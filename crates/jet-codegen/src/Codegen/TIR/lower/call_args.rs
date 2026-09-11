@@ -1,6 +1,5 @@
 use crate::jet_generated_format as jet_format;
 use crate::Codegen::mangle;
-use crate::Codegen::emit_named_fn_value;
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::lower_expr;
@@ -17,7 +16,9 @@ use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::TExternArg;
 use crate::Codegen::TIR::TFnCoerce;
 use crate::Codegen::TIR::TLocal;
-use crate::AST::{AccessConvention, Expr, Lambda, LambdaBody, Stmt, Type};
+use crate::Codegen::TIR::TStrPart;
+use crate::Diagnostics::Span;
+use crate::AST::{AccessConvention, CtValue, Expr, Lambda, LambdaBody, Stmt, StrPart, Type};
 
 /// D-UNIONTYPE1=A: wrap a member value into the compiler-generated union enum.
 pub(crate) fn maybe_widen_expr_to_union(value: TExpr, want: &Type) -> TExpr {
@@ -70,6 +71,680 @@ fn callback_fn_type(ty: &Type) -> Option<&Type> {
         _ => None,
     }
 }
+
+fn is_opaque_handle_type(ty: &Type, cx: &Cx) -> bool {
+    match ty {
+        Type::Named(name) => cx.opaque_handles.contains(name),
+        Type::Tagged { inner, .. } => is_opaque_handle_type(inner, cx),
+        _ => false,
+    }
+}
+fn invariant_arg_value(
+    arg: &crate::AST::CallArg,
+    construct: impl Into<String>,
+) -> TExpr {
+    TExpr {
+        ty: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
+        kind: TExprKind::InvariantViolation {
+            construct: construct.into(),
+            span: arg.span,
+        },
+    }
+}
+
+fn invariant_call_arg(
+    arg: &crate::AST::CallArg,
+    construct: impl Into<String>,
+) -> TCallArg {
+    TCallArg {
+        value: invariant_arg_value(arg, construct),
+        template_items: None,
+        borrow: false,
+        mut_borrow: false,
+        clone: false,
+        arc_clone: false,
+        fn_coerce: None,
+        widen_to_vec: false,
+        widen_to_union: None,
+        box_as_trait: None,
+    }
+}
+
+fn invariant_extern_arg(
+    arg: &crate::AST::CallArg,
+    construct: impl Into<String>,
+) -> TExternArg {
+    TExternArg {
+        value: invariant_arg_value(arg, construct),
+        clone: false,
+        mut_borrow: false,
+    }
+}
+
+fn template_never_expr(name: impl Into<String>) -> TExpr {
+    TExpr {
+        ty: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
+        kind: TExprKind::Local(TLocal::user(name)),
+    }
+}
+
+fn template_reference_expr(name: &str, env: &LowerEnv) -> TExpr {
+    let bare_name = name.trim_start_matches('@');
+    let marked_name = format!("@{bare_name}");
+    let local_name = if env.locals.contains_key(name) {
+        name
+    } else if env.locals.contains_key(bare_name) {
+        bare_name
+    } else if env.locals.contains_key(&marked_name) {
+        marked_name.as_str()
+    } else {
+        name
+    };
+    let mut value = template_never_expr(local_name);
+    if let Some(ty) = env.ty_of(local_name) {
+        value.ty = ty;
+        value.kind = TExprKind::Local(env.local_of(local_name));
+    }
+    value
+}
+
+fn template_expr_root(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::Ident(name, _) | Expr::ComptimeName { name, .. } => Some(name),
+        Expr::Field(base, ..) | Expr::OptField { base, .. } => template_expr_root(base),
+        Expr::Paren(inner, _) => template_expr_root(inner),
+        _ => None,
+    }
+}
+
+fn lower_template_expr(
+    expr: &Expr,
+    cx: &Cx,
+    env: &mut LowerEnv,
+    template_vars: &std::collections::HashSet<String>,
+) -> TExpr {
+    match expr {
+        Expr::ComptimeName { name, .. } if cx.const_values.contains_key(name) => {
+            lower_expr(expr, cx, env)
+        }
+        Expr::ComptimeName { value: Some(_), .. } => lower_expr(expr, cx, env),
+        Expr::ComptimeName { name, .. } => template_reference_expr(name, env),
+        Expr::Ident(name, _) if name.starts_with('@') => template_reference_expr(name, env),
+        Expr::Ident(name, _) if template_vars.contains(name) => {
+            template_reference_expr(name, env)
+        }
+        Expr::Field(base, member, _)
+            if member.starts_with('@')
+                || template_expr_root(base)
+                    .is_some_and(|name| template_vars.contains(name.trim_start_matches('@'))) =>
+        {
+            let recv = lower_template_expr(base, cx, env, template_vars);
+            TExpr {
+                ty: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
+                kind: TExprKind::Field {
+                    recv: Box::new(recv),
+                    field: member.trim_start_matches('@').to_string(),
+                    boxed: false,
+                },
+            }
+        }
+        Expr::Str(parts, _) => TExpr {
+            ty: Type::String,
+            kind: TExprKind::StrLit(
+                parts
+                    .iter()
+                    .map(|part| match part {
+                        StrPart::Lit(text) => TStrPart::Lit(text.clone()),
+                        StrPart::Interp(value, format) => TStrPart::Interp(
+                            lower_template_expr(value, cx, env, template_vars),
+                            format.clone(),
+                        ),
+                    })
+                    .collect(),
+            ),
+        },
+        Expr::ListLit(values, _) => TExpr {
+            ty: Type::List(Box::new(Type::Named(crate::Syntax::TYPE_NEVER.to_string()))),
+            kind: TExprKind::ListLit(
+                values
+                    .iter()
+                    .map(|value| lower_template_expr(value, cx, env, template_vars))
+                    .collect(),
+            ),
+        },
+        Expr::Paren(inner, _) => lower_template_expr(inner, cx, env, template_vars),
+        _ => lower_expr(expr, cx, env),
+    }
+}
+
+fn lower_template_loop_expr(
+    expr: &Expr,
+    cx: &Cx,
+    env: &mut LowerEnv,
+    template_vars: &std::collections::HashSet<String>,
+) -> TExpr {
+    if let Expr::ListLit(values, _) = expr {
+        if let Some(items) = values
+            .iter()
+            .map(|value| {
+                let name = match value {
+                    Expr::Ident(name, _) | Expr::ComptimeName { name, .. } => name,
+                    _ => return None,
+                };
+                Some(TExpr {
+                    ty: Type::String,
+                    kind: TExprKind::CtLit(CtValue::Str(
+                        name.trim_start_matches('@').to_string(),
+                    )),
+                })
+            })
+            .collect::<Option<Vec<_>>>()
+        {
+            return TExpr {
+                ty: Type::List(Box::new(Type::String)),
+                kind: TExprKind::ListLit(items),
+            };
+        }
+    }
+    lower_template_expr(expr, cx, env, template_vars)
+}
+
+struct TemplateMarker {
+    start: usize,
+    end: usize,
+    value: bool,
+}
+
+fn scan_template_markers(
+    source: &str,
+    template_vars: &std::collections::HashSet<String>,
+) -> Vec<TemplateMarker> {
+    fn ident(byte: u8) -> bool {
+        byte.is_ascii_alphanumeric() || byte == b'_'
+    }
+    fn name_context(bytes: &[u8], start: usize) -> bool {
+        let mut end = start;
+        while end > 0 && bytes[end - 1].is_ascii_whitespace() {
+            end -= 1;
+        }
+        if end > 0 && bytes[end - 1] == b'.' {
+            return true;
+        }
+        let word_end = end;
+        while end > 0 && ident(bytes[end - 1]) {
+            end -= 1;
+        }
+        std::str::from_utf8(&bytes[end..word_end]).is_ok_and(|word| {
+            matches!(
+                word,
+                "fn" | "impl" | "struct" | "enum" | "type" | "trait" | "module" | "const"
+            )
+        })
+    }
+    fn skip_quoted(bytes: &[u8], mut at: usize, quote: u8) -> usize {
+        at += 1;
+        while at < bytes.len() {
+            match bytes[at] {
+                b'\\' => at = at.saturating_add(2),
+                current if current == quote => return at + 1,
+                _ => at += 1,
+            }
+        }
+        bytes.len()
+    }
+    fn scan_code(
+        bytes: &[u8],
+        mut at: usize,
+        stop_at_brace: bool,
+        value_context: bool,
+        template_vars: &std::collections::HashSet<String>,
+        out: &mut Vec<TemplateMarker>,
+    ) -> usize {
+        while at < bytes.len() {
+            match bytes[at] {
+                b'/' if bytes.get(at + 1) == Some(&b'/') => {
+                    at += 2;
+                    while at < bytes.len() && bytes[at] != b'\n' {
+                        at += 1;
+                    }
+                }
+                b'/' if bytes.get(at + 1) == Some(&b'*') => {
+                    at += 2;
+                    let mut nested = 1usize;
+                    while at < bytes.len() && nested > 0 {
+                        if bytes
+                            .get(at..at + 2)
+                            .is_some_and(|pair| pair == b"/*")
+                        {
+                            nested += 1;
+                            at += 2;
+                        } else if bytes
+                            .get(at..at + 2)
+                            .is_some_and(|pair| pair == b"*/")
+                        {
+                            nested -= 1;
+                            at += 2;
+                        } else {
+                            at += 1;
+                        }
+                    }
+                }
+                b'"' => {
+                    at = scan_string(bytes, at, template_vars, out);
+                }
+                b'\'' => {
+                    at = skip_quoted(bytes, at, b'\'');
+                }
+                b'{' if value_context => {
+                    at = scan_code(bytes, at + 1, true, true, template_vars, out);
+                }
+                b'{' => at += 1,
+                b'}' if stop_at_brace => {
+                    return at + 1;
+                }
+                byte if ident(byte) => {
+                    let start = at;
+                    at += 1;
+                    while at < bytes.len() && ident(bytes[at]) {
+                        at += 1;
+                    }
+                    let name = std::str::from_utf8(&bytes[start..at]).ok();
+                    let mut marker_end = at;
+                    let mut field_chain = false;
+                    if name.is_some_and(|name| template_vars.contains(name)) {
+                        loop {
+                            let Some(&b'.') = bytes.get(marker_end) else {
+                                break;
+                            };
+                            let field_start = marker_end + 1;
+                            let Some(&first) = bytes.get(field_start) else {
+                                break;
+                            };
+                            if first == b'@' || !ident(first) {
+                                break;
+                            }
+                            let mut field_end = field_start + 1;
+                            while field_end < bytes.len() && ident(bytes[field_end]) {
+                                field_end += 1;
+                            }
+                            marker_end = field_end;
+                            field_chain = true;
+                        }
+                    }
+                    if let Some(name) = name {
+                        if template_vars.contains(name)
+                            && (marker_end != at || bytes.get(at) != Some(&b'.'))
+                        {
+                            out.push(TemplateMarker {
+                                start,
+                                end: marker_end,
+                                value: value_context || field_chain,
+                            });
+                        }
+                    }
+                    at = marker_end;
+                }
+                b'@' => {
+                    let start = at;
+                    at += 1;
+                    while at < bytes.len() && ident(bytes[at]) {
+                        at += 1;
+                    }
+                    if at > start + 1 {
+                        let name = &bytes[start + 1..at];
+                        if name != b"loop" {
+                            out.push(TemplateMarker {
+                                start,
+                                end: at,
+                                value: value_context || !name_context(bytes, start),
+                            });
+                        }
+                    }
+                }
+                _ => at += 1,
+            }
+        }
+        bytes.len()
+    }
+    fn scan_string(
+        bytes: &[u8],
+        mut at: usize,
+        template_vars: &std::collections::HashSet<String>,
+        out: &mut Vec<TemplateMarker>,
+    ) -> usize {
+        at += 1;
+        while at < bytes.len() {
+            match bytes[at] {
+                b'\\' => at = at.saturating_add(2),
+                b'"' => return at + 1,
+                b'{' if bytes.get(at + 1) == Some(&b'{') => {
+                    at += 2;
+                    while at < bytes.len() {
+                        if bytes
+                            .get(at..at + 2)
+                            .is_some_and(|pair| pair == b"}}")
+                        {
+                            at += 2;
+                            break;
+                        }
+                        at += 1;
+                    }
+                }
+                b'{' => {
+                    at = scan_code(bytes, at + 1, true, true, template_vars, out);
+                }
+                _ => at += 1,
+            }
+        }
+        bytes.len()
+    }
+    let mut markers = Vec::new();
+    scan_code(
+        source.as_bytes(),
+        0,
+        false,
+        false,
+        template_vars,
+        &mut markers,
+    );
+    markers
+}
+
+fn template_marker_base(source: &str, start: usize) -> Option<String> {
+    let before = source.get(..start)?.strip_suffix('.')?;
+    let end = before.len();
+    let begin = before
+        .char_indices()
+        .rev()
+        .find_map(|(index, character)| {
+            (!character.is_ascii_alphanumeric() && character != '_').then_some(index + character.len_utf8())
+        })
+        .unwrap_or(0);
+    (begin < end).then(|| before[begin..end].trim_start_matches('@').to_string())
+}
+
+fn template_path_expr(
+    path: &str,
+    env: &LowerEnv,
+    template_vars: &std::collections::HashSet<String>,
+) -> Option<TExpr> {
+    let mut segments = path.split('.');
+    let root_segment = segments.next()?;
+    let explicit_root = root_segment.starts_with('@');
+    let root = root_segment.trim_start_matches('@');
+    if root.is_empty()
+        || (!explicit_root
+            && !template_vars.contains(root)
+            && !env.locals.contains_key(root)
+            && !env.locals.contains_key(&format!("@{root}")))
+    {
+        return None;
+    }
+    let root_name = if explicit_root {
+        format!("@{root}")
+    } else {
+        root.to_string()
+    };
+    let mut value = template_reference_expr(&root_name, env);
+    for field in segments {
+        let field = field.trim_start_matches('@');
+        if field.is_empty() {
+            return None;
+        }
+        value = TExpr {
+            ty: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
+            kind: TExprKind::Field {
+                recv: Box::new(value),
+                field: field.to_string(),
+                boxed: false,
+            },
+        };
+    }
+    Some(value)
+}
+
+fn template_marker_expr(
+    source: &str,
+    marker: &TemplateMarker,
+    cx: &Cx,
+    env: &LowerEnv,
+    template_vars: &std::collections::HashSet<String>,
+) -> TExpr {
+    let marker_text = &source[marker.start..marker.end];
+    if marker_text.contains('.') {
+        if let Some(value) = template_path_expr(marker_text, env, template_vars) {
+            return value;
+        }
+    }
+    let marker_name = marker_text.strip_prefix('@').unwrap_or(marker_text);
+    if template_vars.contains(marker_name) {
+        return template_reference_expr(marker_name, env);
+    }
+    if let Some(base) = template_marker_base(source, marker.start) {
+        let marked_base = format!("@{base}");
+        if template_vars.contains(&base)
+            || env.locals.contains_key(&base)
+            || env.locals.contains_key(&marked_base)
+        {
+            return TExpr {
+                ty: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
+                kind: TExprKind::Field {
+                    recv: Box::new(template_reference_expr(&base, env)),
+                    field: source[marker.start + 1..marker.end].to_string(),
+                    boxed: false,
+                },
+            };
+        }
+    }
+    let _ = cx;
+    template_reference_expr(&source[marker.start..marker.end], env)
+}
+
+fn template_source(
+    span: Span,
+    cx: &Cx,
+    env: &LowerEnv,
+    template_vars: &std::collections::HashSet<String>,
+) -> Option<crate::Comptime::TemplateSource<TExpr>> {
+    let source = cx.src.get(span.start..span.end)?.to_string();
+    let holes = scan_template_markers(&source, template_vars)
+        .into_iter()
+        .map(|marker| crate::Comptime::TemplateHole {
+            start: marker.start,
+            end: marker.end,
+            expr: Box::new(template_marker_expr(
+                &source,
+                &marker,
+                cx,
+                env,
+                template_vars,
+            )),
+            kind: if marker.value {
+                crate::Comptime::TemplateHoleKind::Value
+            } else {
+                crate::Comptime::TemplateHoleKind::Name
+            },
+            span: Span::new(span.start + marker.start, span.start + marker.end),
+        })
+        .collect();
+    Some(crate::Comptime::TemplateSource {
+        source,
+        holes,
+        span,
+    })
+}
+
+fn item_span(item: &crate::AST::Item, cx: &Cx) -> Span {
+    match item {
+        crate::AST::Item::Func(item) => item.span,
+        crate::AST::Item::Struct(item) => item.span,
+        crate::AST::Item::Enum(item) => item.span,
+        crate::AST::Item::Distinct(item) => item.span,
+        crate::AST::Item::TypeAlias(item) => item.span,
+        crate::AST::Item::UnitFamily(item) => item.span,
+        crate::AST::Item::Trait(item) => item.span,
+        crate::AST::Item::Tag(item) => item.span,
+        crate::AST::Item::EffectDecl(item) => item.span,
+        crate::AST::Item::Impl(item) => item.span,
+        crate::AST::Item::Const(item) => item.span,
+        crate::AST::Item::Test(item) => item.span,
+        crate::AST::Item::ExternRust(item) => item.span,
+        crate::AST::Item::Module(item) => item.span,
+        crate::AST::Item::CModule(item) => item.span,
+        crate::AST::Item::CodeModule(item) => item.span,
+        crate::AST::Item::ErrorConv(item) => {
+            let line_start = cx
+                .src
+                .get(..item.from_span.start)
+                .and_then(|source| source.rfind('\n'))
+                .map_or(0, |index| index + 1);
+            let start = cx
+                .src
+                .get(line_start..item.from_span.start)
+                .and_then(|line| line.rfind("impl "))
+                .map_or(item.from_span.start, |offset| line_start + offset);
+            Span::new(start, item.body_span.end)
+        }
+        crate::AST::Item::Migration(item) => item.span,
+        crate::AST::Item::ProtocolDecl(item) => item.span,
+        crate::AST::Item::UserDerive(item) => item.span,
+        crate::AST::Item::TemplateLoop(item) => item.span,
+        crate::AST::Item::GenericModule(item) => item.span,
+        crate::AST::Item::ModuleAlias(item) => item.span,
+        crate::AST::Item::MarkerDecl(item) => item.span,
+        crate::AST::Item::FactDecl(item) => item.span,
+    }
+}
+
+fn lower_template_stmt(
+    statement: &Stmt,
+    cx: &Cx,
+    env: &mut LowerEnv,
+    template_vars: &std::collections::HashSet<String>,
+) -> Vec<Box<crate::Comptime::TemplateItem<TExpr>>> {
+    match statement {
+        Stmt::Val(binding) if !binding.name.is_empty() && binding.pattern.is_none() => {
+            let name = binding.name.trim_start_matches('@').to_string();
+            let value = lower_template_expr(&binding.init, cx, env, template_vars);
+            env.bind(&name, TLocal::user(name.clone()), Some(value.ty.clone()));
+            vec![Box::new(crate::Comptime::TemplateItem::Statement(
+                crate::Comptime::TemplateStatement::Binding {
+                    name,
+                    value: Box::new(value),
+                    span: statement.span(),
+                },
+            ))]
+        }
+        Stmt::Expr(expr) => {
+            vec![Box::new(crate::Comptime::TemplateItem::Statement(
+                crate::Comptime::TemplateStatement::Expr {
+                    value: Box::new(lower_template_expr(expr, cx, env, template_vars)),
+                    span: statement.span(),
+                },
+            ))]
+        }
+        Stmt::ComptimeIf {
+            cond,
+            then_body,
+            else_body,
+            span,
+            selected_then,
+            ..
+        } => {
+            let then_body = lower_template_stmts(then_body, cx, env, template_vars);
+            let else_body = match else_body {
+                Some(body) => lower_template_stmts(body, cx, env, template_vars),
+                None => Vec::new(),
+            };
+            vec![Box::new(crate::Comptime::TemplateItem::If {
+                condition: Box::new(lower_template_expr(cond, cx, env, template_vars)),
+                then_body,
+                else_body,
+                selected: *selected_then,
+                span: *span,
+            })]
+        }
+        Stmt::ComptimeBlock { body, .. }
+        | Stmt::Impure { body, .. }
+        | Stmt::Unsafe { body, .. } => lower_template_stmts(body, cx, env, template_vars),
+        _ => vec![Box::new(crate::Comptime::TemplateItem::Invalid {
+            construct: "unsupported checked template statement shape".to_string(),
+            span: statement.span(),
+        })],
+    }
+}
+
+fn lower_template_stmts(
+    statements: &[Stmt],
+    cx: &Cx,
+    env: &mut LowerEnv,
+    template_vars: &std::collections::HashSet<String>,
+) -> Vec<Box<crate::Comptime::TemplateItem<TExpr>>> {
+    statements
+        .iter()
+        .flat_map(|statement| lower_template_stmt(statement, cx, env, template_vars))
+        .collect()
+}
+
+fn lower_template_items(
+    items: &[crate::AST::DeriveBodyItem],
+    body_span: Span,
+    cx: &Cx,
+    env: &mut LowerEnv,
+    template_vars: &std::collections::HashSet<String>,
+) -> crate::Comptime::TemplateBody<TExpr> {
+    let mut lowered = Vec::new();
+    for item in items {
+        match item {
+            crate::AST::DeriveBodyItem::Item(item) => {
+                let span = item_span(item, cx);
+                let lowered_item = match template_source(span, cx, env, template_vars) {
+                    Some(source) => crate::Comptime::TemplateItem::Item(source),
+                    None => crate::Comptime::TemplateItem::Invalid {
+                        construct: "template item source span is outside the source file".to_string(),
+                        span,
+                    },
+                };
+                lowered.push(Box::new(lowered_item));
+            }
+            crate::AST::DeriveBodyItem::Stmt(statement) => {
+                lowered.extend(lower_template_stmt(statement, cx, env, template_vars));
+            }
+            crate::AST::DeriveBodyItem::Loop {
+                var,
+                source,
+                body,
+                span,
+                ..
+            } => {
+                let source = lower_template_loop_expr(source, cx, env, template_vars);
+                let element_ty = match &source.ty {
+                    Type::List(inner) | Type::FixedList { elem: inner, .. } => {
+                        Some(inner.as_ref().clone())
+                    }
+                    _ => None,
+                };
+                let mut loop_env = clone_env(env);
+                loop_env.bind(var, TLocal::user(var.clone()), element_ty);
+                let mut nested_vars = template_vars.clone();
+                nested_vars.insert(var.clone());
+                let body =
+                    lower_template_items(body, *span, cx, &mut loop_env, &nested_vars).items;
+                lowered.push(Box::new(crate::Comptime::TemplateItem::Loop {
+                    var: var.clone(),
+                    source: Box::new(source),
+                    body,
+                    span: *span,
+                }));
+            }
+        }
+    }
+    crate::Comptime::TemplateBody {
+        items: lowered,
+        span: body_span,
+    }
+}
+
 /// Lower a named function for a collection adapter's callback ABI.
 ///
 /// Ordinary function values carry their effective failure result. Collection
@@ -100,7 +775,6 @@ pub(crate) fn lower_named_collection_callback(
         ty: ty.clone(),
         kind: TExprKind::FnValue {
             kind: crate::Codegen::TIR::TFnValueKind::NamedFn {
-                wrapper: emit_named_fn_value(cx, name, ty),
                 name: Some(name.clone()),
                 lambda: None,
             },
@@ -159,22 +833,34 @@ pub(crate) fn spawn_body_result_ty(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Typ
 /// `Result`/`Option` carrier while the source-level task remains `Task<T>`.
 pub(crate) fn spawn_body_carrier_ty(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Type {
     let t = spawn_body_result_ty(lam, cx, env);
-    if let Some(Type::Result { err, .. }) = lam.meta.fallible_carrier.as_ref() {
-        return Type::Result {
-            ok: Box::new(t),
-            err: err.clone(),
+    let checked_carrier = lam.meta.fallible_carrier.as_ref().or_else(|| {
+        lam.meta
+            .fallible_propagation
+            .then(|| env.ret_ty.as_ref())
+            .flatten()
+    });
+    if let Some(carrier) = checked_carrier {
+        return match carrier {
+            Type::Result { err, .. } => Type::Result {
+                ok: Box::new(match &t {
+                    Type::Result { ok, .. } => (**ok).clone(),
+                    other => other.clone(),
+                }),
+                err: err.clone(),
+            },
+            Type::Option(_) => Type::Option(Box::new(match &t {
+                Type::Option(inner) => (**inner).clone(),
+                other => other.clone(),
+            })),
+            other => other.clone(),
         };
     }
-    if !lam.meta.fallible_propagation {
-        return t;
-    }
-    match env.ret_ty.as_ref() {
-        Some(Type::Result { err, .. }) => Type::Result {
+    match t {
+        Type::Result { .. } | Type::Option(_) => t,
+        t => Type::Result {
             ok: Box::new(t),
-            err: err.clone(),
+            err: Box::new(Type::Named(crate::Syntax::TYPE_ERR.to_string())),
         },
-        Some(Type::Option(_)) => Type::Option(Box::new(t)),
-        _ => t,
     }
 }
 
@@ -244,8 +930,13 @@ pub(crate) fn lower_method_args(
     args.iter()
         .enumerate()
         .map(|(i, a)| {
-            let conv = sig.get(i).map(|(c, t)| (*c, t.clone()));
-            lower_one_call_arg(a, conv, env, cx)
+            let Some((convention, ty)) = sig.get(i) else {
+                return invariant_call_arg(
+                    a,
+                    format!("method call argument {} has no resolved parameter", i + 1),
+                );
+            };
+            lower_one_call_arg(a, Some((*convention, ty.clone())), env, cx)
         })
         .collect()
 }
@@ -265,12 +956,28 @@ pub(crate) fn lower_call_arg_value(
     env: &mut LowerEnv,
     cx: &Cx,
 ) -> TExpr {
-    let saved_binder_refs = env.binder_refs.clone();
-    let site = a.flags.binder_site.unwrap_or(a.span.start as u32);
-    for (name, slot, ty) in &a.flags.binder_refs {
-        let temp = jet_format!("{jet_prefix}arg{site}_{slot}");
-        env.binder_refs.insert(name.clone(), (temp, ty.clone()));
+    if a.flags.c_callback_symbol
+        && !conv
+            .as_ref()
+            .is_some_and(|(_, ty)| callback_fn_type(ty).is_some())
+    {
+        return invariant_arg_value(a, "C callback argument has no function signature");
     }
+    let saved_binder_refs = env.binder_refs.clone();
+    if !a.flags.binder_refs.is_empty() {
+        let Some(site) = a.flags.binder_site else {
+            return invariant_arg_value(a, "call argument binder has no site");
+        };
+        for (name, slot, ty) in &a.flags.binder_refs {
+            let temp = jet_format!("{jet_prefix}arg{site}_{slot}");
+            env.binder_refs.insert(name.clone(), (temp, ty.clone()));
+        }
+    }
+    let _arg_cache_scope = env
+        .fallback_subject
+        .then(super::expressions::ExprCacheScope::enter);
+    let fallback_subject = env.fallback_subject;
+    env.fallback_subject = false;
     // A bare lambda flowing into a user fn-typed parameter takes its param
     // types from that fn-type so codegen emits the Rust closure-param types
     // rustc needs (c142). Other args lower normally.
@@ -285,27 +992,24 @@ pub(crate) fn lower_call_arg_value(
             if a.flags.c_callback_symbol && callback_fn_type(ty).is_some() =>
         {
             TExpr {
-                ty: conv.as_ref().map(|(_, t)| t.clone()).unwrap(),
+                ty: ty.clone(),
                 kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::FnName(
                     crate::Codegen::TIR::c_callback_adapter_name(name),
                 ))),
             }
         }
-        (
-            Expr::Ident(name, _),
-            Some((_, ty @ Type::Fn { .. })),
-        ) if !env.locals.contains_key(name)
-            && !cx.consts.contains_key(name)
-            && cx
-                .fn_types
-                .get(name)
-                .is_some_and(|fn_ty| matches!(fn_ty, Type::Fn { .. })) =>
+        (Expr::Ident(name, _), Some((_, ty @ Type::Fn { .. })))
+            if !env.locals.contains_key(name)
+                && !cx.consts.contains_key(name)
+                && cx
+                    .fn_types
+                    .get(name)
+                    .is_some_and(|fn_ty| matches!(fn_ty, Type::Fn { .. })) =>
         {
             TExpr {
                 ty: ty.clone(),
                 kind: TExprKind::FnValue {
                     kind: crate::Codegen::TIR::TFnValueKind::NamedFn {
-                        wrapper: emit_named_fn_value(cx, name, ty),
                         name: Some(name.clone()),
                         lambda: None,
                     },
@@ -315,18 +1019,25 @@ pub(crate) fn lower_call_arg_value(
         (Expr::Lambda(lam), Some((_, ty)))
             if a.flags.c_callback_symbol && callback_fn_type(ty).is_some() =>
         {
-            let Type::Fn { params, ret, .. } = callback_fn_type(ty).unwrap() else {
-                unreachable!()
-            };
-            let tl = lower_lambda_expecting(lam, cx, env, Some(params.as_slice()));
-            let name = mangle(&format!("c_callback_{}_{}", lam.span.start, lam.span.end));
-            TExpr {
-                ty: conv.as_ref().map(|(_, t)| t.clone()).unwrap(),
-                kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::CCallback {
-                    symbol: name,
-                    lambda: tl,
-                    ret: ret.as_deref().cloned(),
-                })),
+            match callback_fn_type(ty) {
+                Some(Type::Fn { params, ret, .. }) => {
+                    let tl = lower_lambda_expecting(lam, cx, env, Some(params.as_slice()));
+                    let name = mangle(&format!("c_callback_{}_{}", lam.span.start, lam.span.end));
+                    TExpr {
+                        ty: ty.clone(),
+                        kind: TExprKind::HostCall(Box::new(
+                            crate::Codegen::TIR::THostCall::CCallback {
+                                symbol: name,
+                                lambda: tl,
+                                ret: ret.as_deref().cloned(),
+                                managed: a.flags.c_callback_managed,
+                                plan_digest: a.flags.c_callback_plan_digest.clone(),
+                                callback_identity: a.flags.c_callback_identity.clone(),
+                            },
+                        )),
+                    }
+                }
+                _ => invariant_arg_value(a, "C callback argument has a non-function signature"),
             }
         }
         (Expr::Lambda(lam), Some((_, ty @ Type::Fn { .. }))) => {
@@ -338,6 +1049,7 @@ pub(crate) fn lower_call_arg_value(
         }
         _ => lower_expr(&a.expr, cx, env),
     };
+    env.fallback_subject = fallback_subject;
     env.binder_refs = saved_binder_refs;
     value
 }
@@ -348,6 +1060,27 @@ pub(crate) fn lower_one_call_arg(
     env: &mut LowerEnv,
     cx: &Cx,
 ) -> TCallArg {
+    if a.flags.c_callback_symbol
+        && !conv
+            .as_ref()
+            .is_some_and(|(_, ty)| callback_fn_type(ty).is_some())
+    {
+        return invariant_call_arg(a, "C callback argument has no function signature");
+    }
+    let template_items = a.flags.template_items.as_deref().map(|items| {
+        let _template_cache_scope = env
+            .fallback_subject
+            .then(super::expressions::ExprCacheScope::enter);
+        let mut template_env = clone_env(env);
+        template_env.fallback_subject = false;
+        lower_template_items(
+            items,
+            a.span,
+            cx,
+            &mut template_env,
+            &std::collections::HashSet::new(),
+        )
+    });
     let resource_move = matches!(
         (&a.expr, &conv),
         (Expr::Ident(name, _), Some((AccessConvention::Move, _))) if env.is_resource(name)
@@ -355,7 +1088,7 @@ pub(crate) fn lower_one_call_arg(
     // Default expressions carry private references to earlier declaration
     // slots. A plain worklist pass cannot install that mapping, so never reuse
     // its cached value here; lower the argument through the binder-aware path.
-    let value = if a.flags.template_items.is_some() {
+    let value = if template_items.is_some() {
         TExpr {
             ty: Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
             kind: TExprKind::Unit,
@@ -373,16 +1106,15 @@ pub(crate) fn lower_one_call_arg(
     // Refresh local reads from that environment before resolving boundary
     // conversions such as `[T#N]` to `[T]`.
     let value = match (&a.expr, value.kind) {
-        (Expr::Ident(name, _), TExprKind::Local(local)) => env
-            .ty_of(name)
-            .map(|ty| TExpr {
+        (Expr::Ident(name, _), TExprKind::Local(local)) => {
+            let Some(ty) = env.ty_of(name) else {
+                return invariant_call_arg(a, "call argument local has no resolved type");
+            };
+            TExpr {
                 ty,
-                kind: TExprKind::Local(local.clone()),
-            })
-            .unwrap_or(TExpr {
-                ty: value.ty,
                 kind: TExprKind::Local(local),
-            }),
+            }
+        }
         (_, kind) => TExpr { ty: value.ty, kind },
     };
     // Decide this before `preserve_typed_list_shape` retags the local read to
@@ -422,6 +1154,7 @@ pub(crate) fn lower_one_call_arg(
             _ => false,
         };
     let clone = !resource_move
+        && !is_opaque_handle_type(&value.ty, cx)
         && (web_noncopy_int
             || a.flags.implicit_clone
             || matches!(
@@ -431,24 +1164,25 @@ pub(crate) fn lower_one_call_arg(
                         && env.ty_of(name).is_some_and(|ty| !ty.is_scalar())
             ));
     let arc_clone = a.flags.shared_auto_clone;
-    // The Fn-typed Box-coercion (`emit_call_args`' `if let Some((_, Type::Fn …))`).
+    // The fn-value carrier is materialized exactly once at the call boundary.
+    // Named values and escaping lambda TIR already emit the carrier; an
+    // immediate lambda still needs coercion into the expected function slot.
     let fn_coerce = match &conv {
         Some((_, ty)) if a.flags.c_callback_symbol && callback_fn_type(ty).is_some() => None,
-        Some((_, Type::Fn { .. })) => {
-            // `already_boxed`: the value already produces a `Box::new(…)`. The AST
-            // checks two cases — the emitted string starts with `Box::new(` (only a
-            // bare fn-name value does, in subset — `emit_named_fn_value`), OR the
-            // value is a fn-typed local ident. Resolve both at lowering.
-            let already_boxed = ast_arg_is_named_fn_value(&a.expr, cx, env)
+        Some((_, ty @ Type::Fn { .. })) => {
+            let already_carrier = ast_arg_is_named_fn_value(&a.expr, cx, env)
                 || matches!(
                     &a.expr,
                     Expr::Ident(name, _)
                         if env.ty_of(name).is_some_and(|t| matches!(t, Type::Fn { .. }))
+                )
+                || matches!(
+                    &value.kind,
+                    TExprKind::Lambda(lam) if lam.boxed || lam.rc || lam.arc
                 );
-            let (_, ty) = conv.as_ref().expect("matched Some above");
             Some(TFnCoerce {
                 ty: ty.clone(),
-                already_boxed,
+                already_boxed: already_carrier,
             })
         }
         _ => None,
@@ -460,13 +1194,9 @@ pub(crate) fn lower_one_call_arg(
         }
         _ => None,
     };
-    // S48: a concrete value meeting a single-trait value slot (`fn show(s: Shape)`)
-    // boxes invisibly. This is the call-argument instance of the boxing a `[Shape]`
-    // list element already gets from its slot's element type (`emit_tir_expr`'s
-    // `ListLit` arm / `preserve_typed_list_shape`), so the rule lives here — the
-    // one place that knows both the argument and the parameter type — and emit
-    // only applies the wrapper. A value that is ALREADY a trait object (a trait
-    // parameter forwarded on, a coerced `as_trait` literal) needs no second box.
+    // S48: a concrete value meeting a single-trait value slot is boxed at the
+    // call boundary. Keep the target type as a typed TIR fact; MIR resolves it
+    // to a MirTypeId and each backend consumes that row.
     let box_as_trait = match (&value.ty, conv.as_ref().map(|(_, t)| t)) {
         (Type::TraitObject(_), _) => None,
         (Type::Named(concrete) | Type::Apply { name: concrete, .. }, Some(want)) => {
@@ -475,11 +1205,10 @@ pub(crate) fn lower_one_call_arg(
                 Type::Named(name) if cx.trait_names.contains(name) => Some(name),
                 _ => None,
             };
-            // A value whose own type IS the trait is already a trait value: the
-            // parameter's bare-trait spelling just was not resolved.
             trait_name
                 .filter(|trait_name| *trait_name != concrete)
                 .cloned()
+                .map(|name| Type::TraitObject(vec![name]))
         }
         _ => None,
     };
@@ -497,7 +1226,7 @@ pub(crate) fn lower_one_call_arg(
     };
     TCallArg {
         value,
-        template_items: a.flags.template_items.clone(),
+        template_items,
         borrow,
         mut_borrow,
         clone,
@@ -519,11 +1248,22 @@ pub(crate) fn lower_module_args(
     env: &mut LowerEnv,
     cx: &Cx,
 ) -> Vec<TCallArg> {
+    let Some(sig) = sig else {
+        return args
+            .iter()
+            .map(|arg| invariant_call_arg(arg, "module call has no resolved signature"))
+            .collect();
+    };
     args.iter()
         .enumerate()
         .map(|(i, a)| {
-            let conv = sig.and_then(|ps| ps.get(i)).map(|(c, t)| (*c, t.clone()));
-            lower_one_call_arg(a, conv, env, cx)
+            let Some((convention, ty)) = sig.get(i) else {
+                return invariant_call_arg(
+                    a,
+                    format!("module call argument {} has no resolved parameter", i + 1),
+                );
+            };
+            lower_one_call_arg(a, Some((*convention, ty.clone())), env, cx)
         })
         .collect()
 }
@@ -540,31 +1280,29 @@ pub(crate) fn lower_extern_call_arg(
     env: &mut LowerEnv,
     cx: &Cx,
 ) -> TExternArg {
+    let Some((convention, ty)) = conv.as_ref() else {
+        return invariant_extern_arg(a, "extern call argument has no resolved parameter");
+    };
     // D-CABI-CALLBACK1: the C bridge is still an extern call, but its callback
     // argument needs the same stable function item / lambda wrapper as a direct
     // C call. Preserve sema's fact instead of re-boxing it as `dyn Fn`.
-    let c_callback = conv
-        .as_ref()
-        .is_some_and(|(_, ty)| a.flags.c_callback_symbol && callback_fn_type(ty).is_some());
-    let value = if c_callback {
-        lower_one_call_arg(a, conv.clone(), env, cx).value
-    } else {
-        lower_expr(&a.expr, cx, env)
-    };
-    let mut_borrow = conv
-        .as_ref()
-        .is_some_and(|(convention, _)| *convention == AccessConvention::Write);
-    let non_scalar_param = conv
-        .as_ref()
-        .map(|(_, ty)| !ty.is_scalar() && !c_callback)
-        .unwrap_or(false);
-    // `(…).clone()` is emitted once: either the explicit implicit_clone flag, or the
-    // non-scalar-param clone (when implicit_clone is false). The two never stack — the
-    // AST applies the param clone only `&& !a.flags.implicit_clone`.
-    let clone = conv.as_ref().is_none_or(|(convention, _)| {
-        *convention == AccessConvention::Read
-            && (a.flags.implicit_clone || (non_scalar_param && !a.flags.implicit_clone))
-    });
+    let c_callback = a.flags.c_callback_symbol && callback_fn_type(ty).is_some();
+    if a.flags.c_callback_symbol && !c_callback {
+        return invariant_extern_arg(a, "C callback argument has a non-function signature");
+    }
+    // Lower through the shared call-argument path so an owning resource move
+    // becomes `ResourceTake` and invalidates the source slot before the native
+    // close call. A plain `lower_expr` would read/clone the handle, then move
+    // the clone and leave the original for the drop edge.
+    let value = lower_call_arg_value(a, conv.clone(), env, cx);
+    let mut_borrow = *convention == AccessConvention::Write;
+    let non_scalar_param = !ty.is_scalar() && !c_callback;
+    // `(…).clone()` is emitted once: either the explicit implicit_clone flag, or
+    // the non-scalar-param clone (when implicit_clone is false). The two never stack —
+    // the AST applies the param clone only `&& !a.flags.implicit_clone`.
+    let clone = *convention == AccessConvention::Read
+        && !is_opaque_handle_type(ty, cx)
+        && (a.flags.implicit_clone || (non_scalar_param && !a.flags.implicit_clone));
     TExternArg {
         value,
         clone,
@@ -698,7 +1436,9 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
                     )
                     && args.len() == 1
                 {
-                    let elem = set_constructor_elem(&args[0].expr, env).unwrap_or(Type::Int);
+                    let Some(elem) = set_constructor_elem(&args[0].expr, env) else {
+                        return None;
+                    };
                     return Some(Type::Apply {
                         name: name.clone(),
                         args: vec![elem],

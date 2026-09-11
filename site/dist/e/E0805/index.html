@@ -34,35 +34,17 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for E0805</p>
+<p class="diag-copy fix" data-registry-field="fix">Declare the function as `Stream&lt;T&gt;` before using `yield`.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0805</code>: <code>tests/ui/loop_stream_reuse.stderr</code>.</p>
+<p>First UI snapshot mentioning <code>E0805</code>: <code>tests/ui/yield_outside_generator.stderr</code>.</p>
 <pre class="diag">Error [E0805]: `yield` outside a generator
-  --&gt; tests/ui/loop_stream_reuse.jet:4:9
+  --&gt; tests/ui/yield_outside_generator.jet:2:5
     |
-  4 |         yield i
-    |         ^^^^^
+  2 |     yield 5
+    |     ^^^^^
  Why: `yield` hands a value to a `Stream&lt;T&gt;` consumer — only a function declared `Stream&lt;T&gt; -&gt;` may use it
- Fix: declare `Stream&lt;T&gt; -&gt;` on this function, or remove the `yield`
+ Fix: Declare `Stream&lt;T&gt; -&gt;` on this function, or remove the `yield`
 More: jet-lang.dev/e/E0805
-
-Error [E0121]: `s` was given away earlier, so it can&#39;t be used here
-  --&gt; tests/ui/loop_stream_reuse.jet:12:15
-    |
- 12 |     loop x in s -&gt; print(&quot;{x}&quot;)
-    |               ^
- Why: after a value moves to another name, the old name no longer gives access to it
- Fix: `s` is one-pass and cannot be copied — create a fresh source for the second drive
-More: jet-lang.dev/e/E0121
-
-Error [E0107]: nothing named `x` exists here
-  --&gt; tests/ui/loop_stream_reuse.jet:12:28
-    |
- 12 |     loop x in s -&gt; print(&quot;{x}&quot;)
-    |                            ^
- Why: a name must be declared before it&#39;s used
- Fix: did you mean `s`?
-More: jet-lang.dev/e/E0107
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

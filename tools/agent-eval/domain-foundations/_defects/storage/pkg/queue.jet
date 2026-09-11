@@ -1,0 +1,33 @@
+use "log" as log
+
+pub fn queue_publish(path: Path, id: String, payload: String) Bool -> {
+    return log.append_record(path, "msg|{id}|{payload}")
+}
+
+pub fn queue_ack(ack_path: Path, group: String, id: String) Bool -> {
+    return log.append_record(ack_path, "ack|{group}|{id}")
+}
+
+fn queue_acked(ack_path: Path, group: String) [String:Bool] -> {
+    seen := [String:Bool]{}
+    records :: log.read_records(ack_path)
+    loop record in records {
+        parts :: record.split("|").to_list()
+        if parts.len() >= 3 && parts[0] == "ack" && parts[1] == group -> seen[parts[2]] = true
+    }
+    return seen
+}
+
+pub fn queue_pending(path: Path, ack_path: Path, group: String) [String] -> {
+    pending := [String]{}
+    seen :: queue_acked(ack_path, group)
+    records :: log.read_records(path)
+    loop record in records {
+        parts :: record.split("|").to_list()
+        if parts.len() >= 3 && parts[0] == "msg" {
+            id :: parts[1]
+            if !(seen.get(id) ?? false) -> pending.push(id)
+        }
+    }
+    return pending
+}

@@ -366,6 +366,9 @@ pub enum Stmt {
     /// leak to the enclosing scope. `@name` splice (piece 1) deferred to c155.
     ComptimeBlock {
         body: Vec<Stmt>,
+        /// Internal derive-template marker: `@loop` in a provider function is
+        /// expanded into ordinary statements before the generated item enters sema.
+        is_template_loop: bool,
         span: Span,
     },
 

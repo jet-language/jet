@@ -1,0 +1,47 @@
+// Renderer selection is authored data.  Headless is the generated default;
+// raylib is an explicit GPU route and never silently falls back to headless.
+pub enum RenderBackend {
+    Headless
+    Raylib
+}
+
+pub struct RendererSelection {
+    name: String
+    backend: String
+    renderer: String
+    requires_gpu: Bool
+    authority: String
+    required_effect: String
+    denial_code: String
+    fallback: String
+}
+
+pub fn headless() RendererSelection -> {
+    return RendererSelection{
+        name: "headless",
+        backend: "headless",
+        renderer: "headless",
+        requires_gpu: false,
+        authority: "none",
+        required_effect: "none",
+        denial_code: "",
+        fallback: "none",
+    }
+}
+
+pub fn raylib() RendererSelection -> {
+    return RendererSelection{
+        name: "raylib",
+        backend: "raylib",
+        renderer: "core.game.raylib",
+        requires_gpu: true,
+        authority: "GPU",
+        required_effect: "GPU",
+        denial_code: "E1803",
+        fallback: "disabled; remove the GPU denial and add GPU to authority.holds.allow, or keep headless",
+    }
+}
+
+pub fn selected() RendererSelection -> {
+    return headless()
+}

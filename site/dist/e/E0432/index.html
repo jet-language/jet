@@ -38,13 +38,22 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0432</code>: <code>tests/ui/retired_error_type.stderr</code>.</p>
 <pre class="diag">Error [E0432]: `Error` is retired
-  --&gt; tests/ui/retired_error_type.jet:1:20
+  --&gt; tests/ui/retired_error_type.jet:1:15
     |
-  1 | fn load() =&gt; Int Error! { return Ok(1) }
-    |                    ^^^^^
- Why: the default error type and its constructor now use the same name
- Fix: replace `Error` with `Err`
+  1 | fn load() Int Error! -&gt; { return Ok(1) }
+    |               ^^^^^
+ Why: The default error type and its constructor now use the same name
+ Fix: Replace `Error` with `Err`
 More: jet-lang.dev/e/E0432
+
+Error [E-ERR-SUFFIX]: `Error!` is a retired suffix failure contract.
+  --&gt; tests/ui/retired_error_type.jet:1:15
+    |
+  1 | fn load() Int Error! -&gt; { return Ok(1) }
+    |               ^^^^^^
+ Why: Jet puts the error contract before its type so the success role and error role stay distinct in every type position.
+ Fix: Write `!Error`, or write `?Success !Error` when the success can be absent.
+More: jet-lang.dev/e/E-ERR-SUFFIX
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

@@ -160,7 +160,7 @@ fn host_descriptors_are_small_and_route_to_native_library_targets() {
     assert!(lifecycle_text.contains("LoadLibraryA"));
     assert!(lifecycle_text.contains("std::thread"));
 
-    let docs = read(&repo_root().join("docs/reference/foreign-build-hosts.md"));
+    let docs = read(&repo_root().join("docs/spec/reference/foreign-build-hosts.md"));
     for term in [
         "CMake",
         "Gradle",

@@ -153,7 +153,8 @@ fn plugin_call_rejects_an_overlarge_argument_list_before_guest_execution() {
 use core.plugin as plugin
 
 fn run() {{
-    mathkit :: plugin.load("{plugin_path}")
+    policy :: Authority.from_rights(["FS.Read:repo"])
+    mathkit :: plugin.load("{plugin_path}", policy)
     greeting :: mathkit.call_text("greet", ["Ada"]) ?? panic("plugin fixture")
     print(greeting)
     _result :: mathkit.call("scale", [{params}]) ?? {{
@@ -226,12 +227,19 @@ fn plugin_failure_source(
         .to_string_lossy()
         .replace('\\', "\\\\")
         .replace('"', "\\\"");
+    let plugin_root = path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
     format!(
         r#"
 use core.plugin as plugin
 
 fn run() {{
-    hostile :: plugin.load("{plugin_path}")
+    policy :: Authority.from_rights(["FS.Read:{plugin_root}"])
+    hostile :: plugin.load("{plugin_path}", policy)
     _result :: hostile.call_int("{export}", []) ?? {{
         print("{failure_marker}")
         print(err)
@@ -242,6 +250,7 @@ fn run() {{
 }}
 "#,
         plugin_path = plugin_path,
+        plugin_root = plugin_root,
         export = export,
         failure_marker = failure_marker,
         success_marker = success_marker,
@@ -1079,6 +1088,11 @@ fn plugin_call_rejects_an_overlarge_frame_for_a_zero_param_export() {
     .to_string_lossy()
     .replace('\\', "\\\\")
     .replace('"', "\\\"");
+    let plugin_root = scratch
+        .path
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
     let params = std::iter::repeat("1")
         .take(1025)
         .collect::<Vec<_>>()
@@ -1088,7 +1102,8 @@ fn plugin_call_rejects_an_overlarge_frame_for_a_zero_param_export() {
 use core.plugin as plugin
 
 fn run() {{
-    hostile :: plugin.load("{plugin_path}")
+    policy :: Authority.from_rights(["FS.Read:{plugin_root}"])
+    hostile :: plugin.load("{plugin_path}", policy)
     _result :: hostile.call_int("zero", [{params}]) ?? {{
         print("rejected")
         return
@@ -1098,6 +1113,7 @@ fn run() {{
 }}
 "#,
         plugin_path = plugin_path,
+        plugin_root = plugin_root,
         params = params,
     );
     tir_support::assert_tiers_agree(

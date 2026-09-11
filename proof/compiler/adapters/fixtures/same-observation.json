@@ -1,0 +1,131 @@
+{
+  "schema": "jet.adapters-fixtures.v1",
+  "schema_version": 1,
+  "fixture_policy": {
+    "execution": "authored source witness only; this stage does not execute fixtures",
+    "unknown_status": "unverified",
+    "universal_proof": false
+  },
+  "observation_fields": [
+    "result",
+    "typed_failure",
+    "mutation",
+    "input_consumption",
+    "ordered_effects",
+    "cleanup",
+    "resource_premises",
+    "schedule",
+    "allowed_schedules"
+  ],
+  "dimensions": [
+    "dispatch",
+    "control_transfer",
+    "calling_convention",
+    "representation",
+    "width",
+    "layout",
+    "handles",
+    "callbacks",
+    "results",
+    "errors",
+    "cleanup",
+    "task_completion",
+    "source_identity",
+    "target_identity",
+    "tool_configuration"
+  ],
+  "cases": [
+    {
+      "id": "same-dispatch-control-transfer",
+      "shared_operation": "adapter.shared.dispatch",
+      "source_refs": [
+        "crates/jet-foundation/src/MIR.rs",
+        "crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs",
+        "Source/CmdCompile.rs"
+      ],
+      "dimensions": ["dispatch", "control_transfer", "source_identity", "target_identity"],
+      "observation": {
+        "result": "same shared operation result carrier",
+        "typed_failure": "same shared operation failure carrier",
+        "mutation": "same operation-owned mutation set",
+        "input_consumption": "same argument consumption order",
+        "ordered_effects": "same declared effect order",
+        "cleanup": "same terminal cleanup transition",
+        "resource_premises": "same resource and allocation premises",
+        "schedule": "same operation schedule events",
+        "allowed_schedules": "same declared schedule set"
+      },
+      "route_difference": "adapter selects an artifact and marshals values; it does not create another semantic body",
+      "status": "unobserved"
+    },
+    {
+      "id": "same-abi-width-layout",
+      "shared_operation": "adapter.shared.abi",
+      "source_refs": [
+        "crates/jet-foundation/src/MIR.rs",
+        "crates/jet-codegen/src/Codegen/MIRRust.rs",
+        "crates/jet-jit/src/Ffi.rs"
+      ],
+      "dimensions": ["calling_convention", "representation", "width", "layout", "handles"],
+      "observation": {
+        "result": "result ABI is decoded by the shared carrier",
+        "typed_failure": "failure ABI remains typed at the adapter edge",
+        "mutation": "writeback uses the declared layout",
+        "input_consumption": "width conversion consumes no extra argument",
+        "ordered_effects": "ABI conversion does not reorder effects",
+        "cleanup": "handle close remains exactly once",
+        "resource_premises": "allocation and alignment premises are retained",
+        "schedule": "conversion is synchronous with the call",
+        "allowed_schedules": "only declared callback schedules are allowed"
+      },
+      "route_difference": "target layout and host-word representation are explicit inputs",
+      "status": "unobserved"
+    },
+    {
+      "id": "same-callback-task-lifetime",
+      "shared_operation": "adapter.shared.lifetime",
+      "source_refs": [
+        "crates/jet-jit/src/Concurrency.rs",
+        "crates/jet-codegen/src/Prelude/Core.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs"
+      ],
+      "dimensions": ["callbacks", "cleanup", "task_completion", "results", "errors"],
+      "observation": {
+        "result": "completion reaches the shared task/result sink",
+        "typed_failure": "callback and task failure use the shared error carrier",
+        "mutation": "task state mutation follows the shared transition",
+        "input_consumption": "callback arguments are consumed once",
+        "ordered_effects": "callback delivery order is retained",
+        "cleanup": "close/cancel/drain is terminal and exactly once",
+        "resource_premises": "handle ownership and epoch checks remain active",
+        "schedule": "scheduler events are recorded by the shared runtime",
+        "allowed_schedules": "only the declared scheduler interleavings are allowed"
+      },
+      "route_difference": "JIT and host paths carry handles; lifecycle policy remains in shared runtime code",
+      "status": "unobserved"
+    },
+    {
+      "id": "same-web-artifact",
+      "shared_operation": "adapter.shared.web-artifact",
+      "source_refs": [
+        "crates/jet-codegen/src/Codegen/MIRWeb.rs",
+        "crates/jet-codegen/src/Codegen/MIRRust.rs",
+        "crates/jet-codegen/src/Codegen/MIREval.rs"
+      ],
+      "dimensions": ["dispatch", "representation", "width", "layout", "results", "errors", "source_identity", "target_identity", "tool_configuration"],
+      "observation": {
+        "result": "Wasm/JavaScript publication carries the shared result",
+        "typed_failure": "browser/host failure remains a named suffix",
+        "mutation": "web publication does not change MIR-owned mutation",
+        "input_consumption": "generated entry consumes the declared ABI payload",
+        "ordered_effects": "publication and callback order follows the shared plan",
+        "cleanup": "web handles and callback closures have explicit terminal cleanup",
+        "resource_premises": "Wasm linear-memory and browser resource premises are explicit",
+        "schedule": "browser events are foreign schedule observations",
+        "allowed_schedules": "only declared browser callback schedules are admissible"
+      },
+      "route_difference": "Web emits Wasm Rust, JavaScript, source maps, and a manifest from the selected Web artifact",
+      "status": "unobserved"
+    }
+  ]
+}

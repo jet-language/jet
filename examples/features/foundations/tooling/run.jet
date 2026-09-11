@@ -1,0 +1,44 @@
+use core.build as build
+use core.compiler as compiler
+
+@source :: "fn old_name(value: Int) Int -> 41\nfn run() Int -> 2\n"
+@lexed :: compiler.lex(@source) ?? panic("compiler lex failed")
+@parsed :: compiler.parse(@source) ?? panic("compiler parse failed")
+@checked :: compiler.check(@parsed) ?? panic("compiler check failed")
+@tokens :: @lexed.tokens().len()
+@items :: @parsed.items().len()
+@functions :: @checked.functions().len()
+
+fn build(b: BuildContext) BuildPlan -> {
+    b.generate("facts") {
+        pub fn tooling_facts() String -> "tokens={@tokens}; items={@items}; functions={@functions}"
+    }
+
+    before :: b.add_executable(
+        "tooling_before",
+        ["run.jet", ".jet/generated/tooling_foundation/facts.jet"],
+        []
+    )
+    before_plan :: b.plan(before)
+    before_graph :: build.graph(before_plan)
+
+    after :: b.add_executable(
+        "tooling_after",
+        ["run.jet", "input.jet", ".jet/generated/tooling_foundation/facts.jet"],
+        []
+    )
+    after_plan :: b.plan(after)
+    after_graph :: build.graph(after_plan)
+    diff :: build.receipt_diff(before_graph, after_graph)
+
+    if before_graph.targets.len() == 0 -> panic("build graph query returned no target")
+    if after_graph.files.len() <= before_graph.files.len() -> panic("build graph query lost source files")
+    if diff.file_deltas.len() == 0 && diff.key_deltas.len() == 0 -> panic("build graph diff was empty")
+
+    return b.plan(after)
+}
+
+fn run() {
+    print("compiler facts: tokens={@tokens}; items={@items}; functions={@functions}")
+    print("build graph: graph=checked; diff=checked")
+}

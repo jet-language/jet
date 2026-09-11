@@ -690,7 +690,8 @@ mod repl_process_tests {
         let cmd = vec![
             "/bin/sh".to_string(),
             "-c".to_string(),
-            "yes x | head -c 67108865".to_string(),
+            // PATH is cleared for REPL launches, so flood with a shell builtin.
+            "while :; do printf %s xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; done".to_string(),
         ];
         let started = Instant::now();
         let error = run_repl_process(

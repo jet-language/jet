@@ -1,0 +1,448 @@
+module backend {
+}
+
+use core.auth as auth
+use core.crypto as crypto
+use core.db as db
+use core.http.client as http_client
+use core.http.server as http_server
+use core.log as log
+use core.service as service
+use core.encoding.json as json
+use core.web as web
+use core.time as time
+use core.tasks as tasks
+
+#Codable
+pub struct RequestId {
+    pub value: String
+}
+
+#Codable
+pub struct HealthResponse {
+    pub status: String
+    pub request_id: String
+}
+
+#Codable
+pub struct OrderRequest {
+    pub item: String
+    pub quantity: Int
+}
+
+#Codable
+pub struct OrderResponse {
+    pub order_id: Int
+    pub item: String
+    pub quantity: Int
+    pub request_id: String
+    pub role: String
+    pub queued: Bool
+}
+
+#Codable
+pub struct ErrorResponse {
+    pub status: Int
+    pub code: String
+    pub message: String
+    pub request_id: String
+}
+#Codable
+pub struct SessionPolicy {
+    pub session_header: String
+    pub role_header: String
+    pub cookie_name: String
+}
+
+
+#Codable
+pub struct MigrationReceipt {
+    pub name: String
+    pub checksum: String
+    pub applied: Int
+    pub rows: Int
+    pub rolled_back: Bool
+    pub first_item: String
+}
+
+#Codable
+pub struct PoolReceipt {
+    pub ready: Bool
+    pub acquired: Bool
+    pub before: String
+    pub drained: Bool
+    pub after: String
+}
+
+
+#Codable
+pub struct QueueReceipt {
+    pub key: String
+    pub payload: String
+    pub status: String
+    pub delivered: Bool
+    pub retried: Bool
+}
+
+#Codable
+pub struct TraceReceipt {
+    pub trace_id: String
+    pub sink: String
+    pub redacted: Bool
+    pub requests: Int
+    pub errors: Int
+}
+
+#Codable
+pub struct LoadSample {
+    pub latency_ms: Int
+    pub status: Int
+}
+
+#Codable
+pub struct LoadSummary {
+    pub users: Int
+    pub completed: Int
+    pub ok: Int
+    pub errors: Int
+    pub transport_errors: Int
+    pub p50: Int
+    pub p95: Int
+    pub p99: Int
+    pub samples: [Int]
+}
+#Codable
+pub struct LoadAssertionReceipt {
+    pub users: Int
+    pub completed: Int
+    pub ok: Int
+    pub errors: Int
+    pub transport_errors: Int
+    pub p50: Int
+    pub p95: Int
+    pub p99: Int
+    pub samples: Int
+    pub passed: Bool
+}
+
+
+#Codable
+pub struct CoreGate {
+    pub name: String
+    pub ticket: String
+    pub available: Bool
+    pub reason: String
+}
+pub fn session_policy() SessionPolicy -> {
+    return SessionPolicy{
+        session_header: "x-session",
+        role_header: "x-role",
+        cookie_name: "session",
+    }
+}
+fn session_value(req: HTTPRequest, policy: SessionPolicy) String -> {
+    header_value :: req.header(policy.session_header) ?? ""
+    if header_value != "" -> return header_value
+    cookie_header :: req.header("cookie") ?? ""
+    loop part in cookie_header.split(";").to_list() {
+        pair_opt :: part.trim().split_once("=")
+        if pair_opt == .Val(pair) {
+            if pair.before.trim() == policy.cookie_name -> return pair.after.trim()
+        }
+    }
+    return ""
+}
+
+
+pub fn request_id(raw: String) RequestId -> {
+    if raw == "" -> return RequestId{value: "unassigned"}
+    return RequestId{value: raw}
+}
+
+
+pub fn error_response(req: HTTPRequest, status: Int, code: String, message: String) HTTPResponse !HTTPError -> {
+    id :: request_id(req.header("x-request-id") ?? "")
+    return Ok(http_server.json(status, ErrorResponse{
+        status: status,
+        code: code,
+        message: message,
+        request_id: id.value,
+    }))
+}
+
+pub fn health_response(req: HTTPRequest) HTTPResponse !HTTPError -> {
+    id :: request_id(req.header("x-request-id") ?? "")
+    return Ok(http_server.json(200, HealthResponse{
+        status: "ok",
+        request_id: id.value,
+    }))
+}
+
+pub fn order_response(status: Int, body: OrderResponse) HTTPResponse !HTTPError -> {
+    return Ok(http_server.json(status, body))
+}
+
+pub fn decode_order(req: HTTPRequest) OrderRequest !HTTPError -> {
+    return req.json<OrderRequest>()
+}
+
+pub fn role_allowed(req: HTTPRequest, session_id: String, expected_role: String, now: Int) Bool !Never -[DB, Time]> {
+    policy :: session_policy()
+    provided :: session_value(req, policy)
+    if provided == "" || provided != session_id -> return false
+    role :: req.header(policy.role_header) ?? ""
+    if role != expected_role -> return false
+    _checked :: auth.session_validate(provided, now) ?? return false
+    return true
+}
+
+pub fn issue_session(user: String, password: String, now: Int, ttl_ms: Int) String !Never -[DB, Time]> {
+    session :: auth.password_login(user, password, now, ttl_ms) ?? return ""
+    return auth.session_id(session)
+}
+
+pub fn migration_checksum(name: String, sql_text: String) String -> {
+    return crypto.sha256("{name}\n{sql_text}".bytes()).hex()
+}
+
+pub fn sqlite_fixture() MigrationReceipt -> {
+    migration_name :: "orders-v1"
+    create_sql :: "CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY, item TEXT NOT NULL)"
+    checksum :: migration_checksum(migration_name, create_sql)
+    conn :: db.open_memory()
+    policy :: db.policy("orders", "true") ?? panic("db.policy")
+    scoped :: conn.with_policy(policy, "backend-battery")
+    applied :: db.migrate(scoped, migration_name, [SQL{"CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY, item TEXT NOT NULL)"}]) ?? panic("db.migrate")
+    item :: "durable-order"
+    seeded :: db.transaction(scoped, "seed-order", [SQL{"INSERT INTO orders (item) VALUES ({item})"}]) ?? panic("db.transaction")
+    if !scoped.begin() -> panic("db.begin")
+    transient :: "rolled-back"
+    _transient :: scoped.execute(SQL{"INSERT INTO orders (item) VALUES ({transient})"}) ?? panic("db.execute")
+    if !scoped.rollback() -> panic("db.rollback")
+    row_opt :: scoped.query_one(SQL{"SELECT item FROM orders ORDER BY id LIMIT 1"}) ?? panic("db.query_one")
+    first_item := "missing"
+    if row_opt == .Val(row) -> first_item = db.row_text(row, "item") ?? "missing"
+    if !scoped.close() -> panic("db.close")
+    return MigrationReceipt{
+        name: migration_name,
+        checksum: checksum,
+        applied: applied,
+        rows: seeded,
+        rolled_back: first_item != transient,
+        first_item: first_item,
+    }
+}
+
+pub fn pool_fixture(path: String) PoolReceipt -> {
+    pool :: db.pool(path, 2) ?? panic("db.pool")
+    ready :: pool.ready() ?? panic("db.pool.ready")
+    if !ready -> panic("db.pool.not-ready")
+    lease :: pool.acquire(deadline: 1s) ?? panic("db.pool.acquire")
+    before :: "{pool.receipt()}"
+    close(^lease)
+    drained_receipt :: pool.drain() ?? panic("db.pool.drain")
+    after :: "{drained_receipt}"
+    return PoolReceipt{
+        ready: ready,
+        acquired: true,
+        before: before,
+        drained: after.contains("lifecycle=drained"),
+        after: after,
+    }
+}
+
+
+fn queue_state(delivery: ^Delivery) String !Never -[DB]> {
+    state :: delivery.status() ?? return "unknown"
+    if state == {
+        .Pending -> return "pending"
+        .Accepted -> return "accepted"
+        .Delivering -> return "delivering"
+        .Delivered -> return "delivered"
+        .DeadLettered -> return "dead-lettered"
+        .Cancelled -> return "cancelled"
+        else -> return "unknown"
+    }
+}
+
+fn backend_worker() {
+    log.info_fields("backend.worker", [log.counter("invocations", 1)])
+}
+
+pub fn durable_queue(state_path: String, payload: String, key: String) QueueReceipt -> {
+    tree := service.tree("backend-battery")
+    tree.set_delivery(service.delivery_durable()) ?? panic("service.delivery_durable")
+    store :: service.state_store(state_path) ?? panic("service.state_store")
+    tree.set_state_event_log(store, "backend-events", 1, "reversible") ?? panic("service.event_log")
+    endpoint :: tree.worker("orders", backend_worker, capacity: 8) ?? panic("service.worker")
+    tree.start() ?? panic("service.start")
+    delivery :: tree.send_durable(endpoint, payload, key: key) ?? panic("service.send_durable")
+    retry :: delivery.retry() ?? panic("service.retry")
+    status :: queue_state(^retry)
+    delivered :: tree.receive(endpoint) ?? panic("service.receive")
+    runtime :: service.runtime("{state_path}.delivery", retention: Duration.seconds(60))
+    runtime.commit(delivery) ?? panic("service.commit")
+    tree.append_event("order-received") ?? panic("service.append_event")
+    tree.stop() ?? panic("service.stop")
+    return QueueReceipt{
+        key: key,
+        payload: delivered,
+        status: status,
+        delivered: delivered == payload,
+        retried: true,
+    }
+}
+
+pub fn configure_trace(path: String, format: String, trace_id: String) TraceReceipt -> {
+    log.setup("json")
+    if format == "otlp" -> log.otlp_file(path)
+    if format != "otlp" -> log.set_sink(format, path)
+    log.set_trace_id(trace_id)
+    span :: log.span("backend.request")
+    log.enter(span)
+    log.info_fields("backend.started", [
+        log.field("trace_id", trace_id),
+        log.redact("authorization"),
+        log.counter("requests", 0),
+        log.counter("errors", 0),
+    ])
+    log.close(span)
+    log.flush()
+    return TraceReceipt{
+        trace_id: trace_id,
+        sink: format,
+        redacted: true,
+        requests: 0,
+        errors: 0,
+    }
+}
+
+pub fn emit_trace(trace_id: String, route_name: String, status: Int, requests: Int, errors: Int, sink: String) TraceReceipt -> {
+    log.set_trace_id(trace_id)
+    span :: log.span("backend.request")
+    log.enter(span)
+    log.info_fields("backend.request", [
+        log.field("trace_id", trace_id),
+        log.field("route", route_name),
+        log.int("status", status),
+        log.redact("authorization"),
+        log.counter("requests", requests),
+        log.counter("errors", errors),
+    ])
+    log.close(span)
+    log.flush()
+    return TraceReceipt{
+        trace_id: trace_id,
+        sink: sink,
+        redacted: true,
+        requests: requests,
+        errors: errors,
+    }
+}
+
+pub fn core_gates() [CoreGate] -> {
+    return [
+        CoreGate{
+            name: "native HTTP handler build",
+            ticket: "#2762",
+            available: false,
+            reason: "native server closure Send ICE remains an explicit release-build gate",
+        },
+        CoreGate{
+            name: "default evaluator trace context",
+            ticket: "#2782",
+            available: false,
+            reason: "core.log.set_trace_id remains an explicit default-evaluator gate",
+        },
+    ]
+}
+
+
+pub fn openapi_document(router: HTTPRouter) String -> {
+    return web.openapi(router)
+}
+
+fn load_one(address: String) LoadSample -> {
+    started := time.now()
+    request :: http_client.request("GET", "http://{address}/health")
+        .connect_timeout(1000)
+        .read_timeout(1000)
+    response :: request.send() ?? return LoadSample{latency_ms: time.now() - started, status: 599}
+    return LoadSample{latency_ms: time.now() - started, status: response.status()}
+}
+
+fn load_worker(address: String, count: Int, sender: Sender<LoadSample>) {
+    index := 0
+    loop index < count {
+        sender.send(load_one(address))
+        index += 1
+    }
+}
+
+fn percentile(samples: [Int], percent: Int) Int -> {
+    if samples.len() == 0 -> return 0
+    ordered := samples.copy()
+    ordered.sort()
+    index := ((ordered.len() - 1) * percent) / 100
+    return ordered[index]
+}
+
+pub fn load_test(address: String) LoadSummary -> {
+    users := 1000
+    worker_limit := 32
+    (sender, receiver) :: channel<LoadSample>(capacity: users)
+    workers := [Task<()>]{ }
+    worker := 0
+    loop worker < worker_limit {
+        count := users / worker_limit
+        if worker < users % worker_limit -> count += 1
+        tx :: ~sender
+        addr :: ~address
+        workers.push(task {
+            load_worker(addr, count, tx)
+        })
+        worker += 1
+    }
+    loop workers.len() > 0 {
+        handle :: workers.pop() ?? panic("load worker")
+        handle.join() ?? panic("load worker join")
+    }
+    sender.close()
+    raw := [LoadSample]{ }
+    loop sample in receiver -> raw.push(sample)
+    samples := [Int]{ }
+    ok := 0
+    errors := 0
+    transport_errors := 0
+    loop sample in raw {
+        samples.push(sample.latency_ms)
+        if sample.status >= 200 && sample.status < 300 -> ok += 1
+        if sample.status >= 400 && sample.status != 599 -> errors += 1
+        if sample.status == 599 -> transport_errors += 1
+    }
+    return LoadSummary{
+        users: users,
+        completed: raw.len(),
+        ok: ok,
+        errors: errors,
+        transport_errors: transport_errors,
+        p50: percentile(samples, 50),
+        p95: percentile(samples, 95),
+        p99: percentile(samples, 99),
+        samples: samples,
+    }
+}
+pub fn load_receipt(summary: LoadSummary) String -> {
+    return json.to_string(LoadAssertionReceipt{
+        users: summary.users,
+        completed: summary.completed,
+        ok: summary.ok,
+        errors: summary.errors,
+        transport_errors: summary.transport_errors,
+        p50: summary.p50,
+        p95: summary.p95,
+        p99: summary.p99,
+        samples: summary.samples.len(),
+        passed: summary.completed == summary.users && summary.errors == 0 && summary.transport_errors == 0,
+    })
+}

@@ -40,5 +40,15 @@
     "rust": {"author": "luna-max", "turns": 2, "retries": 1, "diagnosticsHit": ["rustc E0502: cannot borrow line as mutable because it is also borrowed as immutable"], "notes": "Std-only TcpListener and hand-written HTTP/1.1; Rust std has no HTTP server."},
     "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses http.server.HTTPServer subclass."},
     "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in node:http server with the same JSON bodies, status codes, and clean GET /shutdown path."}
+  },
+  "rewrite_provenance": {
+    "worker": "CorpusHttpService",
+    "variant": "jet",
+    "changed": "Replaced manual req.param(\"key\") extraction with canonical typed :key route parameters for PUT/GET; the raw body cap, JSON bodies and headers, status codes, Shared store, single-request listener loop, and clean shutdown state remain unchanged.",
+    "matched": "Same long-lived HTTP protocol and probe as Go, Rust, Python, and Node: health, raw-body PUT /kv/alpha, stored-value GET, missing-key 404, JSON Content-Type headers, and goodbye response followed by clean exit.",
+    "expected_output_sha256": null,
+    "expected_output": "service protocol transcript declared by entry spec",
+    "measurement": "unrun per assignment: source-only rewrite; runtime, performance, compiler proof, and output proof remain pending; no validation command was executed",
+    "compiler_observations": "No compiler or harness command was run. Historical authoring notes retain the prior default-run E0956 callback-marshaller blocker; no fresh compiler observation is claimed."
   }
 }

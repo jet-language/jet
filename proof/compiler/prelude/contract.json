@@ -1,0 +1,296 @@
+{
+  "schema": "jet.prelude-contract.v1",
+  "schema_version": 1,
+  "contract_id": "jet-prelude-contract-v1",
+  "stage": "prelude",
+  "policy": {
+    "decision_id": "D-COMPILER-PROOF1",
+    "outcome": "A",
+    "status": "ratified",
+    "scope": "Jet-owned Prelude/Core bodies reachable by comptime and shared by every applicable execution tier",
+    "foreign_suffix": "compiler, runtime, operating-system, browser, device, allocator, and foreign libraries remain named assumptions at their edges"
+  },
+  "claim": {
+    "kind": "implementation-bound-conditional-preservation",
+    "statement": "For each current Core dispatcher obligation, this stage binds the real Jet-owned Prelude/Core body, its validation/default/bounds/encoding/numeric/lifecycle/effect/cancellation/cleanup premises, and its named foreign suffix. It records source evidence only; without identity-bound observations the qualification remains blocked.",
+    "preconditions": [
+      "The current Core dispatcher and Core surface ledger are identified inputs.",
+      "The body, receiver, field, task, resource, and error implementation is located in the authoritative Prelude/Foundation source roots or is classified as a named foreign edge.",
+      "Target, compiler, allocation, scheduler, and foreign contracts are explicit assumptions.",
+      "Every current #2940 obligation has one disposition and no disposition claims proved.",
+      "Any body, premise, target, configuration, authority, or witness digest change invalidates the dependency closure."
+    ],
+    "observation_alphabet": [
+      "result",
+      "typed_failure",
+      "mutation",
+      "input_consumption",
+      "ordered_effects",
+      "cleanup",
+      "resource_premises",
+      "schedule",
+      "allowed_schedules"
+    ],
+    "unsupported_cases": [
+      "unmodeled Core receiver or field behavior",
+      "unverified callback, task, resource, cancellation, or cleanup transition",
+      "unverified FFI, ABI/layout, foreign library, browser, device, allocator, or operating-system behavior",
+      "a source, premise, target, configuration, witness, checker, or proof artifact whose identity changed"
+    ]
+  },
+  "execution": {
+    "schema": "jet.compiler-inspection.v1",
+    "runner": "scripts/agent/jet-env",
+    "compiler": "target/debug/jet",
+    "operations": [
+      "check",
+      "run"
+    ],
+    "tiers": [
+      "aot",
+      "jet_run",
+      "interpreter",
+      "check",
+      "web"
+    ],
+    "timeout_ms": 120000,
+    "unknown_status": "unverified",
+    "resource_policy": "resource observations remain unproved until identity-bound evidence records the stated premises"
+  },
+  "inventory_join": {
+    "authorities": [
+      "#2335",
+      "#2898"
+    ],
+    "#2335": {
+      "source": "scripts/agent/check-core-surface-ledger.mjs",
+      "selection": [
+        "module_item",
+        "collection_method_return",
+        "fixed_sig"
+      ],
+      "dimensions": [
+        "Core modules",
+        "nominal types",
+        "receiver methods",
+        "fields",
+        "constructor/use pairs"
+      ]
+    },
+    "#2898": {
+      "source": "proof/compiler/obligations.json",
+      "selection": [
+        "owner:#2940",
+        "family:core",
+        "kind:core_call"
+      ],
+      "dimensions": [
+        "AOT",
+        "jet_run",
+        "interpreter",
+        "web",
+        "shared route"
+      ]
+    },
+    "join_rule": "A ledger capability is bound only when its dispatcher row and real implementation body or explicit foreign edge are both present; inventory presence is never proof."
+  },
+  "obligation_dimensions": [
+    "validation",
+    "defaults",
+    "bounds",
+    "encoding",
+    "numerics",
+    "lifecycle",
+    "effects",
+    "cancellation",
+    "cleanup",
+    "receiver",
+    "field",
+    "task",
+    "resource",
+    "error"
+  ],
+  "memory_premises": [
+    {
+      "id": "memory-safe-call",
+      "source": "crates/jet-foundation/src/MemSentry.rs",
+      "statement": "Vetted memory internals may use unsafe operations only behind checked pointer, allocation, alignment, lifetime, and failure premises; a safe-call wrapper does not erase those premises."
+    },
+    {
+      "id": "memory-checked-allocation",
+      "source": "crates/jet-codegen/src/Prelude/Core/FixedAllocator.rs",
+      "statement": "Allocator capacity, layout, and release outcomes are explicit resource premises; exhaustion is a typed resource failure, not undefined behavior."
+    },
+    {
+      "id": "memory-receiver-lifetime",
+      "source": "crates/jet-codegen/src/Prelude/Core.rs",
+      "statement": "Receiver and callback handles cannot be used after their terminal lifecycle transition; safe calls retain the owner and cleanup premises."
+    }
+  ],
+  "binding_methods": [
+    {
+      "method": "verified_construction",
+      "source": "crates/jet-codegen/src/Prelude/Core.jet and Core.rs",
+      "implementation": "real Prelude/Core and Foundation implementation bodies",
+      "construction": "dispatcher rows, receiver methods, and source body spans are indexed without replacing the body by a route name",
+      "checker": "proof/compiler/prelude/check.mjs",
+      "limit": "source binding is not semantic proof"
+    },
+    {
+      "method": "direct_verification",
+      "source": "Jet-owned implementation source roots",
+      "implementation": "crates/jet-codegen/src/Prelude, crates/jet-foundation/src, and crates/jet-rt/src",
+      "candidate_binding": "identity.candidate.compiler.source and identity.candidate.compiler.artifact from jet.compiler-proof.v1",
+      "checker": "pinned manifest identity plus this stage checker",
+      "limit": "the pinned candidate identity does not establish preservation of every Core/runtime body"
+    },
+    {
+      "method": "translation_certificate",
+      "source": "proof/compiler/prelude/witnesses.json",
+      "implementation": "implementation-bound entry inventory",
+      "certificate": "body, premise, target, configuration, and negative-control references",
+      "checker": "proof/compiler/prelude/check.mjs",
+      "limit": "finite witness declarations and bounded agreement are never universal proof"
+    }
+  ],
+  "identity": {
+    "schema": "jet.compiler-proof.v1",
+    "manifest_path": "proof/compiler/toolchain/manifest.json",
+    "authority_key": "compiler-proof.prelude",
+    "required_authority": "manifest.approved_authorities[identity.authority_key].goals[obligation_id]",
+    "claim_id": "compiler-proof.identity-direct",
+    "identity_digest_source": "scripts/agent/compiler-proof.mjs:identityDigest",
+    "required_fields": [
+      "claim.identity_sha256",
+      "candidate.record_identity.target_inputs_sha256",
+      "candidate.record_identity.tool_version",
+      "candidate.record_identity.engine",
+      "candidate.commit",
+      "candidate.compiler.source",
+      "candidate.compiler.artifact",
+      "candidate.configuration",
+      "candidate.target",
+      "checker.toolchain_pin_sha256",
+      "proof.artifact",
+      "raw_replay"
+    ]
+  },
+  "coverage": {
+    "relation_path": "proof/compiler/obligations.json",
+    "owner": "#2940",
+    "owner_rule": "every current Core/runtime row and boundary owned by #2940 receives one source-bound disposition",
+    "mapping_statuses": [
+      "mapped_unproved",
+      "unsupported",
+      "unmapped",
+      "proved"
+    ],
+    "qualification_rule": "mapped_unproved and unsupported remain blocked; no row may claim proved until complete identity-bound observations exist",
+    "universal_proof": false
+  },
+  "certificates": [
+    "jet.core-body-source-certificate.v1",
+    "jet.core-premise-binding.v1",
+    "jet.core-negative-witness.v1",
+    "jet.core-observation-relation.v1",
+    "jet.memory-safe-call-premise.v1"
+  ],
+  "dependencies": [
+    {
+      "path": "crates/jet-codegen/src/Prelude",
+      "kind": "Jet-owned Prelude/Core bodies",
+      "sha256": "sha256-9ad1863a86f40fe9d6fb6c582996b8bc91d36cb3c29aa4e169546a0850aac624"
+    },
+    {
+      "path": "crates/jet-foundation/src",
+      "kind": "Core facts, contracts, memory-safe internals, and runtime carriers",
+      "sha256": "sha256-26695c3b612d66552cd904dc4f0f07d96f9097bd10b35c5b53df11ca7713851d"
+    },
+    {
+      "path": "crates/jet-rt/src",
+      "kind": "Canonical shared runtime implementation",
+      "sha256": "sha256-e05fd4a8268ba9206f2e882486ba0e49aa94804ad560cbea466e23b472a50526"
+    },
+    {
+      "path": "scripts/agent/check-core-surface-ledger.mjs",
+      "kind": "Core inventory and surface authority",
+      "sha256": "sha256-c24a9000f6a328167f0b83c70f2beeeaf1908f793fb3c1be9e05a0f5b34d945f"
+    },
+    {
+      "path": "proof/compiler/obligations.json",
+      "kind": "shared compiler obligation relation",
+      "sha256": "sha256-200703f69bfffa0c49e8524e0c1caedcd551d4f7ac8c0d2ca1eb235edc3fa45a"
+    },
+    {
+      "path": "Cargo.toml",
+      "kind": "target and dependency configuration",
+      "sha256": "sha256-4b56d9de442add3f976fe4f497db899d386769e1a98f0047326346d1a0174b1a"
+    },
+    {
+      "path": "flake.nix",
+      "kind": "toolchain and target configuration",
+      "sha256": "sha256-c755f1b61cb41ca7818bad09786f519d7c1cb43982b3bf6ec6142598e46c3cb3"
+    }
+  ],
+  "witnesses_sha256": "sha256-24a27a09856cdffbc0d32f08f98cc46a157bf6f21a18d151886ec14dd2907a15",
+  "foreign_assumptions": [
+    {
+      "id": "foreign.compiler-abi",
+      "kind": "compiler",
+      "edge": "Core dispatcher to AOT/JIT/interpreter lowering and ABI adapters",
+      "contract": "The named compiler backend preserves Jet value representation, call arity, ownership, and typed failure transport at this edge."
+    },
+    {
+      "id": "foreign.os",
+      "kind": "os",
+      "edge": "filesystem, process, environment, terminal, network, and clock host calls",
+      "contract": "The operating system returns the documented result or a permitted resource/input failure; Jet validation and error translation remain in the wrapper."
+    },
+    {
+      "id": "foreign.library",
+      "kind": "library",
+      "edge": "crypto, database, encoding, compression, regex, and service library calls",
+      "contract": "The foreign library obeys its named encoding, bounds, error, and lifetime contract; a foreign success status does not prove the Jet wrapper."
+    },
+    {
+      "id": "foreign.browser",
+      "kind": "browser",
+      "edge": "DOM, browser storage, fetch, canvas, and WebGPU host calls",
+      "contract": "The browser exposes the declared API and event/callback lifetime; Jet-owned validation, cancellation, and cleanup are checked separately."
+    },
+    {
+      "id": "foreign.device",
+      "kind": "device",
+      "edge": "CUDA, Metal, Vulkan, WebGPU, Raylib, and embedded-device calls",
+      "contract": "The target device and driver honor the declared width, bounds, synchronization, and resource limits."
+    },
+    {
+      "id": "foreign.allocator",
+      "kind": "allocator",
+      "edge": "allocation, stack, buffer, stream, task, and resource handles",
+      "contract": "The host allocator/resource provider satisfies the finite capacity and release contract; Jet memory-safe premises forbid undefined behavior on failure."
+    }
+  ],
+  "boundary": {
+    "proven": [
+      "The checker parses every current dispatcher row and emits one disposition; source bindings are reported as mapped, foreign, or unresolved.",
+      "The checker records the required Jet-owned policy premises for validation, defaults, bounds, encoding, numerics, lifecycle, effects, cancellation, and cleanup; these premises remain unverified.",
+      "The checker rejects stale dependency closures and cannot promote an unproved or unknown disposition to proved."
+    ],
+    "assumed": [
+      "Ratified Jet Core and Prelude specifications state the intended policy.",
+      "Named compiler, runtime, operating-system, library, browser, device, allocator, and foreign service contracts hold at their edges.",
+      "The pinned jet.compiler-proof.v1 claim identity identifies the candidate without changing its meaning."
+    ],
+    "tested": [
+      "The source inventory and real implementation body bindings are checked structurally.",
+      "Negative controls retain independent wrong-default, width/bounds, cleanup-count, callback-lifetime, cancellation, error, encoding, and numeric mutations for rejection evidence."
+    ],
+    "blocked": [
+      "Universal preservation for all Prelude/Core behavior and every execution tier.",
+      "Semantic agreement, typed-failure, mutation, input, effect ordering, cleanup, resource, scheduler, and allowed-schedule observations until identity-bound execution evidence is recorded.",
+      "Foreign compiler, runtime, operating-system, browser, device, allocator, and library behavior beyond the named contracts."
+    ],
+    "qualification": "blocked"
+  }
+}

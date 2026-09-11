@@ -34,9 +34,18 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for E3215</p>
+<p class="diag-copy fix" data-registry-field="fix">Wrap inline foreign code in an enclosing `#Unsafe(&quot;reason&quot;)` gate.</p>
 <h2>Worked example</h2>
-<p>No UI snapshot currently mentions this code.</p>
+<p>First UI snapshot mentioning <code>E3215</code>: <code>tests/ui/ffi_asm_no_unsafe_gate.stderr</code>.</p>
+<pre class="diag">Error [E3215]: `#FFI(asm)` needs an `#Unsafe(&quot;reason&quot;)` gate
+  --&gt; tests/ui/ffi_asm_no_unsafe_gate.jet:3:1
+    |
+  3 | #FFI(asm)
+    | ^^^^^^^^^
+ Why: `asm` is an unsafe foreign language — an inline `asm` body can break memory safety, so Jet requires you to state why it is sound to call (I1/S58)
+ Fix: Add the gate: `#Unsafe(&quot;…&quot;) #FFI(asm) fn …`
+More: jet-lang.dev/e/E3215
+</pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
 </main>

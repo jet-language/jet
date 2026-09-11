@@ -1,0 +1,267 @@
+{
+  "schema": "jet.compiler-proof.v1",
+  "schema_version": 1,
+  "manifest_id": "compiler-proof-toolchain-lean4",
+  "binding_methods": [
+    "verified_construction",
+    "direct_verification",
+    "translation_certificate"
+  ],
+  "toolchain": {
+    "checker": "lean",
+    "package": "lean4",
+    "version": "4.29.1",
+    "store_path": "/nix/store/sz7vdknpsl9ipkjj003vbfa7sd284535-lean4-4.29.1",
+    "executable": "bin/lean",
+    "version_args": [
+      "--version"
+    ],
+    "version_output": "Lean (version 4.29.1, commit v4.29.1, Release)\n",
+    "version_output_sha256": "sha256-688636523b9e60d5a52e164aec360a2daf78abefee33a9016bf25cbfd88cce0c",
+    "version_stderr": "",
+    "version_stderr_sha256": "sha256-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "nixpkgs": {
+      "input": "proofNixpkgs",
+      "rev": "0c88e1f2bdb93d5999019e99cb0e61e1fe2af4c5",
+      "nar_hash": "sha256-DmTfP92QFYRLOGXlMIE54MAgxSJjDWocl3gRNOu72Os="
+    },
+    "pin_sha256": "sha256-de590c71786533b15af527b3478ace2e25c9660a68f12d19754ac3948032eca5"
+  },
+  "claims": [
+    {
+      "id": "compiler-proof.identity-direct",
+      "authority": {
+        "authority_key": "compiler-proof.identity",
+        "obligation_id": "compiler-proof.identity-direct"
+      },
+      "proposition": "identity(value) returns value",
+      "proposition_sha256": "sha256-a25430abf69aa0e33682038784146e042d9ece057f6207ad7f82c5382f2a6657",
+      "model": {
+        "id": "identity-model-v1",
+        "path": "proof/compiler/toolchain/fixtures/valid/model.lean",
+        "sha256": "sha256-9e3363e991dada0bf7ab4fb23cdbc2b26db1f56a8dc648fd997f8fd4691e1cef"
+      },
+      "source": {
+        "path": "proof/compiler/toolchain/fixtures/valid/source.jet",
+        "sha256": "sha256-3f4baa8137b9b82854a8e9b2e51f99bca796029eed54a6dbcf718f88cada1e7a"
+      },
+      "implementation": {
+        "id": "identity-implementation-v1",
+        "representation": "rust-source",
+        "path": "proof/compiler/toolchain/fixtures/valid/implementation.rs",
+        "sha256": "sha256-c2a494eb9bba5c3eec6cd1c7d2545ebd5dce35d21572f0f29d80ba81c9725288"
+      },
+      "correspondence": {
+        "method": "direct_verification",
+        "route": "direct-real-implementation",
+        "checked_declaration": "jet_binding_identity"
+      },
+      "candidate": {
+        "record_identity": {
+          "target_inputs_sha256": "sha256-3f4baa8137b9b82854a8e9b2e51f99bca796029eed54a6dbcf718f88cada1e7a",
+          "tool_version": "jet-compiler-proof-fixture-1",
+          "engine": "mir-v1"
+        },
+        "commit": "5382a5b2055e1c32c8eb02a2f6cbf9e1598c9a6f",
+        "compiler": {
+          "source": {
+            "path": "proof/compiler/toolchain/fixtures/valid/compiler-source.rs",
+            "sha256": "sha256-11c52fc27f44c00affccead7e9f26629e5d928d51aaee07e81307952bd743303"
+          },
+          "artifact": {
+            "path": "proof/compiler/toolchain/fixtures/valid/compiler-artifact.txt",
+            "sha256": "sha256-94cd0f8e77d4a39127d26c8ea2b7e03621516b0306b8970dacd0eeafd9238394"
+          }
+        },
+        "configuration": {
+          "path": "proof/compiler/toolchain/fixtures/valid/compiler-config.json",
+          "sha256": "sha256-3d1125ab6762bb6a694d51bdb9eea7d9fe867638f30992605378ac8933da4af7"
+        },
+        "target": {
+          "triple": "x86_64-unknown-linux-gnu",
+          "arch": "x86_64",
+          "os": "linux",
+          "backend": "native",
+          "profile": "proof"
+        }
+      },
+      "checker": {
+        "protocol": "lean-source-v1",
+        "toolchain_pin_sha256": "sha256-de590c71786533b15af527b3478ace2e25c9660a68f12d19754ac3948032eca5",
+        "invocation": [
+          "lean",
+          "<proof-artifact>"
+        ]
+      },
+      "assumptions": [
+        {
+          "kind": "model_validity",
+          "id": "assumption-model-v1",
+          "statement": "The Lean model states the intended identity proposition.",
+          "status": "assumed"
+        },
+        {
+          "kind": "preservation",
+          "id": "assumption-preservation-v1",
+          "statement": "The checked model relation is preserved by the selected construction route.",
+          "status": "assumed"
+        },
+        {
+          "kind": "implementation_correspondence",
+          "id": "assumption-correspondence-v1",
+          "statement": "The direct verification artifact names and checks the real implementation representation.",
+          "status": "assumed"
+        },
+        {
+          "kind": "compiler_construction",
+          "id": "assumption-construction-v1",
+          "statement": "The compiler construction used for this candidate is the recorded artifact.",
+          "status": "assumed"
+        }
+      ],
+      "proof": {
+        "formal_goal": "∀ (value : Nat), jetImplementation value = jetModel value",
+        "artifact": {
+          "kind": "lean-source",
+          "path": "proof/compiler/toolchain/fixtures/valid/proof.lean",
+          "sha256": "sha256-1dc32365cc49db043cb5c160a8aa9e66cdc0f12f642f875b16e9165b29edf1e8"
+        },
+        "budget_ms": 30000
+      },
+      "raw_replay": {
+        "stdout": {
+          "path": "proof/compiler/toolchain/fixtures/valid/replay.stdout",
+          "sha256": "sha256-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stderr": {
+          "path": "proof/compiler/toolchain/fixtures/valid/replay.stderr",
+          "sha256": "sha256-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "exit_code": 0
+      },
+      "result": "proved",
+      "identity_sha256": "sha256-2fa369ef8c281d9b37faa45f1d128daa03031fc1b032a2160ec1ad06325f8d4b"
+    }
+  ],
+  "approved_authorities": {
+    "compiler-proof.semantics": {
+      "schema": "jet.compiler-proof-authority.v1",
+      "stage": "semantics",
+      "contract_path": "proof/compiler/semantics/contract.json",
+      "contract_sha256": "sha256-a0518d6b05709582f4bd3875269be73a79bf1a48bdb16bac53261cfda55562c0",
+      "obligations_path": "proof/compiler/obligations.json",
+      "obligations_sha256": "sha256-a2ce1e98546eb3ec76ec079b0170f8dd00323258178ad20c71ea587098d16340",
+      "goals": {}
+    },
+    "compiler-proof.source": {
+      "schema": "jet.compiler-proof-authority.v1",
+      "stage": "source",
+      "contract_path": "proof/compiler/source/contract.json",
+      "contract_sha256": "sha256-575ef485cd0c68611e2fcef253a99cd619d5cd47cfbc8f0979eccfd55f113b6e",
+      "obligations_path": "proof/compiler/obligations.json",
+      "obligations_sha256": "sha256-a2ce1e98546eb3ec76ec079b0170f8dd00323258178ad20c71ea587098d16340",
+      "goals": {}
+    },
+    "compiler-proof.checking": {
+      "schema": "jet.compiler-proof-authority.v1",
+      "stage": "checking",
+      "contract_path": "proof/compiler/checking/contract.json",
+      "contract_sha256": "sha256-187abe262296ef36f66734f9b84f026e518b295925accd682184e85ddb1204dc",
+      "obligations_path": "proof/compiler/obligations.json",
+      "obligations_sha256": "sha256-a2ce1e98546eb3ec76ec079b0170f8dd00323258178ad20c71ea587098d16340",
+      "goals": {}
+    },
+    "compiler-proof.comptime": {
+      "schema": "jet.compiler-proof-authority.v1",
+      "stage": "comptime",
+      "contract_path": "proof/compiler/comptime/contract.json",
+      "contract_sha256": "sha256-1c7c316753fb195e0ccfe4cf203bdd5a6f8a9397dce7b11071c3ed488b29c400",
+      "obligations_path": "proof/compiler/obligations.json",
+      "obligations_sha256": "sha256-a2ce1e98546eb3ec76ec079b0170f8dd00323258178ad20c71ea587098d16340",
+      "goals": {}
+    },
+    "compiler-proof.lowering": {
+      "schema": "jet.compiler-proof-authority.v1",
+      "stage": "lowering",
+      "contract_path": "proof/compiler/lowering/contract.json",
+      "contract_sha256": "sha256-8d7f53669215f7ed63a40c27737fb47f8e03f1c7d27974af96387119c5aafbfe",
+      "obligations_path": "proof/compiler/obligations.json",
+      "obligations_sha256": "sha256-a2ce1e98546eb3ec76ec079b0170f8dd00323258178ad20c71ea587098d16340",
+      "goals": {}
+    },
+    "compiler-proof.optimization": {
+      "schema": "jet.compiler-proof-authority.v1",
+      "stage": "optimization",
+      "contract_path": "proof/compiler/optimization/contract.json",
+      "contract_sha256": "sha256-92692b4802488e3ec26ea19de32f5beb8d3068e895c792273e7679dfbb983cda",
+      "obligations_path": "proof/compiler/obligations.json",
+      "obligations_sha256": "sha256-a2ce1e98546eb3ec76ec079b0170f8dd00323258178ad20c71ea587098d16340",
+      "goals": {}
+    },
+    "compiler-proof.adapters": {
+      "schema": "jet.compiler-proof-authority.v1",
+      "contract_path": "proof/compiler/adapters/contract.json",
+      "stage": "adapters",
+      "contract_sha256": "sha256-5e7da3ce01ab1d1fcf9df2ef889de30a22c493c09d7a6298623f826f0c3aeca8",
+      "obligations_path": "proof/compiler/obligations.json",
+      "obligations_sha256": "sha256-a2ce1e98546eb3ec76ec079b0170f8dd00323258178ad20c71ea587098d16340",
+      "goals": {}
+    },
+    "compiler-proof.prelude": {
+      "schema": "jet.compiler-proof-authority.v1",
+      "stage": "prelude",
+      "contract_path": "proof/compiler/prelude/contract.json",
+      "contract_sha256": "sha256-914d5ddce8e4b879690c96735a1195b5d4a1152ec1c1e292e3b7e22e123d4590",
+      "obligations_path": "proof/compiler/obligations.json",
+      "obligations_sha256": "sha256-a2ce1e98546eb3ec76ec079b0170f8dd00323258178ad20c71ea587098d16340",
+      "goals": {}
+    },
+    "compiler-proof.runtime": {
+      "schema": "jet.compiler-proof-authority.v1",
+      "stage": "runtime",
+      "contract_path": "proof/compiler/runtime/contract.json",
+      "contract_sha256": "sha256-4db06b6700e6fe13a6e72232a92b502e13507070e289ce4e300ebf8af01ec3a2",
+      "obligations_path": "proof/compiler/obligations.json",
+      "obligations_sha256": "sha256-a2ce1e98546eb3ec76ec079b0170f8dd00323258178ad20c71ea587098d16340",
+      "goals": {}
+    },
+    "compiler-proof.composition": {
+      "schema": "jet.compiler-proof-authority.v1",
+      "stage": "composition",
+      "contract_path": "proof/compiler/composition/contract.json",
+      "contract_sha256": "sha256-76d730078b7f41a5c431675fe918eaa7a97e38b9edc62811ffa684008a985765",
+      "obligations_path": "proof/compiler/obligations.json",
+      "obligations_sha256": "sha256-a2ce1e98546eb3ec76ec079b0170f8dd00323258178ad20c71ea587098d16340",
+      "goals": {}
+    },
+    "compiler-proof.identity": {
+      "schema": "jet.compiler-proof-authority.v1",
+      "stage": "identity",
+      "manifest_path": "proof/compiler/toolchain/manifest.json",
+      "obligations_path": "proof/compiler/obligations.json",
+      "obligations_sha256": "sha256-a2ce1e98546eb3ec76ec079b0170f8dd00323258178ad20c71ea587098d16340",
+      "goals": {
+        "compiler-proof.identity-direct": {
+          "goal_declaration": "jetCompilerProofExpectedGoal",
+          "claim_id": "compiler-proof.identity-direct",
+          "model": {
+            "path": "proof/compiler/toolchain/fixtures/valid/model.lean",
+            "sha256": "sha256-9e3363e991dada0bf7ab4fb23cdbc2b26db1f56a8dc648fd997f8fd4691e1cef"
+          },
+          "formal_goal": "∀ (value : Nat), jetImplementation value = jetModel value",
+          "implementation": {
+            "id": "identity-implementation-v1",
+            "representation": "rust-source",
+            "path": "proof/compiler/toolchain/fixtures/valid/implementation.rs",
+            "sha256": "sha256-c2a494eb9bba5c3eec6cd1c7d2545ebd5dce35d21572f0f29d80ba81c9725288"
+          },
+          "correspondence": {
+            "method": "direct_verification",
+            "route": "direct-real-implementation",
+            "checked_declaration": "jet_binding_identity"
+          }
+        }
+      }
+    }
+  }
+}

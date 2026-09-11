@@ -230,6 +230,14 @@ pub const KW_VALIDATE_BLOCK: &str = "validate"; // D-VALIDATE1
 pub const TYPE_VALIDATE: &str = "Validate";
 pub const TYPE_VALIDATE_BUILDER: &str = "__JetValidate";
 pub const INTERNAL_VALIDATE_OVER: &str = "\0jet.validate.over";
+/// D-FOUND-RECEIPT1: compiler-owned ambient receipt handle and its one public
+/// attachment method. The handle has no source constructor or module export.
+pub const INTERNAL_RECEIPT_HANDLE: &str = "\0jet.receipt.handle";
+pub const METHOD_RECEIPT_ATTACH: &str = "attach";
+/// D-QUERY-RETAIN1=A / D-SQL-SURFACE1: the checked-SQL list door `[T].query(SQL)`
+/// is a receiver row keyed by this compiler-owned handle. The public spelling
+/// stays `query`; `jet_data_query_sql` is never exported or documented.
+pub const INTERNAL_LIST_QUERY_HANDLE: &str = "\0jet.query.list";
 
 /// D-VALIDATE1: the builtin call name inside a `validate { … }` block —
 /// `check(cond, at: field, "msg")` records one `FieldError { path, reason }`
@@ -289,6 +297,9 @@ pub const TEST_FLAG_MEASURE: &str = "--measure";
 /// D-RUN-WATCH1=A (ratified 2026-08-07, card #1641): one watch modifier on
 /// every runnable verb named by the ballot.
 pub const RUN_FLAG_WATCH: &str = "--watch";
+/// D-RUN-PREPARE1=A (ratified 2026-09-05): refuse implicit Jetpack project
+/// preparation only when the caller explicitly opts out.
+pub const RUN_FLAG_NO_PREPARE: &str = "--no-prepare";
 /// D-RUN-RECORD1=A (ratified 2026-08-07, card #1641): named replay recording
 /// producer on `run`, `dev`, and `test`.
 pub const RUN_FLAG_RECORD: &str = "--record=";
@@ -326,6 +337,11 @@ pub const DBG_WHY: &str = "why"; // D-DEVR-CAUSE1=A: query recorded acts that pr
 pub const DBG_WHEN: &str = "when"; // D-DEVR-CAUSE1=A: query recorded changes for a place
 pub const DBG_HELP: &str = "help"; // D-DBG3 (alias `h`): list the verbs
 pub const DBG_QUIT: &str = "quit"; // D-DBG3 (alias `q`): end the session (E2204)
+pub const DBG_BACK: &str = "back"; // D-DX-DEBUGBACK1: reverse one statement
+pub const DBG_REVERSE_CONTINUE: &str = "reverse-continue"; // D-DX-DEBUGBACK1
+pub const DBG_WATCH: &str = "watch"; // D-DX-DEBUGBACK1
+pub const DBG_UNWATCH: &str = "unwatch"; // D-DX-DEBUGBACK1
+pub const DBG_FIX: &str = "fix"; // D-DX-DEBUGBACK1: checked source repair
 
 /// D-MIGRATE1 (ratified 2026-06-22): subdirectory under the project `.jet/`
 /// managed folder where schema snapshots are stored. Full path is
@@ -346,17 +362,22 @@ pub const API_CACHE_SUBDIR: &str = "cache/api";
 /// time (E1102) and flagged again at the detach site (E1103).
 pub const TASK_DETACH: &str = "detach"; // D-DETACH1
 
-/// D-REPRC1 (ratified; D-REPRC1 = B): `#Layout(…)` struct attribute — controls
-/// the memory layout of the generated Rust struct. `#Layout(c)` stamps
-/// `#[repr(C)]` for C interop. Field order is preserved as written.
-/// Growable fields (`[T]`, `Map`, `String`) are rejected (E1104).
+/// D-REPRC1 (ratified; D-REPRC1 = B) / D-PLACE1=A / D-LAYOUT-ALIGN1=A:
+/// `#Layout(…)` struct attribute controls the memory layout of the generated
+/// Rust struct. `#Layout(c)` stamps `#[repr(C)]` for C interop;
+/// `#Layout(c, align(N))` requests a portable profile-supported power-of-two
+/// byte alignment, while `#Layout(c, align(target, N))` opts into the selected
+/// target profile for larger proven boundaries. Field order is preserved as
+/// written. Growable fields (`[T]`, `Map`, `String`) are rejected (E1104);
+/// unsupported or unproven alignment values are rejected by sema (E1119).
 /// PascalCase per D-MARKERCASE1=A.
 pub const MARKER_LAYOUT: &str = "Layout"; // D-REPRC1 / D-MARKERCASE1
 /// D-REPRC1: the C-compatible layout variant — `#Layout(c)` → `#[repr(C)]`.
 pub const LAYOUT_C: &str = "c"; // D-REPRC1
-/// D-REPRC1: reserved layout variants — parse-and-error until their milestones ship.
+/// D-REPRC1: `packed` and first-argument `align` remain reserved.
 pub const LAYOUT_PACKED: &str = "packed"; // D-REPRC1 (reserved)
-pub const LAYOUT_ALIGN: &str = "align"; // D-REPRC1 (reserved)
+/// D-PLACE1=A: explicit alignment is the second argument of `#Layout(c)`.
+pub const LAYOUT_ALIGN: &str = "align"; // D-PLACE1
 /// D-SOA1 / D-SOA2A=C (implemented): the struct-of-arrays layout variant —
 /// `#Layout(columnar) struct S` stores a `[S]` collection column-per-field.
 /// Whole-struct only in v1 (D-SOA2B); the partial form `#Layout(columnar: …)`
@@ -371,6 +392,7 @@ pub const LAYOUT_COLUMNAR: &str = "columnar"; // D-SOA1 / D-SOA2A
 // `#[Decode]` is read-only. Owner (D-SERDE4 = B, modified): the
 // collapsed umbrella is `Codable`, with `Encode`/`Decode` as the one-way markers.
 pub const MARKER_CODABLE: &str = "Codable"; // D-SERDE4
+pub const MARKER_RECEIPT: &str = "Receipt"; // D-FOUND-RECEIPT1
 pub const MARKER_ENCODE: &str = "Encode"; // D-SERDE4
 pub const MARKER_DECODE: &str = "Decode"; // D-SERDE4
                                           // D-VERDICT-732-1 (formerly D-MARKERMOVE3, B, ratified 2026-07-02): the
@@ -541,6 +563,8 @@ pub const JET_TYPE_LIST: &[&str] = &[
     TYPE_CHAR,
     TYPE_ERR,
     TYPE_SHARED,
+    TYPE_SHARED_SNAPSHOT,
+    TYPE_SHARED_REVISION_ERROR,
     TYPE_SHARED_GUARD,
     TYPE_SHARED_WEAK,
     TYPE_CONDITION,
@@ -559,6 +583,7 @@ pub const JET_TYPE_LIST: &[&str] = &[
     TYPE_TALLY,
     TYPE_BITS,
     TYPE_BYTES,
+    TYPE_VIEW_ITER,
     TYPE_I8,
     TYPE_I16,
     TYPE_I32,
@@ -700,6 +725,7 @@ use super::{
     TYPE_BYTES, TYPE_CHAR, TYPE_CONDITION, TYPE_F32, TYPE_F64, TYPE_FLOAT, TYPE_HASH_MAP, TYPE_I16,
     TYPE_I32, TYPE_I64, TYPE_I8, TYPE_INT, TYPE_LRU, TYPE_MAP, TYPE_PRIORITY_QUEUE, TYPE_QUEUE,
     TYPE_RANK, TYPE_RECEIVER, TYPE_SENDER, TYPE_SET, TYPE_SHARED, TYPE_SHARED_GUARD,
-    TYPE_SHARED_WEAK, TYPE_STRING, TYPE_TALLY, TYPE_TASK, TYPE_TASK_FAILURE, TYPE_U16, TYPE_U32,
-    TYPE_U64, TYPE_U8, TYPE_UNIT,
+    TYPE_SHARED_REVISION_ERROR, TYPE_SHARED_SNAPSHOT, TYPE_SHARED_WEAK, TYPE_STRING, TYPE_TALLY,
+    TYPE_TASK, TYPE_TASK_FAILURE, TYPE_U16, TYPE_U32,
+    TYPE_U64, TYPE_U8, TYPE_UNIT, TYPE_VIEW_ITER,
 };

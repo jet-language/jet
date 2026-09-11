@@ -3,34 +3,47 @@ use core.[encoding.json, files, process]
 struct Task { id: Int, text: String, done: Bool }
 struct Store { tasks: [Task] }
 
-fn load() [Task] !(IOError | [FieldError]) -> if files.exists("tasks.json") -> Ok(json.decode<Store>(files.read("tasks.json")).tasks) else -> Ok([])
-fn save(tasks: [Task]) !IOError { files.write("tasks.json", json.to_string(Store{tasks})) }
+fn load() [Task] !(IOError | [FieldError]) -> {
+    if !files.exists("tasks.json") -> return Ok([])
+    raw :: files.read("tasks.json")
+    store :: json.decode<Store>(raw)
+    return Ok(store.tasks)
+}
+
+fn save(tasks: [Task]) !IOError {
+    files.write("tasks.json", json.to_string(Store{tasks: tasks}))
+}
 
 fn run() !(IOError | [FieldError]) {
     args :: process.args()
-    text :: args.get(1) ?? ""
+    command :: args.get(0) ?? ""
     tasks := load()
 
-    if (args.first() ?? "") == {
+    if command == {
         "add" -> {
+            text :: args.get(1) ?? ""
             id :: tasks.len() + 1
-            tasks.push(Task{id, text, done: false})
+            tasks.push(Task{id: id, text: ~text, done: false})
             save(tasks)
             print("added {id} {text}")
         }
         "done" -> {
-            id :: Int.parse(text) ?? -1
-            if tasks.find(item -> item.id == id) == .Val(current) {
-                tasks.update_first(item -> item.id == id, Task{id, text: current.text, done: true})
-                save(tasks)
-                print("done {id}")
-            } else {
-                print("no task {id}")
+            id :: Int.parse(args.get(1) ?? "") ?? -1
+            if tasks.find(entry -> entry.id == id) == {
+                .Val(current) -> {
+                    tasks.update_first(entry -> entry.id == id, Task{id: current.id, text: current.text, done: true})
+                    save(tasks)
+                    print("done {id}")
+                }
+                .None -> print("no task {id}")
             }
         }
         "list" -> {
-            done :: tasks.count_where(.done)
-            tasks.each(item -> print("[{if item.done -> "x" else -> " "}] {item.id} {item.text}"))
+            done :: tasks.count_where(entry -> entry.done)
+            loop entry in tasks {
+                mark :: if entry.done -> "x" else -> " "
+                print("[{mark}] {entry.id} {entry.text}")
+            }
             print("open {tasks.len() - done} done {done}")
         }
         else -> {}

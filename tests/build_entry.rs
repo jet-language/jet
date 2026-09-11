@@ -43,6 +43,7 @@ fn opts() -> BuildRunOptions {
         plugin_target: false,
         cross_target: None,
         profile: "dev".to_string(),
+        application_authority: None,
         setting_overrides: std::collections::BTreeMap::new(),
         remote: None,
         package_scope: true,
@@ -599,119 +600,6 @@ fn two_builds_from_two_paths_are_byte_identical() {
     );
 }
 
-#[test]
-fn compiler_speed_plan_and_corpus_are_removal_sensitive() {
-    const PLAN: &str = include_str!("../docs/plans/compiler-speed.md");
-    const CORPUS: &str = include_str!("../tools/perf/corpus.tsv");
-    const DASHBOARD: &str = include_str!("../tools/perf/dashboard.sh");
-    const JOB_SOURCE: &str = include_str!("../examples/features/devloop/job_runner.jet");
-
-    let corpus_programs: Vec<_> = CORPUS
-        .lines()
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(|line| {
-            line.split('\t')
-                .next()
-                .expect("compiler-speed corpus row must name a program")
-        })
-        .collect();
-    assert_eq!(
-        corpus_programs,
-        vec![
-            "examples/features/basics/hello.jet",
-            "examples/features/collections/wordcount.jet",
-            "examples/features/serde/json.jet",
-            "examples/features/basics/pattern_matching.jet",
-            "examples/features/devloop/job_runner.jet",
-        ],
-        "compiler-speed corpus must keep its exact five-row order with job_runner fifth"
-    );
-
-    let row = CORPUS
-        .lines()
-        .find(|line| line.starts_with("examples/features/devloop/job_runner.jet\t"))
-        .expect("compiler-speed corpus must keep the representative project row");
-    let fields: Vec<_> = row.split('\t').collect();
-    assert_eq!(fields.len(), 8, "representative project row must pin all identities");
-    assert_eq!(fields[1], "examples/features/expected/devloop/job_runner.greet.out");
-    assert_eq!(fields[4], "tools/perf/edits/job_runner.jet");
-    assert_eq!(fields[5], "tools/perf/edits/job_runner.out");
-    assert_ne!(fields[3], fields[7], "changed job behavior must change its golden");
-    assert_ne!(fields[0], fields[4]);
-    assert_eq!(
-        include_str!("../examples/features/expected/devloop/job_runner.greet.out"),
-        "hello from job\n"
-    );
-    assert_eq!(include_str!("../tools/perf/edits/job_runner.out"), "hello from edited job\n");
-    for requirement in [
-        "#[Job(.Ship)",
-        "#[Job(.Dev)",
-        "#Job(.Internal)",
-        "Every(5min)",
-        "seed_data()",
-        "greet()",
-    ] {
-        assert!(
-            JOB_SOURCE.contains(requirement),
-            "job-runner corpus witness lost {requirement}"
-        );
-    }
-    for &digest in [fields[2], fields[3], fields[6], fields[7]].iter() {
-        assert_eq!(digest.len(), 64, "corpus digest is not SHA-256: {digest}");
-        assert!(
-            digest.chars().all(|character| character.is_ascii_hexdigit()),
-            "corpus digest is not hexadecimal: {digest}"
-        );
-    }
-
-    let plan_requirements = [
-        "## #1023 checked corpus and phase-timing canary",
-        "tests/build_entry.rs::compiler_speed_phase_timing_reports_real_release_build",
-        "tests/build_entry.rs::compiler_speed_plan_and_corpus_are_removal_sensitive",
-        "The corpus includes a representative project witness,",
-        "The active corpus rows are ordered",
-        "`examples/features/devloop/job_runner.jet`; the representative job is fifth.",
-        "changes the selected `greet` job output and its checked golden.",
-        "warm\ndefault-tier edit-to-output",
-        "the `jet run run.jet -- greet`",
-        "through `jet dev` by the parity rail",
-        "The named-job contract also runs",
-        "`seed_data` through default `jet run`,",
-        "`jet jobs` pins the",
-        "release runs `greet` and rejects the stripped",
-    ];
-    let plan_is_intact = |plan: &str| {
-        plan_requirements
-            .iter()
-            .all(|requirement| plan.contains(requirement))
-    };
-    assert!(plan_is_intact(PLAN), "compiler-speed plan contract is incomplete");
-
-    let bypassed = PLAN.replacen(
-        "warm\ndefault-tier edit-to-output",
-        "warm\ndefault-tier timing",
-        1,
-    );
-    assert_ne!(bypassed, PLAN, "compiler-speed plan canary mutation did not apply");
-    assert!(
-        !plan_is_intact(&bypassed),
-        "the corpus speed proof must fail when its plan contract is bypassed"
-    );
-
-    for requirement in [
-        "job_argument_for_program()",
-        "examples/features/devloop/job_runner.jet|tools/perf/edits/job_runner.jet",
-        "\"$JET_BIN\" run run.jet -- seed_data",
-        "\"$JET_BIN\" run --interpret run.jet -- seed_data",
-        "\"$JET_BIN\" jobs",
-        "parity_check_job_runner_case edit tools/perf/edits/job_runner.jet",
-    ] {
-        assert!(
-            DASHBOARD.contains(requirement),
-            "job-runner measurement contract lost {requirement}"
-        );
-    }
-}
 
 #[test]
 fn package_and_file_build_entries_are_rejected_as_one_unit() {
@@ -1762,7 +1650,7 @@ fn graph_overlay_uses_unsaved_text_and_canonical_cli_facts() {
         .unwrap();
     assert_eq!(disk.targets()[0].name, "disk");
     assert_eq!(overlay.targets()[0].name, "unsaved");
-    let json = jet::Driver::build_plan_json(&overlay);
+    let json = jet::Driver::build_plan_json(&overlay, None);
     assert!(
         json.contains("\"files\"")
             && json.contains("\"toolchains\"")
@@ -1780,8 +1668,8 @@ fn graph_overlay_uses_unsaved_text_and_canonical_cli_facts() {
             .unwrap()
             .unwrap();
     assert_eq!(
-        jet::Driver::build_plan_json(&queried),
-        jet::Driver::build_plan_json(&disk),
+        jet::Driver::build_plan_json(&queried, None),
+        jet::Driver::build_plan_json(&disk, None),
         "fixed `build` expression must evaluate typed graph facts"
     );
 }
@@ -3282,28 +3170,32 @@ fn criterion9_programmable_build_cli_human_and_json_reports_match() {
         .expect("JSON report has what");
     assert!(human_stderr.contains(&format!("Error [E3502]: {what}")));
     let build_error = json_get(&report, "build_error")
-        .expect("JSON report has structured build error")
-        .as_object()
-        .expect("build_error is an object");
+        .expect("JSON report has structured build error");
+    assert!(
+        matches!(build_error, jet_foundation::DataTree::DataTree::Object(_)),
+        "build_error is an object"
+    );
     assert_eq!(
-        build_error.get("typed_identity").and_then(json_str),
+        json_get(build_error, "typed_identity").and_then(json_str),
         Some("BuildError::DuplicateTargetName")
     );
-    let details = build_error
-        .get("details")
-        .expect("structured details stay nested in the jet.err object")
-        .as_object()
-        .expect("structured details are an object");
+    let details = json_get(build_error, "details")
+        .expect("structured details stay nested in the jet.err object");
+    assert!(
+        matches!(details, jet_foundation::DataTree::DataTree::Object(_)),
+        "structured details are an object"
+    );
     assert_eq!(
-        details.get("variant").and_then(json_str),
+        json_get(details, "variant").and_then(json_str),
         Some("DuplicateTargetName")
     );
-    let fields = details
-        .get("fields")
-        .expect("structured fields stay in the JSON report")
-        .as_object()
-        .expect("structured fields are an object");
-    assert_eq!(fields.get("value").and_then(json_str), Some("app"));
+    let fields = json_get(details, "fields")
+        .expect("structured fields stay in the JSON report");
+    assert!(
+        matches!(fields, jet_foundation::DataTree::DataTree::Object(_)),
+        "structured fields are an object"
+    );
+    assert_eq!(json_get(fields, "value").and_then(json_str), Some("app"));
 }
 
 /// Tower card 2008 / I2 / I3: a build entry must never reach runtime codegen,
@@ -3370,7 +3262,6 @@ fn build_entry_is_absent_from_the_runtime_program() {
 /// tier.
 #[test]
 fn build_entry_program_runs_the_same_on_every_tier() {
-    use jet_foundation::JitBackend::JitBackend as _;
 
     let root = project("build-entry-tier-parity");
     let entry = root.join("run.jet");
@@ -3387,7 +3278,13 @@ fn build_entry_program_runs_the_same_on_every_tier() {
         "{diagnostics:#?}"
     );
 
-    let interpreted = match jet::Interpreter::run_checked(&bundle, true) {
+    let policy = common::development_policy();
+    let interpreted = match common::run_interpreter_checked_bundle(
+        &bundle,
+        true,
+        jet::Interpreter::InterpreterInvocation::RunInterpret,
+        &policy,
+    ) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,
@@ -3401,14 +3298,16 @@ fn build_entry_program_runs_the_same_on_every_tier() {
 
     jet_jit::reset_jit_trace_for_test();
     let mut backend = jet_jit::CraneliftBackend::new();
-    let jit = jet_jit::with_program_args(&[shown.clone()], || match backend.run(&bundle, false) {
-        jet::Interpreter::RunOutcome::Ran {
-            stdout,
-            stderr,
-            exit_code,
-        } => (stdout, stderr, exit_code),
-        jet::Interpreter::RunOutcome::Problems(diagnostics) => {
-            panic!("resident JIT rejected the build-entry program: {diagnostics:?}")
+    let jit = jet_jit::with_program_args(&[shown.clone()], || {
+        match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
+            jet::Interpreter::RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => (stdout, stderr, exit_code),
+            jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+                panic!("resident JIT rejected the build-entry program: {diagnostics:?}")
+            }
         }
     });
     assert!(

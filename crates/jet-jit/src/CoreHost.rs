@@ -10,10 +10,10 @@
 // other hosts' usage, not about this one. Scoped to the module, never the crate.
 #![allow(dead_code)]
 
-use super::runtime_host::{contract_kernel, jit_result_parts};
+use super::runtime_host::{self, contract_kernel, jit_result_parts};
 use super::Concurrency;
 use crate::Marshal::{alloc_byte_list, clone_bytes, clone_string, result_err_msg, result_ok};
-use std::cell::{Cell, RefCell};
+use jet_foundation::Devtools::*;
 use std::sync::{mpsc, OnceLock};
 
 mod path_kernel {
@@ -21,16 +21,47 @@ mod path_kernel {
 }
 
 mod fs_walk_kernel {
+    include!("../../jet-codegen/src/Prelude/Core/FSIgnore.rs");
     include!("../../jet-codegen/src/Prelude/Core/FSWalk.rs");
 }
 
 mod fs_ops_kernel {
+    use crate::Collections::authority_semantics::JetFileScope;
     include!("../../jet-codegen/src/Prelude/Core/FSOps.rs");
 }
 
 mod keep_kernel {
     include!("../../jet-codegen/src/Prelude/Core/Keep.rs");
 }
+pub(crate) mod jet_std {
+    #[derive(Clone, Debug, PartialEq)]
+    pub(crate) struct LogField {
+        pub(crate) key: String,
+        pub(crate) value: String,
+        pub(crate) kind: String,
+        pub(crate) redacted: bool,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Default)]
+    pub(crate) struct LogSpan {
+        pub(crate) id: i64,
+        pub(crate) name: String,
+    }
+}
+
+fn jet_log_write_line(line: &str) {
+    let _ = super::runtime_host::write_jit_stderr(
+        &super::IO::term_prelude::jet_term_print_frame(line),
+        false,
+    );
+}
+
+fn jet_log_process_exit(code: i64) {
+    jet_jit_process_exit(code);
+}
+
+include!("../../jet-codegen/src/Prelude/Core/LogState.rs");
+include!("../../jet-codegen/src/Prelude/CoreLib/Top/Log.rs");
 
 // #2027 / I8+I9: the resident host reaches the one signal mechanism through the
 // single in-binary instance of `Prelude/CoreLib/Top/Interrupt.rs` that the TIR
@@ -42,8 +73,10 @@ use jet_codegen::interrupt_runtime;
 // The Prelude owns every core.sys fact. This module supplies only the small
 // type/ambient surface needed to include that exact source; wrappers below
 // marshal its Rust values to the resident heap ABI.
-mod os_rt {
-    pub(super) mod jet_std {
+pub(crate) mod os_rt {
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
+
+    pub(crate) mod jet_std {
         #[derive(Clone, Copy, Debug, PartialEq)]
         pub(crate) enum IOOperation {
             Read,
@@ -127,6 +160,7 @@ mod os_rt {
                 _ => IOError::Other(context),
             }
         }
+        include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/MappedFile.rs");
     }
 
     fn jet_std_env_get(name: &String) -> Option<String> {
@@ -142,6 +176,25 @@ mod os_rt {
 
         include!("../../jet-codegen/src/Prelude/CoreLib/Top/PlatformFamily.rs");
         include!("../../jet-codegen/src/Prelude/CoreLib/Top/OsExtra.rs");
+
+        pub(crate) fn jet_std_env_current_dir() -> Result<String, jet_std::IOError> {
+            std::env::current_dir()
+                .map(|path| path.to_string_lossy().to_string())
+                .map_err(|error| {
+                    jet_std::IOError::other(jet_std::IOOperation::Resolve, None, error)
+                })
+        }
+
+        pub(crate) fn jet_std_env_home_dir() -> Option<String> {
+            jet_std_env_get(&"HOME".to_string())
+                .or_else(|| jet_std_env_get(&"USERPROFILE".to_string()))
+        }
+
+        pub(crate) fn jet_std_os_set_current_dir(path: &String) -> Result<(), jet_std::IOError> {
+            std::env::set_current_dir(path).map_err(|error| {
+                jet_std::IOError::other(jet_std::IOOperation::Resolve, Some(path.clone()), error)
+            })
+        }
     }
 
     fn operation_index(operation: &jet_std::IOOperation) -> i64 {
@@ -221,24 +274,29 @@ mod os_rt {
     }
 
     pub(super) use prelude_impl::{
-        jet_std_os_arch, jet_std_os_close_fd, jet_std_os_cpu_count, jet_std_os_executable,
-        jet_std_os_exitcode, jet_std_os_expand, jet_std_os_family, jet_std_os_fork,
-        jet_std_os_getegid, jet_std_os_geteuid, jet_std_os_getgid, jet_std_os_getgroups,
-        jet_std_os_getpgid, jet_std_os_getpgrp, jet_std_os_getppid, jet_std_os_getpriority,
-        jet_std_os_getsid, jet_std_os_getuid, jet_std_os_hostname, jet_std_os_initgroups,
-        jet_std_os_kill, jet_std_os_loadavg, jet_std_os_mkfifo, jet_std_os_name, jet_std_os_pid,
-        jet_std_os_pipe, jet_std_os_release, jet_std_os_setgid, jet_std_os_setpgid,
-        jet_std_os_setpgrp, jet_std_os_setpriority, jet_std_os_setsid, jet_std_os_setuid,
-        jet_std_os_success, jet_std_os_sync, jet_std_os_temp_dir, jet_std_os_times,
-        jet_std_os_umask, jet_std_os_uptime, jet_std_os_username, jet_std_os_utime,
-        jet_std_os_version, jet_std_os_wait, jet_std_os_waitpid,
+        jet_std_env_current_dir, jet_std_env_home_dir, jet_std_os_arch, jet_std_os_close_fd,
+        jet_std_os_cpu_count, jet_std_os_executable, jet_std_os_exitcode, jet_std_os_expand,
+        jet_std_os_family, jet_std_os_fork, jet_std_os_getegid, jet_std_os_geteuid,
+        jet_std_os_getgid, jet_std_os_getgroups, jet_std_os_getpgid, jet_std_os_getpgrp,
+        jet_std_os_getppid, jet_std_os_getpriority, jet_std_os_getsid, jet_std_os_getuid,
+        jet_std_os_hostname, jet_std_os_initgroups, jet_std_os_kill, jet_std_os_loadavg,
+        jet_std_os_mkfifo, jet_std_os_name, jet_std_os_pid, jet_std_os_pipe, jet_std_os_release,
+        jet_std_os_set_current_dir, jet_std_os_setgid, jet_std_os_setpgid, jet_std_os_setpgrp,
+        jet_std_os_setpriority, jet_std_os_setsid, jet_std_os_setuid, jet_std_os_success,
+        jet_std_os_sync, jet_std_os_temp_dir, jet_std_os_times, jet_std_os_umask,
+        jet_std_os_uptime, jet_std_os_username, jet_std_os_utime, jet_std_os_version,
+        jet_std_os_wait, jet_std_os_waitpid,
     };
 }
 
 // FSRuntimeOps.rs is the one policy-bearing filesystem fragment. The
 // resident host supplies only these raw kernels and its result marshaller.
 mod fs_prelude {
-    use super::fs_ops_kernel::{jet_fs_canonicalize, jet_fs_glob, jet_fs_rename};
+    use crate::Collections::authority_semantics::{JetAuthority, JetFileScope};
+    use crate::Text::text_rt::{jet_view_iter_from_iter, JetViewIter};
+    use super::fs_ops_kernel::{
+        jet_fs_canonicalize, jet_fs_glob, jet_fs_rename, jet_fs_scope_read,
+    };
     use super::os_rt::jet_std;
     use crate::fault_injection::jet_fault_should_fail;
 
@@ -261,7 +319,6 @@ mod fs_write_prelude {
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/FSWriteOps.rs");
 }
 
-
 // The resident JIT cannot hand a Rust `Rc` callback to the process signal
 // boundary. TIR gives it one Send-safe record containing a function address and
 // environment handle. This adapter owns only that raw-code invocation boundary
@@ -275,6 +332,7 @@ mod jit_os_interrupt {
     struct Command {
         callback: usize,
         env: i64,
+        has_env: bool,
         ready: mpsc::SyncSender<()>,
     }
 
@@ -290,11 +348,11 @@ mod jit_os_interrupt {
             std::thread::Builder::new()
                 .name("jet-jit-interrupt".to_string())
                 .spawn(move || {
-                    let mut handlers: Vec<(usize, i64)> = Vec::new();
+                    let mut handlers: Vec<(usize, i64, bool)> = Vec::new();
                     loop {
                         match rx.recv_timeout(interrupt_runtime::jet_interrupt_poll_interval()) {
                             Ok(DispatchCommand::Register(command)) => {
-                                handlers.push((command.callback, command.env));
+                                handlers.push((command.callback, command.env, command.has_env));
                                 let _ = command.ready.send(());
                             }
                             Ok(DispatchCommand::Reset(ready)) => {
@@ -307,14 +365,18 @@ mod jit_os_interrupt {
                         }
                         interrupt_runtime::jet_interrupt_dispatch(
                             &handlers,
-                            |&(callback, environment)| {
+                            |&(callback, environment, has_env)| {
                                 Concurrency::with_http_jet_runtime(|| {
-                                    // Every callback, including named and
-                                    // capture-free callbacks, uses this one ABI.
                                     unsafe {
-                                        let callback: extern "C" fn(i64) =
-                                            std::mem::transmute(callback);
-                                        callback(environment);
+                                        if has_env {
+                                            let callback: extern "C" fn(i64) =
+                                                std::mem::transmute(callback);
+                                            callback(environment);
+                                        } else {
+                                            let callback: extern "C" fn() =
+                                                std::mem::transmute(callback);
+                                            callback();
+                                        }
                                     }
                                 });
                             },
@@ -329,6 +391,24 @@ mod jit_os_interrupt {
         }
     }
 
+    fn register_parts(callback: usize, env: i64, has_env: bool) -> Result<(), String> {
+        if callback == 0 {
+            return Err(interrupt_runtime::jet_interrupt_invalid_callback_value_error().to_string());
+        }
+        let tx = dispatcher()?;
+        let (ready_tx, ready_rx) = mpsc::sync_channel(0);
+        tx.send(DispatchCommand::Register(Command {
+            callback,
+            env,
+            has_env,
+            ready: ready_tx,
+        }))
+        .map_err(|_| interrupt_runtime::jet_interrupt_dispatcher_stopped_error().to_string())?;
+        ready_rx.recv().map_err(|_| {
+            interrupt_runtime::jet_interrupt_dispatcher_stopped_error().to_string()
+        })
+    }
+
     pub(super) fn register(callback_record: i64) {
         let result = (|| {
             let (callback, environment) = Concurrency::with_runtime_mut(|rt| {
@@ -337,21 +417,12 @@ mod jit_os_interrupt {
                     rt.heap.record_get_int(callback_record, 1).unwrap_or(0),
                 )
             });
-            if callback == 0 {
-                return Err(
-                    interrupt_runtime::jet_interrupt_invalid_callback_record_error().to_string(),
-                );
-            }
-            let tx = dispatcher()?;
-            let (ready_tx, ready_rx) = mpsc::sync_channel(0);
-            tx.send(DispatchCommand::Register(Command {
-                callback: callback as usize,
-                env: environment,
-                ready: ready_tx,
-            }))
-            .map_err(|_| interrupt_runtime::jet_interrupt_dispatcher_stopped_error().to_string())?;
-            ready_rx.recv().map_err(|_| {
-                interrupt_runtime::jet_interrupt_dispatcher_stopped_error().to_string()
+            register_parts(callback as usize, environment, true).map_err(|message| {
+                if callback == 0 {
+                    interrupt_runtime::jet_interrupt_invalid_callback_record_error().to_string()
+                } else {
+                    message
+                }
             })
         })();
         if let Err(message) = result {
@@ -359,6 +430,26 @@ mod jit_os_interrupt {
                 rt.set_trap(&interrupt_runtime::jet_interrupt_core_error(&message));
             });
         }
+    }
+
+    pub(super) fn register_callable(callable: i64) -> i64 {
+        let slot = Concurrency::with_runtime_mut(|rt| {
+            super::super::runtime_host::jit_callable_parts(rt, callable)
+        });
+        let Some(slot) = slot else {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_host_fault("MIR interrupt closure has an invalid callable handle");
+                true
+            });
+            return 0;
+        };
+        if let Err(message) = register_parts(slot.fn_ptr as usize, slot.env, slot.has_env) {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_host_fault(&interrupt_runtime::jet_interrupt_core_error(&message));
+                true
+            });
+        }
+        0
     }
 
     pub(super) fn reset() {
@@ -372,6 +463,10 @@ mod jit_os_interrupt {
     }
 }
 
+
+fn jet_jit_core_os_on_interrupt(callable: i64) -> i64 {
+    jit_os_interrupt::register_callable(callable)
+}
 fn jet_jit_os_on_interrupt(callback_record: i64) {
     jit_os_interrupt::register(callback_record);
 }
@@ -422,6 +517,14 @@ fn alloc_f64_list_os(values: &[f64]) -> i64 {
         }
         list
     })
+}
+fn jet_jit_env_current_dir() -> i64 {
+    os_rt::marshal_result(os_rt::jet_std_env_current_dir(), |value| {
+        Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value)) as u64
+    })
+}
+fn jet_jit_env_home_dir() -> i64 {
+    option_string_bits(os_rt::jet_std_env_home_dir())
 }
 
 fn jet_jit_os_name() -> i64 {
@@ -534,9 +637,14 @@ fn jet_jit_os_close_fd(fd: i64) {
     os_rt::jet_std_os_close_fd(fd)
 }
 fn jet_jit_os_mkfifo(path: i64, mode: i64) -> i64 {
-    let path = clone_string(path);
+    let path = clone_path_arg(path);
     os_rt::marshal_result(os_rt::jet_std_os_mkfifo(&path, mode), |_| 0)
 }
+fn jet_jit_os_set_current_dir(path: i64) -> i64 {
+    let path = clone_path_arg(path);
+    os_rt::marshal_result(os_rt::jet_std_os_set_current_dir(&path), |_| 0)
+}
+
 fn jet_jit_os_fork() -> i64 {
     os_rt::marshal_result(os_rt::jet_std_os_fork(), |value| value as u64)
 }
@@ -562,7 +670,7 @@ fn jet_jit_os_waitpid(pid: i64, options: i64) -> i64 {
     })
 }
 fn jet_jit_os_utime(path: i64, atime: i64, mtime: i64) -> i64 {
-    let path = clone_string(path);
+    let path = clone_path_arg(path);
     os_rt::marshal_result(os_rt::jet_std_os_utime(&path, atime, mtime), |_| 0)
 }
 fn jet_jit_os_atexit(handler: i64) -> i64 {
@@ -579,522 +687,338 @@ fn jet_jit_os_stop(code: i64) {
     jet_jit_process_exit(code)
 }
 
-// ── core.log (mirrors jet_ring_log_* in RingCsvLogTimeCrypto.rs) ───────────────
-// Level: 0=debug, 1=info, 2=warn, 3=error. Format: 0=auto, 1=json, 2=text.
+// ── core.log (shared with the AOT Prelude) ───────────────────────────────────
 
-thread_local! {
-    static JIT_LOG_LEVEL: Cell<u8> = const { Cell::new(1) };
-    static JIT_LOG_DISABLED: Cell<bool> = const { Cell::new(false) };
-    static JIT_LOG_FORMAT: Cell<u8> = const { Cell::new(0) };
-    static JIT_LOG_SINK_PATH: RefCell<String> = const { RefCell::new(String::new()) };
-    static JIT_LOG_SAMPLE_EVERY: Cell<i64> = const { Cell::new(1) };
-    static JIT_LOG_SAMPLE_COUNT: Cell<i64> = const { Cell::new(0) };
-    static JIT_LOG_TRACE_ID: RefCell<String> = const { RefCell::new(String::new()) };
-    static JIT_LOG_SPANS: RefCell<Vec<(i64, String)>> = const { RefCell::new(Vec::new()) };
-    static JIT_LOG_NEXT_SPAN: Cell<i64> = const { Cell::new(1) };
-}
-
-struct JitLogField {
-    key: String,
-    value: String,
-    kind: String,
-}
-
-fn jit_log_level_rank(level: &str) -> Option<u8> {
-    match level {
-        "debug" => Some(0),
-        "info" => Some(1),
-        "warn" | "warning" => Some(2),
-        "error" => Some(3),
-        "critical" => Some(4),
-        "fatal" => Some(5),
-        _ => None,
-    }
-}
-
-fn jit_log_set_level_str(level: &str) {
-    let n: u8 = jit_log_level_rank(level).unwrap_or(1);
-    JIT_LOG_LEVEL.with(|l| l.set(n));
-}
-
-// D-CLI-GLOBAL1=E: CLI is an adapter; the level decision comes from the
-// shared Args Prelude and lands in the existing core.log state here.
 pub(crate) fn set_cli_log_level(level: &str) {
-    jit_log_set_level_str(level);
+    jet_ring_log_set_level(&level.to_string());
 }
 
-fn jit_log_setup_str(format: &str) {
-    let n: u8 = match format {
-        "json" => 1,
-        "text" => 2,
-        _ => 0,
-    };
-    JIT_LOG_FORMAT.with(|f| f.set(n));
+pub(crate) fn ambient_log_set_level(level: &str) {
+    jet_ring_log_set_level(&level.to_string());
+}
+pub(crate) fn ambient_log_set_trace_id(trace_id: &str) {
+    jet_ring_log_set_trace_id(trace_id);
 }
 
-fn jit_log_set_sink_str(kind: &str, path: &str) {
-    let n: u8 = match kind {
-        "jsonl" | "json" => 1,
-        "text" => 2,
-        _ => 1,
-    };
-    JIT_LOG_FORMAT.with(|f| f.set(n));
-    JIT_LOG_SINK_PATH.with(|p| *p.borrow_mut() = path.to_string());
+pub(crate) fn ambient_log_enabled(level: &str) -> bool {
+    jet_ring_log_enabled(&level.to_string())
 }
 
-fn jit_log_sample_every(n: i64) {
-    JIT_LOG_SAMPLE_EVERY.with(|every| every.set(n.max(1)));
-    JIT_LOG_SAMPLE_COUNT.with(|count| count.set(0));
-}
-
-fn jit_log_format_active() -> u8 {
-    let explicit = JIT_LOG_FORMAT.with(|f| f.get());
-    if explicit != 0 {
-        return explicit;
-    }
-    if crate::IO::term_prelude::jet_term_stderr_is_terminal() {
-        2
-    } else {
-        1
-    }
-}
-
-fn jit_log_json_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c => out.push(c),
-        }
-    }
-    out
-}
-
-fn jit_log_write(line: &str) {
-    let path = JIT_LOG_SINK_PATH.with(|p| p.borrow().clone());
-    if path.is_empty() {
-        let _ = crate::runtime_host::write_jit_stderr(
-            &crate::IO::term_prelude::jet_term_print_frame(line),
-            false,
-        );
-    } else if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-    {
-        use std::io::Write;
-        let _ = writeln!(file, "{line}");
-    }
-}
-
-/// Mirrors AOT `unix_to_ymdhms` in RingCsvLogTimeCrypto.rs.
-/// parity: guard tests/dev_tier_parity.rs::io_cli_terminal_and_time_match_interpreter_jit_and_aot
-fn unix_to_ymdhms(secs: i64) -> (i32, u32, u32, u32, u32, u32) {
-    let mut days = secs / 86400;
-    let time_of_day = (secs % 86400).unsigned_abs();
-    let h = (time_of_day / 3600) as u32;
-    let mi = ((time_of_day % 3600) / 60) as u32;
-    let s = (time_of_day % 60) as u32;
-    let mut year: i32 = 1970;
-    loop {
-        let dy = if is_leap(year) { 366 } else { 365 };
-        if days < dy {
-            break;
-        }
-        days -= dy;
-        year += 1;
-    }
-    let month_days: [i64; 12] = if is_leap(year) {
-        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    } else {
-        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    };
-    let mut month: u32 = 1;
-    for &md in &month_days {
-        if days < md {
-            break;
-        }
-        days -= md;
-        month += 1;
-    }
-    (year, month, (days + 1) as u32, h, mi, s)
-}
-
-fn is_leap(y: i32) -> bool {
-    (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
-}
-
-fn jit_log_emit(level: &str, msg: &str, fields: &[JitLogField]) {
-    if JIT_LOG_DISABLED.with(|d| d.get()) {
-        return;
-    }
-    let keep = JIT_LOG_SAMPLE_EVERY.with(|every| {
-        JIT_LOG_SAMPLE_COUNT.with(|count| {
-            let next = count.get() + 1;
-            count.set(next);
-            every.get() <= 1 || (next - 1) % every.get() == 0
-        })
-    });
-    if !keep {
-        return;
-    }
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64;
-    let line = if jit_log_format_active() == 2 {
-        let secs = ts / 1000;
-        let (y, mo, d, h, mi, s) = unix_to_ymdhms(secs);
-        let level_tag = match level {
-            "debug" => "DEBUG",
-            "info" => "INFO",
-            "warn" => "WARN",
-            "error" => "ERROR",
-            "critical" => "CRITICAL",
-            "fatal" => "FATAL",
-            _ => level,
-        };
-        let mut line =
-            format!("[{level_tag}] {y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}Z | {msg}");
-        for field in fields {
-            line.push_str(&format!(" {}={}", field.key, field.value));
-        }
-        line
-    } else {
-        let mut fields_json = String::new();
-        for field in fields {
-            fields_json.push_str(",\"");
-            fields_json.push_str(&jit_log_json_escape(&field.key));
-            fields_json.push_str("\":");
-            if matches!(field.kind.as_str(), "int" | "float" | "bool" | "counter") {
-                fields_json.push_str(&field.value);
-            } else {
-                fields_json.push('"');
-                fields_json.push_str(&jit_log_json_escape(&field.value));
-                fields_json.push('"');
-            }
-        }
-        let spans_json = JIT_LOG_SPANS.with(|s| {
-            let spans = s.borrow();
-            if spans.is_empty() {
-                String::new()
-            } else {
-                let names = spans
-                    .iter()
-                    .map(|(_, name)| format!("\"{}\"", jit_log_json_escape(name)))
-                    .collect::<Vec<_>>()
-                    .join(",");
-                format!(",\"spans\":[{names}]")
-            }
-        });
-        let trace = JIT_LOG_TRACE_ID.with(|t| t.borrow().clone());
-        if trace.is_empty() {
-            format!(
-                "{{\"level\":\"{}\",\"body\":\"{}\",\"ts\":{}{}{}}}",
-                level,
-                jit_log_json_escape(msg),
-                ts,
-                fields_json,
-                spans_json
-            )
-        } else {
-            format!(
-                "{{\"level\":\"{}\",\"body\":\"{}\",\"trace_id\":\"{}\",\"ts\":{}{}{}}}",
-                level,
-                jit_log_json_escape(msg),
-                jit_log_json_escape(&trace),
-                ts,
-                fields_json,
-                spans_json
-            )
-        }
-    };
-    jit_log_write(&line);
+pub(crate) fn ambient_log_fatal(message: &str) {
+    jet_ring_log_fatal(&message.to_string());
 }
 
 fn jet_jit_log_set_level(msg: i64) {
-    jit_log_set_level_str(&clone_string(msg));
+    jet_ring_log_set_level(&clone_string(msg));
 }
 
 fn jet_jit_log_setup(msg: i64) {
-    jit_log_setup_str(&clone_string(msg));
+    jet_ring_log_setup(&clone_string(msg));
 }
 
 fn jet_jit_log_set_sink(kind: i64, path: i64) {
-    jit_log_set_sink_str(&clone_string(kind), &clone_string(path));
+    let kind = clone_string(kind);
+    let path = clone_string(path);
+    jet_ring_log_set_sink(&kind, &path);
 }
 
 fn jet_jit_log_sample_every(n: i64) {
-    jit_log_sample_every(n);
+    jet_ring_log_sample_every(n);
 }
 
 fn jet_jit_log_otlp_file(path: i64) {
-    jit_log_set_sink_str("jsonl", &clone_string(path));
+    jet_ring_log_otlp_file(&clone_string(path));
 }
 
 fn jet_jit_log_debug(msg: i64) {
-    if JIT_LOG_LEVEL.with(|l| l.get()) <= 0 {
-        jit_log_emit("debug", &clone_string(msg), &[]);
-    }
+    jet_ring_log_debug(&clone_string(msg));
 }
 
 fn jet_jit_log_info(msg: i64) {
-    if JIT_LOG_LEVEL.with(|l| l.get()) <= 1 {
-        jit_log_emit("info", &clone_string(msg), &[]);
-    }
+    jet_ring_log_info(&clone_string(msg));
 }
 
 fn jet_jit_log_warn(msg: i64) {
-    if JIT_LOG_LEVEL.with(|l| l.get()) <= 2 {
-        jit_log_emit("warn", &clone_string(msg), &[]);
-    }
+    jet_ring_log_warn(&clone_string(msg));
 }
 
 fn jet_jit_log_error(msg: i64) {
-    if JIT_LOG_LEVEL.with(|l| l.get()) <= 3 {
-        jit_log_emit("error", &clone_string(msg), &[]);
-    }
+    jet_ring_log_error(&clone_string(msg));
 }
 
 fn jet_jit_log_critical(msg: i64) {
-    if JIT_LOG_LEVEL.with(|l| l.get()) <= 4 {
-        jit_log_emit("critical", &clone_string(msg), &[]);
-    }
+    jet_ring_log_critical(&clone_string(msg));
 }
 
 fn jet_jit_log_fatal(msg: i64) {
-    if JIT_LOG_LEVEL.with(|l| l.get()) <= 5 {
-        jit_log_emit("fatal", &clone_string(msg), &[]);
-    }
-    let _ = std::io::Write::flush(&mut std::io::stderr());
-    jet_jit_process_exit(1);
+    jet_ring_log_fatal(&clone_string(msg));
 }
 
 fn jet_jit_log_disable() {
-    JIT_LOG_DISABLED.with(|d| d.set(true));
+    jet_ring_log_disable();
 }
 
 fn jet_jit_log_flush() {
-    let _ = std::io::Write::flush(&mut std::io::stderr());
-    JIT_LOG_SINK_PATH.with(|path| {
-        let path = path.borrow();
-        if path.is_empty() {
-            return;
-        }
-        if let Ok(mut file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path.as_str())
-        {
-            let _ = std::io::Write::flush(&mut file);
-        }
-    });
+    jet_ring_log_flush();
 }
 
 fn jet_jit_log_enabled(level: i64) -> i8 {
-    if JIT_LOG_DISABLED.with(|d| d.get()) {
-        return 0;
-    }
-    let Some(rank) = jit_log_level_rank(&clone_string(level)) else {
-        return 0;
-    };
-    if JIT_LOG_LEVEL.with(|l| l.get()) <= rank {
-        1
-    } else {
-        0
-    }
+    i8::from(jet_ring_log_enabled(&clone_string(level)))
 }
 
 fn jet_jit_log_set_trace_id(msg: i64) {
-    let id = clone_string(msg);
-    JIT_LOG_TRACE_ID.with(|t| *t.borrow_mut() = id);
+    jet_ring_log_set_trace_id(&clone_string(msg));
 }
 
-fn alloc_log_field(key: String, value: String, kind: &str, redacted: bool) -> i64 {
+fn alloc_log_field(field: jet_std::LogField) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let rec = rt.heap.alloc_record(4);
-        let k = rt.heap.alloc_string(key);
-        let v = rt.heap.alloc_string(value);
-        let kd = rt.heap.alloc_string(kind.to_string());
-        let _ = rt.heap.record_set_string(rec, 0, k);
-        let _ = rt.heap.record_set_string(rec, 1, v);
-        let _ = rt.heap.record_set_string(rec, 2, kd);
-        let _ = rt.heap.record_set_bool(rec, 3, redacted);
+        let key = rt.heap.alloc_string(field.key);
+        let value = rt.heap.alloc_string(field.value);
+        let kind = rt.heap.alloc_string(field.kind);
+        let _ = rt.heap.record_set_string(rec, 0, key);
+        let _ = rt.heap.record_set_string(rec, 1, value);
+        let _ = rt.heap.record_set_string(rec, 2, kind);
+        let _ = rt.heap.record_set_bool(rec, 3, field.redacted);
         rec
     })
 }
 
 fn jet_jit_log_field(key: i64, value: i64) -> i64 {
-    alloc_log_field(clone_string(key), clone_string(value), "string", false)
+    let key = clone_string(key);
+    let value = clone_string(value);
+    alloc_log_field(jet_ring_log_field(&key, &value))
 }
 
-// Card 1984: these two are named after the row they marshal, not after the
-// record they build. `CoreCallRecord::jit_symbol_candidates` projects
-// `core.log.int` / `core.log.bool` (Prelude `jet_ring_log_int` /
-// `jet_ring_log_bool`) onto `jet_jit_log_int` / `jet_jit_log_bool`, so the
-// old `_field` spellings were unreachable: lowering asked the host registry
-// for the projected name, missed, and the whole function deopted.
 fn jet_jit_log_int(key: i64, value: i64) -> i64 {
-    alloc_log_field(clone_string(key), value.to_string(), "int", false)
+    alloc_log_field(jet_ring_log_int(&clone_string(key), value))
+}
+
+fn jet_jit_log_float(key: i64, value: f64) -> i64 {
+    alloc_log_field(jet_ring_log_float(&clone_string(key), value))
 }
 
 fn jet_jit_log_bool(key: i64, value: i8) -> i64 {
-    alloc_log_field(
-        clone_string(key),
-        if value != 0 { "true" } else { "false" }.to_string(),
-        "bool",
-        false,
-    )
+    alloc_log_field(jet_ring_log_bool(&clone_string(key), value != 0))
+}
+
+fn jet_jit_log_redact(key: i64) -> i64 {
+    alloc_log_field(jet_ring_log_redact(&clone_string(key)))
 }
 
 fn jet_jit_log_counter(name: i64, value: i64) -> i64 {
-    alloc_log_field(
-        format!("metric.counter.{}", clone_string(name)),
-        value.to_string(),
-        "counter",
-        false,
-    )
+    alloc_log_field(jet_ring_log_counter(&clone_string(name), value))
 }
 
-fn jet_jit_log_span(name: i64) -> i64 {
-    let id = JIT_LOG_NEXT_SPAN.with(|n| {
-        let id = n.get();
-        n.set(id + 1);
-        id
-    });
-    let name_s = clone_string(name);
+fn alloc_log_span(span: jet_std::LogSpan) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let rec = rt.heap.alloc_record(2);
-        let _ = rt.heap.record_set_int(rec, 0, id);
-        let sid = rt.heap.alloc_string(name_s);
-        let _ = rt.heap.record_set_string(rec, 1, sid);
+        let name = rt.heap.alloc_string(span.name);
+        let _ = rt.heap.record_set_int(rec, 0, span.id);
+        let _ = rt.heap.record_set_string(rec, 1, name);
         rec
     })
 }
 
-fn jet_jit_log_enter(span: i64) {
-    Concurrency::with_runtime_mut(|rt| {
-        let id = rt.heap.record_get_int(span, 0).unwrap_or(0);
-        let name = rt
+fn jet_jit_log_span(name: i64) -> i64 {
+    alloc_log_span(jet_ring_log_span(&clone_string(name)))
+}
+
+fn read_log_span(span: i64) -> jet_std::LogSpan {
+    Concurrency::with_runtime_mut(|rt| jet_std::LogSpan {
+        id: rt.heap.record_get_int(span, 0).unwrap_or(0),
+        name: rt
             .heap
             .record_get_string(span, 1)
-            .and_then(|sid| rt.heap.clone_string(sid))
-            .unwrap_or_default();
-        JIT_LOG_SPANS.with(|s| s.borrow_mut().push((id, name)));
-    });
-}
-
-fn jet_jit_log_close(span: i64) {
-    Concurrency::with_runtime_mut(|rt| {
-        let id = rt.heap.record_get_int(span, 0).unwrap_or(0);
-        JIT_LOG_SPANS.with(|s| {
-            let mut spans = s.borrow_mut();
-            if let Some(pos) = spans.iter().rposition(|(sid, _)| *sid == id) {
-                spans.remove(pos);
-            }
-        });
-    });
-}
-
-fn read_log_fields(list: i64) -> Vec<JitLogField> {
-    Concurrency::with_runtime_mut(|rt| {
-        let len = rt.heap.list_len(list).unwrap_or(0);
-        let mut out = Vec::with_capacity(len as usize);
-        for i in 0..len {
-            let rec = rt.heap.list_get_int(list, i).unwrap_or(0);
-            let key = rt
-                .heap
-                .record_get_string(rec, 0)
-                .and_then(|sid| rt.heap.clone_string(sid))
-                .unwrap_or_default();
-            let value = rt
-                .heap
-                .record_get_string(rec, 1)
-                .and_then(|sid| rt.heap.clone_string(sid))
-                .unwrap_or_default();
-            let kind = rt
-                .heap
-                .record_get_string(rec, 2)
-                .and_then(|sid| rt.heap.clone_string(sid))
-                .unwrap_or_else(|| "string".to_string());
-            out.push(JitLogField { key, value, kind });
-        }
-        out
+            .and_then(|id| rt.heap.clone_string(id))
+            .unwrap_or_default(),
     })
 }
 
+fn jet_jit_log_enter(span: i64) {
+    let span = read_log_span(span);
+    jet_ring_log_enter(&span);
+}
+
+fn jet_jit_log_close(span: i64) {
+    let span = read_log_span(span);
+    jet_ring_log_close(&span);
+}
+
+fn read_log_fields(list: i64) -> Vec<jet_std::LogField> {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(list).unwrap_or(0);
+        let mut fields = Vec::with_capacity(len as usize);
+        for index in 0..len {
+            let record = rt.heap.list_get_int(list, index).unwrap_or(0);
+            let key = rt
+                .heap
+                .record_get_string(record, 0)
+                .and_then(|id| rt.heap.clone_string(id))
+                .unwrap_or_default();
+            let value = rt
+                .heap
+                .record_get_string(record, 1)
+                .and_then(|id| rt.heap.clone_string(id))
+                .unwrap_or_default();
+            let kind = rt
+                .heap
+                .record_get_string(record, 2)
+                .and_then(|id| rt.heap.clone_string(id))
+                .unwrap_or_else(|| "string".to_string());
+            let redacted = rt.heap.record_get_bool(record, 3).unwrap_or(false);
+            fields.push(jet_std::LogField {
+                key,
+                value,
+                kind,
+                redacted,
+            });
+        }
+        fields
+    })
+}
+
+fn jet_jit_log_debug_fields(msg: i64, fields: i64) {
+    let msg = clone_string(msg);
+    let fields = read_log_fields(fields);
+    jet_ring_log_debug_fields(&msg, &fields);
+}
+
 fn jet_jit_log_info_fields(msg: i64, fields: i64) {
-    if JIT_LOG_LEVEL.with(|l| l.get()) <= 1 {
-        let fs = read_log_fields(fields);
-        jit_log_emit("info", &clone_string(msg), &fs);
-    }
+    let msg = clone_string(msg);
+    let fields = read_log_fields(fields);
+    jet_ring_log_info_fields(&msg, &fields);
+}
+
+fn jet_jit_log_warn_fields(msg: i64, fields: i64) {
+    let msg = clone_string(msg);
+    let fields = read_log_fields(fields);
+    jet_ring_log_warn_fields(&msg, &fields);
+}
+
+fn jet_jit_log_error_fields(msg: i64, fields: i64) {
+    let msg = clone_string(msg);
+    let fields = read_log_fields(fields);
+    jet_ring_log_error_fields(&msg, &fields);
+}
+
+pub(crate) fn ambient_log_span(name: &str) -> i64 {
+    jet_ring_log_span(&name.to_string()).id
+}
+
+pub(crate) fn ambient_log_enter(id: i64, name: &str) {
+    jet_ring_log_enter(&jet_std::LogSpan {
+        id,
+        name: name.to_string(),
+    });
+}
+
+pub(crate) fn ambient_log_close(id: i64, name: &str) {
+    jet_ring_log_close(&jet_std::LogSpan {
+        id,
+        name: name.to_string(),
+    });
 }
 
 pub(crate) fn ambient_log_set_sink(kind: &str, path: &str) {
-    jit_log_set_sink_str(kind, path);
+    jet_ring_log_set_sink(&kind.to_string(), &path.to_string());
 }
 
 pub(crate) fn ambient_log_sample_every(n: i64) {
-    jit_log_sample_every(n);
+    jet_ring_log_sample_every(n);
 }
 
 pub(crate) fn ambient_log_otlp_file(path: &str) {
-    jit_log_set_sink_str("jsonl", path);
+    jet_ring_log_otlp_file(&path.to_string());
 }
 
 pub(crate) fn ambient_log_disable() {
-    JIT_LOG_DISABLED.with(|disabled| disabled.set(true));
+    jet_ring_log_disable();
 }
-
 pub(crate) fn ambient_log_emit(level: &str, message: &str, fields: &[(String, String, String)]) {
-    let Some(rank) = jit_log_level_rank(level) else {
-        return;
-    };
-    if JIT_LOG_LEVEL.with(|current| current.get() > rank) {
-        return;
-    }
     let fields = fields
         .iter()
-        .map(|(key, value, kind)| JitLogField {
+        .map(|(key, value, kind)| jet_std::LogField {
             key: key.clone(),
             value: value.clone(),
             kind: kind.clone(),
+            redacted: kind == "redacted",
         })
         .collect::<Vec<_>>();
-    jit_log_emit(level, message, &fields);
+    let message = message.to_string();
+    match level {
+        "debug" => jet_ring_log_debug_fields(&message, &fields),
+        "info" => jet_ring_log_info_fields(&message, &fields),
+        "warn" => jet_ring_log_warn_fields(&message, &fields),
+        "error" => jet_ring_log_error_fields(&message, &fields),
+        "critical" => jet_ring_log_critical(&message),
+        _ => {}
+    }
 }
 
 pub(crate) fn ambient_log_flush() {
-    jet_jit_log_flush();
+    jet_ring_log_flush();
 }
 
 // ── core.files and typed Path (mirrors jet_std_fs_* / jet_std_path_*) ────────
 
+/// Filesystem Core rows accept either `String` or the erased `Path` record.
+/// Keep that coercion at the resident boundary, matching the shared
+/// interpreter/AOT path normalization instead of treating a record as an
+/// invalid string handle.
+fn clone_path_arg(id: i64) -> String {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .record_clone_string(id, 0)
+            .or_else(|| rt.heap.clone_string(id))
+            .unwrap_or_default()
+    })
+}
+
 fn jet_jit_fs_exists(path: i64) -> i8 {
-    let p = clone_string(path);
+    let p = clone_path_arg(path);
     i8::from(std::path::Path::new(&p).exists())
 }
 
 fn jet_jit_fs_read(path: i64) -> i64 {
-    let p = clone_string(path);
+    let p = clone_path_arg(path);
     if crate::fault_injection::jet_fault_should_fail("FS.Read") {
         return result_err_msg(&format!("fault injected: FS.Read for {p}"));
     }
     match std::fs::read_to_string(&p) {
         Ok(text) => {
             let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text));
+
             result_ok(sid as u64)
         }
         Err(e) => result_err_msg(&format!("read {p}: {e}")),
     }
 }
+fn jet_jit_fs_scope(authority: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let scope = crate::Collections::authority_file_scope(rt, authority);
+        let index = rt.file_scopes.len();
+        rt.file_scopes.push(scope);
+        runtime_host::file_scope_handle(index)
+    })
+}
+
+fn jet_jit_fs_scope_read(scope: i64, path: i64) -> i64 {
+    let path = clone_path_arg(path);
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(index) = runtime_host::file_scope_index(rt, scope) else {
+            rt.set_trap("invalid FileScope handle");
+            return 0;
+        };
+        os_rt::marshal_result(
+            fs_prelude::jet_std_fs_scope_read(&rt.file_scopes[index], &path),
+            |text| rt.heap.alloc_string(text) as u64,
+        )
+    })
+}
 
 fn jet_jit_fs_read_bytes(path: i64) -> i64 {
-    let p = clone_string(path);
+    let p = clone_path_arg(path);
     if crate::fault_injection::jet_fault_should_fail("FS.Read") {
         return result_err_msg(&format!("fault injected: FS.Read for {p}"));
     }
@@ -1104,8 +1028,111 @@ fn jet_jit_fs_read_bytes(path: i64) -> i64 {
     }
 }
 
+fn jet_jit_fs_map(path: i64) -> i64 {
+    let path = clone_path_arg(path);
+    os_rt::marshal_result(fs_prelude::jet_std_fs_map(&path), |map| {
+        Concurrency::with_runtime_mut(|rt| {
+            let index = rt.mapped_files.len();
+            rt.mapped_files.push(map);
+            runtime_host::mapped_file_handle(index) as u64
+        })
+    })
+}
+
+fn jet_jit_fs_map_window_view(map: i64, start: i64, end: i64) -> i64 {
+    let result = Concurrency::with_runtime_mut(|rt| {
+        let Some(index) = runtime_host::mapped_file_index(rt, map) else {
+            rt.set_trap("invalid MappedFile handle");
+            return None;
+        };
+        Some(rt.mapped_files[index].window(start, end))
+    });
+    match result {
+        Some(Ok(view)) => Concurrency::with_runtime_mut(|rt| {
+            let index = rt.mapped_views.len();
+            rt.mapped_views.push(view);
+            let slot = rt.view_slots.len();
+            rt.view_slots
+                .push(runtime_host::JitViewSlot::Mapped { view: index });
+            result_ok(runtime_host::view_handle(slot) as u64)
+        }),
+        Some(Err(error)) => os_rt::marshal_error(error),
+        None => 0,
+    }
+}
+
+fn jet_jit_fs_map_window_len_view(map: i64, offset: i64, length: i64) -> i64 {
+    let result = Concurrency::with_runtime_mut(|rt| {
+        let Some(index) = runtime_host::mapped_file_index(rt, map) else {
+            rt.set_trap("invalid MappedFile handle");
+            return None;
+        };
+        Some(fs_prelude::jet_std_fs_map_window(&rt.mapped_files[index], offset, length))
+    });
+    match result {
+        Some(Ok(view)) => Concurrency::with_runtime_mut(|rt| {
+            let index = rt.mapped_views.len();
+            rt.mapped_views.push(view);
+            let slot = rt.view_slots.len();
+            rt.view_slots
+                .push(runtime_host::JitViewSlot::Mapped { view: index });
+            result_ok(runtime_host::view_handle(slot) as u64)
+        }),
+        Some(Err(error)) => os_rt::marshal_error(error),
+        None => 0,
+    }
+}
+
+fn jet_jit_fs_map_lines_view(map: i64) -> i64 {
+    let lines = Concurrency::with_runtime_mut(|rt| {
+        let Some(index) = runtime_host::mapped_file_index(rt, map) else {
+            rt.set_trap("invalid MappedFile handle");
+            return None;
+        };
+        Some(fs_prelude::jet_std_fs_map_lines(&rt.mapped_files[index]))
+    });
+    let Some(lines) = lines else {
+        return 0;
+    };
+    Concurrency::with_runtime_mut(|rt| {
+        let out = rt.heap.alloc_empty_list();
+        for view in lines {
+            let view_index = rt.mapped_views.len();
+            rt.mapped_views.push(view);
+            let slot = rt.view_slots.len();
+            rt.view_slots
+                .push(runtime_host::JitViewSlot::Mapped { view: view_index });
+            let handle = runtime_host::view_handle(slot);
+            rt.heap
+                .list_push_int(out, handle)
+                .expect("JIT mapped-file lines list");
+        }
+        out
+    })
+}
+
+fn jet_jit_fs_map_len(map: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(index) = runtime_host::mapped_file_index(rt, map) else {
+            rt.set_trap("invalid MappedFile handle");
+            return 0;
+        };
+        rt.mapped_files[index].len()
+    })
+}
+
+fn jet_jit_fs_map_is_empty(map: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(index) = runtime_host::mapped_file_index(rt, map) else {
+            rt.set_trap("invalid MappedFile handle");
+            return 0;
+        };
+        i8::from(rt.mapped_files[index].is_empty())
+    })
+}
+
 fn jet_jit_fs_write(path: i64, text: i64) -> i64 {
-    let p = clone_string(path);
+    let p = clone_path_arg(path);
     let t = clone_string(text);
     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
         return result_err_msg(&format!("fault injected: FS.Write for {p}"));
@@ -1116,8 +1143,12 @@ fn jet_jit_fs_write(path: i64, text: i64) -> i64 {
     }
 }
 
-fn jet_jit_fs_append(path: i64, text: i64) -> i64 {
-    let p = clone_string(path);
+fn jet_jit_fs_append(path: i64) -> i64 {
+    super::enc_stream::jet_jit_fs_append(path)
+}
+
+fn jet_jit_fs_append_all(path: i64, text: i64) -> i64 {
+    let p = clone_path_arg(path);
     let t = clone_string(text);
     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
         return result_err_msg(&format!("fault injected: FS.Write for {p}"));
@@ -1130,12 +1161,12 @@ fn jet_jit_fs_append(path: i64, text: i64) -> i64 {
         .and_then(|mut file| file.write_all(t.as_bytes()))
     {
         Ok(()) => result_ok(0),
-        Err(e) => result_err_msg(&format!("append {p}: {e}")),
+        Err(error) => result_err_msg(&format!("append {p}: {error}")),
     }
 }
 
 fn jet_jit_fs_write_bytes(path: i64, bytes: i64) -> i64 {
-    let p = clone_string(path);
+    let p = clone_path_arg(path);
     let data = clone_bytes(bytes);
     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
         return result_err_msg(&format!("fault injected: FS.Write for {p}"));
@@ -1147,13 +1178,42 @@ fn jet_jit_fs_write_bytes(path: i64, bytes: i64) -> i64 {
 }
 
 fn jet_jit_fs_create_dir(path: i64) -> i64 {
-    let p = clone_string(path);
+    let p = clone_path_arg(path);
     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
         return result_err_msg(&format!("fault injected: FS.Write for {p}"));
     }
     match std::fs::create_dir_all(&p) {
         Ok(()) => result_ok(0),
         Err(e) => result_err_msg(&format!("create_dir {p}: {e}")),
+    }
+}
+fn jet_jit_fs_is_dir(path: i64) -> i8 {
+    i8::from(std::path::Path::new(&clone_path_arg(path)).is_dir())
+}
+
+fn jet_jit_fs_remove_dir(path: i64) -> i64 {
+    let p = clone_path_arg(path);
+    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+        return result_err_msg(&format!("fault injected: FS.Write for {p}"));
+    }
+    match std::fs::remove_dir(&p) {
+        Ok(()) => result_ok(0),
+        Err(e) => result_err_msg(&format!("remove_dir {p}: {e}")),
+    }
+}
+
+fn jet_jit_fs_copy(from: i64, to: i64) -> i64 {
+    let src = clone_path_arg(from);
+    let dst = clone_path_arg(to);
+    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
+        return result_err_msg(&format!("fault injected: FS.Read for {src}"));
+    }
+    if crate::fault_injection::jet_fault_should_fail("FS.Write") {
+        return result_err_msg(&format!("fault injected: FS.Write for {dst}"));
+    }
+    match std::fs::copy(&src, &dst) {
+        Ok(_) => result_ok(0),
+        Err(e) => result_err_msg(&format!("copy {src}: {e}")),
     }
 }
 
@@ -1164,7 +1224,7 @@ fn jet_jit_fs_create_dir(path: i64) -> i64 {
 // `std::fs::create_dir_all` behind the same `FS.Write` fault gate — so this
 // adapter marshals to the same call rather than inventing a second policy.
 fn jet_jit_fs_create_dir_all(path: i64) -> i64 {
-    let p = clone_string(path);
+    let p = clone_path_arg(path);
     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
         return result_err_msg(&format!("fault injected: FS.Write for {p}"));
     }
@@ -1247,7 +1307,7 @@ fn jet_jit_path_walk(rec: i64) -> i64 {
 }
 
 fn jet_jit_fs_list_dir(path: i64) -> i64 {
-    let p = clone_string(path);
+    let p = clone_path_arg(path);
     if crate::fault_injection::jet_fault_should_fail("FS.Read") {
         return result_err_msg(&format!("fault injected: FS.Read for {p}"));
     }
@@ -1299,10 +1359,7 @@ fn path_record(path: String) -> i64 {
 }
 
 fn path_string_from_record(rec: i64) -> String {
-    Concurrency::with_runtime_mut(|rt| {
-        let sid = rt.heap.record_get_string(rec, 0).unwrap_or(0);
-        rt.heap.clone_string(sid).unwrap_or_default()
-    })
+    clone_path_arg(rec)
 }
 
 pub(crate) fn show_path(rt: &crate::JitRuntime, rec: i64) -> String {
@@ -1339,7 +1396,7 @@ fn jit_env_table() -> &'static std::sync::RwLock<JitEnvEntries> {
     })
 }
 
-fn jit_env_read() -> std::sync::RwLockReadGuard<'static, JitEnvEntries> {
+pub(crate) fn jit_env_read() -> std::sync::RwLockReadGuard<'static, JitEnvEntries> {
     jit_env_table()
         .read()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -1460,6 +1517,49 @@ pub(crate) fn jit_env_set(name: &str, value: &str) -> Result<(), &'static str> {
     entries.push((key, std::ffi::OsString::from(value)));
     Ok(())
 }
+/// Remove one key from the logical environment table, preserving the
+/// Prelude's validation and last-spelling-wins semantics.
+pub(crate) fn jit_env_unset(name: &str) -> Result<bool, &'static str> {
+    jit_env_validate_name(name)?;
+    let key = std::ffi::OsStr::new(name);
+    let mut entries = jit_env_write();
+    let existed = entries
+        .iter()
+        .position(|(candidate, _)| jit_env_key_eq(candidate.as_os_str(), key))
+        .map(|old| entries.remove(old))
+        .is_some();
+    Ok(existed)
+}
+
+/// Return the logical environment's Unicode names in the Prelude's stable
+/// platform-aware order. A non-Unicode entry is an EnvError, not an omission.
+pub(crate) fn jit_env_vars() -> Result<Vec<String>, &'static str> {
+    let entries = jit_env_read();
+    let mut names = Vec::with_capacity(entries.len());
+    for (name, value) in entries.iter() {
+        let Some(decoded) = name.to_str() else {
+            return Err("environment contains a name or value that is not valid Unicode");
+        };
+        if value.to_str().is_none() {
+            return Err("environment contains a name or value that is not valid Unicode");
+        }
+        names.push((name.clone(), decoded.to_string()));
+    }
+    names.sort_by(|(left, _), (right, _)| {
+        let folded = jit_env_key_cmp(left.as_os_str(), right.as_os_str());
+        if folded != std::cmp::Ordering::Equal {
+            return folded;
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStrExt;
+            return left.encode_wide().cmp(right.encode_wide());
+        }
+        #[cfg(not(windows))]
+        std::cmp::Ordering::Equal
+    });
+    Ok(names.into_iter().map(|(_, name)| name).collect())
+}
 
 fn jet_temp_path(prefix: &str) -> String {
     let clean: String = prefix
@@ -1477,7 +1577,7 @@ fn jet_temp_path(prefix: &str) -> String {
 }
 
 fn jet_jit_fs_remove(path: i64) -> i64 {
-    let p = clone_string(path);
+    let p = clone_path_arg(path);
     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
         return result_err_msg(&format!("fault injected: FS.Write for {p}"));
     }
@@ -1489,7 +1589,7 @@ fn jet_jit_fs_remove(path: i64) -> i64 {
 }
 
 fn jet_jit_fs_remove_all(path: i64) -> i64 {
-    let p = clone_string(path);
+    let p = clone_path_arg(path);
     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
         return result_err_msg(&format!("fault injected: FS.Write for {p}"));
     }
@@ -1506,7 +1606,7 @@ fn jet_jit_fs_remove_all(path: i64) -> i64 {
 }
 
 fn jet_jit_fs_stat(path: i64) -> i64 {
-    let path = clone_string(path);
+    let path = clone_path_arg(path);
     os_rt::marshal_result(fs_prelude::jet_fs_stat(&path), |stat| {
         Concurrency::with_runtime_mut(|rt| {
             let record = rt.heap.alloc_record(9);
@@ -1526,13 +1626,13 @@ fn jet_jit_fs_stat(path: i64) -> i64 {
 }
 
 fn jet_jit_fs_set_mode(path: i64, mode: i64) -> i64 {
-    let path = clone_string(path);
+    let path = clone_path_arg(path);
     os_rt::marshal_result(fs_prelude::jet_std_fs_set_mode(&path, mode), |_| 0)
 }
 
 fn jet_jit_fs_read_at(path: i64, offset: i64, len: i64) -> i64 {
     use std::io::{Read, Seek, SeekFrom};
-    let p = clone_string(path);
+    let p = clone_path_arg(path);
     if crate::fault_injection::jet_fault_should_fail("FS.Read") {
         return result_err_msg(&format!("fault injected: FS.Read for {p}"));
     }
@@ -1554,7 +1654,7 @@ fn jet_jit_fs_read_at(path: i64, offset: i64, len: i64) -> i64 {
 
 fn jet_jit_fs_write_at(path: i64, offset: i64, bytes: i64) -> i64 {
     use std::io::{Seek, SeekFrom, Write};
-    let p = clone_string(path);
+    let p = clone_path_arg(path);
     let data = clone_bytes(bytes);
     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
         return result_err_msg(&format!("fault injected: FS.Write for {p}"));
@@ -1577,12 +1677,12 @@ fn jet_jit_fs_write_at(path: i64, offset: i64, bytes: i64) -> i64 {
 }
 
 fn jet_jit_fs_fsync(path: i64) -> i64 {
-    let p = clone_string(path);
+    let p = clone_path_arg(path);
     os_rt::marshal_result(fs_prelude::jet_std_fs_fsync(&p), |_| 0)
 }
 
 fn jet_jit_fs_write_atomic(path: i64, bytes: i64) -> i64 {
-    let p = clone_string(path);
+    let p = clone_path_arg(path);
     let data = clone_bytes(bytes);
     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
         return result_err_msg(&format!("fault injected: FS.Write for {p}"));
@@ -1613,65 +1713,67 @@ fn jet_jit_fs_write_atomic(path: i64, bytes: i64) -> i64 {
     }
 }
 fn jet_jit_io_binwrite(path: i64, bytes: i64) -> i64 {
-    let path = clone_string(path);
+    let path = clone_path_arg(path);
     let bytes = clone_bytes(bytes);
     os_rt::marshal_result(fs_write_prelude::jet_std_io_binwrite(&path, &bytes), |_| 0)
 }
 
-
-fn jet_jit_fs_walk(path: i64) -> i64 {
-    jet_jit_fs_walk_parallel(path)
+fn jet_jit_fs_walk(path: i64, ignore_name: i64) -> i64 {
+    jet_jit_fs_walk_entries(path, ignore_name, false)
 }
 
 fn jet_jit_fs_rename(from: i64, to: i64) -> i64 {
-    let from = clone_string(from);
-    let to = clone_string(to);
+    let from = clone_path_arg(from);
+    let to = clone_path_arg(to);
     os_rt::marshal_result(fs_prelude::jet_std_fs_rename(&from, &to), |_| 0)
 }
 
-fn jet_jit_fs_walk_parallel(path: i64) -> i64 {
-    let p = clone_string(path);
-    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
-        return result_err_msg(&format!("fault injected: FS.Read for {p}"));
-    }
-    let mut entries = match fs_walk_kernel::jet_fs_walk_parallel(
-        &p,
-        &p,
-        |path, relative, is_dir, depth| (path, relative, is_dir, depth),
-        |_, error| error.to_string(),
-    ) {
-        Ok(entries) => entries,
-        Err(error) => return result_err_msg(&format!("walk {p}: {error}")),
-    };
-    entries.sort_by(|left, right| left.0.cmp(&right.0));
-    let list = Concurrency::with_runtime_mut(|rt| {
-        let list = rt.heap.alloc_empty_list();
-        for (path, relative, is_dir, depth) in entries {
-            let rec = rt.heap.alloc_record(4);
-            let ps = rt.heap.alloc_string(path);
-            let rs = rt.heap.alloc_string(relative);
-            let _ = rt.heap.record_set_string(rec, 0, ps);
-            let _ = rt.heap.record_set_string(rec, 1, rs);
-            let _ = rt.heap.record_set_bool(rec, 2, is_dir);
-            let _ = rt.heap.record_set_int(rec, 3, depth);
-            let _ = rt.heap.list_push_int(list, rec);
-        }
-        list
-    });
-    result_ok(list as u64)
+fn jet_jit_fs_walk_parallel(path: i64, ignore_name: i64) -> i64 {
+    jet_jit_fs_walk_entries(path, ignore_name, false)
 }
 
-fn jet_jit_fs_walk_files(path: i64) -> i64 {
-    let p = clone_string(path);
+fn jet_jit_fs_walk_files(path: i64, ignore_name: i64) -> i64 {
+    jet_jit_fs_walk_entries(path, ignore_name, true)
+}
+
+fn jet_jit_fs_walk_entries(path: i64, ignore_name: i64, files_only: bool) -> i64 {
+    let p = clone_path_arg(path);
+    let ignore_name = Concurrency::with_runtime_mut(|rt| {
+        let Some((present, bits)) = jit_result_parts(rt, ignore_name) else {
+            return None;
+        };
+        if present {
+            rt.heap.clone_string(bits as i64).map(Some)
+        } else {
+            Some(None)
+        }
+    });
+    let Some(ignore_name) = ignore_name else {
+        return result_err_msg(&format!(
+            "walk {p}: ignore argument is not a valid Option<String> carrier"
+        ));
+    };
     if crate::fault_injection::jet_fault_should_fail("FS.Read") {
         return result_err_msg(&format!("fault injected: FS.Read for {p}"));
     }
-    let mut entries = match fs_walk_kernel::jet_fs_walk_files_parallel(
-        &p,
-        &p,
-        |path, relative, is_dir, depth| (path, relative, is_dir, depth),
-        |_, error| error.to_string(),
-    ) {
+    let result = if files_only {
+        fs_walk_kernel::jet_fs_walk_files_parallel_with_ignore(
+            &p,
+            &p,
+            ignore_name.as_deref(),
+            |path, relative, is_dir, depth| (path, relative, is_dir, depth),
+            |_, error| error.to_string(),
+        )
+    } else {
+        fs_walk_kernel::jet_fs_walk_parallel_with_ignore(
+            &p,
+            &p,
+            ignore_name.as_deref(),
+            |path, relative, is_dir, depth| (path, relative, is_dir, depth),
+            |_, error| error.to_string(),
+        )
+    };
+    let mut entries = match result {
         Ok(entries) => entries,
         Err(error) => return result_err_msg(&format!("walk {p}: {error}")),
     };
@@ -1694,7 +1796,7 @@ fn jet_jit_fs_walk_files(path: i64) -> i64 {
 }
 
 fn jet_jit_fs_glob(pattern: i64) -> i64 {
-    let pat = clone_string(pattern);
+    let pat = clone_path_arg(pattern);
     os_rt::marshal_result(fs_prelude::jet_std_fs_glob(&pat), |matches| {
         Concurrency::with_runtime_mut(|rt| {
             let list = rt.heap.alloc_empty_list();
@@ -1708,13 +1810,13 @@ fn jet_jit_fs_glob(pattern: i64) -> i64 {
 }
 
 fn jet_jit_fs_symlink(from: i64, to: i64) -> i64 {
-    let src = clone_string(from);
-    let dst = clone_string(to);
+    let src = clone_path_arg(from);
+    let dst = clone_path_arg(to);
     os_rt::marshal_result(fs_prelude::jet_std_fs_symlink(&src, &dst), |_| 0)
 }
 
 fn jet_jit_fs_read_link(path: i64) -> i64 {
-    let p = clone_string(path);
+    let p = clone_path_arg(path);
     if crate::fault_injection::jet_fault_should_fail("FS.Read") {
         return result_err_msg(&format!("fault injected: FS.Read for {p}"));
     }
@@ -1730,8 +1832,8 @@ fn jet_jit_fs_read_link(path: i64) -> i64 {
 }
 
 fn jet_jit_fs_hard_link(from: i64, to: i64) -> i64 {
-    let src = clone_string(from);
-    let dst = clone_string(to);
+    let src = clone_path_arg(from);
+    let dst = clone_path_arg(to);
     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
         return result_err_msg(&format!("fault injected: FS.Write for {dst}"));
     }
@@ -1742,22 +1844,22 @@ fn jet_jit_fs_hard_link(from: i64, to: i64) -> i64 {
 }
 
 fn jet_jit_fs_canonicalize(path: i64) -> i64 {
-    let p = clone_string(path);
+    let p = clone_path_arg(path);
     os_rt::marshal_result(fs_prelude::jet_std_fs_canonicalize(&p), |value| {
         Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value)) as u64
     })
 }
 
 fn jet_jit_fs_absolute(path: i64) -> i64 {
-    let path = clone_string(path);
+    let path = clone_path_arg(path);
     os_rt::marshal_result(fs_prelude::jet_std_fs_absolute(&path), |value| {
         Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value)) as u64
     })
 }
 
 fn jet_jit_fs_copy_dir(from: i64, to: i64) -> i64 {
-    let src = clone_string(from);
-    let dst = clone_string(to);
+    let src = clone_path_arg(from);
+    let dst = clone_path_arg(to);
     if crate::fault_injection::jet_fault_should_fail("FS.Read") {
         return result_err_msg(&format!("fault injected: FS.Read for {src}"));
     }
@@ -1814,7 +1916,7 @@ fn jet_jit_fs_temp_file(prefix: i64) -> i64 {
 }
 
 fn jet_jit_fs_lock(path: i64) -> i64 {
-    let p = clone_string(path);
+    let p = clone_path_arg(path);
     if crate::fault_injection::jet_fault_should_fail("FS.Write") {
         return result_err_msg(&format!("fault injected: FS.Write for {p}"));
     }
@@ -1944,52 +2046,20 @@ fn jet_jit_env_set(name: i64, value: i64) -> i64 {
 }
 
 fn jet_jit_env_unset(name: i64) -> i64 {
-    let key = clone_string(name);
-    if let Err(error) = jit_env_validate_name(&key) {
-        return result_err_msg(error);
+    match jit_env_unset(&clone_string(name)) {
+        Ok(existed) => result_ok(u64::from(existed)),
+        Err(error) => result_err_msg(error),
     }
-    let key = std::ffi::OsStr::new(&key);
-    let mut entries = jit_env_write();
-    let existed = entries
-        .iter()
-        .position(|(candidate, _)| jit_env_key_eq(candidate.as_os_str(), key))
-        .map(|old| entries.remove(old))
-        .is_some();
-    result_ok(u64::from(existed))
 }
 
 fn jet_jit_env_vars() -> i64 {
-    let entries = jit_env_read();
-    let mut names = Vec::with_capacity(entries.len());
-    for (name, value) in entries.iter() {
-        let Some(decoded) = name.to_str() else {
-            return result_err_msg(
-                "environment contains a name or value that is not valid Unicode",
-            );
-        };
-        if value.to_str().is_none() {
-            return result_err_msg(
-                "environment contains a name or value that is not valid Unicode",
-            );
-        }
-        names.push((name.clone(), decoded.to_string()));
-    }
-    names.sort_by(|(left, _), (right, _)| {
-        let folded = jit_env_key_cmp(left.as_os_str(), right.as_os_str());
-        if folded != std::cmp::Ordering::Equal {
-            return folded;
-        }
-        #[cfg(windows)]
-        {
-            use std::os::windows::ffi::OsStrExt;
-            return left.encode_wide().cmp(right.encode_wide());
-        }
-        #[cfg(not(windows))]
-        std::cmp::Ordering::Equal
-    });
+    let names = match jit_env_vars() {
+        Ok(names) => names,
+        Err(error) => return result_err_msg(error),
+    };
     let list = Concurrency::with_runtime_mut(|rt| {
         let list = rt.heap.alloc_empty_list();
-        for (_, name) in names {
+        for name in names {
             let sid = rt.heap.alloc_string(name);
             let _ = rt.heap.list_push_int(list, sid);
         }
@@ -2139,6 +2209,10 @@ host_fns! {
         sig_str_i8_str.params.push(AbiParam::new(types::I64));
         sig_str_i8_str.params.push(AbiParam::new(types::I8));
         sig_str_i8_str.returns.push(AbiParam::new(types::I64));
+        let mut sig_str_f64_str = Signature::new(cc);
+        sig_str_f64_str.params.push(AbiParam::new(types::I64));
+        sig_str_f64_str.params.push(AbiParam::new(types::F64));
+        sig_str_f64_str.returns.push(AbiParam::new(types::I64));
         let mut sig_void_i64 = Signature::new(cc);
         sig_void_i64.params.push(AbiParam::new(types::I64));
         let mut sig_void_i64_i64 = Signature::new(cc);
@@ -2234,18 +2308,22 @@ host_fns! {
     os_pipe: "jet_jit_os_pipe" => jet_jit_os_pipe: sig_i64;
     os_close_fd: "jet_jit_os_close_fd" => jet_jit_os_close_fd: sig_void_i64;
     os_mkfifo: "jet_jit_os_mkfifo" => jet_jit_os_mkfifo: sig_i64_i64_i64;
+    os_set_current_dir: "jet_jit_os_set_current_dir" => jet_jit_os_set_current_dir: sig_unary_i64;
+
     os_fork: "jet_jit_os_fork" => jet_jit_os_fork: sig_i64;
     os_setuid: "jet_jit_os_setuid" => jet_jit_os_setuid: sig_unary_i64;
     os_setgid: "jet_jit_os_setgid" => jet_jit_os_setgid: sig_unary_i64;
     os_setsid: "jet_jit_os_setsid" => jet_jit_os_setsid: sig_i64;
     os_initgroups: "jet_jit_os_initgroups" => jet_jit_os_initgroups: sig_i64_i64_i64;
     os_wait: "jet_jit_os_wait" => jet_jit_os_wait: sig_i64;
+    core_os_on_interrupt: "jet_std_os_on_interrupt" => jet_jit_core_os_on_interrupt: sig_unary_i64;
     os_waitpid: "jet_jit_os_waitpid" => jet_jit_os_waitpid: sig_i64_i64_i64;
     os_utime: "jet_jit_os_utime" => jet_jit_os_utime: sig_i64_i64_i64_i64;
     os_on_interrupt: "jet_jit_os_on_interrupt" => jet_jit_os_on_interrupt: sig_void_i64;
     os_atexit: "jet_jit_os_atexit" => jet_jit_os_atexit: sig_unary_i64;
     os_stop: "jet_jit_os_stop" => jet_jit_os_stop: sig_void_i64;
     log_set_level: "jet_jit_log_set_level" => jet_jit_log_set_level: sig_void_str;
+    log_set_trace_id: "jet_jit_log_set_trace_id" => jet_jit_log_set_trace_id: sig_void_str;
     log_setup: "jet_jit_log_setup" => jet_jit_log_setup: sig_void_str;
     log_set_sink: "jet_jit_log_set_sink" => jet_jit_log_set_sink: sig_void_i64_i64;
     log_sample_every: "jet_jit_log_sample_every" => jet_jit_log_sample_every: sig_void_i64;
@@ -2259,24 +2337,40 @@ host_fns! {
     log_disable: "jet_jit_log_disable" => jet_jit_log_disable: sig_void;
     log_flush: "jet_jit_log_flush" => jet_jit_log_flush: sig_void;
     log_enabled: "jet_jit_log_enabled" => jet_jit_log_enabled: sig_i64_i8;
-    log_set_trace_id: "jet_jit_log_set_trace_id" => jet_jit_log_set_trace_id: sig_void_str;
     log_field: "jet_jit_log_field" => jet_jit_log_field: sig_str_str_str;
     log_int: "jet_jit_log_int" => jet_jit_log_int: sig_str_i64_str;
+    log_float: "jet_jit_log_float" => jet_jit_log_float: sig_str_f64_str;
     log_bool: "jet_jit_log_bool" => jet_jit_log_bool: sig_str_i8_str;
+    log_redact: "jet_jit_log_redact" => jet_jit_log_redact: sig_unary_i64;
     log_counter: "jet_jit_log_counter" => jet_jit_log_counter: sig_str_i64_str;
     log_span: "jet_jit_log_span" => jet_jit_log_span: sig_unary_i64;
     log_enter: "jet_jit_log_enter" => jet_jit_log_enter: sig_void_i64;
     log_close: "jet_jit_log_close" => jet_jit_log_close: sig_void_i64;
+    log_debug_fields: "jet_jit_log_debug_fields" => jet_jit_log_debug_fields: sig_void_i64_i64;
     log_info_fields: "jet_jit_log_info_fields" => jet_jit_log_info_fields: sig_void_i64_i64;
+    log_warn_fields: "jet_jit_log_warn_fields" => jet_jit_log_warn_fields: sig_void_i64_i64;
+    log_error_fields: "jet_jit_log_error_fields" => jet_jit_log_error_fields: sig_void_i64_i64;
     fs_exists: "jet_jit_fs_exists" => jet_jit_fs_exists: sig_i64_i8;
+    fs_is_dir: "jet_jit_fs_is_dir" => jet_jit_fs_is_dir: sig_i64_i8;
+    fs_remove_dir: "jet_jit_fs_remove_dir" => jet_jit_fs_remove_dir: sig_unary_i64;
     fs_read: "jet_jit_fs_read" => jet_jit_fs_read: sig_unary_i64;
+    fs_scope: "jet_jit_fs_scope" => jet_jit_fs_scope: sig_unary_i64;
+    fs_scope_read: "jet_jit_fs_scope_read" => jet_jit_fs_scope_read: sig_i64_i64_i64;
     fs_read_bytes: "jet_jit_fs_read_bytes" => jet_jit_fs_read_bytes: sig_unary_i64;
+    fs_map: "jet_jit_fs_map" => jet_jit_fs_map: sig_unary_i64;
+    fs_map_window_view: "jet_jit_fs_map_window_view" => jet_jit_fs_map_window_view: sig_i64_i64_i64_i64;
+    fs_map_window_len_view: "jet_jit_fs_map_window_len_view" => jet_jit_fs_map_window_len_view: sig_i64_i64_i64_i64;
+    fs_map_lines_view: "jet_jit_fs_map_lines_view" => jet_jit_fs_map_lines_view: sig_unary_i64;
+    fs_map_len: "jet_jit_fs_map_len" => jet_jit_fs_map_len: sig_unary_i64;
+    fs_map_is_empty: "jet_jit_fs_map_is_empty" => jet_jit_fs_map_is_empty: sig_i64_i8;
     fs_write: "jet_jit_fs_write" => jet_jit_fs_write: sig_i64_i64_i64;
-    fs_append: "jet_jit_fs_append" => jet_jit_fs_append: sig_i64_i64_i64;
+    fs_append: "jet_jit_fs_append" => jet_jit_fs_append: sig_unary_i64;
+    fs_append_all: "jet_jit_fs_append_all" => jet_jit_fs_append_all: sig_i64_i64_i64;
     fs_write_bytes: "jet_jit_fs_write_bytes" => jet_jit_fs_write_bytes: sig_i64_i64_i64;
     io_binwrite: "jet_jit_io_binwrite" => jet_jit_io_binwrite: sig_i64_i64_i64;
     fs_stat: "jet_jit_fs_stat" => jet_jit_fs_stat: sig_unary_i64;
     fs_set_mode: "jet_jit_fs_set_mode" => jet_jit_fs_set_mode: sig_i64_i64_i64;
+    fs_create_dir: "jet_jit_fs_create_dir" => jet_jit_fs_create_dir: sig_unary_i64;
     fs_create_dir_all: "jet_jit_fs_create_dir_all" => jet_jit_fs_create_dir_all: sig_unary_i64;
     fs_list_dir: "jet_jit_fs_list_dir" => jet_jit_fs_list_dir: sig_unary_i64;
     fs_remove_all: "jet_jit_fs_remove_all" => jet_jit_fs_remove_all: sig_unary_i64;
@@ -2285,9 +2379,9 @@ host_fns! {
     fs_write_at: "jet_jit_fs_write_at" => jet_jit_fs_write_at: sig_i64_i64_i64_i64;
     fs_fsync: "jet_jit_fs_fsync" => jet_jit_fs_fsync: sig_unary_i64;
     fs_write_atomic: "jet_jit_fs_write_atomic" => jet_jit_fs_write_atomic: sig_i64_i64_i64;
-    fs_walk: "jet_jit_fs_walk" => jet_jit_fs_walk: sig_unary_i64;
-    fs_walk_parallel: "jet_jit_fs_walk_parallel" => jet_jit_fs_walk_parallel: sig_unary_i64;
-    fs_walk_files: "jet_jit_fs_walk_files" => jet_jit_fs_walk_files: sig_unary_i64;
+    fs_walk: "jet_jit_fs_walk" => jet_jit_fs_walk: sig_i64_i64_i64;
+    fs_walk_parallel: "jet_jit_fs_walk_parallel" => jet_jit_fs_walk_parallel: sig_i64_i64_i64;
+    fs_walk_files: "jet_jit_fs_walk_files" => jet_jit_fs_walk_files: sig_i64_i64_i64;
     fs_rename: "jet_jit_fs_rename" => jet_jit_fs_rename: sig_i64_i64_i64;
     fs_glob: "jet_jit_fs_glob" => jet_jit_fs_glob: sig_unary_i64;
     fs_symlink: "jet_jit_fs_symlink" => jet_jit_fs_symlink: sig_i64_i64_i64;
@@ -2296,6 +2390,7 @@ host_fns! {
     fs_canonicalize: "jet_jit_fs_canonicalize" => jet_jit_fs_canonicalize: sig_unary_i64;
     fs_absolute: "jet_jit_fs_absolute" => jet_jit_fs_absolute: sig_unary_i64;
     fs_copy_dir: "jet_jit_fs_copy_dir" => jet_jit_fs_copy_dir: sig_i64_i64_i64;
+    fs_copy: "jet_jit_fs_copy" => jet_jit_fs_copy: sig_i64_i64_i64;
     fs_temp_dir: "jet_jit_fs_temp_dir" => jet_jit_fs_temp_dir: sig_unary_i64;
     fs_temp_file: "jet_jit_fs_temp_file" => jet_jit_fs_temp_file: sig_unary_i64;
     fs_lock: "jet_jit_fs_lock" => jet_jit_fs_lock: sig_unary_i64;
@@ -2311,17 +2406,17 @@ host_fns! {
     // declaration. Nullary like the other ambient-query hosts (`os_temp_dir`,
     // `env_vars`): the runtime reaches this host through
     // `Concurrency::with_runtime_mut`, never through a parameter.
-    path_home: "jet_jit_path_home" => jet_jit_path_home: sig_i64;
-    path_from: "jet_jit_path_from" => jet_jit_path_from: sig_unary_i64;
-    path_write_atomic: "jet_jit_path_write_atomic" => jet_jit_path_write_atomic: sig_i64_i64_i64;
-    path_join_handle: "jet_jit_path_join_handle" => jet_jit_path_join_handle: sig_i64_i64_i64;
-    path_parent: "jet_jit_path_parent" => jet_jit_path_parent: sig_unary_i64;
-    path_extension: "jet_jit_path_extension" => jet_jit_path_extension: sig_unary_i64;
-    path_stem: "jet_jit_path_stem" => jet_jit_path_stem: sig_unary_i64;
-    path_normalize: "jet_jit_path_normalize" => jet_jit_path_normalize: sig_unary_i64;
-    path_is_within: "jet_jit_path_is_within" => jet_jit_path_is_within: sig_path_is_within;
-    path_to_string: "jet_jit_path_to_string" => jet_jit_path_to_string: sig_unary_i64;
-    path_walk: "jet_jit_path_walk" => jet_jit_path_walk: sig_unary_i64;
+    path_home: "jet_path_home" => jet_jit_path_home: sig_i64;
+    path_from: "jet_path_from" => jet_jit_path_from: sig_unary_i64;
+    path_write_atomic: "jet_path_write_atomic" => jet_jit_path_write_atomic: sig_i64_i64_i64;
+    path_join_handle: "jet_path_join" => jet_jit_path_join_handle: sig_i64_i64_i64;
+    path_parent: "jet_path_parent" => jet_jit_path_parent: sig_unary_i64;
+    path_extension: "jet_path_extension" => jet_jit_path_extension: sig_unary_i64;
+    path_stem: "jet_path_stem" => jet_jit_path_stem: sig_unary_i64;
+    path_normalize: "jet_path_normalize" => jet_jit_path_normalize: sig_unary_i64;
+    path_is_within: "jet_path_is_within" => jet_jit_path_is_within: sig_path_is_within;
+    path_to_string: "jet_path_to_string" => jet_jit_path_to_string: sig_unary_i64;
+    path_walk: "jet_path_walk" => jet_jit_path_walk: sig_unary_i64;
     math_sin: "jet_jit_math_sin" => jet_jit_math_sin: sig_f64_f64;
     math_cos: "jet_jit_math_cos" => jet_jit_math_cos: sig_f64_f64;
     math_exp: "jet_jit_math_exp" => jet_jit_math_exp: sig_f64_f64;
@@ -2348,6 +2443,8 @@ host_fns! {
     env_set: "jet_jit_env_set" => jet_jit_env_set: sig_i64_i64_i64;
     env_unset: "jet_jit_env_unset" => jet_jit_env_unset: sig_unary_i64;
     env_vars: "jet_jit_env_vars" => jet_jit_env_vars: sig_i64;
+    env_current_dir: "jet_jit_env_current_dir" => jet_jit_env_current_dir: sig_i64;
+    env_home_dir: "jet_jit_env_home_dir" => jet_jit_env_home_dir: sig_i64;
     io_input: "jet_jit_io_input" => jet_jit_io_input: sig_i8_i64_i64;
     carrier_fact: "jet_jit_carrier_fact" => jet_jit_carrier_fact: sig_i64_i64_i8;
     process_exit: "jet_jit_process_exit" => jet_jit_process_exit: sig_void_i64;

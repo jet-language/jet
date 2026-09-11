@@ -32,10 +32,14 @@ const DEFAULT_ROOT = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
 function registeredDiagnostics(root = DEFAULT_ROOT) {
   const codes = new Set(BUILTIN_REGISTERED_DIAGNOSTICS);
-  const path = join(root, "docs/spec/diagnostics.md");
+  const path = join(root, "crates/jet-codegen/src/Prelude/Diagnostics.jet");
   if (!existsSync(path)) return codes;
   try {
-    for (const match of readFileSync(path, "utf8").matchAll(/\b(?:E|L|JT)(?:\d{4}|(?:-[A-Z][A-Z0-9]*){2,})\b/g)) codes.add(match[0]);
+    for (const line of readFileSync(path, "utf8").split(/\r?\n/u)) {
+      if (!line.startsWith("diagnostic\t")) continue;
+      const code = line.split("\t")[1] ?? "";
+      if (DIAGNOSTIC_CODE.test(code)) codes.add(code);
+    }
   } catch {
     // Fixture-only manifests still have the small built-in registry above.
   }

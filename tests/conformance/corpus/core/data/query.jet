@@ -12,6 +12,7 @@ fn run() {
         Sale{item: "small", quantity: 1},
         Sale{item: "large", quantity: 3}
     }
-    result :: data.query(rows, SQL{"SELECT * FROM sales WHERE quantity > 1 LIMIT 1"}) ?? panic("query")
+    query :: data.query(rows).filter(row -> row.quantity > 1)
+    result :: query.collect() ?? panic("collect")
     print(result[0].item)
 }

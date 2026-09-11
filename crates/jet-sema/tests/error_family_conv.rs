@@ -39,6 +39,7 @@ fn diags(src: &str) -> Vec<Diagnostic> {
             user_policy_declarations: prog.user_policy_declarations.clone(),
             rule_facts: std::mem::take(&mut prog.rule_facts),
         }],
+        devtools_registry: jet_sema::AST::DevtoolsRegistry::default(),
         parse_teaching: Vec::new(),
         used_core: HashSet::new(),
         ffi_callback_fns: HashSet::new(),
@@ -64,7 +65,7 @@ fn diags(src: &str) -> Vec<Diagnostic> {
 }
 
 #[test]
-fn core_json_error_converts_into_default_err() {
+fn core_encoding_error_converts_into_default_err() {
     let found = diags(
         r#"
 use core.encoding.json as json
@@ -76,7 +77,7 @@ fn run() {
     );
     assert!(
         !found.iter().any(|d| d.code == "E2402"),
-        "core JSONError should convert into Err, got {:?}",
+        "core EncodingError should convert into Err, got {:?}",
         found
             .iter()
             .map(|d| format!("{}: {}", d.code, d.what))

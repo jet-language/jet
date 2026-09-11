@@ -545,6 +545,29 @@ fn run() {
     assert_tiers_agree("card_2824_map_index_field_assignment", src, "12\n");
 }
 
+#[test]
+fn nested_fallback_restores_outer_error_binding() {
+    let src = r#"
+fn fail(message: String) Int !Err -> {
+    return Err(message)
+}
+fn run() {
+    value :: fail("outer") ?? {
+        print(err.message)
+        inner :: fail("inner") ?? {
+            print(err.message)
+            0
+        }
+        read_outer :: () String -> err.message
+        print(read_outer())
+        inner + 1
+    }
+    print(value)
+}
+"#;
+    assert_tiers_agree("nested_fallback_error_scope", src, "outer\ninner\nouter\n1\n");
+}
+
 /// Hardening finding lane-1/nested-range-view-aot-ice (card #2825): tier-parity regression fixture.
 #[test]
 fn card_2825_nested_range_view_source_tier_parity() {
@@ -1082,6 +1105,72 @@ fn run() {
     assert_tiers_agree("tir_card_2837_escaping_closure_copy", src, "1\n7\n");
 }
 
+#[test]
+fn closure_capture_reads_current_storage_and_reuses_owned_copy() {
+    let src = r#"
+fn run() {
+    first := 41
+    first_read :: () Int -> first
+    first_items :: [first_read]
+    print(first_items[0].call())
+    print(first_items[0].call())
+
+    current := 1
+    print(current)
+    current = 7
+    current_read :: () Int -> current
+    current_items :: [current_read]
+    print(current_items[0].call())
+    print(current)
+}
+"#;
+    assert_tiers_agree(
+        "tir_closure_capture_current_storage",
+        src,
+        "41\n41\n1\n7\n7\n",
+    );
+}
+
+/// Tower #2845: an escaping mutable closure owns its capture state when
+/// returned from a function; subsequent calls advance that private state.
+#[test]
+fn card_2845_returned_mutating_closure_tier_parity() {
+    let src = r#"
+fn make() fn() Int -[..E]> -[..E]> {
+    count := 0
+    return () -> {
+        count += 1
+        count
+    }
+}
+fn run() {
+    f :: make()
+    print(f.call())
+    print(f.call())
+}
+"#;
+    assert_tiers_agree("tir_card_2845_returned_mutating_closure", src, "1\n2\n");
+}
+
+/// Tower #2845: storing the same escaping mutable closure in a list preserves
+/// the closure's owned mutable state and leaves the outer binding unchanged.
+#[test]
+fn card_2845_stored_mutating_closure_tier_parity() {
+    let src = r#"
+fn run() {
+    count := 0
+    step :: () Int -> {
+        count += 1
+        count
+    }
+    items :: [step]
+    print(items[0].call())
+    print(count)
+}
+"#;
+    assert_tiers_agree("tir_card_2845_stored_mutating_closure", src, "1\n0\n");
+}
+
 /// Hardening finding lane-7/lambda-call-aot-ice (card #2842): tier-parity regression fixture.
 #[test]
 fn card_2842_function_value_call_tier_parity() {
@@ -1113,4 +1202,224 @@ fn run() {
 }
 "#;
     assert_tiers_agree("tir_card_2836_json_datetime_field", src, "1710505845000\n");
+}
+
+/// Card #2818: an empty typed list literal keeps its declared element type in
+/// every expression position (binding, argument, comparison, return, `if` arm,
+/// map value, tuple field, lambda result) for U8, Float, and String, with
+/// byte-identical output on every tier.
+#[test]
+fn card_2818_typed_empty_list_keeps_element_type_tier_parity() {
+    let src = "\
+fn empty_bytes() [U8] -> {
+    return [U8]{}
+}
+fn empty_floats() [Float] -> {
+    return [Float]{}
+}
+fn empty_names() [String] -> {
+    return [String]{}
+}
+fn count_bytes(xs: [U8]) Int -> {
+    return xs.len()
+}
+fn count_floats(xs: [Float]) Int -> {
+    return xs.len()
+}
+fn count_names(xs: [String]) Int -> {
+    return xs.len()
+}
+fn run() {
+    bytes :: [U8]{}
+    floats :: [Float]{}
+    names :: [String]{}
+    print(bytes == [U8]{})
+    print(floats == [Float]{})
+    print(names == [String]{})
+    print([U8]{} != bytes)
+    print([Float]{} == floats)
+    print([String]{} == names)
+    print(count_bytes([U8]{}) + count_floats([Float]{}) + count_names([String]{}))
+    print(empty_bytes() == bytes)
+    print(empty_floats() == floats)
+    print(empty_names() == names)
+    picked :: if bytes.len() == 0 -> { [U8]{} } else -> { [U8]{7} }
+    print(picked == bytes)
+    scaled :: if floats.len() > 0 -> { [Float]{1.5} } else -> { [Float]{} }
+    print(scaled == floats)
+    table :: [String: [Float]]{ \"a\": [Float]{} }
+    print(table[\"a\"] == floats)
+    pair :: (left: [U8]{}, right: [String]{})
+    print(pair.left == bytes)
+    print(pair.right == names)
+    fresh :: () [U8] -> { [U8]{} }
+    print(fresh() == bytes)
+}
+";
+    assert_tiers_agree(
+        "tir_card_2818_typed_empty_list_element_type",
+        src,
+        "true\ntrue\ntrue\nfalse\ntrue\ntrue\n0\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
+    );
+}
+
+#[test]
+fn typed_float_heads_preserve_folded_and_runtime_values() {
+    let src = r#"
+fn values(seed: Int) [Float] -> {
+    return [Float{seed}, Float{seed % 7}]
+}
+fn total(values: [Float]) Float -> {
+    sum := Float{0}
+    loop value in values -> sum += value
+    return sum
+}
+fn run() {
+    print(total(values(42)))
+    loop seed in 1..<3 -> print(total(values(seed)))
+}
+"#;
+    assert_tiers_agree(
+        "typed_float_heads_preserve_folded_and_runtime_values",
+        src,
+        "42.0\n2.0\n4.0\n",
+    );
+}
+
+/// Card #2875: a typed byte list must not contextualize positional indices as
+/// its element type; every tier receives the canonical `Int` index expression.
+#[test]
+fn card_2875_typed_byte_list_index_literal_tier_parity() {
+    let src = r#"
+fn copy_first_two(values: [U8]) [U8] -> {
+    return [U8]{ values[0], values[1], 127 }
+}
+fn run() {
+    input :: [U8]{18, 52}
+    output :: copy_first_two(input)
+    print(output[0])
+    print(output[1])
+    print(output[2])
+}
+"#;
+    assert_tiers_agree(
+        "tir_card_2875_typed_byte_list_index_literal",
+        src,
+        "18\n52\n127\n",
+    );
+}
+/// Card #2877: a value-if arm tail has the same owning destination semantics
+/// as a direct binding. A plain read of `bytes` must be copied before the
+/// conditional value is bound, so the original local remains usable.
+#[test]
+fn card_2877_if_arm_tail_copies_noncopy_local() {
+    let src = "\
+fn run() {
+    bytes :: [U8]{1}
+    picked :: if bytes.len() == 0 -> { [U8]{9} } else -> { bytes }
+    print(picked == bytes)
+}
+";
+    assert_tiers_agree("tir_card_2877_if_arm_tail_copy", src, "true\n");
+}
+
+/// Card #2877: an explicit take in an arm remains a move, rather than being
+/// rewritten as the implicit copy used for a plain read.
+#[test]
+fn card_2877_if_arm_tail_preserves_explicit_take() {
+    let src = "\
+fn consume(value: ^[U8]) [U8] -> { return value }
+fn run() {
+    bytes := [U8]{1}
+    picked :: if bytes.len() == 0 -> { [U8]{9} } else -> { consume(^bytes) }
+    print(picked == [U8]{1})
+}
+";
+    assert_tiers_agree("tir_card_2877_if_arm_explicit_take", src, "true\n");
+}
+
+/// Card #2877: a value-if passed to a `View` slot keeps the two arm windows;
+/// the owning-copy path must not materialize either view.
+#[test]
+fn card_2877_if_arm_tail_preserves_view_destination() {
+    let src = "\
+fn use_view(view: View<Int>) { print(view[0]) }
+fn run() {
+    values := [7, 8]
+    left :: values[0..0]
+    right :: values[1..1]
+    use_view(if true -> { left } else -> { right })
+}
+";
+    assert_tiers_agree("tir_card_2877_if_arm_view_destination", src, "7\n");
+}
+
+/// Card #2877: explicit-copy policy rejects a plain read in an owning arm
+/// with the same `~` fix used by other owning destinations.
+#[test]
+fn card_2877_if_arm_explicit_copy_requires_tilde() {
+    let src = "\
+#Policy(copies: .Explicit)
+fn run() {
+    bytes :: [U8]{1}
+    picked :: if bytes.len() == 0 -> { [U8]{9} } else -> { bytes }
+    print(picked == bytes)
+}
+";
+    let diagnostics = jet::compile(src).expect_err("explicit-copy arm must be rejected");
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0120")
+        .expect("explicit-copy arm must report E0120");
+    let edit = diagnostic
+        .edit
+        .as_ref()
+        .expect("E0120 must carry the canonical copy edit");
+    assert_eq!(edit.new_text, "~");
+    assert_eq!(&src[edit.span.start..edit.span.end], "");
+}
+
+#[test]
+fn readonly_optional_list_alias_preserves_sequence() {
+    let src = r#"
+fn none() ?Float -> None
+fn run() {
+    values :: [Val(Float{4.0}), none(), Val(Float{8.0}), none()]
+    print(values.len())
+    alias :: values
+    print(alias.len())
+    print(values.len())
+}
+"#;
+    assert_tiers_agree("readonly_optional_list_alias", src, "4\n4\n4\n");
+}
+
+#[test]
+fn projected_float_list_updates_reach_nested_places() {
+    let src = r#"
+struct Row { values: [Float] }
+fn run() {
+    rows := [Row{values: [Float{1}, Float{2}]}]
+    rows[0].values[1] = Float{7}
+    print(rows[0].values[0])
+    print(rows[0].values[1])
+    nested := [[Float{3}]]
+    nested[0][0] = Float{9}
+    print(nested[0][0])
+}
+"#;
+    assert_tiers_agree("projected_float_list_updates", src, "1.0\n7.0\n9.0\n");
+}
+
+#[test]
+fn command_entry_ignores_associated_run_method() {
+    let src = r#"
+struct Worker {
+    fn run() Int -> 99
+}
+fn run() {
+    print(Worker.run())
+}
+"#;
+    assert_tiers_agree("command_entry_associated_run", src, "99\n");
 }

@@ -7,6 +7,7 @@
 #![allow(dead_code)]
 
 use super::Concurrency;
+use crate::JetShow;
 use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
@@ -39,32 +40,13 @@ pub(crate) mod runtime {
             pub params: Vec<(String, String)>,
         }
 
-        #[derive(Clone, Debug, PartialEq)]
-        pub struct JSONError {
-            pub line: i64,
-            pub message: String,
-        }
-
-        #[derive(Clone, Debug, PartialEq)]
-        pub enum JSON {
-            Null,
-            Boolean(bool),
-            Number(f64),
-            Integer(i64),
-            ExactInteger(String),
-            Text(String),
-            Array(Vec<JSON>),
-            Object(std::collections::BTreeMap<String, JSON>),
-        }
-
+        pub(crate) use crate::Encoding::json_rt::{
+            parse_json_strict, render_json, DataTree,
+        };
         #[allow(unused_imports)]
         pub use jet_foundation::Outcome::*;
         include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs");
-        #[allow(unused_imports)]
-        pub use jet_foundation::Outcome::*;
-        include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs");
     }
-
     fn jet_deadline_remaining_ms() -> Option<i64> {
         None
     }
@@ -75,6 +57,7 @@ pub(crate) mod runtime {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/Browser.rs");
+    include!("../../jet-codegen/src/Prelude/BrowserTest.rs");
 
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
     #[allow(unused_imports)]
@@ -116,6 +99,15 @@ pub(crate) mod runtime {
 
     pub fn url_parse(s: &String) -> Result<JetURL, String> {
         JetURL::parse(s)
+    }
+    pub fn url_from_parts(
+        scheme: &String,
+        host: &String,
+        path: &String,
+        query: &Vec<Vec<String>>,
+        fragment: &String,
+    ) -> Result<JetURL, String> {
+        JetURL::from_parts(scheme, host, path, query, fragment)
     }
     pub fn url_typed_literal(literals: &Vec<String>, holes: &Vec<String>) -> JetURL {
         let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
@@ -178,6 +170,56 @@ pub(crate) mod runtime {
             Err(err) => Err(err.jet_show()),
         }
     }
+
+    thread_local! {
+        static BROWSERS: std::cell::RefCell<Vec<JetBrowser>> =
+            const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    fn store_browser(browser: JetBrowser) -> i64 {
+        BROWSERS.with(|browsers| {
+            let mut browsers = browsers.borrow_mut();
+            browsers.push(browser);
+            browsers.len() as i64
+        })
+    }
+
+    pub fn browser_connect(endpoint: &String) -> Result<i64, String> {
+        jet_browser_connect(endpoint)
+            .map(store_browser)
+            .map_err(|error| error.jet_show())
+    }
+
+    pub fn browser_connect_profile(
+        endpoint: &String,
+        profile: &String,
+        timeout: i64,
+    ) -> Result<i64, String> {
+        let profile = jet_browser_profile(profile).map_err(|error| error.jet_show())?;
+        let timeout = JetBrowserTimeout {
+            milliseconds: timeout,
+        };
+        jet_browser_connect_profile(endpoint, &profile, timeout)
+            .map(store_browser)
+            .map_err(|error| error.jet_show())
+    }
+
+    pub fn browser_locked(
+        engine: &String,
+    ) -> Result<(String, String, String, String, i64, String), String> {
+        jet_browser_locked(engine)
+            .map(|locked| {
+                (
+                    locked.engine,
+                    locked.version,
+                    locked.binary,
+                    locked.protocol,
+                    locked.size,
+                    locked.output_hash,
+                )
+            })
+            .map_err(|error| error.jet_show())
+    }
 }
 
 pub(crate) fn email_runtime_fns() -> jet_codegen::Comptime::EmailAdapter::RuntimeFns {
@@ -205,6 +247,11 @@ pub(crate) enum NetValue {
     EmailAttachment(runtime::jet_email::Attachment),
     EmailMessage(runtime::jet_email::Message),
     EmailMailer(runtime::jet_email::Mailer),
+    BrowserTestConfig(runtime::JetBrowserTestConfig),
+    BrowserTestFixture(runtime::JetBrowserTestFixture),
+    BrowserTestReport(runtime::JetBrowserTestReport),
+    BrowserTestCase(runtime::JetBrowserTestCase),
+    BrowserTestServer(runtime::JetBrowserTestServer),
 }
 
 fn push(value: NetValue) -> i64 {
@@ -360,6 +407,41 @@ fn timeout_record(milliseconds: i64) -> i64 {
         let _ = rt.heap.record_set_int(record, 0, milliseconds);
         record
     })
+}
+fn locked_record(
+    engine: String,
+    version: String,
+    binary: String,
+    protocol: String,
+    size: i64,
+    output_hash: String,
+) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let record = rt.heap.alloc_record(6);
+        let engine = rt.heap.alloc_string(engine);
+        let version = rt.heap.alloc_string(version);
+        let binary = rt.heap.alloc_string(binary);
+        let protocol = rt.heap.alloc_string(protocol);
+        let output_hash = rt.heap.alloc_string(output_hash);
+        let _ = rt.heap.record_set_string(record, 0, engine);
+        let _ = rt.heap.record_set_string(record, 1, version);
+        let _ = rt.heap.record_set_string(record, 2, binary);
+        let _ = rt.heap.record_set_string(record, 3, protocol);
+        let _ = rt.heap.record_set_int(record, 4, size);
+        let _ = rt.heap.record_set_string(record, 5, output_hash);
+        record
+    })
+}
+fn jet_jit_url_from_parts(scheme: i64, host: i64, path: i64, query: i64, fragment: i64) -> i64 {
+    let scheme = clone_string(scheme);
+    let host = clone_string(host);
+    let path = clone_string(path);
+    let query = read_string_pair_list(query);
+    let fragment = clone_string(fragment);
+    match runtime::url_from_parts(&scheme, &host, &path, &query, &fragment) {
+        Ok(url) => result_ok(push(NetValue::Url(url)) as u64),
+        Err(error) => result_err(error),
+    }
 }
 
 fn jet_jit_url_parse(s: i64) -> i64 {
@@ -595,18 +677,6 @@ fn jet_jit_url_join(recv: i64, rel: i64) -> i64 {
     }
 }
 
-fn jet_jit_url_set_query(recv: i64, key: i64, value: i64) -> i64 {
-    let key = clone_string(key);
-    let value = clone_string(value);
-    let Some(url) = with_net(recv, |v| match v {
-        NetValue::Url(u) => Some(u.set_query(&key, &value)),
-        _ => None,
-    }) else {
-        return 0;
-    };
-    push(NetValue::Url(url))
-}
-
 fn jet_jit_url_add_query(recv: i64, key: i64, value: i64) -> i64 {
     let key = clone_string(key);
     let value = clone_string(value);
@@ -627,6 +697,43 @@ fn jet_jit_mime_essence(recv: i64) -> i64 {
         return alloc_string(String::new());
     };
     alloc_string(text)
+}
+fn jet_jit_url_set_query(recv: i64, key: i64, value: i64) -> i64 {
+    let key = clone_string(key);
+    let value = clone_string(value);
+    let Some(url) = with_net(recv, |v| match v {
+        NetValue::Url(u) => Some(u.set_query(&key, &value)),
+        _ => None,
+    }) else {
+        return 0;
+    };
+    push(NetValue::Url(url))
+}
+
+fn jet_jit_browser_connect(endpoint: i64) -> i64 {
+    match runtime::browser_connect(&clone_string(endpoint)) {
+        Ok(handle) => result_ok(handle as u64),
+        Err(error) => result_err(error),
+    }
+}
+
+fn jet_jit_browser_connect_profile(endpoint: i64, profile: i64, timeout: i64) -> i64 {
+    let endpoint = clone_string(endpoint);
+    let profile = record_get_heap_string(profile, 0).unwrap_or_default();
+    let timeout = record_get_i64(timeout, 0).unwrap_or_default();
+    match runtime::browser_connect_profile(&endpoint, &profile, timeout) {
+        Ok(handle) => result_ok(handle as u64),
+        Err(error) => result_err(error),
+    }
+}
+
+fn jet_jit_browser_locked(engine: i64) -> i64 {
+    match runtime::browser_locked(&clone_string(engine)) {
+        Ok((engine, version, binary, protocol, size, output_hash)) => {
+            result_ok(locked_record(engine, version, binary, protocol, size, output_hash) as u64)
+        }
+        Err(error) => result_err(error),
+    }
 }
 
 fn jet_jit_mime_param(recv: i64, name: i64) -> i64 {
@@ -654,6 +761,299 @@ fn jet_jit_browser_timeout(ms: i64) -> i64 {
         Err(err) => result_err(err),
     }
 }
+fn browser_test_config(handle: i64) -> Option<runtime::JetBrowserTestConfig> {
+    with_net(handle, |value| match value {
+        NetValue::BrowserTestConfig(config) => Some(config.clone()),
+        _ => None,
+    })
+}
+
+fn jet_jit_browser_test_config() -> i64 {
+    match runtime::jet_browser_test_config() {
+        Ok(config) => result_ok(push(NetValue::BrowserTestConfig(config)) as u64),
+        Err(error) => result_err(error.jet_show()),
+    }
+}
+
+fn jet_jit_browser_test_config_from_env() -> i64 {
+    match runtime::jet_browser_test_config_from_env() {
+        Ok(config) => result_ok(push(NetValue::BrowserTestConfig(config)) as u64),
+        Err(error) => result_err(error.jet_show()),
+    }
+}
+
+fn jet_jit_browser_test_config_engines(handle: i64) -> i64 {
+    let Some(engines) = with_net(handle, |value| match value {
+        NetValue::BrowserTestConfig(config) => {
+            Some(runtime::jet_browser_test_config_engines(config))
+        }
+        _ => None,
+    }) else {
+        return 0;
+    };
+    list_of_strings(engines)
+}
+
+fn jet_jit_browser_test_config_retries(handle: i64) -> i64 {
+    with_net(handle, |value| match value {
+        NetValue::BrowserTestConfig(config) => {
+            Some(runtime::jet_browser_test_config_retries(config))
+        }
+        _ => None,
+    })
+    .unwrap_or_default()
+}
+
+fn jet_jit_browser_test_config_filter(handle: i64) -> i64 {
+    let filter = with_net(handle, |value| match value {
+        NetValue::BrowserTestConfig(config) => {
+            Some(runtime::jet_browser_test_config_filter(config))
+        }
+        _ => None,
+    })
+    .unwrap_or_default();
+    alloc_string(filter)
+}
+
+fn jet_jit_browser_test_config_reporter(handle: i64) -> i64 {
+    let reporter = with_net(handle, |value| match value {
+        NetValue::BrowserTestConfig(config) => {
+            Some(runtime::jet_browser_test_config_reporter(config))
+        }
+        _ => None,
+    })
+    .unwrap_or_default();
+    alloc_string(reporter)
+}
+
+fn jet_jit_browser_test_config_server_url(handle: i64) -> i64 {
+    let url = with_net(handle, |value| match value {
+        NetValue::BrowserTestConfig(config) => {
+            Some(runtime::jet_browser_test_config_server_url(config))
+        }
+        _ => None,
+    })
+    .unwrap_or_default();
+    alloc_string(url)
+}
+
+fn jet_jit_browser_test_config_artifact_dir(handle: i64) -> i64 {
+    let path = with_net(handle, |value| match value {
+        NetValue::BrowserTestConfig(config) => {
+            Some(runtime::jet_browser_test_config_artifact_dir(config))
+        }
+        _ => None,
+    })
+    .unwrap_or_default();
+    alloc_string(path)
+}
+
+fn jet_jit_browser_test_config_report_path(handle: i64) -> i64 {
+    let path = with_net(handle, |value| match value {
+        NetValue::BrowserTestConfig(config) => {
+            Some(runtime::jet_browser_test_config_report_path(config))
+        }
+        _ => None,
+    })
+    .unwrap_or_default();
+    alloc_string(path)
+}
+
+fn jet_jit_browser_test_config_ui(handle: i64) -> i64 {
+    with_net(handle, |value| match value {
+        NetValue::BrowserTestConfig(config) => {
+            Some(i64::from(runtime::jet_browser_test_config_ui(config)))
+        }
+        _ => None,
+    })
+    .unwrap_or_default()
+}
+
+fn jet_jit_browser_test_config_visual(handle: i64) -> i64 {
+    with_net(handle, |value| match value {
+        NetValue::BrowserTestConfig(config) => {
+            Some(i64::from(runtime::jet_browser_test_config_visual(config)))
+        }
+        _ => None,
+    })
+    .unwrap_or_default()
+}
+
+fn jet_jit_browser_test_config_watch(handle: i64) -> i64 {
+    with_net(handle, |value| match value {
+        NetValue::BrowserTestConfig(config) => {
+            Some(i64::from(runtime::jet_browser_test_config_watch(config)))
+        }
+        _ => None,
+    })
+    .unwrap_or_default()
+}
+
+fn jet_jit_browser_test_begin_named(
+    config_handle: i64,
+    test: i64,
+    engine: i64,
+    attempt: i64,
+    source: i64,
+    line: i64,
+    column: i64,
+) -> i64 {
+    let Some(config) = browser_test_config(config_handle) else {
+        return result_err_msg("invalid BrowserTestConfig handle");
+    };
+    let test = clone_string(test);
+    let engine = clone_string(engine);
+    let source = clone_string(source);
+    match runtime::jet_browser_test_begin_named(
+        &config, &test, &engine, attempt, &source, line, column,
+    ) {
+        Ok(fixture) => result_ok(push(NetValue::BrowserTestFixture(fixture)) as u64),
+        Err(error) => result_err(error.jet_show()),
+    }
+}
+
+fn jet_jit_browser_test_selected(config_handle: i64, test: i64) -> i64 {
+    let Some(config) = browser_test_config(config_handle) else {
+        return 0;
+    };
+    i64::from(runtime::jet_browser_test_selected(&config, &clone_string(test)))
+}
+
+fn jet_jit_browser_test_report_new(config_handle: i64) -> i64 {
+    let Some(config) = browser_test_config(config_handle) else {
+        return 0;
+    };
+    push(NetValue::BrowserTestReport(
+        runtime::jet_browser_test_report_new(&config),
+    ))
+}
+
+fn jet_jit_browser_test_report_add_case(report_handle: i64, case_handle: i64) -> i64 {
+    let Some(NetValue::BrowserTestReport(report)) = take_net(report_handle) else {
+        return 0;
+    };
+    let Some(NetValue::BrowserTestCase(case)) = take_net(case_handle) else {
+        return push(NetValue::BrowserTestReport(report));
+    };
+    push(NetValue::BrowserTestReport(
+        runtime::jet_browser_test_report_add_case(report, case),
+    ))
+}
+
+fn jet_jit_browser_test_report_json(report_handle: i64) -> i64 {
+    let text = with_net(report_handle, |value| match value {
+        NetValue::BrowserTestReport(report) => {
+            Some(runtime::jet_browser_test_report_json(report))
+        }
+        _ => None,
+    })
+    .unwrap_or_default();
+    alloc_string(text)
+}
+
+fn jet_jit_browser_test_report_text(report_handle: i64) -> i64 {
+    let text = with_net(report_handle, |value| match value {
+        NetValue::BrowserTestReport(report) => {
+            Some(runtime::jet_browser_test_report_text(report))
+        }
+        _ => None,
+    })
+    .unwrap_or_default();
+    alloc_string(text)
+}
+
+fn jet_jit_browser_test_report_html(report_handle: i64) -> i64 {
+    let text = with_net(report_handle, |value| match value {
+        NetValue::BrowserTestReport(report) => {
+            Some(runtime::jet_browser_test_report_html(report))
+        }
+        _ => None,
+    })
+    .unwrap_or_default();
+    alloc_string(text)
+}
+
+fn jet_jit_browser_test_report_exit_code(report_handle: i64) -> i64 {
+    with_net(report_handle, |value| match value {
+        NetValue::BrowserTestReport(report) => {
+            Some(runtime::jet_browser_test_report_exit_code(report))
+        }
+        _ => None,
+    })
+    .unwrap_or_default()
+}
+
+fn jet_jit_browser_test_write_report(report_handle: i64, path: i64) -> i64 {
+    let Some(report) = with_net(report_handle, |value| match value {
+        NetValue::BrowserTestReport(report) => Some(report.clone()),
+        _ => None,
+    }) else {
+        return result_err_msg("invalid BrowserTestReport handle");
+    };
+    match runtime::jet_browser_test_write_report(&report, &clone_string(path)) {
+        Ok(()) => result_ok(0),
+        Err(error) => result_err(error.jet_show()),
+    }
+}
+
+fn jet_jit_browser_test_generate_source(name: i64, route: i64, output: i64) -> i64 {
+    let name = clone_string(name);
+    let route = clone_string(route);
+    let output = clone_string(output);
+    match runtime::jet_browser_test_generate_source(&name, &route, &output) {
+        Ok(source) => result_ok(alloc_string(source) as u64),
+        Err(error) => result_err(error.jet_show()),
+    }
+}
+
+fn jet_jit_browser_test_server_start(config_handle: i64) -> i64 {
+    let Some(config) = browser_test_config(config_handle) else {
+        return result_err_msg("invalid BrowserTestConfig handle");
+    };
+    match runtime::jet_browser_test_server_start(&config) {
+        Ok(server) => result_ok(push(NetValue::BrowserTestServer(server)) as u64),
+        Err(error) => result_err(error.jet_show()),
+    }
+}
+
+fn jet_jit_browser_test_server_stop(server_handle: i64) -> i64 {
+    let Some(NetValue::BrowserTestServer(mut server)) = take_net(server_handle) else {
+        return 0;
+    };
+    runtime::jet_browser_test_server_stop(&mut server);
+    let _ = push(NetValue::BrowserTestServer(server));
+    0
+}
+
+fn jet_jit_browser_test_server_url(server_handle: i64) -> i64 {
+    let url = with_net(server_handle, |value| match value {
+        NetValue::BrowserTestServer(server) => {
+            Some(runtime::jet_browser_test_server_url(server))
+        }
+        _ => None,
+    })
+    .unwrap_or_default();
+    alloc_string(url)
+}
+
+fn jet_jit_browser_test_server_logs(server_handle: i64) -> i64 {
+    let logs = with_net(server_handle, |value| match value {
+        NetValue::BrowserTestServer(server) => {
+            Some(runtime::jet_browser_test_server_logs(server))
+        }
+        _ => None,
+    })
+    .unwrap_or_default();
+    alloc_string(logs)
+}
+
+fn jet_jit_browser_test_watch_changed(path: i64, last_modified_ms: i64) -> i64 {
+    match runtime::jet_browser_test_watch_changed(&clone_string(path), last_modified_ms) {
+        Ok(changed) => result_ok(if changed { 1 } else { 0 }),
+        Err(error) => result_err(error.jet_show()),
+    }
+}
+
 
 fn record_get_i64(record: i64, idx: i64) -> Option<i64> {
     Concurrency::with_runtime_mut(|rt| rt.heap.record_get_int(record, idx))
@@ -1239,6 +1639,12 @@ host_fns! {
             sig3.params.push(AbiParam::new(types::I64));
         }
         sig3.returns.push(AbiParam::new(types::I64));
+        let mut sig5 = Signature::new(cc);
+        for _ in 0..5 {
+            sig5.params.push(AbiParam::new(types::I64));
+        }
+        sig5.returns.push(AbiParam::new(types::I64));
+
         let mut sig7 = Signature::new(cc);
         for _ in 0..7 {
             sig7.params.push(AbiParam::new(types::I64));
@@ -1251,7 +1657,9 @@ host_fns! {
     listener_local_socket_addr: "jet_jit_net_listener_local_socket_addr" => jet_jit_net_listener_local_socket_addr: sig1;
     socket_port: "jet_jit_net_socket_port" => jet_jit_net_socket_port: sig1;
     url_parse: "jet_jit_url_parse" => jet_jit_url_parse: sig1;
+    url_from_parts: "jet_jit_url_from_parts" => jet_jit_url_from_parts: sig5;
     url_typed_literal: "jet_jit_url_typed_literal" => jet_jit_url_typed_literal: sig2;
+    url_typed_literal_canonical: "jet_typed_url_literal" => jet_jit_url_typed_literal: sig2;
     url_file: "jet_jit_url_file" => jet_jit_url_file: sig1;
     url_data: "jet_jit_url_data" => jet_jit_url_data: sig2;
     url_query_value: "jet_jit_url_query_value" => jet_jit_url_query_value: sig1;
@@ -1282,6 +1690,61 @@ host_fns! {
     mime_param: "jet_jit_mime_param" => jet_jit_mime_param: sig2;
     browser_profile: "jet_jit_browser_profile" => jet_jit_browser_profile: sig1;
     browser_timeout: "jet_jit_browser_timeout" => jet_jit_browser_timeout: sig1;
+    browser_connect: "jet_jit_browser_connect" => jet_jit_browser_connect: sig1;
+    browser_connect_profile: "jet_jit_browser_connect_profile" => jet_jit_browser_connect_profile: sig3;
+    browser_locked: "jet_jit_browser_locked" => jet_jit_browser_locked: sig1;
+    browser_test_config: "jet_jit_browser_test_config" => jet_jit_browser_test_config: sig0;
+    browser_test_config_from_env: "jet_jit_browser_test_config_from_env" => jet_jit_browser_test_config_from_env: sig0;
+    browser_test_config_engines: "jet_jit_browser_test_config_engines" => jet_jit_browser_test_config_engines: sig1;
+    browser_test_config_retries: "jet_jit_browser_test_config_retries" => jet_jit_browser_test_config_retries: sig1;
+    browser_test_config_filter: "jet_jit_browser_test_config_filter" => jet_jit_browser_test_config_filter: sig1;
+    browser_test_config_reporter: "jet_jit_browser_test_config_reporter" => jet_jit_browser_test_config_reporter: sig1;
+    browser_test_config_server_url: "jet_jit_browser_test_config_server_url" => jet_jit_browser_test_config_server_url: sig1;
+    browser_test_config_artifact_dir: "jet_jit_browser_test_config_artifact_dir" => jet_jit_browser_test_config_artifact_dir: sig1;
+    browser_test_config_report_path: "jet_jit_browser_test_config_report_path" => jet_jit_browser_test_config_report_path: sig1;
+    browser_test_config_ui: "jet_jit_browser_test_config_ui" => jet_jit_browser_test_config_ui: sig1;
+    browser_test_config_visual: "jet_jit_browser_test_config_visual" => jet_jit_browser_test_config_visual: sig1;
+    browser_test_config_watch: "jet_jit_browser_test_config_watch" => jet_jit_browser_test_config_watch: sig1;
+    browser_test_begin_named: "jet_jit_browser_test_begin_named" => jet_jit_browser_test_begin_named: sig7;
+    browser_test_selected: "jet_jit_browser_test_selected" => jet_jit_browser_test_selected: sig2;
+    browser_test_report_new: "jet_jit_browser_test_report_new" => jet_jit_browser_test_report_new: sig1;
+    browser_test_report_add_case: "jet_jit_browser_test_report_add_case" => jet_jit_browser_test_report_add_case: sig2;
+    browser_test_report_json: "jet_jit_browser_test_report_json" => jet_jit_browser_test_report_json: sig1;
+    browser_test_report_text: "jet_jit_browser_test_report_text" => jet_jit_browser_test_report_text: sig1;
+    browser_test_report_html: "jet_jit_browser_test_report_html" => jet_jit_browser_test_report_html: sig1;
+    browser_test_report_exit_code: "jet_jit_browser_test_report_exit_code" => jet_jit_browser_test_report_exit_code: sig1;
+    browser_test_write_report: "jet_jit_browser_test_write_report" => jet_jit_browser_test_write_report: sig2;
+    browser_test_generate_source: "jet_jit_browser_test_generate_source" => jet_jit_browser_test_generate_source: sig3;
+    browser_test_server_start: "jet_jit_browser_test_server_start" => jet_jit_browser_test_server_start: sig1;
+    browser_test_server_stop: "jet_jit_browser_test_server_stop" => jet_jit_browser_test_server_stop: sig1;
+    browser_test_server_url: "jet_jit_browser_test_server_url" => jet_jit_browser_test_server_url: sig1;
+    browser_test_server_logs: "jet_jit_browser_test_server_logs" => jet_jit_browser_test_server_logs: sig1;
+    browser_test_watch_changed: "jet_jit_browser_test_watch_changed" => jet_jit_browser_test_watch_changed: sig2;
+    // Canonical `core.web.browser` / `core.web.browser.test` rows resolve by
+    // the exact symbol the row declares; the `jet_jit_*` spellings above stay
+    // for Core rows projected through `CoreCallRecord::jit_symbol_candidates`.
+    row_browser_profile: "jet_browser_profile" => jet_jit_browser_profile: sig1;
+    row_browser_timeout: "jet_browser_timeout" => jet_jit_browser_timeout: sig1;
+    row_browser_connect: "jet_browser_connect" => jet_jit_browser_connect: sig1;
+    row_browser_connect_profile: "jet_browser_connect_profile" => jet_jit_browser_connect_profile: sig3;
+    row_browser_locked: "jet_browser_locked" => jet_jit_browser_locked: sig1;
+    row_browser_test_config: "jet_browser_test_config" => jet_jit_browser_test_config: sig0;
+    row_browser_test_config_from_env: "jet_browser_test_config_from_env" => jet_jit_browser_test_config_from_env: sig0;
+    row_browser_test_begin_named: "jet_browser_test_begin_named" => jet_jit_browser_test_begin_named: sig7;
+    row_browser_test_selected: "jet_browser_test_selected" => jet_jit_browser_test_selected: sig2;
+    row_browser_test_report_new: "jet_browser_test_report_new" => jet_jit_browser_test_report_new: sig1;
+    row_browser_test_report_add_case: "jet_browser_test_report_add_case" => jet_jit_browser_test_report_add_case: sig2;
+    row_browser_test_report_json: "jet_browser_test_report_json" => jet_jit_browser_test_report_json: sig1;
+    row_browser_test_report_text: "jet_browser_test_report_text" => jet_jit_browser_test_report_text: sig1;
+    row_browser_test_report_html: "jet_browser_test_report_html" => jet_jit_browser_test_report_html: sig1;
+    row_browser_test_report_exit_code: "jet_browser_test_report_exit_code" => jet_jit_browser_test_report_exit_code: sig1;
+    row_browser_test_write_report: "jet_browser_test_write_report" => jet_jit_browser_test_write_report: sig2;
+    row_browser_test_generate_source: "jet_browser_test_generate_source" => jet_jit_browser_test_generate_source: sig3;
+    row_browser_test_server_start: "jet_browser_test_server_start" => jet_jit_browser_test_server_start: sig1;
+    row_browser_test_server_stop: "jet_browser_test_server_stop" => jet_jit_browser_test_server_stop: sig1;
+    row_browser_test_server_url: "jet_browser_test_server_url" => jet_jit_browser_test_server_url: sig1;
+    row_browser_test_server_logs: "jet_browser_test_server_logs" => jet_jit_browser_test_server_logs: sig1;
+    row_browser_test_watch_changed: "jet_browser_test_watch_changed" => jet_jit_browser_test_watch_changed: sig2;
     email_address: "jet_jit_email_address" => jet_jit_email_address: sig1;
     email_attachment: "jet_jit_email_attachment" => jet_jit_email_attachment: sig3;
     email_message: "jet_jit_email_message" => jet_jit_email_message: sig7;

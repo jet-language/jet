@@ -1,8 +1,11 @@
 use super::*;
+use super::super::Validation::check_ui_capabilities;
 
 pub(super) fn complete_bundle_check(
     bundle: &mut ProgramBundle,
     states: &[ModuleState],
+    plugin_interfaces: &PluginInterfaceRegistry,
+    devtools_registry: &mut jet_foundation::AST::DevtoolsRegistry,
     mode: CompileMode,
     no_os: bool,
     gates: crate::Policy::GateSet,
@@ -36,16 +39,7 @@ pub(super) fn complete_bundle_check(
                 &states[idx].imports,
                 Some(&states),
             ) {
-                diags.push(Diagnostic::error(
-                    "E0301",
-                    format!("`impl {}` names a type that doesn't exist", i.type_name),
-                    format!("`{}` hasn't been defined as a struct or enum", i.type_name),
-                    format!(
-                        "define `struct {}` or `enum {}` first",
-                        i.type_name, i.type_name
-                    ),
-                    Some(i.type_span),
-                ));
+                diags.push(e0301_impl_target(i));
             }
         }
     }
@@ -241,7 +235,7 @@ pub(super) fn complete_bundle_check(
     // Use a temporary to avoid simultaneous &mut borrows of `bundle`.
     if mode == CompileMode::Check {
         if let Some(cache) = incremental.as_deref_mut() {
-            cache.begin_bundle(bundle, &name_ledger);
+            cache.begin_bundle(bundle, &name_ledger, plugin_interfaces);
         }
     } else {
         incremental = None;
@@ -249,13 +243,15 @@ pub(super) fn complete_bundle_check(
     let mut embed_inputs = std::mem::take(&mut bundle.comptime_inputs);
     let mut effect_summaries: HashMap<String, EffectSummary> = HashMap::new();
     let mut module_effect_summaries: Vec<(String, HashMap<String, EffectSummary>)> = Vec::new();
-    let mut module_pending_diagnostics = Vec::new();
     diags.extend(check_job_collisions(&bundle.modules));
-    // D-METHODMACRO1=A: top-level function names whose address was taken
+    // D-DX-JOBGRAPH1=A: reject unknown predecessors, cycles, and package
+    // authority violations before any execution tier receives a job table.
+    diags.extend(check_job_graph(bundle));
     // anywhere in the bundle, accumulated across every module below; the
     // `#Inline(Always)` address-taken pass (E0918) runs after the loop, once
     // this set is complete across the whole bundle.
     let mut global_addr_taken: HashSet<String> = HashSet::new();
+    let mut module_pending_diagnostics = Vec::with_capacity(bundle.modules.len());
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
         let mut local_summaries = HashMap::new();
         let mut local_pending_diagnostics = Vec::new();
@@ -263,6 +259,8 @@ pub(super) fn complete_bundle_check(
             module,
             idx,
             &states,
+            plugin_interfaces,
+            devtools_registry,
             &declared_effect_facts,
             mode,
             no_os,
@@ -288,6 +286,11 @@ pub(super) fn complete_bundle_check(
                 .unwrap_or_else(|| format!("{}::{}", module.alias, pending.function_key));
         }
         module_pending_diagnostics.push(local_pending_diagnostics);
+        super::super::super::Effects::collect_lambda_effect_summaries(
+            std::slice::from_mut(module),
+            &name_ledger,
+            &mut local_summaries,
+        );
         seed_trait_dispatch_effects(&module.items, &mut local_summaries);
         apply_effect_via(&module.items, &mut local_summaries, &mut Vec::new());
         effect_summaries.extend(local_summaries.clone());
@@ -299,6 +302,25 @@ pub(super) fn complete_bundle_check(
             local_summaries,
         ));
     }
+    // D-DX-PLUGIN1=D: body inference owns publication typing. Project the
+    // facts stored in each module's existing TypeRegistry into the one shared
+    // panel registry before checking field liveness.
+    for state in states {
+        for publication in state.registry.devtools_publications() {
+            if devtools_registry
+                .publications()
+                .iter()
+                .any(|existing| existing.span == publication.span)
+            {
+                continue;
+            }
+            if let Err(error) = devtools_registry.register_publication(publication) {
+                diags.push(registry_error(error));
+            }
+        }
+    }
+    check_unfed_state_fields(devtools_registry, &mut diags);
+    bundle.devtools_registry = devtools_registry.clone();
     bundle.comptime_inputs = embed_inputs;
     // D-METHODMACRO1=A: E0918 (address-taken) needs every module's function
     // bodies checked first. Methods can't appear in `global_addr_taken`
@@ -347,7 +369,7 @@ pub(super) fn complete_bundle_check(
     }
     let (public_summaries, public_reachability) =
         qualified_effect_facts(&module_effect_summaries, &taint_returns);
-    let public_solved: HashMap<String, EffectSet> = public_summaries
+    let mut public_solved: HashMap<String, EffectSet> = public_summaries
         .keys()
         .filter_map(|key| {
             public_reachability
@@ -356,10 +378,19 @@ pub(super) fn complete_bundle_check(
                 .map(|effects| (key.clone(), effects.clone()))
         })
         .collect();
+    super::super::super::Effects::project_lambda_effect_facts(
+        &mut bundle.modules,
+        &name_ledger,
+        &public_summaries,
+        &public_reachability,
+    );
     // D-EFFECT-AUTHORITY1: publish the exact selected-entry row once, after
     // the qualified reachability fixpoint closes. All execution tiers receive
     // this bundle carrier; none of them recompute effects from source.
-    bundle.package_guarantees.application_authority.required_effects =
+    bundle
+        .package_guarantees
+        .application_authority
+        .required_effects =
         super::super::super::Effects::program_effects(bundle, &public_solved, "run");
     super::super::super::CheckerCoreLib::validate_service_handlers(
         bundle,
@@ -569,7 +600,12 @@ pub(super) fn complete_bundle_check(
     ));
 
     // D-WEBAPP1=D / D-WEBAUTHOR1=D (Tower #1274, #1703): one sema-known application graph.
-    let (app_graph, app_diags) = super::super::super::App::extract_app_graph(bundle);
+    let (app_graph, app_diags) =
+        super::super::super::App::extract_app_graph_with_effects_and_registry(
+            bundle,
+            &public_solved,
+            &states[bundle.entry].trait_reg,
+        );
     diags.extend(app_diags);
     // D-STRUCT-LIVE1=A: all body references, resolved outputs, and application
     // roots are now present in the one name ledger. Emit the four warning-only
@@ -648,23 +684,10 @@ pub(super) fn complete_bundle_check(
     }) {
         used_core.insert("core.validate::field_error".to_string());
     }
-    // D-EMAIL-SMTP-CONFIG1=A: sema canonicalizes `email.Limits.safe()` to a
-    // static `Limits.safe()` call before this late usage walk. Preserve CoreLib
-    // reachability for type-only SMTP policy programs.
-    if bundle
-        .modules
-        .iter()
-        .zip(states.iter())
-        .any(|(module, state)| {
-            module.source.contains(".Limits")
-                && state.core_imports.values().any(|path| path == "core.email")
-        })
-    {
-        used_core.insert("core.email::Limits.safe".to_string());
-    }
     // D-CORE-SOURCE-AUTHORITY1=A: late sema-generated helpers join the same
     // source-owned package and audited ABI closure as explicit calls.
     expand_core_reachable_closure(&mut used_core);
+    diags.extend(check_ui_capabilities(bundle, &used_core, &usage_spans));
     bundle.used_core = used_core;
     bundle.ffi_callback_fns = ffi_callback_fns;
     diags.extend(super::super::super::MemoryFacts::annotate_scoped_gc_promotions(bundle));
@@ -685,6 +708,19 @@ pub(super) fn complete_bundle_check(
     if !allow_compiler_api && mode != CompileMode::Check {
         super::super::strip_build_only_entries(bundle);
     }
+    // D-EFFBUDGET1: package enforcement aggregates each package's solved
+    // effects. A root caller inherits a dependency's Panic row for sema
+    // boundaries, but that same row would produce an unspanned root E1220
+    // beside the dependency-boundary diagnostic. Keep the full row through
+    // every sema check above, then project only this duplicate at the final
+    // fact boundary.
+    suppress_duplicate_root_panic(
+        bundle,
+        &name_ledger,
+        &public_summaries,
+        &mut public_solved,
+    );
+
     jet_foundation::Diagnostics::order_diagnostics_root_first(&mut diags);
     (
         diags,
@@ -700,6 +736,130 @@ pub(super) fn complete_bundle_check(
         },
     )
 }
+fn suppress_duplicate_root_panic(
+    bundle: &ProgramBundle,
+    ledger: &jet_foundation::Names::NameLedger,
+    summaries: &HashMap<String, EffectSummary>,
+    solved: &mut HashMap<String, EffectSet>,
+) {
+    let mut root_aliases = HashSet::new();
+    let mut dependency_aliases = HashSet::new();
+    for (module_index, module) in bundle.modules.iter().enumerate() {
+        let aliases = [
+            module.alias.as_str(),
+            ledger.module_alias(module_index).unwrap_or(&module.alias),
+        ];
+        let owner = bundle
+            .dep_roots
+            .iter()
+            .find(|(_, root)| module.path.starts_with(root))
+            .map(|(name, _)| name.as_str());
+        if let Some(dependency) = owner {
+            if dependency_boundary_span(bundle, dependency).is_some() {
+                dependency_aliases.extend(aliases.into_iter().map(str::to_owned));
+            }
+        } else {
+            root_aliases.extend(aliases.into_iter().map(str::to_owned));
+        }
+    }
+    if root_aliases.is_empty() || dependency_aliases.is_empty() {
+        return;
+    }
+
+    let root_keys = solved
+        .keys()
+        .filter(|key| {
+            key.split_once("::")
+                .is_some_and(|(alias, _)| root_aliases.contains(alias))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    for key in root_keys {
+        let Some(effects) = solved.get_mut(&key) else {
+            continue;
+        };
+        if !effect_set_has_root(effects, Effect::Panic) {
+            continue;
+        }
+        let Some(site) = panic_site_for_budget(&key, summaries, &mut HashSet::new()) else {
+            continue;
+        };
+        let site_alias = site.split_once("::").map(|(alias, _)| alias);
+        if !site_alias.is_some_and(|alias| dependency_aliases.contains(alias))
+            || panic_reaches_root(&key, summaries, &root_aliases, &mut HashSet::new())
+        {
+            continue;
+        }
+        effects.retain(|effect| effect_root(effect) != Effect::Panic.name());
+    }
+}
+
+fn dependency_boundary_span(bundle: &ProgramBundle, dependency: &str) -> Option<Span> {
+    bundle
+        .modules
+        .get(bundle.entry)?
+        .imports
+        .iter()
+        .find_map(|import| match &import.kind {
+            ImportKind::Module(name, span) if name == dependency => Some(*span),
+            ImportKind::Unqualified {
+                module_alias,
+                module_alias_span,
+                ..
+            } if module_alias == dependency => Some(*module_alias_span),
+            _ => None,
+        })
+}
+
+fn panic_site_for_budget(
+    key: &str,
+    summaries: &HashMap<String, EffectSummary>,
+    seen: &mut HashSet<String>,
+) -> Option<String> {
+    if !seen.insert(key.to_string()) {
+        return None;
+    }
+    let summary = summaries.get(key)?;
+    if summary.maximal
+        || effect_set_has_root(&summary.direct, Effect::Panic)
+        || summary.edges.contains("__jet_panic__")
+    {
+        return Some(key.to_string());
+    }
+    summary
+        .edges
+        .iter()
+        .find_map(|callee| panic_site_for_budget(callee, summaries, seen))
+}
+
+fn panic_reaches_root(
+    key: &str,
+    summaries: &HashMap<String, EffectSummary>,
+    root_aliases: &HashSet<String>,
+    seen: &mut HashSet<String>,
+) -> bool {
+    if !seen.insert(key.to_string()) {
+        return false;
+    }
+    let Some(summary) = summaries.get(key) else {
+        return false;
+    };
+    let is_root = key
+        .split_once("::")
+        .is_some_and(|(alias, _)| root_aliases.contains(alias));
+    if is_root
+        && (summary.maximal
+            || effect_set_has_root(&summary.direct, Effect::Panic)
+            || summary.edges.contains("__jet_panic__"))
+    {
+        return true;
+    }
+    summary
+        .edges
+        .iter()
+        .any(|callee| panic_reaches_root(callee, summaries, root_aliases, seen))
+}
+
 
 /// Project the causal edges that survive the checker into the one report
 /// batch. `E0104` is the call-owned root for the recoverable call shape that
@@ -722,7 +882,7 @@ fn attach_known_cause_links(diagnostics: &mut [Diagnostic]) {
                 (candidate_index != index
                     && candidate.code == "E0104"
                     && candidate.span == Some(span))
-                    .then(|| candidate.clone())
+                .then(|| candidate.clone())
             });
         let Some(cause) = cause else {
             continue;

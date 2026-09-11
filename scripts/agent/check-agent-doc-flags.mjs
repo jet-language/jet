@@ -2,7 +2,7 @@
 
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const SCRIPT_ROOT = join(ROOT, "scripts/agent");
@@ -26,7 +26,7 @@ function isDoc(path) {
     || ["AGENTS.md", "CLAUDE.md"].includes(path.split("/").pop());
 }
 
-function docFiles() {
+function docFiles(base = ROOT) {
   const found = [];
   const seen = new Set();
 
@@ -46,7 +46,7 @@ function docFiles() {
     }
   }
 
-  visit(ROOT);
+  visit(base);
   return found;
 }
 
@@ -129,7 +129,52 @@ function sourceFlags(scriptPath) {
   return flags;
 }
 
+export function documentationPolicyErrors(path, text) {
+  const findings = [];
+  let fence = null;
+  for (const [index, line] of text.split(/\r?\n/).entries()) {
+    const marker = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (marker) {
+      if (!fence) fence = marker[1];
+      else if (marker[1][0] === fence[0] && marker[1].length >= fence.length && line.slice(marker[0].length).trim() === "") fence = null;
+      continue;
+    }
+    if (fence) continue;
+    const heading = line.match(/^ {0,3}#{1,6}\s+(.+?)(?:\s+#+)?\s*$/)?.[1];
+    if (heading && /^(?:(?:\d+[.)]?\s+)?(?:implementation plans?|plan of record|derived plan|roadmap|milestones?|status(?: map| report)?|(?:current|shipped|implementation|delivery) status|progress(?: report)?|staged implementation|known (?:drift|gaps)|next steps|remaining work))\b/i.test(heading)) {
+      findings.push(`${path}:${index + 1}: plans and development status belong in Tower`);
+    }
+    if (/^\s*[-*]\s+\[[ xX]\]/.test(line)) {
+      findings.push(`${path}:${index + 1}: work checklists belong on Tower cards`);
+    }
+  }
+  return findings;
+}
+
+function checkDocumentationPolicy() {
+  const paths = [...docFiles(join(ROOT, "docs/spec")), ...docFiles(join(ROOT, "docs/proposals")), join(ROOT, "README.md")];
+  const failures = paths.flatMap((path) => documentationPolicyErrors(relative(ROOT, path), readFileSync(path, "utf8")));
+  for (const retired of [
+    "docs/spec/roadmap.md", "docs/plans", "docs/spec/reference/errors",
+    "docs/spec/diagnostic-rows.md", "docs/spec/reference/core-surface-ledger.md",
+    "llms.text",
+    "docs/spec/reference/core-backend-facts.md", "docs/spec/reference/feature-claims.md",
+  ]) {
+    if (existsSync(join(ROOT, retired))) failures.push(`${retired}: use Tower or generate the reference from code on demand`);
+  }
+  if (failures.length) {
+    console.error(failures.join("\n"));
+    process.exitCode = 1;
+  } else {
+    console.log(`documentation-policy: ok (${paths.length} guidance files; plans/status and retired mirrors checked)`);
+  }
+}
+
 function main() {
+  if (process.argv.includes("--policy-only")) {
+    checkDocumentationPolicy();
+    return;
+  }
   const findings = docFiles().flatMap((path) => documentedFlags(path, readFileSync(path, "utf8")));
   const accepted = new Map();
   const errors = [];
@@ -152,4 +197,4 @@ function main() {
   console.log(`agent-doc-flags: ok (${findings.length} documented flag reference(s))`);
 }
 
-main();
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) main();

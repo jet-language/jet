@@ -36,23 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Put the value in text with interpolation: &quot;{x}&quot;</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0108</code>: <code>tests/ui/cffi_callback_capture.stderr</code>.</p>
-<pre class="diag">Error [E3203]: `fn(I32) I32 -[]&gt;` is not a C-compatible type for a foreign function parameter or return.
-  --&gt; tests/ui/cffi_callback_capture.jet:9:18
+<p>First UI snapshot mentioning <code>E0108</code>: <code>tests/ui/decision_hook_wrong_handler.stderr</code>.</p>
+<pre class="diag">Error [E0108]: `HookDecision.Fail` needs String (text), not Int (a whole number)
+  --&gt; tests/ui/decision_hook_wrong_handler.jet:6:54
     |
-  9 |     print(c.call((x) -&gt; x + offset, 40))
-    |                  ^^^^^^^^^^^^^^^^^
- Why: `#Extern` / `#Bindgen` functions must use types with a stable C ABI at the edge.
- Fix: use scalars, `String`, or a struct with C layout; pointers only through the gated tier.
-More: jet-lang.dev/e/E3203
-
-Error [E0108]: this needs fn(I32) I32 -[]&gt;, but the callable obligations are not satisfied
-  --&gt; tests/ui/cffi_callback_capture.jet:9:18
-    |
-  9 |     print(c.call((x) -&gt; x + offset, 40))
-    |                  ^^^^^^^^^^^^^^^^^
- Why: the callable value does not provide the obligations required here
- Fix: pass a callable with matching effects, labels, and view provenance
+  6 |     hook.on(scope, (value: Int) -&gt; HookDecision.Fail(value))
+    |                                                      ^^^^^
+ Why: The decision payload must match the hook&#39;s declared payload or error type
+ Fix: Put the value in text with interpolation: &quot;{x}&quot;
 More: jet-lang.dev/e/E0108
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

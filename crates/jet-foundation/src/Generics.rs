@@ -33,9 +33,27 @@ pub const ADD: &str = "Add";
 pub const SUB: &str = "Sub";
 pub const MUL: &str = "Mul";
 pub const DIV: &str = "Div";
+/// D-FOUND-LITERAL1=A (card #2789): semantic capability names for contextual
+/// integer and floating-point literal construction. They are compiler hooks,
+/// not ordinary Rust traits and therefore stay outside `BUILTIN_TRAITS`.
+pub const LITERAL_INT: &str = Syntax::TRAIT_LITERAL_INT;
+pub const LITERAL_FLOAT: &str = Syntax::TRAIT_LITERAL_FLOAT;
+pub const LITERAL_FROM_LITERAL: &str = Syntax::METHOD_LITERAL_FROM_LITERAL;
+
+pub fn is_literal_capability(name: &str) -> bool {
+    matches!(name, LITERAL_INT | LITERAL_FLOAT)
+}
+
+pub fn literal_capability_for_source(source: &str) -> Option<&'static str> {
+    match source {
+        Syntax::TYPE_INT => Some(LITERAL_INT),
+        Syntax::TYPE_FLOAT => Some(LITERAL_FLOAT),
+        _ => None,
+    }
+}
+
 /// D-TEXTHEAD-TYPE1=A: the ordinary library-defined checked text contract.
 pub const CHECKED_TEXT: &str = "CheckedText";
-
 pub fn quantity_bound(dimension: &str, kind: &str) -> String {
     format!("{}<{}, .{}>", Syntax::BOUND_QUANTITY, dimension, kind)
 }
@@ -51,12 +69,38 @@ pub fn parse_quantity_bound(bound: &str) -> Option<(&str, &str)> {
 }
 
 pub const BUILTIN_TRAITS: &[&str] = &[
-    PRINTABLE, EQUATABLE, COMPARABLE, SERIALIZE, ENCODE, DECODE, RENDERABLE, CLOSE, ADD, SUB, MUL,
-    DIV, CHECKED_TEXT,
+    PRINTABLE,
+    EQUATABLE,
+    COMPARABLE,
+    SERIALIZE,
+    ENCODE,
+    DECODE,
+    RENDERABLE,
+    CLOSE,
+    ADD,
+    SUB,
+    MUL,
+    DIV,
+    CHECKED_TEXT,
 ];
 
 pub fn is_builtin_trait(name: &str) -> bool {
     BUILTIN_TRAITS.contains(&name)
+}
+fn rust_operator_bound(bound: &str) -> Option<String> {
+    let (trait_name, rhs) = bound.strip_suffix('>')?.split_once('<')?;
+    if !matches!(trait_name, ADD | SUB | MUL | DIV) {
+        return None;
+    }
+    let rust_trait = rust_trait_bound(trait_name)?;
+    let rust_rhs = match rhs {
+        "Int" => "i64".to_string(),
+        "Float" => "f64".to_string(),
+        "Bool" => "bool".to_string(),
+        "String" => "String".to_string(),
+        name => crate::Names::mangle_path(name),
+    };
+    Some(format!("{rust_trait}<{rust_rhs}>"))
 }
 
 /// Rust trait bound for codegen.
@@ -357,8 +401,6 @@ fn types_equal_modulo_self(a: &Type, b: &Type) -> bool {
         _ => a == b,
     }
 }
-
-/// Format type params for Rust generics: `<T: PartialOrd>`.
 pub fn rust_type_param_list(
     params: &[TypeParam],
     extra_bounds: &HashMap<String, Vec<String>>,
@@ -375,6 +417,8 @@ pub fn rust_type_param_list(
                 .filter_map(|b| {
                     if is_quantity_bound(b) {
                         Some("crate::JetQuantity".to_string())
+                    } else if let Some(operator) = rust_operator_bound(b) {
+                        Some(operator)
                     } else if matches!(b.as_str(), IO_READER | IO_WRITER | DRIVER) {
                         rust_trait_bound(b).map(str::to_string)
                     } else if is_builtin_trait(b) {
@@ -422,6 +466,8 @@ pub fn e0904(span: Span, param: &str) -> Diagnostic {
 pub fn e0905(type_name: &str, trait_name: &str, span: Span, needs_derive: bool) -> Diagnostic {
     let fix = if trait_name == COMPARABLE && type_name == crate::Syntax::TYPE_FLOAT {
         "use explicit Float comparisons or sort by a total key that handles NaN".to_string()
+    } else if trait_name == COMPARABLE && type_name == crate::Syntax::TYPE_DECIMAL {
+        "pass a Comparable type such as Int; for approximate values, use concrete Float parameters and Float{2.5}, with explicit NaN handling".to_string()
     } else if needs_derive && (trait_name == COMPARABLE || trait_name == SERIALIZE) {
         format!("write `#{trait_name}` before `{type_name}`, or use a different approach")
     } else if trait_name == COMPARABLE {
@@ -455,14 +501,66 @@ pub fn e0906(trait_name: &str, missing: &[String], span: Span) -> Diagnostic {
     )
 }
 
-pub fn e0907(trait_name: &str, method: &str, span: Span) -> Diagnostic {
+/// E0907. `expected` is the concrete callable the trait declares for this
+/// impl (already wrapped in backticks by the caller, or a short phrase such as
+/// "only `check` and `encode_hole`" when the method name itself is foreign).
+pub fn e0907(trait_name: &str, method: &str, expected: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0907",
-        format!("`{method}` doesn't match `{trait_name}`"),
-        "impl methods must match the trait signature exactly".to_string(),
-        format!("check the parameter and return types for `{method}` against the trait"),
+        format!("`{method}` doesn't match the `{trait_name}` contract"),
+        "a trait implementation must use the trait method's receiver, parameters, return type, and effects"
+            .to_string(),
+        format!(
+            "write {expected}, matching the `{trait_name}` declaration exactly, including `self`, types, labels, return type, and effects"
+        ),
         Some(span),
     )
+}
+
+/// Render the callable a trait declares, as this impl must write it: `Self`
+/// and associated types are replaced by the impl's concrete types.
+pub fn trait_method_expected_signature(
+    owner: &str,
+    sig: &TraitMethodSig,
+    assoc: &HashMap<String, Type>,
+) -> String {
+    let concrete = |ty: &Type| match substitute_type(ty, assoc) {
+        Type::Named(name) if name.is_empty() => owner.to_string(),
+        ty => ty.name(),
+    };
+    let params = sig
+        .params
+        .iter()
+        .map(|param| {
+            if param.name == Syntax::KW_SELF {
+                format!("{}self", param.convention.sigil())
+            } else {
+                format!(
+                    "{}: {}{}",
+                    param.name,
+                    param.convention.sigil(),
+                    concrete(&param.ty)
+                )
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut rendered = format!("fn {}({params})", sig.name);
+    if let Some(ret) = &sig.return_type {
+        rendered.push(' ');
+        rendered.push_str(&concrete(ret));
+    }
+    if let Some(effects) = &sig.declared_effects {
+        let names = effects
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        rendered.push_str(&format!(" -[{names}]>"));
+    } else if sig.is_pure {
+        rendered.push_str(" -[]>");
+    }
+    format!("`{rendered}`")
 }
 
 pub fn e0908(type_name: &str, trait_name: &str, span: Span) -> Diagnostic {

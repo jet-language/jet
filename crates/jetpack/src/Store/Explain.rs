@@ -6,7 +6,8 @@
 
 use super::{entry_action_key, ClosureGraph, Lifecycle, ProducerRecord, Roots, StoreEntry};
 use crate::{BuildDebug, ProviderFacts, SemanticLock, Syntax, JSON};
-use jet_foundation::Report::ReportEnvelope;
+use jet_foundation::Report::{ReportEnvelope, StatusEnvelope, StatusValue};
+use jet_foundation::DataTree::DataTree;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -390,31 +391,32 @@ impl PackageWhy {
             .bytes
             .map(|bytes| bytes.to_string())
             .unwrap_or_else(|| "null".to_string());
-        jet_foundation::Report::render_status_json(
-            "ok",
-            true,
-            "why",
-            &format!(
-                ",\"query\":{},\"package\":{},\"available\":{},\"requesting\":{{\"env_file\":{},\"lock_file\":{}}},\"origin\":{{\"catalog\":{},\"endpoint\":{},\"cache_endpoint\":{},\"signature_chain\":{},\"source\":{},\"source_digest\":{}}},\"trust\":{{\"grade\":{},\"reason\":{}}},\"disk\":{{\"bytes\":{},\"objects\":{}}},\"dependents\":{},\"receipt\":{}",
-                JSON::quote(&self.query),
-                JSON::quote(&self.package),
-                self.available,
-                self.requesting.env_file.to_json(),
-                self.requesting.lock_file.to_json(),
-                JSON::quote(&self.origin.catalog),
-                JSON::quote(&self.origin.endpoint),
-                JSON::quote(&self.origin.cache_endpoint),
-                JSON::quote(&self.origin.signature_chain),
-                JSON::quote(&self.origin.source),
-                JSON::quote(&self.origin.source_digest),
-                JSON::quote(&self.trust.grade),
-                JSON::quote(&self.trust.reason),
-                bytes,
-                self.disk.objects,
-                json_array(self.dependents.iter().map(|dependent| JSON::quote(dependent))),
-                JSON::quote(&self.receipt),
-            ),
-        )
+        let payload = format!(
+            "{{\"query\":{},\"package\":{},\"available\":{},\"requesting\":{{\"env_file\":{},\"lock_file\":{}}},\"origin\":{{\"catalog\":{},\"endpoint\":{},\"cache_endpoint\":{},\"signature_chain\":{},\"source\":{},\"source_digest\":{}}},\"trust\":{{\"grade\":{},\"reason\":{}}},\"disk\":{{\"bytes\":{},\"objects\":{}}},\"dependents\":{},\"receipt\":{}}}",
+            JSON::quote(&self.query),
+            JSON::quote(&self.package),
+            self.available,
+            self.requesting.env_file.to_json(),
+            self.requesting.lock_file.to_json(),
+            JSON::quote(&self.origin.catalog),
+            JSON::quote(&self.origin.endpoint),
+            JSON::quote(&self.origin.cache_endpoint),
+            JSON::quote(&self.origin.signature_chain),
+            JSON::quote(&self.origin.source),
+            JSON::quote(&self.origin.source_digest),
+            JSON::quote(&self.trust.grade),
+            JSON::quote(&self.trust.reason),
+            bytes,
+            self.disk.objects,
+            json_array(self.dependents.iter().map(|dependent| JSON::quote(dependent))),
+            JSON::quote(&self.receipt),
+        );
+        StatusEnvelope::new("why", true)
+            .with_field(
+                "why",
+                StatusValue::parse(&payload).expect("package why payload must be valid JSON"),
+            )
+            .json()
     }
 
     pub fn text(&self) -> String {
@@ -727,10 +729,18 @@ fn catalog_origin(
     }
 }
 
+fn object_field<'a>(object: &'a [(String, DataTree)], field: &str) -> Option<&'a DataTree> {
+    object
+        .iter()
+        .find_map(|(name, value)| (name == field).then_some(value))
+}
+
 fn json_string_field(raw: &str, field: &str) -> Option<String> {
     let value = JSON::parse(raw).ok()?;
     let object = value.as_object().ok()?;
-    object.get(field)?.as_str().ok().map(str::to_string)
+    object_field(object, field)
+        .and_then(|value| value.as_str().ok())
+        .map(str::to_string)
 }
 
 fn config_value(roots: &Roots, relative: &str) -> Option<String> {
@@ -1493,7 +1503,7 @@ fn profile_provider_facts(
                     continue;
                 }
             };
-            if object.get("schema").and_then(|value| value.as_str().ok())
+            if object_field(object, "schema").and_then(|value| value.as_str().ok())
                 != Some("jet-package-generation-v1")
             {
                 reports.push(ExplainReport {
@@ -1504,7 +1514,7 @@ fn profile_provider_facts(
                 });
                 continue;
             }
-            let Some(crate::JSON::JSONValue::Array(packages)) = object.get("packages") else {
+            let Some(DataTree::Array(packages)) = object_field(object, "packages") else {
                 reports.push(ExplainReport {
                     kind: "loss".to_string(),
                     message: format!(
@@ -1523,16 +1533,13 @@ fn profile_provider_facts(
                     });
                     continue;
                 };
-                let output_hash = package
-                    .get("output_hash")
+                let output_hash = object_field(package, "output_hash")
                     .and_then(|value| value.as_str().ok())
                     .unwrap_or_default();
-                let raw_reference = package
-                    .get("raw")
+                let raw_reference = object_field(package, "raw")
                     .and_then(|value| value.as_str().ok())
                     .unwrap_or_default();
-                let target = package
-                    .get("target")
+                let target = object_field(package, "target")
                     .and_then(|value| value.as_str().ok())
                     .unwrap_or_default();
                 if output_hash != entry.envelope.output_hash
@@ -1549,7 +1556,7 @@ fn profile_provider_facts(
                         ),
                     });
                 }
-                let Some(facts_value) = package.get("provider_facts") else {
+                let Some(facts_value) = object_field(package, "provider_facts") else {
                     reports.push(ExplainReport {
                         kind: "loss".to_string(),
                         message: format!(
@@ -1578,8 +1585,7 @@ fn profile_provider_facts(
                     ("target", target, facts.target.as_str()),
                     (
                         "provider",
-                        package
-                            .get("provider")
+                        object_field(package, "provider")
                             .and_then(|value| value.as_str().ok())
                             .unwrap_or_default(),
                         facts.provider.as_str(),
@@ -1594,8 +1600,7 @@ fn profile_provider_facts(
                         });
                     }
                 }
-                if let Some(expected) = package
-                    .get("provider_facts_digest")
+                if let Some(expected) = object_field(package, "provider_facts_digest")
                     .and_then(|value| value.as_str().ok())
                 {
                     let actual = facts.digest();
@@ -2207,22 +2212,23 @@ fn attempt_projection(attempt: &BuildDebug::Attempt) -> ExplainAttempt {
 impl PackageExplain {
     pub fn to_json(&self) -> String {
         let conflicted = self.reports.iter().any(|report| report.kind == "conflict");
-        jet_foundation::Report::render_status_json(
-            if conflicted { "conflict" } else { "ok" },
-            !conflicted,
-            "explain",
-            &format!(
-                ",\"query\":{},\"lens\":{},\"entry\":{},\"provider\":{},\"graph\":{},\"liveness\":{},\"rebuild\":{},\"reports\":{}",
-                JSON::quote(&self.query),
-                JSON::quote(&self.lens),
-                option_json(self.entry.as_ref(), ExplainEntry::to_json),
-                option_json(self.provider.as_ref(), ExplainProvider::to_json),
-                self.graph.to_json(),
-                self.liveness.to_json(),
-                self.rebuild.to_json(),
-                json_array(self.reports.iter().map(ExplainReport::to_json)),
-            ),
-        )
+        let payload = format!(
+            "{{\"query\":{},\"lens\":{},\"entry\":{},\"provider\":{},\"graph\":{},\"liveness\":{},\"rebuild\":{},\"reports\":{}}}",
+            JSON::quote(&self.query),
+            JSON::quote(&self.lens),
+            option_json(self.entry.as_ref(), ExplainEntry::to_json),
+            option_json(self.provider.as_ref(), ExplainProvider::to_json),
+            self.graph.to_json(),
+            self.liveness.to_json(),
+            self.rebuild.to_json(),
+            json_array(self.reports.iter().map(ExplainReport::to_json)),
+        );
+        StatusEnvelope::new("explain", !conflicted)
+            .with_field(
+                "explain",
+                StatusValue::parse(&payload).expect("package explain payload must be valid JSON"),
+            )
+            .json()
     }
 
     pub fn text(&self) -> String {

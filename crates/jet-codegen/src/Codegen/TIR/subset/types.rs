@@ -74,10 +74,19 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         "Effect" | "UiNode" | "Subscription" | "EventScope" | "EventPolicy" | "EventTrace" | "AsyncPolicy" | "HookPolicy"
         | "Overflow" | "FailurePolicy" | "DispatchState" | "EventConfigError"
         // D-WEBAPP1 / D-RENDERTGT*: opaque UI + web graph value types (prelude hosts).
-        | "App" | "WebPage" | "DevServer"
+        | "App" | "WebPage" | "DevServer" | "HTTPServerTls"
         | "EventResult" | "NullBackend" | "TuiBackend" | "GtkBackend"
-        | "Point" | "Size" | "Rect" | "SizeConstraint" | "AriaRole" | "InputEvent"))
+        | "Point" | "Size" | "Rect" | "SizeConstraint" | "AriaRole" | "InputEvent"
+        // D-UI-PREVIEW1=A: preview descriptors remain host-owned opaque values.
+        | "UiPreview" | "UiPlayground" | "UiPreviewRegistry"
+        | "UiPreviewAccessibility" | "UiPreviewAuthority" | "UiPreviewContext"
+        | "UiPreviewDevice" | "UiPreviewEffect" | "UiPreviewInputOverride"
+        | "UiPreviewInputValue" | "UiPreviewKind" | "UiPreviewLifecycle"
+        | "UiPreviewSource" | "UiPreviewTheme" | "UiPreviewTraits" | "UiPreviewViewport"))
     {
+        return true;
+    }
+    if matches!(&ty, Type::Named(n) if n == "LateEventDisposition") {
         return true;
     }
     // D-UNIONTYPE1=A: anonymous unions are one generated enum of covered members.
@@ -105,12 +114,26 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         || is_covered_shared_ty(&ty, cx)
         || is_covered_shared_guard_ty(&ty, cx)
         || is_covered_shared_weak_ty(&ty, cx)
+        || is_covered_atomic_ty(&ty)
         || is_covered_pool_ty(&ty, cx)
         || is_covered_cell_ty(&ty, cx)
         || is_covered_data_ty(&ty, cx)
         || is_covered_compute_ty(&ty)
         || is_covered_vault_ty(&ty, cx)
 }
+
+/// D-PLACE1: compiler-owned inline atomic carriers are covered whenever the
+/// semantic closed-scalar gate has accepted their one type argument.
+pub(crate) fn is_covered_atomic_ty(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Apply { name, args }
+            if name == "Atomic"
+                && args.len() == 1
+                && jet_foundation::Layout::atomic_scalar_type(&args[0])
+    )
+}
+
 
 /// Unit has no value representation for parameters or bindings, but it is a
 /// valid function result. Keep that distinction explicit so a Unit-returning
@@ -163,16 +186,18 @@ pub(crate) fn is_covered_event_ty(ty: &Type, cx: &Cx) -> bool {
     }
 }
 
-/// D-DATAFRAME1=A: core.data value containers. They are plain owned prelude
-/// structs over a covered row/value type; method-like behavior is exposed
-/// through core.data functions, so binding/passing/returning the containers
-/// needs no special emit beyond `cx.rust_type`.
+/// D-QUERY-RETAIN1=A: query carriers and typed list products. Materialized
+/// query results are ordinary lists; only deferred/query metadata needs a
+/// nominal carrier.
 pub(crate) fn is_covered_data_ty(ty: &Type, cx: &Cx) -> bool {
     let Type::Apply { name, args } = ty else {
         return false;
     };
     match name.as_str() {
-        "Table" | "Series" | "LazyFrame" => args.len() == 1 && is_subset_param_ty(&args[0], cx),
+        "Query" => args.len() == 1 && is_subset_param_ty(&args[0], cx),
+        "DataGroupedQuery" | "Group" => {
+            args.len() == 2 && args.iter().all(|arg| is_subset_param_ty(arg, cx))
+        }
         "DataJoin" => args.len() == 2 && args.iter().all(|arg| is_subset_param_ty(arg, cx)),
         _ => false,
     }
@@ -279,9 +304,15 @@ pub(crate) fn is_covered_concurrency_ty(ty: &Type, cx: &Cx) -> bool {
     let Type::Apply { name, args } = ty else {
         return false;
     };
-    matches!(name.as_str(), "Task" | "Receiver" | "Sender" | "Stream")
-        && args.len() == 1
-        && concurrency_elem_covered(&args[0], cx)
+    match name.as_str() {
+        "Task" | "Receiver" | "Sender" | "Stream" | "StreamEventTime" => {
+            args.len() == 1 && concurrency_elem_covered(&args[0], cx)
+        }
+        "KeyedStream" | "Window" => {
+            args.len() == 2 && args.iter().all(|arg| concurrency_elem_covered(arg, cx))
+        }
+        _ => false,
+    }
 }
 
 /// D-REACT1=B: a reactive handle type `Signal<T>` / `Derived<T>` (a single-arg
@@ -497,6 +528,18 @@ pub(crate) fn is_covered_foreign_value_ty(ty: &Type, cx: &Cx) -> bool {
             | "FileCryptoError"
             | "KeyWrapError"
     ) {
+        return true;
+    }
+    // D-FOUND-PLATFORM1=A: font values are shared Prelude carriers.  They
+    // are canonical Core nominals (not user declarations), so no local
+    // `struct_fields`/`enum_variants` row is registered for them; their
+    // fields and enum literals still lower through the ordinary TIR paths.
+    if !cx.type_names.contains(name)
+        && matches!(
+            name.as_str(),
+            "FontStyle" | "FontFace" | "Glyph" | "GlyphRun" | "GlyphShaper"
+        )
+    {
         return true;
     }
     // A prelude struct constructable via a struct literal, or a core/prelude struct that

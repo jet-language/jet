@@ -1,19 +1,832 @@
 //! D-TARGET-* typed target machine facts.
 //!
-//! Internal model for no-OS and embedded builds. Validation errors stay data
-//! (not new user diagnostics) until a follow-up surface ballot lands. Hosted
-//! Jet keeps hidden defaults; selecting a no-OS machine exposes memory, linker,
-//! allocator, panic, startup, MMIO, clock, entropy, scheduler, byte-sink, and
-//! audit facts.
-
-use crate::Facts::TargetDossier;
+use crate::Layout::LayoutCapabilityFacts;
 use crate::RingLayer::{classify_prelude_closure, RuntimeLayer};
+use crate::Report::{StatusFields, StatusValue};
 use std::fmt::Write;
+use crate::Effects::EffectSet;
+use crate::Facts::TargetDossier;
+use std::collections::BTreeSet;
+
+
+/// Compiler-owned provenance for the vendor SVD which generated a target's
+/// hardware facts.  Register access is safe at the Jet surface because this
+/// provenance is selected by the target profile, rather than supplied by a
+/// user `#Unsafe` block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SvdProvenance {
+    pub source: String,
+    pub sha256: String,
+}
+
+impl SvdProvenance {
+    pub fn new(source: impl Into<String>, sha256: impl Into<String>) -> Self {
+        Self {
+            source: source.into(),
+            sha256: sha256.into(),
+        }
+    }
+
+    pub fn from_source(source: impl Into<String>, contents: &[u8]) -> Self {
+        Self::new(
+            source,
+            format!("sha256:{}", crate::SHA256::sha256_hex(contents)),
+        )
+    }
+
+    pub fn is_valid(&self) -> bool {
+        !self.source.trim().is_empty()
+            && self
+                .sha256
+                .strip_prefix("sha256:")
+                .is_some_and(|digest| !digest.trim().is_empty())
+    }
+
+    fn audit_json(&self) -> String {
+        format!(
+            "{{\"source\":{},\"sha256\":{}}}",
+            json_str(&self.source),
+            json_str(&self.sha256)
+        )
+    }
+}
+
+/// Width of one generated memory-mapped register.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RegisterWidth {
+    U8,
+    U16,
+    U32,
+    U64,
+}
+
+impl RegisterWidth {
+
+    pub const fn bytes(self) -> u64 {
+        match self {
+            Self::U8 => 1,
+            Self::U16 => 2,
+            Self::U32 => 4,
+            Self::U64 => 8,
+        }
+    }
+
+    pub const fn bits(self) -> u16 {
+        (self.bytes() * 8) as u16
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::U8 => "u8",
+            Self::U16 => "u16",
+            Self::U32 => "u32",
+            Self::U64 => "u64",
+        }
+    }
+}
+
+/// Access mode emitted by the SVD for one register.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetRegisterAccessMode {
+    ReadOnly,
+    WriteOnly,
+    ReadWrite,
+}
+
+impl TargetRegisterAccessMode {
+
+    pub const fn can_read(self) -> bool {
+        matches!(self, Self::ReadOnly | Self::ReadWrite)
+    }
+
+    pub const fn can_write(self) -> bool {
+        matches!(self, Self::WriteOnly | Self::ReadWrite)
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "read-only",
+            Self::WriteOnly => "write-only",
+            Self::ReadWrite => "read-write",
+        }
+    }
+}
+
+/// One generated register inside a [`TargetRegisterBlockFact`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetRegisterFact {
+    pub name: String,
+    pub offset: u64,
+    pub width: RegisterWidth,
+    pub access: TargetRegisterAccessMode,
+    pub volatile: bool,
+}
+
+impl TargetRegisterFact {
+    pub fn new(
+        name: impl Into<String>,
+        offset: u64,
+        width: RegisterWidth,
+        access: TargetRegisterAccessMode,
+        volatile: bool,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            offset,
+            width,
+            access,
+            volatile,
+        }
+    }
+
+}
+
+/// One SVD-derived peripheral register block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetRegisterBlockFact {
+    pub name: String,
+    pub base: u64,
+    pub size: ByteSize,
+    pub registers: Vec<TargetRegisterFact>,
+}
+
+impl TargetRegisterBlockFact {
+    pub fn new(
+        name: impl Into<String>,
+        base: u64,
+        size: ByteSize,
+        registers: Vec<TargetRegisterFact>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            base,
+            size,
+            registers,
+        }
+    }
+
+    pub fn register(&self, name: &str) -> Option<&TargetRegisterFact> {
+        self.registers.iter().find(|register| register.name == name)
+    }
+}
+
+/// Register operation facts projected by sema and consumed by a later MIR
+/// lowering.  There is deliberately no unsafe gate: the enclosing target
+/// profile owns the SVD provenance and has already established the MMIO range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetRegisterOperation {
+    Read,
+    Write,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetRegisterAccessFact {
+    pub block: String,
+    pub register: String,
+    pub operation: TargetRegisterOperation,
+    pub width: RegisterWidth,
+}
+
+impl TargetRegisterAccessFact {
+    pub fn read(
+        block: impl Into<String>,
+        register: impl Into<String>,
+        width: RegisterWidth,
+    ) -> Self {
+        Self {
+            block: block.into(),
+            register: register.into(),
+            operation: TargetRegisterOperation::Read,
+            width,
+        }
+    }
+
+    pub fn write(
+        block: impl Into<String>,
+        register: impl Into<String>,
+        width: RegisterWidth,
+    ) -> Self {
+        Self {
+            block: block.into(),
+            register: register.into(),
+            operation: TargetRegisterOperation::Write,
+            width,
+        }
+    }
+}
+
+/// One vector-table entry and its bounded-handler contract. `forbidden_effects`
+/// is the negative effect row from `#Interrupt`; sema also always enforces the
+/// two baseline ISR prohibitions (`Mem.Alloc` and `Time.Wait`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetInterruptFact {
+    pub name: String,
+    pub vector: u16,
+    pub forbidden_effects: EffectSet,
+    pub bounded: bool,
+}
+
+impl TargetInterruptFact {
+    pub fn new(name: impl Into<String>, vector: u16) -> Self {
+        let mut forbidden_effects = EffectSet::new();
+        forbidden_effects.insert("Mem.Alloc".to_string());
+        forbidden_effects.insert("Time.Wait".to_string());
+        Self {
+            name: name.into(),
+            vector,
+            forbidden_effects,
+            bounded: true,
+        }
+    }
+
+    pub fn with_effects<I, S>(
+        name: impl Into<String>,
+        vector: u16,
+        forbidden_effects: I,
+    ) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        Self {
+            name: name.into(),
+            vector,
+            forbidden_effects: forbidden_effects
+                .into_iter()
+                .map(|effect| effect.as_ref().to_string())
+                .collect(),
+            bounded: true,
+        }
+    }
+}
+
+/// Semantic handler binding facts. The effect set is the existing sema
+/// inference result for the handler body; `bounded` is the checker result
+/// consumed by the target boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetInterruptHandlerFact {
+    pub interrupt: String,
+    pub handler: String,
+    pub effects: EffectSet,
+    /// Per-handler forbidden effects declared by the interrupt marker.
+    pub forbidden_effects: EffectSet,
+    pub bounded: bool,
+}
+
+impl TargetInterruptHandlerFact {
+    pub fn new(
+        interrupt: impl Into<String>,
+        handler: impl Into<String>,
+        effects: EffectSet,
+        bounded: bool,
+    ) -> Self {
+        Self {
+            interrupt: interrupt.into(),
+            handler: handler.into(),
+            effects,
+            forbidden_effects: EffectSet::new(),
+            bounded,
+        }
+    }
+}
+
+/// Whether a DMA channel borrows a buffer or takes ownership until completion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetDmaOwnership {
+    Borrowed,
+    Transfer,
+}
+
+impl TargetDmaOwnership {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Borrowed => "borrowed",
+            Self::Transfer => "transfer",
+        }
+    }
+}
+
+/// One DMA channel fact from the target profile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetDmaChannelFact {
+    pub name: String,
+    pub channel: u16,
+    pub transfer_width: RegisterWidth,
+    pub ownership: TargetDmaOwnership,
+    pub max_transfer_bytes: Option<u64>,
+}
+
+impl TargetDmaChannelFact {
+    pub fn new(name: impl Into<String>, channel: u16) -> Self {
+        Self {
+            name: name.into(),
+            channel,
+            transfer_width: RegisterWidth::U8,
+            ownership: TargetDmaOwnership::Transfer,
+            max_transfer_bytes: None,
+        }
+    }
+}
+
+/// Ordered DMA ownership facts projected by sema. For a transfer channel,
+/// `Start` moves the buffer CPU → device, `Wait` moves it device → CPU, and
+/// `UseBuffer` requires CPU ownership.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetDmaOperation {
+    Start,
+    Wait,
+    UseBuffer,
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetDmaOwner {
+    Cpu,
+    Device,
+}
+
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetDmaOperationFact {
+    pub channel: String,
+    pub buffer: String,
+    pub operation: TargetDmaOperation,
+    /// Owner immediately before this operation.
+    pub owner: TargetDmaOwner,
+}
+
+impl TargetDmaOperationFact {
+    pub fn start(channel: impl Into<String>, buffer: impl Into<String>) -> Self {
+        Self {
+            channel: channel.into(),
+            buffer: buffer.into(),
+            operation: TargetDmaOperation::Start,
+            owner: TargetDmaOwner::Cpu,
+        }
+    }
+
+    pub fn wait(channel: impl Into<String>, buffer: impl Into<String>) -> Self {
+        Self {
+            channel: channel.into(),
+            buffer: buffer.into(),
+            operation: TargetDmaOperation::Wait,
+            owner: TargetDmaOwner::Device,
+        }
+    }
+
+    pub fn use_buffer(buffer: impl Into<String>) -> Self {
+        Self {
+            channel: String::new(),
+            buffer: buffer.into(),
+            operation: TargetDmaOperation::UseBuffer,
+            owner: TargetDmaOwner::Cpu,
+        }
+    }
+}
+
+/// Explicit external programmer selected by a target profile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TargetProgrammerAdapter {
+    Emulator,
+    ProbeRs,
+    OpenOcd,
+}
+
+impl TargetProgrammerAdapter {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Emulator => "emulator",
+            Self::ProbeRs => "probe-rs",
+            Self::OpenOcd => "openocd",
+        }
+    }
+}
+
+/// Typed facts needed to invoke one profile-declared programmer.  Missing
+/// adapter-specific facts remain explicit and are rejected by the flash
+/// command instead of being inferred from an SVD, target name, or triple.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetProgrammerFacts {
+    pub adapter: TargetProgrammerAdapter,
+    pub executable: String,
+    pub chip: Option<String>,
+    pub interface: Option<String>,
+    pub config: Vec<String>,
+    pub speed_khz: Option<u32>,
+    pub reset: bool,
+    pub machine: Option<String>,
+    pub cpu: Option<String>,
+}
+
+impl TargetProgrammerFacts {
+    pub fn emulator(
+        executable: impl Into<String>,
+        machine: impl Into<String>,
+        cpu: impl Into<String>,
+    ) -> Self {
+        Self {
+            adapter: TargetProgrammerAdapter::Emulator,
+            executable: executable.into(),
+            chip: None,
+            interface: None,
+            config: Vec::new(),
+            speed_khz: None,
+            reset: false,
+            machine: Some(machine.into()),
+            cpu: Some(cpu.into()),
+        }
+    }
+
+    pub fn missing_fact(&self) -> Option<&'static str> {
+        if self.executable.trim().is_empty() {
+            return Some("executable");
+        }
+        if self.config.iter().any(|value| value.trim().is_empty()) {
+            return Some("config");
+        }
+        match self.adapter {
+            TargetProgrammerAdapter::Emulator => {
+                if self
+                    .machine
+                    .as_deref()
+                    .is_none_or(|value| value.trim().is_empty())
+                {
+                    return Some("machine");
+                }
+                if self
+                    .cpu
+                    .as_deref()
+                    .is_none_or(|value| value.trim().is_empty())
+                {
+                    return Some("cpu");
+                }
+            }
+            TargetProgrammerAdapter::ProbeRs => {
+                if self
+                    .chip
+                    .as_deref()
+                    .is_none_or(|value| value.trim().is_empty())
+                {
+                    return Some("chip");
+                }
+            }
+            TargetProgrammerAdapter::OpenOcd => {
+                if self.interface.as_deref().is_none_or(|value| value.trim().is_empty())
+                    && self.config.is_empty()
+                {
+                    return Some("interface or config");
+                }
+            }
+        }
+        None
+    }
+
+    pub fn audit_json(&self) -> String {
+        let config = self
+            .config
+            .iter()
+            .map(|value| json_str(value))
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{{\"adapter\":{},\"chip\":{},\"config\":[{}],\"cpu\":{},\"executable\":{},\"interface\":{},\"machine\":{},\"reset\":{},\"speed_khz\":{}}}",
+            json_str(self.adapter.as_str()),
+            self.chip
+                .as_deref()
+                .map_or_else(|| "null".to_string(), json_str),
+            config,
+            self.cpu
+                .as_deref()
+                .map_or_else(|| "null".to_string(), json_str),
+            json_str(&self.executable),
+            self.interface
+                .as_deref()
+                .map_or_else(|| "null".to_string(), json_str),
+            self.machine
+                .as_deref()
+                .map_or_else(|| "null".to_string(), json_str),
+            if self.reset { "true" } else { "false" },
+            self.speed_khz
+                .map_or_else(|| "null".to_string(), |speed| speed.to_string()),
+        )
+    }
+}
+
+/// All target-profile hardware facts and all backend-neutral hardware uses
+/// projected by sema. This is the single fact plane later MIR tiers consume.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TargetHardwareFacts {
+    pub svd: Option<SvdProvenance>,
+    pub register_blocks: Vec<TargetRegisterBlockFact>,
+    pub interrupts: Vec<TargetInterruptFact>,
+    pub dma_channels: Vec<TargetDmaChannelFact>,
+}
+
+impl TargetHardwareFacts {
+    pub fn from_svd(source: impl Into<String>, sha256: impl Into<String>) -> Self {
+        Self {
+            svd: Some(SvdProvenance::new(source, sha256)),
+            ..Self::default()
+        }
+    }
+
+    pub fn register_block(&self, name: &str) -> Option<&TargetRegisterBlockFact> {
+        self.register_blocks
+            .iter()
+            .find(|block| block.name == name)
+    }
+
+    pub fn interrupt(&self, selector: &str) -> Option<&TargetInterruptFact> {
+        self.interrupts.iter().find(|interrupt| {
+            interrupt.name == selector || interrupt.vector.to_string() == selector
+        })
+    }
+
+    pub fn dma_channel(&self, name: &str) -> Option<&TargetDmaChannelFact> {
+        self.dma_channels.iter().find(|channel| channel.name == name)
+    }
+
+    pub fn validate(&self, memory: &[MemoryRegion]) -> Vec<TargetMachineError> {
+        let mut errors = Vec::new();
+        self.validate_into(memory, &mut errors);
+        errors
+    }
+
+    fn validate_into(&self, memory: &[MemoryRegion], errors: &mut Vec<TargetMachineError>) {
+        if let Some(svd) = &self.svd {
+            if !svd.is_valid() {
+                errors.push(TargetMachineError::InvalidHardwareSvd {
+                    source: svd.source.clone(),
+                    sha256: svd.sha256.clone(),
+                });
+            }
+        }
+
+        let mut block_names = BTreeSet::new();
+        for block in &self.register_blocks {
+            if block.name.trim().is_empty() {
+                errors.push(TargetMachineError::HardwareFactEmptyName {
+                    kind: "register block".to_string(),
+                });
+            }
+            if !block_names.insert(block.name.clone()) {
+                errors.push(TargetMachineError::DuplicateRegisterBlock {
+                    name: block.name.clone(),
+                });
+            }
+            if block.size.bytes == 0 {
+                errors.push(TargetMachineError::RegisterBlockEmpty {
+                    name: block.name.clone(),
+                });
+            }
+            if block.base.checked_add(block.size.bytes).is_none() {
+                errors.push(TargetMachineError::RegisterBlockAddressOverflow {
+                    name: block.name.clone(),
+                });
+            } else if !memory
+                .iter()
+                .any(|region| region.kind == MemoryKind::Mmio && region.contains(block.base, block.size))
+            {
+                errors.push(TargetMachineError::RegisterBlockOutsideRegion {
+                    name: block.name.clone(),
+                    address: block.base,
+                    size_bytes: block.size.bytes,
+                });
+            }
+
+            let mut register_names = BTreeSet::new();
+            for register in &block.registers {
+                if register.name.trim().is_empty() {
+                    errors.push(TargetMachineError::HardwareFactEmptyName {
+                        kind: format!("register in `{}`", block.name),
+                    });
+                }
+                if !register_names.insert(register.name.clone()) {
+                    errors.push(TargetMachineError::DuplicateRegister {
+                        block: block.name.clone(),
+                        register: register.name.clone(),
+                    });
+                }
+                if register.offset.checked_add(register.width.bytes()).is_none() {
+                    errors.push(TargetMachineError::RegisterAddressOverflow {
+                        block: block.name.clone(),
+                        register: register.name.clone(),
+                    });
+                } else if register.offset.saturating_add(register.width.bytes()) > block.size.bytes {
+                    errors.push(TargetMachineError::RegisterOutsideBlock {
+                        block: block.name.clone(),
+                        register: register.name.clone(),
+                    });
+                }
+            }
+        }
+
+        let mut vectors = BTreeSet::new();
+        let mut interrupt_names = BTreeSet::new();
+        for interrupt in &self.interrupts {
+            if interrupt.name.trim().is_empty() {
+                errors.push(TargetMachineError::HardwareFactEmptyName {
+                    kind: "interrupt".to_string(),
+                });
+            }
+            if !interrupt_names.insert(interrupt.name.clone()) {
+                errors.push(TargetMachineError::DuplicateInterrupt {
+                    name: interrupt.name.clone(),
+                });
+            }
+            if !vectors.insert(interrupt.vector) {
+                errors.push(TargetMachineError::DuplicateInterruptVector {
+                    vector: interrupt.vector,
+                });
+            }
+            for effect in &interrupt.forbidden_effects {
+                if crate::Authority::parse_right(effect).is_none() {
+                    errors.push(TargetMachineError::InvalidInterruptEffect {
+                        interrupt: interrupt.name.clone(),
+                        effect: effect.clone(),
+                    });
+                }
+            }
+        }
+
+        let mut channels = BTreeSet::new();
+        let mut channel_numbers = BTreeSet::new();
+        for channel in &self.dma_channels {
+            if channel.name.trim().is_empty() {
+                errors.push(TargetMachineError::HardwareFactEmptyName {
+                    kind: "DMA channel".to_string(),
+                });
+            }
+            if !channels.insert(channel.name.clone()) {
+                errors.push(TargetMachineError::DuplicateDmaChannel {
+                    name: channel.name.clone(),
+                });
+            }
+            if !channel_numbers.insert(channel.channel) {
+                errors.push(TargetMachineError::DuplicateDmaChannelNumber {
+                    channel: channel.channel,
+                });
+            }
+            if channel.max_transfer_bytes == Some(0) {
+                errors.push(TargetMachineError::DmaTransferSizeZero {
+                    channel: channel.name.clone(),
+                });
+            }
+        }
+    }
+
+    fn validate_register_accesses(
+        &self,
+        accesses: &[TargetRegisterAccessFact],
+        errors: &mut Vec<TargetMachineError>,
+    ) {
+        for access in accesses {
+            let Some(block) = self.register_block(&access.block) else {
+                errors.push(TargetMachineError::UnknownRegisterBlock {
+                    block: access.block.clone(),
+                });
+                continue;
+            };
+            let Some(register) = block.register(&access.register) else {
+                errors.push(TargetMachineError::UnknownRegister {
+                    block: access.block.clone(),
+                    register: access.register.clone(),
+                });
+                continue;
+            };
+            if register.width != access.width {
+                errors.push(TargetMachineError::RegisterWidthMismatch {
+                    block: access.block.clone(),
+                    register: access.register.clone(),
+                    expected: register.width,
+                    actual: access.width,
+                });
+            }
+            match access.operation {
+                TargetRegisterOperation::Read if !register.access.can_read() => {
+                    errors.push(TargetMachineError::RegisterReadDenied {
+                        block: access.block.clone(),
+                        register: access.register.clone(),
+                    });
+                }
+                TargetRegisterOperation::Write if !register.access.can_write() => {
+                    errors.push(TargetMachineError::RegisterWriteDenied {
+                        block: access.block.clone(),
+                        register: access.register.clone(),
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pub fn audit_json(&self) -> String {
+        let svd = self
+            .svd
+            .as_ref()
+            .map(SvdProvenance::audit_json)
+            .unwrap_or_else(|| "null".to_string());
+        let mut out = format!("{{\"svd\":{},\"register_blocks\":[", svd);
+        for (index, block) in self.register_blocks.iter().enumerate() {
+            if index > 0 {
+                out.push(',');
+            }
+            let _ = write!(
+                out,
+                "{{\"name\":{},\"base\":{},\"size_bytes\":{},\"registers\":[",
+                json_str(&block.name),
+                block.base,
+                block.size.bytes
+            );
+            for (register_index, register) in block.registers.iter().enumerate() {
+                if register_index > 0 {
+                    out.push(',');
+                }
+                let _ = write!(
+                    out,
+                    "{{\"name\":{},\"offset\":{},\"width\":\"{}\",\"access\":\"{}\",\"volatile\":{}}}",
+                    json_str(&register.name),
+                    register.offset,
+                    register.width.as_str(),
+                    register.access.as_str(),
+                    if register.volatile { "true" } else { "false" }
+                );
+            }
+            out.push_str("]}");
+        }
+        out.push_str("],\"interrupts\":[");
+        for (index, interrupt) in self.interrupts.iter().enumerate() {
+            if index > 0 {
+                out.push(',');
+            }
+            let effects = interrupt
+                .forbidden_effects
+                .iter()
+                .map(|effect| json_str(effect))
+                .collect::<Vec<_>>()
+                .join(",");
+            let _ = write!(
+                out,
+                "{{\"name\":{},\"vector\":{},\"forbidden_effects\":[{}],\"bounded\":{}}}",
+                json_str(&interrupt.name),
+                interrupt.vector,
+                effects,
+                if interrupt.bounded { "true" } else { "false" }
+            );
+        }
+        out.push_str("],\"dma_channels\":[");
+        for (index, channel) in self.dma_channels.iter().enumerate() {
+            if index > 0 {
+                out.push(',');
+            }
+            let _ = write!(
+                out,
+                "{{\"name\":{},\"channel\":{},\"transfer_width\":\"{}\",\"ownership\":\"{}\",\"max_transfer_bytes\":{}}}",
+                json_str(&channel.name),
+                channel.channel,
+                channel.transfer_width.as_str(),
+                channel.ownership.as_str(),
+                channel.max_transfer_bytes
+                    .map_or_else(|| "null".to_string(), |bytes| bytes.to_string())
+            );
+        }
+        out.push_str("]}");
+        out
+    }
+}
+
+/// A source hardware reference that could not be resolved against the selected
+/// profile.  It is diagnostic-only metadata; unresolved names never become
+/// typed register, interrupt, or DMA facts.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TargetHardwareUnresolvedReference {
+    RegisterBlock { block: String },
+    Register { block: String, register: String },
+    DmaChannel { channel: String },
+    Interrupt { interrupt: String },
+}
+
+/// Sema-owned hardware uses. The target profile above is immutable; this
+/// separate projection records operations and inferred handler/ownership facts
+/// without adding parser or backend concepts to the profile.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TargetHardwareUse {
+    pub register_accesses: Vec<TargetRegisterAccessFact>,
+    pub interrupt_handlers: Vec<TargetInterruptHandlerFact>,
+    pub dma_operations: Vec<TargetDmaOperationFact>,
+    /// Source references which failed profile lookup and therefore cannot be
+    /// admitted to any typed hardware operation row.
+    pub unresolved_references: Vec<TargetHardwareUnresolvedReference>,
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TargetMachine {
     pub name: String,
     pub triple: String,
+    /// Canonical target/profile layout support facts. This is independent of
+    /// host guesses and participates in provider/artifact identity.
+    pub layout: LayoutCapabilityFacts,
     pub no_os: bool,
     pub memory: Vec<MemoryRegion>,
     pub linker: LinkerInput,
@@ -32,16 +845,28 @@ pub struct TargetMachine {
     pub scheduler: SchedulerPolicy,
     /// D-FREESTAND-SINK1=B: typed byte input/output/report providers.
     pub byte_sink: ByteSinkPolicy,
-    /// D-FREESTAND-START1=A: generated startup provider.
+    /// D-FREESTAND-START1=A: generated startup provider and typed startup ABI.
     pub startup: StartupPolicy,
+    pub startup_entry: String,
+    pub startup_vectors: String,
+    pub startup_abi: ProviderAbi,
+    pub startup_placement: String,
+    /// D-FOUND-BOARD1=A: compiler-owned SVD-derived register, interrupt, and
+    /// DMA facts. This is the only hardware profile plane.
+    pub hardware: TargetHardwareFacts,
+    /// Explicit external programmer facts. An absent list is not inferred from
+    /// the target name, triple, or hardware SVD.
+    pub programmers: Vec<TargetProgrammerFacts>,
     pub audit: AuditPolicy,
 }
 
 impl TargetMachine {
     pub fn hosted(triple: impl Into<String>) -> Self {
+        let triple = triple.into();
         Self {
             name: "hosted".to_string(),
-            triple: triple.into(),
+            triple: triple.clone(),
+            layout: crate::Layout::TargetLayout::from_triple(&triple).layout_facts,
             no_os: false,
             memory: Vec::new(),
             linker: LinkerInput::HostedDefault,
@@ -56,15 +881,23 @@ impl TargetMachine {
             scheduler: SchedulerPolicy::HostedDefault,
             byte_sink: ByteSinkPolicy::HostedDefault,
             startup: StartupPolicy::HostedDefault,
+            startup_entry: String::new(),
+            startup_vectors: String::new(),
+            startup_abi: ProviderAbi::default(),
+            startup_placement: String::new(),
+            hardware: TargetHardwareFacts::default(),
+            programmers: Vec::new(),
             audit: AuditPolicy::default(),
         }
     }
 
     /// Construct a named no-OS machine with all boundary facts explicit.
     pub fn bare_metal(name: impl Into<String>, triple: impl Into<String>) -> Self {
+        let triple = triple.into();
         Self {
             name: name.into(),
-            triple: triple.into(),
+            triple: triple.clone(),
+            layout: crate::Layout::TargetLayout::from_triple(&triple).layout_facts,
             no_os: true,
             memory: Vec::new(),
             linker: LinkerInput::Generated,
@@ -79,8 +912,53 @@ impl TargetMachine {
             scheduler: SchedulerPolicy::Unspecified,
             byte_sink: ByteSinkPolicy::Unspecified,
             startup: StartupPolicy::Unspecified,
+            // These are profile-owned facts, not triple-derived fallbacks.
+            // Board constructors override them when their ABI differs.
+            startup_entry: "Reset_Handler".to_string(),
+            startup_vectors: "vectors".to_string(),
+            startup_abi: ProviderAbi::c(),
+            startup_placement: ".vectors".to_string(),
+            hardware: TargetHardwareFacts::default(),
+            programmers: Vec::new(),
             audit: AuditPolicy::default(),
         }
+    }
+    /// Override layout support with a complete compiler-owned target profile.
+    pub fn with_layout_facts(mut self, facts: LayoutCapabilityFacts) -> Self {
+        self.layout = facts;
+        self
+    }
+
+
+    /// Override the generated startup facts as one typed contract.
+    pub fn with_startup_facts(
+        mut self,
+        entry: impl Into<String>,
+        vectors: impl Into<String>,
+        abi: ProviderAbi,
+        placement: impl Into<String>,
+    ) -> Self {
+        self.startup_entry = entry.into();
+        self.startup_vectors = vectors.into();
+        self.startup_abi = abi;
+        self.startup_placement = placement.into();
+        self
+    }
+
+    /// Add one complete, owner-approved programmer profile. Adapter-specific
+    /// fields are validated before the profile can be used by `jet flash`.
+    pub fn with_programmer(
+        mut self,
+        programmer: TargetProgrammerFacts,
+    ) -> Result<Self, String> {
+        if let Some(missing) = programmer.missing_fact() {
+            return Err(format!(
+                "target programmer `{}` is missing explicit `{missing}` fact",
+                programmer.adapter.as_str()
+            ));
+        }
+        self.programmers.push(programmer);
+        Ok(self)
     }
 
     pub fn environment_identity(&self) -> &'static str {
@@ -114,6 +992,92 @@ impl TargetMachine {
     pub fn is_web_target(&self) -> bool {
         self.is_browser_target()
     }
+    /// Whether this target has the compiler-supported atomic-word primitive.
+    /// The fact is target-triple based and deliberately has no hosted fallback:
+    /// unsupported targets must be rejected before the Rust backend sees
+    /// `Atomic<T>`.
+    pub fn supports_atomic_word(&self) -> bool {
+        self.triple.starts_with("x86_64-")
+            || self.triple.starts_with("aarch64-")
+            || self.triple.starts_with("wasm32-")
+    }
+
+    /// Ordered, explicit target facts used by both audit output and the
+    /// provider identity digest. Policy absence stays represented by the
+    /// `unspecified`/`none` value; `Atomic64` is the compiler's target fact
+    /// derived from its supported target triple set.
+    pub fn provider_fact_list(&self) -> Vec<(TargetCapability, String)> {
+        TargetCapability::ALL
+            .into_iter()
+            .map(|capability| {
+                let fact = match capability {
+                    TargetCapability::Allocator => self.allocator.audit_json(),
+                    TargetCapability::Atomic64 => format!(
+                        "{{\"triple\":{},\"supported\":{}}}",
+                        json_str(&self.triple),
+                        self.supports_atomic_word()
+                    ),
+                    TargetCapability::Mmio => self.mmio.audit_json(),
+                    TargetCapability::Hardware => self.hardware.audit_json(),
+                    TargetCapability::TimeWall => self.wall_clock.audit_json(),
+                    TargetCapability::TimeMonotonic => self.monotonic_clock.audit_json(),
+                    TargetCapability::TimeZoneData => self.zone_data.audit_json(),
+                    TargetCapability::TimeSleep => self.sleep.audit_json(),
+                    TargetCapability::Entropy => self.entropy.audit_json(),
+                    TargetCapability::Scheduler => self.scheduler.audit_json(),
+                    TargetCapability::IoRead => {
+                        self.byte_sink.audit_component_json(TargetCapability::IoRead)
+                    }
+                    TargetCapability::IoWrite => {
+                        self.byte_sink.audit_component_json(TargetCapability::IoWrite)
+                    }
+                    TargetCapability::PanicReport => format!(
+                        "{{\"panic\":{},\"sink\":{}}}",
+                        self.panic.audit_json(),
+                        self.byte_sink
+                            .audit_component_json(TargetCapability::PanicReport)
+                    ),
+                    TargetCapability::Startup => format!(
+                        "{{\"policy\":{},\"entry\":{},\"vectors\":{},\"abi\":{},\"placement\":{}}}",
+                        self.startup.audit_json(),
+                        json_str(&self.startup_entry),
+                        json_str(&self.startup_vectors),
+                        self.startup_abi.audit_json(),
+                        json_str(&self.startup_placement)
+                    ),
+                };
+                (capability, fact)
+            })
+            .collect()
+    }
+
+    fn provider_facts_json(&self) -> String {
+        let mut out = String::from("[");
+        for (index, (capability, fact)) in self.provider_fact_list().iter().enumerate() {
+            if index > 0 {
+                out.push(',');
+            }
+            let _ = write!(
+                out,
+                "{{\"capability\":{},\"fact\":{}}}",
+                json_str(capability.as_str()),
+                fact
+            );
+        }
+        out.push(']');
+        out
+    }
+    fn programmer_facts_json(&self) -> String {
+        let mut out = String::from("[");
+        for (index, programmer) in self.programmers.iter().enumerate() {
+            if index > 0 {
+                out.push(',');
+            }
+            out.push_str(&programmer.audit_json());
+        }
+        out.push(']');
+        out
+    }
 
     /// Stable identity of every selected provider and target boundary input.
     pub fn provider_identity(&self) -> String {
@@ -136,10 +1100,31 @@ impl TargetMachine {
         append_identity_frame(&mut bytes, "scheduler", &self.scheduler.audit_json());
         append_identity_frame(&mut bytes, "byte_sink", &self.byte_sink.audit_json());
         append_identity_frame(&mut bytes, "startup", &self.startup.audit_json());
+        append_identity_frame(&mut bytes, "provider_facts", &self.provider_facts_json());
+        append_identity_frame(&mut bytes, "hardware", &self.hardware.audit_json());
+        append_identity_frame(&mut bytes, "programmers", &self.programmer_facts_json());
+        append_identity_frame(&mut bytes, "layout_facts", &self.layout.cache_identity());
         format!(
             "target-providers-v1:{}",
             crate::SHA256::sha256_hex(&bytes)
         )
+    }
+    /// Stable identity of the linker implementation selected by this machine.
+    /// Generated scripts are content-bound to the typed memory, allocator, and
+    /// startup facts; they must not collapse to one profile-wide label.
+    pub fn linker_identity(&self) -> String {
+        match &self.linker {
+            LinkerInput::Generated => self
+                .generate_linker_script()
+                .map(|script| {
+                    format!(
+                        "linker-generated-v2:{}",
+                        crate::SHA256::sha256_hex(script.as_bytes())
+                    )
+                })
+                .unwrap_or_else(|_| self.linker.identity()),
+            _ => self.linker.identity(),
+        }
     }
 
     /// Build the complete target dossier consumed by artifact and Prelude
@@ -163,16 +1148,17 @@ impl TargetMachine {
             "prelude-closure-v1:{}",
             crate::SHA256::sha256_hex(&closure_bytes)
         );
-        TargetDossier::new(
-            self.max_runtime_layer(),
-            self.provider_identity(),
+        TargetDossier {
+            machine: Some(Box::new(self.clone())),
+            layer: self.max_runtime_layer(),
+            provider_identity: self.provider_identity(),
             closure_identity,
-        )
-        .with_linker_identity(self.linker.identity())
-        .with_tier_identity(tier.as_str())
-        .with_compiler_identity(compiler_identity.as_ref())
-        .with_environment_identity(self.environment_identity())
-        .with_dependency_identity(dependency_identity.as_ref())
+            linker_identity: self.linker_identity(),
+            tier_identity: tier.as_str().to_string(),
+            compiler_identity: compiler_identity.as_ref().to_string(),
+            environment_identity: self.environment_identity().to_string(),
+            dependency_identity: dependency_identity.as_ref().to_string(),
+        }
     }
 
     pub fn max_runtime_layer(&self) -> RuntimeLayer {
@@ -195,7 +1181,13 @@ impl TargetMachine {
                 AllocatorPolicy::Provider { .. } | AllocatorPolicy::Fixed { .. } => true,
                 AllocatorPolicy::Unspecified | AllocatorPolicy::None => false,
             },
+            TargetCapability::Atomic64 => self.supports_atomic_word(),
             TargetCapability::Mmio => self.mmio.provides(hosted),
+            TargetCapability::Hardware => {
+                !self.hardware.register_blocks.is_empty()
+                    || !self.hardware.interrupts.is_empty()
+                    || !self.hardware.dma_channels.is_empty()
+            },
             TargetCapability::TimeWall => self.wall_clock.provides(hosted),
             TargetCapability::TimeMonotonic => self.monotonic_clock.provides(hosted),
             TargetCapability::TimeZoneData => self.zone_data.provides(hosted),
@@ -224,9 +1216,87 @@ impl TargetMachine {
         validate_ram_budget(self, usage, &mut errors);
         validate_core_usage(self, usage, &mut errors);
         validate_target_capabilities(self, usage, &mut errors);
+        validate_startup_facts(self, &mut errors);
         validate_mmio(self, usage, &mut errors);
+        errors.extend(self.hardware.validate(&self.memory));
 
         errors
+    }
+
+    /// Validate backend-neutral hardware operations projected by sema. The
+    /// sema boundary performs effect and ownership sequencing; this method
+    /// supplies the profile and typed register checks it shares with MIR.
+    pub fn validate_hardware(&self, usage: &TargetHardwareUse) -> Vec<TargetMachineError> {
+        let mut errors = self.hardware.validate(&self.memory);
+        for reference in &usage.unresolved_references {
+            match reference {
+                TargetHardwareUnresolvedReference::RegisterBlock { block } => {
+                    errors.push(TargetMachineError::UnknownRegisterBlock {
+                        block: block.clone(),
+                    });
+                }
+                TargetHardwareUnresolvedReference::Register { block, register } => {
+                    errors.push(TargetMachineError::UnknownRegister {
+                        block: block.clone(),
+                        register: register.clone(),
+                    });
+                }
+                TargetHardwareUnresolvedReference::DmaChannel { channel } => {
+                    errors.push(TargetMachineError::UnknownDmaChannel {
+                        channel: channel.clone(),
+                    });
+                }
+                TargetHardwareUnresolvedReference::Interrupt { interrupt } => {
+                    errors.push(TargetMachineError::UnknownInterrupt {
+                        interrupt: interrupt.clone(),
+                    });
+                }
+            }
+        }
+        self.hardware
+            .validate_register_accesses(&usage.register_accesses, &mut errors);
+        errors
+    }
+
+    /// Typed target audit used by command status producers. This preserves the
+    /// audit document shape without routing in-repo facts through rendered JSON.
+    pub fn audit_value(&self, usage: &TargetMachineUse) -> StatusValue {
+        let dossier = self.target_dossier(usage, ExecutionTier::Aot, "unspecified", "unspecified");
+        StatusValue::object(
+            StatusFields::new()
+                .with("name", self.name.as_str())
+                .with("triple", self.triple.as_str())
+                .with("environment", self.environment_identity())
+                .with("provider_identity", self.provider_identity())
+                .with("linker", linker_value(&self.linker))
+                .with("allocator", allocator_value(&self.allocator))
+                .with("panic", panic_value(&self.panic))
+                .with("memory", memory_value(&self.memory))
+                .with("mmio_capability", mmio_policy_value(&self.mmio))
+                .with("time_wall", clock_value(&self.wall_clock))
+                .with("time_monotonic", clock_value(&self.monotonic_clock))
+                .with("time_zone_data", clock_value(&self.zone_data))
+                .with("time_sleep", clock_value(&self.sleep))
+                .with("entropy", entropy_value(&self.entropy))
+                .with("scheduler", scheduler_value(&self.scheduler))
+                .with("byte_sink", byte_sink_value(&self.byte_sink))
+                .with("startup", startup_value(&self.startup))
+                .with("provider_facts", provider_facts_value(self))
+                .with("hardware", hardware_value(&self.hardware))
+                .with("programmers", programmers_value(&self.programmers))
+                .with("target_dossier", target_dossier_value(&dossier, &self.triple))
+                .with("unavailable_core_apis", unavailable_core_value(self, usage))
+                .with("mmio", mmio_value(&usage.mmio))
+                .with(
+                    "execution",
+                    StatusValue::object(
+                        StatusFields::new()
+                            .with("aot", true)
+                            .with("dev", !self.no_os)
+                            .with("jit", !self.no_os),
+                    ),
+                ),
+        )
     }
 
     pub fn audit_json(&self, usage: &TargetMachineUse) -> String {
@@ -272,6 +1342,9 @@ impl TargetMachine {
         push_field(&mut out, "scheduler", &self.scheduler.audit_json(), false);
         push_field(&mut out, "byte_sink", &self.byte_sink.audit_json(), false);
         push_field(&mut out, "startup", &self.startup.audit_json(), false);
+        push_field(&mut out, "provider_facts", &self.provider_facts_json(), false);
+        push_field(&mut out, "hardware", &self.hardware.audit_json(), false);
+        push_field(&mut out, "programmers", &self.programmer_facts_json(), false);
         let dossier = self.target_dossier(usage, ExecutionTier::Aot, "unspecified", "unspecified");
         push_field(
             &mut out,
@@ -295,15 +1368,29 @@ impl TargetMachine {
     }
 
     /// D-TARGET-LINKER1=A: generate linker input from typed memory regions.
+    ///
+    /// The exported symbols are part of the portable Prelude ABI. Every value
+    /// comes from the checked memory and allocator facts; no target triple
+    /// guesses section placement or heap bounds.
     pub fn generate_linker_script(&self) -> Result<String, TargetMachineError> {
         if !self.no_os {
             return Err(TargetMachineError::HostedHasNoLinkerScript);
         }
-        if self.memory.is_empty() {
-            return Err(TargetMachineError::MissingMemoryKind {
+        let flash = self
+            .memory
+            .iter()
+            .find(|region| region.kind == MemoryKind::Flash)
+            .ok_or(TargetMachineError::MissingMemoryKind {
                 kind: MemoryKind::Flash,
-            });
-        }
+            })?;
+        let ram = self
+            .memory
+            .iter()
+            .find(|region| region.kind == MemoryKind::Ram)
+            .ok_or(TargetMachineError::MissingMemoryKind {
+                kind: MemoryKind::Ram,
+            })?;
+
         let mut out = String::from("/* generated by Jet target machine */\nMEMORY {\n");
         for region in &self.memory {
             let attrs = match region.kind {
@@ -321,94 +1408,190 @@ impl TargetMachine {
             );
         }
         out.push_str("}\n");
-        let entry = if self.triple.contains("thumb") || self.triple.contains("armv") {
-            "Reset_Handler"
-        } else {
-            "_start"
-        };
-        let _ = write!(out, "ENTRY({entry})\nSECTIONS {{\n");
-        if let Some(flash) = self.memory.iter().find(|r| r.kind == MemoryKind::Flash) {
-            let _ = write!(
-                out,
-                "  .text : {{\n    KEEP(*(.vectors))\n    *(.text*)\n    *(.rodata*)\n  }} > {}\n",
-                flash.name
-            );
-        }
-        if let Some(ram) = self.memory.iter().find(|r| r.kind == MemoryKind::Ram) {
-            let flash = self
-                .memory
-                .iter()
-                .find(|r| r.kind == MemoryKind::Flash)
-                .map(|r| r.name.as_str())
-                .unwrap_or(ram.name.as_str());
-            let _ = write!(
-                out,
-                "  .data : {{ *(.data*) }} > {} AT > {}\n  .bss : {{ *(.bss*) *(COMMON) }} > {}\n",
-                ram.name, flash, ram.name
-            );
+        let _ = write!(out, "ENTRY({})\nSECTIONS {{\n", self.startup_entry);
+        let _ = write!(
+            out,
+            "  .text : {{\n    KEEP(*({}))\n    *(.text*)\n    *(.rodata*)\n  }} > {}\n",
+            self.startup_placement, flash.name
+        );
+        let _ = write!(
+            out,
+            "  .data : ALIGN(4) {{\n    __jet_data_start = .;\n    *(.data*)\n    __jet_data_end = .;\n  }} > {} AT > {}\n  __jet_data_load = LOADADDR(.data);\n",
+            ram.name, flash.name
+        );
+        let _ = write!(
+            out,
+            "  .bss (NOLOAD) : ALIGN(4) {{\n    __jet_bss_start = .;\n    *(.bss*)\n    *(COMMON)\n    __jet_bss_end = .;\n  }} > {}\n",
+            ram.name
+        );
+        let _ = write!(
+            out,
+            "  __jet_stack_top = ORIGIN({}) + LENGTH({});\n",
+            ram.name, ram.name
+        );
+        match &self.allocator {
+            AllocatorPolicy::Fixed { region, size } => {
+                let _ = write!(
+                    out,
+                    "  __jet_heap_start = ORIGIN({region});\n  __jet_heap_end = ORIGIN({region}) + {};\n",
+                    size.bytes
+                );
+            }
+            AllocatorPolicy::Provider { .. } => {
+                let _ = write!(
+                    out,
+                    "  __jet_heap_start = __jet_bss_end;\n  __jet_heap_end = ORIGIN({}) + LENGTH({});\n",
+                    ram.name, ram.name
+                );
+            }
+            AllocatorPolicy::None
+            | AllocatorPolicy::Unspecified
+            | AllocatorPolicy::HostedDefault
+            | AllocatorPolicy::Counting { .. } => {
+                out.push_str(
+                    "  __jet_heap_start = __jet_bss_end;\n  __jet_heap_end = __jet_bss_end;\n",
+                );
+            }
         }
         out.push_str("}\n");
         Ok(out)
     }
 
     /// Startup source that matches the machine triple (AOT firmware smoke).
+    ///
+    /// Startup is deliberately only machine plumbing. The checked Jet program
+    /// enters through `__jet_program_entry`; no marker output or canned
+    /// success path is emitted here.
     pub fn generate_startup_source(&self) -> Result<StartupSource, TargetMachineError> {
         if !self.no_os {
             return Err(TargetMachineError::HostedHasNoStartup);
         }
         if self.triple.contains("thumb") || self.triple.starts_with("arm") {
-            let ram = self
-                .memory
+            self.memory
                 .iter()
-                .find(|r| r.kind == MemoryKind::Ram)
+                .find(|region| region.kind == MemoryKind::Ram)
                 .ok_or(TargetMachineError::MissingMemoryKind {
                     kind: MemoryKind::Ram,
                 })?;
-            let stack_top = ram.origin.saturating_add(ram.size.bytes);
-            let mark = ram.origin;
             Ok(StartupSource {
                 filename: "startup.c".to_string(),
                 contents: format!(
                     concat!(
                         "/* generated by Jet target machine `{name}` */\n",
+                        "/* ABI: {abi} {abi_version} */\n",
                         "typedef void (*vec_t)(void);\n",
-                        "void Reset_Handler(void);\n",
-                        "void Default_Handler(void) {{ for(;;){{}} }}\n",
-                        "__attribute__((section(\".vectors\"), used))\n",
-                        "vec_t const vectors[] = {{ (vec_t)0x{stack_top:08X}u, Reset_Handler }};\n",
-                        "void Reset_Handler(void) {{\n",
-                        "  volatile unsigned char *mark = (volatile unsigned char *)0x{mark:08X}u;\n",
-                        "  mark[0] = 0x4F; mark[1] = 0x4B;\n",
-                        "  for(;;){{}}\n",
+                        "typedef __UINTPTR_TYPE__ uintptr_t;\n",
+                        "typedef __UINT32_TYPE__ uint32_t;\n",
+                        "extern unsigned char __jet_stack_top;\n",
+                        "extern unsigned char __jet_data_load;\n",
+                        "extern unsigned char __jet_data_start;\n",
+                        "extern unsigned char __jet_data_end;\n",
+                        "extern unsigned char __jet_bss_start;\n",
+                        "extern unsigned char __jet_bss_end;\n",
+                        "#if defined(__ARM_FP) && (__ARM_FP != 0)\n",
+                        "static void __jet_enable_fpu(void) {{\n",
+                        "  volatile uint32_t *cpacr = (volatile uint32_t *)(uintptr_t)0xE000ED88u;\n",
+                        "  *cpacr |= (uint32_t)(0xFu << 20);\n",
+                        "  __asm__ volatile (\"dsb\" ::: \"memory\");\n",
+                        "  __asm__ volatile (\"isb\" ::: \"memory\");\n",
+                        "}}\n",
+                        "#else\n",
+                        "static void __jet_enable_fpu(void) {{}}\n",
+                        "#endif\n",
+                        "void __jet_target_init(void);\n",
+                        "void __jet_program_entry(void);\n",
+                        "void {entry}(void);\n",
+                        "void SysTick_Handler(void);\n",
+                        "void Default_Handler(void) {{ for (;;) {{ __asm__ volatile (\"wfi\"); }} }}\n",
+                        "__attribute__((section(\"{placement}\"), used, aligned(128)))\n",
+                        "vec_t const {vectors}[] = {{\n",
+                        "  (vec_t)&__jet_stack_top,\n",
+                        "  (vec_t){entry},\n",
+                        "  (vec_t)Default_Handler,\n",
+                        "  (vec_t)Default_Handler,\n",
+                        "  (vec_t)Default_Handler,\n",
+                        "  (vec_t)Default_Handler,\n",
+                        "  (vec_t)Default_Handler,\n",
+                        "  (vec_t)0,\n",
+                        "  (vec_t)0,\n",
+                        "  (vec_t)0,\n",
+                        "  (vec_t)0,\n",
+                        "  (vec_t)Default_Handler,\n",
+                        "  (vec_t)Default_Handler,\n",
+                        "  (vec_t)0,\n",
+                        "  (vec_t)Default_Handler,\n",
+                        "  (vec_t)SysTick_Handler\n",
+                        "}};\n",
+                        "void {entry}(void) {{\n",
+                        "  unsigned char *src = &__jet_data_load;\n",
+                        "  unsigned char *dst = &__jet_data_start;\n",
+                        "  while (dst < &__jet_data_end) {{ *dst++ = *src++; }}\n",
+                        "  dst = &__jet_bss_start;\n",
+                        "  while (dst < &__jet_bss_end) {{ *dst++ = 0; }}\n",
+                        "  __jet_enable_fpu();\n",
+                        "  __jet_target_init();\n",
+                        "  __jet_program_entry();\n",
+                        "  for (;;) {{ __asm__ volatile (\"wfi\"); }}\n",
                         "}}\n"
                     ),
                     name = self.name,
-                    stack_top = stack_top,
-                    mark = mark
+                    abi = self.startup_abi.calling_convention,
+                    abi_version = self.startup_abi.version,
+                    entry = self.startup_entry,
+                    vectors = self.startup_vectors,
+                    placement = self.startup_placement,
                 ),
             })
         } else if self.triple.contains("aarch64") {
-            // QEMU virt UART0 at 0x09000000 — print "OK\n" then idle.
-            // Split the UART base into mov+lsl so clang's aarch64 asm accepts it.
             Ok(StartupSource {
                 filename: "startup.S".to_string(),
                 contents: format!(
                     concat!(
                         "/* generated by Jet target machine `{name}` */\n",
-                        ".global _start\n",
-                        "_start:\n",
-                        "  mov x1, #0x0900\n",
-                        "  lsl x1, x1, #16\n",
-                        "  mov w0, #79\n",
-                        "  str w0, [x1]\n",
-                        "  mov w0, #75\n",
-                        "  str w0, [x1]\n",
-                        "  mov w0, #10\n",
-                        "  str w0, [x1]\n",
-                        "1: wfe\n",
-                        "  b 1b\n"
+                        "/* ABI: {abi} {abi_version}; placement: {placement} */\n",
+                        ".text\n",
+                        ".global {entry}\n",
+                        ".type {entry}, %function\n",
+                        ".extern __jet_target_init\n",
+                        ".extern __jet_program_entry\n",
+                        ".extern __jet_stack_top\n",
+                        ".extern __jet_data_load\n",
+                        ".extern __jet_data_start\n",
+                        ".extern __jet_data_end\n",
+                        ".extern __jet_bss_start\n",
+                        ".extern __jet_bss_end\n",
+                        "{entry}:\n",
+                        "  ldr x0, =__jet_stack_top\n",
+                        "  mov sp, x0\n",
+                        "  ldr x0, =__jet_data_load\n",
+                        "  ldr x1, =__jet_data_start\n",
+                        "  ldr x2, =__jet_data_end\n",
+                        "1:\n",
+                        "  cmp x1, x2\n",
+                        "  b.hs 2f\n",
+                        "  ldrb w3, [x0], #1\n",
+                        "  strb w3, [x1], #1\n",
+                        "  b 1b\n",
+                        "2:\n",
+                        "  ldr x1, =__jet_bss_start\n",
+                        "  ldr x2, =__jet_bss_end\n",
+                        "3:\n",
+                        "  cmp x1, x2\n",
+                        "  b.hs 4f\n",
+                        "  strb wzr, [x1], #1\n",
+                        "  b 3b\n",
+                        "4:\n",
+                        "  bl __jet_target_init\n",
+                        "  bl __jet_program_entry\n",
+                        "5: wfe\n",
+                        "  b 5b\n",
+                        ".size {entry}, .-{entry}\n"
                     ),
-                    name = self.name
+                    name = self.name,
+                    abi = self.startup_abi.calling_convention,
+                    abi_version = self.startup_abi.version,
+                    entry = self.startup_entry,
+                    placement = self.startup_placement,
                 ),
             })
         } else {
@@ -416,6 +1599,164 @@ impl TargetMachine {
                 triple: self.triple.clone(),
             })
         }
+    }
+    /// Emit the actual C adapter object for this no-OS profile.
+    ///
+    /// Only profiles with an implementation in this module are accepted.
+    /// Provider labels alone never cause a target function to be invented.
+    pub fn generate_provider_source(
+        &self,
+    ) -> Result<TargetProviderSource, TargetMachineError> {
+        if !self.no_os {
+            return Err(TargetMachineError::FirmwareBuildFailed {
+                detail: "hosted targets do not emit portable target adapters".to_string(),
+            });
+        }
+        let contents = match self.name.as_str() {
+            "board.sensor_v1" => {
+                let uart = self
+                    .hardware
+                    .register_blocks
+                    .iter()
+                    .find(|block| block.name == "UART0")
+                    .ok_or_else(|| TargetMachineError::FirmwareBuildFailed {
+                        detail: "board.sensor_v1 requires UART0 hardware facts".to_string(),
+                    })?;
+                let register_address = |name: &str| {
+                    uart.register(name)
+                        .map(|register| uart.base.saturating_add(register.offset))
+                };
+                let data = register_address("data").ok_or_else(|| {
+                    TargetMachineError::FirmwareBuildFailed {
+                        detail: "board.sensor_v1 requires UART0.data hardware fact".to_string(),
+                    }
+                })?;
+                let state = register_address("state").ok_or_else(|| {
+                    TargetMachineError::FirmwareBuildFailed {
+                        detail: "board.sensor_v1 requires UART0.state hardware fact".to_string(),
+                    }
+                })?;
+                let ctrl = register_address("ctrl").ok_or_else(|| {
+                    TargetMachineError::FirmwareBuildFailed {
+                        detail: "board.sensor_v1 requires UART0.ctrl hardware fact".to_string(),
+                    }
+                })?;
+                let bauddiv = register_address("bauddiv").ok_or_else(|| {
+                    TargetMachineError::FirmwareBuildFailed {
+                        detail: "board.sensor_v1 requires UART0.bauddiv hardware fact".to_string(),
+                    }
+                })?;
+                let systick = 0xE000_E018u64;
+                sensor_provider_source_contents(ctrl, state, data, bauddiv, systick)
+            }
+            "board.virt_aarch64" => {
+                let uart = self
+                    .memory
+                    .iter()
+                    .find(|region| region.name == "uart0")
+                    .map(|region| region.origin)
+                    .ok_or_else(|| TargetMachineError::FirmwareBuildFailed {
+                        detail: "board.virt_aarch64 requires uart0 memory fact".to_string(),
+                    })?;
+                virt_provider_source_contents(uart)
+            }
+            _ => {
+                return Err(TargetMachineError::FirmwareBuildFailed {
+                    detail: format!(
+                        "no checked target adapter implementation for `{}`",
+                        self.name
+                    ),
+                })
+            }
+        };
+
+        self.verify_provider_bindings(&contents)?;
+        Ok(TargetProviderSource {
+            filename: "target_providers.c".to_string(),
+            contents,
+        })
+    }
+
+    fn verify_provider_bindings(&self, source: &str) -> Result<(), TargetMachineError> {
+        let source = source.as_bytes();
+        let check = |capability: TargetCapability, provider: &ProviderContract| {
+            if provider.provenance.starts_with("builtin:") && provider.matches_source(source) {
+                Ok(())
+            } else {
+                Err(TargetMachineError::InvalidProviderContract {
+                    capability: capability.as_str().to_string(),
+                    provider: provider.provider.clone(),
+                    sha256: provider.sha256.clone(),
+                })
+            }
+        };
+        match self.name.as_str() {
+            "board.sensor_v1" => {
+                if let MmioPolicy::Provider { provider } = &self.mmio {
+                    check(TargetCapability::Mmio, provider)?;
+                }
+                if let ClockPolicy::Provider { provider } = &self.monotonic_clock {
+                    check(TargetCapability::TimeMonotonic, provider)?;
+                }
+                if let ClockPolicy::Provider { provider } = &self.sleep {
+                    check(TargetCapability::TimeSleep, provider)?;
+                }
+                if let SchedulerPolicy::Cooperative { provider } = &self.scheduler {
+                    check(TargetCapability::Scheduler, provider)?;
+                }
+                if let Some(provider) = self.panic.provider() {
+                    check(TargetCapability::PanicReport, provider)?;
+                }
+                if let ByteSinkPolicy::Provider {
+                    read,
+                    write,
+                    report,
+                } = &self.byte_sink
+                {
+                    if let Some(provider) = read {
+                        check(TargetCapability::IoRead, provider)?;
+                    }
+                    if let Some(provider) = write {
+                        check(TargetCapability::IoWrite, provider)?;
+                    }
+                    if let Some(provider) = report {
+                        check(TargetCapability::PanicReport, provider)?;
+                    }
+                }
+            }
+            "board.virt_aarch64" => {
+                if let MmioPolicy::Provider { provider } = &self.mmio {
+                    check(TargetCapability::Mmio, provider)?;
+                }
+                if let ByteSinkPolicy::Provider {
+                    read: _,
+                    write,
+                    report,
+                } = &self.byte_sink
+                {
+                    if let Some(provider) = write {
+                        check(TargetCapability::IoWrite, provider)?;
+                    }
+                    if let Some(provider) = report {
+                        check(TargetCapability::PanicReport, provider)?;
+                    }
+                }
+            }
+            _ => unreachable!("provider implementation matched above"),
+        }
+        if let StartupPolicy::Generated { provider } = &self.startup {
+            let startup = self.generate_startup_source()?.contents;
+            if !provider.provenance.starts_with("builtin:")
+                || !provider.matches_source(startup.as_bytes())
+            {
+                return Err(TargetMachineError::InvalidProviderContract {
+                    capability: TargetCapability::Startup.as_str().to_string(),
+                    provider: provider.provider.clone(),
+                    sha256: provider.sha256.clone(),
+                });
+            }
+        }
+        Ok(())
     }
 
     pub fn size_budget(&self, usage: &TargetMachineUse, artifact_bytes: u64) -> SizeBudgetReport {
@@ -486,28 +1827,28 @@ impl TargetMachine {
         }
     }
 
-    /// Representative MCU board used by card #239 proofs.
+    /// QEMU MPS2 AN386 (Cortex-M4) proof board used by card #239 proofs.
     pub fn board_sensor_v1() -> Self {
         let mut machine = Self::bare_metal("board.sensor_v1", "thumbv7em-none-eabihf");
         machine.memory = vec![
             MemoryRegion::new(
                 "flash",
                 0x0000_0000,
-                ByteSize::kib(256),
+                ByteSize::mib(4),
                 MemoryKind::Flash,
                 MemoryAccess::Rx,
             ),
             MemoryRegion::new(
                 "ram",
                 0x2000_0000,
-                ByteSize::kib(64),
+                ByteSize::mib(4),
                 MemoryKind::Ram,
                 MemoryAccess::Rw,
             ),
             MemoryRegion::new(
                 "peripherals",
                 0x4000_0000,
-                ByteSize::mib(1),
+                ByteSize::kib(64),
                 MemoryKind::Mmio,
                 MemoryAccess::Rw,
             ),
@@ -515,56 +1856,97 @@ impl TargetMachine {
         machine.linker = LinkerInput::Generated;
         machine.allocator = AllocatorPolicy::None;
         machine.panic = PanicPolicy::Abort;
+        let adapter_source = sensor_provider_source_contents(
+            0x4000_4008,
+            0x4000_4004,
+            0x4000_4000,
+            0x4000_4010,
+            0xE000_E018,
+        );
         machine.mmio = MmioPolicy::Provider {
-            provider: ProviderContract::new("board.sensor_v1.mmio", "sha256:board-sensor-v1-mmio"),
+            provider: builtin_provider("board.sensor_v1.mmio", &adapter_source),
         };
         machine.wall_clock = ClockPolicy::None;
         machine.monotonic_clock = ClockPolicy::Provider {
-            provider: ProviderContract::new(
-                "board.sensor_v1.systick",
-                "sha256:board-sensor-v1-systick",
-            ),
+            provider: builtin_provider("board.sensor_v1.systick", &adapter_source),
         };
         machine.zone_data = ClockPolicy::None;
         machine.sleep = ClockPolicy::Provider {
-            provider: ProviderContract::new(
-                "board.sensor_v1.systick",
-                "sha256:board-sensor-v1-systick",
-            ),
+            provider: builtin_provider("board.sensor_v1.systick", &adapter_source),
         };
         machine.entropy = EntropyPolicy::None;
         machine.scheduler = SchedulerPolicy::Cooperative {
-            provider: ProviderContract::new(
-                "board.sensor_v1.cooperative",
-                "sha256:board-sensor-v1-scheduler",
-            ),
+            provider: builtin_provider("board.sensor_v1.cooperative", &adapter_source),
         };
         machine.byte_sink = ByteSinkPolicy::Provider {
-            read: Some(ProviderContract::new(
-                "board.sensor_v1.uart_rx",
-                "sha256:board-sensor-v1-uart-rx",
-            )),
-            write: Some(ProviderContract::new(
-                "board.sensor_v1.uart_tx",
-                "sha256:board-sensor-v1-uart-tx",
-            )),
-            report: Some(ProviderContract::new(
+            read: Some(builtin_provider("board.sensor_v1.uart_rx", &adapter_source)),
+            write: Some(builtin_provider("board.sensor_v1.uart_tx", &adapter_source)),
+            report: Some(builtin_provider(
                 "board.sensor_v1.report_uart",
-                "sha256:board-sensor-v1-report",
+                &adapter_source,
             )),
         };
         machine.startup = StartupPolicy::Generated {
-            provider: ProviderContract::new(
+            provider: builtin_provider(
                 "board.sensor_v1.startup",
-                "sha256:board-sensor-v1-startup",
+                &machine
+                    .generate_startup_source()
+                    .expect("board sensor startup facts are complete")
+                    .contents,
             ),
+        };
+        machine.hardware = TargetHardwareFacts {
+            svd: None,
+            register_blocks: vec![TargetRegisterBlockFact::new(
+                "UART0",
+                0x4000_4000,
+                ByteSize::bytes(0x14),
+                vec![
+                    TargetRegisterFact::new(
+                        "data",
+                        0x00,
+                        RegisterWidth::U32,
+                        TargetRegisterAccessMode::ReadWrite,
+                        true,
+                    ),
+                    TargetRegisterFact::new(
+                        "state",
+                        0x04,
+                        RegisterWidth::U32,
+                        TargetRegisterAccessMode::ReadWrite,
+                        true,
+                    ),
+                    TargetRegisterFact::new(
+                        "ctrl",
+                        0x08,
+                        RegisterWidth::U32,
+                        TargetRegisterAccessMode::ReadWrite,
+                        true,
+                    ),
+                    TargetRegisterFact::new(
+                        "bauddiv",
+                        0x10,
+                        RegisterWidth::U32,
+                        TargetRegisterAccessMode::ReadWrite,
+                        true,
+                    ),
+                ],
+            )],
+            interrupts: Vec::new(),
+            dma_channels: Vec::new(),
         };
         machine
     }
 
     /// Linux no-OS / QEMU virt proof board.
     pub fn board_virt_aarch64() -> Self {
-        let mut machine = Self::bare_metal("board.virt_aarch64", "aarch64-unknown-none");
+        let mut machine = Self::bare_metal("board.virt_aarch64", "aarch64-unknown-none")
+            .with_startup_facts(
+                "_start",
+                "vectors",
+                ProviderAbi::new("AArch64", "1"),
+                ".vectors",
+            );
         machine.memory = vec![
             MemoryRegion::new(
                 "flash",
@@ -591,8 +1973,9 @@ impl TargetMachine {
         machine.linker = LinkerInput::Generated;
         machine.allocator = AllocatorPolicy::None;
         machine.panic = PanicPolicy::Abort;
+        let adapter_source = virt_provider_source_contents(0x0900_0000);
         machine.mmio = MmioPolicy::Provider {
-            provider: ProviderContract::new("board.virt_aarch64.mmio", "sha256:board-virt-mmio"),
+            provider: builtin_provider("board.virt_aarch64.mmio", &adapter_source),
         };
         machine.wall_clock = ClockPolicy::None;
         machine.monotonic_clock = ClockPolicy::None;
@@ -602,21 +1985,29 @@ impl TargetMachine {
         machine.scheduler = SchedulerPolicy::None;
         machine.byte_sink = ByteSinkPolicy::Provider {
             read: None,
-            write: Some(ProviderContract::new(
+            write: Some(builtin_provider(
                 "board.virt_aarch64.uart0",
-                "sha256:board-virt-uart0",
+                &adapter_source,
             )),
-            report: Some(ProviderContract::new(
+            report: Some(builtin_provider(
                 "board.virt_aarch64.uart0",
-                "sha256:board-virt-uart0",
+                &adapter_source,
             )),
         };
         machine.startup = StartupPolicy::Generated {
-            provider: ProviderContract::new(
+            provider: builtin_provider(
                 "board.virt_aarch64.startup",
-                "sha256:board-virt-startup",
+                &machine
+                    .generate_startup_source()
+                    .expect("board virt startup facts are complete")
+                    .contents,
             ),
         };
+        machine.programmers = vec![TargetProgrammerFacts::emulator(
+            "qemu-system-aarch64",
+            "virt",
+            "cortex-a57",
+        )];
         machine
     }
     /// Browser Wasm profile: browser/JS adapters are explicit target facts.
@@ -740,6 +2131,293 @@ impl TargetMachine {
 pub struct StartupSource {
     pub filename: String,
     pub contents: String,
+}
+
+/// Target adapter source emitted from the checked provider facts.
+///
+/// The source is compiled and linked as a separate object. Its digest is also
+/// carried by the provider contracts, so changing an implementation changes
+/// the target dossier and firmware identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetProviderSource {
+    pub filename: String,
+    pub contents: String,
+}
+
+fn sensor_provider_source_contents(
+    control_register: u64,
+    state_register: u64,
+    data_register: u64,
+    bauddiv_register: u64,
+    systick_register: u64,
+) -> String {
+    format!(
+        concat!(
+            "/* checked board.sensor_v1 target adapters */\n",
+            "/* board contract: QEMU MPS2 AN386 CMSDK APB UART0. */\n",
+            "/* UART0 is at 0x40004000; MPS2 AN386 runs the Cortex-M4 at 25 MHz. */\n",
+            "/* Sources: https://raw.githubusercontent.com/qemu/qemu/master/hw/arm/mps2.c; https://raw.githubusercontent.com/qemu/qemu/master/hw/char/cmsdk-apb-uart.c. */\n",
+            "/* Provider source identity is bound by the checked ProviderContract. */\n",
+            "typedef __SIZE_TYPE__ size_t;\n",
+            "typedef __UINTPTR_TYPE__ uintptr_t;\n",
+            "typedef __UINT8_TYPE__ uint8_t;\n",
+            "typedef __INT32_TYPE__ int32_t;\n",
+            "typedef __UINT32_TYPE__ uint32_t;\n",
+            "typedef __UINT64_TYPE__ uint64_t;\n",
+            "typedef __INT64_TYPE__ int64_t;\n",
+            "#define JET_UART_DATA ((volatile uint32_t *)(uintptr_t)0x{data_register:08X}u)\n",
+            "#define JET_UART_STATE ((volatile uint32_t *)(uintptr_t)0x{state_register:08X}u)\n",
+            "#define JET_UART_CTRL ((volatile uint32_t *)(uintptr_t)0x{control_register:08X}u)\n",
+            "#define JET_UART_BAUDDIV ((volatile uint32_t *)(uintptr_t)0x{bauddiv_register:08X}u)\n",
+            "#define JET_SYSTICK_CVR ((volatile uint32_t *)(uintptr_t)0x{systick_register:08X}u)\n",
+            "#define JET_SYSTICK_RVR ((volatile uint32_t *)(uintptr_t)(0x{systick_register:08X}u - 0x4u))\n",
+            "#define JET_SYSTICK_CSR ((volatile uint32_t *)(uintptr_t)(0x{systick_register:08X}u - 0x8u))\n",
+            "#define JET_UART_STATE_TXFULL (1u << 0)\n",
+            "#define JET_UART_STATE_RXFULL (1u << 1)\n",
+            "#define JET_UART_STATE_TXOVERRUN (1u << 2)\n",
+            "#define JET_UART_STATE_RXOVERRUN (1u << 3)\n",
+            "#define JET_UART_CTRL_TX_EN (1u << 0)\n",
+            "#define JET_UART_CTRL_RX_EN (1u << 1)\n",
+            "#define JET_UART_BAUDDIV_VALUE ((uint32_t)217u)\n",
+            "#define JET_SYSTICK_ENABLE (1u << 0)\n",
+            "#define JET_SYSTICK_TICKINT (1u << 1)\n",
+            "#define JET_SYSTICK_CLKSOURCE (1u << 2)\n",
+            "#define JET_SYSTICK_RELOAD ((uint32_t)24999u)\n",
+            "#define JET_MMIO_START ((uint64_t)0x40000000u)\n",
+            "#define JET_MMIO_END ((uint64_t)0x40010000u)\n",
+            "#define JET_IO_LIMIT ((size_t)4096u)\n",
+            "\n",
+            "static volatile uint32_t jet_initialized;\n",
+            "static volatile uint32_t jet_ticks_lo;\n",
+            "static volatile uint32_t jet_ticks_hi;\n",
+            "\n",
+            "static int32_t jet_uart_error(void) {{\n",
+            "  uint32_t errors = *JET_UART_STATE & (JET_UART_STATE_TXOVERRUN | JET_UART_STATE_RXOVERRUN);\n",
+            "  if (errors == 0u) return 0;\n",
+            "  *JET_UART_STATE = errors;\n",
+            "  return -4;\n",
+            "}}\n",
+            "\n",
+            "static int32_t jet_uart_wait_rx(void) {{\n",
+            "  for (;;) {{\n",
+            "    uint32_t state = *JET_UART_STATE;\n",
+            "    if ((state & JET_UART_STATE_RXFULL) != 0u) return jet_uart_error();\n",
+            "    int32_t error = jet_uart_error();\n",
+            "    if (error != 0) return error;\n",
+            "    __asm__ volatile (\"wfi\");\n",
+            "  }}\n",
+            "}}\n",
+            "\n",
+            "static int32_t jet_uart_wait_tx(void) {{\n",
+            "  for (;;) {{\n",
+            "    uint32_t state = *JET_UART_STATE;\n",
+            "    if ((state & JET_UART_STATE_TXFULL) == 0u) return jet_uart_error();\n",
+            "    int32_t error = jet_uart_error();\n",
+            "    if (error != 0) return error;\n",
+            "    __asm__ volatile (\"nop\");\n",
+            "  }}\n",
+            "}}\n",
+            "\n",
+            "void __jet_target_init(void) {{\n",
+            "  if (jet_initialized != 0u) return;\n",
+            "  *JET_UART_CTRL = 0u;\n",
+            "  *JET_UART_STATE = JET_UART_STATE_TXOVERRUN | JET_UART_STATE_RXOVERRUN;\n",
+            "  *JET_UART_BAUDDIV = JET_UART_BAUDDIV_VALUE;\n",
+            "  *JET_UART_CTRL = JET_UART_CTRL_TX_EN | JET_UART_CTRL_RX_EN;\n",
+            "  *JET_SYSTICK_RVR = JET_SYSTICK_RELOAD;\n",
+            "  *JET_SYSTICK_CVR = 0u;\n",
+            "  *JET_SYSTICK_CSR = JET_SYSTICK_ENABLE | JET_SYSTICK_TICKINT | JET_SYSTICK_CLKSOURCE;\n",
+            "  jet_initialized = 1u;\n",
+            "}}\n",
+            "\n",
+            "void SysTick_Handler(void) {{\n",
+            "  uint32_t next = jet_ticks_lo + 1u;\n",
+            "  if (next == 0u) ++jet_ticks_hi;\n",
+            "  jet_ticks_lo = next;\n",
+            "}}\n",
+            "\n",
+            "int32_t __jet_target_read(uint8_t *dst, size_t cap, size_t *used) {{\n",
+            "  if (used == (size_t *)0) return -1;\n",
+            "  *used = 0;\n",
+            "  if (cap > JET_IO_LIMIT || (cap != 0 && dst == (uint8_t *)0)) return -2;\n",
+            "  __jet_target_init();\n",
+            "  for (size_t i = 0; i < cap; ++i) {{\n",
+            "    int32_t error = jet_uart_wait_rx();\n",
+            "    if (error != 0) {{ *used = i; return error; }}\n",
+            "    dst[i] = (uint8_t)(*JET_UART_DATA & 0xffu);\n",
+            "    *used = i + 1u;\n",
+            "  }}\n",
+            "  return jet_uart_error();\n",
+            "}}\n",
+            "\n",
+            "int32_t __jet_target_write(const uint8_t *src, size_t len, size_t *used) {{\n",
+            "  if (used == (size_t *)0) return -1;\n",
+            "  *used = 0;\n",
+            "  if (len > JET_IO_LIMIT || (len != 0 && src == (const uint8_t *)0)) return -2;\n",
+            "  __jet_target_init();\n",
+            "  for (size_t i = 0; i < len; ++i) {{\n",
+            "    int32_t error = jet_uart_wait_tx();\n",
+            "    if (error != 0) {{ *used = i; return error; }}\n",
+            "    *JET_UART_DATA = (uint32_t)src[i];\n",
+            "    *used = i + 1u;\n",
+            "    error = jet_uart_error();\n",
+            "    if (error != 0) return error;\n",
+            "  }}\n",
+            "  return 0;\n",
+            "}}\n",
+            "\n",
+            "int32_t __jet_target_report(const uint8_t *src, size_t len, size_t *used) {{\n",
+            "  return __jet_target_write(src, len, used);\n",
+            "}}\n",
+            "\n",
+            "int32_t __jet_target_monotonic_clock(uint64_t *out) {{\n",
+            "  uint32_t hi1;\n",
+            "  uint32_t lo;\n",
+            "  uint32_t hi2;\n",
+            "  if (out == (uint64_t *)0) return -1;\n",
+            "  __jet_target_init();\n",
+            "  do {{\n",
+            "    hi1 = jet_ticks_hi;\n",
+            "    lo = jet_ticks_lo;\n",
+            "    hi2 = jet_ticks_hi;\n",
+            "  }} while (hi1 != hi2);\n",
+            "  uint64_t ticks = ((uint64_t)hi1 << 32) | (uint64_t)lo;\n",
+            "  if (ticks > (~(uint64_t)0 / 1000000u)) {{\n",
+            "    *out = ~(uint64_t)0;\n",
+            "  }} else {{\n",
+            "    *out = ticks * 1000000u;\n",
+            "  }}\n",
+            "  return 0;\n",
+            "}}\n",
+            "\n",
+            "int32_t __jet_target_sleep(uint64_t nanoseconds) {{\n",
+            "  uint64_t start;\n",
+            "  if (nanoseconds == 0u) return 0;\n",
+            "  __jet_target_init();\n",
+            "  if (__jet_target_monotonic_clock(&start) != 0) return -1;\n",
+            "  while (1) {{\n",
+            "    uint64_t now;\n",
+            "    if (__jet_target_monotonic_clock(&now) != 0) return -1;\n",
+            "    if ((uint64_t)(now - start) >= nanoseconds) return 0;\n",
+            "    __asm__ volatile (\"wfi\");\n",
+            "  }}\n",
+            "}}\n",
+            "\n",
+            "int32_t __jet_target_mmio_read(uint64_t address, uint8_t *dst, size_t len, size_t *used) {{\n",
+            "  if (used == (size_t *)0) return -1;\n",
+            "  *used = 0;\n",
+            "  if (address < JET_MMIO_START || address >= JET_MMIO_END || len > (size_t)(JET_MMIO_END - address)) return -2;\n",
+            "  if (len != 0 && dst == (uint8_t *)0) return -3;\n",
+            "  __jet_target_init();\n",
+            "  for (size_t i = 0; i < len; ++i) dst[i] = *((volatile uint8_t *)(uintptr_t)(address + i));\n",
+            "  *used = len;\n",
+            "  return jet_uart_error();\n",
+            "}}\n",
+            "\n",
+            "int32_t __jet_target_mmio_write(uint64_t address, const uint8_t *src, size_t len, size_t *used) {{\n",
+            "  if (used == (size_t *)0) return -1;\n",
+            "  *used = 0;\n",
+            "  if (address < JET_MMIO_START || address >= JET_MMIO_END || len > (size_t)(JET_MMIO_END - address)) return -2;\n",
+            "  if (len != 0 && src == (const uint8_t *)0) return -3;\n",
+            "  __jet_target_init();\n",
+            "  for (size_t i = 0; i < len; ++i) *((volatile uint8_t *)(uintptr_t)(address + i)) = src[i];\n",
+            "  *used = len;\n",
+            "  return jet_uart_error();\n",
+            "}}\n",
+            "\n",
+            "void __jet_target_scheduler_yield(void) {{\n",
+            "  __jet_target_init();\n",
+            "  __asm__ volatile (\"wfi\");\n",
+            "}}\n",
+            "void __jet_target_abort(void) {{ for (;;) __asm__ volatile (\"wfi\"); }}\n"
+        ),
+        control_register = control_register,
+        state_register = state_register,
+        data_register = data_register,
+        bauddiv_register = bauddiv_register,
+        systick_register = systick_register
+    )
+}
+
+fn virt_provider_source_contents(uart: u64) -> String {
+    format!(
+        concat!(
+            "/* checked board.virt_aarch64 target adapters */\n",
+            "/* board contract: ARM PL011 UART at the declared uart0 base. */\n",
+            "typedef __SIZE_TYPE__ size_t;\n",
+            "typedef __UINTPTR_TYPE__ uintptr_t;\n",
+            "typedef __UINT8_TYPE__ uint8_t;\n",
+            "typedef __UINT32_TYPE__ uint32_t;\n",
+            "typedef __UINT64_TYPE__ uint64_t;\n",
+            "typedef __INT32_TYPE__ int32_t;\n",
+            "#define JET_UART_DR ((volatile uint32_t *)(uintptr_t)0x{uart:08X}u)\n",
+            "#define JET_UART_FR ((volatile uint32_t *)(uintptr_t)(0x{uart:08X}u + 0x18u))\n",
+            "#define JET_UART_LCR_H ((volatile uint32_t *)(uintptr_t)(0x{uart:08X}u + 0x2Cu))\n",
+            "#define JET_UART_CR ((volatile uint32_t *)(uintptr_t)(0x{uart:08X}u + 0x30u))\n",
+            "#define JET_UART_FR_RXFE (1u << 4)\n",
+            "#define JET_UART_FR_TXFF (1u << 5)\n",
+            "#define JET_UART_LCR_H_FEN (1u << 4)\n",
+            "#define JET_UART_LCR_H_WLEN_8 (3u << 5)\n",
+            "#define JET_UART_CR_UARTEN (1u << 0)\n",
+            "#define JET_UART_CR_TXE (1u << 8)\n",
+            "#define JET_UART_CR_RXE (1u << 9)\n",
+            "#define JET_MMIO_START ((uint64_t)0x09000000u)\n",
+            "#define JET_MMIO_END ((uint64_t)0x09001000u)\n",
+            "#define JET_IO_LIMIT ((size_t)4096u)\n",
+            "\n",
+            "static volatile uint32_t jet_initialized;\n",
+            "\n",
+            "void __jet_target_init(void) {{\n",
+            "  if (jet_initialized != 0u) return;\n",
+            "  *JET_UART_CR = 0u;\n",
+            "  *JET_UART_LCR_H = JET_UART_LCR_H_FEN | JET_UART_LCR_H_WLEN_8;\n",
+            "  *JET_UART_CR = JET_UART_CR_UARTEN | JET_UART_CR_TXE | JET_UART_CR_RXE;\n",
+            "  jet_initialized = 1u;\n",
+            "}}\n",
+            "\n",
+            "int32_t __jet_target_write(const uint8_t *src, size_t len, size_t *used) {{\n",
+            "  if (used == (size_t *)0) return -1;\n",
+            "  *used = 0;\n",
+            "  if (len > JET_IO_LIMIT || (len != 0 && src == (const uint8_t *)0)) return -2;\n",
+            "  __jet_target_init();\n",
+            "  for (size_t i = 0; i < len; ++i) {{\n",
+            "    while ((*JET_UART_FR & JET_UART_FR_TXFF) != 0u) __asm__ volatile (\"nop\");\n",
+            "    *JET_UART_DR = (uint32_t)src[i];\n",
+            "  }}\n",
+            "  *used = len;\n",
+            "  return 0;\n",
+            "}}\n",
+            "\n",
+            "int32_t __jet_target_report(const uint8_t *src, size_t len, size_t *used) {{\n",
+            "  return __jet_target_write(src, len, used);\n",
+            "}}\n",
+            "\n",
+            "int32_t __jet_target_mmio_read(uint64_t address, uint8_t *dst, size_t len, size_t *used) {{\n",
+            "  if (used == (size_t *)0) return -1;\n",
+            "  *used = 0;\n",
+            "  if (address < JET_MMIO_START || address >= JET_MMIO_END || len > (size_t)(JET_MMIO_END - address)) return -2;\n",
+            "  if (len != 0 && dst == (uint8_t *)0) return -3;\n",
+            "  __jet_target_init();\n",
+            "  for (size_t i = 0; i < len; ++i) dst[i] = *((volatile uint8_t *)(uintptr_t)(address + i));\n",
+            "  *used = len;\n",
+            "  return 0;\n",
+            "}}\n",
+            "\n",
+            "int32_t __jet_target_mmio_write(uint64_t address, const uint8_t *src, size_t len, size_t *used) {{\n",
+            "  if (used == (size_t *)0) return -1;\n",
+            "  *used = 0;\n",
+            "  if (address < JET_MMIO_START || address >= JET_MMIO_END || len > (size_t)(JET_MMIO_END - address)) return -2;\n",
+            "  if (len != 0 && src == (const uint8_t *)0) return -3;\n",
+            "  __jet_target_init();\n",
+            "  for (size_t i = 0; i < len; ++i) *((volatile uint8_t *)(uintptr_t)(address + i)) = src[i];\n",
+            "  *used = len;\n",
+            "  return 0;\n",
+            "}}\n",
+            "\n",
+            "void __jet_target_abort(void) {{ for (;;) __asm__ volatile (\"wfe\"); }}\n"
+        ),
+        uart = uart
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1010,6 +2688,10 @@ impl AllocatorPolicy {
             ),
         }
     }
+
+    pub fn audit_value(&self) -> StatusValue {
+        allocator_value(self)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1041,19 +2723,109 @@ impl PanicPolicy {
     }
 }
 
+/// D-FREESTAND-FACTS1=A: metadata common to every selected provider fact.
+///
+/// The calling convention and version are kept as data so a target profile
+/// cannot silently inherit the host ABI. `ProviderContract::new` remains the
+/// compatibility constructor for recorded provider identities and supplies
+/// the explicit C/1 default; profiles that use another convention must name
+/// it with [`ProviderContract::with_abi`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderAbi {
+    pub calling_convention: String,
+    pub version: String,
+}
+
+impl ProviderAbi {
+    pub fn new(
+        calling_convention: impl Into<String>,
+        version: impl Into<String>,
+    ) -> Self {
+        Self {
+            calling_convention: calling_convention.into(),
+            version: version.into(),
+        }
+    }
+
+    pub fn c() -> Self {
+        Self::new("C", "1")
+    }
+
+    fn is_valid(&self) -> bool {
+        !self.calling_convention.trim().is_empty()
+            && !self.version.trim().is_empty()
+            && !self.calling_convention.chars().any(char::is_whitespace)
+            && !self.version.chars().any(char::is_whitespace)
+    }
+
+    fn audit_json(&self) -> String {
+        format!(
+            "{{\"calling_convention\":{},\"version\":{}}}",
+            json_str(&self.calling_convention),
+            json_str(&self.version)
+        )
+    }
+}
+
+impl Default for ProviderAbi {
+    fn default() -> Self {
+        Self::c()
+    }
+}
+
+/// Resource limits promised by a provider contract. `None` means that the
+/// provider has no declared bound for that dimension; zero is never a valid
+/// declared limit.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ProviderLimits {
+    pub max_request_bytes: Option<u64>,
+    pub max_response_bytes: Option<u64>,
+    pub max_calls: Option<u64>,
+}
+
+impl ProviderLimits {
+    pub fn unbounded() -> Self {
+        Self::default()
+    }
+
+    fn is_valid(&self) -> bool {
+        [self.max_request_bytes, self.max_response_bytes, self.max_calls]
+            .into_iter()
+            .flatten()
+            .all(|limit| limit > 0)
+    }
+
+    fn audit_json(&self) -> String {
+        format!(
+            "{{\"max_request_bytes\":{},\"max_response_bytes\":{},\"max_calls\":{}}}",
+            optional_u64_json(self.max_request_bytes),
+            optional_u64_json(self.max_response_bytes),
+            optional_u64_json(self.max_calls)
+        )
+    }
+}
+
 /// D-FREESTAND-FACTS1=A: every selected target provider carries an explicit
-/// identity and digest. A target triple never supplies either value implicitly.
+/// identity, digest, provenance, ABI, and resource limits. A target triple
+/// never supplies any of these values implicitly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderContract {
     pub provider: String,
     pub sha256: String,
+    pub provenance: String,
+    pub abi: ProviderAbi,
+    pub limits: ProviderLimits,
 }
 
 impl ProviderContract {
     pub fn new(provider: impl Into<String>, sha256: impl Into<String>) -> Self {
+        let provider = provider.into();
         Self {
-            provider: provider.into(),
+            provenance: format!("provider:{provider}"),
+            provider,
             sha256: sha256.into(),
+            abi: ProviderAbi::default(),
+            limits: ProviderLimits::default(),
         }
     }
 
@@ -1069,19 +2841,50 @@ impl ProviderContract {
         )
     }
 
+    /// Return whether this contract names exactly the supplied implementation
+    /// bytes. Providers emitted by Jet use this before compilation so a stale
+    /// digest cannot silently link under a current machine profile.
+    pub fn matches_source(&self, source: &[u8]) -> bool {
+        self.sha256
+            == format!("sha256:{}", crate::SHA256::sha256_hex(source))
+    }
+
+    pub fn with_provenance(mut self, provenance: impl Into<String>) -> Self {
+        self.provenance = provenance.into();
+        self
+    }
+
+    pub fn with_abi(mut self, abi: ProviderAbi) -> Self {
+        self.abi = abi;
+        self
+    }
+
+    pub fn with_limits(mut self, limits: ProviderLimits) -> Self {
+        self.limits = limits;
+        self
+    }
+
     pub fn is_valid(&self) -> bool {
         !self.provider.trim().is_empty()
             && self
                 .sha256
                 .strip_prefix("sha256:")
-                .is_some_and(|digest| !digest.trim().is_empty())
+                .is_some_and(|digest| {
+                    !digest.trim().is_empty() && !digest.chars().any(char::is_whitespace)
+                })
+            && !self.provenance.trim().is_empty()
+            && self.abi.is_valid()
+            && self.limits.is_valid()
     }
 
     pub fn audit_json(&self) -> String {
         format!(
-            "{{\"provider\":{},\"sha256\":{}}}",
+            "{{\"provider\":{},\"sha256\":{},\"provenance\":{},\"abi\":{},\"limits\":{}}}",
             json_str(&self.provider),
-            json_str(&self.sha256)
+            json_str(&self.sha256),
+            json_str(&self.provenance),
+            self.abi.audit_json(),
+            self.limits.audit_json()
         )
     }
 }
@@ -1312,6 +3115,24 @@ impl ByteSinkPolicy {
         }
     }
 
+    fn audit_component_json(&self, capability: TargetCapability) -> String {
+        let contract = match (self, capability) {
+            (Self::Provider { read, .. }, TargetCapability::IoRead) => read.as_ref(),
+            (Self::Provider { write, .. }, TargetCapability::IoWrite) => write.as_ref(),
+            (Self::Provider { report, .. }, TargetCapability::PanicReport) => report.as_ref(),
+            _ => None,
+        };
+        match self {
+            Self::HostedDefault => "{\"kind\":\"hosted-default\"}".to_string(),
+            Self::Unspecified => "{\"kind\":\"unspecified\"}".to_string(),
+            Self::None => "{\"kind\":\"none\"}".to_string(),
+            Self::Provider { .. } => format!(
+                "{{\"kind\":\"provider\",\"contract\":{}}}",
+                optional_contract_json(contract)
+            ),
+        }
+    }
+
     pub fn audit_json(&self) -> String {
         match self {
             Self::HostedDefault => "{\"kind\":\"hosted-default\"}".to_string(),
@@ -1391,7 +3212,9 @@ impl Default for AuditPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetCapability {
     Allocator,
+    Atomic64,
     Mmio,
+    Hardware,
     TimeWall,
     TimeMonotonic,
     TimeZoneData,
@@ -1405,10 +3228,29 @@ pub enum TargetCapability {
 }
 
 impl TargetCapability {
+    pub const ALL: [Self; 14] = [
+        Self::Allocator,
+        Self::Atomic64,
+        Self::Mmio,
+        Self::Hardware,
+        Self::TimeWall,
+        Self::TimeMonotonic,
+        Self::TimeZoneData,
+        Self::TimeSleep,
+        Self::Entropy,
+        Self::Scheduler,
+        Self::IoRead,
+        Self::IoWrite,
+        Self::PanicReport,
+        Self::Startup,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Allocator => "Target.Allocator",
+            Self::Atomic64 => "Target.Atomic64",
             Self::Mmio => "Target.MMIO",
+            Self::Hardware => "Target.Hardware",
             Self::TimeWall => "Time.Wall",
             Self::TimeMonotonic => "Time.Monotonic",
             Self::TimeZoneData => "Time.ZoneData",
@@ -1422,7 +3264,6 @@ impl TargetCapability {
         }
     }
 }
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TargetMachineUse {
     pub stack_bytes: u64,
@@ -1474,6 +3315,9 @@ fn capabilities_for_core_usage(api: &str) -> Vec<TargetCapability> {
         }
     };
     match module {
+        "core.mem" if matches!(helper, "Atomic" | "atomic") => {
+            add(&mut capabilities, TargetCapability::Atomic64);
+        }
         "core.term" => {
             if helper.is_empty()
                 || matches!(
@@ -1532,6 +3376,9 @@ fn capabilities_for_core_usage(api: &str) -> Vec<TargetCapability> {
         }
         "core.crypto.random" | "core.crypto.uuid" => {
             add(&mut capabilities, TargetCapability::Entropy);
+        }
+        "core.hardware" => {
+            add(&mut capabilities, TargetCapability::Hardware);
         }
         _ => {}
     }
@@ -1637,6 +3484,117 @@ pub enum TargetMachineError {
     SizeBudgetExceeded {
         report: SizeBudgetReport,
     },
+    HardwareFactsMissingSvd,
+    InvalidHardwareSvd {
+        source: String,
+        sha256: String,
+    },
+    HardwareFactEmptyName {
+        kind: String,
+    },
+    DuplicateRegisterBlock {
+        name: String,
+    },
+    RegisterBlockEmpty {
+        name: String,
+    },
+    RegisterBlockAddressOverflow {
+        name: String,
+    },
+    RegisterBlockOutsideRegion {
+        name: String,
+        address: u64,
+        size_bytes: u64,
+    },
+    DuplicateRegister {
+        block: String,
+        register: String,
+    },
+    RegisterAddressOverflow {
+        block: String,
+        register: String,
+    },
+    RegisterOutsideBlock {
+        block: String,
+        register: String,
+    },
+    UnknownRegisterBlock {
+        block: String,
+    },
+    UnknownRegister {
+        block: String,
+        register: String,
+    },
+    RegisterWidthMismatch {
+        block: String,
+        register: String,
+        expected: RegisterWidth,
+        actual: RegisterWidth,
+    },
+    RegisterReadDenied {
+        block: String,
+        register: String,
+    },
+    RegisterWriteDenied {
+        block: String,
+        register: String,
+    },
+    DuplicateInterrupt {
+        name: String,
+    },
+    DuplicateInterruptVector {
+        vector: u16,
+    },
+    InvalidInterruptEffect {
+        interrupt: String,
+        effect: String,
+    },
+    UnknownInterrupt {
+        interrupt: String,
+    },
+    InterruptEffectForbidden {
+        interrupt: String,
+        handler: String,
+        effect: String,
+    },
+    InterruptHandlerUnbounded {
+        interrupt: String,
+        handler: String,
+    },
+    DuplicateDmaChannel {
+        name: String,
+    },
+    DuplicateDmaChannelNumber {
+        channel: u16,
+    },
+    DmaTransferSizeZero {
+        channel: String,
+    },
+    UnknownDmaChannel {
+        channel: String,
+    },
+    DmaOwnershipMismatch {
+        channel: String,
+        buffer: String,
+        expected: TargetDmaOwner,
+        actual: TargetDmaOwner,
+    },
+    DmaStartWhileInFlight {
+        channel: String,
+        buffer: String,
+    },
+    DmaWaitWithoutTransfer {
+        channel: String,
+        buffer: String,
+    },
+    DmaBufferUnavailable {
+        channel: String,
+        buffer: String,
+    },
+    DmaWaitChannelMismatch {
+        channel: String,
+        buffer: String,
+    },
 }
 
 fn validate_memory_regions(regions: &[MemoryRegion], errors: &mut Vec<TargetMachineError>) {
@@ -1734,6 +3692,35 @@ fn validate_panic(machine: &TargetMachine, errors: &mut Vec<TargetMachineError>)
     }
     if let Some(provider) = machine.panic.provider() {
         validate_provider_contract(TargetCapability::PanicReport, provider, errors);
+    }
+}
+
+fn validate_startup_facts(machine: &TargetMachine, errors: &mut Vec<TargetMachineError>) {
+    if !machine.no_os || !matches!(machine.startup, StartupPolicy::Generated { .. }) {
+        return;
+    }
+    let missing = machine.startup_entry.trim().is_empty()
+        || machine.startup_vectors.trim().is_empty()
+        || machine.startup_placement.trim().is_empty();
+    if missing {
+        push_unique(
+            errors,
+            TargetMachineError::MissingTargetCapability {
+                capability: TargetCapability::Startup.as_str().to_string(),
+            },
+        );
+    }
+    if !machine.startup_abi.is_valid() {
+        if let Some(provider) = machine.startup.provider() {
+            push_unique(
+                errors,
+                TargetMachineError::InvalidProviderContract {
+                    capability: TargetCapability::Startup.as_str().to_string(),
+                    provider: provider.provider.clone(),
+                    sha256: provider.sha256.clone(),
+                },
+            );
+        }
     }
 }
 
@@ -1904,9 +3891,10 @@ fn validate_target_capabilities(
         }
         _ => {}
     }
-    if machine.no_os
-        && matches!(machine.panic, PanicPolicy::Report { .. })
-        && !machine.byte_sink.provides_report(false)
+    if matches!(machine.panic, PanicPolicy::Report { .. })
+        && !machine
+            .byte_sink
+            .provides_report(machine.environment_identity() == "hosted")
     {
         push_unique(
             errors,
@@ -1935,11 +3923,25 @@ fn validate_target_capabilities(
         }
     }
 }
-fn target_dossier_json(dossier: &TargetDossier, target_triple: &str) -> String {
+/// Render the stable target dossier projection used by inspect and artifact identity.
+pub fn target_dossier_json(dossier: &TargetDossier, target_triple: &str) -> String {
     let artifact_key =
         crate::SHA256::sha256_hex(&dossier.cache_bytes(target_triple));
+    let machine = dossier.machine.as_deref().map_or_else(
+        || "null".to_string(),
+        |machine| {
+            format!(
+                "{{\"name\":{},\"triple\":{},\"provider_identity\":{},\"linker_identity\":{}}}",
+                json_str(&machine.name),
+                json_str(&machine.triple),
+                json_str(&machine.provider_identity()),
+                json_str(&machine.linker_identity()),
+            )
+        },
+    );
     format!(
-        "{{\"layer\":{},\"provider_identity\":{},\"closure_identity\":{},\"linker_identity\":{},\"tier_identity\":{},\"compiler_identity\":{},\"environment_identity\":{},\"dependency_identity\":{},\"artifact_key\":{}}}",
+        "{{\"machine\":{},\"layer\":{},\"provider_identity\":{},\"closure_identity\":{},\"linker_identity\":{},\"tier_identity\":{},\"compiler_identity\":{},\"environment_identity\":{},\"dependency_identity\":{},\"artifact_key\":{}}}",
+        machine,
         json_str(dossier.layer.as_str()),
         json_str(&dossier.provider_identity),
         json_str(&dossier.closure_identity),
@@ -1951,6 +3953,453 @@ fn target_dossier_json(dossier: &TargetDossier, target_triple: &str) -> String {
         json_str(&artifact_key),
     )
 }
+trait StatusFieldsOptional {
+    fn with_optional(self, name: &str, value: Option<StatusValue>) -> Self;
+    fn with_optional_u64(self, name: &str, value: Option<u64>) -> Self;
+}
+
+impl StatusFieldsOptional for StatusFields {
+    fn with_optional(self, name: &str, value: Option<StatusValue>) -> Self {
+        self.with(name, value.unwrap_or(StatusValue::Null))
+    }
+
+    fn with_optional_u64(self, name: &str, value: Option<u64>) -> Self {
+        self.with(name, value.map(StatusValue::from).unwrap_or(StatusValue::Null))
+    }
+}
+
+pub fn target_dossier_value(dossier: &TargetDossier, target_triple: &str) -> StatusValue {
+    let artifact_key = crate::SHA256::sha256_hex(&dossier.cache_bytes(target_triple));
+    let machine = dossier
+        .machine
+        .as_deref()
+        .map(target_machine_identity_value)
+        .unwrap_or(StatusValue::Null);
+    StatusValue::object(
+        StatusFields::new()
+            .with("machine", machine)
+            .with("layer", dossier.layer.as_str())
+            .with("provider_identity", dossier.provider_identity.as_str())
+            .with("closure_identity", dossier.closure_identity.as_str())
+            .with("linker_identity", dossier.linker_identity.as_str())
+            .with("tier_identity", dossier.tier_identity.as_str())
+            .with("compiler_identity", dossier.compiler_identity.as_str())
+            .with("environment_identity", dossier.environment_identity.as_str())
+            .with("dependency_identity", dossier.dependency_identity.as_str())
+            .with("artifact_key", artifact_key),
+    )
+}
+
+fn target_machine_identity_value(machine: &TargetMachine) -> StatusValue {
+    StatusValue::object(
+        StatusFields::new()
+            .with("name", machine.name.as_str())
+            .with("triple", machine.triple.as_str())
+            .with("provider_identity", machine.provider_identity())
+            .with("linker_identity", machine.linker_identity()),
+    )
+}
+
+fn linker_value(linker: &LinkerInput) -> StatusValue {
+    match linker {
+        LinkerInput::HostedDefault => {
+            StatusValue::object(StatusFields::new().with("kind", "hosted-default"))
+        }
+        LinkerInput::Unspecified => {
+            StatusValue::object(StatusFields::new().with("kind", "unspecified"))
+        }
+        LinkerInput::Generated => {
+            StatusValue::object(StatusFields::new().with("kind", "generated"))
+        }
+        LinkerInput::File { path, sha256 } => StatusValue::object(
+            StatusFields::new()
+                .with("kind", "file")
+                .with("path", path.as_str())
+                .with("sha256", sha256.as_str()),
+        ),
+    }
+}
+
+fn provider_contract_value(provider: &ProviderContract) -> StatusValue {
+    StatusValue::object(
+        StatusFields::new()
+            .with("provider", provider.provider.as_str())
+            .with("sha256", provider.sha256.as_str())
+            .with("provenance", provider.provenance.as_str())
+            .with(
+                "abi",
+                StatusValue::object(
+                    StatusFields::new()
+                        .with("calling_convention", provider.abi.calling_convention.as_str())
+                        .with("version", provider.abi.version.as_str()),
+                ),
+            )
+            .with(
+                "limits",
+                StatusValue::object(
+                    StatusFields::new()
+                        .with_optional_u64("max_request_bytes", provider.limits.max_request_bytes)
+                        .with_optional_u64("max_response_bytes", provider.limits.max_response_bytes)
+                        .with_optional_u64("max_calls", provider.limits.max_calls),
+                ),
+            ),
+    )
+}
+
+fn allocator_value(policy: &AllocatorPolicy) -> StatusValue {
+    match policy {
+        AllocatorPolicy::HostedDefault => {
+            StatusValue::object(StatusFields::new().with("kind", "hosted-default"))
+        }
+        AllocatorPolicy::Unspecified => {
+            StatusValue::object(StatusFields::new().with("kind", "unspecified"))
+        }
+        AllocatorPolicy::None => StatusValue::object(StatusFields::new().with("kind", "none")),
+        AllocatorPolicy::Provider { provider } => StatusValue::object(
+            StatusFields::new()
+                .with("kind", "provider")
+                .with("contract", provider_contract_value(provider)),
+        ),
+        AllocatorPolicy::Fixed { region, size } => StatusValue::object(
+            StatusFields::new()
+                .with("kind", "fixed")
+                .with("region", region.as_str())
+                .with("size_bytes", size.bytes),
+        ),
+        AllocatorPolicy::Counting { cap } => StatusValue::object(
+            StatusFields::new()
+                .with("kind", "counting")
+                .with("wraps", "system")
+                .with_optional_u64("cap_bytes", cap.map(|size| size.bytes)),
+        ),
+    }
+}
+
+fn panic_value(policy: &PanicPolicy) -> StatusValue {
+    match policy {
+        PanicPolicy::HostedDefault => {
+            StatusValue::object(StatusFields::new().with("kind", "hosted-default"))
+        }
+        PanicPolicy::Unspecified => {
+            StatusValue::object(StatusFields::new().with("kind", "unspecified"))
+        }
+        PanicPolicy::Abort => StatusValue::object(StatusFields::new().with("kind", "abort")),
+        PanicPolicy::Report { provider } => StatusValue::object(
+            StatusFields::new()
+                .with("kind", "report")
+                .with("contract", provider_contract_value(provider)),
+        ),
+    }
+}
+
+fn clock_value(policy: &ClockPolicy) -> StatusValue {
+    policy_value_with_provider(
+        match policy {
+            ClockPolicy::HostedDefault => "hosted-default",
+            ClockPolicy::Unspecified => "unspecified",
+            ClockPolicy::None => "none",
+            ClockPolicy::Provider { .. } => "provider",
+        },
+        match policy {
+            ClockPolicy::Provider { provider } => Some(provider),
+            _ => None,
+        },
+    )
+}
+
+fn entropy_value(policy: &EntropyPolicy) -> StatusValue {
+    policy_value_with_provider(
+        match policy {
+            EntropyPolicy::HostedDefault => "hosted-default",
+            EntropyPolicy::Unspecified => "unspecified",
+            EntropyPolicy::None => "none",
+            EntropyPolicy::Provider { .. } => "provider",
+        },
+        match policy {
+            EntropyPolicy::Provider { provider } => Some(provider),
+            _ => None,
+        },
+    )
+}
+
+fn scheduler_value(policy: &SchedulerPolicy) -> StatusValue {
+    let (kind, provider) = match policy {
+        SchedulerPolicy::HostedDefault => ("hosted-default", None),
+        SchedulerPolicy::Unspecified => ("unspecified", None),
+        SchedulerPolicy::None => ("none", None),
+        SchedulerPolicy::Cooperative { provider } => ("cooperative", Some(provider)),
+        SchedulerPolicy::InterruptDriven { provider } => ("interrupt-driven", Some(provider)),
+        SchedulerPolicy::BoardRuntime { provider } => ("board-runtime", Some(provider)),
+    };
+    policy_value_with_provider(kind, provider)
+}
+
+fn mmio_policy_value(policy: &MmioPolicy) -> StatusValue {
+    policy_value_with_provider(
+        match policy {
+            MmioPolicy::HostedDefault => "hosted-default",
+            MmioPolicy::Unspecified => "unspecified",
+            MmioPolicy::None => "none",
+            MmioPolicy::Provider { .. } => "provider",
+        },
+        match policy {
+            MmioPolicy::Provider { provider } => Some(provider),
+            _ => None,
+        },
+    )
+}
+
+fn policy_value_with_provider(kind: &str, provider: Option<&ProviderContract>) -> StatusValue {
+    let fields = StatusFields::new().with("kind", kind);
+    match provider {
+        Some(provider) => StatusValue::object(fields.with("contract", provider_contract_value(provider))),
+        None => StatusValue::object(fields),
+    }
+}
+
+fn byte_sink_value(policy: &ByteSinkPolicy) -> StatusValue {
+    match policy {
+        ByteSinkPolicy::HostedDefault => {
+            StatusValue::object(StatusFields::new().with("kind", "hosted-default"))
+        }
+        ByteSinkPolicy::Unspecified => {
+            StatusValue::object(StatusFields::new().with("kind", "unspecified"))
+        }
+        ByteSinkPolicy::None => StatusValue::object(StatusFields::new().with("kind", "none")),
+        ByteSinkPolicy::Provider {
+            read,
+            write,
+            report,
+        } => StatusValue::object(
+            StatusFields::new()
+                .with("kind", "provider")
+                .with_optional("read", read.as_ref().map(provider_contract_value))
+                .with_optional("write", write.as_ref().map(provider_contract_value))
+                .with_optional("report", report.as_ref().map(provider_contract_value)),
+        ),
+    }
+}
+
+fn startup_value(policy: &StartupPolicy) -> StatusValue {
+    let (kind, provider) = match policy {
+        StartupPolicy::HostedDefault => ("hosted-default", None),
+        StartupPolicy::Unspecified => ("unspecified", None),
+        StartupPolicy::Generated { provider } => ("generated", Some(provider)),
+    };
+    policy_value_with_provider(kind, provider)
+}
+
+fn provider_facts_value(machine: &TargetMachine) -> StatusValue {
+    StatusValue::array(TargetCapability::ALL.iter().map(|capability| {
+        let fact = match capability {
+            TargetCapability::Allocator => allocator_value(&machine.allocator),
+            TargetCapability::Atomic64 => StatusValue::object(
+                StatusFields::new()
+                    .with("triple", machine.triple.as_str())
+                    .with("supported", machine.supports_atomic_word()),
+            ),
+            TargetCapability::Mmio => mmio_policy_value(&machine.mmio),
+            TargetCapability::Hardware => hardware_value(&machine.hardware),
+            TargetCapability::TimeWall => clock_value(&machine.wall_clock),
+            TargetCapability::TimeMonotonic => clock_value(&machine.monotonic_clock),
+            TargetCapability::TimeZoneData => clock_value(&machine.zone_data),
+            TargetCapability::TimeSleep => clock_value(&machine.sleep),
+            TargetCapability::Entropy => entropy_value(&machine.entropy),
+            TargetCapability::Scheduler => scheduler_value(&machine.scheduler),
+            TargetCapability::IoRead => byte_sink_component_value(&machine.byte_sink, TargetCapability::IoRead),
+            TargetCapability::IoWrite => byte_sink_component_value(&machine.byte_sink, TargetCapability::IoWrite),
+            TargetCapability::PanicReport => StatusValue::object(
+                StatusFields::new()
+                    .with("panic", panic_value(&machine.panic))
+                    .with(
+                        "sink",
+                        byte_sink_component_value(&machine.byte_sink, TargetCapability::PanicReport),
+                    ),
+            ),
+            TargetCapability::Startup => StatusValue::object(
+                StatusFields::new()
+                    .with("policy", startup_value(&machine.startup))
+                    .with("entry", machine.startup_entry.as_str())
+                    .with("vectors", machine.startup_vectors.as_str())
+                    .with(
+                        "abi",
+                        StatusValue::object(
+                            StatusFields::new()
+                                .with("calling_convention", machine.startup_abi.calling_convention.as_str())
+                                .with("version", machine.startup_abi.version.as_str()),
+                        ),
+                    )
+                    .with("placement", machine.startup_placement.as_str()),
+            ),
+        };
+        StatusValue::object(
+            StatusFields::new()
+                .with("capability", capability.as_str())
+                .with("fact", fact),
+        )
+    }))
+}
+
+fn byte_sink_component_value(policy: &ByteSinkPolicy, capability: TargetCapability) -> StatusValue {
+    let contract = match (policy, capability) {
+        (ByteSinkPolicy::Provider { read, .. }, TargetCapability::IoRead) => {
+            read.as_ref().map(provider_contract_value)
+        }
+        (ByteSinkPolicy::Provider { write, .. }, TargetCapability::IoWrite) => {
+            write.as_ref().map(provider_contract_value)
+        }
+        (ByteSinkPolicy::Provider { report, .. }, TargetCapability::PanicReport) => {
+            report.as_ref().map(provider_contract_value)
+        }
+        _ => None,
+    };
+    let fields = StatusFields::new().with(
+        "kind",
+        match policy {
+            ByteSinkPolicy::HostedDefault => "hosted-default",
+            ByteSinkPolicy::Unspecified => "unspecified",
+            ByteSinkPolicy::None => "none",
+            ByteSinkPolicy::Provider { .. } => "provider",
+        },
+    );
+    match policy {
+        ByteSinkPolicy::Provider { .. } => {
+            StatusValue::object(fields.with_optional("contract", contract))
+        }
+        _ => StatusValue::object(fields),
+    }
+}
+
+fn memory_value(regions: &[MemoryRegion]) -> StatusValue {
+    StatusValue::array(regions.iter().map(|region| {
+        StatusValue::object(
+            StatusFields::new()
+                .with("name", region.name.as_str())
+                .with("origin", region.origin)
+                .with("size_bytes", region.size.bytes)
+                .with("kind", region.kind.as_str())
+                .with("access", region.access.as_str()),
+        )
+    }))
+}
+
+fn hardware_value(hardware: &TargetHardwareFacts) -> StatusValue {
+    let svd = hardware
+        .svd
+        .as_ref()
+        .map(|svd| {
+            StatusValue::object(
+                StatusFields::new()
+                    .with("source", svd.source.as_str())
+                    .with("sha256", svd.sha256.as_str()),
+            )
+        })
+        .unwrap_or(StatusValue::Null);
+    let register_blocks = StatusValue::array(hardware.register_blocks.iter().map(|block| {
+        StatusValue::object(
+            StatusFields::new()
+                .with("name", block.name.as_str())
+                .with("base", block.base)
+                .with("size_bytes", block.size.bytes)
+                .with(
+                    "registers",
+                    StatusValue::array(block.registers.iter().map(|register| {
+                        StatusValue::object(
+                            StatusFields::new()
+                                .with("name", register.name.as_str())
+                                .with("offset", register.offset)
+                                .with("width", register.width.as_str())
+                                .with("access", register.access.as_str())
+                                .with("volatile", register.volatile),
+                        )
+                    })),
+                ),
+        )
+    }));
+    let interrupts = StatusValue::array(hardware.interrupts.iter().map(|interrupt| {
+        StatusValue::object(
+            StatusFields::new()
+                .with("name", interrupt.name.as_str())
+                .with("vector", u64::from(interrupt.vector))
+                .with(
+                    "forbidden_effects",
+                    StatusValue::array(interrupt.forbidden_effects.iter().map(|effect| StatusValue::from(effect.as_str()))),
+                )
+                .with("bounded", interrupt.bounded),
+        )
+    }));
+    let dma_channels = StatusValue::array(hardware.dma_channels.iter().map(|channel| {
+        StatusValue::object(
+            StatusFields::new()
+                .with("name", channel.name.as_str())
+                .with("channel", u64::from(channel.channel))
+                .with("transfer_width", channel.transfer_width.as_str())
+                .with("ownership", channel.ownership.as_str())
+                .with_optional_u64("max_transfer_bytes", channel.max_transfer_bytes),
+        )
+    }));
+    StatusValue::object(
+        StatusFields::new()
+            .with("svd", svd)
+            .with("register_blocks", register_blocks)
+            .with("interrupts", interrupts)
+            .with("dma_channels", dma_channels),
+    )
+}
+
+fn programmers_value(programmers: &[TargetProgrammerFacts]) -> StatusValue {
+    StatusValue::array(programmers.iter().map(|programmer| {
+        StatusValue::object(
+            StatusFields::new()
+                .with("adapter", programmer.adapter.as_str())
+                .with_optional("chip", programmer.chip.as_ref().map(|value| StatusValue::from(value.as_str())))
+                .with(
+                    "config",
+                    StatusValue::array(programmer.config.iter().map(|value| StatusValue::from(value.as_str()))),
+                )
+                .with_optional("cpu", programmer.cpu.as_ref().map(|value| StatusValue::from(value.as_str())))
+                .with("executable", programmer.executable.as_str())
+                .with_optional(
+                    "interface",
+                    programmer.interface.as_ref().map(|value| StatusValue::from(value.as_str())),
+                )
+                .with_optional(
+                    "machine",
+                    programmer.machine.as_ref().map(|value| StatusValue::from(value.as_str())),
+                )
+                .with("reset", programmer.reset)
+                .with_optional_u64("speed_khz", programmer.speed_khz.map(u64::from)),
+        )
+    }))
+}
+
+fn unavailable_core_value(machine: &TargetMachine, usage: &TargetMachineUse) -> StatusValue {
+    let available = machine.max_runtime_layer();
+    let closure = classify_prelude_closure(usage.core_apis.iter());
+    StatusValue::array(
+        closure
+            .iter()
+            .filter_map(|(api, required)| (*required > available).then_some(StatusValue::from(api.as_str()))),
+    )
+}
+
+fn mmio_value(accesses: &[MmioAccess]) -> StatusValue {
+    StatusValue::array(accesses.iter().map(|access| {
+        StatusValue::object(
+            StatusFields::new()
+                .with("address", access.address)
+                .with("size_bytes", access.size.bytes)
+                .with_optional(
+                    "unsafe_reason",
+                    access
+                        .unsafe_gate
+                        .as_ref()
+                        .map(|gate| StatusValue::from(gate.reason.as_str())),
+                ),
+        )
+    }))
+}
+
 
 fn append_identity_frame(bytes: &mut Vec<u8>, label: &str, value: &str) {
     bytes.extend_from_slice(&(label.len() as u64).to_le_bytes());
@@ -1964,6 +4413,12 @@ fn wasm_provider(name: &str, implementation: &str) -> ProviderContract {
     append_identity_frame(&mut source, "provider", name);
     append_identity_frame(&mut source, "implementation", implementation);
     ProviderContract::from_source(name, &source)
+}
+
+fn builtin_provider(name: &str, source: &str) -> ProviderContract {
+    let digest = crate::SHA256::sha256_hex(source.as_bytes());
+    ProviderContract::from_source(name, source.as_bytes())
+        .with_provenance(format!("builtin:{name};sha256:{digest}"))
 }
 
 fn validate_simple_capability(
@@ -2141,6 +4596,9 @@ fn optional_contract_json(contract: Option<&ProviderContract>) -> String {
         .map(ProviderContract::audit_json)
         .unwrap_or_else(|| "null".to_string())
 }
+fn optional_u64_json(value: Option<u64>) -> String {
+    value.map_or_else(|| "null".to_string(), |value| value.to_string())
+}
 
 fn json_str(value: &str) -> String {
     let mut out = String::from("\"");
@@ -2240,7 +4698,7 @@ mod tests {
         };
         let errors = machine.validate(&TargetMachineUse::default());
         assert!(errors.contains(&TargetMachineError::InvalidProviderContract {
-            capability: "MMIO".to_string(),
+            capability: "Target.MMIO".to_string(),
             provider: String::new(),
             sha256: "not-a-digest".to_string(),
         }));

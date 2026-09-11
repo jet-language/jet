@@ -49,10 +49,11 @@ pub(super) fn substitute_marker(
     types: &HashMap<String, Type>,
     values: &HashMap<String, crate::AST::CtValue>,
 ) {
-    marker
-        .args
-        .iter_mut()
-        .for_each(|arg| substitute_expr(arg, types, values));
+    marker.args.iter_mut().for_each(|arg| {
+        if let Some(expr) = arg.as_expr_mut() {
+            substitute_expr(expr, types, values);
+        }
+    });
 }
 
 pub(super) fn substitute_markers(
@@ -108,6 +109,12 @@ pub(super) fn substitute_expr(
             }
         }),
         Expr::Call(call) => {
+            for ty in &mut call.type_args {
+                *ty = crate::Generics::substitute_type(ty, types);
+            }
+            if let Some(ty) = &mut call.resolved_ret {
+                *ty = crate::Generics::substitute_type(ty, types);
+            }
             call.args
                 .iter_mut()
                 .for_each(|arg| substitute_expr(&mut arg.expr, types, values));
@@ -151,10 +158,12 @@ pub(super) fn substitute_expr(
             receiver,
             method,
             method_span,
+            owner_type_args,
             type_args,
             args,
             recv_type,
             resolved_ret,
+            operator_rhs,
             ..
         } => {
             if let Expr::Ident(name, _) = receiver.as_mut() {
@@ -163,10 +172,13 @@ pub(super) fn substitute_expr(
                 }
             }
             substitute_expr(receiver, types, values);
-            for ty in type_args {
+            for ty in owner_type_args.iter_mut().chain(type_args.iter_mut()) {
                 *ty = crate::Generics::substitute_type(ty, types);
             }
             if let Some(ty) = resolved_ret {
+                *ty = crate::Generics::substitute_type(ty, types);
+            }
+            if let Some(ty) = operator_rhs {
                 *ty = crate::Generics::substitute_type(ty, types);
             }
             args.iter_mut()

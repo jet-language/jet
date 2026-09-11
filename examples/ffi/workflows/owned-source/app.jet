@@ -1,0 +1,30 @@
+use c.jet_cpp_frames as protocol
+// The C++ binder publishes `jet_cpp_frames`; this import keeps the declared
+// native artifact in the project link closure while CBind supplies the C ABI.
+use cpp.frames as native
+
+pub fn run() {
+    input := [U8]{10, 20, 30}
+    owner := protocol.FrameDocument{slot: U64{0}, generation: U64{0}}
+    if protocol.frame_document_open(input, U64{3}, &owner) != 0 -> panic("Frame open failed")
+
+    view := protocol.FrameView{slot: U64{0}, generation: U64{0}}
+    if protocol.frame_document_bytes(owner, &view) != 0 -> panic("Frame view failed")
+    first := U8{0}
+    if protocol.frame_view_at(view, U64{1}, &first) != 0 -> panic("Frame view read failed")
+
+    next := [U8]{40, 50}
+    if protocol.frame_document_replace(&owner, next, U64{2}) != 0 -> panic("Frame replacement failed")
+    stale := U8{0}
+    stale_status :: protocol.frame_view_at(view, U64{1}, &stale)
+    if stale_status != 1 -> panic("stale Frame view was not expired")
+
+    fresh := protocol.FrameView{slot: U64{0}, generation: U64{0}}
+    if protocol.frame_document_bytes(owner, &fresh) != 0 -> panic("fresh Frame view failed")
+    second := U8{0}
+    if protocol.frame_view_at(fresh, U64{1}, &second) != 0 -> panic("fresh Frame read failed")
+
+    if protocol.frame_document_close(&owner) != 0 -> panic("Frame close failed")
+    if protocol.frame_document_close(&owner) != 5 -> panic("Frame close was not idempotent")
+    print("{first} {stale_status} {second}")
+}

@@ -1,0 +1,14 @@
+#Import module c.sums {
+    fn __jet_ffi_native_sum_bytes(bytes: &[U8], count: U64) U64 = "sum_bytes"
+}
+
+// Unrun expectation: the checked facade derives the full byte count once and
+// performs no copy, retry, placement change, or failure remap.
+pub fn sum_bytes(bytes: &[U8]) U64 -> {
+    return __jet_ffi_native_sum_bytes(bytes, bytes.len())
+}
+
+pub fn run() U64 -> {
+    bytes := [10, 20, 30]
+    return sum_bytes(&bytes)
+}

@@ -537,8 +537,7 @@ fn stmt_definitely_exits(stmt: &Stmt) -> bool {
                 && fallback_exits
         }
         Stmt::Loop { body, .. } => !loop_body_can_break(body),
-        Stmt::While { cond, body, .. }
-        | Stmt::CountedLoop { cond, body, .. }
+        Stmt::While { cond, body, .. } | Stmt::CountedLoop { cond, body, .. }
             if matches!(cond.without_parens(), Expr::Bool(true, _)) =>
         {
             !loop_body_can_break(body)
@@ -560,17 +559,17 @@ fn loop_body_can_break_inner(
         let can_break = match stmt {
             Stmt::Break(..) | Stmt::BreakValue(..) => allow_unlabelled,
             Stmt::BreakLabel(name, ..) | Stmt::BreakLabelValue(name, ..) => {
-                !nested_labels
-                    .iter()
-                    .any(|label| *label == name.as_str())
+                !nested_labels.iter().any(|label| *label == name.as_str())
             }
             Stmt::Switch {
                 arms, else_body, ..
-            } => arms.iter().any(|arm| {
-                loop_body_can_break_inner(&arm.body, nested_labels, allow_unlabelled)
-            }) || else_body.as_deref().is_some_and(|body| {
-                loop_body_can_break_inner(body, nested_labels, allow_unlabelled)
-            }),
+            } => {
+                arms.iter().any(|arm| {
+                    loop_body_can_break_inner(&arm.body, nested_labels, allow_unlabelled)
+                }) || else_body.as_deref().is_some_and(|body| {
+                    loop_body_can_break_inner(body, nested_labels, allow_unlabelled)
+                })
+            }
             Stmt::Loop { body, label, .. }
             | Stmt::While { body, label, .. }
             | Stmt::For { body, label, .. }
@@ -603,10 +602,12 @@ pub(crate) fn stmt_definitely_returns(stmt: &Stmt) -> bool {
                 || matches!(
                     expr.without_parens(),
                     Expr::Call(call) if call.name == Syntax::BUILTIN_PANIC
-                ) => true,
+                ) =>
+        {
+            true
+        }
         Stmt::Loop { body, .. } => !loop_body_can_break(body),
-        Stmt::While { cond, body, .. }
-        | Stmt::CountedLoop { cond, body, .. }
+        Stmt::While { cond, body, .. } | Stmt::CountedLoop { cond, body, .. }
             if matches!(cond.without_parens(), Expr::Bool(true, _)) =>
         {
             !loop_body_can_break(body)
@@ -659,7 +660,8 @@ fn is_cloneable_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet<S
     match ty {
         Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
         Type::IntN { .. } | Type::Float32 => true,
-        Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
+        Type::Shared(_) => true,
+        Type::List(inner) | Type::Option(inner) => {
             is_cloneable_rec(inner, registry, visiting)
         }
         Type::Map { key, value, .. } => {
@@ -699,16 +701,19 @@ fn is_cloneable_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet<S
             visiting.remove(name);
             result
         }
-        // A task handle owns one running child and its join slot. Copying the
-        // handle would hand two owners the same join, so the runtime `JetTask`
-        // implements no `Clone` and neither does the language type.
+        // A task or imported Arrow batch owns one release duty.  Copying either
+        // carrier would hand two bindings the same cleanup authority, so both
+        // runtime carriers implement no `Clone` and neither does the language
+        // type.
         Type::Apply { name, .. }
             if matches!(
                 name.as_str(),
-                "MutationPlan"
+                "DataArrowBatch"
+                    | "MutationPlan"
                     | "VaultWrite"
                     | "ExpiringSecret"
                     | "ViewMut"
+                    | Syntax::TYPE_VIEW_ITER
                     | "CellReadGuard"
                     | "CellEditGuard"
                     | "Task"
@@ -740,6 +745,7 @@ fn builtin_resource_type(name: &str) -> bool {
         name,
         "FileReader"
             | "FileWriter"
+            | "FileScope"
             | "FileLock"
             | "TcpStream"
             | "UnixStream"
@@ -1441,7 +1447,9 @@ pub(crate) fn is_one_pass_source(ty: &Type) -> bool {
     matches!(
         ty,
         Type::Apply { name, .. }
-            if name == Syntax::TYPE_ITER || name == Syntax::TYPE_STREAM
+            if name == Syntax::TYPE_ITER
+                || name == Syntax::TYPE_VIEW_ITER
+                || name == Syntax::TYPE_STREAM
     ) || matches!(
         ty,
         Type::Named(name) if matches!(name.as_str(), "HTTPBody" | "HTTPBodyChunks")
@@ -1452,7 +1460,11 @@ pub(crate) fn is_one_pass_source(ty: &Type) -> bool {
 /// `HTTPBodyChunks` are consumed with a loop instead.
 pub(crate) fn one_pass_materializer(ty: &Type) -> Option<&'static str> {
     match ty {
-        Type::Apply { name, .. } if name == Syntax::TYPE_ITER => Some(".to_list()"),
+        Type::Apply { name, .. }
+            if name == Syntax::TYPE_ITER || name == Syntax::TYPE_VIEW_ITER =>
+        {
+            Some(".to_list()")
+        }
         Type::Named(n) if n == "HTTPBody" => Some(".text(limit)"),
         _ => None,
     }
@@ -1484,6 +1496,9 @@ pub(crate) fn is_core_shown_type(name: &str) -> bool {
             | "Period"
             | "Zone"
             | "ZonedDateTime"
+            | "DataTracked"
+            | "DataWatch"
+            | "DataWatchStatus"
     ) || is_core_error_family_type(name)
 }
 
@@ -1513,7 +1528,6 @@ pub(crate) fn is_core_error_family_type(name: &str) -> bool {
             | "EnvError"
             | "HTTPError"
             | "IOError"
-            | "JSONError"
             | "NetError"
             | "RangeError"
             | "TextError"
@@ -1536,6 +1550,7 @@ pub(crate) fn is_core_error_type(name: &str) -> bool {
             | "BuildError"
             | "BrowserError"
             | "CBORError"
+            | "Closed"
             | "CompilerError"
             | "ComputeError"
             | "CryptoError"
@@ -1549,7 +1564,6 @@ pub(crate) fn is_core_error_type(name: &str) -> bool {
             | "FileCryptoError"
             | "HTTPError"
             | "IOError"
-            | "JSONError"
             | "KeyWrapError"
             | "NetError"
             | "RangeError"
@@ -1630,8 +1644,7 @@ pub(crate) fn is_displayable(
         }
         Type::List(inner) => is_displayable(inner, type_reg, trait_reg),
         Type::Map { key, value, .. } => {
-            is_displayable(key, type_reg, trait_reg)
-                && is_displayable(value, type_reg, trait_reg)
+            is_displayable(key, type_reg, trait_reg) && is_displayable(value, type_reg, trait_reg)
         }
         Type::Named(n) => {
             type_reg.is_unit_type(n)
@@ -1652,7 +1665,8 @@ pub(crate) fn is_displayable(
         Type::Apply { name, args } => {
             let native_composite = matches!(
                 name.as_str(),
-                Syntax::TYPE_SET
+                Syntax::TYPE_LIST
+                    | Syntax::TYPE_SET
                     | Syntax::TYPE_RANK
                     | Syntax::TYPE_PRIORITY_QUEUE
                     | Syntax::TYPE_QUEUE
@@ -1753,8 +1767,7 @@ pub(crate) fn is_debuggable(
         }
         Type::List(inner) => is_debuggable(inner, type_reg, trait_reg),
         Type::Map { key, value, .. } => {
-            is_debuggable(key, type_reg, trait_reg)
-                && is_debuggable(value, type_reg, trait_reg)
+            is_debuggable(key, type_reg, trait_reg) && is_debuggable(value, type_reg, trait_reg)
         }
         Type::Named(n) => {
             type_reg.is_unit_type(n)

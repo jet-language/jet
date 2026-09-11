@@ -128,13 +128,25 @@ int32_t abi_explicit(int32_t a, int32_t b) { return a + b; }
 use c.jetmatrix as c
 
 #Layout(c)
-struct Coord {{ x: Int; y: Int }}
+struct Coord {{
+    x: Int
+    y: Int
+}}
 #Layout(c)
-enum Status {{ Ok = 0; Lost = 7 }}
+enum Status {{
+    Ok = 0
+    Lost = 7
+}}
 #Layout(c, tag: U8)
-enum Packet {{ Ping(Int) = 3; Data(x: Int, y: Int) = 7 }}
+enum Packet {{
+    Ping(Int) = 3
+    Data(x: Int, y: Int) = 7
+}}
 #Layout(c)
-struct Record {{ id: U64; flags: U32 }}
+struct Record {{
+    id: U64
+    flags: U32
+}}
 
 fn increment(x: I32) I32 -[]> {{ return x + 1 }}
 

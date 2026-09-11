@@ -88,6 +88,10 @@ pub enum Item {
 pub struct EffectDecl {
     pub name: String,
     pub name_span: Span,
+    /// D-OPENTABLE1=D: a Prelude effect leaf may carry one machine-readable
+    /// irreversibility fact. The declaration parser accepts exactly
+    /// `@irreversible`; no second annotation table exists.
+    pub irreversible: bool,
     pub span: Span,
 }
 
@@ -851,12 +855,27 @@ impl TraitMethodSig {
 pub struct TraitImplBlock {
     pub trait_name: String,
     pub trait_span: Span,
+    /// D-FOUND-OPMIX1=A: an operator impl may name a different right-hand
+    /// operand type and derive its reverse lookup with `#Commutative`.
+    pub operator_rhs: Option<Type>,
+    pub operator_marker: Option<OperatorMarker>,
     pub methods: Vec<Func>,
     /// Compiler-owned structural derive; its signature is generated, not parsed.
     pub compiler_generated: bool,
     /// D-LIB2: `type Name = ConcreteType;` associated type implementations.
     pub assoc_type_impls: Vec<(String, Span, Type)>,
 }
+
+/// D-FOUND-OPMIX1=A: the typed operator marker carried from the source impl
+/// header through checked metadata and canonical MIR. Marker semantics stay
+/// distinct from ordinary callable/type marker vocabulary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OperatorMarker {
+    Commutative,
+}
+
+
+
 
 /// S50: one `extern rust` block declaring foreign functions.
 #[derive(Debug, Clone)]
@@ -880,8 +899,21 @@ pub struct ExternFn {
     pub return_type_span: Option<Span>,
     pub rust_path: String,
     pub rust_path_span: Span,
-    /// Compiler-owned effect root for a generated foreign binding. User-written
-    /// extern declarations leave this unset and retain maximal foreign effects.
+    /// Compiler-owned marker for functions emitted by `#Bindgen`.
+    ///
+    /// Generated bindings may use the checked array carrier (`[T]`) that
+    /// ordinary user-authored C modules do not admit. CFFI preserves this
+    /// fact when it merges the cache with overlays so sema and codegen share
+    /// one source of truth.
+    pub generated: bool,
+    /// Generated callback transport selected by the canonical binding plan.
+    /// `None` keeps ordinary C function-pointer callback checking unchanged.
+    pub callback_transport: Option<String>,
+    /// Digest of the exact generated callback plan. Kept beside the extern
+    /// declaration so sema, TIR, and codegen consume the same artifact fact.
+    pub callback_plan_digest: Option<String>,
+    /// Stable callback identity within the generated foreign module.
+    pub callback_identity: Option<String>,
     pub effect_root: Option<String>,
     /// D-BOUND-UNDO1=A: optional compensating function for transactional calls.
     pub undo: Option<(String, Span)>,
@@ -1019,7 +1051,7 @@ pub fn memo_bound_from_markers(markers: &[Marker]) -> Option<Option<usize>> {
             .first()
             .and_then(Option::as_ref)
             .is_some_and(|(name, _)| name == "bound")
-        && matches!(&marker.args[0], Expr::Ident(name, _) if name == "none");
+        && matches!(marker.expr_arg(0), Some(Expr::Ident(name, _)) if name == "none");
     Some(if unbounded {
         None
     } else {
@@ -1034,6 +1066,10 @@ pub struct Func {
     pub is_pub: bool,
     /// D-PUBPKG1=A: true for `pub(package) fn …`.
     pub is_package_pub: bool,
+    /// D-FOUND-LITERAL1=A (card #2789): `@fn` marks a capability constructor
+    /// as compile-time callable. It is a semantic fact on the declaration,
+    /// distinct from `is_pure`; sema checks both before literal selection.
+    pub is_comptime: bool,
     /// D-EXTMETH1=B: top-level `fn Type.method(...)` before parser normalization.
     /// The parser turns this into an inherent `ImplDef`; all later stages should
     /// see `None`.
@@ -1204,6 +1240,7 @@ impl Func {
             span,
             is_pub: false,
             is_package_pub: false,
+            is_comptime: false,
             external_type: None,
             name,
             name_span: span,
@@ -1317,12 +1354,18 @@ pub fn bundle_serves_until_stopped(bundle: &super::ProgramBundle) -> bool {
 pub struct JobMetadata {
     /// D-JOB-SUBCMD1=C: the build tier in which a named job is exposed.
     pub scope: JobScope,
+    /// D-DX-JOBGRAPH1=A: checked predecessor job names. The names are
+    /// resolved against the package's one job namespace before any invocation.
+    pub after: Vec<String>,
     pub packages: Vec<String>,
     pub cwd: Option<String>,
     pub inputs: Vec<String>,
     pub outputs: Vec<String>,
     pub skip: Option<JobSkip>,
     pub cache: JobCachePolicy,
+    /// D-DX-JOBGRAPH1=A: maximum number of independent jobs admitted by one
+    /// graph run. `None` means the checked default of one.
+    pub parallel: Option<usize>,
     pub limits: BTreeMap<String, String>,
 }
 
@@ -1586,17 +1629,45 @@ impl Param {
     }
 }
 
-/// D-REPRC1 / D-SOA1 (ratified): the variant of `#layout(…)` on a struct.
+/// D-REPRC1 / D-SOA1 / D-PLACE1 / D-LAYOUT-ALIGN1 (ratified): the variant of
+/// `#Layout(…)` on a struct.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StructLayout {
-    /// `#layout(c)` → `#[repr(C)]` on the generated Rust struct. (D-REPRC1=B)
+    /// `#Layout(c)` → `#[repr(C)]` on the generated Rust struct.
     C,
-    /// D-SOA1 / D-SOA2A=C: `#layout(columnar)` → a `[S]` collection is stored
-    /// struct-of-arrays (one `Vec` per field) instead of array-of-structs. The
-    /// logical `S` value and field-access syntax are unchanged; only the memory
-    /// layout of the `[S]` collection differs (cache-friendly). Whole-struct only
-    /// in v1 (D-SOA2B=A).
+    /// `#Layout(c, align(N))` or `#Layout(c, align(target, N))` → C layout
+    /// with an explicit type alignment. `target` is retained as a semantic
+    /// mode bit so adapters cannot accidentally turn an expert request into a
+    /// portable declaration.
+    CAligned {
+        alignment: u64,
+        target: bool,
+    },
+    /// `#Layout(columnar)` → a `[S]` collection is stored struct-of-arrays
+    /// (one `Vec` per field) instead of array-of-structs. The logical `S` value
+    /// and field-access syntax are unchanged; only the memory layout of the
+    /// `[S]` collection differs (cache-friendly).
     Columnar,
+}
+
+impl StructLayout {
+    /// Whether this declaration promises C-compatible field order and padding.
+    pub fn is_c(&self) -> bool {
+        matches!(self, Self::C | Self::CAligned { .. })
+    }
+
+    /// Explicit type alignment in bytes, if the declaration supplied one.
+    pub fn alignment(&self) -> Option<u64> {
+        match self {
+            Self::CAligned { alignment, .. } => Some(*alignment),
+            Self::C | Self::Columnar => None,
+        }
+    }
+
+    /// Whether this declaration selected the target-profile expert form.
+    pub fn target_alignment(&self) -> bool {
+        matches!(self, Self::CAligned { target: true, .. })
+    }
 }
 
 /// D-REPRC2: selected C enum tag representation. `CInt` is C's `int`;
@@ -1620,13 +1691,13 @@ impl EnumDef {
             .type_markers
             .iter()
             .find(|m| m.name == crate::Syntax::MARKER_LAYOUT)?;
-        let Some(Expr::Ident(first, _)) = marker.args.first() else {
+        let Some(Expr::Ident(first, _)) = marker.expr_arg(0) else {
             return None;
         };
         if !first.eq_ignore_ascii_case("c") {
             return None;
         }
-        Some(match marker.args.get(1) {
+        Some(match marker.expr_arg(1) {
             None => CEnumTag::CInt,
             Some(Expr::Ident(n, _)) => match n.as_str() {
                 "U8" => CEnumTag::U8,
@@ -1659,7 +1730,7 @@ pub struct Marker {
     /// D-AUTODERIVE-SYNTAX1=D: `!Trait` rejects only automatic generation.
     pub negated: bool,
     pub name_span: Span,
-    pub args: Vec<Expr>,
+    pub args: Vec<super::MarkerCallArg>,
     /// D-MARKSIG1=A: call-site labels paired with `args`. Marker arguments
     /// use the ordinary call grammar; sema validates labels against the row's
     /// typed signature.
@@ -1672,6 +1743,30 @@ pub struct Marker {
     pub ct: Option<CtValue>,
 }
 
+impl Marker {
+    pub fn expr_arg(&self, index: usize) -> Option<&Expr> {
+        self.args.get(index).and_then(super::MarkerCallArg::as_expr)
+    }
+
+    pub fn expr_arg_mut(&mut self, index: usize) -> Option<&mut Expr> {
+        self.args
+            .get_mut(index)
+            .and_then(super::MarkerCallArg::as_expr_mut)
+    }
+
+    pub fn expr_args(&self) -> impl Iterator<Item = &Expr> {
+        self.args
+            .iter()
+            .filter_map(super::MarkerCallArg::as_expr)
+    }
+    pub fn expr_args_owned(&self) -> Vec<Expr> {
+        self.args
+            .iter()
+            .filter_map(super::MarkerCallArg::as_expr)
+            .cloned()
+            .collect()
+    }
+}
 #[derive(Debug, Clone)]
 pub struct StructDef {
     pub span: Span,
@@ -2071,6 +2166,10 @@ pub struct ImplDef {
     /// S28: `impl Type: Trait` — `None` means plain `impl Type { fn … }`.
     pub trait_name: Option<String>,
     pub trait_span: Option<Span>,
+    /// D-FOUND-OPMIX1=A: an operator impl may name a different right-hand
+    /// operand type and derive its reverse lookup with `#Commutative`.
+    pub operator_rhs: Option<Type>,
+    pub operator_marker: Option<OperatorMarker>,
     pub methods: Vec<Func>,
     /// S62: `impl Type: Trait using field_name;` — the field that supplies the
     /// delegation target. When `Some`, `methods` is empty and the compiler

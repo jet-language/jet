@@ -5,18 +5,18 @@ struct Args {
     input: String
 }
 
-fn parse_millis(stamp: String) Int !IOError -> {
+fn parse_millis(stamp: String) Int -> {
     (time.parse_rfc3339(stamp) ?? panic("bad timestamp")).to_unix_ms()
 }
 
-fn bump(counts: &[String:Int], key: String) !IOError {
+fn bump(counts: &[String:Int], key: String) {
     counts[key] = (counts.get(key) ?? 0) + 1
 }
 
 fn run(args: Args) !IOError {
-    input :: files.open(~args.input) ?? return
-    levels := [String:Int]{}
-    errors := [String:Int]{}
+    input :: files.open(~args.input)
+    level_counts := [String:Int]{}
+    error_components := [String:Int]{}
     first := ""
     last := ""
     first_ms := 0
@@ -36,14 +36,14 @@ fn run(args: Args) !IOError {
         }
         last = ~stamp
         last_ms = millis
-        bump(&levels, level)
-        if level == "ERROR" -> bump(&errors, component)
+        bump(&level_counts, level)
+        if level == "ERROR" -> bump(&error_components, component)
     }
-    print("DEBUG {levels.get("DEBUG") ?? 0}")
-    print("INFO {levels.get("INFO") ?? 0}")
-    print("WARN {levels.get("WARN") ?? 0}")
-    print("ERROR {levels.get("ERROR") ?? 0}")
+    print("DEBUG {level_counts.get("DEBUG") ?? 0}")
+    print("INFO {level_counts.get("INFO") ?? 0}")
+    print("WARN {level_counts.get("WARN") ?? 0}")
+    print("ERROR {level_counts.get("ERROR") ?? 0}")
     print("top-error-components:")
-    loop item in errors.top_n(3) -> print("{item.value} {item.key}")
+    loop item in error_components.top_n(3) -> print("{item.value} {item.key}")
     print("span {first} .. {last} ({(last_ms - first_ms) / 1000}s)")
 }

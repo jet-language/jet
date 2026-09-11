@@ -19,6 +19,7 @@ use crate::Codegen::TIR::expr_in_subset;
 use crate::Codegen::TIR::fallible_pattern_binding;
 use crate::Codegen::TIR::is_data_event_variant;
 use crate::Codegen::TIR::orfallback_rhs_in_subset;
+use crate::Codegen::TIR::pattern_is_variant_or_orvariant;
 use crate::Codegen::TIR::struct_pattern_values_in_subset;
 use crate::Codegen::TIR::variant_pattern_enum;
 use crate::Diagnostics::Span;
@@ -114,19 +115,6 @@ fn stmt_in_subset_inner(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool
                     names,
                     ..
                 }) if matches!(pattern, Pattern::Ok { .. } | Pattern::Present { .. })
-                    || matches!(
-                        pattern,
-                        Pattern::Variant {
-                            variant,
-                            bindings,
-                            ..
-                        } if crate::Codegen::TIR::is_eval_fragment()
-                            && bindings.len() == 1
-                            && matches!(
-                                variant.as_str(),
-                                Syntax::LIT_OK | Syntax::LIT_VALUE
-                            )
-                    )
                     || matches!(
                         pattern,
                         Pattern::Variant { variant, .. }
@@ -569,6 +557,19 @@ pub(crate) fn if_cond_in_subset(
         if !expr_in_subset(subject, cx, locals) {
             return None;
         }
+        if matches!(pattern, Pattern::Or(..))
+            && pattern_is_variant_or_orvariant(pattern)
+            && variant_pattern_enum(cx, pattern)
+                .is_some_and(|owner| enum_is_covered(&owner, cx))
+        {
+            return Some(
+                pattern
+                    .binding_names()
+                    .into_iter()
+                    .map(|binding| binding.local_name().to_owned())
+                    .collect(),
+            );
+        }
         // c109 Phase 24: a JSON variant if-let (`if data == Object(entries)` /
         // `if port == Number(n)`). The prelude JSON enum is matched via a single-payload
         // variant pattern (`Object`/`Number`/`Text`/`Boolean`/`Array`) binding one name.
@@ -642,37 +643,27 @@ pub(crate) fn if_cond_in_subset(
             // generated `__JetUnion_*` enum from the subject's type at lowering.
             if !is_json_variant(variant)
                 && !is_key_variant(variant)
-                && bindings.len() == 1
-                && matches!(bindings[0], PatSlot::Bind { .. })
+                && !bindings.is_empty()
+                && bindings.iter().all(|slot| {
+                    matches!(
+                        slot,
+                        PatSlot::Bind { .. } | PatSlot::Wildcard | PatSlot::Range { .. }
+                    )
+                })
             {
+                let names: Vec<String> = bindings
+                    .iter()
+                    .filter_map(|slot| match slot {
+                        PatSlot::Bind { name, .. } => Some(name.clone()),
+                        _ => None,
+                    })
+                    .collect();
                 if let Some(owner) = cx.variant_owner.get(variant) {
                     if enum_is_covered(owner, cx) {
-                        if let PatSlot::Bind { name, .. } = &bindings[0] {
-                            return Some(vec![name.clone()]);
-                        }
-                    }
-                } else if let PatSlot::Bind { name, .. } = &bindings[0] {
-                    return Some(vec![name.clone()]);
-                }
-            }
-            // c109 (D-PATW): a USER-enum variant if-let with a WILDCARD payload slot
-            // (`if w == Some(_)`). The `_` binds nothing, so the then-branch gains no
-            // local; `emit_if_let_pattern` already renders the slot as `_`, producing
-            // `if let __jet_E::__jet_V(_) = <subj>` (byte-for-byte the AST `emit_if`). A
-            // single-payload covered-enum variant whose one slot is a wildcard is in
-            // subset, introducing NO binding (empty bindings vec). (The recently-covered
-            // user-variant if-let bound a name; this binds `_`.)
-            if !is_json_variant(variant)
-                && !is_key_variant(variant)
-                && bindings.len() == 1
-                && matches!(bindings[0], PatSlot::Wildcard)
-            {
-                if let Some(owner) = cx.variant_owner.get(variant) {
-                    if enum_is_covered(owner, cx) {
-                        return Some(Vec::new());
+                        return Some(names);
                     }
                 } else {
-                    return Some(Vec::new());
+                    return Some(names);
                 }
             }
             // D-TAG1: a binding-free variant/group test (`if d == .Fire { … }`)
@@ -688,8 +679,13 @@ pub(crate) fn if_cond_in_subset(
         }
         // D-PATR / D-IFDIST1: expression-position range arm heads
         // (`return if n == { 0..9 -> 1 }`) desugar to `PatternTest` Range conds.
+        // RangeSwitch re-emits the subject spelling, so only Ident subjects
+        // stay covered (D-IF3 / rejects_range_switch_over_non_ident_subject).
         if let Pattern::Range { .. } = pattern {
-            return Some(Vec::new());
+            if matches!(subject.as_ref(), Expr::Ident(..)) {
+                return Some(Vec::new());
+            }
+            return None;
         }
         return match pattern {
             Pattern::Present { binding, .. }
@@ -725,6 +721,21 @@ pub(crate) fn switch_in_subset(
     }
     // The subject must itself be in-subset (so it lowers + so `it` never escapes).
     if !expr_in_subset(subject, cx, locals) {
+        return false;
+    }
+    // RangeSwitch re-emits the subject spelling twice per arm. A call/field/index
+    // subject with a range head would evaluate 2n times, so keep it uncovered.
+    if !matches!(subject, Expr::Ident(..))
+        && arms.iter().any(|arm| {
+            matches!(
+                &arm.cond,
+                Expr::PatternTest {
+                    pattern: Pattern::Range { .. },
+                    ..
+                }
+            )
+        })
+    {
         return false;
     }
     if crate::AST::is_subjectless_guard(subject, span) {

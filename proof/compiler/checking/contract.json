@@ -1,0 +1,180 @@
+{
+  "schema": "jet.checking-contract.v1",
+  "schema_version": 1,
+  "contract_id": "jet-checking-contract-v1",
+  "policy": {
+    "decision_id": "D-COMPILER-CHECKING-PROOF1",
+    "outcome": "A",
+    "status": "ratified",
+    "scope": "canonical semantic checking, checked names/types/ownership/effects/state facts, and registered rejection diagnostics",
+    "foreign_suffix": "lowering, optimization, prelude, runtime, and foreign tools remain explicit downstream boundaries"
+  },
+  "claim": {
+    "kind": "checking-preservation",
+    "statement": "For an identified UTF-8 Jet source, the canonical compiler checking route emits the checked semantic index and registered diagnostics through one production front end; finite observations remain bounded evidence rather than universal proof.",
+    "preconditions": [
+      "The compiler check operation is the production jet inspect compiler check seam, not a second parser or checker.",
+      "The entry source bytes and all implementation authorities are identified by SHA-256.",
+      "Names, types, ownership, effects, state, and fact records are interpreted through the canonical sema and Facts implementations.",
+      "A rejection has a registered diagnostic code, explanation, fix, and source span.",
+      "A tool crash, timeout, signal, unavailable binary, or malformed response is not an ordinary checking rejection."
+    ],
+    "observation_alphabet": [
+      "checked_names",
+      "checked_types",
+      "ownership_and_views",
+      "effect_facts_and_provenance",
+      "state_transitions",
+      "canonical_fact_registry",
+      "checked_derivations",
+      "registered_diagnostics",
+      "source_spans",
+      "construction_identity"
+    ],
+    "unsupported_cases": [
+      "A missing, stale, or unbound checking witness",
+      "A compiler response without the versioned CompilerChecked value",
+      "A semantic index with a source digest different from the checked source",
+      "A rejection without a registered diagnostic code, reason, fix, or valid span",
+      "An unavailable compiler, tool crash, timeout, or malformed JSON response",
+      "A changed sema, Facts, Core authority, compiler inspection seam, or implementation input"
+    ]
+  },
+  "execution": {
+    "schema": "jet.compiler-inspection.v1",
+    "runner": "scripts/agent/jet-env",
+    "compiler": "target/debug/jet",
+    "command": "scripts/agent/jet-env full jet inspect compiler check <entry>",
+    "operation": "check",
+    "timeout_ms": 120000,
+    "unknown_status": "unverified",
+    "crash_policy": "tool failures are unavailable or invalid_oracle, never checking rejection"
+  },
+  "binding_methods": [
+    {
+      "method": "verified_construction",
+      "source": "proof/compiler/checking/contract.json",
+      "implementation": "the canonical sema, Facts registry, semantic-index builder, compiler inspection seam, and loader",
+      "construction": "the versioned CompilerChecked value with exact source digest, semantic index, facts, spans, and diagnostics",
+      "checker": "proof/compiler/checking/check.mjs",
+      "limit": "finite checking witnesses do not establish universal preservation"
+    },
+    {
+      "method": "direct_verification",
+      "source": "Source/Compiler.rs and Source/CmdCompile.rs",
+      "implementation": "target/debug/jet inspect compiler check",
+      "candidate_binding": "recorded implementation paths and compiler-proof identity",
+      "checker": "proof/compiler/checking/check.mjs",
+      "limit": "the checker observes the production seam; it is not a mechanized theorem about every sema state"
+    },
+    {
+      "method": "translation_certificate",
+      "source": "proof/compiler/checking/witnesses.json",
+      "implementation": "proof/compiler/checking/check.mjs",
+      "certificate": "retained accepted, rejected, alias, ownership, effect, state, fact, derivation, and forged-record controls",
+      "checker": "proof/compiler/checking/check.mjs",
+      "limit": "observed certificates and negative controls are finite and remain proof-blocking"
+    }
+  ],
+  "identity": {
+    "schema": "jet.compiler-proof.v1",
+    "manifest_path": "proof/compiler/toolchain/manifest.json",
+    "authority_key": "compiler-proof.checking",
+    "claim_id": "compiler-proof.identity-direct",
+    "driver_path": "scripts/agent/compiler-proof.mjs",
+    "required_fields": [
+      "claim.identity_sha256",
+      "candidate.record_identity.target_inputs_sha256",
+      "candidate.record_identity.tool_version",
+      "candidate.record_identity.engine",
+      "candidate.commit",
+      "candidate.compiler.source",
+      "candidate.compiler.artifact",
+      "candidate.configuration",
+      "candidate.target",
+      "checker.toolchain_pin_sha256",
+      "proof.artifact",
+      "raw_replay"
+    ]
+  },
+  "coverage": {
+    "relation_path": "proof/compiler/obligations.json",
+    "generator": "proof/compiler/semantics/generate-obligations.mjs",
+    "owner": "#2937",
+    "obligations": [
+      {
+        "id": "boundary:names",
+        "rule": "sema.names-and-facts",
+        "subject": "names and source-graph facts"
+      },
+      {
+        "id": "boundary:types",
+        "rule": "sema.types",
+        "subject": "types, generics, overloads, conversions, and exhaustiveness"
+      },
+      {
+        "id": "boundary:ownership",
+        "rule": "sema.ownership",
+        "subject": "ownership, views, and state transitions"
+      },
+      {
+        "id": "boundary:effects",
+        "rule": "sema.effects",
+        "subject": "effects and capabilities"
+      }
+    ],
+    "qualification_rule": "Every checking boundary row stays blocked unless its implementation correspondence, current identity, binding, and bounded witness disposition are all explicit; no finite corpus claims universal proof."
+  },
+  "facts": {
+    "source": "crates/jet-foundation/src/Facts.rs",
+    "registry": "FactRegistry",
+    "enum": "FactKind",
+    "derivation_record": "DerivationRecord",
+    "derivation_method": "DerivationMethod",
+    "derivation_disposition": "DerivationDisposition",
+    "canonical_rule": "FactRegistry and DerivationRecord are the only fact/derivation authorities; this checker consumes their projections and does not define a parallel fact model."
+  },
+  "core": {
+    "ledger": "scripts/agent/check-core-surface-ledger.mjs",
+    "source_of_truth": "scripts/agent/check-core-surface-ledger.mjs",
+    "checker": "scripts/agent/check-core-surface-ledger.mjs",
+    "authority_rule": "Core inventory and ledger entries remain canonical inputs; checking does not create a second Core table or denominator."
+  },
+  "certificates": [
+    "checked_compiler_value",
+    "exact_source_digest",
+    "definition_and_reference_anchors",
+    "typed_callable_signatures",
+    "ownership_view_provenance",
+    "effect_call_paths_and_spans",
+    "state_graph_presence",
+    "canonical_fact_kinds",
+    "checked_derivation_records",
+    "registered_rejection",
+    "forged_record_rejection",
+    "construction_identity"
+  ],
+  "boundary": {
+    "proven": [
+      "The checker validates the checking contract, witness schema, compiler identity, implementation binding, and obligation ownership.",
+      "The production compiler check seam is compared with exact source bytes, semantic-index facts, source spans, and registered diagnostics.",
+      "Tool failures, stale identities, malformed responses, forged facts, and missing boundaries cannot qualify as checking proof."
+    ],
+    "assumed": [
+      "The ratified sema, Facts, Core ledger, and architecture sources state the intended checking law.",
+      "The compiler inspection command reaches the same loader, parser, sema, fact, and diagnostic paths used by ordinary compilation.",
+      "The pinned jet.compiler-proof.v1 claim identifies the selected candidate toolchain."
+    ],
+    "tested": [
+      "Accepted witnesses retain names, typed signatures, ownership/view metadata, effect provenance, state/fact records, and derivations.",
+      "Rejected witnesses retain registered diagnostics with reasons, fixes, and source spans.",
+      "Forged type, ownership, effect, state, fact, alias, and derivation records are rejected by the checker."
+    ],
+    "blocked": [
+      "Universal preservation for every semantic input and every compiler state.",
+      "A fresh compiler replay or complete witness qualification when the pinned compiler is unavailable.",
+      "Lowering, optimization, Prelude, runtime, adapter, and foreign-tool preservation beyond this checking boundary."
+    ],
+    "qualification": "blocked"
+  }
+}

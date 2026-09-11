@@ -34,25 +34,25 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for L0505</p>
+<p class="diag-copy fix" data-registry-field="fix">Use an arena or another deliberate allocator for loop allocations.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>L0505</code>: <code>tests/ui_lint/arena_heap_loop.warn</code>.</p>
-<pre class="diag">Warning [L0505] (heap_growth_in_loop): heap growth inside a loop — consider an arena
+<pre class="diag">Warning [L0505] (heap_growth_in_loop): Heap growth inside a loop — consider an arena
   --&gt; tests/ui_lint/arena_heap_loop.jet:5:27
     |
   5 |     loop i in 0..&lt;4 -&gt; xs.push(i)
     |                           ^^^^
- Why: each `push` may allocate on the global heap; in a hot loop that adds up
- Fix: bind `arena :: mem.Arena.new()` outside the loop and use `arena.alloc(…)` for scratch data
+ Why: Each `push` may allocate on the global heap; in a hot loop that adds up
+ Fix: Bind `arena :: mem.Arena.new()` outside the loop and use `arena.alloc(…)` for scratch data
 More: jet-lang.dev/e/L0505
 
-Warning [L0103] (unused_import): import `mem` is never used.
+Warning [L0103] (unused_import): Import `mem` is never used.
   --&gt; tests/ui_lint/arena_heap_loop.jet:1:10
     |
   1 | use core.mem
     |          ^^^
- Why: an unused import adds a name and dependency to the file without contributing to checked code.
- Fix: remove the import, or rename `mem` to `_mem` when the import is intentionally kept.
+ Why: An unused import adds a name and dependency to the file without contributing to checked code.
+ Fix: Remove the import, or rename `mem` to `_mem` when the import is intentionally kept.
 More: jet-lang.dev/e/L0103
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

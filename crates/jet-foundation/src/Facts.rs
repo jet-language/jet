@@ -2,6 +2,55 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
+/// Canonical shape facts are defined once in `Shape` and re-exported through
+/// the shared fact plane. Consumers must use this registry rather than build a
+/// projection-specific field table.
+pub use crate::Shape::{
+    ShapeDimensions, ShapeEncoding, ShapeError, ShapeFact, ShapeFieldFact, ShapeFieldNames,
+    ShapeIdentity, ShapeLayoutFact, ShapeLayoutKind, ShapeOrigin, ShapeProjectedField,
+    ShapeProjection, ShapeProjectionKind, ShapeProvenance, ShapeSpan, ShapeType,
+};
+
+/// D-SHAPE-ONE1: one checked shape fact registry feeds every projection.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ShapeFactRegistry {
+    facts: BTreeMap<ShapeIdentity, ShapeFact>,
+}
+
+impl ShapeFactRegistry {
+    /// Validate and register one canonical fact. Re-registering an identity
+    /// replaces the previous checked row and returns it to the caller.
+    pub fn insert(&mut self, fact: ShapeFact) -> Result<Option<ShapeFact>, ShapeError> {
+        fact.validate()?;
+        Ok(self.facts.insert(fact.identity.clone(), fact))
+    }
+
+    pub fn get(&self, identity: &ShapeIdentity) -> Option<&ShapeFact> {
+        self.facts.get(identity)
+    }
+
+    pub fn project(
+        &self,
+        identity: &ShapeIdentity,
+        kind: ShapeProjectionKind,
+    ) -> Result<Option<ShapeProjection>, ShapeError> {
+        self.get(identity)
+            .map(|fact| fact.project(kind))
+            .transpose()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &ShapeFact> {
+        self.facts.values()
+    }
+
+    pub fn len(&self) -> usize {
+        self.facts.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.facts.is_empty()
+    }
+}
 
 pub use crate::Authority::{EFFECT_ROOTS, EFFECT_SOURCE};
 
@@ -34,6 +83,11 @@ impl Default for BuildStamp {
 /// triple alone cannot identify.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TargetDossier {
+    /// The checked target machine selected for this artifact.
+    ///
+    /// This is intentionally owned by the dossier rather than reconstructed
+    /// from a target triple. `None` is the hosted/default snapshot.
+    pub machine: Option<Box<crate::TargetMachine::TargetMachine>>,
     /// The selected runtime ring for the reachable Prelude closure.
     pub layer: crate::RingLayer::RuntimeLayer,
     /// An opaque, stable provider identity. Providers should include their
@@ -56,6 +110,7 @@ pub struct TargetDossier {
 impl Default for TargetDossier {
     fn default() -> Self {
         Self {
+            machine: None,
             layer: crate::RingLayer::RuntimeLayer::Std,
             provider_identity: "hosted-default".to_string(),
             closure_identity: "prelude-hosted-v1".to_string(),
@@ -113,7 +168,21 @@ impl TargetDossier {
     /// Length framing is intentional: it keeps field boundaries unambiguous,
     /// so identities such as `("ab", "c")` cannot collide with `("a", "bc")`.
     pub fn append_cache_bytes(&self, target_triple: &str, bytes: &mut Vec<u8>) {
-        bytes.extend_from_slice(b"jet-target-dossier-v2\0");
+        bytes.extend_from_slice(b"jet-target-dossier-v3\0");
+        append_cache_frame(
+            bytes,
+            if self.machine.is_some() {
+                b"selected-machine"
+            } else {
+                b"hosted-default"
+            },
+        );
+        if let Some(machine) = self.machine.as_deref() {
+            append_cache_frame(bytes, machine.name.as_bytes());
+            append_cache_frame(bytes, machine.triple.as_bytes());
+            append_cache_frame(bytes, machine.provider_identity().as_bytes());
+            append_cache_frame(bytes, machine.linker_identity().as_bytes());
+        }
         for value in [
             target_triple,
             self.layer.as_str(),
@@ -225,10 +294,12 @@ impl BuildFactSnapshot {
         self
     }
 
-    /// Append the canonical target identity to an existing cache-key buffer.
     pub fn append_artifact_identity_bytes(&self, bytes: &mut Vec<u8>) {
         self.target_dossier
             .append_cache_bytes(&self.target_triple, bytes);
+        append_cache_frame(bytes, self.profile.as_bytes());
+        let layout = crate::Layout::TargetLayout::from_build_facts(self);
+        append_cache_frame(bytes, layout.layout_facts.cache_identity().as_bytes());
     }
 
     /// Canonical target identity bytes for artifact and runtime cache keys.
@@ -333,6 +404,10 @@ impl FactKind {
         }
     }
 }
+pub use crate::FactsDerivation::{
+    DerivationDisposition, DerivationIdentity, DerivationMethod, DerivationObservation,
+    DerivationPayload, DerivationRecord, DerivationRef,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FactDeclaration {

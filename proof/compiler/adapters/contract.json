@@ -1,0 +1,486 @@
+{
+  "schema": "jet.adapters-contract.v1",
+  "schema_version": 1,
+  "contract_id": "jet-adapters-contract-v1",
+  "stage": "adapters",
+  "policy": {
+    "decision_id": "D-COMPILER-PROOF1",
+    "tier_decision": "D-TIER-ONEIR1",
+    "outcome": "A",
+    "status": "ratified",
+    "scope": "AOT, Cranelift JIT, canonical interpreter, Web Wasm/browser, and comptime adapter correspondence for shared operations",
+    "foreign_suffix": "rustc/LLVM, Cranelift, assembler/linker, browser/VM, foreign libraries, and physical environment remain separate named assumptions at their edges"
+  },
+  "claim": {
+    "kind": "implementation-bound-conditional-adapter-correspondence",
+    "statement": "For every operation and execution mode admitted by the canonical capability relation, this stage binds the shared operation identity to the real artifact, dispatch/control-transfer path, ABI representation, width/layout conversion, handle/callback/result/error/cleanup/task-completion seam, target identity, and tool configuration. It records source correspondence and consumes optional identity-bound positive observation certificates as bounded matched evidence; only an approved canonical formal discharge may qualify a row as proved, and no finite result is universal.",
+    "preconditions": [
+      "The current Core dispatcher, canonical MIR target applicability, artifact plan, and capability relation are identified inputs.",
+      "Each adapter route names a real source definition or an explicit foreign edge; a route name alone is not a binding.",
+      "Generated Rust, Cranelift, interpreter, Web, and comptime paths consume the selected shared operation and artifact identity without re-deciding semantic policy.",
+      "Every current #2941 obligation receives exactly one source-bound disposition, including unavailable and unsupported applicability rows.",
+      "Any source, shared operation, target, artifact, tool configuration, capability relation, fixture, witness, or checker digest change invalidates the current correspondence record."
+    ],
+    "observation_alphabet": [
+      "result",
+      "typed_failure",
+      "mutation",
+      "input_consumption",
+      "ordered_effects",
+      "cleanup",
+      "resource_premises",
+      "schedule",
+      "allowed_schedules"
+    ],
+    "adapter_dimensions": [
+      "dispatch",
+      "control_transfer",
+      "calling_convention",
+      "representation",
+      "width",
+      "layout",
+      "handles",
+      "callbacks",
+      "results",
+      "errors",
+      "cleanup",
+      "task_completion",
+      "source_identity",
+      "target_identity",
+      "tool_configuration"
+    ],
+    "unsupported_cases": [
+      "a capability relation row that is missing, unavailable, stale, failed, planned, unsupported, or not identity-bound; these rows remain required unless exactly owner-ratified as not applicable",
+      "an artifact target, function, foreign call, link, callback, task, or entry that is not applicable to the selected target",
+      "a route whose source definition or generated bridge cannot be located in the authoritative source roots",
+      "a width, layout, calling convention, handle, callback, result, error, cleanup, or completion correspondence without an identity-bound observation",
+      "rustc/LLVM, Cranelift, assembler/linker, browser/VM, foreign library, operating-system, device, allocator, scheduler, or physical-environment behavior beyond its named assumption"
+    ]
+  },
+  "execution": {
+    "schema": "jet.compiler-inspection.v1",
+    "runner": "scripts/agent/jet-env",
+    "compiler": "target/debug/jet",
+    "operations": [
+      "check",
+      "run"
+    ],
+    "tiers": [
+      "aot",
+      "jet_run",
+      "interpreter",
+      "web",
+      "comptime"
+    ],
+    "timeout_ms": 120000,
+    "unknown_status": "unverified",
+    "resource_policy": "unknown, unavailable, stale, and unobserved adapter facts remain blocked; source correspondence is not runtime evidence",
+    "observation_certificates": {
+      "path": "proof/compiler/adapters/observations.json",
+      "schema": "jet.adapters-observations.v1",
+      "producer": "proof/compiler/adapters/observe.mjs",
+      "required_identity_fields": [
+        "program_sha256",
+        "source_sha256",
+        "shared_operation_sha256",
+        "adapter_artifact_sha256",
+        "target_sha256",
+        "tool_configuration_sha256",
+        "checker_sha256",
+        "obligations_sha256"
+      ],
+      "required_observations": [
+        "result",
+        "typed_failure",
+        "mutation",
+        "input_consumption",
+        "ordered_effects",
+        "cleanup",
+        "resource_premises",
+        "schedule",
+        "allowed_schedules"
+      ],
+      "positive_status": "verified",
+      "certificate_fields": [
+        "schema",
+        "status",
+        "producer",
+        "execution_id",
+        "checker",
+        "runner",
+        "observation_sha256",
+        "identity_sha256"
+      ],
+      "universal_proof": false
+    },
+    "formal_discharge": {
+      "path": "proof/compiler/adapters/discharge.json",
+      "schema": "jet.adapters-formal-discharge.v1",
+      "methods": [
+        "direct_verification",
+        "translation_certificate"
+      ],
+      "required_fields": [
+        "operation_id",
+        "mode",
+        "method",
+        "replay_ref",
+        "identity_fields",
+        "identity",
+        "universal_proof"
+      ],
+      "status_when_absent": "unavailable",
+      "universal_proof": false
+    }
+  },
+  "inventory_join": {
+    "authorities": [
+      "#2335",
+      "#2898",
+      "#2940"
+    ],
+    "#2335": {
+      "source": "scripts/agent/check-core-surface-ledger.mjs",
+      "selection": [
+        "module_item",
+        "collection_method_return",
+        "fixed_sig"
+      ],
+      "dimensions": [
+        "Core modules",
+        "nominal types",
+        "receiver methods",
+        "fields",
+        "constructor/use pairs"
+      ]
+    },
+    "#2898": {
+      "source": "proof/compiler/obligations.json",
+      "selection": [
+        "owner:#2941",
+        "family:adapter",
+        "kind:execution_boundary"
+      ],
+      "dimensions": [
+        "RustAot",
+        "Cranelift",
+        "Interpreter",
+        "Web",
+        "shared adapter route"
+      ]
+    },
+    "#2940": {
+      "source": "proof/compiler/prelude/contract.json and proof/compiler/runtime/contract.json",
+      "selection": [
+        "shared Prelude/Core body identity",
+        "runtime lifecycle and observation premises"
+      ],
+      "dimensions": [
+        "validation",
+        "defaults",
+        "bounds",
+        "encoding",
+        "numerics",
+        "lifecycle",
+        "effects",
+        "cancellation",
+        "cleanup"
+      ]
+    },
+    "capability_relation": {
+      "source": ".jet/hardening-manifest.json:capability_relation",
+      "schema": "jet.capability.relation.v1",
+      "selection": [
+        "capability_id@mode",
+        "owner",
+        "disposition",
+        "source_snapshot_hash"
+      ],
+      "join_rule": "a current identity-bound relation row determines whether a mode is applicable; its disposition determines qualification separately, so failed, stale, unavailable, planned, and unsupported rows remain required unless exactly owner-ratified-not-applicable"
+    },
+    "join_rule": "a shared operation is adapter-bound only when the dispatcher row, operation obligation, applicable capability row, selected artifact target, real route definition, target/tool identity, and dependent Prelude/runtime records all agree; no route name or tool-presence check is proof"
+  },
+  "obligation_dimensions": [
+    "dispatch",
+    "control_transfer",
+    "calling_convention",
+    "representation",
+    "width",
+    "layout",
+    "handles",
+    "callbacks",
+    "results",
+    "errors",
+    "cleanup",
+    "task_completion",
+    "source_identity",
+    "target_identity",
+    "tool_configuration",
+    "validation",
+    "defaults",
+    "bounds",
+    "encoding",
+    "numerics",
+    "lifecycle",
+    "effects",
+    "cancellation"
+  ],
+  "memory_premises": [
+    {
+      "id": "memory-safe-call",
+      "source": "crates/jet-foundation/src/MemSentry.rs",
+      "statement": "Vetted memory internals may use unsafe operations only behind checked pointer, allocation, alignment, lifetime, and failure premises; a safe-call wrapper does not erase those premises."
+    },
+    {
+      "id": "memory-checked-allocation",
+      "source": "crates/jet-codegen/src/Prelude/Core/FixedAllocator.rs",
+      "statement": "Allocator capacity, layout, and release outcomes are explicit resource premises; exhaustion is a typed resource failure, not undefined behavior."
+    },
+    {
+      "id": "memory-receiver-lifetime",
+      "source": "crates/jet-codegen/src/Prelude/Core.rs",
+      "statement": "Receiver and callback handles cannot be used after their terminal lifecycle transition; safe calls retain the owner and cleanup premises."
+    }
+  ],
+  "binding_methods": [
+    {
+      "method": "verified_construction",
+      "source": "crates/jet-codegen/src/Prelude/Core.jet, crates/jet-foundation/src/MIR.rs, and target adapter source",
+      "construction": "dispatcher rows, target enum/applicability facts, artifact selections, route definitions, and source spans are indexed without replacing a body by a route name",
+      "checker": "proof/compiler/adapters/check.mjs",
+      "limit": "source binding is not semantic or runtime proof"
+    },
+    {
+      "method": "direct_verification",
+      "source": "proof/compiler/toolchain/manifest.json, canonical adapter semantic model, and current checked adapter identity",
+      "construction": "a replay_ref selects a pinned compiler-proof claim whose proposition, implementation, correspondence route, model, and candidate identity are checked against the canonical adapter goal before the shared Lean replay runs",
+      "checker": "proof/compiler/adapters/check.mjs via scripts/agent/compiler-proof.mjs:replay",
+      "limit": "a successful pinned replay qualifies only its exact finite operation/mode record; it does not widen applicability or establish a universal adapter theorem"
+    },
+    {
+      "method": "translation_certificate",
+      "source": "proof/compiler/adapters/models, proof/compiler/toolchain/manifest.json, proof/compiler/adapters/fixtures, optional proof/compiler/adapters/observations.json, and optional proof/compiler/adapters/discharge.json",
+      "construction": "the canonical adapter model supplies the semantic goal and route declaration; same-observation dimensions, target bridge requirements, independent negative controls, and future identity-bound positive observations remain separately checked, while proved requires an actual pinned replay",
+      "checker": "proof/compiler/adapters/check.mjs via scripts/agent/compiler-proof.mjs:replay",
+      "limit": "finite source witnesses, observations, and negative controls are never universal proof"
+    }
+  ],
+  "identity": {
+    "schema": "jet.compiler-proof.v1",
+    "manifest_path": "proof/compiler/toolchain/manifest.json",
+    "authority_key": "compiler-proof.adapters",
+    "claim_id": "compiler-proof.identity-direct",
+    "identity_digest_source": "scripts/agent/compiler-proof.mjs:identityDigest",
+    "required_fields": [
+      "claim.identity_sha256",
+      "candidate.record_identity.target_inputs_sha256",
+      "candidate.record_identity.tool_version",
+      "candidate.record_identity.engine",
+      "candidate.commit",
+      "candidate.compiler.source",
+      "candidate.compiler.artifact",
+      "candidate.configuration",
+      "candidate.target",
+      "checker.toolchain_pin_sha256",
+      "proof.artifact",
+      "raw_replay"
+    ]
+  },
+  "coverage": {
+    "relation_path": "proof/compiler/obligations.json",
+    "owner": "#2941",
+    "owner_rule": "every current adapter operation, adapter target, and adapter boundary row receives one source-bound disposition",
+    "mapping_statuses": [
+      "mapped_unproved",
+      "unsupported",
+      "unmapped",
+      "proved"
+    ],
+    "qualification_rule": "mapped_unproved, unsupported, and unmapped rows remain blocked; finite observations may establish bounded matched coverage but no adapter row may claim proved without an approved canonical formal discharge",
+    "universal_proof": false
+  },
+  "certificates": [
+    "jet.adapter-dispatch-source-certificate.v1",
+    "jet.adapter-artifact-target-certificate.v1",
+    "jet.adapter-abi-layout-certificate.v1",
+    "jet.adapter-handle-callback-certificate.v1",
+    "jet.adapter-source-observation-v1",
+    "jet.adapter-negative-witness.v1",
+    "jet.memory-safe-call-premise.v1"
+  ],
+  "dependencies": [
+    {
+      "path": "proof/compiler/adapters/check.mjs",
+      "kind": "source-bound adapter checker"
+    },
+    {
+      "path": "proof/compiler/adapters/observe.mjs",
+      "kind": "identity-bound adapter observation producer"
+    },
+    {
+      "path": "scripts/agent/compiler-proof.mjs",
+      "kind": "compiler-proof stage driver"
+    },
+    {
+      "path": "proof/compiler/observations/comparison-journal.mjs",
+      "kind": "shared typed comparison journal and canonical corpus producer"
+    },
+    {
+      "path": "proof/compiler/adapters/fixtures/public-capture.jet",
+      "kind": "controlled-world typed comparison observation fixture"
+    },
+    {
+      "path": "crates/jet-codegen/src/Prelude/Core.jet",
+      "kind": "Core dispatcher and shared operation identities"
+    },
+    {
+      "path": "crates/jet-foundation/src/MIR.rs",
+      "kind": "canonical MIR artifact targets and applicability"
+    },
+    {
+      "path": "crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs",
+      "kind": "checked artifact plan and target applicability"
+    },
+    {
+      "path": "crates/jet-codegen/src/Codegen/MIRRust.rs",
+      "kind": "AOT and Web Wasm Rust emission"
+    },
+    {
+      "path": "crates/jet-codegen/src/Codegen/MIRWeb.rs",
+      "kind": "Web Wasm/JavaScript artifact emission"
+    },
+    {
+      "path": "crates/jet-codegen/src/Codegen/MIREval.rs",
+      "kind": "canonical interpreter MIR evaluation"
+    },
+    {
+      "path": "crates/jet-jit/src/CLI.rs",
+      "kind": "Cranelift artifact entry and CLI binding"
+    },
+    {
+      "path": "crates/jet-jit/src/Ffi.rs",
+      "kind": "Cranelift foreign ABI and handle binding"
+    },
+    {
+      "path": "crates/jet-jit/src/Concurrency.rs",
+      "kind": "Cranelift task, callback, and completion seam"
+    },
+    {
+      "path": "crates/jet-jit/src/jit/functions_compile.rs",
+      "kind": "Cranelift artifact/function applicability"
+    },
+    {
+      "path": "crates/jet-comptime/src/Comptime/CorePureParity.rs",
+      "kind": "comptime canonical pure route"
+    },
+    {
+      "path": "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
+      "kind": "comptime route admission"
+    },
+    {
+      "path": "Source/CmdCompile.rs",
+      "kind": "CmdCompile artifact and native engine route selection"
+    },
+    {
+      "path": "Source/Interpreter.rs",
+      "kind": "interpreter and JIT source-closure entry routes"
+    },
+    {
+      "path": "Source/CmdInspect.rs",
+      "kind": "Web artifact inspection route"
+    },
+    {
+      "path": ".jet/hardening-manifest.json",
+      "kind": "canonical capability applicability relation"
+    },
+    {
+      "path": "proof/compiler/obligations.json",
+      "kind": "shared compiler obligation relation"
+    },
+    {
+      "path": "proof/compiler/prelude/contract.json",
+      "kind": "shared Prelude dependency contract"
+    },
+    {
+      "path": "proof/compiler/prelude/witnesses.json",
+      "kind": "shared Prelude dependency witnesses"
+    },
+    {
+      "path": "proof/compiler/runtime/contract.json",
+      "kind": "shared runtime dependency contract"
+    },
+    {
+      "path": "proof/compiler/runtime/witnesses.json",
+      "kind": "shared runtime dependency witnesses"
+    },
+    {
+      "path": "Cargo.toml",
+      "kind": "target and dependency configuration"
+    },
+    {
+      "path": "flake.nix",
+      "kind": "toolchain and target configuration"
+    }
+  ],
+  "witnesses_sha256": "sha256-45abbd271a45113b0b9ce13943cbd6427a4639bc3e163a651efa1ef7f3e1ea93",
+  "foreign_assumptions": [
+    {
+      "id": "foreign.rustc-llvm",
+      "kind": "rustc-llvm",
+      "edge": "RustAot/Web Wasm emitted source to rustc and LLVM",
+      "contract": "rustc and LLVM preserve the selected Rust/MIR ABI, widths, layout, failure carrier, and target identity under the recorded configuration"
+    },
+    {
+      "id": "foreign.cranelift",
+      "kind": "cranelift",
+      "edge": "canonical MIR artifact to Cranelift IR and resident module",
+      "contract": "Cranelift preserves declared call conventions, host-word representations, handles, callbacks, trap/failure transport, and completion order"
+    },
+    {
+      "id": "foreign.assembler-linker",
+      "kind": "assembler-linker",
+      "edge": "emitted Rust/native object closure to executable or library",
+      "contract": "the assembler/linker consumes the exact artifact closure and does not change the recorded symbol, layout, or target identity"
+    },
+    {
+      "id": "foreign.browser-vm",
+      "kind": "browser-vm",
+      "edge": "generated Web Wasm/JavaScript publication to browser or Wasm VM",
+      "contract": "the named browser/VM honors the generated ABI, linear-memory widths, callback schedule, and resource lifetime"
+    },
+    {
+      "id": "foreign.library",
+      "kind": "foreign-library",
+      "edge": "adapter wrapper to crypto, HTTP, font, service, data, and other foreign libraries",
+      "contract": "the foreign library satisfies its named ABI, encoding, bounds, error, callback, and lifetime contract; its status never proves the Jet wrapper"
+    },
+    {
+      "id": "foreign.physical-environment",
+      "kind": "physical-environment",
+      "edge": "OS, device, allocator, clock, scheduler, and physical resource providers",
+      "contract": "the environment satisfies the named target, width, synchronization, capacity, scheduling, and release premises"
+    }
+  ],
+  "boundary": {
+    "proven": [
+      "The checker binds current adapter dispatcher rows, canonical artifact target facts, source route definitions, target bridge markers, and capability-relation identity when those inputs are available.",
+      "The checker reports exact source, operation, artifact, target, tool-configuration, dependency, fixture, and negative-control digests without executing the compiler or fixtures.",
+      "The checker rejects stale, missing, unsupported, mismatched, or unknown rows and cannot promote them to proved."
+    ],
+    "assumed": [
+      "Ratified shared Prelude/Core and runtime contracts state the operation-level policy consumed by every adapter.",
+      "Named rustc/LLVM, Cranelift, assembler/linker, browser/VM, foreign-library, and physical-environment contracts hold at their edges.",
+      "The pinned jet.compiler-proof.v1 claim identity identifies the candidate without changing adapter semantics."
+    ],
+    "tested": [
+      "The source relation, artifact plan, ABI/layout markers, callback/task seams, same-observation fixture declarations, and independent negative controls are checked structurally."
+    ],
+    "blocked": [
+      "Runtime execution through AOT/default run/dev/interpreter and applicable Web paths until the retained identity-bound observations are executed by the designated proof workflow.",
+      "Semantic equality of results, failures, mutation, input consumption, effect order, cleanup, resources, schedules, and task completion until complete identity-bound observations exist.",
+      "Universal correspondence and all named foreign or physical-environment behavior beyond the explicit assumptions."
+    ],
+    "qualification": "blocked",
+    "universal_proof": false
+  }
+}

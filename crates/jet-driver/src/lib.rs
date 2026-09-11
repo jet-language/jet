@@ -7,10 +7,10 @@ pub use jet_codegen::{
     SHA256,
 };
 
-/// Install the canonical TIR evaluator into comptime/REPL/dev entry points.
+/// Install the canonical MIR evaluator into comptime/REPL/dev entry points.
 #[inline]
-pub fn boot_tir_eval() {
-    Codegen::TIR::install_comptime_bridge();
+pub fn boot_mir_eval() {
+    Codegen::MIREval::install_mir_bridge();
 }
 
 /// Run front-end work on Jet's canonical compiler worker.
@@ -41,7 +41,7 @@ pub fn run_compiler_work<R: Send>(work: impl FnOnce() -> R + Send) -> R {
     }
     let (ambient_core_call, ambient_handle, ambient_extern_call) = Comptime::ambient_hooks();
     jet_foundation::CompilerStack::run_on_compiler_stack(move || {
-        boot_tir_eval();
+        boot_mir_eval();
         Comptime::with_ambient(ambient_core_call, ambient_handle, ambient_extern_call, work)
     })
 }
@@ -56,6 +56,7 @@ pub mod InterpreterBoundary;
 pub mod Loader;
 pub mod ProjectParts;
 pub mod QueryService;
+pub mod Migrations;
 // Card #367 / D-PRODUCT-SPLIT1=C: the compiler's module loader needs the
 // read-only package/config data model (manifest/lock/store-listing/script-
 // deps/FFI-binding parsing), never the `jetpack` package-manager engine
@@ -76,9 +77,11 @@ pub use jet_pkg_model::Authority;
 pub use jet_pkg_model::JetLib;
 pub use jet_pkg_model::JetLib::{JetLibAccess, JetLibArtifact, JetLibExport, JetLibScalar, JetLibStamp};
 pub use jet_pkg_model::{
-    AdaBind, CBind, CobolBind, ComBind, CppBind, DartBind, DotNetBind, EffectBudget, FortranBind,
-    GoBind, JavaBind, JavaScriptBind, LintPolicy, Lock, LuaBind, Manifest, OctaveBind, Package,
-    PascalBind, PerlBind, PhpBind, Policy, PowerShellBind, Public, PythonBind, RBind, RubyBind,
-    ScriptDeps, Store, TclBind, CFFI, FFI,
+    AdaBind, Bindgen, CBind, CobolBind, ComBind, CppBind, DartBind, DotNetBind, EffectBudget,
+    ForeignBridge,
+    FortranBind,
+    GoBind, JavaBind, JavaScriptBind, LintPolicy, Lock, LuaBind, Manifest, OctaveBind, Package, PascalBind,
+    PerlBind, PhpBind, Policy, PowerShellBind, Public, PythonBind, RBind, RubyBind, ScriptDeps,
+    Store, TclBind, CFFI, FFI,
 };
 pub use Compile::CompileOutput;

@@ -98,7 +98,7 @@ fn job_runner_named_jobs_match_expected_golden() {
 #[test]
 fn infinite_loop_hits_e2202_fuel_stop() {
     use std::collections::HashMap;
-    jet::boot_tir_eval();
+    jet::boot_mir_eval();
     let src = "fn run() {\n    n := 0\n    loop {\n        n = n + 1\n    }\n}\n";
     let prog = jet::Parser::parse(&jet::Lexer::lex(src).0).expect("fixture should parse");
     let mut funcs: HashMap<String, &jet::AST::Func> = HashMap::new();
@@ -127,7 +127,7 @@ fn infinite_loop_hits_e2202_fuel_stop() {
 #[test]
 fn fluent_method_chain_preserves_fuel_order_and_spans() {
     use std::collections::HashMap;
-    jet::boot_tir_eval();
+    jet::boot_mir_eval();
 
     let run_chain = |links: usize, fuel: u64| {
         let src = format!(
@@ -219,10 +219,6 @@ fn debug_keeps_the_impure_files_boundary_while_dev_reaches_the_shared_prelude() 
     .unwrap();
     let shown = path.to_string_lossy().into_owned();
     let bundle = jet::Loader::load_entry(&shown).expect("files boundary fixture should load");
-    assert!(
-        jet_driver::InterpreterBoundary::dev_boundary_scan(&bundle).is_none(),
-        "default dev must reach the shared encoding/files Prelude"
-    );
     jet_jit::reset_jit_trace_for_test();
     match dev_iteration(&shown, false, false) {
         RunOutcome::Ran {
@@ -252,11 +248,9 @@ fn debug_keeps_the_impure_files_boundary_while_dev_reaches_the_shared_prelude() 
     let debug = jet_driver::InterpreterBoundary::debug_boundary_scan(&bundle)
         .expect("source debug must retain the impurity gate");
     assert_eq!(debug.code, "E2203");
-    // The feature slot became a NOUN PHRASE when the boundary wrapper took over
-    // ownership of the sentence (441b0de6a): both wrappers render "it uses
-    // {feature}", so a verb phrase like "reads or writes files" would produce
-    // "it uses reads or writes files". Re-pinned to the noun phrase rather than
-    // reverting the contract, which is what fixed a spliced two-sentence E2201.
+    // The feature slot is a NOUN PHRASE because the boundary wrapper owns
+    // the sentence: a verb phrase like "reads or writes files" would produce
+    // "it uses reads or writes files".
     assert!(
         debug.what.contains("a file read or write"),
         "debug must still name the impure files boundary: {}",
@@ -266,7 +260,7 @@ fn debug_keeps_the_impure_files_boundary_while_dev_reaches_the_shared_prelude() 
     let _ = fs::remove_file(path);
 }
 
-/// c139 M4: task programs inside `resident_jit_safe` run via default `jet dev` (Cranelift), not E2201.
+/// c139 M4: task programs inside `resident_jit_safe` run via default `jet dev` (Cranelift).
 #[test]
 fn task_program_runs_via_jit() {
     if skip_if_cranelift_host_unsupported() {
@@ -281,15 +275,16 @@ fn task_program_runs_via_jit() {
         .collect();
     assert!(errors.is_empty(), "tasks must type-check");
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "tasks must be resident-safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle)
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
         .unwrap_or_else(|e| panic!("tasks JIT compile failed: {e}"));
 
+    let policy = common::development_policy();
     let mut backend = CraneliftBackend::new();
-    let jit = match backend.run(&bundle, false) {
+    let jit = match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
         RunOutcome::Ran { stdout, .. } => stdout,
         RunOutcome::Problems(ds) => panic!("tasks must run via JIT backend, got: {ds:?}"),
     };
@@ -427,9 +422,9 @@ fn run() {
     let shown = path.to_string_lossy().into_owned();
     let bundle = checked_bundle_from_path(&shown);
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "task surface must stay resident-safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
     jet_jit::reset_jit_trace_for_test();
     let RunOutcome::Ran {
@@ -539,8 +534,7 @@ fn caught_task_panics_keep_stderr_deterministic_under_parallel_repetition() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// c728/#778: uncovered effectful programs deopt under default dev; interpreter
-/// mode keeps the honest E2201 boundary.
+/// c728/#778: uncovered effectful programs deopt under default dev.
 #[test]
 fn dev_default_reports_jit_gap_for_env_program() {
     let dir = std::env::temp_dir().join(format!("jet_dev_jit_gap_{}", std::process::id()));
@@ -552,16 +546,6 @@ fn dev_default_reports_jit_gap_for_env_program() {
     )
     .unwrap();
     let shown = file.to_string_lossy().to_string();
-
-    match dev_iteration(&shown, false, true) {
-        RunOutcome::Problems(diags) => {
-            assert!(
-                diags.iter().any(|d| d.code == "E2201"),
-                "interpreter mode should still name the boundary: {diags:?}"
-            );
-        }
-        RunOutcome::Ran { .. } => panic!("interpreter unexpectedly ran core.sys program"),
-    }
 
     jet_jit::reset_jit_trace_for_test();
     match dev_iteration(&shown, false, false) {
@@ -759,9 +743,9 @@ fn run() {
         "loop-value bundle must type-check: {errors:?}"
     );
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "loop values must be resident-safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
     match dev_iteration(file.to_str().unwrap(), false, true) {
         RunOutcome::Ran { stdout, .. } => {
@@ -769,7 +753,7 @@ fn run() {
         }
         other => panic!("loop values must run in the interpreter: {other:?}"),
     }
-    jet_jit::try_compile_bundle(&bundle)
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
         .unwrap_or_else(|error| panic!("loop-value JIT compile failed: {error}"));
 
     jet_jit::reset_jit_trace_for_test();
@@ -1625,16 +1609,6 @@ fn json_coerce_audit_reports_jit_gap_on_default_dev() {
          {front_end:?}"
     );
 
-    match dev_iteration_with_timeout(stem, &file, true) {
-        RunOutcome::Problems(diags) => assert!(
-            diags.iter().any(|d| d.code == "E2201"),
-            "interpreter must name the coercion-audit boundary: {diags:?}"
-        ),
-        RunOutcome::Ran { .. } => {
-            panic!("interpreter dropped the coercion audit effect instead of deferring to native")
-        }
-    }
-
     assert_default_dev_jit_gap(stem, &file);
     let expected = normalize_for_parity(
         stem,
@@ -1874,11 +1848,11 @@ fn scheduler_spawn_runs_via_jit() {
         .collect();
     assert!(errors.is_empty(), "scheduler_spawn must type-check");
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "scheduler_spawn must be resident-safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle)
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
         .unwrap_or_else(|e| panic!("scheduler_spawn JIT compile failed: {e}"));
 
     let got = match dev_iteration(file, false, false) {
@@ -1989,50 +1963,6 @@ fn dev_packed_enum_print_is_safe_across_run_processes() {
     let _ = fs::remove_dir_all(cache);
 }
 
-/// D-DEV1 "try anyway": the opt-in flag skips the boundary scan and attempts
-/// execution. For a task program it then fails honestly at whatever
-/// unsupported construct it actually hits during interpretation, rather than
-/// refusing up front at the pre-scan's (earlier, more conservative) report
-/// site — no guarantees, but it tried.
-///
-/// c139 JIT-parity fix (2026-07-03): the dev interpreter's own comptime-leak
-/// errors (E0956/E3401) are now rewrapped as E2201 for a consistent voice
-/// (`Source/Interpreter.rs::dev_boundary_from_comptime`), so the diagnostic
-/// CODE alone no longer distinguishes "blocked by the pre-scan" from "tried
-/// and failed later" — both surface as E2201. Compare the failure SITE
-/// instead: try-anyway must fail at a different span than the pre-scan's
-/// (earlier / more conservative) report, proving real execution proceeded
-/// past the boundary before hitting trouble.
-#[test]
-fn try_anyway_skips_the_boundary_scan() {
-    let path = std::env::temp_dir().join(format!(
-        "jet_try_anyway_boundary_{}.jet",
-        std::process::id()
-    ));
-    fs::write(
-        &path,
-        "use core.sys as env\nfn run() {\n    print(env.current_dir())\n}\n",
-    )
-    .unwrap();
-    let file = path.to_string_lossy().into_owned();
-    let RunOutcome::Problems(blocked) = dev_iteration(&file, false, true) else {
-        panic!("expected the E2201 pre-scan to block this program up front");
-    };
-    assert_eq!(blocked[0].code, "E2201", "pre-scan should report E2201");
-    match dev_iteration(&file, true, true) {
-        RunOutcome::Problems(diags) => {
-            assert_ne!(
-                diags.first().and_then(|d| d.span),
-                blocked.first().and_then(|d| d.span),
-                "try-anyway must fail at a different site than the pre-scan, proving it skipped the scan and actually tried"
-            );
-        }
-        // If a future evaluator can run it, that's fine too — the point is the
-        // pre-scan was skipped.
-        RunOutcome::Ran { .. } => {}
-    }
-    let _ = fs::remove_file(path);
-}
 
 /// c139 M1: the Cranelift tier-1 backend runs `basics/hello.jet` with byte-identical
 /// stdout to the interpreter baseline.
@@ -2055,8 +1985,9 @@ fn cranelift_backend_matches_hello() {
         }
     };
 
+    let policy = common::development_policy();
     let mut backend = CraneliftBackend::new();
-    let got = match backend.run(&bundle, false) {
+    let got = match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
         RunOutcome::Ran { stdout, .. } => stdout,
         RunOutcome::Problems(ds) => panic!("cranelift backend did not run hello: {ds:?}"),
     };
@@ -2285,39 +2216,39 @@ if (takeWasmError(instance.exports)?.tag !== "Ok") throw new Error("contract Was
 }
 
 #[test]
-fn unicode_16_string_and_core_text_match_aot_comptime_and_resident_jit() {
+fn unicode_string_and_core_text_match_aot_comptime_and_resident_jit() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
-    let upper_only_in_host_unicode_17 = char::from_u32(0xA7CE).unwrap();
-    let lower_only_in_host_unicode_17 = char::from_u32(0xA7CF).unwrap();
+    let upper = char::from_u32(0xA7CE).unwrap();
+    let lower = char::from_u32(0xA7CF).unwrap();
     let whitespace = char::from_u32(0x2003).unwrap();
     let source = format!(
         r#"use core.text as text
 
 fn run() {{
-    print("{upper_only_in_host_unicode_17}".to_lower() == "{upper_only_in_host_unicode_17}")
-    print("{lower_only_in_host_unicode_17}".to_upper() == "{lower_only_in_host_unicode_17}")
+    print("{upper}".to_lower() == "{lower}")
+    print("{lower}".to_upper() == "{upper}")
     print("{whitespace}jet{whitespace}".trim())
-    print(text.lower("{upper_only_in_host_unicode_17}") == "{upper_only_in_host_unicode_17}")
-    print(text.upper("{lower_only_in_host_unicode_17}") == "{lower_only_in_host_unicode_17}")
+    print(text.lower("{upper}") == "{lower}")
+    print(text.upper("{lower}") == "{upper}")
     print(text.trim("{whitespace}jet{whitespace}"))
 }}
 "#,
     );
     let expected = "true\ntrue\njet\ntrue\ntrue\njet\n";
 
-    let resident = run_cranelift_without_fallback(&source, "unicode_16_public_string");
+    let resident = run_cranelift_without_fallback(&source, "unicode_public_string");
     assert_eq!(resident.stdout, expected);
 
-    let dir = common::unique_tmp("jet_unicode_16_public_string_aot");
+    let dir = common::unique_tmp("jet_unicode_public_string_aot");
     fs::create_dir_all(&dir).unwrap();
     let jet_path = dir.join("main.jet");
     let rust_path = dir.join("main.rs");
     let binary = dir.join("main");
     fs::write(&jet_path, &source).unwrap();
     let compiled = jet::compile_with_path(&source, &jet_path.to_string_lossy())
-        .expect("Unicode-16 String fixture should compile");
+        .expect("pinned Unicode String fixture should compile");
     let mut command = Command::new("rustc");
     let _runtime_lease = add_generated_rust(
         &mut command,
@@ -2329,7 +2260,7 @@ fn run() {{
     let rustc = command.arg("-o").arg(&binary).output().unwrap();
     assert!(
         rustc.status.success(),
-        "Unicode-16 AOT fixture rejected:\n{}",
+        "pinned Unicode AOT fixture rejected:\n{}",
         String::from_utf8_lossy(&rustc.stderr)
     );
     let aot = Command::new(&binary).output().unwrap();
@@ -2338,24 +2269,6 @@ fn run() {{
     let _ = fs::remove_dir_all(dir);
 }
 
-#[test]
-fn unsupported_core_text_is_not_claimed_by_resident_jit() {
-    if skip_if_cranelift_host_unsupported() {
-        return;
-    }
-    let dir = common::unique_tmp("jet_unicode_16_jit_boundary");
-    fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("main.jet");
-    fs::write(
-        &path,
-        "use core.text as text\nfn run() { print(text.casefold(\"Straße\")) }\n",
-    )
-    .unwrap();
-    let bundle = checked_bundle_from_path(&path.to_string_lossy());
-    assert!(!jet_jit::resident_jit_safe_bundle(&bundle));
-    assert!(jet_jit::resident_jit_safe_bundle_detail(&bundle).contains("entry not resident-safe"));
-    let _ = fs::remove_dir_all(dir);
-}
 
 #[test]
 fn exact_int_equality_matches_aot_in_resident_and_default_dev() {
@@ -2856,17 +2769,16 @@ fn run() {
     // resident jit without fallback" -- was never checked for this fixture. Prove
     // the resident tier first, the same way the `src` block below does.
     //
-    // `try_compile_bundle` comes first on purpose: `resident_jit_func_safety_detail`
-    // returns `None` (the "covered" answer) when `lower_jit_program` yields nothing,
-    // so on a lowering failure it reads green. The compile hook reports the real
-    // reason instead.
+    // Compile through the canonical MIR seam first: the resident safety
+    // verdict is meaningful only after lowering has succeeded, so a lowering
+    // failure cannot be mistaken for a covered function.
     let unboxed_proof = std::env::temp_dir().join("jet_jit_range_unboxed_safety.jet");
     fs::write(&unboxed_proof, unboxed).unwrap();
     let unboxed_bundle = checked_bundle_from_path(&unboxed_proof.to_string_lossy());
-    jet_jit::try_compile_bundle(&unboxed_bundle)
+    common::compile_cranelift_bundle(&unboxed_bundle, &common::development_policy())
         .unwrap_or_else(|error| panic!("unboxed Range resident compilation failed: {error}"));
     assert_eq!(
-        jet_jit::resident_jit_func_safety_detail(&unboxed_bundle, "run"),
+        common::cranelift_func_safety(&unboxed_bundle, "run"),
         jet_jit::ResidentJitSafety::Covered,
         "unboxed Range values must stay in resident JIT"
     );
@@ -2919,13 +2831,12 @@ fn run() {
     fs::write(&proof, src).unwrap();
     let bundle = checked_bundle_from_path(&proof.to_string_lossy());
     // Same order as the unboxed block above, for the same reason:
-    // `resident_jit_func_safety_detail` answers `None` ("covered") whenever
-    // `lower_jit_program` yields nothing, so on a lowering failure it reads
-    // green. Compile first so this half also names the real reason.
-    jet_jit::try_compile_bundle(&bundle)
+    // Compile through the canonical MIR seam first for the same reason:
+    // a lowering failure must report its actual compile error, not "covered".
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
         .unwrap_or_else(|error| panic!("Range resident compilation failed: {error}"));
     assert_eq!(
-        jet_jit::resident_jit_func_safety_detail(&bundle, "run"),
+        common::cranelift_func_safety(&bundle, "run"),
         jet_jit::ResidentJitSafety::Covered,
         "Range values and windows must stay in resident JIT"
     );
@@ -3432,24 +3343,6 @@ fn run() { print(three.get()); print(same.get()) }
     );
     assert_eq!(jit, aot);
 
-    let bundle = checked_bundle_from_path(file.to_str().unwrap());
-    let tir =
-        jet::Codegen::TIR::lower_jit_program(&bundle).expect("generic instance lowers to JIT TIR");
-    assert_eq!(
-        tir.instance_provenance.len(),
-        1,
-        "equivalent aliases share one canonical instance"
-    );
-    // architecture.md R6 / ratified D-NAME-TREE1 (docs/spec/architecture.md:554-559):
-    // "User identifiers are emitted as `__jet_<name>` … all Rust-name projections
-    // use its canonical mangle functions." An inline-module member goes through
-    // `Names::member_name` (crates/jet-codegen/src/Codegen/TIR/mod.rs:1679,1683),
-    // i.e. `generated_path("three.get")` → `__jet_three__get`; AOT emits the same
-    // symbol from `Codegen/Imports.rs::emit_program_items`. Ask the naming law for
-    // the name rather than restating a spelling — 8044b2e69 (#1801) already moved
-    // it once from the old `{module}__{fn}` form and left this literal behind.
-    let member = jet_foundation::Names::member_name("three", "get");
-    assert_eq!(tir.funcs.iter().filter(|f| f.name == member).count(), 1);
 }
 
 #[test]
@@ -3548,100 +3441,6 @@ fn run() {
         }),
         "sema must retain the concrete generic binding identity"
     );
-    let tir = jet::Codegen::TIR::lower_jit_program(&bundle)
-        .expect("concrete generic derive lowers to resident JIT TIR");
-    let numeric_init_ty = tir
-        .funcs
-        .iter()
-        .find(|func| func.name == "run")
-        .and_then(|func| {
-            func.body.iter().find_map(|stmt| match stmt {
-                jet::Codegen::TIR::TStmt::Let { name, init, .. } if name == "numeric" => {
-                    Some(init.ty.clone())
-                }
-                _ => None,
-            })
-        })
-        .expect("numeric TIR binding");
-    assert_eq!(numeric_init_ty, numeric_binding.ty.clone().unwrap());
-    assert!(tir
-        .funcs
-        .iter()
-        .any(|func| func.name == "Box<Int>::get_value"));
-    assert!(tir
-        .funcs
-        .iter()
-        .any(|func| func.name == "Box<Float>::get_value"));
-    assert!(tir
-        .funcs
-        .iter()
-        .any(|func| func.name == "Box<Bool>::get_value"));
-    assert!(tir
-        .funcs
-        .iter()
-        .any(|func| func.name == "Box<Char>::get_value"));
-    assert!(tir
-        .funcs
-        .iter()
-        .any(|func| func.name == "Box<String>::get_value"));
-    assert!(tir.funcs.iter().any(|func| func.name == "Box<Int>::make"));
-    assert!(tir
-        .funcs
-        .iter()
-        .any(|func| func.name == "Box<String>::make"));
-    assert!(tir
-        .funcs
-        .iter()
-        .any(|func| func.name == "StaticOnly<Int>::marker"));
-    assert!(tir
-        .funcs
-        .iter()
-        .any(|func| func.name == "StaticOnly<String>::marker"));
-    assert!(tir
-        .funcs
-        .iter()
-        .any(|func| func.name == "NumericBox<Float>::replace"));
-    assert!(tir
-        .funcs
-        .iter()
-        .any(|func| func.name == "NumericBox<Float>::plus"));
-    assert!(tir
-        .funcs
-        .iter()
-        .any(|func| func.name == "NumericBox<Float>::equal_to"));
-    assert!(
-        tir.funcs.iter().all(|func| {
-            !func.name.starts_with("Box<T>::") && !func.name.starts_with("Box<U>::")
-        }),
-        "abstract field types must not become fake JIT instances: {:?}",
-        tir.funcs.iter().map(|func| &func.name).collect::<Vec<_>>()
-    );
-    let generic_method_file = dir.join("generic_method_shadow.jet");
-    fs::write(
-        &generic_method_file,
-        r#"
-derive T.GenericMethod {
-    fn keep<T>(self, value: ^T) T -> value
-}
-#GenericMethod
-struct Shadow<T: Printable> { value: T }
-fn run() {
-    item := Shadow<Int>{ value: 1 }
-    print(item.value)
-}
-"#,
-    )
-    .unwrap();
-    let generic_method_bundle = checked_bundle_from_path(generic_method_file.to_str().unwrap());
-    let generic_method_tir = jet::Codegen::TIR::lower_jit_program(&generic_method_bundle)
-        .expect("generic-method fixture lowers around the unsupported method");
-    assert!(
-        generic_method_tir
-            .funcs
-            .iter()
-            .all(|func| !func.name.ends_with("::keep")),
-        "method-owned generic T must not be captured by the owner's T substitution"
-    );
     let resident = run_cranelift_without_fallback(src, "generic_user_derive");
     let default = match dev_iteration(&shown, false, false) {
         RunOutcome::Ran {
@@ -3736,7 +3535,7 @@ fn run() {
     let file = std::env::temp_dir().join("reachable_expanding_generic_method.jet");
     fs::write(&file, reachable).unwrap();
     let bundle = checked_bundle_from_path(file.to_str().unwrap());
-    let error = jet_jit::try_compile_bundle(&bundle).unwrap_err();
+    let error = common::compile_cranelift_bundle(&bundle, &common::development_policy()).unwrap_err();
     assert!(
         error.contains("E0909: generic instantiation goes too deep"),
         "{error}"
@@ -4105,49 +3904,33 @@ fn run() { print(perf.fidelity()) }"#;
     }
 }
 
-/// The AST boundary must not intercept a raw-memory `#Unsafe` region, and the
-/// canonical TIR evaluator must then EXECUTE it: `Ptr.from_addr` and postfix
-/// `p.*` both have evaluator arms (`eval/exprs.rs` `TExprKind::PtrFromAddr` /
-/// `TExprKind::Deref`), so a provenance-less address is not a coverage gap.
+/// The canonical MIR evaluator executes a sema-approved raw-memory `#Unsafe`
+/// region, and its live sentries report invalid provenance at runtime.
 ///
-/// D-MEM-SENTRY1 fixes what it IS: a located R0801 program-side stop at exit
-/// 70 (I2), identical on every tier — `tests/tir_unsafe_and_runtime.rs`
+/// D-MEM-SENTRY1 fixes the contract: a located R0801 program-side stop at
+/// exit 70 (I2), identical on every tier — `tests/tir_unsafe_and_runtime.rs`
 /// `sentry_faults_are_tier_parity` pins the same contract for the forced
-/// interpreter, the default JIT, and AOT. The earlier expectation here (an
-/// E2201 whose text carried `PtrFromAddr`) named a TIR lowering-failure reason
-/// string (`lower/expressions.rs` `expr_kind_name`), and since card #2001 no
-/// lowering reason reaches E2201 at all: `run_bundle_at_stage` keeps E2201 only
-/// for the two no-entry reasons and sends every other one down the ICE rail.
-/// So that combination is unproducible by design. This asserts the shipped
-/// outcome instead, and pins strictly more of it: the outcome kind, the exit
-/// status, an empty stdout (the deref never printed), and the R0801 code, gate
-/// reason, provenance detail and obligation clause.
+/// interpreter, the default JIT, and AOT. This test pins the shipped outcome:
+/// the outcome kind, exit status, empty stdout, and the R0801 code, gate reason,
+/// provenance detail, and obligation clause.
 #[test]
-fn unsafe_blocks_are_evaluated_by_canonical_tir_with_live_sentries() {
+fn unsafe_blocks_are_evaluated_by_canonical_mir_with_live_sentries() {
     let raw = jet::Loader::load_entry(&example_path("memory/rawptr"))
         .expect("rawptr example should load");
-    assert!(
-        jet_driver::InterpreterBoundary::dev_boundary_scan(&raw).is_none(),
-        "sema-approved #Unsafe blocks are evaluated by canonical TIR"
-    );
 
-    let unsupported_path = std::env::temp_dir().join(format!(
-        "jet_unsafe_tir_boundary_{}.jet",
+    let fault_path = std::env::temp_dir().join(format!(
+        "jet_unsafe_mir_runtime_{}.jet",
         std::process::id()
     ));
     fs::write(
-        &unsupported_path,
+        &fault_path,
         "use core.mem\nfn run() {\n    #Unsafe(\"mapped address is valid and aligned\") {\n        p :: mem.Ptr<Int>.from_addr(0x40000100)\n        print(p.*)\n    }\n}\n",
     )
     .unwrap();
-    let unsupported_file = unsupported_path.to_string_lossy().into_owned();
-    let unsupported =
-        jet::Loader::load_entry(&unsupported_file).expect("pointer cast example should load");
-    assert!(
-        jet_driver::InterpreterBoundary::dev_boundary_scan(&unsupported).is_none(),
-        "the AST boundary must not intercept an unsupported unsafe operation"
-    );
-    match dev_iteration(&unsupported_file, false, true) {
+    let fault_file = fault_path.to_string_lossy().into_owned();
+    let _fault_bundle =
+        jet::Loader::load_entry(&fault_file).expect("pointer cast example should load");
+    match dev_iteration(&fault_file, false, true) {
         RunOutcome::Ran {
             stdout,
             stderr,
@@ -4174,7 +3957,7 @@ fn unsafe_blocks_are_evaluated_by_canonical_tir_with_live_sentries() {
             }
         }
         outcome => panic!(
-            "a sema-approved #Unsafe region must be evaluated by canonical TIR, \
+            "a sema-approved #Unsafe region must be evaluated by canonical MIR, \
              not refused at a boundary: {outcome:?}"
         ),
     }
@@ -4223,17 +4006,12 @@ fn jet_probe_no_color_presence() {
     // The decoding accessor calls the very same variable absent.
     assert!(jet_std_env_get(&"NO_COLOR".to_string()).is_none());
 
-    // The env-only seam: no terminal involved, so this cannot go green because
-    // stdout happens to be a pipe.
-    assert!(!jet_style_env_enabled());
-
-    // The production decision itself, with only the stream fact substituted.
-    // `jet_style_enabled` is `jet_term_style_enabled(no_color, term_is_dumb,
-    // jet_term_stdout_is_terminal())` over these exact facts, so switching
-    // either read to the decoding accessor flips this assertion.
-    let (no_color, term_is_dumb) = jet_style_env_facts();
+    // The canonical resolver receives raw presence facts, so this cannot go
+    // green because stdout happens to be a pipe.
+    let no_color = jet_env_value_raw("NO_COLOR").is_some();
+    let force_color = jet_env_value_raw("FORCE_COLOR").is_some();
     assert!(no_color, "set-but-non-Unicode NO_COLOR must register as present");
-    assert!(!jet_term_style_enabled(no_color, term_is_dumb, true));
+    assert!(!jet_term_style_enabled(no_color, force_color, true));
 
     // End to end through the user-facing surface: no escape codes.
     let styled = jet_std_io_style(&"red".to_string(), &"plain".to_string());
@@ -4604,9 +4382,9 @@ fn run() {
         .collect::<Vec<_>>();
     assert!(errors.is_empty(), "{errors:#?}");
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "{}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
 
     jet_jit::reset_jit_trace_for_test();
@@ -4821,8 +4599,8 @@ fn place_windows_matches_resident_jit_and_aot_without_fallback() {
     let stem = "memory/place_windows";
     let file = example_path(stem);
     let expected = ProgramOutput::ran(golden_stdout(stem), String::new(), 0);
-    // The ratchet here used to require the forced interpreter to STOP at
-    // E2201. It runs the example now, so that claim is stale: card 2001
+    // The ratchet here used to require the forced interpreter to stop at
+    // the retired boundary. It runs the example now, so that claim is stale:
     // (c86f848ed) stopped `run_bundle_at_stage` reporting every lowering
     // failure as a missing `run`, and the place-loan mechanism reached
     // `__JetViewMut` regions — this example's own subject.
@@ -5031,11 +4809,11 @@ fn run() {
     let shown = file.to_string_lossy().to_string();
     let bundle = checked_bundle_from_path(&shown);
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "fixed-width integer fixture must be resident-safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle)
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
         .unwrap_or_else(|reason| panic!("fixed-width integer fixture must JIT-compile: {reason}"));
 
     let interpreted = match dev_iteration(&shown, false, true) {
@@ -5101,11 +4879,11 @@ fn run() {
     let shown = file.to_string_lossy().to_string();
     let bundle = checked_bundle_from_path(&shown);
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "signed remainder trap fixture must stay resident-safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle)
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
         .unwrap_or_else(|reason| panic!("signed remainder fixture must JIT-compile: {reason}"));
 
     // D-MODSEM1: `MIN % -1` is 0 and fits — jet_mod answers rather than traps.
@@ -5189,11 +4967,11 @@ fn run() {
         let shown = file.to_string_lossy().to_string();
         let bundle = checked_bundle_from_path(&shown);
         assert!(
-            jet_jit::resident_jit_safe_bundle(&bundle),
+            common::cranelift_resident_safe(&bundle),
             "{tag} remainder-zero fixture must stay resident-safe: {}",
-            jet_jit::resident_jit_safe_bundle_detail(&bundle)
+            common::cranelift_resident_safe_detail(&bundle)
         );
-        jet_jit::try_compile_bundle(&bundle).unwrap_or_else(|reason| {
+            common::compile_cranelift_bundle(&bundle, &common::development_policy()).unwrap_or_else(|reason| {
             panic!("{tag} remainder-zero fixture must JIT-compile: {reason}")
         });
 
@@ -5336,11 +5114,11 @@ fn fixed_width_mixed_sign_shift_counts_trap_across_tiers() {
         let shown = file.to_string_lossy().to_string();
         let bundle = checked_bundle_from_path(&shown);
         assert!(
-            jet_jit::resident_jit_safe_bundle(&bundle),
+            common::cranelift_resident_safe(&bundle),
             "{tag} must stay resident-safe: {}",
-            jet_jit::resident_jit_safe_bundle_detail(&bundle)
+            common::cranelift_resident_safe_detail(&bundle)
         );
-        jet_jit::try_compile_bundle(&bundle)
+        common::compile_cranelift_bundle(&bundle, &common::development_policy())
             .unwrap_or_else(|reason| panic!("{tag} must JIT-compile: {reason}"));
 
         let interpreted = match dev_iteration(&shown, false, true) {
@@ -5475,20 +5253,12 @@ fn run() {
     let shown = file.to_string_lossy().to_string();
     let bundle = checked_bundle_from_path(&shown);
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "numeric singleton splits must stay resident-safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle)
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
         .unwrap_or_else(|reason| panic!("numeric singleton splits must JIT-compile: {reason}"));
-
-    let RunOutcome::Problems(interpreter_diags) = dev_iteration(&shown, false, true) else {
-        panic!("numeric singleton splits unexpectedly left their interpreter boundary");
-    };
-    assert!(
-        interpreter_diags.iter().any(|diag| diag.code == "E2201"),
-        "numeric singleton split interpreter boundary drifted: {interpreter_diags:?}"
-    );
 
     jet_jit::reset_jit_trace_for_test();
     let resident = run_cranelift_without_fallback(source, "numeric_singleton_splits");
@@ -5656,35 +5426,38 @@ fn resident_jit_safety_detail_smoke() {
         let file = format!("examples/features/{stem}.jet");
         let mut bundle = jet::Loader::load_entry(&file).expect("load");
         jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-        let detail = jet_jit::resident_jit_safe_bundle_detail(&bundle);
-        let stmts = jet_jit::jit_dump_main_stmts(&bundle);
-        let funcs = jet_jit::jit_program_func_names(&bundle);
+        let detail = common::cranelift_resident_safe_detail(&bundle);
+        let stmts = common::cranelift_main_stmts(&bundle);
+        let funcs = common::cranelift_func_names(&bundle);
         eprintln!("{stem}: {detail}");
         if stem == "basics/value_dispatch" {
-            eprintln!("  compile: {:?}", jet_jit::try_compile_bundle(&bundle));
+            eprintln!(
+                "  compile: {:?}",
+                common::compile_cranelift_bundle(&bundle, &common::development_policy())
+            );
         }
         if stem == "concurrency/task_group" {
-            let (sites, lams) = jet_jit::jit_spawn_stats(&bundle);
+            let (sites, lams) = common::cranelift_spawn_stats(&bundle);
             eprintln!("  spawn: {sites} sites / {lams} lambdas");
             eprintln!(
                 "  uncovered: {:?}",
-                jet_jit::jit_main_uncovered_detail(&bundle)
+                common::cranelift_uncovered_detail(&bundle)
             );
         }
         eprintln!("  funcs: {}", funcs.join(", "));
         eprintln!("  main: {}", stmts.join(", "));
-        for c in jet_jit::jit_dump_mixed_switch_conds(&bundle) {
+        for c in common::cranelift_mixed_switch_conds(&bundle) {
             eprintln!("  mixed: {c}");
         }
         for fn_name in ["show", "next", "label", "describe"] {
-            match jet_jit::resident_jit_func_safety_detail(&bundle, fn_name) {
+            match common::cranelift_func_safety(&bundle, fn_name) {
                 jet_jit::ResidentJitSafety::Covered => {}
                 jet_jit::ResidentJitSafety::Gap(d) | jet_jit::ResidentJitSafety::Unavailable(d) => {
                     eprintln!("  {fn_name}: {d}");
                 }
             }
         }
-        if let Err(e) = jet_jit::try_compile_bundle(&bundle) {
+        if let Err(e) = common::compile_cranelift_bundle(&bundle, &common::development_policy()) {
             eprintln!("  compile: {e}");
         }
     }
@@ -5759,9 +5532,9 @@ fn resident_jit_safe_increment_decrement() {
             .collect();
         assert!(errors.is_empty(), "increment example must type-check");
         assert!(
-            jet_jit::resident_jit_safe_bundle(&bundle),
+            common::cranelift_resident_safe(&bundle),
             "prefix/postfix ++/-- should stay JIT-covered: {}",
-            jet_jit::resident_jit_safe_bundle_detail(&bundle)
+            common::cranelift_resident_safe_detail(&bundle)
         );
     });
 }
@@ -5779,9 +5552,9 @@ fn resident_jit_safe_named_tuples() {
             .collect();
         assert!(errors.is_empty(), "tuple example must type-check");
         assert!(
-            jet_jit::resident_jit_safe_bundle(&bundle),
+            common::cranelift_resident_safe(&bundle),
             "named tuple literal/access/equality/destructure should stay JIT-covered: {}",
-            jet_jit::resident_jit_safe_bundle_detail(&bundle)
+            common::cranelift_resident_safe_detail(&bundle)
         );
     });
 }
@@ -5802,11 +5575,11 @@ fn resident_jit_safe_zip_family() {
             "zip family example must type-check: {errors:#?}"
         );
         assert!(
-            jet_jit::resident_jit_safe_bundle(&bundle),
+            common::cranelift_resident_safe(&bundle),
             "zip family must stay resident-safe: {}",
-            jet_jit::resident_jit_safe_bundle_detail(&bundle)
+            common::cranelift_resident_safe_detail(&bundle)
         );
-        jet_jit::try_compile_bundle(&bundle)
+        common::compile_cranelift_bundle(&bundle, &common::development_policy())
             .unwrap_or_else(|reason| panic!("zip family must JIT-compile: {reason}"));
     });
 }
@@ -5827,9 +5600,9 @@ fn resident_jit_safe_chained_comparison() {
             "chained comparison example must type-check"
         );
         assert!(
-            jet_jit::resident_jit_safe_bundle(&bundle),
+            common::cranelift_resident_safe(&bundle),
             "same-direction chained comparisons should stay JIT-covered: {}",
-            jet_jit::resident_jit_safe_bundle_detail(&bundle)
+            common::cranelift_resident_safe_detail(&bundle)
         );
     });
 }
@@ -5848,9 +5621,9 @@ fn resident_jit_safe_user_operator_traits() {
         "user operator example must type-check: {errors:#?}"
     );
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "user operators should stay JIT-covered: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
     let src = fs::read_to_string(file).expect("operator example");
     let output = run_cranelift_without_fallback(&src, "user_operator_traits");
@@ -5871,9 +5644,9 @@ fn resident_jit_safe_string_method_chain() {
         .collect();
     assert!(errors.is_empty(), "method-chain example must type-check");
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "pure string method chains should stay JIT-covered: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
 }
 
@@ -6510,51 +6283,6 @@ fn cranelift_matches_plain_parameter_read_write_and_take_modes() {
     );
 }
 
-#[test]
-fn interpreter_writeback_boundary_only_opens_for_resolved_user_functions() {
-    let user = bundle_of(
-        "fn edit(value: &Int) { value = 2 }\nfn run() { value := 1; edit(&value); print(value) }\n",
-        "user_writeback_boundary",
-    );
-    assert!(
-        jet_driver::InterpreterBoundary::dev_boundary_scan(&user).is_none(),
-        "resolved user calls have interpreter writeback support"
-    );
-
-    let unresolved = bundle_of(
-        "fn run() { value := 1; unsupported(&value) }\n",
-        "unsupported_writeback_boundary",
-    );
-    let boundary = jet_driver::InterpreterBoundary::dev_boundary_scan(&unresolved)
-        .expect("an unresolved/core/import-style direct call must keep the honest boundary");
-    assert_eq!(boundary.code, "E2201");
-    assert!(boundary.what.contains("writeback"), "{boundary:?}");
-
-    let mut foreign = bundle_of(
-        "fn edit(value: &Int) {}\nfn run() { value := 1; edit(&value) }\n",
-        "foreign_writeback_boundary",
-    );
-    let edit = foreign.modules[0]
-        .items
-        .iter_mut()
-        .find_map(|item| match item {
-            jet::AST::Item::Func(function) if function.name == "edit" => Some(function),
-            _ => None,
-        })
-        .expect("fixture has edit");
-    let span = edit.name_span;
-    edit.inline_foreign = Some(jet::AST::InlineForeign {
-        lang: "c".to_string(),
-        lang_span: span,
-        marker_span: span,
-        source: String::new(),
-        source_span: span,
-    });
-    let boundary = jet_driver::InterpreterBoundary::dev_boundary_scan(&foreign)
-        .expect("inline foreign functions are not interpreter writeback targets");
-    assert_eq!(boundary.code, "E2201");
-    assert!(boundary.what.contains("writeback"), "{boundary:?}");
-}
 
 /// A fixed `&` write-back parameter beside a variadic pack, read inside the
 /// callee (`extras.len()`).
@@ -6742,9 +6470,11 @@ fn body_only_edit_is_type_stable() {
         "struct P {\n    x: Int\n}\nfn f(p: P) Int {\n    return p.x + 1\n}\nfn run() {\n    print(f(P{x: 2}))\n}\n",
         "stable_new",
     );
+    let decision = jet::Sema::HotSwap::type_stable_decision(&old, &new, "run")
+        .expect("body-only edit must produce a hot-swap decision");
     assert!(
-        jet::Sema::HotSwap::type_stable_check(&old, &new, "run").is_ok(),
-        "a body-only edit must be type-stable (swap path)"
+        decision.is_compatible(),
+        "a body-only edit must be type-stable (swap path): {decision:?}"
     );
 }
 
@@ -6756,18 +6486,23 @@ fn struct_field_change_emits_e2210() {
         "struct P {\n    x: Int\n    y: Int\n}\nfn f(p: P) Int {\n    return p.x\n}\nfn run() {\n    print(f(P{x: 1, y: 2}))\n}\n",
         "field_new",
     );
-    match jet::Sema::HotSwap::type_stable_check(&old, &new, "run") {
-        Ok(()) => panic!("adding a struct field must force a restart"),
-        Err(diags) => {
-            assert_eq!(diags.len(), 1);
-            assert_eq!(diags[0].code, "E2210");
-            assert!(
-                diags[0].what.contains("struct `P`"),
-                "E2210 should name the changed struct, got: {}",
-                diags[0].what
-            );
-        }
-    }
+    let decision = jet::Sema::HotSwap::type_stable_decision(&old, &new, "run")
+        .expect("struct field change must produce a hot-swap decision");
+    assert!(
+        decision.requires_restart(),
+        "adding a struct field must force a restart: {decision:?}"
+    );
+    let reason = decision
+        .compatibility
+        .reason()
+        .expect("an incompatible decision must carry a restart reason");
+    let diagnostic = jet::Sema::HotSwap::e2210(reason);
+    assert_eq!(diagnostic.code, "E2210");
+    assert!(
+        diagnostic.what.contains("struct `P`"),
+        "E2210 should name the changed struct, got: {}",
+        diagnostic.what
+    );
 }
 
 /// Changing a function's return type changes the surface → E2210.
@@ -6781,13 +6516,19 @@ fn fn_signature_change_emits_e2210() {
         "fn g(a: Int) Bool {\n    return a == 0\n}\nfn run() {\n    print(g(1))\n}\n",
         "sig_new",
     );
-    match jet::Sema::HotSwap::type_stable_check(&old, &new, "run") {
-        Ok(()) => panic!("a return-type change must force a restart"),
-        Err(diags) => {
-            assert_eq!(diags[0].code, "E2210");
-            assert!(diags[0].what.contains("return type"));
-        }
-    }
+    let decision = jet::Sema::HotSwap::type_stable_decision(&old, &new, "run")
+        .expect("function signature change must produce a hot-swap decision");
+    assert!(
+        decision.requires_restart(),
+        "a return-type change must force a restart: {decision:?}"
+    );
+    let reason = decision
+        .compatibility
+        .reason()
+        .expect("an incompatible decision must carry a restart reason");
+    let diagnostic = jet::Sema::HotSwap::e2210(reason);
+    assert_eq!(diagnostic.code, "E2210");
+    assert!(diagnostic.what.contains("return type"));
 }
 
 /// Adding an enum variant changes the surface → E2210.
@@ -6801,13 +6542,19 @@ fn enum_variant_change_emits_e2210() {
         "enum E {\n    A\n    B\n    C\n}\nfn run() {\n    print(1)\n}\n",
         "enum_new",
     );
-    match jet::Sema::HotSwap::type_stable_check(&old, &new, "run") {
-        Ok(()) => panic!("adding an enum variant must force a restart"),
-        Err(diags) => {
-            assert_eq!(diags[0].code, "E2210");
-            assert!(diags[0].what.contains("enum `E`"));
-        }
-    }
+    let decision = jet::Sema::HotSwap::type_stable_decision(&old, &new, "run")
+        .expect("enum variant change must produce a hot-swap decision");
+    assert!(
+        decision.requires_restart(),
+        "adding an enum variant must force a restart: {decision:?}"
+    );
+    let reason = decision
+        .compatibility
+        .reason()
+        .expect("an incompatible decision must carry a restart reason");
+    let diagnostic = jet::Sema::HotSwap::e2210(reason);
+    assert_eq!(diagnostic.code, "E2210");
+    assert!(diagnostic.what.contains("enum `E`"));
 }
 
 /// D-PERSIST-DEVSTATE1=A: release codegen lowers a writable `#Persist` binding
@@ -6862,7 +6609,7 @@ fn persist_binding_survives_hot_swap_and_resets_on_shape_change() {
 // ── card #131 S1-bridge (D-SERDE2): hand codec dev-tier parity (R12) ──────────
 // A hand `impl T.Encode`/`impl T.Decode` uses the same typed TIR codec dispatch
 // as a derived codec. The dev tier must execute the round trip, not preserve the
-// retired E2201 coverage gap.
+// retired interpreter coverage gap.
 #[test]
 fn hand_written_codec_dev_tier_matches_native_shape() {
     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
@@ -6918,10 +6665,10 @@ fn run() {
 /// D-SCHEDULE1 (ratified 2026-07-11, card #505): `jet dev`'s due-job tick
 /// consumer. `scheduled_jobs` must enumerate every `#Job #Every(…)` fn
 /// with its resolved schedule (and skip a plain `#Job fn` with no
-/// `#Every(…)`), and `run_named_job` must actually execute one by name
-/// through the same interpreter tier `dev_iteration` uses — golden-testing
-/// the loop's per-tick logic without the long-running file watcher, same
-/// spirit as `dev_iteration` itself (see the module doc above).
+/// `run_interpreter_named_job` must actually execute one by name through the
+/// same interpreter tier `dev_iteration` uses — golden-testing the loop's
+/// per-tick logic without the long-running file watcher, same spirit as
+/// `dev_iteration` itself (see the module doc above).
 #[test]
 fn schedule_every_dev_loop_consumer() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -6984,14 +6731,21 @@ fn schedule_every_dev_loop_consumer() {
     );
 
     // Actually invoking a named job runs it like an ordinary call.
-    match jet::Interpreter::run_named_job(&bundle, "prune_sessions", false) {
+    let policy = common::development_policy();
+    match common::run_interpreter_named_job(
+        &bundle,
+        file.to_str().unwrap(),
+        "prune_sessions",
+        false,
+        &policy,
+    ) {
         RunOutcome::Ran {
             stdout, exit_code, ..
         } => {
             assert_eq!(exit_code, 0);
             assert_eq!(stdout, "pruning sessions\n");
         }
-        RunOutcome::Problems(diags) => panic!("run_named_job failed: {diags:?}"),
+        RunOutcome::Problems(diags) => panic!("named job failed: {diags:?}"),
     }
 }
 
@@ -7293,7 +7047,19 @@ fn run() {
     .unwrap();
     let shown = file.to_string_lossy().to_string();
     let bundle = checked_bundle_from_path(&shown);
-    let plan = jet_jit::plan_bundle_tiers(&bundle);
+    let plan = common::cranelift_tier_plan(&bundle);
+    let run_id = plan
+        .rows
+        .iter()
+        .find(|row| row.function_name == "run")
+        .map(|row| row.function)
+        .expect("tier plan must identify run");
+    let cached_id = plan
+        .rows
+        .iter()
+        .find(|row| row.function_name == "cached")
+        .map(|row| row.function)
+        .expect("tier plan must identify cached");
     for name in ["run", "add1", "native_sum"] {
         assert!(
             plan.native.contains(name),
@@ -7328,8 +7094,9 @@ fn run() {
 
     jet_jit::reset_jit_trace_for_test();
     jet_jit::set_trace_tiers(true);
+    let policy = common::development_policy();
     let mut backend = CraneliftBackend::new();
-    let stdout = match backend.run(&bundle, false) {
+    let stdout = match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
         RunOutcome::Ran { stdout, .. } => stdout,
         RunOutcome::Problems(ds) => panic!("mixed/deopt program must run: {ds:?}"),
     };
@@ -7352,19 +7119,21 @@ fn run() {
     let trace = jet_jit::take_last_trace();
     assert!(!trace.is_empty(), "trace-tiers must record rows");
     assert!(
-        trace.iter().any(|row| !row.function.is_empty()),
-        "trace rows need function names: {trace:?}"
+        trace
+            .iter()
+            .any(|row| row.function == run_id && !row.function_name.is_empty()),
+        "trace run row needs a function identity and name: {trace:?}"
     );
     assert!(
         trace
             .iter()
-            .any(|row| matches!(row.tier, jet_jit::Tier::Native) && row.function == "run"),
+            .any(|row| matches!(row.tier, jet_jit::Tier::Native) && row.function == run_id),
         "trace must record the native entry: {trace:?}"
     );
     assert!(
         trace.iter().any(|row| {
             matches!(row.tier, jet_jit::Tier::Interp)
-                && row.function == "cached"
+                && row.function == cached_id
                 && !row.reason.is_empty()
         }),
         "trace must name the interpreter-bound function and its reason: {trace:?}"

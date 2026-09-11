@@ -17,6 +17,7 @@
 
 mod common;
 
+use jet_foundation::DataTree::DataTree;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
@@ -150,13 +151,21 @@ const PRELUDE_JET_SHOW_EXCLUSIONS: &[PreludeShowExclusion] = &[
 fn prelude_declared_type(source: &str, rust_type: &str) -> bool {
     source.lines().any(|line| {
         let line = line.trim_start();
-        ["pub struct ", "pub enum ", "pub type ", "struct ", "enum ", "type "]
-            .iter()
-            .any(|prefix| {
-                line.strip_prefix(prefix)
-                    .and_then(|rest| rest.split(|ch: char| ch.is_whitespace() || ch == '<').next())
-                    == Some(rust_type)
-            })
+        [
+            "pub struct ",
+            "pub enum ",
+            "pub type ",
+            "struct ",
+            "enum ",
+            "type ",
+        ]
+        .iter()
+        .any(|prefix| {
+            line.strip_prefix(prefix).and_then(|rest| {
+                rest.split(|ch: char| ch.is_whitespace() || ch == '<')
+                    .next()
+            }) == Some(rust_type)
+        })
     })
 }
 
@@ -178,9 +187,7 @@ fn prelude_declared_jet_show(source: &str, rust_type: &str) -> bool {
 }
 
 fn prelude_file(relative: &str) -> PathBuf {
-    root()
-        .join("crates/jet-codegen/src/Prelude")
-        .join(relative)
+    root().join("crates/jet-codegen/src/Prelude").join(relative)
 }
 
 fn named_string_const(source: &str, name: &str) -> BTreeSet<String> {
@@ -286,16 +293,13 @@ fn prelude_jet_show_exclusions_remain_explicit_only() {
             exclusion.canonical_type
         );
         assert!(
-            !registry
-                .auto_printable
-                .contains(exclusion.canonical_type),
+            !registry.auto_printable.contains(exclusion.canonical_type),
             "excluded Prelude JetShow type `{}` has an automatic printable row: {}",
             exclusion.canonical_type,
             exclusion.reason
         );
     }
 }
-
 
 /// Collect all registered-shape codes emitted in Source/ via Diagnostic::error
 /// / Diagnostic::warn.
@@ -1395,7 +1399,6 @@ const DIAGNOSTIC_COVERAGE_ALLOWLIST: &[(&str, &str, &str)] = &[
     ("E1802", "left-only", "Tower #2093"),
     ("E1803", "left-only", "Tower #2093"),
     ("E2106", "left-only", "Tower #2093"),
-    ("E2201", "left-only", "Tower #2093"),
     ("E2202", "left-only", "Tower #2093"),
     ("E2203", "left-only", "Tower #2093"),
     ("E2204", "left-only", "Tower #2093"),
@@ -1835,7 +1838,7 @@ fn check_json_snapshots_for_edits(path: &PathBuf, failures: &mut Vec<String>) {
             }
             let has_edit = matches!(
                 jet_foundation::JSON::json_get(&report, "fix_edits"),
-                Some(jet_foundation::JSON::JSONValue::Array(edits)) if !edits.is_empty()
+                Some(DataTree::Array(edits)) if !edits.is_empty()
             );
             if !has_edit {
                 failures.push(format!("{}:{} — {fix}", path.display(), line + 1));
@@ -1843,7 +1846,7 @@ fn check_json_snapshots_for_edits(path: &PathBuf, failures: &mut Vec<String>) {
             }
             let has_applicability = matches!(
                 jet_foundation::JSON::json_get(&report, "applicability"),
-                Some(jet_foundation::JSON::JSONValue::String(value))
+                Some(DataTree::Text(value) | DataTree::TypedText(value))
                     if value == "safe" || value == "suggested"
             );
             if !has_applicability {
@@ -1855,10 +1858,10 @@ fn check_json_snapshots_for_edits(path: &PathBuf, failures: &mut Vec<String>) {
             }
             let has_safety = matches!(
                 jet_foundation::JSON::json_get(&report, "fix_edits"),
-                Some(jet_foundation::JSON::JSONValue::Array(edits))
+                Some(DataTree::Array(edits))
                     if edits.iter().all(|edit| matches!(
                         jet_foundation::JSON::json_get(edit, "safety"),
-                        Some(jet_foundation::JSON::JSONValue::String(value))
+                        Some(DataTree::Text(value) | DataTree::TypedText(value))
                             if [
                                 jet_foundation::Report::FixSafety::Formatting,
                                 jet_foundation::Report::FixSafety::BehaviorPreserving,
@@ -1986,6 +1989,31 @@ fn every_registered_code_has_explain_page() {
     );
 }
 
+/// Tower #2434: the five reworded rows must reach `jet explain` as detailed
+/// what/why/fix, not the generic stage fallback. Explain.rs projects a row's
+/// prose only when its typed `detail` flag is set, so a rewritten row that
+/// keeps `false` silently regresses to "A longer explanation will land".
+#[test]
+fn reworded_law_rows_explain_with_detail() {
+    for code in ["E0041", "E0109", "E0301", "E0907", "E2511"] {
+        let explanation =
+            jet::Explain::lookup(code).unwrap_or_else(|| panic!("{code} explain page"));
+        for (field, value) in [
+            ("what", &explanation.what),
+            ("why", &explanation.why),
+            ("fix", &explanation.fix),
+        ] {
+            let text = value
+                .as_deref()
+                .unwrap_or_else(|| panic!("{code} explain page has no detailed {field}"));
+            assert!(
+                !text.starts_with("The registered ") && !text.starts_with("Follow the guidance"),
+                "{code} explain {field} is the generic registry fallback: {text}"
+            );
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Audit: typed rows but NOT emitted (spec ahead of impl)
 //
@@ -2105,4 +2133,75 @@ fn registered_unimplemented_codes_are_expected() {
     if let Some(failure) = baseline_failure {
         panic!("{failure}");
     }
+}
+
+#[test]
+fn diagnostic_coverage_baseline_is_a_non_decreasing_floor() {
+    use jet_foundation::Coverage::CoverageEntry;
+    use jet_foundation::Report::NoFixReasonKind;
+
+    let baseline = jet_foundation::Registry::diagnostic_coverage_baseline();
+    assert!(
+        baseline.rows.len() > 1,
+        "coverage baseline must classify the current registry by plane"
+    );
+
+    let entries = jet_foundation::Registry::diagnostic_coverage_entries();
+    let facts = jet_foundation::Coverage::try_facts(entries.clone())
+        .expect("registered diagnostic coverage rows must be valid");
+    let validated = jet_foundation::Registry::validate_diagnostic_coverage(entries)
+        .expect("current diagnostic coverage must meet its checked-in floor");
+    assert_eq!(facts, validated);
+    assert_eq!(
+        facts.iter().map(|fact| fact.rows).sum::<usize>(),
+        baseline.rows.values().map(|row| row.total).sum::<usize>()
+    );
+    assert_eq!(
+        facts.iter().map(|fact| fact.edit_covered).sum::<usize>(),
+        baseline
+            .rows
+            .values()
+            .map(|row| row.edit_covered)
+            .sum::<usize>()
+    );
+    assert_eq!(
+        facts.iter().map(|fact| fact.reason_covered).sum::<usize>(),
+        baseline
+            .rows
+            .values()
+            .map(|row| row.reason_covered)
+            .sum::<usize>()
+    );
+
+    let mut with_new_uncovered = facts
+        .iter()
+        .flat_map(|fact| {
+            let mut rows = Vec::with_capacity(fact.rows);
+            rows.extend((0..fact.edit_covered).map(|_| {
+                CoverageEntry::new(fact.plane.clone(), true, None)
+            }));
+            rows.extend((0..fact.reason_covered).map(|_| {
+                CoverageEntry::new(
+                    fact.plane.clone(),
+                    false,
+                    Some(NoFixReasonKind::Behavior),
+                )
+            }));
+            rows.extend((0..fact.uncovered).map(|_| {
+                CoverageEntry::new(fact.plane.clone(), false, None)
+            }));
+            rows
+        })
+        .collect::<Vec<_>>();
+    let open_plane = facts
+        .iter()
+        .find(|fact| fact.uncovered > 0)
+        .expect("the current source must expose an open coverage plane");
+    with_new_uncovered.push(CoverageEntry::new(open_plane.plane.clone(), false, None));
+    let failure = jet_foundation::Coverage::validate_registry_coverage(
+        with_new_uncovered,
+        &baseline,
+    )
+    .expect_err("a new uncovered row in an open plane must fail the ratchet");
+    assert!(failure.contains("neither fix_edits nor no_fix_reason"));
 }

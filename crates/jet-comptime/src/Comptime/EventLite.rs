@@ -670,8 +670,8 @@ fn eval_method_inner(
             Ok(CtValue::Int(n))
         }
         ("Hook", "listener_count") => {
-            let hid = handle_id(recv, "Hook")
-                .ok_or_else(|| unsupported("Hook.listener_count", span))?;
+            let hid =
+                handle_id(recv, "Hook").ok_or_else(|| unsupported("Hook.listener_count", span))?;
             let n = HOOKS.with(|slot| {
                 let v = slot.borrow();
                 let idx = hid.saturating_sub(1) as usize;
@@ -972,6 +972,25 @@ fn eval_method_inner(
             }
             .ok_or_else(|| unsupported("AsyncEvent.subscribe handler", span))?;
             Ok(async_event_add(eid, sid, handler))
+        }
+        ("AsyncEvent", "listener_count" | "queued_count" | "running_count" | "blocked_count") => {
+            let eid = handle_id(recv, "AsyncEvent")
+                .ok_or_else(|| unsupported("AsyncEvent.count", span))?;
+            let n = ASYNC_EVENTS.with(|slot| {
+                let v = slot.borrow();
+                let idx = eid.saturating_sub(1) as usize;
+                v.get(idx)
+                    .and_then(|e| e.as_ref())
+                    .map(|event| {
+                        if method == "listener_count" {
+                            event.listeners.iter().filter(|l| l.sub.active()).count() as i64
+                        } else {
+                            0
+                        }
+                    })
+                    .unwrap_or(0)
+            });
+            Ok(CtValue::Int(n))
         }
         ("AsyncEvent", "emit_async") => {
             let eid = handle_id(recv, "AsyncEvent")

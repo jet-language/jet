@@ -2,14 +2,14 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use jet_foundation::Report::render_status_json;
-use jet_foundation::AST::{Item, ProgramBundle};
+use jet_foundation::Report::{StatusEnvelope, StatusValue};
 use jet_foundation::AST::{AccessConvention, ParamZone, Type};
+use jet_foundation::AST::{Item, ProgramBundle};
 use jet_foundation::JSON::json_escape;
 use jet_pkg_model::Overlay::OverlayPolicy;
 use jet_pkg_model::EffectBudget::{render_effect_projection_line, render_effect_projection_object};
 use jet_pkg_model::Package::{
-    dep_display, ConfigFacts as PackageConfigFacts, EnvironmentFact, MemberRef,
+    dep_display_redacted, ConfigFacts as PackageConfigFacts, EnvironmentFact, MemberRef,
     OutputFact as PackageOutputFact, OutputPayload, PackageAuthority, PackageFacts, ServiceFact,
     TrustDecision,
 };
@@ -332,7 +332,7 @@ fn json_config_facts(value: &PackageConfigFacts) -> String {
             .deps
             .iter()
             .map(|(name, source)| {
-                format!("{{\"name\":{},\"source\":{}}}", json_str(name), json_str(&dep_display(source)))
+                format!("{{\"name\":{},\"source\":{}}}", json_str(name), json_str(&dep_display_redacted(source)))
             })
             .collect::<Vec<_>>()
             .join(","),
@@ -377,7 +377,7 @@ pub fn package_facts_json(facts: &PackageFacts) -> String {
             format!(
                 "{{\"name\":{},\"source\":{}}}",
                 json_str(name),
-                json_str(&dep_display(source))
+                json_str(&dep_display_redacted(source))
             )
         })
         .collect::<Vec<_>>()
@@ -949,17 +949,28 @@ fn json_state_graph(graph: &StateGraphFact) -> String {
 impl SemIndex {
     /// Stable JSON document for tests and `jet inspect semindex --json`.
     pub fn to_json(&self) -> String {
-        self.to_json_inner(None)
+        self.to_status_envelope().json()
+    }
+
+    /// Typed status boundary for consumers that need to add report fields
+    /// without reparsing the rendered envelope.
+    pub fn to_status_envelope(&self) -> StatusEnvelope {
+        self.to_status_envelope_inner(None)
     }
 
     /// Stable semantic-index document with one additive consumer projection.
     /// The base fields and their order remain owned by this serializer, so a
     /// tooling projection does not create a second top-level document.
     pub fn to_json_with_expand(&self, expand: &ExpandProjection) -> String {
-        self.to_json_inner(Some(expand))
+        self.to_status_envelope_with_expand(expand).json()
     }
 
-    fn to_json_inner(&self, expand: Option<&ExpandProjection>) -> String {
+    /// Typed status boundary for the expanded semantic-index document.
+    pub fn to_status_envelope_with_expand(&self, expand: &ExpandProjection) -> StatusEnvelope {
+        self.to_status_envelope_inner(Some(expand))
+    }
+
+    fn to_status_envelope_inner(&self, expand: Option<&ExpandProjection>) -> StatusEnvelope {
         let defs: Vec<String> = self.definitions().iter().map(json_def).collect();
         let refs: Vec<String> = self.references().iter().map(json_ref).collect();
         let calls: Vec<String> = self.call_edges().iter().map(json_call).collect();
@@ -970,6 +981,11 @@ impl SemIndex {
             .definition_facts()
             .iter()
             .map(json_definition_fact)
+            .collect();
+        let derivations: Vec<String> = self
+            .derivations()
+            .iter()
+            .map(jet_foundation::Facts::DerivationRecord::to_json)
             .collect();
         let instances: Vec<String> = self.instances().iter().map(json_instance).collect();
         let outputs: Vec<String> = self.outputs().iter().map(json_output).collect();
@@ -987,10 +1003,11 @@ impl SemIndex {
             .map(|value| format!(",\"expand\":{}", json_expand_projection(value)))
             .unwrap_or_default();
         let payload = format!(
-            "{{\"schema_version\":{},\"definitions\":[{}],\"definition_facts\":[{}],\"instances\":[{}],\"outputs\":[{}],\"state_graphs\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"effect_projection\":{},\"references\":[{}],\"calls\":[{}],\"effects\":[{}],\"arithmetic\":[{}],\"members\":[{}]{}}}",
+            "{{\"schema_version\":{},\"definitions\":[{}],\"definition_facts\":[{}],\"derivations\":[{}],\"instances\":[{}],\"outputs\":[{}],\"state_graphs\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"effect_projection\":{},\"references\":[{}],\"calls\":[{}],\"effects\":[{}],\"arithmetic\":[{}],\"members\":[{}]{}}}",
             self.schema_version(),
             defs.join(","),
             definition_facts.join(","),
+            derivations.join(","),
             instances.join(","),
             outputs.join(","),
             state_graphs.join(","),
@@ -1004,12 +1021,11 @@ impl SemIndex {
             members.join(","),
             expand,
         );
-        render_status_json(
-            "ok",
-            true,
-            "inspect.semindex",
-            &format!(",\"semindex\":{payload}"),
-        )
+        StatusEnvelope::new("inspect.semindex", true)
+            .with_field(
+                "semindex",
+                StatusValue::parse(&payload).expect("semindex payload must be valid JSON"),
+            )
     }
 }
 
@@ -1064,7 +1080,7 @@ fn json_expand_value(value: &ExpandValue) -> String {
 }
 
 impl TypeDossier {
-    pub fn to_json(&self) -> String {
+    pub fn to_status_envelope(&self) -> StatusEnvelope {
         let def_json = match &self.definition {
             Some(def) => json_def(def),
             None => "null".to_string(),
@@ -1085,12 +1101,14 @@ impl TypeDossier {
             state_graphs.join(","),
             effect_projection,
         );
-        render_status_json(
-            "ok",
-            true,
-            "inspect.dossier",
-            &format!(",\"dossier\":{payload}"),
+        StatusEnvelope::new("inspect.dossier", true).with_field(
+            "dossier",
+            StatusValue::parse(&payload).expect("dossier payload must be valid JSON"),
         )
+    }
+
+    pub fn to_json(&self) -> String {
+        self.to_status_envelope().json()
     }
 
     pub fn render_text(&self) -> String {

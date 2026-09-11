@@ -203,12 +203,13 @@ pub(crate) fn tir_covers_trait_method(
         trait_name,
         crate::Generics::ENCODE | crate::Generics::DECODE
     ) && struct_is_generic(type_name, cx);
+    let is_literal = crate::Generics::is_literal_capability(trait_name);
     let is_checked_text = trait_name == crate::Generics::CHECKED_TEXT;
     // c109 Phase 18: an `#Unsafe fn` trait method IS
     // covered (`TFuncKind::TraitMethod.is_unsafe` already drives the `unsafe ` prefix
     // in `emit_tir_trait_method`).
     // c109 Phase 23: a `#Pure` trait method is covered (purity is sema-only; erased).
-    if !f.type_params.is_empty() && !serde_generic_owner && !is_checked_text {
+    if !f.type_params.is_empty() && !serde_generic_owner && !is_checked_text && !is_literal {
         refusal::note(refusal::TYPE_PARAMS, f.name_span);
         return false;
     }
@@ -230,7 +231,7 @@ pub(crate) fn tir_covers_trait_method(
     // `jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<FieldError>>` with no
     // receiver. Admit it (the general "static trait fn" exclusion below does not apply).
     let is_decode = trait_name == crate::Generics::DECODE;
-    if !is_decode && !is_checked_text {
+    if !is_decode && !is_checked_text && !is_literal {
         // A trait method must have `self` as its FIRST parameter (the receiver `&self`/
         // `&mut self`/`self` per convention). A trait method with no `self` (static trait
         // fn) emits no receiver — exclude it except for the static CheckedText contract.

@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use jet_driver::Diagnostics::{Diagnostic, ReportEnvelope, Severity};
+use jet_driver::Diagnostics::{Diagnostic, Severity};
+use jet_foundation::Report::{StatusEnvelope, StatusValue};
 use jet_driver::SHA256;
 use jet_semindex::{semantic_ops_for_file, SemanticOp, SourceSpan};
 
@@ -22,9 +23,9 @@ use super::project_scan::{
 use super::project_transactions::{
     apply_project_add_dependency, apply_project_add_env_service, apply_project_add_target,
     apply_project_add_workspace_member, apply_project_create_package, apply_project_edit_pkg_field,
-    apply_project_remove_dependency, apply_project_rename, clean_project_rel_path, diagnostic_json,
-    rel_path, required_project_touched_files, validate_project_path,
-    validate_touched_project_files,
+    apply_project_edit_game_selection, apply_project_remove_dependency, apply_project_rename,
+    clean_project_rel_path, diagnostic_json, rel_path, required_project_touched_files,
+    validate_project_path, validate_touched_project_files,
 };
 use super::query_actions::{
     canvas_actions, canvas_authority_context, canvas_core_catalog, canvas_core_catalog_query, canvas_find,
@@ -47,23 +48,24 @@ pub const ACTION_SCHEMA_VERSION: u32 = 1;
 pub const PROJECT_SCHEMA_VERSION: u32 = 1;
 pub const CORE_CATALOG_SCHEMA_VERSION: u32 = 1;
 pub const PROOF_SCHEMA_VERSION: u32 = 1;
-
 /// Put the Canvas command payload behind the one machine-output envelope.
 ///
-/// The existing protocol object remains named command data rather than a
-/// second machine-output door.
-fn canvas_machine_output(action: &str, status: &str, ok: bool, payload: &str) -> String {
-    ReportEnvelope::status_record("tool", status, ok, action)
-        .with_json_field("canvas", payload.trim())
+/// Existing Canvas payloads remain action-specific data under the typed status
+/// fields instead of opening a second machine-output protocol.
+fn canvas_machine_output(action: &str, ok: bool, payload: &str) -> String {
+    let value = StatusValue::parse(payload.trim())
+        .unwrap_or_else(|_| StatusValue::String(payload.trim().to_owned()));
+    StatusEnvelope::new(action, ok)
+        .with_field("canvas", value)
         .json()
 }
 
 fn canvas_machine_success(action: &str, payload: &str) -> String {
-    canvas_machine_output(action, "ok", true, payload)
+    canvas_machine_output(action, true, payload)
 }
 
 fn canvas_machine_error(action: &str, payload: &str) -> String {
-    canvas_machine_output(action, "error", false, payload)
+    canvas_machine_output(action, false, payload)
 }
 
 /// Project a checked Jet file into the public Canvas graph schema.
@@ -429,6 +431,7 @@ fn apply_project_transaction_json_inner(path: &Path, request: &str) -> Result<St
         "add_dependency" => apply_project_add_dependency(&ctx, request, &touched),
         "remove_dependency" => apply_project_remove_dependency(&ctx, request, &touched),
         "edit_pkg_field" => apply_project_edit_pkg_field(&ctx, request, &touched),
+        "edit_game_selection" => apply_project_edit_game_selection(&ctx, request, &touched),
         "add_target" => apply_project_add_target(&ctx, request, &touched),
         "create_package" => apply_project_create_package(&ctx, request, &touched),
         "add_workspace_member" => apply_project_add_workspace_member(&ctx, request, &touched),
@@ -1071,6 +1074,24 @@ pub fn debug_session_json_for_entry_with_sessions(
     };
     debug_session_json_for_file_with_sessions(&path, request, sessions)
 }
+/// Run a debugger command against the shared live-session store and update
+/// the host-owned paused projection at each session lifecycle boundary.
+pub fn debug_session_json_for_entry_with_sessions_and_host(
+    entry: &Path,
+    request: &str,
+    sessions: &DebugSessions,
+    host: &mut crate::PausedEvaluate::PausedEvaluateHost,
+) -> Result<String, String> {
+    let source_id = json_string_field(request, "source_id");
+    let path = match resolve_entry_source_path(entry, source_id.as_deref()) {
+        Ok(path) => path,
+        Err(error) => return Err(canvas_machine_error("canvas.debug", &error)),
+    };
+    debug_session_json_for_file_with_sessions_inner(path.as_path(), request, sessions, Some(host))
+        .map(|payload| canvas_machine_success("canvas.debug", &payload))
+        .map_err(|error| canvas_machine_error("canvas.debug", &error))
+}
+
 
 /// Run one source-level debugger slice and project it onto Canvas graph spans.
 pub fn debug_session_json_for_file(path: &Path, request: &str) -> Result<String, String> {
@@ -1083,7 +1104,7 @@ pub fn debug_session_json_for_file_with_sessions(
     request: &str,
     sessions: &DebugSessions,
 ) -> Result<String, String> {
-    debug_session_json_for_file_with_sessions_inner(path, request, sessions)
+    debug_session_json_for_file_with_sessions_inner(path, request, sessions, None)
         .map(|payload| canvas_machine_success("canvas.debug", &payload))
         .map_err(|error| canvas_machine_error("canvas.debug", &error))
 }
@@ -1092,11 +1113,15 @@ fn debug_session_json_for_file_with_sessions_inner(
     path: &Path,
     request: &str,
     sessions: &DebugSessions,
+    mut paused_evaluate: Option<&mut crate::PausedEvaluate::PausedEvaluateHost>,
 ) -> Result<String, String> {
     let src = match read_source_without_symlinks(path) {
         Ok(src) => src,
         Err(error) => {
             if let Some(id) = json_string_field(request, "session_id") {
+                if let Some(host) = paused_evaluate.as_deref_mut() {
+                    let _ = sessions.stale_paused_session(host, &id);
+                }
                 sessions.discard(&id);
             }
             return Err(debug_error("io", &error.to_string()));
@@ -1110,21 +1135,33 @@ fn debug_session_json_for_file_with_sessions_inner(
             "Canvas debug schema_version must be 1",
         ));
     }
+    let source_id = required_debug_string(request, "source_id")?;
     let session_id = json_string_field(request, "session_id");
     let requested_tier = DebugTier::parse(json_string_field(request, "tier").as_deref())?;
     if json_bool_field(request, "stop").unwrap_or(false) {
         let id = required_debug_string(request, "session_id")?;
         let current_revision = source_revision(&src);
-        let tier = sessions.stop(path, &revision, &current_revision, &id, requested_tier)?;
-        let source_id = json_string_field(request, "source_id").unwrap_or_else(|| {
-            path.file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "source".to_string())
-        });
+        let tier = match sessions.stop(path, &revision, &current_revision, &id, requested_tier) {
+            Ok(tier) => tier,
+            Err(error) => {
+                if revision != current_revision {
+                    if let Some(host) = paused_evaluate.as_deref_mut() {
+                        let _ = sessions.stale_paused_session(host, &id);
+                    }
+                }
+                return Err(error);
+            }
+        };
+        if let Some(host) = paused_evaluate.as_deref_mut() {
+            sessions.clear_paused_session(host, &id)?;
+        }
         return Ok(debug_stop_ok(&src, &id, tier, &source_id));
     }
     if revision != source_revision(&src) {
         if let Some(id) = session_id.as_deref() {
+            if let Some(host) = paused_evaluate.as_deref_mut() {
+                let _ = sessions.stale_paused_session(host, id);
+            }
             sessions.discard(id);
         }
         return Err(debug_error(
@@ -1156,24 +1193,57 @@ fn debug_session_json_for_file_with_sessions_inner(
     breakpoint_lines.dedup();
     let watches = json_string_array(request, "watches");
     let commands = json_string_array(request, "commands");
-    let execution = sessions.execute(
+    super::debug_source_git::validate_debug_limits(&commands, &breakpoint_lines, &watches)?;
+    if let Some(id) = session_id.as_deref() {
+        if let Some(host) = paused_evaluate.as_deref_mut() {
+            sessions.resume_paused_session(host, id)?;
+        }
+    }
+    let execution = match sessions.execute(
         path,
+        &source_id,
         &revision,
         session_id.as_deref(),
         &commands,
         &breakpoint_lines,
         &watches,
         requested_tier,
-    )?;
+    ) {
+        Ok(execution) => execution,
+        Err(error) => {
+            if let Some(id) = session_id.as_deref() {
+                if let Some(host) = paused_evaluate.as_deref_mut() {
+                    let _ = sessions.clear_paused_session(host, id);
+                }
+                sessions.discard(id);
+            }
+            return Err(error);
+        }
+    };
     if execution.status == jet_debug::SessionStatus::Failed {
+        if let Some(host) = paused_evaluate.as_deref_mut() {
+            let _ = sessions.clear_paused_session(host, &execution.id);
+        }
         return Err(debug_error("diagnostic", &execution.transcript));
     }
-    let current_src = read_source_without_symlinks(path)
-        .map_err(|error| debug_error("io", &format!("couldn't re-read debug source: {error}")))?;
-    if current_src != src {
-        if execution.status == jet_debug::SessionStatus::Running {
+    let current_src = match read_source_without_symlinks(path) {
+        Ok(current_src) => current_src,
+        Err(error) => {
+            if let Some(host) = paused_evaluate.as_deref_mut() {
+                let _ = sessions.stale_paused_session(host, &execution.id);
+            }
             sessions.discard(&execution.id);
+            return Err(debug_error(
+                "io",
+                &format!("couldn't re-read debug source: {error}"),
+            ));
         }
+    };
+    if current_src != src {
+        if let Some(host) = paused_evaluate.as_deref_mut() {
+            let _ = sessions.stale_paused_session(host, &execution.id);
+        }
+        sessions.discard(&execution.id);
         return Err(debug_error(
             "conflict",
             "source changed while this Canvas debug command was running; the source was kept",
@@ -1183,15 +1253,29 @@ fn debug_session_json_for_file_with_sessions_inner(
     let projection = match project_file(path) {
         Ok(projection) => projection,
         Err(diags) => {
+            if let Some(host) = paused_evaluate.as_deref_mut() {
+                let _ = sessions.clear_paused_session(host, &execution.id);
+            }
             sessions.discard(&execution.id);
             return Err(debug_diagnostics_error(path, &src, &diags));
         }
     };
-    let source_id = json_string_field(&projection.json, "source_id").unwrap_or_else(|| {
-        path.file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "source".to_string())
-    });
+    let projected_source_id = json_string_field(&projection.json, "source_id");
+    if projected_source_id.as_deref() != Some(source_id.as_str()) {
+        if let Some(host) = paused_evaluate.as_deref_mut() {
+            let _ = sessions.clear_paused_session(host, &execution.id);
+        }
+        sessions.discard(&execution.id);
+        return Err(debug_error(
+            "conflict",
+            "Canvas projection source_id does not match the debug request",
+        ));
+    }
+    if execution.status != jet_debug::SessionStatus::Running {
+        if let Some(host) = paused_evaluate.as_deref_mut() {
+            let _ = sessions.clear_paused_session(host, &execution.id);
+        }
+    }
     Ok(debug_ok(
         &src,
         &projection.json,

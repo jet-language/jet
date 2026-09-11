@@ -1,10 +1,54 @@
 use jet::Interpreter::RunOutcome;
 use jet::AST::{Expr, Item, OutputKind, Type};
-// CraneliftBackend's run/hot_swap come from this trait.
-use jet::JitBackend::JitBackend;
 use jet_jit::CraneliftBackend;
 
 mod common;
+
+fn emit_native_aot(bundle: &jet::AST::ProgramBundle) -> String {
+    emit_native_artifact(
+        bundle,
+        jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+        jet_foundation::MIR::MirArtifactBuildMode::Dev,
+    )
+}
+
+fn emit_test_harness(bundle: &jet::AST::ProgramBundle) -> String {
+    emit_native_artifact(
+        bundle,
+        jet_foundation::MIR::MirArtifactKind::TestExecutable,
+        jet_foundation::MIR::MirArtifactBuildMode::Test,
+    )
+}
+
+fn emit_native_artifact(
+    bundle: &jet::AST::ProgramBundle,
+    kind: jet_foundation::MIR::MirArtifactKind,
+    mode: jet_foundation::MIR::MirArtifactBuildMode,
+) -> String {
+    let request = jet_foundation::MIR::MirArtifactRequest::new(
+        jet_foundation::MIR::MirArtifactTarget::RustAot,
+        kind,
+        mode,
+    );
+    let (mir, artifact) = jet::Codegen::TIR::lower_checked_mir_program_for(bundle, request)
+        .expect("checked native artifact lowers through MIR");
+    mir.validate()
+        .expect("canonical MIR validates in output-callable test");
+    let mir = jet_foundation::MIR::optimize_mir_program(
+        &mir,
+        &jet_foundation::MIR::MirOptimizationPolicy::conservative(),
+    )
+    .expect("canonical MIR optimizes in output-callable test");
+    jet::Codegen::MIRRust::emit_mir_program(
+        &mir,
+        &jet::Codegen::MIRRust::MirRustConfig {
+            target: jet_foundation::Layout::TargetLayout::host(),
+            target_kind: jet::Codegen::MIRRust::MirRustTarget::Native,
+            root_prefix: String::new(),
+            execution: jet::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+        },
+    )
+}
 
 fn checked_bundle(
     source: &str,
@@ -127,14 +171,17 @@ fn aot_dev_and_jit_consume_the_resolved_entry() {
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
 
-    let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
-    assert!(rust.contains("if let Err(__jet___entry_error) = __jet_start()"));
+    let rust = emit_native_aot(&bundle);
+    assert!(rust.contains("match __jet_start()"), "{rust}");
     assert!(matches!(
-        jet::Interpreter::run_checked(&bundle, false),
+        common::run_interpreter_checked_bundle(
+            &bundle,
+            false,
+            jet::Interpreter::InterpreterInvocation::RunInterpret,
+            &common::development_policy(),
+        ),
         RunOutcome::Ran { exit_code: 0, .. }
     ));
-    let jit = jet::Codegen::TIR::lower_jit_program(&bundle).expect("TIR covers start");
-    assert_eq!(jit.entry, "start");
 }
 
 #[test]
@@ -160,15 +207,21 @@ fn resident_jit_hot_swap_session() {
         "jet_output_resident_v2",
         jet::Sema::CompileMode::Run,
     );
-    assert!(jet_jit::resident_jit_safe_bundle(&v1));
-    assert!(jet_jit::resident_jit_safe_bundle(&v2));
+    assert!(common::cranelift_resident_safe(&v1));
+    assert!(common::cranelift_resident_safe(&v2));
 
+    let policy = common::development_policy();
     let mut backend = CraneliftBackend::new();
-    let first = backend.run(&v1, false);
+    let first = common::run_cranelift_bundle(&mut backend, &v1, false, &policy);
     assert!(matches!(first, RunOutcome::Ran { ref stdout, exit_code: 0, .. } if stdout == "v1\n"));
-    let swapped = backend
-        .hot_swap("start", &v2, false)
-        .expect("resident hot swap");
+    let swapped = common::hot_swap_cranelift_bundle(
+        &mut backend,
+        "start",
+        &v2,
+        false,
+        &policy,
+    )
+    .expect("resident hot swap");
     assert!(
         matches!(&swapped, RunOutcome::Ran { stderr, exit_code: 1, .. } if stderr == "Error: selected boom\n"),
         "{swapped:?}"
@@ -208,10 +261,15 @@ fn qualified_entry_keeps_one_definition_and_effect_identity() {
     assert!(facts.name_ledger.references().values().any(|anchor| {
         anchor.module_path == output.source_path && anchor.def_span == output.definition
     }));
-    let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
+    let rust = emit_native_aot(&bundle);
     assert!(rust.contains("__jet_helper::__jet_start()"), "{rust}");
     assert!(matches!(
-        jet::Interpreter::run_checked(&bundle, false),
+        common::run_interpreter_checked_bundle(
+            &bundle,
+            false,
+            jet::Interpreter::InterpreterInvocation::RunInterpret,
+            &common::development_policy(),
+        ),
         RunOutcome::Ran { exit_code: 0, .. }
     ));
 }
@@ -273,10 +331,15 @@ fn qualified_entry_follows_nested_quoted_import_graph() {
     assert_eq!(reexported.source_name, "run");
     assert!(reexported.source_path.ends_with("src/cli.jet"));
 
-    let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
+    let rust = emit_native_aot(&bundle);
     assert!(rust.contains("__jet_command::__jet_run()"), "{rust}");
     assert!(matches!(
-        jet::Interpreter::run_checked(&bundle, false),
+        common::run_interpreter_checked_bundle(
+            &bundle,
+            false,
+            jet::Interpreter::InterpreterInvocation::RunInterpret,
+            &common::development_policy(),
+        ),
         RunOutcome::Ran {
             ref stdout,
             exit_code: 0,
@@ -505,13 +568,10 @@ fn checked_default_selects_one_of_multiple_executables() {
         })
         .expect("checked default selects one Output");
     assert_eq!(selected.address, "two");
-    let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
+    let rust = emit_native_aot(&bundle);
+    assert!(rust.contains("match __jet_second()"), "{rust}");
     assert!(
-        rust.contains("if let Err(__jet___entry_error) = __jet_second()"),
-        "{rust}"
-    );
-    assert!(
-        !rust.contains("if let Err(__jet___entry_error) = __jet_first()"),
+        !rust.contains("match __jet_first()"),
         "{rust}"
     );
 }
@@ -533,8 +593,6 @@ fn explicit_service_address_reaches_tir_and_real_cli_runtime() {
     let diagnostics =
         jet::Sema::check_bundle_for_output(&mut bundle, jet::Sema::CompileMode::Run, "api");
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
-    let tir = jet::Codegen::TIR::lower_jit_program(&bundle).expect("Service lowers through TIR");
-    assert_eq!(tir.entry, "serve");
 
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["run", "--quiet", "--output", "api", file.to_str().unwrap()])
@@ -604,9 +662,9 @@ fn check_outputs_are_plural_real_test_harness_entries_without_test_blocks() {
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Test);
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
-    let rust = jet::Codegen::emit_bundle_tests(&bundle, None);
-    assert!(rust.contains("fn jet_output_check_0()"), "{rust}");
-    assert!(rust.contains("fn jet_output_check_1()"), "{rust}");
+    let rust = emit_test_harness(&bundle);
+    assert_eq!(rust.matches("// jet-mir-output-check:").count(), 2, "{rust}");
+    assert_eq!(rust.matches("fn __jet_output_check_").count(), 2, "{rust}");
 
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["test", "--show-default", file.to_str().unwrap()])
@@ -668,9 +726,9 @@ fn typed_executable_output_reuses_the_checked_cli_schema() {
     let schema = jet_foundation::CLISchema::entry_schema_for_bundle(&bundle)
         .expect("typed Output owns one checked CLI schema");
     assert_eq!(schema.entry_type, "Args");
-    let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
-    assert!(rust.contains("__jet_cli_spec_Args"), "{rust}");
-    assert!(rust.contains("__jet_launch(&__args)"), "{rust}");
+    let rust = emit_native_aot(&bundle);
+    assert!(rust.contains("jet_args_option_base"), "{rust}");
+    assert!(rust.contains("__jet_launch(__jet_cli_0)"), "{rust}");
 }
 
 #[test]

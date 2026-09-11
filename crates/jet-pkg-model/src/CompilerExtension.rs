@@ -13,14 +13,13 @@
 //!
 //! # Protocol (exact)
 //!
-//! Wire bytes for `analyze(snapshot) -> response` are UTF-8 JSONValue with
+//! Wire bytes for `analyze(snapshot) -> response` are UTF-8 DataTree values with
 //! **deterministic key order** (lexicographic) and no insignificant whitespace.
 //! Schema version is `protocol` (must equal [`PROTOCOL_VERSION`]).
 //!
 //! Snapshot fields: `protocol`, `stage`, `abilities`, `limits`, `trust`,
-//! `types`, `symbols`, `spans` (symbols carry `effects` + `provenance`).
-//! Response fields: `protocol`, `findings`, `proposed_edits`, `artifacts`
-//! (`artifacts` must be `[]` in v1).
+//! `types`, `symbols`, `spans`, `host_imports` (symbols carry `effects` +
+//! `provenance`; type facts carry structural shape metadata).
 //!
 //! # Limits / trust / lifecycle
 //!
@@ -36,7 +35,9 @@
 //!   guest Store/memory is dropped.
 
 use crate::FFI::WASMTIME_CRATE_SPEC;
-use crate::JSON::{self, JSONValue};
+use jet_foundation::Authority::HostImportFact;
+use jet_foundation::DataTree::DataTree;
+use crate::JSON;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Closed set of Jet plugin mechanisms (I8 — one semantic role each).
@@ -252,11 +253,35 @@ pub struct SpanFact {
     pub end: u32,
 }
 
-/// Type fact (read-only).
+/// Structural interface shape carried by an existing `TypeFact` identity.
+/// This is metadata for copied boundary payloads, not a second wire type
+/// system; nested entries refer back to the same `types` identity set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypeFactShape {
+    Opaque,
+    Scalar,
+    CodableRecord { fields: Vec<TypeFieldFact> },
+    List { element_type_id: String },
+    Option { inner_type_id: String },
+    Result {
+        ok_type_id: String,
+        error_type_id: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeFieldFact {
+    pub name: String,
+    pub type_id: String,
+}
+
+/// Type fact (read-only). `id` remains the interface snapshot identity used
+/// by symbols and host imports.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeFact {
     pub id: String,
     pub repr: String,
+    pub shape: TypeFactShape,
 }
 
 /// Symbol fact carrying effects + provenance (read-only).
@@ -282,24 +307,41 @@ pub struct TypedSnapshot {
     pub types: Vec<TypeFact>,
     pub symbols: Vec<SymbolFact>,
     pub spans: Vec<SpanFact>,
+    /// Host imports use this same snapshot's type identities for copied
+    /// payloads; no parallel interface registry is permitted.
+    pub host_imports: Vec<HostImportFact>,
 }
 
 impl TypedSnapshot {
-    /// Build a v1 snapshot after ability negotiation. Facts must be sorted
-    /// by `id` before encode for byte-stable replay.
+    /// Build a v1 snapshot with no host imports.
     pub fn new(
         abilities: Vec<Ability>,
         types: Vec<TypeFact>,
         symbols: Vec<SymbolFact>,
         spans: Vec<SpanFact>,
     ) -> Result<Self, ProtocolError> {
+        Self::new_with_imports(abilities, types, symbols, spans, Vec::new())
+    }
+
+    /// Build a snapshot with structured host-import facts. All facts are
+    /// sorted by identity before encode for byte-stable replay.
+    pub fn new_with_imports(
+        abilities: Vec<Ability>,
+        types: Vec<TypeFact>,
+        symbols: Vec<SymbolFact>,
+        spans: Vec<SpanFact>,
+        host_imports: Vec<HostImportFact>,
+    ) -> Result<Self, ProtocolError> {
         let abilities = negotiate_abilities(PROTOCOL_VERSION, &abilities)?;
         let mut types = types;
         let mut symbols = symbols;
         let mut spans = spans;
+        let mut host_imports = host_imports;
         types.sort_by(|a, b| a.id.cmp(&b.id));
         symbols.sort_by(|a, b| a.id.cmp(&b.id));
         spans.sort_by(|a, b| a.id.cmp(&b.id));
+        host_imports.sort_by(|a, b| a.id.cmp(&b.id));
+        validate_interface_facts(&types, &symbols, &spans, &host_imports)?;
         Ok(Self {
             protocol: PROTOCOL_VERSION,
             stage: STAGE.to_string(),
@@ -309,6 +351,7 @@ impl TypedSnapshot {
             types,
             symbols,
             spans,
+            host_imports,
         })
     }
 
@@ -336,39 +379,47 @@ impl TypedSnapshot {
         let mut obj = BTreeMap::new();
         obj.insert(
             "abilities".into(),
-            JSONValue::Array(caps.into_iter().map(JSONValue::String).collect()),
+            DataTree::Array(caps.into_iter().map(DataTree::Text).collect()),
         );
         obj.insert("limits".into(), limits_to_json(&self.limits));
-        obj.insert("protocol".into(), JSONValue::Number(self.protocol as i64));
+        obj.insert(
+            "host_imports".into(),
+            DataTree::Array(
+                self.host_imports
+                    .iter()
+                    .map(host_import_to_json)
+                    .collect(),
+            ),
+        );
+        obj.insert("protocol".into(), DataTree::Int(self.protocol as i64));
         obj.insert(
             "spans".into(),
-            JSONValue::Array(self.spans.iter().map(span_to_json).collect()),
+            DataTree::Array(self.spans.iter().map(span_to_json).collect()),
         );
-        obj.insert("stage".into(), JSONValue::String(self.stage.clone()));
+        obj.insert("stage".into(), DataTree::Text(self.stage.clone()));
         obj.insert(
             "symbols".into(),
-            JSONValue::Array(self.symbols.iter().map(symbol_to_json).collect()),
+            DataTree::Array(self.symbols.iter().map(symbol_to_json).collect()),
         );
         obj.insert(
             "trust".into(),
-            JSONValue::String(self.trust.as_str().to_string()),
+            DataTree::Text(self.trust.as_str().to_string()),
         );
         obj.insert(
             "types".into(),
-            JSONValue::Array(self.types.iter().map(type_to_json).collect()),
+            DataTree::Array(self.types.iter().map(type_to_json).collect()),
         );
-        Ok(stringify(&JSONValue::Object(obj)).into_bytes())
+        Ok(stringify(&object(obj)).into_bytes())
     }
 
     pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
         let text = std::str::from_utf8(bytes)
             .map_err(|_| ProtocolError::new("snapshot is not valid UTF-8"))?;
         let root = JSON::parse(text).map_err(ProtocolError::new)?;
-        let obj = root
-            .as_object()
+        let obj = object_map(&root)
             .map_err(|e| ProtocolError::new(format!("snapshot root: {e}")))?;
-        require_keys(
-            obj,
+        require_keys_with_optional(
+            &obj,
             &[
                 "protocol",
                 "stage",
@@ -379,6 +430,7 @@ impl TypedSnapshot {
                 "symbols",
                 "spans",
             ],
+            &["host_imports"],
         )?;
         let protocol = json_u32(obj.get("protocol").unwrap(), "protocol")?;
         if protocol != PROTOCOL_VERSION {
@@ -408,6 +460,12 @@ impl TypedSnapshot {
         let types = parse_types(obj.get("types").unwrap())?;
         let symbols = parse_symbols(obj.get("symbols").unwrap())?;
         let spans = parse_spans(obj.get("spans").unwrap())?;
+        let host_imports = obj
+            .get("host_imports")
+            .map(parse_host_imports)
+            .transpose()?
+            .unwrap_or_default();
+        validate_interface_facts(&types, &symbols, &spans, &host_imports)?;
         Ok(Self {
             protocol,
             stage: stage.to_string(),
@@ -417,6 +475,7 @@ impl TypedSnapshot {
             types,
             symbols,
             spans,
+            host_imports,
         })
     }
 
@@ -461,35 +520,34 @@ impl AnalyzeResponse {
         let mut obj = BTreeMap::new();
         obj.insert(
             "artifacts".into(),
-            JSONValue::Array(
+            DataTree::Array(
                 self.artifacts
                     .iter()
                     .cloned()
-                    .map(JSONValue::String)
+                    .map(DataTree::Text)
                     .collect(),
             ),
         );
         obj.insert(
             "findings".into(),
-            JSONValue::Array(self.findings.iter().map(finding_to_json).collect()),
+            DataTree::Array(self.findings.iter().map(finding_to_json).collect()),
         );
-        obj.insert("protocol".into(), JSONValue::Number(self.protocol as i64));
+        obj.insert("protocol".into(), DataTree::Int(self.protocol as i64));
         obj.insert(
             "proposed_edits".into(),
-            JSONValue::Array(self.proposed_edits.iter().map(edit_to_json).collect()),
+            DataTree::Array(self.proposed_edits.iter().map(edit_to_json).collect()),
         );
-        Ok(stringify(&JSONValue::Object(obj)).into_bytes())
+        Ok(stringify(&object(obj)).into_bytes())
     }
 
     pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
         let text = std::str::from_utf8(bytes)
             .map_err(|_| ProtocolError::new("response is not valid UTF-8"))?;
         let root = JSON::parse(text).map_err(ProtocolError::new)?;
-        let obj = root
-            .as_object()
+        let obj = object_map(&root)
             .map_err(|e| ProtocolError::new(format!("response root: {e}")))?;
         require_keys(
-            obj,
+            &obj,
             &["protocol", "findings", "proposed_edits", "artifacts"],
         )?;
         let protocol = json_u32(obj.get("protocol").unwrap(), "protocol")?;
@@ -904,17 +962,37 @@ pub fn is_compiler_extension_world(world: &str) -> bool {
     world == WORLD_NAME
 }
 
-// ── JSONValue helpers (deterministic stringify; BTreeMap key order) ───────────
+// ── DataTree helpers (deterministic stringify; BTreeMap key order) ────────────
 
-fn stringify(v: &JSONValue) -> String {
+fn object(map: BTreeMap<String, DataTree>) -> DataTree {
+    DataTree::Object(map.into_iter().collect())
+}
+
+fn object_map(value: &DataTree) -> Result<BTreeMap<String, DataTree>, String> {
+    let DataTree::Object(fields) = value else {
+        return Err("expected a DataTree object".to_string());
+    };
+    Ok(fields.iter().cloned().collect())
+}
+
+fn stringify(v: &DataTree) -> String {
     match v {
-        JSONValue::Null => "null".into(),
-        JSONValue::Bool(true) => "true".into(),
-        JSONValue::Bool(false) => "false".into(),
-        JSONValue::Number(n) => n.to_string(),
-        JSONValue::Flt(n) => format!("{n}"),
-        JSONValue::String(s) => JSON::quote(s),
-        JSONValue::Array(items) => {
+        DataTree::Null => "null".into(),
+        DataTree::Bool(true) => "true".into(),
+        DataTree::Bool(false) => "false".into(),
+        DataTree::Int(n) => n.to_string(),
+        DataTree::Float(n) => format!("{n}"),
+        DataTree::Number(text) => text.clone(),
+        DataTree::TypedText(text) | DataTree::Text(text) => JSON::quote(text),
+        DataTree::Bytes(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(u8::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        DataTree::Array(items) => {
             let mut out = String::from("[");
             for (i, item) in items.iter().enumerate() {
                 if i > 0 {
@@ -925,7 +1003,7 @@ fn stringify(v: &JSONValue) -> String {
             out.push(']');
             out
         }
-        JSONValue::Object(map) => {
+        DataTree::Object(map) => {
             let mut out = String::from("{");
             for (i, (k, v)) in map.iter().enumerate() {
                 if i > 0 {
@@ -941,36 +1019,35 @@ fn stringify(v: &JSONValue) -> String {
     }
 }
 
-fn limits_to_json(l: &ResourceLimits) -> JSONValue {
+fn limits_to_json(l: &ResourceLimits) -> DataTree {
     let mut m = BTreeMap::new();
-    m.insert("max_edits".into(), JSONValue::Number(l.max_edits as i64));
+    m.insert("max_edits".into(), DataTree::Int(l.max_edits as i64));
     m.insert(
         "max_findings".into(),
-        JSONValue::Number(l.max_findings as i64),
+        DataTree::Int(l.max_findings as i64),
     );
-    m.insert("max_fuel".into(), JSONValue::Number(l.max_fuel as i64));
+    m.insert("max_fuel".into(), DataTree::Int(l.max_fuel as i64));
     m.insert(
         "max_memory_bytes".into(),
-        JSONValue::Number(l.max_memory_bytes as i64),
+        DataTree::Int(l.max_memory_bytes as i64),
     );
     m.insert(
         "max_response_bytes".into(),
-        JSONValue::Number(l.max_response_bytes as i64),
+        DataTree::Int(l.max_response_bytes as i64),
     );
     m.insert(
         "max_table_elements".into(),
-        JSONValue::Number(l.max_table_elements as i64),
+        DataTree::Int(l.max_table_elements as i64),
     );
-    m.insert("timeout_ms".into(), JSONValue::Number(l.timeout_ms as i64));
-    JSONValue::Object(m)
+    m.insert("timeout_ms".into(), DataTree::Int(l.timeout_ms as i64));
+    object(m)
 }
 
-fn limits_from_json(v: &JSONValue) -> Result<ResourceLimits, ProtocolError> {
-    let obj = v
-        .as_object()
-        .map_err(|e| ProtocolError::new(format!("limits: {e}")))?;
+fn limits_from_json(v: &DataTree) -> Result<ResourceLimits, ProtocolError> {
+    let obj =
+        object_map(v).map_err(|e| ProtocolError::new(format!("limits: {e}")))?;
     require_keys(
-        obj,
+        &obj,
         &[
             "max_fuel",
             "max_memory_bytes",
@@ -998,58 +1075,140 @@ fn limits_from_json(v: &JSONValue) -> Result<ResourceLimits, ProtocolError> {
     })
 }
 
-fn span_to_json(s: &SpanFact) -> JSONValue {
+fn span_to_json(s: &SpanFact) -> DataTree {
     let mut m = BTreeMap::new();
-    m.insert("end".into(), JSONValue::Number(s.end as i64));
-    m.insert("file".into(), JSONValue::String(s.file.clone()));
-    m.insert("id".into(), JSONValue::String(s.id.clone()));
-    m.insert("start".into(), JSONValue::Number(s.start as i64));
-    JSONValue::Object(m)
+    m.insert("end".into(), DataTree::Int(s.end as i64));
+    m.insert("file".into(), DataTree::Text(s.file.clone()));
+    m.insert("id".into(), DataTree::Text(s.id.clone()));
+    m.insert("start".into(), DataTree::Int(s.start as i64));
+    object(m)
 }
 
-fn type_to_json(t: &TypeFact) -> JSONValue {
+fn type_to_json(t: &TypeFact) -> DataTree {
     let mut m = BTreeMap::new();
-    m.insert("id".into(), JSONValue::String(t.id.clone()));
-    m.insert("repr".into(), JSONValue::String(t.repr.clone()));
-    JSONValue::Object(m)
+    m.insert("id".into(), DataTree::Text(t.id.clone()));
+    m.insert("repr".into(), DataTree::Text(t.repr.clone()));
+    m.insert("shape".into(), type_shape_to_json(&t.shape));
+    object(m)
 }
 
-fn symbol_to_json(s: &SymbolFact) -> JSONValue {
+fn type_shape_to_json(shape: &TypeFactShape) -> DataTree {
+    let mut m = BTreeMap::new();
+    match shape {
+        TypeFactShape::Opaque => {
+            m.insert("kind".into(), DataTree::Text("opaque".into()));
+        }
+        TypeFactShape::Scalar => {
+            m.insert("kind".into(), DataTree::Text("scalar".into()));
+        }
+        TypeFactShape::CodableRecord { fields } => {
+            m.insert("kind".into(), DataTree::Text("codable_record".into()));
+            m.insert(
+                "fields".into(),
+                DataTree::Array(
+                    fields
+                        .iter()
+                        .map(|field| {
+                            let mut value = BTreeMap::new();
+                            value.insert("name".into(), DataTree::Text(field.name.clone()));
+                            value.insert(
+                                "type_id".into(),
+                                DataTree::Text(field.type_id.clone()),
+                            );
+                            object(value)
+                        })
+                        .collect(),
+                ),
+            );
+        }
+        TypeFactShape::List { element_type_id } => {
+            m.insert("element_type_id".into(), DataTree::Text(element_type_id.clone()));
+            m.insert("kind".into(), DataTree::Text("list".into()));
+        }
+        TypeFactShape::Option { inner_type_id } => {
+            m.insert("inner_type_id".into(), DataTree::Text(inner_type_id.clone()));
+            m.insert("kind".into(), DataTree::Text("option".into()));
+        }
+        TypeFactShape::Result {
+            ok_type_id,
+            error_type_id,
+        } => {
+            m.insert("error_type_id".into(), DataTree::Text(error_type_id.clone()));
+            m.insert("kind".into(), DataTree::Text("result".into()));
+            m.insert("ok_type_id".into(), DataTree::Text(ok_type_id.clone()));
+        }
+    }
+    object(m)
+}
+
+fn host_import_to_json(import: &HostImportFact) -> DataTree {
+    let mut m = BTreeMap::new();
+    m.insert("id".into(), DataTree::Text(import.id.clone()));
+    m.insert(
+        "operation".into(),
+        DataTree::Text(import.operation.clone()),
+    );
+    m.insert(
+        "parameter_type_ids".into(),
+        DataTree::Array(
+            import
+                .parameter_type_ids
+                .iter()
+                .cloned()
+                .map(DataTree::Text)
+                .collect(),
+        ),
+    );
+    m.insert(
+        "required_right".into(),
+        DataTree::Text(import.required_right.clone()),
+    );
+    m.insert(
+        "result_type_id".into(),
+        import
+            .result_type_id
+            .as_ref()
+            .map_or(DataTree::Null, |id| DataTree::Text(id.clone())),
+    );
+    object(m)
+}
+
+fn symbol_to_json(s: &SymbolFact) -> DataTree {
     let mut m = BTreeMap::new();
     m.insert(
         "effects".into(),
-        JSONValue::Array(s.effects.iter().cloned().map(JSONValue::String).collect()),
+        DataTree::Array(s.effects.iter().cloned().map(DataTree::Text).collect()),
     );
-    m.insert("id".into(), JSONValue::String(s.id.clone()));
-    m.insert("kind".into(), JSONValue::String(s.kind.clone()));
-    m.insert("name".into(), JSONValue::String(s.name.clone()));
-    m.insert("provenance".into(), JSONValue::String(s.provenance.clone()));
-    m.insert("span_id".into(), JSONValue::String(s.span_id.clone()));
-    m.insert("type_id".into(), JSONValue::String(s.type_id.clone()));
-    JSONValue::Object(m)
+    m.insert("id".into(), DataTree::Text(s.id.clone()));
+    m.insert("kind".into(), DataTree::Text(s.kind.clone()));
+    m.insert("name".into(), DataTree::Text(s.name.clone()));
+    m.insert("provenance".into(), DataTree::Text(s.provenance.clone()));
+    m.insert("span_id".into(), DataTree::Text(s.span_id.clone()));
+    m.insert("type_id".into(), DataTree::Text(s.type_id.clone()));
+    object(m)
 }
 
-fn finding_to_json(f: &Finding) -> JSONValue {
+fn finding_to_json(f: &Finding) -> DataTree {
     let mut m = BTreeMap::new();
-    m.insert("message".into(), JSONValue::String(f.message.clone()));
-    m.insert("rule".into(), JSONValue::String(f.rule.clone()));
-    m.insert("severity".into(), JSONValue::String(f.severity.clone()));
-    m.insert("span_id".into(), JSONValue::String(f.span_id.clone()));
-    JSONValue::Object(m)
+    m.insert("message".into(), DataTree::Text(f.message.clone()));
+    m.insert("rule".into(), DataTree::Text(f.rule.clone()));
+    m.insert("severity".into(), DataTree::Text(f.severity.clone()));
+    m.insert("span_id".into(), DataTree::Text(f.span_id.clone()));
+    object(m)
 }
 
-fn edit_to_json(e: &ProposedEdit) -> JSONValue {
+fn edit_to_json(e: &ProposedEdit) -> DataTree {
     let mut m = BTreeMap::new();
-    m.insert("rationale".into(), JSONValue::String(e.rationale.clone()));
+    m.insert("rationale".into(), DataTree::Text(e.rationale.clone()));
     m.insert(
         "replacement".into(),
-        JSONValue::String(e.replacement.clone()),
+        DataTree::Text(e.replacement.clone()),
     );
-    m.insert("span_id".into(), JSONValue::String(e.span_id.clone()));
-    JSONValue::Object(m)
+    m.insert("span_id".into(), DataTree::Text(e.span_id.clone()));
+    object(m)
 }
 
-fn require_keys(obj: &BTreeMap<String, JSONValue>, keys: &[&str]) -> Result<(), ProtocolError> {
+fn require_keys(obj: &BTreeMap<String, DataTree>, keys: &[&str]) -> Result<(), ProtocolError> {
     for k in keys {
         if !obj.contains_key(*k) {
             return Err(ProtocolError::new(format!("missing key `{k}`")));
@@ -1064,32 +1223,50 @@ fn require_keys(obj: &BTreeMap<String, JSONValue>, keys: &[&str]) -> Result<(), 
     Ok(())
 }
 
-fn json_u32(v: &JSONValue, name: &str) -> Result<u32, ProtocolError> {
+fn require_keys_with_optional(
+    obj: &BTreeMap<String, DataTree>,
+    required: &[&str],
+    optional: &[&str],
+) -> Result<(), ProtocolError> {
+    for key in required {
+        if !obj.contains_key(*key) {
+            return Err(ProtocolError::new(format!("missing key `{key}`")));
+        }
+    }
+    for key in obj.keys() {
+        if !required.contains(&key.as_str()) && !optional.contains(&key.as_str()) {
+            return Err(ProtocolError::new(format!("unknown key `{key}`")));
+        }
+    }
+    Ok(())
+}
+
+fn json_u32(v: &DataTree, name: &str) -> Result<u32, ProtocolError> {
     match v {
-        JSONValue::Number(n) if *n >= 0 && *n <= u32::MAX as i64 => Ok(*n as u32),
-        JSONValue::Flt(n) if n.fract() == 0.0 && *n >= 0.0 && *n <= u32::MAX as f64 => {
+        DataTree::Int(n) if *n >= 0 && *n <= u32::MAX as i64 => Ok(*n as u32),
+        DataTree::Float(n) if n.fract() == 0.0 && *n >= 0.0 && *n <= u32::MAX as f64 => {
             Ok(*n as u32)
         }
         _ => Err(ProtocolError::new(format!("`{name}` must be a u32"))),
     }
 }
 
-fn json_u64(v: &JSONValue, name: &str) -> Result<u64, ProtocolError> {
+fn json_u64(v: &DataTree, name: &str) -> Result<u64, ProtocolError> {
     match v {
-        JSONValue::Number(n) if *n >= 0 => Ok(*n as u64),
-        JSONValue::Flt(n) if n.fract() == 0.0 && *n >= 0.0 && *n <= (u64::MAX as f64) => {
+        DataTree::Int(n) if *n >= 0 => Ok(*n as u64),
+        DataTree::Float(n) if n.fract() == 0.0 && *n >= 0.0 && *n <= (u64::MAX as f64) => {
             Ok(*n as u64)
         }
         _ => Err(ProtocolError::new(format!("`{name}` must be a u64"))),
     }
 }
 
-fn json_usize(v: &JSONValue, name: &str) -> Result<usize, ProtocolError> {
+fn json_usize(v: &DataTree, name: &str) -> Result<usize, ProtocolError> {
     let n = json_u64(v, name)?;
     usize::try_from(n).map_err(|_| ProtocolError::new(format!("`{name}` out of range")))
 }
 
-fn parse_abilities(v: &JSONValue) -> Result<Vec<Ability>, ProtocolError> {
+fn parse_abilities(v: &DataTree) -> Result<Vec<Ability>, ProtocolError> {
     let arr = v
         .as_array()
         .map_err(|e| ProtocolError::new(format!("abilities: {e}")))?;
@@ -1105,7 +1282,7 @@ fn parse_abilities(v: &JSONValue) -> Result<Vec<Ability>, ProtocolError> {
     negotiate_abilities(PROTOCOL_VERSION, &out)
 }
 
-fn parse_string_array(v: &JSONValue, name: &str) -> Result<Vec<String>, ProtocolError> {
+fn parse_string_array(v: &DataTree, name: &str) -> Result<Vec<String>, ProtocolError> {
     let arr = v
         .as_array()
         .map_err(|e| ProtocolError::new(format!("{name}: {e}")))?;
@@ -1118,16 +1295,19 @@ fn parse_string_array(v: &JSONValue, name: &str) -> Result<Vec<String>, Protocol
         .collect()
 }
 
-fn parse_types(v: &JSONValue) -> Result<Vec<TypeFact>, ProtocolError> {
+fn parse_types(v: &DataTree) -> Result<Vec<TypeFact>, ProtocolError> {
     let arr = v
         .as_array()
         .map_err(|e| ProtocolError::new(format!("types: {e}")))?;
     let mut out = Vec::with_capacity(arr.len());
     for item in arr {
-        let obj = item
-            .as_object()
-            .map_err(|e| ProtocolError::new(format!("type: {e}")))?;
-        require_keys(obj, &["id", "repr"])?;
+        let obj = object_map(item).map_err(|e| ProtocolError::new(format!("type: {e}")))?;
+        require_keys_with_optional(&obj, &["id", "repr"], &["shape"])?;
+        let shape = obj
+            .get("shape")
+            .map(parse_type_shape)
+            .transpose()?
+            .unwrap_or(TypeFactShape::Opaque);
         out.push(TypeFact {
             id: obj
                 .get("id")
@@ -1141,21 +1321,274 @@ fn parse_types(v: &JSONValue) -> Result<Vec<TypeFact>, ProtocolError> {
                 .as_str()
                 .map_err(ProtocolError::new)?
                 .to_string(),
+            shape,
         });
     }
     Ok(out)
 }
 
-fn parse_spans(v: &JSONValue) -> Result<Vec<SpanFact>, ProtocolError> {
+fn parse_type_shape(v: &DataTree) -> Result<TypeFactShape, ProtocolError> {
+    let obj = object_map(v).map_err(|e| ProtocolError::new(format!("type shape: {e}")))?;
+    let kind = obj
+        .get("kind")
+        .ok_or_else(|| ProtocolError::new("type shape is missing `kind`"))?
+        .as_str()
+        .map_err(ProtocolError::new)?;
+    match kind {
+        "opaque" => {
+            require_keys(&obj, &["kind"])?;
+            Ok(TypeFactShape::Opaque)
+        }
+        "scalar" => {
+            require_keys(&obj, &["kind"])?;
+            Ok(TypeFactShape::Scalar)
+        }
+        "codable_record" => {
+            require_keys(&obj, &["kind", "fields"])?;
+            let fields = obj
+                .get("fields")
+                .unwrap()
+                .as_array()
+                .map_err(|e| ProtocolError::new(format!("record fields: {e}")))?;
+            let mut out = Vec::with_capacity(fields.len());
+            for field in fields {
+                let field =
+                    object_map(field).map_err(|e| ProtocolError::new(format!("record field: {e}")))?;
+                require_keys(&field, &["name", "type_id"])?;
+                out.push(TypeFieldFact {
+                    name: field
+                        .get("name")
+                        .unwrap()
+                        .as_str()
+                        .map_err(ProtocolError::new)?
+                        .to_string(),
+                    type_id: field
+                        .get("type_id")
+                        .unwrap()
+                        .as_str()
+                        .map_err(ProtocolError::new)?
+                        .to_string(),
+                });
+            }
+            Ok(TypeFactShape::CodableRecord { fields: out })
+        }
+        "list" => {
+            require_keys(&obj, &["kind", "element_type_id"])?;
+            Ok(TypeFactShape::List {
+                element_type_id: obj
+                    .get("element_type_id")
+                    .unwrap()
+                    .as_str()
+                    .map_err(ProtocolError::new)?
+                    .to_string(),
+            })
+        }
+        "option" => {
+            require_keys(&obj, &["kind", "inner_type_id"])?;
+            Ok(TypeFactShape::Option {
+                inner_type_id: obj
+                    .get("inner_type_id")
+                    .unwrap()
+                    .as_str()
+                    .map_err(ProtocolError::new)?
+                    .to_string(),
+            })
+        }
+        "result" => {
+            require_keys(&obj, &["kind", "ok_type_id", "error_type_id"])?;
+            Ok(TypeFactShape::Result {
+                ok_type_id: obj
+                    .get("ok_type_id")
+                    .unwrap()
+                    .as_str()
+                    .map_err(ProtocolError::new)?
+                    .to_string(),
+                error_type_id: obj
+                    .get("error_type_id")
+                    .unwrap()
+                    .as_str()
+                    .map_err(ProtocolError::new)?
+                    .to_string(),
+            })
+        }
+        other => Err(ProtocolError::new(format!(
+            "unknown type shape `{other}`"
+        ))),
+    }
+}
+
+fn parse_host_imports(v: &DataTree) -> Result<Vec<HostImportFact>, ProtocolError> {
+    let arr = v
+        .as_array()
+        .map_err(|e| ProtocolError::new(format!("host_imports: {e}")))?;
+    let mut out = Vec::with_capacity(arr.len());
+    for item in arr {
+        let obj = object_map(item).map_err(|e| ProtocolError::new(format!("host import: {e}")))?;
+        require_keys(
+            &obj,
+            &[
+                "id",
+                "operation",
+                "parameter_type_ids",
+                "required_right",
+                "result_type_id",
+            ],
+        )?;
+        let result_type_id = match obj.get("result_type_id").unwrap() {
+            DataTree::Null => None,
+            value => Some(value.as_str().map_err(ProtocolError::new)?.to_string()),
+        };
+        out.push(HostImportFact {
+            id: obj
+                .get("id")
+                .unwrap()
+                .as_str()
+                .map_err(ProtocolError::new)?
+                .to_string(),
+            operation: obj
+                .get("operation")
+                .unwrap()
+                .as_str()
+                .map_err(ProtocolError::new)?
+                .to_string(),
+            parameter_type_ids: parse_string_array(
+                obj.get("parameter_type_ids").unwrap(),
+                "parameter_type_ids",
+            )?,
+            required_right: obj
+                .get("required_right")
+                .unwrap()
+                .as_str()
+                .map_err(ProtocolError::new)?
+                .to_string(),
+            result_type_id,
+        });
+    }
+    Ok(out)
+}
+
+fn validate_interface_facts(
+    types: &[TypeFact],
+    symbols: &[SymbolFact],
+    spans: &[SpanFact],
+    host_imports: &[HostImportFact],
+) -> Result<(), ProtocolError> {
+    let mut type_ids = BTreeSet::new();
+    for fact in types {
+        if fact.id.is_empty() || !type_ids.insert(fact.id.as_str()) {
+            return Err(ProtocolError::new(format!(
+                "duplicate or empty type identity `{}`",
+                fact.id
+            )));
+        }
+    }
+    for fact in types {
+        let referenced = |id: &str, label: &str| {
+            if id.is_empty() || !type_ids.contains(id) {
+                Err(ProtocolError::new(format!(
+                    "type `{}` references unknown {label} `{id}`",
+                    fact.id
+                )))
+            } else {
+                Ok(())
+            }
+        };
+        match &fact.shape {
+            TypeFactShape::Opaque | TypeFactShape::Scalar => {}
+            TypeFactShape::CodableRecord { fields } => {
+                let mut field_names = BTreeSet::new();
+                for field in fields {
+                    if field.name.is_empty() || !field_names.insert(field.name.as_str()) {
+                        return Err(ProtocolError::new(format!(
+                            "type `{}` repeats or omits a record field name",
+                            fact.id
+                        )));
+                    }
+                    referenced(&field.type_id, "record field type")?;
+                }
+            }
+            TypeFactShape::List { element_type_id } => {
+                referenced(element_type_id, "list element type")?;
+            }
+            TypeFactShape::Option { inner_type_id } => {
+                referenced(inner_type_id, "option inner type")?;
+            }
+            TypeFactShape::Result {
+                ok_type_id,
+                error_type_id,
+            } => {
+                referenced(ok_type_id, "result success type")?;
+                referenced(error_type_id, "result error type")?;
+            }
+        }
+    }
+
+    let mut span_ids = BTreeSet::new();
+    for span in spans {
+        if span.id.is_empty() || !span_ids.insert(span.id.as_str()) {
+            return Err(ProtocolError::new(format!(
+                "duplicate or empty span identity `{}`",
+                span.id
+            )));
+        }
+    }
+
+    let mut symbol_ids = BTreeSet::new();
+    for symbol in symbols {
+        if symbol.id.is_empty() || !symbol_ids.insert(symbol.id.as_str()) {
+            return Err(ProtocolError::new(format!(
+                "duplicate or empty symbol identity `{}`",
+                symbol.id
+            )));
+        }
+        if !type_ids.contains(symbol.type_id.as_str()) {
+            return Err(ProtocolError::new(format!(
+                "symbol `{}` references unknown type `{}`",
+                symbol.id, symbol.type_id
+            )));
+        }
+        if !span_ids.contains(symbol.span_id.as_str()) {
+            return Err(ProtocolError::new(format!(
+                "symbol `{}` references unknown span `{}`",
+                symbol.id, symbol.span_id
+            )));
+        }
+    }
+
+    let mut import_ids = BTreeSet::new();
+    for import in host_imports {
+        if import.id.is_empty() || !import_ids.insert(import.id.as_str()) {
+            return Err(ProtocolError::new(format!(
+                "duplicate or empty host-import identity `{}`",
+                import.id
+            )));
+        }
+        if jet_foundation::Authority::parse_right(&import.required_right).is_none() {
+            return Err(ProtocolError::new(format!(
+                "host import `{}` has unknown required right `{}`",
+                import.id, import.required_right
+            )));
+        }
+        for type_id in import.payload_type_ids() {
+            if !type_ids.contains(type_id) {
+                return Err(ProtocolError::new(format!(
+                    "host import `{}` references unknown payload type `{type_id}`",
+                    import.id
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn parse_spans(v: &DataTree) -> Result<Vec<SpanFact>, ProtocolError> {
     let arr = v
         .as_array()
         .map_err(|e| ProtocolError::new(format!("spans: {e}")))?;
     let mut out = Vec::with_capacity(arr.len());
     for item in arr {
-        let obj = item
-            .as_object()
-            .map_err(|e| ProtocolError::new(format!("span: {e}")))?;
-        require_keys(obj, &["id", "file", "start", "end"])?;
+        let obj = object_map(item).map_err(|e| ProtocolError::new(format!("span: {e}")))?;
+        require_keys(&obj, &["id", "file", "start", "end"])?;
         out.push(SpanFact {
             id: obj
                 .get("id")
@@ -1176,17 +1609,15 @@ fn parse_spans(v: &JSONValue) -> Result<Vec<SpanFact>, ProtocolError> {
     Ok(out)
 }
 
-fn parse_symbols(v: &JSONValue) -> Result<Vec<SymbolFact>, ProtocolError> {
+fn parse_symbols(v: &DataTree) -> Result<Vec<SymbolFact>, ProtocolError> {
     let arr = v
         .as_array()
         .map_err(|e| ProtocolError::new(format!("symbols: {e}")))?;
     let mut out = Vec::with_capacity(arr.len());
     for item in arr {
-        let obj = item
-            .as_object()
-            .map_err(|e| ProtocolError::new(format!("symbol: {e}")))?;
+        let obj = object_map(item).map_err(|e| ProtocolError::new(format!("symbol: {e}")))?;
         require_keys(
-            obj,
+            &obj,
             &[
                 "id",
                 "name",
@@ -1240,16 +1671,14 @@ fn parse_symbols(v: &JSONValue) -> Result<Vec<SymbolFact>, ProtocolError> {
     Ok(out)
 }
 
-fn parse_findings(v: &JSONValue) -> Result<Vec<Finding>, ProtocolError> {
+fn parse_findings(v: &DataTree) -> Result<Vec<Finding>, ProtocolError> {
     let arr = v
         .as_array()
         .map_err(|e| ProtocolError::new(format!("findings: {e}")))?;
     let mut out = Vec::with_capacity(arr.len());
     for item in arr {
-        let obj = item
-            .as_object()
-            .map_err(|e| ProtocolError::new(format!("finding: {e}")))?;
-        require_keys(obj, &["rule", "span_id", "message", "severity"])?;
+        let obj = object_map(item).map_err(|e| ProtocolError::new(format!("finding: {e}")))?;
+        require_keys(&obj, &["rule", "span_id", "message", "severity"])?;
         out.push(Finding {
             rule: obj
                 .get("rule")
@@ -1280,16 +1709,14 @@ fn parse_findings(v: &JSONValue) -> Result<Vec<Finding>, ProtocolError> {
     Ok(out)
 }
 
-fn parse_edits(v: &JSONValue) -> Result<Vec<ProposedEdit>, ProtocolError> {
+fn parse_edits(v: &DataTree) -> Result<Vec<ProposedEdit>, ProtocolError> {
     let arr = v
         .as_array()
         .map_err(|e| ProtocolError::new(format!("proposed_edits: {e}")))?;
     let mut out = Vec::with_capacity(arr.len());
     for item in arr {
-        let obj = item
-            .as_object()
-            .map_err(|e| ProtocolError::new(format!("proposed_edit: {e}")))?;
-        require_keys(obj, &["span_id", "replacement", "rationale"])?;
+        let obj = object_map(item).map_err(|e| ProtocolError::new(format!("proposed_edit: {e}")))?;
+        require_keys(&obj, &["span_id", "replacement", "rationale"])?;
         out.push(ProposedEdit {
             span_id: obj
                 .get("span_id")
@@ -1324,6 +1751,7 @@ mod tests {
             vec![TypeFact {
                 id: "t1".into(),
                 repr: "Int".into(),
+                shape: TypeFactShape::Scalar,
             }],
             vec![SymbolFact {
                 id: "s1".into(),
@@ -1343,6 +1771,40 @@ mod tests {
         )
         .unwrap()
     }
+    #[test]
+    fn structured_types_and_host_imports_roundtrip_as_one_snapshot() {
+        let snapshot = TypedSnapshot::new_with_imports(
+            Ability::v1_defaults().to_vec(),
+            vec![
+                TypeFact {
+                    id: "t-list".into(),
+                    repr: "[Int]".into(),
+                    shape: TypeFactShape::List {
+                        element_type_id: "t-int".into(),
+                    },
+                },
+                TypeFact {
+                    id: "t-int".into(),
+                    repr: "Int".into(),
+                    shape: TypeFactShape::Scalar,
+                },
+            ],
+            Vec::new(),
+            Vec::new(),
+            vec![HostImportFact::new(
+                "host-read",
+                "read_file",
+                "FS.Read",
+                vec!["t-list".into()],
+                Some("t-int".into()),
+            )],
+        )
+        .expect("valid structured snapshot");
+        let decoded = TypedSnapshot::decode(&snapshot.encode().unwrap()).unwrap();
+        assert_eq!(decoded.types, snapshot.types);
+        assert_eq!(decoded.host_imports, snapshot.host_imports);
+    }
+
 
     #[test]
     fn dx5_hook1_world_is_distinct_from_application_plugin_and_path_helpers() {

@@ -6,6 +6,7 @@ impl<'a> Checker<'a> {
     fn unused_name_is_intentional(name: &str) -> bool {
         name.is_empty()
             || name.starts_with('_')
+            || name.starts_with("@_")
             || name == crate::Syntax::KW_SELF
             || name == "result"
             || name == crate::Syntax::AMBIENT_ERR
@@ -99,7 +100,11 @@ impl<'a> Checker<'a> {
         }
         crate::Diagnostics::TextEdit {
             span: binding.span,
-            new_text: format!("_{name}"),
+            new_text: if let Some(rest) = name.strip_prefix('@') {
+                format!("@_{rest}")
+            } else {
+                format!("_{name}")
+            },
         }
     }
 
@@ -255,7 +260,6 @@ impl<'a> Checker<'a> {
         }
     }
 
-
     pub(crate) fn record_method_reference(&mut self, type_name: &str, method: &str, span: Span) {
         let (import_ns, leaf) = Self::split_type_name(type_name);
         let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
@@ -328,7 +332,6 @@ impl<'a> Checker<'a> {
     }
 }
 
-
 fn record_import_alias_use_in_ledger(
     ledger: &mut jet_foundation::Names::NameLedger,
     module_idx: usize,
@@ -391,10 +394,7 @@ pub(crate) fn record_comptime_import_alias_uses(
             mark_shadowed_expr(else_value, &else_aliases, &mut shadowed);
         }
         Expr::OrFallback {
-            fallback:
-                crate::AST::OrFallback::Block {
-                    body, value, ..
-                },
+            fallback: crate::AST::OrFallback::Block { body, value, .. },
             ..
         } => {
             let mut fallback_aliases = HashSet::new();
@@ -412,16 +412,11 @@ pub(crate) fn record_comptime_import_alias_uses(
 
     expression.for_each_expr(|node| {
         let alias = match node {
-            Expr::Call(call) => call
-                .name
-                .split_once('.')
-                .map(|(alias, _)| alias),
+            Expr::Call(call) => call.name.split_once('.').map(|(alias, _)| alias),
             Expr::Field(base, ..)
             | Expr::Index { base, .. }
             | Expr::Slice { base, .. }
-            | Expr::MethodCall {
-                receiver: base, ..
-            }
+            | Expr::MethodCall { receiver: base, .. }
             | Expr::OptField { base, .. } => import_alias_root(base),
             Expr::CallValue { callee, .. } => import_alias_root(callee),
             Expr::PtrFromAddr { alias, .. } => Some(alias.as_str()),
@@ -639,7 +634,6 @@ fn import_alias_root(expr: &Expr) -> Option<&str> {
         _ => None,
     }
 }
-
 
 fn find_function_by_span<'a>(
     items: &'a [crate::AST::Item],

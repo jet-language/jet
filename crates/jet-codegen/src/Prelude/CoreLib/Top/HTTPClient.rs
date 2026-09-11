@@ -272,10 +272,13 @@ fn jet_http_client_response_new(
     reused_connection: bool,
     raw_content_encoding: Option<String>,
 ) -> Result<JetHTTPResponse, JetHTTPError> {
-    let body_length = body_length
-        .map(usize::try_from)
-        .transpose()
-        .map_err(|_| JetHTTPError::InvalidFraming)?;
+    let body_length = match body_length.map(usize::try_from).transpose() {
+        Ok(length) => length,
+        Err(_) => {
+            body_close(body_handle);
+            return Err(JetHTTPError::InvalidFraming);
+        }
+    };
     Ok(JetHTTPResponse {
         status,
         version: "HTTP/1.1".to_string(),
@@ -324,4 +327,91 @@ fn jet_http_client_response_reused(resp: &JetHTTPResponse) -> bool {
 }
 fn jet_http_client_response_raw_encoding(resp: &JetHTTPResponse) -> Option<String> {
     resp.raw_content_encoding.clone()
+}
+
+// The prepared transport namespace differs between generated AOT code and
+// resident hosts. Both instantiate the same response, error and send adapter.
+macro_rules! jet_http_client_bridge {
+    ($bridge:ident) => {
+        fn native_http_error(error: $bridge::JetHTTPBridgeError) -> JetHTTPError {
+            match error {
+                $bridge::JetHTTPBridgeError::InvalidUrl => JetHTTPError::InvalidUrl,
+                $bridge::JetHTTPBridgeError::InvalidHeader => JetHTTPError::InvalidHeader,
+                $bridge::JetHTTPBridgeError::InvalidFraming => JetHTTPError::InvalidFraming,
+                $bridge::JetHTTPBridgeError::UnsupportedEncoding => JetHTTPError::UnsupportedEncoding,
+                $bridge::JetHTTPBridgeError::Resolve => JetHTTPError::Resolve { host: "<redacted>".into() },
+                $bridge::JetHTTPBridgeError::Connect => JetHTTPError::Connect { address: "<redacted>".into() },
+                $bridge::JetHTTPBridgeError::TLS => JetHTTPError::TLS { stage: "handshake".into() },
+                $bridge::JetHTTPBridgeError::Timeout => JetHTTPError::Timeout { phase: "transport".into() },
+                $bridge::JetHTTPBridgeError::Proxy => JetHTTPError::Proxy { stage: "transport".into() },
+                $bridge::JetHTTPBridgeError::Redirect => JetHTTPError::Redirect { reason: "limit".into() },
+                $bridge::JetHTTPBridgeError::Protocol => JetHTTPError::Protocol { version: "unsupported".into() },
+                $bridge::JetHTTPBridgeError::IO => JetHTTPError::IO { operation: "transport".into() },
+                $bridge::JetHTTPBridgeError::ResourceUnavailable => JetHTTPError::ResourceUnavailable { resource: "transport".into() },
+                $bridge::JetHTTPBridgeError::Cancelled => JetHTTPError::Cancelled,
+                $bridge::JetHTTPBridgeError::UnsupportedTarget => JetHTTPError::UnsupportedTarget { operation: JetHTTPOperation::ClientConnect },
+                $bridge::JetHTTPBridgeError::Internal => JetHTTPError::Internal { incident_id: "http-transport".into() },
+            }
+        }
+
+        fn native_http_body_close(handle: i64) {
+            $bridge::jet_http_client_body_close_impl(handle);
+        }
+
+        fn native_http_body_read(handle: i64, max_chunk: usize) -> Result<Option<Vec<u8>>, JetHTTPError> {
+            $bridge::jet_http_client_body_read_impl(handle, max_chunk).map_err(|error| {
+                native_http_body_close(handle);
+                native_http_error(error)
+            })
+        }
+
+        fn native_http_response(
+            result: Result<(i64, i64, Option<i64>, Vec<String>), $bridge::JetHTTPBridgeError>,
+        ) -> Result<JetHTTPResponse, JetHTTPError> {
+            let (status, body, length, headers) = result.map_err(native_http_error)?;
+            let protocol = $bridge::jet_http_client_response_protocol_impl(body);
+            let remote_address = $bridge::jet_http_client_response_remote_address_impl(body);
+            let redirect_history = $bridge::jet_http_client_response_redirect_history_impl(body);
+            let timings_ms = $bridge::jet_http_client_response_timings_impl(body);
+            let reused_connection = $bridge::jet_http_client_response_reused_impl(body);
+            let raw_content_encoding = $bridge::jet_http_client_response_raw_encoding_impl(body);
+            $bridge::jet_http_client_response_facts_drop_impl(body);
+            jet_http_client_response_new(
+                status, body, length, headers, native_http_body_read, native_http_body_close,
+                protocol, remote_address, redirect_history, timings_ms, reused_connection,
+                raw_content_encoding,
+            )
+        }
+
+        fn native_http_request(req: JetHTTPRequest) -> Result<JetHTTPResponse, JetHTTPError> {
+            if let Some(error) = req.header_error.as_ref() {
+                return Err(error.clone());
+            }
+            let body = if req.body_set {
+                Some(req.body.bytes(8 * 1024 * 1024)?)
+            } else {
+                None
+            };
+            let headers = req.headers.to_flat();
+            native_http_response($bridge::jet_http_client_send_impl(
+                &req.method, &req.url, &headers, body.as_deref(), req.timeout_ms,
+                req.connect_timeout_ms, req.read_timeout_ms, req.total_timeout_ms,
+                req.dns_timeout_ms, req.tls_timeout_ms, req.write_timeout_ms,
+                req.first_byte_timeout_ms, req.redirects, req.proxy.as_deref(),
+                &req.cookies, &req.form, &req.multipart,
+            ))
+        }
+
+        fn jet_http_client_get(url: &String) -> Result<JetHTTPResponse, JetHTTPError> {
+            native_http_response($bridge::jet_http_client_get_impl(url))
+        }
+
+        fn jet_http_client_post(url: &String, body: &String) -> Result<JetHTTPResponse, JetHTTPError> {
+            native_http_response($bridge::jet_http_client_post_impl(url, body))
+        }
+
+        fn jet_http_client_request_send(req: JetHTTPRequest) -> Result<JetHTTPResponse, JetHTTPError> {
+            native_http_request(req)
+        }
+    };
 }

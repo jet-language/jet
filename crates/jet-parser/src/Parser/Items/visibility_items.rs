@@ -1,7 +1,10 @@
 use super::super::{Diagnostic, Func, Item, MetaAttr, Parser, Span, Syntax, TokKind};
 
+const VISIBILITY_ITEM_FORMS: &str =
+    "`fn`, `struct`, `enum`, `trait`, `tag`, `module`, `protocol`, `alias`, `distinct`, or `#UnitFamily`";
+
 impl<'a> Parser<'a> {
-    /// D-VISDEFAULT2=A: parse one top-level item after `priv` / `private`.
+    /// D-VISDEFAULT2=A: parse one top-level item after a visibility qualifier.
     pub(super) fn item_after_visibility(
         &mut self,
         is_pub: bool,
@@ -53,6 +56,9 @@ impl<'a> Parser<'a> {
             TokKind::Ident(ref n) if n.as_str() == Syntax::KW_ALIAS => self
                 .type_alias_def(is_pub, is_package_pub)
                 .map(Item::TypeAlias),
+            TokKind::Ident(_) if self.at_distinct_def() => self
+                .distinct_def(is_pub, is_package_pub)
+                .map(Item::Distinct),
             TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_UNIT_FAMILY) => {
                 self.unit_family_def(is_pub, is_package_pub)
                     .map(Item::UnitFamily)
@@ -61,23 +67,12 @@ impl<'a> Parser<'a> {
                 let d = Diagnostic::error(
                     "E0003",
                     format!(
-                        "expected `{}`, `{}`, `{}`, or `{}` after `{}`",
-                        Syntax::KW_FN,
-                        Syntax::KW_STRUCT,
-                        Syntax::KW_ENUM,
-                        Syntax::KW_ALIAS,
-                        Syntax::KW_PRIV
+                        "expected one of {VISIBILITY_ITEM_FORMS} after a visibility qualifier"
                     ),
+                    "all visibility qualifiers share one dispatcher for the canonical top-level declaration forms"
+                        .to_string(),
                     format!(
-                        "`{}` marks one top-level item as private in a `#{}` file",
-                        Syntax::KW_PRIV,
-                        Syntax::MARKER_PUB_FILE
-                    ),
-                    format!(
-                        "write `{} fn …`, `{} struct …`, or `{} alias …`",
-                        Syntax::KW_PRIV,
-                        Syntax::KW_PRIV,
-                        Syntax::KW_PRIV
+                        "write a visibility qualifier before one of {VISIBILITY_ITEM_FORMS}"
                     ),
                     Some(self.peek().span),
                 );

@@ -6,7 +6,9 @@ struct Sale {
     qty: Int
 }
 
-fn run() ![FieldError] {
-    sales :: csv.query<Sale>("sales.csv", SQL{"SELECT * FROM sales WHERE quntity > 1"})?
-    print(sales)
+fn run() {
+    query :: csv.query<Sale>("sales.csv", SQL{"SELECT * FROM sales WHERE quntity > 1"})
+        ?? panic("query")
+    rows :: query.collect() ?? panic("collect")
+    print(rows)
 }

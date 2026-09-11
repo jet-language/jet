@@ -14,16 +14,25 @@ pub mod Blocks;
 mod Convert;
 mod Discovery;
 mod Edit;
+#[path = "ReleaseDevtoolsPolicy.rs"]
+mod ReleasePolicy;
 
 pub use Blocks::{
-    build_entry_source, dep_display, dep_display_redacted, extract_inline_package,
-    mask_inline_package_source, parse_policy_document, AuthorityHolds, InlinePackageBlock,
-    InlinePackageError, BuildOptimize, BuildPanic, BuildProfileDef, DepSource, ImportBoundary,
-    PackageEntry, PackageKind, ProvenanceRequirement, ProviderAuthority, Target, TrustDecision,
-    TrustPolicy,
+    build_entry_source, dep_display_redacted, extract_inline_package, mask_inline_package_source,
+    parse_policy_document,
+    BuildOptimize, BuildPanic, BuildProfileDef, DepSource, DevCaptureSetting, DevPolicy,
+    DevRecordsBudget, DevRecordsPolicy, ImportBoundary, InlinePackageError, PackageEntry,
+    PackageKind, PackageTargets, ProvenanceRequirement, ProviderAuthority, ReleaseInspect, Target,
+    TargetProfileIdentity, TargetProfileSelection, TrustDecision, TrustPolicy,
+};
+pub use ReleasePolicy::{
+    ReleaseDevtoolsAllowlist, ReleaseDevtoolsAuthentication, ReleaseDevtoolsAuthority,
+    ReleaseDevtoolsDeployment, ReleaseDevtoolsEndpoint, ReleaseDevtoolsNetwork,
+    ReleaseDevtoolsPolicy, ReleaseDevtoolsPolicyFacts, ReleaseDevtoolsPublication,
+    INSPECT_ALLOWLIST_ENV, INSPECT_ENABLE_ENV, INSPECT_TOKEN_ENV,
 };
 pub use Convert::{new_template, to_manifest};
-pub use Discovery::{discover_module_in, DiscoveryError};
+pub use Discovery::{discover_jobs_in, discover_module_in, DiscoveryError};
 pub use Edit::{add_authority_hold, add_dep, remove_dep};
 
 use crate::Authority::{AuthorityError, AuthorityResolver, CheckedFile, CheckedPackage};
@@ -46,6 +55,7 @@ pub enum PackageOutputKind {
     Bundle,
     System,
     Fleet,
+    Model,
 }
 
 impl PackageOutputKind {
@@ -64,6 +74,7 @@ impl PackageOutputKind {
             "Bundle" => Ok(Self::Bundle),
             "System" => Ok(Self::System),
             "Fleet" => Ok(Self::Fleet),
+            "Model" => Ok(Self::Model),
             other => Err(PackageParseError::UnknownOutputKind(other.to_string())),
         }
     }
@@ -190,11 +201,14 @@ pub struct PackageFacts {
     /// D-ALLOC-PROGRAM1=A: optional hosted whole-program allocator fact.
     /// The hidden system heap remains the default.
     pub allocator: crate::TargetMachine::AllocatorPolicy,
-    /// D-WEBDEFAULT1: this package's default CLI backend target.
-    pub target: Option<String>,
+    /// Named target profiles selected by this package. An absent block keeps
+    /// the ordinary hosted-package default; no target is inferred.
+    pub targets: Blocks::PackageTargets,
     /// D-RINGLAYER1=A: optional runtime ceiling (`core`/`alloc`/`hosted`).
     pub layer: Option<crate::Syntax::RuntimeLayer>,
     pub deps: BTreeMap<String, Blocks::DepSource>,
+    /// D-LIVE1: package-level development mode; absent means swap is enabled.
+    pub dev: Blocks::DevPolicy,
     /// D-STRUCT-EDGE1=A: package-owned import edges this manifest denies.
     pub boundaries: Vec<Blocks::ImportBoundary>,
     /// U10/D-TGT1: the `packages: { name: kind }` block.
@@ -238,6 +252,175 @@ pub struct PackageFacts {
     pub origin: String,
 }
 
+/// D-GRADE1=D / D-GRADE-POLICY1=A: the one claims ladder shared by
+/// `jet test`, `jet prove`, and `jet inspect claims`. Ordering is deliberately
+/// explicit so a package floor can only tighten evidence requirements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ClaimsGrade {
+    Unchecked,
+    Checked,
+    Examples(u64),
+    Generated(u64),
+    Proved,
+}
+
+impl ClaimsGrade {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unchecked => "unchecked",
+            Self::Checked => "checked",
+            Self::Examples(_) => "examples",
+            Self::Generated(_) => "generated",
+            Self::Proved => "proved",
+        }
+    }
+
+    pub fn render(self) -> String {
+        match self {
+            Self::Examples(count) => format!("examples({count})"),
+            Self::Generated(count) => format!("generated({count})"),
+            _ => self.as_str().to_string(),
+        }
+    }
+
+    pub const fn rank(self) -> u8 {
+        match self {
+            Self::Unchecked => 0,
+            Self::Checked => 1,
+            Self::Examples(_) => 2,
+            Self::Generated(_) => 3,
+            Self::Proved => 4,
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        let value = value.trim().trim_start_matches('.');
+        let lowercase = value.to_ascii_lowercase();
+        if let Some(count) = lowercase
+            .strip_prefix("generated(")
+            .and_then(|value| value.strip_suffix(')'))
+        {
+            return count.parse::<u64>().ok().map(Self::Generated);
+        }
+        if let Some(count) = lowercase
+            .strip_prefix("examples(")
+            .and_then(|value| value.strip_suffix(')'))
+        {
+            return count.parse::<u64>().ok().map(Self::Examples);
+        }
+        match lowercase.as_str() {
+            "unchecked" => Some(Self::Unchecked),
+            "checked" => Some(Self::Checked),
+            "examples" | "example" => Some(Self::Examples(0)),
+            "generated" => Some(Self::Generated(0)),
+            "proved" | "proven" => Some(Self::Proved),
+            _ => None,
+        }
+    }
+
+    pub fn meets(self, floor: Self) -> bool {
+        match (self, floor) {
+            (Self::Examples(actual), Self::Examples(required)) => actual >= required,
+            (Self::Generated(actual), Self::Generated(required)) => actual >= required,
+            (actual, required) => actual.rank() >= required.rank(),
+        }
+    }
+}
+
+/// A typed projection of the evidence ledger for claims inspection. Counts
+/// preserve generated attempts, while the achieved grade only uses successful
+/// records; a failed record can never raise the grade or satisfy a floor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClaimsProjection {
+    pub grade: ClaimsGrade,
+    pub generated_attempts: u64,
+    pub generated_successes: u64,
+    pub examples_successes: u64,
+    pub failed: bool,
+}
+
+impl ClaimsProjection {
+    pub fn from_records(
+        records: &[jet_foundation::Evidence::EvidenceRecord],
+    ) -> Self {
+        use jet_foundation::Evidence::{EvidenceFacet, EvidenceKind, EvidenceOutcome};
+
+        let mut generated_attempts = 0u64;
+        let mut generated_successes = 0u64;
+        let mut examples_successes = 0u64;
+        let mut failed = false;
+        let mut solver_proved = false;
+        let mut checked = false;
+
+        for record in records {
+            let expected_failure = record.is_expected_failure();
+            if (record.outcome.is_failure() && !expected_failure)
+                || record.is_unexpected_pass()
+            {
+                failed = true;
+            }
+            if record.kind == EvidenceKind::Property && record.count > 0 {
+                if matches!(
+                    record.outcome,
+                    EvidenceOutcome::Generated
+                        | EvidenceOutcome::Passed
+                        | EvidenceOutcome::Failed
+                ) {
+                    generated_attempts =
+                        generated_attempts.saturating_add(record.count);
+                }
+                if matches!(
+                    record.outcome,
+                    EvidenceOutcome::Generated | EvidenceOutcome::Passed
+                ) && !record.is_unexpected_pass()
+                {
+                    generated_successes =
+                        generated_successes.saturating_add(record.count);
+                }
+            }
+            if matches!(
+                record.kind,
+                EvidenceKind::Unit | EvidenceKind::Runtime | EvidenceKind::Doctest
+            ) && record.outcome == EvidenceOutcome::Passed
+                && !record.is_unexpected_pass()
+            {
+                examples_successes = examples_successes.saturating_add(1);
+            }
+            if record.facet == EvidenceFacet::Solver
+                && record.outcome == EvidenceOutcome::Proved
+            {
+                solver_proved = true;
+            }
+            if record.outcome == EvidenceOutcome::Checked {
+                checked = true;
+            }
+        }
+
+        let grade = if solver_proved {
+            ClaimsGrade::Proved
+        } else if generated_successes > 0 {
+            ClaimsGrade::Generated(generated_successes)
+        } else if examples_successes > 0 {
+            ClaimsGrade::Examples(examples_successes)
+        } else if checked {
+            ClaimsGrade::Checked
+        } else {
+            ClaimsGrade::Unchecked
+        };
+        Self {
+            grade,
+            generated_attempts,
+            generated_successes,
+            examples_successes,
+            failed,
+        }
+    }
+
+    pub fn floor_met(self, floor: Option<ClaimsGrade>) -> bool {
+        !self.failed && floor.map_or(true, |floor| self.grade.meets(floor))
+    }
+}
+
 /// D-POLICY-WORD1=A / D-TEAMPOLICY1=A: the package's non-memory governance
 /// namespace — package-scope only (never a Config contribution), same as the
 /// ratified D-MARK-SCOPE1 package rung. Memory denials live in
@@ -263,6 +446,9 @@ pub struct PackagePolicy {
     /// D-TEAMPOLICY1=A: `None` means no dependency wall; `Some(list)` is the
     /// `.List([...])` allow-list, with an empty list denying every dependency.
     pub deps: Option<Vec<String>>,
+    /// D-GRADE-POLICY1=A: optional tighten-only claims floor. `None` means
+    /// the package accepts the ordinary `unchecked` floor.
+    pub claims_min: Option<ClaimsGrade>,
     /// D-MEM-GUARANTEE1=A: package-only dependencies whose foreign pointers
     /// are contained by a tracked-handle fence.
     pub contain: BTreeSet<String>,
@@ -308,6 +494,9 @@ impl PackagePolicyException {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PackageAuthority {
     pub holds: Blocks::AuthorityHolds,
+    /// D-PLUGIN-AUTHORITY1: guest-declared requirements. This is a
+    /// declaration/projection, never an additional host grant store.
+    pub needs: Vec<String>,
     pub grants: Vec<(String, Vec<String>)>,
     pub trust: Option<Blocks::TrustPolicy>,
     pub providers: Vec<Blocks::ProviderAuthority>,
@@ -323,6 +512,22 @@ impl PackagePolicy {
         }
         if self.harden && !next.harden {
             return Err("`policy.harden` cannot be turned off".to_string());
+        }
+        match (self.claims_min, next.claims_min) {
+            (Some(current), Some(next)) if !next.meets(current) => {
+                return Err(format!(
+                    "`policy.claims.min` cannot weaken from `{}` to `{}`",
+                    current.render(),
+                    next.render()
+                ));
+            }
+            (Some(current), None) => {
+                return Err(format!(
+                    "`policy.claims.min` cannot remove the `{}` floor",
+                    current.render()
+                ));
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -573,11 +778,13 @@ impl PackageFacts {
         let mut semantic = String::new();
         write!(
             &mut semantic,
-            "name={:?};version={:?};jet={:?};source={:?};deps={:?};boundaries={:?};services={:?};outputs={:?};environments={:?};defaults={:?};build_profiles={:?};settings={:?};configs={:?};members={:?};authority={:?};effects_enabled={:?};effects_allow={:?};effects_deny={:?};policy_lints_deny={:?};policy_effects={:?};policy_unsafe_paths={:?};policy_expert={:?};policy_deps={:?};policy_contain={:?};policy_harden={:?};policy_licenses={:?};policy_source_maps={:?};policy_exceptions={:?};",
+            "name={:?};version={:?};jet={:?};source={:?};targets={:?};dev={:?};deps={:?};boundaries={:?};services={:?};outputs={:?};environments={:?};defaults={:?};build_profiles={:?};settings={:?};configs={:?};members={:?};authority={:?};effects_enabled={:?};effects_allow={:?};effects_deny={:?};policy_lints_deny={:?};policy_effects={:?};policy_unsafe_paths={:?};policy_expert={:?};policy_deps={:?};policy_claims_min={:?};policy_contain={:?};policy_harden={:?};policy_licenses={:?};policy_source_maps={:?};policy_exceptions={:?};",
             self.name,
             self.version,
             self.jet,
             self.source,
+            self.targets,
+            self.dev,
             self.deps,
             self.boundaries,
             self.services,
@@ -597,6 +804,7 @@ impl PackageFacts {
             self.policy.unsafe_paths,
             self.policy.expert,
             self.policy.deps,
+            self.policy.claims_min,
             self.policy.contain,
             self.policy.harden,
             self.policy.licenses,
@@ -622,6 +830,14 @@ impl PackageFacts {
         }
         crate::SHA256::sha256_hex(semantic.as_bytes())
     }
+    /// Return the exact profile identity selected for `target_name`.
+    pub fn target_profile(
+        &self,
+        target_name: &str,
+    ) -> Option<&Blocks::TargetProfileIdentity> {
+        self.targets.profile(target_name)
+    }
+
 
     /// The declared kind of package `name`, derived from its `targets:` list
     /// in the `packages: { … }` block (D-TGT1): an `executable` target wins,
@@ -1085,11 +1301,13 @@ impl PackageFacts {
     /// Resolve one optional command-function override from the package scope.
     ///
     /// D-CMDOVERRIDE1=A makes the package source tree the scope for a bare
-    /// command. The first source file is deterministic (the `@…jet` home sorts
-    /// first), but a command still has exactly one owner: two top-level
-    /// functions with the same command name are an authority error. Nested
-    /// marked role files are not command homes; only the package root may use
-    /// the marked namespace (D-ROLEFILE1=A).
+    /// command. Resolution is shallow and ordered: a matching package-root
+    /// role home, one matching root file, then one matching `src/` file.
+    /// Nested files and other role homes are ordinary non-candidates. A
+    /// command still has exactly one owner: multiple matching functions in
+    /// the selected level are an authority error. Nested marked role files
+    /// are not command homes; only the package root may use the marked
+    /// namespace (D-ROLEFILE1=A).
     pub fn resolve_command_entry(
         &self,
         root: &std::path::Path,
@@ -1107,26 +1325,46 @@ impl PackageFacts {
         resolver: &AuthorityResolver,
         command: &str,
     ) -> Result<Option<CheckedFile>, String> {
-        let mut files = self
+        let files = self
             .source_files_checked(resolver)
             .map_err(|error| format!("{}: {error}", self.origin))?;
-        files.retain(|file| {
-            let is_role_file = file
-                .relative
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| crate::Syntax::COMMAND_ROLE_FILES.contains(&name));
-            if !is_role_file {
-                return true;
+        let requested_role = crate::Syntax::command_role_file(command);
+        let mut role_files = Vec::new();
+        let mut root_files = Vec::new();
+        let mut src_files = Vec::new();
+        for file in files {
+            let parent = file.relative.parent().unwrap_or_else(|| Path::new("."));
+            let direct_root =
+                parent.as_os_str().is_empty() || parent == Path::new(".");
+            let name = file.relative.file_name().and_then(|name| name.to_str());
+            let is_role_file = name.is_some_and(|name| {
+                crate::Syntax::COMMAND_ROLE_FILES.contains(&name)
+            });
+            if direct_root {
+                if requested_role == name {
+                    role_files.push(file);
+                } else if !is_role_file {
+                    root_files.push(file);
+                }
+            } else if parent == Path::new("src") && !is_role_file {
+                src_files.push(file);
             }
-            file.relative
-                .parent()
-                .map(|parent| parent.as_os_str().is_empty() || parent == Path::new("."))
-                .unwrap_or(true)
-        });
-        let entries = self
-            .discover_function_entries_from_files(resolver, &files, command, false, false)
+        }
+        let role_entries = self
+            .discover_function_entries_from_files(resolver, &role_files, command, false, false)
             .map_err(|error| format!("{}: {error}", self.origin))?;
+        if let Some((file, _)) = role_entries.into_iter().next() {
+            return Ok(Some(file));
+        }
+        let root_entries = self
+            .discover_function_entries_from_files(resolver, &root_files, command, false, false)
+            .map_err(|error| format!("{}: {error}", self.origin))?;
+        let entries = if root_entries.is_empty() {
+            self.discover_function_entries_from_files(resolver, &src_files, command, false, false)
+                .map_err(|error| format!("{}: {error}", self.origin))?
+        } else {
+            root_entries
+        };
         if entries.len() > 1 {
             let locations = entries
                 .iter()
@@ -1372,6 +1610,9 @@ impl PackageFacts {
                     // and must remain visible to a quoted Output reference.
                     name == crate::Syntax::PACKAGE_FILE
                         || name == crate::Syntax::PAYLOAD_FILE
+                        || name == crate::Syntax::ENV_FILE
+                        || name == crate::Syntax::CONFIG_FILE
+                        || name == crate::Syntax::WORKSPACE_FILE
                         || (name == crate::Syntax::LEGACY_ENTRY_FILE
                             && (file.relative == Path::new(crate::Syntax::LEGACY_ENTRY_FILE)
                                 || file.relative
@@ -2334,8 +2575,12 @@ fn parse_common(
             "license" => return Err(PackageParseError::UnknownField(field.clone())),
             "repository" if !config => facts.repository = Some(scalar(&value)),
             "repository" => return Err(PackageParseError::UnknownField(field.clone())),
-            "target" if !config => facts.target = Some(scalar(&value)),
             "target" => return Err(PackageParseError::UnknownField(field.clone())),
+            "targets" if config => return Err(PackageParseError::UnknownField(field.clone())),
+            "targets" => {
+                facts.targets =
+                    Blocks::parse_target_profiles(record_body(&value, "targets")?)?
+            }
             "allocator" if !config => {
                 facts.allocator = Blocks::parse_program_allocator(&value)?;
             }
@@ -2369,6 +2614,22 @@ fn parse_common(
             "packages" => {
                 facts.packages = Blocks::parse_packages(record_body(&value, "packages")?)?
             }
+            "dev" if config => return Err(PackageParseError::UnknownField(field.clone())),
+            "dev" => facts.dev = Blocks::parse_dev(&value)?,
+            crate::Syntax::MANIFEST_BLOCK_BUILD if config => {
+                return Err(PackageParseError::UnknownField(field.clone()));
+            }
+            crate::Syntax::MANIFEST_BLOCK_BUILD => {
+                let body = record_body(&value, crate::Syntax::MANIFEST_BLOCK_BUILD)?;
+                facts.build_profiles = Blocks::parse_build(body)?;
+                facts.build_allow = Blocks::parse_build_allow(body)?;
+            }
+            crate::Syntax::MANIFEST_BLOCK_SETTINGS if config => {
+                return Err(PackageParseError::UnknownField(field.clone()));
+            }
+            crate::Syntax::MANIFEST_BLOCK_SETTINGS => {
+                facts.settings = parse_settings(&value)?;
+            }
             "services" => facts.services = parse_services(&value)?,
             crate::Syntax::MANIFEST_BLOCK_OUTPUTS => {
                 for (name, output) in parse_outputs(&value)? {
@@ -2387,23 +2648,6 @@ fn parse_common(
             }
             "environments" => facts.environments = parse_environments(&value)?,
             "defaults" => facts.defaults = parse_string_map("defaults", &value)?,
-            crate::Syntax::MANIFEST_BLOCK_SETTINGS if config => {
-                return Err(PackageParseError::UnknownField(field.clone()))
-            }
-            crate::Syntax::MANIFEST_BLOCK_SETTINGS => facts.settings = parse_settings(&value)?,
-            "build" if config => return Err(PackageParseError::UnknownField(field.clone())),
-            "build" => {
-                let body = record_body(&value, "build")?;
-                facts.build_profiles = Blocks::parse_build(body)?;
-                facts.build_allow = Blocks::parse_build_allow(body)?;
-            }
-            "effects" if config => return Err(PackageParseError::UnknownField(field.clone())),
-            "effects" => {
-                return Err(PackageParseError::RetiredAuthorityField {
-                    field: field.clone(),
-                    replacement: "authority.holds".to_string(),
-                })
-            }
             "grants" if config => return Err(PackageParseError::UnknownField(field.clone())),
             "grants" => {
                 return Err(PackageParseError::RetiredAuthorityField {
@@ -2424,6 +2668,7 @@ fn parse_common(
                 }
                 facts.authority = PackageAuthority {
                     holds: authority.holds,
+                    needs: authority.needs,
                     grants: authority.grants,
                     trust: authority.trust,
                     providers: authority.providers,
@@ -2433,8 +2678,16 @@ fn parse_common(
             "policy" => {
                 let body = record_body(&value, "policy")?;
                 let (contain, harden) = Blocks::parse_guarantee_policy(body)?;
-                let (licenses, source_maps, exceptions, effects, unsafe_paths, expert, deps) =
-                    Blocks::parse_package_policy_surface(body)?;
+                let (
+                    licenses,
+                    source_maps,
+                    exceptions,
+                    effects,
+                    unsafe_paths,
+                    expert,
+                    deps,
+                    claims_min,
+                ) = Blocks::parse_package_policy_surface(body)?;
                 facts.policy = PackagePolicy {
                     declarations: Blocks::parse_policy(body, true)?,
                     lints_deny: Blocks::parse_lints_policy(body)?,
@@ -2442,6 +2695,7 @@ fn parse_common(
                     unsafe_paths,
                     expert,
                     deps,
+                    claims_min,
                     contain,
                     harden,
                     licenses,
@@ -2570,6 +2824,15 @@ fn record_declared_provenance(facts: &mut PackageFacts, field: &str, origin: &st
                     &format!("environments.{key}"),
                     origin,
                     environment,
+                );
+            }
+        }
+        "targets" => {
+            for selection in facts.targets.iter() {
+                record_provenance(
+                    &mut facts.provenance,
+                    &format!("targets.{}", selection.name),
+                    origin,
                 );
             }
         }
@@ -3384,6 +3647,30 @@ fn output_field_allowed(kind: PackageOutputKind, field: &str) -> bool {
             )
         }
         PackageOutputKind::Fleet => matches!(field, "name" | "hosts"),
+        PackageOutputKind::Model => matches!(
+            field,
+            "name"
+                | "graph"
+                | "graph_sha256"
+                | "weights"
+                | "weights_sha256"
+                | "tokenizer"
+                | "tokenizer_sha256"
+                | "adapter"
+                | "adapter_sha256"
+                | "inputs"
+                | "outputs"
+                | "provider"
+                | "preprocessing"
+                | "pooling"
+                | "normalization"
+                | "output_meaning"
+                | "metric"
+                | "custom_operators"
+                | "max_context"
+                | "max_batch"
+                | "max_buffer_bytes"
+        ),
     }
 }
 
@@ -3758,7 +4045,7 @@ fn parse_sources(files: &[CheckedFile]) -> Option<Vec<ParsedSource>> {
             }
             Some(ParsedSource {
                 path: file.path.clone(),
-                program: crate::Parser::parse(&tokens).ok()?,
+                program: crate::Parser::parse_with_source(&tokens, &source).ok()?,
             })
         })
         .collect()
@@ -4047,7 +4334,7 @@ fn real_build_entry_lines(source: &str, candidates: &[usize]) -> Option<Vec<usiz
     if !lex_diags.is_empty() {
         return None;
     }
-    let (program, _) = Parser::parse_for_check(&tokens).ok()?;
+    let (program, _) = Parser::parse_for_check_with_source(&tokens, &source).ok()?;
     let real_lines = program
         .items
         .iter()

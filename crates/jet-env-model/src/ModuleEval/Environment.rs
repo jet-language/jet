@@ -1707,7 +1707,7 @@ fn versioned_package(package: &str, version: Option<&str>) -> String {
         package.to_string()
     } else {
         format!(
-            "{name}{}{source}{}{version}",
+            "{name}{}{source}{}version={version}",
             Syntax::REF_PROVIDER_AT,
             Syntax::REF_CHANNEL_MARKER
         )

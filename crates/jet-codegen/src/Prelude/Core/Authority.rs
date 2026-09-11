@@ -32,6 +32,65 @@ impl JetAuthority {
         }
     }
 }
+/// D-FILES-SCOPE1: a file scope is an owned attenuation of an Authority.
+/// It keeps only explicit resource-qualified read roots; a bare `FS.Read`
+/// grant never becomes an ambient filesystem handle.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JetFileScope {
+    roots: Vec<JetFileScopeRoot>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct JetFileScopeRoot {
+    path: std::path::PathBuf,
+    allow_absolute: bool,
+}
+
+impl JetFileScope {
+    pub(crate) fn from_authority(authority: &JetAuthority) -> Self {
+        let roots = authority
+            .rights
+            .iter()
+            .filter_map(|right| {
+                let root = right.strip_prefix("FS.Read:")?;
+                if root.is_empty() {
+                    return None;
+                }
+                let path = if root == "repo" {
+                    std::path::PathBuf::from(".")
+                } else {
+                    let path = std::path::PathBuf::from(root);
+                    if path
+                        .components()
+                        .any(|component| matches!(component, std::path::Component::ParentDir))
+                    {
+                        return None;
+                    }
+                    path
+                };
+                Some(JetFileScopeRoot {
+                    allow_absolute: root != "repo" && path.is_absolute(),
+                    path,
+                })
+            })
+            .collect();
+        Self { roots }
+    }
+
+    pub(crate) fn roots(&self) -> &[JetFileScopeRoot] {
+        &self.roots
+    }
+}
+
+impl JetFileScopeRoot {
+    pub(crate) fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
+    pub(crate) fn allow_absolute(&self) -> bool {
+        self.allow_absolute
+    }
+}
 
 pub(crate) fn jet_authority_rights_from_strings(
     rights: Vec<String>,

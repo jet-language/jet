@@ -10,7 +10,7 @@ import {
   readReproBundle,
   sha256 as reproSha256,
 } from "./hardening-repro.mjs";
-import { readManifestArtifact } from "./hardening-oracle-layer.mjs";
+import { validateCandidateRecord, verifyCandidateComposition } from "./hardening-manifest.mjs";
 import {
   hardeningDedupKey,
   makeContextPacket,
@@ -337,6 +337,81 @@ function loadManifest({ root, manifestPath }) {
     errors: snapshot.errors,
   };
 }
+
+function candidatePathFor({ root, candidatePath }) {
+  if (candidatePath) return resolve(root, candidatePath);
+  const configured = process.env.JET_CANDIDATE_RECORD;
+  const candidates = configured
+    ? [resolve(root, configured)]
+    : [
+        join(root, ".jet/candidate.json"),
+        join(root, "candidate.json"),
+        join(root, ".cache/jet-hardening/v1/candidate.json"),
+      ];
+  return candidates.find(existsSync) || candidates[0];
+}
+
+function loadCandidate({ root, candidatePath, target, manifestInfo }) {
+  const path = candidatePathFor({ root, candidatePath });
+  const loaded = readJsonFile(path);
+  if (loaded.error) {
+    return {
+      path: relative(root, path),
+      present: false,
+      readable: false,
+      record: null,
+      validation: { ok: false, status: "BLOCKED", errors: [loaded.error], invalidations: [] },
+    };
+  }
+  let validation;
+  try {
+    validation = validateCandidateRecord(loaded.value, {
+      sourceCommit: target.commit,
+      sourceSnapshotHash: manifestInfo.source_snapshot_hash,
+      binarySha256: target.binary_sha256,
+      requireQualified: true,
+      composition: loaded.value?.compiler_proof || null,
+    });
+  } catch (error) {
+    validation = { ok: false, status: "BLOCKED", errors: [error.message], invalidations: [] };
+  }
+  if (validation.ok) {
+    const composition = verifyCandidateComposition(path, { root, candidate: loaded.value });
+    if (!composition.ok) {
+      validation = {
+        ...validation,
+        ok: false,
+        status: "BLOCKED",
+        errors: [...validation.errors, ...composition.errors],
+      };
+    }
+  }
+  return {
+    path: relative(root, path),
+    present: true,
+    readable: true,
+    record: loaded.value,
+    validation,
+  };
+}
+
+function candidateReport(info) {
+  const validation = info.validation || { ok: false, status: "BLOCKED", errors: ["candidate validation unavailable"], invalidations: [] };
+  return {
+    path: info.path,
+    present: info.present,
+    readable: info.readable,
+    status: validation.ok ? "GREEN" : "RED",
+    ok: validation.ok,
+    errors: sortedUnique(validation.errors || []),
+    invalidations: validation.invalidations || [],
+    candidate_identity: info.record?.candidate_identity || null,
+    dependencies: info.record?.dependencies || null,
+    claims: info.record?.claims || [],
+    compiler_proof: info.record?.compiler_proof || null,
+    record: info.record,
+  };
+}
 function redTeamSessionPath(evidenceRoot) {
   return process.env.JET_HARDENING_RED_TEAM_MANIFEST
     ? resolve(evidenceRoot, process.env.JET_HARDENING_RED_TEAM_MANIFEST)
@@ -464,6 +539,84 @@ function conformanceReport(manifestInfo) {
     refused,
     stale,
     exclusions,
+    errors: normalizedErrors,
+  };
+}
+function capabilityReport(manifestInfo) {
+  const relation = manifestInfo.manifest?.capability_relation || null;
+  const rows = Array.isArray(relation?.rows) ? relation.rows : [];
+  const dispositions = ["planned", "implemented-unqualified", "passed", "failed", "stale", "unavailable", "unsupported", "owner-ratified-not-applicable"];
+  const totals = Object.fromEntries(dispositions.map((disposition) => [disposition, 0]));
+  const byFamily = {};
+  const byMode = {};
+  const missing = [];
+  const failing = [];
+  const stale = [];
+  const unavailable = [];
+  const exclusions = [];
+  const errors = [...manifestInfo.errors];
+  for (const row of rows) {
+    const disposition = dispositions.includes(row?.disposition) ? row.disposition : "failed";
+    totals[disposition] += 1;
+    if (row?.family) {
+      byFamily[row.family] ||= { total: 0, dispositions: {} };
+      byFamily[row.family].total += 1;
+      byFamily[row.family].dispositions[disposition] = (byFamily[row.family].dispositions[disposition] || 0) + 1;
+    }
+    if (row?.mode) {
+      byMode[row.mode] ||= { total: 0, dispositions: {} };
+      byMode[row.mode].total += 1;
+      byMode[row.mode].dispositions[disposition] = (byMode[row.mode].dispositions[disposition] || 0) + 1;
+    }
+    if (disposition === "planned") missing.push(row.row_id);
+    if (["failed", "unsupported"].includes(disposition)) failing.push(row.row_id);
+    if (disposition === "stale") stale.push(row.row_id);
+    if (disposition === "unavailable") unavailable.push(row.row_id);
+    if (disposition === "owner-ratified-not-applicable") {
+      const exclusion = row.exclusion || {};
+      const ratified = Boolean(exclusion.reason && exclusion.owner && exclusion.decision);
+      exclusions.push({ row_id: row.row_id, ...exclusion, ratified });
+      if (!ratified) errors.push(`capability row has an invalid exclusion: ${row.row_id}`);
+    }
+    if (disposition !== "passed" && typeof row.owner_link !== "string") errors.push(`capability row has no owner link: ${row.row_id || "<unknown>"}`);
+  }
+  const normalizedErrors = sortedUnique(errors);
+  const gate = Boolean(
+    manifestInfo.readable
+      && !manifestInfo.stale
+      && rows.length > 0
+      && totals.planned === 0
+      && totals["implemented-unqualified"] === 0
+      && totals.failed === 0
+      && totals.stale === 0
+      && totals.unavailable === 0
+      && totals.unsupported === 0
+      && exclusions.every((row) => row.ratified),
+  );
+  return {
+    schema: relation?.schema || "jet.capability.relation.v1",
+    relation_digest: relation?.content_digest || null,
+    source_snapshot_hash: relation?.source_snapshot_hash || manifestInfo.source_snapshot_hash,
+    status: gate ? "GREEN" : "RED",
+    ok: gate,
+    totals: { total: rows.length, counted: rows.filter((row) => row?.counted === true).length, ...totals },
+    by_family: byFamily,
+    by_mode: byMode,
+    missing: missing.sort(),
+    failing: failing.sort(),
+    stale: stale.sort(),
+    unavailable: unavailable.sort(),
+    exclusions,
+    rows: rows.map((row) => ({
+      row_id: row.row_id,
+      capability_id: row.capability_id,
+      family: row.family,
+      mode: row.mode,
+      disposition: row.disposition,
+      owner_link: row.owner_link || null,
+      evidence: row.evidence || null,
+      candidate_identity: row.candidate_identity || null,
+    })),
     errors: normalizedErrors,
   };
 }
@@ -1517,6 +1670,7 @@ export function buildDashboard({
   evidenceRoot = null,
   cacheRoot = null,
   manifestPath = null,
+  candidatePath = null,
   targetRoot = "target",
   binaryPath = null,
   towerCli = null,
@@ -1533,6 +1687,12 @@ export function buildDashboard({
   const resolvedBinary = binaryPath ? resolve(resolvedRoot, binaryPath) : join(resolvedRoot, targetRoot, "debug", "jet");
   const targetInfo = targetIdentity({ root: resolvedRoot, binaryPath: resolvedBinary, target });
   const manifestInfo = loadManifest({ root: resolvedRoot, manifestPath });
+  const candidateInfo = loadCandidate({
+    root: resolvedRoot,
+    candidatePath,
+    target: targetInfo,
+    manifestInfo,
+  });
   const sessionInfo = loadFrozenSessionManifest({ evidenceRoot: resolvedEvidence });
   const evidence = loadEvidence({
     root: resolvedRoot,
@@ -1543,6 +1703,7 @@ export function buildDashboard({
     now,
   });
   const conformance = conformanceReport(manifestInfo);
+  const capabilities = capabilityReport(manifestInfo);
   const fuzz = fuzzReport(evidence, manifestInfo, targetInfo, sessionInfo.manifest, now);
   const redTeam = loadRedTeam({
     root: resolvedRoot,
@@ -1566,9 +1727,12 @@ export function buildDashboard({
       && !state?.blocked
       && lastCycleStatus !== "RED",
   );
+  const candidate = candidateReport(candidateInfo);
   const gates = {
     target: { status: targetGate ? "GREEN" : "RED", ok: targetGate, errors: sortedUnique(targetErrors) },
     conformance: { status: conformance.status, ok: conformance.ok, errors: conformance.errors },
+    capability_relation: { status: capabilities.status, ok: capabilities.ok, errors: capabilities.errors },
+    candidate: { status: candidate.status, ok: candidate.ok, errors: candidate.errors },
     fuzz: { status: fuzz.status, ok: fuzz.ok, errors: fuzz.errors },
     red_team: { status: redTeam.status, ok: redTeam.ok, errors: redTeam.errors },
     tower: { status: tower.status, ok: tower.ok, errors: tower.errors },
@@ -1604,7 +1768,9 @@ export function buildDashboard({
       errors: targetInfo.errors,
     },
     manifest,
+    candidate,
     conformance,
+    capabilities,
     fuzz,
     red_team: redTeam,
     tower,

@@ -28,6 +28,9 @@ fn jet_deadline_remaining_ms() -> Option<i64> {
 }
 
 mod jet_std {
+    pub use jet_foundation::DataTree::DataTree;
+    pub use jet_foundation::Outcome::{JetAbsent, JetOutcome};
+
     #[derive(Clone, Debug, PartialEq)]
     pub struct JSONError {
         pub line: i64,
@@ -46,9 +49,11 @@ mod jet_std {
         Object(std::collections::BTreeMap<String, JSON>),
     }
 
+    include!("Prelude/CoreLib/JetStd/EncodingTypes.rs");
     include!("Prelude/CoreLib/JetStd/JSONCodec.rs");
 }
 
+include!("../../jet-foundation/src/LiveLifecycle.rs");
 // WsClient registers one canonical live-query transport sink. Keep the
 // BrowserHost inclusion order identical to generated AOT: the transport
 // adapter sees the shared Prelude registry, not a browser-only duplicate.

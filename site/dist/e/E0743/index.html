@@ -37,22 +37,22 @@
 <p class="diag-copy fix" data-registry-field="fix">Declare an effect row on the trait method, such as `-[]&gt;` for pure dispatch, or move the dynamic call outside the bounded function.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0743</code>: <code>tests/ui/crypto_expert_nonce_trait_dispatch_precedence.stderr</code>.</p>
-<pre class="diag">Error [E2402]: `?` can&#39;t convert `CryptoError` into `Err` — no declared conversion exists
+<pre class="diag">Error [E2402]: This implicit fallible call can&#39;t convert `CryptoError` into `Err` — no declared conversion exists
   --&gt; tests/ui/crypto_expert_nonce_trait_dispatch_precedence.jet:10:21
     |
  10 |         _ :: expert.xchacha20poly1305_seal([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0], [], [])
     |                     ^^^^^^^^^^^^^^^^^^^^^^
- Why: `?` uses the declared conversion rail; `CryptoError` can reach `Err` only through `impl CryptoError -&gt; Err`
- Fix: add `impl CryptoError -&gt; Err { … }` before this function, or change the return type
+ Why: Ordinary fallible calls propagate automatically; `CryptoError` can reach `Err` only through `impl CryptoError -&gt; Err`
+ Fix: Handle this call locally with `??`, add `impl CryptoError -&gt; Err { … }`, or change the return type
 More: jet-lang.dev/e/E2402
 
-Error [E0743]: dynamic call `Shape::area` has no effect bound
+Error [E0743]: Dynamic call `Shape::area` has no effect bound
   --&gt; tests/ui/crypto_expert_nonce_trait_dispatch_precedence.jet:12:18
     |
  12 |     return shape.area()
     |                  ^^^^
- Why: a trait value can select any implementation at runtime, so an enclosing effect ceiling needs the trait method&#39;s declared upper bound
- Fix: declare an effect row on `Shape::area`, such as `-[]&gt;` for pure dispatch, or move this dynamic call outside the bounded function
+ Why: A trait value can select any implementation at runtime, so an enclosing effect ceiling needs the trait method&#39;s declared upper bound
+ Fix: Declare an effect row on `Shape::area`, such as `-[]&gt;` for pure dispatch, or move this dynamic call outside the bounded function
 More: jet-lang.dev/e/E0743
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

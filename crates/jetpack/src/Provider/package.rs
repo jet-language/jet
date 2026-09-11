@@ -318,7 +318,8 @@ pub(super) fn canonical_package_kind(
         | PackageOutputKind::Image
         | PackageOutputKind::Bundle
         | PackageOutputKind::System
-        | PackageOutputKind::Fleet => None,
+        | PackageOutputKind::Fleet
+        | PackageOutputKind::Model => None,
     }
 }
 

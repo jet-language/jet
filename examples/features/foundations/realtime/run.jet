@@ -1,0 +1,71 @@
+// Foundation real-time example: a canonical callback fake plus a 1 kHz
+// control loop. Receipt values are host observations, not hard WCET claims.
+use core.rt as rt
+use core.time as time
+
+struct ControlStats {
+    ticks: Int
+    missed: Int
+    min_jitter_us: Int
+    max_jitter_us: Int
+    sum_jitter_us: Int
+}
+
+fn control_loop() ControlStats -> {
+    started :: time.instant()
+    next_due := started + 1ms
+    ticks := 0
+    missed := 0
+    min_jitter := 0
+    max_jitter := 0
+    sum_jitter := 0
+
+    // Absolute deadlines avoid accumulating sleep drift. A miss is a host
+    // observation (the loop began after its due time), not a hard deadline.
+    loop ticks < 10000 {
+        time.sleep_until(next_due)
+        due_us :: (ticks + 1) * 1000
+        observed_us :: started.elapsed().in(.Microseconds)
+        jitter :: observed_us - due_us
+        if ticks == 0 {
+            min_jitter = jitter
+            max_jitter = jitter
+        } else {
+            if jitter < min_jitter -> min_jitter = jitter
+            if jitter > max_jitter -> max_jitter = jitter
+        }
+        sum_jitter += jitter
+        if jitter > 0 -> missed += 1
+        ticks += 1
+        next_due = next_due + 1ms
+    }
+
+    return ControlStats{
+        ticks: ticks,
+        missed: missed,
+        min_jitter_us: min_jitter,
+        max_jitter_us: max_jitter,
+        sum_jitter_us: sum_jitter
+    }
+}
+
+fn run() {
+    // `core.rt` owns scheduling, the reusable 256-sample block, and stream
+    // cancellation. The callback does bounded work only: one pass over its
+    // fixed-size input, with no allocation, wait, or I/O.
+    stream := rt.callback(48000, 256, samples -> {
+        total := 0.0
+        loop sample in samples -> total += sample
+    })
+    stream.next_deadline()
+
+    control :: control_loop()
+    stream.cancel()
+    receipt :: stream.receipt()
+
+    // These are measured host facts from the callback receipt. They do not
+    // certify hardware scheduling, audio-device delivery, or a hard WCET.
+    print("audio_callback=cancelled rate:{receipt.requested_rate_hz} frames:{receipt.requested_frames} callbacks:{receipt.completed_callbacks} completed_frames:{receipt.completed_frames} missed:{receipt.missed} max_lateness_ns:{receipt.max_lateness_ns}")
+    print("control_loop=1kHz ticks:{control.ticks} missed:{control.missed} jitter_us=min:{control.min_jitter_us},max:{control.max_jitter_us},sum:{control.sum_jitter_us}")
+    print("receipt cancelled:{stream.is_cancelled()} joined:{receipt.end_identity > 0}")
+}

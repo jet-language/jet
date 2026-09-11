@@ -1,0 +1,15 @@
+use core.testing as testing
+use core.time as time
+
+fn work() {
+    time.sleep(40ms) ?? return
+}
+
+fn run() {
+    testing.world(world -> {
+        slow :: task work() ?? return
+        world.advance(40ms)
+        slow.join() ?? return
+    })
+    print("done")
+}

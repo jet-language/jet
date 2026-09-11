@@ -17,7 +17,7 @@ pub struct CompileOutput {
     /// Written to `.jet/lock` by the build driver for reproducibility.
     pub comptime_inputs: Vec<Lock::ComptimeInput>,
     /// D-WEBBACKEND1 (c123 M2): web target artifacts when `--target=web`.
-    pub web: Option<crate::Codegen::WebArtifacts>,
+    pub web: Option<crate::Codegen::MIRWeb::WebArtifacts>,
     /// D-WASM1: partition report when `--target=web`.
     pub web_partition_report: Option<String>,
     /// D-PLUGIN1=B / D-DEP-WASM1=A (c81): plugin guest artifacts when

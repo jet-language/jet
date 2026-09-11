@@ -56,14 +56,14 @@ fn run() {
         "#Root fixture diagnostics: {diagnostics:#?}"
     );
     assert!(
-        jet_jit::tir_lowers_bundle(&bundle),
-        "#Root fixture must lower to TIR: {}",
-        jet_jit::tir_lower_fail_reason(&bundle)
+        common::cranelift_lowers(&bundle),
+        "#Root fixture must lower to canonical Cranelift MIR: {}",
+        common::cranelift_lower_error(&bundle)
     );
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "#Root fixture must be resident-safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
 
     let outcome = dev_iteration(file.to_str().unwrap(), false, false);
@@ -109,11 +109,11 @@ fn named_args_example_runs_on_resident_jit_and_forced_interpreter_inner() {
         "named_args example must type-check: {diagnostics:#?}"
     );
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "named_args example must be resident-safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle)
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
         .unwrap_or_else(|error| panic!("named_args example must compile in resident JIT: {error}"));
 
     let aot = run_jet(&file, true);
@@ -184,14 +184,14 @@ fn bounded_workers_example_has_total_tir() {
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
     assert!(
-        jet_jit::tir_lowers_bundle(&bundle),
+        common::cranelift_lowers(&bundle),
         "{}",
-        jet_jit::tir_lower_fail_reason(&bundle)
+        common::cranelift_lower_error(&bundle)
     );
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "{}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
 }
 
@@ -270,8 +270,9 @@ fn run() {
         "unsupported callback ABI must not enter native JIT code"
     );
 
-    let error = jet_jit::try_compile_bundle(&bundle)
-        .expect_err("JIT must reject five callback ABI arguments before native code");
+    let error =
+        common::compile_cranelift_bundle(&bundle, &common::development_policy())
+            .expect_err("JIT must reject five callback ABI arguments before native code");
     assert!(
         error.contains("callback ABI argument count 5 > 4"),
         "JIT rejected the callback for the wrong reason: {error}"
@@ -304,10 +305,10 @@ fn run() {}
         diagnostics.is_empty(),
         "HTTP lifetime fixture diagnostics: {diagnostics:#?}"
     );
-    let program = jet::Codegen::TIR::lower_jit_program(&bundle)
-        .expect("HTTP lifetime fixture should lower to JIT TIR");
+    let (program, artifact) =
+        common::lower_cranelift_bundle(&bundle).expect("HTTP lifetime fixture should lower to MIR");
     jet_jit::CraneliftBackend::new()
-        .http_worker_runtime_lifetime_proof_for_test(&program, "handler")
+        .http_worker_runtime_lifetime_proof_for_test(&program, artifact, "handler")
         .expect("resident HTTP lifetime proof");
     let _ = fs::remove_dir_all(&dir);
 }
@@ -888,7 +889,7 @@ fn run() {
             .any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error)),
         "prompt fixture must check: {diags:?}"
     );
-    let plan = jet_jit::plan_bundle_tiers(&bundle);
+    let plan = common::cranelift_tier_plan(&bundle);
     assert!(!plan.whole_interp, "regression needs named deopt: {plan:?}");
     assert!(
         plan.deopt.iter().any(|(name, _)| name == "prompt_gap"),
@@ -1216,7 +1217,7 @@ fn run() {{
 /// No output-only check can see it: the compile failure makes default
 /// `jet run` interpret the whole program, and the interpreter prints the right
 /// answer. So this proves three things together — the resident tier COMPILES
-/// the bundle (the verifier runs inside `try_compile_bundle`), it EXECUTES
+/// the bundle (the verifier runs inside `compile_cranelift_bundle`), it EXECUTES
 /// native code with no deopt and no fallback, and AOT, default `jet run`, and
 /// the forced interpreter all produce the same bytes.
 #[test]
@@ -1250,11 +1251,11 @@ fn iter_adapter_latches_emit_dominating_clif() {
         "adapter fixture must type-check: {diagnostics:#?}"
     );
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "adapter fixture must stay resident-JIT safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle).unwrap_or_else(|error| {
+    common::compile_cranelift_bundle(&bundle, &common::development_policy()).unwrap_or_else(|error| {
         panic!("adapter fixture must compile in the resident JIT: {error}")
     });
 
@@ -1377,11 +1378,11 @@ fn optional_builtins_agree_on_one_option_carrier_across_tiers() {
         "fixture must type-check: {diagnostics:#?}"
     );
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "fixture must stay resident-JIT safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle)
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
         .unwrap_or_else(|error| panic!("fixture must compile in the resident JIT: {error}"));
 
     let aot = run_jet(&file, true);
@@ -1475,16 +1476,16 @@ fn map_has_key_runs_resident_for_supported_key_shapes() {
         "fixture must type-check: {diagnostics:#?}"
     );
     assert!(
-        jet_jit::tir_lowers_bundle(&bundle),
+        common::cranelift_lowers(&bundle),
         "fixture must lower to TIR: {}",
-        jet_jit::tir_lower_fail_reason(&bundle)
+        common::cranelift_lower_error(&bundle)
     );
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "fixture must stay resident-JIT safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle)
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
         .unwrap_or_else(|error| panic!("fixture must compile in resident JIT: {error}"));
 
     let aot = run_jet(&file, true);
@@ -1552,11 +1553,11 @@ fn string_is_empty_runs_resident() {
         "fixture must type-check: {diagnostics:#?}"
     );
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "fixture must stay resident-JIT safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle)
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
         .unwrap_or_else(|error| panic!("fixture must compile in resident JIT: {error}"));
 
     let aot = run_jet(&file, true);
@@ -1627,18 +1628,19 @@ fn run() {
         "float predicate fixture must type-check: {diagnostics:#?}"
     );
     assert!(
-        jet_jit::tir_lowers_bundle(&bundle),
+        common::cranelift_lowers(&bundle),
         "float predicate fixture must lower to TIR: {}",
-        jet_jit::tir_lower_fail_reason(&bundle)
+        common::cranelift_lower_error(&bundle)
     );
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "float predicate fixture must stay resident-safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle).unwrap_or_else(|error| {
-        panic!("float predicate fixture must compile in resident JIT: {error}")
-    });
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
+        .unwrap_or_else(|error| {
+            panic!("float predicate fixture must compile in resident JIT: {error}")
+        });
 
     let aot = run_jet(&file, true);
     assert_eq!(aot.status.code(), Some(0), "AOT float predicate fixture failed");
@@ -1734,13 +1736,14 @@ fn run() {
         "DataTree extend fixture must type-check: {diagnostics:#?}"
     );
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "DataTree extend fixture must stay resident-JIT safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle).unwrap_or_else(|error| {
-        panic!("DataTree extend fixture must compile in resident JIT: {error}")
-    });
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
+        .unwrap_or_else(|error| {
+            panic!("DataTree extend fixture must compile in resident JIT: {error}")
+        });
 
     let expected = "a\nb\nc\nd\na\nb\nc\nd\na\nb\nc\nd\n";
     let aot = run_jet(&file, true);
@@ -1810,11 +1813,11 @@ fn run() {
         "DataTree fixture must type-check: {diagnostics:#?}"
     );
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "DataTree fixture must stay resident-JIT safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle)
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
         .unwrap_or_else(|error| panic!("DataTree fixture must compile in resident JIT: {error}"));
 
     let aot = run_jet(&file, true);
@@ -1883,20 +1886,20 @@ fn run() {
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "flatten fixture diagnostics: {diagnostics:#?}");
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "flatten fixture must stay resident-safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
-    let plan = jet_jit::plan_bundle_tiers(&bundle);
+    let plan = common::cranelift_tier_plan(&bundle);
     assert!(
         !plan.whole_interp,
         "flatten fixture must select the resident tier: deopt={:?}, gap={:?}",
         plan.deopt,
         plan.gap
     );
-    jet_jit::try_compile_bundle(&bundle)
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
         .unwrap_or_else(|error| panic!("flatten fixture must compile in resident JIT: {error}"));
-    let outcome = jet_jit::run_resident_strict_for_test(&bundle)
+    let outcome = common::cranelift_strict_run(&bundle, &common::development_policy())
         .unwrap_or_else(|error| panic!("flatten fixture must execute strictly resident: {error}"));
     let RunOutcome::Ran {
         stdout,
@@ -1945,14 +1948,14 @@ fn result_err_try_sort_by_runs_resident_and_matches_interpreter() {
         diagnostics.is_empty(),
         "Result<Int, Err> fixture must type-check: {diagnostics:#?}"
     );
-    let plan = jet_jit::plan_bundle_tiers(&bundle);
+    let plan = common::cranelift_tier_plan(&bundle);
     assert!(
         plan.native.contains("run") && !plan.whole_interp,
         "Result<Int, Err> fixture must select resident `run`: {plan:?}"
     );
     assert!(
         matches!(
-            jet_jit::resident_jit_func_safety_detail(&bundle, "run"),
+            common::cranelift_func_safety(&bundle, "run"),
             jet_jit::ResidentJitSafety::Covered
         ),
         "Result<Int, Err> `run` must be resident-safe"
@@ -2026,11 +2029,11 @@ fn run() {
         "DataTree sort fixture must type-check: {diagnostics:#?}"
     );
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "DataTree sort fixture must stay resident-JIT safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle)
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
         .unwrap_or_else(|error| panic!("DataTree sort fixture must compile in resident JIT: {error}"));
 
     jet_jit::reset_jit_trace_for_test();
@@ -2083,9 +2086,10 @@ fn run() {
         diagnostics.is_empty(),
         "try payload fixture must type-check: {diagnostics:#?}"
     );
-    jet_jit::try_compile_bundle(&bundle).unwrap_or_else(|error| {
-        panic!("try payload fixture must compile in resident JIT: {error}")
-    });
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
+        .unwrap_or_else(|error| {
+            panic!("try payload fixture must compile in resident JIT: {error}")
+        });
 
     jet_jit::reset_jit_trace_for_test();
     let resident = match dev_iteration(&shown, false, false) {
@@ -2146,18 +2150,19 @@ fn run() {
         "HTTP response fixture must type-check: {diagnostics:#?}"
     );
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "HTTP response fixture must stay resident-safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
-    let plan = jet_jit::plan_bundle_tiers(&bundle);
+    let plan = common::cranelift_tier_plan(&bundle);
     assert!(
         plan.native.contains("run") && !plan.whole_interp,
         "HTTP response fixture must select resident run: {plan:?}"
     );
-    jet_jit::try_compile_bundle(&bundle).unwrap_or_else(|error| {
-        panic!("HTTP response fixture must compile in resident JIT: {error}")
-    });
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
+        .unwrap_or_else(|error| {
+            panic!("HTTP response fixture must compile in resident JIT: {error}")
+        });
 
     let aot = run_jet(&file, true);
     assert_eq!(
@@ -2243,15 +2248,15 @@ fn tower_data_tree_helpers_select_resident_tier() {
         "Tower run should type-check: {diagnostics:#?}"
     );
 
-    jet_jit::try_compile_bundle(&bundle)
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
         .unwrap_or_else(|error| panic!("Tower run must compile in resident JIT: {error}"));
-    let plan = jet_jit::plan_bundle_tiers(&bundle);
+    let plan = common::cranelift_tier_plan(&bundle);
     // Resident HTTP, filesystem, and hashing adapters remove the old Tower gaps.
     for name in ["stream_response", "verify_file_hash"] {
         assert!(
             plan.rows
                 .iter()
-                .find(|row| row.function == name)
+                .find(|row| row.function_name == name)
                 .is_some_and(|row| matches!(row.tier, jet_jit::Tier::Native)),
             "Tower helper `{name}` must run in resident JIT: rows={:?}",
             plan.rows
@@ -2303,23 +2308,14 @@ fn lowering_failure_is_not_resident_covered() {
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
     let _ = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check);
     assert!(
-        !jet_jit::tir_lowers_bundle(&bundle),
+        !common::cranelift_lowers(&bundle),
         "a file with no run must not lower a JIT program"
     );
-    match jet_jit::resident_jit_func_safety_detail(&bundle, "run") {
-        jet_jit::ResidentJitSafety::Covered => {
-            panic!("lowering-produced-nothing must not answer Covered")
-        }
-        jet_jit::ResidentJitSafety::Unavailable(reason) => {
-            assert!(
-                !reason.is_empty(),
-                "Unavailable must name the lowering failure"
-            );
-        }
-        jet_jit::ResidentJitSafety::Gap(detail) => {
-            panic!("expected Unavailable, got Gap({detail})")
-        }
-    }
+    let reason = common::cranelift_lower_error(&bundle);
+    assert!(
+        !reason.is_empty() && reason != "canonical Cranelift MIR lowering succeeded",
+        "lowering failure must carry a diagnostic reason"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -2355,11 +2351,11 @@ fn jit_list_mutations_preserve_dense_arena_values() {
         "dense list fixture must type-check: {diagnostics:#?}"
     );
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "dense list fixture must stay resident-JIT safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle)
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
         .unwrap_or_else(|error| panic!("dense list fixture must compile in resident JIT: {error}"));
 
     let expected = "10\n30\n99\n20\n";
@@ -2402,16 +2398,16 @@ fn nbody_entry_runs_on_resident_jit_without_deopt() {
         "nbody entry must type-check: {diagnostics:#?}"
     );
     assert!(
-        jet_jit::tir_lowers_bundle(&bundle),
+        common::cranelift_lowers(&bundle),
         "nbody entry must lower to TIR: {}",
-        jet_jit::tir_lower_fail_reason(&bundle)
+        common::cranelift_lower_error(&bundle)
     );
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "nbody entry must stay resident-JIT safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle)
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
         .unwrap_or_else(|error| panic!("nbody entry must compile in resident JIT: {error}"));
 
     let run = |use_interpreter| {
@@ -2464,22 +2460,22 @@ fn nbody_entry_runs_on_resident_jit_without_deopt() {
 
 
 #[test]
-fn data_csv_group_mean_keeps_bare_list_handle_resident() {
+fn data_csv_query_mean_keeps_bare_list_handle_resident() {
     if skip_if_cranelift_host_unsupported() {
         return;
     }
-    let scratch = common::Scratch::new("jit_data_csv_group_mean");
+    let scratch = common::Scratch::new("jit_data_csv_query_mean");
     let package = scratch.join("package.jet");
     fs::write(
         &package,
-        r#"name: "jit_data_csv_group_mean"
+        r#"name: "jit_data_csv_query_mean"
 version: "0.1.0"
 edition: "2026"
 authority: { holds: { allow: [GPU, IO, Mem.Alloc] } }
 "#,
     )
     .unwrap();
-    let file = scratch.join("data_csv_group_mean.jet");
+    let file = scratch.join("data_csv_query_mean.jet");
     fs::write(
         &file,
         r###"use core.data as data
@@ -2492,9 +2488,12 @@ struct Sample {
 
 fn run() {
     rows :: data.csv<Sample>("station,amplitude\nSTA,1.0\nSTA,3.0\nSTB,2.0") ?? panic("csv")
-    groups :: data.group_mean(rows, s -> s.station, s -> s.amplitude)
+    groups :: data.query(rows)
+        .group_by(s -> s.station)
+        .mean(s -> s.amplitude)
+        .collect() ?? panic("group mean")
     print("rows:{data.count(rows)}")
-    loop group in groups -> print("group:{group.key}:{group.mean}")
+    loop group in groups -> print("group:{group.key}:{group.value}")
     options :: DataLineOptions{
         title: "waveform",
         x_label: "station",
@@ -2518,11 +2517,11 @@ fn run() {
         "CSV group fixture must type-check: {diagnostics:#?}"
     );
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "CSV group fixture must stay resident-safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle)
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
         .unwrap_or_else(|error| panic!("CSV group fixture must compile in resident JIT: {error}"));
 
     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
@@ -2545,5 +2544,229 @@ fn run() {
     assert!(
         !stderr.contains("internal compiler error") && !stderr.contains("bad handle"),
         "CSV group fixture reported a JIT handle failure: {stderr:?}"
+    );
+}
+/// Run one source fixture through AOT, the default resident JIT, and the
+/// explicitly forced interpreter. The resident assertions are deliberately
+/// observable: a semantic result that only works after boxing, a lowering
+/// failure, or a silent deopt cannot pass as native coverage.
+fn assert_typed_fast_path_fixture(name: &str, source: &str, expected: &str) {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp(name);
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join(format!("{name}.jet"));
+    fs::write(&file, source).unwrap();
+    let shown = file.to_string_lossy().into_owned();
+
+    let mut bundle = jet::Loader::load_entry(&shown)
+        .unwrap_or_else(|error| panic!("{name} fixture should load: {error:?}"));
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| !matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)),
+        "{name} fixture must type-check: {diagnostics:#?}"
+    );
+    assert!(
+        common::cranelift_lowers(&bundle),
+        "{name} fixture must lower to TIR: {}",
+        common::cranelift_lower_error(&bundle)
+    );
+    assert!(
+        common::cranelift_resident_safe(&bundle),
+        "{name} fixture must stay resident-safe: {}",
+        common::cranelift_resident_safe_detail(&bundle)
+    );
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
+        .unwrap_or_else(|error| panic!("{name} fixture must compile in resident JIT: {error}"));
+
+    let aot = run_jet(&file, true);
+    assert_eq!(
+        aot.status.code(),
+        Some(0),
+        "{name} AOT fixture failed: {}",
+        String::from_utf8_lossy(&aot.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&aot.stdout),
+        expected,
+        "{name} AOT observable drifted"
+    );
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => {
+            panic!("{name} default resident JIT rejected fixture: {diags:?}")
+        }
+    };
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "{name} fixture must execute native resident JIT code"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "{name} fixture must not deopt or fall back"
+    );
+
+    jet_jit::reset_jit_trace_for_test();
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => (stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("{name} forced interpreter rejected fixture: {diags:?}"),
+    };
+    assert!(
+        !jet_jit::jit_executed_for_test(),
+        "{name} forced interpreter must not execute resident JIT code"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "{name} forced interpreter must enter directly, not through deopt or fallback"
+    );
+
+    let reference = (expected.to_owned(), String::new(), 0);
+    assert_eq!(resident, reference, "{name} resident JIT observable drifted");
+    assert_eq!(interpreted, reference, "{name} interpreter observable drifted");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// Card #2863: default Int arithmetic stays exact. In-range operations use
+/// the native carrier, while overflow takes the canonical promoting rail; the
+/// checked and saturating Core helpers retain their own published semantics.
+#[test]
+fn jit_typed_int_arithmetic_preserves_checked_promotion() {
+    let source = r#"use core.math as math
+
+fn add_one(value: Int) Int -> {
+    return value + 1
+}
+
+fn subtract_one(value: Int) Int -> {
+    return value - 1
+}
+
+fn multiply_two(value: Int) Int -> {
+    return value * 2
+}
+
+fn run() {
+    print(add_one(41))
+    print(add_one(Int.MAX))
+    print(subtract_one(Int.MIN))
+    print(multiply_two(Int.MAX))
+    print(math.checked_add(Int.MAX, 1) ?? -1)
+    print(math.saturating_add(Int.MAX, 1))
+}
+"#;
+    assert_typed_fast_path_fixture(
+        "jit_typed_int_arithmetic",
+        source,
+        "42\n9223372036854775808\n-9223372036854775809\n18446744073709551614\n-1\n9223372036854775807\n",
+    );
+}
+
+/// Card #2863: Float arithmetic and comparisons use their native f64 values,
+/// while sqrt remains the shared Core math operation.
+#[test]
+fn jit_typed_float_operations_and_comparisons_stay_native() {
+    let source = r#"use core.math as math
+
+fn transform(value: Float) Float -> {
+    return ((value + 1.5) * 2.0 - 1.0) / 2.0
+}
+
+fn run() {
+    value :: transform(3.0)
+    print(value)
+    print(value == 3.5)
+    print(value != 4.0)
+    print(value < 4.0)
+    print(value > 3.0)
+    print(value <= 3.5)
+    print(value >= 3.5)
+    print(math.sqrt(16.0))
+}
+"#;
+    assert_typed_fast_path_fixture(
+        "jit_typed_float_operations",
+        source,
+        "3.5\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n4.0\n",
+    );
+}
+
+/// Card #2863: locals updated across a loop retain their typed scalar values
+/// for the whole loop, rather than crossing the boxed host boundary each turn.
+#[test]
+fn jit_loop_carried_scalars_preserve_exact_values() {
+    let source = r#"fn run() {
+    score := 3
+    weight := 0.5
+    loop index in 0..<4 {
+        score = score * 2 + index
+        weight = weight + 0.25
+    }
+    print(score)
+    print(weight)
+}
+"#;
+    assert_typed_fast_path_fixture("jit_loop_carried_scalars", source, "59\n1.5\n");
+}
+
+/// Card #2863: typed byte and integer lists use indexed read/write semantics
+/// and byte iteration without changing the values at the observable boundary.
+#[test]
+fn jit_typed_list_indexing_and_byte_iteration_preserve_values() {
+    let source = r#"fn run() {
+    bytes := [U8]{1, 2, 3, 4}
+    bytes[1] = 9
+    byte_sum := 0
+    loop byte in bytes {
+        byte_sum = byte_sum + Int.from_u8(byte)
+    }
+    print(bytes[0])
+    print(bytes[1])
+    print(byte_sum)
+
+    values := [Int]{10, 20, 30}
+    values[1] = values[0] + values[2]
+    print(values[1])
+    print(values[0] + values[1] + values[2])
+}
+"#;
+    assert_typed_fast_path_fixture(
+        "jit_typed_list_indexing",
+        source,
+        "1\n9\n17\n40\n80\n",
+    );
+}
+
+/// Card #2863: fixed-width Reader.take_pattern keeps the shared bit-field
+/// matcher and advances the reader exactly once for the matched frame.
+#[test]
+fn jit_reader_fixed_width_take_pattern_preserves_fields_and_position() {
+    let source = r#"fn run() {
+    packet :: [U8]{0x45, 0x00, 0x00, 0x28, 0xDE, 0xAD, 0xBE, 0xEF}
+    reader :: Reader.over(packet)
+    parsed :: reader.take_pattern([U8]{"{version:U4}{ihl:U4}{tos:U8}{len:U16be}"}) ?? panic("bad header")
+    print(parsed.version)
+    print(parsed.ihl)
+    print(parsed.tos)
+    print(parsed.len)
+    print(reader.remaining())
+}
+"#;
+    assert_typed_fast_path_fixture(
+        "jit_reader_fixed_width_take_pattern",
+        source,
+        "4\n5\n0\n40\n4\n",
     );
 }

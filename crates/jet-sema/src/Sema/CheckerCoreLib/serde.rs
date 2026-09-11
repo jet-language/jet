@@ -1,8 +1,7 @@
 use super::core_types::is_json_type_name;
 use super::serde_diags::{apply_serde_ok, e2411};
-use crate::Diagnostics::Span;
+use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Checker;
-use crate::Traits::sized_int_has_datatree_form;
 use crate::AST::Type;
 impl<'a> Checker<'a> {
     fn serde_trait_impl(&self, name: &str, trait_name: &str) -> bool {
@@ -72,10 +71,7 @@ impl<'a> Checker<'a> {
             | Type::Char
             | Type::Float32
             | Type::InlineRange { .. } => true,
-            // Codable's shared DataTree Int is i64. Admitting U64 here
-            // would let sema promise a round trip that no codec lens can
-            // preserve for values above i64::MAX.
-            Type::IntN { .. } => sized_int_has_datatree_form(t),
+            Type::IntN { .. } => true,
             Type::List(e) | Type::Option(e) | Type::Shared(e) => self.is_encodable(e),
             Type::FixedList { elem, .. } => self.is_encodable(elem),
             Type::Map { key, value, .. } => {
@@ -120,7 +116,7 @@ impl<'a> Checker<'a> {
             | Type::Char
             | Type::Float32
             | Type::InlineRange { .. } => true,
-            Type::IntN { .. } => sized_int_has_datatree_form(t),
+            Type::IntN { .. } => true,
             Type::List(e) | Type::Option(e) | Type::Shared(e) => self.is_decodable(e),
             Type::FixedList { elem, .. } => self.is_decodable(elem),
             Type::Map { key, value, .. } => {
@@ -173,6 +169,22 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_decodable(&mut self, t: &Type, span: Span) {
         if !self.is_decodable(t) {
             self.diags.push(e2411(&t, false, span));
+        }
+    }
+
+    /// D-SHAPE-PROJECT1=A: `args.decode<T>()` and `T.merge` need the `#CLI`
+    /// derive, because the builder rows come from that shape and nothing else.
+    pub(crate) fn check_cli_shape(&mut self, t: &Type, span: Span) {
+        let is_cli = matches!(t, Type::Named(name)
+            if self.trait_reg.implements_trait(name, crate::Syntax::MARKER_CLI));
+        if !is_cli {
+            self.diags.push(Diagnostic::error(
+                "E1308",
+                format!("`{}` is not a `#CLI` struct", t.show()),
+                "argument decoding derives its builder rows from the `#CLI` shape, the same rows `fn run(args: T)` uses".to_string(),
+                "mark the struct `#CLI`, or decode it from another format".to_string(),
+                Some(span),
+            ));
         }
     }
 }

@@ -1,8 +1,9 @@
-// D-REPRC1 (ratified; D-REPRC1 = B): `#Layout(c)` — C-compatible struct layout.
-// Uses C-compatible generated layout so the Jet struct can be
-// passed directly to C FFI. Field order is preserved as written.
-// Fixed-size arrays `[T#N]` are allowed; growable `[T]` / Map / String are rejected (E1104).
-#Layout(c) struct Vec3 {
+// D-REPRC1 / D-PLACE1=A (ratified): `#Layout(c, align(64))` — C-compatible
+// struct layout with an explicit portable alignment. Field order is preserved
+// as written and the trailing size/stride is padded to the effective
+// alignment. Fixed-size arrays `[T#N]` are allowed; growable `[T]` / Map /
+// String are rejected (E1104).
+#Layout(c, align(64)) struct Vec3 {
     x: Float
     y: Float
     z: Float

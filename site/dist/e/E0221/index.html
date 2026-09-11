@@ -34,13 +34,13 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">Strong `Shared` handles keep each other alive; a cycle through them never frees.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">use `Shared.Weak&lt;T&gt;` for intentional back-edges, or store an id instead of a strong handle.</p>
+<p class="diag-copy fix" data-registry-field="fix">Use `Shared.Weak&lt;T&gt;` for intentional back-edges, or store an id instead of a strong handle.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0221</code>: <code>tests/ui/shared_strong_cycle.stderr</code>.</p>
 <pre class="diag">Error [E0221]: field `next` on `Node` can form a strong `Shared` cycle
   --&gt; tests/ui/shared_strong_cycle.jet:3:5
     |
-  3 |     next: Shared&lt;Node&gt;?
+  3 |     next: ?Shared&lt;Node&gt;
     |     ^^^^
  Why: a strong `Shared` edge through `Node` can point back at `Node`, so reference counting alone cannot free the graph
  Fix: use `Shared.Weak&lt;T&gt;` for intentional back-edges, or store an id instead of a strong `Shared` handle

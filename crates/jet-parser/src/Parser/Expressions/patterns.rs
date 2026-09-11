@@ -206,6 +206,7 @@ impl<'a> Parser<'a> {
         let mut sub = Parser {
             toks: &toks,
             source: None,
+            explicit_semicolon_reported: false,
             pos: 0,
             diags: Vec::new(),
             pending_type_gt: false,
@@ -263,8 +264,11 @@ impl<'a> Parser<'a> {
         if let Some(expr) = self.try_typed_pattern_literal_expr()? {
             return Ok(expr);
         }
-        let TokKind::Str(parts) = self.peek().kind.clone() else {
-            return Err(Diagnostic::error(
+        let parts = match self.peek().kind.clone() {
+            TokKind::Str(parts) => parts,
+            TokKind::RawStr(text) => vec![StrTokPart::Lit(text)],
+            _ => {
+                return Err(Diagnostic::error(
                     "E0003",
                     format!(
                         "`{}` takes a literal pattern string, not {}",
@@ -273,15 +277,15 @@ impl<'a> Parser<'a> {
                     ),
                     "the pattern is matched at compile time, so it must be written directly as a string literal"
                         .to_string(),
-                        format!(
-                        "write `{}(\"literal-{{hole}}-pattern\")` or `{}([U8]{{\"…\"}})` for bytes",
+                    format!(
+                        "write `{}(\"literal-{{hole}}-pattern\")` or {}([U8]{{\"…\"}}) for bytes",
                         Syntax::METHOD_TAKE_PATTERN,
                         Syntax::METHOD_TAKE_PATTERN
                     ),
                     Some(self.peek().span),
                 ));
+            }
         };
-        Self::reject_bad_take_pattern_holes(&parts, self.peek().span)?;
         let span = self.bump().span;
         let match_parts = self.build_str_match_parts(parts)?;
         Ok(Expr::StrMatchLit(match_parts, span))
@@ -480,11 +484,15 @@ impl<'a> Parser<'a> {
             self.diags.truncate(save_diags);
             return Ok(None);
         }
-        self.bump(); // `{`
-        let TokKind::Str(parts) = self.peek().kind.clone() else {
-            self.pos = save;
-            self.diags.truncate(save_diags);
-            return Ok(None);
+        self.bump(); // opening brace
+        let parts = match self.peek().kind.clone() {
+            TokKind::Str(parts) => parts,
+            TokKind::RawStr(text) => vec![StrTokPart::Lit(text)],
+            _ => {
+                self.pos = save;
+                self.diags.truncate(save_diags);
+                return Ok(None);
+            }
         };
         self.bump(); // string
         if !matches!(self.peek().kind, TokKind::RBrace) {

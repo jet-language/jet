@@ -651,11 +651,15 @@ impl<'a> Parser<'a> {
 
     fn unit_family_plain_string(&mut self, expected: &str) -> Result<String, Diagnostic> {
         let token = self.bump();
-        let TokKind::Str(parts) = token.kind else {
-            return Err(unit_scale_error(
-                format!("expected a plain string {expected}"),
-                token.span,
-            ));
+        let parts = match token.kind {
+            TokKind::Str(parts) => parts,
+            TokKind::RawStr(text) => vec![StrTokPart::Lit(text)],
+            _ => {
+                return Err(unit_scale_error(
+                    format!("expected a plain string {expected}"),
+                    token.span,
+                ));
+            }
         };
         if parts.len() != 1 {
             return Err(unit_scale_error(
@@ -713,10 +717,13 @@ impl<'a> Parser<'a> {
         matches!(&self.peek3().kind, TokKind::LParen)
     }
 
-    /// D-REPRC1 / D-SOA1: parse `#Layout(variant) [pub] struct Name { … }`.
+    /// D-REPRC1 / D-SOA1 / D-PLACE1 / D-LAYOUT-ALIGN1: parse
+    /// `#Layout(variant[, align(N)]) [pub] struct Name { … }`.
+    /// `align(target, N)` is the explicit target-supported expert form;
+    /// sema owns the profile limit and target facts.
     /// `c` (C-compatible) and `columnar` (struct-of-arrays) are supported;
-    /// `packed`, `align` parse-and-error; the partial form `columnar: f, g`
-    /// (D-SOA2B) is rejected (deferred post-v1).
+    /// `packed` and the first-argument `align` spelling remain reserved.
+    /// Enums retain the legacy second bare identifier for their C tag width.
     pub(super) fn layout_type_def(
         &mut self,
         outer_is_pub: bool,
@@ -732,35 +739,107 @@ impl<'a> Parser<'a> {
         let variant = variant.clone();
         let variant_span = *variant_span;
         let mut tag_width = None;
+        let mut alignment = None;
+        let mut alignment_span = None;
+        let mut alignment_target = false;
+        let mut has_alignment = false;
         if let Some(value) = arguments.parameter(1) {
-            let crate::AST::Expr::Ident(width, width_span) = value else {
-                return Err(crate::Policy::marker_argument_shape_error(
-                    Syntax::MARKER_LAYOUT,
-                    value.span(),
-                ));
-            };
-            tag_width = Some((width.clone(), *width_span));
+            match value {
+                crate::AST::Expr::Ident(width, width_span) => {
+                    tag_width = Some((width.clone(), *width_span));
+                }
+                crate::AST::Expr::Call(call)
+                    if call.name == Syntax::LAYOUT_ALIGN
+                        && (call.args.len() == 1
+                            || (call.args.len() == 2
+                                && matches!(
+                                    &call.args[0].expr,
+                                    crate::AST::Expr::Ident(name, _)
+                                        if name == Syntax::LAYOUT_ALIGN_TARGET
+                                ))) =>
+                {
+                    has_alignment = true;
+                    alignment_target = call.args.len() == 2;
+                    let argument_index = usize::from(alignment_target);
+                    let argument = &call.args[argument_index];
+                    match &argument.expr {
+                        crate::AST::Expr::Int(value, value_span, _, _) if *value >= 0 => {
+                            // D-PLACE1/D-LAYOUT-ALIGN1: the parser preserves
+                            // the literal and target-mode marker. Sema owns
+                            // positivity, power-of-two, and profile facts.
+                            alignment = Some(*value as u64);
+                            alignment_span = Some(*value_span);
+                        }
+                        crate::AST::Expr::Unary(
+                            crate::AST::UnOp::Neg,
+                            inner,
+                            _,
+                        ) if matches!(&**inner, crate::AST::Expr::Int(..)) => {
+                            // Keep the marker for sema's value diagnostic; a
+                            // negative literal cannot inhabit CAligned.
+                            alignment_span = Some(argument.expr.span());
+                        }
+                        _ => {
+                            return Err(Diagnostic::error(
+                                "E1105",
+                                "`align` requires one integer byte value (or `target, N`)"
+                                    .to_string(),
+                                "`#Layout(c, align(N))` is compiler-owned ABI metadata"
+                                    .to_string(),
+                                "write `align(64)` or `align(target, 2097152)`".to_string(),
+                                Some(argument.expr.span()),
+                            ));
+                        }
+                    }
+                }
+                _ => {
+                    return Err(crate::Policy::marker_argument_shape_error(
+                        Syntax::MARKER_LAYOUT,
+                        value.span(),
+                    ));
+                }
+            }
         }
         let layout = match variant.as_str() {
-            v if v == Syntax::LAYOUT_C => Some(crate::AST::StructLayout::C),
-            v if v == Syntax::LAYOUT_COLUMNAR => Some(crate::AST::StructLayout::Columnar),
+            v if v == Syntax::LAYOUT_C => alignment
+                .map(|alignment| crate::AST::StructLayout::CAligned {
+                    alignment,
+                    target: alignment_target,
+                })
+                .or(Some(crate::AST::StructLayout::C)),
+            v if v == Syntax::LAYOUT_COLUMNAR => {
+                if has_alignment {
+                    return Err(Diagnostic::error(
+                        "E1105",
+                        "`align` is only valid with `#Layout(c)`".to_string(),
+                        "columnar layout has no C ABI alignment override".to_string(),
+                        "use `#Layout(c, align(64))` or remove `align(…)`".to_string(),
+                        Some(alignment_span.unwrap_or(marker.span)),
+                    ));
+                }
+                Some(crate::AST::StructLayout::Columnar)
+            }
             v if v == Syntax::LAYOUT_PACKED || v == Syntax::LAYOUT_ALIGN => {
                 return Err(Diagnostic::error(
-                        "E1105",
-                        format!("`#Layout({})` is reserved and not yet supported", v),
-                        "the supported variants are `c` (C-compatible) and `columnar` (struct-of-arrays)".to_string(),
-                        "use `#Layout(c)` or `#Layout(columnar)`, or omit `#Layout` for the default".to_string(),
-                        Some(variant_span),
-                    ));
+                    "E1105",
+                    format!("`#Layout({})` is reserved and not yet supported", v),
+                    "the supported variants are `c`, `columnar`, and `c, align(N)` or `c, align(target, N)`"
+                        .to_string(),
+                    "use `#Layout(c)`, `#Layout(c, align(64))`, `#Layout(c, align(target, 2097152))`, or `#Layout(columnar)`"
+                        .to_string(),
+                    Some(variant_span),
+                ));
             }
             _ => {
                 return Err(Diagnostic::error(
-                        "E1105",
-                        format!("`#Layout({})` isn't a known layout variant", variant),
-                        "the supported variants are `c` (C-compatible) and `columnar` (struct-of-arrays)".to_string(),
-                        "write `#Layout(c)` or `#Layout(columnar)`".to_string(),
-                        Some(variant_span),
-                    ));
+                    "E1105",
+                    format!("`#Layout({})` isn't a known layout variant", variant),
+                    "the supported variants are `c`, `columnar`, and `c, align(N)` or `c, align(target, N)`"
+                        .to_string(),
+                    "write `#Layout(c)`, `#Layout(c, align(64))`, `#Layout(c, align(target, 2097152))`, or `#Layout(columnar)`"
+                        .to_string(),
+                    Some(variant_span),
+                ));
             }
         };
         let attr_span = marker.span;
@@ -776,13 +855,13 @@ impl<'a> Parser<'a> {
                 false
             };
         if matches!(self.peek().kind, TokKind::KwEnum) {
-            if layout != Some(crate::AST::StructLayout::C) {
+            if has_alignment || !matches!(layout.as_ref(), Some(crate::AST::StructLayout::C)) {
                 return Err(Diagnostic::error(
                     "E1105",
-                    "Only C layout applies to enums.".to_string(),
-                    "Columnar layout describes struct collections, not enum representation."
+                    "Only plain C layout applies to enums.".to_string(),
+                    "alignment is a struct ABI override; enum tags use the second bare layout argument."
                         .to_string(),
-                    "Use `#Layout(c)` on this enum.".to_string(),
+                    "use `#Layout(c, I32)` or another enum tag width".to_string(),
                     Some(variant_span),
                 ));
             }

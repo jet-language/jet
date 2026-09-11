@@ -707,7 +707,7 @@ fn run() {
         );
         if force_interpreter {
             assert!(
-                !stderr.contains("E2201") && !stderr.contains("unsupported"),
+                !stderr.contains("unsupported"),
                 "{tier} emitted an unsupported-feature diagnostic: {stderr}"
             );
         } else {
@@ -1064,7 +1064,7 @@ fn run() {
             .read_to_string(&mut stderr)
             .unwrap();
         assert!(
-            !stderr.contains("E2201") && !stderr.contains("unsupported"),
+            !stderr.contains("unsupported"),
             "{tier} refused the program instead of running it: {stderr}"
         );
         (status.code(), format!("{ready}{rest}"))

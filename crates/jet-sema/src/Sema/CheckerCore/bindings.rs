@@ -1,16 +1,269 @@
+use std::collections::{HashMap, HashSet, VecDeque};
 use super::helpers::is_pod_uninit_type;
 use crate::Diagnostics::{Diagnostic, Severity, TextEdit};
-use crate::Sema::Captures::{lambda_body_refs_name, stmt_refs_name};
-use crate::Sema::Diagnostics::{edit_distance, field_read_to_clone, is_task_type, type_fix_hint};
+use crate::Sema::Captures::{lambda_body_refs_name, lambda_collect_captures, stmt_refs_name};
+use crate::Sema::Diagnostics::{
+    edit_distance, field_read_to_clone, is_cloneable, is_task_type, type_fix_hint,
+};
 use crate::Sema::{Checker, LocalInfo};
 use crate::Syntax;
 use crate::AST::{
-    AccessConvention, BindPattern, Binding, CallArg, Expr, MetaAttr, MetaField, Stmt, StrPart, Type,
+    AccessConvention, BindPattern, Binding, CallArg, Expr, Lambda, MetaAttr, MetaField, Stmt,
+    StrPart, Type,
 };
+fn canonical_fragment_name(
+    owner: usize,
+    name: &str,
+    modules: &[crate::Sema::ModuleState],
+    source_paths: &HashMap<(usize, String), String>,
+    struct_identities: &HashMap<(usize, String), String>,
+    known_identities: &HashSet<String>,
+) -> Option<String> {
+    if known_identities.contains(name) {
+        return Some(name.to_string());
+    }
+    if let Some(identity) = source_paths.get(&(owner, name.to_string())) {
+        return Some(identity.clone());
+    }
+    if let Some((namespace, leaf)) = name.rsplit_once('.') {
+        if let Some(&target) = modules
+            .get(owner)
+            .and_then(|state| state.imports.get(namespace))
+        {
+            if let Some(identity) = struct_identities.get(&(target, leaf.to_string())) {
+                return Some(identity.clone());
+            }
+        }
+    }
+    struct_identities
+        .get(&(owner, name.to_string()))
+        .cloned()
+}
+
+fn canonical_fragment_type(
+    ty: &Type,
+    owner: usize,
+    modules: &[crate::Sema::ModuleState],
+    source_paths: &HashMap<(usize, String), String>,
+    struct_identities: &HashMap<(usize, String), String>,
+    known_identities: &HashSet<String>,
+) -> Type {
+    let map_name = |name: &str| {
+        canonical_fragment_name(
+            owner,
+            name,
+            modules,
+            source_paths,
+            struct_identities,
+            known_identities,
+        )
+    };
+    match ty {
+        Type::Named(name) => map_name(name).map_or_else(|| ty.clone(), Type::Named),
+        Type::List(inner) => Type::List(Box::new(canonical_fragment_type(
+            inner,
+            owner,
+            modules,
+            source_paths,
+            struct_identities,
+            known_identities,
+        ))),
+        Type::Map {
+            key,
+            key_span,
+            value,
+        } => Type::Map {
+            key: Box::new(canonical_fragment_type(
+                key,
+                owner,
+                modules,
+                source_paths,
+                struct_identities,
+                known_identities,
+            )),
+            key_span: *key_span,
+            value: Box::new(canonical_fragment_type(
+                value,
+                owner,
+                modules,
+                source_paths,
+                struct_identities,
+                known_identities,
+            )),
+        },
+        Type::Shared(inner) => Type::Shared(Box::new(canonical_fragment_type(
+            inner,
+            owner,
+            modules,
+            source_paths,
+            struct_identities,
+            known_identities,
+        ))),
+        Type::Option(inner) => Type::Option(Box::new(canonical_fragment_type(
+            inner,
+            owner,
+            modules,
+            source_paths,
+            struct_identities,
+            known_identities,
+        ))),
+        Type::Result { ok, err } => Type::Result {
+            ok: Box::new(canonical_fragment_type(
+                ok,
+                owner,
+                modules,
+                source_paths,
+                struct_identities,
+                known_identities,
+            )),
+            err: Box::new(canonical_fragment_type(
+                err,
+                owner,
+                modules,
+                source_paths,
+                struct_identities,
+                known_identities,
+            )),
+        },
+        Type::Fn {
+            params,
+            ret,
+            effect_bound,
+            param_contract,
+            call_metadata,
+            return_view_provenance,
+        } => Type::Fn {
+            params: params
+                .iter()
+                .map(|param| {
+                    canonical_fragment_type(
+                        param,
+                        owner,
+                        modules,
+                        source_paths,
+                        struct_identities,
+                        known_identities,
+                    )
+                })
+                .collect(),
+            ret: ret.as_ref().map(|ret| {
+                Box::new(canonical_fragment_type(
+                    ret,
+                    owner,
+                    modules,
+                    source_paths,
+                    struct_identities,
+                    known_identities,
+                ))
+            }),
+            effect_bound: effect_bound.clone(),
+            param_contract: param_contract.clone(),
+            call_metadata: call_metadata.clone(),
+            return_view_provenance: return_view_provenance.clone(),
+        },
+        Type::Apply { name, args } => Type::Apply {
+            name: map_name(name).unwrap_or_else(|| name.clone()),
+            args: args
+                .iter()
+                .map(|arg| {
+                    canonical_fragment_type(
+                        arg,
+                        owner,
+                        modules,
+                        source_paths,
+                        struct_identities,
+                        known_identities,
+                    )
+                })
+                .collect(),
+        },
+        Type::Tuple(fields) => Type::Tuple(
+            fields
+                .iter()
+                .map(|(name, field)| {
+                    (
+                        name.clone(),
+                        Box::new(canonical_fragment_type(
+                            field,
+                            owner,
+                            modules,
+                            source_paths,
+                            struct_identities,
+                            known_identities,
+                        )),
+                    )
+                })
+                .collect(),
+        ),
+        Type::FixedList { elem, len } => Type::FixedList {
+            elem: Box::new(canonical_fragment_type(
+                elem,
+                owner,
+                modules,
+                source_paths,
+                struct_identities,
+                known_identities,
+            )),
+            len: len.clone(),
+        },
+        Type::InlineRange { base, lo, hi } => Type::InlineRange {
+            base: Box::new(canonical_fragment_type(
+                base,
+                owner,
+                modules,
+                source_paths,
+                struct_identities,
+                known_identities,
+            )),
+            lo: *lo,
+            hi: *hi,
+        },
+        Type::Tagged { marker, inner } => Type::Tagged {
+            marker: marker.clone(),
+            inner: Box::new(canonical_fragment_type(
+                inner,
+                owner,
+                modules,
+                source_paths,
+                struct_identities,
+                known_identities,
+            )),
+        },
+        Type::Union(members) => crate::AST::canonicalize_union(
+            members
+                .iter()
+                .map(|member| {
+                    canonical_fragment_type(
+                        member,
+                        owner,
+                        modules,
+                        source_paths,
+                        struct_identities,
+                        known_identities,
+                    )
+                })
+                .collect(),
+        ),
+        Type::Quantity { base, dimension } => Type::Quantity {
+            base: Box::new(canonical_fragment_type(
+                base,
+                owner,
+                modules,
+                source_paths,
+                struct_identities,
+                known_identities,
+            )),
+            dimension: dimension.clone(),
+        },
+        _ => ty.clone(),
+    }
+}
 
 /// A bound lambda can borrow a written capture only while every later use in
 /// the current lexical scope invokes it directly. Any other use may retain the
-/// callable, so sema keeps the conservative owning-capture route.
+/// callable, so sema keeps the conservative owning-capture route. A read-only
+/// lambda with a non-cloneable capture also needs that route: codegen must move
+/// the capture into its `move` closure.
 fn stmt_uses_name_only_as_direct_call(stmt: &Stmt, name: &str) -> bool {
     let mut nested_capture = false;
     stmt.for_each_expr(|expr| {
@@ -73,33 +326,280 @@ impl<'a> Checker<'a> {
     /// Read the statement-tail frame installed by `check_block_inner`.
     /// A null frame means the caller did not provide lexical-use context, so
     /// retain the safe escaping default.
-    fn bound_lambda_escapes(&self, name: &str) -> bool {
+    fn bound_lambda_escapes(&self, name: &str, lambda: &Lambda) -> bool {
         if self.stmt_tail_ptr.is_null() {
             return true;
         }
-        let tail_requires_escape = |tail: &[Stmt]| {
-            tail.iter().any(|stmt| {
-                stmt_refs_name(stmt, name) && !stmt_uses_name_only_as_direct_call(stmt, name)
-            })
+        let mut saw_direct_use = false;
+        let mut saw_other_use = false;
+        let mut inspect_tail = |tail: &[Stmt]| {
+            for stmt in tail {
+                if !stmt_refs_name(stmt, name) {
+                    continue;
+                }
+                if stmt_uses_name_only_as_direct_call(stmt, name) {
+                    saw_direct_use = true;
+                } else {
+                    saw_other_use = true;
+                }
+            }
         };
         // SAFETY: these slices point into the live Program AST while checking
         // the current statement; `check_block_inner` installs and restores
         // each frame around the recursive check.
         let tail = unsafe { std::slice::from_raw_parts(self.stmt_tail_ptr, self.stmt_tail_len) };
-        if tail_requires_escape(tail) {
-            return true;
-        }
+        inspect_tail(tail);
         for &(ptr, len) in self.liveness_frames.iter().rev() {
             if !ptr.is_null() && len > 0 {
                 let frame = unsafe { std::slice::from_raw_parts(ptr, len) };
-                if tail_requires_escape(frame) {
-                    return true;
-                }
+                inspect_tail(frame);
+            }
+        }
+        if saw_other_use || !saw_direct_use {
+            return true;
+        }
+
+        let param_names: HashSet<String> =
+            lambda.params.iter().map(|param| param.name.clone()).collect();
+        let take_names: HashSet<String> =
+            lambda.take_names.iter().map(|(capture, _)| capture.clone()).collect();
+        let mut read_caps = HashSet::new();
+        let mut mut_caps = HashSet::new();
+        lambda_collect_captures(
+            &lambda.body,
+            &param_names,
+            &mut read_caps,
+            &mut mut_caps,
+        );
+        read_caps.extend(lambda.take_names.iter().map(|(capture, _)| capture.clone()));
+        for capture in read_caps {
+            if param_names.contains(&capture)
+                || take_names.contains(&capture)
+                || mut_caps.contains(&capture)
+            {
+                continue;
+            }
+            let cap_ty = self
+                .lookup(&capture)
+                .map(|info| info.ty.clone())
+                .or_else(|| self.consts.get(&capture).cloned());
+            let Some(cap_ty) = cap_ty else {
+                continue;
+            };
+            if self.is_resource_type(&cap_ty) || !is_cloneable(&cap_ty, self.registry) {
+                return true;
             }
         }
         false
     }
 }
+impl<'a> Checker<'a> {
+    /// Snapshot the checked nominal/import rows needed by an isolated
+    /// comptime fragment. The ordinary bundle context already owns these
+    /// rows; the fragment must carry its own projection because it does not
+    /// share that context.
+    fn checked_comptime_nominals(
+        &self,
+    ) -> Option<crate::Comptime::MirBridge::MirFragmentNominalFacts> {
+        let modules = self.modules?;
+        checked_comptime_nominals_for_context(modules, self.module_idx, self.name_ledger)
+    }
+}
+/// Project the checked nominal/import rows needed by an isolated comptime
+/// fragment before a `Checker` exists for the current module. Derive and
+/// marker expansion runs at that earlier bundle phase, but it must carry the
+/// same declaration identities that body checking later supplies.
+pub(crate) fn checked_comptime_nominals_for_context(
+    modules: &[crate::Sema::ModuleState],
+    module_idx: usize,
+    name_ledger: &jet_foundation::Names::NameLedger,
+) -> Option<crate::Comptime::MirBridge::MirFragmentNominalFacts> {
+    let current = modules.get(module_idx)?;
+    let reexports = &current.reexports;
+    let mut struct_identities = HashMap::new();
+    let mut known_identities = HashSet::new();
+    for (owner, state) in modules.iter().enumerate() {
+        for item in &state.items {
+            let name = match item {
+                crate::AST::Item::Struct(def) => &def.name,
+                crate::AST::Item::Enum(def) => &def.name,
+                _ => continue,
+            };
+            let Some(identity) = name_ledger.nominal_identity(owner, name) else {
+                continue;
+            };
+            struct_identities.insert((owner, name.clone()), identity.clone());
+            known_identities.insert(identity);
+        }
+    }
+
+    let mut source_paths = HashMap::new();
+    for owner in 0..modules.len() {
+        for (source, path) in name_ledger.canonical_paths(owner) {
+            if known_identities.contains(&path) {
+                source_paths.insert((owner, source), path);
+            }
+        }
+    }
+
+    let mut queue = VecDeque::new();
+    let mut queued = HashSet::new();
+    for &target in current.imports.values() {
+        if queued.insert(target) {
+            queue.push_back(target);
+        }
+    }
+    for (_, (_, target)) in &current.unqualified_file {
+        if queued.insert(*target) {
+            queue.push_back(*target);
+        }
+    }
+    for (_, (_, target)) in reexports {
+        if queued.insert(*target) {
+            queue.push_back(*target);
+        }
+    }
+
+    let mut facts = crate::Comptime::MirBridge::MirFragmentNominalFacts::default();
+    for item in &current.items {
+        if let crate::AST::Item::Enum(def) = item {
+            let mut row = def.clone();
+            row.methods.clear();
+            row.trait_impls.clear();
+            row.derives.clear();
+            facts.enums.insert(row.name.clone(), row);
+        }
+    }
+    for (alias, &target) in &current.imports {
+        if let Some(state) = modules.get(target) {
+            facts
+                .import_modules
+                .insert(alias.clone(), state.module_alias.clone());
+        }
+    }
+
+    while let Some(target) = queue.pop_front() {
+        let Some(state) = modules.get(target) else {
+            continue;
+        };
+        for &nested in state.imports.values() {
+            if queued.insert(nested) {
+                queue.push_back(nested);
+            }
+        }
+        if target == module_idx {
+            continue;
+        }
+        for item in &state.items {
+            if let crate::AST::Item::Enum(def) = item {
+                if !name_ledger.visible(module_idx, target, &def.name) {
+                    continue;
+                }
+                let Some(identity) = struct_identities.get(&(target, def.name.clone())).cloned()
+                else {
+                    continue;
+                };
+                let mut row = def.clone();
+                row.name = identity.clone();
+                row.methods.clear();
+                row.trait_impls.clear();
+                row.derives.clear();
+                for variant in &mut row.variants {
+                    let canonicalize = |ty: &mut Type| {
+                        *ty = canonical_fragment_type(
+                            ty, target, modules, &source_paths, &struct_identities, &known_identities,
+                        );
+                    };
+                    match &mut variant.payload {
+                        crate::AST::VariantPayload::Unit => {}
+                        crate::AST::VariantPayload::Single(ty, _) => canonicalize(ty),
+                        crate::AST::VariantPayload::Named(fields) => {
+                            for field in fields {
+                                canonicalize(&mut field.ty);
+                            }
+                        }
+                    }
+                }
+                facts.foreign_modules.insert(identity.clone(), state.module_alias.clone());
+                facts.enums.entry(identity).or_insert(row);
+                continue;
+            }
+            let crate::AST::Item::Struct(def) = item else {
+                continue;
+            };
+            if !name_ledger.visible(module_idx, target, &def.name) {
+                continue;
+            }
+            let Some(identity) = struct_identities
+                .get(&(target, def.name.clone()))
+                .cloned()
+            else {
+                continue;
+            };
+            let mut row = def.clone();
+            row.name = identity.clone();
+            row.methods.clear();
+            row.trait_impls.clear();
+            row.derives.clear();
+            for field in &mut row.fields {
+                field.ty = canonical_fragment_type(
+                    &field.ty,
+                    target,
+                    modules,
+                    &source_paths,
+                    &struct_identities,
+                    &known_identities,
+                );
+            }
+            facts
+                .foreign_modules
+                .insert(identity.clone(), state.module_alias.clone());
+            facts.structs.entry(identity).or_insert(row);
+        }
+    }
+
+    let foreign_identities: HashSet<String> = facts.foreign_modules.keys().cloned().collect();
+    for identity in &foreign_identities {
+        facts
+            .nominal_identities
+            .insert(identity.clone(), identity.clone());
+    }
+    for (source, path) in name_ledger.canonical_paths(module_idx) {
+        if foreign_identities.contains(&path) {
+            facts.nominal_identities.insert(source, path);
+        }
+    }
+    for (alias, &target) in &current.imports {
+        for ((owner, leaf), identity) in &struct_identities {
+            if *owner == target && foreign_identities.contains(identity) {
+                facts
+                    .nominal_identities
+                    .insert(format!("{alias}.{leaf}"), identity.clone());
+            }
+        }
+    }
+    for (local, (original, target)) in &current.unqualified_file {
+        if let Some(identity) = struct_identities.get(&(*target, original.clone())) {
+            if foreign_identities.contains(identity) {
+                facts
+                    .nominal_identities
+                    .insert(local.clone(), identity.clone());
+            }
+        }
+    }
+    for (local, (original, target)) in reexports {
+        if let Some(identity) = struct_identities.get(&(*target, original.clone())) {
+            if foreign_identities.contains(identity) {
+                facts
+                    .nominal_identities
+                    .insert(local.clone(), identity.clone());
+            }
+        }
+    }
+
+    Some(facts)
+}
+
 fn direct_fixed_constructor(expr: &Expr) -> bool {
     matches!(
         expr,
@@ -760,11 +1260,11 @@ impl<'a> Checker<'a> {
         }
         let saved_esc = self.lambda_escapes;
         let saved_bind = self.lambda_binding.clone();
-        if matches!(&b.init, Expr::Lambda(_)) {
+        if let Expr::Lambda(lambda) = &b.init {
             // S47: a local callable borrowed by direct calls can retain mutable
             // capture borrows; keep the owning clone only when a later use can
             // retain or move the callable.
-            self.lambda_escapes = self.bound_lambda_escapes(&b.name);
+            self.lambda_escapes = self.bound_lambda_escapes(&b.name, lambda);
             self.lambda_binding = Some(b.name.clone());
         }
         // D-META-STAGE1=B: a marked name in a compile-time binding RHS is an
@@ -901,9 +1401,22 @@ impl<'a> Checker<'a> {
             && !preserve_result_carrier
             && matches!(self.expected_type, Some(Type::Result { .. })))
         .then_some(self.source_nesting + 1);
+        // D-MEM-COPYSEM1: a value-if is not a maximal place. When it feeds a
+        // non-view binding, its arm tails occupy the same owning destination
+        // as the conditional result; route them through `infer_owning_value`.
+        // A declared `View`/`ViewMut` result keeps the view path unchanged.
+        let owning_if_value = matches!(b.init.without_parens(), Expr::If { .. })
+            && !matches!(
+                b.ty.as_ref(),
+                Some(Type::Apply { name, .. }) if name == "View" || name == "ViewMut"
+            )
+            && !matches!(
+                self.expected_type.as_ref(),
+                Some(Type::Apply { name, .. }) if name == "View" || name == "ViewMut"
+            );
         let mut it = if distinct_range_constructor {
             self.infer_without_auto_propagation(&mut b.init)
-        } else if b.mutable {
+        } else if b.mutable || owning_if_value {
             self.infer_owning_value(&mut b.init)
         } else {
             self.infer(&mut b.init)
@@ -1061,7 +1574,26 @@ impl<'a> Checker<'a> {
             .any(|diagnostic| matches!(diagnostic.code.as_str(), "E0801" | "E3203"));
         let init_type_unusable =
             init_has_error && (initializer_type_error || b.ty.is_none() && it.is_none());
-        if b.ty.is_none() && it.is_none() && !init_has_error {
+
+        // An invalid binding carries an `Unknown` recovery type; its failed
+        // receiver makes method inference return `None` without a new
+        // diagnostic. Do not misclassify that cascade as a known valueless call.
+        let recovered_unknown_receiver = matches!(
+            b.init.without_parens(),
+            Expr::MethodCall { receiver, .. }
+                if matches!(
+                    receiver.without_parens(),
+                    Expr::Ident(name, _)
+                        if self.lookup(name).is_some_and(|info| {
+                            info.invalid
+                                && matches!(
+                                    &info.ty,
+                                    Type::Named(type_name) if type_name == "Unknown"
+                                )
+                        })
+                )
+        );
+        if b.ty.is_none() && it.is_none() && !init_has_error && !recovered_unknown_receiver {
             if let Expr::MethodCall {
                 method,
                 method_span,
@@ -1195,11 +1727,12 @@ impl<'a> Checker<'a> {
                 Some(b.name_span),
             ));
         }
-        if b.is_comptime
+        if !self.defer_ct_evaluation
+            && b.is_comptime
             && !crate::Comptime::check_build_time_io(&b.init, self.ct_base_dir, &mut self.diags)
         {
             // D-CTIO1: the path law already reported against the call.
-        } else if b.is_comptime {
+        } else if !self.defer_ct_evaluation && b.is_comptime {
             let is_patch_binding =
                 matches!(&final_ty, Type::Named(name) if name.ends_with(".Patch"));
             let globals = self.current_ct_globals().into_owned();
@@ -1208,19 +1741,20 @@ impl<'a> Checker<'a> {
             // D-CTEFFECT1: pass impure context so bindings inside #Impure blocks
             // start with the gate already open.
             let mut mutated = std::collections::HashMap::new();
-            let folded =
-                crate::Comptime::evaluate_owned_with_imports_opts_collecting_items(
-                    &b.init,
-                    self.ct_funcs,
-                    self.ct_externs,
-                    self.ct_base_dir,
-                    &globals,
-                    self.core_imports,
-                    self.gates,
-                    self.ct_impure_depth,
-                    self.items,
-                    Some(&mut mutated),
-                );
+            let checked_nominals = self.checked_comptime_nominals();
+            let folded = crate::Comptime::evaluate_owned_with_imports_opts_collecting_items(
+                &b.init,
+                self.ct_checked_funcs,
+                self.ct_externs,
+                self.ct_base_dir,
+                &globals,
+                self.core_imports,
+                self.gates,
+                self.ct_impure_depth,
+                self.ct_items,
+                checked_nominals,
+                Some(&mut mutated),
+            );
             self.apply_ct_mutations(mutated);
             match folded {
                 Ok((v, inputs)) => {
@@ -1237,7 +1771,8 @@ impl<'a> Checker<'a> {
                 }
                 Err(d) => self.diags.push(d),
             }
-        } else if !b.mutable
+        } else if !self.defer_ct_evaluation
+            && !b.mutable
             && !skip_ct_view_bake
             && !skip_ct_field_read_bake
             && !skip_ct_memo_fold
@@ -1257,20 +1792,20 @@ impl<'a> Checker<'a> {
             // pattern match here that a stray `(...)` could dodge.)
             let globals = self.current_ct_globals().into_owned();
             let mut mutated = std::collections::HashMap::new();
-            let folded = jet_foundation::Diagnostics::with_ice_panic_hook_suppressed(|| {
-                crate::Comptime::evaluate_owned_with_imports_opts_collecting_items(
-                    &b.init,
-                    self.ct_funcs,
-                    self.ct_externs,
-                    self.ct_base_dir,
-                    &globals,
-                    self.core_imports,
-                    self.gates,
-                    0,
-                    self.items,
-                    Some(&mut mutated),
-                )
-            });
+            let checked_nominals = self.checked_comptime_nominals();
+            let folded = crate::Comptime::evaluate_owned_with_imports_opts_collecting_items(
+                &b.init,
+                self.ct_checked_funcs,
+                self.ct_externs,
+                self.ct_base_dir,
+                &globals,
+                self.core_imports,
+                self.gates,
+                0,
+                self.ct_items,
+                checked_nominals,
+                Some(&mut mutated),
+            );
             let changed = Self::ct_mutated_names(&globals, &mutated);
             if !changed.is_empty() {
                 // The initializer advanced a receiver. Baking either side
@@ -1422,11 +1957,10 @@ impl<'a> Checker<'a> {
             && !matches!(&final_ty, Type::Named(name) if name == "Fixed"))
         .then(|| self.evaluate_constant(&b.init))
         .flatten();
-        let normalized_path_source = (!b.mutable
-            && !init_has_error
-            && matches!(&final_ty, Type::String))
-            .then(|| self.normalized_path_string_source(&b.init))
-            .flatten();
+        let normalized_path_source =
+            (!b.mutable && !init_has_error && matches!(&final_ty, Type::String))
+                .then(|| self.normalized_path_string_source(&b.init))
+                .flatten();
         self.declare_with_sendability(
             &b.name,
             b.name_span,
@@ -1447,11 +1981,11 @@ impl<'a> Checker<'a> {
             binding_sendable,
         );
         if let Some(source) = normalized_path_source {
-            self.flow
-                .path_strings
-                .set_at(&b.name, self.scope_depth(), crate::Sema::FlowFacts::PathStringFact {
-                    source,
-                });
+            self.flow.path_strings.set_at(
+                &b.name,
+                self.scope_depth(),
+                crate::Sema::FlowFacts::PathStringFact { source },
+            );
         }
         if let Some(arena) = arena_alloc_source {
             self.record_arena_view(&b.name, arena, b.name_span);

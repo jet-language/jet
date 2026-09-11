@@ -15,6 +15,7 @@ pub struct BindResult {
     pub source: String,
     pub bound: Vec<String>,
     pub archive: PathBuf,
+    pub provenance: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,6 +103,20 @@ pub fn bind(
     if !output.status.success() {
         return Err(BindError::ToolFailed(launder(&output.stderr)));
     }
+    let mut provenance = "schema=jet-go-bind-v1\n".to_string();
+    crate::ForeignBridge::append_boundary_for_artifact(
+        &mut provenance,
+        *crate::AST::binder_descriptor(crate::AST::ForeignLanguage::Go)
+            .ok_or_else(|| BindError::Source("Go binder descriptor is not registered".into()))?,
+        lib,
+        source_path,
+        &archive,
+        format!(
+            "go={};cgo=enabled;trimpath;ar",
+            crate::ForeignBridge::tool_identity("go")
+        ),
+    )
+    .map_err(BindError::IO)?;
     Ok(BindResult {
         source: render(lib, &functions),
         bound: functions
@@ -109,6 +124,7 @@ pub fn bind(
             .map(|function| function.name)
             .collect(),
         archive,
+        provenance,
     })
 }
 

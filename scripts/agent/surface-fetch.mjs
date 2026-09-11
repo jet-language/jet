@@ -11,7 +11,7 @@
  *
  * Regenerate one language:
  *   node scripts/agent/surface-fetch.mjs swift \
- *       > docs/reference/surfaces/swift-surface.json
+ *       > docs/spec/reference/surfaces/swift-surface.json
  */
 
 import { createHash } from "node:crypto";

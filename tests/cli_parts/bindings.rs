@@ -70,7 +70,7 @@ fn question_mark_observe_slow_program_routes_to_observation_guide() {
 fn file_sugar_runs_without_run_subcommand() {
     let stem = std::env::temp_dir().join("jet_cli_file_sugar");
     let file = stem.with_extension("jet");
-    fs::write(&file, "fn run() {\n    print(\"file-sugar\");\n}\n").unwrap();
+    fs::write(&file, "fn run() {\n    print(\"file-sugar\")\n}\n").unwrap();
     let out = Command::new(jet()).arg(&file).output().unwrap();
     assert_eq!(
         out.status.code(),
@@ -89,7 +89,7 @@ fn file_sugar_runs_without_run_subcommand() {
 fn file_sugar_ext_optional() {
     let stem = std::env::temp_dir().join("jet_cli_file_sugar_extopt");
     let file = stem.with_extension("jet");
-    fs::write(&file, "fn run() {\n    print(\"ext-sugar\");\n}\n").unwrap();
+    fs::write(&file, "fn run() {\n    print(\"ext-sugar\")\n}\n").unwrap();
     let out = Command::new(jet()).arg(&stem).output().unwrap();
     assert_eq!(
         out.status.code(),
@@ -139,7 +139,7 @@ fn did_you_mean_golden() {
 #[test]
 fn unknown_flag_is_e2102() {
     let p = std::env::temp_dir().join("jet_cli_ok2.jet");
-    fs::write(&p, "fn run() {\n    print(\"hi\");\n}\n").unwrap();
+    fs::write(&p, "fn run() {\n    print(\"hi\")\n}\n").unwrap();
     let out = Command::new(jet())
         .arg("check")
         .arg(&p)

@@ -1,0 +1,238 @@
+{
+  "schema": "jet.lowering-contract.v1",
+  "schema_version": 1,
+  "contract_id": "jet-lowering-contract-v1",
+  "policy": {
+    "decision_id": "D-COMPILER-PROOF1",
+    "outcome": "A",
+    "status": "ratified",
+    "scope": "source-bound normalization, desugaring, control-flow lowering, representation lowering, and shared MIR emission",
+    "foreign_suffix": "target ABI, foreign libraries, runtime resources, and finite behavioral replay remain explicit downstream boundaries"
+  },
+  "claim": {
+    "kind": "implementation-bound-conditional-preservation",
+    "statement": "Each production normalization, desugaring, control-flow lowering, and representation pass is joined to the canonical checked TIR/MIR route and carries a conditional preservation certificate. The certificate retains source origin, side conditions, and the complete observation alphabet; it is not a universal semantic proof.",
+    "preconditions": [
+      "The #2898/#2919 canonical operation denominator is read from the generated compiler obligation relation; this stage adds no second lowerer or operation denominator.",
+      "The checked sema-to-TIR-to-MIR route is the only lowering route named by a certificate.",
+      "Source identity, source order, typed failures, mutation, input consumption, cleanup, and target applicability are explicit premises.",
+      "A lowering rejection remains a rejection through the shared semantic route; a source, IR, target, or certificate mismatch is invalid evidence.",
+      "Unknown compiler observations, unavailable targets, and foreign suffixes remain unverified rather than proved."
+    ],
+    "observation_alphabet": [
+      "result",
+      "typed_failure",
+      "mutation",
+      "input_consumption",
+      "ordered_effects",
+      "cleanup",
+      "resource_premises",
+      "schedule",
+      "allowed_schedules"
+    ],
+    "preservation_dimensions": [
+      "origin_identity",
+      "source_identity",
+      "ir_identity",
+      "target_identity",
+      "side_conditions",
+      "legality",
+      "profitability",
+      "target_representation",
+      "result",
+      "typed_failure",
+      "mutation",
+      "input_consumption",
+      "ordered_effects",
+      "cleanup",
+      "resource_premises",
+      "schedule",
+      "allowed_schedules"
+    ],
+    "required_scenarios": [
+      "short_circuit",
+      "early_exit",
+      "typed_errors",
+      "checked_arithmetic",
+      "callbacks",
+      "resource_cleanup",
+      "input_consumption"
+    ],
+    "unsupported_cases": [
+      "A missing, stale, or unbound production pass certificate",
+      "A source/IR/target identity mismatch or a certificate attached to a different operation",
+      "A reordered effect or failure, extra input consumption, invalid alias premise, or unchecked arithmetic reassociation",
+      "A target cost decision used to legalize an otherwise illegal transformation",
+      "Universal preservation over every Jet source, MIR state, target ABI, resource schedule, or foreign implementation",
+      "A fresh compiler replay or behavioral qualification when the pinned compiler is unavailable"
+    ]
+  },
+  "execution": {
+    "schema": "jet.compiler-inspection.v1",
+    "runner": "scripts/agent/jet-env",
+    "compiler": "target/debug/jet",
+    "command": "scripts/agent/jet-env full node proof/compiler/lowering/observe.mjs --json",
+    "operations": ["check", "run"],
+    "tiers": ["aot", "jet_run", "interpreter", "check"],
+    "timeout_ms": 120000,
+    "unknown_status": "unverified",
+    "no_execution_in_checker": true,
+    "observation_certificates": {
+      "path": "proof/compiler/lowering/observations.json",
+      "schema": "jet.lowering-observations.v1",
+      "producer": "compiler-proof observation workflow",
+      "observer": "proof/compiler/lowering/observe.mjs",
+      "protocol": "canonical-tir-mir-route-v1",
+      "required_identity_fields": ["operation_id", "stage", "source_sha256", "compiler_source_sha256", "model_sha256", "checker_sha256", "configuration_sha256", "target_sha256", "obligations_sha256", "driver_sha256", "collector_sha256", "contract_execution_sha256"],
+      "required_observations": ["result", "typed_failure", "mutation", "input_consumption", "ordered_effects", "cleanup", "resource_premises", "schedule", "allowed_schedules"],
+      "positive_status": "matched",
+      "universal_proof": false
+    },
+    "crash_policy": "tool failures, unavailable binaries, and malformed responses are unavailable or invalid_oracle, never preservation"
+  },
+  "binding_methods": [
+    {
+      "method": "verified_construction",
+      "source": "crates/jet-codegen/src/Codegen/TIR/mir.rs",
+      "implementation": "checked sema/TIR lowering and the single TIR-to-MIR seam",
+      "construction": "source-bound operation relation with exact implementation symbol, origin, premises, observations, and target contract",
+      "checker": "proof/compiler/lowering/check.mjs",
+      "limit": "construction binding is not a universal preservation theorem"
+    },
+    {
+      "method": "direct_verification",
+      "source": "crates/jet-codegen/src/Codegen/TIR/mod.rs and crates/jet-codegen/src/Codegen/MIRRust.rs",
+      "implementation": "the production checked-TIR-to-MIR route and canonical MIR emitter",
+      "candidate_binding": "current source SHA-256, compiler-proof identity, target/configuration descriptors",
+      "checker": "proof/compiler/lowering/check.mjs",
+      "limit": "no compiler or Jet execution is performed by this source checker"
+    },
+    {
+      "method": "translation_certificate",
+      "source": "proof/compiler/lowering/witnesses.json",
+      "implementation": "proof/compiler/lowering/common.mjs",
+      "certificate": "every generated production operation, legal/invalid source witness, composition premise, negative control, and optional canonical TIR/MIR route observation",
+      "checker": "proof/compiler/lowering/check.mjs",
+      "limit": "finite route observations remain proof-blocking until an independently derived semantic goal has a pinned formal discharge"
+    }
+  ],
+  "identity": {
+    "schema": "jet.compiler-proof.v1",
+    "manifest_path": "proof/compiler/toolchain/manifest.json",
+    "authority_key": "compiler-proof.lowering",
+    "claim_id": "compiler-proof.identity-direct",
+    "identity_digest_source": "scripts/agent/compiler-proof.mjs:identityDigest",
+    "driver_path": "scripts/agent/compiler-proof.mjs",
+    "required_fields": [
+      "model_sha256",
+      "source_sha256",
+      "compiler_source_sha256",
+      "checker_sha256",
+      "configuration_sha256",
+      "target_sha256",
+      "obligations_sha256",
+      "candidate.commit",
+      "candidate.compiler.artifact",
+      "candidate.configuration",
+      "candidate.target",
+      "proof.artifact",
+      "raw_replay"
+    ]
+  },
+  "inventory_join": {
+    "authorities": ["#2898", "#2919"],
+    "#2898": {
+      "source": "proof/compiler/obligations.json",
+      "selection": ["canonical TExprKind and TStmt operation rows", "result/failure/mutation/input/effect/cleanup/schedule alphabet"],
+      "rule": "reuse the generated operation denominator; do not add a lowering-specific semantic engine"
+    },
+    "#2919": {
+      "source": "proof/compiler/obligations.json",
+      "selection": ["boundary:lowering", "production shared lowering route"],
+      "rule": "bind every production pass to the current sema/TIR/MIR implementation route"
+    }
+  },
+  "coverage": {
+    "relation_path": "proof/compiler/obligations.json",
+    "generator": "proof/compiler/semantics/generate-obligations.mjs",
+    "owner": "#2939",
+    "boundary_ids": ["boundary:lowering"],
+    "mapping_statuses": ["mapped_unproved", "unsupported", "unmapped", "proved"],
+    "operation_relation": "proof/compiler/lowering/common.mjs:operationRegistry(lowering)",
+    "qualification_rule": "A boundary remains blocked unless every current production pass has a current source binding, complete premises, and matched canonical route observations; no finite route observation is promoted to semantic legality or proof without an independent formal discharge."
+  },
+  "implementation_route": {
+    "sema": [
+      "crates/jet-sema/src/Sema/Bundle/Pipeline.rs",
+      "crates/jet-sema/src/Sema/Bundle.rs",
+      "crates/jet-sema/src/Sema/OSTarget.rs",
+      "crates/jet-sema/src/Sema/SchemaMigration.rs",
+      "crates/jet-sema/src/Sema/MemberSpread.rs",
+      "crates/jet-sema/src/Sema/Registration.rs"
+    ],
+    "tir": [
+      "crates/jet-codegen/src/Codegen/TIR/mod.rs",
+      "crates/jet-codegen/src/Codegen/TIR/opt.rs",
+      "crates/jet-codegen/src/Codegen/TIR/lower/control_flow.rs",
+      "crates/jet-codegen/src/Codegen/TIR/lower/statements.rs",
+      "crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs",
+      "crates/jet-codegen/src/Codegen/TIR/lower/functions.rs",
+      "crates/jet-codegen/src/Codegen/TIR/lower/lambdas.rs"
+    ],
+    "mir": [
+      "crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs",
+      "crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs",
+      "crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs",
+      "crates/jet-codegen/src/Codegen/TIR/mir.rs",
+      "crates/jet-foundation/src/MIR.rs",
+      "crates/jet-codegen/src/Codegen/MIRRust.rs"
+    ],
+    "registered_operations": [
+      "sema.desugar-os-switches",
+      "sema.desugar-migrations",
+      "sema.desugar-member-spreads",
+      "sema.desugar-multi-head-functions",
+      "sema.normalize-operator-rhs",
+      "tir.lower-checked-program",
+      "tir.canonicalize-loop-forms",
+      "tir.optimize-program",
+      "tir.lower-value-block",
+      "tir.lower-statements",
+      "tir.lower-expression",
+      "tir.lower-function",
+      "tir.lower-lambda",
+      "mir.lower-expression",
+      "mir.lower-statements",
+      "mir.lower-function",
+      "mir.lower-type",
+      "mir.lower-checked-program",
+      "mir.lower-tir-to-mir",
+      "mir.canonical-operation-model",
+      "mir.rust-emitter"
+    ],
+    "single_route_rule": "No engine-specific semantic lowering is introduced; all targets consume the canonical checked MIR and retain target facts at the emission boundary."
+  },
+  "boundary": {
+    "proven": [
+      "The checker joins the exact generated canonical operation relation to the current #2939 lowering boundary.",
+      "Every registered production lowering pass requires implementation identity, origin identity, side conditions, all observations, and separate legality/profitability fields.",
+      "Forged, reordered, over-consuming, aliased, unsound, cost-overriding, and wrong-operation certificates are rejected structurally.",
+      "Composition requires the ordered pass relation and preserves observations, origin, side conditions, legality, profitability, and target representation."
+    ],
+    "assumed": [
+      "D-TIER-ONEIR1, D-COMPILER-PROOF1, I3, and I9 define the shared checked route.",
+      "#2898 supplies the canonical operation denominator and #2919 supplies the current integrated implementation route.",
+      "Foreign compiler, target ABI/layout, allocator/resource schedule, and external callback environments satisfy their named contracts."
+    ],
+    "tested": [
+      "Legal and deliberately invalid witness sources are source-hash bound and kept distinct without executing them.",
+      "Source/IR/target mismatch checks, premise retention, and negative-control mutation sensitivity are exercised by the checker logic."
+    ],
+    "blocked": [
+      "Universal preservation for all source programs, MIR states, target layouts, failures, effects, schedules, and resource bounds.",
+      "Fresh compiler execution, replay of AOT/JIT/interpreter/check observations, and qualification of cost or foreign behavior.",
+      "A generated operation row with stale source identity or missing observation evidence."
+    ],
+    "qualification": "blocked"
+  }
+}

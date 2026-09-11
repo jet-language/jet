@@ -108,10 +108,17 @@ fn core_conformance_shard(entries: Vec<(String, String)>) -> Vec<(String, String
     let entries = match (index, count) {
         (None, None) => entries,
         (Some(index), Some(count)) => {
-            let index = index.parse::<usize>().expect("Core conformance shard index must be an integer");
-            let count = count.parse::<usize>().expect("Core conformance shard count must be an integer");
+            let index = index
+                .parse::<usize>()
+                .expect("Core conformance shard index must be an integer");
+            let count = count
+                .parse::<usize>()
+                .expect("Core conformance shard count must be an integer");
             assert!(count > 0, "Core conformance shard count must be positive");
-            assert!(index < count, "Core conformance shard index must be below its count");
+            assert!(
+                index < count,
+                "Core conformance shard index must be below its count"
+            );
             entries
                 .into_iter()
                 .enumerate()
@@ -125,10 +132,19 @@ fn core_conformance_shard(entries: Vec<(String, String)>) -> Vec<(String, String
     // can be proven without rerunning the whole denominator.
     match std::env::var("JET_CORE_CONFORMANCE_FILTER") {
         Ok(filter) if !filter.trim().is_empty() => {
-            let needles: Vec<String> = filter.split(',').map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).collect();
-            let kept: Vec<(String, String)> =
-                entries.into_iter().filter(|(stem, _)| needles.iter().any(|n| stem.contains(n.as_str()))).collect();
-            assert!(!kept.is_empty(), "Core conformance filter `{filter}` matched no witness stem");
+            let needles: Vec<String> = filter
+                .split(',')
+                .map(|n| n.trim().to_string())
+                .filter(|n| !n.is_empty())
+                .collect();
+            let kept: Vec<(String, String)> = entries
+                .into_iter()
+                .filter(|(stem, _)| needles.iter().any(|n| stem.contains(n.as_str())))
+                .collect();
+            assert!(
+                !kept.is_empty(),
+                "Core conformance filter `{filter}` matched no witness stem"
+            );
             kept
         }
         _ => entries,
@@ -142,6 +158,26 @@ fn core_conformance_shard(entries: Vec<(String, String)>) -> Vec<(String, String
 /// so a missing witness fails the suite rather than becoming invisible.
 #[test]
 fn core_conformance_corpus_uses_strict_three_tier_gate() {
+    // Census mode: report every failing witness in one run instead of
+    // stopping at the first, so repairs are planned from a complete list.
+    let census = std::env::var("JET_CORE_CONFORMANCE_CENSUS").as_deref() == Ok("1");
+    if census
+        && std::env::var("JET_CORE_CONFORMANCE_FILTER")
+            .map_or(true, |filter| filter.trim().is_empty())
+    {
+        let gate = std::process::Command::new("node")
+            .arg("scripts/agent/closeout-gate.mjs")
+            .arg("check")
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .output()
+            .expect("node must run the milestone closeout gate");
+        assert!(
+            gate.status.success(),
+            "unfiltered Core conformance census is milestone-closeout-only:\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&gate.stdout),
+            String::from_utf8_lossy(&gate.stderr)
+        );
+    }
     let denominator = std::process::Command::new("node")
         .arg("scripts/agent/core-conformance.mjs")
         .arg("--check")
@@ -157,7 +193,13 @@ fn core_conformance_corpus_uses_strict_three_tier_gate() {
     let denominator_stdout = String::from_utf8_lossy(&denominator.stdout);
     let expected_programs = denominator_stdout
         .split("; ")
-        .find_map(|field| field.trim().strip_suffix(" program(s)")?.parse::<usize>().ok())
+        .find_map(|field| {
+            field
+                .trim()
+                .strip_suffix(" program(s)")?
+                .parse::<usize>()
+                .ok()
+        })
         .expect("Core conformance denominator must report its program count");
     with_jit_test_scope(|| {
         if skip_if_cranelift_host_unsupported() {
@@ -170,10 +212,10 @@ fn core_conformance_corpus_uses_strict_three_tier_gate() {
             "strict tier gate must discover exactly the denominator's witness programs"
         );
         let entries = core_conformance_shard(all_entries);
-        assert!(!entries.is_empty(), "Core conformance corpus must have witnesses");
-        // Census mode: report every failing witness in one run instead of
-        // stopping at the first, so repairs are planned from a complete list.
-        let census = std::env::var("JET_CORE_CONFORMANCE_CENSUS").as_deref() == Ok("1");
+        assert!(
+            !entries.is_empty(),
+            "Core conformance corpus must have witnesses"
+        );
         let mut failures: Vec<(String, String)> = Vec::new();
         if census {
             std::panic::set_hook(Box::new(|_| {}));
@@ -242,16 +284,52 @@ fn core_conformance_checker_rejects_structural_false_greens() {
     );
 }
 
+/// #2942: the contract-to-candidate relation has source-only negative controls.
+///
+/// These fixtures are deliberately authored structural mutations. They must
+/// remain rejected without executing a compiler or treating a declaration,
+/// discarded output, shared oracle, stale candidate, or invalid exclusion as
+/// proof.
+#[test]
+fn capability_relation_negative_controls_reject_false_greens() {
+    let output = std::process::Command::new("node")
+        .arg("scripts/agent/hardening-manifest.mjs")
+        .arg("--capability-negative-controls")
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("node must run capability relation negative controls");
+    assert!(
+        output.status.success(),
+        "capability relation negative control failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for control in [
+        "new-member",
+        "missing-mode",
+        "discarded-output",
+        "shared-wrong-oracle",
+        "stale-identity",
+        "invalid-exclusion",
+    ] {
+        assert!(
+            stdout.contains(control),
+            "capability relation output must name {control}"
+        );
+    }
+}
+
 /// c727 C1–C4: discover every top-level example, classify it, and ratchet the
 /// manifest. AOT-oracle examples (exit 0) must resident-JIT or deopt-interp
 /// with backend attribution — never silent fallback. Each AOT-oracle case
 /// compares default tiered against optimized AOT stdout/stderr/exit
-/// byte-for-byte, and compares the pure interpreter too WHEN the TIR evaluator
-/// runs the program. A pure-interpreter refusal carrying E2201/E0956 is accepted
-/// and records `interpreter_refused: CODE` on the observed backend row. A
+/// byte-for-byte, and compares the pure interpreter too WHEN the canonical MIR
+/// evaluator runs the program. A pure-interpreter refusal carrying E0956 is
+/// accepted and records `interpreter_refused: CODE` on the observed backend row. A
 /// `resident_jit` row proves AOT==tiered-JIT plus resident Cranelift execution.
 /// It proves interpreter parity only without that marker. Every accepted refusal
-/// is TIR coverage owed against D-ONECORE1=A/I9, not a settled boundary. Do not
+/// is MIR coverage owed against D-ONECORE1=A/I9, not a settled boundary. Do not
 /// cite a marked `resident_jit` row as three-tier parity. An AOT-green example whose
 /// default tiered run REFUSES to run it lands in `run_tier_broken`, which must
 /// hold exactly `RUN_TIER_BROKEN_HELD_OUT`; one that runs but disagrees with the

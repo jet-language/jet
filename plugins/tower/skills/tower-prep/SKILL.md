@@ -10,6 +10,15 @@ description: >-
 
 # Tower — prep for burndown
 
+## Contract
+
+- **Requested outcome:** An honest board prepared for implementation or owner decision, with no implementation performed.
+- **Supplied inputs:** Fresh Tower state, requested scope, card refs, project rules, and current ballot requirements.
+- **Allowed child result:** `tower`, `tower-rank`, and `tower-ballot` may return board reads, queue order, or a ready ballot. They do not close cards, implement features, or create competing state.
+- **Completion owner:** `tower-prep` owns plan and ballot preparation; the owner owns decisions; Tower owns board state.
+- **Return point:** Each sibling result returns to the current card's preparation before the next card.
+- **Stopping condition:** Stop when every in-scope non-frozen card is ready or owner-decide, then report counts. Do not start implementation or close cards.
+
 Make the board burndown-ready. When this sprint ends, every in-scope card
 except `frozen` is either:
 
@@ -55,10 +64,11 @@ Load the smallest slice. Never hand-edit `plugins/tower/.tower/*.json`.
      need, or hides expert control.
    - For each surviving gate: author a ballot-ready decision via
      **tower-ballot** (`--draft` only while unfinished; `--ready` when the
-     owner can decide from the ballot alone). Use the full profile unless the
-     owner's current request explicitly asks for a short ballot. Full profile
-     reviews run base, boil the ocean, hybrid, cooperative, a fresh-agent RLI5
-     beginner pass, then rival-family adversarial review.
+     owner can decide from the ballot alone). Use `short` by default for one
+     mechanism with at most three options; use `full` for new syntax, invariant
+     carve-outs, or cards the owner marks full. Full reviews are the fresh-agent
+     RLI5 beginner pass and a separate fresh-agent adversarial pass; model
+     families need not differ.
    - Advance honestly: planning → ready when ungated; leave in decide while
      ballots are open. Log what changed with `--by <agent>`.
 4. Optionally run **tower-rank** if the user asked to reorder as part of prep.

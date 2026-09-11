@@ -172,7 +172,7 @@ fn assert_tier_text(text: &str) {
 
 fn assert_knowledge_ledger(json: &str) {
     assert!(
-        json.starts_with("{\"schema\":\"jet.report/v1\"")
+        json.starts_with("{\"schema\":\"jet.status/v1\"")
             && json.contains("\"gates\":{\"entries\":["),
         "{json}"
     );
@@ -697,25 +697,6 @@ fn i9_number_grid_sema_records_the_shared_interval_facts() {
     assert_eq!(severity.range.map(|(lo, hi, _)| (lo, hi)), Some((0, 10)));
 }
 
-#[test]
-fn i9_number_grid_tir_consumes_the_interval_and_keeps_output() {
-    let (_scratch, bundle) = checked_number_grid_bundle("number-grid-tir");
-    let program = jet::Codegen::TIR::lower_jit_program(&bundle)
-        .expect("number-grid example must lower through TIR");
-    assert_eq!(program.distinct_ranges.get("Severity"), Some(&(0, 10)));
-
-    let mut sink = jet::Comptime::DevSink::default();
-    jet::Codegen::TIR::run_program(
-        &program,
-        &bundle.project_root,
-        &mut sink,
-        std::collections::HashMap::new(),
-        &std::collections::HashMap::new(),
-        jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
-    )
-    .expect("number-grid TIR evaluation must succeed");
-    assert_eq!(sink.stdout, NUMBER_GRID_EXPECTED);
-}
 
 #[test]
 fn i9_number_grid_aot_keeps_the_golden_behavior() {

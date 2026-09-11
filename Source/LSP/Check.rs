@@ -17,7 +17,7 @@ pub fn check_document(path: &str, text: &str) -> Vec<Diagnostic> {
 /// serializer used by CLI build inspection, not an LSP-owned graph model.
 pub fn build_graph_json(path: &str, text: &str) -> Result<Option<String>, Vec<Diagnostic>> {
     crate::Driver::query_build_plan_with_overlay(path, text)
-        .map(|plan| plan.map(|plan| crate::Driver::build_plan_json(&plan)))
+        .map(|plan| plan.map(|plan| crate::Driver::build_plan_json(&plan, None)))
 }
 
 /// Check one document, also returning the bundle and effect facts for symbol analysis.
@@ -189,7 +189,7 @@ pub fn run_doctor() {
     } else {
         println!("  [FAIL] lexer: {} errors", lex_errs.len());
     }
-    match crate::Parser::parse(&toks) {
+    match crate::Parser::parse_with_source(&toks, src) {
         Ok(_) => println!("  [ok] parser"),
         Err(errs) => println!("  [FAIL] parser: {} errors", errs.len()),
     }

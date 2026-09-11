@@ -44,16 +44,24 @@ fn format_decimal_int(value: &str, precision: i64, grouped: bool) -> String {
     let digits = digits.trim_start_matches('0');
     let digits = if digits.is_empty() { "0" } else { digits };
     let sign = if negative && digits != "0" { "-" } else { "" };
-    let whole = if grouped {
-        group_decimal_digits(digits)
+    let grouped_digits = if grouped {
+        Some(group_decimal_digits(digits))
     } else {
-        digits.to_string()
+        None
     };
-    if precision == 0 {
-        format!("{sign}{whole}")
-    } else {
-        format!("{sign}{whole}.{}", "0".repeat(precision))
+    let whole = grouped_digits.as_deref().unwrap_or(digits);
+    let mut out = String::with_capacity(
+        sign.len() + whole.len() + usize::from(precision > 0) + precision,
+    );
+    out.push_str(sign);
+    out.push_str(whole);
+    if precision > 0 {
+        out.push('.');
+        for _ in 0..precision {
+            out.push('0');
+        }
     }
+    out
 }
 
 /// D-FMT-INTERP3=B: convert an exact decimal integer spelling to lowercase
@@ -81,18 +89,24 @@ fn jet_fmt_radix_decimal(value: &str, radix: u16, width: i64) -> String {
     } else {
         (false, value)
     };
-    let mut decimal = digits
-        .bytes()
-        .map(|digit| digit.wrapping_sub(b'0'))
-        .collect::<Vec<_>>();
-    if decimal.is_empty() || decimal.iter().any(|digit| *digit > 9) {
-        return value.to_string();
+    let mut decimal = Vec::with_capacity(digits.len());
+    for digit in digits.bytes() {
+        let digit = digit.wrapping_sub(b'0');
+        if digit > 9 {
+            return value.to_string();
+        }
+        if digit != 0 || !decimal.is_empty() {
+            decimal.push(digit);
+        }
     }
-    while decimal.len() > 1 && decimal[0] == 0 {
-        decimal.remove(0);
+    if decimal.is_empty() {
+        if digits.is_empty() {
+            return value.to_string();
+        }
+        decimal.push(0);
     }
 
-    let mut converted = Vec::new();
+    let mut converted = Vec::with_capacity(decimal.len());
     while decimal.iter().any(|digit| *digit != 0) {
         let mut carry = 0u16;
         let mut quotient = Vec::with_capacity(decimal.len());
@@ -112,13 +126,18 @@ fn jet_fmt_radix_decimal(value: &str, radix: u16, width: i64) -> String {
     } else {
         converted.reverse();
     }
-    let converted = converted.into_iter().collect::<String>();
-    let padding = "0".repeat((width.max(0) as usize).saturating_sub(converted.len()));
-    if negative && converted != "0" {
-        format!("-{padding}{converted}")
-    } else {
-        format!("{padding}{converted}")
+    let padding = (width.max(0) as usize).saturating_sub(converted.len());
+    let zero = converted.len() == 1 && converted[0] == '0';
+    let signed = negative && !zero;
+    let mut out = String::with_capacity(usize::from(signed) + padding + converted.len());
+    if signed {
+        out.push('-');
     }
+    for _ in 0..padding {
+        out.push('0');
+    }
+    out.extend(converted);
+    out
 }
 
 pub(crate) fn jet_fmt_sci(value: f64, precision: i64) -> String {
@@ -402,14 +421,18 @@ fn group_decimal_digits(raw: &str) -> String {
     } else {
         ("", raw)
     };
-    let mut out = String::new();
-    for (index, ch) in digits.chars().rev().enumerate() {
-        if index > 0 && index % 3 == 0 {
+    let count = digits.chars().count();
+    let mut out = String::with_capacity(
+        sign.len() + digits.len() + count.saturating_sub(1) / 3,
+    );
+    out.push_str(sign);
+    for (index, ch) in digits.chars().enumerate() {
+        if index > 0 && (count - index) % 3 == 0 {
             out.push(',');
         }
         out.push(ch);
     }
-    format!("{sign}{}", out.chars().rev().collect::<String>())
+    out
 }
 
 fn comma_decimal(raw: String) -> String {

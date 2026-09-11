@@ -142,6 +142,20 @@ impl<T: Send> JetStream<T> {
         Some(value)
     }
 
+    /// Pull one value and preserve the producer-failure contract for lazy
+    /// stream views.  Adapters that wrap a `JetStream` use this instead of
+    /// reimplementing the terminal failure check owned by the base stream.
+    pub fn pull_checked(&mut self) -> Option<T> {
+        let value = self.pull();
+        if value.is_none() && self.failed() {
+            if let Some(report) = self.failure_report() {
+                jet_scheduler_runtime_stop_with_report(report);
+            }
+            jet_scheduler_runtime_stop("stream producer failed");
+        }
+        value
+    }
+
     fn observe_completion(&mut self) {
         let Some(completion) = self.completion.take() else {
             return;
@@ -180,14 +194,7 @@ impl<T: Send> Iterator for JetStreamIter<T> {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let value = self.stream.pull();
-        if value.is_none() && self.stream.failed() {
-            if let Some(report) = self.stream.failure_report() {
-                jet_scheduler_runtime_stop_with_report(report);
-            }
-            jet_scheduler_runtime_stop("stream producer failed");
-        }
-        value
+        self.stream.pull_checked()
     }
 }
 

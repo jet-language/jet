@@ -4,22 +4,19 @@ use core.reactive as reactive
 
 #Target(Web)
 fn run() {
-    count := reactive.signal(0)
-    increment_count := () -> {
-        count.set(count.get() + 1)
-    }
-    reset_count := () -> {
-        count.set(0)
-    }
-    increment := ui.button("increment", on_click: () -> increment_count())
-    reset := ui.button("reset", on_click: () -> reset_count())
+    clicks :: reactive.signal(0)
     backend :: ui.null_backend()
     ui.reactive_render(() -> {
-        current := count.get()
-        ui.mount(backend, ui.box([
+        current :: clicks.get()
+        tree :: ui.box([
             ui.node("count: {current}", 120.0, 32.0),
-            ~increment,
-            ~reset
-        ]), ui.constraint(0.0, 0.0, 240.0, 120.0))
+            ui.button("increment", on_click: () -> {
+                clicks.set(clicks.get() + 1)
+            }),
+            ui.button("reset", on_click: () -> {
+                clicks.set(0)
+            })
+        ])
+        ui.mount(backend, tree, ui.constraint(0.0, 0.0, 240.0, 120.0))
     })
 }

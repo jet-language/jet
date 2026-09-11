@@ -201,7 +201,7 @@ fn receipt_input(name: &str, value: &str) -> JetDevelopmentReceiptInput {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn ensure_receipt_directory(path: &std::path::Path) -> bool {
+pub fn ensure_receipt_directory(path: &std::path::Path) -> bool {
     let mut current = std::path::PathBuf::new();
     for component in path.components() {
         current.push(component.as_os_str());

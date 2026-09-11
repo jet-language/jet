@@ -7,8 +7,8 @@ use std::process::exit;
 
 use jet::Diagnostics::{Diagnostic, Severity, Span, TextEdit};
 use jet::ExitCodes;
-use jet_foundation::Report::ReportEnvelope;
-use jet_foundation::JSON::{json_escape, JSONValue};
+use jet_foundation::Report::{StatusEnvelope, StatusFields};
+use jet_foundation::DataTree::DataTree;
 use jet_semindex::{SemanticOp, SemanticOpTarget, SourceSpan};
 
 #[derive(Clone)]
@@ -113,12 +113,12 @@ fn read_plan(path: &Path) -> TryPlan {
     let value = jet_foundation::JSON::parse(&text)
         .unwrap_or_else(|e| fail(&format!("invalid try plan JSON: {e}")));
     let mut object = match value {
-        JSONValue::Object(object) => object,
+        DataTree::Object(object) => object,
         _ => fail("try plan must be a JSON object"),
     };
 
-    if let Some(version) = object.remove("version") {
-        if !matches!(version, JSONValue::Number(1)) {
+    if let Some(version) = take_value(&mut object, "version") {
+        if !matches!(version, DataTree::Int(1)) {
             fail("unsupported try plan version; expected version 1")
         }
     }
@@ -134,13 +134,13 @@ fn read_plan(path: &Path) -> TryPlan {
         }
         Some("text_edit") => Action::Edits(take_edits(&mut object, path)),
         Some(other) => fail(&format!("try plan operation `{other}` is not supported")),
-        None if object.contains_key("edits") => Action::Edits(take_edits(&mut object, path)),
+        None if contains_key(&object, "edits") => Action::Edits(take_edits(&mut object, path)),
         None => fail("try plan needs `operation: \"rename\"` or `edits`"),
     };
     if !object.is_empty() {
         fail(&format!(
             "unknown field(s) in try plan: {}",
-            object.keys().cloned().collect::<Vec<_>>().join(", ")
+            object_keys(&object).join(", ")
         ))
     }
     TryPlan {
@@ -150,9 +150,9 @@ fn read_plan(path: &Path) -> TryPlan {
     }
 }
 
-fn take_edits(object: &mut BTreeMap<String, JSONValue>, plan_path: &Path) -> Vec<EditPlan> {
-    let values = match object.remove("edits") {
-        Some(JSONValue::Array(values)) => values,
+fn take_edits(object: &mut Vec<(String, DataTree)>, plan_path: &Path) -> Vec<EditPlan> {
+    let values = match take_value(object, "edits") {
+        Some(DataTree::Array(values)) => values,
         Some(_) => fail("`edits` must be an array"),
         None => fail("try plan is missing `edits`"),
     };
@@ -163,7 +163,7 @@ fn take_edits(object: &mut BTreeMap<String, JSONValue>, plan_path: &Path) -> Vec
         .into_iter()
         .map(|value| {
             let mut object = match value {
-                JSONValue::Object(object) => object,
+                DataTree::Object(object) => object,
                 _ => fail("each try edit must be an object"),
             };
             let path = resolve_against(plan_path.parent(), &take_string(&mut object, "path"));
@@ -176,7 +176,7 @@ fn take_edits(object: &mut BTreeMap<String, JSONValue>, plan_path: &Path) -> Vec
             if !object.is_empty() {
                 fail(&format!(
                     "unknown field(s) in try edit: {}",
-                    object.keys().cloned().collect::<Vec<_>>().join(", ")
+                    object_keys(&object).join(", ")
                 ))
             }
             EditPlan {
@@ -349,18 +349,16 @@ fn verify_current_bytes(changes: &[Change]) {
 
 fn emit_success(plan: &TryPlan, verdict: &Verdict, receipt: &str, keep: bool, json: bool) {
     if json {
-        let status = if keep { "kept" } else { "rolled_back" };
+        let fields = StatusFields::new()
+            .with("name", plan.name.clone())
+            .with("kept", keep)
+            .with("claims_rechecked", verdict.claims_rechecked)
+            .with("claims_reused", verdict.claims_reused)
+            .with("receipt_id", receipt);
         println!(
             "{}",
-            ReportEnvelope::status_record("tool", status, true, "try")
-                .with_fields(&format!(
-                    ",\"name\":\"{}\",\"kept\":{},\"claims_rechecked\":{},\"claims_reused\":{},\"receipt_id\":\"{}\"",
-                    json_escape(&plan.name),
-                    keep,
-                    verdict.claims_rechecked,
-                    verdict.claims_reused,
-                    json_escape(receipt),
-                ))
+            StatusEnvelope::new("try", true)
+                .with_fields(fields)
                 .json()
         );
         return;
@@ -386,14 +384,20 @@ fn emit_failure(
     json: bool,
 ) {
     if json {
+        let file = jet::Diagnostics::ReportPath::from_path(&plan.entry);
+        let reports = diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.to_report(&file, entry_source));
+        let fields = StatusFields::new()
+            .with("name", plan.name.clone())
+            .with("kept", false)
+            .with("verdict", "failed")
+            .with("receipt_id", receipt);
         println!(
             "{}",
-            ReportEnvelope::status_record("tool", "rolled_back", false, "try")
-                .with_fields(&format!(
-                    ",\"name\":\"{}\",\"kept\":false,\"verdict\":\"failed\",\"receipt_id\":\"{}\"",
-                    json_escape(&plan.name),
-                    json_escape(receipt),
-                ))
+            StatusEnvelope::new("try", false)
+                .with_reports(reports)
+                .with_fields(fields)
                 .json()
         );
     } else {
@@ -426,33 +430,48 @@ fn edit(span: SourceSpan, text: &str) -> TextEdit {
     }
 }
 
-fn take_string(object: &mut BTreeMap<String, JSONValue>, key: &str) -> String {
-    match object.remove(key) {
-        Some(JSONValue::String(value)) => value,
+fn take_value(object: &mut Vec<(String, DataTree)>, key: &str) -> Option<DataTree> {
+    let index = object.iter().position(|(name, _)| name == key)?;
+    Some(object.remove(index).1)
+}
+
+fn contains_key(object: &[(String, DataTree)], key: &str) -> bool {
+    object.iter().any(|(name, _)| name == key)
+}
+
+fn object_keys(object: &[(String, DataTree)]) -> Vec<String> {
+    let mut keys = object.iter().map(|(name, _)| name.clone()).collect::<Vec<_>>();
+    keys.sort();
+    keys
+}
+
+fn take_string(object: &mut Vec<(String, DataTree)>, key: &str) -> String {
+    match take_value(object, key) {
+        Some(DataTree::Text(value) | DataTree::TypedText(value)) => value,
         Some(_) => fail(&format!("`{key}` must be text")),
         None => fail(&format!("try plan is missing `{key}`")),
     }
 }
 
-fn take_string_opt(object: &mut BTreeMap<String, JSONValue>, key: &str) -> Option<String> {
-    match object.remove(key) {
-        Some(JSONValue::String(value)) => Some(value),
+fn take_string_opt(object: &mut Vec<(String, DataTree)>, key: &str) -> Option<String> {
+    match take_value(object, key) {
+        Some(DataTree::Text(value) | DataTree::TypedText(value)) => Some(value),
         Some(_) => fail(&format!("`{key}` must be text")),
         None => None,
     }
 }
 
 fn take_string_default(
-    object: &mut BTreeMap<String, JSONValue>,
+    object: &mut Vec<(String, DataTree)>,
     key: &str,
     default: &str,
 ) -> String {
     take_string_opt(object, key).unwrap_or_else(|| default.into())
 }
 
-fn take_number(object: &mut BTreeMap<String, JSONValue>, key: &str) -> usize {
-    match object.remove(key) {
-        Some(JSONValue::Number(value)) if value >= 0 => value as usize,
+fn take_number(object: &mut Vec<(String, DataTree)>, key: &str) -> usize {
+    match take_value(object, key) {
+        Some(DataTree::Int(value)) if value >= 0 => value as usize,
         Some(_) => fail(&format!("`{key}` must be a non-negative integer")),
         None => fail(&format!("try edit is missing `{key}`")),
     }

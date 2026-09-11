@@ -418,6 +418,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -428,6 +431,112 @@ jobs:
           path: dist
           pattern: jet-*
           merge-multiple: true
+      - name: Download reviewed compiled-workload reports (#2943)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          path: candidate-input/reports
+          pattern: release-compiled-workload-*
+          merge-multiple: false
+
+      - name: Download exact candidate qualification record (#2943)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          artifact_name="release-candidate-${GITHUB_SHA}"
+          artifact_response="$(gh api --paginate --slurp \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${artifact_name}&per_page=100")"
+          artifact_ids="$(
+            jq -r --arg name "$artifact_name" --arg sha "$GITHUB_SHA" '
+              [.[] | .artifacts[] |
+                select(.name == $name and .expired == false and .workflow_run.head_sha == $sha)] |
+                .[].id
+            ' <<<"$artifact_response"
+          )"
+          artifact_count="$(printf '%s\n' "$artifact_ids" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
+          test "$artifact_count" -eq 1 || {
+            echo "expected exactly one unexpired candidate qualification artifact for ${artifact_name}; run the qualification/closeout producer first" >&2
+            exit 1
+          }
+          artifact_id="$(printf '%s\n' "$artifact_ids" | sed -n '1p')"
+          archive="$RUNNER_TEMP/${artifact_name}.zip"
+          unpack="$RUNNER_TEMP/candidate-qualification"
+          rm -rf "$unpack"
+          mkdir -p "$unpack" candidate-input/candidate
+          gh api \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
+            >"$archive"
+          unzip -q "$archive" -d "$unpack"
+          candidate_paths="$(find "$unpack" -type f -name candidate.json -print)"
+          test "$(printf '%s\n' "$candidate_paths" | sed '/^$/d' | wc -l | tr -d '[:space:]')" -eq 1
+          cp "$candidate_paths" candidate-input/candidate/candidate.json
+
+      - name: Validate reviewed reports and candidate identity (#2943)
+        shell: bash
+        run: |
+          set -euo pipefail
+          reports=(
+            "candidate-input/reports/release-compiled-workload-linux-x86_64-${GITHUB_SHA}/"
+            "candidate-input/reports/release-compiled-workload-macos-x86_64-${GITHUB_SHA}/"
+            "candidate-input/reports/release-compiled-workload-windows-x86_64-${GITHUB_SHA}/"
+          )
+          for report in "${reports[@]}"; do
+            test -d "$report" || {
+              echo "candidate workload report is missing: $report" >&2
+              exit 1
+            }
+            JET_COMPILED_WORKLOAD_CANDIDATE_COMMIT="$GITHUB_SHA" \
+              bash tools/ci/compiled-workload-gate.sh --check "$report"
+          done
+          CANDIDATE_REPORT_ROOT=candidate-input/reports \
+          node --input-type=module <<'NODE'
+          import { readFileSync } from "node:fs";
+          import { readCandidateWorkloadReportRelation } from "./scripts/agent/hardening-manifest.mjs";
+
+          const candidate = JSON.parse(readFileSync("candidate-input/candidate/candidate.json", "utf8"));
+          const reports = readCandidateWorkloadReportRelation(process.env.CANDIDATE_REPORT_ROOT);
+          if ((candidate.commit ?? candidate.candidate_identity?.commit) !== reports.commit) {
+            throw new Error("candidate record and workload reports have different commits");
+          }
+          for (const key of [
+            "source",
+            "compiler",
+            "configuration",
+            "generated_artifact",
+            "target_tool",
+            "consumed_test_oracle",
+            "behavior",
+            "performance",
+            "platform",
+            "binary",
+          ]) {
+            const recorded = candidate.dependencies?.[key];
+            const expected = reports.dependencies?.[key];
+            if (!recorded || !expected
+              || recorded.id !== expected.id
+              || recorded.status !== expected.status
+              || recorded.sha256 !== expected.sha256) {
+              throw new Error(`candidate dependency is not bound to current workload reports: ${key}`);
+            }
+          }
+          NODE
+          mkdir -p dist/candidate
+          cp candidate-input/candidate/candidate.json dist/candidate/candidate.json
+          GITHUB_SHA="$GITHUB_SHA" node --input-type=module <<'NODE'
+          import { readFileSync } from "node:fs";
+
+          const candidate = JSON.parse(readFileSync("dist/candidate/candidate.json", "utf8"));
+          const commit = candidate.commit ?? candidate.candidate_identity?.commit;
+          if (commit !== process.env.GITHUB_SHA) {
+            throw new Error(`candidate record commit ${String(commit)} differs from ${process.env.GITHUB_SHA}`);
+          }
+          NODE
+          node scripts/agent/hardening-manifest.mjs \
+            --candidate-check dist/candidate/candidate.json \
+            --require-qualified \
+            --require-release-claim \
+            --release-channel stable
 
       - name: Stage manifest and signing requests
         shell: bash
@@ -444,6 +553,13 @@ jobs:
             --artifact x86_64-pc-windows-msvc="dist/toolchain/jet-${version}-x86_64-pc-windows-msvc"
           mkdir -p dist/channel
           tar -C channel-staging -czf "dist/channel/toolchain-channel-requests-${version}.tar.gz" .
+      - name: Upload candidate qualification artifact (#2943)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-candidate-${{ github.sha }}
+          path: dist/candidate/candidate.json
+          if-no-files-found: error
+
 
       - name: Upload unsigned channel requests
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -474,12 +590,26 @@ jobs:
         with:
           name: toolchain-channel-requests
           path: dist/channel
+      - name: Download candidate qualification artifact (#2943)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-candidate-${{ github.sha }}
+          path: dist/candidate
+
+      - name: Validate exact candidate before publication (#2943)
+        run: |
+          test -f dist/candidate/candidate.json || { echo "candidate qualification artifact is missing" >&2; exit 1; }
+          node scripts/agent/hardening-manifest.mjs \
+            --candidate-check dist/candidate/candidate.json \
+            --require-qualified \
+            --require-release-claim \
+            --release-channel stable
 
       - name: Attach artifacts to release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" dist/*.tar.gz dist/channel/*.tar.gz \
+          gh release create "${{ github.ref_name }}" dist/*.tar.gz dist/channel/*.tar.gz dist/candidate/candidate.json \
             --title "${{ github.ref_name }}" \
             --generate-notes \
             --repo "${{ github.repository }}"

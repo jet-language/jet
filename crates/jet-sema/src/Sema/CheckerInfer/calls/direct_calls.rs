@@ -1,13 +1,13 @@
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Generics::{e0904, e0905, substitute_type, unify_types};
-use crate::Sema::Bundle::{fn_types_compatible, func_sig_to_fn_type};
+use crate::Sema::Bundle::fn_types_compatible;
 use crate::Sema::CheckerCoreLib::{
     io_error_ty, is_simd_lane_type, math_constructor_arg_types, overflow_opt_in_error, result_ty,
     wrong_core_arity,
 };
 use crate::Sema::CheckerOwnership::{e0142_aliased, e0143_drop_unaudited};
 use crate::Sema::Diagnostics::{
-    edit_distance, is_cloneable, is_printable, owned_type_for_read_view, type_fix_hint,
+    edit_distance, is_cloneable, is_displayable, is_printable, owned_type_for_read_view, type_fix_hint,
     type_is_copy, typed_text_mismatch,
 };
 use crate::Sema::Effects::builtin_effect;
@@ -82,15 +82,7 @@ fn seed_generic_type(
     }
     if let Type::Named(param) = expected {
         if type_params.contains(param) {
-            return bind_inferred_type(
-                param,
-                found,
-                source,
-                type_params,
-                subst,
-                origins,
-                conflict,
-            );
+            return bind_inferred_type(param, found, source, type_params, subst, origins, conflict);
         }
     }
     if let Type::Named(param) = found {
@@ -207,19 +199,17 @@ fn seed_generic_type(
                     // return. Pair the carrier's success slot with that raw
                     // return; two carrier values still use structural matching
                     // so explicit error domains remain checked.
-                    Type::Result { ok: expected_ok, .. }
-                        if !matches!(found.as_ref(), Type::Result { .. }) =>
-                    {
-                        seed_generic_type(
-                            expected_ok.as_ref(),
-                            found.as_ref(),
-                            "the lambda return",
-                            type_params,
-                            subst,
-                            origins,
-                            conflict,
-                        )
-                    }
+                    Type::Result {
+                        ok: expected_ok, ..
+                    } if !matches!(found.as_ref(), Type::Result { .. }) => seed_generic_type(
+                        expected_ok.as_ref(),
+                        found.as_ref(),
+                        "the lambda return",
+                        type_params,
+                        subst,
+                        origins,
+                        conflict,
+                    ),
                     _ => seed_generic_type(
                         expected.as_ref(),
                         found.as_ref(),
@@ -493,7 +483,7 @@ impl<'a> Checker<'a> {
                             Some(*span),
                         ));
                     }
-                    func_sig_to_fn_type(&sig)
+                    self.checked_func_sig_to_fn_type(&sig)
                 }),
                 _ => self.infer(&mut callee.expr),
             }?;
@@ -732,15 +722,11 @@ impl<'a> Checker<'a> {
             for diagnostic in recheck {
                 let duplicate_generic_call_diagnostic =
                     matches!(diagnostic.code.as_str(), "E0904" | "E0112" | "E0113")
-                        && self
-                            .diags
-                            .iter()
-                            .chain(kept.iter())
-                            .any(|previous| {
-                                previous.code == diagnostic.code
-                                    && previous.span == diagnostic.span
-                                    && previous.what == diagnostic.what
-                            });
+                        && self.diags.iter().chain(kept.iter()).any(|previous| {
+                            previous.code == diagnostic.code
+                                && previous.span == diagnostic.span
+                                && previous.what == diagnostic.what
+                        });
                 if duplicate_generic_call_diagnostic {
                     continue;
                 }
@@ -817,11 +803,7 @@ impl<'a> Checker<'a> {
                 }
                 if let Expr::Ident(name, span) = &arg.expr {
                     if !ty.is_scalar() {
-                        self.mark_moved_by(
-                            name.clone(),
-                            *span,
-                            call.name.clone(),
-                        );
+                        self.mark_moved_by(name.clone(), *span, call.name.clone());
                     }
                 }
             }
@@ -948,7 +930,7 @@ impl<'a> Checker<'a> {
                         )
                     } else {
                         format!(
-                            "`{}` is not in Jet; share data through channels",
+                            "`{}` is not a Jet API; use a channel, or `Shared<T>` with `Condition`",
                             call.name
                         )
                     },
@@ -956,14 +938,14 @@ impl<'a> Checker<'a> {
                         "each received token admits one worker until that worker sends the token back"
                             .to_string()
                     } else {
-                        "Jet avoids shared mutable state: tasks communicate by sending messages, not sharing memory"
+                        "tasks pass owned values over channels; when tasks must share memory, `Shared<T>` guards the state under a lock and `Condition` coordinates predicate waits"
                             .to_string()
                     },
                     if semaphore {
                         "create `channel<Int>(capacity: N)`, seed N tokens, receive one before work, and send it back afterward"
                             .to_string()
                     } else {
-                        "create a channel, and use `sender.send`/`channel.receive`"
+                        "create `channel<T>()` and send owned values, or write `shared value` and edit it through `guard_edit()` (a guard can `wait` on a `Condition`)"
                             .to_string()
                     },
                     Some(call.name_span),
@@ -1059,9 +1041,15 @@ impl<'a> Checker<'a> {
             for arg in call.args.iter_mut() {
                 self.borrow_ctx = true; // print borrows via `.jet_show()`
                 if let Some(t) = self.infer(&mut arg.expr) {
-                    if !is_printable(&t, self.registry, self.trait_reg)
+                    if !(is_printable(&t, self.registry, self.trait_reg)
+                        || is_displayable(&t, self.registry, self.trait_reg))
                         && !self.is_unit_type(&t)
                         && !matches!(&t, Type::Named(name) if name == Syntax::TYPE_NEVER)
+                        && !matches!(
+                            &t,
+                            Type::Named(name)
+                                if name == "Unknown" && !self.registry.contains(name)
+                        )
                     {
                         if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t) {
                             self.diags.push(Diagnostic::error(
@@ -1245,11 +1233,7 @@ impl<'a> Checker<'a> {
                 // (E0140/E0141) and prevents any later reuse (E0121). Mark it
                 // consumed even on the E0143 path so the unaudited-drop error is
                 // not buried under a cascade E0140 "unconsumed" at scope end.
-                self.mark_moved_by(
-                    name.clone(),
-                    *span,
-                    call.name.clone(),
-                );
+                self.mark_moved_by(name.clone(), *span, call.name.clone());
             }
             return Some(None);
         }
@@ -1301,6 +1285,7 @@ impl<'a> Checker<'a> {
                     call.name_span,
                     &call.type_args,
                     &mut call.args,
+                    &mut call.resolved_ret,
                 );
                 return Some(result);
             }
@@ -1356,6 +1341,7 @@ impl<'a> Checker<'a> {
                     call.name_span,
                     &call.type_args,
                     &mut call.args,
+                    &mut call.resolved_ret,
                 );
                 return Some(result);
             }
@@ -1665,7 +1651,9 @@ impl<'a> Checker<'a> {
             for arg in call.args.iter_mut() {
                 self.infer(&mut arg.expr);
             }
-            return Some(Some(sig.effective_return_type()));
+            let (_, return_type) =
+                self.checked_return_types(sig.return_type.clone(), sig.is_extern);
+            return Some(Some(return_type));
         }
 
         // E3211 (card #436): a `String` literal with a known interior NUL
@@ -1875,8 +1863,10 @@ impl<'a> Checker<'a> {
             }
             let arg_types: Vec<Type> = pre_inferred.iter().filter_map(|t| t.clone()).collect();
             if arg_types.len() == call.args.len() {
-                let type_param_names: HashSet<String> =
-                    fn_type_params.iter().map(|param| param.name.clone()).collect();
+                let type_param_names: HashSet<String> = fn_type_params
+                    .iter()
+                    .map(|param| param.name.clone())
+                    .collect();
                 let mut inferred_subst = HashMap::new();
                 let mut origins = HashMap::new();
                 let mut conflict = None;
@@ -1910,9 +1900,7 @@ impl<'a> Checker<'a> {
                     let Some((_, param_ty)) = sig.params.get(index) else {
                         continue;
                     };
-                    if matches!(param_ty, Type::Fn { .. })
-                        && matches!(arg_ty, Type::Fn { .. })
-                    {
+                    if matches!(param_ty, Type::Fn { .. }) && matches!(arg_ty, Type::Fn { .. }) {
                         seed_generic_type(
                             param_ty,
                             arg_ty,
@@ -1943,8 +1931,7 @@ impl<'a> Checker<'a> {
                         let Some(arg_ty) = arg_types.get(index) else {
                             continue;
                         };
-                        if matches!(param_ty, Type::Fn { .. })
-                            && matches!(arg_ty, Type::Fn { .. })
+                        if matches!(param_ty, Type::Fn { .. }) && matches!(arg_ty, Type::Fn { .. })
                         {
                             inference_sig.params[index].1 = arg_ty.clone();
                         } else {
@@ -2037,10 +2024,10 @@ impl<'a> Checker<'a> {
             }
             // D-MEM1/S2 vs D-MEM-COPYSEM1. The owning-slot materialization
             // below rewrites a bare name into `Expr::Copy`, and E0209 /
-            // E0201 are stated over exactly that bare name ("a named
-            // binding passed where it would be silently cloned — Move-param
-            // arg without the move marker `^`", diagnostic-rows.md:167). A
-            // parameter-rooted name reaches `implicit_copy_target`'s
+            // E0201 are stated over exactly that bare name ("a named binding passed
+            // where it would be silently cloned — Move-param arg without the move
+            // marker `^`, the registered Diagnostics.jet row). A parameter-rooted
+            // name reaches `implicit_copy_target`'s
             // borrowed-place arm, so the copy landed BEFORE the convention
             // check read the name, and the hard error the law demands was
             // never reported — a clone became silent, which is the one thing
@@ -2179,6 +2166,10 @@ impl<'a> Checker<'a> {
             }
             self.memory_control_multiplier = memory_multiplier;
             if callback_boundary {
+                let managed = sig
+                    .callback_transport
+                    .as_deref()
+                    .is_some_and(|transport| transport != "none");
                 let safe = match &arg.expr {
                     Expr::Ident(callback, _) => {
                         self.funcs
@@ -2188,14 +2179,30 @@ impl<'a> Checker<'a> {
                                 crate::Sema::FFI::cpp_callback_abi_type(ty).is_some()
                             })
                     }
+                    Expr::Lambda(lam) if managed => {
+                        crate::Sema::foreign_managed_callback_lambda(lam)
+                    }
                     Expr::Lambda(lam) => crate::Sema::foreign_thread_safe_lambda(lam),
                     _ => false,
                 };
-                if safe {
+                let metadata_complete = !managed
+                    || (sig.callback_plan_digest.as_deref().is_some_and(|digest| !digest.is_empty())
+                        && sig
+                            .callback_identity
+                            .as_deref()
+                            .is_some_and(|identity| !identity.is_empty())
+                        && sig.foreign_effect_root.as_deref() == Some("FFI.C"));
+                if safe && metadata_complete {
                     arg.flags.c_callback_symbol = true;
+                    arg.flags.c_callback_managed = managed;
+                    arg.flags.c_callback_plan_digest = sig.callback_plan_digest.clone();
+                    arg.flags.c_callback_identity = sig.callback_identity.clone();
                 } else if let Some((_, param_ty)) = effective_params.get(i) {
-                    self.diags
-                        .push(crate::Sema::FFI::e3203(param_ty, arg.expr.span()));
+                    self.diags.push(if managed && !metadata_complete {
+                        crate::Sema::FFI::callback_contract_error(param_ty, arg.expr.span())
+                    } else {
+                        crate::Sema::FFI::e3203(param_ty, arg.expr.span())
+                    });
                 }
             }
             self.expected_type = saved_exp;
@@ -2397,14 +2404,18 @@ impl<'a> Checker<'a> {
                     }
                 }
                 (AccessConvention::Move, AccessConvention::Move) => {
+                    if self.reject_noncanonical_move_place(
+                        &arg.expr,
+                        arg_ty.as_ref(),
+                        &call.name,
+                        arg.span,
+                    ) {
+                        continue;
+                    }
                     // The value is given away for real.
                     if let Expr::Ident(name, span) = &arg.expr {
                         if !type_is_copy(param_ty) {
-                            self.mark_moved_by(
-                                name.clone(),
-                                *span,
-                                call.name.clone(),
-                            );
+                            self.mark_moved_by(name.clone(), *span, call.name.clone());
                         }
                     }
                 }
@@ -2513,18 +2524,20 @@ impl<'a> Checker<'a> {
             call.args.extend(tail);
         }
 
-        Some(Some({
-            let t = sig.effective_return_type();
-            let t = if generic_subst.is_empty() {
-                t
+        let resolved_declared = sig.return_type.clone().map(|return_type| {
+            if generic_subst.is_empty() {
+                return_type
             } else {
-                self.trait_reg.instantiate_type(&t, &generic_subst)
-            };
-            if self.unit_fact_for_type(&t).is_some() {
-                t
-            } else {
-                self.resolve_type(t)
+                self.trait_reg
+                    .instantiate_type(&return_type, &generic_subst)
             }
-        }))
+        });
+        let (resolved_ret, effective_ret) =
+            self.checked_return_types(resolved_declared, sig.is_extern);
+        // Keep the callee's declared return fact on the call node. This is
+        // distinct from the effective failure carrier returned below: a plain
+        // callee return is non-fallible, while `!E`/`Outcome` remains fallible.
+        call.resolved_ret = Some(resolved_ret);
+        Some(Some(effective_ret))
     }
 }

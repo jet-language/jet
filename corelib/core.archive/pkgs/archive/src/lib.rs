@@ -1265,7 +1265,7 @@ mod tests {
             Some("[\"quote\\\"slash\\\\line\\ncontrol\\u0001\"]".to_string())
         );
 
-        let name = "\u{0001}".repeat(MAX_OUTPUT / 6);
+        let name = "\u{0001}".repeat(MAX_OUTPUT / 6 + 1);
         assert!(names_json(vec![name.as_str()]).is_none());
     }
 }

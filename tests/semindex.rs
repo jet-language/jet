@@ -1569,42 +1569,18 @@ fn jet_semindex_cli_json_smoke() {
         jet_foundation::MachineOutput::read_machine_output(&text).unwrap(),
         vec![jet_foundation::MachineOutput::MachineRecord::Status]
     );
-    assert!(text.starts_with("{\"schema\":\"jet.report/v1\""));
+    assert!(text.starts_with("{\"schema\":\"jet.status/v1\""));
     assert_eq!(
-        text.matches("\"schema\":\"jet.report/v1\"").count(),
+        text.matches("\"schema\":\"jet.status/v1\"").count(),
         1,
-        "semindex must emit one report envelope, not nest a second one: {text}"
+        "semindex must emit one status envelope, not nest a second one: {text}"
     );
     assert!(text.contains(&format!("\"schema_version\":{}", SCHEMA_VERSION)));
 }
 
-#[test]
-fn jet_dossier_cli_json_smoke() {
-    let bin = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
-    let path = fixture("types/traits.jet");
-    let out = std::process::Command::new(bin)
-        .args([
-            "inspect",
-            "dossier",
-            path.to_str().unwrap(),
-            "Square",
-            "--json",
-        ])
-        .output()
-        .expect("jet inspect dossier");
-    assert!(
-        out.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let text = String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains("\"target\":\"Square\""));
-    assert!(text.contains("\"members\""));
-    assert!(text.contains("\"check\":{\"status\":\"passed\""));
-}
 
 #[test]
-fn shape6_inspect_routes_and_retired_bare_snapshots() {
+fn shape6_inspect_routes_and_bare_snapshots() {
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
     let help = std::process::Command::new(&bin)
         .arg("help")
@@ -1659,7 +1635,6 @@ fn shape6_inspect_routes_and_retired_bare_snapshots() {
     }
 
     for (verb, handler_text) in [
-        ("dossier", "`jet inspect dossier` needs an entry file"),
         ("schema", "`jet inspect schema` needs a verb"),
         ("expand", "`jet inspect expand` needs an entry file"),
         ("live", "jet inspect live needs a process id"),

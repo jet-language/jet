@@ -1,0 +1,72 @@
+use core.plugin as plugin
+use core.files as fs
+use "service" as service
+
+#Codable
+struct Row {
+    label: String
+    score: Int
+}
+
+fn run() {
+    plugin_root :: "/home/nate/.cache/jet-luna/dx3/prim-capabilities/pkg/plugin_src"
+    input_root :: "/home/nate/.cache/jet-luna/dx3/prim-capabilities/inputs"
+    root_policy :: Authority.from_rights(["FS.Read:{plugin_root}", "FS.Read:{input_root}"])
+    #FX(FS.Read, IO, Exec) {
+        // D-FILES-SCOPE1: the host binds ordinary file access to the same
+        // resource-qualified grant lent to the guest; no ambient FS is added.
+        host_files :: fs.scope(root_policy)
+        host_inside :: host_files.read("{input_root}/allowed.txt") ?? {
+            print("host:file:read-failed")
+            return
+        }
+        print("host:file:inside={host_inside.trim()}")
+        _host_outside :: host_files.read("/etc/passwd") ?? {
+            print("host:file:outside-denied {err}")
+            ""
+        }
+        guest :: plugin.load("/home/nate/.cache/jet-luna/dx3/prim-capabilities/pkg/plugin_src/build/run.wasm", root_policy)
+        greeting :: guest.greet("Ada") ?? {
+            print("plugin:load-failed")
+            return
+        }
+        print("plugin:greeting={greeting}")
+
+        scaled :: guest.scale(6.0, 7.0) ?? {
+            print("plugin:scale-failed")
+            return
+        }
+        print("plugin:scale={scaled}")
+
+        rows :: [Row]{{label: "first", score: 12}, {label: "second", score: 30}}
+        indexed :: guest.index(rows) ?? {
+            print("plugin:index-failed")
+            return
+        }
+        print("plugin:index={indexed}")
+
+        inside :: guest.read("{input_root}/allowed.txt") ?? {
+            print("file:read-failed")
+            return
+        }
+        print("file:inside={inside.trim()}")
+        _guest_outside :: guest.read("/etc/passwd") ?? {
+            print("plugin:file:outside-denied {err}")
+            ""
+        }
+
+        invalid :: plugin.load("/home/nate/.cache/jet-luna/dx3/prim-capabilities/pkg/plugin_src/hostile/run.wasm", root_policy)
+        _invalid_result :: invalid.greet("Ada") ?? {
+            print("plugin:malformed-rejected {err}")
+            "rejected"
+        }
+
+        outside_plugin :: plugin.load("/etc/run.wasm", root_policy)
+        _outside_result :: outside_plugin.greet("Ada") ?? {
+            print("plugin:outside-rejected {err}")
+            "rejected"
+        }
+
+        service.lifecycle()
+    }
+}

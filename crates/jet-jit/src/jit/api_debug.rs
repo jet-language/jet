@@ -1,25 +1,38 @@
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_module::Module;
 use cranelift_object::{ObjectBuilder, ObjectModule};
-use jet_codegen::Codegen::TIR::{self, TEnumPayload, TExpr, TExprKind, TIfCond, TStmt, TStrPart};
-use jet_foundation::{JitBackend::RunOutcome, AST::ProgramBundle};
-use std::collections::HashSet;
+use jet_foundation::{
+    JitBackend::RunOutcome,
+    MIR::{
+        MirArtifactId, MirCoreClosureKind, MirOperation, MirProgram, MirSelectKind,
+        MirSemanticOp, MirTerminator,
+    },
+};
+use jet_pkg_model::Package::ReleaseDevtoolsPolicy;
 
-use super::gap::{entry_run_name, JitGap};
+use super::gap::JitGap;
 use super::resident::{
-    ensure_resident_module, fresh_runtime_with_allocator_cap, resident_hot_swap,
-    resident_run_fresh, resident_run_mixed, resident_teardown,
+    ensure_resident_module, fresh_runtime, publish_runtime_decisions, resident_hot_swap,
+    resident_run_fresh, resident_teardown,
 };
 use super::runtime_host::catch_jit_panic;
 use super::safety::{
-    collect_select_arms_jit, count_spawn_sites, entry_return_supported, jit_list_task_type,
-    jit_value_type, resident_safe_capture_policy, resident_safe_expr, resident_safe_func,
-    resident_safe_func_detail, resident_safe_program, resident_safe_spawn_lambda,
-    resident_safe_stmt,
+    artifact_entry, resident_safe_mir_function, resident_safe_mir_program,
 };
-use super::tiers::{plan_tiers, record_trace};
+use super::tiers::{plan_mir_tiers, record_trace};
 use super::trace::note_jit_execution;
 use super::RESIDENT_RUNTIME;
+
+fn entry_gap(program: &MirProgram, artifact: MirArtifactId, reason: impl Into<String>) -> Option<JitGap> {
+    let id = artifact_entry(program, artifact)?;
+    let name = program
+        .functions
+        .iter()
+        .find(|function| function.id == id)
+        .map(|function| function.key.clone())
+        .unwrap_or_else(|| "<no entry>".to_string());
+    Some(JitGap::new(id, name, reason))
+}
 
 pub fn cranelift_host_supported() -> bool {
     // cranelift-jit 0.112's PLT path panics on non-x86_64 hosts. Keep the
@@ -36,46 +49,42 @@ pub struct DebugAotObject {
     pub entry: String,
 }
 
-/// Compile a checked executable bundle through Cranelift's object backend.
-/// `Err` is a deliberate capability refusal: the caller must report the reason
-/// and retry the same bundle through the debug rustc route.
-pub fn try_compile_debug_aot(bundle: &ProgramBundle) -> Result<DebugAotObject, String> {
-    crate::on_compiler_stack(|| try_compile_debug_aot_on_stack(bundle))
+/// Compile a checked MIR executable through Cranelift's object backend.
+/// `Err` is a deliberate capability refusal: the caller owns the fallback
+/// artifact path and reports the same checked program.
+pub fn try_compile_debug_aot(
+    program: &MirProgram,
+    artifact: MirArtifactId,
+    release_devtools_policy: &ReleaseDevtoolsPolicy,
+) -> Result<DebugAotObject, String> {
+    crate::on_compiler_stack(|| {
+        try_compile_debug_aot_on_stack(program, artifact, release_devtools_policy)
+    })
 }
 
-fn try_compile_debug_aot_on_stack(bundle: &ProgramBundle) -> Result<DebugAotObject, String> {
+fn try_compile_debug_aot_on_stack(
+    program: &MirProgram,
+    artifact: MirArtifactId,
+    release_devtools_policy: &ReleaseDevtoolsPolicy,
+) -> Result<DebugAotObject, String> {
     // Object emission is a separate artifact path. Never let its compiled
     // bytes enter the resident JIT's process-local warm-code capture.
     super::tier_cache::abort_capture();
     if !cfg!(target_arch = "x86_64") {
-        return Err("Cranelift debug-AOT object emission is unavailable on this architecture".into());
+        return Err(
+            "Cranelift debug-AOT object emission is unavailable on this architecture".into(),
+        );
     }
-    if bundle.cffi.links_c() {
-        return Err("the checked bundle has native C links".into());
+    let plan = plan_mir_tiers(program, artifact);
+    if plan.whole_program_deopt || !plan.deopt.is_empty() {
+        return Err("the checked MIR program is not fully applicable to Cranelift".into());
     }
-    let program = TIR::lower_jit_program(bundle).ok_or_else(|| {
-        format!(
-            "TIR lowering refused the checked bundle ({})",
-            TIR::lower_jit_program_fail_reason(bundle)
-        )
-    })?;
-    if program.entry == jet_foundation::Names::mangle_generated("cli_main") {
-        return Err("program-struct CLI dispatch needs the rustc runtime adapter".into());
-    }
-    let plan = plan_tiers(bundle, Some(&program));
-    if plan.whole_interp || !plan.deopt.is_empty() {
-        return Err("the checked bundle requires interpreter deopt".into());
-    }
-
-    crate::Encoding::register_migrations(bundle);
-    super::types_meta::install_struct_redact(bundle);
+    // Keep debug AOT at the same unoptimized Cranelift level as the resident
+    // JIT; #2919 owns any opt-level change after the cross-tier corpus gate.
     let mut flags = settings::builder();
     flags
         .set("opt_level", "none")
         .map_err(|error| format!("Cranelift debug flags: {error}"))?;
-    // Keep the object relocatable for the final native linker. These are the
-    // same long-range/libcall settings used by the resident backend, without
-    // turning any generated address into an in-process pointer.
     flags
         .set("use_colocated_libcalls", "false")
         .map_err(|error| format!("Cranelift debug flags: {error}"))?;
@@ -95,12 +104,12 @@ fn try_compile_debug_aot_on_stack(bundle: &ProgramBundle) -> Result<DebugAotObje
     object_builder.per_function_section(true);
     let mut module = ObjectModule::new(object_builder);
     let host = super::runtime_host::declare_host_fns_for_module(&mut module)?;
-    let cap_bytes = crate::program_allocator_cap_bytes(bundle);
-    let mut runtime = super::resident::fresh_runtime_with_allocator_cap(cap_bytes);
+    let mut runtime = super::resident::fresh_runtime(release_devtools_policy.clone());
     let entry_id = super::functions_compile::compile_program_object(
         &mut module,
         &host,
-        &program,
+        program,
+        artifact,
         &mut runtime,
     )?;
     let entry = module
@@ -112,284 +121,185 @@ fn try_compile_debug_aot_on_stack(bundle: &ProgramBundle) -> Result<DebugAotObje
         .finish()
         .emit()
         .map_err(|error| format!("Cranelift object emission: {error}"))?;
-    Ok(DebugAotObject {
-        bytes,
-        entry,
-    })
+    Ok(DebugAotObject { bytes, entry })
 }
 
-pub(crate) fn classify_jit_gap(bundle: &ProgramBundle) -> JitGap {
-    let function = entry_run_name(bundle);
+pub(crate) fn try_resident(
+    program: &MirProgram,
+    artifact: MirArtifactId,
+    release_devtools_policy: &ReleaseDevtoolsPolicy,
+) -> Result<RunOutcome, super::tiers::MirTierPlan> {
     if !cranelift_host_supported() {
-        return JitGap::new(
-            function,
-            "cranelift-jit host path unsupported on this architecture",
-        );
+        return Err(plan_mir_tiers(program, artifact));
     }
-    let detail = resident_jit_safe_bundle_detail(bundle);
-    if !detail.is_empty() {
-        return JitGap::new(function, detail);
-    }
-    JitGap::new(
-        function,
-        format!(
-            "lower_jit_program returned None ({})",
-            TIR::lower_jit_program_fail_reason(bundle)
-        ),
-    )
-}
-
-pub(crate) fn try_resident(bundle: &ProgramBundle) -> Result<RunOutcome, super::tiers::TierPlan> {
-    if !cranelift_host_supported() {
-        return Err(plan_tiers(bundle, None));
-    }
-    crate::Encoding::register_migrations(bundle);
-    super::types_meta::install_struct_redact(bundle);
-    let cap_bytes = crate::program_allocator_cap_bytes(bundle);
-    let program = match TIR::lower_jit_program(bundle) {
-        Some(program) => program,
-        None => return Err(plan_tiers(bundle, None)),
-    };
-    crate::CLI::prepare_cli_from_bundle(bundle);
-    let plan = plan_tiers(bundle, Some(&program));
-    if plan.whole_interp {
+    super::types_meta::install_struct_redact(program);
+    let plan = plan_mir_tiers(program, artifact);
+    if plan.whole_program_deopt || !plan.deopt.is_empty() {
         return Err(plan);
     }
     note_jit_execution();
-    if plan.deopt.is_empty() {
-        match catch_jit_panic("resident run", || resident_run_fresh(&program, cap_bytes)) {
-            Ok(outcome) => {
-                record_trace(plan.rows);
-                Ok(outcome)
-            }
-            Err(reason) => {
-                let mut plan = plan;
-                if let Some(gap) = plan.gap.as_mut() {
-                    gap.reason = reason;
-                } else {
-                    plan.gap = Some(JitGap::new(entry_run_name(bundle), reason));
-                }
-                Err(plan)
-            }
-        }
-    } else {
-        // Mixed: native entry + interpreter stubs for named gaps.
-        match catch_jit_panic("mixed tier run", || {
-            resident_run_mixed(&program, &plan, cap_bytes)
-        }) {
-            Ok(outcome) => {
-                super::trace::note_deopt_invoked_for_test();
-                record_trace(plan.rows);
-                Ok(outcome)
-            }
-            Err(reason) => {
-                let mut plan = plan;
-                if let Some(gap) = plan.gap.as_mut() {
-                    gap.reason = reason;
-                } else {
-                    plan.gap = Some(JitGap::new(entry_run_name(bundle), reason));
-                }
-                Err(plan)
-            }
-        }
-    }
-}
-
-pub(crate) fn try_resident_hot_swap(
-    bundle: &ProgramBundle,
-) -> Result<RunOutcome, super::tiers::TierPlan> {
-    if !cranelift_host_supported() {
-        return Err(plan_tiers(bundle, None));
-    }
-    crate::Encoding::register_migrations(bundle);
-    super::types_meta::install_struct_redact(bundle);
-    let cap_bytes = crate::program_allocator_cap_bytes(bundle);
-    if let Err(reason) = crate::Ffi::bind_bundle_ffi(bundle) {
-        let mut plan = plan_tiers(bundle, None);
-        if let Some(gap) = plan.gap.as_mut() {
-            gap.reason = reason;
-        }
-        return Err(plan);
-    }
-    let program = match TIR::lower_jit_program(bundle) {
-        Some(program) => program,
-        None => return Err(plan_tiers(bundle, None)),
-    };
-    crate::CLI::prepare_cli_from_bundle(bundle);
-    let plan = plan_tiers(bundle, Some(&program));
-    if plan.whole_interp || !plan.deopt.is_empty() {
-        // Hot-swap keeps the simple path: whole-program deopt when any gap.
-        return Err(plan);
-    }
-    if !resident_safe_program(&program) {
-        return Err(plan);
-    }
-    note_jit_execution();
-    match resident_hot_swap(&program, cap_bytes) {
+    match catch_jit_panic("resident run", || {
+        resident_run_fresh(program, None, artifact, release_devtools_policy)
+    }) {
         Ok(outcome) => {
-            record_trace(plan.rows);
+            record_trace(plan.rows.clone());
+            publish_runtime_decisions(program, artifact, &plan.rows);
             Ok(outcome)
         }
-        Err(_) => Err(plan),
+        Err(reason) => {
+            let mut plan = plan;
+            plan.gap = entry_gap(program, artifact, reason);
+            Err(plan)
+        }
+    }
+}
+pub(crate) fn try_resident_hot_swap(
+    program: &MirProgram,
+    artifact: MirArtifactId,
+    release_devtools_policy: &ReleaseDevtoolsPolicy,
+) -> Result<RunOutcome, super::tiers::MirTierPlan> {
+    if !cranelift_host_supported() {
+        return Err(plan_mir_tiers(program, artifact));
+    }
+    super::types_meta::install_struct_redact(program);
+    let plan = plan_mir_tiers(program, artifact);
+    if plan.whole_program_deopt || !plan.deopt.is_empty() {
+        return Err(plan);
+    }
+    note_jit_execution();
+    match catch_jit_panic("resident hot swap", || {
+        resident_hot_swap(program, None, artifact, release_devtools_policy)
+    }) {
+        Ok(outcome) => {
+            record_trace(plan.rows.clone());
+            publish_runtime_decisions(program, artifact, &plan.rows);
+            Ok(outcome)
+        }
+        Err(reason) => {
+            let mut plan = plan;
+            plan.gap = entry_gap(program, artifact, reason);
+            Err(plan)
+        }
     }
 }
 
 pub(crate) fn try_resident_restart(
-    bundle: &ProgramBundle,
-) -> Result<RunOutcome, super::tiers::TierPlan> {
+    program: &MirProgram,
+    artifact: MirArtifactId,
+    release_devtools_policy: &ReleaseDevtoolsPolicy,
+) -> Result<RunOutcome, super::tiers::MirTierPlan> {
     if !cranelift_host_supported() {
-        return Err(plan_tiers(bundle, None));
+        return Err(plan_mir_tiers(program, artifact));
     }
-    // D-HOTSWAP1 / D-PERSIST1: clean restart drops the shared persist generation
-    // before re-seeding from the new bundle's initializers.
     jet_foundation::Persist::shared_clear();
-    crate::Encoding::register_migrations(bundle);
-    super::types_meta::install_struct_redact(bundle);
-    let cap_bytes = crate::program_allocator_cap_bytes(bundle);
-    if let Err(reason) = crate::Ffi::bind_bundle_ffi(bundle) {
-        let mut plan = plan_tiers(bundle, None);
-        if let Some(gap) = plan.gap.as_mut() {
-            gap.reason = reason;
-        }
-        return Err(plan);
-    }
-    let program = match TIR::lower_jit_program(bundle) {
-        Some(program) => program,
-        None => return Err(plan_tiers(bundle, None)),
-    };
-    crate::CLI::prepare_cli_from_bundle(bundle);
-    let plan = plan_tiers(bundle, Some(&program));
-    if plan.whole_interp {
+    super::types_meta::install_struct_redact(program);
+    let plan = plan_mir_tiers(program, artifact);
+    if plan.whole_program_deopt || !plan.deopt.is_empty() {
         return Err(plan);
     }
     note_jit_execution();
-    if plan.deopt.is_empty() {
-        match resident_run_fresh(&program, cap_bytes) {
-            Ok(outcome) => {
-                record_trace(plan.rows);
-                Ok(outcome)
-            }
-            Err(_) => Err(plan),
+    match catch_jit_panic("resident restart", || {
+        resident_run_fresh(program, None, artifact, release_devtools_policy)
+    }) {
+        Ok(outcome) => {
+            record_trace(plan.rows.clone());
+            publish_runtime_decisions(program, artifact, &plan.rows);
+            Ok(outcome)
         }
-    } else {
-        match resident_run_mixed(&program, &plan, cap_bytes) {
-            Ok(outcome) => {
-                super::trace::note_deopt_invoked_for_test();
-                record_trace(plan.rows);
-                Ok(outcome)
-            }
-            Err(_) => Err(plan),
+        Err(reason) => {
+            let mut plan = plan;
+            plan.gap = entry_gap(program, artifact, reason);
+            Err(plan)
         }
     }
 }
 
-/// Test hook: MixedSwitch arm condition strings from lowered `main`.
+/// Test hook: inspect the lowered MIR switch conditions.
 #[doc(hidden)]
-pub fn jit_dump_mixed_switch_conds(bundle: &ProgramBundle) -> Vec<String> {
-    crate::on_compiler_stack(|| {
-        let Some(program) = TIR::lower_jit_program(bundle) else {
-            return vec!["<no program>".into()];
-        };
-        let mut out = Vec::new();
-        for f in &program.funcs {
-            for s in &f.body {
-                if let TStmt::MixedSwitch { arms, .. } = s {
-                    for (c, _) in arms {
-                        out.push(format!("{}: {:?}", f.name, c.ty));
-                    }
-                }
-            }
-        }
-        out
-    })
+pub fn jit_dump_mixed_switch_conds(
+    program: &MirProgram,
+    artifact: MirArtifactId,
+) -> Vec<String> {
+    artifact_entry(program, artifact)
+        .and_then(|entry| program.functions.iter().find(|function| function.id == entry))
+        .into_iter()
+        .flat_map(|function| function.blocks.iter())
+        .filter_map(|block| match &block.terminator {
+            MirTerminator::Switch { arms, .. } => Some(
+                arms.iter()
+                    .map(|arm| format!("{:?}", arm.condition))
+                    .collect::<Vec<_>>(),
+            ),
+            _ => None,
+        })
+        .flatten()
+        .collect()
 }
 
-/// Test hook: try JIT-compile a checked bundle; surfaces lowering errors.
-#[doc(hidden)]
-pub fn try_compile_bundle(bundle: &ProgramBundle) -> Result<(), String> {
+/// Test hook: compile a checked MIR program through the resident JIT.
+pub fn try_compile_program(
+    program: &MirProgram,
+    artifact: MirArtifactId,
+    release_devtools_policy: &ReleaseDevtoolsPolicy,
+) -> Result<(), String> {
     crate::on_compiler_stack(|| {
         if !cranelift_host_supported() {
             return Err("cranelift-jit host path unsupported on this architecture".to_string());
         }
-        crate::Ffi::bind_bundle_ffi(bundle)?;
-        let cap_bytes = crate::program_allocator_cap_bytes(bundle);
-        let program = TIR::lower_jit_program(bundle).ok_or_else(|| {
-            format!(
-                "lower_jit_program returned None ({})",
-                TIR::lower_jit_program_fail_reason(bundle)
-            )
-        })?;
-        crate::CLI::prepare_cli_from_bundle(bundle);
+        let plan = plan_mir_tiers(program, artifact);
+        if plan.whole_program_deopt || !plan.deopt.is_empty() {
+            return Err(plan
+                .gap
+                .map(|gap| format!("{}: {}", gap.function_name, gap.reason))
+                .unwrap_or_else(|| "checked MIR is not fully applicable to Cranelift".into()));
+        }
         catch_jit_panic("compile", || {
             resident_teardown();
-            crate::Encoding::register_migrations(bundle);
-            super::types_meta::install_struct_redact(bundle);
-            // Teardown must not wipe CLI plan — reinstall after.
-            crate::CLI::prepare_cli_from_bundle(bundle);
-            crate::Ffi::bind_bundle_ffi(bundle)?;
             RESIDENT_RUNTIME.with(|slot| {
-                *slot.borrow_mut() = Some(fresh_runtime_with_allocator_cap(cap_bytes))
+                *slot.borrow_mut() = Some(fresh_runtime(release_devtools_policy.clone()))
             });
-            ensure_resident_module(&program)
+            ensure_resident_module(program, artifact, release_devtools_policy)
         })
     })
 }
 
 /// Test hook: run only the resident Cranelift path.
-///
-/// The public backend intentionally deopts to the canonical interpreter when
-/// resident execution is unavailable. Proof harnesses must not accept that
-/// result as JIT evidence, so this seam returns the resident failure instead.
-///
-/// Like `CraneliftBackend::run` this is a one-shot: it starts a session and
-/// finishes it, so it owns the sized stack rather than borrowing its caller's.
 #[doc(hidden)]
-pub fn run_resident_strict_for_test(bundle: &ProgramBundle) -> Result<RunOutcome, String> {
-    crate::on_compiler_stack(|| run_resident_strict_on_compiler_stack(bundle))
-}
-
-fn run_resident_strict_on_compiler_stack(bundle: &ProgramBundle) -> Result<RunOutcome, String> {
-    let _loaded_mod_scope = crate::Mod::LoadScope;
-    if !cranelift_host_supported() {
-        return Err("cranelift-jit host path unsupported on this architecture".to_string());
-    }
-    TIR::install_comptime_bridge();
-    crate::Ffi::bind_bundle_ffi(bundle)?;
-    let program = TIR::lower_jit_program(bundle).ok_or_else(|| {
-        format!(
-            "lower_jit_program returned None ({})",
-            TIR::lower_jit_program_fail_reason(bundle)
-        )
-    })?;
-    let plan = plan_tiers(bundle, Some(&program));
-    if plan.whole_interp || !plan.deopt.is_empty() {
-        return Err(format!(
-            "resident tier plan is not strict: whole_interp={} deopt={:?}",
-            plan.whole_interp, plan.deopt
-        ));
-    }
-    crate::with_program_allocator(bundle, || match try_resident(bundle) {
-        Ok(outcome) => Ok(outcome),
-        Err(plan) => Err(plan
-            .gap
-            .map(|gap| format!("{}: {}", gap.function, gap.reason))
-            .unwrap_or_else(|| "resident Cranelift execution failed".to_string())),
-    })
-}
-
-/// Test hook: lowered function names in the JIT program.
-#[doc(hidden)]
-pub fn jit_program_func_names(bundle: &ProgramBundle) -> Vec<String> {
+pub fn run_resident_strict_for_test(
+    program: &MirProgram,
+    artifact: MirArtifactId,
+    release_devtools_policy: &ReleaseDevtoolsPolicy,
+) -> Result<RunOutcome, String> {
     crate::on_compiler_stack(|| {
-        let Some(program) = TIR::lower_jit_program(bundle) else {
-            return vec!["<no program>".into()];
-        };
-        program.funcs.iter().map(|f| f.name.clone()).collect()
+        if !cranelift_host_supported() {
+            return Err("cranelift-jit host path unsupported on this architecture".to_string());
+        }
+        let plan = plan_mir_tiers(program, artifact);
+        if plan.whole_program_deopt || !plan.deopt.is_empty() {
+            return Err(plan
+                .gap
+                .map(|gap| format!("{}: {}", gap.function_name, gap.reason))
+                .unwrap_or_else(|| "checked MIR is not fully applicable to Cranelift".into()));
+        }
+        try_resident(program, artifact, release_devtools_policy).map_err(|plan| {
+            plan.gap
+                .map(|gap| format!("{}: {}", gap.function_name, gap.reason))
+                .unwrap_or_else(|| "resident Cranelift execution failed".into())
+        })
     })
+}
+
+/// Test hook: names of functions in a checked MIR program.
+#[doc(hidden)]
+pub fn jit_program_func_names(program: &MirProgram) -> Vec<String> {
+    program
+        .functions
+        .iter()
+        .map(|function| function.name.clone())
+        .collect()
 }
 
 /// Test hook: per-function resident safety. `Covered` is the only green answer.
-/// Lowering that produced no program is `Unavailable`, never `Covered` (#2029).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResidentJitSafety {
     Covered,
@@ -399,636 +309,280 @@ pub enum ResidentJitSafety {
 
 /// Test hook: per-function resident safety detail.
 #[doc(hidden)]
-pub fn resident_jit_func_safety_detail(bundle: &ProgramBundle, name: &str) -> ResidentJitSafety {
-    crate::on_compiler_stack(|| {
-        let Some(program) = TIR::lower_jit_program(bundle) else {
-            return ResidentJitSafety::Unavailable(format!(
-                "lower_jit_program returned None ({})",
-                TIR::lower_jit_program_fail_reason(bundle)
-            ));
-        };
-        let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
-        let Some(f) = program.funcs.iter().find(|f| f.name == name) else {
-            return ResidentJitSafety::Unavailable(format!(
-                "function `{name}` missing from lowered TIR"
-            ));
-        };
-        match resident_safe_func_detail(f, &names) {
-            None => ResidentJitSafety::Covered,
-            Some(detail) => ResidentJitSafety::Gap(detail),
-        }
-    })
-}
-
-/// Test hook: dump lowered run stmt tags.
-#[doc(hidden)]
-pub fn jit_dump_main_stmts(bundle: &ProgramBundle) -> Vec<String> {
-    crate::on_compiler_stack(|| {
-        let Some(program) = TIR::lower_jit_program(bundle) else {
-            return vec!["<no program>".into()];
-        };
-        let Some(m) = program.funcs.iter().find(|f| f.name == program.entry) else {
-            return vec!["<no entry>".into()];
-        };
-        m.body
-            .iter()
-            .enumerate()
-            .map(|(i, s)| format!("{i}:{}", jit_stmt_tag(s)))
-            .collect()
-    })
-}
-
-/// Test hook: observed TIR statement/expression tags in lowered `run`.
-#[doc(hidden)]
-pub fn jit_dump_main_ops(bundle: &ProgramBundle) -> Vec<String> {
-    crate::on_compiler_stack(|| {
-        let Some(program) = TIR::lower_jit_program(bundle) else {
-            return vec!["TStmt::<no program>".into()];
-        };
-        let Some(m) = program.funcs.iter().find(|f| f.name == program.entry) else {
-            return vec!["TStmt::<no entry>".into()];
-        };
-        let mut out = Vec::new();
-        collect_stmt_ops(&m.body, &mut out);
-        out.sort();
-        out
-    })
-}
-
-fn collect_stmt_ops(stmts: &[TStmt], out: &mut Vec<String>) {
-    for stmt in stmts {
-        out.push(format!("TStmt::{}", jit_stmt_tag(stmt)));
-        match stmt {
-            TStmt::Contract { contract } => {
-                collect_expr_ops(&contract.condition, out);
-                collect_expr_ops(&contract.message, out);
-            }
-            TStmt::ContractScope {
-                pre, body, post, ..
-            } => {
-                for contract in pre.iter().chain(post) {
-                    collect_expr_ops(&contract.condition, out);
-                    collect_expr_ops(&contract.message, out);
-                }
-                collect_stmt_ops(body, out);
-            }
-            TStmt::SplitViews {
-                owner: Some(owner), ..
-            } => collect_expr_ops(owner, out),
-            TStmt::SplitViews { owner: None, .. } => {}
-            TStmt::RefutableBind { init, fallback, .. } => {
-                collect_expr_ops(init, out);
-                collect_stmt_ops(fallback, out);
-            }
-            TStmt::Let { init, .. }
-            | TStmt::TupleDestructure { init, .. }
-            | TStmt::StructDestructure { init, .. }
-            | TStmt::ListDestructure { init, .. } => collect_expr_ops(init, out),
-            TStmt::Assign { value, .. }
-            | TStmt::Return(Some(value))
-            | TStmt::ExprStmt(value)
-            | TStmt::DeferClose { close: value, .. } => collect_expr_ops(value, out),
-            TStmt::BreakValue { value, .. } => collect_expr_ops(value, out),
-            TStmt::GcEdit {
-                index_temp, stmt, ..
-            } => {
-                if let Some((_, value)) = index_temp {
-                    collect_expr_ops(value, out);
-                }
-                collect_stmt_ops(std::slice::from_ref(stmt.as_ref()), out);
-            }
-            TStmt::If {
-                cond,
-                then_body,
-                else_body,
-                ..
-            } => {
-                collect_if_cond_ops(cond, out);
-                collect_stmt_ops(then_body, out);
-                if let Some(body) = else_body {
-                    collect_stmt_ops(body, out);
-                }
-            }
-            TStmt::Loop { body, .. }
-            | TStmt::TaskGroup { body, .. }
-            | TStmt::Region(body)
-            | TStmt::Impure(body)
-            | TStmt::Unsafe { body, .. }
-            | TStmt::SentryPolicy { body, .. }
-            | TStmt::Inline(body)
-            | TStmt::DebugOnly(body)
-            | TStmt::Live { body }
-            | TStmt::Shield { body }
-            | TStmt::ScopeMember { body, .. } => collect_stmt_ops(body, out),
-            TStmt::While { cond, body, .. } => {
-                collect_expr_ops(cond, out);
-                collect_stmt_ops(body, out);
-            }
-            TStmt::CountedLoop {
-                init,
-                cond,
-                step,
-                body,
-                ..
-            } => {
-                collect_stmt_ops(std::slice::from_ref(init.as_ref()), out);
-                collect_expr_ops(cond, out);
-                if let Some(step) = step {
-                    collect_stmt_ops(std::slice::from_ref(step.as_ref()), out);
-                }
-                collect_stmt_ops(body, out);
-            }
-            TStmt::Range {
-                start,
-                end,
-                step,
-                body,
-                ..
-            } => {
-                collect_expr_ops(start, out);
-                collect_expr_ops(end, out);
-                if let Some(step) = step {
-                    collect_expr_ops(step, out);
-                }
-                collect_stmt_ops(body, out);
-            }
-            TStmt::IndexAssign {
-                base, index, value, ..
-            }
-            | TStmt::IndexHookAssign {
-                base, index, value, ..
-            } => {
-                collect_expr_ops(base, out);
-                collect_expr_ops(index, out);
-                collect_expr_ops(value, out);
-            }
-            TStmt::IndexFieldAssign(assign) => {
-                collect_expr_ops(&assign.base, out);
-                collect_expr_ops(&assign.index, out);
-                collect_expr_ops(&assign.value, out);
-            }
-            TStmt::MathSwizzleAssign { base, value, .. } => {
-                collect_expr_ops(base, out);
-                collect_expr_ops(value, out);
-            }
-            TStmt::ForIn { body, .. }
-            | TStmt::EnumMatch {
-                else_body: Some(body),
-                ..
-            }
-            | TStmt::Layout { body, .. }
-            | TStmt::ContextBlock { body, .. }
-            | TStmt::Transact { body, .. } => collect_stmt_ops(body, out),
-            TStmt::MixedSwitch {
-                arms, else_body, ..
-            } => {
-                for (cond, body) in arms {
-                    collect_expr_ops(cond, out);
-                    collect_stmt_ops(body, out);
-                }
-                if let Some(body) = else_body {
-                    collect_stmt_ops(body, out);
-                }
-            }
-            TStmt::RangeSwitch {
-                arms, else_body, ..
-            } => {
-                for (_, _, body) in arms {
-                    collect_stmt_ops(body, out);
-                }
-                collect_stmt_ops(else_body, out);
-            }
-            TStmt::Return(None)
-            | TStmt::Break(_)
-            | TStmt::Continue(_)
-            | TStmt::EnumMatch {
-                else_body: None, ..
-            }
-            | TStmt::Reactive { .. }
-            | TStmt::LineMarker(_)
-            | TStmt::SourceSpan(_) => {}
-        }
+pub fn resident_jit_func_safety_detail(
+    program: &MirProgram,
+    name: &str,
+) -> ResidentJitSafety {
+    let Some(function) = program
+        .functions
+        .iter()
+        .find(|function| function.name == name || function.key == name)
+    else {
+        return ResidentJitSafety::Unavailable(format!(
+            "function `{name}` missing from canonical MIR"
+        ));
+    };
+    match resident_safe_mir_function(function) {
+        Ok(()) => ResidentJitSafety::Covered,
+        Err(detail) => ResidentJitSafety::Gap(detail),
     }
 }
 
-fn collect_if_cond_ops(cond: &TIfCond, out: &mut Vec<String>) {
-    match cond {
-        TIfCond::Plain(e) => collect_expr_ops(e, out),
-        TIfCond::And { left, right } => {
-            collect_if_cond_ops(left, out);
-            collect_if_cond_ops(right, out);
-        }
-        TIfCond::IfLet { subj, .. } => collect_expr_ops(subj, out),
-        TIfCond::IsNone { subj, .. } | TIfCond::Matches { subj, .. } => collect_expr_ops(subj, out),
-        TIfCond::WithPrelude { prelude, cond } => {
-            collect_stmt_ops(prelude, out);
-            collect_if_cond_ops(cond, out);
-        }
-    }
+/// Test hook: operation tags in the checked MIR entry function.
+#[doc(hidden)]
+pub fn jit_dump_main_stmts(program: &MirProgram, artifact: MirArtifactId) -> Vec<String> {
+    let Some(entry) = artifact_entry(program, artifact) else {
+        return vec!["<no entry>".into()];
+    };
+    let Some(function) = program.functions.iter().find(|function| function.id == entry) else {
+        return vec!["<no entry>".into()];
+    };
+    function
+        .blocks
+        .iter()
+        .flat_map(|block| block.instructions.iter())
+        .enumerate()
+        .map(|(index, instruction)| format!("{index}:{}", jit_stmt_tag(&instruction.operation)))
+        .collect()
 }
 
-fn collect_expr_ops(expr: &TExpr, out: &mut Vec<String>) {
-    out.push(format!("TExprKind::{}", jit_expr_tag(expr)));
-    match &expr.kind {
-        TExprKind::Print(inner)
-        | TExprKind::Clone(inner)
-        | TExprKind::ExplicitCopy(inner)
-        | TExprKind::MaterializeView(inner)
-        | TExprKind::DistinctRaw(inner)
-        | TExprKind::Present(inner)
-        | TExprKind::Ok(inner)
-        | TExprKind::Err(inner)
-        | TExprKind::Deref(inner)
-        | TExprKind::RawOf(inner)
-        | TExprKind::LayoutLit { inner } => collect_expr_ops(inner, out),
-        TExprKind::DecodeUnder { segment, inner } => {
-            collect_expr_ops(segment, out);
-            collect_expr_ops(inner, out);
+/// Test hook: operation and terminator tags in the checked MIR entry function.
+#[doc(hidden)]
+pub fn jit_dump_main_ops(program: &MirProgram, artifact: MirArtifactId) -> Vec<String> {
+    let Some(entry) = artifact_entry(program, artifact) else {
+        return vec!["Mir::<no entry>".into()];
+    };
+    let Some(function) = program.functions.iter().find(|function| function.id == entry) else {
+        return vec!["Mir::<no entry>".into()];
+    };
+    let mut out = Vec::new();
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            out.push(format!(
+                "MirOperation::{}",
+                jit_expr_tag(&instruction.operation)
+            ));
         }
-        TExprKind::DistinctCtor { arg, .. } => collect_expr_ops(arg, out),
-        TExprKind::Unary { operand, .. } => collect_expr_ops(operand, out),
-        TExprKind::Binary { lhs, rhs, .. } | TExprKind::LayoutCompare { lhs, rhs, .. } => {
-            collect_expr_ops(lhs, out);
-            collect_expr_ops(rhs, out);
-        }
-        TExprKind::CompareChain { operands, .. } => {
-            for operand in operands {
-                collect_expr_ops(operand, out);
-            }
-        }
-        TExprKind::StrLit(parts) => {
-            for part in parts {
-                if let TStrPart::Interp(e, _) = part {
-                    collect_expr_ops(e, out);
-                }
-            }
-        }
-        TExprKind::Call { args, .. }
-        | TExprKind::MethodCall { args, .. }
-        | TExprKind::FnFieldCall { args, .. }
-        | TExprKind::StaticCall { args, .. } => {
-            for arg in args {
-                collect_expr_ops(&arg.value, out);
-            }
-        }
-        TExprKind::StructLit { fields, .. } => {
-            for field in fields {
-                collect_expr_ops(&field.1, out);
-            }
-        }
-        TExprKind::TupleLit { fields, .. } => {
-            for field in fields {
-                collect_expr_ops(&field.1, out);
-            }
-        }
-        TExprKind::EnumLit { payload, .. } => match payload {
-            TEnumPayload::Unit => {}
-            TEnumPayload::Positional(vals) => {
-                for v in vals {
-                    collect_expr_ops(&v.value, out);
-                }
-            }
-            TEnumPayload::Named(vals) => {
-                for (_, v) in vals {
-                    collect_expr_ops(&v.value, out);
-                }
-            }
+        out.push(format!("MirTerminator::{}", terminator_tag(&block.terminator)));
+    }
+    out.sort();
+    out
+}
+
+fn semantic_tag(operation: &MirSemanticOp) -> &'static str {
+    match operation {
+        MirSemanticOp::DataEntriesToMap { .. } => "DataEntriesToMap",
+        MirSemanticOp::MathBuiltin { .. } => "MathBuiltin",
+        MirSemanticOp::PreciseBuiltin { .. } => "PreciseBuiltin",
+        MirSemanticOp::Print { .. } => "Print",
+        MirSemanticOp::AmbientInput { .. } => "AmbientInput",
+        MirSemanticOp::RequireStop { .. } => "RequireStop",
+        MirSemanticOp::LayoutCompare { .. } => "LayoutCompare",
+        MirSemanticOp::LayoutLiteral { .. } => "LayoutLiteral",
+        MirSemanticOp::StructLiteral { .. } => "StructLiteral",
+        MirSemanticOp::SharedGuardSplit { .. } => "SharedGuardSplit",
+        MirSemanticOp::SharedGuardWait { .. } => "SharedGuardWait",
+        MirSemanticOp::ConditionNotify { .. } => "ConditionNotify",
+        MirSemanticOp::AllocNew { .. } => "AllocNew",
+        MirSemanticOp::ColumnarRead { .. } => "ColumnarRead",
+        MirSemanticOp::StaticPreludeCall { .. } => "StaticPreludeCall",
+        MirSemanticOp::DecodeUnder { .. } => "DecodeUnder",
+        MirSemanticOp::BuiltinMethod { .. } => "BuiltinMethod",
+        MirSemanticOp::OptionLift2 { .. } => "OptionLift2",
+        MirSemanticOp::ClosureMethod { .. } => "ClosureMethod",
+        MirSemanticOp::HostBorrowCallback { .. } => "HostBorrowCallback",
+        MirSemanticOp::TextPatternMatch { .. } => "TextPatternMatch",
+        MirSemanticOp::BinaryPatternMatch { .. } => "BinaryPatternMatch",
+        MirSemanticOp::NumericMethod { .. } => "NumericMethod",
+        MirSemanticOp::NumericBinaryMethod { .. } => "NumericBinaryMethod",
+        MirSemanticOp::OverflowOption { .. } => "OverflowOption",
+        MirSemanticOp::HandleMethod { .. } => "HandleMethod",
+        MirSemanticOp::CoreClosureCall { .. } => "CoreClosureCall",
+        MirSemanticOp::TaskGroup { .. } => "TaskGroup",
+        MirSemanticOp::Select { kind, .. } => match kind {
+            MirSelectKind::Start => "SelectStart",
+            MirSelectKind::Receive => "SelectReceive",
+            MirSelectKind::After => "SelectAfter",
+            MirSelectKind::Wait => "SelectWait",
         },
-        TExprKind::ListLit(elems) => {
-            for elem in elems {
-                collect_expr_ops(elem, out);
-            }
-        }
-        TExprKind::Index { base, index, .. }
-        | TExprKind::IndexHook { base, index, .. }
-        | TExprKind::MathLaneIndex { base, index, .. }
-        | TExprKind::ColumnarGather { base, index, .. } => {
-            collect_expr_ops(base, out);
-            collect_expr_ops(index, out);
-        }
-        TExprKind::Slice {
-            base, start, end, ..
-        } => {
-            collect_expr_ops(base, out);
-            collect_expr_ops(start, out);
-            collect_expr_ops(end, out);
-        }
-        TExprKind::BuiltinMethod { recv, args, .. } => {
-            collect_expr_ops(recv, out);
-            for arg in args {
-                collect_expr_ops(arg, out);
-            }
-        }
-        TExprKind::CoreCall { args, .. } => {
-            for arg in args {
-                collect_expr_ops(arg, out);
-            }
-        }
-        TExprKind::IfExpr {
-            cond,
-            then_body,
-            then_value,
-            else_body,
-            else_value,
-        } => {
-            collect_if_cond_ops(cond, out);
-            collect_stmt_ops(then_body, out);
-            collect_expr_ops(then_value, out);
-            collect_stmt_ops(else_body, out);
-            collect_expr_ops(else_value, out);
-        }
-        _ => {}
+        MirSemanticOp::PolicyFunction { .. } => "PolicyFunction",
+        MirSemanticOp::InterruptFunction { .. } => "InterruptFunction",
+        MirSemanticOp::HostCall { .. } => "HostCall",
+        MirSemanticOp::CellGuardProject { .. } => "CellGuardProject",
+        MirSemanticOp::SharedGuardMap { .. } => "SharedGuardMap",
+        MirSemanticOp::HardwareCall { .. } => "HardwareCall",
+        MirSemanticOp::PluginInvoke { .. } => "PluginInvoke",
+        MirSemanticOp::HttpRouterRegister { .. } => "HttpRouterRegister",
+        MirSemanticOp::CarrierFact { .. } => "CarrierFact",
+        MirSemanticOp::GcEdit { .. } => "GcEdit",
+        MirSemanticOp::TypedTextInterp { .. } => "TypedTextInterp",
+        MirSemanticOp::CCallback { .. } => "CCallback",
     }
 }
 
-/// Test hook: count select recv/timer arms on the first `SelectWait` in `run`.
+/// Test hook: label one checked MIR operation.
 #[doc(hidden)]
-pub fn jit_select_arm_counts(bundle: &ProgramBundle) -> Option<(usize, usize)> {
-    crate::on_compiler_stack(|| jit_select_arm_counts_lowered(bundle))
+pub fn jit_expr_tag(operation: &MirOperation) -> &'static str {
+    match operation {
+        MirOperation::Parameter { .. } => "Parameter",
+        MirOperation::Capture { .. } => "Capture",
+        MirOperation::Global { .. } => "Global",
+        MirOperation::Phi { .. } => "Phi",
+        MirOperation::ReadPlace(_) => "ReadPlace",
+        MirOperation::MovePlace { .. } => "MovePlace",
+        MirOperation::WritePlace { .. } => "WritePlace",
+        MirOperation::InitializeUninit { .. } => "InitializeUninit",
+        MirOperation::Copy { .. } => "Copy",
+        MirOperation::Move { .. } => "Move",
+        MirOperation::Constant(_) => "Constant",
+        MirOperation::Unary { .. } => "Unary",
+        MirOperation::Binary { .. } => "Binary",
+        MirOperation::BuildString { .. } => "BuildString",
+        MirOperation::BuildList { .. } => "BuildList",
+        MirOperation::BuildMap { .. } => "BuildMap",
+        MirOperation::EnumIs { .. } => "EnumIs",
+        MirOperation::EnumPayload { .. } => "EnumPayload",
+        MirOperation::OptionIsSome { .. } => "OptionIsSome",
+        MirOperation::OptionValue { .. } => "OptionValue",
+        MirOperation::ResultIsOk { .. } => "ResultIsOk",
+        MirOperation::ResultValue { .. } => "ResultValue",
+        MirOperation::PatternCapture { .. } => "PatternCapture",
+        MirOperation::PatternMatched { .. } => "PatternMatched",
+        MirOperation::ProjectMembers { .. } => "ProjectMembers",
+        MirOperation::Index { .. } => "Index",
+        MirOperation::Slice { .. } => "Slice",
+        MirOperation::Range { .. } => "Range",
+        MirOperation::Field { .. } => "Field",
+        MirOperation::Struct { .. } => "Struct",
+        MirOperation::Enum { .. } => "Enum",
+        MirOperation::Tuple { .. } => "Tuple",
+        MirOperation::Present { .. } => "Present",
+        MirOperation::Convert { .. } => "Convert",
+        MirOperation::Absent => "Absent",
+        MirOperation::ResultOk { .. } => "ResultOk",
+        MirOperation::ResultErr { .. } => "ResultErr",
+        MirOperation::Call { .. } => "Call",
+        MirOperation::IndirectCall { .. } => "IndirectCall",
+        MirOperation::Closure { .. } => "Closure",
+        MirOperation::PtrFromAddr { .. } => "PtrFromAddr",
+        MirOperation::Deref { .. } => "Deref",
+        MirOperation::RawAddressOf { .. } => "RawAddressOf",
+        MirOperation::AddressOf { .. } => "AddressOf",
+        MirOperation::CoreCall { .. } => "CoreCall",
+        MirOperation::AttachTag { .. } => "AttachTag",
+        MirOperation::Todo { .. } => "Todo",
+        MirOperation::Never { .. } => "Never",
+        MirOperation::Semantic(operation) => semantic_tag(operation),
+        MirOperation::LoopRangeInit { .. } => "LoopRangeInit",
+        MirOperation::LoopRangeHasNext { .. } => "LoopRangeHasNext",
+        MirOperation::LoopRangeValue { .. } => "LoopRangeValue",
+        MirOperation::LoopRangeAdvance { .. } => "LoopRangeAdvance",
+        MirOperation::LoopIterInit { .. } => "LoopIterInit",
+        MirOperation::LoopIterHasNext { .. } => "LoopIterHasNext",
+        MirOperation::LoopIterValue { .. } => "LoopIterValue",
+        MirOperation::LoopIterAdvance { .. } => "LoopIterAdvance",
+        MirOperation::ScopeEnter { .. } => "ScopeEnter",
+        MirOperation::ScopeExit { .. } => "ScopeExit",
+        MirOperation::Drop { .. } => "Drop",
+    }
 }
 
-fn jit_select_arm_counts_lowered(bundle: &ProgramBundle) -> Option<(usize, usize)> {
-    let program = TIR::lower_jit_program(bundle)?;
-    let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
-    let m = program.funcs.iter().find(|f| f.name == program.entry)?;
-    for s in &m.body {
-        if let TStmt::TaskGroup { body, .. }
-        | TStmt::Region(body)
-        | TStmt::SentryPolicy { body, .. } = s
-        {
-            for inner in body {
-                if let TStmt::Let { init, .. } = inner {
-                    if let TExprKind::SelectWait { builder, .. } = &init.kind {
-                        let (r, a) = collect_select_arms_jit(builder);
-                        let _ = &names;
-                        return Some((r.len(), a.len()));
-                    }
-                }
+/// Test hook: label one checked MIR operation in statement position.
+#[doc(hidden)]
+pub fn jit_stmt_tag(operation: &MirOperation) -> &'static str {
+    jit_expr_tag(operation)
+}
+
+fn terminator_tag(terminator: &MirTerminator) -> &'static str {
+    match terminator {
+        MirTerminator::Jump { .. } => "Jump",
+        MirTerminator::Branch { .. } => "Branch",
+        MirTerminator::Switch { .. } => "Switch",
+        MirTerminator::Return { .. } => "Return",
+        MirTerminator::Yield { .. } => "Yield",
+        MirTerminator::Break { .. } => "Break",
+        MirTerminator::Continue { .. } => "Continue",
+        MirTerminator::Unreachable { .. } => "Unreachable",
+    }
+}
+
+/// Test hook: count semantic select arms in the checked MIR entry function.
+#[doc(hidden)]
+pub fn jit_select_arm_counts(
+    program: &MirProgram,
+    artifact: MirArtifactId,
+) -> Option<(usize, usize)> {
+    let entry = artifact_entry(program, artifact)?;
+    let function = program.functions.iter().find(|function| function.id == entry)?;
+    let mut recv = 0;
+    let mut after = 0;
+    for operation in function
+        .blocks
+        .iter()
+        .flat_map(|block| block.instructions.iter().map(|instruction| &instruction.operation))
+    {
+        if let MirOperation::Semantic(MirSemanticOp::Select { kind, .. }) = operation {
+            match kind {
+                MirSelectKind::Receive => recv += 1,
+                MirSelectKind::After => after += 1,
+                MirSelectKind::Start | MirSelectKind::Wait => {}
             }
         }
     }
-    None
+    (recv > 0 || after > 0).then_some((recv, after))
 }
+
 #[doc(hidden)]
-pub fn jit_main_uncovered_detail(bundle: &ProgramBundle) -> Option<String> {
-    crate::on_compiler_stack(|| jit_main_uncovered_detail_lowered(bundle))
+pub fn jit_main_uncovered_detail(
+    program: &MirProgram,
+    artifact: MirArtifactId,
+) -> Option<String> {
+    let entry = artifact_entry(program, artifact)?;
+    let function = program.functions.iter().find(|function| function.id == entry)?;
+    resident_safe_mir_function(function)
+        .err()
+        .map(|detail| format!("entry not resident-safe: {detail}"))
 }
 
-fn jit_main_uncovered_detail_lowered(bundle: &ProgramBundle) -> Option<String> {
-    let program = TIR::lower_jit_program(bundle)?;
-    let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
-    let m = program.funcs.iter().find(|f| f.name == program.entry)?;
-    for (i, s) in m.body.iter().enumerate() {
-        if resident_safe_stmt(s, &names) {
-            continue;
-        }
-        if let TStmt::TaskGroup { body, .. }
-        | TStmt::Region(body)
-        | TStmt::SentryPolicy { body, .. } = s
-        {
-            for (j, inner) in body.iter().enumerate() {
-                if !resident_safe_stmt(inner, &names) {
-                    let extra = if let TStmt::Let { init, .. } = inner {
-                        if let TExprKind::TaskGroupAll { tasks } = &init.kind {
-                            format!(
-                                ", init=TaskGroupAll tasks={} list_ok={} tasks_ok={}",
-                                jit_expr_tag(tasks),
-                                jit_list_task_type(&tasks.ty),
-                                resident_safe_expr(tasks, &names)
-                            )
-                        } else {
-                            format!(", init={}", jit_expr_tag(init))
-                        }
-                    } else if let TStmt::ExprStmt(e) = inner {
-                        format!(", expr={}", jit_expr_tag(e))
-                    } else {
-                        String::new()
-                    };
-                    return Some(format!(
-                        "main[{i}] region[{j}]={}{extra}",
-                        jit_stmt_tag(inner)
-                    ));
-                }
-            }
-        }
-        return Some(format!("main[{i}]={}", jit_stmt_tag(s)));
-    }
-    None
-}
-
-/// Test hook: label a lowered expr for diagnostics.
+/// Test hook: count spawn semantic sites and closure values in checked MIR.
 #[doc(hidden)]
-pub fn jit_expr_tag(expr: &TExpr) -> &'static str {
-    match &expr.kind {
-        TExprKind::Print(_) => "Print",
-        TExprKind::Call { .. } => "Call",
-        TExprKind::CoreCall { .. } => "CoreCall",
-        TExprKind::CoreClosureCall { .. } => "CoreClosureCall",
-        TExprKind::HandleMethod { .. } => "HandleMethod",
-        TExprKind::ListLit(_) => "ListLit",
-        TExprKind::TaskGroupAll { .. } => "TaskGroupAll",
-        TExprKind::TaskGroupRace { .. } => "TaskGroupRace",
-        TExprKind::TaskGroupAny { .. } => "TaskGroupAny",
-        TExprKind::SelectStart => "SelectStart",
-        TExprKind::SelectRecv { .. } => "SelectRecv",
-        TExprKind::SelectAfter { .. } => "SelectAfter",
-        TExprKind::SelectWait { .. } => "SelectWait",
-        TExprKind::MethodCall { .. } => "MethodCall",
-        TExprKind::Local(_) => "Local",
-        TExprKind::Binary { .. } => "Binary",
-        TExprKind::Index { .. } => "Index",
-        TExprKind::DecodeUnder { .. } => "DecodeUnder",
-        _ => "Other",
-    }
-}
-
-/// Test hook: label a lowered stmt for diagnostics.
-#[doc(hidden)]
-pub fn jit_stmt_tag(stmt: &TStmt) -> &'static str {
-    match stmt {
-        TStmt::Contract { .. } => "Contract",
-        TStmt::ContractScope { .. } => "ContractScope",
-        TStmt::Let { .. } => "Let",
-        TStmt::RefutableBind { .. } => "RefutableBind",
-        TStmt::SplitViews { .. } => "SplitViews",
-        TStmt::Assign { .. } => "Assign",
-        TStmt::IndexFieldAssign(_) => "IndexFieldAssign",
-        TStmt::Return(_) => "Return",
-        TStmt::ExprStmt(_) => "ExprStmt",
-        TStmt::DeferClose { .. } => "DeferClose",
-        TStmt::If { .. } => "If",
-        TStmt::Loop { .. } => "Loop",
-        TStmt::While { .. } => "While",
-        TStmt::CountedLoop { .. } => "CountedLoop",
-        TStmt::Range { .. } => "Range",
-        TStmt::ForIn { .. } => "ForIn",
-        TStmt::Break(_) | TStmt::BreakValue { .. } => "Break",
-        TStmt::Continue(_) => "Continue",
-        _ => "Other",
-    }
-}
-
-/// Test hook: spawn site vs lambda counts for a bundle.
-#[doc(hidden)]
-pub fn jit_spawn_stats(bundle: &ProgramBundle) -> (usize, usize) {
-    crate::on_compiler_stack(|| {
-        let Some(program) = TIR::lower_jit_program(bundle) else {
-            return (0, 0);
-        };
-        (count_spawn_sites(&program), program.spawn_lambdas.len())
-    })
-}
-
-/// Test hook: whether TIR lowers this bundle for JIT (`lower_jit_program` gate).
-#[doc(hidden)]
-pub fn tir_lowers_bundle(bundle: &ProgramBundle) -> bool {
-    crate::on_compiler_stack(|| TIR::lower_jit_program(bundle).is_some())
-}
-
-/// Test hook: why `lower_jit_program` returned `None`.
-#[doc(hidden)]
-pub fn tir_lower_fail_reason(bundle: &ProgramBundle) -> String {
-    crate::on_compiler_stack(|| TIR::lower_jit_program_fail_reason(bundle))
-}
-
-/// Test hook: whether the bundle's entry module is inside `resident_jit_safe`.
-#[doc(hidden)]
-pub fn resident_jit_safe_bundle(bundle: &ProgramBundle) -> bool {
-    resident_jit_safe_bundle_detail(bundle).is_empty()
-}
-
-/// Test hook: empty string when covered; otherwise a short failure reason.
-#[doc(hidden)]
-pub fn resident_jit_safe_bundle_detail(bundle: &ProgramBundle) -> String {
-    crate::on_compiler_stack(|| resident_jit_safe_bundle_detail_lowered(bundle))
-}
-
-fn resident_jit_safe_bundle_detail_lowered(bundle: &ProgramBundle) -> String {
-    let Some(program) = TIR::lower_jit_program(bundle) else {
-        return format!(
-            "lower_jit_program returned None ({})",
-            TIR::lower_jit_program_fail_reason(bundle)
-        );
-    };
-    let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
-    let main_ok = if program.entry == jet_foundation::Names::mangle_generated("cli_main") {
-        // Typed CLI entry is a host trampoline; user `run` is the resident body.
-        program
-            .funcs
-            .iter()
-            .any(|f| f.name == "run" && resident_safe_func(f, &names))
-    } else {
-        program.funcs.iter().any(|f| {
-            f.name == program.entry
-                && f.params.is_empty()
-                && entry_return_supported(f.ret.as_ref())
-                && resident_safe_func(f, &names)
-        })
-    };
-    if !main_ok {
-        if program.entry == jet_foundation::Names::mangle_generated("cli_main") {
-            for f in &program.funcs {
-                if f.name == "run" {
-                    if let Some(d) = resident_safe_func_detail(f, &names) {
-                        return format!("cli run not resident-safe: {d}");
-                    }
-                }
-            }
-            return "cli entry not resident-safe".to_string();
-        }
-        for f in &program.funcs {
-            if f.name == program.entry {
-                if let Some(d) = resident_safe_func_detail(f, &names) {
-                    return format!("entry not resident-safe: {d}");
-                }
-            }
-        }
-        return "entry not resident-safe".to_string();
-    }
-    for f in &program.funcs {
-        if let Some(detail) = resident_safe_func_detail(f, &names) {
-            return format!("func `{}` not resident-safe: {detail}", f.name);
+pub fn jit_spawn_stats(program: &MirProgram) -> (usize, usize) {
+    let mut spawn_sites = 0;
+    let mut closures = 0;
+    for operation in program
+        .functions
+        .iter()
+        .flat_map(|function| function.blocks.iter())
+        .flat_map(|block| block.instructions.iter().map(|instruction| &instruction.operation))
+    {
+        match operation {
+            MirOperation::Closure { .. } => closures += 1,
+            MirOperation::Semantic(MirSemanticOp::CoreClosureCall {
+                kind: MirCoreClosureKind::Spawn,
+                ..
+            }) => spawn_sites += 1,
+            _ => {}
         }
     }
-    let spawn_sites = count_spawn_sites(&program);
-    if spawn_sites != program.spawn_lambdas.len() {
-        return format!(
-            "spawn site count {spawn_sites} != lambda count {}",
-            program.spawn_lambdas.len()
-        );
+    (spawn_sites, closures)
+}
+
+/// Test hook: whether the checked MIR program is resident-JIT safe.
+#[doc(hidden)]
+pub fn resident_jit_safe_program(program: &MirProgram) -> bool {
+    resident_jit_safe_program_detail(program).is_empty()
+}
+
+/// Test hook: explain why the checked MIR program is not resident-JIT safe.
+#[doc(hidden)]
+pub fn resident_jit_safe_program_detail(program: &MirProgram) -> String {
+    if !cranelift_host_supported() {
+        return "cranelift-jit host path unsupported on this architecture".into();
     }
-    for (i, lam) in program.spawn_lambdas.iter().enumerate() {
-        if !resident_safe_spawn_lambda(lam, &names) {
-            let mut why = Vec::new();
-            if lam.captures.len() > 4 {
-                why.push(format!("too many captures ({})", lam.captures.len()));
-            }
-            for (ci, c) in lam.captures.iter().enumerate() {
-                if !jit_value_type(&c.ty) {
-                    why.push(format!("cap{ci} ty not jit_value: {:?}", c.ty));
-                } else if !resident_safe_capture_policy(c) {
-                    why.push(format!(
-                        "cap{ci} clone_at_spawn={} materialize_at_spawn={} ty={:?}",
-                        c.clone_at_spawn, c.materialize_at_spawn, c.ty
-                    ));
-                }
-            }
-            for (pi, (_, ty)) in lam.params.iter().enumerate() {
-                if !jit_value_type(ty) {
-                    why.push(format!("param{pi} not jit_value: {ty:?}"));
-                }
-            }
-            if !jit_value_type(&lam.ret) {
-                why.push(format!("ret not jit_value: {:?}", lam.ret));
-            }
-            match &lam.body {
-                jet_codegen::Codegen::TIR::TJitSpawnBody::Expr(e) => {
-                    if !resident_safe_expr(e, &names) {
-                        why.push("expr body unsafe".into());
-                    }
-                }
-                jet_codegen::Codegen::TIR::TJitSpawnBody::Block { prefix, tail } => {
-                    for (si, s) in prefix.iter().enumerate() {
-                        if !resident_safe_stmt(s, &names) {
-                            let detail = match s {
-                                TStmt::Let { name, .. } => format!("Let `{name}` init unsafe"),
-                                TStmt::ExprStmt(_) => "ExprStmt unsafe".to_string(),
-                                _ => jit_stmt_tag(s).to_string(),
-                            };
-                            why.push(format!("stmt{si} {detail} unsafe"));
-                        }
-                    }
-                    if let Some(t) = tail {
-                        if !resident_safe_expr(t, &names) {
-                            why.push("tail unsafe".into());
-                        }
-                    }
-                }
-                jet_codegen::Codegen::TIR::TJitSpawnBody::SharedBlock { body, tail } => {
-                    for (si, s) in body.iter().enumerate() {
-                        if !resident_safe_stmt(s, &names) {
-                            let detail = match s {
-                                TStmt::Let { name, .. } => format!("Let `{name}` init unsafe"),
-                                TStmt::ExprStmt(_) => "ExprStmt unsafe".to_string(),
-                                _ => jit_stmt_tag(s).to_string(),
-                            };
-                            why.push(format!("stmt{si} {detail} unsafe"));
-                        }
-                    }
-                    if *tail {
-                        if let Some(TStmt::ExprStmt(expr) | TStmt::Return(Some(expr))) = body.last()
-                        {
-                            if !resident_safe_expr(expr, &names) {
-                                why.push("tail unsafe".into());
-                            }
-                        }
-                    }
-                }
-            }
-            return format!("spawn lambda {i} not resident-safe: {}", why.join("; "));
-        }
+    match resident_safe_mir_program(program) {
+        Ok(()) => String::new(),
+        Err(detail) => detail,
     }
-    String::new()
 }
 
 /// Test hook: how many times resident `main` ran without a clean restart.

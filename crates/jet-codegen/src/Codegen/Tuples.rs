@@ -1,5 +1,3 @@
-use super::*;
-use crate::jet_generated_format as jet_format;
 use crate::AST::{
     EnumLitArg, Expr, ForKind, Func, Item, LambdaBody, OrFallback, Stmt, StrPart, Type,
     VariantPayload,
@@ -211,7 +209,7 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut CollectedTypeShapes) {
             }
             // D-ITER1: indexed/zip/partition return named-tuple types. Sema stores
             // the resolved return type in `resolved_ret`; collect any tuple shapes
-            // it contains so the JetTup_ struct declarations are emitted.
+            // it contains so TIR can register their structural field facts.
             if let Some(ty) = resolved_ret {
                 collect_tuple_shapes_from_type(ty, out);
             }
@@ -430,7 +428,7 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut CollectedTypeShapes) {
                 collect_tuple_shapes_from_stmt(s, out);
             }
         }
-        // D-META-STAGE1=B (formerly D-CTMARKER1): comptime block erases; no tuple shapes in emitted Rust.
+        // D-META-STAGE1=B (formerly D-CTMARKER1): comptime block erases; no tuple shapes reach TIR from it.
         Stmt::ComptimeBlock { .. } => {}
         // D-WHEN1: collect tuple shapes from both arms (conservative).
         Stmt::ComptimeIf {
@@ -548,147 +546,3 @@ pub(crate) fn collect_type_shapes(items: &[Item]) -> CollectedTypeShapes {
     out
 }
 
-pub(crate) fn collect_tuple_shapes(items: &[Item]) -> BTreeMap<String, Vec<(String, Type)>> {
-    collect_type_shapes(items).tuples
-}
-
-/// A linear Cell guard field must move out of a one-shot tuple, so the tuple
-/// itself cannot derive `Clone` (D-LOCALCELL1=A).
-fn is_move_only_cell_guard(ty: &Type) -> bool {
-    matches!(
-        ty,
-        Type::Apply { name, .. }
-            if matches!(name.as_str(), "CellReadGuard" | "CellEditGuard")
-    )
-}
-
-fn tuple_render_body(fields: &[(String, Type)], method: &str) -> String {
-    if fields.is_empty() {
-        return "\"()\".to_string()".to_string();
-    }
-    let label = format!(
-        "({})",
-        fields
-            .iter()
-            .map(|(field, _)| field.as_str())
-            .collect::<Vec<_>>()
-            .join(",")
-    );
-    let field_specs = fields
-        .iter()
-        .map(|(field, _)| format!("{field}: {{}}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let values = fields
-        .iter()
-        .map(|(field, _)| format!("(self).{}.{}()", mangle(field), method))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let format_string = format!("{label} {{{{ {field_specs} }}}}");
-    format!("format!({format_string:?}, {values})")
-}
-
-fn emit_tuple_protocol_impls(cx: &Cx, name: &str, fields: &[(String, Type)], out: &mut String) {
-    if fields
-        .iter()
-        .all(|(_, field)| crate::Codegen::jet_showable_type(cx, field))
-    {
-        out.push_str(&format!(
-            "impl JetShow for {name} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
-            tuple_render_body(fields, "jet_show")
-        ));
-    }
-    if fields
-        .iter()
-        .all(|(_, field)| crate::Codegen::jet_displayable_type(cx, field))
-    {
-        out.push_str(&format!(
-            "impl JetDisplay for {name} {{\n    fn jet_display(&self) -> String {{ {} }}\n}}\n\n",
-            tuple_render_body(fields, "jet_display")
-        ));
-    }
-    if fields
-        .iter()
-        .all(|(_, field)| crate::Codegen::jet_debuggable_type(cx, field))
-    {
-        out.push_str(&format!(
-            "impl JetDebug for {name} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
-            tuple_render_body(fields, "jet_debug")
-        ));
-    }
-}
-
-fn emit_tuple_struct(cx: &Cx, name: &str, fields: &[(String, Type)], out: &mut String) {
-    // Tuples are structural types with no type-parameter scope of their own.
-    let no_params: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let map_key = fields.iter().all(|(_, ty)| field_type_map_key(ty, cx));
-    let mut derives = Vec::new();
-    if fields.iter().all(|(_, t)| {
-        !cx.type_contains_shared_guard(t)
-            && !is_move_only_cell_guard(t)
-            && field_type_cloneable(t, &cx.type_names, &no_params)
-    }) {
-        derives.push("Clone");
-    }
-    if !map_key
-        && fields.iter().all(|(_, t)| {
-            !cx.type_contains_shared_guard(t)
-                && !is_move_only_cell_guard(t)
-                && field_type_rust_eq_compatible(t, &cx.type_names, &no_params)
-        })
-    {
-        derives.push("PartialEq");
-    }
-    if !map_key
-        && fields.iter().all(|(_, t)| {
-            !cx.type_contains_shared_guard(t)
-                && !is_move_only_cell_guard(t)
-                && field_type_hashable(t, &cx.hashable, &no_params)
-        })
-    {
-        // D-MAP-KEY1: the map is a BTreeMap, so the generated tuple carrier
-        // needs the same structural ordering traits as a nominal key.
-        derives.push("Eq");
-        derives.push("PartialOrd");
-        derives.push("Ord");
-    }
-    let view_lifetime = fields
-        .iter()
-        .any(|(_, ty)| cx.type_contains_view(ty))
-        .then(|| jet_format!("<'{jet_prefix}view>"))
-        .unwrap_or_default();
-    if !derives.is_empty() {
-        out.push_str(&format!("#[derive({})]\n", derives.join(", ")));
-    }
-    out.push_str(&format!("struct {}{} {{\n", name, view_lifetime));
-    for (fname, fty) in fields {
-        out.push_str(&format!(
-            "    pub {}: {},\n",
-            mangle(fname),
-            if cx.type_contains_view(fty) {
-                cx.rust_type_with_view_lifetime(fty)
-            } else {
-                cx.rust_type(fty)
-            }
-        ));
-    }
-    out.push_str("}\n\n");
-    if map_key {
-        let key_fields: Vec<String> = fields
-            .iter()
-            .map(|(field, _)| format!("self.{}", mangle(field)))
-            .collect();
-        emit_map_key_impls(name, &key_fields, out);
-    }
-    emit_tuple_protocol_impls(cx, name, fields, out);
-}
-
-pub(crate) fn emit_tuple_structs(
-    cx: &Cx,
-    shapes: &BTreeMap<String, Vec<(String, Type)>>,
-    out: &mut String,
-) {
-    for (name, fields) in shapes {
-        emit_tuple_struct(cx, name, fields, out);
-    }
-}

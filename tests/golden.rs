@@ -809,7 +809,7 @@ fn record_golden_receipt_at_output(
         .map(PathBuf::from)
         .unwrap_or_else(|| root.join(".jet").join("receipts"));
     let store = jet::ReceiptStore::ReceiptStore::new(store_root);
-    let mut argv = vec!["golden".into(), entry.stem.clone(), tier.to_string()];
+    let mut argv = vec!["golden".into(), entry.path.to_string_lossy().into_owned(), tier.to_string()];
     if let Some(variant) = variant {
         argv.push(variant.to_string());
     }

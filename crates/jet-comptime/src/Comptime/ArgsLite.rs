@@ -9,6 +9,7 @@ mod native {
 
     #[allow(unexpected_cfgs)]
     mod job {
+        include!("../../../jet-codegen/src/Prelude/JobQueueTypes.rs");
         include!("../../../jet-codegen/src/Prelude/Job.rs");
     }
     use job::jet_args_source_program_name;

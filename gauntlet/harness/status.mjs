@@ -12,6 +12,47 @@ const SUMMARY_KEYS = Object.freeze([
   "metric_win", "metric_parity", "metric_loss", "metric_unmeasured", "metric_not_applicable",
 ]);
 const RATIO_TIERS = Object.freeze(["aot", "run"]);
+const STATUS_RATIO_VERDICTS = Object.freeze({
+  rust: { win: "<1", parity: "<=1.05", loss: ">1.05" },
+  non_rust: { win: "<1", parity: null, loss: ">=1" },
+});
+const STATUS_TIER_POLICY_BY_MODE = Object.freeze({
+  batch: ["aot", "run"],
+  "batch-steps": ["aot", "run"],
+  service: ["aot", "run"],
+  web: ["aot", "run"],
+  "web-app": ["aot"],
+});
+const STATUS_METRICS_BY_MODE = Object.freeze({
+  batch: ["runtime_wall_seconds", "runtime_peak_rss_kb", "runtime_first_stdout_seconds", "cold_build_seconds", "warm_build_seconds", "binary_bytes", "loc", "source_bytes", "tokens", "source_tokens"],
+  "batch-steps": ["runtime_wall_seconds", "runtime_peak_rss_kb", "runtime_first_stdout_seconds", "cold_build_seconds", "warm_build_seconds", "binary_bytes", "loc", "source_bytes", "tokens", "source_tokens"],
+  service: ["service_latency_ms_p50", "service_latency_ms_p99", "service_startup_seconds", "runtime_peak_rss_kb", "cold_build_seconds", "warm_build_seconds", "binary_bytes", "loc", "source_bytes", "tokens", "source_tokens"],
+  web: ["runtime_first_stdout_seconds", "runtime_wall_seconds", "runtime_peak_rss_kb", "cold_build_seconds", "warm_build_seconds", "binary_bytes", "loc", "source_bytes", "tokens", "source_tokens"],
+  "web-app": ["runtime_first_stdout_seconds", "runtime_wall_seconds", "runtime_peak_rss_kb", "cold_build_seconds", "warm_build_seconds", "binary_bytes", "loc", "source_bytes", "tokens", "source_tokens"],
+});
+const STATUS_AOT_ONLY_METRICS = new Set(["cold_build_seconds", "warm_build_seconds", "binary_bytes"]);
+const STATUS_POLICY_FAILURE_STATUSES = Object.freeze(["missing", "wrong", "unavailable", "uncovered", "mismatched", "inconclusive"]);
+const STATUS_POLICY_TERRITORIES = Object.freeze({
+  foundations: Object.freeze([
+    { id: "numerics", required: true, cells: ["numerics.float-kernel", "numerics.fft", "numerics.tensor-map", "numerics.int-kernel"], metrics: "all" },
+    { id: "text", required: true, cells: ["text.kernel", "text.regex-kernel", "text.regex-find-all-large", "text.report-cli", "text.script"], metrics: "all" },
+    { id: "files", required: true, cells: ["files.script", "files.orchestration"], metrics: "all" },
+    { id: "concurrency", required: true, cells: ["concurrency.app", "concurrency.service"], metrics: "all" },
+    { id: "networking", required: true, cells: ["netserv.client", "netserv.service"], metrics: "all" },
+    { id: "build_time", required: true, cells: "all", metrics: ["cold_build_seconds", "warm_build_seconds"] },
+    { id: "run_time", required: true, cells: "all", metrics: "runtime" },
+  ]),
+  critical_areas: Object.freeze([
+    { id: "web", required: true, cells: ["webfront.widget", "webfront.app"], metrics: "all" },
+    { id: "games", required: false, activation: "first_party_battery", cells: [], metrics: "all" },
+    { id: "cli_and_scripts", required: true, cells: ["cli.app", "text.report-cli", "text.script", "formats.csv-cli", "files.script"], metrics: "all" },
+    { id: "data_analysis", required: true, cells: ["formats.csv-cli", "numerics.script", "numerics.notebook"], metrics: "all" },
+    { id: "backend_services", required: true, cells: ["concurrency.service", "netserv.service"], metrics: "all" },
+    { id: "ai_ml_applications", required: false, activation: "first_party_battery", cells: [], metrics: "all" },
+    { id: "gui_applications", required: false, activation: "first_party_battery", cells: [], metrics: "all" },
+    { id: "embedded", required: true, cells: ["embedded.kernel", "embedded.data"], metrics: "all" },
+  ]),
+});
 const DETAIL_KEYS = Object.freeze(["reason", "unit", "applicability", "evidence", "stats"]);
 const STAMP_KEYS = Object.freeze(["measured_at", "measured_iso", "run_id", "source_file"]);
 
@@ -352,8 +393,12 @@ function reduceVerdicts(values) {
 }
 
 function isMeasured(value) {
-  return value?.status === "measured" && finiteNumber(value.jet) != null &&
-    finiteNumber(value.peer) != null && finiteNumber(value.ratio) != null;
+  const jet = finiteNumber(value?.jet);
+  const peer = finiteNumber(value?.peer);
+  const ratio = finiteNumber(value?.ratio);
+  return value?.status === "measured" && jet != null && jet > 0 &&
+    peer != null && peer > 0 && ratio != null && ratio > 0 &&
+    ratio === jet / peer;
 }
 
 function metricVerdict(peer, metric, mode, policyByMode) {
@@ -378,6 +423,175 @@ function metricVerdict(peer, metric, mode, policyByMode) {
   });
   return reduceVerdicts(values);
 }
+function statusMatrixMode(cell) {
+  const id = String(cell?.id ?? "");
+  if (id === "webfront.app") return "web-app";
+  if (cell?.kind === "service" || id.startsWith("netserv.") || id === "concurrency.service") return "service";
+  if (cell?.kind === "web" || id === "webfront.widget") return "web";
+  if (cell?.kind === "cli" || cell?.kind === "scripting") return "batch-steps";
+  return "batch";
+}
+
+function statusMatrixPeerLanguages(matrix, cell = null) {
+  const rails = matrix?.rails ?? {};
+  const incumbent = cell?.domain && isObject(rails.incumbents) ? rails.incumbents[cell.domain] : null;
+  const peers = [
+    ...(Array.isArray(rails.always) ? rails.always : []),
+    ...(Array.isArray(rails.perf) ? rails.perf : []),
+    ...(typeof incumbent === "string" ? [incumbent] : (cell ? [] : Object.values(isObject(rails.incumbents) ? rails.incumbents : {}))),
+  ].filter((language) => typeof language === "string" && language !== "jet" && !language.endsWith("-expert"));
+  return [...new Set(peers.length ? peers : ["rust"])].sort();
+}
+
+function statusPolicyIssues(matrix) {
+  const policy = matrix?.strict_performance_policy;
+  if (!isObject(policy)) return ["matrix is missing the strict performance policy"];
+  const issues = [];
+  if (policy.schema !== "jet.strict-performance-policy.v1" ||
+      policy.id !== "AGENTS.md#strict-performance-gate" ||
+      policy.version !== 1 ||
+      policy.comparison !== "per_cell_and_metric") {
+    issues.push("matrix strict performance policy identity is not ratified");
+  }
+  if (JSON.stringify(policy.comparators) !== JSON.stringify(STATUS_RATIO_VERDICTS)) {
+    issues.push("matrix strict performance policy comparator differs from the ratified law");
+  }
+  if (!Array.isArray(policy.failure_statuses) ||
+      JSON.stringify(policy.failure_statuses) !== JSON.stringify(STATUS_POLICY_FAILURE_STATUSES)) {
+    issues.push("matrix strict performance policy failure statuses are incomplete");
+  }
+  for (const category of ["foundations", "critical_areas"]) {
+    const expected = STATUS_POLICY_TERRITORIES[category];
+    const actual = Array.isArray(policy[category]) ? policy[category] : [];
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+      issues.push(`matrix strict performance policy ${category} do not match the ratified territory`);
+    }
+  }
+  if (policy.first_party_battery_required !== true ||
+      policy.historical_receipts !== "immutable_recorded_policy") {
+    issues.push("matrix strict performance policy does not preserve the first-party and historical-evidence rules");
+  }
+  if (typeof policy.text !== "string" ||
+      !policy.text.includes("Never average away a loss") ||
+      !policy.text.includes("Historical receipts remain immutable")) {
+    issues.push("matrix strict performance policy text is missing AGENTS.md law");
+  }
+  return issues;
+}
+
+function statusMetricComparableAtTier(metric, tier) {
+  return tier === "aot" || !STATUS_AOT_ONLY_METRICS.has(metric);
+}
+function statusHasStructuralReason(...records) {
+  return records.some((record) => {
+    const source = asObject(record);
+    return ["reason", "basis", "applicability"].some((key) => {
+      const value = source[key];
+      return (typeof value === "string" && value.trim().length > 0) ||
+        (isObject(value) && Object.keys(value).length > 0);
+    });
+  });
+}
+
+function statusMetricFailures(cellId, peerName, peer, metric, mode, cellFailures = [], cellLossOwners = []) {
+  const prefix = `${cellId}/${peerName}/${metric}`;
+  if (!peer) return [`${prefix}: missing peer row`];
+  if (peer.applicable === false || peer.status === "not_applicable") {
+    if (peer.status !== "not_applicable" || !statusHasStructuralReason(peer)) {
+      return [`${prefix}: peer not_applicable lacks an explicit structural reason`];
+    }
+    return [];
+  }
+  if (peer.status !== "ok" && peer.status !== "measured") {
+    return [`${prefix}: peer status ${peer.status ?? "missing"} is not publishable`];
+  }
+  const comparison = asObject(peer.metric_comparisons?.[metric] ?? peer.metrics?.[metric]);
+  const tiers = asObject(comparison.tiers);
+  const declared = asArray(peer.required_tiers).length
+    ? peer.required_tiers
+    : (isObject(peer.tier_policy) ? Object.keys(peer.tier_policy) : (STATUS_TIER_POLICY_BY_MODE[mode] ?? ["aot", "run"]));
+  const ratioTiers = [...new Set(declared.filter((tier) => RATIO_TIERS.includes(tier)))];
+  const values = [];
+  const issues = [];
+  for (const tier of ratioTiers) {
+    const item = tiers[tier];
+    if (!item) {
+      issues.push(`${prefix}: ${tier} tier is missing`);
+      values.push("unmeasured");
+      continue;
+    }
+    if (!statusMetricComparableAtTier(metric, tier)) {
+      if (item.status !== "not_applicable") {
+        issues.push(`${prefix}: ${tier} tier must be not_applicable`);
+      } else if (!statusHasStructuralReason(item, comparison)) {
+        issues.push(`${prefix}: ${tier} not_applicable lacks an explicit structural reason`);
+      }
+      values.push("not_applicable");
+      continue;
+    }
+    if (!isMeasured(item) || item.verdict !== ratioVerdict(item.ratio, peerName)) {
+      issues.push(`${prefix}: ${tier} tier is missing or has an invalid strict ratio`);
+      values.push("unmeasured");
+      continue;
+    }
+    values.push(ratioVerdict(item.ratio, peerName));
+  }
+  const verdict = reduceVerdicts(values);
+  if (!["win", "parity", "not_applicable"].includes(verdict)) {
+    issues.push(`${prefix}: metric ${verdict}`);
+  }
+  if (verdict === "loss") {
+    const owner = asArray(peer.metric_failures).find((failure) => failure?.metric === metric)?.owner ??
+      asArray(cellFailures).flatMap((failure) => asArray(failure?.peers))
+        .find((failure) => failure?.metric === metric && (failure?.peer ?? failure?.language) === peerName)?.owner ??
+      asArray(cellLossOwners).find((owner) => owner?.metric === metric && (owner?.peer ?? owner?.language) === peerName);
+    if (!owner || owner.status !== "live") issues.push(`${prefix}: loss owner is missing or not live`);
+  }
+  return issues;
+}
+
+/**
+ * Validate the tracked status projection without trusting its declared
+ * verdicts. Every matrix cell, declared rail, comparable metric, and ratio
+ * tier gets its own addressable failure.
+ */
+export function validateStatusGate(status, matrix) {
+  const issues = statusPolicyIssues(matrix);
+  const matrixCells = Array.isArray(matrix?.cells) ? matrix.cells : [];
+  const statusCells = asArray(status?.cells);
+  const byId = new Map(statusCells.map((cell) => [cell?.id, cell]));
+  const matrixIds = new Set(matrixCells.map((cell) => cell.id));
+  if (matrixIds.size !== matrixCells.length) issues.push("matrix declares duplicate cell identities");
+  for (const cell of statusCells) {
+    if (!matrixIds.has(cell?.id)) issues.push(`${cell?.id ?? "<unknown>"}/peer/metric: status declares unknown matrix cell`);
+  }
+  for (const matrixCell of matrixCells) {
+    const id = matrixCell.id;
+    const expectedPeers = statusMatrixPeerLanguages(matrix, matrixCell);
+    const cell = byId.get(id);
+    if (cell) {
+      const declaredPeers = asArray(cell.peers).map((peer) => peer?.peer ?? peer?.language);
+      if (new Set(declaredPeers).size !== declaredPeers.length) {
+        issues.push(`${id}/peer/metric: status declares duplicate peer rows`);
+      }
+      for (const peerName of declaredPeers) {
+        if (!expectedPeers.includes(peerName)) issues.push(`${id}/${peerName ?? "peer"}/metric: status declares an unknown peer`);
+      }
+    }
+    const mode = cell?.mode ?? statusMatrixMode(matrixCell);
+    const metrics = STATUS_METRICS_BY_MODE[mode] ?? STATUS_METRICS_BY_MODE.batch;
+    for (const peerName of expectedPeers) {
+      const peer = asArray(cell?.peers).find((candidate) => (candidate?.peer ?? candidate?.language) === peerName) ?? null;
+      for (const metric of metrics) issues.push(...statusMetricFailures(id, peerName, peer, metric, mode, cell?.failures, cell?.loss_owners));
+    }
+    if (!cell) continue;
+    if (!recognizedVerdict(cell.verdict) || !["win", "parity"].includes(cell.verdict)) {
+      issues.push(`${id}/peer/metric: cell ${cell.verdict ?? "unmeasured"}`);
+    }
+  }
+  return [...new Set(issues)];
+}
+
 
 function addCellMetadata(cell, stamp) {
   if (!stamp) return;
@@ -554,6 +768,7 @@ function projectOneReport(report, reportPath = null) {
       primary_metric_by_mode: primaryMetricByMode,
       verdict_policy: scoreboard.verdict_policy ?? reproducibility.ratio_verdicts ?? {},
       tier_policy_by_mode: reproducibility.tier_policy_by_mode ?? {},
+      strict_performance_policy: reproducibility.strict_performance_policy ?? scoreboard.strict_performance_policy ?? null,
     },
     summary: projectSummary(report, cells),
     cells,
@@ -785,6 +1000,13 @@ export function mergeStatus(input, reportPaths = []) {
   const runIds = [...new Set(normalized.map((part) => part.stamp.runId).filter(Boolean))];
   const files = [...new Set(normalized.map((part) => part.stamp.sourceFile).filter(Boolean))];
   const latestReport = latest.report;
+  const historicalReceipts = normalized.map((part) => ({
+    run_id: part.stamp.runId,
+    generated: part.stamp.generated,
+    source_file: part.stamp.sourceFile,
+    strict_performance_policy: part.report.reproducibility?.strict_performance_policy ??
+      part.report.scoreboard?.strict_performance_policy ?? null,
+  }));
   return {
     contract: "gauntlet-status-v1",
     generated: latestReport.generated ?? null,
@@ -800,6 +1022,9 @@ export function mergeStatus(input, reportPaths = []) {
       primary_metric_by_mode: primaryMetricByMode,
       verdict_policy: asObject(latestReport.scoreboard?.verdict_policy ?? latestReport.reproducibility?.ratio_verdicts),
       tier_policy_by_mode: tierPolicyByMode,
+      strict_performance_policy: latestReport.reproducibility?.strict_performance_policy ??
+        latestReport.scoreboard?.strict_performance_policy ?? null,
+      historical_receipts: historicalReceipts,
     },
     summary,
     cells,
@@ -854,16 +1079,49 @@ async function reportFiles(directory) {
     .sort();
 }
 
+export function applyStatusGate(status, matrix) {
+  const strictBlockers = validateStatusGate(status, matrix);
+  const policy = matrix?.strict_performance_policy ?? null;
+  status.policy = {
+    ...asObject(status.policy),
+    strict_performance_policy: policy,
+  };
+  const blockers = [...new Set([
+    ...asArray(status.publication?.blockers),
+    ...strictBlockers,
+  ].filter((blocker) => typeof blocker === "string" && blocker.length > 0))];
+  status.publication = {
+    ...asObject(status.publication),
+    status: blockers.length ? "incomplete" : (status.publication?.status ?? "incomplete"),
+    complete: status.publication?.complete === true && blockers.length === 0,
+    blockers,
+  };
+  return strictBlockers;
+}
+
+async function loadMatrix() {
+  return JSON.parse(await fs.readFile(path.join(repoDir, "gauntlet/matrix.json"), "utf8"));
+}
+
+async function writeStatusAndReport(status, matrix) {
+  const strictBlockers = applyStatusGate(status, matrix);
+  await fs.writeFile(statusPath, `${JSON.stringify(status, null, 2)}\n`);
+  console.log(`status\t${path.relative(repoDir, statusPath).split(path.sep).join("/")}`);
+  console.log(`summary\tcells=${status.summary.cells}\twin=${status.summary.win}\tparity=${status.summary.parity}\tloss=${status.summary.loss}\tunmeasured=${status.summary.unmeasured}`);
+  console.log(`strict_gate\t${strictBlockers.length ? "blocked" : "complete"}\tblockers=${strictBlockers.length}`);
+  for (const blocker of strictBlockers) console.log(`blocker\t${blocker}`);
+  if (strictBlockers.length) process.exitCode = 1;
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (!options) return;
+  const matrix = await loadMatrix();
   if (options.from) {
     const inputPath = path.resolve(process.cwd(), options.from);
     const report = JSON.parse(await fs.readFile(inputPath, "utf8"));
     const status = projectStatus(report, inputPath);
-    await fs.writeFile(statusPath, `${JSON.stringify(status, null, 2)}\n`);
-    console.log(`status\t${path.relative(repoDir, statusPath).split(path.sep).join("/")}`);
-    console.log(`summary\tcells=${status.summary.cells}\twin=${status.summary.win}\tparity=${status.summary.parity}\tloss=${status.summary.loss}\tunmeasured=${status.summary.unmeasured}`);
+    await writeStatusAndReport(status, matrix);
     return;
   }
   const files = await reportFiles(options.merge);
@@ -872,9 +1130,7 @@ async function main() {
     reportPath: file,
   })));
   const status = mergeStatus(reports);
-  await fs.writeFile(statusPath, `${JSON.stringify(status, null, 2)}\n`);
-  console.log(`status\t${path.relative(repoDir, statusPath).split(path.sep).join("/")}`);
-  console.log(`summary\tcells=${status.summary.cells}\twin=${status.summary.win}\tparity=${status.summary.parity}\tloss=${status.summary.loss}\tunmeasured=${status.summary.unmeasured}`);
+  await writeStatusAndReport(status, matrix);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

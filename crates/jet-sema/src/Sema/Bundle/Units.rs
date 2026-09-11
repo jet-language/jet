@@ -335,7 +335,9 @@ pub(super) fn resolve_unit_dimensions(bundle: &mut ProgramBundle) -> Vec<Diagnos
                 .alias(declaration.module, &alias)
                 .map(|binding| binding.span);
             if let Some(span) = span {
-                bundle.name_ledger.record_alias_use(declaration.module, span);
+                bundle
+                    .name_ledger
+                    .record_alias_use(declaration.module, span);
             }
         }
         let mut unqualified_names = HashSet::new();
@@ -352,9 +354,7 @@ pub(super) fn resolve_unit_dimensions(bundle: &mut ProgramBundle) -> Vec<Diagnos
                 .copied()
                 .filter(|target| {
                     declarations.iter().any(|candidate| {
-                        candidate.module == *target
-                            && candidate.is_pub
-                            && candidate.family == name
+                        candidate.module == *target && candidate.is_pub && candidate.family == name
                     })
                 })
                 .collect::<HashSet<_>>();
@@ -367,7 +367,9 @@ pub(super) fn resolve_unit_dimensions(bundle: &mut ProgramBundle) -> Vec<Diagnos
                     .alias(declaration.module, alias)
                     .map(|binding| binding.span);
                 if let Some(span) = span {
-                    bundle.name_ledger.record_alias_use(declaration.module, span);
+                    bundle
+                        .name_ledger
+                        .record_alias_use(declaration.module, span);
                 }
             }
         }

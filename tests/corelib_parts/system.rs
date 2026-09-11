@@ -474,7 +474,7 @@ fn importing_all_core_modules_without_calls_stays_hello_world_sized() {
 
     fs::write(
         dir.join("hello.jet"),
-        "fn run() {\n    print(\"hello, world\");\n}\n",
+        "fn run() {\n    print(\"hello, world\")\n}\n",
     )
     .unwrap();
     fs::write(
@@ -926,85 +926,6 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// c45 drift-guard: `core_module_items` in Sema/CheckerCoreLib must cover
-/// every module in `Loader::KNOWN_CORE_MODULES` (and no extras).
-///
-/// `core_module_items` is `pub(crate)` so we can't call it directly from here.
-/// Instead we parse the source file and extract the string literals used as
-/// match arm heads — the same technique used in tests/decisions.rs for
-/// Source/Syntax.rs. This breaks if the match arm format changes, which is
-/// exactly the right tripwire: a format change must be mirrored here.
-#[test]
-fn core_module_items_covers_known_core_modules() {
-    let src = fs::read_to_string("crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs")
-        .expect("CheckerCoreLib/module_items.rs must exist");
-
-    // Extract the `core_module_items` function body.
-    let fn_start = src
-        .find("fn core_module_items(")
-        .expect("core_module_items function not found in CheckerCoreLib/module_items.rs");
-    // Find the closing `}` at top-level indent (just after the last arm).
-    let fn_body = &src[fn_start..];
-    // Collect ALL string literals from match arm heads (handles `"a" | "b" => &[` form too).
-    let mut items_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    // `core.compiler.lang` is generated from the marker registry and returns before the
-    // static match table, so it has no ordinary arm to extract.
-    if fn_body.contains("if module == \"core.compiler.lang\"") {
-        items_keys.insert("core.compiler.lang".to_string());
-    }
-    if fn_body.contains("module == Syntax::CORE_MEM_MODULE") {
-        items_keys.insert("core.mem".to_string());
-    }
-    if fn_body.contains("Syntax::CORE_MOD_MODULE =>") {
-        items_keys.insert("core.mod".to_string());
-    }
-    for line in fn_body.lines() {
-        let trimmed = line.trim();
-        // A match arm head: `"core.files" => &[` or `"core.log" => &[`
-        if trimmed.starts_with('"') && trimmed.contains("=>") {
-            let arm_head = trimmed.split("=>").next().unwrap_or("");
-            let mut rest = arm_head;
-            while let Some(start) = rest.find('"') {
-                rest = &rest[start + 1..];
-                if let Some(end) = rest.find('"') {
-                    items_keys.insert(rest[..end].to_string());
-                    rest = &rest[end + 1..];
-                } else {
-                    break;
-                }
-            }
-        }
-        // Stop when we reach the wildcard arm or the closing brace of the function.
-        if trimmed == "_ => &[]," || trimmed == "_ => &[]" {
-            break;
-        }
-    }
-
-    // D-CORENS1 / D-CORENS-CANON1: every Core module keeps its canonical
-    // `core.*` key through the checker tables. No internal `jet.*` rewrite is
-    // allowed to hide a missing or extra module arm.
-    let known: std::collections::BTreeSet<String> = jet::Loader::KNOWN_CORE_MODULES
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-
-    let missing_from_items: Vec<&String> =
-        known.iter().filter(|m| !items_keys.contains(*m)).collect();
-    let extra_in_items: Vec<&String> = items_keys.iter().filter(|m| !known.contains(*m)).collect();
-
-    assert!(
-        missing_from_items.is_empty(),
-        "core_module_items is missing arms for modules in KNOWN_CORE_MODULES: {:?}\n\
-         Add a match arm in Source/Sema/CheckerCoreLib.rs for each.",
-        missing_from_items
-    );
-    assert!(
-        extra_in_items.is_empty(),
-        "core_module_items has arms for modules NOT in KNOWN_CORE_MODULES: {:?}\n\
-         Either add to KNOWN_CORE_MODULES in Source/Loader.rs or remove the arm.",
-        extra_in_items
-    );
-}
 
 #[test]
 fn compiler_sources_reject_retired_jet_ring_keys() {
@@ -1062,7 +983,7 @@ fn compiler_sources_reject_retired_jet_ring_keys() {
 
 #[test]
 fn core_reference_lists_every_built_core_module() {
-    let docs = fs::read_to_string("docs/reference/core-library.md")
+    let docs = fs::read_to_string("docs/spec/reference/core-library.md")
         .expect("core library reference must exist");
     let missing: Vec<&str> = jet::Loader::KNOWN_CORE_MODULES
         .iter()
@@ -1072,7 +993,7 @@ fn core_reference_lists_every_built_core_module() {
         .collect();
     assert!(
         missing.is_empty(),
-        "docs/reference/core-library.md must list every built Core module from KNOWN_CORE_MODULES: {:?}",
+        "docs/spec/reference/core-library.md must list every built Core module from KNOWN_CORE_MODULES: {:?}",
         missing
     );
 }

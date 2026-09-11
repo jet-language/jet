@@ -5,6 +5,7 @@
 //! Panics inside handlers are caught (LSP-I2) — process death is a P0 bug.
 //! All file reads go through the overlay (LSP-I4) — unsaved buffers are correct.
 
+mod Adapter;
 mod Check;
 mod Completion;
 mod EnvironmentResources;

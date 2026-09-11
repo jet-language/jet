@@ -1,7 +1,7 @@
 // D-CHOOSE-TEST1=A: test the subject first; the route leaves on a miss.
-fn good() Int !String -> .Ok(7)
+fn good() Int -> .Ok(7)
 
-fn bad() Int !String -> .Err("invalid")
+fn bad() Int -> .Err("invalid")
 
 fn take_good() Int -> {
     good() == .Ok(value) ?? return 0
@@ -9,7 +9,7 @@ fn take_good() Int -> {
 }
 
 fn take_error() String -> {
-    bad() == .Ok(value) ?? return err
+    bad() == .Ok(value) ?? return err.message
     return "value:{value}"
 }
 

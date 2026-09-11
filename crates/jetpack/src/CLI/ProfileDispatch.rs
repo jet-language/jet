@@ -5,7 +5,8 @@
 //! the tool that the user selected, and profile commands inspect metadata.
 
 use crate::{Syntax, JSON, SHA256};
-use std::collections::{BTreeMap, BTreeSet};
+use jet_foundation::DataTree::DataTree;
+use std::collections::BTreeSet;
 use std::io;
 use std::path::{Component, Path};
 
@@ -143,7 +144,7 @@ pub(crate) fn parse_generation_metadata(
     text: &str,
     expected_generation: u64,
 ) -> io::Result<GenerationMetadata> {
-    let JSON::JSONValue::Object(root) = JSON::parse(text).map_err(invalid)? else {
+    let DataTree::Object(root) = JSON::parse(text).map_err(invalid)? else {
         return Err(invalid("profile metadata root is not an object"));
     };
     expect_exact_keys(
@@ -169,10 +170,7 @@ pub(crate) fn parse_generation_metadata(
         return Err(invalid("tool generation metadata disagrees with path"));
     }
     let created_at = integer_field(&root, "created_at")?;
-    let JSON::JSONValue::Array(entries) = root
-        .get("tools")
-        .ok_or_else(|| invalid("profile metadata lacks tools"))?
-    else {
+    let Some(DataTree::Array(entries)) = tree_field(&root, "tools") else {
         return Err(invalid("profile tools field is not an array"));
     };
     if entries.len() > MAX_TOOLS {
@@ -180,7 +178,7 @@ pub(crate) fn parse_generation_metadata(
     }
     let mut tools = Vec::with_capacity(entries.len());
     for entry in entries {
-        let JSON::JSONValue::Object(tool) = entry else {
+        let DataTree::Object(tool) = entry else {
             return Err(invalid("profile tool entry is not an object"));
         };
         expect_exact_keys(
@@ -426,12 +424,25 @@ fn write_string_array(out: &mut String, key: &str, values: &[String], comma: boo
     out.push('\n');
 }
 
+fn tree_field<'a>(
+    object: &'a [(String, DataTree)],
+    key: &str,
+) -> Option<&'a DataTree> {
+    object
+        .iter()
+        .find_map(|(name, value)| (name == key).then_some(value))
+}
+
 fn expect_exact_keys(
-    object: &BTreeMap<String, JSON::JSONValue>,
+    object: &[(String, DataTree)],
     expected: &[&str],
     label: &str,
 ) -> io::Result<()> {
-    let actual = object.keys().map(String::as_str).collect::<Vec<_>>();
+    let mut actual = object
+        .iter()
+        .map(|(key, _)| key.as_str())
+        .collect::<Vec<_>>();
+    actual.sort_unstable();
     let mut expected = expected.to_vec();
     expected.sort_unstable();
     if actual != expected {
@@ -441,26 +452,25 @@ fn expect_exact_keys(
 }
 
 fn string_field<'a>(
-    object: &'a BTreeMap<String, JSON::JSONValue>,
+    object: &'a [(String, DataTree)],
     key: &str,
 ) -> io::Result<&'a str> {
-    object
-        .get(key)
+    tree_field(object, key)
         .ok_or_else(|| invalid(format!("missing key `{key}`")))?
         .as_str()
         .map_err(invalid)
 }
 
-fn bounded_string(object: &BTreeMap<String, JSON::JSONValue>, key: &str) -> io::Result<String> {
+fn bounded_string(object: &[(String, DataTree)], key: &str) -> io::Result<String> {
     let value = string_field(object, key)?;
     validate_string(value)?;
     Ok(value.to_string())
 }
 
-fn integer_field(object: &BTreeMap<String, JSON::JSONValue>, key: &str) -> io::Result<u64> {
-    match object.get(key) {
-        Some(JSON::JSONValue::Number(value)) if *value >= 0 => Ok(*value as u64),
-        Some(JSON::JSONValue::Flt(value))
+fn integer_field(object: &[(String, DataTree)], key: &str) -> io::Result<u64> {
+    match tree_field(object, key) {
+        Some(DataTree::Int(value)) if *value >= 0 => Ok(*value as u64),
+        Some(DataTree::Float(value))
             if value.is_finite()
                 && *value >= 0.0
                 && value.fract() == 0.0
@@ -475,8 +485,8 @@ fn integer_field(object: &BTreeMap<String, JSON::JSONValue>, key: &str) -> io::R
     }
 }
 
-fn string_array(object: &BTreeMap<String, JSON::JSONValue>, key: &str) -> io::Result<Vec<String>> {
-    let Some(JSON::JSONValue::Array(values)) = object.get(key) else {
+fn string_array(object: &[(String, DataTree)], key: &str) -> io::Result<Vec<String>> {
+    let Some(DataTree::Array(values)) = tree_field(object, key) else {
         return Err(invalid(format!("profile field `{key}` is not an array")));
     };
     values

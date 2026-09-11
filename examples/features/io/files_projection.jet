@@ -1,0 +1,21 @@
+// D-FILES1: temporary paths make directory, mode, append, and rename operations explicit.
+use core.files as files
+use core.testing as testing
+
+fn run() {
+    root := testing.temp_dir("files-projection")
+    child := Path.from(root).join("child")
+    source := Path.from(child).join("source.txt")
+    destination := Path.from(child).join("destination.txt")
+    files.create_dir(child) ?? return
+    files.write(source, "one") ?? return
+    files.append(source) ?? return
+    files.append_all(source, "two") ?? return
+    files.set_mode(source, 0o600) ?? return
+    print("directory:{files.is_dir(child)}")
+    files.rename(source, destination) ?? return
+    print("renamed:{files.exists(destination)}")
+    files.remove(destination) ?? return
+    files.remove_dir(child) ?? return
+    print("removed:{!files.is_dir(child)}")
+}

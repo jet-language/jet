@@ -9,9 +9,9 @@
 pub use jet_foundation::JitBackend::{JitBackend, RunOutcome};
 
 use crate::Diagnostics::Diagnostic;
-use crate::Interpreter::run_checked;
-use crate::AST::ProgramBundle;
-
+use crate::Interpreter::{run_checked, InterpreterInvocation};
+use jet_foundation::MIR::{MirArtifactId, MirProgram};
+use jet_pkg_model::Package::ReleaseDevtoolsPolicy;
 /// Tier-0 backend: the comptime interpreter. Stateless between runs (no
 /// resident heap), so every method funnels into [`run_checked`].
 ///
@@ -20,35 +20,81 @@ use crate::AST::ProgramBundle;
 ///
 /// Explicit interpreter selection is not a JIT fallback. Cranelift's fallback
 /// and deopt sites own their trace tripwires, so this backend leaves them clear.
-#[derive(Default)]
-pub struct InterpreterBackend;
+pub struct InterpreterBackend {
+    invocation: InterpreterInvocation,
+}
 
 impl InterpreterBackend {
-    pub fn new() -> Self {
-        InterpreterBackend
+    pub fn new(invocation: InterpreterInvocation) -> Self {
+        Self { invocation }
     }
 }
 
 /// These methods deliberately run on their caller's thread. A resident session
 /// keeps `#Persist` state (D-PERSIST1) in thread-local storage seeded while the
-/// bundle is lowered, and `restart` below clears exactly that store, so hopping
-/// each call onto a fresh worker would drop persisted bindings between hot
-/// swaps. The sized compiler stack therefore wraps the whole session from
-/// outside — `Interpreter::dev_run_bundle` and the `run_*_once` entries — never
+/// MIR program is lowered, and `restart` below clears exactly that store, so
+/// hopping each call onto a fresh worker would drop persisted bindings between
+/// hot swaps. The sized compiler stack therefore wraps the whole session from
+/// outside — `Interpreter::dev_run_snapshot` and the `run_*_once` entries — never
 /// one call inside it.
 impl JitBackend for InterpreterBackend {
-    fn run(&mut self, bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
+    type InvocationPolicy = ReleaseDevtoolsPolicy;
+
+    fn run(
+        &mut self,
+        program: &MirProgram,
+        artifact: MirArtifactId,
+        try_anyway: bool,
+        policy: &Self::InvocationPolicy,
+    ) -> RunOutcome {
+        // A one-shot invocation starts a fresh #Persist store. Resident
+        // sessions use `hot_swap` and retain the store until `restart`.
+        jet_foundation::Persist::shared_clear();
         jet_jit::reset_one_shot_core_state();
-        jet_jit::with_interpreter_ambient(|| run_checked(bundle, try_anyway))
+        jet_jit::with_interpreter_ambient(|ambient| {
+            jet_jit::register_db_interpreter_ambient(ambient);
+            jet_jit::register_raylib_interpreter_ambient(ambient);
+            jet_jit::register_ui_interpreter_ambient(ambient);
+            jet_jit::register_receipt_interpreter_ambient(ambient);
+            jet_jit::register_encoding_interpreter_ambient(ambient);
+            jet_jit::register_plugin_interpreter_ambient(ambient);
+            jet_jit::register_crypto_interpreter_ambient(ambient);
+            if let Some(facts) = program.facts.hardware_profile.clone() {
+                jet_jit::register_hardware_interpreter_ambient(
+                    ambient,
+                    program.facts.hardware_profile_id.clone(),
+                    facts,
+                );
+            }
+            run_checked(program, artifact, try_anyway, self.invocation, policy)
+        })
     }
 
     fn hot_swap(
         &mut self,
         _module_name: &str,
-        bundle: &ProgramBundle,
+        program: &MirProgram,
+        artifact: MirArtifactId,
         try_anyway: bool,
+        policy: &Self::InvocationPolicy,
     ) -> Result<RunOutcome, Vec<Diagnostic>> {
-        match jet_jit::with_interpreter_ambient(|| run_checked(bundle, try_anyway)) {
+        match jet_jit::with_interpreter_ambient(|ambient| {
+            jet_jit::register_db_interpreter_ambient(ambient);
+            jet_jit::register_raylib_interpreter_ambient(ambient);
+            jet_jit::register_ui_interpreter_ambient(ambient);
+            jet_jit::register_receipt_interpreter_ambient(ambient);
+            jet_jit::register_encoding_interpreter_ambient(ambient);
+            jet_jit::register_plugin_interpreter_ambient(ambient);
+            jet_jit::register_crypto_interpreter_ambient(ambient);
+            if let Some(facts) = program.facts.hardware_profile.clone() {
+                jet_jit::register_hardware_interpreter_ambient(
+                    ambient,
+                    program.facts.hardware_profile_id.clone(),
+                    facts,
+                );
+            }
+            run_checked(program, artifact, try_anyway, self.invocation, policy)
+        }) {
             RunOutcome::Ran {
                 stdout,
                 stderr,
@@ -62,9 +108,31 @@ impl JitBackend for InterpreterBackend {
         }
     }
 
-    fn restart(&mut self, bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
+    fn restart(
+        &mut self,
+        program: &MirProgram,
+        artifact: MirArtifactId,
+        try_anyway: bool,
+        policy: &Self::InvocationPolicy,
+    ) -> RunOutcome {
         // D-HOTSWAP1 / D-PERSIST1: interpreter restart drops shared persist.
         jet_foundation::Persist::shared_clear();
-        jet_jit::with_interpreter_ambient(|| run_checked(bundle, try_anyway))
+        jet_jit::with_interpreter_ambient(|ambient| {
+            jet_jit::register_db_interpreter_ambient(ambient);
+            jet_jit::register_raylib_interpreter_ambient(ambient);
+            jet_jit::register_ui_interpreter_ambient(ambient);
+            jet_jit::register_receipt_interpreter_ambient(ambient);
+            jet_jit::register_encoding_interpreter_ambient(ambient);
+            jet_jit::register_plugin_interpreter_ambient(ambient);
+            jet_jit::register_crypto_interpreter_ambient(ambient);
+            if let Some(facts) = program.facts.hardware_profile.clone() {
+                jet_jit::register_hardware_interpreter_ambient(
+                    ambient,
+                    program.facts.hardware_profile_id.clone(),
+                    facts,
+                );
+            }
+            run_checked(program, artifact, try_anyway, self.invocation, policy)
+        })
     }
 }

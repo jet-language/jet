@@ -1,7 +1,7 @@
 use super::actions_policy::{
     BuildAction, BuildCapability, BuildResourcePool, BuildResourcePoolSpec, LegacyWrapperKind,
 };
-use super::cache_cas::{ActionCacheStatus, ActionOutcome, ContentDigest};
+use super::cache_cas::{ActionCacheStatus, ActionKey, ActionOutcome, ContentDigest};
 use super::handles::{ActionId, PluginId, TargetId, TargetRef};
 use super::plugins_modules::{BuildGeneratedModule, BuildPlugin};
 use super::provenance_toolchains::{BuildProbe, BuildSigningIdentity, BuildToolchain};
@@ -181,6 +181,53 @@ pub struct BuildGraphAction {
     pub legacy_wrapper: Option<LegacyWrapperKind>,
     pub plugin: Option<PluginId>,
     pub compiler_owned: bool,
+    /// The deterministic recipe key computed from the checked plan facts.
+    ///
+    /// This is the plan key, before runtime input snapshots and effective
+    /// execution policy are joined by the store.
+    pub key: ActionKey,
+    /// Runtime cache evidence is absent from a static plan projection.
+    /// `None` means unknown, rather than a cache miss.
+    pub cache_hit: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildGraphActionKey {
+    pub action: String,
+    pub key: ActionKey,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildGraphFileDelta {
+    pub path: String,
+    pub before: Option<BuildGraphFile>,
+    pub after: Option<BuildGraphFile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildGraphKeyDelta {
+    pub action: String,
+    pub before: Option<ActionKey>,
+    pub after: Option<ActionKey>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildGraphCacheDelta {
+    pub action: String,
+    pub before: Option<bool>,
+    pub after: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BuildGraphDiff {
+    /// Files whose declared ownership, consumers, or target membership changed.
+    pub file_deltas: Vec<BuildGraphFileDelta>,
+    /// Outputs transitively affected by changed action keys or input paths.
+    pub affected_files: Vec<String>,
+    /// Actions whose stable recipe key was added, removed, or changed.
+    pub key_deltas: Vec<BuildGraphKeyDelta>,
+    /// Runtime cache evidence changes. `None` remains unknown.
+    pub cache_deltas: Vec<BuildGraphCacheDelta>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

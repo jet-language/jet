@@ -1,0 +1,174 @@
+{
+  "schema": "jet.semantic-contract.v1",
+  "schema_version": 1,
+  "contract_id": "jet-semantic-contract-v1",
+  "policy": {
+    "decision_id": "D-COMPILER-PROOF1",
+    "outcome": "A",
+    "status": "ratified",
+    "scope": "every Jet-controlled stage before 1.0",
+    "foreign_suffix": "foreign compiler tools and environment remain explicit assumptions"
+  },
+  "claim": {
+    "kind": "conditional-preservation",
+    "statement": "For a supported source program, configuration, and stated resource/environment premises, every completed target observation is allowed by the executable source semantics.",
+    "preconditions": [
+      "The source bytes and source graph are the identified inputs.",
+      "The program is accepted by the published lexical, parsing, checking, ownership, effect, and contract rules.",
+      "Numeric, target, scheduler, stack, allocation, and fuel premises are recorded for the run.",
+      "Foreign libraries, foreign compiler tools, operating-system behavior, and external services satisfy their named contracts.",
+      "A target may report only the resource failures permitted by the stated resource law; safe Jet has no C-style undefined-behavior escape."
+    ],
+    "observation_alphabet": [
+      "result",
+      "typed_failure",
+      "mutation",
+      "input_consumption",
+      "ordered_effects",
+      "cleanup",
+      "resource_premises",
+      "schedule",
+      "allowed_schedules"
+    ],
+    "permitted_resource_failures": ["ResourceExhausted", "InputUnavailable"],
+    "trusted_components": [
+      "ratified Jet language and Core specifications",
+      "the executable model implementation and its checked source inputs",
+      "the pinned checker identity from jet.compiler-proof.v1",
+      "named foreign compiler, runtime, operating-system, and environment contracts"
+    ],
+    "unsupported_cases": [
+      "unlisted syntax or TIR constructs",
+      "unmodeled Core receiver or adapter behavior",
+      "unbounded scheduling, concurrency, or progress claims",
+      "unverified FFI, ABI/layout, foreign library, or browser behavior",
+      "a source, candidate, checker, configuration, or proof artifact whose identity changed"
+    ]
+  },
+  "execution": {
+    "schema": "jet.semantic-witness-mapping.v1",
+    "runner": "scripts/agent/jet-env",
+    "compiler": "target/debug/jet",
+    "operations": ["run", "check"],
+    "tiers": ["aot", "jet_run", "interpreter", "check"],
+    "observation_fields": [
+      "result",
+      "typed_failure",
+      "mutation",
+      "input_consumption",
+      "ordered_effects",
+      "cleanup",
+      "resource_premises",
+      "schedule",
+      "allowed_schedules"
+    ],
+    "identity_fields": ["program_sha256", "source_sha256"],
+    "timeout_ms": 120000,
+    "unknown_status": "unverified",
+    "resource_policy": "unknown resource observations remain unproved"
+  },
+  "binding_methods": [
+    {
+      "method": "verified_construction",
+      "source": "proof/compiler/semantics/model.mjs",
+      "implementation": "proof/compiler/semantics/model.mjs",
+      "construction": "closed executable transition relation checked by this contract checker",
+      "checker": "proof/compiler/semantics/check.mjs",
+      "limit": "model validity and correspondence to the full Jet implementation are not inferred"
+    },
+    {
+      "method": "direct_verification",
+      "source": "proof/compiler/semantics/implementation.mjs",
+      "implementation": "proof/compiler/semantics/implementation.mjs",
+      "candidate_binding": "identity.candidate.compiler.source and identity.candidate.compiler.artifact from jet.compiler-proof.v1",
+      "checker": "proof/compiler/toolchain/manifest.json claim checker",
+      "limit": "the bounded slice does not establish direct verification of every production stage"
+    },
+    {
+      "method": "translation_certificate",
+      "source": "proof/compiler/semantics/witnesses.json",
+      "implementation": "proof/compiler/semantics/implementation.mjs",
+      "certificate": "proof/compiler/semantics/witnesses.json",
+      "checker": "proof/compiler/semantics/check.mjs",
+      "limit": "finite bounded agreement is tested evidence, never universal preservation"
+    }
+  ],
+  "identity": {
+    "schema": "jet.compiler-proof.v1",
+    "manifest_path": "proof/compiler/toolchain/manifest.json",
+    "authority_key": "compiler-proof.semantics",
+    "claim_id": "compiler-proof.identity-direct",
+    "identity_digest_source": "scripts/agent/compiler-proof.mjs:identityDigest",
+    "required_fields": [
+      "claim.identity_sha256",
+      "candidate.record_identity.target_inputs_sha256",
+      "candidate.record_identity.tool_version",
+      "candidate.record_identity.engine",
+      "candidate.commit",
+      "candidate.compiler.source",
+      "candidate.compiler.artifact",
+      "candidate.configuration",
+      "candidate.target",
+      "checker.toolchain_pin_sha256",
+      "proof.artifact",
+      "raw_replay"
+    ]
+  },
+  "boundary": {
+    "proven": [
+      "The checker validates this contract's shape and disjoint proof-boundary labels.",
+      "The finite witness relation is deterministically serialized and compared with the canonical ordered-effects observation relation.",
+      "Incomplete obligations, identity drift, discarded cases, mismatches, unknown statuses, and unavailable replay cannot qualify as proof."
+    ],
+    "assumed": [
+      "The ratified language and Core specifications state the intended Jet semantics; if those specifications differ from the checker encoding, this contract proves conformance to the encoding rather than to the language.",
+      "The candidate compiler construction and foreign compiler/environment suffix satisfy their named contracts.",
+      "The pinned jet.compiler-proof.v1 claim identity identifies the candidate without changing its meaning."
+    ],
+    "tested": [
+      "The retained value, mutation, compile-time, input/result, rejection, typed-failure, cleanup, and resource witnesses agree between the independent model and implementation.",
+      "A deliberately wrong observation and each independent wrong-rule witness are rejected as mismatch and cannot be promoted to matched.",
+      "When requested, each live Jet mapping is attempted only as identity-bound observation evidence; unobserved dimensions remain explicitly unproved."
+    ],
+    "blocked": [
+      "Universal preservation for all Jet-controlled parsing, checking, comptime, lowering, optimization, Core, runtime, and adapter stages.",
+      "Live Lean replay of the candidate proof artifact when the pinned checker is unavailable.",
+      "Complete fresh AOT, resident JIT, interpreter, and web conformance evidence for the language corpus, including identity-bound observations across every applicable stage and adapter, remains unrecorded.",
+      "Complete implementation-bound mappings for every observation dimension, especially typed failure, mutation, input trace, ordered effects, cleanup, resource premises, scheduler traces, and allowed schedules."
+    ],
+    "qualification": "blocked"
+  },
+  "coverage": {
+    "relation_path": "proof/compiler/obligations.json",
+    "generator": "proof/compiler/semantics/generate-obligations.mjs",
+    "authorities": [
+      "crates/jet-codegen/src/Codegen/TIR/mod.rs",
+      "crates/jet-codegen/src/Prelude/Core.jet",
+      "crates/jet-foundation/src/Syntax.rs",
+      "docs/spec/syntax-decisions.md",
+      "crates/jet-foundation/src/MIR.rs",
+      "docs/spec/architecture.md"
+    ],
+    "owner_rule": "every generated row has a non-empty rule, live owner, and explicit uncovered state until a checked argument exists",
+    "no_duplicate_owners": ["#2898", "#2335", "#2919"],
+    "mapping_statuses": ["mapped_unproved", "unsupported", "unmapped", "proved"],
+    "qualification_rule": "model agreement is tested evidence; a denominator row is proved only after complete identity-bound Jet observations and no current mapping may claim that state"
+  },
+  "comparison_authority": {
+    "path": "crates/jet-foundation/src/TestingComparison.rs",
+    "schema_version": 1,
+    "relation": "ordered_effects",
+    "statuses": [
+      "matched",
+      "mismatch",
+      "empty",
+      "unsupported",
+      "unavailable",
+      "timeout",
+      "cancelled",
+      "invalid_oracle",
+      "contaminated"
+    ],
+    "universal_proof": false
+  }
+}

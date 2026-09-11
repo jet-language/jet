@@ -130,6 +130,12 @@ enum JetServiceSupervisorStatus {
     Partitioned,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum JetServiceTopologyKind {
+    Supervisor,
+    Task,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct JetServiceSupervisorState {
     status: JetServiceSupervisorStatus,
@@ -140,6 +146,15 @@ struct JetServiceSupervisorState {
     /// supervisor never reads a `trace()`/`exception()` string.
     failure: Option<JetTaskFailure>,
     joined: bool,
+    topology_kind: Option<JetServiceTopologyKind>,
+    topology_id: Option<String>,
+    topology_parent_id: Option<String>,
+    topology_restart_history: Vec<JetDevtoolsTopologyRestartFact>,
+    topology_owner: Option<String>,
+    topology_restart_policy: Option<JetDevtoolsTopologyRestartPolicy>,
+    topology_wait_target: Option<String>,
+    topology_started_at_ms: Option<u64>,
+    topology_duration_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -156,19 +171,488 @@ impl JetServiceSupervisorState {
             status,
             failure: None,
             joined: false,
+            topology_kind: None,
+            topology_id: None,
+            topology_parent_id: None,
+            topology_owner: None,
+            topology_restart_policy: None,
+            topology_wait_target: None,
+            topology_started_at_ms: None,
+            topology_duration_ms: None,
+            topology_restart_history: Vec::new(),
         }
     }
 }
 
-fn jet_services_task_start(
+const JET_SERVICES_TOPOLOGY_MAX_ID: usize = 256;
+const JET_SERVICES_TOPOLOGY_SOURCE: &str = "service-runtime";
+
+fn jet_services_topology_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| u64::try_from(duration.as_millis()).ok())
+        .unwrap_or(0)
+}
+
+fn jet_services_topology_restart_policy(
+    restart: &JetServiceRestart,
+    budget: &JetServiceRestartBudget,
+) -> Option<JetDevtoolsTopologyRestartPolicy> {
+    let strategy = match restart {
+        JetServiceRestart::OneForOne => JetDevtoolsTopologyRestartStrategy::OneForOne,
+        JetServiceRestart::OneForAll => JetDevtoolsTopologyRestartStrategy::OneForAll,
+        JetServiceRestart::RestForOne => JetDevtoolsTopologyRestartStrategy::RestForOne,
+    };
+    let max_restarts = u32::try_from(budget.max).ok()?;
+    let window_ms = u64::try_from(budget.per_ms).ok()?;
+    JetDevtoolsTopologyRestartPolicy::new(strategy, max_restarts, window_ms).ok()
+}
+
+fn jet_services_topology_failure(
+    status: &JetServiceSupervisorStatus,
+    failure: Option<&JetTaskFailure>,
+) -> Option<JetDevtoolsTopologyFailureKind> {
+    match status {
+        JetServiceSupervisorStatus::Escalated => Some(JetDevtoolsTopologyFailureKind::Escalated),
+        JetServiceSupervisorStatus::Partitioned => {
+            Some(JetDevtoolsTopologyFailureKind::WorkerLost)
+        }
+        _ => failure.map(|failure| match failure {
+            JetTaskFailure::Cancelled => JetDevtoolsTopologyFailureKind::Cancelled,
+            JetTaskFailure::DeadlineBlown => JetDevtoolsTopologyFailureKind::TimedOut,
+            JetTaskFailure::Panicked(_) => JetDevtoolsTopologyFailureKind::Failed,
+        }),
+    }
+}
+
+fn jet_services_topology_finish(state: &mut JetServiceSupervisorState, at_ms: u64) {
+    if state.topology_duration_ms.is_none() {
+        state.topology_duration_ms = state
+            .topology_started_at_ms
+            .map(|started| at_ms.saturating_sub(started));
+    }
+}
+fn jet_services_topology_id(kind: &str, tree: &str, member: Option<&str>) -> String {
+    let value = match member {
+        Some(member) => format!("service:{kind}:{tree}:{member}"),
+        None => format!("service:{kind}:{tree}"),
+    };
+    if value.len() <= JET_SERVICES_TOPOLOGY_MAX_ID {
+        return value;
+    }
+    format!(
+        "service:{kind}:{}",
+        service_authority_hex(&jet_sha256_raw(value.as_bytes()))
+    )
+}
+
+fn jet_services_topology_root_id(tree: &str) -> String {
+    jet_services_topology_id("supervisor", tree, None)
+}
+
+fn jet_services_topology_group_id(tree: &str, group: &str) -> String {
+    jet_services_topology_id("group", tree, Some(group))
+}
+
+fn jet_services_topology_worker_id(tree: &str, worker: &str) -> String {
+    jet_services_topology_id("task", tree, Some(worker))
+}
+
+fn jet_services_topology_endpoint_id(tree: &str, worker: &str) -> String {
+    jet_services_topology_id("endpoint", tree, Some(worker))
+}
+
+fn jet_services_topology_readiness_id(tree: &str, worker: &str) -> String {
+    jet_services_topology_id("readiness", tree, Some(worker))
+}
+
+fn jet_services_topology_address(tree: &str, worker: &str) -> String {
+    let value = format!("{tree}/{worker}");
+    if value.len() <= JET_SERVICES_TOPOLOGY_MAX_ID {
+        return value;
+    }
+    format!(
+        "service:{}",
+        service_authority_hex(&jet_sha256_raw(value.as_bytes()))
+    )
+}
+
+fn jet_services_topology_publish_fact(fact: JetDevtoolsTopologyFact) {
+    if let Ok(event) = fact.to_protocol_event(JET_SERVICES_TOPOLOGY_SOURCE) {
+        jet_devtools_publish_event(event);
+    }
+}
+
+fn jet_services_topology_publish_state(state: &JetServiceSupervisorState) {
+    let (Some(kind), Some(id)) = (state.topology_kind, state.topology_id.as_ref()) else {
+        return;
+    };
+    let observed_at_ms = jet_services_topology_now();
+    let freshness = JetDevtoolsTopologyFreshness::fresh(observed_at_ms);
+    let parent_id = state.topology_parent_id.clone();
+    let owner = state.topology_owner.clone();
+    let restart_policy = state.topology_restart_policy.clone();
+    let duration_ms = state
+        .topology_duration_ms
+        .or_else(|| {
+            state
+                .topology_started_at_ms
+                .map(|started| observed_at_ms.saturating_sub(started))
+        });
+    let failure = jet_services_topology_failure(&state.status, state.failure.as_ref());
+    let wait_target = state.topology_wait_target.clone();
+    let history = state.topology_restart_history.clone();
+    let fact = match kind {
+        JetServiceTopologyKind::Supervisor => {
+            let state = match state.status {
+                JetServiceSupervisorStatus::Starting => {
+                    JetDevtoolsTopologySupervisorState::Starting
+                }
+                JetServiceSupervisorStatus::Running => {
+                    JetDevtoolsTopologySupervisorState::Running
+                }
+                JetServiceSupervisorStatus::Failed => JetDevtoolsTopologySupervisorState::Failed,
+                JetServiceSupervisorStatus::Cancelling => {
+                    JetDevtoolsTopologySupervisorState::Stopping
+                }
+                JetServiceSupervisorStatus::Stopped => JetDevtoolsTopologySupervisorState::Stopped,
+                JetServiceSupervisorStatus::Escalated => {
+                    JetDevtoolsTopologySupervisorState::Escalated
+                }
+                JetServiceSupervisorStatus::Partitioned => {
+                    JetDevtoolsTopologySupervisorState::Failed
+                }
+            };
+            JetDevtoolsTopologySupervisorFact::new(
+                id.clone(),
+                JET_SERVICES_TOPOLOGY_SOURCE,
+                parent_id,
+                state,
+                history,
+                freshness,
+            )
+            .map(|fact| {
+                let mut fact = fact;
+                if let Some(owner) = owner.clone() {
+                    fact = fact.with_owner(owner);
+                }
+                if let Some(restart_policy) = restart_policy.clone() {
+                    fact = fact.with_restart_policy(restart_policy);
+                }
+                if let Some(failure) = failure {
+                    fact = fact.with_failure(failure);
+                }
+                if let Some(duration_ms) = duration_ms {
+                    fact = fact.with_duration_ms(duration_ms);
+                }
+                JetDevtoolsTopologyFact::Supervisor(fact)
+            })
+        }
+        JetServiceTopologyKind::Task => {
+            let state = match state.status {
+                JetServiceSupervisorStatus::Starting => JetDevtoolsTopologyTaskState::Created,
+                JetServiceSupervisorStatus::Running if wait_target.is_some() => {
+                    JetDevtoolsTopologyTaskState::Waiting
+                }
+                JetServiceSupervisorStatus::Running => JetDevtoolsTopologyTaskState::Running,
+                JetServiceSupervisorStatus::Failed
+                | JetServiceSupervisorStatus::Escalated
+                | JetServiceSupervisorStatus::Partitioned => {
+                    JetDevtoolsTopologyTaskState::Failed
+                }
+                JetServiceSupervisorStatus::Cancelling
+                | JetServiceSupervisorStatus::Stopped => JetDevtoolsTopologyTaskState::Cancelled,
+            };
+            JetDevtoolsTopologyTaskFact::new(
+                id.clone(),
+                JET_SERVICES_TOPOLOGY_SOURCE,
+                parent_id,
+                state,
+                history,
+                freshness,
+            )
+            .map(|fact| {
+                let mut fact = fact;
+                if let Some(owner) = owner.clone() {
+                    fact = fact.with_owner(owner);
+                }
+                if let Some(wait_target) = wait_target.clone() {
+                    fact = fact.with_wait_target(wait_target);
+                }
+                if let Some(duration_ms) = duration_ms {
+                    fact = fact.with_duration_ms(duration_ms);
+                }
+                if let Some(failure) = failure {
+                    fact = fact.with_failure(failure);
+                }
+                if let Some(restart_policy) = restart_policy.clone() {
+                    fact = fact.with_restart_policy(restart_policy);
+                }
+                JetDevtoolsTopologyFact::Task(fact)
+            })
+        }
+    };
+    if let Ok(fact) = fact {
+        jet_services_topology_publish_fact(fact);
+    }
+}
+
+fn jet_services_bind_topology(
     task: &std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
+    kind: JetServiceTopologyKind,
+    id: String,
+    parent_id: Option<String>,
 ) -> Result<(), JetServiceError> {
     let mut state = task
         .lock()
         .map_err(|_| JetServiceError::Policy("service task state lock is poisoned".to_string()))?;
-    state.status = JetServiceSupervisorStatus::Running;
-    state.failure = None;
-    state.joined = false;
+    state.topology_kind = Some(kind);
+    state.topology_id = Some(id);
+    state.topology_owner = parent_id.clone();
+    state.topology_parent_id = parent_id;
+    state.topology_wait_target = None;
+    state.topology_started_at_ms = Some(jet_services_topology_now());
+    state.topology_duration_ms = None;
+    Ok(())
+}
+fn jet_services_reparent_topology(
+    task: &std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
+    parent_id: Option<String>,
+) -> Result<(), JetServiceError> {
+    let mut state = task
+        .lock()
+        .map_err(|_| JetServiceError::Policy("service task state lock is poisoned".to_string()))?;
+    state.topology_owner = parent_id.clone();
+    state.topology_parent_id = parent_id;
+    Ok(())
+}
+
+fn jet_services_set_topology_policy(
+    task: &std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
+    restart: &JetServiceRestart,
+    budget: &JetServiceRestartBudget,
+) -> Result<(), JetServiceError> {
+    let policy = jet_services_topology_restart_policy(restart, budget).ok_or_else(|| {
+        JetServiceError::Policy("service restart policy cannot cross the topology boundary".to_string())
+    })?;
+    let mut state = task
+        .lock()
+        .map_err(|_| JetServiceError::Policy("service task state lock is poisoned".to_string()))?;
+    state.topology_restart_policy = Some(policy);
+    Ok(())
+}
+
+fn jet_services_record_topology_restart(
+    task: &std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
+    at_ms: u64,
+    reason: JetDevtoolsTopologyRestartReason,
+) -> Result<(), JetServiceError> {
+    let mut state = task
+        .lock()
+        .map_err(|_| JetServiceError::Policy("service task state lock is poisoned".to_string()))?;
+    if state.topology_restart_history.len() >= JET_DEVTOOLS_TOPOLOGY_MAX_RESTARTS {
+        state.topology_restart_history.remove(0);
+    }
+    state
+        .topology_restart_history
+        .push(JetDevtoolsTopologyRestartFact {
+            at_ms,
+            duration_ms: 0,
+            reason,
+        });
+    Ok(())
+}
+
+fn jet_services_publish_endpoint_fact(
+    endpoint: &JetServiceEndpoint,
+    authority_state: JetDevtoolsTopologyEndpointAuthorityState,
+) {
+    jet_services_publish_endpoint_fact_with_transport(
+        endpoint,
+        authority_state,
+        None,
+        JetDevtoolsTopologyEndpointConnectionState::Unknown,
+        None,
+        None,
+        None,
+    );
+}
+
+fn jet_services_publish_endpoint_fact_with_transport(
+    endpoint: &JetServiceEndpoint,
+    authority_state: JetDevtoolsTopologyEndpointAuthorityState,
+    owner: Option<String>,
+    connection: JetDevtoolsTopologyEndpointConnectionState,
+    bytes_in: Option<u64>,
+    bytes_out: Option<u64>,
+    restart_policy: Option<JetDevtoolsTopologyRestartPolicy>,
+) {
+    let worker_id = jet_services_topology_worker_id(&endpoint.tree, &endpoint.worker);
+    let fact = JetDevtoolsTopologyEndpointFact::new(
+        jet_services_topology_endpoint_id(&endpoint.tree, &endpoint.worker),
+        JET_SERVICES_TOPOLOGY_SOURCE,
+        Some(worker_id),
+        JetDevtoolsTopologyEndpointScheme::Unix,
+        jet_services_topology_address(&endpoint.tree, &endpoint.worker),
+        None,
+        authority_state,
+        JetDevtoolsTopologyFreshness::fresh(jet_services_topology_now()),
+    )
+    .map(|fact| {
+        let mut fact = fact.with_connection(connection);
+        if let Some(owner) = owner {
+            fact = fact.with_owner(owner);
+        }
+        if let Some(bytes_in) = bytes_in {
+            fact.bytes_in = Some(bytes_in);
+        }
+        if let Some(bytes_out) = bytes_out {
+            fact.bytes_out = Some(bytes_out);
+        }
+        if let Some(restart_policy) = restart_policy {
+            fact = fact.with_restart_policy(restart_policy);
+        }
+        fact
+    });
+    if let Ok(fact) = fact {
+        jet_services_topology_publish_fact(fact.into());
+    }
+}
+
+fn jet_services_publish_readiness_fact(
+    endpoint: &JetServiceEndpoint,
+    state: JetDevtoolsTopologyReadinessState,
+    reason: JetDevtoolsTopologyReadinessReason,
+) {
+    let worker_id = jet_services_topology_worker_id(&endpoint.tree, &endpoint.worker);
+    let fact = JetDevtoolsTopologyReadinessFact::new(
+        jet_services_topology_readiness_id(&endpoint.tree, &endpoint.worker),
+        JET_SERVICES_TOPOLOGY_SOURCE,
+        Some(worker_id),
+        state,
+        reason,
+        JetDevtoolsTopologyFreshness::fresh(jet_services_topology_now()),
+    );
+    if let Ok(fact) = fact {
+        jet_services_topology_publish_fact(fact.into());
+    }
+}
+fn jet_services_publish_supervisor_fact(
+    id: String,
+    parent_id: Option<String>,
+    state: JetDevtoolsTopologySupervisorState,
+    restart_history: Vec<JetDevtoolsTopologyRestartFact>,
+) {
+    let fact = JetDevtoolsTopologySupervisorFact::new(
+        id,
+        JET_SERVICES_TOPOLOGY_SOURCE,
+        parent_id,
+        state,
+        restart_history,
+        JetDevtoolsTopologyFreshness::fresh(jet_services_topology_now()),
+    );
+    if let Ok(fact) = fact {
+        jet_services_topology_publish_fact(fact.into());
+    }
+}
+
+fn jet_services_publish_root_state(
+    tree: &JetServiceTree,
+    state: JetDevtoolsTopologySupervisorState,
+) {
+    jet_services_publish_supervisor_fact(
+        jet_services_topology_root_id(&tree.name),
+        None,
+        state,
+        Vec::new(),
+    );
+}
+
+fn jet_services_publish_tree_topology(
+    tree: &JetServiceTree,
+    root_state: JetDevtoolsTopologySupervisorState,
+) {
+    jet_services_publish_root_state(tree, root_state);
+    for supervisor in &tree.supervisor_tasks {
+        if let Ok(state) = supervisor.lock() {
+            jet_services_topology_publish_state(&state);
+        }
+    }
+    for worker in &tree.workers {
+        let restart_policy = worker
+            .task
+            .lock()
+            .ok()
+            .and_then(|state| state.topology_restart_policy.clone());
+        if let Ok(state) = worker.task.lock() {
+            jet_services_topology_publish_state(&state);
+        }
+        let partitioned = tree.partitioned.iter().any(|name| name == &worker.name);
+        let draining = tree.draining.iter().any(|name| name == &worker.name);
+        let authority_state = if partitioned {
+            JetDevtoolsTopologyEndpointAuthorityState::Revoked
+        } else if worker.running || draining {
+            JetDevtoolsTopologyEndpointAuthorityState::Verified
+        } else {
+            JetDevtoolsTopologyEndpointAuthorityState::Unverified
+        };
+        let connection = if partitioned {
+            JetDevtoolsTopologyEndpointConnectionState::Closed
+        } else if draining {
+            JetDevtoolsTopologyEndpointConnectionState::Draining
+        } else if worker.running && worker.endpoint.channel.is_some() {
+            JetDevtoolsTopologyEndpointConnectionState::Connected
+        } else {
+            JetDevtoolsTopologyEndpointConnectionState::Unknown
+        };
+        let worker_id = jet_services_topology_worker_id(&worker.endpoint.tree, &worker.name);
+        jet_services_publish_endpoint_fact_with_transport(
+            &worker.endpoint,
+            authority_state,
+            Some(worker_id),
+            connection,
+            Some(worker.received_bytes),
+            Some(worker.sent_bytes),
+            restart_policy,
+        );
+        let (readiness, reason) = if partitioned {
+            (
+                JetDevtoolsTopologyReadinessState::NotReady,
+                JetDevtoolsTopologyReadinessReason::AuthorityRevoked,
+            )
+        } else if worker.running {
+            (
+                JetDevtoolsTopologyReadinessState::Ready,
+                JetDevtoolsTopologyReadinessReason::ProbePassed,
+            )
+        } else {
+            (
+                JetDevtoolsTopologyReadinessState::NotReady,
+                JetDevtoolsTopologyReadinessReason::Stopped,
+            )
+        };
+        jet_services_publish_readiness_fact(&worker.endpoint, readiness, reason);
+    }
+}
+
+
+fn jet_services_task_start(
+    task: &std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
+) -> Result<(), JetServiceError> {
+    let snapshot = {
+        let mut state = task.lock().map_err(|_| {
+            JetServiceError::Policy("service task state lock is poisoned".to_string())
+        })?;
+        state.status = JetServiceSupervisorStatus::Running;
+        state.failure = None;
+        state.joined = false;
+        state.topology_wait_target = None;
+        state.topology_started_at_ms = Some(jet_services_topology_now());
+        state.topology_duration_ms = None;
+        state.clone()
+    };
+    jet_services_topology_publish_state(&snapshot);
     Ok(())
 }
 
@@ -176,23 +660,36 @@ fn jet_services_task_fail(
     task: &std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
     reason: String,
 ) -> Result<(), JetServiceError> {
-    let mut state = task
-        .lock()
-        .map_err(|_| JetServiceError::Policy("service task state lock is poisoned".to_string()))?;
-    state.status = JetServiceSupervisorStatus::Failed;
-    state.failure = Some(JetTaskFailure::Panicked(reason));
+    let snapshot = {
+        let mut state = task.lock().map_err(|_| {
+            JetServiceError::Policy("service task state lock is poisoned".to_string())
+        })?;
+        state.status = JetServiceSupervisorStatus::Failed;
+        state.failure = Some(JetTaskFailure::Panicked(reason));
+        state.topology_wait_target = None;
+        jet_services_topology_finish(&mut state, jet_services_topology_now());
+        state.clone()
+    };
+    jet_services_topology_publish_state(&snapshot);
     Ok(())
 }
 
 fn jet_services_task_restart(
     task: &std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
 ) -> Result<(), JetServiceError> {
-    let mut state = task
-        .lock()
-        .map_err(|_| JetServiceError::Policy("service task state lock is poisoned".to_string()))?;
-    state.status = JetServiceSupervisorStatus::Running;
-    state.failure = None;
-    state.joined = false;
+    let snapshot = {
+        let mut state = task.lock().map_err(|_| {
+            JetServiceError::Policy("service task state lock is poisoned".to_string())
+        })?;
+        state.status = JetServiceSupervisorStatus::Running;
+        state.failure = None;
+        state.joined = false;
+        state.topology_wait_target = None;
+        state.topology_started_at_ms = Some(jet_services_topology_now());
+        state.topology_duration_ms = None;
+        state.clone()
+    };
+    jet_services_topology_publish_state(&snapshot);
     Ok(())
 }
 
@@ -200,33 +697,51 @@ fn jet_services_task_escalate(
     task: &std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
     reason: String,
 ) -> Result<(), JetServiceError> {
-    let mut state = task
-        .lock()
-        .map_err(|_| JetServiceError::Policy("service task state lock is poisoned".to_string()))?;
-    // Escalation is a supervisor failure on the one rail: the supervisor task
-    // itself fails so the parent group observes it, and `Escalated` records
-    // that the failure came from a spent restart budget rather than a child.
-    state.status = JetServiceSupervisorStatus::Escalated;
-    state.failure = Some(JetTaskFailure::Panicked(reason));
+    let snapshot = {
+        let mut state = task.lock().map_err(|_| {
+            JetServiceError::Policy("service task state lock is poisoned".to_string())
+        })?;
+        // Escalation is a supervisor failure on the one rail: the supervisor task
+        // itself fails so the parent group observes it, and `Escalated` records
+        // that the failure came from a spent restart budget rather than a child.
+        state.status = JetServiceSupervisorStatus::Escalated;
+        state.failure = Some(JetTaskFailure::Panicked(reason));
+        state.topology_wait_target = None;
+        jet_services_topology_finish(&mut state, jet_services_topology_now());
+        state.clone()
+    };
+    jet_services_topology_publish_state(&snapshot);
     Ok(())
 }
 
 fn jet_services_cancel_task(task: &std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>) {
-    if let Ok(mut state) = task.lock() {
+    let snapshot = task.lock().ok().map(|mut state| {
         if !state.joined && state.status != JetServiceSupervisorStatus::Escalated {
             state.status = JetServiceSupervisorStatus::Cancelling;
             state.failure = Some(JetTaskFailure::Cancelled);
+            state.topology_wait_target = None;
+            jet_services_topology_finish(&mut state, jet_services_topology_now());
         }
+        state.clone()
+    });
+    if let Some(snapshot) = snapshot.as_ref() {
+        jet_services_topology_publish_state(snapshot);
     }
 }
 
 fn jet_services_join_task(task: std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>) {
-    if let Ok(mut state) = task.lock() {
+    let snapshot = task.lock().ok().map(|mut state| {
         if state.status != JetServiceSupervisorStatus::Escalated {
             state.status = JetServiceSupervisorStatus::Stopped;
             // A clean finish carries no failure; `None` is the completed row.
         }
+        state.topology_wait_target = None;
+        jet_services_topology_finish(&mut state, jet_services_topology_now());
         state.joined = true;
+        state.clone()
+    });
+    if let Some(snapshot) = snapshot.as_ref() {
+        jet_services_topology_publish_state(snapshot);
     }
 }
 
@@ -303,12 +818,17 @@ fn jet_services_new_mailbox(
     })
 }
 
+type JetServiceWorkerHandler = fn();
+fn jet_services_noop_worker() {}
+
 #[derive(Clone, Debug)]
 struct JetServiceWorker {
     name: String,
-    /// The worker identity promoted by the typed declaration. Invocation and
-    /// supervision use the private runtime substrate behind the endpoint.
-    handler: String,
+    /// The checked source identity retained for topology and adapter lookup.
+    handler_name: String,
+    /// AOT emits the checked function item here. Resident adapters may leave
+    /// this as the no-op bridge and invoke through their typed adapter.
+    handler: JetServiceWorkerHandler,
     endpoint: JetServiceEndpoint,
     mailbox: JetServiceMailbox,
     /// The restart instants this worker has spent, oldest first. This list is
@@ -318,6 +838,11 @@ struct JetServiceWorker {
     /// policy window.
     restarts: Vec<i64>,
     running: bool,
+    /// Bytes accepted into and delivered from the bounded endpoint mailbox.
+    /// These counters are transport facts; message contents never cross the
+    /// topology protocol boundary.
+    received_bytes: u64,
+    sent_bytes: u64,
     task: std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>,
 }
 
@@ -742,7 +1267,7 @@ impl JetShow for JetServiceTree {
         let handlers = self
             .workers
             .iter()
-            .map(|worker| format!("{}:{}", worker.name, worker.handler))
+            .map(|worker| format!("{}:{}", worker.name, worker.handler_name))
             .collect::<Vec<_>>()
             .join(",");
         format!(
@@ -935,7 +1460,8 @@ fn jet_services_set_restart(
 fn jet_services_worker(
     tree: &mut JetServiceTree,
     name: String,
-    handler: String,
+    handler: JetServiceWorkerHandler,
+    handler_name: String,
     capacity: i64,
 ) -> Result<JetServiceEndpoint, JetServiceError> {
     if tree.started {
@@ -956,12 +1482,12 @@ fn jet_services_worker(
             "worker name must be non-empty and visible".to_string(),
         ));
     }
-    if handler.trim().is_empty()
-        || handler.chars().any(char::is_control)
-        || handler.len() > MAX_SERVICE_NAME
+    if handler_name.trim().is_empty()
+        || handler_name.chars().any(char::is_control)
+        || handler_name.len() > MAX_SERVICE_NAME
     {
         return Err(JetServiceError::Policy(
-            "worker handler must be non-empty and visible".to_string(),
+            "worker handler name must be non-empty and visible".to_string(),
         ));
     }
     if tree.workers.len() >= MAX_SERVICE_WORKERS {
@@ -989,16 +1515,26 @@ fn jet_services_worker(
     // Build the local mailbox before publishing the endpoint.  A failed
     // channel allocation must not leave a ghost authority in the registry.
     service_authority_register(&endpoint, false)?;
+    let task = std::sync::Arc::new(std::sync::Mutex::new(JetServiceSupervisorState::new(
+        JetServiceSupervisorStatus::Stopped,
+    )));
+    jet_services_bind_topology(
+        &task,
+        JetServiceTopologyKind::Task,
+        jet_services_topology_worker_id(&tree.name, &name),
+        Some(jet_services_topology_root_id(&tree.name)),
+    )?;
     tree.workers.push(JetServiceWorker {
+        handler_name,
         handler,
         name,
         endpoint: endpoint.clone(),
         mailbox,
         restarts: Vec::new(),
         running: false,
-        task: std::sync::Arc::new(std::sync::Mutex::new(JetServiceSupervisorState::new(
-            JetServiceSupervisorStatus::Stopped,
-        ))),
+        received_bytes: 0,
+        sent_bytes: 0,
+        task,
     });
     Ok(endpoint)
 }
@@ -1053,6 +1589,12 @@ fn jet_services_group(
             "group `{name}` lists a worker more than once"
         )));
     }
+    let parent_id = jet_services_topology_group_id(&tree.name, &name);
+    for worker_name in &workers {
+        if let Some(worker) = tree.workers.iter().find(|worker| &worker.name == worker_name) {
+            jet_services_reparent_topology(&worker.task, Some(parent_id.clone()))?;
+        }
+    }
     tree.groups.push(JetServiceGroup {
         name,
         restart: tree.restart.clone(),
@@ -1071,6 +1613,13 @@ fn jet_services_build_runtime_groups(tree: &mut JetServiceTree) -> Result<(), Je
         let supervisor = std::sync::Arc::new(std::sync::Mutex::new(JetServiceSupervisorState::new(
             JetServiceSupervisorStatus::Starting,
         )));
+        jet_services_bind_topology(
+            &supervisor,
+            JetServiceTopologyKind::Supervisor,
+            jet_services_topology_group_id(&tree.name, &definition.name),
+            Some(jet_services_topology_root_id(&tree.name)),
+        )?;
+        jet_services_set_topology_policy(&supervisor, &definition.restart, &definition.budget)?;
         for worker_name in definition.workers {
             let index = tree
                 .workers
@@ -1106,6 +1655,13 @@ fn jet_services_build_runtime_groups(tree: &mut JetServiceTree) -> Result<(), Je
         let supervisor = std::sync::Arc::new(std::sync::Mutex::new(JetServiceSupervisorState::new(
             JetServiceSupervisorStatus::Starting,
         )));
+        jet_services_bind_topology(
+            &supervisor,
+            JetServiceTopologyKind::Supervisor,
+            jet_services_topology_group_id(&tree.name, "ungrouped"),
+            Some(jet_services_topology_root_id(&tree.name)),
+        )?;
+        jet_services_set_topology_policy(&supervisor, &tree.restart, &tree.restart_budget)?;
         group.register(JetServiceSupervisorTask {
             state: supervisor.clone(),
             child: child.clone(),
@@ -1118,7 +1674,19 @@ fn jet_services_build_runtime_groups(tree: &mut JetServiceTree) -> Result<(), Je
     Ok(())
 }
 
-fn jet_services_start(tree: &mut JetServiceTree) -> Result<(), JetServiceError> {
+
+fn jet_services_start_with_worker_dispatcher<F>(
+    tree: &mut JetServiceTree,
+    mut dispatch: F,
+) -> Result<(), JetServiceError>
+where
+    F: FnMut(
+        &str,
+        JetServiceWorkerHandler,
+        &JetServiceEndpoint,
+    ) -> Result<(), JetServiceError>,
+{
+
     if tree.started {
         return Err(JetServiceError::Policy(
             "service tree is already started".to_string(),
@@ -1273,13 +1841,21 @@ fn jet_services_start(tree: &mut JetServiceTree) -> Result<(), JetServiceError> 
             Err(error) => Err(error),
         }
         .and_then(|()| {
-            jet_services_authority_update_draining(&endpoint, draining)
-        })
-        .and_then(|()| {
             if running {
                 jet_services_bind_delivery_endpoint(
                     &tree.delivery,
                     tree.state_authority.as_ref(),
+                    &endpoint,
+                )
+            } else {
+                Ok(())
+            }
+        })
+        .and_then(|()| {
+            if running {
+                dispatch(
+                    &tree.workers[index].handler_name,
+                    tree.workers[index].handler,
                     &endpoint,
                 )
             } else {
@@ -1319,9 +1895,28 @@ fn jet_services_start(tree: &mut JetServiceTree) -> Result<(), JetServiceError> 
             let _ = jet_services_authority_update(&worker.endpoint, false);
             let _ = jet_services_authority_update_draining(&worker.endpoint, false);
         }
+        jet_services_publish_root_state(tree, JetDevtoolsTopologySupervisorState::Failed);
         return Err(error);
     }
+    jet_services_publish_tree_topology(tree, JetDevtoolsTopologySupervisorState::Running);
     Ok(())
+}
+
+
+/// Start a service tree with an engine-owned worker/queue dispatcher. The
+/// lifecycle, authority, rollback, and bounded queue settlement remain in
+/// this canonical service implementation; the caller only supplies checked
+/// callback invocation for its execution tier.
+fn jet_services_start_with_queue_dispatcher<F>(
+    tree: &mut JetServiceTree,
+    mut dispatch: F,
+) -> Result<(), JetServiceError>
+where
+    F: FnMut(&str, &JetServiceEndpoint) -> Result<(), JetServiceError>,
+{
+    jet_services_start_with_worker_dispatcher(tree, |handler_name, _handler, endpoint| {
+        dispatch(handler_name, endpoint)
+    })
 }
 
 fn jet_services_close_runtime_groups(tree: &mut JetServiceTree) {
@@ -1338,6 +1933,7 @@ fn jet_services_close_runtime_groups(tree: &mut JetServiceTree) {
 
 fn jet_services_stop(tree: &mut JetServiceTree) -> Result<(), JetServiceError> {
     let _rollout_lock = jet_services_rollout_operation_lock(tree)?;
+    jet_services_publish_root_state(tree, JetDevtoolsTopologySupervisorState::Stopping);
     jet_services_close_runtime_groups(tree);
     let preserve_mailboxes = tree.delivery == JetServiceDelivery::DurableAtLeastOnce;
     let reset_partition = tree.state_adapter == JetServiceStateAdapter::Empty;
@@ -1373,6 +1969,7 @@ fn jet_services_stop(tree: &mut JetServiceTree) -> Result<(), JetServiceError> {
         tree.workflows.clear();
     }
     tree.started = false;
+    jet_services_publish_tree_topology(tree, JetDevtoolsTopologySupervisorState::Stopped);
     match first_error {
         Some(error) => Err(error),
         None => Ok(()),
@@ -1403,7 +2000,11 @@ fn jet_services_restart_worker(
         messages,
     )
     .expect("validated service mailbox must restart with its bounded queue");
-    worker.endpoint = worker.mailbox.endpoint.clone();
+    let _ = jet_services_record_topology_restart(
+        &worker.task,
+        u64::try_from(at.max(0)).unwrap_or_else(|_| jet_services_topology_now()),
+        JetDevtoolsTopologyRestartReason::Failed,
+    );
     let _ = jet_services_task_restart(&worker.task);
 }
 
@@ -1966,6 +2567,7 @@ fn jet_services_send(
             "service message exceeds the 1 MiB limit".to_string(),
         ));
     }
+    let message_bytes = message.len() as u64;
     let draining = tree.draining.iter().any(|name| name == &endpoint.worker);
     let (worker_name, capacity, running) = {
         let worker = jet_services_find_worker_mut(tree, endpoint)?;
@@ -1986,6 +2588,16 @@ fn jet_services_send(
             )));
         }
         Err(error) => return Err(error),
+    }
+    if let Ok(worker) = jet_services_find_worker_mut(tree, endpoint) {
+        worker.received_bytes = worker.received_bytes.saturating_add(message_bytes);
+        if let Ok(mut state) = worker.task.lock() {
+            state.status = JetServiceSupervisorStatus::Running;
+            state.topology_wait_target = None;
+            let snapshot = state.clone();
+            drop(state);
+            jet_services_topology_publish_state(&snapshot);
+        }
     }
     Ok(())
 }
@@ -2149,7 +2761,7 @@ fn jet_services_receive(
                 }
             }
         }
-    let (message, should_stop, mailbox_before) = {
+    let (message, should_stop, mailbox_before, snapshot) = {
         let worker = jet_services_find_worker_mut(tree, endpoint)?;
         if !worker.running && worker.mailbox.channel.depth() == 0 {
             return Err(JetServiceError::NotStarted(format!(
@@ -2161,6 +2773,15 @@ fn jet_services_receive(
         let message = match worker.mailbox.channel.try_recv() {
             Ok(message) => message,
             Err(JetServiceChannelError::Empty) => {
+                let wait_target =
+                    jet_services_topology_endpoint_id(&endpoint.tree, &endpoint.worker);
+                if let Ok(mut state) = worker.task.lock() {
+                    state.status = JetServiceSupervisorStatus::Running;
+                    state.topology_wait_target = Some(wait_target);
+                    let snapshot = state.clone();
+                    drop(state);
+                    jet_services_topology_publish_state(&snapshot);
+                }
                 return Err(JetServiceError::Ambiguous(format!(
                     "mailbox for `{}` is empty",
                     worker.name
@@ -2178,9 +2799,21 @@ fn jet_services_receive(
                 ));
             }
         };
+        let message_bytes = message.len() as u64;
+        worker.sent_bytes = worker.sent_bytes.saturating_add(message_bytes);
+        let snapshot = if let Ok(mut state) = worker.task.lock() {
+            state.status = JetServiceSupervisorStatus::Running;
+            state.topology_wait_target = None;
+            Some(state.clone())
+        } else {
+            None
+        };
         let should_stop = worker.mailbox.channel.depth() == 0;
-        (message, should_stop, mailbox_before)
+        (message, should_stop, mailbox_before, snapshot)
     };
+    if let Some(snapshot) = snapshot.as_ref() {
+        jet_services_topology_publish_state(snapshot);
+    }
     if draining && should_stop {
         if let Err(error) = jet_services_finish_drain(tree, endpoint) {
             let restore = tree
@@ -2361,6 +2994,10 @@ fn jet_services_fail_worker(
             }
             jet_services_close_runtime_groups(tree);
             tree.started = false;
+            jet_services_publish_tree_topology(
+                tree,
+                JetDevtoolsTopologySupervisorState::Escalated,
+            );
             return Err(JetServiceError::Unavailable(reason));
         }
     }
@@ -2432,6 +3069,7 @@ fn jet_services_fail_worker(
             }
         }
     }
+    jet_services_publish_tree_topology(tree, JetDevtoolsTopologySupervisorState::Running);
     Ok(())
 }
 

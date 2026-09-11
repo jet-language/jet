@@ -35,6 +35,7 @@ pub const BUILTIN_EFFECT_LEAVES: &[&str] = &[
     "FS.Write",
     "Rand.Draw",
     "Exec.Exit",
+    "Time.Wait",
     "FFI.Go",
     "FFI.Java",
     "FFI.DotNet",
@@ -242,6 +243,8 @@ pub const TRAIT_DIV: &str = "Div";
 pub const TRAIT_EQUATABLE: &str = "Equatable";
 pub const TRAIT_COMPARABLE: &str = "Comparable";
 pub const TYPE_ORDERING: &str = "Ordering";
+/// Variant order is the shared scalar carrier order for the built-in enum.
+pub const ORDERING_VARIANTS: &[&str] = &["Less", "Equal", "Greater"];
 /// D-NETIO-CONTRACT2=B: nominal byte-stream read contract in `core.term`.
 pub const TRAIT_IO_READER: &str = "Reader";
 /// D-NETIO-CONTRACT2=B: nominal byte-stream write contract in `core.term`.
@@ -738,7 +741,7 @@ pub const ENV_REPORT_JOBS_KEY: &str = "jobs";
 pub const ENV_REPORT_CHECKS_KEY: &str = "checks";
 /// D-ENVHOOK1=A: the escape hatch — set to any non-empty value to suppress
 /// auto-activation (and drop any active env) in the current shell.
-/// Documented in docs/reference/environment.md.
+/// Documented in docs/spec/reference/environment.md.
 pub const ENV_DISABLE_VAR: &str = "JET_ENV_DISABLE";
 /// D-ENVHOOK1=A: the hook's activation state, exported into the shell so each
 /// per-prompt `export` knows which `env.jet` directory is currently live (empty

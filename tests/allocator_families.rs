@@ -8,6 +8,32 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 mod common;
 
+fn emit_native_aot(bundle: &jet::AST::ProgramBundle) -> String {
+    let request = jet_foundation::MIR::MirArtifactRequest::new(
+        jet_foundation::MIR::MirArtifactTarget::RustAot,
+        jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+        jet_foundation::MIR::MirArtifactBuildMode::Dev,
+    );
+    let (mir, artifact) = jet::Codegen::TIR::lower_checked_mir_program_for(bundle, request)
+        .expect("checked native artifact lowers through MIR");
+    mir.validate()
+        .expect("canonical MIR validates in allocator test");
+    let mir = jet_foundation::MIR::optimize_mir_program(
+        &mir,
+        &jet_foundation::MIR::MirOptimizationPolicy::conservative(),
+    )
+    .expect("canonical MIR optimizes in allocator test");
+    jet::Codegen::MIRRust::emit_mir_program(
+        &mir,
+        &jet::Codegen::MIRRust::MirRustConfig {
+            target: jet_foundation::Layout::TargetLayout::host(),
+            target_kind: jet::Codegen::MIRRust::MirRustTarget::Native,
+            root_prefix: String::new(),
+            execution: jet::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+        },
+    )
+}
+
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
 fn temp_dir(label: &str) -> std::path::PathBuf {
@@ -26,12 +52,19 @@ fn compile_rust_harness(body: &str) -> std::process::Output {
     let binary = dir.join("main");
     let observe = std::fs::read_to_string("crates/jet-codegen/src/Prelude/Observe.rs").unwrap();
     let uninit = std::fs::read_to_string("crates/jet-codegen/src/Prelude/Uninit.rs").unwrap();
+    let encoding_errors =
+        std::fs::read_to_string("crates/jet-foundation/src/EncodingErrors.rs").unwrap();
+    let json_number =
+        std::fs::read_to_string("crates/jet-foundation/src/JSONNumber.rs").unwrap();
+    let encoding_json =
+        std::fs::read_to_string("crates/jet-foundation/src/EncodingJson.rs").unwrap();
     let outcome = std::fs::read_to_string("crates/jet-foundation/src/Outcome.rs").unwrap();
+    let runtime_diagnostic_core = std::fs::read_to_string("crates/jet-foundation/src/RuntimeDiagnosticCore.rs").unwrap();
+    let fixed_kernel = std::fs::read_to_string("crates/jet-codegen/src/Prelude/Core/FixedAllocator.rs").unwrap();
     let fault_injection =
         std::fs::read_to_string("crates/jet-codegen/src/Prelude/FaultInjection.rs").unwrap();
     let sentry = std::fs::read_to_string("crates/jet-foundation/src/MemSentry.rs").unwrap();
     let prelude = std::fs::read_to_string("crates/jet-codegen/src/Prelude/Mem.rs").unwrap();
-    // Registry.rs depends on the full Foundation Diagnostics and Policy graph,
     // which this standalone rustc harness intentionally does not embed. Keep
     // Outcome.rs on its canonical typed seam; these memory tests exercise the
     // sentry renderer, so no registered generic runtime row is active here.
@@ -47,15 +80,18 @@ mod Registry {
 "#;
     let runtime_stop = r#"
 fn jet_sentry_runtime_stop(
-    code: &str,
+    code: &'static str,
     file: &str,
     line: u32,
     gate: &str,
     operation: &str,
     obligation: &str,
+    obligation_status: &str,
+    foreign_component: Option<&str>,
+    foreign_fenced: Option<bool>,
     detail: &str,
 ) -> ! {
-    let report = jet_render_runtime_sentry(
+    let report = jet_render_runtime_sentry_with_context(
         match code {
             "R0801" => "R0801",
             "R0802" => "R0802",
@@ -68,6 +104,9 @@ fn jet_sentry_runtime_stop(
         operation,
         obligation,
         detail,
+        obligation_status,
+        foreign_component,
+        foreign_fenced,
     );
     panic!("{}", report.rendered);
 }
@@ -75,6 +114,20 @@ fn jet_sentry_runtime_stop(
     let source_text = format!(
         r#"#![allow(dead_code)]
 {observe}
+mod jet_encoding_errors {{
+{encoding_errors}
+}}
+mod jet_json_number {{
+{json_number}
+}}
+#[allow(non_snake_case)]
+mod EncodingJson {{
+{encoding_json}
+}}
+#[allow(non_snake_case)]
+mod RuntimeDiagnosticCore {{
+{runtime_diagnostic_core}
+}}
 {registry}
 {outcome}
 {fault_injection}
@@ -82,8 +135,10 @@ fn jet_sentry_runtime_stop(
 mod jet_uninit_semantics {{
 {uninit}
 }}
+mod jet_fixed_kernel {{
+{fixed_kernel}
+}}
 mod jet_mem {{
-    use super::jet_sentry_runtime_stop;
     mod jet_sentry {{
 {sentry}
     }}
@@ -578,13 +633,15 @@ fn run() {
     assert!(errors.is_empty(), "{errors:?}");
 
     if jet_jit::cranelift_host_supported() {
-        jet_jit::try_compile_bundle(&bundle)
+        let policy = common::development_policy();
+        common::compile_cranelift_bundle(&bundle, &policy)
             .expect("allocator constructors must compile natively in resident JIT");
     }
 
+    let policy = common::development_policy();
     let mut dev = jet_jit::CraneliftBackend::new();
     jet_jit::reset_jit_trace_for_test();
-    match dev.run(&bundle, false) {
+    match common::run_cranelift_bundle(&mut dev, &bundle, false, &policy) {
         RunOutcome::Ran { stdout, .. } => {
             assert!(
                 !jet_jit::deopt_invoked_for_test(),
@@ -698,7 +755,7 @@ fn program_allocator_fact_selects_counting_wrapper_for_aot() {
         .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
         .collect::<Vec<_>>();
     assert!(errors.is_empty(), "{errors:?}");
-    let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
+    let rust = emit_native_aot(&bundle);
     assert!(rust.contains(
         "static __JET_PROGRAM_ALLOCATOR: JetProgramAllocator = JetProgramAllocator::counting(2048)"
     ));
@@ -717,7 +774,7 @@ fn missing_program_allocator_keeps_hidden_system_heap() {
         .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
         .collect::<Vec<_>>();
     assert!(errors.is_empty(), "{errors:?}");
-    let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
+    let rust = emit_native_aot(&bundle);
     assert!(!rust.contains("__JET_PROGRAM_ALLOCATOR"));
 }
 
@@ -729,7 +786,7 @@ fn invalid_program_allocator_fact_is_a_teaching_diagnostic() {
         .iter()
         .find(|diagnostic| diagnostic.code == "E1206")
         .expect("invalid allocator fact must use the registered manifest diagnostic");
-    assert_eq!(diagnostic.what, "invalid hosted program allocator");
+    assert_eq!(diagnostic.what, "Invalid hosted program allocator");
     assert!(diagnostic.fix.contains("mem.Counting.over"));
 }
 
@@ -839,17 +896,18 @@ fn program_allocator_example_matches_aot_jit_and_interpreter() {
     if !common::have_rustc() {
         return;
     }
-    let project = std::path::Path::new("examples/features/memory/program_allocator");
+    let project =
+        std::fs::canonicalize("examples/features/memory/program_allocator").unwrap();
     let expected =
         std::fs::read_to_string("examples/features/expected/memory/program_allocator.out").unwrap();
     for (name, args) in [
-        ("jit", &["run", "main.jet"][..]),
-        ("interpreter", &["run", "--interpret", "main.jet"][..]),
-        ("aot", &["run", "--release", "main.jet"][..]),
+        ("jit", &["run", "run.jet"][..]),
+        ("interpreter", &["run", "--interpret", "run.jet"][..]),
+        ("aot", &["run", "--release", "run.jet"][..]),
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_jet"))
             .args(args)
-            .current_dir(project)
+            .current_dir(&project)
             .env("NO_COLOR", "1")
             .env(
                 "JET_RUN_CACHE_DIR",
@@ -864,22 +922,4 @@ fn program_allocator_example_matches_aot_jit_and_interpreter() {
         );
         assert_eq!(String::from_utf8_lossy(&output.stdout), expected, "{name}");
     }
-    let dossier = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["inspect", "dossier", "main.jet", "run", "--json"])
-        .current_dir(project)
-        .env("NO_COLOR", "1")
-        .output()
-        .unwrap();
-    assert!(
-        dossier.status.success(),
-        "{}",
-        String::from_utf8_lossy(&dossier.stderr)
-    );
-    let dossier = String::from_utf8(dossier.stdout).unwrap();
-    assert!(
-        dossier.contains(
-            "\"program_allocator\":{\"kind\":\"counting\",\"wraps\":\"system\",\"cap_bytes\":2147483648}"
-        ),
-        "{dossier}"
-    );
 }

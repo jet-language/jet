@@ -1,0 +1,11 @@
+// D-SYS-PRIV1: audited identity/session controls for a disposable user namespace only.
+use core.sys as sys
+
+fn run() {
+    #Unsafe("run only inside a disposable user namespace with a dedicated test identity") {
+        sys.setuid(0) ?? return
+        sys.setgid(0) ?? return
+        sys.initgroups("jet", 0) ?? return
+        sys.setsid() ?? return
+    }
+}

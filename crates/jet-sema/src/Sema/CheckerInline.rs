@@ -20,7 +20,7 @@
 //!     anywhere in the program (stored in a binding, passed as a callback,
 //!     returned), not just called directly. Checked via `inline_addr_taken`,
 //!     a whole-program accumulator threaded through `check_func_body`/
-//!     `check_func_body_bundle` (see `Checker::inline_addr_taken`) and
+//!     `check_func_body_bundle_checked` (see `Checker::inline_addr_taken`) and
 //!     populated for free (`CheckerInfer/expr.rs`'s `Expr::Ident` arm already
 //!     visits every expression in every function during ordinary type
 //!     inference; the one line that resolves a bare name to a global

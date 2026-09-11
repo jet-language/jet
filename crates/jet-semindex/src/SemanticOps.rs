@@ -4,7 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use jet_foundation::JSON::{parse_json, JSONValue};
+use jet_foundation::DataTree::DataTree;
+use jet_foundation::JSON::parse_json;
 
 use crate::Types::{DefinitionFact, EffectFact, SemIndex};
 
@@ -82,10 +83,10 @@ pub fn semantic_ops_for_file(path: &Path, source_hash: &str) -> Vec<SemanticOp> 
                 let Ok(raw) = fs::read_to_string(&receipt) else {
                     continue;
                 };
-                let Ok(JSONValue::Object(object)) = parse_json(&raw) else {
+                let Ok(DataTree::Object(object)) = parse_json(&raw) else {
                     continue;
                 };
-                let Some(files) = object.get("files").and_then(parse_files) else {
+                let Some(files) = field(&object, "files").and_then(parse_files) else {
                     continue;
                 };
                 let files = files
@@ -102,7 +103,7 @@ pub fn semantic_ops_for_file(path: &Path, source_hash: &str) -> Vec<SemanticOp> 
                 }) {
                     continue;
                 }
-                let Some(ops) = object.get("semantic_ops").and_then(ops) else {
+                let Some(ops) = field(&object, "semantic_ops").and_then(ops) else {
                     continue;
                 };
                 out.extend(ops.into_iter().map(|mut op| {
@@ -294,15 +295,15 @@ fn same_hash(recorded: &str, current: &str) -> bool {
         || current.strip_prefix("sha256-") == Some(recorded)
 }
 
-fn parse_files(value: &JSONValue) -> Option<Vec<SemanticOpFile>> {
-    let JSONValue::Array(values) = value else {
+fn parse_files(value: &DataTree) -> Option<Vec<SemanticOpFile>> {
+    let DataTree::Array(values) = value else {
         return None;
     };
     Some(values.iter().filter_map(file).collect())
 }
 
-fn file(value: &JSONValue) -> Option<SemanticOpFile> {
-    let JSONValue::Object(object) = value else {
+fn file(value: &DataTree) -> Option<SemanticOpFile> {
+    let DataTree::Object(object) = value else {
         return None;
     };
     Some(SemanticOpFile {
@@ -312,21 +313,20 @@ fn file(value: &JSONValue) -> Option<SemanticOpFile> {
     })
 }
 
-fn ops(value: &JSONValue) -> Option<Vec<SemanticOp>> {
-    let JSONValue::Array(values) = value else {
+fn ops(value: &DataTree) -> Option<Vec<SemanticOp>> {
+    let DataTree::Array(values) = value else {
         return None;
     };
     Some(values.iter().filter_map(op).collect())
 }
 
-fn op(value: &JSONValue) -> Option<SemanticOp> {
-    let JSONValue::Object(object) = value else {
+fn op(value: &DataTree) -> Option<SemanticOp> {
+    let DataTree::Object(object) = value else {
         return None;
     };
-    let targets = object
-        .get("targets")
+    let targets = field(object, "targets")
         .and_then(|value| match value {
-            JSONValue::Array(values) => Some(values.iter().filter_map(target).collect()),
+            DataTree::Array(values) => Some(values.iter().filter_map(target).collect()),
             _ => None,
         })
         .unwrap_or_default();
@@ -343,8 +343,8 @@ fn op(value: &JSONValue) -> Option<SemanticOp> {
     })
 }
 
-fn target(value: &JSONValue) -> Option<SemanticOpTarget> {
-    let JSONValue::Object(object) = value else {
+fn target(value: &DataTree) -> Option<SemanticOpTarget> {
+    let DataTree::Object(object) = value else {
         return None;
     };
     Some(SemanticOpTarget {
@@ -356,17 +356,20 @@ fn target(value: &JSONValue) -> Option<SemanticOpTarget> {
     })
 }
 
-fn string(object: &std::collections::BTreeMap<String, JSONValue>, key: &str) -> Option<String> {
-    object.get(key).and_then(|value| match value {
-        JSONValue::String(value) => Some(value.clone()),
+fn field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+    object
+        .iter()
+        .find_map(|(name, value)| (name == key).then_some(value))
+}
+
+fn string(object: &[(String, DataTree)], key: &str) -> Option<String> {
+    field(object, key).and_then(|value| match value {
+        DataTree::Text(value) | DataTree::TypedText(value) => Some(value.clone()),
         _ => None,
     })
 }
 
-fn optional_string(
-    object: &std::collections::BTreeMap<String, JSONValue>,
-    key: &str,
-) -> Option<String> {
+fn optional_string(object: &[(String, DataTree)], key: &str) -> Option<String> {
     string(object, key)
 }
 
@@ -418,7 +421,38 @@ impl ReviewOpKind {
     }
 }
 
-/// A compiler-fact operation consumed by the review verdict.
+/// How a checked subject was aligned between the two review sides.
+///
+/// Alignment is deliberately separate from the operation kind.  An added or
+/// removed subject can be unpaired, while an ambiguous candidate set must not
+/// be presented as a semantic match.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ReviewAlignment {
+    Matched,
+    Recorded,
+    UnmatchedBefore,
+    UnmatchedAfter,
+    Ambiguous,
+}
+
+impl ReviewAlignment {
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Self::Matched => "matched",
+            Self::Recorded => "recorded",
+            Self::UnmatchedBefore => "unmatched_before",
+            Self::UnmatchedAfter => "unmatched_after",
+            Self::Ambiguous => "ambiguous",
+        }
+    }
+}
+
+/// One compiler-fact operation consumed by the review verdict.
+///
+/// `before_identity` and `after_identity` are the exact compiler-owned
+/// subject spellings for the two sides.  `before` and `after` remain the
+/// operation payload (module, signature, or content ids) for compatibility
+/// with the original review projection.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReviewSemanticOp {
     pub kind: ReviewOpKind,
@@ -426,6 +460,11 @@ pub struct ReviewSemanticOp {
     pub identity: String,
     pub before: Option<String>,
     pub after: Option<String>,
+    pub before_identity: Option<String>,
+    pub after_identity: Option<String>,
+    pub alignment: ReviewAlignment,
+    /// Rule/receipt identity when a producer recorded the operation.
+    pub source_operation: Option<String>,
 }
 
 /// Compare two checked programs using semantic-index facts only.
@@ -465,67 +504,76 @@ pub fn review_semantic_ops(before: &SemIndex, after: &SemIndex) -> Vec<ReviewSem
         |fact| format!("{}:{}:{}", fact.kind, fact.signature_id, fact.module_path),
         &mut pairs,
     );
-    pair_by_key(
-        before_defs,
-        after_defs,
-        &mut matched_before,
-        &mut matched_after,
-        |fact| format!("{}:{}", fact.kind, fact.signature_id),
-        &mut pairs,
-    );
 
     let mut operations = Vec::new();
     for (before_index, after_index) in pairs {
         let old = &before_defs[before_index];
         let new = &after_defs[after_index];
-        let identity = new.human_identity.clone();
         if old.module_path != new.module_path {
-            operations.push(ReviewSemanticOp {
-                kind: ReviewOpKind::Moved,
-                stable_id: new.stable_id.clone(),
-                identity: identity.clone(),
-                before: Some(old.module_path.clone()),
-                after: Some(new.module_path.clone()),
-            });
+            operations.push(matched_operation(
+                ReviewOpKind::Moved,
+                old,
+                new,
+                compiler_identity(before, old),
+                compiler_identity(after, new),
+                Some(old.module_path.clone()),
+                Some(new.module_path.clone()),
+            ));
         }
         if old.signature_id != new.signature_id {
-            operations.push(ReviewSemanticOp {
-                kind: ReviewOpKind::SignatureChanged,
-                stable_id: new.stable_id.clone(),
-                identity: identity.clone(),
-                before: Some(old.signature_id.clone()),
-                after: Some(new.signature_id.clone()),
-            });
+            operations.push(matched_operation(
+                ReviewOpKind::SignatureChanged,
+                old,
+                new,
+                compiler_identity(before, old),
+                compiler_identity(after, new),
+                Some(old.signature_id.clone()),
+                Some(new.signature_id.clone()),
+            ));
         } else if old.content_id != new.content_id {
-            operations.push(ReviewSemanticOp {
-                kind: ReviewOpKind::BodyChanged,
-                stable_id: new.stable_id.clone(),
-                identity,
-                before: Some(old.content_id.clone()),
-                after: Some(new.content_id.clone()),
-            });
+            operations.push(matched_operation(
+                ReviewOpKind::BodyChanged,
+                old,
+                new,
+                compiler_identity(before, old),
+                compiler_identity(after, new),
+                Some(old.content_id.clone()),
+                Some(new.content_id.clone()),
+            ));
         }
     }
 
     for (index, fact) in before_defs.iter().enumerate() {
         if !matched_before.contains(&index) {
+            let alignment = unmatched_alignment(before_defs, after_defs, index, true);
+            let identity = compiler_identity(before, fact);
             operations.push(ReviewSemanticOp {
                 kind: ReviewOpKind::Removed,
                 stable_id: fact.stable_id.clone(),
-                identity: fact.human_identity.clone(),
-                before: Some(fact.human_identity.clone()),
+                identity: identity.clone(),
+                before: Some(identity.clone()),
                 after: None,
+                before_identity: Some(identity),
+                after_identity: None,
+                alignment,
+                source_operation: None,
             });
         }
     }
     for (index, fact) in after_defs.iter().enumerate() {
         if !matched_after.contains(&index) {
+            let alignment = unmatched_alignment(before_defs, after_defs, index, false);
+            let identity = compiler_identity(after, fact);
             operations.push(ReviewSemanticOp {
                 kind: ReviewOpKind::Added,
                 stable_id: fact.stable_id.clone(),
-                identity: fact.human_identity.clone(),
+                identity: identity.clone(),
                 before: None,
-                after: Some(fact.human_identity.clone()),
+                after: Some(identity.clone()),
+                before_identity: None,
+                after_identity: Some(identity),
+                alignment,
+                source_operation: None,
             });
         }
     }
@@ -563,48 +611,151 @@ pub fn review_semantic_ops_with_receipts(
         .filter(|operation| operation.kind != ReviewOpKind::Renamed)
         .collect::<Vec<_>>();
     for receipt in receipts.iter().filter(|receipt| receipt.kind == "rename") {
-        let before_name = receipt
-            .targets
-            .first()
+        let target = receipt.targets.first();
+        let before_name = target
             .map(|target| target.before.clone())
             .or_else(|| receipt.from.clone());
-        let after_name = receipt
-            .targets
-            .first()
+        let after_name = target
             .map(|target| target.after.clone())
             .or_else(|| receipt.to.clone());
-        let Some(identity) = after_name.clone() else {
-            continue;
+        let before_candidates =
+            rename_candidates(before.definition_facts(), target, before_name.as_deref());
+        let after_candidates =
+            rename_candidates(after.definition_facts(), target, after_name.as_deref());
+        let old = (before_candidates.len() == 1).then(|| {
+            &before.definition_facts()[before_candidates[0]]
+        });
+        let new = (after_candidates.len() == 1).then(|| {
+            &after.definition_facts()[after_candidates[0]]
+        });
+        let valid_pair = old.zip(new).filter(|(old, new)| {
+            old.kind == new.kind
+                && old.module_path == new.module_path
+                && old.signature_id == new.signature_id
+                && old.name != new.name
+        });
+        let alignment = if let Some((old, new)) = valid_pair {
+            if target
+                .is_some_and(|target| !target.stable_id.is_empty())
+                && target.is_some_and(|target| {
+                    target.stable_id != old.stable_id && target.stable_id != new.stable_id
+                })
+            {
+                ReviewAlignment::UnmatchedBefore
+            } else {
+                let old_id = old.stable_id.clone();
+                let new_id = new.stable_id.clone();
+                operations.retain(|operation| {
+                    !matches!(
+                        operation.kind,
+                        ReviewOpKind::Removed | ReviewOpKind::Added
+                    ) || (operation.stable_id != old_id && operation.stable_id != new_id)
+                });
+                ReviewAlignment::Recorded
+            }
+        } else if before_candidates.len() > 1 || after_candidates.len() > 1 {
+            ReviewAlignment::Ambiguous
+        } else if before_candidates.is_empty() {
+            ReviewAlignment::UnmatchedBefore
+        } else {
+            ReviewAlignment::UnmatchedAfter
         };
-        let stable_id = receipt
-            .targets
-            .first()
-            .map(|target| target.stable_id.clone())
-            .or_else(|| {
-                after
-                    .definition_facts()
-                    .iter()
-                    .find(|fact| {
-                        fact.human_identity == identity
-                            || fact.name == identity
-                            || fact.human_identity.ends_with(&format!("::{identity}"))
-                    })
-                    .map(|fact| fact.stable_id.clone())
-            });
-        let Some(stable_id) = stable_id else {
-            continue;
-        };
+        let stable_id = new
+            .map(|fact| fact.stable_id.clone())
+            .or_else(|| old.map(|fact| fact.stable_id.clone()))
+            .or_else(|| target.map(|target| target.stable_id.clone()))
+            .unwrap_or_else(|| "rename:unresolved".to_string());
+        let before_identity = old
+            .map(|fact| fact.human_identity.clone())
+            .or_else(|| before_name.clone());
+        let after_identity = new
+            .map(|fact| fact.human_identity.clone())
+            .or_else(|| after_name.clone());
+        let identity = after_identity
+            .clone()
+            .or_else(|| before_identity.clone())
+            .unwrap_or_else(|| "unknown".to_string());
         let operation = ReviewSemanticOp {
             kind: ReviewOpKind::Renamed,
             stable_id,
             identity,
-            before: before_name,
-            after: after_name,
+            before: before_identity.clone(),
+            after: after_identity.clone(),
+            before_identity,
+            after_identity,
+            alignment,
+            source_operation: Some(
+                receipt
+                    .rule_id
+                    .clone()
+                    .unwrap_or_else(|| receipt.kind.clone()),
+            ),
         };
         if !operations.contains(&operation) {
             operations.push(operation);
         }
     }
+    sort_review_operations(&mut operations);
+    operations
+}
+
+fn compiler_identity(index: &SemIndex, fact: &DefinitionFact) -> String {
+    index
+        .derivation(&fact.stable_id)
+        .map(|derivation| derivation.claim.clone())
+        .filter(|claim| !claim.is_empty())
+        .unwrap_or_else(|| fact.human_identity.clone())
+}
+
+fn matched_operation(
+    kind: ReviewOpKind,
+    _before: &DefinitionFact,
+    after: &DefinitionFact,
+    before_identity: String,
+    after_identity: String,
+    old: Option<String>,
+    new: Option<String>,
+) -> ReviewSemanticOp {
+    ReviewSemanticOp {
+        kind,
+        stable_id: after.stable_id.clone(),
+        identity: after_identity.clone(),
+        before: old,
+        after: new,
+        before_identity: Some(before_identity),
+        after_identity: Some(after_identity),
+        alignment: ReviewAlignment::Matched,
+        source_operation: None,
+    }
+}
+
+fn rename_candidates(
+    facts: &[DefinitionFact],
+    target: Option<&SemanticOpTarget>,
+    requested: Option<&str>,
+) -> Vec<usize> {
+    facts
+        .iter()
+        .enumerate()
+        .filter(|(_, fact)| {
+            target.map_or(true, |target| {
+                (target.stable_id.is_empty() || target.stable_id == fact.stable_id)
+                    && (target.kind.is_empty() || target.kind == fact.kind)
+                    && (target.module_path.is_empty() || target.module_path == fact.module_path)
+            })
+        })
+        .filter(|(_, fact)| {
+            requested.map_or(true, |requested| {
+                requested == fact.human_identity
+                    || requested == fact.name
+                    || fact.human_identity.ends_with(&format!("::{requested}"))
+            })
+        })
+        .map(|(index, _)| index)
+        .collect()
+}
+
+fn sort_review_operations(operations: &mut [ReviewSemanticOp]) {
     operations.sort_by(|left, right| {
         (
             left.stable_id.as_str(),
@@ -612,6 +763,7 @@ pub fn review_semantic_ops_with_receipts(
             &left.kind,
             left.before.as_deref(),
             left.after.as_deref(),
+            &left.alignment,
         )
             .cmp(&(
                 right.stable_id.as_str(),
@@ -619,10 +771,53 @@ pub fn review_semantic_ops_with_receipts(
                 &right.kind,
                 right.before.as_deref(),
                 right.after.as_deref(),
+                &right.alignment,
             ))
     });
-    operations
 }
+
+fn fact_keys(fact: &DefinitionFact) -> [String; 3] {
+    [
+        format!("{}:{}", fact.kind, fact.stable_id),
+        format!("{}:{}", fact.kind, fact.human_identity),
+        format!("{}:{}:{}", fact.kind, fact.signature_id, fact.module_path),
+    ]
+}
+
+fn unmatched_alignment(
+    before: &[DefinitionFact],
+    after: &[DefinitionFact],
+    index: usize,
+    before_side: bool,
+) -> ReviewAlignment {
+    let fact = if before_side {
+        &before[index]
+    } else {
+        &after[index]
+    };
+    let keys = fact_keys(fact);
+    let ambiguous = keys.iter().any(|key| {
+        let before_count = before
+            .iter()
+            .filter(|candidate| fact_keys(candidate).iter().any(|candidate_key| candidate_key == key))
+            .count();
+        let after_count = after
+            .iter()
+            .filter(|candidate| fact_keys(candidate).iter().any(|candidate_key| candidate_key == key))
+            .count();
+        before_count > 0
+            && after_count > 0
+            && (before_count != 1 || after_count != 1)
+    });
+    if ambiguous {
+        ReviewAlignment::Ambiguous
+    } else if before_side {
+        ReviewAlignment::UnmatchedBefore
+    } else {
+        ReviewAlignment::UnmatchedAfter
+    }
+}
+
 
 fn pair_by_key<F>(
     before: &[DefinitionFact],
@@ -686,6 +881,10 @@ fn append_effect_operations(
                 identity: function.to_string(),
                 before: Some(old_shape),
                 after: Some(new_shape),
+                before_identity: Some(function.to_string()),
+                after_identity: Some(function.to_string()),
+                alignment: ReviewAlignment::Matched,
+                source_operation: None,
             });
         }
     }

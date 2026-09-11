@@ -4,6 +4,7 @@
 //! (consent path). Artifacts use the ratified binary envelope (magic `JREPLAY\0`,
 //! canonical JSON header, framed records, `JEND` footer).
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -11,8 +12,10 @@ use std::process::exit;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use jet::ExitCodes;
+use jet::RecordIndex::RecordIdentity;
 use jet::SHA256;
-use jet_foundation::JSON::{parse_json, JSONValue};
+use jet_foundation::DataTree::DataTree;
+use jet_foundation::JSON::parse_json;
 
 const MAGIC: &[u8; 8] = b"JREPLAY\0";
 const KIND_TIME_WALL: u16 = 0x0001;
@@ -37,11 +40,27 @@ pub(crate) struct ReplayIdentity {
     pub core_abi: String,
     pub lock_digest: String,
     pub profile: String,
-    pub tir_hash: String,
-    pub tir_schema: String,
+    pub semantic_mir_hash: String,
+    pub optimized_mir_hash: String,
+    pub mir_schema: String,
+    pub mir_identity: String,
     /// Stable identity of the one statically authorized `core.time.now` call.
     /// The zero placeholder is no longer accepted in a replay frame.
     pub time_site_id: String,
+}
+
+impl ReplayIdentity {
+    /// Every indexed artifact uses the target's resolved input closure as its
+    /// identity component.  Replay header fields remain the execution
+    /// adapter's semantic identity and are checked separately.
+    pub(crate) fn record_identity(&self) -> Result<RecordIdentity, String> {
+        let target_inputs_sha256 = crate::CmdProve::target_input_sha256_for_file(&self.entry)?;
+        RecordIdentity::new(
+            target_inputs_sha256,
+            env!("CARGO_PKG_VERSION"),
+            self.execution_adapter.clone(),
+        )
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -64,6 +83,7 @@ pub(crate) struct ReplayAuthority {
     time_values: Vec<i64>,
     next_time: usize,
     pub recorded_run: jet::Debug::RecordedRun,
+    pub decision_ledger: Option<jet_foundation::MIR::MirDecisionLedger>,
 }
 
 impl ReplayAuthority {
@@ -181,10 +201,18 @@ pub(crate) struct NamedCapture {
     authority: CaptureAuthority,
 }
 
+impl NamedCapture {
+    pub(crate) fn record_identity(&self) -> Result<RecordIdentity, String> {
+        self.identity.record_identity()
+    }
+}
+
 /// Start the ordinary safe Time-only capture used by run/dev/test.
 pub(crate) fn begin_named_capture(
     file: &str,
     name: &str,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
     json_mode: bool,
 ) -> Result<NamedCapture, i32> {
     let path = match replay_path_for_name(name) {
@@ -200,7 +228,7 @@ pub(crate) fn begin_named_capture(
             return Err(ExitCodes::USAGE);
         }
     };
-    let identity = match identity_for_file(file) {
+    let identity = match identity_for_file(file, profile, setting_overrides) {
         Ok(identity) => identity,
         Err(message) => {
             emit_diag(
@@ -257,12 +285,23 @@ pub(crate) fn finish_named_capture_with_run(
         Some(run),
     )
 }
+/// Index a finalized named replay through the canonical CmdProve producer.
+/// Devtools callers reuse the identity established before execution.
+pub(crate) fn index_named_replay_artifact(
+    capture: &NamedCapture,
+    path: &Path,
+    capture_mode: jet::RecordIndex::RecordCapture,
+) -> Result<jet::RecordIndex::RecordLink, String> {
+    crate::CmdProve::index_replay_artifact(path, &capture.identity, capture_mode)
+}
 
 /// Open a named artifact for `jet debug`, install the shared Time adapter, and
 /// consume its bounded record before the debugger starts.
 pub(crate) fn open_named_replay(
     file: &str,
     value: &str,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
     json_mode: bool,
 ) -> Result<ReplayAuthority, i32> {
     let path = if value.ends_with(".jetproof-replay") || value.contains('/') {
@@ -282,7 +321,7 @@ pub(crate) fn open_named_replay(
             }
         }
     };
-    let identity = match identity_for_file(file) {
+    let identity = match identity_for_file(file, profile, setting_overrides) {
         Ok(identity) => identity,
         Err(message) => {
             emit_diag(
@@ -331,31 +370,40 @@ pub(crate) fn open_named_replay(
     };
     std::env::set_var("JET_PROVE_REPLAY_TIME_MS", time_ms.to_string());
     if !json_mode {
-        eprintln!("ambient authority opened: Time; dev-tir-v1");
+        eprintln!("ambient authority opened: Time; mir-v1");
     }
     Ok(authority)
 }
 
-fn identity_for_file(file: &str) -> Result<ReplayIdentity, String> {
+fn identity_for_file(
+    file: &str,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<ReplayIdentity, String> {
     let source = fs::read(file).map_err(|error| format!("could not read `{file}`: {error}"))?;
     let entry = project_relative_entry(file)?;
     let source_digest = SHA256::sha256_hex(&source);
     let build_digest = SHA256::sha256_hex(format!("jet-build:{source_digest}").as_bytes());
     let lock_digest = SHA256::sha256_hex(b"jet-record-lock-v1");
-    let tir_hash = SHA256::sha256_hex(format!("jet-tir:{source_digest}").as_bytes());
+    let mir_identity =
+        crate::CmdProve::proof_mir_identity_for_file(file, profile, setting_overrides)?;
+    let semantic_mir_hash = mir_identity.semantic_hash.clone();
+    let optimized_mir_hash = mir_identity.optimized_hash.clone();
     let time_site_id = SHA256::sha256_hex(format!("jet-time:{entry}").as_bytes());
     Ok(ReplayIdentity {
         entry,
         source_digest,
-        execution_adapter: "dev-tir-v1".to_string(),
+        execution_adapter: "mir-v1".to_string(),
         target_triple: format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS),
         abi: std::env::consts::FAMILY.to_string(),
         build_digest,
         core_abi: "jet-core-abi-v1".to_string(),
         lock_digest,
-        profile: "dev".to_string(),
-        tir_hash,
-        tir_schema: "1".to_string(),
+        profile: profile.to_string(),
+        semantic_mir_hash,
+        optimized_mir_hash,
+        mir_schema: jet_foundation::MIR::MIR_IDENTITY_SCHEMA.to_string(),
+        mir_identity: mir_identity.canonical_json(),
         time_site_id,
     })
 }
@@ -605,21 +653,68 @@ pub(crate) fn prepare_replay(
             format!("could not read `{artifact_path}`: {error}"),
         )
     })?;
+    prepare_replay_bytes(identity, artifact_path, &bytes)
+}
+
+/// Open an indexed saved replay. Saved records intentionally have no
+/// `.jetproof-replay` suffix; the closed path shape prevents this loader from
+/// becoming an alternate ordinary replay-path parser.
+pub(crate) fn prepare_saved_replay(
+    identity: &ReplayIdentity,
+    artifact_path: &Path,
+) -> Result<ReplayAuthority, (&'static str, String)> {
+    let path = validate_saved_replay_path(artifact_path).map_err(|message| ("E3622", message))?;
+    ensure_read_parent(&path).map_err(|message| ("E3622", message))?;
+    let display = path.display().to_string();
+    let metadata = fs::symlink_metadata(&path)
+        .map_err(|error| ("E3622", format!("could not inspect `{display}`: {error}")))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err((
+            "E3622",
+            format!("saved replay is not a regular file: {display}"),
+        ));
+    }
+    if metadata.len() > MAX_REPLAY_BYTES {
+        return Err((
+            "E3622",
+            format!("saved replay exceeds the {MAX_REPLAY_BYTES}-byte limit"),
+        ));
+    }
+    let bytes = fs::read(&path).map_err(|error| {
+        (
+            "E3622",
+            format!("could not read saved replay `{display}`: {error}"),
+        )
+    })?;
+    prepare_replay_bytes(identity, &display, &bytes)
+}
+
+fn prepare_replay_bytes(
+    identity: &ReplayIdentity,
+    artifact_path: &str,
+    bytes: &[u8],
+) -> Result<ReplayAuthority, (&'static str, String)> {
     if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_REPLAY_BYTES {
         return Err((
             "E3622",
             format!("replay artifact exceeds the {MAX_REPLAY_BYTES}-byte limit"),
         ));
     }
-    let header = parse_and_verify(&bytes)?;
+    let header = parse_and_verify(bytes)?;
     identity_matches(&header, identity).map_err(|field| {
         (
             "E3621",
             format!("identity field `{field}` differs from the current target"),
         )
     })?;
-    let time_values = extract_time_ms(&bytes).map_err(|why| ("E3628", why))?;
-    let recorded_run = extract_recorded_run(&bytes).map_err(|why| ("E3622", why))?;
+    let time_values = extract_time_ms(bytes).map_err(|why| ("E3628", why))?;
+    let recorded_run = extract_recorded_run(bytes).map_err(|why| ("E3622", why))?;
+    let decision_ledger = recorded_run
+        .decision_ledger
+        .as_deref()
+        .map(jet_foundation::MIR::MirDecisionLedger::from_json)
+        .transpose()
+        .map_err(|why| ("E3622", why))?;
     let time_ms = time_values.first().copied().ok_or((
         "E3628",
         "replay artifact contains no Time authority".to_string(),
@@ -634,7 +729,7 @@ pub(crate) fn prepare_replay(
         .filter(|status| (0..=255).contains(status))
         .ok_or((
             "E3622",
-            "replay header has an invalid run status".to_string(),
+            format!("replay header has an invalid run status for `{artifact_path}`"),
         ))?;
     Ok(ReplayAuthority {
         time_ms,
@@ -643,9 +738,9 @@ pub(crate) fn prepare_replay(
         time_values,
         next_time: 0,
         recorded_run,
+        decision_ledger,
     })
 }
-
 fn resolve_capture_path(
     identity: &ReplayIdentity,
     explicit: Option<&str>,
@@ -711,10 +806,7 @@ fn validate_identity_for_capture(identity: &ReplayIdentity) -> Result<(), String
     {
         return Err("entry identity must be a project-relative path".into());
     }
-    if !matches!(
-        identity.execution_adapter.as_str(),
-        "dev-tir-v1" | "aot-native-v1"
-    ) {
+    if identity.execution_adapter != "mir-v1" {
         return Err(format!(
             "unsupported execution adapter `{}`",
             identity.execution_adapter
@@ -724,7 +816,8 @@ fn validate_identity_for_capture(identity: &ReplayIdentity) -> Result<(), String
         ("source_digest", identity.source_digest.as_str()),
         ("build_digest", identity.build_digest.as_str()),
         ("lock_digest", identity.lock_digest.as_str()),
-        ("tir_hash", identity.tir_hash.as_str()),
+        ("semantic_mir_hash", identity.semantic_mir_hash.as_str()),
+        ("optimized_mir_hash", identity.optimized_mir_hash.as_str()),
         ("time_site_id", identity.time_site_id.as_str()),
     ] {
         if value.len() != 64
@@ -741,9 +834,13 @@ fn validate_identity_for_capture(identity: &ReplayIdentity) -> Result<(), String
         || identity.core_abi.is_empty()
         || identity.profile.is_empty()
         || identity.target_triple.is_empty()
-        || identity.tir_schema.is_empty()
+        || identity.mir_schema.is_empty()
     {
         return Err("identity contains an empty required field".into());
+    }
+    validate_mir_identity(&identity.mir_identity)?;
+    if identity.mir_schema != jet_foundation::MIR::MIR_IDENTITY_SCHEMA {
+        return Err("identity uses an unsupported MIR schema".into());
     }
     Ok(())
 }
@@ -774,6 +871,35 @@ fn validate_replay_path(path: &str) -> Result<PathBuf, String> {
     }
     if path.extension().and_then(|extension| extension.to_str()) != Some("jetproof-replay") {
         return Err("replay artifact path must end in `.jetproof-replay`".into());
+    }
+    Ok(path.to_path_buf())
+}
+fn validate_saved_replay_path(path: &Path) -> Result<PathBuf, String> {
+    if path.as_os_str().is_empty() {
+        return Err("saved replay path is empty".into());
+    }
+    if path.is_absolute() {
+        return Err("saved replay path must stay project-relative".into());
+    }
+    let components = path.components().collect::<Vec<_>>();
+    if components.len() != 4
+        || components[0] != Component::Normal(std::ffi::OsStr::new(".jet"))
+        || components[1] != Component::Normal(std::ffi::OsStr::new("records"))
+        || components[2] != Component::Normal(std::ffi::OsStr::new("saved"))
+    {
+        return Err("saved replay path must be `.jet/records/saved/<artifact_id>`".into());
+    }
+    let Component::Normal(id) = components[3] else {
+        return Err("saved replay path has an unsafe artifact id".into());
+    };
+    let id = id
+        .to_str()
+        .ok_or_else(|| "saved replay artifact id is not UTF-8".to_string())?;
+    if id.len() != 24
+        || !id.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || id.bytes().any(|byte| byte.is_ascii_uppercase())
+    {
+        return Err("saved replay artifact id must be 24 lowercase hexadecimal bytes".into());
     }
     Ok(path.to_path_buf())
 }
@@ -945,6 +1071,13 @@ fn build_safe_time_artifact_with_run(
     status: i64,
     recorded_run: Option<&jet::Debug::RecordedRun>,
 ) -> Result<Vec<u8>, String> {
+    let decision_ledger = recorded_run
+        .and_then(|run| run.decision_ledger.as_deref())
+        .map(|payload| {
+            jet_foundation::MIR::MirDecisionLedger::from_json(payload)
+                .map(|ledger| ledger.canonical_json())
+        })
+        .transpose()?;
     let salt = privacy_salt()?;
     let time_payload = canonical_json(&[
         ("call_id", Json::Int(0)),
@@ -984,7 +1117,15 @@ fn build_safe_time_artifact_with_run(
     let has_recorded_run = recorded_run.is_some_and(|run| !run.acts.is_empty());
 
     let zero_id = "000000000000000000000000";
-    let header_zero = header_json(identity, zero_id, &salt, outcome, status, has_recorded_run);
+    let header_zero = header_json(
+        identity,
+        zero_id,
+        &salt,
+        outcome,
+        status,
+        has_recorded_run,
+        decision_ledger.as_deref(),
+    );
     let mut body_zero = Vec::new();
     write_prefix(&mut body_zero, header_zero.as_bytes());
     for frame in &frames {
@@ -999,6 +1140,7 @@ fn build_safe_time_artifact_with_run(
         outcome,
         status,
         has_recorded_run,
+        decision_ledger.as_deref(),
     );
     let mut out = Vec::new();
     write_prefix(&mut out, header.as_bytes());
@@ -1041,7 +1183,21 @@ fn header_json(
     outcome: &str,
     status: i64,
     has_recorded_run: bool,
+    decision_ledger: Option<&str>,
 ) -> String {
+    let mut extensions = Vec::new();
+    if has_recorded_run {
+        extensions.push((
+            "recorded_run".into(),
+            Json::Obj(vec![("version".into(), Json::Int(1))]),
+        ));
+    }
+    if let Some(decision_ledger) = decision_ledger {
+        extensions.push((
+            "decision_ledger".into(),
+            Json::Raw(decision_ledger.to_string()),
+        ));
+    }
     canonical_json(&[
         ("artifact_id", Json::Str(artifact_id.into())),
         (
@@ -1051,17 +1207,7 @@ fn header_json(
                 ("roots".into(), Json::Arr(vec![Json::Str("Time".into())])),
             ]),
         ),
-        (
-            "extensions",
-            if has_recorded_run {
-                Json::Obj(vec![(
-                    "recorded_run".into(),
-                    Json::Obj(vec![("version".into(), Json::Int(1))]),
-                )])
-            } else {
-                Json::Obj(vec![])
-            },
-        ),
+        ("extensions", Json::Obj(extensions)),
         (
             "identity",
             Json::Obj(vec![
@@ -1093,8 +1239,19 @@ fn header_json(
                     "target_triple".into(),
                     Json::Str(identity.target_triple.clone()),
                 ),
-                ("tir_hash".into(), Json::Str(identity.tir_hash.clone())),
-                ("tir_schema".into(), Json::Str(identity.tir_schema.clone())),
+                (
+                    "semantic_mir_hash".into(),
+                    Json::Str(identity.semantic_mir_hash.clone()),
+                ),
+                (
+                    "optimized_mir_hash".into(),
+                    Json::Str(identity.optimized_mir_hash.clone()),
+                ),
+                ("mir_schema".into(), Json::Str(identity.mir_schema.clone())),
+                (
+                    "mir_identity".into(),
+                    Json::Str(identity.mir_identity.clone()),
+                ),
             ]),
         ),
         (
@@ -1425,6 +1582,37 @@ fn extract_time_ms(bytes: &[u8]) -> Result<Vec<i64>, String> {
     Ok(values)
 }
 
+fn extract_decision_ledger(bytes: &[u8]) -> Result<Option<String>, String> {
+    if bytes.len() < 16 {
+        return Err("artifact too short for decision ledger".into());
+    }
+    let hlen = u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]) as usize;
+    let header_end = 16usize
+        .checked_add(hlen)
+        .ok_or_else(|| "replay header length overflow".to_string())?;
+    if header_end > bytes.len() {
+        return Err("replay decision ledger header is truncated".into());
+    }
+    let header = std::str::from_utf8(&bytes[16..header_end])
+        .map_err(|_| "replay decision ledger header is not UTF-8".to_string())?;
+    let value = parse_json(header).map_err(|_| "replay header is not valid JSON".to_string())?;
+    let DataTree::Object(root) = value else {
+        return Err("replay header must be an object".into());
+    };
+    let Some(DataTree::Object(extensions)) = object_field(&root, "extensions") else {
+        return Ok(None);
+    };
+    let Some(value) = object_field(extensions, "decision_ledger") else {
+        return Ok(None);
+    };
+    let payload = canonical_json_value(value)?;
+    if payload.len() > 512 * 1024 {
+        return Err("replay decision ledger exceeds its transport limit".into());
+    }
+    let ledger = jet_foundation::MIR::MirDecisionLedger::from_json(&payload)?;
+    Ok(Some(ledger.canonical_json()))
+}
+
 fn extract_recorded_run(bytes: &[u8]) -> Result<jet::Debug::RecordedRun, String> {
     if bytes.len() < 16 {
         return Err("artifact too short for recorded run".into());
@@ -1440,7 +1628,10 @@ fn extract_recorded_run(bytes: &[u8]) -> Result<jet::Debug::RecordedRun, String>
     if header_end > jend || &bytes[jend..jend + 4] != b"JEND" {
         return Err("recorded run payload is truncated".into());
     }
-    let mut run = jet::Debug::RecordedRun::default();
+    let mut run = jet::Debug::RecordedRun {
+        acts: Vec::new(),
+        decision_ledger: extract_decision_ledger(bytes)?,
+    };
     let mut off = header_end;
     while off < jend {
         let frame_header_end = off
@@ -1449,7 +1640,6 @@ fn extract_recorded_run(bytes: &[u8]) -> Result<jet::Debug::RecordedRun, String>
         if frame_header_end > jend {
             return Err("recorded act frame header is truncated".into());
         }
-        let kind = u16::from_le_bytes([bytes[off + 1], bytes[off + 2]]);
         let sequence = u64::from_le_bytes(
             bytes[off + 3..off + 11]
                 .try_into()
@@ -1470,6 +1660,7 @@ fn extract_recorded_run(bytes: &[u8]) -> Result<jet::Debug::RecordedRun, String>
         if frame_end > jend {
             return Err("recorded act frame is truncated".into());
         }
+        let kind = u16::from_le_bytes([bytes[off + 1], bytes[off + 2]]);
         if kind == KIND_RUN_ACT {
             let payload = std::str::from_utf8(&bytes[frame_header_end..payload_end])
                 .map_err(|_| "recorded act payload is not UTF-8".to_string())?;
@@ -1494,7 +1685,7 @@ fn parse_recorded_act_payload(
     if canonical_json_value(&value)? != payload {
         return Err("recorded act payload is not canonical JSON".into());
     }
-    let JSONValue::Object(root) = value else {
+    let DataTree::Object(root) = value else {
         return Err("recorded act payload must be an object".into());
     };
     require_object_keys(
@@ -1503,27 +1694,22 @@ fn parse_recorded_act_payload(
         &["function", "line", "locals"],
         &["function", "line", "locals"],
     )?;
-    let JSONValue::String(function) = root
-        .get("function")
-        .ok_or_else(|| "recorded act function is missing".to_string())?
-    else {
-        return Err("recorded act function must be a string".into());
-    };
+    let function = object_field(&root, "function")
+        .and_then(|value| value.as_str().ok())
+        .ok_or_else(|| "recorded act function must be a string".to_string())?;
     if function.is_empty() {
         return Err("recorded act function is empty".into());
     }
-    let JSONValue::Number(line) = root
-        .get("line")
-        .ok_or_else(|| "recorded act line is missing".to_string())?
-    else {
-        return Err("recorded act line must be an integer".into());
+    let line = match object_field(&root, "line") {
+        Some(DataTree::Int(line)) => {
+            usize::try_from(*line).map_err(|_| "recorded act line is invalid".to_string())?
+        }
+        _ => return Err("recorded act line must be an integer".into()),
     };
-    let line = usize::try_from(*line).map_err(|_| "recorded act line is invalid".to_string())?;
     if line == 0 {
         return Err("recorded act line must be at least 1".into());
     }
-    let JSONValue::Array(locals) = root
-        .get("locals")
+    let DataTree::Array(locals) = object_field(&root, "locals")
         .ok_or_else(|| "recorded act locals are missing".to_string())?
     else {
         return Err("recorded act locals must be an array".into());
@@ -1533,7 +1719,7 @@ fn parse_recorded_act_payload(
     }
     let mut snapshots = Vec::with_capacity(locals.len());
     for local in locals {
-        let JSONValue::Object(local) = local else {
+        let DataTree::Object(local) = local else {
             return Err("recorded act local must be an object".into());
         };
         require_object_keys(
@@ -1542,36 +1728,27 @@ fn parse_recorded_act_payload(
             &["name", "type", "value"],
             &["name", "type", "value"],
         )?;
-        let JSONValue::String(name) = local
-            .get("name")
-            .ok_or_else(|| "recorded act local name is missing".to_string())?
-        else {
-            return Err("recorded act local name must be a string".into());
-        };
-        let JSONValue::String(type_name) = local
-            .get("type")
-            .ok_or_else(|| "recorded act local type is missing".to_string())?
-        else {
-            return Err("recorded act local type must be a string".into());
-        };
-        let JSONValue::String(value) = local
-            .get("value")
-            .ok_or_else(|| "recorded act local value is missing".to_string())?
-        else {
-            return Err("recorded act local value must be a string".into());
-        };
+        let name = object_field(local, "name")
+            .and_then(|value| value.as_str().ok())
+            .ok_or_else(|| "recorded act local name must be a string".to_string())?;
+        let type_name = object_field(local, "type")
+            .and_then(|value| value.as_str().ok())
+            .ok_or_else(|| "recorded act local type must be a string".to_string())?;
+        let value = object_field(local, "value")
+            .and_then(|value| value.as_str().ok())
+            .ok_or_else(|| "recorded act local value must be a string".to_string())?;
         if name.is_empty() || type_name.is_empty() {
             return Err("recorded act local name and type must be non-empty".into());
         }
         snapshots.push(jet::Debug::ValueSnapshot {
-            name: name.clone(),
-            type_name: type_name.clone(),
-            value: value.clone(),
+            name: name.to_string(),
+            type_name: type_name.to_string(),
+            value: value.to_string(),
         });
     }
     Ok(jet::Debug::RecordedAct {
         sequence,
-        function: function.clone(),
+        function: function.to_string(),
         line,
         locals: snapshots,
     })
@@ -1579,21 +1756,17 @@ fn parse_recorded_act_payload(
 
 fn time_ms_from_payload(payload: &str) -> Result<i64, String> {
     let value = parse_json(payload).map_err(|_| "Time payload is not valid JSON".to_string())?;
-    let JSONValue::Object(root) = value else {
+    let DataTree::Object(root) = value else {
         return Err("Time payload must be an object".into());
     };
-    let JSONValue::Object(unix_ns) = root
-        .get("unix_ns")
+    let DataTree::Object(unix_ns) = object_field(&root, "unix_ns")
         .ok_or_else(|| "Time payload is missing unix_ns".to_string())?
     else {
         return Err("Time payload unix_ns must be an object".into());
     };
-    let JSONValue::String(value) = unix_ns
-        .get("v")
-        .ok_or_else(|| "Time payload unix_ns value is missing".to_string())?
-    else {
-        return Err("Time payload unix_ns value is invalid".into());
-    };
+    let value = object_field(unix_ns, "v")
+        .and_then(|value| value.as_str().ok())
+        .ok_or_else(|| "Time payload unix_ns value is invalid".to_string())?;
     let ns = parse_canonical_u64(value)?;
     i64::try_from(ns / 1_000_000)
         .map_err(|_| "Time value exceeds the signed millisecond range".into())
@@ -1604,23 +1777,27 @@ fn validate_time_payload(payload: &str) -> Result<(), String> {
     if canonical_json_value(&value)? != payload {
         return Err("Time payload is not canonical JSON".to_string());
     }
-    let JSONValue::Object(root) = value else {
+    let DataTree::Object(root) = value else {
         return Err("Time payload must be an object".into());
     };
-    for key in root.keys() {
+    for (key, _) in &root {
         if !["call_id", "site_id", "unix_ns"].contains(&key.as_str()) {
             return Err(format!("Time payload has unknown field `{key}`"));
         }
     }
-    if !matches!(root.get("call_id"), Some(JSONValue::Number(0))) {
+    if !matches!(object_field(&root, "call_id"), Some(DataTree::Int(0))) {
         return Err("Time payload call_id is invalid".into());
     }
-    if !matches!(root.get("site_id"), Some(JSONValue::String(site)) if site.len() == 64 && site.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()) && site.bytes().any(|byte| byte != b'0'))
-    {
+    if !matches!(
+        object_field(&root, "site_id").and_then(|value| value.as_str().ok()),
+        Some(site)
+            if site.len() == 64
+                && site.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+                && site.bytes().any(|byte| byte != b'0')
+    ) {
         return Err("Time payload site_id is invalid".into());
     }
-    let JSONValue::Object(unix_ns) = root
-        .get("unix_ns")
+    let DataTree::Object(unix_ns) = object_field(&root, "unix_ns")
         .ok_or_else(|| "Time payload is missing unix_ns".to_string())?
     else {
         return Err("Time payload unix_ns must be an object".into());
@@ -1631,17 +1808,17 @@ fn validate_time_payload(payload: &str) -> Result<(), String> {
         &["bits", "t", "v"],
         &["bits", "t", "v"],
     )?;
-    if !matches!(unix_ns.get("bits"), Some(JSONValue::Number(64)))
-        || !matches!(unix_ns.get("t"), Some(JSONValue::String(kind)) if kind == "int")
+    if !matches!(object_field(unix_ns, "bits"), Some(DataTree::Int(64)))
+        || !matches!(
+            object_field(unix_ns, "t").and_then(|value| value.as_str().ok()),
+            Some("int")
+        )
     {
         return Err("Time payload unix_ns type is invalid".into());
     }
-    let JSONValue::String(value) = unix_ns
-        .get("v")
-        .ok_or_else(|| "Time payload unix_ns value is missing".to_string())?
-    else {
-        return Err("Time payload unix_ns value is invalid".into());
-    };
+    let value = object_field(unix_ns, "v")
+        .and_then(|value| value.as_str().ok())
+        .ok_or_else(|| "Time payload unix_ns value is invalid".to_string())?;
     parse_canonical_u64(value).map_err(|_| "Time payload unix_ns value is invalid".to_string())?;
     Ok(())
 }
@@ -1694,30 +1871,46 @@ fn parse_canonical_u64(value: &str) -> Result<u64, String> {
     Ok(hexadecimal)
 }
 
-fn canonical_json_value(value: &JSONValue) -> Result<String, String> {
+fn object_field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+    object
+        .iter()
+        .find(|(name, _)| name == key)
+        .map(|(_, value)| value)
+}
+
+fn canonical_json_value(value: &DataTree) -> Result<String, String> {
     match value {
-        JSONValue::Null => Ok("null".to_string()),
-        JSONValue::Bool(value) => Ok(value.to_string()),
-        JSONValue::Number(value) => Ok(value.to_string()),
-        JSONValue::Flt(value) if value.is_finite() => Ok(value.to_string()),
-        JSONValue::Flt(_) => Err("JSON contains a non-finite number".into()),
-        JSONValue::String(value) => Ok(json_str(value)),
-        JSONValue::Array(values) => {
+        DataTree::Null => Ok("null".to_string()),
+        DataTree::Bool(value) => Ok(value.to_string()),
+        DataTree::Int(value) => Ok(value.to_string()),
+        DataTree::Float(value) if value.is_finite() => Ok(value.to_string()),
+        DataTree::Float(_) => Err("JSON contains a non-finite number".into()),
+        DataTree::Number(value) => Ok(value.clone()),
+        DataTree::TypedText(value) | DataTree::Text(value) => Ok(json_str(value)),
+        DataTree::Bytes(values) => Ok(format!(
+            "[{}]",
+            values
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        )),
+        DataTree::Array(values) => {
             let mut rendered = Vec::with_capacity(values.len());
             for value in values {
                 rendered.push(canonical_json_value(value)?);
             }
             Ok(format!("[{}]", rendered.join(",")))
         }
-        JSONValue::Object(object) => {
-            let mut keys = object.keys().collect::<Vec<_>>();
-            keys.sort();
-            let mut rendered = Vec::with_capacity(keys.len());
-            for key in keys {
+        DataTree::Object(object) => {
+            let mut entries = object.iter().collect::<Vec<_>>();
+            entries.sort_by(|left, right| left.0.cmp(&right.0));
+            let mut rendered = Vec::with_capacity(entries.len());
+            for (key, value) in entries {
                 rendered.push(format!(
                     "{}:{}",
                     json_str(key),
-                    canonical_json_value(&object[key])?
+                    canonical_json_value(value)?
                 ));
             }
             Ok(format!("{{{}}}", rendered.join(",")))
@@ -1726,19 +1919,76 @@ fn canonical_json_value(value: &JSONValue) -> Result<String, String> {
 }
 
 fn require_object_keys(
-    object: &std::collections::BTreeMap<String, JSONValue>,
+    object: &[(String, DataTree)],
     object_name: &str,
     required: &[&str],
     allowed: &[&str],
 ) -> Result<(), String> {
-    for key in object.keys() {
+    for (key, _) in object {
         if !allowed.contains(&key.as_str()) {
             return Err(format!("{object_name} has unknown field `{key}`"));
         }
     }
     for key in required {
-        if !object.contains_key(*key) {
+        if object_field(object, key).is_none() {
             return Err(format!("{object_name} is missing `{key}`"));
+        }
+    }
+    Ok(())
+}
+fn validate_mir_identity(value: &str) -> Result<(), String> {
+    let parsed = parse_json(value).map_err(|_| "mir_identity is not valid JSON".to_string())?;
+    if canonical_json_value(&parsed)? != value {
+        return Err("mir_identity is not canonical JSON".into());
+    }
+    let DataTree::Object(object) = parsed else {
+        return Err("mir_identity must be a JSON object".into());
+    };
+    require_object_keys(
+        &object,
+        "mir_identity",
+        &[
+            "core_ids",
+            "function_ids",
+            "identity_digest",
+            "optimized_hash",
+            "schema",
+            "semantic_hash",
+            "source_map",
+            "target_facts",
+        ],
+        &[
+            "core_ids",
+            "function_ids",
+            "identity_digest",
+            "optimized_hash",
+            "schema",
+            "semantic_hash",
+            "source_map",
+            "target_facts",
+        ],
+    )?;
+    for key in ["identity_digest", "optimized_hash", "semantic_hash"] {
+        let hash = object_field(&object, key)
+            .and_then(|value| value.as_str().ok())
+            .ok_or_else(|| format!("mir_identity `{key}` must be a string"))?;
+        if hash.len() != 64
+            || !hash
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        {
+            return Err(format!("mir_identity `{key}` is not lowercase SHA-256 hex"));
+        }
+    }
+    if !matches!(
+        object_field(&object, "schema").and_then(|value| value.as_str().ok()),
+        Some(schema) if schema == jet_foundation::MIR::MIR_IDENTITY_SCHEMA
+    ) {
+        return Err("mir_identity schema is unsupported".into());
+    }
+    for key in ["core_ids", "function_ids", "source_map", "target_facts"] {
+        if !matches!(object_field(&object, key), Some(DataTree::Array(_))) {
+            return Err(format!("mir_identity `{key}` must be an array"));
         }
     }
     Ok(())
@@ -1751,7 +2001,7 @@ fn flatten_identity_fields(
     if canonical_json_value(&parsed)? != header_text {
         return Err("header is not canonical JSON".into());
     }
-    let JSONValue::Object(root) = parsed else {
+    let DataTree::Object(root) = parsed else {
         return Err("header must be a JSON object".into());
     };
     require_object_keys(
@@ -1783,75 +2033,47 @@ fn flatten_identity_fields(
         ],
     )?;
     let mut out = std::collections::BTreeMap::new();
-    let string_field =
-        |object: &std::collections::BTreeMap<String, JSONValue>, key: &str| match object.get(key) {
-            Some(JSONValue::String(value)) => Ok(value.clone()),
-            Some(_) => Err(format!("header field `{key}` must be a string")),
-            None => Err(format!("header missing `{key}`")),
-        };
+    let string_field = |object: &[(String, DataTree)], key: &str| {
+        object_field(object, key)
+            .and_then(|value| value.as_str().ok())
+            .map(str::to_string)
+            .ok_or_else(|| format!("header field `{key}` must be a string"))
+    };
     for key in ["schema", "artifact_id"] {
         out.insert(key.to_string(), string_field(&root, key)?);
     }
-    let JSONValue::Object(identity) = root
-        .get("identity")
+    let DataTree::Object(identity) = object_field(&root, "identity")
         .ok_or_else(|| "header missing identity object".to_string())?
     else {
         return Err("header identity must be an object".into());
     };
-    require_object_keys(
-        identity,
-        "header identity",
-        &[
-            "abi",
-            "build_digest",
-            "core_abi",
-            "entry",
-            "execution_adapter",
-            "lock_digest",
-            "profile",
-            "source_digest",
-            "time_site_id",
-            "target_triple",
-            "tir_hash",
-            "tir_schema",
-        ],
-        &[
-            "abi",
-            "build_digest",
-            "core_abi",
-            "entry",
-            "execution_adapter",
-            "lock_digest",
-            "profile",
-            "source_digest",
-            "time_site_id",
-            "target_triple",
-            "tir_hash",
-            "tir_schema",
-        ],
-    )?;
-    for key in [
+    const IDENTITY_KEYS: &[&str] = &[
         "abi",
         "build_digest",
         "core_abi",
         "entry",
         "execution_adapter",
         "lock_digest",
+        "mir_schema",
+        "mir_identity",
+        "optimized_mir_hash",
         "profile",
+        "semantic_mir_hash",
         "source_digest",
         "time_site_id",
         "target_triple",
-        "tir_hash",
-        "tir_schema",
-    ] {
+    ];
+    require_object_keys(identity, "header identity", IDENTITY_KEYS, IDENTITY_KEYS)?;
+    for key in IDENTITY_KEYS {
         let _ = string_field(identity, key)?;
     }
     for key in [
         "build_digest",
         "lock_digest",
+        "optimized_mir_hash",
+        "semantic_mir_hash",
         "source_digest",
         "time_site_id",
-        "tir_hash",
     ] {
         let value = string_field(identity, key)?;
         if value.len() != 64
@@ -1881,15 +2103,20 @@ fn flatten_identity_fields(
         return Err("header identity entry is not project-relative".into());
     }
     let adapter = string_field(identity, "execution_adapter")?;
-    if !matches!(adapter.as_str(), "dev-tir-v1" | "aot-native-v1") {
+    if adapter != "mir-v1" {
         return Err(format!(
             "header execution adapter `{adapter}` is unsupported"
         ));
     }
-    for key in ["abi", "core_abi", "profile", "target_triple", "tir_schema"] {
+    let mir_identity = string_field(identity, "mir_identity")?;
+    validate_mir_identity(&mir_identity)?;
+    for key in ["abi", "core_abi", "mir_schema", "profile", "target_triple"] {
         if string_field(identity, key)?.is_empty() {
             return Err(format!("header identity field `{key}` is empty"));
         }
+    }
+    if string_field(identity, "mir_schema")? != jet_foundation::MIR::MIR_IDENTITY_SCHEMA {
+        return Err("header identity MIR schema is unsupported".into());
     }
     for key in [
         "entry",
@@ -1904,50 +2131,58 @@ fn flatten_identity_fields(
         "build_digest",
         "core_abi",
         "lock_digest",
+        "mir_schema",
+        "mir_identity",
+        "optimized_mir_hash",
         "profile",
+        "semantic_mir_hash",
         "time_site_id",
-        "tir_hash",
-        "tir_schema",
     ] {
         out.insert(key.to_string(), string_field(identity, key)?);
     }
-    let JSONValue::String(producer) = root
-        .get("producer")
-        .ok_or_else(|| "header missing producer".to_string())?
-    else {
-        return Err("header producer must be a string".into());
-    };
+    let producer = string_field(&root, "producer")?;
     if producer != "jet-prove" {
         return Err("header producer is not jet-prove".into());
     }
-    if !matches!(root.get("privacy_salt"), Some(JSONValue::String(salt)) if is_base64url_32(salt)) {
+    if !matches!(
+        object_field(&root, "privacy_salt").and_then(|value| value.as_str().ok()),
+        Some(salt) if is_base64url_32(salt)
+    ) {
         return Err("header privacy_salt is invalid".into());
     }
-    if !matches!(root.get("extensions"), Some(JSONValue::Object(_))) {
+    if !matches!(object_field(&root, "extensions"), Some(DataTree::Object(_))) {
         return Err("header extensions must be an object".into());
     }
-    let JSONValue::Object(capture) = root
-        .get("capture")
+    let DataTree::Object(capture) = object_field(&root, "capture")
         .ok_or_else(|| "header missing capture object".to_string())?
     else {
         return Err("header capture must be an object".into());
     };
-    if !matches!(capture.get("mode"), Some(JSONValue::String(mode)) if mode == "safe") {
-        return Err("header capture mode is not safe".into());
-    }
-    if !matches!(capture.get("roots"), Some(JSONValue::Array(roots)) if roots.len() == 1 && matches!(&roots[0], JSONValue::String(root) if root == "Time"))
-    {
-        return Err("header capture roots are not exactly [Time]".into());
-    }
     require_object_keys(
         capture,
         "header capture",
         &["mode", "roots"],
         &["mode", "roots"],
     )?;
-    let JSONValue::Object(limits) = root
-        .get("limits")
-        .ok_or_else(|| "header missing limits object".to_string())?
+    if !matches!(
+        object_field(capture, "mode").and_then(|value| value.as_str().ok()),
+        Some("safe")
+    ) {
+        return Err("header capture mode is not safe".into());
+    }
+    if !matches!(
+        object_field(capture, "roots"),
+        Some(DataTree::Array(roots))
+            if roots.len() == 1
+                && matches!(
+                    roots.first().and_then(|value| value.as_str().ok()),
+                    Some("Time")
+                )
+    ) {
+        return Err("header capture roots are not exactly [Time]".into());
+    }
+    let DataTree::Object(limits) =
+        object_field(&root, "limits").ok_or_else(|| "header missing limits object".to_string())?
     else {
         return Err("header limits must be an object".into());
     };
@@ -1957,17 +2192,16 @@ fn flatten_identity_fields(
         &["frames", "payload_bytes"],
         &["frames", "payload_bytes"],
     )?;
-    if !matches!(limits.get("frames"), Some(JSONValue::Number(100_000)))
+    if !matches!(object_field(limits, "frames"), Some(DataTree::Int(100_000)))
         || !matches!(
-            limits.get("payload_bytes"),
-            Some(JSONValue::Number(268_435_456))
+            object_field(limits, "payload_bytes"),
+            Some(DataTree::Int(268_435_456))
         )
     {
         return Err("header replay limits are invalid".into());
     }
-    let JSONValue::Object(run) = root
-        .get("run")
-        .ok_or_else(|| "header missing run object".to_string())?
+    let DataTree::Object(run) =
+        object_field(&root, "run").ok_or_else(|| "header missing run object".to_string())?
     else {
         return Err("header run must be an object".into());
     };
@@ -1977,26 +2211,22 @@ fn flatten_identity_fields(
         &["outcome", "status"],
         &["outcome", "status"],
     )?;
-    if !matches!(run.get("outcome"), Some(JSONValue::String(outcome)) if matches!(outcome.as_str(), "exit" | "panic"))
-        || !matches!(run.get("status"), Some(JSONValue::Number(status)) if (0..=255).contains(status))
-    {
-        return Err("header run fields are invalid".into());
+    let outcome = object_field(run, "outcome")
+        .and_then(|value| value.as_str().ok())
+        .ok_or_else(|| "header run outcome is invalid".to_string())?;
+    let status = match object_field(run, "status") {
+        Some(DataTree::Int(status)) if (0..=255).contains(status) => *status,
+        _ => return Err("header run status is invalid".into()),
+    };
+    if !matches!(outcome, "exit" | "panic") {
+        return Err("header run outcome is invalid".into());
     }
-    if let (Some(JSONValue::String(outcome)), Some(JSONValue::Number(status))) =
-        (run.get("outcome"), run.get("status"))
-    {
-        if (outcome == "panic") != (*status == 70) {
-            return Err("header run outcome and status disagree".into());
-        }
+    if (outcome == "panic") != (status == 70) {
+        return Err("header run outcome and status disagree".into());
     }
-    if let Some(JSONValue::String(outcome)) = run.get("outcome") {
-        out.insert("run_outcome".to_string(), outcome.clone());
-    }
-    if let Some(JSONValue::Number(status)) = run.get("status") {
-        out.insert("run_status".to_string(), status.to_string());
-    }
-    let JSONValue::Object(version) = root
-        .get("version")
+    out.insert("run_outcome".to_string(), outcome.to_string());
+    out.insert("run_status".to_string(), status.to_string());
+    let DataTree::Object(version) = object_field(&root, "version")
         .ok_or_else(|| "header missing version object".to_string())?
     else {
         return Err("header version must be an object".into());
@@ -2007,8 +2237,8 @@ fn flatten_identity_fields(
         &["major", "minor"],
         &["major", "minor"],
     )?;
-    if !matches!(version.get("major"), Some(JSONValue::Number(1)))
-        || !matches!(version.get("minor"), Some(JSONValue::Number(0)))
+    if !matches!(object_field(version, "major"), Some(DataTree::Int(1)))
+        || !matches!(object_field(version, "minor"), Some(DataTree::Int(0)))
     {
         return Err("header version is incompatible".into());
     }
@@ -2017,16 +2247,19 @@ fn flatten_identity_fields(
 
 fn zero_artifact_id_header(header_text: &str) -> Result<Vec<u8>, String> {
     let mut value = parse_json(header_text).map_err(|_| "header is not valid JSON".to_string())?;
-    let JSONValue::Object(root) = &mut value else {
+    let DataTree::Object(root) = &mut value else {
         return Err("header must be a JSON object".into());
     };
-    let Some(JSONValue::String(artifact_id)) = root.get("artifact_id") else {
+    let valid_length = object_field(root, "artifact_id")
+        .and_then(|value| value.as_str().ok())
+        .is_some_and(|artifact_id| artifact_id.len() == 24);
+    if !valid_length {
+        return Err("header artifact_id must be a string with the right length".into());
+    }
+    let Some((_, artifact_id)) = root.iter_mut().find(|(key, _)| key == "artifact_id") else {
         return Err("header artifact_id must be a string".into());
     };
-    if artifact_id.len() != 24 {
-        return Err("header artifact_id has the wrong length".into());
-    }
-    root.insert("artifact_id".into(), JSONValue::String("0".repeat(24)));
+    *artifact_id = DataTree::Text("0".repeat(24));
     Ok(canonical_json_value(&value)?.into_bytes())
 }
 
@@ -2071,11 +2304,13 @@ fn identity_matches(
         ("source_digest", identity.source_digest.as_str()),
         ("build_digest", identity.build_digest.as_str()),
         ("lock_digest", identity.lock_digest.as_str()),
-        ("tir_hash", identity.tir_hash.as_str()),
+        ("semantic_mir_hash", identity.semantic_mir_hash.as_str()),
+        ("optimized_mir_hash", identity.optimized_mir_hash.as_str()),
         ("abi", identity.abi.as_str()),
         ("core_abi", identity.core_abi.as_str()),
         ("profile", identity.profile.as_str()),
-        ("tir_schema", identity.tir_schema.as_str()),
+        ("mir_schema", identity.mir_schema.as_str()),
+        ("mir_identity", identity.mir_identity.as_str()),
         ("execution_adapter", identity.execution_adapter.as_str()),
         ("target_triple", identity.target_triple.as_str()),
         ("time_site_id", identity.time_site_id.as_str()),
@@ -2137,10 +2372,10 @@ fn base64url_unpadded(bytes: &[u8]) -> String {
 enum Json {
     Str(String),
     Int(i64),
+    Raw(String),
     Obj(Vec<(String, Json)>),
     Arr(Vec<Json>),
 }
-
 fn canonical_json(fields: &[(&str, Json)]) -> String {
     let mut pairs: Vec<(String, Json)> = fields
         .iter()
@@ -2154,6 +2389,7 @@ fn clone_json(v: &Json) -> Json {
     match v {
         Json::Str(s) => Json::Str(s.clone()),
         Json::Int(n) => Json::Int(*n),
+        Json::Raw(raw) => Json::Raw(raw.clone()),
         Json::Obj(fields) => Json::Obj(
             fields
                 .iter()
@@ -2182,6 +2418,7 @@ fn render_value(v: &Json) -> String {
     match v {
         Json::Str(s) => json_str(s),
         Json::Int(n) => n.to_string(),
+        Json::Raw(raw) => raw.clone(),
         Json::Obj(fields) => {
             let mut sorted: Vec<(String, Json)> = fields
                 .iter()
@@ -2230,6 +2467,16 @@ pub(crate) fn emit_diag(code: &str, what: &str, why: &str, fix: &str, json_mode:
         json_mode,
     );
 }
+pub(crate) fn emit_prove_diag(code: &str, what: &str, why: &str, fix: &str, json_mode: bool) {
+    crate::emit_cli_report_for_action(
+        "prove",
+        code,
+        what.to_string(),
+        why.to_string(),
+        fix.to_string(),
+        json_mode,
+    );
+}
 
 #[allow(dead_code)]
 pub(crate) fn fail_usage(message: &str) -> ! {
@@ -2246,15 +2493,17 @@ mod tests {
             entry: "examples/prove.jet".into(),
             source_digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                 .into(),
-            execution_adapter: "dev-tir-v1".into(),
+            execution_adapter: "mir-v1".into(),
             target_triple: "x86_64-unknown-linux-gnu".into(),
             abi: "gnu".into(),
             build_digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
             core_abi: "1".into(),
             lock_digest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
             profile: "dev".into(),
-            tir_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
-            tir_schema: "1".into(),
+            semantic_mir_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            optimized_mir_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            mir_schema: "mir-v1".into(),
+            mir_identity: "{\"core_ids\":[],\"function_ids\":[],\"identity_digest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"optimized_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"schema\":\"mir-v1\",\"semantic_hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"source_map\":[],\"target_facts\":[]}".into(),
             time_site_id: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
         }
     }
@@ -2283,6 +2532,7 @@ mod tests {
                     value: "0".into(),
                 }],
             }],
+            decision_ledger: None,
         };
         let bytes =
             build_safe_time_artifact_with_run(&identity(), 1_234_567_890, "exit", 0, Some(&run))

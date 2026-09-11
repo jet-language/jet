@@ -29,21 +29,43 @@ test('cli end-to-end: init → epoch → milestone → card → decision → nex
   run(cwd, ['card', 'update', '#1', '--work-order', '1', '--by', 'owner']);
 
   // decision via stdin-less file
-  const ballot = JSON.stringify({ cardId: '#1', id: 'D-CLI1', title: 'Choose',
-    ballotMode: 'full', reviewPasses: { base: 'The base pass completed the ballot.', boilOcean: 'The breadth review checked for missing choices.', hybrid: 'The hybrid pass combined compatible strengths.', cooperative: 'The cooperative pass strengthened every option.', beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.', adversarial: 'Author model family: family-a. Adversarial model family: family-b. The adversarial pass attacked the recommendation.' },
+  const ballot = JSON.stringify({
+    cardId: '#1', id: 'D-CLI1', title: 'Choose', ballotMode: 'full',
+    reviewPasses: {
+      beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.',
+      adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
+    },
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'A',
-    recommendation: { why: 'A wins here.', whyNot: [{ key: 'B', reason: 'B loses the needed behavior.' }], tradeoff: 'A adds one visible step.' },
+    recommendation: {
+      why: 'A wins here.', gains: ['Behavior stays visible'],
+      losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }],
+      whyNot: [{ key: 'B', reason: 'B loses the needed behavior.' }], tradeoff: 'A adds one visible step.',
+    },
     hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Keep it.' }, { key: 'B', aspect: 'B is brief.', use: 'Borrow its short names.' }] },
     options: [{ key: 'A', name: 'a', detail: 'A is explicit.', code: 'a()' }, { key: 'B', name: 'b', detail: 'B is brief.', code: 'b()' }],
-    surface: { gist: 'Which option should Jet ship?', lesson: 'Jet has no way to decide today. This ballot picks the approach.', trio: { current: { note: 'Jet today: nothing.', code: 'jet run x.jet\nError [E1001]' }, wild: { lang: 'Python', note: 'The common tool does X in one call.', code: 'x()' } }, options: [{ key: 'A', name: 'Option A', gist: 'Explicit call.', gains: ['Behavior stays visible'], losses: ['One more step'], proposed: { code: 'a()' } }, { key: 'B', name: 'Option B', gist: 'Short call.', gains: ['Shortest first script'], losses: ['Loses the needed guarantee'], proposed: { code: 'b()' } }], recommendation: { rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'], losses: ['One more step'], whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'B adds one explicit step.' } } });
+    surface: {
+      gist: 'Which option should Jet ship?', lesson: 'Jet has no way to decide today. This ballot picks the approach.',
+      trio: { current: { note: 'Jet today: nothing.', code: 'jet run x.jet\nError [E1001]' }, wild: { lang: 'Python', note: 'The common tool does X in one call.', code: 'x()' } },
+      options: [
+        { key: 'A', name: 'Option A', gist: 'Explicit call.', gains: ['Behavior stays visible'], losses: ['One more step'], proposed: { code: 'a()' } },
+        { key: 'B', name: 'Option B', gist: 'Short call.', gains: ['Shortest first script'], losses: ['Loses the needed guarantee'], proposed: { code: 'b()' } },
+      ],
+      recommendation: {
+        rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'],
+        losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }],
+        whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'B adds one explicit step.',
+      },
+    },
+  });
   const bp = join(cwd, 'ballot.json');
   writeFileSync(bp, ballot);
   run(cwd, ['decision', 'add', '--file', bp, '--by', 'tester']);
   const saved = JSON.parse(run(cwd, ['decision', 'show', 'D-CLI1', '--json']).out);
   assert.equal(saved.ballotMode, 'full');
-  assert.equal(saved.reviewPasses.adversarial, 'Author model family: family-a. Adversarial model family: family-b. The adversarial pass attacked the recommendation.');
+  assert.equal(saved.ballotProcessVersion, 4);
+  assert.equal(saved.reviewPasses.adversarial, 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.');
   const brief = run(cwd, ['brief', '#1', '--color=never']).out;
-  const ordered = ['base pass:', 'boil-the-ocean pass:', 'hybrid pass:', 'cooperative pass:', 'beginner pass:', 'adversarial pass:', 'rec:'];
+  const ordered = ['beginner pass:', 'adversarial pass:', 'rec:'];
   for (let i = 1; i < ordered.length; i++)
     assert.ok(brief.indexOf(ordered[i - 1]) < brief.indexOf(ordered[i]), `${ordered[i - 1]} must precede ${ordered[i]}`);
 
@@ -74,10 +96,27 @@ test('cli end-to-end: init → epoch → milestone → card → decision → nex
   run(cwd, ['milestone', 'criteria', m.id, '--add', 'milestone review', '--by', 'planner']);
   run(cwd, ['milestone', 'criteria', m.id, '--meet', '1', '--evidence', 'reviewed the card', '--by', 'builder']);
   run(cwd, ['milestone', 'criteria', m.id, '--verify', '1', '--evidence', 'checked independently', '--by', 'reviewer']);
+  run(cwd, ['milestone', 'closeout', m.id, '--commit', 'd'.repeat(40), '--by', 'orchestrator']);
   run(cwd, ['milestone', 'verify', m.id, '--evidence', 'owner reviewed the milestone', '--by', 'owner']);
   const verified = JSON.parse(run(cwd, ['milestone', 'list', '--json']).out);
   assert.equal(verified[0].status, 'met');
   assert.equal(verified[0].verification.by, 'owner');
+});
+test('decision scaffold captures probe and cited evidence without touching tower.json', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'tower-scaffold-'));
+  run(cwd, ['init', '--name', 'Scaffold Test']);
+  const evidence = join(cwd, 'evidence.txt');
+  writeFileSync(evidence, 'wild evidence from the cited tool\n');
+  run(cwd, ['card', 'add', '--track', 'sidequest', '--title', 'Scaffold this', '--probe', 'printf current-probe', '--refs', 'evidence.txt', '--by', 'tester']);
+  const towerFile = join(cwd, '.tower', 'tower.json');
+  const before = readFileSync(towerFile);
+  const draftFile = join(cwd, 'draft.json');
+  const draft = JSON.parse(run(cwd, ['decision', 'scaffold', '#1', '--id', 'D-SCAFF', '--out', draftFile, '--json']).out);
+  assert.equal(draft.id, 'D-SCAFF');
+  assert.equal(draft.surface.trio.current.code, 'current-probe');
+  assert.equal(draft.surface.trio.wild.code, 'wild evidence from the cited tool');
+  assert.deepEqual(Object.keys(draft.reviewPasses), ['beginner', 'adversarial']);
+  assert.deepEqual(readFileSync(towerFile), before);
 });
 
 test('cli without init fails with a helpful hint', () => {
@@ -290,15 +329,13 @@ test('secret final and crash-residue files stay ignored while public config rema
   assert.equal(tracked.includes(`.tower/${residueName}`), false);
 });
 
-test('cli refuses legacy secrets in tracked config with safe migration guidance', () => {
+test('cli refuses removed auth configuration without exposing secrets', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'tower-legacy-config-'));
   run(cwd, ['init', '--name', 'Legacy']);
   const marker = 'never-echo-this-value';
   writeFileSync(join(cwd, '.tower', 'config.json'), JSON.stringify({ project: 'Legacy', auth: { token: marker } }));
   const r = run(cwd, ['status'], false);
   assert.equal(r.code, 1);
-  assert.match(r.out, /rotate/);
-  assert.match(r.out, /\.tower\/secrets\.json/);
   assert.equal(r.out.includes(marker), false);
 });
 

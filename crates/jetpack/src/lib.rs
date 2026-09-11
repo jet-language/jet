@@ -7,7 +7,7 @@
 //! is a compatibility provider (D-JPK5).
 //!
 //! Built std-only (I6) and independent from the `jet` binary (D-JPK1). The
-//! consolidated plan lives in `docs/plans/epoch-5/README.md`.
+//! consolidated plan lives in `docs/spec/reference/metaprogramming.md`.
 
 #![allow(non_snake_case)]
 #![deny(warnings)]
@@ -27,7 +27,7 @@ pub use jet_pkg_model::ProviderFacts::{
 };
 pub use jet_pkg_model::{
     AdaBind, CBind, ComBind, CppBind, DartBind, DotNetBind, EffectBudget, Envelope, FortranBind,
-    JavaBind, JetLib, LintPolicy, Lock, Manifest, Package, PascalBind, Platform, PowerShellBind,
+    JavaBind, JetLib, LintPolicy, Lock, Manifest, Model, Package, PascalBind, Platform, PowerShellBind,
     RefSpec, ScriptDeps, TclBind, Variant, CFFI, FFI, JSON,
 };
 pub use jet_pkg_model::MCP;
@@ -36,6 +36,7 @@ pub use jet_pkg_model::MCP;
 // (L2). jetpack re-exports under the historical module paths via the thin
 // shims WorkspaceFile.rs and WorkspaceLock.rs in this crate.
 
+pub(crate) mod Batteries;
 pub mod Bridge;
 pub mod BrowserLock;
 pub mod BuildDebug;

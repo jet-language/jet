@@ -23,9 +23,7 @@ impl<'a> Checker<'a> {
             Some(Type::Result { ok, .. }) if matches!(ok.as_ref(), Type::Fn { .. })
         );
         let expected = match expected {
-            Some(Type::Result { ok, .. })
-                if matches!(ok.as_ref(), Type::Fn { .. }) =>
-            {
+            Some(Type::Result { ok, .. }) if matches!(ok.as_ref(), Type::Fn { .. }) => {
                 Some(ok.as_ref())
             }
             _ => expected,
@@ -73,7 +71,7 @@ impl<'a> Checker<'a> {
             }
         };
         if let Some(ty) = &lam.result_type {
-            self.check_declared_type(ty, lam.span);
+            self.check_declared_return_type(ty, lam.span);
         }
         if let Some(ty) = &lam.error_type {
             self.check_declared_type(ty, lam.span);
@@ -143,10 +141,18 @@ impl<'a> Checker<'a> {
             } else {
                 expected_error.cloned()
             };
-            // D-FAILURE-FOUNDATION1: a lambda that names only its success
-            // value follows the same implicit Error route as a named
-            // function. `!Never` remains the explicit no-failure opt-out.
-            let error = error.or_else(|| Some(Type::Named(Syntax::TYPE_ERR.to_string())));
+            // D-FAILURE-FOUNDATION1 / D-NEVER2: an ordinary explicit success
+            // row gets the implicit Err carrier, but `Never` is itself a
+            // complete no-success contract. Keep `!Never` as the separate
+            // failure-side no-failure opt-out.
+            let error = if matches!(
+                &result,
+                Type::Named(name) if name == Syntax::TYPE_NEVER
+            ) {
+                error
+            } else {
+                error.or_else(|| Some(Type::Named(Syntax::TYPE_ERR.to_string())))
+            };
             match error {
                 Some(error) => Some(Type::Result {
                     ok: Box::new(result),
@@ -164,6 +170,7 @@ impl<'a> Checker<'a> {
         // or must reject the widened callback type.
         let infer_failure_carrier = expected_callable
             && !expected_result_callable
+            && !exp_ret.is_some_and(|ret| is_unit_type(ret))
             && lam.result_type.is_none()
             && lam.error_type.is_none();
 
@@ -333,6 +340,23 @@ impl<'a> Checker<'a> {
                 let Some((cap_ty, cap_conv)) = cap else {
                     continue;
                 };
+                if self.http_handler_depth > 0 {
+                    if let Some(problem) = self.crossing_problem_for_name(
+                        name,
+                        &cap_ty,
+                        SendCrossing::HttpHandler,
+                        true,
+                    ) {
+                        self.report_unsendable(
+                            name,
+                            &cap_ty,
+                            problem,
+                            SendCrossing::HttpHandler,
+                            lam.span,
+                        );
+                        continue;
+                    }
+                }
                 if self.interrupt_callback_depth > 0 {
                     let problem = if matches!(&cap_ty, Type::Fn { .. }) {
                         let callback_safe = self
@@ -682,6 +706,8 @@ impl<'a> Checker<'a> {
             self.fx_edges.clone(),
             self.fx_maximal,
         );
+        self.lambda_effect_stack
+            .push(crate::Sema::Effects::LambdaEffectAccum::default());
         let saved_expected = self.expected_type.clone();
         self.expected_type = effective_ret.clone();
         // A block-bodied lambda's `return` belongs to the lambda, not to the
@@ -827,6 +853,19 @@ impl<'a> Checker<'a> {
                 }
             }
         };
+        // D-EFFECT-LAMBDA1: publish the direct facts gathered by this same
+        // authoritative body walk. Reachability replaces `effect_solved` in
+        // bundle completion; the direct seed is useful before that projection.
+        let lambda_effects = self
+            .lambda_effect_stack
+            .pop()
+            .expect("lambda effect accumulator must be active");
+        let direct = lambda_effects.direct;
+        lam.meta.effect_direct = direct.clone();
+        lam.meta.effect_solved = direct;
+        lam.meta.effect_call_edges = lambda_effects.edges;
+        lam.meta.effect_maximal = lambda_effects.maximal;
+        lam.meta.effect_direct_spans = lambda_effects.direct_spans.into_iter().collect();
         if collecting_loop {
             let item_ty = self.collect_item_types.pop().flatten();
             let item_ty = item_ty.unwrap_or_else(|| {
@@ -880,9 +919,7 @@ impl<'a> Checker<'a> {
         // `Fn() -> None` into the incompatible `Fn() -> Unit` signature.
         if infer_failure_carrier
             && exp_ret.is_none()
-            && body_ret
-                .as_ref()
-                .is_some_and(|ty| is_unit_type(ty))
+            && body_ret.as_ref().is_some_and(|ty| is_unit_type(ty))
         {
             body_ret = None;
         }
@@ -983,9 +1020,9 @@ impl<'a> Checker<'a> {
 
         let inferred_fallible_ret = if infer_failure_carrier {
             inferred_failure_carrier.as_ref().map(|carrier| {
-                let body = body_ret.clone().unwrap_or_else(|| {
-                    Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())
-                });
+                let body = body_ret
+                    .clone()
+                    .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()));
                 let ok = match body {
                     Type::Result { ok, .. } => *ok,
                     other => other,
@@ -995,9 +1032,9 @@ impl<'a> Checker<'a> {
                         ok: Box::new(ok),
                         err: err.clone(),
                     },
-                    _ => body_ret.clone().unwrap_or_else(|| {
-                        Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())
-                    }),
+                    _ => body_ret
+                        .clone()
+                        .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
                 }
             })
         } else {
@@ -1043,9 +1080,15 @@ impl<'a> Checker<'a> {
             Some(inferred.clone())
         } else if let Some(er) = &effective_ret {
             if let Some(br) = &body_ret {
-                if !lambda_body_matches_return(er, br) {
+                let resolved_call_is_fallible = self.lambda_body_call_fallibility(&lam.body);
+                if !lambda_body_matches_return(er, br)
+                    && resolved_call_is_fallible != Some(false)
+                {
                     let diagnostic = match br {
-                        Type::Result { err, .. } if !matches!(er, Type::Result { .. }) => {
+                        Type::Result { err, .. }
+                            if resolved_call_is_fallible == Some(true)
+                                && !matches!(er, Type::Result { .. }) =>
+                        {
                             Diagnostic::error(
                                 "E0403",
                                 "this fallible call only works inside a function that returns a fallible result"
@@ -1112,6 +1155,22 @@ impl<'a> Checker<'a> {
             call_metadata: exp_metadata.cloned(),
             return_view_provenance: lambda_return_view_provenance,
         })
+    }
+    fn lambda_body_call_fallibility(&self, body: &LambdaBody) -> Option<bool> {
+        let terminal = match body {
+            LambdaBody::Expr(expr) => expr.as_ref(),
+            LambdaBody::Block(stmts) => stmts.iter().rev().find_map(|stmt| match stmt {
+                Stmt::Return(Some(expr), _) | Stmt::Expr(expr) => Some(expr),
+                _ => None,
+            })?,
+        };
+        match terminal.without_parens() {
+            Expr::Call(call) => call.resolved_ret.as_ref().map(|ty| ty.is_fallible()),
+            Expr::MethodCall { resolved_ret, .. } => {
+                resolved_ret.as_ref().map(|ty| ty.is_fallible())
+            }
+            _ => None,
+        }
     }
 }
 
@@ -1273,6 +1332,7 @@ fn rewrite_collect_yields(stmts: &mut [Stmt], target: &str) {
                     }],
                     recv_type: None,
                     resolved_ret: Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
+                    operator_rhs: None,
                     checked_widen: false,
                 });
             }

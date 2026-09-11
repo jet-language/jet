@@ -1,0 +1,21 @@
+use core.game as game
+
+struct Position {
+    x: Int
+}
+
+fn write_position(position: &Position) {
+    position.x += 1
+}
+
+fn run() {
+    scene := game.Scene.new("resource-conflict")
+    positions := Position{x: 0}
+    scene.on_frame(frame -> {
+        write_position(&positions)
+    })
+    scene.on_frame(frame -> {
+        write_position(&positions)
+    })
+    game.run(scene)
+}

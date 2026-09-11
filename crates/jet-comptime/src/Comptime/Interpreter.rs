@@ -1,5 +1,5 @@
 //! Comptime/dev interpreter host: `Interp` state, fuel, `Flow`, `DevSink`.
-//! Expression/statement execution goes through TirBridge → TIR evaluator (#777).
+//! Expression/statement execution goes through MirBridge → MIR evaluator (#777).
 //! Residual `Methods/` helpers (`call_func`/`call_closure`) support specialized
 //! host surfaces (typed decode, data pipeline) that still invoke named funcs.
 
@@ -167,6 +167,9 @@ pub(super) struct Interp<'a> {
     /// `Some` in whole-program dev mode (E2-M4): `print`/`eprint` write here
     /// instead of being rejected. `None` in pure comptime mode (M9.5).
     pub(super) sink: Option<&'a mut DevSink>,
+    /// Checked nominal identities and imported struct rows for canonical
+    /// comptime fragments. `None` is used outside an active module scope.
+    pub(super) checked_nominals: Option<super::MirBridge::MirFragmentNominalFacts>,
     /// D-META-EFFECT1: module alias → Core module path (e.g. `"math"` → `"core.math"`).
     /// Enables the comptime interpreter to evaluate effect-approved Core calls.
     /// Empty for contexts that have no `use` declarations (e.g. module-level consts).
@@ -175,6 +178,9 @@ pub(super) struct Interp<'a> {
     /// notified before every statement. `None` for every non-debug path
     /// (comptime, `jet dev`, `jet repl`), so those keep their exact behavior.
     pub(super) debugger: Option<&'a mut dyn DebugHook>,
+    /// Explicit execution provenance for canonical MIR fragments. Runtime
+    /// producers set this independently of comptime `#Impure` gate depth.
+    pub(super) runtime_execution: bool,
     /// D-DBG3: user-function call depth (0 = `main`/top level), threaded so the
     /// debugger can implement `next` (step over a call) and `finish` (run to the
     /// caller). Incremented around a user-function body in `eval_call`.
@@ -253,6 +259,7 @@ pub(super) struct Interp<'a> {
     /// zero-cost identity codegen's trait default gives every other type.
     pub(super) migrations: &'a HashMap<String, Vec<&'a crate::AST::MigrationDecl>>,
     pub(super) list_write_windows: HashMap<String, (String, i64)>,
+    pub(super) data_pipeline: super::DataPipeline::DataPipelineState,
 }
 
 pub(super) fn coerce_value_to_type(value: CtValue, ty: &Type) -> CtValue {
@@ -386,14 +393,16 @@ impl<'a> Interp<'a> {
         let core_imports = self.core_imports;
         let structs = self.structs;
         let sink = self.sink.as_deref_mut();
-        let repl_grants = &self.repl_grants;
+        let checked_nominals = self.checked_nominals.clone();
         let repl_authorizer = reborrow_repl_authorizer(&mut self.repl_authorizer);
         let embed_inputs = Some(&mut self.embed_inputs);
-        let mut req = super::TirBridge::BlockEvalRequest {
+        let mut req = super::MirBridge::BlockEvalRequest {
+            data_pipeline: &mut self.data_pipeline,
             stmts,
             funcs,
             binding_types: &self.binding_types,
             error_conversions,
+            method_traits: super::empty_method_traits(),
             methods: self.methods,
             extern_names: &extern_names,
             base_dir,
@@ -406,24 +415,25 @@ impl<'a> Interp<'a> {
             unit_families: &[],
             fuel,
             sink,
+            checked_nominals,
             repl_mode,
-            repl_grants,
             repl_authorizer,
             gates,
             impure_depth,
+            runtime_execution: self.runtime_execution,
             embed_inputs,
             debugger: self.debugger.take(),
             debug_function: self.cur_func.clone(),
             debug_depth: self.depth,
         };
-        let result = super::TirBridge::eval_block(&mut req);
+        let result = super::MirBridge::eval_block(&mut req);
         self.debugger = req.debugger;
         match result? {
-            super::TirBridge::StmtOutcome::Done(new_scope) => {
+            super::MirBridge::StmtOutcome::Done(new_scope) => {
                 *scope = new_scope;
                 Ok(Flow::Normal)
             }
-            super::TirBridge::StmtOutcome::Returned {
+            super::MirBridge::StmtOutcome::Returned {
                 value,
                 scope: new_scope,
             } => {
@@ -599,11 +609,13 @@ impl<'a> Interp<'a> {
         let repl_authorizer = reborrow_repl_authorizer(&mut self.repl_authorizer);
         let embed_inputs = Some(&mut self.embed_inputs);
         let mut mutated = HashMap::new();
-        let mut req = super::TirBridge::ExprEvalRequest {
+        let mut req = super::MirBridge::ExprEvalRequest {
+            data_pipeline: &mut self.data_pipeline,
             expr: e,
             funcs,
             binding_types: &self.binding_types,
             error_conversions,
+            method_traits: super::empty_method_traits(),
             methods: self.methods,
             extern_names: &extern_names,
             base_dir,
@@ -611,6 +623,7 @@ impl<'a> Interp<'a> {
             core_imports,
             gates,
             initial_impure_depth: impure_depth,
+            runtime_execution: self.runtime_execution,
             structs,
             computed_fields: self.computed_fields,
             distinct_ranges: self.distinct_ranges,
@@ -618,13 +631,14 @@ impl<'a> Interp<'a> {
             unit_families: &[],
             fuel,
             sink,
+            checked_nominals: self.checked_nominals.clone(),
             repl_mode,
             repl_grants,
             repl_authorizer,
             embed_inputs,
             mutated: Some(&mut mutated),
         };
-        let result = super::TirBridge::eval_expr(&mut req);
+        let result = super::MirBridge::eval_expr(&mut req);
         drop(req);
         // Keep whatever the expression changed about bindings this scope owns.
         // Anything else in `mutated` came from `globals` and is not ours.

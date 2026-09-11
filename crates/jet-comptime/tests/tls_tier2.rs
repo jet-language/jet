@@ -18,6 +18,7 @@ fn tls_call_diag(impure_depth: usize, gates: jet_foundation::Policy::GateSet) ->
         args: Vec::new(),
         recv_type: None,
         resolved_ret: None,
+        operator_rhs: None,
         checked_widen: false,
     };
     let funcs = HashMap::new();
@@ -123,6 +124,7 @@ fn core_tls_repl_requests_use_the_net_effect() {
         args: Vec::new(),
         recv_type: None,
         resolved_ret: None,
+        operator_rhs: None,
         checked_widen: false,
     };
     let stmts = vec![Stmt::AuthorityScope {

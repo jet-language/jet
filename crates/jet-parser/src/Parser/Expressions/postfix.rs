@@ -169,6 +169,9 @@ impl<'a> Parser<'a> {
                                     break;
                                 }
                                 self.expect(TokKind::Comma, "between arguments")?;
+                                if matches!(self.peek().kind, TokKind::RParen) {
+                                    break;
+                                }
                             }
                         }
                         self.expect(TokKind::RParen, "to finish the call")?;
@@ -188,6 +191,7 @@ impl<'a> Parser<'a> {
                             args,
                             recv_type: None,
                             resolved_ret: None,
+                            operator_rhs: None,
                             checked_widen: false,
                         };
                     } else {
@@ -272,6 +276,9 @@ impl<'a> Parser<'a> {
                                 break;
                             }
                             self.expect(TokKind::Comma, "between arguments")?;
+                            if matches!(self.peek().kind, TokKind::RParen) {
+                                break;
+                            }
                         }
                     }
                     self.expect(TokKind::RParen, "to finish the call")?;
@@ -314,37 +321,35 @@ impl<'a> Parser<'a> {
                     } else if allow_struct_lit
                         && matches!(
                             expr,
-                            Expr::Ident(..)
-                                | Expr::Call(_)
+                            Expr::Call(_)
                                 | Expr::MethodCall { .. }
                                 | Expr::CallValue { .. }
                         )
                     {
-                        // D-TRAILBLOCK2=A: trailing `{ }` after a call is retired.
-                        // Pass code as an ordinary `() -> { … }` argument inside the
-                        // parentheses (multiline bodies and multiple code args allowed).
-                        let bad_span = self.peek().span;
-                        let fix = match &expr {
-                                Expr::Ident(name, _) => format!(
-                                    "write `{name}(() -> {{ … }})` — a multiline code argument uses `() -> {{ … }}` inside the call"
-                                ),
-                                Expr::Call(c) => format!(
-                                    "write `{}(…, () -> {{ … }})` — put the block inside the parentheses as `() -> {{ … }}`",
-                                    c.name
-                                ),
-                                Expr::MethodCall { method, .. } => format!(
-                                    "write `….{method}(…, () -> {{ … }})` — put the block inside the parentheses as `() -> {{ … }}`"
-                                ),
-                                _ => "write `callee(…, () -> { … })` — put the block inside the parentheses as `() -> { … }`".to_string(),
-                            };
-                        return Err(Diagnostic::error(
-                                "E0335",
-                                "trailing blocks are gone — pass code with `() ->`".to_string(),
-                                "a bare `{ }` after a call used to fill one last zero-parameter function argument; that sugar is retired (D-TRAILBLOCK2)"
-                                    .to_string(),
-                                fix,
-                                Some(bad_span),
-                            ));
+                        // D-UI-CLOSURE1=A: a call may carry one trailing
+                        // block closure. Keep it as a typed lambda argument;
+                        // sema assigns the Core parameter label after it has
+                        // resolved the call.
+                        let lambda = self.parse_trailing_lambda()?;
+                        let span = lambda.span;
+                        let arg = CallArg {
+                            convention: AccessConvention::Read,
+                            expr: Expr::Lambda(Box::new(lambda)),
+                            span,
+                            flags: crate::AST::CallArgFlags {
+                                is_trailing_block: true,
+                                ..Default::default()
+                            },
+                            label: None,
+                            spread: false,
+                        };
+                        match &mut expr {
+                            Expr::Call(call) => call.args.push(arg),
+                            Expr::MethodCall { args, .. } => args.push(arg),
+                            Expr::CallValue { args, .. } => args.push(arg),
+                            _ => unreachable!("trailing block matched a non-call"),
+                        }
+                        continue;
                     } else if allow_struct_lit
                         && matches!(
                             expr,
@@ -353,14 +358,14 @@ impl<'a> Parser<'a> {
                     {
                         let bad_span = self.peek().span;
                         return Err(Diagnostic::error(
-                                "E0335",
-                                "trailing blocks are gone — pass code with `() ->`".to_string(),
-                                "a bare `{ }` here is not a call argument; code arguments use `() -> { … }` inside a call's parentheses (D-TRAILBLOCK2)"
-                                    .to_string(),
-                                "write `callee(() -> { … })` on a call — this expression is not a call"
-                                    .to_string(),
-                                Some(bad_span),
-                            ));
+                            "E0335",
+                            "trailing blocks are only valid on direct calls"
+                                .to_string(),
+                            "a bare `{ }` here is not a call argument; code arguments use `() -> { … }` inside a call's parentheses"
+                                .to_string(),
+                            "write `callee(() -> { … })` on a call".to_string(),
+                            Some(bad_span),
+                        ));
                     } else {
                         break;
                     }

@@ -2,7 +2,6 @@
 // function results and retained computed-field results. Function entries use
 // an argument key and the ratified bound; field entries use one reserved slot.
 // Engines only marshal keys, results, bounds, and invalidation calls here.
-use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::Mutex as JetMemoMutex;
 
@@ -186,8 +185,8 @@ impl<K: Clone, V: Clone> Clone for JetMemo<K, V> {
     }
 }
 
-impl<K, V> fmt::Debug for JetMemo<K, V> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl<K, V> std::fmt::Debug for JetMemo<K, V> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str("<memo>")
     }
 }

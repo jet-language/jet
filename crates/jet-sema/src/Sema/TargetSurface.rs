@@ -24,6 +24,16 @@ const WASIP2_UNSUPPORTED_SURFACES: &[&str] = &[
 /// the selected target has no socket runtime that the Prelude can use.
 pub fn check_target_surface(bundle: &ProgramBundle, target: &str) -> Vec<Diagnostic> {
     let socket_target = socket_target_supported(target);
+    let web_target =
+        target == Syntax::BUILD_TARGET_WEB || bundle.web_partition_enforced;
+    // D-PLUGIN-AUTHORITY1: the browser web backend cannot host the native
+    // Wasmtime Component Model boundary. Reachability comes from sema's
+    // canonical Core-use set, not from an unused import.
+    let plugin_reachable = web_target
+        && bundle
+            .used_core
+            .iter()
+            .any(|usage| usage == "core.plugin" || usage.starts_with("core.plugin::"));
     let wasip2 = target == Syntax::BUILD_TARGET_WASI_SERVER;
     let wasip2_unsupported_surfaces = if wasip2 {
         wasip2_unsupported_surfaces(bundle)
@@ -35,12 +45,56 @@ pub fn check_target_surface(bundle: &ProgramBundle, target: &str) -> Vec<Diagnos
     } else {
         BTreeSet::new()
     };
-    if socket_target && wasip2_unsupported.is_empty() && wasip2_unsupported_surfaces.is_empty() {
+    if socket_target
+        && wasip2_unsupported.is_empty()
+        && wasip2_unsupported_surfaces.is_empty()
+        && !plugin_reachable
+    {
         return Vec::new();
     }
 
     let mut seen = BTreeSet::<(String, usize, usize, String)>::new();
     let mut diagnostics = Vec::new();
+    if plugin_reachable {
+        let mut anchored = false;
+        for module in &bundle.modules {
+            for (_, import) in walk_imports(module) {
+                for binding in import.walk_bindings() {
+                    let module_path = binding.path();
+                    if module_path != "core.plugin"
+                        && !module_path.starts_with("core.plugin.")
+                    {
+                        continue;
+                    }
+                    anchored = true;
+                    let span = binding.items_span.unwrap_or(binding.module_alias_span);
+                    let key = (
+                        module.display.clone(),
+                        span.start,
+                        span.end,
+                        "E3306".to_string(),
+                    );
+                    if seen.insert(key) {
+                        diagnostics.push(Diagnostic::from_row(
+                            "E3306",
+                            &[("module", "core.plugin"), ("target", target)],
+                            Some(span),
+                        ));
+                    }
+                }
+            }
+        }
+        // A generated or re-exported Core use may have no source import in
+        // this bundle; still issue the target verdict rather than allowing a
+        // browser backend to reach codegen without a host boundary.
+        if !anchored {
+            diagnostics.push(Diagnostic::from_row(
+                "E3306",
+                &[("module", "core.plugin"), ("target", target)],
+                None,
+            ));
+        }
+    }
     for module in &bundle.modules {
         for (_, import) in walk_imports(module) {
             for binding in import.walk_bindings() {

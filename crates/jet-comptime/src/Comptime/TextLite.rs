@@ -135,8 +135,11 @@ mod text_kernel {
             pub is_dir: bool,
             pub depth: i64,
         }
+
+        include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/MappedFile.rs");
     }
 
+    include!("../../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs");
@@ -145,15 +148,30 @@ mod text_kernel {
     include!("../../../jet-codegen/src/Prelude/Core/UnicodeString.rs");
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
-    // TextLite is a compile-time adapter. Runtime fault state is supplied by
-    // the generated Prelude and the JIT include context.
+    pub(crate) struct JetFileReader {
+        pub(crate) inner: std::io::BufReader<std::fs::File>,
+        pub(crate) path: String,
+    }
+    pub(crate) struct JetFileWriter {
+        pub(crate) inner: std::io::BufWriter<std::fs::File>,
+        pub(crate) path: String,
+    }
+
+    // TextLite keeps the same runtime Authority/FileScope carrier as AOT; only
+    // the CtValue adapter differs at this boundary.
+    mod authority_semantics {
+        include!("../../../jet-codegen/src/Prelude/Core/Authority.rs");
+    }
+    use authority_semantics::{JetAuthority, JetFileScope};
     fn jet_fault_should_fail(_operation: &str) -> bool {
         false
     }
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Text.rs");
+    include!("../../../jet-codegen/src/Prelude/Core/FSIgnore.rs");
     include!("../../../jet-codegen/src/Prelude/Core/FSWalk.rs");
     include!("../../../jet-codegen/src/Prelude/Core/FSOps.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/FSRuntimeOps.rs");
+    include!("../../../jet-codegen/src/Prelude/CoreLib/Top/FileStream.rs");
 
     pub(super) fn nfd(s: &str) -> String {
         jet_text_nfd(&s.to_string())
@@ -247,7 +265,7 @@ mod text_kernel {
         jet_text_remove_suffix(&s.to_string(), &suffix.to_string())
     }
     pub(super) fn compare(a: &str, b: &str) -> i64 {
-        jet_text_compare(&a.to_string(), &b.to_string())
+        jet_text_compare(a, b)
     }
     pub(super) fn reverse(s: &str) -> String {
         jet_text_reverse(&s.to_string())
@@ -318,6 +336,14 @@ mod text_kernel {
     pub(super) fn fs_read(path: &str) -> Result<String, jet_std::IOError> {
         jet_std_fs_read(&path.to_string())
     }
+    pub(super) fn fs_scope_read(
+        rights: &std::collections::BTreeSet<String>,
+        path: &str,
+    ) -> Result<String, jet_std::IOError> {
+        let authority = JetAuthority::from_rights(rights.iter().cloned().collect());
+        let scope = jet_std_fs_scope(&authority);
+        jet_std_fs_scope_read(&scope, &path.to_string())
+    }
     pub(super) fn fs_read_bytes(path: &str) -> Result<Vec<u8>, jet_std::IOError> {
         jet_std_fs_read_bytes(&path.to_string())
     }
@@ -360,9 +386,16 @@ mod text_kernel {
     pub(super) fn fs_walk_parallel(
         path: &str,
     ) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
-        let mut entries = jet_fs_walk_parallel(
+        fs_walk_parallel_with_ignore(path, None)
+    }
+    pub(super) fn fs_walk_parallel_with_ignore(
+        path: &str,
+        ignore_name: Option<&str>,
+    ) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
+        let mut entries = jet_fs_walk_parallel_with_ignore(
             path,
             path,
+            ignore_name,
             |path, relative, is_dir, depth| jet_std::WalkEntry {
                 path,
                 relative,
@@ -377,9 +410,16 @@ mod text_kernel {
     pub(super) fn fs_walk_files_parallel(
         path: &str,
     ) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
-        let mut entries = jet_fs_walk_files_parallel(
+        fs_walk_files_parallel_with_ignore(path, None)
+    }
+    pub(super) fn fs_walk_files_parallel_with_ignore(
+        path: &str,
+        ignore_name: Option<&str>,
+    ) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
+        let mut entries = jet_fs_walk_files_parallel_with_ignore(
             path,
             path,
+            ignore_name,
             |path, relative, is_dir, depth| jet_std::WalkEntry {
                 path,
                 relative,
@@ -466,6 +506,7 @@ fn io_error_ct(error: text_kernel::jet_std::IOError) -> crate::AST::CtValue {
         text_kernel::jet_std::IOError::TimedOut(context) => ("TimedOut", context),
         text_kernel::jet_std::IOError::Cancelled(context) => ("Cancelled", context),
         text_kernel::jet_std::IOError::Closed(context) => ("Closed", context),
+
         text_kernel::jet_std::IOError::Protocol(context) => ("Protocol", context),
         text_kernel::jet_std::IOError::Other(context) => ("Other", context),
     };
@@ -475,7 +516,241 @@ fn io_error_ct(error: text_kernel::jet_std::IOError) -> crate::AST::CtValue {
         args: vec![(None, context_value(context))],
     }
 }
+struct FileReaderHandle(
+    std::sync::Arc<std::sync::Mutex<Option<text_kernel::JetFileReader>>>,
+);
+struct FileWriterHandle(
+    std::sync::Arc<std::sync::Mutex<Option<text_kernel::JetFileWriter>>>,
+);
 
+fn opaque_file<T: std::any::Any + Send + Sync>(value: T) -> crate::AST::CtValue {
+    crate::AST::CtValue::Closure(std::sync::Arc::new(crate::AST::ClosureData {
+        lambda: crate::AST::Lambda {
+            take_names: Vec::new(),
+            params: Vec::new(),
+            result_type: None,
+            error_type: None,
+            effects: None,
+            body: crate::AST::LambdaBody::Block(Vec::new()),
+            span: crate::Diagnostics::Span::new(0, 0),
+            meta: crate::AST::LambdaMeta::default(),
+        },
+        captured: std::collections::HashMap::new(),
+        return_type: None,
+        opaque: Some(crate::AST::CtOpaque::new(value)),
+    }))
+}
+
+fn file_reader_handle(
+    value: &crate::AST::CtValue,
+) -> Option<&FileReaderHandle> {
+    let crate::AST::CtValue::Closure(data) = value else {
+        return None;
+    };
+    data.opaque
+        .as_ref()
+        .and_then(|opaque| opaque.downcast_ref::<FileReaderHandle>())
+}
+
+fn file_writer_handle(
+    value: &crate::AST::CtValue,
+) -> Option<&FileWriterHandle> {
+    let crate::AST::CtValue::Closure(data) = value else {
+        return None;
+    };
+    data.opaque
+        .as_ref()
+        .and_then(|opaque| opaque.downcast_ref::<FileWriterHandle>())
+}
+
+fn closed_file_error(operation: text_kernel::jet_std::IOOperation, message: &str) -> crate::AST::CtValue {
+    io_error_ct(text_kernel::jet_std::IOError::Closed(
+        text_kernel::jet_std::IOContext::new(
+            operation,
+            None,
+            None,
+            Some(message.to_string()),
+        ),
+    ))
+}
+
+fn reader_line(
+    handle: &FileReaderHandle,
+) -> Result<Option<String>, crate::AST::CtValue> {
+    let mut reader = handle.0.lock().map_err(|_| {
+        io_error_ct(text_kernel::jet_std::IOError::other(
+            text_kernel::jet_std::IOOperation::Read,
+            None,
+            "file reader handle is poisoned",
+        ))
+    })?;
+    let reader = reader
+        .as_mut()
+        .ok_or_else(|| {
+            closed_file_error(
+                text_kernel::jet_std::IOOperation::Read,
+                "file reader is closed",
+            )
+        })?;
+    text_kernel::jet_std_file_reader_read_line(reader).map_err(io_error_ct)
+}
+
+fn writer_line(
+    handle: &FileWriterHandle,
+    line: &str,
+) -> Result<(), crate::AST::CtValue> {
+    let mut writer = handle.0.lock().map_err(|_| {
+        io_error_ct(text_kernel::jet_std::IOError::other(
+            text_kernel::jet_std::IOOperation::Write,
+            None,
+            "file writer handle is poisoned",
+        ))
+    })?;
+    let writer = writer
+        .as_mut()
+        .ok_or_else(|| {
+            closed_file_error(
+                text_kernel::jet_std::IOOperation::Write,
+                "file writer is closed",
+            )
+        })?;
+    text_kernel::jet_std_file_writer_write_line(writer, &line.to_string()).map_err(io_error_ct)
+}
+
+fn writer_flush(handle: &FileWriterHandle) -> Result<(), crate::AST::CtValue> {
+    let mut writer = handle.0.lock().map_err(|_| {
+        io_error_ct(text_kernel::jet_std::IOError::other(
+            text_kernel::jet_std::IOOperation::Write,
+            None,
+            "file writer handle is poisoned",
+        ))
+    })?;
+    let writer = writer
+        .as_mut()
+        .ok_or_else(|| {
+            closed_file_error(
+                text_kernel::jet_std::IOOperation::Write,
+                "file writer is closed",
+            )
+        })?;
+    text_kernel::jet_std_file_writer_flush(writer).map_err(io_error_ct)
+}
+
+fn reader_line_value(handle: &FileReaderHandle) -> crate::AST::CtValue {
+    match reader_line(handle) {
+        Ok(Some(line)) => crate::AST::CtValue::Present(Box::new(crate::AST::CtValue::Str(line))),
+        Ok(None) => crate::AST::CtValue::absent(crate::AST::Type::String),
+        Err(error) => crate::AST::CtValue::failed(Box::new(error)),
+    }
+}
+
+fn writer_result(result: Result<(), crate::AST::CtValue>) -> crate::AST::CtValue {
+    match result {
+        Ok(()) => crate::AST::CtValue::Present(Box::new(crate::AST::CtValue::Unit)),
+        Err(error) => crate::AST::CtValue::failed(Box::new(error)),
+    }
+}
+
+pub(crate) fn fs_open(path: &str) -> FsResult<crate::AST::CtValue> {
+    text_kernel::jet_std_files_open(&path.to_string())
+        .map(|reader| {
+            opaque_file(FileReaderHandle(std::sync::Arc::new(
+                std::sync::Mutex::new(Some(reader)),
+            )))
+        })
+        .map_err(io_error_ct)
+}
+
+pub(crate) fn fs_create(path: &str) -> FsResult<crate::AST::CtValue> {
+    text_kernel::jet_std_files_create(&path.to_string())
+        .map(|writer| {
+            opaque_file(FileWriterHandle(std::sync::Arc::new(
+                std::sync::Mutex::new(Some(writer)),
+            )))
+        })
+        .map_err(io_error_ct)
+}
+
+pub(crate) fn fs_append_stream(path: &str) -> FsResult<crate::AST::CtValue> {
+    text_kernel::jet_std_files_append(&path.to_string())
+        .map(|writer| {
+            opaque_file(FileWriterHandle(std::sync::Arc::new(
+                std::sync::Mutex::new(Some(writer)),
+            )))
+        })
+        .map_err(io_error_ct)
+}
+
+pub fn file_reader_next_line(
+    receiver: &crate::AST::CtValue,
+) -> Result<Option<String>, String> {
+    let handle = file_reader_handle(receiver)
+        .ok_or_else(|| "value is not a FileReader handle".to_string())?;
+    reader_line(handle).map_err(|error| error.jet_show())
+}
+
+pub(crate) fn apply_file_handle(
+    receiver: &crate::AST::CtValue,
+    method: &str,
+    args: &[crate::AST::CtValue],
+    span: crate::Diagnostics::Span,
+) -> Option<Result<crate::AST::CtValue, crate::Diagnostics::Diagnostic>> {
+    if let Some(handle) = file_reader_handle(receiver) {
+        return Some(match method {
+            "file_reader.read_line" | "read_line" if args.is_empty() => {
+                Ok(reader_line_value(handle))
+            }
+            "file_reader.read_line" | "read_line" => Err(
+                crate::Comptime::Diagnostics::unsupported(
+                    "FileReader.read_line expects no arguments",
+                    span,
+                ),
+            ),
+            _ => Err(crate::Comptime::Diagnostics::unsupported(
+                &format!("FileReader.{method}"),
+                span,
+            )),
+        });
+    }
+    if let Some(handle) = file_writer_handle(receiver) {
+        return Some(match method {
+            "file_writer.write_line" | "write_line" => {
+                let [line] = args else {
+                    return Some(Err(crate::Comptime::Diagnostics::unsupported(
+                        "FileWriter.write_line expects one String argument",
+                        span,
+                    )));
+                };
+                let crate::AST::CtValue::Str(line) = line else {
+                    return Some(Err(crate::Comptime::Diagnostics::unsupported(
+                        "FileWriter.write_line expects one String argument",
+                        span,
+                    )));
+                };
+                Ok(writer_result(writer_line(handle, line)))
+            }
+            "file_writer.flush" | "flush" if args.is_empty() => {
+                Ok(writer_result(writer_flush(handle)))
+            }
+            "file_writer.flush" | "flush" => Err(crate::Comptime::Diagnostics::unsupported(
+                "FileWriter.flush expects no arguments",
+                span,
+            )),
+            _ => Err(crate::Comptime::Diagnostics::unsupported(
+                &format!("FileWriter.{method}"),
+                span,
+            )),
+        });
+    }
+    None
+}
+
+pub(super) fn fs_scope_read(
+    rights: &std::collections::BTreeSet<String>,
+    path: &str,
+) -> FsResult<String> {
+    text_kernel::fs_scope_read(rights, path).map_err(io_error_ct)
+}
 // ── D-I9 `core.files`: one arm per Prelude symbol, no second spelling ──────
 // Every helper below is pure marshalling: it hands the resolved path to the
 // `jet_std_fs_*` symbol AOT emits and projects that symbol's `IOError` with
@@ -494,6 +769,9 @@ pub(super) fn fs_write(path: &str, text: &str) -> FsResult<()> {
 }
 pub(super) fn fs_append(path: &str, text: &str) -> FsResult<()> {
     text_kernel::fs_append(path, text).map_err(io_error_ct)
+}
+pub(super) fn fs_fsync(path: &str) -> FsResult<()> {
+    text_kernel::jet_std_fs_fsync(&path.to_string()).map_err(io_error_ct)
 }
 pub(super) fn fs_exists(path: &str) -> bool {
     text_kernel::fs_exists(path)
@@ -588,7 +866,13 @@ pub(super) fn fs_list_dir(path: &str) -> FsResult<Vec<(String, String, bool)>> {
         .map_err(io_error_ct)
 }
 pub(super) fn fs_walk_parallel(path: &str) -> FsResult<Vec<(String, String, bool, i64)>> {
-    text_kernel::fs_walk_parallel(path)
+    fs_walk_parallel_with_ignore(path, None)
+}
+pub(super) fn fs_walk_parallel_with_ignore(
+    path: &str,
+    ignore_name: Option<&str>,
+) -> FsResult<Vec<(String, String, bool, i64)>> {
+    text_kernel::fs_walk_parallel_with_ignore(path, ignore_name)
         .map(|entries| {
             entries
                 .into_iter()
@@ -598,7 +882,13 @@ pub(super) fn fs_walk_parallel(path: &str) -> FsResult<Vec<(String, String, bool
         .map_err(io_error_ct)
 }
 pub(super) fn fs_walk_files_parallel(path: &str) -> FsResult<Vec<(String, String, bool, i64)>> {
-    text_kernel::fs_walk_files_parallel(path)
+    fs_walk_files_parallel_with_ignore(path, None)
+}
+pub(super) fn fs_walk_files_parallel_with_ignore(
+    path: &str,
+    ignore_name: Option<&str>,
+) -> FsResult<Vec<(String, String, bool, i64)>> {
+    text_kernel::fs_walk_files_parallel_with_ignore(path, ignore_name)
         .map(|entries| {
             entries
                 .into_iter()

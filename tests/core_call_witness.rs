@@ -43,3 +43,12 @@ fn non_corpus_printing_fixture_cannot_succeed_silently() {
         assert_not_silent("AOT", aot_code, &aot_stdout, &aot_stderr);
     }
 }
+
+#[test]
+fn canonical_core_module_witness_rejects_retired_dispatcher_spellings() {
+    let dispatcher = include_str!("../crates/jet-foundation/src/Syntax/core_calls.rs");
+    assert!(dispatcher.contains("\"core.service\""));
+    assert!(dispatcher.contains("\"core.tasks\""));
+    assert!(!dispatcher.contains("\"core.task\""));
+    assert!(!dispatcher.contains("\"core.services\""));
+}

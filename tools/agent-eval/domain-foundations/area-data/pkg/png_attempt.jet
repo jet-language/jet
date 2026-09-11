@@ -1,0 +1,17 @@
+use core.data as data
+
+#Codable
+struct Row {
+    team: String
+    value: Float
+}
+
+fn run() {
+    rows :: data.csv<Row>("team,value\nA,2.0") ?? panic("csv")
+    groups :: data.query(rows)
+        .group_by(r -> r.team)
+        .mean(r -> r.value)
+        .collect() ?? panic("groups")
+    png :: data.bar_png(groups)
+    print(png.len())
+}

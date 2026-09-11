@@ -1,25 +1,34 @@
-use core.files as files
-use core.regex as re
+use core.[files, regex]
 
 #CLI
 struct Args {
     path: String
 }
 
+struct Photo {
+    number: Int
+    name: String
+    path: String
+}
+
 fn run(args: Args) {
-    d :: args.path
-    e :: files.list_dir(d) ?? panic("cannot list directory")
-    q :: Regex{"^IMG_(\d+)\.jpeg$"}
-    p := e.filter((x: DirEntry) -> !x.is_dir && (~q).is_match(x.name)).map((x: DirEntry) -> {
-        m :: re.match(~q, x.name) ?? panic("bad photo")
-        "{("{Int.parse(m.group(1) ?? "0") ?? 0}").pad_start(20, "0")}|{x.name}"
+    directory :: args.path
+    entries :: files.list_dir(directory) ?? panic("cannot list directory")
+    pattern :: Regex{"^IMG_(\d+)\.jpeg$"}
+    photos := entries.filter(entry -> !entry.is_dir && pattern.is_match(entry.name)).map(entry -> {
+        match :: pattern.match(entry.name) ?? panic("bad photo")
+        Photo{
+            number: Int.parse(match.group(1) ?? panic("bad photo")) ?? panic("bad photo"),
+            name: entry.name,
+            path: entry.path,
+        }
     })
-    p.sort_by((x: String) -> x)
-    loop (i, x) in p {
-        f :: x.split_once("|") ?? panic("bad photo")
-        n :: "{i + 1}".pad_start(4, "0")
-        files.rename(Path.from(d).join(f.after), Path.from(d).join("photo-{n}.jpg")) ?? panic("cannot rename photo")
-        print("renamed {f.after} -> photo-{n}.jpg")
+    photos.sort_by(photo -> photo.number)
+    loop (index, photo) in photos {
+        ordinal :: "{index + 1}".pad_start(4, "0")
+        target_name :: "photo-{ordinal}.jpg"
+        files.rename(photo.path, Path.from(directory).join(target_name)) ?? panic("cannot rename photo")
+        print("renamed {photo.name} -> {target_name}")
     }
-    print("renamed {p.len()} skipped {e.count_where(x -> !x.is_dir) - p.len()}")
+    print("renamed {photos.len()} skipped {entries.count_where(entry -> !entry.is_dir) - photos.len()}")
 }

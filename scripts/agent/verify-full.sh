@@ -4,8 +4,6 @@ set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # Keep stdout reserved for probe data (for example, the four temp-root rows).
 # Preflight status belongs on stderr so callers can parse stdout safely.
-node "$repo/scripts/agent/check-agent-doc-flags.mjs" >&2
-node "$repo/scripts/agent/check-unsafe-ratchet.mjs" >&2
 if [ "${JET_NIX_TMP_CLEANED:-}" != "1" ]; then
   "$repo/scripts/agent/clean-nix-tmp.sh"
 fi
@@ -21,6 +19,14 @@ case "${1:-}" in
     shift
     ;;
 esac
+if [ -z "$probe_mode" ]; then
+  # Full verification is an epoch/release closeout, never a per-card
+  # confidence check. Bind it to a review-ready milestone and frozen HEAD
+  # before any verification work starts.
+  node "$repo/scripts/agent/closeout-gate.mjs" check
+fi
+node "$repo/scripts/agent/check-agent-doc-flags.mjs" >&2
+node "$repo/scripts/agent/check-unsafe-ratchet.mjs" >&2
 tmp_parent="${JET_VERIFY_TMPDIR:-${TMPDIR:-$HOME/.cache/jet-test-scratch}}"
 case "$tmp_parent" in
   /tmp|/tmp/*)
@@ -88,6 +94,7 @@ case "$probe_mode" in
     exit 143
     ;;
 esac
+
 
 export JET_CANVAS_PREREQUISITES=strict
 

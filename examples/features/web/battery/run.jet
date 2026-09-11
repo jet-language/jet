@@ -1,0 +1,178 @@
+use web as battery
+use core.http.client as client
+use core.http.server as server
+use core.net as net
+use core.web as core_web
+
+fn app_home() WebPage -> {
+    count :: battery.count_orders("/tmp/jet-web-battery.sqlite") ?? return core_web.page("Orders unavailable", "<p>database read failed</p>")
+    return battery.ssr_orders_page(count, "alice")
+}
+
+fn app_orders() WebPage -> {
+    count :: battery.count_orders("/tmp/jet-web-battery.sqlite") ?? return core_web.page("Orders unavailable", "<p>database read failed</p>")
+    return battery.ssr_orders_page(count, "alice")
+}
+
+fn app_orders_loader() String -> "orders:list"
+
+fn app_create_action(input: battery.NewOrder) String -> {
+    inserted :: battery.insert_order("/tmp/jet-web-battery.sqlite", input.item, input.quantity) ?? return "database write failed"
+    return "created={inserted}"
+}
+
+fn app_graph() App -> {
+    return core_web
+        .app()
+        .ssr()
+        .route("/", app_home)
+        .route("/orders", app_orders)
+        .loader(app_orders, app_orders_loader, true)
+        .route("/orders/:id", app_order_detail)
+        .action("create-order", app_create_action)
+        .form("order", app_create_action)
+        .island()
+        .assets("examples/features/web/battery/public")
+        .hydration_dev()
+}
+
+
+#Codable
+struct Login {
+    user: String
+    password: String
+}
+#Codable
+struct OrderSearch {
+    limit: Int
+}
+
+fn app_order_detail(id: Int, search: OrderSearch) WebPage -> {
+    return core_web.page(
+        "Order",
+        "<main><h1>Order {id}</h1><p>limit={search.limit}</p></main>"
+    )
+}
+
+
+fn list_orders(path: String, cache_version: Cell<Int>, req: HTTPRequest) HTTPResponse !HTTPError -> {
+    count :: battery.count_orders(path) ?? return Ok(battery.status_response(500, "database read failed"))
+    body :: "<h1>Orders</h1><p>request-path={req.path()}</p><p>orders={count}</p><p>cache={cache_version.get()}</p>"
+    return Ok(battery.ok_response(body))
+}
+fn detail_order(id: Int) HTTPResponse !HTTPError -> {
+    if id < 1 -> return Ok(battery.not_found_response("bad order id"))
+    return Ok(battery.ok_response("<h1>Order {id}</h1><p>{battery.order_detail_path(id)}</p>"))
+}
+
+fn create_order(path: String, cache_version: Cell<Int>, req: HTTPRequest) HTTPResponse !HTTPError -> {
+    item :: req.form("item") ?? return Ok(battery.invalid_response("missing item"))
+    quantity_text :: req.form("quantity") ?? return Ok(battery.invalid_response("missing quantity"))
+    view :: battery.validate_order_form(item, quantity_text)
+    if !view.valid -> return Ok(battery.invalid_response(view.errors))
+    quantity :: quantity_text.to_int() ?? return Ok(battery.invalid_response(view.errors))
+    inserted :: battery.insert_order(path, item, quantity) ?? return Ok(battery.status_response(500, "database write failed"))
+    cache_version.set(cache_version.get() + 1)
+    return Ok(battery.created_response("created order rows={inserted}"))
+}
+
+fn login(session_cell: Cell<String>, req: HTTPRequest) HTTPResponse !HTTPError -> {
+    input :: req.json<Login>() ?? return Ok(battery.invalid_response("invalid login"))
+    state :: battery.login_state(input.user, input.password) ?? return Ok(battery.status_response(401, "login failed"))
+    session_cell.set(state.session_id)
+    response :: battery.ok_response("logged in")
+    return Ok(response.header("set-cookie", state.cookie))
+}
+
+fn protected(session_cell: Cell<String>, req: HTTPRequest) HTTPResponse !HTTPError -> {
+    cookie :: req.header("cookie") ?? return Ok(battery.status_response(401, "login required"))
+    status :: battery.protected_status(session_cell.get(), cookie)
+    if status != 200 -> return Ok(battery.status_response(status, "login required"))
+    return Ok(battery.ok_response("protected orders"))
+}
+
+fn run() !(HTTPError | NetError | TaskFailure) {
+    // The temporary file is migrated once and seeded only when empty. Every
+    // request then uses the same named policy scope, so output statuses remain
+    // deterministic while the fixture is safe to inspect after a run.
+    _migration :: battery.migrate_orders(db_path) ?? return
+    _reset :: battery.reset_orders(db_path) ?? return
+    seeded_count :: battery.seed_orders(db_path) ?? return
+
+    _app_graph :: app_graph()
+    _page :: battery.ssr_orders_page(seeded_count, "alice")
+    print("route-list:{battery.order_list_path(3)}")
+    print("route-detail:{battery.order_detail_path(1)}")
+    decoded_limit :: battery.decode_limit("/orders/1?limit=3") ?? return
+    print("query-decode:{decoded_limit}")
+    print("route-report:{battery.route_report("/orders/1?limit=3")}")
+    print("form-valid:{battery.validate_order_form("pen", "3").valid}")
+    print("form-invalid:{battery.form_error_display("", "0")}")
+    print("query:{battery.query_report(db_path)}")
+    print("island:{battery.island_props(seeded_count, "alice")}")
+    print("register:{battery.register_demo_user()}")
+    print("login-ok:{battery.login_status("alice", "argon2id:demo")}")
+    print("login-failure:{battery.login_status("alice", "wrong")}")
+
+    login_state :: battery.login_state("alice", "argon2id:demo") ?? return
+    session_cell := Cell.new(login_state.session_id)
+    print("protected-ok:{battery.protected_status(login_state.session_id, login_state.cookie)}")
+    print("protected-failure:{battery.protected_status("missing", "")}")
+    loop command in battery.future_commands() -> print("future:{command}")
+    loop gate in battery.open_core_gates() -> print("gate:{gate}")
+
+    cache_version := Cell.new(0)
+    listener :: net.tcp_listen("127.0.0.1:0")
+    addr :: listener.local_addr()
+    mux :: server.mux()
+    mux.get("/", (req: HTTPRequest) HTTPResponse !HTTPError -> {
+        return Ok(battery.ok_response("<h1>Orders</h1><a href=\"/orders\">list</a>"))
+    })
+    mux.get("/old", (_req: HTTPRequest) HTTPResponse !HTTPError -> {
+        return Ok(battery.redirect_response("/orders"))
+    })
+    mux.get("/orders", (req: HTTPRequest) HTTPResponse !HTTPError -> list_orders(db_path, cache_version, req))
+    mux.get("/orders/:id", (id: Int) HTTPResponse !HTTPError -> detail_order(id))
+    mux.post("/orders", (req: HTTPRequest) HTTPResponse !HTTPError -> create_order(db_path, cache_version, req))
+    mux.post("/login", (req: HTTPRequest) HTTPResponse !HTTPError -> login(session_cell, req))
+    mux.get("/protected", (req: HTTPRequest) HTTPResponse !HTTPError -> protected(session_cell, req))
+
+    task_handle :: task {
+        server.serve_once_listener(listener, mux)
+        server.serve_once_listener(listener, mux)
+        server.serve_once_listener(listener, mux)
+        server.serve_once_listener(listener, mux)
+        server.serve_once_listener(listener, mux)
+        server.serve_once_listener(listener, mux)
+        server.serve_once_listener(listener, mux)
+        server.serve_once_listener(listener, mux)
+        server.serve_once_listener(listener, mux)
+        server.serve_once_listener(listener, mux)
+    }
+
+    home :: client.get("http://{addr}/")
+    print("home:{home.status()}")
+    redirected :: client.get("http://{addr}/old")
+    print("redirect:{redirected.status()}:{redirected.header("location") ?? "missing"}")
+    listed :: client.get("http://{addr}/orders?limit=3")
+    print("list-before:{listed.status()}:{listed.body().text(8192) ?? "bad"}")
+    created_request :: client.request("POST", "http://{addr}/orders").form("item", "pen").form("quantity", "3")
+    created :: created_request.send()
+    print("create:{created.status()}")
+    listed_after :: client.get("http://{addr}/orders")
+    print("list-after:{listed_after.status()}:{listed_after.body().text(8192) ?? "bad"}")
+    detail :: client.get("http://{addr}/orders/1")
+    protected_failure_request :: client.get("http://{addr}/protected")
+    print("protected-failure-http:{protected_failure_request.status()}")
+    print("detail:{detail.status()}")
+    login_request :: client.request("POST", "http://{addr}/login").json(Login{user: "alice", password: "argon2id:demo"})
+    logged :: login_request.send()
+    set_cookie :: logged.header("set-cookie") ?? return
+    print("login:{logged.status()}:cookie={set_cookie.starts_with("jet_session=")}")
+    protected_request :: client.request("GET", "http://{addr}/protected").cookie("jet_session", session_cell.get())
+    protected_response :: protected_request.send()
+    print("protected:{protected_response.status()}")
+    asset :: client.get("http://{addr}/assets/index.html")
+    print("asset:{asset.status()}:{asset.body().text(8192) ?? "bad"}")
+    task_handle.join()
+}

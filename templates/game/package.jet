@@ -1,0 +1,23 @@
+name: "__JET_GAME_NAME__"
+version: "0.1.0"
+edition: "2026"
+runtime: "hosted"
+target: "native"
+
+// `dev` keeps the first run source-backed and deterministic.  `release` is
+// explicit so profile choice never depends on the host environment.
+build: {
+    dev: Build{ optimize: none, debug_info: true },
+    release: Build{ optimize: full },
+}
+
+// The generated scene uses filesystem-backed asset registration and the
+// deterministic headless game substrate.  GPU stays denied until a source edit
+// deliberately selects the raylib route and changes this policy; otherwise
+// that route reports E1803.
+authority: {
+    holds: {
+        allow: [FS, IO, Mem.Alloc],
+        deny: [GPU],
+    },
+}

@@ -3,7 +3,11 @@
 #[path = "CmdCodemod/JSON.rs"]
 mod JSON;
 #[path = "CmdCodemod/Transaction.rs"]
-mod Transaction;
+pub(crate) mod Transaction;
+#[path = "CmdCodemod/Generate.rs"]
+mod Generate;
+
+pub(crate) use Generate::run_generate;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;

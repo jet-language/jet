@@ -366,82 +366,20 @@ fn assert_aot_resolution(rust: &str, owner: &str, trait_name: &str, resolution: 
     }
 }
 
-fn tir_owners(
-    program: &jet::Codegen::TIR::JitProgram,
-    trait_name: &str,
-    method: &str,
-) -> BTreeSet<String> {
-    program
-        .trait_method_owners
-        .get(&(trait_name.to_string(), method.to_string()))
-        .into_iter()
-        .flatten()
-        .cloned()
-        .collect()
-}
-
-fn tir_eval_lookup(program: &jet::Codegen::TIR::JitProgram, owner: &str, method: &str) -> bool {
-    let key = format!("{owner}::{method}");
-    program.funcs.iter().any(|function| function.name == key)
-}
-
-fn jit_func_ids_lookup(program: &jet::Codegen::TIR::JitProgram, owner: &str, method: &str) -> bool {
-    // `compile_program_tiered` inserts every lowered function under its exact
-    // `TFunc.name`; this mirrors the private func_ids key set without adding a
-    // production introspection API just for this contract test.
-    let key = format!("{owner}::{method}");
-    let func_ids: BTreeSet<String> = program
-        .funcs
-        .iter()
-        .map(|function| function.name.clone())
-        .collect();
-    func_ids.contains(&key)
-}
-
-fn expected_explicit_owners(trait_name: &str) -> BTreeSet<String> {
-    ROWS.iter()
-        .filter(|row| row_resolution(row, trait_name) == Resolution::Explicit)
-        .map(|row| row.owner.to_string())
-        .collect::<BTreeSet<_>>()
-}
-
-fn assert_four_seam_contract(
+fn assert_aot_and_admission_contract(
     registry: &jet::Traits::TraitRegistry,
     explicit: &BTreeSet<(String, String)>,
     local: &BTreeSet<String>,
     rust: &str,
-    program: &jet::Codegen::TIR::JitProgram,
 ) {
     assert_admission(registry, explicit, local);
-    for trait_name in [DISPLAY, DEBUG] {
-        let method = if trait_name == DISPLAY {
-            "display"
-        } else {
-            "debug"
-        };
-        assert_eq!(
-            tir_owners(program, trait_name, method),
-            expected_explicit_owners(trait_name),
-            "TIR method-owner lookup drifted for {trait_name}.{method}"
-        );
-    }
     for row in ROWS {
-        for (trait_name, method) in [(DISPLAY, "display"), (DEBUG, "debug")] {
-            let resolution = row_resolution(row, trait_name);
-            assert_aot_resolution(rust, row.owner, trait_name, resolution);
-
-            let expected_method = resolution == Resolution::Explicit;
-            assert_eq!(
-                tir_eval_lookup(program, row.owner, method),
-                expected_method,
-                "TIR evaluator lookup disagreed for {}::{method}",
-                row.owner
-            );
-            assert_eq!(
-                jit_func_ids_lookup(program, row.owner, method),
-                expected_method,
-                "JIT func_ids lookup disagreed for {}::{method}",
-                row.owner
+        for trait_name in [DISPLAY, DEBUG] {
+            assert_aot_resolution(
+                rust,
+                row.owner,
+                trait_name,
+                row_resolution(row, trait_name),
             );
         }
     }
@@ -477,14 +415,11 @@ fn impl_shape_matrix_covers_all_contexts_and_resolution_seams() {
     let compiled = jet::compile_with_path(SOURCE, path.to_str().unwrap())
         .expect("matrix AOT codegen");
 
-    let program = jet::Codegen::TIR::lower_jit_program(&bundle).expect("matrix lowers to TIR");
-    // One row must agree across sema admission, AOT bridge emission, TIR's
-    // evaluator map, and the JIT's private func_ids map.
-    assert_four_seam_contract(&registry, &explicit, &local, &compiled.rust, &program);
+    // One row must agree across sema admission and AOT bridge emission.
+    assert_aot_and_admission_contract(&registry, &explicit, &local, &compiled.rust);
 
-    // This runs the same fixture through release/AOT, default Cranelift (whose
-    // private func_ids table resolves the custom methods), and forced TIR eval.
-    // It is the executable half of the four-seam contract and the golden gate.
+    // This runs the same fixture through release/AOT and the default Cranelift
+    // tier. It is the executable half of the observable contract and golden gate.
     tir_support::assert_example_cli_tiers_agree("traits/impl_shape_matrix", EXPECTED);
 
     // The ordinary three-mode helper proves output parity, but it does not
@@ -500,4 +435,27 @@ fn impl_shape_matrix_covers_all_contexts_and_resolution_seams() {
             .any(|line| line.starts_with("run") && line.contains("tier1 native")),
         "impl_shape_matrix did not execute on the resident JIT: {stderr}"
     );
+}
+
+#[test]
+fn impl_shape_matrix_retains_typed_operator_rhs() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/features/operators/mixed_types.jet");
+    let bundle = jet::Loader::load_entry(path.to_str().unwrap()).expect("operator example loads");
+    let rhs = bundle.modules[bundle.entry]
+        .items
+        .iter()
+        .find_map(|item| {
+            let jet::AST::Item::Impl(implementation) = item else {
+                return None;
+            };
+            if implementation.type_name == "Money"
+                && implementation.trait_name.as_deref() == Some("Add")
+            {
+                implementation.operator_rhs.clone()
+            } else {
+                None
+            }
+        });
+    assert_eq!(rhs, Some(jet::AST::Type::Int));
 }

@@ -45,8 +45,10 @@ marker Inline(mode: InlineMode{.Hint}, @sites: [.Function, .Method, .Constant])
 // function/method marker keeps scalar codegen available for reproducibility or
 // a workload whose measured result favors scalar execution.
 marker Scalar(@sites: [.Function, .Method])
+// D-FOUND-OPMIX1=A: a typed Add/Mul impl may derive its reverse lookup.
+marker Commutative(@sites: [.Impl])
 
-marker Job(scope: JobScope{.Dev}, packages: Value{[]}, cwd: Value{none}, inputs: Value{[]}, outputs: Value{[]}, skip: Value{none}, cache: Value{.Uncached}, limits: Value{none}, @sites: [.Function])
+marker Job(scope: JobScope{.Dev}, packages: Value{[]}, cwd: Value{none}, inputs: Value{[]}, outputs: Value{[]}, skip: Value{none}, cache: Value{.Uncached}, limits: Value{none}, after: Value{[]}, parallel: Value{none}, @sites: [.Function])
 
 marker Every(schedule: Duration | String, @sites: [.Function])
 
@@ -76,6 +78,9 @@ marker Deprecated(since: String, use: String, removed_in: String{none}, @sites: 
 
 marker Codable(@sites: [.Type])
 
+// D-FOUND-RECEIPT1: named typed receipt section declaration.
+marker Receipt(name: String, @sites: [.Type])
+
 marker Encode(@sites: [.Type])
 
 marker Decode(@sites: [.Type])
@@ -104,7 +109,9 @@ marker SingleUse(@sites: [.Type])
 
 marker Invariant(condition: String, @sites: [.Type], @retired: "distinct Int(lo..hi)")
 
-marker Layout(kind: Layout, tag: IntType{I32}, @sites: [.Type])
+// D-PLACE1=A: structs use the second argument for `align(N)`; enums retain
+// the legacy bare tag-width argument in this same registry slot.
+marker Layout(kind: Layout, tag: Value{none}, @sites: [.Type])
 
 marker RenameAll(case: NamingCase, @sites: [.Type], @owns_menu: true)
 
@@ -116,7 +123,7 @@ marker Untagged(@sites: [.Type])
 
 marker Redact(@sites: [.Field])
 
-marker Rename(name: String, @sites: [.Field, .Variant])
+marker Rename(name: String, json: String{none}, cbor: String{none}, csv: String{none}, toml: String{none}, yaml: String{none}, xml: String{none}, args: String{none}, env: String{none}, db: String{none}, layout: String{none}, @sites: [.Field, .Variant])
 
 marker Skip(@sites: [.Field])
 
@@ -143,6 +150,9 @@ marker Local(@sites: [.Declaration])
 marker Shared(@sites: [.Declaration])
 
 marker Meta(category: String{""}, tunable: Bool{false}, maturity: Maturity{.Tested}, @sites: [.Function, .Method, .Declaration, .Constant])
+// D-DX-PLUGIN1=D: exported devtools panels are discovered from one typed
+// function marker; no startup registration call or second metadata surface.
+marker DevPanel(@sites: [.Function])
 
 marker Todo(@sites: [.Expression])
 
@@ -177,10 +187,12 @@ marker DebugOnly(@sites: [.Statement, .Block])
 marker Test(name: String{"function name"}, faults: [Effect]{[]}, expected_fail: Bool{false}, @sites: [.Test])
 
 marker Target(target: Target, @sites: [.File, .Module, .Function])
+// D-FOUND-EMBEDDED1 / #2793: target interrupt vector plus bounded effect row.
+marker Interrupt(vector: Ident, effects: [Effect], @sites: [.Function])
 
 marker Root(@sites: [.Parameter])
 
-marker HTML(path: String{none}, @sites: [.File, .Block])
+marker HTML(page: Path, @sites: [.File, .Block])
 
 marker PubFile(@sites: [.File])
 

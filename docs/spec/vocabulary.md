@@ -1,7 +1,5 @@
 # Jet vocabulary
 
-Status: ratified reference for **D-ONCE-WORD1=A** (card #1732).
-
 This page is the one home for Jet's meanings of **stream**, **reader**, **event**, and
 **collecting loop**. Other pages may use these words, but they must link here and use
 the meanings below.

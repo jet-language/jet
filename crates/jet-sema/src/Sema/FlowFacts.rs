@@ -981,7 +981,9 @@ mod tests {
         then.set("value", OriginFact::untracked());
         let otherwise: Facts<Origin> = Facts::new();
         let merged = Facts::merge_paths(&before, &[then, otherwise], &mut Vec::new());
-        let fact = merged.get("value").expect("untracked row survives the merge");
+        let fact = merged
+            .get("value")
+            .expect("untracked row survives the merge");
         assert!(!fact.tracked);
         assert!(!fact.ambiguity);
     }

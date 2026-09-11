@@ -8,8 +8,47 @@ use super::trust::{
 };
 use crate::{is_item_input, ReplFlags, ReplPolicy, ReplTurn, ReplTurnStatus, RerunPlan, Session};
 use jet_foundation::SHA256;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KernelIdentity {
+    pub source: String,
+    pub build: String,
+    pub session: String,
+    pub authority: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NotebookAppInput {
+    pub name: String,
+    pub label: String,
+    pub type_name: String,
+    pub required: bool,
+    pub variadic: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NotebookAppSchema {
+    pub function: String,
+    pub inputs: Vec<NotebookAppInput>,
+    pub return_projection: String,
+    pub effects: Vec<String>,
+    pub authority: String,
+    pub source_identity: String,
+    pub compatibility_digest: String,
+}
+
+
+#[derive(Clone, Debug)]
+struct ControlSpec {
+    function: String,
+    name: String,
+    label: String,
+    type_name: String,
+    required: bool,
+    variadic: bool,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClientKind {
@@ -47,6 +86,16 @@ pub struct Kernel {
     interrupt_requested: bool,
     debug_attached: bool,
     perf_attached: bool,
+    cell_effects: BTreeMap<String, bool>,
+    cell_lazy: BTreeSet<String>,
+    pending_effects: BTreeSet<String>,
+    cell_errors: BTreeMap<String, String>,
+    executed_cells: BTreeSet<String>,
+    reactive_root: Option<String>,
+    session_id: String,
+    control_values: BTreeMap<String, String>,
+    control_errors: BTreeMap<String, String>,
+    authority_id: String,
 }
 
 #[derive(Clone, Debug)]
@@ -59,7 +108,7 @@ pub struct KernelView {
 
 impl Kernel {
     pub fn open(path: Option<&Path>, environment_hash: impl Into<String>) -> Result<Self, String> {
-        jet_driver::boot_tir_eval();
+        jet_driver::boot_mir_eval();
         let environment_hash = environment_hash.into();
         let mut kernel = Self::blank(path, environment_hash);
         if let Some(path) = path {
@@ -73,7 +122,13 @@ impl Kernel {
                     notebook.environment_hash = kernel.notebook.environment_hash.clone();
                 }
                 kernel.notebook = notebook;
+                kernel.notebook.refresh_dependencies()?;
+                kernel.clear_document_runtime();
+            } else {
+                kernel.notebook.refresh_dependencies()?;
             }
+        } else {
+            kernel.notebook.refresh_dependencies()?;
         }
         kernel.trust = TrustStore::load(&super::trust::trust_store_path());
         Ok(kernel)
@@ -101,7 +156,28 @@ impl Kernel {
             interrupt_requested: false,
             debug_attached: false,
             perf_attached: false,
+            cell_effects: BTreeMap::new(),
+            cell_lazy: BTreeSet::new(),
+            pending_effects: BTreeSet::new(),
+            cell_errors: BTreeMap::new(),
+            executed_cells: BTreeSet::new(),
+            reactive_root: None,
+            session_id: JetNotebook::mint_cell_id(),
+            control_values: BTreeMap::new(),
+            control_errors: BTreeMap::new(),
+            authority_id: SHA256::sha256_hex(b"headless"),
         }
+    }
+
+    fn clear_document_runtime(&mut self) {
+        self.cell_effects.clear();
+        self.cell_lazy.clear();
+        self.pending_effects.clear();
+        self.cell_errors.clear();
+        self.executed_cells.clear();
+        self.control_values.clear();
+        self.control_errors.clear();
+        self.reactive_root = None;
     }
 
     fn reset_runtime(&mut self) {
@@ -119,10 +195,15 @@ impl Kernel {
         self.debug_attached = false;
         self.perf_attached = false;
         self.interrupt_requested = false;
+        self.executed_cells.clear();
+        self.pending_effects.clear();
+        self.cell_errors.clear();
+        self.reactive_root = None;
+
     }
 
     pub fn open_document(&mut self, path: &Path) -> Result<(), String> {
-        let notebook = super::document::load_jetnb(path)?;
+        let mut notebook = super::document::load_jetnb(path)?;
         let base_dir = path
             .parent()
             .filter(|d| !d.as_os_str().is_empty())
@@ -132,12 +213,12 @@ impl Kernel {
         self.document_notice = (notebook.environment_hash != environment_hash).then(|| {
             "notebook environment changed; cached output is stale until local re-run".into()
         });
-        self.notebook = JetNotebook {
-            environment_hash,
-            ..notebook
-        };
+        notebook.environment_hash = environment_hash;
+        notebook.refresh_dependencies()?;
+        self.notebook = notebook;
         self.document_path = Some(path.to_path_buf());
         self.base_dir = base_dir;
+        self.clear_document_runtime();
         self.reset_runtime();
         Ok(())
     }
@@ -161,6 +242,7 @@ impl Kernel {
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."));
         self.notebook.environment_hash = Self::environment_hash(&target_base_dir);
+        self.notebook.refresh_dependencies()?;
         super::document::save_jetnb(&self.notebook, &target)?;
         self.document_notice = None;
         self.document_path = Some(target.clone());
@@ -168,34 +250,380 @@ impl Kernel {
         self.policy = ReplPolicy::for_notebook(notebook_flags(), &self.base_dir);
         Ok(target)
     }
-
-    pub fn replace_notebook(&mut self, notebook: JetNotebook) {
-        self.notebook = JetNotebook {
-            environment_hash: Self::environment_hash(&self.base_dir),
-            ..notebook
-        };
+    pub fn replace_notebook(&mut self, mut notebook: JetNotebook) {
+        notebook.environment_hash = Self::environment_hash(&self.base_dir);
+        let _ = notebook.refresh_dependencies();
+        self.notebook = notebook;
         self.document_path = None;
         self.document_notice = Some(
             "imported notebook output is quarantined; run cells locally to create trusted cache"
                 .into(),
         );
+        self.clear_document_runtime();
         self.reset_runtime();
     }
 
     pub fn merge_notebook(&mut self, theirs: JetNotebook) {
         self.notebook = super::document::merge_by_id(&self.notebook, &theirs);
+        let _ = self.notebook.refresh_dependencies();
         self.document_notice = (!self.notebook.merge_conflicts.is_empty())
             .then(|| "merge conflicts are present; edit the marked cells before execution".into());
+        self.clear_document_runtime();
         self.reset_runtime();
     }
 
     pub fn edit_cell(&mut self, cell_id: &str, source: impl Into<String>) -> Result<(), String> {
+        let previous_source = self
+            .notebook
+            .cells
+            .iter()
+            .find(|cell| cell.id == cell_id)
+            .map(|cell| cell.source.clone())
+            .ok_or_else(|| format!("unknown cell `{cell_id}`"))?;
         self.notebook.edit_cell(cell_id, source)?;
-        self.reset_runtime();
+        if self
+            .notebook
+            .cells
+            .iter()
+            .find(|cell| cell.id == cell_id)
+            .is_some_and(|cell| cell.source != previous_source)
+        {
+            self.reset_runtime();
+            self.reactive_root = Some(cell_id.to_string());
+            let descendants = self.notebook.descendants_in_order(cell_id)?;
+            self.pending_effects.extend(descendants.into_iter().filter(|id| {
+                self.cell_effects.get(id).copied().unwrap_or(false)
+            }));
+        }
         if self.notebook.merge_conflicts.is_empty() {
             self.document_notice = None;
         }
         Ok(())
+    }
+
+    pub fn add_cell(&mut self, kind: CellKind, source: impl Into<String>) -> Result<String, String> {
+        let id = self.notebook.add_cell(kind, source).id.clone();
+        self.notebook.refresh_dependencies()?;
+        Ok(id)
+    }
+
+    pub fn delete_cell(&mut self, cell_id: &str) -> Result<Vec<String>, String> {
+        let removed = self.notebook.remove_cell(cell_id)?;
+        for id in &removed {
+            self.cell_effects.remove(id);
+            self.cell_lazy.remove(id);
+            self.pending_effects.remove(id);
+            self.cell_errors.remove(id);
+            self.executed_cells.remove(id);
+        }
+        self.reset_runtime();
+        self.reactive_root = None;
+        Ok(removed)
+    }
+
+    pub fn set_cell_lazy(&mut self, cell_id: &str, lazy: bool) -> Result<(), String> {
+        if self.notebook.cell_index(cell_id).is_none() {
+            return Err(diagnostic_error(
+                "E2104",
+                "notebook cell does not exist",
+                format!("the requested lazy-cell control named `{cell_id}`"),
+                "refresh notebook state and choose an existing cell",
+            ));
+        }
+        if lazy {
+            self.cell_lazy.insert(cell_id.to_string());
+        } else {
+            self.cell_lazy.remove(cell_id);
+            self.pending_effects.remove(cell_id);
+        }
+        Ok(())
+    }
+    pub fn set_authority(&mut self, authority: &str) {
+        self.authority_id = SHA256::sha256_hex(authority.as_bytes());
+    }
+
+    pub fn identity(&self) -> KernelIdentity {
+        KernelIdentity {
+            source: self.notebook.source_hash(),
+            build: build_identity(&self.notebook.environment_hash),
+            session: self.session_id.clone(),
+            authority: self.authority_id.clone(),
+        }
+    }
+
+    pub fn reconnect(&self, identity: &KernelIdentity) -> Result<(), String> {
+        let expected = self.identity();
+        let mismatches = [
+            ("source", expected.source.as_str(), identity.source.as_str()),
+            ("build", expected.build.as_str(), identity.build.as_str()),
+            ("session", expected.session.as_str(), identity.session.as_str()),
+            (
+                "authority",
+                expected.authority.as_str(),
+                identity.authority.as_str(),
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(name, expected, actual)| (expected != actual).then_some(name))
+        .collect::<Vec<_>>();
+        if mismatches.is_empty() {
+            return Ok(());
+        }
+        Err(diagnostic_error(
+            "E2104",
+            "notebook reconnect identity does not match",
+            format!("the existing bounded kernel rejected {} identity fields", mismatches.join(", ")),
+            "refresh the notebook state and reconnect to the reported source, build, session, and authority",
+        ))
+    }
+
+    /// Return the checked contract for one notebook function.  The app host
+    /// consumes this projection instead of parsing or interpreting the AST.
+    pub fn app_schema(&self, function_name: &str) -> Result<NotebookAppSchema, String> {
+        let source = self.checked_source();
+        if source.trim().is_empty() {
+            return Err(diagnostic_error(
+                "E2104",
+                "notebook app has no checked functions",
+                "the notebook contains no parser-plane function declarations".to_string(),
+                "add one checked function cell and refresh the notebook".to_string(),
+            ));
+        }
+        let bundle = crate::checked_program(&source).map_err(|_| {
+            diagnostic_error(
+                "E2104",
+                "notebook app function is not checked",
+                format!("the selected function `{function_name}` could not be checked"),
+                "fix the notebook diagnostics before publishing a local app",
+            )
+        })?;
+        let Some(function) = bundle.modules[bundle.entry].items.iter().find_map(|item| {
+            let crate::AST::Item::Func(function) = item else {
+                return None;
+            };
+            (function.name == function_name).then_some(function)
+        }) else {
+            return Err(diagnostic_error(
+                "E2104",
+                "notebook app function does not exist",
+                format!("no checked function named `{function_name}` is available"),
+                "select one of the checked top-level functions in the notebook",
+            ));
+        };
+        if function.is_unsafe {
+            return Err(diagnostic_error(
+                "E2104",
+                "notebook app function is unsafe",
+                format!("checked function `{function_name}` carries an unsafe contract"),
+                "select a memory-safe function for local-app publication",
+            ));
+        }
+        if let Some((parameter, _)) = &function.effect_via {
+            return Err(diagnostic_error(
+                "E2104",
+                "notebook app function has dynamic effects",
+                format!(
+                    "checked function `{function_name}` forwards effects through `{parameter}`"
+                ),
+                "publish a function with a static IO or FS effect row",
+            ));
+        }
+        if let Some(declared) = &function.declared_effects {
+            if let Some(effect) = declared
+                .iter()
+                .map(|(effect, _)| effect)
+                .find(|effect| !app_effect_supported(effect))
+            {
+                return Err(diagnostic_error(
+                    "E2104",
+                    "notebook app effect is unsupported",
+                    format!(
+                        "checked function `{function_name}` declares `{effect}`, which the notebook app authority cannot grant"
+                    ),
+                    "use only project-confined IO or FS effects for local-app publication",
+                ));
+            }
+        }
+        if let Some(param) = function
+            .params
+            .iter()
+            .find(|param| !app_control_type_supported(&param.ty))
+        {
+            return Err(diagnostic_error(
+                "E2104",
+                "notebook app control type is unsupported",
+                format!(
+                    "checked function `{function_name}` cannot expose `{}` as a browser control",
+                    param.ty.name()
+                ),
+                "use a scalar, optional, list, map, or tuple control type",
+            ));
+        }
+        let inputs = function
+            .params
+            .iter()
+            .map(|param| NotebookAppInput {
+                name: param.name.clone(),
+                label: param.call_label().to_string(),
+                type_name: param.ty.name(),
+                required: param.default.is_none() && !param.variadic,
+                variadic: param.variadic,
+            })
+            .collect::<Vec<_>>();
+        let return_projection = function.effective_return_type().name();
+        let effects: Vec<String> = function
+            .declared_effects
+            .as_ref()
+            .map(|declared| declared.iter().map(|(name, _)| name.clone()).collect())
+            .unwrap_or_default();
+        let source_identity = self.notebook.source_hash();
+        let authority = self.authority_id.clone();
+        let mut material = String::from("jet-notebook-app-compat-v1\0");
+        material.push_str(&function.name);
+        material.push('\0');
+        for input in &inputs {
+            material.push_str(&input.name);
+            material.push('\0');
+            material.push_str(&input.label);
+            material.push('\0');
+            material.push_str(&input.type_name);
+            material.push('\0');
+            material.push_str(if input.required { "required" } else { "optional" });
+            material.push('\0');
+            material.push_str(if input.variadic { "variadic" } else { "single" });
+            material.push('\0');
+        }
+        material.push_str(&return_projection);
+        material.push('\0');
+        for effect in &effects {
+            material.push_str(effect.as_str());
+            material.push('\0');
+        }
+        material.push_str(if function.is_unsafe { "authority-required" } else { "authority-free" });
+        let compatibility_digest = SHA256::sha256_hex(material.as_bytes());
+        Ok(NotebookAppSchema {
+            function: function.name.clone(),
+            inputs,
+            return_projection,
+            effects,
+            authority,
+            source_identity,
+            compatibility_digest,
+        })
+    }
+
+    pub fn controls_json(&self) -> String {
+        self.function_controls()
+            .into_iter()
+            .map(|control| {
+                let key = control_key(&control.function, &control.name);
+                let value = self
+                    .control_values
+                    .get(&key)
+                    .cloned()
+                    .unwrap_or_default();
+                let error = self
+                    .control_errors
+                    .get(&key)
+                    .map(|message| json_str(message))
+                    .unwrap_or_else(|| "null".into());
+                format!(
+                    "{{\"function\":{},\"name\":{},\"label\":{},\"type\":{},\"required\":{},\"variadic\":{},\"value\":{},\"error\":{}}}",
+                    json_str(&control.function),
+                    json_str(&control.name),
+                    json_str(&control.label),
+                    json_str(&control.type_name),
+                    control.required,
+                    control.variadic,
+                    json_str(&value),
+                    error
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
+    pub fn set_control(
+        &mut self,
+        function: &str,
+        name: &str,
+        value: impl Into<String>,
+    ) -> Result<(), String> {
+        let value = value.into();
+        let Some(control) = self
+            .function_controls()
+            .into_iter()
+            .find(|control| control.function == function && control.name == name)
+        else {
+            return Err(diagnostic_error(
+                "E2104",
+                "notebook function argument does not exist",
+                format!("no checked function argument `{function}.{name}` is available"),
+                "refresh state and choose one of the typed controls reported by the notebook",
+            ));
+        };
+        let key = control_key(function, name);
+        if !control_value_matches(&value, &control.type_name) {
+            let message = format!(
+                "value for `{}` must be a {}",
+                control.label, control.type_name
+            );
+            self.control_errors.insert(key, message.clone());
+            return Err(diagnostic_error(
+                "E2104",
+                "notebook control value has the wrong type",
+                message.clone(),
+                format!("enter a value accepted by the checked `{}` type", control.type_name),
+            ));
+        }
+        self.control_errors.remove(&key);
+        self.control_values.insert(key, value);
+        Ok(())
+    }
+
+
+    fn checked_source(&self) -> String {
+        self.notebook
+            .cells
+            .iter()
+            .filter(|cell| cell.kind == CellKind::Jet && is_item_input(&cell.source))
+            .map(|cell| cell.source.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn function_controls(&self) -> Vec<ControlSpec> {
+        let source = self.checked_source();
+        if source.trim().is_empty() {
+            return Vec::new();
+        }
+        let Ok(bundle) = crate::checked_program(&source) else {
+            return Vec::new();
+        };
+        bundle.modules[bundle.entry]
+            .items
+            .iter()
+            .filter_map(|item| {
+                let crate::AST::Item::Func(function) = item else {
+                    return None;
+                };
+                Some(
+                    function
+                        .params
+                        .iter()
+                        .map(|param| ControlSpec {
+                            function: function.name.clone(),
+                            name: param.name.clone(),
+                            label: param.call_label().to_string(),
+                            type_name: param.ty.name(),
+                            required: param.default.is_none() && !param.variadic,
+                            variadic: param.variadic,
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .flatten()
+            .collect()
     }
 
     pub fn environment_hash(project_root: &Path) -> String {
@@ -262,6 +690,35 @@ impl Kernel {
             self.interrupt_requested = false;
             return Err("interrupted before execute".into());
         }
+        self.notebook.refresh_dependencies()?;
+        let order = self.notebook.dependency_order(cell_id)?;
+        let reactive = self.reactive_root.as_deref() == Some(cell_id);
+        let mut target = None;
+        for id in order {
+            let is_target = id == cell_id;
+            if !is_target && self.executed_cells.contains(&id) {
+                continue;
+            }
+            let result = self.execute_cell_once(client, &id)?;
+            if is_target {
+                target = Some(result);
+            }
+        }
+        let target = target.ok_or_else(|| format!("unknown cell `{cell_id}`"))?;
+        if reactive && target.ok() {
+            let _ = self.run_reactive_descendants(client, cell_id, false)?;
+            if self.pending_effects.is_empty() {
+                self.reactive_root = None;
+            }
+        }
+        Ok(target)
+    }
+
+    fn execute_cell_once(
+        &mut self,
+        client: ClientKind,
+        cell_id: &str,
+    ) -> Result<CellExecResult, String> {
         let source = {
             let cell = self
                 .notebook
@@ -311,10 +768,19 @@ impl Kernel {
             self.stdin_queue.remove(0);
         }
         self.execution_count = self.execution_count.saturating_add(1);
+        self.cell_effects.insert(cell_id.to_string(), eval.had_effect);
+        self.pending_effects.remove(cell_id);
+        if eval.status == ReplTurnStatus::Ok {
+            self.cell_errors.remove(cell_id);
+        } else {
+            self.cell_errors
+                .insert(cell_id.to_string(), eval.text.clone());
+        }
         let bundle = bundle_for_eval(&eval);
         let turn_id = self.session.turns.last().map(|t| t.id);
         self.notebook
             .store_output(cell_id, bundle.clone(), self.execution_count, turn_id)?;
+        self.executed_cells.insert(cell_id.to_string());
         let src_hash = SHA256::sha256_hex(source.as_bytes());
         let render = decide_render(
             &self.trust,
@@ -335,6 +801,66 @@ impl Kernel {
         })
     }
 
+    fn run_reactive_descendants(
+        &mut self,
+        client: ClientKind,
+        root_id: &str,
+        confirm_effects: bool,
+    ) -> Result<Vec<String>, String> {
+        let descendants = self.notebook.descendants_in_order(root_id)?;
+        let mut ran = Vec::new();
+        for cell_id in descendants {
+            let Some(cell) = self.notebook.cells.iter().find(|cell| cell.id == cell_id) else {
+                continue;
+            };
+            if cell.kind != CellKind::Jet {
+                continue;
+            }
+            let known_effect = self.cell_effects.get(&cell_id).copied().unwrap_or(false);
+            let needs_confirmation = self.cell_lazy.contains(&cell_id)
+                || (!confirm_effects
+                    && (known_effect || source_may_have_effect(&cell.source)));
+            if needs_confirmation {
+                self.pending_effects.insert(cell_id);
+                continue;
+            }
+            match self.execute_cell_once(client, &cell_id) {
+                Ok(_) => {
+                    ran.push(cell_id);
+                }
+                Err(error) => {
+                    self.cell_errors.insert(cell_id, error);
+                }
+            }
+        }
+        Ok(ran)
+    }
+
+    pub fn confirm_reactive(
+        &mut self,
+        client: ClientKind,
+        cell_id: &str,
+    ) -> Result<Vec<String>, String> {
+        self.notebook.refresh_dependencies()?;
+        let root = self
+            .reactive_root
+            .clone()
+            .unwrap_or_else(|| cell_id.to_string());
+        if self.pending_effects.is_empty() && self.reactive_root.is_none() {
+            return Err(diagnostic_error(
+                "E2104",
+                "notebook has no effectful descendants awaiting confirmation",
+                format!("cell `{cell_id}` has no pending reactive rerun"),
+                "edit and run a source cell before confirming its effectful descendants",
+            ));
+        }
+        let ran = self.run_reactive_descendants(client, &root, true)?;
+        if self.pending_effects.is_empty() {
+            self.reactive_root = None;
+        }
+        Ok(ran)
+    }
+
     pub fn apply_rerun(
         &mut self,
         client: ClientKind,
@@ -348,8 +874,11 @@ impl Kernel {
         // live by a newly numbered session turn.
         self.notebook.invalidate_all_outputs();
         self.execution_count = 0;
-        let mut decision_iter = decisions.iter().copied();
+        self.executed_cells.clear();
+        self.pending_effects.clear();
+        self.reactive_root = None;
         let mut stale_from = None;
+        let mut decision_iter = decisions.iter().copied();
         for step in &plan.steps {
             if step.kind == RerunPlan::StepKind::ConfirmEffect {
                 match decision_iter.next().unwrap_or(RerunDecision::SkipStale) {
@@ -491,6 +1020,15 @@ impl Kernel {
                     .merge_conflicts
                     .iter()
                     .any(|entry| entry.cell_id == cell.id);
+                let status = self.cell_status(cell);
+                let effectful = self.cell_effects.get(&cell.id).copied().unwrap_or(false);
+                let lazy = self.cell_lazy.contains(&cell.id);
+                let pending = self.pending_effects.contains(&cell.id);
+                let error = self
+                    .cell_errors
+                    .get(&cell.id)
+                    .map(|message| json_str(&bounded_text(message)))
+                    .unwrap_or_else(|| "null".into());
                 let output = cell.output.as_ref().map(|out| {
                     let live = self.cell_output_live(cell);
                     let projected = if live {
@@ -524,13 +1062,19 @@ impl Kernel {
                     )
                 });
                 format!(
-                    "{{\"id\":{},\"kind\":{},\"source\":{},\"conflict\":{},\"output\":{}}}",
+                    "{{\"id\":{},\"kind\":{},\"source\":{},\"depends_on\":{},\"status\":{},\"effectful\":{},\"lazy\":{},\"pending_confirmation\":{},\"error\":{},\"conflict\":{},\"output\":{}}}",
                     json_str(&cell.id),
                     json_str(match cell.kind {
                         CellKind::Jet => "jet",
                         CellKind::Markdown => "markdown",
                     }),
                     json_str(&cell.source),
+                    json_strings(&cell.depends_on),
+                    json_str(status),
+                    effectful,
+                    lazy,
+                    pending,
+                    error,
                     conflict,
                     output.unwrap_or_else(|| "null".into())
                 )
@@ -558,8 +1102,9 @@ impl Kernel {
             })
             .collect::<Vec<_>>()
             .join(",");
+        let identity = self.identity();
         format!(
-            "{{\"environment_hash\":{},\"path\":{},\"notice\":{},\"cache_entries\":{},\"merge_conflicts\":{},\"execution_count\":{},\"debug\":{},\"perf\":{},\"pending_stdin\":{},\"cells\":[{}],\"turns\":[{}]}}",
+            "{{\"environment_hash\":{},\"path\":{},\"notice\":{},\"cache_entries\":{},\"merge_conflicts\":{},\"execution_count\":{},\"debug\":{},\"perf\":{},\"pending_stdin\":{},\"identity\":{{\"source\":{},\"build\":{},\"session\":{},\"authority\":{}}},\"controls\":[{}],\"cells\":[{}],\"turns\":[{}]}}",
             json_str(&self.notebook.environment_hash),
             self.document_path
                 .as_ref()
@@ -575,9 +1120,40 @@ impl Kernel {
             self.debug_attached,
             self.perf_attached,
             self.policy.pending_input(),
+            json_str(&identity.source),
+            json_str(&identity.build),
+            json_str(&identity.session),
+            json_str(&identity.authority),
+            self.controls_json(),
             cells,
             turns
         )
+    }
+
+    fn cell_status(&self, cell: &super::document::NotebookCell) -> &'static str {
+        if self.pending_effects.contains(&cell.id) {
+            return "awaiting_confirmation";
+        }
+        if self
+            .cell_errors
+            .get(&cell.id)
+            .is_some_and(|error| !error.is_empty())
+        {
+            return "error";
+        }
+        if self.cell_output_live(cell) {
+            return "live";
+        }
+        if self.cell_lazy.contains(&cell.id) {
+            return "stale_lazy";
+        }
+        if cell.output.is_some() {
+            "stale"
+
+        } else {
+            "idle"
+        }
+
     }
 
     fn cell_output_live(&self, cell: &super::document::NotebookCell) -> bool {
@@ -591,6 +1167,50 @@ impl Kernel {
             .is_none_or(|turn| !turn.stale)
     }
 }
+fn app_control_type_supported(ty: &crate::AST::Type) -> bool {
+    match ty {
+        crate::AST::Type::Int
+        | crate::AST::Type::Float
+        | crate::AST::Type::Bool
+        | crate::AST::Type::String
+        | crate::AST::Type::Char
+        | crate::AST::Type::IntN { .. }
+        | crate::AST::Type::Float32 => true,
+        crate::AST::Type::List(inner)
+        | crate::AST::Type::Option(inner)
+        | crate::AST::Type::FixedList { elem: inner, .. }
+        | crate::AST::Type::Tagged { inner, .. }
+        | crate::AST::Type::InlineRange { base: inner, .. } => {
+            app_control_type_supported(inner)
+        }
+        crate::AST::Type::Map { key, value, .. } => {
+            app_control_type_supported(key) && app_control_type_supported(value)
+        }
+        crate::AST::Type::Tuple(fields) => fields
+            .iter()
+            .all(|(_, field)| app_control_type_supported(field)),
+        crate::AST::Type::Shared(_)
+        | crate::AST::Type::Result { .. }
+        | crate::AST::Type::Fn { .. }
+        | crate::AST::Type::Named(_)
+        | crate::AST::Type::Apply { .. }
+        | crate::AST::Type::TraitObject(_)
+        | crate::AST::Type::Union(_)
+        | crate::AST::Type::Quantity { .. }
+        | crate::AST::Type::Measure(_) => false,
+    }
+}
+
+fn app_effect_supported(effect: &str) -> bool {
+    let root = effect
+        .strip_prefix('!')
+        .unwrap_or(effect)
+        .split('.')
+        .next()
+        .unwrap_or_default();
+    notebook_flags().allow.contains(root)
+}
+
 
 #[derive(Clone, Debug)]
 pub struct CellExecResult {
@@ -609,6 +1229,114 @@ impl CellExecResult {
     }
 }
 
+fn build_identity(environment_hash: &str) -> String {
+    SHA256::sha256_hex(
+        format!(
+            "jet-notebook-build-v1|{}|{}",
+            env!("CARGO_PKG_VERSION"),
+            environment_hash
+        )
+        .as_bytes(),
+    )
+}
+
+fn control_key(function: &str, name: &str) -> String {
+    format!("{function}\0{name}")
+}
+
+fn control_value_matches(value: &str, type_name: &str) -> bool {
+    let value = value.trim();
+    let (tokens, diagnostics) = crate::Lexer::lex(value);
+    if diagnostics.iter().any(|diagnostic| {
+        matches!(
+            diagnostic.severity,
+            crate::Diagnostics::Severity::Error
+        )
+    }) {
+        return false;
+    }
+    let first = tokens
+        .iter()
+        .find(|token| {
+            !matches!(
+                &token.kind,
+                crate::Lexer::TokKind::Semi
+                    | crate::Lexer::TokKind::Eof
+                    | crate::Lexer::TokKind::LineComment(_)
+                    | crate::Lexer::TokKind::BlockComment(_)
+            )
+        })
+        .map(|token| &token.kind);
+    match type_name {
+        "Bool" => first.is_some_and(|kind| {
+            matches!(
+                kind,
+                crate::Lexer::TokKind::KwTrue | crate::Lexer::TokKind::KwFalse
+            )
+        }),
+        "String" => first.is_some_and(|kind| {
+            matches!(
+                kind,
+                crate::Lexer::TokKind::Str(_) | crate::Lexer::TokKind::RawStr(_)
+            )
+        }),
+        "Char" => first.is_some_and(|kind| matches!(kind, crate::Lexer::TokKind::Char(_))),
+        "Float" | "F32" => first.is_some_and(|kind| {
+            matches!(
+                kind,
+                crate::Lexer::TokKind::Float(..) | crate::Lexer::TokKind::Int(..)
+            )
+        }),
+        "Int" | "I8" | "I16" | "I32" | "I64" | "I128" | "U8" | "U16" | "U32"
+        | "U64" | "U128" => first.is_some_and(|kind| {
+            matches!(kind, crate::Lexer::TokKind::Int(..))
+        }),
+        name if name.starts_with('?') => {
+            value == "null" || control_value_matches(value, name.trim_start_matches('?'))
+        }
+        name if name.starts_with('[') || name.starts_with('(') => first.is_some_and(|kind| {
+            matches!(
+                (name.as_bytes().first(), kind),
+                (Some(b'['), crate::Lexer::TokKind::LBracket)
+                    | (Some(b'('), crate::Lexer::TokKind::LParen)
+            )
+        }),
+        _ => first.is_some(),
+    }
+}
+
+fn source_may_have_effect(source: &str) -> bool {
+    [
+        "print(",
+        "println(",
+        "eprint(",
+        "io.",
+        "fs.",
+        "net.",
+        "exec.",
+        "write(",
+        "save(",
+        "stdin",
+        "stdout",
+        "stderr",
+        "sleep(",
+        "random(",
+        "clock(",
+    ]
+    .iter()
+    .any(|marker| source.contains(marker))
+}
+
+fn diagnostic_error(code: &str, what: &str, why: impl Into<String>, fix: impl Into<String>) -> String {
+    format!(
+        "{{\"code\":{},\"what\":{},\"why\":{},\"fix\":{}}}",
+        json_str(code),
+        json_str(what),
+        json_str(&why.into()),
+        json_str(&fix.into())
+    )
+}
+
 fn bundle_for_eval(eval: &EvalResult) -> MimeBundle {
     // `EvalResult.text` is the canonical turn/event stream: it contains sink
     // output plus any echoed value or diagnostic. Keep it intact so a client
@@ -623,8 +1351,18 @@ fn bundle_for_eval(eval: &EvalResult) -> MimeBundle {
         text => text.to_string(),
     };
     let mut mime = vec![("text/plain".to_string(), text.clone())];
-    if text.trim_start().starts_with("<svg") {
+    let trimmed = text.trim_start();
+    if trimmed.starts_with("<svg") {
         mime.push(("image/svg+xml".to_string(), text.clone()));
+    }
+    let html_tag = trimmed
+        .strip_prefix('<')
+        .and_then(|rest| rest.split_once([' ', '>']).map(|(tag, _)| tag));
+    if matches!(
+        html_tag,
+        Some("html" | "table" | "div" | "span" | "pre" | "section")
+    ) {
+        mime.push(("text/html".to_string(), text.clone()));
     }
     if let Some(table) = eval.value.as_ref().and_then(table_mime) {
         mime.push(("text/html".to_string(), table));

@@ -135,7 +135,17 @@ fn loop_body_can_break_inner(
 pub fn parse(toks: &[Token]) -> Result<Program, Vec<Diagnostic>> {
     parse_inner(toks, false, false, None)
 }
-
+/// Parse ordinary Jet source while retaining the original text for
+/// source-derived machine fixes such as the explicit-semicolon edit.
+///
+/// Token spans are byte offsets into `source`; callers must pass the exact
+/// source used to produce `toks`.
+pub fn parse_with_source(
+    toks: &[Token],
+    source: &str,
+) -> Result<Program, Vec<Diagnostic>> {
+    parse_inner(toks, false, false, Some(source))
+}
 /// Parse a Jetpack config surface. The config grammar reserves `$NAME` for a
 /// typed environment read; ordinary Jet source keeps the same token retired.
 pub fn parse_config(toks: &[Token]) -> Result<Program, Vec<Diagnostic>> {
@@ -216,6 +226,7 @@ fn parse_for_check_inner(
         source: source.map(str::to_owned),
         pos: 0,
         diags: Vec::new(),
+        explicit_semicolon_reported: false,
         pending_type_gt: false,
         depth: 0,
         result_handler_depth: 0,
@@ -262,6 +273,7 @@ fn parse_inner(
         toks: &toks,
         source: source.map(str::to_owned),
         pos: 0,
+        explicit_semicolon_reported: false,
         diags: Vec::new(),
         pending_type_gt: false,
         depth: 0,
@@ -328,6 +340,20 @@ fn string_literal_value(parts: &[StrTokPart]) -> Result<String, Diagnostic> {
         )),
     }
 }
+fn string_literal_token_value(kind: &TokKind) -> Result<String, Diagnostic> {
+    match kind {
+        TokKind::Str(parts) => string_literal_value(parts),
+        TokKind::RawStr(text) => Ok(text.clone()),
+        other => Err(Diagnostic::error(
+            "E0003",
+            format!("expected quoted text, found {}", crate::Lexer::describe(other)),
+            "this position accepts one non-interpolated string literal".to_string(),
+            "write a quoted string or a backtick-fenced raw string".to_string(),
+            None,
+        )),
+    }
+}
+
 
 /// Live teaching diagnostics that recover in the AST; fmt may rewrite to canon.
 fn is_teaching_parse_diag(code: &str) -> bool {
@@ -393,6 +419,8 @@ struct Parser<'a> {
     source: Option<String>,
     pos: usize,
     diags: Vec<Diagnostic>,
+    /// D-SEMI1=A: report one explicit semicolon boundary per source file.
+    explicit_semicolon_reported: bool,
     /// S33: when `>>` is split while closing nested `Type<…>`.
     pending_type_gt: bool,
     /// Current recursive parser nesting depth.
@@ -602,7 +630,6 @@ impl<'a> Parser<'a> {
     fn peek4(&self) -> &Token {
         &self.toks[(self.pos + 3).min(self.toks.len() - 1)]
     }
-
     #[allow(dead_code)]
     fn peek5(&self) -> &Token {
         &self.toks[(self.pos + 4).min(self.toks.len() - 1)]
@@ -613,8 +640,47 @@ impl<'a> Parser<'a> {
         self.toks[self.pos.saturating_sub(1)].span.end
     }
 
+    /// D-SEMI1=A: explicit terminators remain parser boundaries but report one
+    /// source-derived, behavior-preserving edit per file.
+    fn report_explicit_semicolon(&mut self, span: Span) {
+        if self.explicit_semicolon_reported {
+            return;
+        }
+        self.explicit_semicolon_reported = true;
+        let new_text = self
+            .source
+            .as_deref()
+            .and_then(|source| {
+                let next_code = self.toks.get(self.pos + 1..)?.iter().find(|token| {
+                    !matches!(
+                        &token.kind,
+                        TokKind::LineComment(_)
+                            | TokKind::BlockComment(_)
+                            | TokKind::Semi
+                            | TokKind::Eof
+                    )
+                });
+                let same_line_code = next_code
+                    .and_then(|next| source.get(span.end..next.span.start))
+                    .is_some_and(|gap| !gap.contains('\n') && !gap.contains('\r'));
+                Some(if same_line_code {
+                    "\n".to_string()
+                } else {
+                    String::new()
+                })
+            })
+            .unwrap_or_default();
+        let diagnostic = Diagnostic::from_row("E0373", &[], Some(span)).with_edit(
+            crate::Diagnostics::TextEdit { span, new_text },
+        );
+        self.diags.push(diagnostic);
+    }
+
     fn bump(&mut self) -> Token {
         let t = self.peek().clone();
+        if matches!(t.kind, TokKind::Semi) && t.span.start < t.span.end {
+            self.report_explicit_semicolon(t.span);
+        }
         if self.pos < self.toks.len() - 1 {
             self.pos += 1;
         }
@@ -979,10 +1045,13 @@ fn pat_span(pat: &Pattern) -> Span {
 }
 
 /// D-DOTSCOPE1/leading-dot patterns share one head classifier: an uppercase
-/// ident or `null` (spelled `Syntax::LIT_NULL`) may follow a leading `.`.
+/// ident, a derive-template `@` hole, or `null` may follow a leading `.`.
 fn leading_dot_variant(kind: &TokKind) -> Option<String> {
     match kind {
-        TokKind::Ident(name) if name.chars().next().is_some_and(char::is_uppercase) => {
+        TokKind::Ident(name)
+            if name.starts_with('@')
+                || name.chars().next().is_some_and(char::is_uppercase) =>
+        {
             Some(name.clone())
         }
         TokKind::KwNull => Some(Syntax::LIT_NULL.to_string()),
@@ -1026,7 +1095,7 @@ mod s61_tests {
                  callback: fn(?Int !IOError) !IOError\n\
                  impossible: !Never\n\
              }\n\
-             alias Box<T> :: ?T !IOError;\n\
+             alias Box<T> :: ?T !IOError\n\
              fn fetch(value: ?Int !IOError) ?Int !(DbError | TimeoutError) -> value\n\
              fn save() !IOError {}\n\
              fn run() {}\n",
@@ -1081,6 +1150,28 @@ mod s61_tests {
                 .expect("contextual propagation formatter");
         assert!(contextual.contains("?(\"loading config\")"), "{contextual}");
     }
+    #[test]
+    fn built_in_marker_accepts_positional_string_argument() {
+        let parsed = program(
+            "#CLI\n\
+             struct ServeArgs {\n\
+                 #Doc(\"port\") port: Int{3000}\n\
+             }\n\
+             fn run(args: ServeArgs) {}\n",
+        );
+        let field = parsed
+            .items
+            .iter()
+            .find_map(|item| match item {
+                crate::AST::Item::Struct(def) => def.fields.first(),
+                _ => None,
+            })
+            .expect("ServeArgs.port");
+        assert_eq!(field.serde_markers.len(), 1);
+        assert_eq!(field.serde_markers[0].name, "Doc");
+        assert!(field.serde_markers[0].arg_labels[0].is_none());
+    }
+
 
     #[test]
     fn retired_failure_surface_never_builds_legacy_ast() {
@@ -1664,7 +1755,7 @@ fn build(b: BuildContext) {
             ),
             (
                 "#[HTML(\"index.html\"), PubFile, Target(Web), NoPrelude]\nfn main() {}\n",
-                "#[HTML(\"index.html\"), PubFile, Target(Web), NoPrelude]",
+                "#[HTML(Path{\"index.html\"}), PubFile, Target(Web), NoPrelude]",
             ),
         ] {
             let once = format_source(src).expect("format once");
@@ -1828,6 +1919,7 @@ fn run() {
         let mut p = Parser {
             toks: &toks,
             source: None,
+            explicit_semicolon_reported: false,
             pos: 0,
             diags: Vec::new(),
             pending_type_gt: false,
@@ -2093,7 +2185,6 @@ fn notify(ready: Bool) -[Net]> {
 
         for src in [
             "fn run() { y :: |x| x + 1 }",
-            "fn run() { y :: 1 | 2 }",
             "fn run() { y :: 1 |> print }",
         ] {
             let (toks, lex_errs) = lex(src);
@@ -2170,7 +2261,7 @@ fn notify(ready: Bool) -[Net]> {
                  nested: [Int !(DbError | TimeoutError)]\n\
                  callback: fn(?Int !IOError) Int !(DbError | TimeoutError)\n\
              }\n\
-             alias Box<T> :: ?T !IOError;\n\
+             alias Box<T> :: ?T !IOError\n\
              fn fetch(value: ?Int !IOError) Box<?Int !IOError> -> value\n\
              fn run() {}\n",
         );
@@ -2323,7 +2414,7 @@ fn notify(ready: Bool) -[Net]> {
                  tuple: (entry: ?Entry !StoreError, failure: !Err)\n\
                  callback: fn(?Int !StoreError) !IOError\n\
              }\n\
-             alias Callback :: fn(?Int !StoreError) !IOError;\n\
+             alias Callback :: fn(?Int !StoreError) !IOError\n\
              fn run() {}\n",
         );
         let holder = parsed

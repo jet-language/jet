@@ -38,6 +38,9 @@ mod jet_std;
 // Values.rs is shared with the standalone AOT Prelude. Re-export only the
 // canonical formatter needed by that shared fragment.
 pub(crate) use self::jet_std::jet_int_to_string;
+// The Foundation carrier's tier-side accessors are a trait (`DataTree.rs`);
+// the included `Sync.rs` and the marshalling below call them by method syntax.
+use self::jet_std::JetDataTreeAccess;
 
 fn datatree_from_ct(value: &CtValue) -> Option<jet_std::DataTree> {
     fn object_pairs(
@@ -62,6 +65,35 @@ fn datatree_from_ct(value: &CtValue) -> Option<jet_std::DataTree> {
         Some(pairs)
     }
 
+    // Map iteration lowers to a list of named tuple records before the
+    // enclosing DataTree object is built. Normalize that carrier here so the
+    // comptime renderer sees the same ordered object as AOT/JIT.
+    fn list_object_pairs(values: &[CtValue]) -> Option<Vec<(String, CtValue)>> {
+        values
+            .iter()
+            .map(|value| {
+                let CtValue::Struct { fields, .. } = value else {
+                    return None;
+                };
+                if fields.len() != 2 {
+                    return None;
+                }
+                let key = fields
+                    .iter()
+                    .find(|(name, _)| name == "key")
+                    .map(|(_, value)| value)?;
+                let value = fields
+                    .iter()
+                    .find(|(name, _)| name == "value")
+                    .map(|(_, value)| value)?;
+                let CtValue::Str(key) = key else {
+                    return None;
+                };
+                Some((key.clone(), value.clone()))
+            })
+            .collect()
+    }
+
     match value {
         CtValue::Enum {
             type_name,
@@ -69,7 +101,7 @@ fn datatree_from_ct(value: &CtValue) -> Option<jet_std::DataTree> {
             args,
         } if matches!(
             type_name.as_str(),
-            "DataTree" | "JSON" | "TOML" | "YAML" | "CSV"
+            "DataTree" | "TOML" | "YAML" | "CSV"
         ) =>
         {
             let payload = args.first().map(|(_, value)| value);
@@ -119,6 +151,9 @@ fn datatree_from_ct(value: &CtValue) -> Option<jet_std::DataTree> {
                     Some(CtValue::Map(fields)) => map_pairs(fields)
                         .and_then(object_pairs)
                         .map(jet_std::DataTree::Object),
+                    Some(CtValue::List(values)) => list_object_pairs(values)
+                        .and_then(object_pairs)
+                        .map(jet_std::DataTree::Object),
                     Some(CtValue::Struct { type_name, fields }) if type_name == "JSONObject" => {
                         object_pairs(fields.clone()).map(jet_std::DataTree::Object)
                     }
@@ -151,20 +186,79 @@ fn datatree_from_ct(value: &CtValue) -> Option<jet_std::DataTree> {
     }
 }
 
-/// D-DATATREE-ERGO1=A: the comptime value carrier only marshals into the
-/// Prelude tree; scalar projection policy stays on `DataTree::to_text`.
+fn field_errors_to_ct(errors: Vec<jet_std::FieldError>) -> CtValue {
+    CtValue::List(
+        errors
+            .into_iter()
+            .map(|error| CtValue::Struct {
+                type_name: "FieldError".to_string(),
+                fields: vec![
+                    ("path".to_string(), CtValue::Str(error.path)),
+                    ("reason".to_string(), CtValue::Str(error.reason)),
+                ],
+            })
+            .collect(),
+    )
+}
+
+/// The evaluator marshals values; scalar projection policy stays on DataTree.
 pub fn datatree_to_text(value: &CtValue) -> Option<String> {
     datatree_from_ct(value).and_then(|tree| tree.to_text())
 }
 
-/// D-DATATREE-ERGO1=A: the comptime value carrier only marshals into the
-/// Prelude tree; recursive comparison policy stays on `DataTree`.
+/// Recursive comparison uses the same Prelude DataTree policy on every tier.
 pub fn datatree_equal_unordered(left: &CtValue, right: &CtValue) -> bool {
     match (datatree_from_ct(left), datatree_from_ct(right)) {
         (Some(left), Some(right)) => left.equal_unordered(&right),
         _ => false,
     }
 }
+
+/// Route comptime Int decoding through the shared Prelude coercion policy.
+pub(super) fn decode_int_ct(value: &CtValue) -> Result<CtValue, CtValue> {
+    let Some(tree) = datatree_from_ct(value) else {
+        return Err(field_errors_to_ct(jet_std::FieldError::one(
+            "expected Int, found value",
+        )));
+    };
+    jet_std::decode_int_with(
+        &tree,
+        crate::Numeric::CtBigInt::from_int,
+        |text| {
+            crate::Numeric::CtBigInt::from_str(text).map_err(|error| error.to_string())
+        },
+    )
+    .map(super::Builtins::exact_int_value)
+    .map_err(field_errors_to_ct)
+}
+
+/// Route fixed-width comptime integer decoding through the shared Prelude
+/// coercion and bounds policy.
+pub(super) fn decode_int_n_ct(
+    value: &CtValue,
+    signed: bool,
+    bits: u8,
+    type_name: &str,
+) -> Result<CtValue, CtValue> {
+    let Some(tree) = datatree_from_ct(value) else {
+        return Err(field_errors_to_ct(jet_std::FieldError::one(
+            "expected Int, found value",
+        )));
+    };
+    jet_std::jet_datatree_decode_fixed_integer(&tree, signed, bits, type_name)
+        .map(|value| {
+            let exact = if let Ok(value) = i64::try_from(value) {
+                crate::Numeric::CtBigInt::from_int(value)
+            } else if let Ok(value) = u64::try_from(value) {
+                crate::Numeric::CtBigInt::from_u64(value)
+            } else {
+                unreachable!("fixed integer kernel returned an unrepresentable value")
+            };
+            super::Builtins::exact_int_value(exact)
+        })
+        .map_err(field_errors_to_ct)
+}
+
 
 impl __jet_Encode for String {
     fn jet_encode(&self) -> jet_std::DataTree {
@@ -186,7 +280,14 @@ impl __jet_Encode for i64 {
 
 impl __jet_Decode for i64 {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
-        jet_std::decode_int(tree)
+        jet_std::decode_int_with(
+            tree,
+            |value| value,
+            |text| {
+                text.parse::<i64>()
+                    .map_err(|_| "exact Int is outside i64".to_owned())
+            },
+        )
     }
 }
 
@@ -198,7 +299,15 @@ impl __jet_Encode for u64 {
 
 impl __jet_Decode for u64 {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
-        jet_std::decode_int(tree).and_then(|value| {
+        jet_std::decode_int_with(
+            tree,
+            |value| value,
+            |text| {
+                text.parse::<i64>()
+                    .map_err(|_| "exact Int is outside i64".to_owned())
+            },
+        )
+        .and_then(|value| {
             u64::try_from(value)
                 .map_err(|_| jet_std::FieldError::one("expected non-negative integer"))
         })

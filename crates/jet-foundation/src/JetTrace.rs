@@ -4,19 +4,25 @@
 //! performance traces share one encoding/hash law. Capture payloads grow later;
 //! schema identity and verify are the durable seam.
 
+use crate::Devtools::{JetDevtoolsEventBody, JetDevtoolsFunctionIdentity};
+use std::collections::BTreeMap;
 use crate::PerformanceBudget::{stable_id, verify_stable_id, CanonicalJson};
 use crate::Syntax::ARTIFACT_EXT_TRACE;
 use crate::SHA256;
-use std::collections::BTreeMap;
 
 pub const TRACE_SCHEMA: &str = "jet.trace";
 pub const TRACE_VERSION: u32 = 1;
 pub const CAPTURE_POLICY_SCHEMA: &str = "5";
+pub const TRACE_GAME_FRAME_ROW_LIMIT: usize = 4096;
+pub const TRACE_GAME_DRAW_EVENT_ROW_LIMIT: usize = 4096;
 pub const TRACE_BROWSER_ROW_LIMIT: u64 = 4096;
 pub const TRACE_TASK_ROW_LIMIT: u64 = 4096;
 pub const TRACE_IO_ROW_LIMIT: u64 = 4096;
-pub const TRACE_NATIVE_ROW_LIMIT: u64 = 1;
+pub const TRACE_NATIVE_ROW_LIMIT: u64 = 4096;
 pub const TRACE_SPAN_ROW_LIMIT: u64 = 4096;
+const TRACE_RECEIPT_SECTION_NAME_BYTES: usize = 128;
+const TRACE_RECEIPT_SECTION_TYPE_BYTES: usize = 256;
+
 
 /// Default privacy exclusions from D-PERFSESSION1 (sorted for A-canonical bytes).
 pub const DEFAULT_EXCLUSIONS: &[&str] = &[
@@ -297,6 +303,230 @@ impl TraceSample {
         ])
     }
 }
+/// Typed game frame facts projected by the devtools host into `jet.trace`.
+/// These rows retain the producer's identity and timing; they are not a
+/// renderer-local approximation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TraceGameFunctionSource {
+    pub source_id: String,
+    pub file: String,
+    pub start_line: u64,
+    pub start_column: u64,
+    pub end_line: u64,
+    pub end_column: u64,
+}
+
+impl TraceGameFunctionSource {
+    fn to_json(&self) -> Result<CanonicalJson, String> {
+        CanonicalJson::object([
+            ("end_column".into(), CanonicalJson::Integer(self.end_column.to_string())),
+            ("end_line".into(), CanonicalJson::Integer(self.end_line.to_string())),
+            ("file".into(), CanonicalJson::String(self.file.clone())),
+            ("source_id".into(), CanonicalJson::String(self.source_id.clone())),
+            ("start_column".into(), CanonicalJson::Integer(self.start_column.to_string())),
+            ("start_line".into(), CanonicalJson::Integer(self.start_line.to_string())),
+        ])
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TraceGameFunction {
+    pub function_id: String,
+    pub name: String,
+    pub source: TraceGameFunctionSource,
+}
+
+impl TraceGameFunction {
+    fn to_json(&self) -> Result<CanonicalJson, String> {
+        CanonicalJson::object([
+            ("function_id".into(), CanonicalJson::String(self.function_id.clone())),
+            ("name".into(), CanonicalJson::String(self.name.clone())),
+            ("source".into(), self.source.to_json()?),
+        ])
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TraceGameFrame {
+    pub sequence: u64,
+    pub frame_id: u64,
+    pub scene: String,
+    pub frame_index: u64,
+    pub build: String,
+    pub revision: String,
+    pub trace_id: String,
+    pub start_ns: u64,
+    pub cpu_ns: u64,
+    pub gpu_ns: Option<u64>,
+    pub responsible_function: Option<TraceGameFunction>,
+}
+
+impl TraceGameFrame {
+    pub fn to_json(&self) -> Result<CanonicalJson, String> {
+        CanonicalJson::object([
+            ("build".into(), CanonicalJson::String(self.build.clone())),
+            ("cpu_ns".into(), CanonicalJson::Integer(self.cpu_ns.to_string())),
+            ("frame_id".into(), CanonicalJson::Integer(self.frame_id.to_string())),
+            ("frame_index".into(), CanonicalJson::Integer(self.frame_index.to_string())),
+            (
+                "gpu_ns".into(),
+                self.gpu_ns
+                    .map(|value| CanonicalJson::Integer(value.to_string()))
+                    .unwrap_or(CanonicalJson::Null),
+            ),
+            (
+                "responsible_function".into(),
+                self.responsible_function
+                    .as_ref()
+                    .map(TraceGameFunction::to_json)
+                    .transpose()?
+                    .unwrap_or(CanonicalJson::Null),
+            ),
+            ("revision".into(), CanonicalJson::String(self.revision.clone())),
+            ("scene".into(), CanonicalJson::String(self.scene.clone())),
+            ("sequence".into(), CanonicalJson::Integer(self.sequence.to_string())),
+            ("start_ns".into(), CanonicalJson::Integer(self.start_ns.to_string())),
+            ("trace_id".into(), CanonicalJson::String(self.trace_id.clone())),
+        ])
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TraceGameDrawEvent {
+    pub sequence: u64,
+    pub frame_id: u64,
+    pub scene: String,
+    pub frame_index: u64,
+    pub build: String,
+    pub revision: String,
+    pub trace_id: String,
+    pub event_index: u64,
+    pub event_id: u64,
+    pub function: TraceGameFunction,
+    pub phase: String,
+    pub domain: String,
+    pub start_ns: u64,
+    pub duration_ns: u64,
+    pub object_id: Option<String>,
+    pub resource_id: Option<String>,
+}
+
+impl TraceGameDrawEvent {
+    pub fn to_json(&self) -> Result<CanonicalJson, String> {
+        CanonicalJson::object([
+            ("build".into(), CanonicalJson::String(self.build.clone())),
+            ("domain".into(), CanonicalJson::String(self.domain.clone())),
+            ("duration_ns".into(), CanonicalJson::Integer(self.duration_ns.to_string())),
+            ("event_id".into(), CanonicalJson::Integer(self.event_id.to_string())),
+            ("event_index".into(), CanonicalJson::Integer(self.event_index.to_string())),
+            ("frame_id".into(), CanonicalJson::Integer(self.frame_id.to_string())),
+            ("frame_index".into(), CanonicalJson::Integer(self.frame_index.to_string())),
+            ("function".into(), self.function.to_json()?),
+            ("object_id".into(), self.object_id.clone().map(CanonicalJson::String).unwrap_or(CanonicalJson::Null)),
+            ("phase".into(), CanonicalJson::String(self.phase.clone())),
+            ("resource_id".into(), self.resource_id.clone().map(CanonicalJson::String).unwrap_or(CanonicalJson::Null)),
+            ("revision".into(), CanonicalJson::String(self.revision.clone())),
+            ("scene".into(), CanonicalJson::String(self.scene.clone())),
+            ("sequence".into(), CanonicalJson::Integer(self.sequence.to_string())),
+            ("start_ns".into(), CanonicalJson::Integer(self.start_ns.to_string())),
+            ("trace_id".into(), CanonicalJson::String(self.trace_id.clone())),
+        ])
+    }
+}
+
+fn trace_game_function(function: &JetDevtoolsFunctionIdentity) -> TraceGameFunction {
+    TraceGameFunction {
+        function_id: function.function_id.clone(),
+        name: function.name.clone(),
+        source: TraceGameFunctionSource {
+            source_id: function.source.source_id.clone(),
+            file: function.source.file.clone(),
+            start_line: u64::from(function.source.start_line),
+            start_column: u64::from(function.source.start_column),
+            end_line: u64::from(function.source.end_line),
+            end_column: u64::from(function.source.end_column),
+        },
+    }
+}
+
+/// Project typed game devtools bodies into the canonical trace rows.  The
+/// adapter deliberately matches the typed body enum; it does not reinterpret
+/// the wire `kind` string or parse package payloads.
+pub fn project_game_devtools_bodies(
+    bodies: &[JetDevtoolsEventBody],
+) -> Result<(Vec<TraceGameFrame>, Vec<TraceGameDrawEvent>), String> {
+    let mut frames = Vec::new();
+    let mut draws = Vec::new();
+    for body in bodies {
+        match body {
+            JetDevtoolsEventBody::GameFrameSample {
+                sequence,
+                frame_id,
+                scene,
+                frame_index,
+                build,
+                revision,
+                trace_id,
+                start_ns,
+                cpu_ns,
+                gpu_ns,
+                responsible_function,
+            } => frames.push(TraceGameFrame {
+                sequence: *sequence,
+                frame_id: *frame_id,
+                scene: scene.clone(),
+                frame_index: *frame_index,
+                build: build.clone(),
+                revision: revision.clone(),
+                trace_id: trace_id.clone(),
+                start_ns: *start_ns,
+                cpu_ns: *cpu_ns,
+                gpu_ns: *gpu_ns,
+                responsible_function: responsible_function
+                    .as_ref()
+                    .map(trace_game_function),
+            }),
+            JetDevtoolsEventBody::GameDrawEvent {
+                sequence,
+                frame_id,
+                scene,
+                frame_index,
+                build,
+                revision,
+                trace_id,
+                event_index,
+                event_id,
+                function,
+                phase,
+                domain,
+                start_ns,
+                duration_ns,
+                object_id,
+                resource_id,
+            } => draws.push(TraceGameDrawEvent {
+                sequence: *sequence,
+                frame_id: *frame_id,
+                scene: scene.clone(),
+                frame_index: *frame_index,
+                build: build.clone(),
+                revision: revision.clone(),
+                trace_id: trace_id.clone(),
+                event_index: *event_index,
+                event_id: *event_id,
+                function: trace_game_function(function),
+                phase: phase.clone(),
+                domain: domain.clone(),
+                start_ns: *start_ns,
+                duration_ns: *duration_ns,
+                object_id: object_id.clone(),
+                resource_id: resource_id.clone(),
+            }),
+            _ => {}
+        }
+    }
+    Ok((frames, draws))
+}
+
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TraceAllocation {
@@ -644,6 +874,84 @@ impl TraceSourceMap {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TraceReceiptSection {
+    pub name: String,
+    pub type_name: String,
+    pub value: CanonicalJson,
+    pub digest: String,
+}
+
+impl TraceReceiptSection {
+    pub fn to_json(&self) -> Result<CanonicalJson, String> {
+        CanonicalJson::object([
+            ("digest".into(), CanonicalJson::String(self.digest.clone())),
+            ("name".into(), CanonicalJson::String(self.name.clone())),
+            (
+                "type_name".into(),
+                CanonicalJson::String(self.type_name.clone()),
+            ),
+            ("value".into(), self.value.clone()),
+        ])
+    }
+
+    pub fn from_json(value: &CanonicalJson) -> Result<Self, String> {
+        Self::from_json_at(value, "trace receipt section")
+    }
+
+    fn from_json_at(value: &CanonicalJson, label: &str) -> Result<Self, String> {
+        let fields = object_keys(value, label, &["digest", "name", "type_name", "value"])?;
+        let name = text(&fields["name"], &format!("{label}.name"))?;
+        if name.is_empty() {
+            return Err(format!("{label}.name is empty"));
+        }
+        if name.len() > TRACE_RECEIPT_SECTION_NAME_BYTES {
+            return Err(format!(
+                "{label}.name is too long (maximum {TRACE_RECEIPT_SECTION_NAME_BYTES} bytes)"
+            ));
+        }
+        if !name
+            .chars()
+            .all(|character| !character.is_control() && character != '/' && character != '\\')
+        {
+            return Err(format!("{label}.name is invalid"));
+        }
+        let type_name = text(&fields["type_name"], &format!("{label}.type_name"))?;
+        if type_name.is_empty() {
+            return Err(format!("{label}.type_name is empty"));
+        }
+        if type_name.len() > TRACE_RECEIPT_SECTION_TYPE_BYTES {
+            return Err(format!(
+                "{label}.type_name is too long (maximum {TRACE_RECEIPT_SECTION_TYPE_BYTES} bytes)"
+            ));
+        }
+        if !type_name.chars().all(|character| !character.is_control()) {
+            return Err(format!("{label}.type_name is invalid"));
+        }
+        let digest = text(&fields["digest"], &format!("{label}.digest"))?;
+        if digest.len() != 64
+            || !digest
+                .bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+        {
+            return Err(format!("{label}.digest is not lowercase Hex64"));
+        }
+        let value = fields["value"].clone();
+        if !matches!(value, CanonicalJson::Object(_)) {
+            return Err(format!("{label}.value must be a canonical JSON object"));
+        }
+        if digest != stable_id(&value) {
+            return Err(format!("{label}.digest does not match value"));
+        }
+        Ok(Self {
+            name: name.into(),
+            type_name: type_name.into(),
+            value,
+            digest: digest.into(),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TraceSkeleton {
     pub command: String,
     pub argv: Vec<String>,
@@ -653,16 +961,31 @@ pub struct TraceSkeleton {
     pub samples: Vec<TraceSample>,
     pub allocations: Vec<TraceAllocation>,
     pub browser: Vec<TraceBrowser>,
+    pub game_frames: Vec<TraceGameFrame>,
+    pub game_draw_events: Vec<TraceGameDrawEvent>,
     pub tasks: Vec<TraceTask>,
     pub locks: Vec<TraceLock>,
     pub io: Vec<TraceIo>,
     pub native: Vec<TraceNative>,
     pub spans: Vec<TraceSpan>,
+    pub receipt_sections: Vec<TraceReceiptSection>,
     pub source_identity: Vec<SourceIdentity>,
     pub source_maps: Vec<TraceSourceMap>,
 }
 
+
 impl TraceSkeleton {
+    /// Merge typed game profiler projections into the canonical skeleton before
+    /// the shared `build_skeleton_bytes` writer is called.
+    pub fn add_game_devtools_bodies(
+        &mut self,
+        bodies: &[JetDevtoolsEventBody],
+    ) -> Result<(), String> {
+        let (frames, draws) = project_game_devtools_bodies(bodies)?;
+        self.game_frames.extend(frames);
+        self.game_draw_events.extend(draws);
+        Ok(())
+    }
     pub fn content_json(&self) -> Result<CanonicalJson, String> {
         let argv = CanonicalJson::Array(
             self.argv
@@ -683,8 +1006,21 @@ impl TraceSkeleton {
             .collect::<Result<Vec<_>, _>>()?;
         let browser = self
             .browser
+
             .iter()
             .map(TraceBrowser::to_json)
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut game_frames = self.game_frames.clone();
+        game_frames.sort_by_key(|frame| (frame.sequence, frame.frame_id));
+        let game_frames = game_frames
+            .iter()
+            .map(TraceGameFrame::to_json)
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut game_draw_events = self.game_draw_events.clone();
+        game_draw_events.sort_by_key(|event| (event.sequence, event.event_index));
+        let game_draw_events = game_draw_events
+            .iter()
+            .map(TraceGameDrawEvent::to_json)
             .collect::<Result<Vec<_>, _>>()?;
         let tasks = self
             .tasks
@@ -722,8 +1058,23 @@ impl TraceSkeleton {
             .iter()
             .map(TraceSourceMap::to_json)
             .collect::<Result<Vec<_>, _>>()?;
+        let mut receipt_sections = self.receipt_sections.clone();
+        receipt_sections.sort_by(|a, b| {
+            a.name
+                .cmp(&b.name)
+                .then(a.type_name.cmp(&b.type_name))
+                .then(a.digest.cmp(&b.digest))
+                .then(a.value.bytes().cmp(&b.value.bytes()))
+        });
+        let receipt_sections = receipt_sections
+            .iter()
+            .map(TraceReceiptSection::to_json)
+            .collect::<Result<Vec<_>, _>>()?;
+
         CanonicalJson::object([
             ("allocations".into(), CanonicalJson::Array(allocations)),
+            ("game_draw_events".into(), CanonicalJson::Array(game_draw_events)),
+            ("game_frames".into(), CanonicalJson::Array(game_frames)),
             ("argv".into(), argv),
             ("browser".into(), CanonicalJson::Array(browser)),
             ("capture_policy".into(), self.capture_policy.to_json()?),
@@ -741,6 +1092,11 @@ impl TraceSkeleton {
                 CanonicalJson::Array(source_identity),
             ),
             ("source_maps".into(), CanonicalJson::Array(source_maps)),
+            (
+                "receipt_sections".into(),
+                CanonicalJson::Array(receipt_sections),
+            ),
+
             ("spans".into(), CanonicalJson::Array(spans)),
             ("tasks".into(), CanonicalJson::Array(tasks)),
             ("toolchain".into(), self.toolchain.to_json()?),
@@ -816,11 +1172,14 @@ fn validate_content(value: &CanonicalJson) -> Result<(), String> {
             "browser",
             "capture_policy",
             "command",
+            "game_draw_events",
+            "game_frames",
             "hardware",
             "io",
             "locks",
             "native",
             "samples",
+            "receipt_sections",
             "source_identity",
             "source_maps",
             "spans",
@@ -837,7 +1196,15 @@ fn validate_content(value: &CanonicalJson) -> Result<(), String> {
         }
         _ => return Err("content.argv is not an array".into()),
     }
-    for key in ["browser", "native", "spans", "source_maps"] {
+    for key in [
+        "browser",
+        "game_draw_events",
+        "game_frames",
+        "native",
+        "receipt_sections",
+        "spans",
+        "source_maps",
+    ] {
         match &fields[key] {
             CanonicalJson::Array(_) => {}
             _ => return Err(format!("content.{key} is not an array")),
@@ -846,8 +1213,11 @@ fn validate_content(value: &CanonicalJson) -> Result<(), String> {
     validate_hardware(&fields["hardware"])?;
     let limits = validate_capture_policy(&fields["capture_policy"])?;
     validate_browser(&fields["browser"], limits.browser_rows)?;
+    validate_game_frames(&fields["game_frames"])?;
+    validate_game_draw_events(&fields["game_draw_events"])?;
     validate_samples(&fields["samples"])?;
     validate_allocations(&fields["allocations"])?;
+    validate_receipt_sections(&fields["receipt_sections"])?;
     let tasks = validate_tasks(&fields["tasks"], limits.task_rows)?;
     validate_locks(&fields["locks"])?;
     validate_io(&fields["io"], &tasks, limits.io_rows)?;
@@ -858,6 +1228,7 @@ fn validate_content(value: &CanonicalJson) -> Result<(), String> {
     validate_toolchain(&fields["toolchain"])?;
     Ok(())
 }
+
 
 fn validate_hardware(value: &CanonicalJson) -> Result<(), String> {
     let fields = object_keys(
@@ -927,6 +1298,154 @@ fn validate_symbol(value: &CanonicalJson, label: &str) -> Result<(), String> {
     text(&fields["path"], &format!("{label}.path"))?;
     Ok(())
 }
+fn nonempty_game_text<'a>(value: &'a CanonicalJson, label: &str) -> Result<&'a str, String> {
+    let text = text(value, label)?;
+    if text.is_empty() {
+        return Err(format!("{label} is empty"));
+    }
+    Ok(text)
+}
+
+fn validate_game_function(value: &CanonicalJson, label: &str) -> Result<(), String> {
+    let fields = object_keys(value, label, &["function_id", "name", "source"])?;
+    nonempty_game_text(&fields["function_id"], &format!("{label}.function_id"))?;
+    nonempty_game_text(&fields["name"], &format!("{label}.name"))?;
+    let source = object_keys(
+        &fields["source"],
+        &format!("{label}.source"),
+        &[
+            "end_column",
+            "end_line",
+            "file",
+            "source_id",
+            "start_column",
+            "start_line",
+        ],
+    )?;
+    nonempty_game_text(&source["source_id"], &format!("{label}.source.source_id"))?;
+    nonempty_game_text(&source["file"], &format!("{label}.source.file"))?;
+    for key in ["end_column", "end_line", "start_column", "start_line"] {
+        unsigned(&source[key], &format!("{label}.source.{key}"))?;
+    }
+    Ok(())
+}
+
+fn validate_game_frames(value: &CanonicalJson) -> Result<(), String> {
+    let items = match value {
+        CanonicalJson::Array(items) => items,
+        _ => return Err("content.game_frames is not an array".into()),
+    };
+    if items.len() > TRACE_GAME_FRAME_ROW_LIMIT {
+        return Err(format!(
+            "content.game_frames exceeds row limit {TRACE_GAME_FRAME_ROW_LIMIT}"
+        ));
+    }
+    for (i, item) in items.iter().enumerate() {
+        let label = format!("content.game_frames[{i}]");
+        let fields = object_keys(
+            item,
+            &label,
+            &[
+                "build",
+                "cpu_ns",
+                "frame_id",
+                "frame_index",
+                "gpu_ns",
+                "responsible_function",
+                "revision",
+                "scene",
+                "sequence",
+                "start_ns",
+                "trace_id",
+            ],
+        )?;
+        for key in [
+            "frame_id",
+            "frame_index",
+            "sequence",
+            "start_ns",
+            "cpu_ns",
+        ] {
+            unsigned(&fields[key], &format!("{label}.{key}"))?;
+        }
+        for key in ["scene", "build", "revision", "trace_id"] {
+            nonempty_game_text(&fields[key], &format!("{label}.{key}"))?;
+        }
+        match &fields["gpu_ns"] {
+            CanonicalJson::Null => {}
+            value => {
+                unsigned(value, &format!("{label}.gpu_ns"))?;
+            }
+        }
+        match &fields["responsible_function"] {
+            CanonicalJson::Null => {}
+            value => validate_game_function(value, &format!("{label}.responsible_function"))?,
+        }
+    }
+    Ok(())
+}
+
+fn validate_game_draw_events(value: &CanonicalJson) -> Result<(), String> {
+    let items = match value {
+        CanonicalJson::Array(items) => items,
+        _ => return Err("content.game_draw_events is not an array".into()),
+    };
+    if items.len() > TRACE_GAME_DRAW_EVENT_ROW_LIMIT {
+        return Err(format!(
+            "content.game_draw_events exceeds row limit {TRACE_GAME_DRAW_EVENT_ROW_LIMIT}"
+        ));
+    }
+    for (i, item) in items.iter().enumerate() {
+        let label = format!("content.game_draw_events[{i}]");
+        let fields = object_keys(
+            item,
+            &label,
+            &[
+                "build",
+                "domain",
+                "duration_ns",
+                "event_id",
+                "event_index",
+                "frame_id",
+                "frame_index",
+                "function",
+                "object_id",
+                "phase",
+                "resource_id",
+                "revision",
+                "scene",
+                "sequence",
+                "start_ns",
+                "trace_id",
+            ],
+        )?;
+        for key in [
+            "duration_ns",
+            "event_id",
+            "event_index",
+            "frame_id",
+            "frame_index",
+            "sequence",
+            "start_ns",
+        ] {
+            unsigned(&fields[key], &format!("{label}.{key}"))?;
+        }
+        for key in ["build", "domain", "phase", "revision", "scene", "trace_id"] {
+            nonempty_game_text(&fields[key], &format!("{label}.{key}"))?;
+        }
+        validate_game_function(&fields["function"], &format!("{label}.function"))?;
+        for key in ["object_id", "resource_id"] {
+            match &fields[key] {
+                CanonicalJson::Null => {}
+                value => {
+                    nonempty_game_text(value, &format!("{label}.{key}"))?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 
 fn validate_samples(value: &CanonicalJson) -> Result<(), String> {
     let items = match value {
@@ -957,6 +1476,32 @@ fn validate_allocations(value: &CanonicalJson) -> Result<(), String> {
         unsigned(&fields["bytes"], &format!("{label}.bytes"))?;
         unsigned(&fields["count"], &format!("{label}.count"))?;
         validate_symbol(&fields["symbol"], &format!("{label}.symbol"))?;
+    }
+    Ok(())
+}
+
+fn validate_receipt_sections(value: &CanonicalJson) -> Result<(), String> {
+    let items = match value {
+        CanonicalJson::Array(items) => items,
+        _ => return Err("content.receipt_sections is not an array".into()),
+    };
+    let mut prior_name: Option<String> = None;
+    for (i, item) in items.iter().enumerate() {
+        let label = format!("content.receipt_sections[{i}]");
+        let section = TraceReceiptSection::from_json_at(item, &label)?;
+        if prior_name
+            .as_deref()
+            .is_some_and(|prior| prior > section.name.as_str())
+        {
+            return Err("content.receipt_sections is not sorted by name".into());
+        }
+        if prior_name.as_deref() == Some(section.name.as_str()) {
+            return Err(format!(
+                "{label}.name duplicates receipt section `{}`",
+                section.name
+            ));
+        }
+        prior_name = Some(section.name);
     }
     Ok(())
 }
@@ -1532,7 +2077,7 @@ fn validate_capture_policy(value: &CanonicalJson) -> Result<CaptureLimits, Strin
         .iter()
         .map(|item| CanonicalJson::String((*item).into()))
         .collect::<Vec<_>>();
-    if exclusions != &expected {
+    if exclusions.as_slice() != expected.as_slice() {
         return Err(
             "capture_policy.default_exclusions does not match D-PERFSESSION1 defaults".into(),
         );
@@ -1587,12 +2132,19 @@ fn validate_capture_policy(value: &CanonicalJson) -> Result<CaptureLimits, Strin
     match &fields["allowlist"] {
         CanonicalJson::Array(items) => {
             let mut prior: Option<&str> = None;
-            for item in items {
-                let text = text(item, "capture_policy.allowlist item")?;
-                if prior.is_some_and(|p| p > text) {
+            for item in items.iter() {
+                let item_text = match item {
+                    CanonicalJson::String(value) => value.as_str(),
+                    _ => {
+                        return Err(
+                            "capture_policy.allowlist item is not text".into()
+                        );
+                    }
+                };
+                if prior.is_some_and(|previous| previous > item_text) {
                     return Err("capture_policy.allowlist is not sorted".into());
                 }
-                prior = Some(text);
+                prior = Some(item_text);
             }
         }
         _ => return Err("capture_policy.allowlist is not an array".into()),
@@ -1711,11 +2263,14 @@ mod tests {
             samples: Vec::new(),
             allocations: Vec::new(),
             browser: Vec::new(),
+            game_frames: Vec::new(),
+            game_draw_events: Vec::new(),
             tasks: Vec::new(),
             locks: Vec::new(),
             io: Vec::new(),
             native: Vec::new(),
             spans: Vec::new(),
+            receipt_sections: Vec::new(),
             source_identity: Vec::new(),
             source_maps: Vec::new(),
         }
@@ -2067,7 +2622,7 @@ mod tests {
         assert!(text.contains("\"schema\":5,\"span_row_limit\""), "{text}");
         assert!(text.contains("\"io_row_limit\":4096"), "{text}");
         assert!(text.contains("\"io_rows_truncated\":true"), "{text}");
-        assert!(text.contains("\"native_row_limit\":1"), "{text}");
+        assert!(text.contains("\"native_row_limit\":4096"), "{text}");
         assert!(text.contains("\"native_rows_truncated\":true"), "{text}");
         assert!(text.contains("\"span_row_limit\":4096"), "{text}");
         assert!(text.contains("\"span_rows_truncated\":true"), "{text}");

@@ -1,8 +1,8 @@
-Error [E0003]: Expected `{` to open the `#FFI` foreign-source body, found `->`
-  --> tests/ui/ffi_inline_c_mismatch.jet:1:66
+Warning [L0104] (unused_private_fn): Private function `answer` is never called or used as a value.
+  --> tests/ui/ffi_inline_c_mismatch.jet:1:53
     |
   1 | #[Unsafe("deliberate mismatch fixture"), FFI(c)] fn answer() Int -> {
-    |                                                                  ^^
- Why: The structure here isn't what the compiler expected
- Fix: Use `{` to open the `#FFI` foreign-source body
-More: jet-lang.dev/e/E0003
+    |                                                     ^^^^^^
+ Why: A private function with no reachable reference is dead code; public functions stay exempt because other modules may use them.
+ Fix: Remove the function, or rename `answer` to `_answer` when it is intentional.
+More: jet-lang.dev/e/L0104

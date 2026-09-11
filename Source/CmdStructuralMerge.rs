@@ -7,7 +7,7 @@ use std::process::{exit, Command};
 
 use jet::Diagnostics::json_str as json_string;
 use jet_foundation::ExitCodes;
-use jet_foundation::Report::render_status_json;
+use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
 use jet_semindex::{
     open_structural_with_overlays, semantic_ops_for_file, DefinitionFact, SemIndexError, SemanticOp,
 };
@@ -113,22 +113,17 @@ pub(crate) fn run_diff(args: &[String]) {
             );
         }
     } else {
-        let payload = format!(
-            "{{\"changes\":[{}]}}",
-            changes
-                .iter()
-                .map(change_json)
-                .collect::<Vec<_>>()
-                .join(",")
+        let structural_diff = StatusValue::object(
+            StatusFields::new().with(
+                "changes",
+                StatusValue::array(changes.iter().map(change_value)),
+            ),
         );
         println!(
             "{}",
-            render_status_json(
-                "ok",
-                true,
-                "diff.structural",
-                &format!(",\"structural_diff\":{payload}")
-            )
+            StatusEnvelope::new("diff.structural", true)
+                .with_field("structural_diff", structural_diff)
+                .json()
         );
     }
 }
@@ -196,12 +191,17 @@ pub(crate) fn run_merge(args: &[String]) {
         );
         println!(
             "{}",
-            render_status_json(
-                "merged",
-                true,
-                "merge.structural",
-                &format!(",\"structural_merge\":{payload}")
-            )
+            StatusEnvelope::new("merge.structural", true)
+                .with_field(
+                    "structural_merge",
+                    StatusValue::object(
+                        jet_foundation::Report::StatusFields::new().with(
+                            "output",
+                            output_path.display().to_string(),
+                        ),
+                    ),
+                )
+                .json()
         );
     }
 }
@@ -744,22 +744,17 @@ fn render_conflicts(conflicts: &[Conflict], mode: &str) {
         }
         eprintln!("merge stopped: resolve conflicts manually; no output was written");
     } else {
-        let payload = format!(
-            "{{\"conflicts\":[{}]}}",
-            conflicts
-                .iter()
-                .map(conflict_json)
-                .collect::<Vec<_>>()
-                .join(",")
+        let structural_merge = StatusValue::object(
+            StatusFields::new().with(
+                "conflicts",
+                StatusValue::array(conflicts.iter().map(conflict_value)),
+            ),
         );
         eprintln!(
             "{}",
-            render_status_json(
-                "conflict",
-                false,
-                "merge.structural",
-                &format!(",\"structural_merge\":{payload}")
-            )
+            StatusEnvelope::new("merge.structural", false)
+                .with_field("structural_merge", structural_merge)
+                .json()
         );
     }
 }
@@ -973,55 +968,63 @@ fn normalize_path(path: &Path) -> PathBuf {
     }
     out
 }
-fn change_json(change: &Change) -> String {
-    let semantic_op = change
-        .semantic_op
-        .as_ref()
-        .map(semantic_op_json)
-        .unwrap_or_else(|| "null".to_string());
-    format!(
-        "{{\"kind\":{},\"stable_id\":{},\"before\":{},\"after\":{},\"semantic_op\":{}}}",
-        json_string(change.kind.name()),
-        json_string(&change.stable_id),
-        change
-            .before
-            .as_ref()
-            .map(|v| json_string(v))
-            .unwrap_or_else(|| "null".into()),
-        change
-            .after
-            .as_ref()
-            .map(|v| json_string(v))
-            .unwrap_or_else(|| "null".into()),
-        semantic_op,
+fn change_value(change: &Change) -> StatusValue {
+    StatusValue::object(
+        StatusFields::new()
+            .with("kind", change.kind.name())
+            .with("stable_id", change.stable_id.as_str())
+            .with(
+                "before",
+                change
+                    .before
+                    .as_deref()
+                    .map(StatusValue::from)
+                    .unwrap_or(StatusValue::Null),
+            )
+            .with(
+                "after",
+                change
+                    .after
+                    .as_deref()
+                    .map(StatusValue::from)
+                    .unwrap_or(StatusValue::Null),
+            )
+            .with(
+                "semantic_op",
+                change
+                    .semantic_op
+                    .as_ref()
+                    .map(semantic_op_value)
+                    .unwrap_or(StatusValue::Null),
+            ),
     )
 }
-fn semantic_op_json(op: &SemanticOp) -> String {
+fn semantic_op_value(op: &SemanticOp) -> StatusValue {
     let optional = |value: &Option<String>| {
         value
             .as_deref()
-            .map(|value| json_string(value))
-            .unwrap_or_else(|| "null".to_string())
+            .map(StatusValue::from)
+            .unwrap_or(StatusValue::Null)
     };
-    format!(
-        "{{\"kind\":{},\"rule_id\":{},\"from\":{},\"to\":{},\"node\":{},\"match\":{},\"replace\":{}}}",
-        json_string(&op.kind),
-        optional(&op.rule_id),
-        optional(&op.from),
-        optional(&op.to),
-        optional(&op.node),
-        optional(&op.match_template),
-        optional(&op.replace_template),
+    StatusValue::object(
+        StatusFields::new()
+            .with("kind", op.kind.as_str())
+            .with("rule_id", optional(&op.rule_id))
+            .with("from", optional(&op.from))
+            .with("to", optional(&op.to))
+            .with("node", optional(&op.node))
+            .with("match", optional(&op.match_template))
+            .with("replace", optional(&op.replace_template)),
     )
 }
-fn conflict_json(conflict: &Conflict) -> String {
-    format!(
-        "{{\"kind\":{},\"stable_id\":{},\"human_identity\":{},\"ours\":{},\"theirs\":{}}}",
-        json_string(conflict.kind),
-        json_string(&conflict.stable_id),
-        json_string(&conflict.human_identity),
-        json_string(&conflict.ours),
-        json_string(&conflict.theirs)
+fn conflict_value(conflict: &Conflict) -> StatusValue {
+    StatusValue::object(
+        StatusFields::new()
+            .with("kind", conflict.kind)
+            .with("stable_id", conflict.stable_id.as_str())
+            .with("human_identity", conflict.human_identity.as_str())
+            .with("ours", conflict.ours.as_str())
+            .with("theirs", conflict.theirs.as_str()),
     )
 }
 fn render_index_error(context: &str, error: SemIndexError) -> ! {

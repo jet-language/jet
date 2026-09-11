@@ -137,6 +137,53 @@ pub(crate) fn method_call_in_subset(
         return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals))
             && expr_in_subset(receiver, cx, locals);
     }
+    // D-QUERY-RETAIN1=A: typed Query/Group receiver methods and the checked-SQL
+    // list door lower through `lower_query_receiver_call`, which emits the same
+    // typed CoreCall node in every tier. Admit exactly the receiver families and
+    // callback arities that that lowerer recognizes; otherwise a query-containing
+    // entry is incorrectly omitted from the TIR function table and the driver
+    // reports the misleading "selected entry is not a top-level function".
+    if matches!(
+        recv_type.as_deref(),
+        Some("Query" | "DataGroupedQuery" | "DataTracked" | "DataWatch")
+    ) || (recv_type.is_none()
+        && method == "query"
+        && args.len() == 1
+        && match receiver {
+            Expr::Ident(alias, _) => {
+                locals.contains(alias) || cx.any_core_import_module(alias).is_none()
+            }
+            _ => true,
+        })
+    {
+        let method_ok = match recv_type.as_deref() {
+            Some("Query") => matches!(
+                method,
+                "filter"
+                    | "sort_by"
+                    | "map"
+                    | "min"
+                    | "max"
+                    | "inner_join"
+                    | "left_join"
+                    | "collect"
+                    | "plan"
+                    | "group_by"
+                    | "watch"
+            ),
+            Some("DataGroupedQuery") => matches!(method, "count" | "sum" | "mean"),
+            Some("DataTracked") => {
+                matches!(method, "query" | "insert" | "replace" | "remove")
+            }
+            Some("DataWatch") => matches!(method, "get" | "status" | "cancel"),
+            None => true,
+            _ => false,
+        };
+        if method_ok {
+            return expr_in_subset(receiver, cx, locals)
+                && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
+        }
+    }
     // Shape (a): the sema-inserted `.clone()`. It takes no args; the receiver is an
     // owning field read / borrowed value, which must itself be in-subset. The AST
     // path emits `(recv).clone()` unconditionally (no `recv_type` needed) — match it.
@@ -634,6 +681,10 @@ pub(crate) fn method_call_in_subset(
             && labels_ok
             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
+    if recv_type.as_deref() == Some("Atomic") && is_covered_builtin_name(method, args.len()) {
+        return expr_in_subset(receiver, cx, locals)
+            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
+    }
     // Sema may retain the nominal Set family in `recv_type` for an instance
     // operation. It is still the same built-in collection surface, not a user
     // method; keep it on the TIR/JIT path rather than falling through to Todo.
@@ -1024,6 +1075,15 @@ pub(crate) fn method_call_in_subset(
         && args.len() == 2
     {
         return router_register_in_subset(receiver, args, cx, locals);
+    }
+    // Plugin members are the statically registered exports of the loaded
+    // Component interface. Sema owns export/name/shape validation; this gate
+    // only admits the already-checked receiver and argument expressions.
+    if recv_type.as_deref() == Some("Plugin")
+        && !matches!(method, "call" | "call_int" | "call_bool" | "call_text")
+    {
+        return expr_in_subset(receiver, cx, locals)
+            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     // Shape (h) [c109 Phase 13]: a method ON a handle (FileReader/FileWriter/
     // StdinHandle/Stopwatch/TcpListener/TcpStream). Sema sets `recv_type ==
@@ -1430,6 +1490,16 @@ pub(crate) fn static_method_call_in_subset(
     cx: &Cx,
     locals: &HashSet<String>,
 ) -> bool {
+    if type_name == "UiShortcut" && method == "cmd" {
+        return args.len() == 1
+            && args[0].label.is_none()
+            && matches!(
+                args[0].expr.without_parens(),
+                Expr::Str(parts, _)
+                    if parts.len() == 1
+                        && matches!(&parts[0], crate::AST::StrPart::Lit(value) if !value.trim().is_empty())
+            );
+    }
     if locals.contains(type_name) {
         return false;
     }
@@ -1442,6 +1512,16 @@ pub(crate) fn static_method_call_in_subset(
     }
     if type_name == "FieldError" && method == "under" && args.len() == 2 {
         return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
+    }
+    // D-SHAPE-PROJECT1=A: `T.merge(flags, settings)` on a `#CLI` struct lowers
+    // to the `core.args merge` CoreCall; both layers are ordinary values.
+    if method == "merge"
+        && args.len() == 2
+        && cx.type_names.contains(type_name)
+        && cx.struct_fields.contains_key(type_name)
+        && !cx.sigs.contains_key(&format!("{type_name}::merge"))
+    {
+        return args.iter().all(|arg| arg.label.is_none() && expr_in_subset(&arg.expr, cx, locals));
     }
     if matches!(
         (type_name, method, args.len()),
@@ -1570,6 +1650,15 @@ pub(crate) fn static_method_call_in_subset(
     // what the StaticCall lowering reproduces. We therefore admit `new` HERE (the
     // static shape) while `is_intercepted_method_name` keeps the INSTANCE-method intercept
     // (shape b) whole: a user instance method named `new`/`get`/… stays on the AST path.
+    if method == crate::Generics::LITERAL_FROM_LITERAL
+        && matches!(
+            cx.trait_method_traits
+                .get(&(type_name.to_string(), method.to_string())),
+            Some(trait_name) if crate::Generics::is_literal_capability(trait_name)
+        )
+    {
+        return args.len() == 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
+    }
     if method != Syntax::MEM_ALLOC_NEW && is_intercepted_method_name(method) {
         return false;
     }
@@ -1697,7 +1786,7 @@ pub(crate) fn closure_method_in_subset(
         // Sema has already proved a local callback has the map Fn shape. Keep
         // it on the same TIR path as a literal lambda; the lowerer reads the
         // callback's resolved local type and emits the shared helper.
-        Expr::Ident(name, _) => locals.contains(name),
+        Expr::Ident(name, _) => locals.contains(name) || cx.fn_types.contains_key(name),
         _ => false,
     };
     if !crate::Collections::is_closure_method(method) {

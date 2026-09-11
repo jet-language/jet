@@ -2,12 +2,16 @@ use super::super::*;
 use super::bindings::desugar_layout_anchors;
 use jet_foundation::Names::mangle;
 
+use crate::Diagnostics::{NoFixReason, NoFixReasonKind};
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ForeignKeywordKind {
     For,
     While,
     Continue,
     Do,
+    Repeat,
+    Until,
     Declaration,
     MutableBinding,
     ImmutableBinding,
@@ -18,6 +22,8 @@ const FOREIGN_KEYWORDS: &[(&str, ForeignKeywordKind)] = &[
     (Syntax::FOREIGN_WHILE, ForeignKeywordKind::While),
     (Syntax::FOREIGN_CONTINUE, ForeignKeywordKind::Continue),
     (Syntax::FOREIGN_DO, ForeignKeywordKind::Do),
+    (Syntax::FOREIGN_REPEAT, ForeignKeywordKind::Repeat),
+    (Syntax::FOREIGN_UNTIL, ForeignKeywordKind::Until),
     (Syntax::FOREIGN_FUN, ForeignKeywordKind::Declaration),
     (Syntax::FOREIGN_FUNC, ForeignKeywordKind::Declaration),
     (Syntax::FOREIGN_DEF, ForeignKeywordKind::Declaration),
@@ -108,7 +114,7 @@ impl<'a> Parser<'a> {
             let init = self.sigil_binding()?;
             self.expect_loop_comma("after the state initializer")?;
             let cond = self.expr_no_struct_lit()?;
-            let step = if self.take_loop_comma() {
+            let step = if self.take_loop_comma() && !self.at_loop_body_start() {
                 let step_expr = self.expr()?;
                 let step = if matches!(self.peek().kind, TokKind::Eq)
                     || self.peek().kind.compound_op().is_some()
@@ -155,7 +161,10 @@ impl<'a> Parser<'a> {
                 } = &first
                 {
                     let step =
-                        if self.at_yielding_loop_stride() && !self.at_yielding_loop_guard_comma() {
+                        if self.at_yielding_loop_stride()
+                            && !self.at_yielding_loop_guard_comma()
+                            && !matches!(self.peek2().kind, TokKind::LBrace | TokKind::UnifiedArrow)
+                        {
                             self.take_loop_comma();
                             Some(self.expr_no_struct_lit()?)
                         } else {
@@ -172,7 +181,10 @@ impl<'a> Parser<'a> {
                     self.bump();
                     let end = self.expr_no_struct_lit()?;
                     let step =
-                        if self.at_yielding_loop_stride() && !self.at_yielding_loop_guard_comma() {
+                        if self.at_yielding_loop_stride()
+                            && !self.at_yielding_loop_guard_comma()
+                            && !matches!(self.peek2().kind, TokKind::LBrace | TokKind::UnifiedArrow)
+                        {
                             self.take_loop_comma();
                             Some(self.expr_no_struct_lit()?)
                         } else {
@@ -186,7 +198,10 @@ impl<'a> Parser<'a> {
                     }
                 } else {
                     let step =
-                        if self.at_yielding_loop_stride() && !self.at_yielding_loop_guard_comma() {
+                        if self.at_yielding_loop_stride()
+                            && !self.at_yielding_loop_guard_comma()
+                            && !matches!(self.peek2().kind, TokKind::LBrace | TokKind::UnifiedArrow)
+                        {
                             self.take_loop_comma();
                             Some(self.expr_no_struct_lit()?)
                         } else {
@@ -198,6 +213,12 @@ impl<'a> Parser<'a> {
                     }
                 };
                 clauses.push((var, var_span, var2, kind));
+                if matches!(self.peek().kind, TokKind::Comma)
+                    && matches!(self.peek2().kind, TokKind::LBrace | TokKind::UnifiedArrow)
+                {
+                    self.bump();
+                    break;
+                }
                 if self.at_yielding_loop_guard_comma() {
                     self.take_yielding_loop_guard_comma();
                 }
@@ -458,7 +479,7 @@ impl<'a> Parser<'a> {
         let marker = self.parse_registered_marker_at_site(crate::Policy::RuleSite::Block)?;
         let name = marker.name.clone();
         let name_span = marker.name_span;
-        let mut args = marker.args.clone();
+        let mut args = marker.expr_args_owned();
         let args_span = (!args.is_empty()).then_some(marker.span);
         if matches!(self.peek().kind, TokKind::Lt) {
             let type_start = self.bump().span;
@@ -758,7 +779,12 @@ impl<'a> Parser<'a> {
             .map(|index| arguments.parameter_for_source(index))
             .collect::<Vec<_>>();
         let mut fields = Vec::new();
-        for (index, (value, label)) in marker.args.into_iter().zip(marker.arg_labels).enumerate() {
+        for (index, (value, label)) in marker
+            .expr_args_owned()
+            .into_iter()
+            .zip(marker.arg_labels)
+            .enumerate()
+        {
             if label.is_none()
                 && matches!(&value, Expr::Ident(name, _) if name == Syntax::META_FIELD_TUNABLE)
             {
@@ -1226,7 +1252,12 @@ impl<'a> Parser<'a> {
             .map(|index| arguments.parameter_for_source(index))
             .collect::<Vec<_>>();
         let mut fields: Vec<(String, Expr, Span)> = Vec::new();
-        for (index, (value, label)) in marker.args.into_iter().zip(marker.arg_labels).enumerate() {
+        for (index, (value, label)) in marker
+            .expr_args_owned()
+            .into_iter()
+            .zip(marker.arg_labels)
+            .enumerate()
+        {
             let (field_name, field_name_span) = match label {
                 Some(label) => label,
                 None => {
@@ -1299,12 +1330,18 @@ impl<'a> Parser<'a> {
             loop {
                 let (name, span) = self.expect_effect_path_name("as an authority-bound effect")?;
                 let name = Self::strip_marker_enum_prefix(name, "Effect");
-                marker_args.push(crate::AST::Expr::Ident(name.clone(), span));
+                marker_args.push(crate::AST::MarkerCallArg::Expr(crate::AST::Expr::Ident(
+                    name.clone(),
+                    span,
+                )));
                 caps.push((name, span));
                 if matches!(self.peek().kind, TokKind::RParen) {
                     break;
                 }
                 self.expect(TokKind::Comma, "between scoped effects")?;
+                if matches!(self.peek().kind, TokKind::RParen) {
+                    break;
+                }
             }
             let caps_start = caps
                 .first()
@@ -1313,9 +1350,9 @@ impl<'a> Parser<'a> {
             let caps_end = self.toks[self.pos - 1].span.end;
             self.record_rule_fact(
                 crate::AST::Marker {
+                    name_span: marker_name_span,
                     name: Syntax::KW_FX.to_string(),
                     negated: false,
-                    name_span: marker_name_span,
                     args: marker_args,
                     arg_labels: vec![None; caps.len()],
                     span: Span::new(start.start, caps_end),
@@ -1412,12 +1449,15 @@ impl<'a> Parser<'a> {
         if let (Some(name), Some(name_span)) = (&name, name_span) {
             self.record_rule_fact(
                 crate::AST::Marker {
+                    span: Span::new(start.start, self.toks[self.pos - 1].span.end),
                     name: Syntax::KW_TRANSACT.to_string(),
                     negated: false,
                     name_span: marker_name_span,
-                    args: vec![crate::AST::Expr::Ident(name.clone(), name_span)],
+                    args: vec![crate::AST::MarkerCallArg::Expr(crate::AST::Expr::Ident(
+                        name.clone(),
+                        name_span,
+                    ))],
                     arg_labels: vec![None],
-                    span: Span::new(start.start, self.toks[self.pos - 1].span.end),
                     ct: None,
                 },
                 None,
@@ -1496,7 +1536,7 @@ impl<'a> Parser<'a> {
             let cond = self.expr_no_struct_lit()?;
             // D-LOOP-HEADER3=D: three-slot C-style counter (`init, cond, step`)
             // retires. Keep two-slot state loops (`name := value, condition`).
-            if self.take_loop_comma() {
+            if self.take_loop_comma() && !self.at_loop_body_start() {
                 let step_span = self.peek().span;
                 let _ = self.expr()?;
                 if matches!(self.peek().kind, TokKind::Eq)
@@ -1544,7 +1584,7 @@ impl<'a> Parser<'a> {
                 ..
             } = &first
             {
-                let step = if self.take_loop_comma() {
+                let step = if self.take_loop_comma() && !self.at_loop_body_start() {
                     Some(self.expr_no_struct_lit()?)
                 } else {
                     None
@@ -1560,7 +1600,7 @@ impl<'a> Parser<'a> {
                 let exclusive = matches!(self.peek().kind, TokKind::DotDotLt);
                 self.bump();
                 let end = self.expr_no_struct_lit()?;
-                let step = if self.take_loop_comma() {
+                let step = if self.take_loop_comma() && !self.at_loop_body_start() {
                     Some(self.expr_no_struct_lit()?)
                 } else {
                     None
@@ -1572,7 +1612,7 @@ impl<'a> Parser<'a> {
                     exclusive,
                 }
             } else {
-                let step = if self.take_loop_comma() {
+                let step = if self.take_loop_comma() && !self.at_loop_body_start() {
                     Some(self.expr_no_struct_lit()?)
                 } else {
                     None
@@ -1606,6 +1646,10 @@ impl<'a> Parser<'a> {
                 label,
             })
         }
+    }
+
+    fn at_loop_body_start(&self) -> bool {
+        matches!(self.peek().kind, TokKind::LBrace | TokKind::UnifiedArrow)
     }
 
     fn effect_loop_body(&mut self) -> Result<(Vec<Stmt>, bool), Diagnostic> {
@@ -1704,6 +1748,9 @@ impl<'a> Parser<'a> {
             let (first, first_span) = self.expect_ident("as the first loop variable")?;
             self.expect(TokKind::Comma, "between the two loop variables")?;
             let second = self.expect_ident("as the second loop variable")?;
+            if matches!(self.peek().kind, TokKind::Comma) {
+                self.bump();
+            }
             self.expect(TokKind::RParen, "after the two loop variables")?;
             return Ok((first, first_span, Some(second)));
         }
@@ -1743,7 +1790,7 @@ impl<'a> Parser<'a> {
                 Ok(())
             }
             TokKind::Semi if self.peek().span.start < self.peek().span.end => {
-                self.take_loop_comma();
+                self.bump();
                 Ok(())
             }
             _ => self.expect(TokKind::KwIn, "between the loop binding and source"),
@@ -1751,23 +1798,11 @@ impl<'a> Parser<'a> {
     }
 
     fn take_loop_comma(&mut self) -> bool {
-        match self.peek().kind {
-            TokKind::Comma => {
-                self.bump();
-                true
-            }
-            TokKind::Semi if self.peek().span.start < self.peek().span.end => {
-                let span = self.bump().span;
-                self.diags.push(Diagnostic::error(
-                    "E0373",
-                    "this loop header uses a semicolon".to_string(),
-                    "commas separate loop clauses; semicolons separate statements".to_string(),
-                    "replace `;` with `,`; `jet fmt` applies this fix".to_string(),
-                    Some(span),
-                ));
-                true
-            }
-            _ => false,
+        if matches!(self.peek().kind, TokKind::Comma) {
+            self.bump();
+            true
+        } else {
+            false
         }
     }
 
@@ -1808,7 +1843,9 @@ impl<'a> Parser<'a> {
                 TokKind::LBracket => brackets += 1,
                 TokKind::RBracket => brackets = brackets.saturating_sub(1),
                 TokKind::LBrace if parens == 0 && brackets == 0 => return true,
-                TokKind::Semi | TokKind::RBrace | TokKind::Eof if parens == 0 && brackets == 0 => {
+                TokKind::Semi | TokKind::RBrace | TokKind::Eof
+                    if parens == 0 && brackets == 0 =>
+                {
                     return false
                 }
                 _ => {}
@@ -1817,10 +1854,142 @@ impl<'a> Parser<'a> {
         false
     }
 
+    fn foreign_loop_block_end(&self, open: usize) -> Option<usize> {
+        let mut depth = 0usize;
+        for (index, token) in self.toks.iter().enumerate().skip(open) {
+            match &token.kind {
+                TokKind::LBrace => depth += 1,
+                TokKind::RBrace => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return Some(index);
+                    }
+                }
+                TokKind::Eof => return None,
+                _ => {}
+            }
+        }
+        None
+    }
+
+    fn foreign_loop_token_span(&self, start: usize, end: usize) -> Option<Span> {
+        let first = (start..end).find_map(|index| {
+            let token = self.toks.get(index)?;
+            (token.span.start < token.span.end).then_some(token.span.start)
+        })?;
+        let last = (start..end).rev().find_map(|index| {
+            let token = self.toks.get(index)?;
+            (token.span.start < token.span.end).then_some(token.span.end)
+        })?;
+        (first < last).then_some(Span::new(first, last))
+    }
+
+    fn foreign_loop_statement_end(&self, start: usize) -> usize {
+        let mut parens = 0usize;
+        let mut brackets = 0usize;
+        let mut braces = 0usize;
+        for (index, token) in self.toks.iter().enumerate().skip(start) {
+            match &token.kind {
+                TokKind::LParen => parens += 1,
+                TokKind::RParen => parens = parens.saturating_sub(1),
+                TokKind::LBracket => brackets += 1,
+                TokKind::RBracket => brackets = brackets.saturating_sub(1),
+                TokKind::LBrace => braces += 1,
+                TokKind::RBrace if parens == 0 && brackets == 0 && braces == 0 => {
+                    return index
+                }
+                TokKind::RBrace => braces = braces.saturating_sub(1),
+                TokKind::Semi | TokKind::Eof
+                    if parens == 0 && brackets == 0 && braces == 0 =>
+                {
+                    return index
+                }
+                _ => {}
+            }
+        }
+        self.toks.len()
+    }
+
+    fn foreign_post_test_edit(
+        &self,
+        word_span: Span,
+        word: &str,
+    ) -> Option<crate::Diagnostics::TextEdit> {
+        let source = self.source.as_deref()?;
+        let word_pos = self.pos.saturating_sub(1);
+        let open = word_pos + 1;
+        if !matches!(
+            self.toks.get(open).map(|token| &token.kind),
+            Some(TokKind::LBrace)
+        ) {
+            return None;
+        }
+        // `do` and `repeat` are body-first spellings whose trailing test can
+        // be expressed directly in Jet's `loop { … if … { break } }` form.
+        // A standalone `until { … }` has no ratified post-test shape, so it
+        // receives the same teaching text but no guessed rewrite.
+        if !matches!(
+            Self::foreign_keyword_kind(word),
+            Some(ForeignKeywordKind::Do | ForeignKeywordKind::Repeat)
+        ) {
+            return None;
+        }
+        let close = self.foreign_loop_block_end(open)?;
+        let (marker, negate) = match self.toks.get(close + 1).map(|token| &token.kind) {
+            Some(TokKind::Ident(marker)) if marker == "while" => (close + 1, true),
+            Some(TokKind::Ident(marker)) if marker == "until" => (close + 1, false),
+            _ => return None,
+        };
+        let condition_end = self.foreign_loop_statement_end(marker + 1);
+        let condition_span =
+            self.foreign_loop_token_span(marker + 1, condition_end)?;
+        let body = source.get(self.toks[open].span.end..self.toks[close].span.start)?;
+        let condition = source.get(condition_span.start..condition_span.end)?;
+        let stop = if negate {
+            format!("!{condition}")
+        } else {
+            condition.to_string()
+        };
+        Some(crate::Diagnostics::TextEdit {
+            span: Span::new(word_span.start, condition_span.end),
+            new_text: format!("loop {{\n{body}\n    if {stop} {{ break }}\n}}"),
+        })
+    }
+
     fn foreign_keyword_kind(word: &str) -> Option<ForeignKeywordKind> {
         FOREIGN_KEYWORDS
             .iter()
             .find_map(|(known, kind)| (*known == word).then_some(*kind))
+    }
+
+    fn foreign_no_fix_reason(kind: Option<ForeignKeywordKind>) -> NoFixReason {
+        let (reason_kind, next) = match kind {
+            Some(ForeignKeywordKind::For) => (
+                NoFixReasonKind::Ambiguous,
+                "Choose the source binding and body shape, then rewrite it as `loop item in source { … }`",
+            ),
+            Some(ForeignKeywordKind::While) => (
+                NoFixReasonKind::Ambiguous,
+                "Choose a state condition or a fresh-input source, then rewrite it as the matching Jet loop",
+            ),
+            Some(ForeignKeywordKind::Continue) => (
+                NoFixReasonKind::Design,
+                "Replace the foreign control word with Jet's `next` statement",
+            ),
+            Some(
+                ForeignKeywordKind::Do
+                | ForeignKeywordKind::Repeat
+                | ForeignKeywordKind::Until,
+            ) => (
+                NoFixReasonKind::Ambiguous,
+                "Move the stop test into the loop body and exit with `break`",
+            ),
+            _ => (
+                NoFixReasonKind::Ambiguous,
+                "Rewrite the statement using Jet's current grammar",
+            ),
+        };
+        NoFixReason::new(reason_kind, next)
     }
 
     fn is_foreign_loop_word(word: &str) -> bool {
@@ -1831,6 +2000,8 @@ impl<'a> Parser<'a> {
                     | ForeignKeywordKind::While
                     | ForeignKeywordKind::Continue
                     | ForeignKeywordKind::Do
+                    | ForeignKeywordKind::Repeat
+                    | ForeignKeywordKind::Until
             )
         )
     }
@@ -1909,7 +2080,11 @@ impl<'a> Parser<'a> {
                         TokKind::Semi | TokKind::RBrace | TokKind::Eof
                     ))
             }
-            Some(ForeignKeywordKind::Do) => matches!(self.peek2().kind, TokKind::LBrace),
+            Some(
+                ForeignKeywordKind::Do
+                | ForeignKeywordKind::Repeat
+                | ForeignKeywordKind::Until,
+            ) => matches!(self.peek2().kind, TokKind::LBrace),
             _ => false,
         }
     }
@@ -2003,17 +2178,21 @@ impl<'a> Parser<'a> {
             Some(ForeignKeywordKind::While) => (
                 format!("expected a statement, found `{word}`"),
                 "this position accepts only Jet's current statement grammar; retired foreign loop words are not statement keywords".to_string(),
-                "write `loop condition { … }`".to_string(),
+                "write `loop condition { … }`; for repeated input, use `loop line in io.stdin().lines()` and stop in the body with `if test { break }`".to_string(),
             ),
             Some(ForeignKeywordKind::Continue) => (
                 format!("expected a statement, found `{word}`"),
                 "this position accepts only Jet's current statement grammar; retired foreign loop words are not statement keywords".to_string(),
                 "write `next`".to_string(),
             ),
-            Some(ForeignKeywordKind::Do) => (
+            Some(
+                ForeignKeywordKind::Do
+                | ForeignKeywordKind::Repeat
+                | ForeignKeywordKind::Until,
+            ) => (
                 format!("expected a statement, found `{word}`"),
-                "this position accepts only Jet's current statement grammar; retired foreign loop words are not statement keywords".to_string(),
-                "write `loop { … }`".to_string(),
+                "Jet uses one body-first loop form; put the stop test inside the body and exit with `break`".to_string(),
+                "write `loop { … if test { break } }`; for repeated input, use `loop line in io.stdin().lines()`".to_string(),
             ),
             Some(ForeignKeywordKind::Declaration) => (
                 format!("`{word}` is a function declaration keyword; Jet writes `{}`", Syntax::KW_FN),
@@ -2049,6 +2228,23 @@ impl<'a> Parser<'a> {
             if let Some(edit) = self.foreign_binding_edit(span, word) {
                 diagnostic = diagnostic.with_edit(edit);
             }
+        } else if matches!(
+            kind,
+            Some(
+                ForeignKeywordKind::Do
+                    | ForeignKeywordKind::Repeat
+                    | ForeignKeywordKind::Until
+            )
+        ) {
+            if let Some(edit) = self.foreign_post_test_edit(span, word) {
+                diagnostic = diagnostic.with_edit(edit);
+            }
+        }
+        if diagnostic.edit.is_none() {
+            let span = diagnostic.span;
+            diagnostic = diagnostic
+                .with_no_fix_reason(Self::foreign_no_fix_reason(kind))
+                .unwrap_or_else(|error| jet_foundation::ice!(span, "{error}"));
         }
         diagnostic
     }
@@ -2111,13 +2307,13 @@ impl<'a> Parser<'a> {
                              // Recovery: consume `("name")` or bare `"name"` (old form) before `{`.
                 if matches!(self.peek().kind, TokKind::LParen) {
                     self.bump(); // `(`
-                    if matches!(self.peek().kind, TokKind::Str(_)) {
+                    if matches!(self.peek().kind, TokKind::Str(_) | TokKind::RawStr(_)) {
                         self.bump();
                     }
                     if matches!(self.peek().kind, TokKind::RParen) {
                         self.bump(); // `)`
                     }
-                } else if matches!(self.peek().kind, TokKind::Str(_)) {
+                } else if matches!(self.peek().kind, TokKind::Str(_) | TokKind::RawStr(_)) {
                     self.bump(); // old bare-string form
                 }
                 if matches!(self.peek().kind, TokKind::LBrace) {
@@ -2207,28 +2403,6 @@ impl<'a> Parser<'a> {
                 ));
                 self.switch_after_kw(t.span)
             }
-            TokKind::Ident(n) if false && n == Syntax::FOREIGN_SWITCH => {
-                let t = self.bump();
-                self.diags.push(Diagnostic::error(
-                    "E0044",
-                    format!(
-                        "{} does not use `{}`",
-                        Syntax::LANG_NAME,
-                        Syntax::FOREIGN_SWITCH
-                    ),
-                    format!(
-                        "choosing one branch from many is written with `{}` (D-IF1)",
-                        Syntax::KW_IF
-                    ),
-                    format!(
-                        "write `{} subject {{ value {} body … }}` instead",
-                        Syntax::KW_IF,
-                        Syntax::OP_UNIFIED_ARROW
-                    ),
-                    Some(t.span),
-                ));
-                self.switch_after_kw(t.span)
-            }
             TokKind::KwReturn => {
                 let span = self.bump().span;
                 let expr = if matches!(self.peek().kind, TokKind::Semi) {
@@ -2285,6 +2459,9 @@ impl<'a> Parser<'a> {
                         break;
                     }
                     self.bump();
+                    if matches!(self.peek().kind, TokKind::RParen) {
+                        break;
+                    }
                 }
                 self.finish_stmt()?;
                 Ok(Stmt::Expr(Expr::Call(Call {
@@ -2322,33 +2499,6 @@ impl<'a> Parser<'a> {
                 self.if_or_dispatch()
             }
             TokKind::KwIf => self.if_or_dispatch(),
-            // D-S14-PAUSE: `when` teaching is paused.
-            TokKind::KwSwitch if false => {
-                let span = self.bump().span;
-                self.diags.push(Diagnostic::error(
-                    "E0984",
-                    format!(
-                        "`{}` is no longer a keyword in {}",
-                        Syntax::KW_SWITCH,
-                        Syntax::LANG_NAME
-                    ),
-                    format!(
-                        "`{}` is the one branching keyword — multi-arm dispatch is `{} subject == {{ arm {} body }}`",
-                        Syntax::KW_IF,
-                        Syntax::KW_IF,
-                        Syntax::OP_UNIFIED_ARROW
-                    ),
-                    format!(
-                        "write `{} subject == {{ value {} body … }}` (an `{} {} body` catch-all)",
-                        Syntax::KW_IF,
-                        Syntax::OP_UNIFIED_ARROW,
-                        Syntax::KW_ELSE,
-                        Syntax::OP_UNIFIED_ARROW
-                    ),
-                    Some(span),
-                ));
-                self.switch_after_kw(span)
-            }
             TokKind::KwBreak => {
                 let span = self.bump().span;
                 // D-ARROW-CONTROL1: the target is an argument of the control
@@ -2699,7 +2849,7 @@ impl<'a> Parser<'a> {
                 let end = self.toks[self.pos.saturating_sub(1)].span.end;
                 let span = Span::new(marker.span.start, end);
                 self.bind_rule_fact(marker.name_span, Some(span), crate::Policy::RuleSite::Block);
-                let args = marker.args;
+                let args = marker.expr_args_owned();
                 let args_span = (!args.is_empty()).then_some(marker.span);
                 Ok(Stmt::ScopeMember {
                     name: marker.name,
@@ -2928,19 +3078,9 @@ impl<'a> Parser<'a> {
             other => {
                 let found = describe(other);
                 let span = self.peek().span;
-                let expression_start = self.starts_expr(&self.peek().kind)
-                    || matches!(
-                        self.peek().kind,
-                        TokKind::UnitNumber { .. }
-                            | TokKind::Char(_)
-                            | TokKind::LBracket
-                            | TokKind::Star
-                            | TokKind::Amp
-                            | TokKind::PlusPlus
-                            | TokKind::MinusMinus
-                            | TokKind::Dot
-                            | TokKind::KwMove
-                    );
+                // Keep statement classification on the same expression-start
+                // inventory used by `?? return` lookahead.
+                let expression_start = self.starts_expr(&self.peek().kind);
                 if expression_start {
                     let expression = self.expr()?;
                     let expression = match self.try_refutable_test_binding(expression) {

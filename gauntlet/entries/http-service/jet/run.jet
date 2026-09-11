@@ -11,25 +11,24 @@ struct Args {
 
 fn reply(status: Int, body: String) HTTPResponse !HTTPError -> Ok(server.response(status, body).header("content-type", "application/json"))
 
-fn kv(req: HTTPRequest, values: Shared<[String:String]>, put: Bool) HTTPResponse !HTTPError -> {
-    key :: req.param("key") ?? ""
+fn kv(key: String, req: HTTPRequest, store: Shared<[String:String]>, put: Bool) HTTPResponse !HTTPError -> {
     if put {
         value :: req.body().text(8388608) ?? ""
-        values.guard_edit().value[key] = value
+        store.guard_edit().value[key] = value
         return reply(200, "{{\"stored\":\"{key}\"}}")
     }
-    stored :: values.guard_read().value.get(key) ?? return reply(404, "{{\"error\":\"not found\"}}")
+    stored :: store.guard_read().value.get(key) ?? return reply(404, "{{\"error\":\"not found\"}}")
     return reply(200, "{{\"key\":\"{key}\",\"value\":\"{stored}\"}}")
 }
 
 fn run(args: Args) !(HTTPError | IOError | NetError) {
     listener :: net.tcp_listen("127.0.0.1:{args.port}")
-    values :: shared [String:String]{}
+    store :: shared [String:String]{}
     state :: shared ServerState{stopped: false}
     mux :: server.mux()
     mux.get("/health", () -> reply(200, "{{\"status\":\"ok\"}}"))
-    mux.put("/kv/:key", req -> kv(req, values, true))
-    mux.get("/kv/:key", req -> kv(req, values, false))
+    mux.put("/kv/:key", (key: String, req: HTTPRequest) -> kv(key, req, store, true))
+    mux.get("/kv/:key", (key: String, req: HTTPRequest) -> kv(key, req, store, false))
     mux.get("/shutdown", () -> {
         state.stopped = true
         reply(200, "{{\"bye\":true}}")

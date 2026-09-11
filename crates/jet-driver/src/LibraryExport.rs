@@ -1,7 +1,7 @@
 //! D-LIB-EXPORT1=C / D-LIB-REUSE1=B: the driver half of a native `Library`.
 //!
 //! The package model owns the checked manifest fields. This module resolves
-//! one selected Library output, validates the public scalar boundary, records
+//! one selected Library output, validates the public foreign boundary, records
 //! the same API-freeze snapshot used by the plugin boundary, and supplies the
 //! codegen projection with one checked configuration. It does not load or
 //! link anything; those are the CLI/runtime adapters.
@@ -12,7 +12,8 @@ use crate::Diagnostics::Diagnostic;
 use crate::Sema::ApiFreeze;
 use crate::AST::{Item, ProgramBundle};
 
-const SUPPORTED_BINDINGS: &[&str] = &["c", "python", "swift"];
+const SUPPORTED_BINDINGS: &[&str] =
+    &["c", "cpp", "rust", "zig", "go", "python", "javascript", "swift"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryConfig {
@@ -116,7 +117,7 @@ pub fn resolve_config(
         return Err(vec![e1341(
             format!("a Library requests an unsupported `{language}` binding"),
             "D-LIB-EXPORT1=C defines one closed set of generated foreign projections; unknown names cannot be emitted safely",
-            "use `c`, `python`, or `swift`, or remove the unsupported binding",
+            "use c, cpp, rust, zig, go, python, javascript, or swift, or remove the unsupported binding",
         )]);
     }
     if !bindings.is_empty() && !output.is_native() {
@@ -167,21 +168,10 @@ pub fn validate_export_surface(bundle: &ProgramBundle) -> Vec<Diagnostic> {
     let surface = crate::Sema::guest_export_surface(bundle);
     let mut exports = 0usize;
     let mut has_text_export = false;
+    let mut has_rich_export = false;
     let mut symbols = BTreeMap::new();
     for export in surface {
         exports += 1;
-        let Some(shape) = export.scalar else {
-            diagnostics.push(e1341(
-                "a Library export has an unsupported signature".to_string(),
-                format!(
-                    "native Library exports currently use one homogeneous `Int`, `Float`, `Bool`, or `Text` scalar shape; `#Export(c) fn {}` is outside that boundary",
-                    export.name
-                ),
-                "use one supported scalar type for every parameter and the return type, or remove `#Export(c)`".to_string(),
-            ));
-            continue;
-        };
-        has_text_export |= shape == crate::Sema::GuestScalar::Text;
         let symbol = crate::Sema::guest_export_native_symbol(&export.name);
         if let Some(previous) = symbols.insert(symbol.clone(), export.name.clone()) {
             diagnostics.push(e1341(
@@ -191,6 +181,35 @@ pub fn validate_export_surface(bundle: &ProgramBundle) -> Vec<Diagnostic> {
                 ),
                 "C, Python, and Swift projections must name one native function unambiguously; foreign names outside ASCII collapse to the same C symbol",
                 "rename one exported function so every `#Export(c)` function has a unique ASCII C symbol",
+            ));
+        }
+        let Some(shape) = export.scalar else {
+            has_rich_export = true;
+            let component_symbol = format!("{symbol}_component");
+            if let Some(previous) =
+                symbols.insert(component_symbol.clone(), export.name.clone())
+            {
+                diagnostics.push(e1341(
+                    format!(
+                        "Library export `{}` needs generated component symbol `{component_symbol}`, already used by `{previous}`",
+                        export.name
+                    ),
+                    "rich Library projections add one typed component symbol beside each selected C export",
+                    "rename the export whose component symbol collides with another Library symbol",
+                ));
+            }
+            continue;
+        };
+        has_text_export |= shape == crate::Sema::GuestScalar::Text;
+    }
+    if has_rich_export {
+        if let Some(function) = symbols.get("jet_component_free") {
+            diagnostics.push(e1341(
+                format!(
+                    "Library export `{function}` collides with generated C symbol `jet_component_free`"
+                ),
+                "rich component results use one library-owned allocator release function",
+                "rename the export so it does not use `jet_component_free`",
             ));
         }
     }
@@ -246,9 +265,6 @@ pub fn check_and_freeze_version(bundle: &ProgramBundle, name: &str) -> Result<()
     let mut funcs = Vec::new();
     let surface = crate::Sema::guest_export_surface(bundle);
     for export in surface {
-        if export.scalar.is_none() {
-            continue;
-        }
         let Some(function) = bundle.modules[bundle.entry].items.iter().find_map(|item| {
             let Item::Func(function) = item else { return None };
             (function.name == export.name).then_some(function)

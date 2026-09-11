@@ -1,0 +1,116 @@
+{
+  "schema": "jet.optimization-witnesses.v1",
+  "schema_version": 1,
+  "stage": "optimization",
+  "relation": "implementation_preservation",
+  "observation_fields": ["result", "typed_failure", "mutation", "input_consumption", "ordered_effects", "cleanup", "resource_premises", "schedule", "allowed_schedules"],
+  "preservation_fields": ["origin_identity", "source_identity", "ir_identity", "target_identity", "side_conditions", "legality", "profitability", "target_representation", "result", "typed_failure", "mutation", "input_consumption", "ordered_effects", "cleanup", "resource_premises", "schedule", "allowed_schedules"],
+  "identity_fields": ["model_sha256", "source_sha256", "compiler_source_sha256", "checker_sha256", "configuration_sha256", "target_sha256", "obligations_sha256"],
+  "identity": {
+    "model": {"meaning": "#2898 canonical operation denominator and observation alphabet"},
+    "source": {"meaning": "legal and invalid source witness bytes with exact SHA-256"},
+    "compiler": {"meaning": "current canonical MIR optimizer, acceleration gate, and compiler-proof driver"},
+    "checker": {"meaning": "this stage checker and shared source-bound checker implementation"},
+    "configuration": {"meaning": "stage contract, D-COMPILER-PROOF1/D-ACCEL1 policy, and checker no-execution mode"},
+    "target": {"meaning": "scalar/vector/parallel/layout target facts and applicability"},
+    "obligations": {"meaning": "generated proof/compiler/obligations.json boundary and canonical operation rows"}
+  },
+  "binding": {
+    "contract": {"path": "proof/compiler/optimization/contract.json", "sha256": "sha256-92692b4802488e3ec26ea19de32f5beb8d3068e895c792273e7679dfbb983cda"},
+    "checker": {"path": "proof/compiler/optimization/check.mjs", "sha256": "sha256-59a60d4470fcebf8608987120e7fecf6f9950a7c12f95f5ec243e714dc1248ce"},
+    "driver": {"path": "scripts/agent/compiler-proof.mjs", "sha256": "sha256-e604d5348b21090b4222036b167e3fa1bce76ac8ea62aa44f7c7fad53100ee98"},
+    "obligations": {"path": "proof/compiler/obligations.json", "sha256": "sha256-a2ce1e98546eb3ec76ec079b0170f8dd00323258178ad20c71ea587098d16340"},
+    "model": {"path": "proof/compiler/semantics/witnesses.json", "sha256": "sha256-5b5f9390c6a7af3e7e16c748a4df1a3fb9d9b3bd4e09317954f5d5366ae7d6ed"},
+    "authorities": [
+      {"path": "crates/jet-foundation/src/MIR.rs", "sha256": "sha256-e00165bdf13947e21a2b3ed5bfac7ff2279420bf236c60e3af02d707542efd19"},
+      {"path": "crates/jet-foundation/src/MIROptimization.rs", "sha256": "sha256-d0fbdfcf91d1649b14bdc9379a639c11ef87eea9cd42b46c3b4975e0f4a1b1a1"},
+      {"path": "crates/jet-foundation/src/MIROptimization/Acceleration.rs", "sha256": "sha256-0b8b325e4a11697302b20d1c0219538a9d97af56d06c2ed50510dfa286269876"},
+      {"path": "docs/spec/architecture.md", "sha256": "sha256-dfe09d586b9dfe5982496c63ea50118a6f0384fbfde020eb41042f95725dfbac"},
+      {"path": "proof/compiler/lowering/common.mjs", "sha256": "sha256-0e595dfc683203ed57c5fdc7c030cb345e8a8c0cccdf722a133a66ed5c29b58d"},
+      {"path": "proof/compiler/observations/comparison-journal.mjs", "sha256": "sha256-15275902d52692e580a62c025d92e403459102d353067e29f827e4d2f1602b0d"}
+    ]
+  },
+  "runner": {
+    "launcher": "scripts/agent/jet-env",
+    "compiler": "target/debug/jet",
+    "tiers": ["aot", "jet_run", "interpreter", "check"],
+    "operations": ["run", "check"],
+    "execution_requested": false,
+    "unknown_policy": "unverified observations never become preservation or profitability evidence",
+    "configuration": "source-bound checker only; canonical route observation is deferred to the observer, formal discharge to the compiler-proof driver, and workload measurement remains separate"
+  },
+  "observation_certificates": {
+    "path": "proof/compiler/optimization/observations.json",
+    "schema": "jet.optimization-observations.v1",
+    "producer": "compiler-proof observation workflow",
+    "observer": "proof/compiler/optimization/observe.mjs",
+    "protocol": "canonical-tir-mir-route-v1",
+    "status": "unverified",
+    "universal_proof": false
+  },
+  "generated_relation": {
+    "path": "proof/compiler/obligations.json",
+    "authorities": ["#2898", "#2919"],
+    "id_sha256": "sha256-fd9bbe6d0065aa15fdda5fd4c66214feeef9399690e38dfd797b166354607cb6",
+    "required_ids": ["tir-expr:TExprKind.Binary", "tir-expr:TExprKind.Call", "tir-stmt:TStmt.Return"],
+    "mapping": {"default_status": "mapped_unproved", "qualification": "blocked", "proved_rows": 0, "unknown_rows": 0}
+  },
+  "certificate_defaults": {
+    "stage": "optimization",
+    "required_observations": ["result", "typed_failure", "mutation", "input_consumption", "ordered_effects", "cleanup", "resource_premises", "schedule", "allowed_schedules"],
+    "observation_order": ["result", "typed_failure", "mutation", "input_consumption", "ordered_effects", "cleanup", "resource_premises", "schedule", "allowed_schedules"],
+    "scenarios": ["short_circuit", "early_exit", "typed_errors", "checked_arithmetic", "callbacks", "resource_cleanup", "input_consumption"],
+    "premises": ["source_origin_is_retained", "typed_failure_is_retained", "mutation_is_retained", "input_consumption_is_exact", "ordered_effects_are_retained", "cleanup_edges_are_retained", "resource_premises_are_explicit", "target_applicability_is_checked"],
+    "canonical_operations": ["tir-expr:TExprKind.Binary", "tir-expr:TExprKind.Call", "tir-stmt:TStmt.Return"],
+    "origin": {"kind": "source-span", "identity": "source-origin-retained-through-shared-route"},
+    "source_identity": "source-origin-retained",
+    "ir_identity": "canonical-tir-mir-operation",
+    "target_identity": "target-facts-bound",
+    "side_conditions": ["source_order_preserved", "failure_order_preserved", "alias_and_ownership_premises_preserved", "target_and_layout_premises_preserved"],
+    "legality": {"route": "MirOptimization::verify_mir_legality", "required": true, "status": "unverified", "cost_cannot_legalize": true},
+    "profitability": {"separate": true, "route": "AccelerationGateInput-after-legality", "status": "unverified", "cannot_override_legality": true},
+    "rejection_route": "shared-semantic-route-preserves-invalidity",
+    "effects_order": "preserve",
+    "failure_order": "preserve",
+    "input_consumption": "exact",
+    "alias_policy": "preserve-or-prove",
+    "numeric_rule": "checked",
+    "target_contract": {"choices": ["scalar", "vector", "parallel", "layout"], "numerical_contract": "same-source-numerical-contract", "failure_contract": "same-source-failure-contract", "layout_contract": "target-facts-bound"}
+  },
+  "certificates": [
+    {"operation_id": "mir.optimize-pipeline", "source": "crates/jet-foundation/src/MIROptimization.rs", "symbol": "optimize_mir_program", "source_sha256": "sha256-d0fbdfcf91d1649b14bdc9379a639c11ef87eea9cd42b46c3b4975e0f4a1b1a1"},
+    {"operation_id": "mir.legality-verification", "source": "crates/jet-foundation/src/MIROptimization.rs", "symbol": "verify_mir_legality", "source_sha256": "sha256-d0fbdfcf91d1649b14bdc9379a639c11ef87eea9cd42b46c3b4975e0f4a1b1a1"},
+    {"operation_id": "mir.require-canonical-optimization", "source": "crates/jet-foundation/src/MIROptimization.rs", "symbol": "require_canonical_mir_optimization", "source_sha256": "sha256-d0fbdfcf91d1649b14bdc9379a639c11ef87eea9cd42b46c3b4975e0f4a1b1a1"},
+    {"operation_id": "mir.pass-order-facts", "source": "crates/jet-foundation/src/MIR.rs", "symbol": "MirOptimizationPassId", "source_sha256": "sha256-e00165bdf13947e21a2b3ed5bfac7ff2279420bf236c60e3af02d707542efd19"},
+    {"operation_id": "mir.inline-always", "source": "crates/jet-foundation/src/MIROptimization.rs", "symbol": "expand_inline_always", "source_sha256": "sha256-d0fbdfcf91d1649b14bdc9379a639c11ef87eea9cd42b46c3b4975e0f4a1b1a1"},
+    {"operation_id": "mir.unreachable-block-elimination", "source": "crates/jet-foundation/src/MIROptimization.rs", "symbol": "eliminate_unreachable_blocks", "source_sha256": "sha256-d0fbdfcf91d1649b14bdc9379a639c11ef87eea9cd42b46c3b4975e0f4a1b1a1"},
+    {"operation_id": "mir.cfg-simplification", "source": "crates/jet-foundation/src/MIROptimization.rs", "symbol": "simplify_cfg", "source_sha256": "sha256-d0fbdfcf91d1649b14bdc9379a639c11ef87eea9cd42b46c3b4975e0f4a1b1a1"},
+    {"operation_id": "mir.exact-constant-folding", "source": "crates/jet-foundation/src/MIROptimization.rs", "symbol": "fold_exact_constants", "source_sha256": "sha256-d0fbdfcf91d1649b14bdc9379a639c11ef87eea9cd42b46c3b4975e0f4a1b1a1"},
+    {"operation_id": "mir.bounds-check-elimination", "source": "crates/jet-foundation/src/MIROptimization.rs", "symbol": "derive_bounds_facts", "source_sha256": "sha256-d0fbdfcf91d1649b14bdc9379a639c11ef87eea9cd42b46c3b4975e0f4a1b1a1"},
+    {"operation_id": "mir.dead-pure-value-elimination", "source": "crates/jet-foundation/src/MIROptimization.rs", "symbol": "eliminate_dead_pure_values", "source_sha256": "sha256-d0fbdfcf91d1649b14bdc9379a639c11ef87eea9cd42b46c3b4975e0f4a1b1a1"},
+    {"operation_id": "mir.canonical-loop-facts", "source": "crates/jet-foundation/src/MIROptimization.rs", "symbol": "derive_loop_and_vector_facts", "source_sha256": "sha256-d0fbdfcf91d1649b14bdc9379a639c11ef87eea9cd42b46c3b4975e0f4a1b1a1"},
+    {"operation_id": "mir.fixed-reduction-normalization", "source": "crates/jet-foundation/src/MIROptimization.rs", "symbol": "normalize_fixed_reduction_loops", "source_sha256": "sha256-d0fbdfcf91d1649b14bdc9379a639c11ef87eea9cd42b46c3b4975e0f4a1b1a1"},
+    {"operation_id": "mir.acceleration-facts", "source": "crates/jet-foundation/src/MIROptimization.rs", "symbol": "refresh_acceleration_facts", "source_sha256": "sha256-d0fbdfcf91d1649b14bdc9379a639c11ef87eea9cd42b46c3b4975e0f4a1b1a1"},
+    {"operation_id": "mir.canonical-program-order", "source": "crates/jet-foundation/src/MIROptimization.rs", "symbol": "canonicalize_program_order", "source_sha256": "sha256-d0fbdfcf91d1649b14bdc9379a639c11ef87eea9cd42b46c3b4975e0f4a1b1a1"},
+    {"operation_id": "mir.acceleration-gate", "source": "crates/jet-foundation/src/MIROptimization/Acceleration.rs", "symbol": "AccelerationGateInput", "source_sha256": "sha256-0b8b325e4a11697302b20d1c0219538a9d97af56d06c2ed50510dfa286269876"}
+  ],
+  "composition": {
+    "ordered_operations": ["mir.optimize-pipeline", "mir.legality-verification", "mir.require-canonical-optimization", "mir.pass-order-facts", "mir.inline-always", "mir.unreachable-block-elimination", "mir.cfg-simplification", "mir.exact-constant-folding", "mir.bounds-check-elimination", "mir.dead-pure-value-elimination", "mir.canonical-loop-facts", "mir.fixed-reduction-normalization", "mir.acceleration-facts", "mir.canonical-program-order", "mir.acceleration-gate"],
+    "preserves": ["origin_identity", "source_identity", "ir_identity", "target_identity", "side_conditions", "legality", "profitability", "target_representation", "result", "typed_failure", "mutation", "input_consumption", "ordered_effects", "cleanup", "resource_premises", "schedule", "allowed_schedules"],
+    "status": "unverified",
+    "engine_specific_lowerer": false
+  },
+  "witness_sources": [
+    {"id": "legal-checked-loop", "stage": "optimization", "kind": "legal", "path": "proof/compiler/optimization/fixtures/legal-checked-loop.jet", "source_sha256": "sha256-9fe0b31b0885f73d835030e32fb7776feb6d6b4065d31e851bf1790f47113b42", "operation_ids": ["mir.optimize-pipeline", "mir.canonical-loop-facts", "mir.fixed-reduction-normalization"], "expected_status": "preserve"},
+    {"id": "invalid-reassociation", "stage": "optimization", "kind": "invalid", "path": "proof/compiler/optimization/fixtures/invalid-reassociation.jet", "source_sha256": "sha256-693679741829bd90d56cc1b25f300a0273e2c2f3ee796b7398955aff95944f8f", "operation_ids": ["mir.exact-constant-folding", "mir.canonical-loop-facts", "mir.acceleration-gate"], "expected_status": "reject"}
+  ],
+  "negative_controls": [
+    {"kind": "reordered_effects", "operation_id": "mir.cfg-simplification", "expected_status": "reject", "checked_without_execution": true},
+    {"kind": "reordered_failure", "operation_id": "mir.exact-constant-folding", "expected_status": "reject", "checked_without_execution": true},
+    {"kind": "extra_input_consumption", "operation_id": "mir.dead-pure-value-elimination", "expected_status": "reject", "checked_without_execution": true},
+    {"kind": "invalid_alias", "operation_id": "mir.canonical-loop-facts", "expected_status": "reject", "checked_without_execution": true},
+    {"kind": "unsound_arithmetic_reassociation", "operation_id": "mir.exact-constant-folding", "expected_status": "reject", "checked_without_execution": true},
+    {"kind": "wrong_operation_certificate", "operation_id": "mir.acceleration-facts", "expected_status": "reject", "checked_without_execution": true},
+    {"kind": "illegal_cost_selection", "operation_id": "mir.acceleration-gate", "expected_status": "reject", "checked_without_execution": true}
+  ]
+}

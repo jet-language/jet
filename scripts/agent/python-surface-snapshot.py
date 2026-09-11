@@ -8,7 +8,7 @@ this" and "Python lacks this" claim is checkable.
 Regenerate with:
 
     scripts/agent/jet-env python3 scripts/agent/python-surface-snapshot.py \
-        > docs/reference/python-surface.json
+        > docs/spec/reference/python-surface.json
 
 Scope rule (recorded in the snapshot, never applied silently): the comparison
 set is callables and types. Module-level integer/string constants such as

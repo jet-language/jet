@@ -209,3 +209,51 @@ fn liveness_fix_removes_only_literal_locals_and_empty_private_functions() {
     );
     assert!(!String::from_utf8_lossy(&checked.stderr).contains("L0101"));
 }
+
+#[test]
+fn shared_busy_wait_fix_rewrites_empty_plain_field_loop() {
+    let scratch = Scratch::new("shared_busy_wait_fix");
+    let path = scratch.join("busy_spin.jet");
+    fs::write(&path, include_str!("ui_lint/busy_spin.jet")).unwrap();
+
+    let fixed = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["fix", path.to_str().unwrap()])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        fixed.status.code(),
+        Some(0),
+        "jet fix failed: {}",
+        String::from_utf8_lossy(&fixed.stderr)
+    );
+    let source = fs::read_to_string(&path).unwrap();
+    assert!(
+        source.contains(
+            "flag.guard_edit().wait(_changed, value -> value.ready) ?? panic(\"wait failed\")"
+        ),
+        "safe busy-loop fix missing:\n{source}"
+    );
+    assert_eq!(
+        source.matches("loop flag.ready == false {}").count(),
+        1,
+        "safe busy-loop fix changed the deliberate allow:\n{source}"
+    );
+    assert!(
+        source.contains("#allow(shared_busy_wait) loop flag.ready == false {}"),
+        "safe busy-loop fix removed the deliberate allow:\n{source}"
+    );
+
+    let checked = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["check", path.to_str().unwrap()])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        checked.status.success(),
+        "fixed busy-loop source does not check:\n{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+}

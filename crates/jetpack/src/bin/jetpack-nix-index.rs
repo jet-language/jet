@@ -598,24 +598,24 @@ fn read_json_input(
     path: &Path,
     limit: u64,
     label: &str,
-) -> Result<jet_foundation::EncodingJson::Value, String> {
+) -> Result<jet_foundation::DataTree::DataTree, String> {
     let bytes = read_file(path, limit, label)?;
     let text = std::str::from_utf8(&bytes).map_err(|_| format!("{label} is not UTF-8"))?;
     jet_foundation::EncodingJson::parse_json_exact_numbers(text, true)
         .map_err(|error| format!("parse {label}: {}", error.message))
 }
 
-fn json_value_contains_string(value: &jet_foundation::EncodingJson::Value, needle: &str) -> bool {
+fn json_value_contains_string(value: &jet_foundation::DataTree::DataTree, needle: &str) -> bool {
     value_contains_string(value, needle)
 }
 
-fn value_contains_string(value: &jet_foundation::EncodingJson::Value, needle: &str) -> bool {
+fn value_contains_string(value: &jet_foundation::DataTree::DataTree, needle: &str) -> bool {
     match value {
-        jet_foundation::EncodingJson::Value::Text(value) => value == needle,
-        jet_foundation::EncodingJson::Value::Array(values) => values
+        jet_foundation::DataTree::DataTree::Text(value) => value == needle,
+        jet_foundation::DataTree::DataTree::Array(values) => values
             .iter()
             .any(|value| value_contains_string(value, needle)),
-        jet_foundation::EncodingJson::Value::Object(values) => values
+        jet_foundation::DataTree::DataTree::Object(values) => values
             .iter()
             .any(|(_, value)| value_contains_string(value, needle)),
         _ => false,
@@ -623,20 +623,20 @@ fn value_contains_string(value: &jet_foundation::EncodingJson::Value, needle: &s
 }
 
 fn json_value_contains_field_string(
-    value: &jet_foundation::EncodingJson::Value,
+    value: &jet_foundation::DataTree::DataTree,
     field: &str,
     needle: &str,
 ) -> bool {
     match value {
-        jet_foundation::EncodingJson::Value::Object(values) => values.iter().any(|(key, value)| {
+        jet_foundation::DataTree::DataTree::Object(values) => values.iter().any(|(key, value)| {
             (key == field
                 && matches!(
                     value,
-                    jet_foundation::EncodingJson::Value::Text(value) if value == needle
+                    jet_foundation::DataTree::DataTree::Text(value) if value == needle
                 ))
                 || json_value_contains_field_string(value, field, needle)
         }),
-        jet_foundation::EncodingJson::Value::Array(values) => values
+        jet_foundation::DataTree::DataTree::Array(values) => values
             .iter()
             .any(|value| json_value_contains_field_string(value, field, needle)),
         _ => false,
@@ -644,22 +644,22 @@ fn json_value_contains_field_string(
 }
 
 fn collect_named_strings(
-    value: &jet_foundation::EncodingJson::Value,
+    value: &jet_foundation::DataTree::DataTree,
     field: &str,
     values: &mut BTreeSet<String>,
 ) {
     match value {
-        jet_foundation::EncodingJson::Value::Object(entries) => {
+        jet_foundation::DataTree::DataTree::Object(entries) => {
             for (key, value) in entries {
                 if key == field {
-                    if let jet_foundation::EncodingJson::Value::Text(value) = value {
+                    if let jet_foundation::DataTree::DataTree::Text(value) = value {
                         values.insert(value.clone());
                     }
                 }
                 collect_named_strings(value, field, values);
             }
         }
-        jet_foundation::EncodingJson::Value::Array(entries) => {
+        jet_foundation::DataTree::DataTree::Array(entries) => {
             for value in entries {
                 collect_named_strings(value, field, values);
             }
@@ -718,17 +718,17 @@ fn collect_json_files(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), Strin
     Ok(())
 }
 
-fn collect_store_paths(value: &jet_foundation::EncodingJson::Value, paths: &mut BTreeSet<String>) {
+fn collect_store_paths(value: &jet_foundation::DataTree::DataTree, paths: &mut BTreeSet<String>) {
     match value {
-        jet_foundation::EncodingJson::Value::Text(value) if value.starts_with("/nix/store/") => {
+        jet_foundation::DataTree::DataTree::Text(value) if value.starts_with("/nix/store/") => {
             paths.insert(value.clone());
         }
-        jet_foundation::EncodingJson::Value::Array(values) => {
+        jet_foundation::DataTree::DataTree::Array(values) => {
             for value in values {
                 collect_store_paths(value, paths);
             }
         }
-        jet_foundation::EncodingJson::Value::Object(values) => {
+        jet_foundation::DataTree::DataTree::Object(values) => {
             for (_, value) in values {
                 collect_store_paths(value, paths);
             }
@@ -743,24 +743,24 @@ fn find_json_integer(bytes: &[u8], names: &[&str]) -> Option<u64> {
     find_integer(&value, names)
 }
 
-fn find_integer(value: &jet_foundation::EncodingJson::Value, names: &[&str]) -> Option<u64> {
+fn find_integer(value: &jet_foundation::DataTree::DataTree, names: &[&str]) -> Option<u64> {
     match value {
-        jet_foundation::EncodingJson::Value::Number(_)
-        | jet_foundation::EncodingJson::Value::Int(_) => None,
-        jet_foundation::EncodingJson::Value::Object(values) => {
+        jet_foundation::DataTree::DataTree::Number(_)
+        | jet_foundation::DataTree::DataTree::Int(_) => None,
+        jet_foundation::DataTree::DataTree::Object(values) => {
             values.iter().find_map(|(key, value)| {
                 if names.contains(&key.as_str()) {
                     match value {
-                        jet_foundation::EncodingJson::Value::Number(value) => value.parse().ok(),
-                        jet_foundation::EncodingJson::Value::Int(value) if *value >= 0 => {
+                        jet_foundation::DataTree::DataTree::Number(value) => value.parse().ok(),
+                        jet_foundation::DataTree::DataTree::Int(value) if *value >= 0 => {
                             Some(*value as u64)
                         }
                         _ => find_integer(value, names),
                     }
                 } else {
                     match value {
-                        jet_foundation::EncodingJson::Value::Object(_)
-                        | jet_foundation::EncodingJson::Value::Array(_) => {
+                        jet_foundation::DataTree::DataTree::Object(_)
+                        | jet_foundation::DataTree::DataTree::Array(_) => {
                             find_integer(value, names)
                         }
                         _ => None,
@@ -768,7 +768,7 @@ fn find_integer(value: &jet_foundation::EncodingJson::Value, names: &[&str]) -> 
                 }
             })
         }
-        jet_foundation::EncodingJson::Value::Array(values) => {
+        jet_foundation::DataTree::DataTree::Array(values) => {
             values.iter().find_map(|value| find_integer(value, names))
         }
         _ => None,

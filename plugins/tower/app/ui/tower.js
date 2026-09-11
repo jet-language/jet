@@ -76,7 +76,6 @@ const api = async (route, payload, headers = {}) => {
     toast('server unreachable — action NOT saved', true);
     throw new Error('offline');
   }
-  if (r.status === 401) { showUnlock(); throw new Error('unauthorized'); }
   const j = await r.json().catch(() => ({}));
   if (!r.ok || j.ok === false) { toast(j.message || `request failed: ${route}`, true); throw new Error(j.message || route); }
   if (j.state) applyState(j.state, { own: true });
@@ -84,28 +83,7 @@ const api = async (route, payload, headers = {}) => {
   return j.result;
 };
 
-// Auth expired / never set on this device → full-screen unlock, never a
-// silent failure.
-let unlockShown = false;
-function showUnlock() {
-  if (unlockShown) return;
-  unlockShown = true;
-  const box = el(`<div class="unlock" role="dialog" aria-label="Unlock">
-      <div class="unlock__card">
-        <div class="unlock__mark">TOWER<b>.</b></div>
-        <div class="unlock__t">This device isn't unlocked — actions are being rejected.<br>Paste the access key (<code>auth.token</code> in <code>.tower/secrets.json</code>).</div>
-        <input class="unlock__in" placeholder="access key" autocomplete="off">
-        <button class="btn btn--red" id="unlock-go">Unlock</button>
-      </div></div>`);
-  document.body.appendChild(box);
-  const go = () => {
-    const k = $('.unlock__in', box).value.trim();
-    if (k) location.href = '/?key=' + encodeURIComponent(k) + location.hash;
-  };
-  $('#unlock-go', box).addEventListener('click', go);
-  $('.unlock__in', box).addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
-  $('.unlock__in', box).focus();
-}
+
 
 // ---- live state: SSE first, gentle polling as fallback -----------------------
 // The page must NEVER yank the DOM out from under the owner: passive updates
@@ -129,7 +107,7 @@ function applyState(next, { own = false } = {}) {
   // server was upgraded/restarted under us → reload for fresh UI code, but
   // only when the owner isn't mid-anything
   if (S?.boot && next.boot && S.boot !== next.boot) {
-    if (!uiBusy()) return location.reload();
+    if (!uiBusy() && guidanceDraft === null) return location.reload();
     pending = next; S = { ...next, boot: S.boot }; return;
   }
   if (S && next.meta.rev !== S.meta.rev) {
@@ -186,6 +164,7 @@ function scheduleFallbackPoll() {
 // diverge, the watcher failed (or hasn't finished) and the process needs a
 // restart — surface it instead of letting actions 404 silently.
 const SRC_VERSION = document.querySelector('meta[name="tower-version"]')?.content || null;
+
 let staleShown = false;
 function setStaleBanner(stale) {
   if (stale === staleShown) return;
@@ -206,8 +185,12 @@ async function checkVersion() {
 async function refresh() {
   try {
     const r = await fetch('/api/state');
-    if (r.status === 401) return showUnlock();
-    applyState(await r.json());
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.ok === false) {
+      toast(j.message || 'request failed: /api/state', true);
+      return;
+    }
+    applyState(j);
   } catch { /* offline */ }
 }
 
@@ -238,7 +221,7 @@ const TERM = (k, fb) => ((CFG().terms || {})[k] || fb);
 const epochTag = (e) => e ? (e.num != null ? `${TERM('epoch', 'Epoch')} ${e.num}` : e.id) : '';
 const openDecisions = () => S.decisions.filter(d => d.status !== 'ratified' && !d.draft);
 const openGenericDecisions = () => openDecisions().filter(d => d.group !== 'acceptance');
-const ballotCount = () => openDecisions().length;
+const ballotCount = () => openGenericDecisions().length + verifyQueue().length;
 
 // waiting-time chip: shown once something has sat for 6+ hours
 function ageChip(iso) {
@@ -300,9 +283,8 @@ function renderBeacon() {
       : it.type === 'done'
         ? `done: ${it.text}`
         : it.type === 'decision' ? it.decision.title : 'review: ' + it.card.title;
-    // Done cards are news, not a duty: blue segments so a glance at the beacon
-    // separates "finished" from the red "blocked on you" ballots and checks.
-    const tone = it.type === 'done' ? ' beacon__seg--done' : '';
+    const tone = ['done', 'message', 'verify'].includes(it.type)
+      ? ` beacon__seg--${it.type}` : '';
     const seg = el(`<button class="beacon__seg${tone}" style="opacity:${Math.min(1, .55 + h / 96).toFixed(2)}" title="${esc(title)}"></button>`);
     seg.addEventListener('click', () => jumpTo(it));
     b.appendChild(seg);
@@ -319,7 +301,7 @@ const VIEWS = [
   { id: 'board', name: 'Board', count: () => S.cards.filter(c => c.phase !== 'done' && c.phase !== 'frozen').length },
   { id: 'docs', name: 'Docs', count: () => docsFileCount() },
   { id: 'papercuts', name: 'Papercuts', count: () => (S.papercuts || []).filter(p => p.status === 'open').length },
-  { id: 'guidance', name: 'Guidance' },
+  { id: 'guidance', name: 'AGENTS.md' },
   { id: 'gauntlet', name: 'Gauntlet' },
 ];
 function docsFileCount() {
@@ -333,9 +315,14 @@ function renderChrome() {
   tabs.innerHTML = '';
   for (const v of VIEWS) {
     const n = v.count?.();
-    const badge = v.count
-      ? `<span class="tab__n ${v.alert && n ? 'alert' : ''}">${esc(n)}</span>`
-      : '';
+    const decisions = v.alert ? openGenericDecisions().length : 0;
+    const checks = v.alert ? verifyQueue().length : 0;
+    const badge = v.alert && n
+      ? [
+        decisions ? `<span class="tab__n alert" title="${decisions} decisions">${decisions}</span>` : '',
+        checks ? `<span class="tab__n tab__n--verify" title="${checks} owner checks">${checks}</span>` : '',
+      ].join('')
+      : v.count ? `<span class="tab__n">${esc(n)}</span>` : '';
     const t = el(`<button class="tab" aria-current="${VIEW === v.id}">${v.name}${badge}</button>`);
     t.addEventListener('click', () => go(v.id));
     tabs.appendChild(t);
@@ -344,10 +331,15 @@ function renderChrome() {
   updatePill();
 }
 function updatePill() {
-  const fy = ballotCount();
+  const decisions = openGenericDecisions().length;
+  const checks = verifyQueue().length;
   const pill = $('#pill');
-  pill.className = 'top__pill' + (fy ? '' : ' clear');
-  pill.innerHTML = fy ? `<span class="beat"></span> ${fy} for you` : '✓ tower clear';
+  pill.className = 'top__pill' + (decisions && checks ? ' top__pill--mixed'
+    : checks ? ' top__pill--verify' : decisions ? '' : ' clear');
+  pill.innerHTML = [
+    decisions ? `<span class="top__status"><span class="beat"></span>${decisions} decision${decisions === 1 ? '' : 's'}</span>` : '',
+    checks ? `<span class="top__status top__status--verify"><span class="beat"></span>${checks} owner check${checks === 1 ? '' : 's'}</span>` : '',
+  ].filter(Boolean).join('') || '&#10003; tower clear';
   pill.onclick = () => go('now');
 }
 function undoToast(label, rev) {
@@ -366,9 +358,14 @@ function undoToast(label, rev) {
 function viewNow() {
   const v = $('#view');
   const items = duties();
-  const ballots = ballotCount();
+  const decisions = openGenericDecisions().length;
+  const checks = verifyQueue().length;
+  const waiting = [
+    decisions ? `<b>${decisions}</b> decision${decisions === 1 ? '' : 's'}` : '',
+    checks ? `<span class="owner-check-count"><b>${checks}</b> owner check${checks === 1 ? '' : 's'}</span>` : '',
+  ].filter(Boolean).join(' and ');
   v.innerHTML = `<div class="viewhead"><h1 class="h1">Now</h1>
-    <span class="viewhead__sub">${ballots ? `<b>${ballots}</b> ballot${ballots === 1 ? '' : 's'} waiting on you` : 'no ballots waiting on you'}</span>
+    <span class="viewhead__sub">${waiting ? `${waiting} waiting on you` : 'no decisions or checks waiting on you'}</span>
     ${openGenericDecisions().length ? `<div class="viewhead__actions"><button class="btn btn--red" id="focus-all">Decide all →</button></div>` : ''}</div>`;
   $('#focus-all')?.addEventListener('click', () => focusAll(openGenericDecisions()[0].id));
 
@@ -482,32 +479,105 @@ function dutyDecision(d) {
   return node;
 }
 
-// ---- #515: needs-your-verification queue -----------------------------------
-// Pass 2 (2026-07-12, owner directive): entries were too long and asked the
-// owner to run commands he can't run away from his computer. Content
-// sources, in priority order: (1) the acceptance ballot's own
-// checkInstructions — new shape {proof, visualCheck} assembled server-side
-// when minted; (2) old-shape {toCheck, confirms} ballots minted before this
-// pass, still live until a bounce/remint refreshes them; (3) the card's exit
-// criteria; (4) the card's refs. If none of that exists fall back to
-// whatever prose the ballot carries — never render an empty box. visualCheck
-// is never derived client-side (only the server heuristic sets it — no
-// visual claim without the ref evidence behind it).
+// ---- needs-your-verification queue -----------------------------------------
 function acceptanceContent(card, ballot) {
   const ci = ballot?.checkInstructions;
   if (ci && (Array.isArray(ci.proof) || 'visualCheck' in ci))
-    return { proof: ci.proof || [], visualCheck: ci.visualCheck || null, steps: ci.steps || null };
-  if (ci && ((ci.toCheck || []).length || (ci.confirms || []).length))
-    return { proof: (ci.confirms || []).length ? ci.confirms : ci.toCheck, visualCheck: null };
+    return { proof: ci.proof || [], visualCheck: ci.visualCheck || null };
   const items = (card?.criteria || []);
   if (items.length)
     return { proof: items.map(i => `${i.text} — ${i.evidence ? i.evidence : i.status}`), visualCheck: null };
-  const refs = card?.refs || [];
-  if (refs.length) return { proof: refs.map(r => `Check ${r}`), visualCheck: null };
-  const raw = (ballot && (ballot.detail || ballot.gist)) || 'No check instructions recorded on this card — open it for context.';
+  const raw = (ballot && (ballot.detail || ballot.gist)) || 'No proof recorded on this card.';
   return { proof: [raw], visualCheck: null };
 }
 const PROOF_INLINE_MAX = 2;
+const VISUAL_MEDIA_ROOT = 'docs/proposals/visual-acceptance/media/';
+const evidenceMedia = (card, ballot) => ballot ? (ballot.visualMedia || []) : (card.visualMedia || []);
+const mediaUrl = path => `/media/${String(path).slice(VISUAL_MEDIA_ROOT.length).split('/').map(encodeURIComponent).join('/')}`;
+
+// Captured evidence. Screenshots open a gallery scoped to this card or
+// ballot's own captures; videos play inline with native controls.
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+function capturedEvidence(media) {
+  if (!media.length) return `<section class="captured captured--pending" aria-label="Captured evidence">
+    <h3 class="captured__title">Captured evidence</h3>
+    <p>Capture pending. This visual check is not ready.</p>
+  </section>`;
+  const shots = media.filter(item => item.kind === 'image').length;
+  const count = [shots && plural(shots, 'screenshot'), media.length - shots && plural(media.length - shots, 'video')].filter(Boolean).join(' · ');
+  let shot = 0;
+  return `<section class="captured" aria-label="Captured evidence">
+    <div class="captured__head"><h3 class="captured__title">Captured evidence</h3><span class="captured__count">${count}</span></div>
+    <div class="captured__grid">${media.map(item => {
+      const src = mediaUrl(item.path);
+      const state = item.state ? `<span class="captured__state">${esc(item.state)}</span>` : '';
+      const visual = item.kind === 'image'
+        ? `<button class="captured__open" type="button" data-shot="${shot++}" aria-label="View screenshot ${shot} of ${shots}: ${esc(item.caption)}"><img src="${esc(src)}" alt="${esc(item.alt)}" loading="lazy"></button>`
+        : `<video src="${esc(src)}" aria-label="${esc(item.alt)}" controls preload="metadata"${item.poster ? ` poster="${esc(mediaUrl(item.poster))}"` : ''}></video>`;
+      return `<figure class="captured__item">${visual}<figcaption>${state}<span>${esc(item.caption)}</span></figcaption></figure>`;
+    }).join('')}</div>
+  </section>`;
+}
+
+// One shared <dialog>; each open loads the screenshots of a single card or
+// ballot, so arrows never wander into another card's captures.
+let gallery = null;
+function galleryDialog() {
+  if (gallery) return gallery;
+  const g = gallery = el(`<dialog class="gallery" aria-label="Screenshots">
+    <div class="gallery__bar">
+      <span class="gallery__pos" aria-live="polite"></span>
+      <span class="gallery__caption"></span>
+      <button class="gallery__x" type="button" aria-label="Close screenshots">×</button>
+    </div>
+    <div class="gallery__stage" tabindex="-1">
+      <button class="gallery__nav" type="button" data-step="-1" aria-label="Previous screenshot">‹</button>
+      <img alt="">
+      <button class="gallery__nav" type="button" data-step="1" aria-label="Next screenshot">›</button>
+    </div>
+    <div class="gallery__strip"></div>
+  </dialog>`);
+  g.shots = []; g.index = 0; g.opener = null;
+  document.body.appendChild(g);
+  $('.gallery__x', g).addEventListener('click', () => g.close());
+  g.querySelectorAll('[data-step]').forEach(b => b.addEventListener('click', () => galleryGo(g.index + Number(b.dataset.step))));
+  $('.gallery__strip', g).addEventListener('click', e => { const t = e.target.closest('[data-index]'); if (t) galleryGo(Number(t.dataset.index)); });
+  g.addEventListener('click', e => { if (e.target === g) g.close(); });
+  g.addEventListener('keydown', e => {
+    e.stopPropagation();   // a modal owns its keys; the document handler would close the card on Escape
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); galleryGo(g.index + (e.key === 'ArrowLeft' ? -1 : 1)); }
+    else if (e.key === 'Home' || e.key === 'End') { e.preventDefault(); galleryGo(e.key === 'Home' ? 0 : g.shots.length - 1); }
+  });
+  g.addEventListener('close', () => { g.opener?.focus(); g.opener = null; });
+  return g;
+}
+function galleryGo(index) {
+  const g = gallery, n = g.shots.length;
+  g.index = ((index % n) + n) % n;
+  const shot = g.shots[g.index];
+  const img = $('.gallery__stage img', g);
+  img.src = shot.src; img.alt = shot.alt;
+  $('.gallery__pos', g).textContent = `${g.index + 1} / ${n}`;
+  $('.gallery__caption', g).innerHTML = `${shot.state ? `<span class="captured__state">${esc(shot.state)}</span>` : ''}<span>${esc(shot.caption)}</span>`;
+  g.querySelectorAll('.gallery__strip [data-index]').forEach(t => t.toggleAttribute('aria-current', Number(t.dataset.index) === g.index));
+  $('.gallery__strip [aria-current]', g)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+function openGallery(shots, index, opener) {
+  const g = galleryDialog();
+  g.shots = shots; g.opener = opener;
+  g.classList.toggle('gallery--single', shots.length === 1);
+  $('.gallery__strip', g).innerHTML = shots.map((s, i) =>
+    `<button type="button" data-index="${i}" aria-label="Screenshot ${i + 1} of ${shots.length}: ${esc(s.caption)}"><img src="${esc(s.src)}" alt="" loading="lazy"></button>`).join('');
+  galleryGo(index);
+  g.showModal();
+  $('.gallery__stage', g).focus();
+}
+function bindCapturedEvidence(root, media) {
+  const shots = media.filter(item => item.kind === 'image')
+    .map(item => ({ src: mediaUrl(item.path), alt: item.alt, caption: item.caption, state: item.state }));
+  root.querySelectorAll('[data-shot]').forEach(button =>
+    button.addEventListener('click', () => openGallery(shots, Number(button.dataset.shot), button)));
+}
 
 // Owner verification is deliberately transport-distinct from generic ballot
 // clearance. Each click gets a short-lived challenge bound to this browser
@@ -520,28 +590,31 @@ async function ownerAcceptance(decisionId, outcome, comment) {
 
 function dutyVerify(card, ballot) {
   const content = acceptanceContent(card, ballot);
+  const media = evidenceMedia(card, ballot);
   const inline = content.proof.slice(0, PROOF_INLINE_MAX);
   const rest = content.proof.slice(PROOF_INLINE_MAX);
-  const waitingOnAgent = card.needsAcceptance && !ballot;
+  const hasOpenCriteria = (card.criteria || []).some(i => !['met', 'verified'].includes(i.status));
+  const waitingOnAgent = card.needsAcceptance && (!ballot || hasOpenCriteria);
+  const capturePending = media.length === 0;
+  const notReady = waitingOnAgent || capturePending;
   const yourCheck = waitingOnAgent
-    ? 'Agents still finishing machine criteria — visual accept unlocks after that.'
-    : content.visualCheck || 'Look at the surface yourself — confirm it looks clean, modern, and right. Agents already own technical proof.';
+    ? 'The agents are still finishing the computer checks. You can look now, but you can accept only after those checks finish.'
+    : content.visualCheck || 'Try the screen yourself. Check that it looks right and is easy to use. The agents have already checked that it works.';
   const node = el(`<div class="duty duty--verify">
       <div class="duty__top"><span class="duty__kind">Visual check</span>
         <span class="num">${ticket(card)}</span>
-        <span class="duty__meta">${ballot ? esc(ballot.id) : 'needsAcceptance — waiting on ballot'}</span>${ageChip(ballot ? ballot.created : card.updated)}</div>
+        <span class="duty__meta">${ballot ? esc(ballot.id) : 'waiting for the agents to prepare your check'}</span>${ageChip(ballot ? ballot.created : card.updated)}</div>
       <h2 class="duty__title">${esc(card.title)}</h2>
       <div class="verifyblock">
         <div class="verifyblock__h">What agents already proved</div>
         <ul class="verifyblock__list">${inline.map(t => `<li>${esc(t)}</li>`).join('') || '<li class="verifyblock__empty">(nothing recorded — open the card)</li>'}</ul>
         ${rest.length ? `<details class="verifyblock__more"><summary>+${rest.length} more</summary><ul class="verifyblock__list">${rest.map(t => `<li>${esc(t)}</li>`).join('')}</ul></details>` : ''}
-        <div class="verifyblock__h">${content.steps ? 'How to see it' : 'Your eyes only'}</div>
-        ${content.steps
-          ? `<pre class="verifyblock__steps">${esc(content.steps)}</pre>`
-          : `<p class="verifyblock__visual">${esc(yourCheck)}</p>`}
+        <div class="verifyblock__h">Your eyes only</div>
+        <p class="verifyblock__visual">${esc(yourCheck)}</p>
       </div>
+      ${capturedEvidence(media)}
       <div class="duty__actions">
-        <button class="btn btn--red btn--sm" data-accept ${waitingOnAgent ? 'disabled' : ''}>${waitingOnAgent ? 'Waiting for agent criteria' : 'Accept — looks right'}</button>
+        <button class="btn btn--amber btn--sm" data-accept ${notReady ? 'disabled' : ''}>${waitingOnAgent ? 'Waiting for computer checks' : capturePending ? 'Waiting for a screen capture' : 'Accept — looks right'}</button>
         <button class="btn btn--ghost btn--sm" data-bounce ${waitingOnAgent ? 'disabled' : ''}>Bounce</button>
         <button class="btn btn--ghost btn--sm" data-open>Open card</button>
       </div>
@@ -554,7 +627,7 @@ function dutyVerify(card, ballot) {
     ? ownerAcceptance(ballot.id, 'accept')
     : api('card/update', { id: card.id, phase: 'done', logEntry: 'Accepted — closed after visual review.', by: 'owner' });
   $('[data-accept]', node).addEventListener('click', doAccept);
-  node.__primary = waitingOnAgent ? () => showDetail(card.id) : doAccept;
+  node.__primary = notReady ? () => showDetail(card.id) : doAccept;
   $('[data-open]', node).addEventListener('click', () => showDetail(card.id));
   const box = $('.bouncebox', node);
   $('[data-bounce]', node).addEventListener('click', () => { box.hidden = !box.hidden; if (!box.hidden) $('textarea', box).focus(); });
@@ -563,6 +636,7 @@ function dutyVerify(card, ballot) {
     if (ballot) ownerAcceptance(ballot.id, 'bounce', comment);
     else api('card/update', { id: card.id, phase: 'building', logEntry: `Bounced back to building: ${comment || '(no comment)'}`, by: 'owner' });
   });
+  bindCapturedEvidence(node, media);
   return node;
 }
 
@@ -1085,10 +1159,13 @@ function renderDetail(c) {
   const phaseText = phaseLabel(phase);
   const sel = (k, opts, cur) => `<select data-fld="${k}">${opts.map(o => `<option value="${esc(o)}" ${o === cur ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
   const acceptanceBallot = openAcceptanceBallot(c);
-  const waitingOnAgent = phase === 'verify' && c.needsAcceptance && !acceptanceBallot;
+  const hasOpenCriteria = (c.criteria || []).some(i => !['met', 'verified'].includes(i.status));
+  const waitingOnAgent = phase === 'verify' && c.needsAcceptance && (!acceptanceBallot || hasOpenCriteria);
+  const media = evidenceMedia(c, acceptanceBallot);
+  const capturePending = c.needsAcceptance && media.length === 0;
   // Owner CTA only for needsAcceptance visual/UX cards. Bare verify is agent work.
   const cta = phase === 'frozen' ? `<button class="btn btn--red" id="cta-unfreeze">Unfreeze — start work</button>`
-    : (phase === 'verify' && c.needsAcceptance) ? `<button class="btn btn--red" id="cta-done" ${waitingOnAgent ? 'disabled' : ''}>${waitingOnAgent ? 'Waiting for agent criteria' : acceptanceBallot ? 'Accept — looks right' : 'Accept — looks right'}</button>` : '';
+    : (phase === 'verify' && c.needsAcceptance) ? `<button class="btn btn--red" id="cta-done" ${waitingOnAgent || capturePending ? 'disabled' : ''}>${waitingOnAgent ? 'Waiting for agent criteria' : capturePending ? 'Capture pending' : 'Accept — looks right'}</button>` : '';
   m.innerHTML = `<div class="modal__panel">
     <div class="modal__bar">
       ${c.workOrder != null ? `<span class="order">${esc(c.workOrder)}</span>` : ''}
@@ -1101,6 +1178,7 @@ function renderDetail(c) {
       <h2 class="modal__title" contenteditable="plaintext-only" data-fld="title">${esc(c.title)}</h2>
       <p class="card__dates">created ${esc(dateDay(c.created))} · edited ${esc(dateDay(c.updated))}</p>
       ${cta ? `<div class="modal__cta">${cta}</div>` : ''}
+      ${c.needsAcceptance ? capturedEvidence(media) : ''}
       <div class="fields">
         <div class="fld"><div class="fld__k">Stage</div><select data-fld="phase">${S.phases.map(p => `<option value="${esc(p.id)}" ${p.id === phase ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select></div>
         <div class="fld"><div class="fld__k">Track</div>${sel('track', CFG().tracks || ['epoch', 'sidequest'], c.track)}</div>
@@ -1113,7 +1191,7 @@ function renderDetail(c) {
       <div class="fld" style="margin-bottom:16px"><div class="fld__k">Plan</div><input data-fld="plan" value="${esc(c.plan || '')}" placeholder="— (agents fill this in the plan lane)"></div>
       <div class="modal__h">Description</div>
       <div class="prose" contenteditable="plaintext-only" data-fld="body">${md(c.body)}</div>
-      <div class="modal__h">Exit criteria <span class="prose">Builder marks each row met. The orchestrator closes the card when every row is met or verified.</span> <label class="crit__flag"><input type="checkbox" id="needs-acceptance" ${c.needsAcceptance ? 'checked' : ''}> needs owner visual/UX check</label></div>
+      <div class="modal__h">Exit criteria <span class="prose">Workers return a receipt. After integrated proof, the orchestrator marks each row met and closes the card.</span> <label class="crit__flag"><input type="checkbox" id="needs-acceptance" ${c.needsAcceptance ? 'checked' : ''}> needs owner visual/UX check</label></div>
       <div id="m-criteria"></div>
       <div class="modal__h">Decisions</div><div id="m-decisions"></div>
       <div class="modal__h">Notes &amp; questions</div><div id="m-q"></div>
@@ -1132,7 +1210,7 @@ function renderDetail(c) {
             ? `<button class="btn btn--ghost btn--sm" style="margin-left:auto" data-reopen>Reopen</button>`
             : `<button class="btn btn--red btn--sm" style="margin-left:auto" data-focus>Decide</button>`}</div>
         <div class="prose" style="font-size:13px">${esc(de.title)}</div>
-        <div class="decrow__opts">${(de.options || []).map(o => `<button class="opt-pill ${de.outcome === o.key ? 'win' : ''}" data-opt="${esc(o.key)}">${esc(o.key)} · ${esc(o.name)}</button>`).join('')}</div>
+        <div class="decrow__opts">${(de.options || []).map(o => `<button class="opt-pill ${de.outcome === o.key ? 'win' : ''}" data-opt="${esc(o.key)}" ${de.group === 'acceptance' && o.key === 'accept' && !(de.visualMedia || []).length ? 'disabled title="Capture pending"' : ''}>${esc(o.key)} · ${esc(o.name)}</button>`).join('')}</div>
       </div>`);
     $('[data-focus]', box)?.addEventListener('click', () => { closeDetail(); focusAll(de.id); });
     $('[data-reopen]', box)?.addEventListener('click', () => api('clearance/reopen', { decisionId: de.id, by: 'owner' }));
@@ -1159,6 +1237,7 @@ function renderDetail(c) {
   $('input', critAdd).addEventListener('keydown', e => { if (e.key === 'Enter') postCrit(); });
   cb.appendChild(critAdd);
   $('#needs-acceptance', m).addEventListener('change', (e) => api('card/update', { id, needsAcceptance: e.target.checked, by: 'owner' }));
+  bindCapturedEvidence(m, media);
 
   const qb = $('#m-q', m);
   for (const q of c.questions) {
@@ -1213,13 +1292,24 @@ const REVIEW_STAGES = [
   ['beginner', '◌', 'Beginner'],
   ['adversarial', '⚑', 'Adversarial'],
 ];
+const CURRENT_REVIEW_STAGES = [
+  ['beginner', '◌', 'Beginner'],
+  ['adversarial', '⚑', 'Adversarial'],
+];
+const reviewStagesFor = (d) => Number(d.ballotProcessVersion || 0) >= 4
+  ? CURRENT_REVIEW_STAGES : REVIEW_STAGES;
+function lossText(item) {
+  if (!item || typeof item !== 'object') return item;
+  return [item.loss, item.whyUnavoidable ? `Why unavoidable: ${item.whyUnavoidable}` : '']
+    .filter(Boolean).join(' — ');
+}
 function reviewPassesBody(d) {
   if (!d.reviewPasses) {
     return d.hybrid?.synthesis ? `<div class="hybrid"><b>◇ Hybrid pass — ${esc(d.hybrid.result)}:</b> ${esc(d.hybrid.synthesis)}
       ${(d.hybrid.harvest || []).map(x => `<p><b>From ${esc(x.key)}:</b> ${esc(x.aspect || '')} — ${esc(x.use || '')}</p>`).join('')}</div>` : '';
   }
   return `<section class="reviewpasses" aria-label="Ballot review passes">
-    ${REVIEW_STAGES.map(([key, icon, label]) => `<div class="reviewpass reviewpass--${key}">
+    ${reviewStagesFor(d).map(([key, icon, label]) => `<div class="reviewpass reviewpass--${key}">
       <div class="reviewpass__label"><span aria-hidden="true">${icon}</span> ${label} pass</div>
       <p>${esc(d.reviewPasses[key] || '')}</p>
       ${key === 'hybrid' && d.hybrid?.synthesis ? `<div class="reviewpass__detail"><b>Result ${esc(d.hybrid.result)}:</b> ${esc(d.hybrid.synthesis)}
@@ -1280,7 +1370,7 @@ function surfaceDeck(d, c, chosen) {
   const bulletList = (items) => {
     const values = Array.isArray(items) ? items : [];
     return values.length
-      ? `<ul>${values.map(item => `<li>${esc(item)}</li>`).join('')}</ul>`
+      ? `<ul>${values.map(item => `<li>${esc(lossText(item) || '')}</li>`).join('')}</ul>`
       : '<div class="surface__none">none recorded</div>';
   };
   const optionHtml = options.map((o, idx) => {
@@ -1385,6 +1475,7 @@ function renderFocus() {
       ${d.rec ? `<div class="recline"><b>Recommendation:</b> ${esc(d.rec)}${optName(d, d.rec) ? ' — ' + esc(optName(d, d.rec)) : ''}
         ${d.recommendation?.why ? `<p><b>Why this wins:</b> ${esc(d.recommendation.why)}</p>` : ''}
         ${(d.recommendation?.whyNot || []).map(x => `<p class="recline__why-not"><b>Why not ${esc(x.key)}:</b> ${esc(x.reason || '')}</p>`).join('')}
+        ${Array.isArray(d.recommendation?.losses) && d.recommendation.losses.length ? `<p><b>Losses:</b> ${d.recommendation.losses.map(x => esc(lossText(x))).join('; ')}</p>` : ''}
         ${d.recommendation?.tradeoff ? `<p><b>Accepted tradeoff:</b> ${esc(d.recommendation.tradeoff)}</p>` : ''}</div>` : ''}
       `}
       <textarea class="fcomment" id="f-comment" placeholder="Comment (optional) — recorded with your decision">${esc(d.comment || '')}</textarea>
@@ -1474,7 +1565,7 @@ async function recordBatch() {
   renderFocus();
 }
 
-// ---- Docs tab (durable docs/*.md + pinned scratchpad) ---------------------------
+// ---- Docs tab (Markdown + HTML reports + pinned scratchpad) -------------------
 let docsCache = null;   // { scratch, sections }
 let docsSel = null;     // { kind:'scratch'|'doc', path? }
 let docsDirty = false;
@@ -1482,32 +1573,190 @@ let docsMode = 'compose'; // 'compose' | 'source'
 let docsOpen = {};      // section id → bool (every section collapsed until opened)
 let docsDraft = null;   // { key, body } preserved across mode toggles
 let docsBrowse = false; // mobile: file browser and reader are separate views
-let docsSort = 'folders'; // 'folders' | 'updated' | 'created'
+let docsTypeFilter = 'all'; // 'all' | 'md' | 'html'
+let docsOpenRequest = 0; // discard stale detail fetches and report media reads
 const docsKey = (sel) => sel?.kind === 'scratch' ? 'scratch' : (sel?.path || '');
 const setDocsBrowse = (open) => {
   docsBrowse = open;
   $('.docs')?.classList.toggle('docs--browse', open);
 };
-
-function docsDateLine(f) {
-  return `created ${dateDay(f?.created)} · edited ${dateDay(f?.updated)}`;
+const docsKindLabel = (f) => f?.format === 'html' ? 'HTML' : 'MD';
+const docsFileName = (f, { scratch = false } = {}) => {
+  if (scratch) return 'owner-scratch.md';
+  const path = String(f?.path || '');
+  return path.slice(path.lastIndexOf('/') + 1) || 'Untitled';
+};
+const docsCreatedDate = (f) => dateDay(f?.created);
+const docsTypeMatches = (f) => docsTypeFilter === 'all'
+  || (docsTypeFilter === 'html' ? f?.format === 'html' : f?.format !== 'html');
+const docsReportMediaPath = (ref, reportPath) => {
+  const value = String(ref || '').trim();
+  if (!value || /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(value)) return '';
+  let target;
+  try {
+    const base = new URL(String(reportPath || ''), 'https://tower.invalid/');
+    target = new URL(value, base);
+  } catch {
+    return '';
+  }
+  const path = target.pathname.replace(/^\/+/, '');
+  if (!path.startsWith(VISUAL_MEDIA_ROOT)) return '';
+  const relative = path.slice(VISUAL_MEDIA_ROOT.length);
+  if (!relative || relative.includes('\\')
+    || relative.split('/').some(part => !part || part === '.' || part === '..')) return '';
+  return VISUAL_MEDIA_ROOT + relative;
+};
+const docsReportBlobData = (blob, signal) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  let settled = false;
+  const finish = (done, value) => {
+    if (settled) return;
+    settled = true;
+    signal?.removeEventListener('abort', abort);
+    done(value);
+  };
+  const abort = () => {
+    reader.abort();
+    finish(reject, signal?.reason || new DOMException('Aborted', 'AbortError'));
+  };
+  reader.onload = () => finish(resolve, String(reader.result || ''));
+  reader.onerror = () => finish(reject, reader.error || new Error('report media read failed'));
+  reader.onabort = () => finish(reject, signal?.reason || new DOMException('Aborted', 'AbortError'));
+  if (signal?.aborted) { abort(); return; }
+  signal?.addEventListener('abort', abort, { once: true });
+  reader.readAsDataURL(blob);
+});
+const DOCS_REPORT_CSP = [
+  "default-src 'none'",
+  "base-uri 'none'",
+  "connect-src 'none'",
+  "form-action 'none'",
+  "frame-src 'none'",
+  "child-src 'none'",
+  "object-src 'none'",
+  "img-src data: blob:",
+  "media-src data: blob:",
+  "font-src data: blob:",
+  "style-src 'unsafe-inline'",
+  "script-src 'unsafe-inline'",
+].join('; ');
+function docsReportBridge(path) {
+  const reportPath = JSON.stringify(String(path || '')).replace(/</g, '\\u003c');
+  return `<script>
+(() => {
+  const reportPath = ${reportPath};
+  const linkPath = (href) => {
+    try {
+      const base = new URL(reportPath, 'https://tower.invalid/');
+      const target = new URL(href, base);
+      if (target.origin !== base.origin) return '';
+      return target.pathname.replace(/^\\/+/, '');
+    } catch {
+      return '';
+    }
+  };
+  const fragmentTarget = (href) => {
+    let id;
+    try { id = decodeURIComponent(href.slice(1)); }
+    catch { return null; }
+    if (!id) return document.documentElement;
+    return [...document.querySelectorAll('[id], [name]')]
+      .find(node => node.id === id || node.getAttribute('name') === id) || null;
+  };
+  document.addEventListener('click', (event) => {
+    const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+    const link = target?.closest('a[href]');
+    if (!link) return;
+    const href = (link.getAttribute('href') || '').trim();
+    if (href.startsWith('#')) {
+      event.preventDefault();
+      fragmentTarget(href)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    const path = linkPath(href);
+    if (!path) { event.preventDefault(); return; }
+    event.preventDefault();
+    window.parent.postMessage({ type: 'tower-doc-link', path }, '*');
+  }, true);
+})();
+</script>`;
 }
+async function docsReportSource(body, path, signal) {
+  const assets = new Map();
+  const tokenFor = (ref) => {
+    const asset = docsReportMediaPath(ref, path);
+    if (!asset) return ref;
+    let token = assets.get(asset);
+    if (!token) {
+      token = `__TOWER_DOC_MEDIA_${assets.size}__`;
+      assets.set(asset, token);
+    }
+    return token;
+  };
+  const source = String(body ?? '').replace(/<base\b[^>]*>(?:\s*<\/base>)?/gi, '');
+  const report = source
+    .replace(/(\b(?:src|poster|data-src|xlink:href)\s*=\s*)(["'])([^"'<>]+)\2/gi, (match, prefix, quote, ref) =>
+      `${prefix}${quote}${tokenFor(ref)}${quote}`)
+    .replace(/(\b(?:src|poster|data-src|xlink:href)\s*=\s*)([^\s"'<>`]+)/gi, (match, prefix, ref) =>
+      `${prefix}${tokenFor(ref)}`)
+    .replace(/(\burl\(\s*)(["']?)([^) \t\r\n"'`]+)\2(\s*\))/gi, (match, prefix, quote, ref, suffix) =>
+      `${prefix}${quote}${tokenFor(ref)}${suffix}`);
+  const data = new Map();
+  for (const [asset, token] of assets) {
+    if (signal?.aborted) throw signal.reason || new DOMException('Aborted', 'AbortError');
+    const response = await fetch(mediaUrl(asset), { signal });
+    if (!response.ok) throw new Error(`Docs report media failed (${response.status})`);
+    data.set(token, await docsReportBlobData(await response.blob(), signal));
+  }
+  let rewritten = report;
+  for (const [token, value] of data) rewritten = rewritten.split(token).join(value);
+  const csp = `<meta http-equiv="Content-Security-Policy" content="${esc(DOCS_REPORT_CSP)}">`;
+  const bridge = docsReportBridge(path);
+  return `<!doctype html><html><head>${csp}${bridge}</head><body>${rewritten}</body></html>`;
+}
+let docsReportFrame = null;
+let docsReportAbort = null;
+window.addEventListener('message', (event) => {
+  if (VIEW !== 'docs' || !docsReportFrame || event.origin !== 'null' || event.source !== docsReportFrame.contentWindow) return;
+  const message = event.data;
+  if (!message || message.type !== 'tower-doc-link' || typeof message.path !== 'string') return;
+  const path = message.path.replace(/^\/+/, '');
+  const allowed = (docsCache?.sections || []).some(sec => (sec.files || []).some(file => file.path === path));
+  if (!allowed) return;
+  openDocsFile({ kind: 'doc', path });
+});
+const syncDocsSelection = () => {
+  const side = $('#docs-side');
+  if (!side) return;
+  side.querySelectorAll('.docs__item').forEach((button) => {
+    const on = button.dataset.docsKind === 'scratch'
+      ? docsSel?.kind === 'scratch'
+      : docsSel?.kind === 'doc' && docsSel.path === button.dataset.docsPath;
+    button.classList.toggle('on', on);
+    if (on) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  });
+};
+
 function docsFileButton(f, { scratch = false } = {}) {
   const on = scratch
     ? docsSel?.kind === 'scratch'
     : docsSel?.kind === 'doc' && docsSel.path === f.path;
-  const path = scratch ? 'scratchpad' : String(f.path || '').replace(/^docs\//, '');
-  const b = el(`<button class="docs__item${scratch ? ' docs__item--scratch' : ''}${on ? ' on' : ''}" type="button">
-      <b>${esc(f?.title || (scratch ? 'Owner scratch' : ''))}</b>
-      <span>${esc(path)}</span>
-      <span class="docs__dates">${esc(docsDateLine(f))}</span>
+  const pathAttr = scratch ? '' : ` data-docs-path="${esc(f.path)}"`;
+  const currentAttr = on ? ' aria-current="page"' : '';
+  const kind = docsKindLabel(f);
+  const kindClass = kind === 'HTML' ? ' docs__kind--html' : ' docs__kind--md';
+  const b = el(`<button class="docs__item${scratch ? ' docs__item--scratch' : ''}${on ? ' on' : ''}" data-docs-kind="${scratch ? 'scratch' : 'doc'}"${pathAttr}${currentAttr} type="button">
+      <b>${esc(docsFileName(f, { scratch }))}</b>
+      <span class="docs__kind${kindClass}">${kind}</span>
+      <time class="docs__date" datetime="${esc(f?.created || '')}">${esc(docsCreatedDate(f))}</time>
     </button>`);
   b.addEventListener('click', () => openDocsFile(scratch ? { kind: 'scratch' } : { kind: 'doc', path: f.path }));
   return b;
 }
 
-const docsGet = async (qs = '') => {
-  const r = await fetch('/api/docs' + qs);
+const docsGet = async (qs = '', signal) => {
+  const r = await fetch('/api/docs' + qs, signal ? { signal } : undefined);
   if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.message || 'docs fetch failed'); }
   return r.json();
 };
@@ -1531,20 +1780,25 @@ async function viewDocs() {
   }
   const sections = docsCache.sections || [];
   v.innerHTML = `<div class="viewhead"><h1 class="h1">Docs</h1>
-      <span class="viewhead__sub">scratchpad + durable markdown under docs/</span>
-      <div class="viewhead__actions docs__sort">
-        <button class="btn btn--ghost btn--sm" data-docs-sort="folders" aria-pressed="${docsSort === 'folders'}">Folders</button>
-        <button class="btn btn--ghost btn--sm" data-docs-sort="updated" aria-pressed="${docsSort === 'updated'}">Modified</button>
-        <button class="btn btn--ghost btn--sm" data-docs-sort="created" aria-pressed="${docsSort === 'created'}">Created</button>
+      <span class="viewhead__sub">scratchpad, Markdown notes, and HTML reports under docs/</span>
+      <div class="viewhead__actions docs__types" role="group" aria-label="File type">
+        <button class="btn btn--ghost btn--sm" data-docs-type="all" aria-pressed="${docsTypeFilter === 'all'}">All</button>
+        <button class="btn btn--ghost btn--sm" data-docs-type="md" aria-pressed="${docsTypeFilter === 'md'}">MD</button>
+        <button class="btn btn--ghost btn--sm" data-docs-type="html" aria-pressed="${docsTypeFilter === 'html'}">HTML</button>
       </div>
     </div>
     <div class="docs${docsBrowse ? ' docs--browse' : ''}">
       <aside class="docs__side" id="docs-side"></aside>
-      <section class="docs__main" id="docs-main"><div class="empty"><div class="empty__glyph">✎</div><div>Pick a file to edit.</div></div></section>
+      <section class="docs__main" id="docs-main"><div class="empty"><div class="empty__glyph">✎</div><div>Pick a file to read or edit.</div></div></section>
     </div>`;
 
-  v.querySelectorAll('[data-docs-sort]').forEach(btn => {
-    btn.addEventListener('click', () => { docsSort = btn.dataset.docsSort; viewDocs(); });
+  v.querySelectorAll('[data-docs-type]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const next = button.dataset.docsType;
+      if (!['all', 'md', 'html'].includes(next) || next === docsTypeFilter) return;
+      docsTypeFilter = next;
+      viewDocs();
+    });
   });
 
   const side = $('#docs-side');
@@ -1552,47 +1806,36 @@ async function viewDocs() {
   side.appendChild(el(`<div class="docs__label">Scratchpad</div>`));
   side.appendChild(docsFileButton(sc || { title: 'Owner scratch' }, { scratch: true }));
 
-  if (docsSort !== 'folders') {
-    const files = sections.flatMap(sec => sec.files || [])
-      .sort((a, b) => String(b[docsSort] || '').localeCompare(String(a[docsSort] || ''))
-        || a.path.localeCompare(b.path));
-    side.appendChild(el(`<div class="docs__label">${docsSort === 'created' ? 'By created' : 'By modified'}</div>`));
+  for (const sec of sections) {
+    const files = (sec.files || []).filter(docsTypeMatches);
+    const open = docsOpen[sec.id] ?? false;
+    const head = el(`<button class="docs__sec" type="button" aria-expanded="${open}">
+      <span class="docs__chev">${open ? '▾' : '▸'}</span>
+      <span>${esc(sec.label)}</span>
+      <span class="docs__sec-n">${files.length}</span>
+      <span class="docs__sec-add" data-add="${esc(sec.id)}" title="New file">+</span>
+    </button>`);
+    head.addEventListener('click', (ev) => {
+      if (ev.target.closest('[data-add]')) return;
+      docsOpen[sec.id] = !open;
+      viewDocs();
+    });
+    $('[data-add]', head)?.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      const title = prompt(`New ${sec.label.slice(0, -1).toLowerCase()} title`);
+      if (!title) return;
+      const n = await docsPost('add', { section: sec.id, title, body: `# ${title}\n\n` });
+      await loadDocsIndex();
+      docsSel = { kind: 'doc', path: n.path };
+      await viewDocs();
+      await openDocsFile(docsSel);
+    });
+    side.appendChild(head);
+    if (!open) continue;
     const wrap = el('<div class="docs__files"></div>');
     if (!files.length) wrap.appendChild(el(`<div class="docs__empty">Empty</div>`));
     for (const f of files) wrap.appendChild(docsFileButton(f));
     side.appendChild(wrap);
-  } else {
-    for (const sec of sections) {
-      if (sec.id === 'other' && !sec.files.length) continue;
-      const open = docsOpen[sec.id] ?? false;
-      const head = el(`<button class="docs__sec" type="button" aria-expanded="${open}">
-        <span class="docs__chev">${open ? '▾' : '▸'}</span>
-        <span>${esc(sec.label)}</span>
-        <span class="docs__sec-n">${sec.files.length}</span>
-        ${sec.id !== 'other' ? `<span class="docs__sec-add" data-add="${esc(sec.id)}" title="New file">+</span>` : ''}
-      </button>`);
-      head.addEventListener('click', (ev) => {
-        if (ev.target.closest('[data-add]')) return;
-        docsOpen[sec.id] = !open;
-        viewDocs();
-      });
-      $('[data-add]', head)?.addEventListener('click', async (ev) => {
-        ev.stopPropagation();
-        const title = prompt(`New ${sec.label.slice(0, -1).toLowerCase()} title`);
-        if (!title) return;
-        const n = await docsPost('add', { section: sec.id, title, body: `# ${title}\n\n` });
-        await loadDocsIndex();
-        docsSel = { kind: 'doc', path: n.path };
-        await viewDocs();
-        await openDocsFile(docsSel);
-      });
-      side.appendChild(head);
-      if (!open) continue;
-      const wrap = el('<div class="docs__files"></div>');
-      if (!sec.files.length) wrap.appendChild(el(`<div class="docs__empty">Empty</div>`));
-      for (const f of sec.files) wrap.appendChild(docsFileButton(f));
-      side.appendChild(wrap);
-    }
   }
 
   if (docsSel?.kind === 'scratch') await openDocsFile(docsSel, { keepBrowse: docsBrowse });
@@ -1601,32 +1844,73 @@ async function viewDocs() {
 }
 
 async function openDocsFile(sel, { keepDraft = false, keepBrowse = false } = {}) {
+  const request = ++docsOpenRequest;
+  docsReportAbort?.abort();
+  const reportAbort = new AbortController();
+  docsReportAbort = reportAbort;
   docsSel = sel;
+  docsReportFrame = null;
+  syncDocsSelection();
   let n;
   try {
     n = sel.kind === 'scratch'
-      ? await docsGet('?scratch=1')
-      : await docsGet('?path=' + encodeURIComponent(sel.path));
-  } catch (e) { toast(e.message, true); return; }
+      ? await docsGet('?scratch=1', reportAbort.signal)
+      : await docsGet('?path=' + encodeURIComponent(sel.path), reportAbort.signal);
+  } catch (e) {
+    if (request === docsOpenRequest) toast(e.message, true);
+    return;
+  }
+  if (request !== docsOpenRequest) return;
   if (keepDraft && docsDraft && docsDraft.key === docsKey(sel)) {
     n = { ...n, body: docsDraft.body };
   } else {
     docsDirty = false;
     docsDraft = null;
   }
+  if (request !== docsOpenRequest) return;
   const main = $('#docs-main');
   if (!main) return;
 
-  const pathLabel = sel.kind === 'scratch' ? 'scratchpad' : n.path;
+  const filename = docsFileName(n, { scratch: sel.kind === 'scratch' });
+  const kind = docsKindLabel(n);
+  if (sel.kind === 'doc' && kind === 'HTML') {
+    let source;
+    try {
+      source = await docsReportSource(n.body, n.path || sel.path, reportAbort.signal);
+    } catch (e) {
+      if (request === docsOpenRequest && !reportAbort.signal.aborted) toast(e.message, true);
+      return;
+    }
+    if (request !== docsOpenRequest || reportAbort.signal.aborted) return;
+    main.innerHTML = `<div class="docs__toolbar docs__toolbar--report">
+        <button class="btn btn--sm docs__files-btn" id="docs-files">Files</button>
+        <div class="docs__title">${esc(filename)}</div>
+        <span class="docs__kind docs__kind--html">HTML</span>
+        <time class="docs__date" datetime="${esc(n?.created || '')}">${esc(docsCreatedDate(n))}</time>
+      </div>
+      <div class="docs__report" id="docs-report"></div>`;
+    const report = document.createElement('iframe');
+    report.className = 'docs__report-frame';
+    report.setAttribute('sandbox', 'allow-scripts');
+    report.setAttribute('referrerpolicy', 'no-referrer');
+    report.title = `${filename} · HTML`;
+    docsReportFrame = report;
+    report.srcdoc = source;
+    $('#docs-report')?.appendChild(report);
+    setDocsBrowse(keepBrowse);
+    $('#docs-files')?.addEventListener('click', () => setDocsBrowse(true));
+    return;
+  }
+
+  docsReportFrame = null;
   const canDelete = sel.kind === 'doc';
-  const canArchive = canDelete && !String(sel.path || '').startsWith('docs/spec/') && !String(sel.path || '').startsWith('docs/archive/');
   main.innerHTML = `<div class="docs__toolbar">
       <button class="btn btn--sm docs__files-btn" id="docs-files">Files</button>
-      <div class="docs__title">${esc(n.title)}</div>
-      <span class="docs__meta">${esc(pathLabel)} · ${esc(docsDateLine(n))}</span>
+      <div class="docs__title">${esc(filename)}</div>
+      <span class="docs__kind docs__kind--md">MD</span>
+      <time class="docs__date" datetime="${esc(n?.created || '')}">${esc(docsCreatedDate(n))}</time>
       <button class="btn btn--sm" id="docs-mode">${docsMode === 'compose' ? 'Source' : 'Compose'}</button>
       <button class="btn btn--sm btn--red" id="docs-save" ${docsDirty ? '' : 'disabled'}>Save</button>
-      ${canArchive ? '<button class="btn btn--sm" id="docs-arch" title="Move to docs/archive/ (hidden from this UI)">Archive</button>' : ''}
       ${canDelete ? '<button class="btn btn--sm btn--danger" id="docs-del">Delete</button>' : ''}
     </div>
     <textarea class="docs__edit" id="docs-body" spellcheck="true" ${docsMode === 'compose' ? 'hidden' : ''}></textarea>
@@ -1716,7 +2000,7 @@ async function openDocsFile(sel, { keepDraft = false, keepBrowse = false } = {})
   });
 
   $('#docs-del')?.addEventListener('click', async () => {
-    if (!confirm(`Delete ${sel.path} from the project?`)) return;
+    if (!confirm(`Delete ${filename} from the project?`)) return;
     await docsPost('delete', { path: sel.path });
     docsSel = { kind: 'scratch' };
     docsDraft = null;
@@ -1724,104 +2008,156 @@ async function openDocsFile(sel, { keepDraft = false, keepBrowse = false } = {})
     viewDocs();
     toast('deleted');
   });
-  $('#docs-arch')?.addEventListener('click', async () => {
-    if (!confirm(`Archive ${sel.path} to docs/archive/? It will leave this Docs list.`)) return;
-    await docsPost('archive', { path: sel.path });
-    docsSel = { kind: 'scratch' };
-    docsDraft = null;
-    await loadDocsIndex();
-    viewDocs();
-    toast('archived');
-  });
 }
 
-// ---- Guidance tab: one owner-maintained source for agent behavior --------------
+// ---- AGENTS.md: the repository-root agent contract -----------------------------
 let guidanceCache = null;
+let guidanceRequest = null;
 let guidanceEditing = false;
 let guidanceDraft = null;
+let guidanceBaseRevision = null;
+let guidanceSaving = false;
+let guidanceError = '';
 
-async function loadGuidance() {
-  const r = await fetch('/api/guidance');
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.message || 'guidance fetch failed');
-  guidanceCache = j;
+function loadGuidance() {
+  if (!guidanceRequest) {
+    guidanceRequest = (async () => {
+      const r = await fetch('/api/guidance');
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.message || 'AGENTS.md could not be loaded');
+      if (j.path !== 'AGENTS.md' || typeof j.body !== 'string' || typeof j.revision !== 'string')
+        throw new Error('The server does not expose the root AGENTS.md editor. Restart Tower.');
+      guidanceCache = j;
+    })().finally(() => { guidanceRequest = null; });
+  }
+  return guidanceRequest;
 }
 
 async function viewGuidance() {
   const v = $('#view');
   if (!guidanceCache) {
-    v.innerHTML = '<div class="viewhead"><h1 class="h1">Guidance</h1><span class="viewhead__sub">loading…</span></div>';
+    v.innerHTML = '<div class="viewhead"><h1 class="h1">AGENTS.md</h1><span class="viewhead__sub">loading…</span></div>';
     try { await loadGuidance(); }
     catch (e) {
-      v.innerHTML = `<div class="empty"><div>Guidance load failed: ${esc(e.message)}</div></div>`;
+      if (VIEW !== 'guidance') return;
+      v.innerHTML = `<div class="empty"><div>AGENTS.md load failed: ${esc(e.message)}</div><button class="btn" id="guidance-retry">Retry</button></div>`;
+      $('#guidance-retry').addEventListener('click', viewGuidance);
       return;
     }
   }
+  if (VIEW !== 'guidance') return;
 
-  const body = guidanceDraft ?? guidanceCache.body ?? '';
+  const previous = $('#guidance-body');
+  const selection = previous === document.activeElement
+    ? { start: previous.selectionStart, end: previous.selectionEnd, direction: previous.selectionDirection, scroll: previous.scrollTop }
+    : null;
+  const body = guidanceDraft ?? guidanceCache.body;
   const updated = String(guidanceCache.updated || '').slice(0, 19).replace('T', ' ');
-  v.innerHTML = `<div class="viewhead"><h1 class="h1">Guidance</h1>
-      <span class="viewhead__sub">the owner's source of truth for every agent and skill</span>
+  v.innerHTML = `<div class="viewhead"><h1 class="h1">AGENTS.md</h1>
+      <span class="viewhead__sub">repository-root instructions for every agent</span>
     </div>
     <section class="guidance">
       <div class="guidance__seal">
-        <span>Owner maintained</span>
-        <b>Agents can read this file. Only the authenticated owner UI can change it.</b>
+        <span>Owner controlled</span>
+        <b>Agents may read this file. Changes require the owner's explicit permission.</b>
       </div>
       <div class="guidance__toolbar">
-        <span class="docs__meta">${esc(guidanceCache.path || '')} · ${esc(updated)}</span>
+        <span class="docs__meta">${esc(guidanceCache.path)} · ${esc(updated)}</span>
         ${guidanceEditing
-          ? '<button class="btn btn--ghost" id="guidance-cancel">Cancel</button><button class="btn btn--red" id="guidance-save">Save</button>'
-          : '<button class="btn" id="guidance-edit">Edit guidance</button>'}
+          ? `<button class="btn btn--ghost" id="guidance-cancel" ${guidanceSaving ? 'disabled' : ''}>Cancel</button><button class="btn btn--red" id="guidance-save" ${guidanceSaving ? 'disabled' : ''}>${guidanceSaving ? 'Saving…' : 'Save'}</button>`
+          : '<button class="btn" id="guidance-edit">Edit AGENTS.md</button>'}
       </div>
-      <textarea class="docs__edit guidance__edit" id="guidance-body" spellcheck="true" ${guidanceEditing ? '' : 'hidden'}></textarea>
+      ${guidanceError ? `<p class="guidance__error" role="alert">${esc(guidanceError)}</p>` : ''}
+      <textarea class="docs__edit guidance__edit" id="guidance-body" aria-label="AGENTS.md source" spellcheck="true" ${guidanceEditing ? '' : 'hidden'}></textarea>
       <div class="guidance__read prose" id="guidance-read" ${guidanceEditing ? 'hidden' : ''}></div>
     </section>`;
 
   const textarea = $('#guidance-body');
   textarea.value = body;
-  const reader = $('#guidance-read');
-  reader.innerHTML = splitBlocks(body).map(renderMarkdown).join('');
+  $('#guidance-read').innerHTML = splitBlocks(body).map(renderMarkdown).join('');
+  if (guidanceEditing) {
+    textarea.focus({ preventScroll: true });
+    if (selection) {
+      textarea.setSelectionRange(selection.start, selection.end, selection.direction);
+      textarea.scrollTop = selection.scroll;
+    }
+  }
 
-  $('#guidance-edit')?.addEventListener('click', () => {
-    guidanceEditing = true;
-    guidanceDraft = guidanceCache.body || '';
-    viewGuidance();
+  $('#guidance-edit')?.addEventListener('click', async ev => {
+    ev.currentTarget.disabled = true;
+    try {
+      await loadGuidance();
+      if (VIEW !== 'guidance' || guidanceEditing) return;
+      guidanceEditing = true;
+      guidanceDraft = guidanceCache.body;
+      guidanceBaseRevision = guidanceCache.revision;
+      guidanceError = '';
+    } catch (e) { toast(e.message, true); }
+    if (VIEW === 'guidance') viewGuidance();
   });
-  $('#guidance-cancel')?.addEventListener('click', () => {
+
+  const cancel = async () => {
+    if (guidanceSaving) return;
     guidanceEditing = false;
     guidanceDraft = null;
-    viewGuidance();
-  });
+    guidanceBaseRevision = null;
+    guidanceError = '';
+    guidanceCache = null;
+    await viewGuidance();
+    if (VIEW === 'guidance') $('#guidance-edit')?.focus();
+  };
+  $('#guidance-cancel')?.addEventListener('click', cancel);
   textarea.addEventListener('input', () => { guidanceDraft = textarea.value; });
 
   const save = async () => {
-    const r = await fetch('/api/guidance/update', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ body: textarea.value }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok || j.ok === false) {
-      toast(j.message || 'guidance save failed', true);
-      return;
+    if (!guidanceEditing || guidanceSaving) return;
+    const submitted = textarea.value;
+    guidanceDraft = submitted;
+    guidanceSaving = true;
+    guidanceError = '';
+    $('#guidance-save').disabled = true;
+    $('#guidance-save').textContent = 'Saving…';
+    $('#guidance-cancel').disabled = true;
+    try {
+      const r = await fetch('/api/guidance/update', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ body: submitted, expectRev: guidanceBaseRevision }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j.ok === false) {
+        guidanceError = j.error === 'E_CONFLICT'
+          ? 'AGENTS.md changed. Your draft is kept. Copy your edits before canceling to load the latest file.'
+          : `${j.message || 'Save failed'}. Your draft is kept.`;
+        return;
+      }
+      guidanceCache = j.result;
+      guidanceBaseRevision = j.result.revision;
+      if (guidanceDraft === submitted) {
+        guidanceDraft = null;
+        guidanceEditing = false;
+      }
+      toast(guidanceEditing ? 'Saved. Your newer edits are still unsaved.' : 'AGENTS.md saved');
+    } catch {
+      guidanceError = 'Server unreachable. Your draft is kept. Retry when the connection returns.';
+    } finally {
+      guidanceSaving = false;
+      if (VIEW === 'guidance') {
+        await viewGuidance();
+        if (!guidanceEditing) $('#guidance-edit')?.focus();
+      }
     }
-    guidanceCache = j.result;
-    guidanceDraft = null;
-    guidanceEditing = false;
-    toast('guidance saved');
-    viewGuidance();
   };
   $('#guidance-save')?.addEventListener('click', save);
-  textarea.addEventListener('keydown', (ev) => {
+  textarea.addEventListener('keydown', ev => {
     if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === 's') {
       ev.preventDefault();
+      ev.stopPropagation();
       save();
     } else if (ev.key === 'Escape') {
       ev.preventDefault();
-      guidanceEditing = false;
-      guidanceDraft = null;
-      viewGuidance();
+      ev.stopPropagation();
+      cancel();
     }
   });
 }

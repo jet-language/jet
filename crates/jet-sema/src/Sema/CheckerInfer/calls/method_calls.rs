@@ -2,37 +2,63 @@ use crate::Collections;
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Generics::e0901;
 use crate::Sema::Checker;
+use crate::Sema::{json_ty, result_ty};
 use crate::Sema::CheckerCoreLib::{
     alloc_method_return, app_method_return, args_spec_method_return, binary_reader_method_return,
     civil_time_method_contract, civil_time_method_return, core_generic_struct_field,
-    data_renamed_to_datatree,
-    datatree_method_return, db_value_method_return, decode_error_ty, devserver_method_return,
-    email_method_return, encoding_handle_method_return, expiring_method_return,
-    file_handle_method_return, http_type_method_return, is_allocator_type, is_db_value_type_name,
-    is_json_type_name, is_layout_axis_type, is_layout_type, is_math_type,
-    is_polymorphic_core_special, is_reflect_type_name, is_simd_lane_type, json_ty,
+    data_renamed_to_datatree, datatree_method_return, db_value_method_return, decode_error_ty,
+    devserver_method_return, email_method_return, encoding_handle_method_return,
+    expiring_method_return, file_handle_method_return, http_type_method_return, is_allocator_type,
+    is_db_value_type_name, is_geometry_type, is_json_type_name, is_layout_axis_type,
+    is_layout_type, is_math_type,
+    is_reflect_type_name, is_simd_lane_type, job_queue_method_return,
     layout_method_arg_ty, layout_method_return, loadable_method_return, math_method_arg_ty,
-    math_method_return, math_scalar_ty, math_static_arg_ty, math_static_return, net_method_return,
+    math_method_return,
+    math_scalar_ty, math_static_arg_ty, math_static_return, net_method_return,
     parsed_args_method_return, path_method_return, process_child_method_return,
     process_spec_method_return, process_stdin_method_return, process_stream_method_return,
-    reflect_method_return, regex_method_return, require_net_method_labels,
-    result_ty,
+    reflect_method_return, regex_method_return, require_exact_labels, require_net_method_labels,
     simd_reduce_markers, sketch_method_return, sketch_type_name, terminal_session_method_return,
     text_cursor_method_return, u8_ty, ui_backend_method_return, unit_ty, url_mime_method_return,
-    wrong_core_arity,
+    web_method_return, wrong_core_arity, geometry_is_delta, geometry_is_point, geometry_method_return,
+    geometry_space, geometry_static_arg_types, geometry_static_return_with_owner,
+    geometry_transform_diagnostic,
 };
-use crate::Sema::CheckerInfer::{contains_tuple_type, exact_integer_literal, IntegerInterval};
+use crate::Sema::CheckerInfer::{exact_integer_literal, IntegerInterval};
 use crate::Sema::Diagnostics::{
     builtin_type_from_ident, expr_root_ident, is_printable, suggest_method_for_receiver,
     type_is_copy, MethodSuggestion,
 };
+
+
 use crate::Sema::Effects::Effect;
 use crate::Syntax;
 use crate::AST::{
-    AccessConvention, Call, CallArg, CallArgFlags, CtValue, EnumLitArg, Expr, FuncSig, StrPart,
-    Type,
+    AccessConvention, Call, CallArg, CallArgFlags, CtValue, EnumLitArg, Expr, FuncSig, LambdaBody,
+    StrPart, Type,
 };
-use std::collections::HashSet;
+
+fn http_route_find_func_in_items<'a>(
+    items: &'a [crate::AST::Item],
+    name: &str,
+) -> Option<&'a crate::AST::Func> {
+    for item in items {
+        match item {
+            crate::AST::Item::Func(function) if function.name == name => return Some(function),
+            crate::AST::Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    if let Some(function) = http_route_find_func_in_items(body, name) {
+                        return Some(function);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+use std::collections::{HashMap, HashSet};
+
 
 #[derive(Debug, Clone)]
 struct RootCallTarget {
@@ -41,6 +67,7 @@ struct RootCallTarget {
     core_module: Option<String>,
     name: String,
 }
+
 
 impl<'a> Checker<'a> {
     fn record_static_time_effect(&mut self, type_name: &str, method: &str, span: Span) {
@@ -164,6 +191,161 @@ impl<'a> Checker<'a> {
             Some(span),
         ));
         None
+    }
+
+    fn plot_column_value_supported(ty: &Type) -> bool {
+        match ty.without_user_tags() {
+            Type::Int | Type::IntN { .. } | Type::Float | Type::Float32 | Type::Bool | Type::String => {
+                true
+            }
+            Type::InlineRange { base, .. } => Self::plot_column_value_supported(base),
+            _ => false,
+        }
+    }
+
+    // D-DX-PLOT1=A: contextual leading-dot plot selectors remain the original
+    // `EnumLit` so TIR can distinguish them from ordinary values. Sema validates
+    // the selector against the receiver's row schema and records normal field
+    // reference/visibility facts through `field_type`.
+    fn check_plot_column_selector(&mut self, row: &Type, arg: &mut CallArg) -> bool {
+        let Some((field, selector_span, has_payload)) = (match arg.expr.without_parens() {
+            Expr::EnumLit {
+                type_name,
+                variant,
+                args,
+                leading_dot: true,
+                span,
+                ..
+            } if type_name.is_empty() => Some((variant.clone(), *span, !args.is_empty())),
+            _ => None,
+        }) else {
+            return false;
+        };
+
+        if has_payload {
+            self.diags.push(Diagnostic::error(
+                "E0112",
+                format!("plot selector `.{field}` cannot carry payload arguments"),
+                "a leading-dot plot selector names one row field and does not construct an enum variant"
+                    .to_string(),
+                format!("write `.{field}` without parentheses"),
+                Some(selector_span),
+            ));
+            return true;
+        }
+
+        if arg.convention == AccessConvention::Move {
+            self.diags.push(Diagnostic::error(
+                "E0203",
+                "a value was passed with the move marker `^` to a parameter that does not consume"
+                    .to_string(),
+                "plot selectors are compiler-owned field projections; the plot builder reads their row field"
+                    .to_string(),
+                "remove the move marker `^` here".to_string(),
+                Some(arg.span),
+            ));
+        }
+
+        let mut row_type = row;
+        while let Type::Tagged { inner, .. } = row_type {
+            row_type = inner.as_ref();
+        }
+        let type_name = match row_type {
+            Type::Named(name) | Type::Apply { name, .. } => name,
+            _ => {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!(
+                        "plot selector `.{field}` needs a declared row schema, but the plot row is `{}`",
+                        row_type.show()
+                    ),
+                    "contextual plot selectors are checked against named row fields before lowering"
+                        .to_string(),
+                    "use a declared row struct, or pass an explicit JetDataPlotColumn value"
+                        .to_string(),
+                    Some(selector_span),
+                ));
+                return true;
+            }
+        };
+        if self.struct_fields_for_type_name(type_name).is_none() {
+            self.diags.push(Diagnostic::error(
+                "E0112",
+                format!(
+                    "plot selector `.{field}` needs a declared row schema, but `{type_name}` has no fields"
+                ),
+                "contextual plot selectors are checked against named row fields before lowering"
+                    .to_string(),
+                "use a declared row struct, or pass an explicit JetDataPlotColumn value"
+                    .to_string(),
+                Some(selector_span),
+            ));
+            return true;
+        }
+
+        // This is the same checked field path used by ordinary `row.field`
+        // reads: it enforces foreign-field visibility, records the exact
+        // owner/field reference, and substitutes generic row parameters.
+        if let Some(field_ty) = self.field_type(row_type, &field, selector_span) {
+            if !Self::plot_column_value_supported(&field_ty) {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!(
+                        "plot selector `.{field}` needs a scalar field, but `{}` is not plot-compatible",
+                        field_ty.show()
+                    ),
+                    "plot columns carry integer, floating-point, boolean, and string values"
+                        .to_string(),
+                    "select a scalar field or pass an explicit JetDataPlotColumn value".to_string(),
+                    Some(selector_span),
+                ));
+            }
+        }
+        true
+    }
+
+    // D-DX-FORM1=A: a leading-dot field selector is the stable form
+    // validation API. The typed-form runtime checks the field name against
+    // its derived schema; sema lowers the selector to the ABI string.
+    fn check_web_form_field_selector(&mut self, arg: &mut CallArg) -> bool {
+        let Some((field, selector_span, has_payload)) = (match arg.expr.without_parens() {
+            Expr::EnumLit {
+                type_name,
+                variant,
+                args,
+                leading_dot: true,
+                span,
+                ..
+            } if type_name.is_empty() => Some((variant.clone(), *span, !args.is_empty())),
+            _ => None,
+        }) else {
+            return false;
+        };
+
+        if has_payload {
+            self.diags.push(Diagnostic::error(
+                "E0112",
+                format!("form field selector `.{field}` cannot carry payload arguments"),
+                "a leading-dot form selector names one field and does not construct an enum variant"
+                    .to_string(),
+                format!("write `.{field}` without parentheses"),
+                Some(selector_span),
+            ));
+            return true;
+        }
+        if arg.convention == AccessConvention::Move {
+            self.diags.push(Diagnostic::error(
+                "E0203",
+                "a value was passed with the move marker `^` to a parameter that does not consume"
+                    .to_string(),
+                "form field selectors are compiler-owned names; validation reads the field"
+                    .to_string(),
+                "remove the move marker `^` here".to_string(),
+                Some(arg.span),
+            ));
+        }
+        arg.expr = Expr::Str(vec![StrPart::Lit(field)], selector_span);
+        true
     }
 
     fn root_param_accepts(
@@ -336,6 +518,7 @@ impl<'a> Checker<'a> {
         type_args: &[Type],
         args: &mut Vec<crate::AST::CallArg>,
         recv_type_out: &mut Option<String>,
+        resolved_ret_out: &mut Option<Type>,
     ) -> Option<Type> {
         let receiver_expr =
             std::mem::replace(receiver, Box::new(Expr::Ident(String::new(), method_span)));
@@ -351,7 +534,7 @@ impl<'a> Checker<'a> {
         call_args.append(args);
 
         let result = if let Some(core_module) = target.core_module.as_deref() {
-            self.infer_core_call(
+            let ret = self.infer_core_call(
                 core_module,
                 &target.name,
                 None,
@@ -359,7 +542,9 @@ impl<'a> Checker<'a> {
                 method_span,
                 type_args,
                 &mut call_args,
-            )
+            );
+            *resolved_ret_out = ret.clone();
+            ret
         } else if let Some(module_idx) = target.module_idx {
             self.infer_import_call(
                 target.alias.as_deref().unwrap_or_default(),
@@ -369,6 +554,7 @@ impl<'a> Checker<'a> {
                 method_span,
                 type_args,
                 &mut call_args,
+                resolved_ret_out,
             )
         } else {
             let mut call = Call {
@@ -381,6 +567,7 @@ impl<'a> Checker<'a> {
                 widen_approx: false,
             };
             let result = self.check_call(&mut call, true).flatten();
+            *resolved_ret_out = call.resolved_ret;
             call_args = call.args;
             result
         };
@@ -416,35 +603,296 @@ fn is_http_route_registration(type_name: &str, method: &str) -> bool {
 }
 
 impl<'a> Checker<'a> {
-fn http_handler_param_count(&self, expr: &Expr) -> Option<usize> {
-    match expr {
-        Expr::Paren(inner, _) => self.http_handler_param_count(inner),
-        Expr::Lambda(lambda) => Some(lambda.params.len()),
-        Expr::Ident(name, _) => self
-            .funcs
-            .get(name)
-            .map(|sig| sig.params.len())
-            .or_else(|| self.lookup(name).and_then(|info| match &info.ty {
-                Type::Fn { params, .. } => Some(params.len()),
-                _ => None,
-            })),
-        _ => None,
+    fn http_handler_param_count(&self, expr: &Expr) -> Option<usize> {
+        match expr {
+            Expr::Paren(inner, _) => self.http_handler_param_count(inner),
+            Expr::Lambda(lambda) => Some(lambda.params.len()),
+            Expr::Ident(name, _) => {
+                self.funcs
+                    .get(name)
+                    .map(|sig| sig.params.len())
+                    .or_else(|| {
+                        self.lookup(name).and_then(|info| match &info.ty {
+                            Type::Fn { params, .. } => Some(params.len()),
+                            _ => None,
+                        })
+                    })
+            }
+            _ => None,
+        }
+    }
+
+    fn http_route_is_fixed_path(&self, expr: &Expr) -> Option<bool> {
+        let crate::Comptime::CtValue::Str(pattern) = self.evaluate_constant(expr)? else {
+            return None;
+        };
+        Some(
+            Syntax::validate_http_route_pattern(&pattern).is_ok()
+                && pattern.split('/').skip(1).all(|segment| {
+                    !segment.starts_with(Syntax::HTTP_ROUTE_PARAM_PREFIX)
+                        && !segment.starts_with(Syntax::HTTP_ROUTE_CATCH_ALL_PREFIX)
+                }),
+        )
     }
 }
 
-fn http_route_is_fixed_path(&self, expr: &Expr) -> Option<bool> {
-    let crate::Comptime::CtValue::Str(pattern) = self.evaluate_constant(expr)? else {
-        return None;
+fn http_route_json_type(body: &LambdaBody, request_params: &HashSet<String>) -> Option<Type> {
+    let mut found = None;
+    let mut visit = |expr: &Expr| {
+        if found.is_some() {
+            return;
+        }
+        let Expr::MethodCall {
+            receiver,
+            method,
+            type_args,
+            recv_type,
+            ..
+        } = expr
+        else {
+            return;
+        };
+        if method == "json"
+            && type_args.len() == 1
+            && (recv_type.as_deref() == Some("HTTPRequest")
+                || matches!(receiver.as_ref(), Expr::Ident(name, _) if request_params.contains(name)))
+        {
+            found = Some(type_args[0].clone());
+        }
     };
-    Some(
-        Syntax::validate_http_route_pattern(&pattern).is_ok()
-            && pattern.split('/').skip(1).all(|segment| {
-                !segment.starts_with(Syntax::HTTP_ROUTE_PARAM_PREFIX)
-                    && !segment.starts_with(Syntax::HTTP_ROUTE_CATCH_ALL_PREFIX)
-            }),
-    )
+    match body {
+        LambdaBody::Expr(expr) => expr.for_each_expr(&mut visit),
+        LambdaBody::Block(stmts) => {
+            for stmt in stmts {
+                stmt.for_each_expr(&mut visit);
+            }
+        }
+    }
+    found
 }
 
+fn http_route_find_struct_in_items<'a>(
+    items: &'a [crate::AST::Item],
+    name: &str,
+) -> Option<&'a crate::AST::StructDef> {
+    for item in items {
+        match item {
+            crate::AST::Item::Struct(def) if def.name == name => return Some(def),
+            crate::AST::Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    if let Some(def) = http_route_find_struct_in_items(body, name) {
+                        return Some(def);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+impl<'a> Checker<'a> {
+    fn http_route_handler_shape(
+        &self,
+        expr: &Expr,
+    ) -> Option<(Vec<(String, Type)>, LambdaBody)> {
+        match expr {
+            Expr::Paren(inner, _) => self.http_route_handler_shape(inner),
+            Expr::Lambda(lambda) => Some((
+                lambda
+                    .params
+                    .iter()
+                    .map(|param| Some((param.name.clone(), param.ty.clone()?)))
+                    .collect::<Option<Vec<_>>>()?,
+                match &lambda.body {
+                    LambdaBody::Expr(expr) => LambdaBody::Expr(expr.clone()),
+                    LambdaBody::Block(body) => LambdaBody::Block(body.clone()),
+                },
+            )),
+            Expr::Ident(name, _) => {
+                let function = http_route_find_func_in_items(self.items, name).or_else(|| {
+                    self.modules
+                        .into_iter()
+                        .flat_map(|modules| modules.iter())
+                        .find_map(|module| http_route_find_func_in_items(&module.items, name))
+                })?;
+                Some((
+                    function
+                        .params
+                        .iter()
+                        .map(|param| (param.name.clone(), param.ty.clone()))
+                        .collect(),
+                    LambdaBody::Block(function.body.clone()),
+                ))
+            }
+            _ => None,
+        }
+    }
+
+    fn http_route_struct_fields(&self, name: &str) -> Option<HashSet<String>> {
+        let definition = http_route_find_struct_in_items(self.items, name).or_else(|| {
+            self.modules
+                .into_iter()
+                .flat_map(|modules| modules.iter())
+                .find_map(|module| http_route_find_struct_in_items(&module.items, name))
+        })?;
+        Some(
+            definition
+                .fields
+                .iter()
+                .filter(|field| field.is_pub && field.computed.is_none())
+                .map(|field| field.name.clone())
+                .collect(),
+        )
+    }
+
+    /// HTTP route callbacks are retained and invoked on request workers. Keep
+    /// the boundary fact active for the full argument check so every capture
+    /// path (including route-specific inference) uses the existing Send
+    /// crossing prover before codegen sees the lambda.
+    fn expect_http_handler_arg(
+        &mut self,
+        method: &str,
+        index: usize,
+        handler_ty: &Type,
+        arg: &mut crate::AST::CallArg,
+    ) {
+        let saved_http_depth = self.http_handler_depth;
+        let saved_escapes = self.lambda_escapes;
+        self.http_handler_depth += 1;
+        self.lambda_escapes = true;
+        self.expect_core_arg(method, index, handler_ty, arg);
+        self.http_handler_depth = saved_http_depth;
+        self.lambda_escapes = saved_escapes;
+    }
+
+    fn check_http_router_contract(
+        &mut self,
+        method: &str,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) {
+        if args.len() != 2 {
+            self.diags
+                .push(wrong_core_arity(method, 2, args.len(), span));
+            return;
+        }
+        self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+        let Some(CtValue::Str(pattern)) = self.evaluate_constant(&args[0].expr) else {
+            return;
+        };
+        if Syntax::validate_http_route_pattern(&pattern).is_err() {
+            return;
+        }
+        let Some((handler_params, body)) = self.http_route_handler_shape(&args[1].expr) else {
+            return;
+        };
+        let expected_handler = http_handler_type(
+            handler_params
+                .iter()
+                .map(|(_, ty)| ty.clone())
+                .collect(),
+        );
+        self.expect_http_handler_arg(method, 1, &expected_handler, &mut args[1]);
+        let mut request_params = HashSet::new();
+        let mut typed = Vec::new();
+        for (name, ty) in &handler_params {
+            if matches!(ty, Type::Named(request) if request == "HTTPRequest") {
+                request_params.insert(name.clone());
+            } else {
+                typed.push((name.clone(), ty.clone()));
+            }
+        }
+        if request_params.len() > 1 {
+            self.diags.push(Diagnostic::error(
+                "E2805",
+                format!("HTTP route `{pattern}` has more than one HTTPRequest input"),
+                "one handler request value owns the transport envelope and all decoded bindings"
+                    .to_string(),
+                "keep one `HTTPRequest` input and remove the duplicate".to_string(),
+                Some(args[1].expr.span()),
+            ));
+        }
+        let path_names = pattern
+            .split('/')
+            .skip(1)
+            .filter_map(|segment| {
+                segment
+                    .strip_prefix(':')
+                    .or_else(|| segment.strip_prefix('*'))
+            })
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let mut seen = HashSet::new();
+        for (name, _) in &typed {
+            if !seen.insert(name.clone()) {
+                self.diags.push(Diagnostic::error(
+                    "E2805",
+                    format!("HTTP route `{pattern}` has ambiguous handler input `{name}`"),
+                    "one handler field can bind only one transport source".to_string(),
+                    "rename or remove the duplicate handler input".to_string(),
+                    Some(args[1].expr.span()),
+                ));
+            }
+        }
+        for name in &path_names {
+            let matches = typed.iter().filter(|(candidate, _)| candidate == name).count();
+            if matches != 1 {
+                self.diags.push(Diagnostic::error(
+                    "E2805",
+                    format!(
+                        "HTTP route `{pattern}` path field `{name}` does not have exactly one typed handler input"
+                    ),
+                    "path placeholders are bound by name before request decoding".to_string(),
+                    format!("declare one `{name}: T` handler input"),
+                    Some(args[0].expr.span()),
+                ));
+            }
+        }
+        let path_set = path_names.iter().cloned().collect::<HashSet<_>>();
+        let query_names = typed
+            .iter()
+            .filter(|(name, _)| !path_set.contains(name))
+            .map(|(name, _)| name.clone())
+            .collect::<HashSet<_>>();
+        if !matches!(method, "get" | "head") && !query_names.is_empty() {
+            let name = query_names.iter().next().cloned().unwrap_or_default();
+            self.diags.push(Diagnostic::error(
+                "E2805",
+                format!("HTTP route `{pattern}` has unbound non-GET handler input `{name}`"),
+                "GET remainder is query data; non-GET payloads must use an explicit body model"
+                    .to_string(),
+                "remove the input or decode it with `req.json<T>()`".to_string(),
+                Some(args[1].expr.span()),
+            ));
+        }
+        if let Some(body_ty) = http_route_json_type(&body, &request_params) {
+            if let Some(name) = match &body_ty {
+                Type::Named(name) | Type::Apply { name, .. } => Some(name.as_str()),
+                Type::Option(inner) => match inner.as_ref() {
+                    Type::Named(name) | Type::Apply { name, .. } => Some(name.as_str()),
+                    _ => None,
+                },
+                _ => None,
+            } {
+                if let Some(fields) = self.http_route_struct_fields(name) {
+                    if let Some(overlap) = fields
+                        .iter()
+                        .find(|field| path_set.contains(*field) || query_names.contains(*field))
+                    {
+                        self.diags.push(Diagnostic::error(
+                            "E2805",
+                            format!("HTTP route `{pattern}` binds body field `{overlap}` twice"),
+                            "path, query, and body fields are distinct transport sources"
+                                .to_string(),
+                            format!("rename `{overlap}` in the body or remove the duplicate binding"),
+                            Some(args[1].expr.span()),
+                        ));
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn http_handler_type(params: Vec<Type>) -> Type {
@@ -553,6 +1001,88 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Reconstruct the selected method's raw-protocol provenance from the
+    /// declaration that populated the ordinary method registry. `MethodSig`
+    /// intentionally keeps only callable shape, so this lookup preserves the
+    /// existing body-check policy without duplicating its trait vocabulary.
+    fn raw_protocol_return_for_method(&self, type_name: &str, method: &str) -> bool {
+        fn selected_method_raw(
+            items: &[crate::AST::Item],
+            type_name: &str,
+            method: &str,
+        ) -> Option<bool> {
+            for item in items {
+                match item {
+                    crate::AST::Item::Struct(definition) if definition.name == type_name => {
+                        if definition.methods.iter().any(|function| function.name == method) {
+                            return Some(false);
+                        }
+                        for block in &definition.trait_impls {
+                            if let Some(function) =
+                                block.methods.iter().find(|function| function.name == method)
+                            {
+                                return Some(crate::Sema::uses_raw_protocol_return(
+                                    Some(&block.trait_name),
+                                    block.compiler_generated,
+                                    function.compiler_generated,
+                                ));
+                            }
+                        }
+                    }
+                    crate::AST::Item::Enum(definition) if definition.name == type_name => {
+                        if definition.methods.iter().any(|function| function.name == method) {
+                            return Some(false);
+                        }
+                        for block in &definition.trait_impls {
+                            if let Some(function) =
+                                block.methods.iter().find(|function| function.name == method)
+                            {
+                                return Some(crate::Sema::uses_raw_protocol_return(
+                                    Some(&block.trait_name),
+                                    block.compiler_generated,
+                                    function.compiler_generated,
+                                ));
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            for item in items {
+                if let crate::AST::Item::Impl(implementation) = item {
+                    if implementation.type_name != type_name {
+                        continue;
+                    }
+                    if let Some(function) =
+                        implementation.methods.iter().find(|function| function.name == method)
+                    {
+                        return Some(crate::Sema::uses_raw_protocol_return(
+                            implementation.trait_name.as_deref(),
+                            false,
+                            function.compiler_generated,
+                        ));
+                    }
+                }
+            }
+            None
+        }
+
+        let (import_ns, leaf) = self.struct_type_name_parts(type_name);
+        let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
+            return false;
+        };
+        let Some(items) = (if owner == self.module_idx {
+            Some(self.items)
+        } else {
+            self.modules
+                .and_then(|modules| modules.get(owner))
+                .map(|module| module.items.as_slice())
+        }) else {
+            return false;
+        };
+        selected_method_raw(items, leaf, method).unwrap_or(false)
+    }
+
     pub(crate) fn infer_method_call(
         &mut self,
         receiver: &mut Box<Expr>,
@@ -564,6 +1094,45 @@ impl<'a> Checker<'a> {
         recv_type_out: &mut Option<String>,
         resolved_ret_out: &mut Option<Type>,
     ) -> Option<Type> {
+        if let Some(path) = checker_hardware_path(receiver, &self.core_imports) {
+            let is_board = self
+                .core_imports
+                .get(path.first().map(String::as_str).unwrap_or_default())
+                .is_some_and(|module| module.starts_with("board."));
+            if is_board && matches!(method, "read" | "write" | "set" | "clear") {
+                for arg in args.iter_mut() {
+                    self.infer(&mut arg.expr);
+                }
+                let ret = if method == "read" {
+                    Type::Int
+                } else {
+                    Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())
+                };
+                *resolved_ret_out = Some(ret.clone());
+                return Some(ret);
+            }
+        }
+        if method == "start"
+            && matches!(receiver.as_ref(), Expr::Ident(name, _) if name == "dma")
+            && args.len() >= 2
+        {
+            for arg in args.iter_mut() {
+                self.infer(&mut arg.expr);
+            }
+            let ret = Type::Named("__JetDmaTransfer".to_string());
+            *recv_type_out = Some("__JetDma".to_string());
+            *resolved_ret_out = Some(ret.clone());
+            return Some(ret);
+        }
+        if method == "wait"
+            && matches!(receiver.as_ref(), Expr::Ident(name, _) if self
+                .lookup(name)
+                .is_some_and(|info| matches!(&info.ty, Type::Named(ty) if ty == "__JetDmaTransfer")))
+        {
+            let ret = Type::Named("__JetDmaBuffer".to_string());
+            *resolved_ret_out = Some(ret.clone());
+            return Some(ret);
+        }
         // D-VALIDATE1: the first pass elaborates `Validate.over(value)` into
         // the hidden builder literal. Chained calls infer their receiver again;
         // keep that compiler-owned node idempotent instead of trying to resolve
@@ -633,10 +1202,59 @@ impl<'a> Checker<'a> {
                             span,
                             type_args,
                             args,
+                            resolved_ret_out,
                         );
                     }
                 }
             }
+        }
+        // D-FOUND-RECEIPT1: `receipt` is one compiler-owned ambient handle.
+        // The payload is checked against its declaration-owned #Receipt/#Codable
+        // fact; no source constructor or `core.receipt` module exists.
+        if method == Syntax::METHOD_RECEIPT_ATTACH
+            && matches!(receiver.as_ref(), Expr::Ident(name, _) if name == "receipt")
+            && self.lookup("receipt").is_none()
+        {
+            let ret = Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string());
+            *recv_type_out = Some(Syntax::INTERNAL_RECEIPT_HANDLE.to_string());
+            *resolved_ret_out = Some(ret.clone());
+            if args.len() != 1 {
+                self.diags.push(Diagnostic::error(
+                    "E0103",
+                    "`receipt.attach` takes exactly one argument".to_string(),
+                    "one typed value becomes one named receipt section".to_string(),
+                    "write `receipt.attach(value)`".to_string(),
+                    Some(span),
+                ));
+                return Some(ret);
+            }
+            let payload_ty = self.infer(&mut args[0].expr);
+            let type_name = payload_ty.as_ref().and_then(|ty| match ty {
+                Type::Named(name) | Type::Apply { name, .. } => Some(name.as_str()),
+                _ => None,
+            });
+            let Some(type_name) = type_name else {
+                self.diags.push(Diagnostic::error(
+                    "E2411",
+                    "receipt sections require a named `#Receipt` type".to_string(),
+                    "the section schema and wire encoder are declaration-owned".to_string(),
+                    "declare a `#Codable` record with `#Receipt(\"name\")`".to_string(),
+                    Some(args[0].expr.span()),
+                ));
+                return Some(ret);
+            };
+            if self.registry.receipt_section(type_name).is_none() {
+                self.diags.push(Diagnostic::error(
+                    "E2411",
+                    format!("type `{type_name}` is not a `#Receipt` section"),
+                    "receipt attachment accepts only declaration-owned typed sections".to_string(),
+                    "add `#Receipt(\"name\")` and `#Codable` to the record".to_string(),
+                    Some(args[0].expr.span()),
+                ));
+            } else if let Some(payload_ty) = payload_ty.as_ref() {
+                self.check_encodable(payload_ty, args[0].expr.span());
+            }
+            return Some(ret);
         }
         self.check_call_receiver_evaluation(receiver, span);
         // D-SHAPE-PLACE1=A: `.view(a..b)` is retired. Keep the parser's
@@ -701,7 +1319,8 @@ impl<'a> Checker<'a> {
                     }
                     if is_checked {
                         if !self.in_unsafe {
-                            self.diags.push(Diagnostic::from_row("E0387", &[], Some(span)));
+                            self.diags
+                                .push(Diagnostic::from_row("E0387", &[], Some(span)));
                         }
                     }
                     return Some(result);
@@ -752,6 +1371,8 @@ impl<'a> Checker<'a> {
                             Some(span),
                         ));
                     }
+                    *recv_type_out = Some(n.clone());
+                    *resolved_ret_out = Some(base.clone());
                     return Some(base);
                 }
             }
@@ -1384,6 +2005,7 @@ impl<'a> Checker<'a> {
                         span,
                         type_args,
                         args,
+                        resolved_ret_out,
                     );
                 }
             }
@@ -1398,9 +2020,9 @@ impl<'a> Checker<'a> {
                 type_args,
                 args,
             );
-            if is_polymorphic_core_special(&module, method) {
-                *resolved_ret_out = ret.clone();
-            }
+            // The checked return type is carried on the node for every Core
+            // call; TIR reads it before any fixed-signature table.
+            *resolved_ret_out = ret.clone();
             return ret;
         }
         if let Expr::Ident(alias, alias_span) = &**receiver {
@@ -1414,14 +2036,7 @@ impl<'a> Checker<'a> {
                     type_args,
                     args,
                 );
-                // c109 Phase 20: write the resolved return type back onto the node
-                // for the polymorphic core specials whose type is arg-dependent and
-                // NOT in `core_fixed_sig` (so the TIR can read it totally — I3). The
-                // monomorphic calls (in `core_fixed_sig`) get their type from that
-                // table at lowering, so leave `resolved_ret = None` for them.
-                if is_polymorphic_core_special(&module, method) {
-                    *resolved_ret_out = ret.clone();
-                }
+                *resolved_ret_out = ret.clone();
                 return ret;
             }
             if let Some(&mod_idx) = self.imports.get(alias) {
@@ -1433,6 +2048,7 @@ impl<'a> Checker<'a> {
                     span,
                     type_args,
                     args,
+                    resolved_ret_out,
                 );
             }
             // D-MOD2: inline code module call — `math.double(x)` where `math` is an
@@ -1542,6 +2158,60 @@ impl<'a> Checker<'a> {
             };
             *resolved_ret_out = Some(ret.clone());
             return Some(ret);
+        }
+        // D-FOUND-PLATFORM1=A: a leading `.cmd("key")` is contextual syntax,
+        // not a dynamic host shortcut call. The argument expected by `button`
+        // supplies the UiShortcut type; turn the parser's empty receiver into
+        // the canonical static owner before TIR lowering.
+        if method == "cmd"
+            && matches!(
+                receiver.as_ref(),
+                Expr::Ident(name, _) if name.is_empty() || name == "UiShortcut"
+            )
+        {
+            let receiver_span = receiver.span();
+            **receiver = Expr::Ident("UiShortcut".to_string(), receiver_span);
+            let shortcut_ty = Type::Named("UiShortcut".to_string());
+            *resolved_ret_out = Some(shortcut_ty.clone());
+            if args.len() != 1 {
+                self.diags
+                    .push(wrong_core_arity("UiShortcut.cmd", 1, args.len(), span));
+                for arg in args.iter_mut() {
+                    self.infer(&mut arg.expr);
+                }
+                return Some(shortcut_ty);
+            }
+            let literal = match args[0].expr.without_parens() {
+                Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
+                    crate::AST::StrPart::Lit(value) => Some(value.clone()),
+                    _ => None,
+                },
+                _ => None,
+            };
+            self.expect_core_arg(
+                "UiShortcut.cmd",
+                0,
+                &Type::String,
+                &mut args[0],
+            );
+            let valid = args[0].label.is_none()
+                && literal.as_deref().is_some_and(|value| !value.trim().is_empty());
+            if !valid {
+                let shortcut = literal.as_deref().unwrap_or("<expression>");
+                let reason = if args[0].label.is_some() {
+                    "the key must be positional"
+                } else if literal.is_none() {
+                    "the key must be one plain string literal"
+                } else {
+                    "the key must not be empty"
+                };
+                self.diags.push(Diagnostic::from_row(
+                    "E2938",
+                    &[("shortcut", shortcut), ("reason", reason)],
+                    Some(args[0].span),
+                ));
+            }
+            return Some(shortcut_ty);
         }
         if let Expr::Ident(type_name, type_span) = &**receiver {
             let display_type_name = self.display_type_name(type_name, None);
@@ -1682,8 +2352,12 @@ impl<'a> Checker<'a> {
             }
             // D-ENC-DYN1=A+: `DataTree`/`JSON`/`TOML`/`YAML`/`CSV` name the one dynamic
             // value; they are reserved core type names (a user type may not redefine them).
+            // TIR lowers both constructors from `resolved_ret`; the checked
+            // dynamic-value type is carried on the call node here, never
+            // re-derived from the receiver's spelling.
             if is_json_type_name(type_name) {
                 if let Some(ret) = self.check_core_json_lit(method, args, span) {
+                    *resolved_ret_out = Some(ret.clone());
                     return Some(ret);
                 }
             }
@@ -1693,6 +2367,66 @@ impl<'a> Checker<'a> {
             // `MethodCall` — handled in `infer_field` alongside `Data.Null`.
             if type_name == Syntax::TYPE_DB_VALUE {
                 if let Some(ret) = self.check_core_dbvalue_lit(method, args, span) {
+                    *resolved_ret_out = Some(ret.clone());
+                    return Some(ret);
+                }
+            }
+            // D-ATOMIC-WIDTH1=A: generic Atomic constructors are static
+            // Prelude calls, not user associated methods. Keep the source
+            // generic argument on the checked result so every backend emits
+            // the same one-word carrier.
+            if type_name == Syntax::TYPE_ATOMIC
+                && self.lookup(type_name).is_none()
+                && owner_type_args.len() == 1
+            {
+                let inner = owner_type_args[0].clone();
+                if jet_foundation::Layout::atomic_scalar_type(&inner) {
+                    let (expected, ret) = match method {
+                        "new" => (
+                            inner.clone(),
+                            Type::Apply {
+                                name: Syntax::TYPE_ATOMIC.to_string(),
+                                args: vec![inner.clone()],
+                            },
+                        ),
+                        "try_new" => (
+                            inner.clone(),
+                            Type::Result {
+                                ok: Box::new(Type::Apply {
+                                    name: Syntax::TYPE_ATOMIC.to_string(),
+                                    args: vec![inner.clone()],
+                                }),
+                                err: Box::new(Type::Named(
+                                    Syntax::TYPE_ALLOC_ERROR.to_string(),
+                                )),
+                            },
+                        ),
+                        _ => {
+                            // This is not a constructor; let normal static
+                            // method resolution produce its canonical error.
+                            return None;
+                        }
+                    };
+                    if args.len() != 1 {
+                        self.diags.push(wrong_core_arity(
+                            &format!("Atomic.{method}"),
+                            1,
+                            args.len(),
+                            span,
+                        ));
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
+                        }
+                    } else {
+                        self.expect_core_arg(
+                            &format!("Atomic.{method}"),
+                            0,
+                            &expected,
+                            &mut args[0],
+                        );
+                    }
+                    *recv_type_out = Some(Syntax::TYPE_ATOMIC.to_string());
+                    *resolved_ret_out = Some(ret.clone());
                     return Some(ret);
                 }
             }
@@ -1719,13 +2453,9 @@ impl<'a> Checker<'a> {
                 }
             }
             let distinct_numeric_conversion = self.registry.is_distinct(type_name)
-                && self
-                    .registry
-                    .distinct_base(type_name)
-                    .is_some_and(|base| {
-                        base.is_numeric()
-                            && Syntax::numeric_conversion_source(method).is_some()
-                    });
+                && self.registry.distinct_base(type_name).is_some_and(|base| {
+                    base.is_numeric() && Syntax::numeric_conversion_source(method).is_some()
+                });
             if ((type_name == "EncodingLimits"
                 || type_name == "CBOROptions"
                 || type_name == "XMLLimits"
@@ -1745,11 +2475,13 @@ impl<'a> Checker<'a> {
                     type_args,
                     args,
                 );
-                return if type_name == crate::Syntax::CLOCK_TYPE && method == "system" {
+                let ret = if type_name == crate::Syntax::CLOCK_TYPE && method == "system" {
                     ret.map(crate::Sema::Diagnostics::system_clock_type)
                 } else {
                     ret
                 };
+                *resolved_ret_out = ret.clone();
+                return ret;
             }
             // D-FIDELITY-API1=A: `core.perf.Perf` static API. `use core.perf as perf`
             // remains accepted as the existing module-alias path.
@@ -1775,7 +2507,7 @@ impl<'a> Checker<'a> {
                         self.record_static_time_effect(type_name, method, span);
                         let ret =
                             self.finish_builtin_method(receiver, method, &ty, args, span, ret);
-                        return if type_name == crate::Syntax::CLOCK_TYPE {
+                        let ret = if type_name == crate::Syntax::CLOCK_TYPE {
                             if method == "system" {
                                 ret.map(crate::Sema::Diagnostics::system_clock_type)
                             } else if method == "new" {
@@ -1786,6 +2518,11 @@ impl<'a> Checker<'a> {
                         } else {
                             ret
                         };
+                        // Keep the checked static return fact on the method-call
+                        // node. TIR constructors consume this fact; re-deriving it
+                        // from the receiver would weaken shadowing and fallibility.
+                        *resolved_ret_out = ret.clone();
+                        return ret;
                     }
                 }
             }
@@ -2149,7 +2886,7 @@ impl<'a> Checker<'a> {
                         }
                         _ => Type::Int,
                     });
-                    if !self.hashable_type_eligible(&elem_ty) {
+                if !self.hashable_type_eligible(&elem_ty) {
                     self.diags.push(Diagnostic::error(
                             "E0506",
                             format!(
@@ -2203,12 +2940,14 @@ impl<'a> Checker<'a> {
                     }
                     return None;
                 }
-                let expected_elem_ty = owner_type_args.first().cloned().or_else(|| {
-                    match &self.expected_type {
-                        Some(Type::Shared(inner)) => Some((**inner).clone()),
-                        _ => None,
-                    }
-                });
+                let expected_elem_ty =
+                    owner_type_args
+                        .first()
+                        .cloned()
+                        .or_else(|| match &self.expected_type {
+                            Some(Type::Shared(inner)) => Some((**inner).clone()),
+                            _ => None,
+                        });
                 let elem_ty = match expected_elem_ty {
                     Some(expected) => self
                         .infer_with_expected(&mut args[0].expr, &expected)
@@ -2378,6 +3117,39 @@ impl<'a> Checker<'a> {
             if type_name == "Option" && method == "lift2" && !self.registry.contains("Option") {
                 return self.check_option_lift2(args, span, resolved_ret_out);
             }
+            // D-SPACE-GEOMETRY1=A: stock constructors retain their nominal
+            // space in the returned type; the scalar fields are ordinary
+            // Float values and therefore need no heap-backed tag.
+            if is_geometry_type(type_name) && !self.registry.contains(type_name) {
+                if let Some(ret) = geometry_static_return_with_owner(
+                    type_name,
+                    method,
+                    args.len(),
+                    owner_type_args,
+                ) {
+                    if let Some(expected) =
+                        geometry_static_arg_types(type_name, method, owner_type_args)
+                    {
+                        for (idx, (arg, want)) in
+                            args.iter_mut().zip(expected.iter()).enumerate()
+                        {
+                            self.expect_core_arg(
+                                &format!("{type_name}.{method}"),
+                                idx,
+                                want,
+                                arg,
+                            );
+                        }
+                    } else {
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
+                        }
+                    }
+                    *recv_type_out = Some(type_name.clone());
+                    return Some(ret);
+                }
+            }
+
             // D-SIMD2 / D-LINALG1: a STATIC method on a built-in math type —
             // `F32x4.splat(x)` / `Vec3.from_array([…])`. The arg is elaborated
             // against the method's expected type (so a literal becomes the
@@ -2614,6 +3386,44 @@ impl<'a> Checker<'a> {
             Type::Tagged { inner, .. } => *inner,
             other => other,
         };
+        // D-REALTIME1: typed Core handles contribute the same precise wait leaf
+        // as plain Core rows. Only scalar Shared reads and the direct scalar
+        // compatibility get/set/replace rail are wait-free; scalar edit still
+        // acquires the exclusive protocol permit, and structured/guard/txn
+        // paths remain blocking.
+        let scalar_shared_atomic_access = matches!(
+            (&recv_ty, method),
+            (Type::Shared(inner), "read" | "get" | "set" | "replace") if inner.is_scalar()
+        );
+        let shared_protocol_access = matches!(
+            (&recv_ty, method),
+            (Type::Shared(_), "get" | "set" | "replace" | "read" | "edit"
+                | "guard_read" | "guard_edit" | "read_txn" | "edit_txn")
+        );
+        if !scalar_shared_atomic_access {
+            if shared_protocol_access {
+                self.record_effect("Time.Wait", span);
+            } else {
+                let receiver_effect_type = match &recv_ty {
+                    Type::Shared(_) => Some("Shared"),
+                    Type::Named(name) | Type::Apply { name, .. } => Some(name.as_str()),
+                    Type::Tagged { inner, .. } => match inner.as_ref() {
+                        Type::Shared(_) => Some("Shared"),
+                        Type::Named(name) | Type::Apply { name, .. } => Some(name.as_str()),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                if let Some(type_name) = receiver_effect_type {
+                    if let Some(effect) =
+                        crate::Sema::Effects::receiver_effect_leaf(type_name, method)
+                    {
+                        self.record_effect(effect, span);
+                    }
+                }
+            }
+        }
+
         // D-TRACK-ORIGIN1=A: reject the retired runtime projection before
         // receiver-first `#Root` dispatch or any other compatibility path can
         // reinterpret `.origin()` as an ordinary call.
@@ -2704,7 +3514,9 @@ impl<'a> Checker<'a> {
                     return None;
                 }
             };
-            return self.infer_root_call(target, receiver, span, type_args, args, recv_type_out);
+            return self.infer_root_call(
+                target, receiver, span, type_args, args, recv_type_out, resolved_ret_out,
+            );
         }
         if receiver_is_clock
             && !clock_is_deterministic
@@ -2886,9 +3698,7 @@ impl<'a> Checker<'a> {
                 return Some(if method == "template" {
                     Type::String
                 } else {
-                    Type::List(Box::new(Type::Named(
-                        Syntax::TYPE_DB_VALUE.to_string(),
-                    )))
+                    Type::List(Box::new(Type::Named(Syntax::TYPE_DB_VALUE.to_string())))
                 });
             }
             if n == "HTML" && method == "text" {
@@ -3156,6 +3966,13 @@ impl<'a> Checker<'a> {
                     return ret;
                 }
             }
+            if handle_ty == "DbPool" {
+                if let Some(ret) = self.check_db_pool_method(method, args, span) {
+                    *recv_type_out = Some(handle_ty.clone());
+                    *resolved_ret_out = ret.clone();
+                    return ret;
+                }
+            }
             if handle_ty == "ServiceTree" {
                 if let Some(ret) = self.check_service_tree_method(method, args, span) {
                     if matches!(
@@ -3189,24 +4006,28 @@ impl<'a> Checker<'a> {
                         self.check_mutating_method_receiver(receiver, method, span);
                     }
                     *recv_type_out = Some(handle_ty.clone());
+                    *resolved_ret_out = ret.clone();
                     return ret;
                 }
             }
             if handle_ty == "ServiceWorkflow" {
                 if let Some(ret) = self.check_service_workflow_method(method, args, span) {
                     *recv_type_out = Some(handle_ty.clone());
+                    *resolved_ret_out = ret.clone();
                     return ret;
                 }
             }
             if handle_ty == "ServiceEndpoint" {
                 if let Some(ret) = self.check_service_endpoint_method(method, args, span) {
                     *recv_type_out = Some(handle_ty.clone());
+                    *resolved_ret_out = ret.clone();
                     return ret;
                 }
             }
             if handle_ty == "ServiceRuntime" {
                 if let Some(ret) = self.check_service_runtime_method(method, args, span) {
                     *recv_type_out = Some(handle_ty.clone());
+                    *resolved_ret_out = ret.clone();
                     return ret;
                 }
             }
@@ -3224,20 +4045,37 @@ impl<'a> Checker<'a> {
                         );
                     }
                     *recv_type_out = Some(handle_ty.clone());
+                    *resolved_ret_out = ret.clone();
                     return ret;
                 }
             }
         }
-        // D-DEP-WASM1=A / D-PLUGIN1=B (c81): method calls on a `Plugin` handle
-        // — same bespoke-block shape as `DBConnection` above (`.call`/
-        // `.call_int` need `(name: String, args: [T])` elaboration, not the
-        // generic `file_handle_method_return` table).
-        if let Type::Named(handle_ty) = &recv_ty {
-            if handle_ty == "Plugin" {
-                if let Some(ret) = self.check_plugin_method(method, args, span) {
-                    *recv_type_out = Some(handle_ty.clone());
-                    return ret;
-                }
+        // D-DEP-WASM1=A / D-PLUGIN1=B (c81): method calls on a `Plugin`
+        // handle resolve against the immutable sema-owned interface registry.
+        // The receiver's identity is a nominal type argument, so a dynamic
+        // `Plugin` value cannot invent exports.
+        let plugin_identity = match &recv_ty {
+            Type::Apply { name, args } if name == "Plugin" => args.first().and_then(|ty| {
+                matches!(ty, Type::Named(_)).then(|| match ty {
+                    Type::Named(identity) => identity.as_str(),
+                    _ => unreachable!(),
+                })
+            }),
+            Type::Named(name) if name == "Plugin" => None,
+            _ => None,
+        };
+        if matches!(&recv_ty, Type::Named(name) if name == "Plugin")
+            || matches!(&recv_ty, Type::Apply { name, .. } if name == "Plugin")
+        {
+            let interface = plugin_identity
+                .and_then(|identity| self.plugin_interfaces.interface(identity))
+                .cloned();
+            if let Some(ret) =
+                self.check_plugin_method(method, interface.as_ref(), args, span)
+            {
+                *recv_type_out = Some("Plugin".to_string());
+                *resolved_ret_out = ret.clone();
+                return ret;
             }
         }
         // D-LIB-CALLGRANT1=A: a loaded `Mod` has one typed scalar entry
@@ -3290,8 +4128,9 @@ impl<'a> Checker<'a> {
                         self.lambda_escapes = true;
                         self.expected_type = Some(expected_fn);
                         self.infer(&mut args[0].expr);
-                        self.expected_type = saved_exp;
+                        super::super::super::check_game_frame_lambda(self, &mut args[0].expr);
                         self.lambda_escapes = saved_esc;
+                        self.expected_type = saved_exp;
                     }
                     *recv_type_out = Some(handle_ty.clone());
                     return None;
@@ -3439,6 +4278,228 @@ impl<'a> Checker<'a> {
                 return ret;
             }
         }
+        // D-FOUND-COREAPI1 / #2853: event-time stream operators are one
+        // checked surface over the shared scheduler-backed Stream kernel.
+        if let Type::Apply {
+            name,
+            args: stream_args,
+        } = &recv_ty
+        {
+            if name == "Stream" && method == "with_event_time" {
+                self.record_effect(Effect::IO.name(), span);
+                *recv_type_out = Some("Stream".to_string());
+                if stream_args.len() != 1 || args.len() != 1 {
+                    self.diags.push(wrong_core_arity(
+                        "Stream.with_event_time",
+                        1,
+                        args.len(),
+                        span,
+                    ));
+                    for arg in args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                    return None;
+                }
+                let element = stream_args[0].clone();
+                let expected_fn = Type::Fn {
+                    params: vec![element.clone()],
+                    ret: None,
+                    effect_bound: None,
+                    return_view_provenance: None,
+                    param_contract: None,
+                    call_metadata: None,
+                };
+                let saved_esc = self.lambda_escapes;
+                let saved_exp = self.expected_type.clone();
+                self.lambda_escapes = true;
+                self.expected_type = Some(expected_fn);
+                let callback_ty = self.infer(&mut args[0].expr);
+                if let Some(callback_ty) = callback_ty.as_ref() {
+                    self.check_stream_callback_expr(&args[0].expr, callback_ty);
+                }
+                self.expected_type = saved_exp;
+                self.lambda_escapes = saved_esc;
+                let ret = match callback_ty {
+                    Some(Type::Fn {
+                        params,
+                        ret: Some(event_ty),
+                        ..
+                    }) if params.len() == 1
+                        && params[0] == element
+                        && (event_ty.as_ref() == &Type::Int
+                            || matches!(event_ty.as_ref(), Type::Named(type_name) if type_name == "DateTime")) =>
+                    {
+                        Type::Apply {
+                            name: "StreamEventTime".to_string(),
+                            args: vec![element],
+                        }
+                    }
+                    Some(other) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0108",
+                            format!(
+                                "`Stream.with_event_time` needs `fn({}) -> Int|DateTime`, got {}",
+                                element.show(),
+                                other.show()
+                            ),
+                            "the timestamp callback must return one event-time value for each stream element"
+                                .to_string(),
+                            "return an Int Unix timestamp or a DateTime".to_string(),
+                            Some(args[0].expr.span()),
+                        ));
+                        return None;
+                    }
+                    None => return None,
+                };
+                *resolved_ret_out = Some(ret.clone());
+                return Some(ret);
+            }
+            if name == "StreamEventTime" && method == "key_by" {
+                self.record_effect(Effect::IO.name(), span);
+                *recv_type_out = Some("StreamEventTime".to_string());
+                if stream_args.len() != 1 || args.len() != 1 {
+                    self.diags.push(wrong_core_arity(
+                        "StreamEventTime.key_by",
+                        1,
+                        args.len(),
+                        span,
+                    ));
+                    for arg in args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                    return None;
+                }
+                let element = stream_args[0].clone();
+                let expected_fn = Type::Fn {
+                    params: vec![element.clone()],
+                    ret: None,
+                    effect_bound: None,
+                    return_view_provenance: None,
+                    param_contract: None,
+                    call_metadata: None,
+                };
+                let saved_esc = self.lambda_escapes;
+                let saved_exp = self.expected_type.clone();
+                self.lambda_escapes = true;
+                self.expected_type = Some(expected_fn);
+                let callback_ty = self.infer(&mut args[0].expr);
+                if let Some(callback_ty) = callback_ty.as_ref() {
+                    self.check_stream_callback_expr(&args[0].expr, callback_ty);
+                }
+                self.expected_type = saved_exp;
+                self.lambda_escapes = saved_esc;
+                let key = match callback_ty {
+                    Some(Type::Fn {
+                        params,
+                        ret: Some(key),
+                        ..
+                    }) if params.len() == 1 && params[0] == element => key,
+                    Some(other) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0108",
+                            format!(
+                                "`StreamEventTime.key_by` needs `fn({}) -> K`, got {}",
+                                element.show(),
+                                other.show()
+                            ),
+                            "the key callback must return one key for each stream element"
+                                .to_string(),
+                            "return the field or value used as the event key".to_string(),
+                            Some(args[0].expr.span()),
+                        ));
+                        return None;
+                    }
+                    None => return None,
+                };
+                let ret = Type::Apply {
+                    name: "KeyedStream".to_string(),
+                    args: vec![*key, element],
+                };
+                *resolved_ret_out = Some(ret.clone());
+                return Some(ret);
+            }
+            if name == "KeyedStream" && method == "window" {
+                self.record_effect(Effect::IO.name(), span);
+                *recv_type_out = Some("KeyedStream".to_string());
+                if stream_args.len() != 2 || !(args.len() == 2 || args.len() == 3) {
+                    self.diags.push(Diagnostic::error(
+                        "E0102",
+                        format!(
+                            "`Stream.window` expects 2 or 3 arguments, got {}",
+                            args.len()
+                        ),
+                        "a window needs a duration, a labelled watermark duration, and an optional late-event policy"
+                            .to_string(),
+                        "write `window(duration, watermark: duration)` or add `late: .Drop`/`.SideOutput`"
+                            .to_string(),
+                        Some(span),
+                    ));
+                    for arg in args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                    return None;
+                }
+                if args.len() == 2 {
+                    require_exact_labels(
+                        "Stream.window",
+                        args,
+                        &[(1, "watermark")],
+                        span,
+                        &mut self.diags,
+                    );
+                    args.push(CallArg {
+                        convention: AccessConvention::Read,
+                        expr: Expr::EnumLit {
+                            type_name: "LateEventDisposition".to_string(),
+                            variant: "Drop".to_string(),
+                            variant_span: None,
+                            args: Vec::new(),
+                            leading_dot: false,
+                            span,
+                        },
+                        span,
+                        flags: CallArgFlags::default(),
+                        label: Some(("late".to_string(), span)),
+                        spread: false,
+                    });
+                } else {
+                    require_exact_labels(
+                        "Stream.window",
+                        args,
+                        &[(1, "watermark"), (2, "late")],
+                        span,
+                        &mut self.diags,
+                    );
+                }
+                self.expect_core_arg(
+                    "Stream.window",
+                    0,
+                    &Type::Named("Duration".to_string()),
+                    &mut args[0],
+                );
+                self.expect_core_arg(
+                    "Stream.window",
+                    1,
+                    &Type::Named("Duration".to_string()),
+                    &mut args[1],
+                );
+                self.expect_core_arg(
+                    "Stream.window",
+                    2,
+                    &Type::Named("LateEventDisposition".to_string()),
+                    &mut args[2],
+                );
+                let ret = Type::Apply {
+                    name: "Stream".to_string(),
+                    args: vec![Type::Apply {
+                        name: "Window".to_string(),
+                        args: vec![stream_args[0].clone(), stream_args[1].clone()],
+                    }],
+                };
+                *resolved_ret_out = Some(ret.clone());
+                return Some(ret);
+            }
+        }
         // D-DATAFLOW1=A: DataStream<T>.next() → ?T !DataError
         if let Type::Apply {
             name,
@@ -3464,6 +4525,274 @@ impl<'a> Checker<'a> {
                 ));
             }
         }
+        // D-DX-QUEUE1=A: a queue handle is a typed receiver, not a generic
+        // service method. Keep the checked #Job identity and payload type at
+        // this boundary; the provider/codegen layers only marshal the result.
+        if let Type::Named(queue_type) = &recv_ty {
+            if queue_type == "JobQueue" {
+                let Some(method_ret) = job_queue_method_return(&recv_ty, method, args.len()) else {
+                    // Unknown methods continue to ordinary receiver lookup so
+                    // user diagnostics and suggestions remain intact.
+                    return None;
+                };
+                *recv_type_out = Some(queue_type.clone());
+                let mutating = matches!(
+                    method,
+                    "enqueue"
+                        | "delay"
+                        | "claim"
+                        | "heartbeat"
+                        | "acknowledge"
+                        | "fail"
+                        | "cancel"
+                        | "dead_letter"
+                        | "recover_expired"
+                        | "pause"
+                        | "resume"
+                        | "wait"
+                        | "prune"
+                );
+                self.record_call_receiver_access(
+                    receiver,
+                    if mutating {
+                        AccessConvention::Write
+                    } else {
+                        AccessConvention::Read
+                    },
+                    span,
+                );
+                let expected = match method {
+                    "enqueue" => 2,
+                    "delay" => 3,
+                    "receipt" | "events" => 1,
+                    "inspect" | "claim" => 2,
+                    "heartbeat" => 1,
+                    "acknowledge" | "fail" => 2,
+                    "cancel" | "dead_letter" => 2,
+                    "recover_expired" | "status" | "pause" | "resume" | "prune" => 0,
+                    "wait" => 1,
+                    _ => unreachable!(),
+                };
+                let Some(ret) = method_ret else {
+                    self.diags
+                        .push(wrong_core_arity(method, expected, args.len(), span));
+                    for arg in args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                    return None;
+                };
+                if method == "enqueue" && args.len() == 3 {
+                    require_exact_labels(
+                        "JobQueue.enqueue",
+                        args,
+                        &[(2, "key")],
+                        span,
+                        &mut self.diags,
+                    );
+                } else if method == "delay" {
+                    require_exact_labels(
+                        "JobQueue.delay",
+                        args,
+                        &[(2, "for")],
+                        span,
+                        &mut self.diags,
+                    );
+                } else if matches!(method, "cancel" | "dead_letter") && args.len() == 3 {
+                    require_exact_labels(
+                        &format!("JobQueue.{method}"),
+                        args,
+                        &[(2, "lease_token")],
+                        span,
+                        &mut self.diags,
+                    );
+                }
+                let find_job = |items: &[crate::AST::Item], target: &str| {
+                    items.iter().find_map(|item| match item {
+                        crate::AST::Item::Func(function)
+                            if function.name == target
+                                && function.is_job
+                                && function.params.len() == 1 =>
+                        {
+                            Some((function.name.clone(), function.params[0].ty.clone()))
+                        }
+                        _ => None,
+                    })
+                };
+                let job = if matches!(method, "enqueue" | "delay") {
+                    args.first().and_then(|arg| match arg.expr.without_parens() {
+                        Expr::Ident(job_name, _) => find_job(self.items, job_name)
+                            .or_else(|| {
+                                self.unqualified
+                                    .get(job_name)
+                                    .and_then(|mangled| find_job(self.items, mangled))
+                            })
+                            .or_else(|| {
+                                self.unqualified_file
+                                    .get(job_name)
+                                    .and_then(|(function_name, module_idx)| {
+                                        self.modules
+                                            .and_then(|modules| modules.get(*module_idx))
+                                            .and_then(|module| find_job(&module.items, function_name))
+                                    })
+                            }),
+                        _ => None,
+                    })
+                } else {
+                    None
+                };
+                let payload_ty = job.as_ref().map(|(_, ty)| ty);
+                if matches!(method, "enqueue" | "delay") {
+                    if let Some((job_name, _)) = job.as_ref() {
+                        if let Some(arg) = args.get_mut(0) {
+                            let job_span = arg.expr.span();
+                            arg.expr = Expr::Str(
+                                vec![StrPart::Lit(job_name.clone())],
+                                job_span,
+                            );
+                        }
+                    } else if let Some(arg) = args.get_mut(0) {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!(
+                                "`JobQueue.{method}` expects a checked `#Job` function"
+                            ),
+                            "the queue identity is attached to the declared #Job and cannot be selected by an arbitrary function value"
+                                .to_string(),
+                            "pass the name of a #Job function with exactly one payload parameter"
+                                .to_string(),
+                            Some(arg.expr.span()),
+                        ));
+                        self.infer(&mut arg.expr);
+                    }
+                    if let Some(payload_ty) = payload_ty {
+                        let payload_span = args
+                            .get(1)
+                            .map(|arg| arg.expr.span())
+                            .unwrap_or(span);
+                        self.check_encodable(payload_ty, payload_span);
+                    }
+                }
+                match method {
+                    "enqueue" | "delay" => {
+                        if let Some(arg) = args.get_mut(1) {
+                            if let Some(payload_ty) = payload_ty {
+                                self.expect_core_arg(method, 1, payload_ty, arg);
+                            } else {
+                                self.infer(&mut arg.expr);
+                            }
+                        }
+                        if method == "enqueue" {
+                            if let Some(arg) = args.get_mut(2) {
+                                self.expect_core_arg(
+                                    "JobQueue.enqueue",
+                                    2,
+                                    &Type::Option(Box::new(Type::String)),
+                                    arg,
+                                );
+                            }
+                        } else if let Some(arg) = args.get_mut(2) {
+                            self.expect_core_arg("JobQueue.delay", 2, &Type::Named("Duration".to_string()), arg);
+                        }
+                    }
+                    "receipt" | "events" => {
+                        if let Some(arg) = args.get_mut(0) {
+                            self.expect_core_arg(method, 0, &Type::String, arg);
+                        }
+                    }
+                    "inspect" => {
+                        if let Some(arg) = args.get_mut(0) {
+                            self.expect_core_arg(method, 0, &Type::Int, arg);
+                        }
+                        if let Some(arg) = args.get_mut(1) {
+                            self.expect_core_arg(method, 1, &Type::Bool, arg);
+                        }
+                    }
+                    "claim" => {
+                        if let Some(arg) = args.get_mut(0) {
+                            self.expect_core_arg(method, 0, &Type::String, arg);
+                        }
+                        if let Some(arg) = args.get_mut(1) {
+                            self.expect_core_arg(method, 1, &Type::Int, arg);
+                        }
+                    }
+                    "heartbeat" => {
+                        if let Some(arg) = args.get_mut(0) {
+                            self.expect_core_arg(
+                                method,
+                                0,
+                                &Type::Named("JobQueueClaim".to_string()),
+                                arg,
+                            );
+                        }
+                    }
+                    "acknowledge" => {
+                        if let Some(arg) = args.get_mut(0) {
+                            self.expect_core_arg(
+                                method,
+                                0,
+                                &Type::Named("JobQueueClaim".to_string()),
+                                arg,
+                            );
+                        }
+                        if let Some(arg) = args.get_mut(1) {
+                            self.expect_core_arg(
+                                method,
+                                1,
+                                &Type::Named("JobResult".to_string()),
+                                arg,
+                            );
+                        }
+                    }
+                    "fail" => {
+                        if let Some(arg) = args.get_mut(0) {
+                            self.expect_core_arg(
+                                method,
+                                0,
+                                &Type::Named("JobQueueClaim".to_string()),
+                                arg,
+                            );
+                        }
+                        if let Some(arg) = args.get_mut(1) {
+                            self.expect_core_arg(
+                                method,
+                                1,
+                                &Type::Named("JobError".to_string()),
+                                arg,
+                            );
+                        }
+                    }
+                    "cancel" | "dead_letter" => {
+                        if let Some(arg) = args.get_mut(0) {
+                            self.expect_core_arg(method, 0, &Type::String, arg);
+                        }
+                        if let Some(arg) = args.get_mut(1) {
+                            self.expect_core_arg(method, 1, &Type::String, arg);
+                        }
+                        if let Some(arg) = args.get_mut(2) {
+                            self.expect_core_arg(
+                                method,
+                                2,
+                                &Type::Option(Box::new(Type::String)),
+                                arg,
+                            );
+                        }
+                    }
+                    "wait" => {
+                        if let Some(arg) = args.get_mut(0) {
+                            self.expect_core_arg(
+                                method,
+                                0,
+                                &Type::Named("Duration".to_string()),
+                                arg,
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+                *resolved_ret_out = Some(ret.clone());
+                return Some(ret);
+            }
+        }
         // E2-M7: method calls on streaming file handles (D-IO2).
         if let Type::Named(handle_ty) = &recv_ty {
             if let Some(ret) =
@@ -3473,6 +4802,11 @@ impl<'a> Checker<'a> {
                     self.infer(&mut a.expr);
                 }
                 *recv_type_out = Some(handle_ty.clone());
+                if crate::Sema::is_mapped_file_view_method(handle_ty, method) {
+                    if let Some(ret_ty) = ret.as_ref() {
+                        *resolved_ret_out = Some(ret_ty.clone());
+                    }
+                }
                 return ret;
             }
         }
@@ -3482,6 +4816,9 @@ impl<'a> Checker<'a> {
                 net_method_return(handle_ty, method, args.len(), span, &mut self.diags)
             {
                 self.check_http_route_constant(handle_ty, method, args);
+                if is_http_route_registration(handle_ty, method) {
+                    self.check_http_router_contract(method, args, span);
+                }
                 require_net_method_labels(handle_ty, method, args, span, &mut self.diags);
                 if self.check_browser_method_args(handle_ty, method, args, span) {
                     // Browser handles share one exact argument checker.
@@ -3876,7 +5213,7 @@ impl<'a> Checker<'a> {
                     } else {
                         vec![Type::Named("HTTPRequest".to_string())]
                     };
-                    self.expect_core_arg(
+                    self.expect_http_handler_arg(
                         method,
                         1,
                         &http_handler_type(handler_params),
@@ -4067,14 +5404,8 @@ impl<'a> Checker<'a> {
                     core_default: param.default,
                 })
                 .collect::<Vec<_>>();
-            if crate::Sema::CallBinder::bind_call_args(
-                method,
-                &params,
-                args,
-                span,
-                &mut self.diags,
-            )
-            .is_none()
+            if crate::Sema::CallBinder::bind_call_args(method, &params, args, span, &mut self.diags)
+                .is_none()
             {
                 for arg in args.iter_mut() {
                     self.infer(&mut arg.expr);
@@ -4094,6 +5425,14 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg(method, 0, &Type::Int, &mut args[0]);
                 }
                 ("Date" | "LocalDate", "diff_days", 1) => {
+                    self.expect_core_arg(
+                        method,
+                        0,
+                        &Type::Named("LocalDate".to_string()),
+                        &mut args[0],
+                    );
+                }
+                ("Date" | "LocalDate", "equal" | "compare", 1) => {
                     self.expect_core_arg(
                         method,
                         0,
@@ -4144,6 +5483,17 @@ impl<'a> Checker<'a> {
                         method,
                         0,
                         &Type::Named("Duration".to_string()),
+                        &mut args[0],
+                    );
+                }
+                ("DateTime", "add_nanoseconds", 1) => {
+                    self.expect_core_arg(method, 0, &Type::Int, &mut args[0]);
+                }
+                ("DateTime", "equal" | "compare", 1) => {
+                    self.expect_core_arg(
+                        method,
+                        0,
+                        &Type::Named("DateTime".to_string()),
                         &mut args[0],
                     );
                 }
@@ -4220,8 +5570,15 @@ impl<'a> Checker<'a> {
                         &mut args[0],
                     );
                 }
-                ("LocalTime", "truncate" | "floor" | "ceil", argc)
-                    if argc == 1 || argc == 2 => {
+                ("LocalTime", "equal" | "compare", 1) => {
+                    self.expect_core_arg(
+                        method,
+                        0,
+                        &Type::Named("LocalTime".to_string()),
+                        &mut args[0],
+                    );
+                }
+                ("LocalTime", "truncate" | "floor" | "ceil", argc) if argc == 1 || argc == 2 => {
                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
                     if argc == 2 {
                         self.expect_core_arg(method, 1, &Type::Int, &mut args[1]);
@@ -4281,6 +5638,14 @@ impl<'a> Checker<'a> {
                         self.expect_core_arg(method, 1, &Type::String, &mut args[1]);
                     }
                 }
+                ("ZonedDateTime", "equal" | "compare", 1) => {
+                    self.expect_core_arg(
+                        method,
+                        0,
+                        &Type::Named("ZonedDateTime".to_string()),
+                        &mut args[0],
+                    );
+                }
                 ("ZonedDateTime", "with_zone", 1) => {
                     self.expect_core_arg(method, 0, &Type::Named("Zone".to_string()), &mut args[0]);
                 }
@@ -4310,6 +5675,14 @@ impl<'a> Checker<'a> {
                     );
                 }
                 ("ZonedDateTime", "start_of_day" | "hours_in_day" | "next_transition" | "previous_transition", 0) => {}
+                ("Instant", "equal" | "compare", 1) => {
+                    self.expect_core_arg(
+                        method,
+                        0,
+                        &Type::Named("Instant".to_string()),
+                        &mut args[0],
+                    );
+                }
                 ("Period", "add" | "sub", 1) => {
                     self.expect_core_arg(
                         method,
@@ -4355,6 +5728,7 @@ impl<'a> Checker<'a> {
             let handle_ty_s = handle_ty.clone();
             if handle_ty_s == "Fixed" && matches!(method, "new" | "over") {
                 *recv_type_out = Some(handle_ty_s.clone());
+                *resolved_ret_out = Some(Type::Named(handle_ty_s.clone()));
                 if !self.allow_fixed_constructor {
                     self.diags.push(Diagnostic::error(
                             "E0103",
@@ -4399,40 +5773,42 @@ impl<'a> Checker<'a> {
                         },
                         _ => None,
                     };
-                    let size = direct_size.or_else(|| {
-                        let evaluated = {
-                            let globals = self.current_ct_globals();
-                            crate::Comptime::evaluate_owned_with_imports_opts_collecting(
-                                &args[0].expr,
-                                self.ct_funcs,
-                                self.ct_externs,
-                                self.ct_base_dir,
-                                globals.as_ref(),
-                                self.core_imports,
-                                self.gates,
-                                0,
-                                None,
-                            )
-                        };
-                        match evaluated {
-                            Ok((CtValue::Int(value), inputs)) => {
-                                self.ct_embed_inputs.extend(inputs);
-                                Some(value)
+                    if !self.defer_ct_evaluation {
+                        let size = direct_size.or_else(|| {
+                            let evaluated = {
+                                let globals = self.current_ct_globals();
+                                crate::Comptime::evaluate_owned_with_imports_opts_collecting(
+                                    &args[0].expr,
+                                    self.ct_checked_funcs,
+                                    self.ct_externs,
+                                    self.ct_base_dir,
+                                    globals.as_ref(),
+                                    self.core_imports,
+                                    self.gates,
+                                    0,
+                                    None,
+                                )
+                            };
+                            match evaluated {
+                                Ok((CtValue::Int(value), inputs)) => {
+                                    self.ct_embed_inputs.extend(inputs);
+                                    Some(value)
+                                }
+                                _ => None,
                             }
-                            _ => None,
+                        });
+                        if let Some(size) = size.filter(|size| *size > 0) {
+                            let arg_span = args[0].expr.span();
+                            args[0].expr = Expr::Int(size, arg_span, None, None);
+                        } else {
+                            self.diags.push(Diagnostic::error(
+                                    "E0103",
+                                    "`Fixed.new` needs a positive compile-time byte size".to_string(),
+                                    "runtime-sized storage cannot become an inline fixed array in the current stack frame".to_string(),
+                                    "use a positive literal or comptime integer, e.g. `mem.Fixed.new(size: 4096)`".to_string(),
+                                    Some(args[0].expr.span()),
+                                ));
                         }
-                    });
-                    if let Some(size) = size.filter(|size| *size > 0) {
-                        let arg_span = args[0].expr.span();
-                        args[0].expr = Expr::Int(size, arg_span, None, None);
-                    } else {
-                        self.diags.push(Diagnostic::error(
-                                "E0103",
-                                "`Fixed.new` needs a positive compile-time byte size".to_string(),
-                                "runtime-sized storage cannot become an inline fixed array in the current stack frame".to_string(),
-                                "use a positive literal or comptime integer, e.g. `mem.Fixed.new(size: 4096)`".to_string(),
-                                Some(args[0].expr.span()),
-                            ));
                     }
                 } else {
                     let fixed_bytes = matches!(
@@ -4482,21 +5858,23 @@ impl<'a> Checker<'a> {
                 if matches!(method, "alloc" | "try_alloc") {
                     if let Some(arg) = args.get_mut(0) {
                         let inferred = self.infer(&mut arg.expr);
-                        if method == "try_alloc" {
-                            let resolved = result_ty(
+                        let resolved = if method == "try_alloc" {
+                            Some(result_ty(
                                 Type::allocator_view(inferred.clone().unwrap_or(Type::Int)),
                                 Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string()),
-                            );
-                            *resolved_ret_out = Some(resolved.clone());
-                            return Some(resolved);
-                        }
-                        return inferred;
+                            ))
+                        } else {
+                            inferred
+                        };
+                        *resolved_ret_out = resolved.clone();
+                        return resolved;
                     }
                     return None;
                 }
                 for a in args.iter_mut() {
                     self.infer(&mut a.expr);
                 }
+                *resolved_ret_out = ret.clone();
                 return ret;
             }
         }
@@ -4522,6 +5900,18 @@ impl<'a> Checker<'a> {
                         self.infer(&mut a.expr);
                     }
                     *recv_type_out = Some("ParsedArgs".to_string());
+                    *resolved_ret_out = ret.clone();
+                    return ret;
+                }
+            }
+            // D-FOUND-REALTIME1=A: callback streams own a typed, bounded
+            // lifecycle surface; receipt/deadline reads do not block.
+            if handle_ty == "RealtimeStream" {
+                if let Some(ret) = crate::Sema::realtime_stream_method_return(method, args.len()) {
+                    for arg in args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                    *recv_type_out = Some(handle_ty.clone());
                     *resolved_ret_out = ret.clone();
                     return ret;
                 }
@@ -4631,7 +6021,8 @@ impl<'a> Checker<'a> {
                     return ret;
                 }
             }
-            // D-PROCESS1=A: `.write(text)` on the `child.stdin` writer handle.
+            // D-PROCESS1=A / D-FOUND-LIFECYCLE1=A: `.write(text)`/`.close()` on the
+            // `child.stdin` writer handle.
             if handle_ty == "ProcessStdin" {
                 if let Some(ret) =
                     process_stdin_method_return(method, args.len(), span, &mut self.diags)
@@ -4711,7 +6102,14 @@ impl<'a> Checker<'a> {
         // Stopwatch). Reading time/randomness THROUGH the handle is reproducible.
         // Set `recv_type_out` so codegen routes the call to the handle-method op
         // (TIR shape (h)) rather than failing the typed-IR subset check.
-        if let Type::Named(handle_ty) = &recv_ty {
+        let handle_receiver = match &recv_ty {
+            Type::Tagged {
+                marker: crate::AST::TagMarker::Internal(crate::AST::InternalTag::SystemClock),
+                inner,
+            } => inner.as_ref(),
+            other => other,
+        };
+        if let Type::Named(handle_ty) = handle_receiver {
             // D-AUTHORITY-NAME1=A / D-AUTHORITY-WORD2=E: the carried
             // Authority value is ordinary data. Its only instance family is
             // the Prelude `with`/`without` narrowing pair.
@@ -4742,7 +6140,14 @@ impl<'a> Checker<'a> {
             }
             if matches!(
                 handle_ty.as_str(),
-                "Clock" | "Rng" | "Fake" | "Stopwatch" | "Duration" | "Solver" | "TestSuite"
+                "Clock"
+                    | "Rng"
+                    | crate::Syntax::DETERMINISTIC_WORLD_TYPE
+                    | "Fake"
+                    | "Stopwatch"
+                    | "Duration"
+                    | "Solver"
+                    | "TestSuite"
             ) {
                 if let Some(ret) =
                     Collections::builtin_method_return(&recv_ty, method, args.len(), false)
@@ -4771,6 +6176,15 @@ impl<'a> Checker<'a> {
                     *recv_type_out = Some(handle_ty);
                     return result;
                 }
+            }
+        }
+        // D-FFI-CALLBACK2=A: event.stop() closes admission without waiting.
+        // The receiver is represented by a TLS event slot in the runtime
+        // route, so lowering emits a zero-argument native helper.
+        if let Type::Apply { name, .. } = &recv_ty {
+            if name == "FfiCallbackEvent" && method == "stop" && args.is_empty() {
+                *recv_type_out = Some(name.clone());
+                return Some(Type::Tuple(vec![]));
             }
         }
         // D-EVENT1=D: methods on compiler-known Event<T>/Hook<T,R> values.
@@ -4952,6 +6366,19 @@ impl<'a> Checker<'a> {
             }
         }
         if let Type::Apply { name, .. } = &recv_ty {
+            if name == crate::Syntax::TYPE_SHARED_SNAPSHOT {
+                if let Some(ret) =
+                    Collections::builtin_method_return(&recv_ty, method, args.len(), false)
+                {
+                    let result =
+                        self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
+                    *recv_type_out = Some(crate::Syntax::TYPE_SHARED_SNAPSHOT.to_string());
+                    *resolved_ret_out = result.clone();
+                    return result;
+                }
+            }
+        }
+        if let Type::Apply { name, .. } = &recv_ty {
             if name == crate::Syntax::TYPE_SHARED_WEAK {
                 if let Some(ret) =
                     Collections::builtin_method_return(&recv_ty, method, args.len(), false)
@@ -4993,6 +6420,7 @@ impl<'a> Checker<'a> {
                         crate::AST::InternalTag::SharedGuardRead
                     }),
                     inner: Box::new(recv_ty.clone()),
+
                 })
             }
             _ => None,
@@ -5006,6 +6434,89 @@ impl<'a> Checker<'a> {
                 return result;
             }
         }
+        // D-SPACE-GEOMETRY1=A: generic and stock geometry methods share the
+        // same closed return oracle.  This is the sema boundary that rejects
+        // a mismatched transform middle space before any backend sees it.
+        if let Some(base) = recv_ty.base_name() {
+            if is_geometry_type(base) && !self.registry.contains(base) {
+                let args_len = args.len();
+                let mut arg_types = Vec::with_capacity(args_len);
+                for (idx, arg) in args.iter_mut().enumerate() {
+                    let depth_arg = idx == 1
+                        && method == "point_at_depth"
+                        && matches!(
+                            &recv_ty,
+                            Type::Apply { name, .. }
+                                if matches!(name.as_str(), "Transform" | "Transform2")
+                        )
+                        && args_len == 2;
+                    if depth_arg {
+                        self.expect_core_arg(
+                            "Transform.point_at_depth",
+                            idx,
+                            &Type::Float,
+                            arg,
+                        );
+                        arg_types.push(Type::Float);
+                    } else if let Some(arg_ty) = self.infer(&mut arg.expr) {
+                        arg_types.push(arg_ty);
+                    }
+                }
+                if let Some(result) = geometry_method_return(&recv_ty, method, &arg_types) {
+                    *recv_type_out = Some(base.to_string());
+                    match result {
+                        Ok(ret) => return Some(ret),
+                        Err(()) => {
+                            if let Some((first, second, middle_a, middle_b)) =
+                                geometry_transform_diagnostic(&recv_ty, method, &arg_types)
+                            {
+                                self.diags.push(Diagnostic::from_row(
+                                    "E2521",
+                                    &[
+                                        ("first", first.as_str()),
+                                        ("second", second.as_str()),
+                                        ("middle_a", middle_a.as_str()),
+                                        ("middle_b", middle_b.as_str()),
+                                    ],
+                                    Some(span),
+                                ));
+                            } else {
+                                let expected = geometry_space(&recv_ty)
+                                    .map(|space| space.show())
+                                    .unwrap_or_else(|| recv_ty.show());
+                                let actual = arg_types
+                                    .first()
+                                    .and_then(geometry_space)
+                                    .map(|space| space.show())
+                                    .or_else(|| arg_types.first().map(|ty| ty.show()))
+                                    .unwrap_or_else(|| "<missing>".to_string());
+                                let expected = if method == "add" && geometry_is_point(&recv_ty) {
+                                    format!("a displacement in {expected}")
+                                } else if method == "sub" && geometry_is_point(&recv_ty) {
+                                    format!("a point or displacement in {expected}")
+                                } else if geometry_is_delta(&recv_ty) {
+                                    format!("a displacement in {expected}")
+                                } else {
+                                    expected
+                                };
+                                let operation = format!("{base}.{method}");
+                                self.diags.push(Diagnostic::from_row(
+                                    "E2520",
+                                    &[
+                                        ("operation", operation.as_str()),
+                                        ("expected", expected.as_str()),
+                                        ("actual", actual.as_str()),
+                                    ],
+                                    Some(span),
+                                ));
+                            }
+                            return None;
+                        }
+                    }
+                }
+            }
+        }
+
         // D-SIMD2 / D-LINALG1: methods on the built-in math value types
         // (`v.dot(w)`, `v.length()`, `v.sum()`, `v.reduce(.Max)`, `m.matmul(n)`).
         // Operator overloading on this closed family is blessed; named methods are
@@ -5133,7 +6644,13 @@ impl<'a> Checker<'a> {
                             span,
                             "generic trait dispatch has no sealed target set",
                         );
-                        self.record_edge(crate::Sema::effect_key(Some(trait_name), method), span);
+                        self.record_edge(
+                            format!(
+                                "{}::<static>",
+                                crate::Sema::effect_key(Some(trait_name), method)
+                            ),
+                            span,
+                        );
                         if !bounds.iter().any(|b| b == trait_name) {
                             self.diags.push(e0901(method, trait_name, span));
                         }
@@ -5144,10 +6661,16 @@ impl<'a> Checker<'a> {
                             self.infer(&mut arg.expr);
                             self.expected_type = old;
                         }
-                        // Keep source inference on the declared success value.
-                        // The effective Result carrier is an ABI fact carried on
-                        // the call node for TIR/codegen.
-                        let carrier = msig.effective_return_type();
+                        // The AST fact is the checked carrier for ordinary
+                        // trait calls. Raw protocol traits retain their ABI
+                        // declaration so auto-propagation cannot add `Try`.
+                        let raw_protocol_return = crate::Sema::uses_raw_protocol_return(
+                            Some(trait_name),
+                            false,
+                            false,
+                        );
+                        let (_, carrier) =
+                            self.checked_return_types(msig.return_type.clone(), raw_protocol_return);
                         *resolved_ret_out = Some(carrier);
                         return msig.return_type.clone();
                     }
@@ -5304,6 +6827,739 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        // D-FLAGSHIP-WEBAPI1=A: generic web suite methods keep the receiver's
+        // element type through sema; no engine-specific method table is needed.
+        if let Some(ret) = web_method_return(&recv_ty, method, args.len()) {
+            let (type_name, element) = match &recv_ty {
+                Type::Named(name) => (name.as_str(), None),
+                Type::Apply { name, args } => (name.as_str(), args.first().cloned()),
+                _ => ("", None),
+            };
+            let expected = match (type_name, method) {
+                ("JetDataPlot", "line" | "bar" | "point") => Some(0),
+                ("JetDataPlot", "x" | "color" | "size" | "text" | "detail"
+                    | "with_transform" | "with_scale" | "with_axis" | "with_legend"
+                    | "with_layer" | "with_interaction" | "accessibility" | "layout"
+                    | "select_indices") => Some(1),
+                ("JetDataPlot", "y") => Some(2),
+                ("JetDataPlot", "facet") => Some(1),
+                ("WebTable", "with_column") => Some(1),
+                ("WebTable", "paginate") => Some(2),
+                ("WebTable", "page") => Some(0),
+                ("WebStore", "set") => Some(1),
+                ("WebStore", "signal" | "state_signal" | "facts_json")
+                    | ("WebVirtualWindow", "facts_json") => Some(0),
+                ("WebStorePatch", "generation" | "transaction" | "active" | "commit" | "rollback") => Some(0),
+                ("WebStoreSubscription", "unsubscribe" | "active") => Some(0),
+                (
+                    "WebQuery",
+                    "state" | "state_signal" | "mutation_state" | "mutation_signal"
+                    | "invalidate" | "get" | "show" | "facts" | "cancel" | "refresh",
+                ) => Some(0),
+                ("WebFormTyped", "set_async_validator") => Some(4),
+                ("WebFormTyped", "set") => Some(2),
+                ("WebFormTyped", "blur" | "focus" | "set_action" | "post") => Some(1),
+                ("WebFormTyped", "validate") if !args.is_empty() => Some(3),
+                ("WebFormTyped", "validate") => Some(0),
+                (
+                    "WebFormTyped",
+                    "cancel" | "submit" | "no_script" | "state" | "lifecycle"
+                    | "errors" | "render" | "show",
+                ) => Some(0),
+                ("WebFormValidationChain", "render") => Some(0),
+                _ => None,
+            };
+            let Some(expected) = expected else {
+                return None;
+            };
+            if args.len() != expected {
+                self.diags
+                    .push(wrong_core_arity(method, expected, args.len(), span));
+            }
+            let row = element.unwrap_or(Type::Int);
+            match (type_name, method) {
+                ("JetDataPlot", _) => {
+                    let column = Type::Apply {
+                        name: "JetDataPlotColumn".to_string(),
+                        args: vec![row.clone()],
+                    };
+                    match method {
+                        "line" | "bar" | "point" => {}
+                        "x" | "color" | "size" | "text" | "detail" => {
+                            if let Some(arg) = args.get_mut(0) {
+                                if !self.check_plot_column_selector(&row, arg) {
+                                    self.expect_core_arg(method, 0, &column, arg);
+                                }
+                            }
+                        }
+                        "y" => {
+                            if let Some(arg) = args.get_mut(0) {
+                                if !self.check_plot_column_selector(&row, arg) {
+                                    self.expect_core_arg(method, 0, &column, arg);
+                                }
+                            }
+                            if let Some(arg) = args.get_mut(1) {
+                                self.expect_core_arg(
+                                    method,
+                                    1,
+                                    &Type::Named("JetDataPlotAggregate".to_string()),
+                                    arg,
+                                );
+                            }
+                        }
+                        "with_transform" => {
+                            if let Some(arg) = args.get_mut(0) {
+                                self.expect_core_arg(
+                                    method,
+                                    0,
+                                    &Type::Named("JetDataPlotTransform".to_string()),
+                                    arg,
+                                );
+                            }
+                        }
+                        "with_scale" => {
+                            if let Some(arg) = args.get_mut(0) {
+                                self.expect_core_arg(
+                                    method,
+                                    0,
+                                    &Type::Named("JetDataPlotScale".to_string()),
+                                    arg,
+                                );
+                            }
+                        }
+                        "with_axis" => {
+                            if let Some(arg) = args.get_mut(0) {
+                                self.expect_core_arg(
+                                    method,
+                                    0,
+                                    &Type::Named("JetDataPlotAxis".to_string()),
+                                    arg,
+                                );
+                            }
+                        }
+                        "with_legend" => {
+                            if let Some(arg) = args.get_mut(0) {
+                                self.expect_core_arg(
+                                    method,
+                                    0,
+                                    &Type::Named("JetDataPlotLegend".to_string()),
+                                    arg,
+                                );
+                            }
+                        }
+                        "facet" => {
+                            if let Some(arg) = args.get_mut(0) {
+                                if !self.check_plot_column_selector(&row, arg) {
+                                    self.expect_core_arg(method, 0, &column, arg);
+                                }
+                            }
+                        }
+                        "with_layer" => {
+                            if let Some(arg) = args.get_mut(0) {
+                                self.expect_core_arg(
+                                    method,
+                                    0,
+                                    &Type::Named("JetDataPlotLayer".to_string()),
+                                    arg,
+                                );
+                            }
+                        }
+                        "with_interaction" => {
+                            if let Some(arg) = args.get_mut(0) {
+                                self.expect_core_arg(
+                                    method,
+                                    0,
+                                    &Type::Named("JetDataPlotInteraction".to_string()),
+                                    arg,
+                                );
+                            }
+                        }
+                        "accessibility" => {
+                            if let Some(arg) = args.get_mut(0) {
+                                self.expect_core_arg(
+                                    method,
+                                    0,
+                                    &Type::Named("JetDataPlotAccessibility".to_string()),
+                                    arg,
+                                );
+                            }
+                        }
+                        "layout" => {
+                            if let Some(arg) = args.get_mut(0) {
+                                self.expect_core_arg(
+                                    method,
+                                    0,
+                                    &Type::Named("JetDataPlotLayout".to_string()),
+                                    arg,
+                                );
+                            }
+                        }
+                        "select_indices" => {
+                            if let Some(arg) = args.get_mut(0) {
+                                self.expect_core_arg(
+                                    method,
+                                    0,
+                                    &Type::List(Box::new(Type::Int)),
+                                    arg,
+                                );
+                            }
+                        }
+                        _ => unreachable!("web method return was checked above"),
+                    }
+                    self.record_call_receiver_access(receiver, AccessConvention::Read, span);
+                }
+                ("WebTable", "with_column") => {
+                    let column = Type::Apply {
+                        name: "WebTableColumn".to_string(),
+                        args: vec![row],
+                    };
+                    if let Some(arg) = args.get_mut(0) {
+                        self.expect_core_arg(method, 0, &column, arg);
+                    }
+                    self.record_call_receiver_access(
+                        receiver,
+                        AccessConvention::Move,
+                        span,
+                    );
+                }
+                ("WebTable", "paginate") => {
+                    if let Some(arg) = args.get_mut(0) {
+                        self.expect_core_arg(method, 0, &Type::Int, arg);
+                    }
+                    if let Some(arg) = args.get_mut(1) {
+                        self.expect_core_arg(method, 1, &Type::Int, arg);
+                    }
+                    self.record_call_receiver_access(
+                        receiver,
+                        AccessConvention::Read,
+                        span,
+                    );
+                }
+                ("WebTable", "page") => {
+                    self.record_call_receiver_access(
+                        receiver,
+                        AccessConvention::Read,
+                        span,
+                    );
+                }
+                ("WebStore", "set") => {
+                    if let Some(arg) = args.get_mut(0) {
+                        self.expect_core_arg(method, 0, &row, arg);
+                    }
+                    self.record_call_receiver_access(
+                        receiver,
+                        AccessConvention::Read,
+                        span,
+                    );
+                }
+                ("WebStore", "signal" | "state_signal" | "facts_json")
+                | ("WebVirtualWindow", "facts_json") => {
+                    self.record_call_receiver_access(
+                        receiver,
+                        AccessConvention::Read,
+                        span,
+                    );
+                }
+                ("WebStorePatch", "commit" | "rollback") => {
+                    self.record_call_receiver_access(
+                        receiver,
+                        AccessConvention::Move,
+                        span,
+                    );
+                }
+                ("WebStoreSubscription", "unsubscribe" | "active") => {
+                    self.record_call_receiver_access(
+                        receiver,
+                        AccessConvention::Read,
+                        span,
+                    );
+                }
+                ("WebQuery", _) => {
+                    self.record_call_receiver_access(
+                        receiver,
+                        AccessConvention::Read,
+                        span,
+                    );
+                }
+                ("WebFormTyped", "validate") => {
+                    if args.len() == 3 {
+                        require_exact_labels(
+                            "WebFormTyped.validate",
+                            args,
+                            &[(1, "on"), (2, "with")],
+                            span,
+                            &mut self.diags,
+                        );
+                    }
+                    if let Some(arg) = args.get_mut(0) {
+                        if !self.check_web_form_field_selector(arg) {
+                            self.expect_core_arg(method, 0, &Type::String, arg);
+                        }
+                    }
+                    if let Some(arg) = args.get_mut(1) {
+                        self.expect_core_arg(
+                            method,
+                            1,
+                            &Type::Named("WebFormValidationTiming".to_string()),
+                            arg,
+                        );
+                    }
+                    if let Some(arg) = args.get_mut(2) {
+                        let validator = Type::Fn {
+                            params: vec![Type::String],
+                            ret: Some(Box::new(Type::Result {
+                                ok: Box::new(unit_ty()),
+                                err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
+                            })),
+                            effect_bound: None,
+                            return_view_provenance: None,
+                            param_contract: None,
+                            call_metadata: None,
+                        };
+                        self.expect_core_arg(method, 2, &validator, arg);
+                    }
+                    self.record_call_receiver_access(
+                        receiver,
+                        AccessConvention::Read,
+                        span,
+                    );
+                }
+                ("WebFormTyped", "set_async_validator") => {
+                    // ABI: form, field name, timing, debounce, callback.
+                    let string = Type::String;
+                    if let Some(arg) = args.get_mut(0) {
+                        self.expect_core_arg(method, 0, &string, arg);
+                    }
+                    if let Some(arg) = args.get_mut(1) {
+                        self.expect_core_arg(
+                            method,
+                            1,
+                            &Type::Named("WebFormValidationTiming".to_string()),
+                            arg,
+                        );
+                    }
+                    if let Some(arg) = args.get_mut(2) {
+                        self.expect_core_arg(method, 2, &Type::Int, arg);
+                    }
+                    if let Some(arg) = args.get_mut(3) {
+                        let validator = Type::Fn {
+                            params: vec![Type::String],
+                            ret: Some(Box::new(Type::Result {
+                                ok: Box::new(unit_ty()),
+                                err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
+                            })),
+                            effect_bound: None,
+                            return_view_provenance: None,
+                            param_contract: None,
+                            call_metadata: None,
+                        };
+                        self.expect_core_arg(method, 3, &validator, arg);
+                    }
+                    self.record_call_receiver_access(
+                        receiver,
+                        AccessConvention::Read,
+                        span,
+                    );
+                }
+                ("WebFormTyped", "set_action") => {
+                    if let Some(arg) = args.get_mut(0) {
+                        let handler = Type::Fn {
+                            params: vec![Type::Named("WebFormDecodedInput".to_string())],
+                            ret: Some(Box::new(Type::Result {
+                                ok: Box::new(Type::String),
+                                err: Box::new(Type::Named("WebFormActionError".to_string())),
+                            })),
+                            effect_bound: None,
+                            return_view_provenance: None,
+                            param_contract: None,
+                            call_metadata: None,
+                        };
+                        self.expect_core_arg(method, 0, &handler, arg);
+                    }
+                    self.record_call_receiver_access(
+                        receiver,
+                        AccessConvention::Read,
+                        span,
+                    );
+                }
+                ("WebFormTyped", _) => {
+                    for index in 0..expected {
+                        if let Some(arg) = args.get_mut(index) {
+                            self.expect_core_arg(method, index, &Type::String, arg);
+                        }
+                    }
+                    self.record_call_receiver_access(
+                        receiver,
+                        AccessConvention::Read,
+                        span,
+                    );
+                }
+                ("WebFormValidationChain", "render") => {
+                    self.record_call_receiver_access(
+                        receiver,
+                        AccessConvention::Read,
+                        span,
+                    );
+                }
+                _ => unreachable!("web method return was checked above"),
+            }
+            for arg in args.iter_mut().skip(expected) {
+                self.infer(&mut arg.expr);
+            }
+            *recv_type_out = Some(type_name.to_string());
+            if let Some(ret) = &ret {
+                *resolved_ret_out = Some(ret.clone());
+            }
+            return ret;
+        }
+        // D-QUERY-RETAIN1=A: Query<T> methods preserve the deferred carrier;
+        // only `collect` changes the value back to an ordinary list.
+        // `group_by` yields the internal `DataGroupedQuery<T, K>` carrier whose
+        // reducers return `Query<Group<K, V>>`; the key and value types are the
+        // ordinary callback result types, never a String/Float projection.
+        if let Type::Apply { name: head, args: query_args } = &recv_ty {
+            if head == "DataTracked" && query_args.len() == 2 {
+                let row = query_args[0].clone();
+                let key = query_args[1].clone();
+                match method {
+                    "query" => {
+                        if !args.is_empty() {
+                            self.diags
+                                .push(wrong_core_arity(method, 0, args.len(), span));
+                        }
+                        let ret = Type::Apply {
+                            name: "Query".to_string(),
+                            args: vec![row.clone()],
+                        };
+                        *recv_type_out = Some("DataTracked".to_string());
+                        *resolved_ret_out = Some(ret.clone());
+                        return Some(ret);
+                    }
+                    "insert" => {
+                        if args.len() != 1 {
+                            self.diags
+                                .push(wrong_core_arity(method, 1, args.len(), span));
+                        }
+                        if let Some(arg) = args.get_mut(0) {
+                            self.expect_core_arg(method, 0, &row, arg);
+                        }
+                    }
+                    "replace" => {
+                        if args.len() != 2 {
+                            self.diags
+                                .push(wrong_core_arity(method, 2, args.len(), span));
+                        }
+                        if let Some(arg) = args.get_mut(0) {
+                            self.expect_core_arg(method, 0, &key, arg);
+                        }
+                        if let Some(arg) = args.get_mut(1) {
+                            self.expect_core_arg(method, 1, &row, arg);
+                        }
+                    }
+                    "remove" => {
+                        if args.len() != 1 {
+                            self.diags
+                                .push(wrong_core_arity(method, 1, args.len(), span));
+                        }
+                        if let Some(arg) = args.get_mut(0) {
+                            self.expect_core_arg(method, 0, &key, arg);
+                        }
+                    }
+                    _ => {}
+                }
+                if matches!(method, "insert" | "replace" | "remove") {
+                    let ret = Type::Result {
+                        ok: Box::new(unit_ty()),
+                        err: Box::new(Type::Named("DataError".to_string())),
+                    };
+                    *recv_type_out = Some("DataTracked".to_string());
+                    *resolved_ret_out = Some(ret.clone());
+                    return Some(ret);
+                }
+            }
+            if head == "DataWatch" && query_args.len() == 1 {
+                let row = query_args[0].clone();
+                match method {
+                    "get" => {
+                        if !args.is_empty() {
+                            self.diags
+                                .push(wrong_core_arity(method, 0, args.len(), span));
+                        }
+                        let ret = Type::Result {
+                            ok: Box::new(Type::List(Box::new(row))),
+                            err: Box::new(Type::Named("DataError".to_string())),
+                        };
+                        *recv_type_out = Some("DataWatch".to_string());
+                        *resolved_ret_out = Some(ret.clone());
+                        return Some(ret);
+                    }
+                    "status" => {
+                        if !args.is_empty() {
+                            self.diags
+                                .push(wrong_core_arity(method, 0, args.len(), span));
+                        }
+                        let ret = Type::Named("DataWatchStatus".to_string());
+                        *recv_type_out = Some("DataWatch".to_string());
+                        *resolved_ret_out = Some(ret.clone());
+                        return Some(ret);
+                    }
+                    "cancel" => {
+                        if !args.is_empty() {
+                            self.diags
+                                .push(wrong_core_arity(method, 0, args.len(), span));
+                        }
+                        let ret = unit_ty();
+                        *recv_type_out = Some("DataWatch".to_string());
+                        *resolved_ret_out = Some(ret.clone());
+                        return Some(ret);
+                    }
+                    _ => {}
+                }
+            }
+            if head == "Query" && query_args.len() == 1 {
+                let row = query_args[0].clone();
+                match method {
+                    "filter" | "sort_by" => {
+                        if args.len() != 1 {
+                            self.diags
+                                .push(wrong_core_arity(method, 1, args.len(), span));
+                        }
+                        if let Some(callback) = args.get_mut(0) {
+                            let callback_ty = Type::Fn {
+                                params: vec![row.clone()],
+                                ret: Some(Box::new(if method == "filter" {
+                                    Type::Bool
+                                } else {
+                                    Type::String
+                                })),
+                                // Ordinary Query combinators collect later; empty
+                                // effect bounds belong on live `.watch()` callbacks.
+                                effect_bound: None,
+                                return_view_provenance: None,
+                                param_contract: None,
+                                call_metadata: None,
+                            };
+                            self.expect_core_arg(method, 0, &callback_ty, callback);
+                        }
+                        let ret = Type::Apply {
+                            name: "Query".to_string(),
+                            args: vec![row],
+                        };
+                        *recv_type_out = Some("Query".to_string());
+                        *resolved_ret_out = Some(ret.clone());
+                        return Some(ret);
+                    }
+                    "map" | "min" | "max" => {
+                        if args.len() != 1 {
+                            self.diags
+                                .push(wrong_core_arity(method, 1, args.len(), span));
+                        }
+                        let value = args
+                            .get_mut(0)
+                            .and_then(|callback| self.infer_query_callback(method, &row, callback))
+                            .unwrap_or_else(|| row.clone());
+                        let ret = Type::Apply {
+                            name: "Query".to_string(),
+                            args: vec![value],
+                        };
+                        *recv_type_out = Some("Query".to_string());
+                        *resolved_ret_out = Some(ret.clone());
+                        return Some(ret);
+                    }
+                    "inner_join" | "left_join" => {
+                        if args.len() != 3 {
+                            self.diags
+                                .push(wrong_core_arity(method, 3, args.len(), span));
+                        }
+                        let right_row = args.get_mut(0).and_then(|other| {
+                            let other_ty = self.infer(&mut other.expr);
+                            match other_ty.as_ref().map(Type::without_user_tags) {
+                                Some(Type::Apply { name, args })
+                                    if name == "Query" && args.len() == 1 =>
+                                {
+                                    Some(args[0].clone())
+                                }
+                                Some(other_ty) => {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0112",
+                                        format!(
+                                            "`{method}` wants a Query as argument 1, but this is {}",
+                                            other_ty.show()
+                                        ),
+                                        "keyed joins combine two typed deferred queries".to_string(),
+                                        "pass another `Query<Row>` value".to_string(),
+                                        Some(other.expr.span()),
+                                    ));
+                                    None
+                                }
+                                None => None,
+                            }
+                        });
+                        let right_row = right_row.unwrap_or_else(|| row.clone());
+                        let _left_key = args.get_mut(1).and_then(|callback| {
+                            self.infer_query_callback(method, &row, callback)
+                        });
+                        let _right_key = args.get_mut(2).and_then(|callback| {
+                            self.infer_query_callback(method, &right_row, callback)
+                        });
+                        let joined_right = if method == "left_join" {
+                            Type::Option(Box::new(right_row))
+                        } else {
+                            right_row
+                        };
+                        let ret = Type::Apply {
+                            name: "Query".to_string(),
+                            args: vec![Type::Apply {
+                                name: "DataJoin".to_string(),
+                                args: vec![row, joined_right],
+                            }],
+                        };
+                        *recv_type_out = Some("Query".to_string());
+                        *resolved_ret_out = Some(ret.clone());
+                        return Some(ret);
+                    }
+                    "collect" => {
+                        if args.len() != 0 {
+                            self.diags
+                                .push(wrong_core_arity(method, 0, args.len(), span));
+                        }
+                        let ret = Type::Result {
+                            ok: Box::new(Type::List(Box::new(row))),
+                            err: Box::new(Type::Named("DataError".to_string())),
+                        };
+                        *recv_type_out = Some("Query".to_string());
+                        *resolved_ret_out = Some(ret.clone());
+                        return Some(ret);
+                    }
+                    "plan" => {
+                        if !args.is_empty() {
+                            self.diags
+                                .push(wrong_core_arity(method, 0, args.len(), span));
+                        }
+                        let ret = Type::List(Box::new(Type::String));
+                        *recv_type_out = Some("Query".to_string());
+                        *resolved_ret_out = Some(ret.clone());
+                        return Some(ret);
+                    }
+                    "group_by" => {
+                        if args.len() != 1 {
+                            self.diags
+                                .push(wrong_core_arity(method, 1, args.len(), span));
+                        }
+                        let key = args
+                            .get_mut(0)
+                            .and_then(|callback| self.infer_query_callback(method, &row, callback))
+                            .unwrap_or(Type::String);
+                        let ret = Type::Apply {
+                            name: "DataGroupedQuery".to_string(),
+                            args: vec![row.clone(), key],
+                        };
+                        *recv_type_out = Some("Query".to_string());
+                        *resolved_ret_out = Some(ret.clone());
+                        return Some(ret);
+                    }
+                    "watch" => {
+                        if !args.is_empty() {
+                            self.diags
+                                .push(wrong_core_arity(method, 0, args.len(), span));
+                        }
+                        let ret = Type::Result {
+                            ok: Box::new(Type::Apply {
+                                name: "DataWatch".to_string(),
+                                args: vec![row.clone()],
+                            }),
+                            err: Box::new(Type::Named("DataError".to_string())),
+                        };
+                        *recv_type_out = Some("Query".to_string());
+                        *resolved_ret_out = Some(ret.clone());
+                        return Some(ret);
+                    }
+                    _ => {}
+                }
+            }
+            if head == "DataGroupedQuery" && query_args.len() == 2 {
+                let row = query_args[0].clone();
+                let key = query_args[1].clone();
+                let value = match method {
+                    "count" => {
+                        if !args.is_empty() {
+                            self.diags
+                                .push(wrong_core_arity(method, 0, args.len(), span));
+                        }
+                        Some(Type::Int)
+                    }
+                    "sum" | "mean" => {
+                        if args.len() != 1 {
+                            self.diags
+                                .push(wrong_core_arity(method, 1, args.len(), span));
+                        }
+                        let value = args
+                            .get_mut(0)
+                            .and_then(|callback| self.infer_query_callback(method, &row, callback));
+                        if method == "sum"
+                            && !matches!(
+                                value,
+                                Some(
+                                    Type::Int
+                                        | Type::IntN { .. }
+                                        | Type::Float
+                                        | Type::Float32
+                                )
+                            )
+                        {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!(
+                                    "`sum` wants an Int, fixed-width Int, Float, or F32 result, but this is {}",
+                                    value
+                                        .as_ref()
+                                        .map_or_else(|| "missing".to_string(), |ty| ty.show())
+                                ),
+                                "grouped sum follows the runtime numeric domain and does not add arbitrary values"
+                                    .to_string(),
+                                "return a numeric row value, or use `count` for cardinality".to_string(),
+                                Some(span),
+                            ));
+                        }
+                        if method == "mean" {
+                            if let Some(value) = &value {
+                                if !matches!(value, Type::Float) {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0112",
+                                        format!(
+                                            "`mean` wants Float for argument 1's result, but this is {}",
+                                            value.show()
+                                        ),
+                                        "a grouped mean follows the Float numeric rules; \
+                                         it does not widen integers or units silently"
+                                            .to_string(),
+                                        "return a Float from the value callback, or use `sum`"
+                                            .to_string(),
+                                        Some(span),
+                                    ));
+                                }
+                            }
+                            Some(Type::Float)
+                        } else {
+                            Some(value.unwrap_or(Type::Int))
+                        }
+                    }
+                    _ => None,
+                };
+                if let Some(value) = value {
+                    let ret = Type::Apply {
+                        name: "Query".to_string(),
+                        args: vec![Type::Apply {
+                            name: "Group".to_string(),
+                            args: vec![key, value],
+                        }],
+                    };
+                    *recv_type_out = Some("DataGroupedQuery".to_string());
+                    *resolved_ret_out = Some(ret.clone());
+                    return Some(ret);
+                }
+            }
+        }
         // D-ZIPPAD1: list/iterator zip-family calls use one variadic typed
         // contract for free and method spellings. Option.zip remains the
         // separate nullable combinator below.
@@ -5317,9 +7573,11 @@ impl<'a> Checker<'a> {
                     self.check_analytics_sql_schema(inner, &query.expr);
                     self.expect_core_arg(method, 0, &Type::Named("SQL".to_string()), query);
                 }
-                self.check_encodable(inner, span);
                 let ret = Type::Result {
-                    ok: Box::new(Type::List(inner.clone())),
+                    ok: Box::new(Type::Apply {
+                        name: "Query".to_string(),
+                        args: vec![(*inner.clone())],
+                    }),
                     err: Box::new(Type::List(Box::new(Type::Named("FieldError".to_string())))),
                 };
                 *resolved_ret_out = Some(ret.clone());
@@ -5355,6 +7613,9 @@ impl<'a> Checker<'a> {
         if let Some(ret) = Collections::builtin_method_return(&recv_ty, method, args.len(), false) {
             let nominal_recv = match &recv_ty {
                 Type::Named(name) => Some(name.as_str()),
+                Type::Apply { name, args } if name == "Atomic" && args.len() == 1 => {
+                    Some(name.as_str())
+                }
                 Type::Tagged { marker, inner }
                     if matches!(
                         marker,
@@ -5369,6 +7630,9 @@ impl<'a> Checker<'a> {
                 _ => None,
             };
             if let Some(name) = nominal_recv {
+                if name == "Atomic" {
+                    *recv_type_out = Some(name.to_string());
+                }
                 if name == crate::Syntax::TYPE_CONDITION {
                     *recv_type_out = Some(name.to_string());
                 }
@@ -5404,39 +7668,16 @@ impl<'a> Checker<'a> {
             ) {
                 *recv_type_out = Some(recv_ty.name());
             }
-            let declared_ret = ret.clone();
             // S40: retain the receiver fact so the caller can lower the
             // Range spelling through the existing Slice expression path.
             if matches!(&recv_ty, Type::String) && method == "slice" && args.len() == 1 {
                 *recv_type_out = Some(crate::Syntax::TYPE_STRING.to_string());
             }
             let result = self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
-            // Preserve only exact facts the generic table could not express:
-            // callback/argument-refined results, tuple shapes, and numeric
-            // identities needed when a sequence is empty.
-            if let Some(ref ty) = result {
-                let refinement_capable = matches!(
-                    method,
-                    "zip"
-                        | "indexed"
-                        | "map"
-                        | "reduce"
-                        | "flat_map"
-                        | "filter_map"
-                        | "scan"
-                        | "fold"
-                        | "group_by"
-                        | "count_by"
-                        | "para_map"
-                        | "para_fold"
-                );
-                if refinement_capable
-                    || result != declared_ret
-                    || contains_tuple_type(ty)
-                    || matches!(method, "sum" | "product" | "min" | "max")
-                {
-                    *resolved_ret_out = Some(ty.clone());
-                }
+            // Lowering consumes the checked result, including ordinary nominal
+            // methods; retaining only refinements loses their return contract.
+            if let Some(ty) = &result {
+                *resolved_ret_out = Some(ty.clone());
             }
             return result;
         }
@@ -5484,10 +7725,16 @@ impl<'a> Checker<'a> {
                 self.record_edge(crate::Sema::effect_key(Some(&trait_name), method), span);
                 *recv_type_out = Some(trait_name.clone());
                 let source = self.check_trait_method_args(method, &msig, receiver, args, span);
-                // Trait-object calls have the same split as generic dispatch:
-                // source inference consumes the declared success value while
-                // TIR receives the effective failure carrier.
-                let carrier = msig.effective_return_type();
+                // The AST fact is the checked carrier for ordinary trait
+                // calls. Raw protocol traits retain their ABI declaration so
+                // auto-propagation cannot add `Try`.
+                let raw_protocol_return = crate::Sema::uses_raw_protocol_return(
+                    Some(&trait_name),
+                    false,
+                    false,
+                );
+                let (_, carrier) =
+                    self.checked_return_types(msig.return_type.clone(), raw_protocol_return);
                 *resolved_ret_out = Some(carrier);
                 return source;
             }
@@ -5530,7 +7777,11 @@ impl<'a> Checker<'a> {
         // materializer-specific E0102 recovery below.
         let builtin_methods = Collections::builtin_method_names(&recv_ty);
         if !builtin_methods.is_empty()
-            && !matches!(&recv_ty, Type::Apply { name, .. } if name == Syntax::TYPE_ITER)
+            && !matches!(
+                &recv_ty,
+                Type::Apply { name, .. }
+                    if name == Syntax::TYPE_ITER || name == Syntax::TYPE_VIEW_ITER
+            )
         {
             let diagnostic = self.missing_instance_method_diagnostic(
                 method,
@@ -5614,7 +7865,11 @@ impl<'a> Checker<'a> {
         }
         let Some((owner_mod, mut msig)) = self.resolve_method_sig(&type_name, method) else {
             let iter_elem = match &recv_ty {
-                Type::Apply { name, args } if name == Syntax::TYPE_ITER => args.first(),
+                Type::Apply { name, args }
+                    if name == Syntax::TYPE_ITER || name == Syntax::TYPE_VIEW_ITER =>
+                {
+                    args.first()
+                }
                 _ => None,
             };
             let iter_positional_pick = iter_elem.is_some() && method == "nth";
@@ -5715,9 +7970,12 @@ impl<'a> Checker<'a> {
         if let Some(args) = applied_args {
             self.instantiate_method_sig(owner_mod, &type_name, &mut msig, args);
         }
+        let raw_protocol_return = self.raw_protocol_return_for_method(&type_name, method);
         // D-APILABEL1=A: bind before inference — see `bind_method_args`.
         if !self.bind_method_args(method, &msig, args, span) {
-            let ret = Some(self.resolve_type(msig.effective_return_type()));
+            let (_, return_type) =
+                self.checked_return_types(msig.return_type.clone(), raw_protocol_return);
+            let ret = Some(return_type);
             *resolved_ret_out = ret.clone();
             return ret;
         }
@@ -5789,11 +8047,7 @@ impl<'a> Checker<'a> {
                         ));
                     }
                 }
-                self.mark_moved_by(
-                    n.clone(),
-                    *nspan,
-                    format!("{dispatch_type_name}.{method}"),
-                );
+                self.mark_moved_by(n.clone(), *nspan, format!("{dispatch_type_name}.{method}"));
             }
         }
         self.check_method_args(
@@ -5806,8 +8060,39 @@ impl<'a> Checker<'a> {
             pre_inferred_method.as_deref(),
             Some(call_access),
         )?;
-        let ret = Some(self.resolve_type(msig.effective_return_type()));
+        let (_, return_type) =
+            self.checked_return_types(msig.return_type.clone(), raw_protocol_return);
+        let ret = Some(return_type);
         *resolved_ret_out = ret.clone();
         ret
     }
+}
+
+fn checker_hardware_path(
+    expr: &Expr,
+    core_imports: &HashMap<String, String>,
+) -> Option<Vec<String>> {
+    fn append(expr: &Expr, path: &mut Vec<String>) -> bool {
+        match expr {
+            Expr::Ident(name, _) => {
+                path.push(name.clone());
+                true
+            }
+            Expr::Field(base, member, _) => {
+                if !append(base, path) {
+                    return false;
+                }
+                path.push(member.clone());
+                true
+            }
+            Expr::Paren(inner, _) => append(inner, path),
+            _ => false,
+        }
+    }
+    let mut path = Vec::new();
+    append(expr, &mut path).then_some(path).filter(|path| {
+        path.first()
+            .and_then(|alias| core_imports.get(alias))
+            .is_some_and(|module| module.starts_with("board."))
+    })
 }

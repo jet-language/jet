@@ -1,0 +1,669 @@
+// D-TEST-STRATEGY1=A: one ordinary public strategy owns resource-aware
+// generation, rebuilding, validity, bounds, and weighted distributions.
+// D-TEST-HISTORY1=A remains visible in every case: identity, schedule,
+// resources, preconditions, and non-pass outcomes stay attached.
+// The fixed reserve -> timeout -> retry prefix is a concrete schedule, not a
+// seed-only replay claim.  The model and candidate are separate state machines.
+use core.testing as testing
+
+enum BookingCommand {
+    Reserve(creates: testing.HandleId)
+    Cancel(handle: testing.HandleId)
+    Timeout(handle: testing.HandleId)
+    Retry(handle: testing.HandleId, creates: testing.HandleId)
+}
+
+enum CounterCommand {
+    Add(Int)
+    Reset
+}
+
+struct BookingTerminal {
+    handle: testing.HandleId
+    state: String
+}
+
+fn booking_bounds() testing.HistoryBounds -> testing.HistoryBounds{
+    max_steps: 8,
+    max_resources: 16,
+    max_shrink_attempts: 256,
+    max_discarded_cases: 8,
+}
+
+fn booking_distributions() [testing.HistoryDistribution] -> [testing.HistoryDistribution]{
+    testing.HistoryDistribution{
+        operation: "reserve",
+        weight: 3,
+    },
+    testing.HistoryDistribution{
+        operation: "cancel",
+        weight: 2,
+    },
+    testing.HistoryDistribution{
+        operation: "timeout",
+        weight: 2,
+    },
+    testing.HistoryDistribution{
+        operation: "retry",
+        weight: 1,
+    },
+}
+
+fn booking_operation(
+    index: testing.Count,
+    name: String,
+    argument: ?testing.HandleId,
+    creates: ?testing.HandleId,
+    consumes: ?testing.HandleId,
+    state: ?String,
+) testing.HistoryOperation -> {
+    task :: testing.TaskId{value: index % 2}
+    event :: testing.EventId{value: index + 1}
+    arguments := [testing.HistoryValue]{}
+    created_handles := [testing.HandleId]{}
+    consumed_handles := [testing.HandleId]{}
+    preconditions := [testing.HistoryPrecondition]{}
+
+    if argument != None {
+        handle :: argument ?? testing.HandleId{value: 0}
+        arguments.push(testing.HistoryValue.Handle(handle))
+    }
+    if creates != None {
+        handle :: creates ?? testing.HandleId{value: 0}
+        created_handles.push(handle)
+    }
+    if consumes != None {
+        handle :: consumes ?? testing.HandleId{value: 0}
+        consumed_handles.push(handle)
+    }
+    if index > 0 {
+        previous :: index - 1
+        preconditions.push(
+            testing.HistoryPrecondition.TaskCompleted(
+                testing.TaskId{value: previous % 2}
+            )
+        )
+        preconditions.push(
+            testing.HistoryPrecondition.EventAvailable(
+                testing.EventId{value: index}
+            )
+        )
+    }
+    if argument != None {
+        handle :: argument ?? testing.HandleId{value: 0}
+        if name != "reserve" {
+            preconditions.push(testing.HistoryPrecondition.HandleLive(handle))
+        }
+        if state != None {
+            expected :: state ?? ""
+            preconditions.push(
+                testing.HistoryPrecondition.HandleState{
+                    handle: handle,
+                    state: expected,
+                }
+            )
+        }
+    }
+    depends_on :: if index == 0 -> [testing.Count]{} else -> [testing.Count]{index - 1}
+    testing.HistoryOperation{
+        index: index,
+        name: name,
+        arguments: arguments,
+        creates: created_handles,
+        consumes: consumed_handles,
+        preconditions: preconditions,
+        depends_on: depends_on,
+        task: Val(task),
+        event: Val(event),
+    }
+}
+
+fn booking_schedule(index: testing.Count, name: String) testing.HistoryScheduleChoice -> {
+    task :: testing.TaskId{value: index % 2}
+    event :: testing.EventId{value: index + 1}
+    choice :: if name == "timeout" -> "deliver-late" else -> "fifo"
+    testing.HistoryScheduleChoice{
+        operation: index,
+        task: Val(task),
+        event: Val(event),
+        choice: choice,
+    }
+}
+
+fn booking_key(handle: testing.HandleId) String -> "{handle.value}"
+
+fn booking_public_state(states: [String:String]) DataTree -> {
+    values := [String:DataTree]{}
+    loop (key, state) in states {
+        values[key] = DataTree.Text(state)
+    }
+    DataTree.Object(values)
+}
+
+// Independent reference transition table.  It consumes typed commands only;
+// it never calls the production implementation or shares its defect logic.
+fn booking_model(commands: [BookingCommand]) DataTree -> {
+    states := [String:String]{}
+    loop command in commands {
+        if command == {
+            .Reserve(creates) -> states[booking_key(creates)] = "active"
+            .Cancel(handle) -> states[booking_key(handle)] = "cancelled"
+            .Timeout(handle) -> states[booking_key(handle)] = "timed_out"
+            .Retry(handle, creates) -> {
+                old_key :: booking_key(handle)
+                states.remove(old_key).drop("retry consumes the terminal handle")
+                states[booking_key(creates)] = "active"
+            }
+            else -> {}
+        }
+    }
+    booking_public_state(states)
+}
+
+// Candidate implementation with one deliberate observable defect: a retry
+// after timeout forgets to release the timed-out handle.
+fn booking_actual_bug(commands: [BookingCommand]) DataTree -> {
+    states := [String:String]{}
+    loop command in commands {
+        if command == {
+            .Reserve(creates) -> states[booking_key(creates)] = "active"
+            .Cancel(handle) -> states[booking_key(handle)] = "cancelled"
+            .Timeout(handle) -> states[booking_key(handle)] = "timed_out"
+            .Retry(handle, creates) -> {
+                old_key :: booking_key(handle)
+                if states.get(old_key) != Val("timed_out") {
+                    states.remove(old_key).drop("retry consumes the terminal handle")
+                }
+                states[booking_key(creates)] = "active"
+            }
+            else -> {}
+        }
+    }
+    booking_public_state(states)
+}
+
+// Correct production implementation kept separate from the reference model.
+fn booking_actual_correct(commands: [BookingCommand]) DataTree -> {
+    states := [String:String]{}
+    loop command in commands {
+        if command == {
+            .Reserve(creates) -> states[booking_key(creates)] = "active"
+            .Cancel(handle) -> states[booking_key(handle)] = "cancelled"
+            .Timeout(handle) -> states[booking_key(handle)] = "timed_out"
+            .Retry(handle, creates) -> {
+                old_key :: booking_key(handle)
+                states.remove(old_key).drop("retry consumes the terminal handle")
+                states[booking_key(creates)] = "active"
+            }
+            else -> {}
+        }
+    }
+    booking_public_state(states)
+}
+
+fn booking_handle(operation: testing.HistoryOperation) ?testing.HandleId -> {
+    if operation.arguments.len() != 1 -> return None
+    if operation.arguments[0] == {
+        .Handle(handle) -> return Val(handle)
+        else -> return None
+    }
+    None
+}
+
+fn booking_command_for(operation: testing.HistoryOperation) ?BookingCommand -> {
+    if operation.name == "reserve" {
+        if operation.arguments.len() == 0
+            && operation.creates.len() == 1
+            && operation.consumes.len() == 0
+        {
+            return Val(BookingCommand.Reserve{creates: operation.creates[0]})
+        }
+        return None
+    }
+    if operation.name == "cancel" || operation.name == "timeout" {
+        handle :: booking_handle(operation) ?? return None
+        if operation.creates.len() != 0 || operation.consumes.len() != 0 {
+            return None
+        }
+        if operation.name == "cancel" {
+            return Val(BookingCommand.Cancel{handle: handle})
+        }
+        return Val(BookingCommand.Timeout{handle: handle})
+    }
+    if operation.name == "retry" {
+        handle :: booking_handle(operation) ?? return None
+        if operation.creates.len() != 1
+            || operation.consumes.len() != 1
+            || operation.consumes[0] != handle
+        {
+            return None
+        }
+        return Val(
+            BookingCommand.Retry{
+                handle: handle,
+                creates: operation.creates[0],
+            }
+        )
+    }
+    None
+}
+
+fn booking_has_handle_live(
+    operation: testing.HistoryOperation,
+    handle: testing.HandleId,
+) Bool -> {
+    loop precondition in operation.preconditions {
+        if precondition == {
+            .HandleLive(found) -> if found == handle -> return true
+            else -> {}
+        }
+    }
+    false
+}
+
+fn booking_has_handle_state(
+    operation: testing.HistoryOperation,
+    handle: testing.HandleId,
+    state: String,
+) Bool -> {
+    loop precondition in operation.preconditions {
+        if precondition == {
+            .HandleState{handle: found, state: expected} -> {
+                if found == handle && expected == state -> return true
+            }
+            else -> {}
+        }
+    }
+    false
+}
+
+fn booking_has_task_event(
+    operation: testing.HistoryOperation,
+    task: testing.TaskId,
+    event: testing.EventId,
+) Bool -> {
+    task_seen := false
+    event_seen := false
+    loop precondition in operation.preconditions {
+        if precondition == {
+            .TaskCompleted(found) -> if found == task -> task_seen = true
+            .EventAvailable(found) -> if found == event -> event_seen = true
+            else -> {}
+        }
+    }
+    task_seen && event_seen
+}
+
+// Validity checks both the canonical metadata and the domain state machine.
+// A shrink candidate is accepted only when handles, preconditions, dependencies,
+// schedule identities, and the lossless command projection still agree.
+fn booking_valid(candidate: testing.TypedHistoryCase<BookingCommand>) Bool -> {
+    if candidate.case.case_id == "" -> return false
+    operation_count :: candidate.case.operations.len()
+    if operation_count == 0 || operation_count > booking_bounds().max_steps {
+        return false
+    }
+    if candidate.commands.len() != operation_count
+        || candidate.case.schedule.len() != operation_count
+    {
+        return false
+    }
+
+    states := [testing.HandleId:String]{}
+    known := [testing.HandleId:Bool]{}
+    created_count := 0
+    loop position in 0..<operation_count {
+        index :: position
+        operation :: candidate.case.operations[position]
+        if operation.index != index -> return false
+        task :: testing.TaskId{value: index % 2}
+        event :: testing.EventId{value: index + 1}
+        if operation.task != Val(task) || operation.event != Val(event) {
+            return false
+        }
+        if index == 0 {
+            if operation.depends_on.len() != 0 -> return false
+        } else {
+            if operation.depends_on != [testing.Count]{index - 1}
+                || !booking_has_task_event(
+                    operation,
+                    testing.TaskId{value: (index - 1) % 2},
+                    testing.EventId{value: index},
+                )
+            {
+                return false
+            }
+        }
+        schedule :: candidate.case.schedule[position]
+        expected_choice :: if operation.name == "timeout" {
+            "deliver-late"
+        } else {
+            "fifo"
+        }
+        if schedule.operation != index
+            || schedule.task != Val(task)
+            || schedule.event != Val(event)
+            || schedule.choice != expected_choice
+        {
+            return false
+        }
+        command :: booking_command_for(operation) ?? return false
+        if candidate.commands[position] != command -> return false
+
+        if operation.name == "reserve" {
+            created :: operation.creates[0]
+            if states.get(created) != None
+                || known.get(created) != None
+                || !operation.consumes.is_empty()
+                || operation.arguments.len() != 0
+            {
+                return false
+            }
+            known[created] = true
+            states[created] = "active"
+            created_count += 1
+        } else if operation.name == "cancel" || operation.name == "timeout" {
+            handle :: booking_handle(operation) ?? return false
+            expected_state :: "active"
+            if states.get(handle) != Val(expected_state)
+                || !booking_has_handle_live(operation, handle)
+                || !booking_has_handle_state(operation, handle, expected_state)
+            {
+                return false
+            }
+            next_state :: if operation.name == "cancel" -> "cancelled" else -> "timed_out"
+            states[handle] = next_state
+        } else {
+            handle :: booking_handle(operation) ?? return false
+            if states.get(handle) != Val("cancelled")
+                && states.get(handle) != Val("timed_out")
+            {
+                return false
+            }
+            if !booking_has_handle_live(operation, handle)
+                || !booking_has_handle_state(operation, handle, states.get(handle) ?? "")
+            {
+                return false
+            }
+            replacement :: operation.creates[0]
+            if states.get(replacement) != None
+                || known.get(replacement) != None
+                || operation.consumes[0] != handle
+            {
+                return false
+            }
+            states.remove(handle).drop("retry consumes the terminal handle")
+            known[replacement] = true
+            states[replacement] = "active"
+            created_count += 1
+        }
+    }
+    created_count <= booking_bounds().max_resources
+}
+
+// The callback derives typed commands from canonical metadata.  No fixture
+// writes a second wire codec; the compiler owns the Command codec.
+fn booking_rebuild(
+    case: testing.HistoryCase,
+) ?testing.TypedHistoryCase<BookingCommand> -> {
+    if case.operations.len() == 0 -> return None
+    commands := [BookingCommand]{}
+    loop operation in case.operations {
+        command :: booking_command_for(operation) ?? return None
+        commands.push(command)
+    }
+    Val(
+        testing.TypedHistoryCase<BookingCommand>{
+            case: case,
+            commands: commands,
+        }
+    )
+}
+
+// The public generator always starts with the concrete defect schedule, then
+// uses the supplied deterministic RNG for bounded extension choices.
+fn booking_generate(
+    rng: testing.HistoryRng,
+    case_index: testing.Count,
+    max_steps: testing.Count,
+) ?testing.TypedHistoryCase<BookingCommand> -> {
+    if max_steps < 3 -> return None
+    case_seed :: rng.next_u64()
+    step_count :: 3 + rng.below(max_steps - 2)
+    operations := [testing.HistoryOperation]{}
+    schedule := [testing.HistoryScheduleChoice]{}
+    commands := [BookingCommand]{}
+    active := [testing.HandleId]{}
+    terminal := [BookingTerminal]{}
+    next_id := 1
+
+    first :: testing.HandleId{value: next_id}
+    next_id += 1
+    operations.push(booking_operation(
+        0,
+        "reserve",
+        None,
+        Val(first),
+        None,
+        None,
+    ))
+    schedule.push(booking_schedule(0, "reserve"))
+    commands.push(BookingCommand.Reserve{creates: first})
+
+    operations.push(booking_operation(
+        1,
+        "timeout",
+        Val(first),
+        None,
+        None,
+        Val("active"),
+    ))
+    schedule.push(booking_schedule(1, "timeout"))
+    commands.push(BookingCommand.Timeout{handle: first})
+
+    second :: testing.HandleId{value: next_id}
+    next_id += 1
+    operations.push(booking_operation(
+        2,
+        "retry",
+        Val(first),
+        Val(second),
+        Val(first),
+        Val("timed_out"),
+    ))
+    schedule.push(booking_schedule(2, "retry"))
+    commands.push(BookingCommand.Retry{handle: first, creates: second})
+    active.push(second)
+
+    loop index in 3..<step_count {
+        choice :: rng.below(8)
+        if choice < 3 || (active.len() == 0 && terminal.len() == 0) {
+            handle :: testing.HandleId{value: next_id}
+            next_id += 1
+            operations.push(booking_operation(
+                index,
+                "reserve",
+                None,
+                Val(handle),
+                None,
+                None,
+            ))
+            schedule.push(booking_schedule(index, "reserve"))
+            commands.push(BookingCommand.Reserve{creates: handle})
+            active.push(handle)
+        } else if choice < 5 && active.len() > 0 {
+            handle :: active.pop() ?? return None
+            operations.push(booking_operation(
+                index,
+                "cancel",
+                Val(handle),
+                None,
+                None,
+                Val("active"),
+            ))
+            schedule.push(booking_schedule(index, "cancel"))
+            commands.push(BookingCommand.Cancel{handle: handle})
+            terminal.push(BookingTerminal{handle: handle, state: "cancelled"})
+        } else if choice < 7 && active.len() > 0 {
+            handle :: active.pop() ?? return None
+            operations.push(booking_operation(
+                index,
+                "timeout",
+                Val(handle),
+                None,
+                None,
+                Val("active"),
+            ))
+            schedule.push(booking_schedule(index, "timeout"))
+            commands.push(BookingCommand.Timeout{handle: handle})
+            terminal.push(BookingTerminal{handle: handle, state: "timed_out"})
+        } else if terminal.len() > 0 {
+            previous :: terminal.pop() ?? return None
+            replacement :: testing.HandleId{value: next_id}
+            next_id += 1
+            operations.push(booking_operation(
+                index,
+                "retry",
+                Val(previous.handle),
+                Val(replacement),
+                Val(previous.handle),
+                Val(previous.state),
+            ))
+            schedule.push(booking_schedule(index, "retry"))
+            commands.push(
+                BookingCommand.Retry{
+                    handle: previous.handle,
+                    creates: replacement,
+                }
+            )
+            active.push(replacement)
+        } else {
+            handle :: testing.HandleId{value: next_id}
+            next_id += 1
+            operations.push(booking_operation(
+                index,
+                "reserve",
+                None,
+                Val(handle),
+                None,
+                None,
+            ))
+            schedule.push(booking_schedule(index, "reserve"))
+            commands.push(BookingCommand.Reserve{creates: handle})
+            active.push(handle)
+        }
+    }
+
+    Val(
+        testing.TypedHistoryCase<BookingCommand>{
+            case: testing.HistoryCase{
+                case_id: "booking-{case_index}",
+                seed: case_seed,
+                operations: operations,
+                schedule: schedule,
+            },
+            commands: commands,
+        }
+    )
+}
+
+fn booking_strategy() testing.HistoryStrategy<BookingCommand> ->
+    testing.HistoryStrategy<BookingCommand>{
+        generate: booking_generate,
+        rebuild: booking_rebuild,
+        valid: booking_valid,
+        bounds: booking_bounds(),
+        distributions: booking_distributions(),
+    }
+
+// A second explicit strategy selects shorter histories for the same Command.
+// This is a separate valid campaign, not replay of the saved counterexample.
+fn booking_concrete_strategy() testing.HistoryStrategy<BookingCommand> ->
+    testing.HistoryStrategy<BookingCommand>{
+        generate: booking_generate,
+        rebuild: booking_rebuild,
+        valid: booking_valid,
+        bounds: testing.HistoryBounds{
+            max_steps: 3,
+            max_resources: 4,
+            max_shrink_attempts: 64,
+            max_discarded_cases: 2,
+        },
+        distributions: booking_distributions(),
+    }
+
+fn counter_model(commands: [CounterCommand]) DataTree -> {
+    value := 0
+    loop command in commands {
+        if command == {
+            .Add(delta) -> value += delta
+            .Reset -> value = 0
+            else -> {}
+        }
+    }
+    DataTree.Int(value)
+}
+
+fn counter_actual(commands: [CounterCommand]) DataTree -> {
+    value := 0
+    loop command in commands {
+        if command == {
+            .Add(delta) -> value += delta
+            .Reset -> value = 0
+            else -> {}
+        }
+    }
+    DataTree.Int(value)
+}
+
+fn observe(value: DataTree) DataTree -> ~value
+
+fn run() {
+    defect_rules :: booking_strategy()
+    defect :: testing.histories<BookingCommand>(
+        seed: 41,
+        cases: 32,
+        strategy: defect_rules,
+        model: booking_model,
+        actual: booking_actual_bug,
+        observe: observe,
+    )
+    if defect == {
+        .Ok(comparison) -> print("defect campaign: {testing.status(comparison)}")
+        .Err(error) -> print("defect campaign: {error}")
+    }
+
+    valid_rules :: booking_concrete_strategy()
+    valid :: testing.histories<BookingCommand>(
+        seed: 73,
+        cases: 8,
+        strategy: valid_rules,
+        model: booking_model,
+        actual: booking_actual_correct,
+        observe: observe,
+    )
+    if valid == {
+        .Ok(comparison) -> {
+            print("valid campaign: {testing.status(comparison)}")
+            print(testing.assert_equal(comparison))
+        }
+        .Err(error) -> print("valid campaign: {error}")
+    }
+
+    // Omission deliberately keeps the scalar operation type on the compiler-
+    // derived strategy path; it must not inherit BookingCommand's rules.
+    derived :: testing.histories<CounterCommand>(
+        seed: 7,
+        cases: 8,
+        model: counter_model,
+        actual: counter_actual,
+        observe: observe,
+    )
+    if derived == {
+        .Ok(comparison) -> {
+            print("derived CounterCommand campaign: {testing.status(comparison)}")
+            print(testing.assert_equal(comparison))
+        }
+        .Err(error) -> print("derived CounterCommand campaign: {error}")
+    }
+}

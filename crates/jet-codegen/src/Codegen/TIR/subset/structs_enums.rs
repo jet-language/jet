@@ -6,6 +6,7 @@ use crate::Codegen::Cx;
 use crate::Codegen::TIR::is_covered_cell_ty;
 use crate::Codegen::TIR::is_covered_distinct_ty;
 use crate::Codegen::TIR::is_covered_fallible_ty;
+use crate::Codegen::TIR::is_covered_compute_ty;
 use crate::Codegen::TIR::is_covered_foreign_value_ty;
 use crate::Codegen::TIR::is_covered_pool_ty;
 use crate::Codegen::TIR::is_covered_shared_guard_ty;
@@ -48,7 +49,6 @@ pub(crate) fn core_enum_equal_type(name: &str) -> bool {
             | "ProcessResourceLimit"
             | "TerminalMode"
             | "EncodingFormat"
-            | "EncodingErrorKind"
             | "DataEvent"
             | "CBORErrorKind"
             | "XMLReason"
@@ -387,6 +387,13 @@ pub(crate) fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -
     if ty.is_scalar() || matches!(ty, Type::Char | Type::String) {
         return true;
     }
+    // D-COMPUTE-TENSOR-FIELD1: Tensor and its typed compute-family handles are
+    // ordinary value fields. Their shared Prelude representation already
+    // carries shape/device/data, so struct construction and field projection
+    // need no struct-recursion or collection-specific lowering.
+    if is_covered_compute_ty(ty) {
+        return true;
+    }
     // D-MEM-VIEWRET1=B: sema is the sole authority for whether a stored view
     // has a stable owner. Once admitted, a View field is an ordinary borrowed
     // slice value for TIR; codegen only threads the hidden Rust lifetime.
@@ -450,14 +457,8 @@ pub(crate) fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -
     if is_covered_fallible_ty(ty, cx) {
         return true;
     }
-    // c109 Phase 27: a FUNCTION-typed field (`step: fn(Int) => Int` on a `Worker`
-    // struct). It renders via `cx.rust_type` to `Box<dyn Fn(...) -> ...>` exactly as
-    // the AST `struct_field_rust` does; a struct-lit field value (a lambda / a bare
-    // fn-name) lowers in-subset and is emitted as-is (NO ` as <fn-type>` coercion at
-    // the literal site — the AST `emit_struct_lit` field value is a plain `emit_expr`),
-    // and a fn-field READ / CALL routes through the Phase-27 `FnFieldCall` shape. The
-    // param/ret types are only RENDERED (never inspected for a decision), so any Fn
-    // signature is admissible.
+    // A function field uses the ordinary checked field projection and
+    // function-value invocation, including its effective failure carrier.
     if matches!(ty, Type::Fn { .. }) {
         return true;
     }
@@ -478,6 +479,12 @@ pub(crate) fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -
         }
         Type::Tuple(fields) => fields.iter().all(|(_, ty)| field_ty_covered(ty, cx, seen)),
         Type::Tagged { inner, .. } => field_ty_covered(inner, cx, seen),
+        // D-PLACE1: Atomic fields are compiler-owned inline scalar carriers;
+        // their literal payload is wrapped by TIR after this coverage gate.
+        Type::Apply { name, args } if name == "Atomic" => {
+            args.len() == 1
+                && jet_foundation::Layout::atomic_scalar_type(&args[0])
+        }
         // D-MEM1 S6 / D-LOCALCELL1=A: a bare core memory-handle field.
         Type::Apply { .. } => {
             is_covered_pool_ty(ty, cx)

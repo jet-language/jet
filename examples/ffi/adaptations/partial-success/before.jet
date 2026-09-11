@@ -1,0 +1,11 @@
+#Import module c.stream {
+    fn read_chunk(input: &[U8], input_len: U32, output: &[U8], output_cap: U32, read_len: &U32) Int = "read_chunk"
+}
+
+// Unrun expectation: status 1 and the exact prefix length are both observable.
+pub fn run() Int -> {
+    input := [1, 2, 3, 4]
+    output := [0, 0]
+    read_len := 0
+    return c.stream.read_chunk(&input, 4, &output, 2, &read_len)
+}

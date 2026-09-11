@@ -54,6 +54,19 @@ use crate::Diagnostics::Diagnostic;
 use crate::AST::{AccessConvention, CallArg, Expr, Func, ImportKind, Item, Stmt, StructDef};
 
 pub mod Docs;
+pub mod Console;
+pub mod Sql;
+pub mod ConsoleHost;
+pub use Console::{
+    ConsoleAuditEvent, ConsoleAuditOutcome, ConsoleCapability, ConsoleCommand, ConsoleDataBackend,
+    ConsoleDataColumn, ConsoleDataMutation, ConsoleDataRequest, ConsoleDataResult,
+    ConsoleDataStatement, ConsoleDataTransaction, ConsoleDataValue, ConsoleDatabaseHandle,
+    ConsoleError, ConsoleGrant, ConsoleHistory, ConsoleHistoryEntry, ConsoleIdentity, ConsoleMode,
+    ConsoleOptions, ConsoleOutput, ConsoleOutputKind, ConsoleProject, ConsoleRequest,
+    ConsoleResponse, ConsoleServiceHandle, ConsoleSession, InProcessRouter,
+};
+pub use ConsoleHost::{open_attached, run_attached, ConsoleHostAdapters};
+pub use Sql::{SqlEval, SqlSession};
 mod History;
 mod Interactive;
 pub mod Notebook;
@@ -333,7 +346,9 @@ impl crate::Comptime::ReplAuthorizer for ReplAuthorization<'_> {
                     )),
                 }
             }
-            PromptChoice::Deny => Err(self.e1803(request, "interactive authority was denied", span)),
+            PromptChoice::Deny => {
+                Err(self.e1803(request, "interactive authority was denied", span))
+            }
         }
     }
 
@@ -786,7 +801,7 @@ pub struct Session {
     /// Rebuilt when a new function is added.
     pub func_defs: HashMap<String, Func>,
     /// Session struct defs (rebuilt with `func_defs`). Needed so comptime
-    /// `data.schema` can expand empty `Table<T>` columns from `T`'s fields.
+    /// `data.schema` can expand empty typed-list columns from `T`'s fields.
     pub struct_defs: HashMap<String, StructDef>,
     /// Live interpreter scope: accumulated bindings (D-REPL7).
     pub scope: HashMap<String, CtValue>,
@@ -1287,10 +1302,7 @@ fn write_temp_file_at(path: &std::path::Path, source: &str) -> std::io::Result<(
     Ok(())
 }
 
-fn run_native_source_child(
-    jet_bin: &Path,
-    source: &str,
-) -> io::Result<std::process::Output> {
+fn run_native_source_child(jet_bin: &Path, source: &str) -> io::Result<std::process::Output> {
     let mut child = std::process::Command::new(jet_bin)
         .arg("__jet_repl_run_stdin")
         .stdin(std::process::Stdio::piped())
@@ -1313,7 +1325,6 @@ fn run_native_source_child(
     child.wait_with_output()
 }
 
-
 // ── :run ───────────────────────────────────────────────────────────────────
 
 /// Send the materialized session + stmt_srcs to a private native child over
@@ -1325,11 +1336,7 @@ fn cmd_run_native(session: &Session, color: bool, out_sink: &mut impl Write) {
         let _ = writeln!(out_sink, "note: session is empty — nothing to run");
         return;
     }
-    if session
-        .turns
-        .iter()
-        .any(|turn| turn.input.contains("#FX"))
-    {
+    if session.turns.iter().any(|turn| turn.input.contains("#FX")) {
         let _ = writeln!(
             out_sink,
             "Error [E1803]: `:run` will not replay effectful turns"
@@ -1389,11 +1396,7 @@ fn cmd_run_transcript(session: &Session) -> String {
     if session.stmt_srcs.is_empty() && session.item_srcs.is_empty() {
         return "note: session is empty — nothing to run\n".to_string();
     }
-    if session
-        .turns
-        .iter()
-        .any(|turn| turn.input.contains("#FX"))
-    {
+    if session.turns.iter().any(|turn| turn.input.contains("#FX")) {
         return "Error [E1803]: `:run` will not replay effectful turns\n Why: Replay would repeat already-authorized host operations without an operation-by-operation prompt; nothing ran\n Fix: Run each effectful turn in the REPL, or put the program in a file and use `jet run`\nMore: jet-lang.dev/e/E1803\n".to_string();
     }
 
@@ -1420,7 +1423,7 @@ fn cmd_run_transcript(session: &Session) -> String {
             lex_diags.first().map(|d| &d.what)
         );
     }
-    if let Err(ds) = crate::Parser::parse(&toks) {
+    if let Err(ds) = crate::Parser::parse_with_source(&toks, &jet_src) {
         return format!(
             "error: could not build this value: {}\n",
             ds.first().map(|d| d.what.as_str()).unwrap_or("?")
@@ -1498,7 +1501,7 @@ fn load_project_items(project_dir: &Path, session: &mut Session, out_sink: &mut 
             if !lex_diags.is_empty() {
                 continue;
             }
-            match crate::Parser::parse(&toks) {
+            match crate::Parser::parse_with_source(&toks, &src) {
                 Ok(prog) if !prog.items.is_empty() => {
                     session.item_srcs.push(src);
                     loaded += 1;
@@ -1655,7 +1658,7 @@ pub(crate) fn is_item_input(text: &str) -> bool {
     if !lex_diags.is_empty() {
         return false;
     }
-    crate::Parser::parse(&tokens)
+    crate::Parser::parse_with_source(&tokens, trimmed)
         .map(|program| !program.items.is_empty() && program.script_body.is_empty())
         .unwrap_or(false)
 }
@@ -1822,7 +1825,7 @@ pub(crate) fn raw_input_is_complete(text: &str) -> bool {
                 diag.code == "E0002" && diag.span.is_some_and(|span| span.end >= cutoff)
             });
         }
-        match crate::Parser::parse_for_check(&tokens) {
+        match crate::Parser::parse_for_check_with_source(&tokens, &source) {
             Ok(_) => true,
             Err(diags) => !diags
                 .iter()
@@ -1896,7 +1899,7 @@ fn classify(text: &str, step: usize) -> Result<InputKind, Vec<Diagnostic>> {
         if !lex_diags.is_empty() {
             return Err(lex_diags);
         }
-        match crate::Parser::parse(&toks) {
+        match crate::Parser::parse_with_source(&toks, &full) {
             Ok(prog) if prog.items.is_empty() && !prog.imports.is_empty() => {
                 return Ok(InputKind::Import(format!("{}\n", normalized)));
             }
@@ -1920,7 +1923,7 @@ fn classify(text: &str, step: usize) -> Result<InputKind, Vec<Diagnostic>> {
         if !lex_diags.is_empty() {
             return Err(lex_diags);
         }
-        if let Err(ds) = crate::Parser::parse(&toks) {
+        if let Err(ds) = crate::Parser::parse_with_source(&toks, &full) {
             return Err(ds);
         }
         return Ok(InputKind::Item(src));
@@ -1972,7 +1975,7 @@ fn classify(text: &str, step: usize) -> Result<InputKind, Vec<Diagnostic>> {
         // The check_src is the full statement content (with `;` for sema).
         let (toks, lex_diags) = crate::Lexer::lex_generated(&plain_src);
         if lex_diags.is_empty() {
-            if let Ok(prog) = crate::Parser::parse(&toks) {
+            if let Ok(prog) = crate::Parser::parse_with_source(&toks, &plain_src) {
                 if let Some(Item::Func(f)) = prog.items.into_iter().next() {
                     if !f.body.is_empty() {
                         return Ok(InputKind::Stmts(f.body, suppress, plain_input.clone()));
@@ -1986,7 +1989,7 @@ fn classify(text: &str, step: usize) -> Result<InputKind, Vec<Diagnostic>> {
     {
         let (toks, lex_diags) = crate::Lexer::lex_generated(&echo_src);
         if lex_diags.is_empty() {
-            if let Ok(prog) = crate::Parser::parse(&toks) {
+            if let Ok(prog) = crate::Parser::parse_with_source(&toks, &echo_src) {
                 if let Some(Item::Func(f)) = prog.items.into_iter().next() {
                     if !f.body.is_empty() {
                         // check_src must end in `;` for type_check_stmts.
@@ -2003,7 +2006,7 @@ fn classify(text: &str, step: usize) -> Result<InputKind, Vec<Diagnostic>> {
     if !lex_diags.is_empty() {
         return Err(lex_diags);
     }
-    match crate::Parser::parse(&toks) {
+    match crate::Parser::parse_with_source(&toks, &plain_src) {
         Ok(prog) => {
             if let Some(Item::Func(f)) = prog.items.into_iter().next() {
                 return Ok(InputKind::Stmts(f.body, suppress, plain_input));
@@ -2073,7 +2076,7 @@ fn run_sema_with_body(
     if !lex_diags.is_empty() {
         return Err(lex_diags);
     }
-    let mut prog = match crate::Parser::parse(&toks) {
+    let mut prog = match crate::Parser::parse_with_source(&toks, src) {
         Ok(p) => p,
         Err(ds) => return Err(ds),
     };
@@ -2220,7 +2223,7 @@ fn checked_program(src: &str) -> Result<crate::AST::ProgramBundle, Vec<Diagnosti
             .filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error))
             .collect());
     }
-    let prog = match crate::Parser::parse(&toks) {
+    let prog = match crate::Parser::parse_with_source(&toks, src) {
         Ok(p) => p,
         Err(ds) => return Err(ds),
     };
@@ -2232,9 +2235,9 @@ fn checked_program(src: &str) -> Result<crate::AST::ProgramBundle, Vec<Diagnosti
         match write_unique_temp_file("check", src) {
             Err(_) => program_bundle(src, prog),
             Ok(tmp_path) => {
-            let loaded = crate::Loader::load_entry(&tmp_path.to_string_lossy());
-            let _ = std::fs::remove_file(&tmp_path);
-            loaded?
+                let loaded = crate::Loader::load_entry(&tmp_path.to_string_lossy());
+                let _ = std::fs::remove_file(&tmp_path);
+                loaded?
             }
         }
     };
@@ -2272,6 +2275,7 @@ fn program_bundle(src: &str, mut prog: crate::AST::Program) -> crate::AST::Progr
             block_spans: prog.block_spans.clone(),
             rule_facts: std::mem::take(&mut prog.rule_facts),
         }],
+        devtools_registry: crate::AST::DevtoolsRegistry::default(),
         parse_teaching: Vec::new(),
         used_core: std::collections::HashSet::new(),
         ffi_callback_fns: std::collections::HashSet::new(),
@@ -2308,7 +2312,7 @@ fn rebuild_funcs(session: &mut Session) {
     session.func_defs.clear();
     session.struct_defs.clear();
     let (toks, _) = crate::Lexer::lex(&src);
-    if let Ok(prog) = crate::Parser::parse(&toks) {
+    if let Ok(prog) = crate::Parser::parse_with_source(&toks, &src) {
         for item in prog.items {
             match item {
                 Item::Func(f) => {
@@ -2386,7 +2390,7 @@ fn cmd_load(
         let _ = writeln!(out_sink, "{} parse error(s) in `{}`", n, path_str);
         return;
     }
-    let prog = match crate::Parser::parse(&toks) {
+    let prog = match crate::Parser::parse_with_source(&toks, &src) {
         Ok(p) => p,
         Err(ds) => {
             let _ = writeln!(out_sink, "{} parse error(s) in `{}`", ds.len(), path_str);
@@ -2472,7 +2476,6 @@ fn reanchor_repl_diagnostic(diagnostic: &mut Diagnostic, input_start: usize) {
     let end = span.end.checked_sub(input_start).unwrap_or(start);
     diagnostic.span = Some(crate::Diagnostics::Span::new(start, end.max(start)));
 }
-
 
 // ── main REPL loop ─────────────────────────────────────────────────────────
 
@@ -2837,7 +2840,6 @@ pub(crate) fn execute_line(
                         return false;
                     }
                 };
-
 
             // D-REPL8=A: detect which session bindings are moved by this input.
             let session_binding_names: HashSet<String> = session.scope.keys().cloned().collect();
@@ -3452,7 +3454,7 @@ pub fn eval_once(
     base_dir: &Path,
     flags: ReplFlags,
 ) -> Result<EvalOnce, Vec<Diagnostic>> {
-    jet_driver::boot_tir_eval();
+    jet_driver::boot_mir_eval();
     let mut policy = ReplPolicy::new(flags, base_dir);
     let session = Session::new();
 
@@ -3553,7 +3555,7 @@ pub fn run_transcript_with_preload(
 }
 
 fn run_transcript_with(inputs: &[&str], project_dir: Option<&str>, flags: ReplFlags) -> String {
-    jet_driver::boot_tir_eval();
+    jet_driver::boot_mir_eval();
     let base_dir: std::path::PathBuf = project_dir
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::PathBuf::from("."));
@@ -4021,6 +4023,7 @@ mod tests {
         let entries = [jet_driver::EffectBudget::PackageEffects {
             name: "dependency".to_string(),
             effects: Holds::from([expected.clone()]),
+            effect_sites: std::collections::BTreeMap::new(),
             panic_sites: Vec::new(),
             boundary_span: None,
         }];
@@ -4065,10 +4068,8 @@ mod tests {
     fn repl_temp_writer_rejects_existing_symlink() {
         use std::os::unix::fs::symlink;
 
-        let root = std::env::temp_dir().join(format!(
-            "jet-repl-temp-symlink-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet-repl-temp-symlink-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let target = root.join("outside.txt");
@@ -4105,16 +4106,13 @@ mod tests {
     ))]
     #[test]
     fn repl_temp_writer_rejects_unsupported_unix() {
-        let path = std::env::temp_dir().join(format!(
-            "jet-repl-unsupported-{}.jet",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("jet-repl-unsupported-{}.jet", std::process::id()));
         let error = write_temp_file_at(&path, "must not be written\n")
             .err()
             .expect("unsupported Unix target must fail closed");
         assert_eq!(error.kind(), std::io::ErrorKind::Unsupported);
     }
-
 
     #[test]
     fn sigil_binding_is_classified_as_statement() {

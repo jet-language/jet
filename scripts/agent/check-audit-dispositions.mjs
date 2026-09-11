@@ -186,7 +186,7 @@ function main() {
     for (const error of errors) console.error(`  ${error}`);
     process.exitCode = 1;
   } else {
-    console.log("audit dispositions: 0 unresolved findings");
+    console.log("audit dispositions: 0 ledger errors");
   }
 }
 

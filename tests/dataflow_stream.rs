@@ -100,7 +100,10 @@ fn run() {{
         Val(row) -> print("first:{{row.service}}:{{row.latency_ms}}")
         None -> panic("expected row")
     }}
-    groups := data.group_mean(reader, (e) -> e.service, (e) -> e.latency_ms)
+    groups := data.query(reader)
+        .group_by((e) -> e.service)
+        .mean((e) -> e.latency_ms)
+        .collect()
     if groups == {{
         Ok(_) -> print("groups:ok")
         Err(error) -> print("groups:{{error.operation}}:{{error.reason}}")
@@ -125,10 +128,9 @@ fn run() {{
         events_path = events_path
     );
     let (code, stdout, stderr) = build_and_run(&dir, "data_stream_bounds", &src);
-    assert_eq!(code, 0, "dataflow stream program failed: {stderr}");
     assert_eq!(
         stdout,
-        "first:api:10.0\ngroups:group_mean:max_groups 1 exceeded\nmean:mean:mean of empty data is undefined\nq:quantile:quantile q must be a finite value in 0.0 through 1.0\nroll:rolling_mean:rolling width must be positive\n"
+        "first:api:10.0\ngroups:query.group_by.mean:max_groups 1 exceeded\nmean:mean:mean of empty data is undefined\nq:quantile:quantile q must be a finite value in 0.0 through 1.0\nroll:rolling_mean:rolling width must be positive\n"
     );
     let _ = fs::remove_dir_all(&dir);
 }

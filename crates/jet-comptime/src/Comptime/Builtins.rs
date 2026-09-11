@@ -16,6 +16,9 @@ mod duration_semantics {
 }
 
 mod time_semantics {
+    fn jet_scheduler_world_now_ms() -> Option<i64> {
+        None
+    }
     include!("../../../jet-codegen/src/Prelude/Core/Duration.rs");
     include!("../../../jet-codegen/src/Prelude/Core/Time.rs");
 }
@@ -51,10 +54,12 @@ pub fn as_bool(v: &CtValue, span: Span) -> Result<bool, Diagnostic> {
 }
 
 pub fn as_int(v: &CtValue, span: Span) -> Result<i64, Diagnostic> {
-    match v {
-        CtValue::Int(n) => Ok(*n),
-        _ => Err(unsupported("a non-Int used as a number", span)),
-    }
+    let value = match v {
+        CtValue::Int(n) => Some(*n),
+        CtValue::BigInt(n) => n.try_i64(),
+        _ => None,
+    };
+    value.ok_or_else(|| unsupported("a non-Int used as a number", span))
 }
 
 pub fn exact_big(value: &CtValue) -> Option<crate::Numeric::CtBigInt> {
@@ -511,31 +516,15 @@ pub fn eval_binop(op: BinOp, l: CtValue, r: CtValue, span: Span) -> Result<CtVal
                 _ => unreachable!("whole-number arithmetic guard"),
             }))
         }
-        // D-INTDIV1=A: `/` answers the true quotient, so two whole numbers give
-        // a Float. Sema has already moved both sides to Float in ordinary code;
-        // this arm catches the comptime paths that reach the raw values.
+        // D-TYPE2-DEFAULT1 / #2774: exact whole-number `/` is a normalized
+        // Fraction. `/%` below remains floor division; Float operands stay Float.
         (BinOp::Div, left, right) if exact_big(&left).is_some() && exact_big(&right).is_some() => {
             let left = exact_big(&left).expect("whole-number dividend");
             let right = exact_big(&right).expect("whole-number divisor");
-            if right.is_zero() {
-                Err(divide_by_zero(span))
-            } else {
-                let left = left.to_string_rep().parse::<f64>().unwrap_or_else(|_| {
-                    if left.negative {
-                        f64::NEG_INFINITY
-                    } else {
-                        f64::INFINITY
-                    }
-                });
-                let right = right.to_string_rep().parse::<f64>().unwrap_or_else(|_| {
-                    if right.negative {
-                        f64::NEG_INFINITY
-                    } else {
-                        f64::INFINITY
-                    }
-                });
-                Ok(Float(crate::AST::CtFloat::F64(left / right)))
-            }
+            let Some(fraction) = crate::Numeric::CtFraction::from_bigints(left, right) else {
+                return Err(divide_by_zero(span));
+            };
+            Ok(fraction.to_value())
         }
         // D-FLOORDIV1=A: `/%` rounds the answer down, so a signed answer that
         // came out one too high is corrected. Dividing by zero traps like `/`.
@@ -650,10 +639,21 @@ pub fn eval_binop(op: BinOp, l: CtValue, r: CtValue, span: Span) -> Result<CtVal
             .binop(op, b)
             .map(Float)
             .ok_or_else(|| unsupported("mixing float widths", span)),
+        (op @ (BinOp::Eq | BinOp::Ne), left, right)
+            if super::MathLayout::is_geometry_value(&left)
+                || super::MathLayout::is_geometry_value(&right) =>
+        {
+            match super::MathLayout::eval_binop(op, &left, &right, span) {
+                Some(result) => result,
+                None => Err(unsupported("this coordinate-space operator", span)),
+            }
+        }
         // D-SIMD2 / D-LINALG1: element-wise / matmul / Mat*Vec.
         (op @ (BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div), left, right)
             if super::MathLayout::lanes(&left).is_some()
-                || super::MathLayout::lanes(&right).is_some() =>
+                || super::MathLayout::lanes(&right).is_some()
+                || super::MathLayout::is_geometry_value(&left)
+                || super::MathLayout::is_geometry_value(&right) =>
         {
             match super::MathLayout::eval_binop(op, &left, &right, span) {
                 std::option::Option::Some(result) => result,
@@ -806,6 +806,46 @@ mod tests {
     }
 
     #[test]
+    fn collection_extrema_compare_numbers_not_display_text() {
+        let span = Span::new(0, 0);
+        let values = CtValue::Map(
+            [("a", 2), ("b", 10)]
+                .into_iter()
+                .map(|(key, value)| {
+                    (
+                        CtKey::from_value(CtValue::Str(key.into())).unwrap(),
+                        CtValue::Int(value),
+                    )
+                })
+                .collect(),
+        );
+        assert_eq!(
+            apply_method(&values, "min", Vec::new(), span).unwrap(),
+            CtValue::Present(Box::new(CtValue::Int(2))),
+        );
+        assert_eq!(
+            apply_method(&values, "max", Vec::new(), span).unwrap(),
+            CtValue::Present(Box::new(CtValue::Int(10))),
+        );
+        assert_eq!(
+            apply_method(
+                &CtValue::List(vec![CtValue::Int(2), CtValue::Int(10)]),
+                "min_max",
+                Vec::new(),
+                span,
+            )
+            .unwrap(),
+            CtValue::Present(Box::new(CtValue::Struct {
+                type_name: String::new(),
+                fields: vec![
+                    ("min".into(), CtValue::Int(2)),
+                    ("max".into(), CtValue::Int(10)),
+                ],
+            })),
+        );
+    }
+
+    #[test]
     fn ordering_reverse_swaps_less_and_greater() {
         let span = Span::new(0, 0);
         for (input, expected) in [("Less", "Greater"), ("Equal", "Equal"), ("Greater", "Less")] {
@@ -869,6 +909,25 @@ fn cmp_ref(a: &CtValue, b: &CtValue, span: Span) -> Result<std::cmp::Ordering, D
     }
 }
 
+fn extreme_ref<'a>(
+    mut values: impl Iterator<Item = &'a CtValue>,
+    maximum: bool,
+    span: Span,
+) -> Result<Option<&'a CtValue>, Diagnostic> {
+    let Some(mut best) = values.next() else {
+        return Ok(None);
+    };
+    for value in values {
+        let order = cmp_ref(value, best, span)?;
+        if (maximum && order != std::cmp::Ordering::Less)
+            || (!maximum && order == std::cmp::Ordering::Less)
+        {
+            best = value;
+        }
+    }
+    Ok(Some(best))
+}
+
 /// Collection sorting has a total Float comparator even though ordinary Float
 /// relational operators retain IEEE partial-order behavior for NaN.
 pub fn cmp_for_sort(a: CtValue, b: CtValue, span: Span) -> Result<std::cmp::Ordering, Diagnostic> {
@@ -904,7 +963,7 @@ pub fn apply_static_type_method(
     if matches!(type_name, crate::Syntax::TYPE_AUTHORITY | "JetAuthority")
         && method == "from_rights"
     {
-        let Some(CtValue::List(rights)) = args.into_iter().next() else {
+        let Some(CtValue::List(rights)) = args.clone().into_iter().next() else {
             return Some(Err(unsupported(
                 "Authority.from_rights expects one list of String rights",
                 span,
@@ -921,6 +980,9 @@ pub fn apply_static_type_method(
             strings.push(right);
         }
         return Some(Ok(authority_value_from_rights(strings)));
+    }
+    if let Some(result) = super::MathLayout::apply_geometry_static(type_name, method, &args, span) {
+        return Some(result);
     }
     if method == "new" {
         if let Some(result) = super::CollectionEval::prelude_new(type_name, args.clone(), span) {
@@ -1191,7 +1253,7 @@ pub fn apply_mutating_with_type(
         }
         return Ok(value);
     }
-    // D-DET1 / #777: Clock + seeded Rng mutate in place for TirBridge handles.
+    // D-DET1 / #777: Clock + seeded Rng mutate in place for MirBridge handles.
     let clock_next = if let CtValue::Struct { type_name, fields } = &*recv {
         if type_name == crate::Syntax::CLOCK_TYPE && matches!(method, "tick" | "advance" | "wait") {
             let now = fields
@@ -1586,10 +1648,7 @@ pub fn apply_method(
         // Prelude implementation. The type guard keeps ordinary user enums
         // from acquiring DataTree-only operations in the interpreter.
         (v @ CtValue::Enum { type_name, .. }, "to_text")
-            if matches!(
-                type_name.as_str(),
-                "DataTree" | "JSON" | "TOML" | "YAML" | "CSV"
-            ) =>
+            if matches!(type_name.as_str(), "DataTree" | "TOML" | "YAML" | "CSV") =>
         {
             Ok(match super::SyncLite::datatree_to_text(v) {
                 Some(text) => CtValue::Present(Box::new(CtValue::Str(text))),
@@ -1597,10 +1656,7 @@ pub fn apply_method(
             })
         }
         (v @ CtValue::Enum { type_name, .. }, "equal_unordered")
-            if matches!(
-                type_name.as_str(),
-                "DataTree" | "JSON" | "TOML" | "YAML" | "CSV"
-            ) =>
+            if matches!(type_name.as_str(), "DataTree" | "TOML" | "YAML" | "CSV") =>
         {
             let Some(other) = args.into_iter().next() else {
                 return Err(unsupported(
@@ -1642,10 +1698,7 @@ pub fn apply_method(
                         None => datatree_failure(key.clone(), format!("field `{key}` not found")),
                     }
                 }
-                _ => datatree_failure(
-                    key,
-                    format!("expected object, got {}", datatree_render(v)),
-                ),
+                _ => datatree_failure(key, format!("expected object, got {}", datatree_render(v))),
             })
         }
         (v @ CtValue::Enum { .. }, "at") if is_datatree(v) => {
@@ -1690,10 +1743,7 @@ pub fn apply_method(
             Ok(value
                 .map(|value| CtValue::Present(Box::new(value)))
                 .unwrap_or_else(|| {
-                    datatree_failure(
-                        "",
-                        format!("expected int, got {}", datatree_render(v)),
-                    )
+                    datatree_failure("", format!("expected int, got {}", datatree_render(v)))
                 }))
         }
         (v @ CtValue::Enum { .. }, "text") if is_datatree(v) => {
@@ -1703,10 +1753,7 @@ pub fn apply_method(
             Ok(value
                 .map(|value| CtValue::Present(Box::new(value)))
                 .unwrap_or_else(|| {
-                    datatree_failure(
-                        "",
-                        format!("expected text, got {}", datatree_render(v)),
-                    )
+                    datatree_failure("", format!("expected text, got {}", datatree_render(v)))
                 }))
         }
         (v @ CtValue::Enum { .. }, "bool") if is_datatree(v) => {
@@ -1715,10 +1762,7 @@ pub fn apply_method(
             Ok(value
                 .map(|value| CtValue::Present(Box::new(value)))
                 .unwrap_or_else(|| {
-                    datatree_failure(
-                        "",
-                        format!("expected bool, got {}", datatree_render(v)),
-                    )
+                    datatree_failure("", format!("expected bool, got {}", datatree_render(v)))
                 }))
         }
         (v @ CtValue::Enum { .. }, "float") if is_datatree(v) => {
@@ -1726,9 +1770,7 @@ pub fn apply_method(
                 Some(value @ CtValue::Float(_)) => Some(value.clone()),
                 _ => datatree_payload(v, "Int")
                     .and_then(|value| match value {
-                        CtValue::Int(value) => {
-                            Some(CtValue::Float(CtFloat::f64(*value as f64)))
-                        }
+                        CtValue::Int(value) => Some(CtValue::Float(CtFloat::f64(*value as f64))),
                         CtValue::BigInt(value) => value
                             .to_string_rep()
                             .parse::<f64>()
@@ -1750,10 +1792,7 @@ pub fn apply_method(
             Ok(value
                 .map(|value| CtValue::Present(Box::new(value)))
                 .unwrap_or_else(|| {
-                    datatree_failure(
-                        "",
-                        format!("expected float, got {}", datatree_render(v)),
-                    )
+                    datatree_failure("", format!("expected float, got {}", datatree_render(v)))
                 }))
         }
         (value @ (CtValue::Int(_) | CtValue::BigInt(_)), "abs") => Ok(exact_int_value(
@@ -2283,22 +2322,22 @@ pub fn apply_method(
             )))
         }
         (CtValue::List(xs), "min_max") => {
-            if xs.is_empty() {
+            let mut values = xs.iter();
+            let Some(first) = values.next() else {
                 return Ok(CtValue::absent(Type::Int));
+            };
+            let (mut min, mut max) = (first, first);
+            for value in values {
+                if cmp_ref(value, min, span)? == std::cmp::Ordering::Less {
+                    min = value;
+                }
+                if cmp_ref(value, max, span)? != std::cmp::Ordering::Less {
+                    max = value;
+                }
             }
-            let min = xs
-                .iter()
-                .min_by(|a, b| a.jet_show().cmp(&b.jet_show()))
-                .cloned()
-                .unwrap();
-            let max = xs
-                .iter()
-                .max_by(|a, b| a.jet_show().cmp(&b.jet_show()))
-                .cloned()
-                .unwrap();
             Ok(CtValue::Present(Box::new(CtValue::Struct {
                 type_name: String::new(),
-                fields: vec![("min".into(), min), ("max".into(), max)],
+                fields: vec![("min".into(), min.clone()), ("max".into(), max.clone())],
             })))
         }
         // Map
@@ -2358,12 +2397,29 @@ pub fn apply_method(
         )),
         (CtValue::Map(m), "top_n") => {
             let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?.max(0) as usize;
+            if n == 0 {
+                return Ok(CtValue::List(Vec::new()));
+            }
             let mut entries = m.iter().collect::<Vec<_>>();
+            if let Some((_, first_value)) = entries.first() {
+                cmp_ref(first_value, first_value, span)?;
+                for (_, value) in entries.iter().skip(1) {
+                    cmp_ref(first_value, value, span)?;
+                }
+            }
+            let mut sort_error = None;
             entries.sort_by(|(left_key, left_value), (right_key, right_value)| {
-                cmp((*right_value).clone(), (*left_value).clone(), span)
-                    .unwrap_or_else(|_| right_value.jet_show().cmp(&left_value.jet_show()))
-                    .then_with(|| left_key.cmp(right_key))
+                match cmp_ref(right_value, left_value, span) {
+                    Ok(order) => order.then_with(|| left_key.cmp(right_key)),
+                    Err(error) => {
+                        sort_error.get_or_insert(error);
+                        std::cmp::Ordering::Equal
+                    }
+                }
             });
+            if let Some(error) = sort_error {
+                return Err(error);
+            }
             Ok(CtValue::List(
                 entries
                     .into_iter()
@@ -2378,18 +2434,14 @@ pub fn apply_method(
                     .collect(),
             ))
         }
-        (CtValue::Map(m), "min") => Ok(
-            match m.values().min_by(|a, b| a.jet_show().cmp(&b.jet_show())) {
-                Some(v) => CtValue::Present(Box::new(v.clone())),
-                None => CtValue::absent(Type::Int),
-            },
-        ),
-        (CtValue::Map(m), "max") => Ok(
-            match m.values().max_by(|a, b| a.jet_show().cmp(&b.jet_show())) {
-                Some(v) => CtValue::Present(Box::new(v.clone())),
-                None => CtValue::absent(Type::Int),
-            },
-        ),
+        (CtValue::Map(m), "min") => Ok(match extreme_ref(m.values(), false, span)? {
+            Some(min) => CtValue::Present(Box::new(min.clone())),
+            None => CtValue::absent(Type::Int),
+        }),
+        (CtValue::Map(m), "max") => Ok(match extreme_ref(m.values(), true, span)? {
+            Some(max) => CtValue::Present(Box::new(max.clone())),
+            None => CtValue::absent(Type::Int),
+        }),
         (CtValue::Map(m), "intersection") => {
             let Some(CtValue::Map(other)) = args.into_iter().next() else {
                 return Err(unsupported("intersection needs a map", span));
@@ -2432,6 +2484,7 @@ pub fn apply_method(
 
         // String (char-counted per S41)
         (CtValue::Str(s), "len") => Ok(CtValue::Int(s.chars().count() as i64)),
+        (CtValue::Str(s), "count_bytes") => Ok(CtValue::Int(s.len() as i64)),
         (CtValue::Str(s), "is_empty") => Ok(CtValue::Bool(s.is_empty())),
         (CtValue::Str(s), "to_upper") => Ok(CtValue::Str(super::TextLite::upper(s))),
         (CtValue::Str(s), "to_lower") => Ok(CtValue::Str(super::TextLite::lower(s))),
@@ -2602,7 +2655,10 @@ pub fn apply_method(
             _ => Err(unsupported("cut_last with a non-text argument", span)),
         },
         (CtValue::Str(s), "contains") => match args.into_iter().next() {
-            Some(CtValue::Str(n)) => Ok(CtValue::Bool(s.contains(&n))),
+            Some(CtValue::Str(n)) => Ok(CtValue::Bool(super::CollectionEval::string_contains(
+                s,
+                n.as_str(),
+            ))),
             _ => Err(unsupported("contains with a non-text argument", span)),
         },
         (CtValue::Str(s), "starts_with") => match args.into_iter().next() {
@@ -3014,19 +3070,24 @@ pub fn apply_method(
                     _ => None,
                 })
                 .unwrap_or(0);
-            let scale = match args.first() {
+            let unit = match args.first() {
                 Some(CtValue::Enum {
                     type_name, variant, ..
-                }) if type_name == crate::Syntax::DURATION_UNIT_TYPE => match variant.as_str() {
-                    "Nanoseconds" => 1_i64,
-                    "Microseconds" => 1_000,
-                    "Milliseconds" => 1_000_000,
-                    "Seconds" => 1_000_000_000,
-                    "Minutes" => 60_000_000_000,
-                    "Hours" => 3_600_000_000_000,
-                    _ => return Err(unsupported("this duration unit", span)),
-                },
+                }) if type_name == crate::Syntax::DURATION_UNIT_TYPE => variant.as_str(),
+                Some(CtValue::Int(index)) => crate::Syntax::DURATION_UNITS
+                    .get(usize::try_from(*index).ok().unwrap_or(usize::MAX))
+                    .copied()
+                    .ok_or_else(|| unsupported("Duration.in expects a DurationUnit", span))?,
                 _ => return Err(unsupported("Duration.in expects a DurationUnit", span)),
+            };
+            let scale = match unit {
+                "Nanoseconds" => 1_i64,
+                "Microseconds" => 1_000,
+                "Milliseconds" => 1_000_000,
+                "Seconds" => 1_000_000_000,
+                "Minutes" => 60_000_000_000,
+                "Hours" => 3_600_000_000_000,
+                _ => return Err(unsupported("this duration unit", span)),
             };
             Ok(CtValue::Present(Box::new(CtValue::Int(
                 duration_semantics::jet_duration_kernel_in(ns, scale),

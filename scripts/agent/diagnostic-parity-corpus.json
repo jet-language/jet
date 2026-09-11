@@ -1,0 +1,1047 @@
+{
+  "$schema": "./diagnostic-parity-corpus.schema.json",
+  "schema": "jet.diagnostic-parity.corpus.v1",
+  "schema_version": 1,
+  "fields": [
+    "code",
+    "what",
+    "why",
+    "fix",
+    "span",
+    "actionable_edit"
+  ],
+  "tools": [
+    {
+      "id": "rustc",
+      "label": "rustc",
+      "evidence": "rustc --error-format=json exposes rendered message, optional diagnostic code, spans, and suggestions as separate fields; this corpus records capability only."
+    },
+    {
+      "id": "miette",
+      "label": "miette",
+      "evidence": "miette is a Rust diagnostic rendering library: applications provide optional code, help, reason, and source spans; no application-independent code or edit result is assumed."
+    },
+    {
+      "id": "zig",
+      "label": "Zig",
+      "evidence": "Zig compiler diagnostics expose source locations and rendered messages; there is no stable cross-release diagnostic-code contract in this descriptor."
+    },
+    {
+      "id": "go",
+      "label": "Go",
+      "evidence": "Go toolchain diagnostics expose source locations and rendered messages; this descriptor does not infer a stable diagnostic-code or machine-edit contract."
+    }
+  ],
+  "cases": [
+    {
+      "id": "unknown-name",
+      "title": "Unknown name with a source edit",
+      "jet_codes": [
+        "E0107"
+      ],
+      "required_jet_fields": [
+        "code",
+        "what",
+        "why",
+        "fix",
+        "span",
+        "actionable_edit"
+      ],
+      "peers": {
+        "rustc": {
+          "fields": {
+            "code": {
+              "status": "present",
+              "evidence": "rustc JSON diagnostics define an optional code object for named compiler diagnostics."
+            },
+            "what": {
+              "status": "present",
+              "evidence": "rustc JSON diagnostics include a rendered diagnostic message."
+            },
+            "why": {
+              "status": "unknown",
+              "evidence": "rustc may emit child notes, but this case descriptor does not assign a separate why field."
+            },
+            "fix": {
+              "status": "unknown",
+              "evidence": "rustc suggestions can be rendered as help, but availability is case-dependent and not executed here."
+            },
+            "span": {
+              "status": "present",
+              "evidence": "rustc JSON diagnostics expose primary and secondary spans."
+            },
+            "actionable_edit": {
+              "status": "unknown",
+              "evidence": "rustc suggestions can carry replacement text, but this descriptor does not claim one for this case."
+            }
+          }
+        },
+        "miette": {
+          "fields": {
+            "code": {
+              "status": "unknown",
+              "evidence": "miette code is supplied by the embedding application, so no application-independent code is claimed."
+            },
+            "what": {
+              "status": "present",
+              "evidence": "miette reports a displayable diagnostic message from the application diagnostic."
+            },
+            "why": {
+              "status": "unknown",
+              "evidence": "miette supports application-provided diagnostic context, but does not impose a separate why field."
+            },
+            "fix": {
+              "status": "unknown",
+              "evidence": "miette can render application help text, but this case has no fixed library-owned fix."
+            },
+            "span": {
+              "status": "present",
+              "evidence": "miette source diagnostics support labeled source spans."
+            },
+            "actionable_edit": {
+              "status": "unknown",
+              "evidence": "miette renders labels and help; it does not impose a portable edit representation."
+            }
+          }
+        },
+        "zig": {
+          "fields": {
+            "code": {
+              "status": "absent",
+              "evidence": "Zig's compiler diagnostic output has no stable named diagnostic-code field in this comparison contract."
+            },
+            "what": {
+              "status": "present",
+              "evidence": "Zig compiler diagnostics render a primary message."
+            },
+            "why": {
+              "status": "unknown",
+              "evidence": "Zig may print notes, but this descriptor does not classify them as a separate why field."
+            },
+            "fix": {
+              "status": "unknown",
+              "evidence": "A compiler hint may be emitted for some errors, but no fixed fix field is claimed."
+            },
+            "span": {
+              "status": "present",
+              "evidence": "Zig compiler diagnostics include source file and line/column location."
+            },
+            "actionable_edit": {
+              "status": "absent",
+              "evidence": "The compared Zig diagnostic contract has no portable machine-edit field."
+            }
+          }
+        },
+        "go": {
+          "fields": {
+            "code": {
+              "status": "absent",
+              "evidence": "Go compiler diagnostics do not expose a stable named diagnostic-code field in this comparison contract."
+            },
+            "what": {
+              "status": "present",
+              "evidence": "Go compiler diagnostics render a primary message."
+            },
+            "why": {
+              "status": "unknown",
+              "evidence": "Go may emit follow-up lines, but this descriptor does not classify them as a separate why field."
+            },
+            "fix": {
+              "status": "absent",
+              "evidence": "The compared Go diagnostic contract has no portable fix field."
+            },
+            "span": {
+              "status": "present",
+              "evidence": "Go compiler diagnostics include source file and line/column location."
+            },
+            "actionable_edit": {
+              "status": "absent",
+              "evidence": "The compared Go diagnostic contract has no portable machine-edit field."
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "parse-error",
+      "title": "Parse error with a source edit",
+      "jet_codes": [
+        "E0003"
+      ],
+      "required_jet_fields": [
+        "code",
+        "what",
+        "why",
+        "fix",
+        "span",
+        "actionable_edit"
+      ],
+      "peers": {
+        "rustc": {
+          "fields": {
+            "code": {
+              "status": "present",
+              "evidence": "rustc JSON diagnostics define an optional code object for named compiler diagnostics."
+            },
+            "what": {
+              "status": "present",
+              "evidence": "rustc JSON diagnostics include a rendered diagnostic message."
+            },
+            "why": {
+              "status": "unknown",
+              "evidence": "rustc child notes are not treated as a separate why field by this descriptor."
+            },
+            "fix": {
+              "status": "unknown",
+              "evidence": "rustc suggestions can be rendered as help, but availability is case-dependent and not executed here."
+            },
+            "span": {
+              "status": "present",
+              "evidence": "rustc JSON diagnostics expose primary and secondary spans."
+            },
+            "actionable_edit": {
+              "status": "unknown",
+              "evidence": "rustc suggestions can carry replacement text, but this descriptor does not claim one for this case."
+            }
+          }
+        },
+        "miette": {
+          "fields": {
+            "code": {
+              "status": "unknown",
+              "evidence": "miette code is supplied by the embedding application, so no application-independent code is claimed."
+            },
+            "what": {
+              "status": "present",
+              "evidence": "miette reports a displayable diagnostic message from the application diagnostic."
+            },
+            "why": {
+              "status": "unknown",
+              "evidence": "miette supports application-provided diagnostic context, but does not impose a separate why field."
+            },
+            "fix": {
+              "status": "unknown",
+              "evidence": "miette can render application help text, but this case has no fixed library-owned fix."
+            },
+            "span": {
+              "status": "present",
+              "evidence": "miette source diagnostics support labeled source spans."
+            },
+            "actionable_edit": {
+              "status": "unknown",
+              "evidence": "miette does not impose a portable edit representation."
+            }
+          }
+        },
+        "zig": {
+          "fields": {
+            "code": {
+              "status": "absent",
+              "evidence": "Zig's compiler diagnostic output has no stable named diagnostic-code field in this comparison contract."
+            },
+            "what": {
+              "status": "present",
+              "evidence": "Zig compiler diagnostics render a primary message."
+            },
+            "why": {
+              "status": "unknown",
+              "evidence": "Zig may print notes, but this descriptor does not classify them as a separate why field."
+            },
+            "fix": {
+              "status": "unknown",
+              "evidence": "A compiler hint may be emitted for some errors, but no fixed fix field is claimed."
+            },
+            "span": {
+              "status": "present",
+              "evidence": "Zig compiler diagnostics include source file and line/column location."
+            },
+            "actionable_edit": {
+              "status": "absent",
+              "evidence": "The compared Zig diagnostic contract has no portable machine-edit field."
+            }
+          }
+        },
+        "go": {
+          "fields": {
+            "code": {
+              "status": "absent",
+              "evidence": "Go compiler diagnostics do not expose a stable named diagnostic-code field in this comparison contract."
+            },
+            "what": {
+              "status": "present",
+              "evidence": "Go compiler diagnostics render a primary message."
+            },
+            "why": {
+              "status": "unknown",
+              "evidence": "Go follow-up lines are not treated as a separate why field by this descriptor."
+            },
+            "fix": {
+              "status": "absent",
+              "evidence": "The compared Go diagnostic contract has no portable fix field."
+            },
+            "span": {
+              "status": "present",
+              "evidence": "Go compiler diagnostics include source file and line/column location."
+            },
+            "actionable_edit": {
+              "status": "absent",
+              "evidence": "The compared Go diagnostic contract has no portable machine-edit field."
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "type-mismatch",
+      "title": "Type mismatch with location and explanation",
+      "jet_codes": [
+        "E0112"
+      ],
+      "required_jet_fields": [
+        "code",
+        "what",
+        "why",
+        "fix",
+        "span"
+      ],
+      "peers": {
+        "rustc": {
+          "fields": {
+            "code": {
+              "status": "present",
+              "evidence": "rustc JSON diagnostics define an optional code object for named compiler diagnostics."
+            },
+            "what": {
+              "status": "present",
+              "evidence": "rustc JSON diagnostics include a rendered diagnostic message."
+            },
+            "why": {
+              "status": "unknown",
+              "evidence": "rustc child notes are not treated as a separate why field by this descriptor."
+            },
+            "fix": {
+              "status": "unknown",
+              "evidence": "rustc suggestions can be rendered as help, but availability is case-dependent and not executed here."
+            },
+            "span": {
+              "status": "present",
+              "evidence": "rustc JSON diagnostics expose primary and secondary spans."
+            },
+            "actionable_edit": {
+              "status": "unknown",
+              "evidence": "rustc suggestions can carry replacement text, but this descriptor does not claim one for this case."
+            }
+          }
+        },
+        "miette": {
+          "fields": {
+            "code": {
+              "status": "unknown",
+              "evidence": "miette code is supplied by the embedding application, so no application-independent code is claimed."
+            },
+            "what": {
+              "status": "present",
+              "evidence": "miette reports a displayable diagnostic message from the application diagnostic."
+            },
+            "why": {
+              "status": "unknown",
+              "evidence": "miette supports application-provided diagnostic context, but does not impose a separate why field."
+            },
+            "fix": {
+              "status": "unknown",
+              "evidence": "miette can render application help text, but this case has no fixed library-owned fix."
+            },
+            "span": {
+              "status": "present",
+              "evidence": "miette source diagnostics support labeled source spans."
+            },
+            "actionable_edit": {
+              "status": "unknown",
+              "evidence": "miette does not impose a portable edit representation."
+            }
+          }
+        },
+        "zig": {
+          "fields": {
+            "code": {
+              "status": "absent",
+              "evidence": "Zig's compiler diagnostic output has no stable named diagnostic-code field in this comparison contract."
+            },
+            "what": {
+              "status": "present",
+              "evidence": "Zig compiler diagnostics render a primary message."
+            },
+            "why": {
+              "status": "unknown",
+              "evidence": "Zig may print notes, but this descriptor does not classify them as a separate why field."
+            },
+            "fix": {
+              "status": "unknown",
+              "evidence": "A compiler hint may be emitted for some errors, but no fixed fix field is claimed."
+            },
+            "span": {
+              "status": "present",
+              "evidence": "Zig compiler diagnostics include source file and line/column location."
+            },
+            "actionable_edit": {
+              "status": "absent",
+              "evidence": "The compared Zig diagnostic contract has no portable machine-edit field."
+            }
+          }
+        },
+        "go": {
+          "fields": {
+            "code": {
+              "status": "absent",
+              "evidence": "Go compiler diagnostics do not expose a stable named diagnostic-code field in this comparison contract."
+            },
+            "what": {
+              "status": "present",
+              "evidence": "Go compiler diagnostics render a primary message."
+            },
+            "why": {
+              "status": "unknown",
+              "evidence": "Go follow-up lines are not treated as a separate why field by this descriptor."
+            },
+            "fix": {
+              "status": "absent",
+              "evidence": "The compared Go diagnostic contract has no portable fix field."
+            },
+            "span": {
+              "status": "present",
+              "evidence": "Go compiler diagnostics include source file and line/column location."
+            },
+            "actionable_edit": {
+              "status": "absent",
+              "evidence": "The compared Go diagnostic contract has no portable machine-edit field."
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "missing-argument",
+      "title": "Missing argument with a location and fix text",
+      "jet_codes": [
+        "E0103"
+      ],
+      "required_jet_fields": [
+        "code",
+        "what",
+        "why",
+        "fix",
+        "span"
+      ],
+      "peers": {
+        "rustc": {
+          "fields": {
+            "code": {
+              "status": "present",
+              "evidence": "rustc JSON diagnostics define an optional code object for named compiler diagnostics."
+            },
+            "what": {
+              "status": "present",
+              "evidence": "rustc JSON diagnostics include a rendered diagnostic message."
+            },
+            "why": {
+              "status": "unknown",
+              "evidence": "rustc child notes are not treated as a separate why field by this descriptor."
+            },
+            "fix": {
+              "status": "unknown",
+              "evidence": "rustc suggestions can be rendered as help, but availability is case-dependent and not executed here."
+            },
+            "span": {
+              "status": "present",
+              "evidence": "rustc JSON diagnostics expose primary and secondary spans."
+            },
+            "actionable_edit": {
+              "status": "unknown",
+              "evidence": "rustc suggestions can carry replacement text, but this descriptor does not claim one for this case."
+            }
+          }
+        },
+        "miette": {
+          "fields": {
+            "code": {
+              "status": "unknown",
+              "evidence": "miette code is supplied by the embedding application, so no application-independent code is claimed."
+            },
+            "what": {
+              "status": "present",
+              "evidence": "miette reports a displayable diagnostic message from the application diagnostic."
+            },
+            "why": {
+              "status": "unknown",
+              "evidence": "miette supports application-provided diagnostic context, but does not impose a separate why field."
+            },
+            "fix": {
+              "status": "unknown",
+              "evidence": "miette can render application help text, but this case has no fixed library-owned fix."
+            },
+            "span": {
+              "status": "present",
+              "evidence": "miette source diagnostics support labeled source spans."
+            },
+            "actionable_edit": {
+              "status": "unknown",
+              "evidence": "miette does not impose a portable edit representation."
+            }
+          }
+        },
+        "zig": {
+          "fields": {
+            "code": {
+              "status": "absent",
+              "evidence": "Zig's compiler diagnostic output has no stable named diagnostic-code field in this comparison contract."
+            },
+            "what": {
+              "status": "present",
+              "evidence": "Zig compiler diagnostics render a primary message."
+            },
+            "why": {
+              "status": "unknown",
+              "evidence": "Zig may print notes, but this descriptor does not classify them as a separate why field."
+            },
+            "fix": {
+              "status": "unknown",
+              "evidence": "A compiler hint may be emitted for some errors, but no fixed fix field is claimed."
+            },
+            "span": {
+              "status": "present",
+              "evidence": "Zig compiler diagnostics include source file and line/column location."
+            },
+            "actionable_edit": {
+              "status": "absent",
+              "evidence": "The compared Zig diagnostic contract has no portable machine-edit field."
+            }
+          }
+        },
+        "go": {
+          "fields": {
+            "code": {
+              "status": "absent",
+              "evidence": "Go compiler diagnostics do not expose a stable named diagnostic-code field in this comparison contract."
+            },
+            "what": {
+              "status": "present",
+              "evidence": "Go compiler diagnostics render a primary message."
+            },
+            "why": {
+              "status": "unknown",
+              "evidence": "Go follow-up lines are not treated as a separate why field by this descriptor."
+            },
+            "fix": {
+              "status": "absent",
+              "evidence": "The compared Go diagnostic contract has no portable fix field."
+            },
+            "span": {
+              "status": "present",
+              "evidence": "Go compiler diagnostics include source file and line/column location."
+            },
+            "actionable_edit": {
+              "status": "absent",
+              "evidence": "The compared Go diagnostic contract has no portable machine-edit field."
+            }
+          }
+        }
+      }
+    }
+  ],
+  "features": [
+    {
+      "id": "benchmark-history-baselines",
+      "feature": "Statistics-driven benchmark history and named baselines",
+      "jet": {
+        "status": "unmeasured",
+        "evidence": "No Jet result is embedded; run the named comparator probe before scoring this row."
+      },
+      "peers": {
+        "rustc": {
+          "status": "unknown",
+          "evidence": "No rustc result is embedded; run the named comparator probe before scoring this row."
+        },
+        "miette": {
+          "status": "unknown",
+          "evidence": "No miette result is embedded; run the named comparator probe before scoring this row."
+        },
+        "zig": {
+          "status": "unknown",
+          "evidence": "No zig result is embedded; run the named comparator probe before scoring this row."
+        },
+        "go": {
+          "status": "unknown",
+          "evidence": "No go result is embedded; run the named comparator probe before scoring this row."
+        }
+      }
+    },
+    {
+      "id": "workspace-command-lock-cache",
+      "feature": "Workspace-wide command with shared lock and target cache",
+      "jet": {
+        "status": "unmeasured",
+        "evidence": "No Jet result is embedded; run the named comparator probe before scoring this row."
+      },
+      "peers": {
+        "rustc": {
+          "status": "unknown",
+          "evidence": "No rustc result is embedded; run the named comparator probe before scoring this row."
+        },
+        "miette": {
+          "status": "unknown",
+          "evidence": "No miette result is embedded; run the named comparator probe before scoring this row."
+        },
+        "zig": {
+          "status": "unknown",
+          "evidence": "No zig result is embedded; run the named comparator probe before scoring this row."
+        },
+        "go": {
+          "status": "unknown",
+          "evidence": "No go result is embedded; run the named comparator probe before scoring this row."
+        }
+      }
+    },
+    {
+      "id": "named-feature-flags",
+      "feature": "Named feature flags with additive defaults and explicit activation",
+      "jet": {
+        "status": "unmeasured",
+        "evidence": "No Jet result is embedded; run the named comparator probe before scoring this row."
+      },
+      "peers": {
+        "rustc": {
+          "status": "unknown",
+          "evidence": "No rustc result is embedded; run the named comparator probe before scoring this row."
+        },
+        "miette": {
+          "status": "unknown",
+          "evidence": "No miette result is embedded; run the named comparator probe before scoring this row."
+        },
+        "zig": {
+          "status": "unknown",
+          "evidence": "No zig result is embedded; run the named comparator probe before scoring this row."
+        },
+        "go": {
+          "status": "unknown",
+          "evidence": "No go result is embedded; run the named comparator probe before scoring this row."
+        }
+      }
+    },
+    {
+      "id": "machine-readable-build-diagnostic-events",
+      "feature": "Machine-readable build and diagnostic event stream",
+      "jet": {
+        "status": "unmeasured",
+        "evidence": "No Jet result is embedded; run the named comparator probe before scoring this row."
+      },
+      "peers": {
+        "rustc": {
+          "status": "unknown",
+          "evidence": "No rustc result is embedded; run the named comparator probe before scoring this row."
+        },
+        "miette": {
+          "status": "unknown",
+          "evidence": "No miette result is embedded; run the named comparator probe before scoring this row."
+        },
+        "zig": {
+          "status": "unknown",
+          "evidence": "No zig result is embedded; run the named comparator probe before scoring this row."
+        },
+        "go": {
+          "status": "unknown",
+          "evidence": "No go result is embedded; run the named comparator probe before scoring this row."
+        }
+      }
+    },
+    {
+      "id": "contextual-inlay-hints",
+      "feature": "Contextual inlay hints for inferred types and argument names",
+      "jet": {
+        "status": "unmeasured",
+        "evidence": "No Jet result is embedded; run the named comparator probe before scoring this row."
+      },
+      "peers": {
+        "rustc": {
+          "status": "unknown",
+          "evidence": "No rustc result is embedded; run the named comparator probe before scoring this row."
+        },
+        "miette": {
+          "status": "unknown",
+          "evidence": "No miette result is embedded; run the named comparator probe before scoring this row."
+        },
+        "zig": {
+          "status": "unknown",
+          "evidence": "No zig result is embedded; run the named comparator probe before scoring this row."
+        },
+        "go": {
+          "status": "unknown",
+          "evidence": "No go result is embedded; run the named comparator probe before scoring this row."
+        }
+      }
+    },
+    {
+      "id": "automatic-imports-completion-actions",
+      "feature": "Automatic imports and completion actions",
+      "jet": {
+        "status": "unmeasured",
+        "evidence": "No Jet result is embedded; run the named comparator probe before scoring this row."
+      },
+      "peers": {
+        "rustc": {
+          "status": "unknown",
+          "evidence": "No rustc result is embedded; run the named comparator probe before scoring this row."
+        },
+        "miette": {
+          "status": "unknown",
+          "evidence": "No miette result is embedded; run the named comparator probe before scoring this row."
+        },
+        "zig": {
+          "status": "unknown",
+          "evidence": "No zig result is embedded; run the named comparator probe before scoring this row."
+        },
+        "go": {
+          "status": "unknown",
+          "evidence": "No go result is embedded; run the named comparator probe before scoring this row."
+        }
+      }
+    },
+    {
+      "id": "editor-lightbulb-refactoring",
+      "feature": "Editor lightbulb assists and local refactoring",
+      "jet": {
+        "status": "unmeasured",
+        "evidence": "No Jet result is embedded; run the named comparator probe before scoring this row."
+      },
+      "peers": {
+        "rustc": {
+          "status": "unknown",
+          "evidence": "No rustc result is embedded; run the named comparator probe before scoring this row."
+        },
+        "miette": {
+          "status": "unknown",
+          "evidence": "No miette result is embedded; run the named comparator probe before scoring this row."
+        },
+        "zig": {
+          "status": "unknown",
+          "evidence": "No zig result is embedded; run the named comparator probe before scoring this row."
+        },
+        "go": {
+          "status": "unknown",
+          "evidence": "No go result is embedded; run the named comparator probe before scoring this row."
+        }
+      }
+    },
+    {
+      "id": "cursor-actions",
+      "feature": "Run, benchmark, related-test, and rename actions at cursor",
+      "jet": {
+        "status": "unmeasured",
+        "evidence": "No Jet result is embedded; run the named comparator probe before scoring this row."
+      },
+      "peers": {
+        "rustc": {
+          "status": "unknown",
+          "evidence": "No rustc result is embedded; run the named comparator probe before scoring this row."
+        },
+        "miette": {
+          "status": "unknown",
+          "evidence": "No miette result is embedded; run the named comparator probe before scoring this row."
+        },
+        "zig": {
+          "status": "unknown",
+          "evidence": "No zig result is embedded; run the named comparator probe before scoring this row."
+        },
+        "go": {
+          "status": "unknown",
+          "evidence": "No go result is embedded; run the named comparator probe before scoring this row."
+        }
+      }
+    },
+    {
+      "id": "interactive-flamegraph",
+      "feature": "One-command interactive flamegraph profiling",
+      "jet": {
+        "status": "unmeasured",
+        "evidence": "No Jet result is embedded; run the named comparator probe before scoring this row."
+      },
+      "peers": {
+        "rustc": {
+          "status": "unknown",
+          "evidence": "No rustc result is embedded; run the named comparator probe before scoring this row."
+        },
+        "miette": {
+          "status": "unknown",
+          "evidence": "No miette result is embedded; run the named comparator probe before scoring this row."
+        },
+        "zig": {
+          "status": "unknown",
+          "evidence": "No zig result is embedded; run the named comparator probe before scoring this row."
+        },
+        "go": {
+          "status": "unknown",
+          "evidence": "No go result is embedded; run the named comparator probe before scoring this row."
+        }
+      }
+    },
+    {
+      "id": "multiline-labels-width-aware",
+      "feature": "Multi-file and multiline labels with width-aware rendering",
+      "jet": {
+        "status": "unmeasured",
+        "evidence": "No Jet result is embedded; run the named comparator probe before scoring this row."
+      },
+      "peers": {
+        "rustc": {
+          "status": "unknown",
+          "evidence": "No rustc result is embedded; run the named comparator probe before scoring this row."
+        },
+        "miette": {
+          "status": "unknown",
+          "evidence": "No miette result is embedded; run the named comparator probe before scoring this row."
+        },
+        "zig": {
+          "status": "unknown",
+          "evidence": "No zig result is embedded; run the named comparator probe before scoring this row."
+        },
+        "go": {
+          "status": "unknown",
+          "evidence": "No go result is embedded; run the named comparator probe before scoring this row."
+        }
+      }
+    },
+    {
+      "id": "build-script-help-options",
+      "feature": "Build-script options appear in generated help",
+      "jet": {
+        "status": "unmeasured",
+        "evidence": "No Jet result is embedded; run the named comparator probe before scoring this row."
+      },
+      "peers": {
+        "rustc": {
+          "status": "unknown",
+          "evidence": "No rustc result is embedded; run the named comparator probe before scoring this row."
+        },
+        "miette": {
+          "status": "unknown",
+          "evidence": "No miette result is embedded; run the named comparator probe before scoring this row."
+        },
+        "zig": {
+          "status": "unknown",
+          "evidence": "No zig result is embedded; run the named comparator probe before scoring this row."
+        },
+        "go": {
+          "status": "unknown",
+          "evidence": "No go result is embedded; run the named comparator probe before scoring this row."
+        }
+      }
+    },
+    {
+      "id": "go-test-filters",
+      "feature": "Go test filter, list, and package-aware execution",
+      "jet": {
+        "status": "unmeasured",
+        "evidence": "No Jet result is embedded; run the named comparator probe before scoring this row."
+      },
+      "peers": {
+        "rustc": {
+          "status": "unknown",
+          "evidence": "No rustc result is embedded; run the named comparator probe before scoring this row."
+        },
+        "miette": {
+          "status": "unknown",
+          "evidence": "No miette result is embedded; run the named comparator probe before scoring this row."
+        },
+        "zig": {
+          "status": "unknown",
+          "evidence": "No zig result is embedded; run the named comparator probe before scoring this row."
+        },
+        "go": {
+          "status": "unknown",
+          "evidence": "No go result is embedded; run the named comparator probe before scoring this row."
+        }
+      }
+    },
+    {
+      "id": "interleaved-build-test-events",
+      "feature": "Machine-readable interleaved build and test events",
+      "jet": {
+        "status": "unmeasured",
+        "evidence": "No Jet result is embedded; run the named comparator probe before scoring this row."
+      },
+      "peers": {
+        "rustc": {
+          "status": "unknown",
+          "evidence": "No rustc result is embedded; run the named comparator probe before scoring this row."
+        },
+        "miette": {
+          "status": "unknown",
+          "evidence": "No miette result is embedded; run the named comparator probe before scoring this row."
+        },
+        "zig": {
+          "status": "unknown",
+          "evidence": "No zig result is embedded; run the named comparator probe before scoring this row."
+        },
+        "go": {
+          "status": "unknown",
+          "evidence": "No go result is embedded; run the named comparator probe before scoring this row."
+        }
+      }
+    },
+    {
+      "id": "multi-module-workspace-sync",
+      "feature": "Multi-module workspace with use/sync commands",
+      "jet": {
+        "status": "unmeasured",
+        "evidence": "No Jet result is embedded; run the named comparator probe before scoring this row."
+      },
+      "peers": {
+        "rustc": {
+          "status": "unknown",
+          "evidence": "No rustc result is embedded; run the named comparator probe before scoring this row."
+        },
+        "miette": {
+          "status": "unknown",
+          "evidence": "No miette result is embedded; run the named comparator probe before scoring this row."
+        },
+        "zig": {
+          "status": "unknown",
+          "evidence": "No zig result is embedded; run the named comparator probe before scoring this row."
+        },
+        "go": {
+          "status": "unknown",
+          "evidence": "No go result is embedded; run the named comparator probe before scoring this row."
+        }
+      }
+    },
+    {
+      "id": "interactive-profile-views",
+      "feature": "Interactive profile analysis with top/list/web/disasm views",
+      "jet": {
+        "status": "unmeasured",
+        "evidence": "No Jet result is embedded; run the named comparator probe before scoring this row."
+      },
+      "peers": {
+        "rustc": {
+          "status": "unknown",
+          "evidence": "No rustc result is embedded; run the named comparator probe before scoring this row."
+        },
+        "miette": {
+          "status": "unknown",
+          "evidence": "No miette result is embedded; run the named comparator probe before scoring this row."
+        },
+        "zig": {
+          "status": "unknown",
+          "evidence": "No zig result is embedded; run the named comparator probe before scoring this row."
+        },
+        "go": {
+          "status": "unknown",
+          "evidence": "No go result is embedded; run the named comparator probe before scoring this row."
+        }
+      }
+    },
+    {
+      "id": "official-lsp",
+      "feature": "Official LSP with diagnostics, completion, analysis, and refactoring",
+      "jet": {
+        "status": "unmeasured",
+        "evidence": "No Jet result is embedded; run the named comparator probe before scoring this row."
+      },
+      "peers": {
+        "rustc": {
+          "status": "unknown",
+          "evidence": "No rustc result is embedded; run the named comparator probe before scoring this row."
+        },
+        "miette": {
+          "status": "unknown",
+          "evidence": "No miette result is embedded; run the named comparator probe before scoring this row."
+        },
+        "zig": {
+          "status": "unknown",
+          "evidence": "No zig result is embedded; run the named comparator probe before scoring this row."
+        },
+        "go": {
+          "status": "unknown",
+          "evidence": "No go result is embedded; run the named comparator probe before scoring this row."
+        }
+      }
+    },
+    {
+      "id": "named-background-processes",
+      "feature": "Named background processes and task execution in the development environment",
+      "jet": {
+        "status": "unmeasured",
+        "evidence": "No Jet result is embedded; run the named comparator probe before scoring this row."
+      },
+      "peers": {
+        "rustc": {
+          "status": "unknown",
+          "evidence": "No rustc result is embedded; run the named comparator probe before scoring this row."
+        },
+        "miette": {
+          "status": "unknown",
+          "evidence": "No miette result is embedded; run the named comparator probe before scoring this row."
+        },
+        "zig": {
+          "status": "unknown",
+          "evidence": "No zig result is embedded; run the named comparator probe before scoring this row."
+        },
+        "go": {
+          "status": "unknown",
+          "evidence": "No go result is embedded; run the named comparator probe before scoring this row."
+        }
+      }
+    },
+    {
+      "id": "builtin-lsp-semantic-source",
+      "feature": "Built-in LSP with one semantic source of truth",
+      "jet": {
+        "status": "unmeasured",
+        "evidence": "No Jet result is embedded; run the named comparator probe before scoring this row."
+      },
+      "peers": {
+        "rustc": {
+          "status": "unknown",
+          "evidence": "No rustc result is embedded; run the named comparator probe before scoring this row."
+        },
+        "miette": {
+          "status": "unknown",
+          "evidence": "No miette result is embedded; run the named comparator probe before scoring this row."
+        },
+        "zig": {
+          "status": "unknown",
+          "evidence": "No zig result is embedded; run the named comparator probe before scoring this row."
+        },
+        "go": {
+          "status": "unknown",
+          "evidence": "No go result is embedded; run the named comparator probe before scoring this row."
+        }
+      }
+    },
+    {
+      "id": "package-workspace-authority",
+      "feature": "Package/workspace authority and reproducible environment boundary",
+      "jet": {
+        "status": "unmeasured",
+        "evidence": "No Jet result is embedded; run the named comparator probe before scoring this row."
+      },
+      "peers": {
+        "rustc": {
+          "status": "unknown",
+          "evidence": "No rustc result is embedded; run the named comparator probe before scoring this row."
+        },
+        "miette": {
+          "status": "unknown",
+          "evidence": "No miette result is embedded; run the named comparator probe before scoring this row."
+        },
+        "zig": {
+          "status": "unknown",
+          "evidence": "No zig result is embedded; run the named comparator probe before scoring this row."
+        },
+        "go": {
+          "status": "unknown",
+          "evidence": "No go result is embedded; run the named comparator probe before scoring this row."
+        }
+      }
+    }
+  ]
+}

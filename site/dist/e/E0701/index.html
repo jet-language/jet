@@ -34,25 +34,25 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for E0701</p>
+<p class="diag-copy fix" data-registry-field="fix">Add an `@version` pin to the non-`std` `extern rust` crate.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0701</code>: <code>tests/ui/ffi_missing_version.stderr</code>.</p>
-<pre class="diag">Error [E0701]: the crate `base64` needs a version pin
+<pre class="diag">Error [E0701]: The crate `base64` needs a version pin
   --&gt; tests/ui/ffi_missing_version.jet:1:13
     |
   1 | extern rust &quot;base64&quot; {
     |             ^^^^^^^^
- Why: every non-`std` `extern rust` crate must pin an exact version so builds stay reproducible
- Fix: write: extern rust &quot;base64@0.1&quot; { ... }
+ Why: Every non-`std` `extern rust` crate must pin an exact version so builds stay reproducible
+ Fix: Write: extern rust &quot;base64@0.1&quot; { ... }
 More: jet-lang.dev/e/E0701
 
-Error [E0102]: nothing named `b64encode` exists here
+Error [E0102]: Nothing named `b64encode` exists here
   --&gt; tests/ui/ffi_missing_version.jet:6:18
     |
   6 | fn run() { print(b64encode(&quot;hi&quot;)) }
     |                  ^^^^^^^^^
- Why: only functions that have been defined (or built in, like `print` / `input`) can be called
- Fix: define it first (fn b64encode() { ... }), or call one that exists
+ Why: Only functions that have been defined (or built in, like `print` / `input`) can be called
+ Fix: Define it first (fn b64encode() { ... }), or call one that exists
 More: jet-lang.dev/e/E0102
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

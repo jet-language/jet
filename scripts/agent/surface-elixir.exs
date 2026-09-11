@@ -9,7 +9,7 @@
 # for review; the bytes are otherwise exactly what the runtime reported):
 #   nix shell nixpkgs#elixir --command elixir scripts/agent/surface-elixir.exs \
 #       | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.stringify(JSON.parse(s),null,2)))' \
-#       > docs/reference/surfaces/elixir-surface.json
+#       > docs/spec/reference/surfaces/elixir-surface.json
 
 containers = [
   {"List", [List, Enum]},

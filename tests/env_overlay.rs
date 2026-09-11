@@ -596,13 +596,14 @@ fn run() {
         "tier fixture must type-check: {errors:?}"
     );
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "env fixture must be resident-JIT safe: {:?}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
+    let policy = common::development_policy();
     jet_jit::reset_jit_trace_for_test();
     let mut backend = CraneliftBackend::new();
-    let jit_stdout = match backend.run(&bundle, false) {
+    let jit_stdout = match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
         RunOutcome::Ran {
             stdout, exit_code, ..
         } => {

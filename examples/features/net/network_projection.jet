@@ -1,0 +1,57 @@
+// D-NETWORK1: loopback TCP/UDP, readiness, typed addresses, and DNS records.
+use core.net as net
+
+fn run() {
+    ip :: net.ip_addr("127.0.0.1") ?? return
+    print("ip:{net.ip_to_string(ip)}:{net.ip_is_ipv4(ip)}")
+    parsed :: net.socket_addr_parse("127.0.0.1:8080") ?? return
+    print("socket:{net.socket_host(parsed)}:{net.socket_type(parsed)}")
+
+    listener :: net.tcp_listen("127.0.0.1:0") ?? return
+    address :: net.listener_local_socket_addr(listener) ?? return
+    port :: net.socket_port(address)
+    client :: net.tcp_connect_addr(address) ?? return
+    server :: net.tcp_accept(listener) ?? return
+    timeout_client :: net.tcp_connect_timeout(address, 1000) ?? return
+    happy_client :: net.tcp_connect_happy("127.0.0.1", port, 1000) ?? return
+    local_address :: net.tcp_local_addr(client) ?? return
+    peer_address :: net.tcp_peer_addr(client) ?? return
+    local_socket :: net.tcp_local_socket_addr(client) ?? return
+    peer_socket :: net.tcp_peer_socket_addr(client) ?? return
+    print("tcp:{local_address}")
+    print("peer:{peer_address}")
+    print("local-socket:{net.socket_host(local_socket)}")
+    print("peer-socket:{net.socket_host(peer_socket)}")
+    print("type:{net.socket_type(client)}")
+    client.write_text("ready") ?? return
+    ready :: net.tcp_ready(&server, NetReadyInterest.Read, 1000) ?? return
+    print("readable:{net.ready_readable(ready)}")
+    _ :: net.tcp_accept(listener) ?? return
+    _ :: net.tcp_accept(listener) ?? return
+    timeout_client.close() ?? return
+    happy_client.close() ?? return
+    client.close() ?? return
+    server.close() ?? return
+
+    udp_server :: net.udp_bind_addr(net.socket_addr("127.0.0.1", 0) ?? return) ?? return
+    udp_address :: net.udp_local_addr(udp_server) ?? return
+    udp_client :: net.udp_bind("127.0.0.1:0") ?? return
+    net.udp_send_to(udp_client, "packet", udp_address) ?? return
+    packet :: net.udp_recv_from(udp_server, 64) ?? return
+    print("udp:{net.udp_packet_data(packet)}:{net.udp_packet_bytes(packet).len()}")
+    print("packet-address:{net.socket_host(net.udp_packet_addr(packet))}")
+    print("packet-size:{net.udp_packet_original_len(packet)}:{net.udp_packet_truncated(packet)}")
+
+    if net.ip_addr("not-an-ip") == {
+        .Ok(_) -> return
+        .Err(error) -> {
+            print("error:{net.error_name(error)}:{net.error_operation(error)}")
+            print("error-detail:{net.error_address(error)}:{net.error_message(error)}:{net.error_os_code(error)}")
+        }
+    }
+
+    records :: net.dns_srv("_jet._tcp.example.test", 1000)
+    loop record in records {
+        print("srv:{net.dns_srv_target(record)}:{net.dns_srv_port(record)}:{net.dns_srv_priority(record)}:{net.dns_srv_weight(record)}")
+    }
+}

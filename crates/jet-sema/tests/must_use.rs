@@ -39,6 +39,7 @@ fn err_codes(src: &str) -> Vec<String> {
             user_policy_declarations: prog.user_policy_declarations.clone(),
             rule_facts: std::mem::take(&mut prog.rule_facts),
         }],
+        devtools_registry: jet_sema::AST::DevtoolsRegistry::default(),
         parse_teaching: Vec::new(),
         used_core: HashSet::new(),
         ffi_callback_fns: HashSet::new(),

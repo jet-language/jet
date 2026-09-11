@@ -1,0 +1,30 @@
+// #2502 regression fixture — generated contract sampling classification.
+// Not wired to a runner yet; the validation campaign (#2919) executes it.
+//
+// 1. `outer`: its own `#Pre` filters generated inputs (rejected inputs never
+//    run the body), but `strict`'s `#Pre` failing INSIDE the body on an
+//    accepted input is real failure evidence — never input rejection.
+// 2. `impossible`: a `#Pre` no input satisfies accepts zero examples; zero
+//    accepted must never establish generated success.
+// 3. `bad_post`: an accepted input whose `#Post` fails is failure evidence.
+
+#[Pre(n < 10, "n must stay below ten")] fn strict(n: Int) Int -> {
+    return n + 1
+}
+
+#[Pre(n > -100, "n must exceed negative one hundred")] fn outer(n: Int) Int -> {
+    return strict(n)
+}
+
+#[Pre(n < 0 && n > 0, "no input can satisfy this")] fn impossible(n: Int) Int -> {
+    return n
+}
+
+#[Pre(n > 0, "n must be positive"), Post(result < 0, "result must be negative")] fn bad_post(n: Int) Int -> {
+    return n
+}
+
+fn run() {
+    total :: outer(1)
+    print("contract sampling fixture: {total}")
+}

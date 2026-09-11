@@ -22,9 +22,14 @@
 #   scripts/agent/proof-parallel.sh SUITE...            # cargo test --test SUITE
 #   scripts/agent/proof-parallel.sh -j 6 SUITE...       # raise concurrency
 #   scripts/agent/proof-parallel.sh --crate jet-sema    # a crate's lib tests
+# Broad multi-suite proof is a milestone closeout operation. Open a token only
+# after every linked card is closed and the source tree is frozen at HEAD:
+#   scripts/agent/closeout-gate.mjs open MILESTONE --by AGENT
+# Focused card proof stays unrestricted through its exact cargo/jet command.
 set -uo pipefail
 
 cd "$(dirname "$0")/../.." || exit 1
+node scripts/agent/closeout-gate.mjs check || exit $?
 
 jobs=4
 suites=()

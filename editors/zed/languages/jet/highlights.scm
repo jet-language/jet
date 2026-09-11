@@ -117,7 +117,7 @@
   "true"
 ] @constant.builtin
 
-; type.builtin: () BTreeMap Bits Bool Budget BudgetApplies Bytes CSV Cache Char Complex Computed Condition DBValue DataTree Decimal Derived Duration Effect Err Event EventPolicy EventScope EventTrace F32 F64 Float HashMap Hook I16 I32 I64 I8 IOError Instant Int Iter JSON JSONError Key Measurement MemoStats PriorityQueue Ptr Queue Rank Receiver Sender Set Shared Shared.Weak SharedGuard Signal Stream String Subscription TOML Task TaskFailure U16 U32 U64 U8 UTF8Error WatchEvent WatchHandle WatchSet YAML
+; type.builtin: () BTreeMap Bits Bool Budget BudgetApplies Bytes CSV Cache Char Complex Computed Condition DBValue DataTree Decimal Derived Duration Effect EncodingError Err Event EventPolicy EventScope EventTrace F32 F64 Float HashMap Hook I16 I32 I64 I8 IOError Instant Int Iter JSON Key Measurement MemoStats PriorityQueue Ptr Queue Rank Receiver Sender Set Shared Shared.Weak SharedGuard SharedRevisionError SharedSnapshot Signal Stream String Subscription TOML Task TaskFailure U16 U32 U64 U8 UTF8Error ViewIter WatchEvent WatchHandle WatchSet YAML
 [
   "Bool"
   "Char"
@@ -138,7 +138,7 @@
 ] @type.builtin
 
 ; builtin: assert assert_eq channel check freeze input join print
-; marker.rule: ABI Arithmetic Bindgen CLI Close Codable CodableAsBase Comparable Context Debug DebugOnly Decode DenyUnknownFields Deprecated Discriminant Doc Encode Env Equatable Error Every Extern FFI FX Flag Flatten HTML Impure Inline Job Kernel Layout Live Local Memo Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Reactive Redact Region Rename RenameAll Replayable Root SQL Scalar Scrub Shared Shield Short SingleUse Skip State Static Target Test Todo Track Transact Transition Undo UnitFamily Unsafe Untagged WasmExport allow wire
+; marker.rule: ABI Arithmetic Bindgen CLI Close Codable CodableAsBase Commutative Comparable Context Debug DebugOnly Decode DenyUnknownFields Deprecated DevPanel Discriminant Doc Encode Env Equatable Error Every Extern FFI FX Flag Flatten HTML Impure Inline Interrupt Job Kernel Layout Live Local Memo Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Reactive Receipt Redact Region Rename RenameAll Replayable Root SQL Scalar Scrub Shared Shield Short SingleUse Skip State Static Target Test Todo Track Transact Transition Undo UnitFamily Unsafe Untagged WasmExport allow wire
 ; sigil: # & ... :: := @ @[ ]@ ^ ~
 ; operator: ! != % %% %%= %= && &= * *= + ++ += - -- -= -> .. ..< .[ / /% /%= /= < << <<= <= <=> == > >= >> >>= ? ?. ?? ^= { | |= || ~| ~|=
 ; END GENERATED JET SYNTAX HIGHLIGHTS

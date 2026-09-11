@@ -686,7 +686,7 @@ fn simplify_mode_is_stable_across_a_project() {
         ),
         write(
             &dir,
-            "docs/reference/sample.jet",
+            "docs/spec/reference/sample.jet",
             "fn label() String -> {\n    return \"sample\"\n}\n",
         ),
     ];
@@ -778,7 +778,7 @@ fn check_json_output() {
     assert_eq!(out.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("\"schema\":\"jet.report/v1\"")
+        stdout.contains("\"schema\":\"jet.status/v1\"")
             && stdout.contains("\"fmt\":")
             && stdout.contains("dirty"),
         "JSON output should contain the shared envelope and dirty status, got: {}",

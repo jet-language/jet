@@ -6,9 +6,9 @@ use crate::Syntax;
 use crate::AST::Type;
 
 /// D-ARGS1: type-check a method call on `ArgsSpec` (the builder).
-    /// Builder methods return `ArgsSpec` for chaining; `parse` returns `ParsedArgs !String`.
-/// Returns `Some(Some(ty))` for valid calls, `Some(None)` for void (none here),
-/// `None` for unknown method (caller emits E0102).
+/// Builder methods return `ArgsSpec` for chaining; `parse` returns `ParsedArgs !String`.
+/// Returns `Some(Some(ty))` for valid calls, `Some(None)` for void, and `None`
+/// for unknown methods (the caller emits E0102).
 pub(crate) fn args_spec_method_return(
     method: &str,
     n_args: usize,
@@ -354,7 +354,8 @@ pub(crate) fn process_child_method_return(
     }
 }
 
-/// D-PROCESS1=A: type-check `.write(text)` on the `child.stdin` writer handle.
+/// D-PROCESS1=A / D-FOUND-LIFECYCLE1=A: type-check `.write(text)` and `.close()`
+/// on the `child.stdin` writer handle.
 pub(crate) fn process_stdin_method_return(
     method: &str,
     n_args: usize,
@@ -362,7 +363,12 @@ pub(crate) fn process_stdin_method_return(
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Option<Type>> {
     match (method, n_args) {
+        ("close", 0) => Some(Some(unit_ty())),
         ("write", 1) => Some(Some(result_ty(unit_ty(), io_error_ty()))),
+        ("close", _) => {
+            diags.push(wrong_core_arity(method, 0, n_args, span));
+            Some(None)
+        }
         ("write", _) => {
             diags.push(wrong_core_arity(method, 1, n_args, span));
             Some(None)
@@ -467,6 +473,8 @@ pub(crate) fn app_method_return(
     let unit = unit_ty();
     match (method, n_args) {
         ("route" | "page" | "layout", 2) => Some(Some(app)),
+        ("loader", 2 | 3) => Some(Some(app)),
+        ("pending" | "not_found" | "error", 1) => Some(Some(app)),
         ("action" | "form" | "data", 2) => Some(Some(app)),
         ("mount", 2 | 3 | 4) => Some(Some(app)),
         ("routes", 1) => Some(Some(app)),

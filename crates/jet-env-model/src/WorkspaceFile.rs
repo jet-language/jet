@@ -179,7 +179,7 @@ pub fn has_build_entry(src: &str) -> bool {
     if !lex_diags.is_empty() {
         return false;
     }
-    crate::Parser::parse(&tokens)
+    crate::Parser::parse_with_source(&tokens, &source)
         .map(|program| {
             program
                 .items
@@ -233,8 +233,8 @@ fn evaluate_with_resolver(
     resolver: &AuthorityResolver,
 ) -> Result<WorkspacePlan, Diagnostic> {
     // `members:` may call comptime helpers; Canvas/tests invoke `load` outside
-    // `jet`/`jetpack` mains that normally install this bridge.
-    jet_codegen::Codegen::TIR::install_comptime_bridge();
+    // `jet`/`jetpack` mains that normally install the MIR bridge.
+    jet_codegen::Codegen::MIREval::install_mir_bridge();
     let overlay_policy = Overlay::parse_workspace_policy(src).map_err(|e| {
         let unsupported_policy = matches!(
             &e,
@@ -274,7 +274,7 @@ fn evaluate_with_resolver(
     if let Some(d) = lex_diags.into_iter().next() {
         return Err(d);
     }
-    let program = crate::Parser::parse(&toks).map_err(|mut diags| {
+    let program = crate::Parser::parse_with_source(&toks, &eval_src).map_err(|mut diags| {
         diags.pop().unwrap_or_else(|| {
             Diagnostic::error(
                 "E0000",
@@ -543,6 +543,16 @@ fn eval_members_expr(
     Ok((paths, inputs))
 }
 
+
+fn member_path_string(value: crate::Comptime::CtValue) -> Option<String> {
+    match value {
+        crate::Comptime::CtValue::Str(value) => Some(value),
+        crate::Comptime::CtValue::Present(value) => member_path_string(*value),
+        crate::Comptime::CtValue::Bytes(value) => String::from_utf8(value).ok(),
+        _ => None,
+    }
+}
+
 /// Extract a plain string literal from an `Expr::Str` with no interpolation.
 fn extract_literal_string(expr: &Expr) -> Option<String> {
     let Expr::Str(parts, _) = expr else {
@@ -565,9 +575,9 @@ fn extract_string_list(v: crate::Comptime::CtValue, span: Span) -> Result<Vec<St
         crate::Comptime::CtValue::List(xs) => {
             let mut out = Vec::with_capacity(xs.len());
             for x in xs {
-                match x {
-                    crate::Comptime::CtValue::Str(s) => out.push(s),
-                    _ => {
+                match member_path_string(x) {
+                    Some(s) => out.push(s),
+                    None => {
                         return Err(Diagnostic::error(
                             "E0996",
                             "`members:` list must contain strings (package paths)".to_string(),
@@ -835,7 +845,7 @@ module workspace {
         std::fs::write(package.join(Syntax::PACKAGE_FILE), "not package metadata\n").unwrap();
         let error = evaluate("module workspace { members: [\"./packages/app\"] }\n", &tmp)
             .expect_err("malformed member metadata must be surfaced");
-        assert_eq!(error.code, "E1334");
+        assert_eq!(error.code, "E1206");
         std::fs::remove_dir_all(tmp).ok();
     }
 
@@ -855,7 +865,7 @@ module workspace {
             &tmp,
         )
         .expect_err("an escaping member symlink must be rejected");
-        assert_eq!(error.code, "E1322");
+        assert_eq!(error.code, "E1334");
         std::fs::remove_dir_all(tmp).ok();
         std::fs::remove_dir_all(outside).ok();
     }
@@ -926,7 +936,7 @@ module workspace {
 
     #[test]
     fn e0995_no_workspace_module() {
-        let src = "module dev { env.dev: Env.{ packages: [] } }\n";
+        let src = "module dev { env.dev: Env{ packages: [] } }\n";
         let d = eval_err(src);
         assert_eq!(d.code, "E0995");
     }
@@ -1020,7 +1030,7 @@ module workspace {
         let error = load(&symlinked)
             .expect("the symlinked metadata must be surfaced")
             .expect_err("symlinked workspace metadata must fail closed");
-        assert_eq!(error.code, "E1239");
+        assert_eq!(error.code, "E1334");
         std::fs::remove_dir_all(symlinked).ok();
 
         let nonregular = tempdir("workspace-source-directory");

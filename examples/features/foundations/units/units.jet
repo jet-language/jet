@@ -1,0 +1,25 @@
+// D-QUAL3 / D-DIMENSION-OPEN1: Meter, centimeter, the canonical Time
+// Duration, Speed, Acceleration, and Hertz below come from the shipped
+// #UnitFamily declarations in Prelude/Units.jet. No parallel struct-based
+// units are introduced here.
+
+pub fn acceleration_for(distance: Meter, elapsed: Duration) MeterPerSecondSquared -> {
+
+    return distance / elapsed / elapsed
+}
+// #2776: keep this real cross-file fallible boundary in the example. The
+// native lowering ICE is a compiler gate, not a reason to replace it with a
+// non-fallible or simulated provider.
+pub fn checked_meters_add(left: Meter, right: Meter) Meter !Err -> {
+    sum :: left + right
+    if !sum.raw().is_finite() -> return Err("meter sum is not finite")
+    return Ok(sum)
+}
+
+pub fn speed_after(acceleration: MeterPerSecondSquared, elapsed: Duration) MeterPerSecond -> {
+    return acceleration * elapsed
+}
+
+pub fn distance_after(speed: MeterPerSecond, elapsed: Duration) Meter -> {
+    return speed * elapsed
+}

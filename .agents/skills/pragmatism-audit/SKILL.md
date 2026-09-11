@@ -15,7 +15,9 @@ and workloads. Every finding asks: would a competent person trying to finish a
 real job hit friction that Jet could have absorbed by default?
 
 This is a **draft** skill. Prefer clear method and concrete findings over
-framework polish. Improve the skill when a run exposes a missing lens.
+framework polish. When a run exposes a missing lens, record the proposed method
+improvement in that run's report. Do not edit this skill during an audit; apply
+skill edits only in an explicitly authorized skill-maintenance task.
 
 ## What this is (and is not)
 
@@ -26,9 +28,14 @@ framework polish. Improve the skill when a run exposes a missing lens.
 | Beginner magic **with** expert reject + override | Peer leave/stay competition (`gauntlet`) |
 | Defaults that match the most likely use case | Spec text vs code only (`spec-compliance-audit`) |
 
-Authority order: owner instruction → ratified Tower verdicts →
-`docs/spec/philosophy.md` (two-facet design, jack-of-all-trades) →
-`AGENTS.md` invariants (esp. I1, I7, I8) → this skill.
+Authority order: owner instruction → ratified Tower verdicts and acceptance
+terms → the relevant domain spec (`docs/spec/philosophy.md`) → `AGENTS.md`
+invariants and owner gates → this skill.
+
+Before running, read `.agents/skills/_shared/audit-dispositions.md`. It owns
+shared publication, workflow-boundary, and disposition mechanics; this method
+still owns domain selection, happy-path probes, friction taxonomy, and
+dual-facet findings.
 
 Code shows implementation state, not design law.
 
@@ -125,16 +132,17 @@ as settled law until ratified.
 
 ## Output
 
-Write one markdown report under `docs/audits/` via the Tower CLI (never
-hand-edit board JSON):
+This is a report-only method. Write one markdown report under `docs/audits/`
+through the project-approved non-serve CLI. Do not create Tower work or
+implementation edits unless the owner explicitly asks. Read
+`.agents/skills/_shared/audit-dispositions.md` before the run and use it for
+publication rules and the required finding-disposition table. Keep the domain
+scorecard, friction taxonomy, defaults map, and celebrated pragmatism sections
+below; report completion does not implement a proposed fix.
 
-```
-node plugins/tower/tower.mjs docs add --section audits --id pragmatism-audit-YYYY-MM-DD --title "…" --file -
-```
-
-Or `docs update docs/audits/pragmatism-audit-YYYY-MM-DD.md --file -` for the
-same day only when the owner asks to revise that run. Never overwrite a
-different day's note. Do not write reports under `docs/plans/`.
+Record any proposed improvement to this draft method in the report. Do not edit
+this skill during the audit; apply skill edits only in an explicitly authorized
+skill-maintenance task.
 
 ### Required report sections
 
@@ -171,9 +179,6 @@ Ballot titles or card ids only — do not create cards unless asked.
 - Not inventing parallel mechanisms for one semantic job (I8)
 - Not lowering safety to look pragmatic (I1)
 
-Follow `AGENTS.md`. Pick this skill alone — do not chain other audit/research
-skills unless the owner asks.
-
-Before close, add the required per-finding disposition table from
-`.agents/skills/_shared/audit-dispositions.md`. Every finding must name a Tower
-card, a ratified decision, or a concrete no-action reason.
+Before close, use `.agents/skills/_shared/audit-dispositions.md` for the
+required marker table. Keep next actions as ballot titles or card IDs and do
+not create them in this report-only run.

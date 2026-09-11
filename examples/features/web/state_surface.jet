@@ -1,0 +1,319 @@
+// Headless web state surface.  The functions below are small, typed consumers
+// of the canonical router, query, form, table, virtual-window, and store APIs;
+// no browser adapter or second state model is introduced.
+use core.http as http
+use core.web as web
+use core.web.devserver as devserver
+use core.web.forms as forms
+use core.web.query as query
+use core.web.router as router
+use core.web.storage.session as session
+use core.web.store as web_store
+use core.web.table as table
+use core.web.virtual as virtual
+
+struct Row {
+    id: Int
+    name: String
+    active: Bool
+}
+
+fn rows() [Row] -> [Row]{
+    Row{id: 1, name: "Ada", active: true},
+    Row{id: 2, name: "Grace", active: false},
+    Row{id: 3, name: "Linus", active: true},
+}
+
+fn row_key(row: Row) String -> "{row.id}"
+fn row_name(row: Row) String -> row.name
+fn row_active(row: Row) String -> "{row.active}"
+fn row_is_active(row: Row) Bool -> row.active
+fn updated_row(row: Row) Row -> Row{id: row.id, name: "Updated {row.name}", active: row.active}
+
+fn fetch_rows() String !String -> Ok("rows")
+fn send_mutation(payload: String) String !String -> Ok(payload)
+fn replay_mutation(_payload: String) Unit !String -> Ok()
+fn validate_name(value: String) Unit !String -> {
+    if value == "bad" -> return Err("name rejected")
+    return Ok()
+}
+fn form_action(_input: WebFormDecodedInput) String !WebFormActionError -> Ok("saved")
+
+fn route_loader(_navigation: WebNavigation) String !String -> Ok("route data")
+fn not_found(path: String) String -> "not found: {path}"
+
+fn load_table_page(state: WebTableState) WebTablePage<Row> !String -> {
+    source :: rows()
+    return Ok(table.page(source, state.page_index, state.page_size))
+}
+
+fn store_update(value: Int) Unit -> { print(value) }
+fn store_select(value: Int) Int -> value + 1
+fn store_selected(value: Int) Unit -> { print(value) }
+
+fn app_surface() {
+    live :: web.live("users", "[alice,bob]")
+    _live_show :: web.live_show(live)
+    _live_get :: web.live_get(live)
+    _invalidated :: web.invalidate("users")
+    _live_stats :: web.live_stats()
+    subscriber :: web.subscribe("metrics")
+    pushed :: web.signal_push(subscriber, "signal:metrics")
+    _pushed_value :: web.live_get(pushed)
+    _transact_invalidated :: web.transact_invalidate("users,orders")
+    auth :: web.auth("session")
+    _auth_routes :: web.auth_routes(auth)
+    _auth_show :: web.auth_show(auth)
+    _sync :: web.sync("users", "peer-a")
+}
+
+fn router_surface() {
+    initial :: router.new()
+    routed :: router.route(initial, "/rows", [], [], route_loader) ?? panic("route")
+    coded :: router.route_with_search_codec(routed, "/rows", [], [], .Query, route_loader) ?? panic("codec route")
+    named :: router.not_found(coded, not_found) ?? panic("not found")
+    _stale :: router.stale(named, "rows")
+    _invalidated :: router.invalidate(named, "rows")
+    _collected :: router.collect(named, "rows")
+    _cache_state :: router.cache_state(named, "rows")
+    _cache_show :: router.cache_show(named)
+    _current :: router.current(named)
+    _show :: router.show(named)
+    _linked :: router.link(named, "/rows", [String:String]{}, [String:String]{}) ?? panic("link")
+    _navigated :: router.navigate(named, "/rows")
+    _preloaded :: router.preload(named, "/rows")
+    _aborted :: router.abort(named)
+}
+
+fn query_surface() {
+    live :: query.live("rows", "rows", "initial", fetch_rows)
+    created :: query.new("rows", live)
+    subscribed :: query.subscribe("rows")
+    _generation :: query.invalidate(created)
+    _value :: query.get(created)
+    _state :: query.state(created)
+    _state_signal :: query.state_signal(created)
+    _mutation_signal :: query.mutation_signal(created)
+    _shown :: query.show(created)
+    _facts :: query.facts(created)
+    _queued :: query.queue(created, "offline payload")
+    _refreshed :: query.refresh(created)
+    _cancelled :: query.cancel(created)
+    query.set_online(created, false)
+    query.set_mode(created, .OfflineFirst)
+    _mutation :: query.mutate(created, "save", None, send_mutation)
+    _mutation_with_invalidations :: query.mutate_with_invalidations(
+        created,
+        "save-again",
+        None,
+        ["rows"],
+        send_mutation,
+    )
+    _retry :: query.retry(created, replay_mutation)
+    _subscribed_value :: query.get(subscribed)
+}
+
+fn form_surface() {
+    field :: WebFormFieldSpec{
+        name: "name",
+        value_type: .String,
+        required: true,
+        default: None,
+        label: "Name",
+        control: .Text,
+        group: None,
+        wire_name: "name",
+    }
+    replacement :: WebFormFieldSpec{
+        name: "display_name",
+        value_type: .String,
+        required: false,
+        default: Val("Guest"),
+        label: "Display name",
+        control: .Text,
+        group: Val("profile"),
+        wire_name: "display_name",
+    }
+    input0 :: forms.input("Profile", [field]) ?? panic("input")
+    _renamed :: forms.input_rename(input0, "name", "display_name")
+    _excluded :: forms.input_exclude(input0, "name")
+    _grouped :: forms.input_group(input0, "name", "profile")
+    _replaced :: forms.input_replace(input0, "name", replacement)
+    typed :: forms.typed(input0, "save") ?? panic("typed form")
+
+    _set :: forms.typed_set(typed, "name", "Ada")
+    _blur :: forms.typed_blur(typed, "name")
+    _validate :: forms.typed_validate(typed)
+    _async_validator :: forms.typed_set_async_validator(typed, "name", .Blur, 50, validate_name)
+    _set_action :: forms.typed_set_action(typed, form_action)
+    _field_validation :: forms.typed_validate_field(typed, "name", .Blur, validate_name)
+    _validation :: forms.typed_validate_async(typed)
+    _typed_submit :: forms.typed_submit(typed)
+    _typed_no_script :: forms.typed_no_script(typed)
+    _typed_html :: forms.typed_html(typed)
+    _typed_show :: forms.typed_show(typed)
+    _typed_state :: forms.typed_state(typed)
+    _typed_lifecycle :: forms.typed_lifecycle(typed)
+    _typed_errors :: forms.typed_errors(typed)
+    _focus :: forms.typed_focus(typed, "name")
+    _typed_post :: forms.typed_post(typed, "name=Ada")
+    _typed_decoded :: forms.typed_decode_post(typed, "name=Ada")
+    _typed_cancel :: forms.typed_cancel(typed)
+    _selected :: forms.typed_select_field(typed, "name")
+    _rendered_validation :: forms.typed_validation_render(_field_validation)
+    _action_error :: forms.action_error()
+    action_field :: forms.action_field_error(forms.action_error(), "name", "required")
+    _action_form :: forms.action_form_error(action_field, "invalid profile")
+
+    validation0 :: forms.typed_validate_async(typed)
+    _wait_validation :: forms.typed_validation_wait(^validation0)
+    validation1 :: forms.typed_validate_async(typed)
+    _cancel_validation :: forms.typed_validation_cancel(validation1)
+    submission0 :: forms.typed_submit_async(typed)
+    _wait_submission :: forms.typed_submission_wait(^submission0)
+    submission1 :: forms.typed_submit_async(typed)
+    _cancel_submission :: forms.typed_submission_cancel(submission1)
+}
+
+fn table_surface() {
+    source :: rows()
+    plain :: table.new("Rows", source)
+    keyed :: table.new_keyed("KeyedRows", source, row_key)
+    id_column :: table.column("id", "Int", row_key)
+    name_column :: table.column("name", "String", row_name)
+    active_column :: table.column("active", "Bool", row_active)
+    with_id :: table.with_column(keyed, id_column)
+    with_name :: table.with_column(with_id, name_column)
+    configured :: table.with_column(with_name, active_column)
+    _state :: table.state(configured)
+    _facts :: table.facts(configured)
+    _keys :: table.keys(configured)
+    _sorted :: table.sort_by(configured, "id", .Ascending)
+    filtered :: table.filter_by(configured, "active", "true")
+    paged :: table.paginate(filtered, 0, 2)
+    _page_state :: table.page_state(paged)
+    _page :: table.page(paged, 0, 2)
+    _server :: table.with_server_page(paged, load_table_page)
+
+    _set_rows :: table.set_rows(configured, source)
+    selected :: table.set_selected(configured, "1", true)
+    toggled :: table.toggle_selection(configured, "2")
+    focused :: table.focus(configured, "1")
+    _clear_focus :: table.clear_focus(configured)
+    _focused_key :: table.focused_key(focused)
+    _clear_selection :: table.clear_selection(configured)
+    _selected_keys :: table.selected_keys(selected)
+    _selected_rows :: table.selected_rows(selected)
+    _inserted :: table.insert_row(configured, Row{id: 4, name: "New", active: true})
+    _replaced :: table.replace_row(configured, "1", Row{id: 1, name: "Ada Prime", active: true})
+    _updated :: table.update_row(configured, "2", updated_row)
+    _removed :: table.remove_row(configured, "3")
+    _first :: table.first_page(paged)
+    _next :: table.next_page(paged)
+    _last :: table.last_page(paged)
+
+    // Receiver syntax is intentionally shown next to the module calls.
+    receiver_with_column :: plain.with_column(id_column)
+    receiver_paged :: receiver_with_column.paginate(0, 2)
+    _receiver_page :: receiver_paged.page()
+}
+
+fn virtual_surface() {
+    source :: rows()
+    window :: virtual.window(100, 0, 20, 32, 4)
+    measured_window :: virtual.window_measured(100, 0, 20, 32, 4, [Int]{32, 40, 28})
+    _slice :: virtual.slice(source, window)
+    _indices :: virtual.indices(window)
+    _window_facts :: window.facts_json()
+
+    plan :: virtual.plan(100, 0, 480, 240, 32, 4)
+    _measured_plan :: virtual.plan_measured(100, 0, 480, 240, 32, 4, [])
+    sized_plan :: virtual.plan_from_sizes(100, 0, 480, 240, 32, 4, [Int]{32, 40, 28})
+    measured :: virtual.plan_measure(plan, 0, 40)
+    _plan_slice :: virtual.plan_slice(source, measured)
+    _plan_indices :: virtual.plan_indices(measured)
+    viewport :: virtual.plan_viewport(measured)
+    _viewport_plan :: virtual.plan_viewport_state(viewport)
+    virtual.plan_scroll_to(viewport, 64)
+    virtual.plan_resize(viewport, 640, 320)
+    virtual.plan_viewport_measure(viewport, 0, 40)
+    _sized_slice :: virtual.plan_slice(source, sized_plan)
+    _measured_slice :: virtual.slice(source, measured_window)
+}
+
+fn store_surface() {
+    state_store :: web_store.with_history("surface-counter", 0, 8)
+    _new_store :: web_store.new("surface-new", 0)
+    _value :: web_store.value(state_store)
+    _signal :: web_store.signal(state_store)
+    _state_signal :: web_store.state_signal(state_store)
+    _transaction :: web_store.transaction(state_store, "transaction", ["value"], store_update)
+    _update :: web_store.update(state_store, "update", ["value"], store_update)
+    _batch :: web_store.batch(state_store, "batch", ["value"], store_update)
+    _set_state :: web_store.set_state(state_store, 1)
+    _set :: web_store.set(state_store, 2)
+    _receiver_set :: state_store.set(3)
+
+    patch0 :: web_store.optimistic(state_store, "optimistic", ["value"], store_update)
+    _patch0_generation :: web_store.patch_generation(patch0)
+    _patch0_transaction :: web_store.patch_transaction(patch0)
+    _patch0_active :: web_store.patch_active(patch0)
+    patch1 :: web_store.patch(state_store, "patch", ["value"], store_update)
+    _patch1_transaction :: web_store.patch_transaction(patch1)
+    _committed :: web_store.patch_commit(patch1)
+    patch2 :: web_store.patch(state_store, "rollback", ["value"], store_update)
+    _rolled_back :: web_store.patch_rollback(patch2)
+
+    _back :: web_store.back(state_store)
+    _forward :: web_store.forward(state_store)
+    _jump :: web_store.jump(state_store, 0)
+    _scrub :: web_store.scrub(state_store, 0)
+    _restore :: web_store.restore(state_store, 0)
+    _history :: web_store.history(state_store)
+    _history_at :: web_store.history_at(state_store, 0)
+    _events :: web_store.events(state_store)
+    _events_since :: web_store.events_since(state_store, 0)
+    web_store.clear_history(state_store)
+    _history_enabled :: web_store.history_enabled(state_store)
+    _history_limit :: web_store.history_limit(state_store)
+    web_store.set_history_limit(state_store, 4)
+    _cursor :: web_store.cursor(state_store)
+    _generation :: web_store.current_generation(state_store)
+    _inspection :: web_store.inspect(state_store)
+    _facts_json :: web_store.facts_json(state_store)
+    _event_json :: web_store.event_json(state_store)
+    derived :: web_store.derived(state_store, store_select)
+    selector :: web_store.selector(state_store, store_select)
+    subscription :: web_store.subscribe(state_store, store_update)
+    selected_subscription :: web_store.subscribe_selector(state_store, store_select, store_selected)
+    _subscription_active :: web_store.subscription_active(subscription)
+    _selected_active :: web_store.subscription_active(selected_subscription)
+    web_store.subscription_unsubscribe(subscription)
+    web_store.subscription_unsubscribe(selected_subscription)
+    _receiver_signal :: state_store.signal()
+    _receiver_state_signal :: state_store.state_signal()
+    _receiver_facts :: state_store.facts_json()
+    _derived_value :: derived.get()
+    _selected_value :: selector.get()
+}
+
+fn support_surface() {
+    // OpenAPI consumes the checked HTTP router, not the visual WebRouter.
+    http_router :: http.router()
+    _openapi :: web.openapi(http_router)
+    _devserver :: devserver.app()
+    _file_server :: devserver.for_app("examples/features/web/state_surface.jet")
+    _session_value :: session.get("surface")
+    session.remove("surface")
+}
+
+fn run() {
+    app_surface()
+    router_surface()
+    query_surface()
+    form_surface()
+    table_surface()
+    virtual_surface()
+    store_surface()
+    support_surface()
+}

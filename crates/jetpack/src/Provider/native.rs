@@ -12,6 +12,7 @@ use super::{
 use crate::NixIndex::NativeRecipe;
 use crate::RefSpec::{RefSpec as PackageRef, Source, SourceTable};
 use crate::{Envelope, JSON, SHA256};
+use jet_foundation::DataTree::DataTree;
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -565,8 +566,7 @@ fn fetch_release_metadata(tag: Option<&str>) -> Result<ReleaseFacts, ProviderErr
             "GitHub release metadata has an invalid version",
         ));
     }
-    let assets = object
-        .get("assets")
+    let assets = object_field(object, "assets")
         .ok_or_else(|| native_error("GitHub release metadata has no assets"))?
         .as_array()
         .map_err(|error| native_error(format!("GitHub release assets: {error}")))?;
@@ -580,14 +580,13 @@ fn fetch_release_metadata(tag: Option<&str>) -> Result<ReleaseFacts, ProviderErr
     if !url.starts_with("https://") {
         return Err(native_error("GitHub release asset URL is not HTTPS"));
     }
-    let digest = match asset.get("digest") {
-        Some(JSON::JSONValue::String(value)) => {
-            value.strip_prefix("sha256:").unwrap_or(value).to_string()
-        }
-        _ => static_facts(&tag)
-            .map(|facts| facts.sha256)
-            .ok_or_else(|| native_error("GitHub release asset has no published SHA-256 digest"))?,
-    };
+    let digest = object_field(asset, "digest")
+        .and_then(|value| value.as_str().ok())
+        .and_then(|value| value.strip_prefix("sha256:").or(Some(value)))
+        .map(ToString::to_string)
+        .filter(|value| !value.is_empty())
+        .or_else(|| static_facts(&tag).map(|facts| facts.sha256))
+        .ok_or_else(|| native_error("GitHub release asset has no published SHA-256 digest"))?;
     validate_digest(&digest)?;
     Ok(ReleaseFacts {
         version,
@@ -598,12 +597,18 @@ fn fetch_release_metadata(tag: Option<&str>) -> Result<ReleaseFacts, ProviderErr
     })
 }
 
+fn object_field<'a>(object: &'a [(String, DataTree)], field: &str) -> Option<&'a DataTree> {
+    object
+        .iter()
+        .find_map(|(name, value)| (name == field).then_some(value))
+}
+
 fn json_string(
-    object: &BTreeMap<String, JSON::JSONValue>,
+    object: &[(String, DataTree)],
     field: &str,
 ) -> Result<String, ProviderError> {
-    match object.get(field) {
-        Some(JSON::JSONValue::String(value)) if !value.is_empty() => Ok(value.clone()),
+    match object_field(object, field).and_then(|value| value.as_str().ok()) {
+        Some(value) if !value.is_empty() => Ok(value.to_string()),
         _ => Err(native_error(format!(
             "release metadata field `{field}` is not a string"
         ))),

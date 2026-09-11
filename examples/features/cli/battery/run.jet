@@ -1,0 +1,131 @@
+use cli
+use core.files as fs
+
+// The standard marker supplies root help, --version, --color, --verbose, and
+// --quiet. The command-local fields below make defaults visible in each
+// generated command help page.
+#CLI(Standard)
+struct Cli {
+    #[Doc("directory for the CLI config file"), Env("CLI_CONFIG_DIR")] config_dir: String{"cli-config"}
+
+    #Doc("run every library part once with deterministic fixtures")
+    fn demo(self) {
+        run_all(self.config_dir)
+    }
+
+    #Doc("write and read the config file")
+    fn config(self) {
+        cli.write_config(self.config_dir, "always", "aligned")
+        print(cli.read_config(self.config_dir).trim())
+    }
+
+    #Doc("append one note to the config directory")
+    fn add(self, title: String, body: String) {
+        print(cli.append_note(self.config_dir, title, body).trim())
+    }
+
+    #Doc("search a recursive root with its .gitignore")
+    fn search(self, pattern: String{"needle"}, root: String{"."}) {
+        show_search(root, pattern)
+    }
+
+    #Doc("launch, stream, pipe, close stdin, and inspect process receipts")
+    fn process(self, pattern: String{"keep"}) {
+        print(cli.process_demo(pattern))
+    }
+
+    #Doc("exercise the child EOF path")
+    fn eof(self) {
+        print(cli.process_demo("keep"))
+    }
+
+    #Doc("decode, filter, sort, and print typed CSV records")
+    fn records(self, wanted: String{"keep"}) {
+        show_records(wanted)
+    }
+
+    #Doc("overlay one child environment and inspect a failed receipt")
+    fn env(self) {
+        print(cli.environment_demo())
+    }
+
+    #Doc("show ten typed options and their defaults")
+    fn flags(
+        self,
+        one: String{"1"},
+        two: String{"2"},
+        three: String{"3"},
+        four: String{"4"},
+        five: String{"5"},
+        six: String{"6"},
+        seven: String{"7"},
+        eight: String{"8"},
+        nine: String{"9"},
+        ten: String{"10"}
+    ) {
+        print("{one},{two},{three},{four},{five},{six},{seven},{eight},{nine},{ten}")
+    }
+
+    #Doc("exit with the exact requested status code")
+    fn exit(self, code: Int{7}) {
+        cli.exit_with(code)
+    }
+}
+
+fn show_search(root: String, pattern: String) {
+    hits :: cli.search(root, pattern)
+    loop hit in hits -> print(cli.format_hit(hit, true))
+}
+
+fn show_records(wanted: String) {
+    rows :: cli.records(wanted)
+    loop row in rows -> print("{row.title}|{row.tag}|{row.path}")
+}
+
+fn run_all(config_root: String) {
+    cli.write_config(config_root, "always", "aligned")
+    print("config")
+    print(cli.read_config(config_root).trim())
+
+    note_dir :: fs.temp_dir("cli-battery-notes") ?? panic("note temp dir")
+    print("notes")
+    print(cli.append_note(note_dir.path, "first", "ship it").trim())
+
+    fixture_dir :: fs.temp_dir("cli-battery-fixture") ?? panic("fixture temp dir")
+    cli.seed_fixture(fixture_dir.path)
+    print("search")
+    show_search(fixture_dir.path, "needle")
+
+    print("process")
+    print(cli.process_demo("keep"))
+
+    print("records")
+    show_records("keep")
+
+    print("environment")
+    print(cli.environment_demo())
+    refresh()
+}
+
+#[Job(.Dev), Doc("refresh the CLI battery fixture"), Every(1h)]
+fn refresh() {
+    print("job=refresh")
+}
+
+// Gate notes: search's ignore-aware walk and process_demo's stdin.close are
+// real D-FOUND-COREAPI1 calls. An older binary must report that gate instead
+// of substituting a manual matcher or a shell pipeline.
+// Future command matrix (the release/golden lane owns these proofs):
+//   help:    jet run examples/features/cli/battery -- --help
+//   demo:    jet run examples/features/cli/battery -- demo
+//   process: jet run examples/features/cli/battery -- process
+//   eof:     jet run examples/features/cli/battery -- eof
+//   exit:    jet run examples/features/cli/battery -- exit --code 9  (status 9)
+//   script:  jet run examples/features/script_mode/implicit_run.jet
+//   release: jet build examples/features/cli/battery --release
+//            mkdir -p bin && cp build/run bin/cli-battery
+//            ./bin/cli-battery flags
+
+fn run(args: Cli) {
+    run_all(args.config_dir)
+}

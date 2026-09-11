@@ -45,6 +45,17 @@ pub(super) fn bad_import_directive(span: Span) -> Diagnostic {
     )
 }
 
+/// E0970: `imports: find("<dir>")` names a directory that is not there.
+pub(super) fn find_missing_directory(path: &Path, span: Option<crate::Diagnostics::Span>) -> Diagnostic {
+    Diagnostic::error(
+        "E0970",
+        format!("`find` can't read the directory `{}`", path.display()),
+        r#"`imports: find("<dir>")` walks that directory for `.jet` modules (U4); it must exist relative to this file"#.to_string(),
+        "create the directory, or fix the path so it points at your modules folder".to_string(),
+        span,
+    )
+}
+
 /// E0971: a discovered module imports — forbidden by the liftability law (U4):
 /// modules contribute to the merged whole, they don't import each other.
 pub(super) fn discovered_module_imports(file: &Path) -> Diagnostic {
@@ -65,9 +76,9 @@ pub(super) fn not_a_namespace_literal(expected: &str, span: Span) -> Diagnostic 
         "E0966",
         format!("A module contribution must be a `{expected}` literal"),
         format!(
-            "A contribution's value describes its namespace with a typed struct literal, e.g. `env.dev: {expected}.{{…}}`"
+            "A contribution's value describes its namespace with a typed struct literal, e.g. `env.dev: {expected}{{…}}`"
         ),
-        format!("Wrap the value in `{expected}.{{…}}`"),
+        format!("Wrap the value in `{expected}{{…}}`"),
         Some(span),
     )
 }
@@ -77,7 +88,7 @@ pub(super) fn wrong_namespace_type(expected: &str, got: &str, span: Span) -> Dia
         "E0966",
         format!("Expected a `{expected}` literal here, found `{got}`"),
         format!("A contribution to this namespace must use the matching type `{expected}`"),
-        format!("Change `{got}.{{…}}` to `{expected}.{{…}}`"),
+        format!("Change `{got}{{…}}` to `{expected}{{…}}`"),
         Some(span),
     )
 }

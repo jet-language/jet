@@ -1,0 +1,304 @@
+{
+  "schema": "jet.selfhost.workloads.v1",
+  "study": "#2955",
+  "status": "unrun",
+  "purpose": "Evaluate compiler-shaped Jet jobs before an owner decision about the existing bootstrap portfolio. This manifest is an executable contract, not a port plan or a readiness certificate.",
+  "provenance": {
+    "authorProfile": "implementation-worker",
+    "jetFixtures": "authored paired compiler-shaped workload sources",
+    "rustCounterparts": "authored same-job independent counterparts",
+    "execution": "unrun until an owner-scheduled later phase",
+    "measurements": "unavailable until fresh build/run"
+  },
+  "protocols": {
+    "receipt": "receipt.schema.json",
+    "reasoning": "reasoning.schema.json"
+  },
+  "sequence": {
+    "position": "before #2919 repair/greening",
+    "implementationOnly": true,
+    "validationDeferred": true
+  },
+  "sourceBoundary": {
+    "productionCompiler": "Source/",
+    "comparisonRole": "read-only retained Rust-hosted compiler input",
+    "portStarted": false,
+    "versionMigration": false,
+    "releaseGateAdded": false
+  },
+  "owners": [
+    {
+      "id": "#217",
+      "title": "Bootstrap readiness gate: dogfood portfolio + memory-model soundness campaign",
+      "role": "existing bootstrap owner and port prerequisite",
+      "status": "owner-frozen"
+    },
+    {
+      "id": "#218",
+      "title": "Full port: self-host the Jet compiler in Jet",
+      "role": "existing full-port owner; retained-host and seam boundary remains its scope",
+      "status": "planning-blocked-by-217"
+    }
+  ],
+  "evidencePolicy": {
+    "machine": {
+      "owner": "driver and later compiler/oracle runs",
+      "records": ["identity", "exit", "stdout", "stderr", "latency", "peak_rss", "diagnostic", "invalidation", "source_complexity"],
+      "initialStatus": "unavailable"
+    },
+    "model": {
+      "owner": "explicit workload contract and independent oracle",
+      "records": ["expected_values", "expected_failures", "ownership", "effects", "invalidation", "target", "resource_limits"],
+      "initialStatus": "unrun"
+    },
+    "human": {
+      "owner": "later consented reader/repair study",
+      "records": ["cold_read", "repair_friction", "explain", "predict", "modify", "derive"],
+      "initialStatus": "unavailable",
+      "simulatedReadersAreNotHumanEvidence": true
+    },
+    "trust": {
+      "rust": "independent same-job counterpart; agreement is comparison evidence, never proof of Jet correctness",
+      "foreign": "native artifact and ABI are retained trust assumptions unless separately checked; matching source filenames do not prove a loaded binary",
+      "bootstrap": "equal stage binaries would establish identity only, not semantic correctness"
+    }
+  },
+  "phases": {
+    "identity": "hash every source, oracle, input, package, and native file before execution",
+    "complexity": "record bytes, lines, declarations, comments, and control forms; do not synthesize a readability score",
+    "build": "fresh isolated build with exact compiler/toolchain/target/artifact identities and peak RSS",
+    "run": "same input and expected observation through Jet and Rust",
+    "repair": "run the negative case, apply only the authored fix, and record whether the diagnostic clears",
+    "reasoning": "capture explain/predict/modify/derive responses with explicit machine/model/human provenance"
+  },
+  "defaults": {
+    "targets": ["x86_64-unknown-linux-gnu"],
+    "modes": ["check", "run", "run-interpret", "build", "run-release"],
+    "limits": {
+      "checkTimeoutMs": 120000,
+      "runTimeoutMs": 30000,
+      "buildTimeoutMs": 300000,
+      "maxRunRssBytes": 268435456,
+      "maxBuildRssBytes": 2147483648
+    }
+  },
+  "workloads": [
+    {
+      "id": "scan-parse",
+      "title": "Source scanning and parsing",
+      "directory": "workloads/scan-parse",
+      "entry": "run.jet",
+      "oracle": "oracle.rs",
+      "cases": [
+        { "id": "valid", "args": [], "expected": { "exit": 0, "stdout": "tokens=8 lexeme_bytes=26 identifiers=4 ast_nodes=8\nparse=ok root=keyword ownership=owned\n", "stderr": "" } }
+      ],
+      "supportedModes": ["check", "run", "run-interpret", "build", "run-release"],
+      "targets": ["x86_64-unknown-linux-gnu"],
+      "limits": { "checkTimeoutMs": 120000, "runTimeoutMs": 30000, "buildTimeoutMs": 300000, "maxRunRssBytes": 268435456, "maxBuildRssBytes": 2147483648 },
+      "contract": {
+        "ownership": "tokens are read during parsing; returned AST nodes own their copied classification fields",
+        "effects": [],
+        "invalidation": "source bytes or lexer rules invalidate the parse and all derived AST facts; unrelated workload inputs remain reusable",
+        "memory": "bounded by 64 tokens and 256 AST nodes for this fixture",
+        "target": "hosted native and default interpreter; web is not applicable because this is a CLI batch job"
+      },
+      "reasoning": [
+        { "id": "explain", "prompt": "Explain why changing one token invalidates the AST but does not mutate the input token list.", "expectedObservations": ["input remains source-owned", "AST result is a separate owned value", "parse dependency changes"] },
+        { "id": "predict", "prompt": "Predict the valid case's token count, lexeme byte count, identifier count, and root kind before execution.", "expectedObservations": ["tokens=8", "lexeme_bytes=26", "identifiers=4", "root=keyword"] },
+        { "id": "modify", "prompt": "Change the final identifier from right to value and state which observation changes.", "expectedObservations": ["only source identity and dependent AST text change", "counts stay stable"] },
+        { "id": "derive", "prompt": "Derive the invalidation edge from source bytes to parse nodes.", "expectedObservations": ["source -> tokens -> AST"] }
+      ]
+    },
+    {
+      "id": "symbol-type",
+      "title": "Symbol and type relations",
+      "directory": "workloads/symbol-type",
+      "entry": "run.jet",
+      "oracle": "oracle.rs",
+      "cases": [
+        { "id": "valid", "args": [], "expected": { "exit": 0, "stdout": "symbols=3 resolved=Int@1 int_bindings=2\ncompatible=true ownership=borrowed effects=none\n", "stderr": "" } }
+      ],
+      "supportedModes": ["check", "run", "run-interpret", "build", "run-release"],
+      "targets": ["x86_64-unknown-linux-gnu"],
+      "limits": { "checkTimeoutMs": 120000, "runTimeoutMs": 30000, "buildTimeoutMs": 300000, "maxRunRssBytes": 268435456, "maxBuildRssBytes": 2147483648 },
+      "contract": {
+        "ownership": "the symbol relation borrows names and type labels while the relation result is an owned string",
+        "effects": [],
+        "invalidation": "a declaration name, type label, or scope edit invalidates resolution and compatibility facts; independent symbols are retained",
+        "memory": "bounded by 128 symbols and 64-byte labels per symbol",
+        "target": "hosted native and default interpreter; no foreign or web boundary"
+      },
+      "reasoning": [
+        { "id": "explain", "prompt": "Explain why resolving left returns Int@1 and why the relation does not own the symbol table.", "expectedObservations": ["name and type are borrowed during lookup", "scope 1 is selected", "result text is newly owned"] },
+        { "id": "predict", "prompt": "Predict the number of declarations and Int bindings.", "expectedObservations": ["symbols=3", "int_bindings=2", "compatible=true"] },
+        { "id": "modify", "prompt": "Change label's type from String to Int and state the changed observation.", "expectedObservations": ["int_bindings becomes 3", "resolution of left is unchanged"] },
+        { "id": "derive", "prompt": "Derive the relation dependencies for resolve(left).", "expectedObservations": ["query name -> symbol identity -> type label and scope"] }
+      ]
+    },
+    {
+      "id": "diagnostics-maps",
+      "title": "Diagnostics and source maps",
+      "directory": "workloads/diagnostics-maps",
+      "entry": "run.jet",
+      "oracle": "oracle.rs",
+      "cases": [
+        { "id": "valid-map", "args": [], "expected": { "exit": 0, "stdout": "diagnostic=E0102 line=2 col=5 span=15..20\nfix=print source_map=stable\n", "stderr": "" } },
+        { "id": "invalid-source", "program": "invalid.jet", "kind": "check", "args": [], "expected": { "exit": 1, "diagnostic": { "code": "E0102", "file": "invalid.jet", "line": 2, "col": 5, "span": { "start": 15, "end": 20 }, "fixText": "print" } } }
+      ],
+      "repair": { "program": "invalid.jet", "replacement": { "start": 15, "end": 20, "newText": "print" }, "expectedProgram": "repaired.jet", "expectedExit": 0 },
+      "supportedModes": ["check", "run", "run-interpret", "build", "run-release"],
+      "targets": ["x86_64-unknown-linux-gnu"],
+      "limits": { "checkTimeoutMs": 120000, "runTimeoutMs": 30000, "buildTimeoutMs": 300000, "maxRunRssBytes": 268435456, "maxBuildRssBytes": 2147483648 },
+      "contract": {
+        "ownership": "source text is borrowed by the mapper; diagnostic labels and fix edits are owned receipt values",
+        "effects": [],
+        "invalidation": "source edits invalidate offsets and all diagnostics whose spans cross the edit; the repaired source has a new identity",
+        "memory": "maximum source is 4 KiB and at most 32 diagnostics are retained",
+        "target": "hosted native, interpreter, and CLI JSON/human diagnostic renderers; web is not applicable"
+      },
+      "reasoning": [
+        { "id": "explain", "prompt": "Explain how byte offset 15 maps to line 2 column 5 and why the repair is source-bound.", "expectedObservations": ["line one occupies bytes 0..10", "four indentation bytes precede the token", "fix targets the exact source span"] },
+        { "id": "predict", "prompt": "Predict the invalid source's diagnostic code, location, and suggested replacement.", "expectedObservations": ["E0102", "invalid.jet line 2 col 5", "print"] },
+        { "id": "modify", "prompt": "Apply the authored replacement and state the expected check result.", "expectedObservations": ["exit 0", "no E0102 remains"] },
+        { "id": "derive", "prompt": "Derive which identities a diagnostic receipt must bind together.", "expectedObservations": ["source identity", "diagnostic code and span", "replacement text"] }
+      ]
+    },
+    {
+      "id": "dependency-invalidation",
+      "title": "Dependency invalidation",
+      "directory": "workloads/dependency-invalidation",
+      "entry": "run.jet",
+      "oracle": "oracle.rs",
+      "cases": [
+        { "id": "edit-ast", "args": [], "expected": { "exit": 0, "stdout": "changed=ast invalidated=ast,sema,codegen retained=parse,docs\ncache=source+interface ownership=graph-owned\n", "stderr": "" } }
+      ],
+      "supportedModes": ["check", "run", "run-interpret", "build", "run-release"],
+      "targets": ["x86_64-unknown-linux-gnu"],
+      "limits": { "checkTimeoutMs": 120000, "runTimeoutMs": 30000, "buildTimeoutMs": 300000, "maxRunRssBytes": 268435456, "maxBuildRssBytes": 2147483648 },
+      "contract": {
+        "ownership": "the dependency graph owns module identities and the invalidation result; cache entries are not shared across unrelated graphs",
+        "effects": [],
+        "invalidation": "editing ast invalidates ast, sema, and codegen transitively while parse and docs remain reusable",
+        "memory": "bounded by 32 modules, 128 edges, and one invalidation frontier",
+        "target": "hosted native, interpreter, and incremental build driver; web is not applicable"
+      },
+      "reasoning": [
+        { "id": "explain", "prompt": "Explain why codegen is invalidated even though it does not name ast directly.", "expectedObservations": ["sema depends on ast", "codegen depends on sema", "closure is transitive"] },
+        { "id": "predict", "prompt": "Predict the invalidated and retained module sets after editing ast.", "expectedObservations": ["ast,sema,codegen", "parse,docs"] },
+        { "id": "modify", "prompt": "Add a new independent docs2 module and state whether the invalidation frontier changes.", "expectedObservations": ["docs2 is retained", "frontier is unchanged"] },
+        { "id": "derive", "prompt": "Derive the cache identity relation for an incremental result.", "expectedObservations": ["source identity + interface identity + target", "changed dependency invalidates descendants"] }
+      ]
+    },
+    {
+      "id": "generic-comptime",
+      "title": "Generic and compile-time work",
+      "directory": "workloads/generic-comptime",
+      "entry": "run.jet",
+      "oracle": "oracle.rs",
+      "cases": [
+        { "id": "pure", "args": [], "expected": { "exit": 0, "stdout": "generic_sum=42 first=17\ncomptime_value=2 fuel=7\n", "stderr": "" } }
+      ],
+      "supportedModes": ["check", "run", "run-interpret", "build", "run-release"],
+      "targets": ["x86_64-unknown-linux-gnu"],
+      "limits": { "checkTimeoutMs": 120000, "runTimeoutMs": 30000, "buildTimeoutMs": 300000, "maxRunRssBytes": 268435456, "maxBuildRssBytes": 2147483648 },
+      "contract": {
+        "ownership": "generic values are consumed into one typed result; the compile-time table is immutable embedded data",
+        "effects": ["comptime:Pure"],
+        "invalidation": "generic arguments or compile-time function/source changes invalidate instantiations and embedded table data; runtime-only edits do not rerun unrelated instantiations",
+        "memory": "compile-time fuel limit 64 steps; table has at most 32 Int entries",
+        "target": "hosted native, interpreter, and AOT; no ambient comptime effects or foreign target"
+      },
+      "reasoning": [
+        { "id": "explain", "prompt": "Explain which value is computed before runtime and which generic relation remains typed at runtime.", "expectedObservations": ["comptime_value is embedded", "generic_sum uses Pair<Int>", "pure effect boundary"] },
+        { "id": "predict", "prompt": "Predict generic_sum, first, and the compile-time table value at index 3.", "expectedObservations": ["42", "17", "2"] },
+        { "id": "modify", "prompt": "Change the pair's right value from 25 to 26 and state the result change.", "expectedObservations": ["generic_sum becomes 43", "comptime_value remains 2"] },
+        { "id": "derive", "prompt": "Derive the invalidation edge for the embedded table.", "expectedObservations": ["make_table source -> comptime evaluation -> embedded table"] }
+      ]
+    },
+    {
+      "id": "concurrent-scheduling",
+      "title": "Concurrent scheduling",
+      "directory": "workloads/concurrent-scheduling",
+      "entry": "run.jet",
+      "oracle": "oracle.rs",
+      "cases": [
+        { "id": "joined", "args": [], "expected": { "exit": 0, "stdout": "results=10,14 order=sorted\n", "stderr": "" } }
+      ],
+      "supportedModes": ["check", "run", "run-interpret", "build", "run-release"],
+      "targets": ["x86_64-unknown-linux-gnu"],
+      "limits": { "checkTimeoutMs": 120000, "runTimeoutMs": 30000, "buildTimeoutMs": 300000, "maxRunRssBytes": 268435456, "maxBuildRssBytes": 2147483648 },
+      "contract": {
+        "ownership": "each task owns its join slot; joined values are moved into a result list before sorting",
+        "effects": ["Task"],
+        "invalidation": "scheduler and task-body changes invalidate the concurrent result; deterministic input and join contract make completion order irrelevant",
+        "memory": "at most two live tasks and two Int result values",
+        "target": "hosted native and interpreter with task support; embedded and web are not applicable"
+      },
+      "reasoning": [
+        { "id": "explain", "prompt": "Explain why sorting after join preserves the observation while allowing either completion order.", "expectedObservations": ["join waits for each task", "values are owned before sorting", "completion order is not observable"] },
+        { "id": "predict", "prompt": "Predict the two task results and final output.", "expectedObservations": ["10 and 14", "results=10,14 order=sorted"] },
+        { "id": "modify", "prompt": "Change the second task input from 7 to 8 and state the changed output.", "expectedObservations": ["second result becomes 16", "sorted output becomes results=10,16 order=sorted"] },
+        { "id": "derive", "prompt": "Derive the ownership chain from task creation to the printed result.", "expectedObservations": ["task handle -> join result -> owned list -> sorted output"] }
+      ]
+    },
+    {
+      "id": "foreign-interaction",
+      "title": "Foreign interaction",
+      "directory": "workloads/foreign-interaction",
+      "entry": "run.jet",
+      "oracle": "oracle.rs",
+      "cases": [
+        { "id": "sum-bytes", "args": [], "expected": { "exit": 0, "stdout": "foreign_sum=60 count=3 retention=none\n", "stderr": "" } }
+      ],
+      "supportedModes": ["check", "run", "build", "run-release"],
+      "targets": ["x86_64-unknown-linux-gnu"],
+      "limits": { "checkTimeoutMs": 120000, "runTimeoutMs": 30000, "buildTimeoutMs": 300000, "maxRunRssBytes": 268435456, "maxBuildRssBytes": 2147483648 },
+      "native": {
+        "build": "native/build.sh",
+        "header": "include/foreign.h",
+        "artifact": "native/libselfhost_foreign.a",
+        "symbol": "selfhost_sum_bytes",
+        "trust": "C implementation retention behavior is TRUSTED unless source, artifact, compiler flags, target, and loaded identity are checked"
+      },
+      "contract": {
+        "ownership": "Jet borrows a three-byte view for one call; C retains no pointer; returned Int is owned by Jet",
+        "effects": ["FFI.C"],
+        "invalidation": "header, binding descriptor, native source, compiler flags, artifact, or target changes invalidate the foreign call evidence",
+        "memory": "borrowed view length is 3; native function must not retain the pointer or write beyond count",
+        "target": "x86_64-unknown-linux-gnu hosted native only; no web/interpreter claim for this C edge"
+      },
+      "reasoning": [
+        { "id": "explain", "prompt": "Explain why the borrowed byte view is valid only for the call and why the native body remains a trust boundary.", "expectedObservations": ["call-scoped borrow", "native retains nothing", "descriptor does not prove arbitrary C code"] },
+        { "id": "predict", "prompt": "Predict the sum and count for bytes 10,20,30.", "expectedObservations": ["foreign_sum=60", "count=3", "retention=none"] },
+        { "id": "modify", "prompt": "Change the third byte to 31 and state the expected output change.", "expectedObservations": ["sum becomes 61", "count remains 3"] },
+        { "id": "derive", "prompt": "Derive the identity tuple required before accepting a foreign result.", "expectedObservations": ["header + binding + native source + artifact + toolchain + target", "ABI and retention contract"] }
+      ]
+    },
+    {
+      "id": "multi-package-build",
+      "title": "Multi-package build",
+      "directory": "workloads/multi-package-build",
+      "entry": "run.jet",
+      "oracle": "oracle.rs",
+      "cases": [
+        { "id": "workspace", "args": [], "expected": { "exit": 0, "stdout": "packages=2 parser=3 typer=Int\nbuild=single-graph artifacts=3\n", "stderr": "" } }
+      ],
+      "supportedModes": ["check", "run", "run-interpret", "build", "run-release"],
+      "targets": ["x86_64-unknown-linux-gnu"],
+      "limits": { "checkTimeoutMs": 120000, "runTimeoutMs": 30000, "buildTimeoutMs": 300000, "maxRunRssBytes": 268435456, "maxBuildRssBytes": 2147483648 },
+      "contract": {
+        "ownership": "the root owns package graph resolution while each dependency owns its exported function and interface",
+        "effects": [],
+        "invalidation": "parser source invalidates parser and root; typer source invalidates typer and root; an unrelated package remains reusable",
+        "memory": "bounded by three package nodes and one artifact per package plus root",
+        "target": "hosted native and interpreter package builds; target-specific foreign packages are excluded"
+      },
+      "reasoning": [
+        { "id": "explain", "prompt": "Explain why the root artifact depends on both package interfaces but package ownership remains separate.", "expectedObservations": ["root consumes exported interfaces", "each package owns its source", "one graph coordinates artifacts"] },
+        { "id": "predict", "prompt": "Predict package count, parser result, and typer result.", "expectedObservations": ["packages=2", "parser=3", "typer=Int"] },
+        { "id": "modify", "prompt": "Change parser's returned token count from 3 to 4 and state which output changes.", "expectedObservations": ["parser=4", "typer=Int remains", "root artifact is rebuilt"] },
+        { "id": "derive", "prompt": "Derive the invalidation relation after changing only typer/types.jet.", "expectedObservations": ["types -> root", "parser is retained", "root artifact identity changes"] }
+      ]
+    }
+  ]
+}

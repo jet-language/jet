@@ -20,6 +20,7 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
 use std::time::{SystemTime, UNIX_EPOCH};
 pub(crate) fn make_tree_writable_for_removal(path: &Path) -> std::io::Result<()> {
     let Ok(meta) = fs::symlink_metadata(path) else {
@@ -820,102 +821,110 @@ pub fn substitute_cache_entry(
     )))
 }
 
-fn cache_binding_fields(binding: &CacheBinding) -> String {
-    let mirrors = binding
-        .mirrors
-        .iter()
-        .map(|mirror| crate::JSON::quote(mirror))
-        .collect::<Vec<_>>()
-        .join(",");
-    format!(
-        "\"role\":{},\"mirrors\":[{}],\"credential_provider\":{},\"write\":{}",
-        crate::JSON::quote(&binding.role),
-        mirrors,
-        binding
-            .credential_provider
-            .as_deref()
-            .map(crate::JSON::quote)
-            .unwrap_or_else(|| "null".to_string()),
-        if binding.allow_write { "true" } else { "false" }
+fn status_optional_string(value: Option<&str>) -> StatusValue {
+    value
+        .map(|value| StatusValue::String(value.to_string()))
+        .unwrap_or(StatusValue::Null)
+}
+
+fn status_optional_u64(value: Option<u64>) -> StatusValue {
+    value.map(StatusValue::from).unwrap_or(StatusValue::Null)
+}
+
+fn cache_binding_value(binding: &CacheBinding) -> StatusValue {
+    StatusValue::object(
+        StatusFields::new()
+            .with("role", binding.role.as_str())
+            .with(
+                "mirrors",
+                StatusValue::array(
+                    binding
+                        .mirrors
+                        .iter()
+                        .map(|mirror| StatusValue::String(mirror.clone())),
+                ),
+            )
+            .with(
+                "credential_provider",
+                status_optional_string(binding.credential_provider.as_deref()),
+            )
+            .with("write", binding.allow_write),
     )
 }
 
 pub fn cache_binding_json(binding: &CacheBinding) -> String {
-    jet_foundation::Report::render_status_json(
-        "ok",
-        true,
-        "cache-bind",
-        &format!(",{}", cache_binding_fields(binding)),
-    )
+    StatusEnvelope::new("cache-bind", true)
+        .with_fields(
+            StatusFields::new()
+                .with("role", binding.role.as_str())
+                .with(
+                    "mirrors",
+                    StatusValue::array(
+                        binding
+                            .mirrors
+                            .iter()
+                            .map(|mirror| StatusValue::String(mirror.clone())),
+                    ),
+                )
+                .with(
+                    "credential_provider",
+                    status_optional_string(binding.credential_provider.as_deref()),
+                )
+                .with("write", binding.allow_write),
+        )
+        .json()
 }
 
 pub(crate) fn cache_bindings_json(bindings: &[CacheBinding]) -> String {
-    let values = bindings
-        .iter()
-        .map(|binding| format!("{{{}}}", cache_binding_fields(binding)))
-        .collect::<Vec<_>>()
-        .join(",");
-    jet_foundation::Report::render_status_json(
-        "ok",
-        true,
-        "cache-list",
-        &format!(",\"bindings\":[{}]", values),
-    )
+    StatusEnvelope::new("cache-list", true)
+        .with_fields(
+            StatusFields::new().with(
+                "bindings",
+                StatusValue::array(bindings.iter().map(cache_binding_value)),
+            ),
+        )
+        .json()
 }
 
 pub fn cache_report_json(operation: &str, report: &CacheTransferReport) -> String {
-    jet_foundation::Report::render_status_json(
-        "ok",
-        true,
-        operation,
-        &format!(
-            ",\"operation\":{},\"role\":{},\"mirror\":{},\"entry\":{},\"output_hash\":{},\"nar_hash\":{},\"signed_fingerprint\":{},\"builder\":{},\"provenance\":{},\"witness\":{},\"receipt_version\":{},\"receipt_expires_unix\":{},\"credential_provider\":{},\"bytes\":{}",
-            crate::JSON::quote(operation),
-            crate::JSON::quote(&report.role),
-            crate::JSON::quote(&report.mirror),
-            crate::JSON::quote(&report.entry),
-            crate::JSON::quote(&report.output_hash),
-            crate::JSON::quote(&report.nar_hash),
-            crate::JSON::quote(&report.signed_fingerprint),
-            crate::JSON::quote(&report.builder),
-            crate::JSON::quote(&report.provenance),
-            report
-                .witness
-                .as_deref()
-                .map(crate::JSON::quote)
-                .unwrap_or_else(|| "null".to_string()),
-            report
-                .receipt_version
-                .map(|version| version.to_string())
-                .unwrap_or_else(|| "null".to_string()),
-            report
-                .receipt_expires_unix
-                .map(|expires| expires.to_string())
-                .unwrap_or_else(|| "null".to_string()),
-            report
-                .credential_provider
-                .as_deref()
-                .map(crate::JSON::quote)
-                .unwrap_or_else(|| "null".to_string()),
-            report.bytes
-        ),
-    )
+    StatusEnvelope::new(operation, true)
+        .with_fields(
+            StatusFields::new()
+                .with("operation", operation)
+                .with("role", report.role.as_str())
+                .with("mirror", report.mirror.as_str())
+                .with("entry", report.entry.as_str())
+                .with("output_hash", report.output_hash.as_str())
+                .with("nar_hash", report.nar_hash.as_str())
+                .with("signed_fingerprint", report.signed_fingerprint.as_str())
+                .with("builder", report.builder.as_str())
+                .with("provenance", report.provenance.as_str())
+                .with("witness", status_optional_string(report.witness.as_deref()))
+                .with("receipt_version", status_optional_u64(report.receipt_version))
+                .with(
+                    "receipt_expires_unix",
+                    status_optional_u64(report.receipt_expires_unix),
+                )
+                .with(
+                    "credential_provider",
+                    status_optional_string(report.credential_provider.as_deref()),
+                )
+                .with("bytes", report.bytes),
+        )
+        .json()
 }
 
 pub fn cache_stage_report_json(operation: &str, report: &CacheStageReport) -> String {
-    jet_foundation::Report::render_status_json(
-        "ok",
-        true,
-        operation,
-        &format!(
-            ",\"operation\":{},\"role\":{},\"destination\":{},\"entries\":{},\"bytes\":{}",
-            crate::JSON::quote(operation),
-            crate::JSON::quote(&report.role),
-            crate::JSON::quote(&report.destination.to_string_lossy()),
-            report.entries,
-            report.bytes,
-        ),
-    )
+    StatusEnvelope::new(operation, true)
+        .with_fields(
+            StatusFields::new()
+                .with("operation", operation)
+                .with("role", report.role.as_str())
+                .with("destination", report.destination.to_string_lossy().to_string())
+                .with("entries", report.entries)
+                .with("bytes", report.bytes),
+        )
+        .json()
 }
 
 fn select_entry(roots: &Roots, target: &str) -> io::Result<StoreEntry> {

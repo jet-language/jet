@@ -1,12 +1,14 @@
-use super::*;
+use super::{mangle, mangle_path, tuple_fields_plain, tuple_struct_name};
 use crate::jet_generated_format as jet_format;
 use crate::Diagnostics::Span;
 use crate::Generics;
 use crate::Syntax;
 use crate::AST::FfiLink;
+#[cfg(test)]
+use crate::AST::Program;
 use crate::AST::{
-    AccessConvention, ContractClause, CtValue, EnumDef, Expr, Func, Item, Program, ProgramBundle,
-    StructDef, Type, VariantField, VariantPayload,
+    AccessConvention, ContractClause, CtValue, EnumDef, Expr, FfiHandleFact, Func, Item,
+    ProgramBundle, StructDef, Type, VariantField, VariantPayload,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -82,11 +84,6 @@ fn unit_fact(
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct CoverageBranch {
-    pub(crate) id: String,
-    pub(crate) function: String,
-}
 
 #[derive(Clone)]
 pub(crate) struct ExternFn {
@@ -95,6 +92,24 @@ pub(crate) struct ExternFn {
     pub(crate) component: Option<String>,
 }
 
+
+/// D-OPMIX1: one checked operator method keyed by its complete
+/// `(lhs, trait, method, rhs)` identity. The ordinary method tables cannot
+/// represent two RHS pairs with one owner and method spelling.
+#[derive(Clone)]
+pub(crate) struct OperatorMethod {
+    pub(crate) trait_name: String,
+    pub(crate) sig: Vec<(AccessConvention, Type)>,
+    pub(crate) ret: Option<Type>,
+}
+/// D-FOUND-RECEIPT1: declaration-owned facts appended internally to a receipt
+/// Core call. Runtime tiers never infer section meaning from a value.
+#[derive(Clone)]
+pub(crate) struct ReceiptSectionFact {
+    pub(crate) name: String,
+    pub(crate) type_name: String,
+    pub(crate) schema_digest: String,
+}
 
 pub(crate) struct Cx {
     /// Top-level function name -> parameter conventions+types.
@@ -112,6 +127,10 @@ pub(crate) struct Cx {
     /// Binding a named function as a value uses this source contract; call
     /// lowering uses `fn_types`' effective failure carrier instead.
     pub(crate) fn_source_types: HashMap<String, Type>,
+    /// Checked function bodies retained for route-contract extraction. This
+    /// is compiler metadata copied from the parsed AST, never a source scan by
+    /// a runtime adapter.
+    pub(crate) fn_bodies: HashMap<String, Vec<crate::AST::Stmt>>,
     /// Function name -> source parameter names for labeled compute transforms.
     pub(crate) fn_param_names: HashMap<String, Vec<String>>,
     /// `(TypeName, method)` -> parameter conventions+types (including `self`).
@@ -160,6 +179,15 @@ pub(crate) struct Cx {
     pub(crate) type_aliases: HashMap<String, (Vec<crate::AST::TypeParam>, Type)>,
     pub(crate) trait_names: HashSet<String>,
     pub(crate) struct_fields: HashMap<String, Vec<(String, Type)>>,
+    /// Checked `#Receipt` declarations keyed by canonical type name.
+    pub(crate) receipt_sections: HashMap<String, ReceiptSectionFact>,
+    /// D-DX-PLUGIN1=D: checked package-wide panel/publication catalog shared
+    /// by TIR and every native/backend projection.
+    pub(crate) devtools_registry: jet_foundation::AST::DevtoolsRegistry,
+    /// Current module's canonical package scope.
+    pub(crate) devtools_package: String,
+    /// Current module's canonical source-module path.
+    pub(crate) devtools_module: String,
     /// D-METAREFLECT1: the registered field rows shared by comptime and
     /// runtime reflection. Layout consumers keep their own ABI map, while
     /// reflection reads this metadata-bearing model.
@@ -167,6 +195,9 @@ pub(crate) struct Cx {
     /// D-BOUND-EVOLVE1=A: published records carry one compiler-owned wire
     /// holder. The holder is not part of the Jet source schema.
     pub(crate) published_schemas: HashSet<String>,
+    /// Structs carrying both checked serde derives needed for typed HTTP
+    /// request/response schemas.
+    pub(crate) codable_types: HashSet<String>,
     /// Canonical typeable paths for reflectable nominal types. This is a
     /// projection cache seeded only from the sema name ledger.
     pub(crate) reflect_paths: HashMap<String, String>,
@@ -213,25 +244,21 @@ pub(crate) struct Cx {
     /// file module.  TIR uses this only to keep the source package's internal
     /// ABI calls distinct from calls into the package's public surface.
     pub(crate) module_alias: String,
+    /// Checked namespace identity of this loaded source module
+    /// (`package::path` from the name ledger).  This is the identity every
+    /// TIR/MIR module reference is keyed by; `module_alias` is only a
+    /// Rust-name projection and can collide across packages.
+    pub(crate) module_identity: String,
     pub(crate) core_archive_source: bool,
-    /// When true, `assert`/`assert_eq` unwind instead of exiting (test bodies).
-    pub(crate) test_mode: bool,
-    /// D-COV1: `jet test --coverage`. When true, emitted user function heads and
-    /// control-flow decisions get probes and the harness carries the recorder +
-    /// dump. Never set in normal builds, so codegen output is byte-identical
-    /// (golden tests never touch this path).
-    pub(crate) coverage: bool,
-    /// D-COV1: the test harness emits the entry module at crate root. Keep its
-    /// coverage namespace stable as `main`, independent of the input filename.
-    pub(crate) coverage_entry: bool,
-    pub(crate) coverage_branches: std::cell::RefCell<Vec<CoverageBranch>>,
-    pub(crate) coverage_branch_numbers: std::cell::RefCell<HashMap<String, usize>>,
     /// Import alias -> Rust module name (`__jet_scoring`).
     pub(crate) import_mods: HashMap<String, String>,
     /// Generated C-module functions whose wrappers return their declared C
     /// value directly. They do not use the hidden Jet `Result` carrier.
     /// Keys use the emitted module/function path (`__jet_module::function`).
     pub(crate) direct_c_functions: HashSet<String>,
+    /// Opaque C handle nominal names whose ABI is a raw pointer at native
+    /// boundaries. This is bundle metadata, not a source-level type heuristic.
+    pub(crate) opaque_handles: HashSet<String>,
     /// Canonical cross-module nominal identity -> Rust module path. The key
     /// includes package and source-module identity; import aliases are only
     /// source lookup projections and never semantic type identities.
@@ -303,6 +330,14 @@ pub(crate) struct Cx {
     /// S62/M9: (TypeName, method_name) pairs that come from trait impls — these
     /// are called without the `__jet_` prefix in Rust (the trait impl owns the name).
     pub(crate) trait_methods: HashSet<(String, String)>,
+    /// S62/M9: the checked trait identity for each static-capable trait method.
+    /// TIR carries this fact into MIR; adapters never rediscover a trait by
+    /// scanning names or implementation rows.
+    pub(crate) trait_method_traits: HashMap<(String, String), String>,
+    /// D-OPMIX1: exact operator method facts keyed by
+    /// `Traits::operator_method_identity`; unlike `method_sigs`, this table
+    /// retains one entry for every RHS pair.
+    pub(crate) operator_methods: HashMap<String, OperatorMethod>,
     /// Imported trait definitions Rust method lookup must bring into scope,
     /// keyed by generated module and trait name.
     pub(crate) imported_traits: HashSet<(String, String)>,
@@ -324,13 +359,6 @@ pub(crate) struct Cx {
     /// E2-M12 D-OBS1: name of the Jet function currently being emitted, so
     /// jet_panic_rich can include the function name in the panic report.
     pub(crate) current_fn: std::cell::RefCell<String>,
-    /// Source line for the function currently being emitted. FFI call sites
-    /// use this Jet frame when the lowered call has no finer-grained span.
-    pub(crate) current_fn_line: std::cell::Cell<u32>,
-    /// D-SIMD3=B: active `#Scalar` codegen boundary. Loop emitters use this
-    /// only to insert the shared scalar compiler barrier; it is not a runtime
-    /// semantic fact.
-    pub(crate) scalar_function: std::cell::Cell<bool>,
     /// D-MEM-SENTRY1: module/package policy facts carried into TIR lowering.
     pub(crate) policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
     /// D-MEM-GUARANTEE1: package hardening is a build-profile fact, not a
@@ -389,19 +417,9 @@ pub(crate) struct Cx {
     /// D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): trait-bounded variadic function
     /// name -> (fixed param count, resolved trait-bound list). Populated once
     /// from each `Item::Func`'s trailing param; call-site lowering
-    /// (`TIR/lower.rs`) reads this to route to the per-arity monomorphized
-    /// function `Codegen/VariadicBound.rs` synthesizes instead of the normal
-    /// single Rust function a plain generic gets.
+    /// (`TIR/lower.rs`) reads this to route calls to the typed specialization
+    /// built by `Codegen/VariadicBound.rs` instead of ordinary lowering.
     pub(crate) variadic_bound_fns: HashMap<String, (usize, Vec<String>)>,
-    /// Arities actually called, discovered while lowering ordinary function
-    /// bodies — the one traversal already guaranteed to visit every call site,
-    /// so this can never miss one the way a separate scan could. Drained after
-    /// the main function-emission pass to emit exactly the specializations
-    /// that are needed (`Codegen/VariadicBound.rs`). `BTreeMap`/`BTreeSet` (not
-    /// `Hash*`) so the emission order is deterministic — golden output must be
-    /// byte-stable across runs.
-    pub(crate) needed_variadic_arities:
-        std::cell::RefCell<std::collections::BTreeMap<String, std::collections::BTreeSet<usize>>>,
     /// D-OSTARGET1=A (ratified 2026-07-01, c134): the native OS bucket this
     /// build is compiling for — an `impl` gated to a different `#Target(OS.*)`
     /// is skipped entirely (mirrors how `Codegen/Web.rs` filters by
@@ -414,6 +432,11 @@ pub(crate) struct Cx {
     pub(crate) web_wasm_noncopy_int: bool,
     /// D-ENC712: resolved package edition for encoding surface dispatch.
     pub(crate) package_edition: String,
+    /// D-DX-PREVIEW1: compiler-owned build/revision facts for inline previews.
+    /// Adapters receive these values from checked bundle metadata; source calls
+    /// never need to expose a public metadata argument.
+    pub(crate) preview_build_id: String,
+    pub(crate) preview_revision: String,
     /// D-STM1=A (card #506): true while lowering the body of a `#Transact` block,
     /// so a `Shared<T>.edit(f)` inside it routes to the deferred `edit_txn` (the
     /// atomic Shared plane) instead of taking a lock immediately. Set/restored
@@ -424,15 +447,20 @@ pub(crate) struct Cx {
     /// Shared plane and so needs the `jet_stm::begin()/commit()` scaffold emitted.
     /// Save/restored per block so each `#Transact` reports its own use.
     pub(crate) stm_touched: std::cell::Cell<bool>,
+    /// D-FOUND-BOARD1: selected target profile facts are fixed before TIR lowering.
+    /// Hardware call nodes copy canonical IDs from this immutable sema projection.
+    pub(crate) hardware_profile: Option<jet_foundation::TargetMachine::TargetHardwareFacts>,
+    pub(crate) hardware_profile_id: Option<String>,
 }
 
-pub(crate) const MOD_USE: &str = "use super::{JetShow, JetDisplay, JetDebug, JetArith, JetPow, JetPowFloat, JetFloorDiv, JetFloorDivFloat, JetMod, JetTruncRem, JetMap, JetRemoveBy, jet_panic, jet_panic_rich, jet_trace_err, jet_index_vec, jet_index_vec_mut, jet_views_mut_new, jet_views_mut_range_new, jet_split_write, jet_get_disjoint_write, jet_edit_disjoint, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_map_merge, jet_map_merge_with, jet_map_keys, jet_map_values, jet_list_remove_value, jet_list_remove_slot, jet_priority_queue_remove_value, jet_priority_queue_remove_slot, jet_list_count, jet_list_concat, jet_char_len, jet_string_split, jet_string_lines, jet_string_after, jet_string_before, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each, jet_map_copy, jet_map_equal, jet_map_first_key, jet_map_to_list, jet_map_any, jet_map_all, jet_map_filter, jet_map_map_values, jet_map_fold, jet_map_flat_map, jet_map_max_value, jet_map_min_value, jet_map_intersection, jet_map_slice_keys, jet_map_from_keys, jet_map_contains_value, jet_map_pop_first, jet_list_replace, jet_list_slice, jet_list_binary_search, jet_list_binary_search_by, jet_list_union, jet_list_intersection, jet_list_difference, jet_list_random, jet_list_min_max, jet_list_min_max_by, jet_list_take, jet_list_skip, jet_list_step_by, jet_list_dedup, jet_list_chunks, jet_list_windows, jet_list_sum, jet_list_product, jet_list_flatten, jet_list_intersperse, jet_list_count_by, jet_list_take_while, jet_list_skip_while, jet_list_flat_map, jet_list_scan, jet_list_fold, jet_list_position, jet_list_min_by, jet_list_max_by, jet_list_group_by, jet_list_partition, jet_list_para_map, jet_list_para_filter, jet_list_para_partition, jet_list_para_fold, JetIter, jet_iter_from_vec, jet_iter_empty, jet_iter_some, jet_iter_string_split, jet_iter_take, jet_iter_skip, jet_iter_step_by, jet_iter_dedup, jet_iter_chunks, jet_iter_windows, jet_iter_map, jet_iter_map_mut, jet_iter_filter, jet_iter_take_while, jet_iter_skip_while, jet_iter_flat_map, jet_iter_filter_map, jet_iter_scan, jet_iter_flatten, jet_iter_intersperse, jet_iter_enumerate, jet_iter_indexes, jet_iter_zip, jet_iter_zip_strict, jet_iter_zip_pad};\nuse super::__jet_Ordering;\n\n";
 
 /// D-ITER-HOOK: metadata for zero-copy `loop x in mytype` lowering.
 #[derive(Debug, Clone)]
 pub(crate) struct IterableHook {
     pub iter_type: String,
     pub item_type: Type,
+    pub iter_symbol: String,
+    pub next_symbol: String,
 }
 
 /// D-INDEX-HOOK: metadata for expert `mytype[k]` lowering.
@@ -452,21 +480,191 @@ pub(crate) fn is_json_type_name(name: &str) -> bool {
 pub(crate) fn is_db_value_type_name(name: &str) -> bool {
     Syntax::is_db_value_type_name(name)
 }
-/// Plain Prelude records emitted at the generated crate root rather than under
+/// Prelude values emitted at the generated crate root rather than under
 /// `jet_std`. Keep this separate from `core_rust_type_name`: that table's caller
 /// always inserts `jet_std::`.
-pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&'static str> {
+pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
     match name {
         n if n == Syntax::TYPE_MEMO_STATS => Some("JetMemoStats"),
         n if n == Syntax::TYPE_AUTHORITY => Some("JetAuthority"),
+        n if n == Syntax::DETERMINISTIC_WORLD_TYPE => Some("JetDeterministicWorld"),
+        n if n == Syntax::TYPE_ERR => Some("JetErr"),
+        n if n == Syntax::TYPE_RANGE => Some("JetRange"),
+        n if n == Syntax::TYPE_ITER => Some("JetIter"),
+        "Point" => Some("JetPoint"),
+        "Size" => Some("JetSize"),
+        "Rect" => Some("JetRect"),
+        "SizeConstraint" => Some("JetSizeConstraint"),
+        "UiNode" => Some("JetUiNode"),
+        "FontStyle" => Some("JetFontStyle"),
+        "FontFace" => Some("JetFontFace"),
+        "Glyph" => Some("JetGlyph"),
+        "GlyphRun" => Some("JetGlyphRun"),
+        "GlyphShaper" => Some("JetGlyphShaper"),
+        "UiAriaRole" => Some("JetAriaRole"),
+        "InputEvent" => Some("JetInputEvent"),
+        "EventResult" => Some("JetEventResult"),
+        "NullBackend" => Some("JetNullBackend"),
+        "TuiBackend" => Some("JetTuiBackend"),
+        "GtkBackend" => Some("JetGtkBackend"),
+        "JetDate" | "JetInstant" | "JetLocalTime" | "JetDateTime" | "JetPeriod"
+        | "JetZone" | "JetZonedDateTime" => Some(name),
+        "WebMutationStatus" => Some("JetWebMutationStatus"),
+        "WebMutationState" => Some("JetWebMutationState"),
+        "WebQueryStatus" => Some("JetWebQueryStatus"),
+        "WebQueryNetworkMode" => Some("JetWebQueryNetworkMode"),
+        "WebQueryState" => Some("JetWebQueryState"),
+        "WebQuery" => Some("JetWebQuery"),
+        "WebStore" => Some("JetWebStore"),
+        "WebStoreTransaction" => Some("JetWebStoreTransaction"),
+        "WebStorePatch" => Some("JetWebStorePatch"),
+        "WebStoreInspection" => Some("JetWebStoreInspection"),
+        "WebStoreEvent" => Some("JetWebStoreEvent"),
+        "WebStoreSubscription" => Some("JetWebStoreSubscription"),
+        "WebFormValueType" => Some("JetWebFormValueType"),
+        "WebFormStatus" => Some("JetWebFormStatus"),
+        "WebFormFieldState" => Some("JetWebFormFieldState"),
+        "WebFormState" => Some("JetWebFormState"),
+        "WebForm" => Some("JetWebForm"),
+        "WebFormValidation" => Some("JetWebFormValidation"),
+        "WebFormControl" => Some("JetWebFormControl"),
+        "WebFormValidationTiming" => Some("JetWebFormValidationTiming"),
+        "WebFormFieldSpec" => Some("JetWebFormFieldSpec"),
+        "WebFormInput" => Some("JetWebFormInput"),
+        "WebFormDecodedInput" => Some("JetWebFormDecodedInput"),
+        "WebFormActionError" => Some("JetWebFormActionError"),
+        "WebFormLifecycleStatus" => Some("JetWebFormLifecycleStatus"),
+        "WebFormLifecycle" => Some("JetWebFormLifecycle"),
+        "WebFormErrorState" => Some("JetWebFormErrorState"),
+        "WebFormTypedAction" => Some("JetWebFormTypedAction"),
+        "WebFormTyped" => Some("JetWebFormTyped"),
+        "WebFormTypedValidation" => Some("JetWebFormTypedValidation"),
+        "WebFormTypedSubmission" => Some("JetWebFormTypedSubmission"),
+        "WebTableSortDirection" => Some("JetWebTableSortDirection"),
+        "WebTableSort" => Some("JetWebTableSort"),
+        "WebTableFilter" => Some("JetWebTableFilter"),
+        "WebTablePageMode" => Some("JetWebTablePageMode"),
+        "WebTableStatus" => Some("JetWebTableStatus"),
+        "WebTableProjection" => Some("JetWebTableProjection"),
+        "WebTableState" => Some("JetWebTableState"),
+        "WebTableColumn" => Some("JetWebTableColumn"),
+        "WebTableRow" => Some("JetWebTableRow"),
+        "WebTablePage" => Some("JetWebTablePage"),
+        "WebTable" => Some("JetWebTable"),
+        "WebVirtualViewport" => Some("JetWebVirtualViewport"),
+        "WebVirtualWindow" => Some("JetWebVirtualWindow"),
+        "WebVirtualPlan" => Some("JetWebVirtualPlan"),
+        "WebVirtualPlanViewport" => Some("JetWebVirtualPlanViewport"),
+        "Atomic" => Some("JetAtomic"),
+        "JetDataPlotMark"
+        | "JetDataPlotChannel"
+        | "JetDataPlotAggregate"
+        | "JetDataPlotFilterOp"
+        | "JetDataPlotValue"
+        | "JetDataPlotScaleKind"
+        | "JetDataPlotDomain"
+        | "JetDataPlotLegendPosition"
+        | "JetDataPlotFacetKind"
+        | "JetDataPlotInteraction"
+        | "JetDataPlotBackend"
+        | "JetDataPlotSupport"
+        | "JetDataPlotErrorKind"
+        | "JetDataPlotRenderFormat"
+        | "JetDataPlotField"
+        | "JetDataPlotSchema"
+        | "JetDataPlotSourceFacts"
+        | "JetDataPlotEncoding"
+        | "JetDataPlotScale"
+        | "JetDataPlotAxis"
+        | "JetDataPlotLegend"
+        | "JetDataPlotFacet"
+        | "JetDataPlotLayer"
+        | "JetDataPlotAccessibility"
+        | "JetDataPlotLayout"
+        | "JetDataPlotCapability"
+        | "JetDataPlotError"
+        | "JetDataPlotPlan"
+        | "JetDataPlotSelectedRow"
+        | "JetDataPlotInspection"
+        | "JetDataPlotRender"
+        | "JetDataPlotProjection"
+        | "JetDataPlotColumn"
+        | "JetDataPlot"
+        => Some(name),
+        n if job_queue_rust_type(n).is_some() => job_queue_rust_type(n),
+        _ => net_handle_rust_type(name),
+    }
+}
+
+/// D-DX-QUEUE1=A: durable job queue values are flat Prelude carriers, not
+/// `jet_std` values. `JobQueue` is opened with the static provider lifetime.
+pub(crate) fn job_queue_rust_type(name: &str) -> Option<&'static str> {
+    match name {
+        "JobQueue" => Some("JetJobQueue<'static>"),
+        "JobPayload" => Some("JetJobPayload"),
+        "JobResult" => Some("JetJobResult"),
+        "JobError" => Some("JetJobError"),
+        "JobQueueReceipt" => Some("JetJobQueueReceipt"),
+        "JobQueueClaim" => Some("JetJobQueueClaim"),
+        "JobQueueEvent" => Some("JetJobQueueEvent"),
+        "JobQueueRecord" => Some("JetJobQueueRecord"),
+        "JobQueueStatus" => Some("JetJobQueueStatus"),
+        "JobQueueState" => Some("JetJobQueueState"),
+        "JobQueueDeliveryPolicy" => Some("JetJobQueueDeliveryPolicy"),
         _ => None,
     }
 }
 
+/// Rust carriers for the public history-testing records. They live beside the
+/// generated program in the embedded Foundation module, not in `jet_std`.
+pub(crate) fn history_rust_type_name(name: &str) -> Option<&'static str> {
+    match name.rsplit_once("::").or_else(|| name.rsplit_once('.')) {
+        Some((prefix, leaf))
+            if prefix == "core"
+                || prefix.starts_with("core.")
+                || prefix.starts_with("core::") =>
+        {
+            history_rust_type_name(leaf)
+        }
+        Some(_) => None,
+        None => match name {
+            "Count" => Some("Count"),
+            "HandleId" => Some("HandleId"),
+            "TaskId" => Some("TaskId"),
+            "EventId" => Some("EventId"),
+            "HistoryRng" => Some("HistoryRng"),
+            "HistoryValue" => Some("HistoryValue"),
+            "HistoryPrecondition" => Some("HistoryPrecondition"),
+            "HistoryCase" => Some("HistoryCase"),
+            "HistoryOperation" => Some("HistoryOperation"),
+            "HistoryScheduleChoice" => Some("HistoryScheduleChoice"),
+            "HistoryBounds" => Some("HistoryBounds"),
+            "HistoryDistribution" => Some("HistoryDistribution"),
+            "HistoryStrategy" => Some("HistoryStrategy"),
+            "TypedHistoryCase" => Some("TypedHistoryCase"),
+            _ => None,
+        },
+    }
+}
+
 pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
+    // MIR keeps imported core nominals qualified by their canonical module
+    // (`core.time::LocalDate`), while source-facing lowering commonly carries
+    // the bare leaf. Normalize only a `core` path here; arbitrary qualified
+    // user/import names must not become Prelude types by leaf coincidence.
+    let name = match name.rsplit_once("::").or_else(|| name.rsplit_once('.')) {
+        Some((prefix, leaf))
+            if prefix == "core"
+                || prefix.starts_with("core.")
+                || prefix.starts_with("core::") =>
+        {
+            leaf
+        }
+        Some(_) => return None,
+        None => name,
+    };
     match name {
         n if is_json_type_name(n) => Some("DataTree"),
-        n if n == Syntax::TYPE_JSON_ERROR || n == "JSONError" => Some("JSONError"),
         n if n == Syntax::TYPE_IO_ERROR || n == "IOError" => Some("IOError"),
         n if n == Syntax::TYPE_IO_CONTEXT => Some("IOContext"),
         n if n == Syntax::TYPE_IO_OPERATION => Some("IOOperation"),
@@ -491,6 +689,12 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "TextWidthAmbiguous" => Some("TextWidthAmbiguous"),
         "TextWidthControls" => Some("TextWidthControls"),
         "TextError" => Some("TextError"),
+        "Query" => Some("DataQuery"),
+        "DataGroupedQuery" => Some("DataGroupedQuery"),
+        "Group" => Some("GroupValue"),
+        "DataJoin" => Some("DataJoin"),
+        "Signal" => Some("JetSignal"),
+        "Derived" => Some("JetDerived"),
         "AsyncPolicy" => Some("JetAsyncPolicy"),
         "Overflow" => Some("JetEventOverflow"),
         "FailurePolicy" => Some("JetFailurePolicy"),
@@ -508,6 +712,8 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-SHAPE-DURATION1/D-SHAPE-DURATIONCONVERT1: checked duration values.
         "Duration" => Some("Duration"),
         "DurationUnit" => Some("DurationUnit"),
+        // D-FOUND-COREAPI1 / #2853: event-time late-event policy carrier.
+        "LateEventDisposition" => Some("JetLateEventDisposition"),
         "RangeError" => Some("RangeError"),
         "Instant" => Some("JetInstant"),
         "Date" | "LocalDate" => Some("JetDate"),
@@ -518,13 +724,28 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "ZonedDateTime" => Some("JetZonedDateTime"),
         "Url" => Some("JetURL"),
         "Mime" => Some("JetMIME"),
+        "DataLoaderKind" => Some("DataLoaderKind"),
+        "DataFreshness" => Some("DataFreshness"),
+        "DataInvalidationCause" => Some("DataInvalidationCause"),
+        "DataAuthority" => Some("DataAuthority"),
+        "DataSourceIdentity" => Some("DataSourceIdentity"),
+        "DataProvenance" => Some("DataProvenance"),
+        "DataSnapshotIdentity" => Some("DataSnapshotIdentity"),
+        "DataLoaderStatus" => Some("DataLoaderStatus"),
+        "DataLoader" => Some("DataLoader"),
+        "DataSnapshot" => Some("DataSnapshot"),
         "Regex" => Some("JetRegex"),
         "RegexFlags" => Some("RegexFlags"),
         "Match" => Some("JetRegexMatch"),
         // D-DECIMAL1 / D-NUMTYPE1=A: precise numerics.
         "Decimal" => Some("JetDecimal"),
         "Fraction" => Some("JetFraction"),
+        // D-CONC-CHAN1=A / D-MEM1 S6: generic runtime handle carriers.
+        n if n == Syntax::TYPE_RECEIVER => Some("JetReceiver"),
+        n if n == Syntax::TYPE_SENDER => Some("JetSender"),
         "Closed" => Some("Closed"),
+        "Pool" => Some("JetPool"),
+        "Id" => Some("JetId"),
         n if n == Syntax::TYPE_TASK_FAILURE => Some("JetTaskFailure"),
         // D-LSDIR1=A: fs.list_dir returns [DirEntry].
         "DirEntry" => Some("DirEntry"),
@@ -537,11 +758,16 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "WatchKind" => Some("WatchKind"),
         "WatchHandle" => Some("WatchHandle"),
         "WatchSet" => Some("WatchSet"),
-        "TempDir" => Some("TempDir"),
+        // D-FFI-CALLBACK2=A: generated managed callback carriers.
+        "FfiCallbackEvent" => Some("JetFfiCallbackEventValue"),
+        "FfiCallbackRegistration" => Some("JetFfiCallbackRegistrationHandle"),
         "TempFile" => Some("TempFile"),
         "FileLock" => Some("FileLock"),
+        "MappedFile" => Some("JetMappedFile"),
+        // D-DX-QUEUE1=A: queue values are flat Prelude carriers. The MIR
+        // backend handles these root names without a `jet_std` namespace.
+        n if job_queue_rust_type(n).is_some() => job_queue_rust_type(n),
         // D-DATA-SURFACE1=A / D-DATA-STATUS1=A / D-DATA-PLOT1=A: core.data values.
-        "DataGroup" => Some("DataGroup"),
         "DataLineOptions" => Some("DataLineOptions"),
         "DataColumn" => Some("DataColumn"),
         "DataStatus" => Some("DataStatus"),
@@ -558,13 +784,13 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-SERDE2 / D-VALIDATE-DECODE1: the value tree and accumulated typed
         // decode errors live in jet_std.
         "DataTree" => Some("DataTree"),
-        // D-VALIDATE1: the accumulated validation error lives in jet_std too.
-        "FieldError" => Some("FieldError"),
         "EncodingLimits" => Some("EncodingLimits"),
         "EncodingError" => Some("EncodingError"),
         "EncodingCause" => Some("EncodingCause"),
         "EncodingFormat" => Some("EncodingFormat"),
         "EncodingErrorKind" => Some("EncodingErrorKind"),
+        // D-VALIDATE1: the accumulated validation error lives in jet_std too.
+        "FieldError" => Some("FieldError"),
         "CBOROptions" => Some("CBOROptions"),
         "CBORError" => Some("CBORError"),
         "CBORErrorKind" => Some("CBORErrorKind"),
@@ -597,6 +823,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "RaylibWindow" => Some("RaylibWindow"),
         "RaylibColor" => Some("RaylibColor"),
         "RaylibSound" => Some("RaylibSound"),
+        "RaylibTextureAtlas" => Some("RaylibTextureAtlas"),
         // D-TYPEDSQL-SINK1=A: `SQL` is a checked `(String, Vec<DBValue>)`
         // carrier. It remains a known core value type for subset gating; the
         // explicit Rust spelling comes from the `rust_type` arm below.
@@ -631,6 +858,44 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "Vec4" => Some("Vec4"),
         "Mat3" => Some("Mat3"),
         "Mat4" => Some("Mat4"),
+        // D-SPACE-GEOMETRY1=A: coordinate tags erase to compact Prelude
+        // carriers; the nominal space is a sema fact, not a heap object.
+        "Point2" | "Delta2" | "ScreenPoint" | "WorldPoint" | "ViewPoint"
+        | "CameraPoint" | "DevicePoint" | "ScreenDelta" | "WorldDelta"
+        | "ViewDelta" | "CameraDelta" | "DeviceDelta" => Some("JetCoord2"),
+        "Transform" | "Transform2" => Some("JetTransform2"),
+        "Ray2" => Some("JetRay2"),
+        _ => None,
+    }
+}
+
+/// Core email types are emitted by the `jet_email` Prelude module, not by
+/// `jet_std`. MIR canonicalization preserves the `email.<Type>` owner prefix,
+/// so keep this mapping qualified and do not let a user nominal named
+/// `Address` acquire the Core spelling by leaf coincidence.
+pub(crate) fn core_email_rust_type_name(name: &str) -> Option<&'static str> {
+    let (prefix, leaf) = name
+        .rsplit_once("::")
+        .or_else(|| name.rsplit_once('.'))?;
+    if !matches!(prefix, "email" | "core.email" | "core::email") {
+        return None;
+    }
+    match leaf {
+        "Address" => Some("Address"),
+        "Message" => Some("Message"),
+        "Attachment" => Some("Attachment"),
+        "Envelope" => Some("Envelope"),
+        "SMTPSecurity" => Some("SMTPSecurity"),
+        "RecipientPolicy" => Some("RecipientPolicy"),
+        "RecipientReport" => Some("RecipientReport"),
+        "SendReport" => Some("SendReport"),
+        "EmailError" => Some("EmailError"),
+        "Limits" => Some("Limits"),
+        "SMTPAuth" => Some("SMTPAuth"),
+        "TLSTrust" => Some("TLSTrust"),
+        "DkimConfig" => Some("DkimConfig"),
+        "SMTPConfig" => Some("SMTPConfig"),
+        "Mailer" => Some("Mailer"),
         _ => None,
     }
 }
@@ -713,9 +978,9 @@ pub(crate) fn file_handle_rust_type(name: &str) -> Option<&'static str> {
         "StdinHandle" => Some("JetStdinReader"),
         "StdinLines" => Some("()"),
         // D-PROCESS1=A: `child.stdin`/`.stdout`/`.stderr` handle markers — the real
-        // Rust value comes straight off the `ProcessChild` struct field (see
-        // `core_struct_field_rust_name`); these Jet-level types never appear as a
-        // standalone Rust type. `ProcessLines` is the `.lines()` loop-only marker.
+        // Rust value comes straight off the `ProcessChild` struct field; these
+        // Jet-level types never appear as a standalone Rust type.
+        // `ProcessLines` is the `.lines()` loop-only marker.
         "ProcessStdin" => Some("()"),
         "ProcessStdoutStream" => Some("()"),
         "ProcessStderrStream" => Some("()"),
@@ -725,9 +990,16 @@ pub(crate) fn file_handle_rust_type(name: &str) -> Option<&'static str> {
         "Stderr" => Some("JetStderr"),
         // D-PATHFS1: typed path handle.
         "Path" => Some("JetPath"),
+        // D-FILESCOPE1=A: scoped filesystem handles are top-level prelude
+        // values and are borrowed by scope-bound file operations.
+        "FileScope" => Some("JetFileScope"),
         // D-DBDRIVER1: the SQLite connection handle wrapper.
         "DBConnection" => Some("JetDbConnection"),
         "DBScope" => Some("JetDbScope"),
+        "DbPool" => Some("JetDbPool<JetDbConnection>"),
+        "DbLease" => Some("JetDbLease<JetDbConnection>"),
+        "DbPoolReceipt" => Some("JetDbPoolReceipt"),
+        "DbPoolLifecycle" => Some("JetDbPoolLifecycle"),
         // D-DEP-WASM1=A / D-PLUGIN1=B (c81): the sandboxed WASM plugin handle.
         "Plugin" => Some("JetPlugin"),
         // D-LIB-CALLGRANT1=A: loaded libraries are opaque handles; the grant
@@ -745,6 +1017,7 @@ pub(crate) fn raylib_handle_rust_type(name: &str) -> Option<&'static str> {
         "RaylibWindow" => Some("RaylibWindow"),
         "RaylibColor" => Some("RaylibColor"),
         "RaylibSound" => Some("RaylibSound"),
+        "RaylibTextureAtlas" => Some("RaylibTextureAtlas"),
         _ => None,
     }
 }
@@ -837,6 +1110,20 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
         "HTTPCorsOrigins" => Some("JetHTTPCorsOrigins"),
         "HTTPCompressEncoding" => Some("JetHTTPCompressEncoding"),
         "HTTPRouter" => Some("JetHTTPRouter"),
+        "HTTPMethod" => Some("JetHTTPMethod"),
+        "HTTPStatus" => Some("JetHTTPStatus"),
+        "HTTPVersion" => Some("JetHTTPVersion"),
+        "HTTPHeaderName" => Some("JetHTTPHeaderName"),
+        "HTTPHeaderValue" => Some("JetHTTPHeaderValue"),
+        "HTTPBody" => Some("JetHTTPBody"),
+        "HTTPError" => Some("JetHTTPError"),
+        "HTTPOperation" => Some("JetHTTPOperation"),
+        "HTTPHeaders" => Some("JetHTTPHeaders"),
+        "HTTPMux" => Some("JetHTTPMux"),
+        "HTTPHandler" => Some("JetHTTPHandler"),
+        "HTTPServer" => Some("JetHTTPServer"),
+        "HTTPShutdownReport" => Some("JetHTTPShutdownReport"),
+        "HTTPServerTls" => Some("JetHTTPServerTls"),
         _ => None,
     }
 }
@@ -856,8 +1143,18 @@ pub(crate) fn nominal_leaf(name: &str) -> &str {
         .map_or(name, |(_, leaf)| leaf)
 }
 
-
 impl Cx {
+    /// Module key every TFunc lowered under this context is owned by.  This is
+    /// the checked module identity; a context built without a bundle (tests,
+    /// fragments) falls back to the source file so keys stay unique.
+    pub(crate) fn tir_module(&self) -> String {
+        if self.module_identity.is_empty() {
+            self.file.clone()
+        } else {
+            self.module_identity.clone()
+        }
+    }
+
     pub(crate) fn persistent_local(&self, name: &str) -> Option<crate::Codegen::TIR::TLocal> {
         self.persist_types.get(name).map(|_| {
             crate::Codegen::TIR::TLocal::persistent(
@@ -875,33 +1172,6 @@ impl Cx {
         })
     }
 
-    pub(crate) fn register_coverage_branch(&self) -> String {
-        let function = {
-            let current = self.current_fn.borrow();
-            if current.is_empty() {
-                "<test>".to_string()
-            } else {
-                current.clone()
-            }
-        };
-        let next = {
-            let mut numbers = self.coverage_branch_numbers.borrow_mut();
-            let next = numbers.entry(function.clone()).or_insert(0);
-            *next += 1;
-            *next
-        };
-        let module = if self.coverage_entry || self.module_alias.is_empty() {
-            "main"
-        } else {
-            self.module_alias.as_str()
-        };
-        let id = format!("{module}::{function}#branch{next}");
-        self.coverage_branches.borrow_mut().push(CoverageBranch {
-            id: id.clone(),
-            function,
-        });
-        id
-    }
 
     pub(crate) fn foreign_type_identity(&self, alias: &str, leaf: &str) -> Option<String> {
         // A bare source name resolves to a local nominal before any imported
@@ -993,26 +1263,7 @@ impl Cx {
                 .is_some_and(|canonical| self.display_types.contains(&canonical))
     }
 
-    pub(crate) fn has_auto_printable_type(&self, name: &str) -> bool {
-        self.auto_printable.contains(name)
-            || self
-                .imported_type_metadata_name(name)
-                .is_some_and(|canonical| self.auto_printable.contains(&canonical))
-    }
 
-    /// I2: whether codegen guarantees a `JetDebug` impl for nominal `name` —
-    /// auto-derived (`auto_debug`, which also carries the Prelude synthetic
-    /// set) or hand-implemented (`debug_types`). Distinct newtypes are handled
-    /// separately: they always get an impl.
-    pub(crate) fn has_auto_debug_type(&self, name: &str) -> bool {
-        self.auto_debug.contains(name)
-            || self.debug_types.contains(name)
-            || self
-                .imported_type_metadata_name(name)
-                .is_some_and(|canonical| {
-                    self.auto_debug.contains(&canonical) || self.debug_types.contains(&canonical)
-                })
-    }
 
     pub(crate) fn is_distinct_type_name(&self, name: &str) -> bool {
         self.distinct_types.contains_key(name)
@@ -1146,9 +1397,7 @@ impl Cx {
             .or_else(|| {
                 self.inline_core_imports
                     .iter()
-                    .filter_map(|(scope, imports)| {
-                        imports.get(alias).map(|module| (scope, module))
-                    })
+                    .filter_map(|(scope, imports)| imports.get(alias).map(|module| (scope, module)))
                     .min_by(|(left_scope, left_module), (right_scope, right_module)| {
                         left_scope
                             .cmp(right_scope)
@@ -1165,9 +1414,7 @@ impl Cx {
             .or_else(|| {
                 self.inline_foreign_imports
                     .iter()
-                    .filter_map(|(scope, imports)| {
-                        imports.get(alias).map(|module| (scope, module))
-                    })
+                    .filter_map(|(scope, imports)| imports.get(alias).map(|module| (scope, module)))
                     .min_by(|(left_scope, left_module), (right_scope, right_module)| {
                         left_scope
                             .cmp(right_scope)
@@ -1180,6 +1427,57 @@ impl Cx {
 
     pub(crate) fn core_qualified_rust_type_name(&self, name: &str) -> Option<&'static str> {
         let (alias, leaf) = name.split_once('.')?;
+        if matches!(
+            self.any_core_import_module(alias),
+            Some("core.data") | Some("core.data.plot")
+        ) {
+            return match leaf {
+                "JetDataPlotMark" => Some("JetDataPlotMark"),
+                "DataLoaderKind" => Some("DataLoaderKind"),
+                "DataFreshness" => Some("DataFreshness"),
+                "DataInvalidationCause" => Some("DataInvalidationCause"),
+                "DataAuthority" => Some("DataAuthority"),
+                "DataSourceIdentity" => Some("DataSourceIdentity"),
+                "DataProvenance" => Some("DataProvenance"),
+                "DataSnapshotIdentity" => Some("DataSnapshotIdentity"),
+                "DataLoaderStatus" => Some("DataLoaderStatus"),
+                "DataLoader" => Some("DataLoader"),
+                "DataSnapshot" => Some("DataSnapshot"),
+                "JetDataPlotAggregate" => Some("JetDataPlotAggregate"),
+                "JetDataPlotFilterOp" => Some("JetDataPlotFilterOp"),
+                "JetDataPlotValue" => Some("JetDataPlotValue"),
+                "JetDataPlotScaleKind" => Some("JetDataPlotScaleKind"),
+                "JetDataPlotDomain" => Some("JetDataPlotDomain"),
+                "JetDataPlotLegendPosition" => Some("JetDataPlotLegendPosition"),
+                "JetDataPlotFacetKind" => Some("JetDataPlotFacetKind"),
+                "JetDataPlotInteraction" => Some("JetDataPlotInteraction"),
+                "JetDataPlotBackend" => Some("JetDataPlotBackend"),
+                "JetDataPlotSupport" => Some("JetDataPlotSupport"),
+                "JetDataPlotErrorKind" => Some("JetDataPlotErrorKind"),
+                "JetDataPlotRenderFormat" => Some("JetDataPlotRenderFormat"),
+                "JetDataPlotField" => Some("JetDataPlotField"),
+                "JetDataPlotSchema" => Some("JetDataPlotSchema"),
+                "JetDataPlotSourceFacts" => Some("JetDataPlotSourceFacts"),
+                "JetDataPlotEncoding" => Some("JetDataPlotEncoding"),
+                "JetDataPlotScale" => Some("JetDataPlotScale"),
+                "JetDataPlotAxis" => Some("JetDataPlotAxis"),
+                "JetDataPlotLegend" => Some("JetDataPlotLegend"),
+                "JetDataPlotFacet" => Some("JetDataPlotFacet"),
+                "JetDataPlotLayer" => Some("JetDataPlotLayer"),
+                "JetDataPlotAccessibility" => Some("JetDataPlotAccessibility"),
+                "JetDataPlotLayout" => Some("JetDataPlotLayout"),
+                "JetDataPlotCapability" => Some("JetDataPlotCapability"),
+                "JetDataPlotError" => Some("JetDataPlotError"),
+                "JetDataPlotPlan" => Some("JetDataPlotPlan"),
+                "JetDataPlotSelectedRow" => Some("JetDataPlotSelectedRow"),
+                "JetDataPlotInspection" => Some("JetDataPlotInspection"),
+                "JetDataPlotRender" => Some("JetDataPlotRender"),
+                "JetDataPlotProjection" => Some("JetDataPlotProjection"),
+                "JetDataPlotColumn" => Some("JetDataPlotColumn"),
+                "JetDataPlot" => Some("JetDataPlot"),
+                _ => None,
+            };
+        }
         match (self.any_core_import_module(alias), leaf) {
             (Some("core.crypto"), leaf) => core_crypto_type_name(leaf),
             (Some("core.auth"), "Claims") => Some("Claims"),
@@ -1200,13 +1498,13 @@ impl Cx {
             (Some("core.net.tls"), "ClientIdentity") => Some("TLSClientIdentity"),
             (Some("core.sys"), "EnvError") => Some("EnvError"),
             (Some("core.mem"), "AllocError") => Some("AllocError"),
+            (Some("core.encoding"), "DataEvent") => Some("DataEvent"),
             (Some("core.encoding"), "DataTree") => Some("DataTree"),
             (Some("core.encoding"), "EncodingLimits") => Some("EncodingLimits"),
             (Some("core.encoding"), "EncodingError") => Some("EncodingError"),
             (Some("core.encoding"), "EncodingCause") => Some("EncodingCause"),
             (Some("core.encoding"), "EncodingFormat") => Some("EncodingFormat"),
             (Some("core.encoding"), "EncodingErrorKind") => Some("EncodingErrorKind"),
-            (Some("core.encoding"), "DataEvent") => Some("DataEvent"),
             (Some("core.email"), "Address") => Some("Address"),
             (Some("core.email"), "Message") => Some("Message"),
             (Some("core.email"), "Attachment") => Some("Attachment"),
@@ -1246,6 +1544,17 @@ impl Cx {
             (Some("core.encoding.cbor"), "CBORError") => Some("CBORError"),
             (Some("core.encoding.cbor"), "CBORErrorKind") => Some("CBORErrorKind"),
             (Some("core.encoding.cbor"), "CBORWriter") => Some("CBORWriter"),
+            (Some("core.jobs"), "JobQueue") => Some("JobQueue"),
+            (Some("core.jobs"), "JobPayload") => Some("JobPayload"),
+            (Some("core.jobs"), "JobResult") => Some("JobResult"),
+            (Some("core.jobs"), "JobError") => Some("JobError"),
+            (Some("core.jobs"), "JobQueueReceipt") => Some("JobQueueReceipt"),
+            (Some("core.jobs"), "JobQueueClaim") => Some("JobQueueClaim"),
+            (Some("core.jobs"), "JobQueueEvent") => Some("JobQueueEvent"),
+            (Some("core.jobs"), "JobQueueRecord") => Some("JobQueueRecord"),
+            (Some("core.jobs"), "JobQueueStatus") => Some("JobQueueStatus"),
+            (Some("core.jobs"), "JobQueueState") => Some("JobQueueState"),
+            (Some("core.jobs"), "JobQueueDeliveryPolicy") => Some("JobQueueDeliveryPolicy"),
             _ => None,
         }
     }
@@ -1600,15 +1909,6 @@ impl Cx {
         self.rust_type_with_view_lifetime_using(ty, &|ty| self.rust_type(ty))
     }
 
-    pub(crate) fn rust_type_with_view_lifetime_assoc(
-        &self,
-        ty: &Type,
-        assoc: &HashSet<String>,
-    ) -> String {
-        self.rust_type_with_view_lifetime_using(ty, &|ty| {
-            crate::Traits::rust_type_name_assoc(ty, assoc)
-        })
-    }
 
     fn rust_type_with_view_lifetime_using(
         &self,
@@ -1734,47 +2034,7 @@ impl Cx {
         render(self, &self.expand_type_aliases(ty), base)
     }
 
-    pub(crate) fn struct_field_rust_with_view_lifetime(
-        &self,
-        s: &StructDef,
-        edge: &str,
-        ty: &Type,
-    ) -> String {
-        let base = match ty {
-            Type::Named(n) if s.type_params.iter().any(|p| p.name == *n) => n.clone(),
-            _ if self.type_contains_view(ty) => self.rust_type_with_view_lifetime(ty),
-            _ => self.rust_type(ty),
-        };
-        if self
-            .boxed_edges
-            .contains(&(s.name.clone(), edge.to_string()))
-        {
-            format!("Box<{base}>")
-        } else {
-            base
-        }
-    }
 
-    pub(crate) fn enum_field_rust_with_view_lifetime(
-        &self,
-        owner: &str,
-        edge: &str,
-        ty: &Type,
-    ) -> String {
-        let base = if self.type_contains_view(ty) {
-            self.rust_type_with_view_lifetime(ty)
-        } else {
-            self.rust_type(ty)
-        };
-        if self
-            .boxed_edges
-            .contains(&(owner.to_string(), edge.to_string()))
-        {
-            format!("Box<{base}>")
-        } else {
-            base
-        }
-    }
 
     /// D-SOA1: is `name` a `#layout(columnar)` struct (local or imported)? The
     /// columnar set only carries local structs; an imported columnar struct is
@@ -1809,6 +2069,12 @@ impl Cx {
             .get(name)?
             .iter()
             .position(|(candidate, _)| candidate == field)
+    }
+    /// D-DATA-PLOT1=A: derive the canonical identity shared by table schema
+    /// columns and typed plot selectors through the Foundation identity kernel.
+    pub(crate) fn data_plot_field_id(&self, name: &str, ty: &Type) -> String {
+        let type_name = ty.name();
+        jet_foundation::PreludeDataFlow::column_identity(name, &type_name)
     }
 
     /// D-TYPEALIAS1 / D-ALIAS-OP1=B: expand `alias Name<T> :: …` applications to their target type.
@@ -1885,6 +2151,29 @@ impl Cx {
             ),
             other => other.clone(),
         }
+    }
+
+    /// Project source types into the checked trait-object form consumed by
+    /// TIR/MIR. Explicit binders supplement the method-level scope already
+    /// held by this context, so a generic name can shadow a trait name.
+    pub(crate) fn canonicalize_checked_type<'a>(
+        &self,
+        ty: &Type,
+        binders: impl IntoIterator<Item = &'a String>,
+    ) -> Type {
+        let mut binder_names = self.current_type_params.borrow().clone();
+        for name in binders {
+            if !binder_names.contains(name) {
+                binder_names.insert(name.clone());
+            }
+        }
+        let expanded = self.expand_type_aliases(ty);
+        crate::Codegen::TIR::tir_to_mir_types::canonicalize_checked_trait_types(
+            &expanded,
+            &self.trait_names,
+            &self.type_names,
+            &binder_names,
+        )
     }
 
     pub(crate) fn rust_type(&self, ty: &Type) -> String {
@@ -1978,10 +2267,8 @@ impl Cx {
             Type::Named(name)
                 if name == Syntax::TYPE_TASK_FAILURE && !self.type_names.contains(name) =>
             {
-                format!("{}jet_std::JetTaskFailure", self.root_prefix)
+                format!("{}JetTaskFailure", self.root_prefix)
             }
-            // D-TASKGROUP-PARAM1=A: helpers receive the lexical group's real
-            // internal collector. The surface remains second-class.
             Type::Named(name)
                 if name == Syntax::TYPE_TASKGROUP && !self.type_names.contains(name) =>
             {
@@ -1992,8 +2279,11 @@ impl Cx {
             {
                 format!("{}jet_std::JetCondition", self.root_prefix)
             }
-            Type::Named(name) if name == Syntax::TYPE_ERR => {
-                format!("{}JetErr", self.root_prefix)
+            Type::Named(name)
+                if name == Syntax::TYPE_SHARED_REVISION_ERROR
+                    && !self.type_names.contains(name) =>
+            {
+                format!("{}jet_std::JetSharedRevisionError", self.root_prefix)
             }
             Type::Named(name) if name == Syntax::TYPE_NEVER => {
                 "std::convert::Infallible".to_string()
@@ -2117,40 +2407,6 @@ impl Cx {
             {
                 format!("{}jet_email::{}", self.root_prefix, name)
             }
-            // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types → opaque Rust structs.
-            Type::Named(name) if name == "HTTPRequest" => "JetHTTPRequest".to_string(),
-            Type::Named(name) if name == "HTTPResponse" => "JetHTTPResponse".to_string(),
-            Type::Named(name) if name == "HTTPClient" => "JetHTTPClient".to_string(),
-            Type::Named(name) if name == "HTTPProxy" => "JetHTTPProxy".to_string(),
-            Type::Named(name) if name == "HTTPRedirectPolicy" => {
-                "JetHTTPRedirectPolicy".to_string()
-            }
-            Type::Named(name) if name == "HTTPRetryPolicy" => "JetHTTPRetryPolicy".to_string(),
-            Type::Named(name) if name == "HTTPCookieJar" => "JetHTTPCookieJar".to_string(),
-            Type::Named(name) if name == "HTTPCorsPolicy" => "JetHTTPCorsPolicy".to_string(),
-            Type::Named(name) if name == "HTTPCorsOrigins" => "JetHTTPCorsOrigins".to_string(),
-            Type::Named(name) if name == "HTTPCompressEncoding" => {
-                "JetHTTPCompressEncoding".to_string()
-            }
-            Type::Named(name) if name == "HTTPMethod" => "JetHTTPMethod".to_string(),
-            Type::Named(name) if name == "HTTPStatus" => "JetHTTPStatus".to_string(),
-            Type::Named(name) if name == "HTTPVersion" => "JetHTTPVersion".to_string(),
-            Type::Named(name) if name == "HTTPHeaderName" => "JetHTTPHeaderName".to_string(),
-            Type::Named(name) if name == "HTTPHeaderValue" => "JetHTTPHeaderValue".to_string(),
-            Type::Named(name) if name == "HTTPBody" => "JetHTTPBody".to_string(),
-            Type::Named(name) if name == "HTTPBodyChunks" => "JetHTTPBodyChunks".to_string(),
-            Type::Named(name) if name == "HTTPError" => "JetHTTPError".to_string(),
-            Type::Named(name) if name == "HTTPOperation" => "JetHTTPOperation".to_string(),
-            Type::Named(name) if name == "HTTPHeaders" => "JetHTTPHeaders".to_string(),
-            Type::Named(name) if name == "HTTPMux" => "JetHTTPMux".to_string(),
-            Type::Named(name) if name == "HTTPHandler" => "JetHTTPHandler".to_string(),
-            Type::Named(name) if name == "HTTPServer" => "JetHTTPServer".to_string(),
-            Type::Named(name) if name == "HTTPShutdownReport" => {
-                "JetHTTPShutdownReport".to_string()
-            }
-            Type::Named(name) if name == "HTTPRequest" => "JetHTTPRequest".to_string(),
-            Type::Named(name) if name == "HTTPResponse" => "JetHTTPResponse".to_string(),
-            Type::Named(name) if name == "HTTPServerTls" => "JetHTTPServerTls".to_string(),
             // D-WS1=B: WebSocket types.
             Type::Named(name) if name == "WsConn" => "JetWsConn".to_string(),
             Type::Named(name) if name == "WsError" => "JetWsError".to_string(),
@@ -2188,39 +2444,188 @@ impl Cx {
             Type::Named(name) if name == "ScopeGuard" => "_".to_string(),
             // D-TERM1 (ratified 2026-06-22): `Key` is a top-level prelude enum.
             Type::Named(name) if name == "Key" => format!("{}JetKey", self.root_prefix),
-            // D-RENDERTGT2=A (c133 M1): UI geometry/event/backend types. User structs
-            // named Point/Rect/Size (common in examples) keep `__jet_<Name>` lowering.
-            Type::Named(name) if name == "Point" && !self.type_names.contains(name) => {
-                format!("{}JetPoint", self.root_prefix)
+            // D-FOUND-PLATFORM1=A: Core host/font values are shared Prelude
+            // records.  Backends only marshal them; they do not re-define them.
+            Type::Named(name)
+                if matches!(
+                    name.as_str(),
+                    "UiCapability"
+                        | "UiCapabilityFact"
+                        | "UiCapabilityFacts"
+                        | "UiCancellation"
+                        | "UiHostError"
+                        | "UiFileDialogKind"
+                        | "UiFsAccess"
+                        | "UiFsRights"
+                        | "UiFsGrant"
+                        | "UiGrantedPath"
+                        | "UiFileFilter"
+                        | "UiFileDialogRequest"
+                        | "UiFileDialogSelection"
+                        | "UiClipboardText"
+                        | "UiClipboardWrite"
+                        | "UiTextRange"
+                        | "UiImeMode"
+                        | "UiImePhase"
+                        | "UiImeComposition"
+                        | "UiImeEvent"
+                        | "UiDragOperation"
+                        | "UiDropItem"
+                        | "UiDragPhase"
+                        | "UiDragEvent"
+                        | "UiShortcutModifier"
+                        | "UiShortcutModifiers"
+                        | "UiShortcut"
+                        | "UiShortcutBinding"
+                        | "UiShortcutDispatch"
+                        | "UiAccessibilityState"
+                        | "UiAccessibility"
+                        | "UiNodeId"
+                        | "UiAccessibilityProjection"
+                        | "UiPreview"
+                        | "UiPlayground"
+                        | "UiPreviewAccessibility"
+                        | "UiPreviewAuthority"
+                        | "UiPreviewContext"
+                        | "UiPreviewDevice"
+                        | "UiPreviewEffect"
+                        | "UiPreviewInputOverride"
+                        | "UiPreviewInputValue"
+                        | "UiPreviewKind"
+                        | "UiPreviewLifecycle"
+                        | "UiPreviewRegistry"
+                        | "UiPreviewSource"
+                        | "UiPreviewTheme"
+                        | "UiPreviewTraits"
+                        | "UiPreviewViewport"
+                ) && !self.type_names.contains(name) =>
+            {
+                format!("{}Jet{}", self.root_prefix, name)
             }
-            Type::Named(name) if name == "Size" && !self.type_names.contains(name) => {
-                format!("{}JetSize", self.root_prefix)
+            Type::Named(name)
+                if name == "UiFileFilterResult" && !self.type_names.contains(name) =>
+            {
+                format!("{}JetUiServiceResult<{}JetUiFileFilter>", self.root_prefix, self.root_prefix)
             }
-            Type::Named(name) if name == "Rect" && !self.type_names.contains(name) => {
-                format!("{}JetRect", self.root_prefix)
+            Type::Named(name)
+                if name == "UiFsGrantResult" && !self.type_names.contains(name) =>
+            {
+                format!("{}JetUiServiceResult<{}JetUiFsGrant>", self.root_prefix, self.root_prefix)
             }
-            Type::Named(name) if name == "SizeConstraint" && !self.type_names.contains(name) => {
-                format!("{}JetSizeConstraint", self.root_prefix)
+            Type::Named(name)
+                if name == "UiShortcutResult" && !self.type_names.contains(name) =>
+            {
+                format!("{}JetUiServiceResult<{}JetUiShortcut>", self.root_prefix, self.root_prefix)
             }
-            Type::Named(name) if name == "UiNode" && !self.type_names.contains(name) => {
-                format!("{}JetUiNode", self.root_prefix)
+            Type::Named(name)
+                if name == "UiShortcutBindingResult" && !self.type_names.contains(name) =>
+            {
+                format!(
+                    "{}JetUiServiceResult<{}JetUiShortcutBinding>",
+                    self.root_prefix, self.root_prefix
+                )
             }
-            Type::Named(name) if name == "InputEvent" && !self.type_names.contains(name) => {
-                format!("{}JetInputEvent", self.root_prefix)
+            Type::Named(name)
+                if name == "UiAccessibilityResult" && !self.type_names.contains(name) =>
+            {
+                format!(
+                    "{}JetUiServiceResult<{}JetUiAccessibility>",
+                    self.root_prefix, self.root_prefix
+                )
             }
-            Type::Named(name) if name == "EventResult" && !self.type_names.contains(name) => {
-                format!("{}JetEventResult", self.root_prefix)
+            Type::Named(name)
+                if name == "UiFileDialogResult" && !self.type_names.contains(name) =>
+            {
+                format!(
+                    "{}JetUiServiceResult<{}JetUiFileDialogSelection>",
+                    self.root_prefix, self.root_prefix
+                )
             }
-            Type::Named(name) if name == "NullBackend" && !self.type_names.contains(name) => {
-                format!("{}JetNullBackend", self.root_prefix)
+            Type::Named(name)
+                if name == "UiClipboardTextResult" && !self.type_names.contains(name) =>
+            {
+                format!(
+                    "{}JetUiServiceResult<{}JetUiClipboardText>",
+                    self.root_prefix, self.root_prefix
+                )
             }
-            Type::Named(name) if name == "TuiBackend" && !self.type_names.contains(name) => {
-                format!("{}JetTuiBackend", self.root_prefix)
+            Type::Named(name)
+                if name == "UiClipboardWriteResult" && !self.type_names.contains(name) =>
+            {
+                format!(
+                    "{}JetUiServiceResult<{}JetUiClipboardWrite>",
+                    self.root_prefix, self.root_prefix
+                )
             }
-            // D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend — a
-            // top-level prelude struct re-exported from `mod jet_gtk`.
-            Type::Named(name) if name == "GtkBackend" && !self.type_names.contains(name) => {
-                format!("{}JetGtkBackend", self.root_prefix)
+            Type::Named(name) if name == "UiImeResult" && !self.type_names.contains(name) => {
+                format!(
+                    "{}JetUiServiceResult<Option<{}JetUiImeEvent>>",
+                    self.root_prefix, self.root_prefix
+                )
+            }
+            Type::Named(name) if name == "UiDragResult" && !self.type_names.contains(name) => {
+                format!(
+                    "{}JetUiServiceResult<Option<{}JetUiDragEvent>>",
+                    self.root_prefix, self.root_prefix
+                )
+            }
+            Type::Named(name)
+                if name == "UiShortcutDispatchResult" && !self.type_names.contains(name) =>
+            {
+                format!(
+                    "{}JetUiServiceResult<{}JetUiShortcutDispatch>",
+                    self.root_prefix, self.root_prefix
+                )
+            }
+            Type::Named(name)
+                if name == "UiAccessibilityAttachResult" && !self.type_names.contains(name) =>
+            {
+                format!("{}JetUiServiceResult<()>", self.root_prefix)
+            }
+            Type::Named(name)
+                if name == "UiAccessibilityProjectionResult"
+                    && !self.type_names.contains(name) =>
+            {
+                format!(
+                    "{}JetUiServiceResult<Option<{}JetUiAccessibilityProjection>>",
+                    self.root_prefix, self.root_prefix
+
+                )
+            }
+            Type::Named(name)
+                if name == "UiAccessibilityNodeResult" && !self.type_names.contains(name) =>
+            {
+                format!("{}JetUiServiceResult<{}JetUiNode>", self.root_prefix, self.root_prefix)
+            }
+            // D-SPACE-GEOMETRY1=A: static coordinate-space tags erase in the
+            // native carrier. Frame identity is retained by JetTransform2,
+            // not by allocating a marker per point.
+            Type::Named(name)
+                if matches!(
+                    name.as_str(),
+                    "ScreenPoint"
+                        | "WorldPoint"
+                        | "ViewPoint"
+                        | "CameraPoint"
+                        | "DevicePoint"
+                        | "ScreenDelta"
+                        | "WorldDelta"
+                        | "ViewDelta"
+                        | "CameraDelta"
+                        | "DeviceDelta"
+                ) && !self.type_names.contains(name) =>
+            {
+                format!("{}JetCoord2", self.root_prefix)
+            }
+            Type::Named(name)
+                if matches!(name.as_str(), "TransformError" | "FrameId")
+                    && !self.type_names.contains(name) =>
+            {
+                if name == "FrameId" {
+                    format!("{}i64", self.root_prefix)
+                } else {
+                    format!("{}JetErr", self.root_prefix)
+                }
             }
             // c-devserver (owner-directed 2026-07-01): DevServer is a
             // top-level prelude struct (Prelude/DevServer.rs).
@@ -2335,6 +2740,24 @@ impl Cx {
                 )
             }
             Type::Apply { name, args }
+                if matches!(name.as_str(), "Point2" | "Delta2")
+                    && args.len() == 2 =>
+            {
+                format!("{}JetCoord2", self.root_prefix)
+            }
+            Type::Apply { name, args }
+                if matches!(name.as_str(), "Transform" | "Transform2")
+                    && (args.len() == 2 || args.len() == 3) =>
+            {
+                format!("{}JetTransform2", self.root_prefix)
+            }
+            Type::Apply { name, args }
+                if name == "Ray2" && args.len() == 3 =>
+            {
+                format!("{}JetRay2", self.root_prefix)
+            }
+
+            Type::Apply { name, args }
                 if matches!(name.as_str(), "Tensor" | "Vec" | "Matrix")
                     && (name != "Tensor" || args.len() <= 1)
                     && compute_handle_rust_type("Tensor").is_some() =>
@@ -2433,6 +2856,9 @@ impl Cx {
             }
             Type::Named(name) if self.core_qualified_rust_type_name(name).is_some() => {
                 let resolved = self.core_qualified_rust_type_name(name).unwrap();
+                if let Some(rust) = job_queue_rust_type(resolved) {
+                    return format!("{}{rust}", self.root_prefix);
+                }
                 if resolved == "AllocError" {
                     return format!("{}AllocError", self.root_prefix);
                 }
@@ -2523,6 +2949,17 @@ impl Cx {
             // scheduler value, and its error is projected to `TaskFailure` by
             // the join adapter; only an already-carried TIR task keeps its
             // existing inner error type.
+            // D-PLACE1=A: `Atomic<T>` is the root Prelude's one-word carrier,
+            // not a JetStd member. The exact-Int marker keeps source `Int`
+            // distinct from fixed-width `I64` despite their shared i64 ABI.
+            Type::Apply { name, args } if name == "Atomic" && args.len() == 1 => {
+                let inner = if matches!(args[0].without_user_tags(), Type::Int) {
+                    "JetAtomicInt".to_string()
+                } else {
+                    self.rust_type(&args[0])
+                };
+                format!("{}JetAtomic<{inner}>", self.root_prefix)
+            }
             Type::Apply { name, args } if name == "Task" && !args.is_empty() => {
                 let item = self.rust_type(&args[0]);
                 let carrier = if matches!(args[0].without_user_tags(), Type::Result { .. }) {
@@ -2548,32 +2985,20 @@ impl Cx {
                 };
                 format!("{ffi}::{rust}<{}>", self.rust_type(&args[0]))
             }
-            Type::Apply { name, args } if name == "Receiver" && !args.is_empty() => {
+            // Generic Prelude handles share their canonical Rust names with MIR.
+            Type::Apply { name, args }
+                if !args.is_empty()
+                    && matches!(
+                        core_rust_type_name(name),
+                        Some("JetReceiver")
+                            | Some("JetSender")
+                            | Some("JetPool")
+                            | Some("JetId")
+                    ) =>
+            {
+                let rust = core_rust_type_name(name).unwrap();
                 format!(
-                    "{}jet_std::JetReceiver<{}>",
-                    self.root_prefix,
-                    self.rust_type(&args[0])
-                )
-            }
-            Type::Apply { name, args } if name == "Sender" && !args.is_empty() => {
-                format!(
-                    "{}jet_std::JetSender<{}>",
-                    self.root_prefix,
-                    self.rust_type(&args[0])
-                )
-            }
-            // D-MEM1 S6 (D-POOLID-API1=A): `Pool<T>`/`Id<T>` — the generational
-            // arena and its lightweight index+generation handle.
-            Type::Apply { name, args } if name == "Pool" && !args.is_empty() => {
-                format!(
-                    "{}jet_std::JetPool<{}>",
-                    self.root_prefix,
-                    self.rust_type(&args[0])
-                )
-            }
-            Type::Apply { name, args } if name == "Id" && !args.is_empty() => {
-                format!(
-                    "{}jet_std::JetId<{}>",
+                    "{}jet_std::{rust}<{}>",
                     self.root_prefix,
                     self.rust_type(&args[0])
                 )
@@ -2603,6 +3028,36 @@ impl Cx {
             }
             // D-CONC-STREAM1=A: a generator's `Stream<T>` is the Prelude's
             // rendezvous receiver. Its owned iterator closes the receiver when
+            // D-FOUND-COREAPI1 / #2853: event-time stream adapters retain the
+            // shared kernel's event, keyed-view, and window carriers.
+            Type::Apply { name, args }
+                if name == "StreamEventTime" && args.len() == 1 =>
+            {
+                format!(
+                    "{}jet_std::JetStream<{}jet_std::JetStreamEvent<{}>>",
+                    self.root_prefix,
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
+            }
+            Type::Apply { name, args }
+                if name == "KeyedStream" && args.len() == 2 =>
+            {
+                format!(
+                    "{}jet_std::JetKeyedStream<{}, {}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0]),
+                    self.rust_type(&args[1])
+                )
+            }
+            Type::Apply { name, args } if name == "Window" && args.len() == 2 => {
+                format!(
+                    "{}jet_std::JetStreamWindow<{}, {}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0]),
+                    self.rust_type(&args[1])
+                )
+            }
             // a consumer breaks or drops it, so a blocked producer observes the
             // same cancellation rule on every emitted program.
             Type::Apply { name, args } if name == Syntax::TYPE_STREAM && !args.is_empty() => {
@@ -2695,31 +3150,95 @@ impl Cx {
                     self.rust_type(&args[1])
                 )
             }
-            // D-DATAFRAME1=A: core.data typed containers, backed by std-only
-            // prelude values. User types with the same names still win.
+            // D-QUERY-RETAIN1=A: Query<T> defers a typed computation, while
+            // Group<K, V> retains both nominal key and reducer value types.
             Type::Apply { name, args }
-                if name == "Table" && !args.is_empty() && !self.type_names.contains(name) =>
+                if name == "Query"
+                    && args.len() == 1
+                    && !self.type_names.contains(name) =>
             {
                 format!(
-                    "{}jet_std::DataTable<{}>",
+                    "{}jet_std::DataQuery<{}>",
                     self.root_prefix,
                     self.rust_type(&args[0])
                 )
             }
             Type::Apply { name, args }
-                if name == "Series" && !args.is_empty() && !self.type_names.contains(name) =>
+                if name == "Group"
+                    && args.len() == 2
+                    && !self.type_names.contains(name) =>
             {
                 format!(
-                    "{}jet_std::DataSeries<{}>",
+                    "{}jet_std::GroupValue<{}, {}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0]),
+                    self.rust_type(&args[1])
+                )
+            }
+            Type::Apply { name, args }
+                if name == "DataGroupedQuery"
+                    && args.len() == 2
+                    && !self.type_names.contains(name) =>
+            {
+                format!(
+                    "{}jet_std::DataGroupedQuery<{}, {}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0]),
+                    self.rust_type(&args[1])
+                )
+            }
+            Type::Apply { name, args }
+                if name == "DataLoader"
+                    && args.len() == 1
+                    && !self.type_names.contains(name) =>
+            {
+                format!(
+                    "{}jet_std::DataLoader<{}>",
                     self.root_prefix,
                     self.rust_type(&args[0])
                 )
             }
             Type::Apply { name, args }
-                if name == "LazyFrame" && !args.is_empty() && !self.type_names.contains(name) =>
+                if name == Syntax::TYPE_SHARED_SNAPSHOT
+                    && args.len() == 2
+                    && !self.type_names.contains(name) =>
             {
                 format!(
-                    "{}jet_std::DataLazyFrame<{}>",
+                    "{}jet_std::JetSharedSnapshot<{}, {}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0]),
+                    self.rust_type(&args[1])
+                )
+            }
+            Type::Apply { name, args }
+                if name == "DataSnapshot"
+                    && args.len() == 1
+                    && !self.type_names.contains(name) =>
+            {
+                format!(
+                    "{}jet_std::DataSnapshot<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
+            }
+            Type::Apply { name, args }
+                if name == "JetDataPlotColumn"
+                    && args.len() == 1
+                    && !self.type_names.contains(name) =>
+            {
+                format!(
+                    "{}JetDataPlotColumn<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
+            }
+            Type::Apply { name, args }
+                if name == "JetDataPlot"
+                    && args.len() == 1
+                    && !self.type_names.contains(name) =>
+            {
+                format!(
+                    "{}JetDataPlot<{}>",
                     self.root_prefix,
                     self.rust_type(&args[0])
                 )
@@ -2779,6 +3298,8 @@ impl Cx {
             Type::Apply { name, args } if name == "View" && args.len() == 1 => {
                 if matches!(&args[0], Type::Named(inner) if inner == "str") {
                     "&str".to_string()
+                } else if let Type::List(inner) = &args[0] {
+                    format!("&[{}]", self.rust_type(inner))
                 } else {
                     format!("&[{}]", self.rust_type(&args[0]))
                 }
@@ -2799,7 +3320,17 @@ impl Cx {
             }
             // D-ITERTOOLS1=A: Iter<T> → JetIter<T> (must-use move-only lazy view).
             Type::Apply { name, args } if name == Syntax::TYPE_ITER && args.len() == 1 => {
-                format!("JetIter<{}>", self.rust_type(&args[0]))
+                format!(
+                    "{}{}<{}>",
+                    self.root_prefix,
+                    root_prelude_rust_type_name(name).expect("registered iterator carrier"),
+                    self.rust_type(&args[0])
+                )
+            }
+            // D-FOUND-VIEW1=A: `ViewIter<T>` retains the source owner while
+            // yielding borrowed windows; its carrier is not an eager `Iter`.
+            Type::Apply { name, args } if name == Syntax::TYPE_VIEW_ITER && args.len() == 1 => {
+                format!("JetViewIter<{}>", self.rust_type(&args[0]))
             }
             // D-CORE-SECRETS1=A: generic TTL stays distinct from secret lifecycle.
             Type::Apply { name, args }
@@ -2886,12 +3417,7 @@ impl Cx {
                 ret,
                 return_view_provenance,
                 ..
-            } => self.rust_fn_trait(
-                params,
-                ret.as_deref(),
-                return_view_provenance.as_ref(),
-                false,
-            ),
+            } => self.rust_fn_trait(params, ret.as_deref(), return_view_provenance.as_ref()),
             Type::Tuple(fields) => tuple_struct_name(&tuple_fields_plain(fields)),
             // D-FIXARR1 (ratified 2026-06-22): [T#N] lowers to a real Rust stack array [T; N].
             // All size/bounds checks live in sema (I3). The Rust type is [E; N].
@@ -2927,7 +3453,6 @@ impl Cx {
         params: &[Type],
         ret: Option<&Type>,
         return_view_provenance: Option<&crate::AST::ViewProvenanceMap>,
-        mut_capture: bool,
     ) -> String {
         let thread_safe = params.len() == 1
             && matches!(&params[0], Type::Named(name) if name == "HTTPHandler")
@@ -3002,63 +3527,31 @@ impl Cx {
                 }
             })
             .unwrap_or_else(|| "()".to_string());
-        let trait_name = if mut_capture { "FnMut" } else { "Fn" };
-        // D-SPREAD/#1357: `Fn` values use Rc/Arc so collection `.cloned()` works.
-        // `FnMut` stays `Box` (shared Rc cannot call_mut).
+        // Every source-facing function value uses one owned, cloneable slot.
+        // `RefCell` is only borrowed to take/restore the callback around a
+        // call (see `emit_tir_fn_value_call`); user code never runs while the
+        // slot borrow is live. The inner `FnMut` is therefore an ABI detail,
+        // not a second source-level closure kind: S47 already gives every
+        // escaping closure owned mutable captures.
+        let trait_name = "FnMut";
         if thread_safe {
-            format!("std::sync::Arc<dyn {trait_name}({ps}) -> {r} + Send + Sync>")
-        } else if mut_capture {
-            if has_view_return {
-                let lifetimes = std::iter::once(fn_view.clone())
-                    .chain(independent_lifetimes)
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("Box<dyn for<{lifetimes}> {trait_name}({ps}) -> {r}>")
-            } else {
-                format!("Box<dyn {trait_name}({ps}) -> {r}>")
-            }
+            format!("std::sync::Arc<dyn Fn({ps}) -> {r} + Send + Sync>")
         } else if has_view_return {
             let lifetimes = std::iter::once(fn_view.clone())
                 .chain(independent_lifetimes)
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("std::rc::Rc<dyn for<{lifetimes}> {trait_name}({ps}) -> {r}>")
+            format!(
+                "std::rc::Rc<std::cell::RefCell<Option<Box<dyn for<{lifetimes}> {trait_name}({ps}) -> {r}>>>>"
+            )
         } else {
-            format!("std::rc::Rc<dyn {trait_name}({ps}) -> {r}>")
+            format!("std::rc::Rc<std::cell::RefCell<Option<Box<dyn {trait_name}({ps}) -> {r}>>>>")
         }
     }
 
-    pub(crate) fn mangle_name(&self, name: &str) -> String {
-        mangle(name)
-    }
 
-    pub(crate) fn type_prefix(&self, type_name: &str) -> String {
-        if let Some(rust_mod) = self.foreign_types.get(type_name) {
-            let leaf = nominal_leaf(type_name);
-            return format!("{}{}::{}", self.root_prefix, rust_mod, mangle_path(leaf));
-        }
-        if let Some(identity) = self.foreign_type_identity("", type_name) {
-            let rust_mod = self
-                .foreign_types
-                .get(&identity)
-                .expect("foreign identity must have a Rust module");
-            let leaf = nominal_leaf(&identity);
-            return format!("{}{}::{}", self.root_prefix, rust_mod, mangle_path(leaf));
-        }
-        mangle_path(type_name)
-    }
-
-    pub(crate) fn reflect_path(&self, ty: &Type) -> String {
-        match ty {
-            Type::Named(name) | Type::Apply { name, .. } => self
-                .reflect_paths
-                .get(name)
-                .cloned()
-                .unwrap_or_else(|| name.clone()),
-            _ => ty.name(),
-        }
-    }
 }
+
 
 pub(crate) fn rust_param_type(cx: &Cx, convention: AccessConvention, ty: &Type) -> String {
     if let Type::Tagged { marker, inner } = ty {
@@ -3114,22 +3607,22 @@ pub(crate) fn rust_param_type(cx: &Cx, convention: AccessConvention, ty: &Type) 
     }
 }
 
-pub(crate) fn rust_return_type(cx: &Cx, ty: &Type) -> String {
-    cx.rust_type(ty)
-}
 
+#[cfg(test)]
 pub(crate) fn build_cx(prog: &Program, src: &str, file: &str) -> Cx {
-    let extern_funcs = extern_func_map(&prog.items, None);
+    let extern_funcs = extern_func_map(&prog.items, None, &[]);
     build_cx_items(&prog.items, src, file, None, &extern_funcs, "")
 }
 
 fn extern_func_map(
     items: &[Item],
     owner: Option<&str>,
+    handles: &[FfiHandleFact],
 ) -> HashMap<String, ExternFn> {
     fn collect(
         items: &[Item],
         owner: Option<&str>,
+        handles: &[FfiHandleFact],
         map: &mut HashMap<String, ExternFn>,
     ) {
         for item in items {
@@ -3149,9 +3642,7 @@ fn extern_func_map(
                     && crate::Sema::guest_import_bridge_compatible(func)
                 {
                     let wrapper = owner
-                        .map(|owner| {
-                            crate::Sema::guest_import_wrapper_name(owner, &func.name)
-                        })
+                        .map(|owner| crate::Sema::guest_import_wrapper_name(owner, &func.name))
                         .unwrap_or_else(|| format!("jet_ffi_{}", func.name));
                     map.insert(
                         func.name.clone(),
@@ -3175,7 +3666,9 @@ fn extern_func_map(
                 for function in module
                     .functions
                     .iter()
-                    .filter(|function| function.hidden_c_bridge_compatible())
+                    .filter(|function| {
+                        function.hidden_c_bridge_compatible_with_handles(handles)
+                    })
                 {
                     map.insert(
                         function.name.clone(),
@@ -3188,13 +3681,13 @@ fn extern_func_map(
                 }
             } else if let Item::CodeModule(module) = item {
                 if let Some(body) = &module.body {
-                    collect(body, owner, map);
+                    collect(body, owner, handles, map);
                 }
             }
         }
     }
     let mut map = HashMap::new();
-    collect(items, owner, &mut map);
+    collect(items, owner, handles, &mut map);
     map
 }
 
@@ -3253,7 +3746,7 @@ fn foreign_undo_map(items: &[Item]) -> HashMap<String, String> {
 pub(crate) fn bundle_extern_funcs(bundle: &ProgramBundle) -> HashMap<String, ExternFn> {
     let mut map = HashMap::new();
     for (module_idx, module) in bundle.modules.iter().enumerate() {
-        let module_funcs = extern_func_map(&module.items, Some(&module.alias));
+        let module_funcs = extern_func_map(&module.items, Some(&module.alias), &bundle.cffi.handle_facts);
         for (name, wrapper) in module_funcs {
             map.insert(name.clone(), wrapper.clone());
             map.insert(format!("{}::{name}", mangle(&module.alias)), wrapper);
@@ -3264,7 +3757,7 @@ pub(crate) fn bundle_extern_funcs(bundle: &ProgramBundle) -> HashMap<String, Ext
                     for method in def.methods.iter().filter(|method| {
                         bundle
                             .name_ledger
-                            .exported(module_idx, &format!("{}.{}", def.type_name, method.name))
+                            .exported(module_idx, &format!("{}{}", def.type_name, method.name))
                     }) {
                         map.insert(
                             foreign_binding_method_key(&def.type_name, &method.name),
@@ -3456,6 +3949,18 @@ pub(crate) fn register_bundle_unit_metadata(
     }
 }
 
+/// The one checked namespace identity for a loaded module: the name ledger's
+/// `package::path`, or the loader display path for a module the ledger does
+/// not know.  Every TIR/MIR module key (module rows, function owners, type
+/// owners, item order) must derive from this same string.
+pub(crate) fn module_identity(bundle: &ProgramBundle, module_idx: usize) -> String {
+    bundle
+        .name_ledger
+        .module_identity(module_idx)
+        .or_else(|| bundle.modules.get(module_idx).map(|module| module.display.clone()))
+        .unwrap_or_default()
+}
+
 /// Mirror the bundle-level import maps `emit_bundle` fills before lowering.
 /// `build_cx_items` alone leaves `core_imports` empty; without this, JIT
 /// lowering mis-gates `use core.tasks as tasks` channel calls.
@@ -3469,8 +3974,26 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     };
     cx.import_mods = import_mod_map(bundle, module_idx);
     cx.module_alias = bundle.modules[module_idx].alias.clone();
+    cx.module_identity = module_identity(bundle, module_idx);
+    // Bundle construction assigns the module identity after `build_cx_items`;
+    // refresh canonical TFunc keys with that checked identity.
+    collect_iterable_hooks(cx, &bundle.modules[module_idx].items);
+    cx.devtools_registry = bundle.devtools_registry.clone();
+    if let Some(module) = bundle.name_ledger.module(module_idx) {
+        cx.devtools_package = module.package.clone();
+        cx.devtools_module = module.path.clone();
+    } else {
+        cx.devtools_package.clear();
+        cx.devtools_module.clear();
+    }
     cx.policy_declarations = bundle.modules[module_idx].policy_declarations.clone();
     populate_cx_module_facts(cx, bundle, module_idx);
+    cx.opaque_handles = bundle
+        .cffi
+        .handle_facts
+        .iter()
+        .map(|fact| fact.jet_name.clone())
+        .collect();
     cx.core_archive_source = bundle
         .modules
         .iter()
@@ -3507,11 +4030,52 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     cx.inline_foreign_sigs = inline_foreign_sigs;
     cx.inline_foreign_rets = inline_foreign_rets;
     cx.inline_reexport_foreign = inline_foreign_reexport_maps(bundle, module_idx);
+    // Keep the preview identity on the same canonical target/build facts as
+    // artifact caching.  A readable tuple here would silently omit provider,
+    // closure, linker, dependency, or runtime-layer changes.
+    let mut preview_identity = b"jet-ui-preview-build-v1\0".to_vec();
+    bundle
+        .build_facts
+        .append_artifact_identity_bytes(&mut preview_identity);
+    for value in [
+        bundle.build_facts.profile.as_str(),
+        bundle.build_facts.stamp.toolchain.as_str(),
+        if bundle.build_facts.stamp.dirty { "dirty" } else { "clean" },
+        bundle.build_facts.package_name.as_str(),
+        bundle.build_facts.package_version.as_str(),
+    ] {
+        preview_identity.extend_from_slice(&(value.len() as u64).to_le_bytes());
+        preview_identity.extend_from_slice(value.as_bytes());
+    }
+    cx.preview_build_id = format!(
+        "sha256-{}",
+        jet_foundation::SHA256::sha256_hex(&preview_identity)
+    );
+    cx.preview_revision = bundle
+        .build_facts
+        .stamp
+        .git
+        .clone()
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            (!bundle.build_facts.stamp.at.is_empty())
+                .then(|| bundle.build_facts.stamp.at.clone())
+        })
+        .unwrap_or_else(|| {
+            format!(
+                "{}:{}",
+                bundle.build_facts.package_name,
+                bundle.build_facts.package_version
+            )
+        });
     let (inline_foreign_reexport_sigs, inline_foreign_reexport_rets) =
         inline_foreign_reexport_signature_maps(bundle, module_idx);
     cx.inline_foreign_reexport_sigs = inline_foreign_reexport_sigs;
     cx.inline_foreign_reexport_rets = inline_foreign_reexport_rets;
     cx.package_edition = bundle.edition.clone();
+    cx.hardware_profile = crate::Sema::target_hardware_profile(bundle);
+    cx.hardware_profile_id = crate::Sema::target_hardware_profile_id(bundle);
+
 }
 
 /// Carry authoritative module ownership, imported callable metadata, and
@@ -3527,9 +4091,12 @@ pub(crate) fn populate_cx_module_facts(cx: &mut Cx, bundle: &ProgramBundle, modu
                 let Item::CModule(c_module) = item else {
                     return None;
                 };
-                Some(c_module.functions.iter().map(|function| {
-                    format!("{}::{}", mangle(&module.alias), function.name)
-                }))
+                Some(
+                    c_module
+                        .functions
+                        .iter()
+                        .map(|function| format!("{}::{}", mangle(&module.alias), function.name)),
+                )
             })
         })
         .flatten()
@@ -3603,61 +4170,71 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
     for target in imported {
         let rust_mod = crate::Codegen::mangle(&bundle.modules[target].alias);
         for item in &bundle.modules[target].items {
-            let (owner, methods): (&str, Vec<(&Func, Option<&str>, bool)>) = match item {
-                Item::Struct(definition) => {
-                    let mut methods = definition
-                        .methods
-                        .iter()
-                        .map(|method| (method, None, false))
-                        .collect::<Vec<_>>();
-                    methods.extend(definition.trait_impls.iter().flat_map(|implementation| {
-                        implementation.methods.iter().map(|method| {
-                            (
-                                method,
-                                Some(implementation.trait_name.as_str()),
-                                implementation.compiler_generated,
-                            )
-                        })
-                    }));
-                    (&definition.name, methods)
-                }
-                Item::Enum(definition) => {
-                    let mut methods = definition
-                        .methods
-                        .iter()
-                        .map(|method| (method, None, false))
-                        .collect::<Vec<_>>();
-                    methods.extend(definition.trait_impls.iter().flat_map(|implementation| {
-                        implementation.methods.iter().map(|method| {
-                            (
-                                method,
-                                Some(implementation.trait_name.as_str()),
-                                implementation.compiler_generated,
-                            )
-                        })
-                    }));
-                    (&definition.name, methods)
-                }
-                Item::Impl(definition) => (
-                    &definition.type_name,
-                    definition
-                        .methods
-                        .iter()
-                        .map(|method| (method, definition.trait_name.as_deref(), false))
-                        .collect(),
-                ),
-                _ => continue,
-            };
+            let (owner, methods): (&str, Vec<(&Func, Option<&str>, bool, Option<&Type>)>) =
+                match item {
+                    Item::Struct(definition) => {
+                        let mut methods = definition
+                            .methods
+                            .iter()
+                            .map(|method| (method, None, false, None))
+                            .collect::<Vec<_>>();
+                        methods.extend(definition.trait_impls.iter().flat_map(|implementation| {
+                            implementation.methods.iter().map(|method| {
+                                (
+                                    method,
+                                    Some(implementation.trait_name.as_str()),
+                                    implementation.compiler_generated,
+                                    implementation.operator_rhs.as_ref(),
+                                )
+                            })
+                        }));
+                        (&definition.name, methods)
+                    }
+                    Item::Enum(definition) => {
+                        let mut methods = definition
+                            .methods
+                            .iter()
+                            .map(|method| (method, None, false, None))
+                            .collect::<Vec<_>>();
+                        methods.extend(definition.trait_impls.iter().flat_map(|implementation| {
+                            implementation.methods.iter().map(|method| {
+                                (
+                                    method,
+                                    Some(implementation.trait_name.as_str()),
+                                    implementation.compiler_generated,
+                                    implementation.operator_rhs.as_ref(),
+                                )
+                            })
+                        }));
+                        (&definition.name, methods)
+                    }
+                    Item::Impl(definition) => (
+                        &definition.type_name,
+                        definition
+                            .methods
+                            .iter()
+                            .map(|method| {
+                                (
+                                    method,
+                                    definition.trait_name.as_deref(),
+                                    false,
+                                    definition.operator_rhs.as_ref(),
+                                )
+                            })
+                            .collect(),
+                    ),
+                    _ => continue,
+                };
             let owner_identity = bundle
                 .name_ledger
                 .nominal_identity(target, owner)
                 .expect("name ledger must contain every loaded module");
             let owner_visible = bundle.name_ledger.visible(module_idx, target, owner);
-            for (method, trait_name, import_trait) in methods {
+            for (method, trait_name, import_trait, operator_rhs) in methods {
                 let method_visible = bundle.name_ledger.visible(
                     module_idx,
                     target,
-                    &format!("{}.{}", owner, method.name),
+                    &format!("{}{}", owner, method.name),
                 );
                 if !method_visible && !(trait_name.is_some() && owner_visible) {
                     continue;
@@ -3665,6 +4242,8 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
                 let key = (owner_identity.clone(), method.name.clone());
                 if let Some(trait_name) = trait_name {
                     cx.trait_methods.insert(key.clone());
+                    cx.trait_method_traits
+                        .insert(key.clone(), trait_name.to_string());
                     if import_trait {
                         cx.imported_traits
                             .insert((rust_mod.clone(), trait_name.to_string()));
@@ -3675,17 +4254,18 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
                         .entry(key.clone())
                         .or_insert(self_param.convention);
                 }
-                cx.method_sigs.entry(key.clone()).or_insert_with(|| {
-                    method_sig_params(method)
-                        .into_iter()
-                        .map(|(convention, ty)| {
-                            (
-                                convention,
-                                super::Imports::qualify_imported_call_type(bundle, target, "", &ty),
-                            )
-                        })
-                        .collect()
-                });
+                let imported_sig = method_sig_params(method)
+                    .into_iter()
+                    .map(|(convention, ty)| {
+                        (
+                            convention,
+                            super::Imports::qualify_imported_call_type(bundle, target, "", &ty),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                cx.method_sigs
+                    .entry(key.clone())
+                    .or_insert_with(|| imported_sig.clone());
                 cx.contract_sigs
                     .entry(format!("{}::{}", owner, method.name))
                     .or_insert_with(|| (method.pre.clone(), method.post.clone()));
@@ -3698,11 +4278,26 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
                             .map(|param| param.name.clone())
                             .collect()
                     });
-                cx.method_rets.entry(key).or_insert_with(|| {
-                    method.return_type.as_ref().map(|ty| {
-                        super::Imports::qualify_imported_call_type(bundle, target, "", ty)
-                    })
+                let imported_ret = method.return_type.as_ref().map(|ty| {
+                    super::Imports::qualify_imported_call_type(bundle, target, "", ty)
                 });
+                let imported_operator_rhs = operator_rhs.map(|rhs| {
+                    super::Imports::qualify_imported_call_type(bundle, target, "", rhs)
+                });
+                cx.method_rets
+                    .entry(key)
+                    .or_insert_with(|| imported_ret.clone());
+                if let Some(trait_name) = trait_name {
+                    register_operator_method(
+                        cx,
+                        &owner_identity,
+                        &method.name,
+                        trait_name,
+                        imported_operator_rhs.as_ref(),
+                        imported_sig,
+                        imported_ret,
+                    );
+                }
             }
         }
     }
@@ -3733,7 +4328,11 @@ fn register_core_close_types(cx: &mut Cx) {
     }
     if imports("core.db") {
         cx.close_types
-            .extend(["DBConnection", "DBScope"].into_iter().map(str::to_string));
+            .extend(
+                ["DBConnection", "DBScope", "DbPool", "DbLease"]
+                    .into_iter()
+                    .map(str::to_string),
+            );
     }
 }
 
@@ -3742,7 +4341,7 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
     if cx
         .core_imports
         .values()
-        .any(|module| matches!(module.as_str(), "core.service" | "core.services"))
+        .any(|module| module == "core.service")
     {
         let zero = Span::new(0, 0);
         let variants = [
@@ -4192,6 +4791,7 @@ pub(crate) fn memo_facts_for_struct(
         .map(|field| field.name.as_str())
     {
         for memo in memo_fields.keys() {
+
             if depends_on(memo, source, &direct, &computed, &mut HashSet::new()) {
                 dependencies
                     .entry(source.to_string())
@@ -4201,6 +4801,19 @@ pub(crate) fn memo_facts_for_struct(
         }
     }
     (memo_fields, dependencies)
+}
+
+fn receipt_schema_digest(type_name: &str, fields: &[(String, Type)]) -> String {
+    let mut schema = String::new();
+    schema.push_str(type_name);
+    schema.push('\0');
+    for (name, ty) in fields {
+        schema.push_str(name);
+        schema.push(':');
+        schema.push_str(&ty.name());
+        schema.push(';');
+    }
+    jet_foundation::SHA256::sha256_hex(schema.as_bytes())
 }
 
 pub(crate) fn build_cx_items(
@@ -4217,6 +4830,7 @@ pub(crate) fn build_cx_items(
         fn_types: HashMap::new(),
         diverging_functions: HashSet::new(),
         fn_source_types: HashMap::new(),
+        fn_bodies: HashMap::new(),
         fn_param_names: HashMap::new(),
         method_sigs: HashMap::new(),
         method_type_params: HashMap::new(),
@@ -4237,6 +4851,7 @@ pub(crate) fn build_cx_items(
         struct_fields: HashMap::new(),
         reflection_fields: HashMap::new(),
         published_schemas: HashSet::new(),
+        codable_types: HashSet::new(),
         reflect_paths: HashMap::new(),
         serde_wire_params: HashMap::new(),
         enum_variants: HashMap::new(),
@@ -4252,20 +4867,17 @@ pub(crate) fn build_cx_items(
         patchable: HashSet::new(),
         computed_fields: HashMap::new(),
         memo_fields: HashMap::new(),
-        current_fn_line: std::cell::Cell::new(0),
         memo_dependencies: HashMap::new(),
         src: src.to_string(),
         file: file.to_string(),
         module_alias: String::new(),
+        module_identity: String::new(),
         core_archive_source: false,
-        test_mode: false,
-        coverage: false,
-        coverage_entry: false,
-        coverage_branches: std::cell::RefCell::new(Vec::new()),
-        coverage_branch_numbers: std::cell::RefCell::new(HashMap::new()),
-        debug_linemap: false,
         import_mods: HashMap::new(),
+        trait_method_traits: HashMap::new(),
+        operator_methods: HashMap::new(),
         direct_c_functions: HashSet::new(),
+        opaque_handles: HashSet::new(),
         foreign_types: HashMap::new(),
         reexport_calls: HashMap::new(),
         import_sigs: HashMap::new(),
@@ -4297,6 +4909,10 @@ pub(crate) fn build_cx_items(
         inline_import_names: HashSet::new(),
         inline_reexport_inline: HashMap::new(),
         inline_reexport_core: HashMap::new(),
+        receipt_sections: HashMap::new(),
+        devtools_package: String::new(),
+        devtools_module: String::new(),
+        devtools_registry: jet_foundation::AST::DevtoolsRegistry::default(),
         inline_reexport_foreign: HashMap::new(),
         trait_methods: HashSet::new(),
         imported_traits: HashSet::new(),
@@ -4307,7 +4923,6 @@ pub(crate) fn build_cx_items(
         iterable_hooks: HashMap::new(),
         index_hooks: HashMap::new(),
         current_fn: std::cell::RefCell::new(String::new()),
-        scalar_function: std::cell::Cell::new(false),
         policy_declarations: Vec::new(),
         package_hardened: false,
         dependency_fenced: false,
@@ -4324,13 +4939,17 @@ pub(crate) fn build_cx_items(
         jit_local_call_prefix: None,
         fn_type_params: HashMap::new(),
         fn_type_param_order: HashMap::new(),
+        debug_linemap: false,
         variadic_bound_fns: HashMap::new(),
-        needed_variadic_arities: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         active_os: crate::Syntax::OSTarget::host(),
         web_wasm_noncopy_int: false,
         package_edition: package_edition.to_string(),
+        preview_build_id: "unbound".to_string(),
+        preview_revision: "unbound".to_string(),
         in_stm_transact: std::cell::Cell::new(false),
         stm_touched: std::cell::Cell::new(false),
+        hardware_profile: None,
+        hardware_profile_id: None,
     };
 
     let io_context = Type::Named(Syntax::TYPE_IO_CONTEXT.to_string());
@@ -4713,13 +5332,17 @@ pub(crate) fn build_cx_items(
                                 .iter()
                                 .find(|marker| marker.name == crate::Syntax::MARKER_POLICY)
                                 .and_then(|marker| {
-                                    crate::AST::CallablePolicyChain::parse(&marker.args).ok()
+                                    crate::AST::CallablePolicyChain::parse(
+                                        &marker.expr_args_owned(),
+                                    )
+                                    .ok()
                                 })
                                 .unwrap_or_default(),
                         }),
                         return_view_provenance: f.return_view_provenance.clone(),
                     },
                 );
+                cx.fn_bodies.insert(f.name.clone(), f.body.clone());
                 let source_fn_type = cx.fn_types.get(&f.name).cloned().map(|mut ty| {
                     if let Type::Fn { ret, .. } = &mut ty {
                         *ret = f.return_type.clone().map(Box::new);
@@ -4746,6 +5369,15 @@ pub(crate) fn build_cx_items(
             Item::Struct(s) => {
                 cx.type_names.insert(s.name.clone());
                 cx.local_type_names.insert(s.name.clone());
+                let encode = s.derives.iter().any(|(name, _)| {
+                    matches!(name.as_str(), Syntax::MARKER_CODABLE | Generics::ENCODE)
+                });
+                let decode = s.derives.iter().any(|(name, _)| {
+                    matches!(name.as_str(), Syntax::MARKER_CODABLE | Generics::DECODE)
+                });
+                if encode && decode {
+                    cx.codable_types.insert(s.name.clone());
+                }
                 if s.is_published_schema {
                     cx.published_schemas.insert(s.name.clone());
                 }
@@ -4767,6 +5399,26 @@ pub(crate) fn build_cx_items(
                         .map(|f| (f.name.clone(), f.ty.clone()))
                         .collect(),
                 );
+                if let Some(marker) = s
+                    .type_markers
+                    .iter()
+                    .find(|marker| marker.name == crate::Syntax::MARKER_RECEIPT && !marker.negated)
+                {
+                    if let Some(crate::AST::CtValue::Str(name)) = marker.ct.as_ref() {
+                        let fields = s
+                            .reflection_fields()
+                            .map(|field| (field.name.clone(), field.ty.clone()))
+                            .collect::<Vec<_>>();
+                        cx.receipt_sections.insert(
+                            s.name.clone(),
+                            ReceiptSectionFact {
+                                name: name.clone(),
+                                type_name: s.name.clone(),
+                                schema_digest: receipt_schema_digest(&s.name, &fields),
+                            },
+                        );
+                    }
+                }
                 cx.reflection_fields.insert(
                     s.name.clone(),
                     jet_foundation::Reflection::fields(s),
@@ -5216,11 +5868,17 @@ pub(crate) fn build_cx_items(
                     }
                 }
                 for m in &s.methods {
-                    register_method(&mut cx, &s.name, m, false);
+                    register_method(&mut cx, &s.name, m, None, None);
                 }
                 for implementation in &s.trait_impls {
                     for m in &implementation.methods {
-                        register_method(&mut cx, &s.name, m, true);
+                        register_method(
+                            &mut cx,
+                            &s.name,
+                            m,
+                            Some(implementation.trait_name.as_str()),
+                            implementation.operator_rhs.as_ref(),
+                        );
                     }
                 }
                 if s.derives.iter().any(|(t, _)| t == Syntax::MARKER_PATCHABLE) {
@@ -5283,21 +5941,66 @@ pub(crate) fn build_cx_items(
                     }
                 }
                 for m in &e.methods {
-                    register_method(&mut cx, &e.name, m, false);
+                    register_method(&mut cx, &e.name, m, None, None);
                 }
                 for implementation in &e.trait_impls {
                     for m in &implementation.methods {
-                        register_method(&mut cx, &e.name, m, true);
+                        register_method(
+                            &mut cx,
+                            &e.name,
+                            m,
+                            Some(implementation.trait_name.as_str()),
+                            implementation.operator_rhs.as_ref(),
+                        );
                     }
                 }
             }
             Item::Impl(i) => {
                 for m in &i.methods {
-                    register_method(&mut cx, &i.type_name, m, i.trait_name.is_some());
+                    register_method(
+                        &mut cx,
+                        &i.type_name,
+                        m,
+                        i.trait_name.as_deref(),
+                        i.operator_rhs.as_ref(),
+                    );
                 }
             }
             _ => {}
         }
+    }
+
+    // D-OPMIX1: Core's typed vector/scalar operator rows use the same
+    // complete identity as source operator implementations. The ordinary
+    // method tables remain compatibility metadata for non-operator callers;
+    // operator lowering reads `operator_methods` exclusively.
+    for (owner, trait_name, method, rhs, result) in [
+        ("Vec3", Syntax::TRAIT_MUL, "mul", Type::Float, Type::Named("Vec3".to_string())),
+        ("Vec3", Syntax::TRAIT_DIV, "div", Type::Float, Type::Named("Vec3".to_string())),
+        (
+            "Float",
+            Syntax::TRAIT_DIV,
+            "div",
+            Type::Named("Vec3".to_string()),
+            Type::Named("Vec3".to_string()),
+        ),
+    ] {
+        let sig = vec![(AccessConvention::Read, rhs.clone())];
+        let key = crate::Traits::operator_method_identity(owner, trait_name, method, &rhs);
+        cx.operator_methods.insert(
+            key,
+            OperatorMethod {
+                trait_name: trait_name.to_string(),
+                sig: sig.clone(),
+                ret: Some(result.clone()),
+            },
+        );
+        cx.trait_methods
+            .insert((owner.to_string(), method.to_string()));
+        cx.method_sigs
+            .insert((owner.to_string(), method.to_string()), sig);
+        cx.method_rets
+            .insert((owner.to_string(), method.to_string()), Some(result));
     }
 
     // D-TAG1: `hashable` (unlike `comparable`) can't trust "field type is a
@@ -5482,51 +6185,104 @@ fn trait_impl_assoc(
     }
     None
 }
+/// Return an associated type only when its trait implementation also contains
+/// the named method.  Iterable lowering must consume confirmed implementation
+/// facts rather than infer backend symbols from a type name.
+fn trait_impl_assoc_method(
+    items: &[Item],
+    type_name: &str,
+    trait_name: &str,
+    assoc_name: &str,
+    method_name: &str,
+) -> Option<Type> {
+    for item in items {
+        let implementation = match item {
+            Item::Impl(i)
+                if i.type_name == type_name && i.trait_name.as_deref() == Some(trait_name) =>
+            {
+                Some((&i.assoc_type_impls, &i.methods))
+            }
+            Item::Struct(s) if s.name == type_name => s
+                .trait_impls
+                .iter()
+                .find(|block| block.trait_name == trait_name)
+                .map(|block| (&block.assoc_type_impls, &block.methods)),
+            Item::Enum(e) if e.name == type_name => e
+                .trait_impls
+                .iter()
+                .find(|block| block.trait_name == trait_name)
+                .map(|block| (&block.assoc_type_impls, &block.methods)),
+            _ => None,
+        };
+        if let Some((assoc_type_impls, methods)) = implementation {
+            if methods.iter().any(|method| method.name == method_name) {
+                if let Some(assoc_type) = assoc_type_impl(assoc_type_impls, assoc_name) {
+                    return Some(assoc_type.clone());
+                }
+            }
+        }
+    }
+    None
+}
 
-fn collect_iter_index_hooks(cx: &mut Cx, items: &[Item]) {
+fn collect_iterable_hooks(cx: &mut Cx, items: &[Item]) {
     let mut iterable_pairs: Vec<(String, String)> = Vec::new();
     for item in items {
-        match item {
+        let coll_type = match item {
             Item::Impl(i) if i.trait_name.as_deref() == Some(Syntax::TRAIT_ITERABLE) => {
-                if let Some(Type::Named(iter_name)) =
-                    trait_impl_assoc(items, &i.type_name, Syntax::TRAIT_ITERABLE, "Iter")
-                {
-                    iterable_pairs.push((i.type_name.clone(), iter_name));
-                }
+                Some(&i.type_name)
             }
-            Item::Struct(s) => {
-                if trait_impl_assoc(items, &s.name, Syntax::TRAIT_ITERABLE, "Iter").is_some() {
-                    if let Some(Type::Named(iter_name)) =
-                        trait_impl_assoc(items, &s.name, Syntax::TRAIT_ITERABLE, "Iter")
-                    {
-                        iterable_pairs.push((s.name.clone(), iter_name));
-                    }
-                }
-            }
-            Item::Enum(e) => {
-                if trait_impl_assoc(items, &e.name, Syntax::TRAIT_ITERABLE, "Iter").is_some() {
-                    if let Some(Type::Named(iter_name)) =
-                        trait_impl_assoc(items, &e.name, Syntax::TRAIT_ITERABLE, "Iter")
-                    {
-                        iterable_pairs.push((e.name.clone(), iter_name));
-                    }
-                }
-            }
-            _ => {}
+            Item::Struct(s) => Some(&s.name),
+            Item::Enum(e) => Some(&e.name),
+            _ => None,
+        };
+        let Some(coll_type) = coll_type else {
+            continue;
+        };
+        if let Some(Type::Named(iter_type)) = trait_impl_assoc_method(
+            items,
+            coll_type,
+            Syntax::TRAIT_ITERABLE,
+            "Iter",
+            "iter",
+        ) {
+            iterable_pairs.push((coll_type.clone(), iter_type));
         }
     }
+
+    let module = cx.tir_module();
     for (coll_type, iter_type) in iterable_pairs {
-        if let Some(item_type) = trait_impl_assoc(items, &iter_type, Syntax::TRAIT_ITERATOR, "Item")
-        {
-            cx.iterable_hooks.insert(
-                coll_type,
-                IterableHook {
-                    iter_type,
-                    item_type,
-                },
-            );
-        }
+        let Some(item_type) = trait_impl_assoc_method(
+            items,
+            &iter_type,
+            Syntax::TRAIT_ITERATOR,
+            "Item",
+            "next",
+        ) else {
+            continue;
+        };
+        let iter_symbol = format!(
+            "{module}::{coll_type}::{}::iter",
+            Syntax::TRAIT_ITERABLE
+        );
+        let next_symbol = format!(
+            "{module}::{iter_type}::{}::next",
+            Syntax::TRAIT_ITERATOR
+        );
+        cx.iterable_hooks.insert(
+            coll_type,
+            IterableHook {
+                iter_type,
+                item_type,
+                iter_symbol,
+                next_symbol,
+            },
+        );
     }
+}
+
+fn collect_iter_index_hooks(cx: &mut Cx, items: &[Item]) {
+    collect_iterable_hooks(cx, items);
 
     let mut index_types: HashSet<String> = HashSet::new();
     for item in items {
@@ -5566,18 +6322,56 @@ fn collect_iter_index_hooks(cx: &mut Cx, items: &[Item]) {
 /// Register one method surface for sema/codegen call lookup. Nested and
 /// top-level trait impls use the same table so lowering cannot lose a method
 /// merely because derive generation chose a different AST container.
-fn register_method(cx: &mut Cx, owner: &str, method: &Func, is_trait: bool) {
+fn register_operator_method(
+    cx: &mut Cx,
+    owner: &str,
+    method: &str,
+    trait_name: &str,
+    operator_rhs: Option<&Type>,
+    sig: Vec<(AccessConvention, Type)>,
+    ret: Option<Type>,
+) {
+    if !matches!(
+        trait_name,
+        Syntax::TRAIT_ADD
+            | Syntax::TRAIT_SUB
+            | Syntax::TRAIT_MUL
+            | Syntax::TRAIT_DIV
+            | Syntax::TRAIT_EQUATABLE
+            | Syntax::TRAIT_COMPARABLE
+    ) {
+        return;
+    }
+    let Some(rhs) = operator_rhs else { return };
+    let key = crate::Traits::operator_method_identity(owner, trait_name, method, rhs);
+    cx.operator_methods.insert(
+        key,
+        OperatorMethod {
+            trait_name: trait_name.to_string(),
+            sig,
+            ret,
+        },
+    );
+}
+
+fn register_method(
+    cx: &mut Cx,
+    owner: &str,
+    method: &Func,
+    trait_name: Option<&str>,
+    operator_rhs: Option<&Type>,
+) {
     let key = (owner.to_string(), method.name.clone());
     if let Some(self_param) = method
         .params
         .iter()
-        .find(|param| param.name == Syntax::KW_SELF)
+        .find(|p| p.name == Syntax::KW_SELF)
     {
         cx.method_self_convs
             .insert(key.clone(), self_param.convention);
     }
-    cx.method_sigs
-        .insert(key.clone(), method_sig_params(method));
+    let sig = method_sig_params(method);
+    cx.method_sigs.insert(key.clone(), sig.clone());
     cx.method_type_params
         .insert(key.clone(), method.type_params.clone());
     cx.method_rets
@@ -5594,11 +6388,24 @@ fn register_method(cx: &mut Cx, owner: &str, method: &Func, is_trait: bool) {
             .map(|param| param.name.clone())
             .collect(),
     );
-    // S62: track trait-impl methods so call sites know not to mangle.
-    if is_trait {
-        cx.trait_methods.insert(key);
+    // S62: track trait-impl methods so call sites know not to mangle and retain
+    // the checked trait identity for static associated calls.
+    if let Some(trait_name) = trait_name {
+        cx.trait_methods.insert(key.clone());
+        cx.trait_method_traits
+            .insert(key, trait_name.to_string());
+        register_operator_method(
+            cx,
+            owner,
+            &method.name,
+            trait_name,
+            operator_rhs,
+            sig,
+            method.return_type.clone(),
+        );
     }
 }
+
 
 fn method_sig_params(f: &Func) -> Vec<(AccessConvention, Type)> {
     f.params
@@ -5643,7 +6450,7 @@ fn core_type_cloneable(name: &str) -> bool {
     core_rust_type_name(name).is_some()
         && !matches!(
             name,
-            "Clock"
+            "JobQueue" | "Clock"
                 | "Match"
                 | "DataStream"
                 | "JSONReader"
@@ -5684,10 +6491,19 @@ pub(crate) fn field_type_cloneable(
         // every canonical spelling, so records containing it can satisfy the
         // generated decoder's existing result-retention path.
         Type::Named(n) if is_json_type_name(n) || n == "Tensor" => true,
+        // D-TEST-WORLD1=A: the world is an Arc-backed scoped capability.
+        Type::Named(n) if n == Syntax::DETERMINISTIC_WORLD_TYPE => true,
         Type::Named(n) => core_type_cloneable(n) || types.contains(n),
         // `JetTask` implements no `Clone`: a handle owns one join slot.
         // D-PIN1=A: a pin is an exclusive window, so it is no more cloneable
         // than `ViewMut` — duplicating it would hand out a second no-move claim.
+        // `JetSharedSnapshot` owns a single-use publication ticket; cloning
+        // it would create two winners for one revision.
+        Type::Apply { name, .. }
+            if name == Syntax::TYPE_SHARED_SNAPSHOT =>
+        {
+            false
+        }
         Type::Apply { name, .. }
             if matches!(
                 name.as_str(),
@@ -5724,73 +6540,6 @@ pub(crate) fn field_type_cloneable(
     }
 }
 
-/// Backend-only compatibility for the synthetic tuple representation. This
-/// decides whether Rust can derive `PartialEq` for that erased storage shape;
-/// Jet capability requests are checked and expanded in sema.
-pub(crate) fn field_type_rust_eq_compatible(
-    ty: &Type,
-    types: &HashSet<String>,
-    param_names: &HashSet<String>,
-) -> bool {
-    match ty {
-        Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
-        Type::IntN { .. } | Type::Float32 => true,
-        Type::Option(inner) => field_type_rust_eq_compatible(inner, types, param_names),
-        Type::Result { ok, err } => {
-            field_type_rust_eq_compatible(ok, types, param_names)
-                && field_type_rust_eq_compatible(err, types, param_names)
-        }
-        Type::List(inner) => field_type_rust_eq_compatible(inner, types, param_names),
-        // c148: recognize both single-char heuristic and declared multi-char params.
-        Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => true,
-        Type::Named(n) => types.contains(n),
-        // D-TUPLE-DESTRUCT1: `Task<T>`/`Sender<T>`/`Receiver<T>` wrap an opaque
-        // runtime handle (`JetTask`/`JetSender`/`JetReceiver`) — none implement
-        // `PartialEq`, regardless of whether their element type `T` does. Only
-        // surfaces once one of these lands as a tuple field (`channel<T>`'s
-        // `(Sender<T>, Receiver<T>)`); every other `Type::Apply` (Set/Tally/Queue/…)
-        // is still checked structurally through its args below.
-        Type::Apply { name, .. }
-            if matches!(
-                name.as_str(),
-                "Task" | "Sender" | "Receiver" | Syntax::TYPE_SHARED_GUARD
-            ) =>
-        {
-            false
-        }
-        // D-MEM1 S6: `Pool<T>` is a live arena handle (`JetPool`), never comparable
-        // regardless of `T`. `Id<T>` is plain index+generation data — ALWAYS
-        // comparable regardless of `T` (it never touches `T` at runtime), so it
-        // must NOT fall through to the generic "comparable iff every arg is" arm
-        // below (that would wrongly require `T: PartialEq`).
-        Type::Apply { name, .. } if name == "Pool" => false,
-        Type::Apply { name, .. } if name == "Id" => true,
-        Type::Apply { args, .. } => args
-            .iter()
-            .all(|a| field_type_rust_eq_compatible(a, types, param_names)),
-        Type::Tuple(fields) => fields
-            .iter()
-            .all(|(_, t)| field_type_rust_eq_compatible(t, types, param_names)),
-        Type::Map { key, value, .. } => {
-            field_type_rust_eq_compatible(key, types, param_names)
-                && field_type_rust_eq_compatible(value, types, param_names)
-        }
-        Type::TraitObject(_) | Type::Shared(_) | Type::Fn { .. } => false,
-        Type::FixedList { elem, .. } => field_type_rust_eq_compatible(elem, types, param_names),
-        Type::Tagged { inner, .. } => field_type_rust_eq_compatible(inner, types, param_names),
-        Type::InlineRange { base, .. } => field_type_rust_eq_compatible(base, types, param_names),
-        Type::Union(members) => members
-            .iter()
-            .all(|m| field_type_rust_eq_compatible(m, types, param_names)),
-        // Runtime values carry no dimension metadata (I3): comparable iff the
-        // erased base numeric type is.
-        Type::Quantity { base, .. } => field_type_rust_eq_compatible(base, types, param_names),
-        // Same as the retired `\0compute.dimension.N` string encoding: it
-        // never matched the `Type::Named` user-type-registry lookup above
-        // (only ever reached as an `Apply` arg via the fallback above it).
-        Type::Measure(_) => false,
-    }
-}
 
 pub(crate) fn type_is_hashable_struct(s: &StructDef, types: &HashSet<String>) -> bool {
     // D-BOUND-EVOLVE1=A: published records carry an ordered DataTree holder.
@@ -5817,8 +6566,8 @@ pub(crate) fn type_is_hashable_enum(e: &EnumDef, types: &HashSet<String>) -> boo
     })
 }
 
-/// Same shape as `field_type_rust_eq_compatible`, minus `Float`/`Float32` — Rust's
-/// `f64`/`f32` don't implement `Eq`/`Hash` (NaN breaks both laws).
+/// Same recursive shape as the sema hashability walk, minus `Float`/`Float32`
+/// — Rust's `f64`/`f32` don't implement `Eq`/`Hash` (NaN breaks both laws).
 pub(crate) fn field_type_hashable(
     ty: &Type,
     types: &HashSet<String>,
@@ -5876,38 +6625,6 @@ pub(crate) fn field_type_hashable(
 /// D-MAP-KEY1: the backend's key walk mirrors sema's ratified eligibility
 /// rule. It only supplies the fact needed to emit the shared key adapter;
 /// comparison itself remains in `Prelude/Core/MapKey.rs`.
-pub(crate) fn field_type_map_key(ty: &Type, cx: &Cx) -> bool {
-    fn visit(ty: &Type, cx: &Cx, active: &mut HashSet<String>) -> bool {
-        let ty = cx.expand_type_aliases(ty);
-        match &ty {
-            Type::Int | Type::Bool | Type::String | Type::Char | Type::IntN { .. } => true,
-            Type::Tagged { inner, .. } => visit(inner, cx, active),
-            Type::Tuple(fields) => fields.iter().all(|(_, field)| visit(field, cx, active)),
-            Type::Named(name) => {
-                if let Some(numeric) = crate::AST::numeric_type_from_name(name) {
-                    return matches!(numeric, Type::Int | Type::IntN { .. });
-                }
-                if !active.insert(name.clone()) {
-                    return false;
-                }
-                let eligible = if let Some(fields) = cx.struct_fields.get(name) {
-                    fields.iter().all(|(_, field)| visit(field, cx, active))
-                } else if let Some(variants) = cx.enum_variants.get(name) {
-                    variants
-                        .iter()
-                        .all(|(_, payload)| matches!(payload, VariantPayload::Unit))
-                } else {
-                    false
-                };
-                active.remove(name);
-                eligible
-            }
-            _ => false,
-        }
-    }
-
-    visit(ty, cx, &mut HashSet::new())
-}
 
 pub(crate) fn find_struct_box_edges(s: &StructDef, cx: &Cx) -> HashSet<(String, String)> {
     let mut boxed = HashSet::new();
@@ -6042,7 +6759,7 @@ mod tests {
 
     #[test]
     fn type_alias_expansion_preserves_function_parameter_contract() {
-        let source = "alias Callback<T> :: fn(*, force: T) => Int;\nfn run() {}\n";
+        let source = "alias Callback<T> :: fn(*, force: T) Int\nfn run() {}\n";
         let (tokens, lex_diags) = crate::Lexer::lex(source);
         assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
         let program = crate::Parser::parse(&tokens).expect("parse failed");
@@ -6052,6 +6769,6 @@ mod tests {
             name: "Callback".to_string(),
             args: vec![Type::Bool],
         });
-        assert_eq!(expanded.name(), "fn(*, force: Bool) => Int");
+        assert_eq!(expanded.name(), "fn(*, force: Bool) Int");
     }
 }

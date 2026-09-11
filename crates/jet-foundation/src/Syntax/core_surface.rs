@@ -149,6 +149,15 @@ pub const MARKER_DEBUG_ONLY: &str = "DebugOnly";
 /// D-CANVASMETA1=B (ratified 2026-07-09): tooling metadata attribute for
 /// bindings, top-level consts, and functions.
 pub const MARKER_META: &str = "Meta";
+/// D-DX-PLUGIN1=D: one marker discovers an exported typed devtools panel.
+pub const MARKER_DEV_PANEL: &str = "DevPanel";
+/// D-FOUND-EMBEDDED1 / #2793: bind a bounded target interrupt handler.
+pub const MARKER_INTERRUPT: &str = "Interrupt";
+
+/// D-DX-PLUGIN1=D: the shared Core module and member for typed publications.
+pub const CORE_DEVTOOLS_MODULE: &str = "core.devtools";
+pub const CORE_DEVTOOLS_PUBLISH: &str = "publish";
+pub const TYPE_UI_NODE: &str = "UiNode";
 
 /// D-CANVASMETA1=B: `#Meta` category field name.
 pub const META_FIELD_CATEGORY: &str = "category";
@@ -205,8 +214,9 @@ pub const TYPE_HTML: &str = "HTML";
 /// S80 (ratified; amended by D-FAIL-ERROR1=A): default error type and
 /// constructor share `Err`.
 pub const TYPE_ERR: &str = "Err";
-/// D-FAILURE-FOUNDATION1=A: bottom error domain for an explicit unreachable
-/// contract. It is a source type name, not a second runtime carrier.
+/// D-FAILURE-FOUNDATION1=A / D-NEVER2=B: `Never` is the existing bottom
+/// error-domain name and is also legal in callable success-return slots.
+/// It remains uninhabited in every ordinary value position.
 pub const TYPE_NEVER: &str = "Never";
 /// D-FAIL-BIND1=A (ratified 2026-08-06): ambient failure report inside a
 /// fallible `??` fallback. This is an ordinary contextual identifier, not a
@@ -385,6 +395,12 @@ pub const KW_DEFER: &str = "defer";
 pub const RESOURCE_CLOSE: &str = "close";
 /// D-SHAPE-RESOURCE2=A: nominal, consuming, infallible cleanup capability.
 pub const TRAIT_CLOSE: &str = "Close";
+/// D-FOUND-LITERAL1=A (card #2789): a nominal type may opt into contextual
+/// numeric literals through one of these capability traits. The dot-separated
+/// names are semantic capability names, not new lexer words or literal suffixes.
+pub const TRAIT_LITERAL_INT: &str = "Literal.Int";
+pub const TRAIT_LITERAL_FLOAT: &str = "Literal.Float";
+pub const METHOD_LITERAL_FROM_LITERAL: &str = "from_literal";
 
 /// S19 (ratified): loop statement (for SharedHandle lint checks) — same
 /// governing decision as the loop-header keywords in Syntax/math_layout.rs.
@@ -461,9 +477,9 @@ pub const BUILD_TARGET_WASI_SERVER: &str = "wasm32-wasip2";
 /// default" rather than "cap this file's partition ceiling").
 pub const WEB_TARGET_DEFAULT_WEB: &str = "Web";
 
-/// D-HTMLPAIR1 (ratified 2026-07-01, c134): `#HTML("path.html")` — an explicit, file-level
-/// declaration of this program's companion host page for `--target=web`
-/// builds, replacing the silent `<stem>.html` filename convention.
+/// D-MARKERARGS1=A: `#HTML(Path{"path.html"})` — an explicit, file-level
+/// declaration of this program's companion host page for `--target=web`,
+/// replacing the retired bare-string argument.
 pub const MARKER_HTML: &str = "HTML";
 
 /// D-META-DSL1=A: `#SQL<Row> { ... }` — a checked text block whose row is
@@ -476,7 +492,6 @@ pub const TYPE_SH: &str = "Sh";
 
 /// D-REGEX-LIT1=D: `Regex.{"…"}` is a compile-checked pattern value.
 pub const TYPE_REGEX: &str = "Regex";
-
 
 /// D-BOUND-HEAD1=A: checked URL/Path/DateTime literal heads. `Url` remains the
 /// internal nominal spelling; source type declarations use the canonical URL.
@@ -743,6 +758,7 @@ pub const CORE_MEM_GATE_TIERS: &[(&str, CoreMemGate)] = &[
     (MEM_POOL, CoreMemGate::Import),
     (MEM_FIXED, CoreMemGate::Import),
     (TYPE_ALLOC_ERROR, CoreMemGate::Import),
+    ("Atomic", CoreMemGate::Import),
 ];
 
 /// Return named `core.mem` item's gate tier.
@@ -853,6 +869,10 @@ pub const METHOD_FRESH_NEW_RANDOM: &str = "new_random";
 /// D-DET-CAPAPI (ratified 2026-06-25) widens `Rng` with `bool()` / `pick(list)`
 /// / `shuffle(&list)`, mirroring the ambient `random.*` set.
 pub const RNG_TYPE: &str = "Rng";
+/// D-TEST-WORLD1=A (ratified 2026-09-05): scoped deterministic execution
+/// world carrying the controlled clock, scheduler, external-input providers,
+/// and seeded test randomness.
+pub const DETERMINISTIC_WORLD_TYPE: &str = "DeterministicWorld";
 /// D-TESTDATA1: deterministic locale-aware fake-data capability.
 pub const FAKE_TYPE: &str = "Fake";
 
@@ -918,6 +938,19 @@ pub const TYPE_BUILD_TARGET: &str = "BuildTarget";
 pub const TYPE_BUILD_TOOLCHAIN: &str = "BuildToolchain";
 pub const TYPE_BUILD_PROBE: &str = "BuildProbe";
 pub const TYPE_PROGRAM_INFO: &str = "ProgramInfo";
+/// D-BUILDQUERY1=A: typed read-only graph projections returned by
+/// `core.build.graph` and `core.build.receipt_diff`.
+pub const TYPE_BUILD_GRAPH: &str = "BuildGraph";
+pub const TYPE_BUILD_GRAPH_TARGET: &str = "BuildGraphTarget";
+pub const TYPE_BUILD_GRAPH_ACTION: &str = "BuildGraphAction";
+pub const TYPE_BUILD_GRAPH_FILE: &str = "BuildGraphFile";
+pub const TYPE_BUILD_GRAPH_NODE: &str = "BuildGraphNode";
+pub const TYPE_BUILD_GRAPH_INPUT_DIGEST: &str = "BuildGraphInputDigest";
+pub const TYPE_BUILD_GRAPH_ACTION_KEY: &str = "BuildGraphActionKey";
+pub const TYPE_BUILD_GRAPH_FILE_DELTA: &str = "BuildGraphFileDelta";
+pub const TYPE_BUILD_GRAPH_KEY_DELTA: &str = "BuildGraphKeyDelta";
+pub const TYPE_BUILD_GRAPH_CACHE_DELTA: &str = "BuildGraphCacheDelta";
+pub const TYPE_BUILD_GRAPH_DIFF: &str = "BuildGraphDiff";
 /// D-MEMO1=A: the read-only statistics record returned by `name.cache()`.
 pub const TYPE_MEMO_STATS: &str = "MemoStats";
 pub const METHOD_MEMO_CACHE: &str = "cache";
@@ -983,8 +1016,10 @@ pub const TYPE_LAYOUT_FIELD: &str = "LayoutField";
 pub fn is_layout_byte_fact(type_name: &str, field: &str) -> bool {
     matches!(
         (type_name, field),
-        (TYPE_LAYOUT_INFO, "size" | "alignment" | "stride")
-            | (TYPE_LAYOUT_FIELD, "offset" | "size")
+        (
+            TYPE_LAYOUT_INFO,
+            "size" | "alignment" | "stride" | "requested_alignment" | "effective_alignment"
+        ) | (TYPE_LAYOUT_FIELD, "offset" | "size")
     )
 }
 
@@ -1001,6 +1036,3 @@ pub fn layout_selector(name: &str) -> String {
 pub fn layout_selector_name(name: &str) -> Option<&str> {
     name.strip_prefix(LAYOUT_SELECTOR_PREFIX)
 }
-
-/// Internal TIR field spelling for a selected `LayoutField`.
-pub const LAYOUT_FIELD_PROJECTION_PREFIX: &str = "\u{0}jet.layout.field.";

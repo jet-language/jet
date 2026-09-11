@@ -6,10 +6,10 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Once;
 
-fn ensure_tir_bridge() {
+fn ensure_mir_bridge() {
     static INSTALL: Once = Once::new();
     INSTALL.call_once(|| {
-        jet_codegen::Codegen::TIR::install_comptime_bridge();
+        jet_codegen::Codegen::MIREval::install_mir_bridge();
     });
 }
 
@@ -18,7 +18,7 @@ fn check(src: &str) -> (ProgramBundle, Vec<Diagnostic>) {
 }
 
 fn check_at(src: &str, root: &str) -> (ProgramBundle, Vec<Diagnostic>) {
-    ensure_tir_bridge();
+    ensure_mir_bridge();
     let (tokens, lex) = Lexer::lex(src);
     assert!(lex.is_empty(), "lexer diagnostics: {lex:?}");
     let mut program = Parser::parse(&tokens).expect("source parses");
@@ -43,6 +43,7 @@ fn check_at(src: &str, root: &str) -> (ProgramBundle, Vec<Diagnostic>) {
             user_policy_declarations: program.user_policy_declarations.clone(),
             rule_facts: std::mem::take(&mut program.rule_facts),
         }],
+        devtools_registry: jet_sema::AST::DevtoolsRegistry::default(),
         parse_teaching: Vec::new(),
         used_core: HashSet::new(),
         ffi_callback_fns: HashSet::new(),
@@ -82,7 +83,7 @@ fn only_instance_fingerprint(src: &str, root: &str) -> String {
 }
 
 fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, Vec<Diagnostic>) {
-    ensure_tir_bridge();
+    ensure_mir_bridge();
     let mut modules = Vec::new();
     let mut name_ledger = jet_sema::AST::NameLedger::default();
     for (module_idx, (path, src, targets)) in sources.iter().enumerate() {
@@ -123,6 +124,7 @@ fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, 
         entry: sources.len() - 1,
         project_root: PathBuf::from("pkg-a"),
         modules,
+        devtools_registry: jet_sema::AST::DevtoolsRegistry::default(),
         parse_teaching: Vec::new(),
         used_core: HashSet::new(),
         ffi_callback_fns: HashSet::new(),

@@ -1,0 +1,56 @@
+// D-NEVER2=B: declared Never belongs in the return slot, while ordinary
+// functions still infer the same bottom fact without an annotation.
+use core.process as process
+
+#Error
+enum StopError {
+    Closed
+}
+
+fn usage() Never -> {
+    print("usage: tool <count>")
+    process.exit(2)
+}
+
+fn count(arg: String) Int -> {
+    return Int.parse(arg) ?? usage()
+}
+
+fn serve(addr: String) Never !NetError -> {
+    loop { panic("serve stopped") }
+}
+
+fn propagate(error: NetError) Never !NetError -> {
+    return Err(error)
+}
+
+fn stop() Never -> panic("stop")
+
+fn run_then_stop(stop: fn() Never) Never -> stop()
+
+fn fail() Never !StopError -> {
+    return Err(StopError.Closed)
+}
+
+fn unbounded() Never -> {
+    loop { }
+}
+
+fn inferred() {
+    loop { }
+}
+
+trait Terminator {
+    fn stop(self) Never
+}
+
+struct Worker {}
+
+impl Worker.Terminator {
+    fn stop(self) Never -> panic("worker stopped")
+}
+
+fn run() {
+    print(count("41"))
+    print(fail() ?? 42)
+}

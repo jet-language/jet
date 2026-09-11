@@ -5,7 +5,7 @@
 #
 # Regenerate:
 #   nix shell nixpkgs#ruby --command ruby scripts/agent/surface-ruby.rb \
-#       > docs/reference/surfaces/ruby-surface.json
+#       > docs/spec/reference/surfaces/ruby-surface.json
 
 require "json"
 require "set"

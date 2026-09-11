@@ -63,7 +63,9 @@ impl<T> JetUninit<T> {
 
     pub fn write(&mut self, value: T) {
         if self.initialized {
-            // SAFETY: the flag is set only after a successful write.
+            self.initialized = false;
+            // SAFETY: the prior write initialized this value. Clearing the
+            // flag first prevents a second drop if its destructor panics.
             unsafe { self.value.assume_init_drop() };
         }
         self.value.write(value);
@@ -102,6 +104,13 @@ impl<T, const N: usize> JetUninitFixed<T, N> {
         }
     }
 
+    pub fn from_array(values: [T; N]) -> Self {
+        Self {
+            values: values.map(std::mem::MaybeUninit::new),
+            initialized: [true; N],
+        }
+    }
+
     pub fn len(&self) -> usize {
         N
     }
@@ -110,7 +119,9 @@ impl<T, const N: usize> JetUninitFixed<T, N> {
         let (index, replaced) = jet_uninit_write(&mut self.initialized, index)
             .expect("fixed-list index out of range");
         if replaced {
-            // SAFETY: the bitmap is set only after `write` initializes this slot.
+            self.initialized[index] = false;
+            // SAFETY: the prior write initialized this slot. Clearing the
+            // flag first prevents a second drop if its destructor panics.
             unsafe { self.values[index].assume_init_drop() };
         }
         self.values[index].write(value);
@@ -118,9 +129,7 @@ impl<T, const N: usize> JetUninitFixed<T, N> {
     }
 
     pub fn write_array(&mut self, values: [T; N]) {
-        for (index, value) in values.into_iter().enumerate() {
-            self.write(index, value);
-        }
+        *self = Self::from_array(values);
     }
 
     pub fn read_array(&self) -> [T; N]
@@ -130,6 +139,17 @@ impl<T, const N: usize> JetUninitFixed<T, N> {
         jet_uninit_all(&self.initialized)
             .expect("fixed list read before every element was initialized");
         std::array::from_fn(|index| self[index].clone())
+    }
+
+    pub fn into_array(mut self) -> [T; N] {
+        jet_uninit_all(&self.initialized)
+            .expect("fixed list moved before every element was initialized");
+        std::array::from_fn(|index| {
+            self.initialized[index] = false;
+            // SAFETY: all slots were initialized; clearing the bit transfers
+            // this value to the result without dropping it again with self.
+            unsafe { self.values[index].assume_init_read() }
+        })
     }
 
     pub fn as_array(&self) -> &[T; N] {

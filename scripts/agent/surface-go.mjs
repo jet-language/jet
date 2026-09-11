@@ -9,7 +9,7 @@
  * Regenerate:
  *   nix shell nixpkgs#go --command sh -c \
  *     'node scripts/agent/surface-go.mjs $(go env GOROOT) $(go version)' \
- *     > docs/reference/surfaces/go-surface.json
+ *     > docs/spec/reference/surfaces/go-surface.json
  */
 
 import { readdirSync, readFileSync } from "node:fs";

@@ -1,5 +1,5 @@
-//! Comptime/TIR-eval collection ops (#722 / #777). Same CtValue shapes as
-//! `Methods/dispatch/eval_method.rs` — one table for TirBridge + old helpers.
+//! Comptime/MIR-eval collection ops (#722 / #777). Same CtValue shapes as
+//! `Methods/dispatch/eval_method.rs` — one table for MirBridge + old helpers.
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::Type;
@@ -10,7 +10,7 @@ use crate::AST::CtValue;
 use jet_foundation::Prelude::jet_as_bytes as as_bytes;
 
 #[allow(dead_code, non_camel_case_types, unused_imports)]
-mod collection_semantics {
+pub(crate) mod collection_semantics {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     use jet_foundation::StructuralDebug::{jet_debug_map, jet_debug_optional, jet_debug_range};
@@ -35,6 +35,12 @@ mod collection_semantics {
         fn new() -> Self {
             Self(std::collections::BTreeMap::new())
         }
+    }
+
+    /// By-value take of the map entries (`Prelude/Core.rs` spelling); this
+    /// mirror owns its storage outright, so it simply drains it.
+    fn jet_map_into_entries<K: Ord + Clone, V: Clone>(m: JetMap<K, V>) -> Vec<(K, V)> {
+        m.0.into_iter().collect()
     }
 
     impl<K: Ord, V> std::iter::FromIterator<(K, V)> for JetMap<K, V> {
@@ -82,11 +88,65 @@ mod collection_semantics {
     include!("../../../jet-codegen/src/Prelude/Core/Loadable.rs");
     include!("../../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
     include!("../../../jet-codegen/src/Prelude/Core/Values.rs");
+    // D-DATAFRAME1 / card #2447: comptime evaluation consumes the same typed
+    // table-plan fact kernel as AOT and JIT; it owns no alternate plan shape.
+    include!("../../../jet-codegen/src/Prelude/Core/LazyTablePlan.rs");
     include!("../../../jet-codegen/src/Prelude/Core/TextValues.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs");
     include!("../../../jet-codegen/src/Prelude/Memo.rs");
+    include!("../../../jet-codegen/src/Prelude/Core/SimdLanes.rs");
     include!("../../../jet-codegen/src/Prelude/Core/CollectionFailure.rs");
+    include!("../../../jet-codegen/src/Prelude/Core/SortKernel.rs");
     include!("../../../jet-codegen/src/Prelude/Core/Collections.rs");
+
+    pub struct LoopListCursor<T> {
+        cursor: JetLoopIterCursor,
+        started: bool,
+        item: std::marker::PhantomData<T>,
+    }
+
+    impl<T> std::fmt::Debug for LoopListCursor<T> {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.debug_struct("LoopListCursor").finish_non_exhaustive()
+        }
+    }
+
+    impl<T: 'static> LoopListCursor<T> {
+        pub fn new(
+            values: Vec<T>,
+            step: Option<i64>,
+        ) -> Result<Self, &'static str> {
+            jet_loop_iter_init_checked(
+                values,
+                step.unwrap_or(0),
+                step.is_some(),
+                true,
+                JetLoopSourceKind::Plain,
+            )
+            .map(|cursor| Self {
+                cursor,
+                started: false,
+                item: std::marker::PhantomData,
+            })
+        }
+    }
+
+    impl<T: 'static> Iterator for LoopListCursor<T> {
+        type Item = T;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            // Skip/drop subsequent items only after the current loop body.
+            if self.started {
+                jet_loop_iter_advance(&mut self.cursor);
+            } else {
+                self.started = true;
+            }
+            if !jet_loop_iter_has_next(&self.cursor) {
+                return None;
+            }
+            Some(jet_loop_iter_value(&mut self.cursor))
+        }
+    }
 
     pub(super) fn list_pop<T>(values: &mut Vec<T>) -> Option<T> {
         jet_list_pop_kernel(values).ok()
@@ -184,6 +244,10 @@ mod collection_semantics {
         jet_iter_skip(jet_iter_from_vec(values), n).to_list()
     }
 
+    pub fn try_collect<T, E>(values: impl IntoIterator<Item = Result<T, E>>) -> Result<Vec<T>, E> {
+        jet_list_try_collect(values)
+    }
+
     pub(super) fn sequence_argument_message(method: &str, value: i64) -> Option<&'static str> {
         jet_sequence_argument_message(method, value)
     }
@@ -191,6 +255,45 @@ mod collection_semantics {
     pub(super) fn zip_row_count(lengths: &[usize], mode: u8) -> Option<usize> {
         jet_zip_row_count(lengths, mode)
     }
+}
+
+pub use collection_semantics::LoopListCursor;
+pub use collection_semantics::{
+    jet_zip_length_mismatch_message, jet_zip_pad_step, jet_zip_short_step, jet_zip_strict_step,
+    try_collect,
+};
+
+#[derive(Debug)]
+pub struct LoopRangeCursor(collection_semantics::JetLoopRangeCursor);
+
+impl LoopRangeCursor {
+    pub fn new(
+        start: i64,
+        end: i64,
+        step: Option<i64>,
+        exclusive: bool,
+    ) -> Result<Self, &'static str> {
+        collection_semantics::jet_loop_range_init_checked(
+            start, end, step.unwrap_or(0), step.is_some(), exclusive,
+        ).map(Self)
+    }
+}
+
+impl Iterator for LoopRangeCursor {
+    type Item = i64;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if !collection_semantics::jet_loop_range_has_next(&self.0) {
+            return None;
+        }
+        let value = collection_semantics::jet_loop_range_value(&self.0);
+        collection_semantics::jet_loop_range_advance(&mut self.0);
+        Some(value)
+    }
+}
+
+pub(super) fn string_contains(text: &str, needle: &str) -> bool {
+    collection_semantics::jet_string_contains(text, needle)
 }
 
 pub(super) fn iter_first<T: 'static>(values: Vec<T>) -> Option<T> {
@@ -201,7 +304,7 @@ pub(super) fn iter_skip<T: 'static>(values: Vec<T>, n: i64) -> Vec<T> {
     collection_semantics::iter_skip(values, n)
 }
 
-pub(super) fn sequence_argument_message(method: &str, value: i64) -> Option<&'static str> {
+pub fn sequence_argument_message(method: &str, value: i64) -> Option<&'static str> {
     collection_semantics::sequence_argument_message(method, value)
 }
 
@@ -514,7 +617,7 @@ pub fn prelude_new(
         // #1478: `Set.new()` at this tier — the tier1 native path
         // (`crates/jet-jit/.../lower_ctx.rs`) already builds an empty
         // HashSet handle; this closes the same construct for the canonical
-        // TIR evaluator (comptime + `jet run` deopt), matching `BTreeSet`
+        // MIR evaluator (comptime + `jet run` deopt), matching `BTreeSet`
         // just below (I9 — no tier left calling this an unsupported prelude
         // static once tier1 already ships it natively).
         "std::collections::HashSet" => Ok(set_struct(crate::Syntax::TYPE_SET, Vec::new())),

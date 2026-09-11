@@ -1,0 +1,240 @@
+// TanStack Start reference loop: one typed application graph with one
+// first-party Router/Query/Forms/Table/Virtual/Store state projection.
+//
+// The suite calls below are the ratified D-DX-SUITE1 surface.  The app builder
+// remains the only route registration graph; no local parser, cache, form
+// model, table renderer, or JavaScript runtime is introduced.
+use core.web as web
+use core.encoding.json as json
+use core.net.url as url
+use core.web.query as query
+use core.web.forms as forms
+use core.web.table as table
+use core.web.virtual as virtual
+use core.web.store as store
+#Target(Web)
+
+#Codable
+struct Order {
+    id: Int
+    customer: String
+    total: Int
+    shipped: Bool
+}
+
+#Codable
+struct OrderSearch {
+    q: String
+    page: Int
+    cart: Int
+    refresh: Int
+}
+
+#Codable
+struct ShipForm {
+    id: Int
+    carrier: String
+    tracking: String
+}
+
+struct Cart {
+    ids: [Int]
+}
+
+fn order_for(id: Int) Order -> {
+    return Order{id: id, customer: "Customer {id}", total: 100 + (id % 500), shipped: id % 2 == 0}
+}
+
+fn order_rows() [Order] -> {
+    rows := [Order]{}
+    loop id in 0..<100000 -> rows.push(order_for(id + 1))
+    return rows
+}
+
+fn order_id(order: Order) String -> "{order.id}"
+fn order_customer(order: Order) String -> order.customer
+fn order_shipped(order: Order) String -> "{order.shipped}"
+fn pending_order(order: Order) Bool -> !order.shipped
+fn render_order_row(order: Order) String -> "<tr><td>{order.id}</td><td>{order.customer}</td><td>{order.total}</td><td>{order.shipped}</td></tr>"
+fn render_order_rows(orders: [Order]) String -> orders.map(render_order_row).join("")
+fn render_keyed_order_row(row: WebTableRow<Order>) String -> render_order_row(row.value)
+fn render_keyed_order_rows(rows: [WebTableRow<Order>]) String -> rows.map(render_keyed_order_row).join("")
+
+// The server loader receives the same typed table state as local pagination.
+// This fixture applies its known sort/filter policy before honoring the
+// requested page, so route/query state and loader state stay one contract.
+fn load_order_page(state: WebTableState) WebTablePage<Order> !String -> {
+    source :: order_rows()
+    pending :: table.filter(source, pending_order)
+    ordered :: table.sort(pending, true, order_id)
+    return Ok(table.page(ordered, state.page_index, state.page_size))
+}
+
+// The route loader takes the route's typed search input and returns the
+// Codable route data; the App graph runs it through the router (preload,
+// cache, abort) and hands the decoded value to `orders_page` as `data`.
+fn load_orders(search: OrderSearch) [Order] !String -> {
+    source :: order_rows()
+    if search.q == "all" -> return Ok(table.page(source, search.page, 24).rows)
+    if search.q != "pending" -> return Err("unknown order filter `{search.q}`")
+    return Ok(table.page(table.filter(source, pending_order), search.page, 24).rows)
+}
+
+fn pending_page() WebPage -> web.page(
+    "Orders pending",
+    "<main data-state=\"pending\"><h1>Orders</h1><p>Loading orders…</p></main>"
+)
+
+fn error_page() WebPage -> web.page(
+    "Orders error",
+    "<main data-state=\"error\"><h1>Orders</h1><p>Orders could not be loaded.</p></main>"
+)
+
+fn add_order_to_cart(cart: Cart) {
+    cart.ids.push(41)
+}
+
+fn cart_seed(search: OrderSearch) Cart -> {
+    ids := [Int]{}
+    if search.cart > 0 -> ids.push(41)
+    return Cart{ids: ids}
+}
+
+// This is the stable source anchor used by the canonical DX manifest's edit
+// recipe.  A failed edit restores the last-good source and state marker.
+#Test("orders keep deterministic row facts") {
+    sample :: order_for(41)
+    assert_eq(sample.customer, "Customer 41")
+    assert_eq(sample.total, 141)
+    assert_eq(sample.shipped, false)
+}
+
+fn render_snapshot(id: Int, route_search: OrderSearch, loaded: [Order]) String -> {
+    // App.route is the sole registration graph and the App router is the
+    // single navigation state; `loaded` is that router's decoded route data.
+    loaded_markup :: render_order_rows(loaded)
+    search_wire :: url.percent_encode(json.to_string(route_search))
+    route_text :: "route=/orders/{id} search={search_wire} loaded={loaded.len()}"
+    search :: route_search
+    next_search :: OrderSearch{q: search.q, page: search.page + 1, cart: search.cart, refresh: search.refresh}
+    refresh_search :: OrderSearch{q: search.q, page: search.page, cart: search.cart, refresh: search.refresh + 1}
+    cart_search :: OrderSearch{q: search.q, page: search.page, cart: search.cart + 1, refresh: search.refresh}
+    next_link :: url.percent_encode(json.to_string(next_search))
+    refresh_link :: url.percent_encode(json.to_string(refresh_search))
+    cart_link :: url.percent_encode(json.to_string(cart_search))
+    ship_data :: ShipForm{id: id, carrier: "Parcel", tracking: "PX-41"}
+    typed_form :: web.form(ShipForm, action: submit_ship_order)
+    typed_form.set("id", "{ship_data.id}") ?? panic("typed id value")
+    typed_form.set("carrier", ship_data.carrier) ?? panic("typed carrier value")
+    typed_form.set("tracking", ship_data.tracking) ?? panic("typed tracking value")
+    typed_form_markup :: typed_form
+        .validate(.carrier, on: .Blur, with: check_carrier)
+        .render()
+
+    // Query.live seeds the cache with route data and reuses its loader for
+    // refreshes. Invalidation exposes stale → fetching → fresh to the panel.
+    orders_query :: query.live("orders.list", "orders", json.to_string(loaded), () -> {
+        refreshed :: load_orders(route_search)
+        return Ok(json.to_string(refreshed))
+    })
+    stale_generation :: orders_query.invalidate()
+    query_state :: orders_query.state()
+    query_text :: "{orders_query.show()} status={query_state.status}"
+
+    // Forms stay headless: typed fields, blur validation, async validation,
+    // and the same encoded body used by progressive no-script POST.
+    form0 :: forms.new("/actions/ship-order-progressive")
+    form1 :: forms.field(form0, "id", "Int", true) ?? panic("id field")
+    form2 :: forms.field(form1, "carrier", "String", true) ?? panic("carrier field")
+    form3 :: forms.field(form2, "tracking", "String", true) ?? panic("tracking field")
+    forms.set(form3, "id", "{ship_data.id}") ?? panic("id value")
+    forms.set(form3, "carrier", ship_data.carrier) ?? panic("carrier value")
+    forms.set(form3, "tracking", ship_data.tracking) ?? panic("tracking value")
+    forms.blur(form3, "carrier") ?? panic("carrier blur")
+    forms.validate(form3) ?? panic("form validation")
+    async_form :: forms.validate_async(form3)
+    submission :: forms.submit(async_form) ?? panic("form submission")
+    no_script_body :: forms.no_script(async_form) ?? panic("no-script body")
+    form_html :: "<link rel=\"stylesheet\" href=\"/assets/app.css\">" + forms.html(async_form)
+    form_text :: forms.show(async_form) + typed_form_markup
+
+    // Table owns typed rows, deterministic sorting/filtering, and pagination.
+    // Virtual consumes only the bounded viewport slice, never the full render
+    // surface, even though the source dataset has 100,000 rows.
+    rows :: order_rows()
+    row_count :: rows.len()
+    orders_table :: table.new_keyed("OrdersTable", rows, order_id)
+    id_column :: table.column("id", "Int", order_id)
+    customer_column :: table.column("customer", "String", order_customer)
+    shipped_column :: table.column("shipped", "Bool", order_shipped)
+    configured_table :: orders_table
+        .with_column(id_column)
+        .with_column(customer_column)
+        .with_column(shipped_column)
+    local_sorted :: table.sort_by(configured_table, "id", WebTableSortDirection.Descending)
+    local_table :: table.filter_by(local_sorted, "shipped", "false")
+    local_page_table :: table.paginate(local_table, search.page, 24)
+    table_page :: table.page_state(local_page_table) ?? panic("table page")
+    table_markup :: render_order_rows(table_page.rows)
+    virtual_plan :: virtual.plan_from_sizes(row_count, 0, 480, 480, 36, 8, [Int]{36, 42, 30, 36})
+    visible_rows :: table.visible_rows(local_table, virtual_plan) ?? panic("visible table rows")
+    visible_indices :: virtual.plan_indices(virtual_plan)
+    virtual_markup :: render_keyed_order_rows(visible_rows)
+    virtual_text :: virtual.plan_facts(virtual_plan)
+    server_table :: table.with_server_page(local_table, load_order_page)
+    server_page_table :: table.paginate(server_table, search.page, 24)
+    server_page :: table.page_state(server_page_table) ?? panic("server table page")
+    pending_count :: server_page.total_rows
+
+    // A named store uses bounded history; transaction publishes one write and
+    // one typed diff that survives a compatible development reload.
+    cart :: store.with_history("Cart", cart_seed(search), 8)
+    transaction :: store.transaction(cart, "add-order", ["ids"], add_order_to_cart)
+    store_text :: cart.facts_json()
+
+    search_link :: url.percent_encode(json.to_string(route_search))
+    nav :: "<nav data-panel=\"routes\" data-jet-routes=\"/,/orders,/orders/:id,/settings\"><a data-jet-route=\"/\" href=\"/\">Home</a><a data-jet-route=\"/orders\" href=\"/orders?search={search_link}\">Orders</a><a data-jet-route=\"/orders/:id\" href=\"/orders/41?search={search_link}\">Order 41</a><a data-jet-route=\"/settings\" href=\"/settings\">Settings</a></nav>"
+    interactions :: "<section data-panel=\"interactions\"><a data-action=\"refresh-orders\" href=\"/orders?search={refresh_link}\">Refresh orders</a><a data-action=\"next-page\" href=\"/orders?search={next_link}\">Next page</a><a data-action=\"add-to-cart\" href=\"/orders?search={cart_link}\">Add order 41 to cart</a></section>"
+    loader_html :: "<section data-panel=\"loader\"><table><tbody>{loaded_markup}</tbody></table></section>"
+    table_html :: "<section data-panel=\"table\" data-table-page=\"{search.page}\"><p>rows={row_count} pending={pending_count} page={table_page.rows.len()}</p><table><tbody>{table_markup}</tbody></table></section>"
+    virtual_html :: "<section data-panel=\"virtual\"><p>indices={visible_indices.len()} rows={visible_rows.len()}</p><div data-virtual-window=\"0:480\">{virtual_markup}</div><pre>{virtual_text}</pre></section>"
+    return "<main data-jet-edit-loop=\"state-preserved\">" + nav + "<h1>Orders</h1><p data-state=\"edit-loop\">edit-loop: state-preserved</p>" + interactions + "<p data-state=\"loaded\">loaded: {loaded.len()}</p><p data-state=\"error\">error: route/query/form boundaries</p><p data-route=\"/orders/:id\">route search={search.q}</p><pre data-panel=\"router\">{route_text}</pre>" + loader_html + "<pre data-panel=\"query\" data-query-refresh=\"{search.refresh}\">{query_text} invalidation={stale_generation}</pre><section data-panel=\"forms\">{form_html}<pre>{form_text} body={submission} no-script={no_script_body}</pre></section>" + table_html + virtual_html + "<pre data-panel=\"store\" data-cart-count=\"{search.cart}\">{store_text} transaction={transaction.generation}</pre></main>"
+}
+
+fn home() WebPage -> web.page("Orders", render_snapshot(41, OrderSearch{q: "pending", page: 0, cart: 0, refresh: 0}, [Order]{}))
+// `/orders` binds its typed search record and the loader's decoded data.
+fn orders_page(search: OrderSearch, data: [Order]) WebPage -> web.page("Orders", render_snapshot(41, search, data))
+fn order_detail(id: Int, search: OrderSearch) WebPage -> web.page("Order", render_snapshot(id, search, [Order]{}))
+fn settings_page() WebPage -> web.page("Settings", "<main><h1>Settings</h1><p>Preferences</p></main>")
+
+// App.action and App.form are the one checked server boundary. ShipForm is
+// Codable so the same input/output contract is available to scripted and
+// progressive requests without a second RPC declaration.
+fn submit_ship_order(input: ShipForm) String -> "ship-order submitted for {input.id} via {input.carrier}"
+
+fn check_carrier(value: String) Unit !Err -> {
+    if value == "" -> return Err("carrier required")
+    return Ok()
+}
+
+fn run() App -> {
+    // Existing web.app is the shipped derived render surface.  The suite state
+    // above remains headless, so browser, native, and devtools hosts consume
+    // one projection rather than a JavaScript runtime or fallback renderer.
+    // The canonical graph receipt is `jet explain --web-graph`; it reads this
+    // app builder graph rather than a second route description.
+    return web.app()
+        .ssr()
+        .route("/", home)
+        .route("/orders", orders_page)
+        .loader(orders_page, load_orders, true)
+        .pending(pending_page)
+        .error(error_page)
+        .route("/orders/:id", order_detail)
+        .island()
+        .route("/settings", settings_page)
+        .action("ship-order", submit_ship_order)
+        .form("ship-order-progressive", submit_ship_order)
+        .assets("public")
+        .hydration_dev()
+}

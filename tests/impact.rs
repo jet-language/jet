@@ -51,7 +51,7 @@ fn impact_json_output() {
         jet_foundation::MachineOutput::read_machine_output(&text).unwrap(),
         vec![jet_foundation::MachineOutput::MachineRecord::Status]
     );
-    assert!(text.starts_with("{\"schema\":\"jet.report/v1\""));
+    assert!(text.starts_with("{\"schema\":\"jet.status/v1\""));
     assert!(text.contains("\"symbol\":\"square\""));
     assert!(text.contains("\"found\":true"));
     assert!(text.contains("\"check\":{\"status\":\"passed\""));

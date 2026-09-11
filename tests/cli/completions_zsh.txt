@@ -11,7 +11,7 @@ commands=(
         'merge:Merge Jet programs without losing code structure'
         'review:Review meaning, authority, and proof changes'
         'run:Run a program or project'
-        'jobs:List project #Job functions (<file.jet> -- <job>)'
+        'jobs:List or run named project jobs'
         'check:check code without creating a binary'
         'fill:Propose checked code for typed goals'
         'test:Run tests'
@@ -228,8 +228,13 @@ flags=(
     )
 if (( CURRENT == 2 )); then
 _describe -t commands 'command' commands
-elif (( CURRENT == 3 )); then
-case $words[2] in
+elif (( CURRENT == 3 && $words[2] == jobs )); then
+        local -a job_names
+        job_names=("${(@f)$(jet jobs 2>/dev/null | awk '$1 != \"No\" {print $1}')}")
+        _describe -t job_names 'job' job_names
+    else
+        if (( CURRENT == 3 )); then
+            case $words[2] in
             registry) _values 'action' 'publish:Publish the current package' 'yank:Stop new installs of a published version' 'keygen:Create a package-signing key' 'key:Manage the package-signing key' 'vendor:Copy dependencies into vendor/' ;;
             inspect) _values 'action' 'live:Watch a running Jet process' 'graph:Show the build graph' 'query:Search code and build information' 'explain-build:Explain why a target, action, or file is rebuilt' 'compiler:Read compiler facts as versioned JSON' 'impact:Show code affected by a symbol' 'dossier:show everything known about a file or symbol' 'guarantees:Show memory-safety guarantees by component' 'provenance:read dependency provenance' 'digest:Write the one-file LLM surface digest' 'env:List typed environment reads in a config surface' 'semindex:search the code index' 'output:inspect one selected Output' 'expand:show expanded meaning of Jet code (use --json for canonical facts)' 'unsafe:Review unsafe code and its safeguards' 'gates:read the complete compile-time gate ledger' 'authority:read rights-bearing gates from the ledger' 'schema:Inspect saved data schema versions' 'codemod:Preview or apply code changes' 'audit:Inspect implicit copies, exercised memory witnesses, or dependencies' 'sbom:Create a software bill of materials' 'bind:Generate Jet bindings from a foreign header' 'logs:Show recent package build logs' 'info:Show package details' 'outdated:List dependencies with available updates' 'reserved:List reserved words and sigils' 'facts:List every registered truth and its guard' 'structure:Inspect liveness, lifecycle, and import-edge facts' ;;
             project) _values 'action' 'parts:List loaded and skipped project modules' ;;
@@ -240,10 +245,11 @@ case $words[2] in
             os) _values 'action' 'push:Deploy one or more Jetos machines' 'bridge:Convert an existing system configuration to Jet' 'services:Manage development services' 'config:Manage Jet settings and trust' ;;
             gc) _values 'action' 'report:Show values moved into automatic memory management' ;;
             perf) _values 'action' 'run:Run a program and write a .jettrace' 'test:Run tests and write a .jettrace' 'attach:Attach to a running process and write a .jettrace' 'view:Show a .jettrace summary' 'compare:Compare two .jettrace artifacts' 'export:Export a loss-declared projection of a .jettrace' ;;
-        esac
-else
-_values 'flag' $flags
-_files
-fi
+            esac
+        else
+            _values 'flag' $flags
+            _files
+        fi
+    fi
 }
 _jet "$@"

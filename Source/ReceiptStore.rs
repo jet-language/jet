@@ -3,11 +3,35 @@
 //! D-DEVR-TWICE1=A: `check`, `build`, `test`, `prove`, and `budget check`
 //! consult one local receipt store before doing work. Receipt identity uses
 //! input bytes and invocation context; filesystem timestamps never participate.
-//! Result payloads are opaque bytes in this one codec; a claim never selects a
-//! legacy result format.
+//! Result payloads use the fixed codec fields; an explicit bounded extension
+//! carries named canonical typed sections without changing claim identity.
 
+#[path = "ReceiptSections.rs"]
+mod ReceiptSections;
+
+pub use ReceiptSections::{
+    decode_section_record, diff_projection as receipt_section_diff_projection,
+    encode_section_record, diff_sections, normalized_sections, payload_digest, query_sections,
+    schema_digest_for_type, section_record_identity, ReceiptFieldDiff, ReceiptSection,
+    ReceiptSectionRecord, MAX_RECEIPT_SECTION_BYTES, MAX_RECEIPT_SECTION_BYTES_TOTAL,
+    MAX_RECEIPT_SECTION_NAME_BYTES, MAX_RECEIPT_SECTION_RECORD_BYTES,
+    MAX_RECEIPT_SECTION_TYPE_BYTES, MAX_RECEIPT_SECTIONS, RECEIPT_SECTION_RECORD_ID_MAGIC,
+    RECEIPT_SECTION_RECORD_WIRE_MAGIC, RECEIPT_SECTION_WIRE_MAGIC,
+};
+
+use jet_foundation::MIROptimization::Acceleration::{
+    AccelerationDecision, ACCELERATION_RECEIPT_SCHEMA_DIGEST, ACCELERATION_RECEIPT_SECTION_PREFIX,
+    ACCELERATION_RECEIPT_TYPE_NAME,
+};
+
+use crate::RecordIndex::{
+    RecordCapture, RecordIdentity, RecordIndex, RecordIndexEntry, RecordKind, RecordLink,
+};
 use crate::SHA256::sha256_hex;
 use jet_devserver::WatchService::WatchGraph;
+use jet_foundation::JSON::json_escape;
+use jet_foundation::PerformanceBudget::CanonicalJson;
+use jet_foundation::TestingComparison::ComparisonRecord;
 use std::collections::BTreeSet;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
@@ -15,11 +39,24 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::LazyLock;
-
+const RECEIPT_LINK_WIRE_MAGIC: &[u8] = b"jet-receipt-links-v1\0";
+const RECEIPT_LINK_VERSION: u64 = 1;
+const MAX_RECEIPT_LINKS: u64 = 100_000;
 const MAGIC: &[u8] = b"jet-receipt-v2\0";
 const DIGEST_LEN: usize = 64;
 const MAX_FIELD: u64 = 64 * 1024 * 1024;
 const MAX_RECEIPT_BYTES: u64 = MAX_FIELD * 2 + 4 * 1024 * 1024;
+const RECEIPT_SECTION_DIR: &str = "sections";
+const RECEIPT_SECTION_STAGE_DIR: &str = "staged";
+/// Set only by the outer receipt runner after its receipt row is reserved. The
+/// prove child uses this claim key for its produced `receipt` link; keeping it
+/// separate from the general receipt claim environment prevents an untrusted
+/// ambient value from creating a dangling record edge.
+pub const JET_RECEIPT_RECORD_CLAIM_ENV: &str = "JET_RECEIPT_RECORD_CLAIM";
+const RECEIPT_RECORD_ENGINE: &str = "jet-receipt-v2";
+pub const JET_RECEIPT_DIR_ENV: &str = "JET_RECEIPT_DIR";
+pub const JET_RECEIPT_CLAIM_ENV: &str = "JET_RECEIPT_CLAIM";
+pub const JET_RECEIPT_DIGEST_ENV: &str = "JET_RECEIPT_DIGEST";
 const CAPTURE_TRUNCATION_MARKER: &[u8] = b"\n<output truncated>\n";
 const RECEIPT_SECRET_NAME_PARTS: &[&str] =
     &["secret", "token", "password", "passwd", "credential", "key"];
@@ -50,6 +87,11 @@ pub struct Receipt {
     pub status: i32,
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
+    pub sections: Vec<ReceiptSection>,
+    /// Versioned typed links are optional, so receipts without links retain
+    /// their exact pre-index bytes.
+    pub consumed: Vec<RecordLink>,
+    pub produced: Vec<RecordLink>,
     pub digest: String,
 }
 
@@ -61,10 +103,227 @@ impl std::fmt::Debug for Receipt {
             .field("status", &self.status)
             .field("stdout", &"<redacted>")
             .field("stderr", &"<redacted>")
+            .field("sections", &self.sections)
+            .field("consumed", &self.consumed)
+            .field("produced", &self.produced)
             .field("digest", &self.digest)
             .finish()
     }
 }
+
+impl Receipt {
+    /// Find one named section without exposing any mutable post-publication
+    /// path. A receipt object is immutable once written to the store.
+    pub fn section(&self, name: &str) -> Result<Option<&ReceiptSection>, String> {
+        if name.is_empty()
+            || name.len() > MAX_RECEIPT_SECTION_NAME_BYTES
+            || !name
+                .chars()
+                .all(|character| !character.is_control() && character != '/' && character != '\\')
+        {
+            return Err(format!("receipt section name `{name}` is invalid"));
+        }
+        Ok(self.sections.iter().find(|section| section.name == name))
+    }
+
+    /// Project all sections using the shared deterministic canonical object.
+    pub fn sections_json(&self) -> Result<CanonicalJson, String> {
+        ReceiptSections::query_sections(&self.sections, None)
+    }
+
+    /// Project selected sections using the shared deterministic canonical
+    /// object. An empty list selects all sections.
+    pub fn query_sections(
+        &self,
+        names: Option<&[String]>,
+    ) -> Result<CanonicalJson, String> {
+        ReceiptSections::query_sections(&self.sections, names)
+    }
+
+    /// Return deterministic per-field changes against an earlier receipt.
+    pub fn diff_sections(&self, before: &Receipt) -> Result<Vec<ReceiptFieldDiff>, String> {
+        ReceiptSections::diff_sections(&before.sections, &self.sections)
+    }
+
+    /// Canonical JSON array projection for receipt diff and perf compare.
+    pub fn diff_sections_json(&self, before: &Receipt) -> Result<CanonicalJson, String> {
+        Ok(receipt_section_diff_projection(&self.diff_sections(before)?))
+    }
+
+    pub fn consumed_links(&self) -> &[RecordLink] {
+        &self.consumed
+    }
+
+
+    pub fn produced_links(&self) -> &[RecordLink] {
+        &self.produced
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AccelerationReceiptRow {
+    pub sequence: u64,
+    pub function: String,
+    pub loop_header: u32,
+    pub source_start: usize,
+    pub source_end: usize,
+    pub decision: AccelerationDecision,
+}
+
+/// The payload carries source identity beside the canonical Foundation
+/// `AccelerationDecision` object; display text is never consulted. Rows are
+/// returned in numeric sequence order, independent of receipt section-name
+/// sorting.
+pub fn acceleration_decisions(
+    receipt: &Receipt,
+) -> Result<Vec<AccelerationReceiptRow>, String> {
+    let mut rows = Vec::new();
+    for section in &receipt.sections {
+        if section.type_name != ACCELERATION_RECEIPT_TYPE_NAME
+            || !section
+                .name
+                .starts_with(ACCELERATION_RECEIPT_SECTION_PREFIX)
+        {
+            continue;
+        }
+        if section.schema_digest != ACCELERATION_RECEIPT_SCHEMA_DIGEST {
+            return Err(format!(
+                "acceleration section `{}` has an unexpected schema digest",
+                section.name
+            ));
+        }
+        let sequence = section
+            .name
+            .strip_prefix(ACCELERATION_RECEIPT_SECTION_PREFIX)
+            .and_then(|value| (!value.is_empty()).then_some(value))
+            .ok_or_else(|| format!("invalid acceleration section name `{}`", section.name))?
+            .parse::<u64>()
+            .map_err(|_| format!("invalid acceleration section sequence `{}`", section.name))?;
+        let value = section.value()?;
+        let fields = receipt_acceleration_object(&value, "acceleration receipt")?;
+        receipt_acceleration_require_fields(
+            fields,
+            "acceleration receipt",
+            &["decision", "function", "loop_header", "source"],
+        )?;
+        let function = receipt_acceleration_string(fields, "function")?.to_string();
+        let loop_header = receipt_acceleration_integer(fields, "loop_header")?
+            .parse::<u32>()
+            .map_err(|_| "acceleration receipt loop_header is out of range".to_string())?;
+        let source = receipt_acceleration_object(
+            fields
+                .get("source")
+                .ok_or("acceleration receipt is missing source")?,
+            "acceleration receipt source",
+        )?;
+        receipt_acceleration_require_fields(
+            source,
+            "acceleration receipt source",
+            &["end", "start"],
+        )?;
+        let source_start = receipt_acceleration_integer(source, "start")?
+            .parse::<usize>()
+            .map_err(|_| "acceleration receipt source start is out of range".to_string())?;
+        let source_end = receipt_acceleration_integer(source, "end")?
+            .parse::<usize>()
+            .map_err(|_| "acceleration receipt source end is out of range".to_string())?;
+        if source_start > source_end {
+            return Err("acceleration receipt source range is reversed".to_string());
+        }
+        let decision = AccelerationDecision::from_canonical_json(
+            fields
+                .get("decision")
+                .ok_or("acceleration receipt is missing decision")?,
+        )?;
+        rows.push(AccelerationReceiptRow {
+            sequence,
+            function,
+            loop_header,
+            source_start,
+            source_end,
+            decision,
+        });
+    }
+    rows.sort_by_key(|row| row.sequence);
+    if rows
+        .windows(2)
+        .any(|pair| pair[0].sequence == pair[1].sequence)
+    {
+        return Err("duplicate acceleration receipt sequence".to_string());
+    }
+    Ok(rows)
+}
+
+fn receipt_acceleration_object<'a>(
+    value: &'a CanonicalJson,
+    label: &str,
+) -> Result<&'a std::collections::BTreeMap<String, CanonicalJson>, String> {
+    match value {
+        CanonicalJson::Object(fields) => Ok(fields),
+        _ => Err(format!("{label} must be a canonical object")),
+    }
+}
+
+fn receipt_acceleration_string<'a>(
+    fields: &'a std::collections::BTreeMap<String, CanonicalJson>,
+    key: &str,
+) -> Result<&'a str, String> {
+    match fields.get(key) {
+        Some(CanonicalJson::String(value)) => Ok(value),
+        Some(_) => Err(format!("acceleration receipt field `{key}` must be a string")),
+        None => Err(format!("acceleration receipt field `{key}` is missing")),
+    }
+}
+
+fn receipt_acceleration_integer<'a>(
+    fields: &'a std::collections::BTreeMap<String, CanonicalJson>,
+    key: &str,
+) -> Result<&'a str, String> {
+    match fields.get(key) {
+        Some(CanonicalJson::Integer(value)) => Ok(value),
+        Some(_) => Err(format!("acceleration receipt field `{key}` must be an integer")),
+        None => Err(format!("acceleration receipt field `{key}` is missing")),
+    }
+}
+
+fn receipt_acceleration_require_fields(
+    fields: &std::collections::BTreeMap<String, CanonicalJson>,
+    label: &str,
+    keys: &[&str],
+) -> Result<(), String> {
+    if fields.len() != keys.len() || !keys.iter().all(|key| fields.contains_key(*key)) {
+        return Err(format!("{label} has missing or unknown fields"));
+    }
+    Ok(())
+}
+
+/// Decode one authenticated `jet-receipt-v2` object from bytes. Command
+/// boundaries use this instead of reaching into the private codec so indexed
+/// verification cannot consume a forged or stale payload.
+pub(crate) fn decode_bytes(bytes: &[u8]) -> Result<Receipt, String> {
+    let receipt = decode_receipt(bytes)?;
+    if receipt.digest != receipt_digest(&receipt) {
+        return Err("receipt digest does not authenticate its body".into());
+    }
+    Ok(receipt)
+}
+
+/// Read one authenticated receipt object without following a symlink.
+pub fn read_path(path: &Path) -> Result<Receipt, String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("could not inspect receipt `{}`: {error}", path.display()))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(format!(
+            "receipt path is not a regular file: {}",
+            path.display()
+        ));
+    }
+    let bytes = read_regular(path)
+        .map_err(|error| format!("could not read receipt `{}`: {error}", path.display()))?;
+    decode_bytes(&bytes)
+}
+
+
 
 pub struct ReceiptStore {
     root: PathBuf,
@@ -92,6 +351,18 @@ impl ReceiptStore {
         input_paths: &[PathBuf],
     ) -> Result<ReceiptClaim, String> {
         self.claim_with_identity(verb, context_identity(verb, argv)?, input_paths)
+    }
+    fn claim_with_attempt(
+        &self,
+        verb: &str,
+        argv: &[String],
+        input_paths: &[PathBuf],
+        attempt: &[u8],
+    ) -> Result<ReceiptClaim, String> {
+        let mut identity = context_identity(verb, argv)?;
+        frame(&mut identity, b"generated-replay-attempt-v1");
+        frame(&mut identity, attempt);
+        self.claim_with_identity(verb, identity, input_paths)
     }
 
     fn claim_with_identity(
@@ -179,6 +450,12 @@ impl ReceiptStore {
         if receipt.claim.key != key || receipt.claim.verb != verb {
             return Ok(None);
         }
+        if matches!(verb, "build" | "prove") {
+            let _ = receipt_target_inputs_sha256(&receipt.claim, argv, cwd)?;
+        }
+        if verb == "prove" && has_generated_failure_for_target(&receipt, argv, cwd)? {
+            return Ok(None);
+        }
         let input_paths = if verb == "check" && !has_explicit_target(verb, argv) {
             project_check_input_paths(cwd).unwrap_or_else(|| {
                 target_path(verb, argv, cwd)
@@ -210,7 +487,7 @@ impl ReceiptStore {
                     // workspace, lock, generated input, or entry candidate
                     // cannot hide behind an old claim.
                     if let Some(target) = target_path(verb, argv, cwd) {
-                        add_project_inputs(&target, &mut paths);
+                        add_project_inputs(&target, verb, &mut paths);
                     }
                     paths.into_iter().collect()
                 }
@@ -220,7 +497,9 @@ impl ReceiptStore {
             Ok(claim) => claim,
             Err(_) => return Ok(None),
         };
-        if claim != receipt.claim {
+        let generated_replay_receipt =
+            verb == "prove" && claim.inputs == receipt.claim.inputs;
+        if claim != receipt.claim && !generated_replay_receipt {
             let changes = changed_receipt_inputs(&receipt.claim.inputs, &claim.inputs);
             if changes.is_empty() {
                 eprintln!(
@@ -317,13 +596,42 @@ impl ReceiptStore {
                 ))
             }
         };
-        let receipt = match decode_receipt(&bytes) {
+        let mut receipt = match decode_receipt(&bytes) {
             Ok(receipt) => receipt,
             Err(_) => return Ok(None),
         };
+        // The immutable object authenticates itself before any append-only
+        // section records are projected into the caller-visible receipt.
         if receipt.claim != *claim || receipt.digest != receipt_digest(&receipt) {
             return Ok(None);
         }
+        let appended = self.published_sections(&receipt.claim.key, &receipt.digest)?;
+        for section in appended {
+            let same = receipt.sections.iter().any(|existing| {
+                existing.name == section.name
+                    && existing.type_name == section.type_name
+                    && existing.schema_digest == section.schema_digest
+                    && existing.payload_digest == section.payload_digest
+            });
+            if same {
+                continue;
+            }
+            if receipt
+                .sections
+                .iter()
+                .any(|existing| existing.name == section.name)
+            {
+                return Err(format!(
+                    "receipt section `{}` conflicts with the immutable receipt",
+                    section.name
+                ));
+            }
+            receipt.sections.push(section);
+        }
+        receipt.sections = match normalized_sections(&receipt.sections) {
+            Ok(sections) => sections,
+            Err(error) => return Err(error),
+        };
         Ok(Some(receipt))
     }
 
@@ -338,10 +646,53 @@ impl ReceiptStore {
         stdout: &[u8],
         stderr: &[u8],
     ) -> Result<bool, String> {
+        self.write_with_sections(claim, argv, status, stdout, stderr, &[])
+    }
+
+    /// Publish one immutable receipt object and its bounded named sections.
+    /// Section bytes and typed links are authenticated by the receipt digest,
+    /// but neither participates in the immutable claim key.
+    pub fn write_with_sections(
+        &self,
+        claim: &ReceiptClaim,
+        argv: &[String],
+        status: i32,
+        stdout: &[u8],
+        stderr: &[u8],
+        sections: &[ReceiptSection],
+    ) -> Result<bool, String> {
+        self.write_with_sections_and_links(
+            claim,
+            argv,
+            status,
+            stdout,
+            stderr,
+            sections,
+            &[],
+            &[],
+        )
+    }
+
+    /// Publish one immutable receipt with versioned consumed/produced links.
+    /// Empty links take the pre-index wire path, preserving old bytes.
+    pub fn write_with_sections_and_links(
+        &self,
+        claim: &ReceiptClaim,
+        argv: &[String],
+        status: i32,
+        stdout: &[u8],
+        stderr: &[u8],
+        sections: &[ReceiptSection],
+        consumed: &[RecordLink],
+        produced: &[RecordLink],
+    ) -> Result<bool, String> {
         let secret_values = receipt_secret_values(argv);
         if !is_digest(&claim.key) {
             return Err("receipt claim key is not a lowercase SHA-256 digest".into());
         }
+        let sections = normalized_sections(sections)?;
+        let consumed = normalized_links(consumed, "consumed")?;
+        let produced = normalized_links(produced, "produced")?;
         if !inputs_current(&claim.inputs) {
             return Ok(false);
         }
@@ -350,6 +701,9 @@ impl ReceiptStore {
             status,
             stdout: bounded_redact_bytes(stdout, &secret_values)?,
             stderr: bounded_redact_bytes(stderr, &secret_values)?,
+            sections,
+            consumed,
+            produced,
             digest: String::new(),
         };
         let digest = receipt_digest(&receipt);
@@ -416,10 +770,64 @@ impl ReceiptStore {
         stdout: &[u8],
         stderr: &[u8],
     ) -> Result<Receipt, String> {
+        self.record_with_sections(verb, argv, input_paths, status, stdout, stderr, &[])
+    }
+
+    /// Record one command result with named typed sections.
+    pub fn record_with_sections(
+        &self,
+        verb: &str,
+        argv: &[String],
+        input_paths: &[PathBuf],
+        status: i32,
+        stdout: &[u8],
+        stderr: &[u8],
+        sections: &[ReceiptSection],
+    ) -> Result<Receipt, String> {
+        self.record_with_sections_and_links(
+            verb,
+            argv,
+            input_paths,
+            status,
+            stdout,
+            stderr,
+            sections,
+            &[],
+            &[],
+        )
+    }
+
+    /// Record one command result and attach typed consumed/produced links.
+    pub fn record_with_sections_and_links(
+        &self,
+        verb: &str,
+        argv: &[String],
+        input_paths: &[PathBuf],
+        status: i32,
+        stdout: &[u8],
+        stderr: &[u8],
+        sections: &[ReceiptSection],
+        consumed: &[RecordLink],
+        produced: &[RecordLink],
+    ) -> Result<Receipt, String> {
         let claim = self.claim(verb, argv, input_paths)?;
-        self.write(&claim, argv, status, stdout, stderr)?;
-        self.lookup(&claim)?
-            .ok_or_else(|| "receipt was not current after publication".into())
+        self.write_with_sections_and_links(
+            &claim,
+            argv,
+            status,
+            stdout,
+            stderr,
+            sections,
+            consumed,
+            produced,
+        )?;
+        let receipt = self
+            .lookup(&claim)?
+            .ok_or_else(|| "receipt was not current after publication".to_string())?;
+        if let Ok(cwd) = std::env::current_dir() {
+            index_published_receipt(self, &receipt, argv, &cwd)?;
+        }
+        Ok(receipt)
     }
 
     /// List valid immutable receipt objects in stable claim-key order.
@@ -459,12 +867,20 @@ impl ReceiptStore {
                 Ok(bytes) => bytes,
                 Err(_) => continue,
             };
-            let Ok(receipt) = decode_receipt(&bytes) else {
+            let Ok(mut receipt) = decode_receipt(&bytes) else {
                 continue;
             };
             if receipt.claim.key != name || receipt.digest != receipt_digest(&receipt) {
                 continue;
             }
+            let Ok(appended) = self.published_sections(&receipt.claim.key, &receipt.digest) else {
+                continue;
+            };
+            receipt.sections.extend(appended);
+            let Ok(sections) = normalized_sections(&receipt.sections) else {
+                continue;
+            };
+            receipt.sections = sections;
             receipts.push(receipt);
         }
         receipts.sort_by(|left, right| left.claim.key.cmp(&right.claim.key));
@@ -491,9 +907,261 @@ impl ReceiptStore {
             .collect()
     }
 
+    /// Query all or selected named sections through the shared projection.
+    pub fn query_sections(
+        &self,
+        receipt: &Receipt,
+        names: Option<&[String]>,
+    ) -> Result<CanonicalJson, String> {
+        if let Some(names) = names {
+            for name in names {
+                receipt.section(name)?;
+            }
+        }
+        receipt.query_sections(names)
+    }
+
+    /// Diff named sections through the shared deterministic field projection.
+    pub fn diff_sections(
+        &self,
+        before: &Receipt,
+        after: &Receipt,
+    ) -> Result<Vec<ReceiptFieldDiff>, String> {
+        after.diff_sections(before)
+    }
+
+    /// Canonical JSON array projection for receipt diff and perf compare.
+    pub fn diff_sections_json(
+        &self,
+        before: &Receipt,
+        after: &Receipt,
+    ) -> Result<CanonicalJson, String> {
+        after.diff_sections_json(before)
+    }
+
+    /// Move child-process staged section records under the immutable parent
+    /// digest once the command output has made that digest knowable.
+    pub fn adopt_staged_sections(&self, claim: &ReceiptClaim) -> Result<(), String> {
+        let Some(receipt) = self.lookup(claim)? else {
+            return Err("cannot adopt receipt sections before parent publication".into());
+        };
+        let stage_dir = self.section_stage_path(&claim.key);
+        let staged = read_section_records(&stage_dir, Some(&claim.key), Some(""))?;
+        if staged.is_empty() {
+            return Ok(());
+        }
+
+        let mut existing = receipt.sections.clone();
+        let mut pending = Vec::new();
+        for (_, record) in &staged {
+            if let Some(section) = existing.iter().find(|section| {
+                section.name == record.section.name
+                    && section.type_name == record.section.type_name
+                    && section.schema_digest == record.section.schema_digest
+                    && section.payload_digest == record.section.payload_digest
+            }) {
+                let _ = section;
+                continue;
+            }
+            if existing
+                .iter()
+                .any(|section| section.name == record.section.name)
+                || pending
+                    .iter()
+                    .any(|section: &ReceiptSection| section.name == record.section.name)
+            {
+                return Err(format!(
+                    "receipt section `{}` conflicts with an existing section",
+                    record.section.name
+                ));
+            }
+            pending.push(record.section.clone());
+        }
+        existing.extend(pending);
+        normalized_sections(&existing)?;
+
+        for (path, record) in staged {
+            self.append_section_record(&claim.key, &receipt.digest, record.section)?;
+            fs::remove_file(&path)
+                .map_err(|error| format!("could not remove staged receipt section: {error}"))?;
+        }
+        let _ = fs::remove_dir(&stage_dir);
+        Ok(())
+    }
+
+    fn published_sections(
+        &self,
+        claim_key: &str,
+        parent_digest: &str,
+    ) -> Result<Vec<ReceiptSection>, String> {
+        let records = read_section_records(
+            &self.section_path(claim_key),
+            Some(claim_key),
+            Some(parent_digest),
+        )?;
+        Ok(records
+            .into_iter()
+            .map(|(_, record)| record.section)
+            .collect())
+    }
+
+    fn append_section_record(
+        &self,
+        claim_key: &str,
+        parent_digest: &str,
+        section: ReceiptSection,
+    ) -> Result<bool, String> {
+        let record = ReceiptSectionRecord::new(claim_key, parent_digest, section)?;
+        let id = section_record_identity(&record);
+        let bytes = encode_section_record(&record)?;
+        publish_immutable_bytes(&self.section_path(claim_key).join(id), &bytes)
+    }
+
+    fn section_path(&self, claim_key: &str) -> PathBuf {
+        self.root.join(RECEIPT_SECTION_DIR).join(claim_key)
+    }
+
+    fn section_stage_path(&self, claim_key: &str) -> PathBuf {
+        self.root
+            .join(RECEIPT_SECTION_STAGE_DIR)
+            .join(claim_key)
+    }
+
+
     pub fn object_path(&self, key: &str) -> PathBuf {
         self.root.join("objects").join(key)
     }
+}
+fn read_section_records(
+    directory: &Path,
+    expected_claim: Option<&str>,
+    expected_parent: Option<&str>,
+) -> Result<Vec<(PathBuf, ReceiptSectionRecord)>, String> {
+    let metadata = match fs::symlink_metadata(directory) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => {
+            return Err(format!(
+                "could not inspect receipt section directory {}: {error}",
+                directory.display()
+            ))
+        }
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(format!(
+            "receipt section directory is not a regular directory: {}",
+            directory.display()
+        ));
+    }
+
+    let entries = fs::read_dir(directory)
+        .map_err(|error| format!("could not list receipt sections: {error}"))?;
+    let mut records = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("could not inspect receipt section: {error}"))?;
+        let path = entry.path();
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        if name.is_empty() || name.starts_with('.') {
+            continue;
+        }
+        if !is_digest(name) {
+            return Err(format!(
+                "receipt section record has a non-digest name: {}",
+                path.display()
+            ));
+        }
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|error| format!("could not inspect receipt section: {error}"))?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(format!(
+                "receipt section record is not a regular file: {}",
+                path.display()
+            ));
+        }
+        let bytes = read_regular(&path)
+            .map_err(|error| format!("could not read receipt section {}: {error}", path.display()))?;
+        let record = decode_section_record(&bytes)?;
+        if section_record_identity(&record) != name {
+            return Err(format!(
+                "receipt section record identity does not match its path: {}",
+                path.display()
+            ));
+        }
+        if expected_claim.is_some_and(|claim| record.claim_key != claim)
+            || expected_parent.is_some_and(|parent| record.parent_digest != parent)
+        {
+            return Err(format!(
+                "receipt section record belongs to a different receipt: {}",
+                path.display()
+            ));
+        }
+        records.push((path, record));
+    }
+    records.sort_by(|left, right| {
+        left.0
+            .file_name()
+            .and_then(|name| name.to_str())
+            .cmp(&right.0.file_name().and_then(|name| name.to_str()))
+    });
+    let sections = records
+        .iter()
+        .map(|(_, record)| record.section.clone())
+        .collect::<Vec<_>>();
+    normalized_sections(&sections)?;
+    Ok(records)
+}
+
+fn publish_immutable_bytes(path: &Path, bytes: &[u8]) -> Result<bool, String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("receipt section path has no parent: {}", path.display()))?;
+    secure_create_dir(parent)?;
+    let temp = parent.join(format!(
+        ".{}.{}.{}",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("section"),
+        std::process::id(),
+        NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+    ));
+    let result = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)
+            .map_err(|error| format!("could not stage receipt section: {error}"))?;
+        file.write_all(bytes)
+            .map_err(|error| format!("could not write receipt section: {error}"))?;
+        file.sync_all()
+            .map_err(|error| format!("could not flush receipt section: {error}"))?;
+        match fs::hard_link(&temp, path) {
+            Ok(()) => {
+                fs::remove_file(&temp)
+                    .map_err(|error| format!("could not remove staged receipt section: {error}"))?;
+                sync_directory(parent)
+                    .map_err(|error| format!("could not flush receipt section directory: {error}"))?;
+                Ok(true)
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let existing = read_regular(path)
+                    .map_err(|read_error| format!("could not inspect receipt section: {read_error}"))?;
+                let _ = fs::remove_file(&temp);
+                if existing == bytes {
+                    Ok(false)
+                } else {
+                    Err("receipt section identity collision with different content".into())
+                }
+            }
+            Err(error) => Err(format!("could not publish receipt section: {error}")),
+        }
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result
 }
 
 /// Resolve a CLI invocation's source closure. Direct source files use the
@@ -518,9 +1186,22 @@ pub fn input_paths_for(verb: &str, argv: &[String], cwd: &Path) -> Vec<PathBuf> 
                 paths.insert(target.clone());
             }
         }
-        add_project_inputs(&target, &mut paths);
+        add_project_inputs(&target, verb, &mut paths);
     } else {
         return Vec::new();
+    }
+    if verb == "prove" {
+        let start = if target.is_dir() {
+            target.as_path()
+        } else {
+            target.parent().unwrap_or(cwd)
+        };
+        for root in receipt_authority_roots(start) {
+            collect_generated_failure_inputs(
+                &root.join(".jet").join("records").join("generated"),
+                &mut paths,
+            );
+        }
     }
     paths
         .into_iter()
@@ -545,28 +1226,97 @@ pub fn run_if_needed(argv: &[String]) -> Option<i32> {
     let cwd = std::env::current_dir().ok()?;
     let root = receipt_root(verb, argv, &cwd);
     let store = ReceiptStore::new(root);
-    if let Ok(Some(receipt)) = store.lookup_context(verb, argv, &cwd) {
-        let secret_values = receipt_secret_values(argv);
-        replay_receipt(verb, &receipt, &secret_values);
-        return Some(receipt.status);
+    match store.lookup_context(verb, argv, &cwd) {
+        Ok(Some(receipt)) => {
+            if let Err(error) = index_published_receipt(&store, &receipt, argv, &cwd) {
+                eprintln!("receipt index: {error}");
+            }
+            let secret_values = receipt_secret_values(argv);
+            replay_receipt(verb, &receipt, &secret_values);
+            return Some(receipt.status);
+        }
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!("receipt: {error}");
+            return None;
+        }
     }
 
     let input_paths = if verb == "check" && !has_explicit_target(verb, argv) {
-        project_check_input_paths(&cwd)
-            .unwrap_or_else(|| input_paths_for(verb, argv, &cwd))
+        project_check_input_paths(&cwd).unwrap_or_else(|| input_paths_for(verb, argv, &cwd))
     } else {
         input_paths_for(verb, argv, &cwd)
     };
     if input_paths.is_empty() && verb != "budget check" {
         return None;
     }
-    let claim = store.claim(verb, argv, &input_paths).ok()?;
+    let mut claim = store.claim(verb, argv, &input_paths).ok()?;
+    if verb == "prove" {
+        let target_inputs_sha256 = match receipt_target_inputs_sha256(&claim, argv, &cwd) {
+            Ok(identity) => identity,
+            Err(error) => {
+                eprintln!("receipt: {error}");
+                return None;
+            }
+        };
+        let filtered_paths = claim
+            .inputs
+            .iter()
+            .filter(|input| {
+                !is_generated_failure_input(&input.path)
+                    || generated_failure_matches_target(&input.path, &target_inputs_sha256)
+            })
+            .map(|input| input.path.clone())
+            .collect::<Vec<_>>();
+        let has_generated_failure = claim.inputs.iter().any(|input| {
+            generated_failure_matches_target(&input.path, &target_inputs_sha256)
+        });
+        if has_generated_failure {
+            let attempt = format!(
+                "{}:{}:{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|duration| duration.as_nanos())
+                    .unwrap_or_default(),
+                NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+            );
+            claim = store
+                .claim_with_attempt(verb, argv, &filtered_paths, attempt.as_bytes())
+                .ok()?;
+        } else if filtered_paths.len() != claim.inputs.len() {
+            claim = store.claim(verb, argv, &filtered_paths).ok()?;
+        }
+    }
+    let proof_receipt_link = if verb == "prove" {
+        match reserve_receipt_record(&store, &claim, argv, &cwd) {
+            Ok(link) => link,
+            Err(error) => {
+                eprintln!("receipt index: {error}");
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     let executable = std::env::current_exe().ok()?;
-    let mut child = std::process::Command::new(executable)
+    let mut command = std::process::Command::new(executable);
+    command
         .args(argv)
         .current_dir(&cwd)
         .env("JET_RECEIPT_BYPASS", "1")
+        .env(JET_RECEIPT_DIR_ENV, &store.root)
+        .env(JET_RECEIPT_CLAIM_ENV, &claim.key)
+        // The parent digest is not knowable until child output is captured.
+        // Prelude attach records are staged and rebound after publication.
+        .env(JET_RECEIPT_DIGEST_ENV, "");
+    if proof_receipt_link.is_some() {
+        command.env(JET_RECEIPT_RECORD_CLAIM_ENV, &claim.key);
+    } else {
+        command.env_remove(JET_RECEIPT_RECORD_CLAIM_ENV);
+    }
+    let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -578,15 +1328,467 @@ pub fn run_if_needed(argv: &[String]) -> Option<i32> {
     let status = child.wait().ok()?.code().unwrap_or(1);
     let stdout = stdout_reader.join().unwrap_or_default();
     let stderr = stderr_reader.join().unwrap_or_default();
+    let published_claim = if verb == "prove" {
+        let target_inputs_sha256 = match receipt_target_inputs_sha256(&claim, argv, &cwd) {
+            Ok(identity) => identity,
+            Err(error) => {
+                eprintln!("receipt: {error}");
+                return None;
+            }
+        };
+        let current_paths = input_paths_for(verb, argv, &cwd)
+            .into_iter()
+            .filter(|path| {
+                !is_generated_failure_input(path)
+                    || generated_failure_matches_target(path, &target_inputs_sha256)
+            })
+            .collect::<Vec<_>>();
+        let current_claim = store.claim(verb, argv, &current_paths).ok()?;
+        ReceiptClaim {
+            inputs: current_claim.inputs,
+            ..claim.clone()
+        }
+    } else {
+        claim.clone()
+    };
     let receipt_stderr = canonicalize_receipt_stderr(verb, &stderr);
-    if store
-        .write(&claim, argv, status, &stdout, &receipt_stderr)
-        .is_ok()
-    {
-        let _ = store.remember_context(verb, argv, &claim);
+    let published = store
+        .write(&published_claim, argv, status, &stdout, &receipt_stderr)
+        .is_ok();
+    if published {
+        let _ = store.adopt_staged_sections(&published_claim);
+        let _ = store.remember_context(verb, argv, &published_claim);
+    }
+    if let Ok(Some(receipt)) = store.lookup(&published_claim) {
+        if let Err(error) = index_published_receipt(&store, &receipt, argv, &cwd) {
+            eprintln!("receipt index: {error}");
+        }
     }
     Some(status)
 }
+fn receipt_record_path(store: &ReceiptStore, claim: &ReceiptClaim, cwd: &Path) -> Option<PathBuf> {
+    let object = store.object_path(&claim.key);
+    let object = if object.is_absolute() {
+        object
+    } else {
+        cwd.join(object)
+    };
+    object
+        .strip_prefix(cwd)
+        .ok()
+        .map(Path::to_path_buf)
+        .filter(|path| !path.as_os_str().is_empty())
+        .filter(|path| path.starts_with(Path::new(".jet")))
+}
+
+/// The one target identity contract shared by proof artifacts, receipt index
+/// rows, and build verification.  The authority closure is resolved strictly:
+/// malformed authority is an error, never a reason to hash a weaker input set.
+#[derive(Clone, Debug)]
+pub struct CanonicalTargetIdentity {
+    pub members: Vec<(String, String)>,
+    pub input_sha256: String,
+    pub authority_root: PathBuf,
+}
+
+fn canonical_authority_roots(
+    target: &Path,
+) -> Result<(BTreeSet<PathBuf>, PathBuf), String> {
+    let metadata = fs::symlink_metadata(target).map_err(|error| {
+        format!(
+            "couldn't inspect canonical target `{}`: {error}",
+            target.display()
+        )
+    })?;
+    if metadata.file_type().is_symlink() {
+        return Err(format!(
+            "canonical target `{}` must not be a symlink",
+            target.display()
+        ));
+    }
+    let start = if metadata.is_dir() {
+        target
+    } else {
+        target.parent().unwrap_or_else(|| Path::new("."))
+    };
+    let workspace_root = crate::Loader::find_workspace_root_checked(start)
+        .map_err(|diagnostic| {
+            format!(
+                "couldn't resolve workspace authority for `{}`: {diagnostic:?}",
+                target.display()
+            )
+        })?;
+    let package_root = crate::Loader::find_package_root_checked(start)
+        .map_err(|diagnostic| {
+            format!(
+                "couldn't resolve package authority for `{}`: {diagnostic:?}",
+                target.display()
+            )
+        })?;
+    let mut roots = BTreeSet::new();
+    if let Some(root) = package_root.as_ref() {
+        roots.insert(root.clone());
+    }
+    if let Some(root) = workspace_root.as_ref() {
+        roots.insert(root.clone());
+    }
+    let authority_root = package_root
+        .or(workspace_root)
+        .unwrap_or_else(|| start.to_path_buf());
+    Ok((roots, authority_root))
+}
+
+pub fn canonical_target_identity(
+    target: &Path,
+    members: &[(String, String)],
+) -> Result<CanonicalTargetIdentity, String> {
+    let (roots, authority_root) = canonical_authority_roots(target)?;
+
+    let mut canonical = Vec::new();
+    for (path, digest) in members {
+        canonical_identity_insert(&mut canonical, path, digest)?;
+    }
+    for root in roots {
+        for name in [
+            crate::Syntax::PACKAGE_FILE,
+            crate::Syntax::PAYLOAD_FILE,
+            crate::Syntax::WORKSPACE_FILE,
+            "build.jet",
+        ] {
+            canonical_identity_file(&root.join(name), &mut canonical)?;
+        }
+        canonical_identity_file(
+            &root.join(crate::Syntax::UNIFIED_LOCK_FILE),
+            &mut canonical,
+        )?;
+        canonical_identity_tree(
+            &root.join(".jet").join("generated"),
+            &mut canonical,
+        )?;
+    }
+    canonical.sort_by(|left, right| left.0.as_bytes().cmp(right.0.as_bytes()));
+    let mut identity = Vec::new();
+    for (path, digest) in &canonical {
+        identity.extend_from_slice(
+            format!(
+                "{{\"path\":\"{}\",\"sha256\":\"{}\"}}\n",
+                json_escape(path),
+                json_escape(digest)
+            )
+            .as_bytes(),
+        );
+    }
+    Ok(CanonicalTargetIdentity {
+        members: canonical,
+        input_sha256: sha256_hex(&identity),
+        authority_root,
+    })
+}
+
+fn canonical_identity_path(path: &Path) -> String {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let path = if path.is_absolute() {
+        path.strip_prefix(&cwd).unwrap_or(path)
+    } else {
+        path
+    };
+    path.to_string_lossy().replace('\\', "/")
+}
+
+fn canonical_identity_insert(
+    members: &mut Vec<(String, String)>,
+    path: &str,
+    digest: &str,
+) -> Result<(), String> {
+    let path = canonical_identity_path(Path::new(path));
+    if is_generated_failure_identity_path(&path) {
+        return Ok(());
+    }
+    if let Some((_, existing)) = members.iter().find(|(member, _)| member == &path) {
+        if existing != digest {
+            return Err(format!(
+                "canonical target identity has conflicting digests for `{path}`"
+            ));
+        }
+        return Ok(());
+    }
+    members.push((path, digest.to_string()));
+    Ok(())
+}
+
+fn canonical_identity_file(
+    path: &Path,
+    members: &mut Vec<(String, String)>,
+) -> Result<(), String> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!(
+                "couldn't inspect canonical authority input `{}`: {error}",
+                path.display()
+            ))
+        }
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(format!(
+            "canonical authority input `{}` must not be a symlink",
+            path.display()
+        ));
+    }
+    if !metadata.is_file() {
+        return Ok(());
+    }
+    let bytes = fs::read(path).map_err(|error| {
+        format!(
+            "couldn't read canonical authority input `{}`: {error}",
+            path.display()
+        )
+    })?;
+    let digest = sha256_hex(&bytes);
+    let path = canonical_identity_path(path);
+    canonical_identity_insert(members, &path, &digest)
+}
+
+fn canonical_identity_tree(
+    root: &Path,
+    members: &mut Vec<(String, String)>,
+) -> Result<(), String> {
+    let metadata = match fs::symlink_metadata(root) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!(
+                "couldn't inspect canonical generated inputs `{}`: {error}",
+                root.display()
+            ))
+        }
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(format!(
+            "canonical generated inputs `{}` must not contain a symlink",
+            root.display()
+        ));
+    }
+    if metadata.is_file() {
+        return canonical_identity_file(root, members);
+    }
+    if !metadata.is_dir() {
+        return Ok(());
+    }
+    let entries = fs::read_dir(root).map_err(|error| {
+        format!(
+            "couldn't read canonical generated inputs `{}`: {error}",
+            root.display()
+        )
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            format!(
+                "couldn't inspect canonical generated inputs `{}`: {error}",
+                root.display()
+            )
+        })?;
+        canonical_identity_tree(&entry.path(), members)?;
+    }
+    Ok(())
+}
+
+fn is_generated_failure_identity_path(path: &str) -> bool {
+    path.split('/').collect::<Vec<_>>().windows(3).any(|parts| {
+        parts[0] == ".jet" && parts[1] == "records" && parts[2] == "generated"
+    })
+}
+
+fn receipt_target_inputs_sha256(
+    claim: &ReceiptClaim,
+    argv: &[String],
+    cwd: &Path,
+) -> Result<String, String> {
+    let target = target_path(&claim.verb, argv, cwd)
+        .ok_or_else(|| format!("couldn't resolve `{}` target for receipt identity", claim.verb))?;
+    let members = claim
+        .inputs
+        .iter()
+        .map(|input| {
+            (
+                input.path.to_string_lossy().to_string(),
+                input.digest.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    canonical_target_identity(&target, &members).map(|identity| identity.input_sha256)
+}
+
+fn receipt_record_identity(
+    claim: &ReceiptClaim,
+    argv: &[String],
+    cwd: &Path,
+) -> Result<RecordIdentity, String> {
+    RecordIdentity::new(
+        receipt_target_inputs_sha256(claim, argv, cwd)?,
+        env!("CARGO_PKG_VERSION"),
+        RECEIPT_RECORD_ENGINE,
+    )
+}
+
+fn receipt_record_link(claim: &ReceiptClaim) -> Result<RecordLink, String> {
+    RecordLink::new(RecordKind::Receipt, claim.key.clone())
+}
+
+fn reserve_receipt_record(
+    store: &ReceiptStore,
+    claim: &ReceiptClaim,
+    argv: &[String],
+    cwd: &Path,
+) -> Result<Option<RecordLink>, String> {
+    let Some(path) = receipt_record_path(store, claim, cwd) else {
+        return Ok(None);
+    };
+    let identity = receipt_record_identity(claim, argv, cwd)?;
+    let link = receipt_record_link(claim)?;
+    let mut index = RecordIndex::load_for_project(cwd.to_path_buf())?;
+    if let Some(existing) = index.find(RecordKind::Receipt, &claim.key, true) {
+        if existing.identity != identity {
+            return Err(format!(
+                "receipt `{}` conflicts with its indexed identity",
+                claim.key
+            ));
+        }
+        return Ok(Some(link));
+    }
+    let sequence = index.next_recorded_sequence().map_err(|error| error.to_string())?;
+    let entry = RecordIndexEntry::new(identity, RecordKind::Receipt, claim.key.clone(), path)?
+        .with_capture(RecordCapture::Safe)
+        .with_size(0)
+        .with_recorded_sequence(sequence);
+    index.update_and_store(entry)?;
+    Ok(Some(link))
+}
+fn index_published_receipt(
+    store: &ReceiptStore,
+    receipt: &Receipt,
+    argv: &[String],
+    cwd: &Path,
+) -> Result<(), String> {
+    let Some(path) = receipt_record_path(store, &receipt.claim, cwd) else {
+        return Ok(());
+    };
+    let object = store.object_path(&receipt.claim.key);
+    let metadata = fs::symlink_metadata(&object).map_err(|error| {
+        format!(
+            "could not inspect receipt object `{}`: {error}",
+            object.display()
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(format!(
+            "receipt object is not a regular file: {}",
+            object.display()
+        ));
+    }
+    let size = metadata.len();
+    let identity = receipt_record_identity(&receipt.claim, argv, cwd)?;
+    let comparisons = indexed_comparison_sections(receipt)?;
+    let mut index = RecordIndex::load_for_project(cwd.to_path_buf())?;
+    let mut comparison_links = Vec::with_capacity(comparisons.len());
+    for (artifact_id, consumed, comparison_size) in comparisons {
+        let existing = index.find(RecordKind::Comparison, &artifact_id, true);
+        let sequence = match existing.as_ref() {
+            Some(entry) => entry.recorded_sequence,
+            None => index
+                .next_recorded_sequence()
+                .map_err(|error| error.to_string())?,
+        };
+        let comparison_identity = RecordIdentity::new(
+            identity.target_inputs_sha256.clone(),
+            identity.tool_version.clone(),
+            "jet-comparison-v1",
+        )?;
+        let entry = RecordIndexEntry::new(
+            comparison_identity,
+            RecordKind::Comparison,
+            artifact_id.clone(),
+            path.clone(),
+        )?
+        .with_links(consumed, Vec::new())?
+        .with_capture(RecordCapture::Safe)
+        .with_size(comparison_size)
+        .with_recorded_sequence(sequence)
+        .with_saved(existing.as_ref().is_some_and(|entry| entry.saved));
+        if existing.is_some() {
+            index.replace(entry)?;
+        } else {
+            index.update(entry)?;
+        }
+        comparison_links.push(RecordLink::new(RecordKind::Comparison, artifact_id)?);
+    }
+    let mut produced = receipt.produced.clone();
+    for link in comparison_links {
+        if !produced.contains(&link) {
+            produced.push(link);
+        }
+    }
+    let existing = index.find(RecordKind::Receipt, &receipt.claim.key, true);
+    let sequence = match existing.as_ref() {
+        Some(entry) => entry.recorded_sequence,
+        None => index
+            .next_recorded_sequence()
+            .map_err(|error| error.to_string())?,
+    };
+    let saved = existing.as_ref().is_some_and(|entry| entry.saved);
+    let entry = RecordIndexEntry::new(
+        identity,
+        RecordKind::Receipt,
+        receipt.claim.key.clone(),
+        path,
+    )?
+    .with_links(receipt.consumed.clone(), produced)?
+    .with_capture(RecordCapture::Safe)
+    .with_size(size)
+    .with_recorded_sequence(sequence)
+    .with_saved(saved);
+    if existing.is_some() {
+        index.replace(entry)?;
+    } else {
+        index.update(entry)?;
+    }
+    index.store()?;
+    Ok(())
+}
+
+fn indexed_comparison_sections(
+    receipt: &Receipt,
+) -> Result<Vec<(String, Vec<RecordLink>, u64)>, String> {
+    let consumed = receipt
+        .consumed
+        .iter()
+        .filter(|link| link.kind == RecordKind::Evidence)
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut comparisons = Vec::new();
+    for section in &receipt.sections {
+        if section.name != "comparison" || section.type_name != "ComparisonRecord" {
+            continue;
+        }
+        if consumed.is_empty() {
+            return Err(
+                "comparison receipt must link at least one canonical evidence record".into(),
+            );
+        }
+        let payload = section.value()?;
+        let comparison_size = u64::try_from(payload.bytes().len())
+            .map_err(|_| "comparison payload is too large".to_string())?;
+        let record = ComparisonRecord::from_json(&payload)?;
+        let artifact_id = record.artifact_id()?;
+        if section.payload_digest != artifact_id {
+            return Err("comparison section payload digest is not canonical".into());
+        }
+        comparisons.push((artifact_id, consumed.clone(), comparison_size));
+    }
+    Ok(comparisons)
+}
+
 
 fn canonicalize_receipt_stderr(verb: &str, stderr: &[u8]) -> Vec<u8> {
     if verb != "build" {
@@ -652,10 +1854,12 @@ fn cacheable_invocation(verb: &str, argv: &[String]) -> bool {
         && argv.iter().any(|arg| {
             matches!(
                 arg.as_str(),
-                "--capture" | "--capture-sensitive" | "--replay"
+                "--capture" | "--capture-sensitive" | "--replay" | "--save" | "--unsave"
             ) || arg.starts_with("--capture=")
                 || arg.starts_with("--capture-sensitive=")
                 || arg.starts_with("--replay=")
+                || arg.starts_with("--save=")
+                || arg.starts_with("--unsave=")
         })
     {
         return false;
@@ -759,6 +1963,10 @@ fn target_path(verb: &str, argv: &[String], cwd: &Path) -> Option<PathBuf> {
                 | "--iterations"
                 | "--time"
                 | "--corpus"
+                | "--lens"
+                | "--save"
+                | "--unsave"
+                | "--replay"
         ) {
             skip_next = true;
             continue;
@@ -836,6 +2044,10 @@ fn has_explicit_target(verb: &str, argv: &[String]) -> bool {
                 | "--iterations"
                 | "--time"
                 | "--corpus"
+                | "--lens"
+                | "--save"
+                | "--unsave"
+                | "--replay"
         ) {
             skip_next = true;
             continue;
@@ -872,7 +2084,12 @@ fn project_check_input_paths(cwd: &Path) -> Option<Vec<PathBuf>> {
             paths.extend(graph.watched_paths());
         }
     }
-    Some(paths.into_iter().filter(|path| regular_file(path)).collect())
+    Some(
+        paths
+            .into_iter()
+            .filter(|path| regular_file(path))
+            .collect(),
+    )
 }
 
 fn collect_tree_inputs(root: &Path, verb: &str, out: &mut BTreeSet<PathBuf>) {
@@ -923,14 +2140,13 @@ fn collect_tree_inputs(root: &Path, verb: &str, out: &mut BTreeSet<PathBuf>) {
                     | "workspace.jet"
                     | "lock"
             );
-        let is_generated_input = path
-            .components()
-            .collect::<Vec<_>>()
-            .windows(2)
-            .any(|components| {
-                components[0].as_os_str() == ".jet"
-                    && components[1].as_os_str() == "generated"
-            });
+        let is_generated_input =
+            path.components()
+                .collect::<Vec<_>>()
+                .windows(2)
+                .any(|components| {
+                    components[0].as_os_str() == ".jet" && components[1].as_os_str() == "generated"
+                });
         let is_budget_input = verb == "budget check"
             && path
                 .components()
@@ -940,8 +2156,71 @@ fn collect_tree_inputs(root: &Path, verb: &str, out: &mut BTreeSet<PathBuf>) {
         }
     }
 }
+fn collect_generated_failure_inputs(root: &Path, out: &mut BTreeSet<PathBuf>) {
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        if metadata.is_dir() {
+            collect_generated_failure_inputs(&path, out);
+        } else if metadata.is_file() {
+            out.insert(path);
+        }
+    }
+}
 
-fn add_project_inputs(entry: &Path, out: &mut BTreeSet<PathBuf>) {
+fn is_generated_failure_input(path: &Path) -> bool {
+    path.components()
+        .collect::<Vec<_>>()
+        .windows(3)
+        .any(|components| {
+            components[0].as_os_str() == ".jet"
+                && components[1].as_os_str() == "records"
+                && components[2].as_os_str() == "generated"
+        })
+}
+
+fn generated_failure_matches_target(path: &Path, target_inputs_sha256: &str) -> bool {
+    is_generated_failure_input(path)
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| {
+                name.starts_with(target_inputs_sha256)
+                    && name.as_bytes().get(target_inputs_sha256.len()) == Some(&b'-')
+            })
+}
+
+fn has_generated_failure_for_target(
+    receipt: &Receipt,
+    argv: &[String],
+    cwd: &Path,
+) -> Result<bool, String> {
+    let target_inputs_sha256 = receipt_target_inputs_sha256(&receipt.claim, argv, cwd)?;
+    let target = target_path("prove", argv, cwd)
+        .ok_or_else(|| "couldn't resolve prove target for generated replay".to_string())?;
+    let (roots, _) = canonical_authority_roots(&target)?;
+    let mut paths = BTreeSet::new();
+    for root in roots {
+        collect_generated_failure_inputs(
+            &root.join(".jet").join("records").join("generated"),
+            &mut paths,
+        );
+    }
+    Ok(paths
+        .into_iter()
+        .any(|path| generated_failure_matches_target(&path, &target_inputs_sha256)))
+}
+
+
+fn add_project_inputs(entry: &Path, verb: &str, out: &mut BTreeSet<PathBuf>) {
     let start = entry.parent().unwrap_or_else(|| Path::new("."));
     let roots = receipt_authority_roots(start);
 
@@ -954,6 +2233,7 @@ fn add_project_inputs(entry: &Path, out: &mut BTreeSet<PathBuf>) {
             crate::Syntax::PACKAGE_FILE,
             crate::Syntax::PAYLOAD_FILE,
             "workspace.jet",
+            "build.jet",
         ] {
             let path = root.join(name);
             if regular_file(&path) {
@@ -964,9 +2244,11 @@ fn add_project_inputs(entry: &Path, out: &mut BTreeSet<PathBuf>) {
         if regular_file(&lock) {
             out.insert(lock);
         }
-        for candidate in check_entry_candidates(&root) {
-            if regular_file(&candidate) {
-                out.insert(candidate);
+        if verb == "check" {
+            for candidate in check_entry_candidates(&root) {
+                if regular_file(&candidate) {
+                    out.insert(candidate);
+                }
             }
         }
         collect_tree_inputs(&root.join(".jet").join("generated"), "check", out);
@@ -1051,9 +2333,7 @@ fn append_context_path(identity: &mut Vec<u8>, label: &[u8], path: &Path) {
         }
         Ok(metadata) if metadata.is_dir() => frame(identity, b"directory"),
         Ok(_) => frame(identity, b"other"),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            frame(identity, b"missing")
-        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => frame(identity, b"missing"),
         Err(error) => {
             frame(identity, b"unreadable");
             frame(identity, error.kind().to_string().as_bytes());
@@ -1073,10 +2353,7 @@ fn changed_receipt_inputs(old: &[ReceiptInput], new: &[ReceiptInput]) -> Vec<Pat
         }
     }
     for input in new {
-        if old
-            .iter()
-            .all(|candidate| candidate.path != input.path)
-        {
+        if old.iter().all(|candidate| candidate.path != input.path) {
             changed.push(input.path.clone());
         }
     }
@@ -1094,7 +2371,6 @@ fn stale_receipt_input(inputs: &[ReceiptInput]) -> Option<PathBuf> {
             .then(|| input.path.clone())
     })
 }
-
 
 fn canonical_path(path: &Path) -> Result<PathBuf, String> {
     let metadata = fs::symlink_metadata(path)
@@ -1119,8 +2395,6 @@ fn inputs_current(inputs: &[ReceiptInput]) -> bool {
         .iter()
         .all(|input| file_digest(&input.path).is_ok_and(|digest| digest == input.digest))
 }
-
-
 
 fn regular_file(path: &Path) -> bool {
     fs::symlink_metadata(path)
@@ -1174,8 +2448,19 @@ fn take_frame(bytes: &[u8], cursor: &mut usize) -> Result<Vec<u8>, String> {
 }
 
 fn encode_receipt(receipt: &Receipt) -> Result<Vec<u8>, String> {
+    // Validate again at the wire boundary so callers cannot construct an
+    // unauthenticated receipt by bypassing `write_with_sections`.
+    normalized_sections(&receipt.sections)?;
+    normalized_links(&receipt.consumed, "consumed")?;
+    normalized_links(&receipt.produced, "produced")?;
     let mut out = encode_receipt_body(receipt);
     frame(&mut out, receipt.digest.as_bytes());
+    if out.len() as u64 > MAX_RECEIPT_BYTES {
+        return Err(format!(
+            "receipt is too large (maximum {} bytes)",
+            MAX_RECEIPT_BYTES
+        ));
+    }
     Ok(out)
 }
 
@@ -1192,10 +2477,35 @@ fn encode_receipt_body(receipt: &Receipt) -> Vec<u8> {
     }
     frame(&mut out, &receipt.stdout);
     frame(&mut out, &receipt.stderr);
+    if !receipt.sections.is_empty() {
+        let mut sections = receipt.sections.clone();
+        sections.sort_by(|left, right| {
+            left.name
+                .cmp(&right.name)
+                .then(left.type_name.cmp(&right.type_name))
+                .then(left.bytes.cmp(&right.bytes))
+        });
+        frame(&mut out, RECEIPT_SECTION_WIRE_MAGIC);
+        frame(&mut out, &(sections.len() as u64).to_be_bytes());
+        for section in sections {
+            frame(&mut out, section.name.as_bytes());
+            frame(&mut out, section.type_name.as_bytes());
+            frame(&mut out, &section.bytes);
+        }
+    }
+    if !receipt.consumed.is_empty() || !receipt.produced.is_empty() {
+        frame(&mut out, RECEIPT_LINK_WIRE_MAGIC);
+        frame(&mut out, &RECEIPT_LINK_VERSION.to_be_bytes());
+        encode_links(&mut out, &receipt.consumed);
+        encode_links(&mut out, &receipt.produced);
+    }
     out
 }
 
 fn decode_receipt(bytes: &[u8]) -> Result<Receipt, String> {
+    if bytes.len() as u64 > MAX_RECEIPT_BYTES {
+        return Err("receipt is too large".into());
+    }
     if !bytes.starts_with(MAGIC) {
         return Err("receipt magic is invalid".into());
     }
@@ -1233,7 +2543,52 @@ fn decode_receipt(bytes: &[u8]) -> Result<Receipt, String> {
     }
     let stdout = take_frame(bytes, &mut cursor)?;
     let stderr = take_frame(bytes, &mut cursor)?;
-    let digest = String::from_utf8(take_frame(bytes, &mut cursor)?)
+    let extension_or_digest = take_frame(bytes, &mut cursor)?;
+    let mut sections = Vec::new();
+    let mut consumed = Vec::new();
+    let mut produced = Vec::new();
+    let mut digest_bytes = extension_or_digest;
+    if digest_bytes.as_slice() == RECEIPT_SECTION_WIRE_MAGIC {
+        let section_count = take_frame(bytes, &mut cursor)?;
+        if section_count.len() != 8 {
+            return Err("receipt section count is malformed".into());
+        }
+        let section_count =
+            u64::from_be_bytes(section_count.try_into().expect("checked section count length"));
+        if section_count > MAX_RECEIPT_SECTIONS as u64 {
+            return Err(format!(
+                "receipt has too many sections (maximum {})",
+                MAX_RECEIPT_SECTIONS
+            ));
+        }
+        sections = Vec::with_capacity(section_count as usize);
+        for _ in 0..section_count {
+            let name = String::from_utf8(take_frame(bytes, &mut cursor)?)
+                .map_err(|_| "receipt section name is not UTF-8".to_string())?;
+            let type_name = String::from_utf8(take_frame(bytes, &mut cursor)?)
+                .map_err(|_| "receipt section type name is not UTF-8".to_string())?;
+            let value = take_frame(bytes, &mut cursor)?;
+            sections.push(ReceiptSection::new(name, type_name, value).map_err(|error| {
+                format!("receipt section schema is invalid: {error}")
+            })?);
+        }
+        sections = normalized_sections(&sections)?;
+        digest_bytes = take_frame(bytes, &mut cursor)?;
+    }
+    if digest_bytes.as_slice() == RECEIPT_LINK_WIRE_MAGIC {
+        let version = take_frame(bytes, &mut cursor)?;
+        if version.len() != 8 {
+            return Err("receipt links version is malformed".into());
+        }
+        let version = u64::from_be_bytes(version.try_into().expect("checked link version length"));
+        if version != RECEIPT_LINK_VERSION {
+            return Err(format!("unsupported receipt links version {version}"));
+        }
+        consumed = decode_links(bytes, &mut cursor, "consumed")?;
+        produced = decode_links(bytes, &mut cursor, "produced")?;
+        digest_bytes = take_frame(bytes, &mut cursor)?;
+    }
+    let digest = String::from_utf8(digest_bytes)
         .map_err(|_| "receipt digest is not UTF-8".to_string())?;
     if cursor != bytes.len() || !is_digest(&key) || !is_digest(&digest) {
         return Err("receipt has trailing bytes or malformed digest".into());
@@ -1243,13 +2598,76 @@ fn decode_receipt(bytes: &[u8]) -> Result<Receipt, String> {
         status,
         stdout,
         stderr,
+        sections,
+        consumed,
+        produced,
         digest,
     })
+}
+
+fn normalized_links(links: &[RecordLink], label: &str) -> Result<Vec<RecordLink>, String> {
+    if links.len() > MAX_RECEIPT_LINKS as usize {
+        return Err(format!(
+            "receipt has too many {label} links (maximum {MAX_RECEIPT_LINKS})"
+        ));
+    }
+    let mut normalized = links.to_vec();
+    for link in &normalized {
+        link.validate()
+            .map_err(|error| format!("receipt {label} link is invalid: {error}"))?;
+    }
+    normalized.sort_by(|left, right| left.kind.cmp(&right.kind).then(left.artifact_id.cmp(&right.artifact_id)));
+    if normalized.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Err(format!("receipt {label} links contain a duplicate"));
+    }
+    Ok(normalized)
+}
+
+fn encode_links(out: &mut Vec<u8>, links: &[RecordLink]) {
+    let mut links = links.to_vec();
+    links.sort_by(|left, right| left.kind.cmp(&right.kind).then(left.artifact_id.cmp(&right.artifact_id)));
+    frame(out, &(links.len() as u64).to_be_bytes());
+    for link in links {
+        frame(out, link.kind.as_str().as_bytes());
+        frame(out, link.artifact_id.as_bytes());
+    }
+}
+
+fn decode_links(
+    bytes: &[u8],
+    cursor: &mut usize,
+    label: &str,
+) -> Result<Vec<RecordLink>, String> {
+    let count = take_frame(bytes, cursor)?;
+    if count.len() != 8 {
+        return Err(format!("receipt {label} link count is malformed"));
+    }
+    let count = u64::from_be_bytes(count.try_into().expect("checked link count length"));
+    if count > MAX_RECEIPT_LINKS {
+        return Err(format!(
+            "receipt has too many {label} links (maximum {MAX_RECEIPT_LINKS})"
+        ));
+    }
+    let mut links = Vec::with_capacity(count as usize);
+    for _ in 0..count {
+        let kind = String::from_utf8(take_frame(bytes, cursor)?)
+            .map_err(|_| format!("receipt {label} link kind is not UTF-8"))?;
+        let kind = RecordKind::parse(&kind)
+            .map_err(|error| format!("receipt {label} link kind is invalid: {error}"))?;
+        let artifact_id = String::from_utf8(take_frame(bytes, cursor)?)
+            .map_err(|_| format!("receipt {label} link artifact_id is not UTF-8"))?;
+        links.push(
+            RecordLink::new(kind, artifact_id)
+                .map_err(|error| format!("receipt {label} link is invalid: {error}"))?,
+        );
+    }
+    normalized_links(&links, label)
 }
 
 fn receipt_digest(receipt: &Receipt) -> String {
     sha256_hex(&encode_receipt_body(receipt))
 }
+
 
 fn context_identity(verb: &str, argv: &[String]) -> Result<Vec<u8>, String> {
     if verb.is_empty() {
@@ -1308,8 +2726,19 @@ fn argv_identity(argv: &[String]) -> Vec<u8> {
 }
 
 fn environment_identity() -> Vec<u8> {
-    let mut env: Vec<(String, String)> = std::env::vars().collect();
-    env.retain(|(key, _)| key != "JET_RECEIPT_BYPASS");
+    environment_identity_from(std::env::vars().collect())
+}
+
+fn environment_identity_from(mut env: Vec<(String, String)>) -> Vec<u8> {
+    // Nix creates a fresh build root for every shell.  Its temporary-path
+    // aliases are process plumbing, not build inputs, so they cannot claim a
+    // different receipt for the same invocation.
+    env.retain(|(key, _)| {
+        !matches!(
+            key.as_str(),
+            "JET_RECEIPT_BYPASS" | "NIX_BUILD_TOP" | "TEMP" | "TEMPDIR" | "TMP" | "TMPDIR"
+        )
+    });
     env.sort();
     let mut out = Vec::new();
     for (key, value) in env {
@@ -1549,6 +2978,9 @@ mod tests {
             status: 0,
             stdout: b"ok".to_vec(),
             stderr: Vec::new(),
+            sections: Vec::new(),
+            consumed: Vec::new(),
+            produced: Vec::new(),
             digest: String::new(),
         };
         let second = Receipt {
@@ -1946,7 +3378,6 @@ mod tests {
         let _ = fs::remove_dir_all(project);
     }
 
-
     #[test]
     fn receipt_debug_redacts_raw_legacy_and_unrecognized_output() {
         let receipt = Receipt {
@@ -1958,12 +3389,39 @@ mod tests {
             status: 17,
             stdout: b"legacy bearer secret\xff".to_vec(),
             stderr: vec![0, 1, 2, 255],
+            sections: Vec::new(),
+            consumed: Vec::new(),
+            produced: Vec::new(),
             digest: "b".repeat(DIGEST_LEN),
         };
         let debug = format!("{receipt:?}");
         assert!(debug.contains("stdout: \"<redacted>\""));
         assert!(debug.contains("stderr: \"<redacted>\""));
         assert!(!debug.contains("legacy bearer secret"));
+    }
+
+    #[test]
+    fn receipt_context_ignores_nix_shell_temp_paths() {
+        let first = vec![
+            ("NIX_BUILD_TOP".into(), "/tmp/nix-shell.first".into()),
+            ("TEMP".into(), "/tmp/nix-shell.first".into()),
+            ("TEMPDIR".into(), "/tmp/nix-shell.first".into()),
+            ("TMP".into(), "/tmp/nix-shell.first".into()),
+            ("TMPDIR".into(), "/tmp/nix-shell.first".into()),
+            ("JET_RECEIPT_TEST_STABLE".into(), "same".into()),
+        ];
+        let second = vec![
+            ("NIX_BUILD_TOP".into(), "/tmp/nix-shell.second".into()),
+            ("TEMP".into(), "/tmp/nix-shell.second".into()),
+            ("TEMPDIR".into(), "/tmp/nix-shell.second".into()),
+            ("TMP".into(), "/tmp/nix-shell.second".into()),
+            ("TMPDIR".into(), "/tmp/nix-shell.second".into()),
+            ("JET_RECEIPT_TEST_STABLE".into(), "same".into()),
+        ];
+        assert_eq!(
+            environment_identity_from(first),
+            environment_identity_from(second)
+        );
     }
 
     #[test]
@@ -2033,6 +3491,9 @@ mod tests {
             status: 0,
             stdout: b"old legacy-replay-secret\0".to_vec(),
             stderr: b"legacy-replay-secret\n".to_vec(),
+            sections: Vec::new(),
+            consumed: Vec::new(),
+            produced: Vec::new(),
             digest: "b".repeat(DIGEST_LEN),
         };
         let (stdout, stderr) = replay_output(&receipt, &secrets);
@@ -2130,14 +3591,18 @@ mod tests {
                 file_secret.display(),
             )
             .into_bytes(),
-            stderr: b"unknown-secret".to_vec(),
+            stderr: Vec::new(),
+            sections: Vec::new(),
+            consumed: Vec::new(),
+            produced: Vec::new(),
             digest: String::new(),
         };
         let digest = receipt_digest(&receipt);
         let mut bytes = encode_receipt(&Receipt { digest, ..receipt }).unwrap();
-        let legacy_magic = b"jet-receipt-v1\0";
-        assert_eq!(legacy_magic.len(), MAGIC.len());
-        bytes[..MAGIC.len()].copy_from_slice(legacy_magic);
+        let legacy_magic =
+            include_bytes!("../tests/fixtures/build-metadata-compat/receipt-v1.magic");
+        assert!(legacy_magic.len() >= MAGIC.len());
+        bytes[..MAGIC.len()].copy_from_slice(&legacy_magic[..MAGIC.len()]);
         assert!(decode_receipt(&bytes).is_err());
         fs::create_dir_all(root.join("objects")).unwrap();
         fs::write(store.object_path(&claim.key), bytes).unwrap();

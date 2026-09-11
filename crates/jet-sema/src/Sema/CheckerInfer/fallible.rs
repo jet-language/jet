@@ -3,9 +3,7 @@
 //! Split out of the original `CheckerInfer.rs`; behavior unchanged.
 
 use super::*;
-use crate::Diagnostics::{
-    Diagnostic, FixApplicability, FixSafety, Span, TextEdit,
-};
+use crate::Diagnostics::{Diagnostic, FixApplicability, FixSafety, Span, TextEdit};
 use crate::Sema::Diagnostics::{is_core_error_family_type, is_default_error};
 use crate::Syntax;
 use crate::AST::{Call, Expr, LambdaBody, OrFallback, Stmt, TryConvert, Type};
@@ -170,18 +168,14 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn resolve_failure_function(
-        &self,
-        name: &str,
-    ) -> Option<(usize, String, crate::AST::FuncSig)> {
+    fn resolve_failure_function(&self, name: &str) -> Option<(usize, String, crate::AST::FuncSig)> {
         if let Some(signature) = self.funcs.get(name) {
             return Some((self.module_idx, name.to_string(), signature.clone()));
         }
-        if let Some(mangled) = self
-            .inline_module
-            .as_ref()
-            .and_then(|module| self.inline_unqualified.get(&(module.clone(), name.to_string())))
-        {
+        if let Some(mangled) = self.inline_module.as_ref().and_then(|module| {
+            self.inline_unqualified
+                .get(&(module.clone(), name.to_string()))
+        }) {
             if let Some(signature) = self.funcs.get(mangled) {
                 return Some((self.module_idx, mangled.clone(), signature.clone()));
             }
@@ -191,18 +185,19 @@ impl<'a> Checker<'a> {
                 return Some((self.module_idx, mangled.clone(), signature.clone()));
             }
         }
-        if let Some((function, module_idx)) = self
-            .inline_module
-            .as_ref()
-            .and_then(|module| self.inline_unqualified_file.get(&(module.clone(), name.to_string())))
-        {
-            if let Some(target) = self.resolve_failure_function_in_module(*module_idx, function.clone())
+        if let Some((function, module_idx)) = self.inline_module.as_ref().and_then(|module| {
+            self.inline_unqualified_file
+                .get(&(module.clone(), name.to_string()))
+        }) {
+            if let Some(target) =
+                self.resolve_failure_function_in_module(*module_idx, function.clone())
             {
                 return Some(target);
             }
         }
         if let Some((function, module_idx)) = self.unqualified_file.get(name) {
-            if let Some(target) = self.resolve_failure_function_in_module(*module_idx, function.clone())
+            if let Some(target) =
+                self.resolve_failure_function_in_module(*module_idx, function.clone())
             {
                 return Some(target);
             }
@@ -287,9 +282,7 @@ impl<'a> Checker<'a> {
                 }
             }
             Expr::MethodCall {
-                method,
-                recv_type,
-                ..
+                method, recv_type, ..
             } => {
                 let mut contract = "inferred failure contract".to_string();
                 let mut definition = self.definition_fallback_text();
@@ -622,13 +615,8 @@ impl<'a> Checker<'a> {
                                     ),
                                 )
                             };
-                            self.diags.push(Diagnostic::error(
-                                "E2402",
-                                what,
-                                why,
-                                fix,
-                                Some(span),
-                            ));
+                            self.diags
+                                .push(Diagnostic::error("E2402", what, why, fix, Some(span)));
                             return None;
                         }
                         // E2404: no declared conversion between these two typed error types.
@@ -667,13 +655,8 @@ impl<'a> Checker<'a> {
                                 ),
                             )
                         };
-                        self.diags.push(Diagnostic::error(
-                            "E0403",
-                            what,
-                            why,
-                            fix,
-                            Some(span),
-                        ));
+                        self.diags
+                            .push(Diagnostic::error("E0403", what, why, fix, Some(span)));
                         None
                     }
                 }
@@ -948,7 +931,10 @@ impl<'a> Checker<'a> {
                 None
             }
             ty if matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
-                || self.is_unit_type(ty) => None,
+                || self.is_unit_type(ty) =>
+            {
+                None
+            }
             _ => Some(ret),
         }
     }
@@ -982,7 +968,10 @@ impl<'a> Checker<'a> {
         if val_ty.is_none() {
             let callback_error = match value.as_ref().without_parens() {
                 Expr::MethodCall {
-                    receiver, method, args, ..
+                    receiver,
+                    method,
+                    args,
+                    ..
                 } => {
                     let receiver_ty = match receiver.as_ref().without_parens() {
                         Expr::Ident(name, _) => self.lookup(name).map(|info| info.ty.clone()),
@@ -1002,17 +991,18 @@ impl<'a> Checker<'a> {
                             Some(None)
                         )
                     }) {
-                        args.first().and_then(|arg| match arg.expr.without_parens() {
-                            Expr::Lambda(lambda) => lambda
-                                .meta
-                                .fallible_carrier
-                                .as_ref()
-                                .and_then(|carrier| match carrier {
-                                    Type::Result { err, .. } => Some((**err).clone()),
-                                    _ => None,
-                                }),
-                            _ => None,
-                        })
+                        args.first()
+                            .and_then(|arg| match arg.expr.without_parens() {
+                                Expr::Lambda(lambda) => {
+                                    lambda.meta.fallible_carrier.as_ref().and_then(|carrier| {
+                                        match carrier {
+                                            Type::Result { err, .. } => Some((**err).clone()),
+                                            _ => None,
+                                        }
+                                    })
+                                }
+                                _ => None,
+                            })
                     } else {
                         None
                     }
@@ -1027,13 +1017,14 @@ impl<'a> Checker<'a> {
             }
         }
         let val_ty = val_ty?;
+        // The parser starts this marker as `false`; classify the checked
+        // carrier before fallback context decides whether `err` is ambient.
+        *is_option = matches!(&val_ty, Type::Option(_));
         // D-FAILURE-FOUNDATION1=A: `??` consumes the success-side carrier
         // exactly once. A `?T !E` return is `Result<Option<T>, E>`, so its
         // fallback payload is T; the nested Option remains part of the same
         // success contract rather than leaking as `?T`.
-        let optional_success = matches!(&val_ty, Type::Option(_));
-        *is_option = optional_success;
-        let payload = match &val_ty {
+        let mut payload = match &val_ty {
             Type::Result { ok, .. } => match ok.as_ref() {
                 Type::Option(inner) => (**inner).clone(),
                 success => success.clone(),
@@ -1057,6 +1048,10 @@ impl<'a> Checker<'a> {
                 return None;
             }
         };
+        // D-NEVER2=B: `Result<Never, E>` has no successful payload. The
+        // fallback is therefore the only value-producing route, so infer its
+        // type without forcing it to unify with the uninhabited `Never`.
+        let success_never = payload.is_never();
         self.reject_borrowed_param_subplace(
             value,
             // The owning destination is the whole Option/Result expression.
@@ -1107,7 +1102,7 @@ impl<'a> Checker<'a> {
                 // D-SG9: the fallback shares the success type, so a fixed-width
                 // literal fallback (`x ?? 0` where `x` is `U8?`) elaborates to it.
                 let saved = self.expected_type.clone();
-                self.expected_type = Some(payload.clone());
+                self.expected_type = (!success_never).then(|| payload.clone());
                 let fallback_diverges = self.expr_diverges(e);
                 let ft = self.infer(e);
                 self.expected_type = saved;
@@ -1119,7 +1114,9 @@ impl<'a> Checker<'a> {
                     self.fallback_is_shape_miss = saved_fallback_is_shape_miss;
                     return None;
                 };
-                if ft != payload && !fallback_diverges {
+                if success_never {
+                    payload = ft.clone();
+                } else if ft != payload && !fallback_diverges {
                     self.diags.push(Diagnostic::error(
                         "E0405",
                         format!(
@@ -1144,11 +1141,13 @@ impl<'a> Checker<'a> {
                 self.check_conditional_block(body, false);
                 if let Some(value) = value {
                     let saved = self.expected_type.clone();
-                    self.expected_type = Some(payload.clone());
+                    self.expected_type = (!success_never).then(|| payload.clone());
                     let value_ty = self.infer(value);
                     self.expected_type = saved;
                     if let Some(value_ty) = value_ty {
-                        if value_ty != payload {
+                        if success_never {
+                            payload = value_ty;
+                        } else if value_ty != payload {
                             self.diags.push(Diagnostic::error(
                                 "E0405",
                                 format!(

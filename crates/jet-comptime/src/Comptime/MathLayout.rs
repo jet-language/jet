@@ -55,7 +55,7 @@ fn fixed_result(
             Ok(CtValue::absent(Type::IntN { signed, bits }))
         }
         fixed_arithmetic::JetFixedArithmeticResult::Trap(error) => {
-            let message = error.message();
+            let message = error.to_string();
             Err(comptime_panic(&message, span))
         }
     }
@@ -288,6 +288,225 @@ const MATH_TYPES: &[&str] = &[
 pub(super) fn is_math_type(name: &str) -> bool {
     Syntax::is_simd_lane_type(name) || MATH_TYPES.contains(&name)
 }
+const GEOMETRY_TYPES: &[&str] = &[
+    "Point2",
+    "Delta2",
+    "Transform",
+    "Transform2",
+    "Ray2",
+    "ScreenPoint",
+    "WorldPoint",
+    "ViewPoint",
+    "CameraPoint",
+    "DevicePoint",
+    "ScreenDelta",
+    "WorldDelta",
+    "ViewDelta",
+    "CameraDelta",
+    "DeviceDelta",
+];
+
+const GEOMETRY_FRAME: &str = "__jet_frame_id";
+const GEOMETRY_FROM_FRAME: &str = "__jet_from_frame";
+const GEOMETRY_TO_FRAME: &str = "__jet_to_frame";
+
+pub(super) fn is_geometry_type(name: &str) -> bool {
+    GEOMETRY_TYPES.contains(&name)
+}
+
+pub(super) fn is_geometry_value(value: &CtValue) -> bool {
+    matches!(
+        value,
+        CtValue::Struct { type_name, .. } if is_geometry_type(type_name)
+    )
+}
+
+fn geometry_field<'a>(
+    fields: &'a [(String, CtValue)],
+    name: &str,
+) -> Option<&'a CtValue> {
+    fields
+        .iter()
+        .find(|(field, _)| field == name)
+        .map(|(_, value)| value)
+}
+
+fn geometry_float(value: &CtValue, what: &str, span: Span) -> Result<f64, Diagnostic> {
+    match value {
+        CtValue::Float(value) => Ok(value.as_f64()),
+        CtValue::Int(value) => Ok(*value as f64),
+        _ => Err(unsupported(
+            &format!("geometry {what} must be a Float"),
+            span,
+        )),
+    }
+}
+
+fn geometry_int(value: &CtValue, what: &str, span: Span) -> Result<i64, Diagnostic> {
+    match value {
+        CtValue::Int(value) => Ok(*value),
+        _ => Err(unsupported(
+            &format!("geometry {what} must be a FrameId"),
+            span,
+        )),
+    }
+}
+
+fn geometry_coord(
+    value: &CtValue,
+    span: Span,
+) -> Result<(String, f64, f64, i64), Diagnostic> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return Err(unsupported("malformed coordinate carrier", span));
+    };
+    if !is_geometry_type(type_name)
+        || !(type_name == "Point2"
+            || type_name == "Delta2"
+            || type_name.ends_with("Point")
+            || type_name.ends_with("Delta"))
+    {
+        return Err(unsupported("expected a coordinate carrier", span));
+    }
+    let x = geometry_field(fields, "x")
+        .ok_or_else(|| unsupported("coordinate carrier is missing x", span))
+        .and_then(|value| geometry_float(value, "x", span))?;
+    let y = geometry_field(fields, "y")
+        .ok_or_else(|| unsupported("coordinate carrier is missing y", span))
+        .and_then(|value| geometry_float(value, "y", span))?;
+    let frame = geometry_field(fields, GEOMETRY_FRAME)
+        .map_or(Ok(0), |value| geometry_int(value, "frame identity", span))?;
+    Ok((type_name.clone(), x, y, frame))
+}
+
+fn geometry_coord_value(type_name: &str, x: f64, y: f64, frame: i64) -> CtValue {
+    CtValue::Struct {
+        type_name: type_name.to_string(),
+        fields: vec![
+            ("x".to_string(), CtValue::Float(CtFloat::f64(x))),
+            ("y".to_string(), CtValue::Float(CtFloat::f64(y))),
+            (GEOMETRY_FRAME.to_string(), CtValue::Int(frame)),
+        ],
+    }
+}
+
+fn geometry_transform(
+    value: &CtValue,
+    span: Span,
+) -> Result<(String, [f64; 6], i64, i64), Diagnostic> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return Err(unsupported("malformed transform carrier", span));
+    };
+    if !matches!(type_name.as_str(), "Transform" | "Transform2") {
+        return Err(unsupported("expected a transform carrier", span));
+    }
+    let mut matrix = [0.0; 6];
+    for (index, name) in ["m00", "m01", "m10", "m11", "tx", "ty"].iter().enumerate() {
+        matrix[index] = geometry_field(fields, name)
+            .ok_or_else(|| unsupported("transform carrier is missing a matrix field", span))
+            .and_then(|value| geometry_float(value, name, span))?;
+    }
+    let from = geometry_field(fields, GEOMETRY_FROM_FRAME)
+        .map_or(Ok(0), |value| geometry_int(value, "source frame", span))?;
+    let to = geometry_field(fields, GEOMETRY_TO_FRAME)
+        .map_or(Ok(0), |value| geometry_int(value, "destination frame", span))?;
+    Ok((type_name.clone(), matrix, from, to))
+}
+
+fn geometry_transform_value(
+    type_name: &str,
+    matrix: [f64; 6],
+    from: i64,
+    to: i64,
+) -> CtValue {
+    let fields = ["m00", "m01", "m10", "m11", "tx", "ty"]
+        .into_iter()
+        .zip(matrix)
+        .map(|(name, value)| (name.to_string(), CtValue::Float(CtFloat::f64(value))))
+        .chain([
+            (GEOMETRY_FROM_FRAME.to_string(), CtValue::Int(from)),
+            (GEOMETRY_TO_FRAME.to_string(), CtValue::Int(to)),
+        ])
+        .collect();
+    CtValue::Struct {
+        type_name: type_name.to_string(),
+        fields,
+    }
+}
+
+fn geometry_failed(message: &str) -> CtValue {
+    CtValue::failed(Box::new(CtValue::Str(message.to_string())))
+}
+
+fn geometry_is_point(name: &str) -> bool {
+    name == "Point2" || name.ends_with("Point")
+}
+
+fn geometry_is_delta(name: &str) -> bool {
+    name == "Delta2" || name.ends_with("Delta")
+}
+fn geometry_point_result_name(name: &str, dynamic: bool) -> &str {
+    if dynamic {
+        return "Point2";
+    }
+    name
+}
+
+fn geometry_delta_result_name(name: &str, dynamic: bool) -> &str {
+    if dynamic {
+        return "Delta2";
+    }
+    match name {
+        "ScreenPoint" => "ScreenDelta",
+        "WorldPoint" => "WorldDelta",
+        "ViewPoint" => "ViewDelta",
+        "CameraPoint" => "CameraDelta",
+        "DevicePoint" => "DeviceDelta",
+        _ => name,
+    }
+}
+
+pub(super) fn apply_geometry_static(
+    type_name: &str,
+    method: &str,
+    args: &[CtValue],
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if !is_geometry_type(type_name) || !matches!(method, "new" | "affine") {
+        return None;
+    }
+    Some((|| -> Result<CtValue, Diagnostic> {
+        Ok(match (type_name, args) {
+            (name, [x, y]) if geometry_is_point(name) || geometry_is_delta(name) => {
+                let x = geometry_float(x, "x", span)?;
+                let y = geometry_float(y, "y", span)?;
+                geometry_coord_value(name, x, y, 0)
+            }
+            (name, [x, y, frame]) if matches!(name, "Point2" | "Delta2") => {
+                let x = geometry_float(x, "x", span)?;
+                let y = geometry_float(y, "y", span)?;
+                let frame = geometry_int(frame, "frame identity", span)?;
+                geometry_coord_value(name, x, y, frame)
+            }
+            (name, [m00, m01, m10, m11, tx, ty, from, to])
+                if matches!(name, "Transform" | "Transform2") =>
+            {
+                let mut matrix = [0.0; 6];
+                for (index, value) in [m00, m01, m10, m11, tx, ty].into_iter().enumerate() {
+                    matrix[index] = geometry_float(value, "matrix component", span)?;
+                }
+                let from = geometry_int(from, "source frame", span)?;
+                let to = geometry_int(to, "destination frame", span)?;
+                geometry_transform_value(name, matrix, from, to)
+            }
+            _ => {
+                return Err(unsupported(
+                    &format!("`{type_name}.{method}` has no geometry constructor shape"),
+                    span,
+                ));
+            }
+        })
+    })())
+}
 
 pub(super) fn arity(name: &str) -> Option<usize> {
     if let Some((_, lanes)) = Syntax::simd_lane_layout(name) {
@@ -376,6 +595,149 @@ fn from_int_lanes(type_name: &str, lanes: &[i64]) -> CtValue {
         type_name: type_name.to_string(),
         fields,
     }
+}
+
+fn geometry_binop(
+    op: BinOp,
+    left: &CtValue,
+    right: &CtValue,
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if !is_geometry_value(left) && !is_geometry_value(right) {
+        return None;
+    }
+    let (left_name, lx, ly, left_frame) = match geometry_coord(left, span) {
+        Ok(value) => value,
+        Err(error) => return Some(Err(error)),
+    };
+    let (right_name, rx, ry, right_frame) = match geometry_coord(right, span) {
+        Ok(value) => value,
+        Err(error) => return Some(Err(error)),
+    };
+    let dynamic = matches!(left_name.as_str(), "Point2" | "Delta2")
+        || matches!(right_name.as_str(), "Point2" | "Delta2");
+    let wrap = |value| {
+        if dynamic {
+            CtValue::Present(Box::new(value))
+        } else {
+            value
+        }
+    };
+    if dynamic
+        && left_frame != 0
+        && right_frame != 0
+        && left_frame != right_frame
+        && matches!(op, BinOp::Add | BinOp::Sub)
+    {
+        return Some(Ok(geometry_failed(
+            "coordinate values belong to different frames",
+        )));
+    }
+    let result = match op {
+        BinOp::Add if geometry_is_point(&left_name) && geometry_is_delta(&right_name) => {
+            Ok(wrap(geometry_coord_value(
+                geometry_point_result_name(&left_name, dynamic),
+                lx + rx,
+                ly + ry,
+                if left_frame != 0 { left_frame } else { right_frame },
+            )))
+        }
+        BinOp::Add if geometry_is_delta(&left_name) && geometry_is_point(&right_name) => {
+            Ok(wrap(geometry_coord_value(
+                geometry_point_result_name(&right_name, dynamic),
+                lx + rx,
+                ly + ry,
+                if left_frame != 0 { left_frame } else { right_frame },
+            )))
+        }
+        BinOp::Add if geometry_is_delta(&left_name) && geometry_is_delta(&right_name) => {
+            Ok(wrap(geometry_coord_value(
+                geometry_delta_result_name(&left_name, dynamic),
+                lx + rx,
+                ly + ry,
+                if left_frame != 0 { left_frame } else { right_frame },
+            )))
+        }
+        BinOp::Sub if geometry_is_point(&left_name) && geometry_is_delta(&right_name) => {
+            Ok(wrap(geometry_coord_value(
+                geometry_point_result_name(&left_name, dynamic),
+                lx - rx,
+                ly - ry,
+                left_frame,
+            )))
+        }
+        BinOp::Sub if geometry_is_point(&left_name) && geometry_is_point(&right_name) => {
+            Ok(wrap(geometry_coord_value(
+                geometry_delta_result_name(&left_name, dynamic),
+                lx - rx,
+                ly - ry,
+                left_frame,
+            )))
+        }
+        BinOp::Sub if geometry_is_delta(&left_name) && geometry_is_delta(&right_name) => {
+            Ok(wrap(geometry_coord_value(
+                geometry_delta_result_name(&left_name, dynamic),
+                lx - rx,
+                ly - ry,
+                left_frame,
+            )))
+        }
+        BinOp::Eq => Ok(CtValue::Bool(
+            lx == rx && ly == ry && left_frame == right_frame,
+        )),
+        BinOp::Ne => Ok(CtValue::Bool(
+            !(lx == rx && ly == ry && left_frame == right_frame),
+        )),
+        _ => Err(unsupported("this coordinate-space operator", span)),
+    };
+    Some(result)
+}
+
+pub(super) fn eval_binop(
+    op: BinOp,
+    left: &CtValue,
+    right: &CtValue,
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if let Some(result) = geometry_binop(op, left, right, span) {
+        return Some(result);
+    }
+    let (Some((ln, ll)), Some((rn, rl))) = (lanes(left), lanes(right)) else {
+        return None;
+    };
+    if ln == rn && integer_lane_layout(ln).is_some() {
+        let Some((_, left)) = integer_lanes(left) else {
+            return Some(Err(unsupported("integer math lanes", span)));
+        };
+        let Some((_, right)) = integer_lanes(right) else {
+            return Some(Err(unsupported("integer math lanes", span)));
+        };
+        return Some(zip_int_op(op, &left, &right, ln, span).map(|out| from_int_lanes(ln, &out)));
+    }
+    if ln != rn {
+        // MatN * VecN transform.
+        if matches!(op, BinOp::Mul) {
+            if ln == Syntax::LINALG_MAT3_TYPE && rn == Syntax::LINALG_VEC3_TYPE {
+                return Some(Ok(from_lanes(rn, &mat_transform(3, &ll, &rl))));
+            }
+            if ln == Syntax::LINALG_MAT4_TYPE && rn == Syntax::LINALG_VEC4_TYPE {
+                return Some(Ok(from_lanes(rn, &mat_transform(4, &ll, &rl))));
+            }
+        }
+        return Some(Err(unsupported("mixing math types", span)));
+    }
+    let out = if matches!(ln, Syntax::LINALG_MAT3_TYPE | Syntax::LINALG_MAT4_TYPE)
+        && matches!(op, BinOp::Mul)
+    {
+        let n = if ln == Syntax::LINALG_MAT3_TYPE { 3 } else { 4 };
+        mat_mul(n, &ll, &rl)
+    } else {
+        match zip_op(op, &ll, &rl, ln) {
+            Some(v) => v,
+            None => return Some(Err(unsupported("this math operator", span))),
+        }
+    };
+    Some(Ok(from_lanes(ln, &out)))
 }
 
 fn field_name(type_name: &str, index: usize) -> String {
@@ -548,49 +910,6 @@ fn mat_transform(n: usize, m: &[f64], v: &[f64]) -> Vec<f64> {
     r
 }
 
-pub(super) fn eval_binop(
-    op: BinOp,
-    left: &CtValue,
-    right: &CtValue,
-    span: Span,
-) -> Option<Result<CtValue, Diagnostic>> {
-    let (Some((ln, ll)), Some((rn, rl))) = (lanes(left), lanes(right)) else {
-        return None;
-    };
-    if ln == rn && integer_lane_layout(ln).is_some() {
-        let Some((_, left)) = integer_lanes(left) else {
-            return Some(Err(unsupported("integer math lanes", span)));
-        };
-        let Some((_, right)) = integer_lanes(right) else {
-            return Some(Err(unsupported("integer math lanes", span)));
-        };
-        return Some(zip_int_op(op, &left, &right, ln, span).map(|out| from_int_lanes(ln, &out)));
-    }
-    if ln != rn {
-        // MatN * VecN transform.
-        if matches!(op, BinOp::Mul) {
-            if ln == Syntax::LINALG_MAT3_TYPE && rn == Syntax::LINALG_VEC3_TYPE {
-                return Some(Ok(from_lanes(rn, &mat_transform(3, &ll, &rl))));
-            }
-            if ln == Syntax::LINALG_MAT4_TYPE && rn == Syntax::LINALG_VEC4_TYPE {
-                return Some(Ok(from_lanes(rn, &mat_transform(4, &ll, &rl))));
-            }
-        }
-        return Some(Err(unsupported("mixing math types", span)));
-    }
-    let out = if matches!(ln, Syntax::LINALG_MAT3_TYPE | Syntax::LINALG_MAT4_TYPE)
-        && matches!(op, BinOp::Mul)
-    {
-        let n = if ln == Syntax::LINALG_MAT3_TYPE { 3 } else { 4 };
-        mat_mul(n, &ll, &rl)
-    } else {
-        match zip_op(op, &ll, &rl, ln) {
-            Some(v) => v,
-            None => return Some(Err(unsupported("this math operator", span))),
-        }
-    };
-    Some(Ok(from_lanes(ln, &out)))
-}
 
 fn list_to_lanes(args: &[CtValue], n: usize, span: Span) -> Result<Vec<f64>, Diagnostic> {
     let list = match args.first() {
@@ -627,12 +946,188 @@ fn list_to_int_lanes(
         .collect()
 }
 
+fn apply_geometry_method(
+    recv: &CtValue,
+    method: &str,
+    args: &[CtValue],
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let CtValue::Struct { type_name, .. } = recv else {
+        return Err(unsupported("malformed geometry carrier", span));
+    };
+    if matches!(type_name.as_str(), "Transform" | "Transform2") {
+        let (name, matrix, from, to) = geometry_transform(recv, span)?;
+        match (method, args) {
+            ("then", [next]) => {
+                let (_, next_matrix, next_from, next_to) = geometry_transform(next, span)?;
+                if to != 0 && next_from != 0 && to != next_from {
+                    return Ok(geometry_failed(
+                        "transform composition has mismatched frame identity",
+                    ));
+                }
+                let composed = [
+                    next_matrix[0] * matrix[0] + next_matrix[1] * matrix[2],
+                    next_matrix[0] * matrix[1] + next_matrix[1] * matrix[3],
+                    next_matrix[2] * matrix[0] + next_matrix[3] * matrix[2],
+                    next_matrix[2] * matrix[1] + next_matrix[3] * matrix[3],
+                    next_matrix[0] * matrix[4] + next_matrix[1] * matrix[5] + next_matrix[4],
+                    next_matrix[2] * matrix[4] + next_matrix[3] * matrix[5] + next_matrix[5],
+                ];
+                Ok(CtValue::Present(Box::new(geometry_transform_value(
+                    &name, composed, from, next_to,
+                ))))
+            }
+            ("inverse", []) => {
+                let det = matrix[0] * matrix[3] - matrix[1] * matrix[2];
+                if !det.is_finite() || det.abs() <= f64::EPSILON {
+                    return Ok(geometry_failed("transform is singular and has no inverse"));
+                }
+                let inv_det = 1.0 / det;
+                let inverse = [
+                    matrix[3] * inv_det,
+                    -matrix[1] * inv_det,
+                    -matrix[2] * inv_det,
+                    matrix[0] * inv_det,
+                    (matrix[1] * matrix[5] - matrix[3] * matrix[4]) * inv_det,
+                    (matrix[2] * matrix[4] - matrix[0] * matrix[5]) * inv_det,
+                ];
+                Ok(CtValue::Present(Box::new(geometry_transform_value(
+                    &name, inverse, to, from,
+                ))))
+            }
+            ("point", [point]) => {
+                let (_, x, y, frame) = geometry_coord(point, span)?;
+                if frame != 0 && frame != from {
+                    return Ok(geometry_failed(
+                        "coordinate point belongs to a stale frame",
+                    ));
+                }
+                Ok(CtValue::Present(Box::new(geometry_coord_value(
+                    "Point2",
+                    matrix[0] * x + matrix[1] * y + matrix[4],
+                    matrix[2] * x + matrix[3] * y + matrix[5],
+                    to,
+                ))))
+            }
+            ("point_at_depth", [point, depth]) => {
+                let depth = geometry_float(depth, "perspective depth", span)?;
+                if !depth.is_finite() {
+                    return Ok(geometry_failed("perspective depth must be finite"));
+                }
+                let (_, x, y, frame) = geometry_coord(point, span)?;
+                if frame != 0 && frame != from {
+                    return Ok(geometry_failed(
+                        "coordinate point belongs to a stale frame",
+                    ));
+                }
+                Ok(CtValue::Present(Box::new(geometry_coord_value(
+                    "Point2",
+                    matrix[0] * x + matrix[1] * y + matrix[4] + matrix[0] * depth,
+                    matrix[2] * x + matrix[3] * y + matrix[5] + matrix[2] * depth,
+                    to,
+                ))))
+            }
+            ("ray", [point]) => {
+                let (_, x, y, frame) = geometry_coord(point, span)?;
+                if frame != 0 && frame != from {
+                    return Ok(geometry_failed(
+                        "coordinate point belongs to a stale frame",
+                    ));
+                }
+                let origin = geometry_coord_value(
+                    "Point2",
+                    matrix[0] * x + matrix[1] * y + matrix[4],
+                    matrix[2] * x + matrix[3] * y + matrix[5],
+                    to,
+                );
+                let direction = geometry_coord_value("Delta2", matrix[0], matrix[2], to);
+                Ok(CtValue::Present(Box::new(CtValue::Struct {
+                    type_name: "Ray2".to_string(),
+                    fields: vec![
+                        ("origin".to_string(), origin),
+                        ("direction".to_string(), direction),
+                    ],
+                })))
+            }
+            _ => Err(unsupported(
+                &format!("`{name}.{method}` has no geometry method"),
+                span,
+            )),
+        }
+    } else if geometry_is_point(type_name) || geometry_is_delta(type_name) {
+        let (_, x, y, frame) = geometry_coord(recv, span)?;
+        let [other] = args else {
+            return Err(unsupported(
+                &format!("`{type_name}.{method}` expects one coordinate"),
+                span,
+            ));
+        };
+        let (other_name, ox, oy, other_frame) = geometry_coord(other, span)?;
+        let dynamic = matches!(type_name.as_str(), "Point2" | "Delta2")
+            || matches!(other_name.as_str(), "Point2" | "Delta2");
+        if dynamic
+            && frame != 0
+            && other_frame != 0
+            && frame != other_frame
+        {
+            return Ok(geometry_failed(
+                "coordinate values belong to different frames",
+            ));
+        }
+        let frame = if frame != 0 { frame } else { other_frame };
+        let output_name = if method == "add" && geometry_is_point(type_name) {
+            geometry_point_result_name(type_name, dynamic)
+        } else if method == "sub"
+            && geometry_is_point(type_name)
+            && geometry_is_point(&other_name)
+        {
+            geometry_delta_result_name(type_name, dynamic)
+        } else if geometry_is_delta(type_name) {
+            geometry_delta_result_name(type_name, dynamic)
+        } else {
+            type_name
+        };
+        let value = match method {
+            "add" if (geometry_is_point(type_name) && geometry_is_delta(&other_name))
+                || (geometry_is_delta(type_name) && geometry_is_delta(&other_name)) =>
+            {
+                geometry_coord_value(output_name, x + ox, y + oy, frame)
+            }
+            "sub" if (geometry_is_point(type_name)
+                && (geometry_is_delta(&other_name) || geometry_is_point(&other_name)))
+                || (geometry_is_delta(type_name) && geometry_is_delta(&other_name)) =>
+            {
+                geometry_coord_value(output_name, x - ox, y - oy, frame)
+            }
+            _ => {
+                return Err(unsupported(
+                    &format!("`{type_name}.{method}` has no geometry method"),
+                    span,
+                ))
+            }
+        };
+        Ok(if dynamic {
+            CtValue::Present(Box::new(value))
+        } else {
+            value
+        })
+    } else {
+        Err(unsupported(
+            &format!("`{type_name}.{method}` has no geometry method"),
+            span,
+        ))
+    }
+}
+
 pub(super) fn apply_static(
     type_name: &str,
     method: &str,
     args: Vec<CtValue>,
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    if let Some(result) = apply_geometry_static(type_name, method, &args, span) {
+        return Some(result);
+    }
     if !is_math_type(type_name) {
         return None;
     }
@@ -745,6 +1240,9 @@ pub(super) fn apply_method(
     args: &[CtValue],
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    if is_geometry_value(recv) {
+        return Some(apply_geometry_method(recv, method, args, span));
+    }
     let (name, vals) = lanes(recv)?;
     let int_vals = integer_lanes(recv).map(|(_, values)| values);
     Some(match (method, args.len()) {

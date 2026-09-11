@@ -1,0 +1,453 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:jet:dogfood:2393-r2-manifest-v1",
+  "title": "Jet earned-preference campaign 2393-r2 evidence",
+  "description": "The one schema used for the 2393-r2 manifest, arm receipts, and blind comparison receipts. This file defines shapes only; it is not a receipt manifest and contains no participant result.",
+  "oneOf": [
+    { "$ref": "#/$defs/manifest" },
+    { "$ref": "#/$defs/receipt" },
+    { "$ref": "#/$defs/comparison" }
+  ],
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "participant": {
+      "type": "string",
+      "enum": ["A01", "A02", "A03", "A04", "A05", "A06", "A07", "A08", "A09", "A10"]
+    },
+    "task": {
+      "type": "string",
+      "enum": ["T1", "T2", "T3", "T4"]
+    },
+    "arm": {
+      "type": "string",
+      "enum": ["Jet", "Rust"]
+    },
+    "family": {
+      "type": "string",
+      "enum": ["OpenAI", "Anthropic"]
+    },
+    "stopStatus": {
+      "type": "string",
+      "enum": ["not_measured", "unrecoverable_tool_failure"]
+    },
+    "manifestEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["participant", "task", "arm", "path", "sha256", "status", "complete", "project_green"],
+      "properties": {
+        "participant": { "$ref": "#/$defs/participant" },
+        "task": { "$ref": "#/$defs/task" },
+        "arm": { "$ref": "#/$defs/arm" },
+        "path": {
+          "type": "string",
+          "pattern": "^docs/audits/raw/2393-r2/(A0[1-9]|A10)/(T[1-4])/(jet|rust)\\.json$"
+        },
+        "sha256": { "$ref": "#/$defs/digest" },
+        "status": { "enum": ["measured", "not_measured", "unrecoverable_tool_failure"] },
+        "complete": { "type": "boolean" },
+        "project_green": { "type": "boolean" }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "status": { "const": "measured" },
+            "complete": { "const": true },
+            "project_green": { "type": "boolean" }
+          }
+        },
+        {
+          "properties": {
+            "status": { "$ref": "#/$defs/stopStatus" },
+            "complete": { "const": false },
+            "project_green": { "const": false }
+          }
+        }
+      ]
+    },
+    "comparisonEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["participant", "path", "sha256", "status"],
+      "properties": {
+        "participant": { "$ref": "#/$defs/participant" },
+        "path": {
+          "type": "string",
+          "pattern": "^docs/audits/raw/2393-r2/(A0[1-9]|A10)/comparison\\.json$"
+        },
+        "sha256": { "$ref": "#/$defs/digest" },
+        "status": { "enum": ["measured", "not_measured", "unrecoverable_tool_failure"] }
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jet", "rustc", "omp", "node", "runner_commit", "captured_at", "sha256"],
+      "properties": {
+        "jet": { "type": "string", "minLength": 1 },
+        "rustc": { "type": "string", "minLength": 1 },
+        "omp": { "type": "string", "minLength": 1 },
+        "node": { "type": "string", "minLength": 1 },
+        "runner_commit": { "type": "string", "minLength": 1 },
+        "captured_at": { "type": "string", "format": "date-time" },
+        "sha256": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "strictPerformancePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "id", "version", "comparison", "comparators", "failure_statuses"],
+      "properties": {
+        "schema": { "const": "jet.strict-performance-policy.v1" },
+        "id": { "const": "AGENTS.md#strict-performance-gate" },
+        "version": { "const": 1 },
+        "comparison": { "const": "per_cell_and_metric" },
+        "comparators": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["rust", "non_rust"],
+          "properties": {
+            "rust": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["win", "parity", "loss"],
+              "properties": {
+                "win": { "const": "<1" },
+                "parity": { "const": "<=1.05" },
+                "loss": { "const": ">1.05" }
+              }
+            },
+            "non_rust": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["win", "parity", "loss"],
+              "properties": {
+                "win": { "const": "<1" },
+                "parity": { "const": null },
+                "loss": { "const": ">=1" }
+              }
+            }
+          }
+        },
+        "failure_statuses": {
+          "type": "array",
+          "prefixItems": [
+            { "const": "missing" },
+            { "const": "wrong" },
+            { "const": "unavailable" },
+            { "const": "uncovered" },
+            { "const": "mismatched" },
+            { "const": "inconclusive" }
+          ],
+          "items": false,
+          "minItems": 6,
+          "maxItems": 6
+        }
+      }
+    },
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "card",
+        "run_id",
+        "protocol_path",
+        "protocol_sha256",
+        "task_contract_path",
+        "task_contract_sha256",
+        "fixture_manifest_path",
+        "fixture_manifest_sha256",
+        "assignment_path",
+        "assignment_sha256",
+        "comparison_mapping_path",
+        "comparison_mapping_sha256",
+        "strict_performance_policy",
+        "toolchain",
+        "expected_receipt_count",
+        "entries",
+        "comparison_receipts"
+      ],
+      "properties": {
+        "schema_version": { "const": "2393-r2-manifest-v1" },
+        "card": { "const": 2393 },
+        "run_id": { "const": "2393-r2" },
+        "protocol_path": { "const": "docs/audits/fresh-agent-5-of-5-rerun-2026-09-05.md" },
+        "protocol_sha256": { "$ref": "#/$defs/digest" },
+        "task_contract_path": { "const": "docs/proposals/dogfood-jet-experience-5-of-5.md" },
+        "task_contract_sha256": { "$ref": "#/$defs/digest" },
+        "fixture_manifest_path": {
+          "const": "docs/audits/raw/2393-r2/fixtures.json"
+        },
+        "fixture_manifest_sha256": { "$ref": "#/$defs/digest" },
+        "assignment_path": { "const": ".tmp/2393-r2/assignment.json" },
+        "assignment_sha256": { "$ref": "#/$defs/digest" },
+        "comparison_mapping_path": { "const": ".tmp/2393-r2/comparison-meta.json" },
+        "comparison_mapping_sha256": { "$ref": "#/$defs/digest" },
+        "strict_performance_policy": { "$ref": "#/$defs/strictPerformancePolicy" },
+        "toolchain": { "$ref": "#/$defs/toolchain" },
+        "expected_receipt_count": { "const": 80 },
+        "entries": {
+          "type": "array",
+          "minItems": 80,
+          "maxItems": 80,
+          "items": { "$ref": "#/$defs/manifestEntry" }
+        },
+        "comparison_receipts": {
+          "type": "array",
+          "minItems": 10,
+          "maxItems": 10,
+          "items": { "$ref": "#/$defs/comparisonEntry" }
+        }
+      }
+    },
+    "assignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_bit", "task_bit_digest", "task_arm_order"],
+      "properties": {
+        "task_bit": { "type": "integer", "enum": [0, 1] },
+        "task_bit_digest": { "$ref": "#/$defs/digest" },
+        "task_arm_order": {
+          "type": "array",
+          "prefixItems": [
+            { "$ref": "#/$defs/arm" },
+            { "$ref": "#/$defs/arm" }
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        }
+      }
+    },
+    "blindMapping": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["digest", "first_bit", "second_bit", "jet_label", "rust_label", "option_order"],
+      "properties": {
+        "digest": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
+        "first_bit": { "anyOf": [{ "type": "integer", "enum": [0, 1] }, { "type": "null" }] },
+        "second_bit": { "anyOf": [{ "type": "integer", "enum": [0, 1] }, { "type": "null" }] },
+        "jet_label": { "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+        "rust_label": { "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+        "option_order": {
+          "anyOf": [
+            {
+              "type": "array",
+              "prefixItems": [
+                { "type": "string", "minLength": 1 },
+                { "type": "string", "minLength": 1 },
+                { "const": "no preference" }
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "protocolEvidence": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["path", "task_contract_sha256", "language_reference_sha256", "prompt_path", "prompt_sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "task_contract_sha256": { "$ref": "#/$defs/digest" },
+        "language_reference_sha256": { "$ref": "#/$defs/digest" },
+        "prompt_path": { "type": "string", "minLength": 1 },
+        "prompt_sha256": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "rating": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["reading", "writing", "reasoning", "creating", "modifying", "diagnostics", "tooling_docs", "reason"],
+      "properties": {
+        "reading": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "writing": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "reasoning": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "creating": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "modifying": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "diagnostics": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "tooling_docs": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "taskOutcome": {
+      "type": ["object", "null"],
+      "additionalProperties": true,
+      "required": ["project_green"],
+      "properties": {
+        "project_green": { "type": "boolean" }
+      }
+    },
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "card",
+        "run_id",
+        "participant",
+        "family",
+        "task",
+        "arm",
+        "opaque_arm_label",
+        "assignment",
+        "comparison_blind_mapping",
+        "protocol",
+        "transport",
+        "source_path",
+        "source_metrics",
+        "source",
+        "status",
+        "stop_reason",
+        "implementation_session",
+        "commands",
+        "task_outcome",
+        "correction_passes",
+        "rating",
+        "rating_response_raw",
+        "rating_response_ref",
+        "rating_session",
+        "diagnostics",
+        "diagnostic_policy",
+        "status_detail",
+        "rating_prompt",
+        "rating_category_wording"
+      ],
+      "properties": {
+        "schema_version": { "const": "2393-r2-receipt-v1" },
+        "card": { "const": 2393 },
+        "run_id": { "const": "2393-r2" },
+        "participant": { "$ref": "#/$defs/participant" },
+        "family": { "$ref": "#/$defs/family" },
+        "task": { "$ref": "#/$defs/task" },
+        "arm": { "$ref": "#/$defs/arm" },
+        "opaque_arm_label": { "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+        "assignment": { "$ref": "#/$defs/assignment" },
+        "comparison_blind_mapping": { "$ref": "#/$defs/blindMapping" },
+        "protocol": { "$ref": "#/$defs/protocolEvidence" },
+        "transport": { "type": "object", "additionalProperties": true },
+        "source_path": { "type": "string", "minLength": 1 },
+        "source_metrics": { "type": ["object", "null"], "additionalProperties": true },
+        "source": { "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+        "status": { "enum": ["measured", "not_measured", "unrecoverable_tool_failure"] },
+        "stop_reason": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "implementation_session": { "type": "object", "additionalProperties": true },
+        "commands": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+        "task_outcome": { "$ref": "#/$defs/taskOutcome" },
+        "correction_passes": { "anyOf": [{ "type": "integer", "minimum": 0, "maximum": 3 }, { "type": "null" }] },
+        "rating": { "$ref": "#/$defs/rating" },
+        "rating_response_raw": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "rating_response_ref": { "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+        "rating_session": { "type": ["object", "null"], "additionalProperties": true },
+        "diagnostics": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+        "diagnostic_policy": { "type": ["object", "null"], "additionalProperties": true },
+        "status_detail": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "rating_prompt": { "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+        "rating_category_wording": { "type": ["array", "null"], "items": { "type": "string", "minLength": 1 } }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "status": { "const": "measured" },
+            "source": { "type": "string", "minLength": 1 },
+            "task_outcome": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": ["project_green"],
+              "properties": { "project_green": { "type": "boolean" } }
+            },
+            "rating": {
+              "type": "object",
+              "required": ["reading", "writing", "reasoning", "creating", "modifying", "diagnostics", "tooling_docs", "reason"],
+              "properties": {
+                "reading": { "type": "integer", "minimum": 1, "maximum": 5 },
+                "writing": { "type": "integer", "minimum": 1, "maximum": 5 },
+                "reasoning": { "type": "integer", "minimum": 1, "maximum": 5 },
+                "creating": { "type": "integer", "minimum": 1, "maximum": 5 },
+                "modifying": { "type": "integer", "minimum": 1, "maximum": 5 },
+                "diagnostics": { "type": "integer", "minimum": 1, "maximum": 5 },
+                "tooling_docs": { "type": "integer", "minimum": 1, "maximum": 5 },
+                "reason": { "type": "string", "minLength": 1 }
+              }
+            },
+            "correction_passes": { "type": "integer", "minimum": 0, "maximum": 3 }
+          },
+          "required": ["source", "task_outcome", "rating", "correction_passes"]
+        },
+        {
+          "properties": {
+            "status": { "$ref": "#/$defs/stopStatus" },
+            "source": { "type": "null" },
+            "task_outcome": { "type": "null" },
+            "rating": { "type": "null" },
+            "correction_passes": { "type": "null" },
+            "stop_reason": { "type": "string", "minLength": 1 }
+          },
+          "required": ["stop_reason"]
+        }
+      ]
+    },
+    "comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "card", "run_id", "participant", "status", "mapping", "prompt_path", "prompt_sha256", "preference", "mapped_choice", "reason", "response_raw", "session"],
+      "properties": {
+        "schema_version": { "const": "2393-r2-comparison-v1" },
+        "card": { "const": 2393 },
+        "run_id": { "const": "2393-r2" },
+        "participant": { "$ref": "#/$defs/participant" },
+        "status": { "enum": ["measured", "not_measured", "unrecoverable_tool_failure"] },
+        "mapping": { "$ref": "#/$defs/blindMapping" },
+        "prompt_path": { "type": "string", "minLength": 1 },
+        "prompt_sha256": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
+        "preference": { "anyOf": [{ "enum": ["Arm A", "Arm B", "no preference"] }, { "type": "null" }] },
+        "mapped_choice": { "anyOf": [{ "enum": ["Jet", "Rust", "no preference"] }, { "type": "null" }] },
+        "reason": { "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+        "response_raw": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "session": { "type": ["object", "null"], "additionalProperties": true }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "status": { "const": "measured" },
+            "mapping": {
+              "type": "object",
+              "required": ["digest", "first_bit", "second_bit", "jet_label", "rust_label", "option_order"],
+              "properties": {
+                "digest": { "$ref": "#/$defs/digest" },
+                "first_bit": { "type": "integer", "enum": [0, 1] },
+                "second_bit": { "type": "integer", "enum": [0, 1] },
+                "jet_label": { "type": "string", "minLength": 1 },
+                "rust_label": { "type": "string", "minLength": 1 },
+                "option_order": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "string", "minLength": 1 } }
+              }
+            },
+            "preference": { "enum": ["Arm A", "Arm B", "no preference"] },
+            "mapped_choice": { "enum": ["Jet", "Rust", "no preference"] },
+            "reason": { "type": "string", "minLength": 1 },
+            "response_raw": { "type": "string" },
+            "session": { "type": "object", "additionalProperties": true }
+          }
+        },
+        {
+          "properties": {
+            "status": { "$ref": "#/$defs/stopStatus" },
+            "mapping": { "type": "null" },
+            "preference": { "type": "null" },
+            "mapped_choice": { "type": "null" },
+            "reason": { "type": "string", "minLength": 1 },
+            "response_raw": { "type": "null" },
+            "session": { "type": "null" }
+          }
+        }
+      ]
+    }
+  }
+}

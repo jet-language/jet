@@ -288,7 +288,7 @@ fn measurement_has_one_semantic_home() {
         );
     }
 
-    let docs = read("docs/reference/core-library.md")
+    let docs = read("docs/spec/reference/core-library.md")
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");

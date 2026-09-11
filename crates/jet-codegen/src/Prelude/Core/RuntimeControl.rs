@@ -55,6 +55,17 @@ impl JetTransaction {
         self.committed = true;
     }
 }
+
+/// Canonical MIR route for a checked transaction commit hook. The generated
+/// adapters select this row; they do not reopen the private transaction method.
+fn jet_transaction_on_commit(transaction: &mut JetTransaction, callback: Box<dyn FnOnce()>) {
+    transaction.on_commit(callback);
+}
+
+/// Canonical MIR route for a checked transaction rollback hook.
+fn jet_transaction_on_rollback(transaction: &mut JetTransaction, callback: Box<dyn FnOnce()>) {
+    transaction.on_rollback(callback);
+}
 impl Drop for JetTransaction {
     fn drop(&mut self) {
         if self.committed {

@@ -3,6 +3,11 @@
 Shared by every Jet audit and research skill. Do not copy this text into a
 skill; point at it. One file, many pointers.
 
+This page owns the shared evidence lens only. Publication, workflow boundaries,
+write permissions, and the disposition marker live in
+`.agents/skills/_shared/audit-dispositions.md`; load both where the method
+requires them.
+
 The owner should never have to ask for anything on this page. A request for
 "lessons", "a report", or "an audit" already includes all of it.
 

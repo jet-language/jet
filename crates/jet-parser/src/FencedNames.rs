@@ -54,15 +54,11 @@ fn token_cost(tokens: &[Token]) -> Option<(usize, usize)> {
                 | TokKind::Float(_, name)
                 | TokKind::LineComment(name)
                 | TokKind::BlockComment(name) => name.len(),
-                TokKind::UnitNumber {
-                    raw,
-                    suffix,
-                    ..
-                } => raw.len().checked_add(suffix.len())?,
+                TokKind::UnitNumber { raw, suffix, .. } => raw.len().checked_add(suffix.len())?,
+                TokKind::RawStr(text) => text.len(),
                 TokKind::Str(parts) => {
-                    let mut part_bytes = parts
-                        .len()
-                        .checked_mul(std::mem::size_of::<StrTokPart>())?;
+                    let mut part_bytes =
+                        parts.len().checked_mul(std::mem::size_of::<StrTokPart>())?;
                     let mut literal_bytes = 0usize;
                     for part in parts {
                         match part {
@@ -253,9 +249,7 @@ fn expand_segment(
         match segment[index].kind {
             TokKind::FenceOpen => {
                 let open = index;
-                let Some(after_open) = index
-                    .checked_add(1)
-                    .and_then(|start| segment.get(start..))
+                let Some(after_open) = index.checked_add(1).and_then(|start| segment.get(start..))
                 else {
                     diags.push(rejected_position(
                         segment[open].span,
@@ -366,7 +360,6 @@ fn expand_segment(
                     | TokKind::KwIf
                     | TokKind::KwElse
                     | TokKind::KwLoop
-                    | TokKind::KwSwitch
                     | TokKind::KwStruct
                     | TokKind::KwEnum
                     | TokKind::KwImpl
@@ -434,7 +427,8 @@ fn expand_segment(
     }
 
     let copies = fences[0].names.len();
-    let Some((expanded_count, expanded_bytes)) = expanded_cost(segment, &pairs, &fence_entries, copies)
+    let Some((expanded_count, expanded_bytes)) =
+        expanded_cost(segment, &pairs, &fence_entries, copies)
     else {
         return Err(vec![rejected_entry(
             statement_span(segment),
@@ -527,10 +521,7 @@ fn parse_entries(
                         ));
                     }
                     let Some(bytes) = count.and_then(|count| {
-                        count.checked_mul(
-                            std::mem::size_of::<Token>()
-                                .checked_add(20)?,
-                        )
+                        count.checked_mul(std::mem::size_of::<Token>().checked_add(20)?)
                     }) else {
                         return Err(rejected_entry(
                             range_span,
@@ -639,8 +630,7 @@ fn parse_entries(
             }
             _ => {}
         }
-        let Some((_, bytes)) = token_cost(std::slice::from_ref(token))
-        else {
+        let Some((_, bytes)) = token_cost(std::slice::from_ref(token)) else {
             return Err(rejected_entry(
                 token.span,
                 "a fenced entry is too large to expand",
@@ -769,8 +759,7 @@ fn numbered_name(name: &str) -> Option<(&str, usize, usize)> {
         .char_indices()
         .rev()
         .find(|(_, ch)| !ch.is_ascii_digit())
-        .map_or(Some(0), |(index, ch)| index.checked_add(ch.len_utf8()))
-        ?;
+        .map_or(Some(0), |(index, ch)| index.checked_add(ch.len_utf8()))?;
     if split == name.len() {
         return None;
     }
@@ -911,6 +900,18 @@ mod tests {
 
     #[test]
     fn formatter_keeps_fenced_lambda_body_after_an_inline_comment() {
+        // Worker threads in the lib suite use a smaller stack than the main
+        // thread; this format walk is deep enough to overflow the default.
+        std::thread::Builder::new()
+            .name("fenced-lambda-fmt".into())
+            .stack_size(8 * 1024 * 1024)
+            .spawn(formatter_keeps_fenced_lambda_body_after_an_inline_comment_body)
+            .expect("spawn fenced-lambda formatter check")
+            .join()
+            .expect("fenced-lambda formatter check thread");
+    }
+
+    fn formatter_keeps_fenced_lambda_body_after_an_inline_comment_body() {
         let source = "\
 fn run() {
     @[ first, second ]@ :: work(() -> { // keep this note
@@ -1020,10 +1021,7 @@ fn run() {
     fn hostile_fence_ranges_are_rejected_before_expansion() {
         let padded_start = "0".repeat(MAX_FENCE_EXPANSION_BYTES / MAX_FENCE_EXPANSION + 1);
         for source in [
-            format!(
-                "fn run() {{ print(@[0..{}]@) }}\n",
-                MAX_FENCE_EXPANSION
-            ),
+            format!("fn run() {{ print(@[0..{}]@) }}\n", MAX_FENCE_EXPANSION),
             "fn run() { @[ task1..task1000000000 ]@ :: work() }\n".to_string(),
             format!("fn run() {{ @[ task{padded_start}..task4095 ]@ :: work() }}\n"),
         ] {
@@ -1050,7 +1048,9 @@ fn run() {
         assert!(lex_diags.is_empty(), "{lex_diags:?}");
         let diagnostics = expand(&Lexer::without_comments(&tokens)).unwrap_err();
         assert!(
-            diagnostics.iter().any(|diagnostic| diagnostic.code == "E0371"),
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E0371"),
             "{diagnostics:?}"
         );
     }
@@ -1063,7 +1063,9 @@ fn run() {
         assert!(lex_diags.is_empty(), "{lex_diags:?}");
         let diagnostics = expand(&Lexer::without_comments(&tokens)).unwrap_err();
         assert!(
-            diagnostics.iter().any(|diagnostic| diagnostic.code == "E0371"),
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E0371"),
             "{diagnostics:?}"
         );
     }

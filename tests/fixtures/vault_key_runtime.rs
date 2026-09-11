@@ -1,3 +1,5 @@
+#[allow(non_snake_case)]
+mod RuntimeDiagnosticCore { include!("../../crates/jet-foundation/src/RuntimeDiagnosticCore.rs"); }
 include!("../../crates/jet-foundation/src/Outcome.rs");
 include!("../../crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
 use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};

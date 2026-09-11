@@ -116,8 +116,9 @@ fn shared_weak_cycle_matches_aot_and_default_tiers() {
             .collect::<Vec<_>>();
         assert!(errors.is_empty(), "{errors:?}");
 
+        let policy = common::development_policy();
         let mut backend = jet_jit::CraneliftBackend::new();
-        match backend.run(&bundle, false) {
+        match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
             jet::Interpreter::RunOutcome::Ran { stdout, .. } => {
                 assert_eq!(stdout, expected);
             }

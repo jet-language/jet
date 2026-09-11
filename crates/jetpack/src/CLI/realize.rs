@@ -1,7 +1,8 @@
 use super::parse::Flags;
 use super::update_search_info::shell_on_failed_build;
 use super::workspace_sources::{
-    cwd_table, cwd_workspace_index, fixtures_for, project_root, reject_retired_jetpack_toml,
+    cwd_table, cwd_workspace_index, ensure_builtin_sources, fixtures_for, project_root,
+    reject_retired_jetpack_toml,
 };
 use crate::EnvFile;
 use crate::Lock;
@@ -1183,7 +1184,8 @@ pub(super) fn load_project_plan_with_selections(
     }
 
     let ef = EnvFile::parse(&src);
-    let table = ef.source_table();
+    let mut table = ef.source_table();
+    ensure_builtin_sources(&mut table);
     let refs = classify_all(theme, ef.refs().iter().map(String::as_str), &table)?;
     Ok(RunPlan {
         project_root: dir.clone(),
@@ -1218,7 +1220,8 @@ fn typed_plan(
                 );
                 2
             })?;
-    let table = plan.table;
+    let mut table = plan.table;
+    ensure_builtin_sources(&mut table);
     // U12: a dev service with no explicit `run:` that matches the built-in
     // catalog implicitly depends on that catalog's package (e.g. `redis: {
     // enable: true }` needs `redis-server` on PATH) — fold its ref in
@@ -1453,14 +1456,25 @@ pub(super) fn apply_locked_channels(
                             );
                             return Err(2);
                         }
-                        Lock::record_source_channel(
+                        if let Err(error) = Lock::record_source_channel(
                             project_dir,
                             Lock::LockedSourceChannel {
                                 name: source.name.clone(),
                                 channel: source.lock_channel().to_string(),
                                 exact: exact.clone(),
                             },
-                        );
+                        ) {
+                            theme.error_coded(
+                                "E1206",
+                                &format!(
+                                    "couldn't write source channel `{}` to the lock",
+                                    source.name
+                                ),
+                                &error,
+                                "fix the project lock permissions and run the command again",
+                            );
+                            return Err(2);
+                        }
                     }
                 }
                 Err(error) if Lock::locked_source_channel(project_dir, &source.name).is_none() => {

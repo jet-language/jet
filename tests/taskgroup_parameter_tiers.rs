@@ -5,29 +5,11 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use std::fs;
 
 const SOURCE: &str = include_str!("../examples/features/concurrency/task_group_parameter.jet");
 const EXPECTED: &str =
     include_str!("../examples/features/expected/concurrency/task_group_parameter.out");
 
-fn checked_bundle() -> (jet::AST::ProgramBundle, common::Scratch) {
-    let scratch = common::Scratch::new("taskgroup-parameter-tir");
-    let entry = scratch.join("main.jet");
-    fs::write(&entry, SOURCE).unwrap();
-    let shown = entry.to_string_lossy().into_owned();
-    let mut bundle = jet::Loader::load_entry(&shown).expect("group parameter source must load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-    let errors = diagnostics
-        .iter()
-        .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
-        .collect::<Vec<_>>();
-    assert!(
-        errors.is_empty(),
-        "group parameter sema diagnostics: {errors:?}"
-    );
-    (bundle, scratch)
-}
 
 fn assert_runtime_output(name: &str, result: (i32, String, String)) {
     let (code, stdout, stderr) = result;
@@ -50,29 +32,6 @@ fn sema_accepts_group_parameters_in_the_canonical_example() {
     jet::compile(SOURCE).expect("group parameter source must pass sema");
 }
 
-#[test]
-fn tir_carries_the_group_parameter_and_spawn_body() {
-    let (bundle, _scratch) = checked_bundle();
-    let program = jet::Codegen::TIR::lower_jit_program(&bundle)
-        .expect("group parameter source must lower through TIR");
-    let method = program
-        .funcs
-        .iter()
-        .find(|function| function.name == "Counter::print_stepped")
-        .expect("lowered Group-parameter method");
-    assert!(
-        method.params.iter().any(|(_, ty, _)| matches!(
-            ty,
-            jet::AST::Type::Named(name) if name == jet::Syntax::TYPE_TASKGROUP
-        )),
-        "TIR method parameters must retain the resolved Group type"
-    );
-    assert_eq!(
-        program.spawn_lambdas.len(),
-        2,
-        "both Group-owned helper spawns must reach TIR"
-    );
-}
 
 #[test]
 fn aot_runs_group_parameter_example() {

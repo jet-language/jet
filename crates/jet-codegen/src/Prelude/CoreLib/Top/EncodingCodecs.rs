@@ -100,51 +100,43 @@ fn jet_xml_from_data_tree(value: &jet_std::DataTree) -> Result<crate::jet_xml_pu
     }
 }
 
-fn jet_xml_reason(reason: crate::jet_xml_pull::Reason) -> jet_std::XMLReason {
-    use crate::jet_xml_pull::Reason as Source;
-    match reason {
-        Source::InvalidEncoding => jet_std::XMLReason::InvalidEncoding,
-        Source::Malformed => jet_std::XMLReason::Malformed,
-        Source::MismatchedTag => jet_std::XMLReason::MismatchedTag,
-        Source::InvalidName => jet_std::XMLReason::InvalidName,
-        Source::Namespace => jet_std::XMLReason::Namespace,
-        Source::DuplicateAttribute => jet_std::XMLReason::DuplicateAttribute,
-        Source::Entity => jet_std::XMLReason::Entity,
-        Source::EntityCycle => jet_std::XMLReason::EntityCycle,
-        Source::Limit => jet_std::XMLReason::Limit,
-        Source::Canonicalization => jet_std::XMLReason::Canonicalization,
-        Source::Shape => jet_std::XMLReason::Shape,
-        Source::Unsupported => jet_std::XMLReason::Unsupported,
-    }
+fn jet_xml_error(error: crate::jet_xml_pull::Error) -> jet_std::EncodingError {
+    use crate::jet_xml_pull::Reason;
+    let kind = match error.kind {
+        Reason::EntityCycle | Reason::Limit => jet_std::EncodingErrorKind::Limit,
+        Reason::Canonicalization | Reason::Unsupported => {
+            jet_std::EncodingErrorKind::Unsupported
+        }
+        Reason::Malformed
+            if error.reason.contains("ended")
+                || error.reason.contains("unterminated")
+                || error.reason.contains("truncated") =>
+        {
+            jet_std::EncodingErrorKind::Truncated
+        }
+        _ => jet_std::EncodingErrorKind::Syntax,
+    };
+    jet_std::EncodingError::new(
+        jet_std::EncodingFormat::XML,
+        kind,
+        error.offset as i64,
+        jet_outcome_of(error.line.map(|value| value as i64)),
+        jet_outcome_of(error.column.map(|value| value as i64)),
+        error.path,
+        error.reason,
+    )
 }
 
-fn jet_xml_error(error: crate::jet_xml_pull::Error) -> jet_std::XMLError {
-    jet_std::XMLError {
-        kind: jet_xml_reason(error.kind),
-        byte_offset: jet_outcome_of(error.line.map(|_| error.offset as i64)),
-        line: jet_outcome_of(error.line.map(|value| value as i64)),
-        column: jet_outcome_of(error.column.map(|value| value as i64)),
-        path: error.path,
-        reason: error.reason,
-    }
-}
-
-fn jet_xml_source_error(error: crate::jet_xml_pull::Error) -> jet_std::XMLError {
-    let offset = error.offset as i64;
-    let mut converted = jet_xml_error(error);
-    converted.byte_offset = Ok(offset);
-    converted
-}
-
-fn jet_xml_shape_error(reason: String) -> jet_std::XMLError {
-    jet_std::XMLError {
-        kind: jet_std::XMLReason::Shape,
-        byte_offset: Err(JetAbsent),
-        line: Err(JetAbsent),
-        column: Err(JetAbsent),
-        path: String::new(),
+fn jet_xml_shape_error(reason: String) -> jet_std::EncodingError {
+    jet_std::EncodingError::new(
+        jet_std::EncodingFormat::XML,
+        jet_std::EncodingErrorKind::Syntax,
+        0,
+        Err(JetAbsent),
+        Err(JetAbsent),
+        "",
         reason,
-    }
+    )
 }
 
 fn jet_xml_options(options: &jet_std::XMLParseOptions) -> crate::jet_xml_pull::ParseOptions {
@@ -152,7 +144,9 @@ fn jet_xml_options(options: &jet_std::XMLParseOptions) -> crate::jet_xml_pull::P
     let entities = match &options.entities {
         jet_std::XMLEntityPolicy::Preserve => crate::jet_xml_pull::EntityPolicy::Preserve,
         jet_std::XMLEntityPolicy::Reject => crate::jet_xml_pull::EntityPolicy::Reject,
-        jet_std::XMLEntityPolicy::Resolve(values) => crate::jet_xml_pull::EntityPolicy::Resolve(values.clone()),
+        jet_std::XMLEntityPolicy::Resolve(values) => {
+            crate::jet_xml_pull::EntityPolicy::Resolve(values.clone())
+        }
     };
     crate::jet_xml_pull::ParseOptions {
         entities,
@@ -169,30 +163,41 @@ fn jet_xml_options(options: &jet_std::XMLParseOptions) -> crate::jet_xml_pull::P
     }
 }
 
-fn jet_std_xml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::XMLError> {
-    crate::jet_xml_kernel::parse_document(text).map(jet_xml_to_data_tree).map_err(jet_xml_error)
+fn jet_std_xml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::EncodingError> {
+    crate::jet_xml_kernel::parse_document(text)
+        .map(jet_xml_to_data_tree)
+        .map_err(jet_xml_error)
 }
 
-fn jet_std_xml_parse_with(text: &String, options: &jet_std::XMLParseOptions) -> Result<jet_std::DataTree, jet_std::XMLError> {
+fn jet_std_xml_parse_with(
+    text: &String,
+    options: &jet_std::XMLParseOptions,
+) -> Result<jet_std::DataTree, jet_std::EncodingError> {
     crate::jet_xml_kernel::parse_document_with(text, &jet_xml_options(options))
         .map(jet_xml_to_data_tree)
         .map_err(jet_xml_error)
 }
 
-fn jet_std_xml_parse_bytes(bytes: &Vec<u8>, options: jet_std::XMLParseOptions) -> Result<jet_std::DataTree, jet_std::XMLError> {
+fn jet_std_xml_parse_bytes(
+    bytes: &Vec<u8>,
+    options: jet_std::XMLParseOptions,
+) -> Result<jet_std::DataTree, jet_std::EncodingError> {
     crate::jet_xml_kernel::parse_document_bytes_with(bytes, &jet_xml_options(&options))
         .map(jet_xml_to_data_tree)
-        .map_err(jet_xml_source_error)
+        .map_err(jet_xml_error)
 }
 
-fn jet_std_xml_render(d: &jet_std::DataTree) -> String {
-    jet_xml_from_data_tree(d)
-        .ok()
-        .and_then(|value| crate::jet_xml_kernel::render_document(&value).ok())
-        .unwrap_or_default()
+fn jet_std_xml_render(
+    d: &jet_std::DataTree,
+) -> Result<String, jet_std::EncodingError> {
+    let value = jet_xml_from_data_tree(d).map_err(jet_xml_shape_error)?;
+    crate::jet_xml_kernel::render_document(&value).map_err(jet_xml_error)
 }
 
-fn jet_std_xml_to_bytes(d: &jet_std::DataTree, options: jet_std::XMLRenderOptions) -> Result<Vec<u8>, jet_std::XMLError> {
+fn jet_std_xml_to_bytes(
+    d: &jet_std::DataTree,
+    options: jet_std::XMLRenderOptions,
+) -> Result<Vec<u8>, jet_std::EncodingError> {
     let value = jet_xml_from_data_tree(d).map_err(jet_xml_shape_error)?;
     crate::jet_xml_kernel::render_document_bytes(
         &value,
@@ -202,28 +207,41 @@ fn jet_std_xml_to_bytes(d: &jet_std::DataTree, options: jet_std::XMLRenderOption
     .map_err(jet_xml_error)
 }
 
-fn jet_std_xml_canonical(d: &jet_std::DataTree, options: &jet_std::XMLCanonical) -> Result<String, jet_std::XMLError> {
-    let value = jet_xml_from_data_tree(d).map_err(|reason| jet_std::XMLError {
-        kind: jet_std::XMLReason::Shape,
-        byte_offset: Err(JetAbsent),
-        line: Err(JetAbsent),
-        column: Err(JetAbsent),
-        path: String::new(),
-        reason,
-    })?;
+fn jet_enc_xml_to_string_shape<T: __jet_Encode>(
+    value: &T,
+    projection: &ShapeProjection,
+) -> Result<String, Vec<jet_std::FieldError>> {
+    if projection.kind != ShapeProjectionKind::Xml {
+        return Err(jet_std::FieldError::one("XML needs an XML shape projection"));
+    }
+    let projected = jet_std::jet_datatree_project(&value.jet_encode(), projection)?;
+    jet_std_xml_render(&projected).map_err(jet_xml_field_error)
+}
+
+fn jet_std_xml_canonical(
+    d: &jet_std::DataTree,
+    options: &jet_std::XMLCanonical,
+) -> Result<String, jet_std::EncodingError> {
+    let value = jet_xml_from_data_tree(d).map_err(jet_xml_shape_error)?;
     let mode = match options.mode {
         jet_std::XMLCanonicalMode::Inclusive11 => crate::jet_xml_pull::CanonicalMode::Inclusive11,
         jet_std::XMLCanonicalMode::Exclusive10 => crate::jet_xml_pull::CanonicalMode::Exclusive10,
     };
-    crate::jet_xml_kernel::canonical_document(&value, &crate::jet_xml_pull::CanonicalOptions {
-        mode,
-        comments: options.comments,
-        inclusive_prefixes: options.inclusive_prefixes.clone(),
-    }).map_err(jet_xml_error)
+    crate::jet_xml_kernel::canonical_document(
+        &value,
+        &crate::jet_xml_pull::CanonicalOptions {
+            mode,
+            comments: options.comments,
+            inclusive_prefixes: options.inclusive_prefixes.clone(),
+        },
+    )
+    .map_err(jet_xml_error)
 }
 
 // D-ENCXML-PROJECTION1=A: focused helpers + typed decode over the closed tree.
-fn jet_std_xml_root(document: &jet_std::DataTree) -> Result<jet_std::DataTree, jet_std::XMLError> {
+fn jet_std_xml_root(
+    document: &jet_std::DataTree,
+) -> Result<jet_std::DataTree, jet_std::EncodingError> {
     let value = jet_xml_from_data_tree(document).map_err(jet_xml_shape_error)?;
     crate::jet_xml_kernel::document_root(&value)
         .map(jet_xml_to_data_tree)
@@ -232,29 +250,42 @@ fn jet_std_xml_root(document: &jet_std::DataTree) -> Result<jet_std::DataTree, j
 
 fn jet_std_xml_expanded_name(
     node: &jet_std::DataTree,
-) -> Result<(String, JetOutcome<String, JetAbsent>, String, JetOutcome<String, JetAbsent>), jet_std::XMLError> {
+) -> Result<
+    (
+        String,
+        JetOutcome<String, JetAbsent>,
+        String,
+        JetOutcome<String, JetAbsent>,
+    ),
+    jet_std::EncodingError,
+> {
     let value = jet_xml_from_data_tree(node).map_err(jet_xml_shape_error)?;
     crate::jet_xml_kernel::expanded_name_parts(&value)
-        .map(|(raw, prefix, local, uri)| (raw, jet_outcome_of(prefix), local, jet_outcome_of(uri)))
+        .map(|(raw, prefix, local, uri)| {
+            (raw, jet_outcome_of(prefix), local, jet_outcome_of(uri))
+        })
         .map_err(jet_xml_error)
 }
 
 fn jet_std_xml_attribute(
     element: &jet_std::DataTree,
     name: &String,
-) -> Result<JetOutcome<String, JetAbsent>, jet_std::XMLError> {
+) -> Result<JetOutcome<String, JetAbsent>, jet_std::EncodingError> {
     let value = jet_xml_from_data_tree(element).map_err(jet_xml_shape_error)?;
     crate::jet_xml_kernel::lookup_attribute(&value, name)
         .map(jet_outcome_of)
         .map_err(jet_xml_error)
 }
 
-fn jet_std_xml_content(element: &jet_std::DataTree) -> Result<Vec<jet_std::DataTree>, jet_std::XMLError> {
+fn jet_std_xml_content(
+    element: &jet_std::DataTree,
+) -> Result<Vec<jet_std::DataTree>, jet_std::EncodingError> {
     let value = jet_xml_from_data_tree(element).map_err(jet_xml_shape_error)?;
     crate::jet_xml_kernel::element_content(&value)
         .map(|nodes| nodes.into_iter().map(jet_xml_to_data_tree).collect())
         .map_err(jet_xml_error)
 }
+
 
 fn jet_decode_path(path: &str) -> String {
     if path == "$" {
@@ -266,46 +297,36 @@ fn jet_decode_path(path: &str) -> String {
     }
 }
 
-fn jet_xml_decode_source_error(error: crate::jet_xml_pull::Error) -> Vec<jet_std::FieldError> {
+fn jet_xml_field_error(error: jet_std::EncodingError) -> Vec<jet_std::FieldError> {
+    let mut location = format!(" at byte {}", error.byte_offset);
+    match (error.line, error.column) {
+        (Ok(line), Ok(column)) => {
+            location.push_str(&format!(" (line {line}, column {column})"));
+        }
+        (Ok(line), Err(_)) => {
+            location.push_str(&format!(" (line {line})"));
+        }
+        (Err(_), Ok(column)) => {
+            location.push_str(&format!(" (column {column})"));
+        }
+        (Err(_), Err(_)) => {}
+    }
     jet_std::FieldError::at(
         jet_decode_path(&error.path),
-        format!("XML {:?}: {}", jet_xml_reason(error.kind), error.reason),
+        format!("XML {:?}{location}: {}", error.kind, error.reason),
     )
 }
 
-fn jet_xml_decode_value_error(error: jet_std::XMLError) -> Vec<jet_std::FieldError> {
-    jet_std::FieldError::at(
-        jet_decode_path(&error.path),
-        format!("XML {:?}: {}", error.kind, error.reason),
-    )
+fn jet_xml_decode_source_error(error: crate::jet_xml_pull::Error) -> Vec<jet_std::FieldError> {
+    jet_xml_field_error(jet_xml_error(error))
+}
+
+fn jet_xml_decode_value_error(error: jet_std::EncodingError) -> Vec<jet_std::FieldError> {
+    jet_xml_field_error(error)
 }
 
 fn jet_xml_decode_shape_error(reason: String) -> Vec<jet_std::FieldError> {
     jet_std::FieldError::one(reason)
-}
-
-fn jet_enc_xml_decode_projected<T: __jet_Decode>(projected: &jet_std::DataTree) -> Result<T, Vec<jet_std::FieldError>> {
-    match T::jet_decode(projected) {
-        Ok(value) => Ok(value),
-        Err(primary) => {
-            if let jet_std::DataTree::Object(entries) = projected {
-                if let Some((_, jet_std::DataTree::Text(text))) =
-                    entries.iter().find(|(key, _)| key == "$text")
-                {
-                    return T::jet_decode(&jet_std::DataTree::Text(text.clone())).map_err(|secondary| {
-                        if secondary.first().is_some_and(|error| error.path.is_empty())
-                            && primary.first().is_some_and(|error| !error.path.is_empty())
-                        {
-                            primary
-                        } else {
-                            secondary
-                        }
-                    });
-                }
-            }
-            Err(primary)
-        }
-    }
 }
 
 fn jet_enc_xml_decode<T: __jet_Decode>(
@@ -316,7 +337,7 @@ fn jet_enc_xml_decode<T: __jet_Decode>(
     let value = jet_xml_from_data_tree(&document).map_err(jet_xml_decode_shape_error)?;
     let projected = crate::jet_xml_kernel::project_document_for_decode(&value)
         .map_err(jet_xml_decode_source_error)?;
-    jet_enc_xml_decode_projected(&jet_xml_to_data_tree(projected))
+    T::jet_decode(&jet_xml_to_data_tree(projected))
 }
 
 fn jet_enc_xml_decode_bytes<T: __jet_Decode>(
@@ -327,30 +348,66 @@ fn jet_enc_xml_decode_bytes<T: __jet_Decode>(
     let value = jet_xml_from_data_tree(&document).map_err(jet_xml_decode_shape_error)?;
     let projected = crate::jet_xml_kernel::project_document_for_decode(&value)
         .map_err(jet_xml_decode_source_error)?;
-    jet_enc_xml_decode_projected(&jet_xml_to_data_tree(projected))
+    T::jet_decode(&jet_xml_to_data_tree(projected))
 }
 
-fn jet_cbor_value(value: &jet_std::DataTree) -> crate::jet_cbor_kernel::Value {
+fn jet_cbor_value_error(
+    path: &str,
+    reason: impl Into<String>,
+) -> jet_std::EncodingError {
+    jet_std::EncodingError::new(
+        jet_std::EncodingFormat::CBOR,
+        jet_std::EncodingErrorKind::Unsupported,
+        0,
+        Err(JetAbsent),
+        Err(JetAbsent),
+        path,
+        reason,
+    )
+}
+
+fn jet_cbor_value_at(
+    value: &jet_std::DataTree,
+    path: &str,
+) -> Result<crate::jet_cbor_kernel::Value, jet_std::EncodingError> {
     match value {
-        jet_std::DataTree::Null => crate::jet_cbor_kernel::Value::Null,
-        jet_std::DataTree::Bool(value) => crate::jet_cbor_kernel::Value::Bool(*value),
-        jet_std::DataTree::Int(value) => crate::jet_cbor_kernel::Value::Int(*value),
-        jet_std::DataTree::Float(value) => crate::jet_cbor_kernel::Value::Float(*value),
-        jet_std::DataTree::Number(_) | jet_std::DataTree::TypedText(_) => {
-            unreachable!("internal JSON carrier escaped typed decode")
+        jet_std::DataTree::Null => Ok(crate::jet_cbor_kernel::Value::Null),
+        jet_std::DataTree::Bool(value) => Ok(crate::jet_cbor_kernel::Value::Bool(*value)),
+        jet_std::DataTree::Int(value) => Ok(crate::jet_cbor_kernel::Value::Int(*value)),
+        jet_std::DataTree::Float(value) => Ok(crate::jet_cbor_kernel::Value::Float(*value)),
+        jet_std::DataTree::Number(text) => Err(jet_cbor_value_error(
+            path,
+            format!("JSON number carrier {text:?} is not a CBOR value"),
+        )),
+        jet_std::DataTree::TypedText(text) => Err(jet_cbor_value_error(
+            path,
+            format!("typed text carrier {text:?} is not a CBOR value"),
+        )),
+        jet_std::DataTree::Text(value) => Ok(crate::jet_cbor_kernel::Value::Text(value.clone())),
+        jet_std::DataTree::Bytes(value) => Ok(crate::jet_cbor_kernel::Value::Bytes(value.clone())),
+        jet_std::DataTree::Array(values) => {
+            let mut output = Vec::with_capacity(values.len());
+            for (index, value) in values.iter().enumerate() {
+                let child_path = format!("{path}[{index}]");
+                output.push(jet_cbor_value_at(value, &child_path)?);
+            }
+            Ok(crate::jet_cbor_kernel::Value::Array(output))
         }
-        jet_std::DataTree::Text(value) => crate::jet_cbor_kernel::Value::Text(value.clone()),
-        jet_std::DataTree::Bytes(value) => crate::jet_cbor_kernel::Value::Bytes(value.clone()),
-        jet_std::DataTree::Array(values) => crate::jet_cbor_kernel::Value::Array(
-            values.iter().map(jet_cbor_value).collect(),
-        ),
-        jet_std::DataTree::Object(entries) => crate::jet_cbor_kernel::Value::Object(
-            entries
-                .iter()
-                .map(|(key, value)| (key.clone(), jet_cbor_value(value)))
-                .collect(),
-        ),
+        jet_std::DataTree::Object(entries) => {
+            let mut output = Vec::with_capacity(entries.len());
+            for (key, value) in entries {
+                let child_path = format!("{path}[{key:?}]");
+                output.push((key.clone(), jet_cbor_value_at(value, &child_path)?));
+            }
+            Ok(crate::jet_cbor_kernel::Value::Object(output))
+        }
     }
+}
+
+fn jet_cbor_value(
+    value: &jet_std::DataTree,
+) -> Result<crate::jet_cbor_kernel::Value, jet_std::EncodingError> {
+    jet_cbor_value_at(value, "$")
 }
 
 fn jet_cbor_tree(value: crate::jet_cbor_kernel::Value) -> jet_std::DataTree {
@@ -382,7 +439,7 @@ fn jet_cbor_options(options: &jet_std::CBOROptions) -> crate::jet_cbor_kernel::O
     }
 }
 
-fn jet_cbor_error(error: crate::jet_cbor_kernel::Error) -> jet_std::CBORError {
+fn jet_cbor_error(error: crate::jet_cbor_kernel::Error) -> jet_std::EncodingError {
     let crate::jet_cbor_kernel::Error {
         kind,
         byte_offset,
@@ -390,32 +447,80 @@ fn jet_cbor_error(error: crate::jet_cbor_kernel::Error) -> jet_std::CBORError {
         reason,
     } = error;
     let kind = match kind {
-        crate::jet_cbor_kernel::ErrorKind::Syntax => jet_std::CBORErrorKind::Syntax,
-        crate::jet_cbor_kernel::ErrorKind::Truncated => jet_std::CBORErrorKind::Truncated,
-        crate::jet_cbor_kernel::ErrorKind::Unsupported => jet_std::CBORErrorKind::Unsupported,
-        crate::jet_cbor_kernel::ErrorKind::Limit => jet_std::CBORErrorKind::Limit,
-        crate::jet_cbor_kernel::ErrorKind::TypeMismatch => jet_std::CBORErrorKind::TypeMismatch,
-        crate::jet_cbor_kernel::ErrorKind::TrailingData => jet_std::CBORErrorKind::TrailingData,
-        crate::jet_cbor_kernel::ErrorKind::NonCanonical => jet_std::CBORErrorKind::NonCanonical,
+        crate::jet_cbor_kernel::ErrorKind::Syntax => jet_std::EncodingErrorKind::Syntax,
+        crate::jet_cbor_kernel::ErrorKind::Truncated => jet_std::EncodingErrorKind::Truncated,
+        crate::jet_cbor_kernel::ErrorKind::Unsupported
+        | crate::jet_cbor_kernel::ErrorKind::TypeMismatch
+        | crate::jet_cbor_kernel::ErrorKind::NonCanonical => {
+            jet_std::EncodingErrorKind::Unsupported
+        }
+        crate::jet_cbor_kernel::ErrorKind::Limit => jet_std::EncodingErrorKind::Limit,
+        crate::jet_cbor_kernel::ErrorKind::TrailingData => jet_std::EncodingErrorKind::Syntax,
     };
-    jet_std::CBORError {
+    jet_std::EncodingError::new(
+        jet_std::EncodingFormat::CBOR,
         kind,
-        byte_offset: byte_offset as i64,
+        byte_offset as i64,
+        Err(JetAbsent),
+        Err(JetAbsent),
         path,
         reason,
-    }
+    )
 }
 
-fn jet_enc_cbor_to_bytes<T: __jet_Encode>(value: &T) -> Result<Vec<u8>, jet_std::CBORError> {
+fn jet_cbor_field_error(error: jet_std::EncodingError) -> Vec<jet_std::FieldError> {
+    jet_std::FieldError::at(
+        jet_decode_path(&error.path),
+        format!(
+            "CBOR {:?} at byte {}: {}",
+            error.kind, error.byte_offset, error.reason
+        ),
+    )
+}
+
+fn jet_enc_cbor_to_bytes<T: __jet_Encode>(
+    value: &T,
+) -> Result<Vec<u8>, jet_std::EncodingError> {
     let tree = value.jet_encode();
-    crate::jet_cbor_kernel::encode(&jet_cbor_value(&tree), false).map_err(jet_cbor_error)
+    let value = jet_cbor_value(&tree)?;
+    crate::jet_cbor_kernel::encode(&value, false).map_err(jet_cbor_error)
+}
+
+fn jet_enc_cbor_to_bytes_shape<T: __jet_Encode>(
+    value: &T,
+    projection: &ShapeProjection,
+) -> Result<Vec<u8>, Vec<jet_std::FieldError>> {
+    jet_enc_cbor_to_bytes_shape_with(value, projection, false)
+}
+
+fn jet_enc_cbor_to_bytes_shape_canonical<T: __jet_Encode>(
+    value: &T,
+    projection: &ShapeProjection,
+) -> Result<Vec<u8>, Vec<jet_std::FieldError>> {
+    jet_enc_cbor_to_bytes_shape_with(value, projection, true)
+}
+
+fn jet_enc_cbor_to_bytes_shape_with<T: __jet_Encode>(
+    value: &T,
+    projection: &ShapeProjection,
+    canonical: bool,
+) -> Result<Vec<u8>, Vec<jet_std::FieldError>> {
+    if projection.kind != ShapeProjectionKind::Cbor {
+        return Err(jet_std::FieldError::one("CBOR needs a CBOR shape projection"));
+    }
+    let projected = jet_std::jet_datatree_project(&value.jet_encode(), projection)?;
+    let value = jet_cbor_value(&projected).map_err(jet_cbor_field_error)?;
+    crate::jet_cbor_kernel::encode(&value, canonical)
+        .map_err(jet_cbor_error)
+        .map_err(jet_cbor_field_error)
 }
 
 fn jet_enc_cbor_to_bytes_canonical<T: __jet_Encode>(
     value: &T,
-) -> Result<Vec<u8>, jet_std::CBORError> {
+) -> Result<Vec<u8>, jet_std::EncodingError> {
     let tree = value.jet_encode();
-    crate::jet_cbor_kernel::encode(&jet_cbor_value(&tree), true).map_err(jet_cbor_error)
+    let value = jet_cbor_value(&tree)?;
+    crate::jet_cbor_kernel::encode(&value, true).map_err(jet_cbor_error)
 }
 
 fn jet_enc_cbor_encode(value: &jet_std::DataTree) -> Vec<u8> {
@@ -433,7 +538,7 @@ fn jet_enc_cbor_parse_with(
     bytes: &Vec<u8>,
     options: jet_std::CBOROptions,
     allow_bytes: bool,
-) -> Result<jet_std::DataTree, jet_std::CBORError> {
+) -> Result<jet_std::DataTree, jet_std::EncodingError> {
     crate::jet_cbor_kernel::decode(bytes, &jet_cbor_options(&options), allow_bytes)
         .map(jet_cbor_tree)
         .map_err(jet_cbor_error)
@@ -442,18 +547,12 @@ fn jet_enc_cbor_parse_with(
 fn jet_enc_cbor_parse(
     bytes: &Vec<u8>,
     options: jet_std::CBOROptions,
-) -> Result<jet_std::DataTree, jet_std::CBORError> {
+) -> Result<jet_std::DataTree, jet_std::EncodingError> {
     jet_enc_cbor_parse_with(bytes, options, false)
 }
 
-fn jet_cbor_decode_source_error(error: jet_std::CBORError) -> Vec<jet_std::FieldError> {
-    jet_std::FieldError::at(
-        jet_decode_path(&error.path),
-        format!(
-            "CBOR {:?} at byte {}: {}",
-            error.kind, error.byte_offset, error.reason
-        ),
-    )
+fn jet_cbor_decode_source_error(error: jet_std::EncodingError) -> Vec<jet_std::FieldError> {
+    jet_cbor_field_error(error)
 }
 
 fn jet_enc_cbor_decode<T: __jet_Decode>(

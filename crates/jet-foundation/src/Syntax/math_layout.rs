@@ -1,3 +1,20 @@
+/// D-PLACE1=A / D-ATOMIC-WIDTH1=A (ratified 2026-09-04/06): the one safe
+/// scalar synchronization family. `Atomic<T>` accepts the closed scalar set
+/// `Bool`, `I32`, `U32`, `I64`, `Int`, and `U64`. Ordinary operations are
+/// sequentially consistent; `publish`/`observe` are the intent-named
+/// release/acquire pair. No operation accepts a memory-order argument.
+pub const TYPE_ATOMIC: &str = "Atomic";
+pub const ATOMIC_SCALAR_TYPES: &[&str] = &["Bool", "I32", "U32", "I64", "Int", "U64"];
+pub const ATOMIC_METHODS: &[&str] =
+    &["load", "store", "add", "try_add", "compare_exchange", "publish", "observe"];
+
+/// D-LAYOUT-ALIGN1=A (ratified 2026-09-06): alignment remains inside the
+/// existing `#Layout(c, align(N))` family. `target` is the contextual expert
+/// mode (`align(target, N)`); portable declarations use the profile-intersection
+/// facts and the language baseline rather than a backend-local numeric rule.
+pub const LAYOUT_ALIGN_TARGET: &str = "target";
+pub const LAYOUT_PORTABLE_ALIGNMENT_BASELINE_MAX: u64 = 1 << 20;
+
 /// D-SIMD1/D-SIMD2/D-SIMD3 (ratified 2026-06-24/2026-08-27): the built-in
 /// portable SIMD lane types. The family is named by scalar width and lane
 /// count: `F32x4`/`F64x2` are the existing 128-bit forms and
@@ -208,6 +225,9 @@ pub const WATCHER_MODULE: &str = "core.watcher";
 pub const TYPE_WATCH_HANDLE: &str = "WatchHandle";
 pub const TYPE_WATCH_SET: &str = "WatchSet";
 pub const TYPE_WATCH_EVENT: &str = "WatchEvent";
+/// D-FFI-CALLBACK2=A: managed callback event and consuming registration names.
+pub const TYPE_FFI_CALLBACK_EVENT: &str = "FfiCallbackEvent";
+pub const TYPE_FFI_CALLBACK_REGISTRATION: &str = "FfiCallbackRegistration";
 /// D-HONESTNUM1=A / D-TYPE2-UNCERT1=A (ratified 2026-08-06): the science
 /// measurement type name and the measured knowledge grade.
 pub const TYPE_MEASUREMENT: &str = "Measurement";
@@ -247,6 +267,9 @@ pub const RETIRED_TYPE_BITS: &str = concat!("Bit", "Set");
 pub const RETIRED_TYPE_BYTES: &str = concat!("Byte", "Buffer");
 /// D-ITERTOOLS1=A: lazy adapter view; materialize with `to_list`/`collect`/reducers.
 pub const TYPE_ITER: &str = "Iter";
+/// D-FOUND-VIEW1=A: borrowed text/byte/mapped-file iteration has an explicit
+/// lifetime-bearing carrier; it cannot reuse `Iter<T>`'s `'static` box.
+pub const TYPE_VIEW_ITER: &str = "ViewIter";
 /// D-LISTREMOVE1/F: selector for the two List.remove meanings.  The default
 /// is `.Val`; `.Slot` opts into positional removal.
 pub const TYPE_REMOVE_BY: &str = "RemoveBy";
@@ -287,7 +310,7 @@ pub const IO_OPERATION_VARIANTS: &[&str] = &[
 pub const IO_CONTEXT_FIELDS: &[&str] = &["operation", "resource", "os_code", "cause"];
 pub const TYPE_UTF8_ERROR: &str = "UTF8Error";
 pub const TYPE_JSON: &str = "JSON";
-pub const TYPE_JSON_ERROR: &str = "JSONError";
+pub const TYPE_ENCODING_ERROR: &str = "EncodingError";
 
 /// D-ENC-DYN1=A+ (ratified 2026-06-25) + D-SERDE13=B (ratified 2026-07-11): the
 /// one dynamic encoding value every format's `parse` returns and every hand codec
@@ -342,6 +365,12 @@ pub fn is_db_value_variant(variant: &str) -> bool {
     matches!(variant, "Null" | "Int" | "Float" | "Text" | "Bool" | "Blob")
 }
 
+/// M2 / D-SHARED-REVISION1=A: opaque owner/revision ticket carrying an
+/// ordinary snapshot projection.
+pub const TYPE_SHARED_SNAPSHOT: &str = "SharedSnapshot";
+/// D-SHARED-REVISION1=A: typed failures for owner mismatch and generation
+/// exhaustion. A stale ticket is the ordinary `false` outcome.
+pub const TYPE_SHARED_REVISION_ERROR: &str = "SharedRevisionError";
 /// M2: shared handle type (Arc equivalent); auto-cloned across boundaries.
 pub const TYPE_SHARED: &str = "Shared";
 /// D-SHAREDGUARD2=A: named expert lock token returned by Shared.guard_*.
@@ -381,9 +410,6 @@ pub const KW_NEXT: &str = "next";
 /// it is not accepted as a loop-control alias.
 pub const FOREIGN_CONTINUE: &str = "continue";
 
-/// S24 / D-IF1 (ratified 2026-06-18): `if` is the one branching keyword.
-pub const KW_SWITCH: &str = "if";
-
 /// D-ARROW-UNIFY1=B (ratified 2026-08-19): one arrow for callable results,
 /// function types, lambdas, computed fields, conversions, task bodies, arms,
 /// and loop bodies.
@@ -394,9 +420,7 @@ pub const OP_UNIFIED_ARROW: &str = "->";
 pub const LIT_TRUE: &str = "true";
 pub const LIT_FALSE: &str = "false";
 
-/// M1 (docs/spec/roadmap.md): arithmetic operators. `+ - * / ^` on Int and
-/// Float; `% & ~| << >>` on Int only. No `+` on String (S8: interpolate
-/// instead).
+/// M1: arithmetic operator spellings. Sema owns operand and result rules.
 pub const OP_PLUS: &str = "+";
 pub const OP_MINUS: &str = "-";
 pub const OP_STAR: &str = "*";
@@ -639,6 +663,10 @@ pub const BINDINGS_ROOT_SUBDIR: &str = "bindings"; // D-FFI-UNIFY1
 pub const FOREIGN_WHILE: &str = "while";
 pub const FOREIGN_FOR: &str = "for";
 pub const FOREIGN_DO: &str = "do";
+/// D-S14-PAUSE: `repeat` and `until` are foreign loop words; they are
+/// recognized only long enough to report an ordinary current-syntax error.
+pub const FOREIGN_REPEAT: &str = "repeat";
+pub const FOREIGN_UNTIL: &str = "until";
 pub const FOREIGN_TRY: &str = "try";
 /// D-S14-PAUSE: foreign declaration and binding words are diagnostic-only;
 /// they never enter Jet grammar.
@@ -656,7 +684,6 @@ pub const FOREIGN_TEXT: &str = "Text";
 
 /// S24: `match` recognized only for a teaching error naming `when`.
 pub const FOREIGN_MATCH: &str = "match";
-
 /// S24 (D-SG1): `switch` recognized only for a teaching error naming `when`
 /// (the keyword was `switch` before the 2026-06-15 rename).
 pub const FOREIGN_SWITCH: &str = "switch";

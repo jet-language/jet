@@ -1,0 +1,53 @@
+// jet-ffi-descriptor=jet-ffi-descriptor-v1;language=C;surface=Namespace;status=Active;runtime=DirectCAbi;stub=CHeader;contract=jet-ffi-descriptor-v1;version=1;calling=C;layout=CAbi;ownership=SignatureDeclared;errors=JetBoundary;callbacks=ReentrantThreadSafe;async=JetTask;tasks=RejectCapturedState;safety=GeneratedWrapper;integer=Int;float=Float;bool=Bool;char=Char;string=String;effect=FFI;provider=System;cache=jet;type-stub=None;capabilities=[TypedStub, SafeWrapper, OwnershipConversion, LayoutValidation, ErrorConversion, CallbackValidation, CacheProvenance, PackageProvider, UnsafeRawEscape];bridge=
+// jet-ffi-boundary=jet-ffi-boundary-v1;language=c;library=harfbuzz;disposition=supported;source-authority=foreign-until-accepted;digest=b46ca96dc71742a2175fd0fcf4e6da8d340366073352c3180ec8da02a43b3475
+pub struct HbBlob {}
+pub struct HbBuffer {}
+pub struct HbFace {}
+pub struct HbFont {}
+
+#Layout(c)
+pub struct HbFeature {
+    tag_field: U32,
+    value: U32,
+    start: U32,
+    end: U32,
+}
+
+#Layout(c)
+pub struct HbGlyphInfo {
+    codepoint: U32,
+    mask: U32,
+    cluster: U32,
+    var1: U32,
+    var2: U32,
+}
+
+#Layout(c)
+pub struct HbGlyphPosition {
+    x_advance: I32,
+    y_advance: I32,
+    x_offset: I32,
+    y_offset: I32,
+    var: U32,
+}
+
+#Bindgen module c.harfbuzz.__bindgen__ {
+    #Close(hb_blob_destroy)
+fn hb_blob_create_from_file(file_name: String) HbBlob = "hb_blob_create_from_file"
+    #Close(hb_face_destroy)
+fn hb_face_create(blob: &HbBlob, index: Int) HbFace = "hb_face_create"
+    #Close(hb_font_destroy)
+fn hb_font_create(face: &HbFace) HbFont = "hb_font_create"
+    fn hb_font_set_scale(font: &HbFont, x_scale: Int, y_scale: Int) = "hb_font_set_scale"
+    #Close(hb_buffer_destroy)
+fn hb_buffer_create() HbBuffer = "hb_buffer_create"
+    fn hb_buffer_guess_segment_properties(buffer: &HbBuffer) = "hb_buffer_guess_segment_properties"
+    fn hb_shape(font: &HbFont, buffer: &HbBuffer, features: [HbFeature], num_features: Int) = "hb_shape"
+    fn hb_buffer_get_length(buffer: &HbBuffer) Int = "hb_buffer_get_length"
+    fn hb_buffer_get_glyph_infos(buffer: &HbBuffer, length: &U32) [HbGlyphInfo] = "hb_buffer_get_glyph_infos"
+    fn hb_buffer_get_glyph_positions(buffer: &HbBuffer, length: &U32) [HbGlyphPosition] = "hb_buffer_get_glyph_positions"
+    fn hb_font_destroy(font: ^HbFont) = "hb_font_destroy"
+    fn hb_face_destroy(face: ^HbFace) = "hb_face_destroy"
+    fn hb_blob_destroy(blob: ^HbBlob) = "hb_blob_destroy"
+    fn hb_buffer_destroy(buffer: ^HbBuffer) = "hb_buffer_destroy"
+}

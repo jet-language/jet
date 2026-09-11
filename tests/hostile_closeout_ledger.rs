@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const LEDGER: &str = include_str!("../docs/proposals/dogfood-jet-experience-5-of-5.md");
+const LEDGER: &str = include_str!("../docs/audits/dogfood-jet-experience-5-of-5.md");
 
 struct EvidenceFile {
     path: &'static str,

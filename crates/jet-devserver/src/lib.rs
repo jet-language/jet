@@ -12,19 +12,57 @@ use std::sync::{Arc, OnceLock, RwLock};
 use std::thread;
 use std::time::Duration;
 
+/// The devserver re-exports the exact Foundation protocol source exposed by
+/// the compiler's Prelude path, then includes the same panel sources. Hosts
+/// consume this module for projection and marshalling; it is not a second
+/// semantic schema.
+pub mod Devtools {
+    pub use jet_foundation::Devtools::*;
+    include!("../../jet-codegen/src/Prelude/Core/DevtoolsPanelCatalog.rs");
+    include!("../../jet-codegen/src/Prelude/Core/DevtoolsDatabasePanel.rs");
+    include!("../../jet-codegen/src/Prelude/Core/DevtoolsJobsPanel.rs");
+    include!("../../jet-codegen/src/Prelude/Core/DevtoolsRequestPanel.rs");
+    include!("../../jet-codegen/src/Prelude/Core/DevtoolsTelemetryPanel.rs");
+    include!("../../jet-codegen/src/Prelude/Core/DevtoolsTopologyPanel.rs");
+
+    pub mod panel {
+        use super::{jet_devtools_publish_event, JetDevtoolsEvent, JetDevtoolsPayload, JetDevtoolsValue};
+
+        #[derive(Clone, Debug, Default, Eq, PartialEq)]
+        pub struct JetUiNode;
+
+        include!("../../jet-codegen/src/Prelude/Core/DevtoolsPanel.rs");
+    }
+
+    pub use panel::{jet_devtools_publish, JetDevtoolsPanel, JetDevtoolsPublishValue};
+}
+
+pub mod BrowserHost;
 pub mod BrowserTrace;
 pub mod Canvas;
+pub mod CapturePolicy;
+pub mod EditorHost;
 pub mod LiveInspect;
+pub mod NativeOverlayAdapter;
+pub mod NativeOverlayHost;
+pub mod NativeSwap;
+pub mod PausedEvaluate;
 pub mod Session;
+pub mod SessionRecording;
+pub mod TerminalHost;
+pub mod TerminalStyleReload;
 pub mod WatchService;
+pub mod WebErrorPage;
 pub mod WebHost;
+pub mod WebModuleSwap;
 
 pub use Session::ResidentDevSession;
 
 pub use WatchService::{
-    any_stamp_changed, within_budget, ChangeKind, HotReplaceTxn, InvalidationReceipt, PersistEntry,
-    PersistOutcome, PersistStore, RootKind, SessionSnapshot, WatchGraph, WatchSession,
-    EDIT_TO_VISIBLE_BUDGET_MS,
+    any_stamp_changed, within_budget, ChangeKind, DevWatchEntry, HotReplaceTxn,
+    InvalidationReceipt, PersistEntry, PersistOutcome, PersistStore, RootKind, SessionSnapshot,
+    WatchGraph, WatchSession, EDIT_TO_VISIBLE_BUDGET_MS, WATCH_COALESCE_MS,
+    WATCH_POLL_INTERVAL_MS,
 };
 
 pub const MAX_REQUEST_BODY_BYTES: usize = 1024 * 1024;

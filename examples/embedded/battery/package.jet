@@ -1,0 +1,22 @@
+// Hosted execution is the replay tier. Override the target at build time for
+// board.sensor_v1 once the toolchain and target-provider gates are available.
+name: "embedded_battery"
+version: "0.1.0"
+edition: "2026"
+packages: {
+    embedded_battery: executable,
+}
+deps: {
+    embedded: "0.1.0",
+}
+target: "hosted"
+runtime: "hosted"
+authority: {
+    holds: {
+        allow: [IO, Mem.Alloc],
+    }
+}
+build: {
+    release: Build{ optimize: full },
+    debug: Build{ optimize: none, debug_info: true },
+}

@@ -14,7 +14,7 @@ The [executable lease recovery example](jetpack/executable-lease-recovery.md)
 shows the read-only audit and explicit Hangar recovery boundary for a stale
 process-tree lease.
 
-For the complete new-project workflow, use the [first-hour guide](../docs/first-hour.md).
+For the complete new-project workflow, use the [first-hour guide](../docs/spec/guides/first-hour.md).
 The explicit path above is the standalone-example form.
 
 ## Short path first (D-EXAMPLES-SHORTPATH1=A)
@@ -100,6 +100,6 @@ Suggested learning order:
 | `concurrency/` | tasks, channels, select, race/cancel, deadlines, scheduler |
 | `crypto/` | envelope, signing, key migration |
 | `ui/` | view tree, styles, component kit, motion, a11y, reactive TUI |
-| `web/` | hybrid JS DOM + Wasm compute — see `docs/sidequests/web-backend-wasm.md` for the full example index, build commands, and unsupported-breadth list |
+| `web/` | hybrid JS DOM + Wasm compute — see `docs/spec/reference/web-backend-wasm.md` for the full example index, build commands, and unsupported-breadth list |
 | `lowlevel/` | ffi, c layout, simd, freestanding, MMIO board writes, cross-compile |
 | `tooling/` | tests, measurement, debug, property tests, build profiles |

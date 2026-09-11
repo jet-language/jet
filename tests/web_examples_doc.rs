@@ -11,7 +11,7 @@ fn web_examples_are_documented_and_have_expected_outputs() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let web_dir = repo.join("examples/features/web");
     let expected_dir = repo.join("examples/features/expected/web");
-    let doc = fs::read_to_string(repo.join("docs/sidequests/web-backend-wasm.md"))
+    let doc = fs::read_to_string(repo.join("docs/spec/reference/web-backend-wasm.md"))
         .expect("web backend doc");
 
     let mut jets: Vec<_> = fs::read_dir(&web_dir)
@@ -28,7 +28,7 @@ fn web_examples_are_documented_and_have_expected_outputs() {
         let name = jet.file_name().unwrap().to_str().unwrap();
         assert!(
             doc.contains(name),
-            "{name} missing from docs/sidequests/web-backend-wasm.md"
+            "{name} missing from docs/spec/reference/web-backend-wasm.md"
         );
 
         let stem = jet.file_stem().unwrap().to_str().unwrap();

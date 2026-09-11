@@ -115,14 +115,32 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
             .iter()
             .map(|function| function.jet.clone())
             .collect(),
+        provenance: {
+            let mut provenance = format!(
+                "schema=jet-perl-bind-v1\nsha256={}\nperl={}\nscript={}\nworker={}\n",
+                crate::SHA256::sha256_hex(&identity),
+                perl.display(),
+                script.display(),
+                worker.display()
+            );
+            crate::ForeignBridge::append_boundary_for_artifact(
+                &mut provenance,
+                *crate::AST::binder_descriptor(crate::AST::ForeignLanguage::Perl)
+                    .ok_or_else(|| BindError::Source("Perl binder descriptor is not registered".into()))?,
+                lib,
+                &script,
+                &archive,
+                format!(
+                    "perl={};cc={};ar={}",
+                    perl.display(),
+                    crate::ForeignBridge::tool_identity("cc"),
+                    crate::ForeignBridge::tool_identity("ar")
+                ),
+            )
+            .map_err(BindError::IO)?;
+            provenance
+        },
         archive,
-        provenance: format!(
-            "schema=jet-perl-bind-v1\nsha256={}\nperl={}\nscript={}\nworker={}\n",
-            crate::SHA256::sha256_hex(&identity),
-            perl.display(),
-            script.display(),
-            worker.display()
-        ),
     };
     let _ = std::fs::remove_dir_all(&build);
     Ok(result)

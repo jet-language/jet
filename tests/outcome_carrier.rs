@@ -42,12 +42,25 @@ fn run_jet(name: &str, src: &str) -> String {
                 "{name} failed the front end:\n{}",
                 jet::render_diagnostics(path, &src, &diags)
             );
-            let program = jet::Codegen::TIR::lower_jit_program(&bundle)
-                .unwrap_or_else(|| panic!("{name} must lower for the interpreter"));
-            let mut sink = jet::Comptime::DevSink::default();
-            jet::Codegen::TIR::run_named_func(&program, "run", Vec::new(), &mut sink)
-                .unwrap_or_else(|diag| panic!("{name} failed on the interpreter: {diag:?}"));
-            sink.stdout
+            match common::run_interpreter_checked_bundle(
+                &bundle,
+                true,
+                jet::Interpreter::InterpreterInvocation::RunInterpret,
+                &common::development_policy(),
+            ) {
+                jet::Interpreter::RunOutcome::Ran {
+                    stdout,
+                    stderr,
+                    exit_code,
+                } => {
+                    assert_eq!(exit_code, 0, "{name} failed on the interpreter: {stderr}");
+                    assert!(stderr.is_empty(), "{name} emitted diagnostics: {stderr}");
+                    stdout
+                }
+                jet::Interpreter::RunOutcome::Problems(diagnostics) => {
+                    panic!("{name} failed on the interpreter: {diagnostics:?}");
+                }
+            }
         })
         .expect("spawn the interpreter thread")
         .join()
@@ -346,7 +359,12 @@ fn run() !Err {
         "interpreter Err fixture should type-check: {diagnostics:?}"
     );
 
-    match jet::Interpreter::run_checked(&bundle, false) {
+    match common::run_interpreter_checked_bundle(
+        &bundle,
+        false,
+        jet::Interpreter::InterpreterInvocation::RunInterpret,
+        &common::development_policy(),
+    ) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,

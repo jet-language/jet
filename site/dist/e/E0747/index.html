@@ -37,40 +37,31 @@
 <p class="diag-copy fix" data-registry-field="fix">Pass a callback within the bound (a `fn … -[]&gt;` for a pure parameter), or widen the parameter&#39;s effect bound.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0747</code>: <code>tests/ui/crypto_expert_nonce_callback_bound_precedence.stderr</code>.</p>
-<pre class="diag">Error [E0112]: `transform` wants fn(Int) Int -[]&gt; for argument 2, but this is fn(n: Int) Int
+<pre class="diag">Error [E0112]: `transform` wants fn(Int) Int -[]&gt; for argument 2, but this is fn(Int) Int
   --&gt; tests/ui/crypto_expert_nonce_callback_bound_precedence.jet:12:28
     |
  12 |     r :: transform([1, 2], noisy)
     |                            ^^^^^
- Why: every argument must match its parameter&#39;s type
- Fix: use fn(Int) Int -[]&gt; here
+ Why: Every argument must match its parameter&#39;s type
+ Fix: Use fn(Int) Int -[]&gt; here
 More: jet-lang.dev/e/E0112
 
-Error [E0112]: `transform` wants fn(Int) Int -[]&gt; for argument 2, but this is fn(n: Int) Int
-  --&gt; tests/ui/crypto_expert_nonce_callback_bound_precedence.jet:12:28
-    |
- 12 |     r :: transform([1, 2], noisy)
-    |                            ^^^^^
- Why: every argument must match its parameter&#39;s type
- Fix: use fn(Int) Int -[]&gt; here
-More: jet-lang.dev/e/E0112
-
-Error [E2402]: `?` can&#39;t convert `CryptoError` into `Err` — no declared conversion exists
+Error [E2402]: This implicit fallible call can&#39;t convert `CryptoError` into `Err` — no declared conversion exists
   --&gt; tests/ui/crypto_expert_nonce_callback_bound_precedence.jet:14:21
     |
  14 |         _ :: expert.xchacha20poly1305_seal([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0], [], [])
     |                     ^^^^^^^^^^^^^^^^^^^^^^
- Why: `?` uses the declared conversion rail; `CryptoError` can reach `Err` only through `impl CryptoError -&gt; Err`
- Fix: add `impl CryptoError -&gt; Err { … }` before this function, or change the return type
+ Why: Ordinary fallible calls propagate automatically; `CryptoError` can reach `Err` only through `impl CryptoError -&gt; Err`
+ Fix: Handle this call locally with `??`, add `impl CryptoError -&gt; Err { … }`, or change the return type
 More: jet-lang.dev/e/E2402
 
-Error [E0747]: this callback uses the effect `IO`, which the parameter doesn&#39;t allow
+Error [E0747]: This callback uses the effect `IO`, which the parameter doesn&#39;t allow
   --&gt; tests/ui/crypto_expert_nonce_callback_bound_precedence.jet:12:28
     |
  12 |     r :: transform([1, 2], noisy)
     |                            ^^^^^
- Why: the parameter is `fn(…) -[]&gt;`, so the callback must be pure; `IO` is outside that bound
- Fix: pass a `fn(…) -[]&gt;` callback (or a lambda that uses no effects), or widen the parameter&#39;s bound
+ Why: The parameter is `fn(…) -[]&gt;`, so the callback must be pure; `IO` is outside that bound
+ Fix: Pass a `fn(…) -[]&gt;` callback (or a lambda that uses no effects), or widen the parameter&#39;s bound
 More: jet-lang.dev/e/E0747
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

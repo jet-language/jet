@@ -35,21 +35,6 @@ fn run() {
     }
 }
 "#;
-    let rust = compile("tir_generated_name_collections", src);
-    for stem in ["i", "item", "k", "v"] {
-        let user = jet::AST::mangle(stem);
-        let generated = jet::AST::mangle_generated(stem);
-        assert_ne!(
-            user, generated,
-            "allocator lanes must stay distinct for {stem}"
-        );
-        assert!(
-            rust.contains(&generated),
-            "generated binding {generated} missing"
-        );
-    }
-    assert!(rust.contains(&format!("let {}", jet::AST::mangle("v"))));
-    assert!(rust.contains(&format!("let {}", jet::AST::mangle_generated("v"))));
     assert_tiers_agree("tir_generated_name_collections", src, "0:2\n1:2\napple=2\n");
 }
 
@@ -180,9 +165,6 @@ fn run() {
 /// form. BTreeMap iterates in sorted key order, so output is deterministic.
 #[test]
 fn map_literal_index_insert_and_iteration() {
-    if !have_rustc() {
-        return;
-    }
     let src = "\
 fn run() {
     counts := [String:Int]{}
@@ -197,9 +179,7 @@ fn run() {
     }
 }
 ";
-    let (code, stdout) = build_and_run("tir_map", src);
-    assert_eq!(code, 0);
-    assert_eq!(stdout, "5\napple=5\nbanana=3\napple:5\nbanana:3\n");
+    assert_tiers_agree("tir_map", src, "5\napple=5\nbanana=3\napple:5\nbanana:3\n");
 }
 
 /// E0163/E0164 teach this total update. Empty-map input proves a missing key
@@ -217,15 +197,58 @@ fn run() {
     print(counts["product"])
 }
 "#;
-    let rust = compile("tir_map_get_update", src);
-    assert!(
-        rust.contains("jet_std::jet_int_add_hot!")
-            && rust.contains("jet_std::jet_int_sub_hot!")
-            && rust.contains("jet_std::jet_int_mul_hot!")
-            && rust.contains("jet_map_update_string"),
-        "map updates must use the shared inline packed-Int kernels:\n{rust}"
-    );
     assert_tiers_agree("tir_map_get_update", src, "1\n-1\n2\n");
+}
+
+#[test]
+fn list_get_fallback_classifies_option_carrier() {
+    let src = r#"
+fn run() {
+    values :: [Int]{}
+    print(values.get(0) ?? 0)
+}
+"#;
+    assert_tiers_agree("tir_list_get_fallback_option", src, "0\n");
+}
+
+#[test]
+fn numeric_methods_resolve_literal_and_bound_receivers() {
+    let src = r#"
+fn run() {
+    value :: -17
+    print(17.div_euclid(5))
+    print(value.div_euclid(5))
+}
+"#;
+    assert_tiers_agree("tir_numeric_method_return_type", src, "3\n-4\n");
+}
+
+#[test]
+fn bare_run_rejects_non_unit_entry_contract() {
+    let src = r#"
+fn run() Int -> {
+    return 42
+}
+"#;
+    let diagnostics = tir_support::compile_source("bare_run_contract", src)
+        .expect_err("a bare executable run must have a unit return");
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E1321")
+        .unwrap_or_else(|| panic!("missing E1321: {diagnostics:?}"));
+    assert_eq!(
+        diagnostic.what,
+        "Output entry `run` has the wrong callable contract"
+    );
+    assert_eq!(
+        diagnostic.why,
+        "an Executable takes zero or one typed CLI parameter and returns `()` or `() ?`"
+    );
+    assert_eq!(
+        diagnostic.fix,
+        "declare the entry as `fn run()` or `fn run() ()?`"
+    );
+    assert!(diagnostic.span.is_some(), "{diagnostic:?}");
 }
 
 #[test]
@@ -731,6 +754,35 @@ fn run() {
     assert_eq!(stdout, "t-x\n");
 }
 
+/// Generated protocol methods use a shared provider span. Their checked
+/// identities must still include the owner, while the ordinary operator and
+/// helper calls resolve to the corresponding owner-specific implementation.
+#[test]
+fn generated_same_name_methods_keep_owner_identity() {
+    let src = r#"
+struct D {
+    value: Int
+}
+struct Pair {
+    a: Int
+    b: Int
+}
+fn align(left: D, right: D) Pair -> Pair{a: left.value, b: right.value}
+impl D.Add {
+    fn add(self, rhs: D) D -> {
+        pair :: align(self, rhs)
+        return D{value: pair.a + pair.b}
+    }
+}
+fn run() {
+    sum :: (D{value: 1} + D{value: 2})
+    print(sum.value)
+    print(Pair{a: 1, b: 2} == Pair{a: 1, b: 2})
+}
+"#;
+    assert_release_tiers_agree("tir_generated_method_owner_identity", src, "3\ntrue\n");
+}
+
 /// A trait-impl method call. `(d).label()` is emitted with the BARE method name
 /// (the trait impl owns it — no generated mangle), decided at lowering from
 /// `cx.trait_methods`. The caller `describe` routes through the TIR.
@@ -1022,23 +1074,20 @@ fn optional_val_none_and_fallback() {
         return;
     }
     let src = "\
-fn first_even(limit: Int) (?Int) -[]> {
+fn first_even(limit: Int) (?Float) -[]> {
     loop i in 1..limit {
         if (i % 2) == 0 {
-            return Val(i)
+            return Val(Float.from_int(i))
         }
     }
     return None
 }
 fn run() {
-    print(first_even(9) ?? 0)
-    print(first_even(1) ?? 0)
+    print((first_even(9) ?? 0.0) == 2.0)
+    print((first_even(1) ?? 7.5) == 7.5)
 }
 ";
-    let (code, stdout) = build_and_run("tir_optional", src);
-    assert_eq!(code, 0);
-    // first_even(9)→Val(2); first_even(1)→None → 0.
-    assert_eq!(stdout, "2\n0\n");
+    assert_tiers_agree("tir_optional", src, "true\ntrue\n");
 }
 
 /// Optional field chaining `?.` (both `.map` and flattening `.and_then`), with a

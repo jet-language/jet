@@ -1,0 +1,152 @@
+use data
+use core.compute as compute
+use core.data as core_data
+use core.encoding.json as json
+use core.files as files
+use core.testing as testing
+
+#Codable
+struct AnalysisReceipt {
+    rows: Int
+    columns: Int
+    filtered: Int
+    groups: Int
+    grouped_sum_cells: Int
+    joined: Int
+    pivot_cells: Int
+    rolling_values: Int
+    described_values: Int
+    labeled_value: Float
+    tensor_shape: [Int]
+    regression_slope: Float
+    regression_intercept: Float
+    regression_r_squared: Float
+    svg_bytes: Int
+    png_bytes: Int
+    svg_written: Bool
+    png_written: Bool
+    bridge_statuses: Int
+}
+
+// Generate the same deterministic 100k workload as the area probe instead of
+// relying on a repository-local or cache-local fixture path.
+fn fixture_text() String -> {
+    lines := [String]{"team,segment,x,y,value"}
+    loop i in 0..<100000 {
+        x :: Float.from_int(i % 1000) / Float{10.0}
+        residual :: Float.from_int((i % 7) - 3)
+        y :: Float{3.5} * x + residual
+        value :: Float.from_int(i % 97) + Float{0.25}
+        lines.push("team{i % 10},seg{i % 4},{x},{y},{value}")
+    }
+    return lines.join("\n")
+}
+
+fn owners() [data.Owner] -> {
+    return [data.Owner]{
+        {team: "team0", owner: "Ada"},
+        {team: "team1", owner: "Grace"},
+        {team: "team2", owner: "Lin"},
+        {team: "team3", owner: "Mina"},
+        {team: "team4", owner: "Noor"},
+        {team: "team5", owner: "Omar"},
+        {team: "team6", owner: "Priya"},
+        {team: "team7", owner: "Quinn"},
+        {team: "team8", owner: "Rae"},
+        {team: "team9", owner: "Sol"},
+    }
+}
+
+fn run() {
+    root :: testing.temp_dir("data-battery")
+    csv_path :: Path.from(root).join("fixture-100k.csv").to_string()
+    svg_path :: Path.from(root).join("analysis.svg").to_string()
+    png_path :: Path.from(root).join("analysis.png").to_string()
+    receipt_path :: Path.from(root).join("analysis.receipt.json").to_string()
+
+    files.write(csv_path, fixture_text()) ?? panic("write CSV fixture")
+    raw :: files.read(csv_path) ?? panic("read CSV fixture")
+    rows :: data.load_csv(raw) ?? panic("decode typed CSV")
+    row_count :: rows.len()
+    column_count :: core_data.schema(rows).len()
+    if row_count != 100000 -> panic("CSV row count")
+    if column_count != 5 -> panic("CSV schema")
+
+    filtered :: core_data.query(rows)
+        .filter(row -> row.value >= 50.0)
+        .collect() ?? panic("filter")
+    groups :: core_data.query(filtered)
+        .group_by(row -> row.team)
+        .mean(row -> row.value)
+        .collect() ?? panic("group mean")
+    group_sums :: core_data.query(filtered)
+        .group_by(row -> row.team)
+        .sum(row -> row.value)
+        .collect() ?? panic("group sum")
+    counts :: core_data.query(filtered)
+        .group_by(row -> row.team)
+        .count()
+        .collect() ?? panic("group count")
+    pivot :: data.pivot_sum(filtered) ?? panic("pivot")
+    values := [Float]{}
+    loop row in filtered -> values.push(row.value)
+    rolling :: data.rolling_mean(values, 8) ?? panic("rolling mean")
+    described :: data.describe(values) ?? panic("describe")
+
+    summaries :: data.group_summaries(groups)
+    joined :: data.join_summaries(summaries, owners())
+    regression :: data.fit(rows)
+
+    // The current compiler reports #2769 at this Tensor-in-struct literal.
+    // Keep the real path in the executable so a repaired compiler exercises
+    // the same record instead of silently switching representations.
+    source_tensor :: compute.from_list([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) ?? panic("tensor")
+    tensor :: compute.reshape(source_tensor, [2, 3]) ?? panic("reshape tensor")
+    tensor_shape :: compute.shape(tensor)
+    labeled_array :: data.LabeledArray{
+        row_labels: [String]{"north", "south"},
+        col_labels: [String]{"sales", "cost", "margin"},
+        values: tensor,
+    }
+    labeled_value :: data.cell(labeled_array, "south", "margin")
+
+    svg :: data.plot_svg(counts) ?? panic("SVG plot")
+    png :: data.plot_png(counts)
+    files.write(svg_path, svg) ?? panic("write SVG plot")
+    files.write_bytes(png_path, png) ?? panic("write PNG plot")
+    if !files.exists(svg_path) -> panic("SVG output missing")
+    if !files.exists(png_path) -> panic("PNG output missing")
+
+    bridge_statuses :: data.bridge_status()
+    receipt :: AnalysisReceipt{
+        rows: row_count,
+        columns: column_count,
+        filtered: filtered.len(),
+        groups: groups.len(),
+        grouped_sum_cells: group_sums.len(),
+        joined: joined.len(),
+        pivot_cells: pivot.len(),
+        rolling_values: rolling.len(),
+        described_values: described.count,
+        labeled_value: labeled_value,
+        tensor_shape: tensor_shape,
+        regression_slope: regression.slope,
+        regression_intercept: regression.intercept,
+        regression_r_squared: regression.r_squared,
+        svg_bytes: svg.len(),
+        png_bytes: png.len(),
+        svg_written: files.exists(svg_path),
+        png_written: files.exists(png_path),
+        bridge_statuses: bridge_statuses.len(),
+    }
+    files.write(receipt_path, json.to_string(receipt)) ?? panic("write receipt")
+    if !files.exists(receipt_path) -> panic("receipt missing")
+
+    // Unavailable paths stay explicit in source: core.data has no parquet
+    // reader (D-FOUND-HANDLE1), and the default Python foreign-handle bridge
+    // is not bound. Future proof runs must record those exact failures rather
+    // than replacing either path with a provider-shaped value.
+    print("rows={receipt.rows} columns={receipt.columns} filtered={receipt.filtered} groups={receipt.groups} sums={receipt.grouped_sum_cells} joined={receipt.joined} pivot={receipt.pivot_cells} rolling={receipt.rolling_values} described={receipt.described_values}")
+    print("labeled=south/margin:{receipt.labeled_value} tensor_shape={receipt.tensor_shape} ols={receipt.regression_slope}/{receipt.regression_intercept}/{receipt.regression_r_squared}")
+    print("svg={receipt.svg_bytes} png={receipt.png_bytes} receipt={receipt.svg_written && receipt.png_written} bridges={receipt.bridge_statuses}")
+}

@@ -4,6 +4,7 @@
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Lexer::{TokKind, Token};
 use crate::Syntax;
+use std::collections::BTreeMap;
 
 use super::Completion::{
     context_is_member_access, context_is_option_field, use_statement_for_module, JET_KEYWORDS,
@@ -131,6 +132,10 @@ pub(crate) fn compute_hover(
                 }
             }
         }
+        if let Some(record) = derivation_for_symbol(db, symbol) {
+            hover.push_str("\n\n---\n\n");
+            hover.push_str(&reasoning_summary(record));
+        }
         if let Some(arithmetic) = arithmetic_hover.as_deref() {
             hover.push_str("\n\n");
             hover.push_str(arithmetic);
@@ -154,6 +159,10 @@ pub(crate) fn compute_hover(
                 symbol.module_path == target.module_path && symbol.span == Some(target.def_span)
             }) {
                 let mut hover = semantic_hover(symbol, path);
+                if let Some(record) = derivation_for_symbol(db, symbol) {
+                    hover.push_str("\n\n---\n\n");
+                    hover.push_str(&reasoning_summary(record));
+                }
                 if let Some(arithmetic) = arithmetic_hover.as_deref() {
                     hover.push_str("\n\n");
                     hover.push_str(arithmetic);
@@ -165,6 +174,10 @@ pub(crate) fn compute_hover(
     if let Some(name) = find_ident_at(tokens, offset) {
         if let Some(symbol) = db.symbols.resolve_visible_in(name, Some(path)) {
             let mut hover = semantic_hover(symbol, path);
+            if let Some(record) = derivation_for_symbol(db, symbol) {
+                hover.push_str("\n\n---\n\n");
+                hover.push_str(&reasoning_summary(record));
+            }
             if let Some(arithmetic) = arithmetic_hover.as_deref() {
                 hover.push_str("\n\n");
                 hover.push_str(arithmetic);
@@ -174,6 +187,296 @@ pub(crate) fn compute_hover(
     }
     arithmetic_hover.or_else(|| db.hover_at(path, offset).map(str::to_string))
 }
+/// Return the checked derivation attached to a semantic symbol.  The symbol
+/// identity is only an anchor; the derivation table remains the sole source of
+/// the relation payload.
+fn derivation_for_symbol<'a>(
+    db: &'a SymbolDB,
+    symbol: &jet_semindex::SemanticSymbol,
+) -> Option<&'a jet_foundation::Facts::DerivationRecord> {
+    let definition = db.index.lookup_identity(&symbol.identity).or_else(|| {
+        let span = symbol.span?;
+        db.index.definitions().iter().find(|definition| {
+            definition.module_path == symbol.module_path && definition.def_span == span
+        })
+    })?;
+    let stable_id = db
+        .index
+        .definition_facts()
+        .iter()
+        .find(|fact| fact.human_identity == definition.identity)
+        .map(|fact| fact.stable_id.as_str());
+    stable_id
+        .and_then(|subject| db.index.derivations().iter().find(|row| row.subject == subject))
+        .or_else(|| {
+            db.index
+                .derivations()
+                .iter()
+                .find(|row| row.subject == definition.identity || row.subject == symbol.identity)
+        })
+}
+
+fn reasoning_summary(record: &jet_foundation::Facts::DerivationRecord) -> String {
+    let identity = &record.identity;
+    format!(
+        "Reasoning\n\nclaim: `{}`\nrecord: `{}`\nproducer: `{}`\nmethod: `{}`\ndisposition: `{}`\npremises: {}\nsource/build/run/target: `{}` / `{}` / `{}` / `{}`",
+        record.claim,
+        record.id,
+        record.producer,
+        record.method.as_str(),
+        record.disposition.as_str(),
+        record.premises.len(),
+        identity.source,
+        identity.build,
+        identity.run,
+        identity.target,
+    )
+}
+
+
+/// Add bounded inlay hints for derivations whose source anchor belongs to this
+/// module.  The label is a cue to open the complete relationship view; it is
+/// not a replacement for the canonical record.
+pub(crate) fn reasoning_inlay_hints(db: &SymbolDB, path: &str) -> Vec<InlayHint> {
+    const MAX_HINTS: usize = 64;
+    db.index
+        .derivations()
+        .iter()
+        .filter_map(|record| {
+            let fact = db
+                .index
+                .definition_facts()
+                .iter()
+                .find(|fact| fact.stable_id == record.subject)?;
+            (fact.module_path == path).then(|| InlayHint {
+                span: fact.span.into(),
+                module_path: fact.module_path.clone(),
+                label: format!(
+                    "reason: {} · {}",
+                    record.claim,
+                    record.disposition.as_str()
+                ),
+            })
+        })
+        .take(MAX_HINTS)
+        .collect()
+}
+
+fn reasoning_span_json(
+    db: &SymbolDB,
+    record: &jet_foundation::Facts::DerivationRecord,
+) -> String {
+    db.index
+        .definition_facts()
+        .iter()
+        .find(|fact| fact.stable_id == record.subject)
+        .map(|fact| format!("{{\"start\":{},\"end\":{}}}", fact.span.start, fact.span.end))
+        .unwrap_or_else(|| "null".to_string())
+}
+
+fn bounded_reasoning_text(value: &str, limit: usize) -> (String, bool) {
+    let mut text = value.chars().take(limit).collect::<String>();
+    let truncated = text.chars().count() < value.chars().count();
+    if truncated {
+        text.push('…');
+    }
+    (text, truncated)
+}
+
+fn reasoning_record_json(
+    db: &SymbolDB,
+    record: &jet_foundation::Facts::DerivationRecord,
+    expanded: bool,
+) -> String {
+    const MAX_ITEMS: usize = 128;
+    const MAX_RAW_BYTES: usize = 16 * 1024;
+    let (claim, claim_truncated) = bounded_reasoning_text(&record.claim, 1024);
+    let (producer, producer_truncated) = bounded_reasoning_text(&record.producer, 512);
+    let (rule, rule_truncated) = bounded_reasoning_text(&record.rule, 1024);
+    let premises = record
+        .premises
+        .iter()
+        .take(MAX_ITEMS)
+        .map(|value| {
+            let (value, _) = bounded_reasoning_text(value, 1024);
+            format!("\"{}\"", json_escape(&value))
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let assumptions = record
+        .assumptions
+        .iter()
+        .take(MAX_ITEMS)
+        .map(|value| {
+            let (value, _) = bounded_reasoning_text(value, 1024);
+            format!("\"{}\"", json_escape(&value))
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let observation = record.observation.as_ref().map_or_else(
+        || "null".to_string(),
+        |observation| {
+            format!(
+                "{{\"event\":{},\"counterexample\":{}}}",
+                observation
+                    .event_id
+                    .as_deref()
+                    .map(|value| format!("\"{}\"", json_escape(value)))
+                    .unwrap_or_else(|| "null".to_string()),
+                observation
+                    .counterexample_id
+                    .as_deref()
+                    .map(|value| format!("\"{}\"", json_escape(value)))
+                    .unwrap_or_else(|| "null".to_string()),
+            )
+        },
+    );
+    let payload = if expanded {
+        record
+            .payload
+            .as_ref()
+            .map(|payload| payload.to_json())
+            .filter(|payload| payload.len() <= MAX_RAW_BYTES)
+            .unwrap_or_else(|| "null".to_string())
+    } else {
+        "null".to_string()
+    };
+    let raw_premises = if expanded {
+        format!(",\"raw_premises\":[{}]", premises)
+    } else {
+        String::new()
+    };
+    format!(
+        "{{\"id\":\"{}\",\"subject\":\"{}\",\"claim\":\"{}\",\"producer\":\"{}\",\"method\":\"{}\",\"rule\":\"{}\",\"disposition\":\"{}\",\"identity\":{{\"source\":\"{}\",\"build\":\"{}\",\"run\":\"{}\",\"target\":\"{}\"}},\"source_span\":{},\"premises\":[{}],\"assumptions\":[{}],\"observation\":{},\"payload\":{},\"limits\":{{\"premises_truncated\":{},\"assumptions_truncated\":{},\"claim_truncated\":{},\"producer_truncated\":{},\"rule_truncated\":{},\"payload_truncated\":{}}}{}}}",
+        json_escape(&record.id),
+        json_escape(&record.subject),
+        json_escape(&claim),
+        json_escape(&producer),
+        record.method.as_str(),
+        json_escape(&rule),
+        record.disposition.as_str(),
+        json_escape(&record.identity.source),
+        json_escape(&record.identity.build),
+        json_escape(&record.identity.run),
+        json_escape(&record.identity.target),
+        reasoning_span_json(db, record),
+        premises,
+        assumptions,
+        observation,
+        payload,
+        record.premises.len() > MAX_ITEMS,
+        record.assumptions.len() > MAX_ITEMS,
+        claim_truncated,
+        producer_truncated,
+        rule_truncated,
+        expanded
+            && record.payload.is_some()
+            && record
+                .payload
+                .as_ref()
+                .is_some_and(|payload| payload.to_json().len() > MAX_RAW_BYTES),
+        raw_premises,
+    )
+}
+
+fn reasoning_family(record: &jet_foundation::Facts::DerivationRecord) -> &'static str {
+    let text = format!(
+        "{} {} {} {}",
+        record.subject, record.claim, record.rule, record.producer
+    )
+    .to_ascii_lowercase();
+    let families: [(&str, &[&str]); 8] = [
+        ("value", &["value", "observed"][..]),
+        ("ownership", &["owner", "ownership", "lifetime", "borrow"][..]),
+        ("state", &["state", "transition"][..]),
+        ("effects", &["effect", "event", "callback", "task"][..]),
+        ("dependencies", &["depend", "premise", "input"][..]),
+        ("impact", &["impact", "changed", "change"][..]),
+        ("optimization", &["optim", "copy", "cost", "vector"][..]),
+        ("counterexamples", &["counterexample", "witness"][..]),
+    ];
+    families
+        .iter()
+        .find_map(|(family, needles)| {
+            needles
+                .iter()
+                .any(|needle| text.contains(needle))
+                .then_some(*family)
+        })
+        .unwrap_or("relationships")
+}
+
+/// Complete source-linked relationship data for the expandable/pinnable
+/// editor command.  It is a projection over `SemIndex::derivations()` and
+/// never evaluates source or reconstructs a reason.
+pub(crate) fn reasoning_view_json(
+    db: &SymbolDB,
+    path: &str,
+    selection: Option<&str>,
+    expanded: bool,
+) -> String {
+    const MAX_RECORDS: usize = 64;
+    let selected = selection.filter(|value| !value.is_empty() && *value != "all");
+    let records = db
+        .index
+        .derivations()
+        .iter()
+        .filter(|record| {
+            selected.is_none_or(|selection| {
+                record.id == selection
+                    || record.subject == selection
+                    || record.claim == selection
+            })
+        })
+        .collect::<Vec<_>>();
+    let rendered = records
+        .iter()
+        .take(MAX_RECORDS)
+        .map(|record| reasoning_record_json(db, record, expanded))
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut lens_rows = BTreeMap::<&str, Vec<String>>::new();
+    for record in records.iter().take(MAX_RECORDS) {
+        lens_rows
+            .entry(reasoning_family(record))
+            .or_default()
+            .push(format!("\"{}\"", json_escape(&record.id)));
+    }
+    let lenses = [
+        "value",
+        "ownership",
+        "state",
+        "effects",
+        "dependencies",
+        "impact",
+        "optimization",
+        "counterexamples",
+        "relationships",
+    ]
+    .iter()
+    .map(|name| {
+        let rows = lens_rows
+            .get(name)
+            .map(|rows| rows.join(","))
+            .unwrap_or_default();
+        format!("{{\"name\":\"{}\",\"records\":[{}]}}", name, rows)
+    })
+    .collect::<Vec<_>>()
+    .join(",");
+    format!(
+        "{{\"kind\":\"jet.reasoning/v1\",\"source\":\"{}\",\"selection\":{},\"records\":[{}],\"lenses\":[{}],\"limits\":{{\"records\":{},\"records_truncated\":{},\"expanded\":{}}}}}",
+        json_escape(path),
+        selected
+            .map(|value| format!("\"{}\"", json_escape(value)))
+            .unwrap_or_else(|| "\"all\"".to_string()),
+        rendered,
+        lenses,
+        MAX_RECORDS,
+        records.len() > MAX_RECORDS,
+        expanded,
+    )
+}
+
 
 /// Hover over package metadata and typed environment option fields from the
 /// same local, offline discovery index used by completion.
@@ -334,7 +637,21 @@ pub(crate) fn semantic_symbol_metadata_json(
             definition.module_path == symbol.module_path && definition.def_span == span
         })
     })?;
-    if definition.nominal_base.is_none() && definition.trait_contracts.is_empty() {
+    let derivation = db
+        .index
+        .definition_facts()
+        .iter()
+        .find(|fact| fact.human_identity == definition.identity)
+        .and_then(|fact| {
+            db.index
+                .derivations()
+                .iter()
+                .find(|row| row.subject == fact.stable_id)
+        });
+    if definition.nominal_base.is_none()
+        && definition.trait_contracts.is_empty()
+        && derivation.is_none()
+    {
         return None;
     }
     let associated_types = |contract: &jet_semindex::TraitContractFact| {
@@ -377,13 +694,17 @@ pub(crate) fn semantic_symbol_metadata_json(
         .as_deref()
         .map(|base| format!("\"{}\"", json_escape(base)))
         .unwrap_or_else(|| "null".to_string());
+    let derivation_json = derivation
+        .map(jet_foundation::Facts::DerivationRecord::to_json)
+        .unwrap_or_else(|| "null".to_string());
     Some(format!(
-        "{{\"identity\":\"{}\",\"qualified_name\":\"{}\",\"signature\":\"{}\",\"nominal_base\":{},\"trait_contracts\":[{}]}}",
+        "{{\"identity\":\"{}\",\"qualified_name\":\"{}\",\"signature\":\"{}\",\"nominal_base\":{},\"trait_contracts\":[{}],\"derivation\":{}}}",
         json_escape(&definition.identity),
         json_escape(&definition.qualified_name),
         json_escape(&symbol.signature),
         nominal_base,
         contracts,
+        derivation_json,
     ))
 }
 
@@ -2001,7 +2322,7 @@ fn semantic_token_type_for(tokens: &[Token], idx: usize, src: &str) -> Option<(u
 
         TokKind::KwCopy => Some((st::OWNERSHIP, sm::COPY)),
 
-        TokKind::KwSwitch | TokKind::KwMutate | TokKind::KwMove => None,
+        TokKind::KwMutate | TokKind::KwMove => None,
 
         TokKind::Ident(name) => {
             if name == Syntax::KW_NEXT && is_contextual_next(tokens, idx) {

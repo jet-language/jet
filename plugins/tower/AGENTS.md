@@ -54,7 +54,7 @@ tower docs list|show|add|update|archive|delete   # durable docs/*.md + scratchpa
 tower lint [--json] [--docs] # durability sweeper over the live board (+
                               # docs/spec/** reference scan with --docs); exit 1
                               # on any finding, 0 clean
-tower question list --open   # owner questions — answer these before building
+tower question list --open   # owner questions — block only affected slices
 tower message list [--all]   # open card messages, or every one with --all
 tower papercut list [--open] # logged tooling friction, newest first (--open filters)
 tower card show '#12'        # one card, with computed lane + decisions
@@ -64,15 +64,13 @@ tower card update '#12' --add-tag ready-for-agent --by me
 tower events --limit 20      # who did what, when
 ```
 
-`tower brief` is the one-shot work packet (#462): it replaces reading
-`status`/`next`/`card show`/`decision show`/`question list` separately to
-start a card. No `[ref]` → picks the top card via the same picker as
-`next`. `--agent me` takes a renewable 24-hour work lease (E_CLAIMED if
-someone else holds an active lease; a no-op if you already do); omit
-`--agent`, or pass `--no-claim`, to read without leasing. Normal card writes
-by the holder renew it. Expired leases never block selection or takeover.
-Done and frozen cards clear them. Decisions in the packet are copied verbatim
-off the live store — never paraphrased.
+`tower brief` is the one-shot work packet. No ref picks the canonical next
+card; `--agent me` takes a renewable 24-hour lease. `E_CLAIMED` means another
+agent holds it. `E_CLOSE_READY` means an actively claimed card already has all
+criteria met and no open gate: close, reopen, or block it before any other
+brief or claim. The barrier also applies to `--no-claim` and read-only briefs.
+Normal writes renew leases; expired leases do not block; done and frozen cards
+clear them. Decisions in the packet are copied verbatim from the live store.
 
 Report completions and blockers on the card itself: a `--log` entry when you
 advance it, a `tower question answer` when the owner asked something. The
@@ -82,11 +80,14 @@ side channel.
 Cards may carry free-form **`tags[]`** (triage roles like `needs-triage` /
 `ready-for-agent`, wayfinder labels like `wayfinder:map`) and an optional
 **`parentId`** (child of a wayfinder map). These are orthogonal to `phase`
-— do not encode triage state in phases. See `docs/agents/issue-tracker.md`
-and `docs/agents/triage-labels.md` in the host repo.
+— do not encode triage state in phases. See `docs/spec/contributing/issue-tracker.md`
+and `docs/spec/contributing/triage-labels.md` in the host repo.
 
-Auth note: localhost is exempt. Remote access reads `auth.token` from the
-untracked `plugins/tower/.tower/secrets.json`; never put credentials in `config.json`.
+LAN note: Tower is keyless on the local network. Every LAN device can read
+and change the board; do not expose the server to the public Internet.
+Browser mutations require same-origin evidence; CLI mutations require the
+explicit `X-Tower-Client: cli` header. Never put removed auth or push fields
+in tracked `config.json`; existing ignored `secrets.json` files are not read.
 
 Each card has a computed `lane`: `decide` (owner), `plan`/`implement`/
 `building`/`verify` (displayed as Review; agent), `blocked`/`frozen`/`done` (inert).
@@ -114,11 +115,12 @@ tower card release '#12' --by me              # if you stop without finishing
 tower card release '#12' --by me --handoff "parser done, sema left, watch X"  # required if the card is `building`
 ```
 
-Phase honesty: a builder marks exit criteria `met`; the orchestrator closes the
-card `done` when every row is `met` or `verified`. There is no independent
-verify step for a card. `verified` is milestone-review signoff, and its
-reviewer must differ from the builder. If the board and reality disagree, fix
-the board.
+Phase honesty: workers return `CHECK OK` or `DOCS ONLY` and never write Tower.
+After integration, the orchestrator runs the exact criterion proof, marks the
+corresponding exit criteria `met`, and closes the card `done` immediately when
+every row is `met` or `verified` and no blocker contradicts it. Query `done`
+before briefing another card. There is no independent per-card review,
+duplicate proof, broad confidence sweep, or technical verify step.
 
 ### Exit criteria gate `done`
 
@@ -128,20 +130,20 @@ Add and progress it:
 
 ```
 tower card criteria '#12' --add "matrix vs full spec, per feature" --by planner
-tower card criteria '#12' --meet 1 --evidence "ran the matrix, 9/9" --by builder
-tower card criteria '#12' --verify 1 --evidence "re-ran independently" --by verifier
+tower card criteria '#12' --meet 1 --evidence "ran the matrix, 9/9" --by orchestrator
+tower card criteria '#12' --verify 1 --evidence "milestone review confirmed it" --by reviewer
 tower card criteria '#12' --list
 ```
 
 `--phase done` by a non-owner is refused (`E_CRITERIA`) when the card has no
-criteria or any row is not `met` or `verified`. A builder may mark a row `met`.
-The orchestrator closes the card after the guard passes. A milestone reviewer
-may mark a row `verified`; that reviewer must differ from its builder
-(`E_CRITERIA_SELF`). Owner writes keep the legacy bypass and record
-`card.criteria-bypass`.
-
-Integration and no-known-blocker are orchestration evidence. They are not
-mandatory rows on every card.
+criteria or any row is not `met` or `verified`. The orchestrator marks rows
+`met` only from integrated focused proof. When the last row settles on an
+actively claimed card, `E_CLOSE_READY` blocks every further claim and brief
+until that card closes, reopens, or gains a real gate. A milestone reviewer may
+mark a row `verified`; that reviewer must differ from the agent that marked it
+met (`E_CRITERIA_SELF`). Owner writes keep the legacy closure bypass and record
+`card.criteria-bypass`. Integration and no-known-blocker are orchestration
+evidence, not checklist rows.
 
 Flag a card `needsAcceptance` **only** when the owner must judge look-and-feel
 with their eyes: UI/UX/DX taste, visual presentation, copy polish, or a real
@@ -165,32 +167,28 @@ attempt while one acceptance ballot is still open is a no-op, not a duplicate
 mint.
 
 Acceptance is not generic ratification. Only the dedicated owner-verification
-buttons may accept or bounce, from a loopback device or a remote device that
-presents the configured `auth.token` (the same trust boundary every other
-remote write already uses — see Auth note above; no token configured means no
-remote device can prove it's the owner, so acceptance stays loopback-only).
-The server binds each click to an HTTPOnly in-memory UI session and a
-short-lived, single-use challenge for that exact ballot and outcome. CLI
-ratify, `clearance`, batch clearance, `--quote`, and caller-supplied
+buttons may accept or bounce, from a browser that has the silent HttpOnly owner
+interaction session and same-origin provenance. The server binds each click to
+that session and a short-lived, single-use challenge for that exact ballot and
+outcome. CLI ratify, `clearance`, batch clearance, `--quote`, and caller-supplied
 `by: owner` are rejected and audited.
 
 ### Milestone review
 
-All linked cards done makes a milestone `review-ready`. It does not make the
-milestone `met`. A milestone becomes `met` only through explicit review:
+All linked cards done makes a milestone `review-ready`. Commit the frozen
+source, then open the closeout token before broad proof:
 
 ```
-tower milestone criteria <id> --add "ship the user path" --by planner
-tower milestone criteria <id> --meet 1 --evidence "built" --by builder
+scripts/agent/closeout-gate.mjs open <id> --by orchestrator
+tower milestone criteria <id> --meet 1 --evidence "built" --by orchestrator
 tower milestone criteria <id> --verify 1 --evidence "reviewed" --by reviewer
 tower milestone verify <id> --evidence "milestone review complete" --by reviewer
 ```
 
-The verify command requires every linked card to be `done` and every milestone
-criterion to be `verified`. It stores the reviewer, evidence, and timestamp in
-the milestone verification record. Reopening a linked card or milestone
-criterion clears that record and returns the milestone to `open` or
-`review-ready`.
+`milestone closeout` records the frozen Git object ID. Broad proof scripts
+check that the source tree still matches it. Milestone verify requires every
+linked card `done`, every milestone criterion `verified`, and the token.
+Reopening a linked card or milestone criterion clears the token and signoff.
 
 Ballot-ready decisions carry: `gist` (one plain sentence), `lesson` (a few
 plain sentences in one short paragraph that explain only the situation and
@@ -199,13 +197,14 @@ stakes), `story` (a named person, why this exists), `inWild`
 `options[]` each with plain `{key,name,detail,code}` worked examples and optional
 hidden `technical` law, `comparisons[]` when relevant, `rec`, and structured
 `recommendation:{why,whyNot,tradeoff}`. `whyNot` covers every losing option.
-The `simple` skill applies to every user-visible field. A full ballot is the
-default and records one- or two-sentence summaries for the complete base draft,
-then boil-the-ocean, hybrid, cooperative, fresh-agent RLI5 beginner, and
-rival-family adversarial reviews in that exact order. A short ballot is the
-complete base draft with no reviews; use it only
-when the owner's current request explicitly asks for one, and preserve that
-request in `shortAuthorizedBy`. Plain prose uses one idea per sentence, defines
+The `simple` skill applies to every user-visible field. A new full ballot
+records one- or two-sentence summaries from two fresh readers: first RLI5
+beginner, then adversarial. Neither reader helped author the ballot, and the
+adversarial reader differs from the beginner reader. Model families may match
+(owner direction, 2026-09-05). Preserve historical review records unchanged.
+A short ballot is the complete base draft with no reviews and is the default
+for one mechanism with at most three options. New syntax, invariant changes,
+and owner-tagged full cards require the full profile. Plain prose uses one idea per sentence, defines
 jargon, expands acronyms, and leads with user impact. Write-time density limits
 are 32 words per sentence and 90 per paragraph. The owner decides from the ballot
 alone — if they'd need to ask you something to decide, it isn't ready.
@@ -260,21 +259,22 @@ tower lint --docs-root DIR # override the docs root (default: <project>/docs)
 
 ## Guards (agent-hard, owner-soft)
 
-Card closure guards bind writes where `--by` is not `owner`; `--by owner`
-bypasses them and records the bypass. Milestone review still requires its
-explicit command and evidence. D-TWRGUARD1=C.
+Card closure and progression guards are agent-hard; `--by owner` may bypass
+card closure and records that bypass. Milestone review requires its explicit
+closeout token, criteria, command, and evidence. D-TWRGUARD1=C.
 
 | Guard | Trigger | Error | Escape |
 |---|---|---|---|
 | Ballot-ready | missing required fields, profile authority, ordered full-ballot reviews, complete recommendation rationale, or plain-language density limits | `E_BALLOT` | `--draft`, rewrite, then `decision update <id> --ready` |
 | Owner-only ratify | `decision ratify` by a non-owner, for a non-acceptance ballot | `E_OWNER_ONLY` | `--quote "owner's words"` |
-| Owner acceptance provenance | Any generic ratify, clearance, quote, or batch attempt on `D-ACCEPT-*` | `E_ACCEPTANCE_OWNER_UI` | Owner uses the verification UI (loopback or an `auth.token`-authenticated device) |
+| Owner acceptance provenance | Any generic ratify, clearance, quote, or batch attempt on `D-ACCEPT-*` | `E_ACCEPTANCE_OWNER_UI` | Owner uses the dedicated verification UI with its same-origin session and one-time challenge |
 | Frozen lane | any write to a `frozen` card | `E_OWNER_LANE` | none — owner moves it out with `tower card update --phase ... --by owner` |
 | Ratified-decision delete | `card delete` on a card with a ratified decision | `E_HAS_RATIFIED` | let it retire (`tower archive status`) or `tower archive restore` then re-detach — applies to owner too |
 | Outcome/option match | `decision ratify --outcome K` not one of the decision's option keys | `E_INVALID` | pass a real option key |
 | Building-release handoff | `card release` on a `building` card | `E_HANDOFF` | `--handoff "what's done, what's left, gotchas"` |
 | Card closure | non-owner closes a card with no criteria or an unsettled criterion | `E_CRITERIA` | add criteria and mark every row `met` or `verified` |
-| Milestone review | milestone verify before all linked cards are done or all milestone criteria are verified | `E_MILESTONE` | finish the linked work and review every milestone criterion |
+| Closure progression | any claim or brief while an active card has all criteria settled and no open gate | `E_CLOSE_READY` | close, reopen, or block the closure-ready card |
+| Milestone closeout | closeout begins before linked cards are done, or milestone verify lacks its token or verified criteria | `E_MILESTONE` | finish and close cards, freeze source, open token, run review |
 
 `tower verdict '#N' --outcome "..." [--title "…"] --by owner` records an
 owner ruling as an already-ratified decision (never a mere log note) and is
@@ -313,7 +313,7 @@ POST /api/card/add|update|claim|release|delete   (release: {handoff})
 POST /api/card/criteria-add|criteria-meet|criteria-verify|criteria-reopen
 POST /api/decision/add|update|delete   (add: {draft}; update: {ready})
 POST /api/clearance {decisionId,outcome,comment,quote}  (generic ballots only; quote = on-behalf-of)
-POST /api/acceptance/challenge {decisionId,outcome}     (owner UI, loopback or auth.token; session-bound, short TTL)
+POST /api/acceptance/challenge {decisionId,outcome}     (owner UI, same-origin session-bound, short TTL)
 POST /api/acceptance/resolve {challenge,decisionId,outcome,comment}  (single-use)
 POST /api/verdict {id,outcome,title}                    (owner-only; mints a ratified decision)
 POST /api/question/add|answer|delete

@@ -6,8 +6,18 @@
 //! making a second protocol implementation.
 
 use crate::JSON;
-pub use crate::JSON::JSONValue;
+use jet_foundation::DataTree::DataTree;
 use std::collections::BTreeMap;
+
+fn field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+    object
+        .iter()
+        .find_map(|(name, value)| (name == key).then_some(value))
+}
+
+fn object_from_map(map: BTreeMap<String, DataTree>) -> DataTree {
+    DataTree::Object(map.into_iter().collect())
+}
 use std::fmt;
 
 /// Stable MCP revision selected by default.
@@ -280,17 +290,17 @@ pub enum RequestId {
 }
 
 impl RequestId {
-    fn to_json_value(&self) -> JSONValue {
+    fn to_json_value(&self) -> DataTree {
         match self {
-            Self::Number(value) => JSONValue::Number(*value),
-            Self::String(value) => JSONValue::String(value.clone()),
+            Self::Number(value) => DataTree::Int(*value),
+            Self::String(value) => DataTree::Text(value.clone()),
         }
     }
 
-    fn from_json_value(value: &JSONValue) -> Result<Self, CodecError> {
+    fn from_json_value(value: &DataTree) -> Result<Self, CodecError> {
         match value {
-            JSONValue::Number(value) => Ok(Self::Number(*value)),
-            JSONValue::String(value) => Ok(Self::String(value.clone())),
+            DataTree::Int(value) => Ok(Self::Number(*value)),
+            DataTree::Text(value) => Ok(Self::String(value.clone())),
             _ => Err(CodecError::InvalidMessage(
                 "request id must be an integer or string".to_string(),
             )),
@@ -303,7 +313,7 @@ impl RequestId {
 pub struct McpRequest {
     pub id: RequestId,
     pub method: String,
-    pub params: Option<JSONValue>,
+    pub params: Option<DataTree>,
 }
 
 impl McpRequest {
@@ -311,7 +321,7 @@ impl McpRequest {
     pub fn new(
         id: RequestId,
         method: impl Into<String>,
-        params: Option<JSONValue>,
+        params: Option<DataTree>,
     ) -> Result<Self, CodecError> {
         let request = Self {
             id,
@@ -332,14 +342,14 @@ impl McpRequest {
 #[derive(Clone, Debug, PartialEq)]
 pub struct McpNotification {
     pub method: String,
-    pub params: Option<JSONValue>,
+    pub params: Option<DataTree>,
 }
 
 impl McpNotification {
     /// Construct a notification with an optional object or array params value.
     pub fn new(
         method: impl Into<String>,
-        params: Option<JSONValue>,
+        params: Option<DataTree>,
     ) -> Result<Self, CodecError> {
         let notification = Self {
             method: method.into(),
@@ -356,12 +366,12 @@ impl McpNotification {
 pub struct McpRpcError {
     pub code: i64,
     pub message: String,
-    pub data: Option<JSONValue>,
+    pub data: Option<DataTree>,
 }
 
 impl McpRpcError {
     /// Construct an error payload.
-    pub fn new(code: i64, message: impl Into<String>, data: Option<JSONValue>) -> Self {
+    pub fn new(code: i64, message: impl Into<String>, data: Option<DataTree>) -> Self {
         Self {
             code,
             message: message.into(),
@@ -375,13 +385,13 @@ impl McpRpcError {
 pub struct McpResponse {
     /// `None` represents a JSON-RPC null response ID.
     pub id: Option<RequestId>,
-    pub result: Option<JSONValue>,
+    pub result: Option<DataTree>,
     pub error: Option<McpRpcError>,
 }
 
 impl McpResponse {
     /// Construct a successful response.
-    pub fn success(id: RequestId, result: JSONValue) -> Self {
+    pub fn success(id: RequestId, result: DataTree) -> Self {
         Self {
             id: Some(id),
             result: Some(result),
@@ -427,16 +437,16 @@ impl McpMessage {
         codec.decode(text, limits)
     }
 
-    fn to_json_value(&self) -> Result<JSONValue, CodecError> {
+    fn to_json_value(&self) -> Result<DataTree, CodecError> {
         let mut object = BTreeMap::new();
-        object.insert("jsonrpc".to_string(), JSONValue::String("2.0".to_string()));
+        object.insert("jsonrpc".to_string(), DataTree::Text("2.0".to_string()));
         match self {
             Self::Request(request) => {
                 request.validate()?;
                 object.insert("id".to_string(), request.id.to_json_value());
                 object.insert(
                     "method".to_string(),
-                    JSONValue::String(request.method.clone()),
+                    DataTree::Text(request.method.clone()),
                 );
                 if let Some(params) = &request.params {
                     object.insert("params".to_string(), params.clone());
@@ -447,7 +457,7 @@ impl McpMessage {
                 validate_params(notification.params.as_ref())?;
                 object.insert(
                     "method".to_string(),
-                    JSONValue::String(notification.method.clone()),
+                    DataTree::Text(notification.method.clone()),
                 );
                 if let Some(params) = &notification.params {
                     object.insert("params".to_string(), params.clone());
@@ -461,7 +471,7 @@ impl McpMessage {
                         .id
                         .as_ref()
                         .map(RequestId::to_json_value)
-                        .unwrap_or(JSONValue::Null),
+                        .unwrap_or(DataTree::Null),
                 );
                 if let Some(result) = &response.result {
                     object.insert("result".to_string(), result.clone());
@@ -471,27 +481,26 @@ impl McpMessage {
                 }
             }
         }
-        Ok(JSONValue::Object(object))
+        Ok(object_from_map(object))
     }
 
-    fn from_json_value(value: JSONValue, limits: McpLimits) -> Result<Self, CodecError> {
+    fn from_json_value(value: DataTree, limits: McpLimits) -> Result<Self, CodecError> {
         let object = value
             .as_object()
             .map_err(|_| CodecError::InvalidMessage("message must be a JSON object".to_string()))?;
-        if object.get("jsonrpc").and_then(JSON::json_str) != Some("2.0") {
+        if field(object, "jsonrpc").and_then(JSON::json_str) != Some("2.0") {
             return Err(CodecError::InvalidMessage(
                 "jsonrpc must be \"2.0\"".to_string(),
             ));
         }
-        let method = object.get("method");
-        if method.is_some()
-            && (object.contains_key("result") || object.contains_key("error"))
+        let method = field(object, "method");
+        if method.is_some() && (field(object, "result").is_some() || field(object, "error").is_some())
         {
             return Err(CodecError::InvalidMessage(
                 "request or notification cannot contain result or error".to_string(),
             ));
         }
-        let params = match object.get("params") {
+        let params = match field(object, "params") {
             None => None,
             Some(value) => {
                 validate_params(Some(value))?;
@@ -499,9 +508,9 @@ impl McpMessage {
             }
         };
         match method {
-            Some(JSONValue::String(method)) => {
+            Some(DataTree::Text(method)) => {
                 validate_method(method)?;
-                match object.get("id") {
+                match field(object, "id") {
                     Some(id) => Ok(Self::Request(McpRequest {
                         id: RequestId::from_json_value(id)?,
                         method: method.clone(),
@@ -517,23 +526,22 @@ impl McpMessage {
                 "method must be a string".to_string(),
             )),
             None => {
-                let id = object
-                    .get("id")
+                let id = field(object, "id")
                     .ok_or_else(|| CodecError::InvalidMessage("response is missing id".to_string()))?;
                 let id = match id {
-                    JSONValue::Null => None,
+                    DataTree::Null => None,
                     value => Some(RequestId::from_json_value(value)?),
                 };
-                let result = object.get("result").cloned();
-                let error = object.get("error").map(rpc_error_from_json).transpose()?;
+                let result = field(object, "result").cloned();
+                let error = field(object, "error").map(rpc_error_from_json).transpose()?;
                 let response = McpResponse { id, result, error };
                 response.validate()?;
-                if object.contains_key("params") {
+                if field(object, "params").is_some() {
                     return Err(CodecError::InvalidMessage(
                         "response cannot contain params".to_string(),
                     ));
                 }
-                if object.get("result").is_some() && object.get("error").is_some() {
+                if field(object, "result").is_some() && field(object, "error").is_some() {
                     return Err(CodecError::InvalidMessage(
                         "response cannot contain both result and error".to_string(),
                     ));
@@ -549,7 +557,7 @@ impl McpMessage {
 /// retained so peers can extend the protocol without changing this core.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct McpCapabilities {
-    pub values: BTreeMap<String, JSONValue>,
+    pub values: BTreeMap<String, DataTree>,
 }
 
 impl McpCapabilities {
@@ -559,16 +567,16 @@ impl McpCapabilities {
     }
 
     /// Add or replace one capability entry.
-    pub fn insert(&mut self, name: impl Into<String>, value: JSONValue) {
+    pub fn insert(&mut self, name: impl Into<String>, value: DataTree) {
         self.values.insert(name.into(), value);
     }
 
     /// Look up one capability entry.
-    pub fn get(&self, name: &str) -> Option<&JSONValue> {
+    pub fn get(&self, name: &str) -> Option<&DataTree> {
         self.values.get(name)
     }
 
-    fn to_json_value(&self, limits: McpLimits) -> Result<JSONValue, CodecError> {
+    fn to_json_value(&self, limits: McpLimits) -> Result<DataTree, CodecError> {
         limits.validate()?;
         if self.values.len() > limits.max_capability_entries {
             return Err(CodecError::CapabilityLimitExceeded {
@@ -576,10 +584,10 @@ impl McpCapabilities {
                 maximum: limits.max_capability_entries,
             });
         }
-        Ok(JSONValue::Object(self.values.clone()))
+        Ok(object_from_map(self.values.clone()))
     }
 
-    fn from_json_value(value: &JSONValue, limits: McpLimits) -> Result<Self, CodecError> {
+    fn from_json_value(value: &DataTree, limits: McpLimits) -> Result<Self, CodecError> {
         limits.validate()?;
         let values = value.as_object().map_err(|_| {
             CodecError::InvalidMessage("capabilities must be a JSON object".to_string())
@@ -591,7 +599,7 @@ impl McpCapabilities {
             });
         }
         Ok(Self {
-            values: values.clone(),
+            values: values.iter().cloned().collect(),
         })
     }
 }
@@ -618,17 +626,17 @@ impl McpImplementation {
         Ok(implementation)
     }
 
-    fn to_json_value(&self) -> JSONValue {
+    fn to_json_value(&self) -> DataTree {
         let mut object = BTreeMap::new();
-        object.insert("name".to_string(), JSONValue::String(self.name.clone()));
+        object.insert("name".to_string(), DataTree::Text(self.name.clone()));
         object.insert(
             "version".to_string(),
-            JSONValue::String(self.version.clone()),
+            DataTree::Text(self.version.clone()),
         );
-        JSONValue::Object(object)
+        object_from_map(object)
     }
 
-    fn from_json_value(value: &JSONValue) -> Result<Self, CodecError> {
+    fn from_json_value(value: &DataTree) -> Result<Self, CodecError> {
         let object = value.as_object().map_err(|_| {
             CodecError::InvalidMessage("implementation must be a JSON object".to_string())
         })?;
@@ -670,7 +678,7 @@ impl InitializeParams {
     }
 
     /// Encode this structured initialize value as JSON.
-    pub fn to_json_value(&self, limits: McpLimits) -> Result<JSONValue, CodecError> {
+    pub fn to_json_value(&self, limits: McpLimits) -> Result<DataTree, CodecError> {
         let mut object = BTreeMap::new();
         object.insert(
             "capabilities".to_string(),
@@ -681,25 +689,24 @@ impl InitializeParams {
         }
         object.insert(
             "protocolVersion".to_string(),
-            JSONValue::String(self.protocol_version.clone()),
+            DataTree::Text(self.protocol_version.clone()),
         );
-        Ok(JSONValue::Object(object))
+        Ok(object_from_map(object))
     }
 
     /// Decode a structured initialize value from JSON.
-    pub fn from_json_value(value: &JSONValue, limits: McpLimits) -> Result<Self, CodecError> {
+    pub fn from_json_value(value: &DataTree, limits: McpLimits) -> Result<Self, CodecError> {
         let object = value.as_object().map_err(|_| {
             CodecError::InvalidMessage("initialize params must be a JSON object".to_string())
         })?;
         let protocol_version = required_string(object, "protocolVersion")?;
         let capabilities = McpCapabilities::from_json_value(
-            object.get("capabilities").ok_or_else(|| {
+            field(object, "capabilities").ok_or_else(|| {
                 CodecError::InvalidMessage("initialize params missing capabilities".to_string())
             })?,
             limits,
         )?;
-        let client_info = object
-            .get("clientInfo")
+        let client_info = field(object, "clientInfo")
             .map(McpImplementation::from_json_value)
             .transpose()?;
         Ok(Self {
@@ -741,7 +748,7 @@ impl InitializeResult {
     }
 
     /// Encode this structured initialize value as JSON.
-    pub fn to_json_value(&self, limits: McpLimits) -> Result<JSONValue, CodecError> {
+    pub fn to_json_value(&self, limits: McpLimits) -> Result<DataTree, CodecError> {
         let mut object = BTreeMap::new();
         object.insert(
             "capabilities".to_string(),
@@ -749,14 +756,14 @@ impl InitializeResult {
         );
         object.insert(
             "protocolVersion".to_string(),
-            JSONValue::String(self.protocol_version.as_str().to_string()),
+            DataTree::Text(self.protocol_version.as_str().to_string()),
         );
         object.insert("serverInfo".to_string(), self.server_info.to_json_value());
-        Ok(JSONValue::Object(object))
+        Ok(object_from_map(object))
     }
 
     /// Decode a structured initialize result from JSON.
-    pub fn from_json_value(value: &JSONValue, limits: McpLimits) -> Result<Self, CodecError> {
+    pub fn from_json_value(value: &DataTree, limits: McpLimits) -> Result<Self, CodecError> {
         let object = value.as_object().map_err(|_| {
             CodecError::InvalidMessage("initialize result must be a JSON object".to_string())
         })?;
@@ -767,14 +774,16 @@ impl InitializeResult {
             ))
         })?;
         let capabilities = McpCapabilities::from_json_value(
-            object.get("capabilities").ok_or_else(|| {
+            field(object, "capabilities").ok_or_else(|| {
                 CodecError::InvalidMessage("initialize result missing capabilities".to_string())
             })?,
             limits,
         )?;
-        let server_info = McpImplementation::from_json_value(object.get("serverInfo").ok_or_else(
-            || CodecError::InvalidMessage("initialize result missing serverInfo".to_string()),
-        )?)?;
+        let server_info = McpImplementation::from_json_value(
+            field(object, "serverInfo").ok_or_else(|| {
+                CodecError::InvalidMessage("initialize result missing serverInfo".to_string())
+            })?,
+        )?;
         Ok(Self {
             protocol_version,
             capabilities,
@@ -1209,8 +1218,8 @@ fn validate_method(method: &str) -> Result<(), CodecError> {
     Ok(())
 }
 
-fn validate_params(params: Option<&JSONValue>) -> Result<(), CodecError> {
-    if matches!(params, Some(JSONValue::Array(_) | JSONValue::Object(_)) | None) {
+fn validate_params(params: Option<&DataTree>) -> Result<(), CodecError> {
+    if matches!(params, Some(DataTree::Array(_) | DataTree::Object(_)) | None) {
         Ok(())
     } else {
         Err(CodecError::InvalidMessage(
@@ -1219,33 +1228,32 @@ fn validate_params(params: Option<&JSONValue>) -> Result<(), CodecError> {
     }
 }
 
-fn required_string(object: &BTreeMap<String, JSONValue>, name: &str) -> Result<String, CodecError> {
-    object
-        .get(name)
+fn required_string(object: &[(String, DataTree)], name: &str) -> Result<String, CodecError> {
+    field(object, name)
         .and_then(JSON::json_str)
         .map(str::to_string)
         .ok_or_else(|| CodecError::InvalidMessage(format!("{name} must be a string")))
 }
 
-fn rpc_error_to_json(error: &McpRpcError) -> JSONValue {
+fn rpc_error_to_json(error: &McpRpcError) -> DataTree {
     let mut object = BTreeMap::new();
-    object.insert("code".to_string(), JSONValue::Number(error.code));
+    object.insert("code".to_string(), DataTree::Int(error.code));
     object.insert(
         "message".to_string(),
-        JSONValue::String(error.message.clone()),
+        DataTree::Text(error.message.clone()),
     );
     if let Some(data) = &error.data {
         object.insert("data".to_string(), data.clone());
     }
-    JSONValue::Object(object)
+    object_from_map(object)
 }
 
-fn rpc_error_from_json(value: &JSONValue) -> Result<McpRpcError, CodecError> {
+fn rpc_error_from_json(value: &DataTree) -> Result<McpRpcError, CodecError> {
     let object = value.as_object().map_err(|_| {
         CodecError::InvalidMessage("response error must be a JSON object".to_string())
     })?;
-    let code = match object.get("code") {
-        Some(JSONValue::Number(code)) => *code,
+    let code = match field(object, "code") {
+        Some(DataTree::Int(code)) => *code,
         _ => {
             return Err(CodecError::InvalidMessage(
                 "response error code must be an integer".to_string(),
@@ -1255,49 +1263,61 @@ fn rpc_error_from_json(value: &JSONValue) -> Result<McpRpcError, CodecError> {
     Ok(McpRpcError {
         code,
         message: required_string(object, "message")?,
-        data: object.get("data").cloned(),
+        data: field(object, "data").cloned(),
     })
 }
 
-fn ensure_depth(value: &JSONValue, depth: usize, maximum: usize) -> Result<(), CodecError> {
+fn ensure_depth(value: &DataTree, depth: usize, maximum: usize) -> Result<(), CodecError> {
     if depth > maximum {
         return Err(CodecError::SchemaTooDeep { maximum });
     }
     match value {
-        JSONValue::Array(values) => {
+        DataTree::Array(values) => {
             for value in values {
                 ensure_depth(value, depth + 1, maximum)?;
             }
         }
-        JSONValue::Object(values) => {
-            for value in values.values() {
+        DataTree::Object(values) => {
+            for (_, value) in values {
                 ensure_depth(value, depth + 1, maximum)?;
             }
         }
-        JSONValue::Null
-        | JSONValue::Bool(_)
-        | JSONValue::Number(_)
-        | JSONValue::Flt(_)
-        | JSONValue::String(_) => {}
+        DataTree::Null
+        | DataTree::Bool(_)
+        | DataTree::Int(_)
+        | DataTree::Float(_)
+        | DataTree::Number(_)
+        | DataTree::TypedText(_)
+        | DataTree::Text(_)
+        | DataTree::Bytes(_) => {}
     }
     Ok(())
 }
 
-fn stringify(value: &JSONValue, depth: usize, maximum: usize) -> Result<String, CodecError> {
+fn stringify(value: &DataTree, depth: usize, maximum: usize) -> Result<String, CodecError> {
     ensure_depth(value, depth, maximum)?;
     Ok(match value {
-        JSONValue::Null => "null".to_string(),
-        JSONValue::Bool(true) => "true".to_string(),
-        JSONValue::Bool(false) => "false".to_string(),
-        JSONValue::Number(value) => value.to_string(),
-        JSONValue::Flt(value) if value.is_finite() => value.to_string(),
-        JSONValue::Flt(_) => {
+        DataTree::Null => "null".to_string(),
+        DataTree::Bool(true) => "true".to_string(),
+        DataTree::Bool(false) => "false".to_string(),
+        DataTree::Int(value) => value.to_string(),
+        DataTree::Float(value) if value.is_finite() => value.to_string(),
+        DataTree::Float(_) => {
             return Err(CodecError::InvalidMessage(
                 "JSON numbers must be finite".to_string(),
             ))
         }
-        JSONValue::String(value) => JSON::quote(value),
-        JSONValue::Array(values) => {
+        DataTree::Number(value) => value.clone(),
+        DataTree::TypedText(value) | DataTree::Text(value) => JSON::quote(value),
+        DataTree::Bytes(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(u8::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        DataTree::Array(values) => {
             let mut out = String::from("[");
             for (index, value) in values.iter().enumerate() {
                 if index > 0 {
@@ -1308,7 +1328,7 @@ fn stringify(value: &JSONValue, depth: usize, maximum: usize) -> Result<String, 
             out.push(']');
             out
         }
-        JSONValue::Object(values) => {
+        DataTree::Object(values) => {
             let mut out = String::from("{");
             for (index, (key, value)) in values.iter().enumerate() {
                 if index > 0 {
@@ -1399,7 +1419,7 @@ mod tests {
             McpRequest::new(
                 RequestId::Number(7),
                 "tools/list",
-                Some(JSONValue::Object(BTreeMap::new())),
+                Some(DataTree::Object(Vec::new())),
             )
             .unwrap(),
         );

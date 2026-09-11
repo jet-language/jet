@@ -143,7 +143,7 @@ license: "MIT OR Apache-2.0"
 repository: ""
 authority: {{ holds: {{ allow: [IO, Mem.Alloc] }} }}
 
-deps: {{
+deps: {{}}
 "#
         )
     }

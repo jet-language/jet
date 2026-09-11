@@ -1,0 +1,47 @@
+#Codable
+pub struct ProjectionRecord {
+    count: Int
+    label: String
+}
+#Codable
+pub enum ProjectionError {
+    Closed
+    Empty
+    Bounds
+}
+
+#Export(c) pub fn add(value: Int) Int -> value + 1
+#Export(c) pub fn label(value: String) String -> value
+#Export(c) pub fn project(value: ProjectionRecord) ProjectionRecord -> value
+#Codable
+pub struct ProjectionDocument {
+    bytes: [Int]
+    generation: Int
+    closed: Bool
+}
+
+#Export(c) pub fn document_open(input: [Int]) Result<ProjectionDocument, ProjectionError> -> {
+    return Ok(ProjectionDocument{bytes: input, generation: 1, closed: false})
+}
+
+#Export(c) pub fn document_bytes(owner: ProjectionDocument) Result<View<Int>, ProjectionError> -> {
+    if owner.closed -> return Err(ProjectionError.Closed)
+    if owner.bytes.len() == 0 -> return Err(ProjectionError.Empty)
+    return Ok(owner.bytes[0..owner.bytes.len() - 1])
+}
+
+#Export(c) pub fn view_at(owner: ProjectionDocument, view: View<Int>, index: Int) Result<Int, ProjectionError> -> {
+    if owner.closed -> return Err(ProjectionError.Closed)
+    if index < 0 || index >= view.len() -> return Err(ProjectionError.Bounds)
+    return Ok(view[index])
+}
+
+#Export(c) pub fn document_replace(owner: ^ProjectionDocument, input: [Int]) Result<ProjectionDocument, ProjectionError> -> {
+    if owner.closed -> return Err(ProjectionError.Closed)
+    if owner.generation == 9223372036854775807 -> return Err(ProjectionError.Bounds)
+    return Ok(ProjectionDocument{bytes: input, generation: owner.generation + 1, closed: false})
+}
+
+#Export(c) pub fn document_close(owner: ^ProjectionDocument) Result<Unit, ProjectionError> -> {
+    return Ok(())
+}

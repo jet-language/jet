@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-
+use jet_foundation::DataTree::DataTree;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LockRecordKind {
     Package,
@@ -1428,6 +1428,12 @@ fn flake_lock_node_json(node: &FlakeLockNode) -> String {
     )
 }
 
+fn data_field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+    object
+        .iter()
+        .find_map(|(name, value)| (name == key).then_some(value))
+}
+
 fn parse_flake_lock_node(raw: &str) -> Result<FlakeLockNode, FlakeGraphError> {
     let parsed = crate::JSON::parse_lenient(raw)
         .map_err(|error| FlakeGraphError::InvalidAssignment(error))?;
@@ -1436,8 +1442,7 @@ fn parse_flake_lock_node(raw: &str) -> Result<FlakeLockNode, FlakeGraphError> {
         .as_object()
         .map_err(FlakeGraphError::InvalidAssignment)?;
     let string_field = |key: &str| {
-        object
-            .get(key)
+        data_field(object, key)
             .ok_or_else(|| {
                 FlakeGraphError::InvalidAssignment(format!("missing lock node field `{key}`"))
             })?
@@ -1445,8 +1450,7 @@ fn parse_flake_lock_node(raw: &str) -> Result<FlakeLockNode, FlakeGraphError> {
             .map(str::to_string)
             .map_err(FlakeGraphError::InvalidAssignment)
     };
-    let inputs = object
-        .get("inputs")
+    let inputs = data_field(object, "inputs")
         .ok_or_else(|| FlakeGraphError::InvalidAssignment("missing lock node inputs".to_string()))?
         .as_array()
         .map_err(FlakeGraphError::InvalidAssignment)?
@@ -1455,15 +1459,14 @@ fn parse_flake_lock_node(raw: &str) -> Result<FlakeLockNode, FlakeGraphError> {
             let object = value
                 .as_object()
                 .map_err(FlakeGraphError::InvalidAssignment)?;
-            let name = object
-                .get("name")
+            let name = data_field(object, "name")
                 .ok_or_else(|| {
                     FlakeGraphError::InvalidAssignment("missing lock edge name".to_string())
                 })?
                 .as_str()
                 .map(str::to_string)
                 .map_err(FlakeGraphError::InvalidAssignment)?;
-            let target = object.get("target").ok_or_else(|| {
+            let target = data_field(object, "target").ok_or_else(|| {
                 FlakeGraphError::InvalidAssignment("missing lock edge target".to_string())
             })?;
             Ok(FlakeLockEdge {
@@ -1472,10 +1475,10 @@ fn parse_flake_lock_node(raw: &str) -> Result<FlakeLockNode, FlakeGraphError> {
             })
         })
         .collect::<Result<Vec<_>, FlakeGraphError>>()?;
-    let original = object.get("original").ok_or_else(|| {
+    let original = data_field(object, "original").ok_or_else(|| {
         FlakeGraphError::InvalidAssignment("missing lock node original".to_string())
     })?;
-    let locked = object.get("locked").ok_or_else(|| {
+    let locked = data_field(object, "locked").ok_or_else(|| {
         FlakeGraphError::InvalidAssignment("missing lock node locked".to_string())
     })?;
     let name = string_field("name")?;
@@ -1530,8 +1533,7 @@ fn parse_flake_registry(raw: &str) -> Result<FlakeRegistryEntry, FlakeGraphError
         .as_object()
         .map_err(FlakeGraphError::InvalidAssignment)?;
     let string_field = |key: &str| {
-        object
-            .get(key)
+        data_field(object, key)
             .ok_or_else(|| {
                 FlakeGraphError::InvalidAssignment(format!("missing registry field `{key}`"))
             })?
@@ -1539,11 +1541,10 @@ fn parse_flake_registry(raw: &str) -> Result<FlakeRegistryEntry, FlakeGraphError
             .map(str::to_string)
             .map_err(FlakeGraphError::InvalidAssignment)
     };
-    let original = object.get("original").ok_or_else(|| {
+    let original = data_field(object, "original").ok_or_else(|| {
         FlakeGraphError::InvalidAssignment("missing registry original".to_string())
     })?;
-    let locked = object
-        .get("locked")
+    let locked = data_field(object, "locked")
         .ok_or_else(|| FlakeGraphError::InvalidAssignment("missing registry locked".to_string()))?;
     let original = original.as_object().map_err(|_| {
         FlakeGraphError::InvalidAssignment("registry original/locked must be objects".to_string())
@@ -1557,8 +1558,14 @@ fn parse_flake_registry(raw: &str) -> Result<FlakeRegistryEntry, FlakeGraphError
         ));
     }
     let alias = string_field("alias")?;
-    let original = canonical_json(&crate::JSON::JSONValue::Object(original.clone()));
-    let locked = canonical_json(&crate::JSON::JSONValue::Object(locked.clone()));
+    let original = canonical_json(
+        data_field(object, "original")
+            .expect("validated registry original field"),
+    );
+    let locked = canonical_json(
+        data_field(object, "locked")
+            .expect("validated registry locked field"),
+    );
     if indirect_registry_alias(&original)? != Some(alias.clone()) {
         return Err(FlakeGraphError::InvalidAssignment(
             "registry record original is not the recorded indirect alias".to_string(),
@@ -1580,8 +1587,7 @@ fn parse_composition_record(raw: &str) -> Result<FlakeComposition, FlakeGraphErr
         .as_object()
         .map_err(FlakeGraphError::InvalidAssignment)?;
     let string_list = |key: &str| -> Result<Vec<String>, FlakeGraphError> {
-        object
-            .get(key)
+        data_field(object, key)
             .ok_or_else(|| {
                 FlakeGraphError::InvalidAssignment(format!("missing composition field `{key}`"))
             })?
@@ -1596,23 +1602,22 @@ fn parse_composition_record(raw: &str) -> Result<FlakeComposition, FlakeGraphErr
             })
             .collect()
     };
-    let framework = object
-        .get("framework")
+    let framework = data_field(object, "framework")
         .ok_or_else(|| {
             FlakeGraphError::InvalidAssignment("missing composition framework".to_string())
         })?
         .as_str()
         .map_err(FlakeGraphError::InvalidAssignment)?
         .to_string();
-    let per_system = match object.get("perSystem") {
-        Some(crate::JSON::JSONValue::Bool(value)) => *value,
+    let per_system = match data_field(object, "perSystem") {
+        Some(DataTree::Bool(value)) => *value,
         _ => {
             return Err(FlakeGraphError::InvalidAssignment(
                 "composition perSystem is not boolean".to_string(),
             ))
         }
     };
-    let module_sources = match object.get("moduleSources") {
+    let module_sources = match data_field(object, "moduleSources") {
         Some(_) => string_list("moduleSources")?,
         None => Vec::new(),
     };
@@ -1922,7 +1927,7 @@ fn quoted_rhs(value: &str) -> Option<String> {
 
 fn flake_lock_node_values(
     nodes: &[FlakeLockNode],
-) -> Result<BTreeMap<String, crate::JSON::JSONValue>, FlakeGraphError> {
+) -> Result<BTreeMap<String, DataTree>, FlakeGraphError> {
     nodes
         .iter()
         .map(|node| {
@@ -1939,13 +1944,13 @@ fn flake_lock_node_values(
                             ))
                         })
                 })
-                .collect::<Result<BTreeMap<_, _>, _>>()?;
+                .collect::<Result<Vec<_>, _>>()?;
             Ok((
                 node.name.clone(),
-                crate::JSON::JSONValue::Object(BTreeMap::from([(
+                DataTree::Object(vec![(
                     "inputs".to_string(),
-                    crate::JSON::JSONValue::Object(inputs),
-                )])),
+                    DataTree::Object(inputs),
+                )]),
             ))
         })
         .collect()
@@ -1990,20 +1995,29 @@ fn flake_query_fields(query: &str) -> Option<BTreeMap<String, String>> {
     Some(fields)
 }
 
-fn canonical_json(value: &crate::JSON::JSONValue) -> String {
+fn canonical_json(value: &DataTree) -> String {
     match value {
-        crate::JSON::JSONValue::Null => "null".to_string(),
-        crate::JSON::JSONValue::Bool(value) => value.to_string(),
-        crate::JSON::JSONValue::Number(value) => value.to_string(),
-        crate::JSON::JSONValue::Flt(value) => {
+        DataTree::Null => "null".to_string(),
+        DataTree::Bool(value) => value.to_string(),
+        DataTree::Int(value) => value.to_string(),
+        DataTree::Float(value) => {
             if value.is_finite() && value.fract() == 0.0 {
                 format!("{value:.0}")
             } else {
                 value.to_string()
             }
         }
-        crate::JSON::JSONValue::String(value) => crate::JSON::quote(value),
-        crate::JSON::JSONValue::Array(values) => format!(
+        DataTree::Number(value) => value.clone(),
+        DataTree::Text(value) | DataTree::TypedText(value) => crate::JSON::quote(value),
+        DataTree::Bytes(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(u8::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        DataTree::Array(values) => format!(
             "[{}]",
             values
                 .iter()
@@ -2011,7 +2025,7 @@ fn canonical_json(value: &crate::JSON::JSONValue) -> String {
                 .collect::<Vec<_>>()
                 .join(",")
         ),
-        crate::JSON::JSONValue::Object(values) => format!(
+        DataTree::Object(values) => format!(
             "{{{}}}",
             values
                 .iter()
@@ -2024,12 +2038,8 @@ fn canonical_json(value: &crate::JSON::JSONValue) -> String {
     }
 }
 
-fn canonical_object(
-    object: &std::collections::BTreeMap<String, crate::JSON::JSONValue>,
-    key: &str,
-) -> String {
-    object
-        .get(key)
+fn canonical_object(object: &[(String, DataTree)], key: &str) -> String {
+    data_field(object, key)
         .map(canonical_json)
         .unwrap_or_else(|| "{}".to_string())
 }
@@ -2041,7 +2051,7 @@ fn indirect_registry_alias(raw: &str) -> Result<Option<String>, FlakeGraphError>
     let object = value.as_object().map_err(|error| {
         FlakeGraphError::Io(format!("flake.lock original metadata is invalid: {error}"))
     })?;
-    let Some(kind) = object.get("type") else {
+    let Some(kind) = data_field(object, "type") else {
         return Ok(None);
     };
     let kind = kind.as_str().map_err(|error| {
@@ -2050,8 +2060,7 @@ fn indirect_registry_alias(raw: &str) -> Result<Option<String>, FlakeGraphError>
     if kind != "indirect" {
         return Ok(None);
     }
-    let alias = object
-        .get("id")
+    let alias = data_field(object, "id")
         .ok_or_else(|| FlakeGraphError::Io("flake.lock indirect input has no id".to_string()))?
         .as_str()
         .map_err(|error| {
@@ -2181,16 +2190,16 @@ fn flake_source_identity(url: &str) -> Option<FlakeSourceIdentity> {
 }
 
 fn json_string_field<'a>(
-    object: &'a BTreeMap<String, crate::JSON::JSONValue>,
+    object: &'a [(String, DataTree)],
     key: &str,
 ) -> Option<&'a str> {
-    object.get(key).and_then(|value| value.as_str().ok())
+    data_field(object, key).and_then(|value| value.as_str().ok())
 }
 
 fn source_query_matches(
     query: &BTreeMap<String, String>,
-    original: &BTreeMap<String, crate::JSON::JSONValue>,
-    locked: &BTreeMap<String, crate::JSON::JSONValue>,
+    original: &[(String, DataTree)],
+    locked: &[(String, DataTree)],
     validate_revision: bool,
 ) -> bool {
     query.iter().all(|(key, expected)| {
@@ -2200,9 +2209,8 @@ fn source_query_matches(
         let actual = if key == "rev" {
             json_string_field(locked, key)
         } else {
-            original
-                .get(key)
-                .or_else(|| locked.get(key))
+            data_field(original, key)
+                .or_else(|| data_field(locked, key))
                 .and_then(|value| value.as_str().ok())
         };
         actual == Some(expected.as_str())
@@ -2212,7 +2220,7 @@ fn source_query_matches(
 fn source_revision_matches(
     identity_revision: Option<&String>,
     input: &FlakeInput,
-    locked: &BTreeMap<String, crate::JSON::JSONValue>,
+    locked: &[(String, DataTree)],
     validate_revision: bool,
 ) -> bool {
     if !validate_revision {
@@ -2229,8 +2237,8 @@ fn validate_root_input_identity(
     input: &FlakeInput,
     node_name: &str,
     node: &FlakeLockNode,
-    root_inputs: &BTreeMap<String, crate::JSON::JSONValue>,
-    nodes: &BTreeMap<String, crate::JSON::JSONValue>,
+    root_inputs: &BTreeMap<String, DataTree>,
+    nodes: &BTreeMap<String, DataTree>,
     validate_revision: bool,
 ) -> Result<(), FlakeGraphError> {
     let original = crate::JSON::parse(&node.original).map_err(|error| {
@@ -2397,23 +2405,22 @@ fn validate_semantic_root_inputs(graph: &FlakeGraph) -> Result<(), FlakeGraphErr
 fn apply_flake_lock(graph: &mut FlakeGraph, text: &str) -> Result<(), FlakeGraphError> {
     let parsed = crate::JSON::parse_lenient(text)
         .map_err(|error| FlakeGraphError::Io(format!("flake.lock is invalid: {error}")))?;
-    let root_inputs = parsed
-        .value
-        .get("nodes")
-        .ok()
-        .and_then(|value| value.as_object().ok())
-        .and_then(|nodes| nodes.get("root"))
-        .and_then(|value| value.get("inputs").ok())
-        .and_then(|value| value.as_object().ok())
-        .ok_or_else(|| {
-            FlakeGraphError::Io("flake.lock has no nodes.root.inputs map".to_string())
-        })?;
     let nodes = parsed
         .value
         .get("nodes")
         .ok()
         .and_then(|value| value.as_object().ok())
         .ok_or_else(|| FlakeGraphError::Io("flake.lock has no nodes map".to_string()))?;
+    let nodes = nodes.iter().cloned().collect::<BTreeMap<_, _>>();
+    let root_inputs = nodes
+        .get("root")
+        .and_then(|value| value.as_object().ok())
+        .and_then(|object| data_field(object, "inputs"))
+        .and_then(|value| value.as_object().ok())
+        .map(|values| values.iter().cloned().collect::<BTreeMap<_, _>>())
+        .ok_or_else(|| {
+            FlakeGraphError::Io("flake.lock has no nodes.root.inputs map".to_string())
+        })?;
 
     graph.lock_nodes = nodes
         .iter()
@@ -2426,8 +2433,8 @@ fn apply_flake_lock(graph: &mut FlakeGraph, text: &str) -> Result<(), FlakeGraph
                     "flake.lock node name is empty".to_string(),
                 ));
             }
-            let has_original = object.contains_key("original");
-            let has_locked = object.contains_key("locked");
+            let has_original = data_field(object, "original").is_some();
+            let has_locked = data_field(object, "locked").is_some();
             if name == "root" {
                 if has_original || has_locked {
                     return Err(FlakeGraphError::Io(
@@ -2441,16 +2448,14 @@ fn apply_flake_lock(graph: &mut FlakeGraph, text: &str) -> Result<(), FlakeGraph
                 )));
             }
             if name != "root" {
-                let original = object
-                    .get("original")
+                let original = data_field(object, "original")
                     .and_then(|value| value.as_object().ok())
                     .ok_or_else(|| {
                         FlakeGraphError::Io(format!(
                             "flake.lock node `{name}` original metadata is not an object"
                         ))
                     })?;
-                let locked = object
-                    .get("locked")
+                let locked = data_field(object, "locked")
                     .and_then(|value| value.as_object().ok())
                     .ok_or_else(|| {
                         FlakeGraphError::Io(format!(
@@ -2463,7 +2468,7 @@ fn apply_flake_lock(graph: &mut FlakeGraph, text: &str) -> Result<(), FlakeGraph
                     )));
                 }
             }
-            let inputs = match object.get("inputs") {
+            let inputs = match data_field(object, "inputs") {
                 None => Vec::new(),
                 Some(value) => value
                     .as_object()
@@ -2494,8 +2499,8 @@ fn apply_flake_lock(graph: &mut FlakeGraph, text: &str) -> Result<(), FlakeGraph
         .iter()
         .map(|node| node.name.as_str())
         .collect::<BTreeSet<_>>();
-    for (input, reference) in root_inputs {
-        let Some(node) = lock_node_name(Some(reference), nodes, "root")? else {
+    for (input, reference) in &root_inputs {
+        let Some(node) = lock_node_name(Some(reference), &nodes, "root")? else {
             return Err(FlakeGraphError::Io(format!(
                 "flake.lock root input `{input}` has no node reference"
             )));
@@ -2541,7 +2546,7 @@ fn apply_flake_lock(graph: &mut FlakeGraph, text: &str) -> Result<(), FlakeGraph
                 input.name
             )));
         };
-        let Some(node_name) = lock_node_name(Some(reference), nodes, "root")? else {
+        let Some(node_name) = lock_node_name(Some(reference), &nodes, "root")? else {
             return Err(FlakeGraphError::Io(format!(
                 "flake.lock root input `{}` has no node reference",
                 input.name
@@ -2553,14 +2558,14 @@ fn apply_flake_lock(graph: &mut FlakeGraph, text: &str) -> Result<(), FlakeGraph
                 input.name
             )));
         };
-        validate_root_input_identity(input, &node_name, node, root_inputs, nodes, false)?;
+        validate_root_input_identity(input, &node_name, node, &root_inputs, &nodes, false)?;
         let locked = crate::JSON::parse(&node.locked).map_err(|error| {
             FlakeGraphError::Io(format!("flake.lock node `{node_name}` is invalid: {error}"))
         })?;
         let locked = locked.as_object().map_err(|error| {
             FlakeGraphError::Io(format!("flake.lock node `{node_name}` is invalid: {error}"))
         })?;
-        let Some(exact) = locked.get("rev").and_then(|value| value.as_str().ok()) else {
+        let Some(exact) = json_string_field(locked, "rev") else {
             if !input.revision.is_empty() || !input.follows.is_empty() {
                 continue;
             }
@@ -2581,25 +2586,27 @@ fn apply_flake_lock(graph: &mut FlakeGraph, text: &str) -> Result<(), FlakeGraph
 }
 
 fn lock_node_name(
-    value: Option<&crate::JSON::JSONValue>,
-    nodes: &BTreeMap<String, crate::JSON::JSONValue>,
+    value: Option<&DataTree>,
+    nodes: &BTreeMap<String, DataTree>,
     start_node: &str,
 ) -> Result<Option<String>, FlakeGraphError> {
     let Some(value) = value else {
         return Ok(None);
     };
     fn resolve(
-        value: &crate::JSON::JSONValue,
-        nodes: &BTreeMap<String, crate::JSON::JSONValue>,
+        value: &DataTree,
+        nodes: &BTreeMap<String, DataTree>,
         path: &mut BTreeSet<String>,
         start_node: &str,
     ) -> Result<Option<String>, FlakeGraphError> {
         match value {
-            crate::JSON::JSONValue::String(value) if !value.is_empty() => Ok(Some(value.clone())),
-            crate::JSON::JSONValue::String(_) => Err(FlakeGraphError::Io(
+            DataTree::Text(value) | DataTree::TypedText(value) if !value.is_empty() => {
+                Ok(Some(value.clone()))
+            }
+            DataTree::Text(_) | DataTree::TypedText(_) => Err(FlakeGraphError::Io(
                 "flake.lock node reference is empty".to_string(),
             )),
-            crate::JSON::JSONValue::Array(values) => {
+            DataTree::Array(values) => {
                 if values.is_empty() {
                     return Ok(None);
                 }
@@ -2643,15 +2650,16 @@ fn lock_node_name(
                         ))
                     })?;
                     let inputs = node
-                        .get("inputs")
+                        .as_object()
                         .ok()
+                        .and_then(|object| data_field(object, "inputs"))
                         .and_then(|value| value.as_object().ok())
                         .ok_or_else(|| {
                             FlakeGraphError::Io(format!(
                                 "flake.lock follow path node `{current}` has no inputs map"
                             ))
                         })?;
-                    let target = inputs.get(segment).ok_or_else(|| {
+                    let target = data_field(inputs, segment).ok_or_else(|| {
                         FlakeGraphError::Io(format!(
                             "flake.lock follow path `{segment}` is missing from node `{current}`"
                         ))
@@ -3852,23 +3860,20 @@ mod flake_tests {
         )
         .unwrap();
 
-        let expected_revisions = expected
-            .get("input_revisions")
+        let expected_revisions = data_field(expected, "input_revisions")
             .unwrap()
             .as_object()
             .unwrap();
         for input in &graph.inputs {
             assert_eq!(
                 input.revision,
-                expected_revisions
-                    .get(&input.name)
+                data_field(expected_revisions, &input.name)
                     .unwrap()
                     .as_str()
                     .unwrap()
             );
         }
-        let expected_nodes = expected
-            .get("lock_nodes")
+        let expected_nodes = data_field(expected, "lock_nodes")
             .unwrap()
             .as_array()
             .unwrap()
@@ -3895,22 +3900,21 @@ mod flake_tests {
         assert_eq!(systems.target, "[\"systems\"]");
 
         let registry = graph.registries.first().unwrap();
-        let expected_registry = expected.get("registry").unwrap().as_object().unwrap();
+        let expected_registry = data_field(expected, "registry").unwrap().as_object().unwrap();
         assert_eq!(
             registry.alias,
-            expected_registry.get("alias").unwrap().as_str().unwrap()
+            data_field(expected_registry, "alias").unwrap().as_str().unwrap()
         );
         assert_eq!(
             registry.node,
-            expected_registry.get("node").unwrap().as_str().unwrap()
+            data_field(expected_registry, "node").unwrap().as_str().unwrap()
         );
         let locked = crate::JSON::parse(&registry.locked).unwrap();
         let locked = locked.as_object().unwrap();
         for field in ["type", "owner", "repo"] {
             assert_eq!(
-                locked.get(field).unwrap().as_str().unwrap(),
-                expected_registry
-                    .get(&format!("locked_{field}"))
+                data_field(locked, field).unwrap().as_str().unwrap(),
+                data_field(expected_registry, &format!("locked_{field}"))
                     .unwrap()
                     .as_str()
                     .unwrap()
@@ -4030,7 +4034,9 @@ mod flake_tests {
         .unwrap()
         .as_object()
         .unwrap()
-        .clone();
+        .iter()
+        .cloned()
+        .collect::<BTreeMap<_, _>>();
         let reference = crate::JSON::parse(r#"["flake-utils", "systems"]"#).unwrap();
         assert_eq!(
             lock_node_name(Some(&reference), &nodes, "root").unwrap(),

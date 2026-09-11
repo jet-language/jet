@@ -8,32 +8,9 @@ use crate::Codegen::TIR::TRequireKind;
 use crate::Diagnostics::Span;
 use crate::AST::{Expr, Type};
 
-pub(crate) const RESOURCE_CLEANUP_MARKER: &str = "__JET_RESOURCE_CLEANUP__";
 
 pub(crate) fn clone_env(env: &LowerEnv) -> LowerEnv {
-    LowerEnv {
-        locals: env.locals.clone(),
-        fn_name: env.fn_name.clone(),
-        ret_ty: env.ret_ty.clone(),
-        fallback_subject: env.fallback_subject,
-        self_owner: env.self_owner.clone(),
-        string_view_locals: env.string_view_locals.clone(),
-        borrowed_locals: env.borrowed_locals.clone(),
-        resource_locals: env.resource_locals.clone(),
-        resource_take_targets: env.resource_take_targets.clone(),
-        gc_locals: env.gc_locals.clone(),
-        uninit_fixed_locals: env.uninit_fixed_locals.clone(),
-        gc_return: env.gc_return,
-        split_view_handles: env.split_view_handles.clone(),
-        cloned_types: env.cloned_types.clone(),
-        send_fn_locals: env.send_fn_locals.clone(),
-        binder_refs: env.binder_refs.clone(),
-        txn_handle: env.txn_handle.clone(),
-        txn_undo_needed: env.txn_undo_needed.clone(),
-        sentries_enabled: env.sentries_enabled,
-        sentries_fenced: env.sentries_fenced,
-        stack_sentry_needed: env.stack_sentry_needed.clone(),
-    }
+    env.clone()
 }
 
 pub(crate) fn fork_panic(env: &LowerEnv) -> LowerEnv {

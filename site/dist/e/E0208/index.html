@@ -34,34 +34,34 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for E0208</p>
+<p class="diag-copy fix" data-registry-field="fix">Place the raw pointer operation inside an audited `#Unsafe` region.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0208</code>: <code>tests/ui/lowlevel_e3101.stderr</code>.</p>
-<pre class="diag">Error [E0208]: taking a raw pointer requires `#Unsafe`
+<pre class="diag">Error [E0208]: Taking a raw pointer requires `#Unsafe`
   --&gt; tests/ui/lowlevel_e3101.jet:4:10
     |
   4 |     p :: *Int{*value}
     |          ^^^^^^^^^^^^
  Why: `*x` takes a raw pointer to `x`; that is a raw memory operation, only valid inside a `#Unsafe { … }` region
- Fix: wrap this in `#Unsafe(&quot;why this is safe&quot;) { … }` — to dereference a pointer use postfix `p.*`
+ Fix: Wrap this in `#Unsafe(&quot;why this is safe&quot;) { … }` — to dereference a pointer use postfix `p.*`
 More: jet-lang.dev/e/E0208
 
-Error [E0208]: taking a raw pointer requires `#Unsafe`
+Error [E0208]: Taking a raw pointer requires `#Unsafe`
   --&gt; tests/ui/lowlevel_e3101.jet:4:15
     |
   4 |     p :: *Int{*value}
     |               ^^^^^^
  Why: `*x` takes a raw pointer to `x`; that is a raw memory operation, only valid inside a `#Unsafe { … }` region
- Fix: wrap this in `#Unsafe(&quot;why this is safe&quot;) { … }` — to dereference a pointer use postfix `p.*`
+ Fix: Wrap this in `#Unsafe(&quot;why this is safe&quot;) { … }` — to dereference a pointer use postfix `p.*`
 More: jet-lang.dev/e/E0208
 
-Error [E0208]: reading through a raw pointer requires `#Unsafe`
+Error [E0208]: Reading through a raw pointer requires `#Unsafe`
   --&gt; tests/ui/lowlevel_e3101.jet:5:12
     |
   5 |     return p.*
     |            ^^^
  Why: `p.*` dereferences a raw pointer; that is a raw memory access, only valid inside a `#Unsafe { … }` region
- Fix: wrap this in `#Unsafe(&quot;why this is safe&quot;) { … }`
+ Fix: Wrap this in `#Unsafe(&quot;why this is safe&quot;) { … }`
 More: jet-lang.dev/e/E0208
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

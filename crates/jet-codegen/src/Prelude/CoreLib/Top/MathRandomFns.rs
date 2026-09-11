@@ -56,6 +56,12 @@ fn jet_std_math_ceil_f32(x: f32) -> f32 {
 
 thread_local! { static JET_RNG: std::cell::Cell<u64> = std::cell::Cell::new(0x4d595df4d0f33173); }
 fn jet_rng_next() -> u64 {
+    // D-TEST-WORLD1=A: ordinary non-cryptographic random draws use the
+    // active world's isolated stream; production ambient behavior remains the
+    // fallback outside a world.
+    if let Some(value) = jet_scheduler_world_rng_next() {
+        return value;
+    }
     JET_RNG.with(|cell| {
         let mut x = cell.get();
         x ^= x << 7;
@@ -66,6 +72,9 @@ fn jet_rng_next() -> u64 {
     })
 }
 fn jet_std_random_seed(n: i64) {
+    if jet_scheduler_world_rng_seed(n) {
+        return;
+    }
     JET_RNG.with(|cell| cell.set(n as u64));
 }
 fn jet_std_random_int(low: i64, high: i64) -> i64 {

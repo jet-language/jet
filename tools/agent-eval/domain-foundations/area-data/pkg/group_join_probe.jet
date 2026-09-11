@@ -1,0 +1,41 @@
+use core.data as data
+
+#Codable
+struct Row { team: String value: Float }
+
+#Codable
+struct Owner { team: String owner: String }
+
+#Codable
+struct Summary { team: String mean: Float }
+
+#Codable
+struct Joined { team: String owner: String mean: Float }
+
+fn join_summaries(rows: [Summary], owners: [Owner]) [Joined] -> {
+    out := [Joined]{}
+    loop row in rows {
+        loop owner in owners {
+            if row.team == owner.team {
+                out.push(Joined{team: row.team, owner: owner.owner, mean: row.mean})
+                break
+            }
+        }
+    }
+    return out
+}
+
+fn run() {
+    rows :: data.csv<Row>("team,value\nA,2.0\nB,4.0\nA,6.0\n") ?? panic("csv")
+    groups :: data.query(rows)
+        .group_by(row -> row.team)
+        .mean(row -> row.value)
+        .collect() ?? panic("groups")
+    summaries := [Summary]{}
+    loop group in groups {
+        summaries.push(Summary{team: group.key, mean: group.value})
+    }
+    owners :: [Owner]{{team: "A", owner: "Ada"}, {team: "B", owner: "Grace"}}
+    joined :: join_summaries(summaries, owners)
+    print("groups={groups.len()} joined={joined.len()} {joined[0].owner} {joined[1].mean}")
+}

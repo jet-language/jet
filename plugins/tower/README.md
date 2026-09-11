@@ -48,9 +48,9 @@ node <tower-dir>/tower.mjs serve --open        # board at http://localhost:7878
 
 `init` creates `plugins/tower/.tower/` beside this app: `tower.json` (all state),
 `config.json` (public terminology + taxonomies), `backups/` (rolling,
-automatic), and ignore rules for `secrets.json` plus crash-residue
-`.secrets.json.tmp-*` files. Commit `plugins/tower/.tower/` to share the board with the
-team; backups and both secret-file forms are gitignored.
+automatic), and historical ignore rules for `secrets.json` plus crash-residue
+`.secrets.json.tmp-*` files. Commit `plugins/tower/.tower/` to share the board with
+the team. The old credential-file patterns stay ignored so local files never become trackable.
 
 Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json --name "My Project"`.
 
@@ -58,7 +58,9 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
 
 - **Epochs** — the major groupings of work (`epoch add/update/current`).
 - **Milestones** — goals within an epoch. Linked cards move a milestone to
-  `review-ready` when all are done. Only `milestone verify` can make it `met`.
+  `review-ready` when all are done. `milestone closeout` records the frozen
+  source commit that authorizes broad proof. Only `milestone verify` can make
+  the tokened milestone `met`.
 - **Cards** — the work. Stages: deciding → planning → ready → building →
   review → done (+ frozen). A fresh card lands in `planning` — no owner
   greenlight step. Tower picks review, building, implement, then plan cards.
@@ -66,10 +68,14 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
   internal renewable work lease, `plan`, `log`, and `refs`
   (explicit doc-path pointers, merged with auto-harvested ones in `tower brief`).
 - **Exit criteria** — a card needs a nonempty `criteria[]` checklist for agent
-  closure. Every row must be `met` or `verified`. A builder marks rows `met`;
-  the orchestrator closes the card. `verified` is milestone-review signoff,
-  and its reviewer must differ from the builder. There is no separate card
-  verify step. Flag a card `needsAcceptance` **only** for owner visual/UI/UX/DX
+  closure. Every row must be `met` or `verified`. Workers return `CHECK OK` or
+  `DOCS ONLY` and never write Tower. After integration, the orchestrator runs
+  the exact proof, marks rows `met`, and closes the card immediately. An
+  actively claimed card with every row settled and no open gate blocks every
+  further claim or brief until it closes, reopens, or gains a real gate.
+  `verified` is milestone-review signoff, and its reviewer must differ from the
+  agent that marked the row met. There is no separate card verify step. Flag a
+  card `needsAcceptance` **only** for owner visual/UI/UX/DX
   taste or a real environment eyes-only check. That mints an accept/bounce
   ballot once the checklist is clean. Bare `verify` is legacy agent state and
   does not appear in the owner's Now queue. Integration and no-known-blocker
@@ -78,17 +84,20 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
   `--by owner`, and agent quotes cannot resolve `D-ACCEPT-*`; rejected
   attempts remain in the audit log.
 - **Decisions** — ballot-ready choices attached to a card; only the owner
-  ratifies. Full ballots contain a complete base draft followed by
-  boil-the-ocean, hybrid, cooperative, fresh-agent RLI5 beginner, and
-  rival-family adversarial reviews. Short ballots contain the same complete
-  base draft without reviews and require an explicit owner request. The
+  ratifies. New full ballots contain a complete base draft followed by
+  fresh-agent RLI5 beginner and separate fresh-agent adversarial reviews;
+  model families may match. Historical review records stay unchanged.
+  Short ballots contain the same complete base draft without reviews and
+  are the default for one mechanism with at most three options. The
   `simple` skill applies to every visible ballot field. A card with an open
   decision surfaces as **Decide** no matter its stage.
 - **Milestone review** — milestone criteria use the same `open` → `met` →
-  `verified` flow. `tower milestone verify <id> --evidence "…" --by X` works
-  only when every linked card is done and every milestone criterion is verified.
-  It stores the reviewer, evidence, and timestamp. Reopening a linked card or
-  milestone criterion clears the milestone signoff.
+  `verified` flow. After all cards close, freeze the source commit with
+  `scripts/agent/closeout-gate.mjs open <id> --by X`; broad proof is refused
+  before that. `tower milestone verify <id> --evidence "…" --by X` works only
+  when every linked card is done, every milestone criterion is verified, and
+  the token exists. Reopening a linked card or milestone criterion clears the
+  token and signoff.
 - **Questions** — owner ⇄ agent threads on a card.
 - **Ideas** — capture bay; promote to a card when real.
 - **Events** — append-only audit trail of every mutation, with `--by` attribution.
@@ -113,7 +122,7 @@ tower message   list|add|done
 tower papercut  list|add|resolve
 tower idea      list|add|promote|delete
 tower epoch     list|add|update|current
-tower milestone list|add|update|criteria|verify|delete
+tower milestone list|add|update|criteria|closeout|verify|delete
 tower archive   status | show <id> | restore <id>
 tower init | serve | import
 ```
@@ -133,33 +142,44 @@ itself is a card. It never fails on a card lane, so logging never derails the
 task. The **Papercuts** tab groups them by day; the owner clears a handled one
 with `tower papercut resolve <id> --by owner`.
 
-The **Guidance** tab sits to the right of **Papercuts**. It shows
-`docs/agents/owner-guidance.md`, the owner's source of truth for agent behavior.
-Agents can read it through the repository. Only an authenticated owner UI
-session can save changes, and the normal Docs API cannot update, archive, or
-delete it.
+The **AGENTS.md** tab sits to the right of **Papercuts**. It reads and edits
+the repository-root `AGENTS.md`, not a plugin policy file. Changing the editor
+does not rewrite policy content.
 
-`tower brief` is the one-shot agent work packet (#462): card, live blocker
-state, exit criteria, every linked decision copied verbatim, open questions,
-`refs` (explicit + harvested from body/plan), recent log, and the standing
-rules footer — everything needed to start a card with no other reads. No
-`ref` → picks the top card the same way `next` would. `--agent` takes a
-renewable 24-hour work lease (unless `--no-claim`); without `--agent` it is
-read-only. Expired leases never block work, and owner-facing card views do
-not show durable ownership markings.
+The **Docs** tab groups durable files into exactly four sections: **Spec**,
+**Audits**, **Research**, and **Proposals**. `docs/README.md` remains navigation
+for the repository and is not a fifth Docs section. There is no Docs archive
+command; use the existing owner deletion action when a document must be
+removed.
 
-`--json` everywhere for machine output; `--file x.json` / `--file -` (stdin)
-for rich payloads; cards accept `#num` or id; `--by <name>` attributes every
-write; `--expect-rev N` gives optimistic concurrency (exit 2 on conflict).
+Use **Save** or **Ctrl/Cmd+S** to save. Each save includes the content revision
+loaded with the draft. If the file changed, Tower rejects the save and keeps
+the draft. Copy your edits before using **Cancel** or **Escape** to load the
+latest file, then merge your changes into it.
+
+Drafts survive navigation between Tower tabs and failed requests. Edits typed
+while a save is pending remain unsaved after its acknowledgement. Drafts are
+held only in the current page; canceling, reloading, or closing it discards them.
+
+This is one fixed-path editor, not a general source editor. Generic Docs
+routes cannot write root files. The editor rejects symlinks and hard links
+and preserves read/write/execute permissions. After a server update, the owner
+must restart an outdated Tower process and reload the page before using the new
+editor.
 
 ## Live + remote
 
 - **SSE** — the UI updates over `/api/stream` the instant anything changes;
   passive updates never disturb reading, typing, or an open ballot.
-- **Auth** — without a configured token, Tower binds to loopback and keeps
-  board access local. Set `"auth": {"token": "…"}` in the untracked
-  `plugins/tower/.tower/secrets.json` to permit authenticated remote devices
-  (`/?key=<token>` once per device; localhost remains exempt).
+- **LAN access** — Tower listens on the local network. Open
+  `http://<machine-hostname>:7878` or `http://<machine-ip>:7878` from another
+  device. No credentials or setup key are needed. Every device on the LAN can
+  read and change the board, so do not expose Tower to the public Internet.
+  Browser mutations require same-origin evidence. CLI mutations must send the
+  explicit `X-Tower-Client: cli` header.
+- **Acceptance** — opening the board silently creates a short-lived,
+  HttpOnly owner interaction session. Accept and Bounce use a one-time
+  challenge tied to that session. This is not a login or an access key.
 - **PWA** — installable app (offline shell). Live updates use SSE; web push
   was removed (owner D-VERDICT-460-1).
 - **Undo** — every owner action shows an Undo toast (`tower undo` in the
@@ -173,6 +193,19 @@ write; `--expect-rev N` gives optimistic concurrency (exit 2 on conflict).
 - **Recently decided** — a quiet, collapsed strip on Now lists every ratified
   decision still on the live board ("reversible for N days") with a one-tap
   Reopen — the walk-back buffer, surfaced.
+
+`tower brief` is the one-shot agent work packet (#462): card, live blocker
+state, exit criteria, every linked decision copied verbatim, open questions,
+`refs` (explicit + harvested from body/plan), recent log, and the standing
+rules footer — everything needed to start a card with no other reads. No
+`ref` → picks the top card the same way `next` would. `--agent` takes a
+renewable 24-hour work lease (unless `--no-claim`); without `--agent` it is
+read-only. Expired leases never block work, and owner-facing card views do
+not show durable ownership markings.
+
+`--json` everywhere for machine output; `--file x.json` / `--file -` (stdin)
+for rich payloads; cards accept `#num` or id; `--by <name>` attributes every
+write; `--expect-rev N` gives optimistic concurrency (exit 2 on conflict).
 
 ## Reliability
 
@@ -203,20 +236,10 @@ Everything is optional; the UI and validation follow whatever you set.
 `retireAfterDays` is the walk-back buffer before a done card / ratified
 decision moves to `plugins/tower/.tower/history.json`.
 
-Runtime credentials belong only in ignored `plugins/tower/.tower/secrets.json`:
-
-```json
-{
-  "auth": { "token": "replace-with-a-random-access-key" }
-}
-```
-
-Auth token (optional) belongs only in ignored `plugins/tower/.tower/secrets.json`. Tower
-never provisions push credentials — web push was removed.
-If an older tracked `config.json` contains `auth` or `push`, Tower refuses to
-start: remove those fields, rotate any exposed auth token, then put only auth
-in `secrets.json`. Delete any leftover `push` key from secrets. Tower never
-migrates committed credentials forward.
+There is no runtime credential file. `auth` and `push` are removed fields.
+Tower rejects them in tracked `config.json` with `ConfigError`; remove those
+fields from old config before starting Tower. Existing ignored `secrets.json`
+files are not read and do not affect startup or access.
 
 ## UI
 

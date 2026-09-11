@@ -7,9 +7,18 @@ description: >-
 
 # Spec Compliance Audit
 
-Compare `docs/spec/syntax-decisions.md` (and related ratified spec) to parser,
-sema, tests, and examples. Status keys: `shipped`, `partial`, `gap`, `gated`,
-`declined`, `stale-doc`. Cite paths. Do not invent or reopen syntax.
+Locate the relevant ratified section by searching
+`docs/spec/syntax-decisions.md` for the requested feature or decision. Follow
+only linked or task-triggered spec sections; do not preload unrelated specs.
+Compare the selected ratified law to parser, sema, tests, and examples. Status
+keys: `shipped`, `partial`, `gap`, `gated`, `declined`, `stale-doc`. Cite paths.
+Do not invent or reopen syntax.
+
+Before running, read `.agents/skills/_shared/audit-dispositions.md`. It owns
+shared publication, workflow-boundary, and disposition mechanics; this method
+still owns comparison against ratified law, live probes, status keys, and
+stopping conditions.
+
 
 ## The standing lens (partial)
 
@@ -34,18 +43,10 @@ distance:
 
 ## Output
 
-Write one markdown report under `docs/audits/` via the Tower CLI (never hand-edit board JSON):
-
-```
-node plugins/tower/tower.mjs docs add --section audits --id <skill>-YYYY-MM-DD --title "…" --file -
-```
-
-Or `docs update docs/audits/<skill>-YYYY-MM-DD.md --file -` for the same day only when the owner asks to revise that run.
-Never overwrite a different day's note. Do not write reports under `docs/plans/`.
-
-Follow `AGENTS.md`. Pick this skill alone — do not chain other audit/research
-skills unless the owner asks.
-
-Before close, add the required per-finding disposition table from
-`.agents/skills/_shared/audit-dispositions.md`. Every finding must name a Tower
-card, a ratified decision, or a concrete no-action reason.
+This is a report-only method. Write one markdown report under `docs/audits/`
+through the project-approved non-serve CLI. Do not create Tower work or
+implementation edits unless the owner explicitly asks. Read
+`.agents/skills/_shared/audit-dispositions.md` before the run and use it for
+publication rules and the required finding-disposition table. Report completion
+does not change a `gap`, `partial`, or `gated` status into implementation
+completion.

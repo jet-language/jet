@@ -34,12 +34,32 @@ test('lane derivation follows phases and decisions', () => {
   assert.equal(db.laneOf(db.findCard(s, '#1'), s.decisions, s.cards).lane, 'plan');
 
   st.mutate((s2) => db.addDecision(s2, { cardId: '#1', id: 'D-T1', title: 'Pick one',
-    ballotMode: 'full', reviewPasses: { base: 'The base pass completed the ballot.', boilOcean: 'The breadth review checked the broad solution space.', hybrid: 'The hybrid pass combined compatible strengths.', cooperative: 'The cooperative pass strengthened every option.', beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.', adversarial: 'Author model family: family-a. Adversarial model family: family-b. The adversarial pass attacked the recommendation.' },
+    ballotMode: 'full', reviewPasses: {
+      beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.',
+      adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
+    },
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'A',
-    recommendation: { why: 'A wins here.', whyNot: [{ key: 'B', reason: 'B loses the needed behavior.' }], tradeoff: 'A adds one visible step.' },
-    hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Keep it.' }, { key: 'B', aspect: 'B is brief.', use: 'Borrow its short names.' }] },
+    recommendation: {
+      why: 'A wins here.', gains: ['Behavior stays visible'],
+      losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }],
+      whyNot: [{ key: 'B', reason: 'B loses the needed behavior.' }], tradeoff: 'A adds one visible step.',
+    },
+    hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Borrow its clear names.' }, { key: 'B', aspect: 'B is brief.', use: 'Keep it.' }] },
     options: [{ key: 'A', name: 'a', detail: 'A is explicit.', code: 'a()' }, { key: 'B', name: 'b', detail: 'B is brief.', code: 'b()' }],
-    surface: { gist: 'Which option should Jet ship?', lesson: 'Jet has no way to decide today. This ballot picks the approach.', trio: { current: { note: 'Jet today: nothing.', code: 'jet run x.jet\nError [E1001]' }, wild: { lang: 'Python', note: 'The common tool does X in one call.', code: 'x()' } }, options: [{ key: 'A', name: 'Option A', gist: 'Explicit call.', gains: ['Behavior stays visible'], losses: ['One more step'], proposed: { code: 'a()' } }, { key: 'B', name: 'Option B', gist: 'Short call.', gains: ['Shortest first script'], losses: ['Loses the needed guarantee'], proposed: { code: 'b()' } }], recommendation: { rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'], losses: ['One more step'], whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step.' } } }));
+    surface: {
+      gist: 'Which option should Jet ship?', lesson: 'Jet has no way to decide today. This ballot picks the approach.',
+      trio: { current: { note: 'Jet today: nothing.', code: 'jet run x.jet\nError [E1001]' }, wild: { lang: 'Python', note: 'The common tool does X in one call.', code: 'x()' } },
+      options: [
+        { key: 'A', name: 'Option A', gist: 'Explicit call.', gains: ['Behavior stays visible'], losses: ['One more step'], proposed: { code: 'a()' } },
+        { key: 'B', name: 'Option B', gist: 'Short call.', gains: ['Shortest first script'], losses: ['Loses the needed guarantee'], proposed: { code: 'b()' } },
+      ],
+      recommendation: {
+        rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'],
+        losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }],
+        whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step.',
+      },
+    },
+  }));
   s = st.load();
   assert.equal(db.laneOf(db.findCard(s, '#1'), s.decisions, s.cards).lane, 'decide');
 
@@ -57,12 +77,32 @@ test('deciding card auto-advances when last decision ratifies', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A', phase: 'deciding', plan: 'plan' }, cfg));
   st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-X', title: 't',
-    ballotMode: 'full', reviewPasses: { base: 'The base pass completed the ballot.', boilOcean: 'The breadth review checked the broad solution space.', hybrid: 'The hybrid pass combined compatible strengths.', cooperative: 'The cooperative pass strengthened every option.', beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.', adversarial: 'Author model family: family-a. Adversarial model family: family-b. The adversarial pass attacked the recommendation.' },
+    ballotMode: 'full', reviewPasses: {
+      beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.',
+      adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
+    },
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'A',
-    recommendation: { why: 'A wins here.', whyNot: [{ key: 'B', reason: 'B loses the needed behavior.' }], tradeoff: 'A adds one visible step.' },
-    hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Keep it.' }, { key: 'B', aspect: 'B is brief.', use: 'Borrow its short names.' }] },
+    recommendation: {
+      why: 'A wins here.', gains: ['Behavior stays visible'],
+      losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }],
+      whyNot: [{ key: 'B', reason: 'B loses the needed behavior.' }], tradeoff: 'A adds one visible step.',
+    },
+    hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Borrow its clear names.' }, { key: 'B', aspect: 'B is brief.', use: 'Keep it.' }] },
     options: [{ key: 'A', name: 'a', detail: 'A is explicit.', code: 'a()' }, { key: 'B', name: 'b', detail: 'B is brief.', code: 'b()' }],
-    surface: { gist: 'Which option should Jet ship?', lesson: 'Jet has no way to decide today. This ballot picks the approach.', trio: { current: { note: 'Jet today: nothing.', code: 'jet run x.jet\nError [E1001]' }, wild: { lang: 'Python', note: 'The common tool does X in one call.', code: 'x()' } }, options: [{ key: 'A', name: 'Option A', gist: 'Explicit call.', gains: ['Behavior stays visible'], losses: ['One more step'], proposed: { code: 'a()' } }, { key: 'B', name: 'Option B', gist: 'Short call.', gains: ['Shortest first script'], losses: ['Loses the needed guarantee'], proposed: { code: 'b()' } }], recommendation: { rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'], losses: ['One more step'], whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'B adds one explicit step.' } } }));
+    surface: {
+      gist: 'Which option should Jet ship?', lesson: 'Jet has no way to decide today. This ballot picks the approach.',
+      trio: { current: { note: 'Jet today: nothing.', code: 'jet run x.jet\nError [E1001]' }, wild: { lang: 'Python', note: 'The common tool does X in one call.', code: 'x()' } },
+      options: [
+        { key: 'A', name: 'Option A', gist: 'Explicit call.', gains: ['Behavior stays visible'], losses: ['One more step'], proposed: { code: 'a()' } },
+        { key: 'B', name: 'Option B', gist: 'Short call.', gains: ['Shortest first script'], losses: ['Loses the needed guarantee'], proposed: { code: 'b()' } },
+      ],
+      recommendation: {
+        rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'],
+        losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }],
+        whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step.',
+      },
+    },
+  }));
   st.mutate((s) => db.ratify(s, 'D-X', 'B', null, 'owner'));
   const s = st.load();
   assert.equal(db.findCard(s, '#1').phase, 'ready');
@@ -71,7 +111,7 @@ test('deciding card auto-advances when last decision ratifies', () => {
 test('ratified decisions cannot be mutated by agent attribution', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'Protected decision' }, cfg));
-  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-PROTECTED', title: 'keep', draft: true, ballotMode: 'full', reviewPasses: { beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.', adversarial: 'Author model family: family-a. Adversarial model family: family-b.' } }));
+  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-PROTECTED', title: 'keep', draft: true, ballotMode: 'full', reviewPasses: { beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.', adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2.' } }));
   st.mutate((s) => db.ratify(s, 'D-PROTECTED', 'keep', null, 'owner'));
 
   for (const action of [
@@ -133,6 +173,44 @@ test('claims: second agent bounces, release frees', () => {
   st.mutate((s) => db.releaseCard(s, '#1', 'agent-1'));
   st.mutate((s) => db.claimCard(s, '#1', 'agent-2'));
   assert.equal(st.load().cards[0].assignee, 'agent-2');
+});
+
+test('closure-ready active card blocks every further claim until closed, reopened, or gated', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => {
+    db.addCard(s, { title: 'Ready to close', phase: 'building' }, cfg);
+    db.addCard(s, { title: 'Next card', phase: 'ready' }, cfg);
+  });
+  st.mutate((s) => db.addCriterion(s, '#1', 'observable result', 'planner'));
+  st.mutate((s) => db.claimCard(s, '#1', 'builder'));
+  st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'focused proof passed', by: 'orchestrator' }));
+  assert.throws(
+    () => st.mutate((s) => db.claimCard(s, '#1', 'builder')),
+    (e) => e instanceof TowerError && e.code === 'E_CLOSE_READY',
+  );
+
+  assert.throws(
+    () => st.mutate((s) => db.claimCard(s, '#2', 'another-builder')),
+    (e) => e instanceof TowerError && e.code === 'E_CLOSE_READY' && /#1 has an active lease/.test(e.message),
+  );
+  st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'orchestrator' }, cfg));
+  st.mutate((s) => db.claimCard(s, '#2', 'another-builder'));
+  assert.equal(st.load().cards[1].assignee, 'another-builder');
+});
+
+test('closure barrier ignores a settled card with an open owner gate', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => {
+    db.addCard(s, { title: 'Gated', phase: 'building' }, cfg);
+    db.addCard(s, { title: 'Independent', phase: 'ready' }, cfg);
+  });
+  st.mutate((s) => db.addCriterion(s, '#1', 'observable result', 'planner'));
+  st.mutate((s) => db.claimCard(s, '#1', 'builder'));
+  st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'focused proof passed', by: 'orchestrator' }));
+  st.mutate((s) => db.addQuestion(s, { cardId: '#1', text: 'Owner choice?', by: 'orchestrator' }));
+
+  st.mutate((s) => db.claimCard(s, '#2', 'another-builder'));
+  assert.equal(st.load().cards[1].assignee, 'another-builder');
 });
 
 test('expired claims do not block selection or takeover', () => {
@@ -305,7 +383,7 @@ test('deleteCard cascades decisions/questions and clears blockedBy refs', () => 
   st.mutate((s, cfg) => {
     const a = db.addCard(s, { title: 'A' }, cfg);
     db.addCard(s, { title: 'B', blockedBy: [a.id] }, cfg);
-    db.addDecision(s, { cardId: a.id, title: 'd', draft: true, ballotMode: 'full', reviewPasses: { beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.', adversarial: 'Author model family: family-a. Adversarial model family: family-b.' } });
+    db.addDecision(s, { cardId: a.id, title: 'd', draft: true, ballotMode: 'full', reviewPasses: { beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.', adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2.' } });
     db.addQuestion(s, { cardId: a.id, text: 'q?', by: 'owner' });
   });
   st.mutate((s) => db.deleteCard(s, '#1', { by: 'owner' }));

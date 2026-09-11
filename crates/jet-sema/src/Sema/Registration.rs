@@ -1,4 +1,5 @@
 use super::*;
+use jet_foundation::CanonicalPass;
 use crate::Collections::is_reserved_type;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Numeric::{allows_float_money, is_money_like_name};
@@ -14,12 +15,273 @@ mod Serde;
 pub(super) use Derives::{expand_builtin_derive_items, expand_builtin_derive_items_with_auto};
 pub(crate) use Items::{
     check_strong_shared_cycles, comptime_context_from_items, eval_comptime_items, name_defined,
-    register_const, register_distinct, register_enum, register_impl_methods, register_struct,
-    register_type_alias, register_type_methods, resolve_comptime_declaration_values,
+    register_const, register_distinct, register_enum, register_impl_methods,
+    register_missing_type_methods, register_struct, register_type_alias, register_type_methods,
+    resolve_comptime_declaration_values,
 };
 pub(crate) use Serde::{
     expand_builtin_serde_items, expand_builtin_serde_items_with_auto, inject_anonymous_union_items,
 };
+
+/// Seed a checker-only declaration view before top-level comptime values run.
+/// The production registration pass remains authoritative; this view only
+/// gives initializer inference the same nominal and callable context.
+pub(crate) fn register_comptime_declarations(
+    items: &[Item],
+    st: &mut ModuleState,
+    prelude_enabled: bool,
+) {
+    let mut ignored_diags = Vec::new();
+
+    for item in items {
+        match item {
+            Item::Func(function) => crate::Sema::register_func_item(
+                function,
+                st,
+                &mut ignored_diags,
+                prelude_enabled,
+            ),
+            Item::CodeModule(module) => {
+                let Some(body) = &module.body else {
+                    continue;
+                };
+                st.code_modules.insert(module.name.clone(), module.name.clone());
+                st.code_module_identities.insert(
+                    module.name.clone(),
+                    module
+                        .instance_identity
+                        .as_ref()
+                        .map(|identity| format!("instance:{}", identity.fingerprint))
+                        .unwrap_or_else(|| format!("module:{}::{}", st.module_path, module.name)),
+                );
+                for inner in body {
+                    if let Item::Func(function) = inner {
+                        let mangled = jet_foundation::Names::member_name(
+                            &module.name,
+                            &function.name,
+                        );
+                        st.funcs
+                            .insert(mangled.clone(), crate::Sema::func_to_sig(function));
+                        if !function.type_params.is_empty() {
+                            st.trait_reg
+                                .fn_params
+                                .insert(mangled, function.type_params.clone());
+                        }
+                    }
+                }
+            }
+            Item::ExternRust(block) => {
+                for function in &block.functions {
+                    crate::Sema::register_extern_fn(
+                        function,
+                        &mut st.funcs,
+                        &st.registry,
+                        &st.consts,
+                        &mut ignored_diags,
+                        false,
+                        prelude_enabled,
+                    );
+                }
+            }
+            Item::CModule(module) => {
+                for function in &module.functions {
+                    crate::Sema::register_extern_fn(
+                        function,
+                        &mut st.funcs,
+                        &st.registry,
+                        &st.consts,
+                        &mut ignored_diags,
+                        true,
+                        prelude_enabled,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
+    for item in items {
+        match item {
+            Item::Struct(definition) => register_struct(
+                definition,
+                &mut st.registry,
+                &mut ignored_diags,
+                &st.funcs,
+                &st.consts,
+                &jet_foundation::Layout::TargetLayout::from_build_facts(&st.build_facts),
+            ),
+            Item::Enum(definition) => register_enum(
+                definition,
+                &mut st.registry,
+                &mut ignored_diags,
+                &st.funcs,
+                &st.consts,
+            ),
+            Item::Distinct(definition) => register_distinct(
+                definition,
+                &mut st.registry,
+                &mut ignored_diags,
+                &st.funcs,
+                &st.consts,
+            ),
+            Item::TypeAlias(definition) => register_type_alias(
+                definition,
+                &mut st.registry,
+                &mut ignored_diags,
+                &st.funcs,
+                &st.consts,
+            ),
+            Item::UnitFamily(family) => {
+                for definition in family.distinct_defs() {
+                    register_distinct(
+                        &definition,
+                        &mut st.registry,
+                        &mut ignored_diags,
+                        &st.funcs,
+                        &st.consts,
+                    );
+                    st.registry.unit_types.insert(definition.name.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    for item in items {
+        if let Item::Const(constant) = item {
+            register_const(
+                constant,
+                &mut st.consts,
+                &mut ignored_diags,
+                &st.funcs,
+                &st.registry,
+            );
+        }
+    }
+
+    st.trait_reg.register_synthetic_iter_index();
+    st.trait_reg.register_items(items, &mut ignored_diags);
+    register_type_methods(items, &mut st.registry, &mut ignored_diags);
+    register_impl_methods(items, &mut st.registry, &mut ignored_diags);
+}
+
+/// D-OPDEF1/D-OPMIX1: materialize the omitted RHS of every operator
+/// declaration once, in sema, before any downstream registry or tier reads
+/// the AST. An explicit `(Other)` remains untouched; a bare operator hook
+/// means the implementation owner, including its generic parameters.
+pub(crate) fn normalize_operator_rhs(items: &mut Vec<Item>) {
+    let before = CanonicalPass::ast_items_payload(items);
+    let before_identity = CanonicalPass::ast_items_identity(items);
+    fn owner_type(name: &str, params: &[crate::AST::TypeParam]) -> Type {
+        if params.is_empty() {
+            Type::Named(name.to_string())
+        } else {
+            Type::Apply {
+                name: name.to_string(),
+                args: params
+                    .iter()
+                    .map(|param| Type::Named(param.name.clone()))
+                    .collect(),
+            }
+        }
+    }
+
+    fn is_operator_trait(name: &str) -> bool {
+        matches!(
+            name,
+            Syntax::TRAIT_ADD
+                | Syntax::TRAIT_SUB
+                | Syntax::TRAIT_MUL
+                | Syntax::TRAIT_DIV
+                | Syntax::TRAIT_EQUATABLE
+                | Syntax::TRAIT_COMPARABLE
+        )
+    }
+
+    fn normalize_nested(items: &mut [Item]) {
+        let owners: HashMap<String, Type> = items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Struct(definition) => Some((
+                    definition.name.clone(),
+                    owner_type(&definition.name, &definition.type_params),
+                )),
+                Item::Enum(definition) => Some((
+                    definition.name.clone(),
+                    owner_type(&definition.name, &definition.type_params),
+                )),
+                _ => None,
+            })
+            .collect();
+
+        for item in items {
+            match item {
+                Item::Struct(definition) => {
+                    let owner = owners
+                        .get(&definition.name)
+                        .cloned()
+                        .unwrap_or_else(|| Type::Named(definition.name.clone()));
+                    for implementation in &mut definition.trait_impls {
+                        if implementation.operator_rhs.is_none()
+                            && is_operator_trait(&implementation.trait_name)
+                        {
+                            implementation.operator_rhs = Some(owner.clone());
+                        }
+                    }
+                }
+                Item::Enum(definition) => {
+                    let owner = owners
+                        .get(&definition.name)
+                        .cloned()
+                        .unwrap_or_else(|| Type::Named(definition.name.clone()));
+                    for implementation in &mut definition.trait_impls {
+                        if implementation.operator_rhs.is_none()
+                            && is_operator_trait(&implementation.trait_name)
+                        {
+                            implementation.operator_rhs = Some(owner.clone());
+                        }
+                    }
+                }
+                Item::Impl(implementation) => {
+                    if implementation.operator_rhs.is_none()
+                        && implementation
+                            .trait_name
+                            .as_deref()
+                            .is_some_and(is_operator_trait)
+                    {
+                        implementation.operator_rhs = Some(
+                            owners
+                                .get(&implementation.type_name)
+                                .cloned()
+                                .unwrap_or_else(|| Type::Named(implementation.type_name.clone())),
+                        );
+                    }
+                }
+                Item::CodeModule(module) => {
+                    if let Some(body) = &mut module.body {
+                        normalize_nested(body);
+                    }
+                }
+                Item::GenericModule(module) => normalize_nested(&mut module.body),
+                _ => {}
+            }
+        }
+    }
+
+    normalize_nested(items);
+    CanonicalPass::record(
+        "lowering",
+        "sema.normalize-operator-rhs",
+        "crates/jet-sema/src/Sema/Registration.rs",
+        "ast",
+        before,
+        before_identity,
+        "ast",
+        CanonicalPass::ast_items_payload(items),
+        CanonicalPass::ast_items_identity(items),
+        "preserve",
+    );
+}
 
 fn is_void_named(ty: &Type) -> bool {
     matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
@@ -210,7 +472,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Shared tail of `check_func_body` / `check_func_body_bundle`:
+    /// Shared tail of `check_func_body` / `check_func_body_bundle_checked`:
     /// declare parameters, check the body, enforce definite return.
     pub(crate) fn check_params_and_body(&mut self, f: &mut Func, owner_type: Option<&str>) {
         // A public fallible signature is an API boundary. Validate its error
@@ -388,9 +650,10 @@ impl<'a> Checker<'a> {
         // against each wrapped function signature below the bundle seam.
         for marker in &f.markers {
             if marker.name == Syntax::MARKER_POLICY
-                && crate::AST::CallablePolicyChain::parse(&marker.args).is_ok()
+                && crate::AST::CallablePolicyChain::parse(&marker.expr_args_owned()).is_ok()
             {
-                let _ = self.validate_callable_policy_values(&marker.args, marker.span);
+                let policy_args = marker.expr_args_owned();
+                let _ = self.validate_callable_policy_values(&policy_args, marker.span);
             }
         }
         for mut marker in self.take_targeted_rule_facts(f.span) {
@@ -416,7 +679,7 @@ impl<'a> Checker<'a> {
                     if let Some(clause) =
                         clauses.iter_mut().find(|clause| clause.span == marker.span)
                     {
-                        if let Some(message) = marker.args.get(1) {
+                        if let Some(message) = marker.expr_arg(1) {
                             clause.message_expr = message.clone();
                         }
                     }
@@ -536,8 +799,7 @@ impl<'a> Checker<'a> {
             .find(|marker| marker.name == Syntax::MARKER_ARITHMETIC)
         {
             if let Some(mode) = marker
-                .args
-                .first()
+                .expr_arg(0)
                 .and_then(crate::AST::ArithmeticMode::from_expr)
             {
                 self.arithmetic_policy_stack
@@ -1529,6 +1791,7 @@ pub(crate) fn synthesize_delegation_method(
         args,
         recv_type: None,
         resolved_ret: None,
+        operator_rhs: None,
         checked_widen: false,
     };
 
@@ -1565,6 +1828,7 @@ pub(crate) fn synthesize_delegation_method(
 
     Func {
         span: sig.name_span,
+        is_comptime: false,
         is_pub: false,
         is_package_pub: false,
         external_type: None,
@@ -1651,6 +1915,7 @@ pub(crate) fn synthesize_default_method(
 
     Func {
         span: sig.name_span,
+        is_comptime: false,
         is_pub: false,
         is_package_pub: false,
         external_type: None,

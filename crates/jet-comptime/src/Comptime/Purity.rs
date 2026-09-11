@@ -1,9 +1,10 @@
 //! Purity check: walk the call graph reachable from a comptime `init` and
-//! reject the first impure call (IO, FFI) with the path that reached it
-//! (E3401 — D-META-EFFECT1 c3: the one call-graph walk, shared with the
-//! run-time `-[]>` declaration check in `jet-sema/Sema/Purity.rs`, since
-//! `jet-sema` depends on `jet-comptime` and not the other way around).
-//! `embed_file`, `embed_bytes`, `find`, `panic`, and `require` are allowed.
+//! reject the first call denied by the canonical comptime rights row
+//! (E3401 — D-META-EFFECT1 c3). The same syntax walker serves the run-time
+//! `-[]>` declaration check in `jet-sema/Sema/Effects.rs`; only the stage
+//! options differ. The row allows memory-only operations; host effects such as
+//! IO and FFI are denied. `embed_file`, `embed_bytes`, `find`, `panic`, and
+//! `require` remain allowed through their existing evaluator paths.
 
 use std::borrow::Borrow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -12,6 +13,8 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{
     EnumLitArg, Expr, Func, LValue, LambdaBody, OrFallback, Pattern, Stmt, StrPart, StructPatField,
 };
+use jet_foundation::Authority::Holds;
+use jet_foundation::sema::{RightsProvenance, RightsRow};
 
 use super::Diagnostics::impurity_diag;
 
@@ -87,19 +90,35 @@ impl WalkOpts {
     }
 }
 
-/// Walk the call graph reachable from `init`; reject the first impure call
-/// (IO, FFI) with the path that reached it (E3401). `embed_file`,
-/// `embed_bytes`, `find`, `panic`, and `require` are allowed.
+/// Walk the call graph reachable from `init`; reject the first call denied by
+/// the canonical compile-time row (E3401). The row allows only `Mem`, so
+/// builtins and foreign bindings use the same effect vocabulary as sema.
 pub(super) fn check_purity_stmts(
     stmts: &[Stmt],
     funcs: &HashMap<String, &Func>,
     extern_names: &HashSet<String>,
 ) -> Result<(), Diagnostic> {
+    let row = RightsRow::comptime(RightsProvenance::new(
+        "comptime",
+        "compile-time block rights row",
+    ));
+    let is_leaf_impure =
+        |name: &str| comptime_call_denial_path(&row, name, extern_names, &[]).is_some();
     walk_purity_stmts(
         stmts,
         funcs,
-        &|name| impure_builtin(name) || extern_names.contains(name),
-        &impurity_diag,
+        &is_leaf_impure,
+        &|name, path, span| {
+            let mut call_chain = comptime_call_denial_path(&row, name, extern_names, path)
+                .unwrap_or_else(|| path.to_vec());
+            call_chain.push(name.to_string());
+            impurity_diag(name, path, span).with_rights_chain(
+                row.kind.name(),
+                call_chain,
+                std::iter::empty::<String>(),
+                None,
+            )
+        },
         PurityStage::BuildTime,
     )
 }
@@ -109,17 +128,55 @@ pub(super) fn check_purity(
     funcs: &HashMap<String, &Func>,
     extern_names: &HashSet<String>,
 ) -> Result<(), Diagnostic> {
+    let row = RightsRow::comptime(RightsProvenance::new(
+        "comptime",
+        "compile-time initializer rights row",
+    ));
+    let is_leaf_impure =
+        |name: &str| comptime_call_denial_path(&row, name, extern_names, &[]).is_some();
     walk_purity_expr(
         init,
         funcs,
-        &|name| impure_builtin(name) || extern_names.contains(name),
-        &impurity_diag,
+        &is_leaf_impure,
+        &|name, path, span| {
+            let mut call_chain = comptime_call_denial_path(&row, name, extern_names, path)
+                .unwrap_or_else(|| path.to_vec());
+            call_chain.push(name.to_string());
+            impurity_diag(name, path, span).with_rights_chain(
+                row.kind.name(),
+                call_chain,
+                std::iter::empty::<String>(),
+                None,
+            )
+        },
         PurityStage::BuildTime,
     )
 }
 
-fn impure_builtin(name: &str) -> bool {
-    jet_foundation::Authority::builtin_effect(name).is_some()
+fn comptime_call_right(name: &str, extern_names: &HashSet<String>) -> Option<String> {
+    jet_foundation::Authority::builtin_effect(name)
+        .map(|effect| effect.name().to_string())
+        .or_else(|| {
+            extern_names
+                .contains(name)
+                .then(|| jet_foundation::Authority::Effect::FFI.name().to_string())
+        })
+}
+
+/// Walk one denied call through the canonical row and retain its typed chain.
+fn comptime_call_denial_path(
+    row: &RightsRow,
+    name: &str,
+    extern_names: &HashSet<String>,
+    path: &[String],
+) -> Option<Vec<String>> {
+    let right = comptime_call_right(name, extern_names)?;
+    let effects = Holds::from([right]);
+    row.walk(&effects, path, &[])
+        .denials
+        .into_iter()
+        .next()
+        .map(|denial| denial.chain.call_chain)
 }
 
 /// D-META-EFFECT1 c3: the one call-graph purity walk. Walks the call graph
@@ -334,10 +391,7 @@ pub(super) fn reachable_owned_funcs(
 /// This is separate from [`reachable_owned_funcs`] so callers that already
 /// hold borrowed functions can prune their lowering table without cloning the
 /// entire module first.
-pub(super) fn reachable_func_names<F>(
-    init: &Expr,
-    funcs: &HashMap<String, F>,
-) -> HashSet<String>
+pub(super) fn reachable_func_names<F>(init: &Expr, funcs: &HashMap<String, F>) -> HashSet<String>
 where
     F: Borrow<Func>,
 {
@@ -786,10 +840,14 @@ fn walk_stmt_expr_nodes(s: &Stmt, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
                 walk_stmt_body_nodes(body, opts, f);
             }
         }
+        Stmt::Switched { marker, body, .. } => {
+            if !crate::AST::switched_off(marker) {
+                walk_stmt_body_nodes(body, opts, f);
+            }
+        }
         Stmt::Loop { body, .. }
         | Stmt::Reactive { body, .. }
         | Stmt::Shield { body, .. }
-        | Stmt::Switched { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }

@@ -34,16 +34,16 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for E0921</p>
+<p class="diag-copy fix" data-registry-field="fix">Grant the required memory right or move the call outside the denied boundary.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0921</code>: <code>tests/ui/arena_bounded_open_multiplicity.stderr</code>.</p>
-<pre class="diag">Error [E0921]: `!Mem.Alloc(above: 8)` cannot be proved through the open dispatch at tests/ui/arena_bounded_open_multiplicity.jet
+<pre class="diag">Error [E0921]: `!Mem.Alloc(above: 8)` cannot be proved through the open dispatch at arena_bounded_open_multiplicity.jet
   --&gt; tests/ui/arena_bounded_open_multiplicity.jet:9:18
     |
   9 |     loop true -&gt; reserve()
     |                  ^^^^^^^
- Why: loop iteration count is not statically bounded for arena accounting is reachable through arena_bounded_open_multiplicity::run -&gt; arena_bounded_open_multiplicity::reserve; a strict transitive fact cannot assume an unknown future target is compatible; declaration provenance: signature denial `-[!Mem.Alloc(above: 8)]&gt;` in tests/ui/arena_bounded_open_multiplicity.jet
- Fix: seal the target set, consume a verified signed dependency summary that proves the denial, or move the dispatch outside it
+ Why: Loop iteration count is not statically bounded for arena accounting is reachable through arena_bounded_open_multiplicity::run -&gt; arena_bounded_open_multiplicity::reserve; a strict transitive fact cannot assume an unknown future target is compatible; declaration provenance: signature denial `-[!Mem.Alloc(above: 8)]&gt;` in arena_bounded_open_multiplicity.jet
+ Fix: Seal the target set, consume a verified signed dependency summary that proves the denial, or move the dispatch outside it
 More: jet-lang.dev/e/E0921
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

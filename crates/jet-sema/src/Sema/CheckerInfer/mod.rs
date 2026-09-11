@@ -120,22 +120,6 @@ pub(crate) fn exact_decimal_literal(
     })
 }
 
-/// D-ITER1: returns true when `ty` or an immediate inner layer is `Type::Tuple`.
-/// Used to decide whether to store `resolved_ret` on a `MethodCall` node so that
-/// `Tuples.rs` can collect the JetTup_ shape for `indexed`/`zip`/`partition`.
-pub(crate) fn contains_tuple_type(ty: &Type) -> bool {
-    match ty {
-        Type::Tuple(_) => true,
-        Type::List(inner) => matches!(inner.as_ref(), Type::Tuple(_)),
-        // D-ITERTOOLS1=A / D-RANGE-EXCL1=C: adapters return `Iter<(…)>`.
-        Type::Apply { name, args } if name == Syntax::TYPE_ITER && args.len() == 1 => {
-            matches!(&args[0], Type::Tuple(_))
-        }
-        Type::Option(inner) => matches!(inner.as_ref(), Type::Tuple(_)),
-        _ => false,
-    }
-}
-
 /// D-REACT1=B / D-DATARACE1=C: a reactive handle type `Signal<T>`/`Derived<T>`/
 /// `Computed<T>` — an Arc-backed shared value whose "copy" shares the same
 /// reactive cell. Lock-ordered so task/channel

@@ -1,0 +1,88 @@
+{
+  "schema": "jet.core-runtime-witnesses.v1",
+  "schema_version": 1,
+  "stage": "prelude",
+  "relation": "implementation_observation",
+  "observation_fields": [
+    "result",
+    "typed_failure",
+    "mutation",
+    "input_consumption",
+    "ordered_effects",
+    "cleanup",
+    "resource_premises",
+    "schedule",
+    "allowed_schedules"
+  ],
+  "identity_fields": ["program_sha256", "source_sha256", "body_sha256", "premise_sha256", "target_sha256", "configuration_sha256"],
+  "runner": {
+    "launcher": "scripts/agent/jet-env",
+    "invocation": "stage checker only; compiler/runtime observations are not executed here",
+    "compiler": "target/debug/jet",
+    "tiers": ["aot", "jet_run", "interpreter", "check"],
+    "unknown_policy": "unverified observations remain blocked; no unknown is promoted to proof"
+  },
+  "coverage": {
+    "relation": "proof/compiler/obligations.json",
+    "owner": "#2940",
+    "mapping_statuses": ["mapped_unproved", "unsupported", "unmapped", "proved"],
+    "qualification_rule": "a source certificate binds the real body and premises; no obligation becomes proved without complete identity-bound observations"
+  },
+  "negative_controls": [
+    {
+      "id": "prelude-wrong-default",
+      "category": "wrong-default",
+      "obligations": ["core-call:plain:core.time.sleep", "boundary:core-prelude"],
+      "source_refs": ["crates/jet-codegen/src/Prelude/Core.jet", "crates/jet-codegen/src/Prelude/Core.rs"],
+      "mutation": {"property": "default timeout or scheduler option", "operation": "replace Jet-owned default with a different value", "must_change": ["defaults", "lifecycle"]},
+      "expected": {"status": "mismatch", "reason": "default selection is part of the Jet-owned contract", "universal_proof": false}
+    },
+    {
+      "id": "prelude-width-bounds-conversion",
+      "category": "width-bounds-conversion",
+      "obligations": ["core-call:plain:core.files.read_at", "core-call:plain:core.compute.kernel_bounds_ok"],
+      "source_refs": ["crates/jet-codegen/src/Prelude/CoreLib/Top/FSRuntimeOps.rs", "crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs"],
+      "mutation": {"property": "checked width, offset, length, or index conversion", "operation": "remove checked conversion or narrow without a bound", "must_change": ["bounds", "numerics", "typed_failure"]},
+      "expected": {"status": "mismatch", "reason": "unsafe truncation or out-of-range access is not an allowed Jet observation", "universal_proof": false}
+    },
+    {
+      "id": "prelude-cleanup-count",
+      "category": "cleanup-count",
+      "obligations": ["boundary:tasks", "core-call:receiver:JobQueue::cancel"],
+      "source_refs": ["crates/jet-codegen/src/Prelude/Core.rs", "crates/jet-codegen/src/Prelude/CoreLib/Top/JobQueueNative.rs"],
+      "mutation": {"property": "resource release count", "operation": "drop one cleanup or perform it twice", "must_change": ["lifecycle", "cleanup"]},
+      "expected": {"status": "mismatch", "reason": "exactly-once cleanup is observable under success, failure, and cancellation", "universal_proof": false}
+    },
+    {
+      "id": "prelude-callback-lifetime",
+      "category": "callback-lifetime",
+      "obligations": ["core-call:plain:core.rt.callback", "core-call:plain:core.event.hook"],
+      "source_refs": ["crates/jet-codegen/src/Prelude/Core.rs", "crates/jet-codegen/src/Prelude/CoreLib/Top/Browser.rs"],
+      "mutation": {"property": "callback registration lifetime", "operation": "invoke after close or retain a callback after owner cleanup", "must_change": ["lifecycle", "effects", "cleanup"]},
+      "expected": {"status": "mismatch", "reason": "callback use after terminal owner state is rejected", "universal_proof": false}
+    },
+    {
+      "id": "prelude-cancellation",
+      "category": "cancellation",
+      "obligations": ["core-call:plain:core.time.sleep", "core-call:receiver:RealtimeStream::cancel", "core-call:receiver:JobQueue::cancel"],
+      "source_refs": ["crates/jet-codegen/src/Prelude/CoreLib/Top/TimeSleep.rs", "crates/jet-codegen/src/Prelude/CoreLib/Top/JobQueueNative.rs", "crates/jet-codegen/src/Prelude/Core/RuntimeStop.js"],
+      "mutation": {"property": "cancel terminal transition", "operation": "commit a result or callback after cancellation", "must_change": ["cancellation", "cleanup", "ordered_effects"]},
+      "expected": {"status": "mismatch", "reason": "cancellation is an observable terminal state", "universal_proof": false}
+    },
+    {
+      "id": "prelude-error-interpretation",
+      "category": "error-interpretation",
+      "source_refs": ["crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs", "crates/jet-codegen/src/Prelude/CoreLib/Top/FSRuntimeOps.rs"],
+      "mutation": {"property": "typed error mapping", "operation": "treat foreign success/status text as a Jet success or reinterpret a typed failure", "must_change": ["validation", "encoding", "effects"]},
+      "expected": {"status": "mismatch", "reason": "foreign status never proves the Jet-owned error policy", "universal_proof": false}
+    },
+    {
+      "id": "prelude-encoding-numeric-boundary",
+      "category": "encoding-numeric-boundary",
+      "obligations": ["core-call:plain:core.encoding.base64.decode", "core-call:plain:core.math.checked_pow"],
+      "source_refs": ["crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs", "crates/jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs", "crates/jet-foundation/src/Numeric.rs"],
+      "mutation": {"property": "encoding, precision, and checked numeric domain", "operation": "accept malformed bytes or change rounding/overflow behavior", "must_change": ["encoding", "numerics", "bounds"]},
+      "expected": {"status": "mismatch", "reason": "malformed input and numeric domain violations retain typed Jet failures", "universal_proof": false}
+    }
+  ]
+}

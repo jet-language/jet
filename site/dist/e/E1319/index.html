@@ -34,7 +34,7 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">`#Short` and `#Env` describe generated command inputs. They do not apply outside a `#CLI` struct; `#Env` also cannot map a presence-only `Bool` flag to the builder&#39;s value-option fallback.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">remove the marker, mark the command-input struct `#CLI`, or move `#Env` to a value field.</p>
+<p class="diag-copy fix" data-registry-field="fix">Remove the marker, mark the command-input struct `#CLI`, or move `#Env` to a value field.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E1319</code>: <code>tests/ui/cli_field_marker_misuse.stderr</code>.</p>
 <pre class="diag">Error [E1319]: `#Short` has no CLI mapping for field `port`
@@ -43,7 +43,7 @@
   2 |     #Short(&quot;p&quot;) port: Int
     |      ^^^^^
  Why: `#Short` and `#Env` describe generated command inputs, but this struct is not `#CLI`.
- Fix: remove the marker, or mark the command-input struct `#CLI`
+ Fix: Remove the marker, or mark the command-input struct `#CLI`
 More: jet-lang.dev/e/E1319
 
 Error [E1318]: `#Short(&quot;port&quot;)` is not a one-letter option
@@ -51,8 +51,8 @@ Error [E1318]: `#Short(&quot;port&quot;)` is not a one-letter option
     |
   7 |     #Short(&quot;port&quot;) port: Int
     |      ^^^^^
- Why: the shared command parser treats a short option as one ASCII letter.
- Fix: use one letter, such as `#Short(&quot;p&quot;)`
+ Why: The shared command parser treats a short option as one ASCII letter.
+ Fix: Use one letter, such as `#Short(&quot;p&quot;)`
 More: jet-lang.dev/e/E1318
 
 Error [E1319]: `#Env` has no CLI mapping for field `verbose`
@@ -60,8 +60,8 @@ Error [E1319]: `#Env` has no CLI mapping for field `verbose`
     |
   8 |     #Env(&quot;VERBOSE&quot;) verbose: Bool
     |      ^^^
- Why: a `Bool` command field is a presence flag, while `#Env` lowers to a value option.
- Fix: remove `#Env`, or use it on an `Int`, `Float`, `String`, `Path`, or optional value field
+ Why: A `Bool` command field is a presence flag, while `#Env` lowers to a value option.
+ Fix: Remove `#Env`, or use it on an `Int`, `Float`, `String`, `Path`, or optional value field
 More: jet-lang.dev/e/E1319
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url);
  * record for both languages, and every "TypeScript has this" claim is checkable.
  *
  * Regenerate:
- *   node scripts/agent/surface-js.mjs > docs/reference/surfaces/js-surface.json
+ *   node scripts/agent/surface-js.mjs > docs/spec/reference/surfaces/js-surface.json
  */
 
 // Canonical Jet-facing container names map to the ECMAScript objects that hold

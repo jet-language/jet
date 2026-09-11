@@ -17,7 +17,8 @@ use crate::Term::{Key, KeyReader, RawGuard};
 use super::Render;
 use super::{build_index, search, Entry, Hit};
 
-enum Mode {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Mode {
     /// Empty query: categorized command list.
     Categorized,
     /// Typing: fuzzy results over the whole index.
@@ -26,6 +27,656 @@ enum Mode {
     Detail,
     /// F1: two-pane reference, alt-screen.
     Reference,
+}
+
+#[derive(Debug)]
+pub(crate) enum Action {
+    Continue,
+    Quit,
+    EnterReference,
+    LeaveReference,
+    Submit(Option<String>),
+}
+
+/// Pure interactive state shared by the real raw-mode loop and the headless
+/// driver. Rendering stays in `Render`; this type only owns focus, input, and
+/// selection transitions.
+pub(crate) struct State {
+    index: Vec<Entry>,
+    width: usize,
+    height: usize,
+    color: bool,
+    mode: Mode,
+    query: String,
+    cat_selected: usize,
+    cat_entry: Option<usize>,
+    hits: Vec<Hit>,
+    res_selected: usize,
+    res_scroll: usize,
+    ref_category: usize,
+    ref_entry: Option<usize>,
+    ref_query: String,
+    ref_scroll: usize,
+}
+
+impl State {
+    pub(crate) fn new(width: usize, height: usize, color: bool) -> Self {
+        Self {
+            index: build_index(),
+            width: width.max(1),
+            height: height.max(1),
+            color,
+            mode: Mode::Categorized,
+            query: String::new(),
+            cat_selected: 0,
+            cat_entry: None,
+            hits: Vec::new(),
+            res_selected: 0,
+            res_scroll: 0,
+            ref_category: 0,
+            ref_entry: None,
+            ref_query: String::new(),
+            ref_scroll: 0,
+        }
+    }
+
+    pub(crate) fn width(&self) -> usize {
+        self.width
+    }
+
+    pub(crate) fn height(&self) -> usize {
+        self.height
+    }
+
+    pub(crate) fn resize(&mut self, width: usize, height: usize) {
+        self.width = width.max(1);
+        self.height = height.max(1);
+    }
+
+    pub(crate) fn render(&self) -> String {
+        render_current(
+            &self.mode,
+            &self.index,
+            self.cat_selected,
+            self.cat_entry,
+            &self.query,
+            &self.hits,
+            self.res_selected,
+            self.res_scroll,
+            self.ref_category,
+            self.ref_entry,
+            &self.ref_query,
+            self.ref_scroll,
+            self.width,
+            self.height,
+            self.color,
+        )
+    }
+
+    pub(crate) fn apply_key(&mut self, key: Key) -> Action {
+        match key {
+            Key::Idle => Action::Continue,
+            Key::Eof | Key::CtrlC => Action::Quit,
+            Key::Escape => match self.mode {
+                Mode::Detail => {
+                    self.mode = if self.query.is_empty() {
+                        Mode::Categorized
+                    } else {
+                        Mode::Results
+                    };
+                    self.res_scroll = 0;
+                    Action::Continue
+                }
+                Mode::Reference => {
+                    self.mode = if self.query.is_empty() {
+                        Mode::Categorized
+                    } else {
+                        Mode::Results
+                    };
+                    self.ref_scroll = 0;
+                    Action::LeaveReference
+                }
+                Mode::Categorized | Mode::Results => Action::Quit,
+            },
+            Key::F1 => {
+                if !matches!(self.mode, Mode::Reference) {
+                    self.mode = Mode::Reference;
+                    self.ref_category = 0;
+                    self.ref_entry = selected_category_index(
+                        &self.index,
+                        self.cat_selected,
+                        self.cat_entry,
+                    )
+                    .or_else(|| entries_in_category(&self.index, self.cat_selected).first().copied());
+                    self.ref_query.clear();
+                    self.ref_scroll = 0;
+                    Action::EnterReference
+                } else {
+                    Action::Continue
+                }
+            }
+            Key::Tab => {
+                match self.mode {
+                    Mode::Categorized if self.cat_entry.is_some() => {
+                        self.mode = Mode::Detail;
+                        self.res_scroll = 0;
+                    }
+                    Mode::Results if !self.hits.is_empty() => {
+                        self.mode = Mode::Detail;
+                        self.res_scroll = 0;
+                    }
+                    Mode::Detail => {
+                        self.mode = if self.query.is_empty() {
+                            Mode::Categorized
+                        } else {
+                            Mode::Results
+                        };
+                    }
+                    _ => {}
+                }
+                Action::Continue
+            }
+            Key::Backspace if matches!(self.mode, Mode::Reference) => {
+                self.ref_query.pop();
+                self.ref_scroll = 0;
+                apply_reference_search(
+                    &self.index,
+                    &self.ref_query,
+                    &mut self.ref_category,
+                    &mut self.ref_entry,
+                );
+                Action::Continue
+            }
+            Key::Backspace => {
+                self.query.pop();
+                if self.query.is_empty() {
+                    self.mode = Mode::Categorized;
+                    self.hits.clear();
+                } else {
+                    self.hits = search(&self.index, &self.query);
+                    self.res_selected = 0;
+                    self.res_scroll = 0;
+                    self.mode = Mode::Results;
+                }
+                Action::Continue
+            }
+            Key::Char(c) if matches!(self.mode, Mode::Reference) => {
+                self.ref_query.push(c);
+                self.ref_scroll = 0;
+                apply_reference_search(
+                    &self.index,
+                    &self.ref_query,
+                    &mut self.ref_category,
+                    &mut self.ref_entry,
+                );
+                Action::Continue
+            }
+            Key::Char('q') if self.query.is_empty() && matches!(self.mode, Mode::Categorized) => {
+                Action::Quit
+            }
+            Key::Char(c) => {
+                self.query.push(c);
+                self.hits = search(&self.index, &self.query);
+                self.res_selected = 0;
+                self.res_scroll = 0;
+                self.mode = Mode::Results;
+                Action::Continue
+            }
+            Key::Up
+                if matches!(self.mode, Mode::Reference)
+                    && reference_code(&self.index, &self.ref_query).is_some() =>
+            {
+                self.ref_scroll = self.ref_scroll.saturating_sub(1);
+                Action::Continue
+            }
+            Key::Down
+                if matches!(self.mode, Mode::Reference)
+                    && reference_code(&self.index, &self.ref_query).is_some() =>
+            {
+                self.ref_scroll = self.ref_scroll.saturating_add(1);
+                Action::Continue
+            }
+            Key::Up
+                if matches!(self.mode, Mode::Results | Mode::Detail)
+                    && result_code(&self.hits, self.res_selected).is_some() =>
+            {
+                self.res_scroll = self.res_scroll.saturating_sub(1);
+                Action::Continue
+            }
+            Key::Down
+                if matches!(self.mode, Mode::Results | Mode::Detail)
+                    && result_code(&self.hits, self.res_selected).is_some() =>
+            {
+                self.res_scroll = self.res_scroll.saturating_add(1);
+                Action::Continue
+            }
+            Key::Up if matches!(self.mode, Mode::Detail) => {
+                self.res_scroll = self.res_scroll.saturating_sub(1);
+                Action::Continue
+            }
+            Key::Down if matches!(self.mode, Mode::Detail) => {
+                self.res_scroll = self.res_scroll.saturating_add(1);
+                Action::Continue
+            }
+            Key::Up => {
+                move_selection(
+                    &mut self.mode,
+                    &mut self.cat_selected,
+                    &mut self.cat_entry,
+                    &self.hits,
+                    &mut self.res_selected,
+                    &self.index,
+                    &mut self.ref_category,
+                    &mut self.ref_entry,
+                    -1,
+                );
+                Action::Continue
+            }
+            Key::Down => {
+                move_selection(
+                    &mut self.mode,
+                    &mut self.cat_selected,
+                    &mut self.cat_entry,
+                    &self.hits,
+                    &mut self.res_selected,
+                    &self.index,
+                    &mut self.ref_category,
+                    &mut self.ref_entry,
+                    1,
+                );
+                Action::Continue
+            }
+            Key::Left if matches!(self.mode, Mode::Categorized) => {
+                self.cat_entry = None;
+                Action::Continue
+            }
+            Key::Right if matches!(self.mode, Mode::Categorized) => {
+                self.cat_entry = Some(0);
+                Action::Continue
+            }
+            Key::Left if matches!(self.mode, Mode::Reference) => {
+                self.ref_entry = None;
+                Action::Continue
+            }
+            Key::Right if matches!(self.mode, Mode::Reference) => {
+                let cat = super::CATEGORIES[self.ref_category];
+                if let Some(e) = self.index.iter().find(|e| e.category == cat) {
+                    self.ref_entry = self
+                        .index
+                        .iter()
+                        .position(|x| x.symbol.identity == e.symbol.identity);
+                }
+                Action::Continue
+            }
+            key @ (Key::Enter | Key::EscapeEnter) => {
+                let want_example = matches!(key, Key::EscapeEnter);
+                if !want_example
+                    && matches!(self.mode, Mode::Categorized)
+                    && self.cat_entry.is_none()
+                {
+                    self.cat_entry = Some(0);
+                    return Action::Continue;
+                }
+                if matches!(self.mode, Mode::Categorized)
+                    && selected_category_index(&self.index, self.cat_selected, self.cat_entry)
+                        .is_none()
+                {
+                    return Action::Continue;
+                }
+                Action::Submit(current_prefill(
+                    &self.mode,
+                    &self.index,
+                    self.cat_selected,
+                    self.cat_entry,
+                    &self.hits,
+                    self.res_selected,
+                    self.ref_entry,
+                    want_example,
+                ))
+            }
+            _ => Action::Continue,
+        }
+    }
+
+    /// Apply a click through a semantic hit map.
+    ///
+    /// The map is derived from selection state and the renderer's documented
+    /// row geometry.  It never scans the rendered frame, so ANSI/style changes
+    /// cannot change which command a click selects.
+    pub(crate) fn click(&mut self, column: usize, row: usize) -> Action {
+        if column >= self.width || row >= self.height {
+            return Action::Continue;
+        }
+        let Some(element) = self
+            .hit_map()
+            .into_iter()
+            .find(|region| region.contains(column, row))
+            .map(|region| region.element)
+        else {
+            return Action::Continue;
+        };
+        match element {
+            ElementId::Category(category) => {
+                if matches!(self.mode, Mode::Categorized) {
+                    self.cat_selected = category;
+                    self.cat_entry = None;
+                }
+            }
+            ElementId::Command(command_index) => {
+                if matches!(self.mode, Mode::Categorized) {
+                    self.select_categorized_command(command_index);
+                }
+            }
+            ElementId::Result(hit) => {
+                if matches!(self.mode, Mode::Results) && hit < self.hits.len() {
+                    self.res_selected = hit;
+                }
+            }
+            ElementId::ReferenceCategory(category) => {
+                if matches!(self.mode, Mode::Reference) {
+                    self.ref_category = category;
+                    self.ref_entry = None;
+                }
+            }
+            ElementId::ReferenceCommand(command_index) => {
+                if matches!(self.mode, Mode::Reference)
+                    && self.index.get(command_index).is_some()
+                {
+                    self.ref_entry = Some(command_index);
+                    self.ref_category = self.category_index(command_index).unwrap_or(self.ref_category);
+                }
+            }
+        }
+        Action::Continue
+    }
+
+    pub(crate) fn wait(&mut self) {}
+
+    /// Return the canonical name of the target that currently owns focus.
+    pub(crate) fn focus_name(&self) -> Option<String> {
+        match self.mode {
+            Mode::Categorized => self
+                .selected_category_index()
+                .map(|index| self.index[index].symbol.name.clone())
+                .or_else(|| {
+                    super::CATEGORIES
+                        .get(self.cat_selected)
+                        .map(|name| (*name).to_string())
+                }),
+            Mode::Results | Mode::Detail => match self.hits.get(self.res_selected) {
+                Some(Hit::Command { entry, .. }) => Some(entry.symbol.name.clone()),
+                Some(Hit::Code(explanation)) => Some(explanation.code.clone()),
+                None => None,
+            },
+            Mode::Reference => self
+                .ref_entry
+                .and_then(|index| self.index.get(index))
+                .map(|entry| entry.symbol.name.clone())
+                .or_else(|| {
+                    super::CATEGORIES
+                        .get(self.ref_category)
+                        .map(|name| (*name).to_string())
+                }),
+        }
+    }
+
+    /// Return the canonical semantic readiness state used by headless waits.
+    ///
+    /// Readiness is deliberately limited to state-owned names.  In
+    /// particular, this does not accept arbitrary substrings from a rendered
+    /// frame.
+    pub(crate) fn ready(&self, marker: &str) -> bool {
+        if marker.is_empty() {
+            return false;
+        }
+        let mode_ready = match marker {
+            "categorized" => matches!(self.mode, Mode::Categorized),
+            "results" => matches!(self.mode, Mode::Results),
+            "detail" => matches!(self.mode, Mode::Detail),
+            "reference" => matches!(self.mode, Mode::Reference),
+            _ => false,
+        };
+        if mode_ready {
+            return true;
+        }
+        let Some(focus) = self.focus_name() else {
+            return false;
+        };
+        marker == focus || marker.strip_prefix("jet ") == Some(focus.as_str())
+    }
+
+    /// Return the semantic hit target at a viewport coordinate.
+    ///
+    /// This is kept as a typed map rather than inferred from terminal text.
+    fn hit_map(&self) -> Vec<HitRegion> {
+        match self.mode {
+            Mode::Categorized => self.categorized_hit_map(),
+            Mode::Results => self.result_hit_map(),
+            Mode::Detail => Vec::new(),
+            Mode::Reference => self.reference_hit_map(),
+        }
+    }
+
+    fn categorized_hit_map(&self) -> Vec<HitRegion> {
+        let rows = self.categorized_elements();
+        if rows.is_empty() {
+            return Vec::new();
+        }
+        let selected_header = rows
+            .iter()
+            .position(|element| *element == Some(ElementId::Category(self.cat_selected)));
+        let selected = if self.cat_entry.is_some() {
+            self.selected_category_index()
+                .and_then(|command_index| {
+                    rows.iter()
+                        .position(|element| *element == Some(ElementId::Command(command_index)))
+                })
+                .or(selected_header)
+        } else {
+            selected_header
+        }
+        .unwrap_or(0);
+        let visible_rows = self.height.saturating_sub(4).max(1);
+        let start = selected
+            .saturating_sub(visible_rows.saturating_sub(1))
+            .min(rows.len().saturating_sub(visible_rows));
+        rows.into_iter()
+            .enumerate()
+            .skip(start)
+            .take(visible_rows)
+            .filter_map(|(body_row, element)| {
+                element.map(|element| HitRegion::all_columns(
+                    3 + body_row - start,
+                    self.width,
+                    element,
+                ))
+            })
+            .collect()
+    }
+
+    fn result_hit_map(&self) -> Vec<HitRegion> {
+        let Some((start, visible_hits)) = self.result_viewport() else {
+            return Vec::new();
+        };
+        self.hits
+            .iter()
+            .enumerate()
+            .skip(start)
+            .take(visible_hits)
+            .enumerate()
+            .map(|(offset, (hit, _))| {
+                HitRegion::all_columns(3 + offset, self.width, ElementId::Result(hit))
+            })
+            .collect()
+    }
+
+    fn reference_hit_map(&self) -> Vec<HitRegion> {
+        let rows = self.reference_elements();
+        let height = self.height.max(3);
+        let body_rows = height.saturating_sub(2);
+        let selected = self
+            .ref_entry
+            .and_then(|command_index| {
+                rows.iter()
+                    .position(|element| *element == ElementId::ReferenceCommand(command_index))
+            });
+        let left_start = selected
+            .map(|row| row.saturating_sub(body_rows.saturating_sub(1)))
+            .unwrap_or(0)
+            .min(rows.len().saturating_sub(body_rows));
+        let left_width = (self.width.max(24) / 3).max(18);
+        (0..body_rows)
+            .filter_map(|offset| {
+                rows.get(left_start + offset).copied().map(|element| {
+                    HitRegion::new(1 + offset, 0, left_width, element)
+                })
+            })
+            .collect()
+    }
+
+    fn categorized_elements(&self) -> Vec<Option<ElementId>> {
+        let mut rows = Vec::new();
+        for (category, name) in super::CATEGORIES.iter().enumerate() {
+            let entries: Vec<usize> = self
+                .index
+                .iter()
+                .enumerate()
+                .filter(|(_, entry)| &entry.category == name)
+                .map(|(index, _)| index)
+                .collect();
+            if entries.is_empty() && *name != "Error Codes" {
+                continue;
+            }
+            rows.push(Some(ElementId::Category(category)));
+            if category == self.cat_selected && self.cat_entry.is_some() {
+                if *name == "Error Codes" {
+                    rows.push(None);
+                }
+                rows.extend(entries.into_iter().map(|index| Some(ElementId::Command(index))));
+            }
+        }
+        rows
+    }
+
+    fn reference_elements(&self) -> Vec<ElementId> {
+        let mut rows = Vec::new();
+        for (category, name) in super::CATEGORIES.iter().enumerate() {
+            rows.push(ElementId::ReferenceCategory(category));
+            if category == self.ref_category {
+                rows.extend(
+                    self.index
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, entry)| &entry.category == name)
+                        .map(|(index, _)| ElementId::ReferenceCommand(index)),
+                );
+            }
+        }
+        rows
+    }
+
+    fn result_viewport(&self) -> Option<(usize, usize)> {
+        if self.hits.is_empty() || result_code(&self.hits, self.res_selected).is_some() {
+            return None;
+        }
+        let show_footer = self.height >= 6;
+        let show_lower_rule = self.height >= 7;
+        let show_example = self
+            .hits
+            .first()
+            .and_then(|hit| match hit {
+                Hit::Command { entry, .. } => entry.symbol.examples.first(),
+                Hit::Code(_) => None,
+            })
+            .is_some()
+            && self.height >= 8;
+        let fixed_rows =
+            4 + usize::from(show_footer) + usize::from(show_lower_rule) + usize::from(show_example);
+        let visible_hits = self.height.saturating_sub(fixed_rows).max(1);
+        let selected = self.res_selected.min(self.hits.len().saturating_sub(1));
+        let start = selected
+            .saturating_sub(visible_hits.saturating_sub(1))
+            .min(self.hits.len().saturating_sub(visible_hits));
+        Some((start, visible_hits))
+    }
+
+    fn selected_category_index(&self) -> Option<usize> {
+        selected_category_index(&self.index, self.cat_selected, self.cat_entry)
+    }
+
+    fn category_index(&self, command_index: usize) -> Option<usize> {
+        let category = self.index.get(command_index)?.category;
+        super::CATEGORIES
+            .iter()
+            .position(|candidate| *candidate == category)
+    }
+
+    fn select_categorized_command(&mut self, command_index: usize) {
+        let Some(category) = self.category_index(command_index) else {
+            return;
+        };
+        self.cat_selected = category;
+        self.cat_entry = entries_in_category(&self.index, category)
+            .iter()
+            .position(|&index| index == command_index);
+    }
+
+    pub(crate) fn cursor(&self) -> Option<(usize, usize)> {
+        let target = match self.mode {
+            Mode::Categorized => self
+                .selected_category_index()
+                .map(ElementId::Command)
+                .or(Some(ElementId::Category(self.cat_selected))),
+            Mode::Results if result_code(&self.hits, self.res_selected).is_none() => {
+                Some(ElementId::Result(self.res_selected))
+            }
+            Mode::Reference => self
+                .ref_entry
+                .map(ElementId::ReferenceCommand)
+                .or(Some(ElementId::ReferenceCategory(self.ref_category))),
+            Mode::Results | Mode::Detail => None,
+        }?;
+        self.hit_map()
+            .into_iter()
+            .find(|region| region.element == target)
+            .map(|region| (region.column_start, region.row))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ElementId {
+    Category(usize),
+    Command(usize),
+    Result(usize),
+    ReferenceCategory(usize),
+    ReferenceCommand(usize),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct HitRegion {
+    row: usize,
+    column_start: usize,
+    column_end: usize,
+    element: ElementId,
+}
+
+impl HitRegion {
+    const fn new(row: usize, column_start: usize, column_end: usize, element: ElementId) -> Self {
+        Self {
+            row,
+            column_start,
+            column_end,
+            element,
+        }
+    }
+
+    const fn all_columns(row: usize, width: usize, element: ElementId) -> Self {
+        Self::new(row, 0, width, element)
+    }
+
+    const fn contains(self, column: usize, row: usize) -> bool {
+        self.row == row && column >= self.column_start && column < self.column_end
+    }
 }
 
 /// RAII: enters the terminal alt-screen buffer on construction, restores the
@@ -102,234 +753,37 @@ pub fn run(color: bool) -> io::Result<()> {
         return Ok(());
     };
 
-    let index = build_index();
-    let (mut width, mut height) = terminal_size();
+    let (width, height) = terminal_size();
+    let mut state = State::new(width, height, color);
     let stdin = io::stdin();
     let mut reader = KeyReader::new(stdin.lock());
-
-    let mut query = String::new();
-    let mut mode = Mode::Categorized;
-    let mut cat_selected: usize = 0; // index into `CATEGORIES`
-    let mut cat_entry: Option<usize> = None; // index into entries in selected category
-    let mut hits: Vec<Hit> = Vec::new();
-    let mut res_selected: usize = 0;
-    let mut res_scroll = 0usize;
-    let mut ref_category: usize = 0;
-    let mut ref_entry: Option<usize> = None; // index into `index`, filtered to ref_category
-    let mut ref_query = String::new();
-    let mut ref_scroll = 0usize;
     let mut alt: Option<AltScreen> = None;
-    let mut prev_lines = 0usize;
-
-    let mut frame = Render::render_categorized(
-        &index,
-        cat_selected,
-        cat_entry.is_some(),
-        selected_category_cmd(&index, cat_selected, cat_entry),
-        width,
-        color,
-        Some(height),
-    );
-    prev_lines = redraw(prev_lines, &frame, height);
+    let mut prev_lines = redraw(0, &state.render(), state.height());
 
     loop {
-        match reader.read_key() {
-            Key::Idle if terminal_size() == (width, height) => continue,
-            Key::Eof | Key::CtrlC => {
+        let key = reader.read_key();
+        if matches!(key, Key::Idle) {
+            let (next_width, next_height) = terminal_size();
+            if (next_width, next_height) == (state.width(), state.height()) {
+                continue;
+            }
+            state.resize(next_width, next_height);
+        }
+        match state.apply_key(key) {
+            Action::Continue => {}
+            Action::Quit => {
                 quit_without_prefill(prev_lines);
                 return Ok(());
             }
-            Key::Escape => match mode {
-                Mode::Detail => {
-                    mode = if query.is_empty() {
-                        Mode::Categorized
-                    } else {
-                        Mode::Results
-                    };
-                    res_scroll = 0;
-                }
-                Mode::Reference => {
-                    alt = None; // Drop restores the normal screen.
-                    mode = if query.is_empty() {
-                        Mode::Categorized
-                    } else {
-                        Mode::Results
-                    };
-                    prev_lines = 0;
-                }
-                Mode::Categorized | Mode::Results => {
-                    quit_without_prefill(prev_lines);
-                    return Ok(());
-                }
-            },
-            Key::F1 => {
-                if !matches!(mode, Mode::Reference) {
-                    alt = Some(AltScreen::enter());
-                    mode = Mode::Reference;
-                    ref_category = 0;
-                    ref_entry = selected_category_index(&index, cat_selected, cat_entry)
-                        .or_else(|| entries_in_category(&index, cat_selected).first().copied());
-                    ref_query.clear();
-                    ref_scroll = 0;
-                    prev_lines = 0;
-                }
+            Action::EnterReference => {
+                alt = Some(AltScreen::enter());
+                prev_lines = 0;
             }
-            Key::Tab => match mode {
-                Mode::Categorized if cat_entry.is_some() => {
-                    mode = Mode::Detail;
-                    res_scroll = 0;
-                }
-                Mode::Results if !hits.is_empty() => {
-                    mode = Mode::Detail;
-                    res_scroll = 0;
-                }
-                Mode::Detail => {
-                    mode = if query.is_empty() {
-                        Mode::Categorized
-                    } else {
-                        Mode::Results
-                    }
-                }
-                _ => {}
-            },
-            Key::Backspace if matches!(mode, Mode::Reference) => {
-                ref_query.pop();
-                ref_scroll = 0;
-                apply_reference_search(&index, &ref_query, &mut ref_category, &mut ref_entry);
+            Action::LeaveReference => {
+                alt = None;
+                prev_lines = 0;
             }
-            Key::Backspace => {
-                query.pop();
-                if query.is_empty() {
-                    mode = Mode::Categorized;
-                    hits.clear();
-                } else {
-                    hits = search(&index, &query);
-                    res_selected = 0;
-                    res_scroll = 0;
-                    mode = Mode::Results;
-                }
-            }
-            Key::Char(c) if matches!(mode, Mode::Reference) => {
-                ref_query.push(c);
-                ref_scroll = 0;
-                apply_reference_search(&index, &ref_query, &mut ref_category, &mut ref_entry);
-            }
-            Key::Char('q') if query.is_empty() && matches!(mode, Mode::Categorized) => {
-                quit_without_prefill(prev_lines);
-                return Ok(());
-            }
-            Key::Char(c) => {
-                query.push(c);
-                hits = search(&index, &query);
-                res_selected = 0;
-                res_scroll = 0;
-                mode = Mode::Results;
-            }
-            Key::Up
-                if matches!(mode, Mode::Reference)
-                    && reference_code(&index, &ref_query).is_some() =>
-            {
-                ref_scroll = ref_scroll.saturating_sub(1);
-            }
-            Key::Down
-                if matches!(mode, Mode::Reference)
-                    && reference_code(&index, &ref_query).is_some() =>
-            {
-                ref_scroll = ref_scroll.saturating_add(1);
-            }
-            Key::Up
-                if matches!(mode, Mode::Results | Mode::Detail)
-                    && result_code(&hits, res_selected).is_some() =>
-            {
-                res_scroll = res_scroll.saturating_sub(1);
-            }
-            Key::Down
-                if matches!(mode, Mode::Results | Mode::Detail)
-                    && result_code(&hits, res_selected).is_some() =>
-            {
-                res_scroll = res_scroll.saturating_add(1);
-            }
-            Key::Up if matches!(mode, Mode::Detail) => {
-                res_scroll = res_scroll.saturating_sub(1);
-            }
-            Key::Down if matches!(mode, Mode::Detail) => {
-                res_scroll = res_scroll.saturating_add(1);
-            }
-            Key::Up => move_selection(
-                &mut mode,
-                &mut cat_selected,
-                &mut cat_entry,
-                &hits,
-                &mut res_selected,
-                &index,
-                &mut ref_category,
-                &mut ref_entry,
-                -1,
-            ),
-            Key::Down => move_selection(
-                &mut mode,
-                &mut cat_selected,
-                &mut cat_entry,
-                &hits,
-                &mut res_selected,
-                &index,
-                &mut ref_category,
-                &mut ref_entry,
-                1,
-            ),
-            Key::Left if matches!(mode, Mode::Categorized) => cat_entry = None,
-            Key::Right if matches!(mode, Mode::Categorized) => cat_entry = Some(0),
-            Key::Left if matches!(mode, Mode::Reference) => {
-                ref_entry = None;
-            }
-            Key::Right if matches!(mode, Mode::Reference) => {
-                let cat = super::CATEGORIES[ref_category];
-                if let Some(e) = index.iter().find(|e| e.category == cat) {
-                    ref_entry = index
-                        .iter()
-                        .position(|x| x.symbol.identity == e.symbol.identity);
-                }
-            }
-            key @ (Key::Enter | Key::EscapeEnter) => {
-                let want_example = matches!(key, Key::EscapeEnter);
-                if !want_example && matches!(mode, Mode::Categorized) && cat_entry.is_none() {
-                    cat_entry = Some(0);
-                    (width, height) = terminal_size();
-                    frame = render_current(
-                        &mode,
-                        &index,
-                        cat_selected,
-                        cat_entry,
-                        &query,
-                        &hits,
-                        res_selected,
-                        res_scroll,
-                        ref_category,
-                        ref_entry,
-                        &ref_query,
-                        ref_scroll,
-                        width,
-                        height,
-                        color,
-                    );
-                    prev_lines = redraw(prev_lines, &frame, height);
-                    continue;
-                }
-                if matches!(mode, Mode::Categorized)
-                    && selected_category_index(&index, cat_selected, cat_entry).is_none()
-                {
-                    continue;
-                }
-                let command = current_prefill(
-                    &mode,
-                    &index,
-                    cat_selected,
-                    cat_entry,
-                    &hits,
-                    res_selected,
-                    ref_entry,
-                    want_example,
-                );
+            Action::Submit(command) => {
                 drop(alt);
                 drop(_guard);
                 if let Some(cmd) = command {
@@ -353,28 +807,12 @@ pub fn run(color: bool) -> io::Result<()> {
                 }
                 return Ok(());
             }
-            _ => {}
         }
 
-        (width, height) = terminal_size();
-        frame = render_current(
-            &mode,
-            &index,
-            cat_selected,
-            cat_entry,
-            &query,
-            &hits,
-            res_selected,
-            res_scroll,
-            ref_category,
-            ref_entry,
-            &ref_query,
-            ref_scroll,
-            width,
-            height,
-            color,
-        );
-        prev_lines = redraw(prev_lines, &frame, height);
+        let (next_width, next_height) = terminal_size();
+        state.resize(next_width, next_height);
+        let frame = state.render();
+        prev_lines = redraw(prev_lines, &frame, state.height());
     }
 }
 

@@ -4,10 +4,17 @@
 //! proves its types. These rules need the surrounding statement sequence, so
 //! they use the same sema checker but keep their structural probes here.
 
-use crate::AST::{Expr, ForKind, LValue, Stmt, StrPart, Type};
+mod display_lint;
+mod loop_lints;
+
+pub(crate) use display_lint::{
+    debug_interpolation_edit, explicit_copy_edit, is_display_migration_candidate,
+};
+
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Sema::Checker;
 use std::collections::HashSet;
+use crate::AST::{Expr, ForKind, LValue, Stmt, StrPart, Type};
 
 impl<'a> Checker<'a> {
     /// Precompute a complete ASCII ladder before checking its first statement.
@@ -44,16 +51,16 @@ impl<'a> Checker<'a> {
                 continue;
             }
             if !*replace_landed.get_or_insert_with(|| {
-                crate::Collections::builtin_method_return(
-                    &Type::String,
-                    "replace",
-                    2,
-                    false,
-                ) == Some(Some(Type::String))
+                crate::Collections::builtin_method_return(&Type::String, "replace", 2, false)
+                    == Some(Some(Type::String))
             }) {
                 continue;
             }
-            let direction = if lower { "to_ascii_lower" } else { "to_ascii_upper" };
+            let direction = if lower {
+                "to_ascii_lower"
+            } else {
+                "to_ascii_upper"
+            };
             let Some(prefix) = self
                 .source
                 .get(binding.name_span.start..binding.init.span().start)
@@ -156,15 +163,24 @@ fn direct_fs_walk<'a>(checker: &Checker<'_>, expr: &'a Expr) -> Option<(&'a Expr
         return None;
     };
     (method == "walk"
-        && args.len() == 1
-        && args[0].label.is_none()
-        && !args[0].spread
+        && matches!(args.len(), 1 | 2)
+        && args.iter().enumerate().all(|(index, arg)| {
+            let label_ok = if index == 1 {
+                matches!(
+                    arg.label.as_ref().map(|(label, _)| label.as_str()),
+                    None | Some("ignore")
+                )
+            } else {
+                arg.label.is_none()
+            };
+            !arg.spread && label_ok
+        })
         && checker
             .core_module_path_from_receiver(receiver)
             .is_some_and(|(module, alias, _)| module == "core.files" && alias == "fs")
-        && super::expr::landed_core_call("core.files", "walk", 1)
-        && super::expr::landed_core_call("core.files", "walk_files", 1))
-        .then_some((receiver.as_ref(), *method_span))
+        && super::expr::landed_core_call("core.files", "walk", 2)
+        && super::expr::landed_core_call("core.files", "walk_files", 2))
+    .then_some((receiver.as_ref(), *method_span))
 }
 
 fn walk_files_edit(checker: &Checker<'_>, receiver: &Expr, method_span: Span) -> Option<TextEdit> {
@@ -331,8 +347,7 @@ fn scan_stmt_exprs(stmt: &mut Stmt, var: &str, facts: &mut StmtLintFacts) {
                 scan_body(body, var, facts);
             }
         }
-        Stmt::BreakValue(value, ..)
-        | Stmt::Yield(value, ..) => scan_expr(value, var, facts, true),
+        Stmt::BreakValue(value, ..) | Stmt::Yield(value, ..) => scan_expr(value, var, facts, true),
         Stmt::BreakLabelValue(_, _, value, ..) => scan_expr(value, var, facts, true),
         Stmt::Loop { body, .. }
         | Stmt::Reactive { body, .. }
@@ -454,14 +469,15 @@ fn stmt_has_structural_control_flow(stmt: &Stmt) -> bool {
 }
 
 fn is_fallback_exit_expr(expr: &Expr) -> bool {
-    matches!(expr, Expr::OrFallback { .. } | Expr::Try(..) | Expr::Todo { .. })
-        || matches!(
-            expr,
-            Expr::Call(crate::AST::Call { name, .. })
-                if name == crate::Syntax::BUILTIN_PANIC
-        )
+    matches!(
+        expr,
+        Expr::OrFallback { .. } | Expr::Try(..) | Expr::Todo { .. }
+    ) || matches!(
+        expr,
+        Expr::Call(crate::AST::Call { name, .. })
+            if name == crate::Syntax::BUILTIN_PANIC
+    )
 }
-
 
 fn ascii_ladder(stmts: &[Stmt], index: usize) -> Option<(&crate::AST::Binding, bool, usize)> {
     let Stmt::Val(binding) = stmts.get(index)? else {
@@ -524,7 +540,10 @@ fn ascii_replace(expr: &Expr, binding: &str) -> Option<(char, char)> {
     {
         return None;
     }
-    Some((single_literal(&args[0].expr)?, single_literal(&args[1].expr)?))
+    Some((
+        single_literal(&args[0].expr)?,
+        single_literal(&args[1].expr)?,
+    ))
 }
 
 fn single_literal(expr: &Expr) -> Option<char> {

@@ -34,16 +34,16 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered parse rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for E0059</p>
+<p class="diag-copy fix" data-registry-field="fix">Write `#Scrub(Tag) fn` instead of a bare `sanitizer fn`.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0059</code>: <code>tests/ui/retired_bare_sanitizer.stderr</code>.</p>
-<pre class="diag">Error [E0059]: the taint-strip modifier is written `#Scrub(Tag)`, not bare `sanitizer`
+<pre class="diag">Error [E0059]: The taint-strip modifier is written `#Scrub(Tag)`, not bare `sanitizer`
   --&gt; tests/ui/retired_bare_sanitizer.jet:1:1
     |
-  1 | sanitizer fn clean(raw: #Input String) =&gt; String :: raw
+  1 | sanitizer fn clean(raw: #Input String) String -&gt; raw
     | ^^^^^^^^^
  Why: `#Scrub(Tag)` names the exact fact removed by the function
- Fix: write: #Scrub(Tag) fn name() { ... }
+ Fix: Write: #Scrub(Tag) fn name() { ... }
 More: jet-lang.dev/e/E0059
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

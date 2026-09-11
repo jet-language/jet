@@ -1,91 +1,344 @@
-// D-FAIL-ERRWIRE1=D: one versioned error wire and one native JS adapter.
+// D-FAIL-ERRWIRE1=D: Rust owns the error carrier, journey, and report edge.
+// This file only marshals UTF-8 bytes through the compiled Prelude ABI and
+// adapts the resulting carrier to JavaScript's native Error protocol.
+
+const JET_ERROR_WASM_MAX_U32 = 0xffffffff;
+const JET_ERROR_WASM_ENCODER = new TextEncoder();
+const JET_ERROR_WASM_DECODER = new TextDecoder("utf-8", { fatal: true });
+const JET_ERROR_WASM_MESSAGE_SLOT = 0;
+const JET_ERROR_WASM_ERROR_SLOT = 1;
+const JET_ERROR_WASM_FILE_SLOT = 2;
+const JET_ERROR_WASM_FUNCTION_SLOT = 3;
+const JET_ERROR_WASM_NOTE_SLOT = 4;
+const JET_ERROR_WASM_ORIGINAL_SLOT = 5;
+const JET_ERROR_WASM_SOURCE_SLOT = 6;
+const JET_ERROR_WASM_TARGET_SLOT = 7;
+
+function jet_error_wasm_exports() {
+  let wasm;
+  try {
+    wasm = __jetPreludeWasm;
+  } catch (_error) {
+    throw new Error("compiled Prelude error Wasm exports are unavailable");
+  }
+  if (!wasm || !wasm.memory || !wasm.memory.buffer
+      || typeof wasm.jet_error_wasm_input_alloc !== "function"
+      || typeof wasm.jet_error_wasm_input_free !== "function"
+      || typeof wasm.jet_error_wasm_result_clear !== "function"
+      || typeof wasm.jet_error_wasm_output_ptr !== "function"
+      || typeof wasm.jet_error_wasm_output_len !== "function"
+      || typeof wasm.jet_error_wasm_error_ptr !== "function"
+      || typeof wasm.jet_error_wasm_error_len !== "function") {
+    throw new Error("compiled Prelude error Wasm ABI is unavailable");
+  }
+  return wasm;
+}
+
+function jet_error_wasm_operation(wasm, name) {
+  const operation = wasm[name];
+  if (typeof operation !== "function") {
+    throw new Error(`compiled Prelude error Wasm export ${name} is unavailable`);
+  }
+  return operation;
+}
+
+function jet_error_wasm_number(value, label) {
+  const number = Number(value);
+  if (!Number.isSafeInteger(number) || number < 0 || number > JET_ERROR_WASM_MAX_U32) {
+    throw new Error(`compiled Prelude error Wasm ${label} is invalid`);
+  }
+  return number;
+}
+
+function jet_error_wasm_range(wasm, pointer, length, label) {
+  const offset = jet_error_wasm_number(pointer, `${label} pointer`);
+  const size = jet_error_wasm_number(length, `${label} length`);
+  if (size !== 0 && offset === 0) {
+    throw new Error(`compiled Prelude error Wasm ${label} pointer is null`);
+  }
+  const capacity = wasm.memory.buffer.byteLength;
+  if (offset > capacity || size > capacity - offset) {
+    throw new Error(`compiled Prelude error Wasm ${label} range is outside memory`);
+  }
+  return { offset, size };
+}
+
+function jet_error_wasm_encode(value, label) {
+  if (typeof value !== "string") throw new TypeError(`${label} must be text`);
+  const bytes = JET_ERROR_WASM_ENCODER.encode(value);
+  if (bytes.length > JET_ERROR_WASM_MAX_U32) {
+    throw new Error(`compiled Prelude error Wasm ${label} exceeds the u32 ABI length`);
+  }
+  return bytes;
+}
+
+function jet_error_wasm_release(wasm, handle, label) {
+  const released = jet_error_wasm_number(
+    wasm.jet_error_wasm_input_free(handle.slot, handle.pointer),
+    `${label} release`,
+  );
+  if (released !== 1) throw new Error(`compiled Prelude error Wasm ${label} release failed`);
+}
+
+function jet_error_wasm_with_inputs(entries, invoke) {
+  const wasm = jet_error_wasm_exports();
+  const handles = [];
+  wasm.jet_error_wasm_result_clear();
+  try {
+    for (const entry of entries) {
+      const bytes = jet_error_wasm_encode(entry.value, entry.label);
+      const pointer = jet_error_wasm_number(
+        wasm.jet_error_wasm_input_alloc(entry.slot, bytes.length),
+        `${entry.label} allocation`,
+      );
+      if (bytes.length !== 0 && pointer === 0) {
+        throw new Error(`compiled Prelude error Wasm ${entry.label} allocation failed`);
+      }
+      const handle = { slot: entry.slot, pointer, length: bytes.length, label: entry.label };
+      handles.push(handle);
+      if (bytes.length === 0) {
+        if (pointer !== 0) {
+          throw new Error(`compiled Prelude error Wasm ${entry.label} empty allocation is invalid`);
+        }
+      } else {
+        const range = jet_error_wasm_range(wasm, pointer, bytes.length, `${entry.label} input`);
+        new Uint8Array(wasm.memory.buffer, range.offset, range.size).set(bytes);
+      }
+    }
+    return invoke(wasm, handles);
+  } finally {
+    let cleanupError = null;
+    for (let index = handles.length - 1; index >= 0; index -= 1) {
+      try {
+        jet_error_wasm_release(wasm, handles[index], handles[index].label);
+      } catch (error) {
+        cleanupError ??= error;
+      }
+    }
+    wasm.jet_error_wasm_result_clear();
+    if (cleanupError) throw cleanupError;
+  }
+}
+
+function jet_error_wasm_output(wasm) {
+  const length = jet_error_wasm_number(
+    wasm.jet_error_wasm_output_len(),
+    "output length",
+  );
+  if (length === 0) return "";
+  const pointer = wasm.jet_error_wasm_output_ptr();
+  const range = jet_error_wasm_range(wasm, pointer, length, "output");
+  const bytes = new Uint8Array(wasm.memory.buffer, range.offset, range.size).slice();
+  return JET_ERROR_WASM_DECODER.decode(bytes);
+}
+
+function jet_error_wasm_error(wasm) {
+  const length = jet_error_wasm_number(
+    wasm.jet_error_wasm_error_len(),
+    "diagnostic length",
+  );
+  if (length === 0) return "";
+  const pointer = wasm.jet_error_wasm_error_ptr();
+  const range = jet_error_wasm_range(wasm, pointer, length, "diagnostic");
+  const bytes = new Uint8Array(wasm.memory.buffer, range.offset, range.size).slice();
+  return JET_ERROR_WASM_DECODER.decode(bytes);
+}
+
+function jet_error_wasm_status(wasm, statusValue, operation) {
+  const status = Number(statusValue);
+  if (status === 1) return;
+  const detail = jet_error_wasm_error(wasm);
+  if (status !== -1) {
+    throw new Error(`compiled Prelude error Wasm ${operation} returned an invalid status`);
+  }
+  throw new Error(detail || `compiled Prelude error Wasm ${operation} failed`);
+}
+
+function jet_error_wasm_json(wasm, statusValue, operation) {
+  jet_error_wasm_status(wasm, statusValue, operation);
+  const text = jet_error_wasm_output(wasm);
+  if (!text) throw new Error(`compiled Prelude error Wasm ${operation} returned no result`);
+  try {
+    return globalThis.__jetWebJsonParse(text);
+  } catch (_error) {
+    throw new Error(`compiled Prelude error Wasm ${operation} returned invalid JSON`);
+  }
+}
+
+function jet_web_option_value(value) {
+  if (!value || typeof value !== "object") return value;
+  if (value.tag === "Ok") {
+    return "value" in value ? value.value : value.values?.[0];
+  }
+  if (value.tag === "Err") return null;
+  return value;
+}
+
+function jet_web_clone_json(value) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "bigint") return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new Error("error details contain a non-finite number");
+    return value;
+  }
+  if (Array.isArray(value)) return value.map(jet_web_clone_json);
+  if (typeof value === "object") {
+    const copy = {};
+    for (const [key, entry] of Object.entries(value)) copy[key] = jet_web_clone_json(entry);
+    return copy;
+  }
+  throw new Error("error details contain an unsupported JSON value");
+}
+
+// JSON has no BigInt primitive, but converting an exact Jet Int to a quoted
+// string changes its wire type. Native JSON.rawJSON keeps the decimal lexeme
+// numeric while JSON.stringify retains all normal JSON semantics.
+function jet_web_json_stringify(value) {
+  return JSON.stringify(
+    value,
+    (_key, item) => typeof item === "bigint" ? JSON.rawJSON(item.toString()) : item,
+  );
+}
+
+function jet_web_error_details(value) {
+  const details = jet_web_option_value(value);
+  if (!details || typeof details !== "object") return null;
+  const fields = {};
+  if (Array.isArray(details.fields)) {
+    for (const field of details.fields) {
+      const name = String(field?.name ?? "");
+      const raw = field?.value;
+      if (typeof raw === "string") {
+        try {
+          fields[name] = globalThis.__jetWebJsonParse(raw);
+        } catch (_error) {
+          throw new Error(`error details field ${name} is not canonical JSON`);
+        }
+      } else {
+        fields[name] = jet_web_clone_json(raw);
+      }
+    }
+  } else if (details.fields && typeof details.fields === "object") {
+    for (const [name, raw] of Object.entries(details.fields)) {
+      fields[name] = jet_web_clone_json(raw);
+    }
+  } else {
+    throw new Error("error details fields are not an object or list");
+  }
+  const sourceSpan = jet_web_option_value(details.source_span);
+  const source_span = sourceSpan && typeof sourceSpan === "object"
+    ? {
+        start: Number(sourceSpan.start ?? 0),
+        end: Number(sourceSpan.end ?? 0),
+      }
+    : null;
+  return {
+    variant: String(details.variant ?? ""),
+    fields,
+    source_span,
+  };
+}
 
 function jet_web_error_wire(error) {
-  const cause = error?.cause && error.cause.tag
-    ? error.cause.tag === "Some" ? error.cause.values?.[0] : null
-    : error?.cause;
-  const contextFrames = Array.isArray(error?.context_frames)
-    ? error.context_frames.map((frame) => ({
-        text: String(frame.text ?? ""),
-        file: String(frame.file ?? ""),
-        line: Number(frame.line ?? 0),
-      }))
-    : [];
-  const sourceJourney = Array.isArray(error?.source_journey)
-    ? error.source_journey.map((frame) => ({
-        fn_name: String(frame.fn_name ?? frame.fnName ?? ""),
-        file: String(frame.file ?? ""),
-        line: Number(frame.line ?? 0),
-        note: String(frame.note ?? ""),
-        hops: Number(frame.hops ?? 1),
-      }))
-    : [];
-  const conversionHistory = Array.isArray(error?.conversion_history)
-    ? error.conversion_history.map((conversion) => ({
-        source: String(conversion.source ?? ""),
-        target: String(conversion.target ?? ""),
-      }))
-    : [];
+  const source = error && typeof error === "object" && error._wire ? error._wire : error;
+  const metadata = source && typeof source === "object"
+    ? source.__jet_memo_error_metadata ?? source.__jet_error_metadata
+    : null;
+  const cause = jet_web_option_value(source?.cause);
+  const code = jet_web_option_value(source?.code);
+  const contextFrames = source?.context_frames ?? source?.contextFrames
+    ?? metadata?.context_frames ?? metadata?.contextFrames;
+  const sourceJourney = source?.source_journey ?? source?.sourceJourney
+    ?? metadata?.source_journey ?? metadata?.sourceJourney;
+  const conversionHistory = source?.conversion_history ?? source?.conversionHistory
+    ?? metadata?.conversion_history ?? metadata?.conversionHistory;
+  const typedIdentity = jet_web_option_value(
+    source?.typed_identity ?? source?.typedIdentity
+      ?? metadata?.typed_identity ?? metadata?.typedIdentity,
+  );
+  const details = source?.details ?? metadata?.details;
   const wire = {
     schema: "jet.err/v1",
-    message: String(error?.message ?? error),
-    code: typeof error?.code === "string" ? error.code : null,
+    message: String(source?.message ?? source),
+    code: typeof code === "string" ? code : null,
     cause: cause && typeof cause === "object" ? jet_web_error_wire(cause) : null,
   };
-  if (typeof error?.typed_identity === "string") wire.typed_identity = error.typed_identity;
-  if (contextFrames.length) wire.context_frames = contextFrames;
-  if (sourceJourney.length) wire.source_journey = sourceJourney;
-  if (conversionHistory.length) wire.conversion_history = conversionHistory;
+  if (typeof typedIdentity === "string") wire.typed_identity = typedIdentity;
+  if (Array.isArray(contextFrames) && contextFrames.length) {
+    wire.context_frames = contextFrames.map((frame) => ({
+      text: String(frame?.text ?? ""),
+      file: String(frame?.file ?? ""),
+      line: Number(frame?.line ?? 0),
+    }));
+  }
+  if (Array.isArray(sourceJourney) && sourceJourney.length) {
+    wire.source_journey = sourceJourney.map((frame) => ({
+      fn_name: String(frame?.fn_name ?? frame?.fnName ?? ""),
+      file: String(frame?.file ?? ""),
+      line: Number(frame?.line ?? 0),
+      note: String(frame?.note ?? ""),
+      hops: Number(frame?.hops ?? 1),
+    }));
+  }
+  if (Array.isArray(conversionHistory) && conversionHistory.length) {
+    wire.conversion_history = conversionHistory.map((conversion) => ({
+      source: String(conversion?.source ?? ""),
+      target: String(conversion?.target ?? ""),
+    }));
+  }
+  const normalizedDetails = jet_web_error_details(details);
+  if (normalizedDetails) wire.details = normalizedDetails;
   return wire;
 }
 
-function jet_web_base_frame(error) {
-  let frame = error.code
-    ? `Error [${error.code}]: ${error.message}`
-    : `Error: ${error.message}`;
-  const appendIdentity = (value) => {
-    if (typeof value?.typed_identity === "string") frame += ` (type: ${value.typed_identity})`;
+function jet_web_carrier_from_wire(wire) {
+  const carrier = {
+    message: wire.message,
+    code: wire.code === null
+      ? jet_option_none()
+      : jet_option_some(wire.code),
+    cause: wire.cause === null
+      ? jet_option_none()
+      : jet_option_some(jet_web_carrier_from_wire(wire.cause)),
   };
-  appendIdentity(error);
-  const appendDetails = (value, depth) => {
-    if (value.cause) {
-      frame += `\n${"  ".repeat(depth + 1)}cause: ${value.cause.message}`;
-      appendIdentity(value.cause);
-      appendDetails(value.cause, depth + 1);
-    }
-    for (const context of value.context_frames ?? []) {
-      frame += `\n${"  ".repeat(depth + 1)}context (${context.file}:${context.line}): ${context.text}`;
-    }
-    for (const conversion of value.conversion_history ?? []) {
-      frame += `\n${"  ".repeat(depth + 1)}conversion: ${conversion.source} -> ${conversion.target}`;
-    }
-  };
-  appendDetails(error, 0);
-  return frame;
+  const metadata = {};
+  if (typeof wire.typed_identity === "string") metadata.typed_identity =
+    jet_option_some(wire.typed_identity);
+  if (Array.isArray(wire.context_frames)) metadata.context_frames = wire.context_frames;
+  if (Array.isArray(wire.source_journey)) metadata.source_journey = wire.source_journey;
+  if (Array.isArray(wire.conversion_history)) {
+    metadata.conversion_history = wire.conversion_history;
+  }
+  if (wire.details) metadata.details = jet_option_some(wire.details);
+  if (Object.keys(metadata).length) {
+    Object.defineProperty(carrier, "__jet_memo_error_metadata", {
+      value: metadata,
+      enumerable: false,
+      writable: false,
+    });
+  }
+  return carrier;
 }
 
-// D-FAIL-CTX1 / E3002: the JS projection of Foundation's trail block
-// (`jet_journey_trail` in crates/jet-foundation/src/Outcome.rs). The JS tier
-// runs no Rust, so this grammar is duplicated by construction; the cross-tier
-// parity assertion in tests/web_build.rs is what keeps the two identical.
-function jet_web_journey_trail(hops) {
-  if (!hops.length) return "";
-  const total = hops.reduce((sum, hop) => sum + hop.hops, 0);
-  let trail = ` Trail [E3002] (${total} hop${total === 1 ? "" : "s"} via ?, origin first):\n`;
-  hops.forEach((hop, index) => {
-    trail += `  ${index + 1}. ${hop.fn_name ?? hop.fnName} (${hop.file}:${hop.line})`;
-    if (hop.hops > 1) trail += ` ×${hop.hops}`;
-    if (hop.note) trail += ` — ${hop.note}`;
-    trail += "\n";
-  });
-  return trail;
-}
-
-// The one order, mirroring Foundation's `jet_journey_compose`: the root failure
-// leads, its trail follows.
-function jet_web_error_frame(error, journey) {
-  const base = jet_web_base_frame(error);
-  return journey ? `${base}\n${journey}` : base;
+function jet_web_error_terminal(error) {
+  const wire = jet_web_error_wire(error);
+  const encoded = jet_web_json_stringify(wire);
+  return jet_error_wasm_with_inputs(
+    [{ slot: JET_ERROR_WASM_ERROR_SLOT, value: encoded, label: "error" }],
+    (wasm, handles) => {
+      const operation = jet_error_wasm_operation(wasm, "jet_error_wasm_entry_error_exit");
+      const result = jet_error_wasm_json(
+        wasm,
+        operation(handles[0].pointer, handles[0].length),
+        "entry error exit",
+      );
+      if (!result || result.tag !== "Err" || !result.error
+          || typeof result.report !== "string" || typeof result.journey !== "string") {
+        throw new Error("compiled Prelude error Wasm entry error exit returned an invalid result");
+      }
+      return result;
+    },
+  );
 }
 
 export class JetError extends Error {
@@ -100,8 +353,9 @@ export class JetError extends Error {
     this.contextFrames = wire.context_frames ?? [];
     this.sourceJourney = wire.source_journey ?? [];
     this.conversionHistory = wire.conversion_history ?? [];
+    this.details = wire.details ?? null;
     this.journey = metadata.journey ?? "";
-    this.frame = metadata.frame ?? jet_web_error_frame(wire, this.journey);
+    this.frame = metadata.frame ?? "";
     this._wire = wire;
   }
 
@@ -111,13 +365,11 @@ export class JetError extends Error {
 }
 
 class JetWebPropagation extends Error {
-  constructor(wire, journey, frame, hops) {
-    super(wire.message);
+  constructor(wire) {
+    const normalized = jet_web_error_wire(wire);
+    super(normalized.message);
     this.name = "JetWebPropagation";
-    this.wire = wire;
-    this.journey = journey;
-    this.frame = frame;
-    this.hops = hops;
+    this.wire = normalized;
   }
 }
 
@@ -127,105 +379,190 @@ function jet_web_result_value(value) {
   return value;
 }
 
+function jet_web_report_error(error, metadata = {}) {
+  const result = jet_web_error_terminal(error);
+  return new JetError(result.error, {
+    ...metadata,
+    journey: metadata.journey ?? result.journey,
+    frame: metadata.frame ?? result.report,
+  });
+}
+
 function jet_web_edge_error(error, metadata = {}) {
-  return new JetError(error, metadata);
+  if (Object.prototype.hasOwnProperty.call(metadata, "frame")) {
+    return new JetError(error, metadata);
+  }
+  return jet_web_report_error(error, metadata);
 }
 
 export function jet_web_edge_result(value, metadata = {}) {
   if (value instanceof JetWebPropagation) {
-    throw jet_web_edge_error(value.wire, {
-      journey: value.journey,
-      frame: value.frame,
-    });
+    throw jet_web_report_error(value.wire, metadata);
   }
   if (value && value.tag === "Err") {
     const carrier = jet_web_result_value(value);
-    throw jet_web_edge_error(carrier?.wire ?? carrier, {
-      journey: metadata.journey ?? carrier?.journey,
-      frame: metadata.frame ?? carrier?.frame,
-    });
+    if (Object.prototype.hasOwnProperty.call(metadata, "frame")) {
+      throw jet_web_edge_error(carrier?.wire ?? carrier, metadata);
+    }
+    throw jet_web_report_error(carrier?.wire ?? carrier, metadata);
   }
   return jet_web_result_value(value);
 }
 
-// D-FAIL-CONV: these adapters preserve the Foundation carrier fields while
-// invoking the lowered conversion body. They do not reconstruct meaning from
-// rendered error text.
+function jet_journey_reset() {
+  jet_error_wasm_with_inputs([], (wasm) => {
+    const operation = jet_error_wasm_operation(wasm, "jet_error_wasm_journey_reset");
+    jet_error_wasm_status(wasm, operation(), "journey reset");
+  });
+}
+
+function jet_journey_frame_text(file, line, fnName, note) {
+  jet_error_wasm_with_inputs(
+    [
+      { slot: JET_ERROR_WASM_FILE_SLOT, value: String(file), label: "source file" },
+      { slot: JET_ERROR_WASM_FUNCTION_SLOT, value: String(fnName), label: "function" },
+      { slot: JET_ERROR_WASM_NOTE_SLOT, value: String(note), label: "journey note" },
+    ],
+    (wasm, handles) => {
+      const operation = jet_error_wasm_operation(wasm, "jet_error_wasm_journey_frame_text");
+      jet_error_wasm_status(
+        wasm,
+        operation(
+          handles[0].pointer,
+          handles[0].length,
+          jet_error_wasm_number(line, "source line"),
+          handles[1].pointer,
+          handles[1].length,
+          handles[2].pointer,
+          handles[2].length,
+        ),
+        "journey frame",
+      );
+    },
+  );
+}
+
+function jet_err_from_message(message) {
+  return jet_error_wasm_with_inputs(
+    [{ slot: JET_ERROR_WASM_MESSAGE_SLOT, value: String(message), label: "message" }],
+    (wasm, handles) => {
+      const operation = jet_error_wasm_operation(wasm, "jet_error_wasm_err_from_message");
+      const wire = jet_error_wasm_json(
+        wasm,
+        operation(handles[0].pointer, handles[0].length),
+        "error from message",
+      );
+      return jet_web_carrier_from_wire(wire);
+    },
+  );
+}
+
+function jet_err_with_context_frame(error, file, line, fnName, note) {
+  const encoded = jet_web_json_stringify(jet_web_error_wire(error));
+  return jet_error_wasm_with_inputs(
+    [
+      { slot: JET_ERROR_WASM_ERROR_SLOT, value: encoded, label: "error" },
+      { slot: JET_ERROR_WASM_FILE_SLOT, value: String(file), label: "source file" },
+      { slot: JET_ERROR_WASM_FUNCTION_SLOT, value: String(fnName), label: "function" },
+      { slot: JET_ERROR_WASM_NOTE_SLOT, value: String(note), label: "context note" },
+    ],
+    (wasm, handles) => {
+      const operation = jet_error_wasm_operation(wasm, "jet_error_wasm_with_context_frame");
+      const wire = jet_error_wasm_json(
+        wasm,
+        operation(
+          handles[0].pointer,
+          handles[0].length,
+          handles[1].pointer,
+          handles[1].length,
+          jet_error_wasm_number(line, "source line"),
+          handles[2].pointer,
+          handles[2].length,
+          handles[3].pointer,
+          handles[3].length,
+        ),
+        "error context frame",
+      );
+      return jet_web_carrier_from_wire(wire);
+    },
+  );
+}
+
 function jet_web_default_error(value) {
-  return {
-    schema: "jet.err/v1",
-    message: String(value),
-    code: null,
-    cause: null,
-  };
+  return jet_err_from_message(String(value));
 }
 
 function jet_web_error_from_conversion(value, source, target, original = null) {
   const converted = jet_web_result_value(value);
-  const wire = jet_web_error_wire(converted?.wire ?? converted);
-  const originalWire = original?.wire ? jet_web_error_wire(original.wire) : null;
-  const nextWire = {
-    ...wire,
-    typed_identity: source,
-    conversion_history: [
-      ...(Array.isArray(wire.conversion_history) ? wire.conversion_history : []),
-      { source, target },
+  const convertedWire = jet_web_error_wire(converted?.wire ?? converted);
+  const originalWire = original == null
+    ? ""
+    : jet_web_json_stringify(jet_web_error_wire(original?.wire ?? original));
+  return jet_error_wasm_with_inputs(
+    [
+      {
+        slot: JET_ERROR_WASM_ERROR_SLOT,
+        value: jet_web_json_stringify(convertedWire),
+        label: "converted error",
+      },
+      { slot: JET_ERROR_WASM_ORIGINAL_SLOT, value: originalWire, label: "original error" },
+      { slot: JET_ERROR_WASM_SOURCE_SLOT, value: String(source), label: "conversion source" },
+      { slot: JET_ERROR_WASM_TARGET_SLOT, value: String(target), label: "conversion target" },
     ],
-  };
-  if (originalWire?.source_journey && !nextWire.source_journey) {
-    nextWire.source_journey = originalWire.source_journey;
-  }
-  if (originalWire?.context_frames && !nextWire.context_frames) {
-    nextWire.context_frames = originalWire.context_frames;
-  }
-  return nextWire;
+    (wasm, handles) => {
+      const operation = jet_error_wasm_operation(wasm, "jet_error_wasm_from_conversion");
+      const wire = jet_error_wasm_json(
+        wasm,
+        operation(
+          handles[0].pointer,
+          handles[0].length,
+          handles[1].pointer,
+          handles[1].length,
+          handles[2].pointer,
+          handles[2].length,
+          handles[3].pointer,
+          handles[3].length,
+        ),
+        "error conversion",
+      );
+      return jet_web_carrier_from_wire(wire);
+    },
+  );
+}
+
+function jet_entry_error_exit_jet(error) {
+  const result = jet_web_error_terminal(error?.wire ?? error);
+  throw new JetError(result.error, { journey: result.journey, frame: result.report });
 }
 
 // A `?` carries a typed propagation until the enclosing fallible function
 // returns its Err carrier. The final edge turns that carrier into the native
-// Web error object, so nested `?` sites keep one journey. The thunk is
-// important: a nested `?` can throw before its caller's adapter gets control.
+// Web error object. Rust owns the one journey and report policy.
 function jet_web_try(valueOrThunk, file, line, fnName, note = null, convert = null, addContext = false) {
-  const appendHop = (carrier, priorHops = null) => {
-    const wire = jet_web_error_wire(carrier?.wire ?? carrier);
-    const hops = priorHops
-      ? priorHops.slice()
-      : (Array.isArray(wire.source_journey) ? wire.source_journey.slice() : []);
-    const last = hops[hops.length - 1];
+  const appendHop = (carrier) => {
     const noteText = typeof note === "function" ? String(note() ?? "") : "";
-    if (last && (last.fn_name ?? last.fnName) === fnName && last.file === file && last.line === line) {
-      // Same site again: count the repeat instead of printing the line twice.
-      hops[hops.length - 1] = { ...last, hops: last.hops + 1 };
+    let next;
+    if (addContext) {
+      next = jet_err_with_context_frame(carrier?.wire ?? carrier, file, line, fnName, noteText);
     } else {
-      hops.push({
-        fn_name: fnName,
-        file,
-        line,
-        note: noteText,
-        hops: 1,
-      });
+      jet_journey_frame_text(file, line, fnName, noteText);
+      next = carrier?.wire ?? carrier;
     }
-    const journey = jet_web_journey_trail(hops);
-    const nextWire = { ...wire, source_journey: hops };
-    if (addContext && typeof note === "function") {
-      nextWire.context_frames = [
-        ...(Array.isArray(wire.context_frames) ? wire.context_frames : []),
-        { text: noteText, file, line },
-      ];
-    }
-    throw new JetWebPropagation(nextWire, journey, jet_web_error_frame(nextWire, journey), hops);
+    throw new JetWebPropagation(next);
   };
   const appendCaught = (error) => {
     if (!(error instanceof JetWebPropagation)) throw error;
-    appendHop({ wire: error.wire }, error.hops);
+    appendHop(error.wire);
   };
   const handle = (value) => {
-    if (value && value.tag === "Ok") return "value" in value ? value.value : value.values?.[0];
+    if (value && value.tag === "Ok") {
+      jet_journey_reset();
+      return "value" in value ? value.value : value.values?.[0];
+    }
     if (value && value.tag === "Err") {
       let carrier = jet_web_result_value(value);
       if (typeof convert === "function") {
-        const original = carrier;
-        carrier = jet_web_result_value(convert(carrier, original));
+        carrier = jet_web_result_value(convert(carrier, carrier));
       }
       appendHop(carrier);
     }

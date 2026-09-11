@@ -1,0 +1,38 @@
+// core-conformance: core.sync.condition_notify_all
+// coverage: Condition.new, guard.wait, notify_all, two waiters
+// web: not-applicable (the web target has no browser scheduler)
+
+struct State {
+    ready: Bool
+}
+
+fn wait_for_ready(state: Shared<State>, changed: Condition, armed: Sender<Int>, woke: Sender<Int>) {
+    guard :: state.guard_edit()
+    armed.send(1)
+    guard.wait(changed, value -> value.ready) ?? panic("wait failed")
+    woke.send(1)
+}
+
+fn run() {
+    state :: shared State{ready: false}
+    changed :: Condition.new()
+    (armed_sender, armed) :: channel<Int>(capacity: 2)
+    (woke_sender, woke) :: channel<Int>(capacity: 2)
+    second_armed_sender :: ~armed_sender
+    second_woke_sender :: ~woke_sender
+
+    first :: task wait_for_ready(state, changed, armed_sender, woke_sender)
+    second :: task wait_for_ready(state, changed, second_armed_sender, second_woke_sender)
+    armed.receive() ?? panic("first waiter was not armed")
+    armed.receive() ?? panic("second waiter was not armed")
+    {
+        guard :: state.guard_edit()
+        guard.value.ready = true
+        changed.notify_all()
+    }
+    woke.receive() ?? panic("first waiter did not wake")
+    woke.receive() ?? panic("second waiter did not wake")
+    print("notify_all:2")
+    first.join() ?? panic("first waiter failed")
+    second.join() ?? panic("second waiter failed")
+}

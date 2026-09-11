@@ -1,0 +1,23 @@
+struct Pair<T> {
+    left: T
+    right: T
+}
+
+fn identity<T>(value: T) T -> ~value
+
+fn sum_pair(pair: Pair<Int>) Int -> pair.left + pair.right
+
+fn make_table() [Int] -> {
+    values := [Int]{}
+    loop i in 0..7 -> values.push(i * i % 7)
+    return values
+}
+
+@table :: make_table()
+
+fn run() {
+    pair :: Pair<Int>{left: 17, right: 25}
+    first :: identity(pair.left)
+    print("generic_sum={sum_pair(pair)} first={first}")
+    print("comptime_value={@table[3]} fuel={@table.len()}")
+}

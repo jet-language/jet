@@ -1,0 +1,57 @@
+{
+  "schema": "jet.gauntlet.performance-surface-evidence.v1",
+  "version": 1,
+  "generated_command": "JET_TEST_SCRATCH_DIR=$HOME/.cache/jet-luna/perf-surface-pair TMPDIR=$HOME/.cache/jet-luna/perf-surface-pair JET_BUILD_LINE='Finished `dev` profile [unoptimized + debuginfo] target(s) in 2m 10s' scripts/agent/jet-env node ~/.cache/jet-luna/perf-surface-pair/measure-performance-surface.mjs",
+  "generated_at": "2026-09-06T15:41:28.391Z",
+  "target": "jet run --interpret",
+  "artifact": "target/debug/jet",
+  "artifact_sha256": "a3a41a71270e6d10630d7c4deb45acadcf4717afc5729cf96b982e651474141c",
+  "artifact_md5": "unknown-at-original-run",
+  "build_line": "Finished `dev` profile [unoptimized + debuginfo] target(s) in 2m 10s",
+  "artifact_mtime_ms": 1788709085933.517,
+  "provenance_status": "valid against named clean binary; superseded by later compiler build measurement",
+  "host": {
+    "hostname": "halcyon",
+    "platform": "linux",
+    "release": "7.0.11-cachyos",
+    "arch": "x64",
+    "cpu_count": 32
+  },
+  "input": {
+    "iterations": 100000,
+    "range": "0..<100000",
+    "expected_sum": 4999950000
+  },
+  "setup": "fresh interpreter process and fresh main.jet per warmup/trial; no generated artifact",
+  "warmups": 3,
+  "trials": 9,
+  "metric": "wall_time_ms",
+  "output_oracle": "stdout must exactly equal expected_output; both spellings run the same integer reduction",
+  "pairs": [
+    {
+      "id": "compound_assign_vs_binary_assign",
+      "canonical": "compound assignment",
+      "alternate": "binary expression followed by assignment",
+      "workload": "100000-element integer reduction with identical final stdout",
+      "artifact": "target/debug/jet",
+      "artifact_sha256": "a3a41a71270e6d10630d7c4deb45acadcf4717afc5729cf96b982e651474141c",
+      "build_line": "Finished `dev` profile [unoptimized + debuginfo] target(s) in 2m 10s",
+      "surface_program": "gauntlet:performance-surface:compound_assign_vs_binary_assign:surface",
+      "plain_program": "gauntlet:performance-surface:compound_assign_vs_binary_assign:plain",
+      "surface_source": "// Real paired workload: compound_assign_vs_binary_assign surface spelling\nfn run() {\n    total := 0\n    loop i in 0..<100000 {\n        total += i\n    }\n    print(\"performance-surface:compound_assign_vs_binary_assign:{total}\")\n}",
+      "plain_source": "// Real paired workload: compound_assign_vs_binary_assign plain spelling\nfn run() {\n    total := 0\n    loop i in 0..<100000 {\n        total = total + i\n    }\n    print(\"performance-surface:compound_assign_vs_binary_assign:{total}\")\n}",
+      "expected_output": "performance-surface:compound_assign_vs_binary_assign:4999950000",
+      "timing_status": "measured",
+      "surface_output_matches": true,
+      "plain_output_matches": true,
+      "surface_warmup_ms": [2244.654, 2208.492, 2225.476],
+      "plain_warmup_ms": [2212.069, 2231.034, 2283.874],
+      "surface_trials_ms": [2428.41, 2230.891, 2204.122, 2204.768, 2236.41, 2245.647, 2229.806, 2219.945, 2264.857],
+      "plain_trials_ms": [2188.131, 2215.709, 2164.605, 2210.618, 2185.757, 2208.451, 2169.165, 2185.157, 2201.633],
+      "surface_wall_time_ms": 2230.891,
+      "plain_wall_time_ms": 2188.131,
+      "ratio": 1.0195417916020568,
+      "timing_references": []
+    }
+  ]
+}

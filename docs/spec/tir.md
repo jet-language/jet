@@ -1,9 +1,8 @@
-# TIR semantic core (for #668 freeze)
+# TIR semantic core
 
-**Status:** living inventory for D-ONECORE1 / #779, amended by #2301. Canonical
-definitions stay in `crates/jet-codegen/src/Codegen/TIR/mod.rs` and its
-exhaustive engine matches. This page records which surface forms desugar away
-before engines see them and the optimizer fact-channel contract.
+Canonical definitions stay in `crates/jet-codegen/src/Codegen/TIR/mod.rs` and
+its exhaustive engine matches. This page records the lowering boundary and the
+optimizer fact-channel contract.
 
 ## Law (R12 / D-ONECORE1=A)
 
@@ -38,17 +37,6 @@ remains exhaustive for AOT, Cranelift, interpreter, and web.
 |---|---|---|
 | `freeze(x)` | `Clone`, `MaterializeView`, or `ExplicitCopy` selected by sema-approved source type; frozen provenance stays in the capture metadata | D-CONC-FREEZE1=A |
 | `task ^name { … }` | existing task lambda with an explicit consuming capture; the task crossing prover owns legality | D-CONC-FREEZE1=A |
-
-## Still wide (ranked #779; next shrink slices)
-
-| Construct | Why expensive | Intended core form |
-|---|---|---|
-| `ForIn` (+ method kinds) | many emit/JIT arms | `While` / `CountedLoop` + iterator protocol |
-| `MapLit` | block builder in emit | host/builder call or block expr |
-| `ListSpread` | block builder in emit | push/extend sequence |
-| `TupleDestructure` / `StructDestructure` | per-engine unpack | `Let` + `Borrow` + `Field` + `Clone` |
-| `ListDestructure` | `jet_unpack_vec` spelling | host unpack + `Let`s |
-| `StrLit` with `Interp` | string builder block | concat of lit + show |
 
 ## Core keepers (engines must handle)
 

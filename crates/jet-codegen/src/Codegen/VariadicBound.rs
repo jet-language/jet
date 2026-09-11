@@ -1,55 +1,35 @@
 //! D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): trait-bounded heterogeneous variadic
 //! parameters (`parts: ...Renderable` / `parts: ...[A, B]`).
 //!
-//! S48 says a trait name in type position means boxed dynamic dispatch, and
-//! `<T: Trait>` means monomorphization — the ballot wants zero boxing, so this
-//! has to be the second shape, not the first. Rust has no variadic generics,
-//! so one Jet function with a trait-bounded rest parameter becomes **one
-//! specialized Rust function per call-site arity**: `log_all(a, b)` and
-//! `log_all(a, b, c)` each get their own monomorphic-per-instantiation
-//! function (`user_log_all__va2`, `user_log_all__va3`), each with that many
-//! fresh generic type parameters bound to the trait — exactly the same Rust
-//! generics + rustc-monomorphization "existing machinery" an ordinary
-//! `fn f<T: Trait>(x: T)` already relies on. Every call sharing an arity
-//! shares one specialized function; rustc does the per-type-argument
-//! monomorphization for free.
+//! A trait-bounded variadic call is represented by a closed typed function
+//! identity for each call-site arity (`user_log_all__va2`, ...). Call lowering
+//! records concrete argument types under that identity. The definition-side
+//! helper replaces the variadic parameter with one fresh generic parameter per
+//! slot and unrolls the sema-approved body into an ordinary `Func` for the
+//! existing TIR lowering path.
 //!
-//! The one open problem a plain per-arity generic function doesn't solve on
-//! its own: the *body*. `parts` was written as a single name the source
-//! iterates (`loop p in parts { … }`), but there is no zero-cost Rust value
-//! that stands for "N values of N different (trait-bounded) types" — a real
-//! `Vec`/tuple can't express it without boxing or macros. So sema restricts a
-//! trait-bounded variadic's body to exactly one shape it CAN compile away for
-//! free (`Sema/Registration.rs::check_variadic_bound_body_shape`, E1314): a
-//! single top-level `loop x in parts { … }` loop. Here, that loop is unrolled
-//! into `arity` copies, the loop variable rebound to each synthetic parameter
-//! in turn — after which the synthesized function is an entirely ordinary
-//! generic Jet function, run through the *unmodified* `emit_func` /
-//! TIR-lowering path (I3: codegen for this feature is exactly zero new TIR
-//! node kinds — it's AST synthesis feeding the existing generic-function
-//! pipeline).
+//! Sema restricts the body to one top-level `loop x in parts { … }` loop
+//! (`Sema/Registration.rs::check_variadic_bound_body_shape`, E1314). The
+//! helper verifies that shape locally and fails loudly if sema's invariant is
+//! violated. This feature adds no TIR node kinds.
 
 use super::*;
 use crate::AST::{Binding, Expr, ForKind, Func, Param, Stmt, Type, TypeParam};
 
-/// D-ANY-JAI1: the per-arity specialized Rust-function name shared by the
-/// call-site router (`lower_variadic_bound_call`, below) and the
-/// definition-side synthesizer (`build_variadic_bound_func`, below) — both
-/// must agree so the call and its callee's `cx.mangle_name` land on the same
-/// Rust symbol.
+/// D-ANY-JAI1: the per-arity specialized function name shared by call-site
+/// routing and definition-side synthesis. Both derive the same closed typed
+/// identity.
 pub(crate) fn variadic_bound_fn_name(base: &str, arity: usize) -> String {
     format!("{base}__va{arity}")
 }
 
-/// D-ANY-JAI1: lower a call to a trait-bounded variadic function. Sema left
+/// D-ANY-JAI1: lower a call to a trait-bounded variadic function. Sema leaves
 /// the trailing arguments as individual `call.args` entries past the fixed
 /// prefix (`Sema/CheckerInfer/calls.rs::check_variadic_bound_tail`) — no
 /// packed list, since a heterogeneous tail has no single element type a real
-/// list literal could carry — so the arity is just `call.args.len() - fixed`.
-/// Records the arity into `cx.needed_variadic_arities` (read back by
-/// `emit_variadic_bound_specializations` once every call site in the program
-/// has been lowered) and routes the call to that arity's specialized
-/// function.
+/// list literal could carry — so the arity is `call.args.len() - fixed`.
+/// Records the concrete call shape in `cx.jit_generic_calls`, keyed by the
+/// closed per-arity name consumed by TIR specialization.
 pub(crate) fn lower_variadic_bound_call(
     call: &crate::AST::Call,
     fixed: usize,
@@ -64,21 +44,15 @@ pub(crate) fn lower_variadic_bound_call(
         .map(|(convention, _)| *convention)
         .expect("trait-bounded variadic signature must retain its tail convention");
     let arity = call.args.len().saturating_sub(fixed);
-    cx.needed_variadic_arities
-        .borrow_mut()
-        .entry(call.name.clone())
-        .or_default()
-        .insert(arity);
     let args: Vec<crate::Codegen::TIR::TCallArg> = call
         .args
         .iter()
         .enumerate()
         .map(|(i, a)| {
-            // The fixed prefix uses its declared signature. Each synthetic tail
-            // slot keeps the original variadic parameter's access convention and
-            // has a fresh generic type. The generated specialization renders a
-            // default-Read tail as `&JaiVarN`, so the call must borrow every tail
-            // argument, including scalar concrete instantiations.
+            // Each synthetic tail slot keeps the original access convention
+            // and gets a fresh generic type. Preserve that convention when
+            // lowering each tail argument so its concrete type matches the
+            // specialized slot.
             let conv = if i < fixed {
                 sig.as_ref()
                     .and_then(|ps| ps.get(i))
@@ -105,37 +79,11 @@ pub(crate) fn lower_variadic_bound_call(
     }
 }
 
-/// D-ANY-JAI1: after the main function-emission pass has run (and so has
-/// discovered, via every call site it lowered, every `(fn, arity)` pair a
-/// trait-bounded variadic function is actually called with — see
-/// `Cx::needed_variadic_arities`'s doc comment), emit one specialized Rust
-/// function per pair.
-pub(crate) fn emit_variadic_bound_specializations(cx: &Cx, items: &[Item], out: &mut String) {
-    let needed = cx.needed_variadic_arities.borrow();
-    if needed.is_empty() {
-        return;
-    }
-    for (fn_name, arities) in needed.iter() {
-        let Some((_, bounds)) = cx.variadic_bound_fns.get(fn_name) else {
-            continue;
-        };
-        let Some(f) = items.iter().find_map(|it| match it {
-            Item::Func(f) if &f.name == fn_name => Some(f),
-            _ => None,
-        }) else {
-            continue;
-        };
-        for &arity in arities {
-            let specialized = build_variadic_bound_func(f, bounds, arity);
-            crate::Codegen::Items::emit_func(cx, &specialized, out);
-        }
-    }
-}
 
-/// D-ANY-JAI1: build the specialized Rust-backing `Func` for `f` (a
-/// trait-bounded variadic function) at one call-site `arity` — `arity` fresh
-/// generic type parameters (each bound to `bounds`) replace the trailing
-/// variadic parameter, one per call-site argument, and the body's one legal
+/// D-ANY-JAI1: build the typed specialized `Func` for `f` (a trait-bounded
+/// variadic function) at one call-site `arity` — `arity` fresh generic type
+/// parameters (each bound to `bounds`) replace the trailing variadic parameter,
+/// one per call-site argument, and the body's one legal
 /// `loop x in <variadic> { … }` loop is unrolled to match.
 pub(crate) fn build_variadic_bound_func(f: &Func, bounds: &[String], arity: usize) -> Func {
     let last = f
@@ -194,10 +142,9 @@ fn variadic_slot_name(param_name: &str, i: usize) -> String {
 /// D-ANY-JAI1: replace the (sema-guaranteed unique, top-level) `loop x in
 /// target { … }` loop with `arity` unrolled copies, the loop variable rebound
 /// to each synthetic slot (`variadic_slot_name`) in turn. `Err` names the
-/// unsupported shape found — an internal-compiler-error backstop; sema's
-/// E1314 should already have rejected every case that reaches it, but this
-/// function makes zero assumptions codegen can't verify locally (never
-/// silently emits wrong Rust, I2).
+/// unsupported shape found — an internal-compiler-error backstop; sema's E1314
+/// should already have rejected every case that reaches it, but this function
+/// verifies the invariant locally and never silently lowers the wrong body (I2).
 fn unroll_variadic_body(stmts: &[Stmt], target: &str, arity: usize) -> Result<Vec<Stmt>, String> {
     let mut out = Vec::new();
     let mut seen_loop = false;
@@ -330,10 +277,8 @@ fn stmt_references_ident(s: &Stmt, name: &str) -> bool {
         }
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
         Stmt::BreakLabel(_, _) | Stmt::ContinueLabel(_, _) => false,
-        // Every other statement kind (lexical-scope wrappers like `#Unsafe { }`,
-        // `region`, `#Transact`, `@ { }`, …) — conservatively assume a
         // reference so an unsupported-but-undetected body shape becomes a loud
-        // internal-compiler-error, never silently-wrong Rust (I2).
+        // internal-compiler-error, never silently-wrong lowering (I2).
         _ => true,
     }
 }
@@ -420,10 +365,8 @@ fn expr_references_ident(e: &Expr, name: &str) -> bool {
         | Expr::Bool(..)
         | Expr::Char(..)
         | Expr::ReduceMarker(..) => false,
-        // Anything else (lambdas, comprehensions, closures, …) is conservatively
-        // "yes, might reference it" — this function only exists to turn a body
         // shape sema's E1314 somehow missed into a loud internal-compiler-error
-        // instead of silently-wrong Rust (I2), so an over-eager panic is the
+        // instead of silently-wrong lowering (I2), so an over-eager panic is the
         // safe failure direction, never an under-eager "looks fine".
         _ => true,
     }

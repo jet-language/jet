@@ -5,17 +5,16 @@ use super::realize::{
     RealizeScope, RunPlan,
 };
 use super::services_secrets_config::{
-    find_jet_binary, find_project_entry, has_dev_or_run_entry, list_project_jobs,
-    project_job_declared, project_job_metadata, run_lifecycle_hooks, run_lifecycle_hooks_clean,
-    run_lifecycle_hooks_silent, validate_declared_secrets, validate_declared_secrets_with_reuse,
-    wait_for_services_ready,
+    checked_project_job_registry, find_jet_binary, find_project_entry, has_dev_or_run_entry,
+    list_project_jobs, run_lifecycle_hooks, run_lifecycle_hooks_clean, run_lifecycle_hooks_silent,
+    validate_declared_secrets, validate_declared_secrets_with_reuse, wait_for_services_ready,
 };
 use super::tool::reject_unavailable_provider;
 use super::trust_env_build::{
     compose_env, compose_env_scoped, compose_env_scoped_with_warm, validate_integration_facts,
 };
 use super::workspace_sources::{
-    cwd_table, load_workspace_for_source, workspace_root_snapshot_or_exit,
+    builtin_table, cwd_table, load_workspace_for_source, workspace_root_snapshot_or_exit,
 };
 use crate::Bridge;
 use crate::EnvFile;
@@ -259,7 +258,12 @@ pub(super) fn run_project_job(
 ) -> i32 {
     run_project_job_with_mode(theme, parsed, roots, project_dir, entry, job, false, false)
 }
-
+/// D-DX-JOBGRAPH1=A: realize each checked predecessor exactly once, in
+/// D-DX-JOBGRAPH1=A: load one checked bundle registry, validate the requested
+/// closure once, realize every package capability in that closure, then hand
+/// the root to the compiler's canonical Prelude graph dispatcher. The child
+/// process owns dependency admission, so this host never runs predecessors and
+/// then asks the child to run them again.
 pub(super) fn run_project_job_with_mode(
     theme: &Theme,
     parsed: &Parsed,
@@ -270,20 +274,81 @@ pub(super) fn run_project_job_with_mode(
     clean: bool,
     silent: bool,
 ) -> i32 {
-    if project_job_declared(entry, job) == Some(false) {
-        let declared_jobs = list_project_jobs(entry);
+    let registry = match checked_project_job_registry(entry) {
+        Ok(registry) => registry,
+        Err(diagnostics) => {
+            for diagnostic in diagnostics {
+                theme.error_coded(
+                    &diagnostic.code,
+                    &diagnostic.what,
+                    &diagnostic.why,
+                    &diagnostic.fix,
+                );
+            }
+            return 2;
+        }
+    };
+    let Some(root_fact) = registry.find(job) else {
+        let declared_jobs = registry
+            .jobs()
+            .iter()
+            .map(|fact| fact.name.as_str())
+            .collect::<Vec<_>>();
         theme.error_coded(
             "E1294",
             &format!("no job named `{job}`"),
-            "lifecycle job names must refer to a declared top-level #Job function.",
+            "lifecycle job names must refer to a checked top-level #Job function.",
             "declare the job with #Job, or remove it from the environment lifecycle.",
         );
         if !declared_jobs.is_empty() {
             theme.detail(&format!("declared jobs: {}", declared_jobs.join(", ")));
         }
         return 2;
+    };
+    let closure = match registry.dependency_closure(job) {
+        Ok(closure) => closure,
+        Err(reason) => {
+            theme.error_coded(
+                "E1331",
+                &format!("job `{job}` has an invalid dependency graph"),
+                &reason,
+                "correct the #Job `after` declarations, then rerun the job.",
+            );
+            return 2;
+        }
+    };
+    let mut metadata = root_fact.metadata();
+    for fact in closure {
+        for package in &fact.packages {
+            if !metadata.packages.iter().any(|existing| existing == package) {
+                metadata.packages.push(package.clone());
+            }
+        }
     }
-    let metadata = project_job_metadata(entry, job).unwrap_or_default();
+    run_project_job_leaf_with_mode(
+        theme,
+        parsed,
+        roots,
+        project_dir,
+        entry,
+        job,
+        clean,
+        silent,
+        &metadata,
+    )
+}
+
+fn run_project_job_leaf_with_mode(
+    theme: &Theme,
+    parsed: &Parsed,
+    roots: &Store::Roots,
+    project_dir: &Path,
+    entry: &Path,
+    job: &str,
+    clean: bool,
+    silent: bool,
+    metadata: &crate::AST::JobMetadata,
+) -> i32 {
     if let Some(reason) = job_skip_reason(metadata.skip.as_ref()) {
         theme.status(&format!("skipping job {}: {}", theme.bold(job), reason));
         return 0;
@@ -396,7 +461,7 @@ pub(super) fn run_project_job_with_mode(
             );
             return 2;
         }
-        if let Err(message) = validate_cached_job_metadata(project_dir, &metadata) {
+        if let Err(message) = validate_cached_job_metadata(project_dir, metadata) {
             theme.error_coded(
                 "E1330",
                 &format!("job `{job}` has unsafe cache declarations"),
@@ -431,7 +496,7 @@ pub(super) fn run_project_job_with_mode(
             entry,
             job,
             Path::new(&jet_binary),
-            &metadata,
+            metadata,
             &task_args,
             &plan.refs,
             &plan.table,
@@ -454,7 +519,7 @@ pub(super) fn run_project_job_with_mode(
                 return 2;
             }
         };
-        if task_cache_hit(project_dir, roots, &metadata, &key) {
+        if task_cache_hit(project_dir, roots, metadata, &key) {
             theme.status(&format!("job {} is up to date", theme.bold(job)));
             return 0;
         }
@@ -482,7 +547,7 @@ pub(super) fn run_project_job_with_mode(
         // A strict cache key must describe the complete job environment. The
         // ordinary direct-job path inherits host variables, so cached jobs
         // use the clean composed environment whose values are in the key.
-        match run_job_with_access_trace(&env, &argv, &job_cwd, true, silent, trace_path) {
+        match run_job_with_access_trace(&env, &argv, project_dir, true, silent, trace_path) {
             Ok(code) => code,
             Err(message) => {
                 theme.error_coded(
@@ -495,13 +560,13 @@ pub(super) fn run_project_job_with_mode(
             }
         }
     } else if clean && silent {
-        Shell::run_clean_command_in_silent(&env, &argv, Some(&job_cwd))
+        Shell::run_clean_command_in_silent(&env, &argv, Some(project_dir))
     } else if clean {
-        Shell::run_clean_command_in(&env, &argv, Some(&job_cwd))
+        Shell::run_clean_command_in(&env, &argv, Some(project_dir))
     } else if silent {
-        Shell::run_command_in_silent(&env, &argv, Some(&job_cwd))
+        Shell::run_command_in_silent(&env, &argv, Some(project_dir))
     } else {
-        Shell::run_command_in(&env, &argv, Some(&job_cwd))
+        Shell::run_command_in(&env, &argv, Some(project_dir))
     };
     if code != 0 {
         if let Some(path) = access_trace.as_deref() {
@@ -514,7 +579,7 @@ pub(super) fn run_project_job_with_mode(
                 .as_deref()
                 .map(|path| {
                     let result =
-                        task_undeclared_accesses(project_dir, &job_cwd, entry, &metadata, path);
+                        task_undeclared_accesses(project_dir, &job_cwd, entry, metadata, path);
                     let _ = std::fs::remove_file(path);
                     result
                 })
@@ -541,7 +606,7 @@ pub(super) fn run_project_job_with_mode(
                 );
                 return 1;
             }
-            if !job_outputs_exist(project_dir, &metadata) {
+            if !job_outputs_exist(project_dir, metadata) {
                 theme.error_coded(
                     "E1330",
                     &format!("job `{job}` did not produce its declared outputs"),
@@ -550,7 +615,7 @@ pub(super) fn run_project_job_with_mode(
                 );
                 return 1;
             }
-            if let Err(error) = write_job_cache(project_dir, roots, &metadata, &cache_key) {
+            if let Err(error) = write_job_cache(project_dir, roots, metadata, &cache_key) {
                 theme.error(
                     "job completed but its cache record could not be written",
                     &error,
@@ -590,7 +655,7 @@ fn resolve_job_jet_binary(env: &Env) -> Result<String, String> {
 fn run_job_with_access_trace(
     env: &Env,
     argv: &[String],
-    cwd: &Path,
+    project_dir: &Path,
     clean: bool,
     silent: bool,
     trace_path: &Path,
@@ -619,13 +684,13 @@ fn run_job_with_access_trace(
     ];
     traced.extend_from_slice(argv);
     let code = if clean && silent {
-        Shell::run_clean_command_in_silent(env, &traced, Some(cwd))
+        Shell::run_clean_command_in_silent(env, &traced, Some(project_dir))
     } else if clean {
-        Shell::run_clean_command_in(env, &traced, Some(cwd))
+        Shell::run_clean_command_in(env, &traced, Some(project_dir))
     } else if silent {
-        Shell::run_command_in_silent(env, &traced, Some(cwd))
+        Shell::run_command_in_silent(env, &traced, Some(project_dir))
     } else {
-        Shell::run_command_in(env, &traced, Some(cwd))
+        Shell::run_command_in(env, &traced, Some(project_dir))
     };
     if !trace_path.is_file() {
         return Err("file-access tracer completed without producing an access log".to_string());
@@ -884,7 +949,7 @@ fn empty_job_plan() -> RunPlan {
         project_root: std::env::current_dir().unwrap_or_default(),
         refs: Vec::new(),
         adapters: Vec::new(),
-        table: RefSpec::SourceTable::empty(),
+        table: builtin_table(),
         label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
         prompt_path: ModuleEval::PromptPathMode::default(),
         prompt_strip: ModuleEval::PromptStripMode::default(),
@@ -1798,7 +1863,7 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
             project_root: project_dir.clone(),
             refs: Vec::new(),
             adapters: Vec::new(),
-            table: RefSpec::SourceTable::empty(),
+            table: builtin_table(),
             label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
             prompt_path: ModuleEval::PromptPathMode::default(),
             prompt_strip: ModuleEval::PromptStripMode::default(),
@@ -1887,7 +1952,7 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
         return code;
     }
     mark("secrets-validated");
-    let definition_fingerprint = environment_entry_definition_fingerprint(
+    let (definition_fingerprint, hook_fingerprint) = environment_entry_definition_fingerprint(
         &project_dir,
         parsed.flags.preset.as_deref(),
         parsed.flags.environment.as_deref(),
@@ -1928,7 +1993,7 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
     }
     mark("catalog-configured");
 
-    let (env, ready_stats) = match compose_env_scoped_with_warm(
+    let (mut env, ready_stats) = match compose_env_scoped_with_warm(
         theme,
         &roots,
         &flags,
@@ -1940,6 +2005,10 @@ fn cmd_env_project(theme: &Theme, parsed: &Parsed) -> i32 {
         Ok(result) => result,
         Err(code) => return code,
     };
+    if let Some(hash) = hook_fingerprint {
+        env.vars
+            .insert(Syntax::ENV_HOOK_ACTIVE_HASH_VAR.to_string(), hash);
+    }
 
     mark("env-composed");
     if flags.prep {
@@ -2157,13 +2226,12 @@ fn environment_entry_definition_fingerprint(
     requested_environment: Option<&str>,
     plan: &RunPlan,
     secret_identity: Option<&str>,
-) -> String {
+) -> (String, Option<String>) {
     let hook_fingerprint = EnvHook::definition_fingerprint_with_selections(
         project_dir,
         requested_preset,
         requested_environment,
-    )
-    .unwrap_or_default();
+    );
     let semantic_fingerprint = Trust::environment_definition_hash(
         &plan.refs,
         &plan.table,
@@ -2173,7 +2241,7 @@ fn environment_entry_definition_fingerprint(
     let target = std::env::var("JET_TARGET").unwrap_or_default();
     let mut canonical = b"jetpack-env-definition-v3\0".to_vec();
     for field in [
-        hook_fingerprint.as_str(),
+        hook_fingerprint.as_deref().unwrap_or_default(),
         semantic_fingerprint.as_str(),
         requested_preset.unwrap_or_default(),
         requested_environment.unwrap_or_default(),
@@ -2183,7 +2251,7 @@ fn environment_entry_definition_fingerprint(
         canonical.extend_from_slice(&(field.len() as u64).to_le_bytes());
         canonical.extend_from_slice(field.as_bytes());
     }
-    crate::SHA256::sha256_hex(&canonical)
+    (crate::SHA256::sha256_hex(&canonical), hook_fingerprint)
 }
 
 fn env_entry_plan_references(plan: &RunPlan) -> Vec<String> {
@@ -2360,13 +2428,14 @@ pub(super) fn cmd_use(theme: &Theme, parsed: &Parsed) -> i32 {
         return 2;
     }
 
+    let table = builtin_table();
     let mut refs = Vec::with_capacity(parsed.positional.len());
     for raw in &parsed.positional {
         if let Some(code) = reject_unavailable_provider(theme, raw) {
             return code;
         }
         let canonical = RefSpec::with_default_source(raw);
-        match RefSpec::classify(&canonical) {
+        match RefSpec::classify_in(&canonical, &table) {
             Ok(spec) => refs.push(spec),
             Err(error) => {
                 crate::Output::ref_error(theme, &error);
@@ -2380,7 +2449,7 @@ pub(super) fn cmd_use(theme: &Theme, parsed: &Parsed) -> i32 {
         project_root: std::env::current_dir().unwrap_or_default(),
         refs,
         adapters: Vec::new(),
-        table: RefSpec::SourceTable::empty(),
+        table,
         label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
         prompt_path: ModuleEval::PromptPathMode::default(),
         prompt_strip: ModuleEval::PromptStripMode::default(),

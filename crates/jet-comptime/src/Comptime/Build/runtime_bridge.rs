@@ -4,18 +4,23 @@ use super::actions_policy::{
 };
 use super::context::BuildContext;
 use super::errors_keys::{dependency_cycle_text, BuildError};
+use super::cache_cas::ActionKey;
 use super::handles::{
-    ActionHandle, ActionId, ProbeHandle, ProbeId, SigningIdentityHandle, SigningIdentityId,
-    TargetId, TargetRef, ToolchainHandle, ToolchainId,
+    ActionHandle, ActionId, PluginId, ProbeHandle, ProbeId, SigningIdentityHandle,
+    SigningIdentityId, TargetId, TargetRef, ToolchainHandle, ToolchainId,
 };
-use super::plan_graph::BuildPlan;
+use super::plan_graph::{
+    BuildExecutionReport, BuildGraph, BuildGraphAction, BuildGraphActionKey, BuildGraphCacheDelta,
+    BuildGraphDiff, BuildGraphFile, BuildGraphFileDelta, BuildGraphKeyDelta, BuildGraphTarget,
+    BuildPlan, BuildPlanNode,
+};
 use super::provenance_toolchains::{
     BuildProvenance, LinkerIdentity, ProbeSpec, ReproducibilityClass, SdkIdentity,
     SigningIdentitySpec, SysrootIdentity, ToolchainSpec,
 };
-use super::targets::TargetSpec;
+use super::targets::{TargetKind, TargetSpec};
 use crate::Diagnostics::{Diagnostic, Span, StructuredDiagnostic};
-use crate::AST::{ComptimeInput, CtValue};
+use crate::AST::{ComptimeInput, CtValue, Type};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -32,6 +37,10 @@ struct ProgramBuildSession {
 thread_local! {
     static PROGRAM_BUILD_SESSIONS: RefCell<BTreeMap<u64, ProgramBuildSession>> =
         const { RefCell::new(BTreeMap::new()) };
+    /// The latest completed receipt is only a query aid. Its graph identity
+    /// must match before cache facts can be attached to a new static plan.
+    static PROGRAM_BUILD_EXECUTION_RECEIPTS: RefCell<Vec<(BuildGraph, BuildExecutionReport)>> =
+        const { RefCell::new(Vec::new()) };
 }
 
 /// Start one selected-root build evaluation. Session is thread-local so
@@ -113,9 +122,662 @@ pub fn finish_program_build(
         None => session
             .context
             .plan()
+
             .map_err(|e| build_error_diag(&e, error_span)),
     }?;
     Ok((plan, session.diagnostics))
+}
+/// Install one completed execution report for the current thread's later
+/// build-query/tooling pass. This is intentionally a Rust-side ambient hook,
+/// not a Jet loader or a public receipt constructor.
+#[doc(hidden)]
+pub fn install_build_execution_receipt(
+    plan: &BuildPlan,
+    execution: &BuildExecutionReport,
+) {
+    if !execution.events.iter().any(|event| {
+        matches!(
+            event,
+            super::plan_graph::BuildExecutionEvent::Finished { .. }
+        )
+    }) {
+        return;
+    }
+    let graph = plan.graph();
+    PROGRAM_BUILD_EXECUTION_RECEIPTS.with(|receipts| {
+        let mut receipts = receipts.borrow_mut();
+        receipts.retain(|(known, _)| known != &graph);
+        receipts.push((graph, execution.clone()));
+        let excess = receipts.len().saturating_sub(8);
+        if excess != 0 {
+            receipts.drain(..excess);
+        }
+    });
+}
+
+fn execution_receipt_for_graph(graph: &BuildGraph) -> Option<BuildExecutionReport> {
+    PROGRAM_BUILD_EXECUTION_RECEIPTS.with(|receipts| {
+        receipts
+            .borrow()
+            .iter()
+            .rev()
+            .find(|(known, _)| known == graph)
+            .map(|(_, execution)| execution.clone())
+    })
+}
+/// Project one plan through the ambient receipt context used by in-process
+/// tooling and CLI queries. An explicit report wins; otherwise an exact static
+/// graph identity may reuse a completed report from this thread.
+#[doc(hidden)]
+pub fn graph_for_build_query(
+    plan: &BuildPlan,
+    execution: Option<&BuildExecutionReport>,
+) -> BuildGraph {
+    if let Some(execution) = execution {
+        return plan.graph_with_execution(Some(execution));
+    }
+    let static_graph = plan.graph();
+    let ambient = execution_receipt_for_graph(&static_graph);
+    plan.graph_with_execution(ambient.as_ref())
+}
+
+/// D-BUILDQUERY1=A: project the checked plan without opening a store or
+/// re-deciding any graph meaning in a tier-specific host.
+pub fn eval_build_graph(plan: &CtValue, span: Span) -> Result<CtValue, Diagnostic> {
+    let Some((session_id, target_id)) =
+        returned_handle(plan, crate::Syntax::TYPE_BUILD_PLAN)
+    else {
+        return Err(build_query_diag(
+            "argument 1 must be a BuildPlan returned by this build",
+            span,
+        ));
+    };
+    let graph = PROGRAM_BUILD_SESSIONS.with(|sessions| {
+        let sessions = sessions.borrow();
+        let session = sessions
+            .get(&session_id)
+            .ok_or_else(|| build_query_diag("build context expired", span))?;
+        let plan = if target_id >= 0 {
+            session
+                .context
+                .plan_with_default(TargetRef {
+                    id: TargetId(target_id as usize),
+                    context: session_id,
+                })
+        } else {
+            session.context.plan()
+        };
+        plan.map(|plan| graph_for_build_query(&plan, None))
+        .map_err(|error| build_error_diag(&error, span))
+    })?;
+    Ok(build_graph_value(&graph))
+}
+
+/// D-BUILDQUERY1=A: compare two typed graph projections. The graph parser is
+/// deliberately private; source code can only receive these records from the
+/// canonical query above, while malformed values fail with a normal diagnostic.
+pub fn eval_build_receipt_diff(
+    before: &CtValue,
+    after: &CtValue,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let before = build_graph_from_value(before, span)?;
+    let after = build_graph_from_value(after, span)?;
+    Ok(build_graph_diff_value(&before.diff(&after)))
+}
+
+fn build_query_diag(detail: impl Into<String>, span: Span) -> Diagnostic {
+    let detail = detail.into();
+    Diagnostic::error(
+        "E3502",
+        format!("build graph query failed: {detail}"),
+        "core.build exposes only canonical checked BuildPlan facts".to_string(),
+        "pass a BuildPlan or BuildGraph returned by this build".to_string(),
+        Some(span),
+    )
+}
+
+fn graph_struct(type_name: &str, fields: Vec<(&str, CtValue)>) -> CtValue {
+    CtValue::Struct {
+        type_name: type_name.to_string(),
+        fields: fields
+            .into_iter()
+            .map(|(name, value)| (name.to_string(), value))
+            .collect(),
+    }
+}
+
+fn graph_list(values: impl IntoIterator<Item = CtValue>) -> CtValue {
+    CtValue::List(values.into_iter().collect())
+}
+
+fn graph_option(value: Option<CtValue>, element_type: Type) -> CtValue {
+    value.map_or_else(
+        || CtValue::absent(element_type),
+        |value| CtValue::Present(Box::new(value)),
+    )
+}
+
+fn graph_option_int(value: Option<usize>) -> CtValue {
+    graph_option(value.map(|value| CtValue::Int(value as i64)), Type::Int)
+}
+
+fn graph_option_string(value: Option<String>) -> CtValue {
+    graph_option(value.map(CtValue::Str), Type::String)
+}
+
+fn graph_option_bool(value: Option<bool>) -> CtValue {
+    graph_option(value.map(CtValue::Bool), Type::Bool)
+}
+
+fn build_graph_value(graph: &BuildGraph) -> CtValue {
+    let action_keys = graph.action_keys();
+    let cache_hits = graph.cache_hits();
+    let affected_files = graph.affected_files();
+    graph_struct(
+        crate::Syntax::TYPE_BUILD_GRAPH,
+        vec![
+            (
+                "targets",
+                graph_list(graph.targets.iter().map(build_graph_target_value)),
+            ),
+            (
+                "actions",
+                graph_list(graph.actions.iter().map(build_graph_action_value)),
+            ),
+            (
+                "action_keys",
+                graph_list(action_keys.iter().map(build_graph_action_key_value)),
+            ),
+            (
+                "cache_hits",
+                graph_list(cache_hits.iter().map(|action| build_graph_action_value(action))),
+            ),
+            (
+                "files",
+                graph_list(graph.files.iter().map(build_graph_file_value)),
+            ),
+            (
+                "affected_files",
+                graph_list(affected_files.iter().map(build_graph_file_value)),
+            ),
+            (
+                "nodes",
+                graph_list(graph.nodes.iter().map(build_graph_node_value)),
+            ),
+        ],
+    )
+}
+
+fn build_graph_target_value(target: &BuildGraphTarget) -> CtValue {
+    graph_struct(
+        crate::Syntax::TYPE_BUILD_GRAPH_TARGET,
+        vec![
+            ("id", CtValue::Int(target.id.0 as i64)),
+            ("name", CtValue::Str(target.name.clone())),
+            ("kind", CtValue::Str(format!("{:?}", target.kind))),
+            (
+                "deps",
+                graph_list(
+                    target
+                        .deps
+                        .iter()
+                        .map(|id| CtValue::Int(id.0 as i64)),
+                ),
+            ),
+            (
+                "actions",
+                graph_list(
+                    target
+                        .actions
+                        .iter()
+                        .map(|id| CtValue::Int(id.0 as i64)),
+                ),
+            ),
+            (
+                "files",
+                graph_list(target.files.iter().cloned().map(CtValue::Str)),
+            ),
+            ("plugin", graph_option_int(target.plugin.map(|id| id.0))),
+        ],
+    )
+}
+
+fn build_graph_action_value(action: &BuildGraphAction) -> CtValue {
+    graph_struct(
+        crate::Syntax::TYPE_BUILD_GRAPH_ACTION,
+        vec![
+            ("id", CtValue::Int(action.id.0 as i64)),
+            ("name", CtValue::Str(action.name.clone())),
+            ("kind", CtValue::Str(action.kind.as_str().to_string())),
+            (
+                "inputs",
+                graph_list(action.inputs.iter().cloned().map(CtValue::Str)),
+            ),
+            (
+                "outputs",
+                graph_list(action.outputs.iter().cloned().map(CtValue::Str)),
+            ),
+            ("target", graph_option_int(action.target.map(|id| id.0))),
+            (
+                "caps",
+                graph_list(
+                    action
+                        .caps
+                        .iter()
+                        .map(|cap| CtValue::Str(cap.name().to_string())),
+                ),
+            ),
+            (
+                "pools",
+                graph_list(
+                    action
+                        .pools
+                        .iter()
+                        .map(|pool| CtValue::Str(pool.as_str().to_string())),
+                ),
+            ),
+            (
+                "legacy_wrapper",
+                graph_option_string(
+                    action
+                        .legacy_wrapper
+                        .map(|wrapper| wrapper.as_str().to_string()),
+                ),
+            ),
+            ("plugin", graph_option_int(action.plugin.map(|id| id.0))),
+            ("compiler_owned", CtValue::Bool(action.compiler_owned)),
+            ("key", CtValue::Str(action.key.as_str().to_string())),
+            ("cache_hit", graph_option_bool(action.cache_hit)),
+        ],
+    )
+}
+
+fn build_graph_file_value(file: &BuildGraphFile) -> CtValue {
+    graph_struct(
+        crate::Syntax::TYPE_BUILD_GRAPH_FILE,
+        vec![
+            ("path", CtValue::Str(file.path.clone())),
+            ("owner", graph_option_int(file.owner.map(|id| id.0))),
+            (
+                "consumers",
+                graph_list(
+                    file.consumers
+                        .iter()
+                        .map(|id| CtValue::Int(id.0 as i64)),
+                ),
+            ),
+            (
+                "targets",
+                graph_list(
+                    file.targets
+                        .iter()
+                        .map(|id| CtValue::Int(id.0 as i64)),
+                ),
+            ),
+        ],
+    )
+}
+
+fn build_graph_node_value(node: &BuildPlanNode) -> CtValue {
+    graph_struct(
+        crate::Syntax::TYPE_BUILD_GRAPH_NODE,
+        vec![
+            ("kind", CtValue::Str(node.kind.as_str().to_string())),
+            ("key", CtValue::Str(node.key.clone())),
+            ("subject", CtValue::Str(node.subject.clone())),
+            (
+                "inputs",
+                graph_list(node.inputs.iter().cloned().map(CtValue::Str)),
+            ),
+            (
+                "input_digests",
+                graph_list(node.input_digests.iter().map(|(name, digest)| {
+                    graph_struct(
+                        crate::Syntax::TYPE_BUILD_GRAPH_INPUT_DIGEST,
+                        vec![
+                            ("name", CtValue::Str(name.clone())),
+                            ("digest", CtValue::Str(digest.clone())),
+                        ],
+                    )
+                })),
+            ),
+        ],
+    )
+}
+
+fn build_graph_action_key_value(key: &BuildGraphActionKey) -> CtValue {
+    graph_struct(
+        crate::Syntax::TYPE_BUILD_GRAPH_ACTION_KEY,
+        vec![
+            ("action", CtValue::Str(key.action.clone())),
+            ("key", CtValue::Str(key.key.as_str().to_string())),
+        ],
+    )
+}
+
+fn build_graph_diff_value(diff: &BuildGraphDiff) -> CtValue {
+    graph_struct(
+        crate::Syntax::TYPE_BUILD_GRAPH_DIFF,
+        vec![
+            (
+                "file_deltas",
+                graph_list(diff.file_deltas.iter().map(build_graph_file_delta_value)),
+            ),
+            (
+                "affected_files",
+                graph_list(diff.affected_files.iter().cloned().map(CtValue::Str)),
+            ),
+            (
+                "key_deltas",
+                graph_list(diff.key_deltas.iter().map(build_graph_key_delta_value)),
+            ),
+            (
+                "cache_deltas",
+                graph_list(diff.cache_deltas.iter().map(build_graph_cache_delta_value)),
+            ),
+        ],
+    )
+}
+
+fn build_graph_file_delta_value(delta: &BuildGraphFileDelta) -> CtValue {
+    graph_struct(
+        crate::Syntax::TYPE_BUILD_GRAPH_FILE_DELTA,
+        vec![
+            ("path", CtValue::Str(delta.path.clone())),
+            (
+                "before",
+                graph_option(
+                    delta.before.as_ref().map(build_graph_file_value),
+                    Type::Named(crate::Syntax::TYPE_BUILD_GRAPH_FILE.to_string()),
+                ),
+            ),
+            (
+                "after",
+                graph_option(
+                    delta.after.as_ref().map(build_graph_file_value),
+                    Type::Named(crate::Syntax::TYPE_BUILD_GRAPH_FILE.to_string()),
+                ),
+            ),
+        ],
+    )
+}
+
+fn build_graph_key_delta_value(delta: &BuildGraphKeyDelta) -> CtValue {
+    graph_struct(
+        crate::Syntax::TYPE_BUILD_GRAPH_KEY_DELTA,
+        vec![
+            ("action", CtValue::Str(delta.action.clone())),
+            (
+                "before",
+                graph_option_string(delta.before.as_ref().map(|key| key.as_str().to_string())),
+            ),
+            (
+                "after",
+                graph_option_string(delta.after.as_ref().map(|key| key.as_str().to_string())),
+            ),
+        ],
+    )
+}
+
+fn build_graph_cache_delta_value(delta: &BuildGraphCacheDelta) -> CtValue {
+    graph_struct(
+        crate::Syntax::TYPE_BUILD_GRAPH_CACHE_DELTA,
+        vec![
+            ("action", CtValue::Str(delta.action.clone())),
+            ("before", graph_option_bool(delta.before)),
+            ("after", graph_option_bool(delta.after)),
+        ],
+    )
+}
+
+fn graph_payload(value: &CtValue) -> &CtValue {
+    match value {
+        CtValue::Present(value) => value.as_ref(),
+        value => value,
+    }
+}
+
+fn graph_struct_fields<'a>(
+    value: &'a CtValue,
+    type_name: &str,
+    span: Span,
+) -> Result<&'a [(String, CtValue)], Diagnostic> {
+    match graph_payload(value) {
+        CtValue::Struct {
+            type_name: actual,
+            fields,
+        } if actual == type_name => Ok(fields),
+        _ => Err(build_query_diag(
+            format!("value must be a `{type_name}`"),
+            span,
+        )),
+    }
+}
+
+fn graph_field<'a>(
+    fields: &'a [(String, CtValue)],
+    name: &str,
+    span: Span,
+) -> Result<&'a CtValue, Diagnostic> {
+    fields
+        .iter()
+        .find_map(|(field, value)| (field == name).then_some(value))
+        .ok_or_else(|| build_query_diag(format!("`{name}` is missing"), span))
+}
+
+fn graph_list_value<'a>(
+    value: &'a CtValue,
+    name: &str,
+    span: Span,
+) -> Result<&'a [CtValue], Diagnostic> {
+    match graph_payload(value) {
+        CtValue::List(values) => Ok(values),
+        _ => Err(build_query_diag(format!("`{name}` must be a list"), span)),
+    }
+}
+
+fn graph_int(value: &CtValue, name: &str, span: Span) -> Result<i64, Diagnostic> {
+    match graph_payload(value) {
+        CtValue::Int(value) => Ok(*value),
+        _ => Err(build_query_diag(format!("`{name}` must be an Int"), span)),
+    }
+}
+
+fn graph_id(value: &CtValue, name: &str, span: Span) -> Result<usize, Diagnostic> {
+    let value = graph_int(value, name, span)?;
+    usize::try_from(value)
+        .map_err(|_| build_query_diag(format!("`{name}` must be a non-negative id"), span))
+}
+
+fn graph_string(value: &CtValue, name: &str, span: Span) -> Result<String, Diagnostic> {
+    match graph_payload(value) {
+        CtValue::Str(value) => Ok(value.clone()),
+        _ => Err(build_query_diag(format!("`{name}` must be a String"), span)),
+    }
+}
+
+fn graph_bool(value: &CtValue, name: &str, span: Span) -> Result<bool, Diagnostic> {
+    match graph_payload(value) {
+        CtValue::Bool(value) => Ok(*value),
+        _ => Err(build_query_diag(format!("`{name}` must be a Bool"), span)),
+    }
+}
+
+fn graph_strings(
+    value: &CtValue,
+    name: &str,
+    span: Span,
+) -> Result<Vec<String>, Diagnostic> {
+    graph_list_value(value, name, span)?
+        .iter()
+        .map(|value| graph_string(value, name, span))
+        .collect()
+}
+
+fn graph_ids(value: &CtValue, name: &str, span: Span) -> Result<Vec<usize>, Diagnostic> {
+    graph_list_value(value, name, span)?
+        .iter()
+        .map(|value| graph_id(value, name, span))
+        .collect()
+}
+
+fn graph_optional_int(
+    value: &CtValue,
+    name: &str,
+    span: Span,
+) -> Result<Option<usize>, Diagnostic> {
+    match value {
+        CtValue::Failed(crate::AST::CtReport::Clean(_)) => Ok(None),
+        CtValue::Present(value) => Ok(Some(graph_id(value, name, span)?)),
+        _ => Err(build_query_diag(format!("`{name}` must be an optional Int"), span)),
+    }
+}
+
+
+fn graph_optional_bool(
+    value: &CtValue,
+    name: &str,
+    span: Span,
+) -> Result<Option<bool>, Diagnostic> {
+    match value {
+        CtValue::Failed(crate::AST::CtReport::Clean(_)) => Ok(None),
+        CtValue::Present(value) => Ok(Some(graph_bool(value, name, span)?)),
+        _ => Err(build_query_diag(format!("`{name}` must be an optional Bool"), span)),
+    }
+}
+
+fn graph_target_kind(value: &str) -> TargetKind {
+    match value {
+        "Executable" | "executable" => TargetKind::Executable,
+        "Test" | "test" => TargetKind::Test,
+        _ => TargetKind::Library,
+    }
+}
+
+fn graph_action_kind(value: &str) -> ActionKind {
+    match value {
+        "compile" | "Compile" => ActionKind::Compile,
+        "docs" | "Docs" => ActionKind::Docs,
+        "debug" | "Debug" => ActionKind::Debug,
+        "source-archive" | "SourceArchive" => ActionKind::SourceArchive,
+        _ => ActionKind::Generic,
+    }
+}
+
+fn build_graph_from_value(value: &CtValue, span: Span) -> Result<BuildGraph, Diagnostic> {
+    let fields = graph_struct_fields(value, crate::Syntax::TYPE_BUILD_GRAPH, span)?;
+    let targets = graph_list_value(graph_field(fields, "targets", span)?, "targets", span)?
+        .iter()
+        .map(|value| {
+            let fields =
+                graph_struct_fields(value, crate::Syntax::TYPE_BUILD_GRAPH_TARGET, span)?;
+            let id = TargetId(graph_id(graph_field(fields, "id", span)?, "id", span)?);
+            let name = graph_string(graph_field(fields, "name", span)?, "name", span)?;
+            let kind = graph_target_kind(&graph_string(
+                graph_field(fields, "kind", span)?,
+                "kind",
+                span,
+            )?);
+            let deps = graph_ids(graph_field(fields, "deps", span)?, "deps", span)?
+                .into_iter()
+                .map(TargetId)
+                .collect();
+            let actions = graph_ids(graph_field(fields, "actions", span)?, "actions", span)?
+                .into_iter()
+                .map(ActionId)
+                .collect();
+            let files = graph_strings(graph_field(fields, "files", span)?, "files", span)?;
+            let plugin = graph_optional_int(graph_field(fields, "plugin", span)?, "plugin", span)?
+                .map(PluginId);
+            Ok(BuildGraphTarget {
+                id,
+                name,
+                kind,
+                deps,
+                actions,
+                files,
+                plugin,
+            })
+        })
+        .collect::<Result<Vec<_>, Diagnostic>>()?;
+    let actions = graph_list_value(graph_field(fields, "actions", span)?, "actions", span)?
+        .iter()
+        .map(|value| {
+            let fields =
+                graph_struct_fields(value, crate::Syntax::TYPE_BUILD_GRAPH_ACTION, span)?;
+            let id = ActionId(graph_id(graph_field(fields, "id", span)?, "id", span)?);
+            let name = graph_string(graph_field(fields, "name", span)?, "name", span)?;
+            let kind = graph_action_kind(&graph_string(
+                graph_field(fields, "kind", span)?,
+                "kind",
+                span,
+            )?);
+            let inputs = graph_strings(graph_field(fields, "inputs", span)?, "inputs", span)?;
+            let outputs =
+                graph_strings(graph_field(fields, "outputs", span)?, "outputs", span)?;
+            let target = graph_optional_int(graph_field(fields, "target", span)?, "target", span)?
+                .map(TargetId);
+            let plugin = graph_optional_int(graph_field(fields, "plugin", span)?, "plugin", span)?
+                .map(PluginId);
+            let compiler_owned =
+                graph_bool(graph_field(fields, "compiler_owned", span)?, "compiler_owned", span)?;
+            let key = ActionKey::new(graph_string(
+                graph_field(fields, "key", span)?,
+                "key",
+                span,
+            )?);
+            let cache_hit =
+                graph_optional_bool(graph_field(fields, "cache_hit", span)?, "cache_hit", span)?;
+            Ok(BuildGraphAction {
+                id,
+                name,
+                kind,
+                inputs,
+                outputs,
+                target,
+                caps: Vec::new(),
+                pools: Vec::new(),
+                legacy_wrapper: None,
+                plugin,
+                compiler_owned,
+                key,
+                cache_hit,
+            })
+        })
+        .collect::<Result<Vec<_>, Diagnostic>>()?;
+    let files = graph_list_value(graph_field(fields, "files", span)?, "files", span)?
+        .iter()
+        .map(|value| {
+            let fields =
+                graph_struct_fields(value, crate::Syntax::TYPE_BUILD_GRAPH_FILE, span)?;
+            let path = graph_string(graph_field(fields, "path", span)?, "path", span)?;
+            let owner = graph_optional_int(graph_field(fields, "owner", span)?, "owner", span)?
+                .map(ActionId);
+            let consumers =
+                graph_ids(graph_field(fields, "consumers", span)?, "consumers", span)?
+                    .into_iter()
+                    .map(ActionId)
+                    .collect();
+            let targets =
+                graph_ids(graph_field(fields, "targets", span)?, "targets", span)?
+                    .into_iter()
+                    .map(TargetId)
+                    .collect();
+            Ok(BuildGraphFile {
+                path,
+                owner,
+                consumers,
+                targets,
+            })
+        })
+        .collect::<Result<Vec<_>, Diagnostic>>()?;
+    Ok(BuildGraph {
+        targets,
+        actions,
+        files,
+        nodes: Vec::new(),
+    })
 }
 
 #[doc(hidden)]
@@ -1375,8 +2037,10 @@ fn build_diag(detail: &str, span: Span) -> Diagnostic {
         return Diagnostic::error(
             "E3511",
             format!("build plan is invalid: {detail}"),
-            "generated source must reach a bounded deterministic order, not loop until quiescent".to_string(),
-            "break the dependency between these generators or give each generated module one owner".to_string(),
+            "generated source must reach a bounded deterministic order, not loop until quiescent"
+                .to_string(),
+            "break the dependency between these generators or give each generated module one owner"
+                .to_string(),
             Some(span),
         );
     }

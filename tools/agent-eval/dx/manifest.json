@@ -1,0 +1,4903 @@
+{
+  "schema": "jet.dx.benchmark-manifest.v1",
+  "schema_version": 1,
+  "title": "Jet E14 developer-experience matrix",
+  "cards": [
+    "#2479",
+    "#2481",
+    "#2482"
+  ],
+  "source": {
+    "id": "jet-e14-dx-v1",
+    "authority": "docs/audits/developer-experience.md",
+    "command_environment": "scripts/agent/jet-env"
+  },
+  "policy": {
+    "dimensions": [
+      "cold",
+      "warm",
+      "edit",
+      "error",
+      "test",
+      "debug",
+      "package"
+    ],
+    "sample_policy": {
+      "cold": 5,
+      "warm": 5,
+      "edit": 10,
+      "error": 1,
+      "test": 1,
+      "debug": 1,
+      "package": 1
+    },
+    "max_samples": 10,
+    "cold_definition": "A new isolated project and process with global package caches retained.",
+    "warm_definition": "The same installed project after the cold setup, with a new command process.",
+    "neutral_matching": {
+      "rule": "Every participant receives the same domain task, fixture, edit, defect, fix, and required observations; only native scaffold and command spelling may differ.",
+      "required_task_fields": [
+        "task_id",
+        "fixture_id",
+        "objective",
+        "success_facts",
+        "fixture",
+        "markers"
+      ],
+      "forbidden": [
+        "precomputed result",
+        "hand-edited baseline",
+        "substitute workload",
+        "ranking from missing evidence"
+      ]
+    },
+    "outcomes": [
+      "measured",
+      "unmeasured",
+      "failed",
+      "pending"
+    ],
+    "comparison_outcomes": [
+      "win",
+      "parity",
+      "loss",
+      "unmeasured",
+      "failed"
+    ],
+    "no_score_without_evidence": true,
+    "comparison": {
+      "lower_is_better": true,
+      "parity_ratio_low": 0.95,
+      "parity_ratio_high": 1.05,
+      "rule": "A comparison is scored only when both participants have measured values and complete command, observation, and artifact evidence for that leaf."
+    }
+  },
+  "default_workflows": {
+    "cold": {
+      "setup": [
+        "scaffold"
+      ],
+      "command": "run"
+    },
+    "warm": {
+      "setup": [
+        "scaffold"
+      ],
+      "command": "run"
+    },
+    "edit": {
+      "setup": [
+        "scaffold"
+      ],
+      "command": "run"
+    },
+    "error": {
+      "setup": [
+        "scaffold"
+      ],
+      "command": "check",
+      "expect_failure": true
+    },
+    "test": {
+      "setup": [
+        "scaffold"
+      ],
+      "command": "test",
+      "two_passes": true
+    },
+    "debug": {
+      "setup": [
+        "scaffold"
+      ],
+      "command": "debug"
+    },
+    "package": {
+      "setup": [
+        "scaffold"
+      ],
+      "command": "package",
+      "two_passes": true
+    }
+  },
+  "profiles": {
+    "jet": {
+      "label": "Jet",
+      "kind": "jet",
+      "executable": "scripts/agent/jet-env",
+      "version_args": [
+        "jet",
+        "--version"
+      ],
+      "commands": {
+        "scaffold": {
+          "program": "scripts/agent/jet-env",
+          "args": [
+            "jet",
+            "new",
+            "project",
+            "$TARGET"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 180000
+        },
+        "run": {
+          "program": "scripts/agent/jet-env",
+          "args": [
+            "jet",
+            "run"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "dev": {
+          "program": "scripts/agent/jet-env",
+          "args": [
+            "jet",
+            "dev",
+            "run.jet",
+            "--watch=off"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000,
+          "resident": true
+        },
+        "explain-web-graph": {
+          "program": "scripts/agent/jet-env",
+          "args": [
+            "jet",
+            "explain",
+            "--web-graph"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "check": {
+          "program": "scripts/agent/jet-env",
+          "args": [
+            "jet",
+            "check"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "test": {
+          "program": "scripts/agent/jet-env",
+          "args": [
+            "jet",
+            "test"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "reference-first-run": {
+          "program": "node",
+          "args": [
+            "$ROOT/scripts/web-dev-test/reference_app.mjs",
+            "--metric",
+            "first_run",
+            "--manifest",
+            "$ROOT/tools/agent-eval/dx/manifest.json",
+            "--app",
+            "tanstack-start-orders",
+            "--jet-env",
+            "$ROOT/scripts/agent/jet-env"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "reference-edit-to-see": {
+          "program": "node",
+          "args": [
+            "$ROOT/scripts/web-dev-test/reference_app.mjs",
+            "--metric",
+            "edit_to_see",
+            "--manifest",
+            "$ROOT/tools/agent-eval/dx/manifest.json",
+            "--app",
+            "tanstack-start-orders",
+            "--jet-env",
+            "$ROOT/scripts/agent/jet-env"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "reference-error-to-fix": {
+          "program": "node",
+          "args": [
+            "$ROOT/scripts/web-dev-test/reference_app.mjs",
+            "--metric",
+            "error_to_fix",
+            "--manifest",
+            "$ROOT/tools/agent-eval/dx/manifest.json",
+            "--app",
+            "tanstack-start-orders",
+            "--jet-env",
+            "$ROOT/scripts/agent/jet-env"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "reference-test-loop": {
+          "program": "node",
+          "args": [
+            "$ROOT/scripts/web-dev-test/reference_app.mjs",
+            "--metric",
+            "test_loop",
+            "--manifest",
+            "$ROOT/tools/agent-eval/dx/manifest.json",
+            "--app",
+            "tanstack-start-orders",
+            "--jet-env",
+            "$ROOT/scripts/agent/jet-env"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "debug": {
+          "program": "scripts/agent/jet-env",
+          "args": [
+            "jet",
+            "debug",
+            "--dap"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "package": {
+          "program": "scripts/agent/jet-env",
+          "args": [
+            "jet",
+            "build",
+            "--output",
+            "build/project"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        }
+      },
+      "target_by_domain": {
+        "web": "--target=web",
+        "games": "--target=game",
+        "cli": "--target=cli",
+        "data": "--target=cli",
+        "backend": "--target=server",
+        "ai-ml": "--target=cli",
+        "gui": "--target=gui",
+        "embedded": "--target=thumbv7em-none-eabihf"
+      },
+      "artifact": "build/project",
+      "fixture_by_domain": {
+        "web": {
+          "files": {
+            "run.jet": "print(\"DX_READY:web\")\nprint(\"DX_STATE:web:before\")\nprint(\"DX_VALUE:web:before\")\nprint(\"DX_EDIT:web\")\nprint(\"DX_ERROR:web\")\nprint(\"DX_TEST:web\")\nprint(\"DX_DEBUG:web\")\n"
+          },
+          "edit": {
+            "file": "run.jet",
+            "needle": "print(\"DX_VALUE:web:before\")",
+            "replacement": "print(\"DX_VALUE:web:after\")",
+            "expected_marker": "DX_EDIT:web"
+          },
+          "defect": {
+            "file": "run.jet",
+            "needle": "print(\"DX_VALUE:web:before\")",
+            "replacement": "print(",
+            "diagnostic": "DX_ERROR:web"
+          },
+          "fix": {
+            "file": "run.jet",
+            "needle": "print(",
+            "replacement": "print(\"DX_VALUE:web:before\")",
+            "expected_marker": "DX_READY:web"
+          },
+          "state": {
+            "before": "DX_STATE:web:before",
+            "after": "DX_STATE:web:after",
+            "reset": "DX_STATE:web:reset"
+          }
+        },
+        "games": {
+          "files": {
+            "run.jet": "print(\"DX_READY:games\")\nprint(\"DX_STATE:games:before\")\nprint(\"DX_VALUE:games:before\")\nprint(\"DX_EDIT:games\")\nprint(\"DX_ERROR:games\")\nprint(\"DX_TEST:games\")\nprint(\"DX_DEBUG:games\")\n"
+          },
+          "edit": {
+            "file": "run.jet",
+            "needle": "print(\"DX_VALUE:games:before\")",
+            "replacement": "print(\"DX_VALUE:games:after\")",
+            "expected_marker": "DX_EDIT:games"
+          },
+          "defect": {
+            "file": "run.jet",
+            "needle": "print(\"DX_VALUE:games:before\")",
+            "replacement": "print(",
+            "diagnostic": "DX_ERROR:games"
+          },
+          "fix": {
+            "file": "run.jet",
+            "needle": "print(",
+            "replacement": "print(\"DX_VALUE:games:before\")",
+            "expected_marker": "DX_READY:games"
+          },
+          "state": {
+            "before": "DX_STATE:games:before",
+            "after": "DX_STATE:games:after",
+            "reset": "DX_STATE:games:reset"
+          }
+        },
+        "cli": {
+          "files": {
+            "run.jet": "print(\"DX_READY:cli\")\nprint(\"DX_STATE:cli:before\")\nprint(\"DX_VALUE:cli:before\")\nprint(\"DX_EDIT:cli\")\nprint(\"DX_ERROR:cli\")\nprint(\"DX_TEST:cli\")\nprint(\"DX_DEBUG:cli\")\n"
+          },
+          "edit": {
+            "file": "run.jet",
+            "needle": "print(\"DX_VALUE:cli:before\")",
+            "replacement": "print(\"DX_VALUE:cli:after\")",
+            "expected_marker": "DX_EDIT:cli"
+          },
+          "defect": {
+            "file": "run.jet",
+            "needle": "print(\"DX_VALUE:cli:before\")",
+            "replacement": "print(",
+            "diagnostic": "DX_ERROR:cli"
+          },
+          "fix": {
+            "file": "run.jet",
+            "needle": "print(",
+            "replacement": "print(\"DX_VALUE:cli:before\")",
+            "expected_marker": "DX_READY:cli"
+          },
+          "state": {
+            "before": "DX_STATE:cli:before",
+            "after": "DX_STATE:cli:after",
+            "reset": "DX_STATE:cli:reset"
+          }
+        },
+        "data": {
+          "files": {
+            "run.jet": "print(\"DX_READY:data\")\nprint(\"DX_STATE:data:before\")\nprint(\"DX_VALUE:data:before\")\nprint(\"DX_EDIT:data\")\nprint(\"DX_ERROR:data\")\nprint(\"DX_TEST:data\")\nprint(\"DX_DEBUG:data\")\n"
+          },
+          "edit": {
+            "file": "run.jet",
+            "needle": "print(\"DX_VALUE:data:before\")",
+            "replacement": "print(\"DX_VALUE:data:after\")",
+            "expected_marker": "DX_EDIT:data"
+          },
+          "defect": {
+            "file": "run.jet",
+            "needle": "print(\"DX_VALUE:data:before\")",
+            "replacement": "print(",
+            "diagnostic": "DX_ERROR:data"
+          },
+          "fix": {
+            "file": "run.jet",
+            "needle": "print(",
+            "replacement": "print(\"DX_VALUE:data:before\")",
+            "expected_marker": "DX_READY:data"
+          },
+          "state": {
+            "before": "DX_STATE:data:before",
+            "after": "DX_STATE:data:after",
+            "reset": "DX_STATE:data:reset"
+          }
+        },
+        "backend": {
+          "files": {
+            "run.jet": "print(\"DX_READY:backend\")\nprint(\"DX_STATE:backend:before\")\nprint(\"DX_VALUE:backend:before\")\nprint(\"DX_EDIT:backend\")\nprint(\"DX_ERROR:backend\")\nprint(\"DX_TEST:backend\")\nprint(\"DX_DEBUG:backend\")\n"
+          },
+          "edit": {
+            "file": "run.jet",
+            "needle": "print(\"DX_VALUE:backend:before\")",
+            "replacement": "print(\"DX_VALUE:backend:after\")",
+            "expected_marker": "DX_EDIT:backend"
+          },
+          "defect": {
+            "file": "run.jet",
+            "needle": "print(\"DX_VALUE:backend:before\")",
+            "replacement": "print(",
+            "diagnostic": "DX_ERROR:backend"
+          },
+          "fix": {
+            "file": "run.jet",
+            "needle": "print(",
+            "replacement": "print(\"DX_VALUE:backend:before\")",
+            "expected_marker": "DX_READY:backend"
+          },
+          "state": {
+            "before": "DX_STATE:backend:before",
+            "after": "DX_STATE:backend:after",
+            "reset": "DX_STATE:backend:reset"
+          }
+        },
+        "ai-ml": {
+          "files": {
+            "run.jet": "print(\"DX_READY:ai-ml\")\nprint(\"DX_STATE:ai-ml:before\")\nprint(\"DX_VALUE:ai-ml:before\")\nprint(\"DX_EDIT:ai-ml\")\nprint(\"DX_ERROR:ai-ml\")\nprint(\"DX_TEST:ai-ml\")\nprint(\"DX_DEBUG:ai-ml\")\n"
+          },
+          "edit": {
+            "file": "run.jet",
+            "needle": "print(\"DX_VALUE:ai-ml:before\")",
+            "replacement": "print(\"DX_VALUE:ai-ml:after\")",
+            "expected_marker": "DX_EDIT:ai-ml"
+          },
+          "defect": {
+            "file": "run.jet",
+            "needle": "print(\"DX_VALUE:ai-ml:before\")",
+            "replacement": "print(",
+            "diagnostic": "DX_ERROR:ai-ml"
+          },
+          "fix": {
+            "file": "run.jet",
+            "needle": "print(",
+            "replacement": "print(\"DX_VALUE:ai-ml:before\")",
+            "expected_marker": "DX_READY:ai-ml"
+          },
+          "state": {
+            "before": "DX_STATE:ai-ml:before",
+            "after": "DX_STATE:ai-ml:after",
+            "reset": "DX_STATE:ai-ml:reset"
+          }
+        },
+        "gui": {
+          "files": {
+            "run.jet": "print(\"DX_READY:gui\")\nprint(\"DX_STATE:gui:before\")\nprint(\"DX_VALUE:gui:before\")\nprint(\"DX_EDIT:gui\")\nprint(\"DX_ERROR:gui\")\nprint(\"DX_TEST:gui\")\nprint(\"DX_DEBUG:gui\")\n"
+          },
+          "edit": {
+            "file": "run.jet",
+            "needle": "print(\"DX_VALUE:gui:before\")",
+            "replacement": "print(\"DX_VALUE:gui:after\")",
+            "expected_marker": "DX_EDIT:gui"
+          },
+          "defect": {
+            "file": "run.jet",
+            "needle": "print(\"DX_VALUE:gui:before\")",
+            "replacement": "print(",
+            "diagnostic": "DX_ERROR:gui"
+          },
+          "fix": {
+            "file": "run.jet",
+            "needle": "print(",
+            "replacement": "print(\"DX_VALUE:gui:before\")",
+            "expected_marker": "DX_READY:gui"
+          },
+          "state": {
+            "before": "DX_STATE:gui:before",
+            "after": "DX_STATE:gui:after",
+            "reset": "DX_STATE:gui:reset"
+          }
+        },
+        "embedded": {
+          "files": {
+            "run.jet": "print(\"DX_READY:embedded\")\nprint(\"DX_STATE:embedded:before\")\nprint(\"DX_VALUE:embedded:before\")\nprint(\"DX_EDIT:embedded\")\nprint(\"DX_ERROR:embedded\")\nprint(\"DX_TEST:embedded\")\nprint(\"DX_DEBUG:embedded\")\n"
+          },
+          "edit": {
+            "file": "run.jet",
+            "needle": "print(\"DX_VALUE:embedded:before\")",
+            "replacement": "print(\"DX_VALUE:embedded:after\")",
+            "expected_marker": "DX_EDIT:embedded"
+          },
+          "defect": {
+            "file": "run.jet",
+            "needle": "print(\"DX_VALUE:embedded:before\")",
+            "replacement": "print(",
+            "diagnostic": "DX_ERROR:embedded"
+          },
+          "fix": {
+            "file": "run.jet",
+            "needle": "print(",
+            "replacement": "print(\"DX_VALUE:embedded:before\")",
+            "expected_marker": "DX_READY:embedded"
+          },
+          "state": {
+            "before": "DX_STATE:embedded:before",
+            "after": "DX_STATE:embedded:after",
+            "reset": "DX_STATE:embedded:reset"
+          }
+        }
+      }
+    },
+    "vite": {
+      "label": "npm + Vite",
+      "kind": "peer",
+      "executable": "npm",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {
+        "scaffold": {
+          "program": "npm",
+          "args": [
+            "create",
+            "vite@latest",
+            "project",
+            "--",
+            "--template",
+            "vanilla",
+            "--no-interactive"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 180000
+        },
+        "run": {
+          "program": "npm",
+          "args": [
+            "run",
+            "dev",
+            "--",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "4173",
+            "--strictPort"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000,
+          "resident": true
+        },
+        "check": {
+          "program": "npm",
+          "args": [
+            "run",
+            "dev",
+            "--",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "4173",
+            "--strictPort"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000,
+          "resident": true
+        },
+        "test": {
+          "program": "npm",
+          "args": [
+            "run",
+            "test",
+            "--",
+            "--run"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "package": {
+          "program": "npm",
+          "args": [
+            "run",
+            "build"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        }
+      },
+      "workflow_support": {
+        "debug": {
+          "supported": false,
+          "reason": "Vite has no declared deterministic debugger command in this matrix."
+        }
+      },
+      "artifact": "dist/index.html"
+    },
+    "bun-vite": {
+      "label": "Bun + Vite",
+      "kind": "peer",
+      "executable": "bun",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {
+        "scaffold": {
+          "program": "bun",
+          "args": [
+            "create",
+            "vite",
+            "project",
+            "--template",
+            "vanilla",
+            "--no-interactive"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 180000
+        },
+        "run": {
+          "program": "bun",
+          "args": [
+            "run",
+            "dev",
+            "--",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "4173",
+            "--strictPort"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000,
+          "resident": true
+        },
+        "check": {
+          "program": "bun",
+          "args": [
+            "run",
+            "dev",
+            "--",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "4173",
+            "--strictPort"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000,
+          "resident": true
+        },
+        "test": {
+          "program": "bun",
+          "args": [
+            "test"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "package": {
+          "program": "bun",
+          "args": [
+            "run",
+            "build"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        }
+      },
+      "workflow_support": {
+        "debug": {
+          "supported": false,
+          "reason": "Bun + Vite has no declared deterministic debugger command in this matrix."
+        }
+      },
+      "artifact": "dist/index.html"
+    },
+    "tanstack-start": {
+      "label": "TanStack Start",
+      "kind": "peer",
+      "executable": "npm",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {
+        "scaffold": {
+          "program": "npm",
+          "args": [
+            "create",
+            "tanstack-start@latest",
+            "project",
+            "--",
+            "--no-interactive"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 180000
+        },
+        "run": {
+          "program": "npm",
+          "args": [
+            "run",
+            "dev",
+            "--",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "4173"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000,
+          "resident": true
+        },
+        "check": {
+          "program": "npm",
+          "args": [
+            "run",
+            "dev",
+            "--",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "4173"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000,
+          "resident": true
+        },
+        "test": {
+          "program": "npm",
+          "args": [
+            "run",
+            "test",
+            "--",
+            "--run"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "package": {
+          "program": "npm",
+          "args": [
+            "run",
+            "build"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        }
+      },
+      "workflow_support": {
+        "debug": {
+          "supported": false,
+          "reason": "TanStack Start has no declared deterministic debugger command in this matrix."
+        }
+      },
+      "artifact": ".output/server/index.mjs"
+    },
+    "unity": {
+      "label": "Unity",
+      "kind": "peer",
+      "executable": "unity-editor",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {
+        "scaffold": {
+          "program": "unity-editor",
+          "args": [
+            "-batchmode",
+            "-quit",
+            "-projectPath",
+            "project"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 180000
+        },
+        "run": {
+          "program": "unity-editor",
+          "args": [
+            "-batchmode",
+            "-quit",
+            "-projectPath",
+            "$PROJECT"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 30000
+        },
+        "check": {
+          "program": "unity-editor",
+          "args": [
+            "-batchmode",
+            "-quit",
+            "-projectPath",
+            "$PROJECT"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 30000
+        },
+        "test": {
+          "program": "unity-editor",
+          "args": [
+            "-batchmode",
+            "-quit",
+            "-projectPath",
+            "$PROJECT",
+            "-runTests",
+            "-testResults",
+            "test-results.xml"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 180000
+        },
+        "debug": {
+          "program": "unity-editor",
+          "args": [
+            "-batchmode",
+            "-quit",
+            "-projectPath",
+            "$PROJECT"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 30000
+        },
+        "package": {
+          "program": "unity-editor",
+          "args": [
+            "-batchmode",
+            "-quit",
+            "-projectPath",
+            "$PROJECT",
+            "-buildTarget",
+            "StandaloneLinux64",
+            "-buildLinux64Player",
+            "build/project"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 180000
+        }
+      },
+      "workflow_support": {
+        "debug": {
+          "supported": false,
+          "reason": "Unity editor automation is not a debugger session and cannot provide a stable debug observation."
+        }
+      },
+      "artifact": "build/project"
+    },
+    "godot": {
+      "label": "Godot",
+      "kind": "peer",
+      "executable": "godot",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {
+        "scaffold": {
+          "program": "godot",
+          "args": [
+            "--editor",
+            "--path",
+            "$PROJECT"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 180000
+        },
+        "run": {
+          "program": "godot",
+          "args": [
+            "--headless",
+            "--path",
+            "$PROJECT"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 30000
+        },
+        "check": {
+          "program": "godot",
+          "args": [
+            "--headless",
+            "--path",
+            "$PROJECT"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 30000
+        },
+        "test": {
+          "program": "godot",
+          "args": [
+            "--headless",
+            "--path",
+            "$PROJECT",
+            "--quit"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 180000
+        },
+        "debug": {
+          "program": "godot",
+          "args": [
+            "--headless",
+            "--path",
+            "$PROJECT"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 30000
+        },
+        "package": {
+          "program": "godot",
+          "args": [
+            "--headless",
+            "--path",
+            "$PROJECT",
+            "--export-release",
+            "Linux/X11",
+            "build/project"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 180000
+        }
+      },
+      "workflow_support": {
+        "debug": {
+          "supported": false,
+          "reason": "Godot headless execution is not a debugger session and cannot provide a stable debug observation."
+        }
+      },
+      "artifact": "build/project"
+    },
+    "bevy": {
+      "label": "Bevy",
+      "kind": "peer",
+      "executable": "cargo",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {
+        "scaffold": {
+          "program": "cargo",
+          "args": [
+            "new",
+            "project",
+            "--bin"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 180000
+        },
+        "run": {
+          "program": "cargo",
+          "args": [
+            "run"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "check": {
+          "program": "cargo",
+          "args": [
+            "check"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "test": {
+          "program": "cargo",
+          "args": [
+            "test"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "debug": {
+          "program": "cargo",
+          "args": [
+            "run"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "package": {
+          "program": "cargo",
+          "args": [
+            "build",
+            "--release"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        }
+      },
+      "workflow_support": {
+        "debug": {
+          "supported": false,
+          "reason": "Cargo run is not a debugger session and cannot provide a stable debug observation."
+        }
+      },
+      "artifact": "target/release/project"
+    },
+    "textual": {
+      "label": "Textual",
+      "kind": "peer",
+      "executable": "python3",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {
+        "scaffold": {
+          "program": "python3",
+          "args": [
+            "-m",
+            "venv",
+            "project/.venv"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 180000
+        },
+        "run": {
+          "program": "python3",
+          "args": [
+            "-m",
+            "textual",
+            "run",
+            "main.py"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000,
+          "resident": true
+        },
+        "check": {
+          "program": "python3",
+          "args": [
+            "-m",
+            "textual",
+            "run",
+            "main.py"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000,
+          "resident": true
+        },
+        "test": {
+          "program": "python3",
+          "args": [
+            "-m",
+            "pytest"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "debug": {
+          "program": "python3",
+          "args": [
+            "-m",
+            "textual",
+            "run",
+            "main.py"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "package": {
+          "program": "python3",
+          "args": [
+            "-m",
+            "compileall",
+            "."
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        }
+      },
+      "workflow_support": {
+        "debug": {
+          "supported": false,
+          "reason": "Textual has no declared deterministic debugger command in this matrix."
+        }
+      },
+      "artifact": "__pycache__"
+    },
+    "bubble-tea": {
+      "label": "Bubble Tea",
+      "kind": "peer",
+      "executable": "go",
+      "version_args": [
+        "version"
+      ],
+      "commands": {
+        "scaffold": {
+          "program": "go",
+          "args": [
+            "mod",
+            "init",
+            "example.com/project"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "run": {
+          "program": "go",
+          "args": [
+            "run",
+            "."
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "check": {
+          "program": "go",
+          "args": [
+            "test",
+            "./..."
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "test": {
+          "program": "go",
+          "args": [
+            "test",
+            "./..."
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "debug": {
+          "program": "go",
+          "args": [
+            "run",
+            "."
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "package": {
+          "program": "go",
+          "args": [
+            "build",
+            "-o",
+            "build/project",
+            "."
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        }
+      },
+      "workflow_support": {
+        "debug": {
+          "supported": false,
+          "reason": "Go run is not a debugger session and cannot provide a stable debug observation."
+        }
+      },
+      "artifact": "build/project"
+    },
+    "ratatui": {
+      "label": "Ratatui",
+      "kind": "peer",
+      "executable": "cargo",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {
+        "scaffold": {
+          "program": "cargo",
+          "args": [
+            "new",
+            "project",
+            "--bin"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 180000
+        },
+        "run": {
+          "program": "cargo",
+          "args": [
+            "run"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "check": {
+          "program": "cargo",
+          "args": [
+            "check"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "test": {
+          "program": "cargo",
+          "args": [
+            "test"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "debug": {
+          "program": "cargo",
+          "args": [
+            "run"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "package": {
+          "program": "cargo",
+          "args": [
+            "build",
+            "--release"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        }
+      },
+      "workflow_support": {
+        "debug": {
+          "supported": false,
+          "reason": "Cargo run is not a debugger session and cannot provide a stable debug observation."
+        }
+      },
+      "artifact": "target/release/project"
+    },
+    "marimo": {
+      "label": "marimo",
+      "kind": "peer",
+      "executable": "marimo",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {
+        "scaffold": {
+          "program": "marimo",
+          "args": [
+            "edit",
+            "main.py",
+            "--no-token"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "run": {
+          "program": "marimo",
+          "args": [
+            "run",
+            "main.py",
+            "--headless"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000,
+          "resident": true
+        },
+        "check": {
+          "program": "marimo",
+          "args": [
+            "check",
+            "main.py"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "test": {
+          "program": "marimo",
+          "args": [
+            "run",
+            "main.py",
+            "--headless"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "debug": {
+          "program": "marimo",
+          "args": [
+            "run",
+            "main.py",
+            "--headless"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "package": {
+          "program": "marimo",
+          "args": [
+            "export",
+            "html",
+            "main.py",
+            "-o",
+            "build/project.html"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        }
+      },
+      "workflow_support": {
+        "debug": {
+          "supported": false,
+          "reason": "marimo has no declared deterministic debugger command in this matrix."
+        }
+      },
+      "artifact": "build/project.html"
+    },
+    "jupyter": {
+      "label": "Jupyter",
+      "kind": "peer",
+      "executable": "jupyter",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {
+        "scaffold": {
+          "program": "jupyter",
+          "args": [
+            "notebook",
+            "main.ipynb",
+            "--no-browser"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000,
+          "resident": true
+        },
+        "run": {
+          "program": "jupyter",
+          "args": [
+            "execute",
+            "main.ipynb"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "check": {
+          "program": "jupyter",
+          "args": [
+            "execute",
+            "main.ipynb"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "test": {
+          "program": "jupyter",
+          "args": [
+            "execute",
+            "main.ipynb"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "debug": {
+          "program": "jupyter",
+          "args": [
+            "execute",
+            "main.ipynb"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "package": {
+          "program": "jupyter",
+          "args": [
+            "nbconvert",
+            "main.ipynb",
+            "--to",
+            "html",
+            "--output",
+            "build/project.html"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        }
+      },
+      "workflow_support": {
+        "debug": {
+          "supported": false,
+          "reason": "Jupyter execute is not a debugger session and cannot provide a stable debug observation."
+        }
+      },
+      "artifact": "build/project.html"
+    },
+    "polars": {
+      "label": "Python + Polars",
+      "kind": "peer",
+      "executable": "python3",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {
+        "scaffold": {
+          "program": "python3",
+          "args": [
+            "-c",
+            "import polars"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "run": {
+          "program": "python3",
+          "args": [
+            "main.py"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "check": {
+          "program": "python3",
+          "args": [
+            "-m",
+            "py_compile",
+            "main.py"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "test": {
+          "program": "python3",
+          "args": [
+            "-m",
+            "pytest"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "debug": {
+          "program": "python3",
+          "args": [
+            "main.py"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "package": {
+          "program": "python3",
+          "args": [
+            "-m",
+            "compileall",
+            "-q",
+            "."
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        }
+      },
+      "workflow_support": {
+        "debug": {
+          "supported": false,
+          "reason": "Python execution is not a debugger session and cannot provide a stable debug observation."
+        }
+      },
+      "artifact": "__pycache__"
+    },
+    "phoenix": {
+      "label": "Phoenix",
+      "kind": "peer",
+      "executable": "mix",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {
+        "scaffold": {
+          "program": "mix",
+          "args": [
+            "phx.new",
+            "project",
+            "--no-install"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 180000
+        },
+        "run": {
+          "program": "mix",
+          "args": [
+            "phx.server"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000,
+          "resident": true
+        },
+        "check": {
+          "program": "mix",
+          "args": [
+            "compile",
+            "--warnings-as-errors"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "test": {
+          "program": "mix",
+          "args": [
+            "test"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "debug": {
+          "program": "mix",
+          "args": [
+            "phx.server"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "package": {
+          "program": "mix",
+          "args": [
+            "release"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        }
+      },
+      "workflow_support": {
+        "debug": {
+          "supported": false,
+          "reason": "Phoenix server execution is not a debugger session and cannot provide a stable debug observation."
+        }
+      },
+      "artifact": "_build/prod/rel/project"
+    },
+    "rails": {
+      "label": "Rails",
+      "kind": "peer",
+      "executable": "rails",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {
+        "scaffold": {
+          "program": "rails",
+          "args": [
+            "new",
+            "project",
+            "--skip-bundle"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 180000
+        },
+        "run": {
+          "program": "bin/rails",
+          "args": [
+            "server",
+            "-b",
+            "127.0.0.1",
+            "-p",
+            "4173"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000,
+          "resident": true
+        },
+        "check": {
+          "program": "bin/rails",
+          "args": [
+            "runner",
+            "puts",
+            "'check'"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "test": {
+          "program": "bin/rails",
+          "args": [
+            "test"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "debug": {
+          "program": "bin/rails",
+          "args": [
+            "runner",
+            "puts",
+            "'debug'"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "package": {
+          "program": "bin/rails",
+          "args": [
+            "assets:precompile"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        }
+      },
+      "workflow_support": {
+        "debug": {
+          "supported": false,
+          "reason": "Rails runner execution is not a debugger session and cannot provide a stable debug observation."
+        }
+      },
+      "artifact": "public/assets"
+    },
+    "aspire": {
+      "label": "Aspire",
+      "kind": "peer",
+      "executable": "aspire",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {
+        "scaffold": {
+          "program": "aspire",
+          "args": [
+            "new",
+            "project"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 180000
+        },
+        "run": {
+          "program": "aspire",
+          "args": [
+            "run"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000,
+          "resident": true
+        },
+        "check": {
+          "program": "dotnet",
+          "args": [
+            "build"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "test": {
+          "program": "dotnet",
+          "args": [
+            "test"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "debug": {
+          "program": "dotnet",
+          "args": [
+            "run"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "package": {
+          "program": "dotnet",
+          "args": [
+            "publish",
+            "-c",
+            "Release",
+            "-o",
+            "build/project"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        }
+      },
+      "workflow_support": {
+        "debug": {
+          "supported": false,
+          "reason": "Aspire run is not a debugger session and cannot provide a stable debug observation."
+        }
+      },
+      "artifact": "build/project"
+    },
+    "pytorch": {
+      "label": "Python + PyTorch",
+      "kind": "peer",
+      "executable": "python3",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {
+        "scaffold": {
+          "program": "python3",
+          "args": [
+            "-c",
+            "import torch"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "run": {
+          "program": "python3",
+          "args": [
+            "main.py"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "check": {
+          "program": "python3",
+          "args": [
+            "-m",
+            "py_compile",
+            "main.py"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "test": {
+          "program": "python3",
+          "args": [
+            "-m",
+            "pytest"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "debug": {
+          "program": "python3",
+          "args": [
+            "main.py"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "package": {
+          "program": "python3",
+          "args": [
+            "-m",
+            "compileall",
+            "-q",
+            "."
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        }
+      },
+      "workflow_support": {
+        "debug": {
+          "supported": false,
+          "reason": "Python execution is not a debugger session and cannot provide a stable debug observation."
+        }
+      },
+      "artifact": "__pycache__"
+    },
+    "ollama": {
+      "label": "Ollama",
+      "kind": "peer",
+      "executable": "ollama",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {
+        "scaffold": {
+          "program": "ollama",
+          "args": [
+            "list"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "run": {
+          "program": "ollama",
+          "args": [
+            "run",
+            "model"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "check": {
+          "program": "ollama",
+          "args": [
+            "list"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "test": {
+          "program": "ollama",
+          "args": [
+            "run",
+            "model",
+            "--",
+            "test"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "debug": {
+          "program": "ollama",
+          "args": [
+            "run",
+            "model"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "package": {
+          "program": "ollama",
+          "args": [
+            "show",
+            "model"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        }
+      },
+      "workflow_support": {
+        "debug": {
+          "supported": false,
+          "reason": "Ollama model execution is not a debugger session and cannot provide a stable debug observation."
+        }
+      },
+      "artifact": "model.json"
+    },
+    "flutter": {
+      "label": "Flutter",
+      "kind": "peer",
+      "executable": "flutter",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {
+        "scaffold": {
+          "program": "flutter",
+          "args": [
+            "create",
+            "project"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 180000
+        },
+        "run": {
+          "program": "flutter",
+          "args": [
+            "test",
+            "--machine"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "check": {
+          "program": "flutter",
+          "args": [
+            "analyze"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "test": {
+          "program": "flutter",
+          "args": [
+            "test"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "debug": {
+          "program": "flutter",
+          "args": [
+            "test",
+            "--machine"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "package": {
+          "program": "flutter",
+          "args": [
+            "build",
+            "linux",
+            "--release"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        }
+      },
+      "workflow_support": {
+        "debug": {
+          "supported": false,
+          "reason": "Flutter test is not a debugger session and cannot provide a stable debug observation."
+        }
+      },
+      "artifact": "build/linux/x64/release/bundle/project"
+    },
+    "swiftui": {
+      "label": "SwiftUI",
+      "kind": "peer",
+      "executable": "swift",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {
+        "scaffold": {
+          "program": "swift",
+          "args": [
+            "package",
+            "init",
+            "--type",
+            "executable"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "run": {
+          "program": "swift",
+          "args": [
+            "run"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "check": {
+          "program": "swift",
+          "args": [
+            "build"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "test": {
+          "program": "swift",
+          "args": [
+            "test"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "debug": {
+          "program": "swift",
+          "args": [
+            "run"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "package": {
+          "program": "swift",
+          "args": [
+            "build",
+            "-c",
+            "release"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        }
+      },
+      "workflow_support": {
+        "debug": {
+          "supported": false,
+          "reason": "Swift run is not a debugger session and cannot provide a stable debug observation."
+        }
+      },
+      "artifact": ".build/release/project"
+    },
+    "compose": {
+      "label": "Compose",
+      "kind": "peer",
+      "executable": "gradle",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {
+        "scaffold": {
+          "program": "gradle",
+          "args": [
+            "init",
+            "--type",
+            "basic"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "run": {
+          "program": "gradle",
+          "args": [
+            "run"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "check": {
+          "program": "gradle",
+          "args": [
+            "check"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "test": {
+          "program": "gradle",
+          "args": [
+            "test"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "debug": {
+          "program": "gradle",
+          "args": [
+            "run"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "package": {
+          "program": "gradle",
+          "args": [
+            "assemble"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        }
+      },
+      "workflow_support": {
+        "debug": {
+          "supported": false,
+          "reason": "Gradle run is not a debugger session and cannot provide a stable debug observation."
+        }
+      },
+      "artifact": "build/libs/project.jar"
+    },
+    "cargo-embedded": {
+      "label": "Cargo Embedded",
+      "kind": "peer",
+      "executable": "cargo",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {
+        "scaffold": {
+          "program": "cargo",
+          "args": [
+            "new",
+            "project",
+            "--bin"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 180000
+        },
+        "run": {
+          "program": "cargo",
+          "args": [
+            "build",
+            "--target",
+            "thumbv7em-none-eabihf"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "check": {
+          "program": "cargo",
+          "args": [
+            "check",
+            "--target",
+            "thumbv7em-none-eabihf"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "test": {
+          "program": "cargo",
+          "args": [
+            "test"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "debug": {
+          "program": "cargo",
+          "args": [
+            "build",
+            "--target",
+            "thumbv7em-none-eabihf"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "package": {
+          "program": "cargo",
+          "args": [
+            "build",
+            "--release",
+            "--target",
+            "thumbv7em-none-eabihf"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        }
+      },
+      "workflow_support": {
+        "debug": {
+          "supported": false,
+          "reason": "Cargo Embedded build is not a debugger session and cannot provide a stable debug observation."
+        }
+      },
+      "artifact": "target/thumbv7em-none-eabihf/release/project"
+    },
+    "zephyr": {
+      "label": "Zephyr",
+      "kind": "peer",
+      "executable": "west",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {
+        "scaffold": {
+          "program": "west",
+          "args": [
+            "init",
+            "project"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 180000
+        },
+        "run": {
+          "program": "west",
+          "args": [
+            "build",
+            "-b",
+            "native_sim",
+            "project"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 30000
+        },
+        "check": {
+          "program": "west",
+          "args": [
+            "build",
+            "-b",
+            "native_sim",
+            "project"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 30000
+        },
+        "test": {
+          "program": "west",
+          "args": [
+            "build",
+            "-b",
+            "native_sim",
+            "project"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 180000
+        },
+        "debug": {
+          "program": "west",
+          "args": [
+            "build",
+            "-b",
+            "native_sim",
+            "project"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 30000
+        },
+        "package": {
+          "program": "west",
+          "args": [
+            "build",
+            "-b",
+            "native_sim",
+            "project"
+          ],
+          "cwd": "$CELL",
+          "timeout_ms": 180000
+        }
+      },
+      "workflow_support": {
+        "debug": {
+          "supported": false,
+          "reason": "Zephyr build is not a debugger session and cannot provide a stable debug observation."
+        }
+      },
+      "artifact": "build/zephyr/zephyr/zephyr.elf"
+    },
+    "platformio": {
+      "label": "PlatformIO",
+      "kind": "peer",
+      "executable": "pio",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {
+        "scaffold": {
+          "program": "pio",
+          "args": [
+            "project",
+            "init",
+            "--board",
+            "native"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "run": {
+          "program": "pio",
+          "args": [
+            "run"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "check": {
+          "program": "pio",
+          "args": [
+            "check"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "test": {
+          "program": "pio",
+          "args": [
+            "test"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        },
+        "debug": {
+          "program": "pio",
+          "args": [
+            "run"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 30000
+        },
+        "package": {
+          "program": "pio",
+          "args": [
+            "run",
+            "-e",
+            "native"
+          ],
+          "cwd": "$PROJECT",
+          "timeout_ms": 180000
+        }
+      },
+      "workflow_support": {
+        "debug": {
+          "supported": false,
+          "reason": "PlatformIO run is not a debugger session and cannot provide a stable debug observation."
+        }
+      },
+      "artifact": ".pio/build/native/program"
+    },
+    "web-frameworks": {
+      "label": "web-frameworks",
+      "kind": "peer",
+      "executable": "web-frameworks",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {},
+      "workflow_support": {
+        "cold": {
+          "supported": false,
+          "reason": "web-frameworks has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "warm": {
+          "supported": false,
+          "reason": "web-frameworks has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "edit": {
+          "supported": false,
+          "reason": "web-frameworks has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "error": {
+          "supported": false,
+          "reason": "web-frameworks has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "test": {
+          "supported": false,
+          "reason": "web-frameworks has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "debug": {
+          "supported": false,
+          "reason": "web-frameworks has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "package": {
+          "supported": false,
+          "reason": "web-frameworks has no deterministic fixture/host adapter in this source-only matrix"
+        }
+      },
+      "native_fixture": false
+    },
+    "mobile": {
+      "label": "mobile",
+      "kind": "peer",
+      "executable": "mobile",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {},
+      "workflow_support": {
+        "cold": {
+          "supported": false,
+          "reason": "mobile has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "warm": {
+          "supported": false,
+          "reason": "mobile has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "edit": {
+          "supported": false,
+          "reason": "mobile has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "error": {
+          "supported": false,
+          "reason": "mobile has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "test": {
+          "supported": false,
+          "reason": "mobile has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "debug": {
+          "supported": false,
+          "reason": "mobile has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "package": {
+          "supported": false,
+          "reason": "mobile has no deterministic fixture/host adapter in this source-only matrix"
+        }
+      },
+      "native_fixture": false
+    },
+    "systems": {
+      "label": "systems",
+      "kind": "peer",
+      "executable": "systems",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {},
+      "workflow_support": {
+        "cold": {
+          "supported": false,
+          "reason": "systems has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "warm": {
+          "supported": false,
+          "reason": "systems has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "edit": {
+          "supported": false,
+          "reason": "systems has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "error": {
+          "supported": false,
+          "reason": "systems has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "test": {
+          "supported": false,
+          "reason": "systems has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "debug": {
+          "supported": false,
+          "reason": "systems has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "package": {
+          "supported": false,
+          "reason": "systems has no deterministic fixture/host adapter in this source-only matrix"
+        }
+      },
+      "native_fixture": false
+    },
+    "games": {
+      "label": "games",
+      "kind": "peer",
+      "executable": "games",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {},
+      "workflow_support": {
+        "cold": {
+          "supported": false,
+          "reason": "games has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "warm": {
+          "supported": false,
+          "reason": "games has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "edit": {
+          "supported": false,
+          "reason": "games has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "error": {
+          "supported": false,
+          "reason": "games has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "test": {
+          "supported": false,
+          "reason": "games has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "debug": {
+          "supported": false,
+          "reason": "games has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "package": {
+          "supported": false,
+          "reason": "games has no deterministic fixture/host adapter in this source-only matrix"
+        }
+      },
+      "native_fixture": false
+    },
+    "backend": {
+      "label": "backend",
+      "kind": "peer",
+      "executable": "backend",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {},
+      "workflow_support": {
+        "cold": {
+          "supported": false,
+          "reason": "backend has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "warm": {
+          "supported": false,
+          "reason": "backend has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "edit": {
+          "supported": false,
+          "reason": "backend has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "error": {
+          "supported": false,
+          "reason": "backend has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "test": {
+          "supported": false,
+          "reason": "backend has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "debug": {
+          "supported": false,
+          "reason": "backend has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "package": {
+          "supported": false,
+          "reason": "backend has no deterministic fixture/host adapter in this source-only matrix"
+        }
+      },
+      "native_fixture": false
+    },
+    "data": {
+      "label": "data",
+      "kind": "peer",
+      "executable": "data",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {},
+      "workflow_support": {
+        "cold": {
+          "supported": false,
+          "reason": "data has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "warm": {
+          "supported": false,
+          "reason": "data has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "edit": {
+          "supported": false,
+          "reason": "data has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "error": {
+          "supported": false,
+          "reason": "data has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "test": {
+          "supported": false,
+          "reason": "data has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "debug": {
+          "supported": false,
+          "reason": "data has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "package": {
+          "supported": false,
+          "reason": "data has no deterministic fixture/host adapter in this source-only matrix"
+        }
+      },
+      "native_fixture": false
+    },
+    "cli": {
+      "label": "cli",
+      "kind": "peer",
+      "executable": "cli",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {},
+      "workflow_support": {
+        "cold": {
+          "supported": false,
+          "reason": "cli has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "warm": {
+          "supported": false,
+          "reason": "cli has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "edit": {
+          "supported": false,
+          "reason": "cli has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "error": {
+          "supported": false,
+          "reason": "cli has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "test": {
+          "supported": false,
+          "reason": "cli has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "debug": {
+          "supported": false,
+          "reason": "cli has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "package": {
+          "supported": false,
+          "reason": "cli has no deterministic fixture/host adapter in this source-only matrix"
+        }
+      },
+      "native_fixture": false
+    },
+    "live": {
+      "label": "live",
+      "kind": "peer",
+      "executable": "live",
+      "version_args": [
+        "--version"
+      ],
+      "commands": {},
+      "workflow_support": {
+        "cold": {
+          "supported": false,
+          "reason": "live has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "warm": {
+          "supported": false,
+          "reason": "live has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "edit": {
+          "supported": false,
+          "reason": "live has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "error": {
+          "supported": false,
+          "reason": "live has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "test": {
+          "supported": false,
+          "reason": "live has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "debug": {
+          "supported": false,
+          "reason": "live has no deterministic fixture/host adapter in this source-only matrix"
+        },
+        "package": {
+          "supported": false,
+          "reason": "live has no deterministic fixture/host adapter in this source-only matrix"
+        }
+      },
+      "native_fixture": false
+    }
+  },
+  "reference_apps": [
+    {
+      "id": "tanstack-start-orders",
+      "card": "#2479",
+      "root": "examples/features/web/tanstack_start",
+      "entry": "examples/features/web/tanstack_start/run.jet",
+      "target": "--target=web",
+      "source": {
+        "files": [
+          "examples/features/web/tanstack_start/run.jet",
+          "examples/features/web/tanstack_start/package.jet",
+          "examples/features/web/tanstack_start/public/index.html",
+          "examples/features/web/tanstack_start/public/app.css"
+        ],
+        "loc": {
+          "unit": "lines",
+          "count": "derived",
+          "policy": "Count UTF-8 source lines after excluding blank lines and lines whose first non-whitespace token is //; keep source files and policy fixed for every participant."
+        }
+      },
+      "comparison": {
+        "peer_profile": "tanstack-start",
+        "peer_root": "$PROJECT",
+        "peer_extensions": [
+          ".js",
+          ".jsx",
+          ".ts",
+          ".tsx",
+          ".css",
+          ".html"
+        ],
+        "peer_exclude": [
+          "node_modules",
+          "dist",
+          ".output",
+          "package-lock.json",
+          "pnpm-lock.yaml",
+          "yarn.lock"
+        ],
+        "loc_policy": "Apply the same nonblank, non-line-comment count to the peer source inventory; retain the inventory and exclusions in the receipt.",
+        "peer_source_env": "JET_DX_REFERENCE_PEER_ROOT"
+      },
+      "features": [
+        {
+          "id": "routes",
+          "facts": [
+            "/",
+            "/orders",
+            "/orders/:id",
+            "/settings",
+            "App.route navigation links"
+          ]
+        },
+        {
+          "id": "load-and-invalidate",
+          "facts": [
+            "orders:list",
+            "query.live",
+            "query.invalidate",
+            "App.loader preload"
+          ]
+        },
+        {
+          "id": "form-action",
+          "facts": [
+            "ShipForm: Codable input -> String output",
+            "App.action and App.form boundary",
+            "typed fields",
+            "blur validation",
+            "async validation",
+            "progressive no-script body",
+            "action: /actions/ship-order",
+            "form: /actions/ship-order-progressive"
+          ]
+        },
+        {
+          "id": "table-and-virtual",
+          "facts": [
+            "sort",
+            "filter",
+            "page",
+            "100000 rows",
+            "bounded viewport"
+          ]
+        },
+        {
+          "id": "store",
+          "facts": [
+            "named store",
+            "history limit",
+            "transaction diff",
+            "state-preserved marker"
+          ]
+        },
+        {
+          "id": "rendering",
+          "facts": [
+            "SSR routes",
+            "island /settings",
+            "hydration_dev",
+            "state-preserved edit loop"
+          ]
+        }
+      ],
+      "metrics": [
+        "lines_of_code",
+        "first_run",
+        "edit_to_see",
+        "error_to_fix",
+        "test_loop"
+      ],
+      "recorded_program": {
+        "id": "tanstack-start-orders-v1",
+        "entry": "examples/features/web/tanstack_start/run.jet",
+        "same_inputs": true,
+        "source_and_workflow_contract": "Use the declared source inventory, edit recipe, defect/repair recipe, and workflow markers for Jet and the peer. Never scaffold, download, or score a participant without direct evidence."
+      },
+      "workflows": {
+        "first_run": {
+          "dimension": "cold",
+          "profile": "jet",
+          "command": "reference-first-run",
+          "cwd": "examples/features/web/tanstack_start",
+          "marker": "REFERENCE_METRIC:first_run"
+        },
+        "edit_to_see": {
+          "dimension": "edit",
+          "profile": "jet",
+          "command": "reference-edit-to-see",
+          "cwd": "examples/features/web/tanstack_start",
+          "marker": "REFERENCE_METRIC:edit_to_see"
+        },
+        "error_to_fix": {
+          "dimension": "error",
+          "profile": "jet",
+          "command": "reference-error-to-fix",
+          "cwd": "examples/features/web/tanstack_start",
+          "marker": "REFERENCE_METRIC:error_to_fix"
+        },
+        "test_loop": {
+          "dimension": "test",
+          "profile": "jet",
+          "command": "reference-test-loop",
+          "cwd": "examples/features/web/tanstack_start",
+          "marker": "REFERENCE_METRIC:test_loop"
+        },
+        "graph": {
+          "profile": "jet",
+          "command": "explain-web-graph",
+          "cwd": "examples/features/web/tanstack_start",
+          "marker": "web application graph"
+        }
+      },
+      "edit_loop": {
+        "file": "examples/features/web/tanstack_start/run.jet",
+        "edit": {
+          "needle": "edit-loop: state-preserved",
+          "replacement": "edit-loop: state-preserved (edited)",
+          "visible_marker": "edit-loop: state-preserved (edited)"
+        },
+        "restore": {
+          "needle": "edit-loop: state-preserved (edited)",
+          "replacement": "edit-loop: state-preserved"
+        },
+        "failure": {
+          "needle": "forms.validate(form3) ?? panic(\"form validation\")",
+          "replacement": "forms.validate(form3) ?? panic(\"form validation\"",
+          "diagnostic": "compiler diagnostic with source span"
+        },
+        "repair": {
+          "needle": "forms.validate(form3) ?? panic(\"form validation\"",
+          "replacement": "forms.validate(form3) ?? panic(\"form validation\")"
+        },
+        "last_good_facts": [
+          "data-jet-edit-loop=\"state-preserved\"",
+          "data-panel=\"query\"",
+          "data-panel=\"forms\"",
+          "data-panel=\"table\"",
+          "data-panel=\"virtual\"",
+          "data-panel=\"store\""
+        ]
+      },
+      "receipt": {
+        "path": "tools/agent-eval/dx/tanstack-start-orders.json",
+        "schema": "jet.dx.reference-app-receipt.v1",
+        "required_fields": [
+          "source_digest",
+          "loc",
+          "peer_loc",
+          "first_run",
+          "edit_to_see",
+          "error_to_fix",
+          "test_loop",
+          "graph"
+        ]
+      }
+    }
+  ],
+  "tasks": [
+    {
+      "order": 1,
+      "id": "web",
+      "task_id": "e14.web.cold-start.v1",
+      "slug": "web",
+      "title": "Web",
+      "fixture_id": "e14-web-cold-start-v1",
+      "objective": "Create one local page, reach its first visible result, edit one visible value, repair one fixed defect, test the project, inspect a debug fact, and produce a package artifact.",
+      "task": "Starting with no project-specific context, exercise one local web page and its edit, repair, test, debug, and package loop. Use only the declared project and fixture; report an unavailable capability instead of substituting a result.",
+      "success_facts": [
+        "first visible page",
+        "edit-to-visible result",
+        "diagnostic and repair",
+        "test verdict",
+        "debug fact",
+        "package artifact"
+      ],
+      "markers": {
+        "cold": "DX_READY:web",
+        "warm": "DX_READY:web",
+        "edit": "DX_EDIT:web",
+        "error": "DX_ERROR:web",
+        "test": "DX_TEST:web",
+        "debug": "DX_DEBUG:web",
+        "repair": "DX_READY:web"
+      },
+      "fixture": {
+        "files": {
+          "src/main.txt": "DX_READY:web\nDX_STATE:web:before\nDX_VALUE:web:before\n"
+        },
+        "edit": {
+          "file": "src/main.txt",
+          "needle": "DX_VALUE:web:before",
+          "replacement": "DX_VALUE:web:after",
+          "expected_marker": "DX_EDIT:web"
+        },
+        "defect": {
+          "file": "src/main.txt",
+          "needle": "DX_VALUE:web:before",
+          "replacement": "DX_DEFECT:web",
+          "diagnostic": "DX_ERROR:web"
+        },
+        "fix": {
+          "file": "src/main.txt",
+          "needle": "DX_DEFECT:web",
+          "replacement": "DX_VALUE:web:before",
+          "expected_marker": "DX_READY:web"
+        },
+        "state": {
+          "before": "DX_STATE:web:before",
+          "after": "DX_STATE:web:before",
+          "reset": "DX_STATE:web:reset"
+        }
+      },
+      "neutral": {
+        "id": "e14-neutral-web-v1",
+        "input": "one local page and one visible text value",
+        "expected": "same visible value transition and same fixed diagnostic",
+        "equivalence": "adapter commands may differ only in native scaffold, run, test, debug, and package verbs"
+      },
+      "scenario": {
+        "base_task_id": "http",
+        "fixture_variant": "e14-web-native-v1",
+        "fixture_files": [
+          "run.jet"
+        ],
+        "required_capabilities": [
+          "fresh-process",
+          "utf8-source",
+          "deterministic-marker"
+        ],
+        "execution_mode": "http",
+        "first_run": {
+          "observation": "verified web readiness marker",
+          "marker": "DX_READY:web"
+        },
+        "first_edit": {
+          "observation": "atomic source edit changes web marker",
+          "marker": "DX_EDIT:web"
+        },
+        "first_repair": {
+          "observation": "fixed source returns web readiness marker",
+          "marker": "DX_READY:web"
+        },
+        "first_panel": {
+          "observation": "web task emits a bounded panel or output marker",
+          "marker": "DX_TEST:web"
+        }
+      }
+    },
+    {
+      "order": 2,
+      "id": "games",
+      "task_id": "e14.games.cold-start.v1",
+      "slug": "games",
+      "title": "Games",
+      "fixture_id": "e14-games-cold-start-v1",
+      "objective": "Create one deterministic local scene, reach its first frame, edit one world value, repair one fixed defect, test, inspect a debug fact, and package it.",
+      "task": "Starting with no project-specific context, exercise one deterministic local game scene and its edit, repair, test, debug, and package loop. Prefer a supported headless path and report unavailable rendering or device capabilities.",
+      "success_facts": [
+        "first deterministic frame",
+        "edit-to-frame result",
+        "diagnostic and repair",
+        "test verdict",
+        "debug fact",
+        "package artifact"
+      ],
+      "markers": {
+        "cold": "DX_READY:games",
+        "warm": "DX_READY:games",
+        "edit": "DX_EDIT:games",
+        "error": "DX_ERROR:games",
+        "test": "DX_TEST:games",
+        "debug": "DX_DEBUG:games",
+        "repair": "DX_READY:games"
+      },
+      "fixture": {
+        "files": {
+          "src/main.txt": "DX_READY:games\nDX_STATE:games:before\nDX_VALUE:games:before\n"
+        },
+        "edit": {
+          "file": "src/main.txt",
+          "needle": "DX_VALUE:games:before",
+          "replacement": "DX_VALUE:games:after",
+          "expected_marker": "DX_EDIT:games"
+        },
+        "defect": {
+          "file": "src/main.txt",
+          "needle": "DX_VALUE:games:before",
+          "replacement": "DX_DEFECT:games",
+          "diagnostic": "DX_ERROR:games"
+        },
+        "fix": {
+          "file": "src/main.txt",
+          "needle": "DX_DEFECT:games",
+          "replacement": "DX_VALUE:games:before",
+          "expected_marker": "DX_READY:games"
+        },
+        "state": {
+          "before": "DX_STATE:games:before",
+          "after": "DX_STATE:games:before",
+          "reset": "DX_STATE:games:reset"
+        }
+      },
+      "neutral": {
+        "id": "e14-neutral-games-v1",
+        "input": "one deterministic scene and one world value",
+        "expected": "same frame transition and same fixed diagnostic",
+        "equivalence": "headless replay is valid only when the participant declares the renderer or device unavailable"
+      },
+      "scenario": {
+        "base_task_id": "hello",
+        "fixture_variant": "e14-games-native-v1",
+        "fixture_files": [
+          "run.jet"
+        ],
+        "required_capabilities": [
+          "fresh-process",
+          "utf8-source",
+          "deterministic-marker"
+        ],
+        "execution_mode": "batch",
+        "first_run": {
+          "observation": "verified games readiness marker",
+          "marker": "DX_READY:games"
+        },
+        "first_edit": {
+          "observation": "atomic source edit changes games marker",
+          "marker": "DX_EDIT:games"
+        },
+        "first_repair": {
+          "observation": "fixed source returns games readiness marker",
+          "marker": "DX_READY:games"
+        },
+        "first_panel": {
+          "observation": "games task emits a bounded panel or output marker",
+          "marker": "DX_TEST:games"
+        }
+      }
+    },
+    {
+      "order": 3,
+      "id": "cli",
+      "task_id": "e14.cli-scripts.cold-start.v1",
+      "slug": "cli-scripts",
+      "title": "CLI and scripts",
+      "fixture_id": "e14-cli-scripts-cold-start-v1",
+      "objective": "Create one typed command with help, run it on a fixture, edit its output, repair one fixed defect, test, inspect a debug fact, and package it.",
+      "task": "Starting with no project-specific context, exercise one local typed command and script loop. Preserve exact stdout, stderr, exit status, and arguments; report any missing terminal capability as unavailable.",
+      "success_facts": [
+        "first command result",
+        "edit-to-result change",
+        "diagnostic and repair",
+        "test verdict",
+        "debug fact",
+        "package artifact"
+      ],
+      "markers": {
+        "cold": "DX_READY:cli",
+        "warm": "DX_READY:cli",
+        "edit": "DX_EDIT:cli",
+        "error": "DX_ERROR:cli",
+        "test": "DX_TEST:cli",
+        "debug": "DX_DEBUG:cli",
+        "repair": "DX_READY:cli"
+      },
+      "fixture": {
+        "files": {
+          "src/main.txt": "DX_READY:cli\nDX_STATE:cli:before\nDX_VALUE:cli:before\n"
+        },
+        "edit": {
+          "file": "src/main.txt",
+          "needle": "DX_VALUE:cli:before",
+          "replacement": "DX_VALUE:cli:after",
+          "expected_marker": "DX_EDIT:cli"
+        },
+        "defect": {
+          "file": "src/main.txt",
+          "needle": "DX_VALUE:cli:before",
+          "replacement": "DX_DEFECT:cli",
+          "diagnostic": "DX_ERROR:cli"
+        },
+        "fix": {
+          "file": "src/main.txt",
+          "needle": "DX_DEFECT:cli",
+          "replacement": "DX_VALUE:cli:before",
+          "expected_marker": "DX_READY:cli"
+        },
+        "state": {
+          "before": "DX_STATE:cli:before",
+          "after": "DX_STATE:cli:before",
+          "reset": "DX_STATE:cli:reset"
+        }
+      },
+      "neutral": {
+        "id": "e14-neutral-cli-v1",
+        "input": "one typed command, one fixture, and one help request",
+        "expected": "same stdout transition, exit status, and fixed diagnostic",
+        "equivalence": "native command parsers and terminal hosts may differ, but the task and evidence contract does not"
+      },
+      "scenario": {
+        "base_task_id": "cli",
+        "fixture_variant": "e14-cli-native-v1",
+        "fixture_files": [
+          "run.jet"
+        ],
+        "required_capabilities": [
+          "fresh-process",
+          "utf8-source",
+          "deterministic-marker"
+        ],
+        "execution_mode": "batch",
+        "first_run": {
+          "observation": "verified cli readiness marker",
+          "marker": "DX_READY:cli"
+        },
+        "first_edit": {
+          "observation": "atomic source edit changes cli marker",
+          "marker": "DX_EDIT:cli"
+        },
+        "first_repair": {
+          "observation": "fixed source returns cli readiness marker",
+          "marker": "DX_READY:cli"
+        },
+        "first_panel": {
+          "observation": "cli task emits a bounded panel or output marker",
+          "marker": "DX_TEST:cli"
+        }
+      }
+    },
+    {
+      "order": 4,
+      "id": "data",
+      "task_id": "e14.data-analysis.cold-start.v1",
+      "slug": "data-analysis",
+      "title": "Data analysis",
+      "fixture_id": "e14-data-analysis-cold-start-v1",
+      "objective": "Create one deterministic transform over a tiny fixture, expose a table or plot, edit the transform, repair one fixed defect, test, inspect a debug fact, and package it.",
+      "task": "Starting with no project-specific context, exercise one deterministic data transform over a tiny local fixture. Record table or plot output and stale or unavailable state instead of substituting a guessed result.",
+      "success_facts": [
+        "first table or plot result",
+        "edit-to-rerun result",
+        "diagnostic and repair",
+        "test verdict",
+        "debug fact",
+        "package artifact"
+      ],
+      "markers": {
+        "cold": "DX_READY:data",
+        "warm": "DX_READY:data",
+        "edit": "DX_EDIT:data",
+        "error": "DX_ERROR:data",
+        "test": "DX_TEST:data",
+        "debug": "DX_DEBUG:data",
+        "repair": "DX_READY:data"
+      },
+      "fixture": {
+        "files": {
+          "src/main.txt": "DX_READY:data\nDX_STATE:data:before\nDX_VALUE:data:before\n"
+        },
+        "edit": {
+          "file": "src/main.txt",
+          "needle": "DX_VALUE:data:before",
+          "replacement": "DX_VALUE:data:after",
+          "expected_marker": "DX_EDIT:data"
+        },
+        "defect": {
+          "file": "src/main.txt",
+          "needle": "DX_VALUE:data:before",
+          "replacement": "DX_DEFECT:data",
+          "diagnostic": "DX_ERROR:data"
+        },
+        "fix": {
+          "file": "src/main.txt",
+          "needle": "DX_DEFECT:data",
+          "replacement": "DX_VALUE:data:before",
+          "expected_marker": "DX_READY:data"
+        },
+        "state": {
+          "before": "DX_STATE:data:before",
+          "after": "DX_STATE:data:before",
+          "reset": "DX_STATE:data:reset"
+        }
+      },
+      "neutral": {
+        "id": "e14-neutral-data-v1",
+        "input": "one tiny fixture and one deterministic transform",
+        "expected": "same table or plot transition and same fixed diagnostic",
+        "equivalence": "notebook, script, and table hosts may differ, but input and required observations stay matched"
+      },
+      "scenario": {
+        "base_task_id": "data-transform",
+        "fixture_variant": "e14-data-native-v1",
+        "fixture_files": [
+          "run.jet"
+        ],
+        "required_capabilities": [
+          "fresh-process",
+          "utf8-source",
+          "deterministic-marker"
+        ],
+        "execution_mode": "batch",
+        "first_run": {
+          "observation": "verified data readiness marker",
+          "marker": "DX_READY:data"
+        },
+        "first_edit": {
+          "observation": "atomic source edit changes data marker",
+          "marker": "DX_EDIT:data"
+        },
+        "first_repair": {
+          "observation": "fixed source returns data readiness marker",
+          "marker": "DX_READY:data"
+        },
+        "first_panel": {
+          "observation": "data task emits a bounded panel or output marker",
+          "marker": "DX_TEST:data"
+        }
+      }
+    },
+    {
+      "order": 5,
+      "id": "backend",
+      "task_id": "e14.backend-services.cold-start.v1",
+      "slug": "backend-services",
+      "title": "Backend services",
+      "fixture_id": "e14-backend-services-cold-start-v1",
+      "objective": "Create one loopback route, make a request, edit its response, repair one fixed defect, test, inspect a debug fact, and package it.",
+      "task": "Starting with no project-specific context, exercise one local loopback service. Record request status and body, response transition, diagnostic, test verdict, debug fact, and package artifact; never use a remote service as a substitute.",
+      "success_facts": [
+        "first successful request",
+        "edit-to-response result",
+        "diagnostic and repair",
+        "test verdict",
+        "debug fact",
+        "package artifact"
+      ],
+      "markers": {
+        "cold": "DX_READY:backend",
+        "warm": "DX_READY:backend",
+        "edit": "DX_EDIT:backend",
+        "error": "DX_ERROR:backend",
+        "test": "DX_TEST:backend",
+        "debug": "DX_DEBUG:backend",
+        "repair": "DX_READY:backend"
+      },
+      "fixture": {
+        "files": {
+          "src/main.txt": "DX_READY:backend\nDX_STATE:backend:before\nDX_VALUE:backend:before\n"
+        },
+        "edit": {
+          "file": "src/main.txt",
+          "needle": "DX_VALUE:backend:before",
+          "replacement": "DX_VALUE:backend:after",
+          "expected_marker": "DX_EDIT:backend"
+        },
+        "defect": {
+          "file": "src/main.txt",
+          "needle": "DX_VALUE:backend:before",
+          "replacement": "DX_DEFECT:backend",
+          "diagnostic": "DX_ERROR:backend"
+        },
+        "fix": {
+          "file": "src/main.txt",
+          "needle": "DX_DEFECT:backend",
+          "replacement": "DX_VALUE:backend:before",
+          "expected_marker": "DX_READY:backend"
+        },
+        "state": {
+          "before": "DX_STATE:backend:before",
+          "after": "DX_STATE:backend:before",
+          "reset": "DX_STATE:backend:reset"
+        }
+      },
+      "neutral": {
+        "id": "e14-neutral-backend-v1",
+        "input": "one loopback route and one bounded request",
+        "expected": "same response transition and same fixed diagnostic",
+        "equivalence": "service frameworks may differ, but network access stays loopback and payloads stay bounded"
+      },
+      "scenario": {
+        "base_task_id": "http",
+        "fixture_variant": "e14-backend-native-v1",
+        "fixture_files": [
+          "run.jet"
+        ],
+        "required_capabilities": [
+          "fresh-process",
+          "utf8-source",
+          "deterministic-marker"
+        ],
+        "execution_mode": "http",
+        "first_run": {
+          "observation": "verified backend readiness marker",
+          "marker": "DX_READY:backend"
+        },
+        "first_edit": {
+          "observation": "atomic source edit changes backend marker",
+          "marker": "DX_EDIT:backend"
+        },
+        "first_repair": {
+          "observation": "fixed source returns backend readiness marker",
+          "marker": "DX_READY:backend"
+        },
+        "first_panel": {
+          "observation": "backend task emits a bounded panel or output marker",
+          "marker": "DX_TEST:backend"
+        }
+      }
+    },
+    {
+      "order": 6,
+      "id": "ai-ml",
+      "task_id": "e14.ai-ml.cold-start.v1",
+      "slug": "ai-ml-applications",
+      "title": "AI and ML applications",
+      "fixture_id": "e14-ai-ml-cold-start-v1",
+      "objective": "Create one deterministic tensor, inference, training, or tool-loop fixture, expose a result, edit one operation, repair one fixed defect, test, inspect a debug fact, and package it.",
+      "task": "Starting with no project-specific context, exercise one deterministic local AI or ML fixture without requiring a remote provider. Mark missing hardware or providers unavailable and never substitute a guessed result.",
+      "success_facts": [
+        "first deterministic model or tensor result",
+        "edit-to-result change",
+        "diagnostic and repair",
+        "test verdict",
+        "debug fact",
+        "package artifact"
+      ],
+      "markers": {
+        "cold": "DX_READY:ai-ml",
+        "warm": "DX_READY:ai-ml",
+        "edit": "DX_EDIT:ai-ml",
+        "error": "DX_ERROR:ai-ml",
+        "test": "DX_TEST:ai-ml",
+        "debug": "DX_DEBUG:ai-ml",
+        "repair": "DX_READY:ai-ml"
+      },
+      "fixture": {
+        "files": {
+          "src/main.txt": "DX_READY:ai-ml\nDX_STATE:ai-ml:before\nDX_VALUE:ai-ml:before\n"
+        },
+        "edit": {
+          "file": "src/main.txt",
+          "needle": "DX_VALUE:ai-ml:before",
+          "replacement": "DX_VALUE:ai-ml:after",
+          "expected_marker": "DX_EDIT:ai-ml"
+        },
+        "defect": {
+          "file": "src/main.txt",
+          "needle": "DX_VALUE:ai-ml:before",
+          "replacement": "DX_DEFECT:ai-ml",
+          "diagnostic": "DX_ERROR:ai-ml"
+        },
+        "fix": {
+          "file": "src/main.txt",
+          "needle": "DX_DEFECT:ai-ml",
+          "replacement": "DX_VALUE:ai-ml:before",
+          "expected_marker": "DX_READY:ai-ml"
+        },
+        "state": {
+          "before": "DX_STATE:ai-ml:before",
+          "after": "DX_STATE:ai-ml:before",
+          "reset": "DX_STATE:ai-ml:reset"
+        }
+      },
+      "neutral": {
+        "id": "e14-neutral-ai-ml-v1",
+        "input": "one deterministic local tensor or inference fixture",
+        "expected": "same result transition and same fixed diagnostic",
+        "equivalence": "provider and accelerator absence is an explicit unmeasured outcome, never a guessed score"
+      },
+      "scenario": {
+        "base_task_id": "data-transform",
+        "fixture_variant": "e14-ai-ml-native-v1",
+        "fixture_files": [
+          "run.jet"
+        ],
+        "required_capabilities": [
+          "fresh-process",
+          "utf8-source",
+          "deterministic-marker"
+        ],
+        "execution_mode": "batch",
+        "first_run": {
+          "observation": "verified ai-ml readiness marker",
+          "marker": "DX_READY:ai-ml"
+        },
+        "first_edit": {
+          "observation": "atomic source edit changes ai-ml marker",
+          "marker": "DX_EDIT:ai-ml"
+        },
+        "first_repair": {
+          "observation": "fixed source returns ai-ml readiness marker",
+          "marker": "DX_READY:ai-ml"
+        },
+        "first_panel": {
+          "observation": "ai-ml task emits a bounded panel or output marker",
+          "marker": "DX_TEST:ai-ml"
+        }
+      }
+    },
+    {
+      "order": 7,
+      "id": "gui",
+      "task_id": "e14.gui-apps.cold-start.v1",
+      "slug": "gui-apps",
+      "title": "GUI applications",
+      "fixture_id": "e14-gui-apps-cold-start-v1",
+      "objective": "Create one headless or native UI tree, inspect its first state, edit one widget value, repair one fixed defect, test, inspect a debug fact, and package it.",
+      "task": "Starting with no project-specific context, exercise one headless or native UI tree. If a display or mobile target is unavailable, record that capability as unavailable and retain the supported headless evidence.",
+      "success_facts": [
+        "first rendered or inspected state",
+        "edit-to-state result",
+        "diagnostic and repair",
+        "test verdict",
+        "debug fact",
+        "package artifact"
+      ],
+      "markers": {
+        "cold": "DX_READY:gui",
+        "warm": "DX_READY:gui",
+        "edit": "DX_EDIT:gui",
+        "error": "DX_ERROR:gui",
+        "test": "DX_TEST:gui",
+        "debug": "DX_DEBUG:gui",
+        "repair": "DX_READY:gui"
+      },
+      "fixture": {
+        "files": {
+          "src/main.txt": "DX_READY:gui\nDX_STATE:gui:before\nDX_VALUE:gui:before\n"
+        },
+        "edit": {
+          "file": "src/main.txt",
+          "needle": "DX_VALUE:gui:before",
+          "replacement": "DX_VALUE:gui:after",
+          "expected_marker": "DX_EDIT:gui"
+        },
+        "defect": {
+          "file": "src/main.txt",
+          "needle": "DX_VALUE:gui:before",
+          "replacement": "DX_DEFECT:gui",
+          "diagnostic": "DX_ERROR:gui"
+        },
+        "fix": {
+          "file": "src/main.txt",
+          "needle": "DX_DEFECT:gui",
+          "replacement": "DX_VALUE:gui:before",
+          "expected_marker": "DX_READY:gui"
+        },
+        "state": {
+          "before": "DX_STATE:gui:before",
+          "after": "DX_STATE:gui:before",
+          "reset": "DX_STATE:gui:reset"
+        }
+      },
+      "neutral": {
+        "id": "e14-neutral-gui-v1",
+        "input": "one UI tree and one widget state",
+        "expected": "same inspected state transition and same fixed diagnostic",
+        "equivalence": "headless and native hosts may differ only in the declared capability state"
+      },
+      "scenario": {
+        "base_task_id": "hello",
+        "fixture_variant": "e14-gui-native-v1",
+        "fixture_files": [
+          "run.jet"
+        ],
+        "required_capabilities": [
+          "fresh-process",
+          "utf8-source",
+          "deterministic-marker"
+        ],
+        "execution_mode": "batch",
+        "first_run": {
+          "observation": "verified gui readiness marker",
+          "marker": "DX_READY:gui"
+        },
+        "first_edit": {
+          "observation": "atomic source edit changes gui marker",
+          "marker": "DX_EDIT:gui"
+        },
+        "first_repair": {
+          "observation": "fixed source returns gui readiness marker",
+          "marker": "DX_READY:gui"
+        },
+        "first_panel": {
+          "observation": "gui task emits a bounded panel or output marker",
+          "marker": "DX_TEST:gui"
+        }
+      }
+    },
+    {
+      "order": 8,
+      "id": "embedded",
+      "task_id": "e14.embedded.cold-start.v1",
+      "slug": "embedded",
+      "title": "Embedded",
+      "fixture_id": "e14-embedded-cold-start-v1",
+      "objective": "Create one host-replay or target-shaped firmware fixture, inspect its first result, edit one control value, repair one fixed defect, test, inspect a debug fact, and package it.",
+      "task": "Starting with no project-specific context, exercise one host-replay or target-shaped firmware loop. If the target toolchain or device is unavailable, preserve that explicit state and use host replay only when the adapter declares it.",
+      "success_facts": [
+        "first firmware or host-replay result",
+        "edit-to-replay result",
+        "diagnostic and repair",
+        "test verdict",
+        "debug fact",
+        "package artifact"
+      ],
+      "markers": {
+        "cold": "DX_READY:embedded",
+        "warm": "DX_READY:embedded",
+        "edit": "DX_EDIT:embedded",
+        "error": "DX_ERROR:embedded",
+        "test": "DX_TEST:embedded",
+        "debug": "DX_DEBUG:embedded",
+        "repair": "DX_READY:embedded"
+      },
+      "fixture": {
+        "files": {
+          "src/main.txt": "DX_READY:embedded\nDX_STATE:embedded:before\nDX_VALUE:embedded:before\n"
+        },
+        "edit": {
+          "file": "src/main.txt",
+          "needle": "DX_VALUE:embedded:before",
+          "replacement": "DX_VALUE:embedded:after",
+          "expected_marker": "DX_EDIT:embedded"
+        },
+        "defect": {
+          "file": "src/main.txt",
+          "needle": "DX_VALUE:embedded:before",
+          "replacement": "DX_DEFECT:embedded",
+          "diagnostic": "DX_ERROR:embedded"
+        },
+        "fix": {
+          "file": "src/main.txt",
+          "needle": "DX_DEFECT:embedded",
+          "replacement": "DX_VALUE:embedded:before",
+          "expected_marker": "DX_READY:embedded"
+        },
+        "state": {
+          "before": "DX_STATE:embedded:before",
+          "after": "DX_STATE:embedded:before",
+          "reset": "DX_STATE:embedded:reset"
+        }
+      },
+      "neutral": {
+        "id": "e14-neutral-embedded-v1",
+        "input": "one host-replay or target-shaped firmware fixture",
+        "expected": "same replay transition and same fixed diagnostic",
+        "equivalence": "device or target absence is explicit unmeasured evidence, never a host result silently labeled as target success"
+      },
+      "scenario": {
+        "base_task_id": "hello",
+        "fixture_variant": "e14-embedded-native-v1",
+        "fixture_files": [
+          "run.jet"
+        ],
+        "required_capabilities": [
+          "fresh-process",
+          "utf8-source",
+          "deterministic-marker"
+        ],
+        "execution_mode": "batch",
+        "first_run": {
+          "observation": "verified embedded readiness marker",
+          "marker": "DX_READY:embedded"
+        },
+        "first_edit": {
+          "observation": "atomic source edit changes embedded marker",
+          "marker": "DX_EDIT:embedded"
+        },
+        "first_repair": {
+          "observation": "fixed source returns embedded readiness marker",
+          "marker": "DX_READY:embedded"
+        },
+        "first_panel": {
+          "observation": "embedded task emits a bounded panel or output marker",
+          "marker": "DX_TEST:embedded"
+        }
+      }
+    },
+    {
+      "order": 9,
+      "id": "web-frameworks",
+      "task_id": "e14.web-frameworks.cold-start.v1",
+      "slug": "web-frameworks",
+      "title": "web-frameworks",
+      "fixture_id": "e14-web-frameworks-cold-start-v1",
+      "objective": "Measure web-frameworks cold-start and feedback loops",
+      "task": "Starting with no project-specific context, exercise one local web-frameworks page and its edit, repair, test, debug, and package loop. Use only the declared project and fixture; report an unavailable capability instead of substituting a result.",
+      "success_facts": [
+        "the web-frameworks fixture is identified",
+        "all unavailable capabilities carry explicit reasons"
+      ],
+      "markers": {
+        "cold": "DX_READY:web-frameworks",
+        "warm": "DX_READY:web-frameworks",
+        "edit": "DX_EDIT:web-frameworks",
+        "error": "DX_ERROR:web-frameworks",
+        "test": "DX_TEST:web-frameworks",
+        "debug": "DX_DEBUG:web-frameworks",
+        "repair": "DX_READY:web-frameworks"
+      },
+      "fixture": {
+        "files": {
+          "src/main.txt": "DX_READY:web-frameworks\nDX_STATE:web-frameworks:before\nDX_VALUE:web-frameworks:before\n"
+        },
+        "edit": {
+          "file": "src/main.txt",
+          "needle": "DX_VALUE:web-frameworks:before",
+          "replacement": "DX_VALUE:web-frameworks:after",
+          "expected_marker": "DX_EDIT:web-frameworks"
+        },
+        "defect": {
+          "file": "src/main.txt",
+          "needle": "DX_VALUE:web-frameworks:before",
+          "replacement": "DX_DEFECT:web-frameworks",
+          "diagnostic": "DX_ERROR:web-frameworks"
+        },
+        "fix": {
+          "file": "src/main.txt",
+          "needle": "DX_DEFECT:web-frameworks",
+          "replacement": "DX_VALUE:web-frameworks:before",
+          "expected_marker": "DX_READY:web-frameworks"
+        },
+        "state": {
+          "before": "DX_STATE:web-frameworks:before",
+          "after": "DX_STATE:web-frameworks:before",
+          "reset": "DX_STATE:web-frameworks:reset"
+        }
+      },
+      "neutral": {
+        "id": "e14-neutral-web-frameworks-v1",
+        "input": "one deterministic web-frameworks task",
+        "expected": "same observable web-frameworks transition and fixed diagnostic",
+        "equivalence": "native hosts may differ only where the row records an explicit unavailable reason"
+      },
+      "scenario": {
+        "base_task_id": "http",
+        "fixture_variant": "e14-web-frameworks-native-v1",
+        "fixture_files": [
+          "run.jet"
+        ],
+        "required_capabilities": [
+          "fresh-process",
+          "utf8-source",
+          "deterministic-marker"
+        ],
+        "execution_mode": "http",
+        "first_run": {
+          "observation": "verified web-frameworks readiness marker",
+          "marker": "DX_READY:web-frameworks"
+        },
+        "first_edit": {
+          "observation": "atomic source edit changes web-frameworks marker",
+          "marker": "DX_EDIT:web-frameworks"
+        },
+        "first_repair": {
+          "observation": "fixed source returns web-frameworks readiness marker",
+          "marker": "DX_READY:web-frameworks"
+        },
+        "first_panel": {
+          "observation": "web-frameworks task emits a bounded panel or output marker",
+          "marker": "DX_TEST:web-frameworks"
+        }
+      }
+    },
+    {
+      "order": 10,
+      "id": "mobile",
+      "task_id": "e14.mobile.cold-start.v1",
+      "slug": "mobile",
+      "title": "mobile",
+      "fixture_id": "e14-mobile-cold-start-v1",
+      "objective": "Measure mobile cold-start and feedback loops",
+      "task": "Starting with no project-specific context, exercise one local mobile page and its edit, repair, test, debug, and package loop. Use only the declared project and fixture; report an unavailable capability instead of substituting a result.",
+      "success_facts": [
+        "the mobile fixture is identified",
+        "all unavailable capabilities carry explicit reasons"
+      ],
+      "markers": {
+        "cold": "DX_READY:mobile",
+        "warm": "DX_READY:mobile",
+        "edit": "DX_EDIT:mobile",
+        "error": "DX_ERROR:mobile",
+        "test": "DX_TEST:mobile",
+        "debug": "DX_DEBUG:mobile",
+        "repair": "DX_READY:mobile"
+      },
+      "fixture": {
+        "files": {
+          "src/main.txt": "DX_READY:mobile\nDX_STATE:mobile:before\nDX_VALUE:mobile:before\n"
+        },
+        "edit": {
+          "file": "src/main.txt",
+          "needle": "DX_VALUE:mobile:before",
+          "replacement": "DX_VALUE:mobile:after",
+          "expected_marker": "DX_EDIT:mobile"
+        },
+        "defect": {
+          "file": "src/main.txt",
+          "needle": "DX_VALUE:mobile:before",
+          "replacement": "DX_DEFECT:mobile",
+          "diagnostic": "DX_ERROR:mobile"
+        },
+        "fix": {
+          "file": "src/main.txt",
+          "needle": "DX_DEFECT:mobile",
+          "replacement": "DX_VALUE:mobile:before",
+          "expected_marker": "DX_READY:mobile"
+        },
+        "state": {
+          "before": "DX_STATE:mobile:before",
+          "after": "DX_STATE:mobile:before",
+          "reset": "DX_STATE:mobile:reset"
+        }
+      },
+      "neutral": {
+        "id": "e14-neutral-mobile-v1",
+        "input": "one deterministic mobile task",
+        "expected": "same observable mobile transition and fixed diagnostic",
+        "equivalence": "native hosts may differ only where the row records an explicit unavailable reason"
+      },
+      "scenario": {
+        "base_task_id": "hello",
+        "fixture_variant": "e14-mobile-native-v1",
+        "fixture_files": [
+          "run.jet"
+        ],
+        "required_capabilities": [
+          "fresh-process",
+          "utf8-source",
+          "deterministic-marker"
+        ],
+        "execution_mode": "batch",
+        "first_run": {
+          "observation": "verified mobile readiness marker",
+          "marker": "DX_READY:mobile"
+        },
+        "first_edit": {
+          "observation": "atomic source edit changes mobile marker",
+          "marker": "DX_EDIT:mobile"
+        },
+        "first_repair": {
+          "observation": "fixed source returns mobile readiness marker",
+          "marker": "DX_READY:mobile"
+        },
+        "first_panel": {
+          "observation": "mobile task emits a bounded panel or output marker",
+          "marker": "DX_TEST:mobile"
+        }
+      }
+    },
+    {
+      "order": 11,
+      "id": "systems",
+      "task_id": "e14.systems.cold-start.v1",
+      "slug": "systems",
+      "title": "systems",
+      "fixture_id": "e14-systems-cold-start-v1",
+      "objective": "Measure systems cold-start and feedback loops",
+      "task": "Starting with no project-specific context, exercise one local systems page and its edit, repair, test, debug, and package loop. Use only the declared project and fixture; report an unavailable capability instead of substituting a result.",
+      "success_facts": [
+        "the systems fixture is identified",
+        "all unavailable capabilities carry explicit reasons"
+      ],
+      "markers": {
+        "cold": "DX_READY:systems",
+        "warm": "DX_READY:systems",
+        "edit": "DX_EDIT:systems",
+        "error": "DX_ERROR:systems",
+        "test": "DX_TEST:systems",
+        "debug": "DX_DEBUG:systems",
+        "repair": "DX_READY:systems"
+      },
+      "fixture": {
+        "files": {
+          "src/main.txt": "DX_READY:systems\nDX_STATE:systems:before\nDX_VALUE:systems:before\n"
+        },
+        "edit": {
+          "file": "src/main.txt",
+          "needle": "DX_VALUE:systems:before",
+          "replacement": "DX_VALUE:systems:after",
+          "expected_marker": "DX_EDIT:systems"
+        },
+        "defect": {
+          "file": "src/main.txt",
+          "needle": "DX_VALUE:systems:before",
+          "replacement": "DX_DEFECT:systems",
+          "diagnostic": "DX_ERROR:systems"
+        },
+        "fix": {
+          "file": "src/main.txt",
+          "needle": "DX_DEFECT:systems",
+          "replacement": "DX_VALUE:systems:before",
+          "expected_marker": "DX_READY:systems"
+        },
+        "state": {
+          "before": "DX_STATE:systems:before",
+          "after": "DX_STATE:systems:before",
+          "reset": "DX_STATE:systems:reset"
+        }
+      },
+      "neutral": {
+        "id": "e14-neutral-systems-v1",
+        "input": "one deterministic systems task",
+        "expected": "same observable systems transition and fixed diagnostic",
+        "equivalence": "native hosts may differ only where the row records an explicit unavailable reason"
+      },
+      "scenario": {
+        "base_task_id": "hello",
+        "fixture_variant": "e14-systems-native-v1",
+        "fixture_files": [
+          "run.jet"
+        ],
+        "required_capabilities": [
+          "fresh-process",
+          "utf8-source",
+          "deterministic-marker"
+        ],
+        "execution_mode": "batch",
+        "first_run": {
+          "observation": "verified systems readiness marker",
+          "marker": "DX_READY:systems"
+        },
+        "first_edit": {
+          "observation": "atomic source edit changes systems marker",
+          "marker": "DX_EDIT:systems"
+        },
+        "first_repair": {
+          "observation": "fixed source returns systems readiness marker",
+          "marker": "DX_READY:systems"
+        },
+        "first_panel": {
+          "observation": "systems task emits a bounded panel or output marker",
+          "marker": "DX_TEST:systems"
+        }
+      }
+    },
+    {
+      "order": 12,
+      "id": "live",
+      "task_id": "e14.live.cold-start.v1",
+      "slug": "live",
+      "title": "live",
+      "fixture_id": "e14-live-cold-start-v1",
+      "objective": "Measure live cold-start and feedback loops",
+      "task": "Starting with no project-specific context, exercise one local live page and its edit, repair, test, debug, and package loop. Use only the declared project and fixture; report an unavailable capability instead of substituting a result.",
+      "success_facts": [
+        "the live fixture is identified",
+        "all unavailable capabilities carry explicit reasons"
+      ],
+      "markers": {
+        "cold": "DX_READY:live",
+        "warm": "DX_READY:live",
+        "edit": "DX_EDIT:live",
+        "error": "DX_ERROR:live",
+        "test": "DX_TEST:live",
+        "debug": "DX_DEBUG:live",
+        "repair": "DX_READY:live"
+      },
+      "fixture": {
+        "files": {
+          "src/main.txt": "DX_READY:live\nDX_STATE:live:before\nDX_VALUE:live:before\n"
+        },
+        "edit": {
+          "file": "src/main.txt",
+          "needle": "DX_VALUE:live:before",
+          "replacement": "DX_VALUE:live:after",
+          "expected_marker": "DX_EDIT:live"
+        },
+        "defect": {
+          "file": "src/main.txt",
+          "needle": "DX_VALUE:live:before",
+          "replacement": "DX_DEFECT:live",
+          "diagnostic": "DX_ERROR:live"
+        },
+        "fix": {
+          "file": "src/main.txt",
+          "needle": "DX_DEFECT:live",
+          "replacement": "DX_VALUE:live:before",
+          "expected_marker": "DX_READY:live"
+        },
+        "state": {
+          "before": "DX_STATE:live:before",
+          "after": "DX_STATE:live:before",
+          "reset": "DX_STATE:live:reset"
+        }
+      },
+      "neutral": {
+        "id": "e14-neutral-live-v1",
+        "input": "one deterministic live task",
+        "expected": "same observable live transition and fixed diagnostic",
+        "equivalence": "native hosts may differ only where the row records an explicit unavailable reason"
+      },
+      "scenario": {
+        "base_task_id": "hello",
+        "fixture_variant": "e14-live-native-v1",
+        "fixture_files": [
+          "run.jet"
+        ],
+        "required_capabilities": [
+          "fresh-process",
+          "utf8-source",
+          "deterministic-marker"
+        ],
+        "execution_mode": "batch",
+        "first_run": {
+          "observation": "verified live readiness marker",
+          "marker": "DX_READY:live"
+        },
+        "first_edit": {
+          "observation": "atomic source edit changes live marker",
+          "marker": "DX_EDIT:live"
+        },
+        "first_repair": {
+          "observation": "fixed source returns live readiness marker",
+          "marker": "DX_READY:live"
+        },
+        "first_panel": {
+          "observation": "live task emits a bounded panel or output marker",
+          "marker": "DX_TEST:live"
+        }
+      }
+    }
+  ],
+  "domains": [
+    {
+      "order": 1,
+      "id": "web",
+      "slug": "web",
+      "title": "Web",
+      "task_id": "web",
+      "required": true,
+      "benchmark_peer": "vite",
+      "comparators": [
+        {
+          "profile": "jet"
+        },
+        {
+          "profile": "vite"
+        },
+        {
+          "profile": "bun-vite"
+        },
+        {
+          "profile": "tanstack-start"
+        }
+      ]
+    },
+    {
+      "order": 2,
+      "id": "games",
+      "slug": "games",
+      "title": "Games",
+      "task_id": "games",
+      "required": true,
+      "benchmark_peer": "unity",
+      "comparators": [
+        {
+          "profile": "jet"
+        },
+        {
+          "profile": "unity"
+        },
+        {
+          "profile": "godot"
+        },
+        {
+          "profile": "bevy"
+        },
+        {
+          "profile": "unreal"
+        }
+      ]
+    },
+    {
+      "order": 3,
+      "id": "cli",
+      "slug": "cli-scripts",
+      "title": "CLI and scripts",
+      "task_id": "cli",
+      "required": true,
+      "benchmark_peer": "textual",
+      "comparators": [
+        {
+          "profile": "jet"
+        },
+        {
+          "profile": "textual"
+        },
+        {
+          "profile": "bubble-tea"
+        },
+        {
+          "profile": "ratatui"
+        },
+        {
+          "profile": "lip-gloss"
+        },
+        {
+          "profile": "bubbles"
+        },
+        {
+          "profile": "huh"
+        },
+        {
+          "profile": "gum"
+        },
+        {
+          "profile": "vhs"
+        },
+        {
+          "profile": "wish"
+        },
+        {
+          "profile": "ink"
+        },
+        {
+          "profile": "clap"
+        },
+        {
+          "profile": "typer"
+        },
+        {
+          "profile": "oclif"
+        },
+        {
+          "profile": "cobra"
+        },
+        {
+          "profile": "rich"
+        },
+        {
+          "profile": "indicatif"
+        }
+      ]
+    },
+    {
+      "order": 4,
+      "id": "data",
+      "slug": "data-analysis",
+      "title": "Data analysis",
+      "task_id": "data",
+      "required": true,
+      "benchmark_peer": "marimo",
+      "comparators": [
+        {
+          "profile": "jet"
+        },
+        {
+          "profile": "marimo"
+        },
+        {
+          "profile": "jupyter"
+        },
+        {
+          "profile": "polars"
+        },
+        {
+          "profile": "observable"
+        },
+        {
+          "profile": "pluto"
+        },
+        {
+          "profile": "livebook"
+        },
+        {
+          "profile": "duckdb"
+        },
+        {
+          "profile": "pandas"
+        },
+        {
+          "profile": "streamlit"
+        },
+        {
+          "profile": "gradio"
+        },
+        {
+          "profile": "quarto"
+        }
+      ]
+    },
+    {
+      "order": 5,
+      "id": "backend",
+      "slug": "backend-services",
+      "title": "Backend services",
+      "task_id": "backend",
+      "required": true,
+      "benchmark_peer": "phoenix",
+      "comparators": [
+        {
+          "profile": "jet"
+        },
+        {
+          "profile": "phoenix"
+        },
+        {
+          "profile": "laravel"
+        },
+        {
+          "profile": "rails"
+        },
+        {
+          "profile": "spring"
+        },
+        {
+          "profile": "aspire"
+        },
+        {
+          "profile": "django"
+        },
+        {
+          "profile": "erlang"
+        }
+      ]
+    },
+    {
+      "order": 6,
+      "id": "ai-ml",
+      "slug": "ai-ml-applications",
+      "title": "AI and ML applications",
+      "task_id": "ai-ml",
+      "required": true,
+      "benchmark_peer": "pytorch",
+      "comparators": [
+        {
+          "profile": "jet"
+        },
+        {
+          "profile": "pytorch"
+        },
+        {
+          "profile": "jupyter"
+        },
+        {
+          "profile": "ollama"
+        }
+      ]
+    },
+    {
+      "order": 7,
+      "id": "gui",
+      "slug": "gui-apps",
+      "title": "GUI applications",
+      "task_id": "gui",
+      "required": true,
+      "benchmark_peer": "flutter",
+      "comparators": [
+        {
+          "profile": "jet"
+        },
+        {
+          "profile": "flutter"
+        },
+        {
+          "profile": "swiftui"
+        },
+        {
+          "profile": "compose"
+        }
+      ]
+    },
+    {
+      "order": 8,
+      "id": "embedded",
+      "slug": "embedded",
+      "title": "Embedded",
+      "task_id": "embedded",
+      "required": true,
+      "benchmark_peer": "cargo-embedded",
+      "comparators": [
+        {
+          "profile": "jet"
+        },
+        {
+          "profile": "cargo-embedded"
+        },
+        {
+          "profile": "zephyr"
+        },
+        {
+          "profile": "platformio"
+        }
+      ]
+    },
+    {
+      "order": 9,
+      "id": "web-frameworks",
+      "slug": "web-frameworks",
+      "title": "web-frameworks",
+      "task_id": "web-frameworks",
+      "required": true,
+      "benchmark_peer": "tanstack-router",
+      "comparators": [
+        {
+          "profile": "jet"
+        },
+        {
+          "profile": "tanstack-router"
+        },
+        {
+          "profile": "tanstack-query"
+        },
+        {
+          "profile": "tanstack-form"
+        },
+        {
+          "profile": "tanstack-table"
+        },
+        {
+          "profile": "tanstack-virtual"
+        },
+        {
+          "profile": "next"
+        },
+        {
+          "profile": "astro"
+        },
+        {
+          "profile": "qwik"
+        },
+        {
+          "profile": "sveltekit"
+        },
+        {
+          "profile": "solidstart"
+        },
+        {
+          "profile": "react-router"
+        },
+        {
+          "profile": "fresh"
+        }
+      ]
+    },
+    {
+      "order": 10,
+      "id": "mobile",
+      "slug": "mobile",
+      "title": "mobile",
+      "task_id": "mobile",
+      "required": true,
+      "benchmark_peer": "flutter",
+      "comparators": [
+        {
+          "profile": "jet"
+        },
+        {
+          "profile": "flutter"
+        },
+        {
+          "profile": "expo"
+        },
+        {
+          "profile": "swiftui"
+        },
+        {
+          "profile": "compose"
+        },
+        {
+          "profile": "kotlin-multiplatform"
+        }
+      ]
+    },
+    {
+      "order": 11,
+      "id": "systems",
+      "slug": "systems",
+      "title": "systems",
+      "task_id": "systems",
+      "required": true,
+      "benchmark_peer": "cargo",
+      "comparators": [
+        {
+          "profile": "jet"
+        },
+        {
+          "profile": "cargo"
+        },
+        {
+          "profile": "rustc"
+        },
+        {
+          "profile": "rust-analyzer"
+        },
+        {
+          "profile": "bacon"
+        },
+        {
+          "profile": "zig"
+        },
+        {
+          "profile": "go"
+        },
+        {
+          "profile": "criterion"
+        }
+      ]
+    },
+    {
+      "order": 12,
+      "id": "live",
+      "slug": "live",
+      "title": "live",
+      "task_id": "live",
+      "required": true,
+      "benchmark_peer": "elm",
+      "comparators": [
+        {
+          "profile": "jet"
+        },
+        {
+          "profile": "elm"
+        },
+        {
+          "profile": "redux"
+        },
+        {
+          "profile": "replay"
+        },
+        {
+          "profile": "pharo"
+        },
+        {
+          "profile": "cider"
+        },
+        {
+          "profile": "erlang-live"
+        },
+        {
+          "profile": "swift-playgrounds"
+        },
+        {
+          "profile": "julia-revise"
+        },
+        {
+          "profile": "live-share"
+        },
+        {
+          "profile": "rr"
+        }
+      ]
+    }
+  ],
+  "fresh_agent": {
+    "card": "#2482",
+    "runner": "scripts/agent/fresh-agent-domain-run.mjs",
+    "result_schema": "jet.fresh-agent-domain.result.v1",
+    "scoreboard_schema": "jet.fresh-agent-domain.scoreboard.v1",
+    "response_schema": "jet.fresh-agent-domain.response.v1",
+    "context": {
+      "capsule": "tools/agent-eval/jet-context-capsule.md",
+      "control": "jet inspect digest",
+      "modes": [
+        "capsule",
+        "control"
+      ],
+      "control_rule": "The control is the exact UTF-8 prefix of jet inspect digest with the capsule byte budget."
+    },
+    "adapters": {
+      "config": "tools/agent-eval/adapters.json",
+      "transport": "command",
+      "required_families": [
+        "openai",
+        "anthropic"
+      ]
+    },
+    "protocol": {
+      "fresh_process": true,
+      "hidden_context": false,
+      "required_phases": [
+        "first_run",
+        "first_edit",
+        "first_repair",
+        "first_panel"
+      ],
+      "phase_contract": "Each phase must report status, one exact command argv, observed output or an explicit unavailable reason, elapsed_ms, and resource fields. A pass without those facts is incomplete.",
+      "outcomes": [
+        "pass",
+        "unavailable",
+        "wrong",
+        "incomplete"
+      ],
+      "failure_categories": [
+        "setup",
+        "compiler",
+        "task",
+        "environment"
+      ],
+      "failure_kinds": [
+        "blocked",
+        "timeout",
+        "malformed_output",
+        "check_fail",
+        "run_fail"
+      ]
+    },
+    "domains": [
+      {
+        "order": 1,
+        "id": "web",
+        "slug": "web",
+        "title": "Web",
+        "task_id": "web",
+        "fixture_id": "e14-web-cold-start-v1",
+        "base_task_id": "http",
+        "task": "Starting with no project-specific context, exercise one local web page and its edit, repair, test, debug, and package loop. Use only the declared project and fixture; report an unavailable capability instead of substituting a result.",
+        "success_facts": [
+          "first visible page",
+          "edit-to-visible result",
+          "diagnostic and repair",
+          "test verdict",
+          "debug fact",
+          "package artifact"
+        ],
+        "scenario": {
+          "base_task_id": "http",
+          "fixture_variant": "e14-web-native-v1",
+          "fixture_files": [
+            "run.jet"
+          ],
+          "required_capabilities": [
+            "fresh-process",
+            "utf8-source",
+            "deterministic-marker"
+          ],
+          "execution_mode": "http",
+          "first_run": {
+            "observation": "verified web readiness marker",
+            "marker": "DX_READY:web"
+          },
+          "first_edit": {
+            "observation": "atomic source edit changes web marker",
+            "marker": "DX_EDIT:web"
+          },
+          "first_repair": {
+            "observation": "fixed source returns web readiness marker",
+            "marker": "DX_READY:web"
+          },
+          "first_panel": {
+            "observation": "web task emits a bounded panel or output marker",
+            "marker": "DX_TEST:web"
+          }
+        }
+      },
+      {
+        "order": 2,
+        "id": "games",
+        "slug": "games",
+        "title": "Games",
+        "task_id": "games",
+        "fixture_id": "e14-games-cold-start-v1",
+        "base_task_id": "hello",
+        "task": "Starting with no project-specific context, exercise one deterministic local game scene and its edit, repair, test, debug, and package loop. Prefer a supported headless path and report unavailable rendering or device capabilities.",
+        "success_facts": [
+          "first deterministic frame",
+          "edit-to-frame result",
+          "diagnostic and repair",
+          "test verdict",
+          "debug fact",
+          "package artifact"
+        ],
+        "scenario": {
+          "base_task_id": "hello",
+          "fixture_variant": "e14-games-native-v1",
+          "fixture_files": [
+            "run.jet"
+          ],
+          "required_capabilities": [
+            "fresh-process",
+            "utf8-source",
+            "deterministic-marker"
+          ],
+          "execution_mode": "batch",
+          "first_run": {
+            "observation": "verified games readiness marker",
+            "marker": "DX_READY:games"
+          },
+          "first_edit": {
+            "observation": "atomic source edit changes games marker",
+            "marker": "DX_EDIT:games"
+          },
+          "first_repair": {
+            "observation": "fixed source returns games readiness marker",
+            "marker": "DX_READY:games"
+          },
+          "first_panel": {
+            "observation": "games task emits a bounded panel or output marker",
+            "marker": "DX_TEST:games"
+          }
+        }
+      },
+      {
+        "order": 3,
+        "id": "cli",
+        "slug": "cli-scripts",
+        "title": "CLI and scripts",
+        "task_id": "cli",
+        "fixture_id": "e14-cli-scripts-cold-start-v1",
+        "base_task_id": "cli",
+        "task": "Starting with no project-specific context, exercise one local typed command and script loop. Preserve exact stdout, stderr, exit status, and arguments; report any missing terminal capability as unavailable.",
+        "success_facts": [
+          "first command result",
+          "edit-to-result change",
+          "diagnostic and repair",
+          "test verdict",
+          "debug fact",
+          "package artifact"
+        ],
+        "scenario": {
+          "base_task_id": "cli",
+          "fixture_variant": "e14-cli-native-v1",
+          "fixture_files": [
+            "run.jet"
+          ],
+          "required_capabilities": [
+            "fresh-process",
+            "utf8-source",
+            "deterministic-marker"
+          ],
+          "execution_mode": "batch",
+          "first_run": {
+            "observation": "verified cli readiness marker",
+            "marker": "DX_READY:cli"
+          },
+          "first_edit": {
+            "observation": "atomic source edit changes cli marker",
+            "marker": "DX_EDIT:cli"
+          },
+          "first_repair": {
+            "observation": "fixed source returns cli readiness marker",
+            "marker": "DX_READY:cli"
+          },
+          "first_panel": {
+            "observation": "cli task emits a bounded panel or output marker",
+            "marker": "DX_TEST:cli"
+          }
+        }
+      },
+      {
+        "order": 4,
+        "id": "data",
+        "slug": "data-analysis",
+        "title": "Data analysis",
+        "task_id": "data",
+        "fixture_id": "e14-data-analysis-cold-start-v1",
+        "base_task_id": "data-transform",
+        "task": "Starting with no project-specific context, exercise one deterministic data transform over a tiny local fixture. Record table or plot output and stale or unavailable state instead of substituting a guessed result.",
+        "success_facts": [
+          "first table or plot result",
+          "edit-to-rerun result",
+          "diagnostic and repair",
+          "test verdict",
+          "debug fact",
+          "package artifact"
+        ],
+        "scenario": {
+          "base_task_id": "data-transform",
+          "fixture_variant": "e14-data-native-v1",
+          "fixture_files": [
+            "run.jet"
+          ],
+          "required_capabilities": [
+            "fresh-process",
+            "utf8-source",
+            "deterministic-marker"
+          ],
+          "execution_mode": "batch",
+          "first_run": {
+            "observation": "verified data readiness marker",
+            "marker": "DX_READY:data"
+          },
+          "first_edit": {
+            "observation": "atomic source edit changes data marker",
+            "marker": "DX_EDIT:data"
+          },
+          "first_repair": {
+            "observation": "fixed source returns data readiness marker",
+            "marker": "DX_READY:data"
+          },
+          "first_panel": {
+            "observation": "data task emits a bounded panel or output marker",
+            "marker": "DX_TEST:data"
+          }
+        }
+      },
+      {
+        "order": 5,
+        "id": "backend",
+        "slug": "backend-services",
+        "title": "Backend services",
+        "task_id": "backend",
+        "fixture_id": "e14-backend-services-cold-start-v1",
+        "base_task_id": "http",
+        "task": "Starting with no project-specific context, exercise one local loopback service. Record request status and body, response transition, diagnostic, test verdict, debug fact, and package artifact; never use a remote service as a substitute.",
+        "success_facts": [
+          "first successful request",
+          "edit-to-response result",
+          "diagnostic and repair",
+          "test verdict",
+          "debug fact",
+          "package artifact"
+        ],
+        "scenario": {
+          "base_task_id": "http",
+          "fixture_variant": "e14-backend-native-v1",
+          "fixture_files": [
+            "run.jet"
+          ],
+          "required_capabilities": [
+            "fresh-process",
+            "utf8-source",
+            "deterministic-marker"
+          ],
+          "execution_mode": "http",
+          "first_run": {
+            "observation": "verified backend readiness marker",
+            "marker": "DX_READY:backend"
+          },
+          "first_edit": {
+            "observation": "atomic source edit changes backend marker",
+            "marker": "DX_EDIT:backend"
+          },
+          "first_repair": {
+            "observation": "fixed source returns backend readiness marker",
+            "marker": "DX_READY:backend"
+          },
+          "first_panel": {
+            "observation": "backend task emits a bounded panel or output marker",
+            "marker": "DX_TEST:backend"
+          }
+        }
+      },
+      {
+        "order": 6,
+        "id": "ai-ml",
+        "slug": "ai-ml-applications",
+        "title": "AI and ML applications",
+        "task_id": "ai-ml",
+        "fixture_id": "e14-ai-ml-cold-start-v1",
+        "base_task_id": "data-transform",
+        "task": "Starting with no project-specific context, exercise one deterministic local AI or ML fixture without requiring a remote provider. Mark missing hardware or providers unavailable and never substitute a guessed result.",
+        "success_facts": [
+          "first deterministic model or tensor result",
+          "edit-to-result change",
+          "diagnostic and repair",
+          "test verdict",
+          "debug fact",
+          "package artifact"
+        ],
+        "scenario": {
+          "base_task_id": "data-transform",
+          "fixture_variant": "e14-ai-ml-native-v1",
+          "fixture_files": [
+            "run.jet"
+          ],
+          "required_capabilities": [
+            "fresh-process",
+            "utf8-source",
+            "deterministic-marker"
+          ],
+          "execution_mode": "batch",
+          "first_run": {
+            "observation": "verified ai-ml readiness marker",
+            "marker": "DX_READY:ai-ml"
+          },
+          "first_edit": {
+            "observation": "atomic source edit changes ai-ml marker",
+            "marker": "DX_EDIT:ai-ml"
+          },
+          "first_repair": {
+            "observation": "fixed source returns ai-ml readiness marker",
+            "marker": "DX_READY:ai-ml"
+          },
+          "first_panel": {
+            "observation": "ai-ml task emits a bounded panel or output marker",
+            "marker": "DX_TEST:ai-ml"
+          }
+        }
+      },
+      {
+        "order": 7,
+        "id": "gui",
+        "slug": "gui-apps",
+        "title": "GUI applications",
+        "task_id": "gui",
+        "fixture_id": "e14-gui-apps-cold-start-v1",
+        "base_task_id": "hello",
+        "task": "Starting with no project-specific context, exercise one headless or native UI tree. If a display or mobile target is unavailable, record that capability as unavailable and retain the supported headless evidence.",
+        "success_facts": [
+          "first rendered or inspected state",
+          "edit-to-state result",
+          "diagnostic and repair",
+          "test verdict",
+          "debug fact",
+          "package artifact"
+        ],
+        "scenario": {
+          "base_task_id": "hello",
+          "fixture_variant": "e14-gui-native-v1",
+          "fixture_files": [
+            "run.jet"
+          ],
+          "required_capabilities": [
+            "fresh-process",
+            "utf8-source",
+            "deterministic-marker"
+          ],
+          "execution_mode": "batch",
+          "first_run": {
+            "observation": "verified gui readiness marker",
+            "marker": "DX_READY:gui"
+          },
+          "first_edit": {
+            "observation": "atomic source edit changes gui marker",
+            "marker": "DX_EDIT:gui"
+          },
+          "first_repair": {
+            "observation": "fixed source returns gui readiness marker",
+            "marker": "DX_READY:gui"
+          },
+          "first_panel": {
+            "observation": "gui task emits a bounded panel or output marker",
+            "marker": "DX_TEST:gui"
+          }
+        }
+      },
+      {
+        "order": 8,
+        "id": "embedded",
+        "slug": "embedded",
+        "title": "Embedded",
+        "task_id": "embedded",
+        "fixture_id": "e14-embedded-cold-start-v1",
+        "base_task_id": "hello",
+        "task": "Starting with no project-specific context, exercise one host-replay or target-shaped firmware loop. If the target toolchain or device is unavailable, preserve that explicit state and use host replay only when the adapter declares it.",
+        "success_facts": [
+          "first firmware or host-replay result",
+          "edit-to-replay result",
+          "diagnostic and repair",
+          "test verdict",
+          "debug fact",
+          "package artifact"
+        ],
+        "scenario": {
+          "base_task_id": "hello",
+          "fixture_variant": "e14-embedded-native-v1",
+          "fixture_files": [
+            "run.jet"
+          ],
+          "required_capabilities": [
+            "fresh-process",
+            "utf8-source",
+            "deterministic-marker"
+          ],
+          "execution_mode": "batch",
+          "first_run": {
+            "observation": "verified embedded readiness marker",
+            "marker": "DX_READY:embedded"
+          },
+          "first_edit": {
+            "observation": "atomic source edit changes embedded marker",
+            "marker": "DX_EDIT:embedded"
+          },
+          "first_repair": {
+            "observation": "fixed source returns embedded readiness marker",
+            "marker": "DX_READY:embedded"
+          },
+          "first_panel": {
+            "observation": "embedded task emits a bounded panel or output marker",
+            "marker": "DX_TEST:embedded"
+          }
+        }
+      },
+      {
+        "order": 9,
+        "id": "web-frameworks",
+        "slug": "web-frameworks",
+        "title": "web-frameworks",
+        "task_id": "web-frameworks",
+        "fixture_id": "e14-web-frameworks-cold-start-v1",
+        "base_task_id": "http",
+        "task": "Starting with no project-specific context, exercise one local web-frameworks page and its edit, repair, test, debug, and package loop. Use only the declared project and fixture; report an unavailable capability instead of substituting a result.",
+        "success_facts": [
+          "the web-frameworks fixture is identified",
+          "all unavailable capabilities carry explicit reasons"
+        ],
+        "scenario": {
+          "base_task_id": "http",
+          "fixture_variant": "e14-web-frameworks-native-v1",
+          "fixture_files": [
+            "run.jet"
+          ],
+          "required_capabilities": [
+            "fresh-process",
+            "utf8-source",
+            "deterministic-marker"
+          ],
+          "execution_mode": "http",
+          "first_run": {
+            "observation": "verified web-frameworks readiness marker",
+            "marker": "DX_READY:web-frameworks"
+          },
+          "first_edit": {
+            "observation": "atomic source edit changes web-frameworks marker",
+            "marker": "DX_EDIT:web-frameworks"
+          },
+          "first_repair": {
+            "observation": "fixed source returns web-frameworks readiness marker",
+            "marker": "DX_READY:web-frameworks"
+          },
+          "first_panel": {
+            "observation": "web-frameworks task emits a bounded panel or output marker",
+            "marker": "DX_TEST:web-frameworks"
+          }
+        }
+      },
+      {
+        "order": 10,
+        "id": "mobile",
+        "slug": "mobile",
+        "title": "mobile",
+        "task_id": "mobile",
+        "fixture_id": "e14-mobile-cold-start-v1",
+        "base_task_id": "hello",
+        "task": "Starting with no project-specific context, exercise one local mobile page and its edit, repair, test, debug, and package loop. Use only the declared project and fixture; report an unavailable capability instead of substituting a result.",
+        "success_facts": [
+          "the mobile fixture is identified",
+          "all unavailable capabilities carry explicit reasons"
+        ],
+        "scenario": {
+          "base_task_id": "hello",
+          "fixture_variant": "e14-mobile-native-v1",
+          "fixture_files": [
+            "run.jet"
+          ],
+          "required_capabilities": [
+            "fresh-process",
+            "utf8-source",
+            "deterministic-marker"
+          ],
+          "execution_mode": "batch",
+          "first_run": {
+            "observation": "verified mobile readiness marker",
+            "marker": "DX_READY:mobile"
+          },
+          "first_edit": {
+            "observation": "atomic source edit changes mobile marker",
+            "marker": "DX_EDIT:mobile"
+          },
+          "first_repair": {
+            "observation": "fixed source returns mobile readiness marker",
+            "marker": "DX_READY:mobile"
+          },
+          "first_panel": {
+            "observation": "mobile task emits a bounded panel or output marker",
+            "marker": "DX_TEST:mobile"
+          }
+        }
+      },
+      {
+        "order": 11,
+        "id": "systems",
+        "slug": "systems",
+        "title": "systems",
+        "task_id": "systems",
+        "fixture_id": "e14-systems-cold-start-v1",
+        "base_task_id": "hello",
+        "task": "Starting with no project-specific context, exercise one local systems page and its edit, repair, test, debug, and package loop. Use only the declared project and fixture; report an unavailable capability instead of substituting a result.",
+        "success_facts": [
+          "the systems fixture is identified",
+          "all unavailable capabilities carry explicit reasons"
+        ],
+        "scenario": {
+          "base_task_id": "hello",
+          "fixture_variant": "e14-systems-native-v1",
+          "fixture_files": [
+            "run.jet"
+          ],
+          "required_capabilities": [
+            "fresh-process",
+            "utf8-source",
+            "deterministic-marker"
+          ],
+          "execution_mode": "batch",
+          "first_run": {
+            "observation": "verified systems readiness marker",
+            "marker": "DX_READY:systems"
+          },
+          "first_edit": {
+            "observation": "atomic source edit changes systems marker",
+            "marker": "DX_EDIT:systems"
+          },
+          "first_repair": {
+            "observation": "fixed source returns systems readiness marker",
+            "marker": "DX_READY:systems"
+          },
+          "first_panel": {
+            "observation": "systems task emits a bounded panel or output marker",
+            "marker": "DX_TEST:systems"
+          }
+        }
+      },
+      {
+        "order": 12,
+        "id": "live",
+        "slug": "live",
+        "title": "live",
+        "task_id": "live",
+        "fixture_id": "e14-live-cold-start-v1",
+        "base_task_id": "hello",
+        "task": "Starting with no project-specific context, exercise one local live page and its edit, repair, test, debug, and package loop. Use only the declared project and fixture; report an unavailable capability instead of substituting a result.",
+        "success_facts": [
+          "the live fixture is identified",
+          "all unavailable capabilities carry explicit reasons"
+        ],
+        "scenario": {
+          "base_task_id": "hello",
+          "fixture_variant": "e14-live-native-v1",
+          "fixture_files": [
+            "run.jet"
+          ],
+          "required_capabilities": [
+            "fresh-process",
+            "utf8-source",
+            "deterministic-marker"
+          ],
+          "execution_mode": "batch",
+          "first_run": {
+            "observation": "verified live readiness marker",
+            "marker": "DX_READY:live"
+          },
+          "first_edit": {
+            "observation": "atomic source edit changes live marker",
+            "marker": "DX_EDIT:live"
+          },
+          "first_repair": {
+            "observation": "fixed source returns live readiness marker",
+            "marker": "DX_READY:live"
+          },
+          "first_panel": {
+            "observation": "live task emits a bounded panel or output marker",
+            "marker": "DX_TEST:live"
+          }
+        }
+      }
+    ],
+    "method_tasks": [
+      {
+        "id": "hello",
+        "fixture_id": "e14-method-hello-v1",
+        "mode": "batch",
+        "objective": "Print a deterministic hello marker"
+      },
+      {
+        "id": "cli",
+        "fixture_id": "e14-method-cli-v1",
+        "mode": "batch",
+        "objective": "Parse one bounded command and print its result"
+      },
+      {
+        "id": "data-transform",
+        "fixture_id": "e14-method-data-transform-v1",
+        "mode": "batch",
+        "objective": "Transform one bounded data fixture"
+      },
+      {
+        "id": "http",
+        "fixture_id": "e14-method-http-v1",
+        "mode": "http",
+        "objective": "Serve and fetch one bounded loopback response"
+      }
+    ],
+    "source_execution": {
+      "required": true,
+      "launcher": "scripts/agent/jet-env",
+      "check": [
+        "jet",
+        "check",
+        "$SOURCE"
+      ],
+      "run": [
+        "jet",
+        "run",
+        "$SOURCE"
+      ],
+      "batch_output": "exact UTF-8 stdout",
+      "http_probe": "loopback-only",
+      "unsupported": "blocked before partial scoring"
+    },
+    "baseline": {
+      "path": "docs/audits/cold-agent-jet-baseline.json",
+      "metrics": [
+        "compile_score",
+        "run_score",
+        "score"
+      ],
+      "regression": "capsule score must not be lower than control"
+    }
+  }
+}

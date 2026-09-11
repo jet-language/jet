@@ -12,6 +12,7 @@ pub use schema_api::*;
 // jet-canvas; semantic/edit APIs live with their dev-server host.
 pub use jet_canvas::{canvas_html, canvas_html_for, canvas_html_query, canvas_js};
 mod debug_source_git;
+mod paused_debug_adapter;
 mod graph_helpers;
 mod graph_json;
 mod graph_projection;
@@ -23,3 +24,5 @@ pub(crate) use source_model::read_source_without_symlinks;
 pub use source_model::source_revision;
 pub use debug_source_git::DebugSessions;
 mod validation_json;
+mod preview;
+pub use preview::*;

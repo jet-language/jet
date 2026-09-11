@@ -13,8 +13,8 @@ use crate::AST::{Expr, Item, Namespace, StrPart};
 use super::super::Merge;
 use super::super::RefSpec::{self, ProviderKind, RefError, Source, SourceTable};
 use super::Diagnostics::{
-    bad_import_directive, bad_source_ref, discovered_module_imports, fleet_unknown_system,
-    image_from_unknown_system, merge_error_to_diagnostic,
+    bad_import_directive, bad_source_ref, discovered_module_imports, find_missing_directory,
+    fleet_unknown_system, image_from_unknown_system, merge_error_to_diagnostic,
     oci_from_non_executable, retired_nixpkgs_source_ref,
 };
 use super::Environment::{
@@ -1141,8 +1141,14 @@ fn discover_imports(
             }
             let rel = find_dir_arg(imp)?;
             let relative = Path::new(&rel);
-            if relative.is_absolute()
-                || relative
+            let relative_norm = normalize_relative_path(relative);
+            let find_span = match imp {
+                Expr::Call(call) => Some(call.name_span),
+                _ => Some(imp.span()),
+            };
+            if relative_norm.as_os_str().is_empty()
+                || relative_norm.is_absolute()
+                || relative_norm
                     .components()
                     .any(|component| component == std::path::Component::ParentDir)
             {
@@ -1151,13 +1157,21 @@ fn discover_imports(
                     format!("module import `{rel}` escapes the environment root"),
                     "one environment graph may compose files below its root, but an import cannot escape it".to_string(),
                     "use a project-relative directory without `..`".to_string(),
-                    Some(imp.span()),
+                    find_span,
                 ));
             }
-            let files = loader.list_jet_files(relative)?;
+            let listed = environment_root.join(&relative_norm);
+            if !listed.exists() {
+                return Err(find_missing_directory(
+                    &environment_root.join(relative),
+                    find_span,
+                ));
+            }
+            let files = loader.list_jet_files(&relative_norm)?;
             for file_relative in files {
+                let file_norm = normalize_relative_path(&file_relative);
                 if file_relative.is_absolute()
-                    || !file_relative.starts_with(relative)
+                    || !file_norm.starts_with(&relative_norm)
                     || file_relative
                         .components()
                         .any(|component| component == std::path::Component::ParentDir)
@@ -1172,7 +1186,7 @@ fn discover_imports(
                             .to_string(),
                         "remove the escaping import or move the module below the environment root"
                             .to_string(),
-                        Some(imp.span()),
+                        find_span,
                     ));
                 }
                 let canonical_file = environment_root.join(&file_relative);
@@ -1214,6 +1228,12 @@ fn collect_import_directives<'a>(expr: &'a Expr, out: &mut Vec<&'a Expr>) {
         }
         _ => out.push(expr),
     }
+}
+
+fn normalize_relative_path(path: &Path) -> PathBuf {
+    path.components()
+        .filter(|component| *component != std::path::Component::CurDir)
+        .collect()
 }
 
 /// Extract the literal directory path from an `imports: find("dir")` directive.

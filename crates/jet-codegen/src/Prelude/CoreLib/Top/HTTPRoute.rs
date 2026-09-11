@@ -1,14 +1,14 @@
 // D-HTTP-ROUTE-SYNTAX2=A: one route grammar for every HTTP entry point.
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum JetHTTPRouteSegment {
+pub enum JetHTTPRouteSegment {
     Static(String),
     Param(String),
     CatchAll(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct JetHTTPRoutePattern {
+pub struct JetHTTPRoutePattern {
     segments: Vec<JetHTTPRouteSegment>,
 }
 
@@ -18,45 +18,18 @@ fn jet_http_route_name(name: &str) -> bool {
         && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
 }
 
-fn jet_http_route_hex(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
-}
 
 fn jet_http_route_decode_segment(segment: &str) -> Result<String, String> {
-    let bytes = segment.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] != b'%' {
-            decoded.push(bytes[index]);
-            index += 1;
-            continue;
-        }
-        let Some(high) = bytes.get(index + 1).and_then(|byte| jet_http_route_hex(*byte)) else {
-            return Err("invalid percent escape".to_string());
-        };
-        let Some(low) = bytes.get(index + 2).and_then(|byte| jet_http_route_hex(*byte)) else {
-            return Err("invalid percent escape".to_string());
-        };
-        let byte = high * 16 + low;
-        if byte == b'/' {
-            return Err("encoded slash is ambiguous".to_string());
-        }
-        decoded.push(byte);
-        index += 3;
+    let decoded = jet_std::jet_url_percent_decode_str(segment)?;
+    if decoded.contains('/') {
+        return Err("encoded slash is ambiguous".to_string());
     }
-    let decoded = String::from_utf8(decoded).map_err(|_| "route segment is not valid UTF-8".to_string())?;
     if decoded == "." || decoded == ".." {
         return Err("dot traversal segment is not allowed".to_string());
     }
     Ok(decoded)
 }
-fn jet_http_route_decode_path_segment<'a>(
+pub(crate) fn jet_http_route_decode_path_segment<'a>(
     segment: &'a str,
 ) -> Result<std::borrow::Cow<'a, str>, String> {
     if !segment.as_bytes().contains(&b'%') {
@@ -116,6 +89,46 @@ fn jet_http_route_parse(pattern: &str) -> Result<JetHTTPRoutePattern, String> {
     }
     Ok(JetHTTPRoutePattern { segments })
 }
+ 
+/// Parse one route pattern for every HTTP-facing adapter.  Keeping this
+/// constructor beside the grammar lets typed projections carry the parsed
+/// pattern instead of reparsing a rendered OpenAPI path.
+pub fn jet_http_route_pattern(pattern: &str) -> Result<JetHTTPRoutePattern, String> {
+    jet_http_route_parse(pattern)
+}
+
+fn jet_http_route_encode_component(value: &str, query: bool, allow_slash: bool) -> String {
+    let encoded = jet_std::jet_url_percent_encode(value, allow_slash);
+    if query {
+        encoded.replace("%20", "+")
+    } else {
+        encoded
+    }
+}
+
+pub fn jet_http_route_encode_segment(value: &str, allow_slash: bool) -> String {
+    jet_http_route_encode_component(value, false, allow_slash)
+}
+
+pub fn jet_http_route_openapi_path(pattern: &JetHTTPRoutePattern) -> String {
+    let mut path = String::from("/");
+    for (index, segment) in pattern.segments.iter().enumerate() {
+        if index > 0 {
+            path.push('/');
+        }
+        match segment {
+            JetHTTPRouteSegment::Static(value) => {
+                path.push_str(&jet_http_route_encode_segment(value, false));
+            }
+            JetHTTPRouteSegment::Param(name) | JetHTTPRouteSegment::CatchAll(name) => {
+                path.push('{');
+                path.push_str(name);
+                path.push('}');
+            }
+        }
+    }
+    path
+}
 
 fn jet_http_route_path<'a>(path: &'a str) -> Result<Vec<std::borrow::Cow<'a, str>>, String> {
     let path = path.split('?').next().unwrap_or(path);
@@ -136,7 +149,7 @@ fn jet_http_route_path<'a>(path: &'a str) -> Result<Vec<std::borrow::Cow<'a, str
     }
     Ok(decoded)
 }
-fn jet_http_route_validate_path(path: &str) -> Result<(), String> {
+pub(crate) fn jet_http_route_validate_path(path: &str) -> Result<(), String> {
     let path = path.split('?').next().unwrap_or(path);
     if !path.starts_with('/') {
         return Err("request path must start with `/`".to_string());
@@ -150,7 +163,7 @@ fn jet_http_route_validate_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn jet_http_route_matches_path(pattern: &JetHTTPRoutePattern, path: &str) -> bool {
+pub(crate) fn jet_http_route_matches_path(pattern: &JetHTTPRoutePattern, path: &str) -> bool {
     let path = path.split('?').next().unwrap_or(path);
     let path_len = if path == "/" {
         0
@@ -184,7 +197,7 @@ fn jet_http_route_matches_path(pattern: &JetHTTPRoutePattern, path: &str) -> boo
     true
 }
 
-fn jet_http_route_params_path(
+pub(crate) fn jet_http_route_params_path(
     pattern: &JetHTTPRoutePattern,
     path: &str,
 ) -> Result<std::collections::BTreeMap<String, String>, String> {
@@ -223,7 +236,7 @@ fn jet_http_route_params_path(
 }
 
 
-fn jet_http_route_matches<'a>(
+pub(crate) fn jet_http_route_matches<'a>(
     pattern: &JetHTTPRoutePattern,
     path: &[std::borrow::Cow<'a, str>],
 ) -> bool {
@@ -242,7 +255,7 @@ fn jet_http_route_matches<'a>(
     })
 }
 
-fn jet_http_route_params<'a>(
+pub(crate) fn jet_http_route_params<'a>(
     pattern: &JetHTTPRoutePattern,
     path: &[std::borrow::Cow<'a, str>],
 ) -> std::collections::BTreeMap<String, String> {
@@ -271,7 +284,7 @@ fn jet_http_route_params<'a>(
     params
 }
 
-fn jet_http_route_match<'a>(
+pub(crate) fn jet_http_route_match<'a>(
     pattern: &JetHTTPRoutePattern,
     path: &[std::borrow::Cow<'a, str>],
 ) -> Option<std::collections::BTreeMap<String, String>> {
@@ -287,7 +300,7 @@ fn jet_http_route_rank(segment: &JetHTTPRouteSegment) -> u8 {
     }
 }
 
-fn jet_http_route_selection_cmp(
+pub(crate) fn jet_http_route_selection_cmp(
     left: &JetHTTPRoutePattern,
     left_order: usize,
     right: &JetHTTPRoutePattern,
@@ -306,7 +319,7 @@ fn jet_http_route_selection_cmp(
         .then_with(|| right_order.cmp(&left_order))
 }
 
-fn jet_http_route_shape(pattern: &JetHTTPRoutePattern) -> String {
+pub(crate) fn jet_http_route_shape(pattern: &JetHTTPRoutePattern) -> String {
     pattern.segments.iter().map(|segment| match segment {
         JetHTTPRouteSegment::Static(value) => format!("s{}:{value}", value.len()),
         JetHTTPRouteSegment::Param(_) => "p".to_string(),

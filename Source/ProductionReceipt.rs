@@ -6,11 +6,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use jet::development_receipt as receipt;
+use jet::RecordIndex::RecordIdentity;
 
 const TARGET: &str = "native";
 
 pub(crate) struct Context {
     directory: PathBuf,
+    source_file: PathBuf,
     entry: String,
     source_digest: String,
     closure_digest: String,
@@ -22,7 +24,8 @@ pub(crate) struct Context {
 
 pub(crate) fn prepare(file: &str, source: &str, program_args: &[&String]) -> Context {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let entry = project_relative_entry(Path::new(file), &cwd);
+    let source_file = cwd.join(file);
+    let entry = project_relative_entry(&source_file, &cwd);
     let source_digest = content_digest(source.as_bytes());
 
     let mut closure = b"jet-production-closure-v1\0".to_vec();
@@ -58,6 +61,7 @@ pub(crate) fn prepare(file: &str, source: &str, program_args: &[&String]) -> Con
         .join(format!("production-{}", &receipt_id[7..23]));
     Context {
         directory,
+        source_file,
         entry,
         source_digest,
         closure_digest,
@@ -101,15 +105,22 @@ impl Context {
             &self.target_digest,
         );
     }
+    /// Project this production receipt's target inputs onto the shared
+    /// record-index identity without exposing source or argument values.
+    pub(crate) fn record_identity(&self) -> Result<RecordIdentity, String> {
+        let target_inputs_sha256 =
+            crate::CmdProve::target_input_sha256_for_file(&self.source_file.to_string_lossy())?;
+        RecordIdentity::new(
+            target_inputs_sha256,
+            env!("CARGO_PKG_VERSION"),
+            TARGET,
+        )
+    }
+
 }
 
 fn project_relative_entry(file: &Path, cwd: &Path) -> String {
-    let absolute = if file.is_absolute() {
-        file.to_path_buf()
-    } else {
-        cwd.join(file)
-    };
-    absolute
+    file
         .strip_prefix(cwd)
         .ok()
         .map(|path| path.to_string_lossy().replace('\\', "/"))

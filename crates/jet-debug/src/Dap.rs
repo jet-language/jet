@@ -30,10 +30,15 @@ use super::Inferior::{
     parse_current_thread_id, parse_exit_signal, Inferior, RawFrame, ResumeResult,
 };
 use super::LineMap::LineMap;
+use super::Native::{build_native_candidate, NativeCandidateArtifact};
+use super::{
+    DebugCheckpoint, DebugEvent, DebugHistory, DebugWrite, FrameSnapshot, ValueSnapshot,
+};
 #[cfg(test)]
 use jet_foundation::JSON::parse_json;
+use jet_foundation::DataTree::DataTree;
 use jet_foundation::JSON::{
-    json_escape, json_get, json_str, json_u32, parse_json_with_limit, JSONValue,
+    json_escape, json_get, json_str, json_u32, parse_json_with_limit,
     MAX_PROTOCOL_HEADER_BYTES, MAX_PROTOCOL_HEADER_COUNT,
 };
 
@@ -110,6 +115,23 @@ pub fn run(binary: &Path, rust_file: &str, rust_src: &str, jet_file: &str, jet_s
         seq: 1,
         resume_task: None,
         resume_stop_requested: false,
+        history: DebugHistory {
+            events: Vec::new(),
+            checkpoint: Some(DebugCheckpoint {
+                source_identity: jet_foundation::SHA256::sha256_hex(
+                    format!("{}:{}", jet_file, jet_src).as_bytes(),
+                ),
+                shape: super::native_checkpoint_shape(jet_file, jet_src),
+                sequence: 0,
+            }),
+            cursor: None,
+            capped: false,
+            decision_ledger: None,
+        },
+        history_cursor: None,
+        data_watches: HashSet::new(),
+        candidate_artifacts: Vec::new(),
+        replay_only_after_fix: false,
     };
     let reader = std::io::BufReader::new(std::io::stdin());
     let mut stdout = std::io::stdout();
@@ -176,17 +198,25 @@ fn run_io(
     server.finish(crate::ExitCodes::OK)
 }
 
-fn is_running_control_request(msg: &JSONValue) -> bool {
+fn is_running_control_request(msg: &DataTree) -> bool {
     matches!(
         json_get(msg, "command").and_then(json_str),
-        Some("cancel" | "disconnect" | "pause" | "restart" | "setBreakpoints" | "terminate")
+        Some(
+            "cancel"
+                | "disconnect"
+                | "pause"
+                | "restart"
+                | "setBreakpoints"
+                | "setDataBreakpoints"
+                | "terminate",
+        )
     )
 }
 
 fn take_next_request(
-    requests: &mut VecDeque<JSONValue>,
+    requests: &mut VecDeque<DataTree>,
     resume_pending: bool,
-) -> Option<JSONValue> {
+) -> Option<DataTree> {
     if resume_pending {
         requests
             .iter()
@@ -240,6 +270,13 @@ struct DapServer {
     seq: i64,
     resume_task: Option<ResumeTask>,
     resume_stop_requested: bool,
+    history: DebugHistory,
+    history_cursor: Option<usize>,
+    data_watches: HashSet<String>,
+    /// Candidate modules remain rooted while LLDB may call their typed
+    /// function pointers.
+    candidate_artifacts: Vec<NativeCandidateArtifact>,
+    replay_only_after_fix: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -804,6 +841,700 @@ impl DapServer {
             jet_line.saturating_sub(1)
         }
     }
+    fn history_event(&self) -> Option<DebugEvent> {
+        self.history_cursor
+            .and_then(|index| self.history.events.get(index).cloned())
+    }
+
+    fn history_stack_body(
+        &mut self,
+        thread_id: u32,
+        start_frame: usize,
+        levels: Option<usize>,
+    ) -> Option<String> {
+        let event = self.history_event()?;
+        let stack = if event.stack.is_empty() {
+            vec![FrameSnapshot {
+                function: event.function,
+                line: event.line,
+            }]
+        } else {
+            event.stack
+        };
+        let total_frames = stack.len();
+        let entries = stack
+            .into_iter()
+            .enumerate()
+            .skip(start_frame)
+            .take(levels.unwrap_or(usize::MAX))
+            .map(|(position, frame)| {
+                let id = self.references.issue_frame(thread_id, position);
+                format!(
+                    "{{\"id\":{},\"name\":\"{}\",\"source\":{{\"path\":\"{}\"}},\"line\":{},\"column\":{}}}",
+                    id,
+                    json_escape(&frame.function),
+                    json_escape(&self.source_path()),
+                    self.dap_line(frame.line),
+                    self.dap_column(1)
+                )
+            })
+            .collect::<Vec<_>>();
+        Some(format!(
+            "{{\"stackFrames\":[{}],\"totalFrames\":{}}}",
+            entries.join(","),
+            total_frames
+        ))
+    }
+
+    fn history_variables_body(&self) -> Option<String> {
+        let event = self.history_event()?;
+        let entries = event
+            .locals
+            .iter()
+            .map(|value| {
+                format!(
+                    "{{\"name\":\"{}\",\"value\":\"{}\",\"type\":\"{}\",\"variablesReference\":0}}",
+                    json_escape(&value.name),
+                    json_escape(&value.value),
+                    json_escape(&value.type_name)
+                )
+            })
+            .collect::<Vec<_>>();
+        Some(format!(
+            "{{\"variables\":[{}],\"namedVariables\":{}}}",
+            entries.join(","),
+            entries.len()
+        ))
+    }
+
+    fn record_history_event(&mut self, backtrace: &str, jet_line: usize) {
+        let frames = Inferior::parse_frames(backtrace)
+            .into_iter()
+            .filter_map(|frame| {
+                let line = self
+                    .map
+                    .jet_line_for_file(&frame.rust_file, &self.rust_file, frame.rust_line)?;
+                Some(FrameSnapshot {
+                    function: Inferior::rust_func_to_jet(&frame.func),
+                    line,
+                })
+            })
+            .collect::<Vec<_>>();
+        let function = frames
+            .first()
+            .map(|frame| frame.function.clone())
+            .unwrap_or_else(|| "<native>".to_string());
+        let locals = self
+            .inf
+            .as_mut()
+            .and_then(|inf| inf.locals().ok())
+            .map(|raw| {
+                Inferior::parse_typed_locals(&raw)
+                    .into_iter()
+                    .filter_map(|(type_name, rust_name, raw_value)| {
+                        let name = Inferior::rust_local_to_jet(&rust_name)?;
+                        let value = Inferior::safe_value(&type_name, &raw_value);
+                        Some(ValueSnapshot {
+                            name,
+                            type_name,
+                            value,
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let writes = self
+            .history
+            .events
+            .last()
+            .map(|previous| {
+                locals
+                    .iter()
+                    .filter_map(|current| {
+                        let old = previous
+                            .locals
+                            .iter()
+                            .find(|value| value.name == current.name)?;
+                        (old.value != current.value).then(|| DebugWrite {
+                            line: jet_line,
+                            place: current.name.clone(),
+                            old_value: old.value.clone(),
+                            new_value: current.value.clone(),
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let sequence = self
+            .history
+            .events
+            .last()
+            .map_or(0, |event| event.sequence.saturating_add(1));
+        self.history.push(DebugEvent {
+            sequence,
+            function,
+            line: jet_line,
+            depth: 0,
+            stack: frames,
+            locals,
+            writes,
+        });
+        self.history_cursor = None;
+    }
+    fn current_history_index(&self) -> Option<usize> {
+        self.history_cursor
+            .or_else(|| self.history.events.len().checked_sub(1))
+    }
+
+    fn emit_history_stop(&mut self, out: &mut impl Write, reason: &str) {
+        self.invalidate_references();
+        self.state = State::Stopped;
+        let thread_id = self.current_thread.max(1);
+        let description = self
+            .history_event()
+            .map(|event| {
+                let write = event.writes.first().map(|write| {
+                    format!(
+                        "write {}: {} -> {}",
+                        write.place, write.old_value, write.new_value
+                    )
+                });
+                match write {
+                    Some(write) => format!(
+                        "recorded event {} at {}:{} ({write})",
+                        event.sequence,
+                        self.source_path(),
+                        self.dap_line(event.line)
+                    ),
+                    None => format!(
+                        "recorded event {} at {}:{}",
+                        event.sequence,
+                        self.source_path(),
+                        self.dap_line(event.line)
+                    ),
+                }
+            })
+            .unwrap_or_else(|| "recorded Jet source event".to_string());
+        self.event(
+            out,
+            "stopped",
+            &format!(
+                "{{\"reason\":\"{}\",\"description\":\"{}\",\"threadId\":{},\"allThreadsStopped\":true}}",
+                json_escape(reason),
+                json_escape(&description),
+                thread_id
+            ),
+        );
+    }
+
+    fn replay_native_history(
+        &mut self,
+        command: &str,
+        start: usize,
+        include_controls: bool,
+    ) -> Result<DebugHistory, &'static str> {
+        if self.history.events.is_empty() {
+            return Err("reverse unavailable: this session has no recorded source history");
+        }
+        if start >= self.history.events.len() {
+            return Err("reverse unavailable: the requested native stop is no longer retained");
+        }
+        let expected_identity = jet_foundation::SHA256::sha256_hex(
+            format!("{}:{}", self.jet_file, self.jet_src).as_bytes(),
+        );
+        if self
+            .history
+            .checkpoint
+            .as_ref()
+            .is_some_and(|checkpoint| checkpoint.source_identity != expected_identity)
+        {
+            return Err("native history no longer matches the selected Jet source");
+        }
+        let mut history = self.history.clone();
+        history.cursor = Some(start);
+        let mut inputs = Vec::new();
+        if include_controls {
+            inputs.extend(
+                self.pending_breakpoints
+                    .iter()
+                    .map(|line| format!("break {line}")),
+            );
+            inputs.extend(
+                self.data_watches
+                    .iter()
+                    .map(|watch| format!("watch {watch}")),
+            );
+        }
+        inputs.push(command.to_string());
+        let refs = inputs.iter().map(String::as_str).collect::<Vec<_>>();
+        let result =
+            super::run_native_session_replay(&self.jet_file, &self.jet_src, &history, &refs, true);
+        if result.status != super::SessionStatus::Running {
+            return Err("native source history could not be replayed");
+        }
+        if result.history.cursor.is_none() {
+            return Err("native replay returned no retained stop");
+        }
+        Ok(result.history)
+    }
+
+    fn history_write_matches(&self, event: &DebugEvent) -> bool {
+        event.writes.iter().any(|write| {
+            self.data_watches.iter().any(|watch| {
+                watch == &write.place
+                    || write.place.starts_with(&format!("{watch}."))
+                    || watch.starts_with(&format!("{}.", write.place))
+            })
+        })
+    }
+    fn data_breakpoint_info(
+        &mut self,
+        out: &mut impl Write,
+        request_seq: i64,
+        command: &str,
+        args: Option<&DataTree>,
+    ) {
+        if matches!(self.state, State::Terminated) {
+            self.respond_jet_error(
+                out,
+                request_seq,
+                command,
+                22031,
+                "data breakpoint information is unavailable after target termination",
+            );
+            return;
+        }
+        let Some(name) = args
+            .and_then(|args| json_get(args, "name"))
+            .and_then(json_str)
+            .map(str::trim)
+            .filter(|name| jet_expression(name).is_some())
+        else {
+            self.respond_jet_error(
+                out,
+                request_seq,
+                command,
+                22032,
+                "dataBreakpointInfo requires a bounded Jet local path in `name`",
+            );
+            return;
+        };
+        self.respond(
+            out,
+            request_seq,
+            command,
+            true,
+            &format!(
+                "{{\"dataId\":\"{}\",\"description\":\"Jet write watch: {}\",\"accessTypes\":[\"write\"],\"canPersist\":false}}",
+                json_escape(name),
+                json_escape(name)
+            ),
+        );
+    }
+    fn set_data_breakpoints(
+        &mut self,
+        out: &mut impl Write,
+        request_seq: i64,
+        command: &str,
+        args: Option<&DataTree>,
+    ) {
+        if !matches!(
+            self.state,
+            State::Ready | State::Configuring | State::Running | State::Stopped
+        ) {
+            self.respond_jet_error(
+                out,
+                request_seq,
+                command,
+                22031,
+                "data breakpoints are not legal after the target terminated",
+            );
+            return;
+        }
+        let places = match data_breakpoint_places(args) {
+            Ok(places) => places,
+            Err(message) => {
+                self.respond_jet_error(out, request_seq, command, 22032, message);
+                return;
+            }
+        };
+        self.data_watches = places.iter().cloned().collect();
+        let breakpoints = places
+            .iter()
+            .enumerate()
+            .map(|(index, place)| {
+                format!(
+                    "{{\"id\":{},\"verified\":true,\"dataId\":\"{}\",\"message\":\"session write watch: {}\"}}",
+                    index + 1,
+                    json_escape(place),
+                    json_escape(place)
+                )
+            })
+            .collect::<Vec<_>>();
+        self.respond(
+            out,
+            request_seq,
+            command,
+            true,
+            &format!("{{\"breakpoints\":[{}]}}", breakpoints.join(",")),
+        );
+    }
+
+    fn replay_forward_history(
+        &mut self,
+        out: &mut impl Write,
+        request_seq: i64,
+        command: &str,
+        response_command: Option<&str>,
+    ) {
+        let response_command = response_command.unwrap_or(command);
+        let Some(current) = self.current_history_index() else {
+            self.respond_jet_error(
+                out,
+                request_seq,
+                command,
+                22034,
+                "forward replay unavailable: this session has no recorded source history",
+            );
+            return;
+        };
+        let last = self.history.events.len().saturating_sub(1);
+        let is_continue = command == "continue";
+        let target = if is_continue {
+            (current + 1..self.history.events.len())
+                .find(|index| {
+                    let Some(event) = self.history.events.get(*index) else {
+                        return false;
+                    };
+                    self.pending_breakpoints.contains(&event.line)
+                        || self.history_write_matches(event)
+                })
+                .or_else(|| (current < last).then_some(last))
+        } else {
+            (current < last).then_some(current + 1)
+        };
+        let Some(target) = target else {
+            if self.replay_only_after_fix {
+                self.respond_jet_error(
+                    out,
+                    request_seq,
+                    command,
+                    22037,
+                    "fix checkpoint is checked but cannot resume the stale native artifact; rebuild and restart",
+                );
+                return;
+            }
+            if self.history_cursor.is_some() {
+                self.respond_jet_error(
+                    out,
+                    request_seq,
+                    command,
+                    22037,
+                    "forward replay reached the retained history boundary; restart is required before live resume",
+                );
+                return;
+            }
+            self.history.cursor = None;
+            self.history_cursor = None;
+            self.invalidate_references();
+            self.state = State::Running;
+            self.respond(
+                out,
+                request_seq,
+                response_command,
+                true,
+                "{\"allThreadsContinued\":true}",
+            );
+            let resume_cmd = match command {
+                "continue" => "continue",
+                "next" => "thread step-over",
+                "stepIn" => "thread step-in",
+                _ => "thread step-out",
+            };
+            let mode = if command == "continue" {
+                ResumeMode::Continue
+            } else {
+                ResumeMode::Step
+            };
+            self.begin_resume(out, resume_cmd, mode);
+            return;
+        };
+        let replay_command = if is_continue {
+            "continue"
+        } else {
+            match command {
+                "next" => "next",
+                "stepIn" => "step",
+                "stepOut" => "finish",
+                _ => "step",
+            }
+        };
+        let replayed = match self.replay_native_history(replay_command, current, is_continue) {
+            Ok(history) if history.cursor == Some(target) => history,
+            Ok(_) => {
+                self.respond_jet_error(
+                    out,
+                    request_seq,
+                    command,
+                    22034,
+                    "native replay did not reach the requested recorded stop",
+                );
+                return;
+            }
+            Err(message) => {
+                self.respond_jet_error(out, request_seq, command, 22034, message);
+                return;
+            }
+        };
+        self.history = replayed;
+        self.history_cursor = Some(target);
+        self.respond(out, request_seq, response_command, true, "{}");
+    }
+
+    fn apply_fix(
+        &mut self,
+        out: &mut impl Write,
+        request_seq: i64,
+        command: &str,
+        _args: Option<&DataTree>,
+    ) {
+        if !self.state.is_stopped() {
+            self.respond_jet_error(
+                out,
+                request_seq,
+                command,
+                22031,
+                "source repair requires a stopped target",
+            );
+            return;
+        }
+        let Some(current) = self.current_history_index() else {
+            self.respond_jet_error(
+                out,
+                request_seq,
+                command,
+                22034,
+                "fix unavailable: this session has no recorded source history",
+            );
+            return;
+        };
+        let Ok(source_on_disk) = std::fs::read_to_string(&self.jet_file) else {
+            self.respond_jet_error(
+                out,
+                request_seq,
+                command,
+                22039,
+                "fix rejected: the selected Jet source could not be read",
+            );
+            return;
+        };
+        if source_on_disk == self.jet_src {
+            self.respond_jet_error(
+                out,
+                request_seq,
+                command,
+                22034,
+                "fix unavailable: source is unchanged; edit the selected file and retry",
+            );
+            return;
+        }
+        let (_, candidate_source, candidate_shape) =
+            match super::checked_bundle_for_fix(&self.jet_file) {
+                Ok(value) => value,
+                Err(reason) => {
+                    self.respond_jet_error(
+                        out,
+                        request_seq,
+                        command,
+                        22034,
+                        &format!("fix rejected: {reason}"),
+                    );
+                    return;
+                }
+            };
+        let expected_shape = self
+            .history
+            .checkpoint
+            .as_ref()
+            .map(|checkpoint| checkpoint.shape.as_str());
+        if expected_shape.is_some_and(|shape| {
+            !matches!(shape, "native-dap-debug-artifact" | "native-debug-artifact")
+                && shape != candidate_shape
+        }) {
+            self.respond_jet_error(
+                out,
+                request_seq,
+                command,
+                22034,
+                "fix rejected: checkpoint incompatible (source type, layout, or authority changed); restart required",
+            );
+            return;
+        }
+        let candidate = match build_native_candidate(
+            &self.jet_file,
+            &self.rust_file,
+            &candidate_source,
+        ) {
+            Ok(candidate) => candidate,
+            Err(reason) => {
+                self.respond_jet_error(
+                    out,
+                    request_seq,
+                    command,
+                    22034,
+                    &format!("fix rejected: native candidate was not built: {reason}"),
+                );
+                return;
+            }
+        };
+        let Some(inferior) = self.inf.as_mut() else {
+            self.respond_jet_error(
+                out,
+                request_seq,
+                command,
+                22031,
+                "fix rejected: the native target is no longer available",
+            );
+            return;
+        };
+        let receipt = match inferior.rebind_native_candidate(
+            &candidate.binary,
+            &self.rust_src,
+            &candidate.rust_source,
+        ) {
+            Ok(receipt) => receipt,
+            Err(error) => {
+                self.respond_jet_error(
+                    out,
+                    request_seq,
+                    command,
+                    22034,
+                    &format!("fix rejected: native candidate was not activated: {error}"),
+                );
+                return;
+            }
+        };
+        if let Some(checkpoint) = self.history.checkpoint.as_mut() {
+            checkpoint.source_identity = jet_foundation::SHA256::sha256_hex(
+                format!("{}:{}", self.jet_file, candidate_source).as_bytes(),
+            );
+            checkpoint.shape = candidate_shape;
+        }
+        self.rust_src = candidate.rust_source.clone();
+        self.map = LineMap::build(&self.rust_src);
+        self.jet_src = candidate_source;
+        self.history.cursor = Some(current);
+        self.history_cursor = Some(current);
+        self.replay_only_after_fix = false;
+        let changed = receipt
+            .changed
+            .iter()
+            .map(|name| format!("\"{}\"", json_escape(name)))
+            .collect::<Vec<_>>()
+            .join(",");
+        let body = format!(
+            "{{\"checkpoint\":\"compatible\",\"native\":\"committed\",\"buildId\":\"{}\",\"changed\":[{}],\"source\":\"{}\",\"historySequence\":{}}}",
+            json_escape(&candidate.build_id),
+            changed,
+            json_escape(&self.source_path()),
+            self.history
+                .events
+                .get(current)
+                .map_or(0, |event| event.sequence)
+        );
+        self.candidate_artifacts.push(candidate);
+        self.respond(out, request_seq, command, true, &body);
+    }
+    fn reverse_history(
+        &mut self,
+        out: &mut impl Write,
+        request_seq: i64,
+        command: &str,
+        reverse_continue: bool,
+    ) {
+        if !self.state.is_stopped() {
+            self.respond_jet_error(
+                out,
+                request_seq,
+                command,
+                22031,
+                "reverse execution requires a stopped target",
+            );
+            return;
+        }
+        let Some(current) = self.current_history_index() else {
+            self.respond_jet_error(
+                out,
+                request_seq,
+                command,
+                22034,
+                "reverse unavailable: this session has no recorded source history",
+            );
+            return;
+        };
+        let target = if reverse_continue {
+            (0..current).rev().find(|index| {
+                let Some(event) = self.history.events.get(*index) else {
+                    return false;
+                };
+                self.pending_breakpoints.contains(&event.line)
+                    || self.history_write_matches(event)
+            })
+        } else {
+            current.checked_sub(1)
+        };
+        let Some(target) = target else {
+            self.respond_jet_error(
+                out,
+                request_seq,
+                command,
+                22034,
+                if reverse_continue {
+                    "reverse unavailable: no earlier breakpoint or data write exists"
+                } else {
+                    "reverse unavailable: no earlier source event exists"
+                },
+            );
+            return;
+        };
+        let replay_command = if reverse_continue {
+            "reverse-continue"
+        } else {
+            "back"
+        };
+        let replayed = match self.replay_native_history(replay_command, current, reverse_continue) {
+            Ok(history) if history.cursor == Some(target) => history,
+            Ok(_) => {
+                self.respond_jet_error(
+                    out,
+                    request_seq,
+                    command,
+                    22034,
+                    "native replay did not reach the requested recorded stop",
+                );
+                return;
+            }
+            Err(message) => {
+                self.respond_jet_error(out, request_seq, command, 22034, message);
+                return;
+            }
+        };
+        self.history = replayed;
+        self.history_cursor = Some(target);
+        self.respond(out, request_seq, command, true, "{}");
+        let reason = if reverse_continue && self.history_event().is_some_and(|event| {
+            self.history_write_matches(&event)
+        }) {
+            "data breakpoint"
+        } else if reverse_continue {
+            "breakpoint"
+        } else {
+            "step"
+        };
+        self.emit_history_stop(out, reason);
+    }
+
+
 
     fn dap_column(&self, jet_column: usize) -> usize {
         if self.columns_start_at_1 {
@@ -818,6 +1549,24 @@ impl DapServer {
             .unwrap_or_else(|_| PathBuf::from(&self.jet_file))
             .to_string_lossy()
             .into_owned()
+    }
+
+    fn reset_history(&mut self) {
+        self.history = DebugHistory {
+            events: Vec::new(),
+            checkpoint: Some(DebugCheckpoint {
+                source_identity: jet_foundation::SHA256::sha256_hex(
+                    format!("{}:{}", self.jet_file, self.jet_src).as_bytes(),
+                ),
+                shape: super::native_checkpoint_shape(&self.jet_file, &self.jet_src),
+                sequence: 0,
+            }),
+            cursor: None,
+            capped: false,
+            decision_ledger: None,
+        };
+        self.history_cursor = None;
+        self.replay_only_after_fix = false;
     }
 
     fn assign_client_breakpoint_ids(&mut self, specs: &[BreakpointSpec]) -> Vec<u32> {
@@ -862,7 +1611,7 @@ impl DapServer {
         self.event(out, "thread", "{\"reason\":\"started\",\"threadId\":1}");
     }
 
-    fn raw_frames_for_request(&self, args: Option<&JSONValue>) -> Result<bool, &'static str> {
+    fn raw_frames_for_request(&self, args: Option<&DataTree>) -> Result<bool, &'static str> {
         match args.and_then(|args| json_get(args, "showRawFrames")) {
             None => Ok(self.show_raw_frames),
             Some(value) => json_bool(value)
@@ -919,7 +1668,7 @@ impl DapServer {
 
     fn attach_target(
         &self,
-        args: Option<&JSONValue>,
+        args: Option<&DataTree>,
     ) -> Result<(Inferior, LineMap, bool), AttachFailure> {
         let attach = parse_attach_arguments(args).map_err(|_| AttachFailure::InvalidArguments)?;
         let map = LineMap::load_verified(
@@ -1026,7 +1775,7 @@ impl DapServer {
 
     fn select_resume_thread(
         &mut self,
-        args: Option<&JSONValue>,
+        args: Option<&DataTree>,
     ) -> Result<(), (i64, &'static str)> {
         let thread_id = args
             .and_then(|args| json_get(args, "threadId"))
@@ -1078,6 +1827,7 @@ impl DapServer {
         if let Some(inf) = self.inf.take() {
             inf.quit();
         }
+        self.reset_history();
         self.current_thread = 1;
         self.last_signal = None;
         self.last_exception = None;
@@ -1201,7 +1951,7 @@ impl DapServer {
 
     /// Dispatch one DAP request. `Some(())` to keep the loop going; `None` to
     /// stop (a `disconnect`/`terminate` request, or an unrecoverable error).
-    fn handle(&mut self, msg: &JSONValue, out: &mut impl Write) -> Option<()> {
+    fn handle(&mut self, msg: &DataTree, out: &mut impl Write) -> Option<()> {
         let command = json_get(msg, "command").and_then(json_str)?;
         let client_seq = json_get(msg, "seq").and_then(json_u32)?;
         let request_seq = i64::from(client_seq);
@@ -1244,7 +1994,7 @@ impl DapServer {
                     request_seq,
                     "initialize",
                     true,
-                    "{\"supportsConfigurationDoneRequest\":true,\"supportsTerminateRequest\":true,\"supportsRestartRequest\":true,\"supportsPauseRequest\":true,\"supportsConditionalBreakpoints\":true,\"supportsHitConditionalBreakpoints\":true,\"supportsLogPoints\":true,\"supportsEvaluateForHovers\":true,\"supportsExceptionInfoRequest\":true,\"supportsLoadedSourcesRequest\":true,\"supportsProgressReporting\":true,\"supportsVariablePaging\":true}",
+                    "{\"supportsConfigurationDoneRequest\":true,\"supportsTerminateRequest\":true,\"supportsRestartRequest\":true,\"supportsPauseRequest\":true,\"supportsStepBack\":true,\"supportsDataBreakpoints\":true,\"supportsConditionalBreakpoints\":true,\"supportsHitConditionalBreakpoints\":true,\"supportsLogPoints\":true,\"supportsEvaluateForHovers\":true,\"supportsExceptionInfoRequest\":true,\"supportsLoadedSourcesRequest\":true,\"supportsProgressReporting\":true,\"supportsVariablePaging\":true}",
                 );
                 Some(())
             }
@@ -1656,6 +2406,29 @@ impl DapServer {
                     );
                     return Some(());
                 };
+                if self.history_cursor.is_some() {
+                    let start_frame = args
+                        .and_then(|args| json_get(args, "startFrame"))
+                        .and_then(json_u32)
+                        .unwrap_or(0) as usize;
+                    let levels = args
+                        .and_then(|args| json_get(args, "levels"))
+                        .and_then(json_u32)
+                        .map(|levels| levels as usize);
+                    let Some(body) = self.history_stack_body(thread_id, start_frame, levels) else {
+                        self.respond_jet_error(
+                            out,
+                            request_seq,
+                            command,
+                            22034,
+                            "the recorded Jet stack is unavailable at this stop",
+                        );
+                        return Some(());
+                    };
+                    self.current_thread = thread_id;
+                    self.respond(out, request_seq, command, true, &body);
+                    return Some(());
+                }
                 if let Some(inf) = self.inf.as_mut() {
                     if let Err(_error) = inf.select_thread(thread_id) {
                         self.respond_jet_error(
@@ -1849,6 +2622,24 @@ impl DapServer {
                     self.respond_err(out, request_seq, command, "variablesReference is required");
                     return Some(());
                 };
+                if self.history_cursor.is_some() {
+                    if !self.references.is_live(scope_id, ReferenceKind::Scope) {
+                        self.respond_stale_reference(out, request_seq, command);
+                        return Some(());
+                    }
+                    let Some(body) = self.history_variables_body() else {
+                        self.respond_jet_error(
+                            out,
+                            request_seq,
+                            command,
+                            22034,
+                            "recorded Jet locals are unavailable at this stop",
+                        );
+                        return Some(());
+                    };
+                    self.respond(out, request_seq, command, true, &body);
+                    return Some(());
+                }
                 let value_reference = if self.references.is_live(scope_id, ReferenceKind::Value) {
                     let Some(value) = self.references.value(scope_id) else {
                         self.respond_stale_reference(out, request_seq, command);
@@ -2167,6 +2958,37 @@ impl DapServer {
                 );
                 Some(())
             }
+            "reverseStep" | "stepBack" => {
+                self.reverse_history(out, request_seq, command, false);
+                Some(())
+            }
+            "reverseContinue" => {
+                self.reverse_history(out, request_seq, command, true);
+                Some(())
+            }
+            "dataBreakpointInfo" => {
+                self.data_breakpoint_info(out, request_seq, command, args);
+                Some(())
+            }
+            "setDataBreakpoints" => {
+                self.set_data_breakpoints(out, request_seq, command, args);
+                Some(())
+            }
+            "setExpression" => {
+                self.respond_jet_error(
+                    out,
+                    request_seq,
+                    command,
+                    22033,
+                    "setExpression cannot mutate a native Jet frame; use fix with an edited source checkpoint",
+                );
+                Some(())
+            }
+            "fix" => {
+                self.apply_fix(out, request_seq, command, args);
+                Some(())
+            }
+
             "continue" | "next" | "stepIn" | "stepOut" => {
                 if self.state != State::Stopped {
                     self.respond_jet_error(
@@ -2176,6 +2998,25 @@ impl DapServer {
                         22031,
                         "run control requires a stopped target",
                     );
+                    return Some(());
+                }
+                if self.history_cursor.is_some() {
+                    let thread_id = args
+                        .and_then(|args| json_get(args, "threadId"))
+                        .and_then(json_u32)
+                        .filter(|thread_id| *thread_id > 0);
+                    if thread_id.is_none() {
+                        self.respond_jet_error(
+                            out,
+                            request_seq,
+                            command,
+                            22032,
+                            "run control requires a positive threadId",
+                        );
+                        return Some(());
+                    }
+                    self.current_thread = thread_id.expect("checked above");
+                    self.replay_forward_history(out, request_seq, command, None);
                     return Some(());
                 }
                 if self.inf.is_none() {
@@ -2285,7 +3126,7 @@ impl DapServer {
                     self.respond(out, request_seq, command, true, "{}");
                     return Some(());
                 };
-                let JSONValue::Array(values) = filters else {
+                let DataTree::Array(values) = filters else {
                     self.respond_jet_error(
                         out,
                         request_seq,
@@ -2531,7 +3372,6 @@ impl DapServer {
     }
 
     /// Send a DAP `output` event for any Jet `print()`/`eprint()` the debuggee
-    /// wrote since the last check (redirected off lldb's own control channel —
     /// `Inferior.rs`'s module doc point 3).
     fn emit_program_output(&mut self, out: &mut impl Write) {
         let Some(inf) = &mut self.inf else { return };
@@ -2658,7 +3498,7 @@ impl DapServer {
                     return;
                 }
             }
-            let reason = if mode == ResumeMode::Pause {
+            let mut reason = if mode == ResumeMode::Pause {
                 "pause"
             } else if self.last_exception.is_some() || self.last_signal.is_some() {
                 "exception"
@@ -2765,11 +3605,21 @@ impl DapServer {
             }
             match Inferior::parse_top_frame(&bt_text) {
                 Some(frame) => {
-                    let _ = self.source_line(
-                        self.map
-                            .jet_line_for_file(&frame.rust_file, &self.rust_file, frame.rust_line)
-                            .unwrap_or(1),
-                    );
+                    let jet_line = self
+                        .map
+                        .jet_line_for_file(&frame.rust_file, &self.rust_file, frame.rust_line)
+                        .unwrap_or(1);
+                    let _ = self.source_line(jet_line);
+                    self.record_history_event(&bt_text, jet_line);
+                    if reason == "breakpoint"
+                        && self
+                            .history
+                            .events
+                            .last()
+                            .is_some_and(|event| self.history_write_matches(event))
+                    {
+                        reason = "data breakpoint";
+                    }
                     let hit_ids = if hit_breakpoint_ids.is_empty() {
                         String::new()
                     } else {
@@ -3227,10 +4077,10 @@ fn diagnostic_details(id: i64, format: &str) -> (&'static str, &'static str, &'s
     }
 }
 
-fn parse_dap_request(body: &str) -> Result<JSONValue, &'static str> {
+fn parse_dap_request(body: &str) -> Result<DataTree, &'static str> {
     let message =
         parse_json_with_limit(body, MAX_DAP_MESSAGE_BYTES).map_err(|()| "invalid JSON")?;
-    let JSONValue::Object(_) = &message else {
+    let DataTree::Object(_) = &message else {
         return Err("request must be an object");
     };
     if json_get(&message, "type").and_then(json_str) != Some("request") {
@@ -3250,7 +4100,7 @@ fn parse_dap_request(body: &str) -> Result<JSONValue, &'static str> {
     }
     if !matches!(
         json_get(&message, "arguments"),
-        None | Some(JSONValue::Object(_))
+        None | Some(DataTree::Object(_))
     ) {
         return Err("arguments must be an object");
     }
@@ -3291,7 +4141,7 @@ struct InitializeArguments {
 }
 
 fn parse_initialize_arguments(
-    args: Option<&JSONValue>,
+    args: Option<&DataTree>,
 ) -> Result<InitializeArguments, &'static str> {
     let args = args.ok_or("initialize arguments are required")?;
     if json_get(args, "adapterID").and_then(json_str) != Some("jet") {
@@ -3331,7 +4181,7 @@ struct LaunchArguments {
 }
 
 fn parse_launch_arguments(
-    args: Option<&JSONValue>,
+    args: Option<&DataTree>,
     jet_file: &str,
 ) -> Result<LaunchArguments, &'static str> {
     if let Some(program) = args
@@ -3344,7 +4194,7 @@ fn parse_launch_arguments(
     }
     let values = match args.and_then(|args| json_get(args, "args")) {
         None => Vec::new(),
-        Some(JSONValue::Array(values)) => values
+        Some(DataTree::Array(values)) => values
             .iter()
             .map(|value| json_str(value).ok_or("launch args must be strings"))
             .collect::<Result<Vec<_>, _>>()?
@@ -3375,7 +4225,7 @@ fn parse_launch_arguments(
     };
     let env = match args.and_then(|args| json_get(args, "env")) {
         None => Vec::new(),
-        Some(JSONValue::Object(values)) => values
+        Some(DataTree::Object(values)) => values
             .iter()
             .map(|(key, value)| {
                 if !valid_launch_env_key(key) {
@@ -3422,20 +4272,55 @@ fn same_path(left: &str, right: &str) -> bool {
     }
 }
 
+fn data_breakpoint_places(args: Option<&DataTree>) -> Result<Vec<String>, &'static str> {
+    let value = args
+        .and_then(|args| json_get(args, "breakpoints"))
+        .ok_or("setDataBreakpoints requires a breakpoints array")?;
+    let DataTree::Array(items) = value else {
+        return Err("setDataBreakpoints breakpoints must be an array");
+    };
+    if items.len() > 32 {
+        return Err("setDataBreakpoints supports at most 32 session watchpoints");
+    }
+    items
+        .iter()
+        .map(|item| {
+            let place = json_get(item, "dataId")
+                .and_then(json_str)
+                .ok_or("data breakpoint dataId must be a Jet local path")?;
+            if jet_expression(place).is_none() {
+                return Err("data breakpoint dataId must be a bounded Jet local path");
+            }
+            if let Some(access) = json_get(item, "accessType").and_then(json_str) {
+                if access != "write" {
+                    return Err("Jet data breakpoints support write access only");
+                }
+            }
+            Ok(place.to_string())
+        })
+        .try_fold(Vec::new(), |mut places, place| {
+            let place = place?;
+            if !places.contains(&place) {
+                places.push(place);
+            }
+            Ok(places)
+        })
+}
+
 #[cfg(test)]
-fn breakpoint_lines(args: Option<&JSONValue>) -> Result<Vec<usize>, &'static str> {
+fn breakpoint_lines(args: Option<&DataTree>) -> Result<Vec<usize>, &'static str> {
     breakpoint_lines_for_origin(args, true)
 }
 
 #[cfg(test)]
 fn breakpoint_lines_for_origin(
-    args: Option<&JSONValue>,
+    args: Option<&DataTree>,
     lines_start_at_1: bool,
 ) -> Result<Vec<usize>, &'static str> {
     let Some(value) = args.and_then(|args| json_get(args, "breakpoints")) else {
         return Ok(Vec::new());
     };
-    let JSONValue::Array(items) = value else {
+    let DataTree::Array(items) = value else {
         return Err("breakpoints must be an array");
     };
     items
@@ -3457,7 +4342,7 @@ fn breakpoint_lines_for_origin(
         .collect()
 }
 
-fn breakpoint_source(args: Option<&JSONValue>, jet_file: &str) -> Result<(), &'static str> {
+fn breakpoint_source(args: Option<&DataTree>, jet_file: &str) -> Result<(), &'static str> {
     let source = args
         .and_then(|args| json_get(args, "source"))
         .ok_or("setBreakpoints requires a source object")?;
@@ -3472,13 +4357,13 @@ fn breakpoint_source(args: Option<&JSONValue>, jet_file: &str) -> Result<(), &'s
 }
 
 fn breakpoint_specs_for_origin(
-    args: Option<&JSONValue>,
+    args: Option<&DataTree>,
     lines_start_at_1: bool,
 ) -> Result<Vec<BreakpointSpec>, &'static str> {
     let Some(value) = args.and_then(|args| json_get(args, "breakpoints")) else {
         return Ok(Vec::new());
     };
-    let JSONValue::Array(items) = value else {
+    let DataTree::Array(items) = value else {
         return Err("breakpoints must be an array");
     };
     items
@@ -3515,7 +4400,7 @@ fn breakpoint_specs_for_origin(
         })
 }
 
-fn breakpoint_text(item: &JSONValue, key: &str) -> Result<Option<String>, &'static str> {
+fn breakpoint_text(item: &DataTree, key: &str) -> Result<Option<String>, &'static str> {
     let Some(value) = json_get(item, key) else {
         return Ok(None);
     };
@@ -3585,7 +4470,7 @@ fn validate_breakpoint_specs(specs: &[BreakpointSpec]) -> Result<(), &'static st
     Ok(())
 }
 
-fn parse_attach_arguments(args: Option<&JSONValue>) -> Result<AttachArguments, &'static str> {
+fn parse_attach_arguments(args: Option<&DataTree>) -> Result<AttachArguments, &'static str> {
     let args = args.ok_or("attach arguments are required")?;
     let pid = json_get(args, "processId")
         .and_then(json_u32)
@@ -3605,7 +4490,7 @@ fn parse_attach_arguments(args: Option<&JSONValue>) -> Result<AttachArguments, &
     })
 }
 
-fn attach_path(args: &JSONValue, key: &str) -> Result<PathBuf, &'static str> {
+fn attach_path(args: &DataTree, key: &str) -> Result<PathBuf, &'static str> {
     let raw = json_get(args, key)
         .and_then(json_str)
         .filter(|value| !value.is_empty() && !value.chars().any(char::is_control))
@@ -3621,9 +4506,9 @@ fn attach_path(args: &JSONValue, key: &str) -> Result<PathBuf, &'static str> {
     Ok(path)
 }
 
-fn json_bool(value: &JSONValue) -> Option<bool> {
+fn json_bool(value: &DataTree) -> Option<bool> {
     match value {
-        JSONValue::Bool(value) => Some(*value),
+        DataTree::Bool(value) => Some(*value),
         _ => None,
     }
 }
@@ -3774,6 +4659,23 @@ mod tests {
             seq: 1,
             resume_task: None,
             resume_stop_requested: false,
+            history: DebugHistory {
+                events: Vec::new(),
+                checkpoint: Some(DebugCheckpoint {
+                    source_identity: jet_foundation::SHA256::sha256_hex(
+                        "main.jet:".as_bytes(),
+                    ),
+                    shape: "native-dap-debug-artifact".to_string(),
+                    sequence: 0,
+                }),
+                cursor: None,
+                capped: false,
+                decision_ledger: None,
+            },
+            history_cursor: None,
+            data_watches: HashSet::new(),
+            candidate_artifacts: Vec::new(),
+            replay_only_after_fix: false,
         }
     }
 
@@ -4416,7 +5318,7 @@ mod tests {
         String::from_utf8(output).expect("DAP output is UTF-8")
     }
 
-    fn dap_message(output: &str) -> JSONValue {
+    fn dap_message(output: &str) -> DataTree {
         let mut reader = std::io::Cursor::new(output.as_bytes());
         let body = read_message(&mut reader)
             .expect("DAP response frame")
@@ -4428,7 +5330,7 @@ mod tests {
         let message = dap_message(output);
         let body = json_get(&message, "body").expect("DAP response body object");
         let values = match json_get(body, collection).expect("DAP response collection") {
-            JSONValue::Array(values) => values,
+            DataTree::Array(values) => values,
             _ => panic!("DAP response collection is not an array"),
         };
         json_get(values.first().expect("DAP response collection item"), field)

@@ -1,5 +1,6 @@
 use super::*;
-use jet_foundation::JSON::{json_get, json_int, json_str, JSONValue};
+use jet_foundation::DataTree::DataTree;
+use jet_foundation::JSON::{json_get, json_int, json_str};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[test]
@@ -266,7 +267,7 @@ fn top_level_help_is_registry_inventory_and_env_help_lists_live_actions() {
 #[test]
 fn run_help_teaches_the_project_default_and_keeps_explicit_targets() {
     let usage = jet::CLI::command_usage("run");
-    assert_eq!(usage, "jet run [<file.jet|dir>] [-- <args>]");
+    assert_eq!(usage, "jet run [<file.jet|dir>] [--no-prepare] [-- <args>]");
 
     for args in [["run", "--help"], ["help", "run"]] {
         let out = Command::new(jet())
@@ -277,7 +278,7 @@ fn run_help_teaches_the_project_default_and_keeps_explicit_targets() {
         assert!(out.status.success(), "{args:?}: {:?}", out);
         let stdout = String::from_utf8_lossy(&out.stdout);
         assert!(
-            stdout.contains("jet run [<file.jet|dir>] [-- <args>]"),
+            stdout.contains("jet run [<file.jet|dir>] [--no-prepare] [-- <args>]"),
             "{args:?} omitted the optional project target: {stdout}"
         );
     }
@@ -387,81 +388,8 @@ fn run(args: Commands) {}
         );
         check_snapshot(&format!("shape_cli_program_{shell}.txt"), &script);
     }
-    let dossier = Command::new(jet())
-        .args(["inspect", "dossier", "commands.jet", "run", "--json"])
-        .current_dir(&dir)
-        .output()
-        .unwrap();
-    assert!(dossier.status.success());
-    let dossier = String::from_utf8(dossier.stdout).unwrap();
-    assert!(dossier.contains("\"completion_words\":[\"--help\",\"--verbose\",\"-v\",\"--quiet\",\"-q\",\"--color\",\"--version\",\"--config\",\"-c\",\"serve\",\"import\"]"), "dossier flattened program flags: {dossier}");
-    for fact in [
-        "\"commands\":[",
-        "\"name\":\"serve\"",
-        "\"name\":\"import\"",
-        "\"flag\":\"--port\"",
-        "\"flag\":\"--file\"",
-    ] {
-        assert!(dossier.contains(fact), "dossier omitted {fact}: {dossier}");
-    }
-    let dossier = Command::new(jet())
-        .args(["inspect", "dossier", "commands.jet", "run"])
-        .current_dir(&dir)
-        .output()
-        .unwrap();
-    assert!(dossier.status.success());
-    let dossier = String::from_utf8(dossier.stdout).unwrap();
-    for fact in [
-        "command serve",
-        "--config",
-        "JET_CONFIG",
-        "shared config",
-        "command import",
-        "--file: String (required) — value for --file",
-    ] {
-        assert!(
-            dossier.contains(fact),
-            "text dossier omitted {fact}: {dossier}"
-        );
-    }
 }
 
-#[test]
-fn documented_subcommands_are_projected_into_the_dossier_schema() {
-    let dir = isolated_cwd("shape_cli_documented_dossier");
-    fs::write(
-        dir.join("commands.jet"),
-        r#"#CLI
-struct Commands {
-    #Doc("Start the service") fn serve(self) {}
-    #Doc("Import one data file") fn import(self) {}
-}
-fn run(args: Commands) {}
-"#,
-    )
-    .unwrap();
-    let dossier = Command::new(jet())
-        .args(["inspect", "dossier", "commands.jet", "run", "--json"])
-        .current_dir(&dir)
-        .output()
-        .unwrap();
-    assert!(
-        dossier.status.success(),
-        "documented dossier failed: {}",
-        String::from_utf8_lossy(&dossier.stderr)
-    );
-    let json = String::from_utf8(dossier.stdout).unwrap();
-    for fact in [
-        "\"name\":\"serve\",\"description\":\"Start the service\"",
-        "\"name\":\"import\",\"description\":\"Import one data file\"",
-        "\"completion_words\":[\"--help\",\"serve\",\"import\"]",
-    ] {
-        assert!(
-            json.contains(fact),
-            "documented dossier omitted {fact}: {json}"
-        );
-    }
-}
 
 #[test]
 fn derived_help_uses_program_basename_for_compiled_and_jet_run_paths() {
@@ -1114,7 +1042,7 @@ fn machine_report_paths_stay_resolvable_across_repository_layouts() {
         assert_eq!(stderr.lines().count(), 1, "{stderr}");
         parse_json(stderr.trim()).unwrap_or_else(|_| panic!("invalid diagnostic JSON: {stderr}"))
     };
-    let report_file = |value: &jet_foundation::JSON::JSONValue| {
+    let report_file = |value: &DataTree| {
         jet_foundation::JSON::json_str(jet_foundation::JSON::json_get(value, "file").unwrap())
             .unwrap()
             .to_string()
@@ -1162,12 +1090,12 @@ fn machine_report_paths_stay_resolvable_across_repository_layouts() {
         "safe"
     );
     let edits = match jet_foundation::JSON::json_get(&fix_report, "fix_edits").unwrap() {
-        jet_foundation::JSON::JSONValue::Array(edits) => edits,
+        DataTree::Array(edits) => edits,
         _ => panic!("fix_edits is not an array"),
     };
     assert_eq!(edits.len(), 1);
     let edit = match &edits[0] {
-        jet_foundation::JSON::JSONValue::Object(_) => &edits[0],
+        DataTree::Object(_) => &edits[0],
         _ => panic!("fix edit is not an object"),
     };
     let edit_file =
@@ -1175,7 +1103,7 @@ fn machine_report_paths_stay_resolvable_across_repository_layouts() {
             .unwrap();
     assert_eq!(fix_file, edit_file);
     let span = match jet_foundation::JSON::json_get(edit, "span").unwrap() {
-        span @ jet_foundation::JSON::JSONValue::Object(_) => span,
+        span @ DataTree::Object(_) => span,
         _ => panic!("fix span is not an object"),
     };
     let start =
@@ -1230,19 +1158,19 @@ fn machine_report_paths_stay_resolvable_across_repository_layouts() {
 fn e0102_and_e0111_typed_fix_edits_apply() {
     let dir = isolated_cwd("typed_fix_edits");
     let typo = dir.join("typo.jet");
-    fs::write(&typo, "fn run() {\n    pirnt(\"hi\");\n}\n").unwrap();
+    fs::write(&typo, "fn run() {\n    pirnt(\"hi\")\n}\n").unwrap();
     let immutable = dir.join("immutable.jet");
     fs::write(
         &immutable,
-        "fn run() {\n    x :: 1\n    x = 2;\n    print(x);\n}\n",
+        "fn run() {\n    x :: 1\n    x = 2\n    print(x)\n}\n",
     )
     .unwrap();
 
     for (file, expected) in [
-        (&typo, "fn run() {\n    print(\"hi\");\n}\n"),
+        (&typo, "fn run() {\n    print(\"hi\")\n}\n"),
         (
             &immutable,
-            "fn run() {\n    x := 1\n    x = 2;\n    print(x);\n}\n",
+            "fn run() {\n    x := 1\n    x = 2\n    print(x)\n}\n",
         ),
     ] {
         let output = Command::new(jet())
@@ -1286,7 +1214,7 @@ fn name_suggestion_json_edit_applies_and_rechecks_clean() {
         "E0107"
     );
     let edits = match jet_foundation::JSON::json_get(&report, "fix_edits").unwrap() {
-        jet_foundation::JSON::JSONValue::Array(edits) => edits,
+        DataTree::Array(edits) => edits,
         _ => panic!("fix_edits is not an array"),
     };
     assert_eq!(edits.len(), 1);
@@ -1376,17 +1304,17 @@ struct RepairReport {
 
 type RepairState = BTreeMap<PathBuf, String>;
 
-fn repair_json_field<'a>(value: &'a JSONValue, key: &str) -> &'a JSONValue {
+fn repair_json_field<'a>(value: &'a DataTree, key: &str) -> &'a DataTree {
     json_get(value, key).unwrap_or_else(|| panic!("machine report missing {key}"))
 }
 
-fn repair_json_string(value: &JSONValue, key: &str) -> String {
+fn repair_json_string(value: &DataTree, key: &str) -> String {
     json_str(repair_json_field(value, key))
         .unwrap_or_else(|| panic!("machine report {key} is not a string"))
         .to_string()
 }
 
-fn repair_json_usize(value: &JSONValue, key: &str) -> usize {
+fn repair_json_usize(value: &DataTree, key: &str) -> usize {
     usize::try_from(
         json_int(repair_json_field(value, key))
             .unwrap_or_else(|| panic!("machine report {key} is not an integer")),
@@ -1394,11 +1322,11 @@ fn repair_json_usize(value: &JSONValue, key: &str) -> usize {
     .unwrap_or_else(|_| panic!("machine report {key} is negative"))
 }
 
-fn parse_repair_report(value: &JSONValue) -> RepairReport {
-    assert_eq!(repair_json_string(value, "schema"), "jet.report/v1");
+fn parse_repair_report(value: &DataTree) -> RepairReport {
+    assert_eq!(repair_json_string(value, "schema"), "jet.report/v2");
     let code = repair_json_string(value, "code");
     let edits = match repair_json_field(value, "fix_edits") {
-        JSONValue::Array(edits) => edits
+        DataTree::Array(edits) => edits
             .iter()
             .map(|edit| {
                 let span = repair_json_field(edit, "span");
@@ -1416,8 +1344,17 @@ fn parse_repair_report(value: &JSONValue) -> RepairReport {
     RepairReport { code, edits }
 }
 
-// Read only published jet.report/v1 fields. Human What/Why/Fix text never
-// participates in repair loop.
+fn parse_repair_reports(value: &DataTree) -> Vec<RepairReport> {
+    assert_eq!(repair_json_string(value, "schema"), "jet.status/v1");
+    assert_eq!(repair_json_string(value, "action"), "check");
+    match repair_json_field(value, "reports") {
+        DataTree::Array(reports) => reports.iter().map(parse_repair_report).collect(),
+        _ => panic!("machine status reports is not an array"),
+    }
+}
+
+// Read only published jet.status/v1 and nested jet.report/v2 fields. Human
+// What/Why/Fix text never participates in the repair loop.
 fn check_repair_state(dir: &Path, state: &RepairState) -> Vec<RepairReport> {
     for (file, source) in state {
         fs::write(file, source).unwrap();
@@ -1431,43 +1368,33 @@ fn check_repair_state(dir: &Path, state: &RepairState) -> Vec<RepairReport> {
             .output()
             .unwrap();
 
-        if output.status.success() {
-            assert!(
-                output.stderr.is_empty(),
-                "clean check wrote stderr: {:?}",
-                output.stderr
-            );
-            let clean = parse_json(String::from_utf8(output.stdout).unwrap().trim())
-                .expect("clean check must emit one JSON object");
-            assert_eq!(repair_json_string(&clean, "schema"), "jet.report/v1");
-            assert_eq!(repair_json_string(&clean, "status"), "ok");
-            assert!(matches!(
-                json_get(&clean, "ok"),
-                Some(JSONValue::Bool(true))
-            ));
-            match repair_json_field(&clean, "diagnostics") {
-                JSONValue::Array(diagnostics) => assert!(diagnostics.is_empty()),
-                _ => panic!("clean report diagnostics is not an array"),
-            }
-            continue;
-        }
-
-        assert_eq!(output.status.code(), Some(1), "check failed: {:?}", output);
         assert!(
-            output.stdout.is_empty(),
-            "error check wrote stdout: {:?}",
-            output.stdout
+            output.stderr.is_empty(),
+            "JSON check wrote stderr: {:?}",
+            output.stderr
         );
-        reports.extend(
-            String::from_utf8(output.stderr)
-                .unwrap()
-                .lines()
-                .map(|line| parse_json(line).expect("error check must emit JSON lines"))
-                .map(|report| parse_repair_report(&report)),
-        );
+        let status = parse_json(String::from_utf8(output.stdout).unwrap().trim())
+            .expect("JSON check must emit one status object");
+        assert_eq!(repair_json_string(&status, "schema"), "jet.status/v1");
+        assert_eq!(repair_json_string(&status, "action"), "check");
+        if output.status.success() {
+            assert!(matches!(
+                json_get(&status, "ok"),
+                Some(DataTree::Bool(true))
+            ));
+            assert!(
+                parse_repair_reports(&status).is_empty(),
+                "clean check must have no reports"
+            );
+        } else {
+            let code = output.status.code();
+            assert_eq!(code, Some(1), "check failed: {status:?}");
+            reports.extend(parse_repair_reports(&status));
+        }
     }
     reports
 }
+
 
 fn apply_repair_edits(
     state: &RepairState,
@@ -1730,7 +1657,7 @@ fn agent_fix_loop_regression_guard_names_offending_code() {
 fn fix_safety_tiers_are_reported_and_applied() {
     let dir = isolated_cwd("typed_fix_edits");
     let typo = dir.join("typo.jet");
-    fs::write(&typo, "fn run() {\n    pirnt(\"hi\");\n}\n").unwrap();
+    fs::write(&typo, "fn run() {\n    pirnt(\"hi\")\n}\n").unwrap();
     let formatting = dir.join("formatting.jet");
     fs::write(
         &formatting,
@@ -1738,7 +1665,7 @@ fn fix_safety_tiers_are_reported_and_applied() {
     )
     .unwrap();
     let immutable = dir.join("immutable.jet");
-    let immutable_source = "fn run() {\n    x :: 1\n    x = 2;\n    print(x);\n}\n";
+    let immutable_source = "fn run() {\n    x :: 1\n    x = 2\n    print(x)\n}\n";
     fs::write(&immutable, immutable_source).unwrap();
 
     let report_grades = |file: &Path| {
@@ -1761,7 +1688,7 @@ fn fix_safety_tiers_are_reported_and_applied() {
         .unwrap()
         .to_string();
         let edits = match jet_foundation::JSON::json_get(&report, "fix_edits").unwrap() {
-            jet_foundation::JSON::JSONValue::Array(edits) => edits,
+            DataTree::Array(edits) => edits,
             _ => panic!("fix_edits is not an array"),
         };
         assert_eq!(edits.len(), 1);
@@ -1796,7 +1723,7 @@ fn fix_safety_tiers_are_reported_and_applied() {
     );
     assert_eq!(
         fs::read_to_string(&typo).unwrap(),
-        "fn run() {\n    print(\"hi\");\n}\n"
+        "fn run() {\n    print(\"hi\")\n}\n"
     );
 
     let output = Command::new(jet())
@@ -2634,7 +2561,7 @@ fn eval_missing_jet_file_still_reports_not_found() {
 fn eval_file_forwards_print_output_alongside_the_value() {
     let dir = isolated_cwd("eval_print_output");
     let file = dir.join("printer.jet");
-    fs::write(&file, "fn run() {\n    print(\"hi\");\n}\n").unwrap();
+    fs::write(&file, "fn run() {\n    print(\"hi\")\n}\n").unwrap();
 
     let human = Command::new(jet())
         .args(["eval", &file.to_string_lossy()])
@@ -2672,5 +2599,15 @@ fn eval_file_forwards_print_output_alongside_the_value() {
         String::from_utf8_lossy(&json.stderr).contains("hi"),
         "--json should forward program output to stderr: {:?}",
         String::from_utf8_lossy(&json.stderr)
+    );
+}
+
+#[test]
+fn parser_registry_has_no_dispatch_drift() {
+    let violations = jet::CLI::parser_inventory_violations();
+    assert!(
+        violations.is_empty(),
+        "CLI parser registry drift: {:?}",
+        violations
     );
 }

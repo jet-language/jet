@@ -38,6 +38,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::JSON;
 use crate::SHA256;
+use jet_foundation::DataTree::DataTree;
 
 const ARCHITECTURE: &str = "amd64";
 const OS: &str = "linux";
@@ -716,7 +717,7 @@ fn load_registry_manifest(root: &Path) -> io::Result<RegistryManifest> {
     let _ = load_base(root)?;
     let index = JSON::parse(&read_text(root.join("index.json"))?).map_err(io::Error::other)?;
     let index = object(&index, "OCI index")?;
-    let descriptors = array(index.get("manifests"), "OCI index manifests")?;
+    let descriptors = array(field(index, "manifests"), "OCI index manifests")?;
     let descriptor = object(
         descriptors
             .first()
@@ -738,8 +739,7 @@ fn load_registry_manifest(root: &Path) -> io::Result<RegistryManifest> {
             .map_err(io::Error::other)?;
     let manifest = object(&manifest, "OCI manifest")?;
     let config = object(
-        manifest
-            .get("config")
+        field(manifest, "config")
             .ok_or_else(|| invalid("OCI manifest has no config"))?,
         "OCI config descriptor",
     )?;
@@ -753,7 +753,7 @@ fn load_registry_manifest(root: &Path) -> io::Result<RegistryManifest> {
         digest: config_digest,
         data: config_data,
     }];
-    for value in array(manifest.get("layers"), "OCI manifest layers")? {
+    for value in array(field(manifest, "layers"), "OCI manifest layers")? {
         let descriptor = object(value, "OCI layer descriptor")?;
         let digest = string_field(descriptor, "digest")?.to_string();
         let size = number_field(descriptor, "size")?;
@@ -1258,7 +1258,7 @@ fn load_base(root: &Path) -> io::Result<BaseLayout> {
     }
     let index = JSON::parse(&read_text(root.join("index.json"))?).map_err(io::Error::other)?;
     let index = object(&index, "OCI index")?;
-    let manifests = array(index.get("manifests"), "OCI index manifests")?;
+    let manifests = array(field(index, "manifests"), "OCI index manifests")?;
     let descriptor = object(
         manifests
             .first()
@@ -1283,7 +1283,7 @@ fn load_base(root: &Path) -> io::Result<BaseLayout> {
     )
     .map_err(io::Error::other)?;
     let manifest = object(&manifest, "OCI manifest")?;
-    let layer_values = array(manifest.get("layers"), "OCI manifest layers")?;
+    let layer_values = array(field(manifest, "layers"), "OCI manifest layers")?;
     let mut layers = Vec::with_capacity(layer_values.len());
     for value in layer_values {
         let descriptor = object(value, "OCI layer descriptor")?;
@@ -1300,12 +1300,9 @@ fn load_base(root: &Path) -> io::Result<BaseLayout> {
             size,
         });
     }
-    let config = object(
-        manifest
-            .get("config")
-            .ok_or_else(|| invalid("OCI manifest has no config descriptor"))?,
-        "OCI config descriptor",
-    )?;
+    let config_value = field(manifest, "config")
+        .ok_or_else(|| invalid("OCI manifest has no config descriptor"))?;
+    let config = object(config_value, "OCI config descriptor")?;
     if string_field(config, "mediaType")? != MEDIA_TYPE_CONFIG {
         return Err(invalid("OCI config has an unsupported media type"));
     }
@@ -1329,16 +1326,13 @@ fn load_base(root: &Path) -> io::Result<BaseLayout> {
         ("linux", "arm64") => "linux.arm64",
         _ => return Err(invalid("OCI base platform is unsupported")),
     };
-    let rootfs = object(
-        config
-            .get("rootfs")
-            .ok_or_else(|| invalid("OCI config has no rootfs"))?,
-        "OCI config rootfs",
-    )?;
-    let mut diff_ids = array(rootfs.get("diff_ids"), "OCI config diff_ids")?
+    let rootfs_value =
+        field(config, "rootfs").ok_or_else(|| invalid("OCI config has no rootfs"))?;
+    let rootfs = object(rootfs_value, "OCI config rootfs")?;
+    let mut diff_ids = array(field(rootfs, "diff_ids"), "OCI config diff_ids")?
         .iter()
         .map(|value| match value {
-            JSON::JSONValue::String(digest) => {
+            DataTree::Text(digest) => {
                 digest_hex(digest)?;
                 Ok(digest.clone())
             }
@@ -1434,45 +1428,45 @@ fn read_blob(root: &Path, digest: &str) -> io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn object<'a>(
-    value: &'a JSON::JSONValue,
-    label: &str,
-) -> io::Result<&'a std::collections::BTreeMap<String, JSON::JSONValue>> {
+fn object<'a>(value: &'a DataTree, label: &str) -> io::Result<&'a [(String, DataTree)]> {
     match value {
-        JSON::JSONValue::Object(object) => Ok(object),
+        DataTree::Object(object) => Ok(object),
         _ => Err(invalid(&format!("{label} is not an object"))),
     }
 }
 
-fn array<'a>(
-    value: Option<&'a JSON::JSONValue>,
-    label: &str,
-) -> io::Result<&'a Vec<JSON::JSONValue>> {
+fn field<'a>(
+    object: &'a [(String, DataTree)],
+    key: &str,
+) -> Option<&'a DataTree> {
+    object
+        .iter()
+        .find_map(|(name, value)| (name == key).then_some(value))
+}
+
+fn array<'a>(value: Option<&'a DataTree>, label: &str) -> io::Result<&'a [DataTree]> {
     match value {
-        Some(JSON::JSONValue::Array(values)) => Ok(values),
+        Some(DataTree::Array(values)) => Ok(values),
         _ => Err(invalid(&format!("{label} is not an array"))),
     }
 }
 
 fn string_field<'a>(
-    object: &'a std::collections::BTreeMap<String, JSON::JSONValue>,
-    field: &str,
+    object: &'a [(String, DataTree)],
+    field_name: &str,
 ) -> io::Result<&'a str> {
-    match object.get(field) {
-        Some(JSON::JSONValue::String(value)) if !value.is_empty() => Ok(value),
+    match field(object, field_name) {
+        Some(DataTree::Text(value)) if !value.is_empty() => Ok(value),
         _ => Err(invalid(&format!(
-            "OCI object field `{field}` is not a string"
+            "OCI object field `{field_name}` is not a string"
         ))),
     }
 }
 
-fn number_field(
-    object: &std::collections::BTreeMap<String, JSON::JSONValue>,
-    field: &str,
-) -> io::Result<u64> {
-    match object.get(field) {
-        Some(JSON::JSONValue::Number(value)) if *value >= 0 => Ok(*value as u64),
-        Some(JSON::JSONValue::Flt(value))
+fn number_field(object: &[(String, DataTree)], field_name: &str) -> io::Result<u64> {
+    match field(object, field_name) {
+        Some(DataTree::Int(value)) if *value >= 0 => Ok(*value as u64),
+        Some(DataTree::Float(value))
             if value.is_finite()
                 && *value >= 0.0
                 && *value <= u64::MAX as f64
@@ -1481,7 +1475,7 @@ fn number_field(
             Ok(*value as u64)
         }
         _ => Err(invalid(&format!(
-            "OCI object field `{field}` is not a non-negative integer"
+            "OCI object field `{field_name}` is not a non-negative integer"
         ))),
     }
 }

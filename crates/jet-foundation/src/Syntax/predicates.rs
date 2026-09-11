@@ -67,91 +67,7 @@ pub const UNIT_SUFFIX_IMAGINARY: &str = "i";
 /// `core_module_items` in Sema/CheckerCoreLib.rs has per-module item data and
 /// cannot collapse here, but a drift-guard test (tests/corelib.rs) asserts its
 /// key set equals this slice.
-pub const KNOWN_CORE_MODULES: &[&str] = &[
-    "core",
-    "core.prelude",
-    // D-CORE-TREE1=A: one canonical nested Core tree. Keep this list in
-    // lexical/domain order; deleted free namespaces do not get aliases here.
-    "core.files",
-    "core.term",
-    "core.args",
-    "core.log",
-    "core.process",
-    "core.sys",
-    "core.math",
-    "core.math.random",
-    "core.time",
-    "core.time.expiring",
-    "core.tasks",
-    "core.testing",
-    "core.mem",
-    "core.mem.scope",
-    "core.mod",
-    "core.reflect",
-    "core.compiler",
-    "core.compiler.lang",
-    "core.encoding",
-    "core.encoding.json",
-    "core.encoding.jsonl",
-    "core.encoding.csv",
-    "core.encoding.toml",
-    "core.encoding.yaml",
-    "core.encoding.xml",
-    "core.encoding.cbor",
-    // D-UUIDENC1=A (ratified 2026-06-26): hex and base64 codecs (pure, no deps).
-    "core.encoding.hex",
-    "core.encoding.base64",
-    "core.encoding.base32",
-    "core.text",
-    "core.text.fmt",
-    "core.regex",
-    "core.net",
-    "core.net.tls",
-    "core.net.ws",
-    "core.net.url",
-    "core.net.mime",
-    "core.http",
-    "core.http.client",
-    "core.http.server",
-    "core.crypto",
-    "core.crypto.random",
-    "core.crypto.uuid",
-    "core.crypto.vault",
-    "core.crypto.expert",
-    "core.email",
-    "core.data",
-    "core.data.plot",
-    "core.data.sketch.hll",
-    "core.data.sketch.tdigest",
-    "core.data.sketch.reservoir",
-    "core.data.sketch.cms",
-    "core.compute",
-    "core.compute.solve",
-    "core.db",
-    "core.auth",
-    "core.sync",
-    "core.event",
-    "core.reactive",
-    "core.reactive.loadable",
-    "core.service",
-    "core.watcher",
-    "core.game",
-    "core.game.raylib",
-    "core.ui",
-    "core.web",
-    "core.web.browser",
-    "core.web.storage",
-    "core.web.storage.local",
-    "core.web.storage.session",
-    "core.web.devserver",
-    "core.archive",
-    "core.archive.gzip",
-    "core.archive.zstd",
-    "core.plugin",
-    "core.units",
-    "core.perf",
-    "app",
-];
+pub use crate::CoreModuleExports::CORE_MODULE_NAMES as KNOWN_CORE_MODULES;
 
 pub fn is_known_core_module(name: &str) -> bool {
     if KNOWN_CORE_MODULES.contains(&name) {
@@ -171,6 +87,7 @@ mod tests {
             .all(|name| !name.starts_with("jet.")));
         for ring in [
             "log", "crypto", "http", "regex", "reactive", "archive", "game", "db", "plugin", "time",
+            "web.router", "web.query", "web.forms", "web.table", "web.virtual", "web.store",
         ] {
             assert!(is_known_core_module(&format!("core.{ring}")));
             assert!(!is_known_core_module(&format!("jet.{ring}")));
@@ -314,6 +231,9 @@ pub const POLICY_FIELD_EFFECTS: &str = "effects";
 pub const POLICY_FIELD_UNSAFE: &str = "unsafe";
 pub const POLICY_FIELD_EXPERT: &str = "expert";
 pub const POLICY_FIELD_DEPS: &str = "deps";
+/// D-GRADE-POLICY1=A: the package claims floor (`.Unchecked` through
+/// `.Proved`) is a package-only policy field.
+pub const POLICY_FIELD_CLAIMS: &str = "claims";
 /// D-JPK-POLICYSURFACE1=D: package license allow-list policy.
 pub const POLICY_FIELD_LICENSES: &str = "licenses";
 /// D-JPK-POLICYSURFACE1=D: package-pattern to source-authority mapping.
@@ -333,9 +253,11 @@ pub const AUTHORITY_FIELD_HOLDS: &str = "holds"; // D-AUTHORITY-MANIFEST1
 pub const AUTHORITY_HOLDS_FIELD_ALLOW: &str = "allow"; // D-AUTHORITY-MANIFEST1
 pub const AUTHORITY_HOLDS_FIELD_DENY: &str = "deny"; // D-AUTHORITY-MANIFEST1
 pub const AUTHORITY_FIELD_GRANTS: &str = "grants"; // D-AUTHORITY-MANIFEST1
+/// D-PLUGIN-AUTHORITY1: a guest package declares the capabilities it may
+/// request; hosts provide the tightened authority separately.
+pub const AUTHORITY_FIELD_NEEDS: &str = "needs";
 pub const AUTHORITY_FIELD_TRUST: &str = "trust"; // D-BOUND-PROV1
-/// D-JPK-PROVIDERAUTH1=A: reviewed registry and fetch authority.
-pub const AUTHORITY_FIELD_PROVIDERS: &str = "providers";
+pub const AUTHORITY_FIELD_PROVIDERS: &str = "providers"; // D-AUTHORITY-MANIFEST1
 pub const PROVIDER_FIELD_REGISTRY: &str = "registry";
 pub const PROVIDER_FIELD_ALLOW: &str = "allow";
 pub const PROVIDER_FIELD_DENY: &str = "deny";
@@ -376,14 +298,11 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
     prev[b.len()]
 }
 use super::core_surface::{
-    CLOCK_TYPE, KW_CONST, KW_COPY, KW_MOVE, KW_MUTATE, KW_YIELD, LIT_NULL, RETIRED_TYPE_ERROR,
-    TYPE_DATETIME, TYPE_ERR, TYPE_FRACTION, TYPE_INSTANT, TYPE_NEVER, TYPE_PATH, TYPE_REGEX,
-    TYPE_URL,
+    CLOCK_TYPE, KW_CONST, KW_COPY, KW_MOVE, KW_MUTATE, LIT_NULL, RETIRED_TYPE_ERROR, TYPE_DATETIME,
+    TYPE_ERR, TYPE_FRACTION, TYPE_INSTANT, TYPE_NEVER, TYPE_PATH, TYPE_REGEX, TYPE_URL,
 };
 use super::effects_surface::KW_STATE_DECL;
-use super::math_layout::{
-    FOREIGN_MATCH, KW_COMPTIME, KW_SWITCH, TYPE_BITS, TYPE_BYTES, TYPE_DATA, TYPE_JSON, TYPE_RESULT,
-};
+use super::math_layout::{FOREIGN_MATCH, TYPE_BITS, TYPE_BYTES, TYPE_DATA, TYPE_JSON, TYPE_RESULT};
 use super::package_files::{JET_KEYWORD_LIST, JET_TYPE_LIST};
 use super::{canonical_name_case, NameCase};
 
@@ -400,8 +319,87 @@ pub fn generated_name(name: &str) -> String {
     }
 }
 
+/// Encode one path identity as a readable, injective Rust identifier suffix.
+///
+/// Alphanumeric bytes stay literal. `_` starts every escape and therefore is
+/// escaped itself; the common path punctuation has a short mnemonic escape and
+/// all other bytes use a fixed-width hexadecimal escape. This keeps canonical
+/// identities such as `package::item` and absolute paths distinct without
+/// emitting `/`, `:`, `\`, or `-` into Rust source.
+fn encode_generated_path(name: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(name.len());
+    for byte in name.bytes() {
+        if byte.is_ascii_alphanumeric() {
+            encoded.push(byte as char);
+            continue;
+        }
+        encoded.push('_');
+        match byte {
+            b'_' => encoded.push('u'),
+            b'.' => encoded.push('d'),
+            b':' => encoded.push('c'),
+            b'/' => encoded.push('s'),
+            b'\\' => encoded.push('b'),
+            b'-' => encoded.push('h'),
+            byte => {
+                encoded.push('x');
+                encoded.push(HEX[(byte >> 4) as usize] as char);
+                encoded.push(HEX[(byte & 0x0f) as usize] as char);
+            }
+        }
+    }
+    encoded
+}
+
+/// Decode a generated path suffix for composition by `member_name`.
+///
+/// The decoder is intentionally crate-visible: generated names are an
+/// internal representation, while callers still operate on source identities.
+pub(crate) fn decode_generated_path_suffix(suffix: &str) -> Option<String> {
+    fn hex_value(byte: u8) -> Option<u8> {
+        match byte {
+            b'0'..=b'9' => Some(byte - b'0'),
+            b'a'..=b'f' => Some(byte - b'a' + 10),
+            b'A'..=b'F' => Some(byte - b'A' + 10),
+            _ => None,
+        }
+    }
+
+    let bytes = suffix.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index].is_ascii_alphanumeric() {
+            decoded.push(bytes[index]);
+            index += 1;
+            continue;
+        }
+        if bytes[index] != b'_' || index + 1 >= bytes.len() {
+            return None;
+        }
+        match bytes[index + 1] {
+            b'u' => decoded.push(b'_'),
+            b'd' => decoded.push(b'.'),
+            b'c' => decoded.push(b':'),
+            b's' => decoded.push(b'/'),
+            b'b' => decoded.push(b'\\'),
+            b'h' => decoded.push(b'-'),
+            b'x' if index + 3 < bytes.len() => {
+                let high = hex_value(bytes[index + 2])?;
+                let low = hex_value(bytes[index + 3])?;
+                decoded.push(high * 16 + low);
+                index += 2;
+            }
+            _ => return None,
+        }
+        index += 2;
+    }
+    String::from_utf8(decoded).ok()
+}
+
 pub fn generated_path(name: &str) -> String {
-    generated_name(&name.replace('.', "__"))
+    format!("{GENERATED_NAME_PREFIX}{}", encode_generated_path(name))
 }
 
 pub fn generated_suffix(name: &str) -> &str {
@@ -461,15 +459,7 @@ pub fn is_reserved_generated_name(name: &str) -> bool {
     (JET_KEYWORD_LIST.contains(&name) && name != KW_STATE_DECL)
         || matches!(
             name,
-            KW_MUTATE
-                | KW_MOVE
-                | KW_COPY
-                | KW_CONST
-                | KW_COMPTIME
-                | KW_SWITCH
-                | KW_YIELD
-                | FOREIGN_MATCH
-                | LIT_NULL
+            KW_MUTATE | KW_MOVE | KW_COPY | KW_CONST | FOREIGN_MATCH | LIT_NULL
         )
         || JET_TYPE_LIST.contains(&name)
         || crate::Collections::is_reserved_type(name)
@@ -579,7 +569,7 @@ pub fn sanitize_generated_name(raw: &str, case: NameCase, fallback: &str) -> Str
 mod generated_name_tests {
     use super::{
         generated_name, generated_path, generated_suffix, is_reserved_generated_name,
-        sanitize_crate_name,
+        sanitize_crate_name, GENERATED_NAME_PREFIX,
     };
     use crate::Syntax::{classify_identifier, IdentifierClass};
 
@@ -587,10 +577,29 @@ mod generated_name_tests {
     fn generated_names_have_one_machine_prefix() {
         assert_eq!(generated_name("run"), "__jet_run");
         assert_eq!(generated_name("__jet_run"), "__jet_run");
-        assert_eq!(generated_path("grades.curve"), "__jet_grades__curve");
-        assert_eq!(generated_path("__jet_grades__curve"), "__jet_grades__curve");
-        assert_eq!(generated_path("__jet_grades.curve"), "__jet_grades__curve");
+        assert_eq!(generated_path("grades.curve"), "__jet_grades_dcurve");
+        assert_eq!(
+            generated_path("__jet_grades__curve"),
+            "__jet__u_ujet_ugrades_u_ucurve"
+        );
+        assert_eq!(
+            generated_path("__jet_grades.curve"),
+            "__jet__u_ujet_ugrades_dcurve"
+        );
         assert_eq!(generated_suffix("__jet_run"), "run");
+    }
+
+    #[test]
+    fn generated_paths_are_injective_across_identity_separators() {
+        let identities = ["a::b", "a/b", r"a\b", "a_b", "a.b", "a-b", "a:x"];
+        let symbols: Vec<String> = identities.iter().map(|name| generated_path(name)).collect();
+        for (index, symbol) in symbols.iter().enumerate() {
+            assert!(symbol.starts_with(GENERATED_NAME_PREFIX));
+            assert!(symbol[GENERATED_NAME_PREFIX.len()..]
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_'));
+            assert!(symbols[index + 1..].iter().all(|other| other != symbol));
+        }
     }
 
     #[test]
@@ -610,7 +619,7 @@ mod generated_name_tests {
             "Date",
             "LocalDate",
             "LocalTime",
-            "JSONError",
+            "EncodingError",
         ] {
             assert!(
                 is_reserved_generated_name(name),

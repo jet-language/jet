@@ -241,10 +241,8 @@ mod tests {
     fn docs_temp_writer_rejects_existing_symlink() {
         use std::os::unix::fs::symlink;
 
-        let root = std::env::temp_dir().join(format!(
-            "jet-repl-docs-temp-symlink-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet-repl-docs-temp-symlink-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let target = root.join("outside.txt");

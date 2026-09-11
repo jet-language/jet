@@ -131,6 +131,9 @@ impl<'a> Parser<'a> {
                     break;
                 }
                 self.expect(TokKind::Comma, "between captured names")?;
+                if matches!(self.peek().kind, TokKind::RParen) {
+                    break;
+                }
             }
         }
         self.expect(TokKind::RParen, "after the capture list")?;
@@ -172,6 +175,9 @@ impl<'a> Parser<'a> {
                     break;
                 }
                 self.expect(TokKind::Comma, "between lambda parameters")?;
+                if matches!(self.peek().kind, TokKind::RParen) {
+                    break;
+                }
             }
         }
         let close_paren = self.peek().span;
@@ -198,6 +204,24 @@ impl<'a> Parser<'a> {
             result_type,
             error_type,
             effects,
+            body,
+            span: Span::new(open.start, end),
+            meta: LambdaMeta::default(),
+        })
+    }
+
+    /// D-UI-CLOSURE1=A: parse the brace body attached directly to a call.
+    /// The call binder assigns the parameter label (`on_click`, `on_drop`,
+    /// or another checked callable slot) after resolving the callee.
+    pub(super) fn parse_trailing_lambda(&mut self) -> Result<Lambda, Diagnostic> {
+        let open = self.peek().span;
+        let (body, end) = self.lambda_arrow_body(open.end)?;
+        Ok(Lambda {
+            take_names: Vec::new(),
+            params: Vec::new(),
+            result_type: None,
+            error_type: None,
+            effects: None,
             body,
             span: Span::new(open.start, end),
             meta: LambdaMeta::default(),

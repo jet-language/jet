@@ -1,617 +1,195 @@
-//! Interpreter deopt host shim + whole-program fallback (D-ONECORE1=A / #778).
+//! MIR frame snapshots for a Cranelift-to-interpreter handoff.
 //!
-//! Deopt tier calls the SAME TIR evaluator as #777 (`TirBridge` /
-//! `install_comptime_bridge` / `run_named_func`).
+//! The interpreter owns execution semantics. This module only carries the
+//! versioned foundation MIR identities and the packed ABI frame values across
+//! a host boundary.
 
-use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
-use std::time::Instant;
-
-use cranelift_codegen::ir::condcodes::IntCC;
-use cranelift_codegen::ir::{types, InstBuilder};
-use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
-use cranelift_module::{FuncId, Module};
-use jet_codegen::Codegen::TIR::{self, JitProgram, TFunc};
-use jet_codegen::Comptime::{self, CtReport, CtValue, DevSink};
-use jet_foundation::Diagnostics::Diagnostic;
-use jet_foundation::JitBackend::RunOutcome;
-use jet_foundation::AST::{ProgramBundle, Type};
-
-use super::runtime_host::{
-    alloc_jit_error, alloc_jit_result, jit_error, jit_result, HostFns, JitRuntime,
+use jet_foundation::MIR::{
+    MirArtifactId, MirBlockId, MirExecutionIdentity, MirFrameIdentity, MirFunctionId, MirPlaceId,
+    MirProgram, MirValueId,
 };
-use super::tiers::{deopt_marshallable, record_trace, Tier, TierPlan, TierRow};
-use super::types_meta::{func_has_receiver, func_signature, JitMeta};
-use super::Concurrency;
+use std::cell::RefCell;
 
-thread_local! {
-    /// Borrowed for the duration of one resident invoke / compile.
-    static DEOPT_PROGRAM: RefCell<Option<*const JitProgram>> = const { RefCell::new(None) };
-    static DEOPT_NAMES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
-    /// D-MEMO1=A: one Prelude memo carrier survives every deopt call in the
-    /// current resident run. The evaluator owns cache semantics.
-    static DEOPT_MEMOS: RefCell<Option<TIR::MemoState>> = const { RefCell::new(None) };
-    static NATIVE_FNS: RefCell<HashMap<String, NativeFn>> = RefCell::new(HashMap::new());
-    static NATIVE_HOOK_INSTALLED: Cell<bool> = const { Cell::new(false) };
+#[derive(Debug, Clone)]
+pub struct MirFrameValue {
+    pub value: MirValueId,
+    pub bits: u64,
 }
 
-#[derive(Clone)]
-struct NativeFn {
-    code: *const u8,
-    params: Vec<Type>,
-    ret: Option<Type>,
+#[derive(Debug, Clone)]
+pub struct MirFramePlace {
+    pub place: MirPlaceId,
+    pub bits: u64,
 }
 
-// SAFETY: pointers live for the resident module lifetime; the scheduler drains
-// workers before that module is torn down.
-unsafe impl Send for NativeFn {}
-unsafe impl Sync for NativeFn {}
+#[derive(Debug, Clone)]
+pub struct MirFrameSnapshot {
+    pub identity: MirFrameIdentity,
+    pub values: Vec<MirFrameValue>,
+    pub places: Vec<MirFramePlace>,
+}
 
-/// Deopt state belongs to one resident run, but scheduler workers are not the
-/// thread that installed the run's TLS. Carry the state into every JIT task so
-/// a worker's `jet_deopt_call` sees the same checked program and memo carrier.
-#[derive(Clone, Default)]
+#[derive(Debug, Clone)]
+pub struct MirFrameSchema {
+    pub execution: MirExecutionIdentity,
+    pub function: MirFunctionId,
+    pub values: Vec<MirValueId>,
+    pub places: Vec<MirPlaceId>,
+}
+
+#[derive(Debug, Clone, Default)]
 pub(crate) struct DeoptState {
-    /// Address is only used while the owning resident invoke is alive.
-    program: Option<usize>,
-    names: Vec<String>,
-    memos: Option<TIR::MemoState>,
-    native_fns: HashMap<String, NativeFn>,
-    native_hook_installed: bool,
+    schemas: Vec<MirFrameSchema>,
+    last_snapshot: Option<MirFrameSnapshot>,
+    sequence: u64,
 }
 
 pub(crate) struct DeoptStateGuard {
-    previous: DeoptState,
+    previous: Option<DeoptState>,
+}
+
+thread_local! {
+    static DEOPT_STATE: RefCell<DeoptState> = const { RefCell::new(DeoptState {
+        schemas: Vec::new(),
+        last_snapshot: None,
+        sequence: 0,
+    }) };
+}
+
+pub(crate) fn install_frame_schemas(
+    program: &MirProgram,
+    artifact: Option<MirArtifactId>,
+) -> Result<(), String> {
+    let execution = program
+        .execution_identity(artifact)
+        .map_err(|error| format!("MIR deopt execution identity unavailable: {error}"))?;
+    DEOPT_STATE.with(|slot| {
+        let mut state = slot.borrow_mut();
+        state.schemas.clear();
+        state.last_snapshot = None;
+        state.sequence = 0;
+        state.schemas.extend(program.functions.iter().map(|function| MirFrameSchema {
+            execution: execution.clone(),
+            function: function.id,
+            values: function.values.iter().map(|(id, _, _, _)| *id).collect(),
+            places: function.places.iter().map(|place| place.id).collect(),
+        }));
+    });
+    Ok(())
+}
+
+pub(crate) fn capture_deopt_state() -> DeoptState {
+    DEOPT_STATE.with(|slot| slot.borrow().clone())
+}
+
+pub(crate) fn install_deopt_state(state: DeoptState) -> DeoptStateGuard {
+    let previous = DEOPT_STATE.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), state));
+    DeoptStateGuard { previous: Some(previous) }
 }
 
 impl Drop for DeoptStateGuard {
     fn drop(&mut self) {
-        apply_deopt_state(std::mem::take(&mut self.previous));
+        if let Some(previous) = self.previous.take() {
+            DEOPT_STATE.with(|slot| *slot.borrow_mut() = previous);
+        }
     }
 }
 
-fn apply_deopt_state(state: DeoptState) {
-    let DeoptState {
-        program,
-        names,
-        memos,
-        native_fns,
-        native_hook_installed,
-    } = state;
-    DEOPT_PROGRAM
-        .with(|slot| *slot.borrow_mut() = program.map(|address| address as *const JitProgram));
-    DEOPT_NAMES.with(|slot| *slot.borrow_mut() = names);
-    DEOPT_MEMOS.with(|slot| *slot.borrow_mut() = memos);
-    NATIVE_FNS.with(|slot| *slot.borrow_mut() = native_fns);
-    NATIVE_HOOK_INSTALLED.with(|slot| slot.set(native_hook_installed));
-    TIR::set_native_call_hook(if native_hook_installed {
-        Some(native_call_hook)
-    } else {
-        None
+pub fn frame_schema(function: MirFunctionId) -> Option<MirFrameSchema> {
+    DEOPT_STATE.with(|slot| {
+        slot.borrow()
+            .schemas
+            .iter()
+            .find(|schema| schema.function == function)
+            .cloned()
+    })
+}
+
+pub fn last_snapshot() -> Option<MirFrameSnapshot> {
+    DEOPT_STATE.with(|slot| slot.borrow().last_snapshot.clone())
+}
+
+pub(crate) fn record_frame_snapshot(
+    program: &MirProgram,
+    artifact: MirArtifactId,
+    function: MirFunctionId,
+    block: MirBlockId,
+    values: Vec<MirFrameValue>,
+    places: Vec<MirFramePlace>,
+) -> Result<(), String> {
+    DEOPT_STATE.with(|slot| {
+        let mut state = slot.borrow_mut();
+        let sequence = state.sequence;
+        state.sequence = state.sequence.wrapping_add(1);
+        let identity = program
+            .frame_identity(Some(artifact), function, Some(block), sequence)
+            .map_err(|error| format!("MIR deopt frame identity unavailable: {error}"))?;
+        state.last_snapshot = Some(MirFrameSnapshot { identity, values, places });
+        Ok(())
+    })
+}
+
+fn record_abi_frame(function: i64, argc: i64, args: &[i64; 8]) {
+    let Ok(function) = u64::try_from(function) else {
+        return;
+    };
+    let Ok(argc) = usize::try_from(argc) else {
+        return;
+    };
+    if argc > args.len() {
+        return;
+    }
+    DEOPT_STATE.with(|slot| {
+        let mut state = slot.borrow_mut();
+        let Some((execution, schema_function, schema_values)) = state
+            .schemas
+            .iter()
+            .find(|schema| schema.function == MirFunctionId(function))
+            .map(|schema| {
+                (
+                    schema.execution.clone(),
+                    schema.function,
+                    schema.values.iter().copied().collect::<Vec<_>>(),
+                )
+            })
+        else {
+            return;
+        };
+        if argc > schema_values.len() {
+            return;
+        }
+        let sequence = state.sequence;
+        state.sequence = state.sequence.wrapping_add(1);
+        let identity = MirFrameIdentity {
+            schema_version: execution.schema_version,
+            execution,
+            function: schema_function,
+            block: None,
+            sequence,
+        };
+        let values = schema_values
+            .into_iter()
+            .zip(args.iter().copied())
+            .take(argc)
+            .map(|(value, bits)| MirFrameValue { value, bits: bits as u64 })
+            .collect();
+        state.last_snapshot = Some(MirFrameSnapshot {
+            identity,
+            values,
+            places: Vec::new(),
+        });
     });
-}
-
-pub(crate) fn capture_deopt_state() -> DeoptState {
-    DeoptState {
-        program: DEOPT_PROGRAM.with(|slot| slot.borrow().map(|program| program as usize)),
-        names: DEOPT_NAMES.with(|slot| slot.borrow().clone()),
-        memos: DEOPT_MEMOS.with(|slot| slot.borrow().clone()),
-        native_fns: NATIVE_FNS.with(|slot| slot.borrow().clone()),
-        native_hook_installed: NATIVE_HOOK_INSTALLED.with(Cell::get),
-    }
-}
-
-/// Install a parent task's deopt state on a scheduler worker. The guard
-/// restores the worker's prior state because the worker is reused.
-pub(crate) fn install_deopt_state(state: DeoptState) -> DeoptStateGuard {
-    let previous = capture_deopt_state();
-    apply_deopt_state(state);
-    DeoptStateGuard { previous }
 }
 
 pub(crate) fn clear_deopt_state() {
-    DEOPT_PROGRAM.with(|s| *s.borrow_mut() = None);
-    DEOPT_NAMES.with(|s| s.borrow_mut().clear());
-    DEOPT_MEMOS.with(|s| *s.borrow_mut() = None);
-    NATIVE_FNS.with(|s| s.borrow_mut().clear());
-    NATIVE_HOOK_INSTALLED.with(|s| s.set(false));
-    TIR::set_native_call_hook(None);
+    DEOPT_STATE.with(|slot| *slot.borrow_mut() = DeoptState::default());
 }
 
-pub(crate) fn install_deopt_program(program: &JitProgram, deopt_names: &[String]) {
-    DEOPT_PROGRAM.with(|s| *s.borrow_mut() = Some(program as *const JitProgram));
-    DEOPT_NAMES.with(|s| *s.borrow_mut() = deopt_names.to_vec());
-    DEOPT_MEMOS.with(|s| *s.borrow_mut() = Some(TIR::new_memo_state()));
-}
-
-/// D-MEMO1=A / I9: `f.cache()` is a projection of the ONE Prelude memo store,
-/// never a second cache. `tiers.rs` deopts every memoized function, so the
-/// evaluator fills the `MemoState` installed above and the resident tier has to
-/// read that same `Arc` back. `bound` is the function's ratified bound, used
-/// only when the store has no entry yet — exactly what the evaluator's own
-/// `memo_stats` does with `JetMemo::with_bound`, so an untouched function
-/// reports zeroed counters against its declared bound on both tiers.
-pub(crate) fn deopt_memo_stats(
-    name: &str,
-    bound: Option<usize>,
-) -> jet_codegen::memo::JetMemoStats {
-    let memos = DEOPT_MEMOS
-        .with(|state| state.borrow().clone())
-        .unwrap_or_else(TIR::new_memo_state);
-    let mut memos = memos
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    memos
-        .entry(name.to_string())
-        .or_insert_with(|| jet_codegen::memo::JetMemo::with_bound(bound))
-        .stats()
-}
-
-pub(crate) fn register_native_fn(name: String, code: *const u8, tir: &TFunc) {
-    NATIVE_FNS.with(|s| {
-        s.borrow_mut().insert(
-            name,
-            NativeFn {
-                code,
-                params: tir.params.iter().map(|(_, ty, _)| ty.clone()).collect(),
-                ret: tir.ret.clone(),
-            },
-        );
-    });
-}
-
-pub(crate) fn install_native_hook() {
-    NATIVE_HOOK_INSTALLED.with(|s| s.set(true));
-    TIR::set_native_call_hook(Some(native_call_hook));
-}
-
-fn native_call_hook(name: &str, args: &[CtValue]) -> Option<Result<CtValue, Diagnostic>> {
-    let native = NATIVE_FNS.with(|s| {
-        s.borrow()
-            .get(name)
-            .map(|n| (n.code, n.params.clone(), n.ret.clone()))
-    })?;
-    let (code, params, ret) = native;
-    if args.len() != params.len() {
-        return Some(Err(Diagnostic::error(
-            "E0956",
-            format!("native call `{name}` arity mismatch"),
-            "cross-tier call argument count does not match the Cranelift signature".to_string(),
-            "report this as a compiler bug".to_string(),
-            None,
-        )));
-    }
-    if args.len() > 8 {
-        return Some(Err(Diagnostic::error(
-            "E0956",
-            format!("native call `{name}` has too many arguments"),
-            "cross-tier host shim supports at most 8 parameters".to_string(),
-            "report this as a compiler bug".to_string(),
-            None,
-        )));
-    }
-    let mut bits = [0i64; 8];
-    let converted: Option<Result<(), Diagnostic>> = Concurrency::with_runtime_mut(|rt| {
-        for (i, (arg, ty)) in args.iter().zip(params.iter()).enumerate() {
-            match ct_to_bits(rt, ty, arg) {
-                Ok(b) => bits[i] = b,
-                Err(d) => return Some(Err(d)),
-            }
-        }
-        Some(Ok(()))
-    });
-    match converted {
-        Some(Err(d)) => return Some(Err(d)),
-        None => {
-            return Some(Err(Diagnostic::error(
-                "E0956",
-                "native call with no active JIT runtime".to_string(),
-                "cross-tier native dispatch needs the resident runtime".to_string(),
-                "report this as a compiler bug".to_string(),
-                None,
-            )));
-        }
-        Some(Ok(())) => {}
-    }
-    let result_bits = unsafe {
-        match params.len() {
-            0 => {
-                let f: extern "C" fn() -> i64 = std::mem::transmute(code);
-                f()
-            }
-            1 => {
-                let f: extern "C" fn(i64) -> i64 = std::mem::transmute(code);
-                f(bits[0])
-            }
-            2 => {
-                let f: extern "C" fn(i64, i64) -> i64 = std::mem::transmute(code);
-                f(bits[0], bits[1])
-            }
-            3 => {
-                let f: extern "C" fn(i64, i64, i64) -> i64 = std::mem::transmute(code);
-                f(bits[0], bits[1], bits[2])
-            }
-            4 => {
-                let f: extern "C" fn(i64, i64, i64, i64) -> i64 = std::mem::transmute(code);
-                f(bits[0], bits[1], bits[2], bits[3])
-            }
-            n => {
-                let f: extern "C" fn(i64, i64, i64, i64, i64, i64, i64, i64) -> i64 =
-                    std::mem::transmute(code);
-                let mut wide = [0i64; 8];
-                wide[..n].copy_from_slice(&bits[..n]);
-                f(
-                    wide[0], wide[1], wide[2], wide[3], wide[4], wide[5], wide[6], wide[7],
-                )
-            }
-        }
-    };
-    Some(
-        Concurrency::with_runtime_mut(|rt| match &ret {
-            None => Some(Ok(CtValue::Unit)),
-            Some(Type::Named(n)) if n == "Unit" => Some(Ok(CtValue::Unit)),
-            Some(ty) => Some(bits_to_ct(rt, ty, result_bits)),
-        })
-        .unwrap_or_else(|| {
-            Err(Diagnostic::error(
-                "E0956",
-                "native call with no active JIT runtime".to_string(),
-                "cross-tier native dispatch needs the resident runtime".to_string(),
-                "report this as a compiler bug".to_string(),
-                None,
-            ))
-        }),
-    )
-}
-
-/// Rewrite shared-evaluator diagnostics that need runtime-tier voice into the
-/// default `jet run` / whole-program deopt path. E0956 already has one shared
-/// what/why/fix constructor, so it passes through unchanged.
-///
-/// D-META-EFFECT1 c3: E0951 retired into E3401 (the comptime purity gate and
-/// the run-time `=[]=>` check share one code now). This is still safe to
-/// rewrite unconditionally: a genuine run-time E3401 (a `=[]=>`-declared
-/// function's own body, or the whole-program effect fixpoint) is a sema-time
-/// diagnostic that fails the build before the deopt path ever runs, so any
-/// E3401 seen here can only be the shared evaluator's own purity gate firing
-/// during interpretation.
-fn rewrite_runtime_tier_diag(d: Diagnostic) -> Diagnostic {
-    let construct = match d.code.as_str() {
-        "E0956" => return d,
-        "E3401" => d
-            .what
-            .strip_suffix(" is not allowed in comptime code")
-            .unwrap_or(&d.what)
-            .to_string(),
-        "E3412" => d
-            .what
-            .strip_suffix(" is not available at comptime")
-            .unwrap_or(&d.what)
-            .to_string(),
-        "E3410" => d
-            .what
-            .split(" is a Tier-2")
-            .next()
-            .unwrap_or(&d.what)
-            .to_string(),
-        _ => return d,
-    };
-    Diagnostic::error(
-        d.code.clone(),
-        format!("{construct} isn't supported in Jet's quick-run mode yet"),
-        "Jet's quick-run mode doesn't cover this yet — that's a gap in Jet, not a mistake in your program"
-            .to_string(),
-        "run with `jet run --release <file>` (full build), which supports everything".to_string(),
-        d.span,
-    )
-}
-
-#[cfg(test)]
-mod rewrite_tests {
-    use super::*;
-
-    fn assert_quick_run_voice(d: &Diagnostic) {
-        assert!(
-            d.what.contains("quick-run"),
-            "what must name quick-run, got: {:?}",
-            d.what
-        );
-        assert!(
-            d.why.contains("gap in Jet") && d.why.contains("not a mistake"),
-            "why must blame Jet's gap, got: {:?}",
-            d.why
-        );
-        assert!(
-            d.fix.contains("jet run --release"),
-            "fix must point at jet run --release, got: {:?}",
-            d.fix
-        );
-        for (label, text) in [
-            ("what", d.what.as_str()),
-            ("why", d.why.as_str()),
-            ("fix", d.fix.as_str()),
-        ] {
-            let lower = text.to_ascii_lowercase();
-            assert!(
-                !lower.contains("comptime") && !lower.contains("compile time"),
-                "runtime-tier {label} must not mention comptime/compile time, got: {text:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn rewrite_e3412_uses_quick_run_voice() {
-        let d = Diagnostic::error(
-            "E3412",
-            "core.net.listen() is not available at comptime".to_string(),
-            "only fetch is Tier-1".to_string(),
-            "use fetch".to_string(),
-            None,
-        );
-        let out = rewrite_runtime_tier_diag(d);
-        assert_eq!(out.code, "E3412");
-        assert!(
-            out.what.contains("core.net.listen()"),
-            "construct must survive rewrite, got: {:?}",
-            out.what
-        );
-        assert_quick_run_voice(&out);
-    }
-
-    #[test]
-    fn rewrite_e3401_comptime_leak_uses_quick_run_voice() {
-        let d = Diagnostic::error(
-            "E3401",
-            "core.files.read is not allowed in comptime code".to_string(),
-            "impure".to_string(),
-            "gate it".to_string(),
-            None,
-        );
-        let out = rewrite_runtime_tier_diag(d);
-        assert_eq!(out.code, "E3401");
-        assert!(
-            out.what.contains("core.files.read"),
-            "construct must survive rewrite, got: {:?}",
-            out.what
-        );
-        assert_quick_run_voice(&out);
-    }
-
-    #[test]
-    fn structured_e0953_survives_deopt_rewrite() {
-        let d = Diagnostic::error(
-            "E0953",
-            "comptime evaluation stopped".to_string(),
-            "the structured evaluator stop".to_string(),
-            "change the expression".to_string(),
-            None,
-        );
-        let out = rewrite_runtime_tier_diag(d);
-        assert_eq!(out.code, "E0953");
-        assert_eq!(out.what, "comptime evaluation stopped");
-        assert_eq!(out.why, "the structured evaluator stop");
-        assert_eq!(out.fix, "change the expression");
-        assert_ne!(out.code, "E3001");
-    }
-}
-
-/// Whole-program interpreter deopt — same evaluator as `--interpret` / comptime.
-/// The deopt owns its allocator marshalling boundary because it can run after
-/// the resident runtime has been rejected or torn down.
-pub(crate) fn run_whole_interp(bundle: &ProgramBundle, plan: &TierPlan) -> RunOutcome {
-    let _loaded_mod_scope = crate::Mod::LoadScope;
-    crate::with_program_allocator(bundle, || run_whole_interp_configured(bundle, plan))
-}
-
-fn run_whole_interp_configured(bundle: &ProgramBundle, plan: &TierPlan) -> RunOutcome {
-    TIR::install_comptime_bridge();
-    let started = Instant::now();
-    let mut sink = DevSink::new();
-    // Per-run buffer, cleared like the sink (see `resident_invoke`).
-    jet_foundation::Outcome::jet_journey_reset();
-    let mut outcome = crate::with_interpreter_ambient(|| {
-        match Comptime::TirBridge::run_bundle_at_stage(
-            bundle,
-            &mut sink,
-            jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
-            Comptime::PurityStage::RunTime,
-        ) {
-            Ok(CtValue::Failed(CtReport::Told(error))) => {
-                let rendered = match error.to_jet_err() {
-                    Some(error) => jet_foundation::Outcome::jet_error_report(&error).render(),
-                    None => jet_foundation::Outcome::jet_journey_report(&error.jet_show()),
-                };
-                sink.stderr.push_str(&rendered);
-                RunOutcome::Ran {
-                    stdout: sink.stdout,
-                    stderr: sink.stderr,
-                    exit_code: 1,
-                }
-            }
-            Ok(_) => RunOutcome::Ran {
-                stdout: sink.stdout,
-                stderr: sink.stderr,
-                exit_code: sink.exit_code.unwrap_or(0),
-            },
-            Err(d) if sink.exit_code.is_some() || d.code == "SOFT_EXIT" => RunOutcome::Ran {
-                stdout: sink.stdout,
-                stderr: sink.stderr,
-                exit_code: sink
-                    .exit_code
-                    .unwrap_or_else(|| d.what.parse().unwrap_or(0)),
-            },
-            Err(d) => RunOutcome::Problems(vec![rewrite_runtime_tier_diag(d)]),
-        }
-    });
-    if let RunOutcome::Ran { stderr, .. } = &mut outcome {
-        if let Some(report) = jet_codegen::scheduler::jet_observe_parked_tasks_report() {
-            stderr.push_str(&report.rendered);
-        }
-    }
-    let ms = started.elapsed().as_secs_f64() * 1000.0;
-    // Preserve the first lowering gap that caused the tier transition. A
-    // whole-program interpreter run is a consequence of that gap, not its
-    // diagnosis; replacing it here made corpus trace evidence unactionable.
-    let gap_reason = plan
-        .gap
-        .as_ref()
-        .map(|gap| gap.reason.as_str())
-        .filter(|reason| !reason.is_empty())
-        .unwrap_or("whole-program deopt");
-    let mut rows = plan.rows.clone();
-    for row in &mut rows {
-        row.tier = Tier::Interp;
-        if row.reason.is_empty() {
-            row.reason = gap_reason.into();
-        }
-        row.millis = ms;
-    }
-    if rows.is_empty() {
-        rows.push(TierRow {
-            function: plan
-                .gap
-                .as_ref()
-                .map(|g| g.function.clone())
-                .unwrap_or_else(|| "run".into()),
-            tier: Tier::Interp,
-            reason: plan
-                .gap
-                .as_ref()
-                .map(|g| g.reason.clone())
-                .filter(|reason| !reason.is_empty())
-                .unwrap_or_else(|| gap_reason.into()),
-            millis: ms,
-        });
-    }
-    record_trace(rows);
-    outcome
-}
-
-/// Emit a Cranelift trampoline that packs args and calls `jet_deopt_call`.
-pub(crate) fn lower_deopt_stub(
-    module: &mut dyn Module,
-    host: &HostFns,
-    meta: &JitMeta<'_>,
-    tir: &TFunc,
-    func_id: FuncId,
-    deopt_idx: i64,
-) -> Result<(), String> {
-    if !deopt_marshallable(tir) {
-        return Err(format!("{}: deopt ABI not marshallable", tir.name));
-    }
-    if func_has_receiver(tir) {
-        return Err(format!("{}: method deopt not supported", tir.name));
-    }
-    let mut ctx = module.make_context();
-    ctx.func.signature = func_signature(module, tir, meta)?;
-    let mut fbcx = FunctionBuilderContext::new();
-    {
-        let mut b = FunctionBuilder::new(&mut ctx.func, &mut fbcx);
-        let entry = b.create_block();
-        b.append_block_params_for_function_params(entry);
-        b.switch_to_block(entry);
-        b.seal_block(entry);
-        let params = b.block_params(entry).to_vec();
-        if params.len() > 8 {
-            return Err(format!(
-                "{}: deopt stub supports at most 8 params",
-                tir.name
-            ));
-        }
-        let mut args = Vec::with_capacity(10);
-        args.push(b.ins().iconst(types::I64, deopt_idx));
-        args.push(b.ins().iconst(types::I64, params.len() as i64));
-        for i in 0..8 {
-            if i < params.len() {
-                let p = params[i];
-                let wide = match b.func.dfg.value_type(p) {
-                    types::I64 => p,
-                    types::I8 | types::I32 => b.ins().uextend(types::I64, p),
-                    other => {
-                        return Err(format!("{}: unexpected param clif type {other}", tir.name))
-                    }
-                };
-                args.push(wide);
-            } else {
-                args.push(b.ins().iconst(types::I64, 0));
-            }
-        }
-        let host_ref = module.declare_func_in_func(host.deopt_call, b.func);
-        let call = b.ins().call(host_ref, &args);
-        // `jet_deopt_call` converts an interpreter unwind into the tier's
-        // status channel. A deopt stub is also a direct task entry, so it has
-        // no caller-side trap poll to observe that status before returning.
-        let trapped_ref = module.declare_func_in_func(host.is_trapped, b.func);
-        let trapped_call = b.ins().call(trapped_ref, &[]);
-        let trapped = b.inst_results(trapped_call)[0];
-        let pending_ref = module.declare_func_in_func(host.conc.pending_exit_status, b.func);
-        let pending_call = b.ins().call(pending_ref, &[]);
-        let pending = b.inst_results(pending_call)[0];
-        let status = b.ins().bor(trapped, pending);
-        let interrupted = b.ins().icmp_imm(IntCC::NotEqual, status, 0);
-        let interrupted_block = b.create_block();
-        let continue_block = b.create_block();
-        b.ins()
-            .brif(interrupted, interrupted_block, &[], continue_block, &[]);
-        b.switch_to_block(interrupted_block);
-        b.seal_block(interrupted_block);
-        if let Some(ret) = &tir.ret {
-            if let Some(ct) = meta.clif_ty(ret) {
-                let zero = match ct {
-                    types::I64 | types::I8 | types::I32 => b.ins().iconst(ct, 0),
-                    _ => return Err(format!("{}: unexpected return clif type {ct}", tir.name)),
-                };
-                b.ins().return_(&[zero]);
-            } else {
-                b.ins().return_(&[]);
-            }
-        } else {
-            b.ins().return_(&[]);
-        }
-        b.switch_to_block(continue_block);
-        b.seal_block(continue_block);
-        if let Some(ret) = &tir.ret {
-            if let Some(ct) = meta.clif_ty(ret) {
-                let raw = b.inst_results(call)[0];
-                let out = match ct {
-                    types::I64 => raw,
-                    types::I8 => b.ins().ireduce(types::I8, raw),
-                    types::I32 => b.ins().ireduce(types::I32, raw),
-                    _ => return Err(format!("{}: unexpected return clif type", tir.name)),
-                };
-                b.ins().return_(&[out]);
-            } else {
-                b.ins().return_(&[]);
-            }
-        } else {
-            b.ins().return_(&[]);
-        }
-        b.finalize();
-    }
-    module
-        .define_function(func_id, &mut ctx)
-        .map_err(|e| e.to_string())?;
-    module.clear_context(&mut ctx);
-    Ok(())
-}
-
-/// Host: interpret one deopted function with packed i64 args.
-///
-/// The whole TIR evaluator runs below this line, so this seam raises every kind
-/// of unwind the interpreter can — a cancel delivered at a wait point
-/// (`Prelude/Scheduler.rs::jet_task_deliver_cancel`) most of all. None of them
-/// may reach the Cranelift frame that called it (#1995).
-///
-/// This is a plain Rust `fn`, deliberately: generated code reaches it through
-/// the `extern "C"` shim `host_seam::guarded` builds for the `deopt_call` entry
-/// in `host_fns!`, and that shim catches and converts inside its own C frame.
-/// It used to be an `extern "C" fn` with its own hand-written `catch_unwind`,
-/// which was the right conversion in the wrong place: an `extern "C"` body
-/// aborts an escaping unwind at its own edge, so the conversion could never be
-/// added from outside and had to be repeated at every seam by hand. See
-/// `host_seam.rs` for the decision record.
+/// Host ABI entry used by every deopt-capable Cranelift module. A native
+/// frame cannot resume without the interpreter's typed MIR frame object; the
+/// explicit trap is therefore safer than guessing from packed words.
 pub(crate) fn jet_deopt_call(
-    fn_idx: i64,
+    function: i64,
     argc: i64,
     a0: i64,
     a1: i64,
@@ -622,244 +200,16 @@ pub(crate) fn jet_deopt_call(
     a6: i64,
     a7: i64,
 ) -> i64 {
-    let packed = [a0, a1, a2, a3, a4, a5, a6, a7];
-    let argc = argc.clamp(0, 8) as usize;
-    let interpret = move || -> i64 {
-        TIR::install_comptime_bridge();
-        let name = DEOPT_NAMES.with(|s| s.borrow().get(fn_idx as usize).cloned());
-        let Some(name) = name else {
-            Concurrency::with_runtime_mut(|rt| {
-                rt.set_trap("deopt call: unknown function index");
-            });
-            return 0;
-        };
-        let program_ptr = DEOPT_PROGRAM.with(|s| *s.borrow());
-        let Some(program_ptr) = program_ptr else {
-            Concurrency::with_runtime_mut(|rt| {
-                rt.set_trap("deopt call: no program");
-            });
-            return 0;
-        };
-        // SAFETY: install_deopt_program keeps this pointer valid for the invoke.
-        let program = unsafe { &*program_ptr };
-        let Some(func) = program.funcs.iter().find(|f| f.name == name) else {
-            Concurrency::with_runtime_mut(|rt| {
-                rt.set_trap(&format!("deopt call: missing `{name}`"));
-            });
-            return 0;
-        };
-        let func_name = func.name.clone();
-        let param_tys: Vec<Type> = func.params.iter().map(|(_, ty, _)| ty.clone()).collect();
-        let ret_ty = func.ret.clone();
-
-        let prepared: Option<
-            Result<
-                (
-                    Vec<CtValue>,
-                    std::sync::Arc<jet_codegen::program_allocator::JetProgramAllocator>,
-                ),
-                String,
-            >,
-        > = Concurrency::with_runtime_mut(|rt| {
-            let mut args = Vec::with_capacity(argc);
-            for i in 0..argc {
-                let ty = match param_tys.get(i) {
-                    Some(ty) => ty,
-                    None => return Some(Err(format!("deopt `{func_name}` missing param {i}"))),
-                };
-                match bits_to_ct(rt, ty, packed[i]) {
-                    Ok(v) => args.push(v),
-                    Err(d) => return Some(Err(d.what)),
-                }
-            }
-            Some(Ok((args, rt.program_allocator.clone())))
-        });
-        let (args, allocator) = match prepared {
-            Some(Ok(value)) => value,
-            Some(Err(msg)) => {
-                Concurrency::with_runtime_mut(|rt| rt.set_trap(&msg));
-                return 0;
-            }
-            None => {
-                Concurrency::with_runtime_mut(|rt| {
-                    rt.set_trap("deopt call: no active runtime");
-                });
-                return 0;
-            }
-        };
-
-        let mut sink = DevSink::new();
-        let memos = DEOPT_MEMOS
-            .with(|state| state.borrow().clone())
-            .unwrap_or_else(TIR::new_memo_state);
-        let value = match jet_codegen::program_allocator::jet_with_active_hosted_program_allocator(
-            allocator.as_ref(),
-            || {
-                crate::with_interpreter_ambient(|| {
-                    TIR::run_named_func_with_memos(program, &func_name, args, &mut sink, memos)
-                })
-            },
-        ) {
-            Ok(v) => v,
-            Err(d) => {
-                Concurrency::with_runtime_mut(|rt| rt.set_trap(&d.what));
-                return 0;
-            }
-        };
-        let result: Option<Result<i64, String>> = Concurrency::with_runtime_mut(|rt| {
-            rt.stdout.push_str(&sink.stdout);
-            rt.stderr.push_str(&sink.stderr);
-            match &ret_ty {
-                None => Some(Ok(0)),
-                Some(Type::Named(n)) if n == "Unit" => Some(Ok(0)),
-                Some(ty) => Some(ct_to_bits(rt, ty, &value).map_err(|d| d.what)),
-            }
-        });
-        match result {
-            Some(Ok(bits)) => bits,
-            Some(Err(msg)) => {
-                Concurrency::with_runtime_mut(|rt| {
-                    rt.set_trap(&msg);
-                });
-                0
-            }
-            None => {
-                Concurrency::with_runtime_mut(|rt| {
-                    rt.set_trap("deopt call: no active runtime");
-                });
-                0
-            }
-        }
-    };
-    // No catch here on purpose. The `extern "C"` shim `host_seam::guarded`
-    // generated for the `deopt_call` symbol is the boundary, and
-    // `Concurrency::deliver_caught_unwind` is the one place a caught payload
-    // becomes a status: a cancel raised at an interpreter wait point lands on
-    // the tier's pending-interrupt channel — the status `#Shield` already
-    // delivers for a deferred cancel (D-CANCELMODEL1=C) — and anything else
-    // takes the branded ICE rail (I2). A second `catch_unwind` here would be a
-    // second boundary beside the generated one (I8).
-    interpret()
-}
-
-fn deopt_marshal_diag(ty: &Type, detail: &str) -> Diagnostic {
-    Diagnostic::error(
-        "E0956",
-        format!("deopt cannot marshall type `{ty:?}`"),
-        detail.to_string(),
-        "report this as a compiler bug".to_string(),
-        None,
-    )
-}
-
-/// Decode the record form emitted for a comptime-folded `Err` value. Runtime
-/// error constructors use `JitRuntime::errors`; this fallback keeps the
-/// comptime record carrier symmetric when it crosses the same result ABI.
-fn bits_to_ct_err_record(rt: &JitRuntime, bits: i64) -> Option<CtValue> {
-    let message = rt.heap.record_clone_string(bits, 0)?;
-    let code = match rt.heap.record_get_int(bits, 1)? {
-        0 => CtValue::absent(Type::String),
-        packed if packed > 0 => CtValue::Present(Box::new(CtValue::Str(
-            rt.heap.clone_string(packed - 1)?,
-        ))),
-        _ => return None,
-    };
-    let cause = match rt.heap.record_get_int(bits, 2)? {
-        0 => CtValue::absent(Type::Named(
-            jet_foundation::Syntax::TYPE_ERR.to_string(),
-        )),
-        packed if packed > 0 => CtValue::Present(Box::new(bits_to_ct_err_record(
-            rt,
-            packed - 1,
-        )?)),
-        _ => return None,
-    };
-    Some(CtValue::Struct {
-        type_name: jet_foundation::Syntax::TYPE_ERR.to_string(),
-        fields: vec![
-            ("message".to_string(), CtValue::Str(message)),
-            ("code".to_string(), code),
-            ("cause".to_string(), cause),
-        ],
-    })
-}
-
-fn bits_to_ct(rt: &JitRuntime, ty: &Type, bits: i64) -> Result<CtValue, Diagnostic> {
-    match ty {
-        Type::Result { ok, err } => {
-            let result = jit_result(rt, bits)
-                .ok_or_else(|| deopt_marshal_diag(ty, "cross-tier host shim needs a valid Result arena handle"))?;
-            let payload_ty = if result.ok { ok.as_ref() } else { err.as_ref() };
-            let payload = bits_to_ct(rt, payload_ty, result.bits as i64)?;
-            if result.ok {
-                Ok(CtValue::Present(Box::new(payload)))
-            } else {
-                Ok(CtValue::Failed(CtReport::Told(Box::new(payload))))
-            }
-        }
-        Type::Named(name) if name == jet_foundation::Syntax::TYPE_ERR => {
-            if let Some(error) = jit_error(rt, bits) {
-                return Ok(CtValue::from_jet_err(&error));
-            }
-            bits_to_ct_err_record(rt, bits).ok_or_else(|| {
-                deopt_marshal_diag(ty, "cross-tier host shim needs a valid Err arena handle")
-            })
-        }
-        Type::Int | Type::IntN { .. } | Type::InlineRange { .. } => Ok(CtValue::Int(bits)),
-        Type::Bool => Ok(CtValue::Bool(bits != 0)),
-        Type::Char => Ok(CtValue::Char(char::from_u32(bits as u32).unwrap_or('\0'))),
-        Type::String => Ok(CtValue::Str(rt.heap.clone_string(bits).unwrap_or_default())),
-        Type::Named(n) if n == "Int" => Ok(CtValue::Int(bits)),
-        Type::Named(n) if n == "Bool" => Ok(CtValue::Bool(bits != 0)),
-        Type::Named(n) if n == "Char" => {
-            Ok(CtValue::Char(char::from_u32(bits as u32).unwrap_or('\0')))
-        }
-        Type::Named(n) if n == "String" => {
-            Ok(CtValue::Str(rt.heap.clone_string(bits).unwrap_or_default()))
-        }
-        Type::Named(n) if n == "Unit" || n == jet_foundation::Syntax::TYPE_NEVER => {
-            Ok(CtValue::Unit)
-        }
-        _ => Err(deopt_marshal_diag(
-            ty,
-            "cross-tier host shim only moves scalar values plus tagged Result payloads",
-        )),
+    crate::trace::note_deopt_invoked_for_test();
+    record_abi_frame(function, argc, &[a0, a1, a2, a3, a4, a5, a6, a7]);
+    if let Ok(function) = u64::try_from(function) {
+        super::resident::publish_runtime_deopt(
+            MirFunctionId(function),
+            "native frame requested interpreter deopt",
+        );
     }
-}
-
-fn ct_to_bits(rt: &mut JitRuntime, ty: &Type, value: &CtValue) -> Result<i64, Diagnostic> {
-    if let Type::Result { ok, err } = ty {
-        return match value {
-            CtValue::Present(inner) => {
-                let bits = ct_to_bits(rt, ok, inner)?;
-                Ok(alloc_jit_result(rt, true, bits as u64))
-            }
-            CtValue::Failed(CtReport::Told(inner)) => {
-                let bits = ct_to_bits(rt, err, inner)?;
-                Ok(alloc_jit_result(rt, false, bits as u64))
-            }
-            CtValue::Failed(CtReport::Clean(_)) => Ok(alloc_jit_result(rt, false, 0)),
-            other => {
-                let bits = ct_to_bits(rt, ok, other)?;
-                Ok(alloc_jit_result(rt, true, bits as u64))
-            }
-        };
-    }
-    if matches!(ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_ERR) {
-        let error = value
-            .to_jet_err()
-            .ok_or_else(|| deopt_marshal_diag(ty, "cross-tier host shim needs a structured Err payload"))?;
-        return Ok(alloc_jit_error(rt, error));
-    }
-    match value {
-        CtValue::Int(n) => Ok(*n),
-        CtValue::Bool(b) => Ok(i64::from(*b)),
-        CtValue::Char(c) => Ok(u32::from(*c) as i64),
-        CtValue::Str(s) => Ok(rt.heap.alloc_string(s.clone())),
-        CtValue::Unit => Ok(0),
-        _ => Err(deopt_marshal_diag(
-            ty,
-            "cross-tier host shim only moves scalar values plus tagged Result payloads",
-        )),
-    }
+    crate::Concurrency::with_runtime_mut(|runtime| {
+        runtime.set_host_fault("MIR deopt requested without an interpreter frame");
+    });
+    0
 }

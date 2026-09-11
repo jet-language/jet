@@ -31,87 +31,39 @@ fn run() {
     round :: compute.deserialize(wire) ?? panic("round")
     print("round:{compute.to_list(round)}")
 
-    bad :: compute.deserialize("shape=2;data=1")
-    if bad == {
-        .Ok(_) -> { print("corrupt:accepted") }
-        .Err(_) -> { print("corrupt:rejected") }
-    }
+    compute.deserialize("shape=2;data=1") ? value -> { print("corrupt:accepted") } ! error -> { print("corrupt:rejected") }
 
-    bad_axis :: compute.deserialize("shape=02;data=1.0,1.0")
-    if bad_axis == {
-        .Ok(_) -> { print("axis:accepted") }
-        .Err(_) -> { print("axis:rejected") }
-    }
+    compute.deserialize("shape=02;data=1.0,1.0") ? value -> { print("axis:accepted") } ! error -> { print("axis:rejected") }
 
-    bad_field :: compute.deserialize("shape=1;data=1.0;data=1.0")
-    if bad_field == {
-        .Ok(_) -> { print("field:accepted") }
-        .Err(_) -> { print("field:rejected") }
-    }
+    compute.deserialize("shape=1;data=1.0;data=1.0") ? value -> { print("field:accepted") } ! error -> { print("field:rejected") }
 
-    bad_checksum :: compute.deserialize("shape=1;data=1.0;profile=F64Strict+Reproducible;checksum=0000000000000000")
-    if bad_checksum == {
-        .Ok(_) -> { print("checksum:accepted") }
-        .Err(_) -> { print("checksum:rejected") }
-    }
+    compute.deserialize("shape=1;data=1.0;profile=F64Strict+Reproducible;checksum=0000000000000000") ? value -> { print("checksum:accepted") } ! error -> { print("checksum:rejected") }
 
     mse_left :: compute.full([2], 1.0) ?? panic("mse_left")
     mse_right :: compute.full([3], 1.0) ?? panic("mse_right")
-    bad_loss :: compute.mse_loss(mse_left, mse_right)
-    if bad_loss == {
-        .Ok(_) -> { print("mse_shape:accepted") }
-        .Err(_) -> { print("mse_shape:rejected") }
-    }
+    compute.mse_loss(mse_left, mse_right) ? value -> { print("mse_shape:accepted") } ! error -> { print("mse_shape:rejected") }
 
     f32_seed :: compute.matrix(1, 1, 1.0) ?? panic("f32_seed")
     f32_tensor :: compute.matmul_f32_tile(f32_seed, f32_seed) ?? panic("f32_tensor")
     f64_target :: compute.full([1], 1.0) ?? panic("f64_target")
-    bad_profile :: compute.mse_loss(f32_tensor, f64_target)
-    if bad_profile == {
-        .Ok(_) -> { print("mse_profile:accepted") }
-        .Err(_) -> { print("mse_profile:rejected") }
-    }
+    compute.mse_loss(f32_tensor, f64_target) ? value -> { print("mse_profile:accepted") } ! error -> { print("mse_profile:rejected") }
 
-    bad_lr :: compute.sgd_step(mse_left, mse_left, -1.0)
-    if bad_lr == {
-        .Ok(_) -> { print("negative_lr:accepted") }
-        .Err(_) -> { print("negative_lr:rejected") }
-    }
+    compute.sgd_step(mse_left, mse_left, -1.0) ? value -> { print("negative_lr:accepted") } ! error -> { print("negative_lr:rejected") }
 
-    bounds :: compute.kernel_bounds_ok([2, 3], [2, 0])
-    if bounds == {
-        .Ok(_) -> { print("bounds:accepted") }
-        .Err(_) -> { print("bounds:rejected") }
-    }
+    compute.kernel_bounds_ok([2, 3], [2, 0]) ? value -> { print("bounds:accepted") } ! error -> { print("bounds:rejected") }
 
     empty :: compute.full([0, 3], 1.0) ?? panic("empty")
     print("empty:{compute.shape(empty)}:{compute.to_list(empty)}")
     empty_other :: compute.full([1, 3], 2.0) ?? panic("empty_other")
-    empty_broadcast :: compute.add(empty, empty_other)
-    if empty_broadcast == {
-        .Ok(value) -> { print("empty_broadcast:{compute.shape(value)}:{compute.to_list(value)}") }
-        .Err(_) -> { print("empty_broadcast:rejected") }
-    }
+    compute.add(empty, empty_other) ? value -> { print("empty_broadcast:{compute.shape(value)}:{compute.to_list(value)}") } ! error -> { print("empty_broadcast:rejected") }
 
     left_shape :: compute.full([2, 2], 1.0) ?? panic("left_shape")
     right_shape :: compute.full([3], 1.0) ?? panic("right_shape")
-    incompatible :: compute.add(left_shape, right_shape)
-    if incompatible == {
-        .Ok(_) -> { print("broadcast:accepted") }
-        .Err(_) -> { print("broadcast:rejected") }
-    }
+    compute.add(left_shape, right_shape) ? value -> { print("broadcast:accepted") } ! error -> { print("broadcast:rejected") }
 
-    overflow :: compute.full([9223372036854775807, 2], 1.0)
-    if overflow == {
-        .Ok(_) -> { print("overflow:accepted") }
-        .Err(_) -> { print("overflow:rejected") }
-    }
+    compute.full([9223372036854775807, 2], 1.0) ? value -> { print("overflow:accepted") } ! error -> { print("overflow:rejected") }
 
-    bad_get :: compute.get(tensor, [4])
-    if bad_get == {
-        .Ok(_) -> { print("tensor_bounds:accepted") }
-        .Err(_) -> { print("tensor_bounds:rejected") }
-    }
+    compute.get(tensor, [4]) ? value -> { print("tensor_bounds:accepted") } ! error -> { print("tensor_bounds:rejected") }
 }
 "#;
 
@@ -168,6 +120,50 @@ fn run() {
     assert!(
         stderr.contains("tier1 native") && !stderr.contains("tier0 interp"),
         "Result-wrapped Tensor did not stay resident:\n{stderr}"
+    );
+}
+
+#[test]
+fn compute_tensor_in_record_has_parity_across_tiers() {
+    let source = r#"
+use core.compute as compute
+
+struct TensorRecord {
+    value: Tensor
+}
+
+fn run() {
+    tensor :: compute.from_list([1.0, 2.0]) ?? panic("tensor")
+    record :: TensorRecord{ value: tensor }
+    print("wrapped:{compute.shape(record.value)}")
+}
+"#;
+    assert_tiers_agree("compute_tensor_record", source, "wrapped:[2]\n");
+}
+
+#[test]
+fn named_gradient_composes_into_second_derivative() {
+    let source = r#"
+use core.compute as compute
+
+fn loss(w: Tensor, x: Tensor) Tensor -> compute.mul(w, x) ?? panic("loss")
+
+fn run() {
+    w :: compute.from_list([2.0]) ?? panic("w")
+    x :: compute.from_list([4.0]) ?? panic("x")
+    derivative :: compute.gradient(loss)
+    curvature :: compute.gradient(derivative)
+    result :: curvature(w, x)
+    print("ww:{compute.to_list(result.w.w)}")
+    print("wx:{compute.to_list(result.w.x)}")
+    print("xw:{compute.to_list(result.x.w)}")
+    print("xx:{compute.to_list(result.x.x)}")
+}
+"#;
+    assert_tiers_agree(
+        "compute_named_second_derivative",
+        source,
+        "ww:[0.0]\nwx:[1.0]\nxw:[1.0]\nxx:[0.0]\n",
     );
 }
 

@@ -46,7 +46,7 @@ pub(crate) fn run_doc(target: &str, mode: OutputMode, check: bool) {
             exit(ExitCodes::USER_ERROR);
         }
         if mode.json {
-            println!("{}", graph.to_json());
+            println!("{}", graph.to_status_envelope().json());
         } else {
             println!(
                 "doc check: passed ({} doctest block(s))",
@@ -57,7 +57,7 @@ pub(crate) fn run_doc(target: &str, mode: OutputMode, check: bool) {
     }
 
     if mode.json {
-        println!("{}", graph.to_json());
+        println!("{}", graph.to_status_envelope().json());
         return;
     }
 

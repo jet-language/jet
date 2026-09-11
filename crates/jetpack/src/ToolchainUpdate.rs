@@ -8,9 +8,10 @@
 use crate::TrustRoot::PublicTrustKey;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use jet_foundation::base_encoding_strict::decode_base64;
-use jet_foundation::EncodingJson::{parse_json_exact_numbers, Value};
-use std::fs;
+use jet_foundation::DataTree::DataTree;
+use jet_foundation::EncodingJson::parse_json_exact_numbers;
 use std::io::{Read, Write};
+use std::fs;
 use std::net::{IpAddr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -491,7 +492,7 @@ fn parse_manifest(bytes: &[u8], expected_channel: &str) -> Result<ChannelManifes
     Ok(manifest)
 }
 
-fn parse_artifact(value: &Value) -> Result<Artifact, UpdateError> {
+fn parse_artifact(value: &DataTree) -> Result<Artifact, UpdateError> {
     let fields = object(value, "toolchain artifact")?;
     reject_unknown(fields, &["target", "path", "sha256", "size", "signature"])?;
     Ok(Artifact {
@@ -1317,21 +1318,21 @@ fn validate_digest(value: &str, label: &str) -> Result<(), UpdateError> {
     Ok(())
 }
 
-fn object<'a>(value: &'a Value, label: &str) -> Result<&'a [(String, Value)], UpdateError> {
+fn object<'a>(value: &'a DataTree, label: &str) -> Result<&'a [(String, DataTree)], UpdateError> {
     match value {
-        Value::Object(fields) => Ok(fields),
+        DataTree::Object(fields) => Ok(fields),
         _ => Err(UpdateError::new(format!("{label} must be an object"))),
     }
 }
 
-fn array<'a>(value: &'a Value, label: &str) -> Result<&'a [Value], UpdateError> {
+fn array<'a>(value: &'a DataTree, label: &str) -> Result<&'a [DataTree], UpdateError> {
     match value {
-        Value::Array(values) => Ok(values),
+        DataTree::Array(values) => Ok(values),
         _ => Err(UpdateError::new(format!("{label} must be an array"))),
     }
 }
 
-fn field<'a>(fields: &'a [(String, Value)], name: &str) -> Result<&'a Value, UpdateError> {
+fn field<'a>(fields: &'a [(String, DataTree)], name: &str) -> Result<&'a DataTree, UpdateError> {
     fields
         .iter()
         .find(|(key, _)| key == name)
@@ -1339,7 +1340,7 @@ fn field<'a>(fields: &'a [(String, Value)], name: &str) -> Result<&'a Value, Upd
         .ok_or_else(|| UpdateError::new(format!("missing toolchain field {name}")))
 }
 
-fn reject_unknown(fields: &[(String, Value)], allowed: &[&str]) -> Result<(), UpdateError> {
+fn reject_unknown(fields: &[(String, DataTree)], allowed: &[&str]) -> Result<(), UpdateError> {
     if let Some((name, _)) = fields
         .iter()
         .find(|(name, _)| !allowed.iter().any(|allowed| *allowed == name))
@@ -1349,17 +1350,17 @@ fn reject_unknown(fields: &[(String, Value)], allowed: &[&str]) -> Result<(), Up
     Ok(())
 }
 
-fn text_field<'a>(value: &'a Value, label: &str) -> Result<&'a str, UpdateError> {
+fn text_field<'a>(value: &'a DataTree, label: &str) -> Result<&'a str, UpdateError> {
     match value {
-        Value::Text(value) => Ok(value),
+        DataTree::Text(value) => Ok(value),
         _ => Err(UpdateError::new(format!("{label} must be text"))),
     }
 }
 
-fn integer(value: &Value, label: &str) -> Result<u64, UpdateError> {
+fn integer(value: &DataTree, label: &str) -> Result<u64, UpdateError> {
     let value = match value {
-        Value::Number(value) => value,
-        Value::Int(value) => {
+        DataTree::Number(value) => value,
+        DataTree::Int(value) => {
             return u64::try_from(*value).map_err(|_| {
                 UpdateError::new(format!("{label} must be a non-negative integer"))
             })

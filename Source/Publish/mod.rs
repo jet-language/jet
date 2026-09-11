@@ -413,6 +413,116 @@ mod tests {
     }
 
     #[test]
+    fn audit_lockfile_includes_foreign_rust_bridge_packages() {
+        let mut package = make_lock_pkg("base64", "0.22.1", "sha256-aabb");
+        package.source = LockSource::Foreign {
+            language: crate::AST::ForeignLanguage::Rust,
+            reference: "base64@0.22.1".into(),
+            output: "sha256-bridge".into(),
+        };
+        let lock = make_lock(vec![package]);
+        let advisories = vec![Advisory::Advisory {
+            id: "RUSTSEC-TEST".into(),
+            package: "base64".into(),
+            affected: VersionReq::parse("^0.22").unwrap(),
+            fixed: None,
+            title: "bridge advisory".into(),
+            severity: Severity::High,
+        }];
+        let matches = audit_lockfile(&lock, &advisories).unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].severity, Severity::High);
+        assert!(matches[0].diagnostic.what.contains("base64"));
+    }
+
+    #[test]
+    fn sbom_emits_foreign_rust_bridge_packages() {
+        let digest = "a".repeat(64);
+        let mut package = make_lock_pkg("base64", "0.22.1", "sha256-aabb");
+        package.content_hash = Some(format!("sha256-{digest}"));
+        package.source = LockSource::Foreign {
+            language: crate::AST::ForeignLanguage::Rust,
+            reference: "base64@0.22.1".into(),
+            output: "sha256-bridge".into(),
+        };
+        let lock = make_lock(vec![package]);
+        let spdx = emit_spdx(&lock, "myapp", "0.1.0");
+        assert!(spdx.contains("PackageName: base64"));
+        assert!(spdx.contains("PackageVersion: 0.22.1"));
+        assert!(spdx.contains(&format!("SHA256: {digest}")));
+        let cyclonedx = emit_cyclonedx(&lock, "myapp", "0.1.0");
+        assert!(cyclonedx.contains("\"name\": \"base64\""));
+        assert!(cyclonedx.contains("\"version\": \"0.22.1\""));
+        assert!(cyclonedx.contains(&format!("\"content\": \"{digest}\"")));
+    }
+
+    #[test]
+    fn maturity_window_applies_to_foreign_rust_bridge_packages() {
+        let mut package = make_lock_pkg("base64", "0.22.1", "sha256-aabb");
+        package.source = LockSource::Foreign {
+            language: crate::AST::ForeignLanguage::Rust,
+            reference: "base64@0.22.1".into(),
+            output: "sha256-bridge".into(),
+        };
+        let lock = make_lock(vec![package]);
+        let feed = |releases: Vec<AdvisoryRelease>| AdvisoryFeed {
+            sequence: 1,
+            issued_at: 100,
+            expires_at: 200_000,
+            maturity_seconds: DEFAULT_MATURITY_SECONDS,
+            key_id: String::new(),
+            public_key: String::new(),
+            signature: String::new(),
+            releases,
+            advisories: Vec::new(),
+            exceptions: Vec::new(),
+        };
+        let release = AdvisoryRelease {
+            package: "base64".into(),
+            version: sv("0.22.1"),
+            first_seen: 100,
+            source_class: SourceClass::ThirdParty,
+        };
+
+        // Inside the window: the bridge crate is refused like any dependency.
+        let (maturity, applied) = Advisory::lock_maturity_diagnostics(
+            &lock,
+            &feed(vec![release.clone()]),
+            DEFAULT_MATURITY_SECONDS,
+            200,
+            &[],
+        )
+        .unwrap();
+        assert!(applied.is_empty());
+        assert_eq!(maturity.len(), 1, "{maturity:?}");
+        assert_eq!(maturity[0].code, "E2609");
+        assert!(maturity[0].what.contains("base64#0.22.1"));
+
+        // Past the window: clean.
+        let (maturity, _) = Advisory::lock_maturity_diagnostics(
+            &lock,
+            &feed(vec![release]),
+            DEFAULT_MATURITY_SECONDS,
+            100 + DEFAULT_MATURITY_SECONDS,
+            &[],
+        )
+        .unwrap();
+        assert!(maturity.is_empty(), "{maturity:?}");
+
+        // No release record: a foreign package is not exempt like root/path.
+        let (maturity, _) = Advisory::lock_maturity_diagnostics(
+            &lock,
+            &feed(Vec::new()),
+            DEFAULT_MATURITY_SECONDS,
+            200,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(maturity.len(), 1, "{maturity:?}");
+        assert_eq!(maturity[0].code, "E2610");
+    }
+
+    #[test]
     fn audit_lockfile_emits_e2603() {
         let lock = make_lock(vec![make_lock_pkg("mylib", "1.0.3", "sha256-aabb")]);
         let advisories = vec![Advisory::Advisory {

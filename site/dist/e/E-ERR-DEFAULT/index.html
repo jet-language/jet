@@ -36,7 +36,43 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">remove `!`; failure is implicit, or name an explicit domain such as `!IOError`.</p>
 <h2>Worked example</h2>
-<p>No UI snapshot currently mentions this code.</p>
+<p>First UI snapshot mentioning <code>E-ERR-DEFAULT</code>: <code>tests/ui/retired_void_result.stderr</code>.</p>
+<pre class="diag">Error [E0431]: `Void` is retired
+  --&gt; tests/ui/retired_void_result.jet:1:13
+    |
+  1 | fn run() =&gt; Void ! {
+    |             ^^^^
+ Why: Jet uses `()` for a result with no information; non-returning paths are compiler facts under D-NEVER1
+ Fix: Replace `Void` with `()`
+More: jet-lang.dev/e/E0431
+
+Error [E-ERR-DEFAULT]: `!` is a retired bare default failure contract.
+  --&gt; tests/ui/retired_void_result.jet:1:18
+    |
+  1 | fn run() =&gt; Void ! {
+    |                  ^
+ Why: Ordinary fallible functions use the implicit default `Err` contract; the `!` prefix is only for a named error domain.
+ Fix: Remove `!`; failure is implicit, or name an explicit domain such as `!IOError`.
+More: jet-lang.dev/e/E-ERR-DEFAULT
+
+Error [E0068]: This callable uses the retired result-arrow shape.
+  --&gt; tests/ui/retired_void_result.jet:1:10
+    |
+  1 | fn run() =&gt; Void ! {
+    |          ^^
+ Why: A return type sits after the parameter list, and `-&gt;` introduces the body; an effect ceiling follows the return type
+ Fix: Write `fn name(...) Type -&gt; body`, or `fn name(...) Type -[Effects]&gt; { … }`
+More: jet-lang.dev/e/E0068
+
+Error [E0003]: This unit-fallible signature uses the retired arrow-and-unit form
+  --&gt; tests/ui/retired_void_result.jet:1:13
+    |
+  1 | fn run() =&gt; Void ! {
+    |             ^^^^^^
+ Why: A function that can fail but returns no value has no result payload for an arrow to introduce
+ Fix: Write `fn save(path: String) !IOError`, or omit the contract for implicit `Err`
+More: jet-lang.dev/e/E0003
+</pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
 </main>

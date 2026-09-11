@@ -7,6 +7,7 @@
 
 use jet_foundation::Terminal::Theme;
 use std::collections::BTreeMap;
+use jet_foundation::Report::{StatusEnvelope, StatusValue};
 
 /// One explainable diagnostic code.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,47 +68,6 @@ pub fn live_codes() -> Vec<String> {
         .filter(|e| !e.retired)
         .map(|e| e.code)
         .collect()
-}
-
-/// Render the generated diagnostic-row reference. The committed Markdown is a
-/// checked artifact; this function is its only producer.
-pub fn diagnostics_reference_markdown() -> String {
-    let mut out = String::from(
-        "# Typed diagnostic rows\n\nGenerated from `crates/jet-codegen/src/Prelude/Diagnostics.jet`.\n\nVocabulary: [Jet vocabulary](vocabulary.md).\n\n| Code | Stage | Severity | Moment | Status | Meaning | What | Why | Fix |\n|---|---|---|---|---|---|---|---|---|\n",
-    );
-    for row in jet_foundation::Registry::diagnostic_rows() {
-        let severity = match row.severity {
-            jet_foundation::Diagnostics::Severity::Error => "error",
-            jet_foundation::Diagnostics::Severity::Lint => "lint",
-        };
-        let what = jet_foundation::Outcome::jet_sentence_case_line(row.what);
-        let why = jet_foundation::Outcome::jet_sentence_case_line(row.why);
-        let fix = jet_foundation::Outcome::jet_sentence_case_line(row.fix);
-        let cells = [
-            row.code,
-            row.stage,
-            severity,
-            row.moment.as_str(),
-            row.status.name(),
-            row.meaning,
-            what.as_str(),
-            why.as_str(),
-            fix.as_str(),
-        ];
-        out.push('|');
-        for cell in cells {
-            out.push(' ');
-            out.push_str(&escape_markdown_cell(cell));
-            out.push(' ');
-            out.push('|');
-        }
-        out.push('\n');
-    }
-    out
-}
-
-fn escape_markdown_cell(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('|', "\\|")
 }
 
 /// D-CONF-READ1=A: normalize every user spelling of a registered build fact
@@ -556,12 +516,10 @@ pub fn facts_report_json() -> String {
         })
         .collect();
     let payload = format!("{{\"rows\":[{}]}}", rows.join(","));
-    jet_foundation::Report::render_status_json(
-        "ok",
-        true,
-        "inspect.facts",
-        &format!(",\"facts\":{payload}"),
-    )
+    let facts = StatusValue::parse(&payload).expect("facts projection must be valid JSON");
+    StatusEnvelope::new("inspect.facts", true)
+        .with_field("facts", facts)
+        .json()
 }
 
 #[cfg(test)]

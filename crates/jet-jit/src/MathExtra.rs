@@ -16,6 +16,9 @@ pub(crate) mod math_rt {
     include!(concat!(env!("OUT_DIR"), "/math_rt.rs"));
 }
 
+fn jet_jit_math_pi() -> f64 {
+    math_rt::jet_std_math_pi()
+}
 fn jet_jit_math_abs_i64(value: i64) -> i64 {
     math_rt::jet_std_math_abs_i64(value)
 }
@@ -213,6 +216,9 @@ fn jet_jit_math_log(x: f64, base: f64) -> f64 {
 fn jet_jit_math_log10(x: f64) -> f64 {
     x.log10()
 }
+fn jet_jit_math_log2(x: f64) -> f64 {
+    x.log2()
+}
 fn jet_jit_math_copysign(x: f64, y: f64) -> f64 {
     x.copysign(y)
 }
@@ -304,6 +310,8 @@ host_fns! {
     register: register_math_extra_symbols;
     declare: declare_math_extra_host_fns(module) {
         let cc = module.target_config().default_call_conv;
+        let mut zero_f64 = Signature::new(cc);
+        zero_f64.returns.push(AbiParam::new(types::F64));
         let mut f64_f64 = Signature::new(cc);
         f64_f64.params.push(AbiParam::new(types::F64));
         f64_f64.returns.push(AbiParam::new(types::F64));
@@ -360,8 +368,11 @@ host_fns! {
 
     }
     abs_i64: "jet_jit_math_abs_i64" => jet_jit_math_abs_i64: i64_i64;
+    pi: "jet_jit_math_pi" => jet_jit_math_pi: zero_f64;
     abs_f64: "jet_jit_math_abs_f64" => jet_jit_math_abs_f64: f64_f64;
     abs_f32: "jet_jit_math_abs_f32" => jet_jit_math_abs_f32: f64_f64;
+    abs_f64_core: "jet_std_math_abs_f64" => jet_jit_math_abs_f64: f64_f64;
+    abs_f32_core: "jet_std_math_abs_f32" => jet_jit_math_abs_f32: f64_f64;
     to_bits: "jet_jit_math_to_bits" => jet_jit_math_to_bits: f64_i64;
     from_bits: "jet_jit_math_from_bits" => jet_jit_math_from_bits: i64_f64;
     round: "jet_jit_math_round" => jet_jit_math_round: f64_i64;
@@ -407,6 +418,7 @@ host_fns! {
     ln_1p: "jet_jit_math_ln_1p" => jet_jit_math_ln_1p: f64_f64;
     log: "jet_jit_math_log" => jet_jit_math_log: f64_f64_f64;
     log10: "jet_jit_math_log10" => jet_jit_math_log10: f64_f64;
+    log2: "jet_jit_math_log2" => jet_jit_math_log2: f64_f64;
     copysign: "jet_jit_math_copysign" => jet_jit_math_copysign: f64_f64_f64;
     signum: "jet_jit_math_signum" => jet_jit_math_signum: f64_f64;
     fma: "jet_jit_math_fma" => jet_jit_math_fma: fma;
@@ -416,9 +428,9 @@ host_fns! {
     checked_neg: "jet_jit_math_checked_neg" => jet_jit_math_checked_neg: i64_i64;
     checked_div: "jet_jit_math_checked_div" => jet_jit_math_checked_div: i64_i64_i64;
     checked_rem: "jet_jit_math_checked_rem" => jet_jit_math_checked_rem: i64_i64_i64;
-    is_nan: "jet_jit_math_is_nan" => jet_jit_math_is_nan: f64_i8;
-    is_infinite: "jet_jit_math_is_infinite" => jet_jit_math_is_infinite: f64_i8;
-    is_finite: "jet_jit_math_is_finite" => jet_jit_math_is_finite: f64_i8;
+    is_nan: "jet_std_math_is_nan" => jet_jit_math_is_nan: f64_i8;
+    is_infinite: "jet_std_math_is_infinite" => jet_jit_math_is_infinite: f64_i8;
+    is_finite: "jet_std_math_is_finite" => jet_jit_math_is_finite: f64_i8;
     is_normal: "jet_jit_math_is_normal" => jet_jit_math_is_normal: f64_i8;
     is_subnormal: "jet_jit_math_is_subnormal" => jet_jit_math_is_subnormal: f64_i8;
     is_canonical: "jet_jit_math_is_canonical" => jet_jit_math_is_canonical: f64_i8;

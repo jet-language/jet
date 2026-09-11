@@ -3,9 +3,9 @@
 use crate::Comptime::DevSink;
 use crate::Diagnostics::{span_line_col, Diagnostic, Severity, Span};
 use crate::Lexer::{TokKind, Token};
-use crate::AST::{CtValue, Type};
+use crate::AST::{CtKey, CtReport, CtValue, Type};
 use crate::{Lexer, Parser, AST};
-use jet_foundation::Report::render_status_json;
+use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
 use std::path::{Path, PathBuf};
 
 use jet_driver::Authority::{AuthorityError, AuthorityResolver};
@@ -84,7 +84,7 @@ impl PackageReadError {
 
 pub use PackageModel::{
     BuildProfileView, DependencyView, KeyValueView, LockView, LockedPackageView, ManifestView,
-    OutputView, PackageTargetView, PackageView, ProfileSetView, ProfileView,
+    OutputView, PackageTargetView, PackageView, ProfileSetView, ProfileView, TargetProfileView,
 };
 
 fn package_read_error(
@@ -103,16 +103,16 @@ fn authority_reason(cause: &AuthorityError) -> String {
         AuthorityError::ManifestParse { .. } => {
             "package metadata is malformed; fix the metadata and try again".to_string()
         }
-        AuthorityError::Io { operation, .. } => format!(
-            "couldn't {operation} authority metadata; restore access and try again"
-        ),
+        AuthorityError::Io { operation, .. } => {
+            format!("couldn't {operation} authority metadata; restore access and try again")
+        }
         AuthorityError::Symlink(_) => {
             "authority input is a symlink; replace it with the expected file or directory"
                 .to_string()
         }
-        AuthorityError::WrongKind { expected, actual, .. } => format!(
-            "authority input is a {actual}, but the operation requires a {expected}"
-        ),
+        AuthorityError::WrongKind {
+            expected, actual, ..
+        } => format!("authority input is a {actual}, but the operation requires a {expected}"),
         AuthorityError::Escapes(_) => {
             "authority path escapes its root; use a relative path below the authority root"
                 .to_string()
@@ -128,8 +128,7 @@ fn authority_reason(cause: &AuthorityError) -> String {
                 .to_string()
         }
         AuthorityError::WorkspaceNoModule => {
-            "the authority source has no workspace module; declare the workspace module"
-                .to_string()
+            "the authority source has no workspace module; declare the workspace module".to_string()
         }
         AuthorityError::NestedMembers { .. } => {
             "a member Package cannot declare another members list; keep membership at one level"
@@ -164,7 +163,11 @@ fn authority_read_error(
     cause: AuthorityError,
 ) -> PackageReadError {
     let code = cause.diagnostic().code;
-    package_read_error(file, message, format!("{code}: {}", authority_reason(&cause)))
+    package_read_error(
+        file,
+        message,
+        format!("{code}: {}", authority_reason(&cause)),
+    )
 }
 
 fn diagnostic_cause(diagnostic: &Diagnostic) -> String {
@@ -214,8 +217,14 @@ fn inline_authority_error(
 
 fn checked_inline_package(
     resolver: &AuthorityResolver,
-) -> Result<Option<(jet_driver::Authority::CheckedFile, Package::InlinePackageBlock, String)>, PackageReadError>
-{
+) -> Result<
+    Option<(
+        jet_driver::Authority::CheckedFile,
+        Package::Blocks::InlinePackageBlock,
+        String,
+    )>,
+    PackageReadError,
+> {
     let candidates = [
         PathBuf::from(crate::Syntax::DEFAULT_ENTRY_FILE),
         PathBuf::from("src").join(crate::Syntax::DEFAULT_ENTRY_FILE),
@@ -241,15 +250,13 @@ fn checked_inline_package(
             )
         })?;
         let block = Package::extract_inline_package(&source).map_err(inline_carrier_error)?;
-        resolver
-            .revalidate_file(&file)
-            .map_err(|error| {
-                authority_read_error(
-                    crate::Syntax::PACKAGE_FILE,
-                    "the inline package carrier changed while it was being read",
-                    error,
-                )
-            })?;
+        resolver.revalidate_file(&file).map_err(|error| {
+            authority_read_error(
+                crate::Syntax::PACKAGE_FILE,
+                "the inline package carrier changed while it was being read",
+                error,
+            )
+        })?;
         if let Some(block) = block {
             return Ok(Some((file, block, source)));
         }
@@ -260,7 +267,7 @@ fn checked_inline_package(
 fn inline_package_facts(
     resolver: &AuthorityResolver,
     carrier: &jet_driver::Authority::CheckedFile,
-    block: &Package::InlinePackageBlock,
+    block: &Package::Blocks::InlinePackageBlock,
     source: &str,
 ) -> Result<Package::PackageFacts, PackageReadError> {
     let mut facts = Package::PackageFacts::parse_uncomposed(
@@ -268,18 +275,32 @@ fn inline_package_facts(
         carrier.path.display().to_string(),
     )
     .map_err(inline_parse_error)?;
-    facts
-        .compose_configs(resolver.root())
-        .map_err(|error| inline_authority_error(carrier, "could not compose the inline package facts", error))?;
-    facts
-        .validate_guarantees()
-        .map_err(|error| inline_authority_error(carrier, "could not validate the inline package facts", error))?;
-    facts
-        .validate_defaults()
-        .map_err(|error| inline_authority_error(carrier, "could not validate the inline package defaults", error))?;
+    facts.compose_configs(resolver.root()).map_err(|error| {
+        inline_authority_error(carrier, "could not compose the inline package facts", error)
+    })?;
+    facts.validate_guarantees().map_err(|error| {
+        inline_authority_error(
+            carrier,
+            "could not validate the inline package facts",
+            error,
+        )
+    })?;
+    facts.validate_defaults().map_err(|error| {
+        inline_authority_error(
+            carrier,
+            "could not validate the inline package defaults",
+            error,
+        )
+    })?;
     facts
         .validate_members_in(resolver.root())
-        .map_err(|error| inline_authority_error(carrier, "could not validate the inline package members", error))?;
+        .map_err(|error| {
+            inline_authority_error(
+                carrier,
+                "could not validate the inline package members",
+                error,
+            )
+        })?;
     Ok(facts)
 }
 
@@ -301,7 +322,6 @@ fn record_inline_package_inputs(
     }
     Ok(())
 }
-
 
 fn record_checked_file(file: &jet_driver::Authority::CheckedFile) {
     let path = file
@@ -329,7 +349,6 @@ fn record_checked_package_inputs(
     Ok(())
 }
 
-
 fn profile_view(profile: &jet_env_model::ModuleEval::PackageProfileSpec) -> ProfileView {
     ProfileView::from_parts(
         profile.name.clone(),
@@ -343,9 +362,7 @@ fn profile_view(profile: &jet_env_model::ModuleEval::PackageProfileSpec) -> Prof
     )
 }
 
-fn profile_set_view(
-    profiles: &jet_env_model::ModuleEval::PackageProfileSet,
-) -> ProfileSetView {
+fn profile_set_view(profiles: &jet_env_model::ModuleEval::PackageProfileSet) -> ProfileSetView {
     ProfileSetView::from_profiles(profiles.profiles.values().map(profile_view))
 }
 
@@ -450,15 +467,13 @@ pub fn read_lock(root: &Path) -> Result<LockView, PackageReadError> {
             cause,
         )
     })?;
-    resolver
-        .revalidate_file(&file)
-        .map_err(|cause| {
-            authority_read_error(
-                crate::Syntax::UNIFIED_LOCK_FILE,
-                "the package lock changed while it was being read",
-                cause,
-            )
-        })?;
+    resolver.revalidate_file(&file).map_err(|cause| {
+        authority_read_error(
+            crate::Syntax::UNIFIED_LOCK_FILE,
+            "the package lock changed while it was being read",
+            cause,
+        )
+    })?;
     Ok(PackageModel::lock_view_from_lock(&lock))
 }
 
@@ -514,8 +529,8 @@ impl SourceLoader for PackageSourceLoader {
                 Ok(Some(package.facts))
             }
             Err(error) if error.is_missing() => {
-                let facts = crate::Loader::package_facts_for_root(self.resolver.root())
-                    .map_err(|mut diagnostics| {
+                let facts = crate::Loader::package_facts_for_root(self.resolver.root()).map_err(
+                    |mut diagnostics| {
                         diagnostics.pop().unwrap_or_else(|| {
                             Diagnostic::error(
                                 "E1206",
@@ -525,7 +540,8 @@ impl SourceLoader for PackageSourceLoader {
                                 None,
                             )
                         })
-                    })?;
+                    },
+                )?;
                 Ok(facts)
             }
             Err(error) => Err(error.diagnostic()),
@@ -579,16 +595,13 @@ pub fn read_profiles(root: &Path) -> Result<ProfileSetView, PackageReadError> {
             .relative
             .to_string_lossy()
             .replace(std::path::MAIN_SEPARATOR, "/");
-        loader
-            .resolver
-            .revalidate_file(file)
-            .map_err(|cause| {
-                authority_read_error(
-                    file_name,
-                    "a profile input changed while it was being read",
-                    cause,
-                )
-            })?;
+        loader.resolver.revalidate_file(file).map_err(|cause| {
+            authority_read_error(
+                file_name,
+                "a profile input changed while it was being read",
+                cause,
+            )
+        })?;
     }
     let mut profiles = jet_env_model::ModuleEval::PackageProfileSet::default();
     for profile in plan.package_profiles {
@@ -605,6 +618,15 @@ pub fn read_profiles(root: &Path) -> Result<ProfileSetView, PackageReadError> {
 
 fn optional_string(value: Option<&String>) -> CtValue {
     compiler_option_string(value.map(String::as_str))
+}
+
+fn target_value(targets: &[TargetProfileView]) -> CtValue {
+    // The legacy scalar can represent one exact target name.  Do not pick a
+    // profile when the package declares multiple named targets.
+    match targets {
+        [target] => optional_string(Some(&target.name)),
+        _ => optional_string(None),
+    }
 }
 
 fn dependency_value(dependency: &DependencyView) -> CtValue {
@@ -655,7 +677,10 @@ fn manifest_value(view: &ManifestView) -> CtValue {
     ct_struct(
         "CompilerManifest",
         vec![
-            ("schema_version", CtValue::Int(i64::from(view.schema_version))),
+            (
+                "schema_version",
+                CtValue::Int(i64::from(view.schema_version)),
+            ),
             ("file", CtValue::Str(view.file.clone())),
             ("jet", optional_string(view.jet.as_ref())),
             ("edition", optional_string(view.edition.as_ref())),
@@ -663,7 +688,7 @@ fn manifest_value(view: &ManifestView) -> CtValue {
             ("license", optional_string(view.license.as_ref())),
             ("repository", optional_string(view.repository.as_ref())),
             ("layer", optional_string(view.layer.as_ref())),
-            ("target", optional_string(view.target.as_ref())),
+            ("target", target_value(&view.targets)),
             (
                 "dependencies",
                 CtValue::List(view.dependencies.iter().map(dependency_value).collect()),
@@ -678,7 +703,12 @@ fn manifest_value(view: &ManifestView) -> CtValue {
             ),
             (
                 "build_profiles",
-                CtValue::List(view.build_profiles.iter().map(build_profile_value).collect()),
+                CtValue::List(
+                    view.build_profiles
+                        .iter()
+                        .map(build_profile_value)
+                        .collect(),
+                ),
             ),
         ],
     )
@@ -688,7 +718,10 @@ fn package_value(view: &PackageView) -> CtValue {
     ct_struct(
         "CompilerPackage",
         vec![
-            ("schema_version", CtValue::Int(i64::from(view.schema_version))),
+            (
+                "schema_version",
+                CtValue::Int(i64::from(view.schema_version)),
+            ),
             ("file", CtValue::Str(view.file.clone())),
             ("jet", optional_string(view.jet.as_ref())),
             ("edition", optional_string(view.edition.as_ref())),
@@ -696,7 +729,7 @@ fn package_value(view: &PackageView) -> CtValue {
             ("license", optional_string(view.license.as_ref())),
             ("repository", optional_string(view.repository.as_ref())),
             ("layer", optional_string(view.layer.as_ref())),
-            ("target", optional_string(view.target.as_ref())),
+            ("target", target_value(&view.targets)),
             (
                 "dependencies",
                 CtValue::List(view.dependencies.iter().map(dependency_value).collect()),
@@ -711,7 +744,12 @@ fn package_value(view: &PackageView) -> CtValue {
             ),
             (
                 "build_profiles",
-                CtValue::List(view.build_profiles.iter().map(build_profile_value).collect()),
+                CtValue::List(
+                    view.build_profiles
+                        .iter()
+                        .map(build_profile_value)
+                        .collect(),
+                ),
             ),
         ],
     )
@@ -727,7 +765,10 @@ fn locked_package_value(package: &LockedPackageView) -> CtValue {
             ("source", optional_string(package.source.as_ref())),
             ("revision", optional_string(package.revision.as_ref())),
             ("fingerprint", CtValue::Str(package.fingerprint.clone())),
-            ("content_hash", optional_string(package.content_hash.as_ref())),
+            (
+                "content_hash",
+                optional_string(package.content_hash.as_ref()),
+            ),
             (
                 "dependencies",
                 compiler_string_list(package.dependencies.clone()),
@@ -771,7 +812,10 @@ fn lock_value(view: &LockView) -> CtValue {
     ct_struct(
         "CompilerLock",
         vec![
-            ("schema_version", CtValue::Int(i64::from(view.schema_version))),
+            (
+                "schema_version",
+                CtValue::Int(i64::from(view.schema_version)),
+            ),
             ("file", CtValue::Str(view.file.clone())),
             ("version", CtValue::Int(i64::from(view.version))),
             (
@@ -790,7 +834,10 @@ fn profile_set_value(view: &ProfileSetView) -> CtValue {
     ct_struct(
         "CompilerProfileSet",
         vec![
-            ("schema_version", CtValue::Int(i64::from(view.schema_version))),
+            (
+                "schema_version",
+                CtValue::Int(i64::from(view.schema_version)),
+            ),
             ("file", CtValue::Str(view.file.clone())),
             (
                 "profiles",
@@ -824,6 +871,22 @@ pub fn eval_core_call_with_type(
     _resolved_ret: Option<Type>,
     _sink: Option<&mut DevSink>,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    if module == "core.build" {
+        let result = match (method, args.as_slice()) {
+            ("graph", [plan]) => crate::Comptime::Build::eval_build_graph(plan, span),
+            ("receipt_diff", [before, after]) => {
+                crate::Comptime::Build::eval_build_receipt_diff(before, after, span)
+            }
+            _ => Err(Diagnostic::error(
+                "E3502",
+                format!("unsupported core.build operation `{method}`"),
+                "core.build exposes only the checked graph and receipt diff queries".to_string(),
+                "call `core.build.graph` with one BuildPlan or `core.build.receipt_diff` with two BuildGraph values".to_string(),
+                Some(span),
+            )),
+        };
+        return Some(result);
+    }
     if module != "core.compiler" {
         return None;
     }
@@ -1398,6 +1461,179 @@ fn compiler_view_provenance_value(provenance: &jet_semindex::ViewProvenanceFact)
     )
 }
 
+fn compiler_state_node_value(node: &jet_semindex::StateNodeFact) -> CtValue {
+    ct_struct(
+        "CompilerStateNode",
+        vec![
+            ("name", CtValue::Str(node.name.clone())),
+            ("terminal", CtValue::Bool(node.terminal)),
+            (
+                "reachable",
+                node.reachable.map_or_else(
+                    || CtValue::absent(Type::Bool),
+                    |value| CtValue::Present(Box::new(CtValue::Bool(value))),
+                ),
+            ),
+            ("span", compiler_semantic_span(node.span)),
+        ],
+    )
+}
+
+fn compiler_state_transition_value(transition: &jet_semindex::StateTransitionFact) -> CtValue {
+    ct_struct(
+        "CompilerStateTransition",
+        vec![
+            ("operation", CtValue::Str(transition.operation.clone())),
+            ("from", compiler_option_string(transition.from.as_deref())),
+            ("to", CtValue::Str(transition.to.clone())),
+        ],
+    )
+}
+
+fn compiler_state_graph_value(graph: &jet_semindex::StateGraphFact) -> CtValue {
+    ct_struct(
+        "CompilerStateGraph",
+        vec![
+            ("owner", CtValue::Str(graph.owner.clone())),
+            ("module", CtValue::Str(graph.module_path.clone())),
+            (
+                "states",
+                CtValue::List(
+                    graph
+                        .states
+                        .iter()
+                        .map(compiler_state_node_value)
+                        .collect(),
+                ),
+            ),
+            (
+                "transitions",
+                CtValue::List(
+                    graph
+                        .transitions
+                        .iter()
+                        .map(compiler_state_transition_value)
+                        .collect(),
+                ),
+            ),
+        ],
+    )
+}
+
+fn compiler_fact_declaration_value(
+    declaration: &jet_foundation::Facts::FactDeclaration,
+) -> CtValue {
+    ct_struct(
+        "CompilerFactDeclaration",
+        vec![
+            ("kind", CtValue::Str(declaration.kind.name().to_string())),
+            ("name", CtValue::Str(declaration.name.clone())),
+            (
+                "members",
+                compiler_string_list(declaration.members.iter().cloned()),
+            ),
+            ("deny", compiler_string_list(declaration.deny.iter().cloned())),
+            ("from", compiler_string_list(declaration.from.iter().cloned())),
+        ],
+    )
+}
+
+fn compiler_fact_registry_value(
+    registry: &jet_foundation::Facts::FactRegistry,
+) -> CtValue {
+    CtValue::List(
+        registry
+            .iter()
+            .map(compiler_fact_declaration_value)
+            .collect(),
+    )
+}
+
+fn compiler_derivation_observation_value(
+    observation: &jet_foundation::Facts::DerivationObservation,
+) -> CtValue {
+    ct_struct(
+        "CompilerDerivationObservation",
+        vec![
+            (
+                "counterexample",
+                compiler_option_string(observation.counterexample_id.as_deref()),
+            ),
+            (
+                "event",
+                compiler_option_string(observation.event_id.as_deref()),
+            ),
+        ],
+    )
+}
+
+fn compiler_derivation_payload_value(
+    payload: &jet_foundation::Facts::DerivationPayload,
+) -> CtValue {
+    ct_struct(
+        "CompilerDerivationPayload",
+        vec![
+            ("kind", CtValue::Str(payload.kind().to_string())),
+            ("json", CtValue::Str(payload.to_json())),
+        ],
+    )
+}
+
+fn compiler_derivation_value(record: &jet_foundation::Facts::DerivationRecord) -> CtValue {
+    ct_struct(
+        "CompilerDerivationRecord",
+        vec![
+            ("id", CtValue::Str(record.id.clone())),
+            ("subject", CtValue::Str(record.subject.clone())),
+            ("claim", CtValue::Str(record.claim.clone())),
+            ("producer", CtValue::Str(record.producer.clone())),
+            (
+                "method",
+                CtValue::Str(record.method.as_str().to_string()),
+            ),
+            ("rule", CtValue::Str(record.rule.clone())),
+            ("premises", compiler_string_list(record.premises.clone())),
+            (
+                "identity",
+                ct_struct(
+                    "CompilerDerivationIdentity",
+                    vec![
+                        ("source", CtValue::Str(record.identity.source.clone())),
+                        ("build", CtValue::Str(record.identity.build.clone())),
+                        ("run", CtValue::Str(record.identity.run.clone())),
+                        ("target", CtValue::Str(record.identity.target.clone())),
+                    ],
+                ),
+            ),
+            (
+                "assumptions",
+                compiler_string_list(record.assumptions.clone()),
+            ),
+            (
+                "disposition",
+                CtValue::Str(record.disposition.as_str().to_string()),
+            ),
+            (
+                "observation",
+                record.observation.as_ref().map_or_else(
+                    || CtValue::absent(Type::Named("CompilerDerivationObservation".to_string())),
+                    |value| {
+                        CtValue::Present(Box::new(compiler_derivation_observation_value(value)))
+                    },
+                ),
+            ),
+            (
+                "payload",
+                record.payload.as_ref().map_or_else(
+                    || CtValue::absent(Type::Named("CompilerDerivationPayload".to_string())),
+                    |value| CtValue::Present(Box::new(compiler_derivation_payload_value(value))),
+                ),
+            ),
+        ],
+    )
+}
+
+
 fn compiler_definition_value(definition: &jet_semindex::SymbolDef) -> CtValue {
     ct_struct(
         "CompilerDefinition",
@@ -1627,7 +1863,11 @@ fn compiler_output_value(output: &jet_semindex::OutputFact) -> CtValue {
     )
 }
 
-fn compiler_semantic_index_value(index: &jet_semindex::SemIndex, source: &str) -> CtValue {
+fn compiler_semantic_index_value(
+    index: &jet_semindex::SemIndex,
+    source: &str,
+    fact_registry: &jet_foundation::Facts::FactRegistry,
+) -> CtValue {
     ct_struct(
         "CompilerSemanticIndex",
         vec![
@@ -1691,6 +1931,27 @@ fn compiler_semantic_index_value(index: &jet_semindex::SemIndex, source: &str) -
                 "outputs",
                 CtValue::List(index.outputs().iter().map(compiler_output_value).collect()),
             ),
+            (
+                "state_graphs",
+                CtValue::List(
+                    index
+                        .state_graphs()
+                        .iter()
+                        .map(compiler_state_graph_value)
+                        .collect(),
+                ),
+            ),
+            ("fact_registry", compiler_fact_registry_value(fact_registry)),
+            (
+                "derivations",
+                CtValue::List(
+                    index
+                        .derivations()
+                        .iter()
+                        .map(compiler_derivation_value)
+                        .collect(),
+                ),
+            ),
         ],
     )
 }
@@ -1734,7 +1995,11 @@ fn checked_value_from_parts(
         let semantic_index = if has_errors {
             CtValue::absent(Type::Named("CompilerSemanticIndex".to_string()))
         } else {
-            CtValue::Present(Box::new(compiler_semantic_index_value(&index, source)))
+            CtValue::Present(Box::new(compiler_semantic_index_value(
+                &index,
+                source,
+                &effect_facts.fact_registry,
+            )))
         };
         (functions, effects, semantic_index)
     } else {
@@ -1932,6 +2197,9 @@ pub struct SemIndexView {
     pub effects: Vec<jet_semindex::EffectFact>,
     pub arithmetic: Vec<jet_semindex::ArithmeticOperationFact>,
     pub outputs: Vec<jet_semindex::OutputFact>,
+    pub state_graphs: Vec<jet_semindex::StateGraphFact>,
+    pub fact_registry: jet_foundation::Facts::FactRegistry,
+    pub derivations: Vec<jet_foundation::Facts::DerivationRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2004,7 +2272,11 @@ pub fn check_file(path: &std::path::Path) -> CheckedFile {
         None
     } else {
         bundle.as_ref().map(|bundle| {
-            SemIndexView::from_index(jet_semindex::from_checked(bundle, &facts), &source)
+            SemIndexView::from_index(
+                jet_semindex::from_checked(bundle, &facts),
+                &source,
+                &facts.fact_registry,
+            )
         })
     };
     CheckedFile {
@@ -2022,36 +2294,30 @@ pub fn check_file(path: &std::path::Path) -> CheckedFile {
 /// schema's deterministic output.
 pub const JSON_SCHEMA_VERSION: u32 = SCHEMA_VERSION;
 
-fn compiler_json(operation: &str, payload: String) -> String {
-    render_status_json(
-        "ok",
-        true,
-        &format!("inspect.compiler.{operation}"),
-        &format!(",\"compiler\":{payload}"),
+fn compiler_json(operation: &str, compiler: StatusValue) -> String {
+    StatusEnvelope::new(format!("inspect.compiler.{operation}"), true)
+        .with_field("compiler", compiler)
+        .json()
+}
+
+fn compiler_payload(operation: &str, value: StatusValue) -> StatusValue {
+    StatusValue::object(
+        StatusFields::new()
+            .with("schema_version", JSON_SCHEMA_VERSION)
+            .with("api_version", API_VERSION)
+            .with("operation", operation)
+            .with("value", value),
     )
 }
 
 pub fn lex_source_json(source: &str) -> String {
-    compiler_json(
-        "lex",
-        format!(
-            "{{\"schema_version\":{},\"api_version\":{},\"operation\":\"lex\",\"value\":{}}}",
-            JSON_SCHEMA_VERSION,
-            API_VERSION,
-            json_lexed(&lex_source(source)),
-        ),
-    )
+    compiler_json("lex", compiler_payload("lex", status_lexed(&lex_source(source))))
 }
 
 pub fn parse_source_json(source: &str) -> String {
     compiler_json(
         "parse",
-        format!(
-            "{{\"schema_version\":{},\"api_version\":{},\"operation\":\"parse\",\"value\":{}}}",
-            JSON_SCHEMA_VERSION,
-            API_VERSION,
-            json_syntax_tree(&parse_source(source)),
-        ),
+        compiler_payload("parse", status_syntax_tree(&parse_source(source))),
     )
 }
 
@@ -2068,17 +2334,15 @@ pub fn check_file_json(path: &std::path::Path) -> String {
             )
         }
     };
-    // Keep the JSON mirror byte-for-byte aligned with the typed, source-only
-    // operation. The file belongs in the outer envelope; it must not change
-    // the `CompilerChecked` value returned by `core.compiler.check`.
-    let value = checked_value(&source).to_json();
-    compiler_json("check", format!(
-        "{{\"schema_version\":{},\"api_version\":{},\"operation\":\"check\",\"file\":{},\"value\":{}}}",
-        JSON_SCHEMA_VERSION,
-        API_VERSION,
-        json_string(&file),
-        value,
-    ))
+    let compiler = StatusValue::object(
+        StatusFields::new()
+            .with("schema_version", JSON_SCHEMA_VERSION)
+            .with("api_version", API_VERSION)
+            .with("operation", "check")
+            .with("file", file.as_ref())
+            .with("value", status_ct_value(&checked_value(&source))),
+    );
+    compiler_json("check", compiler)
 }
 
 /// Serialize one compiler-operation failure at the JSON boundary. The typed
@@ -2090,185 +2354,262 @@ pub fn compiler_api_error_json(
     code: &str,
     message: impl Into<String>,
 ) -> String {
-    render_status_json(
-        "error",
-        false,
-        &format!("inspect.compiler.{operation}"),
-        &format!(
-            ",\"compiler\":{}",
-            format!(
-        "{{\"schema_version\":{},\"api_version\":{},\"operation\":{},\"file\":{},\"error\":{{\"code\":{},\"message\":{}}}}}",
-        JSON_SCHEMA_VERSION,
-        API_VERSION,
-        json_string(operation),
-        json_string(file),
-        json_string(code),
-        json_string(&message.into()),
-            )
-        ),
-    )
+    let compiler = StatusValue::object(
+        StatusFields::new()
+            .with("schema_version", JSON_SCHEMA_VERSION)
+            .with("api_version", API_VERSION)
+            .with("operation", operation)
+            .with("file", file)
+            .with(
+                "error",
+                StatusValue::object(
+                    StatusFields::new()
+                        .with("code", code)
+                        .with("message", message.into()),
+                ),
+            ),
+    );
+    StatusEnvelope::new(format!("inspect.compiler.{operation}"), false)
+        .with_field("compiler", compiler)
+        .json()
 }
 
 pub fn source_map_json(rust_source: &str) -> String {
     compiler_json(
         "source_map",
-        format!(
-        "{{\"schema_version\":{},\"api_version\":{},\"operation\":\"source_map\",\"value\":{}}}",
-        JSON_SCHEMA_VERSION,
-        API_VERSION,
-        json_source_map(&source_map_from_generated_rust(rust_source)),
-    ),
+        compiler_payload(
+            "source_map",
+            status_source_map(&source_map_from_generated_rust(rust_source)),
+        ),
     )
 }
 
-fn json_string(value: &str) -> String {
-    format!("\"{}\"", jet_foundation::JSON::json_escape(value))
+fn status_span(range: Option<TextRange>) -> StatusValue {
+    range.map_or(StatusValue::Null, |range| {
+        StatusValue::object(
+            StatusFields::new()
+                .with("start", range.start)
+                .with("end", range.end),
+        )
+    })
 }
 
-fn json_span(span: Option<TextRange>) -> String {
-    span.map_or_else(
-        || "null".to_string(),
-        |range| format!("{{\"start\":{},\"end\":{}}}", range.start, range.end),
-    )
-}
-
-fn json_diagnostic(diagnostic: &DiagnosticView) -> String {
-    format!(
-        "{{\"code\":{},\"severity\":{},\"message\":{},\"why\":{},\"fix\":{},\"span\":{}}}",
-        json_string(&diagnostic.code),
-        json_string(match diagnostic.severity {
-            DiagnosticSeverity::Error => "error",
-            DiagnosticSeverity::Lint => "lint",
-        }),
-        json_string(&diagnostic.message),
-        json_string(&diagnostic.why),
-        json_string(&diagnostic.fix),
-        json_span(diagnostic.span),
-    )
-}
-
-fn json_diagnostics(diagnostics: &[DiagnosticView]) -> String {
-    format!(
-        "[{}]",
-        diagnostics
-            .iter()
-            .map(json_diagnostic)
-            .collect::<Vec<_>>()
-            .join(",")
-    )
-}
-
-fn json_lexed(lexed: &LexedSource) -> String {
-    let tokens = lexed
-        .tokens
-        .iter()
-        .map(|token| {
-            format!(
-                "{{\"kind\":{},\"text\":{},\"span\":{{\"start\":{},\"end\":{}}},\"start\":{{\"line\":{},\"column\":{}}},\"end\":{{\"line\":{},\"column\":{}}}}}",
-                json_string(token.kind),
-                json_string(&token.text),
-                token.span.start,
-                token.span.end,
-                token.start.line,
-                token.start.column,
-                token.end.line,
-                token.end.column,
+fn status_diagnostic(diagnostic: &DiagnosticView) -> StatusValue {
+    StatusValue::object(
+        StatusFields::new()
+            .with("code", diagnostic.code.as_str())
+            .with(
+                "severity",
+                match diagnostic.severity {
+                    DiagnosticSeverity::Error => "error",
+                    DiagnosticSeverity::Lint => "lint",
+                },
             )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-    format!(
-        "{{\"schema_version\":{},\"api_version\":{},\"source\":{},\"tokens\":[{}],\"diagnostics\":{}}}",
-        lexed.schema_version,
-        lexed.api_version,
-        json_string(&lexed.source),
-        tokens,
-        json_diagnostics(&lexed.diagnostics),
+            .with("message", diagnostic.message.as_str())
+            .with("why", diagnostic.why.as_str())
+            .with("fix", diagnostic.fix.as_str())
+            .with("span", status_span(diagnostic.span)),
     )
 }
 
-fn json_syntax_tree(tree: &SyntaxTree) -> String {
-    let items = tree
-        .items
-        .iter()
-        .map(|node| {
-            format!(
-                "{{\"kind\":{},\"name\":{},\"span\":{{\"start\":{},\"end\":{}}}}}",
-                json_string(match node.kind {
-                    SyntaxNodeKind::Function => "function",
-                    SyntaxNodeKind::Struct => "struct",
-                    SyntaxNodeKind::Enum => "enum",
-                    SyntaxNodeKind::Trait => "trait",
-                    SyntaxNodeKind::Tag => "tag",
-                    SyntaxNodeKind::Effect => "effect",
-                    SyntaxNodeKind::Impl => "impl",
-                    SyntaxNodeKind::Const => "const",
-                    SyntaxNodeKind::Test => "test",
-                    SyntaxNodeKind::ExternRust => "extern_rust",
-                    SyntaxNodeKind::Module => "module",
-                    SyntaxNodeKind::CModule => "c_module",
-                    SyntaxNodeKind::CodeModule => "code_module",
-                    SyntaxNodeKind::ErrorConversion => "error_conversion",
-                    SyntaxNodeKind::Migration => "migration",
-                    SyntaxNodeKind::State => "state",
-                    SyntaxNodeKind::Protocol => "protocol",
-                    SyntaxNodeKind::Derive => "derive",
-                    SyntaxNodeKind::GenericModule => "generic_module",
-                    SyntaxNodeKind::ModuleAlias => "module_alias",
-                    SyntaxNodeKind::Distinct => "distinct",
-                    SyntaxNodeKind::TypeAlias => "type_alias",
-                    SyntaxNodeKind::UnitFamily => "unit_family",
-                    SyntaxNodeKind::Marker => "marker",
-                    SyntaxNodeKind::Fact => "fact",
-                    SyntaxNodeKind::TemplateLoop => "template_loop",
+fn status_diagnostics(diagnostics: &[DiagnosticView]) -> StatusValue {
+    StatusValue::array(diagnostics.iter().map(status_diagnostic))
+}
+
+fn status_lexed(lexed: &LexedSource) -> StatusValue {
+    let tokens = StatusValue::array(lexed.tokens.iter().map(|token| {
+        StatusValue::object(
+            StatusFields::new()
+                .with("kind", token.kind)
+                .with("text", token.text.as_str())
+                .with(
+                    "span",
+                    StatusValue::object(
+                        StatusFields::new()
+                            .with("start", token.span.start)
+                            .with("end", token.span.end),
+                    ),
+                )
+                .with(
+                    "start",
+                    StatusValue::object(
+                        StatusFields::new()
+                            .with("line", token.start.line)
+                            .with("column", token.start.column),
+                    ),
+                )
+                .with(
+                    "end",
+                    StatusValue::object(
+                        StatusFields::new()
+                            .with("line", token.end.line)
+                            .with("column", token.end.column),
+                    ),
+                ),
+        )
+    }));
+    StatusValue::object(
+        StatusFields::new()
+            .with("schema_version", lexed.schema_version)
+            .with("api_version", lexed.api_version)
+            .with("source", lexed.source.as_str())
+            .with("tokens", tokens)
+            .with("diagnostics", status_diagnostics(&lexed.diagnostics)),
+    )
+}
+
+fn syntax_node_kind_name(kind: SyntaxNodeKind) -> &'static str {
+    match kind {
+        SyntaxNodeKind::Function => "function",
+        SyntaxNodeKind::Struct => "struct",
+        SyntaxNodeKind::Enum => "enum",
+        SyntaxNodeKind::Trait => "trait",
+        SyntaxNodeKind::Tag => "tag",
+        SyntaxNodeKind::Effect => "effect",
+        SyntaxNodeKind::Impl => "impl",
+        SyntaxNodeKind::Const => "const",
+        SyntaxNodeKind::Test => "test",
+        SyntaxNodeKind::ExternRust => "extern_rust",
+        SyntaxNodeKind::Module => "module",
+        SyntaxNodeKind::CModule => "c_module",
+        SyntaxNodeKind::CodeModule => "code_module",
+        SyntaxNodeKind::ErrorConversion => "error_conversion",
+        SyntaxNodeKind::Migration => "migration",
+        SyntaxNodeKind::State => "state",
+        SyntaxNodeKind::Protocol => "protocol",
+        SyntaxNodeKind::Derive => "derive",
+        SyntaxNodeKind::GenericModule => "generic_module",
+        SyntaxNodeKind::ModuleAlias => "module_alias",
+        SyntaxNodeKind::Distinct => "distinct",
+        SyntaxNodeKind::TypeAlias => "type_alias",
+        SyntaxNodeKind::UnitFamily => "unit_family",
+        SyntaxNodeKind::Marker => "marker",
+        SyntaxNodeKind::Fact => "fact",
+        SyntaxNodeKind::TemplateLoop => "template_loop",
+    }
+}
+
+fn status_syntax_tree(tree: &SyntaxTree) -> StatusValue {
+    let items = StatusValue::array(tree.items.iter().map(|node| {
+        StatusValue::object(
+            StatusFields::new()
+                .with("kind", syntax_node_kind_name(node.kind))
+                .with(
+                    "name",
+                    node.name
+                        .as_deref()
+                        .map(StatusValue::from)
+                        .unwrap_or(StatusValue::Null),
+                )
+                .with(
+                    "span",
+                    StatusValue::object(
+                        StatusFields::new()
+                            .with("start", node.span.start)
+                            .with("end", node.span.end),
+                    ),
+                ),
+        )
+    }));
+    StatusValue::object(
+        StatusFields::new()
+            .with("schema_version", tree.schema_version)
+            .with("api_version", tree.api_version)
+            .with("source", tree.source.as_str())
+            .with("items", items)
+            .with("diagnostics", status_diagnostics(&tree.diagnostics)),
+    )
+}
+
+fn status_source_map(map: &SourceMap) -> StatusValue {
+    let sources = StatusValue::array(map.sources.iter().map(|source| StatusValue::from(source.as_str())));
+    let lines = StatusValue::array(map.generated_lines.iter().map(|line| {
+        StatusValue::object(
+            StatusFields::new()
+                .with("generated_line", line.generated_line)
+                .with(
+                    "source",
+                    line.source
+                        .as_deref()
+                        .map(StatusValue::from)
+                        .unwrap_or(StatusValue::Null),
+                )
+                .with("source_line", line.source_line),
+        )
+    }));
+    StatusValue::object(
+        StatusFields::new()
+            .with("schema_version", map.schema_version)
+            .with("api_version", map.api_version)
+            .with("sources", sources)
+            .with("generated_lines", lines),
+    )
+}
+fn status_map_key(key: &CtKey) -> String {
+    match key {
+        CtKey::Int(value) => value.to_string(),
+        CtKey::Str(value) => value.clone(),
+        CtKey::Bool(value) => value.to_string(),
+        CtKey::Char(value) => value.to_string(),
+        CtKey::Tuple(_) | CtKey::Struct { .. } | CtKey::Enum { .. } => {
+            key.to_value().to_json()
+        }
+    }
+}
+
+fn status_ct_value(value: &CtValue) -> StatusValue {
+    match value {
+        CtValue::Int(value) => StatusValue::from(*value),
+        CtValue::Float(value) => StatusValue::Float(value.to_json()),
+        CtValue::Bool(value) => StatusValue::from(*value),
+        CtValue::Char(value) => StatusValue::from(value.to_string()),
+        CtValue::Str(value) => StatusValue::from(value.as_str()),
+        CtValue::BigInt(value) => StatusValue::from(value.to_string_rep().as_str()),
+        CtValue::Bytes(values) => {
+            StatusValue::array(values.iter().map(|value| StatusValue::from(*value as i128)))
+        }
+        CtValue::List(values) => StatusValue::array(values.iter().map(status_ct_value)),
+        CtValue::Map(values) => StatusValue::object(
+            values.iter().fold(StatusFields::new(), |fields, (key, value)| {
+                fields.with(status_map_key(key), status_ct_value(value))
+            }),
+        ),
+        CtValue::Struct { fields, .. } => StatusValue::object(
+            fields
+                .iter()
+                .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name))
+                .fold(StatusFields::new(), |fields, (name, value)| {
+                    fields.with(name.as_str(), status_ct_value(value))
                 }),
-                node.name
-                    .as_deref()
-                    .map(json_string)
-                    .unwrap_or_else(|| "null".to_string()),
-                node.span.start,
-                node.span.end,
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-    format!(
-        "{{\"schema_version\":{},\"api_version\":{},\"source\":{},\"items\":[{}],\"diagnostics\":{}}}",
-        tree.schema_version,
-        tree.api_version,
-        json_string(&tree.source),
-        items,
-        json_diagnostics(&tree.diagnostics),
-    )
-}
-
-fn json_source_map(map: &SourceMap) -> String {
-    let sources = map
-        .sources
-        .iter()
-        .map(|source| json_string(source))
-        .collect::<Vec<_>>()
-        .join(",");
-    let lines = map
-        .generated_lines
-        .iter()
-        .map(|line| {
-            format!(
-                "{{\"generated_line\":{},\"source\":{},\"source_line\":{}}}",
-                line.generated_line,
-                line.source
-                    .as_deref()
-                    .map(json_string)
-                    .unwrap_or_else(|| "null".to_string()),
-                line.source_line,
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-    format!(
-        "{{\"schema_version\":{},\"api_version\":{},\"sources\":[{}],\"generated_lines\":[{}]}}",
-        map.schema_version, map.api_version, sources, lines
-    )
+        ),
+        CtValue::Enum {
+            variant, args, ..
+        } if args.is_empty() => StatusValue::from(variant.as_str()),
+        CtValue::Enum {
+            variant, args, ..
+        } if args.iter().all(|(label, _)| label.is_some()) => {
+            let fields = args.iter().fold(StatusFields::new(), |fields, (label, value)| {
+                fields.with(
+                    label.as_deref().expect("checked enum label"),
+                    status_ct_value(value),
+                )
+            });
+            StatusValue::object(StatusFields::new().with(variant.as_str(), StatusValue::object(fields)))
+        }
+        CtValue::Enum { variant, args, .. } => StatusValue::object(
+            StatusFields::new().with(
+                variant.as_str(),
+                StatusValue::array(args.iter().map(|(_, value)| status_ct_value(value))),
+            ),
+        ),
+        CtValue::Present(value) => status_ct_value(value),
+        CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit | CtValue::Closure(_) => {
+            StatusValue::Null
+        }
+        CtValue::Failed(CtReport::Told(value)) => {
+            StatusValue::object(StatusFields::new().with("err", status_ct_value(value)))
+        }
+    }
 }
 
 pub fn source_map_from_generated_rust(rust_src: &str) -> SourceMap {
@@ -2304,7 +2645,11 @@ pub fn source_map_from_generated_rust(rust_src: &str) -> SourceMap {
 }
 
 impl SemIndexView {
-    fn from_index(index: jet_semindex::SemIndex, source: &str) -> Self {
+    fn from_index(
+        index: jet_semindex::SemIndex,
+        source: &str,
+        fact_registry: &jet_foundation::Facts::FactRegistry,
+    ) -> Self {
         SemIndexView {
             schema_version: index.schema_version(),
             source_digest: crate::SHA256::sha256_hex(source.as_bytes()),
@@ -2314,6 +2659,9 @@ impl SemIndexView {
             effects: index.effects().to_vec(),
             arithmetic: index.arithmetic().to_vec(),
             outputs: index.outputs().to_vec(),
+            state_graphs: index.state_graphs().to_vec(),
+            fact_registry: fact_registry.clone(),
+            derivations: index.derivations().to_vec(),
         }
     }
 }
@@ -2452,7 +2800,6 @@ fn token_kind_name(kind: &TokKind) -> &'static str {
         TokKind::KwIf => "keyword.if",
         TokKind::KwElse => "keyword.else",
         TokKind::KwIn => "keyword.in",
-        TokKind::KwSwitch => "keyword.switch",
         TokKind::KwBreak => "keyword.break",
         TokKind::KwTrue => "literal.true",
         TokKind::KwFalse => "literal.false",
@@ -2479,6 +2826,7 @@ fn token_kind_name(kind: &TokKind) -> &'static str {
         TokKind::KwModule => "keyword.module",
         TokKind::Ident(_) => "identifier",
         TokKind::Str(_) => "literal.string",
+        TokKind::RawStr(_) => "literal.raw_string",
         TokKind::Int(..) => "literal.int",
         TokKind::Float(..) => "literal.float",
         TokKind::UnitNumber { .. } => "literal.unit_number",

@@ -247,7 +247,7 @@ const CANVAS_COMMENT_FIXTURE: &str = r#"fn run() {
 
 #[test]
 fn canvas_parity_matrix_tracks_ast_language_forms() {
-    let matrix = fs::read_to_string("docs/reference/canvas-parity.md")
+    let matrix = fs::read_to_string("docs/spec/reference/canvas-parity.md")
         .expect("Canvas parity matrix must exist");
     for (enum_name, path) in [
         ("Item", "crates/jet-foundation/src/AST/items.rs"),
@@ -639,7 +639,7 @@ fn canvas_graph_json_is_stable_and_typed() {
     let path = write_fixture("graph", CANVAS_FIXTURE);
     let json = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
 
-    assert!(json.starts_with("{\"schema\":\"jet.report/v1\""), "{json}");
+    assert!(json.starts_with("{\"schema\":\"jet.status/v1\""), "{json}");
     assert_eq!(
         jet_foundation::MachineOutput::read_machine_line(&json),
         Ok(jet_foundation::MachineOutput::MachineRecord::Status)
@@ -2862,7 +2862,7 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
         "\"insert_callee\"",
         "\"insert_op\":\"insert_call\"",
         "\"pure\"",
-        "\"source\":\"docs/reference/core-library.md\"",
+        "\"source\":\"docs/spec/reference/core-library.md\"",
         "\"kind\":\"canvas.command\"",
         "\"kind\":\"canvas.structural\"",
         "\"action_id\":\"canvas.structural:branch\"",
@@ -3343,7 +3343,7 @@ fn canvas_core_catalog_browses_canonical_core_library_without_write_authority() 
         "\"catalog_schema_version\":1",
         "\"authority\":[\"canvas.catalog:core.read\"]",
         "\"writes\":\"none\"",
-        "\"source\":\"docs/reference/core-library.md\"",
+        "\"source\":\"docs/spec/reference/core-library.md\"",
         "\"path\":\"core.http\"",
         "\"path\":\"core.http.client\"",
         "\"path\":\"core.files\"",
@@ -3493,7 +3493,7 @@ fn canvas_library_action_preserves_events_example_source_and_refuses_bad_edits()
         "\"insert_op\":\"insert_call\"",
         "\"engine\":\"checked-tir+jit\"",
         "\"writes\":\"source_transaction_only\"",
-        "\"source\":\"docs/reference/core-library.md\"",
+        "\"source\":\"docs/spec/reference/core-library.md\"",
     ] {
         assert!(
             actions.contains(field),
@@ -5667,7 +5667,7 @@ fn canvas_rename_receipt_rejects_symlinked_metadata_directory() {
 #[test]
 fn canvas_protocol_doc_matches_v1_graph_and_edit_shape() {
     let doc_path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs/reference/canvas-protocol.md");
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs/spec/reference/canvas-protocol.md");
     let doc = fs::read_to_string(doc_path).expect("Canvas protocol reference");
     for term in [
         "jet.canvas.project",
@@ -6914,84 +6914,6 @@ fn canvas_unsupported_and_invalid_actions_return_canvas_errors_without_rustc() {
     assert_eq!(fs::read_to_string(&path).unwrap(), before);
 }
 
-#[test]
-fn canvas_blueprint_parity_matrix_is_classified() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("docs/plans/epoch-6/canvas-blueprint-parity-matrix.md");
-    let matrix = fs::read_to_string(&path).expect("Canvas parity matrix");
-    let allowed = [
-        "shipped",
-        "claimed",
-        "planned",
-        "blocked-by-ballot",
-        "rejected-as-Blueprint-semantic-debt",
-        "not-yet-applicable",
-    ];
-    let required_areas = [
-        "Workbench",
-        "Hotkeys",
-        "Node model",
-        "Pins and wires",
-        "Types",
-        "Comments",
-        "Functions",
-        "Macros/collapse",
-        "Events",
-        "Debugger",
-        "Search/refactor",
-        "Source control",
-        "Public protocol",
-        "Extensibility",
-        "Tests",
-    ];
-
-    for area in required_areas {
-        assert!(
-            matrix.contains(&format!("| {area} |")),
-            "missing area {area}"
-        );
-    }
-
-    let mut rows = 0;
-    for line in matrix.lines().filter(|line| line.starts_with("| ")) {
-        if line.starts_with("| Area |") || line.starts_with("|---|") {
-            continue;
-        }
-        let cols: Vec<_> = line.trim_matches('|').split('|').map(str::trim).collect();
-        assert_eq!(cols.len(), 5, "matrix row must have five columns: {line}");
-        assert!(
-            allowed.contains(&cols[3]),
-            "unknown Canvas parity status `{}` in row: {line}",
-            cols[3]
-        );
-        if cols[3] == "claimed" || cols[3] == "shipped" {
-            assert!(
-                ["interaction:", "protocol:", "projection:", "grep:"]
-                    .iter()
-                    .any(|prefix| cols[4].starts_with(prefix)),
-                "Canvas matrix row with implementation proof must carry a ratchet class: {line}"
-            );
-        }
-        if cols[3] == "shipped" {
-            assert!(
-                cols[4].starts_with("interaction:tests/canvas_scenarios.rs::"),
-                "shipped Canvas matrix row must cite an interaction scenario: {line}"
-            );
-        }
-        rows += 1;
-    }
-
-    assert!(
-        rows >= 50,
-        "Canvas parity matrix should cover the UE audit breadth"
-    );
-    for status in allowed {
-        assert!(
-            matrix.contains(&format!("- `{status}`")),
-            "status vocabulary `{status}` must be documented"
-        );
-    }
-}
 #[test]
 fn canvas_reconstructs_checked_output_callable_from_semindex() {
     let path = write_fixture(

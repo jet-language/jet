@@ -35,10 +35,15 @@ pub enum JetAuthError {
     TokenNotYetValid,
 }
 
-// `parse_json_strict` returns the internal JSON tree, not DataTree. Keep the
-// verifier's claim boundary on that one representation in every emitted tier.
-type JetAuthJSON = jet_std::JSON;
-type JetAuthFields = std::collections::BTreeMap<String, JetAuthJSON>;
+// Claims are decoded directly into the canonical ordered DataTree.
+fn jet_auth_get<'a>(
+    fields: &'a [(String, jet_std::DataTree)],
+    name: &str,
+) -> Option<&'a jet_std::DataTree> {
+    fields
+        .iter()
+        .find_map(|(key, value)| (key == name).then_some(value))
+}
 
 fn jet_auth_b64_decode_inner(s: &str) -> Result<Vec<u8>, String> {
     let mut out = Vec::with_capacity(s.len().saturating_mul(3) / 4);
@@ -93,11 +98,11 @@ fn jet_auth_b64url_decode(text: &str) -> Result<Vec<u8>, String> {
     jet_auth_b64_decode_inner(&s)
 }
 
-fn jet_auth_object(text: &str) -> Result<JetAuthFields, JetAuthError> {
+fn jet_auth_object(text: &str) -> Result<Vec<(String, jet_std::DataTree)>, JetAuthError> {
     match jet_std::parse_json_strict(text) {
-        Ok(jet_std::JSON::Object(fields)) => Ok(fields),
+        Ok(jet_std::DataTree::Object(fields)) => Ok(fields),
         Ok(_) => Err(JetAuthError::MalformedToken("token JSON must be an object".to_string())),
-        Err(error) => Err(JetAuthError::DecodeError(error.message)),
+        Err(error) => Err(JetAuthError::DecodeError(error.reason)),
     }
 }
 
@@ -210,9 +215,8 @@ fn jet_auth_json_skip_value(chars: &[char], pos: &mut usize) {
     }
 }
 
-// `jet_std::JSON::Number` is deliberately still the shared f64 tree. Auth
-// claims need one extra lexical pass so an i64 NumericDate never crosses a
-// rounding boundary before the verifier checks it.
+// NumericDate claims are checked against their source lexeme so exact Int
+// values never cross a binary64 rounding boundary.
 fn jet_auth_number_lexeme(text: &str, name: &str) -> Option<String> {
     let chars: Vec<char> = text.chars().collect();
     let mut pos = 0usize;
@@ -285,9 +289,6 @@ fn jet_auth_number_lexeme(text: &str, name: &str) -> Option<String> {
     }
 }
 
-// NumericDate is an exact Jet Int, while the shared JSON tree stores numbers
-// as f64. Parse the recovered integer lexeme with checked decimal arithmetic;
-// never narrow the rounded JSON number back to i64.
 fn jet_auth_parse_i64_decimal(lexeme: &str) -> Option<i64> {
     let (negative, digits) = lexeme
         .strip_prefix('-')
@@ -295,7 +296,6 @@ fn jet_auth_parse_i64_decimal(lexeme: &str) -> Option<i64> {
     if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
     }
-    // `-0` is a JSON number, but not the canonical integer spelling.
     if negative && digits == "0" {
         return None;
     }
@@ -318,35 +318,26 @@ fn jet_auth_parse_i64_decimal(lexeme: &str) -> Option<i64> {
 }
 
 fn jet_auth_optional_text(
-    fields: &JetAuthFields,
+    fields: &[(String, jet_std::DataTree)],
     name: &str,
 ) -> Result<Option<String>, JetAuthError> {
-    match fields.get(name) {
+    match jet_auth_get(fields, name) {
         None => Ok(None),
-        Some(jet_std::JSON::Text(value)) => Ok(Some(value.clone())),
+        Some(jet_std::DataTree::Text(value) | jet_std::DataTree::TypedText(value)) => {
+            Ok(Some(value.clone()))
+        }
         Some(_) => Err(JetAuthError::MalformedToken(format!("claim `{name}` must be text"))),
     }
 }
 
 fn jet_auth_i64_claim(
-    fields: &JetAuthFields,
+    fields: &[(String, jet_std::DataTree)],
     text: &str,
     name: &str,
 ) -> Result<Option<i64>, JetAuthError> {
-    match fields.get(name) {
+    match jet_auth_get(fields, name) {
         None => Ok(None),
-        Some(jet_std::JSON::Integer(_)) => {
-            let lexeme = jet_auth_number_lexeme(text, name).ok_or_else(|| {
-                JetAuthError::MalformedToken(format!("claim `{name}` must be an exact integer"))
-            })?;
-            let value = jet_auth_parse_i64_decimal(&lexeme).ok_or_else(|| {
-                JetAuthError::MalformedToken(format!("claim `{name}` must be an exact integer"))
-            })?;
-            Ok(Some(value))
-        }
-        // `Number` is only the JSON type check. Range and integrality come
-        // from the source lexeme, never from the rounded f64 payload.
-        Some(jet_std::JSON::Number(_)) => {
+        Some(jet_std::DataTree::Int(_) | jet_std::DataTree::Number(_)) => {
             let lexeme = jet_auth_number_lexeme(text, name).ok_or_else(|| {
                 JetAuthError::MalformedToken(format!("claim `{name}` must be an exact integer"))
             })?;
@@ -360,7 +351,7 @@ fn jet_auth_i64_claim(
 }
 
 fn jet_auth_required_i64(
-    fields: &JetAuthFields,
+    fields: &[(String, jet_std::DataTree)],
     text: &str,
     name: &str,
 ) -> Result<i64, JetAuthError> {
@@ -368,35 +359,45 @@ fn jet_auth_required_i64(
 }
 
 fn jet_auth_optional_i64(
-    fields: &JetAuthFields,
+    fields: &[(String, jet_std::DataTree)],
     text: &str,
     name: &str,
 ) -> Result<Option<i64>, JetAuthError> {
     jet_auth_i64_claim(fields, text, name)
 }
 
-fn jet_auth_audience_values(value: &JetAuthJSON) -> Result<Vec<String>, JetAuthError> {
+fn jet_auth_audience_values(value: &jet_std::DataTree) -> Result<Vec<String>, JetAuthError> {
     match value {
-        jet_std::JSON::Text(value) => Ok(vec![value.clone()]),
-        jet_std::JSON::Array(values) if values.is_empty() => {
-            return Err(JetAuthError::MalformedToken(
-                "claim `aud` must contain at least one text".to_string(),
-            ));
+        jet_std::DataTree::Text(value) | jet_std::DataTree::TypedText(value) => {
+            Ok(vec![value.clone()])
         }
-        jet_std::JSON::Array(values) => values
+        jet_std::DataTree::Array(values) if values.is_empty() => {
+            Err(JetAuthError::MalformedToken(
+                "claim `aud` must contain at least one text".to_string(),
+            ))
+        }
+        jet_std::DataTree::Array(values) => values
             .iter()
             .map(|value| match value {
-                jet_std::JSON::Text(value) => Ok(value.clone()),
-                _ => Err(JetAuthError::MalformedToken("claim `aud` must contain only text".to_string())),
+                jet_std::DataTree::Text(value) | jet_std::DataTree::TypedText(value) => {
+                    Ok(value.clone())
+                }
+                _ => Err(JetAuthError::MalformedToken(
+                    "claim `aud` must contain only text".to_string(),
+                )),
             })
             .collect(),
-        _ => Err(JetAuthError::MalformedToken("claim `aud` must be text or a text list".to_string())),
+        _ => Err(JetAuthError::MalformedToken(
+            "claim `aud` must be text or a text list".to_string(),
+        )),
     }
 }
 
-fn jet_auth_audience(fields: &JetAuthFields, expected: &str) -> Result<String, JetAuthError> {
-    let value = fields
-        .get("aud")
+fn jet_auth_audience(
+    fields: &[(String, jet_std::DataTree)],
+    expected: &str,
+) -> Result<String, JetAuthError> {
+    let value = jet_auth_get(fields, "aud")
         .ok_or_else(|| JetAuthError::MissingClaim("aud".to_string()))?;
     let values = jet_auth_audience_values(value)?;
     if values.iter().any(|value| value == expected) {
@@ -524,25 +525,38 @@ fn jet_auth_verify_jwt_impl(
     issuer: Option<&String>,
     clock_skew_ns: i64,
 ) -> Result<JetAuthClaims, JetAuthError> {
-    if key.len() < 32 { return Err(JetAuthError::WeakKey); }
+    if key.len() < 32 {
+        return Err(JetAuthError::WeakKey);
+    }
     let parts = token.split('.').collect::<Vec<_>>();
     if parts.len() != 3 || parts.iter().any(|part| part.is_empty()) {
-        return Err(JetAuthError::MalformedToken("JWT must have exactly three non-empty parts".to_string()));
+        return Err(JetAuthError::MalformedToken(
+            "JWT must have exactly three non-empty parts".to_string(),
+        ));
     }
     let header = jet_auth_b64url_decode(parts[0]).map_err(JetAuthError::DecodeError)?;
     let header = std::str::from_utf8(&header)
         .map_err(|_| JetAuthError::MalformedToken("JWT header is not valid UTF-8".to_string()))?;
     let header = jet_auth_object(header)?;
-    match header.get("alg") {
-        Some(jet_std::JSON::Text(algorithm)) if algorithm == "HS256" => {}
-        Some(jet_std::JSON::Text(algorithm)) => {
-            return Err(JetAuthError::UnsupportedToken(format!("unsupported JWT algorithm `{algorithm}`")));
+    match jet_auth_get(&header, "alg") {
+        Some(jet_std::DataTree::Text(algorithm) | jet_std::DataTree::TypedText(algorithm))
+            if algorithm == "HS256" => {}
+        Some(jet_std::DataTree::Text(algorithm) | jet_std::DataTree::TypedText(algorithm)) => {
+            return Err(JetAuthError::UnsupportedToken(format!(
+                "unsupported JWT algorithm `{algorithm}`"
+            )));
         }
-        _ => return Err(JetAuthError::MalformedToken("JWT header requires text `alg`".to_string())),
+        _ => {
+            return Err(JetAuthError::MalformedToken(
+                "JWT header requires text `alg`".to_string(),
+            ))
+        }
     }
     let signature = jet_auth_b64url_decode(parts[2]).map_err(|_| JetAuthError::InvalidSignature)?;
     let expected = jet_hmac_sha256(key, format!("{}.{}", parts[0], parts[1]).as_bytes());
-    if !jet_ct_eq(&expected, &signature) { return Err(JetAuthError::InvalidSignature); }
+    if !jet_ct_eq(&expected, &signature) {
+        return Err(JetAuthError::InvalidSignature);
+    }
     let payload = jet_auth_b64url_decode(parts[1]).map_err(JetAuthError::DecodeError)?;
     jet_auth_claims(&payload, audience, issuer.map(String::as_str), clock_skew_ns)
 }

@@ -1,9 +1,9 @@
 //! c139 (D-JITDEP1 / D-JIT2=A) — Cranelift JIT tier-1 backend.
 //!
-//! Architecture: tiered `CraneliftBackend` for default `jet run` / `jet dev`
-//! (D-ONECORE1=A / D-LENS-RUN2=A). Covered functions run native; named gaps
-//! deopt to the canonical TIR interpreter. E2211 is retired — silent deopt,
-//! `--trace-tiers` for experts. No AOT fallback.
+//! Architecture: `CraneliftBackend` consumes checked canonical MIR. Native
+//! execution is allowed only for functions whose upstream target facts include
+//! Cranelift; unsupported MIR is reported at this execution boundary.
+//! `--trace-tiers` remains available for experts.
 //! M2 keeps a resident JIT module + live runtime heap across hot_swap.
 //! M3 widens native lowering: arithmetic, bindings, if/else, calls, loops,
 //! compound assign, &&/|| short-circuit.
@@ -21,40 +21,25 @@
     reason = "#804: shared Prelude symbols retain canonical Jet names"
 )]
 
+/// Canonical devtools event records are shared by every host, including the
+/// generated job Prelude. Keep the names at the JIT root so that an included
+/// Prelude sees the same types as the compiler/comptime host.
+pub use jet_foundation::Devtools::{JetDevtoolsEvent, JET_DEVTOOLS_MAX_HISTORY};
+pub use jet_foundation::DataTree;
+
 /// D-JOB-SUBCMD1=C: the JIT and interpreter import the same Prelude selector
 /// as generated AOT mains. Their only extra work is mapping the selected name
-/// onto the already checked TIR entry.
-
-/// D-ALLOC-PROGRAM1=A / I9: engines only marshal the checked typed fact into
-/// the allocator kernel compiled from Prelude/ProgramAllocator.rs.
-fn program_allocator_cap_bytes(bundle: &jet_foundation::AST::ProgramBundle) -> Option<u64> {
-    match &bundle.program_allocator {
-        jet_foundation::TargetMachine::AllocatorPolicy::Counting { cap } => {
-            Some(cap.map_or(0, |size| size.bytes))
-        }
-        _ => None,
-    }
-}
-
-fn with_program_allocator<R>(
-    bundle: &jet_foundation::AST::ProgramBundle,
-    run: impl FnOnce() -> R,
-) -> R {
-    jet_codegen::program_allocator::jet_with_host_program_allocator(
-        program_allocator_cap_bytes(bundle),
-        run,
-    )
-    .0
-}
+/// onto the already checked MIR entry.
 pub mod Job {
+    include!("../../jet-codegen/src/Prelude/JobQueueTypes.rs");
     include!("../../jet-codegen/src/Prelude/Job.rs");
 }
 
-/// D-DEVR-LAW1=A / I9: the JIT uses the exact receipt record source embedded
-/// by AOT. It does not define a second receipt schema or serializer.
+/// D-DEVR-LAW1=A / I9: the same development-act receipt the AOT prelude embeds.
 pub mod development_receipt {
     include!("../../jet-codegen/src/Prelude/DevelopmentReceipt.rs");
 }
+
 
 /// The dev watcher sleeps through the same Prelude TimerWheel as language
 /// timers. This is only the host adapter; timer ownership stays in
@@ -215,6 +200,7 @@ pub(crate) mod host_fns_audit {
 }
 
 mod Archive;
+mod ambient_interp;
 mod Args;
 mod CLI;
 mod Cell;
@@ -225,8 +211,16 @@ mod Concurrency;
 mod CoreHost;
 mod Crypto;
 mod DB;
-mod Data;
+mod Receipt;
+mod Plugin;
+/// The JIT always supplies checked authority-needs metadata through its
+/// hidden plugin-load argument. This root symbol only satisfies the shared
+/// Prelude's AOT default entry and fails closed if that path is used.
+fn jet_plugin_declared_authority_needs() -> Result<Vec<String>, String> {
+    Err("plugin load requires compiler-supplied declared authority needs".to_string())
+}
 mod Encoding;
+mod Data;
 mod Ffi;
 mod Fmt;
 mod Game;
@@ -237,7 +231,7 @@ mod Math;
 mod MathExtra;
 mod Memory;
 mod Mod;
-mod ambient_interp;
+mod ProcessPrelude;
 mod enc_stream;
 mod host_seam;
 mod net_http_rt;
@@ -255,12 +249,55 @@ mod Text;
 mod testing_shared {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
+    // The typed evidence error is one type across tiers; the compiler's
+    // `test_report` module is its canonical host-side home.
+    pub(crate) use jet_codegen::Codegen::test_report::TestEvidenceError;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/TestingShared.rs");
 }
 mod Time;
 mod Ui;
 mod Watcher;
 mod Web;
+
+pub use DB::{
+    inspect_migrations, migration_request_checksum, run_migration, ConsoleDbConnection,
+    ConsoleDbQueryResult, ConsoleDbResource, ConsoleDbTransaction, ConsoleDbValue, MigrationLock,
+    MigrationOperation, MigrationOutcome, MigrationRequest, MigrationSql, MigrationState,
+    MigrationStateRequest, MIGRATION_SCHEMA_IDENTITY,
+};
+pub use net_http_rt::{ConsoleHttpRequest, ConsoleHttpResponse, ConsoleHttpRouter};
+
+pub use ambient_interp::{
+    register_hardware_interpreter_ambient, with_interpreter_ambient, InterpreterAmbientContext,
+};
+
+pub fn register_encoding_interpreter_ambient(context: &mut InterpreterAmbientContext) {
+    Encoding::register_interpreter_ambient(context);
+}
+
+pub fn register_receipt_interpreter_ambient(context: &mut InterpreterAmbientContext) {
+    Receipt::register_interpreter_ambient(context);
+}
+
+pub fn register_db_interpreter_ambient(context: &mut InterpreterAmbientContext) {
+    DB::register_interpreter_ambient(context);
+}
+
+pub fn register_ui_interpreter_ambient(context: &mut InterpreterAmbientContext) {
+    Ui::register_interpreter_ambient(context);
+}
+
+pub fn register_raylib_interpreter_ambient(context: &mut InterpreterAmbientContext) {
+    Raylib::register_interpreter_ambient(context);
+}
+
+pub fn register_plugin_interpreter_ambient(context: &mut InterpreterAmbientContext) {
+    Plugin::register_interpreter_ambient(context);
+}
+
+pub fn register_crypto_interpreter_ambient(context: &mut InterpreterAmbientContext) {
+    Crypto::register_interpreter_ambient(context);
+}
 
 /// Shared by prelude `include!` fragments that impl `crate::JetShow`.
 pub(crate) trait JetShow {
@@ -285,7 +322,7 @@ pub mod jet_xml_pull {
 // The root package depends on jet-jit; jet-jit depends on cranelift-*.
 // D-JITDEP1 approved this as a scoped runtime-side exception.
 
-use std::cell::{Cell as StdCell, RefCell};
+use std::cell::RefCell;
 
 use runtime_host::ResidentModule;
 
@@ -296,76 +333,12 @@ thread_local! {
     static RESIDENT_RUNTIME: RefCell<Option<JitRuntime>> = const { RefCell::new(None) };
 }
 
-type AmbientCoreCall = fn(
-    &str,
-    &str,
-    Vec<jet_foundation::AST::CtValue>,
-    jet_foundation::Diagnostics::Span,
-    Option<jet_foundation::AST::Type>,
-    Option<&mut jet_codegen::Comptime::DevSink>,
-) -> Option<Result<jet_foundation::AST::CtValue, jet_foundation::Diagnostics::Diagnostic>>;
-
-thread_local! {
-    /// Callback that was active before the runtime adapters were installed.
-    ///
-    /// The compiler owns `core.compiler.*`; the JIT owns the other ambient
-    /// routes. A run must expose both without making either crate depend on the
-    /// other, so the runtime callback delegates to this slot before its own
-    /// dispatch.
-    static AMBIENT_CORE_FALLBACK: StdCell<Option<AmbientCoreCall>> = const { StdCell::new(None) };
-}
-
-struct AmbientCoreFallbackGuard(Option<AmbientCoreCall>);
-
-impl Drop for AmbientCoreFallbackGuard {
-    fn drop(&mut self) {
-        AMBIENT_CORE_FALLBACK.with(|slot| slot.set(self.0));
-    }
-}
-
-fn combined_ambient_core_call(
-    module: &str,
-    method: &str,
-    args: Vec<jet_foundation::AST::CtValue>,
-    span: jet_foundation::Diagnostics::Span,
-    resolved_ret: Option<jet_foundation::AST::Type>,
-    mut sink: Option<&mut jet_codegen::Comptime::DevSink>,
-) -> Option<Result<jet_foundation::AST::CtValue, jet_foundation::Diagnostics::Diagnostic>> {
-    let fallback = AMBIENT_CORE_FALLBACK.with(|slot| slot.get());
-    if let Some(fallback) = fallback {
-        // Nested runtime scopes already point at this combiner. Do not recurse
-        // through the same function; its own runtime dispatch runs below.
-        let is_runtime_callback =
-            fallback as usize == ambient_interp::ambient_core_call as *const () as usize;
-        let is_combiner =
-            fallback as usize == combined_ambient_core_call as *const () as usize;
-        if !is_runtime_callback && !is_combiner {
-            if let Some(result) = fallback(
-                module,
-                method,
-                args.clone(),
-                span,
-                resolved_ret.clone(),
-                sink.as_deref_mut(),
-            ) {
-                return Some(result);
-            }
-        }
-    }
-    ambient_interp::ambient_core_call(module, method, args, span, resolved_ret, sink)
-}
 
 /// Serializes whole resident JIT runs across the process.
 ///
-/// It was introduced to guard a `take_hook`/`set_hook` swap, which
-/// `runtime_host::catch_jit_panic` no longer performs — but it is still
-/// load-bearing, and for a sharper reason. The resident session state above is
-/// thread-local, yet parts of the session reached from it are *not*:
-/// `Data.rs`'s `LAZY_RESOLVED`/`LAZY_FN_TABLE` cache finalized code pointers
-/// keyed by raw `FuncId`, which two independent `JITModule`s hand out from the
-/// same small numbering, and `clear_lazy_state` wipes that cache globally.
-/// Two concurrent resident runs would therefore read each other's code
-/// pointers. Until that state is made per-session, one run at a time.
+/// Resident module and runtime state are thread-local handles with process-wide
+/// host resources behind them. Keep one resident run at a time so hot-swap and
+/// reset cannot interleave with another run.
 static RESIDENT_JIT_RUN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Install argv for one JIT run (`argv[0]` = entry path, then program args).
@@ -384,30 +357,11 @@ pub fn with_program_args<R>(args: &[String], run: impl FnOnce() -> R) -> R {
 pub fn reset_one_shot_core_state() {
     Crypto::runtime::auth_runtime_reset();
     jet_codegen::Comptime::AuthLite::auth_runtime_reset();
+    // One-shot runs must not retain `core.watcher` handles or event scopes from
+    // a previous in-process invocation. Resident teardown owns its own reset.
+    Watcher::clear_watcher_state();
 }
 
-/// Install the runtime ambient adapters around an explicitly forced
-/// interpreter run, matching whole-program deopt.
-pub fn with_interpreter_ambient<R>(body: impl FnOnce() -> R) -> R {
-    jet_codegen::scheduler::jet_observe_runtime_start();
-    let previous = jet_codegen::Comptime::ambient_hooks().0;
-    let _fallback = AmbientCoreFallbackGuard(AMBIENT_CORE_FALLBACK.with(|slot| slot.replace(previous)));
-    jet_codegen::Comptime::with_ambient(
-        Some(combined_ambient_core_call),
-        Some(ambient_interp::ambient_handle),
-        Some(ambient_interp::ambient_extern_call),
-        body,
-    )
-}
-
-/// Bind the prepared bridge for the explicit tier-0 interpreter. The caller
-/// runs the boundary scan first, so capability diagnostics keep their normal
-/// source-level code before the runtime bridge is attempted.
-pub fn bind_interpreter_ffi(
-    bundle: &jet_foundation::AST::ProgramBundle,
-) -> Result<(), Vec<jet_foundation::Diagnostics::Diagnostic>> {
-    Ffi::bind_bundle_ffi_for_interpreter(bundle)
-}
 
 /// Clear native `Mod` loads created by the current interpreter invocation.
 /// The engine exposes no second lifecycle policy: `JetMod::Drop` in the shared
@@ -416,78 +370,26 @@ pub fn clear_loaded_modules() {
     Mod::clear();
 }
 
-/// Run JIT work on Jet's canonical compiler worker.
-///
-/// TIR lowering and Cranelift lowering are the same unbounded-depth recursive
-/// descent the front end runs, so a caller that reaches this crate without
-/// going through `jet-driver` — an embedder holding a checked bundle, a test
-/// harness, the dev server — needs the same explicit stack a compile entry
-/// gets. `jet-jit` cannot depend on `jet-driver` (I6), so both sides install
-/// the boundary from [`jet_foundation::CompilerStack`] and share its
-/// re-entrancy flag: whichever entry is outermost spawns the worker and every
-/// inner entry runs inline on it.
-///
-/// The worker is a different thread, so this carries every thread-local a
-/// caller writes before the call or reads after it:
-///
-/// * **in** — comptime ambient hooks and the TIR comptime bridge, program
-///   argv (`Comptime::RUNTIME_ARGV`), `--trace-tiers`.
-/// * **out** — the JIT/fallback/deopt trace flags, the `--trace-tiers` rows,
-///   the `struct_new` counter, and the tier-1 cache artifact the run just
-///   published.
-/// * **in and out** — the `core.perf` fidelity signal
-///   (`runtime_host::perf_fidelity_bits`). Alone in this list it is *session*
-///   state rather than run state: D-FIDELITY-API1=A requires it to survive
-///   `resident_teardown()` and a fresh `JitRuntime`, mirroring the AOT binary's
-///   process-global static, while staying invisible to an unrelated
-///   resident-JIT session on another thread. Its home is the thread that owns
-///   the session — the outermost non-worker caller, the one identity that is
-///   stable across a sequence of calls — and each hop borrows it and hands it
-///   back. Leaving it on the worker made every outermost `run` start from the
-///   default, because the worker is per call; a process-wide atomic is the bug
-///   the thread-local was introduced to fix (see `runtime_host.rs`).
-///
-/// Everything else this crate keeps in thread-local storage is runtime state
-/// created from the bundle inside the run and consumed inside it (host log
-/// levels, CLI plan, type migrations, redaction, ambient streams, listeners,
-/// watches, deadlines, deopt tables) — with one exception, the *resident
-/// session* (`RESIDENT_MODULE` / `RESIDENT_RUNTIME` /
-/// `jet_foundation::Persist`), which by D-HOTSWAP1 / D-PERSIST1 is scoped to
-/// the thread rather than to a call or a backend value. A session owner that
-/// keeps that state alive across calls therefore installs this boundary once
-/// around the whole session; see [`CraneliftBackend`]. Anything added to the
-/// "consumed inside it" list must be checked against that distinction: state a
-/// *later* call reads belongs in a bucket above, not there.
-///
-/// Panics are re-raised, not reshaped, so the ICE path is unchanged — but the
-/// carried-out state is published first, so a caller that inspects the trace
-/// after a caught panic sees what the worker recorded rather than nothing.
+/// Run JIT work on Jet's shared compiler worker. Callers pass a checked MIR
+/// program, so this boundary adds only the stack and thread-local transport
+/// needed by the resident adapter.
 pub fn on_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
     if jet_foundation::CompilerStack::on_compiler_worker() {
         return work();
     }
-    let (ambient_core_call, ambient_handle, ambient_extern_call) =
-        jet_codegen::Comptime::ambient_hooks();
     let argv = jet_codegen::Comptime::runtime_argv();
     let trace_tiers = tiers::trace_tiers_enabled();
     let fidelity = runtime_host::perf_fidelity_bits();
     let (out, flags, rows, struct_new, artifact, fidelity_out) =
         jet_foundation::CompilerStack::run_on_compiler_stack(move || {
-            jet_codegen::Codegen::TIR::install_comptime_bridge();
             tiers::set_trace_tiers(trace_tiers);
             runtime_host::set_perf_fidelity_bits(fidelity);
             let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                jet_codegen::Comptime::with_ambient(
-                    ambient_core_call,
-                    ambient_handle,
-                    ambient_extern_call.or(Some(ambient_interp::ambient_extern_call)),
-                    || {
-                        match argv {
-                            Some(args) => {
-                                jet_codegen::Comptime::with_runtime_argv(&args, work)
-                            }
-                            None => work(),
-                        }
+                jet_codegen::Comptime::with_ambient_mir_extern(
+                    Some(Ffi::ambient_mir_extern_call_cranelift),
+                    || match argv {
+                        Some(args) => jet_codegen::Comptime::with_runtime_argv(&args, work),
+                        None => work(),
                     },
                 )
             }));
@@ -501,7 +403,7 @@ pub fn on_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
             )
         });
     trace::merge_jit_trace_flags_for_test(flags);
-    tiers::publish_trace(rows);
+    tiers::record_trace(rows);
     runtime_host::add_struct_new_count_for_test(struct_new);
     tier_cache::publish_last_tier_artifact(artifact);
     runtime_host::set_perf_fidelity_bits(fidelity_out);
@@ -510,7 +412,7 @@ pub fn on_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
 
 /// Runtime-neutral Result carrier used by native JIT code. Cranelift functions
 /// pass one i64 handle for every `Result<T, E>`; payload bits stay exact and
-/// are decoded using the statically checked TIR payload type.
+/// are decoded using the statically checked MIR payload type.
 #[derive(Clone, Copy)]
 pub(crate) struct JitResultValue {
     ok: bool,
@@ -527,8 +429,6 @@ mod deopt;
 mod functions_compile;
 #[path = "jit/gap.rs"]
 mod gap;
-#[path = "jit/lower_ctx.rs"]
-mod lower_ctx;
 #[path = "jit/resident.rs"]
 mod resident;
 #[path = "jit/runtime_host.rs"]
@@ -566,17 +466,19 @@ pub use api_debug::{
     cranelift_host_supported, jit_dump_main_ops, jit_dump_main_stmts, jit_dump_mixed_switch_conds,
     jit_expr_tag, jit_main_uncovered_detail, jit_program_func_names, jit_select_arm_counts,
     jit_spawn_stats, jit_stmt_tag, resident_invocations_for_test, resident_jit_func_safety_detail,
-    resident_jit_safe_bundle, resident_jit_safe_bundle_detail, run_resident_strict_for_test,
-    tir_lower_fail_reason, tir_lowers_bundle, try_compile_bundle, try_compile_debug_aot,
-    DebugAotObject, ResidentJitSafety,
+    resident_jit_safe_program, resident_jit_safe_program_detail, run_resident_strict_for_test,
+    try_compile_debug_aot, try_compile_program, DebugAotObject, ResidentJitSafety,
 };
-pub use backend::plan_bundle_tiers;
 pub use backend::CraneliftBackend;
-pub use gap::{entry_run_name, is_e2211, JitGap};
-pub use tier_cache::{run_cached_module, take_last_tier_artifact};
+pub use resident::{
+    apply_hot_swap, apply_hot_swap_with_program, discard_hot_swap_plan, resident_boot_console,
+    ConsoleServiceBinding, ResidentConsoleLease,
+};
+pub use tier_cache::{cached_artifact_id, run_cached_module, take_last_tier_artifact};
 pub use tiers::{
-    publish_trace, record_trace, set_trace_tiers, take_last_trace, take_trace_aggregate,
-    trace_tiers_enabled, write_trace_sidecar, Tier, TierPlan, TierRow, TierTraceAggregate,
+    plan_mir_tiers, record_trace, set_trace_tiers, take_last_trace,
+    take_trace_aggregate, trace_tiers_enabled, write_trace_sidecar, MirTierPlan, Tier, TierRow,
+    TierTraceAggregate,
 };
 pub use trace::{
     deopt_invoked_for_test, fallback_invoked_for_test, jit_executed_for_test,

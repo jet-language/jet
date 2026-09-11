@@ -1,6 +1,7 @@
 //! Integration tests for D-METAREFLECT1 / D-REFLECT1 rich reflection.
 
 mod common;
+mod tir_support;
 
 use jet::Comptime::{
     build_distinct_type_info, build_registered_fact_info, build_state_infos_with_graph,
@@ -16,6 +17,34 @@ use jet_foundation::Facts::{StateGraph, StateNode};
 fn span() -> Span {
     Span::new(0, 1)
 }
+
+/// D-LAYOUT-FACTS1=B: a direct nominal layout fact can initialize an
+/// ordinary top-level comptime binding, then project its target-sized bytes.
+#[test]
+fn direct_layout_fact_feeds_top_level_binding() {
+    let src = r#"
+#Layout(c)
+struct Ring {
+    slots: [Int#1024]
+    head: Int
+    tail: Int
+}
+
+@size :: Ring.@layout.size
+@alignment :: Ring.@layout.alignment
+
+fn run() {
+    print("{@size}:{@alignment}")
+}
+"#;
+    let expected = format!(
+        "{}:{}\n",
+        std::mem::size_of::<jet_foundation::Numeric::JetInt>() * 1026,
+        std::mem::align_of::<jet_foundation::Numeric::JetInt>(),
+    );
+    tir_support::assert_tiers_agree("direct_layout_fact", src, &expected);
+}
+
 
 #[test]
 fn arithmetic_policy_is_visible_in_function_reflection() {
@@ -152,6 +181,7 @@ fn method(name: &str, is_pub: bool) -> Func {
         span: span(),
         is_pub,
         is_package_pub: false,
+        is_comptime: false,
         external_type: None,
         name: name.to_string(),
         name_span: span(),
@@ -431,7 +461,10 @@ fn marker_arguments_are_typed_in_the_written_view() {
         name: "Inline".to_string(),
         negated: false,
         name_span: span(),
-        args: vec![Expr::Ident("Always".to_string(), span())],
+        args: vec![jet_foundation::AST::MarkerCallArg::Expr(Expr::Ident(
+            "Always".to_string(),
+            span(),
+        ))],
         arg_labels: vec![None],
         span: span(),
         ct: None,

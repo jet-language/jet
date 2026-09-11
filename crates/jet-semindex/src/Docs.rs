@@ -7,6 +7,7 @@
 use crate::Types::{SemIndex, TraitContractFact};
 use jet_foundation::AST::{Item, ProgramBundle};
 use jet_foundation::Diagnostics::Span;
+use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
 use jet_pkg_model::EffectBudget::{render_effect_projection_line, render_effect_projection_object, EffectProjection};
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -189,6 +190,65 @@ impl DocGraph {
             .iter()
             .filter(|item| item.public && item.summary.is_empty())
             .collect()
+    }
+
+    /// Typed command boundary for the documentation projection. The generated
+    /// HTML/Markdown artifacts continue to use `to_json` independently.
+    pub fn to_status_envelope(&self) -> StatusEnvelope {
+        let effect_projection = StatusValue::object(
+            StatusFields::new()
+                .with(
+                    "required_effects",
+                    StatusValue::array(
+                        self.effect_projection
+                            .required_effects
+                            .iter()
+                            .map(|effect| StatusValue::from(effect.as_str())),
+                    ),
+                )
+                .with(
+                    "granted_effects",
+                    StatusValue::array(
+                        self.effect_projection
+                            .granted_effects
+                            .iter()
+                            .map(|effect| StatusValue::from(effect.as_str())),
+                    ),
+                )
+                .with(
+                    "denied_effects",
+                    StatusValue::array(
+                        self.effect_projection
+                            .denied_effects
+                            .iter()
+                            .map(|effect| StatusValue::from(effect.as_str())),
+                    ),
+                )
+                .with("authority", self.effect_projection.authority.as_str()),
+        );
+        let doc = StatusValue::object(
+            StatusFields::new()
+                .with("schema_version", self.schema_version)
+                .with("root", self.root.as_str())
+                .with("effect_projection", effect_projection)
+                .with(
+                    "modules",
+                    StatusValue::array(self.modules.iter().map(doc_module_value)),
+                )
+                .with(
+                    "items",
+                    StatusValue::array(self.items.iter().map(doc_item_value)),
+                )
+                .with(
+                    "impls",
+                    StatusValue::array(self.impls.iter().map(doc_impl_value)),
+                )
+                .with(
+                    "doctests",
+                    StatusValue::array(self.doctests.iter().map(doc_test_value)),
+                ),
+        );
+        StatusEnvelope::new("inspect.doc", true).with_field("doc", doc)
     }
 
     /// Stable machine-readable output.  Field order is explicit because this
@@ -401,6 +461,107 @@ impl DocGraph {
         out.push_str("</body></html>\n");
         out
     }
+}
+
+fn optional_doc_text(value: Option<&str>) -> StatusValue {
+    value.map(StatusValue::from).unwrap_or(StatusValue::Null)
+}
+
+fn doc_source_value(source: &DocSource) -> StatusValue {
+    StatusValue::object(
+        StatusFields::new()
+            .with("path", source.path.as_str())
+            .with("start", source.start)
+            .with("end", source.end)
+            .with("line", source.line)
+            .with("column", source.column)
+            .with("link", source.link.as_str()),
+    )
+}
+
+fn doc_module_value(module: &DocModule) -> StatusValue {
+    StatusValue::object(
+        StatusFields::new()
+            .with("name", module.name.as_str())
+            .with("path", module.path.as_str())
+            .with("public", module.public)
+            .with("summary", module.summary.as_str())
+            .with("source", doc_source_value(&module.source)),
+    )
+}
+
+fn doc_item_value(item: &DocItem) -> StatusValue {
+    StatusValue::object(
+        StatusFields::new()
+            .with("kind", item.kind.as_str())
+            .with("name", item.name.as_str())
+            .with("qualified_name", item.qualified_name.as_str())
+            .with("module", item.module.as_str())
+            .with("public", item.public)
+            .with("package_public", item.package_public)
+            .with("signature", item.signature.as_str())
+            .with("failure_contract", optional_doc_text(item.failure_contract.as_deref()))
+            .with("failure_source", optional_doc_text(item.failure_source.as_deref()))
+            .with("summary", item.summary.as_str())
+            .with(
+                "examples",
+                StatusValue::array(item.examples.iter().map(|value| StatusValue::from(value.as_str()))),
+            )
+            .with(
+                "markers",
+                StatusValue::array(item.markers.iter().map(|value| StatusValue::from(value.as_str()))),
+            )
+            .with("source", doc_source_value(&item.source)),
+    )
+}
+
+fn doc_impl_value(implementation: &DocImpl) -> StatusValue {
+    StatusValue::object(
+        StatusFields::new()
+            .with("kind", implementation.kind.as_str())
+            .with("type_name", implementation.type_name.as_str())
+            .with(
+                "trait_name",
+                optional_doc_text(implementation.trait_name.as_deref()),
+            )
+            .with("module", implementation.module.as_str())
+            .with("public", implementation.public)
+            .with(
+                "methods",
+                StatusValue::array(
+                    implementation
+                        .methods
+                        .iter()
+                        .map(|value| StatusValue::from(value.as_str())),
+                ),
+            )
+            .with("source", doc_source_value(&implementation.source)),
+    )
+}
+
+fn doc_test_value(test: &DocTest) -> StatusValue {
+    let expectations = StatusValue::array(test.expectations.iter().map(|expectation| {
+        StatusValue::object(
+            StatusFields::new()
+                .with("expression", expectation.expression.as_str())
+                .with("expected", expectation.expected.as_str()),
+        )
+    }));
+    StatusValue::object(
+        StatusFields::new()
+            .with("module", test.module.as_str())
+            .with("line", test.line)
+            .with(
+                "setup",
+                StatusValue::array(
+                    test.setup
+                        .iter()
+                        .map(|value| StatusValue::from(value.as_str())),
+                ),
+            )
+            .with("expectations", expectations)
+            .with("source", doc_source_value(&test.source)),
+    )
 }
 
 impl DocSource {

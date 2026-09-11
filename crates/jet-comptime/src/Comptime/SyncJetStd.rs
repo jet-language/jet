@@ -3,9 +3,14 @@ pub use jet_foundation::Outcome::*;
 // D-DBPOLICY1=A: the one closed row-policy language. `Top/Sync.rs` reaches it
 // through `jet_std::jet_db_policy_compile` on this tier exactly as it does in
 // the AOT Prelude, so comptime cannot accept a policy AOT rejects (I9).
+use jet_foundation::Shape::ShapeProjection;
 include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/RowPolicy.rs");
 include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/WireOrder.rs");
 include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTreeKind.rs");
+// The carrier enum lives in Foundation (`jet_foundation::DataTree`); the
+// included `DataTree.rs` is the runtime extension over it, exactly as the AOT
+// Prelude splice and the Cranelift host arrange it.
+pub use jet_foundation::DataTree::DataTree;
 // The one FieldError projection (I9): `DataTree.rs`'s `JetShow`/`JetDisplay`
 // impls call it, exactly as the AOT Prelude and the Cranelift host do.
 include!("../../../jet-codegen/src/Prelude/Core/FieldError.rs");

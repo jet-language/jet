@@ -302,6 +302,19 @@ fn run() {
         .Err(_) -> { print("i64-overflow") }
         else -> { print("accepted") }
     }
+    print(json.decode<U64>("18446744073709551615") ?? panic("u64 maximum"))
+    if json.decode<U64>("18446744073709551616") == {
+        .Err(_) -> print("u64-overflow")
+        else -> print("accepted")
+    }
+    if json.decode<U64>("-1") == {
+        .Err(_) -> print("u64-negative")
+        else -> print("accepted")
+    }
+    if json.decode<Int>("\"123\"") == {
+        .Err(_) -> print("quoted-int")
+        else -> print("accepted")
+    }
     nonfinite :: json.decode<Float>("1e400")
     if nonfinite == {
         .Err(_) -> { print("nonfinite") }
@@ -361,7 +374,8 @@ fn run() {
             "1000000000000000000000000000000\n",
             "9007199254740993\n",
             "12345678901234567890123456789012345678901234567890\n",
-            "i64-overflow\nnonfinite\nnan-rejected\ninfinity-rejected\n",
+            "i64-overflow\n18446744073709551615\nu64-overflow\nu64-negative\nquoted-int\n",
+            "nonfinite\nnan-rejected\ninfinity-rejected\n",
             "fractional-rejected\nexponent-limit\nmismatch\nstream-mismatch\n",
             "string-mismatch\nlimit\n",
         )

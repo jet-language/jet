@@ -964,3 +964,101 @@ fn char_literal_end(bytes: &[u8]) -> Option<usize> {
     None
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn emitted_target_dossier_source(layer: &str, provider: &str, closure: &str) -> String {
+        format!(
+            "{BEGIN}// jet:target-dossier layer={layer} provider={provider} closure={closure} artifact=fixture\nfn runtime_entry() {{}}\n{END}"
+        )
+    }
+
+    fn key_for_source(
+        crate_name: &str,
+        crate_prefix: &str,
+        dependency_key: Option<&str>,
+        source: &str,
+    ) -> String {
+        cache_key_with_schema(
+            CACHE_SCHEMA,
+            crate_name,
+            source,
+            "fixed-exported-runtime",
+            crate_prefix,
+            dependency_key,
+            OsStr::new("rustc"),
+            "rustc-test",
+            &[],
+            &[],
+        )
+    }
+
+    #[test]
+    fn target_dossier_source_invalidates_runtime_and_core_keys() {
+        let provider = "target-providers-v1:sha256:provider-a";
+        let closure = "prelude-hosted-v1:sha256:closure-a";
+        let base = emitted_target_dossier_source("hosted", provider, closure);
+        let variants = [
+            (
+                "layer",
+                emitted_target_dossier_source("core", provider, closure),
+            ),
+            (
+                "provider digest/identity",
+                emitted_target_dossier_source(
+                    "hosted",
+                    "target-providers-v1:sha256:provider-b",
+                    closure,
+                ),
+            ),
+            (
+                "Prelude closure",
+                emitted_target_dossier_source(
+                    "hosted",
+                    provider,
+                    "prelude-hosted-v1:sha256:closure-b",
+                ),
+            ),
+        ];
+        let runtime_base =
+            key_for_source(RUNTIME_CRATE_NAME, RUNTIME_CRATE_PREFIX, None, &base);
+        let core_base = key_for_source(
+            CORE_CRATE_NAME,
+            CORE_CRATE_PREFIX,
+            Some("runtime-key"),
+            &base,
+        );
+        assert_eq!(
+            runtime_base,
+            key_for_source(RUNTIME_CRATE_NAME, RUNTIME_CRATE_PREFIX, None, &base)
+        );
+        assert_eq!(
+            core_base,
+            key_for_source(
+                CORE_CRATE_NAME,
+                CORE_CRATE_PREFIX,
+                Some("runtime-key"),
+                &base
+            )
+        );
+
+        for (field, changed) in variants {
+            assert_ne!(
+                runtime_base,
+                key_for_source(RUNTIME_CRATE_NAME, RUNTIME_CRATE_PREFIX, None, &changed),
+                "{field} source identity must invalidate the runtime rlib key"
+            );
+            assert_ne!(
+                core_base,
+                key_for_source(
+                    CORE_CRATE_NAME,
+                    CORE_CRATE_PREFIX,
+                    Some("runtime-key"),
+                    &changed
+                ),
+                "{field} source identity must invalidate the Core rlib key"
+            );
+        }
+    }
+}

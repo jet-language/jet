@@ -24,7 +24,9 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 thread_local! {
     static DB_CONNS: RefCell<HashMap<u64, rusqlite::Connection>> =
@@ -65,8 +67,31 @@ pub fn jet_db_close(handle: u64) -> bool {
     DB_CONNS.with(|m| m.borrow_mut().remove(&handle).is_some())
 }
 
-/// Run a `BEGIN`/`COMMIT`/`ROLLBACK` on `handle`. Returns `true` on success,
-/// `false` on error or invalid handle. Shared by `.begin()`/`.commit()`/`.rollback()`.
+/// Check that a database handle is live and can execute the pool health
+/// probe. This stays an adapter fact; Jet code sees only the pool lifecycle.
+pub fn jet_db_health(handle: u64) -> bool {
+    DB_CONNS.with(|m| {
+        let map = m.borrow();
+        map.get(&handle).is_some_and(|conn| {
+            conn.query_row("SELECT 1", [], |row| row.get::<_, i64>(0))
+                .is_ok()
+        })
+    })
+}
+
+/// Return a leased connection to its clean transaction state. A connection
+/// already in autocommit mode is clean; otherwise rollback is the shared
+/// adapter reset operation.
+pub fn jet_db_reset(handle: u64) -> bool {
+    DB_CONNS.with(|m| {
+        let mut map = m.borrow_mut();
+        let Some(conn) = map.get_mut(&handle) else {
+            return false;
+        };
+        conn.is_autocommit() || conn.execute_batch("ROLLBACK").is_ok()
+    })
+}
+
 fn run_txn_stmt(handle: u64, stmt: &str) -> bool {
     DB_CONNS.with(|m| {
         let map = m.borrow();
@@ -75,8 +100,20 @@ fn run_txn_stmt(handle: u64, stmt: &str) -> bool {
     })
 }
 
+/// Begin a transaction with the migration lock requested by the shared
+/// Prelude kernel.  SQLite's RESERVED write lock is the authoritative
+/// exclusive migration lock; a plain deferred transaction is the shared read
+/// mode.  Process lock files remain advisory diagnostics only.
+pub fn jet_db_begin_mode(handle: u64, mode: i64) -> bool {
+    match mode {
+        0 => run_txn_stmt(handle, "BEGIN"),
+        1 => run_txn_stmt(handle, "BEGIN IMMEDIATE"),
+        _ => false,
+    }
+}
+
 pub fn jet_db_begin(handle: u64) -> bool {
-    run_txn_stmt(handle, "BEGIN")
+    jet_db_begin_mode(handle, 0)
 }
 
 pub fn jet_db_commit(handle: u64) -> bool {
@@ -162,6 +199,327 @@ pub fn jet_db_execute(handle: u64, sql: &str, params_wire: &str) -> String {
         }
     })
 }
+#[derive(Clone, Debug)]
+struct DbPlanFact {
+    ordinal: u64,
+    parent: u64,
+    operation: String,
+    relation: Option<String>,
+    index: Option<String>,
+}
+
+fn parse_plan_detail(detail: &str) -> (String, Option<String>, Option<String>) {
+    let tokens: Vec<&str> = detail.split_whitespace().collect();
+    let operation = match tokens.first().copied() {
+        Some("USE") if tokens.get(1).copied() == Some("TEMP") => "USE TEMP".to_string(),
+        Some(value) => value.to_string(),
+        None => "UNKNOWN".to_string(),
+    };
+    let relation = match tokens.first().copied() {
+        Some("SCAN" | "SEARCH") => tokens.get(1).and_then(|value| {
+            let value = value.trim_matches(|character: char| {
+                !character.is_ascii_alphanumeric() && character != '_' && character != '.'
+            });
+            (!value.is_empty() && !value.eq_ignore_ascii_case("SUBQUERY")).then(|| value.to_string())
+        }),
+        _ => None,
+    };
+    let index = tokens
+        .windows(2)
+        .position(|pair| pair[0].eq_ignore_ascii_case("INDEX"))
+        .and_then(|position| tokens.get(position + 1))
+        .map(|value| {
+            value
+                .trim_matches(|character: char| {
+                    !character.is_ascii_alphanumeric() && character != '_' && character != '.'
+                })
+                .to_string()
+        })
+        .filter(|value| !value.is_empty());
+    (operation, relation, index)
+}
+
+fn query_plan(
+    conn: &rusqlite::Connection,
+    sql: &str,
+    param_refs: &[&dyn rusqlite::types::ToSql],
+) -> Vec<DbPlanFact> {
+    let explain_sql = format!("EXPLAIN QUERY PLAN {}", sql.trim().trim_end_matches(';'));
+    let Ok(mut statement) = conn.prepare(&explain_sql) else {
+        return Vec::new();
+    };
+    let Ok(mut rows) = statement.query(param_refs) else {
+        return Vec::new();
+    };
+    let mut plan = Vec::new();
+    while let Ok(Some(row)) = rows.next() {
+        let Ok(ordinal) = row.get::<_, i64>(0) else {
+            continue;
+        };
+        let Ok(parent) = row.get::<_, i64>(1) else {
+            continue;
+        };
+        let Ok(detail) = row.get::<_, String>(3) else {
+            continue;
+        };
+        if ordinal < 0 || parent < 0 {
+            continue;
+        }
+        let (operation, relation, index) = parse_plan_detail(&detail);
+        plan.push(DbPlanFact {
+            ordinal: ordinal as u64,
+            parent: parent as u64,
+            operation,
+            relation,
+            index,
+        });
+    }
+    plan
+}
+
+fn query_plan_limited(
+    conn: &rusqlite::Connection,
+    sql: &str,
+    param_refs: &[&dyn rusqlite::types::ToSql],
+    max_rows: usize,
+    timeout_ms: u64,
+) -> Result<(Vec<DbPlanFact>, bool, bool), String> {
+    let timeout_flag = Arc::new(AtomicBool::new(false));
+    let callback_flag = Arc::clone(&timeout_flag);
+    let timeout = Duration::from_millis(timeout_ms);
+    let started = Instant::now();
+    conn.progress_handler(
+        1_000,
+        Some(move || {
+            if started.elapsed() >= timeout {
+                callback_flag.store(true, Ordering::Relaxed);
+                true
+            } else {
+                false
+            }
+        }),
+    );
+    let result = (|| {
+        let explain_sql = format!("EXPLAIN QUERY PLAN {}", sql.trim());
+        let mut statement = conn.prepare(&explain_sql).map_err(|error| error.to_string())?;
+        let mut rows = statement
+            .query(param_refs)
+            .map_err(|error| error.to_string())?;
+        let mut plan = Vec::new();
+        let mut truncated = false;
+        let max_rows = max_rows.min(256);
+        loop {
+            let row = match rows.next() {
+                Ok(row) => row,
+                Err(_error) if timeout_flag.load(Ordering::Relaxed) => {
+                    return Ok((plan, true, truncated));
+                }
+                Err(error) => return Err(error.to_string()),
+            };
+            let Some(row) = row else {
+                break;
+            };
+            if plan.len() >= max_rows {
+                truncated = true;
+                break;
+            }
+            let Ok(ordinal) = row.get::<_, i64>(0) else {
+                continue;
+            };
+            let Ok(parent) = row.get::<_, i64>(1) else {
+                continue;
+            };
+            let Ok(detail) = row.get::<_, String>(3) else {
+                continue;
+            };
+            if ordinal < 0 || parent < 0 {
+                continue;
+            }
+            let (operation, relation, index) = parse_plan_detail(&detail);
+            plan.push(DbPlanFact {
+                ordinal: ordinal as u64,
+                parent: parent as u64,
+                operation,
+                relation,
+                index,
+            });
+        }
+        Ok((plan, timeout_flag.load(Ordering::Relaxed), truncated))
+    })();
+    conn.progress_handler(0, None::<fn() -> bool>);
+    result
+}
+
+fn explain_sql_is_select(sql: &str) -> bool {
+    let text = sql.trim();
+    if text.is_empty()
+        || text.contains(';')
+        || text.contains("--")
+        || text.contains("/*")
+        || text.contains("*/")
+    {
+        return false;
+    }
+    text.split_whitespace()
+        .next()
+        .is_some_and(|word| word.eq_ignore_ascii_case("select"))
+}
+
+fn encode_plan(facts: &[DbPlanFact]) -> String {
+    let mut out = String::new();
+    out.push_str(&facts.len().to_string());
+    out.push(':');
+    for fact in facts {
+        out.push_str(&encode_tagged('I', &fact.ordinal.to_string()));
+        out.push_str(&encode_tagged('P', &fact.parent.to_string()));
+        out.push_str(&encode_tagged('O', &fact.operation));
+        out.push_str(&encode_tagged('T', fact.relation.as_deref().unwrap_or("")));
+        out.push_str(&encode_tagged('X', fact.index.as_deref().unwrap_or("")));
+    }
+    out
+}
+
+fn query_rows(
+    conn: &rusqlite::Connection,
+    sql: &str,
+    param_refs: &[&dyn rusqlite::types::ToSql],
+) -> Result<Vec<String>, String> {
+    let mut statement = conn.prepare_cached(sql).map_err(|error| error.to_string())?;
+    let column_count = statement.column_count();
+    let column_names: Vec<String> = (0..column_count)
+        .map(|index| statement.column_name(index).unwrap_or("").to_string())
+        .collect();
+    let mut rows = statement
+        .query(param_refs)
+        .map_err(|error| error.to_string())?;
+    let mut row_wires = Vec::new();
+    loop {
+        let row_opt = rows.next().map_err(|error| error.to_string())?;
+        let Some(row) = row_opt else { break };
+        let mut columns: Vec<(String, rusqlite::types::Value)> =
+            Vec::with_capacity(column_count);
+        for (index, name) in column_names.iter().enumerate() {
+            use rusqlite::types::ValueRef;
+            let value = match row.get_ref(index).unwrap_or(ValueRef::Null) {
+                ValueRef::Null => rusqlite::types::Value::Null,
+                ValueRef::Integer(number) => rusqlite::types::Value::Integer(number),
+                ValueRef::Real(number) => rusqlite::types::Value::Real(number),
+                ValueRef::Text(bytes) => rusqlite::types::Value::Text(
+                    std::str::from_utf8(bytes).unwrap_or("").to_string(),
+                ),
+                ValueRef::Blob(bytes) => rusqlite::types::Value::Blob(bytes.to_vec()),
+            };
+            columns.push((name.clone(), value));
+        }
+        row_wires.push(encode_row(&columns));
+    }
+    Ok(row_wires)
+}
+
+/// Run a SELECT and return rows plus the actual execution duration and
+/// driver-provided query-plan facts.
+pub fn jet_db_query_observed(handle: u64, sql: &str, params_wire: &str) -> String {
+    DB_CONNS.with(|connections| {
+        let map = connections.borrow();
+        let Some(conn) = map.get(&handle) else {
+            return "E:no connection for this handle".to_string();
+        };
+        let params = decode_params(params_wire);
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|value| value as &dyn rusqlite::types::ToSql).collect();
+        let started = Instant::now();
+        let row_wires = match query_rows(conn, sql, param_refs.as_slice()) {
+            Ok(rows) => rows,
+            Err(error) => return format!("E:{error}"),
+        };
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        let plan = query_plan(conn, sql, param_refs.as_slice());
+        let rows_wire = encode_count_prefixed(&row_wires);
+        format!(
+            "Q:{}{}{}{}",
+            encode_tagged('R', &rows_wire),
+            encode_tagged('N', &row_wires.len().to_string()),
+            encode_tagged('D', &elapsed_ms.to_string()),
+            encode_tagged('P', &encode_plan(&plan)),
+        )
+    })
+}
+
+/// Run a mutation and return the actual affected-row count and execution
+/// duration.  A mutating statement has no EXPLAIN payload.
+pub fn jet_db_execute_observed(handle: u64, sql: &str, params_wire: &str) -> String {
+    DB_CONNS.with(|connections| {
+        let map = connections.borrow();
+        let Some(conn) = map.get(&handle) else {
+            return "E:no connection for this handle".to_string();
+        };
+        let params = decode_params(params_wire);
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|value| value as &dyn rusqlite::types::ToSql).collect();
+        let started = Instant::now();
+        let mut statement = match conn.prepare_cached(sql) {
+            Ok(statement) => statement,
+            Err(error) => return format!("E:{error}"),
+        };
+        let affected = match statement.execute(param_refs.as_slice()) {
+            Ok(count) => count,
+            Err(error) => return format!("E:{error}"),
+        };
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        format!(
+            "X:{}{}{}",
+            encode_tagged('A', &affected.to_string()),
+            encode_tagged('D', &elapsed_ms.to_string()),
+            encode_tagged('P', "0:"),
+        )
+    })
+}
+/// Run a bounded, read-only EXPLAIN QUERY PLAN.  The driver never executes the
+/// original SELECT: it prepares only SQLite's plan statement, interrupts it
+/// through the progress callback at the requested deadline, and limits the
+/// number of returned plan rows before they cross the FFI boundary.
+pub fn jet_db_explain(
+    handle: u64,
+    sql: &str,
+    params_wire: &str,
+    max_rows: u64,
+    timeout_ms: u64,
+) -> String {
+    DB_CONNS.with(|connections| {
+        let map = connections.borrow();
+        let Some(conn) = map.get(&handle) else {
+            return "E:no connection for this handle".to_string();
+        };
+        if !explain_sql_is_select(sql) {
+            return "E:database EXPLAIN accepts read-only SELECT statements only".to_string();
+        }
+        let params = decode_params(params_wire);
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|value| value as &dyn rusqlite::types::ToSql).collect();
+        let started = Instant::now();
+        let max_rows = usize::try_from(max_rows).unwrap_or(256).min(256);
+        match query_plan_limited(
+            conn,
+            sql,
+            param_refs.as_slice(),
+            max_rows,
+            timeout_ms,
+        ) {
+            Ok((plan, timed_out, truncated)) => {
+                let elapsed_ms = started.elapsed().as_millis() as u64;
+                format!(
+                    "Y:{}{}{}{}",
+                    encode_tagged('D', &elapsed_ms.to_string()),
+                    encode_tagged('T', if timed_out { "1" } else { "0" }),
+                    encode_tagged('L', if truncated { "1" } else { "0" }),
+                    encode_tagged('P', &encode_plan(&plan)),
+                )
+            }
+            Err(error) => format!("E:{error}"),
+        }
+    })
+}
+
 
 // ── wire encoding: tagged, length-prefixed, byte-exact (never escaped) ──────
 // A single value: `<tag><decimal-length>:<payload-bytes>`. A list: the decimal

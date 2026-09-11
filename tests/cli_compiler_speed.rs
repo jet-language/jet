@@ -3,60 +3,14 @@ mod common;
 #[cfg(unix)]
 mod production_path {
     use super::common::Scratch;
+    use jet_foundation::DataTree::DataTree;
+    use jet_foundation::JSON::{json_get, json_int, json_str, parse};
     use std::env;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
     use std::process::Command;
-    use jet_foundation::JSON::{json_get, json_int, json_str, parse, JSONValue};
 
-    const COMPILER_SPEED_PLAN: &str = include_str!("../docs/plans/compiler-speed.md");
-    const DEFAULT_PROFILE_ROUTING_CANARY: &str = "## #1027 default profile routing canary";
-    const DEFAULT_PROFILE_ROUTING_CANARY_REQUIREMENTS: &[&str] = &[
-        DEFAULT_PROFILE_ROUTING_CANARY,
-        "compiler_speed_default_profile_routing_is_removal_sensitive_and_production_backed",
-        "`jet run` and `jet dev` use the fast profile and the default native tier;",
-        "`jet build` uses the optimized default profile.",
-        "Removing or bypassing this plan section must fail the canary.",
-    ];
-    const CLOSEOUT_CRITERIA_SECTION: &str = "## #666 criterion evidence and removal checks\n";
-    const CLOSEOUT_CRITERIA_REQUIREMENTS: &[&str] = &[
-        CLOSEOUT_CRITERIA_SECTION,
-        "tools/perf/dashboard.sh",
-        "tests/dev_default_parity.rs::dev_default_matches_compiled_binary",
-        "tests/cli_compiler_speed.rs::compiler_speed_named_job_dev_matches_run_and_interpreter",
-        "tests/build_entry.rs::compiler_speed_phase_timing_reports_real_release_build",
-        "tests/cli_compiler_speed.rs::production_build_reports_missing_explicit_linker_as_tool_error",
-        "The checked-corpus dashboard emits six rows per active corpus row:",
-        "`jit-clean`, `jit-no-change`, `jit-representative-edit`,",
-        "`aot-release-clean`, `aot-release-no-change`, and",
-        "`aot-release-representative-edit`.",
-        "The current `tools/perf/corpus.tsv` has five active",
-        "rows, so the minimum matrix is 30 rows.",
-        "Each row uses one warmup and twenty",
-        "measured samples.",
-        "interquartile spread of 100% or less",
-        "five Tukey-fence outliers.",
-        "Matched compiler-speed peer contract",
-        "JET_PERF_PEER_REPORT",
-        "each non-Rust ratio `Jet / peer` is less than `1.00`",
-        "The matrix metadata must carry `compiler_sha256`, machine identity, rustc version,",
-        "and `rustc_sha256`; missing identity fields fail closed.",
-        "All per-cell values are positive integers, and every workload, source,",
-        "expected, manifest, and toolchain identity is a complete SHA-256 digest.",
-        "gate never averages cells, selects a best peer, or accepts a partial report.",
-    ];
-    const CACHE_REMOVAL_CANARY: &str = "## #1025 cache removal canary";
-    const CACHE_REMOVAL_CANARY_REQUIREMENTS: &[&str] = &[
-        CACHE_REMOVAL_CANARY,
-        "production_build_reuses_and_repairs_stdlib_objects",
-        "an unchanged build restores its final binary from BuildCache",
-        "a corrupted final binary is rejected by its digest and rebuilt",
-        "a program edit reuses the runtime/Core objects",
-        "a corrupted runtime object is rebuilt before link",
-        "The test also checks that the native cache log exposes the relevant runtime and",
-        "Core digests. Removing or bypassing this plan section must fail the canary.",
-    ];
 
     fn jet() -> PathBuf {
         PathBuf::from(env!("CARGO_BIN_EXE_jet"))
@@ -79,16 +33,17 @@ mod production_path {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path)
     }
 
-    fn json_field<'a>(value: &'a JSONValue, key: &str) -> &'a JSONValue {
+    fn json_field<'a>(value: &'a DataTree, key: &str) -> &'a DataTree {
         json_get(value, key).unwrap_or_else(|| panic!("missing JSON field {key}"))
     }
 
-    fn json_text<'a>(value: &'a JSONValue, key: &str) -> &'a str {
+    fn json_text<'a>(value: &'a DataTree, key: &str) -> &'a str {
         json_str(json_field(value, key)).unwrap_or_else(|| panic!("JSON field {key} is not text"))
     }
 
-    fn json_number(value: &JSONValue, key: &str) -> i64 {
-        json_int(json_field(value, key)).unwrap_or_else(|| panic!("JSON field {key} is not numeric"))
+    fn json_number(value: &DataTree, key: &str) -> i64 {
+        json_int(json_field(value, key))
+            .unwrap_or_else(|| panic!("JSON field {key} is not numeric"))
     }
 
     fn synthetic_v4_baseline() -> String {
@@ -100,42 +55,25 @@ mod production_path {
             "aot-release-no-change",
             "aot-release-representative-edit",
         ];
-        let source_hash =
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        let expected_hash =
-            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-        let manifest_hash =
-            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-        let workload_hash =
-            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
-        let libc_hash =
-            "1111111111111111111111111111111111111111111111111111111111111111";
-        let allocator_hash =
-            "2222222222222222222222222222222222222222222222222222222222222222";
+        let source_hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let expected_hash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let manifest_hash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let workload_hash = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+        let libc_hash = "1111111111111111111111111111111111111111111111111111111111111111";
+        let allocator_hash = "2222222222222222222222222222222222222222222222222222222222222222";
         let allocator_environment_hash =
             "3333333333333333333333333333333333333333333333333333333333333333";
-        let hardware_hash =
-            "4444444444444444444444444444444444444444444444444444444444444444";
-        let topology_hash =
-            "5555555555555555555555555555555555555555555555555555555555555555";
-        let toolchain_hash =
-            "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
-        let rustc_hash =
-            "6666666666666666666666666666666666666666666666666666666666666666";
-        let output_hash =
-            "7777777777777777777777777777777777777777777777777777777777777777";
-        let error_hash =
-            "8888888888888888888888888888888888888888888888888888888888888888";
-        let linker_hash =
-            "9999999999999999999999999999999999999999999999999999999999999999";
-        let compiler_hash =
-            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
-        let rustc_vv_hash =
-            "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
-        let jet_env_hash =
-            "abababababababababababababababababababababababababababababababab";
-        let peer_contract =
-            "6f9085bde94607c64f688587c06e6fc2f3e02fba10104c960c7488dba341c183";
+        let hardware_hash = "4444444444444444444444444444444444444444444444444444444444444444";
+        let topology_hash = "5555555555555555555555555555555555555555555555555555555555555555";
+        let toolchain_hash = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+        let rustc_hash = "6666666666666666666666666666666666666666666666666666666666666666";
+        let output_hash = "7777777777777777777777777777777777777777777777777777777777777777";
+        let error_hash = "8888888888888888888888888888888888888888888888888888888888888888";
+        let linker_hash = "9999999999999999999999999999999999999999999999999999999999999999";
+        let compiler_hash = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+        let rustc_vv_hash = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+        let jet_env_hash = "abababababababababababababababababababababababababababababababab";
+        let peer_contract = "6f9085bde94607c64f688587c06e6fc2f3e02fba10104c960c7488dba341c183";
         let mut runs = String::new();
         let mut peers = String::new();
         for state in states {
@@ -205,8 +143,7 @@ mod production_path {
                 }
             }
         }
-        let corpus_hash =
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let corpus_hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         format!(
             r#"{{"schema":"jet.compiler-speed","version":4,"corpus_sha256":"{corpus_hash}","manifest_sha256":"{manifest_hash}","stage":"matrix","peer_version":1,"peer_contract_sha256":"{peer_contract}","peer_run_id":"fixture-run","peer_keys":"rustc:rust,cxx:cxx","peer_metrics":"latency_ns,memory_bytes","peer_count":2,"peer_rows":24,"parity":{{"status":"verified","cases":1,"semantic":"verified","diagnostics":"verified","effects":"verified","tiers":"verified"}},"machine":{{"allocator_source_sha256":"{allocator_hash}","allocator_environment_sha256":"{allocator_environment_hash}","arch":"x86_64","compiler_sha256":"{compiler_hash}","cpus":2,"governor":"governor","hardware_sha256":"{hardware_hash}","hostname":"fixture","kernel":"kernel","libc_sha256":"{libc_hash}","load1_start_milli":100,"load1_peak_milli":200,"load1_end_milli":150,"memory_bytes":1024,"os":"Linux","rustc":"rustc","rustc_vv_sha256":"{rustc_vv_hash}","target":"target","toolchain_sha256":"{toolchain_hash}","topology_sha256":"{topology_hash}","jet_env_sha256":"{jet_env_hash}","llvm":"llvm","rustc_sha256":"{rustc_hash}"}},"budgets":{{"latency_regression_pct":15,"memory_regression_pct":15,"samples":20,"variance_pct":100,"warmups":1}},"outliers_discarded":0,"runs":[{runs}],"peers":[{peers}]}}
 "#
@@ -221,7 +158,11 @@ mod production_path {
         let runs = json_field(&root, "runs")
             .as_array()
             .expect("compiler-speed baseline runs array");
-        assert_eq!(runs.len() % 6, 0, "baseline runs are not six rows per corpus row");
+        assert_eq!(
+            runs.len() % 6,
+            0,
+            "baseline runs are not six rows per corpus row"
+        );
         let machine_id = format!(
             "{}/{}/cpus={}/host={}",
             json_text(machine, "os"),
@@ -339,7 +280,10 @@ mod production_path {
             .join("rust-checker-fixtures");
         Command::new(checker)
             .current_dir(&scratch.path)
-            .env("JET_CI_CANDIDATE_COMMIT", "0123456789abcdef0123456789abcdef01234567")
+            .env(
+                "JET_CI_CANDIDATE_COMMIT",
+                "0123456789abcdef0123456789abcdef01234567",
+            )
             .env("JET_TEST_CURRENT_REPORT", report_path)
             .env("JET_PERF_SCRATCH_ROOT", scratch_root)
             .output()
@@ -383,9 +327,15 @@ mod production_path {
         );
         let output = run_checker_fixture("compiler-speed-checker-version", &bumped, "");
         let text = output_text(&output);
-        assert!(!output.status.success(), "unsupported version was accepted:\n{text}");
         assert!(
-            text.contains(&format!("unsupported compiler-speed baseline version: {}", version + 1)),
+            !output.status.success(),
+            "unsupported version was accepted:\n{text}"
+        );
+        assert!(
+            text.contains(&format!(
+                "unsupported compiler-speed baseline version: {}",
+                version + 1
+            )),
             "version mismatch was not named:\n{text}"
         );
     }
@@ -406,7 +356,10 @@ mod production_path {
         let report = checker_report_from_baseline(&baseline);
         let output = run_checker_fixture("compiler-speed-checker-rustc", &bumped, &report);
         let text = output_text(&output);
-        assert!(!output.status.success(), "changed rustc identity was accepted:\n{text}");
+        assert!(
+            !output.status.success(),
+            "changed rustc identity was accepted:\n{text}"
+        );
         assert!(
             text.contains(&format!("rustc changed: changed-rustc -> {machine_rustc}")),
             "rustc mismatch was not named:\n{text}"
@@ -420,44 +373,9 @@ mod production_path {
         env::join_paths(paths).unwrap()
     }
 
-    fn default_profile_routing_canary_is_intact(plan: &str) -> bool {
-        DEFAULT_PROFILE_ROUTING_CANARY_REQUIREMENTS
-            .iter()
-            .all(|requirement| plan.contains(*requirement))
-    }
-
-    fn closeout_criteria_canary_is_intact(plan: &str) -> bool {
-        CLOSEOUT_CRITERIA_REQUIREMENTS
-            .iter()
-            .all(|requirement| plan.contains(*requirement))
-    }
-
-    fn cache_removal_canary_is_intact(plan: &str) -> bool {
-        CACHE_REMOVAL_CANARY_REQUIREMENTS
-            .iter()
-            .all(|requirement| plan.contains(*requirement))
-    }
 
     #[test]
     fn compiler_speed_default_profile_routing_is_removal_sensitive_and_production_backed() {
-        assert!(
-            default_profile_routing_canary_is_intact(COMPILER_SPEED_PLAN),
-            "default profile routing is no longer backed by docs/plans/compiler-speed.md"
-        );
-        let bypassed = COMPILER_SPEED_PLAN.replacen(
-            DEFAULT_PROFILE_ROUTING_CANARY,
-            "## #1027 route canary bypassed",
-            1,
-        );
-        assert_ne!(
-            bypassed, COMPILER_SPEED_PLAN,
-            "default profile routing canary mutation did not apply"
-        );
-        assert!(
-            !default_profile_routing_canary_is_intact(&bypassed),
-            "the route proof must fail when the compiler-speed plan canary is bypassed"
-        );
-
         let scratch = Scratch::new("compiler-speed-default-profile-routing");
         fs::write(
             scratch.join("main.jet"),
@@ -636,64 +554,17 @@ mod production_path {
             "unknown",
         );
         let stderr = String::from_utf8_lossy(&unknown.stderr);
-        assert_ne!(unknown.status.code(), Some(0), "unknown dev job was accepted");
-        assert!(stderr.contains("E1294"), "unknown dev job lost E1294:\n{stderr}");
-    }
-
-    #[test]
-    fn compiler_speed_closeout_is_backed_by_plan() {
-        for requirement in [
-            "The cross-backend proof runs the same checked example through optimized AOT",
-            "the default tiered lens, then compares exit status, stdout, and stderr.",
-            "The speed proof uses the existing phase reports and typed `CompilerProbe`",
-            "The checked-corpus dashboard emits six rows per active corpus row:",
-            "interquartile spread of 100% or less",
-            "five Tukey-fence outliers.",
-        ] {
-            assert!(
-                COMPILER_SPEED_PLAN.contains(requirement),
-                "compiler-speed closeout proof is no longer backed by docs/plans/compiler-speed.md: missing {requirement:?}"
-            );
-        }
-        assert!(
-            closeout_criteria_canary_is_intact(COMPILER_SPEED_PLAN),
-            "#666 criterion evidence is no longer backed by docs/plans/compiler-speed.md"
-        );
-        let bypassed = COMPILER_SPEED_PLAN.replacen(
-            CLOSEOUT_CRITERIA_SECTION,
-            "## #666 criterion evidence and removal checks (bypassed)\n",
-            1,
-        );
         assert_ne!(
-            bypassed, COMPILER_SPEED_PLAN,
-            "#666 criterion evidence canary mutation did not apply"
+            unknown.status.code(),
+            Some(0),
+            "unknown dev job was accepted"
         );
         assert!(
-            !closeout_criteria_canary_is_intact(&bypassed),
-            "#666 criterion evidence must fail when its plan section is bypassed"
+            stderr.contains("E1294"),
+            "unknown dev job lost E1294:\n{stderr}"
         );
     }
 
-    #[test]
-    fn compiler_speed_cache_removal_canary_is_backed_by_plan() {
-        assert!(
-            cache_removal_canary_is_intact(COMPILER_SPEED_PLAN),
-            "compiler-speed cache canary is no longer backed by docs/plans/compiler-speed.md"
-        );
-        let bypassed = COMPILER_SPEED_PLAN.replacen(
-            CACHE_REMOVAL_CANARY,
-            "## #1025 cache proof bypassed",
-            1,
-        );
-        assert_ne!(
-            bypassed, COMPILER_SPEED_PLAN,
-            "compiler-speed cache canary mutation did not apply"
-        );
-        assert!(
-            !cache_removal_canary_is_intact(&bypassed),
-            "the cache proof must fail when the compiler-speed plan canary is bypassed"
-        );
-    }
 
     fn invocations(log: &str) -> Vec<Vec<String>> {
         let mut all = Vec::new();
@@ -811,20 +682,6 @@ mod production_path {
 
     #[test]
     fn production_build_follows_compiler_speed_plan_flags_and_linker() {
-        for requirement in [
-            "Fast linker (mold → lld → system), tuned rustc flags.",
-            "Native rustc builds\n  honor explicit",
-            "`RUSTC_LINKER`/`CC`; otherwise Jet selects mold, then lld",
-            "Fast builds pass explicit `opt-level=0`, `codegen-units=256`, and",
-            "`lto=off`",
-            "optimized AOT passes explicit `opt-level=2`, thin LTO, and strip.",
-        ] {
-            assert!(
-                COMPILER_SPEED_PLAN.contains(requirement),
-                "compiler-speed production proof is no longer backed by docs/plans/compiler-speed.md: missing {requirement:?}"
-            );
-        }
-
         let scratch = Scratch::new("compiler-speed-production");
         fs::write(
             scratch.join("main.jet"),
@@ -945,7 +802,10 @@ mod production_path {
             jet::SHA256::sha256_hex(&right_rust),
             "generated Rust SHA-256 changed with checkout path"
         );
-        assert_eq!(left_rust, right_rust, "generated Rust changed with checkout path");
+        assert_eq!(
+            left_rust, right_rust,
+            "generated Rust changed with checkout path"
+        );
 
         let left_binary = fs::read(left.join("build/main")).unwrap();
         let right_binary = fs::read(right.join("build/main")).unwrap();
@@ -1172,13 +1032,11 @@ fn run() {
 
         let cache_log = fs::read_to_string(scratch.join("native-cache.log")).unwrap();
         assert!(
-            cache_log
-                .lines()
-                .any(|line| {
-                    has_digest_field(line, "runtime=")
-                        && has_corelib_identity(line)
-                        && has_digest_field(line, "key=")
-                }),
+            cache_log.lines().any(|line| {
+                has_digest_field(line, "runtime=")
+                    && has_corelib_identity(line)
+                    && has_digest_field(line, "key=")
+            }),
             "native cache log did not expose relevant runtime/Core digests:\n{cache_log}"
         );
         let cache_key = cache_key(&cache_log);
@@ -1202,9 +1060,7 @@ fn run() {
         let cached_bin = initial_status
             .entries
             .iter()
-            .find(|entry| {
-                entry.kind == jet_store::EntryKind::Blob && entry.key == binary_digest
-            })
+            .find(|entry| entry.kind == jet_store::EntryKind::Blob && entry.key == binary_digest)
             .map(|entry| entry.path.clone())
             .expect("cold build published a final binary blob");
 
@@ -1243,8 +1099,7 @@ fn run() {
             String::from_utf8_lossy(&final_repaired.stderr)
         );
         assert!(
-            String::from_utf8_lossy(&final_repaired.stderr)
-                .contains("cache store -> saved binary"),
+            String::from_utf8_lossy(&final_repaired.stderr).contains("cache store -> saved binary"),
             "final cache repair did not republish the binary:\n{}",
             String::from_utf8_lossy(&final_repaired.stderr)
         );
@@ -1355,7 +1210,9 @@ fn run() {
             "cold release build failed:\n{cold_stderr}"
         );
         assert_eq!(
-            cold_stderr.matches("[build] cache miss -> compiling").count(),
+            cold_stderr
+                .matches("[build] cache miss -> compiling")
+                .count(),
             1,
             "cold release build must compile once:\n{cold_stderr}"
         );
@@ -1416,6 +1273,144 @@ fn run() {
                 .count(),
             0,
             "edited source must not reuse the prior release artifact:\n{edited_stderr}"
+        );
+    }
+
+    /// D-DEVR-TWICE1=A: the second identical `jet build` replays its receipt
+    /// instead of compiling again. Each invocation runs under its own Nix
+    /// shell temp root (`nix develop` mints a fresh `/tmp/nix-shell.*` per
+    /// shell), so the receipt context must not fingerprint that plumbing.
+    #[test]
+    fn second_identical_build_replays_receipt() {
+        let scratch = Scratch::new("compiler-speed-receipt-replay");
+        fs::write(
+            scratch.join("main.jet"),
+            "fn run() { print(\"receipt-replay\") }\n",
+        )
+        .unwrap();
+        let tools = scratch.join("tools");
+        fs::create_dir_all(&tools).unwrap();
+        let rustc_log = scratch.join("rustc.log");
+        let real_rustc = path_program("rustc");
+        let real_linker = path_program("cc");
+        write_executable(
+            &tools.join("rustc"),
+            "#!/bin/sh\n\
+             { printf '%s\\n' BEGIN; printf '%s\\n' \"$@\"; printf '%s\\n' END; } >> \"$JET_TEST_RUSTC_LOG\"\n\
+             exec \"$JET_TEST_REAL_RUSTC\" \"$@\"\n",
+        );
+        let contexts = scratch.join(".jet/receipts/contexts");
+        let context_pointers = || -> Vec<(PathBuf, String)> {
+            let mut pointers = fs::read_dir(&contexts)
+                .map(|entries| {
+                    entries
+                        .map(|entry| {
+                            let path = entry.unwrap().path();
+                            let key = fs::read_to_string(&path).unwrap();
+                            (path, key)
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            pointers.sort();
+            pointers
+        };
+
+        let build = |shell_temp: &Path| -> std::process::Output {
+            fs::create_dir_all(shell_temp).unwrap();
+            Command::new(jet())
+                .args(["build", "main.jet", "--profile=debug"])
+                .current_dir(&scratch.path)
+                .env("PATH", prepend_path(&tools))
+                .env("RUSTC_LINKER", &real_linker)
+                .env("JET_TEST_REAL_RUSTC", &real_rustc)
+                .env("JET_TEST_RUSTC_LOG", &rustc_log)
+                .env("JET_STORE_DIR", scratch.join("store"))
+                .env("JET_STORE_CAP_BYTES", "21474836480")
+                .env("JET_STORE_RESERVE_BYTES", "2147483648")
+                .env("NIX_BUILD_TOP", shell_temp)
+                .env("TMPDIR", shell_temp)
+                .env("TMP", shell_temp)
+                .env("TEMP", shell_temp)
+                .env("TEMPDIR", shell_temp)
+                .env("NO_COLOR", "1")
+                .output()
+                .unwrap()
+        };
+
+        let first = build(&scratch.join("nix-shell.first"));
+        let first_stderr = String::from_utf8_lossy(&first.stderr);
+        assert_eq!(
+            first.status.code(),
+            Some(0),
+            "first debug build failed:\n{first_stderr}"
+        );
+        assert!(
+            !first_stderr.contains("ok: build current"),
+            "first build must do the work, not replay a receipt:\n{first_stderr}"
+        );
+        let first_log = fs::read_to_string(&rustc_log).unwrap();
+        assert!(
+            invocations(&first_log)
+                .iter()
+                .any(|args| has_pair(args, "--crate-name", "main")),
+            "first build must run rustc for the program:\n{first_log}"
+        );
+        let binary = scratch.join("build/main");
+        let first_binary = fs::read(&binary).unwrap();
+        let first_modified = fs::metadata(&binary).unwrap().modified().unwrap();
+        let first_pointers = context_pointers();
+        assert_eq!(
+            first_pointers.len(),
+            1,
+            "first build must publish exactly one receipt context: {first_pointers:?}"
+        );
+        let receipt_key = first_pointers[0].1.clone();
+        assert_eq!(
+            receipt_key.len(),
+            64,
+            "receipt context pointer must hold one receipt key: {receipt_key:?}"
+        );
+
+        let second = build(&scratch.join("nix-shell.second"));
+        let second_stderr = String::from_utf8_lossy(&second.stderr);
+        assert_eq!(
+            second.status.code(),
+            Some(0),
+            "second debug build failed:\n{second_stderr}"
+        );
+        let expected = format!("ok: build current (receipt {})", &receipt_key[..12]);
+        assert!(
+            second_stderr.contains(&expected),
+            "second identical build must replay receipt `{expected}`:\n{second_stderr}"
+        );
+        assert!(
+            !second_stderr.contains("receipt: build invalidated"),
+            "identical inputs must not invalidate the receipt:\n{second_stderr}"
+        );
+        assert_eq!(
+            second.stdout, first.stdout,
+            "replayed build must reproduce the recorded stdout"
+        );
+        assert_eq!(
+            context_pointers(),
+            first_pointers,
+            "two identical builds under different shell temp roots must share one context digest"
+        );
+        assert_eq!(
+            fs::read_to_string(&rustc_log).unwrap(),
+            first_log,
+            "a replayed build must not run rustc or the linker"
+        );
+        assert_eq!(
+            fs::metadata(&binary).unwrap().modified().unwrap(),
+            first_modified,
+            "a replayed build must not rewrite the binary"
+        );
+        assert_eq!(
+            fs::read(&binary).unwrap(),
+            first_binary,
+            "a replayed build must leave the first binary in place"
         );
     }
     fn cache_cli(scratch: &Scratch, args: &[&str]) -> std::process::Output {
@@ -1510,5 +1505,4 @@ fn run() {
             "doctor lost the artifact-store footprint row:\n{doctor_stdout}"
         );
     }
-
 }

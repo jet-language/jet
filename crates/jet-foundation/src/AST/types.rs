@@ -2614,6 +2614,23 @@ impl Type {
         }
     }
 
+    /// Whether this type is the uninhabited `Never` value type.
+    pub fn is_never(&self) -> bool {
+        matches!(self, Type::Named(name) if name == crate::Syntax::TYPE_NEVER)
+    }
+
+    /// Whether a callable declaration promises that its success path never
+    /// produces a value. `Never` is legal in this return slot and in a
+    /// function-type return slot; `!Never` remains the separate failure-side
+    /// proof.
+    pub fn has_never_success(&self) -> bool {
+        match self {
+            Type::Named(_) => self.is_never(),
+            Type::Result { ok, .. } => ok.is_never(),
+            _ => false,
+        }
+    }
+
     pub fn is_fallible(&self) -> bool {
         matches!(self, Type::Option(_))
             || matches!(self, Type::Result { err, .. }

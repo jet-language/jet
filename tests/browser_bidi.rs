@@ -1279,11 +1279,16 @@ fn run() {
     let (default_stdout, default_methods, trace) = run_once(false);
     assert_eq!(default_stdout, forced_stdout);
     assert_eq!(default_methods, forced_methods);
+    let run_id = trace
+        .iter()
+        .find(|row| row.function_name.rsplit("::").next() == Some("run"))
+        .map(|row| row.function)
+        .expect("Browser trace must identify run");
     assert!(
         trace
             .iter()
-            .any(|row| row.function == "run" && row.tier == jet_jit::Tier::Interp),
-        "Browser must visibly select/deopt to tier-0, never AOT: {trace:?}"
+            .any(|row| row.function == run_id && row.tier == jet_jit::Tier::Interp),
+        "Browser must visibly select/deopt run to tier-0, never AOT: {trace:?}"
     );
     assert!(
         !jet_jit::fallback_invoked_for_test(),

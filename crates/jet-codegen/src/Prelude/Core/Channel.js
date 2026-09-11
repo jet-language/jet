@@ -148,12 +148,12 @@ function jet_scheduler_select_probe(receivers, durations, started) {
   for (let index = 0; index < receivers.length; index += 1) {
     const result = receivers[index].channel.tryReceive();
     if (result.ready) {
-      return [BigInt(index), { tag: "Some", values: [result.value] }];
+      return [BigInt(index), jet_option_some(result.value)];
     }
   }
   for (let index = 0; index < durations.length; index += 1) {
     if (durations[index].ms === 0 || performance.now() - started >= durations[index].ms) {
-      return [BigInt(receivers.length + index), { tag: "None", values: [] }];
+      return [BigInt(receivers.length + index), jet_option_none()];
     }
   }
   if (durations.length === 0 && receivers.length !== 0
@@ -214,6 +214,6 @@ function jet_scheduler_try_select(receivers, duration_values) {
   const durations = duration_values.map((value) => ({ ms: jet_web_duration_ms(value) }));
   const result = jet_scheduler_select_probe(receivers, durations, performance.now());
   return result === undefined || result === null
-    ? [-1n, { tag: "None", values: [] }]
+    ? [-1n, jet_option_none()]
     : result;
 }

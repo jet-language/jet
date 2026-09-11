@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
 
 use jet::ExitCodes;
-use jet_foundation::Report::render_status_json;
+use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
 
 use crate::{find_project_entry, report_problems, OutputMode};
 struct PackageInput {
@@ -1219,28 +1219,29 @@ pub(crate) fn run_copy_audit(args: &[String], json: bool) {
     }
     rows.sort_by(|left, right| left.0.cmp(&right.0).then(left.3.start.cmp(&right.3.start)));
     if json {
-        let entries = rows
-            .iter()
-            .map(|(path, line, column, span)| {
-                format!(
-                    "{{\"path\":\"{}\",\"line\":{},\"column\":{},\"span\":{{\"start\":{},\"end\":{}}},\"size\":\"dynamic\",\"kind\":\"implicit\"}}",
-                    jet_foundation::JSON::json_escape(path),
-                    line,
-                    column,
-                    span.start,
-                    span.end,
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(",");
+        let copies = StatusValue::array(rows.iter().map(|(path, line, column, span)| {
+            StatusValue::object(
+                StatusFields::new()
+                    .with("path", path.as_str())
+                    .with("line", *line)
+                    .with("column", *column)
+                    .with(
+                        "span",
+                        StatusValue::object(
+                            StatusFields::new()
+                                .with("start", span.start)
+                                .with("end", span.end),
+                        ),
+                    )
+                    .with("size", "dynamic")
+                    .with("kind", "implicit"),
+            )
+        }));
         println!(
             "{}",
-            render_status_json(
-                "ok",
-                true,
-                "audit.copies",
-                &format!(",\"copies\":[{}]", entries),
-            )
+            StatusEnvelope::new("audit.copies", true)
+                .with_field("copies", copies)
+                .json()
         );
         return;
     }

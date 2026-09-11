@@ -593,7 +593,7 @@ impl JetErrorReport {
 }
 
 fn jet_error_report_from_json(
-    value: &crate::EncodingJson::Value,
+    value: &crate::DataTree::DataTree,
 ) -> Result<JetErrorReport, String> {
     let fields = jet_error_json_object(value, "report")?;
     if jet_error_json_text(jet_error_json_field(fields, "schema")?, "schema")?
@@ -603,15 +603,15 @@ fn jet_error_report_from_json(
     }
     let message = jet_error_json_text(jet_error_json_field(fields, "message")?, "message")?;
     let code = match jet_error_json_field(fields, "code")? {
-        crate::EncodingJson::Value::Null => None,
+        crate::DataTree::DataTree::Null => None,
         value => Some(jet_error_json_text(value, "code")?),
     };
     let causes = match jet_error_json_field(fields, "cause")? {
-        crate::EncodingJson::Value::Null => Vec::new(),
-        crate::EncodingJson::Value::Object(_) => {
+        crate::DataTree::DataTree::Null => Vec::new(),
+        crate::DataTree::DataTree::Object(_) => {
             vec![jet_error_report_from_json(jet_error_json_field(fields, "cause")?)?]
         }
-        crate::EncodingJson::Value::Array(values) => values
+        crate::DataTree::DataTree::Array(values) => values
             .iter()
             .map(jet_error_report_from_json)
             .collect::<Result<Vec<_>, _>>()?,
@@ -661,43 +661,43 @@ fn jet_error_report_from_json(
 }
 
 fn jet_error_json_object<'a>(
-    value: &'a crate::EncodingJson::Value,
+    value: &'a crate::DataTree::DataTree,
     name: &str,
-) -> Result<&'a [(String, crate::EncodingJson::Value)], String> {
+) -> Result<&'a [(String, crate::DataTree::DataTree)], String> {
     match value {
-        crate::EncodingJson::Value::Object(fields) => Ok(fields),
+        crate::DataTree::DataTree::Object(fields) => Ok(fields),
         _ => Err(format!("error report {name} is not an object")),
     }
 }
 
 fn jet_error_json_field<'a>(
-    fields: &'a [(String, crate::EncodingJson::Value)],
+    fields: &'a [(String, crate::DataTree::DataTree)],
     name: &str,
-) -> Result<&'a crate::EncodingJson::Value, String> {
+) -> Result<&'a crate::DataTree::DataTree, String> {
     jet_error_json_field_optional(fields, name).ok_or_else(|| format!("error report lacks {name}"))
 }
 
 fn jet_error_json_field_optional<'a>(
-    fields: &'a [(String, crate::EncodingJson::Value)],
+    fields: &'a [(String, crate::DataTree::DataTree)],
     name: &str,
-) -> Option<&'a crate::EncodingJson::Value> {
+) -> Option<&'a crate::DataTree::DataTree> {
     fields
         .iter()
         .find_map(|(field, value)| (field == name).then_some(value))
 }
 
 fn jet_error_json_text(
-    value: &crate::EncodingJson::Value,
+    value: &crate::DataTree::DataTree,
     name: &str,
 ) -> Result<String, String> {
     match value {
-        crate::EncodingJson::Value::Text(value) => Ok(value.clone()),
+        crate::DataTree::DataTree::Text(value) => Ok(value.clone()),
         _ => Err(format!("error report {name} is not text")),
     }
 }
 
 fn jet_error_json_optional_text(
-    fields: &[(String, crate::EncodingJson::Value)],
+    fields: &[(String, crate::DataTree::DataTree)],
     name: &str,
 ) -> Result<Option<String>, String> {
     jet_error_json_field_optional(fields, name)
@@ -706,31 +706,31 @@ fn jet_error_json_optional_text(
 }
 
 fn jet_error_json_optional_array<'a>(
-    fields: &'a [(String, crate::EncodingJson::Value)],
+    fields: &'a [(String, crate::DataTree::DataTree)],
     name: &str,
-) -> Result<Option<&'a [crate::EncodingJson::Value]>, String> {
+) -> Result<Option<&'a [crate::DataTree::DataTree]>, String> {
     let Some(value) = jet_error_json_field_optional(fields, name) else {
         return Ok(None);
     };
     match value {
-        crate::EncodingJson::Value::Array(values) => Ok(Some(values)),
+        crate::DataTree::DataTree::Array(values) => Ok(Some(values)),
         _ => Err(format!("error report {name} is not an array")),
     }
 }
 
 fn jet_error_json_u32(
-    value: &crate::EncodingJson::Value,
+    value: &crate::DataTree::DataTree,
     name: &str,
 ) -> Result<u32, String> {
     match value {
-        crate::EncodingJson::Value::Int(value) => u32::try_from(*value)
+        crate::DataTree::DataTree::Int(value) => u32::try_from(*value)
             .map_err(|_| format!("error report {name} is not a u32")),
         _ => Err(format!("error report {name} is not an integer")),
     }
 }
 
 fn jet_error_context_from_json(
-    value: &crate::EncodingJson::Value,
+    value: &crate::DataTree::DataTree,
 ) -> Result<JetErrorContextFrame, String> {
     let fields = jet_error_json_object(value, "context frame")?;
     Ok(JetErrorContextFrame {
@@ -741,7 +741,7 @@ fn jet_error_context_from_json(
 }
 
 fn jet_error_journey_from_json(
-    value: &crate::EncodingJson::Value,
+    value: &crate::DataTree::DataTree,
 ) -> Result<JetErrorJourneyFrame, String> {
     let fields = jet_error_json_object(value, "journey frame")?;
     Ok(JetErrorJourneyFrame {
@@ -754,7 +754,7 @@ fn jet_error_journey_from_json(
 }
 
 fn jet_error_conversion_from_json(
-    value: &crate::EncodingJson::Value,
+    value: &crate::DataTree::DataTree,
 ) -> Result<JetErrorConversion, String> {
     let fields = jet_error_json_object(value, "conversion")?;
     Ok(JetErrorConversion {
@@ -764,7 +764,7 @@ fn jet_error_conversion_from_json(
 }
 
 fn jet_error_details_from_json(
-    value: &crate::EncodingJson::Value,
+    value: &crate::DataTree::DataTree,
 ) -> Result<JetErrorDetails, String> {
     let fields = jet_error_json_object(value, "details")?;
     let field_values = jet_error_json_object(jet_error_json_field(fields, "fields")?, "detail fields")?
@@ -777,7 +777,7 @@ fn jet_error_details_from_json(
         })
         .collect::<Result<Vec<_>, String>>()?;
     let source_span = match jet_error_json_field(fields, "source_span")? {
-        crate::EncodingJson::Value::Null => None,
+        crate::DataTree::DataTree::Null => None,
         value => {
             let span = jet_error_json_object(value, "source span")?;
             Some(JetErrorSpan {
@@ -795,17 +795,25 @@ fn jet_error_details_from_json(
     })
 }
 
-fn jet_error_json_encode_value(value: &crate::EncodingJson::Value) -> String {
+fn jet_error_json_encode_value(value: &crate::DataTree::DataTree) -> String {
     match value {
-        crate::EncodingJson::Value::Null => "null".to_string(),
-        crate::EncodingJson::Value::Bool(value) => value.to_string(),
-        crate::EncodingJson::Value::Int(value) => value.to_string(),
-        crate::EncodingJson::Value::Float(value) => value.to_string(),
-        crate::EncodingJson::Value::Number(value) => value.clone(),
-        crate::EncodingJson::Value::Text(value) => {
+        crate::DataTree::DataTree::Null => "null".to_string(),
+        crate::DataTree::DataTree::Bool(value) => value.to_string(),
+        crate::DataTree::DataTree::Int(value) => value.to_string(),
+        crate::DataTree::DataTree::Float(value) => value.to_string(),
+        crate::DataTree::DataTree::Number(value) => value.clone(),
+        crate::DataTree::DataTree::Text(value) | crate::DataTree::DataTree::TypedText(value) => {
             format!("\"{}\"", jet_error_json_escape(value))
         }
-        crate::EncodingJson::Value::Array(values) => format!(
+        crate::DataTree::DataTree::Bytes(bytes) => format!(
+            "[{}]",
+            bytes
+                .iter()
+                .map(|byte| byte.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        crate::DataTree::DataTree::Array(values) => format!(
             "[{}]",
             values
                 .iter()
@@ -813,7 +821,7 @@ fn jet_error_json_encode_value(value: &crate::EncodingJson::Value) -> String {
                 .collect::<Vec<_>>()
                 .join(",")
         ),
-        crate::EncodingJson::Value::Object(fields) => format!(
+        crate::DataTree::DataTree::Object(fields) => format!(
             "{{{}}}",
             fields
                 .iter()
@@ -1187,6 +1195,453 @@ pub fn jet_trace_err_note_jet<T, F: FnOnce() -> String>(
     }
 }
 
+/// Scalar MIR adapter for a checked failure-site note.
+pub fn jet_journey_frame_text(file: &str, line: u32, fn_name: &str, note: &str) {
+    jet_journey_frame(file, line, fn_name, || note.to_string());
+}
+
+/// Add one evaluated note to the default error and its source journey.
+pub fn jet_err_with_context_frame(
+    mut error: JetErr,
+    file: &str,
+    line: u32,
+    fn_name: &str,
+    note: String,
+) -> JetErr {
+    jet_err_add_context(&mut error, note.clone(), file.to_string(), line);
+    jet_journey_frame(file, line, fn_name, || note);
+    error
+}
+#[cfg(target_arch = "wasm32")]
+mod jet_error_wasm_bridge {
+    use super::*;
+    use std::cell::RefCell;
+
+    // The Web tier owns only these byte slots. All error facts, journey
+    // accumulation, conversion history, and report rendering stay in the
+    // Foundation Prelude.
+    const INPUT_SLOT_COUNT: usize = 8;
+    const MESSAGE_SLOT: u32 = 0;
+    const ERROR_SLOT: u32 = 1;
+    const FILE_SLOT: u32 = 2;
+    const FUNCTION_SLOT: u32 = 3;
+    const NOTE_SLOT: u32 = 4;
+    const ORIGINAL_SLOT: u32 = 5;
+    const SOURCE_SLOT: u32 = 6;
+    const TARGET_SLOT: u32 = 7;
+    const OK: i32 = 1;
+    const BRIDGE_ERROR: i32 = -1;
+
+    thread_local! {
+        static INPUT: RefCell<[Vec<u8>; INPUT_SLOT_COUNT]> =
+            RefCell::new(std::array::from_fn(|_| Vec::new()));
+        static OUTPUT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+        static ERROR: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+    }
+
+    fn clear_output() {
+        OUTPUT.with(|cell| {
+            let mut output = cell.borrow_mut();
+            output.clear();
+            output.shrink_to_fit();
+        });
+    }
+
+    fn clear_error() {
+        ERROR.with(|cell| {
+            let mut error = cell.borrow_mut();
+            error.clear();
+            error.shrink_to_fit();
+        });
+    }
+
+    fn begin_result() {
+        clear_output();
+        clear_error();
+    }
+
+    fn set_output(value: impl AsRef<str>) {
+        OUTPUT.with(|cell| {
+            let mut output = cell.borrow_mut();
+            output.clear();
+            output.extend_from_slice(value.as_ref().as_bytes());
+        });
+    }
+    fn set_error(value: impl AsRef<str>) {
+        ERROR.with(|cell| {
+            let mut error = cell.borrow_mut();
+            error.clear();
+            error.extend_from_slice(value.as_ref().as_bytes());
+        });
+    }
+
+    fn bridge_error(value: impl AsRef<str>) -> i32 {
+        set_error(value);
+        BRIDGE_ERROR
+    }
+
+    fn input_slot(slot: u32) -> Result<usize, String> {
+        let slot = usize::try_from(slot)
+            .map_err(|_| "invalid error Web input slot".to_string())?;
+        (slot < INPUT_SLOT_COUNT)
+            .then_some(slot)
+            .ok_or_else(|| "invalid error Web input slot".to_string())
+    }
+
+    fn read_input(slot: u32, pointer: u32, length: u32, label: &str) -> Result<String, String> {
+        let slot = input_slot(slot)?;
+        let length = usize::try_from(length)
+            .map_err(|_| format!("error Web {label} length is invalid"))?;
+        INPUT.with(|cell| {
+            let slots = cell.borrow();
+            let bytes = &slots[slot];
+            if bytes.len() != length {
+                return Err(format!(
+                    "error Web {label} length does not match its allocation"
+                ));
+            }
+            let owned = if length == 0 {
+                pointer == 0
+            } else {
+                pointer as usize == bytes.as_ptr() as usize
+            };
+            if !owned {
+                return Err(format!(
+                    "error Web {label} pointer is not owned by the bridge"
+                ));
+            }
+            String::from_utf8(bytes.clone())
+                .map_err(|_| format!("error Web {label} must be UTF-8"))
+        })
+    }
+
+
+    fn report_to_error(report: &JetErrorReport) -> Result<JetErr, String> {
+        let cause = match report.causes.as_slice() {
+            [] => Err(JetAbsent),
+            [cause] => Ok(report_to_error(cause)?),
+            _ => return Err("error report has multiple causes".to_string()),
+        };
+        let mut error = match report.typed_identity.clone() {
+            Some(identity) => jet_err_with_identity(
+                report.message.clone(),
+                report.code.clone().map_or(Err(JetAbsent), Ok),
+                cause,
+                identity,
+            ),
+            None => jet_err(
+                report.message.clone(),
+                report.code.clone().map_or(Err(JetAbsent), Ok),
+                cause,
+            ),
+        };
+        for frame in &report.context_frames {
+            jet_err_add_context(
+                &mut error,
+                frame.text.clone(),
+                frame.file.clone(),
+                frame.line,
+            );
+        }
+        for conversion in &report.conversion_history {
+            jet_err_record_conversion(
+                &mut error,
+                conversion.source.clone(),
+                conversion.target.clone(),
+            );
+        }
+        if let Some(details) = &report.details {
+            jet_err_set_details(&mut error, details.clone());
+        }
+        Ok(error)
+    }
+    fn read_error_at(
+        slot: u32,
+        pointer: u32,
+        length: u32,
+    ) -> Result<(JetErr, Vec<JetErrorJourneyFrame>), String> {
+        let wire = read_input(slot, pointer, length, "error")?;
+        parse_error(&wire)
+    }
+
+    fn read_error(
+        pointer: u32,
+        length: u32,
+    ) -> Result<(JetErr, Vec<JetErrorJourneyFrame>), String> {
+        read_error_at(ERROR_SLOT, pointer, length)
+    }
+    fn parse_error(wire: &str) -> Result<(JetErr, Vec<JetErrorJourneyFrame>), String> {
+        let report = JetErrorReport::from_json(wire)?;
+        let journey = report.source_journey.clone();
+        let error = report_to_error(&report)?;
+        Ok((error, journey))
+    }
+
+    fn restore_journey(frames: &[JetErrorJourneyFrame]) {
+        if frames.is_empty() {
+            return;
+        }
+        JET_JOURNEY_HOPS.with(|cell| {
+            let mut hops = cell.borrow_mut();
+            hops.clear();
+            hops.extend(frames.iter().map(|frame| JourneyHop {
+                site: JourneyFrame {
+                    fn_name: frame.fn_name.clone(),
+                    file: frame.file.clone(),
+                    line: frame.line,
+                },
+                note: frame.note.clone(),
+                hops: frame.hops,
+            }));
+        });
+    }
+
+    fn write_carrier(error: &JetErr) {
+        // Keep the source journey with the structured carrier.  The JS edge
+        // may cross several `?` sites before the terminal report, so dropping
+        // the thread-local hops here would make the Web report lose its trail.
+        set_output(jet_error_report(error).to_json());
+    }
+
+
+    #[no_mangle]
+    pub extern "C" fn jet_error_wasm_input_alloc(slot: u32, length: u32) -> u32 {
+        let Ok(slot) = input_slot(slot) else {
+            return 0;
+        };
+        let length = length as usize;
+        INPUT.with(|cell| {
+            let mut slots = cell.borrow_mut();
+            let bytes = &mut slots[slot];
+            if !bytes.is_empty() || length == 0 {
+                return 0;
+            }
+            bytes.resize(length, 0);
+            bytes.as_mut_ptr() as usize as u32
+        })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_error_wasm_input_free(slot: u32, pointer: u32) -> u32 {
+        let Ok(slot) = input_slot(slot) else {
+            return 0;
+        };
+        INPUT.with(|cell| {
+            let mut slots = cell.borrow_mut();
+            let bytes = &mut slots[slot];
+            let owned = if bytes.is_empty() {
+                pointer == 0
+            } else {
+                pointer as usize == bytes.as_ptr() as usize
+            };
+            if !owned {
+                return 0;
+            }
+            bytes.clear();
+            bytes.shrink_to_fit();
+            OK as u32
+        })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_error_wasm_result_clear() {
+        begin_result();
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_error_wasm_output_ptr() -> u32 {
+        OUTPUT.with(|cell| cell.borrow().as_ptr() as usize as u32)
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_error_wasm_output_len() -> u32 {
+        OUTPUT.with(|cell| {
+            u32::try_from(cell.borrow().len()).expect("error Web output exceeds the u32 ABI")
+        })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_error_wasm_error_ptr() -> u32 {
+        ERROR.with(|cell| cell.borrow().as_ptr() as usize as u32)
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_error_wasm_error_len() -> u32 {
+        ERROR.with(|cell| {
+            u32::try_from(cell.borrow().len()).expect("error Web diagnostic exceeds the u32 ABI")
+        })
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_error_wasm_journey_reset() -> i32 {
+        begin_result();
+        jet_journey_reset();
+        OK
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_error_wasm_journey_frame_text(
+        file_pointer: u32,
+        file_length: u32,
+        line: u32,
+        function_pointer: u32,
+        function_length: u32,
+        note_pointer: u32,
+        note_length: u32,
+    ) -> i32 {
+        begin_result();
+        let file = match read_input(FILE_SLOT, file_pointer, file_length, "source file") {
+            Ok(file) => file,
+            Err(error) => return bridge_error(error),
+        };
+        let function =
+            match read_input(FUNCTION_SLOT, function_pointer, function_length, "function") {
+                Ok(function) => function,
+                Err(error) => return bridge_error(error),
+            };
+        let note = match read_input(NOTE_SLOT, note_pointer, note_length, "journey note") {
+            Ok(note) => note,
+            Err(error) => return bridge_error(error),
+        };
+        jet_journey_frame_text(&file, line, &function, &note);
+        OK
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_error_wasm_err_from_message(
+        message_pointer: u32,
+        message_length: u32,
+    ) -> i32 {
+        begin_result();
+        let message = match read_input(MESSAGE_SLOT, message_pointer, message_length, "message") {
+            Ok(message) => message,
+            Err(error) => return bridge_error(error),
+        };
+        write_carrier(&jet_err_from_message(message));
+        OK
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_error_wasm_with_context_frame(
+        error_pointer: u32,
+        error_length: u32,
+        file_pointer: u32,
+        file_length: u32,
+        line: u32,
+        function_pointer: u32,
+        function_length: u32,
+        note_pointer: u32,
+        note_length: u32,
+    ) -> i32 {
+        begin_result();
+        let (error, journey) = match read_error(error_pointer, error_length) {
+            Ok(error) => error,
+            Err(error) => return bridge_error(error),
+        };
+        let file = match read_input(FILE_SLOT, file_pointer, file_length, "source file") {
+            Ok(file) => file,
+            Err(error) => return bridge_error(error),
+        };
+        let function =
+            match read_input(FUNCTION_SLOT, function_pointer, function_length, "function") {
+                Ok(function) => function,
+                Err(error) => return bridge_error(error),
+            };
+        let note = match read_input(NOTE_SLOT, note_pointer, note_length, "context note") {
+            Ok(note) => note,
+            Err(error) => return bridge_error(error),
+        };
+        restore_journey(&journey);
+        let error = jet_err_with_context_frame(error, &file, line, &function, note);
+        write_carrier(&error);
+        OK
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_error_wasm_from_conversion(
+        converted_pointer: u32,
+        converted_length: u32,
+        original_pointer: u32,
+        original_length: u32,
+        source_pointer: u32,
+        source_length: u32,
+        target_pointer: u32,
+        target_length: u32,
+    ) -> i32 {
+        begin_result();
+        let (mut converted, converted_journey) =
+            match read_error(converted_pointer, converted_length) {
+                Ok(error) => error,
+                Err(error) => return bridge_error(error),
+            };
+        let original = if original_length == 0 {
+            None
+        } else {
+            match read_error_at(ORIGINAL_SLOT, original_pointer, original_length) {
+                Ok(error) => Some(error),
+                Err(error) => return bridge_error(error),
+            }
+        };
+        let source = match read_input(SOURCE_SLOT, source_pointer, source_length, "conversion source")
+        {
+            Ok(source) => source,
+            Err(error) => return bridge_error(error),
+        };
+        let target = match read_input(TARGET_SLOT, target_pointer, target_length, "conversion target")
+        {
+            Ok(target) => target,
+            Err(error) => return bridge_error(error),
+        };
+        if !converted_journey.is_empty() {
+            restore_journey(&converted_journey);
+        } else if let Some((_, journey)) = &original {
+            restore_journey(journey);
+        }
+        if let Some((original, _)) = original {
+            if converted.typed_identity.is_none() {
+                converted.typed_identity = original.typed_identity;
+            }
+            if converted.context.is_empty() {
+                converted.context = original.context;
+            }
+            if converted.conversions.is_empty() {
+                converted.conversions = original.conversions;
+            }
+            if converted.details.is_none() {
+                converted.details = original.details;
+            }
+        }
+        jet_err_apply_conversion(&mut converted, source, target);
+        write_carrier(&converted);
+        OK
+    }
+
+    #[no_mangle]
+    pub extern "C" fn jet_error_wasm_entry_error_exit(
+        error_pointer: u32,
+        error_length: u32,
+    ) -> i32 {
+        begin_result();
+        let (error, journey) = match read_error(error_pointer, error_length) {
+            Ok(error) => error,
+            Err(error) => return bridge_error(error),
+        };
+        restore_journey(&journey);
+        let report = jet_error_report(&error);
+        let rendered = report.render();
+        let journey_text = report.render_journey_with_style(JetReportStyle::PLAIN);
+        set_output(format!(
+            "{{\"tag\":\"Err\",\"error\":{},\"report\":{},\"journey\":{}}}",
+            report.to_json(),
+            jet_error_json_quote(&rendered),
+            jet_error_json_quote(&journey_text)
+        ));
+        OK
+    }
+
+}
+
+
 pub fn jet_render_err(error: &JetErr) -> String {
     JetErrorReport::from_error(error, Vec::new()).render_root()
 }
@@ -1252,7 +1707,7 @@ mod err_tests {
         let report = jet_error_report(&error);
         assert_eq!(report.code, Some("CFG404".to_string()));
         assert_eq!(report.message, "loading config");
-        assert_eq!(report.typed_identity, Some("ConfigError".to_string()));
+        assert_eq!(report.typed_identity, Some("IoError".to_string()));
         assert_eq!(report.causes.len(), 1);
         assert_eq!(report.causes[0].message, "disk offline");
         assert_eq!(report.causes[0].typed_identity, Some("IoError".to_string()));
@@ -1268,11 +1723,11 @@ mod err_tests {
         assert_eq!(report.conversion_history[0].target, "ConfigError");
         assert_eq!(
             report.to_json(),
-            "{\"schema\":\"jet.err/v1\",\"message\":\"loading config\",\"code\":\"CFG404\",\"cause\":{\"schema\":\"jet.err/v1\",\"message\":\"disk offline\",\"code\":\"IO001\",\"cause\":null,\"typed_identity\":\"IoError\"},\"typed_identity\":\"ConfigError\",\"context_frames\":[{\"text\":\"while loading app.toml\",\"file\":\"config.jet\",\"line\":42}],\"source_journey\":[{\"fn_name\":\"run\",\"file\":\"config.jet\",\"line\":42,\"note\":\"\",\"hops\":1}],\"conversion_history\":[{\"source\":\"IoError\",\"target\":\"ConfigError\"}]}"
+            "{\"schema\":\"jet.err/v1\",\"message\":\"loading config\",\"code\":\"CFG404\",\"cause\":{\"schema\":\"jet.err/v1\",\"message\":\"disk offline\",\"code\":\"IO001\",\"cause\":null,\"typed_identity\":\"IoError\"},\"typed_identity\":\"IoError\",\"context_frames\":[{\"text\":\"while loading app.toml\",\"file\":\"config.jet\",\"line\":42}],\"source_journey\":[{\"fn_name\":\"run\",\"file\":\"config.jet\",\"line\":42,\"note\":\"\",\"hops\":1}],\"conversion_history\":[{\"source\":\"IoError\",\"target\":\"ConfigError\"}]}"
         );
         assert_eq!(
             report.render_with_style(JetReportStyle::PLAIN),
-            "Error [CFG404]: loading config (type: ConfigError)\n\
+            "Error [CFG404]: loading config (type: IoError)\n\
              \x20\x20cause: disk offline (type: IoError)\n\
              \x20\x20context (config.jet:42): while loading app.toml\n\
              \x20\x20conversion: IoError -> ConfigError\n\
@@ -1678,14 +2133,11 @@ pub struct JetRuntimeDiagnostic {
 /// One active runtime row projected into a standalone Prelude. The host
 /// wrapper below adapts Foundation's RegistryRow to this self-contained shape;
 /// AOT and Wasm emit the same shape from the active Registry rows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct JetRuntimeDiagnosticRow {
-    pub code: &'static str,
-    pub what: &'static str,
-    pub why: &'static str,
-    pub fix: &'static str,
-    pub template_holes: &'static [&'static str],
-}
+pub use crate::RuntimeDiagnosticCore::{JetRuntimeDiagnosticRow, jet_runtime_stop_has_context};
+use crate::RuntimeDiagnosticCore::{
+    JetRuntimeStopContext, jet_runtime_stop_fields, jet_runtime_stop_status,
+    jet_write_diagnostic_template, jet_write_runtime_stop, jet_write_sentence_case,
+};
 
 impl JetRuntimeDiagnosticRow {
     fn render(self, holes: &[(&str, &str)]) -> (String, String, String) {
@@ -1722,46 +2174,12 @@ impl JetRuntimeDiagnosticRow {
 /// as a second template. Escaped braces remain literal.
 pub fn jet_render_diagnostic_template(template: &str, holes: &[(&str, &str)]) -> String {
     let mut out = String::with_capacity(template.len());
-    let bytes = template.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'{' && bytes.get(index + 1) == Some(&b'{') {
-            out.push('{');
-            index += 2;
-            continue;
-        }
-        if bytes[index] == b'}' && bytes.get(index + 1) == Some(&b'}') {
-            out.push('}');
-            index += 2;
-            continue;
-        }
-        if bytes[index] == b'{' {
-            if let Some(close_offset) = template[index + 1..].find('}') {
-                let close = index + 1 + close_offset;
-                let name = &template[index + 1..close];
-                if !name.is_empty()
-                    && name
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-                {
-                    let value = holes
-                        .iter()
-                        .find(|entry| entry.0 == name)
-                        .map(|entry| entry.1)
-                        .unwrap_or_else(|| panic!("missing diagnostic template hole `{name}`"));
-                    out.push_str(value);
-                    index = close + 1;
-                    continue;
-                }
-            }
-        }
-        let character = template[index..]
-            .chars()
-            .next()
-            .expect("template index is on a character boundary");
-        out.push(character);
-        index += character.len_utf8();
-    }
+    jet_write_diagnostic_template(&mut out, template, |out, name| {
+        let value = holes.iter().find(|entry| entry.0 == name)
+            .map(|entry| entry.1)
+            .unwrap_or_else(|| panic!("missing diagnostic template hole `{name}`"));
+        out.write_str(value)
+    }).expect("String formatting cannot fail");
     out
 }
 
@@ -1769,18 +2187,9 @@ pub fn jet_render_diagnostic_template(template: &str, holes: &[(&str, &str)]) ->
 /// leading flag, identifier, ref, path, keyword, or code fragment. Runtime-
 /// built diagnostic facts use this same product rule as table rows.
 pub fn jet_sentence_case_line(input: &str) -> String {
-    let Some((start, end)) = first_diagnostic_prose_token(input) else {
-        return input.to_string();
-    };
-    let Some(first) = input[start..end].chars().next() else {
-        return input.to_string();
-    };
-    if !first.is_ascii_lowercase() {
-        return input.to_string();
-    }
-    let mut output = input.to_string();
-    output.replace_range(start..start + first.len_utf8(), &first.to_ascii_uppercase().to_string());
-    output
+    let mut out = String::with_capacity(input.len());
+    jet_write_sentence_case(&mut out, &input).expect("String formatting cannot fail");
+    out
 }
 
 /// D-DIAG-URL1: every human-readable diagnostic ends with this stable lookup
@@ -1790,152 +2199,8 @@ pub fn jet_diagnostic_more_line(code: &str) -> String {
     format!("More: jet-lang.dev/e/{code}")
 }
 
-fn first_diagnostic_prose_token(input: &str) -> Option<(usize, usize)> {
-    let mut offset = 0;
-    while offset < input.len() {
-        let rest = &input[offset..];
-        let ch = rest.chars().next()?;
-        if ch.is_whitespace() || matches!(ch, '*' | '~' | '_') {
-            offset += ch.len_utf8();
-            continue;
-        }
-        if matches!(ch, '`' | '"' | '\'') || ch == '{' {
-            return None;
-        }
-        let start = offset;
-        let mut end = 0;
-        while end < rest.len() {
-            let value = rest[end..]
-                .chars()
-                .next()
-                .expect("diagnostic token index is on a character boundary");
-            if end > 0
-                && (value.is_whitespace()
-                    || matches!(value, ',' | ';' | ':' | '(' | ')' | '[' | ']' | '!'))
-            {
-                break;
-            }
-            if value == '.' {
-                let next = rest[end + value.len_utf8()..].chars().next();
-                if next.is_none_or(|next| {
-                    next.is_whitespace()
-                        || matches!(next, ',' | ';' | ':' | '(' | ')' | '[' | ']' | '!')
-                }) {
-                    if end > 0 {
-                        break;
-                    }
-                }
-            }
-            end += value.len_utf8();
-        }
-        let end = offset + end;
-        let token = &input[start..end];
-        if token.is_empty() || diagnostic_token_keeps_case(token) {
-            return None;
-        }
-        return Some((start, end));
-    }
-    None
-}
 
-fn diagnostic_token_keeps_case(token: &str) -> bool {
-    if DIAGNOSTIC_TYPE_NAMES.contains(&token)
-        || matches!(token.chars().next(), Some('-' | '#' | '@'))
-        || token == "C"
-        || matches!(
-            token,
-            "App"
-                | "Canvas"
-                | "Cell"
-                | "Codable"
-                | "Core"
-                | "Dart"
-                | "Debug"
-                | "Decimal"
-                | "Display"
-                | "Float"
-                | "fn"
-                | "Hangar"
-                | "Int"
-                | "Jet"
-                | "Jetpack"
-                | "Nix"
-                | "Output"
-                | "Package"
-                | "Quantity"
-                | "Rscript"
-                | "Rust"
-                | "Runtime"
-                | "Set"
-                | "Source"
-                | "Store"
-                | "String"
-                | "Syntax"
-                | "Target"
-                | "Tensor"
-                | "Terminal"
-                | "Type"
-                | "Unit"
-                | "Wasm"
-                | "Web"
-        )
-    {
-        return true;
-    }
-    let has_digit = token.chars().any(|ch| ch.is_ascii_digit());
-    let has_structural_case = token
-        .chars()
-        .any(|ch| matches!(ch, '_' | '/' | '\\' | '@' | '#' | '.'));
-    let all_code = token
-        .chars()
-        .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || matches!(ch, '-' | '_'));
-    let camel_case = token
-        .chars()
-        .next()
-        .is_some_and(|ch| ch.is_ascii_uppercase())
-        && token.chars().skip(1).any(|ch| ch.is_ascii_uppercase());
-    has_digit || has_structural_case || all_code || camel_case || token.starts_with("C-")
-}
 
-// Keep this list dependency-free: Outcome.rs is embedded into standalone AOT
-// and Web Preludes, where the host Syntax module does not exist.
-const DIAGNOSTIC_TYPE_NAMES: &[&str] = &[
-    "Bool",
-    "Char",
-    "Float",
-    "Int",
-    "String",
-    "Unit",
-    "Shared",
-    "SharedGuard",
-    "Shared.Weak",
-    "Condition",
-    "Task",
-    "Receiver",
-    "Sender",
-    "TaskFailure",
-    "HashMap",
-    "BTreeMap",
-    "Map",
-    "Queue",
-    "Set",
-    "Rank",
-    "PriorityQueue",
-    "Cache",
-    "Tally",
-    "Bits",
-    "Bytes",
-    "I8",
-    "I16",
-    "I32",
-    "I64",
-    "U8",
-    "U16",
-    "U32",
-    "U64",
-    "F32",
-    "F64",
-];
 
 /// Shared wording for a checked list position. Collection adapters marshal
 /// the length and index here; they do not own the user-facing text.
@@ -1965,6 +2230,17 @@ pub fn jet_missing_map_key_message(key: Option<&str>) -> String {
 /// carry the full JetShow trait into their boundary.
 pub fn jet_missing_map_key_value(key: impl std::fmt::Display) -> String {
     jet_missing_map_key_message(Some(&key.to_string()))
+}
+
+pub fn jet_test_expect_fail_message(expected_code: Option<&str>) -> String {
+    match expected_code {
+        Some(code) => format!("expected this region to stop with {code}, but it passed"),
+        None => "expected this region to fail, but it passed".to_string(),
+    }
+}
+
+pub fn jet_test_timeout_message(elapsed_ns: i64, limit_ns: i64) -> String {
+    format!("timeout: region took {elapsed_ns}ns, limit was {limit_ns}ns")
 }
 
 /// Shared wording for a reached typed goal.
@@ -2003,10 +2279,6 @@ pub fn jet_loop_stride_message() -> &'static str {
 // stop before the host stack aborts.
 pub const JET_RUNTIME_STACK_LIMIT: usize = 1024;
 
-/// Whether a runtime row carries the rich source context frame.
-pub fn jet_runtime_stop_has_context(code: &str) -> bool {
-    matches!(code, "E3001" | "E3012" | "E3014")
-}
 
 /// D-FAIL-BREACH1=A: the one renderer for a running program's breach stop.
 ///
@@ -2025,95 +2297,27 @@ pub fn jet_render_runtime_stop_from_row(
     message: &str,
     locals: &str,
 ) -> JetRuntimeDiagnostic {
-    let Some(row) = row else {
-        let what = format!("runtime diagnostic `{code}` is not an active runtime row");
-        let why = "Jet could not resolve this stop through the active diagnostic registry";
-        let fix = "report this as a Jet compiler or host defect";
-        return JetRuntimeDiagnostic {
-            code,
-            source: "host",
-            what: what.clone(),
-            why: why.to_string(),
-            fix: fix.to_string(),
-            rendered: format!(
-                "Internal error: {what}\n Why: {why}\n Fix: {fix}\n{}\n",
-                jet_diagnostic_more_line(code)
-            ),
-            exit_code: 101,
-            obligation: None,
-            foreign: None,
-        };
+    let context = JetRuntimeStopContext {
+        file, line, function: fn_name, source_line: src_line,
+        column: col, caret_len,
+        expected_type: message.rsplit_once(" — expected ").map(|(_, expected)| expected).unwrap_or(message),
     };
-
-    let line_text = line.to_string();
-    let todo_type = message
-        .rsplit_once(" — expected ")
-        .map(|(_, expected)| expected)
-        .unwrap_or(message);
-    let holes = row
-        .template_holes
-        .iter()
-        .map(|hole| {
-            let value = match *hole {
-                "msg" => message,
-                "file" => file,
-                "line" | "n" => &line_text,
-                "fn" => fn_name,
-                "type" => todo_type,
-                _ => message,
-            };
-            (*hole, value)
-        })
-        .collect::<Vec<_>>();
-    let (row_what, row_why, row_fix) = row.render(&holes);
-    let what = if code == "E3005" {
-        message.to_string()
-    } else {
-        row_what
+    let mut rendered = String::new();
+    jet_write_runtime_stop(
+        &mut rendered, row, code, context, &message,
+        (!locals.is_empty()).then_some(&locals as &dyn std::fmt::Display),
+    ).expect("String formatting cannot fail");
+    let (source, [what, why, fix]) = match row {
+        Some(row) => ("runtime", jet_runtime_stop_fields(row, code, context, &message).map(|field| field.to_string())),
+        None => ("host", [
+            format!("runtime diagnostic `{code}` is not an active runtime row"),
+            "Jet could not resolve this stop through the active diagnostic registry".to_string(),
+            "report this as a Jet compiler or host defect".to_string(),
+        ]),
     };
-    let what = jet_sentence_case_line(&what);
-    let why = jet_sentence_case_line(&row_why);
-    let fix = jet_sentence_case_line(&row_fix);
-
-    let show_context = jet_runtime_stop_has_context(code);
-    let mut rendered = format!("Stop [{code}]: {what}\n");
-    if !file.is_empty() {
-        rendered.push_str(&format!(
-            "  --> {}:{}{}\n",
-            file,
-            line,
-            if !show_context || fn_name.is_empty() {
-                String::new()
-            } else {
-                format!(" in {fn_name}")
-            }
-        ));
-    }
-    if show_context && !src_line.is_empty() {
-        let line_s = line.to_string();
-        let margin = line_s.len();
-        let pad = " ".repeat(margin);
-        rendered.push_str(&format!("   {pad}|\n"));
-        rendered.push_str(&format!("{line_s} | {src_line}\n"));
-        let col_offset = col.saturating_sub(1) as usize;
-        let caret = "^".repeat(caret_len.max(1) as usize);
-        rendered.push_str(&format!("   {pad}| {}{}\n", " ".repeat(col_offset), caret));
-    }
-    if show_context && !locals.is_empty() {
-        rendered.push_str(&format!("locals: {locals}\n"));
-    }
-    rendered.push_str(&format!(" Why: {why}\n Fix: {fix}\n"));
-    rendered.push_str(&jet_diagnostic_more_line(code));
-    rendered.push('\n');
-
     JetRuntimeDiagnostic {
-        code,
-        source: "runtime",
-        what,
-        why,
-        fix,
-        rendered,
-        exit_code: 70,
+        code, source, what, why, fix, rendered,
+        exit_code: jet_runtime_stop_status(row),
         obligation: None,
         foreign: None,
     }

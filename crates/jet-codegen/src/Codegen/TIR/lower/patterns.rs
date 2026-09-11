@@ -1,19 +1,14 @@
-use crate::jet_generated_format as jet_format;
-use crate::Codegen::mangle;
 use crate::Codegen::mangle_generated;
-use crate::Codegen::mangle_path;
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::arm_fallible_pattern;
 use crate::Codegen::TIR::arm_head_range;
 use crate::Codegen::TIR::arm_variant_pattern;
 use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::fork_panic;
-use crate::Codegen::TIR::lower::str_match_scan_closure;
 use crate::Codegen::TIR::lower::{deferred_stmt, LowerBody, LowerStmtPlan};
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::unit_type;
-use crate::Codegen::TIR::variant_pattern_enum;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::TEnumArg;
 use crate::Codegen::TIR::TExpr;
@@ -23,7 +18,7 @@ use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TMatchArm;
 use crate::Codegen::TIR::TPattern;
 use crate::Codegen::TIR::TStmt;
-use crate::Codegen::{variant_binding_types, variant_binding_types_for_enum};
+use crate::Codegen::variant_binding_types_for_enum;
 use crate::AST::{BinOp, Expr, PatSlot, Pattern, Stmt, SwitchArm, Type, VariantPayload};
 
 /// D-SHIFT1 (c7shift): lower `cursor.take_pattern("…")`. Builds the
@@ -42,15 +37,29 @@ pub(super) fn lower_cursor_take_pattern(
     env: &mut LowerEnv,
 ) -> TExpr {
     let recv_t = lower_expr(receiver, cx, env);
-    let canonical: Vec<(String, Type)> = parts
-        .iter()
-        .filter_map(|p| match p {
-            crate::AST::StrMatchPart::Hole { name, ty, .. } => {
-                Some((name.clone(), ty.clone().unwrap_or(Type::String)))
+    let mut canonical = Vec::new();
+    for part in parts {
+        let crate::AST::StrMatchPart::Hole { name, ty, span } = part else {
+            continue;
+        };
+        let ty = match ty {
+            None => Type::String,
+            Some(t @ (Type::Int | Type::Float | Type::Bool | Type::String | Type::InlineRange { .. })) => {
+                t.clone()
             }
-            crate::AST::StrMatchPart::Lit(_) => None,
-        })
-        .collect();
+            Some(_) => {
+                return invariant_expr(
+                    "cursor.take_pattern hole type",
+                    *span,
+                    Type::Result {
+                        ok: Box::new(unit_type()),
+                        err: Box::new(Type::String),
+                    },
+                );
+            }
+        };
+        canonical.push((name.clone(), ty));
+    }
     let ok_ty = if canonical.is_empty() {
         unit_type()
     } else {
@@ -137,17 +146,14 @@ pub(super) fn lower_reader_take_pattern(
 
 /// D-PARSESTR1: the bool test for a str-match arm head — whether the scan
 /// closure succeeds. Always refutable (E0148 requires an `else` whenever this
-/// pattern appears in an if-table with no fallback).
+/// pattern appears in an if-table, sema requires an `else`).
 pub(super) fn str_match_pattern_cond_expr(pattern: &Pattern, subject: TExpr, _cx: &Cx) -> TExpr {
     let Pattern::StrMatch { parts, .. } = pattern else {
-        return TExpr {
-            ty: Type::Bool,
-            kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::StrMatchScan {
-                subject: Box::new(subject),
-                parts: Vec::new(),
-                probe: crate::Codegen::TIR::TMatchProbe::IsSome,
-            })),
-        };
+        return invariant_expr(
+            "string-match condition pattern",
+            pattern.span(),
+            Type::Bool,
+        );
     };
     TExpr {
         ty: Type::Bool,
@@ -167,17 +173,27 @@ pub(super) fn str_match_pattern_cond_expr(pattern: &Pattern, subject: TExpr, _cx
 pub(super) fn lower_str_match_pattern_bindings(
     pattern: &Pattern,
     subject: TExpr,
-    cx: &Cx,
+    _cx: &Cx,
     env: &mut LowerEnv,
 ) -> Vec<TStmt> {
-    let (_, holes) = str_match_scan_closure(pattern, cx);
+    let Pattern::StrMatch { parts, .. } = pattern else {
+        return vec![TStmt::InvariantViolation {
+            construct: "string-match binding pattern".to_string(),
+            span: pattern.span(),
+        }];
+    };
+    let holes: Vec<(String, Type)> = parts
+        .iter()
+        .filter_map(|part| match part {
+            crate::AST::StrMatchPart::Hole { name, ty, .. } => {
+                Some((name.clone(), ty.clone().unwrap_or(Type::String)))
+            }
+            crate::AST::StrMatchPart::Lit(_) => None,
+        })
+        .collect();
     if holes.is_empty() {
         return Vec::new();
     }
-    let parts = match pattern {
-        Pattern::StrMatch { parts, .. } => parts.clone(),
-        _ => Vec::new(),
-    };
     let tuple_local = mangle_generated("sm_tuple");
     let tuple_ty = Type::Tuple(
         holes
@@ -193,7 +209,7 @@ pub(super) fn lower_str_match_pattern_bindings(
             ty: tuple_ty.clone(),
             kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::StrMatchScan {
                 subject: Box::new(subject),
-                parts,
+                parts: parts.clone(),
                 probe: crate::Codegen::TIR::TMatchProbe::Unwrap,
             })),
         },
@@ -226,37 +242,56 @@ pub(super) fn lower_str_match_pattern_bindings(
 /// D-BINPAT1 (card #506): the bool test for a binary-pattern arm head —
 /// whether the bit-scan closure succeeds. Always refutable (E0148).
 pub(super) fn bin_match_pattern_cond_expr(pattern: &Pattern, subject: TExpr, _cx: &Cx) -> TExpr {
-    let parts = match pattern {
-        Pattern::BinMatch { parts, .. } => parts.clone(),
-        _ => Vec::new(),
+    let Pattern::BinMatch { parts, .. } = pattern else {
+        return invariant_expr(
+            "binary-match condition pattern",
+            pattern.span(),
+            Type::Bool,
+        );
     };
     TExpr {
         ty: Type::Bool,
         kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::BinMatchScan {
             subject: Box::new(subject),
-            parts,
+            parts: parts.clone(),
             probe: crate::Codegen::TIR::TMatchProbe::IsSome,
         })),
     }
 }
-
 /// D-BINPAT1: bind each hole locally before the arm body runs — re-invokes the
 /// bit-scan closure (pure/cheap), binds the whole result tuple to one temp,
 /// then projects each hole out by index. Mirrors `lower_str_match_pattern_bindings`.
 pub(super) fn lower_bin_match_pattern_bindings(
     pattern: &Pattern,
     subject: TExpr,
-    cx: &Cx,
+    _cx: &Cx,
     env: &mut LowerEnv,
 ) -> Vec<TStmt> {
-    let (_, holes) = crate::Codegen::TIR::lower::bin_match_scan_closure(pattern, cx);
+    let Pattern::BinMatch { parts, .. } = pattern else {
+        return vec![TStmt::InvariantViolation {
+            construct: "binary-match binding pattern".to_string(),
+            span: pattern.span(),
+        }];
+    };
+    let holes: Vec<(String, Type)> = parts
+        .iter()
+        .filter_map(|part| match part {
+            crate::AST::BinMatchPart::Hole { name, spec, .. } => {
+                let ty = match spec {
+                    crate::AST::BinSpec::Rest => Type::List(Box::new(Type::IntN {
+                        signed: false,
+                        bits: 8,
+                    })),
+                    crate::AST::BinSpec::Bits { width, .. } => super::bin_bits_type(*width),
+                };
+                Some((name.clone(), ty))
+            }
+            crate::AST::BinMatchPart::Lit(_) => None,
+        })
+        .collect();
     if holes.is_empty() {
         return Vec::new();
     }
-    let parts = match pattern {
-        Pattern::BinMatch { parts, .. } => parts.clone(),
-        _ => Vec::new(),
-    };
     let tuple_local = mangle_generated("bm_tuple");
     let tuple_ty = Type::Tuple(
         holes
@@ -272,7 +307,7 @@ pub(super) fn lower_bin_match_pattern_bindings(
             ty: tuple_ty.clone(),
             kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::BinMatchScan {
                 subject: Box::new(subject),
-                parts,
+                parts: parts.clone(),
                 probe: crate::Codegen::TIR::TMatchProbe::Unwrap,
             })),
         },
@@ -336,6 +371,39 @@ pub(super) fn bool_and_chain(mut tests: Vec<TExpr>) -> TExpr {
     acc
 }
 
+fn invariant_expr(
+    construct: impl Into<String>,
+    span: crate::Diagnostics::Span,
+    ty: Type,
+) -> TExpr {
+    TExpr {
+        ty,
+        kind: TExprKind::InvariantViolation {
+            construct: construct.into(),
+            span,
+        },
+    }
+}
+
+fn invariant_stmt(construct: impl Into<String>, span: crate::Diagnostics::Span) -> TStmt {
+    TStmt::InvariantViolation {
+        construct: construct.into(),
+        span,
+    }
+}
+
+pub(super) fn resolved_enum_subject_type(cx: &Cx, subject_ty: &Type) -> Result<String, &'static str> {
+    match subject_ty.without_user_tags() {
+        Type::Union(members) if !members.is_empty() => Ok(crate::AST::union_enum_name(members)),
+        Type::Union(_) => Err("empty union enum subject"),
+        Type::Named(name) | Type::Apply { name, .. } => {
+            Ok(crate::Codegen::TIR::canonical_enum_owner(cx, name))
+        }
+        _ => Err("enum match subject is not an enum type"),
+    }
+}
+
+
 /// c109 Phase 8: lower a fallible/optional pattern match (`when … { it == Ok(n) ->
 /// … }`). Reuses the `EnumMatch` TStmt — the scrutinee is the subject's emitted form
 /// (a covered fallible/optional value: a user fallible fn call, an optional local,
@@ -350,14 +418,29 @@ pub(crate) fn lower_fallible_match<'a>(
     cx: &'a Cx,
     env: &mut LowerEnv,
 ) -> LowerStmtPlan<'a> {
-    // The subject's resolved type carries the ok/err/present payload types. Lower the
-    // subject once to get both its emitted string and its total type.
-    let subject_t = lower_expr(subject, cx, env);
+    // Preserve a fallible core/helper call as its Result/Option carrier while
+    // lowering the scrutinee. Normal value lowering consumes that carrier via
+    // `Try`, but an outcome pattern needs to inspect it directly.
+    let subject_t = {
+        let _fallible_match_cache_scope = super::expressions::ExprCacheScope::enter();
+        let fallback_subject = env.fallback_subject;
+        env.fallback_subject = true;
+        let subject_t = lower_expr(subject, cx, env);
+        env.fallback_subject = fallback_subject;
+        subject_t
+    };
     let subject_ty = subject_t.ty.clone();
-    // A by-reference enum param is cloned in the enum-match path; a fallible/optional
-    // subject in-subset is never a deref'd slot (it is a fn-call value or an owned
-    // local), so the scrutinee is the plain emitted form — matching the AST path,
-    // whose `subj` clone branch only fires for a deref'd `Ident`.
+    let is_option = match subject_ty.without_user_tags() {
+        Type::Option(_) => true,
+        Type::Result { .. } => false,
+        _ => {
+            return LowerStmtPlan::ready(invariant_stmt(
+                "fallible match subject type",
+                subject.span(),
+            ));
+        }
+    };
+    let subject_span = subject.span();
     let (scrutinee, clone_subject) = match subject {
         Expr::Ident(name, _) if env.is_borrowed(name) => {
             let mut by_value = env.local_of(name);
@@ -372,18 +455,29 @@ pub(crate) fn lower_fallible_match<'a>(
         }
         _ => (subject_t, false),
     };
-    let mut tarms = Vec::new();
-    let mut bodies = Vec::new();
+    if arms.is_empty() {
+        return LowerStmtPlan::ready(invariant_stmt(
+            "fallible match has no arms",
+            subject_span,
+        ));
+    }
+    let mut tarms = Vec::with_capacity(arms.len());
+    let mut bodies = Vec::with_capacity(arms.len() + usize::from(else_body.is_some()));
     for arm in arms {
-        let pattern =
-            arm_fallible_pattern(cx, &arm.cond, subject).expect("gate proved fallible arm");
-        // An arm body is a CLONED env in `emit_pattern_match_switch` (no leak) — fork.
+        let Some(pattern) = arm_fallible_pattern(cx, &arm.cond, subject) else {
+            return LowerStmtPlan::ready(invariant_stmt(
+                "fallible match arm pattern",
+                arm.span,
+            ));
+        };
         let mut body_env = fork_panic(env);
-        tir_add_fallible_binding(&pattern, &mut body_env, &subject_ty);
-        let tir_pattern = if matches!(&subject_ty, Type::Option(_)) {
-            TPattern::option_binding(pattern)
+        if let Err(reason) = tir_add_fallible_binding(&pattern, &mut body_env, &subject_ty) {
+            return LowerStmtPlan::ready(invariant_stmt(reason, pattern.span()));
+        }
+        let tir_pattern = if is_option {
+            TPattern::option_binding_with_values(pattern, |value| lower_expr(value, cx, env))
         } else {
-            TPattern::binding(pattern)
+            TPattern::binding_with_values(pattern, |value| lower_expr(value, cx, env))
         };
         tarms.push(tir_pattern);
         bodies.push(LowerBody::scoped(&arm.body, body_env));
@@ -393,25 +487,36 @@ pub(crate) fn lower_fallible_match<'a>(
         let branch = clone_env(env);
         bodies.push(LowerBody::scoped(body, branch));
     }
-    deferred_stmt(bodies, move |mut lowered| {
-        let else_lowered = has_else.then(|| lowered.pop().unwrap());
+    deferred_stmt(bodies, move |lowered| {
+        let expected = tarms.len() + if has_else { 1 } else { 0 };
+        if lowered.len() != expected {
+            return invariant_stmt("fallible match body count", subject_span);
+        }
         let mut lowered = lowered.into_iter();
-        let tarms = tarms
-            .into_iter()
-            .map(|pattern| TMatchArm {
-                pattern,
-                body: lowered.next().expect("fallible match body was deferred"),
-            })
-            .collect();
-        // No explicit `else` → the AST path (`emit_pattern_match_switch`) appends
-        // `_ => unreachable!(…)` so rustc sees a complete match (sema proved E0307).
-        let fallthrough = !has_else;
+        let mut match_arms = Vec::with_capacity(tarms.len());
+        for pattern in tarms {
+            let Some(body) = lowered.next() else {
+                return invariant_stmt("fallible match body order", subject_span);
+            };
+            match_arms.push(TMatchArm { pattern, body });
+        }
+        let else_lowered = if has_else {
+            let Some(body) = lowered.next() else {
+                return invariant_stmt("fallible match else body", subject_span);
+            };
+            Some(body)
+        } else {
+            None
+        };
+        if lowered.next().is_some() {
+            return invariant_stmt("fallible match extra body", subject_span);
+        }
         TStmt::EnumMatch {
             scrutinee,
             clone_subject,
-            arms: tarms,
+            arms: match_arms,
             else_body: else_lowered,
-            fallthrough,
+            fallthrough: !has_else,
         }
     })
 }
@@ -420,32 +525,38 @@ pub(crate) fn lower_fallible_match<'a>(
 /// subject's Result/Option type. Mirrors `add_pattern_bindings`'s Ok/Err/Present
 /// arms (the binding's `jet_ty` is the inner type so any arithmetic on it traps
 /// exactly as the AST path; `null` binds nothing).
-pub(crate) fn tir_add_fallible_binding(pattern: &Pattern, env: &mut LowerEnv, subject_ty: &Type) {
+pub(crate) fn tir_add_fallible_binding(
+    pattern: &Pattern,
+    env: &mut LowerEnv,
+    subject_ty: &Type,
+) -> Result<(), &'static str> {
+    let subject_ty = subject_ty.without_user_tags();
     let (binding, ty) = match (pattern, subject_ty) {
         (Pattern::Ok { binding, .. }, Type::Result { ok, .. }) => {
-            (binding.clone(), Some((**ok).clone()))
+            (binding.clone(), (**ok).clone())
         }
         (Pattern::Err { binding, .. }, Type::Result { err, .. }) => {
-            (binding.clone(), Some((**err).clone()))
+            (binding.clone(), (**err).clone())
         }
         (Pattern::Present { binding, .. }, Type::Option(inner)) => {
-            (binding.clone(), Some((**inner).clone()))
+            (binding.clone(), (**inner).clone())
         }
-        // The subject type didn't resolve to the expected shape (impossible for a
-        // covered subject — sema validated it); bind with no type (matches the AST
-        // path's `jet_ty: None` fallback).
-        (Pattern::Ok { binding, .. }, _)
-        | (Pattern::Err { binding, .. }, _)
-        | (Pattern::Present { binding, .. }, _) => (binding.clone(), None),
-        // `null` (Absent) binds nothing.
-        _ => return,
+        (Pattern::Absent(_), Type::Option(_)) => return Ok(()),
+        (Pattern::Ok { .. }, _) => return Err("Ok pattern does not match fallible subject type"),
+        (Pattern::Err { .. }, _) => return Err("Err pattern does not match fallible subject type"),
+        (Pattern::Present { .. }, _) => {
+            return Err("present pattern does not match optional subject type")
+        }
+        (Pattern::Absent(_), _) => return Err("absent pattern does not match optional subject type"),
+        _ => return Err("unsupported fallible binding pattern"),
     };
-    let slot = if ty.as_ref().is_some_and(Type::is_allocator_view) {
+    let slot = if ty.is_allocator_view() {
         TLocal::user(&binding).through_ref()
     } else {
         TLocal::user(&binding)
     };
-    env.bind(&binding, slot, ty);
+    env.bind(&binding, slot, Some(ty));
+    Ok(())
 }
 
 pub(crate) fn lower_enum_match<'a>(
@@ -455,14 +566,16 @@ pub(crate) fn lower_enum_match<'a>(
     cx: &'a Cx,
     env: &mut LowerEnv,
 ) -> LowerStmtPlan<'a> {
-    // The match owns the value. Mirror `emit_pattern_match_switch`: a by-reference
-    // subject (a deref'd enum param) is cloned — the borrow itself is cloned, NOT
-    // the deref'd place, so the scrutinee carries the slot *without* its deref and
-    // the clone is recorded as a fact.
+    let subject_span = subject.span();
     let (scrutinee, clone_subject) = match subject {
         Expr::Ident(name, _) if env.is_borrowed(name) => {
             let slot = env.local_of(name);
-            let ty = env.ty_of(name).unwrap_or(Type::Int);
+            let Some(ty) = env.ty_of(name) else {
+                return LowerStmtPlan::ready(invariant_stmt(
+                    "enum match borrowed subject type",
+                    subject_span,
+                ));
+            };
             let mut by_value = slot.clone();
             by_value.deref = false;
             (
@@ -475,36 +588,39 @@ pub(crate) fn lower_enum_match<'a>(
         }
         _ => (lower_expr(subject, cx, env), false),
     };
-    // Resolve the owning enum once — drives the Rust variant prefix in patterns.
-    // Variant names are not unique (`Closed`, for example), so prefer the checked
-    // subject type over the lossy variant-name fallback.
     let subject_ty = scrutinee.ty.clone();
-    let subject_enum = match &subject_ty {
-        Type::Union(members) => Some(crate::AST::union_enum_name(members)),
-        Type::Named(name) | Type::Apply { name, .. } => {
-            let resolved = cx
-                .core_qualified_rust_type_name(name)
-                .unwrap_or(name.as_str());
-            cx.enum_variants
-                .contains_key(resolved)
-                .then(|| resolved.to_string())
+    let enum_type = match resolved_enum_subject_type(cx, &subject_ty) {
+        Ok(name) => Some(name),
+        Err(reason) => {
+            return LowerStmtPlan::ready(invariant_stmt(reason, subject_span));
         }
-        _ => None,
     };
-    let enum_type = subject_enum.or_else(|| {
-        arms.iter().find_map(|a| {
-            arm_variant_pattern(cx, &a.cond, subject).and_then(|p| variant_pattern_enum(cx, &p))
-        })
-    });
-    let mut patterns = Vec::new();
-    let mut bodies = Vec::new();
+    if arms.is_empty() {
+        return LowerStmtPlan::ready(invariant_stmt(
+            "enum match has no arms",
+            subject_span,
+        ));
+    }
+    let mut patterns = Vec::with_capacity(arms.len());
+    let mut bodies = Vec::with_capacity(arms.len() + usize::from(else_body.is_some()));
     for arm in arms {
-        let pattern = arm_variant_pattern(cx, &arm.cond, subject).expect("gate proved variant arm");
-        // The arm body sees the variant's payload bindings, typed from the layout. The
-        // arm body is a CLONED env in `emit_pattern_match_switch` (no leak) — fork.
+        let Some(pattern) = arm_variant_pattern(cx, &arm.cond, subject) else {
+            return LowerStmtPlan::ready(invariant_stmt(
+                "enum match arm pattern",
+                arm.span,
+            ));
+        };
         let mut body_env = fork_panic(env);
-        tir_add_pattern_bindings(cx, &pattern, &mut body_env, Some(&subject_ty));
-        patterns.push(TPattern::arm(pattern, enum_type.clone()));
+        if let Err(reason) =
+            tir_add_pattern_bindings(cx, &pattern, &mut body_env, Some(&subject_ty))
+        {
+            return LowerStmtPlan::ready(invariant_stmt(reason, pattern.span()));
+        }
+        patterns.push(TPattern::arm_with_values(
+            pattern,
+            enum_type.clone(),
+            |value| lower_expr(value, cx, env),
+        ));
         bodies.push(LowerBody::scoped(&arm.body, body_env));
     }
     let has_else = else_body.is_some();
@@ -512,22 +628,34 @@ pub(crate) fn lower_enum_match<'a>(
         let branch = clone_env(env);
         bodies.push(LowerBody::scoped(body, branch));
     }
-    deferred_stmt(bodies, move |mut lowered| {
-        let else_lowered = has_else.then(|| lowered.pop().unwrap());
+    deferred_stmt(bodies, move |lowered| {
+        let expected = patterns.len() + if has_else { 1 } else { 0 };
+        if lowered.len() != expected {
+            return invariant_stmt("enum match body count", subject_span);
+        }
         let mut lowered = lowered.into_iter();
-        let tarms = patterns
-            .into_iter()
-            .map(|pattern| TMatchArm {
-                pattern,
-                body: lowered.next().expect("enum match body was deferred"),
-            })
-            .collect();
-        // No explicit `else` → the AST path appends `_ => unreachable!(…)` so rustc
-        // sees a complete match (sema already proved exhaustiveness — E0307).
+        let mut match_arms = Vec::with_capacity(patterns.len());
+        for pattern in patterns {
+            let Some(body) = lowered.next() else {
+                return invariant_stmt("enum match body order", subject_span);
+            };
+            match_arms.push(TMatchArm { pattern, body });
+        }
+        let else_lowered = if has_else {
+            let Some(body) = lowered.next() else {
+                return invariant_stmt("enum match else body", subject_span);
+            };
+            Some(body)
+        } else {
+            None
+        };
+        if lowered.next().is_some() {
+            return invariant_stmt("enum match extra body", subject_span);
+        }
         TStmt::EnumMatch {
             scrutinee,
             clone_subject,
-            arms: tarms,
+            arms: match_arms,
             else_body: else_lowered,
             fallthrough: !has_else,
         }
@@ -542,33 +670,69 @@ pub(crate) fn lower_range_switch<'a>(
     env: &mut LowerEnv,
 ) -> LowerStmtPlan<'a> {
     let subject_expr = lower_expr(subject, cx, env);
-    let mut ranges = Vec::new();
-    let mut bodies = Vec::new();
+    let subject_span = subject.span();
+    if !matches!(
+        subject_expr.ty.without_user_tags(),
+        Type::Int | Type::InlineRange { .. } | Type::Char
+    ) {
+        return LowerStmtPlan::ready(invariant_stmt(
+            "range switch subject type",
+            subject_span,
+        ));
+    }
+    if arms.is_empty() {
+        return LowerStmtPlan::ready(invariant_stmt(
+            "range switch has no arms",
+            subject_span,
+        ));
+    }
+    let mut ranges = Vec::with_capacity(arms.len());
+    let mut bodies = Vec::with_capacity(arms.len() + 1);
     for arm in arms {
-        let (lo, hi) = arm_head_range(cx, &arm.cond, subject).expect("gate proved range arm");
+        let Some((lo, hi)) = arm_head_range(cx, &arm.cond, subject) else {
+            return LowerStmtPlan::ready(invariant_stmt(
+                "range switch arm pattern",
+                arm.span,
+            ));
+        };
+        if lo > hi {
+            return LowerStmtPlan::ready(invariant_stmt(
+                "range switch arm bounds",
+                arm.span,
+            ));
+        }
         ranges.push((lo, hi));
         bodies.push(LowerBody::scoped(&arm.body, clone_env(env)));
     }
-    let else_body = else_body
-        .as_ref()
-        .expect("range switch requires else (gate)");
+    let Some(else_body) = else_body.as_ref() else {
+        return LowerStmtPlan::ready(invariant_stmt(
+            "range switch requires else",
+            subject_span,
+        ));
+    };
     bodies.push(LowerBody::scoped(else_body, clone_env(env)));
-    deferred_stmt(bodies, move |mut lowered| {
-        let else_lowered = lowered.pop().unwrap();
+    deferred_stmt(bodies, move |lowered| {
+        let expected = ranges.len() + 1;
+        if lowered.len() != expected {
+            return invariant_stmt("range switch body count", subject_span);
+        }
         let mut lowered = lowered.into_iter();
-        let arms = ranges
-            .into_iter()
-            .map(|(lo, hi)| {
-                (
-                    lo,
-                    hi,
-                    lowered.next().expect("range switch body was deferred"),
-                )
-            })
-            .collect();
+        let mut match_arms = Vec::with_capacity(ranges.len());
+        for (lo, hi) in ranges {
+            let Some(body) = lowered.next() else {
+                return invariant_stmt("range switch body order", subject_span);
+            };
+            match_arms.push((lo, hi, body));
+        }
+        let Some(else_lowered) = lowered.next() else {
+            return invariant_stmt("range switch else body", subject_span);
+        };
+        if lowered.next().is_some() {
+            return invariant_stmt("range switch extra body", subject_span);
+        }
         TStmt::RangeSwitch {
             subject: subject_expr,
-            arms,
+            arms: match_arms,
             else_body: else_lowered,
         }
     })
@@ -577,85 +741,51 @@ pub(crate) fn lower_range_switch<'a>(
 /// TIR-local reproduction of codegen's `emit_range_guard` (Statement.rs): a payload
 /// range slot becomes `__jet_range_i >= lo && __jet_range_i <= hi`. `None` when no
 /// slot is a range. Or-patterns reuse the first alt's ranges (all alts bind alike).
-pub(crate) fn tir_range_guard(pattern: &Pattern) -> Option<String> {
-    match pattern {
-        Pattern::Variant { bindings, .. } => {
-            let guards: Vec<String> = bindings
-                .iter()
-                .enumerate()
-                .filter_map(|(i, s)| {
-                    if let PatSlot::Range { lo, hi } = s {
-                        Some(jet_format!(
-                            "{jet_prefix}range_{} >= {} && {jet_prefix}range_{} <= {}",
-                            i,
-                            lo,
-                            i,
-                            hi
-                        ))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            if guards.is_empty() {
-                None
-            } else {
-                Some(guards.join(" && "))
-            }
-        }
-        Pattern::Or(alts, _) => alts.first().and_then(tir_range_guard),
-        _ => None,
-    }
-}
 
-/// TIR-local reproduction of codegen's `add_pattern_bindings`/`variant_binding_types`
-/// for the user-enum case: bind each `Bind` slot to its payload field type, read
-/// from the resolved enum layout (`cx.enum_variants`). Wildcard/Range slots bind
-/// nothing. Or-patterns bind the first alt's names (all alts bind alike — E0317).
+
+/// TIR-local reproduction of codegen's `add_pattern_bindings`: bind each `Bind`
+/// slot to its exact payload type from the resolved subject. Wildcard/Range slots
+/// bind nothing. Or-pattern alternatives are checked for the same names and types.
 pub(crate) fn tir_add_pattern_bindings(
     cx: &Cx,
     pattern: &Pattern,
     env: &mut LowerEnv,
     subject_ty: Option<&Type>,
-) {
+) -> Result<(), &'static str> {
     match pattern {
         Pattern::Variant {
             variant, bindings, ..
         } => {
-            let hook_payload = match (subject_ty, variant.as_str()) {
-                (Some(Type::Apply { name, args }), "Continue" | "Transform")
-                    if matches!(name.as_str(), "HookOutcome" | "HookDecision") =>
-                {
-                    args.first().cloned()
-                }
-                (Some(Type::Apply { name, args }), "Fail")
-                    if matches!(name.as_str(), "HookOutcome" | "HookDecision") =>
-                {
-                    args.get(1).cloned()
-                }
-                _ => None,
+            let owner = match subject_ty {
+                Some(ty) => Some(resolved_enum_subject_type(cx, ty)?),
+                None => None,
             };
-            // D-UNIONTYPE1=A: union arm binds the matching member type.
-            let union_payload = match subject_ty {
-                Some(Type::Union(members)) => members
-                    .iter()
-                    .find(|m| crate::AST::union_member_tag(m) == *variant)
-                    .map(|m| vec![m.clone()]),
-                _ => None,
-            };
-            let tys = hook_payload
-                .map(|ty| vec![ty])
-                .or(union_payload)
-                .or_else(|| variant_payload_types(cx, variant, subject_ty));
-            let owner = subject_ty.and_then(|ty| match ty {
-                Type::Named(name) | Type::Apply { name, .. }
-                    if cx.enum_variants.contains_key(name) =>
-                {
-                    Some(name.as_str())
-                }
-                _ => None,
+            let is_group = owner.as_deref().is_some_and(|owner| {
+                !crate::Codegen::group_leaves(cx, Some(owner), variant).is_empty()
             });
-            let payload = owner.and_then(|owner| {
+            if is_group {
+                return if bindings.is_empty() {
+                    Ok(())
+                } else {
+                    Err("enum group pattern cannot bind payload slots")
+                };
+            }
+            let tys = variant_payload_types(cx, variant, subject_ty)?;
+            let range_slots_forbidden = subject_ty.is_some_and(|ty| {
+                match ty.without_user_tags() {
+                    Type::Named(name) | Type::Apply { name, .. } => {
+                        let resolved = crate::Codegen::TIR::canonical_enum_owner(cx, name);
+                        crate::Codegen::is_json_type_name(name)
+                            || resolved == "DataTree"
+                            || resolved == crate::Syntax::TYPE_KEY
+                    }
+                    _ => false,
+                }
+            });
+            if bindings.len() != tys.len() {
+                return Err("enum pattern payload slot count");
+            }
+            let payload = owner.as_deref().and_then(|owner| {
                 cx.enum_variants
                     .get(owner)?
                     .iter()
@@ -663,65 +793,177 @@ pub(crate) fn tir_add_pattern_bindings(
                     .map(|(_, payload)| payload)
             });
             for (i, slot) in bindings.iter().enumerate() {
-                if let PatSlot::Bind { name, .. } = slot {
-                    let ty = tys
-                        .as_ref()
-                        .and_then(|ts| ts.get(i).cloned())
-                        .unwrap_or(Type::Int);
-                    // Recursive enum payloads are `Box<T>` only in Rust. Jet's
-                    // binding remains `T`, so record the representation deref
-                    // on the local once; every downstream use, including a
-                    // generated Encode call, sees the canonical payload type.
-                    let boxed = owner.zip(payload).is_some_and(|(owner, payload)| {
+                let ty = tys.get(i).ok_or("enum pattern payload type")?;
+                match slot {
+                    PatSlot::Bind { name, .. } => {
                         let edge = match payload {
-                            VariantPayload::Single(..) => Some(variant.clone()),
-                            VariantPayload::Named(fields) => fields
-                                .get(i)
-                                .map(|field| format!("{variant}.{}", field.name)),
-                            VariantPayload::Unit => None,
+                            Some(VariantPayload::Single(..)) => Some(variant.clone()),
+                            Some(VariantPayload::Named(fields)) => {
+                                let Some(field) = fields.get(i) else {
+                                    return Err("enum named payload field");
+                                };
+                                Some(format!("{variant}.{}", field.name))
+                            }
+                            Some(VariantPayload::Unit) | None => None,
                         };
-                        edge.is_some_and(|edge| cx.boxed_edges.contains(&(owner.to_string(), edge)))
-                    });
-                    let local = if boxed {
-                        TLocal::user(name).through_ref()
-                    } else {
-                        TLocal::user(name)
-                    };
-                    env.bind(name, local, Some(ty));
+                        let boxed = owner
+                            .as_ref()
+                            .zip(edge.as_ref())
+                            .is_some_and(|(owner, edge)| {
+                                cx.boxed_edges.contains(&(owner.clone(), edge.clone()))
+                            });
+                        let local = if boxed {
+                            TLocal::user(name).through_ref()
+                        } else {
+                            TLocal::user(name)
+                        };
+                        env.bind(name, local, Some(ty.clone()));
+                    }
+                    PatSlot::Wildcard => {}
+                    PatSlot::Range { lo, hi } => {
+                        if range_slots_forbidden
+                            || lo > hi
+                            || !matches!(
+                                ty.without_user_tags(),
+                                Type::Int | Type::InlineRange { .. } | Type::Char
+                            )
+                        {
+                            return Err("enum range payload type or bounds");
+                        }
+                    }
                 }
             }
+            Ok(())
         }
         Pattern::Or(alts, _) => {
-            if let Some(first) = alts.first() {
-                tir_add_pattern_bindings(cx, first, env, subject_ty);
+            let Some(first) = alts.first() else {
+                return Err("empty enum or-pattern");
+            };
+            tir_add_pattern_bindings(cx, first, env, subject_ty)?;
+            let first_names = first.binding_names();
+            let expected: Vec<(String, Option<Type>)> = first_names
+                .iter()
+                .map(|binding| {
+                    (
+                        binding.local_name().to_string(),
+                        env.ty_of(binding.local_name()),
+                    )
+                })
+                .collect();
+            for alternative in alts.iter().skip(1) {
+                let mut alternative_env = clone_env(env);
+                tir_add_pattern_bindings(cx, alternative, &mut alternative_env, subject_ty)?;
+                let names = alternative.binding_names();
+                if names.len() != expected.len() {
+                    return Err("enum or-pattern binding count");
+                }
+                for (binding, (expected_name, expected_ty)) in names.iter().zip(&expected) {
+                    if binding.local_name() != expected_name
+                        || alternative_env.ty_of(binding.local_name()).as_ref()
+                            != expected_ty.as_ref()
+                    {
+                        return Err("enum or-pattern binding shape");
+                    }
+                }
             }
+            Ok(())
         }
-        _ => {}
+        _ => Err("unsupported enum binding pattern"),
     }
 }
 
-/// The payload field types a variant binds, from the resolved enum layout. c109
-/// Phase 24: DELEGATES to the AST `variant_binding_types` (made `pub(crate)`), which
-/// handles the JSON enum (`core_json_pattern_types`) AND user/foreign enums
-/// (`cx.variant_owner` → `cx.enum_variants`) — pure table lookups, no env/inference —
-/// so the bound payload type is byte-parity-faithful for every covered enum (e.g. a
-/// foreign `ParseError.NoFrontmatter(p)` binds `p: String`).
+/// The payload field types a variant binds, from the resolved subject type and
+/// canonical enum layout. Missing or inconsistent layout data is a compiler
+/// invariant.
+///
+/// Core dynamic enums use their canonical payload tables; user and foreign enums
+/// use the exact layout selected by the already-resolved subject type.
 pub(crate) fn variant_payload_types(
     cx: &Cx,
     variant: &str,
     subject_ty: Option<&Type>,
-) -> Option<Vec<Type>> {
-    let typed = subject_ty.and_then(|ty| {
-        let name = match ty {
-            Type::Named(name) | Type::Apply { name, .. } => name,
-            _ => return None,
-        };
-        let resolved = cx
-            .core_qualified_rust_type_name(name)
-            .unwrap_or(name.as_str());
-        variant_binding_types_for_enum(cx, resolved, variant)
-    });
-    typed.or_else(|| variant_binding_types(cx, variant))
+) -> Result<Vec<Type>, &'static str> {
+    let Some(subject_ty) = subject_ty else {
+        return Err("enum payload subject type");
+    };
+    let subject_ty = subject_ty.without_user_tags();
+    if let Type::Apply { name, args } = subject_ty {
+        if matches!(
+            name.as_str(),
+            crate::Syntax::TYPE_HOOK_OUTCOME | crate::Syntax::TYPE_HOOK_DECISION
+        ) {
+            return match (name.as_str(), variant) {
+                ("HookOutcome", "Continue") | ("HookDecision", "Continue" | "Transform") => args
+                    .first()
+                    .cloned()
+                    .map(|ty| vec![ty])
+                    .ok_or("hook payload type"),
+                ("HookOutcome", "Fail") | ("HookDecision", "Fail") => args
+                    .get(1)
+                    .cloned()
+                    .map(|ty| vec![ty])
+                    .ok_or("hook payload type"),
+                ("HookOutcome", "Cancel") | ("HookDecision", "Cancel") => Ok(Vec::new()),
+                _ => Err("unknown hook enum variant"),
+            };
+        }
+    }
+    match subject_ty {
+        Type::Union(members) => members
+            .iter()
+            .find(|member| crate::AST::union_member_tag(member) == variant)
+            .cloned()
+            .map(|member| vec![member])
+            .ok_or("union variant payload type"),
+        Type::Named(name) | Type::Apply { name, .. } => {
+            let resolved = crate::Codegen::TIR::canonical_enum_owner(cx, name);
+            if (crate::Codegen::is_json_type_name(name) || resolved == "DataTree")
+                && crate::Codegen::is_json_variant(variant)
+            {
+                return match variant {
+                    "Null" => Ok(Vec::new()),
+                    "Bool" => Ok(vec![Type::Bool]),
+                    "Int" => Ok(vec![Type::Int]),
+                    "Float" => Ok(vec![Type::Float]),
+                    "Text" => Ok(vec![Type::String]),
+                    "Array" => Ok(vec![Type::List(Box::new(Type::Named(
+                        crate::Syntax::TYPE_DATA.to_string(),
+                    )))]),
+                    "Object" => Ok(vec![Type::Map {
+                        key: Box::new(Type::String),
+                        key_span: None,
+                        value: Box::new(Type::Named(crate::Syntax::TYPE_DATA.to_string())),
+                    }]),
+                    "Number" => Ok(vec![Type::String]),
+                    _ => Err("unknown data enum variant"),
+                };
+            }
+            if resolved == crate::Syntax::TYPE_KEY {
+                return match variant {
+                    "Char" | "Ctrl" => Ok(vec![Type::Char]),
+                    "F" => Ok(vec![Type::Int]),
+                    v if crate::Codegen::is_key_variant(v) => Ok(Vec::new()),
+                    _ => Err("unknown key enum variant"),
+                };
+            }
+            if resolved == "DataEvent" {
+                return match variant {
+                    "Bool" => Ok(vec![Type::Bool]),
+                    "Int" => Ok(vec![Type::Int]),
+                    "Float" => Ok(vec![Type::Float]),
+                    "Text" | "Key" => Ok(vec![Type::String]),
+                    "Bytes" => Ok(vec![Type::List(Box::new(Type::Int))]),
+                    "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd" => {
+                        Ok(Vec::new())
+                    }
+                    _ => Err("unknown data-event enum variant"),
+                };
+            }
+            variant_binding_types_for_enum(cx, &resolved, variant)
+                .ok_or("enum variant payload type")
+        }
+        _ => Err("enum payload subject type"),
+    }
 }
 
 /// The Rust type path a Jet enum name spells, plus whether its variants are
@@ -736,213 +978,65 @@ pub(crate) fn variant_payload_types(
 /// is how `WatchDomain`/`WatchKind` reached rustc as E0433 in generated code
 /// (I2): the copy in `emit_match_pattern` had never heard of them, so every
 /// core enum the copy was missing mangled into a nonexistent local type.
-pub(crate) fn tir_enum_rust_path(cx: &Cx, type_name: &str) -> (String, bool) {
-    let root = cx.root_prefix.as_str();
-    let in_std = |rust: &str| (format!("{root}jet_std::{rust}"), true);
-    let at_root = |rust: &str| (format!("{root}{rust}"), true);
-    // D-UNIONTYPE1=A: compiler-generated union enums use bare member-type tags.
-    if type_name.starts_with("__JetUnion_") {
-        return (mangle_path(type_name), true);
-    }
-    // D-ENC-DYN1=A+: `Data` (+ `JSON`/`TOML`/`YAML`/`CSV`) is the user-facing
-    // face of one runtime value, `jet_std::DataTree`.
-    if crate::Codegen::is_json_type_name(type_name) {
-        return in_std("DataTree");
-    }
-    // D-TERM1 (ratified 2026-06-22): `Key` is a prelude enum; its Rust name is `JetKey`.
-    // Variant names are not mangled (Char, Enter, …).
-    if type_name == crate::Syntax::TYPE_KEY {
-        return at_root("JetKey");
-    }
-    if type_name == crate::Syntax::TYPE_REMOVE_BY
-        || type_name == mangle(crate::Syntax::TYPE_REMOVE_BY)
-    {
-        return at_root("JetRemoveBy");
-    }
-    if type_name == crate::Syntax::TYPE_TASK_FAILURE {
-        return in_std("JetTaskFailure");
-    }
-    if type_name == "DataEvent" {
-        return in_std("DataEvent");
-    }
-    if matches!(type_name, "EncodingFormat" | "EncodingErrorKind") {
-        return in_std(type_name);
-    }
-    if matches!(
-        type_name,
-        "XMLEncoding" | "XMLLexicalPolicy" | "XMLCanonicalMode"
-    ) {
-        return in_std(type_name);
-    }
-    // D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum (`.Stream`/
-    // `.Inherit`/`.Capture`) — its Rust type lives in `jet_std`, plain variant names.
-    if type_name == "ProcessStreamMode" {
-        return in_std("ProcessStreamMode");
-    }
-    if type_name == crate::Syntax::TYPE_TERMINAL_MODE {
-        return in_std("TerminalMode");
-    }
-    // D-TEXTWIDTH1=B: `TextWidth`'s two field enums — same shape.
-    if matches!(type_name, "TextWidthAmbiguous" | "TextWidthControls") {
-        return in_std(type_name);
-    }
-    // stdlib-api-laws D4: `WatchEvent`'s two field enums — same shape.
-    if matches!(type_name, "WatchDomain" | "WatchKind") {
-        return in_std(type_name);
-    }
-    if type_name == crate::Syntax::DURATION_UNIT_TYPE {
-        return in_std("DurationUnit");
-    }
-    if type_name == "Overflow" {
-        return in_std("JetEventOverflow");
-    }
-    if type_name == "FailurePolicy" {
-        return in_std("JetFailurePolicy");
-    }
-    if type_name == "DispatchState" {
-        return in_std("JetDispatchState");
-    }
-    if type_name == "HookPolicy" {
-        return in_std("JetHookPolicy");
-    }
-    if type_name == "HookDecision" {
-        return in_std("JetHookDecision");
-    }
-    if type_name == "HookOutcome" {
-        return in_std("JetHookOutcome");
-    }
-    if matches!(
-        type_name,
-        "NetShutdown" | "NetReadyInterest" | "NetError" | "NetDnsError"
-    ) {
-        return at_root(&format!("Jet{type_name}"));
-    }
-    if type_name == "TLSClientTrust" {
-        return at_root("JetTLSTrust");
-    }
-    if type_name == "TLSVersion" {
-        return at_root("JetTLSVersion");
-    }
-    if matches!(
-        type_name,
-        "IOError" | "IOOperation" | "ProcessResourceLimit"
-    ) {
-        return in_std(type_name);
-    }
-    if matches!(
-        type_name,
-        "HTTPError"
-            | "WsError"
-            | "HTTPOperation"
-            | "HTTPProxy"
-            | "HTTPCorsOrigins"
-            | "HTTPRedirectPolicy"
-            | "HTTPRetryPolicy"
-            | "HTTPCookieJar"
-            | "HTTPCompressEncoding"
-    ) {
-        return at_root(&format!("Jet{type_name}"));
-    }
-    if matches!(
-        type_name,
-        "SMTPSecurity" | "RecipientPolicy" | "EmailError" | "SMTPAuth" | "TLSTrust"
-    ) {
-        let rust = if type_name == "EmailError" {
-            "Error"
-        } else {
-            type_name
-        };
-        return (format!("{root}jet_email::{rust}"), true);
-    }
-    // D-PENDING1=B: `Loadable` is a Prelude carrier, not a generated Jet enum.
-    // Keep enum literals and match patterns on the same Rust type as core-call
-    // emission and `Cx::rust_type`.
-    if type_name == "Loadable" {
-        return at_root("JetLoadable");
-    }
-    if type_name == "AuthError" {
-        return at_root("JetAuthError");
-    }
-    if type_name == "DeliveryState" {
-        return at_root("JetDeliveryState");
-    }
-    if type_name == "TaskOutcome" {
-        return at_root("JetTaskOutcome");
-    }
-    if type_name == "TaskStatus" {
-        return at_root("JetTaskStatus");
-    }
-    if type_name == "ServiceError" {
-        return at_root("JetServiceError");
-    }
-    let foreign_identity = if cx.foreign_types.contains_key(type_name) {
-        Some(type_name.to_string())
-    } else {
-        cx.foreign_type_identity("", type_name)
-    };
-    match foreign_identity {
-        Some(identity) => {
-            let rust_mod = cx
-                .foreign_types
-                .get(&identity)
-                .expect("foreign identity must have a Rust module");
-            let leaf = identity.rsplit("::").next().unwrap_or(&identity);
-            (
-                format!("{}{}::{}", cx.root_prefix, rust_mod, mangle_path(leaf)),
-                false,
-            )
-        }
-        None => (mangle_path(type_name), false),
-    }
-}
+
 
 /// The Rust variant name under a `tir_enum_rust_path` head. A raw (Rust-defined)
 /// variant keeps its own identifier — a mangled spelling reaching it means the
 /// caller carried the generated prefix, which is not part of the Rust name.
-pub(crate) fn tir_enum_variant_rust_name(variant: &str, raw: bool) -> String {
-    if raw {
-        crate::Syntax::generated_suffix(variant).to_string()
-    } else {
-        mangle_path(variant)
-    }
-}
+
 
 /// c109 Phase 24: the Rust enum-literal head `{prefix}::{mangle(variant)}` for a payload
 /// or named enum literal, reproducing `emit_enum_lit`'s `type_prefix` (Expression.rs): a
 /// FOREIGN (imported) enum → `{root}{mod}::__jet_<T>::__jet_<V>`, a local enum →
 /// `__jet_<T>::__jet_<V>`. Keyed on the ENUM name in `cx.foreign_types`, byte-for-byte.
-pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> String {
-    if type_name == "Loadable" {
-        let root = cx.root_prefix.as_str();
-        let path = match variant {
-            "Idle" | "Loading" => format!("{root}JetLoadable::<(), ()>"),
-            "Loaded" => format!("{root}JetLoadable::<_, ()>"),
-            "Failed" => format!("{root}JetLoadable::<(), _>"),
-            _ => format!("{root}JetLoadable"),
-        };
-        return format!("{path}::{}", tir_enum_variant_rust_name(variant, true));
-    }
-    let (path, raw) = tir_enum_rust_path(cx, type_name);
-    format!("{path}::{}", tir_enum_variant_rust_name(variant, raw))
-}
+
 
 /// c109 Phase 16: the single-payload type of `(type_name, edge)`, mirroring the AST
 /// `enum_variant_payload_type` (Expression.rs). `edge` is the VARIANT name for a
-/// positional arg, or `"Variant.label"` for a named arg — the latter never matches a
-/// variant name, so it returns `None` (the AST never clones a named-payload arg), as
-/// `enum_variant_payload_type` does. Only `Single(t)` / single-field `Named` resolve.
+/// positional arg, or `"Variant.label"` for a named arg — the latter is explicitly
+/// non-applicable to the single-payload clone decision. Missing checked owner/variant
+/// layout is an invariant, not a payload-less variant.
 pub(crate) fn enum_variant_payload_type<'a>(
     cx: &'a Cx,
     type_name: &str,
     edge: &str,
-) -> Option<&'a Type> {
-    let variants = cx.enum_variants.get(type_name)?;
-    let (_, payload) = variants.iter().find(|(v, _)| v == edge)?;
-    match payload {
+) -> Result<Option<&'a Type>, &'static str> {
+    let type_name = crate::Codegen::TIR::canonical_enum_owner(cx, type_name);
+    if let Some((variant, label)) = edge.split_once('.') {
+        let variants = cx
+            .enum_variants
+            .get(&type_name)
+            .ok_or("enum payload owner layout")?;
+        let (_, payload) = variants
+            .iter()
+            .find(|(candidate, _)| candidate == variant)
+            .ok_or("enum payload variant layout")?;
+        return match payload {
+            VariantPayload::Named(fields)
+                if fields.iter().any(|field| field.name == label) =>
+            {
+                Ok(None)
+            }
+            VariantPayload::Named(_) => Err("enum named payload field layout"),
+            VariantPayload::Unit | VariantPayload::Single(..) => {
+                Err("enum named payload variant layout")
+            }
+        };
+    }
+    let variants = cx
+        .enum_variants
+        .get(&type_name)
+        .ok_or("enum payload owner layout")?;
+    let (_, payload) = variants
+        .iter()
+        .find(|(v, _)| v == edge)
+        .ok_or("enum payload variant layout")?;
+    Ok(match payload {
         VariantPayload::Single(t, _) => Some(t),
         VariantPayload::Named(fs) if fs.len() == 1 => Some(&fs[0].ty),
-        _ => None,
-    }
+        VariantPayload::Unit => return Err("enum payload argument for unit variant"),
+        VariantPayload::Named(_) => return Err("enum positional payload requires one field"),
+    })
 }
 
 /// c109 Phase 16: lower one enum-literal payload arg, resolving the `clone`/`boxed`
@@ -958,13 +1052,27 @@ pub(crate) fn lower_enum_arg(
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> TEnumArg {
-    let payload_ty = enum_variant_payload_type(cx, type_name, edge);
+    let payload_ty = match enum_variant_payload_type(cx, type_name, edge) {
+        Ok(payload_ty) => payload_ty,
+        Err(reason) => {
+            let value = lower_expr(e, cx, env);
+            let value_ty = value.ty.clone();
+            return TEnumArg {
+                value: invariant_expr(
+                    format!("enum payload `{type_name}.{variant}`: {reason}"),
+                    e.span(),
+                    value_ty,
+                ),
+                clone: false,
+                boxed: false,
+            };
+        }
+    };
     let borrowed = matches!(e, Expr::Ident(name, _) if env.is_borrowed(name));
     let clone = payload_ty.is_some_and(|t| !t.is_scalar()) && borrowed;
     let boxed = cx
         .boxed_edges
         .contains(&(type_name.to_string(), edge.to_string()));
-    let _ = variant;
     let mutable_view_payload = matches!(
         payload_ty,
         Some(Type::Apply { name, .. })

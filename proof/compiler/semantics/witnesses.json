@@ -1,0 +1,453 @@
+{
+  "schema": "jet.semantic-witnesses.v1",
+  "schema_version": 1,
+  "relation": "ordered_effects",
+  "observation_fields": [
+    "result",
+    "typed_failure",
+    "mutation",
+    "input_consumption",
+    "ordered_effects",
+    "cleanup",
+    "resource_premises",
+    "schedule",
+    "allowed_schedules"
+  ],
+  "identity_fields": ["program_sha256", "source_sha256"],
+  "runner": {
+    "launcher": "scripts/agent/jet-env",
+    "invocation": "scripts/agent/jet-env full followed by the declared Jet operation and tier arguments",
+    "compiler": "target/debug/jet",
+    "supported_operations": ["run", "check"],
+    "tiers": ["aot", "jet_run", "interpreter", "check"],
+    "scratch": "$HOME/.cache/jet-test-scratch",
+    "timeout_ms": 120000,
+    "unknown_policy": "unverified mappings never become comparison evidence; unknown resource observations remain unproved"
+  },
+  "coverage": {
+    "relation": "proof/compiler/obligations.json",
+    "mapping_statuses": ["mapped_unproved", "unsupported", "unmapped", "proved"],
+    "qualification_rule": "model agreement is tested evidence; an obligation is proved only after complete identity-bound Jet observations, and no current witness claims that state"
+  },
+  "cases": [
+    {
+      "id": "value-mutation-cleanup",
+      "category": "mutation",
+      "obligations": [
+        "syntax-registry-001-none-910625f0",
+        "tir-expr:TExprKind.Local",
+        "tir-expr:TExprKind.Binary",
+        "tir-stmt:TStmt.Let",
+        "tir-stmt:TStmt.Assign",
+        "tir-stmt:TStmt.Return",
+        "tir-stmt:TStmt.DeferClose"
+      ],
+      "program": {
+        "version": 1,
+        "fuel": 32,
+        "steps": [
+          { "kind": "defer", "event": "scope.closed" },
+          { "kind": "let", "name": "counter", "expr": { "kind": "literal", "value": 1 } },
+          {
+            "kind": "set",
+            "name": "counter",
+            "expr": {
+              "kind": "add",
+              "left": { "kind": "var", "name": "counter" },
+              "right": { "kind": "literal", "value": 2 }
+            }
+          },
+          { "kind": "emit", "event": "counter.updated" },
+          { "kind": "return", "expr": { "kind": "var", "name": "counter" } }
+        ]
+      },
+      "expect": { "accepted": true, "result": "value", "value": 3, "mutation": true, "cleanup": true },
+      "jet": {
+        "status": "unverified",
+        "source_mode": "inline",
+        "entry": "main.jet",
+        "source": "fn run() {\n    counter := 1\n    counter += 2\n    print(\"SEMANTIC_RESULT:{counter}\")\n}\n",
+        "source_sha256": "sha256-58545490cefbaedf5bdd102940fac0e1dd538afb75636cc66f5e59b05b56df5e",
+        "program_sha256": "sha256-fa86e79ca34202a9b0a2dabe03097bb9ebb3d7cfad44beffd04ed5a1f37b58f1",
+        "runner": {
+          "operation": "run",
+          "tiers": {
+            "aot": { "applicable": true, "args": ["jet", "run", "--release", "main.jet"], "expected_exit": 0 },
+            "jet_run": { "applicable": true, "args": ["jet", "run", "main.jet"], "expected_exit": 0 },
+            "interpreter": { "applicable": true, "args": ["jet", "run", "--interpret", "main.jet"], "expected_exit": 0 }
+          }
+        },
+        "observation": {
+          "protocol": "marker-lines-v1",
+          "marker": "SEMANTIC_RESULT:",
+          "dimensions": {
+            "result": { "status": "observed", "from": "stdout", "encoding": "json" },
+            "typed_failure": { "status": "unobserved", "reason": "the source mapping has no stable typed-failure channel" },
+            "mutation": { "status": "unobserved", "reason": "the source mapping does not serialize the before/after store" },
+            "input_consumption": { "status": "unobserved", "reason": "the source mapping has no input trace channel" },
+            "ordered_effects": { "status": "unobserved", "reason": "print output is not a complete effect trace" },
+            "cleanup": { "status": "unobserved", "reason": "the source mapping does not expose scope cleanup" },
+            "resource_premises": { "status": "unobserved", "reason": "the Jet runner does not provide verified fuel, stack, or allocation observations" },
+            "schedule": { "status": "unobserved", "reason": "tier execution does not establish a scheduler trace" },
+            "allowed_schedules": { "status": "unobserved", "reason": "no complete allowed-schedule set is emitted by the source" }
+          }
+        }
+      }
+    },
+    {
+      "id": "compile-time-value",
+      "category": "compile_time",
+      "obligations": ["boundary:compile-time", "tir-expr:TExprKind.Binary", "tir-stmt:TStmt.Return"],
+      "program": {
+        "version": 1,
+        "fuel": 32,
+        "steps": [
+          {
+            "kind": "let",
+            "name": "answer",
+            "expr": {
+              "kind": "comptime",
+              "expr": {
+                "kind": "add",
+                "left": { "kind": "literal", "value": 20 },
+                "right": { "kind": "literal", "value": 22 }
+              }
+            }
+          },
+          { "kind": "return", "expr": { "kind": "var", "name": "answer" } }
+        ]
+      },
+      "expect": { "accepted": true, "result": "value", "value": 42, "compile_time": true },
+      "jet": {
+        "status": "unverified",
+        "source_mode": "inline",
+        "entry": "main.jet",
+        "source": "@answer :: 20 + 22\n\nfn run() {\n    print(\"SEMANTIC_RESULT:{@answer}\")\n}\n",
+        "source_sha256": "sha256-2c7bedd7506658bb90fd903364f72ebe5343919a6133c9a03316fdd2072266e3",
+        "program_sha256": "sha256-003d9523a4ff4b38ce76f3ec978330b2a8c1ed15717cb84cfdf8f96a06276329",
+        "runner": {
+          "operation": "run",
+          "tiers": {
+            "aot": { "applicable": true, "args": ["jet", "run", "--release", "main.jet"], "expected_exit": 0 },
+            "jet_run": { "applicable": true, "args": ["jet", "run", "main.jet"], "expected_exit": 0 },
+            "interpreter": { "applicable": true, "args": ["jet", "run", "--interpret", "main.jet"], "expected_exit": 0 }
+          }
+        },
+        "observation": {
+          "protocol": "marker-lines-v1",
+          "marker": "SEMANTIC_RESULT:",
+          "dimensions": {
+            "result": { "status": "observed", "from": "stdout", "encoding": "json" },
+            "typed_failure": { "status": "unobserved", "reason": "the source mapping has no stable typed-failure channel" },
+            "mutation": { "status": "unobserved", "reason": "compile-time binding is not a runtime store trace" },
+            "input_consumption": { "status": "unobserved", "reason": "the source mapping has no input trace channel" },
+            "ordered_effects": { "status": "unobserved", "reason": "print output is not a complete effect trace" },
+            "cleanup": { "status": "unobserved", "reason": "the source mapping does not expose scope cleanup" },
+            "resource_premises": { "status": "unobserved", "reason": "the Jet runner does not provide verified fuel, stack, or allocation observations" },
+            "schedule": { "status": "unobserved", "reason": "tier execution does not establish a scheduler trace" },
+            "allowed_schedules": { "status": "unobserved", "reason": "no complete allowed-schedule set is emitted by the source" }
+          }
+        }
+      }
+    },
+    {
+      "id": "typed-failure-preserves-cleanup",
+      "category": "failure",
+      "obligations": ["tir-stmt:TStmt.Contract", "tir-stmt:TStmt.DeferClose", "tir-stmt:TStmt.Return"],
+      "program": {
+        "version": 1,
+        "fuel": 32,
+        "steps": [
+          { "kind": "defer", "event": "failure.cleaned" },
+          {
+            "kind": "require",
+            "expr": {
+              "kind": "equal",
+              "left": { "kind": "literal", "value": 1 },
+              "right": { "kind": "literal", "value": 2 }
+            },
+            "failure": "PreconditionFailed"
+          },
+          { "kind": "return", "expr": { "kind": "literal", "value": "unreachable" } }
+        ]
+      },
+      "expect": { "accepted": true, "result": "failure", "error": "PreconditionFailed", "cleanup": true },
+      "jet": {
+        "status": "unverified",
+        "source_mode": "inline",
+        "entry": "main.jet",
+        "source": "fn run() {\n    assert(false)\n    print(\"SEMANTIC_RESULT:unreachable\")\n}\n",
+        "source_sha256": "sha256-e6dffccf9fe22a607b7c73ae548e7eccc5cae5b6036da0c6612408b9119d7f4f",
+        "program_sha256": "sha256-ee2b6513a33f83cf717fcfd0ffa7ae622b51fd053cb91c556c3bf04ba08a92fe",
+        "runner": {
+          "operation": "run",
+          "tiers": {
+            "aot": { "applicable": true, "args": ["jet", "run", "--release", "main.jet"], "expected_exit": 1 },
+            "jet_run": { "applicable": true, "args": ["jet", "run", "main.jet"], "expected_exit": 1 },
+            "interpreter": { "applicable": true, "args": ["jet", "run", "--interpret", "main.jet"], "expected_exit": 1 }
+          }
+        },
+        "observation": {
+          "protocol": "marker-lines-v1",
+          "marker": "SEMANTIC_RESULT:",
+          "dimensions": {
+            "result": { "status": "unobserved", "reason": "the failing process does not emit a complete typed result" },
+            "typed_failure": { "status": "unobserved", "reason": "compiler/runtime diagnostic identity is not pinned to PreconditionFailed" },
+            "mutation": { "status": "unobserved", "reason": "the source mapping does not serialize the store" },
+            "input_consumption": { "status": "unobserved", "reason": "the source mapping has no input trace channel" },
+            "ordered_effects": { "status": "unobserved", "reason": "diagnostic output is not a complete effect trace" },
+            "cleanup": { "status": "unobserved", "reason": "the source mapping does not expose cleanup on failure" },
+            "resource_premises": { "status": "unobserved", "reason": "the Jet runner does not provide verified fuel, stack, or allocation observations" },
+            "schedule": { "status": "unobserved", "reason": "tier execution does not establish a scheduler trace" },
+            "allowed_schedules": { "status": "unobserved", "reason": "no complete allowed-schedule set is emitted by the source" }
+          }
+        }
+      }
+    },
+    {
+      "id": "cleanup-order",
+      "category": "failure",
+      "obligations": ["tir-stmt:TStmt.DeferClose", "tir-stmt:TStmt.Return"],
+      "program": {
+        "version": 1,
+        "fuel": 32,
+        "steps": [
+          { "kind": "defer", "event": "first.closed" },
+          { "kind": "defer", "event": "second.closed" },
+          { "kind": "return", "expr": { "kind": "literal", "value": "done" } }
+        ]
+      },
+      "expect": { "accepted": true, "result": "value", "value": "done", "cleanup": true },
+      "jet": {
+        "status": "unverified",
+        "source_mode": "inline",
+        "entry": "main.jet",
+        "source": "fn run() {\n    print(\"SEMANTIC_RESULT:\\\"done\\\"\")\n}\n",
+        "source_sha256": "sha256-07ba8efac1c914b710e188b1430ab7d3751b873c78b6fcfa7682498c4fe059ce",
+        "program_sha256": "sha256-be283dc41787c1b3221aefd5f9511177dc4629311dfae4eab0f7f803a2861840",
+        "runner": {
+          "operation": "run",
+          "tiers": {
+            "aot": { "applicable": true, "args": ["jet", "run", "--release", "main.jet"], "expected_exit": 0 },
+            "jet_run": { "applicable": true, "args": ["jet", "run", "main.jet"], "expected_exit": 0 },
+            "interpreter": { "applicable": true, "args": ["jet", "run", "--interpret", "main.jet"], "expected_exit": 0 }
+          }
+        },
+        "observation": {
+          "protocol": "marker-lines-v1",
+          "marker": "SEMANTIC_RESULT:",
+          "dimensions": {
+            "result": { "status": "observed", "from": "stdout", "encoding": "json" },
+            "typed_failure": { "status": "unobserved", "reason": "the source mapping has no stable typed-failure channel" },
+            "mutation": { "status": "unobserved", "reason": "the source mapping does not serialize the store" },
+            "input_consumption": { "status": "unobserved", "reason": "the source mapping has no input trace channel" },
+            "ordered_effects": { "status": "unobserved", "reason": "print output is not a complete effect trace" },
+            "cleanup": { "status": "unobserved", "reason": "the source mapping has no cleanup trace" },
+            "resource_premises": { "status": "unobserved", "reason": "the Jet runner does not provide verified fuel, stack, or allocation observations" },
+            "schedule": { "status": "unobserved", "reason": "tier execution does not establish a scheduler trace" },
+            "allowed_schedules": { "status": "unobserved", "reason": "no complete allowed-schedule set is emitted by the source" }
+          }
+        }
+      }
+    },
+    {
+      "id": "input-consumption",
+      "category": "result",
+      "obligations": ["tir-expr:TExprKind.AmbientInput", "tir-stmt:TStmt.Let", "tir-stmt:TStmt.Return"],
+      "program": {
+        "version": 1,
+        "input": { "n": 41 },
+        "fuel": 32,
+        "steps": [
+          { "kind": "let", "name": "n", "expr": { "kind": "input", "name": "n" } },
+          {
+            "kind": "return",
+            "expr": {
+              "kind": "add",
+              "left": { "kind": "var", "name": "n" },
+              "right": { "kind": "literal", "value": 1 }
+            }
+          }
+        ]
+      },
+      "expect": { "accepted": true, "result": "value", "value": 42, "consumed_input": ["n"] },
+      "jet": {
+        "status": "unverified",
+        "source_mode": "inline",
+        "entry": "main.jet",
+        "source": "fn run() {\n    args :: process.argv()\n    print(\"SEMANTIC_RESULT:{args.len()}\")\n}\n",
+        "source_sha256": "sha256-b26572c9cc0f4b109bb412c8a48ac8acda4ab2cd45cfba4941637974e2c6a95b",
+        "program_sha256": "sha256-1b4835adf56e26bd8b404fbd01a4f8b4d25e5739d2f157b88b1cd4b1a204c10c",
+        "runner": {
+          "operation": "run",
+          "tiers": {
+            "aot": { "applicable": true, "args": ["jet", "run", "--release", "main.jet"], "expected_exit": 0 },
+            "jet_run": { "applicable": true, "args": ["jet", "run", "main.jet"], "expected_exit": 0 },
+            "interpreter": { "applicable": true, "args": ["jet", "run", "--interpret", "main.jet"], "expected_exit": 0 }
+          }
+        },
+        "observation": {
+          "protocol": "marker-lines-v1",
+          "marker": "SEMANTIC_RESULT:",
+          "dimensions": {
+            "result": { "status": "observed", "from": "stdout", "encoding": "json" },
+            "typed_failure": { "status": "unobserved", "reason": "the source mapping has no stable typed-failure channel" },
+            "mutation": { "status": "unobserved", "reason": "the source mapping does not serialize the store" },
+            "input_consumption": { "status": "unobserved", "reason": "argv length is not an input-consumption trace" },
+            "ordered_effects": { "status": "unobserved", "reason": "print output is not a complete effect trace" },
+            "cleanup": { "status": "unobserved", "reason": "the source mapping does not expose cleanup" },
+            "resource_premises": { "status": "unobserved", "reason": "the Jet runner does not provide verified fuel, stack, or allocation observations" },
+            "schedule": { "status": "unobserved", "reason": "tier execution does not establish a scheduler trace" },
+            "allowed_schedules": { "status": "unobserved", "reason": "no complete allowed-schedule set is emitted by the source" }
+          }
+        }
+      }
+    },
+    {
+      "id": "resource-exhaustion-is-failure",
+      "category": "resource",
+      "obligations": ["boundary:resource"],
+      "program": {
+        "version": 1,
+        "fuel": 1,
+        "steps": [
+          { "kind": "let", "name": "x", "expr": { "kind": "literal", "value": 1 } },
+          { "kind": "return", "expr": { "kind": "var", "name": "x" } }
+        ]
+      },
+      "expect": { "accepted": true, "result": "failure", "error": "ResourceExhausted" },
+      "jet": {
+        "status": "unverified",
+        "source_mode": "inline",
+        "entry": "main.jet",
+        "source": "fn run() {\n    print(\"SEMANTIC_RESULT:resource\")\n}\n",
+        "source_sha256": "sha256-6931e7045d806d5cdb275ac84eec8fe5415efda47f9c14f2c647e21fb27252ff",
+        "program_sha256": "sha256-73804faa24e4088dbcf2e4069230762a6e1c587b0c08e4de500ba84602803929",
+        "runner": {
+          "operation": "run",
+          "tiers": {
+            "aot": { "applicable": true, "args": ["jet", "run", "--release", "main.jet"], "expected_exit": 0 },
+            "jet_run": { "applicable": true, "args": ["jet", "run", "main.jet"], "expected_exit": 0 },
+            "interpreter": { "applicable": true, "args": ["jet", "run", "--interpret", "main.jet"], "expected_exit": 0 }
+          }
+        },
+        "observation": {
+          "protocol": "marker-lines-v1",
+          "marker": "SEMANTIC_RESULT:",
+          "dimensions": {
+            "result": { "status": "unobserved", "reason": "the source mapping does not request or expose the model fuel bound" },
+            "typed_failure": { "status": "unobserved", "reason": "the compiler has no pinned resource-failure projection in this mapping" },
+            "mutation": { "status": "unobserved", "reason": "the source mapping does not serialize the store" },
+            "input_consumption": { "status": "unobserved", "reason": "the source mapping has no input trace channel" },
+            "ordered_effects": { "status": "unobserved", "reason": "print output is not a complete effect trace" },
+            "cleanup": { "status": "unobserved", "reason": "the source mapping does not expose cleanup" },
+            "resource_premises": { "status": "unobserved", "reason": "unknown resource observations must not be copied from expected output" },
+            "schedule": { "status": "unobserved", "reason": "tier execution does not establish a scheduler trace" },
+            "allowed_schedules": { "status": "unobserved", "reason": "no complete allowed-schedule set is emitted by the source" }
+          }
+        }
+      }
+    },
+    {
+      "id": "rejection-unknown-statement",
+      "category": "rejection",
+      "obligations": ["boundary:parsing"],
+      "program": {
+        "version": 1,
+        "steps": [{ "kind": "spawn", "task": "foreign" }]
+      },
+      "expect": { "accepted": false, "diagnostic": "E-PROOF-STMT" },
+      "jet": {
+        "status": "unverified",
+        "source_mode": "inline",
+        "entry": "main.jet",
+        "source": "fn run() {\n    this_is_not_a_declared_operation()\n}\n",
+        "source_sha256": "sha256-33f203c489bb9f5112a0c284cd873f1b31e00821e927ab6467647833afa57660",
+        "program_sha256": "sha256-90d57d40a4a00cf5f5efbb2ce3114e8cb7b9684c4a179f4e1da63ce4a59a7d2b",
+        "runner": {
+          "operation": "check",
+          "tiers": {
+            "check": { "applicable": true, "args": ["jet", "check", "main.jet"], "expected_exit": 1 }
+          }
+        },
+        "observation": {
+          "protocol": "marker-lines-v1",
+          "marker": "SEMANTIC_RESULT:",
+          "dimensions": {
+            "result": { "status": "unobserved", "reason": "a rejected source has no runtime result" },
+            "typed_failure": { "status": "unobserved", "reason": "diagnostic spelling is not a complete semantic typed-failure observation" },
+            "mutation": { "status": "not_applicable", "reason": "rejected source has no runtime store" },
+            "input_consumption": { "status": "not_applicable", "reason": "rejected source has no runtime input" },
+            "ordered_effects": { "status": "not_applicable", "reason": "rejected source has no runtime effect trace" },
+            "cleanup": { "status": "not_applicable", "reason": "rejected source has no runtime cleanup" },
+            "resource_premises": { "status": "unobserved", "reason": "compiler rejection does not establish runtime resource premises" },
+            "schedule": { "status": "not_applicable", "reason": "rejected source has no schedule" },
+            "allowed_schedules": { "status": "not_applicable", "reason": "rejected source has no allowed schedules" }
+          }
+        }
+      }
+    },
+    {
+      "id": "rejection-comptime-input",
+      "category": "rejection",
+      "obligations": ["boundary:compile-time"],
+      "program": {
+        "version": 1,
+        "steps": [
+          {
+            "kind": "return",
+            "expr": { "kind": "comptime", "expr": { "kind": "input", "name": "n" } }
+          }
+        ]
+      },
+      "expect": { "accepted": false, "diagnostic": "E-PROOF-COMPTIME" },
+      "jet": {
+        "status": "unverified",
+        "source_mode": "inline",
+        "entry": "main.jet",
+        "source": "@bad :: process.argv()\n\nfn run() {\n    print(\"SEMANTIC_RESULT:unreachable\")\n}\n",
+        "source_sha256": "sha256-32a60b29a9242b809776e99b37788e7ed88bc537d3c03913bb0f07e7eed9617b",
+        "program_sha256": "sha256-d64f580253ce5b9c75d33e00b91efe8362256810dda42af9d542f9fa4983d893",
+        "runner": {
+          "operation": "check",
+          "tiers": {
+            "check": { "applicable": true, "args": ["jet", "check", "main.jet"], "expected_exit": 1 }
+          }
+        },
+        "observation": {
+          "protocol": "marker-lines-v1",
+          "marker": "SEMANTIC_RESULT:",
+          "dimensions": {
+            "result": { "status": "unobserved", "reason": "a rejected source has no runtime result" },
+            "typed_failure": { "status": "unobserved", "reason": "diagnostic spelling is not a complete semantic typed-failure observation" },
+            "mutation": { "status": "not_applicable", "reason": "rejected source has no runtime store" },
+            "input_consumption": { "status": "not_applicable", "reason": "rejected source has no runtime input" },
+            "ordered_effects": { "status": "not_applicable", "reason": "rejected source has no runtime effect trace" },
+            "cleanup": { "status": "not_applicable", "reason": "rejected source has no runtime cleanup" },
+            "resource_premises": { "status": "unobserved", "reason": "compiler rejection does not establish runtime resource premises" },
+            "schedule": { "status": "not_applicable", "reason": "rejected source has no schedule" },
+            "allowed_schedules": { "status": "not_applicable", "reason": "rejected source has no allowed schedules" }
+          }
+        }
+      }
+    }
+  ],
+  "negative_controls": [
+    {
+      "id": "wrong-add-rule",
+      "case_id": "value-mutation-cleanup",
+      "rule": "numeric.add-as-subtract",
+      "mutation": "replace the first add expression with subtraction in the candidate rule",
+      "expected_difference": "result",
+      "required_status": "mismatch"
+    },
+    {
+      "id": "wrong-cleanup-order",
+      "case_id": "cleanup-order",
+      "rule": "cleanup.defer-fifo",
+      "mutation": "run deferred cleanup in declaration order instead of reverse order",
+      "expected_difference": "cleanup",
+      "required_status": "mismatch"
+    }
+  ]
+}

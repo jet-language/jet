@@ -3,6 +3,7 @@ use super::{
     IndexKind, OrFallback, Param, Pattern, Stmt, StrMatchPart, TryConvert, Type,
 };
 use crate::{Diagnostics::Span, Syntax};
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone)]
 pub struct Call {
@@ -133,6 +134,12 @@ pub struct CallArgFlags {
     pub template_items: Option<Vec<super::DeriveBodyItem>>,
     /// D-CABI-CALLBACK1: sema proved this argument is a stable C callback symbol.
     pub c_callback_symbol: bool,
+    /// D-FFI-CALLBACK2=A: this callback flows through a generated managed
+    /// registration. The companion identity/digest fields are checked before
+    /// TIR creates a retained adapter.
+    pub c_callback_managed: bool,
+    pub c_callback_plan_digest: Option<String>,
+    pub c_callback_identity: Option<String>,
     /// Sema proved this synthetic typed-text hole is already an `HTML` value.
     /// TIR preserves the fact so every engine composes the fragment directly.
     pub trusted_html: bool,
@@ -181,6 +188,42 @@ pub struct CallArg {
     /// D-VARIADIC1: `f(...xs)` — expand a list into the remaining parameter slots.
     pub spread: bool,
 }
+/// One marker-call argument after parsing. Marker expressions retain their
+/// existing expression representation; an effect row reuses the callable
+/// effect-bound representation and remains distinct until sema validates its
+/// marker slot.
+#[derive(Debug, Clone)]
+pub enum MarkerCallArg {
+    Expr(Expr),
+    EffectRow {
+        effects: Vec<(String, Span)>,
+        span: Span,
+    },
+}
+
+impl MarkerCallArg {
+    pub fn as_expr(&self) -> Option<&Expr> {
+        match self {
+            Self::Expr(expr) => Some(expr),
+            Self::EffectRow { .. } => None,
+        }
+    }
+
+    pub fn as_expr_mut(&mut self) -> Option<&mut Expr> {
+        match self {
+            Self::Expr(expr) => Some(expr),
+            Self::EffectRow { .. } => None,
+        }
+    }
+
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Expr(expr) => expr.span(),
+            Self::EffectRow { span, .. } => *span,
+        }
+    }
+}
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOp {
@@ -379,9 +422,24 @@ pub enum LambdaBody {
 #[derive(Debug, Clone, Default)]
 pub struct LambdaMeta {
     pub escapes: bool,
+    /// Sema checked this lambda inside an erased scope; it has no runtime row.
+    pub runtime_erased: bool,
     pub needs_fn_mut: bool,
     pub mut_captures: Vec<String>,
     pub cloned_captures: Vec<String>,
+    /// D-EFFECT-LAMBDA1: the checked lambda's direct effect row. This is
+    /// populated by sema, not reconstructed from the body by a later tier.
+    pub effect_direct: crate::Effects::EffectSet,
+    /// D-EFFECT-LAMBDA1: the transitive row solved from this lambda's checked
+    /// call edges.
+    pub effect_solved: crate::Effects::EffectSet,
+    /// D-EFFECT-LAMBDA1: stable identities of checked callees reached by the
+    /// lambda body.
+    pub effect_call_edges: BTreeSet<String>,
+    /// D-EFFECT-LAMBDA1: an opaque or foreign call forced the maximal row.
+    pub effect_maximal: bool,
+    /// D-EFFECT-LAMBDA1: source witnesses for direct effects.
+    pub effect_direct_spans: BTreeMap<String, Span>,
     /// D-CONC-FREEZE1=A: captures whose source value was proved frozen. The
     /// fact is carried beside the ordinary cloned-capture slot; codegen does
     /// not re-prove crossing policy.
@@ -432,8 +490,20 @@ pub struct LambdaMeta {
     /// callback may propagate into its own `Result` even when the enclosing
     /// expression handles that result locally with `??`.
     pub fallible_carrier: Option<Type>,
-}
+    /// D-RESOURCE-SCHEDULE1=A: sema's one source-order frame schedule
+    /// explanation. Tooling projects this retained fact; execution tiers do
+    /// not reconstruct a second dependency graph.
+    pub frame_schedule_explanation: Option<String>,
+    /// D-RESOURCE-SCHEDULE1=A: the complete checked schedule record.  The
+    /// explanation above is only its stable text projection; lowerings carry
+    /// this record rather than deriving another dependency graph.
+    pub frame_schedule: Option<crate::ResourceSchedule::JetFrameSchedule>,
+    /// ID of the canonical #2945 derivation relation that owns the payload.
+    /// Consumers carry this checked identity with the typed schedule instead
+    /// of rebuilding dependencies from the lambda body.
+    pub frame_schedule_derivation: Option<crate::Facts::DerivationRef>,
 
+}
 /// S46/S47 (M8): `(params) -> body`; captures are inferred.
 #[derive(Debug, Clone)]
 pub struct Lambda {
@@ -716,6 +786,11 @@ pub enum Expr {
         /// never re-infers it (I3). `None` when a fixed codegen table owns the
         /// return type or the method is void.
         resolved_ret: Option<Type>,
+        /// Filled by sema for an operator rewrite with the exact checked RHS
+        /// type. Ordinary method calls leave this unset. TIR uses this one
+        /// identity fact to select an overloaded hook without re-inferring the
+        /// argument or falling back to an owner/method-only key.
+        operator_rhs: Option<Type>,
         /// D-NUMWIDEN-CROSS1=E / card #1662: sema sets this when it
         /// synthesizes this method-call shape as an implicit checked numeric
         /// crossing, including exact-Int fixed-width construction. Replaces the retired

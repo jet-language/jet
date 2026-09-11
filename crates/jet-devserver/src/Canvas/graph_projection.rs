@@ -61,6 +61,22 @@ pub(super) struct Projection {
     pub(super) graph_anchors: Vec<GraphEditAnchor>,
     pub(super) node_refs: Vec<NodeQueryRef>,
     pub(super) callable_exports: Vec<CanvasCallableExport>,
+    pub(super) game_facts: Vec<CanvasGameFact>,
+}
+
+/// One source-backed `core.game` asset or component instance. Canvas keeps the
+/// exact source anchor and authored identity so actions never need a binary
+/// graph or importer-side semantic record.
+#[derive(Debug, Clone)]
+pub(super) struct CanvasGameFact {
+    pub(super) source_id: String,
+    pub(super) kind: String,
+    pub(super) operation: String,
+    pub(super) field: String,
+    pub(super) value_source: String,
+    pub(super) source_span: SourceSpan,
+    pub(super) field_span: Option<SourceSpan>,
+    pub(super) authored_instance_id: String,
 }
 
 #[derive(Default)]
@@ -126,6 +142,85 @@ pub(super) struct InlineRec {
     pub(super) span: SourceSpan,
 }
 
+fn canvas_reasoning_family(record: &jet_foundation::Facts::DerivationRecord) -> &'static str {
+    let text = format!(
+        "{} {} {} {}",
+        record.subject, record.claim, record.rule, record.producer
+    )
+    .to_ascii_lowercase();
+    let families: [(&str, &[&str]); 8] = [
+        ("value", &["value", "observed"][..]),
+        ("ownership", &["owner", "ownership", "lifetime", "borrow"][..]),
+        ("state", &["state", "transition"][..]),
+        ("effects", &["effect", "event", "callback", "task"][..]),
+        ("dependencies", &["depend", "premise", "input"][..]),
+        ("impact", &["impact", "changed", "change"][..]),
+        ("optimization", &["optim", "copy", "cost", "vector"][..]),
+        ("counterexamples", &["counterexample", "witness"][..]),
+    ];
+    families
+        .iter()
+        .find_map(|(family, needles)| {
+            needles
+                .iter()
+                .any(|needle| text.contains(needle))
+                .then_some(*family)
+        })
+        .unwrap_or("relationships")
+}
+
+fn canvas_reasoning_json(path: &Path, index: &SemIndex) -> String {
+    let source_path = path.to_string_lossy().replace('\\', "/");
+    let mut records = Vec::new();
+    let mut lens_rows = BTreeMap::<&str, Vec<String>>::new();
+    for record in index.derivations() {
+        let source_span = index
+            .definition_facts()
+            .iter()
+            .find(|fact| fact.stable_id == record.subject)
+            .map(|fact| span_json(fact.span))
+            .unwrap_or_else(|| "null".to_string());
+        records.push(format!(
+            "{{\"derivation\":{},\"source_span\":{}}}",
+            record.to_json(),
+            source_span
+        ));
+        lens_rows
+            .entry(canvas_reasoning_family(record))
+            .or_default()
+            .push(json_str(&record.id));
+    }
+    let lenses = [
+        "value",
+        "ownership",
+        "state",
+        "effects",
+        "dependencies",
+        "impact",
+        "optimization",
+        "counterexamples",
+        "relationships",
+    ]
+    .iter()
+    .map(|name| {
+        let rows = lens_rows
+            .get(name)
+            .map(|rows| rows.join(","))
+            .unwrap_or_default();
+        format!("{{\"name\":{},\"records\":[{}]}}", json_str(name), rows)
+    })
+    .collect::<Vec<_>>()
+    .join(",");
+    format!(
+        "{{\"kind\":\"jet.reasoning/v1\",\"source\":{},\"selection\":\"all\",\"records\":[{}],\"lenses\":[{}],\"limits\":{{\"records\":{},\"records_truncated\":false,\"expanded\":true}}}}",
+        json_str(&source_path),
+        records.join(","),
+        lenses,
+        index.derivations().len(),
+    )
+}
+
+ 
 pub(super) fn project_checked(
     path: &Path,
     source_id: &str,
@@ -166,14 +261,17 @@ pub(super) fn project_checked(
             &mut node_refs,
         );
     }
+    let game_facts = canvas_game_facts(source_id, src, bundle);
     let fmt = jet_driver::Formatter::format_source(src).unwrap_or_else(|_| src.to_string());
-    let blueprint = canvas_blueprint_facts_json(path, src, bundle, &index, runtime_events);
+    let blueprint =
+        canvas_blueprint_facts_json(path, src, bundle, &index, runtime_events, &game_facts);
     let enum_catalog = enum_catalog_json(bundle);
     let pattern_catalog = pattern_catalog_json(bundle);
     let effect_projection =
         jet_semindex::render_effect_projection_object(index.effect_projection());
+    let reasoning = canvas_reasoning_json(path, &index);
     let json = format!(
-        "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{},\"source_id\":{},\"revision\":{},\"fmt_fingerprint\":{},\"source_text\":{},\"node_descriptors\":{},\"graphs\":[{}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\",\"outputs\",\"state_graphs\"],\"effect_projection\":{},\"enum_variants\":{},\"pattern_variants\":{},\"blueprint\":{}}}}}",
+        "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{},\"source_id\":{},\"revision\":{},\"fmt_fingerprint\":{},\"source_text\":{},\"node_descriptors\":{},\"graphs\":[{}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\",\"outputs\",\"state_graphs\",\"assets\",\"components\"],\"effect_projection\":{},\"enum_variants\":{},\"pattern_variants\":{},\"blueprint\":{},\"reasoning\":{}}}}}",
         GRAPH_SCHEMA_VERSION,
         json_str(source_id),
         json_str(&source_revision(src)),
@@ -185,7 +283,8 @@ pub(super) fn project_checked(
         effect_projection,
         enum_catalog,
         pattern_catalog,
-        blueprint
+        blueprint,
+        reasoning
     );
     Projection {
         json,
@@ -193,6 +292,7 @@ pub(super) fn project_checked(
         graph_anchors: anchors,
         node_refs,
         callable_exports,
+        game_facts,
     }
 }
 
@@ -515,6 +615,7 @@ fn canvas_blueprint_facts_json(
     bundle: &AST::ProgramBundle,
     index: &SemIndex,
     runtime_events: Option<&str>,
+    game_facts: &[CanvasGameFact],
 ) -> String {
     let mut interfaces = Vec::new();
     for (module_idx, module) in bundle.modules.iter().enumerate() {
@@ -551,18 +652,272 @@ fn canvas_blueprint_facts_json(
         .map(state_graph_json)
         .collect::<Vec<_>>()
         .join(",");
+    let assets = game_facts
+        .iter()
+        .filter(|fact| fact.kind == "asset")
+        .map(canvas_game_fact_json)
+        .collect::<Vec<_>>()
+        .join(",");
+    let components = game_facts
+        .iter()
+        .filter(|fact| fact.kind == "component")
+        .map(canvas_game_fact_json)
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        "{{\"runtime_events\":{},\"event_dispatchers\":[{}],\"interfaces\":[{}],\"task_flows\":[{}],\"outputs\":[{}],\"state_graphs\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"source_truth\":\"ordinary_jet_source\"}}",
+        "{{\"runtime_events\":{},\"event_dispatchers\":[{}],\"interfaces\":[{}],\"task_flows\":[{}],\"outputs\":[{}],\"state_graphs\":[{}],\"assets\":[{}],\"components\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"source_truth\":\"ordinary_jet_source\"}}",
         runtime_events.unwrap_or("null"),
         event_dispatchers,
         interfaces.join(","),
         task_flows,
         outputs,
         state_graphs,
+        assets,
+        components,
         package_facts,
         workspace_overlays,
     )
 }
+
+pub(super) fn canvas_game_fact_json(fact: &CanvasGameFact) -> String {
+    let field_span = fact
+        .field_span
+        .map(span_json)
+        .unwrap_or_else(|| "null".to_string());
+    let fields = format!(
+        "{{{}:{{\"source_span\":{},\"source\":{}}}}}",
+        json_str(&fact.field),
+        field_span,
+        json_str(&fact.value_source),
+    );
+    format!(
+        "{{\"kind\":{},\"operation\":{},\"source_id\":{},\"source_span\":{},\"authored_instance_id\":{},\"field\":{},\"value\":{},\"fields\":{},\"source_truth\":\"ordinary_jet_source\",\"fact_source\":\"checked_game_call\"}}",
+        json_str(&fact.kind),
+        json_str(&fact.operation),
+        json_str(&fact.source_id),
+        span_json(fact.source_span),
+        json_str(&fact.authored_instance_id),
+        json_str(&fact.field),
+        json_str(&fact.value_source),
+        fields,
+    )
+}
+fn canvas_game_facts(
+    source_id: &str,
+    src: &str,
+    bundle: &AST::ProgramBundle,
+) -> Vec<CanvasGameFact> {
+    let mut facts = Vec::new();
+    let Some(module) = bundle.modules.get(bundle.entry) else {
+        return facts;
+    };
+    collect_game_items(&module.items, source_id, src, &mut facts);
+    facts.sort_by_key(|fact| (fact.source_span.start, fact.source_span.end));
+    facts
+}
+
+fn collect_game_items(
+    items: &[Item],
+    source_id: &str,
+    src: &str,
+    out: &mut Vec<CanvasGameFact>,
+) {
+    for item in items {
+        match item {
+            Item::Func(function) => collect_game_statements(&function.body, source_id, src, out),
+            Item::Struct(structure) => {
+                for method in &structure.methods {
+                    collect_game_statements(&method.body, source_id, src, out);
+                }
+            }
+            Item::Impl(implementation) => {
+                for method in &implementation.methods {
+                    collect_game_statements(&method.body, source_id, src, out);
+                }
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    collect_game_items(body, source_id, src, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_game_statements(
+    statements: &[Stmt],
+    source_id: &str,
+    src: &str,
+    out: &mut Vec<CanvasGameFact>,
+) {
+    for statement in statements {
+        statement.for_each_expr(|expr| {
+            let Expr::MethodCall {
+                receiver,
+                method,
+                method_span,
+                owner_type_args,
+                type_args,
+                args,
+                ..
+            } = expr
+            else {
+                return;
+            };
+            let source_span = game_method_call_span(src, receiver, *method_span);
+            let (operation, field, value_source, field_span) =
+                if matches!(method.as_str(), "image" | "sound")
+                    && game_assets_receiver(receiver)
+                {
+                    let Some(argument) = args.first() else {
+                        return;
+                    };
+                    let span: SourceSpan = argument.expr.span().into();
+                    (
+                        format!("scene.assets.{method}"),
+                        "path".to_string(),
+                        source_span_text(src, span),
+                        Some(span),
+                    )
+                } else if method == "component" {
+                    let type_arg = type_args.first().or_else(|| owner_type_args.first());
+                    let (field, value_source, field_span) = if let Some(type_arg) = type_arg {
+                        let value = type_arg.name();
+                        let span = game_type_name_span(src, source_span, *method_span, &value);
+                        ("component".to_string(), value, span)
+                    } else if let Some(argument) = args.first() {
+                        let span: SourceSpan = argument.expr.span().into();
+                        (
+                            "component".to_string(),
+                            source_span_text(src, span),
+                            Some(span),
+                        )
+                    } else {
+                        return;
+                    };
+                    ("scene.component".to_string(), field, value_source, field_span)
+                } else {
+                    return;
+                };
+            let authored_instance_id = format!(
+                "{source_id}:game:{operation}:{}-{}",
+                source_span.start, source_span.end
+            );
+            out.push(CanvasGameFact {
+                source_id: source_id.to_string(),
+                kind: if operation == "scene.component" {
+                    "component".to_string()
+                } else {
+                    "asset".to_string()
+                },
+                operation,
+                field,
+                value_source,
+                source_span,
+                field_span,
+                authored_instance_id,
+            });
+        });
+    }
+}
+
+fn game_assets_receiver(expr: &Expr) -> bool {
+    match expr {
+        Expr::Field(_, name, _) => name == "assets",
+        Expr::Paren(inner, _) => game_assets_receiver(inner),
+        _ => false,
+    }
+}
+fn game_receiver_start(expr: &Expr) -> usize {
+    match expr {
+        Expr::Field(base, ..) | Expr::Paren(base, ..) => game_receiver_start(base),
+        _ => expr.span().start,
+    }
+}
+
+fn game_method_call_span(
+    src: &str,
+    receiver: &Expr,
+    method_span: jet_driver::Diagnostics::Span,
+) -> SourceSpan {
+    let fallback = method_span.into();
+    let start = game_receiver_start(receiver);
+    let Some(open_relative) = src
+        .get(method_span.end..)
+        .and_then(|tail| tail.find('('))
+    else {
+        return fallback;
+    };
+    let open = method_span.end + open_relative;
+    let Some(close) = matching_call_close(src, open) else {
+        return fallback;
+    };
+    SourceSpan {
+        start,
+        end: close,
+    }
+}
+
+fn matching_call_close(src: &str, open: usize) -> Option<usize> {
+    let bytes = src.as_bytes();
+    let mut depth = 1usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for index in (open + 1)..bytes.len() {
+        let byte = bytes[index];
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'(' => depth += 1,
+            b')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(index + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+
+fn game_type_name_span(
+    src: &str,
+    enclosing: SourceSpan,
+    method_span: jet_driver::Diagnostics::Span,
+    type_name: &str,
+) -> Option<SourceSpan> {
+    let start = method_span.end.min(enclosing.end);
+    let end = enclosing.end.min(src.len());
+    if start >= end {
+        return None;
+    }
+    let relative = src.get(start..end)?.find(type_name)?;
+    let token_start = start + relative;
+    Some(SourceSpan {
+        start: token_start,
+        end: token_start + type_name.len(),
+    })
+}
+
+fn source_span_text(src: &str, span: SourceSpan) -> String {
+    src.get(span.start..span.end)
+        .unwrap_or("")
+        .trim()
+        .to_string()
+}
+
 
 fn state_graph_json(graph: &StateGraphFact) -> String {
     let states = graph
@@ -2162,7 +2517,7 @@ fn project_stmt(
                 project_stmt_block(g, index, src, body, ordinal * 100 + 180, x + 460, y + 70);
             }
         }
-        Stmt::ComptimeBlock { body, span } => {
+        Stmt::ComptimeBlock { body, span, .. } => {
             add_region(g, ordinal, "comptime", "comptime", *span);
             project_stmt_block(g, index, src, body, ordinal * 100 + 190, x + 230, y + 70);
         }
@@ -2785,6 +3140,13 @@ fn project_expr_node(
             } else {
                 format!(".{method}")
             };
+            let is_game_asset =
+                matches!(method.as_str(), "image" | "sound") && game_assets_receiver(receiver);
+            let is_game_component = method == "component";
+            let mut affordances = vec!["insert_call", "source_jump"];
+            if is_game_asset || is_game_component {
+                affordances.push("edit_game_selection");
+            }
             add_node(
                 g,
                 &node_id,
@@ -2794,7 +3156,7 @@ fn project_expr_node(
                 x,
                 y,
                 Vec::new(),
-                vec!["insert_call", "source_jump"],
+                affordances,
             );
             let recv_ty = expr_type(g, index, receiver);
             let recv_pin = add_pin(g, &node_id, "self", "input", &recv_ty, "", false);

@@ -65,8 +65,8 @@ fn run(args: Args) {
     dt::Float{0.01}
     dt_vec::F64x4.splat(dt)
     unit_padding::F64x4(1.0,0.0,0.0,0.0)
-    remaining:=I64{args.steps}
-    loop remaining > 0 {
+    steps_left:=I64{args.steps}
+    loop steps_left > 0 {
         d01::p0-p1
         d02::p0-p2
         d12::p1-p2
@@ -128,7 +128,7 @@ fn run(args: Args) {
         p2+=dt_vec*v2
         p3+=dt_vec*v3
         p4+=dt_vec*v4
-        remaining-=1
+        steps_left-=1
     }
 
     print(fmt.decimal(energy(p0,v0,m0,p1,v1,m1,p2,v2,m2,p3,v3,m3,p4,v4,m4),9))

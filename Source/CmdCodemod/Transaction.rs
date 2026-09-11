@@ -1,7 +1,7 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
@@ -781,6 +781,10 @@ fn recover_unix(lock: &Lock) {
     };
     let raw =
         String::from_utf8(journal_bytes).unwrap_or_else(|_| fail("recovery journal is not UTF-8"));
+    if is_generate_journal(&raw) {
+        recover_generate_unix(lock, journal_id, &raw);
+        return;
+    }
     let parsed = parse_journal(&raw);
     let handles = prepare_recovery_handles(lock, &parsed);
     let records = &parsed.records;
@@ -844,6 +848,124 @@ fn recover_unix(lock: &Lock) {
     }
     unlink_at_checked(&lock._file, journal_name, journal_id)
         .unwrap_or_else(|e| fail(&format!("could not remove recovered journal: {e}")));
+}
+
+#[cfg(unix)]
+fn is_generate_journal(raw: &str) -> bool {
+    let Ok(super::JSON::Value::Object(root)) = super::JSON::parse(raw) else {
+        return false;
+    };
+    matches!(
+        root.get("schema"),
+        Some(super::JSON::Value::String(schema)) if schema == "jet-generate-transaction-v1"
+    )
+}
+
+#[cfg(unix)]
+fn parse_generate_journal(raw: &str) -> Vec<GenerateRecord> {
+    let root = super::JSON::parse(raw)
+        .and_then(|value| value.object())
+        .unwrap_or_else(|error| fail(&format!("invalid generation recovery journal: {error}")));
+    let files = match root.get("files") {
+        Some(super::JSON::Value::Array(files)) if !files.is_empty() => files,
+        _ => fail("generation recovery journal has no files"),
+    };
+    let string = |object: &BTreeMap<String, super::JSON::Value>, key: &str| match object.get(key) {
+        Some(super::JSON::Value::String(value)) => value.clone(),
+        _ => fail(&format!("generation recovery journal missing `{key}`")),
+    };
+    let boolean = |object: &BTreeMap<String, super::JSON::Value>, key: &str| match object.get(key) {
+        Some(super::JSON::Value::Bool(value)) => *value,
+        _ => fail(&format!("generation recovery journal missing `{key}`")),
+    };
+    files
+        .iter()
+        .map(|value| {
+            let object = match value {
+                super::JSON::Value::Object(object) => object,
+                _ => fail("invalid generation recovery journal record"),
+            };
+            GenerateRecord {
+                path: PathBuf::from(string(object, "path")),
+                temp: PathBuf::from(string(object, "temp")),
+                before: unhex(&string(object, "before")),
+                after: unhex(&string(object, "after")),
+                before_exists: boolean(object, "before_exists"),
+            }
+        })
+        .collect()
+}
+
+#[cfg(unix)]
+fn recover_generate_unix(lock: &Lock, journal_id: (u64, u64), raw: &str) {
+    let records = parse_generate_journal(raw);
+    let paths = records
+        .iter()
+        .map(|record| record.path.clone())
+        .collect::<Vec<_>>();
+    validate_generate_destinations(&lock.project, &paths);
+    for record in &records {
+        if record.temp == record.path || record.temp.parent() != record.path.parent() {
+            fail("generation recovery temp is not beside its destination; journal preserved");
+        }
+        let (temp_exists, temp) = read_generate_path(&record.temp).unwrap_or_else(|error| {
+            fail(&format!(
+                "could not inspect generation recovery temp `{}`: {error}; journal preserved",
+                record.temp.display()
+            ))
+        });
+        if temp_exists && temp != record.after {
+            fail(&format!(
+                "generation recovery temp `{}` differs from its journal; journal preserved",
+                record.temp.display()
+            ));
+        }
+    }
+    let mut all_after = true;
+    for record in &records {
+        let (exists, current) = read_generate_path(&record.path).unwrap_or_else(|error| {
+            fail(&format!(
+                "could not inspect generation destination `{}`: {error}; journal preserved",
+                record.path.display()
+            ))
+        });
+        let at_after = exists && current == record.after;
+        let at_before = exists == record.before_exists && (!exists || current == record.before);
+        if !at_after && !at_before {
+            fail(&format!(
+                "generation recovery found concurrent drift at `{}`; journal preserved",
+                record.path.display()
+            ));
+        }
+        if !at_after {
+            all_after = false;
+            let (temp_exists, _) = read_generate_path(&record.temp).unwrap_or_else(|error| {
+                fail(&format!(
+                    "could not inspect pending generation temp `{}`: {error}; journal preserved",
+                    record.temp.display()
+                ))
+            });
+            if !temp_exists {
+                fail(&format!(
+                    "generation recovery temp `{}` is missing; journal preserved",
+                    record.temp.display()
+                ));
+            }
+        }
+    }
+    if !all_after {
+        generate_rollback(&records);
+        if !generate_all_before(&records) {
+            fail("generation recovery could not restore every destination; journal preserved");
+        }
+    }
+    cleanup_generate_temps(&records);
+    unlink_at_checked(
+        &lock._file,
+        std::ffi::OsStr::new("transaction.journal"),
+        journal_id,
+    )
+    .unwrap_or_else(|error| fail(&format!("could not remove generation recovery journal: {error}")));
 }
 
 #[cfg(unix)]
@@ -1019,6 +1141,700 @@ pub fn commit_fix(lock: &Lock, changes: &[Change], log_path: &Path, log: &[u8]) 
     commit_unix(lock, changes, log_path, log, true);
     #[cfg(not(unix))]
     fail("fix commit is unavailable on this platform until native handle-relative transactions are implemented")
+}
+/// Publish generated source and its receipt as one locked transaction.
+///
+/// Unlike a codemod, a generator may create a declared output for the first
+/// time.  The existing codemod transaction intentionally requires every
+/// destination to exist, so generation has a small sibling commit path that
+/// records absence in its rollback state and refuses every undeclared path.
+pub fn commit_generate(
+    lock: &Lock,
+    changes: &[Change],
+    absent: &[PathBuf],
+    log_path: &Path,
+    log: &[u8],
+) {
+    #[cfg(unix)]
+    commit_generate_unix(lock, changes, absent, log_path, log);
+    #[cfg(not(unix))]
+    {
+        let _ = (lock, changes, absent, log_path, log);
+        fail("source generation transactions are unavailable on this platform until native atomic transactions are implemented")
+    }
+}
+
+/// Remove generator-owned files or restore generator-owned edits only after
+/// every expected byte is rechecked.
+///
+/// Each path is first renamed to a private sibling while the codemod lock is
+/// held. A later failure restores every staged path from its saved bytes, so
+/// callers can include receipts, replay logs, and edited source in one
+/// transaction.
+pub fn commit_delete(lock: &Lock, changes: &[Change]) {
+    #[cfg(unix)]
+    commit_delete_unix(lock, changes);
+    #[cfg(not(unix))]
+    {
+        let _ = (lock, changes);
+        fail("source deletion transactions are unavailable on this platform until native atomic transactions are implemented")
+    }
+}
+
+
+#[cfg(unix)]
+fn commit_delete_unix(lock: &Lock, changes: &[Change]) {
+    if changes.is_empty() {
+        fail("source deletion has no file changes");
+    }
+    let project = lock.project.clone();
+    let tx = format!("{}-{}", std::process::id(), now_nanos());
+    let mut names = BTreeSet::new();
+    let mut identities = BTreeSet::new();
+    let mut records = Vec::with_capacity(changes.len());
+    for (index, change) in changes.iter().enumerate() {
+        validate_delete_destination(&project, &change.path);
+        let metadata = fs::symlink_metadata(&change.path).unwrap_or_else(|error| {
+            fail(&format!(
+                "could not inspect deletion destination `{}`: {error}",
+                change.path.display()
+            ))
+        });
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            fail(&format!(
+                "deletion destination `{}` is not a regular non-link file",
+                change.path.display()
+            ));
+        }
+        let canonical = fs::canonicalize(&change.path).unwrap_or_else(|error| {
+            fail(&format!(
+                "could not canonicalize deletion destination `{}`: {error}",
+                change.path.display()
+            ))
+        });
+        if canonical != change.path || !names.insert(canonical) {
+            fail(&format!(
+                "duplicate or aliased deletion destination `{}`",
+                change.path.display()
+            ));
+        }
+        let identity = path_identity(&change.path)
+            .unwrap_or_else(|error| fail(&format!("could not identify deletion destination: {error}")));
+        if !identities.insert(identity) {
+            fail(&format!(
+                "deletion destinations alias the same file at `{}`",
+                change.path.display()
+            ));
+        }
+        let current = fs::read(&change.path).unwrap_or_else(|error| {
+            fail(&format!(
+                "could not read deletion destination `{}`: {error}",
+                change.path.display()
+            ))
+        });
+        if current != change.before {
+            fail(&format!(
+                "deletion destination `{}` drifted before commit",
+                change.path.display()
+            ));
+        }
+        let parent = change.path.parent().unwrap_or(&project);
+        records.push(DeleteRecord {
+            path: change.path.clone(),
+            temp: parent.join(format!(".jet-delete-{tx}-{index}.tmp")),
+            after_temp: (!change.after.is_empty())
+                .then(|| parent.join(format!(".jet-delete-after-{tx}-{index}.tmp"))),
+            before: change.before.clone(),
+            after: change.after.clone(),
+            identity,
+            staged: false,
+            published: false,
+        });
+    }
+    for record in &records {
+        if fs::symlink_metadata(&record.temp).is_ok()
+            || record
+                .after_temp
+                .as_deref()
+                .is_some_and(|path| fs::symlink_metadata(path).is_ok())
+        {
+            fail(&format!(
+                "deletion staging path for `{}` already exists",
+                record.path.display()
+            ));
+        }
+    }
+    for record in &records {
+        let Some(after_temp) = record.after_temp.as_deref() else {
+            continue;
+        };
+        let mut staged = match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(after_temp)
+        {
+            Ok(file) => file,
+            Err(error) => {
+                restore_delete_records(&records);
+                fail(&format!(
+                    "could not stage restoration of `{}`: {error}",
+                    record.path.display()
+                ))
+            }
+        };
+        if let Err(error) = staged.write_all(&record.after).and_then(|_| staged.sync_all()) {
+            let _ = fs::remove_file(after_temp);
+            restore_delete_records(&records);
+            fail(&format!(
+                "could not write staged restoration of `{}`: {error}",
+                record.path.display()
+            ));
+        }
+    }
+    for index in 0..records.len() {
+        let (path, before, identity, temp) = {
+            let record = &records[index];
+            (
+                record.path.clone(),
+                record.before.clone(),
+                record.identity,
+                record.temp.clone(),
+            )
+        };
+        let current = fs::read(&path).unwrap_or_else(|error| {
+            restore_delete_records(&records);
+            fail(&format!(
+                "could not recheck deletion destination `{}`: {error}",
+                path.display()
+            ))
+        });
+        if current != before || path_identity(&path).ok() != Some(identity) {
+            restore_delete_records(&records);
+            fail(&format!(
+                "deletion destination `{}` drifted before staging",
+                path.display()
+            ));
+        }
+        if let Err(error) = fs::rename(&path, &temp) {
+            restore_delete_records(&records);
+            fail(&format!(
+                "could not stage deletion of `{}`: {error}",
+                path.display()
+            ));
+        }
+        records[index].staged = true;
+    }
+    for index in 0..records.len() {
+        let Some(after_temp) = records[index].after_temp.clone() else {
+            continue;
+        };
+        let path = records[index].path.clone();
+        if let Err(error) = fs::rename(&after_temp, &path) {
+            restore_delete_records(&records);
+            fail(&format!(
+                "could not publish restoration of `{}`: {error}",
+                path.display()
+            ));
+        }
+        records[index].published = true;
+    }
+    for record in &records {
+        if let Err(error) = fs::remove_file(&record.temp) {
+            restore_delete_records(&records);
+            fail(&format!(
+                "could not publish deletion of `{}`: {error}",
+                record.path.display()
+            ));
+        }
+    }
+    let mut parents = BTreeSet::new();
+    for record in &records {
+        if let Some(parent) = record.path.parent() {
+            parents.insert(parent.to_path_buf());
+        }
+    }
+    for parent in parents {
+        if let Ok(dir) = OpenOptions::new().read(true).open(parent) {
+            let _ = dir.sync_all();
+        }
+    }
+}
+
+
+#[cfg(unix)]
+struct DeleteRecord {
+    path: PathBuf,
+    temp: PathBuf,
+    after_temp: Option<PathBuf>,
+    before: Vec<u8>,
+    after: Vec<u8>,
+    identity: (u64, u64),
+    staged: bool,
+    published: bool,
+}
+
+
+#[cfg(unix)]
+fn validate_delete_destination(project: &Path, path: &Path) {
+    let relative = path.strip_prefix(project).unwrap_or_else(|_| {
+        fail(&format!(
+            "deletion destination `{}` escapes the project",
+            path.display()
+        ))
+    });
+    let components = relative.components().collect::<Vec<_>>();
+    if components.is_empty()
+        || components
+            .iter()
+            .any(|component| !matches!(component, Component::Normal(_)))
+        || relative.starts_with(".git")
+        || relative.starts_with("target")
+    {
+        fail(&format!(
+            "deletion destination `{}` is not a normal project file",
+            path.display()
+        ));
+    }
+    let mut parent = project.to_path_buf();
+    for component in relative.parent().into_iter().flat_map(Path::components) {
+        let Component::Normal(name) = component else {
+            unreachable!()
+        };
+        parent.push(name);
+        let metadata = fs::symlink_metadata(&parent).unwrap_or_else(|error| {
+            fail(&format!(
+                "deletion parent `{}` is unavailable: {error}",
+                parent.display()
+            ))
+        });
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            fail(&format!(
+                "deletion parent `{}` is not a real directory",
+                parent.display()
+            ));
+        }
+    }
+}
+
+#[cfg(unix)]
+fn restore_delete_records(records: &[DeleteRecord]) {
+    for record in records.iter().rev() {
+        if let Some(after_temp) = record.after_temp.as_deref() {
+            let _ = fs::remove_file(after_temp);
+        }
+        if !record.staged {
+            continue;
+        }
+        let path_exists = match fs::symlink_metadata(&record.path) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => continue,
+            Ok(_) => true,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(_) => continue,
+        };
+        if path_exists {
+            if !record.published || record.after.is_empty() {
+                continue;
+            }
+            let current = fs::read(&record.path).ok();
+            if current.as_deref() != Some(record.after.as_slice()) {
+                continue;
+            }
+            if fs::remove_file(&record.path).is_err() {
+                continue;
+            }
+        }
+        if fs::rename(&record.temp, &record.path).is_ok() {
+            continue;
+        }
+        let Some(parent) = record.path.parent() else {
+            continue;
+        };
+        let restore = parent.join(format!(
+            ".jet-delete-restore-{}-{}.tmp",
+            std::process::id(),
+            now_nanos()
+        ));
+        if let Ok(mut file) = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&restore)
+        {
+            if file
+                .write_all(&record.before)
+                .and_then(|_| file.sync_all())
+                .is_ok()
+            {
+                let _ = fs::rename(&restore, &record.path);
+            } else {
+                let _ = fs::remove_file(&restore);
+            }
+        }
+    }
+}
+
+
+#[cfg(unix)]
+fn render_generate_journal(tx: &str, completed: usize, records: &[GenerateRecord]) -> String {
+    let files = records
+        .iter()
+        .map(|record| {
+            format!(
+                "{{\"path\":\"{}\",\"temp\":\"{}\",\"before_exists\":{},\"before\":\"{}\",\"after\":\"{}\"}}",
+                json_escape(&record.path.to_string_lossy()),
+                json_escape(&record.temp.to_string_lossy()),
+                record.before_exists,
+                hex(&record.before),
+                hex(&record.after),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"schema\":\"jet-generate-transaction-v1\",\"tx\":\"{}\",\"completed\":{},\"files\":[{}]}}\n",
+        json_escape(tx),
+        completed,
+        files,
+    )
+}
+
+#[cfg(unix)]
+fn generate_all_before(records: &[GenerateRecord]) -> bool {
+    records.iter().all(|record| {
+        read_generate_path(&record.path).is_ok_and(|(exists, current)| {
+            exists == record.before_exists && (!exists || current == record.before)
+        })
+    })
+}
+
+#[cfg(unix)]
+fn abort_generate(lock: &Lock, journal_id: (u64, u64), records: &[GenerateRecord]) {
+    generate_rollback(records);
+    if !generate_all_before(records) {
+        fail("source generation rollback was incomplete; transaction journal preserved");
+    }
+    unlink_at_checked(
+        &lock._file,
+        std::ffi::OsStr::new("transaction.journal"),
+        journal_id,
+    )
+    .unwrap_or_else(|error| fail(&format!("could not remove aborted generation journal: {error}")));
+}
+
+#[cfg(unix)]
+fn commit_generate_unix(
+    lock: &Lock,
+    changes: &[Change],
+    absent: &[PathBuf],
+    log_path: &Path,
+    log: &[u8],
+) {
+    if changes.is_empty() {
+        fail("source generation has no file changes");
+    }
+    let project = lock.project.clone();
+    if log_path.parent() != Some(lock.dir.as_path())
+        || !log_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with(".log.json"))
+    {
+        fail("source generation replay log must be directly beneath .jet/codemods and end in .log.json");
+    }
+    let mut all_changes = changes.to_vec();
+    if all_changes.iter().any(|change| change.path == log_path) {
+        fail("source generation replay log is duplicated in its file changes");
+    }
+    let (log_exists, log_before) = read_generate_path(log_path).unwrap_or_else(|error| {
+        fail(&format!("could not inspect generation replay log: {error}"))
+    });
+    all_changes.push(Change {
+        path: log_path.to_path_buf(),
+        before: log_before,
+        after: log.to_vec(),
+    });
+    let paths = all_changes
+        .iter()
+        .map(|change| change.path.clone())
+        .collect::<Vec<_>>();
+    validate_generate_destinations(&project, &paths);
+    let absent = absent.iter().cloned().collect::<BTreeSet<_>>();
+    let mut records = Vec::new();
+    for (index, change) in all_changes.iter().enumerate() {
+        let (before_exists, before) = read_generate_path(&change.path).unwrap_or_else(|error| {
+            cleanup_generate_temps(&records);
+            fail(&format!(
+                "could not inspect generation destination `{}`: {error}",
+                change.path.display()
+            ))
+        });
+        let expected_exists = if change.path == log_path {
+            log_exists
+        } else {
+            !absent.contains(&change.path)
+        };
+        if before_exists != expected_exists || before != change.before {
+            cleanup_generate_temps(&records);
+            fail(&format!(
+                "generation destination `{}` drifted before commit; no files written",
+                change.path.display()
+            ));
+        }
+        let parent = change.path.parent().unwrap_or(&project);
+        let temp = parent.join(format!(
+            ".jet-generate-{}-{}-{index}.tmp",
+            std::process::id(),
+            now_nanos()
+        ));
+        let mut staged = match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)
+        {
+            Ok(file) => file,
+            Err(error) => {
+                cleanup_generate_temps(&records);
+                fail(&format!(
+                    "could not stage generated destination `{}`: {error}",
+                    change.path.display()
+                ))
+            }
+        };
+        if let Err(error) = staged
+            .write_all(&change.after)
+            .and_then(|_| staged.sync_all())
+        {
+            cleanup_generate_temps(&records);
+            let _ = fs::remove_file(&temp);
+            fail(&format!(
+                "could not write staged generated destination `{}`: {error}",
+                change.path.display()
+            ))
+        }
+        records.push(GenerateRecord {
+            path: change.path.clone(),
+            temp,
+            before: change.before.clone(),
+            after: change.after.clone(),
+            before_exists,
+        });
+    }
+    let tx = format!("{}-{}", std::process::id(), now_nanos());
+    let mut journal_id = replace_journal_generation(
+        lock,
+        &tx,
+        0,
+        render_generate_journal(&tx, 0, &records).as_bytes(),
+        None,
+    );
+    if std::env::var("JET_CODEMOD_CRASH_AFTER_JOURNAL")
+        .ok()
+        .as_deref()
+        == Some("1")
+    {
+        std::process::exit(87);
+    }
+    for (index, record) in records.iter().enumerate() {
+        let (exists, before) = read_generate_path(&record.path).unwrap_or_else(|error| {
+            abort_generate(lock, journal_id, &records);
+            fail(&format!(
+                "could not recheck generation destination `{}`: {error}",
+                record.path.display()
+            ))
+        });
+        if exists != record.before_exists || before != record.before {
+            abort_generate(lock, journal_id, &records);
+            fail(&format!(
+                "generation destination `{}` drifted before rename; no files written",
+                record.path.display()
+            ));
+        }
+        if let Err(error) = fs::rename(&record.temp, &record.path) {
+            abort_generate(lock, journal_id, &records);
+            fail(&format!(
+                "could not atomically publish generated destination `{}`: {error}",
+                record.path.display()
+            ))
+        }
+        journal_id = replace_journal_generation(
+            lock,
+            &tx,
+            index + 1,
+            render_generate_journal(&tx, index + 1, &records).as_bytes(),
+            Some(journal_id),
+        );
+        if std::env::var("JET_CODEMOD_CRASH_AFTER_RENAME")
+            .ok()
+            .is_some_and(|value| value == (index + 1).to_string())
+        {
+            std::process::exit(86);
+        }
+    }
+    unlink_at_checked(
+        &lock._file,
+        std::ffi::OsStr::new("transaction.journal"),
+        journal_id,
+    )
+    .unwrap_or_else(|error| fail(&format!("could not remove generation journal: {error}")));
+    for record in &records {
+        if let Some(parent) = record.path.parent() {
+            sync_generate_parent(parent);
+        }
+    }
+}
+
+#[cfg(unix)]
+struct GenerateRecord {
+    path: PathBuf,
+    temp: PathBuf,
+    before: Vec<u8>,
+    after: Vec<u8>,
+    before_exists: bool,
+}
+
+#[cfg(unix)]
+fn read_generate_path(path: &Path) -> std::io::Result<(bool, Vec<u8>)> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok((false, Vec::new())),
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "generation destination is not a regular non-link file",
+        ));
+    }
+    Ok((true, fs::read(path)?))
+}
+
+#[cfg(unix)]
+fn validate_generate_destinations(project: &Path, paths: &[PathBuf]) {
+    let mut names = BTreeSet::new();
+    for path in paths {
+        let relative = path.strip_prefix(project).unwrap_or_else(|_| {
+            fail(&format!(
+                "generation destination `{}` escapes the project",
+                path.display()
+            ))
+        });
+        let components = relative.components().collect::<Vec<_>>();
+        if components.is_empty()
+            || components
+                .iter()
+                .any(|component| !matches!(component, std::path::Component::Normal(_)))
+        {
+            fail(&format!(
+                "generation destination `{}` is not a normal project path",
+                path.display()
+            ));
+        }
+        if relative.starts_with(".git") || relative.starts_with("target") {
+            fail(&format!(
+                "generation destination `{}` points into compiler state",
+                path.display()
+            ));
+        }
+        if !names.insert(relative.to_path_buf()) {
+            fail(&format!(
+                "duplicate generation destination `{}`",
+                path.display()
+            ));
+        }
+        let mut parent = project.to_path_buf();
+        for component in relative.parent().into_iter().flat_map(Path::components) {
+            let std::path::Component::Normal(name) = component else {
+                unreachable!()
+            };
+            parent.push(name);
+            let metadata = fs::symlink_metadata(&parent).unwrap_or_else(|error| {
+                fail(&format!(
+                    "generation destination parent `{}` is unavailable: {error}",
+                    parent.display()
+                ))
+            });
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                fail(&format!(
+                    "generation destination parent `{}` is not a real directory",
+                    parent.display()
+                ));
+            }
+        }
+        if let Ok(metadata) = fs::symlink_metadata(path) {
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                fail(&format!(
+                    "generation destination `{}` is not a regular non-link file",
+                    path.display()
+                ));
+            }
+            let canonical = fs::canonicalize(path).unwrap_or_else(|error| {
+                fail(&format!(
+                    "could not canonicalize generation destination `{}`: {error}",
+                    path.display()
+                ))
+            });
+            if canonical.as_path() != path.as_path() {
+                fail(&format!(
+                    "generation destination `{}` aliases another path",
+                    path.display()
+                ));
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+fn cleanup_generate_temps(records: &[GenerateRecord]) {
+    for record in records {
+        let _ = fs::remove_file(&record.temp);
+    }
+}
+
+#[cfg(unix)]
+fn generate_rollback(records: &[GenerateRecord]) {
+    for record in records.iter().rev() {
+        let Ok((exists, current)) = read_generate_path(&record.path) else {
+            continue;
+        };
+        if !exists || current != record.after {
+            continue;
+        }
+        if record.before_exists {
+            let Some(parent) = record.path.parent() else {
+                continue;
+            };
+            let temp = parent.join(format!(
+                ".jet-generate-rollback-{}-{}.tmp",
+                std::process::id(),
+                now_nanos()
+            ));
+            let Ok(mut file) = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temp)
+            else {
+                continue;
+            };
+            if file
+                .write_all(&record.before)
+                .and_then(|_| file.sync_all())
+                .is_ok()
+            {
+                let _ = fs::rename(&temp, &record.path);
+            } else {
+                let _ = fs::remove_file(&temp);
+            }
+        } else {
+            let _ = fs::remove_file(&record.path);
+        }
+    }
+    cleanup_generate_temps(records);
+}
+
+#[cfg(unix)]
+fn sync_generate_parent(parent: &Path) {
+    if let Ok(file) = OpenOptions::new().read(true).open(parent) {
+        let _ = file.sync_all();
+    }
 }
 
 #[cfg(unix)]

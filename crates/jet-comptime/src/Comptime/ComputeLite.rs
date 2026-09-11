@@ -4,6 +4,9 @@
 //! to `CtValue` lives here; engines must not re-encode tensor law.
 //! parity: include path=crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs
 
+use super::CollectionEval::collection_semantics::{
+    jet_simd_reduce_fixed_iter, JetSimdScalar,
+};
 use super::Diagnostics::unsupported;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{
@@ -43,6 +46,7 @@ fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
 include!("../../../jet-codegen/src/Prelude/Core/ViewAccess.rs");
+include!("../../../jet-codegen/src/Prelude/Core/ParallelKernel.rs");
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Compute.rs");
 
 fn device_to_ct(device: JetComputeDevice) -> CtValue {
@@ -536,8 +540,8 @@ fn tensor_to_ct_with_handle(
     valid: std::sync::Arc<std::sync::atomic::AtomicBool>,
     include_trace: bool,
 ) -> CtValue {
-    // CtValue owns lists; Prelude remains authority for validation and logical
-    // element selection at this engine boundary.
+    // The opaque Prelude handle owns storage. Keep only bounded metadata here:
+    // copying elements into CtValue would inflate and duplicate every tensor.
     if let Err(error) = jet_compute_validate_tensor(tensor) {
         jet_panic(
             "ComputeLite::tensor_to_ct",
@@ -545,8 +549,7 @@ fn tensor_to_ct_with_handle(
             &format!("invalid Tensor result: {}", error.jet_show()),
         );
     }
-    // CtValue owns lists, not borrowed strided allocations. Marshal the
-    // logical projection as a fresh contiguous value at this engine boundary.
+    // Preserve the existing logical metadata projection without copying data.
     let strides = match jet_compute_row_major_strides(&tensor.shape) {
         Ok(strides) => strides,
         Err(error) => jet_panic(
@@ -555,7 +558,6 @@ fn tensor_to_ct_with_handle(
             &format!("invalid Tensor view metadata: {}", error.jet_show()),
         ),
     };
-    let data = jet_compute_tensor_values(tensor);
     let mut fields = vec![
         (
             "shape".to_string(),
@@ -564,14 +566,6 @@ fn tensor_to_ct_with_handle(
         (
             "strides".to_string(),
             CtValue::List(strides.iter().map(|d| CtValue::Int(*d)).collect()),
-        ),
-        (
-            "data".to_string(),
-            CtValue::List(
-                data.iter()
-                    .map(|v| CtValue::Float(CtFloat::f64(*v)))
-                    .collect(),
-            ),
         ),
         ("device".to_string(), device_to_ct(tensor.device)),
         (
@@ -1247,6 +1241,274 @@ fn err_compute(err: JetComputeError) -> CtValue {
     CtValue::failed(Box::new(map_err(err)))
 }
 
+#[derive(Clone)]
+struct ComputeCallback {
+    handle: JetComputeHandle,
+    result_type: Type,
+    identity_key: String,
+    identity_captures: std::sync::Arc<Vec<CtValue>>,
+    callback_error: std::sync::Arc<std::sync::Mutex<Option<Diagnostic>>>,
+}
+
+impl ComputeCallback {
+    fn into_value(self) -> CtValue {
+        let result_type = self.result_type.clone();
+        CtValue::Closure(std::sync::Arc::new(ClosureData {
+            lambda: Lambda {
+                take_names: Vec::new(),
+                params: Vec::new(),
+                result_type: Some(result_type.clone()),
+                error_type: None,
+                effects: None,
+                body: LambdaBody::Block(Vec::new()),
+                span: Span::new(0, 0),
+                meta: LambdaMeta::default(),
+            },
+            captured: std::collections::HashMap::new(),
+            return_type: Some(result_type),
+            opaque: Some(CtOpaque::new(super::AmbientStandaloneClosure::new(self))),
+        }))
+    }
+
+    fn call(&self, args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
+        let tensors = args
+            .iter()
+            .map(|value| ct_to_tensor(value, span))
+            .collect::<Result<Vec<_>, _>>()?;
+        let result = jet_compute_call_curried(
+            self.handle.raw(),
+            JetComputeInputPack::from_flat(tensors),
+        );
+        if let Some(error) = self
+            .callback_error
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+        {
+            return Err(error);
+        }
+        let result = result.map_err(|error| {
+            unsupported(&format!("autodiff: {}", error.jet_show()), span)
+        })?;
+        match result {
+            JetComputeCurriedResult::Gradient(gradients) => {
+                gradient_to_ct(gradients, &self.result_type, span)
+            }
+            JetComputeCurriedResult::ValueAndGradient { value, gradients } => {
+                let Type::Tuple(fields) = &self.result_type else {
+                    return Err(unsupported("checked value-and-gradient result type", span));
+                };
+                let [_, (_, gradient_type)] = fields.as_slice() else {
+                    return Err(unsupported("checked value-and-gradient result fields", span));
+                };
+                tuple_to_ct(
+                    vec![
+                        tensor_to_ct(&value),
+                        gradient_to_ct(gradients, gradient_type, span)?,
+                    ],
+                    &self.result_type,
+                    span,
+                )
+            }
+            JetComputeCurriedResult::Jvp { value, tangent } => tuple_to_ct(
+                vec![tensor_to_ct(&value), tensor_to_ct(&tangent)],
+                &self.result_type,
+                span,
+            ),
+            JetComputeCurriedResult::Vjp { value, pull, grads } => {
+                let pull = JetComputeHandle::new(pull);
+                let grads = JetComputeHandle::new(grads);
+                let Type::Apply { name, args: types } = &self.result_type else {
+                    return Err(unsupported("checked VjpRun result type", span));
+                };
+                let [gradient_type] = types.as_slice() else {
+                    return Err(unsupported("checked VjpRun gradient type", span));
+                };
+                let captures = std::sync::Arc::new(vec![
+                    self.clone().into_value(),
+                    CtValue::List(args),
+                ]);
+                let continuation = |handle, role: &str| {
+                    ComputeCallback {
+                        handle,
+                        result_type: gradient_type.clone(),
+                        identity_key: format!("compute.vjp.{role}"),
+                        identity_captures: captures.clone(),
+                        callback_error: self.callback_error.clone(),
+                    }
+                    .into_value()
+                };
+                Ok(CtValue::Struct {
+                    type_name: name.clone(),
+                    fields: vec![
+                        ("value".to_string(), tensor_to_ct(&value)),
+                        ("pull".to_string(), continuation(pull, "pull")),
+                        ("grads".to_string(), continuation(grads, "grads")),
+                    ],
+                })
+            }
+        }
+    }
+}
+
+impl super::StandaloneClosureHost for ComputeCallback {
+    fn invoke(&self, args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
+        self.call(args, span)
+    }
+
+    fn history_callback_identity(&self) -> Result<String, String> {
+        super::history_callback_fingerprint(&self.identity_key, &self.identity_captures)
+    }
+}
+
+fn tuple_to_ct(values: Vec<CtValue>, ty: &Type, span: Span) -> Result<CtValue, Diagnostic> {
+    let Type::Tuple(fields) = ty else {
+        return Err(unsupported("checked autodiff tuple type", span));
+    };
+    if values.len() != fields.len() {
+        return Err(unsupported("checked autodiff tuple arity", span));
+    }
+    Ok(CtValue::Struct {
+        type_name: "tuple".to_string(),
+        fields: fields
+            .iter()
+            .zip(values)
+            .map(|((name, _), value)| (name.clone(), value))
+            .collect(),
+    })
+}
+
+fn gradient_to_ct(
+    gradients: Vec<Vec<JetTensor>>,
+    ty: &Type,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let Type::Tuple(fields) = ty else {
+        return Err(unsupported("checked gradient result type", span));
+    };
+    if gradients.len() != fields.len() {
+        return Err(unsupported("checked gradient result arity", span));
+    }
+    let values = gradients
+        .into_iter()
+        .zip(fields)
+        .map(|(values, (_, field_type))| {
+            if matches!(field_type.as_ref(), Type::Tuple(_)) {
+                tuple_to_ct(values.iter().map(tensor_to_ct).collect(), field_type, span)
+            } else {
+                let [value] = values.as_slice() else {
+                    return Err(unsupported("checked gradient Tensor result", span));
+                };
+                Ok(tensor_to_ct(value))
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    tuple_to_ct(values, ty, span)
+}
+
+/// Marshal checked callables and Tensor values into the shared curried kernel.
+/// The kernel owns tracing, differentiation, target selection, and continuations.
+pub fn autodiff_transform(
+    method: &str,
+    mut args: Vec<CtValue>,
+    function_type: &Type,
+    result_type: &Type,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let kind = match method {
+        "gradient" => JetComputeTransformKind::Gradient,
+        "value_and_gradient" => JetComputeTransformKind::ValueAndGradient,
+        "vjp" => JetComputeTransformKind::Vjp,
+        "jvp" => JetComputeTransformKind::Jvp,
+        _ => return Err(unsupported("checked autodiff transform kind", span)),
+    };
+    let Type::Fn { params, ret: Some(ret), .. } = function_type else {
+        return Err(unsupported("checked autodiff base function type", span));
+    };
+    if args.len() < 2 {
+        return Err(unsupported("checked autodiff arguments", span));
+    }
+    let targets_value = args.pop().unwrap();
+    let targets = as_i64_list(&targets_value, span)?;
+    let function = args.remove(0);
+    let CtValue::Closure(data) = &function else {
+        return Err(unsupported("checked autodiff base callable", span));
+    };
+    let host = data
+        .opaque
+        .as_ref()
+        .and_then(|value| value.downcast_ref::<super::AmbientStandaloneClosure>())
+        .cloned()
+        .ok_or_else(|| unsupported("checked autodiff callable owner", span))?;
+    let (output_type, outcome) = match ret.as_ref() {
+        Type::Result { ok, .. } => (ok.as_ref().clone(), true),
+        ty => (ty.clone(), false),
+    };
+    let shape = match &output_type {
+        Type::Tuple(fields) => JetComputeResultShape::TensorTuple(fields.len()),
+        _ => JetComputeResultShape::Tensor,
+    };
+    let callback_error = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let errors = callback_error.clone();
+    let base = JetComputeBase::new(params.len(), move |inputs| {
+        let invoke = || -> Result<JetComputeBaseResult, Diagnostic> {
+            let value = host.invoke(inputs.iter().map(tensor_to_ct).collect(), span)?;
+            let value = if outcome {
+                match value {
+                    CtValue::Present(value) => *value,
+                    CtValue::Failed(report) => {
+                        return Err(unsupported(&format!("autodiff base failed: {report:?}"), span));
+                    }
+                    _ => return Err(unsupported("checked autodiff base outcome", span)),
+                }
+            } else {
+                value
+            };
+            match &output_type {
+                Type::Tuple(fields) => {
+                    let CtValue::Struct { fields: values, .. } = &value else {
+                        return Err(unsupported("checked autodiff base tuple", span));
+                    };
+                    let tensors = fields
+                        .iter()
+                        .map(|(name, _)| {
+                            let value = values.iter().find(|(field, _)| field == name)
+                                .map(|(_, value)| value)
+                                .ok_or_else(|| unsupported("checked autodiff base tuple field", span))?;
+                            ct_to_tensor(value, span)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Ok(JetComputeBaseResult::TensorTuple(tensors))
+                }
+                _ => ct_to_tensor(&value, span).map(JetComputeBaseResult::Tensor),
+            }
+        };
+        invoke().map_err(|error| {
+            let message = error.what.clone();
+            *errors
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error);
+            JetComputeError::Unsupported(message)
+        })
+    });
+    let result = match result_type {
+        Type::Fn { ret: Some(ret), .. } => ret.as_ref().clone(),
+        ty => ty.clone(),
+    };
+    let callback = ComputeCallback {
+        handle: JetComputeHandle::new(jet_compute_curried_new(base, kind, &targets, shape)),
+        identity_key: format!("compute.{method}:{}", result.identity_key()),
+        result_type: result,
+        identity_captures: std::sync::Arc::new(vec![function, targets_value]),
+        callback_error,
+    };
+    if matches!(result_type, Type::Fn { .. }) {
+        Ok(callback.into_value())
+    } else {
+        callback.call(args, span)
+    }
+}
+
 fn autodiff_state(
     output: &CtValue,
     anchor: &CtValue,
@@ -1742,6 +2004,20 @@ mod backend_tests {
             .collect();
         jet_compute_validate_tensor(&tensor).unwrap();
         tensor
+    }
+
+    #[test]
+    fn scalar_access_rejects_invalid_tensor_storage() {
+        let mut tensor = jet_compute_full(&vec![2], 1.0).unwrap();
+        tensor.data = std::sync::Arc::new(vec![1.0, f64::NAN]);
+        assert!(matches!(
+            jet_compute_get(&tensor, &[0]),
+            Err(JetComputeError::Arithmetic(_))
+        ));
+        assert!(matches!(
+            jet_compute_set(&mut tensor, &[0], 2.0),
+            Err(JetComputeError::Arithmetic(_))
+        ));
     }
 
     #[test]

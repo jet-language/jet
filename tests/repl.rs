@@ -3321,14 +3321,9 @@ fn repl_core_url_dispatch() {
 // `status`/`bar_text`/`bar_svg` touch builtin struct values, so they're
 // covered here (repl transcript) rather than `comptime_diff` — see that
 // file's note on why struct `Display` can't be compared byte-for-byte yet.
-// `bar_text`/`bar_svg` take `[DataGroup]`, but `DataGroup` isn't a
-// user-constructible type name at comptime/REPL (E0119 — it's only ever
-// produced by `group_count`/`group_sum`/`group_mean`, the generic
-// call-site-typed pipeline functions that are still an open gap). So
-// there's no Jet-source way to exercise `bar_text`/`bar_svg` standalone yet
-// — they're verified instead by `DataLite.rs`'s own `#[cfg(test)]` module
-// against AOT's exact expected output, and will get a real transcript once
-// `group_*` closes that gap.
+// Bar and line renderers consume ordinary lists of grouped query values.
+// Their source-level grouping path is covered by the query conformance
+// corpus; this transcript keeps the fixed-signature status checks focused.
 // parity: guard tests/repl.rs::repl_core_data_dispatch
 #[test]
 fn repl_core_data_dispatch() {
@@ -3395,22 +3390,22 @@ fn repl_zstd_decompress_is_resident_and_typed() {
 }
 
 #[test]
-fn repl_core_data_lazy_plans_and_typed_joins() {
+fn repl_core_data_query_plans_and_typed_joins() {
     let inputs = &[
         "use core.data as data",
-        "table :: data.table([3, 1, 2])",
-        "lazy :: data.lazy(table)",
-        "deferred :: data.lazy_filter(lazy, (x) -> x > 10)",
-        "data.plan(deferred)",
-        "planned :: data.lazy_sort_by(data.lazy_filter(lazy, (x) -> x > 1), (x) -> \"{x}\")",
-        "data.rows(data.collect(planned))",
+        "rows :: [Int]{3, 1, 2}",
+        "query :: data.query(rows)",
+        "deferred :: query.filter((x) -> x > 10)",
+        "deferred.plan()",
+        "planned :: data.query(rows).filter((x) -> x > 1).sort_by((x) -> \"{x}\")",
+        "planned.collect() ?? panic(\"collect\")",
         "data.inner_join([1, 2, 1], [1, 1], (x) -> \"{x}\", (x) -> \"{x}\")",
         "data.left_join([1, 2], [1], (x) -> \"{x}\", (x) -> \"{x}\")",
     ];
     let out = run_transcript(inputs, None);
     assert!(
         out.contains("[table, filter]"),
-        "deferred plan missing: {out}"
+        "deferred query plan missing: {out}"
     );
     assert!(
         out.contains("[2, 3]"),
@@ -3428,24 +3423,23 @@ fn repl_core_data_lazy_plans_and_typed_joins() {
 }
 
 #[test]
-fn repl_core_data_schema_empty_table_and_series_law() {
+fn repl_core_data_schema_empty_lists_and_row_law() {
     let inputs = &[
         "use core.data as data",
         "struct Ticket { team: String minutes: Float }",
         "empty_rows: [Ticket] := []",
-        "empty_table :: data.table(empty_rows)",
-        "data.schema(empty_table)",
-        "data.schema(data.series([1.0, 2.0]))",
+        "data.schema(empty_rows)",
+        "data.schema([1.0, 2.0])",
         "t :: Ticket{team: \"Core\", minutes: 4.0}",
-        "data.schema(data.series([t]))",
+        "data.schema([t])",
         "empty_tickets: [Ticket] := []",
-        "data.schema(data.series(empty_tickets))",
+        "data.schema(empty_tickets)",
         "struct Empty {}",
         "empty_units: [Empty] := []",
-        "data.schema(data.table(empty_units))",
+        "data.schema(empty_units)",
         "struct Box<T> { value: T }",
         "boxed: [Box<Int>] := []",
-        "data.schema(data.table(boxed))",
+        "data.schema(boxed)",
     ];
     let out = run_transcript(inputs, None);
     assert!(
@@ -3455,18 +3449,11 @@ fn repl_core_data_schema_empty_table_and_series_law() {
     assert!(
         out.contains("DataColumn(name: team, type_name: String)")
             && out.contains("DataColumn(name: minutes, type_name: Float)"),
-        "empty Table<Ticket> must keep static columns: {out}"
+        "empty list of Ticket must keep static columns: {out}"
     );
     assert!(
         out.contains("DataColumn(name: value, type_name: Float)"),
-        "Series<Float> must be one value column: {out}"
-    );
-    let ticket_value_hits = out
-        .matches("DataColumn(name: value, type_name: Ticket)")
-        .count();
-    assert!(
-        ticket_value_hits >= 2,
-        "non-empty and empty Series<Ticket> both need value:Ticket (not expanded fields): {out}"
+        "scalar Float list must have one value column: {out}"
     );
     assert!(
         out.contains("[] : List"),
@@ -3479,29 +3466,31 @@ fn repl_core_data_schema_empty_table_and_series_law() {
 }
 
 #[test]
-fn repl_core_data_table_echo_hides_elem_type() {
+fn repl_core_data_list_query_echo_hides_comptime_metadata() {
     let inputs = &[
         "use core.data as data",
         "struct Ticket { team: String minutes: Float }",
         "empty_rows: [Ticket] := []",
-        "data.table(empty_rows)",
-        "data.series(empty_rows)",
-        "data.lazy(data.table(empty_rows))",
+        "empty_rows",
+        "data.query(empty_rows)",
+        "data.schema(empty_rows)",
     ];
     let out = run_transcript(inputs, None);
     assert!(
         !out.contains("E0956"),
-        "core.data containers should dispatch at comptime, got: {out}"
+        "core.data list/query calls should dispatch at comptime, got: {out}"
     );
     assert!(
-        out.contains("Table(rows:")
-            && out.contains("Series(values:")
-            && out.contains("LazyFrame(rows:"),
-        "expected Table/Series/LazyFrame echoes: {out}"
+        out.contains("Query("),
+        "expected a typed Query echo: {out}"
+    );
+    assert!(
+        out.contains("[] : List"),
+        "ordinary list echo missing: {out}"
     );
     assert!(
         !out.contains("elem_type:"),
-        "elem_type is comptime-only metadata; must not leak into REPL echo: {out}"
+        "comptime-only metadata must not leak into REPL echo: {out}"
     );
 }
 
@@ -3519,9 +3508,8 @@ fn repl_core_data_json_ingest_and_select() {
         "use core.data as data",
         r#"raw :: "[{{\"team\":\"Core\",\"minutes\":4.0}},{{\"team\":\"Tools\",\"minutes\":5.0}},{{\"team\":\"Core\",\"minutes\":8.0}}]""#,
         r#"rows :: data.json<Ticket>(raw) ?? panic("bad json")"#,
-        "table :: data.table(rows)",
-        "data.schema(table)",
-        "selected :: data.filter(data.rows(table), (t) -> t.minutes >= 5.0)",
+        "data.schema(rows)",
+        "selected :: data.query(rows).filter((t) -> t.minutes >= 5.0).collect() ?? panic(\"filter\")",
         "data.count(selected)",
         "data.status()[6]",
     ];
@@ -3534,7 +3522,7 @@ fn repl_core_data_json_ingest_and_select() {
     assert!(
         out.contains("DataColumn(name: team, type_name: String)")
             && out.contains("DataColumn(name: minutes, type_name: Float)"),
-        "json table schema missing: {out}"
+        "json list schema missing: {out}"
     );
     assert!(out.contains("2 : Int"), "selected count missing: {out}");
     assert!(
@@ -3542,6 +3530,7 @@ fn repl_core_data_json_ingest_and_select() {
         "json status row missing: {out}"
     );
 }
+
 
 // ── #2038: `jet repl <file>.jet` ──────────────────────────────────────────
 

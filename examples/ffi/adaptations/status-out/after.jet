@@ -1,0 +1,18 @@
+#Import module c.status {
+    fn __jet_ffi_native_decode_status(input: &[U8], input_len: U32, output: &[U8], output_cap: U32, written: &U32) Int = "decode_status"
+}
+
+// Unrun expectation: status and the written count become one checked result;
+// negative status is not remapped to success and caller storage is retained.
+pub fn decode_status(input: &[U8], output: &[U8]) Result<U32, Int> -> {
+    written := 0
+    status := __jet_ffi_native_decode_status(input, input.len(), output, output.len(), &written)
+    if status < 0 -> return Err(status)
+    return Ok(written)
+}
+
+pub fn run() Result<U32, Int> -> {
+    input := [1, 2, 3]
+    output := [0, 0, 0]
+    return decode_status(&input, &output)
+}

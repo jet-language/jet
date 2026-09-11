@@ -26,7 +26,6 @@ pub enum TokKind {
     /// D-LOOP-IN1=A / D-TIME-IN1=C: source-loop `in`; postfix `.in` is
     /// reclassified as `Ident` by the lexer and accepted by the parser.
     KwIn,
-    KwSwitch,
     KwBreak,
     KwTrue,
     KwFalse,
@@ -57,6 +56,10 @@ pub enum TokKind {
     // D-CASING1 follow-on: `Test`/`Todo`/`Pure` are no longer keyword tokens —
     // they are `#`-markers recognized as `#` + ident in the parser.
     Ident(String),
+    /// D-RAWSTR1=A: a backtick-fenced ordinary `String`. The lexer keeps this
+    /// token distinct so formatters can choose a lossless raw spelling while
+    /// the parser lowers it to the ordinary string AST.
+    RawStr(String),
     Str(Vec<StrTokPart>),
     /// Parsed value plus exact source spelling, including radix prefix,
     /// leading zeroes, separator placement, and digit case.
@@ -227,7 +230,6 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::KwIf => format!("the keyword `{}`", Syntax::KW_IF),
         TokKind::KwElse => format!("the keyword `{}`", Syntax::KW_ELSE),
         TokKind::KwIn => format!("the keyword `{}`", Syntax::KW_IN),
-        TokKind::KwSwitch => format!("the keyword `{}`", Syntax::KW_SWITCH),
         TokKind::KwBreak => format!("the keyword `{}`", Syntax::KW_BREAK),
         TokKind::KwTrue => "`true`".to_string(),
         TokKind::KwFalse => "`false`".to_string(),
@@ -254,6 +256,7 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::KwModule => format!("the keyword `{}`", Syntax::KW_MODULE),
         TokKind::Ident(name) => format!("the name `{}`", name),
         TokKind::Str(_) => "a piece of quoted text".to_string(),
+        TokKind::RawStr(_) => "a piece of raw text".to_string(),
         TokKind::Int(..) => "a number".to_string(),
         TokKind::Float(..) => "a decimal number".to_string(),
         TokKind::UnitNumber { .. } => "a number with a unit suffix".to_string(),

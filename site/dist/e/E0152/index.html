@@ -34,16 +34,25 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for E0152</p>
+<p class="diag-copy fix" data-registry-field="fix">Use a valid typed `Regex` literal without interpolation.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0152</code>: <code>tests/ui/regex_bad_literal.stderr</code>.</p>
-<pre class="diag">Error [E0152]: this regex pattern is invalid at position 8
+<pre class="diag">Error [E0320]: Inferred record construction uses `{…}`, not `.{…}`
+  --&gt; tests/ui/regex_bad_literal.jet:5:19
+    |
+  5 |     print(re.find(.{&quot;(unclosed&quot;}, &quot;id=42&quot;) ?? &quot;none&quot;)
+    |                   ^
+ Why: D-LIT-DOT1 drops the constructor dot from every literal head
+ Fix: Write `{…}`
+More: jet-lang.dev/e/E0320
+
+Error [E0152]: This regex pattern is invalid at position 8
   --&gt; tests/ui/regex_bad_literal.jet:5:21
     |
   5 |     print(re.find(.{&quot;(unclosed&quot;}, &quot;id=42&quot;) ?? &quot;none&quot;)
     |                     ^^^^^^^^^^^
- Why: missing `)`
- Fix: fix the pattern at the reported position
+ Why: Missing `)`
+ Fix: Fix the pattern at the reported position
 More: jet-lang.dev/e/E0152
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

@@ -1,14 +1,15 @@
 //! D-OPTGC1: bounded, durable automatic-promotion reports.
 
 use std::collections::BTreeSet;
-use std::io::{IsTerminal, Read};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use jet_foundation::JetTrace::TRACE_VERSION;
-use jet_foundation::Report::ReportEnvelope;
-use jet_foundation::JSON::{json_escape, parse_json, JSONValue};
+use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
+use jet_foundation::DataTree::DataTree;
+use jet_foundation::JSON::parse_json;
 
 use crate::OutputMode;
 
@@ -100,7 +101,7 @@ pub(crate) fn run(args: &[String], mode: OutputMode) {
     if mode.json {
         println!("{}", render_json(&trace));
     } else {
-        let color = mode.color_stderr_for(std::io::stdout().is_terminal());
+        let color = mode.color_stderr();
         print!("{}", render_text(&trace, color));
     }
 }
@@ -405,13 +406,12 @@ fn parse_trace(raw: &str, expected_project: &str, now: u64) -> Result<Trace, Tra
         sites,
     })
 }
-
 fn object<'a>(
-    value: &'a JSONValue,
+    value: &'a DataTree,
     name: &str,
-) -> Result<&'a std::collections::BTreeMap<String, JSONValue>, TraceError> {
+) -> Result<&'a [(String, DataTree)], TraceError> {
     match value {
-        JSONValue::Object(object) => Ok(object),
+        DataTree::Object(object) => Ok(object),
         _ => Err(TraceError::new(
             ErrorKind::Malformed,
             format!("{name} is not an object"),
@@ -420,23 +420,26 @@ fn object<'a>(
 }
 
 fn field<'a>(
-    object: &'a std::collections::BTreeMap<String, JSONValue>,
+    object: &'a [(String, DataTree)],
     name: &str,
-) -> Result<&'a JSONValue, TraceError> {
-    object.get(name).ok_or_else(|| {
-        TraceError::new(
-            ErrorKind::Malformed,
-            format!("GC trace is missing `{name}`"),
-        )
-    })
+) -> Result<&'a DataTree, TraceError> {
+    object
+        .iter()
+        .find_map(|(key, value)| (key == name).then_some(value))
+        .ok_or_else(|| {
+            TraceError::new(
+                ErrorKind::Malformed,
+                format!("GC trace is missing `{name}`"),
+            )
+        })
 }
 
 fn string_field<'a>(
-    object: &'a std::collections::BTreeMap<String, JSONValue>,
+    object: &'a [(String, DataTree)],
     name: &str,
 ) -> Result<&'a str, TraceError> {
     match field(object, name)? {
-        JSONValue::String(value) => Ok(value),
+        DataTree::Text(value) | DataTree::TypedText(value) => Ok(value),
         _ => Err(TraceError::new(
             ErrorKind::Malformed,
             format!("GC trace `{name}` is not text"),
@@ -445,7 +448,7 @@ fn string_field<'a>(
 }
 
 fn safe_string(
-    object: &std::collections::BTreeMap<String, JSONValue>,
+    object: &[(String, DataTree)],
     name: &str,
 ) -> Result<String, TraceError> {
     let value = string_field(object, name)?;
@@ -462,11 +465,11 @@ fn safe_string(
 }
 
 fn uint_field(
-    object: &std::collections::BTreeMap<String, JSONValue>,
+    object: &[(String, DataTree)],
     name: &str,
 ) -> Result<u64, TraceError> {
     match field(object, name)? {
-        JSONValue::Number(value) if *value >= 0 => Ok(*value as u64),
+        DataTree::Int(value) if *value >= 0 => Ok(*value as u64),
         _ => Err(TraceError::new(
             ErrorKind::Malformed,
             format!("GC trace `{name}` is not a non-negative integer"),
@@ -475,11 +478,11 @@ fn uint_field(
 }
 
 fn bool_field(
-    object: &std::collections::BTreeMap<String, JSONValue>,
+    object: &[(String, DataTree)],
     name: &str,
 ) -> Result<bool, TraceError> {
     match field(object, name)? {
-        JSONValue::Bool(value) => Ok(*value),
+        DataTree::Bool(value) => Ok(*value),
         _ => Err(TraceError::new(
             ErrorKind::Malformed,
             format!("GC trace `{name}` is not Bool"),
@@ -488,11 +491,11 @@ fn bool_field(
 }
 
 fn array_field<'a>(
-    object: &'a std::collections::BTreeMap<String, JSONValue>,
+    object: &'a [(String, DataTree)],
     name: &str,
-) -> Result<&'a [JSONValue], TraceError> {
+) -> Result<&'a [DataTree], TraceError> {
     match field(object, name)? {
-        JSONValue::Array(values) => Ok(values),
+        DataTree::Array(values) => Ok(values),
         _ => Err(TraceError::new(
             ErrorKind::Malformed,
             format!("GC trace `{name}` is not a list"),
@@ -579,25 +582,50 @@ fn render_json(trace: &Trace) -> String {
         .flat_map(|site| &site.identities)
         .filter(|identity| identity.retained)
         .count();
-    let sites = trace.sites.iter().map(|site| {
-        let retained = site.identities.iter().filter(|identity| identity.retained).count();
-        let identities = site.identities.iter().map(|identity| {
-            format!("{{\"identity\":{},\"retained\":{}}}", identity.id, identity.retained)
-        }).collect::<Vec<_>>().join(",");
-        format!(
-            "{{\"source\":\"{}\",\"span_start\":{},\"span_end\":{},\"scope\":\"{}\",\"policy_provenance\":\"{}\",\"reason\":\"{}\",\"type_name\":\"{}\",\"allocations\":{},\"retained\":{},\"identities\":[{}],\"recommendation\":\"{}\"}}",
-            json_escape(&site.source), site.span_start, site.span_end, json_escape(&site.scope),
-            json_escape(&site.policy_provenance), json_escape(&site.reason), json_escape(&site.type_name),
-            site.identities.len(), retained, identities, json_escape(&recommendation(site))
+    let sites = StatusValue::array(trace.sites.iter().map(|site| {
+        let site_retained = site.identities.iter().filter(|identity| identity.retained).count();
+        let identities = StatusValue::array(site.identities.iter().map(|identity| {
+            StatusValue::object(
+                StatusFields::new()
+                    .with("identity", identity.id)
+                    .with("retained", identity.retained),
+            )
+        }));
+        StatusValue::object(
+            StatusFields::new()
+                .with("source", site.source.as_str())
+                .with("span_start", site.span_start)
+                .with("span_end", site.span_end)
+                .with("scope", site.scope.as_str())
+                .with("policy_provenance", site.policy_provenance.as_str())
+                .with("reason", site.reason.as_str())
+                .with("type_name", site.type_name.as_str())
+                .with("allocations", site.identities.len())
+                .with("retained", site_retained)
+                .with("identities", identities)
+                .with("recommendation", recommendation(site)),
         )
-    }).collect::<Vec<_>>().join(",");
-    let payload = format!(
-        "{{\"schema\":\"jet.gc.report\",\"version\":1,\"project\":\"{}\",\"pid\":{},\"started_unix_ms\":{},\"updated_unix_ms\":{},\"collections\":{},\"summary\":{{\"sites\":{},\"allocations\":{},\"retained\":{}}},\"sites\":[{}]}}",
-        json_escape(&trace.project), trace.pid, trace.started_unix_ms, trace.updated_unix_ms,
-        trace.collections, trace.sites.len(), allocations, retained, sites
+    }));
+    let summary = StatusValue::object(
+        StatusFields::new()
+            .with("sites", trace.sites.len())
+            .with("allocations", allocations)
+            .with("retained", retained),
     );
-    ReportEnvelope::status_record("tool", "ok", true, "gc.report")
-        .with_json_field("gc", &payload)
+    let gc = StatusValue::object(
+        StatusFields::new()
+            .with("schema", "jet.gc.report")
+            .with("version", 1)
+            .with("project", trace.project.as_str())
+            .with("pid", trace.pid)
+            .with("started_unix_ms", trace.started_unix_ms)
+            .with("updated_unix_ms", trace.updated_unix_ms)
+            .with("collections", trace.collections)
+            .with("summary", summary)
+            .with("sites", sites),
+    );
+    StatusEnvelope::new("gc.report", true)
+        .with_field("gc", gc)
         .json()
 }
 
@@ -625,13 +653,15 @@ fn fail(error: TraceError, mode: OutputMode) -> ! {
         None,
     );
     if mode.json {
+        let report = diagnostic.to_report(
+            &jet::Diagnostics::ReportPath::from_process(""),
+            "",
+        );
         print!(
             "{}",
-            jet::render_all_json(
-                &jet::Diagnostics::ReportPath::from_process(""),
-                "",
-                &[diagnostic],
-            )
+            StatusEnvelope::new("gc.report", false)
+                .with_report(report)
+                .json()
         );
     } else {
         eprint!(

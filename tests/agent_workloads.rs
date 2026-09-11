@@ -2809,49 +2809,24 @@ fn equivalent_adapters_complete_declared_tasks() {
 #[test]
 fn llm_digest_first_program() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let digest = fs::read_to_string(root.join("llms.text")).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["inspect", "digest", "--topic", "first-program"])
+        .current_dir(&root)
+        .output()
+        .expect("generate digest first program");
+    assert!(output.status.success(), "{}", stderr_receipt(&output));
+    let digest = String::from_utf8(output.stdout).expect("digest is UTF-8");
     let fixture = corpus_root().join("llm_digest");
-    let source = fixture.join("first_program.jet");
     let expected = fs::read(fixture.join("transcript.txt")).unwrap();
-    let sums = fs::read_to_string(fixture.join("SHA256SUMS")).unwrap();
-
-    let rows = sums
-        .lines()
-        .filter(|line| !line.is_empty())
-        .map(|line| {
-            line.split_once("  ")
-                .map(|(hash, path)| (hash, path))
-                .unwrap_or_else(|| panic!("bad llm digest fixture checksum row: {line}"))
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        rows.len(),
-        2,
-        "llm digest fixture checksum row count drifted"
-    );
-    assert_eq!(
-        rows.iter().map(|(_, path)| *path).collect::<BTreeSet<_>>(),
-        BTreeSet::from(["first_program.jet", "transcript.txt"]),
-        "llm digest fixture checksum closure drifted"
-    );
-    for (hash, relative) in rows {
-        let actual = jet::SHA256::sha256_hex(&fs::read(fixture.join(relative)).unwrap());
-        assert_eq!(actual, hash, "llm digest fixture drifted: {relative}");
-    }
-
-    for required in [
-        "fn run() {",
-        "greeting :: \"Hello, Jet\"",
-        "print(greeting)",
-        "No semicolons.",
-    ] {
-        assert!(
-            digest.contains(required),
-            "digest lacks first-program context: {required}"
-        );
-    }
+    let program = digest
+        .split_once("```jet\n")
+        .and_then(|(_, rest)| rest.split_once("\n```"))
+        .map(|(program, _)| program)
+        .expect("first-program topic contains an executable Jet example");
 
     let scratch = Scratch::new("jet_llm_digest_first_program");
+    let source = scratch.path.join("first_program.jet");
+    fs::write(&source, program).expect("write generated first program");
     let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
     command
         .args(["run", "--release"])

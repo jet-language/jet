@@ -37,22 +37,22 @@
 <p class="diag-copy fix" data-registry-field="fix">remove one registration, or rename the convention file.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E2807</code>: <code>tests/ui/web_app_route_collision.stderr</code>.</p>
-<pre class="diag">Error [E2807]: route `/` is registered both by `builder` and `routes_collision/index.jet`
-  --&gt; tests/ui/web_app_route_collision.jet:5:47
+<pre class="diag">Error [E2807]: Route `/` is registered both by `builder` and `routes_collision/index.jet`
+  --&gt; tests/ui/web_app_route_collision.jet:6:44
     |
-  5 | fn run() =&gt; App :: web.app().route(&quot;/&quot;, home).routes(from: &quot;routes_collision&quot;).csr()
-    |                                               ^^^^^^
- Why: explicit builder entries and `.routes(from:)` conventions must not claim the same path (D-WEBAUTHOR1)
- Fix: remove one registration, or rename the convention file
+  6 | fn run() App -&gt; web.app().route(&quot;/&quot;, home).routes(from: &quot;routes_collision&quot;).csr()
+    |                                            ^^^^^^
+ Why: Explicit builder entries and `.routes(from:)` conventions must not claim the same path (D-WEBAUTHOR1)
+ Fix: Remove one registration, or rename the convention file
 More: jet-lang.dev/e/E2807
 
-Error [E2807]: earlier registration of route `/`
-  --&gt; tests/ui/web_app_route_collision.jet:5:30
+Error [E2807]: Earlier registration of route `/`
+  --&gt; tests/ui/web_app_route_collision.jet:6:27
     |
-  5 | fn run() =&gt; App :: web.app().route(&quot;/&quot;, home).routes(from: &quot;routes_collision&quot;).csr()
-    |                              ^^^^^
- Why: both spans are kept so provenance stays audible
- Fix: delete or rename this registration
+  6 | fn run() App -&gt; web.app().route(&quot;/&quot;, home).routes(from: &quot;routes_collision&quot;).csr()
+    |                           ^^^^^
+ Why: Both spans are kept so provenance stays audible
+ Fix: Delete or rename this registration
 More: jet-lang.dev/e/E2807
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

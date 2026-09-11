@@ -180,10 +180,10 @@ pub(crate) fn run_expand(args: &[String], json: bool) {
             selection: selection.to_string(),
             lenses,
         };
-        println!(
-            "{}",
-            crate::CmdInspect::with_check_json(index.to_json_with_expand(&expand), &checked.check)
-        );
+        let envelope = index
+            .to_status_envelope_with_expand(&expand)
+            .with_field("check", crate::CmdInspect::check_result_value(&checked.check));
+        println!("{}", envelope.json());
         exit(ExitCodes::OK);
     }
 
@@ -709,6 +709,8 @@ fn layout_text(layout: &jet::CtValue) -> String {
         "size",
         "alignment",
         "stride",
+        "requested_alignment",
+        "effective_alignment",
         "target",
         "guarantee",
         "source",

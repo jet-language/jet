@@ -58,13 +58,28 @@ mod jet_std {
         }
     }
 
-    pub struct JetMIME(pub String);
-
-    impl JetMIME {
-        pub fn to_string_value(&self) -> String {
-            self.0.clone()
-        }
+    #[derive(Clone, Debug)]
+    pub struct JetURL {
+        pub scheme: String,
+        pub username: Option<String>,
+        pub password: Option<String>,
+        pub host: Option<String>,
+        pub port: Option<i64>,
+        pub path: String,
+        pub query: Vec<(String, String)>,
+        pub fragment: Option<String>,
+        pub typed_host: Option<Vec<(String, bool)>>,
+        pub typed_path: Option<Vec<(String, bool)>>,
     }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct JetMIME {
+        pub top: String,
+        pub sub: String,
+        pub params: Vec<(String, String)>,
+    }
+
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs");
 }
 
 enum JetParaRuntimeFailure {
@@ -225,6 +240,41 @@ struct LogField {
 }
 
 fn jet_log_emit(_level: &str, _msg: &str, _fields: &[LogField]) {}
+#[allow(unused_imports)]
+use jet_foundation::Devtools::*;
+include!("../crates/jet-codegen/src/Prelude/Core/DevtoolsRequestPanel.rs");
+
+include!("../crates/jet-codegen/src/Prelude/Core/TimeMonotonic.rs");
+include!("../crates/jet-codegen/src/Prelude/Deadline.rs");
+
+thread_local! {
+    static JET_DB_REQUEST_ID: std::cell::RefCell<Option<String>> =
+        std::cell::RefCell::new(None);
+}
+
+fn jet_db_current_request_id() -> Option<String> {
+    JET_DB_REQUEST_ID.with(|request_id| request_id.borrow().clone())
+}
+
+struct JetDbRequestScope {
+    previous: Option<String>,
+}
+
+impl JetDbRequestScope {
+    fn enter(request_id: Option<String>) -> Self {
+        let previous = JET_DB_REQUEST_ID.with(|current| current.replace(request_id));
+        Self { previous }
+    }
+}
+
+impl Drop for JetDbRequestScope {
+    fn drop(&mut self) {
+        JET_DB_REQUEST_ID.with(|current| {
+            let _ = current.replace(self.previous.take());
+        });
+    }
+}
+
 
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;

@@ -17,7 +17,6 @@ const payload = [
   '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}',
   '{"jsonrpc":"2.0","id":2,"method":"resources/list","params":{}}',
   '{"jsonrpc":"2.0","id":3,"method":"resources/read","params":{"uri":"jet://environment"}}',
-  '{"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"jet://missing"}}',
   '{"jsonrpc":"2.0","id":5,"method":"shutdown","params":{}}',
   '{"jsonrpc":"2.0","method":"exit","params":{}}',
 ].map(frame).join("");
@@ -36,7 +35,7 @@ if (task === "mcp-environment-denied") {
   if (response.includes("/agent-secret")) throw new Error("MCP denied case leaked HOME");
   console.log("mcp=denied\nerror=-32002\nsecret=redacted");
 } else {
-  for (const marker of ["active_environment", "codex-agent", "mcp.read", "generated.txt", "lint"]) {
+  for (const marker of ["active_environment", "codex-agent", "mcp.read", "generated.txt", "fixture"]) {
     if (!response.includes(marker)) throw new Error(`MCP resource omitted ${marker}`);
   }
   if (response.includes("/agent-secret")) throw new Error("MCP resource leaked HOME");

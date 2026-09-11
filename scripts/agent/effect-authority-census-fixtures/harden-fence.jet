@@ -1,0 +1,10 @@
+use core.mem
+
+fn run() {
+    arena :: mem.Arena.new()
+    #Unsafe("harden fence must retain the sentry") {
+        stale :: *Int{*arena.alloc(11)}
+        arena.reset()
+        print(stale.*)
+    }
+}

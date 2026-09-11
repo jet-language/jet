@@ -2,7 +2,8 @@
 //! Runtime records are payload-free; this consumer accepts only the closed
 //! schema and preserves every numeric/runtime enum fact exactly.
 
-use jet_foundation::JSON::{json_get, json_str, parse_json, JSONValue};
+use jet_foundation::DataTree::DataTree;
+use jet_foundation::JSON::{json_get, json_str, parse_json};
 
 const MAX_SNAPSHOT_BYTES: usize = 1024 * 1024;
 const MAX_EVENTS: usize = 256;
@@ -14,8 +15,8 @@ pub fn render(snapshot: &str) -> Result<String, String> {
     let root =
         parse_json(snapshot).map_err(|()| "runtime observation is not valid JSON".to_string())?;
     let events = match json_get(&root, "event_observations") {
-        Some(JSONValue::Array(events)) if events.len() <= MAX_EVENTS => events,
-        Some(JSONValue::Array(_)) => {
+        Some(DataTree::Array(events)) if events.len() <= MAX_EVENTS => events,
+        Some(DataTree::Array(_)) => {
             return Err("runtime event observation exceeds the 256-record limit".to_string())
         }
         _ => return Err("runtime observation has no event sequence".to_string()),
@@ -24,7 +25,7 @@ pub fn render(snapshot: &str) -> Result<String, String> {
     let mut previous = 0;
     let mut lines = Vec::with_capacity(events.len());
     for event in events {
-        let JSONValue::Object(fields) = event else {
+        let DataTree::Object(fields) = event else {
             return Err("runtime event observation is not an object".to_string());
         };
         const KEYS: [&str; 15] = [
@@ -44,7 +45,9 @@ pub fn render(snapshot: &str) -> Result<String, String> {
             "failure",
             "terminal",
         ];
-        if fields.len() != KEYS.len() || fields.keys().any(|key| !KEYS.contains(&key.as_str())) {
+        if fields.len() != KEYS.len()
+            || fields.iter().any(|(key, _)| !KEYS.contains(&key.as_str()))
+        {
             return Err(
                 "runtime event observation contains an unsafe or unknown field".to_string(),
             );
@@ -116,28 +119,26 @@ pub fn render(snapshot: &str) -> Result<String, String> {
     Ok(lines.join("\n"))
 }
 
-fn integer(object: &JSONValue, key: &str) -> Result<i64, String> {
+fn integer(object: &DataTree, key: &str) -> Result<i64, String> {
     match json_get(object, key) {
-        Some(JSONValue::Number(value)) => Ok(*value),
+        Some(DataTree::Int(value)) => Ok(*value),
         _ => Err(format!("runtime event observation has invalid `{key}`")),
     }
 }
 
-fn unsigned(object: &JSONValue, key: &str) -> Result<i64, String> {
+fn unsigned(object: &DataTree, key: &str) -> Result<i64, String> {
     let value = integer(object, key)?;
     (value >= 0)
         .then_some(value)
         .ok_or_else(|| format!("runtime event observation has negative `{key}`"))
 }
-
-fn count(object: &JSONValue, key: &str) -> Result<i64, String> {
+fn count(object: &DataTree, key: &str) -> Result<i64, String> {
     let value = integer(object, key)?;
     (value >= -1)
         .then_some(value)
         .ok_or_else(|| format!("runtime event observation has invalid `{key}`"))
 }
-
-fn closed<'a>(object: &'a JSONValue, key: &str, allowed: &[&str]) -> Result<&'a str, String> {
+fn closed<'a>(object: &'a DataTree, key: &str, allowed: &[&str]) -> Result<&'a str, String> {
     let value = json_get(object, key)
         .and_then(json_str)
         .ok_or_else(|| format!("runtime event observation has invalid `{key}`"))?;

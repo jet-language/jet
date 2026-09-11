@@ -11,7 +11,7 @@
 use super::Concurrency;
 use super::CoreHost::{jit_env_value, jit_env_value_raw};
 use crate::runtime_host;
-use crate::Marshal::{clone_string, result_err_msg, result_ok};
+use crate::Marshal::{alloc_byte_list, clone_string, result_err_msg, result_ok};
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
 use std::collections::{HashMap, HashSet};
@@ -22,11 +22,10 @@ pub(crate) mod term_prelude {
     include!("../../jet-codegen/src/Prelude/Term.rs");
 }
 
-mod progress_semantics {
-    #[allow(unused_imports)]
-    pub use jet_foundation::Outcome::*;
-    include!("../../jet-codegen/src/Prelude/Core/Progress.rs");
+mod human_output_semantics {
+    include!("../../jet-codegen/src/Prelude/Core/HumanOutput.rs");
 }
+
 
 // #1480: literal Prelude source for line/byte stdin primitives. The extern "C"
 // wrappers below only marshal jit heap i64 handles to/from Rust values and
@@ -116,6 +115,19 @@ mod io_line_stream {
         }
     }
 
+    pub(super) fn jet_jit_io_input(prompt: i64) -> i64 {
+        // The AmbientInput ABI uses the heap's zero handle for an absent
+        // optional prompt; every allocated String handle is nonzero.
+        let prompt = (prompt != 0).then(|| super::clone_string(prompt));
+        match jet_std_io_input(prompt.as_ref()) {
+            Ok(s) => {
+                let id = super::Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
+                super::result_ok(id as u64)
+            }
+            Err(e) => super::result_err(&format!("{e:?}")),
+        }
+    }
+
     pub(super) fn jet_jit_io_read_all_input() -> i64 {
         match jet_std_io_read_all_input() {
             Ok(s) => {
@@ -178,9 +190,7 @@ fn list_from_lines(lines: Vec<String>) -> i64 {
 fn style_enabled() -> bool {
     term_prelude::jet_term_style_enabled(
         jit_env_value_raw("NO_COLOR").is_some(),
-        jit_env_value_raw("TERM")
-            .and_then(|term| term.into_string().ok())
-            .is_some_and(|term| term == "dumb"),
+        jit_env_value_raw("FORCE_COLOR").is_some(),
         term_prelude::jet_term_stdout_is_terminal(),
     )
 }
@@ -429,10 +439,13 @@ fn jet_jit_io_style_force(style: i64, text: i64) -> i64 {
 }
 
 fn jet_jit_io_progress(text: i64) -> i64 {
+    if !term_prelude::jet_term_progress_enabled() {
+        return result_ok_unit();
+    }
     let s = clone_string(text);
     let frame =
-        term_prelude::jet_term_progress_frame(term_prelude::jet_term_stdout_is_terminal(), &s);
-    match runtime_host::write_jit_stdout(&frame, true) {
+        term_prelude::jet_term_progress_frame(term_prelude::jet_term_stderr_is_terminal(), &s);
+    match runtime_host::write_jit_stderr(&frame, true) {
         Ok(()) => result_ok_unit(),
         Err(error) => result_err(&error),
     }
@@ -446,6 +459,9 @@ fn jet_jit_io_progress_iter_with_total(
 ) -> i64 {
     let description = clone_string(description);
     let format = clone_string(format);
+    let total = total.or_else(|| {
+        Concurrency::with_runtime_mut(|rt| runtime_host::lazy_iter_exact_len(rt, list))
+    });
     let wrapped = Concurrency::with_runtime_mut(|rt| {
         let wrapped = rt.heap.clone_list(list).unwrap_or(list);
         wrapped
@@ -476,7 +492,16 @@ fn jet_jit_io_progress_iter(list: i64, description: i64, format: i64) -> i64 {
         .expect("JIT progress known-iter state poisoned")
         .remove(&list);
     let total = known_total
-        .then(|| Concurrency::with_runtime_mut(|rt| rt.heap.list_len(list).unwrap_or(0) as usize));
+        .then(|| {
+            Concurrency::with_runtime_mut(|rt| {
+                runtime_host::lazy_iter_exact_len(rt, list).or_else(|| {
+                    rt.heap
+                        .list_len(list)
+                        .and_then(|length| usize::try_from(length).ok())
+                })
+            })
+        })
+        .flatten();
     jet_jit_io_progress_iter_with_total(list, description, format, total)
 }
 
@@ -485,8 +510,14 @@ fn jet_jit_io_progress_list(list: i64, description: i64, format: i64) -> i64 {
         .lock()
         .expect("JIT progress known-iter state poisoned")
         .remove(&list);
-    let total = Concurrency::with_runtime_mut(|rt| rt.heap.list_len(list).unwrap_or(0) as usize);
-    jet_jit_io_progress_iter_with_total(list, description, format, Some(total))
+    let total = Concurrency::with_runtime_mut(|rt| {
+        runtime_host::lazy_iter_exact_len(rt, list).or_else(|| {
+            rt.heap
+                .list_len(list)
+                .and_then(|length| usize::try_from(length).ok())
+        })
+    });
+    jet_jit_io_progress_iter_with_total(list, description, format, total)
 }
 
 fn jet_jit_io_mark_exact_iter(list: i64) -> i64 {
@@ -502,8 +533,9 @@ pub(crate) fn jet_jit_io_progress_pull_n(list: i64, pulls: i64) {
     if requested == 0 {
         return;
     }
-    let tty = term_prelude::jet_term_stdout_is_terminal();
-    let Some(texts) = (|| {
+    let tty = term_prelude::jet_term_stderr_is_terminal();
+    let enabled = term_prelude::jet_term_progress_enabled();
+    let Some((texts, finished)) = (|| {
         let mut states = progress_states()
             .lock()
             .expect("JIT progress state poisoned");
@@ -521,28 +553,33 @@ pub(crate) fn jet_jit_io_progress_pull_n(list: i64, pulls: i64) {
             .map(|total| pulls.min(total.saturating_sub(state.count)))
             .unwrap_or(pulls);
         if pulls == 0 {
-            return Some(Vec::new());
+            return Some((Vec::new(), state.total == Some(state.count)));
         }
         let mut texts = Vec::with_capacity(pulls);
         for _ in 0..pulls {
             state.count = state.count.saturating_add(1);
-            texts.push(progress_semantics::jet_progress_render(
+            texts.push(human_output_semantics::jet_output_progress_legacy(
                 &state.description,
                 &state.format,
                 state.count,
                 state.total,
                 state.started.elapsed().as_secs_f64(),
-                jit_env_value_raw("NO_COLOR").is_some(),
+                style_enabled(),
             ));
         }
         state.displayed = true;
-        Some(texts)
+        Some((texts, state.total == Some(state.count)))
     })() else {
         return;
     };
-    for text in texts {
-        let frame = term_prelude::jet_term_progress_frame(tty, &text);
-        let _ = runtime_host::write_jit_stdout(&frame, true);
+    if enabled {
+        for text in texts {
+            let frame = term_prelude::jet_term_progress_frame(tty, &text);
+            let _ = runtime_host::write_jit_stderr(&frame, true);
+        }
+    }
+    if finished {
+        progress_finish_state(list);
     }
 }
 
@@ -570,7 +607,8 @@ pub(crate) fn progress_exhaust_state(list: i64) {
     if remaining != 0 {
         // A plan's tail is already a raw source-pull count. The direct-loop
         // form has no plan and uses the same argument as a raw count.
-        let tty = term_prelude::jet_term_stdout_is_terminal();
+        let tty = term_prelude::jet_term_stderr_is_terminal();
+        let enabled = term_prelude::jet_term_progress_enabled();
         let Some(texts) = (|| {
             let mut states = progress_states()
                 .lock()
@@ -583,13 +621,13 @@ pub(crate) fn progress_exhaust_state(list: i64) {
             let mut texts = Vec::with_capacity(pulls);
             for _ in 0..pulls {
                 state.count = state.count.saturating_add(1);
-                texts.push(progress_semantics::jet_progress_render(
+                texts.push(human_output_semantics::jet_output_progress_legacy(
                     &state.description,
                     &state.format,
                     state.count,
                     state.total,
                     state.started.elapsed().as_secs_f64(),
-                    jit_env_value_raw("NO_COLOR").is_some(),
+                    style_enabled(),
                 ));
             }
             state.displayed |= !texts.is_empty();
@@ -597,9 +635,11 @@ pub(crate) fn progress_exhaust_state(list: i64) {
         })() else {
             return;
         };
-        for text in texts {
-            let frame = term_prelude::jet_term_progress_frame(tty, &text);
-            let _ = runtime_host::write_jit_stdout(&frame, true);
+        if enabled {
+            for text in texts {
+                let frame = term_prelude::jet_term_progress_frame(tty, &text);
+                let _ = runtime_host::write_jit_stderr(&frame, true);
+            }
         }
     }
     progress_finish_state(list);
@@ -1004,11 +1044,11 @@ pub(crate) fn progress_finish_state(list: i64) {
     else {
         return;
     };
-    if state.displayed {
+    if state.displayed && term_prelude::jet_term_progress_enabled() {
         let frame =
-            term_prelude::jet_term_progress_finish(term_prelude::jet_term_stdout_is_terminal());
+            term_prelude::jet_term_progress_finish(term_prelude::jet_term_stderr_is_terminal());
         if !frame.is_empty() {
-            let _ = runtime_host::write_jit_stdout(frame, true);
+            let _ = runtime_host::write_jit_stderr(frame, true);
         }
     }
 }
@@ -1081,9 +1121,21 @@ fn jet_jit_io_progress_collect(list: i64) -> i64 {
         .expect("JIT progress state poisoned")
         .contains_key(&list);
     if active {
-        let total = Concurrency::with_runtime_mut(|rt| rt.heap.list_len(list).unwrap_or(0));
-        jet_jit_io_progress_pull_n(list, total);
-        progress_exhaust_state(list);
+        let is_lazy = Concurrency::with_runtime_mut(|rt| {
+            runtime_host::lazy_iter_index(rt, list).is_some()
+        });
+        if is_lazy {
+            let _ = Concurrency::with_runtime_mut(|rt| runtime_host::lazy_iter_collect(rt, list));
+        } else if let Some(total) = Concurrency::with_runtime_mut(|rt| {
+            runtime_host::lazy_iter_exact_len(rt, list).or_else(|| {
+                rt.heap
+                    .list_len(list)
+                    .and_then(|length| usize::try_from(length).ok())
+            })
+        }) {
+            jet_jit_io_progress_pull_n(list, total as i64);
+            progress_exhaust_state(list);
+        }
     }
     list
 }
@@ -1124,21 +1176,30 @@ fn jet_jit_io_input_secret(prompt: i64) -> i64 {
     }
 }
 
-/// Materialize stdin lines into a string list (for-in walk).
-fn jet_jit_stdin_lines(_h: i64) -> i64 {
-    if crate::fault_injection::jet_fault_should_fail("IO.Read") {
-        return result_err_msg("fault injected: IO.Read");
+fn jet_jit_io_binread(path: i64) -> i64 {
+    let path = clone_string(path);
+    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
+        return result_err_msg(&format!("fault injected: FS.Read for {path}"));
     }
-    let mut lines = Vec::new();
-    let stdin = std::io::stdin();
-    for line in stdin.lock().lines() {
-        match line {
-            Ok(l) => lines.push(l),
-            Err(_) => break,
-        }
+    match std::fs::read(&path) {
+        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
+        Err(error) => result_err_msg(&format!("read_bytes {path}: {error}")),
     }
-    list_from_lines(lines)
 }
+
+/// A resident callable is the JIT carrier for the generic Prelude guard.
+/// Preserve that carrier; scope exit owns when it is invoked.
+fn jet_jit_scope_guard(callback: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        if runtime_host::jit_callable_parts(rt, callback).is_some() {
+            callback
+        } else {
+            rt.set_host_fault("MIR scope guard closure has an invalid callable handle");
+            0
+        }
+    })
+}
+
 
 /// Materialize FileReader lines into a string list without consuming the handle.
 fn jet_jit_file_lines(handle: i64) -> i64 {
@@ -1172,6 +1233,42 @@ fn jet_jit_file_lines(handle: i64) -> i64 {
         out
     });
     list_from_lines(lines)
+}
+fn jet_jit_file_reader_read_line(handle: i64) -> i64 {
+    use super::enc_stream::FileReaderSlot;
+    use std::io::BufRead;
+    if crate::fault_injection::jet_fault_should_fail("FS.Read") {
+        return result_err_msg("fault injected: FS.Read");
+    }
+    let mut outcome = None;
+    Concurrency::with_runtime_mut(|rt| {
+        let idx = handle.saturating_sub(1) as usize;
+        let result = match rt.file_readers.get_mut(idx) {
+            Some(FileReaderSlot::Live(reader)) => {
+                let mut line = String::new();
+                match reader.inner.read_line(&mut line) {
+                    Ok(0) => Ok(None),
+                    Ok(_) => {
+                        while line.ends_with('\n') || line.ends_with('\r') {
+                            line.pop();
+                        }
+                        Ok(Some(line))
+                    }
+                    Err(error) => Err(format!("read {}: {error}", reader.path)),
+                }
+            }
+            _ => Err("bad FileReader".to_string()),
+        };
+        outcome = Some(result);
+    });
+    match outcome.unwrap_or_else(|| Err("no active JIT runtime".to_string())) {
+        Ok(Some(line)) => {
+            let handle = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(line));
+            result_ok(handle.saturating_add(1) as u64)
+        }
+        Ok(None) => result_ok(0),
+        Err(error) => result_err_msg(&error),
+    }
 }
 
 fn jet_jit_file_writer_write_line(handle: i64, line: i64) -> i64 {
@@ -1341,14 +1438,17 @@ host_fns! {
     confirm: "jet_jit_io_confirm" => jet_jit_io_confirm: unary_i8;
     choose: "jet_jit_io_choose" => jet_jit_io_choose: binary;
     input_secret: "jet_jit_io_input_secret" => jet_jit_io_input_secret: unary;
+    binread: "jet_std_io_binread" => jet_jit_io_binread: unary;
+    scope_guard: "jet_scope_guard" => jet_jit_scope_guard: unary;
     take: "jet_jit_io_take" => io_line_stream::jet_jit_io_take: unary;
     read_until: "jet_jit_io_read_until" => io_line_stream::jet_jit_io_read_until: unary;
+    input: "jet_std_io_input" => io_line_stream::jet_jit_io_input: unary;
     readline: "jet_jit_io_readline" => io_line_stream::jet_jit_io_readline: nullary;
     read_all_input: "jet_jit_io_read_all_input" => io_line_stream::jet_jit_io_read_all_input: nullary;
-    stdin_lines: "jet_jit_stdin_lines" => jet_jit_stdin_lines: unary;
+    file_reader_read_line: "jet_std_file_reader_read_line" => jet_jit_file_reader_read_line: unary;
     file_lines: "jet_jit_file_lines" => jet_jit_file_lines: unary;
-    file_writer_write_line: "jet_jit_file_writer_write_line" => jet_jit_file_writer_write_line: binary;
-    file_writer_flush: "jet_jit_file_writer_flush" => jet_jit_file_writer_flush: unary;
+    file_writer_write_line: "jet_std_file_writer_write_line" => jet_jit_file_writer_write_line: binary;
+    file_writer_flush: "jet_std_file_writer_flush" => jet_jit_file_writer_flush: unary;
     file_writer_close: "jet_jit_file_writer_close" => super::enc_stream::jet_jit_file_writer_close: unary_void;
     file_reader_close: "jet_jit_file_reader_close" => super::enc_stream::jet_jit_file_reader_close: unary_void;
     term_enter: "jet_jit_term_enter" => jet_jit_term_enter: nullary_void;

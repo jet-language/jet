@@ -120,23 +120,23 @@ fn private_integration_materializes_all_declared_non_fixed_outputs() {
 #[test]
 fn private_derivation_materializer_matches_pinned_fixture_and_errors() {
     let fixture = crate::JSON::parse(STAGE_A_DERIVATION_FIXTURE).expect("fixture must parse");
-    let root = fixture.as_object().expect("fixture root");
+    let root = &fixture;
     for case in root
         .get("values")
         .expect("fixture values")
         .as_array()
         .expect("fixture values array")
     {
-        let case = case.as_object().expect("value case");
+        let case = case;
         let source = case.get("source").unwrap().as_str().unwrap();
         let system = case.get("system").unwrap().as_str().unwrap();
         let actual = super::evaluate_derivation(source, system).expect("native derivation");
-        let expected = case.get("nix_value").unwrap().as_object().unwrap();
+        let expected = case.get("nix_value").unwrap();
         assert_eq!(
             actual.drv_path(),
             expected.get("drvPath").unwrap().as_str().unwrap()
         );
-        if let Some(outputs) = expected.get("outputs") {
+        if let Some(outputs) = expected.get_opt("outputs") {
             let outputs = outputs.as_object().expect("fixture outputs object");
             assert_eq!(actual.outputs().len(), outputs.len());
             for (name, path) in outputs {
@@ -145,8 +145,10 @@ fn private_derivation_materializer_matches_pinned_fixture_and_errors() {
                     Some(path.as_str().unwrap())
                 );
             }
-        } else if expected.get("dev").is_some() || expected.get("doc").is_some() {
+        } else if expected.get_opt("dev").is_some() || expected.get_opt("doc").is_some() {
             let outputs = expected
+                .as_object()
+                .expect("fixture nix value object")
                 .iter()
                 .filter(|(name, _)| name.as_str() != "drvPath")
                 .collect::<Vec<_>>();
@@ -170,7 +172,7 @@ fn private_derivation_materializer_matches_pinned_fixture_and_errors() {
         .as_array()
         .expect("fixture errors array")
     {
-        let case = case.as_object().expect("error case");
+        let case = case;
         let source = case.get("source").unwrap().as_str().unwrap();
         let system = case.get("system").unwrap().as_str().unwrap();
         let error = super::evaluate_derivation(source, system)
@@ -184,7 +186,7 @@ fn private_derivation_materializer_matches_pinned_fixture_and_errors() {
 #[test]
 fn private_integration_matches_pinned_breadth_fixture() {
     let fixture = crate::JSON::parse(BREADTH_FIXTURE).expect("breadth fixture must parse");
-    let root = fixture.as_object().expect("breadth fixture root");
+    let root = &fixture;
     let boundary = NativeBoundary::embedded().expect("committed manifest must validate");
 
     for case in root
@@ -193,11 +195,11 @@ fn private_integration_matches_pinned_breadth_fixture() {
         .as_array()
         .expect("breadth value array")
     {
-        let case = case.as_object().expect("breadth value object");
+        let case = case;
         let source = case.get("source").unwrap().as_str().unwrap();
         let system = case.get("system").unwrap().as_str().unwrap();
         let output = case
-            .get("output")
+            .get_opt("output")
             .and_then(|value| value.as_str().ok())
             .unwrap_or("default");
         let evaluated = boundary
@@ -213,8 +215,6 @@ fn private_integration_matches_pinned_breadth_fixture() {
             .collect::<Vec<_>>();
         let nix_packages = case
             .get("nix_value")
-            .unwrap()
-            .as_object()
             .unwrap()
             .get("packages")
             .unwrap()
@@ -242,7 +242,7 @@ fn private_integration_matches_pinned_breadth_fixture() {
         .as_array()
         .expect("breadth error array")
     {
-        let case = case.as_object().expect("breadth error object");
+        let case = case;
         let source = case.get("source").unwrap().as_str().unwrap();
         let system = case.get("system").unwrap().as_str().unwrap();
         let expected = case.get("jet_error").unwrap().as_str().unwrap();
@@ -258,13 +258,13 @@ fn private_integration_matches_pinned_breadth_fixture() {
         .as_array()
         .expect("breadth derivation array")
     {
-        let case = case.as_object().expect("breadth derivation object");
+        let case = case;
         let source = case.get("source").unwrap().as_str().unwrap();
         let system = case.get("system").unwrap().as_str().unwrap();
         let evaluated = boundary
             .evaluate_derivation(source, system)
             .expect("breadth derivation must materialize through Jetpack");
-        let nix_value = case.get("nix_value").unwrap().as_object().unwrap();
+        let nix_value = case.get("nix_value").unwrap();
         assert_eq!(
             evaluated.drv_path(),
             nix_value.get("drvPath").unwrap().as_str().unwrap()

@@ -100,6 +100,15 @@ fn run() {
 }
 "#;
 
+const NET_ERROR_CONVERSION: &str = r#"
+use core.net as net
+
+fn run() {
+    result :: net.dns_srv("_jet._tcp.example.test", -1)
+    print(result.len())
+}
+"#;
+
 const RECOVERED_CONTEXT: &str = r#"
 fn contextual_source() Int -> Err("context", cause: Err("root"))
 
@@ -126,11 +135,18 @@ fn normalize_journey_paths(stderr: &str) -> String {
             if !line[open + 2..colon].contains(".jet") {
                 return line.to_string();
             }
-            format!(
-                "{}<source>:{}",
-                &line[..open + 2],
-                &line[colon + 1..]
-            )
+            format!("{}<source>:{}", &line[..open + 2], &line[colon + 1..])
+        })
+        .map(|line| {
+            let Some(start) = line.match_indices("jet_").find_map(|(start, _)| {
+                (start == 0 || line.as_bytes().get(start - 1) == Some(&b'/')).then_some(start)
+            }) else {
+                return line;
+            };
+            let Some(end) = line[start..].find(".jet").map(|offset| start + offset + 4) else {
+                return line;
+            };
+            format!("{}<source>{}", &line[..start], &line[end..])
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -140,11 +156,21 @@ fn normalize_journey_paths(stderr: &str) -> String {
     normalized
 }
 
+fn runtime_error_suffix(stderr: &str) -> &str {
+    stderr
+        .find("Error:")
+        .map(|start| &stderr[start..])
+        .unwrap_or_else(|| panic!("runtime error missing from stderr: {stderr}"))
+}
+
 #[test]
 fn declared_conversion_keeps_one_report_across_runtime_tiers() {
     let (jit_code, jit_out, jit_err) = tir_support::jit_run("failure_conversion_tiers", CONVERSION);
     assert_eq!(jit_code, 1, "default JIT must report the converted failure");
-    assert!(jit_out.is_empty(), "converted failure must not print stdout");
+    assert!(
+        jit_out.is_empty(),
+        "converted failure must not print stdout"
+    );
     assert!(jit_err.contains("converted"), "JIT report: {jit_err}");
 
     let (interpreter_code, interpreter_out, interpreter_err) =
@@ -164,6 +190,56 @@ fn declared_conversion_keeps_one_report_across_runtime_tiers() {
         assert_eq!(
             normalize_journey_paths(&aot_err),
             normalize_journey_paths(&jit_err)
+        );
+    }
+}
+
+#[test]
+fn core_net_error_conversion_renders_in_resident_jit() {
+    let (jit_code, jit_out, jit_err) =
+        tir_support::jit_run("net_error_conversion_tiers", NET_ERROR_CONVERSION);
+    assert_eq!(
+        jit_code, 1,
+        "default JIT must report the NetError conversion"
+    );
+    assert!(
+        jit_out.is_empty(),
+        "failed DNS lookup must not print stdout"
+    );
+    let jit_runtime = runtime_error_suffix(&jit_err);
+    assert!(
+        jit_runtime.contains("network timeout must be non-negative"),
+        "JIT report: {jit_err}"
+    );
+    assert!(
+        jit_runtime.contains("(type: NetError)"),
+        "JIT report lost the NetError type: {jit_err}"
+    );
+    assert!(
+        jit_runtime.contains("conversion"),
+        "JIT report lost the conversion trail: {jit_err}"
+    );
+
+    let (interpreter_code, interpreter_out, interpreter_err) =
+        tir_support::interpreter_run("net_error_conversion_tiers", NET_ERROR_CONVERSION);
+    assert_eq!(interpreter_code, jit_code);
+    assert_eq!(interpreter_out, jit_out);
+    assert_eq!(
+        normalize_journey_paths(&interpreter_err),
+        normalize_journey_paths(&jit_err)
+    );
+
+    if tir_support::have_rustc() {
+        let (aot_code, aot_out, aot_err) = tir_support::build_and_run_full(
+            "net_error_conversion_tiers",
+            "main",
+            NET_ERROR_CONVERSION,
+        );
+        assert_eq!(aot_code, jit_code);
+        assert_eq!(aot_out, jit_out);
+        assert_eq!(
+            normalize_journey_paths(runtime_error_suffix(&aot_err)),
+            normalize_journey_paths(jit_runtime)
         );
     }
 }
@@ -294,7 +370,12 @@ fn have_tool(name: &str) -> bool {
 
 fn have_wasm_target() -> bool {
     Command::new("rustc")
-        .args(["--print", "target-libdir", "--target", "wasm32-unknown-unknown"])
+        .args([
+            "--print",
+            "target-libdir",
+            "--target",
+            "wasm32-unknown-unknown",
+        ])
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)

@@ -24,19 +24,14 @@ fn jet_std_process_cmd(cmd: &Vec<String>) -> jet_std::ProcessSpec {
 /// D-AGENT-EXEC1: attach the one ordinary authority carrier to the existing
 /// ProcessSpec. Binding the policy also closes ambient environment inheritance;
 /// later builders may add explicit values, but cannot restore the host snapshot.
+/// The launch directory is deliberately not inferred here: authority-bound
+/// execution requires the caller to provide an explicit cwd/PathAuthority.
 fn jet_process_spec_under_wire(
     mut spec: jet_std::ProcessSpec,
-    authority_wire: &String,
+    authority_facts: &str,
 ) -> jet_std::ProcessSpec {
-    spec.policy_wire = Some(authority_wire.clone());
+    spec.policy_wire = Some(authority_facts.to_owned());
     spec.env_clear = true;
-    // Capture the launch directory at authority binding. A later cwd change
-    // must not alter the policy digest or make plan and launch disagree.
-    if spec.cwd.is_none() {
-        spec.cwd = std::env::current_dir()
-            .ok()
-            .map(|path| path.to_string_lossy().to_string());
-    }
     spec
 }
 

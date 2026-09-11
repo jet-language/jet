@@ -1,0 +1,67 @@
+// The generated console is a source-backed projection.  It owns no hidden
+// editor database and never mutates authored scene or source files.
+pub enum DiagnosticCategory {
+    Console
+    Info
+    Debug
+    Warning
+    Error
+    Stat
+}
+
+pub enum DiagnosticFilterMode {
+    All
+    Category(String)
+    Text(String)
+}
+
+pub struct DiagnosticFilter {
+    mode: DiagnosticFilterMode
+    text: String
+}
+
+pub enum DiagnosticClearPolicy {
+    OnRun
+    Manual
+}
+
+pub enum DiagnosticStackPolicy {
+    Hidden
+    SourceLinked
+}
+
+pub struct DiagnosticsRegistry {
+    categories: [DiagnosticCategory]
+    filter: DiagnosticFilter
+    clear_policy: DiagnosticClearPolicy
+    stack: DiagnosticStackPolicy
+    stack_links: Bool
+    error_pause: Bool
+    error_pause_action: String
+    source_immutable: Bool
+    payload_free: Bool
+}
+
+pub fn default() DiagnosticsRegistry -> {
+    return DiagnosticsRegistry{
+        categories: [DiagnosticCategory]{
+            DiagnosticCategory.Console,
+            DiagnosticCategory.Info,
+            DiagnosticCategory.Debug,
+            DiagnosticCategory.Warning,
+            DiagnosticCategory.Error,
+            DiagnosticCategory.Stat,
+        },
+        filter: DiagnosticFilter{
+            mode: DiagnosticFilterMode.All,
+            text: "",
+        },
+        clear_policy: DiagnosticClearPolicy.OnRun,
+        stack: DiagnosticStackPolicy.SourceLinked,
+        stack_links: true,
+        error_pause: true,
+        error_pause_action: "pause-and-link-source",
+        source_immutable: true,
+        payload_free: true,
+    }
+}

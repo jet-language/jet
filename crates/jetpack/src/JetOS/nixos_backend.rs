@@ -1447,7 +1447,7 @@ fn require_nixos_guest_fact(report: &str) -> Result<ObservedGuestIdentity, Strin
         JSON::parse(report).map_err(|_| "invalid guest fact JSON; guest payload was suppressed")?;
     let field = |name| -> Result<String, String> {
         fact.get(name)
-            .and_then(JSON::JSONValue::as_str)
+            .and_then(|value| value.as_str())
             .map(str::to_string)
             .map_err(|_| {
                 "guest fact omitted a required identity field; guest payload was suppressed"

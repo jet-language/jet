@@ -202,6 +202,9 @@ impl<'a> Parser<'a> {
                         break;
                     }
                     self.bump();
+                    if matches!(self.peek().kind, TokKind::RParen) {
+                        break;
+                    }
                 }
                 Ok(VariantPayload::Named(fields))
             } else {
@@ -236,6 +239,72 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// D-FOUND-OPMIX1=A: parse the one parenthesized right-hand type allowed
+    /// on an operator trait impl. A bare operator impl keeps `None`, which
+    /// means `Self`.
+    fn parse_operator_rhs(
+        &mut self,
+        trait_name: Option<&str>,
+    ) -> Result<Option<crate::AST::Type>, Diagnostic> {
+        if !matches!(self.peek().kind, TokKind::LParen) {
+            return Ok(None);
+        }
+        self.expect(TokKind::LParen, "after an operator trait")?;
+        let (rhs, rhs_span) = self.type_()?;
+        if matches!(self.peek().kind, TokKind::Comma) {
+            let comma_span = self.bump().span;
+            return Err(Diagnostic::error(
+                "E0003",
+                "an operator impl accepts exactly one right-hand type".to_string(),
+                "operator dispatch has one right-hand operand; multiple type arguments would make the hook ambiguous".to_string(),
+                "write one type, for example `impl Money.Mul(Int)`".to_string(),
+                Some(comma_span),
+            ));
+        }
+        self.expect(TokKind::RParen, "after the operator right-hand type")?;
+        let Some(trait_name) = trait_name else {
+            return Err(Diagnostic::error(
+                "E0003",
+                "type arguments on an impl need an operator trait".to_string(),
+                "only Add, Sub, Mul, and Div accept an explicit right-hand operand type".to_string(),
+                "write a dotted operator impl such as `impl Money.Mul(Int)`".to_string(),
+                Some(rhs_span),
+            ));
+        };
+        if !matches!(
+            trait_name,
+            Syntax::TRAIT_ADD | Syntax::TRAIT_SUB | Syntax::TRAIT_MUL | Syntax::TRAIT_DIV
+        ) {
+            return Err(Diagnostic::error(
+                "E0003",
+                format!("`{trait_name}` does not accept an operator right-hand type"),
+                "only Add, Sub, Mul, and Div have a typed right-hand operand".to_string(),
+                "remove the type arguments or use an arithmetic operator trait".to_string(),
+                Some(rhs_span),
+            ));
+        }
+        Ok(Some(rhs))
+    }
+
+    fn operator_marker_from_markers(
+        markers: &[crate::AST::Marker],
+    ) -> Option<crate::AST::OperatorMarker> {
+        markers
+            .iter()
+            .find(|marker| marker.name == Syntax::MARKER_COMMUTATIVE)
+            .map(|_| crate::AST::OperatorMarker::Commutative)
+    }
+
+    fn bind_operator_marker_facts(
+        &mut self,
+        markers: &[crate::AST::Marker],
+        target: Span,
+    ) {
+        for marker in markers {
+            self.bind_rule_fact(marker.name_span, Some(target), crate::Policy::RuleSite::Impl);
+        }
+    }
+
     /// D-ERR-CONV (ratified 2026-06-19): dispatch `impl …` to either the normal
     /// `ImplDef` path or the `impl Source -> Target { body }` error-conversion path.
     pub(in crate::Parser) fn impl_or_error_conv(&mut self) -> Result<Item, Diagnostic> {
@@ -254,6 +323,16 @@ impl<'a> Parser<'a> {
             let is_protocol_impl = parts.len() == 2
                 && matches!(parts[1].0.as_str(), "Client" | "Server")
                 && matches!(self.peek().kind, TokKind::LBrace);
+            // D-FOUND-LITERAL1=A (card #2789): literal capabilities reuse the
+            // existing dotted impl header. Only the exact `Type.Literal.Int`
+            // and `Type.Literal.Float` tails are split specially; ordinary
+            // dotted type/trait headers keep the established last-segment rule.
+            let literal_capability = parts.len() >= 3
+                && parts[parts.len() - 2].0 == "Literal"
+                && matches!(
+                    parts[parts.len() - 1].0.as_str(),
+                    "Int" | "Float"
+                );
             if parts.len() == 1 || is_error_conversion || is_protocol_impl {
                 let end = parts.last().unwrap().1.end;
                 let name = parts
@@ -262,6 +341,21 @@ impl<'a> Parser<'a> {
                     .collect::<Vec<_>>()
                     .join(".");
                 (name, Span::new(first_span.start, end), None, None)
+            } else if literal_capability {
+                let (carrier, carrier_span) = parts.pop().unwrap();
+                let (literal, literal_span) = parts.pop().unwrap();
+                let owner_end = parts.last().unwrap().1.end;
+                let owner = parts
+                    .iter()
+                    .map(|(part, _)| part.as_str())
+                    .collect::<Vec<_>>()
+                    .join(".");
+                (
+                    owner,
+                    Span::new(first_span.start, owner_end),
+                    Some(format!("{literal}.{carrier}")),
+                    Some(Span::new(literal_span.start, carrier_span.end)),
+                )
             } else {
                 let (last, last_span) = parts.pop().unwrap();
                 let owner_end = parts.last().unwrap().1.end;
@@ -329,18 +423,27 @@ impl<'a> Parser<'a> {
             trait_name = Some(t);
             trait_span = Some(ts);
         }
+        let operator_rhs = self.parse_operator_rhs(trait_name.as_deref())?;
+        let operator_markers =
+            self.parse_attached_marker_sequence(crate::Policy::RuleSite::Impl, "impl")?;
+        let operator_marker = Self::operator_marker_from_markers(&operator_markers);
         // S62: `impl Type.Trait using field_name;` — delegation form.
-        if let TokKind::Ident(ref kw) = self.peek().kind.clone() {
+        if let TokKind::Ident(kw) = &self.peek().kind {
             if kw == "using" && trait_name.is_some() {
                 self.bump(); // consume `using`
                 let (field, _) = self.expect_ident("after `using` for the delegation field")?;
                 self.finish_stmt()?;
+                let span =
+                    Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end);
+                self.bind_operator_marker_facts(&operator_markers, span);
                 return Ok(Item::Impl(ImplDef {
-                    span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
+                    span,
                     type_name,
                     type_span,
                     trait_name,
                     trait_span,
+                    operator_rhs: operator_rhs.clone(),
+                    operator_marker,
                     methods: Vec::new(),
                     delegation_field: Some(field),
                     assoc_type_impls: Vec::new(),
@@ -360,7 +463,7 @@ impl<'a> Parser<'a> {
             if self.at_state_section() {
                 return Err(self.reject_state_section("impl"));
             }
-            if let TokKind::Ident(ref kw) = self.peek().kind.clone() {
+            if let TokKind::Ident(kw) = &self.peek().kind {
                 if kw == "type" {
                     let kw_span = self.bump().span;
                     let (assoc_name, name_span) = self.expect_ident("after `type` in impl body")?;
@@ -378,11 +481,15 @@ impl<'a> Parser<'a> {
             methods.push(self.method_in_type()?);
         }
         let item_end = self.bump().span.end;
+        let span = Span::new(item_start, item_end);
+        self.bind_operator_marker_facts(&operator_markers, span);
         Ok(Item::Impl(ImplDef {
-            span: Span::new(item_start, item_end),
+            span,
             type_name,
             type_span,
             trait_name,
+            operator_rhs,
+            operator_marker,
             trait_span,
             methods,
             delegation_field: None,
@@ -431,13 +538,17 @@ impl<'a> Parser<'a> {
                     Some(ec.from_span),
                 )),
                 other => Ok(other),
-            }
+        }
     }
-
     /// S28: `impl Trait { … }` inside a struct/enum body.
     pub(super) fn trait_impl_block(&mut self) -> Result<TraitImplBlock, Diagnostic> {
+        let block_start = self.peek().span.start;
         self.expect_kw(TokKind::KwImpl, "to start a trait impl block")?;
         let (trait_name, trait_span) = self.expect_ident("after `impl`")?;
+        let operator_rhs = self.parse_operator_rhs(Some(&trait_name))?;
+        let operator_markers =
+            self.parse_attached_marker_sequence(crate::Policy::RuleSite::Impl, "impl")?;
+        let operator_marker = Self::operator_marker_from_markers(&operator_markers);
         self.expect(TokKind::LBrace, "to open the trait impl body")?;
         let mut methods = Vec::new();
         let mut assoc_type_impls = Vec::new();
@@ -450,7 +561,7 @@ impl<'a> Parser<'a> {
                 return Err(self.reject_state_section("impl"));
             }
             // D-LIB2: `type Name = ConcreteType;`
-            if let TokKind::Ident(ref kw) = self.peek().kind.clone() {
+            if let TokKind::Ident(kw) = &self.peek().kind {
                 if kw == "type" {
                     let kw_span = self.bump().span;
                     let (assoc_name, name_span) = self.expect_ident("after `type` in impl body")?;
@@ -467,9 +578,13 @@ impl<'a> Parser<'a> {
             }
             methods.push(self.method_in_type()?);
         }
-        self.bump();
+        let block_end = self.bump().span.end;
+        let span = Span::new(block_start, block_end);
+        self.bind_operator_marker_facts(&operator_markers, span);
         Ok(TraitImplBlock {
             trait_name,
+            operator_rhs,
+            operator_marker,
             trait_span,
             methods,
             compiler_generated: false,

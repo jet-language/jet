@@ -112,8 +112,9 @@ impl<'a> Parser<'a> {
             return Ok(("0".to_string(), span));
         }
         // D-FACT-READ1=A / D-META-STAGE1=B: a marked member after `.` is a
-        // compiler-owned fact, and the registry is closed. The mark is not
-        // a general user-member escape hatch.
+        // compiler-owned fact, and the registry is closed. Derive-template
+        // bodies are the one typed exception: `self.@field`/`rhs.@field`
+        // names a reflected payload binding that expands before sema.
         if matches!(&self.peek().kind, TokKind::Ident(n) if Syntax::is_comptime_name(n)) {
             let (member, member_span) = self.expect_ident("in a compiler fact")?;
             if member == "@track_origin" {
@@ -124,6 +125,9 @@ impl<'a> Parser<'a> {
                     "write `value.@origin`".to_string(),
                     Some(member_span),
                 ));
+            }
+            if self.derive_template_depth > 0 && member.starts_with('@') {
+                return Ok((member, member_span));
             }
             if Syntax::fact_read_kind(&member).is_none() {
                 return Err(Diagnostic::error(
@@ -426,8 +430,8 @@ impl<'a> Parser<'a> {
                 | TokKind::KwIt
                 | TokKind::KwNull
                 | TokKind::Hash
+                | TokKind::RawStr(_)
                 | TokKind::Str(_)
-                | TokKind::Int(_, _)
                 | TokKind::Float(..)
                 | TokKind::UnitNumber { .. }
                 | TokKind::Char(_)

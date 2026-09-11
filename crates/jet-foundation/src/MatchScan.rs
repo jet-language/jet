@@ -12,6 +12,11 @@ mod bin_kernel {
     include!("Prelude/MatchScan.rs");
 }
 
+
+pub use bin_kernel::{
+    jet_binary_pattern_match, jet_text_pattern_match, JetBinMatchPart, JetPatternCapture,
+    JetTextHoleKind, JetTextMatchPart,
+};
 mod inline_range_semantics {
     include!("../../jet-codegen/src/Prelude/Core/InlineRange.rs");
 }

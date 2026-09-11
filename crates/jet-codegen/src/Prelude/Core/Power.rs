@@ -26,10 +26,7 @@ fn jet_power_fixed_value(result: JetFixedArithmeticResult, file: &str, line: u32
             line,
             "This checked fixed-width operation has no result",
         ),
-        JetFixedArithmeticResult::Trap(error) => {
-            let message = error.message();
-            jet_arithmetic_stop(file, line, &message)
-        }
+        JetFixedArithmeticResult::Trap(error) => jet_fixed_error_stop(error, file, line),
     }
 }
 

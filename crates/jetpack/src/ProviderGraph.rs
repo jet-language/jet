@@ -4,9 +4,10 @@
 //! module models provider metadata/fetch/lock/sandbox/signature/audit facts.
 
 pub use super::Replacement::ReplacementCandidate as ReplacementOverlay;
-use super::JSON::{self, JSONValue};
-use jet_pkg_model::ProviderFacts::{ProviderFactValue, ProviderFacts, ProviderSelector};
+use super::JSON;
+use jet_foundation::DataTree::DataTree;
 
+use jet_pkg_model::ProviderFacts::{ProviderFactValue, ProviderFacts, ProviderSelector};
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ProviderFamily {
     Core,
@@ -393,7 +394,24 @@ fn typed_projection_value(value: &str) -> ProviderFactValue {
         .unwrap_or_else(|| ProviderFactValue::Text(value.to_string()))
 }
 
-fn add_typed_json_fact(facts: &mut MetadataFacts, key: impl Into<String>, value: &JSONValue) {
+fn object_field<'a>(
+    object: &'a [(String, DataTree)],
+    key: &str,
+) -> Option<&'a DataTree> {
+    object
+        .iter()
+        .find_map(|(name, value)| (name == key).then_some(value))
+}
+
+fn object_keys<'a>(object: &'a [(String, DataTree)]) -> impl Iterator<Item = &'a str> {
+    object.iter().map(|(key, _)| key.as_str())
+}
+
+fn object_values<'a>(object: &'a [(String, DataTree)]) -> impl Iterator<Item = &'a DataTree> {
+    object.iter().map(|(_, value)| value)
+}
+
+fn add_typed_json_fact(facts: &mut MetadataFacts, key: impl Into<String>, value: &DataTree) {
     facts.typed.insert(key.into(), vec![json_value_json(value)]);
 }
 
@@ -404,7 +422,7 @@ fn add_typed_json_fact(facts: &mut MetadataFacts, key: impl Into<String>, value:
 fn add_json_projection(
     facts: &mut MetadataFacts,
     namespace: &str,
-    object: &std::collections::BTreeMap<String, JSONValue>,
+    object: &[(String, DataTree)],
 ) {
     for (key, value) in object {
         add_typed_json_fact(facts, format!("{namespace}.{key}"), value);
@@ -418,7 +436,7 @@ fn add_typed_text_fact(facts: &mut MetadataFacts, key: impl Into<String>, value:
 fn add_conflicting_typed_json_fact(
     facts: &mut MetadataFacts,
     key: impl Into<String>,
-    value: &JSONValue,
+    value: &DataTree,
 ) {
     let key = key.into();
     let value = json_value_json(value);
@@ -439,13 +457,13 @@ fn add_conflicting_typed_json_fact(
     }
 }
 
-fn json_string_list(value: &JSONValue) -> Option<Vec<String>> {
+fn json_string_list(value: &DataTree) -> Option<Vec<String>> {
     match value {
-        JSONValue::String(value) => Some(vec![value.clone()]),
-        JSONValue::Array(values) => values
+        DataTree::Text(value) => Some(vec![value.clone()]),
+        DataTree::Array(values) => values
             .iter()
             .map(|value| match value {
-                JSONValue::String(value) => Some(value.clone()),
+                DataTree::Text(value) => Some(value.clone()),
                 _ => None,
             })
             .collect(),
@@ -453,9 +471,9 @@ fn json_string_list(value: &JSONValue) -> Option<Vec<String>> {
     }
 }
 
-fn json_bool(value: Option<&JSONValue>) -> Option<bool> {
+fn json_bool(value: Option<&DataTree>) -> Option<bool> {
     match value {
-        Some(JSONValue::Bool(value)) => Some(*value),
+        Some(DataTree::Bool(value)) => Some(*value),
         _ => None,
     }
 }
@@ -666,29 +684,29 @@ pub fn normalize_npm(package_json: &str) -> MetadataFacts {
     let parsed = JSON::parse(package_json).ok();
     let obj = parsed.as_ref().and_then(|j| j.as_object().ok());
     let name = obj
-        .and_then(|m| m.get("name"))
+        .and_then(|m| object_field(m, "name"))
         .and_then(|v| v.as_str().ok())
         .unwrap_or_default()
         .to_string();
     let mut facts = MetadataFacts::empty(ProviderFamily::Npm, name);
     facts.version = obj
-        .and_then(|m| m.get("version"))
+        .and_then(|m| object_field(m, "version"))
         .and_then(|v| v.as_str().ok())
         .unwrap_or("")
         .to_string();
     facts.license = obj
-        .and_then(|m| m.get("license"))
+        .and_then(|m| object_field(m, "license"))
         .and_then(|v| v.as_str().ok())
         .unwrap_or("")
         .to_string();
-    if let Some(JSONValue::Object(deps)) = obj.and_then(|m| m.get("dependencies")) {
-        facts.dependencies = deps.keys().cloned().collect();
+    if let Some(DataTree::Object(deps)) = obj.and_then(|m| object_field(m, "dependencies")) {
+        facts.dependencies = object_keys(deps).map(str::to_string).collect();
     }
-    if let Some(JSONValue::Object(scripts)) = obj.and_then(|m| m.get("scripts")) {
-        facts.scripts = scripts.keys().cloned().collect();
+    if let Some(DataTree::Object(scripts)) = obj.and_then(|m| object_field(m, "scripts")) {
+        facts.scripts = object_keys(scripts).map(str::to_string).collect();
     }
-    if let Some(JSONValue::Object(bin)) = obj.and_then(|m| m.get("bin")) {
-        facts.bins = bin.keys().cloned().collect();
+    if let Some(DataTree::Object(bin)) = obj.and_then(|m| object_field(m, "bin")) {
+        facts.bins = object_keys(bin).map(str::to_string).collect();
     }
     facts.source_identity = format!("npm:{}@{}", facts.name, facts.version);
     facts
@@ -758,7 +776,7 @@ pub fn binary_object(
 
 fn npm_report(document: &str) -> ProviderFactReport {
     let parsed = JSON::parse(document).ok();
-    let Some(JSONValue::Object(object)) = parsed else {
+    let Some(DataTree::Object(object)) = parsed else {
         return empty_report(ProviderFamily::Npm, "npm", "package.json is not valid JSON");
     };
     let mut facts = MetadataFacts::empty(
@@ -772,13 +790,13 @@ fn npm_report(document: &str) -> ProviderFactReport {
         losses.push("npm metadata has no package name".to_string());
     }
     facts.version = json_string(&object, "version").unwrap_or_default();
-    if object.contains_key("version") && facts.version.is_empty() {
+    if object_field(&object, "version").is_some() && facts.version.is_empty() {
         losses.push("npm metadata `version` must be a non-empty string".to_string());
     }
     if facts.version.is_empty() {
-        match object.get("versions") {
-            Some(JSONValue::Object(versions)) if versions.len() == 1 => {
-                if let Some((version, JSONValue::Object(package))) = versions.iter().next() {
+        match object_field(&object, "versions") {
+            Some(DataTree::Object(versions)) if versions.len() == 1 => {
+                if let Some((version, DataTree::Object(package))) = versions.iter().next() {
                     facts.version = version.clone();
                     metadata = package.clone();
                     add_json_projection(
@@ -788,7 +806,7 @@ fn npm_report(document: &str) -> ProviderFactReport {
                     );
                 }
             }
-            Some(JSONValue::Object(versions)) if versions.len() > 1 => losses.push(
+            Some(DataTree::Object(versions)) if versions.len() > 1 => losses.push(
                 "npm packument contains multiple versions; select one exact version before realization"
                     .to_string(),
             ),
@@ -800,17 +818,16 @@ fn npm_report(document: &str) -> ProviderFactReport {
     facts.dependencies = json_keys(&metadata, "dependencies");
     facts.dev_dependencies = json_keys(&metadata, "devDependencies");
     facts.scripts = json_keys(&metadata, "scripts");
-    facts.bins = match metadata.get("bin") {
-        Some(JSONValue::Object(values)) => {
-            if values
-                .values()
-                .any(|value| !matches!(value, JSONValue::String(_)))
+    facts.bins = match object_field(&metadata, "bin") {
+        Some(DataTree::Object(values)) => {
+            if object_values(values)
+                .any(|value| !matches!(value, DataTree::Text(_)))
             {
                 losses.push("npm `bin` object values must be strings".to_string());
             }
-            values.keys().cloned().collect()
+            object_keys(values).map(str::to_string).collect()
         }
-        Some(JSONValue::String(_)) => vec![facts.name.clone()],
+        Some(DataTree::Text(_)) => vec![facts.name.clone()],
         Some(_) => {
             losses.push("npm `bin` must be a string or object".to_string());
             Vec::new()
@@ -830,8 +847,8 @@ fn npm_report(document: &str) -> ProviderFactReport {
                 ));
             }
         }
-        match metadata.get("version") {
-            Some(JSONValue::String(version)) if version != &facts.version => {
+        match object_field(&metadata, "version") {
+            Some(DataTree::Text(version)) if version != &facts.version => {
                 conflicts.push(format!(
                     "npm packument version `{}` conflicts with package version `{version}`",
                     facts.version
@@ -855,32 +872,32 @@ fn npm_report(document: &str) -> ProviderFactReport {
         ("bundledDependencies", "bundled"),
     ];
     for (field, kind) in dependency_sets {
-        let Some(value) = metadata.get(field) else {
+        let Some(value) = object_field(&metadata, field) else {
             continue;
         };
         match value {
-            JSONValue::Object(values) if field != "bundledDependencies" => {
+            DataTree::Object(values) if field != "bundledDependencies" => {
                 for (name, requirement) in values {
                     add_typed_json_fact(
                         &mut facts,
                         format!("provider.npm.dependency.{kind}.{name}"),
                         requirement,
                     );
-                    if !matches!(requirement, JSONValue::String(_)) {
+                    if !matches!(requirement, DataTree::Text(_)) {
                         losses.push(format!(
                             "npm `{field}.{name}` must retain a string requirement"
                         ));
                     }
                 }
             }
-            JSONValue::Array(values) if field == "bundledDependencies" => {
+            DataTree::Array(values) if field == "bundledDependencies" => {
                 for (index, value) in values.iter().enumerate() {
                     add_typed_json_fact(
                         &mut facts,
                         format!("provider.npm.dependency.bundled.{index}"),
                         value,
                     );
-                    if !matches!(value, JSONValue::String(_)) {
+                    if !matches!(value, DataTree::Text(_)) {
                         losses.push(format!(
                             "npm `bundledDependencies[{index}]` must be a package name"
                         ));
@@ -890,12 +907,12 @@ fn npm_report(document: &str) -> ProviderFactReport {
             _ => losses.push(format!("npm `{field}` must be an object")),
         }
     }
-    if let (Some(JSONValue::Object(dependencies)), Some(JSONValue::Object(optional))) = (
-        metadata.get("dependencies"),
-        metadata.get("optionalDependencies"),
+    if let (Some(DataTree::Object(dependencies)), Some(DataTree::Object(optional))) = (
+        object_field(&metadata, "dependencies"),
+        object_field(&metadata, "optionalDependencies"),
     ) {
         for (name, dependency) in dependencies {
-            if let Some(optional_requirement) = optional.get(name) {
+            if let Some(optional_requirement) = object_field(optional, name) {
                 if dependency != optional_requirement {
                     losses.push(format!(
                         "npm dependency `{name}` has different runtime and optional requirements"
@@ -904,18 +921,18 @@ fn npm_report(document: &str) -> ProviderFactReport {
             }
         }
     }
-    if let Some(JSONValue::Object(scripts)) = metadata.get("scripts") {
+    if let Some(DataTree::Object(scripts)) = object_field(&metadata, "scripts") {
         for (name, command) in scripts {
             add_typed_json_fact(&mut facts, format!("provider.npm.hook.{name}"), command);
-            if !matches!(command, JSONValue::String(_)) {
+            if !matches!(command, DataTree::Text(_)) {
                 losses.push(format!("npm script `{name}` must be a string command"));
             }
         }
-    } else if metadata.contains_key("scripts") {
+    } else if object_field(&metadata, "scripts").is_some() {
         losses.push("npm `scripts` must be an object".to_string());
     }
     for key in ["os", "cpu"] {
-        if let Some(value) = metadata.get(key) {
+        if let Some(value) = object_field(&metadata, key) {
             match json_string_list(value) {
                 Some(values) => {
                     facts
@@ -927,20 +944,20 @@ fn npm_report(document: &str) -> ProviderFactReport {
             }
         }
     }
-    if let Some(JSONValue::Object(engines)) = metadata.get("engines") {
+    if let Some(DataTree::Object(engines)) = object_field(&metadata, "engines") {
         for (engine, requirement) in engines {
             add_typed_json_fact(
                 &mut facts,
                 format!("provider.npm.variant.engine.{engine}"),
                 requirement,
             );
-            if !matches!(requirement, JSONValue::String(_)) {
+            if !matches!(requirement, DataTree::Text(_)) {
                 losses.push(format!(
                     "npm engine `{engine}` must be a string requirement"
                 ));
             }
         }
-    } else if metadata.contains_key("engines") {
+    } else if object_field(&metadata, "engines").is_some() {
         losses.push("npm `engines` must be an object".to_string());
     }
     for (field, target) in [
@@ -951,22 +968,22 @@ fn npm_report(document: &str) -> ProviderFactReport {
         ("maintainers", "provider.npm.source.maintainers"),
         ("dist-tags", "provider.npm.channel.dist_tags"),
     ] {
-        if let Some(value) = metadata.get(field) {
+        if let Some(value) = object_field(&metadata, field) {
             add_typed_json_fact(&mut facts, target, value);
         }
     }
-    if let Some(value) = metadata.get("yanked") {
+    if let Some(value) = object_field(&metadata, "yanked") {
         if json_bool(Some(value)).is_some() {
             add_typed_json_fact(&mut facts, "provider.npm.yanked", value);
         } else {
             losses.push("npm `yanked` must be a boolean".to_string());
         }
     }
-    if let Some(JSONValue::Object(dist)) = metadata.get("dist") {
+    if let Some(DataTree::Object(dist)) = object_field(&metadata, "dist") {
         for key in ["integrity", "shasum", "tarball"] {
-            if let Some(value) = dist.get(key) {
+            if let Some(value) = object_field(dist, key) {
                 add_typed_json_fact(&mut facts, format!("provider.npm.dist.{key}"), value);
-                if !matches!(value, JSONValue::String(value) if !value.trim().is_empty()) {
+                if !matches!(value, DataTree::Text(value) if !value.trim().is_empty()) {
                     losses.push(format!("npm dist field `{key}` must be a non-empty string"));
                 }
             }
@@ -974,7 +991,7 @@ fn npm_report(document: &str) -> ProviderFactReport {
         facts.integrity_hash = json_string(dist, "integrity")
             .or_else(|| json_string(dist, "shasum"))
             .unwrap_or_default();
-    } else if metadata.contains_key("dist") {
+    } else if object_field(&metadata, "dist").is_some() {
         losses.push("npm dist metadata must be an object".to_string());
     }
     let mut report = report_with_identity(facts);
@@ -1345,7 +1362,7 @@ fn cargo_lock_records(
 }
 
 fn pypi_report(document: &str) -> ProviderFactReport {
-    if let Ok(JSONValue::Object(object)) = JSON::parse(document) {
+    if let Ok(DataTree::Object(object)) = JSON::parse(document) {
         return pypi_json_report(&object);
     }
 
@@ -1456,10 +1473,10 @@ fn pypi_report(document: &str) -> ProviderFactReport {
     report
 }
 
-fn pypi_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> ProviderFactReport {
-    let info = object
-        .get("info")
+fn pypi_json_report(object: &[(String, DataTree)]) -> ProviderFactReport {
+    let info = object_field(object, "info")
         .and_then(|value| value.as_object().ok())
+        .map(|value| value.as_slice())
         .unwrap_or(object);
     let mut facts = MetadataFacts::empty(
         ProviderFamily::PyPI,
@@ -1478,19 +1495,16 @@ fn pypi_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> P
 
     let mut losses = Vec::new();
     let mut conflicts = Vec::new();
-    if !object.contains_key("info") {
+    if object_field(object, "info").is_none() {
         losses.push("PyPI JSON has no `info` object".to_string());
     }
-    if object
-        .get("info")
-        .is_some_and(|value| value.as_object().is_err())
-    {
+    if object_field(object, "info").is_some_and(|value| value.as_object().is_err()) {
         losses.push("PyPI `info` must be an object".to_string());
     }
     if info != object {
         for field in ["name", "version"] {
-            if let Some(value) = object.get(field) {
-                if !matches!(value, JSONValue::String(_)) {
+            if let Some(value) = object_field(object, field) {
+                if !matches!(value, DataTree::Text(_)) {
                     losses.push(format!("PyPI top-level `{field}` must be a string"));
                 }
             }
@@ -1510,8 +1524,8 @@ fn pypi_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> P
         "requires_python",
         "description_content_type",
     ] {
-        if let Some(value) = info.get(field) {
-            if !matches!(value, JSONValue::String(_)) {
+        if let Some(value) = object_field(info, field) {
+            if !matches!(value, DataTree::Text(_)) {
                 losses.push(format!("PyPI `info.{field}` must be a string"));
             }
         }
@@ -1570,13 +1584,13 @@ fn pypi_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> P
         ("classifiers", "classifier"),
         ("project_urls", "project_url"),
     ] {
-        let Some(value) = info.get(field) else {
+        let Some(value) = object_field(info, field) else {
             continue;
         };
         match value {
-            JSONValue::Array(values) => {
+            DataTree::Array(values) => {
                 for (index, value) in values.iter().enumerate() {
-                    if let JSONValue::String(value) = value {
+                    if let DataTree::Text(value) = value {
                         if field == "requires_dist" {
                             facts.dependencies.push(value.clone());
                             add_typed_text_fact(
@@ -1610,9 +1624,9 @@ fn pypi_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> P
                     }
                 }
             }
-            JSONValue::Object(values) if field == "project_urls" => {
+            DataTree::Object(values) if field == "project_urls" => {
                 for (name, value) in values {
-                    if let JSONValue::String(value) = value {
+                    if let DataTree::Text(value) = value {
                         add_typed_text_fact(
                             &mut facts,
                             format!("provider.pypi.source.project_url.{name}"),
@@ -1626,17 +1640,17 @@ fn pypi_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> P
             _ => losses.push(format!("PyPI `{field}` has an unsupported shape")),
         }
     }
-    if let Some(JSONValue::Array(values)) = info.get("dynamic") {
+    if let Some(DataTree::Array(values)) = object_field(info, "dynamic") {
         for (index, value) in values.iter().enumerate() {
             add_typed_json_fact(&mut facts, format!("provider.pypi.dynamic.{index}"), value);
-            if !matches!(value, JSONValue::String(_)) {
+            if !matches!(value, DataTree::Text(_)) {
                 losses.push(format!("PyPI `dynamic[{index}]` must be a field name"));
             }
         }
         if !values.is_empty() {
             losses.push("dynamic Python metadata must be resolved to an exact lock".to_string());
         }
-    } else if info.contains_key("dynamic") {
+    } else if object_field(info, "dynamic").is_some() {
         losses.push("PyPI `dynamic` must be an array of fields".to_string());
     }
     for (field, target) in [
@@ -1649,15 +1663,15 @@ fn pypi_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> P
             "provider.pypi.metadata.import_namespaces",
         ),
     ] {
-        if let Some(value) = info.get(field) {
+        if let Some(value) = object_field(info, field) {
             add_typed_json_fact(&mut facts, target, value);
         }
     }
 
     let mut artifact_hashes = Vec::new();
-    if let Some(JSONValue::Array(urls)) = object.get("urls") {
+    if let Some(DataTree::Array(urls)) = object_field(object, "urls") {
         for (index, value) in urls.iter().enumerate() {
-            let JSONValue::Object(url) = value else {
+            let DataTree::Object(url) = value else {
                 losses.push(format!("PyPI `urls[{index}]` must be an object"));
                 continue;
             };
@@ -1666,12 +1680,12 @@ fn pypi_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> P
                 losses.push(format!("PyPI artifact {index} has no filename"));
                 index.to_string()
             });
-            if let Some(JSONValue::Object(digests)) = url.get("digests") {
+            if let Some(DataTree::Object(digests)) = object_field(url, "digests") {
                 for algorithm in ["md5", "sha256", "sha384", "sha512"] {
-                    let Some(value) = digests.get(algorithm) else {
+                    let Some(value) = object_field(digests, algorithm) else {
                         continue;
                     };
-                    let JSONValue::String(value) = value else {
+                    let DataTree::Text(value) = value else {
                         losses.push(format!(
                             "PyPI artifact `{filename}` digest `{algorithm}` must be a string"
                         ));
@@ -1697,13 +1711,13 @@ fn pypi_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> P
                         value,
                     );
                 }
-            } else if url.contains_key("digests") {
+            } else if object_field(url, "digests").is_some() {
                 losses.push(format!(
                     "PyPI artifact `{filename}` digests must be an object"
                 ));
             }
-            if let Some(value) = url.get("yanked") {
-                if matches!(value, JSONValue::Bool(_)) {
+            if let Some(value) = object_field(url, "yanked") {
+                if matches!(value, DataTree::Bool(_)) {
                     add_typed_json_fact(
                         &mut facts,
                         format!("provider.pypi.advisory.yanked.{index}"),
@@ -1719,7 +1733,7 @@ fn pypi_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> P
                     format!("provider.pypi.advisory.yanked_reason.{index}"),
                     &reason,
                 );
-            } else if url.contains_key("yanked_reason") {
+            } else if object_field(url, "yanked_reason").is_some() {
                 losses.push(format!(
                     "PyPI artifact `{filename}` yanked_reason must be a string"
                 ));
@@ -1738,27 +1752,25 @@ fn pypi_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> P
     if artifact_hashes.len() == 1 {
         facts.integrity_hash = artifact_hashes[0].1.clone();
     }
-    if let Some(JSONValue::Array(vulnerabilities)) = object.get("vulnerabilities") {
+    if let Some(DataTree::Array(vulnerabilities)) = object_field(object, "vulnerabilities") {
         for (index, vulnerability) in vulnerabilities.iter().enumerate() {
             add_typed_json_fact(
                 &mut facts,
                 format!("provider.pypi.advisory.vulnerability.{index}"),
                 vulnerability,
             );
-            if !matches!(vulnerability, JSONValue::Object(_)) {
+            if !matches!(vulnerability, DataTree::Object(_)) {
                 losses.push(format!("PyPI vulnerability {index} must be an object"));
             }
         }
     }
-    if object
-        .get("urls")
-        .is_some_and(|value| !matches!(value, JSONValue::Array(_)))
+    if object_field(object, "urls")
+        .is_some_and(|value| !matches!(value, DataTree::Array(_)))
     {
         losses.push("PyPI `urls` must be an array of artifacts".to_string());
     }
-    if object
-        .get("vulnerabilities")
-        .is_some_and(|value| !matches!(value, JSONValue::Array(_)))
+    if object_field(object, "vulnerabilities")
+        .is_some_and(|value| !matches!(value, DataTree::Array(_)))
     {
         losses.push("PyPI `vulnerabilities` must be an array".to_string());
     }
@@ -1775,18 +1787,19 @@ fn pypi_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> P
 
 fn swiftpm_report(document: &str) -> ProviderFactReport {
     let parsed = JSON::parse(document).ok();
-    let Some(JSONValue::Object(root)) = parsed else {
+    let Some(DataTree::Object(root)) = parsed else {
         return empty_report(
             ProviderFamily::SwiftPM,
             "swiftpm",
             "Package.resolved is not valid JSON",
         );
     };
-    let root_pins = root.get("pins");
+    let root_pins = object_field(&root, "pins");
     let object_pins = root
-        .get("object")
+        .iter()
+        .find_map(|(name, value)| (name == "object").then_some(value))
         .and_then(|value| value.as_object().ok())
-        .and_then(|object| object.get("pins"));
+        .and_then(|object| object_field(object, "pins"));
     if let (Some(root_pins), Some(object_pins)) = (root_pins, object_pins) {
         if root_pins != object_pins {
             return empty_report(
@@ -1797,7 +1810,7 @@ fn swiftpm_report(document: &str) -> ProviderFactReport {
         }
     }
     let pins = match root_pins.or(object_pins) {
-        Some(JSONValue::Array(pins)) => pins,
+        Some(DataTree::Array(pins)) => pins,
         Some(_) => {
             return empty_report(
                 ProviderFamily::SwiftPM,
@@ -1818,15 +1831,15 @@ fn swiftpm_report(document: &str) -> ProviderFactReport {
     let mut losses = Vec::new();
     let mut conflicts = Vec::new();
     add_json_projection(&mut facts, "provider.swiftpm.native", &root);
-    match root.get("version") {
-        Some(JSONValue::Number(version)) if matches!(*version, 1..=3) => {
+    match object_field(&root, "version") {
+        Some(DataTree::Int(version)) if matches!(*version, 1..=3) => {
             add_typed_text_fact(
                 &mut facts,
                 "provider.swiftpm.lock.version",
                 &version.to_string(),
             );
         }
-        Some(JSONValue::Number(version)) => losses.push(format!(
+        Some(DataTree::Int(version)) => losses.push(format!(
             "SwiftPM lock version `{version}` is unsupported; expected v1, v2, or v3"
         )),
         Some(_) => losses.push("SwiftPM lock `version` must be numeric".to_string()),
@@ -1834,7 +1847,7 @@ fn swiftpm_report(document: &str) -> ProviderFactReport {
     }
 
     if pins.len() == 1 {
-        let Some(JSONValue::Object(pin)) = pins.first() else {
+        let Some(DataTree::Object(pin)) = pins.first() else {
             return empty_report(
                 ProviderFamily::SwiftPM,
                 "swiftpm",
@@ -1852,15 +1865,15 @@ fn swiftpm_report(document: &str) -> ProviderFactReport {
             }
         }
         for field in ["identity", "package", "location", "repositoryURL", "kind"] {
-            if let Some(value) = pin.get(field) {
-                if !matches!(value, JSONValue::String(_)) {
+            if let Some(value) = object_field(pin, field) {
+                if !matches!(value, DataTree::Text(_)) {
                     losses.push(format!("SwiftPM pin `{field}` must be a string"));
                 }
             }
         }
         facts.name = identity.or(package).unwrap_or_default();
-        let state = match pin.get("state") {
-            Some(JSONValue::Object(state)) => Some(state),
+        let state = match object_field(pin, "state") {
+            Some(DataTree::Object(state)) => Some(state),
             Some(_) => {
                 losses.push(format!(
                     "SwiftPM pin `{}` state must be an object",
@@ -1872,8 +1885,8 @@ fn swiftpm_report(document: &str) -> ProviderFactReport {
         };
         if let Some(state) = state {
             for field in ["version", "revision", "branch"] {
-                if let Some(value) = state.get(field) {
-                    if !matches!(value, JSONValue::String(_) | JSONValue::Null) {
+                if let Some(value) = object_field(state, field) {
+                    if !matches!(value, DataTree::Text(_) | DataTree::Null) {
                         losses.push(format!(
                             "SwiftPM pin `{}` state field `{field}` must be a string or null",
                             facts.name
@@ -1916,7 +1929,7 @@ fn swiftpm_report(document: &str) -> ProviderFactReport {
         {
             add_typed_text_fact(&mut facts, "provider.swiftpm.source.location", &location);
         }
-        if state.is_none() && !pin.contains_key("state") {
+        if state.is_none() && !object_field(pin, "state").is_some() {
             losses.push(format!("SwiftPM pin `{}` has no state object", facts.name));
         }
         let source_identity = facts
@@ -1933,7 +1946,7 @@ fn swiftpm_report(document: &str) -> ProviderFactReport {
             .iter()
             .enumerate()
             .filter_map(|(index, pin)| {
-                let JSONValue::Object(pin) = pin else {
+                let DataTree::Object(pin) = pin else {
                     losses.push(format!("SwiftPM pin {index} is not an object"));
                     return None;
                 };
@@ -1951,13 +1964,13 @@ fn swiftpm_report(document: &str) -> ProviderFactReport {
                     .to_string(),
             );
             for (left_index, left) in pins.iter().enumerate() {
-                let JSONValue::Object(left) = left else {
+                let DataTree::Object(left) = left else {
                     continue;
                 };
                 let left_identity =
                     json_string(left, "identity").or_else(|| json_string(left, "package"));
                 for right in pins.iter().skip(left_index + 1) {
-                    let JSONValue::Object(right) = right else {
+                    let DataTree::Object(right) = right else {
                         continue;
                     };
                     let right_identity =
@@ -2415,7 +2428,7 @@ fn maven_report(document: &str) -> ProviderFactReport {
 }
 
 fn nuget_report(document: &str) -> ProviderFactReport {
-    if let Ok(JSONValue::Object(object)) = JSON::parse(document) {
+    if let Ok(DataTree::Object(object)) = JSON::parse(document) {
         return nuget_json_report(&object);
     }
     if xml_has_namespace(document) {
@@ -2686,19 +2699,19 @@ fn nuget_report(document: &str) -> ProviderFactReport {
     report
 }
 
-fn nuget_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> ProviderFactReport {
+fn nuget_json_report(object: &[(String, DataTree)]) -> ProviderFactReport {
     let mut packages = Vec::new();
     let mut dependency_values = Vec::new();
     let mut losses = Vec::new();
     let mut typed_projection = Vec::new();
     let mut target_frameworks = Vec::new();
     let mut library_hashes = Vec::new();
-    if let Some(JSONValue::Object(dependencies)) = object.get("dependencies") {
+    if let Some(DataTree::Object(dependencies)) = object_field(object, "dependencies") {
         for (framework, packages_for_framework) in dependencies {
             target_frameworks.push(format!("framework:{framework}"));
-            if let JSONValue::Object(entries) = packages_for_framework {
+            if let DataTree::Object(entries) = packages_for_framework {
                 for (name, value) in entries {
-                    if let JSONValue::Object(entry) = value {
+                    if let DataTree::Object(entry) = value {
                         let requested = json_string(entry, "requested").unwrap_or_default();
                         let resolved = json_string(entry, "resolved")
                             .or_else(|| json_string(entry, "version"))
@@ -2712,14 +2725,14 @@ fn nuget_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
                             packages.push((name.clone(), selected.clone()));
                             dependency_values.push(format_dependency(name, &selected));
                         }
-                        if let Some(requested) = entry.get("requested") {
+                        if let Some(requested) = object_field(entry, "requested") {
                             typed_projection.push((
                                 format!("provider.nuget.request.{framework}.{name}"),
                                 json_value_json(requested),
                             ));
                         }
                         if let Some(resolved) =
-                            entry.get("resolved").or_else(|| entry.get("version"))
+                            object_field(entry, "resolved").or_else(|| object_field(entry, "version"))
                         {
                             typed_projection.push((
                                 format!("provider.nuget.resolution.{framework}.{name}"),
@@ -2743,10 +2756,10 @@ fn nuget_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
                 ));
             }
         }
-    } else if object.contains_key("dependencies") {
+    } else if object_field(object, "dependencies").is_some() {
         losses.push("NuGet `dependencies` must be an object keyed by target framework".to_string());
     }
-    if let Some(JSONValue::Object(libraries)) = object.get("libraries") {
+    if let Some(DataTree::Object(libraries)) = object_field(object, "libraries") {
         for (identity, value) in libraries {
             let Some((name, version)) = identity.rsplit_once('/') else {
                 losses.push(format!(
@@ -2767,7 +2780,7 @@ fn nuget_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
                     "NuGet library identity `{identity}` is not an exact package identity"
                 ));
             }
-            if let JSONValue::Object(record) = value {
+            if let DataTree::Object(record) = value {
                 if let Some(hash) =
                     json_string(record, "sha512").or_else(|| json_string(record, "contentHash"))
                 {
@@ -2779,10 +2792,10 @@ fn nuget_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
                 ));
             }
         }
-    } else if object.contains_key("libraries") {
+    } else if object_field(object, "libraries").is_some() {
         losses.push("NuGet `libraries` must be an object keyed by name/version".to_string());
     }
-    if let Some(JSONValue::Object(targets)) = object.get("targets") {
+    if let Some(DataTree::Object(targets)) = object_field(object, "targets") {
         for (framework, packages_for_framework) in targets {
             target_frameworks.push(format!("framework:{framework}"));
             let Some(entries) = packages_for_framework.as_object().ok() else {
@@ -2810,15 +2823,15 @@ fn nuget_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
                     ));
                     continue;
                 };
-                if let Some(JSONValue::Object(dependencies)) = record.get("dependencies") {
+                if let Some(DataTree::Object(dependencies)) = object_field(record, "dependencies") {
                     for (dependency, resolved) in dependencies {
                         typed_projection.push((
                             format!("provider.nuget.target.{framework}.{identity}.{dependency}"),
                             json_value_json(resolved),
                         ));
                         let version = match resolved {
-                            JSONValue::String(value) => value.clone(),
-                            JSONValue::Object(value) => {
+                            DataTree::Text(value) => value.clone(),
+                            DataTree::Object(value) => {
                                 json_string(value, "version").unwrap_or_default()
                             }
                             _ => String::new(),
@@ -2831,17 +2844,17 @@ fn nuget_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
                             dependency_values.push(format_dependency(dependency, &version));
                         }
                     }
-                } else if record.contains_key("dependencies") {
+                } else if object_field(record, "dependencies").is_some() {
                     losses.push(format!(
                         "NuGet target package `{identity}` dependencies are not an object"
                     ));
                 }
             }
         }
-    } else if object.contains_key("targets") {
+    } else if object_field(object, "targets").is_some() {
         losses.push("NuGet `targets` must be an object keyed by target framework".to_string());
     }
-    if let Some(JSONValue::Object(groups)) = object.get("projectFileDependencyGroups") {
+    if let Some(DataTree::Object(groups)) = object_field(object, "projectFileDependencyGroups") {
         for (framework, requests) in groups {
             target_frameworks.push(format!("framework:{framework}"));
             let Some(requests) = requests.as_array().ok() else {
@@ -2851,7 +2864,7 @@ fn nuget_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
                 continue;
             };
             for (index, request) in requests.iter().enumerate() {
-                if !matches!(request, JSONValue::String(_)) {
+                if !matches!(request, DataTree::Text(_)) {
                     losses.push(format!(
                         "NuGet project dependency `{framework}[{index}]` is not a string"
                     ));
@@ -2863,7 +2876,7 @@ fn nuget_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
                 ));
             }
         }
-    } else if object.contains_key("projectFileDependencyGroups") {
+    } else if object_field(object, "projectFileDependencyGroups").is_some() {
         losses.push(
             "NuGet `projectFileDependencyGroups` must be an object keyed by target framework"
                 .to_string(),
@@ -2874,8 +2887,8 @@ fn nuget_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
         json_string(object, "version"),
     ) {
         (Some(name), Some(version)) => Some((name, version)),
-        _ => object.get("package").and_then(|value| match value {
-            JSONValue::Object(package) => Some((
+        _ => object_field(object, "package").and_then(|value| match value {
+            DataTree::Object(package) => Some((
                 json_string(package, "id").or_else(|| json_string(package, "name"))?,
                 json_string(package, "version")?,
             )),
@@ -2934,9 +2947,8 @@ fn nuget_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
         .or_else(|| json_string(object, "license"))
         .or_else(|| json_string(object, "licenseUrl"))
         .unwrap_or_default();
-    if let Some(JSONValue::Object(dependencies)) = object.get("dependencies") {
-        facts.platforms = dependencies
-            .keys()
+    if let Some(DataTree::Object(dependencies)) = object_field(object, "dependencies") {
+        facts.platforms = object_keys(dependencies)
             .map(|framework| format!("framework:{framework}"))
             .collect();
     }
@@ -2955,7 +2967,7 @@ fn nuget_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
         "signatures",
         "contentHash",
     ] {
-        if let Some(value) = object.get(key) {
+        if let Some(value) = object_field(object, key) {
             add_typed_json_fact(&mut facts, format!("provider.nuget.{key}"), value);
         }
     }
@@ -2984,7 +2996,7 @@ fn nuget_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
 }
 
 fn conan_report(document: &str) -> ProviderFactReport {
-    if let Ok(JSONValue::Object(object)) = JSON::parse(document) {
+    if let Ok(DataTree::Object(object)) = JSON::parse(document) {
         return conan_json_report(&object);
     }
     let names = assignment_values(document, "name");
@@ -3081,7 +3093,7 @@ fn conan_report(document: &str) -> ProviderFactReport {
     report
 }
 
-fn conan_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> ProviderFactReport {
+fn conan_json_report(object: &[(String, DataTree)]) -> ProviderFactReport {
     let mut losses = Vec::new();
     let mut conflicts = Vec::new();
     let mut facts = MetadataFacts::empty(
@@ -3117,11 +3129,11 @@ fn conan_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
             ));
         }
     }
-    match object.get("license") {
-        Some(JSONValue::String(license)) => facts.license = license.clone(),
-        Some(JSONValue::Array(values)) => {
+    match object_field(object, "license") {
+        Some(DataTree::Text(license)) => facts.license = license.clone(),
+        Some(DataTree::Array(values)) => {
             for (index, value) in values.iter().enumerate() {
-                if let JSONValue::String(value) = value {
+                if let DataTree::Text(value) = value {
                     add_typed_text_fact(
                         &mut facts,
                         format!("provider.conan.metadata.license.{index}"),
@@ -3134,7 +3146,7 @@ fn conan_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
             facts.license = values
                 .iter()
                 .find_map(|value| match value {
-                    JSONValue::String(value) => Some(value.clone()),
+                    DataTree::Text(value) => Some(value.clone()),
                     _ => None,
                 })
                 .unwrap_or_default();
@@ -3143,24 +3155,24 @@ fn conan_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
         None => {}
     }
     let dependencies =
-        conan_json_dependencies(&mut facts, object.get("requires"), "runtime", &mut losses);
+        conan_json_dependencies(&mut facts, object_field(object, "requires"), "runtime", &mut losses);
     facts.dependencies = dependencies;
     let mut build_dependencies =
-        conan_json_dependencies(&mut facts, object.get("tool_requires"), "tool", &mut losses);
+        conan_json_dependencies(&mut facts, object_field(object, "tool_requires"), "tool", &mut losses);
     build_dependencies.extend(conan_json_dependencies(
         &mut facts,
-        object.get("build_requires"),
+        object_field(object, "build_requires"),
         "build",
         &mut losses,
     ));
     facts.build_dependencies = build_dependencies;
 
-    let graph_value = object.get("graph_lock").or_else(|| object.get("graph"));
+    let graph_value = object_field(object, "graph_lock").or_else(|| object_field(object, "graph"));
     let graph_nodes = graph_value
         .and_then(|value| value.as_object().ok())
-        .and_then(|graph| graph.get("nodes"))
+        .and_then(|graph| object_field(graph, "nodes"))
         .and_then(|value| value.as_object().ok())
-        .or_else(|| object.get("nodes").and_then(|value| value.as_object().ok()));
+        .or_else(|| object_field(object, "nodes").and_then(|value| value.as_object().ok()));
     if let Some(nodes) = graph_nodes {
         let mut node_identities = Vec::new();
         for (node_id, node_value) in nodes {
@@ -3191,7 +3203,7 @@ fn conan_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
             } else {
                 losses.push(format!("Conan graph node `{node_id}` has no package ref"));
             }
-            if let Some(requires) = node.get("requires") {
+            if let Some(requires) = object_field(node, "requires") {
                 let dependencies = conan_json_dependencies(
                     &mut facts,
                     Some(requires),
@@ -3200,7 +3212,7 @@ fn conan_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
                 );
                 facts.dependencies.extend(dependencies);
             }
-            if let Some(tool_requires) = node.get("tool_requires") {
+            if let Some(tool_requires) = object_field(node, "tool_requires") {
                 let dependencies = conan_json_dependencies(
                     &mut facts,
                     Some(tool_requires),
@@ -3209,7 +3221,7 @@ fn conan_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
                 );
                 facts.build_dependencies.extend(dependencies);
             }
-            if let Some(build_requires) = node.get("build_requires") {
+            if let Some(build_requires) = object_field(node, "build_requires") {
                 let dependencies = conan_json_dependencies(
                     &mut facts,
                     Some(build_requires),
@@ -3236,7 +3248,7 @@ fn conan_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
                 );
             }
         }
-    } else if graph_value.is_some() || object.contains_key("nodes") {
+    } else if graph_value.is_some() || object_field(object, "nodes").is_some() {
         losses.push("Conan graph lock `nodes` must be an object".to_string());
     }
 
@@ -3248,7 +3260,7 @@ fn conan_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
         "rrev",
         "prev",
     ] {
-        if let Some(value) = object.get(key) {
+        if let Some(value) = object_field(object, key) {
             add_typed_json_fact(&mut facts, format!("provider.conan.variant.{key}"), value);
         }
     }
@@ -3269,7 +3281,7 @@ fn conan_json_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
 
 fn conan_json_dependencies(
     facts: &mut MetadataFacts,
-    value: Option<&JSONValue>,
+    value: Option<&DataTree>,
     kind: &str,
     losses: &mut Vec<String>,
 ) -> Vec<String> {
@@ -3283,7 +3295,7 @@ fn conan_json_dependencies(
     let mut dependencies = Vec::new();
     for (index, value) in values.iter().enumerate() {
         match value {
-            JSONValue::String(reference) if !reference.trim().is_empty() => {
+            DataTree::Text(reference) if !reference.trim().is_empty() => {
                 dependencies.push(reference.clone());
                 add_typed_text_fact(
                     facts,
@@ -3291,12 +3303,12 @@ fn conan_json_dependencies(
                     reference,
                 );
             }
-            JSONValue::String(_) => {
+            DataTree::Text(_) => {
                 losses.push(format!(
                     "Conan `{kind}[{index}]` has an empty dependency ref"
                 ));
             }
-            JSONValue::Object(dependency) => {
+            DataTree::Object(dependency) => {
                 let reference =
                     json_string(dependency, "ref").or_else(|| json_string(dependency, "name"));
                 let Some(reference) = reference else {
@@ -3326,7 +3338,7 @@ fn conan_json_dependencies(
 
 fn vcpkg_report(document: &str) -> ProviderFactReport {
     let parsed = JSON::parse(document).ok();
-    let Some(JSONValue::Object(object)) = parsed else {
+    let Some(DataTree::Object(object)) = parsed else {
         return empty_report(
             ProviderFamily::Vcpkg,
             "vcpkg",
@@ -3343,8 +3355,8 @@ fn vcpkg_report(document: &str) -> ProviderFactReport {
     if facts.name.is_empty() {
         losses.push("vcpkg manifest has no package name".to_string());
     }
-    if let Some(value) = object.get("name") {
-        if !matches!(value, JSONValue::String(value) if !value.trim().is_empty()) {
+    if let Some(value) = object_field(&object, "name") {
+        if !matches!(value, DataTree::Text(value) if !value.trim().is_empty()) {
             losses.push("vcpkg `name` must be a non-empty string".to_string());
         }
     }
@@ -3356,12 +3368,12 @@ fn vcpkg_report(document: &str) -> ProviderFactReport {
     ];
     let mut versions = Vec::new();
     for key in version_fields {
-        if let Some(value) = object.get(key) {
+        if let Some(value) = object_field(&object, key) {
             match value {
-                JSONValue::String(value) if !value.trim().is_empty() => {
+                DataTree::Text(value) if !value.trim().is_empty() => {
                     versions.push((key, value.clone()));
                 }
-                JSONValue::String(_) => {
+                DataTree::Text(_) => {
                     losses.push(format!("vcpkg `{key}` must not be empty"));
                 }
                 _ => losses.push(format!("vcpkg `{key}` must be a string")),
@@ -3376,34 +3388,34 @@ fn vcpkg_report(document: &str) -> ProviderFactReport {
         add_typed_text_fact(&mut facts, format!("provider.vcpkg.variant.{key}"), value);
     }
     facts.dependencies = vcpkg_dependencies(&object, &mut facts, &mut losses);
-    if let Some(value) = object.get("supports") {
+    if let Some(value) = object_field(&object, "supports") {
         match value {
-            JSONValue::String(value) if !value.trim().is_empty() => {
+            DataTree::Text(value) if !value.trim().is_empty() => {
                 facts.platforms.push(value.clone());
             }
-            JSONValue::String(_) => losses.push("vcpkg `supports` must not be empty".to_string()),
+            DataTree::Text(_) => losses.push("vcpkg `supports` must not be empty".to_string()),
             _ => losses.push("vcpkg `supports` must be a string".to_string()),
         }
     }
-    if let Some(value) = object.get("license") {
+    if let Some(value) = object_field(&object, "license") {
         match value {
-            JSONValue::String(value) => facts.license = value.clone(),
+            DataTree::Text(value) => facts.license = value.clone(),
             _ => losses.push("vcpkg `license` must be a string".to_string()),
         }
     }
     for key in ["builtin-baseline", "overrides", "features"] {
-        if let Some(value) = object.get(key) {
+        if let Some(value) = object_field(&object, key) {
             add_typed_json_fact(&mut facts, format!("vcpkg.{key}"), value);
         }
     }
-    if let Some(value) = object.get("port-version") {
+    if let Some(value) = object_field(&object, "port-version") {
         add_typed_json_fact(&mut facts, "provider.vcpkg.variant.port-version", value);
-        if !matches!(value, JSONValue::Number(value) if *value >= 0) {
+        if !matches!(value, DataTree::Int(value) if *value >= 0) {
             losses.push("vcpkg `port-version` must be a non-negative integer".to_string());
         }
     }
-    if let Some(value) = object.get("builtin-baseline") {
-        if !matches!(value, JSONValue::String(value) if !value.trim().is_empty()) {
+    if let Some(value) = object_field(&object, "builtin-baseline") {
+        if !matches!(value, DataTree::Text(value) if !value.trim().is_empty()) {
             losses.push("vcpkg `builtin-baseline` must be a non-empty string".to_string());
         } else {
             add_typed_text_fact(
@@ -3413,19 +3425,19 @@ fn vcpkg_report(document: &str) -> ProviderFactReport {
             );
         }
     }
-    if let Some(JSONValue::Object(features)) = object.get("features") {
+    if let Some(DataTree::Object(features)) = object_field(&object, "features") {
         for (name, value) in features {
-            if !matches!(value, JSONValue::Array(values) if values.iter().all(|item| matches!(item, JSONValue::String(_))))
+            if !matches!(value, DataTree::Array(values) if values.iter().all(|item| matches!(item, DataTree::Text(_))))
             {
                 losses.push(format!(
                     "vcpkg feature `{name}` must be an array of strings"
                 ));
             }
         }
-    } else if object.contains_key("features") {
+    } else if object_field(&object, "features").is_some() {
         losses.push("vcpkg `features` must be an object".to_string());
     }
-    if let Some(value) = object.get("overrides") {
+    if let Some(value) = object_field(&object, "overrides") {
         if let Some(overrides) = value.as_array().ok() {
             for (index, value) in overrides.iter().enumerate() {
                 let Some(override_value) = value.as_object().ok() else {
@@ -3441,16 +3453,16 @@ fn vcpkg_report(document: &str) -> ProviderFactReport {
                     "version-semver",
                     "version-date",
                 ] {
-                    if let Some(value) = override_value.get(key) {
-                        if !matches!(value, JSONValue::String(value) if !value.trim().is_empty()) {
+                    if let Some(value) = object_field(override_value, key) {
+                        if !matches!(value, DataTree::Text(value) if !value.trim().is_empty()) {
                             losses.push(format!(
                                 "vcpkg override {index} field `{key}` must be a non-empty string"
                             ));
                         }
                     }
                 }
-                if let Some(value) = override_value.get("port-version") {
-                    if !matches!(value, JSONValue::Number(value) if *value >= 0) {
+                if let Some(value) = object_field(override_value, "port-version") {
+                    if !matches!(value, DataTree::Int(value) if *value >= 0) {
                         losses.push(format!(
                             "vcpkg override {index} `port-version` must be a non-negative integer"
                         ));
@@ -3478,7 +3490,7 @@ fn vcpkg_report(document: &str) -> ProviderFactReport {
 
 fn homebrew_report(document: &str) -> ProviderFactReport {
     let parsed = JSON::parse(document).ok();
-    let Some(JSONValue::Object(object)) = parsed else {
+    let Some(DataTree::Object(object)) = parsed else {
         return empty_report(
             ProviderFamily::Homebrew,
             "homebrew",
@@ -3497,16 +3509,16 @@ fn homebrew_report(document: &str) -> ProviderFactReport {
     add_json_projection(&mut facts, "provider.homebrew.native", &object);
 
     let mut versions = Vec::new();
-    if let Some(value) = object.get("version") {
+    if let Some(value) = object_field(&object, "version") {
         match value {
-            JSONValue::String(version) if !version.trim().is_empty() => {
+            DataTree::Text(version) if !version.trim().is_empty() => {
                 versions.push(("version", version.clone()));
             }
-            JSONValue::String(_) => losses.push("Homebrew formula version is empty".to_string()),
+            DataTree::Text(_) => losses.push("Homebrew formula version is empty".to_string()),
             _ => losses.push("Homebrew formula `version` must be a string".to_string()),
         }
     }
-    if let Some(value) = object.get("versions") {
+    if let Some(value) = object_field(&object, "versions") {
         let Some(versions_object) = value.as_object().ok() else {
             losses.push("Homebrew formula `versions` must be an object".to_string());
             facts.version = String::new();
@@ -3516,12 +3528,12 @@ fn homebrew_report(document: &str) -> ProviderFactReport {
             report.conflicts.extend(conflicts);
             return report;
         };
-        if let Some(stable) = versions_object.get("stable") {
+        if let Some(stable) = object_field(versions_object, "stable") {
             match stable {
-                JSONValue::String(version) if !version.trim().is_empty() => {
+                DataTree::Text(version) if !version.trim().is_empty() => {
                     versions.push(("versions.stable", version.clone()));
                 }
-                JSONValue::String(_) => {
+                DataTree::Text(_) => {
                     losses.push("Homebrew `versions.stable` is empty".to_string())
                 }
                 _ => losses.push("Homebrew `versions.stable` must be a string".to_string()),
@@ -3543,9 +3555,9 @@ fn homebrew_report(document: &str) -> ProviderFactReport {
         .map(|(_, version)| version.clone())
         .unwrap_or_default();
 
-    if let Some(value) = object.get("license") {
+    if let Some(value) = object_field(&object, "license") {
         match value {
-            JSONValue::String(license) => facts.license = license.clone(),
+            DataTree::Text(license) => facts.license = license.clone(),
             _ => losses.push("Homebrew formula `license` must be a string".to_string()),
         }
     }
@@ -3582,13 +3594,13 @@ fn homebrew_report(document: &str) -> ProviderFactReport {
     ] {
         provider_dependency_field(&mut facts, &object, field, kind, "homebrew", &mut losses);
     }
-    if let Some(value) = object.get("platforms") {
+    if let Some(value) = object_field(&object, "platforms") {
         match json_string_list(value) {
             Some(platforms) => facts.platforms = platforms,
             None => losses.push("Homebrew formula `platforms` must be strings".to_string()),
         }
     }
-    if let Some(value) = object.get("bottle") {
+    if let Some(value) = object_field(&object, "bottle") {
         homebrew_bottle_facts(&mut facts, value, &mut losses);
     }
     facts.integrity_hash = homebrew_source_hash(&object, &mut losses).unwrap_or_default();
@@ -3606,7 +3618,7 @@ fn jet_registry_report(document: &str) -> ProviderFactReport {
         .filter(|line| !line.trim().is_empty())
         .collect::<Vec<_>>();
     let (object, duplicate_lines) = match JSON::parse(document) {
-        Ok(JSONValue::Object(object)) => (object, Vec::new()),
+        Ok(DataTree::Object(object)) => (object, Vec::new()),
         Ok(_) => {
             return empty_report(
                 ProviderFamily::JetRegistry,
@@ -3622,7 +3634,7 @@ fn jet_registry_report(document: &str) -> ProviderFactReport {
                     "registry metadata is not valid JSON",
                 );
             };
-            let Some(JSONValue::Object(object)) = JSON::parse(line).ok() else {
+            let Some(DataTree::Object(object)) = JSON::parse(line).ok() else {
                 return empty_report(
                     ProviderFamily::JetRegistry,
                     "jet-registry",
@@ -3645,8 +3657,8 @@ fn jet_registry_report(document: &str) -> ProviderFactReport {
     facts.platforms = json_array_strings(&object, "platforms");
     add_json_projection(&mut facts, "provider.registry.native", &object);
     let mut losses = Vec::new();
-    if let Some(value) = object.get("dependencies") {
-        if let JSONValue::Object(dependencies) = value {
+    if let Some(value) = object_field(&object, "dependencies") {
+        if let DataTree::Object(dependencies) = value {
             for (name, requirement) in dependencies {
                 add_typed_json_fact(
                     &mut facts,
@@ -3668,8 +3680,8 @@ fn jet_registry_report(document: &str) -> ProviderFactReport {
         ("plugin_dependencies", "plugin"),
         ("target_dependencies", "target"),
     ] {
-        if let Some(value) = object.get(field) {
-            if let JSONValue::Object(dependencies) = value {
+        if let Some(value) = object_field(&object, field) {
+            if let DataTree::Object(dependencies) = value {
                 add_typed_json_fact(
                     &mut facts,
                     format!("provider.registry.dependency-role.{role}"),
@@ -3687,13 +3699,13 @@ fn jet_registry_report(document: &str) -> ProviderFactReport {
             }
         }
     }
-    if let Some(value) = object.get("features") {
-        if let JSONValue::Object(features) = value {
-            if features.values().all(|value| {
+    if let Some(value) = object_field(&object, "features") {
+        if let DataTree::Object(features) = value {
+            if object_values(features).all(|value| {
                 matches!(
                     value,
-                    JSONValue::Array(values)
-                        if values.iter().all(|item| matches!(item, JSONValue::String(_)))
+                    DataTree::Array(values)
+                        if values.iter().all(|item| matches!(item, DataTree::Text(_)))
                 )
             }) {
                 add_typed_json_fact(&mut facts, "provider.registry.features", value);
@@ -3704,18 +3716,18 @@ fn jet_registry_report(document: &str) -> ProviderFactReport {
             losses.push("registry `features` must be an object".to_string());
         }
     }
-    if let Some(value) = object.get("constraints") {
-        if matches!(value, JSONValue::Object(_)) {
+    if let Some(value) = object_field(&object, "constraints") {
+        if matches!(value, DataTree::Object(_)) {
             add_typed_json_fact(&mut facts, "provider.registry.constraints", value);
         } else {
             losses.push("registry `constraints` must be an object".to_string());
         }
     }
-    if let Some(value) = object.get("platforms") {
+    if let Some(value) = object_field(&object, "platforms") {
         if !matches!(
             value,
-            JSONValue::Array(values)
-                if values.iter().all(|item| matches!(item, JSONValue::String(_)))
+            DataTree::Array(values)
+                if values.iter().all(|item| matches!(item, DataTree::Text(_)))
         ) {
             losses.push("registry platforms must be an array of strings".to_string());
         }
@@ -3724,31 +3736,31 @@ fn jet_registry_report(document: &str) -> ProviderFactReport {
         (
             "license",
             matches!(
-                object.get("license"),
-                Some(JSONValue::String(_)) | Some(JSONValue::Object(_)) | None
+                object_field(&object, "license"),
+                Some(DataTree::Text(_)) | Some(DataTree::Object(_)) | None
             ),
         ),
         (
             "source",
             matches!(
-                object.get("source"),
-                Some(JSONValue::String(_)) | Some(JSONValue::Object(_)) | None
+                object_field(&object, "source"),
+                Some(DataTree::Text(_)) | Some(DataTree::Object(_)) | None
             ),
         ),
         (
             "advisories",
             matches!(
-                object.get("advisories"),
-                Some(JSONValue::Array(_)) | Some(JSONValue::Object(_)) | None
+                object_field(&object, "advisories"),
+                Some(DataTree::Array(_)) | Some(DataTree::Object(_)) | None
             ),
         ),
         (
             "variants",
-            matches!(object.get("variants"), Some(JSONValue::Object(_)) | None),
+            matches!(object_field(&object, "variants"), Some(DataTree::Object(_)) | None),
         ),
         (
             "hooks",
-            matches!(object.get("hooks"), Some(JSONValue::Object(_)) | None),
+            matches!(object_field(&object, "hooks"), Some(DataTree::Object(_)) | None),
         ),
     ] {
         if !valid {
@@ -3769,7 +3781,7 @@ fn jet_registry_report(document: &str) -> ProviderFactReport {
         ("variants", "provider.registry.variants"),
         ("hooks", "provider.registry.hooks"),
     ] {
-        if let Some(value) = object.get(field) {
+        if let Some(value) = object_field(&object, field) {
             add_typed_json_fact(&mut facts, target, value);
         }
     }
@@ -3781,7 +3793,7 @@ fn jet_registry_report(document: &str) -> ProviderFactReport {
             .losses
             .push("registry entry has no content hash".to_string());
     }
-    if let Some(value) = object.get("yanked") {
+    if let Some(value) = object_field(&object, "yanked") {
         if json_bool(Some(value)).is_none() {
             report
                 .losses
@@ -3790,7 +3802,7 @@ fn jet_registry_report(document: &str) -> ProviderFactReport {
     }
     for (index, line) in duplicate_lines.iter().enumerate() {
         match JSON::parse(line) {
-            Ok(JSONValue::Object(other))
+            Ok(DataTree::Object(other))
                 if json_string(&other, "name") == json_string(&object, "name")
                     && json_string(&other, "version") == json_string(&object, "version") =>
             {
@@ -3801,7 +3813,7 @@ fn jet_registry_report(document: &str) -> ProviderFactReport {
                     ));
                 }
             }
-            Ok(JSONValue::Object(_)) => report.losses.push(format!(
+            Ok(DataTree::Object(_)) => report.losses.push(format!(
                 "registry metadata contains multiple package identities; line {} needs its own lock record",
                 index + 2
             )),
@@ -3816,7 +3828,7 @@ fn jet_registry_report(document: &str) -> ProviderFactReport {
 
 fn github_report(document: &str) -> ProviderFactReport {
     let parsed = JSON::parse(document).ok();
-    let Some(JSONValue::Object(object)) = parsed else {
+    let Some(DataTree::Object(object)) = parsed else {
         return empty_report(
             ProviderFamily::Github,
             "github",
@@ -3829,7 +3841,8 @@ fn github_report(document: &str) -> ProviderFactReport {
         .or_else(|| json_string(&object, "full_name"))
         .or_else(|| {
             object
-                .get("repository")
+                .iter()
+                .find_map(|(name, value)| (name == "repository").then_some(value))
                 .and_then(|value| value.as_object().ok())
                 .and_then(|repository| json_string(repository, "full_name"))
         })
@@ -3850,9 +3863,9 @@ fn github_report(document: &str) -> ProviderFactReport {
         }
     }
     facts.version = tag.or(version).unwrap_or_default();
-    if let Some(value) = object.get("target_commitish") {
+    if let Some(value) = object_field(&object, "target_commitish") {
         match value {
-            JSONValue::String(revision) if !revision.trim().is_empty() => {
+            DataTree::Text(revision) if !revision.trim().is_empty() => {
                 add_typed_text_fact(
                     &mut facts,
                     "provider.github.source.target_commitish",
@@ -3862,20 +3875,20 @@ fn github_report(document: &str) -> ProviderFactReport {
                     add_typed_text_fact(&mut facts, "provider.github.revision", revision);
                 }
             }
-            JSONValue::String(_) => losses.push("GitHub `target_commitish` is empty".to_string()),
+            DataTree::Text(_) => losses.push("GitHub `target_commitish` is empty".to_string()),
             _ => losses.push("GitHub `target_commitish` must be a string".to_string()),
         }
     }
-    if let Some(value) = object.get("license") {
+    if let Some(value) = object_field(&object, "license") {
         facts.license = match value {
-            JSONValue::String(license) => license.clone(),
-            JSONValue::Object(license) => json_string(license, "spdx_id").unwrap_or_default(),
+            DataTree::Text(license) => license.clone(),
+            DataTree::Object(license) => json_string(license, "spdx_id").unwrap_or_default(),
             _ => {
                 losses.push("GitHub `license` must be a string or object".to_string());
                 String::new()
             }
         };
-        if matches!(value, JSONValue::Object(_)) && facts.license.is_empty() {
+        if matches!(value, DataTree::Object(_)) && facts.license.is_empty() {
             losses.push("GitHub license object has no spdx_id".to_string());
         }
     }
@@ -3904,14 +3917,14 @@ fn github_report(document: &str) -> ProviderFactReport {
         &mut losses,
     );
     for key in ["platforms", "os", "architectures"] {
-        if let Some(value) = object.get(key) {
+        if let Some(value) = object_field(&object, key) {
             match json_string_list(value) {
                 Some(values) => facts.platforms.extend(values),
                 None => losses.push(format!("GitHub `{key}` must be strings")),
             }
         }
     }
-    if let Some(value) = object.get("assets") {
+    if let Some(value) = object_field(&object, "assets") {
         github_asset_facts(&mut facts, value, &mut losses);
     }
     for (field, target) in [
@@ -3937,7 +3950,7 @@ fn github_report(document: &str) -> ProviderFactReport {
         ("hooks", "provider.github.hooks"),
         ("variants", "provider.github.variants"),
     ] {
-        if let Some(value) = object.get(field) {
+        if let Some(value) = object_field(&object, field) {
             add_typed_json_fact(&mut facts, target, value);
         }
     }
@@ -3946,7 +3959,7 @@ fn github_report(document: &str) -> ProviderFactReport {
         ("digest", "provider.github.digest"),
         ("hash", "provider.github.digest"),
     ] {
-        if let Some(value) = object.get(key) {
+        if let Some(value) = object_field(&object, key) {
             add_typed_json_fact(&mut facts, target, value);
             if let Some(digest) = json_string(&object, key) {
                 if !ProviderSelector::parse(&format!("#digest={digest}")).is_exact() {
@@ -3971,7 +3984,7 @@ fn github_report(document: &str) -> ProviderFactReport {
 
 fn binary_report(document: &str) -> ProviderFactReport {
     let parsed = JSON::parse(document).ok();
-    let Some(JSONValue::Object(object)) = parsed else {
+    let Some(DataTree::Object(object)) = parsed else {
         return empty_report(
             ProviderFamily::Binary,
             "binary",
@@ -3986,17 +3999,17 @@ fn binary_report(document: &str) -> ProviderFactReport {
     }
     let mut facts = MetadataFacts::empty(ProviderFamily::Binary, name);
     add_json_projection(&mut facts, "provider.binary.native", &object);
-    if let Some(value) = object.get("version") {
+    if let Some(value) = object_field(&object, "version") {
         match value {
-            JSONValue::String(version) => facts.version = version.clone(),
+            DataTree::Text(version) => facts.version = version.clone(),
             _ => losses.push("binary metadata `version` must be a string".to_string()),
         }
     }
     let mut digests = Vec::new();
     for key in ["hash", "sha256", "digest"] {
-        if let Some(value) = object.get(key) {
+        if let Some(value) = object_field(&object, key) {
             match value {
-                JSONValue::String(digest) if !digest.trim().is_empty() => {
+                DataTree::Text(digest) if !digest.trim().is_empty() => {
                     digests.push((key, digest.clone()));
                     add_typed_text_fact(
                         &mut facts,
@@ -4004,7 +4017,7 @@ fn binary_report(document: &str) -> ProviderFactReport {
                         digest,
                     );
                 }
-                JSONValue::String(_) => losses.push(format!("binary metadata `{key}` is empty")),
+                DataTree::Text(_) => losses.push(format!("binary metadata `{key}` is empty")),
                 _ => losses.push(format!("binary metadata `{key}` must be a string")),
             }
         }
@@ -4023,17 +4036,17 @@ fn binary_report(document: &str) -> ProviderFactReport {
     }
     let mut platforms = Vec::new();
     for key in ["platform", "target"] {
-        if let Some(value) = object.get(key) {
+        if let Some(value) = object_field(&object, key) {
             match value {
-                JSONValue::String(platform) if !platform.trim().is_empty() => {
+                DataTree::Text(platform) if !platform.trim().is_empty() => {
                     platforms.push(platform.clone());
                 }
-                JSONValue::String(_) => losses.push(format!("binary metadata `{key}` is empty")),
+                DataTree::Text(_) => losses.push(format!("binary metadata `{key}` is empty")),
                 _ => losses.push(format!("binary metadata `{key}` must be a string")),
             }
         }
     }
-    if let Some(value) = object.get("platforms") {
+    if let Some(value) = object_field(&object, "platforms") {
         match json_string_list(value) {
             Some(values) => platforms.extend(values),
             None => losses.push("binary metadata `platforms` must be strings".to_string()),
@@ -4069,7 +4082,7 @@ fn binary_report(document: &str) -> ProviderFactReport {
         "binary",
         &mut losses,
     );
-    if let Some(value) = object.get("bins") {
+    if let Some(value) = object_field(&object, "bins") {
         match json_string_list(value) {
             Some(values) => facts.bins = values,
             None => losses.push("binary metadata `bins` must be strings".to_string()),
@@ -4091,11 +4104,11 @@ fn binary_report(document: &str) -> ProviderFactReport {
         ("variants", "provider.binary.variants"),
         ("hooks", "provider.binary.hooks"),
     ] {
-        if let Some(value) = object.get(field) {
+        if let Some(value) = object_field(&object, field) {
             add_typed_json_fact(&mut facts, target, value);
         }
     }
-    if let Some(value) = object.get("artifacts") {
+    if let Some(value) = object_field(&object, "artifacts") {
         binary_artifact_facts(&mut facts, value, &mut losses);
     }
     facts.source_identity = format!("binary:{}@{}", facts.name, facts.integrity_hash);
@@ -4117,9 +4130,9 @@ fn nix_report(document: &str) -> ProviderFactReport {
         }
     };
     match parsed {
-        JSONValue::Object(object) => nix_object_report(&object),
-        JSONValue::Array(entries) => {
-            let Some(JSONValue::Object(first)) = entries.first() else {
+        DataTree::Object(object) => nix_object_report(&object),
+        DataTree::Array(entries) => {
+            let Some(DataTree::Object(first)) = entries.first() else {
                 return empty_report(
                     ProviderFamily::Nix,
                     "nix",
@@ -4128,7 +4141,7 @@ fn nix_report(document: &str) -> ProviderFactReport {
             };
             let mut report = nix_object_report(first);
             for (index, entry) in entries.iter().enumerate().skip(1) {
-                let JSONValue::Object(other) = entry else {
+                let DataTree::Object(other) = entry else {
                     report.losses.push(format!(
                         "Nix provider metadata entry {} is not a JSON object",
                         index + 1
@@ -4157,11 +4170,13 @@ fn nix_report(document: &str) -> ProviderFactReport {
     }
 }
 
-fn nix_object_report(object: &std::collections::BTreeMap<String, JSONValue>) -> ProviderFactReport {
-    let meta = object.get("meta").and_then(|value| value.as_object().ok());
-    let locked = object
-        .get("locked")
-        .and_then(|value| value.as_object().ok());
+fn nix_object_report(object: &[(String, DataTree)]) -> ProviderFactReport {
+    let meta = object_field(object, "meta")
+        .and_then(|value| value.as_object().ok())
+        .map(|value| value.as_slice());
+    let locked = object_field(object, "locked")
+        .and_then(|value| value.as_object().ok())
+        .map(|value| value.as_slice());
     let mut losses = Vec::new();
     let mut conflicts = Vec::new();
     let mut facts = MetadataFacts::empty(ProviderFamily::Nix, "");
@@ -4169,7 +4184,7 @@ fn nix_object_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
 
     if let Some(meta) = meta {
         add_json_projection(&mut facts, "provider.nix.native.meta", meta);
-    } else if object.contains_key("meta") {
+    } else if object_field(object, "meta").is_some() {
         losses.push("Nix `meta` must be a JSON object".to_string());
     }
     if let Some(locked) = locked {
@@ -4180,7 +4195,7 @@ fn nix_object_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
                     .to_string(),
             );
         }
-    } else if object.contains_key("locked") {
+    } else if object_field(object, "locked").is_some() {
         losses.push("Nix `locked` source facts must be a JSON object".to_string());
     }
 
@@ -4253,10 +4268,9 @@ fn nix_object_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
         .unwrap_or_default();
 
     let top_hash = nix_hash_field(object, &mut losses);
-    let output_hash = object
-        .get("outputs")
+    let output_hash = object_field(object, "outputs")
         .and_then(|value| value.as_object().ok())
-        .and_then(|outputs| outputs.get("out").or_else(|| outputs.get("bin")))
+        .and_then(|outputs| object_field(outputs, "out").or_else(|| object_field(outputs, "bin")))
         .and_then(|value| value.as_object().ok())
         .and_then(|output| {
             ["narHash", "outputHash", "hash", "sha256"]
@@ -4298,17 +4312,17 @@ fn nix_object_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
     nix_advisories(&mut facts, object, meta, &mut losses);
     nix_sources(&mut facts, object, locked, drv_path.as_deref(), &mut losses);
 
-    if let Some(JSONValue::Object(nodes)) = object.get("nodes") {
+    if let Some(DataTree::Object(nodes)) = object_field(object, "nodes") {
         add_json_projection(&mut facts, "provider.nix.lock.nodes", nodes);
         for (name, node) in nodes {
             add_typed_json_fact(&mut facts, format!("provider.nix.lock.node.{name}"), node);
-            let JSONValue::Object(node) = node else {
+            let DataTree::Object(node) = node else {
                 losses.push(format!(
                     "Nix flake lock node `{name}` must be a JSON object"
                 ));
                 continue;
             };
-            let Some(locked) = node.get("locked") else {
+            let Some(locked) = object_field(node, "locked") else {
                 continue;
             };
             let Ok(locked) = locked.as_object() else {
@@ -4336,23 +4350,23 @@ fn nix_object_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
                     .to_string(),
             );
         }
-    } else if object.contains_key("nodes") {
+    } else if object_field(object, "nodes").is_some() {
         losses.push("Nix flake lock `nodes` must be a JSON object".to_string());
     }
-    if let Some(value) = object.get("packages") {
+    if let Some(value) = object_field(object, "packages") {
         add_typed_json_fact(&mut facts, "provider.nix.packages", value);
         match value {
-            JSONValue::Array(packages) => {
+            DataTree::Array(packages) => {
                 for package in packages {
                     match package {
-                        JSONValue::String(name) => facts.dependencies.push(name.clone()),
-                        JSONValue::Object(package) => {
+                        DataTree::Text(name) => facts.dependencies.push(name.clone()),
+                        DataTree::Object(package) => {
                             if let Some(name) = json_string(package, "name") {
                                 facts.dependencies.push(name.clone());
                                 add_typed_json_fact(
                                     &mut facts,
                                     format!("provider.nix.package.{name}"),
-                                    package.get("version").unwrap_or(value),
+                                    object_field(package, "version").unwrap_or(value),
                                 );
                             } else {
                                 losses.push(
@@ -4395,30 +4409,25 @@ fn nix_object_report(object: &std::collections::BTreeMap<String, JSONValue>) -> 
 }
 
 fn nix_identity_key(
-    object: &std::collections::BTreeMap<String, JSONValue>,
+    object: &[(String, DataTree)],
 ) -> (Option<String>, Option<String>, Option<String>) {
     (
-        object
-            .get("pname")
+        object_field(object, "pname")
             .and_then(|value| value.as_str().ok())
             .map(str::to_string)
             .or_else(|| {
-                object
-                    .get("name")
+                object_field(object, "name")
                     .and_then(|value| value.as_str().ok())
                     .map(str::to_string)
             }),
-        object
-            .get("version")
+        object_field(object, "version")
             .and_then(|value| value.as_str().ok())
             .map(str::to_string),
-        object
-            .get("drvPath")
+        object_field(object, "drvPath")
             .and_then(|value| value.as_str().ok())
             .map(str::to_string)
             .or_else(|| {
-                object
-                    .get("narHash")
+                object_field(object, "narHash")
                     .and_then(|value| value.as_str().ok())
                     .map(str::to_string)
             }),
@@ -4426,15 +4435,15 @@ fn nix_identity_key(
 }
 
 fn nix_string_field(
-    object: &std::collections::BTreeMap<String, JSONValue>,
+    object: &[(String, DataTree)],
     key: &str,
     label: &str,
     losses: &mut Vec<String>,
 ) -> Option<String> {
-    match object.get(key) {
+    match object_field(object, key) {
         None => None,
-        Some(JSONValue::String(value)) if !value.trim().is_empty() => Some(value.clone()),
-        Some(JSONValue::String(_)) => {
+        Some(DataTree::Text(value)) if !value.trim().is_empty() => Some(value.clone()),
+        Some(DataTree::Text(_)) => {
             losses.push(format!("Nix `{label}` must not be empty"));
             None
         }
@@ -4468,17 +4477,17 @@ fn nix_conflicting_values<const N: usize>(
 }
 
 fn nix_output_path(
-    object: &std::collections::BTreeMap<String, JSONValue>,
+    object: &[(String, DataTree)],
     losses: &mut Vec<String>,
 ) -> Option<String> {
-    let Some(outputs) = object.get("outputs") else {
+    let Some(outputs) = object_field(object, "outputs") else {
         return None;
     };
     let Ok(outputs) = outputs.as_object() else {
         losses.push("Nix `outputs` must be a JSON object".to_string());
         return None;
     };
-    let key = if outputs.contains_key("out") {
+    let key = if object_field(outputs, "out").is_some() {
         "out"
     } else {
         "bin"
@@ -4487,11 +4496,11 @@ fn nix_output_path(
 }
 
 fn nix_hash_field(
-    object: &std::collections::BTreeMap<String, JSONValue>,
+    object: &[(String, DataTree)],
     losses: &mut Vec<String>,
 ) -> Option<String> {
     for key in ["narHash", "outputHash", "hash", "sha256", "contentHash"] {
-        if object.contains_key(key) {
+        if object_field(object, key).is_some() {
             let hash = nix_string_field(object, key, key, losses);
             if let Some(hash) = &hash {
                 if !ProviderSelector::parse(&format!("#digest={hash}")).is_exact() {
@@ -4534,14 +4543,14 @@ fn nix_version_suffix(name: &str, package: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn nix_dependency_values(value: &JSONValue, losses: &mut Vec<String>, label: &str) -> Vec<String> {
+fn nix_dependency_values(value: &DataTree, losses: &mut Vec<String>, label: &str) -> Vec<String> {
     match value {
-        JSONValue::String(value) => vec![value.clone()],
-        JSONValue::Array(values) => values
+        DataTree::Text(value) => vec![value.clone()],
+        DataTree::Array(values) => values
             .iter()
             .filter_map(|value| match value {
-                JSONValue::String(value) => Some(value.clone()),
-                JSONValue::Object(object) => json_string(object, "name")
+                DataTree::Text(value) => Some(value.clone()),
+                DataTree::Object(object) => json_string(object, "name")
                     .or_else(|| json_string(object, "drvPath"))
                     .or_else(|| {
                         losses.push(format!(
@@ -4555,21 +4564,21 @@ fn nix_dependency_values(value: &JSONValue, losses: &mut Vec<String>, label: &st
                 }
             })
             .collect(),
-        JSONValue::Object(values) => {
+        DataTree::Object(values) => {
             if label == "inputDrvs"
-                && values.values().any(|value| {
+                && object_values(values).any(|value| {
                     !matches!(
                         value,
-                        JSONValue::Array(outputs)
+                        DataTree::Array(outputs)
                             if outputs
                                 .iter()
-                                .all(|output| matches!(output, JSONValue::String(_)))
+                                .all(|output| matches!(output, DataTree::Text(_)))
                     )
                 })
             {
                 losses.push("Nix `inputDrvs` values must be arrays of output names".to_string());
             }
-            values.keys().cloned().collect()
+            object_keys(values).map(str::to_string).collect()
         }
         _ => {
             losses.push(format!("Nix `{label}` must be a string, array, or object"));
@@ -4580,12 +4589,12 @@ fn nix_dependency_values(value: &JSONValue, losses: &mut Vec<String>, label: &st
 
 fn nix_dependencies(
     facts: &mut MetadataFacts,
-    object: &std::collections::BTreeMap<String, JSONValue>,
+    object: &[(String, DataTree)],
     losses: &mut Vec<String>,
     fields: &[(&str, &str)],
 ) {
     for (field, kind) in fields {
-        let Some(value) = object.get(*field) else {
+        let Some(value) = object_field(object, *field) else {
             continue;
         };
         add_typed_json_fact(facts, format!("provider.nix.dependency.{kind}"), value);
@@ -4608,7 +4617,7 @@ fn nix_dependencies(
 
 fn nix_hooks(
     facts: &mut MetadataFacts,
-    object: &std::collections::BTreeMap<String, JSONValue>,
+    object: &[(String, DataTree)],
     losses: &mut Vec<String>,
 ) {
     for key in [
@@ -4624,21 +4633,21 @@ fn nix_hooks(
         "installPhase",
         "postInstall",
     ] {
-        if let Some(value) = object.get(key) {
+        if let Some(value) = object_field(object, key) {
             add_typed_json_fact(facts, format!("provider.nix.hook.{key}"), value);
             let valid = match key {
                 "args" => match value {
-                    JSONValue::String(_) => true,
-                    JSONValue::Array(values) => values
+                    DataTree::Text(_) => true,
+                    DataTree::Array(values) => values
                         .iter()
-                        .all(|value| matches!(value, JSONValue::String(_))),
+                        .all(|value| matches!(value, DataTree::Text(_))),
                     _ => false,
                 },
                 "hooks" => matches!(
                     value,
-                    JSONValue::String(_) | JSONValue::Array(_) | JSONValue::Object(_)
+                    DataTree::Text(_) | DataTree::Array(_) | DataTree::Object(_)
                 ),
-                _ => matches!(value, JSONValue::String(_)),
+                _ => matches!(value, DataTree::Text(_)),
             };
             if !valid {
                 losses.push(format!("Nix `{key}` hook has an unsupported shape"));
@@ -4652,8 +4661,8 @@ fn nix_hooks(
 
 fn nix_variants(
     facts: &mut MetadataFacts,
-    object: &std::collections::BTreeMap<String, JSONValue>,
-    meta: Option<&std::collections::BTreeMap<String, JSONValue>>,
+    object: &[(String, DataTree)],
+    meta: Option<&[(String, DataTree)]>,
     losses: &mut Vec<String>,
 ) {
     for key in [
@@ -4668,14 +4677,14 @@ fn nix_variants(
         "outputs",
         "variants",
     ] {
-        if let Some(value) = object.get(key) {
+        if let Some(value) = object_field(object, key) {
             add_typed_json_fact(facts, format!("provider.nix.variant.{key}"), value);
             let values = nix_string_list_value(value, key, losses);
             facts.platforms.extend(values);
         }
     }
     if let Some(meta) = meta {
-        if let Some(value) = meta.get("platforms") {
+        if let Some(value) = object_field(meta, "platforms") {
             add_typed_json_fact(facts, "provider.nix.variant.meta.platforms", value);
             facts
                 .platforms
@@ -4686,20 +4695,20 @@ fn nix_variants(
     facts.platforms.dedup();
 }
 
-fn nix_string_list_value(value: &JSONValue, label: &str, losses: &mut Vec<String>) -> Vec<String> {
+fn nix_string_list_value(value: &DataTree, label: &str, losses: &mut Vec<String>) -> Vec<String> {
     match value {
-        JSONValue::String(value) => vec![value.clone()],
-        JSONValue::Array(values) => values
+        DataTree::Text(value) => vec![value.clone()],
+        DataTree::Array(values) => values
             .iter()
             .filter_map(|value| match value {
-                JSONValue::String(value) => Some(value.clone()),
+                DataTree::Text(value) => Some(value.clone()),
                 _ => {
                     losses.push(format!("Nix `{label}` entries must be strings"));
                     None
                 }
             })
             .collect(),
-        JSONValue::Object(_)
+        DataTree::Object(_)
             if matches!(
                 label,
                 "crossSystem"
@@ -4728,18 +4737,17 @@ fn nix_string_list_value(value: &JSONValue, label: &str, losses: &mut Vec<String
 
 fn nix_license(
     facts: &mut MetadataFacts,
-    object: &std::collections::BTreeMap<String, JSONValue>,
-    meta: Option<&std::collections::BTreeMap<String, JSONValue>>,
+    object: &[(String, DataTree)],
+    meta: Option<&[(String, DataTree)]>,
     losses: &mut Vec<String>,
 ) {
-    let license = object
-        .get("license")
-        .or_else(|| meta.and_then(|value| value.get("license")));
+    let license = object_field(object, "license")
+        .or_else(|| meta.and_then(|value| object_field(value, "license")));
     if let Some(value) = license {
         add_typed_json_fact(facts, "provider.nix.license", value);
         if !matches!(
             value,
-            JSONValue::String(_) | JSONValue::Object(_) | JSONValue::Array(_)
+            DataTree::Text(_) | DataTree::Object(_) | DataTree::Array(_)
         ) {
             losses.push("Nix `license` must be a string, object, or array".to_string());
         }
@@ -4749,7 +4757,7 @@ fn nix_license(
 
 fn nix_signatures(
     facts: &mut MetadataFacts,
-    object: &std::collections::BTreeMap<String, JSONValue>,
+    object: &[(String, DataTree)],
     losses: &mut Vec<String>,
 ) {
     for key in [
@@ -4761,7 +4769,7 @@ fn nix_signatures(
         "signedBy",
         "trustedKeys",
     ] {
-        if let Some(value) = object.get(key) {
+        if let Some(value) = object_field(object, key) {
             add_typed_json_fact(facts, format!("provider.nix.signature.{key}"), value);
             facts
                 .trust_roots
@@ -4774,22 +4782,22 @@ fn nix_signatures(
 
 fn nix_advisories(
     facts: &mut MetadataFacts,
-    object: &std::collections::BTreeMap<String, JSONValue>,
-    meta: Option<&std::collections::BTreeMap<String, JSONValue>>,
+    object: &[(String, DataTree)],
+    meta: Option<&[(String, DataTree)]>,
     losses: &mut Vec<String>,
 ) {
     for key in ["yanked", "broken", "insecure", "unfree", "available"] {
-        if let Some(value) = object.get(key).or_else(|| meta.and_then(|m| m.get(key))) {
+        if let Some(value) = object_field(object, key).or_else(|| meta.and_then(|m| object_field(m, key))) {
             add_typed_json_fact(facts, format!("provider.nix.advisory.{key}"), value);
-            if !matches!(value, JSONValue::Bool(_)) {
+            if !matches!(value, DataTree::Bool(_)) {
                 losses.push(format!("Nix `{key}` advisory flag must be a boolean"));
             }
         }
     }
     for key in ["advisories", "knownVulnerabilities", "vulnerabilities"] {
-        if let Some(value) = object.get(key).or_else(|| meta.and_then(|m| m.get(key))) {
+        if let Some(value) = object_field(object, key).or_else(|| meta.and_then(|m| object_field(m, key))) {
             add_typed_json_fact(facts, format!("provider.nix.advisory.{key}"), value);
-            if !matches!(value, JSONValue::String(_) | JSONValue::Array(_)) {
+            if !matches!(value, DataTree::Text(_) | DataTree::Array(_)) {
                 losses.push(format!("Nix `{key}` advisories must be a string or array"));
             }
             if let Some(values) = json_string_list(value) {
@@ -4801,8 +4809,8 @@ fn nix_advisories(
 
 fn nix_sources(
     facts: &mut MetadataFacts,
-    object: &std::collections::BTreeMap<String, JSONValue>,
-    locked: Option<&std::collections::BTreeMap<String, JSONValue>>,
+    object: &[(String, DataTree)],
+    locked: Option<&[(String, DataTree)]>,
     drv_path: Option<&str>,
     _losses: &mut Vec<String>,
 ) {
@@ -4818,13 +4826,13 @@ fn nix_sources(
         "homepage",
         "downloadPage",
     ] {
-        if let Some(value) = object.get(key) {
+        if let Some(value) = object_field(object, key) {
             add_typed_json_fact(facts, format!("provider.nix.source.{key}"), value);
         }
     }
     if let Some(locked) = locked {
         for key in ["type", "owner", "repo", "rev", "narHash", "lastModified"] {
-            if let Some(value) = locked.get(key) {
+            if let Some(value) = object_field(locked, key) {
                 add_typed_json_fact(facts, format!("provider.nix.source.locked.{key}"), value);
             }
         }
@@ -4835,12 +4843,12 @@ fn nix_sources(
 }
 
 fn nix_source_identity(
-    object: &std::collections::BTreeMap<String, JSONValue>,
-    locked: Option<&std::collections::BTreeMap<String, JSONValue>>,
+    object: &[(String, DataTree)],
+    locked: Option<&[(String, DataTree)]>,
     drv_path: Option<&str>,
 ) -> Option<String> {
     for key in ["sourceIdentity", "immutableSource", "sourcePath", "flake"] {
-        if let Some(value) = object.get(key).and_then(|value| value.as_str().ok()) {
+        if let Some(value) = object_field(object, key).and_then(|value| value.as_str().ok()) {
             if !value.trim().is_empty() {
                 return Some(value.to_string());
             }
@@ -4849,13 +4857,12 @@ fn nix_source_identity(
     if let Some(identity) = locked_source_identity(locked) {
         return Some(identity);
     }
-    let root = object
-        .get("root")
+    let root = object_field(object, "root")
         .and_then(|value| value.as_str().ok())
         .unwrap_or("root");
-    if let Some(JSONValue::Object(nodes)) = object.get("nodes") {
-        if let Some(JSONValue::Object(node)) = nodes.get(root) {
-            if let Some(locked) = node.get("locked").and_then(|value| value.as_object().ok()) {
+    if let Some(DataTree::Object(nodes)) = object_field(object, "nodes") {
+        if let Some(DataTree::Object(node)) = object_field(nodes, root) {
+            if let Some(locked) = object_field(node, "locked").and_then(|value| value.as_object().ok()) {
                 if let Some(identity) = locked_source_identity(Some(locked)) {
                     return Some(identity);
                 }
@@ -4866,7 +4873,7 @@ fn nix_source_identity(
 }
 
 fn locked_source_identity(
-    locked: Option<&std::collections::BTreeMap<String, JSONValue>>,
+    locked: Option<&[(String, DataTree)]>,
 ) -> Option<String> {
     let locked = locked?;
     let kind = json_string(locked, "type").unwrap_or_else(|| "flake".to_string());
@@ -4898,13 +4905,13 @@ fn locked_source_identity(
 
 fn provider_dependency_field(
     facts: &mut MetadataFacts,
-    object: &std::collections::BTreeMap<String, JSONValue>,
+    object: &[(String, DataTree)],
     field: &str,
     kind: &str,
     namespace: &str,
     losses: &mut Vec<String>,
 ) -> Vec<String> {
-    let Some(value) = object.get(field) else {
+    let Some(value) = object_field(object, field) else {
         return Vec::new();
     };
     let Some(values) = value.as_array().ok() else {
@@ -4919,7 +4926,7 @@ fn provider_dependency_field(
             value,
         );
         match value {
-            JSONValue::String(name) if !name.trim().is_empty() => {
+            DataTree::Text(name) if !name.trim().is_empty() => {
                 dependencies.push(name.clone());
                 add_conflicting_typed_json_fact(
                     facts,
@@ -4927,7 +4934,7 @@ fn provider_dependency_field(
                     value,
                 );
             }
-            JSONValue::Object(dependency) => {
+            DataTree::Object(dependency) => {
                 let Some(name) =
                     json_string(dependency, "name").or_else(|| json_string(dependency, "id"))
                 else {
@@ -4957,7 +4964,7 @@ fn provider_dependency_field(
 
 fn add_homebrew_named_facts(
     facts: &mut MetadataFacts,
-    object: &std::collections::BTreeMap<String, JSONValue>,
+    object: &[(String, DataTree)],
 ) {
     for (field, category) in [
         ("homepage", "source"),
@@ -4983,7 +4990,7 @@ fn add_homebrew_named_facts(
         ("disable_date", "advisory"),
         ("replacement", "advisory"),
     ] {
-        if let Some(value) = object.get(field) {
+        if let Some(value) = object_field(object, field) {
             add_typed_json_fact(
                 facts,
                 format!("provider.homebrew.{category}.{field}"),
@@ -4993,12 +5000,12 @@ fn add_homebrew_named_facts(
     }
 }
 
-fn homebrew_bottle_facts(facts: &mut MetadataFacts, value: &JSONValue, losses: &mut Vec<String>) {
+fn homebrew_bottle_facts(facts: &mut MetadataFacts, value: &DataTree, losses: &mut Vec<String>) {
     let Some(bottle) = value.as_object().ok() else {
         losses.push("Homebrew `bottle` must be an object".to_string());
         return;
     };
-    let Some(stable) = bottle.get("stable") else {
+    let Some(stable) = object_field(bottle, "stable") else {
         losses.push("Homebrew `bottle` has no stable artifact set".to_string());
         return;
     };
@@ -5006,8 +5013,7 @@ fn homebrew_bottle_facts(facts: &mut MetadataFacts, value: &JSONValue, losses: &
         losses.push("Homebrew `bottle.stable` must be an object".to_string());
         return;
     };
-    let files = stable
-        .get("files")
+    let files = object_field(stable, "files")
         .and_then(|value| value.as_object().ok())
         .unwrap_or(stable);
     for (platform, artifact) in files {
@@ -5022,7 +5028,7 @@ fn homebrew_bottle_facts(facts: &mut MetadataFacts, value: &JSONValue, losses: &
         add_typed_json_fact(
             facts,
             format!("provider.homebrew.bottle.{platform}"),
-            &JSONValue::Object(artifact.clone()),
+            &DataTree::Object(artifact.clone()),
         );
         let Some(hash) = json_string(artifact, "sha256") else {
             losses.push(format!(
@@ -5044,21 +5050,21 @@ fn homebrew_bottle_facts(facts: &mut MetadataFacts, value: &JSONValue, losses: &
 }
 
 fn homebrew_source_hash(
-    object: &std::collections::BTreeMap<String, JSONValue>,
+    object: &[(String, DataTree)],
     losses: &mut Vec<String>,
 ) -> Option<String> {
     let mut hashes = Vec::new();
     for (field, value) in [
-        ("sha256", object.get("sha256")),
-        ("source", object.get("source")),
+        ("sha256", object_field(object, "sha256")),
+        ("source", object_field(object, "source")),
     ] {
         let Some(value) = value else {
             continue;
         };
         let hash = if field == "sha256" {
             match value {
-                JSONValue::String(hash) if !hash.trim().is_empty() => Some(hash.clone()),
-                JSONValue::String(_) => {
+                DataTree::Text(hash) if !hash.trim().is_empty() => Some(hash.clone()),
+                DataTree::Text(_) => {
                     losses.push("Homebrew `sha256` must not be empty".to_string());
                     None
                 }
@@ -5072,9 +5078,9 @@ fn homebrew_source_hash(
                 losses.push("Homebrew `source` must be an object".to_string());
                 continue;
             };
-            match source.get("sha256") {
-                Some(JSONValue::String(hash)) if !hash.trim().is_empty() => Some(hash.clone()),
-                Some(JSONValue::String(_)) => {
+            match object_field(source, "sha256") {
+                Some(DataTree::Text(hash)) if !hash.trim().is_empty() => Some(hash.clone()),
+                Some(DataTree::Text(_)) => {
                     losses.push("Homebrew `source.sha256` must not be empty".to_string());
                     None
                 }
@@ -5092,12 +5098,12 @@ fn homebrew_source_hash(
             hashes.push(hash);
         }
     }
-    if let Some(urls_value) = object.get("urls") {
+    if let Some(urls_value) = object_field(object, "urls") {
         let Some(urls) = urls_value.as_object().ok() else {
             losses.push("Homebrew `urls` must be an object".to_string());
             return hashes.into_iter().next();
         };
-        if let Some(stable_value) = urls.get("stable") {
+        if let Some(stable_value) = object_field(urls, "stable") {
             let Some(stable) = stable_value.as_object().ok() else {
                 losses.push("Homebrew `urls.stable` must be an object".to_string());
                 return hashes.into_iter().next();
@@ -5107,7 +5113,7 @@ fn homebrew_source_hash(
                     losses.push("Homebrew `urls.stable.sha256` is not an exact digest".to_string());
                 }
                 hashes.push(hash);
-            } else if stable.contains_key("sha256") {
+            } else if object_field(stable, "sha256").is_some() {
                 losses.push("Homebrew `urls.stable.sha256` must be a string".to_string());
             }
         }
@@ -5118,7 +5124,7 @@ fn homebrew_source_hash(
     hashes.into_iter().next()
 }
 
-fn github_asset_facts(facts: &mut MetadataFacts, value: &JSONValue, losses: &mut Vec<String>) {
+fn github_asset_facts(facts: &mut MetadataFacts, value: &DataTree, losses: &mut Vec<String>) {
     let Some(assets) = value.as_array().ok() else {
         losses.push("GitHub `assets` must be an array".to_string());
         return;
@@ -5136,14 +5142,13 @@ fn github_asset_facts(facts: &mut MetadataFacts, value: &JSONValue, losses: &mut
         if let Some(platform) = json_string(asset, "platform") {
             facts.platforms.push(platform);
         }
-        let digest = asset
-            .get("digest")
-            .or_else(|| asset.get("sha256"))
-            .or_else(|| asset.get("hash"));
+        let digest = object_field(asset, "digest")
+            .or_else(|| object_field(asset, "sha256"))
+            .or_else(|| object_field(asset, "hash"));
         match digest {
-            Some(JSONValue::String(digest))
+            Some(DataTree::Text(digest))
                 if ProviderSelector::parse(&format!("#digest={digest}")).is_exact() => {}
-            Some(JSONValue::String(_)) => {
+            Some(DataTree::Text(_)) => {
                 losses.push(format!("GitHub asset `{name}` has a non-exact digest"))
             }
             Some(_) => losses.push(format!("GitHub asset `{name}` digest must be a string")),
@@ -5152,7 +5157,7 @@ fn github_asset_facts(facts: &mut MetadataFacts, value: &JSONValue, losses: &mut
     }
 }
 
-fn binary_artifact_facts(facts: &mut MetadataFacts, value: &JSONValue, losses: &mut Vec<String>) {
+fn binary_artifact_facts(facts: &mut MetadataFacts, value: &DataTree, losses: &mut Vec<String>) {
     let Some(artifacts) = value.as_object().ok() else {
         losses.push("binary metadata `artifacts` must be an object".to_string());
         return;
@@ -5236,35 +5241,34 @@ fn provider_document_format(family: &ProviderFamily, document: &str) -> String {
 }
 
 fn json_string(
-    object: &std::collections::BTreeMap<String, JSONValue>,
+    object: &[(String, DataTree)],
     key: &str,
 ) -> Option<String> {
-    match object.get(key) {
-        Some(JSONValue::String(value)) if !value.trim().is_empty() => Some(value.clone()),
-        _ => None,
-    }
+    object_field(object, key)
+        .and_then(|value| value.as_str().ok())
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
 }
 
-fn json_keys(object: &std::collections::BTreeMap<String, JSONValue>, key: &str) -> Vec<String> {
-    match object.get(key) {
-        Some(JSONValue::Object(values)) => values.keys().cloned().collect(),
+fn json_keys(object: &[(String, DataTree)], key: &str) -> Vec<String> {
+    match object_field(object, key) {
+        Some(DataTree::Object(values)) => object_keys(values).map(str::to_string).collect(),
         _ => Vec::new(),
     }
 }
 
 fn json_array_strings(
-    object: &std::collections::BTreeMap<String, JSONValue>,
+    object: &[(String, DataTree)],
     key: &str,
 ) -> Vec<String> {
-    match object.get(key) {
-        Some(JSONValue::Array(values)) => values
+    match object_field(object, key) {
+        Some(DataTree::Array(values)) => values
             .iter()
             .filter_map(|value| match value {
-                JSONValue::String(value) => Some(value.clone()),
-                JSONValue::Object(value) => value.get("name").and_then(|value| match value {
-                    JSONValue::String(value) => Some(value.clone()),
-                    _ => None,
-                }),
+                DataTree::Text(value) | DataTree::TypedText(value) => Some(value.clone()),
+                DataTree::Object(value) => object_field(value, "name")
+                    .and_then(|value| value.as_str().ok())
+                    .map(str::to_string),
                 _ => None,
             })
             .collect(),
@@ -5273,11 +5277,11 @@ fn json_array_strings(
 }
 
 fn vcpkg_dependencies(
-    object: &std::collections::BTreeMap<String, JSONValue>,
+    object: &[(String, DataTree)],
     facts: &mut MetadataFacts,
     losses: &mut Vec<String>,
 ) -> Vec<String> {
-    let Some(value) = object.get("dependencies") else {
+    let Some(value) = object_field(object, "dependencies") else {
         return Vec::new();
     };
     let Some(values) = value.as_array().ok() else {
@@ -5287,11 +5291,11 @@ fn vcpkg_dependencies(
     let mut dependencies = Vec::new();
     for (index, value) in values.iter().enumerate() {
         match value {
-            JSONValue::String(name) if !name.trim().is_empty() => dependencies.push(name.clone()),
-            JSONValue::String(_) => {
+            DataTree::Text(name) if !name.trim().is_empty() => dependencies.push(name.clone()),
+            DataTree::Text(_) => {
                 losses.push(format!("vcpkg dependency {index} has an empty name"));
             }
-            JSONValue::Object(dependency) => {
+            DataTree::Object(dependency) => {
                 let Some(name) = json_string(dependency, "name") else {
                     losses.push(format!("vcpkg dependency {index} has no non-empty `name`"));
                     continue;
@@ -5302,7 +5306,7 @@ fn vcpkg_dependencies(
                     .unwrap_or_default();
                 dependencies.push(format_dependency(&name, &version));
                 for key in ["features", "platform", "host", "default-features"] {
-                    if let Some(value) = dependency.get(key) {
+                    if let Some(value) = object_field(dependency, key) {
                         add_conflicting_typed_json_fact(
                             facts,
                             format!("vcpkg.dependency.{name}.{key}"),
@@ -5311,13 +5315,13 @@ fn vcpkg_dependencies(
                         let valid = match key {
                             "features" => matches!(
                                 value,
-                                JSONValue::Array(values)
-                                    if values.iter().all(|item| matches!(item, JSONValue::String(_)))
+                                DataTree::Array(values)
+                                    if values.iter().all(|item| matches!(item, DataTree::Text(_)))
                             ),
                             "platform" => {
-                                matches!(value, JSONValue::String(value) if !value.trim().is_empty())
+                                matches!(value, DataTree::Text(value) if !value.trim().is_empty())
                             }
-                            "host" | "default-features" => matches!(value, JSONValue::Bool(_)),
+                            "host" | "default-features" => matches!(value, DataTree::Bool(_)),
                             _ => true,
                         };
                         if !valid {
@@ -5328,8 +5332,8 @@ fn vcpkg_dependencies(
                     }
                 }
                 for key in ["version>=", "version>", "version"] {
-                    if let Some(value) = dependency.get(key) {
-                        if !matches!(value, JSONValue::String(_)) {
+                    if let Some(value) = object_field(dependency, key) {
+                        if !matches!(value, DataTree::Text(_)) {
                             losses.push(format!(
                                 "vcpkg dependency `{name}` field `{key}` must be a string"
                             ));
@@ -5345,25 +5349,35 @@ fn vcpkg_dependencies(
     dependencies
 }
 
-fn json_value_text(value: &JSONValue) -> String {
+fn json_value_text(value: &DataTree) -> String {
     match value {
-        JSONValue::Null => "null".to_string(),
-        JSONValue::Bool(value) => value.to_string(),
-        JSONValue::Number(value) => value.to_string(),
-        JSONValue::Flt(value) => value.to_string(),
-        JSONValue::String(value) => value.clone(),
-        JSONValue::Array(_) | JSONValue::Object(_) => json_value_json(value),
+        DataTree::Null => "null".to_string(),
+        DataTree::Bool(value) => value.to_string(),
+        DataTree::Int(value) => value.to_string(),
+        DataTree::Float(value) => value.to_string(),
+        DataTree::Number(value) => value.clone(),
+        DataTree::Text(value) | DataTree::TypedText(value) => value.clone(),
+        DataTree::Bytes(_) | DataTree::Array(_) | DataTree::Object(_) => json_value_json(value),
     }
 }
 
-fn json_value_json(value: &JSONValue) -> String {
+fn json_value_json(value: &DataTree) -> String {
     match value {
-        JSONValue::Null => "null".to_string(),
-        JSONValue::Bool(value) => value.to_string(),
-        JSONValue::Number(value) => value.to_string(),
-        JSONValue::Flt(value) => value.to_string(),
-        JSONValue::String(value) => JSON::quote(value),
-        JSONValue::Array(values) => format!(
+        DataTree::Null => "null".to_string(),
+        DataTree::Bool(value) => value.to_string(),
+        DataTree::Int(value) => value.to_string(),
+        DataTree::Float(value) => value.to_string(),
+        DataTree::Number(value) => value.clone(),
+        DataTree::Text(value) | DataTree::TypedText(value) => JSON::quote(value),
+        DataTree::Bytes(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(u8::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        DataTree::Array(values) => format!(
             "[{}]",
             values
                 .iter()
@@ -5371,7 +5385,7 @@ fn json_value_json(value: &JSONValue) -> String {
                 .collect::<Vec<_>>()
                 .join(",")
         ),
-        JSONValue::Object(values) => format!(
+        DataTree::Object(values) => format!(
             "{{{}}}",
             values
                 .iter()
@@ -5381,6 +5395,7 @@ fn json_value_json(value: &JSONValue) -> String {
         ),
     }
 }
+
 
 // ponytail: bounded tag/attribute scan; add an XML parser if namespaces or
 // entity decoding become part of provider identity.

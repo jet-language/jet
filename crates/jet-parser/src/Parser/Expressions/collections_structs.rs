@@ -24,7 +24,7 @@ fn brace_body_looks_like_record(toks: &[Token], pos: usize) -> bool {
                 toks.get(pos).map(|t| &t.kind),
                 toks.get(pos + 1).map(|t| &t.kind)
             ),
-            (Some(TokKind::Str(_)), Some(TokKind::Colon))
+            (Some(TokKind::Str(_) | TokKind::RawStr(_)), Some(TokKind::Colon))
         )
 }
 
@@ -35,6 +35,17 @@ impl<'a> Parser<'a> {
     pub(crate) fn brace_starts_inferred_literal(&self) -> bool {
         matches!(self.peek().kind, TokKind::LBrace) && !matches!(self.peek2().kind, TokKind::RBrace)
     }
+    /// Consume line-break terminators that the lexer inserts before a literal's
+    /// closing brace. An authored semicolon still reports E0373 through `bump`;
+    /// only the synthetic terminator is silent.
+    fn consume_literal_close_terminators(&mut self) {
+        while matches!(self.peek().kind, TokKind::Semi)
+            && matches!(self.peek2().kind, TokKind::RBrace)
+        {
+            self.bump();
+        }
+    }
+
 
     pub(in crate::Parser) fn brace_starts_record(&self) -> bool {
         brace_body_looks_like_record(&self.toks, self.pos + 1)
@@ -62,7 +73,7 @@ impl<'a> Parser<'a> {
             self.bump();
             let value = self.expr()?;
             let mut entries = vec![(first, value)];
-            while matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
+            while matches!(self.peek().kind, TokKind::Comma) {
                 self.bump();
                 if matches!(self.peek().kind, TokKind::RBracket) {
                     break;
@@ -77,7 +88,7 @@ impl<'a> Parser<'a> {
             return Ok(Expr::MapLit(entries, Span::new(open.start, close.end)));
         }
         let mut elems = vec![first];
-        while matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
+        while matches!(self.peek().kind, TokKind::Comma) {
             self.bump();
             if matches!(self.peek().kind, TokKind::RBracket) {
                 break;
@@ -194,7 +205,7 @@ impl<'a> Parser<'a> {
             Type::Map { .. } => self.finish_typed_lit_entries(),
             Type::List(_) | Type::FixedList { .. }
                 if super::patterns::is_byte_list_head(head)
-                    && matches!(self.peek().kind, TokKind::Str(_))
+                    && matches!(self.peek().kind, TokKind::Str(_) | TokKind::RawStr(_))
                     && matches!(self.peek2().kind, TokKind::RBrace) =>
             {
                 self.finish_byte_text()
@@ -211,6 +222,7 @@ impl<'a> Parser<'a> {
             }
             _ => {
                 let value = self.expr()?;
+                self.consume_literal_close_terminators();
                 self.expect(TokKind::RBrace, "to close a typed literal")?;
                 Ok(TypedLitBody::Value(Box::new(value)))
             }
@@ -219,14 +231,17 @@ impl<'a> Parser<'a> {
 
     fn finish_byte_text(&mut self) -> Result<TypedLitBody, Diagnostic> {
         let token = self.bump();
-        let TokKind::Str(parts) = token.kind else {
-            unreachable!("byte typed literal body starts with a string token");
+        let parts = match token.kind {
+            TokKind::Str(parts) => parts,
+            TokKind::RawStr(text) => vec![StrTokPart::Lit(text)],
+            _ => unreachable!("byte typed literal body starts with a string token"),
         };
         if parts
             .iter()
             .any(|part| matches!(part, StrTokPart::Interp(_)))
         {
             let value = self.str_expr_from_parts(parts, token.span)?;
+            self.consume_literal_close_terminators();
             self.expect(TokKind::RBrace, "to close a typed literal")?;
             return Ok(TypedLitBody::Value(Box::new(value)));
         }
@@ -238,19 +253,21 @@ impl<'a> Parser<'a> {
                 StrTokPart::Interp(_) => unreachable!("interpolation handled above"),
             })
             .collect();
+        self.consume_literal_close_terminators();
         self.expect(TokKind::RBrace, "to close a typed literal")?;
         Ok(TypedLitBody::ByteText(parts))
     }
 
     fn finish_typed_lit_elements(&mut self) -> Result<TypedLitBody, Diagnostic> {
         let mut elems = vec![self.list_elem()?];
-        while matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
+        while matches!(self.peek().kind, TokKind::Comma) {
             self.bump();
             if matches!(self.peek().kind, TokKind::RBrace) {
                 break;
             }
             elems.push(self.list_elem()?);
         }
+        self.consume_literal_close_terminators();
         self.expect(TokKind::RBrace, "to close a typed literal")?;
         Ok(TypedLitBody::Elements(elems))
     }
@@ -260,7 +277,7 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::Colon, "between a map key and its value")?;
         let value = self.expr()?;
         let mut entries = vec![(key, value)];
-        while matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
+        while matches!(self.peek().kind, TokKind::Comma) {
             self.bump();
             if matches!(self.peek().kind, TokKind::RBrace) {
                 break;
@@ -270,6 +287,7 @@ impl<'a> Parser<'a> {
             let val = self.expr()?;
             entries.push((key, val));
         }
+        self.consume_literal_close_terminators();
         self.expect(TokKind::RBrace, "to close a typed map literal")?;
         Ok(TypedLitBody::Entries(entries))
     }
@@ -477,13 +495,14 @@ impl<'a> Parser<'a> {
         // Map entries start with a non-ident key then `:`, or ident keys are
         // field-shaped above. Remaining forms are element lists / values.
         let first = self.list_elem()?;
+        self.consume_literal_close_terminators();
         if matches!(self.peek().kind, TokKind::Colon) {
             // Rare inferred map body `{ key: val }` where key wasn't a bare
             // Ident (e.g. string key). Parse as entries.
             self.bump();
             let value = self.expr()?;
             let mut entries = vec![(first, value)];
-            while matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
+            while matches!(self.peek().kind, TokKind::Comma) {
                 self.bump();
                 if matches!(self.peek().kind, TokKind::RBrace) {
                     break;
@@ -493,6 +512,7 @@ impl<'a> Parser<'a> {
                 let val = self.expr()?;
                 entries.push((key, val));
             }
+            self.consume_literal_close_terminators();
             self.expect(TokKind::RBrace, "to close an inferred map literal")?;
             let end = self.toks[self.pos.saturating_sub(1)].span.end;
             return Ok(Expr::TypedLit {
@@ -510,13 +530,14 @@ impl<'a> Parser<'a> {
             });
         }
         let mut elems = vec![first];
-        while matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
+        while matches!(self.peek().kind, TokKind::Comma) {
             self.bump();
             if matches!(self.peek().kind, TokKind::RBrace) {
                 break;
             }
             elems.push(self.list_elem()?);
         }
+        self.consume_literal_close_terminators();
         self.expect(TokKind::RBrace, "to close an inferred list literal")?;
         let end = self.toks[self.pos.saturating_sub(1)].span.end;
         Ok(Expr::TypedLit {
@@ -737,6 +758,9 @@ impl<'a> Parser<'a> {
                             break;
                         }
                         self.expect(TokKind::Comma, "between pattern bindings")?;
+                        if matches!(self.peek().kind, TokKind::RParen) {
+                            break;
+                        }
                     }
                 }
                 self.expect(TokKind::RParen, "after pattern bindings")?;
@@ -847,6 +871,9 @@ impl<'a> Parser<'a> {
                                 break;
                             }
                             self.expect(TokKind::Comma, "between pattern bindings")?;
+                            if matches!(self.peek().kind, TokKind::RParen) {
+                                break;
+                            }
                         }
                     }
                     self.expect(TokKind::RParen, "after pattern bindings")?;

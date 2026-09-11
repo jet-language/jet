@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E2404 — Jet diagnostic</title>
-<meta name="description" content="`` `?` can&#39;t turn a `{Source}` into a `{Target}` here ``.">
+<meta name="description" content="`?` can&#39;t turn the `{Source}` from `{callee}` into `{Target}` here">
 <meta property="og:title" content="E2404 — Jet diagnostic">
-<meta property="og:description" content="`` `?` can&#39;t turn a `{Source}` into a `{Target}` here ``.">
+<meta property="og:description" content="`?` can&#39;t turn the `{Source}` from `{callee}` into `{Target}` here">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,25 +25,34 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E2404</h1>
-<p>`` `?` can&#39;t turn a `{Source}` into a `{Target}` here ``.</p>
+<p>`?` can&#39;t turn the `{Source}` from `{callee}` into `{Target}` here</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">`` `?` can&#39;t turn a `{Source}` into a `{Target}` here ``.</p>
+<p class="diag-copy what" data-registry-field="what">`?` can&#39;t turn the `{Source}` from `{callee}` into `{Target}` here</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">`?` changes an error&#39;s type only when you&#39;ve declared how via `impl Source -&gt; Target { … }` (D-ERR-CONV); no such declaration exists for this pair.</p>
+<p class="diag-copy why" data-registry-field="why">`{callee}` is defined at `{definition}` with effective failure contract `{contract}`; the caller&#39;s `{caller}` contract has no route from `{Source}` to `{Target}`</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">add `impl {Source} -&gt; {Target} { … }` before the function that uses `?`.</p>
+<p class="diag-copy fix" data-registry-field="fix">Declare the caller with `{Source}` as its failure domain, or add `impl {Source} -&gt; {Target} { … }`; otherwise handle `{callee}` locally with `??`</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E2404</code>: <code>tests/ui/try_wrong_error.stderr</code>.</p>
-<pre class="diag">Error [E2404]: `?` can&#39;t turn a `E1` into a `E2` here
-  --&gt; tests/ui/try_wrong_error.jet:11:10
+<p>First UI snapshot mentioning <code>E2404</code>: <code>tests/ui/e2392_linked_cascade.stderr</code>.</p>
+<pre class="diag">Error [E0104]: `load_row` expects 0 arguments, got 1
+  --&gt; tests/ui/e2392_linked_cascade.jet:15:5
     |
- 11 |     x :: f()?
-    |          ^^^^
- Why: `?` only changes an error&#39;s type when you&#39;ve declared how; there&#39;s no declared way to turn `E1` into `E2`
- Fix: add `impl E1 =&gt; E2 { … }` before this function
+ 15 |     load_row(1)
+    |     ^^^^^^^^
+ Why: Every argument must match a parameter
+ Fix: Check the definition of `load_row`
+More: jet-lang.dev/e/E0104
+
+Error [E2404]: `?` can&#39;t turn the `SourceErr` from `load_row` into `TargetErr` here
+  --&gt; tests/ui/e2392_linked_cascade.jet:15:5
+    |
+ 15 |     load_row(1)
+    |     ^^^^^^^^
+ Why: `load_row` is defined at `e2392_linked_cascade.jet:12:4` with effective failure contract `explicit !SourceErr`; the caller&#39;s `explicit !TargetErr` contract has no route from `SourceErr` to `TargetErr`
+ Fix: Declare the caller with `SourceErr` as its failure domain, or add `impl SourceErr -&gt; TargetErr { … }`; otherwise handle `load_row` locally with `??`
 More: jet-lang.dev/e/E2404
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

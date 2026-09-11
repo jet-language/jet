@@ -1,0 +1,81 @@
+use core.data as data
+use core.files as files
+
+#Codable
+struct Observation { team: String segment: String x: Float y: Float value: Float }
+#Codable
+struct Owner { team: String owner: String }
+#Codable
+struct Summary { team: String mean: Float }
+#Codable
+struct Joined { team: String owner: String mean: Float }
+#Codable
+struct Regression { slope: Float intercept: Float r_squared: Float }
+
+fn join_summaries(rows: [Summary], owners: [Owner]) [Joined] -> {
+    out := [Joined]{}
+    loop row in rows {
+        loop owner in owners {
+            if row.team == owner.team {
+                out.push(Joined{team: row.team, owner: owner.owner, mean: row.mean})
+                break
+            }
+        }
+    }
+    return out
+}
+
+fn fit(rows: [Observation]) Regression -> {
+    n := 0
+    sum_x := Float{0.0}
+    sum_y := Float{0.0}
+    sum_xx := Float{0.0}
+    sum_xy := Float{0.0}
+    loop row in rows {
+        n += 1
+        sum_x += row.x
+        sum_y += row.y
+        sum_xx += row.x * row.x
+        sum_xy += row.x * row.y
+    }
+    nf :: Float.from_int(n)
+    denominator :: nf * sum_xx - sum_x * sum_x
+    slope :: (nf * sum_xy - sum_x * sum_y) / denominator
+    intercept :: (sum_y - slope * sum_x) / nf
+    mean_y :: sum_y / nf
+    total := Float{0.0}
+    residual := Float{0.0}
+    loop row in rows {
+        predicted :: intercept + slope * row.x
+        total += (row.y - mean_y) * (row.y - mean_y)
+        residual += (row.y - predicted) * (row.y - predicted)
+    }
+    return Regression{slope: slope, intercept: intercept, r_squared: Float{1.0} - residual / total}
+}
+
+fn run() {
+    raw :: files.read("/home/nate/.cache/jet-luna/dx3/area-data/fixture-100k.csv") ?? panic("read")
+    rows :: data.csv<Observation>(raw) ?? panic("csv")
+    filtered :: data.query(rows)
+        .filter(row -> row.value >= Float{50.0})
+        .collect() ?? panic("filter")
+    groups :: data.query(filtered)
+        .group_by(row -> row.team)
+        .mean(row -> row.value)
+        .collect() ?? panic("group")
+    data.query(filtered)
+        .group_by(row -> row.team)
+        .sum(row -> row.value)
+        .collect() ?? panic("sum")
+    pivot :: data.pivot_sum(filtered, row -> row.team, row -> row.segment, row -> row.value) ?? panic("pivot")
+    values := [Float]{}
+    loop row in filtered { values.push(row.value) }
+    rolling :: data.rolling_mean(values, 8) ?? panic("rolling")
+    summary :: data.describe(values) ?? panic("describe")
+    summaries := [Summary]{}
+    loop group in groups { summaries.push(Summary{team: group.key, mean: group.value}) }
+    owners :: [Owner]{{team: "team0", owner: "Ada"}, {team: "team1", owner: "Grace"}, {team: "team2", owner: "Lin"}, {team: "team3", owner: "Mina"}, {team: "team4", owner: "Noor"}, {team: "team5", owner: "Omar"}, {team: "team6", owner: "Priya"}, {team: "team7", owner: "Quinn"}, {team: "team8", owner: "Rae"}, {team: "team9", owner: "Sol"}}
+    joined :: join_summaries(summaries, owners)
+    regression :: fit(rows)
+    print("rows={rows.len()} f={filtered.len()} g={groups.len()} p={pivot.len()} w={rolling.len()} s={summary.count} j={joined.len()} r={regression.slope}")
+}

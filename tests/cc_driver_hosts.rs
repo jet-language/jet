@@ -80,7 +80,7 @@ fn aliases_are_real_installed_bins_and_docs_cover_the_driver_matrix() {
     assert!(release.contains("jet jetpack jet-cc jet-c++"));
     assert!(release.contains("jet.exe jetpack.exe jet-cc.exe jet-c++.exe"));
 
-    let docs = read(&repo_root().join("docs/reference/cc-driver.md"));
+    let docs = read(&repo_root().join("docs/spec/reference/cc-driver.md"));
     for term in [
         "signed Nix index",
         "offline",

@@ -1,6 +1,7 @@
 //! U27 (D-JPK-BUILDDBG1=A): failed-build logs, preserved scratch, explain.
 
-use super::JSON::{self, JSONValue};
+use super::JSON;
+use jet_foundation::DataTree::DataTree;
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -402,7 +403,9 @@ fn parse_attempt(text: &str) -> Result<Attempt, String> {
         log_dir: str_field(obj, "log_dir")?,
         steps: Vec::new(),
     };
-    if let Some(JSONValue::Array(steps)) = obj.get("steps") {
+    if let Some(steps) = obj.iter().find_map(|(key, value)| {
+        (key == "steps").then(|| value.as_array().ok())
+    }).flatten() {
         for item in steps {
             let o = item.as_object()?;
             attempt.steps.push(StepLog {
@@ -420,20 +423,22 @@ fn parse_attempt(text: &str) -> Result<Attempt, String> {
     Ok(attempt)
 }
 
-fn str_field(
-    obj: &std::collections::BTreeMap<String, JSONValue>,
-    key: &str,
-) -> Result<String, String> {
-    obj.get(key)
+fn str_field(obj: &[(String, DataTree)], key: &str) -> Result<String, String> {
+    obj.iter()
+        .find_map(|(name, value)| (name == key).then_some(value))
         .ok_or_else(|| format!("missing key `{key}`"))?
         .as_str()
         .map(ToString::to_string)
 }
 
-fn num_field(obj: &std::collections::BTreeMap<String, JSONValue>, key: &str) -> usize {
-    match obj.get(key) {
-        Some(JSONValue::Number(n)) => *n as usize,
-        Some(JSONValue::Flt(n)) => *n as usize,
+fn num_field(obj: &[(String, DataTree)], key: &str) -> usize {
+    match obj
+        .iter()
+        .find_map(|(name, value)| (name == key).then_some(value))
+    {
+        Some(DataTree::Int(value)) => (*value).try_into().unwrap_or(0),
+        Some(DataTree::Float(value)) if value.is_finite() && *value >= 0.0 => *value as usize,
+        Some(DataTree::Number(value)) => value.parse().unwrap_or(0),
         _ => 0,
     }
 }

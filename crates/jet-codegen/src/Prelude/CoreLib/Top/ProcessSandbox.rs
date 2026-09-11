@@ -454,11 +454,11 @@ pub fn output_with_read_only_mounts(
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
-            #[cfg(target_os = "macos")]
+            #[cfg(unix)]
             {
                 use std::os::unix::process::CommandExt;
-                // Linux Bubblewrap already creates the session with
-                // `--new-session`; Seatbelt needs an explicit child group.
+                // One process group for the sandbox wrapper so output-limit
+                // and timeout SIGKILL the wrapper and every descendant.
                 command.process_group(0);
             }
             Ok(())
@@ -510,11 +510,64 @@ fn terminate_process_group(pid: u32) -> io::Result<()> {
     Err(error)
 }
 
-fn terminate_process_tree(child: &mut Child, child_reaped: bool) -> io::Result<()> {
+#[cfg(target_os = "linux")]
+fn collect_descendant_pids(root: u32) -> Vec<u32> {
+    let mut out = Vec::new();
+    let mut stack = vec![root];
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some(pid) = stack.pop() {
+        if !seen.insert(pid) {
+            continue;
+        }
+        if pid != root {
+            out.push(pid);
+        }
+        let Ok(tasks) = fs::read_dir(format!("/proc/{pid}/task")) else {
+            continue;
+        };
+        for task in tasks.flatten() {
+            let Ok(text) = fs::read_to_string(task.path().join("children")) else {
+                continue;
+            };
+            for token in text.split_whitespace() {
+                if let Ok(child) = token.parse::<u32>() {
+                    stack.push(child);
+                }
+            }
+        }
+    }
+    out
+}
+
+#[cfg(target_os = "linux")]
+fn terminate_descendants(pids: &[u32]) {
+    for pid in pids {
+        let Ok(pid) = i32::try_from(*pid) else {
+            continue;
+        };
+        // SAFETY: these PIDs were children of the sandbox wrapper at the
+        // moment we walked /proc. SIGKILL is the same signal used for the
+        // wrapper process group.
+        let _ = unsafe { kill(pid, PROCESS_GROUP_SIGKILL) };
+    }
+}
+
+fn terminate_process_tree(
+    child: &mut Child,
+    child_reaped: bool,
+    extra_descendants: &[u32],
+) -> io::Result<()> {
+    let _ = extra_descendants;
+    #[cfg(target_os = "linux")]
+    let mut descendants = collect_descendant_pids(child.id());
+    #[cfg(target_os = "linux")]
+    descendants.extend_from_slice(extra_descendants);
     #[cfg(unix)]
     let group_error = terminate_process_group(child.id()).err();
     #[cfg(not(unix))]
     let group_error = child.kill().err();
+    #[cfg(target_os = "linux")]
+    terminate_descendants(&descendants);
 
     #[cfg(unix)]
     if group_error.is_some() {
@@ -541,7 +594,7 @@ fn wait_with_limited_output(mut child: Child, timeout: Option<Duration>) -> Resu
         Some(stdout) => stdout,
         None => {
             let error = Error::Io("sandbox child stdout was not piped".to_string());
-            let _ = terminate_process_tree(&mut child, false);
+            let _ = terminate_process_tree(&mut child, false, &[]);
             return Err(error);
         }
     };
@@ -549,7 +602,7 @@ fn wait_with_limited_output(mut child: Child, timeout: Option<Duration>) -> Resu
         Some(stderr) => stderr,
         None => {
             let error = Error::Io("sandbox child stderr was not piped".to_string());
-            let _ = terminate_process_tree(&mut child, false);
+            let _ = terminate_process_tree(&mut child, false, &[]);
             return Err(error);
         }
     };
@@ -585,7 +638,10 @@ fn wait_with_limited_output(mut child: Child, timeout: Option<Duration>) -> Resu
     let mut child_reaped = false;
     let mut wait_error = None;
     let mut status = None;
+    let mut known_descendants = Vec::new();
     loop {
+        #[cfg(target_os = "linux")]
+        known_descendants.extend(collect_descendant_pids(child.id()));
         match child.try_wait() {
             Ok(Some(child_status)) => {
                 child_reaped = true;
@@ -608,7 +664,7 @@ fn wait_with_limited_output(mut child: Child, timeout: Option<Duration>) -> Resu
             }
         }
     }
-    let cleanup_error = terminate_process_tree(&mut child, child_reaped).err();
+    let cleanup_error = terminate_process_tree(&mut child, child_reaped, &known_descendants).err();
     let stdout = stdout_thread
         .join()
         .map_err(|_| Error::Io("sandbox stdout reader panicked".to_string()))?

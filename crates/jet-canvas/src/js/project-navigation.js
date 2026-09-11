@@ -745,7 +745,7 @@
         appendText(meta, "span", "library-entry-state", action.stageable ? "staged until wired" : availability.available ? "checked source" : "unavailable");
         const inputPins = (action.pins || []).filter((pin) => pin.direction === "input").map((pin) => `${pin.name || "arg"}: ${pin.type || "Value"}`).join(", ");
         if (inputPins) appendText(meta, "small", "library-entry-pins", inputPins);
-        appendText(meta, "small", "library-entry-source", action.source || (action.kind === "canvas.core_catalog" ? "docs/reference/core-library.md" : modulePath));
+        appendText(meta, "small", "library-entry-source", action.source || (action.kind === "canvas.core_catalog" ? "docs/spec/reference/core-library.md" : modulePath));
         if (!availability.available) appendText(meta, "small", "library-entry-reason", availability.reason);
         body.appendChild(row);
       }
@@ -1007,7 +1007,11 @@
   function syncProjectPanels(project) {
     const capabilities = project.capabilities || {};
     const packageRows = (project.packages || []).map((pkg) => {
-      const targets = (pkg.targets || []).map((t) => `${t.package || pkg.name}:${t.target}`).join(", ") || pkg.target || "native";
+      const targets = (pkg.targets || []).map((target) => {
+        const name = target && target.name || "target";
+        const profile = target && target.profile;
+        return profile ? `${name}: ${profile}` : name;
+      }).join(", ") || "no explicit target profiles";
       return projectMiniCard(pkg.name || pkg.path || "package", `${pkg.path || ""} · ${pkg.version || ""}`, targets + (pkg.effects_enabled ? " · effects" : ""));
     });
     const depRows = [];

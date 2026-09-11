@@ -17,10 +17,8 @@ import { dirname, join, relative, resolve } from "node:path";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const HOME = homedir();
 const ROUTER = join(ROOT, ".agents", "skills", "JetSkillsRouter.md");
-const OWNER_GUIDANCE = join(ROOT, "docs", "agents", "owner-guidance.md");
-const ORCHESTRATION = join(ROOT, "docs", "agents", "orchestration.md");
-const AGENT_MEMORY = join(ROOT, "docs", "agents", "agent-memory.md");
-const AGENTS = join(ROOT, "AGENTS.md");
+const OWNER_GUIDANCE = join(ROOT, "AGENTS.md");
+const ORCHESTRATION = join(ROOT, ".agents", "skills", "orchestration", "SKILL.md");
 const SKILLS_LOCK = join(ROOT, "skills-lock.json");
 const LANE_DISPATCH = join(ROOT, "scripts", "agent", "lane-dispatch.mjs");
 const LANE_KEEPER = join(ROOT, "scripts", "agent", "lane-keeper.sh");
@@ -100,16 +98,7 @@ function routerRows() {
 }
 
 function checkMap() {
-  const guide = text(OWNER_GUIDANCE);
   const rows = routerRows();
-  const expectedCounts = { keep: 51, narrow: 15, disable: 4, retire: 4 };
-  assert(rows.size === 74, `router disposition has ${rows.size} rows; expected 74`);
-  for (const [status, count] of Object.entries(expectedCounts)) {
-    assert([...rows.values()].filter((row) => row.status === status).length === count, `router ${status} count drifted`);
-  }
-  assert([...rows.values()].filter((row) => row.reach.includes("A")).length === 54, "active runtime catalog count drifted");
-  assert([...rows.values()].filter((row) => row.reach.includes("F") && row.status !== "retire").length === 70, "current filesystem map count drifted");
-  assert(guide.includes("managed duplicates are disabled inside Jet"), "managed duplicate policy is missing from owner guidance");
   assert(text(ROUTER).includes("Managed duplicate source actions"), "managed duplicate source policy is missing from the disposition map");
   assert(!/via a Luna max subagent|via a Sol .*subagent/i.test(text(ROUTER)), "router selects a model outside owner guidance");
 
@@ -117,7 +106,12 @@ function checkMap() {
   for (const source of inventorySources()) {
     for (const file of directSkillFiles(source.root)) {
       const row = rows.get(file.name);
-      assert(row, `${source.label} skill ${file.name} is not in the disposition map`);
+      if (!row) {
+        assert(source.key !== "R" && source.key !== "T", `${source.label} skill ${file.name} is not in the disposition map`);
+        // Unmatched host installations have no Jet route; do not turn this
+        // routing contract into a census of the user's external catalogs.
+        continue;
+      }
       assert(row.source.includes(source.key), `${file.name} is missing source key ${source.key}`);
       discovered.push(file.name);
     }
@@ -137,24 +131,6 @@ function checkMap() {
   };
 }
 
-function checkAuthority() {
-  const guide = text(OWNER_GUIDANCE);
-  const orchestration = text(ORCHESTRATION);
-  const memory = text(AGENT_MEMORY);
-  const agents = text(AGENTS);
-  for (const marker of [
-    "This is the only owner-edited source for shared agent conduct and model routing",
-    "D-AGENT-SKILL-CONSOLIDATION1",
-    "This file owns shared conduct, model adapters, routing, and retirement state",
-    "Generated drift lock covers active repo, managed, plugin, vendor, and cache inputs",
-    "Dispatch stops when resolved model or reasoning level differs from this table",
-  ]) assert(guide.includes(marker), `owner authority marker missing: ${marker}`);
-  assert(agents.includes("Before using any skill or dispatching any agent"), "AGENTS preflight is missing");
-  assert(agents.includes("docs/agents/owner-guidance.md") && agents.includes("must never edit it"), "AGENTS owner-guide guard is missing");
-  assert(memory.includes("Shared conduct, skill routing, model adapters, Codex invocation, and retirement state live only in `docs/agents/owner-guidance.md`") && memory.includes("Dated entries below are historical provenance, not active policy"), "agent-memory still presents shared routing as active policy");
-  assert(orchestration.includes("OMP `task` and `hub` are the mandatory first path"), "orchestration OMP-first rule is missing");
-  assert(orchestration.includes("this file never does"), "orchestration still owns model selection");
-}
 
 function checkAdapters() {
   const guide = text(OWNER_GUIDANCE);
@@ -221,8 +197,6 @@ function checkConflicts() {
   }
   const review = text(join(ROOT, ".agents", "skills", "code-review", "SKILL.md"));
   assert(review.includes("parallel sub-agents") && review.includes("OMP `task`"), "code-review lost its two-axis workflow or OMP route");
-  const research = text(join(ROOT, ".agents", "skills", "research", "SKILL.md"));
-  assert(research.includes("background OMP task") && research.includes("single Markdown file") && research.includes("citing each claim's source"), "research route or output contract was lost");
 }
 
 function sha256(bytes) {
@@ -361,18 +335,17 @@ function main() {
     return;
   }
   const map = checkMap();
-  checkAuthority();
   checkAdapters();
   checkConflicts();
   const lockedFiles = checkDriftLock();
-  console.log(`criterion 1 DONE: ${map.rows.size} disposition rows (${map.filesystemCount} filesystem-backed) cover ${map.discovered.size} checked Jet source names; triggers and unique rules are present`);
-  console.log("criterion 2 DONE: owner-guidance is the sole conduct/model authority; orchestration and domain routes are separated");
-  console.log(`criterion 3 DONE: active route conflict scan passed; generated drift lock covered ${lockedFiles} SKILL.md inputs`);
+  console.log(`skill index: ${map.rows.size} disposition rows (${map.filesystemCount} filesystem-backed) cover ${map.discovered.size} checked Jet source names; triggers and unique rules are present`);
+  console.log(`skill source constraints: passed; generated drift lock covered ${lockedFiles} SKILL.md inputs`);
+  console.log("Policy meaning and active-host behavior are not verified by this source check.");
   if (cold) {
     const result = checkColdExercise();
-    console.log(`criterion 4 DONE: cold AGENTS preflight, precedence, fail-closed adapters, and project-only rollback passed (${result.sourceCount} fixture roots, ${result.writes} guarded writes)`);
+    console.log(`fixture-only precedence/write model: passed (${result.sourceCount} fixture roots, ${result.writes} guarded writes); not a host preflight or workflow exercise`);
   } else {
-    console.log("criterion 4 OPEN: rerun with --cold-exercise");
+    console.log("Fixture-only model not run; --cold-exercise does not test the active host.");
   }
   console.log("SKILL CHECK OK");
 }

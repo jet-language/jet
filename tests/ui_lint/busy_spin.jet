@@ -1,0 +1,55 @@
+use core.time as time
+
+struct Flag { ready: Bool, ticks: Int }
+
+fn busy_spin(flag: Shared<Flag>, _changed: Condition) {
+    loop flag.ready == false {}
+}
+
+fn allowed_spin(flag: Shared<Flag>) {
+    #allow(shared_busy_wait) loop flag.ready == false {}
+}
+
+fn finite(flag: Shared<Flag>) {
+    loop _i in 0..<10 {
+        if flag.ready { break }
+    }
+}
+
+fn mutating(flag: Shared<Flag>) {
+    loop flag.ready == false {
+        flag.ready = true
+    }
+}
+
+fn blocking(flag: Shared<Flag>, changed: Condition) {
+    loop flag.ready == false {
+        guard :: flag.guard_edit()
+        guard.wait(changed, value -> value.ready) ?? panic("wait failed")
+    }
+}
+
+fn sleeping(flag: Shared<Flag>) {
+    loop flag.ready == false {
+        time.sleep(1ms)
+    }
+}
+
+fn receiving(flag: Shared<Flag>, rx: Receiver<Int>) {
+    loop flag.ready == false {
+        rx.receive() ?? panic("channel closed")
+    }
+}
+
+fn run() {
+    flag := shared Flag{ ready: true, ticks: 0 }
+    changed := Condition.new()
+    (_tx, rx) :: channel<Int>()
+    busy_spin(flag, changed)
+    allowed_spin(flag)
+    finite(flag)
+    mutating(flag)
+    blocking(flag, changed)
+    sleeping(flag)
+    receiving(flag, rx)
+}

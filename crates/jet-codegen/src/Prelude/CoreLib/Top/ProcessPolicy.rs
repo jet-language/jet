@@ -210,6 +210,60 @@ fn jet_process_policy_safe_right_name(right: &str) -> &str {
         .next()
         .unwrap_or("unknown")
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct JetProcessSandboxScope {
+    source_readable: bool,
+    output_writable: bool,
+    share_network: bool,
+}
+
+/// Return the native-boundary facts derived from the already-bound authority.
+/// Process launchers consume this typed projection; they must not parse or
+/// reinterpret the opaque policy carrier themselves.
+fn jet_process_policy_sandbox_scope(
+    spec: &jet_std::ProcessSpec,
+    executable_identity: &str,
+) -> Result<JetProcessSandboxScope, jet_std::IOError> {
+    jet_process_policy_check_executable(spec, executable_identity)?;
+    let rights = jet_process_policy_rights(spec);
+    Ok(JetProcessSandboxScope {
+        source_readable: rights.iter().any(|right| right == "FS.Read:repo"),
+        output_writable: rights.iter().any(|right| right == "FS.Write:.jet/build"),
+        share_network: rights.iter().any(|right| right == "Net"),
+    })
+}
+
+/// Authority-bound launch must use a host-supplied, absolute working
+/// directory. An absent or relative value would silently reintroduce the
+/// launcher's ambient current directory.
+fn jet_process_policy_authority_cwd(
+    spec: &jet_std::ProcessSpec,
+) -> Result<&str, jet_std::IOError> {
+    let Some(cwd) = spec.cwd.as_deref() else {
+        return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
+            jet_std::IOOperation::Resolve,
+            Some("cwd".to_string()),
+            None,
+            Some(
+                "authority-bound process execution requires an explicit absolute cwd/PathAuthority"
+                    .to_string(),
+            ),
+        )));
+    };
+    if cwd.is_empty() || !std::path::Path::new(cwd).is_absolute() {
+        return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
+            jet_std::IOOperation::Resolve,
+            Some("cwd".to_string()),
+            None,
+            Some(
+                "authority-bound process execution requires an explicit absolute cwd/PathAuthority"
+                    .to_string(),
+            ),
+        )));
+    }
+    Ok(cwd)
+}
+
 
 /// The process boundary has a deliberately small enforcement vocabulary. A
 /// grant that is only recorded in the digest but ignored by the backend would
@@ -279,11 +333,12 @@ fn jet_process_policy_check_executable(
 /// command inputs. The same bytes feed plan and receipt consumers, and secret
 /// values never enter the digest material.
 fn jet_process_policy_material(spec: &jet_std::ProcessSpec) -> String {
+    // Unbound specs have no authority working directory. Never consult the
+    // host current directory to fill that field into a policy identity.
     let cwd = spec
         .cwd
         .clone()
-        .or_else(|| std::env::current_dir().ok().map(|path| path.to_string_lossy().to_string()))
-        .unwrap_or_else(|| "<unresolved-cwd>".to_string());
+        .unwrap_or_else(|| "<unspecified-cwd>".to_string());
     let timeout_ms = spec
         .timeout_ms
         .map(|value| value.to_string())
@@ -433,36 +488,9 @@ fn jet_process_resolve_executable(
 /// child boundary already used by hermetic build actions. The consumer only
 /// selects the backend; profile construction and launch stay in the shared
 /// ProcessSandbox Prelude fragment.
-fn jet_process_isolation_backend() -> Option<&'static str> {
-    #[cfg(target_os = "linux")]
-    {
-        return jet_process_sandbox::status()
-            .available
-            .then_some("linux-bwrap");
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        return jet_process_sandbox::status()
-            .available
-            .then_some("macos-seatbelt");
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        return jet_process_sandbox::status()
-            .available
-            .then_some("windows-appcontainer");
-    }
-
-    #[cfg(not(any(
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "windows"
-    )))]
-    {
-        None
-    }
+fn jet_process_isolation_backend() -> Option<String> {
+    let status = jet_process_sandbox::status();
+    status.available.then_some(status.mechanism)
 }
 
 fn jet_process_spec_backend_check(
@@ -493,10 +521,11 @@ fn jet_process_spec_plan(
             Some("ProcessSpec.plan() requires an authority policy from .under(...)".to_string()),
         )));
     }
+    jet_process_policy_authority_cwd(spec)?;
     let executable_identity = jet_process_resolve_executable(spec)?;
     jet_process_policy_check(spec)?;
     jet_process_policy_check_executable(spec, &executable_identity)?;
-    let backend = jet_process_isolation_backend().unwrap_or("unavailable");
+    let backend = jet_process_isolation_backend().unwrap_or_else(|| "unavailable".to_string());
     let plan = jet_std::ProcessPlan {
         executable_identity,
         argv: spec
@@ -506,7 +535,7 @@ fn jet_process_spec_plan(
             .collect(),
         input_digest: jet_process_input_digest(spec),
         policy_digest: jet_process_policy_digest(spec),
-        backend: backend.to_string(),
+        backend: backend.clone(),
         authority: jet_process_policy_receipt_rights(spec),
         descendants: jet_process_policy_descendants(spec),
         limits: jet_process_policy_limits(spec),

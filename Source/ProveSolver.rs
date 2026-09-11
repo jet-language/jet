@@ -11,7 +11,8 @@ use jet::Lexer;
 use jet::Parser;
 use jet::AST::{BinOp, Expr, Item, Program, UnOp};
 use jet::SHA256;
-use jet_foundation::JSON::{parse_json, JSONValue};
+use jet_foundation::DataTree::DataTree;
+use jet_foundation::JSON::parse_json;
 
 const MAX_OBLIGATIONS: usize = 10_000;
 const MAX_TERMS: usize = 50_000;
@@ -292,7 +293,7 @@ fn extract_obligations(
     if !lex_diags.is_empty() {
         return Ok(Vec::new());
     }
-    let program = match Parser::parse(&toks) {
+    let program = match Parser::parse_with_source(&toks, source) {
         Ok(p) => p,
         Err(_) => return Ok(Vec::new()),
     };
@@ -1338,7 +1339,6 @@ fn finite_result_record(variable: &str, value: i128) -> String {
         json_str(variable)
     )
 }
-
 fn check_finite_certificate(formula: &Formula, certificate: &str) -> Result<(), &'static str> {
     let root = parse_json(certificate).map_err(|_| "certificate_invalid")?;
     if canonical_json_value(&root).map_err(|_| "certificate_invalid")? != certificate {
@@ -1349,26 +1349,28 @@ fn check_finite_certificate(formula: &Formula, certificate: &str) -> Result<(), 
         object,
         &["assignmentCount", "domainManifest", "rollingResultSha256"],
     )?;
-    let count = json_usize(object.get("assignmentCount"))?;
-    let manifest = match object.get("domainManifest") {
-        Some(JSONValue::Array(values)) if values.len() == 1 => as_object(&values[0])?,
+    let count = json_usize(object_field(object, "assignmentCount"))?;
+    let manifest = match object_field(object, "domainManifest") {
+        Some(DataTree::Array(values)) if values.len() == 1 => as_object(&values[0])?,
         _ => return Err("certificate_invalid"),
     };
     exact_certificate_keys(manifest, &["lower", "name", "upper"])?;
     let Some((variable, lower, upper)) = finite_domain(formula) else {
         return Err("structural_limit");
     };
-    let manifest_name = match manifest.get("name") {
-        Some(JSONValue::String(name)) => name,
-        _ => return Err("certificate_invalid"),
+    let manifest_name = match object_field(manifest, "name").and_then(|value| value.as_str().ok()) {
+        Some(name) => name,
+        None => return Err("certificate_invalid"),
     };
-    let manifest_lower = json_i128(manifest.get("lower"))?;
-    let manifest_upper = json_i128(manifest.get("upper"))?;
+    let manifest_lower = json_i128(object_field(manifest, "lower"))?;
+    let manifest_upper = json_i128(object_field(manifest, "upper"))?;
     if manifest_name != variable.as_str() || manifest_lower != lower || manifest_upper != upper {
         return Err("certificate_invalid");
     }
-    let claimed_hash = match object.get("rollingResultSha256") {
-        Some(JSONValue::String(value))
+    let claimed_hash = match object_field(object, "rollingResultSha256")
+        .and_then(|value| value.as_str().ok())
+    {
+        Some(value)
             if value.len() == 64
                 && value
                     .bytes()
@@ -1406,7 +1408,7 @@ fn check_finite_certificate(formula: &Formula, certificate: &str) -> Result<(), 
         }
         value = value.checked_add(1).ok_or("coefficient_overflow")?;
     }
-    if SHA256::sha256_hex(&records) == claimed_hash.as_str() {
+    if SHA256::sha256_hex(&records) == claimed_hash {
         Ok(())
     } else {
         Err("certificate_invalid")
@@ -1781,8 +1783,8 @@ fn check_certificate(formula: &Formula, certificate: &str) -> Result<(), &'stati
         "and_intro" => {
             let object = as_object(&root)?;
             exact_certificate_keys(object, &["children", "kind"])?;
-            let children = match object.get("children") {
-                Some(JSONValue::Array(children)) => children,
+            let children = match object_field(object, "children") {
+                Some(DataTree::Array(children)) => children,
                 _ => return Err("certificate_invalid"),
             };
             if children.len() != negated.len() {
@@ -1792,14 +1794,14 @@ fn check_certificate(formula: &Formula, certificate: &str) -> Result<(), &'stati
             for (expected_index, child) in children.iter().enumerate() {
                 let child = as_object(child)?;
                 exact_certificate_keys(child, &["branchIndex", "proof"])?;
-                let branch_index = json_usize(child.get("branchIndex"))?;
+                let branch_index = json_usize(object_field(child, "branchIndex"))?;
                 if branch_index != expected_index
                     || branch_index >= negated.len()
                     || !seen.insert(branch_index)
                 {
                     return Err("certificate_invalid");
                 }
-                let proof = child.get("proof").ok_or("certificate_invalid")?;
+                let proof = object_field(child, "proof").ok_or("certificate_invalid")?;
                 let mut branch = formula.assumptions.clone();
                 branch.push(negated[branch_index].clone());
                 check_certificate_node(proof, &branch)?;
@@ -1835,64 +1837,79 @@ fn check_certificate(formula: &Formula, certificate: &str) -> Result<(), &'stati
 }
 
 fn as_object(
-    value: &JSONValue,
-) -> Result<&std::collections::BTreeMap<String, JSONValue>, &'static str> {
+    value: &DataTree,
+) -> Result<&[(String, DataTree)], &'static str> {
     match value {
-        JSONValue::Object(object) => Ok(object),
+        DataTree::Object(object) => Ok(object),
         _ => Err("certificate_invalid"),
     }
 }
 
+fn object_field<'a>(
+    object: &'a [(String, DataTree)],
+    key: &str,
+) -> Option<&'a DataTree> {
+    object.iter().find_map(|(name, value)| (name == key).then_some(value))
+}
+
 fn exact_certificate_keys(
-    object: &std::collections::BTreeMap<String, JSONValue>,
+    object: &[(String, DataTree)],
     keys: &[&str],
 ) -> Result<(), &'static str> {
     if object.len() != keys.len()
-        || object.keys().any(|key| !keys.contains(&key.as_str()))
-        || keys.iter().any(|key| !object.contains_key(*key))
+        || object.iter().any(|(key, _)| !keys.contains(&key.as_str()))
+        || keys.iter().any(|key| object_field(object, key).is_none())
     {
         return Err("certificate_invalid");
     }
     Ok(())
 }
 
-fn object_kind(value: &JSONValue) -> Result<&str, &'static str> {
+fn object_kind(value: &DataTree) -> Result<&str, &'static str> {
     let object = as_object(value)?;
-    match object.get("kind") {
-        Some(JSONValue::String(kind)) => Ok(kind.as_str()),
-        _ => Err("certificate_invalid"),
-    }
+    object_field(object, "kind")
+        .and_then(|value| value.as_str().ok())
+        .ok_or("certificate_invalid")
 }
 
-fn json_usize(value: Option<&JSONValue>) -> Result<usize, &'static str> {
+fn json_usize(value: Option<&DataTree>) -> Result<usize, &'static str> {
     match value {
-        Some(JSONValue::Number(value)) if *value >= 0 => {
+        Some(DataTree::Int(value)) if *value >= 0 => {
             usize::try_from(*value).map_err(|_| "certificate_invalid")
         }
         _ => Err("certificate_invalid"),
     }
 }
 
-fn json_i128(value: Option<&JSONValue>) -> Result<i128, &'static str> {
-    let Some(JSONValue::String(value)) = value else {
+fn json_i128(value: Option<&DataTree>) -> Result<i128, &'static str> {
+    let Some(value) = value.and_then(|value| value.as_str().ok()) else {
         return Err("certificate_invalid");
     };
     let parsed = value.parse::<i128>().map_err(|_| "certificate_invalid")?;
-    if parsed.to_string() != value.as_str() {
+    if parsed.to_string() != value {
         return Err("certificate_invalid");
     }
     Ok(parsed)
 }
 
-fn canonical_json_value(value: &JSONValue) -> Result<String, &'static str> {
+fn canonical_json_value(value: &DataTree) -> Result<String, &'static str> {
     match value {
-        JSONValue::Null => Ok("null".into()),
-        JSONValue::Bool(value) => Ok(value.to_string()),
-        JSONValue::Number(value) => Ok(value.to_string()),
-        JSONValue::Flt(value) if value.is_finite() => Ok(value.to_string()),
-        JSONValue::Flt(_) => Err("certificate_invalid"),
-        JSONValue::String(value) => Ok(json_str(value)),
-        JSONValue::Array(values) => Ok(format!(
+        DataTree::Null => Ok("null".into()),
+        DataTree::Bool(value) => Ok(value.to_string()),
+        DataTree::Int(value) => Ok(value.to_string()),
+        DataTree::Float(value) if value.is_finite() => Ok(value.to_string()),
+        DataTree::Float(_) => Err("certificate_invalid"),
+        DataTree::Number(value) => Ok(value.clone()),
+        DataTree::TypedText(value) | DataTree::Text(value) => Ok(json_str(value)),
+        DataTree::Bytes(values) => Ok(format!(
+            "[{}]",
+            values
+                .iter()
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        )),
+        DataTree::Array(values) => Ok(format!(
             "[{}]",
             values
                 .iter()
@@ -1900,15 +1917,15 @@ fn canonical_json_value(value: &JSONValue) -> Result<String, &'static str> {
                 .collect::<Result<Vec<_>, _>>()?
                 .join(",")
         )),
-        JSONValue::Object(object) => {
-            let mut keys = object.keys().collect::<Vec<_>>();
-            keys.sort();
-            let mut fields = Vec::with_capacity(keys.len());
-            for key in keys {
+        DataTree::Object(object) => {
+            let mut entries = object.iter().collect::<Vec<_>>();
+            entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+            let mut fields = Vec::with_capacity(entries.len());
+            for (key, value) in entries {
                 fields.push(format!(
                     "{}:{}",
                     json_str(key),
-                    canonical_json_value(&object[key])?
+                    canonical_json_value(value)?
                 ));
             }
             Ok(format!("{{{}}}", fields.join(",")))
@@ -1917,15 +1934,15 @@ fn canonical_json_value(value: &JSONValue) -> Result<String, &'static str> {
 }
 
 fn check_certificate_node(
-    value: &JSONValue,
+    value: &DataTree,
     inequalities: &[Inequality],
 ) -> Result<(), &'static str> {
     match object_kind(value)? {
         "linear_contradiction" => {
             let object = as_object(value)?;
             exact_certificate_keys(object, &["kind", "multipliers"])?;
-            let entries = match object.get("multipliers") {
-                Some(JSONValue::Array(entries)) => entries,
+            let entries = match object_field(object, "multipliers") {
+                Some(DataTree::Array(entries)) => entries,
                 _ => return Err("certificate_invalid"),
             };
             if entries.is_empty() {
@@ -1941,11 +1958,11 @@ fn check_certificate_node(
             for entry in entries {
                 let entry = as_object(entry)?;
                 exact_certificate_keys(entry, &["inequalityIndex", "multiplier"])?;
-                let index = json_usize(entry.get("inequalityIndex"))?;
+                let index = json_usize(object_field(entry, "inequalityIndex"))?;
                 if index >= inequalities.len() || !seen.insert(index) {
                     return Err("certificate_invalid");
                 }
-                let multiplier = json_i128(entry.get("multiplier"))?;
+                let multiplier = json_i128(object_field(entry, "multiplier"))?;
                 if multiplier < 0 {
                     return Err("certificate_invalid");
                 }
@@ -1967,8 +1984,8 @@ fn check_certificate_node(
         "split" => {
             let object = as_object(value)?;
             exact_certificate_keys(object, &["kind", "left", "pivot", "right", "variable"])?;
-            let variable = match object.get("variable") {
-                Some(JSONValue::String(variable)) if !variable.is_empty() => variable,
+            let variable = match object_field(object, "variable").and_then(|value| value.as_str().ok()) {
+                Some(variable) if !variable.is_empty() => variable,
                 _ => return Err("certificate_invalid"),
             };
             if !inequalities
@@ -1977,9 +1994,9 @@ fn check_certificate_node(
             {
                 return Err("certificate_invalid");
             }
-            let pivot = json_i128(object.get("pivot"))?;
-            let left = object.get("left").ok_or("certificate_invalid")?;
-            let right = object.get("right").ok_or("certificate_invalid")?;
+            let pivot = json_i128(object_field(object, "pivot"))?;
+            let left = object_field(object, "left").ok_or("certificate_invalid")?;
+            let right = object_field(object, "right").ok_or("certificate_invalid")?;
             let mut left_branch = inequalities.to_vec();
             left_branch.push(Inequality::le(
                 Affine::var(variable, 1)
@@ -2002,7 +2019,7 @@ fn check_certificate_node(
         "assumption" => {
             let object = as_object(value)?;
             exact_certificate_keys(object, &["assumptionIndex", "kind"])?;
-            let index = json_usize(object.get("assumptionIndex"))?;
+            let index = json_usize(object_field(object, "assumptionIndex"))?;
             let Some(assumption) = inequalities.get(index) else {
                 return Err("certificate_invalid");
             };
@@ -2061,10 +2078,16 @@ pub(crate) fn evidence_json(item: &SolverEvidence, diagnostic_indexes: &str) -> 
         ),
     };
     let (line, column) = span_start(&item.obligation.span);
+    let source_path = item
+        .obligation
+        .origin
+        .split_once("::")
+        .map(|(path, _)| path)
+        .unwrap_or(item.obligation.origin.as_str());
     format!(
         "{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":{diagnostic_indexes},\"facet\":\"solver\",\"id\":{},\"kind\":\"solver\",\"outcome\":\"{outcome}\",\"producer\":\"native-presburger\",\"property\":null,\"reason\":null,\"solver\":{solver_payload},\"source\":{{\"column\":{column},\"line\":{line},\"path\":{}}},\"state\":\"checked\"}}",
         json_str(&item.evidence_id),
-        json_str(&item.obligation.origin)
+        json_str(source_path)
     )
 }
 

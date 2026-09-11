@@ -2,7 +2,7 @@
 // carrier and primitive operations in one shared Prelude fragment so AOT and
 // JIT do not maintain separate time semantics across the cache boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct JetInstant {
+pub struct JetInstant {
     start_ns: i64,
 }
 
@@ -44,4 +44,14 @@ impl JetInstant {
     pub(crate) fn to_string_fmt(&self) -> String {
         "Instant".to_string()
     }
+}
+
+/// Wait until an Instant using the same monotonic clock and deadline-aware
+/// sleep kernel as `core.time.sleep`.
+pub(crate) fn jet_time_sleep_until(deadline: &JetInstant) {
+    let remaining = deadline
+        .start_ns
+        .saturating_sub(jet_time_monotonic_now_ns())
+        .max(0);
+    jet_std_time_sleep_duration_ns(remaining);
 }

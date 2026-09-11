@@ -4,11 +4,20 @@ description: Author a complete short or full Tower ballot with simple prose, wor
 ---
 
 # Tower — raise a ballot-ready decision
+## Contract
+
+- **Requested outcome:** A complete `short` or `full` ballot that lets the owner decide from the reading surface alone.
+- **Supplied inputs:** The card and choice, ratified decisions, real current and in-the-wild examples, project priorities, and the required ballot profile.
+- **Allowed child result:** In `full`, one fresh beginner reader returns RLI5 friction and a separate fresh adversarial reader returns challenge findings. Neither reader helped author the ballot. Either may share the author's model family. They cannot decide, publish, or open a follow-on workflow.
+- **Completion owner:** `tower-ballot` owns the draft and repair; the owner owns the choice and ratification.
+- **Return point:** Each reader result returns to the ballot's design-away and recommendation checks.
+- **Stopping condition:** Stop when the selected profile is complete, every loss is addressed or justified, and Tower accepts the ready ballot. Do not implement the choice.
 
 Any owner-facing choice becomes a `decision` on its card. The owner decides
 from the ballot alone, in the board's focus mode — if they would have to ask
 you something to decide, it is not ready. A plan-writer **proposes**; the
 owner **picks**; never pre-empt the pick.
+- A performance-motivated surface ballot must include an executable candidate/plain two-program cell in the canonical gauntlet matrix before owner ratification; apply the standing comparator and keep every loss carded.
 
 ## Apply `/simple` to everything
 
@@ -24,25 +33,27 @@ paragraphs over 90 words.
 
 ## Choose the profile
 
-Ratified 2026-09-02 (D-BALLOT-PROCESS1 = C). Until Tower's gate catches up
-with this ruling (carded for the implementing orchestrator), the store still
-demands the six-summary shape for `full`: fill each retired key with the
-literal sentence `Retired by D-BALLOT-PROCESS1; not performed.` and never
-invent a pass that did not run.
+Ratified 2026-09-02 (D-BALLOT-PROCESS1 = C). New full ballots use the current
+two-reader process: `beginner` and `adversarial`. Stored process 2/3 ballots
+keep their historical six-pass records and render unchanged; never rewrite
+those records just to fit the current process.
 
 - **`short`** is the default for a ballot inside one mechanism with at most
   three options. It is one complete base draft: the reading surface, every
   decision field, complete options, a recommendation, no review passes. Set
-  `ballotMode: "short"` and put the ruling in `shortAuthorizedBy`
-  (`D-BALLOT-PROCESS1: one mechanism, three options`).
+  `ballotMode: "short"`; Tower accepts it without `shortAuthorizedBy` when the
+  card is a one-mechanism choice with at most three options.
 - **`full`** is required for new syntax (anything that touches `Syntax.rs`),
   any invariant carve-out (I1-I9), and any card the owner tags `full`. It is
   the same base draft plus the two independent readers, recorded in
   `reviewPasses`:
   `beginner` must begin `Fresh agent: <agent-id>. Skill: rli5.` and the agent
   must be fresh; `adversarial` must begin
-  `Author model family: <family>. Adversarial model family: <family>.` and the
-  two normalized families must differ.
+  `Author model family: <family>. Adversarial model family: <family>.` and
+  identify the actual reviewer with `Fresh agent: <agent-id>.` in its summary.
+  Owner direction (2026-09-05): the reviewer must be fresh, but may use the
+  same model or model family as the author. Family labels are provenance,
+  not an independence test. Follow the owner's requested reviewer and routing.
   The four self-graded summaries (base, boil the ocean, hybrid, cooperative)
   are retired: a drafter grading its own draft is not a review.
 - The scaffold (`tower decision scaffold <card> --id <D-…>`, carded) fills
@@ -82,10 +93,8 @@ rest can be hidden." Tower refuses a ballot without a valid `surface`.
   losing option. Every remaining loss carries `whyUnavoidable`: the concrete
   reason it cannot be designed out (physics, a ratified law, a measured cost,
   or "removing it brings back option B's loss X"). A loss without that reason
-  means the design is not finished. Tower's gate will refuse it (carded).
-  Until that gate lands the store only accepts plain strings under 14 words
-  in `losses`, so write the loss there and put each reason as one sentence
-  in `tradeoff`: `Unavoidable: <loss> because <reason>.`
+  means the design is not finished. Tower refuses it. Use plain strings only
+  in the legacy `surface.options[*].losses` arrays.
 
 ### The design-away pass (owner law, 2026-09-02)
 
@@ -188,16 +197,18 @@ not create a separate hybrid option unless it is a real final design.
    above; change the option, delete the loss, or write `whyUnavoidable`. Then
    write `rec` (always `A`, listed first), `why`, `whyNot`, `tradeoff`.
    A short ballot ships here.
-3. **Beginner** (full only) — dispatch one fresh OMP agent that had no role in
+3. **Beginner** (full only) — dispatch one fresh agent that had no role in
    the earlier steps. The brief must invoke `/rli5`, provide the complete
    ballot, and use the true-beginner profile unless the owner named another
    reader. The agent attempts explain, predict, modify, and derive tasks and
    returns the RLI5 friction table. Revise the ballot and record its exact
    agent id after `Fresh agent: <agent-id>. Skill: rli5.`
-4. **Adversarial** (full only) — use the required rival model family to attack
+4. **Adversarial** (full only) — use a separate fresh agent to attack
    the recommendation, assumptions, evidence, failure modes, and every
    `whyUnavoidable`. Repair the ballot; change the recommendation if it does
    not survive; re-run the design-away pass on anything the attack reopened.
+   The agent must not have authored the ballot or performed its beginner pass;
+   a different model family is optional. Record the actual agent ID.
 
 The two summaries are evidence, not status labels: say what was tested,
 added, removed, or repaired. After the adversarial pass, check that
@@ -212,6 +223,8 @@ Labels and icons carry the same meaning when color is unavailable.
 
 ```
 mkdir -p ~/.cache/jet-luna
+# A card probe and cited reference are copied into a new draft:
+tower decision scaffold #12 --id D-CACHE1 --out ~/.cache/jet-luna/ballot.json
 cat > ~/.cache/jet-luna/ballot.json <<'EOF'
 {
   "cardId": "#12",
@@ -231,16 +244,14 @@ cat > ~/.cache/jet-luna/ballot.json <<'EOF'
   "rec": "B",
   "recommendation": {
     "why": "Updates become visible as soon as the source announces them, without serving known-stale prices.",
+    "gains": ["Price changes reach readers without waiting for a timer."],
+    "losses": [{ "loss": "Every writer must emit a purge event.", "whyUnavoidable": "Only the source knows when a price changes." }],
     "whyNot": [{ "key": "A", "reason": "A time limit still serves stale prices until its clock expires." }],
-    "tradeoff": "Every writer must emit a purge event. That is acceptable because this system already owns every price update."
+    "tradeoff": "Writers must emit purge events because only the source knows when a price changes."
   },
   "reviewPasses": {
-    "base": "The first draft compared time limits with purge events.",
-    "boilOcean": "The breadth review tested versioned keys and manual clearing.",
-    "hybrid": "The hybrid review kept purge events and added a safety limit.",
-    "cooperative": "The cooperative review strengthened time limits with safe staggering.",
     "beginner": "Fresh agent: reader-17. Skill: rli5. The beginner pass found one undefined term and one ambiguous example. Both were repaired.",
-    "adversarial": "Author model family: family-a. Adversarial model family: family-b. The rival-family review attacked the recommendation and repaired one failure mode."
+    "adversarial": "Author model family: family-a. Adversarial model family: family-a. Fresh agent: reader-18. The adversarial review attacked the recommendation and repaired one failure mode."
   }
 }
 EOF
@@ -262,5 +273,6 @@ owner if it's urgent (new ballots show on the live SSE board — web push remove
   inside a ratification is not a clean pick; address it before building.
 - Owner asks for changes via a question → edit the ballot
   (`tower decision update <id> --file …`), then reply.
-- Never mark a ballot `short` because time is tight or the choice looks easy.
-  Only the owner's explicit request authorizes that profile.
+- Use `short` only for one mechanism with at most three options. No
+  `shortAuthorizedBy` is needed. Syntax groups, `carve-out` cards, and `full`
+  cards require the two-reader `full` profile.

@@ -1,0 +1,250 @@
+use core.auth as auth
+use core.db as db
+use core.encoding.json as json
+use core.http.server as server
+use core.web as core_web
+use core.web.forms as forms
+use core.web.query as query
+use core.web.router as router
+
+// Web battery contract:
+// - route helpers keep path/query/status/redirect decisions in one ordinary library;
+// - forms use the canonical headless Forms state machine and add the domain range;
+// - database helpers always establish the named policy before reads or writes;
+// - SSR emits serializable island props; the browser package owns reactive state.
+// The native HTTP+DB build ICE and missing server query/form accessors remain open
+// core gates. The example records exact future commands instead of simulating them.
+module web {
+    #Codable
+    pub struct NewOrder {
+        item: String
+        quantity: Int
+    }
+
+    #Codable
+    pub struct IslandProps {
+        order_count: Int
+        signed_in: String
+    }
+
+
+    pub struct FormView {
+        valid: Bool
+        html: String
+        errors: String
+    }
+
+    pub fn order_list_path(limit: Int) String -> {
+        bounded := limit
+        if bounded < 1 -> bounded = 1
+        if bounded > 100 -> bounded = 100
+        return "/orders?limit={bounded}"
+    }
+
+    pub fn order_detail_path(id: Int) String -> {
+        if id < 1 -> return "/orders/1"
+        return "/orders/{id}"
+    }
+
+    // The Router owns typed query decoding when App.route has installed the
+    // graph; native calls return None until that graph is available.
+    pub fn decode_limit(url: String) ?Int -> {
+        route_state :: router.new()
+        navigation :: router.navigate(route_state, url) ?? return None
+        raw_limit :: navigation.search.get("limit") ?? return None
+        return raw_limit.to_int()
+    }
+
+    // Router is the canonical client navigation state. App.route owns the
+    // registration graph; this helper reports an unregistered route explicitly
+    // on native runs instead of inventing a second parser or a fake success.
+    pub fn route_report(url: String) String -> {
+        route_state :: router.new()
+        navigation :: router.navigate(route_state, url)
+        current :: router.current(route_state)
+        return "navigation={navigation} data={current.data} {router.show(route_state)}"
+    }
+
+    pub fn status_response(status: Int, body: String) HTTPResponse -> server.response(status, body)
+
+    pub fn ok_response(body: String) HTTPResponse -> server.response(200, body)
+
+    pub fn created_response(body: String) HTTPResponse -> server.response(201, body)
+
+    pub fn invalid_response(body: String) HTTPResponse -> server.response(422, body)
+
+    pub fn not_found_response(body: String) HTTPResponse -> server.response(404, body)
+
+    pub fn redirect_response(location: String) HTTPResponse -> {
+        response :: server.response(303, "")
+        return response.header("location", location)
+    }
+
+    pub fn order_form() WebForm -> {
+        draft :: forms.new("/orders")
+        with_item :: forms.field(draft, "item", "String", true) ?? draft
+        return forms.field(with_item, "quantity", "Int", true) ?? with_item
+    }
+
+    pub fn validate_order_form(item: String, quantity: String) FormView -> {
+        form :: order_form()
+        _item_set :: forms.set(form, "item", item) ?? return FormView{valid: false, html: forms.show(form), errors: "item field unavailable"}
+        _quantity_set :: forms.set(form, "quantity", quantity) ?? return FormView{valid: false, html: forms.show(form), errors: "quantity field unavailable"}
+        _item_blur :: forms.blur(form, "item") ?? return FormView{valid: false, html: forms.show(form), errors: "item field unavailable"}
+        _quantity_blur :: forms.blur(form, "quantity") ?? return FormView{valid: false, html: forms.show(form), errors: "quantity field unavailable"}
+        validation :: forms.validate(form)
+        if validation == {
+            .Err(message) -> return FormView{valid: false, html: forms.html(form), errors: message}
+            .Ok(_) -> {}
+        }
+        numeric :: Int.parse(quantity) ?? return FormView{
+            valid: false,
+            html: forms.html(form),
+            errors: "quantity must be an integer"
+        }
+        if numeric < 1 || numeric > 1000 {
+            return FormView{
+                valid: false,
+                html: forms.html(form),
+                errors: "quantity must be between 1 and 1000"
+            }
+        }
+        return FormView{valid: true, html: forms.html(form), errors: forms.show(form)}
+    }
+
+    pub fn form_error_display(item: String, quantity: String) String -> {
+        view :: validate_order_form(item, quantity)
+        return "{view.errors}\n{view.html}"
+    }
+    // HTTPRequest form decoding stays on the canonical App.form/Action boundary.
+    // The local listener names G3 instead of adding a parallel parser.
+
+
+    pub fn island_props(order_count: Int, signed_in: String) String -> {
+        return json.to_string(IslandProps{order_count: order_count, signed_in: signed_in})
+    }
+
+    pub fn ssr_orders_page(order_count: Int, signed_in: String) WebPage -> {
+        props :: island_props(order_count, signed_in)
+        body :: "<main data-island=\"orders\" data-props='{props}'><h1>Orders</h1><p>orders={order_count}</p><div id=\"orders-island\"></div></main>"
+        return core_web.page("Orders", body)
+    }
+
+    fn scoped_orders(path: String) ?DBScope -> {
+        conn :: db.open(path)
+        policy :: db.policy("orders", "true") ?? return None
+        return Val(conn.with_policy(policy, "web-battery"))
+    }
+
+    pub fn migrate_orders(path: String) ?Int -> {
+        scope :: scoped_orders(path) ?? return None
+        version :: db.migrate(
+            scope,
+            "orders-v1",
+            [SQL{"CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY, item TEXT NOT NULL, quantity INTEGER NOT NULL)"}]
+        ) ?? return None
+        scope.close()
+        return Val(version)
+    }
+
+    pub fn count_orders(path: String) ?Int -> {
+        scope :: scoped_orders(path) ?? return None
+        rows :: scope.query(SQL{"SELECT id FROM orders ORDER BY id"}) ?? return None
+        count :: rows.len()
+        scope.close()
+        return Val(count)
+    }
+
+    pub fn insert_order(path: String, item: String, quantity: Int) ?Int -> {
+        scope :: scoped_orders(path) ?? return None
+        inserted :: scope.execute(SQL{"INSERT INTO orders (item, quantity) VALUES ({item}, {quantity})"}) ?? return None
+        scope.close()
+        return Val(inserted)
+    }
+
+    pub fn reset_orders(path: String) ?Int -> {
+        scope :: scoped_orders(path) ?? return None
+        deleted :: scope.execute(SQL{"DELETE FROM orders"}) ?? return None
+        scope.close()
+        return Val(deleted)
+    }
+
+    pub fn seed_orders(path: String) ?Int -> {
+        current :: count_orders(path) ?? return None
+        if current == 0 {
+            _inserted :: insert_order(path, "book", 2) ?? return None
+        }
+        return count_orders(path)
+    }
+
+    pub fn live_orders(path: String) ?WebQuery -> {
+        scope :: scoped_orders(path) ?? return None
+        live :: scope.live(SQL{"SELECT id, item, quantity FROM orders ORDER BY id"}) ?? return None
+        return Val(query.new("orders.list", live))
+    }
+
+    pub fn invalidate_orders(orders: WebQuery) Int -> query.invalidate(orders)
+
+    pub fn query_report(path: String) String -> {
+        orders :: live_orders(path) ?? return "orders unavailable"
+        before :: query.show(orders)
+        generation :: invalidate_orders(orders)
+        refresh_result :: query.refresh(orders)
+        after :: query.show(orders)
+        return "before={before} invalidated={generation} refreshed={refresh_result} after={after}"
+    }
+
+    pub fn register_demo_user() Bool -> {
+        _registered :: auth.register_user("alice", "argon2id:demo")
+        _session :: auth.password_login("alice", "argon2id:demo", 1_700_000_000_000, 3_600_000) ?? return false
+        return true
+    }
+    pub struct LoginState {
+        session_id: String
+        cookie: String
+    }
+
+    pub fn login_state(user: String, password: String) ?LoginState -> {
+        session :: auth.password_login(user, password, 1_700_000_000_000, 3_600_000) ?? return None
+        return Val(LoginState{
+            session_id: auth.session_id(session),
+            cookie: auth.session_cookie(session)
+        })
+    }
+
+    pub fn login_session(user: String, password: String) ?String -> {
+        state :: login_state(user, password) ?? return None
+        return Val(state.session_id)
+    }
+
+    pub fn login_cookie(user: String, password: String) ?String -> {
+        state :: login_state(user, password) ?? return None
+        return Val(state.cookie)
+    }
+
+    pub fn login_status(user: String, password: String) Int -> {
+        _session :: auth.password_login(user, password, 1_700_000_000_000, 3_600_000) ?? return 401
+        return 200
+    }
+    pub fn protected_status(session_id: String, cookie: String) Int -> {
+        if cookie == "" -> return 401
+        expected :: "jet_session={session_id}"
+        if !cookie.starts_with(expected) -> return 401
+        _validated :: auth.session_validate(session_id, 1_700_000_000_001) ?? return 401
+        return 200
+    }
+
+    pub fn future_commands() [String] -> [
+        "scripts/agent/jet-env jet run examples/features/web/battery/run.jet",
+        "scripts/agent/jet-env jet build --target=web examples/features/web/battery/web/client.jet",
+        "scripts/agent/jet-env jet build --target=native examples/features/web/battery/run.jet --verbose",
+        "scripts/agent/jet-env jet dev examples/features/web/battery/run.jet --swap"
+    ]
+
+    pub fn open_core_gates() [String] -> [
+        "G1: native HTTP+DB build ICE; generated Rust did not compile (area-web/pkg/build/run.rs)",
+        "G2: HTTPRequest typed query accessor absent; req.query(\"limit\") is E0102",
+        "G3: HTTPRequest typed form decoder absent; req.form(...) is E0405",
+        "#2762: dev watcher route edit/restart state-retention proof remains a Core gate"
+    ]
+}

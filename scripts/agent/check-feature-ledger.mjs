@@ -7,9 +7,8 @@ import { fileURLToPath } from "node:url";
 import { execFileSync, spawnSync } from "node:child_process";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const MANIFEST_PATH = join(ROOT, "docs/spec/feature-claims.json");
-const REGISTRY_PATH = join(ROOT, "docs/reference/feature-claims.md");
-const REPORT_PATH = join(ROOT, "docs/plans/epoch-3/feature-claim-report.json");
+const MANIFEST_PATH = join(ROOT, "tests/fixtures/feature-claims/manifest.json");
+const REPORT_PATH = join(ROOT, "docs/audits/feature-claim-report.json");
 const FIXTURES_PATH = join(ROOT, "tests/fixtures/feature-claims/hostile-cases.json");
 // Worktrees carry stale board snapshots. Resolve live ownership from the main
 // checkout, then fall back to this tree for standalone checkouts.
@@ -25,8 +24,8 @@ const DEFAULT_TOWER_PATH = (function () {
   return join(ROOT, "plugins/tower/.tower/tower.json");
 })();
 const EXPECTED_CLASSES = ["reserved", "facade", "partial", "implemented", "proven"];
-const PUBLIC_DECLARATION_FILES = ["README.md", "docs/reference/core-library.md", "crates/jet-cli/src/CLI.rs", "site/generate.jet"];
-const PUBLIC_CLAIM_SURFACES = ["README.md", "site/generate.jet"];
+const PUBLIC_DECLARATION_FILES = ["crates/jet-cli/src/CLI.rs", "site/generate.jet"];
+const PUBLIC_CLAIM_SURFACES = ["site/generate.jet"];
 
 /** Live board cards plus archived history (D-TWR-ARCHIVE1) for owner lookup. */
 function loadBoardCards(towerPath) {
@@ -68,14 +67,6 @@ function sameSet(left, right) {
   return left.length === right.length && [...left].sort().every((value, index) => value === [...right].sort()[index]);
 }
 
-function registryClaims() {
-  const claims = [];
-  for (const line of readFileSync(REGISTRY_PATH, "utf8").split(/\r?\n/)) {
-    const match = line.match(/^\| `(claim\.[a-z0-9-]+)` \|/);
-    if (match) claims.push(match[1]);
-  }
-  return claims;
-}
 
 function declarationClaims(overrides, declarationsByFile = new Map()) {
   const found = [];
@@ -111,7 +102,7 @@ function declarationClaims(overrides, declarationsByFile = new Map()) {
 function validatePublicSurface(manifest, claims, declarationsByFile, overrides, fail) {
   const rows = manifest.publicSurface;
   if (!Array.isArray(rows) || rows.length === 0) {
-    fail("manifest", "publicSurface must contain one row per declared README/site claim");
+    fail("manifest", "publicSurface must contain one row per declared site claim");
     return;
   }
   const rowsBySurface = new Map();
@@ -182,9 +173,9 @@ function cliCommands() {
 }
 
 function coreModules() {
-  const text = readFileSync(join(ROOT, "crates/jet-foundation/src/Syntax/predicates.rs"), "utf8");
-  const block = text.match(/pub const KNOWN_CORE_MODULES:[\s\S]*?= &\[([\s\S]*?)\];/);
-  if (!block) throw new Error("KNOWN_CORE_MODULES registry not found");
+  const text = readFileSync(join(ROOT, "crates/jet-foundation/src/CoreModuleExports.rs"), "utf8");
+  const block = text.match(/pub const CORE_MODULE_NAMES:[\s\S]*?= &\[([\s\S]*?)\];/);
+  if (!block) throw new Error("CORE_MODULE_NAMES registry not found");
   return [...block[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]);
 }
 
@@ -325,14 +316,10 @@ function validateManifest(manifest, board, options = {}) {
     if (claims.has(claim.id)) fail(claim.id, "duplicate stable claim id");
     claims.set(claim.id, claim);
   }
-  const docsClaims = registryClaims();
-  if (!sameSet([...claims.keys()], docsClaims)) {
-    errors.push(`manifest: docs registry drift; manifest=${[...claims.keys()].sort().join(",")} docs=${docsClaims.sort().join(",")}`);
-  }
   const declarationsByFile = new Map();
   const declaredClaims = declarationClaims(options.fileOverrides, declarationsByFile);
-  if (!sameSet([...claims.keys()], [...new Set(declaredClaims)])) {
-    errors.push(`manifest: designated public declarations have unowned or missing claim IDs; declarations=${[...new Set(declaredClaims)].sort().join(",")}`);
+  for (const claimId of new Set(declaredClaims)) {
+    if (!claims.has(claimId)) errors.push(`public declaration names unknown claim ID ${claimId}`);
   }
   validatePublicSurface(manifest, claims, declarationsByFile, options.fileOverrides, fail);
 
@@ -399,7 +386,7 @@ function reportFor(manifest, board) {
   return {
     schemaVersion: 2,
     inventory: {
-      broadClaims: registryClaims().length,
+      broadClaims: manifest.claims.length,
       cliCommands: cliCommands().length,
       coreModules: coreModules().length,
     },
@@ -533,9 +520,9 @@ function hostileFixtures(towerPath) {
         break;
       }
       case "unmarked-broad-claim": {
-        const path = "README.md";
+        const path = "site/generate.jet";
         const text = fileText(path);
-        overrides.set(path, text.replace("<!-- FEATURE_CLAIMS:END -->", "<!-- Jet replaces every database without limits. -->\n<!-- FEATURE_CLAIMS:END -->"));
+        overrides.set(path, text.replace("// FEATURE_CLAIMS:END", "// Jet replaces every database without limits\n// FEATURE_CLAIMS:END"));
         break;
       }
       default:

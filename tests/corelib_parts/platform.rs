@@ -51,7 +51,7 @@ struct Ticket {
 
 fn run() {
     rows :: data.csv<Ticket>("team,minutes\nCore,4.0") ?? panic("bad csv")
-    print(data.count(rows))
+    print(rows.len())
 }
 "#,
     );
@@ -66,7 +66,10 @@ fn run() {
         "core.data.csv nested its list result at the runtime boundary:\n{}",
         out.rust
     );
-    assert!(out.rust.contains("jet_data_count"));
+    assert!(
+        !out.rust.contains("jet_data_count"),
+        "ordinary list length must not lower through the removed data.count wrapper"
+    );
 }
 
 #[test]

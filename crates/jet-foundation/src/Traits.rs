@@ -14,15 +14,45 @@ use crate::Generics::{
 use crate::Syntax;
 use crate::AST::FuncSig;
 use crate::AST::{
-    AccessConvention, DistinctDef, EnumDef, Func, ImplDef, Item, ProgramBundle, StructDef,
+    AccessConvention, DistinctDef, EnumDef, Func, ImplDef, Item, OperatorMarker, ProgramBundle,
+    StructDef,
     TraitDef, TraitImplBlock, TraitMethodSig, Type, TypeParam,
 };
 use std::collections::{BTreeSet, HashMap, HashSet};
+/// D-OPMIX1 / D-FOUND-OPMIX1=A: one checked operator hook and its concrete
+/// right-hand type. `rhs` is always concrete in this table; a bare
+/// `impl Type.Op` is recorded with the owner's type as its right-hand operand.
+#[derive(Debug, Clone)]
+pub struct OperatorImpl {
+    pub left: String,
+    pub trait_name: String,
+    pub rhs: Type,
+    pub result: Type,
+    pub span: Span,
+    pub explicit_rhs: bool,
+    pub operator_marker: Option<OperatorMarker>,
+}
+
+/// D-OPMIX1: stable source identity for one operator implementation method.
+/// The RHS type is part of the identity so same-owner hooks with different
+/// operand pairs never collapse onto an owner/method-only entry.
+pub fn operator_method_identity(
+    left: &str,
+    trait_name: &str,
+    method: &str,
+    rhs: &Type,
+) -> String {
+    format!("{left}::{trait_name}::{method}<{}>", rhs.name())
+}
+
 
 #[derive(Debug, Clone, Default)]
 pub struct TraitRegistry {
     pub traits: HashMap<String, TraitInfo>,
     pub trait_impls: HashSet<(String, String)>,
+    /// D-OPMIX1: all validated operator hooks, including multiple RHS types
+    /// for one owner/trait pair. Rows stay in registration order for inspect.
+    pub operator_impls: Vec<OperatorImpl>,
     pub struct_params: HashMap<String, Vec<TypeParam>>,
     /// Generic struct parameters mentioned by stored fields. Structural
     /// Equatable/Comparable bridges constrain only these; phantom parameters
@@ -75,6 +105,35 @@ pub struct TraitInfo {
 }
 
 impl TraitRegistry {
+    /// Return one exact operator hook for a left type, trait, and right type.
+    pub fn operator_impl_for(
+        &self,
+        left: &Type,
+        trait_name: &str,
+        rhs: &Type,
+    ) -> Option<&OperatorImpl> {
+        let left_name = left.name();
+        self.operator_impls.iter().find(|implementation| {
+            implementation.left == left_name
+                && implementation.trait_name == trait_name
+                && implementation.rhs == *rhs
+        })
+    }
+
+    /// Return all operator hooks for a left type and trait. The caller can
+    /// inspect `rhs`, `result`, and `explicit_rhs` without reconstructing AST.
+    pub fn operator_impls_for(
+        &self,
+        left: &Type,
+        trait_name: &str,
+    ) -> impl Iterator<Item = &OperatorImpl> {
+        let left_name = left.name();
+        let trait_name = trait_name.to_string();
+        self.operator_impls.iter().filter(move |implementation| {
+            implementation.left == left_name && implementation.trait_name == trait_name
+        })
+    }
+
     /// Compute automatic structural traits for one standalone item group.
     pub fn auto_derives_for_items(items: &[Item]) -> TraitRegistry {
         let mut registry = Self::default();
@@ -488,8 +547,19 @@ impl TraitRegistry {
         span: Span,
         diags: &mut Vec<Diagnostic>,
     ) {
+        let error_name = assoc_type_impls
+            .iter()
+            .find(|(name, _, _)| name == "Error")
+            .map_or_else(|| "Error".to_string(), |(_, _, ty)| ty.name());
+        let check_expected = format!("`fn check(text: String) !{error_name} -[]>`");
+        let hole_expected = "`fn encode_hole<T: Printable>(value: T) String -[]>`";
         let Some(Type::String) = self.distinct_bases.get(type_name) else {
-            diags.push(e0907(Generics::CHECKED_TEXT, "check", span));
+            diags.push(e0907(
+                Generics::CHECKED_TEXT,
+                "check",
+                &format!("{check_expected} on a `distinct String` type"),
+                span,
+            ));
             return;
         };
         let error_impls: Vec<_> = assoc_type_impls
@@ -501,7 +571,12 @@ impl TraitRegistry {
             diags.push(e0913(Generics::CHECKED_TEXT, &["Error".to_string()], span));
         }
         for (_, assoc_span, _) in error_impls.iter().skip(1) {
-            diags.push(e0907(Generics::CHECKED_TEXT, "type Error", *assoc_span));
+            diags.push(e0907(
+                Generics::CHECKED_TEXT,
+                "type Error",
+                "one `type Error = …` binding",
+                *assoc_span,
+            ));
         }
         for (name, assoc_span, _) in assoc_type_impls
             .iter()
@@ -510,6 +585,7 @@ impl TraitRegistry {
             diags.push(e0907(
                 Generics::CHECKED_TEXT,
                 &format!("type {name}"),
+                "only `type Error = …`",
                 *assoc_span,
             ));
         }
@@ -532,12 +608,18 @@ impl TraitRegistry {
             ));
         }
         for method in check_methods.iter().skip(1) {
-            diags.push(e0907(Generics::CHECKED_TEXT, "check", method.name_span));
+            diags.push(e0907(
+                Generics::CHECKED_TEXT,
+                "check",
+                &check_expected,
+                method.name_span,
+            ));
         }
         for method in hole_methods.iter().skip(1) {
             diags.push(e0907(
                 Generics::CHECKED_TEXT,
                 "encode_hole",
+                hole_expected,
                 method.name_span,
             ));
         }
@@ -580,6 +662,7 @@ impl TraitRegistry {
             diags.push(e0907(
                 Generics::CHECKED_TEXT,
                 "check",
+                &check_expected,
                 check.map_or(span, |method| method.name_span),
             ));
         }
@@ -587,6 +670,7 @@ impl TraitRegistry {
             diags.push(e0907(
                 Generics::CHECKED_TEXT,
                 "encode_hole",
+                hole_expected,
                 hole.map_or(span, |method| method.name_span),
             ));
         }
@@ -597,6 +681,7 @@ impl TraitRegistry {
             diags.push(e0907(
                 Generics::CHECKED_TEXT,
                 &method.name,
+                "only `check` and `encode_hole`",
                 method.name_span,
             ));
         }
@@ -944,21 +1029,130 @@ impl TraitRegistry {
         }
     }
 
+    fn impl_owner_type(&self, type_name: &str) -> Type {
+        self.struct_params
+            .get(type_name)
+            .or_else(|| self.enum_params.get(type_name))
+            .map_or_else(
+                || Type::Named(type_name.to_string()),
+                |params| {
+                    if params.is_empty() {
+                        Type::Named(type_name.to_string())
+                    } else {
+                        Type::Apply {
+                            name: type_name.to_string(),
+                            args: params
+                                .iter()
+                                .map(|param| Type::Named(param.name.clone()))
+                                .collect(),
+                        }
+                    }
+                },
+            )
+    }
+
+    fn operator_rhs_is_local(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Named(name) | Type::Apply { name, .. } => self.local_types.contains(name),
+            _ => false,
+        }
+    }
+    fn validate_operator_marker(
+        &self,
+        marker: Option<OperatorMarker>,
+        trait_name: Option<&str>,
+        operator_rhs: Option<&Type>,
+        span: Span,
+        diags: &mut Vec<Diagnostic>,
+    ) -> bool {
+        let Some(OperatorMarker::Commutative) = marker else {
+            return true;
+        };
+        let valid_trait = trait_name.is_some_and(|name| {
+            matches!(name, Syntax::TRAIT_ADD | Syntax::TRAIT_MUL)
+        });
+        if valid_trait && operator_rhs.is_some() {
+            return true;
+        }
+        let trait_name = trait_name.unwrap_or("the impl");
+        diags.push(Diagnostic::error(
+            "E0907",
+            format!("`#Commutative` is not valid on `{trait_name}`"),
+            "`#Commutative` derives a reverse lookup only for a typed Add or Mul hook"
+                .to_string(),
+            "use `impl Type.Add(Other) #Commutative` or `impl Type.Mul(Other) #Commutative`"
+                .to_string(),
+            Some(span),
+        ));
+        false
+    }
+
+
     fn register_impl(&mut self, i: &ImplDef, diags: &mut Vec<Diagnostic>) {
+        if !self.validate_operator_marker(
+            i.operator_marker,
+            i.trait_name.as_deref(),
+            i.operator_rhs.as_ref(),
+            i.type_span,
+            diags,
+        ) {
+            return;
+        }
         if let Some(trait_name) = &i.trait_name {
             if i.delegation_field.is_some() {
+                if Generics::is_literal_capability(trait_name) {
+                    // Literal capabilities are constructor contracts, not
+                    // field-forwarded traits. Run the ordinary validator so a
+                    // delegation cannot create a capability without `@fn
+                    // from_literal`.
+                    self.validate_trait_impl(
+                        &i.type_name,
+                        trait_name,
+                        &i.methods,
+                        &i.assoc_type_impls,
+                        i.operator_rhs.as_ref(),
+                        i.operator_marker,
+                        i.type_span,
+                        diags,
+                    );
+                    return;
+                }
                 // S62: delegation — just register the impl pair; method completeness
                 // is satisfied by the field, not by the methods vec (which is empty).
                 // Full validation (field existence + field type implements trait) happens
                 // in sema.rs after type registration.
                 let key = (i.type_name.clone(), trait_name.clone());
                 let _ = self.trait_impls.insert(key); // may already be there; ignore dup
+                if matches!(
+                    trait_name.as_str(),
+                    Syntax::TRAIT_ADD
+                        | Syntax::TRAIT_SUB
+                        | Syntax::TRAIT_MUL
+                        | Syntax::TRAIT_DIV
+                ) {
+                    let owner_type = self.impl_owner_type(&i.type_name);
+                    let rhs = i
+                        .operator_rhs
+                        .clone()
+                        .unwrap_or_else(|| owner_type.clone());
+                    self.operator_impls.push(OperatorImpl {
+                        left: i.type_name.clone(),
+                        trait_name: trait_name.clone(),
+                        rhs,
+                        result: owner_type,
+                        span: i.type_span,
+                        explicit_rhs: i.operator_rhs.is_some(),
+                        operator_marker: i.operator_marker,
+                    });
+                }
             } else {
                 self.validate_trait_impl(
                     &i.type_name,
                     trait_name,
                     &i.methods,
                     &i.assoc_type_impls,
+                    i.operator_rhs.as_ref(),
+                    i.operator_marker,
                     i.type_span,
                     diags,
                 );
@@ -969,6 +1163,79 @@ impl TraitRegistry {
     fn register_struct_trait_impls(&mut self, s: &StructDef, diags: &mut Vec<Diagnostic>) {
         for block in &s.trait_impls {
             self.register_trait_impl_block(&s.name, block, diags);
+        }
+    }
+
+    fn literal_constructor_return_matches(return_type: Option<&Type>, owner: &str) -> bool {
+        let Some(return_type) = return_type else {
+            return false;
+        };
+        let success = match return_type {
+            Type::Result { ok, .. } => ok.as_ref(),
+            other => other,
+        };
+        matches!(
+            success,
+            Type::Named(name) if name == owner
+        ) || matches!(
+            success,
+            Type::Apply { name, .. } if name == owner
+        )
+    }
+
+    /// D-FOUND-LITERAL1=A (card #2789): a literal capability is a closed
+    /// constructor contract, not an ordinary user-declared trait. Keep its
+    /// shape in the shared registry so every checker can select it without
+    /// teaching a backend how to interpret literal syntax.
+    fn check_literal_capability_impl(
+        &self,
+        type_name: &str,
+        trait_name: &str,
+        methods: &[Func],
+        span: Span,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        let (source_type, source_label) = match trait_name {
+            Generics::LITERAL_INT => (Type::Int, Syntax::TYPE_INT),
+            Generics::LITERAL_FLOAT => (Type::String, Syntax::TYPE_FLOAT),
+            _ => return,
+        };
+        let constructors: Vec<&Func> = methods
+            .iter()
+            .filter(|method| method.name == Generics::LITERAL_FROM_LITERAL)
+            .collect();
+        if constructors.is_empty() {
+            diags.push(e0906(
+                trait_name,
+                &[Generics::LITERAL_FROM_LITERAL.to_string()],
+                span,
+            ));
+            return;
+        }
+        let expected = format!(
+            "`@fn from_literal(value: {}) {type_name}`",
+            source_type.name()
+        );
+        let valid = constructors.len() == 1
+            && constructors[0].is_comptime
+            && constructors[0].type_params.is_empty()
+            && constructors[0].params.len() == 1
+            && constructors[0].params[0].convention == AccessConvention::Read
+            && constructors[0].params[0].ty == source_type
+            && constructors[0].params[0].default.is_none()
+            && !constructors[0].params[0].variadic
+            && Self::literal_constructor_return_matches(
+                constructors[0].return_type.as_ref(),
+                type_name,
+            );
+        if !valid {
+            let method = constructors[0];
+            diags.push(e0907(
+                trait_name,
+                Generics::LITERAL_FROM_LITERAL,
+                &format!("{expected} // `{source_label}` capability"),
+                method.name_span,
+            ));
         }
     }
 
@@ -983,6 +1250,8 @@ impl TraitRegistry {
             &block.trait_name,
             &block.methods,
             &block.assoc_type_impls,
+            block.operator_rhs.as_ref(),
+            block.operator_marker,
             block.trait_span,
             diags,
         );
@@ -994,23 +1263,26 @@ impl TraitRegistry {
         trait_name: &str,
         methods: &[Func],
         assoc_type_impls: &[(String, Span, Type)],
+        operator_rhs: Option<&Type>,
+        operator_marker: Option<OperatorMarker>,
         span: Span,
         diags: &mut Vec<Diagnostic>,
     ) {
+        if !self.validate_operator_marker(
+            operator_marker,
+            Some(trait_name),
+            operator_rhs,
+            span,
+            diags,
+        ) {
+            return;
+        }
         // D-QUAL2: an `impl Type: Tag { … }` attaches methods and dispatches, but
         // a tag is a marker with no methods — E0731.
         if self.local_tags.contains(trait_name) {
             diags.push(Generics::e0731(trait_name, "an `impl` block", span));
             return;
         }
-        let key = (type_name.to_string(), trait_name.to_string());
-        if !self.trait_impls.insert(key) {
-            diags.push(e0908(type_name, trait_name, span));
-            return;
-        }
-        let local_type = self.local_types.contains(type_name);
-        let local_trait = !trait_name.contains('.')
-            && (self.local_traits.contains(trait_name) || Generics::is_builtin_trait(trait_name));
         let operator_trait = matches!(
             trait_name,
             Syntax::TRAIT_ADD
@@ -1020,12 +1292,56 @@ impl TraitRegistry {
                 | Syntax::TRAIT_EQUATABLE
                 | Syntax::TRAIT_COMPARABLE
         );
-        if operator_trait && !local_type {
+        let arithmetic_trait = matches!(
+            trait_name,
+            Syntax::TRAIT_ADD | Syntax::TRAIT_SUB | Syntax::TRAIT_MUL | Syntax::TRAIT_DIV
+        );
+        let owner_type = self.impl_owner_type(type_name);
+        let rhs_type = operator_rhs
+            .cloned()
+            .unwrap_or_else(|| owner_type.clone());
+        let key = (type_name.to_string(), trait_name.to_string());
+        if operator_trait {
+            if self.operator_impls.iter().any(|implementation| {
+                implementation.left == type_name
+                    && implementation.trait_name == trait_name
+                    && implementation.rhs == rhs_type
+            }) {
+                diags.push(Diagnostic::error(
+                    "E0908",
+                    format!(
+                        "`{type_name}` already implements `{trait_name}` for `{}`",
+                        rhs_type.name()
+                    ),
+                    "operator implementation identity includes both the left and right operand types"
+                        .to_string(),
+                    format!(
+                        "remove the duplicate hook or choose a different right-hand type than `{}`",
+                        rhs_type.name()
+                    ),
+                    Some(span),
+                ));
+                return;
+            }
+            let _ = self.trait_impls.insert(key);
+        } else if !self.trait_impls.insert(key) {
+            diags.push(e0908(type_name, trait_name, span));
+            return;
+        }
+        let local_type = self.local_types.contains(type_name);
+        let local_trait = !trait_name.contains('.')
+            && (self.local_traits.contains(trait_name) || Generics::is_builtin_trait(trait_name));
+        let rhs_local = operator_rhs.is_some() && self.operator_rhs_is_local(&rhs_type);
+        if operator_trait && !local_type && !(arithmetic_trait && rhs_local) {
             diags.push(e0902(span));
             return;
         }
         if !local_type && !local_trait {
             diags.push(e0902(span));
+            return;
+        }
+        if Generics::is_literal_capability(trait_name) {
+            self.check_literal_capability_impl(type_name, trait_name, methods, span, diags);
             return;
         }
         // D-SERDE2 (card #131 S1-bridge): `Encode`/`Decode` are built-in traits with no
@@ -1050,33 +1366,29 @@ impl TraitRegistry {
                 Syntax::TRAIT_EQUATABLE => "equal",
                 _ => "compare",
             };
+            let owner_name = owner_type.name();
+            let rhs_name = rhs_type.name();
+            let expected_result = match trait_name {
+                Syntax::TRAIT_EQUATABLE => Syntax::TYPE_BOOL.to_string(),
+                Syntax::TRAIT_COMPARABLE => Syntax::TYPE_ORDERING.to_string(),
+                _ if arithmetic_trait => "a declared result type".to_string(),
+                _ => owner_name.clone(),
+            };
+            let expected = format!(
+                "`fn {expected_method}(self, rhs: {rhs_name}) {expected_result}`"
+            );
             let Some(method) = methods.iter().find(|method| method.name == expected_method) else {
                 diags.push(e0906(trait_name, &[expected_method.to_string()], span));
                 for extra in methods {
-                    diags.push(e0907(trait_name, expected_method, extra.name_span));
+                    diags.push(e0907(
+                        trait_name,
+                        expected_method,
+                        &expected,
+                        extra.name_span,
+                    ));
                 }
                 return;
             };
-            let owner_type = self
-                .struct_params
-                .get(type_name)
-                .or_else(|| self.enum_params.get(type_name))
-                .map_or_else(
-                    || Type::Named(type_name.to_string()),
-                    |params| {
-                        if params.is_empty() {
-                            Type::Named(type_name.to_string())
-                        } else {
-                            Type::Apply {
-                                name: type_name.to_string(),
-                                args: params
-                                    .iter()
-                                    .map(|param| Type::Named(param.name.clone()))
-                                    .collect(),
-                            }
-                        }
-                    },
-                );
             let self_ok = method.params.first().is_some_and(|param| {
                 param.name == Syntax::KW_SELF
                     && param.convention == AccessConvention::Read
@@ -1085,7 +1397,7 @@ impl TraitRegistry {
             });
             let rhs_ok = method.params.get(1).is_some_and(|param| {
                 param.convention == AccessConvention::Read
-                    && param.ty == owner_type
+                    && param.ty == rhs_type
                     && !param.variadic
                     && param.default.is_none()
             });
@@ -1094,21 +1406,45 @@ impl TraitRegistry {
                 Syntax::TRAIT_COMPARABLE => {
                     method.return_type == Some(Type::Named(Syntax::TYPE_ORDERING.to_string()))
                 }
+                _ if arithmetic_trait => method.return_type.is_some(),
                 _ => method.return_type.as_ref() == Some(&owner_type),
             };
-            if methods.len() != 1
-                || !self_ok
-                || !rhs_ok
-                || !ret_ok
-                || !method.type_params.is_empty()
-            {
-                diags.push(e0907(trait_name, expected_method, method.name_span));
+            let valid = methods.len() == 1
+                && self_ok
+                && rhs_ok
+                && ret_ok
+                && method.type_params.is_empty();
+            if !valid {
+                diags.push(e0907(
+                    trait_name,
+                    expected_method,
+                    &expected,
+                    method.name_span,
+                ));
             }
             for extra in methods
                 .iter()
                 .filter(|candidate| !std::ptr::eq(*candidate, method))
             {
-                diags.push(e0907(trait_name, expected_method, extra.name_span));
+                diags.push(e0907(
+                    trait_name,
+                    expected_method,
+                    &expected,
+                    extra.name_span,
+                ));
+            }
+            if valid {
+                if let Some(result) = method.return_type.clone() {
+                    self.operator_impls.push(OperatorImpl {
+                        left: type_name.to_string(),
+                        trait_name: trait_name.to_string(),
+                        rhs: rhs_type.clone(),
+                        result,
+                        span,
+                        explicit_rhs: operator_rhs.is_some(),
+                        operator_marker,
+                    });
+                }
             }
             return;
         }
@@ -1176,12 +1512,16 @@ impl TraitRegistry {
                             .map(|p| (p.convention, p.ty.clone()))
                             .collect();
                         if !sig_matches_trait(&params, &m.return_type, sig, &assoc) {
-                            diags.push(e0907(trait_name, &m.name, m.name_span));
+                            let expected =
+                                Generics::trait_method_expected_signature(type_name, sig, &assoc);
+                            diags.push(e0907(trait_name, &m.name, &expected, m.name_span));
                         }
                     }
                 }
             }
-        } else if !Generics::is_builtin_trait(trait_name) {
+        } else if !Generics::is_builtin_trait(trait_name)
+            && !Generics::is_literal_capability(trait_name)
+        {
             diags.push(Diagnostic::error(
                 "E0119",
                 format!("there's no trait called `{trait_name}`"),
@@ -1420,9 +1760,7 @@ impl TraitRegistry {
                 .unwrap_or_else(|| self.implements_trait(name, trait_name)),
             Type::Float | Type::Float32 => trait_name != COMPARABLE,
             Type::Int | Type::Bool | Type::String | Type::Char => true,
-            Type::IntN { .. } => {
-                !matches!(trait_name, ENCODE | DECODE) || sized_int_has_datatree_form(ty)
-            }
+            Type::IntN { .. } => true,
             Type::Quantity { base, .. } => {
                 if matches!(trait_name, ENCODE | DECODE) {
                     false
@@ -1438,7 +1776,9 @@ impl TraitRegistry {
     }
 
     pub fn is_trait_name(&self, name: &str) -> bool {
-        self.traits.contains_key(name) || Generics::is_builtin_trait(name)
+        self.traits.contains_key(name)
+            || Generics::is_builtin_trait(name)
+            || Generics::is_literal_capability(name)
     }
 
     pub fn resolve_type_name(&self, name: &str, type_param_scope: &[TypeParam]) -> Type {
@@ -1831,7 +2171,7 @@ impl TraitRegistry {
                 }
                 let mut visiting = HashSet::new();
                 if self.error_conversion_path_count(source, target, &mut visiting) > 1 {
-                    return Some((source.clone(), target.clone()));
+                    return Some((source.to_string(), target.to_string()));
                 }
             }
         }
@@ -2004,11 +2344,11 @@ impl TraitRegistry {
             "BrowserError",
             crate::Syntax::TYPE_BYTES,
             "Clock",
-            "Closed",
             "CountMinSketch",
-            "DBValue",
             "DataError",
-            "DataErrorKind",
+            "DataTracked",
+            "DataWatch",
+            "DataWatchStatus",
             "DataTree",
             "Date",
             "DateTime",
@@ -2049,7 +2389,6 @@ impl TraitRegistry {
             "IOError",
             "IPAddr",
             "JSON",
-            "JSONError",
             "Key",
             "LocalDate",
             "LocalTime",
@@ -2107,8 +2446,6 @@ impl TraitRegistry {
             "WalkEntry",
             "WatchEvent",
             "WsError",
-            "XMLError",
-            "CBORError",
             "Zone",
             "ZonedDateTime",
         ]
@@ -2122,6 +2459,9 @@ impl TraitRegistry {
             crate::Syntax::TYPE_BYTES,
             "Clock",
             "Decimal",
+            "DataTracked",
+            "DataWatch",
+            "DataWatchStatus",
             "DataTree",
             // Core time carriers have real Prelude JetDebug impls. Keep them
             // in the registry so nested auto-derived Debug uses that hook too.
@@ -2189,8 +2529,8 @@ impl TraitRegistry {
         self.trait_impls
             .insert(("FieldError".to_string(), DISPLAY.to_string()));
         for ty in [
-            "EncodingFormat",
             "EncodingErrorKind",
+            "EncodingFormat",
             "EncodingCause",
             "EncodingError",
             "EncodingLimits",
@@ -2228,6 +2568,8 @@ impl TraitRegistry {
             "TLSStream",
             "DBConnection",
             "DBScope",
+            "DbPool",
+            "DbLease",
             "Arena",
             "Bump",
             "Pool",
@@ -2253,6 +2595,50 @@ impl TraitRegistry {
             ),
         ] {
             self.register_synthetic_binary_trait(trait_name, method, ret);
+        }
+        // D-OPMIX1: Core's vector/scalar hooks are explicit typed rows. Keep
+        // them in the same registry as source impls so every tier can resolve
+        // the one mixed-type dispatch table.
+        let dummy = Span { start: 0, end: 0 };
+        for (left, trait_name, rhs, result) in [
+            (
+                "Vec3",
+                Syntax::TRAIT_MUL,
+                Type::Named(Syntax::TYPE_FLOAT.to_string()),
+                Type::Named("Vec3".to_string()),
+            ),
+            (
+                "Vec3",
+                Syntax::TRAIT_DIV,
+                Type::Named(Syntax::TYPE_FLOAT.to_string()),
+                Type::Named("Vec3".to_string()),
+            ),
+            (
+                Syntax::TYPE_FLOAT,
+                Syntax::TRAIT_DIV,
+                Type::Named("Vec3".to_string()),
+                Type::Named("Vec3".to_string()),
+            ),
+        ] {
+            if !self.operator_impls.iter().any(|implementation| {
+                implementation.left == left
+                    && implementation.trait_name == trait_name
+                    && implementation.rhs == rhs
+            }) {
+                self.operator_impls.push(OperatorImpl {
+                    left: left.to_string(),
+                    trait_name: trait_name.to_string(),
+                    rhs,
+                    result,
+                    span: dummy,
+                    explicit_rhs: true,
+                    operator_marker: (left == "Vec3"
+                        && trait_name == Syntax::TRAIT_MUL)
+                        .then_some(OperatorMarker::Commutative),
+                });
+            }
+            self.trait_impls
+                .insert((left.to_string(), trait_name.to_string()));
         }
         // D-POOLID-API1=A: Id<T> compares only its index and generation.
         // Its phantom T does not take part in equality.
@@ -2755,12 +3141,22 @@ impl TraitRegistry {
             "decode"
         };
         let is_data = |ty: &Type| matches!(ty, Type::Named(n) if Syntax::is_data_type_name(n));
+        let expected = if trait_name == ENCODE {
+            "`fn encode(self) DataTree`".to_string()
+        } else {
+            format!("`fn decode(tree: DataTree) {type_name} ![FieldError]`")
+        };
         let mut saw_verb = false;
         for m in methods {
             if m.name != verb {
                 // Only `encode`/`decode` belong in the codec impl (the trait owns exactly
                 // one method); anything else can't be bridged.
-                diags.push(e0907(trait_name, &m.name, m.name_span));
+                diags.push(e0907(
+                    trait_name,
+                    &m.name,
+                    &format!("only `{verb}`"),
+                    m.name_span,
+                ));
                 continue;
             }
             saw_verb = true;
@@ -2786,7 +3182,7 @@ impl TraitRegistry {
                 !has_self && non_self.len() == 1 && is_data(&non_self[0].ty) && ret_ok
             };
             if !ok {
-                diags.push(e0907(trait_name, &m.name, m.name_span));
+                diags.push(e0907(trait_name, &m.name, &expected, m.name_span));
             }
         }
         if !saw_verb {
@@ -2963,19 +3359,6 @@ pub fn auto_derive_requested(
                 || (matches!(trait_name, ENCODE | DECODE) && marker.name == Syntax::MARKER_CODABLE)
         })
         .map_or(package_default, |marker| !marker.negated)
-}
-
-/// D-SERDE: the shared DataTree `Int` representation cannot preserve U64.
-/// Keep this predicate in the foundation so auto-derive eligibility and the
-/// explicit serde checker make the same decision before codec expansion.
-pub fn sized_int_has_datatree_form(ty: &Type) -> bool {
-    !matches!(
-        ty,
-        Type::IntN {
-            signed: false,
-            bits: 64
-        }
-    )
 }
 
 pub fn struct_auto_derive_ok(s: &StructDef) -> bool {

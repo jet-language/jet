@@ -76,6 +76,38 @@ pub struct JetDbScope {
     pub handle: u64,
     pub policy: JetRowPolicy,
     pub user: String,
+    pub request_id: Option<String>,
+}
+
+thread_local! {
+    static JET_DB_REQUEST_ID: std::cell::RefCell<Option<String>> =
+        std::cell::RefCell::new(None);
+}
+
+/// The request identity is installed by the HTTP server for the duration of
+/// handler execution.  DB scopes copy it at construction; no adapter invents
+/// a request identifier.
+pub(crate) fn jet_db_current_request_id() -> Option<String> {
+    JET_DB_REQUEST_ID.with(|request_id| request_id.borrow().clone())
+}
+
+pub(crate) struct JetDbRequestScope {
+    previous: Option<String>,
+}
+
+impl JetDbRequestScope {
+    pub(crate) fn enter(request_id: Option<String>) -> Self {
+        let previous = JET_DB_REQUEST_ID.with(|current| current.replace(request_id));
+        Self { previous }
+    }
+}
+
+impl Drop for JetDbRequestScope {
+    fn drop(&mut self) {
+        JET_DB_REQUEST_ID.with(|current| {
+            let _ = current.replace(self.previous.take());
+        });
+    }
 }
 
 #[derive(Clone, Debug)]

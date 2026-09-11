@@ -4,16 +4,59 @@
     // behind the same value API; the shared Prelude owns both representations,
     // and the public surface does not depend on a target feature.
 
+    // Private place access uses the same checked lane index as value reads.
+    pub(crate) trait JetNativeLane {
+        type Scalar;
+        const NAME: &'static str;
+        fn lanes(&self) -> &[Self::Scalar];
+        fn lanes_mut(&mut self) -> &mut [Self::Scalar];
+    }
+
+    pub(crate) fn jet_native_lane_ref<'a, L: JetNativeLane>(value: &'a L, index: i64, file: &str, line: u32) -> &'a L::Scalar {
+        let lanes = value.lanes();
+        let index = crate::jet_simd_lane_index(index, L::NAME, lanes.len())
+            .unwrap_or_else(|message| crate::jet_panic(file, line, &message));
+        &lanes[index]
+    }
+
+    pub(crate) fn jet_native_lane_mut<'a, L: JetNativeLane>(value: &'a mut L, index: i64, file: &str, line: u32) -> &'a mut L::Scalar {
+        let lanes = value.lanes_mut();
+        let index = crate::jet_simd_lane_index(index, L::NAME, lanes.len())
+            .unwrap_or_else(|message| crate::jet_panic(file, line, &message));
+        &mut lanes[index]
+    }
+
     macro_rules! jet_lane_type {
         (F64x4, $E:ty, $N:literal) => {
             #[repr(transparent)]
             #[derive(Clone, Copy)]
             pub struct F64x4(pub(crate) crate::JetF64x4);
+            impl JetNativeLane for F64x4 {
+                type Scalar = f64;
+                const NAME: &'static str = "F64x4";
+                fn lanes(&self) -> &[f64] {
+                    // SAFETY: JetF64x4 is [f64; 4] or __m256d, the same four
+                    // contiguous f64 lanes used by the native array bridge.
+                    // Both carriers have sufficient alignment and no padding.
+                    unsafe { &*((&self.0 as *const crate::JetF64x4).cast::<[f64; 4]>()) }
+                }
+                fn lanes_mut(&mut self) -> &mut [f64] {
+                    // SAFETY: same representation as lanes(); this exclusive
+                    // borrow is the sole access to the carrier for its lifetime.
+                    unsafe { &mut *((&mut self.0 as *mut crate::JetF64x4).cast::<[f64; 4]>()) }
+                }
+            }
         };
         ($T:ident, $E:ty, $N:literal) => {
             #[repr(transparent)]
             #[derive(Clone, Copy, Debug, PartialEq)]
             pub struct $T(pub [$E; $N]);
+            impl JetNativeLane for $T {
+                type Scalar = $E;
+                const NAME: &'static str = stringify!($T);
+                fn lanes(&self) -> &[$E] { &self.0 }
+                fn lanes_mut(&mut self) -> &mut [$E] { &mut self.0 }
+            }
         };
     }
 
@@ -804,7 +847,7 @@ macro_rules! jet_lane_show {
     /// D-CONC-CHAN1: wait on plain endpoints and return the selected arm plus
     /// its receive payload. Timer arms carry no value, so the option is absent.
     pub fn jet_select_wait_tagged<T: Send + 'static>(
-        recvs: &[&JetReceiver<T>],
+        recvs: &[JetReceiver<T>],
         after_ns: Vec<i64>,
     ) -> (i64, Option<T>) {
         let inners: Vec<_> = recvs.iter().map(|receiver| receiver.inner.select_inner()).collect();
@@ -822,7 +865,7 @@ macro_rules! jet_lane_show {
     /// D-CONC-CHAN2=D: probe a readiness table with an `else` arm. `-1` means
     /// that no receive or timer arm is ready, including a closed-only table.
     pub fn jet_select_try_wait_tagged<T: Send + 'static>(
-        recvs: &[&JetReceiver<T>],
+        recvs: &[JetReceiver<T>],
         after_ns: Vec<i64>,
     ) -> (i64, Option<T>) {
         let inners: Vec<_> = recvs.iter().map(|receiver| receiver.inner.select_inner()).collect();
@@ -965,23 +1008,261 @@ macro_rules! jet_lane_show {
 
     #[derive(Clone, Debug, PartialEq)]
     pub enum Closed {
-        Closed,
+        Closed
     }
 
-    // D-MEM1 S6 / D-SHAREDGUARD1=A: `Shared<T>` is a copyable lock handle.
-    // Beginner closures and expert owned guards share this one lock.
+    /// D-SHARED-REVISION1=A: a failed optimistic publication has a typed
+    /// reason. Stale tickets are not failures: they return `Ok(false)` so a
+    /// caller can distinguish a lost race from a malformed ticket or an
+    /// exhausted generation.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub enum JetSharedRevisionError {
+        WrongOwner,
+        GenerationExhausted,
+    }
+
+    impl super::JetShow for JetSharedRevisionError {
+        fn jet_show(&self) -> String {
+            match self {
+                Self::WrongOwner => "SharedRevisionError.WrongOwner".to_string(),
+                Self::GenerationExhausted => {
+                    "SharedRevisionError.GenerationExhausted".to_string()
+                }
+            }
+        }
+    }
+    impl super::JetDisplay for JetSharedRevisionError {
+        fn jet_display(&self) -> String {
+            self.jet_show()
+        }
+    }
+    impl super::JetDebug for JetSharedRevisionError {
+        fn jet_debug(&self) -> String {
+            self.jet_show()
+        }
+    }
+
+    // D-SHARED-REVISION1=A: the owner and generation are intentionally private.
+    // The copied projection is ordinary data, but the ticket cannot be forged,
+    // decoded, cloned, or reused after it is moved to `try_replace`.
+    pub struct JetSharedSnapshot<T: 'static, U> {
+        owner: std::sync::Arc<JetSharedCell<T>>,
+        revision: u64,
+        valid: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        consumed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        value: U,
+    }
+
+    // JET_VETTED_UNSAFE_BEGIN: jet_shared_cell
+    // AUDIT: JetSharedCell's UnsafeCell, permit-gated Send/Sync, and raw
+    // projections implement the shared-cell lease. Safe Rust cannot express
+    // that a runtime read or exclusive permit protects a dynamically selected
+    // field projection across the callback. The invariant is that every
+    // dereference holds its matching permit, projections are sema-validated
+    // disjoint fields, and a revision ticket is consumed at most once.
+    // Violating those conditions would create an aliasing/data race or a
+    // dangling reference and is undefined behavior.
+
     // jet:shared-guard-internal-begin
-    // The payload lives in `UnsafeCell`; every read/edit path below takes a
-    // protocol permit before forming a reference. The type name itself must
-    // stay inside the vetted region so I1 scans (`contains("unsafe")`) do not
-    // false-positive on `UnsafeCell`.
     struct JetSharedCell<T> {
         protocol: std::sync::Arc<crate::JetSharedProtocol>,
+        scalar: Option<crate::JetSharedAtomic>,
+        revision: std::sync::atomic::AtomicU64,
         value: std::cell::UnsafeCell<T>,
     }
+    // jet:shared-guard-internal-end
 
+    // jet:shared-guard-internal-begin
+    fn jet_shared_scalar_read_as<T: 'static, U: Copy + 'static>(value: &T) -> U {
+        debug_assert_eq!(
+            std::any::TypeId::of::<T>(),
+            std::any::TypeId::of::<U>()
+        );
+        // SAFETY: callers select U only after matching T's TypeId. Both
+        // values therefore have the same size and valid representation.
+        unsafe { std::mem::transmute_copy(value) }
+    }
+
+    fn jet_shared_scalar_write_as<T: 'static, U: Copy + 'static>(value: U) -> T {
+        debug_assert_eq!(
+            std::any::TypeId::of::<T>(),
+            std::any::TypeId::of::<U>()
+        );
+        // SAFETY: callers select U only after matching T's TypeId. Both
+        // values therefore have the same size and valid representation.
+        unsafe { std::mem::transmute_copy(&value) }
+    }
+
+    fn jet_shared_scalar_bits<T: 'static>(
+        value: &T,
+        kind: crate::JetSharedScalarKind,
+    ) -> u64 {
+        match kind {
+            crate::JetSharedScalarKind::I8 => {
+                jet_shared_scalar_read_as::<T, i8>(value) as i64 as u64
+            }
+            crate::JetSharedScalarKind::U8 => {
+                jet_shared_scalar_read_as::<T, u8>(value) as u64
+            }
+            crate::JetSharedScalarKind::I16 => {
+                jet_shared_scalar_read_as::<T, i16>(value) as i64 as u64
+            }
+            crate::JetSharedScalarKind::U16 => {
+                jet_shared_scalar_read_as::<T, u16>(value) as u64
+            }
+            crate::JetSharedScalarKind::I32 => {
+                jet_shared_scalar_read_as::<T, i32>(value) as i64 as u64
+            }
+            crate::JetSharedScalarKind::U32 => {
+                jet_shared_scalar_read_as::<T, u32>(value) as u64
+            }
+            crate::JetSharedScalarKind::I64 => {
+                jet_shared_scalar_read_as::<T, i64>(value) as u64
+            }
+            crate::JetSharedScalarKind::U64 => {
+                jet_shared_scalar_read_as::<T, u64>(value)
+            }
+            crate::JetSharedScalarKind::F32 => {
+                jet_shared_scalar_read_as::<T, f32>(value).to_bits() as u64
+            }
+            crate::JetSharedScalarKind::F64 => {
+                jet_shared_scalar_read_as::<T, f64>(value).to_bits()
+            }
+            crate::JetSharedScalarKind::Bool => {
+                if jet_shared_scalar_read_as::<T, bool>(value) {
+                    1
+                } else {
+                    0
+                }
+            }
+            crate::JetSharedScalarKind::Char => {
+                jet_shared_scalar_read_as::<T, char>(value) as u32 as u64
+            }
+        }
+    }
+
+    fn jet_shared_scalar_from_bits<T: 'static>(
+        bits: u64,
+        kind: crate::JetSharedScalarKind,
+    ) -> T {
+        match kind {
+            crate::JetSharedScalarKind::I8 => {
+                jet_shared_scalar_write_as::<T, i8>(bits as i8)
+            }
+            crate::JetSharedScalarKind::U8 => {
+                jet_shared_scalar_write_as::<T, u8>(bits as u8)
+            }
+            crate::JetSharedScalarKind::I16 => {
+                jet_shared_scalar_write_as::<T, i16>(bits as i16)
+            }
+            crate::JetSharedScalarKind::U16 => {
+                jet_shared_scalar_write_as::<T, u16>(bits as u16)
+            }
+            crate::JetSharedScalarKind::I32 => {
+                jet_shared_scalar_write_as::<T, i32>(bits as i32)
+            }
+            crate::JetSharedScalarKind::U32 => {
+                jet_shared_scalar_write_as::<T, u32>(bits as u32)
+            }
+            crate::JetSharedScalarKind::I64 => {
+                jet_shared_scalar_write_as::<T, i64>(bits as i64)
+            }
+            crate::JetSharedScalarKind::U64 => {
+                jet_shared_scalar_write_as::<T, u64>(bits)
+            }
+            crate::JetSharedScalarKind::F32 => {
+                jet_shared_scalar_write_as::<T, f32>(f32::from_bits(bits as u32))
+            }
+            crate::JetSharedScalarKind::F64 => {
+                jet_shared_scalar_write_as::<T, f64>(f64::from_bits(bits))
+            }
+            crate::JetSharedScalarKind::Bool => {
+                jet_shared_scalar_write_as::<T, bool>(bits != 0)
+            }
+            crate::JetSharedScalarKind::Char => {
+                let value = crate::jet_shared_guard_validate_char(bits as i32)
+                    .expect(crate::JET_SHARED_GUARD_CHARACTER_STORAGE_FAILED);
+                jet_shared_scalar_write_as::<T, char>(value)
+            }
+        }
+    }
+    // jet:shared-guard-internal-end
+
+    // jet:shared-guard-internal-begin
+    impl<T: 'static> JetSharedCell<T> {
+        fn scalar_snapshot(&self) -> Option<T> {
+            self.scalar.as_ref().map(|scalar| {
+                jet_shared_scalar_from_bits(scalar.load(), scalar.kind())
+            })
+        }
+
+        fn store_scalar_value(&self, value: &T) {
+            if let Some(scalar) = self.scalar.as_ref() {
+                scalar.store(jet_shared_scalar_bits(value, scalar.kind()));
+            }
+        }
+
+        fn with_read<F, R>(&self, f: F) -> R
+        where
+            F: FnOnce(&T) -> R,
+        {
+            let _permit = crate::jet_shared_acquire(&self.protocol, false, || false)
+                .expect("uncancelled Shared read acquires");
+            if let Some(value) = self.scalar_snapshot() {
+                return f(&value);
+            }
+            // jet:shared-guard-internal-begin
+            // SAFETY: the read permit is held through the callback.
+            f(unsafe { &*self.value.get() })
+            // jet:shared-guard-internal-end
+        }
+
+        fn next_revision(&self) -> Result<u64, JetSharedRevisionError> {
+            let current = self
+                .revision
+                .load(std::sync::atomic::Ordering::Acquire);
+            current
+                .checked_add(1)
+                .ok_or(JetSharedRevisionError::GenerationExhausted)
+        }
+
+        fn commit_revision(&self) {
+            let next = self
+                .next_revision()
+                .expect("Shared revision generation exhausted");
+            self.revision
+                .store(next, std::sync::atomic::Ordering::Release);
+        }
+
+        fn commit_guard(&self) {
+            let next = self
+                .next_revision()
+                .expect("Shared revision generation exhausted");
+            if self.scalar.is_some() {
+                // SAFETY: the caller still holds the editable guard permit
+                // while committing the guard's shadow value.
+                let value = unsafe { &*self.value.get() };
+                self.store_scalar_value(value);
+            }
+            self.revision
+                .store(next, std::sync::atomic::Ordering::Release);
+        }
+
+        fn refresh_scalar_shadow(&self) {
+            if let Some(value) = self.scalar_snapshot() {
+                // SAFETY: the caller holds this cell's guard permit while
+                // synchronizing the shadow used by the guard projection.
+                unsafe { *self.value.get() = value };
+            }
+        }
+    }
+    // jet:shared-guard-internal-end
+
+    // jet:shared-guard-internal-begin
     // SAFETY: JetSharedProtocol grants either shared read permits or one
-    // exclusive edit permit before any payload reference is created.
+    // exclusive edit permit before any structured payload reference is
+    // created. Scalar callback paths use the atomic carrier and do not touch
+    // the shadow.
     unsafe impl<T: Send> Send for JetSharedCell<T> {}
     unsafe impl<T: Send + Sync> Sync for JetSharedCell<T> {}
     // jet:shared-guard-internal-end
@@ -989,81 +1270,336 @@ macro_rules! jet_lane_show {
     pub struct JetShared<T>(std::sync::Arc<JetSharedCell<T>>);
     impl<T: 'static> JetShared<T> {
         pub fn new(value: T) -> Self {
+            let kind = crate::jet_shared_scalar_kind::<T>();
+            let scalar = kind.map(|kind| {
+                crate::JetSharedAtomic::new(kind, jet_shared_scalar_bits(&value, kind))
+            });
             JetShared(std::sync::Arc::new(JetSharedCell {
                 protocol: crate::JetSharedProtocol::new(),
+                scalar,
+                revision: std::sync::atomic::AtomicU64::new(0),
                 // jet:shared-guard-internal-begin
                 value: std::cell::UnsafeCell::new(value),
                 // jet:shared-guard-internal-end
             }))
         }
+
+        /// Compatibility surface for a Cell binding promoted across an HTTP
+        /// handler boundary. The carrier is still the canonical lock-ordered
+        /// Shared value; these methods preserve the ordinary Cell operations
+        /// while the checked binding fact changes the storage type.
+        pub fn get(&self) -> T
+        where
+            T: Clone,
+        {
+            self.read(Clone::clone)
+        }
+
+        pub fn set(&self, value: T) {
+            let _permit = crate::jet_shared_acquire(&self.0.protocol, true, || false)
+                .expect("uncancelled Shared set acquires");
+            let next = self
+                .0
+                .next_revision()
+                .expect("Shared revision generation exhausted");
+            if self.0.scalar.is_some() {
+                self.0.store_scalar_value(&value);
+            } else {
+                // jet:shared-guard-internal-begin
+                // SAFETY: the exclusive permit is held for the whole write.
+                unsafe { *self.0.value.get() = value };
+                // jet:shared-guard-internal-end
+            }
+            self.0
+                .revision
+                .store(next, std::sync::atomic::Ordering::Release);
+        }
+
+        pub fn replace(&self, value: T) -> T {
+            let _permit = crate::jet_shared_acquire(&self.0.protocol, true, || false)
+                .expect("uncancelled Shared replace acquires");
+            let next = self
+                .0
+                .next_revision()
+                .expect("Shared revision generation exhausted");
+            let old = if let Some(scalar) = self.0.scalar.as_ref() {
+                let old = scalar.swap(jet_shared_scalar_bits(&value, scalar.kind()));
+                jet_shared_scalar_from_bits(old, scalar.kind())
+            } else {
+                // jet:shared-guard-internal-begin
+                // SAFETY: the exclusive permit is held for the whole replace.
+                unsafe { std::mem::replace(&mut *self.0.value.get(), value) }
+                // jet:shared-guard-internal-end
+            };
+            self.0
+                .revision
+                .store(next, std::sync::atomic::Ordering::Release);
+            old
+        }
+
         pub fn read<F, R>(&self, f: F) -> R
         where
             F: FnOnce(&T) -> R,
         {
-            let _permit = crate::jet_shared_acquire(&self.0.protocol, false, || false)
-                .expect("uncancelled Shared read acquires");
-            // jet:shared-guard-internal-begin
-            // SAFETY: the read permit is held through the callback.
-            f(unsafe { &*self.0.value.get() })
-            // jet:shared-guard-internal-end
+            self.0.with_read(f)
         }
+        /// Return the canonical publication revision without copying the value.
+        ///
+        /// Readers that need an optimistic ticket must still use `capture`; this
+        /// accessor is metadata only and deliberately does not create a second
+        /// revision mechanism in callers.
+        pub(crate) fn revision(&self) -> u64 {
+            self.0
+                .revision
+                .load(std::sync::atomic::Ordering::Acquire)
+        }
+
+
+        /// Capture one value/revision pair under the Shared read permit.
+        pub fn capture(&self) -> JetSharedSnapshot<T, T>
+        where
+            T: Clone,
+        {
+            self.capture_with(Clone::clone)
+        }
+
+        /// Capture a pure owned projection under the same read permit.
+        pub fn capture_with<F, U>(&self, project: F) -> JetSharedSnapshot<T, U>
+        where
+            F: FnOnce(&T) -> U,
+        {
+            let owner = self.0.clone();
+            let valid = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+            let consumed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let (revision, value) = owner.with_read(|value| {
+                (
+                    owner
+                        .revision
+                        .load(std::sync::atomic::Ordering::Acquire),
+                    project(value),
+                )
+            });
+            JetSharedSnapshot {
+                owner,
+                revision,
+                valid,
+                consumed,
+                value,
+            }
+        }
+
+        /// Transaction-local capture. Reads the current working value when
+        /// this participant has a staged edit, and predicts the one revision
+        /// that the outermost commit will publish. Abort invalidates the
+        /// ticket; a later local write invalidates earlier tickets.
+        pub fn capture_txn<F, U>(
+            &self,
+            stm: &mut super::jet_stm::Guard,
+            project: F,
+        ) -> JetSharedSnapshot<T, U>
+        where
+            F: FnOnce(&T) -> U,
+        {
+            let protocol = self.0.protocol.clone();
+            stm.touch(protocol.clone());
+            let snapshot = if let Some(staged) = stm.staged_value::<T>(&protocol) {
+                let owner = self.0.clone();
+                let valid = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+                let consumed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let revision = stm
+                    .snapshot_revision(
+                        &protocol,
+                        owner.revision.load(std::sync::atomic::Ordering::Acquire),
+                    )
+                    .expect("SharedRevisionError.GenerationExhausted");
+                let value = project(&staged.borrow());
+                JetSharedSnapshot {
+                    owner,
+                    revision,
+                    valid,
+                    consumed,
+                    value,
+                }
+            } else {
+                self.capture_with(project)
+            };
+            stm.record_snapshot(protocol, snapshot.valid.clone());
+            snapshot
+        }
+
+        /// Consume an owner-bound ticket. The write and revision comparison
+        /// happen while holding the same exclusive permit, so a race has one
+        /// winner and a stale ticket never mutates the payload.
+        pub fn try_replace<U>(
+            &self,
+            snapshot: JetSharedSnapshot<T, U>,
+            value: T,
+        ) -> Result<bool, JetSharedRevisionError> {
+            let _permit = crate::jet_shared_acquire(&self.0.protocol, true, || false)
+                .expect("uncancelled Shared try_replace acquires");
+            if !std::sync::Arc::ptr_eq(&self.0, &snapshot.owner) {
+                return Err(JetSharedRevisionError::WrongOwner);
+            }
+            if !snapshot
+                .valid
+                .load(std::sync::atomic::Ordering::Acquire)
+            {
+                return Ok(false);
+            }
+            let current = self
+                .0
+                .revision
+                .load(std::sync::atomic::Ordering::Acquire);
+            if current != snapshot.revision {
+                return Ok(false);
+            }
+            let next = self.0.next_revision()?;
+            if snapshot
+                .consumed
+                .swap(true, std::sync::atomic::Ordering::AcqRel)
+            {
+                return Ok(false);
+            }
+            if self.0.scalar.is_some() {
+                self.0.store_scalar_value(&value);
+            } else {
+                // jet:shared-guard-internal-begin
+                // SAFETY: the exclusive permit is held for the whole write.
+                unsafe { *self.0.value.get() = value };
+                // jet:shared-guard-internal-end
+            }
+            self.0
+                .revision
+                .store(next, std::sync::atomic::Ordering::Release);
+            snapshot
+                .valid
+                .store(false, std::sync::atomic::Ordering::Release);
+            Ok(true)
+        }
+
         /// Register a read participant with the current Shared transaction,
-        /// then perform the ordinary statement read. The read itself remains
-        /// immediate; the transaction owns the participant's fixed-order
-        /// write lock at commit, so a statement that touches several cells
-        /// cannot build a nested lock order.
+        /// then read its transaction-local working value when one exists.
         pub fn read_txn<F, R>(&self, stm: &mut super::jet_stm::Guard, f: F) -> R
         where
             F: FnOnce(&T) -> R,
         {
-            stm.touch(self.0.protocol.clone());
-            self.read(f)
+            let protocol = self.0.protocol.clone();
+            stm.touch(protocol.clone());
+            if let Some(staged) = stm.staged_value::<T>(&protocol) {
+                f(&staged.borrow())
+            } else {
+                self.read(f)
+            }
         }
+
+
         pub fn edit<F, R>(&self, f: F) -> R
         where
             F: FnOnce(&mut T) -> R,
         {
             let _permit = crate::jet_shared_acquire(&self.0.protocol, true, || false)
                 .expect("uncancelled Shared edit acquires");
+            let next = self
+                .0
+                .next_revision()
+                .expect("Shared revision generation exhausted");
+            if self.0.scalar.is_some() {
+                let mut value = self
+                    .0
+                    .scalar_snapshot()
+                    .expect("scalar Shared payload disappeared");
+                let result = f(&mut value);
+                self.0.store_scalar_value(&value);
+                self.0
+                    .revision
+                    .store(next, std::sync::atomic::Ordering::Release);
+                return result;
+            }
             // jet:shared-guard-internal-begin
             // SAFETY: the exclusive permit is held through the callback.
-            f(unsafe { &mut *self.0.value.get() })
+            let result = f(unsafe { &mut *self.0.value.get() });
             // jet:shared-guard-internal-end
+            self.0
+                .revision
+                .store(next, std::sync::atomic::Ordering::Release);
+            result
         }
+
         pub fn guard_read(&self) -> JetSharedGuard<T> {
             JetSharedGuard::read(self.0.clone())
         }
         pub fn guard_edit(&self) -> JetSharedGuard<T> {
             JetSharedGuard::edit(self.0.clone())
         }
+
         // D-STM1=A (ratified 2026-07-12, card #506): the Shared plane of
-        // `#Transact`. Inside a transaction block, `handle.edit(f)` lowers to
-        // `edit_txn` — the mutation is deferred onto the Shared Prelude
-        // transaction. That protocol owns participant identity, canonical lock
-        // ordering, commit, and rollback; this adapter supplies only the
-        // type-erased payload closure. `f` runs against a fresh `&mut T` while
-        // the Prelude holds the participant permit. The result is void by
-        // construction — the write has not happened yet — which sema enforces
-        // (E0750).
+        // `#Transact`. Edits run once against a private transaction-local
+        // working value; commit publishes that value and one revision.
         pub fn edit_txn<F>(&self, stm: &mut super::jet_stm::Guard, f: F)
         where
             F: FnOnce(&mut T) + 'static,
-            T: 'static,
+            T: Clone + 'static,
         {
             let cell = self.0.clone();
             let protocol = cell.protocol.clone();
-            stm.record_edit(
+            let staged = stm.stage_value(protocol.clone(), || cell.with_read(Clone::clone));
+            stm.mark_write(protocol.clone());
+            f(&mut staged.borrow_mut());
+            let commit_cell = cell.clone();
+            let commit_staged = staged.clone();
+            stm.record_edit_with_commit(
                 protocol,
+                Box::new(|| {}),
                 Box::new(move || {
-                    // jet:shared-guard-internal-begin
-                    // SAFETY: jet_stm holds this Shared protocol's exclusive
-                    // permit while applying every deferred edit.
-                    f(unsafe { &mut *cell.value.get() })
-                    // jet:shared-guard-internal-end
+                    let value = commit_staged.borrow().clone();
+                    let next = commit_cell
+                        .next_revision()
+                        .expect("Shared revision generation exhausted");
+                    if commit_cell.scalar.is_some() {
+                        commit_cell.store_scalar_value(&value);
+                    } else {
+                        // jet:shared-guard-internal-begin
+                        // SAFETY: the transaction commit owns the participant
+                        // permit while publishing the staged value.
+                        unsafe { *commit_cell.value.get() = value };
+                        // jet:shared-guard-internal-end
+                    }
+                    commit_cell
+                        .revision
+                        .store(next, std::sync::atomic::Ordering::Release);
                 }),
             );
         }
     }
+    impl<T: 'static, U: Clone> JetSharedSnapshot<T, U> {
+        /// Return a fresh ordinary copy of the captured projection. This
+        /// exposes no owner or revision authority.
+        pub fn value(&self) -> U {
+            self.value.clone()
+        }
+        /// Return the captured canonical revision for an internal atomic
+        /// publication handoff.
+        pub(crate) fn revision(&self) -> u64 {
+            self.revision
+        }
+    }
+
+    impl<T: 'static, U: super::JetShow> super::JetShow for JetSharedSnapshot<T, U> {
+        fn jet_show(&self) -> String {
+            format!("SharedSnapshot({})", self.value.jet_show())
+        }
+    }
+    impl<T: 'static, U: super::JetShow> super::JetDisplay for JetSharedSnapshot<T, U> {
+        fn jet_display(&self) -> String {
+            self.jet_show()
+        }
+    }
+    impl<T: 'static, U: super::JetShow> super::JetDebug for JetSharedSnapshot<T, U> {
+        fn jet_debug(&self) -> String {
+            self.jet_show()
+        }
+    }
+
     impl<T> Clone for JetShared<T> {
         fn clone(&self) -> Self {
             JetShared(self.0.clone())
@@ -1118,41 +1654,61 @@ macro_rules! jet_lane_show {
         }
     }
 
-    trait JetSharedLease {
-        fn state(&self) -> std::sync::Arc<crate::JetSharedGuardState>;
-        fn root_ptr(&self) -> *mut ();
-    }
-
-    struct JetSharedRootLease<T: 'static> {
-        state: std::sync::Arc<crate::JetSharedGuardState>,
-        cell: std::sync::Arc<JetSharedCell<T>>,
-    }
-
-    impl<T: 'static> JetSharedLease for JetSharedRootLease<T> {
-        fn state(&self) -> std::sync::Arc<crate::JetSharedGuardState> {
-            self.state.clone()
-        }
-        fn root_ptr(&self) -> *mut () {
-            assert!(self.state.held(), "SharedGuard lease is released");
-            self.cell.value.get().cast::<()>()
-        }
-    }
-
-    /// Owned lock token. `Rc` deliberately makes guards task-local and
-    /// non-cloneable; mapped and split guards share only the private lease.
+    /// A guard keeps the active protocol projection state separately from the
+    /// root lease. Mapping consumes that state, while every mapped/split child
+    /// retains the same root permit and scalar-shadow commit owner.
     pub struct JetSharedGuard<T: 'static> {
+        state: std::sync::Arc<crate::JetSharedGuardState>,
         lease: std::rc::Rc<dyn JetSharedLease>,
         project: std::rc::Rc<dyn Fn(*mut ()) -> *mut T>,
         editable: bool,
     }
 
+    trait JetSharedLease {
+        fn root_ptr(&self) -> *mut ();
+    }
+
+    struct JetSharedRootLease<T: 'static> {
+        permit: std::sync::Arc<crate::JetSharedPermit>,
+        editable: bool,
+        cell: std::sync::Arc<JetSharedCell<T>>,
+    }
+
+    impl<T: 'static> JetSharedLease for JetSharedRootLease<T> {
+        fn root_ptr(&self) -> *mut () {
+            assert!(self.permit.held(), "SharedGuard lease is released");
+            self.cell.value.get().cast::<()>()
+        }
+    }
+
+    impl<T: 'static> Drop for JetSharedRootLease<T> {
+        fn drop(&mut self) {
+            if self.editable && self.permit.held() {
+                self.cell.commit_guard();
+            }
+        }
+    }
+
     impl<T: 'static> JetSharedGuard<T> {
         fn read(cell: std::sync::Arc<JetSharedCell<T>>) -> Self {
             let state = crate::jet_shared_guard_acquire(&cell.protocol, false, || false)
-                .expect("uncancelled Shared guard acquires");
+                .unwrap_or_else(|| {
+                    super::jet_runtime_stop_with_context(
+                        "E3001",
+                        "",
+                        0,
+                        "",
+                        "",
+                        crate::JET_SHARED_GUARD_INVALID,
+                    )
+                });
+            cell.refresh_scalar_shadow();
+            let permit = state.permit_arc();
             Self {
+                state,
                 lease: std::rc::Rc::new(JetSharedRootLease {
-                    state,
+                    permit,
+                    editable: false,
                     cell,
                 }),
                 project: std::rc::Rc::new(|root| root.cast::<T>()),
@@ -1162,10 +1718,23 @@ macro_rules! jet_lane_show {
 
         fn edit(cell: std::sync::Arc<JetSharedCell<T>>) -> Self {
             let state = crate::jet_shared_guard_acquire(&cell.protocol, true, || false)
-                .expect("uncancelled Shared guard acquires");
+                .unwrap_or_else(|| {
+                    super::jet_runtime_stop_with_context(
+                        "E3001",
+                        "",
+                        0,
+                        "",
+                        "",
+                        crate::JET_SHARED_GUARD_INVALID,
+                    )
+                });
+            cell.refresh_scalar_shadow();
+            let permit = state.permit_arc();
             Self {
+                state,
                 lease: std::rc::Rc::new(JetSharedRootLease {
-                    state,
+                    permit,
+                    editable: true,
                     cell,
                 }),
                 project: std::rc::Rc::new(|root| root.cast::<T>()),
@@ -1173,10 +1742,22 @@ macro_rules! jet_lane_show {
             }
         }
 
-        pub fn map_read<U: 'static, F>(self, project: F) -> JetSharedGuard<U>
+        pub fn map_read<U: 'static, F>(self, field: i64, project: F) -> JetSharedGuard<U>
         where
             F: FnOnce(&T) -> &U,
         {
+            let mapped = crate::jet_shared_guard_map(&self.state, field, false).unwrap_or_else(
+                |message| {
+                    super::jet_runtime_stop_with_context(
+                        "E3001",
+                        "",
+                        0,
+                        "",
+                        "",
+                        message,
+                    )
+                },
+            );
             let root = (self.project)(self.lease.root_ptr());
             // jet:shared-guard-internal-begin
             // SAFETY: the lease keeps the root alive and holds a read or edit
@@ -1184,17 +1765,39 @@ macro_rules! jet_lane_show {
             let projected = unsafe { project(&*root) as *const U as *mut U };
             // jet:shared-guard-internal-end
             JetSharedGuard {
+                state: mapped,
                 lease: self.lease.clone(),
                 project: std::rc::Rc::new(move |_| projected),
                 editable: false,
             }
         }
 
-        pub fn map_edit<U: 'static, F>(self, project: F) -> JetSharedGuard<U>
+        pub fn map_edit<U: 'static, F>(self, field: i64, project: F) -> JetSharedGuard<U>
         where
             F: FnOnce(&mut T) -> &mut U,
         {
-            assert!(self.editable, "read SharedGuard used for edit map");
+            if !self.editable {
+                super::jet_runtime_stop_with_context(
+                    "E3001",
+                    "",
+                    0,
+                    "",
+                    "",
+                    crate::JET_SHARED_GUARD_EDIT_REQUIRED,
+                );
+            }
+            let mapped = crate::jet_shared_guard_map(&self.state, field, true).unwrap_or_else(
+                |message| {
+                    super::jet_runtime_stop_with_context(
+                        "E3001",
+                        "",
+                        0,
+                        "",
+                        "",
+                        message,
+                    )
+                },
+            );
             let root = (self.project)(self.lease.root_ptr());
             // jet:shared-guard-internal-begin
             // SAFETY: the editable lease holds the exclusive permit, and sema
@@ -1202,6 +1805,7 @@ macro_rules! jet_lane_show {
             let projected = unsafe { project(&mut *root) as *mut U };
             // jet:shared-guard-internal-end
             JetSharedGuard {
+                state: mapped,
                 lease: self.lease.clone(),
                 project: std::rc::Rc::new(move |_| projected),
                 editable: true,
@@ -1210,11 +1814,25 @@ macro_rules! jet_lane_show {
 
         pub fn split_read<A: 'static, B: 'static, F>(
             self,
+            first_field: i64,
+            second_field: i64,
             project: F,
         ) -> (JetSharedGuard<A>, JetSharedGuard<B>)
         where
             F: FnOnce(&T) -> (&A, &B),
         {
+            let (first_state, second_state) =
+                crate::jet_shared_guard_split(&self.state, first_field, second_field, false)
+                    .unwrap_or_else(|message| {
+                        super::jet_runtime_stop_with_context(
+                            "E3001",
+                            "",
+                            0,
+                            "",
+                            "",
+                            message,
+                        )
+                    });
             let root = (self.project)(self.lease.root_ptr());
             // jet:shared-guard-internal-begin
             // SAFETY: the lease holds a read or edit permit. Sema proved both
@@ -1225,11 +1843,13 @@ macro_rules! jet_lane_show {
             // jet:shared-guard-internal-end
             (
                 JetSharedGuard {
+                    state: first_state,
                     lease: self.lease.clone(),
                     project: std::rc::Rc::new(move |_| first),
                     editable: false,
                 },
                 JetSharedGuard {
+                    state: second_state,
                     lease: self.lease.clone(),
                     project: std::rc::Rc::new(move |_| second),
                     editable: false,
@@ -1239,12 +1859,35 @@ macro_rules! jet_lane_show {
 
         pub fn split_edit<A: 'static, B: 'static, F>(
             self,
+            first_field: i64,
+            second_field: i64,
             project: F,
         ) -> (JetSharedGuard<A>, JetSharedGuard<B>)
         where
             F: FnOnce(&mut T) -> (&mut A, &mut B),
         {
-            assert!(self.editable, "read SharedGuard used for edit split");
+            if !self.editable {
+                super::jet_runtime_stop_with_context(
+                    "E3001",
+                    "",
+                    0,
+                    "",
+                    "",
+                    crate::JET_SHARED_GUARD_EDIT_REQUIRED,
+                );
+            }
+            let (first_state, second_state) =
+                crate::jet_shared_guard_split(&self.state, first_field, second_field, true)
+                    .unwrap_or_else(|message| {
+                        super::jet_runtime_stop_with_context(
+                            "E3001",
+                            "",
+                            0,
+                            "",
+                            "",
+                            message,
+                        )
+                    });
             let root = (self.project)(self.lease.root_ptr());
             // jet:shared-guard-internal-begin
             // SAFETY: the editable lease holds the exclusive permit. One
@@ -1255,11 +1898,13 @@ macro_rules! jet_lane_show {
             // jet:shared-guard-internal-end
             (
                 JetSharedGuard {
+                    state: first_state,
                     lease: self.lease.clone(),
                     project: std::rc::Rc::new(move |_| first),
                     editable: true,
                 },
                 JetSharedGuard {
+                    state: second_state,
                     lease: self.lease.clone(),
                     project: std::rc::Rc::new(move |_| second),
                     editable: true,
@@ -1271,7 +1916,7 @@ macro_rules! jet_lane_show {
         where
             F: Fn(&T) -> bool,
         {
-            let state = self.lease.state();
+            let state = self.state.clone();
             if !state.held() {
                 return Err(crate::JET_SHARED_GUARD_INVALID.to_string());
             }
@@ -1319,6 +1964,7 @@ macro_rules! jet_lane_show {
             // jet:shared-guard-internal-end
         }
     }
+    // JET_VETTED_UNSAFE_END: jet_shared_cell
 
     struct JetSchedulerConditionWaiter {
         slot: std::sync::Arc<super::ParkSlot>,
@@ -1439,6 +2085,32 @@ macro_rules! jet_lane_show {
                 })
                 .collect()
         }
+        /// Return the live value named by `id`, without changing the pool's
+        /// ownership. All checked readers and writers share this generation
+        /// validation seam.
+        pub fn checked_get(&self, id: JetId<T>) -> Option<&T> {
+            match self.slots.get(id.index as usize) {
+                Some(JetPoolSlot::Occupied(generation, value))
+                    if *generation == id.generation =>
+                {
+                    Some(value)
+                }
+                _ => None,
+            }
+        }
+
+        /// Mutable counterpart to [`Self::checked_get`].
+        pub fn checked_get_mut(&mut self, id: JetId<T>) -> Option<&mut T> {
+            match self.slots.get_mut(id.index as usize) {
+                Some(JetPoolSlot::Occupied(generation, value))
+                    if *generation == id.generation =>
+                {
+                    Some(value)
+                }
+                _ => None,
+            }
+        }
+
     }
     // D-MEM1 S6: an opaque-handle placeholder, same rationale as `JetShared`'s
     // `JetShow` just above.
@@ -1460,6 +2132,19 @@ macro_rules! jet_lane_show {
                 generation,
                 _marker: std::marker::PhantomData,
             }
+        }
+
+        /// Encode this handle for the native/JIT ABI: low word is index+1,
+        /// high word is the generation. Zero is never a valid handle.
+        pub fn to_word(self) -> i64 {
+            (((u64::from(self.generation)) << 32) | (u64::from(self.index) + 1)) as i64
+        }
+
+        /// Decode the native/JIT handle representation.
+        pub fn from_word(word: i64) -> Option<Self> {
+            let raw = word as u64;
+            let index = (raw as u32).checked_sub(1)?;
+            Some(Self::new(index, (raw >> 32) as u32))
         }
     }
     impl<T> Clone for JetId<T> {
@@ -1533,9 +2218,21 @@ macro_rules! jet_lane_show {
         fn_name: &str,
         src_line: &str,
     ) -> T {
-        match pool.slots.get(id.index as usize) {
-            Some(JetPoolSlot::Occupied(gen, v)) if *gen == id.generation => v.clone(),
-            _ => super::jet_runtime_stop_with_context(
+        jet_pool_get_ref(pool, id, file, line, fn_name, src_line).clone()
+    }
+
+    /// Borrow the generation-checked stored value without requiring `Clone`.
+    pub fn jet_pool_get_ref<'a, T>(
+        pool: &'a JetPool<T>,
+        id: JetId<T>,
+        file: &str,
+        line: u32,
+        fn_name: &str,
+        src_line: &str,
+    ) -> &'a T {
+        match pool.checked_get(id) {
+            Some(value) => value,
+            None => super::jet_runtime_stop_with_context(
                 "E3001",
                 file,
                 line,
@@ -1558,23 +2255,40 @@ macro_rules! jet_lane_show {
         fn_name: &str,
         src_line: &str,
     ) -> &'a mut T {
-        let idx = id.index as usize;
-        let valid = matches!(
-            pool.slots.get(idx),
-            Some(JetPoolSlot::Occupied(gen, _)) if *gen == id.generation
-        );
-        if !valid {
-            super::jet_runtime_stop_with_context(
+        match pool.checked_get_mut(id) {
+            Some(value) => value,
+            None => super::jet_runtime_stop_with_context(
                 "E3001",
                 file,
                 line,
                 fn_name,
                 src_line,
                 super::jet_pool_stale_message(),
-            );
+            ),
         }
-        match &mut pool.slots[idx] {
-            JetPoolSlot::Occupied(_, v) => v,
-            JetPoolSlot::Vacant(_) => unreachable!("just checked Occupied above"),
+    }
+    /// `pool[id] = value` as an owned-place write. Generation validation is
+    /// identical to `jet_pool_get` and `jet_pool_get_mut`; stale or vacant
+    /// handles stop through the shared runtime context kernel.
+    pub fn jet_pool_set<T>(
+        pool: &mut JetPool<T>,
+        id: JetId<T>,
+        value: T,
+        file: &str,
+        line: u32,
+        fn_name: &str,
+        src_line: &str,
+    ) {
+        if let Some(slot) = pool.checked_get_mut(id) {
+            *slot = value;
+            return;
         }
+        super::jet_runtime_stop_with_context(
+            "E3001",
+            file,
+            line,
+            fn_name,
+            src_line,
+            super::jet_pool_stale_message(),
+        );
     }

@@ -1,0 +1,131 @@
+{
+  "schema": "jet-diagnostic-actionability-fixtures-v1",
+  "rule": "edit-command-path-v1",
+  "cases": [
+    {
+      "id": "source-edit",
+      "fix": "Replace `old_name` with `new_name`.",
+      "fix_kind": "source_edit",
+      "actionable": true
+    },
+    {
+      "id": "structured-source-edit",
+      "fix": "Write the complete statement form named by the diagnostic.",
+      "structured_fix": "source_edit|needs-review",
+      "fix_kind": "source_edit",
+      "actionable": true
+    },
+    {
+      "id": "runnable-command",
+      "fix": "Run `jet build app.jet` and rerun the command.",
+      "fix_kind": "exact_command",
+      "actionable": true
+    },
+    {
+      "id": "literal-path",
+      "fix": "Edit `src/main.jet` and rerun the check.",
+      "fix_kind": "exact_path",
+      "actionable": true
+    },
+    {
+      "id": "generic-inspection",
+      "fix": "Check the definition of `show`.",
+      "fix_kind": "non_actionable",
+      "actionable": false
+    },
+    {
+      "id": "placeholder",
+      "fix": "{fix}",
+      "fix_kind": "non_actionable",
+      "actionable": false
+    },
+    {
+      "id": "vague-advice",
+      "fix": "Consider revising the code.",
+      "fix_kind": "non_actionable",
+      "actionable": false
+    },
+    {
+      "id": "tier-with-invoking-command",
+      "stage": "interp",
+      "what": "`jet run --interpret` stopped at this feature.",
+      "why": "The interpreter does not cover this native operation.",
+      "fix": "Run `jet build app.jet` for the full compiler.",
+      "actionable": true,
+      "invoking_command": "jet run --interpret"
+    },
+    {
+      "id": "tier-without-invoking-command",
+      "stage": "interp",
+      "what": "The interpreter stopped at this feature.",
+      "why": "The native evaluator does not cover this operation.",
+      "fix": "Run `jet build app.jet` for the full compiler.",
+      "actionable": true,
+      "invoking_command": ""
+    },
+    {
+      "id": "E1250-unlocked-toolchain",
+      "diagnostic": "E1250",
+      "fixture": "tests/ui/e1250_unlocked_toolchain.jet",
+      "snapshot": "tests/ui/e1250_unlocked_toolchain.stderr",
+      "stage": "jet",
+      "what": "Toolchain channel `0.9` is pinned but not locked.",
+      "why": "An `--offline`/CI build will not resolve a channel; it needs the exact toolchain version recorded in `.jet/lock`, and none is present. A `jet build` run reports this toolchain error.",
+      "fix": "Run `jet update jet` to resolve `0.9` to an exact version, then commit `.jet/lock`.",
+      "fix_kind": "exact_command",
+      "actionable": true,
+      "tier_or_toolchain": true,
+      "invoking_command": "jet build"
+    },
+    {
+      "id": "E2104-generic-cost-projection",
+      "diagnostic": "E2104",
+      "fixture": "tests/ui/e2104_cost_generic.jet",
+      "snapshot": "tests/ui/e2104_cost_generic.stderr",
+      "stage": "jet",
+      "what": "The generic cost projection is incomplete.",
+      "why": "Jet needs valid command input before it can run this command.",
+      "fix": "Correct the named argument or input, then run the command again.",
+      "fix_kind": "source_edit",
+      "actionable": true
+    },
+    {
+      "id": "E3302-unknown-target",
+      "diagnostic": "E3302",
+      "fixture": "tests/cli/unknown_target_e3302.txt",
+      "snapshot": "tests/cli/unknown_target_e3302.txt",
+      "stage": "jet",
+      "what": "Target `definitely-not-a-rust-target` is not available.",
+      "why": "A `jet build` or `jet run` run reports this target-support diagnostic.",
+      "fix": "Run `jet self doctor --target=<triple>` to see what is missing, or `rustup target add <triple>` to install it.",
+      "fix_kind": "exact_command",
+      "actionable": true,
+      "tier_or_toolchain": true,
+      "invoking_command": "jet build | jet run"
+    },
+    {
+      "id": "L0520-display-debug",
+      "diagnostic": "L0520",
+      "fixture": "tests/ui/display_no_impl.jet",
+      "snapshot": "tests/ui/display_no_impl.stderr",
+      "stage": "sema",
+      "what": "Interpolation uses a value without a Display implementation.",
+      "why": "The value has Debug but not Display.",
+      "fix": "Replace `{value}` with `{{{value}:Debug}}`.",
+      "fix_kind": "source_edit",
+      "actionable": true
+    },
+    {
+      "id": "L2510-hidden-cost",
+      "diagnostic": "L2510",
+      "fixture": "tests/ui_lint/cost_hidden_in_loop.jet",
+      "snapshot": "tests/ui_lint/cost_hidden_in_loop.warn",
+      "stage": "sema",
+      "what": "A repeated representation fallback occurs inside a loop.",
+      "why": "A growing value can make the repeated copy cost super-linear.",
+      "fix": "Insert `{fix}` before the highlighted expression to make the copy explicit.",
+      "fix_kind": "source_edit",
+      "actionable": true
+    }
+  ]
+}

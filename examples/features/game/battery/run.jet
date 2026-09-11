@@ -1,0 +1,116 @@
+use core.files as fs
+use core.game as game
+use core.game.raylib as rl
+use core.rt as rt
+use games
+
+struct Position {
+    x: Int
+}
+
+struct Velocity {
+    dx: Int
+}
+
+// Resolve the fixture root for both a repository checkout and an installed
+// package. The asset itself remains a real file; this only chooses its root.
+fn battery_root() String -> {
+    candidates :: [String]{
+        "examples/features/game/battery",
+        "battery",
+        ".",
+    }
+    loop candidate in candidates {
+        if fs.exists("{candidate}/assets/player.atlas") -> return candidate
+    }
+    return "."
+}
+
+fn run() {
+    root :: battery_root()
+    atlas_path :: "{root}/assets/player.atlas"
+    sound_path :: "{root}/assets/jump.wav"
+    replay_path :: "{root}/runs/demo.jetreplay"
+
+    scene := game.Scene.new("games_battery")
+    image :: scene.assets.image(atlas_path) ?? panic("image fixture")
+    sound :: scene.assets.sound(sound_path) ?? panic("sound fixture")
+    scene.input.bind("jump", "Space")
+    scene.input.bind("move_left", "Left")
+    scene.component<Position>()
+    scene.component<Velocity>()
+    rows :: scene.query<Position, Velocity>()
+    print("query={rows.len()} row={rows[0]}")
+    scene.on_frame(frame -> {
+        if frame.input.pressed("jump") -> print("scene_input={frame.index}")
+    })
+
+    nodes :: [games.SceneNode]{
+        {parent: -1, local: games.Transform{x: 100, y: 40}},
+        {parent: 0, local: games.Transform{x: 20, y: 5}},
+    }
+    child :: games.world_transform(nodes, 1)
+    print("scene_child_world={child.x},{child.y}")
+
+    player :: games.Aabb{x: 18, y: 20, w: 8, h: 8}
+    wall :: games.Aabb{x: 20, y: 20, w: 8, h: 8}
+    hit_count := 0
+    if games.aabb_overlaps(player, wall) -> hit_count += 1
+    print("aabb_hits={hit_count}")
+
+    accumulator := games.accumulator_new(16)
+    loop frame in 0..<8 {
+        accumulator = games.accumulator_advance(accumulator, 17)
+        alpha :: games.accumulator_alpha_thousand(accumulator)
+        render_tick :: games.interpolate(accumulator.previous_tick, accumulator.current_tick, alpha)
+        print("frame={frame} fixed_tick={accumulator.current_tick} render_tick={render_tick}")
+    }
+
+    window :: rl.window_open(320, 240, "Jet games battery")
+    rl.set_target_fps(60)
+    atlas :: rl.load_texture_atlas(atlas_path)
+    sound_effect :: rl.load_sound(sound_path)
+    rl.begin_drawing(window)
+    rl.clear_background(rl.color(20, 24, 32, 255))
+    rl.draw_sprite(atlas, "hero", 100, 40)
+    rl.draw_rectangle(100, 40, 16, 16, rl.color(245, 245, 245, 255))
+    rl.draw_text("Jet games", 8, 8, 16, rl.color(255, 220, 120, 255))
+    rl.end_drawing()
+    played :: rl.play_sound(sound_effect)
+    rl.window_ready(window)
+    rl.window_should_close(window)
+    key_space :: rl.key_down("Space")
+    gamepad_a :: rl.gamepad_down(0, "A")
+    gamepad_x :: rl.gamepad_axis(0, "LeftX")
+    print("window=opened sound_play={played}")
+    print("input_matrix=keyboard:{key_space} gamepad_a:{gamepad_a} axis_left_x:{gamepad_x}")
+    print("atlas={atlas:Debug}")
+    rl.close_window(window)
+
+    replay :: game.Replay.record(replay_path)
+    transcript :: game.run(scene, replay: replay, frames: 600)
+    print(transcript)
+
+    state :: games.SaveState{x: accumulator.current_tick, paused: false}
+    paused_state :: games.pause_toggle(state)
+    encoded :: games.save_encode(paused_state)
+    save_path :: "/tmp/jet-games-battery-save.txt"
+    fs.write(save_path, encoded) ?? panic("save write")
+    restored_raw :: fs.read(save_path) ?? panic("save read")
+    restored :: games.save_decode(restored_raw)
+    fs.remove(save_path) ?? panic("save remove")
+    print("save_round_trip=x:{restored.x} paused:{restored.paused}")
+
+    // `core.rt` owns callback scheduling and stream cancellation. The lambda
+    // only consumes its reusable block, with no allocation, wait, or I/O.
+    stream := rt.callback(48000, 256, samples -> {
+        total := 0.0
+        loop sample in samples -> total += sample
+    })
+    stream.next_deadline()
+    receipt :: stream.receipt()
+    stream.cancel()
+    print("audio_callback=cancelled rate:{receipt.requested_rate_hz} frames:{receipt.requested_frames} callbacks:{receipt.completed_callbacks} missed:{receipt.missed}")
+    print("music_stream=unavailable")
+    print("scene_image={image:Debug} scene_sound={sound:Debug}")
+}

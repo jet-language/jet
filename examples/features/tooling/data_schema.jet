@@ -9,12 +9,14 @@ struct Ticket {
 
 fn run() {
     raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0"
-    rows :: data.csv<Ticket>(raw) ?? return Err("bad csv")
-    table :: data.table(rows)
-    cols :: data.schema(table)
+    rows :: data.csv<Ticket>(raw) ?? panic("bad csv")
+    cols :: data.schema(rows)
     loop c in cols -> print("{c.name}:{c.type_name}")
-    selected :: data.filter(data.rows(table), t -> t.minutes >= 5.0)
-    print("selected:{data.count(selected)}")
+    selected_query :: data.query(rows).filter(t -> t.minutes >= 5.0)
+    selected :: selected_query.collect() ?? panic("filter")
+    print("selected:{selected.len()}")
     loop t in selected -> print("{t.team}:{t.minutes}")
-    print("{data.status()[5].step}:{data.status()[5].path}")
+    loop status in data.status() {
+        if status.step == "core.data.schema" -> print("{status.step}:{status.path}")
+    }
 }

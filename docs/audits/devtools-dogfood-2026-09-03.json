@@ -1,0 +1,70 @@
+{
+  "schema": "jet.devtools-dogfood.v1",
+  "card": "#2497",
+  "campaign": "#2386",
+  "portfolio": "#217",
+  "program": {
+    "package_path": "examples/features/devtools/",
+    "source_sha256": "31a316188a995be1c2b121107873c7973d6931d85f4e578c3c9121f4ef902a04",
+    "toolchain": "jet dev and jet test"
+  },
+  "findings": [
+    {
+      "id": "DEV-2497-01",
+      "domain": "panel-state",
+      "command": "jet dev examples/features/devtools/run.jet",
+      "expected": "The host can render the panel before the first event arrives.",
+      "actual": "A package-defined State must provide defaults so the first host render has a typed value and count.",
+      "source": "examples/features/devtools/run.jet:13-16; state construction is the package-to-host render seam.",
+      "receipt": "Source receipt: State declares selected: String{\"none\"} and event_count: Int{0}; replay with the command above.",
+      "severity": "medium",
+      "action": "absorbed in dogfood source; host proof remains with #2424",
+      "owning_card": "#2497",
+      "workaround": "Keep defaults on every panel state field. Do not invent an ambient global state or an untyped fallback.",
+      "status": "open"
+    },
+    {
+      "id": "DEV-2497-02",
+      "domain": "event-publication",
+      "command": "jet dev examples/features/devtools/run.jet",
+      "expected": "Only a deliberately selected value leaves the process, while the event remains typed.",
+      "actual": "Publication uses explicit field: and value: labels for each typed state value.",
+      "source": "examples/features/devtools/run.jet:33-47; explicit-value gates are the core.devtools seam.",
+      "receipt": "Source receipt: publish_selection uses devtools.publish(field: .selected, value: selected_value), and run publishes devtools.publish(field: .event_count, value: 1); replay with the command above and inspect the jet.devtools.v1 stream.",
+      "severity": "high",
+      "action": "absorbed in dogfood source; protocol proof remains with #2424",
+      "owning_card": "#2497",
+      "workaround": "Preserve the value: and field: labels. Never replace them with a bare value or a stringly global event store.",
+      "status": "open"
+    },
+    {
+      "id": "DEV-2497-03",
+      "domain": "panel-discovery",
+      "command": "jet dev examples/features/devtools/run.jet",
+      "expected": "A public panel is discoverable from the package without a startup registry call.",
+      "actual": "The canonical marker is #DevPanel on pub fn panel(state: State) UiNode; no startup registry call is present.",
+      "source": "examples/features/devtools/run.jet:28-31; marker discovery is the panel registration seam.",
+      "receipt": "Source receipt: #DevPanel and the typed panel signature are adjacent; replay with the command above and inspect the host panel catalog.",
+      "severity": "medium",
+      "action": "resolved by canonical source; catalog proof remains with #2424",
+      "owning_card": "#2497",
+      "workaround": "Use only ratified #DevPanel; do not add a runtime registration call or compatibility alias.",
+      "status": "open"
+    },
+    {
+      "id": "DEV-2497-04",
+      "domain": "package-checks",
+      "command": "jet test examples/features/devtools/run.jet",
+      "expected": "The package's own checks exercise its state contract without an external test runner.",
+      "actual": "Checks assert the pre-event defaults and the bounded selected-value state separately from host rendering.",
+      "source": "examples/features/devtools/run.jet:54-68; package #Test reachability is the self-hosting seam.",
+      "receipt": "Source receipt: two named #Test blocks assert State{} and exercise panel; replay with the command above.",
+      "severity": "low",
+      "action": "absorbed in dogfood source; integrated test proof remains with #2497",
+      "owning_card": "#2497",
+      "workaround": "Keep checks in the Jet package and use assert_eq; do not mirror them in a foreign frontend harness.",
+      "status": "open"
+    }
+  ],
+  "duplicates": []
+}

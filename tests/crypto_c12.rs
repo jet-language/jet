@@ -71,7 +71,8 @@ fn typed_crypto_matches_aot_in_default_dev_with_honest_jit_boundary() {
         errors.is_empty(),
         "typed crypto must type-check: {errors:?}"
     );
-    jet_jit::try_compile_bundle(&bundle)
+    let policy = common::development_policy();
+    common::compile_cranelift_bundle(&bundle, &policy)
         .expect("typed crypto must compile natively in the resident JIT");
 
     let (aot_code, aot_stdout, aot_stderr) =

@@ -20,6 +20,102 @@ pub const JET_SHARED_TRANSACTION_VALUE_STORAGE_FAILED: &str =
 pub fn jet_shared_guard_validate_char(value: i32) -> Result<char, &'static str> {
     char::from_u32(value as u32).ok_or(JET_SHARED_GUARD_CHARACTER_STORAGE_FAILED)
 }
+/// Runtime scalar kinds with a lossless representation in one atomic word.
+///
+/// This metadata is shared by generated Prelude code and execution adapters;
+/// it deliberately contains only scalar representations that can be read or
+/// written without entering the blocking Shared protocol.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum JetSharedScalarKind {
+    I8,
+    U8,
+    I16,
+    U16,
+    I32,
+    U32,
+    I64,
+    U64,
+    F32,
+    F64,
+    Bool,
+    Char,
+}
+
+/// The canonical wait-free carrier for a scalar Shared payload.
+///
+/// The payload bits use Acquire loads and Release stores.  The carrier has no
+/// mutex, condition variable, allocation, or retry loop; structured Shared
+/// values continue to use `JetSharedProtocol` separately.
+pub struct JetSharedAtomic {
+    kind: JetSharedScalarKind,
+    bits: std::sync::atomic::AtomicU64,
+}
+
+impl JetSharedAtomic {
+    pub fn new(kind: JetSharedScalarKind, bits: u64) -> Self {
+        Self {
+            kind,
+            bits: std::sync::atomic::AtomicU64::new(bits),
+        }
+    }
+
+    pub fn kind(&self) -> JetSharedScalarKind {
+        self.kind
+    }
+
+    #[inline(always)]
+    pub fn load(&self) -> u64 {
+        self.bits
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    #[inline(always)]
+    pub fn store(&self, bits: u64) {
+        self.bits
+            .store(bits, std::sync::atomic::Ordering::Release);
+    }
+
+    #[inline(always)]
+    pub fn swap(&self, bits: u64) -> u64 {
+        self.bits
+            .swap(bits, std::sync::atomic::Ordering::AcqRel)
+    }
+}
+
+/// Return the scalar carrier kind for a native Prelude payload.
+///
+/// Type identity is resolved once when the Shared cell is constructed.  A
+/// non-scalar payload returns `None` and keeps the protocol-backed path.
+pub fn jet_shared_scalar_kind<T: 'static>() -> Option<JetSharedScalarKind> {
+    let ty = std::any::TypeId::of::<T>();
+    Some(if ty == std::any::TypeId::of::<i8>() {
+        JetSharedScalarKind::I8
+    } else if ty == std::any::TypeId::of::<u8>() {
+        JetSharedScalarKind::U8
+    } else if ty == std::any::TypeId::of::<i16>() {
+        JetSharedScalarKind::I16
+    } else if ty == std::any::TypeId::of::<u16>() {
+        JetSharedScalarKind::U16
+    } else if ty == std::any::TypeId::of::<i32>() {
+        JetSharedScalarKind::I32
+    } else if ty == std::any::TypeId::of::<u32>() {
+        JetSharedScalarKind::U32
+    } else if ty == std::any::TypeId::of::<i64>() {
+        JetSharedScalarKind::I64
+    } else if ty == std::any::TypeId::of::<u64>() {
+        JetSharedScalarKind::U64
+    } else if ty == std::any::TypeId::of::<f32>() {
+        JetSharedScalarKind::F32
+    } else if ty == std::any::TypeId::of::<f64>() {
+        JetSharedScalarKind::F64
+    } else if ty == std::any::TypeId::of::<bool>() {
+        JetSharedScalarKind::Bool
+    } else if ty == std::any::TypeId::of::<char>() {
+        JetSharedScalarKind::Char
+    } else {
+        return None;
+    })
+}
 
 #[derive(Default)]
 struct JetSharedLockState {
@@ -110,38 +206,328 @@ pub fn jet_shared_acquire_ordered(
 /// The Shared side of a `#Transact` block.
 ///
 /// Engines and generated adapters only supply type-erased payload closures.
-/// Participant identity, canonical lock ordering, commit, and rollback live
-/// here so every execution tier uses one transaction protocol.
-pub struct JetSharedTransaction {
-    parts: Option<Vec<JetSharedTransactionPart>>,
+/// Participant identity, canonical lock ordering, commit, rollback, and the
+/// transaction-local view live here so every execution tier uses one protocol.
+///
+/// A transaction stages each edited payload in a private working value.  The
+/// edit callback runs once while the transaction body is executing; commit
+/// only publishes that working value.  Nested transactions clone the parent's
+/// working value, merge a committed child back into the parent, and never
+/// publish to a Shared cell until the outermost transaction commits.
+trait JetSharedTxnValue {
+    fn as_any(&self) -> &dyn std::any::Any;
+
+    fn merge_into(&self, parent: &dyn JetSharedTxnValue);
+}
+
+struct JetSharedTxnValueImpl<T: 'static> {
+    value: std::rc::Rc<std::cell::RefCell<T>>,
+}
+
+impl<T: Clone + 'static> JetSharedTxnValue for JetSharedTxnValueImpl<T> {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn merge_into(&self, parent: &dyn JetSharedTxnValue) {
+        let parent = parent
+            .as_any()
+            .downcast_ref::<Self>()
+            .expect("Shared transaction participant type changed");
+        let value = self.value.borrow().clone();
+        *parent.value.borrow_mut() = value;
+    }
 }
 
 struct JetSharedTransactionPart {
     protocol: std::sync::Arc<JetSharedProtocol>,
+    staged: Option<Box<dyn JetSharedTxnValue>>,
+    writes: bool,
+    snapshots: Vec<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     deltas: Vec<Box<dyn FnOnce()>>,
+    commit_hooks: Vec<Box<dyn FnOnce()>>,
+    has_commit_hook: bool,
+}
+
+impl JetSharedTransactionPart {
+    fn new(protocol: std::sync::Arc<JetSharedProtocol>) -> Self {
+        Self {
+            protocol,
+            staged: None,
+            writes: false,
+            snapshots: Vec::new(),
+            deltas: Vec::new(),
+            commit_hooks: Vec::new(),
+            has_commit_hook: false,
+        }
+    }
+}
+
+struct JetSharedTransactionState {
+    parts: Option<Vec<JetSharedTransactionPart>>,
+    rollback_hooks: Option<Vec<Box<dyn FnOnce()>>>,
+    parent: Option<std::rc::Weak<std::cell::RefCell<JetSharedTransactionState>>>,
+}
+
+thread_local! {
+    static JET_SHARED_TRANSACTION_STACK:
+        std::cell::RefCell<Vec<std::rc::Weak<std::cell::RefCell<JetSharedTransactionState>>>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+pub struct JetSharedTransaction {
+    state: std::rc::Rc<std::cell::RefCell<JetSharedTransactionState>>,
+}
+
+fn jet_shared_transaction_part_mut<'a>(
+    parts: &'a mut Vec<JetSharedTransactionPart>,
+    protocol: &std::sync::Arc<JetSharedProtocol>,
+) -> &'a mut JetSharedTransactionPart {
+    if let Some(index) = parts
+        .iter()
+        .position(|part| std::sync::Arc::ptr_eq(&part.protocol, protocol))
+    {
+        return &mut parts[index];
+    }
+    parts.push(JetSharedTransactionPart::new(protocol.clone()));
+    parts.last_mut().expect("new Shared transaction participant")
+}
+
+fn jet_shared_transaction_part<'a>(
+    parts: &'a [JetSharedTransactionPart],
+    protocol: &std::sync::Arc<JetSharedProtocol>,
+) -> Option<&'a JetSharedTransactionPart> {
+    parts
+        .iter()
+        .find(|part| std::sync::Arc::ptr_eq(&part.protocol, protocol))
+}
+
+fn jet_shared_transaction_staged_from<T: 'static>(
+    state: &std::rc::Rc<std::cell::RefCell<JetSharedTransactionState>>,
+    protocol: &std::sync::Arc<JetSharedProtocol>,
+) -> Option<std::rc::Rc<std::cell::RefCell<T>>> {
+    let (staged, parent) = {
+        let state = state.borrow();
+        let staged = state
+            .parts
+            .as_deref()
+            .and_then(|parts| jet_shared_transaction_part(parts, protocol))
+            .and_then(|part| part.staged.as_ref())
+            .and_then(|staged| {
+                staged
+                    .as_any()
+                    .downcast_ref::<JetSharedTxnValueImpl<T>>()
+                    .map(|staged| staged.value.clone())
+            });
+        (staged, state.parent.clone())
+    };
+    staged.or_else(|| {
+        parent
+            .and_then(|parent| parent.upgrade())
+            .and_then(|parent| jet_shared_transaction_staged_from(&parent, protocol))
+    })
+}
+
+fn jet_shared_transaction_has_writes(
+    state: &std::rc::Rc<std::cell::RefCell<JetSharedTransactionState>>,
+    protocol: &std::sync::Arc<JetSharedProtocol>,
+) -> bool {
+    let (writes, parent) = {
+        let state = state.borrow();
+        let writes = state
+            .parts
+            .as_deref()
+            .and_then(|parts| jet_shared_transaction_part(parts, protocol))
+            .is_some_and(|part| part.writes);
+        (writes, state.parent.clone())
+    };
+    writes
+        || parent.is_some_and(|parent| {
+            parent
+                .upgrade()
+                .is_some_and(|parent| jet_shared_transaction_has_writes(&parent, protocol))
+        })
+}
+
+fn jet_shared_transaction_pop(
+    state: &std::rc::Rc<std::cell::RefCell<JetSharedTransactionState>>,
+) {
+    JET_SHARED_TRANSACTION_STACK.with(|stack| {
+        let mut stack = stack.borrow_mut();
+        if let Some(index) = stack.iter().rposition(|entry| {
+            entry
+                .upgrade()
+                .is_some_and(|candidate| std::rc::Rc::ptr_eq(&candidate, state))
+        }) {
+            stack.remove(index);
+        }
+    });
+}
+
+fn jet_shared_transaction_merge_nested(
+    parent: &std::rc::Rc<std::cell::RefCell<JetSharedTransactionState>>,
+    mut child_parts: Vec<JetSharedTransactionPart>,
+    mut child_rollbacks: Vec<Box<dyn FnOnce()>>,
+) {
+    let mut parent = parent.borrow_mut();
+    let parts = parent
+        .parts
+        .as_mut()
+        .expect("nested Shared transaction parent already committed");
+    for mut child in child_parts.drain(..) {
+        let parent_part = jet_shared_transaction_part_mut(parts, &child.protocol);
+        if child.writes {
+            for snapshot in &parent_part.snapshots {
+                snapshot.store(false, std::sync::atomic::Ordering::Release);
+            }
+        }
+        if let Some(staged) = child.staged.take() {
+            if let Some(parent_staged) = parent_part.staged.as_ref() {
+                staged.merge_into(parent_staged.as_ref());
+            } else {
+                parent_part.staged = Some(staged);
+            }
+        }
+        parent_part.writes |= child.writes;
+        parent_part.deltas.append(&mut child.deltas);
+        if !parent_part.has_commit_hook {
+            parent_part.commit_hooks.append(&mut child.commit_hooks);
+            parent_part.has_commit_hook = child.has_commit_hook;
+        }
+        parent_part.snapshots.append(&mut child.snapshots);
+    }
+    parent
+        .rollback_hooks
+        .as_mut()
+        .expect("nested Shared transaction parent has no rollback hooks")
+        .append(&mut child_rollbacks);
 }
 
 pub fn jet_shared_transaction_begin() -> JetSharedTransaction {
-    JetSharedTransaction {
+    let parent = JET_SHARED_TRANSACTION_STACK.with(|stack| {
+        stack
+            .borrow()
+            .last()
+            .and_then(|parent| parent.upgrade())
+            .map(|parent| std::rc::Rc::downgrade(&parent))
+    });
+    let state = std::rc::Rc::new(std::cell::RefCell::new(JetSharedTransactionState {
         parts: Some(Vec::new()),
-    }
+        rollback_hooks: Some(Vec::new()),
+        parent,
+    }));
+    JET_SHARED_TRANSACTION_STACK.with(|stack| {
+        stack.borrow_mut().push(std::rc::Rc::downgrade(&state));
+    });
+    JetSharedTransaction { state }
 }
 
 impl JetSharedTransaction {
     pub fn touch(&mut self, protocol: std::sync::Arc<JetSharedProtocol>) {
-        let parts = self
+        let mut state = self.state.borrow_mut();
+        let parts = state
             .parts
             .as_mut()
             .expect("Shared transaction touch after commit");
-        if !parts
-            .iter()
-            .any(|part| std::sync::Arc::ptr_eq(&part.protocol, &protocol))
+        let _ = jet_shared_transaction_part_mut(parts, &protocol);
+    }
+
+    /// Return a transaction-local working value, creating it from `initial`
+    /// only when neither this transaction nor its parent has staged a value.
+    pub fn stage_value<T: Clone + 'static>(
+        &mut self,
+        protocol: std::sync::Arc<JetSharedProtocol>,
+        initial: impl FnOnce() -> T,
+    ) -> std::rc::Rc<std::cell::RefCell<T>> {
         {
-            parts.push(JetSharedTransactionPart {
-                protocol,
-                deltas: Vec::new(),
-            });
+            let state = self.state.borrow();
+            if let Some(staged) = state
+                .parts
+                .as_deref()
+                .and_then(|parts| jet_shared_transaction_part(parts, &protocol))
+                .and_then(|part| part.staged.as_ref())
+                .and_then(|staged| {
+                    staged
+                        .as_any()
+                        .downcast_ref::<JetSharedTxnValueImpl<T>>()
+                        .map(|staged| staged.value.clone())
+                })
+            {
+                return staged;
+            }
         }
+        let value = self
+            .staged_value::<T>(&protocol)
+            .map(|staged| staged.borrow().clone())
+            .unwrap_or_else(initial);
+        let staged = std::rc::Rc::new(std::cell::RefCell::new(value));
+        let mut state = self.state.borrow_mut();
+        let parts = state
+            .parts
+            .as_mut()
+            .expect("Shared transaction stage after commit");
+        let part = jet_shared_transaction_part_mut(parts, &protocol);
+        part.staged = Some(Box::new(JetSharedTxnValueImpl {
+            value: staged.clone(),
+        }));
+        staged
+    }
+
+    pub fn staged_value<T: 'static>(
+        &self,
+        protocol: &std::sync::Arc<JetSharedProtocol>,
+    ) -> Option<std::rc::Rc<std::cell::RefCell<T>>> {
+        jet_shared_transaction_staged_from::<T>(&self.state, protocol)
+    }
+
+    /// Mark a participant as written and invalidate tickets captured before
+    /// this local write. The outermost commit still advances one revision.
+    pub fn mark_write(&mut self, protocol: std::sync::Arc<JetSharedProtocol>) {
+        let mut state = self.state.borrow_mut();
+        let parts = state
+            .parts
+            .as_mut()
+            .expect("Shared transaction write after commit");
+        let part = jet_shared_transaction_part_mut(parts, &protocol);
+        part.writes = true;
+        for snapshot in &part.snapshots {
+            snapshot.store(false, std::sync::atomic::Ordering::Release);
+        }
+    }
+
+    pub fn snapshot_revision(
+        &self,
+        protocol: &std::sync::Arc<JetSharedProtocol>,
+        committed: u64,
+    ) -> Option<u64> {
+        if jet_shared_transaction_has_writes(&self.state, protocol) {
+            committed.checked_add(1)
+        } else {
+            Some(committed)
+        }
+    }
+
+    /// Register a snapshot with the participant so abort invalidates it and
+    /// nested commit can carry its lifecycle into the parent transaction.
+    pub fn record_snapshot(
+        &mut self,
+        protocol: std::sync::Arc<JetSharedProtocol>,
+        valid: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) {
+        self.touch(protocol.clone());
+        {
+            let mut state = self.state.borrow_mut();
+            let parts = state
+                .parts
+                .as_mut()
+                .expect("Shared transaction snapshot after commit");
+            jet_shared_transaction_part_mut(parts, &protocol)
+                .snapshots
+                .push(valid.clone());
+        }
+        self.record_rollback(Box::new(move || {
+            valid.store(false, std::sync::atomic::Ordering::Release);
+        }));
     }
 
     pub fn record_edit(
@@ -149,31 +535,74 @@ impl JetSharedTransaction {
         protocol: std::sync::Arc<JetSharedProtocol>,
         delta: Box<dyn FnOnce()>,
     ) {
-        let parts = self
+        let mut state = self.state.borrow_mut();
+        let parts = state
             .parts
             .as_mut()
             .expect("Shared transaction edit after commit");
-        if let Some(part) = parts
-            .iter_mut()
-            .find(|part| std::sync::Arc::ptr_eq(&part.protocol, &protocol))
-        {
-            part.deltas.push(delta);
-        } else {
-            parts.push(JetSharedTransactionPart {
-                protocol,
-                deltas: vec![delta],
-            });
+        jet_shared_transaction_part_mut(parts, &protocol)
+            .deltas
+            .push(delta);
+    }
+
+    /// Register one hook for a participant's successful commit. The first
+    /// hook wins because a participant publishes one revision regardless of
+    /// how many deferred edits it contains.
+    pub fn record_edit_with_commit(
+        &mut self,
+        protocol: std::sync::Arc<JetSharedProtocol>,
+        delta: Box<dyn FnOnce()>,
+        commit: Box<dyn FnOnce()>,
+    ) {
+        let mut state = self.state.borrow_mut();
+        let parts = state
+            .parts
+            .as_mut()
+            .expect("Shared transaction edit after commit");
+        let part = jet_shared_transaction_part_mut(parts, &protocol);
+        part.deltas.push(delta);
+        if !part.has_commit_hook {
+            part.commit_hooks.push(commit);
+            part.has_commit_hook = true;
         }
+    }
+
+    pub fn record_rollback(&mut self, hook: Box<dyn FnOnce()>) {
+        self.state
+            .borrow_mut()
+            .rollback_hooks
+            .as_mut()
+            .expect("Shared transaction rollback after commit")
+            .push(hook);
     }
 
     pub fn commit(self) {
         let _ = self.commit_with(|| ());
     }
 
-    pub fn commit_with<R>(mut self, apply: impl FnOnce() -> R) -> R {
-        let Some(mut parts) = self.parts.take() else {
+    pub fn commit_with<R>(self, apply: impl FnOnce() -> R) -> R {
+        let state = self.state.clone();
+        let (parts, rollback_hooks, parent) = {
+            let mut state = state.borrow_mut();
+            (
+                state.parts.take(),
+                state.rollback_hooks.take(),
+                state.parent.clone(),
+            )
+        };
+        jet_shared_transaction_pop(&state);
+        let Some(mut parts) = parts else {
             return apply();
         };
+        if let Some(parent) = parent.and_then(|parent| parent.upgrade()) {
+            jet_shared_transaction_merge_nested(
+                &parent,
+                parts,
+                rollback_hooks.unwrap_or_default(),
+            );
+            return apply();
+        }
+        let _rollback_hooks = rollback_hooks;
         let _permits = jet_shared_acquire_ordered(
             parts
                 .iter()
@@ -184,6 +613,9 @@ impl JetSharedTransaction {
             for delta in part.deltas.drain(..) {
                 delta();
             }
+            for commit in part.commit_hooks.drain(..) {
+                commit();
+            }
         }
         apply()
     }
@@ -191,9 +623,21 @@ impl JetSharedTransaction {
 
 impl Drop for JetSharedTransaction {
     fn drop(&mut self) {
-        // An uncommitted transaction drops its deferred payloads. No engine
-        // gets a second rollback path to implement or accidentally invoke.
-        self.parts.take();
+        let state = self.state.clone();
+        let rollback_hooks = {
+            let mut state = state.borrow_mut();
+            if state.parts.take().is_some() {
+                state.rollback_hooks.take()
+            } else {
+                None
+            }
+        };
+        if let Some(mut hooks) = rollback_hooks {
+            jet_shared_transaction_pop(&state);
+            for hook in hooks.drain(..) {
+                hook();
+            }
+        }
     }
 }
 
@@ -352,6 +796,50 @@ pub fn jet_shared_guard_map(
         .active
         .store(false, std::sync::atomic::Ordering::Release);
     Ok(mapped)
+}
+/// Split one checked guard into two disjoint projections while retaining the
+/// original permit. Sema proves both field identities are stored and disjoint;
+/// this protocol helper only records the two paths and consumes the parent
+/// handle, so every engine observes the same lease lifetime.
+pub fn jet_shared_guard_split(
+    guard: &JetSharedGuardState,
+    first: i64,
+    second: i64,
+    editable: bool,
+) -> Result<
+    (
+        std::sync::Arc<JetSharedGuardState>,
+        std::sync::Arc<JetSharedGuardState>,
+    ),
+    &'static str,
+> {
+    if !guard.held() {
+        return Err(JET_SHARED_GUARD_INVALID);
+    }
+    if editable {
+        jet_shared_guard_require_edit_capability(guard.editable(), guard.permit())?;
+    }
+
+    let mut first_path = guard.path.clone();
+    first_path.push(first);
+    let mut second_path = guard.path.clone();
+    second_path.push(second);
+    let first = std::sync::Arc::new(JetSharedGuardState {
+        permit: std::sync::Arc::clone(&guard.permit),
+        path: first_path,
+        editable,
+        active: std::sync::atomic::AtomicBool::new(true),
+    });
+    let second = std::sync::Arc::new(JetSharedGuardState {
+        permit: std::sync::Arc::clone(&guard.permit),
+        path: second_path,
+        editable,
+        active: std::sync::atomic::AtomicBool::new(true),
+    });
+    guard
+        .active
+        .store(false, std::sync::atomic::Ordering::Release);
+    Ok((first, second))
 }
 
 pub fn jet_shared_guard_clone(

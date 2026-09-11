@@ -291,8 +291,8 @@ fn entry_recovery_covers_missing_ambiguous_legacy_and_stale_layouts() {
 
 #[test]
 fn install_host_and_offline_failures_have_recovery() {
-    let guide = repo_text("docs/first-hour.md");
-    let exercises = repo_text("docs/diagnostic-recovery.md");
+    let guide = repo_text("docs/spec/guides/first-hour.md");
+    let exercises = repo_text("docs/spec/guides/diagnostic-recovery.md");
     for phrase in [
         "x86_64 Linux and x86_64 macOS",
         "platform-specific project track",

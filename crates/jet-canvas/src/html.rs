@@ -473,6 +473,87 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
   #graph-overview { display: none; }
   #topbar > button, .debug-controls button { min-height: 28px; padding-inline: 6px; }
 }
+#jet-devtools-shell { position: fixed; right: 14px; bottom: 40px; z-index: 60; color: #eaf5ff; font: 12px/1.4 "Inter", "Segoe UI", Roboto, system-ui, sans-serif; }
+#jet-devtools-shell[hidden], #jet-devtools-lens[hidden], #jet-devtools-workbench[hidden] { display: none !important; }
+#jet-devtools-pill { display: flex; align-items: stretch; max-width: min(780px, calc(100vw - 28px)); overflow: hidden; border: 1px solid #435566; border-radius: 6px; background: #101820; box-shadow: 0 12px 34px rgba(0,0,0,.48); }
+#jet-devtools-pill > span, #jet-devtools-pill > button { min-height: 32px; padding: 7px 9px; border: 0; border-right: 1px solid #334655; border-radius: 0; background: transparent; color: #b6c4cf; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; white-space: nowrap; }
+#jet-devtools-pill > span { display: inline-flex; align-items: center; color: #65d4ff; font-weight: 700; letter-spacing: .08em; }
+#jet-devtools-pill > button { cursor: pointer; text-align: left; }
+#jet-devtools-pill > button:hover, #jet-devtools-pill > button:focus-visible { background: #1b2b3b; color: #f8fbff; outline: none; box-shadow: inset 0 -2px #65d4ff; }
+#jet-devtools-pill > button:last-child { border-right: 0; }
+#jet-devtools-pill b { color: #f8fbff; font-weight: 600; }
+#jet-devtools-pill [data-state="building"], #jet-devtools-pill [data-state="hot_reload"] { color: #f6d365; }
+#jet-devtools-pill [data-state="build_failed"], #jet-devtools-pill [data-state="runtime_failure"], #jet-devtools-pill [data-state="tests_failing"] { color: #fb7185; }
+#jet-devtools-pill kbd { margin-left: 3px; padding: 1px 3px; border: 1px solid #46698f; border-radius: 3px; color: #8fb2dc; font-size: 9px; }
+#jet-devtools-lens { position: fixed; right: 14px; bottom: 82px; z-index: 61; width: min(390px, calc(100vw - 28px)); max-height: min(76vh, 700px); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; border: 1px solid #3a4a5a; border-radius: 7px; background: rgba(16,21,28,.98); box-shadow: 0 24px 70px rgba(0,0,0,.62); }
+.jet-devtools-head { display: flex; align-items: center; gap: 8px; min-height: 42px; padding: 8px 10px; border-bottom: 1px solid #2a3744; background: #0d1218; }
+.jet-devtools-head h2, .jet-devtools-head h3 { margin: 0; color: #f1f5f8; font-size: 13px; }
+.jet-devtools-head .jet-devtools-context { color: #72b8ff; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.jet-devtools-head .jet-devtools-actions { display: flex; gap: 5px; margin-left: auto; }
+.jet-devtools-action { min-height: 26px; padding: 4px 7px; border: 1px solid #3a4a5a; border-radius: 4px; background: #151c25; color: #b9c5cf; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.jet-devtools-action:hover, .jet-devtools-action:focus-visible { border-color: #72b8ff; color: #f1f5f8; outline: none; }
+#jet-devtools-lens-scroll { min-height: 0; overflow: auto; padding: 10px; }
+#jet-devtools-lens-summary { margin-bottom: 9px; padding: 10px; border: 1px solid rgba(114,184,255,.35); border-radius: 5px; background: rgba(114,184,255,.14); }
+#jet-devtools-lens-summary small { color: #72b8ff; font: 9px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; }
+#jet-devtools-lens-summary strong { display: block; margin: 4px 0 2px; color: #f1f5f8; font-size: 14px; }
+#jet-devtools-lens-summary p { margin: 0; color: #b9c5cf; font-size: 11px; overflow-wrap: anywhere; }
+#jet-devtools-lens-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.jet-devtools-card { min-height: 76px; padding: 8px; border: 1px solid #2a3744; border-radius: 5px; background: #151c25; }
+.jet-devtools-card[role="button"] { cursor: pointer; }
+.jet-devtools-card[role="button"]:hover, .jet-devtools-card[role="button"]:focus-visible { border-color: #72b8ff; background: #1b2530; outline: none; }
+.jet-devtools-card h4 { margin: 0 0 5px; color: #7d8b98; font: 9px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .06em; text-transform: uppercase; }
+.jet-devtools-card p { margin: 0; color: #b9c5cf; font: 10px/1.45 ui-monospace, "SFMono-Regular", Consolas, monospace; overflow-wrap: anywhere; }
+#jet-devtools-panel-drawer { display: grid; gap: 7px; margin-top: 12px; padding-top: 9px; border-top: 1px solid #2a3744; }
+#jet-devtools-panel-drawer > label { color: #7d8b98; font: 9px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .06em; text-transform: uppercase; }
+#jet-devtools-panel-drawer select { width: 100%; min-height: 28px; color: #f1f5f8; border-color: #3a4a5a; background: #1b2530; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+#jet-devtools-panel-list { display: grid; gap: 3px; }
+.jet-devtools-event-row { width: 100%; padding: 6px 7px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: #b9c5cf; text-align: left; font: 9px/1.4 ui-monospace, "SFMono-Regular", Consolas, monospace; overflow-wrap: anywhere; }
+.jet-devtools-event-row:hover, .jet-devtools-event-row:focus-visible { border-color: #3a4a5a; background: #1b2530; color: #f1f5f8; outline: none; }
+.jet-devtools-empty { margin: 0; color: #7d8b98; font: 10px/1.45 ui-monospace, "SFMono-Regular", Consolas, monospace; }
+#jet-devtools-lens-timebar { display: grid; gap: 4px; padding: 8px 10px 9px; border-top: 1px solid #2a3744; background: #0d1218; }
+#jet-devtools-lens-timebar > div { display: flex; justify-content: space-between; gap: 8px; color: #7d8b98; font: 9px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+#jet-devtools-lens-time-label, #jet-devtools-workbench-time { color: #72b8ff; }
+#jet-devtools-lens-time, #jet-devtools-workbench-range { width: 100%; accent-color: #72b8ff; cursor: ew-resize; }
+#jet-devtools-workbench { position: fixed; inset: 14px; z-index: 70; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; border: 1px solid #3a4a5a; border-radius: 8px; background: #090c10; box-shadow: 0 30px 100px rgba(0,0,0,.76); }
+#jet-devtools-workbench-body { min-height: 0; display: grid; grid-template-columns: minmax(150px, .38fr) minmax(260px, 1fr) minmax(230px, .82fr); }
+.jet-devtools-pane { min-width: 0; min-height: 0; overflow: auto; border-right: 1px solid #2a3744; background: #10151c; }
+.jet-devtools-pane:last-child { border-right: 0; }
+.jet-devtools-pane-head { padding: 9px 10px 7px; color: #7d8b98; font: 9px ui-monospace, "SFMono-Regular", Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; }
+#jet-devtools-tree { display: grid; gap: 3px; padding: 0 7px 10px; }
+.jet-devtools-tree-item { width: 100%; padding: 7px 6px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: #b9c5cf; text-align: left; font: 10px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.jet-devtools-tree-item:hover, .jet-devtools-tree-item:focus-visible, .jet-devtools-tree-item[aria-selected="true"] { border-color: rgba(114,184,255,.35); background: rgba(114,184,255,.14); color: #72b8ff; outline: none; }
+#jet-devtools-timeline { display: grid; gap: 4px; padding: 10px; }
+.jet-devtools-timeline-event { width: 100%; display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 3px 7px; padding: 7px 6px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: #b9c5cf; text-align: left; font: 9px/1.35 ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.jet-devtools-timeline-event:hover, .jet-devtools-timeline-event:focus-visible, .jet-devtools-timeline-event[aria-current="true"] { border-color: rgba(114,184,255,.35); background: rgba(114,184,255,.14); color: #f1f5f8; outline: none; }
+.jet-devtools-timeline-event code { color: #72b8ff; font: inherit; }
+.jet-devtools-timeline-event small { grid-column: 2; color: #7d8b98; overflow-wrap: anywhere; }
+#jet-devtools-inspector { padding: 0 10px 14px; }
+#jet-devtools-inspector-selection { margin-bottom: 10px; padding: 9px; border: 1px solid rgba(114,184,255,.35); border-radius: 5px; background: rgba(114,184,255,.14); }
+#jet-devtools-inspector-selection small { color: #72b8ff; font: 9px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+#jet-devtools-inspector-selection strong { display: block; margin-top: 3px; color: #f1f5f8; font-size: 13px; overflow-wrap: anywhere; }
+#jet-devtools-inspector-selection span { display: block; margin-top: 3px; color: #b9c5cf; font: 9px ui-monospace, "SFMono-Regular", Consolas, monospace; overflow-wrap: anywhere; }
+#jet-devtools-inspector-facts { display: grid; gap: 4px; }
+.jet-devtools-fact { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 8px; padding: 5px 0; border-bottom: 1px solid #2a3744; color: #b9c5cf; font-size: 10px; }
+.jet-devtools-fact code { color: #f1f5f8; font: 9px ui-monospace, "SFMono-Regular", Consolas, monospace; text-align: right; overflow-wrap: anywhere; }
+#jet-devtools-workbench-status { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 5px 9px; border-top: 1px solid #2a3744; color: #7d8b98; font: 9px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+#jet-devtools-workbench-status strong { color: #62d3a0; font-weight: 500; }
+@media (max-width: 900px) {
+  #jet-devtools-workbench { inset: 8px; }
+  #jet-devtools-workbench-body { grid-template-columns: 1fr; grid-template-rows: minmax(126px, .7fr) minmax(180px, 1fr) minmax(150px, .8fr); }
+  .jet-devtools-pane { border-right: 0; border-bottom: 1px solid #2a3744; }
+  .jet-devtools-pane:last-child { border-bottom: 0; }
+}
+@media (max-width: 640px) {
+  #jet-devtools-shell { right: 8px; bottom: 34px; left: 8px; }
+  #jet-devtools-pill { width: 100%; overflow-x: auto; }
+  #jet-devtools-pill > span, #jet-devtools-pill > button { flex: 0 0 auto; }
+  #jet-devtools-lens { right: 8px; bottom: 72px; width: calc(100vw - 16px); max-height: calc(100vh - 88px); }
+  #jet-devtools-lens-cards { grid-template-columns: 1fr; }
+  #jet-devtools-workbench { inset: 5px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #jet-devtools-shell *, #jet-devtools-shell *::before, #jet-devtools-shell *::after { transition-duration: .001ms !important; animation-duration: .001ms !important; }
+}
 </style>
 </head>
 <body>
@@ -617,6 +698,97 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
     </aside>
   </main>
   <footer id="statusbar"><span id="source-id">source</span><span id="revision">revision</span><span id="session-id">session</span><span id="schema">canvas v1</span><span id="scm-state">git</span><span id="toast"></span></footer>
+</div>
+<div id="jet-devtools-shell" data-state="idle" hidden>
+  <div id="jet-devtools-pill" role="status" aria-live="polite" aria-label="Jet Devtools">
+    <span class="jet-devtools-prefix">DEV</span>
+    <span id="jet-devtools-status">Idle</span>
+    <button type="button" data-devtools-panel="Build" aria-label="Inspect Build facts">build <b id="jet-devtools-build">waiting</b></button>
+    <button type="button" data-devtools-panel="Traces" aria-label="Inspect Traces facts">reload <b id="jet-devtools-reload">—</b></button>
+    <button type="button" data-devtools-panel="Gates" aria-label="Inspect diagnostic facts">errors <b id="jet-devtools-errors">0</b></button>
+    <button type="button" data-devtools-panel="Tests" aria-label="Inspect Tests facts">tests <b id="jet-devtools-tests">—</b></button>
+    <button type="button" data-devtools-panel="Queries" aria-label="Inspect fetching queries">fetching <b id="jet-devtools-fetching">0</b></button>
+    <button id="jet-devtools-open-lens" type="button" aria-haspopup="dialog" aria-controls="jet-devtools-lens" aria-expanded="false">Inspect <kbd>Alt+J</kbd></button>
+    <button id="jet-devtools-open-workbench" type="button" aria-haspopup="dialog" aria-controls="jet-devtools-workbench" aria-expanded="false">Workbench <kbd>Ctrl+Shift+W</kbd></button>
+  </div>
+  <aside id="jet-devtools-lens" role="dialog" aria-modal="false" aria-labelledby="jet-devtools-lens-title" hidden inert>
+    <header class="jet-devtools-head">
+      <div>
+        <h2 id="jet-devtools-lens-title">Running program</h2>
+        <span id="jet-devtools-lens-context" class="jet-devtools-context">waiting for jet.devtools.v1</span>
+      </div>
+      <div class="jet-devtools-actions">
+        <button id="jet-devtools-copy" class="jet-devtools-action" type="button">Copy</button>
+        <button id="jet-devtools-lens-close" class="jet-devtools-action" type="button" aria-label="Close running program lens">Close</button>
+      </div>
+    </header>
+    <div id="jet-devtools-lens-scroll">
+      <div id="jet-devtools-lens-summary">
+        <small id="jet-devtools-lens-selection">No selection</small>
+        <strong id="jet-devtools-lens-description">No live facts yet</strong>
+        <p>Facts are read from the shared <code>jet.devtools.v1</code> stream.</p>
+      </div>
+      <div id="jet-devtools-lens-cards" aria-live="polite"></div>
+      <div id="jet-devtools-panel-drawer">
+        <label for="jet-devtools-panel-select">Panel</label>
+        <select id="jet-devtools-panel-select" aria-label="Devtools panel">
+          <option>Build</option>
+          <option>Routes</option>
+          <option>Queries</option>
+          <option>Mutations</option>
+          <option>Forms</option>
+          <option>Table</option>
+          <option>Store</option>
+          <option>Traces</option>
+          <option>Cost</option>
+          <option>Gates</option>
+          <option>Structure</option>
+          <option>Tests</option>
+          <option>Jobs</option>
+        </select>
+        <div id="jet-devtools-panel-list" aria-live="polite"></div>
+      </div>
+    </div>
+    <div id="jet-devtools-lens-timebar">
+      <div><span>Time cursor</span><span id="jet-devtools-lens-time-label">live</span></div>
+      <input id="jet-devtools-lens-time" type="range" min="0" max="1" value="0" step="1" aria-label="Devtools time cursor">
+    </div>
+  </aside>
+  <section id="jet-devtools-workbench" role="dialog" aria-modal="true" aria-labelledby="jet-devtools-workbench-title" hidden inert>
+    <header class="jet-devtools-head">
+      <div>
+        <h2 id="jet-devtools-workbench-title">Devtools Workbench</h2>
+        <span id="jet-devtools-workbench-state" class="jet-devtools-context">Idle · live</span>
+      </div>
+      <div class="jet-devtools-actions">
+        <button id="jet-devtools-workbench-close" class="jet-devtools-action" type="button" aria-label="Close Devtools Workbench">Close</button>
+      </div>
+    </header>
+    <div id="jet-devtools-workbench-body">
+      <aside class="jet-devtools-pane" aria-label="Devtools panels">
+        <div class="jet-devtools-pane-head">Panels</div>
+        <nav id="jet-devtools-tree" role="tree" aria-label="Devtools panels"></nav>
+      </aside>
+      <section class="jet-devtools-pane" aria-label="Devtools event timeline">
+        <div class="jet-devtools-pane-head">Timeline</div>
+        <div id="jet-devtools-timeline" role="list" aria-live="polite"></div>
+      </section>
+      <aside class="jet-devtools-pane" id="jet-devtools-inspector" aria-label="Devtools inspector">
+        <div class="jet-devtools-pane-head">Inspector</div>
+        <div id="jet-devtools-inspector-selection">
+          <small id="jet-devtools-inspector-panel">Build</small>
+          <strong id="jet-devtools-inspector-title">No event selected</strong>
+          <span id="jet-devtools-inspector-source">waiting for a live fact</span>
+        </div>
+        <div id="jet-devtools-inspector-facts"></div>
+      </aside>
+    </div>
+    <footer id="jet-devtools-workbench-status">
+      <span id="jet-devtools-workbench-time">live</span>
+      <input id="jet-devtools-workbench-range" type="range" min="0" max="1" value="0" step="1" aria-label="Devtools workbench time cursor">
+      <strong>Tab panel · Enter inspect · Esc close</strong>
+    </footer>
+  </section>
 </div>
 <div id="context-menu" role="menu"></div>
 <dialog id="keyboard-cheat-sheet" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="keyboard-cheat-sheet-title" aria-describedby="keyboard-cheat-sheet-note">

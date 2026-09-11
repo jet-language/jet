@@ -2,7 +2,8 @@
 
 use super::trust::{quarantine_outputs, MimeBundle, POLICY_VERSION};
 use jet_foundation::PerformanceBudget::CanonicalJson;
-use jet_foundation::JSON::{parse_json, JSONValue};
+use jet_foundation::DataTree::DataTree;
+use jet_foundation::JSON::parse_json;
 use jet_foundation::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
@@ -123,6 +124,195 @@ impl JetNotebook {
         self.add_cell(kind, source)
     }
 
+    /// Refresh dependency edges from the source while preserving authored
+    /// edges.  The graph is source-owned; layout never supplies an implicit
+    /// execution order.
+    pub fn refresh_dependencies(&mut self) -> Result<(), String> {
+        let facts: Vec<_> = self
+            .cells
+            .iter()
+            .map(|cell| source_name_facts(&cell.source))
+            .collect();
+        let mut producers: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+        for (index, (declared, _)) in facts.iter().enumerate() {
+            for name in declared {
+                producers.entry(name.clone()).or_default().push(index);
+            }
+        }
+        let ids: Vec<_> = self.cells.iter().map(|cell| cell.id.clone()).collect();
+        for (index, cell) in self.cells.iter_mut().enumerate() {
+            let mut dependencies = Vec::new();
+            for dependency in &cell.depends_on {
+                if !ids.iter().any(|id| id == dependency) {
+                    return Err(format!(
+                        "cell `{}` depends on unknown cell `{dependency}`",
+                        cell.id
+                    ));
+                }
+                if !dependencies.contains(dependency) {
+                    dependencies.push(dependency.clone());
+                }
+            }
+            for name in &facts[index].1 {
+                let producer = producers
+                    .get(name)
+                    .and_then(|indexes| {
+                        indexes
+                            .iter()
+                            .rev()
+                            .find(|&&producer| producer < index)
+                            .copied()
+                            .or_else(|| {
+                                indexes
+                                    .iter()
+                                    .copied()
+                                    .find(|&producer| producer != index)
+                            })
+                    })
+                    .filter(|&producer| producer != index);
+                if let Some(producer) = producer {
+                    let dependency = &ids[producer];
+                    if !dependencies.contains(dependency) {
+                        dependencies.push(dependency.clone());
+                    }
+                }
+            }
+            dependencies.sort_by_key(|dependency| {
+                ids.iter()
+                    .position(|id| id == dependency)
+                    .unwrap_or(usize::MAX)
+            });
+            cell.depends_on = dependencies;
+        }
+        Ok(())
+    }
+
+    /// Return dependencies before the requested cell.  A cycle is a document
+    /// error, never a reason to silently choose a layout order.
+    pub fn dependency_order(&self, cell_id: &str) -> Result<Vec<String>, String> {
+        if self.cell_index(cell_id).is_none() {
+            return Err(format!("unknown cell `{cell_id}`"));
+        }
+        fn visit(
+            nb: &JetNotebook,
+            id: &str,
+            marks: &mut BTreeMap<String, u8>,
+            stack: &mut Vec<String>,
+            order: &mut Vec<String>,
+        ) -> Result<(), String> {
+            match marks.get(id).copied() {
+                Some(2) => return Ok(()),
+                Some(1) => {
+                    let start = stack.iter().position(|entry| entry == id).unwrap_or(0);
+                    let mut cycle = stack[start..].to_vec();
+                    cycle.push(id.to_string());
+                    return Err(format!(
+                        "notebook dependency cycle: {}",
+                        cycle.join(" -> ")
+                    ));
+                }
+                _ => {}
+            }
+            let cell = nb
+                .cells
+                .iter()
+                .find(|cell| cell.id == id)
+                .ok_or_else(|| format!("cell `{id}` depends on unknown cell"))?;
+            marks.insert(id.to_string(), 1);
+            stack.push(id.to_string());
+            for dependency in &cell.depends_on {
+                visit(nb, dependency, marks, stack, order)?;
+            }
+            stack.pop();
+            marks.insert(id.to_string(), 2);
+            order.push(id.to_string());
+            Ok(())
+        }
+        let mut order = Vec::new();
+        visit(
+            self,
+            cell_id,
+            &mut BTreeMap::new(),
+            &mut Vec::new(),
+            &mut order,
+        )?;
+        Ok(order)
+    }
+
+    /// Return every transitive descendant in dependency order.
+    pub fn descendants_in_order(&self, cell_id: &str) -> Result<Vec<String>, String> {
+        self.dependency_order(cell_id)?;
+        let mut descendants = Vec::new();
+        for cell in &self.cells {
+            if cell.id == cell_id {
+                continue;
+            }
+            let order = self.dependency_order(&cell.id)?;
+            if order.iter().any(|id| id == cell_id) {
+                descendants.push((order.len(), self.cell_index(&cell.id).unwrap(), cell.id.clone()));
+            }
+        }
+        descendants.sort_by_key(|(depth, index, _)| (*depth, *index));
+        Ok(descendants
+            .into_iter()
+            .map(|(_, _, id)| id)
+            .collect())
+    }
+
+    /// Stable identity for reconnect checks.  Cell IDs, source, kind, and
+    /// dependency edges are all part of the source identity.
+    pub fn source_hash(&self) -> String {
+        let mut material = String::from("jetnb-source-v1\0");
+        for cell in &self.cells {
+            material.push_str(&cell.id);
+            material.push('\0');
+            material.push_str(match cell.kind {
+                CellKind::Jet => "jet",
+                CellKind::Markdown => "markdown",
+            });
+            material.push('\0');
+            material.push_str(&cell.source);
+            material.push('\0');
+            for dependency in &cell.depends_on {
+                material.push_str(dependency);
+                material.push('\0');
+            }
+        }
+        SHA256::sha256_hex(material.as_bytes())
+    }
+
+    /// Remove one cell and scrub every cached descendant.  Descendant source
+    /// remains visible for repair, but its removed edge is gone so a save can
+    /// never retain an unknown dependency ID.
+    pub fn remove_cell(&mut self, cell_id: &str) -> Result<Vec<String>, String> {
+        let _ = self
+            .cell_index(cell_id)
+            .ok_or_else(|| format!("unknown cell `{cell_id}`"))?;
+        let descendants = self.descendants_in_order(cell_id)?;
+        let mut doomed = BTreeSet::new();
+        doomed.insert(cell_id.to_string());
+        doomed.extend(descendants.iter().cloned());
+        let keys: Vec<_> = self
+            .cells
+            .iter()
+            .filter(|cell| doomed.contains(&cell.id))
+            .filter_map(|cell| cell.output.as_ref()?.cache_key.clone())
+            .collect();
+        for key in keys {
+            self.output_cache.remove(&key);
+        }
+        self.cells.retain(|cell| cell.id != cell_id);
+        for cell in &mut self.cells {
+            cell.depends_on.retain(|dependency| dependency != cell_id);
+        }
+        self.merge_conflicts
+            .retain(|conflict| conflict.cell_id != cell_id);
+        self.refresh_dependencies()?;
+        let mut removed = vec![cell_id.to_string()];
+        removed.extend(descendants);
+        Ok(removed)
+    }
+
     pub fn cell_index(&self, id: &str) -> Option<usize> {
         self.cells.iter().position(|c| c.id == id)
     }
@@ -134,7 +324,14 @@ impl JetNotebook {
         let source = source.into();
         let changed = self.cells[idx].source != source;
         if changed {
+            let previous_source = self.cells[idx].source.clone();
+            let previous_dependencies = self.cells[idx].depends_on.clone();
             self.cells[idx].source = source;
+            if let Err(error) = self.refresh_dependencies() {
+                self.cells[idx].source = previous_source;
+                self.cells[idx].depends_on = previous_dependencies;
+                return Err(error);
+            }
             self.invalidate_from(cell_id);
             self.merge_conflicts
                 .retain(|conflict| conflict.cell_id != cell_id);
@@ -272,6 +469,104 @@ impl JetNotebook {
         let json = CanonicalJson::parse_canonical(bytes)?;
         notebook_from_json(&json)
     }
+}
+
+fn source_name_facts(source: &str) -> (BTreeSet<String>, BTreeSet<String>) {
+    let (tokens, _) = crate::Lexer::lex(source);
+    let mut declared = BTreeSet::new();
+    let mut ignored = BTreeSet::new();
+    let declaration_keyword = |kind: &crate::Lexer::TokKind| {
+        matches!(
+            kind,
+            crate::Lexer::TokKind::KwFn
+                | crate::Lexer::TokKind::KwStruct
+                | crate::Lexer::TokKind::KwEnum
+                | crate::Lexer::TokKind::KwTrait
+                | crate::Lexer::TokKind::KwModule
+                | crate::Lexer::TokKind::KwTag
+                | crate::Lexer::TokKind::KwEffect
+                | crate::Lexer::TokKind::KwConst
+        )
+    };
+
+    for (index, token) in tokens.iter().enumerate() {
+        if !matches!(&token.kind, crate::Lexer::TokKind::KwFn) {
+            continue;
+        }
+        let Some(name_index) = (index + 1..tokens.len()).find(|candidate| {
+            matches!(&tokens[*candidate].kind, crate::Lexer::TokKind::Ident(_))
+        }) else {
+            continue;
+        };
+        if let crate::Lexer::TokKind::Ident(name) = &tokens[name_index].kind {
+            declared.insert(name.clone());
+        }
+        let Some(open) = (name_index + 1..tokens.len()).find(|candidate| {
+            matches!(&tokens[*candidate].kind, crate::Lexer::TokKind::LParen)
+        }) else {
+            continue;
+        };
+        let mut depth = 0usize;
+        for token in tokens.iter().skip(open) {
+            match &token.kind {
+                crate::Lexer::TokKind::LParen => depth += 1,
+                crate::Lexer::TokKind::RParen => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                crate::Lexer::TokKind::Ident(name) if depth > 0 => {
+                    ignored.insert(name.clone());
+                }
+                _ => {}
+            }
+        }
+    }
+
+    for (index, token) in tokens.iter().enumerate() {
+        let crate::Lexer::TokKind::Ident(name) = &token.kind else {
+            continue;
+        };
+        let previous = index.checked_sub(1).and_then(|position| tokens.get(position));
+        let next = tokens.get(index + 1);
+        if previous.is_some_and(|token| declaration_keyword(&token.kind))
+            || matches!(
+                previous.map(|token| &token.kind),
+                Some(crate::Lexer::TokKind::ColonColon)
+                    | Some(crate::Lexer::TokKind::ColonEq)
+            )
+            || matches!(
+                next.map(|token| &token.kind),
+                Some(crate::Lexer::TokKind::Colon)
+            )
+        {
+            declared.insert(name.clone());
+        }
+    }
+
+    let references = tokens
+        .iter()
+        .enumerate()
+        .filter_map(|(index, token)| {
+            let crate::Lexer::TokKind::Ident(name) = &token.kind else {
+                return None;
+            };
+            let previous = index.checked_sub(1).and_then(|position| tokens.get(position));
+            if declared.contains(name)
+                || ignored.contains(name)
+                || matches!(
+                    previous.map(|token| &token.kind),
+                    Some(crate::Lexer::TokKind::Dot)
+                )
+            {
+                None
+            } else {
+                Some(name.clone())
+            }
+        })
+        .collect();
+    (declared, references)
 }
 
 fn fill_csprng(out: &mut [u8]) {
@@ -534,6 +829,11 @@ fn notebook_from_json(json: &CanonicalJson) -> Result<JetNotebook, String> {
             }
         }
     }
+    let dependency_ids: Vec<_> = nb.cells.iter().map(|cell| cell.id.clone()).collect();
+    for cell_id in dependency_ids {
+        nb.dependency_order(&cell_id)?;
+    }
+
     if let Some(cache_value) = root.get("output_cache") {
         let CanonicalJson::Object(cache) = cache_value else {
             return Err("jetnb `output_cache` must be an object".into());
@@ -807,6 +1107,7 @@ pub fn merge_by_id(base: &JetNotebook, theirs: &JetNotebook) -> JetNotebook {
             .entry(k.clone())
             .or_insert_with(|| v.clone());
     }
+    let _ = out.refresh_dependencies();
     out
 }
 
@@ -908,17 +1209,24 @@ pub fn import_ipynb(text: &str) -> Result<(JetNotebook, LossReport), String> {
     Ok((nb, loss))
 }
 
-fn json_value_to_canonical(value: JSONValue) -> CanonicalJson {
+fn json_value_to_canonical(value: DataTree) -> CanonicalJson {
     match value {
-        JSONValue::Null => CanonicalJson::Null,
-        JSONValue::Bool(value) => CanonicalJson::Bool(value),
-        JSONValue::Number(value) => CanonicalJson::Integer(value.to_string()),
-        JSONValue::Flt(value) => CanonicalJson::String(value.to_string()),
-        JSONValue::String(value) => CanonicalJson::String(value),
-        JSONValue::Array(values) => {
+        DataTree::Null => CanonicalJson::Null,
+        DataTree::Bool(value) => CanonicalJson::Bool(value),
+        DataTree::Int(value) => CanonicalJson::Integer(value.to_string()),
+        DataTree::Float(value) => CanonicalJson::String(value.to_string()),
+        DataTree::Number(value) => CanonicalJson::String(value),
+        DataTree::TypedText(value) | DataTree::Text(value) => CanonicalJson::String(value),
+        DataTree::Bytes(values) => CanonicalJson::Array(
+            values
+                .into_iter()
+                .map(|value| CanonicalJson::Integer(value.to_string()))
+                .collect(),
+        ),
+        DataTree::Array(values) => {
             CanonicalJson::Array(values.into_iter().map(json_value_to_canonical).collect())
         }
-        JSONValue::Object(values) => CanonicalJson::Object(
+        DataTree::Object(values) => CanonicalJson::Object(
             values
                 .into_iter()
                 .map(|(key, value)| (key, json_value_to_canonical(value)))

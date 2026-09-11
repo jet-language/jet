@@ -1,0 +1,49 @@
+{
+  "package": "sentence-transformers/all-MiniLM-L6-v2",
+  "output": "document_embedding",
+  "signatureName": "Embedder",
+  "revision": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+  "license": "Apache-2.0",
+  "artifacts": {
+    "graph": {
+      "path": "onnx/model.onnx",
+      "sha256": "6fd5d72fe4589f189f8ebc006442dbb529bb7ce38f8082112682524616046452"
+    },
+    "weights": {
+      "path": "onnx/model.onnx",
+      "sha256": "6fd5d72fe4589f189f8ebc006442dbb529bb7ce38f8082112682524616046452"
+    },
+    "tokenizer": {
+      "path": "tokenizer.json",
+      "sha256": "be50c3628f2bf5bb5e3a7f17b1f74611b2561a3a27eeab05e5aa30f411572037"
+    }
+  },
+  "tokenizer": {
+    "vocabulary": "vocab.txt",
+    "sha256": "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3",
+    "sequence_length": 128,
+    "special_tokens": ["[CLS]", "[SEP]", "[PAD]"],
+    "lowercase": true
+  },
+  "contract": {
+    "inputs": [
+      {"name": "input_ids", "dtype": "i64", "shape": [{"name": "batch", "min": 1, "max": 1}, {"name": "tokens", "min": 1, "max": 128}]},
+      {"name": "attention_mask", "dtype": "i64", "shape": [{"name": "batch", "min": 1, "max": 1}, {"name": "tokens", "min": 1, "max": 128}]},
+      {"name": "token_type_ids", "dtype": "i64", "shape": [{"name": "batch", "min": 1, "max": 1}, {"name": "tokens", "min": 1, "max": 128}]}
+    ],
+    "outputs": [
+      {"name": "last_hidden_state", "dtype": "f32", "shape": [{"name": "batch", "min": 1, "max": 1}, {"name": "tokens", "min": 1, "max": 128}, 384]}
+    ],
+    "provider": "onnxruntime@1.29.0",
+    "custom_operators": false,
+    "max_context": 128,
+    "max_batch": 1,
+    "max_buffer_bytes": 1048576
+  },
+  "preprocessing": "BERT WordPiece tokenizer.json; lowercase; [CLS]/[SEP]/[PAD]; token_type_ids=0",
+  "pooling": "masked_mean(last_hidden_state, attention_mask)",
+  "normalization": "l2",
+  "output_meaning": "per-token transformer hidden states pooled by the attention mask into a document embedding",
+  "metric": "cosine",
+  "operators": ["Add", "Cast", "Concat", "Constant", "ConstantOfShape", "Div", "Equal", "Erf", "Expand", "Gather", "MatMul", "Mul", "Pow", "ReduceMean", "Reshape", "Shape", "Slice", "Softmax", "Sqrt", "Sub", "Transpose", "Unsqueeze", "Where"]
+}

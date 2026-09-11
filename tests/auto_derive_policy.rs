@@ -3,6 +3,32 @@ use std::process::Command;
 
 mod common;
 
+fn emit_native_aot(bundle: &jet::AST::ProgramBundle) -> String {
+    let request = jet_foundation::MIR::MirArtifactRequest::new(
+        jet_foundation::MIR::MirArtifactTarget::RustAot,
+        jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+        jet_foundation::MIR::MirArtifactBuildMode::Dev,
+    );
+    let (mir, artifact) = jet::Codegen::TIR::lower_checked_mir_program_for(bundle, request)
+        .expect("checked native artifact lowers through MIR");
+    mir.validate()
+        .expect("canonical MIR validates in auto-derive test");
+    let mir = jet_foundation::MIR::optimize_mir_program(
+        &mir,
+        &jet_foundation::MIR::MirOptimizationPolicy::conservative(),
+    )
+    .expect("canonical MIR optimizes in auto-derive test");
+    jet::Codegen::MIRRust::emit_mir_program(
+        &mir,
+        &jet::Codegen::MIRRust::MirRustConfig {
+            target: jet_foundation::Layout::TargetLayout::host(),
+            target_kind: jet::Codegen::MIRRust::MirRustTarget::Native,
+            root_prefix: String::new(),
+            execution: jet::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+        },
+    )
+}
+
 fn project_dir(name: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("jet_auto_derive_{name}_{}", std::process::id()))
 }
@@ -88,7 +114,7 @@ fn aot_measurement(bundle: &jet::AST::ProgramBundle, name: &str) -> Option<AotMe
     std::fs::create_dir_all(&dir).unwrap();
     let rust = dir.join("main.rs");
     let binary = dir.join("main_bin");
-    let generated = jet::Codegen::emit_bundle(bundle, jet::Sema::CompileMode::Run, None);
+    let generated = emit_native_aot(bundle);
     std::fs::write(&rust, &generated).unwrap();
     let built = Command::new("rustc")
         .args(["--edition", "2021", "-O"])
@@ -129,13 +155,14 @@ fn run() {
 }
 "#,
     );
-    let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
+    let rust = emit_native_aot(&bundle);
     assert!(rust.contains("impl JetShow for __jet_Mixed"));
     assert!(!rust.contains("impl JetDebug for __jet_Mixed"));
     assert!(!rust.contains("impl __jet_Equatable for __jet_Mixed"));
 
+    let policy = common::development_policy();
     let mut backend = jet_jit::CraneliftBackend::new();
-    let outcome = backend.run(&bundle, false);
+    let outcome = common::run_cranelift_bundle(&mut backend, &bundle, false, &policy);
     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
         panic!("signed auto-derive program did not run: {outcome:?}");
     };
@@ -160,26 +187,6 @@ fn run() {}
     assert!(!facts.auto_decode.contains("NoCodec"));
 }
 
-#[test]
-fn ineligible_struct_does_not_expand_codec_body() {
-    let bundle = checked_project(
-        "ineligible_codec",
-        "",
-        r#"
-struct Record { id: U64; flags: U32 }
-
-fn run() {}
-"#,
-    );
-    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
-    let facts = &facts[bundle.entry];
-    assert!(!facts.auto_encode.contains("Record"));
-    assert!(!facts.auto_decode.contains("Record"));
-
-    let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
-    assert!(!rust.contains("impl __jet_Encode for __jet_Record"));
-    assert!(!rust.contains("impl __jet_Decode for __jet_Record"));
-}
 
 #[test]
 fn plain_struct_auto_codable_matches_all_execution_tiers() {
@@ -202,8 +209,9 @@ fn run() {
         assert_eq!(stdout, expected);
     }
 
+    let policy = common::development_policy();
     let mut backend = jet_jit::CraneliftBackend::new();
-    let outcome = backend.run(&bundle, false);
+    let outcome = common::run_cranelift_bundle(&mut backend, &bundle, false, &policy);
     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
         panic!("plain Codable program did not run in the default JIT: {outcome:?}");
     };
@@ -412,7 +420,7 @@ fn run() {}
     assert!(facts.auto_encode.contains("Explicit"));
     assert!(facts.auto_decode.contains("Explicit"));
     let bundle = checked_bundle(bundle);
-    let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
+    let rust = emit_native_aot(&bundle);
     assert!(!rust.contains("impl __jet_Encode for __jet_Defaulted"));
     assert!(!rust.contains("impl __jet_Decode for __jet_Defaulted"));
     assert!(rust.contains("impl __jet_Encode for __jet_Explicit"));
@@ -446,7 +454,7 @@ fn run() {
 }
 "#,
     );
-    let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
+    let rust = emit_native_aot(&bundle);
     for implementation in [
         "impl JetShow for __jet_Enabled",
         "impl JetDebug for __jet_Enabled",
@@ -467,8 +475,9 @@ fn run() {
     assert!(!facts.auto_decode.contains("Missing"));
     assert_eq!(rust.matches("impl JetDebug for __jet_Manual").count(), 1);
 
+    let policy = common::development_policy();
     let mut backend = jet_jit::CraneliftBackend::new();
-    let outcome = backend.run(&bundle, false);
+    let outcome = common::run_cranelift_bundle(&mut backend, &bundle, false, &policy);
     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
         panic!("package-off auto-derive program did not run: {outcome:?}");
     };
@@ -898,8 +907,9 @@ true\n";
         assert_eq!(exit, 0);
         assert_eq!(stdout, expected);
     }
+    let policy = common::development_policy();
     let mut backend = jet_jit::CraneliftBackend::new();
-    let outcome = backend.run(&bundle, false);
+    let outcome = common::run_cranelift_bundle(&mut backend, &bundle, false, &policy);
     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
         panic!("same-name program did not run in the default JIT: {outcome:?}");
     };

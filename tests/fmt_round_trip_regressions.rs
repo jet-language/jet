@@ -154,7 +154,7 @@ fn inline_module_struct_heads_round_trip() {
 #[test]
 fn effect_arrows_round_trip_beside_foreign_bodies() {
     let source = r#"#Import module c.demo {
-    fn probe(value: Int) Int = "probe";
+    fn probe(value: Int) Int = "probe"
 }
 
 fn run() Int -[IO]> {

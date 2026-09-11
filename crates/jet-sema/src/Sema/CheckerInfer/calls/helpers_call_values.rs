@@ -247,6 +247,9 @@ impl<'a> Checker<'a> {
                 is_must_use: false,
                 is_c_abi: false,
                 c_abi_name: None,
+                callback_transport: None,
+                callback_plan_digest: None,
+                callback_identity: None,
                 foreign_effect_root: None,
                 undo: None,
                 param_info: (0..params.len())
@@ -359,13 +362,12 @@ impl<'a> Checker<'a> {
                     if boxes_as_trait {
                         self.note_move_if_direct_ident(&arg.expr);
                     }
-                    let type_mismatch = if matches!(param_ty, Type::Fn { .. })
-                        && matches!(&got, Type::Fn { .. })
-                    {
-                        !callable_compatible
-                    } else {
-                        got != *param_ty
-                    };
+                    let type_mismatch =
+                        if matches!(param_ty, Type::Fn { .. }) && matches!(&got, Type::Fn { .. }) {
+                            !callable_compatible
+                        } else {
+                            got != *param_ty
+                        };
                     if type_mismatch && !boxes_as_trait {
                         self.diags.push(Diagnostic::error(
                             "E0112",

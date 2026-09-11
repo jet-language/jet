@@ -15,7 +15,12 @@ titles or card ids only — do not create cards unless asked).
 Search live specs, examples, stdlib, and CLI surfaces. Prefer
 `scripts/agent/jet-env` and `rg` over memory.
 
+Before running, read `.agents/skills/_shared/audit-dispositions.md`. It owns
+shared publication, workflow-boundary, and disposition mechanics; this method
+still owns the surface question, evidence, micro sweep, and stopping rule.
+
 ## The standing lens
+
 
 Apply `.agents/skills/_shared/standing-lens.md` in full: the four questions, the
 five agent-optimality quantities, the micro sweep, probe the running binary, and
@@ -44,18 +49,10 @@ agent to drive, which is the machine-facing half of I8.
 
 ## Output
 
-Write one markdown report under `docs/audits/` via the Tower CLI (never hand-edit board JSON):
-
-```
-node plugins/tower/tower.mjs docs add --section audits --id <skill>-YYYY-MM-DD --title "…" --file -
-```
-
-Or `docs update docs/audits/<skill>-YYYY-MM-DD.md --file -` for the same day only when the owner asks to revise that run.
-Never overwrite a different day's note. Do not write reports under `docs/plans/`.
-
-Follow `AGENTS.md`. Pick this skill alone — do not chain other audit/research
-skills unless the owner asks.
-
-Before close, add the required per-finding disposition table from
-`.agents/skills/_shared/audit-dispositions.md`. Every finding must name a Tower
-card, a ratified decision, or a concrete no-action reason.
+This is a report-only method. Write one markdown report under `docs/audits/`
+through the project-approved non-serve CLI. Do not create Tower work or
+implementation edits unless the owner explicitly asks. Read
+`.agents/skills/_shared/audit-dispositions.md` before the run and use it for
+publication rules and the required finding-disposition table. Keep this
+method's concrete next actions as ballot titles or card IDs; do not create them
+in this run.

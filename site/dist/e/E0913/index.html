@@ -34,25 +34,25 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for E0913</p>
+<p class="diag-copy fix" data-registry-field="fix">Add the missing associated type to the trait implementation.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0913</code>: <code>tests/ui/missing_assoc_type.stderr</code>.</p>
-<pre class="diag">Error [E0106]: the name `Tally` is built in and can&#39;t be redefined
+<pre class="diag">Error [E0106]: The name `Tally` is built in and can&#39;t be redefined
   --&gt; tests/ui/missing_assoc_type.jet:6:8
     |
   6 | struct Tally {
     |        ^^^^^
  Why: `Tally` is provided by the language itself
- Fix: choose a different name for this struct
+ Fix: Choose a different name for this struct
 More: jet-lang.dev/e/E0106
 
-Error [E0301]: `impl Tally` names a type that doesn&#39;t exist
+Error [E0301]: `impl Tally.Container` needs a user-defined type
   --&gt; tests/ui/missing_assoc_type.jet:10:6
     |
  10 | impl Tally.Container {
     |      ^^^^^
- Why: `Tally` hasn&#39;t been defined as a struct or enum
- Fix: define `struct Tally` or `enum Tally` first
+ Why: `Tally` is built in, and an `impl` only extends a struct, enum, or distinct type declared by your program
+ Fix: Implement `Container` on a struct or distinct type of your own, or wrap `Tally` in one
 More: jet-lang.dev/e/E0301
 
 Error [E0913]: `impl …: Container` doesn&#39;t set `type Item`
@@ -61,16 +61,16 @@ Error [E0913]: `impl …: Container` doesn&#39;t set `type Item`
  10 | impl Tally.Container {
     |      ^^^^^
  Why: `Container` declares an associated type each impl must define
- Fix: add `type Item = …` inside the impl block
+ Fix: Add `type Item = …` inside the impl block
 More: jet-lang.dev/e/E0913
 
-Error [E0119]: there&#39;s no type called `Tally`
+Error [E0119]: There&#39;s no type called `Tally`
   --&gt; tests/ui/missing_assoc_type.jet:6:8
     |
   6 | struct Tally {
     |        ^^^^^
- Why: the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
- Fix: check the spelling, or define the struct or enum first
+ Why: The types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
+ Fix: Check the spelling, or define the struct or enum first
 More: jet-lang.dev/e/E0119
 
 Error [E0302]: `.vals` only works on struct and tuple values
@@ -78,8 +78,8 @@ Error [E0302]: `.vals` only works on struct and tuple values
     |
   6 | struct Tally {
     |        ^^^^^
- Why: enums and other values use methods or pattern tests instead
- Fix: use a struct or tuple value before `.vals`
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.vals`
 More: jet-lang.dev/e/E0302
 
 Error [E0302]: `.vals` only works on struct and tuple values
@@ -87,26 +87,8 @@ Error [E0302]: `.vals` only works on struct and tuple values
     |
   6 | struct Tally {
     |        ^^^^^
- Why: enums and other values use methods or pattern tests instead
- Fix: use a struct or tuple value before `.vals`
-More: jet-lang.dev/e/E0302
-
-Error [E0119]: there&#39;s no type called `Tally`
-  --&gt; tests/ui/missing_assoc_type.jet:6:8
-    |
-  6 | struct Tally {
-    |        ^^^^^
- Why: the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
- Fix: check the spelling, or define the struct or enum first
-More: jet-lang.dev/e/E0119
-
-Error [E0302]: `.vals` only works on struct and tuple values
-  --&gt; tests/ui/missing_assoc_type.jet:6:8
-    |
-  6 | struct Tally {
-    |        ^^^^^
- Why: enums and other values use methods or pattern tests instead
- Fix: use a struct or tuple value before `.vals`
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.vals`
 More: jet-lang.dev/e/E0302
 
 Error [E0302]: `.vals` only works on struct and tuple values
@@ -114,8 +96,8 @@ Error [E0302]: `.vals` only works on struct and tuple values
     |
   6 | struct Tally {
     |        ^^^^^
- Why: enums and other values use methods or pattern tests instead
- Fix: use a struct or tuple value before `.vals`
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.vals`
 More: jet-lang.dev/e/E0302
 
 Error [E0302]: `.vals` only works on struct and tuple values
@@ -123,8 +105,8 @@ Error [E0302]: `.vals` only works on struct and tuple values
     |
   6 | struct Tally {
     |        ^^^^^
- Why: enums and other values use methods or pattern tests instead
- Fix: use a struct or tuple value before `.vals`
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.vals`
 More: jet-lang.dev/e/E0302
 
 Error [E0302]: `.vals` only works on struct and tuple values
@@ -132,8 +114,17 @@ Error [E0302]: `.vals` only works on struct and tuple values
     |
   6 | struct Tally {
     |        ^^^^^
- Why: enums and other values use methods or pattern tests instead
- Fix: use a struct or tuple value before `.vals`
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.vals`
+More: jet-lang.dev/e/E0302
+
+Error [E0302]: `.vals` only works on struct and tuple values
+  --&gt; tests/ui/missing_assoc_type.jet:6:8
+    |
+  6 | struct Tally {
+    |        ^^^^^
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.vals`
 More: jet-lang.dev/e/E0302
 
 Error [E0302]: `.vals` only works on struct and tuple values
@@ -141,8 +132,8 @@ Error [E0302]: `.vals` only works on struct and tuple values
     |
  11 |     fn first(self) Int -&gt; self.vals[0]
     |                                ^^^^
- Why: enums and other values use methods or pattern tests instead
- Fix: use a struct or tuple value before `.vals`
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.vals`
 More: jet-lang.dev/e/E0302
 
 Error [E0302]: `.vals` only works on struct and tuple values
@@ -150,8 +141,8 @@ Error [E0302]: `.vals` only works on struct and tuple values
     |
  11 |     fn first(self) Int -&gt; self.vals[0]
     |                                ^^^^
- Why: enums and other values use methods or pattern tests instead
- Fix: use a struct or tuple value before `.vals`
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.vals`
 More: jet-lang.dev/e/E0302
 
 Error [E0302]: `.vals` only works on struct and tuple values
@@ -159,35 +150,17 @@ Error [E0302]: `.vals` only works on struct and tuple values
     |
   6 | struct Tally {
     |        ^^^^^
- Why: enums and other values use methods or pattern tests instead
- Fix: use a struct or tuple value before `.vals`
+ Why: Enums and other values use methods or pattern tests instead
+ Fix: Use a struct or tuple value before `.vals`
 More: jet-lang.dev/e/E0302
 
-Error [E0302]: `.vals` only works on struct and tuple values
+Error [E0119]: There&#39;s no type called `Tally`
   --&gt; tests/ui/missing_assoc_type.jet:6:8
     |
   6 | struct Tally {
     |        ^^^^^
- Why: enums and other values use methods or pattern tests instead
- Fix: use a struct or tuple value before `.vals`
-More: jet-lang.dev/e/E0302
-
-Error [E0119]: there&#39;s no type called `Tally`
-  --&gt; tests/ui/missing_assoc_type.jet:6:8
-    |
-  6 | struct Tally {
-    |        ^^^^^
- Why: the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
- Fix: check the spelling, or define the struct or enum first
-More: jet-lang.dev/e/E0119
-
-Error [E0119]: there&#39;s no type called `Tally`
-  --&gt; tests/ui/missing_assoc_type.jet:6:8
-    |
-  6 | struct Tally {
-    |        ^^^^^
- Why: struct literals need a struct type name
- Fix: define the struct first, or check the spelling
+ Why: Struct literals need a struct type name
+ Fix: Define the struct first, or check the spelling
 More: jet-lang.dev/e/E0119
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

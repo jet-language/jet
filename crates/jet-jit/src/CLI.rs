@@ -8,17 +8,18 @@
 #![allow(dead_code)]
 
 use super::Concurrency;
-use crate::Marshal::alloc_string;
-use jet_foundation::CLISchema::{
-    self, CLICommandSchema, CLIDefault, CLIInputSchema, CLIInputShape, CLIValueKind,
+use crate::Marshal::{alloc_string, result_ok};
+use jet_foundation::MIR::{
+    MirArtifactId, MirArtifactTarget, MirCliDefault, MirCliEntry, MirCliInput,
+    MirCliInputShape, MirCliValueKind, MirConstant, MirFunctionId, MirProgram, MirType,
+    MirTypeKind,
 };
-use jet_foundation::AST::{CtValue, Item, ProgramBundle, StructDef, Type};
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicPtr, Ordering};
 
 #[allow(dead_code, unused_imports, clippy::all)]
 mod runtime {
-    use super::{CLIValueKind, Concurrency};
+    use super::{Concurrency, MirCliValueKind};
     use crate::Job::jet_args_source_program_name;
 
     trait JetShow {
@@ -60,14 +61,17 @@ mod runtime {
         short: Option<&str>,
         help: &str,
         meta: &str,
+        default: Option<String>,
         env: Option<&str>,
-        kind: CLIValueKind,
+        required: bool,
+        repeat: bool,
+        kind: MirCliValueKind,
     ) -> Spec {
         let value = match kind {
-            CLIValueKind::Int => JetArgValueKind::Int,
-            CLIValueKind::Float => JetArgValueKind::Float,
-            CLIValueKind::String | CLIValueKind::Path => JetArgValueKind::String,
-            CLIValueKind::Bool => JetArgValueKind::String,
+            MirCliValueKind::Int => JetArgValueKind::Int,
+            MirCliValueKind::Float => JetArgValueKind::Float,
+            MirCliValueKind::String | MirCliValueKind::Path => JetArgValueKind::String,
+            MirCliValueKind::Bool => JetArgValueKind::String,
         };
         Spec(jet_args_option_base(
             spec.0,
@@ -75,10 +79,10 @@ mod runtime {
             short.map(str::to_string),
             &help.to_string(),
             &meta.to_string(),
-            None,
+            default,
             env.map(str::to_string),
-            false,
-            false,
+            required,
+            repeat,
             value,
         ))
     }
@@ -125,6 +129,53 @@ mod runtime {
         jet_args_parse(&spec.0, &argv).map(Parsed)
     }
 
+    pub(super) fn parse_guided(spec: &Spec, argv: &[String]) -> Result<Parsed, String> {
+        let argv = argv.to_vec();
+        jet_args_parse_guided(&spec.0, &argv).map(Parsed)
+    }
+
+    pub(super) fn explicit_names(parsed: &Parsed) -> Vec<String> {
+        parsed
+            .0
+            .explicit_flags
+            .iter()
+            .chain(parsed.0.explicit_options.iter())
+            .cloned()
+            .collect()
+    }
+    pub(super) fn guided_argv(spec: &Spec, argv: &[String]) -> Result<Vec<String>, String> {
+        if !crate::IO::term_prelude::jet_term_stdin_is_terminal()
+            || !crate::IO::term_prelude::jet_term_stderr_is_terminal()
+            || crate::IO::term_prelude::jet_term_machine_output()
+            || std::env::var_os("CI").is_some()
+        {
+            return Ok(argv.to_vec());
+        }
+        let input = argv.to_vec();
+        jet_args_guided_argv_with(&spec.0, &input, |field, initial, error| {
+            let mut prompt = if field.help.is_empty() {
+                format!("{}:", field.name)
+            } else {
+                format!("{} — {}:", field.name, field.help)
+            };
+            if !initial.is_empty() {
+                prompt.push_str(&format!(" [{}]", initial));
+            }
+            if let Some(error) = error {
+                prompt.push_str(&format!(" Correction: {error}"));
+            }
+            prompt.push(' ');
+            crate::runtime_host::write_jit_stderr(&prompt, true)?;
+            match crate::IO::term_prelude::jet_term_read_stdin_line() {
+                Ok(crate::IO::term_prelude::JetTermRead::Line(value)) => Ok(value),
+                Ok(crate::IO::term_prelude::JetTermRead::EndOfInput) => {
+                    Err("guided input ended before the form was submitted".to_string())
+                }
+                Err(error) => Err(format!("guided input could not read stdin: {error}")),
+            }
+        })
+    }
+
     pub(super) fn help_text(spec: &Spec) -> String {
         spec.0.help()
     }
@@ -135,6 +186,10 @@ mod runtime {
 
     pub(super) fn option_val(parsed: &Parsed, name: &str) -> Option<String> {
         jet_parsed_option(&parsed.0, &name.to_string()).ok()
+    }
+
+    pub(super) fn option_values(parsed: &Parsed, name: &str) -> Vec<String> {
+        jet_parsed_options(&parsed.0, &name.to_string())
     }
 
     pub(super) fn standard_log_level(parsed: &Parsed) -> String {
@@ -153,8 +208,9 @@ mod runtime {
 use crate::Job::{jet_args_source_program_name, jet_cli_banner};
 
 use runtime::{
-    empty_spec, flag, flag_set, flag_short, help_text, option, option_val, parse, positional,
-    standard_color_mode, standard_log_level, Parsed, Spec,
+    empty_spec, explicit_names, flag, flag_set, flag_short, help_text, option, option_val,
+    option_values, parse, parse_guided, positional, standard_color_mode, standard_log_level, Parsed,
+    Spec,
 };
 
 mod inline_range_semantics {
@@ -170,25 +226,25 @@ fn apply_standard_cli(parsed: &Parsed, standard: bool) {
 }
 #[derive(Clone)]
 pub(crate) struct CLIPlan {
-    pub schema: CLICommandSchema,
-    /// Field types for the entry struct, or the direct `run` parameters.
-    pub field_types: Vec<(String, Type)>,
-    /// Canonical callable members. Function names are TIR keys; method
-    /// commands carry the root record as their first ABI argument.
+    pub schema: MirCliEntry,
+    pub version: Option<String>,
+    /// Field types for the entry record, or the direct `run` parameters.
+    pub field_types: Vec<(String, MirType)>,
+    /// Canonical callable members. Stable MIR function IDs are resolved to
+    /// native pointers only after the artifact has been compiled.
     pub commands: Vec<CLICommandPlan>,
     /// The CLI frame passed to the `run` adapter is already the entry record.
     pub run_record: bool,
     /// The typed entry's ABI carries a non-unit return value.
     pub run_returns_value: bool,
-    pub user_run: String,
+    pub user_run: MirFunctionId,
 }
 
 #[derive(Clone)]
 pub(crate) struct CLICommandPlan {
     pub name: String,
-    pub function: String,
+    pub function: MirFunctionId,
     pub method: bool,
-    pub arg_types: Vec<Type>,
     pub ptr: Option<*const u8>,
 }
 
@@ -210,8 +266,7 @@ pub(crate) fn install_cli_plan(plan: CLIPlan) {
 pub(crate) fn install_cli_run_ptr(ptr: *const u8) {
     CLI_RUN_PTR.store(ptr as *mut (), Ordering::SeqCst);
 }
-
-pub(crate) fn install_cli_command_ptr(function: &str, ptr: *const u8) {
+pub(crate) fn install_cli_command_ptr(function: MirFunctionId, ptr: *const u8) {
     CLI_PLAN.with(|slot| {
         let mut plan_slot = slot.borrow_mut();
         let Some(plan) = plan_slot.as_mut() else {
@@ -220,21 +275,21 @@ pub(crate) fn install_cli_command_ptr(function: &str, ptr: *const u8) {
         if let Some(command) = plan
             .commands
             .iter_mut()
-            .find(|command| command.function.as_str() == function)
+            .find(|command| command.function == function)
         {
             command.ptr = Some(ptr);
         }
     });
 }
 
-pub(crate) fn cli_function_targets() -> Vec<String> {
+pub(crate) fn cli_function_targets() -> Vec<MirFunctionId> {
     CLI_PLAN.with(|slot| {
         let plan_slot = slot.borrow();
         let Some(plan) = plan_slot.as_ref() else {
             return Vec::new();
         };
-        let mut targets = vec![plan.user_run.clone()];
-        targets.extend(plan.commands.iter().map(|command| command.function.clone()));
+        let mut targets = vec![plan.user_run];
+        targets.extend(plan.commands.iter().map(|command| command.function));
         targets.sort();
         targets.dedup();
         targets
@@ -248,194 +303,76 @@ pub(crate) fn cli_run_requires_adapter() -> bool {
 pub(crate) fn cli_run_frame_is_value() -> bool {
     CLI_PLAN.with(|slot| slot.borrow().as_ref().is_some_and(|plan| plan.run_record))
 }
-
-pub(crate) fn prepare_cli_from_bundle(bundle: &ProgramBundle) {
-    clear_cli_plan();
-    let Some(module) = bundle.modules.get(bundle.entry) else {
-        return;
-    };
-    let Some(cli_module) = CLISchema::entry_type_module(bundle) else {
-        return;
-    };
-    let Some(schema) = CLISchema::entry_schema_for_bundle(bundle) else {
-        return;
-    };
-    let Some(cli_items) = bundle
-        .modules
-        .get(cli_module)
-        .map(|module| module.items.as_slice())
-    else {
-        return;
-    };
-    let entry_leaf = schema
-        .entry_type
-        .rsplit('.')
-        .next()
-        .unwrap_or(&schema.entry_type);
-    let type_identity = (!CLISchema::is_direct_run_entry(&bundle.modules[bundle.entry].items))
-        .then(|| {
-            if cli_module == bundle.entry {
-                Some(entry_leaf.to_string())
-            } else {
-                bundle
-                    .name_ledger
-                    .module_identity(cli_module)
-                    .map(|owner| format!("{owner}::{entry_leaf}"))
-            }
-        })
-        .flatten();
-    if let Some(mut plan) =
-        cli_plan_from_schema(schema, &module.items, cli_items, type_identity.as_deref())
-    {
-        if let Some(output) = module.items.iter().find_map(|item| match item {
-            Item::Const(value) => value
-                .resolved_output
-                .as_ref()
-                .filter(|output| output.selected && output.params.len() == 1),
-            _ => None,
-        }) {
-            plan.user_run = output.lowered_name.clone();
-            plan.run_returns_value = !matches!(
-                output.failure_contract().effective_type(),
-                Type::Named(name) if name == jet_foundation::Syntax::INTERNAL_UNIT_TYPE
-            );
-        }
-        install_cli_plan(plan);
-    }
+pub(crate) fn cli_user_run_target() -> Option<MirFunctionId> {
+    CLI_PLAN.with(|slot| slot.borrow().as_ref().map(|plan| plan.user_run))
 }
 
-pub(crate) fn cli_plan_from_items(items: &[Item]) -> Option<CLIPlan> {
-    let schema = CLISchema::entry_schema(items)?;
-    cli_plan_from_schema(schema, items, items, None)
-}
-
-fn cli_plan_from_schema(
-    schema: CLICommandSchema,
-    entry_items: &[Item],
-    cli_items: &[Item],
-    type_identity: Option<&str>,
-) -> Option<CLIPlan> {
-    let entry = schema.entry_type.clone();
-    let run_returns_value = cli_run_returns_value(entry_items);
-    let entry_leaf = entry.rsplit('.').next().unwrap_or(&entry);
-    if !schema.commands.is_empty() {
-        return cli_plan_from_struct_schema(
-            schema,
-            entry_items,
-            cli_items,
-            entry_leaf,
-            type_identity,
-            run_returns_value,
-        );
-    }
-    if entry_leaf == "run" && CLISchema::is_direct_run_entry(entry_items) {
-        let function = entry_items.iter().find_map(|item| match item {
-            Item::Func(function) if function.name == "run" => Some(function),
-            _ => None,
-        })?;
-        let field_types = function
-            .params
-            .iter()
-            .filter(|param| param.name != jet_foundation::Syntax::KW_SELF)
-            .map(|param| (param.name.clone(), param.ty.clone()))
-            .collect();
-        return Some(CLIPlan {
-            schema,
-            field_types,
-            commands: Vec::new(),
-            run_record: false,
-            run_returns_value,
-            user_run: "run".to_string(),
-        });
-    }
-    cli_plan_from_struct_schema(
-        schema,
-        entry_items,
-        cli_items,
-        entry_leaf,
-        type_identity,
-        run_returns_value,
-    )
-}
-
-fn cli_plan_from_struct_schema(
-    schema: CLICommandSchema,
-    _entry_items: &[Item],
-    cli_items: &[Item],
-    entry: &str,
-    type_identity: Option<&str>,
-    run_returns_value: bool,
-) -> Option<CLIPlan> {
-    let field_types = struct_fields(cli_items, entry)?;
-    let structure = cli_items.iter().find_map(|item| match item {
-        Item::Struct(structure) if structure.name == entry => Some(structure),
-        _ => None,
-    })?;
-    let function_owner = type_identity.unwrap_or(entry);
-    let commands = schema
-        .commands
-        .iter()
-        .map(|command| {
-            let target = jet_foundation::CLISchema::command_target(
-                structure,
-                command,
-                cli_items,
-                function_owner,
-            )?;
-            let method = target.is_method || target.bound_shared;
-            let mut arg_types = if method {
-                vec![Type::Named(function_owner.to_string())]
-            } else {
-                Vec::new()
-            };
-            arg_types.extend(
-                target
-                    .payload_params(&structure.name)
-                    .into_iter()
-                    .map(|param| param.ty),
-            );
-            Some(CLICommandPlan {
-                name: command.name.clone(),
-                function: target.function_name,
-                method,
-                arg_types,
-                ptr: None,
-            })
-        })
-        .collect::<Option<Vec<_>>>()?;
-    Some(CLIPlan {
-        schema,
-        field_types,
-        commands,
-        run_record: true,
-        run_returns_value,
-        user_run: "run".to_string(),
+pub(crate) fn cli_command_targets() -> Vec<MirFunctionId> {
+    CLI_PLAN.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map(|plan| plan.commands.iter().map(|command| command.function).collect())
+            .unwrap_or_default()
     })
 }
 
-fn cli_run_returns_value(items: &[Item]) -> bool {
-    match items.iter().find_map(|item| match item {
-        Item::Func(function) if function.name == "run" => function.return_type.as_ref(),
-        _ => None,
-    }) {
-        Some(Type::Named(name)) if name == "Unit" => false,
-        Some(_) => true,
-        None => false,
-    }
-}
 
-fn struct_fields(items: &[Item], name: &str) -> Option<Vec<(String, Type)>> {
-    let s: &StructDef = items.iter().find_map(|item| match item {
-        Item::Struct(s) if s.name == name => Some(s),
-        _ => None,
-    })?;
-    Some(
-        s.fields
-            .iter()
-            .filter(|f| f.computed.is_none())
-            .map(|f| (f.name.clone(), f.ty.clone()))
-            .collect(),
-    )
+/// Install a CLI plan from the exact canonical MIR artifact.
+pub(crate) fn prepare_cli_from_mir(program: &MirProgram, artifact_id: MirArtifactId) {
+    clear_cli_plan();
+    let Some(artifact) = program
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.id == artifact_id)
+    else {
+        return;
+    };
+    if artifact.target != MirArtifactTarget::Cranelift {
+        return;
+    }
+    let Some(entry) = artifact.entry.as_ref() else {
+        return;
+    };
+    let Some(cli) = entry.cli.clone() else {
+        return;
+    };
+    let Some(user_run) = entry.function else {
+        return;
+    };
+    let Some(run_function) = program.functions.iter().find(|function| function.id == user_run)
+    else {
+        return;
+    };
+    let field_types = cli
+        .inputs
+        .iter()
+        .map(|input| (input.name.clone(), input.ty.clone()))
+        .collect();
+    let commands = cli
+        .commands
+        .iter()
+        .map(|command| CLICommandPlan {
+            name: command.name.clone(),
+            function: command.function,
+            method: command.receiver.is_some(),
+            ptr: None,
+        })
+        .collect();
+    let version = (!entry.package_version.is_empty()).then(|| entry.package_version.clone());
+    install_cli_plan(CLIPlan {
+        schema: cli,
+        version,
+        field_types,
+        commands,
+        run_record: run_function.params.len() == 1
+            && run_function.params[0].ty.identity.is_some_and(|id| {
+                program.types.iter().any(|definition| {
+                    definition.id == id && definition.cli.is_some()
+                })
+            }),
+        run_returns_value: !run_function.return_type.is_unit(),
+        user_run,
+    });
 }
 
 fn alloc_path_record(path: String) -> i64 {
@@ -447,16 +384,64 @@ fn alloc_path_record(path: String) -> i64 {
     })
 }
 
+fn cli_value_kind(input: &MirCliInput) -> MirCliValueKind {
+    match &input.shape {
+        MirCliInputShape::Flag => MirCliValueKind::Bool,
+        MirCliInputShape::Value { kind, .. } => *kind,
+    }
+}
+
 fn build_spec(
-    inputs: &[CLIInputSchema],
+    inputs: &[MirCliInput],
     description: Option<&str>,
     standard: bool,
     version: Option<&str>,
     prog: &str,
-) -> Spec {
+) -> Result<Spec, String> {
     let mut spec = empty_spec(&jet_args_source_program_name(prog));
     if let Some(description) = description {
         spec = runtime::description(spec, description);
+    }
+    for input in inputs {
+        let flag_name = input.name.clone();
+        let help = input.help.clone();
+        match &input.shape {
+            MirCliInputShape::Flag => {
+                spec = match &input.short {
+                    Some(short) => flag_short(spec, &flag_name, short, &help),
+                    None => flag(spec, &flag_name, &help),
+                };
+            }
+            MirCliInputShape::Value {
+                default,
+                optional,
+                ..
+            } => {
+                let meta = input
+                    .metavar
+                    .clone()
+                    .unwrap_or_else(|| "VALUE".to_string());
+                let has_declared_default = default.is_some();
+                let default = input_default_text(input)?;
+                let required =
+                    !optional && !has_declared_default && input.positional.is_none();
+                spec = option(
+                    spec,
+                    &flag_name,
+                    input.short.as_deref(),
+                    &help,
+                    &meta,
+                    default,
+                    input.env.as_deref(),
+                    required,
+                    input.variadic,
+                    cli_value_kind(input),
+                );
+                if input.positional.is_some() {
+                    spec = positional(spec, &flag_name, &help);
+                }
+            }
+        }
     }
     if standard {
         spec = flag_short(spec, "verbose", "v", "print extra detail");
@@ -472,44 +457,21 @@ fn build_spec(
             spec = runtime::version(spec, version);
         }
     }
-    for input in inputs {
-        let flag_name = input.flag.clone();
-        let help = input.builder_help();
-        match &input.shape {
-            CLIInputShape::Flag => {
-                spec = match &input.short {
-                    Some(short) => flag_short(spec, &flag_name, short, &help),
-                    None => flag(spec, &flag_name, &help),
-                };
-            }
-            CLIInputShape::Value { .. } => {
-                let meta = input.metavar.clone().unwrap_or_else(|| "VALUE".to_string());
-                spec = option(
-                    spec,
-                    &flag_name,
-                    input.short.as_deref(),
-                    &help,
-                    &meta,
-                    input.env.as_deref(),
-                    input.value_kind(),
-                );
-                if input.positional.is_some() {
-                    spec = positional(spec, &flag_name, &help);
-                }
-            }
-        }
-    }
-    spec
+    Ok(spec)
 }
 
-fn build_command_spec(schema: &CLICommandSchema, prog: &str) -> (Spec, Vec<(String, Spec)>) {
+fn build_command_spec(
+    schema: &MirCliEntry,
+    version: Option<&str>,
+    prog: &str,
+) -> Result<(Spec, Vec<(String, Spec)>), String> {
     let mut root = build_spec(
         &schema.inputs,
         schema.description.as_deref(),
         schema.standard,
-        schema.version.as_deref(),
+        version,
         prog,
-    );
+    )?;
     let mut commands = Vec::new();
     for command in &schema.commands {
         let nested_prog = format!("{} {}", jet_args_source_program_name(prog), command.name);
@@ -519,7 +481,7 @@ fn build_command_spec(schema: &CLICommandSchema, prog: &str) -> (Spec, Vec<(Stri
             false,
             None,
             &nested_prog,
-        );
+        )?;
         root = runtime::subcommand_spec(
             root,
             &command.name,
@@ -528,12 +490,171 @@ fn build_command_spec(schema: &CLICommandSchema, prog: &str) -> (Spec, Vec<(Stri
         );
         commands.push((command.name.clone(), nested));
     }
-    (root, commands)
+    Ok((root, commands))
+}
+
+fn is_path_type(ty: &MirType) -> bool {
+    match &ty.kind {
+        MirTypeKind::Int
+        | MirTypeKind::Float
+        | MirTypeKind::Bool
+        | MirTypeKind::String
+        | MirTypeKind::Char
+        | MirTypeKind::TraitObject(_)
+        | MirTypeKind::Measure(_) => false,
+        MirTypeKind::List(inner)
+        | MirTypeKind::Shared(inner)
+        | MirTypeKind::Option(inner)
+        | MirTypeKind::InlineRange { base: inner, .. }
+        | MirTypeKind::Tagged { inner, .. }
+        | MirTypeKind::Quantity { base: inner, .. } => is_path_type(inner),
+        MirTypeKind::Map { .. }
+        | MirTypeKind::Result { .. }
+        | MirTypeKind::Fn(_)
+        | MirTypeKind::SendFn { .. }
+        | MirTypeKind::Tuple(_)
+        | MirTypeKind::FixedList { .. }
+        | MirTypeKind::IntN { .. }
+        | MirTypeKind::Float32
+        | MirTypeKind::Union(_) => false,
+        MirTypeKind::Apply { name, .. } => {
+            name.name == jet_foundation::Syntax::TYPE_PATH
+        }
+    }
+}
+
+fn inline_range_bounds(ty: &MirType) -> Option<(i64, i64)> {
+    match &ty.kind {
+        MirTypeKind::InlineRange { lo, hi, .. } => Some((*lo, *hi)),
+        MirTypeKind::Tagged { inner, .. } | MirTypeKind::Quantity { base: inner, .. } => {
+            inline_range_bounds(inner)
+        }
+        MirTypeKind::Int
+        | MirTypeKind::Float
+        | MirTypeKind::Bool
+        | MirTypeKind::String
+        | MirTypeKind::Char
+        | MirTypeKind::List(_)
+        | MirTypeKind::Map { .. }
+        | MirTypeKind::Shared(_)
+        | MirTypeKind::Option(_)
+        | MirTypeKind::Result { .. }
+        | MirTypeKind::Fn(_)
+        | MirTypeKind::SendFn { .. }
+        | MirTypeKind::Apply { .. }
+        | MirTypeKind::TraitObject(_)
+        | MirTypeKind::Tuple(_)
+        | MirTypeKind::FixedList { .. }
+        | MirTypeKind::IntN { .. }
+        | MirTypeKind::Float32
+        | MirTypeKind::Union(_)
+        | MirTypeKind::Measure(_) => None,
+    }
+}
+
+fn constant_text(value: &MirConstant) -> Result<String, String> {
+    match value {
+        MirConstant::Int { value, .. } => Ok(value.to_string()),
+        MirConstant::Float { value, .. } => Ok(value.to_string()),
+        MirConstant::Bool(value) => Ok(value.to_string()),
+        MirConstant::Char(value) => Ok(value.to_string()),
+        MirConstant::String(value) => Ok(value.clone()),
+        MirConstant::Bytes(_) => Err("byte defaults are not valid CLI scalars".to_string()),
+        MirConstant::Unit => Err("unit defaults are not valid CLI scalars".to_string()),
+        MirConstant::BigInt(value) => Ok(value.clone()),
+        MirConstant::List(_) => Err("list defaults are not valid CLI scalars".to_string()),
+        MirConstant::Map(_) => Err("map defaults are not valid CLI scalars".to_string()),
+        MirConstant::Struct { .. } => {
+            Err("struct defaults are not valid CLI scalars".to_string())
+        }
+        MirConstant::Enum { .. } => Err("enum defaults are not valid CLI scalars".to_string()),
+        MirConstant::Present(value) => constant_text(value),
+        MirConstant::Failed(report) => match report {
+            jet_foundation::MIR::MirConstReport::Clean(_) => {
+                Err("failed defaults are not valid CLI scalars".to_string())
+            }
+            jet_foundation::MIR::MirConstReport::Told(value) => constant_text(value),
+        },
+    }
+}
+
+fn default_text(default: Option<&MirCliDefault>) -> Result<Option<String>, String> {
+    match default {
+        None => Ok(None),
+        Some(MirCliDefault::TypeDefault) => Ok(None),
+        Some(MirCliDefault::Value(value)) => constant_text(value).map(Some),
+    }
+}
+
+fn type_default_text(ty: &MirType) -> Option<String> {
+    if let Some((lo, _)) = inline_range_bounds(ty) {
+        return Some(lo.to_string());
+    }
+    if ty.is_bool() {
+        return Some("false".to_string());
+    }
+    if ty.is_integer() || ty.is_float() {
+        return Some("0".to_string());
+    }
+    if ty.is_string() || is_path_type(ty) {
+        return Some(String::new());
+    }
+    None
+}
+
+fn input_default_text(input: &MirCliInput) -> Result<Option<String>, String> {
+    let MirCliInputShape::Value { default, .. } = &input.shape else {
+        return Ok(None);
+    };
+    match default {
+        Some(MirCliDefault::TypeDefault) => Ok(type_default_text(&input.ty)),
+        Some(MirCliDefault::Value(value)) => constant_text(value).map(Some),
+        None => Ok(None),
+    }
+}
+
+fn required_input_value(
+    input: &MirCliInput,
+    fty: &MirType,
+    parsed: &Parsed,
+    spec: &Spec,
+) -> Result<String, String> {
+    if let Some(value) = option_val(parsed, &input.name) {
+        return Ok(value);
+    }
+    if let MirCliInputShape::Value { default, .. } = &input.shape {
+        if let Some(value) = default_text(default.as_ref())? {
+            return Ok(value);
+        }
+        if matches!(default, Some(MirCliDefault::TypeDefault)) {
+            if let Some(value) = type_default_text(fty) {
+                return Ok(value);
+            }
+        }
+    }
+    let kind = if input.positional.is_some() {
+        "argument"
+    } else {
+        "flag"
+    };
+    Err(format!(
+        "missing required {kind} {}\n\n{}",
+        input.name,
+        help_text(spec)
+    ))
+}
+
+fn parse_bool(text: &str, name: &str) -> Result<bool, String> {
+    match text.to_ascii_lowercase().as_str() {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(format!("invalid bool for --{name}")),
+    }
 }
 
 fn decode_struct(
-    inputs: &[CLIInputSchema],
-    field_types: &[(String, Type)],
+    inputs: &[MirCliInput],
+    field_types: &[(String, MirType)],
     parsed: &Parsed,
     spec: &Spec,
 ) -> Result<i64, String> {
@@ -541,8 +662,8 @@ fn decode_struct(
 }
 
 fn decode_frame(
-    inputs: &[CLIInputSchema],
-    field_types: &[(String, Type)],
+    inputs: &[MirCliInput],
+    field_types: &[(String, MirType)],
     parsed: &Parsed,
     spec: &Spec,
     receiver: Option<i64>,
@@ -558,242 +679,155 @@ fn decode_frame(
     for (idx, (fname, fty)) in field_types.iter().enumerate() {
         let input = inputs
             .iter()
-            .find(|i| i.field == *fname)
+            .find(|input| input.name == *fname)
             .ok_or_else(|| format!("missing CLI input for `{fname}`"))?;
-        let flag_name = &input.flag;
-        let bits = match (&input.shape, fty) {
-            (CLIInputShape::Flag, Type::Bool) => i64::from(flag_set(parsed, flag_name)),
-            (
-                CLIInputShape::Value {
-                    kind: CLIValueKind::Bool,
-                    optional: true,
-                    ..
-                },
-                Type::Option(inner),
-            ) if matches!(inner.as_ref(), Type::Bool) => match option_val(parsed, flag_name) {
-                Some(value) => match value.to_ascii_lowercase().as_str() {
-                    "true" => 2,
-                    "false" => 1,
-                    _ => return Err(format!("invalid bool for --{flag_name}")),
-                },
-                None => 0,
-            },
-            (
-                CLIInputShape::Value {
-                    kind: CLIValueKind::Int,
-                    optional: true,
-                    ..
-                },
-                Type::Option(inner),
-            ) if matches!(inner.as_ref(), Type::Int) => match option_val(parsed, flag_name) {
-                Some(value) => value
-                    .parse::<i64>()
-                    .map(|value| value.wrapping_add(1))
-                    .map_err(|_| format!("invalid int for --{flag_name}"))?,
-                None => 0,
-            },
-            (
-                CLIInputShape::Value {
-                    kind: CLIValueKind::Float,
-                    optional: true,
-                    ..
-                },
-                Type::Option(inner),
-            ) if matches!(inner.as_ref(), Type::Float) => match option_val(parsed, flag_name) {
-                Some(value) => value
-                    .parse::<f64>()
-                    .map(|value| (value.to_bits() as i64).wrapping_add(1))
-                    .map_err(|_| format!("invalid float for --{flag_name}"))?,
-                None => 0,
-            },
-            (
-                CLIInputShape::Value {
-                    kind: CLIValueKind::Float,
-                    optional: false,
-                    default,
-                },
-                Type::Float,
-            ) => match option_val(parsed, flag_name) {
-                Some(v) => v
-                    .parse::<f64>()
-                    .map(f64::to_bits)
-                    .map(|bits| bits as i64)
-                    .map_err(|_| format!("invalid float for --{flag_name}"))?,
-                None => match default {
-                    Some(CLIDefault::Value(CtValue::Float(value))) => {
-                        value.as_f64().to_bits() as i64
-                    }
-                    Some(CLIDefault::TypeDefault) => 0.0f64.to_bits() as i64,
-                    Some(CLIDefault::Value(other)) => other
-                        .jet_show()
-                        .parse::<f64>()
-                        .map(f64::to_bits)
-                        .map(|bits| bits as i64)
-                        .map_err(|_| format!("bad default for --{flag_name}"))?,
-                    Some(CLIDefault::Recorded(value)) => value
-                        .parse::<f64>()
-                        .map(f64::to_bits)
-                        .map(|bits| bits as i64)
-                        .map_err(|_| format!("bad default for --{flag_name}"))?,
-                    None if input.positional.is_some() => {
-                        return Err(format!(
-                            "missing required argument {flag_name}\n\n{}",
-                            help_text(spec)
-                        ));
-                    }
-                    None => {
-                        return Err(format!(
-                            "missing required flag --{flag_name}\n\n{}",
-                            help_text(spec)
-                        ));
-                    }
-                },
-            },
-            (
-                CLIInputShape::Value {
-                    kind: CLIValueKind::Int,
-                    optional: false,
-                    default,
-                },
-                Type::Int,
-            ) => match option_val(parsed, flag_name) {
-                Some(v) => Concurrency::with_runtime_mut(|rt| rt.heap.int_from_str(v.trim()).ok())
-                    .ok_or_else(|| format!("invalid int for --{flag_name}"))?,
-                None => match default {
-                    Some(CLIDefault::Value(CtValue::Int(n))) => *n,
-                    Some(CLIDefault::TypeDefault) => 0,
-                    Some(CLIDefault::Value(other)) => {
-                        let text = other.jet_show();
-                        Concurrency::with_runtime_mut(|rt| rt.heap.int_from_str(text.trim()).ok())
-                            .ok_or_else(|| format!("bad default for --{flag_name}"))?
-                    }
-                    Some(CLIDefault::Recorded(s)) => {
-                        Concurrency::with_runtime_mut(|rt| rt.heap.int_from_str(s.trim()).ok())
-                            .ok_or_else(|| format!("bad default for --{flag_name}"))?
-                    }
-                    None if input.positional.is_some() => {
-                        return Err(format!(
-                            "missing required argument {flag_name}\n\n{}",
-                            help_text(spec)
-                        ));
-                    }
-                    None => {
-                        return Err(format!(
-                            "missing required flag --{flag_name}\n\n{}",
-                            help_text(spec)
-                        ));
-                    }
-                },
-            },
-            (
-                CLIInputShape::Value {
-                    kind: CLIValueKind::Int,
-                    optional: false,
-                    default,
-                },
-                Type::InlineRange { lo, hi, .. },
-            ) => {
-                let value = match option_val(parsed, flag_name) {
-                    Some(v) => v
-                        .trim()
-                        .parse::<i64>()
-                        .map_err(|_| format!("invalid int for --{flag_name}"))?,
-                    None => match default {
-                        Some(CLIDefault::Value(CtValue::Int(n))) => *n,
-                        Some(CLIDefault::TypeDefault) => *lo,
-                        Some(CLIDefault::Value(other)) => other
-                            .jet_show()
-                            .trim()
-                            .parse::<i64>()
-                            .map_err(|_| format!("bad default for --{flag_name}"))?,
-                        Some(CLIDefault::Recorded(s)) => s
-                            .trim()
-                            .parse::<i64>()
-                            .map_err(|_| format!("bad default for --{flag_name}"))?,
-                        None if input.positional.is_some() => {
-                            return Err(format!(
-                                "missing required argument {flag_name}\n\n{}",
-                                help_text(spec)
-                            ));
-                        }
-                        None => {
-                            return Err(format!(
-                                "missing required flag --{flag_name}\n\n{}",
-                                help_text(spec)
-                            ));
-                        }
-                    },
-                };
-                inline_range_semantics::jet_inline_range_from_int(value, *lo, *hi)
-                    .map_err(|reason| format!("invalid value for --{flag_name}: {reason}"))?
+        let bits = match &input.shape {
+            MirCliInputShape::Flag => {
+                if !fty.is_bool() {
+                    return Err(format!("CLI flag `{}` is not Bool", input.name));
+                }
+                i64::from(flag_set(parsed, &input.name))
             }
-            (
-                CLIInputShape::Value {
-                    kind: CLIValueKind::String | CLIValueKind::Path,
-                    optional: false,
-                    default,
-                },
-                Type::String | Type::Named(_),
-            ) => {
-                let text = match option_val(parsed, flag_name) {
-                    Some(v) => v,
-                    None => match default {
-                        Some(CLIDefault::Value(CtValue::Str(s))) => s.clone(),
-                        Some(CLIDefault::TypeDefault) => String::new(),
-                        Some(CLIDefault::Value(other)) => other.jet_show(),
-                        Some(CLIDefault::Recorded(s)) => s.clone(),
-                        None if input.positional.is_some() => {
-                            return Err(format!(
-                                "missing required argument {flag_name}\n\n{}",
-                                help_text(spec)
-                            ));
+            MirCliInputShape::Value {
+                kind,
+                optional,
+                ..
+            } => {
+                if *optional {
+                    match fty.option_inner() {
+                        Some(inner) if inner.is_bool() && *kind == MirCliValueKind::Bool => {
+                            match option_val(parsed, &input.name) {
+                                Some(value) => i64::from(parse_bool(&value, &input.name)?) + 1,
+                                None => 0,
+                            }
+                        }
+                        Some(inner) if inner.is_integer() && *kind == MirCliValueKind::Int => {
+                            match option_val(parsed, &input.name) {
+                                Some(value) => {
+                                    if let Some((lo, hi)) = inline_range_bounds(inner) {
+                                        let value = value.parse::<i64>().map_err(|_| {
+                                            format!("invalid int for --{}", input.name)
+                                        })?;
+                                        inline_range_semantics::jet_inline_range_from_int(
+                                            value, lo, hi,
+                                        )
+                                        .map(|value| value.wrapping_add(1))
+                                        .map_err(|reason| {
+                                            format!("invalid value for --{}: {reason}", input.name)
+                                        })?
+                                    } else {
+                                        Concurrency::with_runtime_mut(|rt| {
+                                            rt.heap.int_from_str(value.trim()).ok()
+                                        })
+                                        .ok_or_else(|| {
+                                            format!("invalid int for --{}", input.name)
+                                        })?
+                                        .wrapping_add(1)
+                                    }
+                                }
+                                None => 0,
+                            }
+                        }
+                        Some(inner) if inner.is_float() && *kind == MirCliValueKind::Float => {
+                            match option_val(parsed, &input.name) {
+                                Some(value) => value
+                                    .parse::<f64>()
+                                    .map(|value| value.to_bits() as i64 + 1)
+                                    .map_err(|_| {
+                                        format!("invalid float for --{}", input.name)
+                                    })?,
+                                None => 0,
+                            }
+                        }
+                        Some(inner)
+                            if (inner.is_string() || is_path_type(inner))
+                                && matches!(
+                                    kind,
+                                    MirCliValueKind::String | MirCliValueKind::Path
+                                ) =>
+                        {
+                            match option_val(parsed, &input.name) {
+                                Some(value) => {
+                                    let value = if is_path_type(inner) {
+                                        alloc_path_record(value)
+                                    } else {
+                                        alloc_string(value)
+                                    };
+                                    value.wrapping_add(1)
+                                }
+                                None => 0,
+                            }
+                        }
+                        Some(_) => {
+                            return Err(format!("jit CLI decode unsupported field `{fname}`"));
                         }
                         None => {
                             return Err(format!(
-                                "missing required flag --{flag_name}\n\n{}",
-                                help_text(spec)
+                                "optional CLI input `{}` has a non-option MIR type",
+                                input.name
                             ));
                         }
-                    },
-                };
-                if matches!(fty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_PATH) {
-                    alloc_path_record(text)
+                    }
                 } else {
-                    alloc_string(text)
+                    let value = required_input_value(input, fty, parsed, spec)?;
+                    match kind {
+                        MirCliValueKind::Bool => {
+                            if !fty.is_bool() {
+                                return Err(format!("CLI input `{}` is not Bool", input.name));
+                            }
+                            i64::from(parse_bool(&value, &input.name)?)
+                        }
+                        MirCliValueKind::Int => {
+                            if !fty.is_integer() {
+                                return Err(format!("CLI input `{}` is not Int", input.name));
+                            }
+                            if let Some((lo, hi)) = inline_range_bounds(fty) {
+                                let value = value.parse::<i64>().map_err(|_| {
+                                    format!("invalid int for --{}", input.name)
+                                })?;
+                                inline_range_semantics::jet_inline_range_from_int(value, lo, hi)
+                                    .map_err(|reason| {
+                                        format!("invalid value for --{}: {reason}", input.name)
+                                    })?
+                            } else {
+                                Concurrency::with_runtime_mut(|rt| {
+                                    rt.heap.int_from_str(value.trim()).ok()
+                                })
+                                .ok_or_else(|| format!("invalid int for --{}", input.name))?
+                            }
+                        }
+                        MirCliValueKind::Float => {
+                            if !fty.is_float() {
+                                return Err(format!("CLI input `{}` is not Float", input.name));
+                            }
+                            value
+                                .parse::<f64>()
+                                .map(|value| value.to_bits() as i64)
+                                .map_err(|_| format!("invalid float for --{}", input.name))?
+                        }
+                        MirCliValueKind::String | MirCliValueKind::Path => {
+                            if !(fty.is_string() || is_path_type(fty)) {
+                                return Err(format!("CLI input `{}` is not String", input.name));
+                            }
+                            if is_path_type(fty) {
+                                alloc_path_record(value)
+                            } else {
+                                alloc_string(value)
+                            }
+                        }
+                    }
                 }
-            }
-            (
-                CLIInputShape::Value {
-                    kind: CLIValueKind::String | CLIValueKind::Path,
-                    optional: true,
-                    ..
-                },
-                Type::Option(_),
-            ) => match option_val(parsed, flag_name) {
-                Some(v) => {
-                    let value = if matches!(fty, Type::Option(inner) if matches!(inner.as_ref(), Type::Named(name) if name == jet_foundation::Syntax::TYPE_PATH))
-                    {
-                        alloc_path_record(v)
-                    } else {
-                        alloc_string(v)
-                    };
-                    value.wrapping_add(1)
-                }
-                None => 0,
-            },
-            _ => {
-                return Err(format!("jit CLI decode unsupported field `{fname}`"));
             }
         };
         Concurrency::with_runtime_mut(|rt| {
             let index = (idx + offset) as i64;
-            if matches!(fty, Type::Float) {
+            if fty.is_float() {
                 let _ = rt
                     .heap
                     .record_set_float(rec, index, f64::from_bits(bits as u64));
-            } else if matches!(fty, Type::Bool) {
+            } else if fty.is_bool() && fty.option_inner().is_none() {
                 let _ = rt.heap.record_set_bool(rec, index, bits != 0);
-            } else if matches!(fty, Type::String) {
+            } else if fty.is_string() && fty.option_inner().is_none() {
                 let _ = rt.heap.record_set_string(rec, index, bits);
             } else {
                 let _ = rt.heap.record_set_int(rec, index, bits);
@@ -801,6 +835,232 @@ fn decode_frame(
         });
     }
     Ok(rec)
+}
+
+fn typed_cli_tree(
+    inputs: &[MirCliInput],
+    parsed: &Parsed,
+    descriptor: &crate::runtime_host::RuntimeTypeDescriptor,
+) -> Result<crate::Encoding::json_rt::DataTree, Vec<crate::Encoding::json_rt::FieldError>> {
+    let mut fields = Vec::new();
+    for input in inputs {
+        let Some(field) = descriptor.fields.iter().find(|field| {
+            !field.skip
+                && !field.computed
+                && (field.name_for(jet_foundation::Shape::ShapeProjectionKind::Args)
+                    == input.name
+                    || field.source_name == input.label)
+        }) else {
+            return Err(crate::Encoding::json_rt::FieldError::at(
+                input.name.clone(),
+                "checked CLI input has no target record field",
+            ));
+        };
+        let output_name = field
+            .name_for(jet_foundation::Shape::ShapeProjectionKind::Json)
+            .to_string();
+        if fields.iter().any(|(name, _)| name == &output_name) {
+            return Err(crate::Encoding::json_rt::FieldError::at(
+                output_name,
+                "ambiguous duplicate argument shape field",
+            ));
+        }
+        let value = match &input.shape {
+            MirCliInputShape::Flag => {
+                crate::Encoding::json_rt::DataTree::Bool(flag_set(parsed, &input.name))
+            }
+            MirCliInputShape::Value { .. } => {
+                let values = option_values(parsed, &input.name);
+                if values.is_empty() {
+                    continue;
+                }
+                let mut decoded = Vec::with_capacity(values.len());
+                for value in values {
+                    let value = match cli_value_kind(input) {
+                        MirCliValueKind::Bool => match parse_bool(&value, &input.name) {
+                            Ok(value) => crate::Encoding::json_rt::DataTree::Bool(value),
+                            Err(error) => {
+                                return Err(crate::Encoding::json_rt::FieldError::at(
+                                    input.name.clone(),
+                                    error,
+                                ));
+                            }
+                        },
+                        MirCliValueKind::String | MirCliValueKind::Path => {
+                            crate::Encoding::json_rt::DataTree::Text(value)
+                        }
+                        MirCliValueKind::Int => {
+                            if let Some((lo, hi)) = inline_range_bounds(&input.ty) {
+                                let parsed = match value.parse::<i64>() {
+                                    Ok(value) => value,
+                                    Err(_) => {
+                                        return Err(crate::Encoding::json_rt::FieldError::at(
+                                            input.name.clone(),
+                                            format!("expected Int, found {value:?}"),
+                                        ));
+                                    }
+                                };
+                                if let Err(reason) =
+                                    inline_range_semantics::jet_inline_range_from_int(parsed, lo, hi)
+                                {
+                                    return Err(crate::Encoding::json_rt::FieldError::at(
+                                        input.name.clone(),
+                                        reason,
+                                    ));
+                                }
+                            }
+                            match crate::Encoding::json_rt::jet_int_from_str(&value) {
+                                Ok(value) => crate::Encoding::json_rt::DataTree::Int(value),
+                                Err(_) => {
+                                    return Err(crate::Encoding::json_rt::FieldError::at(
+                                        input.name.clone(),
+                                        format!("expected Int, found {value:?}"),
+                                    ));
+                                }
+                            }
+                        }
+                        MirCliValueKind::Float => match value.parse::<f64>() {
+                            Ok(value) => crate::Encoding::json_rt::DataTree::Float(value),
+                            Err(_) => {
+                                return Err(crate::Encoding::json_rt::FieldError::at(
+                                    input.name.clone(),
+                                    format!("expected Float, found {value:?}"),
+                                ));
+                            }
+                        },
+                    };
+                    decoded.push(value);
+                }
+                if input.variadic {
+                    crate::Encoding::json_rt::DataTree::Array(decoded)
+                } else {
+                    decoded
+                        .pop()
+                        .expect("checked CLI option values are non-empty")
+                }
+            }
+        };
+        fields.push((output_name, value));
+    }
+    Ok(crate::Encoding::json_rt::DataTree::Object(fields))
+}
+
+fn typed_cli_descriptor(type_key: &str) -> Option<crate::runtime_host::RuntimeTypeDescriptor> {
+    Concurrency::with_runtime_mut(|rt| {
+        let id = type_key
+            .strip_prefix("id:")
+            .and_then(|value| value.parse::<u64>().ok());
+        match id {
+            Some(id) => rt.runtime_type_descriptor(id).cloned(),
+            None => rt.runtime_type_descriptor_by_name(type_key).cloned(),
+        }
+    })
+}
+
+fn typed_cli_error(error: impl Into<String>) -> i64 {
+    crate::Encoding::result_err_fields(crate::Encoding::json_rt::FieldError::one(error))
+}
+
+pub(crate) fn jet_jit_args_decode(type_key: i64) -> i64 {
+    let Some(type_key) = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(type_key)) else {
+        return typed_cli_error("typed CLI decode received an invalid type key");
+    };
+    let Some(descriptor) = typed_cli_descriptor(&type_key) else {
+        return typed_cli_error(format!("typed CLI decode has no type `{type_key}`"));
+    };
+    let Some(cli) = descriptor.cli.clone() else {
+        return typed_cli_error(format!("type `{type_key}` has no checked CLI schema"));
+    };
+    let argv = jet_codegen::Comptime::runtime_argv().unwrap_or_default();
+    let prog = argv.first().map(String::as_str).unwrap_or("program");
+    let spec = match build_spec(
+        &cli.inputs,
+        cli.description.as_deref(),
+        cli.standard,
+        cli.version.as_deref(),
+        prog,
+    ) {
+        Ok(spec) => spec,
+        Err(error) => return typed_cli_error(error),
+    };
+    let parsed = match parse(&spec, &argv) {
+        Ok(parsed) => parsed,
+        Err(error) => return typed_cli_error(error),
+    };
+    let tree = match typed_cli_tree(&cli.inputs, &parsed, &descriptor) {
+        Ok(tree) => tree,
+        Err(errors) => return crate::Encoding::result_err_fields(errors),
+    };
+    match crate::Encoding::decode_datatree_for_type(&tree, &type_key) {
+        Ok(value) => result_ok(value as u64),
+        Err(errors) => crate::Encoding::result_err_fields(errors),
+    }
+}
+
+pub(crate) fn jet_jit_args_merge(flags: i64, settings: i64, type_key: i64) -> i64 {
+    let Some(type_key) = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(type_key)) else {
+        return typed_cli_error("typed CLI merge received an invalid type key");
+    };
+    let Some(descriptor) = typed_cli_descriptor(&type_key) else {
+        return typed_cli_error(format!("typed CLI merge has no type `{type_key}`"));
+    };
+    let Some(cli) = descriptor.cli.clone() else {
+        return typed_cli_error(format!("type `{type_key}` has no checked CLI schema"));
+    };
+    let argv = jet_codegen::Comptime::runtime_argv().unwrap_or_default();
+    let prog = argv.first().map(String::as_str).unwrap_or("program");
+    let spec = match build_spec(
+        &cli.inputs,
+        cli.description.as_deref(),
+        cli.standard,
+        cli.version.as_deref(),
+        prog,
+    ) {
+        Ok(spec) => spec,
+        Err(error) => return typed_cli_error(error),
+    };
+    let parsed = match parse_guided(&spec, &argv) {
+        Ok(parsed) => parsed,
+        Err(error) => return typed_cli_error(error),
+    };
+    let explicit = explicit_names(&parsed);
+    let Some((mut merged, flag_slots)) = Concurrency::with_runtime_mut(|rt| {
+        Some((
+            rt.heap.clone_record_values(settings)?,
+            rt.heap.clone_record_values(flags)?,
+        ))
+    }) else {
+        return typed_cli_error("typed CLI merge requires record flags and settings");
+    };
+    if merged.len() != flag_slots.len() {
+        return typed_cli_error("typed CLI merge flags/settings record shape mismatch");
+    }
+    for input in &cli.inputs {
+        if !explicit.iter().any(|name| name == &input.name) {
+            continue;
+        }
+        let Some(field) = descriptor.fields.iter().find(|field| {
+            !field.skip
+                && !field.computed
+                && (field.name_for(jet_foundation::Shape::ShapeProjectionKind::Args)
+                    == input.name
+                    || field.source_name == input.label)
+        }) else {
+            return typed_cli_error(format!(
+                "typed CLI merge has no record field `{}`",
+                input.name
+            ));
+        };
+        if field.index >= merged.len() {
+            return typed_cli_error(format!(
+                "typed CLI merge field `{}` is outside its record",
+                input.name
+            ));
+        }
+        merged[field.index] = flag_slots[field.index].clone();
+    }
+    let record = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_record_values(merged));
+    result_ok(record as u64)
 }
 
 fn report_cli_error(error: &str) {
@@ -815,7 +1075,7 @@ fn finish_cli_success() {
 }
 
 fn finish_cli_version(plan: &CLIPlan) {
-    let Some(version) = plan.schema.version.as_deref() else {
+    let Some(version) = plan.version.as_deref() else {
         report_cli_error("jit CLI: standard version metadata missing");
         return;
     };
@@ -855,8 +1115,22 @@ pub(crate) fn jet_jit_cli_main() -> i64 {
 
     let prog = argv.first().map(String::as_str).unwrap_or("program");
     if !plan.commands.is_empty() {
-        let (spec, command_specs) = build_command_spec(&plan.schema, prog);
-        let parsed = match parse(&spec, &argv) {
+        let (spec, command_specs) =
+            match build_command_spec(&plan.schema, plan.version.as_deref(), prog) {
+                Ok(value) => value,
+                Err(error) => {
+                    report_cli_error(&error);
+                    return 0;
+                }
+            };
+        let guided_argv = match runtime::guided_argv(&spec, &argv) {
+            Ok(value) => value,
+            Err(error) => {
+                report_cli_error(&error);
+                return 0;
+            }
+        };
+        let parsed = match parse(&spec, &guided_argv) {
             Ok(p) => p,
             Err(e) => {
                 report_cli_error(&e);
@@ -927,12 +1201,10 @@ pub(crate) fn jet_jit_cli_main() -> i64 {
         } else {
             None
         };
-        let type_offset = usize::from(command.method);
-        let command_types: Vec<(String, Type)> = command_schema
+        let command_types: Vec<(String, MirType)> = command_schema
             .inputs
             .iter()
-            .zip(command.arg_types.iter().skip(type_offset))
-            .map(|(input, ty)| (input.field.clone(), ty.clone()))
+            .map(|input| (input.name.clone(), input.ty.clone()))
             .collect();
         if command_types.len() != command_schema.inputs.len() {
             report_cli_error("jit CLI: command signature/schema mismatch");
@@ -961,15 +1233,27 @@ pub(crate) fn jet_jit_cli_main() -> i64 {
         return call(frame);
     }
 
-    // Struct or parameter-direct typed entry.
-    let spec = build_spec(
+    let spec = match build_spec(
         &plan.schema.inputs,
         plan.schema.description.as_deref(),
         plan.schema.standard,
-        plan.schema.version.as_deref(),
+        plan.version.as_deref(),
         prog,
-    );
-    let parsed = match parse(&spec, &argv) {
+    ) {
+        Ok(spec) => spec,
+        Err(error) => {
+            report_cli_error(&error);
+            return 0;
+        }
+    };
+    let guided_argv = match runtime::guided_argv(&spec, &argv) {
+        Ok(value) => value,
+        Err(error) => {
+            report_cli_error(&error);
+            return 0;
+        }
+    };
+    let parsed = match parse(&spec, &guided_argv) {
         Ok(p) => p,
         Err(e) => {
             report_cli_error(&e);

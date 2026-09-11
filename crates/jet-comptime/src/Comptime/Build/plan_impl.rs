@@ -19,7 +19,8 @@ use super::handles::{
 };
 use super::plan_graph::{
     BuildExecutionEvent, BuildExecutionModel, BuildExecutionNode, BuildExecutionReport,
-    BuildExplanation, BuildGraph, BuildGraphAction, BuildGraphFile, BuildGraphSubject,
+    BuildExplanation, BuildGraph, BuildGraphAction, BuildGraphActionKey, BuildGraphCacheDelta,
+    BuildGraphDiff, BuildGraphFile, BuildGraphFileDelta, BuildGraphKeyDelta, BuildGraphSubject,
     BuildGraphTarget, BuildPlan, CompilerPackageSpec, FileOwnership, RebuildExplanation,
     MAX_ACTIONS,
 };
@@ -607,6 +608,8 @@ impl BuildPlan {
                     legacy_wrapper: action.legacy_wrapper,
                     plugin: action.plugin.map(|plugin| plugin.id),
                     compiler_owned: action.compiler_owned,
+                    key: canonical_action_key(self, action, &[]),
+                    cache_hit: None,
                 })
                 .collect(),
             files: file_index
@@ -620,6 +623,33 @@ impl BuildPlan {
                 .collect(),
             nodes: self.compiler_nodes.clone(),
         }
+    }
+    /// Add execution receipt facts to the canonical graph projection. A plan
+    /// without a report stays static, preserving `None` for unknown cache
+    /// status instead of inventing a miss.
+    pub fn graph_with_execution(
+        &self,
+        execution: Option<&BuildExecutionReport>,
+    ) -> BuildGraph {
+        let mut graph = self.graph();
+        let Some(execution) = execution else {
+            return graph;
+        };
+        let statuses = execution
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                BuildExecutionEvent::Finished { action, outcome } => Some((
+                    *action,
+                    matches!(outcome, ActionOutcome::RestoredFromCache),
+                )),
+                _ => None,
+            })
+            .collect::<BTreeMap<_, _>>();
+        for action in &mut graph.actions {
+            action.cache_hit = statuses.get(&action.id).copied();
+        }
+        graph
     }
 
     pub fn file_ownership(&self, path: impl AsRef<str>) -> FileOwnership {
@@ -726,7 +756,6 @@ impl BuildPlan {
             reason: cache_status_reason(status).to_string(),
         })
     }
-
 
     pub fn execution_model(&self) -> Result<BuildExecutionModel, BuildError> {
         let selected = self.selected_action_ids()?;
@@ -1172,6 +1201,224 @@ impl BuildPlan {
         }
         Ok(facts)
     }
+}
+
+impl BuildGraph {
+    /// Files declared by the checked graph, in canonical path order.
+    ///
+    /// This is the static file universe, not the rebuild-impact closure in
+    /// [`BuildGraphDiff::affected_files`].
+    pub fn affected_files(&self) -> &[BuildGraphFile] {
+        &self.files
+    }
+
+    /// Recipe keys for all actions, ordered by stable action name.
+    pub fn action_keys(&self) -> Vec<BuildGraphActionKey> {
+        let mut keys = self
+            .actions
+            .iter()
+            .map(|action| BuildGraphActionKey {
+                action: action.name.clone(),
+                key: action.key.clone(),
+            })
+            .collect::<Vec<_>>();
+        keys.sort_by(|left, right| left.action.cmp(&right.action));
+        keys
+    }
+
+    /// Return only actions with positive cache evidence.
+    ///
+    /// A static BuildPlan has no execution receipt, so its `cache_hit` values
+    /// are `None`; unknown is intentionally not treated as a miss.
+    pub fn cache_hits(&self) -> Vec<&BuildGraphAction> {
+        let mut hits = self
+            .actions
+            .iter()
+            .filter(|action| action.cache_hit == Some(true))
+            .collect::<Vec<_>>();
+        hits.sort_by(|left, right| left.name.cmp(&right.name));
+        hits
+    }
+
+    /// Compare two checked graph projections without re-reading source files
+    /// or reconstructing commands. `self` is the before graph and `after` is
+    /// the graph being compared.
+    pub fn diff(&self, after: &BuildGraph) -> BuildGraphDiff {
+        let mut paths = BTreeSet::new();
+        paths.extend(self.files.iter().map(|file| file.path.clone()));
+        paths.extend(after.files.iter().map(|file| file.path.clone()));
+
+        let file_deltas = paths
+            .into_iter()
+            .filter_map(|path| {
+                let before_file = self.files.iter().find(|file| file.path == path);
+                let after_file = after.files.iter().find(|file| file.path == path);
+                (file_identity(self, before_file) != file_identity(after, after_file)).then(|| {
+                    BuildGraphFileDelta {
+                        path,
+                        before: before_file.cloned(),
+                        after: after_file.cloned(),
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let mut action_names = BTreeSet::new();
+        action_names.extend(self.actions.iter().map(|action| action.name.clone()));
+        action_names.extend(after.actions.iter().map(|action| action.name.clone()));
+
+        let mut changed_actions = BTreeSet::new();
+        let mut key_deltas = Vec::new();
+        let mut cache_deltas = Vec::new();
+        for action_name in action_names {
+            let before = self
+                .actions
+                .iter()
+                .find(|action| action.name == action_name);
+            let after_action = after
+                .actions
+                .iter()
+                .find(|action| action.name == action_name);
+            let action_changed = match (before, after_action) {
+                (Some(before), Some(after)) => {
+                    before.key != after.key || before.inputs != after.inputs
+                }
+                _ => true,
+            };
+            if action_changed {
+                changed_actions.insert(action_name.clone());
+            }
+
+            let before_key = before.map(|action| action.key.clone());
+            let after_key = after_action.map(|action| action.key.clone());
+            if before_key != after_key {
+                key_deltas.push(BuildGraphKeyDelta {
+                    action: action_name.clone(),
+                    before: before_key,
+                    after: after_key,
+                });
+            }
+            let before_hit = before.and_then(|action| action.cache_hit);
+            let after_hit = after_action.and_then(|action| action.cache_hit);
+            if before_hit != after_hit {
+                cache_deltas.push(BuildGraphCacheDelta {
+                    action: action_name,
+                    before: before_hit,
+                    after: after_hit,
+                });
+            }
+        }
+
+        let mut affected_files = graph_affected_files(self, &changed_actions);
+        affected_files.extend(graph_affected_files(after, &changed_actions));
+
+        BuildGraphDiff {
+            file_deltas,
+            affected_files: affected_files.into_iter().collect(),
+            key_deltas,
+            cache_deltas,
+        }
+    }
+}
+
+fn graph_affected_files(
+    graph: &BuildGraph,
+    changed_actions: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    let mut pending_actions = graph
+        .actions
+        .iter()
+        .filter(|action| changed_actions.contains(&action.name))
+        .map(|action| action.id)
+        .collect::<Vec<_>>();
+    let mut pending_targets = Vec::new();
+    let mut seen_actions = BTreeSet::new();
+    let mut seen_targets = BTreeSet::new();
+    let mut affected = BTreeSet::new();
+
+    while !pending_actions.is_empty() || !pending_targets.is_empty() {
+        while let Some(action_id) = pending_actions.pop() {
+            if !seen_actions.insert(action_id) {
+                continue;
+            }
+            let Some(action) = graph
+                .actions
+                .iter()
+                .find(|action| action.id == action_id)
+            else {
+                continue;
+            };
+            for output in &action.outputs {
+                affected.insert(output.clone());
+                if let Some(file) = graph.files.iter().find(|file| file.path == *output) {
+                    pending_actions.extend(file.consumers.iter().copied());
+                }
+            }
+            let target_ids = graph
+                .targets
+                .iter()
+                .filter(|target| target.actions.contains(&action_id))
+                .map(|target| target.id);
+            pending_targets.extend(target_ids);
+        }
+
+        while let Some(target_id) = pending_targets.pop() {
+            if !seen_targets.insert(target_id) {
+                continue;
+            }
+            for target in graph
+                .targets
+                .iter()
+                .filter(|target| target.deps.contains(&target_id))
+            {
+                pending_actions.extend(target.actions.iter().copied());
+                pending_targets.push(target.id);
+            }
+        }
+    }
+
+    affected
+}
+
+
+fn file_identity(
+    graph: &BuildGraph,
+    file: Option<&BuildGraphFile>,
+) -> Option<(Option<String>, Vec<String>, Vec<String>)> {
+    let file = file?;
+    let action_name = |id| {
+        graph
+            .actions
+            .iter()
+            .find(|action| action.id == id)
+            .map(|action| action.name.clone())
+    };
+    let target_name = |id| {
+        graph
+            .targets
+            .iter()
+            .find(|target| target.id == id)
+            .map(|target| target.name.clone())
+    };
+    let mut consumers = file
+        .consumers
+        .iter()
+        .filter_map(|id| action_name(*id))
+        .collect::<Vec<_>>();
+    let mut targets = file
+        .targets
+        .iter()
+        .filter_map(|id| target_name(*id))
+        .collect::<Vec<_>>();
+    consumers.sort();
+    consumers.dedup();
+    targets.sort();
+    targets.dedup();
+    Some((
+        file.owner.and_then(action_name),
+        consumers,
+        targets,
+    ))
 }
 
 fn map_debug(map: &BTreeMap<String, String>) -> String {

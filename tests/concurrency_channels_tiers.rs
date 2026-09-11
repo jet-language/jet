@@ -13,7 +13,7 @@ const SOURCE: &str = include_str!("../examples/features/concurrency/select_chann
 const EXPECTED: &str = include_str!("../examples/features/expected/concurrency/select_channel.out");
 
 const COMPTIME_SOURCE: &str = r#"
-fn choose() Int {
+fn choose() Int -> {
     (sender, receiver) :: channel<Int>()
     sender.send(7)
     result := 0
@@ -47,37 +47,6 @@ fn run() {
 "#;
 
 #[test]
-fn parser_reads_the_ratified_channel_surface() {
-    let (tokens, diagnostics) = jet::Lexer::lex(SOURCE);
-    assert!(diagnostics.is_empty(), "lexer diagnostics: {diagnostics:?}");
-    assert!(
-        jet::Parser::parse(&tokens).is_ok(),
-        "channel/readiness example must parse"
-    );
-}
-
-#[test]
-fn sema_accepts_plain_endpoint_readiness_and_drain_surface() {
-    jet::compile(SOURCE).expect("channel/readiness example must pass sema");
-}
-
-#[test]
-fn tir_keeps_one_private_readiness_wait_door() {
-    let output = jet::compile_with_path(SOURCE, "examples/features/concurrency/select_channel.jet")
-        .expect("channel/readiness example must lower");
-    assert!(
-        output.rust.contains("jet_select_wait_tagged"),
-        "TIR/AOT must marshal readiness through the shared Prelude door:\n{}",
-        output.rust
-    );
-    assert!(
-        output.rust.contains("jet_std::channel"),
-        "the builtin channel must lower through the existing channel Prelude:\n{}",
-        output.rust
-    );
-}
-
-#[test]
 fn aot_runs_the_channel_readiness_example() {
     if tir_support::have_rustc() {
         let (code, stdout, stderr) =
@@ -105,13 +74,13 @@ fn interpreter_runs_the_channel_readiness_example() {
 }
 
 #[test]
-fn comptime_folds_a_channel_send_and_readiness_wait() {
-    let output = jet::compile(COMPTIME_SOURCE);
-    assert!(
-        output.is_ok(),
-        "comptime channel/select fold must use the shared evaluator: {:#?}",
-        output.err()
-    );
+fn comptime_channel_result_reaches_runtime() {
+    if tir_support::have_rustc() {
+        let (code, stdout, stderr) =
+            tir_support::build_and_run_full("jet_channel_comptime", "aot", COMPTIME_SOURCE);
+        assert_eq!(code, 0, "comptime channel program failed: {stderr}");
+        assert_eq!(stdout, "7\n");
+    }
 }
 
 #[test]
@@ -142,14 +111,6 @@ fn web_runs_the_same_channel_readiness_example() {
                 )
             });
     let web = output.web.expect("web target must produce artifacts");
-    assert!(
-        web.js_app.contains("jet_scheduler_select"),
-        "web must marshal readiness through the scheduler Prelude"
-    );
-    assert!(
-        web.js_app.contains("jet_channel_new"),
-        "web must marshal the builtin channel through the channel Prelude"
-    );
     fs::write(scratch.join("app.js"), &web.js_app).unwrap();
     fs::write(scratch.join("jet_dom_runtime.js"), &web.dom_runtime).unwrap();
     fs::write(scratch.join("package.json"), r#"{"type":"module"}"#).unwrap();

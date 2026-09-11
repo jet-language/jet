@@ -32,7 +32,7 @@
 <h2>What</h2>
 <p class="diag-copy what" data-registry-field="what">`{caller}` uses `{gated_type}`, whose `impl` is gated to `#Target(OS.{os})`, without itself being gated to match.</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">An OS-gated impl only exists in the build for that OS; code reachable on other platforms would hit a missing method, so this is caught at compile time, not left to fail as a link (or a raw rustc) error.</p>
+<p class="diag-copy why" data-registry-field="why">An OS-gated impl only exists in the build for that OS; code reachable on other platforms would hit a missing method, so this is caught at compile time, not left to fail as a link (or a raw rustc) error. During `jet check`, Jet reports this diagnostic.</p>
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Only use `{gated_type}` from inside an `impl` already gated to `#Target(OS.{os})`, or move `{caller}`&#39;s body into one.</p>
 <h2>Worked example</h2>
@@ -42,8 +42,8 @@
     |
  14 | fn run_paint(b: LinuxBackend) Int -&gt; b.paint()
     |    ^^^^^^^^^
- Why: an OS-gated impl only exists in the build for that OS; code reachable on other platforms would hit a missing method, so this is caught at compile time, not left to fail as a link (or a raw rustc) error
- Fix: only use `LinuxBackend` from inside an `impl` already gated to `#Target(OS.Linux)`, or move `run_paint`&#39;s body into one
+ Why: An OS-gated impl only exists in the build for that OS; code reachable on other platforms would hit a missing method, so this is caught at compile time, not left to fail as a link (or a raw rustc) error
+ Fix: Only use `LinuxBackend` from inside an `impl` already gated to `#Target(OS.Linux)`, or move `run_paint`&#39;s body into one
 More: jet-lang.dev/e/E-OSTARGET-UNMATCHED-CALL
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

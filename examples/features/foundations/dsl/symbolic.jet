@@ -1,0 +1,343 @@
+pub enum Node {
+    Const(Float)
+    Var(String)
+    Add
+    Sub
+    Mul
+    Neg
+}
+
+pub struct Expr {
+    code: [Node],
+}
+
+fn atom(node: Node) Expr -> {
+    return Expr{code: [Node]{node}}
+}
+
+fn zero() Expr -> {
+    return atom(Node.Const(Float{0.0}))
+}
+
+fn one() Expr -> {
+    return atom(Node.Const(Float{1.0}))
+}
+
+fn emit_operator(operator: String, code: &[Node]) {
+    if operator == "+" -> code.push(Node.Add)
+    else if operator == "-" -> code.push(Node.Sub)
+    else if operator == "*" -> code.push(Node.Mul)
+    else if operator == "neg" -> code.push(Node.Neg)
+}
+
+fn precedence(operator: String) Int -> {
+    if operator == "neg" -> return 3
+    if operator == "*" -> return 2
+    return 1
+}
+
+fn drain_operators(
+    operator: String,
+    operators: &[String],
+    code: &[Node],
+) {
+    loop operators.len() > 0 {
+        top :: operators[operators.len() - 1]
+        if top == "(" || precedence(top) < precedence(operator) -> break
+        popped :: operators.pop() ?? ""
+        emit_operator(popped, code)
+    }
+}
+
+pub fn parse(source: String) ?Expr -> {
+    tokens :: source.trim().split(" ").to_list()
+    if tokens.len() == 0 -> return None
+
+    code := [Node]{}
+    operators := [String]{}
+    expect_value := true
+    loop token in tokens {
+        if token == "" -> next
+
+        if Int.parse(token) == .Val(value) {
+            if !expect_value -> return None
+            code.push(Node.Const(Float.from_int(value)))
+            expect_value = false
+        } else if token == "x" || token == "y" {
+            if !expect_value -> return None
+            code.push(Node.Var(token))
+            expect_value = false
+        } else if token == "(" {
+            if !expect_value -> return None
+            operators.push(token)
+            expect_value = true
+        } else if token == ")" {
+            if expect_value -> return None
+            found_open := false
+            loop operators.len() > 0 {
+                popped :: operators.pop() ?? return None
+                if popped == "(" {
+                    found_open = true
+                    break
+                }
+                emit_operator(popped, code)
+            }
+            if !found_open -> return None
+            expect_value = false
+        } else if token == "+" || token == "-" || token == "*" {
+            if expect_value {
+                if token != "-" -> return None
+                drain_operators("neg", &operators, &code)
+                operators.push("neg")
+            } else {
+                drain_operators(token, &operators, &code)
+                operators.push(token)
+            }
+            expect_value = true
+        } else {
+            return None
+        }
+    }
+    if expect_value -> return None
+
+    loop operators.len() > 0 {
+        popped :: operators.pop() ?? return None
+        if popped == "(" -> return None
+        emit_operator(popped, &code)
+    }
+    return Val(Expr{code: code})
+}
+
+fn constant_value(expr: Expr) ?Float -> {
+    if expr.code.len() != 1 -> return None
+    if expr.code[0] == .Const(value) -> return Val(value)
+    return None
+}
+
+fn is_zero(expr: Expr) Bool -> {
+    value :: constant_value(~expr) ?? return false
+    return value == 0.0
+}
+
+fn is_one(expr: Expr) Bool -> {
+    value :: constant_value(~expr) ?? return false
+    return value == 1.0
+}
+
+fn append_binary(left: Expr, right: Expr, operator: Node) Expr -> {
+    code := [Node]{}
+    code.extend(~left.code)
+    code.extend(~right.code)
+    code.push(operator)
+    return Expr{code: code}
+}
+
+fn negate(expr: Expr) Expr -> {
+    code := [Node]{}
+    code.extend(~expr.code)
+    code.push(Node.Neg)
+    return Expr{code: code}
+}
+
+fn add(left: Expr, right: Expr) Expr -> {
+    return append_binary(left, right, Node.Add)
+}
+
+fn subtract(left: Expr, right: Expr) Expr -> {
+    return append_binary(left, right, Node.Sub)
+}
+
+fn multiply(left: Expr, right: Expr) Expr -> {
+    return append_binary(left, right, Node.Mul)
+}
+
+pub fn simplify(expr: Expr) Expr -> {
+    stack := [Expr]{}
+    loop token in expr.code {
+        if token == {
+            .Const(value) -> stack.push(atom(Node.Const(value)))
+            .Var(name) -> stack.push(atom(Node.Var(name)))
+            .Neg -> {
+                value :: stack.pop() ?? zero()
+                reduced :: simplify(value)
+                if is_zero(~reduced) {
+                    stack.push(zero())
+                } else if constant_value(~reduced) == .Val(number) {
+                    stack.push(atom(Node.Const(Float{0.0} - number)))
+                } else {
+                    stack.push(negate(reduced))
+                }
+            }
+            .Add -> {
+                right :: stack.pop() ?? zero()
+                left :: stack.pop() ?? zero()
+                left_reduced :: simplify(left)
+                right_reduced :: simplify(right)
+                if is_zero(~left_reduced) {
+                    stack.push(right_reduced)
+                } else if is_zero(~right_reduced) {
+                    stack.push(left_reduced)
+                } else if constant_value(~left_reduced) == .Val(left_value)
+                    && constant_value(~right_reduced) == .Val(right_value) {
+                    stack.push(atom(Node.Const(left_value + right_value)))
+                } else {
+                    stack.push(add(left_reduced, right_reduced))
+                }
+            }
+            .Sub -> {
+                right :: stack.pop() ?? zero()
+                left :: stack.pop() ?? zero()
+                left_reduced :: simplify(left)
+                right_reduced :: simplify(right)
+                if is_zero(~right_reduced) {
+                    stack.push(left_reduced)
+                } else if is_zero(~left_reduced) {
+                    stack.push(negate(right_reduced))
+                } else if constant_value(~left_reduced) == .Val(left_value)
+                    && constant_value(~right_reduced) == .Val(right_value) {
+                    stack.push(atom(Node.Const(left_value - right_value)))
+                } else {
+                    stack.push(subtract(left_reduced, right_reduced))
+                }
+            }
+            .Mul -> {
+                right :: stack.pop() ?? zero()
+                left :: stack.pop() ?? zero()
+                left_reduced :: simplify(left)
+                right_reduced :: simplify(right)
+                if is_zero(~left_reduced) || is_zero(~right_reduced) {
+                    stack.push(zero())
+                } else if is_one(~left_reduced) {
+                    stack.push(right_reduced)
+                } else if is_one(~right_reduced) {
+                    stack.push(left_reduced)
+                } else if constant_value(~left_reduced) == .Val(left_value)
+                    && constant_value(~right_reduced) == .Val(right_value) {
+                    stack.push(atom(Node.Const(left_value * right_value)))
+                } else {
+                    stack.push(multiply(left_reduced, right_reduced))
+                }
+            }
+        }
+    }
+    return stack.pop() ?? zero()
+}
+
+pub fn differentiate(expr: Expr, variable: String) Expr -> {
+    expressions := [Expr]{}
+    derivatives := [Expr]{}
+    loop token in expr.code {
+        if token == {
+            .Const(value) -> {
+                expressions.push(atom(Node.Const(value)))
+                derivatives.push(zero())
+            }
+            .Var(name) -> {
+                expressions.push(atom(Node.Var(~name)))
+                if name == variable {
+                    derivatives.push(one())
+                } else {
+                    derivatives.push(zero())
+                }
+            }
+            .Neg -> {
+                value :: expressions.pop() ?? zero()
+                derivative :: derivatives.pop() ?? zero()
+                expressions.push(negate(value))
+                derivatives.push(negate(derivative))
+            }
+            .Add -> {
+                right :: expressions.pop() ?? zero()
+                left :: expressions.pop() ?? zero()
+                right_derivative :: derivatives.pop() ?? zero()
+                left_derivative :: derivatives.pop() ?? zero()
+                expressions.push(add(left, right))
+                derivatives.push(add(left_derivative, right_derivative))
+            }
+            .Sub -> {
+                right :: expressions.pop() ?? zero()
+                left :: expressions.pop() ?? zero()
+                right_derivative :: derivatives.pop() ?? zero()
+                left_derivative :: derivatives.pop() ?? zero()
+                expressions.push(subtract(left, right))
+                derivatives.push(subtract(left_derivative, right_derivative))
+            }
+            .Mul -> {
+                right :: expressions.pop() ?? zero()
+                left :: expressions.pop() ?? zero()
+                right_derivative :: derivatives.pop() ?? zero()
+                left_derivative :: derivatives.pop() ?? zero()
+                expressions.push(multiply(~left, ~right))
+                derivatives.push(add(
+                    multiply(left_derivative, ~right),
+                    multiply(~left, right_derivative),
+                ))
+            }
+        }
+    }
+    return derivatives.pop() ?? zero()
+}
+
+pub fn evaluate(expr: Expr, environment: [String:Float]) ?Float -> {
+    stack := [Float]{}
+    loop token in expr.code {
+        if token == {
+            .Const(value) -> stack.push(value)
+            .Var(name) -> {
+                value :: environment.get(~name) ?? return None
+                stack.push(value)
+            }
+            .Neg -> {
+                value :: stack.pop() ?? return None
+                stack.push(Float{0.0} - value)
+            }
+            .Add -> {
+                right :: stack.pop() ?? return None
+                left :: stack.pop() ?? return None
+                stack.push(left + right)
+            }
+            .Sub -> {
+                right :: stack.pop() ?? return None
+                left :: stack.pop() ?? return None
+                stack.push(left - right)
+            }
+            .Mul -> {
+                right :: stack.pop() ?? return None
+                left :: stack.pop() ?? return None
+                stack.push(left * right)
+            }
+        }
+    }
+    if stack.len() != 1 -> return None
+    return Val(stack.pop() ?? 0.0)
+}
+
+pub fn show(expr: Expr) String -> {
+    stack := [String]{}
+    loop token in expr.code {
+        if token == {
+            .Const(value) -> stack.push("{value}")
+            .Var(name) -> stack.push(name)
+            .Neg -> {
+                value :: stack.pop() ?? "?"
+                stack.push("(-{value})")
+            }
+            .Add -> {
+                right :: stack.pop() ?? "?"
+                left :: stack.pop() ?? "?"
+                stack.push("({left} + {right})")
+            }
+            .Sub -> {
+                right :: stack.pop() ?? "?"
+                left :: stack.pop() ?? "?"
+                stack.push("({left} - {right})")
+            }
+            .Mul -> {
+                right :: stack.pop() ?? "?"
+                left :: stack.pop() ?? "?"
+                stack.push("({left} * {right})")
+            }
+        }
+    }
+    return stack.pop() ?? "?"
+}

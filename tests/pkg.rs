@@ -2112,6 +2112,7 @@ fn manifest_panic_budget_names_the_dependency_stop_site() {
     let entries = [jetpack::EffectBudget::PackageEffects {
         name: "panicdep".to_string(),
         effects: jet::Sema::EffectSet::from(["Panic".to_string()]),
+        effect_sites: std::collections::BTreeMap::new(),
         panic_sites: vec!["panicdep::parse_port".to_string()],
         boundary_span: Some(jet::Diagnostics::Span::new(4, 12)),
     }];
@@ -2905,8 +2906,7 @@ fn store_install_rejects_source_and_destination_symlinks() {
         fs::remove_file(&entry).unwrap();
 
         symlink(&outside, source.join("leak")).unwrap();
-        let source_result =
-            jet::Store::ensure_path_dep("safe", "0.1.0", "sha256-source", &source);
+        let source_result = jet::Store::ensure_path_dep("safe", "0.1.0", "sha256-source", &source);
         (destination, source_result)
     });
 
@@ -3318,7 +3318,10 @@ fn transitive_path_dependency_cannot_escape_declaring_package() {
     });
     assert_eq!(first_diag_code(&error), "E1206");
     assert!(error[0].what.contains("escapes"));
-    assert!(!store.join("outside").exists(), "escaped package was ingested");
+    assert!(
+        !store.join("outside").exists(),
+        "escaped package was ingested"
+    );
     let _ = fs::remove_dir_all(&tmp);
 }
 
@@ -3342,11 +3345,7 @@ fn transitive_path_dependency_cannot_escape_via_symlinked_directory() {
         "outside/escape/package.jet",
         &min_manifest("escape", "0.1.0"),
     );
-    write(
-        &tmp,
-        "outside/escape/escape.jet",
-        "pub fn hostile() {}\n",
-    );
+    write(&tmp, "outside/escape/escape.jet", "pub fn hostile() {}\n");
     symlink(tmp.join("outside"), tmp.join("outer/link")).unwrap();
 
     let raw = manifest_with_deps("app", "0.1.0", "    outer: ./outer,");
@@ -3364,7 +3363,10 @@ fn transitive_path_dependency_cannot_escape_via_symlinked_directory() {
             .expect_err("a symlinked transitive path must be rejected")
     });
     assert_eq!(first_diag_code(&error), "E1206");
-    assert!(!store.join("escape").exists(), "escaped package was ingested");
+    assert!(
+        !store.join("escape").exists(),
+        "escaped package was ingested"
+    );
     let _ = fs::remove_dir_all(&tmp);
 }
 
@@ -3398,8 +3400,8 @@ fn version_conflict_emits_e1201() {
 }
 
 #[test]
-fn stale_lock_emits_e1202() {
-    let tmp = tmp_dir("stale_lock");
+fn toolchain_only_lock_keeps_declared_path_unlocked() {
+    let tmp = tmp_dir("toolchain_only_lock");
 
     write(
         &tmp,
@@ -3411,13 +3413,11 @@ fn stale_lock_emits_e1202() {
         "greeter/greeter.jet",
         "pub fn greet() => String { return \"hi\"; }\n",
     );
-
-    write(
-        &tmp,
-        "package.jet",
-        &manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,"),
-    );
-    // Lock exists but lists no dependencies — stale.
+    let manifest_text =
+        manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,");
+    write(&tmp, "package.jet", &manifest_text);
+    // A toolchain/build-fact lock has no dependency record. It must not turn
+    // this ordinary declared path into an implicit locked realization.
     write(
         &tmp,
         ".jet/lock",
@@ -3426,10 +3426,24 @@ fn stale_lock_emits_e1202() {
 
     let entry = tmp.join("run.jet");
     fs::write(&entry, "fn run() {}\n").unwrap();
+    let ordinary = jet::compile_with_path("", &entry.to_string_lossy());
+    assert!(
+        ordinary.is_ok(),
+        "toolchain-only lock must not block declared path loading: {:?}",
+        ordinary.err()
+    );
 
-    let diags = jet::compile_with_path("", &entry.to_string_lossy())
-        .expect_err("stale lock must fail with E1202");
-    assert_eq!(first_diag_code(&diags), "E1202");
+    let manifest = jet::Manifest::parse(&tmp.join("package.jet"), &manifest_text).unwrap();
+    let lock = jet::Lock::parse(&fs::read_to_string(tmp.join(".jet/lock")).unwrap()).unwrap();
+    let locked = jet::Fetch::FetchOptions {
+        locked: true,
+        update: false,
+        update_dep: None,
+        resolution: jet::Publish::ResolveMode::Conservative,
+    };
+    let error = jet::Fetch::fetch(&tmp, &manifest, Some(&lock), &locked)
+        .expect_err("strict locked resolution must reject missing dependency facts");
+    assert_eq!(first_diag_code(&error), "E1217");
 
     let _ = fs::remove_dir_all(&tmp);
 }
@@ -3533,7 +3547,11 @@ fn fetch_locked_rejects_tampered_path_dependency_store_entry() {
     let store = tmp.join("store");
     let dependency = tmp.join("greeter");
     fs::create_dir_all(&store).unwrap();
-    write(&dependency, "package.jet", &min_manifest("greeter", "0.1.0"));
+    write(
+        &dependency,
+        "package.jet",
+        &min_manifest("greeter", "0.1.0"),
+    );
     write(&dependency, "greeter.jet", "pub fn greet() {}\n");
     let raw = manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,");
     write(&tmp, "package.jet", &raw);
@@ -3561,11 +3579,8 @@ fn fetch_locked_rejects_tampered_path_dependency_store_entry() {
             .iter()
             .find(|package| package.name == "greeter")
             .expect("path dependency must be recorded in the lock");
-        let store_entry = jet::Store::store_path(
-            &package.name,
-            &package.version,
-            &package.fingerprint,
-        );
+        let store_entry =
+            jet::Store::store_path(&package.name, &package.version, &package.fingerprint);
         fs::write(store_entry.join("greeter.jet"), "pub fn compromised() {}\n").unwrap();
         jet::Fetch::fetch(&tmp, &manifest, Some(&lock), &locked)
             .expect_err("locked fetch must reject a changed store entry")
@@ -3580,7 +3595,11 @@ fn locked_build_rejects_tampered_path_dependency_store_entry() {
     let store = tmp.join("store");
     let dependency = tmp.join("greeter");
     fs::create_dir_all(&store).unwrap();
-    write(&dependency, "package.jet", &min_manifest("greeter", "0.1.0"));
+    write(
+        &dependency,
+        "package.jet",
+        &min_manifest("greeter", "0.1.0"),
+    );
     write(&dependency, "greeter.jet", "pub fn greet() {}");
     let raw = manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,");
     write(&tmp, "package.jet", &raw);
@@ -3606,11 +3625,8 @@ fn locked_build_rejects_tampered_path_dependency_store_entry() {
             .iter()
             .find(|package| package.name == "greeter")
             .expect("path dependency must be recorded in the lock");
-        let store_entry = jet::Store::store_path(
-            &package.name,
-            &package.version,
-            &package.fingerprint,
-        );
+        let store_entry =
+            jet::Store::store_path(&package.name, &package.version, &package.fingerprint);
         fs::write(store_entry.join("greeter.jet"), "pub fn compromised() {}\n").unwrap();
         jet::Driver::compile_bundle_path_build(entry.to_str().unwrap(), locked)
             .expect_err("locked build must reject a changed store entry before loading it")
@@ -3625,7 +3641,11 @@ fn locked_build_rejects_wide_empty_store_tree_before_dependency_manifest_load() 
     let store = tmp.join("store");
     let dependency = tmp.join("greeter");
     fs::create_dir_all(&store).unwrap();
-    write(&dependency, "package.jet", &min_manifest("greeter", "0.1.0"));
+    write(
+        &dependency,
+        "package.jet",
+        &min_manifest("greeter", "0.1.0"),
+    );
     write(&dependency, "greeter.jet", "pub fn greet() {}\n");
     for index in 0..128 {
         fs::create_dir(dependency.join(format!("empty-{index}"))).unwrap();
@@ -3655,11 +3675,8 @@ fn locked_build_rejects_wide_empty_store_tree_before_dependency_manifest_load() 
             .iter()
             .find(|package| package.name == "greeter")
             .expect("path dependency must be recorded in the lock");
-        let store_entry = jet::Store::store_path(
-            &package.name,
-            &package.version,
-            &package.fingerprint,
-        );
+        let store_entry =
+            jet::Store::store_path(&package.name, &package.version, &package.fingerprint);
         assert!(store_entry.join("empty-127").is_dir());
         // The malformed manifest must not be read before the bounded tree
         // verification reports the changed source as E1204.
@@ -3683,7 +3700,11 @@ fn locked_build_rejects_deep_store_tree_before_dependency_manifest_load() {
     let store = tmp.join("store");
     let dependency = tmp.join("greeter");
     fs::create_dir_all(&store).unwrap();
-    write(&dependency, "package.jet", &min_manifest("greeter", "0.1.0"));
+    write(
+        &dependency,
+        "package.jet",
+        &min_manifest("greeter", "0.1.0"),
+    );
     write(&dependency, "greeter.jet", "pub fn greet() {}\n");
     let raw = manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,");
     write(&tmp, "package.jet", &raw);
@@ -3709,11 +3730,8 @@ fn locked_build_rejects_deep_store_tree_before_dependency_manifest_load() {
             .iter()
             .find(|package| package.name == "greeter")
             .expect("path dependency must be recorded in the lock");
-        let store_entry = jet::Store::store_path(
-            &package.name,
-            &package.version,
-            &package.fingerprint,
-        );
+        let store_entry =
+            jet::Store::store_path(&package.name, &package.version, &package.fingerprint);
         let mut nested = store_entry.clone();
         for index in 0..=jet::SHA256::MAX_TREE_DEPTH {
             nested.push(format!("d{index}"));
@@ -3735,7 +3753,11 @@ fn locked_build_rejects_manifest_lock_path_identity_mismatch() {
     let store = tmp.join("store");
     let dependency = tmp.join("greeter");
     fs::create_dir_all(&store).unwrap();
-    write(&dependency, "package.jet", &min_manifest("greeter", "0.1.0"));
+    write(
+        &dependency,
+        "package.jet",
+        &min_manifest("greeter", "0.1.0"),
+    );
     write(&dependency, "greeter.jet", "pub fn greet() {}\n");
     let raw = manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,");
     write(&tmp, "package.jet", &raw);
@@ -3976,9 +3998,7 @@ fn git_revision_with_multibyte_prefix_does_not_panic() {
     let raw = manifest_with_deps(
         "app",
         "0.1.0",
-        &format!(
-            "    broken: {{ git: \"file:///definitely/missing.git\", rev: \"{revision}\" }},"
-        ),
+        &format!("    broken: {{ git: \"file:///definitely/missing.git\", rev: \"{revision}\" }},"),
     );
     write(&tmp, "package.jet", &raw);
     let manifest = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
@@ -3992,7 +4012,9 @@ fn git_revision_with_multibyte_prefix_does_not_panic() {
     };
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        with_store(&store, || jet::Fetch::fetch(&tmp, &manifest, None, &options))
+        with_store(&store, || {
+            jet::Fetch::fetch(&tmp, &manifest, None, &options)
+        })
     }));
     assert!(
         result.is_ok(),
@@ -4029,13 +4051,16 @@ fn git_dep_rejects_private_transport_before_network_access() {
     let diags = with_store(&store, || jet::Fetch::fetch(&tmp, &mf, None, &opts))
         .expect_err("private git transport must be rejected before clone");
     assert_eq!(first_diag_code(&diags), "E1203");
-    let rendered = jet::Diagnostics::render_all(
-        &tmp.join("package.jet").to_string_lossy(),
-        &raw,
-        &diags,
+    let rendered =
+        jet::Diagnostics::render_all(&tmp.join("package.jet").to_string_lossy(), &raw, &diags);
+    assert!(
+        rendered.contains("not allowed"),
+        "unexpected diagnostic:\n{rendered}"
     );
-    assert!(rendered.contains("not allowed"), "unexpected diagnostic:\n{rendered}");
-    assert!(!tmp.join(".jet").exists(), "rejected transport created project state");
+    assert!(
+        !tmp.join(".jet").exists(),
+        "rejected transport created project state"
+    );
     let _ = fs::remove_dir_all(&tmp);
 }
 
@@ -4063,18 +4088,22 @@ fn git_dep_rejects_reserved_ipv4_transport_before_network_access() {
         resolution: jet::Publish::ResolveMode::Conservative,
     };
 
-    let diags = with_store(&store, || jet::Fetch::fetch(&tmp, &manifest, None, &options))
-        .expect_err("reserved Git transport must be rejected before clone");
+    let diags = with_store(&store, || {
+        jet::Fetch::fetch(&tmp, &manifest, None, &options)
+    })
+    .expect_err("reserved Git transport must be rejected before clone");
     assert_eq!(first_diag_code(&diags), "E1203");
-    assert!(!tmp.join(".jet").exists(), "rejected transport created project state");
+    assert!(
+        !tmp.join(".jet").exists(),
+        "rejected transport created project state"
+    );
     let _ = fs::remove_dir_all(&tmp);
 }
 
 #[test]
 fn git_transport_uses_canonical_public_ip_classifier() {
-    let source =
-        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Source/Fetch.rs"))
-            .expect("Fetch source should be readable");
+    let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Source/Fetch.rs"))
+        .expect("Fetch source should be readable");
     assert_eq!(
         source.matches("jet_net::is_public_ip(").count(),
         1,
@@ -4760,7 +4789,10 @@ exit 99
         "Git was invoked: {}",
         fs::read_to_string(&log).unwrap_or_default()
     );
-    assert!(!marker.exists(), "hostile SSH user-info reached Git transport");
+    assert!(
+        !marker.exists(),
+        "hostile SSH user-info reached Git transport"
+    );
     assert!(!tmp.join(".jet").exists());
     let _ = fs::remove_dir_all(&tmp);
 }
@@ -4835,10 +4867,7 @@ exit 99
 #[cfg(unix)]
 #[test]
 fn git_dep_rejects_option_url_before_ls_remote_execution() {
-    assert_option_git_url_rejected_before_execution(
-        "branch: \"main\"",
-        "git_option_url_ls_remote",
-    );
+    assert_option_git_url_rejected_before_execution("branch: \"main\"", "git_option_url_ls_remote");
 }
 
 #[cfg(unix)]
@@ -4910,10 +4939,15 @@ fn git_dep_rejects_cache_path_traversal_before_filesystem_access() {
         resolution: jet::Publish::ResolveMode::Conservative,
     };
 
-    let diagnostics = with_store(&store, || jet::Fetch::fetch(&tmp, &manifest, None, &options))
-        .expect_err("a traversal-shaped revision must be rejected");
+    let diagnostics = with_store(&store, || {
+        jet::Fetch::fetch(&tmp, &manifest, None, &options)
+    })
+    .expect_err("a traversal-shaped revision must be rejected");
     assert_eq!(first_diag_code(&diagnostics), "E1203");
-    assert!(!escaped.exists(), "rejected revision created an escaped cache");
+    assert!(
+        !escaped.exists(),
+        "rejected revision created an escaped cache"
+    );
     let _ = fs::remove_dir_all(&tmp);
 }
 
@@ -6353,7 +6387,10 @@ fn vendor_rejects_symlink_sources_and_traversal_names() {
         &symlink_deps,
         &tmp.join("vendor-symlink"),
     );
-    assert!(symlink_result.is_err(), "vendor must refuse source symlinks");
+    assert!(
+        symlink_result.is_err(),
+        "vendor must refuse source symlinks"
+    );
     assert_eq!(fs::read_to_string(&outside).unwrap(), "must survive\n");
 
     let safe_source = tmp.join("safe-source");
@@ -6537,10 +6574,14 @@ fn e1217_missing_locked_revision() {
         build_stamp: None,
         build_contributions: Vec::new(),
     };
-    let err = verify_all_manifest_deps_locked(&mf, &empty_lock)
-        .expect_err("missing locked revision must fail");
-    assert_eq!(err.code, "E1217");
-    assert!(err.what.contains("greeter"));
+    let diagnostic = verify_all_manifest_deps_locked(&mf, &empty_lock)
+        .expect_err("missing locked revision must fail")
+        .diagnostic();
+    assert_eq!(diagnostic.code, "E1217");
+    assert!(diagnostic.what.contains("greeter"));
+    assert!(diagnostic.why.contains("missing `package`"));
+    assert!(diagnostic.fix.contains("fetch"));
+    assert!(diagnostic.fix.contains(".jet/lock"));
 
     // A lock that pins greeter passes.
     let good_lock = make_test_lock("greeter", "0.1.0", "sha256-aabb");
@@ -8050,14 +8091,9 @@ fn registry_artifact_hash_covers_auxiliary_files() {
 
     let expected_hash = jet::Publish::registry_artifact_hash(&source).unwrap();
     fs::write(source.join("embedded.bin"), b"tampered asset").unwrap();
-    let error = jet::Publish::publish_artifact(
-        &repo,
-        &source,
-        "asset-kit",
-        "1.0.0",
-        &expected_hash,
-    )
-    .expect_err("mutating a non-Jet artifact file must fail content verification");
+    let error =
+        jet::Publish::publish_artifact(&repo, &source, "asset-kit", "1.0.0", &expected_hash)
+            .expect_err("mutating a non-Jet artifact file must fail content verification");
     assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
     assert!(error.to_string().contains("source hash changed"));
     let destination = jet::Publish::artifact_path(&repo, "asset-kit", "1.0.0").unwrap();
@@ -9189,7 +9225,11 @@ fn locked_build_rejects_manifest_lock_git_identity_mismatches() {
     .unwrap()
     .trim()
     .to_string();
-    assert_eq!(revision.len(), 40, "test Git revision must be a full object id");
+    assert_eq!(
+        revision.len(),
+        40,
+        "test Git revision must be a full object id"
+    );
 
     let bare = tmp.join("mylib.git");
     assert!(

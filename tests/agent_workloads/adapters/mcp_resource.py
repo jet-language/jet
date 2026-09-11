@@ -22,7 +22,6 @@ bodies = [
     '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}',
     '{"jsonrpc":"2.0","id":2,"method":"resources/list","params":{}}',
     '{"jsonrpc":"2.0","id":3,"method":"resources/read","params":{"uri":"jet://environment"}}',
-    '{"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"jet://missing"}}',
     '{"jsonrpc":"2.0","id":5,"method":"shutdown","params":{}}',
     '{"jsonrpc":"2.0","method":"exit","params":{}}',
 ]
@@ -47,7 +46,7 @@ if task == "mcp-environment-denied":
         raise SystemExit("MCP denied case leaked HOME")
     print("mcp=denied\nerror=-32002\nsecret=redacted")
 else:
-    for marker in ("active_environment", "codex-agent", "mcp.read", "generated.txt", "lint"):
+    for marker in ("active_environment", "codex-agent", "mcp.read", "generated.txt", "fixture"):
         if marker not in response:
             raise SystemExit(f"MCP resource omitted {marker}")
     if "/agent-secret" in response:

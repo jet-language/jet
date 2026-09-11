@@ -198,7 +198,10 @@ fn prepare_library(
     let jetlib_path = target_dir.join(format!("{stem}.jetlib"));
     let runtime = read_regular_file(&runtime_path, "native host runtime")?;
     if runtime.is_empty() {
-        return Err(format!("native host runtime '{}' is empty", runtime_path.display()));
+        return Err(format!(
+            "native host runtime '{}' is empty",
+            runtime_path.display()
+        ));
     }
     let header = read_regular_file(&header_path, "C ABI header")?;
     validate_header(&header, &library_name, &runtime_name)?;
@@ -400,9 +403,19 @@ fn collect_source_files(
 ) -> Result<(), String> {
     let directory = root.join(relative);
     let mut entries = fs::read_dir(&directory)
-        .map_err(|error| format!("could not read source tree '{}': {error}", directory.display()))?
+        .map_err(|error| {
+            format!(
+                "could not read source tree '{}': {error}",
+                directory.display()
+            )
+        })?
         .collect::<Result<Vec<_>, io::Error>>()
-        .map_err(|error| format!("could not enumerate source tree '{}': {error}", directory.display()))?;
+        .map_err(|error| {
+            format!(
+                "could not enumerate source tree '{}': {error}",
+                directory.display()
+            )
+        })?;
     entries.sort_by_key(|entry| entry.file_name());
     for entry in entries {
         let name = entry.file_name();
@@ -422,7 +435,10 @@ fn collect_source_files(
             continue;
         }
         let metadata = fs::symlink_metadata(entry.path()).map_err(|error| {
-            format!("could not inspect source path '{}': {error}", entry.path().display())
+            format!(
+                "could not inspect source path '{}': {error}",
+                entry.path().display()
+            )
         })?;
         if metadata.file_type().is_symlink() {
             return Err(format!(
@@ -443,7 +459,10 @@ fn collect_source_files(
             files.push((
                 slash_path,
                 fs::read(entry.path()).map_err(|error| {
-                    format!("could not read source path '{}': {error}", entry.path().display())
+                    format!(
+                        "could not read source path '{}': {error}",
+                        entry.path().display()
+                    )
                 })?,
             ));
         }
@@ -478,7 +497,10 @@ fn release_identity(
     ] {
         push_len_bytes(&mut bytes, value.as_bytes());
     }
-    format!("jet-release-v1:sha256-{}", crate::SHA256::sha256_hex(&bytes))
+    format!(
+        "jet-release-v1:sha256-{}",
+        crate::SHA256::sha256_hex(&bytes)
+    )
 }
 
 fn render_abi_json(stamp: &JetLibStamp) -> String {
@@ -618,8 +640,10 @@ fn signature_metadata(
             .ok_or_else(|| "foreign registry signing key has no public key".to_string())?;
         (seed, public_key)
     } else {
-        let (seed, _, public_key) = crate::Publish::Sign::keygen(&key_name, false)
-            .map_err(|error| format!("could not create the foreign registry signing key: {error:?}"))?;
+        let (seed, _, public_key) =
+            crate::Publish::Sign::keygen(&key_name, false).map_err(|error| {
+                format!("could not create the foreign registry signing key: {error:?}")
+            })?;
         (seed, public_key)
     };
     let signature = crate::Publish::Sign::sign(&seed, release_identity)
@@ -648,7 +672,10 @@ fn render_archive(registry: ForeignRegistry, input: &LibraryInput) -> Result<Vec
 fn python_entries(input: &LibraryInput) -> Result<Vec<ArchiveEntry>, String> {
     let distribution = python_distribution(&input.package_name);
     let module = python_module(&input.package_name);
-    let dist_info = format!("{distribution}-{}.dist-info", input.version.replace('-', "_"));
+    let dist_info = format!(
+        "{distribution}-{}.dist-info",
+        input.version.replace('-', "_")
+    );
     let mut entries = vec![
         ArchiveEntry {
             name: format!("{module}/__init__.py"),
@@ -804,7 +831,11 @@ fn maven_entries(input: &LibraryInput) -> Result<Vec<ArchiveEntry>, String> {
             bytes: jni_bytes,
         },
         ArchiveEntry {
-            name: format!("META-INF/native/{}/{}", shared_platform(), input.runtime_name),
+            name: format!(
+                "META-INF/native/{}/{}",
+                shared_platform(),
+                input.runtime_name
+            ),
             bytes: input.runtime.clone(),
         },
         ArchiveEntry {
@@ -1028,11 +1059,7 @@ fn python_ctypes_type(value: JetLibScalar) -> &'static str {
 fn normalized_component(value: &str, lower: bool) -> String {
     let mut result = String::new();
     for ch in value.chars() {
-        let ch = if lower {
-            ch.to_ascii_lowercase()
-        } else {
-            ch
-        };
+        let ch = if lower { ch.to_ascii_lowercase() } else { ch };
         if ch.is_ascii_alphanumeric() || ch == '_' {
             result.push(ch);
         } else {
@@ -1071,7 +1098,10 @@ fn python_platform() -> String {
 }
 
 fn npm_package_name(value: &str) -> String {
-    format!("@jet/{}", normalized_component(value, true).replace('_', "-"))
+    format!(
+        "@jet/{}",
+        normalized_component(value, true).replace('_', "-")
+    )
 }
 
 fn java_package(value: &str) -> String {
@@ -1100,7 +1130,10 @@ fn java_class_name(value: &str) -> String {
 }
 
 fn java_artifact(value: &str) -> String {
-    format!("jet-{}", normalized_component(value, true).replace('_', "-"))
+    format!(
+        "jet-{}",
+        normalized_component(value, true).replace('_', "-")
+    )
 }
 
 fn nuget_package_name(value: &str) -> String {
@@ -1214,8 +1247,7 @@ fn render_python_record(entries: &[ArchiveEntry], dist_info: &str) -> String {
 }
 
 fn base64url(bytes: &[u8]) -> String {
-    const TABLE: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     let mut out = String::new();
     for chunk in bytes.chunks(3) {
         let a = chunk[0] as u32;
@@ -1332,7 +1364,10 @@ fn zip(entries: &[ArchiveEntry]) -> Result<Vec<u8>, String> {
     let mut files = BTreeMap::new();
     for entry in entries {
         validate_archive_entry(&entry.name, entry.bytes.len())?;
-        if files.insert(entry.name.clone(), entry.bytes.clone()).is_some() {
+        if files
+            .insert(entry.name.clone(), entry.bytes.clone())
+            .is_some()
+        {
             return Err(format!("foreign archive repeats entry '{}'", entry.name));
         }
     }
@@ -1345,8 +1380,8 @@ fn zip(entries: &[ArchiveEntry]) -> Result<Vec<u8>, String> {
             .map_err(|_| format!("foreign archive entry name '{name}' is too long"))?;
         let size = u32::try_from(bytes.len())
             .map_err(|_| format!("foreign archive entry '{name}' is too large for ZIP"))?;
-        let offset = u32::try_from(output.len())
-            .map_err(|_| "foreign ZIP is too large".to_string())?;
+        let offset =
+            u32::try_from(output.len()).map_err(|_| "foreign ZIP is too large".to_string())?;
         let crc = crc32(&bytes);
         output.extend_from_slice(&0x04034b50u32.to_le_bytes());
         output.extend_from_slice(&20u16.to_le_bytes());
@@ -1387,8 +1422,8 @@ fn zip(entries: &[ArchiveEntry]) -> Result<Vec<u8>, String> {
     let central_size =
         u32::try_from(central.len()).map_err(|_| "foreign ZIP is too large".to_string())?;
     output.extend_from_slice(&central);
-    let entry_count = u16::try_from(entry_count)
-        .map_err(|_| "foreign ZIP has too many entries".to_string())?;
+    let entry_count =
+        u16::try_from(entry_count).map_err(|_| "foreign ZIP has too many entries".to_string())?;
     output.extend_from_slice(&0x06054b50u32.to_le_bytes());
     output.extend_from_slice(&0u16.to_le_bytes());
     output.extend_from_slice(&0u16.to_le_bytes());
@@ -1404,7 +1439,9 @@ fn validate_archive_entry(name: &str, size: usize) -> Result<(), String> {
     if name.is_empty()
         || name.starts_with('/')
         || name.contains('\\')
-        || name.split('/').any(|part| part.is_empty() || part == "." || part == "..")
+        || name
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
     {
         return Err(format!("foreign archive has unsafe entry name '{name}'"));
     }
@@ -1436,7 +1473,10 @@ fn tar_gz(entries: &[ArchiveEntry]) -> Result<Vec<u8>, String> {
     let mut files = BTreeMap::new();
     for entry in entries {
         validate_archive_entry(&entry.name, entry.bytes.len())?;
-        if files.insert(entry.name.clone(), entry.bytes.clone()).is_some() {
+        if files
+            .insert(entry.name.clone(), entry.bytes.clone())
+            .is_some()
+        {
             return Err(format!("foreign archive repeats entry '{}'", entry.name));
         }
     }
@@ -1447,7 +1487,10 @@ fn tar_gz(entries: &[ArchiveEntry]) -> Result<Vec<u8>, String> {
         }
         let mut header = [0u8; 512];
         header[..name.len()].copy_from_slice(name.as_bytes());
-        write_octal(&mut header[100..108], if is_native_name(&name) { 0o755 } else { 0o644 });
+        write_octal(
+            &mut header[100..108],
+            if is_native_name(&name) { 0o755 } else { 0o644 },
+        );
         write_octal(&mut header[108..116], 0);
         write_octal(&mut header[116..124], 0);
         write_octal(&mut header[124..136], bytes.len() as u64);
@@ -1507,7 +1550,10 @@ fn gzip_store(bytes: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 fn run_host_tool(command: &mut Command, tool: &str) -> Result<(), String> {
-    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     let status = command.status().map_err(|error| {
         if error.kind() == io::ErrorKind::NotFound {
             format!("required host tool '{tool}' was not found")
@@ -1569,11 +1615,8 @@ fn java_home() -> Result<PathBuf, String> {
 }
 
 fn work_dir(input: &LibraryInput, name: &str) -> Result<PathBuf, String> {
-    let directory = foreign_output_dir(&input.root)?.join(format!(
-        ".{}-{}",
-        name,
-        std::process::id()
-    ));
+    let directory =
+        foreign_output_dir(&input.root)?.join(format!(".{}-{}", name, std::process::id()));
     fs::create_dir(&directory)
         .map_err(|error| format!("could not create foreign build directory: {error}"))?;
     Ok(directory)
@@ -1672,7 +1715,10 @@ fn render_node_addon(input: &LibraryInput) -> String {
         output.push_str(
             "    if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != ",
         );
-        let _ = writeln!(output, "{params}) return jet_napi_error(env, \"invalid argument count\");");
+        let _ = writeln!(
+            output,
+            "{params}) return jet_napi_error(env, \"invalid argument count\");"
+        );
         for param in 0..params {
             match export.scalar {
                 JetLibScalar::Int => {
@@ -1719,11 +1765,7 @@ fn render_node_addon(input: &LibraryInput) -> String {
             .join(", ");
         match export.scalar {
             JetLibScalar::Int => {
-                let _ = writeln!(
-                    output,
-                    "    int64_t result = {}({args});",
-                    export.symbol
-                );
+                let _ = writeln!(output, "    int64_t result = {}({args});", export.symbol);
                 for param in 0..params {
                     if export.scalar == JetLibScalar::Text {
                         let _ = writeln!(output, "    free(raw{param});");
@@ -1732,27 +1774,15 @@ fn render_node_addon(input: &LibraryInput) -> String {
                 output.push_str("    napi_value value; if (napi_create_int64(env, result, &value) != napi_ok) return jet_napi_error(env, \"could not create result\"); return value;\n");
             }
             JetLibScalar::Float => {
-                let _ = writeln!(
-                    output,
-                    "    double result = {}({args});",
-                    export.symbol
-                );
+                let _ = writeln!(output, "    double result = {}({args});", export.symbol);
                 output.push_str("    napi_value value; if (napi_create_double(env, result, &value) != napi_ok) return jet_napi_error(env, \"could not create result\"); return value;\n");
             }
             JetLibScalar::Bool => {
-                let _ = writeln!(
-                    output,
-                    "    bool result = {}({args});",
-                    export.symbol
-                );
+                let _ = writeln!(output, "    bool result = {}({args});", export.symbol);
                 output.push_str("    napi_value value; if (napi_get_boolean(env, result, &value) != napi_ok) return jet_napi_error(env, \"could not create result\"); return value;\n");
             }
             JetLibScalar::Text => {
-                let _ = writeln!(
-                    output,
-                    "    JetText result = {}({args});",
-                    export.symbol
-                );
+                let _ = writeln!(output, "    JetText result = {}({args});", export.symbol);
                 for param in 0..params {
                     let _ = writeln!(output, "    free(raw{param});");
                 }
@@ -1808,12 +1838,7 @@ fn build_java_classes(
     result
 }
 
-fn render_java(
-    input: &LibraryInput,
-    package: &str,
-    class_name: &str,
-    jni_name: &str,
-) -> String {
+fn render_java(input: &LibraryInput, package: &str, class_name: &str, jni_name: &str) -> String {
     let platform = shared_platform();
     let mut output = format!(
         "package {package};\n\n\
@@ -1879,13 +1904,56 @@ fn java_type(value: JetLibScalar) -> &'static str {
 fn java_public_name(value: &str) -> String {
     let name = normalized_component(value, false);
     if [
-        "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char",
-        "class", "const", "continue", "default", "do", "double", "else", "enum",
-        "extends", "final", "finally", "float", "for", "goto", "if", "implements",
-        "import", "instanceof", "int", "interface", "long", "native", "new",
-        "package", "private", "protected", "public", "return", "short", "static",
-        "strictfp", "super", "switch", "synchronized", "this", "throw", "throws",
-        "transient", "try", "void", "volatile", "while",
+        "abstract",
+        "assert",
+        "boolean",
+        "break",
+        "byte",
+        "case",
+        "catch",
+        "char",
+        "class",
+        "const",
+        "continue",
+        "default",
+        "do",
+        "double",
+        "else",
+        "enum",
+        "extends",
+        "final",
+        "finally",
+        "float",
+        "for",
+        "goto",
+        "if",
+        "implements",
+        "import",
+        "instanceof",
+        "int",
+        "interface",
+        "long",
+        "native",
+        "new",
+        "package",
+        "private",
+        "protected",
+        "public",
+        "return",
+        "short",
+        "static",
+        "strictfp",
+        "super",
+        "switch",
+        "synchronized",
+        "this",
+        "throw",
+        "throws",
+        "transient",
+        "try",
+        "void",
+        "volatile",
+        "while",
     ]
     .contains(&name.as_str())
     {
@@ -1959,11 +2027,7 @@ fn jni_mangle(value: &str) -> String {
 }
 
 fn render_jni_bridge(input: &LibraryInput, package: &str, class_name: &str) -> String {
-    let prefix = format!(
-        "Java_{}_{}_",
-        jni_mangle(package),
-        jni_mangle(class_name)
-    );
+    let prefix = format!("Java_{}_{}_", jni_mangle(package), jni_mangle(class_name));
     let has_text = input
         .stamp
         .exports
@@ -1986,11 +2050,7 @@ fn render_jni_bridge(input: &LibraryInput, package: &str, class_name: &str) -> S
             "\nJNIEXPORT {result_type} JNICALL {prefix}jetCall{index}(JNIEnv *env, jclass ignored",
         );
         for param in 0..export.params {
-            let _ = write!(
-                output,
-                ", {} arg{param}",
-                jni_type(export.scalar)
-            );
+            let _ = write!(output, ", {} arg{param}", jni_type(export.scalar));
         }
         output.push_str(") {\n    (void)ignored;\n");
         let params = usize::try_from(export.params).unwrap_or(0);
@@ -2016,11 +2076,7 @@ fn render_jni_bridge(input: &LibraryInput, package: &str, class_name: &str) -> S
                 .map(|param| format!("value{param}"))
                 .collect::<Vec<_>>()
                 .join(", ");
-            let _ = writeln!(
-                output,
-                "    JetText result = {}({args});",
-                export.symbol
-            );
+            let _ = writeln!(output, "    JetText result = {}({args});", export.symbol);
             for param in 0..params {
                 let _ = writeln!(
                     output,
@@ -2038,8 +2094,7 @@ fn render_jni_bridge(input: &LibraryInput, package: &str, class_name: &str) -> S
             let _ = writeln!(
                 output,
                 "    return ({}){}({args});",
-                result_type,
-                export.symbol
+                result_type, export.symbol
             );
         }
         output.push_str("}\n");
@@ -2065,20 +2120,20 @@ fn build_dotnet_assembly(input: &LibraryInput, package: &str) -> Result<Vec<u8>,
         );
         fs::write(work.join("Library.csproj"), project.as_bytes())
             .map_err(|error| format!("could not write the .NET project: {error}"))?;
-        fs::write(work.join("Library.cs"), render_csharp(input, package).as_bytes())
-            .map_err(|error| format!("could not write the C# wrapper: {error}"))?;
+        fs::write(
+            work.join("Library.cs"),
+            render_csharp(input, package).as_bytes(),
+        )
+        .map_err(|error| format!("could not write the C# wrapper: {error}"))?;
         let mut command = Command::new("dotnet");
-        command
-            .arg("build")
-            .arg(work.join("Library.csproj"))
-            .args([
-                "-c",
-                "Release",
-                "--nologo",
-                "-v:q",
-                "--disable-build-servers",
-                "-p:RestoreIgnoreFailedSources=true",
-            ]);
+        command.arg("build").arg(work.join("Library.csproj")).args([
+            "-c",
+            "Release",
+            "--nologo",
+            "-v:q",
+            "--disable-build-servers",
+            "-p:RestoreIgnoreFailedSources=true",
+        ]);
         run_host_tool(&mut command, "dotnet")?;
         read_regular_file(
             &work
@@ -2224,16 +2279,83 @@ fn csharp_type(value: JetLibScalar) -> &'static str {
 fn csharp_public_name(value: &str) -> String {
     let name = normalized_component(value, false);
     if [
-        "abstract", "as", "base", "bool", "break", "byte", "case", "catch", "char",
-        "checked", "class", "const", "continue", "decimal", "default", "delegate",
-        "do", "double", "else", "enum", "event", "explicit", "extern", "false",
-        "finally", "fixed", "float", "for", "foreach", "goto", "if", "implicit",
-        "in", "int", "interface", "internal", "is", "lock", "long", "namespace",
-        "new", "null", "object", "operator", "out", "override", "params", "private",
-        "protected", "public", "readonly", "ref", "return", "sbyte", "sealed",
-        "short", "sizeof", "stackalloc", "static", "string", "struct", "switch",
-        "this", "throw", "true", "try", "typeof", "uint", "ulong", "unchecked",
-        "unsafe", "ushort", "using", "virtual", "void", "volatile", "while",
+        "abstract",
+        "as",
+        "base",
+        "bool",
+        "break",
+        "byte",
+        "case",
+        "catch",
+        "char",
+        "checked",
+        "class",
+        "const",
+        "continue",
+        "decimal",
+        "default",
+        "delegate",
+        "do",
+        "double",
+        "else",
+        "enum",
+        "event",
+        "explicit",
+        "extern",
+        "false",
+        "finally",
+        "fixed",
+        "float",
+        "for",
+        "foreach",
+        "goto",
+        "if",
+        "implicit",
+        "in",
+        "int",
+        "interface",
+        "internal",
+        "is",
+        "lock",
+        "long",
+        "namespace",
+        "new",
+        "null",
+        "object",
+        "operator",
+        "out",
+        "override",
+        "params",
+        "private",
+        "protected",
+        "public",
+        "readonly",
+        "ref",
+        "return",
+        "sbyte",
+        "sealed",
+        "short",
+        "sizeof",
+        "stackalloc",
+        "static",
+        "string",
+        "struct",
+        "switch",
+        "this",
+        "throw",
+        "true",
+        "try",
+        "typeof",
+        "uint",
+        "ulong",
+        "unchecked",
+        "unsafe",
+        "ushort",
+        "using",
+        "virtual",
+        "void",
+        "volatile",
+        "while",
         "yield",
     ]
     .contains(&name.as_str())
@@ -2289,8 +2411,13 @@ fn registry_endpoint(registry: ForeignRegistry) -> Result<String, String> {
                 registry.as_str()
             )
         })?;
-    if endpoint.chars().any(|ch| ch.is_control() || ch.is_whitespace()) {
-        return Err("foreign registry endpoint contains whitespace or control characters".to_string());
+    if endpoint
+        .chars()
+        .any(|ch| ch.is_control() || ch.is_whitespace())
+    {
+        return Err(
+            "foreign registry endpoint contains whitespace or control characters".to_string(),
+        );
     }
     if endpoint.contains('@') {
         return Err(
@@ -2367,11 +2494,7 @@ fn publish_archive(
     run_host_tool(&mut command, registry.as_str())
 }
 
-fn publish_to_file_registry(
-    directory: &str,
-    artifact: &Path,
-    bytes: &[u8],
-) -> Result<(), String> {
+fn publish_to_file_registry(directory: &str, artifact: &Path, bytes: &[u8]) -> Result<(), String> {
     let root = Path::new(directory);
     if let Ok(metadata) = fs::symlink_metadata(root) {
         if metadata.file_type().is_symlink() || !metadata.is_dir() {
@@ -2381,8 +2504,12 @@ fn publish_to_file_registry(
             ));
         }
     } else {
-        fs::create_dir_all(root)
-            .map_err(|error| format!("could not create file registry '{}': {error}", root.display()))?;
+        fs::create_dir_all(root).map_err(|error| {
+            format!(
+                "could not create file registry '{}': {error}",
+                root.display()
+            )
+        })?;
     }
     let name = artifact
         .file_name()

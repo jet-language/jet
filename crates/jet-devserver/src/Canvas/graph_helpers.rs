@@ -554,7 +554,8 @@ fn query_error_with_diagnostics(
     )
 }
 
-pub(super) fn project_edit_ok(
+
+pub(super) fn project_edit_ok_with_audit(
     op: &str,
     preview: bool,
     changed: bool,
@@ -562,9 +563,15 @@ pub(super) fn project_edit_ok(
     after_revision: &str,
     touched_files: &str,
     diff: &str,
+    audit: &str,
 ) -> String {
+    let game_audit = if audit.is_empty() {
+        String::new()
+    } else {
+        format!(",\"game_selection\":{audit}")
+    };
     format!(
-        "{{\"protocol\":\"jet.canvas.project.edit\",\"schema_version\":{},\"ok\":true,\"op\":{},\"preview\":{},\"changed\":{},\"project_revision\":{},\"after_project_revision\":{},\"writes\":{},\"authority\":[\"canvas.source_edit:project\"],\"audit\":{{\"touched_files\":[{}],\"diagnostics\":[]}},\"diff\":{}}}",
+        "{{\"protocol\":\"jet.canvas.project.edit\",\"schema_version\":{},\"ok\":true,\"op\":{},\"preview\":{},\"changed\":{},\"project_revision\":{},\"after_project_revision\":{},\"writes\":{},\"authority\":[\"canvas.source_edit:project\"],\"audit\":{{\"touched_files\":[{}],\"diagnostics\":[]{}}},\"diff\":{}}}",
         PROJECT_SCHEMA_VERSION,
         json_str(op),
         if preview { "true" } else { "false" },
@@ -573,6 +580,7 @@ pub(super) fn project_edit_ok(
         json_str(after_revision),
         if preview { "\"preview_only\"" } else { "\"source_transaction\"" },
         touched_files,
+        game_audit,
         json_str(diff)
     )
 }

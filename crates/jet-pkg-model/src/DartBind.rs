@@ -172,14 +172,32 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
         host_source: render_dart_host(&canonical, lib, &functions),
         host_rust: render_host_rust(lib, &functions),
         bound: functions.iter().map(|v| v.jet.clone()).collect(),
+        provenance: {
+            let mut provenance = format!(
+                "schema=jet-dart-bind-v1\nsha256={}\ndart={}\nsdk={}\ncontract={}\n",
+                crate::SHA256::sha256_hex(&identity),
+                dart.display(),
+                sdk.display(),
+                canonical.display()
+            );
+            crate::ForeignBridge::append_boundary_for_artifact(
+                &mut provenance,
+                *crate::AST::binder_descriptor(crate::AST::ForeignLanguage::Dart)
+                    .ok_or_else(|| BindError::Source("Dart binder descriptor is not registered".into()))?,
+                lib,
+                &canonical,
+                &archive,
+                format!(
+                    "dart={};cc={};ar={}",
+                    dart.display(),
+                    crate::ForeignBridge::tool_identity("cc"),
+                    crate::ForeignBridge::tool_identity("ar")
+                ),
+            )
+            .map_err(BindError::IO)?;
+            provenance
+        },
         archive,
-        provenance: format!(
-            "schema=jet-dart-bind-v1\nsha256={}\ndart={}\nsdk={}\ncontract={}\n",
-            crate::SHA256::sha256_hex(&identity),
-            dart.display(),
-            sdk.display(),
-            canonical.display()
-        ),
     };
     let _ = std::fs::remove_dir_all(&build);
     Ok(result)

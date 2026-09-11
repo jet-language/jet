@@ -10,6 +10,12 @@ Mine peer languages for ideas that address Jet surface gaps, issues, and
 weaknesses. Prefer primary sources. Record idea, Jet use, and failure to avoid.
 This is research, not ratification.
 
+
+Before running, read `.agents/skills/_shared/audit-dispositions.md`. It owns
+shared publication, workflow-boundary, and disposition mechanics; this method
+still owns source selection, micro-sweep mining, peer comparison, and
+non-ratifying recommendations.
+
 ## The standing lens
 
 Apply `.agents/skills/_shared/standing-lens.md` in full: the four questions, the
@@ -40,14 +46,9 @@ failure mode has not been researched, only admired.
 
 ## Output
 
-Write one markdown report under `docs/research/` via the Tower CLI (never hand-edit board JSON):
-
-```
-node plugins/tower/tower.mjs docs add --section research --id <skill>-YYYY-MM-DD --title "…" --file -
-```
-
-Or `docs update docs/research/<skill>-YYYY-MM-DD.md --file -` for the same day only when the owner asks to revise that run.
-Never overwrite a different day's note. Do not write reports under `docs/plans/`.
-
-Follow `AGENTS.md`. Pick this skill alone — do not chain other audit/research
-skills unless the owner asks.
+This is a report-only, non-ratifying method. Write one markdown report under
+`docs/research/` through the project-approved non-serve CLI. Do not create
+Tower work, ballots, or implementation edits unless the owner explicitly asks.
+Read `.agents/skills/_shared/audit-dispositions.md` before the run and use it
+for publication rules and the required finding-disposition table. Report
+completion does not ratify or implement a proposed idea.

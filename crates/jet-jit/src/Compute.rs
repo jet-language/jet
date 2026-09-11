@@ -16,6 +16,7 @@ use crate::runtime_host::{JitCallableSlot, bind_jit_callable_handle, jit_callabl
 
 #[allow(dead_code, unused_imports)]
 mod semantics {
+    use crate::Math::simd_lanes::{jet_simd_reduce_fixed_iter, JetSimdScalar};
     use crate::{JetDisplay, JetShow};
     use jet_foundation::Outcome::jet_list_bounds_message;
     use jet_foundation::StructuralDebug::jet_debug_range;
@@ -33,6 +34,7 @@ mod semantics {
 
     include!("../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
     include!("../../jet-codegen/src/Prelude/Core/ViewAccess.rs");
+    include!("../../jet-codegen/src/Prelude/Core/ParallelKernel.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/Compute.rs");
 
     #[cfg(test)]
@@ -104,19 +106,55 @@ mod semantics {
             assert_eq!(jet_compute_simd_backend(), detected_backend());
         }
 
+        fn lane_accumulation_oracle<const WIDTH: usize>(left: &[f32], right: &[f32]) -> f32 {
+            let mut lanes = [0.0_f32; WIDTH];
+            let mut index = 0usize;
+            let limit = left.len() / WIDTH * WIDTH;
+            while index < limit {
+                for lane in 0..WIDTH {
+                    lanes[lane] += left[index + lane] * right[index + lane];
+                }
+                index += WIDTH;
+            }
+            let mut sum = 0.0_f32;
+            for lane in lanes {
+                sum += lane;
+            }
+            while index < left.len() {
+                sum += left[index] * right[index];
+                index += 1;
+            }
+            sum
+        }
+
         #[test]
         fn simd_dot_paths_match_scalar_bit_for_bit_including_tail() {
             let (left, right) = sample_lanes(4099);
             let scalar = jet_compute_f32_dot_scalar(&left, &right);
-            for backend in [JetComputeSimdBackend::Sse2, JetComputeSimdBackend::Avx2] {
+            for (backend, width) in [
+                (JetComputeSimdBackend::Sse2, 4usize),
+                (JetComputeSimdBackend::Avx2, 8usize),
+            ] {
                 if !jet_compute_simd_backend_available(backend) {
                     continue;
                 }
                 let actual = jet_compute_f32_dot(backend, &left, &right).unwrap();
+                let oracle = match width {
+                    4 => lane_accumulation_oracle::<4>(&left, &right),
+                    8 => lane_accumulation_oracle::<8>(&left, &right),
+                    _ => unreachable!(),
+                };
                 assert_eq!(
                     actual.to_bits(),
-                    scalar.to_bits(),
-                    "{} path changed ordered f32 reduction",
+                    oracle.to_bits(),
+                    "{} path changed lane-accumulation f32 reduction",
+                    backend.name()
+                );
+                let delta = (actual - scalar).abs();
+                let scale = scalar.abs().max(1.0);
+                assert!(
+                    delta / scale < 1e-5,
+                    "{} path drifted from sequential scalar: actual={actual} scalar={scalar}",
                     backend.name()
                 );
             }
@@ -164,11 +202,13 @@ mod semantics {
                 return;
             }
             let (left, right) = sample_lanes(1 << 18);
-            let scalar = (0..3)
+            let _ = measure(2, || jet_compute_f32_dot_scalar(&left, &right));
+            let _ = measure(2, || jet_compute_f32_dot(backend, &left, &right).unwrap());
+            let scalar = (0..7)
                 .map(|_| measure(4, || jet_compute_f32_dot_scalar(&left, &right)))
                 .min()
                 .unwrap();
-            let simd = (0..3)
+            let simd = (0..7)
                 .map(|_| measure(4, || jet_compute_f32_dot(backend, &left, &right).unwrap()))
                 .min()
                 .unwrap();
@@ -517,79 +557,17 @@ mod semantics {
     pub(super) type Device = JetComputeDevice;
     pub(super) type Stream = JetComputeStream;
     pub(super) type Sparse = JetSparseCsr;
-    pub(super) type Tape = std::sync::Arc<std::sync::Mutex<JetComputeTape>>;
-    pub(super) type VjpState = JetComputeVjpState;
 
-    pub(super) enum TransformResult {
-        Gradient(Vec<Tensor>),
-        ValueAndGradient {
-            value: Tensor,
-            gradients: Vec<Tensor>,
-        },
-        Vjp {
-            value: Tensor,
-            state: VjpState,
-        },
-        Jvp {
-            value: Tensor,
-            tangent: Tensor,
-        },
-    }
 
-    pub(super) fn trace_inputs(inputs: Vec<Tensor>) -> (Tape, Vec<Tensor>) {
-        jet_compute_trace_inputs(inputs)
-    }
 
-    pub(super) fn vjp_begin(value: Tensor, tape: Tape) -> VjpState {
-        jet_compute_vjp_begin(value, tape)
-    }
 
-    pub(super) fn transform(
-        method: &str,
-        state: &VjpState,
-        tangents: &[Tensor],
-        targets: &[i64],
-    ) -> Result<TransformResult, String> {
-        match jet_compute_transform(method, state, tangents, targets) {
-            Ok(JetComputeTransformResult::Gradient(values)) => {
-                Ok(TransformResult::Gradient(values))
-            }
-            Ok(JetComputeTransformResult::ValueAndGradient { value, gradients }) => {
-                Ok(TransformResult::ValueAndGradient { value, gradients })
-            }
-            Ok(JetComputeTransformResult::Vjp { value, state }) => {
-                Ok(TransformResult::Vjp { value, state })
-            }
-            Ok(JetComputeTransformResult::Jvp { value, tangent }) => {
-                Ok(TransformResult::Jvp { value, tangent })
-            }
-            Err(error) => Err(error.jet_show()),
-        }
-    }
 
     pub(super) fn error_message(error: &JetComputeError) -> String {
         error.jet_show()
     }
 
-    pub(super) fn nested_gradient(
-        states: &[VjpState],
-        targets: &[i64],
-    ) -> Result<Vec<Vec<Tensor>>, String> {
-        jet_compute_nested_gradient(states, targets).map_err(|error| error.jet_show())
-    }
 
-    pub(super) fn vjp_pull(
-        state: &VjpState,
-        seed: &Tensor,
-        targets: &[i64],
-    ) -> Result<Vec<Tensor>, String> {
-        jet_compute_vjp_pull(state, seed, targets).map_err(|error| error.jet_show())
-    }
 
-    pub(super) fn vjp_gradient(state: &VjpState, targets: &[i64]) -> Result<Vec<Tensor>, String> {
-        let seed = jet_compute_gradient_seed(state).map_err(|error| error.jet_show())?;
-        vjp_pull(state, &seed, targets)
-    }
 
     pub(super) fn from_list(values: &[f64]) -> Result<Tensor, String> {
         jet_compute_from_list(&values.to_vec()).map_err(|error| error.jet_show())
@@ -919,7 +897,6 @@ pub(crate) struct ComputeState {
     windows: Vec<TensorWindowSlot>,
     streams: Vec<Option<semantics::Stream>>,
     sparse: Vec<Option<semantics::Sparse>>,
-    vjp_states: Vec<Option<semantics::VjpState>>,
     curried_handles: Vec<i64>,
     deferred_tensor_drop_depth: usize,
     deferred_tensor_drops: Vec<i64>,
@@ -931,7 +908,6 @@ impl ComputeState {
         self.slots.clear();
         self.streams.clear();
         self.sparse.clear();
-        self.vjp_states.clear();
         self.deferred_tensor_drop_depth = 0;
         self.deferred_tensor_drops.clear();
         for handle in self.curried_handles.drain(..) {
@@ -973,11 +949,6 @@ fn sparse<'a>(runtime: &'a JitRuntime, handle: i64) -> Option<&'a semantics::Spa
         .and_then(Option::as_ref)
 }
 
-fn vjp_state<'a>(runtime: &'a JitRuntime, handle: i64) -> Option<&'a semantics::VjpState> {
-    tensor_index(handle)
-        .and_then(|index| runtime.compute.vjp_states.get(index))
-        .and_then(Option::as_ref)
-}
 
 fn slot<'a>(runtime: &'a JitRuntime, handle: i64) -> Option<&'a TensorSlot> {
     tensor_index(handle)
@@ -1135,13 +1106,6 @@ fn alloc_tensor_record(
     alloc_record_words(runtime, &handles, context)
 }
 
-fn read_tensor_list(runtime: &JitRuntime, handle: i64) -> Option<Vec<i64>> {
-    let values = read_int_list(runtime, handle)?;
-    values
-        .iter()
-        .all(|value| slot(runtime, *value).is_some())
-        .then_some(values)
-}
 
 fn read_record_words(runtime: &JitRuntime, handle: i64, count: usize) -> Option<Vec<i64>> {
     (0..count)
@@ -1242,223 +1206,13 @@ fn transform_failure(runtime: &mut JitRuntime, message: &str) -> i64 {
     0
 }
 
-fn alloc_vjp_run(
-    runtime: &mut JitRuntime,
-    value: semantics::Tensor,
-    state: semantics::VjpState,
-    targets: &[i64],
-    targets_handle: i64,
-) -> i64 {
-    let gradients = match semantics::vjp_gradient(&state, targets) {
-        Ok(values) => values,
-        Err(message) => return transform_failure(runtime, &message),
-    };
-    runtime.compute.vjp_states.push(Some(state));
-    let state_handle = runtime.compute.vjp_states.len() as i64;
-    let pull_env = alloc_record_words(
-        runtime,
-        &[state_handle, targets_handle],
-        "core.compute.vjp.pull",
-    );
-    if pull_env == 0 {
-        return 0;
-    }
-    let pull = bind_jit_callable_handle(
-        runtime,
-        crate::host_seam::guarded_addr(jet_jit_compute_vjp_pull) as i64,
-        pull_env,
-        true,
-    );
-    if pull == 0 {
-        return 0;
-    }
-    let value_handle = alloc_tensor(runtime, value);
-    let gradients_handle = alloc_tensor_record(runtime, &gradients, "core.compute.vjp.grads");
-    if value_handle == 0 || gradients_handle == 0 {
-        return 0;
-    }
-    let grads = bind_jit_callable_handle(
-        runtime,
-        crate::host_seam::guarded_addr(jet_jit_compute_vjp_grads_value) as i64,
-        gradients_handle,
-        true,
-    );
-    if grads == 0 {
-        return 0;
-    }
-    alloc_record_words(runtime, &[value_handle, pull, grads], "core.compute.vjp")
-}
 
-fn run_transform(
-    runtime: &mut JitRuntime,
-    base_handle: i64,
-    inputs_handle: i64,
-    targets_handle: i64,
-    method: &str,
-    base_arity: usize,
-    result_fields: usize,
-) -> i64 {
-    let Some(callable) = jit_callable_parts(runtime, base_handle) else {
-        return transform_failure(
-            runtime,
-            "core.compute transform received an invalid function",
-        );
-    };
-    let Some(inputs) = read_tensor_list(runtime, inputs_handle) else {
-        return transform_failure(runtime, "core.compute transform expects Tensor arguments");
-    };
-    let Some(targets) = read_int_list(runtime, targets_handle) else {
-        return transform_failure(runtime, "core.compute transform expects integer targets");
-    };
-    let expected_inputs = if method == "jvp" {
-        base_arity.saturating_mul(2)
-    } else {
-        base_arity
-    };
-    if inputs.len() != expected_inputs {
-        return transform_failure(runtime, "core.compute transform argument count mismatch");
-    }
-    if base_arity > 6 {
-        return transform_failure(
-            runtime,
-            "core.compute transform function arity exceeds the resident ABI",
-        );
-    }
-    let primal_handles = &inputs[..base_arity];
-    let tangent_handles = if method == "jvp" {
-        &inputs[base_arity..]
-    } else {
-        &[]
-    };
-    let input_tensors = match primal_handles
-        .iter()
-        .map(|handle| slot(runtime, *handle).map(|slot| slot.tensor.clone()))
-        .collect::<Option<Vec<_>>>()
-    {
-        Some(values) => values,
-        None => {
-            return transform_failure(runtime, "core.compute transform received an invalid Tensor");
-        }
-    };
-    let tangent_tensors = match tangent_handles
-        .iter()
-        .map(|handle| slot(runtime, *handle).map(|slot| slot.tensor.clone()))
-        .collect::<Option<Vec<_>>>()
-    {
-        Some(values) => values,
-        None => {
-            return transform_failure(
-                runtime,
-                "core.compute.jvp received an invalid tangent Tensor",
-            );
-        }
-    };
-    let (tape, traced) = semantics::trace_inputs(input_tensors);
-    let mut originals = Vec::with_capacity(primal_handles.len());
-    for (handle, traced_tensor) in primal_handles.iter().zip(traced.iter()) {
-        let Some(slot) = slot_mut(runtime, *handle) else {
-            return transform_failure(runtime, "core.compute transform received an invalid Tensor");
-        };
-        originals.push((*handle, slot.tensor.clone()));
-        slot.tensor = traced_tensor.clone();
-    }
-    let drop_mark = begin_tensor_drop_deferral(runtime);
-    let output_handle = invoke_callable(callable, primal_handles);
-    let output_tensors = if output_handle != 0 && result_fields != 0 {
-        read_record_words(runtime, output_handle, result_fields).and_then(|fields| {
-            fields
-                .into_iter()
-                .map(|handle| slot(runtime, handle).map(|slot| slot.tensor.clone()))
-                .collect::<Option<Vec<_>>>()
-        })
-    } else {
-        None
-    };
-    let output_tensor = if output_handle != 0 && result_fields == 0 {
-        slot(runtime, output_handle).map(|slot| slot.tensor.clone())
-    } else {
-        None
-    };
-    for (handle, original) in originals {
-        if let Some(slot) = slot_mut(runtime, handle) {
-            slot.tensor = original;
-        }
-    }
-    finish_tensor_drop_deferral(runtime, drop_mark, primal_handles);
-    if output_handle == 0 {
-        return transform_failure(runtime, "core.compute transform function returned no value");
-    }
-    let targets = targets.as_slice();
-    if result_fields != 0 {
-        if method != "gradient" {
-            return transform_failure(runtime, "core.compute transform requires a Tensor result");
-        }
-        let Some(tensors) = output_tensors else {
-            return transform_failure(runtime, "core.compute.gradient returned an invalid tuple");
-        };
-        let states = tensors
-            .into_iter()
-            .map(|tensor| semantics::vjp_begin(tensor, tape.clone()))
-            .collect::<Vec<_>>();
-        let nested = match semantics::nested_gradient(&states, targets) {
-            Ok(values) => values,
-            Err(message) => return transform_failure(runtime, &message),
-        };
-        let mut outer_handles = Vec::with_capacity(nested.len());
-        for values in nested {
-            let handle = alloc_tensor_record(runtime, &values, "core.compute.gradient");
-            if handle == 0 {
-                return 0;
-            }
-            outer_handles.push(handle);
-        }
-        return alloc_record_words(runtime, &outer_handles, "core.compute.gradient");
-    }
-    let Some(output_tensor) = output_tensor else {
-        return transform_failure(runtime, "core.compute transform returned an invalid Tensor");
-    };
-    let state = semantics::vjp_begin(output_tensor, tape);
-    let transform = match semantics::transform(method, &state, &tangent_tensors, targets) {
-        Ok(result) => result,
-        Err(message) => return transform_failure(runtime, &message),
-    };
-    match transform {
-        semantics::TransformResult::Gradient(values) => {
-            alloc_tensor_record(runtime, &values, "core.compute.gradient")
-        }
-        semantics::TransformResult::ValueAndGradient { value, gradients } => {
-            let value_handle = alloc_tensor(runtime, value);
-            let gradients_handle =
-                alloc_tensor_record(runtime, &gradients, "core.compute.value_and_gradient");
-            if value_handle == 0 || gradients_handle == 0 {
-                0
-            } else {
-                alloc_record_words(
-                    runtime,
-                    &[value_handle, gradients_handle],
-                    "core.compute.value_and_gradient",
-                )
-            }
-        }
-        semantics::TransformResult::Vjp { value, state } => {
-            alloc_vjp_run(runtime, value, state, targets, targets_handle)
-        }
-        semantics::TransformResult::Jvp { value, tangent } => {
-            let value_handle = alloc_tensor(runtime, value);
-            let tangent_handle = alloc_tensor(runtime, tangent);
-            if value_handle == 0 || tangent_handle == 0 {
-                0
-            } else {
-                alloc_record_words(runtime, &[value_handle, tangent_handle], "core.compute.jvp")
-            }
-        }
-    }
-}
 
 fn curried_base(
     base_handle: i64,
     base_arity: usize,
     result_fields: usize,
+    error_type_id: Option<u64>,
 ) -> semantics::JetComputeBase {
     semantics::JetComputeBase::new(base_arity, move |inputs| {
         let result = Concurrency::with_runtime_mut(|runtime| {
@@ -1482,7 +1236,26 @@ fn curried_base(
             }
             let drop_mark = begin_tensor_drop_deferral(runtime);
             let output_handle = invoke_callable(callable, &handles);
-            let value = if output_handle == 0 {
+            let output_handle = match error_type_id {
+                Some(error_type_id) => {
+                    match crate::runtime_host::jit_result_parts(runtime, output_handle) {
+                        Some((true, bits)) => Ok(bits as i64),
+                        Some((false, bits)) => Err(semantics::JetComputeError::Unsupported(
+                            format!(
+                                "autodiff callable failed: {}",
+                                crate::runtime_host::display_handle_text(
+                                    runtime, bits as i64, error_type_id, 0,
+                                ),
+                            ),
+                        )),
+                        None => Err(semantics::JetComputeError::Unsupported(
+                            "core.compute transform returned an invalid Result".to_string(),
+                        )),
+                    }
+                }
+                None => Ok(output_handle),
+            };
+            let value = output_handle.and_then(|output_handle| if output_handle == 0 {
                 Err(semantics::JetComputeError::Unsupported(
                     "core.compute transform function returned no value".to_string(),
                 ))
@@ -1508,7 +1281,7 @@ fn curried_base(
                             "core.compute.gradient returned an invalid tuple".to_string(),
                         )
                     })
-            };
+            });
             finish_tensor_drop_deferral(runtime, drop_mark, &[]);
             for handle in handles {
                 release_tensor(runtime, handle);
@@ -1650,9 +1423,6 @@ fn jet_jit_compute_curried_pull(env: i64, seed: i64) -> i64 {
     Concurrency::with_runtime_mut(|runtime| run_curried_handle(runtime, env, &[seed]))
 }
 
-fn jet_jit_compute_vjp_grads_value(env: i64) -> i64 {
-    env
-}
 
 fn jet_jit_compute_curried_grads(env: i64) -> i64 {
     Concurrency::with_runtime_mut(|runtime| {
@@ -1706,27 +1476,6 @@ fn jet_jit_compute_curried_call_6(env: i64, a: i64, b: i64, c: i64, d: i64, e: i
     })
 }
 
-fn jet_jit_compute_vjp_pull(env: i64, seed: i64) -> i64 {
-    Concurrency::with_runtime_mut(|runtime| {
-        let Some(fields) = read_record_words(runtime, env, 2) else {
-            return transform_failure(runtime, "core.compute.vjp.pull environment is invalid");
-        };
-        let Some(state) = vjp_state(runtime, fields[0]).cloned() else {
-            return transform_failure(runtime, "core.compute.vjp.pull state is invalid");
-        };
-        let Some(seed) = slot(runtime, seed).map(|slot| slot.tensor.clone()) else {
-            return transform_failure(runtime, "core.compute.vjp.pull seed is invalid");
-        };
-        let Some(targets) = read_int_list(runtime, fields[1]) else {
-            return transform_failure(runtime, "core.compute.vjp.pull targets are invalid");
-        };
-        let values = match semantics::vjp_pull(&state, &seed, &targets) {
-            Ok(values) => values,
-            Err(message) => return transform_failure(runtime, &message),
-        };
-        alloc_tensor_record(runtime, &values, "core.compute.vjp.pull")
-    })
-}
 
 fn jet_jit_compute_transform(
     base: i64,
@@ -1735,33 +1484,60 @@ fn jet_jit_compute_transform(
     method: i64,
     base_arity: i64,
     result_fields: i64,
+    return_type_id: i64,
 ) -> i64 {
     Concurrency::with_runtime_mut(|runtime| {
-        let Some(kind) = semantics::JetComputeTransformKind::from_i64(method) else {
-            return transform_failure(runtime, "core.compute transform method is invalid");
+        let (plan, _) = match create_transform_plan(
+            runtime, base, targets, method, base_arity, result_fields, return_type_id,
+        ) {
+            Ok(plan) => plan,
+            Err(error) => return transform_failure(runtime, &error),
         };
-        let Ok(base_arity) = usize::try_from(base_arity) else {
-            return transform_failure(runtime, "core.compute transform arity is invalid");
-        };
-        let Ok(result_fields) = usize::try_from(result_fields) else {
-            return transform_failure(runtime, "core.compute transform result shape is invalid");
-        };
-        if inputs != 0 {
-            return run_transform(
-                runtime,
-                base,
-                inputs,
-                targets,
-                kind.name(),
-                base_arity,
-                result_fields,
-            );
-        }
-        transform_failure(
-            runtime,
-            "core.compute curried transform needs its constructor seam",
-        )
+        let result = run_curried_call_list(runtime, plan, inputs);
+        semantics::jet_compute_curried_drop(plan);
+        result
     })
+}
+
+fn create_transform_plan(
+    runtime: &mut JitRuntime,
+    base: i64,
+    targets: i64,
+    method: i64,
+    base_arity: i64,
+    result_fields: i64,
+    return_type_id: i64,
+) -> Result<(i64, usize), String> {
+    let kind = semantics::JetComputeTransformKind::from_i64(method)
+        .ok_or("core.compute transform method is invalid")?;
+    let base_arity = usize::try_from(base_arity)
+        .map_err(|_| "core.compute transform arity is invalid")?;
+    let result_fields = usize::try_from(result_fields)
+        .map_err(|_| "core.compute transform result shape is invalid")?;
+    let targets = read_int_list(runtime, targets)
+        .ok_or("core.compute transform expects integer targets")?;
+    let descriptor = runtime.runtime_type_descriptor(return_type_id as u64)
+        .ok_or("core.compute transform has no checked return descriptor")?;
+    let error_type_id = descriptor.err;
+    let adapter_arity = if kind.is_jvp() {
+        base_arity.saturating_mul(2)
+    } else {
+        base_arity
+    };
+    if adapter_arity > 6 {
+        return Err("core.compute transform function arity exceeds the resident ABI".to_string());
+    }
+    let plan = semantics::jet_compute_curried_new(
+        curried_base(base, base_arity, result_fields, error_type_id),
+        kind,
+        &targets,
+        if result_fields == 0 {
+            semantics::JetComputeResultShape::Tensor
+        } else {
+            semantics::JetComputeResultShape::TensorTuple(result_fields)
+        },
+    );
+    Ok((plan, adapter_arity))
 }
 
 fn jet_jit_compute_curried_new(
@@ -1770,36 +1546,16 @@ fn jet_jit_compute_curried_new(
     method: i64,
     base_arity: i64,
     result_fields: i64,
+    return_type_id: i64,
 ) -> i64 {
     Concurrency::with_runtime_mut(|runtime| {
-        let Some(kind) = semantics::JetComputeTransformKind::from_i64(method) else {
-            return transform_failure(runtime, "core.compute transform method is invalid");
+        let (plan, adapter_arity) = match create_transform_plan(
+            runtime, base, targets, method, base_arity, result_fields, return_type_id,
+        ) {
+            Ok(plan) => plan,
+            Err(error) => return transform_failure(runtime, &error),
         };
-        let Ok(base_arity) = usize::try_from(base_arity) else {
-            return transform_failure(runtime, "core.compute transform arity is invalid");
-        };
-        let Ok(result_fields) = usize::try_from(result_fields) else {
-            return transform_failure(runtime, "core.compute transform result shape is invalid");
-        };
-        let Some(targets) = read_int_list(runtime, targets) else {
-            return transform_failure(runtime, "core.compute transform expects integer targets");
-        };
-        let plan = semantics::jet_compute_curried_new(
-            curried_base(base, base_arity, result_fields),
-            kind,
-            &targets,
-            if result_fields == 0 {
-                semantics::JetComputeResultShape::Tensor
-            } else {
-                semantics::JetComputeResultShape::TensorTuple(result_fields)
-            },
-        );
         runtime.compute.curried_handles.push(plan);
-        let adapter_arity = if kind.is_jvp() {
-            base_arity.saturating_mul(2)
-        } else {
-            base_arity
-        };
         // These adapters are handed to generated code as plain callable
         // addresses rather than as named `host_fns!` imports, so they need the
         // same no-unwind boundary explicitly (#1997, `host_seam.rs`).
@@ -2797,7 +2553,7 @@ host_fns! {
                 cranelift_codegen::ir::types::I64,
             ));
         let mut sig_transform = cranelift_codegen::ir::Signature::new(cc);
-        for _ in 0..6 {
+        for _ in 0..7 {
             sig_transform
                 .params
                 .push(cranelift_codegen::ir::AbiParam::new(
@@ -2810,7 +2566,7 @@ host_fns! {
                 cranelift_codegen::ir::types::I64,
             ));
         let mut sig_curried_new = cranelift_codegen::ir::Signature::new(cc);
-        for _ in 0..5 {
+        for _ in 0..6 {
             sig_curried_new
                 .params
                 .push(cranelift_codegen::ir::AbiParam::new(

@@ -1,15 +1,14 @@
 # Core API ergonomic laws (D-STDRUBRIC1=A)
 
-Review rubric for all Core API additions. Every new function, method, or type
-must pass each law before landing. No exceptions; file a follow-up card for any
-existing drift found during review.
+This rubric governs Core API additions. Every new function, method, or type must
+pass each law before landing. Existing drift does not become an exception.
 
 The talks add two review questions: is this function honest—does its projected
 effect row plus signature tell the complete story? Does its body stay at one
 level of abstraction—if it zooms into character codes or hand-rolls a search,
 that work belongs in a named brick? These are review prompts, not new
 mechanisms; I8 is unchanged. The [2026-08-21 function-design canon mining
-report](../reference/prior-art.md#function-design-canon) records the Logan
+report](reference/prior-art.md#function-design-canon) records the Logan
 Smith video and its three linked sources.
 
 ---
@@ -39,7 +38,7 @@ Smith video and its three linked sources.
 ### Collection verb table (D-ONCE-VERB1=A)
 
 This table is the one review truth row for collection verbs. Reference docs and
-future API reviews render this row; they do not create a second verb list.
+API reviews render this row; they do not create a second verb list.
 
 | Job | List | Map | Set | Queue | PriorityQueue |
 | --- | --- | --- | --- | --- | --- |
@@ -142,7 +141,7 @@ method because its parameter and control shape differ.
 
 The family has one job per spelling. Beginners learn ambient `print` first.
 
-| Spelling | Job | Status and default |
+| Spelling | Job | Default or disposition |
 | --- | --- | --- |
 | `print(value, ...)` | Display each value and end each line. | Beginner default; no import. |
 | `term.print(value, ...)` | The same one-line-per-value print through `core.term`. | Qualified twin for `#NoPrelude` files. |
@@ -155,12 +154,9 @@ debug representation selector; it is not a second print API.
 
 ---
 
-## Review template
-
-When submitting a new or changed Core API for merge, copy this checklist into
-the review record. It is self-contained: a reviewer records the real call
-sites, the defaults rows, the options audit, and the drift cards here. No
-proposal lookup is required.
+When reviewing a new or changed Core API, use this checklist. Record the real
+call sites, defaults, options audit, and required evidence in the review
+system; this page supplies the laws.
 
 ```
 ## Core API review
@@ -170,7 +166,7 @@ Ratified decision(s): <D-XXX / S-YYY>
 Changed call sites: <file:line and the call read aloud>
 Defaults rows: <table rows or `none`>
 D4 audit: <scope, result, and every exception>
-Drift cards: <card number for every existing exception, or `none`>
+Exception disposition: <ratified policy or `none`>
 Required evidence: <example, diagnostic snapshot, and focused proof>
 
 - [ ] `L1` Naming is plain English, predicate-prefixed, and uses S66 acronyms.
@@ -216,38 +212,6 @@ checklist does not reopen that reconciliation.
 
 ---
 
-## Known drift (follow-up cards)
-
-This is the current audit inventory, not a grandfather list. A row can point to
-a completed owner card when that card shipped the surface but did not reconcile
-the later doctrine rule. Such a row remains drift until a later decision and
-implementation close it.
-
-| Gap | API | Law | Follow-up |
-|-----|-----|-----|-----------|
-| Layering split between the typed/raw and one-shot/configurable rungs | `core.crypto.expert`, `core.http.client`, `core.time`, `core.mem` | `L-A`, `L-D` | #1725 |
-| Boolean client policy controls (`protocols`, `allow_http_downgrade`, and `same_origin_credentials`) | `core.http.client` / `HTTPRedirectPolicy.Follow` | `D4` | #301, #1725 |
-| Boolean static-file policy controls (`index`, `dotfiles`, `follow_links`) | `core.http.server.static_files` | `D4` | #1273 |
-| Boolean CORS policy control (`credentials`) | `core.http.server.cors_policy` | `D4` | #1273 |
-| Boolean encoding policy controls (`canonical`, `require_canonical`, `comments`, and edition-gated `allow_*` flags) | `core.encoding` | `D4` | #712 |
-| Three Boolean regex policy flags | `core.regex.flags` | `D4` | #1471 |
-| Boolean socket policy setter | `core.net.set_nodelay` | `D4` | #300 |
-| Empty-byte lookup result on missing or invalid archive entry | `core.archive.tar_get` | `F2` | #1470 |
-| Empty-string absence results and process-status sentinels | `core.url` accessors and `core.sys` facts | `F2` | #1472, #1465 |
-
-Evidence boundary for this inventory: the 2026-08-14 scan covered the current
-Core declarations in `crates/jet-sema/src/Sema/CheckerCoreLib`, the matching
-Prelude surfaces, and `docs/reference/core-library.md` plus the ratified
-encoding scope in `docs/spec/encoding-decisions.md`. Boolean results, data
-fields, predicates, implementation parameters, and constructor sentinels are
-not D4 options. The rows above are the policy and lookup exceptions found in
-that scan; every exception has a card home and none is approved by this table.
-
-Resolved disposition, #1691: `core.crypto.expert` now uses distinct
-`x25519_raw` / `hkdf_sha256_raw` names, and
-`examples/features/crypto/crypto_migration.jet` covers the audited raw path
-while the safe `core.crypto` APIs retain typed defaults.
-
 ### Core rung splits
 
 `D-ONCE-LAYER1=B` ratifies two taught rungs when one Core subject has a safe
@@ -257,11 +221,7 @@ default and an explicit control surface. `core.crypto` is the typed rung;
 in the compiler surface and a golden example that shows the same operation
 through both doors.
 
-**2026-08-06 — the core-library slate: D-CORE-DOCTRINE1=A,
-D-CORE-EAGER1=A, D-CORE-PATH1=A, D-CORE-PRELUDE1=A, D-CORE-PRELUDE2=B,
-D-CORE-TREE1=A, D-CORE-USELIST1=A** *(card #1495; proposal record folded into
-this law)*. The tree migration itself lands with
-card #1574. The reference doc restructure rides that cutover.
+The core-library slate ratifies the following durable rules:
 
 - **D-CORE-DOCTRINE1=A** — all Part A rules become law. Every new or changed
   Core API must pass them in review. Call sites are judged by reading them
@@ -296,11 +256,10 @@ card #1574. The reference doc restructure rides that cutover.
 
 ## Extended Core API doctrine
 
-The ratified Part A rules are the review test for every changed Core call. The
-short form below is the current checklist; the proposal contains the evidence
-and examples.
+The short form below is the review checklist for the Part A rules. The examples
+and evidence remain in the laws above.
 
-| Rule | Current test |
+| Rule | Test |
 |---|---|
 | C1 | Judge the call site, not the declaration. |
 | C2 | Required values are positional; labels make uncommon or ambiguous options readable. Do not force `*` zones on simple APIs; reserve them for load-bearing names. |
@@ -326,8 +285,7 @@ and examples.
 
 ### Part A relation map
 
-This is the proposal's mapping from the existing laws to the Part A extension.
-It records which rule is extended and which rule is new ground.
+This mapping shows how the existing laws relate to the Part A extension.
 
 | Existing law | Part A rule(s) | Effect |
 |---|---|---|
@@ -381,44 +339,24 @@ The caller handles `None` as absence or propagates it with the ordinary
 optional path. It does not compare a valid value with a sentinel or inspect a
 second status result.
 
-### D4 options audit
-
-The audit covers user-facing policy and configuration choices in the current
-Core declarations and the ratified edition-gated encoding surface. It excludes
-Boolean results, predicates, data fields, enum payload data, implementation
-parameters, and compiler-only handles. An existing Boolean option is marked
-drift; it is not a grandfathered exception.
-
-| Surface | Current option shape | D4 result | Card home |
-|---|---|---|---|
-| `core.http.client` / `HTTPRedirectPolicy.Follow` | `protocols`, `allow_http_downgrade`, and `same_origin_credentials` are Boolean policy values. | Existing drift; replace with named enum choices in a later reconciled change. | #301, #1725 |
-| `core.http.server.static_files` | `index`, `dotfiles`, and `follow_links` are Boolean policy values. | Existing drift; the safe bare mount remains documented. | #1273 |
-| `core.http.server.cors_policy` | `credentials` is a Boolean policy value. | Existing drift; the `.Any` safety rejection remains a separate policy fact. | #1273 |
-| `core.encoding` | `json.writer` `canonical`, `CBOROptions.require_canonical`, `XMLCanonical.comments`, and edition-gated `allow_*` flags are Boolean policy values. | Existing edition and encoding-surface drift; no new encoding behavior is chosen here. | #712 |
-| `core.regex.flags` | Three Boolean flag arguments configure the regex policy. | Existing drift; the regex surface stays on its owner card. | #1471 |
-| `core.net.set_nodelay` | A Boolean argument selects socket behavior. | Existing drift; low-level control remains on the typed network surface. | #300 |
-| `HTTPProxy`, `HTTPRedirectPolicy`, `HTTPRetryPolicy`, `HTTPCorsOrigins` | Named policy enums with dot-shorthand. | Conforms to D4. | — |
-
-The audit is closed for review only when every current exception has a card
-home and the changed surface has no new Boolean or bare-string policy option.
-The known-drift table above is the card ledger for the exceptions found in the
-same audit.
+The D4 law applies to every user-facing policy and configuration choice. Policy
+options use dedicated enums; Boolean results, predicates, data fields, enum
+payload data, implementation parameters, and compiler-only handles are not D4
+options.
 
 ### Magic defaults and expert overrides
 
-This is the one current defaults table for the Part A worked doors and every
-current option-bearing Core surface in the D4 audit. APIs with no magic default
-do not need a row. New entries must extend this table or reuse an existing
-option.
-
+Use this defaults table for the Part A worked doors and option-bearing Core
+surfaces. APIs with no magic default do not need a row. New entries must extend
+this table or reuse an existing option.
 | Door | Bare default | Explicit control |
 |---|---|---|
 | `files.read(path)` / `files.write(path, text)` | Whole-value UTF-8 file operation; write is safe for the normal path. | `open`, `create`, `append_all`, or labeled write mode. |
 | `http.get(url)` | One-shot HTTPS request with the safe client defaults: bounded redirects, safe stale-connection retry, environment proxy use, and no HTTPS-to-HTTP downgrade. | `http.client` for timeout, redirect, retry, proxy, and transport policy. |
-| `http.client` | Follow at most 10 redirects, keep same-origin credentials, use safe retries, use the environment proxy, and deny HTTPS-to-HTTP downgrade; cookies stay opt-in. | `.redirects(.Follow{ max:, same_origin_credentials: })`, `.retries(.Safe/.Idempotent/.None)`, `.proxy(HTTPProxy)`, `.allow_http_downgrade(Bool)`, and `.cookies(.Memory)`; current Boolean controls remain D4 drift. |
-| `http.server.static_files(mux, prefix, root)` | Normalize the root, refuse escapes, hide dot-files, refuse escaping links, and serve `index.html` for a directory request. | `index`, `dotfiles`, and `follow_links`; current Boolean controls remain D4 drift. |
-| `http.server.cors_policy(origins)` | No CORS header exists until a policy is installed; the safe constructor rejects an unsafe origin/credential combination. | `methods`, `headers`, `credentials`, and `max_age`; `credentials` remains D4 drift. |
-| `encoding.*.reader` / `encoding.*.writer` | `EncodingLimits.safe()` bounds the codec; JSON writing is non-canonical unless requested. | `limits: …` and JSON `canonical: …`; the current Boolean canonical control remains D4 drift. |
+| `http.client` | Follow at most 10 redirects, keep same-origin credentials, use safe retries, use the environment proxy, and deny HTTPS-to-HTTP downgrade; cookies stay opt-in. | `.redirects(.Follow{ max:, same_origin_credentials: })`, `.retries(.Safe/.Idempotent/.None)`, `.proxy(HTTPProxy)`, `.allow_http_downgrade(Bool)`, and `.cookies(.Memory)`. |
+| `http.server.static_files(mux, prefix, root)` | Normalize the root, refuse escapes, hide dot-files, refuse escaping links, and serve `index.html` for a directory request. | `index`, `dotfiles`, and `follow_links`. |
+| `http.server.cors_policy(origins)` | No CORS header exists until a policy is installed; the safe constructor rejects an unsafe origin/credential combination. | `methods`, `headers`, `credentials`, and `max_age`. |
+| `encoding.*.reader` / `encoding.*.writer` | `EncodingLimits.safe()` bounds the codec; JSON writing is non-canonical unless requested. | `limits: …` and JSON `canonical: …`. |
 | `list.map` / `list.filter` | Eager plain collection. | `.lazy` for a deferred view. |
 | `time.now` | Current Unix time in milliseconds from the ambient standard clock. | `time.clock(seed)` or an injected `Clock` for deterministic/reproducible code. |
 | `crypto` | Typed safe values and fail-closed defaults. | `crypto.expert` inside the audited raw-byte boundary. |
@@ -429,11 +367,11 @@ This is the one Core API superiority gate. Python is the calibration arm. The
 release claim covers every language recorded in the Core surface ledger, not
 Python alone.
 
-The only workflow inventory is
-[`docs/reference/core-surface-ledger.json`](../reference/core-surface-ledger.json).
-The checker reads its `rows` and requires one `coreApiGate.workflowManifest`
-entry for every row. It does not copy the inventory into another policy or
-benchmark document.
+The workflow inventory is generated on demand by
+[`scripts/agent/check-core-surface-ledger.mjs`](../../scripts/agent/check-core-surface-ledger.mjs).
+Its `--check` rebuilds `.jet/reports/core-surface-ledger.json` from the
+compiler/source tables and never reads the report; every generated row requires
+one `coreApiGate.workflowManifest` entry.
 
 ### Frozen task record
 

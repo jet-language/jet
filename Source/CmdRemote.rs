@@ -3,7 +3,7 @@
 use crate::OutputMode;
 use jet::Comptime::Build::RemoteBuildBinding;
 use jet::ExitCodes;
-use jet_foundation::Report::render_status_json;
+use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
 
 pub(crate) fn run_remote(args: &[String], mode: OutputMode) -> ! {
     match args.get(1).map(String::as_str) {
@@ -93,22 +93,18 @@ fn bind(args: &[String], mode: OutputMode) -> ! {
     )
     .unwrap_or_else(|error| fail(&error));
     if mode.json {
+        let fields = StatusFields::new()
+            .with("builder", binding.builder.clone())
+            .with("root", binding.root.to_string_lossy().into_owned())
+            .with("trust_domain", binding.trust_domain.clone())
+            .with("worker_id", binding.worker_id.clone())
+            .with("platform", binding.platform.clone())
+            .with("abi", binding.abi.clone());
         println!(
             "{}",
-            render_status_json(
-                "ok",
-                true,
-                "remote.bind",
-                &format!(
-                    ",\"builder\":\"{}\",\"root\":\"{}\",\"trust_domain\":\"{}\",\"worker_id\":\"{}\",\"platform\":\"{}\",\"abi\":\"{}\"",
-                    escape(&binding.builder),
-                    escape(&binding.root.to_string_lossy()),
-                    escape(&binding.trust_domain),
-                    escape(&binding.worker_id),
-                    escape(&binding.platform),
-                    escape(&binding.abi),
-                ),
-            )
+            StatusEnvelope::new("remote.bind", true)
+                .with_fields(fields)
+                .json()
         );
     } else {
         println!("bound remote builder `{}`", binding.builder);
@@ -119,34 +115,28 @@ fn bind(args: &[String], mode: OutputMode) -> ! {
 fn list(mode: OutputMode) -> ! {
     let names = RemoteBuildBinding::list_host().unwrap_or_else(|error| fail(&error));
     if mode.json {
-        let builders = names
-            .iter()
-            .filter_map(|name| RemoteBuildBinding::load_host(name).ok())
-            .map(|binding| {
-                format!(
-                    "{{\"name\":\"{}\",\"root\":\"{}\",\"trust_domain\":\"{}\",\"worker_id\":\"{}\",\"platform\":\"{}\",\"abi\":\"{}\",\"cache_read\":{},\"cache_write\":{},\"execute\":{},\"fallback_local\":{}}}",
-                    escape(&binding.builder),
-                    escape(&binding.root.to_string_lossy()),
-                    escape(&binding.trust_domain),
-                    escape(&binding.worker_id),
-                    escape(&binding.platform),
-                    escape(&binding.abi),
-                    binding.cache_read,
-                    binding.cache_write,
-                    binding.execute,
-                    binding.fallback_local,
+        let builders = StatusValue::array(names.iter().filter_map(|name| {
+            RemoteBuildBinding::load_host(name).ok().map(|binding| {
+                StatusValue::object(
+                    StatusFields::new()
+                        .with("name", binding.builder)
+                        .with("root", binding.root.to_string_lossy().into_owned())
+                        .with("trust_domain", binding.trust_domain)
+                        .with("worker_id", binding.worker_id)
+                        .with("platform", binding.platform)
+                        .with("abi", binding.abi)
+                        .with("cache_read", binding.cache_read)
+                        .with("cache_write", binding.cache_write)
+                        .with("execute", binding.execute)
+                        .with("fallback_local", binding.fallback_local),
                 )
             })
-            .collect::<Vec<_>>()
-            .join(",");
+        }));
         println!(
             "{}",
-            render_status_json(
-                "ok",
-                true,
-                "remote.list",
-                &format!(",\"builders\":[{builders}]"),
-            )
+            StatusEnvelope::new("remote.list", true)
+                .with_field("builders", builders)
+                .json()
         );
     } else if names.is_empty() {
         println!("no remote builders are bound");
@@ -206,19 +196,6 @@ fn has_flag(args: &[String], name: &str) -> bool {
         .any(|argument| argument == name || argument == &format!("{name}=true"))
 }
 
-fn escape(value: &str) -> String {
-    value
-        .chars()
-        .flat_map(|character| match character {
-            '"' => "\\\"".chars().collect::<Vec<_>>(),
-            '\\' => "\\\\".chars().collect(),
-            '\n' => "\\n".chars().collect(),
-            '\r' => "\\r".chars().collect(),
-            '\t' => "\\t".chars().collect(),
-            character => vec![character],
-        })
-        .collect()
-}
 
 fn fail(message: &str) -> ! {
     crate::cli_error!(@fix "E2104", message, "run `jet remote help`");

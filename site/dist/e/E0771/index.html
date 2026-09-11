@@ -34,52 +34,25 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for E0771</p>
+<p class="diag-copy fix" data-registry-field="fix">Match the function value&#39;s call labels and parameter zones to the expected function type.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0771</code>: <code>tests/ui/function_contract_laundering.stderr</code>.</p>
-<pre class="diag">Error [E0112]: `labelled` wants fn(*, force: Bool) Int for argument 1, but this is fn(force: Bool) Int
-  --&gt; tests/ui/function_contract_laundering.jet:10:29
+<p>First UI snapshot mentioning <code>E0771</code>: <code>tests/ui/fn_type_zone_call.stderr</code>.</p>
+<pre class="diag">Error [E0769]: `force` is a label-only parameter of `action`
+  --&gt; tests/ui/fn_type_zone_call.jet:3:65
     |
- 10 |     plain :: erase(labelled(save))
-    |                             ^^^^
- Why: every argument must match its parameter&#39;s type
- Fix: use fn(*, force: Bool) Int here
-More: jet-lang.dev/e/E0112
+  3 | fn apply(action: fn(*, force: Bool) Int) Int -&gt; { return action(true) }
+    |                                                                 ^^^^
+ Why: The `*` in the declaration requires the label, so the call says what the value means
+ Fix: Write `force: …` for this argument
+More: jet-lang.dev/e/E0769
 
-Error [E0112]: `labelled` wants fn(*, force: Bool) Int for argument 1, but this is fn(force: Bool) Int
-  --&gt; tests/ui/function_contract_laundering.jet:10:29
+Error [E0771]: This needs fn(*, force: Bool) Int, but the function value is fn(Bool) Int
+  --&gt; tests/ui/fn_type_zone_call.jet:5:23
     |
- 10 |     plain :: erase(labelled(save))
-    |                             ^^^^
- Why: every argument must match its parameter&#39;s type
- Fix: use fn(*, force: Bool) Int here
-More: jet-lang.dev/e/E0112
-
-Error [E0112]: `labelled` wants fn(*, force: Bool) Int for argument 1, but this is fn(force: Bool) Int
-  --&gt; tests/ui/function_contract_laundering.jet:10:29
-    |
- 10 |     plain :: erase(labelled(save))
-    |                             ^^^^
- Why: every argument must match its parameter&#39;s type
- Fix: use fn(*, force: Bool) Int here
-More: jet-lang.dev/e/E0112
-
-Error [E0771]: this needs fn(*, force: Bool) Int, but the function value is fn(Bool) Int
-  --&gt; tests/ui/function_contract_laundering.jet:11:20
-    |
- 11 |     _ :: use_label(plain)
-    |                    ^^^^^
- Why: public labels and parameter zones are part of a function&#39;s callable type
- Fix: use `fn(*, force: Bool) Int` here
-More: jet-lang.dev/e/E0771
-
-Error [E0771]: this needs fn(*, force: Bool) Int, but the function value is fn(Bool) Int
-  --&gt; tests/ui/function_contract_laundering.jet:11:20
-    |
- 11 |     _ :: use_label(plain)
-    |                    ^^^^^
- Why: public labels and parameter zones are part of a function&#39;s callable type
- Fix: use `fn(*, force: Bool) Int` here
+  5 | fn run() { _ :: apply(save) }
+    |                       ^^^^
+ Why: Public labels and parameter zones are part of a function&#39;s callable type
+ Fix: Use `fn(*, force: Bool) Int` here
 More: jet-lang.dev/e/E0771
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

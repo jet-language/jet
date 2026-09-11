@@ -18,7 +18,7 @@
 use jet_pkg_model::CompilerExtension::{
     decode_and_validate_response, message_exposes_rustc, parse_analyze_result, parse_load_result,
     Ability, AnalyzeResponse, ExtensionSession, Finding, ProtocolError, SessionPhase, SpanFact,
-    SymbolFact, TypeFact, TypedSnapshot,
+    SymbolFact, TypeFact, TypeFactShape, TypedSnapshot,
 };
 #[path = "../../jet-pkg-model/src/Prelude/CompilerExtension.rs"]
 mod CompilerExtensionHost;
@@ -42,6 +42,7 @@ fn snapshot_with_symbol(name: &str) -> TypedSnapshot {
         vec![TypeFact {
             id: "t1".into(),
             repr: "Int".into(),
+            shape: TypeFactShape::Scalar,
         }],
         vec![SymbolFact {
             id: "s1".into(),

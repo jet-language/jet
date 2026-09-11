@@ -43,9 +43,11 @@ pub enum FailureContract {
     /// absence is already the complete carrier, so it must not acquire the
     /// callable default `Err` domain as a nested result.
     Optional { success: Type },
-    /// The declaration named its error domain with a `!E` contract.
+    /// The declaration chose the uninhabited return carrier (`Never`).
+    /// Unlike `!Never`, this is a successful return slot with no values.
+    DeclaredNever,
+    /// An explicit failure domain was declared on the callable.
     Explicit { success: Type, error: Type },
-    /// A declared conversion crosses from `source` into `target`.
     Converted {
         success: Type,
         source: Type,
@@ -58,6 +60,7 @@ pub enum FailureContract {
 impl FailureContract {
     pub fn from_return_type(return_type: Option<&Type>) -> Self {
         match return_type {
+            Some(Type::Named(name)) if name == crate::Syntax::TYPE_NEVER => Self::DeclaredNever,
             Some(Type::Result { ok, err }) if matches!(err.as_ref(), Type::Named(name) if name == crate::Syntax::TYPE_NEVER) => {
                 Self::ProvenUnreachable {
                     success: ok.as_ref().clone(),
@@ -83,6 +86,7 @@ impl FailureContract {
 
     pub fn effective_type(&self) -> Type {
         match self {
+            Self::DeclaredNever => Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
             Self::Default { success, error } | Self::Explicit { success, error } => Type::Result {
                 ok: Box::new(success.clone()),
                 err: Box::new(error.clone()),
@@ -113,6 +117,10 @@ impl FailureContract {
         matches!(self, Self::Converted { .. })
     }
 
+    pub fn is_declared_never(&self) -> bool {
+        matches!(self, Self::DeclaredNever)
+    }
+
     pub fn is_proven_unreachable(&self) -> bool {
         matches!(self, Self::ProvenUnreachable { .. })
     }
@@ -130,10 +138,12 @@ impl FailureContract {
             Self::Converted { source, target, .. } => {
                 format!("converted {} -> {}", source.name(), target.name())
             }
+            Self::DeclaredNever => "declared Never return".to_string(),
             Self::ProvenUnreachable { .. } => "explicit !Never (proven unreachable)".to_string(),
         }
     }
 }
+
 
 /// D-MEMPROVENANCE2=A: one returned-view slot may come from any source path
 /// in this bounded, deterministic set. Access stays a property of the slot:
@@ -283,6 +293,11 @@ pub struct FuncSig {
     pub is_c_abi: bool,
     /// D-CABI-PLATFORM1: explicit alternate ABI; such functions are direct-call-only.
     pub c_abi_name: Option<String>,
+    /// D-FFI-CALLBACK2=A: generated callback lifecycle metadata. These fields
+    /// are absent for ordinary C function-pointer callbacks.
+    pub callback_transport: Option<String>,
+    pub callback_plan_digest: Option<String>,
+    pub callback_identity: Option<String>,
     /// Narrow compiler-owned effect for a generated foreign binding. `None`
     /// keeps ordinary extern calls maximally effectful.
     pub foreign_effect_root: Option<String>,
@@ -1557,14 +1572,11 @@ impl CtValue {
                 }
                 // AOT `JetShow` for user structs is `format!("{:?}", self)`
                 // (`Codegen::Items`) → `__jet_Name { __jet_field: … }`. Match that
-                // here (I2 / #777 corpus differential). Table/Series/LazyFrame
-                // hide the internal `elem_type` schema tag AOT never prints.
+                // here (I2 / #777 corpus differential).
                 let filtered: Vec<(String, CtValue)> = fields
                     .iter()
                     .filter(|(n, _)| {
                         !crate::Syntax::is_memo_storage_name(n)
-                            && !(matches!(type_name.as_str(), "Table" | "Series" | "LazyFrame")
-                                && n == "elem_type")
                             && !(type_name == "Tensor" && n == "__jet_tensor_handle")
                     })
                     .cloned()
@@ -2155,7 +2167,10 @@ mod tests {
             args: vec![(None, CtValue::Int(3))],
         };
 
-        assert_eq!(value.serialize(), "__jet___JetUnion_Int_String::Int(3i64)");
+        assert_eq!(
+            value.serialize(),
+            "__jet__u_uJetUnion_uInt_uString::Int(3i64)"
+        );
     }
 
     #[test]
@@ -2239,6 +2254,9 @@ mod tests {
             is_must_use: false,
             is_c_abi: false,
             c_abi_name: None,
+            callback_transport: None,
+            callback_plan_digest: None,
+            callback_identity: None,
             foreign_effect_root: None,
             undo: None,
             param_info: Vec::new(),

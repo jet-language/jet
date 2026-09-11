@@ -1,0 +1,223 @@
+{
+  "schema": "jet.optimization-contract.v1",
+  "schema_version": 1,
+  "contract_id": "jet-optimization-contract-v1",
+  "policy": {
+    "decision_id": "D-COMPILER-PROOF1",
+    "outcome": "A",
+    "status": "ratified",
+    "scope": "source-bound canonical MIR legality, exact simplification, bounds/fact derivation, loop/vector representation, reduction, acceleration, and cost rejection",
+    "foreign_suffix": "target ABI, foreign libraries, runtime resources, scheduler, and finite workload measurements remain explicit downstream boundaries"
+  },
+  "claim": {
+    "kind": "implementation-bound-conditional-preservation",
+    "statement": "Each production canonical MIR optimization pass is joined to the shared lowering operation denominator and carries a conditional preservation certificate. Legality is checked before profitability; scalar, vector, parallel, and layout choices retain the same numerical, failure, mutation, input, cleanup, and schedule contract. The certificate is not a universal semantic or performance proof.",
+    "preconditions": [
+      "The #2898/#2919 canonical operation denominator is read from the generated compiler obligation relation; this stage adds no second optimizer or denominator.",
+      "Canonical MIR legality, exact folding, CFG, bounds, purity, loop, vector, reduction, acceleration, and ordering facts are produced by crates/jet-foundation/src/MIROptimization.rs and its existing acceleration module.",
+      "A transform runs only when its semantic premises hold; an expert rejection or a cost-model rejection uses the same canonical implementation and cannot legalize an illegal transform.",
+      "Source identity, IR identity, target/layout identity, failure order, numerical rules, alias premises, and observation order remain explicit across composition.",
+      "Unknown compiler observations, unavailable targets, and foreign suffixes remain unverified rather than proved."
+    ],
+    "observation_alphabet": [
+      "result",
+      "typed_failure",
+      "mutation",
+      "input_consumption",
+      "ordered_effects",
+      "cleanup",
+      "resource_premises",
+      "schedule",
+      "allowed_schedules"
+    ],
+    "preservation_dimensions": [
+      "origin_identity",
+      "source_identity",
+      "ir_identity",
+      "target_identity",
+      "side_conditions",
+      "legality",
+      "profitability",
+      "target_representation",
+      "result",
+      "typed_failure",
+      "mutation",
+      "input_consumption",
+      "ordered_effects",
+      "cleanup",
+      "resource_premises",
+      "schedule",
+      "allowed_schedules"
+    ],
+    "required_scenarios": [
+      "short_circuit",
+      "early_exit",
+      "typed_errors",
+      "checked_arithmetic",
+      "callbacks",
+      "resource_cleanup",
+      "input_consumption"
+    ],
+    "unsupported_cases": [
+      "A missing, stale, or unbound production optimization pass certificate",
+      "A source/IR/target identity mismatch or a certificate attached to a different operation",
+      "Reordered effects or failures, extra input consumption, invalid alias assumptions, unchecked arithmetic reassociation, or dropped cleanup",
+      "A cost or workload selection used to make an illegal transform legal",
+      "A universal claim that scalar, vector, parallel, layout, or acceleration is profitable on every target or workload",
+      "A fresh compiler replay or behavioral qualification when the pinned compiler is unavailable"
+    ]
+  },
+  "execution": {
+    "schema": "jet.compiler-inspection.v1",
+    "runner": "scripts/agent/jet-env",
+    "compiler": "target/debug/jet",
+    "command": "scripts/agent/jet-env full node proof/compiler/optimization/observe.mjs --json",
+    "operations": ["check", "run"],
+    "tiers": ["aot", "jet_run", "interpreter", "check"],
+    "timeout_ms": 120000,
+    "unknown_status": "unverified",
+    "no_execution_in_checker": true,
+    "observation_certificates": {
+      "path": "proof/compiler/optimization/observations.json",
+      "schema": "jet.optimization-observations.v1",
+      "producer": "compiler-proof observation workflow",
+      "observer": "proof/compiler/optimization/observe.mjs",
+      "protocol": "canonical-tir-mir-route-v1",
+      "required_identity_fields": ["operation_id", "stage", "source_sha256", "compiler_source_sha256", "model_sha256", "checker_sha256", "configuration_sha256", "target_sha256", "obligations_sha256", "driver_sha256", "collector_sha256", "contract_execution_sha256"],
+      "required_observations": ["result", "typed_failure", "mutation", "input_consumption", "ordered_effects", "cleanup", "resource_premises", "schedule", "allowed_schedules"],
+      "positive_status": "matched",
+      "universal_proof": false
+    },
+    "crash_policy": "tool failures, unavailable binaries, and malformed responses are unavailable or invalid_oracle, never preservation"
+  },
+  "binding_methods": [
+    {
+      "method": "verified_construction",
+      "source": "crates/jet-foundation/src/MIROptimization.rs",
+      "implementation": "the single canonical MIR optimizer, legality verifier, exact transformations, fact derivation, and canonical order",
+      "construction": "source-bound optimization relation with exact implementation symbol, origin, premises, observations, target contract, and rejection route",
+      "checker": "proof/compiler/optimization/check.mjs",
+      "limit": "construction binding is not a universal preservation or profitability theorem"
+    },
+    {
+      "method": "direct_verification",
+      "source": "crates/jet-foundation/src/MIR.rs and crates/jet-foundation/src/MIROptimization/Acceleration.rs",
+      "implementation": "canonical MIR operation/terminator/fact types and the D-ACCEL1 legality-plus-cost gate",
+      "candidate_binding": "current source SHA-256, compiler-proof identity, target/configuration descriptors",
+      "checker": "proof/compiler/optimization/check.mjs",
+      "limit": "no compiler, Jet, target, scheduler, or workload execution is performed by this source checker"
+    },
+    {
+      "method": "translation_certificate",
+      "source": "proof/compiler/optimization/witnesses.json",
+      "implementation": "proof/compiler/lowering/common.mjs",
+      "certificate": "every generated production pass, legal/invalid source witness, composition premise, negative control, and optional canonical TIR/MIR route observation",
+      "checker": "proof/compiler/optimization/check.mjs",
+      "limit": "finite route observations remain proof-blocking until an independently derived semantic goal has a pinned formal discharge and cost remains separate"
+    }
+  ],
+  "identity": {
+    "schema": "jet.compiler-proof.v1",
+    "manifest_path": "proof/compiler/toolchain/manifest.json",
+    "authority_key": "compiler-proof.optimization",
+    "claim_id": "compiler-proof.identity-direct",
+    "identity_digest_source": "scripts/agent/compiler-proof.mjs:identityDigest",
+    "driver_path": "scripts/agent/compiler-proof.mjs",
+    "required_fields": [
+      "model_sha256",
+      "source_sha256",
+      "compiler_source_sha256",
+      "checker_sha256",
+      "configuration_sha256",
+      "target_sha256",
+      "obligations_sha256",
+      "candidate.commit",
+      "candidate.compiler.artifact",
+      "candidate.configuration",
+      "candidate.target",
+      "proof.artifact",
+      "raw_replay"
+    ]
+  },
+  "inventory_join": {
+    "authorities": ["#2898", "#2919"],
+    "#2898": {
+      "source": "proof/compiler/obligations.json",
+      "selection": ["canonical TExprKind and TStmt operation rows", "result/failure/mutation/input/effect/cleanup/schedule alphabet"],
+      "rule": "reuse the generated operation denominator; do not add an optimizer-specific semantic engine"
+    },
+    "#2919": {
+      "source": "proof/compiler/obligations.json",
+      "selection": ["boundary:optimization", "canonical MIR optimizer route"],
+      "rule": "bind every production pass to the current MIROptimization implementation route"
+    }
+  },
+  "coverage": {
+    "relation_path": "proof/compiler/obligations.json",
+    "generator": "proof/compiler/semantics/generate-obligations.mjs",
+    "owner": "#2939",
+    "boundary_ids": ["boundary:optimization"],
+    "mapping_statuses": ["mapped_unproved", "unsupported", "unmapped", "proved"],
+    "operation_relation": "proof/compiler/lowering/common.mjs:operationRegistry(optimization)",
+    "qualification_rule": "A boundary remains blocked unless every current production optimization pass has a current source binding, complete premises, and matched canonical route observations; no finite route observation is promoted to semantic legality, profitability, or proof without an independent formal discharge."
+  },
+  "implementation_route": {
+    "mir": [
+      "crates/jet-foundation/src/MIR.rs",
+      "crates/jet-foundation/src/MIROptimization.rs",
+      "crates/jet-foundation/src/MIROptimization/Acceleration.rs",
+      "crates/jet-codegen/src/Codegen/MIRRust.rs"
+    ],
+    "pass_order": [
+      "legality-verification",
+      "unreachable-block-elimination",
+      "cfg-simplification",
+      "exact-constant-folding",
+      "bounds-check-elimination",
+      "dead-pure-value-elimination",
+      "canonical-loop-facts"
+    ],
+    "registered_operations": [
+      "mir.optimize-pipeline",
+      "mir.legality-verification",
+      "mir.require-canonical-optimization",
+      "mir.pass-order-facts",
+      "mir.inline-always",
+      "mir.unreachable-block-elimination",
+      "mir.cfg-simplification",
+      "mir.exact-constant-folding",
+      "mir.bounds-check-elimination",
+      "mir.dead-pure-value-elimination",
+      "mir.canonical-loop-facts",
+      "mir.fixed-reduction-normalization",
+      "mir.acceleration-facts",
+      "mir.canonical-program-order",
+      "mir.acceleration-gate"
+    ],
+    "decision_route": "Legality facts and rejection reasons are established by the canonical MIR optimizer before any D-ACCEL1 or workload-cost decision. Scalar, vector, parallel, and layout are target facts, not alternate semantic engines.",
+    "single_route_rule": "No adapter-specific optimizer or semantic evaluator is introduced; all targets consume the canonical checked MIR and its preserved failure/order/layout facts."
+  },
+  "boundary": {
+    "proven": [
+      "The checker joins the exact generated canonical operation relation to the current #2939 optimization boundary.",
+      "Every registered production optimization pass requires implementation identity, origin identity, side conditions, all observations, target choices, and separate legality/profitability fields.",
+      "Forged, reordered, over-consuming, aliased, unsound, cost-overriding, and wrong-operation certificates are rejected structurally.",
+      "Composition requires the ordered pass relation and preserves observations, origin, side conditions, legality, profitability, and target representation."
+    ],
+    "assumed": [
+      "D-TIER-ONEIR1, D-COMPILER-PROOF1, D-ACCEL1, I3, and I9 define the shared checked MIR route and acceleration gate.",
+      "#2898 supplies the canonical operation denominator and #2919 supplies the current integrated implementation route.",
+      "Foreign compiler, target ABI/layout, allocator/resource schedule, scheduler, and external callback environments satisfy their named contracts."
+    ],
+    "tested": [
+      "Legal and deliberately invalid witness sources are source-hash bound and kept distinct without executing them.",
+      "Source/IR/target identity checks, premise retention, legality-before-profitability separation, and negative-control mutation sensitivity are present in the checker."
+    ],
+    "blocked": [
+      "Universal preservation for all source programs, MIR states, target layouts, failures, effects, schedules, and resource bounds.",
+      "Fresh compiler execution, replay of AOT/JIT/interpreter/check observations, and qualification of profitability or foreign behavior.",
+      "A generated operation row with stale source identity or missing observation evidence."
+    ],
+    "qualification": "blocked"
+  }
+}

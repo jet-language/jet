@@ -1,0 +1,43 @@
+use core.game as game
+use "src/Renderer" as renderer
+use "src/Diagnostics" as diagnostics
+use "src/Protocol" as protocol
+use "src/Editor" as editor
+use "src/Tooling" as tooling
+
+// Components are ordinary source types.  The Core scene owns their durable
+// registration and returns a deterministic row for this generated example.
+struct Position {
+    x: Int
+}
+
+struct Velocity {
+    dx: Int
+}
+
+pub fn run() {
+    renderer.selected()
+    diagnostics.default()
+    protocol.loopback()
+    editor.default()
+    tooling.default()
+
+    scene := game.Scene.new("__JET_GAME_NAME__")
+    image :: scene.assets.image("assets/player.png") ?? panic("image")
+    sound :: scene.assets.sound("assets/jump.wav") ?? panic("sound")
+    scene.input.bind("jump", "Space")
+    scene.component<Position>()
+    scene.component<Velocity>()
+    hits :: scene.query<Position, Velocity>()
+    print("query {hits.len()}")
+    print("row {hits[0]}")
+    scene.on_frame((frame) -> {
+        if frame.input.pressed("jump") -> print("hook jump {frame.index}")
+    })
+    replay :: game.Replay.record("runs/demo.jetreplay")
+    backend :: game.Backend.headless()
+    transcript :: game.run(scene, replay: replay, backend: backend)
+    print(transcript)
+    print("{image:Debug}")
+    print("{sound:Debug}")
+}

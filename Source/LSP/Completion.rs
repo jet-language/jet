@@ -2,10 +2,20 @@
 
 use crate::Syntax;
 use crate::AST;
+use jet_cli::DynamicCompletions::{
+    self, CompletionContext, CompletionKind as DynamicCompletionKind, CompletionRequest,
+    CompletionTarget, CompletionValueFact, PathAuthority, TypedCompletionFact,
+};
+use jet_foundation::CLISchema::{
+    self, CLICommandSchema, CLIInputSchema, CLISubcommandSchema, CLIValueKind,
+};
+use jet_foundation::Facts::FactKind;
 use jetpack::Discovery::Index as DiscoveryIndex;
 
+use super::Position::{byte_span_to_range, range_json};
 use super::SymbolDB::{SymKind, SymbolDB};
-use jet_foundation::JSON::json_escape;
+use jet_foundation::DataTree::DataTree;
+use jet_foundation::JSON::{json_escape, json_str};
 
 /// LSP completion item kinds (standard integers).
 mod ck {
@@ -603,6 +613,371 @@ pub(crate) fn compute_completions(
     }
 
     items
+}
+
+/// Handle the typed dynamic completion extension on an already parsed LSP
+/// request. `Ok(None)` means that the standard language completion path should
+/// run; once `jetCompletion` is present, all failures are returned to the
+/// caller rather than silently falling back to a second candidate engine.
+pub(crate) fn dynamic_completion_json(
+    params: &DataTree,
+    doc_text: &str,
+    offset: usize,
+    revision: u64,
+    bundle: Option<&AST::ProgramBundle>,
+    semantic_facts: &jet_semindex::SemIndexEffectFacts,
+    workspace_root: Option<&str>,
+) -> Result<Option<String>, String> {
+    let Some(options) = dynamic_options(params)? else {
+        return Ok(None);
+    };
+    let options = options
+        .as_object()
+        .map_err(|_| "jetCompletion must be an object".to_string())?;
+    let target = match option_string(options, &["target"])?.as_deref() {
+        Some("value") => CompletionTarget::Value,
+        Some("path") => CompletionTarget::Path,
+        Some("jobs") | Some("job") => CompletionTarget::Jobs,
+        Some(other) => return Err(format!("unsupported dynamic completion target `{other}`")),
+        None => return Err("jetCompletion.target is required".to_string()),
+    };
+    let field = option_string(options, &["field"])?;
+    let command = option_string(options, &["command"])?;
+    let source = option_string(options, &["source"])?.unwrap_or_else(|| doc_text.to_string());
+    let cursor = option_u64(options, &["cursor"])?
+        .map(|value| {
+            usize::try_from(value).map_err(|_| "jetCompletion.cursor exceeds usize".to_string())
+        })
+        .transpose()?
+        .unwrap_or(offset);
+    let schema_revision = option_u64(options, &["schema_revision", "schemaRevision"])?
+        .unwrap_or(CLISchema::RECORD_VERSION as u64);
+    let request_revision = option_u64(options, &["revision"])?.unwrap_or(revision);
+    let bundle = bundle.ok_or_else(|| {
+        "dynamic completion needs a successful checked command schema".to_string()
+    })?;
+    let schema = CLISchema::executable_schema(bundle);
+    let typed_facts = checked_dynamic_facts(bundle, &schema, semantic_facts);
+    let mut request = match target {
+        CompletionTarget::Value => CompletionRequest::for_value(
+            source,
+            cursor,
+            field.ok_or_else(|| "value completion needs jetCompletion.field".to_string())?,
+            schema_revision,
+            request_revision,
+        ),
+        CompletionTarget::Path => CompletionRequest::for_path(
+            source,
+            cursor,
+            field.ok_or_else(|| "path completion needs jetCompletion.field".to_string())?,
+            schema_revision,
+            request_revision,
+        ),
+        CompletionTarget::Jobs => {
+            CompletionRequest::for_jobs(source, cursor, schema_revision, request_revision)
+        }
+    };
+    if let Some(command) = command {
+        request = request.in_command(command);
+    }
+
+    let authority = if target == CompletionTarget::Path {
+        workspace_root
+            .map(|root| {
+                PathAuthority::new([std::path::PathBuf::from(root)])
+                    .map_err(|error| error.to_string())
+            })
+            .transpose()?
+    } else {
+        None
+    };
+    let mut context = CompletionContext::new(&schema, schema_revision, revision)
+        .with_typed_facts(&typed_facts);
+    if let Some(authority) = authority.as_ref() {
+        context = context.with_path_authority(authority);
+    }
+    let result = DynamicCompletions::query(&request, &context).map_err(|error| error.to_string())?;
+    let mut items = String::new();
+    for (index, candidate) in result.candidates.iter().enumerate() {
+        if index > 0 {
+            items.push(',');
+        }
+        let kind = match candidate.kind {
+            DynamicCompletionKind::Enum | DynamicCompletionKind::Tag => ck::ENUM_MEMBER,
+            DynamicCompletionKind::Literal | DynamicCompletionKind::Bool => ck::VALUE,
+            DynamicCompletionKind::Path => 17,
+            DynamicCompletionKind::Job => ck::FUNCTION,
+        };
+        let range = range_json(byte_span_to_range(
+            &request.source,
+            candidate.replacement.span,
+        ));
+        items.push_str(&format!(
+            r#"{{"label":"{}","kind":{},"detail":"{}","textEdit":{{"range":{},"newText":"{}"}},"data":{{"kind":"{}","source":"{}","freshness":"{}","schemaRevision":{},"revision":{}}}}}"#,
+            json_escape(&candidate.label),
+            kind,
+            json_escape(&candidate.detail),
+            range,
+            json_escape(&candidate.replacement.text),
+            candidate.kind.as_str(),
+            json_escape(&candidate.source),
+            candidate.freshness.as_str(),
+            result.schema_revision,
+            result.revision,
+        ));
+    }
+    Ok(Some(format!(
+        r#"{{"isIncomplete":{},"items":[{}]}}"#,
+        result.truncated, items
+    )))
+}
+fn object_get<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+    object
+        .iter()
+        .find_map(|(name, value)| (name == key).then_some(value))
+
+}
+fn dynamic_options(params: &DataTree) -> Result<Option<&DataTree>, String> {
+    let object = params
+        .as_object()
+        .map_err(|_| "completion params must be an object".to_string())?;
+    for key in ["jetCompletion", "dynamicCompletion", "dynamic_completion"] {
+        if let Some(value) = object_get(object, key) {
+            return Ok(Some(value));
+        }
+    }
+    Ok(None)
+}
+
+fn option_string(
+    object: &[(String, DataTree)],
+    keys: &[&str],
+) -> Result<Option<String>, String> {
+    for key in keys {
+        if let Some(value) = object_get(object, *key) {
+            return match value {
+                DataTree::Null => Ok(None),
+                _ => json_str(value)
+                    .map(str::to_string)
+                    .map(Some)
+                    .ok_or_else(|| format!("jetCompletion.{key} must be a string or null")),
+            };
+        }
+    }
+    Ok(None)
+}
+
+fn option_u64(
+    object: &[(String, DataTree)],
+    keys: &[&str],
+) -> Result<Option<u64>, String> {
+    for key in keys {
+        if let Some(value) = object_get(object, *key) {
+            return match value {
+                DataTree::Null => Ok(None),
+                DataTree::Int(number) if *number >= 0 => Ok(Some(*number as u64)),
+                _ => Err(format!(
+                    "jetCompletion.{key} must be a nonnegative integer or null"
+                )),
+            };
+        }
+    }
+    Ok(None)
+}
+
+fn checked_dynamic_facts(
+    bundle: &AST::ProgramBundle,
+    schema: &CLICommandSchema,
+    semantic_facts: &jet_semindex::SemIndexEffectFacts,
+) -> Vec<TypedCompletionFact> {
+    let module = CLISchema::entry_type_module(bundle);
+    let structure = module.and_then(|module| {
+        let leaf = schema
+            .entry_type
+            .rsplit_once('.')
+            .map_or(schema.entry_type.as_str(), |(_, leaf)| leaf);
+        bundle.modules[module].items.iter().find_map(|item| match item {
+            AST::Item::Struct(structure) if structure.name == leaf => Some(structure),
+            _ => None,
+        })
+    });
+    let mut facts = Vec::new();
+    for input in &schema.inputs {
+        let ty = structure
+            .and_then(|structure| {
+                structure
+                    .fields
+                    .iter()
+                    .find(|field| field.name == input.field)
+                    .map(|field| &field.ty)
+            })
+            .or_else(|| {
+                module.and_then(|module| {
+                    bundle.modules[module].items.iter().find_map(|item| match item {
+                        AST::Item::Func(function) if function.name == "run" => {
+                            parameter_type(&function.params, input)
+                        }
+                        _ => None,
+                    })
+                })
+            });
+        if let Some(fact) = completion_fact_for_input(
+            bundle,
+            semantic_facts,
+            input,
+            ty,
+            None,
+        ) {
+            facts.push(fact);
+        }
+    }
+    if let Some(structure) = structure {
+        for command in &schema.commands {
+            for input in &command.inputs {
+                let ty = command_parameter_type(bundle, structure, command, input);
+                if let Some(fact) = completion_fact_for_input(
+                    bundle,
+                    semantic_facts,
+                    input,
+                    ty,
+                    Some(command),
+                ) {
+                    facts.push(fact);
+                }
+            }
+        }
+    }
+    facts
+}
+
+fn command_parameter_type<'a>(
+    bundle: &'a AST::ProgramBundle,
+    structure: &'a AST::StructDef,
+    command: &CLISubcommandSchema,
+    input: &CLIInputSchema,
+) -> Option<&'a AST::Type> {
+    if let Some(function) = structure
+        .methods
+        .iter()
+        .find(|function| function.name.eq_ignore_ascii_case(&command.name))
+    {
+        return parameter_type(&function.params, input);
+    }
+    let binding = structure
+        .cli_bindings
+        .iter()
+        .find(|binding| binding.name.eq_ignore_ascii_case(&command.name))?;
+    let AST::Expr::Ident(target, _) = binding.target.without_parens() else {
+        return None;
+    };
+    bundle.modules.iter().find_map(|module| {
+        module.items.iter().find_map(|item| match item {
+            AST::Item::Func(function) if function.name == target.as_str() => {
+                parameter_type(&function.params, input)
+            }
+            _ => None,
+        })
+    })
+}
+
+fn parameter_type<'a>(
+    params: &'a [AST::Param],
+    input: &CLIInputSchema,
+) -> Option<&'a AST::Type> {
+    params
+        .iter()
+        .find(|param| {
+            input.field == param.name
+                || input.field == param.call_label()
+                || input.flag == param.call_label().replace('_', "-")
+        })
+        .map(|param| &param.ty)
+}
+
+fn completion_fact_for_input(
+    bundle: &AST::ProgramBundle,
+    semantic_facts: &jet_semindex::SemIndexEffectFacts,
+    input: &CLIInputSchema,
+    ty: Option<&AST::Type>,
+    command: Option<&CLISubcommandSchema>,
+) -> Option<TypedCompletionFact> {
+    let fact = match input.value_kind() {
+        CLIValueKind::Bool => TypedCompletionFact::bool_value(input.field.clone()),
+        CLIValueKind::String => {
+            let type_name = named_type(ty)?;
+            if let Some(declaration) = semantic_facts
+                .fact_registry
+                .get(FactKind::Tag, type_name)
+                .filter(|declaration| !declaration.members.is_empty())
+            {
+                let values = declaration
+                    .members
+                    .iter()
+                    .map(|value| {
+                        CompletionValueFact::new(value.clone())
+                            .with_detail(format!("tag {}", declaration.name))
+                            .with_source("semantic-facts")
+                    })
+                    .collect();
+                TypedCompletionFact::tag_values(
+                    input.field.clone(),
+                    declaration.name.clone(),
+                    values,
+                )
+            } else {
+                let enum_definition = find_enum(bundle, type_name)?;
+                let values = enum_definition
+                    .variants
+                    .iter()
+                    .map(|variant| {
+                        CompletionValueFact::new(variant.name.clone())
+                            .with_detail(format!("variant of {type_name}"))
+                            .with_source("semantic-index")
+                    })
+                    .collect();
+                if enum_definition.groups.is_empty() {
+                    TypedCompletionFact::enum_values(input.field.clone(), type_name, values)
+                } else {
+                    TypedCompletionFact::tag_values(input.field.clone(), type_name, values)
+                }
+            }
+        }
+        _ => return None,
+    };
+    Some(match command {
+        Some(command) => fact.for_command(command.name.clone()),
+        None => fact,
+    })
+}
+
+fn named_type(ty: Option<&AST::Type>) -> Option<&str> {
+    match ty? {
+        AST::Type::Named(name) => Some(name.as_str()),
+        AST::Type::Option(inner) => named_type(Some(inner)),
+        _ => None,
+    }
+}
+
+fn find_enum<'a>(
+    bundle: &'a AST::ProgramBundle,
+    type_name: &str,
+) -> Option<&'a AST::EnumDef> {
+    let leaf = type_name
+        .rsplit_once('.')
+        .map_or(type_name, |(_, leaf)| leaf);
+    let leaf = leaf
+        .rsplit_once("::")
+        .map_or(leaf, |(_, leaf)| leaf);
+    bundle.modules.iter().find_map(|module| {
+        module.items.iter().find_map(|item| match item {
+            AST::Item::Enum(definition)
+                if definition.name == type_name || definition.name == leaf =>
+            {
+                Some(definition)
+            }
+            _ => None,
+        })
+    })
 }
 
 pub(crate) fn use_statement_for_module(

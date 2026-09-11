@@ -14,7 +14,6 @@ Produce one readable report for the owner. Measure first. Recommend only after t
 - Remove that checkpoint directory only after final validation and report installation.
 - Never create or change Tower cards, decisions, ballots, Tower docs, or board state. The final audit report is the only docs change.
 - Read Tower only after the findings and rankings are nearly final.
-- Do not run another audit or research skill. Use their files only as named prior art.
 - Apply `.agents/skills/simple/SKILL.md` to the final report.
 - Treat public source as evidence of written use, not runtime frequency or private production behavior.
 - Never claim literal coverage of all code. State the declared scope and every coverage gap.
@@ -46,6 +45,12 @@ The bounds above still hold: this skill never writes Tower state, whatever the
 lens says about logging findings elsewhere.
 
 Read `AGENTS.md`. Search the current tree before broad reading. Preserve unrelated worktree changes.
+
+Read `.agents/skills/_shared/audit-dispositions.md` before the run. It owns
+shared publication, workflow-boundary, and disposition mechanics; this method
+remains report-only and its checkpointed corpus, sampling, ranking, and
+final-report rules remain local.
+
 
 ## Start or resume a run
 
@@ -229,10 +234,9 @@ The retained output is one Markdown report. Report the path, coverage, strongest
 
 ## Failure guards
 
-Before close, add the required per-finding disposition table from
-`.agents/skills/_shared/audit-dispositions.md` to the retained report. Every
-finding must name a Tower card, a ratified decision, or a concrete no-action
-reason.
+Use `.agents/skills/_shared/audit-dispositions.md` for the required marker
+table before installation. It does not authorize Tower writes or follow-up
+work; this method remains report-only.
 
 - Do not confuse source frequency with runtime frequency, importance, or approval.
 - Do not let one monorepo, ecosystem, domain, or copied codebase dominate the rank.

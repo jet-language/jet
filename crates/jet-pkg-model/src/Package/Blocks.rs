@@ -9,6 +9,10 @@
 //! D-ONCE-AUTODERIVE1) — this module is the single reader for all of them, so
 //! `package.jet` never again has two parsers for one fact.
 
+#[path = "ReleaseInspect.rs"]
+mod ReleaseInspection;
+pub use self::ReleaseInspection::ReleaseInspect;
+
 use super::PackageParseError;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::RefSpec::{self, Source};
@@ -622,6 +626,314 @@ pub struct PackageEntry {
     pub targets: Vec<Target>,
 }
 
+/// The exact identity selected for a package target.
+///
+/// Built-in web identities are deliberately closed. Other identities name a
+/// typed target-profile declaration, which the language target-profile
+/// semantic pass resolves separately.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TargetProfileIdentity {
+    WebBrowser,
+    WebWasiServer,
+    WebNoOs,
+    Named(String),
+}
+
+impl TargetProfileIdentity {
+    pub const WEB_BROWSER: &'static str = "web.browser";
+    pub const WEB_WASI_SERVER: &'static str = "web.wasi_server";
+    pub const WEB_NO_OS: &'static str = "web.no_os";
+
+    /// Parse one exact target-profile identity.
+    pub fn parse(value: &str) -> Result<Self, String> {
+        let value = value.trim();
+        if value.is_empty() {
+            return Err("target profile identity must not be empty".to_string());
+        }
+        if value
+            .chars()
+            .any(|character| !character.is_ascii_alphanumeric() && !matches!(character, '_' | '.' | '-'))
+        {
+            return Err(format!(
+                "target profile identity `{value}` contains characters outside `[A-Za-z0-9_.-]`"
+            ));
+        }
+        if value.starts_with('.') || value.ends_with('.') || value.contains("..") {
+            return Err(format!(
+                "target profile identity `{value}` must use non-empty dotted components"
+            ));
+        }
+
+        match value {
+            Self::WEB_BROWSER => return Ok(Self::WebBrowser),
+            Self::WEB_WASI_SERVER => return Ok(Self::WebWasiServer),
+            Self::WEB_NO_OS => return Ok(Self::WebNoOs),
+            _ => {}
+        }
+
+        let lower = value.to_ascii_lowercase();
+        if lower == "web" || lower.starts_with("web.") {
+            return Err(format!(
+                "unknown web target profile `{value}`; allowed identities are `{}`, `{}`, and `{}`",
+                Self::WEB_BROWSER,
+                Self::WEB_WASI_SERVER,
+                Self::WEB_NO_OS
+            ));
+        }
+        if lower == "wasm"
+            || lower.starts_with("wasm.")
+            || lower.starts_with("wasm32-")
+            || lower == "no_os"
+            || lower.starts_with("no_os.")
+            || lower == "no-os"
+            || lower.starts_with("no-os.")
+            || lower == "freestanding"
+        {
+            return Err(format!(
+                "generic Wasm/no-OS target profile `{value}` is not selectable; use an exact typed profile identity"
+            ));
+        }
+        Ok(Self::Named(value.to_string()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::WebBrowser => Self::WEB_BROWSER,
+            Self::WebWasiServer => Self::WEB_WASI_SERVER,
+            Self::WebNoOs => Self::WEB_NO_OS,
+            Self::Named(value) => value,
+        }
+    }
+
+    pub fn is_web_builtin(&self) -> bool {
+        matches!(
+            self,
+            Self::WebBrowser | Self::WebWasiServer | Self::WebNoOs
+        )
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        let parsed = Self::parse(self.as_str())?;
+        if parsed == *self {
+            Ok(())
+        } else {
+            Err(format!(
+                "target profile identity `{}` does not match its typed identity",
+                self.as_str()
+            ))
+        }
+    }
+}
+
+impl std::fmt::Display for TargetProfileIdentity {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// One named package target and the exact profile it selects.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetProfileSelection {
+    pub name: String,
+    pub profile: TargetProfileIdentity,
+}
+
+/// Ordered target-profile selections keyed by target name.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PackageTargets {
+    selections: BTreeMap<String, TargetProfileSelection>,
+}
+
+impl PackageTargets {
+    pub fn from_selections(
+        selections: impl IntoIterator<Item = TargetProfileSelection>,
+    ) -> Result<Self, String> {
+        let mut by_name = BTreeMap::new();
+        let mut profiles = BTreeSet::new();
+        for selection in selections {
+            let name = selection.name.trim();
+            if name.is_empty() {
+                return Err("target name must not be empty".to_string());
+            }
+            if name.chars().any(char::is_whitespace) {
+                return Err(format!("target name `{name}` must not contain whitespace"));
+            }
+            if by_name.contains_key(name) {
+                return Err(format!("target `{name}` is declared more than once"));
+            }
+            selection.profile.validate()?;
+            if !profiles.insert(selection.profile.as_str().to_string()) {
+                return Err(format!(
+                    "target profile `{}` is selected more than once",
+                    selection.profile
+                ));
+            }
+            by_name.insert(
+                name.to_string(),
+                TargetProfileSelection {
+                    name: name.to_string(),
+                    profile: selection.profile,
+                },
+            );
+        }
+        Ok(Self { selections: by_name })
+    }
+
+    pub fn get(&self, target_name: &str) -> Option<&TargetProfileSelection> {
+        self.selections.get(target_name)
+    }
+
+    pub fn profile(&self, target_name: &str) -> Option<&TargetProfileIdentity> {
+        self.get(target_name).map(|selection| &selection.profile)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &TargetProfileSelection> {
+        self.selections.values()
+    }
+
+    pub fn as_map(&self) -> &BTreeMap<String, TargetProfileSelection> {
+        &self.selections
+    }
+
+    pub fn len(&self) -> usize {
+        self.selections.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.selections.is_empty()
+    }
+}
+
+fn target_profile_entries(
+    body: &str,
+) -> Result<Vec<(String, String)>, PackageParseError> {
+    let mut entries = Vec::new();
+    for entry in top_level_lines_or_commas(body) {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        if let Some((key, value)) = entry.split_once(':') {
+            entries.push((key.trim().to_string(), value.trim().to_string()));
+        } else {
+            return Err(err(format!("malformed target profile field `{entry}`")));
+        }
+    }
+    Ok(entries)
+}
+
+fn top_level_lines_or_commas(body: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut current = String::new();
+    let mut quoted = false;
+    let mut escaped = false;
+    for character in body.chars() {
+        if quoted {
+            current.push(character);
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                quoted = false;
+            }
+            continue;
+        }
+        match character {
+            '"' => {
+                quoted = true;
+                current.push(character);
+            }
+            '(' | '[' | '{' => {
+                depth += 1;
+                current.push(character);
+            }
+            ')' | ']' | '}' => {
+                depth -= 1;
+                current.push(character);
+            }
+            ',' | '\n' if depth == 0 => {
+                if !current.trim().is_empty() {
+                    out.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(character),
+        }
+    }
+    if !current.trim().is_empty() {
+        out.push(current);
+    }
+    out
+}
+
+pub(super) fn parse_target_profiles(body: &str) -> Result<PackageTargets, PackageParseError> {
+    let entries = target_profile_entries(body)?;
+    if entries.is_empty() {
+        return Err(PackageParseError::BadTargetField {
+            name: "targets".to_string(),
+            detail: "the `targets` block must declare at least one target".to_string(),
+        });
+    }
+
+    let mut selections = Vec::with_capacity(entries.len());
+    for (raw_name, value) in entries {
+        let name = unquote(&raw_name);
+        if name.is_empty() {
+            return Err(PackageParseError::BadTargetField {
+                name: "targets".to_string(),
+                detail: "target names must not be empty".to_string(),
+            });
+        }
+        let inner = value
+            .trim()
+            .strip_prefix('{')
+            .and_then(|body| body.strip_suffix('}'))
+            .map(str::trim)
+            .ok_or_else(|| PackageParseError::BadTargetField {
+                name: name.clone(),
+                detail: "target selection must be a record containing only `profile`".to_string(),
+            })?;
+
+        let mut profile = None;
+        let mut seen = HashSet::new();
+        for (field, raw_profile) in target_profile_entries(inner)? {
+            if !seen.insert(field.clone()) {
+                return Err(PackageParseError::BadTargetField {
+                    name: name.clone(),
+                    detail: format!("target field `{field}` is declared more than once"),
+                });
+            }
+            if field != "profile" {
+                return Err(PackageParseError::BadTargetField {
+                    name: name.clone(),
+                    detail: format!(
+                        "unknown target selection field `{field}` (allowed: `profile`)"
+                    ),
+                });
+            }
+            let raw_profile = unquote(&raw_profile);
+            let identity = TargetProfileIdentity::parse(&raw_profile).map_err(|detail| {
+                PackageParseError::BadTargetField {
+                    name: name.clone(),
+                    detail,
+                }
+            })?;
+            profile = Some(identity);
+        }
+        let profile = profile.ok_or_else(|| PackageParseError::BadTargetField {
+            name: name.clone(),
+            detail: "target selection must declare `profile`".to_string(),
+        })?;
+        selections.push(TargetProfileSelection { name, profile });
+    }
+
+    PackageTargets::from_selections(selections).map_err(|detail| PackageParseError::BadTargetField {
+        name: "targets".to_string(),
+        detail,
+    })
+}
+
 pub(super) fn parse_packages(body: &str) -> Result<Vec<PackageEntry>, PackageParseError> {
     let mut packages = Vec::new();
     for entry in top_level_commas(body) {
@@ -820,6 +1132,221 @@ pub enum BuildPanic {
     Abort,
 }
 
+/// Development-time replay policy from the package's `dev: .{ … }` block.
+///
+/// The package model owns the typed manifest facts. Runtime adapters map this
+/// value to their own capture sink without reparsing package source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DevRecordsBudget {
+    pub max_bytes: u64,
+    pub max_records: usize,
+}
+
+impl Default for DevRecordsBudget {
+    fn default() -> Self {
+        Self {
+            max_bytes: 256 * 1024 * 1024,
+            max_records: 200,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DevCaptureSetting {
+    #[default]
+    Default,
+    On,
+    Off,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DevRecordsPolicy {
+    pub capture: DevCaptureSetting,
+    pub budget: DevRecordsBudget,
+}
+
+impl Default for DevRecordsPolicy {
+    fn default() -> Self {
+        Self {
+            capture: DevCaptureSetting::Default,
+            budget: DevRecordsBudget::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DevPolicy {
+    pub swap: bool,
+    pub records: DevRecordsPolicy,
+}
+
+impl Default for DevPolicy {
+    fn default() -> Self {
+        Self {
+            swap: true,
+            records: DevRecordsPolicy::default(),
+        }
+    }
+}
+
+fn record_body<'a>(value: &'a str, field: &str) -> Result<&'a str, PackageParseError> {
+    let Some(open) = value.find('{') else {
+        return Err(err(format!("{field} needs a record value")));
+    };
+    let Some(close) = value.rfind('}') else {
+        return Err(err(format!("{field} needs a closed record value")));
+    };
+    Ok(&value[open + 1..close])
+}
+
+pub(super) fn parse_dev(value: &str) -> Result<DevPolicy, PackageParseError> {
+    let body = record_body(value, "dev")?;
+    let mut policy = DevPolicy::default();
+    let mut seen_swap = false;
+    let mut seen_records = false;
+    for (key, raw) in key_value_entries(body)? {
+        match key.as_str() {
+            "swap" => {
+                if seen_swap {
+                    return Err(err("dev policy field `swap` is declared more than once"));
+                }
+                seen_swap = true;
+                policy.swap = match raw.trim() {
+                    "true" => true,
+                    "false" => false,
+                    _ => return Err(err("dev policy field `swap` expected `true` or `false")),
+                };
+            }
+            "records" => {
+                if seen_records {
+                    return Err(err("dev policy field `records` is declared more than once"));
+                }
+                seen_records = true;
+                policy.records = parse_dev_records(&raw)?;
+            }
+            other => {
+                return Err(err(format!(
+                    "dev policy has unknown field `{other}` (allowed: swap, records)"
+                )));
+            }
+        }
+    }
+    Ok(policy)
+}
+
+fn parse_dev_records(value: &str) -> Result<DevRecordsPolicy, PackageParseError> {
+    let body = record_body(value, "dev.records")?;
+    let mut policy = DevRecordsPolicy::default();
+    let mut seen_capture = false;
+    let mut seen_budget = false;
+    for (key, raw) in key_value_entries(body)? {
+        match key.as_str() {
+            "capture" => {
+                if seen_capture {
+                    return Err(err(
+                        "dev.records field `capture` is declared more than once",
+                    ));
+                }
+                seen_capture = true;
+                policy.capture = match unquote(&raw).as_str() {
+                    "default" => DevCaptureSetting::Default,
+                    "on" => DevCaptureSetting::On,
+                    "off" => DevCaptureSetting::Off,
+                    _ => {
+                        return Err(err(
+                            "dev.records.capture expected `default`, `on`, or `off`",
+                        ))
+                    }
+                };
+            }
+            "budget" => {
+                if seen_budget {
+                    return Err(err(
+                        "dev.records field `budget` is declared more than once",
+                    ));
+                }
+                seen_budget = true;
+                policy.budget = parse_dev_records_budget(&raw)?;
+            }
+            other => {
+                return Err(err(format!(
+                    "dev.records has unknown field `{other}` (allowed: capture, budget)"
+                )));
+            }
+        }
+    }
+    Ok(policy)
+}
+
+fn parse_dev_records_budget(value: &str) -> Result<DevRecordsBudget, PackageParseError> {
+    let body = record_body(value, "dev.records.budget")?;
+    let mut budget = DevRecordsBudget::default();
+    let mut seen_size = false;
+    let mut seen_count = false;
+    for (key, raw) in key_value_entries(body)? {
+        match key.as_str() {
+            "size" => {
+                if seen_size {
+                    return Err(err(
+                        "dev.records.budget field `size` is declared more than once",
+                    ));
+                }
+                seen_size = true;
+                budget.max_bytes = parse_dev_record_bytes(&raw)?;
+            }
+            "count" => {
+                if seen_count {
+                    return Err(err(
+                        "dev.records.budget field `count` is declared more than once",
+                    ));
+                }
+                seen_count = true;
+                budget.max_records = raw.trim().replace('_', "").parse::<usize>().ok().filter(|n| *n > 0).ok_or_else(|| {
+                    err("dev.records.budget.count must be a positive whole number")
+                })?;
+            }
+            other => {
+                return Err(err(format!(
+                    "dev.records.budget has unknown field `{other}` (allowed: size, count)"
+                )));
+            }
+        }
+    }
+    Ok(budget)
+}
+
+fn parse_dev_record_bytes(value: &str) -> Result<u64, PackageParseError> {
+    let compact = unquote(value).to_ascii_lowercase();
+    let compact = compact.trim();
+    let (digits, multiplier) = ["bytes", "gib", "gb", "mib", "mb", "kib", "kb", "b"]
+        .iter()
+        .find_map(|suffix| compact.strip_suffix(suffix).map(|digits| (digits, *suffix)))
+        .map(|(digits, suffix)| {
+            let multiplier = match suffix {
+                "gib" | "gb" => 1024u64.pow(3),
+                "mib" | "mb" => 1024u64.pow(2),
+                "kib" | "kb" => 1024,
+                _ => 1,
+            };
+            (digits.trim(), multiplier)
+        })
+        .unwrap_or((compact, 1));
+    let count = digits
+        .replace('_', "")
+        .split_whitespace()
+        .collect::<String>()
+        .parse::<u64>()
+        .ok()
+        .filter(|n| *n > 0)
+        .ok_or_else(|| {
+            err("dev.records.budget.size must be a positive whole-byte quantity")
+        })?;
+    count
+        .checked_mul(multiplier)
+        .filter(|bytes| *bytes > 0)
+        .ok_or_else(|| err("dev.records.budget.size does not fit in 64 bits"))
+}
+
 /// One named build profile declared in `build: .{ … }`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuildProfileDef {
@@ -830,6 +1357,11 @@ pub struct BuildProfileDef {
     pub panic: Option<BuildPanic>,
     /// D-CONF-MODULE1=A: profile contributions to declared typed settings.
     pub settings: BTreeMap<String, String>,
+    /// D-DX-PROD1: release-only devtools presence form.
+    pub inspect: ReleaseInspect,
+    /// Game packaging policy resolved from this named profile.
+    pub game_development_stripping: Option<bool>,
+    pub game_cook_mode: Option<String>,
 }
 
 pub(super) fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, PackageParseError> {
@@ -863,6 +1395,9 @@ pub(super) fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, PackagePar
         let mut small = false;
         let mut panic = None;
         let mut settings = BTreeMap::new();
+        let mut inspect = ReleaseInspect::default();
+        let mut game_development_stripping = None;
+        let mut game_cook_mode = None;
         let mut seen_fields = HashSet::new();
         for (key, val) in key_value_entries(inner)? {
             if !seen_fields.insert(key.clone()) {
@@ -883,6 +1418,28 @@ pub(super) fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, PackagePar
                     s if s == Syntax::BUILD_PANIC_UNWIND => BuildPanic::Unwind,
                     _ => return Err(err(format!("build profile `{name}` has an unknown `panic:` value — use `abort` or `unwind`"))),
                 });
+            } else if key == ReleaseInspect::FIELD {
+                if name != Syntax::BUILD_PROFILE_RELEASE {
+                    return Err(err(format!(
+                        "build profile `{name}` may declare `inspect:` only on `release`"
+                    )));
+                }
+                inspect = ReleaseInspect::parse(&val).map_err(|detail| {
+                    err(format!(
+                        "build profile `{name}` has an invalid `inspect:` value `{}` — {detail}",
+                        val.trim()
+                    ))
+                })?;
+            } else if key == "game_development_stripping" {
+                game_development_stripping = Some(parse_bool(&name, &val)?);
+            } else if key == "game_cook_mode" {
+                let mode = unquote(&val);
+                if !matches!(mode.as_str(), "fast" | "reproducible" | "scripts-only") {
+                    return Err(err(format!(
+                        "build profile `{name}` has an unknown `game_cook_mode:` value `{mode}`"
+                    )));
+                }
+                game_cook_mode = Some(mode);
             } else if key == Syntax::BUILD_FIELD_SETTINGS {
                 let inner = val
                     .trim_start_matches('.')
@@ -911,7 +1468,7 @@ pub(super) fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, PackagePar
                 )));
             } else {
                 return Err(err(format!(
-                    "build profile `{name}` has an unknown field `{key}` (allowed: optimize, debug_info, small, panic, settings)"
+                    "build profile `{name}` has an unknown field `{key}` (allowed: optimize, debug_info, small, panic, inspect, game_development_stripping, game_cook_mode, settings)"
                 )));
             }
         }
@@ -932,6 +1489,9 @@ pub(super) fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, PackagePar
             small,
             panic,
             settings,
+            inspect,
+            game_development_stripping,
+            game_cook_mode,
         });
     }
     Ok(profiles)
@@ -1039,6 +1599,38 @@ fn parse_effect_list(field: &str, value: &str) -> Result<Vec<String>, PackagePar
     }
     Ok(names)
 }
+fn parse_authority_needs(value: &str) -> Result<Vec<String>, PackageParseError> {
+    let needs = parse_string_list(value).map_err(|_| {
+        PackageParseError::BadEffectsBlock(
+            "`authority.needs:` must be a list like `[DB, Net, UI.Clipboard]`".to_string(),
+        )
+    })?;
+    for name in &needs {
+        if jet_foundation::Syntax::is_ui_capability(name) {
+            continue;
+        }
+        if crate::Sema::Effect::parse(crate::Sema::effect_root(name)).is_none() {
+            return Err(PackageParseError::BadEffectsBlock(format!(
+                "`{name}` isn't a known effect or UI capability"
+            )));
+        }
+        if name.contains('(') {
+            return Err(PackageParseError::BadEffectsBlock(format!(
+                "`{name}` is a parameterized memory denial and cannot be declared in `authority.needs`"
+            )));
+        }
+    }
+    if let Some(denied_only) = needs.iter().find(|right| {
+        let root = crate::Sema::effect_root(right);
+        root == "Panic" || root == "Mem"
+    }) {
+        return Err(PackageParseError::BadEffectsBlock(format!(
+            "`{denied_only}` is deny-only and cannot be declared in `authority.needs`"
+        )));
+    }
+    Ok(needs)
+}
+
 
 // ── authority: … / policy: … (D-AUTHORITY-MANIFEST1, D-BOUND-PROV1,
 //    D-JPK-GRANTSCHEMA1, D-JPK-PROVIDERAUTH1, D-LINTPOLICY1,
@@ -1094,10 +1686,12 @@ pub struct ProviderAuthority {
 
 /// D-AUTHORITY-MANIFEST1=A: one parsed authority block. The package model
 /// copies this into its public authority fact and projects holds/grants into
-/// the effect-budget summary inputs.
+/// the effect-budget summary inputs. `needs` is a guest declaration, not a
+/// second grant store.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AuthorityBlock {
     pub holds: AuthorityHolds,
+    pub needs: Vec<String>,
     pub grants: Vec<(String, Vec<String>)>,
     pub trust: Option<TrustPolicy>,
     pub providers: Vec<ProviderAuthority>,
@@ -1174,6 +1768,9 @@ pub(super) fn parse_authority(body: &str) -> Result<AuthorityBlock, PackageParse
             Syntax::AUTHORITY_FIELD_HOLDS => {
                 authority.holds = parse_authority_holds(authority_object_body(&value, "holds")?)?;
             }
+            Syntax::AUTHORITY_FIELD_NEEDS => {
+                authority.needs = parse_authority_needs(&value).map_err(authority_error)?;
+            }
             Syntax::AUTHORITY_FIELD_GRANTS => {
                 authority.grants = parse_grants(authority_object_body(&value, "grants")?)
                     .map_err(authority_error)?;
@@ -1189,8 +1786,9 @@ pub(super) fn parse_authority(body: &str) -> Result<AuthorityBlock, PackageParse
             }
             _ => {
                 return Err(authority_bad(format!(
-                    "unknown `authority` field `{key}` — allowed: `{}`, `{}`, `{}`, `{}`",
+                    "unknown `authority` field `{key}` — allowed: `{}`, `{}`, `{}`, `{}`, `{}`",
                     Syntax::AUTHORITY_FIELD_HOLDS,
+                    Syntax::AUTHORITY_FIELD_NEEDS,
                     Syntax::AUTHORITY_FIELD_GRANTS,
                     Syntax::AUTHORITY_FIELD_TRUST,
                     Syntax::AUTHORITY_FIELD_PROVIDERS,
@@ -1411,6 +2009,7 @@ pub(super) fn parse_policy(
                     | Syntax::POLICY_FIELD_UNSAFE
                     | Syntax::POLICY_FIELD_EXPERT
                     | Syntax::POLICY_FIELD_DEPS
+                    | Syntax::POLICY_FIELD_CLAIMS
             )
         {
             continue;
@@ -1442,7 +2041,8 @@ pub(super) fn parse_policy(
                         || name == Syntax::POLICY_FIELD_HARDEN
                         || name == Syntax::POLICY_FIELD_LICENSES
                         || name == Syntax::POLICY_FIELD_SOURCES
-                        || name == Syntax::POLICY_FIELD_EXCEPTIONS))
+                        || name == Syntax::POLICY_FIELD_EXCEPTIONS
+                        || name == Syntax::POLICY_FIELD_CLAIMS))
             {
                 continue;
             }
@@ -1503,6 +2103,7 @@ pub(super) fn parse_package_policy_surface(
         Option<Vec<String>>,
         Option<bool>,
         Option<Vec<String>>,
+        Option<super::ClaimsGrade>,
     ),
     PackageParseError,
 > {
@@ -1520,6 +2121,8 @@ pub(super) fn parse_package_policy_surface(
     let mut unsafe_seen = false;
     let mut expert_seen = false;
     let mut deps_seen = false;
+    let mut claims_min = None;
+    let mut claims_seen = false;
     for (name, raw) in key_value_entries(body)? {
         match name.as_str() {
             Syntax::POLICY_FIELD_EFFECTS => {
@@ -1587,6 +2190,34 @@ pub(super) fn parse_package_policy_surface(
                     ));
                 };
                 deps = Some(parse_dependency_policy_list(list)?);
+            }
+            Syntax::POLICY_FIELD_CLAIMS => {
+                if claims_seen {
+                    return Err(bad_policy("`policy.claims` is declared more than once"));
+                }
+                claims_seen = true;
+                let claims_body = record_value_body(&raw, "policy.claims")?;
+                let entries = key_value_entries(claims_body)?;
+                let mut min_seen = false;
+                for (field, value) in entries {
+                    if field != "min" {
+                        return Err(bad_policy(format!(
+                            "`policy.claims` has unknown field `{field}`; use `min`"
+                        )));
+                    }
+                    if min_seen {
+                        return Err(bad_policy("`policy.claims.min` is declared more than once"));
+                    }
+                    min_seen = true;
+                    claims_min = Some(super::ClaimsGrade::parse(&value).ok_or_else(|| {
+                        bad_policy(
+                            "`policy.claims.min` must be `.Unchecked`, `.Checked`, `examples(n)`, `generated(n)`, or `.Proved`",
+                        )
+                    })?);
+                }
+                if !min_seen {
+                    return Err(bad_policy("`policy.claims` requires `min`"));
+                }
             }
             Syntax::POLICY_FIELD_LICENSES => {
                 if licenses.is_some() {
@@ -1679,6 +2310,7 @@ pub(super) fn parse_package_policy_surface(
         unsafe_paths,
         expert,
         deps,
+        claims_min,
     ))
 }
 

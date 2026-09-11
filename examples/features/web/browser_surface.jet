@@ -1,0 +1,173 @@
+// A real browser target: the companion HTML is the page under test.  The
+// endpoint and server are supplied by the browser harness, never fabricated by
+// this example.  All protocol and report values remain typed handles.
+#[Target(Web), HTML("browser_surface.html")]
+use core.web.browser as browser
+
+fn report_surface() {
+    config_result :: browser.config()
+    if config_result == {
+        .Ok(config) -> {
+            _config_from_env :: browser.config_from_env()
+            _engines :: config.engines()
+            _retries :: config.retries()
+            _filter :: config.filter()
+            _reporter :: config.reporter()
+            _ui :: config.ui()
+            _visual :: config.visual()
+            _watch :: config.watch()
+            _server_url :: config.server_url()
+            _artifact_dir :: config.artifact_dir()
+            _report_path :: config.report_path()
+            _selected :: browser.selected(config, "surface")
+            report :: browser.report_new(config)
+            _json :: browser.report_json(report)
+            _text :: browser.report_text(report)
+            _html :: browser.report_html(report)
+            _exit_code :: browser.report_exit_code(report)
+            _changed :: browser.watch_changed("examples/features/web/browser_surface.jet", 0)
+        }
+        .Err(_) -> {}
+    }
+}
+
+// The report case is supplied by the browser runner.  Keeping this adapter in
+// the example makes the report_add_case row executable without manufacturing a
+// private case shape in application code.
+fn add_case(report: BrowserTestReport, case: BrowserTestCase) BrowserTestReport -> browser.report_add_case(report, case)
+
+fn report_external(config: BrowserTestConfig, case: BrowserTestCase, server: BrowserTestServer) {
+    started :: browser.server_start(config)
+    if started == {
+        .Ok(started_server) -> browser.server_stop(started_server)
+        .Err(_) -> {}
+    }
+    _generated :: browser.generate_source("surface_generated", "/browser_surface.html", "build/browser_surface_generated.jet")
+    _fixture :: browser.begin_named(config, "surface", "chromium", 0, "examples/features/web/browser_surface.jet", 1, 1)
+    _server_url :: browser.server_url(server)
+    _server_logs :: browser.server_logs(server)
+    browser.server_stop(server)
+    report :: browser.report_add_case(browser.report_new(config), case)
+    _json :: browser.report_json(report)
+    _text :: browser.report_text(report)
+    _html :: browser.report_html(report)
+    _exit :: browser.report_exit_code(report)
+    _written :: browser.write_report(report, "build/browser-surface-report.json")
+}
+
+fn browser_session(endpoint: String, page_url: String) {
+    profile :: browser.profile("bidi-2025.5") ?? return
+    timeout :: browser.timeout(5000) ?? return
+    _locked :: browser.locked("chromium")
+
+    connected :: browser.connect(endpoint)
+    if connected == {
+        .Ok(other) -> {
+            _other_abilities :: other.abilities()
+            _other_closed :: other.close()
+        }
+        .Err(_) -> {}
+    }
+
+    b :: browser.connect_profile(endpoint, profile, timeout) ?? return
+    abilities :: b.abilities()
+    _bidi :: abilities.bidi()
+    _cdp :: abilities.cdp()
+    _profile :: abilities.profile()
+
+    _subscribed :: b.subscribe("network.beforeRequestSent")
+    _intercept :: b.add_intercept("beforeRequestSent")
+    _url_intercept :: b.add_intercept_url("beforeRequestSent", "*")
+    _continued :: b.continue_request("request-id")
+    _failed :: b.fail_request("request-id")
+    _fulfilled :: b.fulfill_request("request-id", 200, "browser surface")
+    _downloads :: b.allow_downloads("build/browser-downloads")
+
+    protocol :: b.protocol("cdp") ?? return
+    _protocol_result :: protocol.send("Runtime.evaluate", "{}")
+    trace :: b.trace()
+    _trace_count :: trace.entry_count()
+    _trace_redacted :: trace.redacted()
+    _trace_summary :: trace.summary()
+    privacy :: b.privacy()
+    _privacy_isolated :: privacy.isolated_profiles()
+    _privacy_redacted :: privacy.redact_receipts()
+    _privacy_shared :: privacy.shared_profiles()
+    receipt :: b.receipt()
+    _receipt_count :: receipt.entry_count()
+    _receipt_redacted :: receipt.redacted()
+    _receipt_summary :: receipt.summary()
+    _receipt_isolated :: receipt.isolated()
+    _receipt_cleaned :: receipt.cleaned()
+
+    event :: b.next_event(timeout)
+    if event == {
+        .Ok(value) -> {
+            _kind :: value.kind()
+            _request_id :: value.request_id()
+            _request_method :: value.request_method()
+            _url_hash :: value.url_hash()
+            _blocked :: value.is_blocked()
+            _status :: value.status_code()
+            _download_id :: value.download_id()
+            _filename_hash :: value.suggested_filename_hash()
+        }
+        .Err(_) -> {}
+    }
+
+    context :: b.context() ?? return
+    _isolated :: context.isolated()
+    _user_hash :: context.user_hash()
+    page :: context.page() ?? return
+    extra_tab :: context.tab() ?? return
+    _extra_closed :: extra_tab.close()
+    _navigated :: page.goto(page_url)
+
+    role_button :: page.get_by_role("button", "Apply")
+    text_status :: page.get_by_text("Ready")
+    labeled_input :: page.get_by_label("Name")
+    placeholder_input :: page.get_by_placeholder("Type a name")
+    test_id :: page.get_by_test_id("surface-status")
+    css_status :: page.get_by_css("#surface-status")
+    _role_wait :: role_button.wait(timeout)
+    _text_wait_gone :: text_status.wait_gone(timeout)
+    _click :: role_button.click()
+    _hover :: role_button.hover()
+    _fill_label :: labeled_input.fill("Ada")
+    _fill_placeholder :: placeholder_input.fill("Grace")
+    _press :: labeled_input.press("Enter")
+    _set_files :: page.get_by_label("Attachment").set_files("examples/features/web/browser_surface.html")
+    _resolve :: test_id.resolve()
+
+    _cookie_set :: page.set_cookie("surface", "ready", "localhost")
+    _cookie :: page.cookie("surface")
+    _cookie_clear :: page.clear_cookies()
+    _local_set :: page.storage_set("local", "surface", "ready")
+    _local_get :: page.storage_get("local", "surface")
+    _session_get :: page.storage_get("session", "surface")
+    _local_clear :: page.storage_clear("local")
+    _session_clear :: page.storage_clear("session")
+    _screenshot :: page.screenshot()
+    _pdf :: page.pdf()
+    _url :: page.url()
+    _title :: page.title()
+    _text :: page.text()
+    _dom :: page.dom()
+
+    main_frame :: page.main_frame() ?? return
+    _frame_close :: main_frame.close()
+    frames :: page.frames() ?? return
+    loop frame in frames -> {
+        _closed_frame :: frame.close()
+    }
+    _closed_page :: page.close()
+    _closed_context :: context.close()
+    _closed_browser :: b.close()
+}
+
+fn run() {
+    report_surface()
+    endpoint :: input() ?? return
+    if endpoint.is_empty() -> return
+    browser_session(endpoint, "http://127.0.0.1:8080/browser_surface.html")
+}

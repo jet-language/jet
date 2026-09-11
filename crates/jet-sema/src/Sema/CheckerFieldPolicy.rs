@@ -409,6 +409,7 @@ fn synthesize_computed_field_getter(f: &Field) -> Func {
     Func {
         span,
         is_pub: f.is_pub,
+        is_comptime: false,
         is_package_pub: f.is_package_pub,
         external_type: None,
         name: f.name.clone(),

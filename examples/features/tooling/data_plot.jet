@@ -9,7 +9,10 @@ struct Sale {
 
 fn run() {
     rows :: data.csv<Sale>("month,value\nJan,4.0\nFeb,6.0\nMar,5.0") ?? panic("csv")
-    groups :: data.group_mean(rows, sale -> sale.month, sale -> sale.value) ?? panic("groups")
+    groups :: data.query(rows)
+        .group_by(sale -> sale.month)
+        .mean(sale -> sale.value)
+        .collect() ?? panic("groups")
     options :: DataLineOptions{
         title: "Sales",
         x_label: "month",

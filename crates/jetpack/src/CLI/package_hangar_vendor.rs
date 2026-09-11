@@ -2,6 +2,7 @@ use super::parse::Parsed;
 use super::shared_store::cmd_shared_store;
 use crate::Output::{self, Theme};
 use crate::Store::{self, Roots};
+use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -26,7 +27,11 @@ pub(super) fn cmd_list(theme: &Theme, parsed: &Parsed) -> i32 {
         if parsed.flags.json {
             println!(
                 "{}",
-                jet_foundation::Report::render_status_json("ok", true, "list", ",\"packages\":[]")
+                status_json(
+                    "list",
+                    true,
+                    StatusFields::new().with("packages", StatusValue::array(Vec::new())),
+                )
             );
         } else {
             theme.status("no realized packages yet.");
@@ -34,28 +39,26 @@ pub(super) fn cmd_list(theme: &Theme, parsed: &Parsed) -> i32 {
         return 0;
     }
     if parsed.flags.json {
-        let packages = entries
-            .iter()
-            .map(|entry| {
-                format!(
-                    "{{\"id\":{},\"name\":{},\"version\":{},\"reference\":{},\"output_hash\":{},\"source_built\":{}}}",
-                    crate::JSON::quote(&entry.id),
-                    crate::JSON::quote(&entry.name),
-                    crate::JSON::quote(&entry.version),
-                    crate::JSON::quote(&entry.reference),
-                    crate::JSON::quote(&entry.envelope.output_hash),
-                    entry.envelope.provenance.contains("core-"),
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(",");
+        let packages = StatusValue::array(entries.iter().map(|entry| {
+            StatusValue::object(
+                StatusFields::new()
+                    .with("id", entry.id.as_str())
+                    .with("name", entry.name.as_str())
+                    .with("version", entry.version.as_str())
+                    .with("reference", entry.reference.as_str())
+                    .with("output_hash", entry.envelope.output_hash.as_str())
+                    .with(
+                        "source_built",
+                        entry.envelope.provenance.contains("core-"),
+                    ),
+            )
+        }));
         println!(
             "{}",
-            jet_foundation::Report::render_status_json(
-                "ok",
-                true,
+            status_json(
                 "list",
-                &format!(",\"packages\":[{}]", packages),
+                true,
+                StatusFields::new().with("packages", packages),
             )
         );
         return 0;
@@ -204,11 +207,12 @@ pub(super) fn cmd_cache(theme: &Theme, parsed: &Parsed) -> i32 {
                     if parsed.flags.json {
                         println!(
                             "{}",
-                            jet_foundation::Report::render_status_json(
-                                "ok",
-                                true,
+                            status_json(
                                 "cache-remove",
-                                &format!(",\"role\":{},\"removed\":true", crate::JSON::quote(role)),
+                                true,
+                                StatusFields::new()
+                                    .with("role", role.as_str())
+                                    .with("removed", true),
                             )
                         );
                         return 0;
@@ -220,17 +224,14 @@ pub(super) fn cmd_cache(theme: &Theme, parsed: &Parsed) -> i32 {
                     if parsed.flags.json {
                         println!(
                             "{}",
-                            jet_foundation::Report::render_status_json(
-                                "ok",
-                                true,
+                            status_json(
                                 "cache-remove",
-                                &format!(
-                                    ",\"role\":{},\"removed\":false",
-                                    crate::JSON::quote(role)
-                                ),
+                                true,
+                                StatusFields::new()
+                                    .with("role", role.as_str())
+                                    .with("removed", false),
                             )
                         );
-                        return 0;
                     }
                     theme.status(&format!("cache role `{role}` was not bound"));
                     0
@@ -373,7 +374,7 @@ fn cache_confirm_apply(theme: &Theme, parsed: &Parsed, action: &str) -> bool {
     }
     println!(
         "{}",
-        jet_foundation::Report::render_status_json("plan", true, action, ",\"applied\":false",)
+        status_json(action, true, StatusFields::new().with("applied", false))
     );
     false
 }
@@ -424,15 +425,14 @@ pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
         Some("vendor") => cmd_vendor(theme, &hangar_nested(parsed)),
         Some("cache") => cmd_cache(theme, &hangar_nested(parsed)),
         Some("shared") => cmd_shared_store(theme, &hangar_nested(parsed)),
+        Some("ingest") => cmd_hangar_ingest(theme, parsed),
+        Some("doctor") => cmd_hangar_doctor(theme, parsed),
         Some("path") => {
             let path = Store::resolve().hangar_dir();
             if parsed.flags.json {
                 hangar_status_json(
                     "path",
-                    &format!(
-                        ",\"path\":{}",
-                        crate::JSON::quote(&path.display().to_string())
-                    ),
+                    StatusFields::new().with("path", path.display().to_string()),
                 );
             } else {
                 println!("{}", path.display());
@@ -454,35 +454,31 @@ pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
                 }
             };
             if parsed.flags.json {
-                let roots = report
-                    .roots
-                    .iter()
-                    .map(|entry| {
-                        format!(
-                            "{{\"root\":{},\"hangar\":{},\"bytes\":{}}}",
-                            crate::JSON::quote(&entry.root.display().to_string()),
-                            crate::JSON::quote(&entry.hangar.display().to_string()),
-                            entry.bytes,
+                let roots = StatusValue::array(report.roots.iter().map(|entry| {
+                    StatusValue::object(
+                        StatusFields::new()
+                            .with("root", entry.root.display().to_string())
+                            .with("hangar", entry.hangar.display().to_string())
+                            .with("bytes", entry.bytes),
+                    )
+                }));
+                let shared_cas = report
+                    .shared_cas
+                    .as_ref()
+                    .map(|pool| {
+                        StatusValue::object(
+                            StatusFields::new()
+                                .with("path", pool.path.display().to_string())
+                                .with("bytes", pool.bytes),
                         )
                     })
-                    .collect::<Vec<_>>()
-                    .join(",");
-                let shared_cas = report.shared_cas.as_ref().map_or_else(
-                    || "null".to_string(),
-                    |pool| {
-                        format!(
-                            "{{\"path\":{},\"bytes\":{}}}",
-                            crate::JSON::quote(&pool.path.display().to_string()),
-                            pool.bytes,
-                        )
-                    },
-                );
+                    .unwrap_or(StatusValue::Null);
                 hangar_status_json(
                     "du",
-                    &format!(
-                        ",\"shared_cas\":{},\"roots\":[{}],\"total_bytes\":{}",
-                        shared_cas, roots, report.total_bytes
-                    ),
+                    StatusFields::new()
+                        .with("shared_cas", shared_cas)
+                        .with("roots", roots)
+                        .with("total_bytes", report.total_bytes),
                 );
                 return 0;
             }
@@ -527,32 +523,28 @@ pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
                 }
             };
             if parsed.flags.json {
-                let machine_entries = report
-                    .entries
-                    .iter()
-                    .map(|entry| {
-                        format!(
-                            "{{\"id\":{},\"unique_bytes\":{},\"shared_bytes\":{},\"source_built\":{}}}",
-                            crate::JSON::quote(&entry.id),
-                            json_u64(entry.unique_bytes),
-                            json_u64(entry.shared_bytes),
-                            entry.source_built,
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(",");
+                let entries = StatusValue::array(report.entries.iter().map(|entry| {
+                    StatusValue::object(
+                        StatusFields::new()
+                            .with("id", entry.id.as_str())
+                            .with("unique_bytes", status_optional_u64(entry.unique_bytes))
+                            .with("shared_bytes", status_optional_u64(entry.shared_bytes))
+                            .with("source_built", entry.source_built),
+                    )
+                }));
                 hangar_status_json(
                     "du",
-                    &format!(
-                        ",\"objects\":{},\"packages\":{},\"built\":{},\"unique_bytes\":{},\"shared_bytes\":{},\"closure_physical_bytes\":{},\"entries\":[{}]",
-                        report.objects,
-                        report.packages,
-                        report.built,
-                        json_u64(report.unique_bytes),
-                        json_u64(report.shared_bytes),
-                        json_u64(report.closure_physical_bytes),
-                        machine_entries,
-                    ),
+                    StatusFields::new()
+                        .with("objects", report.objects)
+                        .with("packages", report.packages)
+                        .with("built", report.built)
+                        .with("unique_bytes", status_optional_u64(report.unique_bytes))
+                        .with("shared_bytes", status_optional_u64(report.shared_bytes))
+                        .with(
+                            "closure_physical_bytes",
+                            status_optional_u64(report.closure_physical_bytes),
+                        )
+                        .with("entries", entries),
                 );
                 return 0;
             }
@@ -592,8 +584,6 @@ pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
             );
             0
         }
-        Some("ingest") => cmd_hangar_ingest(theme, parsed),
-        Some("doctor") => cmd_hangar_doctor(theme, parsed),
         Some("verify") => cmd_hangar_verify(theme, parsed),
         Some("export") => cmd_hangar_archive(theme, parsed, "export"),
         Some("import") => cmd_hangar_archive(theme, parsed, "import"),
@@ -611,7 +601,10 @@ pub(super) fn cmd_hangar(theme: &Theme, parsed: &Parsed) -> i32 {
             match Store::recover_hangar(&roots) {
                 Ok(n) => {
                     if parsed.flags.json {
-                        hangar_status_json("recover", &format!(",\"recovered\":{n}"));
+                        hangar_status_json(
+                            "recover",
+                            StatusFields::new().with("recovered", n),
+                        );
                     } else {
                         theme.status(&format!(
                             "recovered {n} abandoned or committed hangar item(s)"
@@ -700,17 +693,13 @@ fn cmd_hangar_register_external_root(theme: &Theme, parsed: &Parsed) -> i32 {
         if !parsed.flags.assume_yes {
             hangar_plan_json(
                 "register-external-root",
-                &format!(
-                    ",\"applied\":false,\"label\":{},\"reference\":{},\"closure_objects\":{},\"expires_at\":{},\"if_etag\":{}",
-                    crate::JSON::quote(label),
-                    crate::JSON::quote(reference),
-                    closure_size,
-                    expires_at.map_or_else(|| "null".to_string(), |value| value.to_string()),
-                    expected_etag
-                        .as_deref()
-                        .map(crate::JSON::quote)
-                        .unwrap_or_else(|| "null".to_string())
-                ),
+                StatusFields::new()
+                    .with("applied", false)
+                    .with("label", label.as_str())
+                    .with("reference", reference.as_str())
+                    .with("closure_objects", closure_size)
+                    .with("expires_at", status_optional_u64(expires_at))
+                    .with("if_etag", status_optional_string(expected_etag.as_deref())),
             );
             return 0;
         }
@@ -743,20 +732,12 @@ fn cmd_hangar_register_external_root(theme: &Theme, parsed: &Parsed) -> i32 {
             if parsed.flags.json {
                 hangar_status_json(
                     "register-external-root",
-                    &format!(
-                        ",\"label\":{},\"reference\":{},\"etag\":{},\"expires_at\":{}",
-                        crate::JSON::quote(&view.label),
-                        crate::JSON::quote(&view.reference),
-                        crate::JSON::quote(&view.etag),
-                        view.expires_at
-                            .map_or_else(|| "null".to_string(), |value| value.to_string())
-                    ),
+                    StatusFields::new()
+                        .with("label", view.label.as_str())
+                        .with("reference", view.reference.as_str())
+                        .with("etag", view.etag.as_str())
+                        .with("expires_at", status_optional_u64(view.expires_at)),
                 );
-            } else {
-                theme.status(&format!(
-                    "Created external root `{}` at etag {}.",
-                    view.label, view.etag
-                ));
             }
             0
         }
@@ -769,7 +750,10 @@ fn cmd_hangar_list_external_roots(theme: &Theme, parsed: &Parsed) -> i32 {
     match Store::list_external_roots(&roots, &external_root_principal()) {
         Ok(roots) if roots.is_empty() => {
             if parsed.flags.json {
-                hangar_status_json("list-external-roots", ",\"roots\":[]");
+                hangar_status_json(
+                    "list-external-roots",
+                    StatusFields::new().with("roots", StatusValue::array(Vec::new())),
+                );
             } else {
                 theme.status("no external roots.");
             }
@@ -777,32 +761,31 @@ fn cmd_hangar_list_external_roots(theme: &Theme, parsed: &Parsed) -> i32 {
         }
         Ok(roots) => {
             let now = unix_now();
-            let mut machine_roots = Vec::with_capacity(roots.len());
-            for root in roots {
-                machine_roots.push(format!(
-                    "{{\"label\":{},\"reference\":{},\"etag\":{},\"expires_at\":{}}}",
-                    crate::JSON::quote(&root.label),
-                    crate::JSON::quote(&root.reference),
-                    crate::JSON::quote(&root.etag),
-                    root.expires_at
-                        .map_or_else(|| "null".to_string(), |value| value.to_string())
-                ));
-                let expiry = root
-                    .expires_at
-                    .map(|at| format!("{}", render_expiry(at, now)))
-                    .unwrap_or_else(|| "expires never".to_string());
-                if !parsed.flags.json {
+            if parsed.flags.json {
+                let machine_roots = StatusValue::array(roots.iter().map(|root| {
+                    StatusValue::object(
+                        StatusFields::new()
+                            .with("label", root.label.as_str())
+                            .with("reference", root.reference.as_str())
+                            .with("etag", root.etag.as_str())
+                            .with("expires_at", status_optional_u64(root.expires_at)),
+                    )
+                }));
+                hangar_status_json(
+                    "list-external-roots",
+                    StatusFields::new().with("roots", machine_roots),
+                );
+            } else {
+                for root in roots {
+                    let expiry = root
+                        .expires_at
+                        .map(|at| render_expiry(at, now))
+                        .unwrap_or_else(|| "expires never".to_string());
                     theme.detail(&format!(
                         "{}  {}  {}  etag {}",
                         root.label, root.reference, expiry, root.etag
                     ));
                 }
-            }
-            if parsed.flags.json {
-                hangar_status_json(
-                    "list-external-roots",
-                    &format!(",\"roots\":[{}]", machine_roots.join(",")),
-                );
             }
             0
         }
@@ -847,7 +830,7 @@ fn cmd_hangar_unregister_external_root(theme: &Theme, parsed: &Parsed) -> i32 {
             if parsed.flags.json {
                 hangar_status_json(
                     "unregister-external-root",
-                    &format!(",\"label\":{}", crate::JSON::quote(label)),
+                    StatusFields::new().with("label", label.as_str()),
                 );
             } else {
                 theme.status(&format!("Removed external root `{label}`."));
@@ -987,22 +970,26 @@ fn unix_now() -> u64 {
         .unwrap_or(0)
 }
 
-fn hangar_status_json(action: &str, fields: &str) {
-    println!(
-        "{}",
-        jet_foundation::Report::render_status_json("ok", true, action, fields)
-    );
+fn status_json(action: &str, ok: bool, fields: StatusFields) -> String {
+    StatusEnvelope::new(action, ok).with_fields(fields).json()
 }
 
-fn json_u64(value: Option<u64>) -> String {
-    value.map_or_else(|| "null".to_string(), |value| value.to_string())
+fn hangar_status_json(action: &str, fields: StatusFields) {
+    println!("{}", status_json(action, true, fields));
 }
 
-fn hangar_plan_json(action: &str, fields: &str) {
-    println!(
-        "{}",
-        jet_foundation::Report::render_status_json("plan", true, action, fields)
-    );
+fn status_optional_string(value: Option<&str>) -> StatusValue {
+    value
+        .map(|value| StatusValue::String(value.to_string()))
+        .unwrap_or(StatusValue::Null)
+}
+
+fn status_optional_u64(value: Option<u64>) -> StatusValue {
+    value.map(StatusValue::from).unwrap_or(StatusValue::Null)
+}
+
+fn hangar_plan_json(action: &str, fields: StatusFields) {
+    println!("{}", status_json(action, true, fields));
 }
 
 fn hangar_confirm_apply(theme: &Theme, parsed: &Parsed, action: &str) -> bool {
@@ -1012,9 +999,10 @@ fn hangar_confirm_apply(theme: &Theme, parsed: &Parsed, action: &str) -> bool {
     if parsed.flags.assume_yes {
         return true;
     }
-    hangar_plan_json(action, ",\"applied\":false");
+    hangar_plan_json(action, StatusFields::new().with("applied", false));
     false
 }
+
 
 fn hangar_report_error(
     theme: &Theme,
@@ -1032,13 +1020,13 @@ fn hangar_report_error(
             fix.to_string(),
             None,
         );
+        let file = jet_foundation::Diagnostics::ReportPath::from_process("");
+        let report = diagnostic.to_report(&file, "");
         print!(
             "{}",
-            jet_foundation::Diagnostics::render_all_json(
-                &jet_foundation::Diagnostics::ReportPath::from_process(""),
-                "",
-                &[diagnostic],
-            )
+            StatusEnvelope::new("hangar", false)
+                .with_reports(std::iter::once(report))
+                .json_line()
         );
     } else {
         theme.error_coded(code, what, why, fix);
@@ -1114,12 +1102,13 @@ fn cmd_hangar_ingest(theme: &Theme, parsed: &Parsed) -> i32 {
             if parsed.flags.json {
                 hangar_status_json(
                     "ingest",
-                    &format!(
-                        ",\"id\":{},\"output_hash\":{},\"deduplicated\":{}",
-                        crate::JSON::quote(&ingested.entry.id),
-                        crate::JSON::quote(&ingested.entry.envelope.output_hash),
-                        ingested.deduplicated
-                    ),
+                    StatusFields::new()
+                        .with("id", ingested.entry.id.as_str())
+                        .with(
+                            "output_hash",
+                            ingested.entry.envelope.output_hash.as_str(),
+                        )
+                        .with("deduplicated", ingested.deduplicated),
                 );
             } else {
                 let tag = if ingested.deduplicated {
@@ -1176,47 +1165,33 @@ fn cmd_hangar_doctor(theme: &Theme, parsed: &Parsed) -> i32 {
     };
     let remaining = report.remaining_count();
     if parsed.flags.json {
-        let findings = report
-            .findings
-            .iter()
-            .map(|finding| {
-                format!(
-                    "{{\"kind\":{},\"subject\":{},\"detail\":{},\"fixed\":{}}}",
-                    crate::JSON::quote(&finding.kind),
-                    crate::JSON::quote(&finding.subject),
-                    crate::JSON::quote(&finding.detail),
-                    finding.fixed,
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(",");
+        let findings = StatusValue::array(report.findings.iter().map(|finding| {
+            StatusValue::object(
+                StatusFields::new()
+                    .with("kind", finding.kind.as_str())
+                    .with("subject", finding.subject.as_str())
+                    .with("detail", finding.detail.as_str())
+                    .with("fixed", finding.fixed),
+            )
+        }));
         println!(
             "{}",
-            jet_foundation::Report::render_status_json(
-                if remaining == 0 { "ok" } else { "degraded" },
-                remaining == 0,
+            status_json(
                 "hangar.doctor",
-                &format!(
-                    ",\"objects\":{},\"findings\":[{}],\"fixed\":{},\"remaining\":{},\"seal_reused\":{},\"seal_resealed\":{},\"seal_reseal_needed\":{}",
-                    report.objects,
-                    findings,
-                    report.fixed_count(),
-                    remaining,
-                    report.seal_reused,
-                    report.seal_resealed,
-                    report.seal_reseal_needed,
-                ),
+                remaining == 0,
+                StatusFields::new()
+                    .with("objects", report.objects)
+                    .with("findings", findings)
+                    .with("fixed", report.fixed_count())
+                    .with("remaining", remaining)
+                    .with("seal_reused", report.seal_reused)
+                    .with("seal_resealed", report.seal_resealed)
+                    .with("seal_reseal_needed", report.seal_reseal_needed),
             )
         );
     } else {
         for finding in &report.findings {
-            let verdict = if finding.fixed {
-                "fixed"
-            } else if repair {
-                "unfixed"
-            } else {
-                "found"
-            };
+            let verdict = if finding.fixed { "fixed" } else { "remaining" };
             theme.status(&format!(
                 "{verdict} {} {}: {}",
                 finding.kind, finding.subject, finding.detail
@@ -1263,7 +1238,10 @@ fn cmd_hangar_verify(theme: &Theme, parsed: &Parsed) -> i32 {
             verified += 1;
         }
         if parsed.flags.json {
-            hangar_status_json("verify", &format!(",\"objects\":{verified}"));
+            hangar_status_json(
+                "verify",
+                StatusFields::new().with("objects", verified),
+            );
         } else {
             theme.status(&format!("verified {verified} Hangar object(s)"));
         }
@@ -1602,10 +1580,9 @@ fn cmd_hangar_referrers(theme: &Theme, parsed: &Parsed) -> i32 {
         if parsed.flags.json {
             hangar_status_json(
                 "referrers",
-                &format!(
-                    ",\"digest\":{},\"referrers\":[]",
-                    crate::JSON::quote(&digest)
-                ),
+                StatusFields::new()
+                    .with("digest", digest.as_str())
+                    .with("referrers", StatusValue::array(Vec::new())),
             );
         } else {
             theme.status("no referrers.");
@@ -1613,17 +1590,15 @@ fn cmd_hangar_referrers(theme: &Theme, parsed: &Parsed) -> i32 {
         return 0;
     }
     if parsed.flags.json {
-        let values = refs
-            .iter()
-            .map(|reference| crate::JSON::quote(reference))
-            .collect::<Vec<_>>();
+        let values = StatusValue::array(
+            refs.iter()
+                .map(|reference| StatusValue::String(reference.clone())),
+        );
         hangar_status_json(
             "referrers",
-            &format!(
-                ",\"digest\":{},\"referrers\":[{}]",
-                crate::JSON::quote(&digest),
-                values.join(",")
-            ),
+            StatusFields::new()
+                .with("digest", digest.as_str())
+                .with("referrers", values),
         );
     } else {
         for r in refs {

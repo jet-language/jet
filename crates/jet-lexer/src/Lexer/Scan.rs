@@ -536,6 +536,11 @@ impl<'a> Lexer<'a> {
                         toks.push(tok);
                     }
                 }
+                '`' => {
+                    if let Some(tok) = self.raw_string(start) {
+                        toks.push(tok);
+                    }
+                }
                 '\'' => {
                     if let Some(tok) = self.char_lit(start) {
                         toks.push(tok);
@@ -554,6 +559,16 @@ impl<'a> Lexer<'a> {
                         }
                     }
                     let span = Span::new(start, self.pos(self.i));
+                    if matches!(name.as_str(), "r" | "raw") && self.at(self.i) == '"' {
+                        self.diags.push(Diagnostic::error(
+                            "E0003",
+                            format!("`{name}\"…\"` is not a Jet raw-string prefix"),
+                            "backtick fences are the one raw ordinary-String spelling; `r` and `raw` are ordinary names"
+                                .to_string(),
+                            "write the text as ``…`` instead".to_string(),
+                            Some(span),
+                        ));
+                    }
                     if !self.allow_reserved_identifiers
                         && Syntax::classify_identifier(&name) == Syntax::IdentifierClass::Reserved
                     {

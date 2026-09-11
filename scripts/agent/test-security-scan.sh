@@ -19,8 +19,8 @@ mkdir -p \
   "$repo/.agent-scratch-1" \
   "$repo/plugins/tower/.tower" \
   "$repo/dogfood/tower/tests/parity/fixtures" \
+  "$repo/.jet/reports" \
   "$repo/site/dist" \
-  "$repo/docs/reference" \
   "$repo/docs/audits/security-final-prior" \
   "$repo/target/generated" \
   "$repo/build/generated" \
@@ -30,7 +30,7 @@ mkdir -p \
 git -C "$repo" init -q
 git -C "$repo" config user.name test
 git -C "$repo" config user.email test@example.invalid
-printf '%s\n' '/target/' '/build/' '/result/' '/.tmp/' '/unlisted-cache/' >"$repo/.gitignore"
+printf '%s\n' '/target/' '/build/' '/result/' '/.tmp/' '/.jet/reports/' '/unlisted-cache/' >"$repo/.gitignore"
 printf '%s\n' 'main' >"$repo/src/main.js"
 printf '%s\n' 'policy' >"$repo/.agents/policy.md"
 printf '%s\n' 'settings' >"$repo/.claude/settings.json"
@@ -44,7 +44,7 @@ printf '%s\n' 'scratch' >"$repo/.agent-scratch-1/data"
 printf '%s\n' 'tower state' >"$repo/plugins/tower/.tower/state.json"
 printf '%s\n' 'fixture' >"$repo/dogfood/tower/tests/parity/fixtures/state.json"
 printf '%s\n' 'site output' >"$repo/site/dist/index.html"
-printf '%s\n' 'ledger' >"$repo/docs/reference/core-surface-ledger.json"
+printf '%s\n' 'runtime ledger' >"$repo/.jet/reports/core-surface-ledger.json"
 printf '%s\n' 'prior discovery' >"$repo/docs/audits/security-deep-scan-2026-08-03.md"
 printf '%s\n' 'prior discovery' >"$repo/docs/audits/security-deep-scan-2026-08-03-full.md"
 printf '%s\n' 'prior discovery' >"$repo/docs/audits/security-deep-scan-2026-08-03-full-tower-control-plane.md"
@@ -73,7 +73,7 @@ indexed_paths=(
   plugins/tower/.tower/state.json
   dogfood/tower/tests/parity/fixtures/state.json
   site/dist/index.html
-  docs/reference/core-surface-ledger.json
+  .jet/reports/core-surface-ledger.json
   docs/audits/security-deep-scan-2026-08-03.md
   docs/audits/security-deep-scan-2026-08-03-full.md
   docs/audits/security-deep-scan-2026-08-03-full-tower-control-plane.md
@@ -142,7 +142,7 @@ for (const excluded of [
   "plugins/tower/.tower/state.json",
   "dogfood/tower/tests/parity/fixtures/state.json",
   "site/dist/index.html",
-  "docs/reference/core-surface-ledger.json",
+  ".jet/reports/core-surface-ledger.json",
   "docs/audits/security-deep-scan-2026-08-03.md",
   "docs/audits/security-deep-scan-2026-08-03-full.md",
   "docs/audits/security-deep-scan-2026-08-03-full-tower-control-plane.md",

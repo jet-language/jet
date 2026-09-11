@@ -13,11 +13,12 @@ use crate::RuntimePolicy;
 use crate::TrustRoot::{
     constant_time_eq, os_random_bytes, Signature as TrustSignature, TrustKey,
 };
-use crate::{Envelope, JSON, SHA256};
+use crate::{Envelope, SHA256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
+use jet_foundation::Report::{StatusEnvelope, StatusFields};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAGIC: &[u8] = b"jet-hangar-archive-v1\0";
@@ -2719,20 +2720,15 @@ fn invalid(message: &str) -> io::Error {
 }
 
 /// Stable status output used by the Hangar CLI. It uses the shared report
-/// schema and intentionally does not include host paths or timestamps.
 pub fn report_json(action: &str, report: &ArchiveReport) -> String {
-    jet_foundation::Report::render_status_json(
-        "ok",
-        true,
-        action,
-        &format!(
-            ",\"bytes\":{},\"objects\":{},\"root\":{},\"signed\":{}",
-            report.bytes,
-            report.objects,
-            JSON::quote(&report.root),
-            report.signed
-        ),
-    )
+    let fields = StatusFields::new()
+        .with("bytes", report.bytes)
+        .with("objects", report.objects)
+        .with("root", report.root.as_str())
+        .with("signed", report.signed);
+    StatusEnvelope::new(action, true)
+        .with_fields(fields)
+        .json()
 }
 
 #[cfg(test)]

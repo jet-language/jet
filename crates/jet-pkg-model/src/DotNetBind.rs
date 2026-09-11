@@ -192,12 +192,22 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
     identity.extend_from_slice(&inspected.stdout);
     identity.push(0);
     identity.extend_from_slice(hostfxr.to_string_lossy().as_bytes());
-    let provenance = format!(
+    let mut provenance = format!(
         "schema=jet-dotnet-bind-v1\nsha256={}\nclass={}\nhostfxr={}\n",
         crate::SHA256::sha256_hex(&identity),
         surface.class,
         hostfxr.display()
     );
+    crate::ForeignBridge::append_boundary_for_artifact(
+        &mut provenance,
+        *crate::AST::binder_descriptor(crate::AST::ForeignLanguage::DotNet)
+            .ok_or_else(|| BindError::Source(".NET binder descriptor is not registered".into()))?,
+        lib,
+        path,
+        &archive,
+        "dotnet/cc/ar",
+    )
+    .map_err(BindError::IO)?;
     let bound = std::iter::once("new".into())
         .chain(surface.methods.iter().map(|m| m.name.clone()))
         .collect();

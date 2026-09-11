@@ -1,0 +1,260 @@
+// #2815 GUI battery consumer. The model and view are shared by the null, TUI,
+// and native GTK paths; host outcomes are never converted into fabricated success.
+// Future state-matrix proof commands:
+//   JET_UI_HEADLESS=1 jet run examples/features/ui/battery/run.jet
+//   jet run --target native examples/features/ui/battery/run.jet
+//   jet dev --target web examples/features/ui/battery/run.jet
+use core.files as fs
+use core.reactive as reactive
+use core.text as text
+use core.tui as tui
+use core.ui as ui
+use gui
+
+fn run() {
+    root :: ".jet-gui-battery"
+    if fs.exists(root) -> fs.remove_all(root) ?? panic("cleanup before GUI battery")
+    fs.create_dir_all(root) ?? panic("create GUI battery state directory")
+
+    note_path :: "{root}/note.txt"
+    session_path :: "{root}/session.txt"
+    recovery_path :: "{root}/recovery.txt"
+    seed :: "Meeting notes — café\nBring résumé and naïve examples.\nالعربية हिन्दी é 👨‍👩‍👦\n"
+
+    state := gui.new_editor("{seed}", "Meeting")
+    fs.write(note_path, gui.persisted_body(state)) ?? panic("write Unicode note")
+    fs.write(session_path, gui.persisted_session(state)) ?? panic("write session settings")
+    fs.write(recovery_path, gui.persisted_body(state)) ?? panic("write recovery snapshot")
+
+    draft := reactive.signal(gui.body_of(state))
+    selected := reactive.signal(0)
+    theme := reactive.signal(gui.theme_of(state))
+    settings_open := reactive.signal(gui.settings_open_of(state))
+    saved := reactive.signal(false)
+    save_requested := reactive.signal(false)
+    status :: reactive.derived(() -> if saved.get() -> "saved" else -> "dirty")
+
+    tui_backend :: ui.tui_backend()
+    render_backend :: ~tui_backend
+    ui.reactive_render(() -> {
+        save_action :: ui.node_shortcut(ui.button("Save", on_click: () -> { save_requested.set(true) }), gui.save_shortcut())
+        editor :: gui.editor_view(draft.get(), selected.get(), theme.get(), settings_open.get())
+        tree :: ui.box([
+            editor,
+            save_action,
+        ])
+        ui.mount(render_backend, tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
+    })
+
+    focus :: gui.focus_group()
+    tui_backend.set_focus_group(focus)
+    print("focus: {tui_backend.focused_label()}")
+    tab :: ui.key_event("Tab")
+    tui_backend.on_event(tab)
+    print("focus after Tab: {tui_backend.focused_label()}")
+    print("TUI frames: {tui_backend.frame_lines().len()} renders: {tui_backend.render_count()}")
+    print("save command requested before input: {save_requested.get()}")
+    loop line in tui_backend.frame_lines() -> print("frame: {line}")
+
+    area :: ui.rect(0.0, 0.0, 80.0, 24.0)
+    panes :: tui.layout(area, tui.horizontal(), [tui.length(24.0), tui.fill(1.0)])
+    print("layout panes: {panes.len()}")
+
+    null_backend :: ui.null_backend()
+    snapshot :: gui.editor_view(draft.get(), selected.get(), theme.get(), settings_open.get())
+    ui.mount(null_backend, ui.box([snapshot, gui.save_button()]), ui.constraint(0.0, 0.0, 80.0, 24.0))
+    print("headless commands: {null_backend.commands().len()}")
+
+    // Selection, Unicode scalar offsets, IME composition, drag/drop, and history
+    // all update one state model. No backend-specific copy of this logic exists.
+    raw_selection :: gui.selection(-3, 999)
+    normalized_selection :: gui.normalize_selection(gui.body_of(state), raw_selection)
+    _selected :: gui.selected_text(gui.body_of(state), normalized_selection)
+    _edit :: gui.replace_selection(gui.body_of(state), normalized_selection, "probe")
+    _cursor :: gui.move_cursor(gui.body_of(state), normalized_selection, -2)
+    _title :: gui.title_of(state)
+    _composition :: gui.composition_of(state)
+    _revision :: gui.revision_of(state)
+    _status :: gui.status_of(state)
+    _start :: gui.selection_start(gui.body_of(state), normalized_selection)
+    _end :: gui.selection_end(gui.body_of(state), normalized_selection)
+
+    composing := gui.start_composition(state)
+    composing = gui.update_composition(composing, "preview")
+    _cancelled_composition :: gui.cancel_composition(composing)
+
+    state = gui.with_selection(state, gui.selection(0, 7))
+    state = gui.apply_text(state, "Edited — café, résumé, 中文")
+    state = gui.start_composition(state)
+    state = gui.update_composition(state, "かな")
+    state = gui.commit_composition(state, "かな")
+    state = gui.drop_text(state, "\nDropped text — naïve")
+    undo_state :: gui.undo(state)
+    state = gui.redo(undo_state)
+    state = gui.set_theme(state, "light")
+    state = gui.set_settings_open(state, true)
+    edited_state :: state
+    draft.set(gui.body_of(edited_state))
+    selected.set(1)
+    theme.set(gui.theme_of(edited_state))
+    settings_open.set(gui.settings_open_of(edited_state))
+    saved.set(false)
+    print("reactive renders after edit: {tui_backend.render_count()}")
+    print("editor status: {gui.status_label(edited_state)} ({status.get()})")
+
+    // Recovery is durable before a host save is confirmed. The committed note
+    // remains the original file until the save dialog and scoped write succeed.
+    fs.write(session_path, gui.persisted_session(edited_state)) ?? panic("save session settings")
+    fs.write(recovery_path, gui.persisted_body(edited_state)) ?? panic("save recovery snapshot")
+    reloaded_body :: fs.read(recovery_path) ?? panic("reload recovery note")
+
+    // Reload the exact Unicode recovery body with independent session policy.
+    reloaded_session :: fs.read(session_path) ?? panic("reload session settings")
+    reloaded :: gui.recover(reloaded_body, reloaded_session, "Meeting")
+    print("reloaded scalars: {text.scalar_count(gui.body_of(reloaded))}")
+    print("reloaded theme: {gui.theme_of(reloaded)} settings: {gui.settings_open_of(reloaded)}")
+    _restored_settings :: gui.restore_session(reloaded_session)
+
+    // Typography receives Arabic, Indic, combining-mark, and emoji-cluster input.
+    // `font.shape` is the canonical host shaper; the package never invents a
+    // glyph sequence when the host reports an approximate run.
+    face :: gui.system_font(.Body)
+    boundary :: gui.grapheme_cursor_boundary(gui.body_of(edited_state), 3)
+    shaped :: gui.shape_text("العربية हिन्दी é 👨‍👩‍👦", face)
+    print("font shaping invoked; grapheme cursor boundary: {boundary}; glyphs: {shaped.glyphs.len()}")
+    if shaped.approximate -> print("font shaper reported approximate fallback")
+    else -> print("font shaper reported host-shaped run")
+
+    // Real host calls. Result branches below preserve cancellation and failure
+    // rather than marking a cancelled service as a completed save.
+    _caps :: gui.host_capabilities()
+    _filter :: gui.text_filter()
+    _custom_filter :: gui.file_filter("Notes", ["jet", "md"], ["text/plain"])
+    _rights :: gui.fs_rights()
+    _grant :: gui.request_grant(root)
+    _clipboard_write :: gui.write_clipboard(gui.selected_text(gui.body_of(edited_state), gui.selection_of(edited_state)))
+    _clipboard_read :: gui.read_clipboard()
+    _ime :: gui.poll_ime()
+    _drop :: gui.poll_drag_drop()
+    save_shortcut :: gui.save_shortcut()
+    _shortcut :: gui.host_shortcut()
+    _a11y :: gui.accessibility_metadata("Editor", "Multiline note editor")
+
+    if _custom_filter == {
+        .Ok(filter) -> print("file filter ready: {filter.extensions.len()} extensions")
+        .Err(_) -> {
+            error_state :: gui.mark_error(edited_state, "file filter cancelled or failed")
+            print("file filter outcome: {gui.status_label(error_state)}")
+        }
+    }
+    if _grant == {
+        .Ok(grant) -> {
+            print("filesystem grant: {grant.root}")
+            open_request :: gui.open_request(~grant)
+            save_request :: gui.save_request(~grant)
+            open_result :: gui.open_file(open_request)
+            if open_result == {
+                .Ok(selection) -> {
+                    opened_path :: selection.files.get(0) ?? panic("open dialog returned no files")
+                    opened_body :: fs.read(opened_path.path) ?? panic("read selected note")
+                    print("open dialog files: {selection.files.len()} scalars: {text.scalar_count(opened_body)}")
+                }
+                .Err(_) -> print("open dialog outcome: cancelled or failed")
+            }
+            save_result :: gui.save_file(save_request)
+            if save_result == {
+                .Ok(selection) -> {
+                    selected_path :: selection.files.get(0) ?? panic("save dialog returned no files")
+                    fs.write(selected_path.path, gui.persisted_body(edited_state)) ?? panic("save selected note")
+                    saved_state :: gui.mark_saved(edited_state)
+                    saved.set(true)
+                    print("save dialog files: {selection.files.len()}")
+                    print("editor status after save: {gui.status_label(saved_state)} ({status.get()})")
+                }
+                .Err(_) -> {
+                    error_state :: gui.mark_error(edited_state, "save dialog cancelled or failed")
+                    print("save dialog outcome: {gui.status_label(error_state)}")
+                }
+            }
+        }
+        .Err(_) -> print("filesystem grant outcome: cancelled or failed")
+    }
+    if _clipboard_write == {
+        .Ok(receipt) -> print("clipboard write characters: {receipt.characters}")
+        .Err(_) -> print("clipboard write outcome: cancelled or failed")
+    }
+    if _clipboard_read == {
+        .Ok(value) -> print("clipboard read scalars: {text.scalar_count(value.text)}")
+        .Err(_) -> print("clipboard read outcome: cancelled or failed")
+    }
+    if _ime == {
+        .Ok(_) -> print("IME poll completed (event may be absent)")
+        .Err(_) -> print("IME poll outcome: cancelled or failed")
+    }
+    if _drop == {
+        .Ok(_) -> print("drag/drop poll completed (event may be absent)")
+        .Err(_) -> print("drag/drop poll outcome: cancelled or failed")
+    }
+    if _shortcut == {
+        .Ok(shortcut) -> {
+            print("host shortcut: {shortcut.key}")
+            binding_result :: gui.bind_shortcut(~shortcut, "save")
+            if binding_result == {
+                .Ok(binding) -> {
+                    register_result :: gui.register_shortcut(binding)
+                    if register_result == {
+                        .Ok(_) -> print("shortcut registration completed")
+                        .Err(_) -> print("shortcut registration outcome: cancelled or failed")
+                    }
+                }
+                .Err(_) -> print("shortcut binding outcome: cancelled or failed")
+            }
+            dispatch_result :: gui.dispatch_shortcut(~shortcut)
+            if dispatch_result == {
+                .Ok(_) -> print("shortcut dispatch completed")
+                .Err(_) -> print("shortcut dispatch outcome: cancelled or failed")
+            }
+        }
+        .Err(_) -> print("host shortcut outcome: cancelled or failed")
+    }
+    if _a11y == {
+        .Ok(metadata) -> {
+            a11y_node :: gui.editor_view(draft.get(), selected.get(), theme.get(), settings_open.get())
+            accessible_tree :: ui.node_accessibility(a11y_node, ~metadata)
+            if accessible_tree.accessibility == {
+                .Some(_) -> print("accessibility metadata on labeled node: {accessible_tree.label}")
+                .None -> panic("accessibility metadata missing")
+            }
+            accessibility_backend :: ui.null_backend()
+            ui.mount(accessibility_backend, ~accessible_tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
+            print("accessibility mount commands: {accessibility_backend.commands().len()}")
+            attached :: gui.attach_accessibility(a11y_node, metadata)
+            if attached == {
+                .Ok(_) -> print("host accessibility attachment completed")
+                .Err(_) -> print("accessibility attachment outcome: cancelled or failed")
+            }
+        }
+        .Err(_) -> print("accessibility metadata outcome: cancelled or failed")
+    }
+    print("menu: File > Open | Save | Quit; tray fallback is explicit in the shared tree")
+    print("mobile gate: Android/iOS adapters, touch, and native IME lifecycle remain core work")
+    print("remaining core gates: #2771 reactive ICE compositions; Typography/mobile native cursor adapters")
+    loop command in gui.future_commands() -> print("future proof: {command}")
+    loop gate in gui.open_core_gates() -> print("open gate: {gate}")
+
+    // Native presentation uses the same portable tree. Other targets retain the
+    // headless/TUI path until their platform adapter is supplied by core.
+    @if @build.os == {
+        .Linux -> {
+            gtk_backend :: ui.gtk_backend()
+            native_tree :: gui.editor_view(draft.get(), selected.get(), theme.get(), settings_open.get())
+            ui.mount(gtk_backend, ui.box([native_tree, gui.save_button()]), ui.constraint(0.0, 0.0, 80.0, 24.0))
+            gtk_backend.present("Jet GUI battery")
+            print("native backend: gtk4")
+        }
+        .MacOS -> { print("native backend gate: macOS adapter unavailable") }
+        .Windows -> { print("native backend gate: Windows adapter unavailable") }
+    }
+
+    fs.remove_all(root) ?? panic("cleanup GUI battery state")
+}

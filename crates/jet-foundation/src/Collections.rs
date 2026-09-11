@@ -18,6 +18,7 @@ pub const RESERVED_TYPES: &[&str] = &[
     Syntax::TYPE_PRIORITY_QUEUE,
     Syntax::TYPE_LRU,
     Syntax::TYPE_ITER,
+    Syntax::TYPE_VIEW_ITER,
     Syntax::TYPE_MEMO_STATS,
     Syntax::TYPE_REMOVE_BY,
     Syntax::TYPE_ORDERING,
@@ -238,17 +239,54 @@ pub fn iter_ty(elem: Type) -> Type {
 }
 
 pub fn is_iter_type(ty: &Type) -> bool {
-    matches!(ty, Type::Apply { name, args } if name == Syntax::TYPE_ITER && args.len() == 1)
+    matches!(
+        ty,
+        Type::Apply { name, args }
+            if args.len() == 1
+                && matches!(name.as_str(), Syntax::TYPE_ITER | Syntax::TYPE_VIEW_ITER)
+    )
 }
 
 pub fn iter_elem(ty: &Type) -> Option<&Type> {
     match ty {
-        Type::Apply { name, args } if name == Syntax::TYPE_ITER && args.len() == 1 => {
+        Type::Apply { name, args }
+            if args.len() == 1
+                && matches!(name.as_str(), Syntax::TYPE_ITER | Syntax::TYPE_VIEW_ITER) =>
+        {
             Some(&args[0])
         }
         _ => None,
     }
 }
+/// D-FOUND-VIEW1=A: lifetime-bearing borrowed iterator carrier. Its element
+/// type is normally `View<str>` or `View<U8>`; unlike `Iter<T>`, the carrier
+/// must retain the source owner while the loop pulls windows.
+pub fn view_iter_ty(elem: Type) -> Type {
+    Type::Apply {
+        name: Syntax::TYPE_VIEW_ITER.to_string(),
+        args: vec![elem],
+    }
+}
+
+pub fn is_view_iter_type(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Apply { name, args }
+            if name == Syntax::TYPE_VIEW_ITER && args.len() == 1
+    )
+}
+
+pub fn view_iter_elem(ty: &Type) -> Option<&Type> {
+    match ty {
+        Type::Apply { name, args }
+            if name == Syntax::TYPE_VIEW_ITER && args.len() == 1 =>
+        {
+            Some(&args[0])
+        }
+        _ => None,
+    }
+}
+
 
 /// Candidate vocabulary for missing-method diagnostics. The receiver filter
 /// below still delegates to `builtin_method_return`, so a name is suggested
@@ -257,7 +295,7 @@ const BUILTIN_METHOD_VOCABULARY: &str = concat!(
     "a accepted action active_count add add_asset_bundle add_doc add_executable add_install add_library add_new ",
     "add_package add_publish add_test advance after all any average b before binary_search binary_search_by ",
     "blocked_count bool buffer bytes cancel capacity capitalize chars chunk_while chunks clear clone ",
-    "close collect compare concat contains contains_value copy copy_to count count_by count_where counts count_ones count_zeros ",
+    "close collect compare compare_exchange concat contains contains_value copy copy_to count count_by count_where counts count_ones count_zeros ",
     "cycle contribute dedup dedup_by delete delivered delivered_handlers diagnostics difference digest downgrade ",
     "drop_last dropped each edit edit_disjoint effects elapsed_millis embed emit emit_async ends_with eof ",
     "equal error events exponential extend failure_count failures fetch filter filter_map find first ",
@@ -270,12 +308,12 @@ const BUILTIN_METHOD_VOCABULARY: &str = concat!(
     "is_active is_alphabetic is_ascii is_disjoint is_empty is_finite is_infinite is_lower is_nan is_numeric is_sorted is_sorted_by ",
     "is_subset is_superset is_upper is_whitespace item items join key keys last last_index_of lazy ",
     "leading_zeros left legacy len lines listener_count map match matches max max_by merge ",
-    "min min_by min_max min_max_by new new_random next normal normalize notes notify_all notify_one ",
-    "now on on_priority once or_err origin packages pad_end pad_start para_filter para_fold para_map ",
-    "para_partition parse partial partition peek peek_back peek_front pick plan plugin poll pop ",
+    "min load min_by min_max min_max_by new new_random next normal normalize notes notify_all notify_one ",
+    "now observe on on_priority once or_err origin packages pad_end pad_start para_filter para_fold para_map ",
+    "para_partition parse partial partition peek peek_back peek_front pick plan plugin poll pop publish ",
     "pop_back pop_first pop_front position probe product public_key push push_back push_front queued queued_count ",
     "random reaches_panic read read_byte read_bytes read_f32_be read_f32_le read_f64_be read_f64_le read_i8 read_i16_be read_i16_le read_i32_be read_i32_le read_i64_be read_i64_le read_string receive reduce remove remove_prefix remove_suffix repeat ",
-    "replace require reverse rewind right rsplit run running_count sample scan second seek ",
+    "replace require reverse rewind right rsplit run running_count sample scan second seek store ",
     "semantic_index send set shuffle shutdown signing skip skip_while slice sort sort_desc sort_by sort_by_desc source ",
     "sources split split_once split_write starts_with state status step_by string strong_count sum summary ",
     "swapcase symmetric_difference syntax system take take_while text then tick title to_bytes to_float ",
@@ -390,6 +428,52 @@ fn compiler_package_method_return(
     Some(Some(result))
 }
 
+fn atomic_method_return(inner: &Type, method: &str, arg_count: usize) -> Option<Option<Type>> {
+    if !crate::Layout::atomic_scalar_type(inner) {
+        return None;
+    }
+    match method {
+        "load" | "observe" if arg_count == 0 => Some(Some(inner.clone())),
+        "store" | "publish" if arg_count == 1 => Some(None),
+        "add" if arg_count == 1 && crate::Layout::atomic_add_type(inner) => {
+            Some(Some(inner.clone()))
+        }
+        "try_add"
+            if arg_count == 1
+                && matches!(inner.without_user_tags(), Type::Int)
+                && crate::Layout::atomic_add_type(inner) =>
+        {
+            Some(Some(Type::Result {
+                ok: Box::new(Type::Int),
+                err: Box::new(Type::Named(crate::Syntax::TYPE_ALLOC_ERROR.to_string())),
+            }))
+        }
+        "compare_exchange" if arg_count == 2 => Some(Some(Type::Bool)),
+        _ => None,
+    }
+}
+
+fn atomic_method_arg_types(inner: &Type, method: &str) -> Option<Vec<Type>> {
+    if !crate::Layout::atomic_scalar_type(inner) {
+        return None;
+    }
+    match method {
+        "load" | "observe" => Some(vec![]),
+        "store" | "publish" if crate::Layout::atomic_scalar_type(inner) => {
+            Some(vec![inner.clone()])
+        }
+        "add" if crate::Layout::atomic_add_type(inner) => Some(vec![inner.clone()]),
+        "try_add"
+            if matches!(inner.without_user_tags(), Type::Int)
+                && crate::Layout::atomic_add_type(inner) =>
+        {
+            Some(vec![Type::Int])
+        }
+        "compare_exchange" => Some(vec![inner.clone(), inner.clone()]),
+        _ => None,
+    }
+}
+
 /// `None` = not a built-in method; `Some(None)` = void; `Some(Some(t))` = returns `t`.
 pub fn builtin_method_return(
     recv_ty: &Type,
@@ -403,13 +487,25 @@ pub fn builtin_method_return(
     if is_static_on_type {
         return builtin_static_return(recv_ty, method, arg_count);
     }
+    if let Type::Apply { name, args } = recv_ty {
+        if name == "Atomic" && args.len() == 1 {
+            return atomic_method_return(&args[0], method, arg_count);
+        }
+    }
     match recv_ty {
         Type::List(inner) => list_method_return(inner, method, arg_count),
         // S76: [T#N] delegates to list methods; length-changing ops are blocked in sema (E0964).
         Type::FixedList { elem, .. } => list_method_return(elem, method, arg_count),
         // D-ITERTOOLS1=A: lazy views share the list adapter/reducer surface.
-        Type::Apply { name, args } if name == Syntax::TYPE_ITER && args.len() == 1 => {
-            iter_method_return(&args[0], method, arg_count)
+        Type::Apply { name, args }
+            if (name == Syntax::TYPE_ITER || name == Syntax::TYPE_VIEW_ITER)
+                && args.len() == 1 =>
+        {
+            if name == Syntax::TYPE_VIEW_ITER {
+                view_iter_method_return(&args[0], method, arg_count)
+            } else {
+                iter_method_return(&args[0], method, arg_count)
+            }
         }
         Type::Map { key, value, .. } => map_method_return(key, value, method, arg_count),
         Type::String => string_method_return(method, arg_count),
@@ -437,6 +533,10 @@ pub fn builtin_method_return(
         // time/randomness THROUGH the handle is reproducible (caller seeded it).
         Type::Named(n) if n == crate::Syntax::CLOCK_TYPE => clock_method_return(method, arg_count),
         Type::Named(n) if n == crate::Syntax::RNG_TYPE => rng_method_return(method, arg_count),
+        Type::Named(n) if n == "HistoryRng" => history_rng_method_return(method, arg_count),
+        Type::Named(n) if n == crate::Syntax::DETERMINISTIC_WORLD_TYPE => {
+            deterministic_world_method_return(method, arg_count)
+        }
         Type::Named(n) if n == crate::Syntax::FAKE_TYPE => fake_method_return(method, arg_count),
         // D-SOLVER-LIB1=A: explicit finite solver handle. `new(seed)` constructs
         // state; `require(Bool)` records a checked constraint; query methods read it.
@@ -610,14 +710,19 @@ pub fn builtin_method_return(
         Type::Apply { name, args } if name == crate::Syntax::TYPE_ASYNC_EVENT => {
             async_event_method_return(args, method, arg_count)
         }
-        Type::Apply { name, args } if name == crate::Syntax::TYPE_DISPATCH_REPORT => {
-            dispatch_report_method_return(args, method, arg_count)
-        }
         Type::Apply { name, args } if name == crate::Syntax::TYPE_HOOK => {
             hook_method_return(args, method, arg_count)
         }
         Type::Apply { name, args } if name == crate::Syntax::TYPE_DECISION_HOOK => {
             decision_hook_method_return(args, method, arg_count)
+        }
+        Type::Apply { name, args } if name == crate::Syntax::TYPE_DISPATCH_REPORT => {
+            dispatch_report_method_return(args, method, arg_count)
+        }
+        Type::Apply { name, args }
+            if name == Syntax::TYPE_SHARED_SNAPSHOT && args.len() == 2 =>
+        {
+            shared_snapshot_method_return(args, method, arg_count)
         }
         Type::Named(n) if n == crate::Syntax::TYPE_SUBSCRIPTION => {
             subscription_method_return(method, arg_count)
@@ -706,6 +811,11 @@ pub fn builtin_method_return(
         // D-ITERTOOLS1=A: lazy `Iter<T>` — adapters chain; terminals materialize.
         Type::Apply { name, args } if name == Syntax::TYPE_ITER => {
             iter_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
+        }
+        // D-FOUND-VIEW1=A: borrowed iterators preserve their carrier through
+        // adapters and materialize only at an explicit terminal.
+        Type::Apply { name, args } if name == Syntax::TYPE_VIEW_ITER => {
+            view_iter_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
         }
         // D-HOLE1: `.map` on `?T` (no general "hole"/absent-propagating value type —
         // Option composition gets library combinators instead). `.zip` is handled
@@ -1206,6 +1316,18 @@ pub fn numeric_conversion_return(
 }
 
 fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
+    if let Type::Apply { name, args } = ty {
+        if name == Syntax::TYPE_ATOMIC && args.len() == 1 && nargs == 1 {
+            return match method {
+                "new" => Some(Some(ty.clone())),
+                "try_new" => Some(Some(Type::Result {
+                    ok: Box::new(ty.clone()),
+                    err: Box::new(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
+                })),
+                _ => None,
+            };
+        }
+    }
     match (ty, method, nargs) {
         // D-ALLOCFAIL1=A: List constructors return the fallible carrier. The
         // element placeholder is refined from the expected result by sema.
@@ -1680,6 +1802,20 @@ fn iter_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         _ => None,
     }
 }
+/// D-FOUND-VIEW1=A: the borrowed carrier keeps lazy adapters distinct from
+/// `Iter<T>`, but reuses the same terminal method semantics. Any adapter that
+/// would return `Iter<U>` is relabelled as `ViewIter<U>`.
+fn view_iter_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
+    match iter_method_return(inner, method, nargs) {
+        Some(Some(Type::Apply { name, args }))
+            if name == Syntax::TYPE_ITER && args.len() == 1 =>
+        {
+            Some(Some(view_iter_ty(args[0].clone())))
+        }
+        other => other,
+    }
+}
+
 
 /// D-DYNARRAY1: `View<T>` — the read-only method surface a `.view(a..b)`
 /// window supports (indexing is handled separately, in `infer_index`; a
@@ -1800,6 +1936,7 @@ fn map_method_return(key: &Type, value: &Type, method: &str, nargs: usize) -> Op
 fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
         ("len", 0) => Some(Some(Type::Int)),
+        ("count_bytes", 0) => Some(Some(Type::Int)),
         ("is_empty", 0) => Some(Some(Type::Bool)),
         ("try_push", 1) => Some(Some(Type::Result {
             ok: Box::new(Type::Named("Unit".to_string())),
@@ -1896,6 +2033,15 @@ fn clock_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         _ => None,
     }
 }
+/// D-TEST-WORLD1=A: methods on a scoped deterministic execution world.
+fn deterministic_world_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs) {
+        ("now", 0) | ("advance", 1) => Some(Some(Type::Int)),
+        ("wait_idle", 0) => Some(None),
+        ("history", 0) => Some(Some(Type::String)),
+        _ => None,
+    }
+}
 
 /// D-DET1: methods on the deterministic injected `Rng` capability.
 /// `rng.int(lo, hi)` draws an Int in `[lo, hi]`; `rng.float()` draws a Float in
@@ -1928,6 +2074,17 @@ fn rng_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         ("weighted_pick", 2) => Some(Some(Type::Option(Box::new(Type::Int)))),
         ("sample", 2) => Some(Some(Type::List(Box::new(Type::Int)))),
         ("shuffle", 1) => Some(None),
+        _ => None,
+    }
+}
+
+fn history_rng_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
+    let u64_ty = Type::IntN {
+        signed: false,
+        bits: 64,
+    };
+    match (method, nargs) {
+        ("next_u64", 0) | ("below", 1) => Some(Some(u64_ty)),
         _ => None,
     }
 }
@@ -2043,8 +2200,21 @@ fn pool_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Optio
 
 /// D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>` placeholder gate (see call site note).
 fn shared_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
+    let snapshot = |projection| Type::Apply {
+        name: Syntax::TYPE_SHARED_SNAPSHOT.to_string(),
+        args: vec![inner.clone(), projection],
+    };
+    let revision_error = || Type::Named(Syntax::TYPE_SHARED_REVISION_ERROR.to_string());
     match (method, nargs) {
         ("read", 1) | ("edit", 1) => Some(Some(inner.clone())),
+        // D-SHARED-REVISION1=A: the one-argument form is refined by sema
+        // after checking the pure projection's return type.
+        ("capture", 0) => Some(Some(snapshot(inner.clone()))),
+        ("capture", 1) => Some(Some(snapshot(inner.clone()))),
+        ("try_replace", 2) => Some(Some(Type::Result {
+            ok: Box::new(Type::Bool),
+            err: Box::new(revision_error()),
+        })),
         ("guard_read", 0) => Some(Some(shared_guard_type(
             inner.clone(),
             crate::AST::InternalTag::SharedGuardRead,
@@ -2059,6 +2229,13 @@ fn shared_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Opti
             args: vec![inner.clone()],
         })),
         ("strong_count", 0) => Some(Some(Type::Int)),
+        _ => None,
+    }
+}
+
+fn shared_snapshot_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs, args) {
+        ("value", 0, [_, projection]) => Some(Some(projection.clone())),
         _ => None,
     }
 }
@@ -2677,6 +2854,7 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
                     | "shuffle"
             )
         }
+        Type::Named(n) if n == "HistoryRng" => matches!(method, "next_u64" | "below"),
         Type::Named(n) if n == crate::Syntax::FAKE_TYPE => {
             matches!(method, "name" | "email" | "host" | "address")
         }
@@ -2712,6 +2890,11 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             .and_then(crate::AST::numeric_type_from_name)
         {
             return Some(vec![source]);
+        }
+    }
+    if let Type::Apply { name, args } = recv_ty {
+        if name == "Atomic" && args.len() == 1 {
+            return atomic_method_arg_types(&args[0], method);
         }
     }
     match recv_ty {
@@ -2879,13 +3062,16 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         Type::Named(n) if n == "EffectInfo" && method == "has" => Some(vec![Type::String]),
         // D-ITERTOOLS1=A: Iter shares list adapter arg types; materializers take none.
         Type::Apply { name, args }
-            if name == Syntax::TYPE_ITER
+            if (name == Syntax::TYPE_ITER || name == Syntax::TYPE_VIEW_ITER)
                 && args.len() == 1
                 && matches!(method, "to_list" | "collect") =>
         {
             Some(vec![])
         }
-        Type::Apply { name, args } if name == Syntax::TYPE_ITER && args.len() == 1 => {
+        Type::Apply { name, args }
+            if (name == Syntax::TYPE_ITER || name == Syntax::TYPE_VIEW_ITER)
+                && args.len() == 1 =>
+        {
             builtin_method_arg_types(&Type::List(Box::new(args[0].clone())), method)
         }
         Type::List(inner) => match method {
@@ -3647,6 +3833,13 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "bytes" => Some(vec![Type::Int]),
             _ => Some(vec![]),
         },
+        Type::Named(n) if n == "HistoryRng" => match method {
+            "below" => Some(vec![Type::IntN {
+                signed: false,
+                bits: 64,
+            }]),
+            _ => Some(vec![]),
+        },
         Type::Named(n) if n == crate::Syntax::FAKE_TYPE => match method {
             "locale" => Some(vec![Type::String]),
             _ => Some(vec![]),
@@ -3701,6 +3894,7 @@ pub fn builtin_receiver_borrow(recv_ty: &Type, method: &str) -> BuiltinReceiverB
             Type::Named(name)
                 if name == Syntax::CLOCK_TYPE
                     || name == Syntax::RNG_TYPE
+                    || name == "HistoryRng"
                     || name == Syntax::FAKE_TYPE
                     || name == Syntax::SOLVER_TYPE
         )

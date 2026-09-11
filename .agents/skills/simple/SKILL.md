@@ -1,15 +1,30 @@
 ---
 name: simple
 description: >-
-  Clear controlled prose for Jet (ASD-STE100-inspired + Orwell). Auto-apply
-  when writing user-visible text: docs, specs, ballots, Tower card plans/logs,
-  commit/PR bodies, and owner-facing reports. Also when the user invokes
-  simple / ste / STE / STE100. Do not use for agent-to-agent caveman chatter.
+  Clear controlled prose for Jet (ASD-STE100-inspired + Orwell). Use on hosts
+  that support the trigger when writing user-visible text: docs, specs, ballots,
+  Tower card plans/logs, commit/PR bodies, and owner-facing reports. Also use
+  when the user invokes simple / ste / STE / STE100. Do not use for
+  agent-to-agent caveman chatter.
 ---
 
 # Simple writing (user-visible prose)
 
-**Auto-apply** whenever you newly write text a human owner or user will read:
+## Contract
+
+- **Requested outcome:** Clear, controlled prose for the human-facing artifact named by the caller.
+- **Supplied inputs:** The source prose, audience, exact technical tokens, governing authority, and the requested format.
+- **Allowed child result:** None. Linked style references are passive guidance; this skill does not start a review, ballot, plan, or implementation workflow.
+- **Completion owner:** `simple` owns the prose transformation; the calling workflow owns the artifact's meaning and final acceptance.
+- **Return point:** Return the edited prose to the caller without opening a new agenda.
+- **Stopping condition:** Stop when the prose passes the checklist and preserves technical meaning, caveats, order, and safety conditions.
+
+The description and any automatic trigger are host-dependent routing hints.
+When the host does not support automatic application, apply this skill only
+when the caller or user explicitly requests it.
+
+**Apply** whenever you newly write text a human owner or user will read. A
+host that supports automatic triggers may apply this skill automatically:
 
 - docs, specs, comments meant for humans
 - Tower ballots, card plans/bodies, owner-facing logs and reports

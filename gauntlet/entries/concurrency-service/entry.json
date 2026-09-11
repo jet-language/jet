@@ -39,5 +39,15 @@
     "rust": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only TCP listener, sync channel, and four worker threads."},
     "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Stdlib socket listener and four worker threads."},
     "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in Node net listener with four asynchronous workers and the same line protocol."}
+  },
+  "rewrite_provenance": {
+    "worker": "CorpusConcurrencyService",
+    "variant": "jet",
+    "changed": "No source rewrite: run.jet already uses the ratified #CLI entry, bounded channel<T>(capacity: ...), task.group(limit: ...), fenced four-worker spawn, canonical ranges, and core.net/core.time stream APIs. Retained the source because available alternatives would add a job/result carrier or change input and failure behavior without simplifying the canonical program.",
+    "matched": "Same long-lived TCP line protocol as Go, Rust, Python, and Node: ready, batch N for values 1 through N, square results summed in receive order, bounded four-worker queue, shutdown, clean worker join, and exact response formatting; no input, side effect, ordering, or output work was removed.",
+    "expected_output_sha256": null,
+    "expected_output": "line protocol transcript declared by entry spec",
+    "measurement": "unrun: source-only rewrite; runtime, performance, and output proof intentionally not executed",
+    "compiler_observations": "No compiler or harness command was run. Historical diagnostics remain unchanged in authoring.jet.diagnosticsHit; fresh compiler observations are unavailable by design."
   }
 }

@@ -18,12 +18,16 @@ use cranelift_codegen::Context;
 use cranelift_codegen::{FinalizedMachReloc, FinalizedRelocTarget};
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Linkage, Module};
-use jet_foundation::{JitBackend::RunOutcome, AST::Type};
+use jet_foundation::{
+    JitBackend::RunOutcome,
+    MIR::{MirArtifactId, MirFunctionId},
+};
+use jet_pkg_model::Package::ReleaseDevtoolsPolicy;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::time::Instant;
 
-use super::resident::{fresh_runtime, resident_invoke, resident_teardown};
+use super::resident::{fresh_runtime, publish_runtime_decisions, resident_invoke};
 use super::runtime_host::{new_jit_module, ResidentModule};
 use super::tiers::{record_trace, Tier, TierRow};
 use super::{RESIDENT_MODULE, RESIDENT_RUNTIME};
@@ -35,10 +39,9 @@ use super::{RESIDENT_MODULE, RESIDENT_RUNTIME};
 /// so a native replay was indistinguishable from a run that reached no tier at
 /// all — the exact silence the tier lens exists to prevent.
 ///
-/// FORMAT 4 added the entry error rail ([`EntryRail`]). A FORMAT 3 artifact is
-/// REFUSED rather than read: it cannot say whether the entry is fallible, so
-/// replaying one renders the error and still exits 0 from a program that failed.
-const FORMAT: u32 = 5;
+/// FORMAT 7 stores the checked MIR function id beside each roster name so a
+/// warm hit reports the same `function_id` rows as the cold run.
+const FORMAT: u32 = 7;
 
 thread_local! {
     static CAPTURE: RefCell<Option<Capture>> = const { RefCell::new(None) };
@@ -118,10 +121,7 @@ fn capture_rail() -> Option<EntryRail> {
             returns_app: resident.main_returns_app,
             returns_default_err: resident.main_returns_default_err,
             error_is_packed: resident.main_error_is_packed,
-            error_name: match &resident.main_error_type {
-                Some(Type::Named(name)) => Some(name.clone()),
-                _ => None,
-            },
+            error_name: resident.main_error_type.clone(),
         })
     })
 }
@@ -205,11 +205,13 @@ thread_local! {
 
 /// Move a successful capture into the process-local "last artifact" slot.
 ///
-/// `native_fns` is the tier roster this run is publishing with its code. A
-/// capture is only published from `resident_run_fresh`, which runs with an
-/// empty deopt list, so every listed function is tier-1 native with no reason —
-/// exactly the rows the cold run printed under `--trace-tiers`.
-pub(crate) fn publish_capture(native_fns: &[&str]) {
+/// `native_fns` is the tier roster this run is publishing with its code: the
+/// checked MIR id and name of every function, since the warm run has no MIR
+/// program to recover ids from. A capture is only published from
+/// `resident_run_fresh`, which runs with an empty deopt list, so every listed
+/// function is tier-1 native with no reason — exactly the rows the cold run
+/// printed under `--trace-tiers`.
+pub(crate) fn publish_capture(native_fns: &[(MirFunctionId, &str)], artifact: MirArtifactId) {
     // FFI entries point into a process-local cdylib. A disk artifact cannot
     // recreate that bridge on a warm run, so force the bundle through the cold
     // entry that binds its FFI table before execution.
@@ -246,7 +248,7 @@ pub(crate) fn publish_capture(native_fns: &[&str]) {
     // No rail, no artifact. A stored module that has forgotten whether its entry
     // is fallible replays as a success on the next run.
     if let (Some(fns), Some(rail)) = (fns, capture_rail()) {
-        let bytes = encode_module(&rail, native_fns, &fns, &strings);
+        let bytes = encode_module(artifact, &rail, native_fns, &fns, &strings);
         LAST_ARTIFACT.with(|slot| *slot.borrow_mut() = Some(bytes));
     } else {
         LAST_ARTIFACT.with(|slot| *slot.borrow_mut() = None);
@@ -411,16 +413,19 @@ fn decode_sig(module: &JITModule, enc: &EncodedSig) -> Option<Signature> {
 }
 
 fn encode_module(
+    artifact: MirArtifactId,
     rail: &EntryRail,
-    native_fns: &[&str],
+    native_fns: &[(MirFunctionId, &str)],
     fns: &[CapturedFn],
     strings: &[(usize, String)],
 ) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(&FORMAT.to_le_bytes());
+    out.extend_from_slice(&artifact.0.to_le_bytes());
     write_rail(&mut out, rail);
     out.extend_from_slice(&(native_fns.len() as u32).to_le_bytes());
-    for name in native_fns {
+    for (id, name) in native_fns {
+        out.extend_from_slice(&id.0.to_le_bytes());
         write_str(&mut out, name);
     }
     out.extend_from_slice(&(strings.len() as u32).to_le_bytes());
@@ -554,7 +559,7 @@ fn read_u16_slice(data: &[u8], i: &mut usize) -> Option<Vec<u16>> {
 struct WarmModule {
     rail: EntryRail,
     /// Tier roster: the functions the cold run reported as tier-1 native.
-    native_fns: Vec<String>,
+    native_fns: Vec<(MirFunctionId, String)>,
     strings: Vec<(usize, String)>,
     fns: Vec<CapturedFn>,
 }
@@ -564,9 +569,7 @@ struct WarmModule {
 /// The version gate is load-bearing, not hygiene. A FORMAT 3 artifact carries no
 /// entry error rail, so reading one as if it had a rail forgets that the entry is
 /// fallible: the error still renders and the process exits 0. Refusing returns
-/// `Err`, and `RunCache::try_warm_run` then drops the entry directory and
-/// recompiles cold — correct, only slower.
-fn decode_module(data: &[u8]) -> Result<WarmModule, String> {
+fn decode_module(data: &[u8], artifact: MirArtifactId) -> Result<WarmModule, String> {
     let mut i = 0usize;
     match read_u32(data, &mut i) {
         Some(FORMAT) => {}
@@ -577,6 +580,14 @@ fn decode_module(data: &[u8]) -> Result<WarmModule, String> {
         }
         None => return Err("tier-cache: artifact has no format word".to_string()),
     }
+    let found_artifact = read_u64(data, &mut i)
+        .ok_or_else(|| "tier-cache: artifact has no MIR artifact id".to_string())?;
+    if found_artifact != artifact.0 {
+        return Err(format!(
+            "tier-cache: artifact id {found_artifact} does not match requested {:?}",
+            artifact
+        ));
+    }
     decode_body(data, i).ok_or_else(|| "tier-cache: corrupt artifact".to_string())
 }
 
@@ -586,7 +597,8 @@ fn decode_body(data: &[u8], start: usize) -> Option<WarmModule> {
     let native_n = read_u32(data, &mut i)? as usize;
     let mut native_fns = Vec::with_capacity(native_n);
     for _ in 0..native_n {
-        native_fns.push(read_str(data, &mut i)?);
+        let id = MirFunctionId(read_u64(data, &mut i)?);
+        native_fns.push((id, read_str(data, &mut i)?));
     }
     let str_n = read_u32(data, &mut i)? as usize;
     let mut strings = Vec::with_capacity(str_n);
@@ -652,13 +664,30 @@ fn decode_body(data: &[u8], start: usize) -> Option<WarmModule> {
     })
 }
 
+/// Read the stable artifact identity embedded in a warm module header.
+///
+/// The caller uses this only before frontend lowering, when the cached module
+/// is the source of truth for the artifact being replayed. The full decoder
+/// still validates the same identity before loading code.
+pub fn cached_artifact_id(data: &[u8]) -> Option<MirArtifactId> {
+    let mut index = 0usize;
+    if read_u32(data, &mut index) != Some(FORMAT) {
+        return None;
+    }
+    let value = read_u64(data, &mut index)?;
+    (value != 0).then_some(MirArtifactId(value))
+}
+
 /// Load a previously captured tier-1 module and invoke `__jet_jit_main`.
 ///
 /// A hit is a tier-1 native execution like any other, so it reports the same
 /// rows to `--trace-tiers`. Skipping the compile must not skip the lens: an
 /// unreported run reads as a program that reached no tier at all, which is how
-/// a silent deopt would look too.
-pub fn run_cached_module(artifact: &[u8]) -> Result<RunOutcome, String> {
+pub fn run_cached_module(
+    bytes: &[u8],
+    artifact: MirArtifactId,
+    release_devtools_policy: &ReleaseDevtoolsPolicy,
+) -> Result<RunOutcome, String> {
     let _loaded_mod_scope = crate::Mod::LoadScope;
     if !super::api_debug::cranelift_host_supported() {
         return Err("cranelift host unsupported".into());
@@ -669,11 +698,10 @@ pub fn run_cached_module(artifact: &[u8]) -> Result<RunOutcome, String> {
         native_fns,
         strings,
         fns,
-    } = decode_module(artifact)?;
+    } = decode_module(bytes, artifact)?;
     jet_rt::__gc::initialize_trace().map_err(|e| e.to_string())?;
-    resident_teardown();
     RESIDENT_RUNTIME.with(|slot| {
-        let mut rt = fresh_runtime();
+        let mut rt = fresh_runtime(release_devtools_policy.clone());
         rt.heap.install_string_slots(&strings);
         rt.compile_strings = strings.clone();
         *slot.borrow_mut() = Some(rt);
@@ -736,7 +764,7 @@ pub fn run_cached_module(artifact: &[u8]) -> Result<RunOutcome, String> {
             main_returns_result: rail.returns_result,
             main_returns_app: rail.returns_app,
             main_returns_default_err: rail.returns_default_err,
-            main_error_type: rail.error_name.map(Type::Named),
+            main_error_type: rail.error_name,
             main_error_is_packed: rail.error_is_packed,
         });
     });
@@ -746,17 +774,17 @@ pub fn run_cached_module(artifact: &[u8]) -> Result<RunOutcome, String> {
     let reload_ms = reload.elapsed().as_secs_f64() * 1000.0;
     let outcome = resident_invoke();
     if outcome.is_ok() {
-        record_trace(
-            native_fns
-                .into_iter()
-                .map(|function| TierRow {
-                    function,
-                    tier: Tier::Native,
-                    reason: "warm tier-1 module".to_string(),
-                    millis: reload_ms,
-                })
-                .collect(),
-        );
+        let observed_rows = native_fns
+            .into_iter()
+            .map(|(function, function_name)| TierRow {
+                function,
+                function_name,
+                tier: Tier::Native,
+                reason: "warm tier-1 module".to_string(),
+                millis: reload_ms,
+            })
+            .collect::<Vec<_>>();
+        record_trace(observed_rows.clone());
     }
     outcome
 }

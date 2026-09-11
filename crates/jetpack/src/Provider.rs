@@ -1493,7 +1493,7 @@ pub fn fixtures_from_env(explicit: Option<PathBuf>) -> Option<PathBuf> {
 }
 
 // ──────────────────────────────────────────────
-// Provider boundary (R0; see docs/plans/epoch-5/unified-ecosystem.md).
+// Provider boundary (R0; see docs/spec/syntax-decisions.md).
 //
 // Each provider owns acquisition and realization behind one trait. `core`
 // realizes first-party Jet packages (no Nix); `nix` leverages nixpkgs. Source
@@ -2446,10 +2446,14 @@ fn parse_realization(spec: &RefSpec, stdout: &str) -> Result<Realized, ProviderE
         })
         .collect::<Result<BTreeMap<_, _>, _>>()?;
 
-    let out = outputs
-        .get("out")
-        .or_else(|| outputs.get("bin"))
-        .and_then(|j| j.as_str().ok())
+    let output = |name: &str| {
+        outputs
+            .iter()
+            .find_map(|(key, value)| (key == name).then_some(value))
+    };
+    let out = output("out")
+        .or_else(|| output("bin"))
+        .and_then(|value| value.as_str().ok())
         .ok_or_else(|| bad_output("provider output had no `out`/`bin` store path".into()))?;
 
     let bin_root = named_outputs.get("bin").map(String::as_str).unwrap_or(out);

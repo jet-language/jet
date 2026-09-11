@@ -6,7 +6,7 @@ mod math_lib_pure {
 
 use crate::AST::{CtFloat, CtValue};
 
-pub(crate) fn part(value: &CtValue) -> Option<f64> {
+pub fn part(value: &CtValue) -> Option<f64> {
     match value {
         CtValue::Int(value) => Some(*value as f64),
         CtValue::Float(value) => Some(value.as_f64()),
@@ -14,7 +14,7 @@ pub(crate) fn part(value: &CtValue) -> Option<f64> {
     }
 }
 
-pub(crate) fn from_parts(real: f64, imaginary: f64) -> CtValue {
+pub fn from_parts(real: f64, imaginary: f64) -> CtValue {
     let value = math_lib_pure::JetComplex::from_parts(real, imaginary);
     CtValue::Struct {
         type_name: crate::Syntax::TYPE_COMPLEX.to_string(),
@@ -47,7 +47,7 @@ fn value(value: &CtValue) -> Option<math_lib_pure::JetComplex> {
     ))
 }
 
-pub(crate) fn binary(method: &str, left: &CtValue, right: &CtValue) -> Option<CtValue> {
+pub fn binary(method: &str, left: &CtValue, right: &CtValue) -> Option<CtValue> {
     let left = value(left)?;
     let right = value(right)?;
     let result = match method {
@@ -60,10 +60,10 @@ pub(crate) fn binary(method: &str, left: &CtValue, right: &CtValue) -> Option<Ct
     Some(from_parts(result.real, result.imaginary))
 }
 
-pub(crate) fn abs(input: &CtValue) -> Option<f64> {
+pub fn abs(input: &CtValue) -> Option<f64> {
     Some(value(input)?.abs())
 }
 
-pub(crate) fn to_string(input: &CtValue) -> Option<String> {
+pub fn to_string(input: &CtValue) -> Option<String> {
     Some(value(input)?.to_string_rep())
 }

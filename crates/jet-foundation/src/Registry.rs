@@ -25,6 +25,10 @@
 use std::sync::LazyLock;
 
 use crate::Diagnostics::{FixApplicability, FixSafety, ReportMoment, Severity};
+use crate::Report::NoFixReasonKind;
+use crate::Coverage::{
+    validate_registry_coverage, CoverageBaseline, CoverageEntry, CoverageFact,
+};
 use crate::Policy::{AppliedRule, RuleSite, APPLIED_RULES};
 
 /// What a row attaches to. This is the whole difference between the six uses
@@ -236,13 +240,15 @@ fn marker_arguments(marker: &crate::AST::Marker) -> Vec<MarkerArgument> {
         .args
         .iter()
         .enumerate()
-        .map(|(index, value)| MarkerArgument::Expr {
-            label: marker
-                .arg_labels
-                .get(index)
-                .and_then(|label| label.as_ref())
-                .map(|(name, _)| name.clone()),
-            value: value.clone(),
+        .filter_map(|(index, value)| {
+            Some(MarkerArgument::Expr {
+                label: marker
+                    .arg_labels
+                    .get(index)
+                    .and_then(|label| label.as_ref())
+                    .map(|(name, _)| name.clone()),
+                value: value.as_expr()?.clone(),
+            })
         })
         .collect()
 }
@@ -450,6 +456,16 @@ pub struct DiagnosticRow {
     pub detail: bool,
     pub structured_fix: Option<StructuredFix>,
     pub fix_safety: Option<FixSafety>,
+    pub no_fix_reason: Option<DiagnosticNoFixReason>,
+}
+
+/// A reviewed next action declared by a diagnostic source row. Keeping the
+/// text borrowed preserves the registry's copyable row shape; runtime reports
+/// convert it to the owned `Report::NoFixReason` value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiagnosticNoFixReason {
+    pub kind: NoFixReasonKind,
+    pub next: &'static str,
 }
 
 /// Machine-applicable behavior declared by a diagnostic row.
@@ -875,8 +891,55 @@ pub fn build_setting_key(path: &str) -> Option<&str> {
 /// The one authority for the non-code registration rows.
 pub const FACT_SOURCE: &str = include_str!("../../jet-codegen/src/Prelude/Facts.jet");
 
-/// D-REPORT-HOME1=A: the compile-time row source. Markdown and terminal
-/// renderers are projections of this table, never another authority.
+/// D-VERDICT-LOOP1=D: the reviewed coverage floor. The registry owns this
+/// source baseline; reports and `jet inspect build --coverage` project it
+/// without inventing a second diagnostic table.
+pub const DIAGNOSTIC_COVERAGE_BASELINE: &str =
+    include_str!("../../../tests/diagnostics_coverage_baseline.txt");
+
+pub fn diagnostic_coverage_baseline() -> CoverageBaseline {
+    CoverageBaseline::parse(DIAGNOSTIC_COVERAGE_BASELINE)
+        .expect("the checked-in diagnostic coverage baseline must parse")
+}
+
+/// Derive coverage rows from the active diagnostic registry. The source stage
+/// is the coverage plane; an explicit structured fix is edit coverage, while
+/// an emitted `no_fix_reason` is counted only when a producer attaches one.
+pub fn diagnostic_coverage_entries() -> Vec<CoverageEntry> {
+    diagnostic_rows()
+        .iter()
+        .filter(|row| row.status == DiagnosticStatus::Active)
+        .map(|row| {
+            CoverageEntry::new(
+                row.stage,
+                row.structured_fix
+                    .is_some_and(|fix| fix.applicability().is_some()),
+                row.no_fix_reason.map(|reason| reason.kind),
+            )
+        })
+        .collect()
+}
+/// Validate current diagnostic rows against the checked-in per-plane floor.
+///
+/// The baseline is loaded here, beside the source-derived entries, so every
+/// caller uses the same registry-owned ratchet rather than supplying a second
+/// floor.
+pub fn validate_diagnostic_coverage(
+    entries: impl IntoIterator<Item = CoverageEntry>,
+) -> Result<Vec<CoverageFact>, String> {
+    let baseline = diagnostic_coverage_baseline();
+    validate_registry_coverage(entries, &baseline)
+}
+
+
+/// Validate the current source registry against the checked-in per-plane
+/// coverage floor.
+pub fn current_diagnostic_coverage() -> Result<Vec<CoverageFact>, String> {
+    validate_diagnostic_coverage(diagnostic_coverage_entries())
+}
+/// D-REPORT-HOME1=A: the compile-time row source. Explain and terminal
+/// renderers project this table; generated website pages are projections too,
+/// never another authority.
 pub const DIAGNOSTIC_SOURCE: &str = include_str!("../../jet-codegen/src/Prelude/Diagnostics.jet");
 
 static FACT_DECLARATIONS: LazyLock<Vec<FactDeclaration>> = LazyLock::new(read_fact_declarations);
@@ -1001,19 +1064,32 @@ fn diagnostic_row_from_source(line: &str) -> DiagnosticRow {
     let detail = match fields[10] {
         "true" => true,
         "false" => false,
-        other => crate::ice!(
-            None,
-            "diagnostic detail flag `{other}` is not bool in {line}"
-        ),
+        other => crate::ice!(None, "unknown diagnostic detail flag `{other}` in {line}"),
     };
-    let (structured_fix, fix_safety) = match fields[11] {
-        "-" => (None, None),
+    let (structured_fix, fix_safety, no_fix_reason) = match fields[11] {
+        "-" => (None, None, None),
         value => {
             let marker = leak(&unescape_source(value));
-            (
-                Some(structured_fix_from_source(marker, line)),
-                fix_safety_from_source(marker, line),
-            )
+            if let Some(reason) = no_fix_reason_from_source(marker, line) {
+                // `crypto_misuse` is structured evidence for the report
+                // extension, not a machine edit. Preserve that evidence when
+                // the same source marker also carries its reviewed next action.
+                if marker.starts_with("crypto_misuse|reason:") {
+                    (
+                        Some(structured_fix_from_source(marker, line)),
+                        None,
+                        Some(reason),
+                    )
+                } else {
+                    (None, None, Some(reason))
+                }
+            } else {
+                (
+                    Some(structured_fix_from_source(marker, line)),
+                    fix_safety_from_source(marker, line),
+                    None,
+                )
+            }
         }
     };
     DiagnosticRow {
@@ -1031,14 +1107,39 @@ fn diagnostic_row_from_source(line: &str) -> DiagnosticRow {
         detail,
         structured_fix,
         fix_safety,
+        no_fix_reason,
     }
+}
+fn no_fix_reason_from_source(
+    value: &'static str,
+    line: &str,
+) -> Option<DiagnosticNoFixReason> {
+    let payload = value
+        .strip_prefix("reason:")
+        .or_else(|| value.split_once("|reason:").map(|(_, payload)| payload))?;
+    let (kind, next) = payload.split_once('|').unwrap_or_else(|| {
+        crate::ice!(
+            None,
+            "no-fix reason needs `reason:<kind>|<next action>` in {line}"
+        )
+    });
+    assert!(
+        !next.trim().is_empty(),
+        "no-fix reason needs a reviewed next action in {line}"
+    );
+    let kind = NoFixReasonKind::parse(kind)
+        .unwrap_or_else(|error| crate::ice!(None, "{error} in {line}"));
+    Some(DiagnosticNoFixReason {
+        kind,
+        next: leak(next),
+    })
 }
 
 fn structured_fix_from_source(value: &'static str, line: &str) -> StructuredFix {
-    if value == "crypto_misuse" {
+    let marker = value.split_once('|').map_or(value, |(marker, _)| marker);
+    if marker == "crypto_misuse" {
         return StructuredFix::CryptoMisuse;
     }
-    let marker = value.split_once('|').map_or(value, |(marker, _)| marker);
     if marker == "source_edit" {
         return StructuredFix::SourceEdit;
     }
@@ -1079,7 +1180,8 @@ fn structured_fix_from_source(value: &'static str, line: &str) -> StructuredFix 
 }
 
 fn fix_safety_from_source(value: &'static str, line: &str) -> Option<FixSafety> {
-    if value == "crypto_misuse" {
+    let marker = value.split_once('|').map_or(value, |(marker, _)| marker);
+    if marker == "crypto_misuse" {
         return None;
     }
     let (_, safety) = value.rsplit_once('|').unwrap_or_else(|| {
@@ -1430,7 +1532,7 @@ const TRUTH_ROWS: &[RegistryRow] = &[
         "crates/jet-foundation/src/Registry.rs",
         &[
             "jet explain",
-            "jet inspect facts",
+            "jet inspect types",
             "compile-time reflection",
         ],
         Guard {
@@ -2069,7 +2171,10 @@ mod tests {
         );
         let rendered = crypto.render(&[("why", "the bound is 32 bytes"), ("fix", "pass 32 bytes")]);
         assert_eq!(rendered.why, "the bound is 32 bytes");
-        assert_eq!(rendered.fix, "pass 32 bytes");
+        assert_eq!(
+            rendered.fix,
+            "Replace the offending cryptographic argument with the concrete value or bound named in the diagnostic: pass 32 bytes"
+        );
 
         for row in diagnostic_rows() {
             if let Some(fix) = row.structured_fix {

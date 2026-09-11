@@ -1,0 +1,31 @@
+struct Symbol {
+    name: String
+    type_name: String
+    scope: Int
+}
+
+fn resolve(symbols: &[Symbol], query: String) String -> {
+    loop symbol in symbols {
+        if symbol.name == query -> return "{symbol.type_name}@{symbol.scope}"
+    }
+    return "missing"
+
+}
+fn compatible(left: String, right: String) Bool -> left == right
+
+fn run() {
+    symbols :: [Symbol]{
+        Symbol{name: "left", type_name: "Int", scope: 1},
+        Symbol{name: "add", type_name: "Fn(Int,Int)->Int", scope: 0},
+        Symbol{name: "label", type_name: "String", scope: 1}
+    }
+    resolved :: resolve(&symbols, "left")
+    int_bindings := 0
+    loop symbol in symbols {
+        if symbol.type_name == "Int" -> int_bindings += 1
+        if symbol.type_name == "Fn(Int,Int)->Int" -> int_bindings += 1
+    }
+    same :: compatible("Int", "Int")
+    print("symbols={symbols.len()} resolved={resolved} int_bindings={int_bindings}")
+    print("compatible={same} ownership=borrowed effects=none")
+}

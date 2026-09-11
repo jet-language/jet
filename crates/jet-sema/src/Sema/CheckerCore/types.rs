@@ -25,7 +25,8 @@ impl<'a> Checker<'a> {
                 crate::AST::Item::Impl(implementation)
                     if implementation.type_name == leaf
                         && implementation.trait_name.as_deref()
-                            == Some(crate::Generics::CHECKED_TEXT) => {
+                            == Some(crate::Generics::CHECKED_TEXT) =>
+                {
                     Some(implementation.assoc_type_impls.as_slice())
                 }
                 crate::AST::Item::Struct(definition) if definition.name == leaf => definition
@@ -81,6 +82,11 @@ impl<'a> Checker<'a> {
             return name.to_string();
         }
         let (import_ns, leaf) = Self::split_type_name(name);
+        if let Some(module) = import_ns.and_then(|alias| self.core_imports.get(alias)) {
+            if jet_foundation::CoreModuleExports::core_leaf_kind(module, leaf).is_some() {
+                return leaf.to_string();
+            }
+        }
         let Some(owner) = self.struct_owner_module(leaf, import_ns) else {
             return name.to_string();
         };
@@ -175,7 +181,10 @@ impl<'a> Checker<'a> {
                     Some(jet_foundation::CoreModuleExports::CoreLeafKind::CryptoNominal) => {
                         crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(leaf.to_string()))
                     }
-                    Some(jet_foundation::CoreModuleExports::CoreLeafKind::Plain) | None => {
+                    Some(jet_foundation::CoreModuleExports::CoreLeafKind::Plain)
+                    | Some(jet_foundation::CoreModuleExports::CoreLeafKind::Generic(_))
+                    | Some(jet_foundation::CoreModuleExports::CoreLeafKind::Enum(_))
+                    | None => {
                         Type::Named(leaf.to_string())
                     }
                 }
@@ -290,6 +299,42 @@ impl<'a> Checker<'a> {
             },
             Type::Measure(measure) => Type::Measure(measure),
         }
+    }
+
+    /// Resolve a callable's declared return before projecting its failure
+    /// carrier. A transparent alias may itself name a `Result`; projecting
+    /// first would add the implicit default carrier around that result.
+    pub(crate) fn checked_return_types(
+        &mut self,
+        return_type: Option<Type>,
+        raw_protocol_return: bool,
+    ) -> (Type, Type) {
+        let has_declared_return = return_type.is_some();
+        let declared = return_type.map(|ty| self.resolve_type(ty));
+        let source = declared.clone().unwrap_or_else(|| {
+            if raw_protocol_return {
+                Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())
+            } else {
+                crate::AST::FailureContract::from_return_type(None).effective_type()
+            }
+        });
+        let effective = if raw_protocol_return {
+            source.clone()
+        } else if has_declared_return {
+            crate::AST::FailureContract::from_return_type(declared.as_ref()).effective_type()
+        } else {
+            source.clone()
+        };
+        (source, effective)
+    }
+
+    /// Publish the canonical declared return on the checked AST function so
+    /// body checking, signatures, and TIR all project the same carrier.
+    pub(crate) fn canonicalize_function_return_type(
+        &mut self,
+        function: &mut crate::AST::Func,
+    ) {
+        function.return_type = function.return_type.take().map(|ty| self.resolve_type(ty));
     }
 
     /// D-FAILURE-FOUNDATION1=A: validate an explicit failure domain after

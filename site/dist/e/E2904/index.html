@@ -37,18 +37,18 @@
 <p class="diag-copy fix" data-registry-field="fix">remove one declaration or make their applicability disjoint.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E2904</code>: <code>tests/ui/perf_budget_e2904_overlap.stderr</code>.</p>
-<pre class="diag">Error [E2904]: performance budgets binary and shipping overlap
-  --&gt; tests/ui/perf_budget_e2904_overlap.jet:4:9
+<pre class="diag">Error [E2904]: Performance budgets binary and shipping overlap
+  --&gt; tests/ui/perf_budget_e2904_overlap.jet:2:84
     |
-  4 |         Budget{ name: &quot;shipping&quot;, metric: .BinarySize, limit: .AtMost(3MiB) },
-    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: their scope, metric, provider, and intersecting applicability form the same effective key
- Fix: remove one budget or make their target/profile applicability disjoint
+  2 |     budgets: [Budget]{{name: &quot;binary&quot;, metric: .BinarySize, limit: .AtMost(2MiB)}, {name: &quot;shipping&quot;, metric: .BinarySize, limit: .AtMost(3MiB)}}
+    |                                                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: Their scope, metric, provider, and intersecting applicability form the same effective key
+ Fix: Remove one budget or make their target/profile applicability disjoint
 More: jet-lang.dev/e/E2904
 
-Error [E0101]: this program has no `run` function
- Why: running a program starts at `fn run`, and the entry file doesn&#39;t define one
- Fix: add `fn run() { ... }` to the entry file
+Error [E0101]: This program has no `run` function
+ Why: Running a program starts at `fn run`, and the entry file doesn&#39;t define one
+ Fix: Add `fn run() { ... }` to the entry file
 More: jet-lang.dev/e/E0101
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

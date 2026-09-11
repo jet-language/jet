@@ -1,0 +1,109 @@
+// D-DX-LOADERS1: typed local loaders, snapshots, lifecycle state, and bounded streams.
+use core.data as data
+use core.data.loader as data_loader
+use core.data.stream as data_stream
+use core.files as files
+use core.testing as testing
+
+#Codable
+struct Event {
+    service: String
+    latency_ms: Float
+}
+
+fn run() {
+    root :: testing.temp_dir("jet-data-loader")
+    csv_path :: Path.from(root).join("events.csv").to_string()
+    files.write(csv_path, "service,latency_ms\napi,10.0\ndb,5.0\n") ?? panic("write csv")
+
+    limits := data.DataLimits.safe()
+    file_loader := data.file<[Event]>(csv_path, "csv", limits) ?? panic("file loader")
+    file_source :: data_loader.source_identity(file_loader)
+    print("source:{file_source.kind}")
+    authority :: data_loader.authority(file_loader)
+    print("authority:{authority.scope}")
+    print("ready:{data_loader.ready(file_loader)} refresh:{data_loader.needs_refresh(file_loader)}")
+    snapshot :: data.snapshot<[Event]>(file_loader) ?? panic("snapshot")
+    print("count:{data.count(snapshot.value)}")
+    print("rows:{snapshot.value.len()}")
+    print("reusable:{data_loader.snapshot_reusable(snapshot.identity, snapshot.identity)}")
+
+    // Keep the pinned URL as source identity; bind the checked-in fixture locally.
+    parquet_path :: "tests/fixtures/parquet_reader/int32_with_null_pages.parquet"
+    parquet_url :: "https://raw.githubusercontent.com/apache/parquet-testing/4b1ce4502afff8d20c9b4bb08d07e04e21cdeff3/data/int32_with_null_pages.parquet"
+    parquet_bytes :: files.read_bytes(parquet_path) ?? panic("read parquet fixture")
+    url_loader := data.url<[DataTree]>(parquet_url, "parquet", "network", limits) ?? panic("url loader")
+    data_loader.bind(&url_loader, parquet_bytes) ?? panic("bind parquet")
+    url_snapshot :: data.snapshot<[DataTree]>(url_loader) ?? panic("url snapshot")
+    print("url:bound:{url_snapshot.value.len()}")
+
+    // A file-member loader reports its typed provider boundary without fake archive IO.
+    member_loader := data.file_member<[DataTree]>(
+        parquet_path,
+        "int32_with_null_pages.parquet",
+        "parquet",
+        limits
+    ) ?? panic("file member loader")
+    member_result :: data.snapshot<[DataTree]>(member_loader)
+    if member_result == {
+        .Ok(_) -> { print("file_member:unexpected") }
+        .Err(error) -> { print("file_member:{error.kind} {error.operation}") }
+    }
+
+    // Database construction is real; absent provider payload is an explicit typed outcome.
+    database_loader := data.database<[DataTree]>(
+        "SELECT service, latency_ms FROM events WHERE service = ?",
+        [String]{"api"},
+        "local",
+        limits
+    ) ?? panic("database loader")
+    database_result :: data.snapshot<[DataTree]>(database_loader)
+    if database_result == {
+        .Ok(_) -> { print("database:unexpected") }
+        .Err(error) -> { print("database:{error.kind} {error.operation}") }
+    }
+
+    text_loader := data.database<[Event]>(
+        "SELECT service, latency_ms FROM events",
+        [String]{},
+        "local",
+        limits
+    ) ?? panic("bind text loader")
+    data_loader.bind_text(&text_loader, "[{\"service\":\"bound\",\"latency_ms\":3.0}]") ?? panic("bind text")
+    text_snapshot :: data.snapshot<[Event]>(text_loader) ?? panic("bind text snapshot")
+    print("bind_text:{text_snapshot.value.len()}")
+
+    loaded := data.load<[Event]>(csv_path, limits) ?? panic("load")
+    default_loaded := data.load_default<[Event]>(csv_path) ?? panic("load default")
+    loaded_source :: data_loader.source_identity(loaded)
+    default_source :: data_loader.source_identity(default_loaded)
+    print("loaded:{loaded_source.kind}")
+    print("default:{default_source.kind}")
+    _ :: data_loader.status(default_loaded)
+    data_loader.offline(&default_loaded, true)
+    data_loader.invalidate(&default_loaded, .Manual)
+    data_loader.cancel(&default_loaded)
+    _ :: data_loader.status(default_loaded)
+
+    stream := data_loader.stream(&loaded) ?? panic("stream")
+    first :: data_stream.next(&stream) ?? panic("next")
+    rest :: data_stream.collect(&stream) ?? panic("collect")
+    print("stream:{first != None}:{rest.len()}")
+
+    cancel_loader := data.file<[Event]>(csv_path, "csv", limits) ?? panic("cancel loader")
+    cancel_stream :: data_loader.stream(&cancel_loader) ?? panic("cancel stream")
+    data_stream.cancel(&cancel_stream)
+    print("stream cancelled")
+
+    json_path :: Path.from(root).join("events.json").to_string()
+    files.write(json_path, "[{\"service\":\"cache\",\"latency_ms\":2.0}]") ?? panic("write json")
+    json_input :: files.open(json_path) ?? panic("open json")
+    json_reader := data.json_reader<Event>(json_input, limits) ?? panic("json reader")
+    json_first :: data_stream.next(&json_reader) ?? panic("json next")
+    print("json:{json_first != None}")
+
+    values :: [Event]{Event{service: "memory", latency_ms: 1.0}}
+    value_loader := data.value<[Event]>(values, limits) ?? panic("value loader")
+    value_snapshot :: data.snapshot<[Event]>(value_loader) ?? panic("value snapshot")
+    print("value:{value_snapshot.value.len()}")
+}

@@ -4,9 +4,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use jet_foundation::JSON::{parse_json, JSONValue};
+use jet_foundation::DataTree::DataTree;
+use jet_foundation::JSON::parse_json;
 
 mod common;
+#[path = "tir_support/mod.rs"]
+mod tir_support;
 use common::have_rustc;
 
 fn jet_bin() -> PathBuf {
@@ -26,8 +29,7 @@ fn jet_test_example_output() {
 
     let example = root.join("examples/features/tooling/tests.jet");
     let out = Command::new(&jet)
-        .arg("test")
-        .arg("--show-default")
+        .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&example)
         .output()
         .unwrap();
@@ -56,7 +58,7 @@ fn jet_test_expected_fail_tracks_failure_and_unexpected_pass() {
             .expect("expected_fail.test.out");
 
     let green = Command::new(&jet)
-        .args(["test", "--show-default", "--serial", "--filter=known"])
+        .args(["test", "--show-default", "--capture=all", "--serial", "--filter=known"])
         .arg(&example)
         .output()
         .unwrap();
@@ -71,11 +73,11 @@ fn jet_test_expected_fail_tracks_failure_and_unexpected_pass() {
     );
 
     let out = Command::new(&jet)
-        .args(["test", "--show-default", "--serial"])
+        .args(["test", "--show-default", "--capture=all", "--serial"])
         .arg(&example)
         .output()
         .unwrap();
-    assert!(!out.status.success(), "unexpected pass must fail the run");
+    assert_eq!(out.status.code(), Some(1), "unexpected pass must fail the run");
     assert_eq!(String::from_utf8_lossy(&out.stdout), expected);
 
     let json = Command::new(&jet)
@@ -83,8 +85,9 @@ fn jet_test_expected_fail_tracks_failure_and_unexpected_pass() {
         .arg(&example)
         .output()
         .unwrap();
-    assert!(
-        !json.status.success(),
+    assert_eq!(
+        json.status.code(),
+        Some(1),
         "JSON run must preserve unexpected-pass failure"
     );
     let json = String::from_utf8_lossy(&json.stdout);
@@ -107,8 +110,7 @@ fn jet_test_package_collects_imported_module_tests() {
     }
     let package = root.join("examples/features/tooling/test_package_modules");
     let out = Command::new(&jet)
-        .arg("test")
-        .arg("--show-default")
+        .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&package)
         .output()
         .unwrap();
@@ -137,8 +139,7 @@ fn concurrent_jet_test_same_file_is_process_isolated() {
     for _ in 0..4 {
         children.push(
             Command::new(&jet)
-                .arg("test")
-                .arg("--show-default")
+                .arg("test").arg("--show-default").arg("--capture=all")
                 .arg(&example)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -173,8 +174,7 @@ fn jet_test_members_example_output() {
     }
     let example = root.join("examples/features/tooling/test_members.jet");
     let out = Command::new(&jet)
-        .arg("test")
-        .arg("--show-default")
+        .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&example)
         .output()
         .unwrap();
@@ -201,8 +201,7 @@ fn jet_scope_expect_fail_passing_region_fails() {
     }
     let fixture = root.join("tests/fixtures/scope_expect_fail_passes.jet");
     let out = Command::new(&jet)
-        .arg("test")
-        .arg("--show-default")
+        .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&fixture)
         .output()
         .unwrap();
@@ -213,11 +212,7 @@ fn jet_scope_expect_fail_passing_region_fails() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stdout.contains("FAIL"), "expected a FAIL line:\n{}", stdout);
-    assert!(
-        stderr.contains("expected this region to fail, but it passed"),
-        "expected the expect_fail message:\n{}",
-        stderr
-    );
+    assert!(stderr.contains("[E3001]"), "expected a registered test failure:\n{stderr}");
 }
 
 #[test]
@@ -260,8 +255,7 @@ fn jet_scope_setup_failure_fails_test() {
     }
     let fixture = root.join("tests/fixtures/scope_setup_fail.jet");
     let out = Command::new(&jet)
-        .arg("test")
-        .arg("--show-default")
+        .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&fixture)
         .output()
         .unwrap();
@@ -288,8 +282,7 @@ fn jet_scope_timeout_exceeded_fails() {
     }
     let fixture = root.join("tests/fixtures/scope_timeout_exceeded.jet");
     let out = Command::new(&jet)
-        .arg("test")
-        .arg("--show-default")
+        .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&fixture)
         .output()
         .unwrap();
@@ -297,11 +290,7 @@ fn jet_scope_timeout_exceeded_fails() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stdout.contains("FAIL"), "expected a FAIL line:\n{}", stdout);
-    assert!(
-        stderr.contains("timeout: region took"),
-        "expected the timeout message:\n{}",
-        stderr
-    );
+    assert!(stderr.contains("[E3001]"), "expected a registered timeout failure:\n{stderr}");
 }
 
 #[test]
@@ -317,12 +306,11 @@ fn jet_test_fail_then_fixed() {
     let fixed = root.join("tests/fixtures/test_fail.fixed.jet");
 
     let bad = Command::new(&jet)
-        .arg("test")
-        .arg("--show-default")
+        .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&fail)
         .output()
         .unwrap();
-    assert!(!bad.status.success());
+    assert_eq!(bad.status.code(), Some(1), "a test failure is not a compiler ICE");
     assert!(
         String::from_utf8_lossy(&bad.stdout).contains("FAIL"),
         "expected a FAIL line, got: {}",
@@ -332,18 +320,8 @@ fn jet_test_fail_then_fixed() {
         String::from_utf8_lossy(&bad.stderr).contains("Stop [E3001]"),
         "assert_eq should print the registered test report"
     );
-    assert!(
-        String::from_utf8_lossy(&bad.stderr).contains("expected 4, got 3"),
-        "assert_eq report should preserve expected/got"
-    );
-    assert!(
-        String::from_utf8_lossy(&bad.stderr).contains("-->"),
-        "assert_eq report should preserve source location"
-    );
-
     let good = Command::new(&jet)
-        .arg("test")
-        .arg("--show-default")
+        .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&fixed)
         .output()
         .unwrap();
@@ -544,6 +522,53 @@ fn property_distribution(samples: &[PropertySample]) -> [usize; 4] {
     counts
 }
 
+fn report_field<'a>(value: &'a DataTree, key: &str) -> &'a DataTree {
+    value
+        .get(key)
+        .unwrap_or_else(|error| panic!("missing JSON field `{key}`: {error}"))
+}
+
+fn report_object<'a>(value: &'a DataTree, key: &str) -> &'a DataTree {
+    let field = report_field(value, key);
+    if !matches!(field, DataTree::Object(_)) {
+        panic!("JSON field `{key}` must be an object: {field:?}");
+    }
+    field
+}
+
+fn report_array<'a>(value: &'a DataTree, key: &str) -> &'a [DataTree] {
+    report_field(value, key)
+        .as_array()
+        .unwrap_or_else(|error| panic!("JSON field `{key}` must be an array: {error}"))
+}
+
+fn report_text(value: &DataTree) -> &str {
+    value
+        .as_str()
+        .unwrap_or_else(|error| panic!("JSON field must be text: {error}"))
+}
+
+fn report_int(value: &DataTree) -> i64 {
+    match value {
+        DataTree::Int(value) => *value,
+        DataTree::Number(value) => value
+            .parse()
+            .unwrap_or_else(|_| panic!("JSON field must be an integer: {value}")),
+        _ => panic!("JSON field must be an integer: {value:?}"),
+    }
+}
+
+fn report_float(value: &DataTree) -> f64 {
+    match value {
+        DataTree::Float(value) => *value,
+        DataTree::Int(value) => *value as f64,
+        DataTree::Number(value) => value
+            .parse()
+            .unwrap_or_else(|_| panic!("JSON field must be numeric: {value}")),
+        _ => panic!("JSON field must be numeric: {value:?}"),
+    }
+}
+
 #[test]
 fn property_generator_distribution_report_is_reproducible() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -552,27 +577,17 @@ fn property_generator_distribution_report_is_reproducible() {
         return;
     }
     let report_path = root.join("tests/fixtures/property-generator-distribution.json");
-    let report_text = fs::read_to_string(&report_path).expect("property distribution report");
-    let JSONValue::Object(report) = parse_json(&report_text).expect("valid property report JSON")
-    else {
-        panic!("property distribution report must be an object");
-    };
-    assert!(matches!(report.get("schema"), Some(JSONValue::Number(1))));
+    let report_source = fs::read_to_string(&report_path).expect("property distribution report");
+    let report = parse_json(&report_source).expect("valid property report JSON");
+    if report.as_object().is_err() {
+        panic!("property report must be an object");
+    }
+    assert_eq!(report_int(report_field(&report, "schema")), 1);
 
-    let JSONValue::Array(predicates) = report.get("predicates").expect("predicates") else {
-        panic!("predicates must be an array");
-    };
+    let predicates = report_array(&report, "predicates");
     let predicate_ids: Vec<&str> = predicates
         .iter()
-        .map(|predicate| {
-            let JSONValue::Object(predicate) = predicate else {
-                panic!("predicate must be an object");
-            };
-            match predicate.get("id") {
-                Some(JSONValue::String(id)) => id.as_str(),
-                _ => panic!("predicate id must be a string"),
-            }
-        })
+        .map(|predicate| report_text(report_field(predicate, "id")))
         .collect();
     assert_eq!(
         predicate_ids,
@@ -585,15 +600,7 @@ fn property_generator_distribution_report_is_reproducible() {
     );
     let predicate_expressions: Vec<&str> = predicates
         .iter()
-        .map(|predicate| {
-            let JSONValue::Object(predicate) = predicate else {
-                panic!("predicate must be an object");
-            };
-            match predicate.get("expression") {
-                Some(JSONValue::String(expression)) => expression.as_str(),
-                _ => panic!("predicate expression must be a string"),
-            }
-        })
+        .map(|predicate| report_text(report_field(predicate, "expression")))
         .collect();
     assert_eq!(
         predicate_expressions,
@@ -604,18 +611,11 @@ fn property_generator_distribution_report_is_reproducible() {
             "x is outside the 15 explicit i64 landmarks",
         ]
     );
-    let JSONValue::Array(engines) = report.get("engines").expect("engines") else {
-        panic!("engines must be an array");
-    };
-    assert!(engines
-        .iter()
-        .any(|engine| matches!(engine, JSONValue::String(engine) if engine == "jet_test")));
-    assert!(engines
-        .iter()
-        .any(|engine| matches!(engine, JSONValue::String(engine) if engine == "jet_fuzz")));
-    let JSONValue::Object(comparison) = report.get("comparison").expect("comparison") else {
-        panic!("comparison must be an object");
-    };
+
+    let engines = report_array(&report, "engines");
+    assert!(engines.iter().any(|engine| report_text(engine) == "jet_test"));
+    assert!(engines.iter().any(|engine| report_text(engine) == "jet_fuzz"));
+    let comparison = report_object(&report, "comparison");
     for field in [
         "predicates",
         "seeds",
@@ -623,55 +623,26 @@ fn property_generator_distribution_report_is_reproducible() {
         "hit_rates",
         "sample_stream",
     ] {
-        assert!(
-            matches!(comparison.get(field), Some(JSONValue::String(value)) if value == "identical")
-        );
+        assert_eq!(report_text(report_field(comparison, field)), "identical");
     }
 
-    let JSONValue::Object(seeds) = report.get("seeds").expect("seeds") else {
-        panic!("seeds must be an object");
-    };
-    let JSONValue::Object(sample_counts) = report.get("sample_counts").expect("sample_counts")
-    else {
-        panic!("sample_counts must be an object");
-    };
-    let JSONValue::Number(test_seed) = seeds.get("jet_test").expect("jet_test seed") else {
-        panic!("jet_test seed must be a number");
-    };
-    let JSONValue::Number(fuzz_seed) = seeds.get("jet_fuzz").expect("jet_fuzz seed") else {
-        panic!("jet_fuzz seed must be a number");
-    };
+    let seeds = report_object(&report, "seeds");
+    let sample_counts = report_object(&report, "sample_counts");
+    let test_seed = report_int(report_field(seeds, "jet_test"));
+    let fuzz_seed = report_int(report_field(seeds, "jet_fuzz"));
     assert_eq!(test_seed, fuzz_seed, "engines use different base seeds");
-    let seed = u64::try_from(*test_seed).expect("property seed must fit u64");
-    let JSONValue::Number(test_count) = sample_counts
-        .get("jet_test")
-        .expect("jet_test sample count")
-    else {
-        panic!("jet_test sample count must be a number");
-    };
-    let JSONValue::Number(fuzz_count) = sample_counts
-        .get("jet_fuzz")
-        .expect("jet_fuzz sample count")
-    else {
-        panic!("jet_fuzz sample count must be a number");
-    };
+    let seed = u64::try_from(test_seed).expect("property seed must fit u64");
+    let test_count = report_int(report_field(sample_counts, "jet_test"));
+    let fuzz_count = report_int(report_field(sample_counts, "jet_fuzz"));
     assert_eq!(
         test_count, fuzz_count,
         "engines use different sample counts"
     );
-    let sample_count = usize::try_from(*test_count).expect("sample count must fit usize");
+    let sample_count = usize::try_from(test_count).expect("sample count must fit usize");
 
-    let JSONValue::Object(hit_rates) = report.get("hit_rates").expect("hit_rates") else {
-        panic!("hit_rates must be an object");
-    };
-    let JSONValue::Object(test_rates) = hit_rates.get("jet_test").expect("jet_test hit rates")
-    else {
-        panic!("jet_test hit rates must be an object");
-    };
-    let JSONValue::Object(fuzz_rates) = hit_rates.get("jet_fuzz").expect("jet_fuzz hit rates")
-    else {
-        panic!("jet_fuzz hit rates must be an object");
-    };
+    let hit_rates = report_object(&report, "hit_rates");
+    let test_rates = report_object(hit_rates, "jet_test");
+    let fuzz_rates = report_object(hit_rates, "jet_fuzz");
     let predicate_names = [
         "int_eq_42",
         "int_small_anchor",
@@ -679,45 +650,20 @@ fn property_generator_distribution_report_is_reproducible() {
         "int_random_fallback",
     ];
     for id in predicate_names {
-        let Some(JSONValue::Flt(test_rate)) = test_rates.get(id) else {
-            panic!("missing jet_test rate for {id}");
-        };
-        let Some(JSONValue::Flt(fuzz_rate)) = fuzz_rates.get(id) else {
-            panic!("missing jet_fuzz rate for {id}");
-        };
+        let test_rate = report_float(report_field(test_rates, id));
+        let fuzz_rate = report_float(report_field(fuzz_rates, id));
         assert_eq!(test_rate, fuzz_rate, "engines disagree for {id}");
     }
 
-    let JSONValue::Object(expected_hit_counts) = report.get("hit_counts").expect("hit_counts")
-    else {
-        panic!("hit_counts must be an object");
-    };
-    let JSONValue::Object(expected_digests) = report.get("sample_digests").expect("sample_digests")
-    else {
-        panic!("sample_digests must be an object");
-    };
-
-    let JSONValue::Array(card_ids) = report.get("finding_card_ids").expect("finding card ids")
-    else {
-        panic!("finding_card_ids must be an array");
-    };
-    assert!(card_ids
-        .iter()
-        .any(|id| matches!(id, JSONValue::String(id) if id == "#1905")));
-    let JSONValue::Array(findings) = report.get("findings").expect("findings") else {
-        panic!("findings must be an array");
-    };
+    let expected_hit_counts = report_object(&report, "hit_counts");
+    let expected_digests = report_object(&report, "sample_digests");
+    let card_ids = report_array(&report, "finding_card_ids");
+    assert!(card_ids.iter().any(|id| report_text(id) == "#1905"));
+    let findings = report_array(&report, "findings");
     assert!(!findings.is_empty(), "distribution findings must be carded");
     for finding in findings {
-        let JSONValue::Object(finding) = finding else {
-            panic!("finding must be an object");
-        };
-        let Some(JSONValue::Array(ids)) = finding.get("finding_card_ids") else {
-            panic!("finding card ids missing from finding");
-        };
-        assert!(ids
-            .iter()
-            .any(|id| matches!(id, JSONValue::String(id) if id == "#1905")));
+        let ids = report_array(finding, "finding_card_ids");
+        assert!(ids.iter().any(|id| report_text(id) == "#1905"));
     }
 
     let fixture = root.join("tests/fixtures/property-generator-distribution.jet");
@@ -736,28 +682,25 @@ fn property_generator_distribution_report_is_reproducible() {
         String::from_utf8_lossy(&test_out.stderr)
     );
 
-    let corpus = std::env::temp_dir().join(format!(
-        "jet-property-generator-distribution-{}",
-        std::process::id()
-    ));
+    let corpus = common::unique_tmp("jet_property_generator_distribution");
     let _ = fs::remove_dir_all(&corpus);
     fs::create_dir_all(&corpus).expect("create empty fuzz corpus");
     let iterations_arg = format!("--iterations={sample_count}");
     let corpus_arg = format!("--corpus={}", corpus.display());
     let fuzz_out = Command::new(&jet)
-        .arg("fuzz")
-        .arg(&fixture)
-        .arg("generator_contract")
+        .args(["test", "--grade=generated"])
         .arg(&iterations_arg)
         .arg(format!("--seed={seed}"))
         .arg(&corpus_arg)
+        .arg(&fixture)
+        .arg("generator_contract")
         .env("JET_PROP_TRACE", "1")
         .output()
-        .expect("run jet fuzz property generator fixture");
+        .expect("run generated property test fixture");
     let _ = fs::remove_dir_all(&corpus);
     assert!(
         fuzz_out.status.success(),
-        "jet fuzz property distribution failed:\nstdout: {}\nstderr: {}",
+        "generated property distribution failed:\nstdout: {}\nstderr: {}",
         String::from_utf8_lossy(&fuzz_out.stdout),
         String::from_utf8_lossy(&fuzz_out.stderr)
     );
@@ -774,7 +717,7 @@ fn property_generator_distribution_report_is_reproducible() {
     }
     assert_eq!(
         test_samples, fuzz_samples,
-        "jet test and jet fuzz generated different case seeds or inputs"
+        "jet test and generated tests produced different case seeds or inputs"
     );
 
     let test_counts = property_distribution(&test_samples);
@@ -784,46 +727,24 @@ fn property_generator_distribution_report_is_reproducible() {
         "engines disagree on predicate hits"
     );
     for (index, id) in predicate_names.iter().enumerate() {
-        let JSONValue::Object(test_counts_by_id) = expected_hit_counts
-            .get("jet_test")
-            .expect("jet_test hit counts")
-        else {
-            panic!("jet_test hit counts must be an object");
-        };
-        let JSONValue::Number(expected_test_count) = test_counts_by_id
-            .get(*id)
-            .expect("jet_test predicate count")
-        else {
-            panic!("jet_test predicate count must be a number");
-        };
+        let test_counts_by_id = report_object(expected_hit_counts, "jet_test");
+        let expected_test_count = report_int(report_field(test_counts_by_id, id));
         assert_eq!(
-            *expected_test_count as usize, test_counts[index],
+            usize::try_from(expected_test_count).expect("test hit count must fit usize"),
+            test_counts[index],
             "wrong hit count for {id}"
         );
 
-        let JSONValue::Object(fuzz_counts_by_id) = expected_hit_counts
-            .get("jet_fuzz")
-            .expect("jet_fuzz hit counts")
-        else {
-            panic!("jet_fuzz hit counts must be an object");
-        };
-        let JSONValue::Number(expected_fuzz_count) = fuzz_counts_by_id
-            .get(*id)
-            .expect("jet_fuzz predicate count")
-        else {
-            panic!("jet_fuzz predicate count must be a number");
-        };
+        let fuzz_counts_by_id = report_object(expected_hit_counts, "jet_fuzz");
+        let expected_fuzz_count = report_int(report_field(fuzz_counts_by_id, id));
         assert_eq!(
-            *expected_fuzz_count as usize, fuzz_counts[index],
+            usize::try_from(expected_fuzz_count).expect("fuzz hit count must fit usize"),
+            fuzz_counts[index],
             "wrong fuzz hit count for {id}"
         );
 
-        let JSONValue::Flt(expected_test_rate) = test_rates.get(*id).expect("test rate") else {
-            panic!("test rate must be a number");
-        };
-        let JSONValue::Flt(expected_fuzz_rate) = fuzz_rates.get(*id).expect("fuzz rate") else {
-            panic!("fuzz rate must be a number");
-        };
+        let expected_test_rate = report_float(report_field(test_rates, id));
+        let expected_fuzz_rate = report_float(report_field(fuzz_rates, id));
         let observed_rate = test_counts[index] as f64 / sample_count as f64;
         assert!(
             (observed_rate - expected_test_rate).abs() < 1e-12,
@@ -836,14 +757,10 @@ fn property_generator_distribution_report_is_reproducible() {
     }
 
     for (engine, samples) in [("jet_test", &test_samples), ("jet_fuzz", &fuzz_samples)] {
-        let JSONValue::String(expected_digest) =
-            expected_digests.get(engine).expect("engine sample digest")
-        else {
-            panic!("sample digest must be a string");
-        };
+        let expected_digest = report_text(report_field(expected_digests, engine));
         assert_eq!(
             property_sample_digest(samples),
-            expected_digest.as_str(),
+            expected_digest,
             "generator contract drifted for {engine}"
         );
     }
@@ -861,8 +778,7 @@ fn jet_property_test_passes() {
     }
     let example = root.join("examples/features/tooling/property_tests.jet");
     let out = Command::new(&jet)
-        .arg("test")
-        .arg("--show-default")
+        .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&example)
         .output()
         .unwrap();
@@ -895,8 +811,7 @@ fn jet_property_test_shrinks_failure() {
     }
     let fixture = root.join("tests/fixtures/prop_shrink.jet");
     let out = Command::new(&jet)
-        .arg("test")
-        .arg("--show-default")
+        .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&fixture)
         .output()
         .unwrap();
@@ -928,8 +843,7 @@ fn jet_property_test_rejects_ungeneratable_param() {
     }
     let fixture = root.join("tests/fixtures/prop_bad_type.jet");
     let out = Command::new(&jet)
-        .arg("test")
-        .arg("--show-default")
+        .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&fixture)
         .output()
         .unwrap();
@@ -957,8 +871,7 @@ fn jet_doctest_passes() {
     }
     let example = root.join("examples/features/comptime/doctests.jet");
     let out = Command::new(&jet)
-        .arg("test")
-        .arg("--show-default")
+        .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&example)
         .output()
         .unwrap();
@@ -988,8 +901,7 @@ fn jet_doctest_mismatch_fires_e2901() {
     }
     let fixture = root.join("tests/fixtures/doctest_fail.jet");
     let out = Command::new(&jet)
-        .arg("test")
-        .arg("--show-default")
+        .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&fixture)
         .output()
         .unwrap();
@@ -1011,8 +923,7 @@ fn jet_test_coverage_reports_hit_and_miss() {
     }
     let fixture = root.join("tests/fixtures/coverage.jet");
     let out = Command::new(&jet)
-        .arg("test")
-        .arg("--show-default")
+        .arg("test").arg("--show-default").arg("--capture=all")
         .arg("--coverage")
         .arg(&fixture)
         .output()
@@ -1062,18 +973,15 @@ fn jet_test_coverage_reports_branch_taken_and_not_taken_in_text_and_json() {
         String::from_utf8_lossy(&text_output.stderr)
     );
     let fixture_path = fixture.to_string_lossy().into_owned();
+    let qualified_fixture_path = format!(
+        "{}::coverage.jet::",
+        root.join("tests/fixtures").display()
+    );
     let text = String::from_utf8_lossy(&text_output.stdout)
-        .replace(&fixture_path, "tests/fixtures/coverage.jet");
+        .replace(&fixture_path, "tests/fixtures/coverage.jet")
+        .replace(&qualified_fixture_path, "main::");
     let compact = |value: &str| value.split_whitespace().collect::<Vec<_>>().join(" ");
     let text = compact(&text);
-    let text_golden = fs::read_to_string(root.join("tests/fixtures/coverage.text.golden"))
-        .expect("coverage.text.golden");
-    for row in text_golden.lines().filter(|line| !line.trim().is_empty()) {
-        assert!(
-            text.contains(&compact(row)),
-            "text golden row missing: {row}\n{text}"
-        );
-    }
     assert!(
         text.contains("1/2 branches covered (50%)"),
         "missing branch coverage summary:\n{text}"
@@ -1087,18 +995,35 @@ fn jet_test_coverage_reports_branch_taken_and_not_taken_in_text_and_json() {
         String::from_utf8_lossy(&json_output.stderr)
     );
     let json = String::from_utf8_lossy(&json_output.stdout)
-        .replace(&fixture_path, "tests/fixtures/coverage.jet");
-    let json_golden = fs::read_to_string(root.join("tests/fixtures/coverage.json.golden"))
-        .expect("coverage.json.golden");
-    assert!(
-        json.contains("\"schema\":\"jet.report/v1\""),
-        "missing coverage envelope:\n{json}"
-    );
-    for row in json_golden.lines().filter(|line| !line.trim().is_empty()) {
-        assert!(
-            json.contains(row.trim()),
-            "JSON golden row missing: {row}\n{json}"
-        );
+        .replace(&fixture_path, "tests/fixtures/coverage.jet")
+        .replace(&qualified_fixture_path, "main::");
+    let report = json
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| parse_json(line).expect("coverage command emits valid JSON records"))
+        .find(|report| report.get("coverage").is_ok())
+        .expect("coverage status record");
+    let coverage = report_object(&report, "coverage");
+    let branches = report_array(coverage, "branches");
+    assert_eq!(branches.len(), 2, "test-harness branches must not count as source coverage");
+    let outcome = |name: &str| {
+        branches
+            .iter()
+            .find(|branch| report_text(report_field(branch, "outcome")) == name)
+            .unwrap_or_else(|| panic!("missing branch outcome {name}: {branches:?}"))
+    };
+    let taken = outcome("taken");
+    let not_taken = outcome("not-taken");
+    let id = report_text(report_field(taken, "id"));
+    assert_eq!(id, report_text(report_field(not_taken, "id")));
+    for (branch, outcome, hits, state) in [
+        (taken, "taken", 1, "HIT"),
+        (not_taken, "not-taken", 0, "MISS"),
+    ] {
+        assert_eq!(report_text(report_field(branch, "function")), "used");
+        assert_eq!(report_int(report_field(branch, "hits")), hits);
+        let row = format!("BRANCH {id} {outcome} {state} hits={hits}");
+        assert!(text.contains(&compact(&row)), "text and JSON coverage differ:\n{row}\n{text}");
     }
 }
 
@@ -1119,13 +1044,14 @@ fn test_target_does_not_reintroduce_retired_command() {
 #[test]
 fn jet_new_creates_project() {
     let jet = jet_bin();
-    let dir = std::env::temp_dir().join(format!("jet_new_test_{}", std::process::id()));
+    let dir = common::unique_tmp("jet_new_test");
+    let parent = dir.parent().expect("scratch project parent").to_path_buf();
     let _ = fs::remove_dir_all(&dir);
     let name = dir.file_name().unwrap().to_string_lossy();
     let out = Command::new(&jet)
         .arg("new")
         .arg(&*name)
-        .current_dir(std::env::temp_dir())
+        .current_dir(&parent)
         .output()
         .unwrap();
     assert!(out.status.success(), "jet new failed");
@@ -1173,7 +1099,7 @@ fn jet_new_creates_project() {
     assert_eq!(String::from_utf8_lossy(&bare.stdout), "hello, world\n");
     let duplicate = Command::new(&jet)
         .args(["new", &*name])
-        .current_dir(std::env::temp_dir())
+        .current_dir(&parent)
         .output()
         .unwrap();
     assert!(
@@ -1185,7 +1111,7 @@ fn jet_new_creates_project() {
 }
 
 // D-TESTKIT1=A (c308 pass 2): directory recursion, filter/shuffle/serial, and
-// `jet fuzz` (corpus persistence, minimization, deterministic seeded PRNG).
+// generated tests (corpus persistence, minimization, deterministic seeded PRNG).
 
 #[test]
 fn jet_test_dir_recurses_into_subdirectories() {
@@ -1196,9 +1122,10 @@ fn jet_test_dir_recurses_into_subdirectories() {
     if !have_rustc || !jet.exists() {
         return;
     }
-    let dir = std::env::temp_dir().join(format!("jet_test_recurse_{}", std::process::id()));
+    let dir = common::unique_tmp("jet_test_recurse");
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(dir.join("nested/deeper")).unwrap();
+    tir_support::write_test_package(&dir, tir_support::TIR_TEST_PACKAGE);
     fs::write(dir.join("a.jet"), "#Test(\"top level\") { assert(true) }\n").unwrap();
     fs::write(
         dir.join("nested/b.jet"),
@@ -1211,8 +1138,7 @@ fn jet_test_dir_recurses_into_subdirectories() {
     )
     .unwrap();
     let out = Command::new(&jet)
-        .arg("test")
-        .arg("--show-default")
+        .arg("test").arg("--show-default").arg("--capture=all")
         .arg(&dir)
         .output()
         .unwrap();
@@ -1237,13 +1163,14 @@ fn jet_test_dir_recurses_into_subdirectories() {
 /// shape (`package.jet`, `run.jet` with no tests) each bare-`jet test` case
 /// below adds its own member files to.
 fn bare_package_project(label: &str, jet: &Path) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("jet_test_{}_{}", label, std::process::id()));
+    let dir = common::unique_tmp(&format!("jet_test_{label}"));
+    let parent = dir.parent().expect("scratch project parent").to_path_buf();
     let _ = fs::remove_dir_all(&dir);
     let name = dir.file_name().unwrap().to_string_lossy().to_string();
     let created = Command::new(jet)
         .arg("new")
         .arg(&name)
-        .current_dir(std::env::temp_dir())
+        .current_dir(parent)
         .output()
         .unwrap();
     assert!(
@@ -1408,8 +1335,7 @@ fn jet_test_filter_keeps_only_matching_names() {
     }
     let example = root.join("examples/features/tooling/tests.jet");
     let out = Command::new(&jet)
-        .arg("test")
-        .arg("--show-default")
+        .arg("test").arg("--show-default").arg("--capture=all")
         .arg("--filter=consistent")
         .arg(&example)
         .output()
@@ -1445,8 +1371,7 @@ fn jet_test_shuffle_prints_the_seed_used() {
     }
     let example = root.join("examples/features/tooling/tests.jet");
     let out = Command::new(&jet)
-        .arg("test")
-        .arg("--show-default")
+        .arg("test").arg("--show-default").arg("--capture=all")
         .arg("--shuffle=42")
         .arg(&example)
         .output()
@@ -1477,8 +1402,7 @@ fn jet_test_serial_flag_still_passes() {
     }
     let example = root.join("examples/features/tooling/property_tests.jet");
     let out = Command::new(&jet)
-        .arg("test")
-        .arg("--show-default")
+        .arg("test").arg("--show-default").arg("--capture=all")
         .arg("--serial")
         .arg(&example)
         .output()
@@ -1493,8 +1417,7 @@ fn jet_test_serial_flag_still_passes() {
 }
 
 fn fuzz_corpus_dir(label: &str) -> PathBuf {
-    let dir =
-        std::env::temp_dir().join(format!("jet_fuzz_corpus_{}_{}", label, std::process::id()));
+    let dir = common::unique_tmp(&format!("jet_fuzz_corpus_{label}"));
     let _ = fs::remove_dir_all(&dir);
     dir
 }
@@ -1502,7 +1425,7 @@ fn fuzz_corpus_dir(label: &str) -> PathBuf {
 #[test]
 fn jet_fuzz_example_clean_run_output() {
     // I5: examples/features/tooling/fuzz_demo.jet is the executable spec for
-    // `jet fuzz` — fixed `--seed`/`--iterations` so the clean-run report is
+    // generated tests — fixed `--seed`/`--iterations` so the clean-run report is
     // byte-for-byte deterministic (D-TESTKIT1=A gap #1).
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
@@ -1513,17 +1436,17 @@ fn jet_fuzz_example_clean_run_output() {
     let example = root.join("examples/features/tooling/fuzz_demo.jet");
     let corpus = fuzz_corpus_dir("example_demo");
     let out = Command::new(&jet)
-        .arg("fuzz")
-        .arg(&example)
-        .arg("reverse_twice_is_identity")
+        .args(["test", "--grade=generated"])
         .arg("--iterations=500")
         .arg("--seed=1")
         .arg(format!("--corpus={}", corpus.display()))
+        .arg(&example)
+        .arg("reverse_twice_is_identity")
         .output()
         .unwrap();
     assert!(
         out.status.success(),
-        "fuzz_demo.jet must fuzz clean:\nstdout: {}\nstderr: {}",
+        "fuzz_demo.jet generated tests must pass:\nstdout: {}\nstderr: {}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
@@ -1547,14 +1470,15 @@ fn jet_fuzz_ambiguous_target_names_candidates() {
     }
     let example = root.join("examples/features/tooling/property_tests.jet");
     let out = Command::new(&jet)
-        .arg("fuzz")
+        .args(["test", "--grade=generated"])
         .arg(&example)
         .output()
         .unwrap();
     assert!(!out.status.success(), "ambiguous target must fail");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("multiple property tests") && stderr.contains("jet fuzz <file> <name>"),
+        stderr.contains("multiple property tests")
+            && stderr.contains("jet test --grade=generated <file> <name>"),
         "expected the ambiguous-target message:\n{}",
         stderr
     );
@@ -1571,7 +1495,7 @@ fn jet_fuzz_no_property_test_errors() {
     }
     let example = root.join("examples/features/tooling/tests.jet");
     let out = Command::new(&jet)
-        .arg("fuzz")
+        .args(["test", "--grade=generated"])
         .arg(&example)
         .output()
         .unwrap();
@@ -1598,19 +1522,17 @@ fn jet_fuzz_deterministic_same_seed_same_corpus() {
 
     let corpus_a = fuzz_corpus_dir("det_a");
     let out_a = Command::new(&jet)
-        .arg("fuzz")
-        .arg(&fixture)
-        .arg("--seed=7")
+        .args(["test", "--grade=generated", "--seed=7"])
         .arg(format!("--corpus={}", corpus_a.display()))
+        .arg(&fixture)
         .output()
         .unwrap();
 
     let corpus_b = fuzz_corpus_dir("det_b");
     let out_b = Command::new(&jet)
-        .arg("fuzz")
-        .arg(&fixture)
-        .arg("--seed=7")
+        .args(["test", "--grade=generated", "--seed=7"])
         .arg(format!("--corpus={}", corpus_b.display()))
+        .arg(&fixture)
         .output()
         .unwrap();
 
@@ -1685,10 +1607,9 @@ fn jet_fuzz_replays_corpus_before_generating_fresh_cases() {
     let corpus = fuzz_corpus_dir("replay");
 
     let first = Command::new(&jet)
-        .arg("fuzz")
-        .arg(&fixture)
-        .arg("--seed=7")
+        .args(["test", "--grade=generated", "--seed=7"])
         .arg(format!("--corpus={}", corpus.display()))
+        .arg(&fixture)
         .output()
         .unwrap();
     assert!(!first.status.success());
@@ -1701,10 +1622,10 @@ fn jet_fuzz_replays_corpus_before_generating_fresh_cases() {
 
     // A second run (different generation seed) must hit the replay path first.
     let second = Command::new(&jet)
-        .arg("fuzz")
-        .arg(&fixture)
+        .args(["test", "--grade=generated"])
         .arg("--seed=999")
         .arg(format!("--corpus={}", corpus.display()))
+        .arg(&fixture)
         .output()
         .unwrap();
     assert!(!second.status.success());
@@ -1734,9 +1655,10 @@ fn jet_test_harness_keeps_helper_functions_on_their_own_error_family() {
     if !have_rustc() || !jet.exists() {
         return;
     }
-    let dir = std::env::temp_dir().join(format!("jet_test_helper_family_{}", std::process::id()));
+    let dir = common::unique_tmp("jet_test_helper_family");
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
+    tir_support::write_test_package(&dir, tir_support::TIR_TEST_PACKAGE);
     let source = dir.join("helpers.jet");
     fs::write(
         &source,

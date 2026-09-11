@@ -43,10 +43,7 @@ pub fn run_debug_aot(file: &str) -> Command {
 //                              and_matches_run_outside_projects` (`build
 //                              --release` strips `#Job` dev entries; a debug
 //                              build keeps them, so this needs release)
-//   cli_parts/inspect.rs       `inspect_guarantees_harden_contains_every_
-//                              dependency` (asserts `profile: release` in the
-//                              guarantee report) and
-//                              `hardened_release_sentry_reaches_a_foreign_
+//   cli_parts/inspect.rs       `hardened_release_sentry_reaches_a_foreign_
 //                              dependency` (hardened release sentry semantics)
 //
 // Everything else in the cli targets is behavior, and pays debug.
@@ -117,7 +114,7 @@ pub fn check_snapshot(name: &str, actual: &str) {
 pub fn bad_file(tag: &str) -> PathBuf {
     let dir = isolated_cwd(&format!("bad_{tag}"));
     let p = dir.join("bad.jet");
-    fs::write(&p, "fn run() {\n    pirnt(\"hi\");\n}\n").unwrap();
+    fs::write(&p, "fn run() {\n    pirnt(\"hi\")\n}\n").unwrap();
     p
 }
 

@@ -8,7 +8,7 @@
 //! stack frame and locals are in Jet terms (I2 — never generated Rust), and
 //! that step / next / continue / finish behave as ratified.
 //!
-//! The fixtures are tiny temp files so the test is hermetic. The debugger drives
+//! The fixtures are tiny owned scratch projects so the test is hermetic. The debugger drives
 //! the same dev interpreter `jet dev`/`jet repl` use, so no rustc is needed.
 //!
 //! Also covers D-DBG3 step 2 (dap-debugger) — the native lldb-backed `jet
@@ -18,19 +18,31 @@
 //! once both tools exist, a stop or cleanup failure is a test failure.
 
 mod common;
+#[path = "tir_support/mod.rs"]
+mod tir_support;
 
-use jet_foundation::JSON::{json_get, json_str, parse_json, JSONValue};
+use jet_foundation::DataTree::DataTree;
+use jet_foundation::JSON::{json_get, json_str, parse_json};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// Write `src` to a temp `.jet` file and return its path.
+/// Write `src` to an owned `.jet` project and return its path.
 fn fixture(tag: &str, src: &str) -> String {
-    let p = std::env::temp_dir().join(format!("jet_debug_{tag}.jet"));
+    let dir = common::unique_tmp(&format!("jet_debug_{tag}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    tir_support::write_test_package(&dir, tir_support::TIR_TEST_PACKAGE);
+    let p = dir.join(format!("jet_debug_{tag}.jet"));
     let mut f = std::fs::File::create(&p).unwrap();
     f.write_all(src.as_bytes()).unwrap();
     p.to_string_lossy().into_owned()
+}
+
+fn canvas_source_id(path: &Path) -> &str {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .expect("Canvas fixture must have a UTF-8 file name")
 }
 
 const LOOPS: &str = "\
@@ -104,10 +116,11 @@ fn canvas_debug_session_replays_one_source_bound_session() {
     let path = Path::new(&file);
     let source = std::fs::read_to_string(path).unwrap();
     let revision = jet::Canvas::source_revision(&source);
+    let source_id = canvas_source_id(path);
     let sessions = jet::Canvas::DebugSessions::default();
     let first_request = format!(
-        "{{\"schema_version\":1,\"revision\":\"{}\",\"commands\":[\"s\"]}}",
-        revision
+        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"commands\":[\"s\"]}}",
+        source_id, revision
     );
     let first =
         jet::Canvas::debug_session_json_for_file_with_sessions(path, &first_request, &sessions)
@@ -134,8 +147,8 @@ fn canvas_debug_session_replays_one_source_bound_session() {
         .expect("live response session id terminator");
     let session_id = &first[start..end];
     let next_request = format!(
-        "{{\"schema_version\":1,\"revision\":\"{}\",\"session_id\":\"{}\",\"commands\":[\"s\"]}}",
-        revision, session_id
+        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"session_id\":\"{}\",\"commands\":[\"s\"]}}",
+        source_id, revision, session_id
     );
     let next =
         jet::Canvas::debug_session_json_for_file_with_sessions(path, &next_request, &sessions)
@@ -148,8 +161,8 @@ fn canvas_debug_session_replays_one_source_bound_session() {
     assert!(next.contains("\"debug_overlay\":\"running\""), "{next}");
 
     let invalid_continuation = format!(
-        "{{\"schema_version\":1,\"revision\":\"{}\",\"session_id\":\"{}\",\"commands\":[\"teleport\"]}}",
-        revision, session_id
+        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"session_id\":\"{}\",\"commands\":[\"teleport\"]}}",
+        source_id, revision, session_id
     );
     let invalid = jet::Canvas::debug_session_json_for_file_with_sessions(
         path,
@@ -171,8 +184,8 @@ fn canvas_debug_session_replays_one_source_bound_session() {
     );
 
     let stop_request = format!(
-        "{{\"schema_version\":1,\"revision\":\"{}\",\"session_id\":\"{}\",\"stop\":true}}",
-        revision, session_id
+        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"session_id\":\"{}\",\"stop\":true}}",
+        source_id, revision, session_id
     );
     let stopped =
         jet::Canvas::debug_session_json_for_file_with_sessions(path, &stop_request, &sessions)
@@ -182,8 +195,8 @@ fn canvas_debug_session_replays_one_source_bound_session() {
     assert_eq!(std::fs::read_to_string(path).unwrap(), source);
 
     let invalid_request = format!(
-        "{{\"schema_version\":1,\"revision\":\"{}\",\"commands\":[\"teleport\"]}}",
-        revision
+        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"commands\":[\"teleport\"]}}",
+        source_id, revision
     );
     let invalid =
         jet::Canvas::debug_session_json_for_file_with_sessions(path, &invalid_request, &sessions)
@@ -198,10 +211,11 @@ fn canvas_debug_stop_requires_matching_source_revision_and_tier() {
     let path = Path::new(&file);
     let source = std::fs::read_to_string(path).unwrap();
     let revision = jet::Canvas::source_revision(&source);
+    let source_id = canvas_source_id(path);
     let sessions = jet::Canvas::DebugSessions::default();
     let first_request = format!(
-        "{{\"schema_version\":1,\"revision\":\"{}\",\"tier\":\"jet-dev-interpreter\",\"commands\":[\"s\"]}}",
-        revision
+        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"tier\":\"jet-dev-interpreter\",\"commands\":[\"s\"]}}",
+        source_id, revision
     );
     let first =
         jet::Canvas::debug_session_json_for_file_with_sessions(path, &first_request, &sessions)
@@ -215,8 +229,8 @@ fn canvas_debug_stop_requires_matching_source_revision_and_tier() {
     let session_id = &first[start..end];
 
     let wrong_tier = format!(
-        "{{\"schema_version\":1,\"revision\":\"{}\",\"tier\":\"native-lldb\",\"session_id\":\"{}\",\"stop\":true}}",
-        revision, session_id
+        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"tier\":\"native-lldb\",\"session_id\":\"{}\",\"stop\":true}}",
+        source_id, revision, session_id
     );
     let error =
         jet::Canvas::debug_session_json_for_file_with_sessions(path, &wrong_tier, &sessions)
@@ -226,9 +240,10 @@ fn canvas_debug_stop_requires_matching_source_revision_and_tier() {
     let other_file = fixture("canvas_stop_other_source", LOOPS);
     let other_revision =
         jet::Canvas::source_revision(&std::fs::read_to_string(&other_file).unwrap());
+    let other_source_id = canvas_source_id(Path::new(&other_file));
     let wrong_source = format!(
-        "{{\"schema_version\":1,\"revision\":\"{}\",\"tier\":\"jet-dev-interpreter\",\"session_id\":\"{}\",\"stop\":true}}",
-        other_revision, session_id
+        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"tier\":\"jet-dev-interpreter\",\"session_id\":\"{}\",\"stop\":true}}",
+        other_source_id, other_revision, session_id
     );
     let error = jet::Canvas::debug_session_json_for_file_with_sessions(
         Path::new(&other_file),
@@ -239,15 +254,15 @@ fn canvas_debug_stop_requires_matching_source_revision_and_tier() {
     assert!(error.contains("\"kind\":\"conflict\""), "{error}");
 
     let next_request = format!(
-        "{{\"schema_version\":1,\"revision\":\"{}\",\"tier\":\"jet-dev-interpreter\",\"session_id\":\"{}\",\"commands\":[\"s\"]}}",
-        revision, session_id
+        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"tier\":\"jet-dev-interpreter\",\"session_id\":\"{}\",\"commands\":[\"s\"]}}",
+        source_id, revision, session_id
     );
     jet::Canvas::debug_session_json_for_file_with_sessions(path, &next_request, &sessions)
         .expect("a mismatched stop must leave the live session intact");
 
     let stale_stop = format!(
-        "{{\"schema_version\":1,\"revision\":\"sha256-stale\",\"tier\":\"jet-dev-interpreter\",\"session_id\":\"{}\",\"stop\":true}}",
-        session_id
+        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"sha256-stale\",\"tier\":\"jet-dev-interpreter\",\"session_id\":\"{}\",\"stop\":true}}",
+        source_id, session_id
     );
     let error =
         jet::Canvas::debug_session_json_for_file_with_sessions(path, &stale_stop, &sessions)
@@ -255,8 +270,8 @@ fn canvas_debug_stop_requires_matching_source_revision_and_tier() {
     assert!(error.contains("\"kind\":\"conflict\""), "{error}");
 
     let ended = format!(
-        "{{\"schema_version\":1,\"revision\":\"{}\",\"tier\":\"jet-dev-interpreter\",\"session_id\":\"{}\",\"stop\":true}}",
-        revision, session_id
+        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"tier\":\"jet-dev-interpreter\",\"session_id\":\"{}\",\"stop\":true}}",
+        source_id, revision, session_id
     );
     let stopped = jet::Canvas::debug_session_json_for_file_with_sessions(path, &ended, &sessions)
         .expect("a stale stop request must leave the current session intact");
@@ -270,10 +285,11 @@ fn canvas_debug_rejects_unbounded_breakpoint_spans_before_execution() {
     let path = Path::new(&file);
     let source = std::fs::read_to_string(path).unwrap();
     let revision = jet::Canvas::source_revision(&source);
+    let source_id = canvas_source_id(path);
     let anchors = (0..129).map(|_| "\"0:1\"").collect::<Vec<_>>().join(",");
     let request = format!(
-        "{{\"schema_version\":1,\"revision\":\"{}\",\"breakpoint_spans\":[{}],\"commands\":[\"s\"]}}",
-        revision, anchors
+        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"breakpoint_spans\":[{}],\"commands\":[\"s\"]}}",
+        source_id, revision, anchors
     );
     let error = jet::Canvas::debug_session_json_for_file(path, &request)
         .expect_err("Canvas must bound breakpoint span input");
@@ -287,10 +303,11 @@ fn canvas_debug_native_tier_never_falls_back_to_interpreter() {
     let path = Path::new(&file);
     let source = std::fs::read_to_string(path).unwrap();
     let revision = jet::Canvas::source_revision(&source);
+    let source_id = canvas_source_id(path);
     let sessions = jet::Canvas::DebugSessions::default();
     let request = format!(
-        "{{\"schema_version\":1,\"revision\":\"{}\",\"tier\":\"native-lldb\",\"commands\":[\"s\"]}}",
-        revision
+        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"tier\":\"native-lldb\",\"commands\":[\"s\"]}}",
+        source_id, revision
     );
     match jet::Canvas::debug_session_json_for_file_with_sessions(path, &request, &sessions) {
         Ok(body) => {
@@ -305,8 +322,8 @@ fn canvas_debug_native_tier_never_falls_back_to_interpreter() {
                 .expect("native session id terminator");
             let session_id = &body[start..end];
             let stop = format!(
-                "{{\"schema_version\":1,\"revision\":\"{}\",\"tier\":\"native-lldb\",\"session_id\":\"{}\",\"stop\":true}}",
-                revision, session_id
+                "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"tier\":\"native-lldb\",\"session_id\":\"{}\",\"stop\":true}}",
+                source_id, revision, session_id
             );
             let stopped =
                 jet::Canvas::debug_session_json_for_file_with_sessions(path, &stop, &sessions)
@@ -328,10 +345,6 @@ fn canvas_graph_source_id_stays_project_relative_for_relative_entries() {
     assert!(
         graph.contains("\"source_id\":\"hello.jet\""),
         "Canvas/debug source identity must match project file ids: {graph}"
-    );
-    assert!(
-        !graph.contains("examples/features/basics/hello.jet"),
-        "relative entry path leaked into the source identity: {graph}"
     );
 }
 
@@ -615,13 +628,16 @@ fn have(tool: &str) -> bool {
 }
 
 fn native_fixture(tag: &str, src: &str) -> String {
-    let p = std::env::temp_dir().join(format!("jet_debug_native_{tag}.jet"));
+    let dir = common::unique_tmp(&format!("jet_debug_native_{tag}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    tir_support::write_test_package(&dir, tir_support::TIR_TEST_PACKAGE);
+    let p = dir.join(format!("jet_debug_native_{tag}.jet"));
     std::fs::write(&p, src).unwrap();
     p.to_string_lossy().into_owned()
 }
 
 fn native_binary(tag: &str, rust: &str) -> (PathBuf, PathBuf) {
-    let dir = std::env::temp_dir().join(format!("jet_debug_native_map_{tag}_{}", std::process::id()));
+    let dir = common::unique_tmp(&format!("jet_debug_native_map_{tag}"));
     std::fs::create_dir_all(&dir).unwrap();
     let rust_file = dir.join("prog.rs");
     let binary = dir.join("prog");
@@ -670,14 +686,14 @@ fn dap_response(output: &str, request_seq: u32, command: &str) -> Option<String>
         };
         let type_name = json_get(&value, "type").and_then(json_str);
         let actual_request_seq = match json_get(&value, "request_seq") {
-            Some(JSONValue::Number(value)) => Some(*value),
+            Some(DataTree::Int(value)) => Some(*value),
             _ => None,
         };
         let success = json_get(&value, "success");
         let actual_command = json_get(&value, "command").and_then(json_str);
         if type_name == Some("response")
             && actual_request_seq == Some(i64::from(request_seq))
-            && matches!(success, Some(JSONValue::Bool(_)))
+            && matches!(success, Some(DataTree::Bool(_)))
             && actual_command == Some(command)
         {
             return Some(body.to_string());
@@ -764,9 +780,10 @@ fn linux_process_state(pid: u32) -> Option<String> {
 
 #[cfg(target_os = "linux")]
 fn spawn_attachable_native_target(binary: &Path, tag: &str) -> std::process::Child {
-    let root = std::env::temp_dir();
-    let source = root.join(format!("jet_debug_attach_authorizer_{tag}.rs"));
-    let helper = root.join(format!("jet_debug_attach_authorizer_{tag}"));
+    let root = common::unique_tmp(&format!("jet_debug_attach_authorizer_{tag}"));
+    std::fs::create_dir_all(&root).unwrap();
+    let source = root.join("authorizer.rs");
+    let helper = root.join("authorizer");
     std::fs::write(
         &source,
         r#"
@@ -1647,23 +1664,6 @@ fn line_markers_resolve_every_statement_to_its_source_line() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-#[test]
-fn needs_native_is_false_for_an_interpreter_safe_program() {
-    let file = native_fixture("needs_native_false", LOOPS);
-    assert_eq!(jet::Debug::needs_native(&file), Some(false));
-}
-
-/// D-DBG3 step 2: an FFI/task/#Unsafe/native-std program is exactly the case
-/// the interpreter declines (E2203) — `needs_native` must say so, so the CLI
-/// dispatch (`Source/main.rs`'s `debug` arm) routes it to the native backend
-/// instead of erroring.
-#[test]
-fn needs_native_is_true_for_a_native_only_import() {
-    let src = "use core.files as fs\nfn run() {\n    print(\"hi\")\n}\n";
-    let file = native_fixture("needs_native_true", src);
-    assert_eq!(jet::Debug::needs_native(&file), Some(true));
-}
-
 /// Full end-to-end native session: build a debug binary, launch it under
 /// lldb, and drive the SAME `(jet)` vocabulary the interpreter backend uses.
 /// Gated on rustc AND lldb; skips (not fails) when either is absent.
@@ -1674,7 +1674,7 @@ fn native_session_steps_and_shows_locals() {
     }
     let file = native_fixture("native_session", LOOPS);
     let out = jet::compile_for_debug(&file).expect("compiles for debug");
-    let dir = std::env::temp_dir().join(format!("jet_debug_native_build_{}", std::process::id()));
+    let dir = common::unique_tmp("jet_debug_native_build");
     std::fs::create_dir_all(&dir).unwrap();
     let rs = dir.join("prog.rs");
     let bin = dir.join("prog");

@@ -87,9 +87,10 @@ if [ "$got_slot" -eq 0 ]; then
   flock -u 9
 fi
 
-node - "$tmp" <<'NODE'
+node - "$tmp" "$code" <<'NODE'
 const fs = require("fs");
 const text = fs.readFileSync(process.argv[2], "utf8");
+const code = Number(process.argv[3]);
 const lines = text.split("\n");
 const errors = [];
 for (let i = 0; i < lines.length; i += 1) {
@@ -102,8 +103,13 @@ for (let i = 0; i < lines.length; i += 1) {
   }
   errors.push({ head, where });
 }
-if (errors.length === 0) {
+if (errors.length === 0 && code === 0) {
   console.log("CHECK OK");
+  process.exit(0);
+}
+if (errors.length === 0) {
+  console.log(`CHECK FAILED — cargo check exited ${code} without a compiler diagnostic`);
+  console.log(text.slice(-1600));
   process.exit(0);
 }
 const byFile = new Map();

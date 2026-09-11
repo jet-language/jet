@@ -4,6 +4,15 @@ When the user wants to explore alternative interfaces for a chosen deepening can
 
 Uses the vocabulary in [SKILL.md](SKILL.md) — **module**, **interface**, **seam**, **adapter**, **leverage**.
 
+## Handoff contract
+
+- **Requested outcome:** Competing interface designs for one chosen deepening candidate.
+- **Supplied inputs:** The candidate's problem-space frame, module/interface/seam vocabulary, domain context, dependency category, and existing ADRs.
+- **Allowed child result:** Each authorized OMP design task returns one alternative interface, usage example, hidden implementation, adapter strategy, and trade-offs. It does not resolve the owner's choice, implement code, or dispatch another worker.
+- **Completion owner:** `codebase-design` owns comparison and recommendation; the user owns the final choice.
+- **Return point:** Every design task returns to the comparison step before the next design or recommendation.
+- **Stopping condition:** Stop after the requested alternatives are compared and a recommendation is presented. Do not auto-chain implementation or an undeclared workflow.
+
 ## Process
 
 ### 1. Frame the problem space
@@ -21,10 +30,12 @@ adapter; this document does not choose a model or a fixed worker count.
 ### 2. Delegate design tasks
 
 Submit the genuinely independent design tasks through OMP `task` or `hub`,
-using the most specific available role from `docs/agents/owner-guidance.md`.
-Do not use a generic Agent tool, choose a model in this skill, or exceed the
-owner's adaptive concurrency limits. Each task must produce a **radically
-different** interface for the deepened module.
+using the most specific available role from `AGENTS.md`.
+If the host cannot provide that route, report the routing failure rather than
+pretending a child handoff occurred. Do not use a generic Agent tool, choose a
+model in this skill, or exceed the owner's adaptive concurrency limits. Each
+task must produce a **radically different** interface for the deepened module
+and return only that design to `codebase-design`.
 
 Prompt each sub-agent with a separate technical brief (file paths, coupling details, dependency category from [DEEPENING.md](DEEPENING.md), what sits behind the seam). The brief is independent of the user-facing problem-space explanation in Step 1. Give each agent a different design constraint:
 

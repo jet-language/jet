@@ -29,6 +29,10 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         // failure; `.partial` and `.notes` read the carrier's middle states.
         ("or_err", 1) | ("partial", 0) | ("notes", 0)
         // List + map shared.
+        // D-PLACE1: Atomic<T> methods are keyed by the receiver type in
+        // `method_call_in_subset`; these names are not collection fallbacks.
+        | ("load", 0) | ("store", 1)
+        | ("compare_exchange", 2) | ("publish", 1) | ("observe", 0)
         |         ("len", 0) | ("is_empty", 0) | ("clear", 0)
         // List-only, except for Iter's positional terminal.
         | ("push", 1) | ("pop", 0) | ("pop", 1) | ("first", 0) | ("last", 0)
@@ -254,8 +258,9 @@ pub(crate) fn is_process_handle_method_name(
             )
         ),
         Some("TerminalSession") => matches!((method, nargs), ("resize", 1)),
-        // D-PROCESS1=A: `.write(text)` on `child.stdin`.
-        Some("ProcessStdin") => matches!((method, nargs), ("write", 1)),
+        // D-PROCESS1=A / D-FOUND-LIFECYCLE1=A: `.write(text)` and `.close()`
+        // on `child.stdin`.
+        Some("ProcessStdin") => matches!((method, nargs), ("write", 1) | ("close", 0)),
         // D-PROCESS1=A: `.lines()` on `child.stdout`/`child.stderr`.
         Some("ProcessStdoutStream") | Some("ProcessStderrStream") => {
             matches!((method, nargs), ("lines", 0))
@@ -314,7 +319,10 @@ pub(crate) fn is_devserver_method_name(method: &str, nargs: usize) -> bool {
 pub(crate) fn is_app_method_name(method: &str, nargs: usize) -> bool {
     matches!(
         (method, nargs),
-        ("route" | "page" | "layout" | "action" | "form" | "data", 2)
+        ("route" | "page" | "layout", 2)
+            | ("loader", 2 | 3)
+            | ("pending" | "not_found" | "error", 1)
+            | ("action" | "form" | "data", 2)
             | ("mount", 2 | 3 | 4)
             | (
                 "routes"
@@ -443,7 +451,7 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
             "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "middleware"
         ),
         Some("HTTPHandler") => method == "handle",
-        Some("HTTPServer") => matches!(method, "local_addr" | "serve" | "shutdown"),
+        Some("HTTPServer") => matches!(method, "local_addr" | "serve" | "shutdown" | "wait"),
         Some("WsConn") => matches!(method, "send_text" | "send_bytes" | "recv" | "close"),
         Some("WsMessage") => matches!(
             method,
@@ -611,6 +619,7 @@ pub fn is_civil_time_method_name(recv_type: Option<&str>, method: &str) -> bool 
                 | "time"
                 | "plus_duration"
                 | "subtract_duration"
+                | "add_nanoseconds"
                 | "difference"
                 | "add_period"
                 | "subtract_period"

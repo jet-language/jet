@@ -1,16 +1,16 @@
 // D-FAIL-CONV2=A: the standard library declares the conversion for its own error
 // family. This program is a plain fallible `fn run()` and declares nothing, yet
-// ordinary calls carry a `JSONError` and an `EnvError` straight out to the default `Err`.
+// ordinary calls carry an `EncodingError` and an `EnvError` to the default `Err`.
 //
 // Compare `default_error_conversion.jet`: a program's OWN error type still needs
 // its own `impl MyError -> Err { … }`. Only the library's family is shipped.
-// Compare `serde/json_coerce.jet`: naming the failure (`fn run() !JSONError`) is
+// Compare `serde/json_coerce.jet`: naming the failure (`fn run() !EncodingError`) is
 // still correct, and stays the right choice when one failure is the point.
 use core.encoding.json as json
 use core.sys as env
 
 fn run() {
-    // `json.decode` fails with `JSONError` — one family member.
+    // `json.decode` fails with `EncodingError` — one family member.
     data :: json.decode("{{\"name\":\"api\"}}")
     if data == .Object(entries) {
         name :: entries["name"]

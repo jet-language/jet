@@ -18,6 +18,12 @@ in this order: "duh, that makes perfect sense", "how did I not make that
 connection", "ohhh — those are the same underlying thing". If the proposal
 does not produce those, the synthesis is not done.
 
+Before running, read `.agents/skills/_shared/audit-dispositions.md`. It owns
+shared publication, workflow-boundary, and disposition mechanics; this method
+still owns the area rethink, full-corpus sweep, proposal shape, Tower
+deliverables, and stopping rules.
+
+
 ## Mission and non-negotiables
 
 Apply `.agents/skills/_shared/standing-lens.md` in full alongside everything
@@ -38,10 +44,11 @@ more demanding of the two and wins.
 - **Support anything anyone would need in the domain** — from critical
   simulation to trivial one-liners. Test the model against the extremes, not
   the middle.
-- **Beginner magic, expert control is the governing philosophy, and the
-  proposal must show it, not claim it.** This is the owner's stated test —
-  "beginner magic out of the box and full expert control" — and it is the most
-  common thing a rethink under-serves. Run both passes on every element:
+- **Beginner magic, expert control is the governing philosophy
+  (`docs/spec/philosophy.md`), and the proposal must show it, not claim it.**
+  This is the owner's stated test — "beginner magic out of the box and full
+  expert control" — and it is the most common thing a rethink under-serves.
+  Run both passes on every element:
   invisible correct defaults with zero ceremony; full nameable, reflectable,
   overridable control behind explicit opt-in. Then prove it with a **mandatory
   ladder section** (Phase 3 item 7): every rung from "the user types nothing"
@@ -117,6 +124,10 @@ Submit genuinely independent read-only OMP tasks; each returns compact evidence
 with file:line references, real syntax, and decision IDs — raw data over polish.
 Use the owner guide's adaptive concurrency and adapter rules; do not select a
 model or fixed worker count here.
+
+Each child task is bounded to one evidence slice, returns to this audit owner,
+and cannot start another audit or widen the requested area.
+
 Cover at least:
 
 1. **Current mechanisms** — spec, sema/compiler code, prelude, examples,
@@ -145,7 +156,8 @@ space is where the unification usually hides.
   digging.
 - **Build the evidence table of shadow systems**: every mechanism found doing
   the same underlying job, with its home and its defect. This table is the
-  proof the rethink is needed; it also becomes the migration checklist.
+  proof the rethink is needed; implementation work belongs in Tower, not this
+  proposal.
 - **Apply the unification test**: every existing feature must fall out as an
   instance of the one idea; every known missing feature must become a new
   instance of the same mechanism, not a new mechanism. A feature that resists
@@ -216,10 +228,9 @@ visually. Prose preps; visuals decide. Structure, in order:
    Never "kept because shipped".
 7. **Decisions for the owner** — a compact direction-level table mapping to
    the ballot slate; each ballot stands alone so any subset can be adopted.
-8. **Implementation shape** — phased: (A) internal re-founding with no
-   surface change and all tests green; (B) land ratified-but-unbuilt work on
-   the new substrate so it is built once; (C) balloted surface unifications,
-   each a coherent greenfield migration that deletes the replaced form.
+8. **Adoption boundary** — state which ballots authorize the change, what each
+   covers, and the Tower card or ballot that owns any implementation work. Do
+   not turn the proposal into a task list.
 
 ## Phase 4 — Tower (ballots are part of the deliverable)
 
@@ -248,13 +259,10 @@ visually. Prose preps; visuals decide. Structure, in order:
 - Commit only owned paths (proposal, skill/docs touched, Tower store); never
   another task's files; commit messages without card refs (the githook
   rewrites `.tower` on `#N` mentions).
-- Save a memory pointer so the next session knows the slate exists and what
-  awaits the owner.
 
-Before close, add the required per-finding disposition table from
-`.agents/skills/_shared/audit-dispositions.md` to the retained proposal or
-report. Every finding must name a Tower card, a ratified decision, or a concrete
-no-action reason.
+Before close, use `.agents/skills/_shared/audit-dispositions.md` for the
+required marker table in the retained proposal or report. It does not replace
+the Phase 4 Tower card and ballot obligations or make implementation complete.
 
 ## Anti-patterns (each one has burned a run)
 

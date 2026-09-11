@@ -1013,27 +1013,30 @@ fn run() {
     rows :: data.csv<Ticket>(raw) ?? panic("bad csv")
     budget_raw :: "team,owner\nCore,Ada\nCore,Lin\nTools,Grace"
     budgets :: data.csv<Budget>(budget_raw) ?? panic("bad budget")
-    print(data.count(rows))
-    table :: data.table(rows)
-    lazy :: data.lazy(table)
-    deferred :: data.lazy_filter(lazy, (t) -> must_stay_deferred(t))
-    print(data.plan(deferred)[1])
-    planned :: data.lazy_sort_by(data.lazy_filter(lazy, (t) -> t.minutes >= 6.0), (t) -> t.team)
-    collected :: data.collect(planned) ?? panic("collect")
-    print(data.count(table))
-    print(data.count(planned))
-    print(data.count(data.rows(collected)))
-    print(data.plan(planned)[2])
-    loop ticket in data.rows(collected) {
+    print(rows.len())
+    deferred :: data.query(rows).filter((t) -> must_stay_deferred(t))
+    print(deferred.plan()[1])
+    planned :: data.query(rows)
+        .filter((t) -> t.minutes >= 6.0)
+        .sort_by((t) -> t.team)
+    collected :: planned.collect() ?? panic("collect")
+    print(rows.len())
+    print(collected.len())
+    print(collected.len())
+    print(planned.plan()[2])
+    loop ticket in collected {
         print("planned:{ticket.team}:{ticket.minutes}")
     }
     maybe_minutes :: [ Val(2.0), missing_minutes(), Val(6.0), missing_minutes() ]
-    series :: data.series(maybe_minutes)
-    print(data.count(series))
-    print(data.missing_count(series))
-    groups :: data.group_mean(rows, (t) -> t.team, (t) -> t.minutes) ?? panic("group")
+    series :: maybe_minutes
+    print(series.len())
+    print(series.filter((value) -> value == None).len())
+    groups :: data.query(rows)
+        .group_by((t) -> t.team)
+        .mean((t) -> t.minutes)
+        .collect() ?? panic("group")
     loop g in groups {
-        print("{g.key}:{g.count}:{g.sum}:{g.mean}")
+        print("{g.key}:{g.value}")
     }
     values :: [2.0, 4.0, 6.0]
     print(data.sum(values) ?? panic("sum"))
@@ -1055,7 +1058,10 @@ fn run() {
     }
     rolling :: data.rolling_mean([2.0, 4.0, 6.0], 2) ?? panic("rolling")
     print(rolling[2])
-    counts :: data.group_count(rows, (t) -> t.team) ?? panic("count")
+    counts :: data.query(rows)
+        .group_by((t) -> t.team)
+        .count()
+        .collect() ?? panic("count")
     print(data.bar_text(counts) ?? panic("bar"))
     print((data.bar_svg(counts) ?? panic("svg")).len())
     status :: data.status()
@@ -1068,7 +1074,7 @@ fn run() {
     assert_eq!(code, 0, "core.data program failed: {stderr}");
     assert_eq!(
         stdout,
-        "4\nfilter\n4\n2\n2\nsort_by\nplanned:Core:8.0\nplanned:Tools:7.0\n4\n2\nCore:2:12.0:6.0\nTools:2:12.0:6.0\n12.0\n4.0\nCore:Ada\nCore:Lin\nTools:Grace\nCore:Ada\nCore:Lin\nTools:Grace\nCore:Ada\nTools:none\nCore:Ada\nTools:none\nCore|long:1\nCore|short:1\nTools|long:1\nTools|short:1\n5.0\nCore | ## 2\nTools | ## 2\n531\ncore.data.csv:native\n"
+        "4\nfilter\n4\n2\n2\nsort_by\nplanned:Core:8.0\nplanned:Tools:7.0\n4\n2\nCore:6.0\nTools:6.0\n12.0\n4.0\nCore:Ada\nCore:Lin\nTools:Grace\nCore:Ada\nCore:Lin\nTools:Grace\nCore:Ada\nTools:none\nCore:Ada\nTools:none\nCore|long:1\nCore|short:1\nTools|long:1\nTools|short:1\n5.0\nCore | ## 2\nTools | ## 2\n531\ncore.data.csv:native\n"
     );
     let _ = fs::remove_dir_all(&dir);
 }
@@ -1091,13 +1097,16 @@ struct Ticket {
 
 fn run() {
     rows :: [Ticket]{Ticket{region: "West", amount: 2.5}}
-    groups :: data.group_sum(rows, sale -> sale.region, sale -> sale.amount) ?? panic("group")
-    print("{groups[0].key}:{groups[0].count}:{groups[0].sum}")
+    groups :: data.query(rows)
+        .group_by(sale -> sale.region)
+        .sum(sale -> sale.amount)
+        .collect() ?? panic("group")
+    print("{groups[0].key}:{groups[0].value}")
 }
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "data_group_collision", src, &[], None);
     assert_eq!(code, 0, "AOT core.data group program failed: {stderr}");
-    assert_eq!(stdout, "West:1:2.5\n");
+    assert_eq!(stdout, "West:2.5\n");
 
     let source = dir.join("data_group_collision.jet");
     fs::write(&source, src).unwrap();
@@ -1168,7 +1177,10 @@ fn run() {{
         Val(row) -> print("first:{{row.service}}")
         None -> panic("eof")
     }}
-    groups := data.group_mean(reader, (e) -> e.service, (e) -> e.latency_ms)
+    groups := data.query(reader)
+        .group_by((e) -> e.service)
+        .mean((e) -> e.latency_ms)
+        .collect()
     if groups == {{
         .Ok(_) -> print("unexpected ok")
         .Err(error) -> print("{{error.kind}} {{error.operation}}")
@@ -1192,7 +1204,7 @@ fn run() {{
     assert_eq!(code, 0, "core.data stream program failed: {stderr}");
     assert_eq!(
         stdout,
-        "first:api\nLimit group_mean\nEmpty mean\nInvalidArgument quantile\n"
+        "first:api\nLimit query.group_by.mean\nEmpty mean\nInvalidArgument quantile\n"
     );
     let _ = fs::remove_dir_all(&dir);
 }
@@ -1222,13 +1234,14 @@ struct Ticket {
 fn run() {
     raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0"
     rows :: data.csv<Ticket>(raw) ?? panic("bad csv")
-    table :: data.table(rows)
-    cols :: data.schema(table)
+    cols :: data.schema(rows)
     loop c in cols {
         print("{c.name}:{c.type_name}")
     }
-    selected :: data.filter(data.rows(table), (t) -> t.minutes >= 5.0)
-    print("selected:{data.count(selected)}")
+    selected :: data.query(rows)
+        .filter((t) -> t.minutes >= 5.0)
+        .collect() ?? panic("filter")
+    print("selected:{selected.len()}")
     loop t in selected {
         print("{t.team}:{t.minutes}")
     }
@@ -1271,13 +1284,14 @@ struct Ticket {
 fn run() {
     raw :: "[{{\"team\":\"Core\",\"minutes\":4.0}},{{\"team\":\"Tools\",\"minutes\":5.0}},{{\"team\":\"Core\",\"minutes\":8.0}}]"
     rows :: data.json<Ticket>(raw) ?? panic("bad json")
-    table :: data.table(rows)
-    cols :: data.schema(table)
+    cols :: data.schema(rows)
     loop c in cols {
         print("{c.name}:{c.type_name}")
     }
-    selected :: data.filter(data.rows(table), (t) -> t.minutes >= 5.0)
-    print("selected:{data.count(selected)}")
+    selected :: data.query(rows)
+        .filter((t) -> t.minutes >= 5.0)
+        .collect() ?? panic("filter")
+    print("selected:{selected.len()}")
     loop t in selected {
         print("{t.team}:{t.minutes}")
     }
@@ -1328,32 +1342,30 @@ struct Box<T> {
 
 fn run() {
     empty_rows := [Ticket]{}
-    empty_table :: data.table(empty_rows)
-    loop c in data.schema(empty_table) {
+    loop c in data.schema(empty_rows) {
         print("empty:{c.name}:{c.type_name}")
     }
 
-    nums :: data.series([1.0, 2.0])
+    nums :: [Float]{1.0, 2.0}
     loop c in data.schema(nums) {
         print("float:{c.name}:{c.type_name}")
     }
 
-    tickets :: data.series([Ticket{team: "Core", minutes: 4.0}])
+    tickets :: [Ticket]{Ticket{team: "Core", minutes: 4.0}}
     loop c in data.schema(tickets) {
         print("struct:{c.name}:{c.type_name}")
     }
 
     empty_tickets := [Ticket]{}
-    empty_series :: data.series(empty_tickets)
-    loop c in data.schema(empty_series) {
+    loop c in data.schema(empty_tickets) {
         print("empty_series:{c.name}:{c.type_name}")
     }
 
     empty_units := [Empty]{}
-    print("empty_struct:{data.count(data.schema(data.table(empty_units)))}")
+    print("empty_struct:{data.schema(empty_units).len()}")
 
     boxed := [Box<Int>]{}
-    loop c in data.schema(data.table(boxed)) {
+    loop c in data.schema(boxed) {
         print("generic:{c.name}:{c.type_name}")
     }
 }

@@ -40,6 +40,61 @@ const BUDGET_MS: u128 = 200;
 /// Rounds timed after the warm-up. The best of them is the sample least
 /// disturbed by anything outside this process.
 const ROUNDS: usize = 5;
+const WATCH_LATENCY_MARGIN_MS: u128 = 20;
+
+/// Measure the shared watcher itself, separately from front-end work. The
+/// bound is derived from the configured coalescing window rather than widened
+/// to make a slow implementation pass.
+fn measure_watch_latency_ms() -> u128 {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_dev_latency_watch_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("app.jet");
+    std::fs::write(&file, "fn run() {}\n").unwrap();
+    let mut watch = jet_devserver::WatchSession::open(&file).unwrap();
+    let mut best = u128::MAX;
+
+    for round in 0..ROUNDS {
+        let source = format!(
+            "fn run() {{ /* watch-round-{round} {} */ }}\n",
+            "x".repeat(round + 1)
+        );
+        let started = std::time::Instant::now();
+        watch.mark_edit_started();
+        std::fs::write(&file, source).unwrap();
+        let receipt = watch.poll().expect("watch edit");
+        let elapsed = started.elapsed().as_millis();
+        let reported = receipt.edit_to_visible_ms.expect("watch timing");
+        best = best.min(elapsed.max(reported));
+        watch.acknowledge(&receipt).unwrap();
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+    best
+}
+
+fn assert_watch_latency_contract() {
+    assert!(
+        jet_devserver::WATCH_COALESCE_MS < 5,
+        "watch coalescing must stay below 5ms, got {}ms",
+        jet_devserver::WATCH_COALESCE_MS
+    );
+    assert!(
+        jet_devserver::WATCH_POLL_INTERVAL_MS <= 10,
+        "idle watch polling must stay bounded, got {}ms",
+        jet_devserver::WATCH_POLL_INTERVAL_MS
+    );
+    let best = measure_watch_latency_ms();
+    let budget = jet_devserver::WATCH_COALESCE_MS as u128 + WATCH_LATENCY_MARGIN_MS;
+    assert!(
+        best <= budget,
+        "watch save observation {best}ms exceeds coalescing contract {budget}ms"
+    );
+}
+
 
 #[test]
 fn check_latency_under_budget_measured_alone() {
@@ -65,6 +120,11 @@ fn check_latency_under_budget_measured_alone() {
         errors, 0,
         "{EXAMPLE} must check clean, or the timed round is not a real check: {warm:?}"
     );
+
+    // The watch engine owns the fixed save-observation costs that precede this
+    // front-end round. Keep its coalescing and idle-poll contracts visible in
+    // the same isolated latency target.
+    assert_watch_latency_contract();
 
     let mut best = u128::MAX;
     for _ in 0..ROUNDS {

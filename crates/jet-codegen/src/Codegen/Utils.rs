@@ -1,18 +1,4 @@
-use super::*;
 
-/// The Rust type path of the enum that OWNS `variant`. Reads the one enum-path
-/// table (`TIR::tir_enum_rust_path`), so an if-let head cannot drift from a
-/// match-arm head or an enum literal for the same enum.
-pub(crate) fn enum_type_prefix(cx: &Cx, variant: &str) -> String {
-    match cx.variant_owner.get(variant) {
-        Some(owner) => crate::Codegen::TIR::tir_enum_rust_path(cx, owner).0,
-        // No owner registered: the variant name itself names the prelude enum.
-        None if is_json_variant(variant) => format!("{}jet_std::DataTree", cx.root_prefix),
-        // D-TERM1: `Key` variants are in the top-level prelude as `JetKey`.
-        None if is_key_variant(variant) => format!("{}JetKey", cx.root_prefix),
-        None => mangle("TYPE"),
-    }
-}
 
 // D-ENC-DYN1=A+: the dynamic `Data` value's public variants plus the
 // compiler-only typed-JSON numeric carrier.
@@ -44,7 +30,6 @@ pub(crate) fn is_key_variant(variant: &str) -> bool {
             | "Unknown"
     )
 }
-
 
 pub(crate) fn escape_rust_str(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))

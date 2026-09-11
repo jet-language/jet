@@ -2,12 +2,12 @@
 //!
 //! Zero-config: every `jet build` prints a one-line summary of the effects the
 //! dependency graph uses, and per-dependency effect provenance is recorded in
-//! the lockfile. An `authority: { holds: { allow: […], deny: […] } }` block in
-//! `package.jet` turns on whole-graph enforcement — the build fails naming the
-//! exact dependency and offending function when a transitive dependency needs
-//! an effect outside the budget. `authority.grants: { "dep": [Effect] }` is the
-//! audited per-dependency escape, also recorded in the lockfile. Manifest keys
-//! only — no language grammar (§0.4 DO-NOT).
+//! the lockfile. An `authority: { holds: { allow: […], deny: […] } }` block
+//! enforces the whole graph — package code and every dependency fail with the
+//! exact package and offending function when they reach an effect outside the
+//! budget. `authority.grants: { "dep": [Effect] }` is the audited per-dependency
+//! escape, also recorded in the lockfile. Manifest keys only — no language
+//! grammar (§0.4 DO-NOT).
 //!
 //! Attribution: sema already computes a whole-program per-function effect fixpoint
 //! (`Sema::Effects::solve`, keyed by `Sema::effect_key`). This module attributes
@@ -19,11 +19,12 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Package::PackageFacts;
-use crate::Sema::{effect_set_has_root, Effect, EffectSet, EffectSummary};
+use crate::Sema::{effect_covers, effect_set_has_root, Effect, EffectSet, EffectSummary};
 use crate::AST::{ImportKind, Item, ProgramBundle};
 use jet_foundation::Authority::{
     answer, parse_right, root as effect_root, ApplicationAuthority, Holds, Verdict,
 };
+use jet_foundation::Report::{StatusEnvelope, StatusValue};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// The application-boundary view of one checked program.
@@ -172,6 +173,12 @@ pub fn application_policy_diagnostic(
         fix,
         None,
     )
+    .with_rights_chain(
+        "authority",
+        std::iter::empty::<String>(),
+        std::iter::once(projection.authority.clone()),
+        None,
+    )
 }
 
 fn is_memory_right(name: &str) -> bool {
@@ -184,6 +191,9 @@ pub struct PackageEffects {
     /// `"root"` for the building package itself, else the dependency name.
     pub name: String,
     pub effects: EffectSet,
+    /// One deterministic function identity that reaches each effect.
+    /// This is the package-budget provenance used by E1220.
+    pub effect_sites: BTreeMap<String, String>,
     /// Function identities where a deniable Panic stop enters the graph.
     /// This is the package-budget provenance used by E1220.
     pub panic_sites: Vec<String>,
@@ -195,6 +205,7 @@ pub struct PackageEffects {
 #[derive(Default)]
 struct PackageEffectAggregate {
     effects: EffectSet,
+    effect_sites: BTreeMap<String, String>,
     panic_sites: BTreeSet<String>,
     boundary_span: Option<Span>,
 }
@@ -249,6 +260,7 @@ pub fn compute_package_effects(
                 solved,
                 summaries,
                 &mut out.effects,
+                &mut out.effect_sites,
                 &mut out.panic_sites,
             );
         }
@@ -259,6 +271,7 @@ pub fn compute_package_effects(
         .map(|(name, aggregate)| PackageEffects {
             name,
             effects: aggregate.effects,
+            effect_sites: aggregate.effect_sites,
             panic_sites: aggregate.panic_sites.into_iter().collect(),
             boundary_span: aggregate.boundary_span,
         })
@@ -270,15 +283,54 @@ fn collect_effects_for_key(
     solved: &HashMap<String, EffectSet>,
     summaries: &HashMap<String, EffectSummary>,
     out: &mut EffectSet,
+    effect_sites: &mut BTreeMap<String, String>,
     panic_sites: &mut BTreeSet<String>,
 ) {
     let Some(set) = solved.get(&key) else {
         return;
     };
     out.extend(set.iter().cloned());
+    for effect in set {
+        let site = effect_site(&key, effect, solved, summaries, &mut HashSet::new());
+        effect_sites.entry(effect.clone()).or_insert(site);
+    }
     if let Some(site) = panic_site(&key, summaries, &mut HashSet::new()) {
         panic_sites.insert(site);
     }
+}
+
+fn effect_site(
+    key: &str,
+    effect: &str,
+    solved: &HashMap<String, EffectSet>,
+    summaries: &HashMap<String, EffectSummary>,
+    seen: &mut HashSet<String>,
+) -> String {
+    if !seen.insert(key.to_string()) {
+        return key.to_string();
+    }
+    let Some(summary) = summaries.get(key) else {
+        return key.to_string();
+    };
+    if summary.maximal
+        || summary
+            .direct
+            .iter()
+            .any(|direct| effect_covers(direct, effect))
+    {
+        return key.to_string();
+    }
+    for callee in &summary.edges {
+        let reaches = solved.get(callee).is_some_and(|effects| {
+            effects
+                .iter()
+                .any(|candidate| effect_covers(candidate, effect))
+        });
+        if reaches {
+            return effect_site(callee, effect, solved, summaries, seen);
+        }
+    }
+    key.to_string()
 }
 
 fn panic_site(
@@ -310,6 +362,7 @@ fn collect_item_effects(
     solved: &HashMap<String, EffectSet>,
     summaries: &HashMap<String, EffectSummary>,
     out: &mut EffectSet,
+    effect_sites: &mut BTreeMap<String, String>,
     panic_sites: &mut BTreeSet<String>,
 ) {
     match item {
@@ -319,6 +372,7 @@ fn collect_item_effects(
                 solved,
                 summaries,
                 out,
+                effect_sites,
                 panic_sites,
             );
         }
@@ -332,6 +386,7 @@ fn collect_item_effects(
                     solved,
                     summaries,
                     out,
+                    effect_sites,
                     panic_sites,
                 );
             }
@@ -346,6 +401,7 @@ fn collect_item_effects(
                     solved,
                     summaries,
                     out,
+                    effect_sites,
                     panic_sites,
                 );
             }
@@ -359,6 +415,7 @@ fn collect_item_effects(
                         solved,
                         summaries,
                         out,
+                        effect_sites,
                         panic_sites,
                     );
                 }
@@ -374,6 +431,7 @@ fn collect_item_effects(
                     solved,
                     summaries,
                     out,
+                    effect_sites,
                     panic_sites,
                 );
             }
@@ -558,49 +616,43 @@ fn render_effect_names(effects: &EffectSet) -> String {
             .join(", ")
     }
 }
-
 fn render_effect_json(effects: &EffectSet) -> String {
-    let effects = effects
-        .iter()
-        .map(|effect| format!("\"{}\"", effect.as_str()))
-        .collect::<Vec<_>>()
-        .join(",");
-    jet_foundation::Report::render_status_json(
-        "ok",
-        true,
-        "build.effects",
-        &format!(",\"effects\":[{effects}]"),
-    )
+    let effects = StatusValue::array(
+        effects
+            .iter()
+            .map(|effect| StatusValue::from(effect.as_str())),
+    );
+    StatusEnvelope::new("build.effects", true)
+        .with_field("effects", effects)
+        .json()
 }
 
 pub fn render_effect_projection_json(projection: &EffectProjection) -> String {
-    let required = projection
-        .required_effects
-        .iter()
-        .map(|effect| jet_foundation::JSON::quote(effect))
-        .collect::<Vec<_>>()
-        .join(",");
-    let granted = projection
-        .granted_effects
-        .iter()
-        .map(|effect| jet_foundation::JSON::quote(effect))
-        .collect::<Vec<_>>()
-        .join(",");
-    let denied = projection
-        .denied_effects
-        .iter()
-        .map(|effect| jet_foundation::JSON::quote(effect))
-        .collect::<Vec<_>>()
-        .join(",");
-    jet_foundation::Report::render_status_json(
-        "ok",
-        true,
-        "build.effects",
-        &format!(
-            ",\"effects\":[{required}],\"required_effects\":[{required}],\"granted_effects\":[{granted}],\"denied_effects\":[{denied}],\"authority\":{}",
-            jet_foundation::JSON::quote(&projection.authority),
-        ),
-    )
+    let required = StatusValue::array(
+        projection
+            .required_effects
+            .iter()
+            .map(|effect| StatusValue::from(effect.as_str())),
+    );
+    let granted = StatusValue::array(
+        projection
+            .granted_effects
+            .iter()
+            .map(|effect| StatusValue::from(effect.as_str())),
+    );
+    let denied = StatusValue::array(
+        projection
+            .denied_effects
+            .iter()
+            .map(|effect| StatusValue::from(effect.as_str())),
+    );
+    StatusEnvelope::new("build.effects", true)
+        .with_field("effects", required.clone())
+        .with_field("required_effects", required)
+        .with_field("granted_effects", granted)
+        .with_field("denied_effects", denied)
+        .with_field("authority", StatusValue::from(projection.authority.as_str()))
+        .json()
 }
 
 /// Human build status reports effects reachable through statically known
@@ -624,10 +676,10 @@ pub fn provenance_for(entries: &[PackageEffects], name: &str) -> Vec<String> {
 }
 
 /// D-EFFBUDGET1 whole-graph enforcement: when `package.jet` declares an
-/// `authority.holds` block, fail the build for any *dependency* (not root — the
-/// budget names the supply chain) whose effect set has something outside
-/// `allow` or inside `deny`, unless `authority.grants` covers it for that
-/// dependency. Returns E1220 per offending (dependency, effect) pair.
+/// `authority.holds` block, fail the build for any package (root or
+/// dependency) whose effect set has something outside `allow` or inside
+/// `deny`, unless `authority.grants` covers it for that dependency. Returns
+/// E1220 per offending (package, effect) pair.
 pub fn enforce(entries: &[PackageEffects], manifest: &PackageFacts) -> Vec<Diagnostic> {
     if !manifest.effects_enabled {
         return Vec::new();
@@ -673,24 +725,27 @@ pub fn enforce(entries: &[PackageEffects], manifest: &PackageFacts) -> Vec<Diagn
     let empty = Holds::new();
     let mut diags = Vec::new();
     for pkg in entries {
-        if pkg.name == "root" {
-            continue;
-        }
         let granted = grants.get(pkg.name.as_str());
         for effect in pkg
             .effects
             .iter()
             .filter(|effect| effect_root(effect) != "Mem")
         {
-            if granted.is_some_and(|g| answer(g, &empty, effect) == Verdict::Allowed) {
+            let is_panic = effect_root(effect) == Effect::Panic.name();
+            // D-PANICROOT1: Panic is deny-only. Omission from `allow` is not
+            // a denial, and an audited positive grant cannot override one.
+            if !is_panic
+                && granted.is_some_and(|g| answer(g, &empty, effect) == Verdict::Allowed)
+            {
                 continue;
             }
-            let outside_allow = allow
-                .as_ref()
-                .is_some_and(|a| answer(a, &empty, effect) != Verdict::Allowed);
+            let outside_allow = !is_panic
+                && allow
+                    .as_ref()
+                    .is_some_and(|a| answer(a, &empty, effect) != Verdict::Allowed);
             let inside_deny = answer(&empty, &deny, effect) == Verdict::Denied;
             if outside_allow || inside_deny {
-                if effect_root(effect) == Effect::Panic.name() {
+                if is_panic {
                     let site = pkg
                         .panic_sites
                         .first()
@@ -698,7 +753,8 @@ pub fn enforce(entries: &[PackageEffects], manifest: &PackageFacts) -> Vec<Diagn
                         .unwrap_or("a reachable dependency function");
                     diags.push(e1220_panic(&pkg.name, site, pkg.boundary_span));
                 } else {
-                    diags.push(e1220(&pkg.name, effect));
+                    let site = pkg.effect_sites.get(effect).map(String::as_str);
+                    diags.push(e1220_at(&pkg.name, effect, site));
                 }
             }
         }
@@ -747,17 +803,27 @@ pub fn update_lock_provenance(
     }
 }
 
-/// E1220: a transitive dependency uses an effect outside this package's budget.
+/// E1220: a package reaches an effect outside this package's budget.
 pub fn e1220(dep: &str, effect: &str) -> Diagnostic {
+    e1220_at(dep, effect, None)
+}
+
+fn e1220_at(dep: &str, effect: &str, site: Option<&str>) -> Diagnostic {
+    let location = site.map_or_else(String::new, |site| format!(" function `{site}`"));
+    let fix = if dep == "root" {
+        format!("add `{effect}` to `authority.holds.allow` or remove the code that reaches it")
+    } else {
+        format!(
+            "add `{effect}` to `authority.holds.allow`, grant it to `{dep}` in `authority.grants`, or drop the dependency"
+        )
+    };
     Diagnostic::error(
         "E1220",
         format!(
-            "`{dep}` uses the `{effect}` effect, which this package's budget doesn't allow"
+            "`{dep}`{location} uses the `{effect}` effect, which this package's budget doesn't allow"
         ),
-        "an `authority.holds` budget fails the build when any dependency reaches an effect you didn't list — supply-chain review as a compile error".to_string(),
-        format!(
-            "add `{effect}` to `authority.holds.allow`, grant it to `{dep}` in `authority.grants`, or drop the dependency"
-        ),
+        "an `authority.holds` budget fails the build when package code or any dependency reaches an effect you didn't list — supply-chain review as a compile error".to_string(),
+        fix,
         None::<Span>,
     )
 }
@@ -793,6 +859,7 @@ mod tests {
         let entries = [PackageEffects {
             name: "dep".to_string(),
             effects: EffectSet::from(["Net".to_string()]),
+            effect_sites: BTreeMap::new(),
             panic_sites: Vec::new(),
             boundary_span: None,
         }];
@@ -803,6 +870,65 @@ mod tests {
 
         manifest.authority.grants = vec![("dep".to_string(), vec!["Net".to_string()])];
         assert!(enforce(&entries, &manifest).is_empty());
+    }
+
+    #[test]
+    fn authority_block_covers_root_and_names_effect_site() {
+        let mut manifest = PackageFacts::default();
+        manifest.effects_enabled = true;
+        manifest.authority.holds.allow = Some(vec!["FS".to_string()]);
+        let entries = [PackageEffects {
+            name: "root".to_string(),
+            effects: EffectSet::from(["Net".to_string()]),
+            effect_sites: BTreeMap::from([("Net".to_string(), "run::fetch".to_string())]),
+            panic_sites: Vec::new(),
+            boundary_span: None,
+        }];
+
+        let diagnostics = enforce(&entries, &manifest);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "E1220");
+        assert!(diagnostics[0].what.contains("fetch"));
+        assert!(diagnostics[0].what.contains("Net"));
+
+        manifest.authority.holds.allow = Some(vec!["Net".to_string()]);
+        assert!(enforce(&entries, &manifest).is_empty());
+    }
+
+    #[test]
+    fn panic_budget_ignores_allow_omission_but_honors_denial() {
+        let mut manifest = PackageFacts::default();
+        manifest.effects_enabled = true;
+        manifest.authority.holds.allow = Some(vec![
+            "IO".to_string(),
+            "GPU".to_string(),
+            "Mem.Alloc".to_string(),
+            "FS".to_string(),
+            "Rand".to_string(),
+        ]);
+        let entries = [PackageEffects {
+            name: "panicdep".to_string(),
+            effects: EffectSet::from(["Panic".to_string()]),
+            effect_sites: BTreeMap::new(),
+            panic_sites: vec!["panicdep::parse_port".to_string()],
+            boundary_span: Some(Span::new(4, 12)),
+        }];
+
+        assert!(enforce(&entries, &manifest).is_empty());
+
+        manifest.authority.holds.deny = Some(vec!["Panic".to_string()]);
+        let diagnostics = enforce(&entries, &manifest);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "E1220");
+        assert!(diagnostics[0].what.contains("panicdep::parse_port"));
+        assert_eq!(diagnostics[0].span, Some(Span::new(4, 12)));
+
+        manifest.authority.grants = vec![("panicdep".to_string(), vec!["Panic".to_string()])];
+        let diagnostics = enforce(&entries, &manifest);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "E1220");
+        assert!(diagnostics[0].what.contains("panicdep::parse_port"));
+        assert_eq!(diagnostics[0].span, Some(Span::new(4, 12)));
     }
 
     #[test]
@@ -925,7 +1051,10 @@ mod tests {
         let diagnostic =
             application_policy_diagnostic(&projection, &EffectSet::from(["Exec".to_string()]));
         assert!(diagnostic.what.contains("denies `Exec`"));
-        assert!(diagnostic.fix.contains("adjust the denial"));
+        assert!(diagnostic
+            .fix
+            .to_ascii_lowercase()
+            .contains("adjust the denial"));
     }
 
     #[test]

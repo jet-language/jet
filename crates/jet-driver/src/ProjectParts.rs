@@ -300,7 +300,7 @@ pub fn scan_with_diagnostics(
             });
             continue;
         }
-        let program = match Parser::parse(&tokens) {
+        let program = match Parser::parse_with_source(&tokens, &source_for_parse) {
             Ok(program) => program,
             Err(parse_diags) => {
                 failures.push(ProjectPartScanFailure {
@@ -436,7 +436,7 @@ mod tests {
         assert_eq!(report.parts[0].state, ProjectPartState::Skipped);
         assert!(!report.should_index(&internal));
 
-        std::fs::write(root.join("main.jet"), "use project._bench;\nfn run() {}\n").unwrap();
+        std::fs::write(root.join("main.jet"), "use project._bench\nfn run() {}\n").unwrap();
         let report = scan(&root);
         assert_eq!(report.parts[0].state, ProjectPartState::Explicit);
         assert!(report.should_index(&internal));

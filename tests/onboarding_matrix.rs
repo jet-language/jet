@@ -38,7 +38,7 @@ fn stderr(output: &Output) -> String {
 #[test]
 fn terminal_editor_state_matrix() {
     // FEATURE_CLAIM: claim.tooling-cli / cli-terminal-matrix
-    let guide = read("docs/first-hour.md");
+    let guide = read("docs/spec/guides/first-hour.md");
     for state in [
         "## Terminal and editor state matrix",
         "| Install ready |",
@@ -58,8 +58,6 @@ fn terminal_editor_state_matrix() {
     }
     assert!(guide.contains("jet ?") && guide.contains("jet ? run"));
     assert!(guide.contains("jet check run.jet") && guide.contains("jet test run.jet"));
-    let diagnostics = read("docs/spec/diagnostics.md");
-    assert!(diagnostics.contains("canonical `run.jet` is missing"));
     let example = read("examples/features/basics/first_hour.jet");
     assert!(example.contains("First-hour tour"));
     assert!(root()

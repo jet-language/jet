@@ -328,6 +328,19 @@ pub fn canonical_fn_signature_with_effects(
             }
         });
     signature.push_str(&provenance);
+    let declared_never = f
+        .return_type
+        .as_ref()
+        .is_some_and(Type::has_never_success);
+    if declared_never || f.diverges {
+        // D-NEVER2=B: freeze the written contract separately from the
+        // inferred bottom fact. A declared `Never` can carry a real `Err`
+        // route, while an inferred-only fact remains an advisory API hint.
+        signature.push_str(&format!(
+            " ; never_declared = {} ; never_inferred = {}",
+            declared_never, f.diverges
+        ));
+    }
     signature
 }
 
@@ -912,6 +925,7 @@ mod tests {
         Func {
             span: zero(),
             is_pub,
+            is_comptime: false,
             is_package_pub: false,
             external_type: None,
             name: name.to_string(),

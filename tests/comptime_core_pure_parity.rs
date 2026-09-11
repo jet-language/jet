@@ -1319,9 +1319,8 @@ fn rustc_backed_rank_matches_aot_comptime_forced_interpreter_and_default_dev_fal
 fn rustc_backed_seeded_rng_methods_match_all_execution_tiers_exactly() {
     let source = parity_source("rng_view()", RNG_DECLS);
     assert_eq!(check_aot_comptime("rng/all-methods", &source), RNG_EXPECTED);
-    // `core.math.random` keeps its ambient-effect E2201 boundary. `try_anyway`
-    // proves the seeded handle itself is interpreter-resident; default dev
-    // proves its normal AOT fallback remains byte-identical.
+    // Force the interpreter, then compare default dev's output with the same
+    // expected bytes.
     check_dev_tiers_with_boundary("rng", &source, RNG_EXPECTED, true);
 }
 

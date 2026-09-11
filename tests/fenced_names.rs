@@ -43,11 +43,12 @@ fn run_fenced_source(name: &str, source: &str, expected: &str) {
         "fenced names must type-check: {errors:?}"
     );
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "expanded statements must stay resident-JIT safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle).expect("expanded statements must compile in resident JIT");
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
+        .expect("expanded statements must compile in resident JIT");
 
     for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
         jet_jit::reset_jit_trace_for_test();

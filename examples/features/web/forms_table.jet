@@ -1,0 +1,91 @@
+// Headless Forms, Table, and Virtual use one typed state model. Forms derive
+// controls from a struct and expose selected field subscriptions; tables keep
+// sorting, filtering, pagination, and row identity without choosing markup.
+use core.web as web
+use core.web.forms as forms
+use core.web.table as table
+use core.web.virtual as virtual
+
+struct Person {
+    id: Int
+    name: String
+    active: Bool
+}
+
+fn save(input: Person) String -> "saved {input.name}"
+fn key(row: Person) String -> "{row.id}"
+fn by_id(row: Person) String -> "{row.id}"
+fn by_name(row: Person) String -> row.name
+fn by_active(row: Person) String -> "{row.active}"
+
+fn async_check(value: String) Unit !Err -> {
+    if value == "bad" -> return Err("name rejected")
+    return Ok()
+}
+
+fn rows() [Person] -> {
+    out := [Person]{}
+    loop id in 0..<100000 -> out.push(Person{id: id + 1, name: "Person {id + 1}", active: (id + 1) % 2 == 0})
+    return out
+}
+
+fn run() {
+    // `web.form` derives the WebFormInput from Person and checks save's input.
+    form :: web.form(Person, action: save)
+    name_signal :: forms.typed_select_field(form, "name") ?? panic("name selection")
+    before :: name_signal.get()
+    form.set("id", "bad") ?? panic("id set")
+    form.set("name", "Ada") ?? panic("name set")
+    form.set("active", "true") ?? panic("active set")
+    after :: name_signal.get()
+    print("form-subscription={before.value}->{after.value};selected={after.name}")
+    form.blur("name") ?? panic("blur")
+    _validation :: form.validate()
+    id_signal :: forms.typed_select_field(form, "id") ?? panic("id selection")
+    id_state :: id_signal.get()
+    print("form-validation={id_state.errors.join("|")};touched={id_state.touched}")
+    form.set("id", "7") ?? panic("valid id")
+    forms.typed_set_async_validator(form, "name", WebFormValidationTiming.Blur, 1000, async_check) ?? panic("validator")
+    pending :: forms.typed_validate_async(form)
+    print("form-async-before={form.show()}")
+    form.cancel()
+    _wait :: forms.typed_validation_wait(^pending)
+    print("form-async-after={form.show()}")
+    no_script :: form.no_script() ?? panic("no script")
+    print("form-no-script={no_script}")
+    print("form-html={form.render()}")
+    print("form-state={form.show()}")
+
+    source :: rows()
+    base :: table.new_keyed("People", source, key)
+    with_id :: table.with_column(base, table.column("id", "Int", by_id))
+    with_name :: table.with_column(with_id, table.column("name", "String", by_name))
+    configured :: table.with_column(with_name, table.column("active", "Bool", by_active))
+    sorted :: table.sort_by(configured, "id", WebTableSortDirection.Descending)
+    filtered :: table.filter_by(sorted, "active", "true")
+    paged :: filtered.paginate(0, 24)
+    page :: paged.page() ?? panic("page")
+    print("table-local={page.page_index}/{page.page_size};rows={page.rows.len()};total={page.total_rows};pages={page.page_count}")
+    print("table-facts={table.facts(paged)}")
+
+    server_base :: table.with_server_page(filtered, (state: WebTableState) -> {
+        server_rows :: table.filter(source, (row: Person) -> row.active)
+        ordered :: table.sort(server_rows, true, by_id)
+        return Ok(table.page(ordered, state.page_index, state.page_size))
+    })
+    server_page_table :: server_base.paginate(0, 24)
+    server_page :: server_page_table.page() ?? panic("server page")
+    first :: table.first_page(server_page_table)
+    next :: table.next_page(first)
+    last :: table.last_page(first) ?? panic("last page")
+    print("table-server={server_page.page_index}/{server_page.page_size};rows={server_page.rows.len()};total={server_page.total_rows};pages={server_page.page_count}")
+    first_state :: table.state(first)
+    next_state :: table.state(next)
+    last_state :: table.state(last)
+    print("table-transitions={first_state.page_index}->{next_state.page_index}->{last_state.page_index}")
+
+    plan :: virtual.plan_from_sizes(source.len(), 0, 480, 480, 36, 8, [Int]{36, 42, 30, 36})
+    visible :: table.visible_rows(filtered, plan) ?? panic("visible")
+    indices :: virtual.plan_indices(plan)
+    print("virtual={plan.start}..{plan.end};visible={visible.len()};indices={indices.len()};total={plan.total_size};measured={plan.measured_count}")
+}

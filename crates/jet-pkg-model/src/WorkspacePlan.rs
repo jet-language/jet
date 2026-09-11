@@ -153,6 +153,23 @@ pub(crate) fn declares_workspace_module(src: &str) -> bool {
     false
 }
 
+/// True when a workspace declaration also supplies a `members:` index field.
+/// An arbitrary top-level `.jet` file that lists members is an index, not
+/// authority-only metadata (D-JPK-FILENAME2=B).
+pub(crate) fn declares_workspace_members(src: &str) -> bool {
+    if !declares_workspace_module(src) {
+        return false;
+    }
+    let (tokens, _lex_diags) = crate::Lexer::lex(src);
+    let tokens = crate::Lexer::without_comments(&tokens);
+    tokens.iter().any(|token| {
+        matches!(
+            &token.kind,
+            crate::Lexer::TokKind::Ident(name) if name == crate::Syntax::MODULE_FIELD_MEMBERS
+        )
+    })
+}
+
 /// E1239: the workspace authority must have one declaration source.
 pub(crate) fn e1239_ambiguous_workspace(paths: &[&Path]) -> Diagnostic {
     let list = paths

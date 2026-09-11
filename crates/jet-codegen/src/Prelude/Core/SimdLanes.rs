@@ -198,6 +198,602 @@ pub(crate) fn jet_simd_div_array<T: JetSimdScalar, const N: usize>(
 ) -> [T; N] {
     jet_simd_binary_array(left, right, JetSimdBinaryOp::Div)
 }
+/// Apply a boolean lane mask without changing the order or evaluation of either
+/// input array.  Conditional accumulation uses this as its canonical select.
+#[inline(always)]
+pub(crate) fn jet_simd_select_array<T: Copy, const N: usize>(
+    mask: &[bool; N],
+    when_true: &[T; N],
+    when_false: &[T; N],
+) -> [T; N] {
+    let mut out = *when_false;
+    for index in 0..N {
+        if mask[index] {
+            out[index] = when_true[index];
+        }
+    }
+    out
+}
+
+/// A masked add is the shared conditional-accumulate kernel.  The caller
+/// supplies a checked mask; no backend is allowed to turn a conditional write
+/// into an unconditional arithmetic operation.
+#[inline(always)]
+pub(crate) fn jet_simd_masked_add_array<T: JetSimdScalar, const N: usize>(
+    accumulator: &[T; N],
+    addend: &[T; N],
+    mask: &[bool; N],
+) -> [T; N] {
+    let mut out = *accumulator;
+    for index in 0..N {
+        if mask[index] {
+            out[index] = accumulator[index].simd_add(addend[index]);
+        }
+    }
+    out
+}
+/// Slice counterpart used by resident/JIT adapters.  A shape mismatch is
+/// rejected instead of silently truncating one side of a conditional update.
+#[inline(always)]
+pub(crate) fn jet_simd_masked_add_slice<T: JetSimdScalar>(
+    accumulator: &mut [T],
+    addend: &[T],
+    mask: &[bool],
+) -> bool {
+    if accumulator.len() != addend.len() || accumulator.len() != mask.len() {
+        return false;
+    }
+    for index in 0..accumulator.len() {
+        if mask[index] {
+            accumulator[index] = accumulator[index].simd_add(addend[index]);
+        }
+    }
+    true
+}
+
+/// D-FRED1=A conditional reduction.  Masked values enter the same eight
+/// source-order accumulators and fixed adjacent tree as an unmasked reduction.
+#[inline(always)]
+pub(crate) fn jet_simd_masked_reduce_array<T: JetSimdScalar, const N: usize>(
+    values: &[T; N],
+    mask: &[bool; N],
+    seed: T,
+) -> T {
+    let mut accumulators = jet_simd_seed_fixed(seed);
+    let mut seen = false;
+    for index in 0..N {
+        if mask[index] {
+            let lane = index % JET_SIMD_REDUCTION_LANES;
+            accumulators[lane] = accumulators[lane].simd_add(values[index]);
+            seen = true;
+        }
+    }
+    if seen {
+        jet_simd_finish_fixed(&accumulators)
+    } else {
+        seed
+    }
+}
+
+/// Slice counterpart for masked reductions.  `None` is reserved for a
+/// malformed mask, while an all-false mask returns the supplied seed.
+#[inline(always)]
+pub(crate) fn jet_simd_masked_reduce_slice<T: JetSimdScalar>(
+    values: &[T],
+    mask: &[bool],
+    seed: T,
+) -> Option<T> {
+    if values.len() != mask.len() {
+        return None;
+    }
+    let mut accumulators = jet_simd_seed_fixed(seed);
+    let mut seen = false;
+    for (index, (&value, &selected)) in values.iter().zip(mask).enumerate() {
+        if selected {
+            let lane = index % JET_SIMD_REDUCTION_LANES;
+            accumulators[lane] = accumulators[lane].simd_add(value);
+            seen = true;
+        }
+    }
+    Some(if seen {
+        jet_simd_finish_fixed(&accumulators)
+    } else {
+        seed
+    })
+}
+/// Iterator form for adapters that stream a mask and values together.  A
+/// length mismatch is rejected; accepted values retain D-FRED1 source order.
+#[inline(always)]
+pub(crate) fn jet_simd_masked_reduce_fixed_iter<I, M, T>(
+    values: I,
+    mask: M,
+    seed: T,
+) -> Option<T>
+where
+    I: IntoIterator<Item = T>,
+    M: IntoIterator<Item = bool>,
+    T: JetSimdScalar,
+{
+    let mut values = values.into_iter();
+    let mut mask = mask.into_iter();
+    let mut accumulators = jet_simd_seed_fixed(seed);
+    let mut seen = false;
+    let mut index = 0;
+    loop {
+        match (values.next(), mask.next()) {
+            (None, None) => break,
+            (Some(value), Some(selected)) => {
+                if selected {
+                    let lane = index % JET_SIMD_REDUCTION_LANES;
+                    accumulators[lane] = accumulators[lane].simd_add(value);
+                    seen = true;
+                }
+                index += 1;
+            }
+            _ => return None,
+        }
+    }
+    Some(if seen {
+        jet_simd_finish_fixed(&accumulators)
+    } else {
+        seed
+    })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum JetSimdCompareOp {
+    Eq,
+    Ne,
+    Lt,
+    Gt,
+    Le,
+    Ge,
+}
+
+#[inline(always)]
+fn jet_simd_compare<T: PartialEq + PartialOrd>(left: T, right: T, op: JetSimdCompareOp) -> bool {
+    match op {
+        JetSimdCompareOp::Eq => left == right,
+        JetSimdCompareOp::Ne => left != right,
+        JetSimdCompareOp::Lt => left < right,
+        JetSimdCompareOp::Gt => left > right,
+        JetSimdCompareOp::Le => left <= right,
+        JetSimdCompareOp::Ge => left >= right,
+    }
+}
+
+#[inline(always)]
+fn jet_simd_compare_array_scalar<T: Copy + PartialEq + PartialOrd, const N: usize>(
+    left: &[T; N],
+    right: &[T; N],
+    op: JetSimdCompareOp,
+) -> [bool; N] {
+    std::array::from_fn(|index| jet_simd_compare(left[index], right[index], op))
+}
+/// Compare default `Int` carriers through the canonical numeric comparator.
+/// Inline carriers use the existing hardware-backed `i64` lane helper; any
+/// spilled carrier falls back to the exact canonical scalar comparator.
+#[inline(always)]
+pub(crate) fn jet_simd_compare_int_array<const N: usize, I, F>(
+    left: &[i64; N],
+    right: &[i64; N],
+    op: JetSimdCompareOp,
+    is_inline: I,
+    compare: F,
+) -> [bool; N]
+where
+    I: Fn(i64) -> bool,
+    F: Fn(i64, i64) -> i64,
+{
+    if left.iter().all(|value| is_inline(*value))
+        && right.iter().all(|value| is_inline(*value))
+    {
+        return jet_simd_compare_i64_array(left, right, op);
+    }
+    std::array::from_fn(|index| {
+        let ordering = compare(left[index], right[index]);
+        match op {
+            JetSimdCompareOp::Eq => ordering == 0,
+            JetSimdCompareOp::Ne => ordering != 0,
+            JetSimdCompareOp::Lt => ordering < 0,
+            JetSimdCompareOp::Gt => ordering > 0,
+            JetSimdCompareOp::Le => ordering <= 0,
+            JetSimdCompareOp::Ge => ordering >= 0,
+        }
+    })
+}
+
+
+/// Comparable scalar families may override the fixed-width comparison path
+/// while retaining the scalar source-order fallback for unsupported widths or
+/// targets.
+pub(crate) trait JetSimdComparable: Copy + PartialEq + PartialOrd {
+    fn compare_array<const N: usize>(
+        left: &[Self; N],
+        right: &[Self; N],
+        op: JetSimdCompareOp,
+    ) -> [bool; N] {
+        jet_simd_compare_array_scalar(left, right, op)
+    }
+
+    fn first_match_slice(
+        values: &[Self],
+        needle: &Self,
+        op: JetSimdCompareOp,
+    ) -> Option<usize> {
+        values
+            .iter()
+            .enumerate()
+            .find_map(|(index, value)| jet_simd_compare(*value, *needle, op).then_some(index))
+    }
+}
+
+macro_rules! jet_simd_scalar_comparable {
+    ($($scalar:ty),+ $(,)?) => {
+        $(impl JetSimdComparable for $scalar {})+
+    };
+}
+
+jet_simd_scalar_comparable!(bool, char, i8, i16, i32, isize, u8, u16, u32, u64, usize);
+
+#[inline(always)]
+fn jet_simd_compare_i64_array<const N: usize>(
+    left: &[i64; N],
+    right: &[i64; N],
+    op: JetSimdCompareOp,
+) -> [bool; N] {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        if N == 4 {
+            let left4: [i64; 4] = std::array::from_fn(|index| left[index]);
+            let right4: [i64; 4] = std::array::from_fn(|index| right[index]);
+            if let Some(mask) = jet_simd_x86::i64x4_compare_if_available(&left4, &right4, op) {
+                let mut out = [false; N];
+                out[..4].copy_from_slice(&mask);
+                return out;
+            }
+        }
+        if N == 2 {
+            let left2: [i64; 2] = std::array::from_fn(|index| left[index]);
+            let right2: [i64; 2] = std::array::from_fn(|index| right[index]);
+            if let Some(mask) = jet_simd_x86::i64x2_compare_if_available(&left2, &right2, op) {
+                let mut out = [false; N];
+                out[..2].copy_from_slice(&mask);
+                return out;
+            }
+        }
+    }
+    jet_simd_compare_array_scalar(left, right, op)
+}
+
+impl JetSimdComparable for i64 {
+    fn compare_array<const N: usize>(
+        left: &[Self; N],
+        right: &[Self; N],
+        op: JetSimdCompareOp,
+    ) -> [bool; N] {
+        jet_simd_compare_i64_array(left, right, op)
+    }
+
+    fn first_match_slice(values: &[Self], needle: &Self, op: JetSimdCompareOp) -> Option<usize> {
+        let mut index = 0;
+        while values.len().saturating_sub(index) >= 4 {
+            let left: [i64; 4] = std::array::from_fn(|lane| values[index + lane]);
+            let right = [*needle; 4];
+            if let Some(found) = jet_simd_compare_i64_array(&left, &right, op)
+                .iter()
+                .position(|matched| *matched)
+            {
+                return Some(index + found);
+            }
+            index += 4;
+        }
+        while values.len().saturating_sub(index) >= 2 {
+            let left: [i64; 2] = std::array::from_fn(|lane| values[index + lane]);
+            let right = [*needle; 2];
+            if let Some(found) = jet_simd_compare_i64_array(&left, &right, op)
+                .iter()
+                .position(|matched| *matched)
+            {
+                return Some(index + found);
+            }
+            index += 2;
+        }
+        values[index..].iter().enumerate().find_map(|(offset, value)| {
+            jet_simd_compare(*value, *needle, op).then_some(index + offset)
+        })
+    }
+}
+
+#[inline(always)]
+fn jet_simd_compare_f32_array<const N: usize>(
+    left: &[f32; N],
+    right: &[f32; N],
+    op: JetSimdCompareOp,
+) -> [bool; N] {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        if N == 8 {
+            let left8: [f32; 8] = std::array::from_fn(|index| left[index]);
+            let right8: [f32; 8] = std::array::from_fn(|index| right[index]);
+            if let Some(mask) = jet_simd_x86::f32x8_compare_if_available(&left8, &right8, op) {
+                let mut out = [false; N];
+                out[..8].copy_from_slice(&mask);
+                return out;
+            }
+        }
+        if N == 4 {
+            let left4: [f32; 4] = std::array::from_fn(|index| left[index]);
+            let right4: [f32; 4] = std::array::from_fn(|index| right[index]);
+            if let Some(mask) = jet_simd_x86::f32x4_compare_if_available(&left4, &right4, op) {
+                let mut out = [false; N];
+                out[..4].copy_from_slice(&mask);
+                return out;
+            }
+        }
+    }
+    jet_simd_compare_array_scalar(left, right, op)
+}
+
+#[inline(always)]
+fn jet_simd_compare_f64_array<const N: usize>(
+    left: &[f64; N],
+    right: &[f64; N],
+    op: JetSimdCompareOp,
+) -> [bool; N] {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    {
+        if N == 4 {
+            let left4: [f64; 4] = std::array::from_fn(|index| left[index]);
+            let right4: [f64; 4] = std::array::from_fn(|index| right[index]);
+            if let Some(mask) = jet_simd_x86::f64x4_compare_if_available(&left4, &right4, op) {
+                let mut out = [false; N];
+                out[..4].copy_from_slice(&mask);
+                return out;
+            }
+        }
+        if N == 2 {
+            let left2: [f64; 2] = std::array::from_fn(|index| left[index]);
+            let right2: [f64; 2] = std::array::from_fn(|index| right[index]);
+            if let Some(mask) = jet_simd_x86::f64x2_compare_if_available(&left2, &right2, op) {
+                let mut out = [false; N];
+                out[..2].copy_from_slice(&mask);
+                return out;
+            }
+        }
+    }
+    jet_simd_compare_array_scalar(left, right, op)
+}
+
+impl JetSimdComparable for f32 {
+    fn compare_array<const N: usize>(
+        left: &[Self; N],
+        right: &[Self; N],
+        op: JetSimdCompareOp,
+    ) -> [bool; N] {
+        jet_simd_compare_f32_array(left, right, op)
+    }
+
+    fn first_match_slice(values: &[Self], needle: &Self, op: JetSimdCompareOp) -> Option<usize> {
+        let mut index = 0;
+        while values.len().saturating_sub(index) >= 8 {
+            let left: [f32; 8] = std::array::from_fn(|lane| values[index + lane]);
+            let right = [*needle; 8];
+            if let Some(found) = jet_simd_compare_f32_array(&left, &right, op)
+                .iter()
+                .position(|matched| *matched)
+            {
+                return Some(index + found);
+            }
+            index += 8;
+        }
+        while values.len().saturating_sub(index) >= 4 {
+            let left: [f32; 4] = std::array::from_fn(|lane| values[index + lane]);
+            let right = [*needle; 4];
+            if let Some(found) = jet_simd_compare_f32_array(&left, &right, op)
+                .iter()
+                .position(|matched| *matched)
+            {
+                return Some(index + found);
+            }
+            index += 4;
+        }
+        values[index..]
+            .iter()
+            .enumerate()
+            .find_map(|(offset, value)| jet_simd_compare(*value, *needle, op).then_some(index + offset))
+    }
+}
+
+impl JetSimdComparable for f64 {
+    fn compare_array<const N: usize>(
+        left: &[Self; N],
+        right: &[Self; N],
+        op: JetSimdCompareOp,
+    ) -> [bool; N] {
+        jet_simd_compare_f64_array(left, right, op)
+    }
+
+    fn first_match_slice(values: &[Self], needle: &Self, op: JetSimdCompareOp) -> Option<usize> {
+        let mut index = 0;
+        while values.len().saturating_sub(index) >= 4 {
+            let left: [f64; 4] = std::array::from_fn(|lane| values[index + lane]);
+            let right = [*needle; 4];
+            if let Some(found) = jet_simd_compare_f64_array(&left, &right, op)
+                .iter()
+                .position(|matched| *matched)
+            {
+                return Some(index + found);
+            }
+            index += 4;
+        }
+        while values.len().saturating_sub(index) >= 2 {
+            let left: [f64; 2] = std::array::from_fn(|lane| values[index + lane]);
+            let right = [*needle; 2];
+            if let Some(found) = jet_simd_compare_f64_array(&left, &right, op)
+                .iter()
+                .position(|matched| *matched)
+            {
+                return Some(index + found);
+            }
+            index += 2;
+        }
+        values[index..].iter().enumerate().find_map(|(offset, value)| {
+            jet_simd_compare(*value, *needle, op).then_some(index + offset)
+        })
+    }
+}
+
+#[inline(always)]
+pub(crate) fn jet_simd_compare_array<T: JetSimdComparable, const N: usize>(
+    left: &[T; N],
+    right: &[T; N],
+    op: JetSimdCompareOp,
+) -> [bool; N] {
+    T::compare_array(left, right, op)
+}
+
+/// Compare lanes and return the lowest matching source lane.  The compare
+/// mask is produced through the packed-array seam; `position` preserves the
+/// source-order early-exit law.
+#[inline(always)]
+pub(crate) fn jet_simd_first_match_array<T: JetSimdComparable, const N: usize>(
+    values: &[T; N],
+    needle: &T,
+    op: JetSimdCompareOp,
+) -> Option<usize> {
+    let needles = [*needle; N];
+    jet_simd_compare_array(values, &needles, op)
+        .iter()
+        .position(|matched| *matched)
+}
+
+/// Return the lowest matching index in a resident slice.  Float slices use
+/// packed chunks with a scalar tail; all other scalar families use the same
+/// source-order fallback.
+#[inline(always)]
+pub(crate) fn jet_simd_first_match_slice<T: JetSimdComparable>(
+    values: &[T],
+    needle: &T,
+    op: JetSimdCompareOp,
+) -> Option<usize> {
+    T::first_match_slice(values, needle, op)
+}
+
+/// D-FRED1=A's fixed-width reduction policy. Eight accumulators receive source
+/// element `i` in lane `i mod 8`; the seed is in lane zero before the first
+/// source element is accumulated. Every tier calls this same Prelude seam.
+pub(crate) const JET_SIMD_REDUCTION_LANES: usize = 8;
+
+#[inline(always)]
+pub(crate) fn jet_simd_seed_fixed<T: JetSimdScalar>(seed: T) -> [T; JET_SIMD_REDUCTION_LANES] {
+    let mut accumulators = [T::simd_zero(); JET_SIMD_REDUCTION_LANES];
+    accumulators[0] = seed;
+    accumulators
+}
+
+#[inline(always)]
+pub(crate) fn jet_simd_reduce_fixed<T: JetSimdScalar>(values: &[T], seed: T) -> T {
+    jet_simd_reduce_fixed_iter(values.iter().copied(), seed)
+}
+
+#[inline(always)]
+pub(crate) fn jet_simd_reduce_fixed_iter<I, T>(values: I, seed: T) -> T
+where
+    I: IntoIterator<Item = T>,
+    T: JetSimdScalar,
+{
+    let mut accumulators = jet_simd_seed_fixed(seed);
+    let mut seen = false;
+    for (index, value) in values.into_iter().enumerate() {
+        let lane = index & (JET_SIMD_REDUCTION_LANES - 1);
+        accumulators[lane] = accumulators[lane].simd_add(value);
+        seen = true;
+    }
+    if seen {
+        jet_simd_finish_fixed(&accumulators)
+    } else {
+        seed
+    }
+}
+/// Map a canonical default-`Int` index difference onto the fixed reduction
+/// lanes. The callbacks keep this shared helper independent of the host's
+/// `jet_std` module while preventing raw tagged-carrier arithmetic.
+#[inline(always)]
+pub(crate) fn jet_simd_fixed_lane_from_int<const LANES: usize, Sub, ToI64>(
+    index: i64,
+    start: i64,
+    subtract: Sub,
+    to_i64: ToI64,
+) -> usize
+where
+    Sub: Fn(i64, i64) -> i64,
+    ToI64: Fn(i64) -> Option<i64>,
+{
+    let difference = subtract(index, start);
+    to_i64(difference)
+        .map(|value| value.rem_euclid(LANES as i64) as usize)
+        .unwrap_or(0)
+}
+
+/// Array entry point for callers that already marshal one fixed-width lane
+/// group.  It is the canonical D-FRED1 reduction, not a backend-local fold.
+#[inline(always)]
+pub(crate) fn jet_simd_reduce_fixed_array<T: JetSimdScalar, const N: usize>(
+    values: &[T; N],
+    seed: T,
+) -> T {
+    jet_simd_reduce_fixed(values, seed)
+}
+
+#[inline(always)]
+pub(crate) fn jet_simd_accumulate_fixed<T: JetSimdScalar>(
+    accumulators: &mut [T; JET_SIMD_REDUCTION_LANES],
+    values: &[T],
+    offset: usize,
+) {
+    for (lane, &value) in values.iter().enumerate() {
+        let target = (offset + lane) & (JET_SIMD_REDUCTION_LANES - 1);
+        accumulators[target] = accumulators[target].simd_add(value);
+    }
+}
+/// Apply a checked mask while assigning source lanes to the fixed reduction
+/// order.  The boolean result lets adapters reject malformed masks without
+/// changing the accumulator.
+#[inline(always)]
+pub(crate) fn jet_simd_accumulate_masked_fixed<T: JetSimdScalar>(
+    accumulators: &mut [T; JET_SIMD_REDUCTION_LANES],
+    values: &[T],
+    mask: &[bool],
+    offset: usize,
+) -> bool {
+    if values.len() != mask.len() {
+        return false;
+    }
+    for (lane, (&value, &selected)) in values.iter().zip(mask).enumerate() {
+        if selected {
+            let target = (offset + lane) % JET_SIMD_REDUCTION_LANES;
+            accumulators[target] = accumulators[target].simd_add(value);
+        }
+    }
+    true
+}
+
+/// Finish the exact D-FRED1 tree:
+/// `((a0+a1)+(a2+a3))+((a4+a5)+(a6+a7))`.
+#[inline(always)]
+pub(crate) fn jet_simd_finish_fixed<T: JetSimdScalar>(
+    accumulators: &[T; JET_SIMD_REDUCTION_LANES],
+) -> T {
+    let left = accumulators[0]
+        .simd_add(accumulators[1])
+        .simd_add(accumulators[2].simd_add(accumulators[3]));
+    let right = accumulators[4]
+        .simd_add(accumulators[5])
+        .simd_add(accumulators[6].simd_add(accumulators[7]));
+    left.simd_add(right)
+}
+
 
 // I1: the native lane backend is a vetted Prelude implementation. Runtime
 // dispatch keeps cross-target binaries on the portable array path when a
@@ -208,7 +804,7 @@ pub(crate) fn jet_simd_div_array<T: JetSimdScalar, const N: usize>(
 // JET_VETTED_UNSAFE_BEGIN: jet_simd_x86
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 mod jet_simd_x86 {
-    use super::JetSimdBinaryOp;
+    use super::{JetSimdBinaryOp, JetSimdCompareOp};
 
     #[cfg(target_arch = "x86")]
     use std::arch::x86 as arch;
@@ -289,6 +885,134 @@ mod jet_simd_x86 {
         let mut out = [0.0; 4];
         arch::_mm256_storeu_pd(out.as_mut_ptr(), value);
         out
+    }
+
+    #[target_feature(enable = "sse")]
+    pub(super) unsafe fn f32x4_compare(
+        left: &[f32; 4],
+        right: &[f32; 4],
+        op: JetSimdCompareOp,
+    ) -> [bool; 4] {
+        let left = arch::_mm_loadu_ps(left.as_ptr());
+        let right = arch::_mm_loadu_ps(right.as_ptr());
+        let value = match op {
+            JetSimdCompareOp::Eq => arch::_mm_cmp_ps::<0>(left, right),
+            JetSimdCompareOp::Ne => arch::_mm_cmp_ps::<4>(left, right),
+            JetSimdCompareOp::Lt => arch::_mm_cmp_ps::<1>(left, right),
+            JetSimdCompareOp::Gt => arch::_mm_cmp_ps::<14>(left, right),
+            JetSimdCompareOp::Le => arch::_mm_cmp_ps::<2>(left, right),
+            JetSimdCompareOp::Ge => arch::_mm_cmp_ps::<13>(left, right),
+        };
+        let bits = arch::_mm_movemask_ps(value) as u32;
+        std::array::from_fn(|index| bits & (1_u32 << index) != 0)
+    }
+
+    #[target_feature(enable = "sse2")]
+    pub(super) unsafe fn f64x2_compare(
+        left: &[f64; 2],
+        right: &[f64; 2],
+        op: JetSimdCompareOp,
+    ) -> [bool; 2] {
+        let left = arch::_mm_loadu_pd(left.as_ptr());
+        let right = arch::_mm_loadu_pd(right.as_ptr());
+        let value = match op {
+            JetSimdCompareOp::Eq => arch::_mm_cmp_pd::<0>(left, right),
+            JetSimdCompareOp::Ne => arch::_mm_cmp_pd::<4>(left, right),
+            JetSimdCompareOp::Lt => arch::_mm_cmp_pd::<1>(left, right),
+            JetSimdCompareOp::Gt => arch::_mm_cmp_pd::<14>(left, right),
+            JetSimdCompareOp::Le => arch::_mm_cmp_pd::<2>(left, right),
+            JetSimdCompareOp::Ge => arch::_mm_cmp_pd::<13>(left, right),
+        };
+        let bits = arch::_mm_movemask_pd(value) as u32;
+        std::array::from_fn(|index| bits & (1_u32 << index) != 0)
+    }
+
+    #[target_feature(enable = "avx")]
+    pub(super) unsafe fn f32x8_compare(
+        left: &[f32; 8],
+        right: &[f32; 8],
+        op: JetSimdCompareOp,
+    ) -> [bool; 8] {
+        let left = arch::_mm256_loadu_ps(left.as_ptr());
+        let right = arch::_mm256_loadu_ps(right.as_ptr());
+        let value = match op {
+            JetSimdCompareOp::Eq => arch::_mm256_cmp_ps::<0>(left, right),
+            JetSimdCompareOp::Ne => arch::_mm256_cmp_ps::<4>(left, right),
+            JetSimdCompareOp::Lt => arch::_mm256_cmp_ps::<1>(left, right),
+            JetSimdCompareOp::Gt => arch::_mm256_cmp_ps::<14>(left, right),
+            JetSimdCompareOp::Le => arch::_mm256_cmp_ps::<2>(left, right),
+            JetSimdCompareOp::Ge => arch::_mm256_cmp_ps::<13>(left, right),
+        };
+        let bits = arch::_mm256_movemask_ps(value) as u32;
+        std::array::from_fn(|index| bits & (1_u32 << index) != 0)
+    }
+
+    #[target_feature(enable = "avx")]
+    pub(super) unsafe fn f64x4_compare(
+        left: &[f64; 4],
+        right: &[f64; 4],
+        op: JetSimdCompareOp,
+    ) -> [bool; 4] {
+        let left = arch::_mm256_loadu_pd(left.as_ptr());
+        let right = arch::_mm256_loadu_pd(right.as_ptr());
+        let value = match op {
+            JetSimdCompareOp::Eq => arch::_mm256_cmp_pd::<0>(left, right),
+            JetSimdCompareOp::Ne => arch::_mm256_cmp_pd::<4>(left, right),
+            JetSimdCompareOp::Lt => arch::_mm256_cmp_pd::<1>(left, right),
+            JetSimdCompareOp::Gt => arch::_mm256_cmp_pd::<14>(left, right),
+            JetSimdCompareOp::Le => arch::_mm256_cmp_pd::<2>(left, right),
+            JetSimdCompareOp::Ge => arch::_mm256_cmp_pd::<13>(left, right),
+        };
+        let bits = arch::_mm256_movemask_pd(value) as u32;
+        std::array::from_fn(|index| bits & (1_u32 << index) != 0)
+    }
+
+    #[target_feature(enable = "sse4.2")]
+    pub(super) unsafe fn i64x2_compare(
+        left: &[i64; 2],
+        right: &[i64; 2],
+        op: JetSimdCompareOp,
+    ) -> [bool; 2] {
+        let left = arch::_mm_loadu_si128(left.as_ptr().cast());
+        let right = arch::_mm_loadu_si128(right.as_ptr().cast());
+        let equal = arch::_mm_cmpeq_epi64(left, right);
+        let greater = arch::_mm_cmpgt_epi64(left, right);
+        let less = arch::_mm_cmpgt_epi64(right, left);
+        let all = arch::_mm_set1_epi32(-1);
+        let selected = match op {
+            JetSimdCompareOp::Eq => equal,
+            JetSimdCompareOp::Ne => arch::_mm_xor_si128(equal, all),
+            JetSimdCompareOp::Lt => less,
+            JetSimdCompareOp::Gt => greater,
+            JetSimdCompareOp::Le => arch::_mm_xor_si128(greater, all),
+            JetSimdCompareOp::Ge => arch::_mm_xor_si128(less, all),
+        };
+        let bits = arch::_mm_movemask_pd(arch::_mm_castsi128_pd(selected)) as u32;
+        std::array::from_fn(|index| bits & (1_u32 << index) != 0)
+    }
+
+    #[target_feature(enable = "avx2")]
+    pub(super) unsafe fn i64x4_compare(
+        left: &[i64; 4],
+        right: &[i64; 4],
+        op: JetSimdCompareOp,
+    ) -> [bool; 4] {
+        let left = arch::_mm256_loadu_si256(left.as_ptr().cast());
+        let right = arch::_mm256_loadu_si256(right.as_ptr().cast());
+        let equal = arch::_mm256_cmpeq_epi64(left, right);
+        let greater = arch::_mm256_cmpgt_epi64(left, right);
+        let less = arch::_mm256_cmpgt_epi64(right, left);
+        let all = arch::_mm256_set1_epi32(-1);
+        let selected = match op {
+            JetSimdCompareOp::Eq => equal,
+            JetSimdCompareOp::Ne => arch::_mm256_xor_si256(equal, all),
+            JetSimdCompareOp::Lt => less,
+            JetSimdCompareOp::Gt => greater,
+            JetSimdCompareOp::Le => arch::_mm256_xor_si256(greater, all),
+            JetSimdCompareOp::Ge => arch::_mm256_xor_si256(less, all),
+        };
+        let bits = arch::_mm256_movemask_pd(arch::_mm256_castsi256_pd(selected)) as u32;
+        std::array::from_fn(|index| bits & (1_u32 << index) != 0)
     }
 
     #[target_feature(enable = "sse")]
@@ -374,6 +1098,72 @@ mod jet_simd_x86 {
         }
         Some(unsafe { f64x4_binary(left, right, op) })
     }
+    pub(super) fn f32x4_compare_if_available(
+        left: &[f32; 4],
+        right: &[f32; 4],
+        op: JetSimdCompareOp,
+    ) -> Option<[bool; 4]> {
+        if !is_x86_feature_detected!("sse") {
+            return None;
+        }
+        Some(unsafe { f32x4_compare(left, right, op) })
+    }
+
+    pub(super) fn f64x2_compare_if_available(
+        left: &[f64; 2],
+        right: &[f64; 2],
+        op: JetSimdCompareOp,
+    ) -> Option<[bool; 2]> {
+        if !is_x86_feature_detected!("sse2") {
+            return None;
+        }
+        Some(unsafe { f64x2_compare(left, right, op) })
+    }
+
+    pub(super) fn f32x8_compare_if_available(
+        left: &[f32; 8],
+        right: &[f32; 8],
+        op: JetSimdCompareOp,
+    ) -> Option<[bool; 8]> {
+        if !is_x86_feature_detected!("avx") {
+            return None;
+        }
+        Some(unsafe { f32x8_compare(left, right, op) })
+    }
+
+    pub(super) fn f64x4_compare_if_available(
+        left: &[f64; 4],
+        right: &[f64; 4],
+        op: JetSimdCompareOp,
+    ) -> Option<[bool; 4]> {
+        if !is_x86_feature_detected!("avx") {
+            return None;
+        }
+        Some(unsafe { f64x4_compare(left, right, op) })
+    }
+
+    pub(super) fn i64x2_compare_if_available(
+        left: &[i64; 2],
+        right: &[i64; 2],
+        op: JetSimdCompareOp,
+    ) -> Option<[bool; 2]> {
+        if !is_x86_feature_detected!("sse4.2") {
+            return None;
+        }
+        Some(unsafe { i64x2_compare(left, right, op) })
+    }
+
+    pub(super) fn i64x4_compare_if_available(
+        left: &[i64; 4],
+        right: &[i64; 4],
+        op: JetSimdCompareOp,
+    ) -> Option<[bool; 4]> {
+        if !is_x86_feature_detected!("avx2") {
+            return None;
+        }
+        Some(unsafe { i64x4_compare(left, right, op) })
+    }
+
     pub(super) fn f32x4_neg_if_available(left: &[f32; 4]) -> Option<[f32; 4]> {
         if !is_x86_feature_detected!("sse") {
             return None;
@@ -1349,19 +2139,23 @@ pub(crate) fn jet_simd_f64_binary_slice(
     Some(out)
 }
 
-/// Shared left-to-right dot product for the resident math carriers. Keeping
-/// the fold here makes the JIT adapter use the same scalar reduction order as
-/// the AOT Prelude implementation.
+/// D-FRED1=A dot reduction for the resident math carriers. Products are
+/// accumulated into the same eight fixed lanes and finished through the shared
+/// pairwise tree, so AOT, JIT, and comptime do not choose separate orders.
 #[inline(always)]
 pub(crate) fn jet_simd_dot_f64_slice(left: &[f64], right: &[f64]) -> Option<f64> {
     if left.len() != right.len() {
         return None;
     }
-    let mut value = 0.0;
-    for (&left, &right) in left.iter().zip(right) {
-        value += left * right;
+    if left.is_empty() {
+        return Some(0.0);
     }
-    Some(value)
+    let mut accumulators = jet_simd_seed_fixed(0.0);
+    for (index, (&left, &right)) in left.iter().zip(right).enumerate() {
+        let lane = index & (JET_SIMD_REDUCTION_LANES - 1);
+        accumulators[lane] += left * right;
+    }
+    Some(jet_simd_finish_fixed(&accumulators))
 }
 
 #[inline(always)]
@@ -1412,14 +2206,31 @@ pub(crate) fn jet_simd_reduce_slice<T: JetSimdScalar>(
 ) -> Option<T> {
     lanes.first()?;
     let mut value = match op {
-        JetSimdReduceOp::Add | JetSimdReduceOp::Avg => T::simd_zero(),
-        JetSimdReduceOp::Mul => T::simd_one(),
-        JetSimdReduceOp::Min => T::simd_min_identity(),
-        JetSimdReduceOp::Max => T::simd_max_identity(),
+        JetSimdReduceOp::Add | JetSimdReduceOp::Avg => {
+            jet_simd_reduce_fixed(lanes, T::simd_zero())
+        }
+        JetSimdReduceOp::Mul => {
+            let mut value = T::simd_one();
+            for &lane in lanes {
+                value = value.simd_mul(lane);
+            }
+            value
+        }
+        JetSimdReduceOp::Min => {
+            let mut value = T::simd_min_identity();
+            for &lane in lanes {
+                value = value.simd_min(lane);
+            }
+            value
+        }
+        JetSimdReduceOp::Max => {
+            let mut value = T::simd_max_identity();
+            for &lane in lanes {
+                value = value.simd_max(lane);
+            }
+            value
+        }
     };
-    for &lane in lanes {
-        value = jet_simd_reduce_apply(value, lane, op);
-    }
     if op == JetSimdReduceOp::Avg {
         value = value.simd_div(T::simd_from_len(lanes.len()));
     }

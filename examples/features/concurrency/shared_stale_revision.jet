@@ -1,0 +1,14 @@
+// D-SHARED-REVISION1=A: a publication must match the committed Shared
+// revision it observed; the older result is rejected without overwriting new.
+struct State {
+    value: String
+}
+
+fn run() {
+    state :: shared State{value: "old"}
+    seen :: state.capture()
+    state.value = "new"
+    accepted :: state.try_replace(^seen, State{value: "late"}) ?? false
+    print("accepted={accepted}")
+    print("current={state.value}")
+}

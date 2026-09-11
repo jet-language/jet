@@ -1,12 +1,12 @@
 //! Card #1895: cross-run runtime-witness ledger and conservative repairs.
 
 use std::collections::BTreeMap;
-use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
-use jet_foundation::Report::render_status_json;
-use jet_foundation::JSON::{json_escape, parse_json, JSONValue};
+use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
+use jet_foundation::DataTree::DataTree;
+use jet_foundation::JSON::parse_json;
 
 use crate::OutputMode;
 
@@ -44,7 +44,7 @@ pub(crate) fn audit(args: &[String], mode: OutputMode) {
     if mode.json {
         println!("{}", render_audit_json(&rows));
     } else {
-        let color = mode.color_stderr_for(std::io::stdout().is_terminal());
+        let color = mode.color_stderr();
         print!("{}", render_audit_text(&rows, color));
     }
 }
@@ -139,29 +139,27 @@ pub(crate) fn fix(args: &[String], mode: OutputMode) {
     }
 
     if mode.json {
-        let applied_json = applied
-            .iter()
-            .map(|(row, changed)| {
-                format!(
-                    "{{\"source\":\"{}\",\"span_start\":{},\"span_end\":{},\"repair\":\"{}\",\"changed\":{}}}",
-                    json_escape(&row.source),
-                    row.span_start,
-                    row.span_end,
-                    json_escape(&row.repairs[0]),
-                    *changed && !dry_run,
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(",");
-        let payload = format!(
-            "{{\"dry_run\":{},\"applied\":[{}],\"options\":{}}}",
-            dry_run,
-            applied_json,
-            options.len(),
+        let applied = StatusValue::array(applied.iter().map(|(row, changed)| {
+            StatusValue::object(
+                StatusFields::new()
+                    .with("source", row.source.as_str())
+                    .with("span_start", row.span_start)
+                    .with("span_end", row.span_end)
+                    .with("repair", row.repairs[0].as_str())
+                    .with("changed", *changed && !dry_run),
+            )
+        }));
+        let memory = StatusValue::object(
+            StatusFields::new()
+                .with("dry_run", dry_run)
+                .with("applied", applied)
+                .with("options", options.len()),
         );
         println!(
             "{}",
-            render_status_json("ok", true, "fix.memory", &format!(",\"memory\":{payload}"))
+            StatusEnvelope::new("fix.memory", true)
+                .with_field("memory", memory)
+                .json()
         );
         return;
     }
@@ -298,10 +296,9 @@ fn read_rows(path: &Path) -> Result<Vec<Row>, String> {
     });
     Ok(rows)
 }
-
-fn parse_row(value: &JSONValue, line: usize) -> Result<Row, String> {
+fn parse_row(value: &DataTree, line: usize) -> Result<Row, String> {
     let object = match value {
-        JSONValue::Object(object) => object,
+        DataTree::Object(object) => object,
         _ => return Err(format!("memory ledger row {line} is not an object")),
     };
     if string(object, "schema", line)? != LEDGER_SCHEMA
@@ -316,23 +313,27 @@ fn parse_row(value: &JSONValue, line: usize) -> Result<Row, String> {
     if span_start > span_end {
         return Err(format!("memory ledger row {line} has a reversed span"));
     }
-    let expected = match object.get("expected") {
-        Some(JSONValue::Null) | None => None,
-        Some(JSONValue::String(value)) if value.len() <= MAX_FIELD_BYTES => Some(value.clone()),
-        _ => {
-            return Err(format!(
-                "memory ledger row {line} has invalid expected text"
-            ))
-        }
+    let expected = match object_field(object, "expected") {
+        Some(DataTree::Null) | None => None,
+        Some(value) => match value.as_str().ok().filter(|value| value.len() <= MAX_FIELD_BYTES) {
+            Some(value) => Some(value.to_string()),
+            None => {
+                return Err(format!(
+                    "memory ledger row {line} has invalid expected text"
+                ))
+            }
+        },
     };
-    let repairs = match object.get("repairs") {
-        Some(JSONValue::Array(values)) if values.len() <= 16 => values
+    let repairs = match object_field(object, "repairs") {
+        Some(DataTree::Array(values)) if values.len() <= 16 => values
             .iter()
-            .map(|value| match value {
-                JSONValue::String(value) if !value.is_empty() && value.len() <= MAX_FIELD_BYTES => {
-                    Ok(value.clone())
-                }
-                _ => Err(format!("memory ledger row {line} has an invalid repair")),
+            .map(|value| {
+                value
+                    .as_str()
+                    .ok()
+                    .filter(|value| !value.is_empty() && value.len() <= MAX_FIELD_BYTES)
+                    .map(str::to_string)
+                    .ok_or_else(|| format!("memory ledger row {line} has an invalid repair"))
             })
             .collect::<Result<Vec<_>, _>>()?,
         _ => return Err(format!("memory ledger row {line} has invalid repairs")),
@@ -352,29 +353,31 @@ fn parse_row(value: &JSONValue, line: usize) -> Result<Row, String> {
     })
 }
 
+fn object_field<'a>(object: &'a [(String, DataTree)], name: &str) -> Option<&'a DataTree> {
+    object.iter().find_map(|(key, value)| (key == name).then_some(value))
+}
+
 fn field<'a>(
-    object: &'a std::collections::BTreeMap<String, JSONValue>,
+    object: &'a [(String, DataTree)],
     name: &str,
     line: usize,
-) -> Result<&'a JSONValue, String> {
-    object
-        .get(name)
+) -> Result<&'a DataTree, String> {
+    object_field(object, name)
         .ok_or_else(|| format!("memory ledger row {line} is missing `{name}`"))
 }
 
 fn string<'a>(
-    object: &'a std::collections::BTreeMap<String, JSONValue>,
+    object: &'a [(String, DataTree)],
     name: &str,
     line: usize,
 ) -> Result<&'a str, String> {
-    match field(object, name, line)? {
-        JSONValue::String(value) => Ok(value),
-        _ => Err(format!("memory ledger row {line} `{name}` is not text")),
-    }
+    field(object, name, line)?
+        .as_str()
+        .map_err(|_| format!("memory ledger row {line} `{name}` is not text"))
 }
 
 fn safe_string(
-    object: &std::collections::BTreeMap<String, JSONValue>,
+    object: &[(String, DataTree)],
     name: &str,
     line: usize,
 ) -> Result<String, String> {
@@ -388,12 +391,14 @@ fn safe_string(
 }
 
 fn uint(
-    object: &std::collections::BTreeMap<String, JSONValue>,
+    object: &[(String, DataTree)],
     name: &str,
     line: usize,
 ) -> Result<u64, String> {
     match field(object, name, line)? {
-        JSONValue::Number(value) if *value >= 0 => Ok(*value as u64),
+        DataTree::Int(value) if *value >= 0 => u64::try_from(*value).map_err(|_| {
+            format!("memory ledger row {line} `{name}` is not a non-negative integer")
+        }),
         _ => Err(format!(
             "memory ledger row {line} `{name}` is not a non-negative integer"
         )),
@@ -401,12 +406,12 @@ fn uint(
 }
 
 fn boolean(
-    object: &std::collections::BTreeMap<String, JSONValue>,
+    object: &[(String, DataTree)],
     name: &str,
     line: usize,
 ) -> Result<bool, String> {
     match field(object, name, line)? {
-        JSONValue::Bool(value) => Ok(*value),
+        DataTree::Bool(value) => Ok(*value),
         _ => Err(format!("memory ledger row {line} `{name}` is not Bool")),
     }
 }
@@ -453,41 +458,35 @@ fn render_audit_text(rows: &[Row], color: bool) -> String {
 
 fn render_audit_json(rows: &[Row]) -> String {
     let count = rows.len();
-    let rows = rows
-        .iter()
-        .map(|row| {
-            let repairs = row
-                .repairs
+    let rows = StatusValue::array(rows.iter().map(|row| {
+        let repairs = StatusValue::array(
+            row.repairs
                 .iter()
-                .map(|repair| format!("\"{}\"", json_escape(repair)))
-                .collect::<Vec<_>>()
-                .join(",");
-            format!(
-                "{{\"kind\":\"{}\",\"code\":\"{}\",\"source\":\"{}\",\"span_start\":{},\"span_end\":{},\"byte_spans\":{},\"scope\":\"{}\",\"provenance\":\"{}\",\"detail\":\"{}\",\"repairs\":[{}]}}",
-                json_escape(&row.kind),
-                json_escape(&row.code),
-                json_escape(&row.source),
-                row.span_start,
-                row.span_end,
-                row.byte_spans,
-                json_escape(&row.scope),
-                json_escape(&row.provenance),
-                json_escape(&row.detail),
-                repairs,
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-    let payload = format!(
-        "{{\"coverage\":\"exercised runs only\",\"witnesses\":{},\"rows\":[{}]}}",
-        count, rows,
+                .map(|repair| StatusValue::from(repair.as_str())),
+        );
+        StatusValue::object(
+            StatusFields::new()
+                .with("kind", row.kind.as_str())
+                .with("code", row.code.as_str())
+                .with("source", row.source.as_str())
+                .with("span_start", row.span_start)
+                .with("span_end", row.span_end)
+                .with("byte_spans", row.byte_spans)
+                .with("scope", row.scope.as_str())
+                .with("provenance", row.provenance.as_str())
+                .with("detail", row.detail.as_str())
+                .with("repairs", repairs),
+        )
+    }));
+    let memory = StatusValue::object(
+        StatusFields::new()
+            .with("coverage", "exercised runs only")
+            .with("witnesses", count)
+            .with("rows", rows),
     );
-    render_status_json(
-        "ok",
-        true,
-        "audit.memory",
-        &format!(",\"memory\":{payload}"),
-    )
+    StatusEnvelope::new("audit.memory", true)
+        .with_field("memory", memory)
+        .json()
 }
 
 fn write_atomic(path: &Path, source: &str) -> Result<(), String> {

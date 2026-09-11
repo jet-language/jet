@@ -23,6 +23,9 @@ impl<'a> Parser<'a> {
                 }
                 if matches!(self.peek().kind, TokKind::Comma) {
                     self.bump();
+                    if matches!(self.peek().kind, TokKind::RParen) {
+                        break;
+                    }
                 } else if compose && matches!(self.peek().kind, TokKind::Semi) {
                     self.bump();
                 } else {
@@ -43,23 +46,123 @@ impl<'a> Parser<'a> {
     }
 
     pub(in crate::Parser) fn call_arg(&mut self) -> Result<CallArg, Diagnostic> {
-        self.call_arg_with_leading_dot(false, false)
+        self.call_arg_with_leading_dot(false, false, false)
     }
 
     fn call_arg_for_named_call(&mut self, compose: bool) -> Result<CallArg, Diagnostic> {
-        self.call_arg_with_leading_dot(false, compose)
+        self.call_arg_with_leading_dot(false, false, compose)
     }
 
     /// Marker arguments also accept a leading-dot enum literal for a lowercase
-    /// variant, such as `#Kernel(.parallel)`. Ordinary expression parsing keeps
-    /// the existing uppercase-only leading-dot value grammar.
-    pub(in crate::Parser) fn marker_call_arg(&mut self) -> Result<CallArg, Diagnostic> {
-        self.call_arg_with_leading_dot(true, false)
+    /// variant, such as `#Kernel(.parallel)`. Effect rows use the same
+    /// `-[Effects]>` representation as callable bounds, but stay in the marker
+    /// argument carrier until sema validates their slot.
+    pub(in crate::Parser) fn marker_call_arg(
+        &mut self,
+    ) -> Result<(crate::AST::MarkerCallArg, Option<(String, Span)>), Diagnostic> {
+        if self.marker_effect_row_starts_here() {
+            let (label, label_span) = self.marker_effect_row_label()?;
+            let (effects, span) = self.parse_marker_effect_row()?;
+            return Ok((
+                crate::AST::MarkerCallArg::EffectRow { effects, span },
+                label.map(|name| (name, label_span)),
+            ));
+        }
+        let arg = self.call_arg_with_leading_dot(true, true, false)?;
+        let label = arg.label.clone();
+        Ok((crate::AST::MarkerCallArg::Expr(arg.expr), label))
+    }
+
+
+    fn marker_effect_row_starts_here(&self) -> bool {
+        let direct = matches!(self.peek().kind, TokKind::Minus)
+            && matches!(self.peek2().kind, TokKind::LBracket);
+        let labeled = matches!(
+            (
+                &self.peek().kind,
+                &self.peek2().kind,
+                self.toks.get(self.pos + 2).map(|token| &token.kind),
+                self.toks.get(self.pos + 3).map(|token| &token.kind),
+            ),
+            (
+                TokKind::Ident(_) | TokKind::KwTag | TokKind::KwUse,
+                TokKind::Colon,
+                Some(TokKind::Minus),
+                Some(TokKind::LBracket),
+            )
+        );
+        direct || labeled
+    }
+
+    fn marker_effect_row_label(&mut self) -> Result<(Option<String>, Span), Diagnostic> {
+        if !matches!(
+            (
+                &self.peek().kind,
+                &self.peek2().kind,
+                self.toks.get(self.pos + 2).map(|token| &token.kind),
+                self.toks.get(self.pos + 3).map(|token| &token.kind),
+            ),
+            (
+                TokKind::Ident(_) | TokKind::KwTag | TokKind::KwUse,
+                TokKind::Colon,
+                Some(TokKind::Minus),
+                Some(TokKind::LBracket),
+            )
+        ) {
+            return Ok((None, self.peek().span));
+        }
+        let token = self.bump();
+        let name_span = token.span;
+        let name = match token.kind {
+            TokKind::Ident(name) => name,
+            TokKind::KwTag => "tag".to_string(),
+            TokKind::KwUse => crate::Syntax::KW_USE.to_string(),
+            _ => unreachable!(),
+        };
+        self.bump(); // `:`
+        Ok((Some(name), name_span))
+    }
+
+    fn parse_marker_effect_row(
+        &mut self,
+    ) -> Result<(Vec<(String, Span)>, Span), Diagnostic> {
+        let start = self.peek().span.start;
+        self.expect(TokKind::Minus, "to start an effect row")?;
+        self.expect(TokKind::LBracket, "to start an effect row")?;
+        let mut effects = Vec::new();
+        while !matches!(self.peek().kind, TokKind::RBracket) {
+            if matches!(self.peek().kind, TokKind::DotDot) {
+                self.bump();
+                let (name, span) = self.expect_ident("for an open effect-row name")?;
+                effects.push((format!("..{name}"), span));
+            } else {
+                let prohibited = matches!(self.peek().kind, TokKind::Bang);
+                if prohibited {
+                    self.bump();
+                }
+                let (name, span) = self.expect_effect_path_name("for an effect name")?;
+                let name = if prohibited {
+                    format!("!{name}")
+                } else {
+                    name
+                };
+                effects.push((name, span));
+            }
+            if matches!(self.peek().kind, TokKind::RBracket) {
+                break;
+            }
+            self.expect(TokKind::Comma, "between effects in the row")?;
+        }
+        self.expect(TokKind::RBracket, "to close the effect row")?;
+        self.expect(TokKind::Gt, "after the effect row")?;
+        let end = self.toks[self.pos - 1].span.end;
+        Ok((effects, Span::new(start, end)))
     }
 
     fn call_arg_with_leading_dot(
         &mut self,
         allow_lowercase_leading_dot: bool,
+        allow_marker_labels: bool,
         allow_compose_template: bool,
     ) -> Result<CallArg, Diagnostic> {
         // D-MEM1/S2: an unmarked argument is a plain read at the call site —
@@ -76,7 +179,7 @@ impl<'a> Parser<'a> {
         // S61: detect `name: expr` labels — including the registered `use` keyword
         // inside marker arguments — without consuming a plain variable name.
         let label_token = matches!(self.peek().kind, TokKind::Ident(_) | TokKind::KwTag)
-            || allow_lowercase_leading_dot && matches!(self.peek().kind, TokKind::KwUse);
+            || allow_marker_labels && matches!(self.peek().kind, TokKind::KwUse);
         let label = if label_token && matches!(self.peek2().kind, TokKind::Colon) {
             let lbl_tok = self.bump();
             let lbl_name = match lbl_tok.kind {
@@ -129,7 +232,7 @@ impl<'a> Parser<'a> {
         {
             let start = self.bump().span.start;
             let (variant, variant_span) =
-                self.expect_ident("after `.` in a marker enum argument")?;
+                self.expect_ident("after `.` in a leading-dot enum argument")?;
             Expr::EnumLit {
                 type_name: String::new(),
                 variant,
@@ -171,7 +274,7 @@ impl<'a> Parser<'a> {
                     }
                 }
                 TokKind::Slash | TokKind::LBrace | TokKind::At => saw_url_punctuation = true,
-                TokKind::Str(_) | TokKind::Eof => break,
+                TokKind::Str(_) | TokKind::RawStr(_) | TokKind::Eof => break,
                 _ => {}
             }
             index += 1;

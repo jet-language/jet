@@ -1,4 +1,4 @@
-// core-conformance: core.data.group_mean
+// core-conformance: core.data.query.group_by.mean
 use core.data as data
 
 struct Ticket {
@@ -11,6 +11,9 @@ fn run() {
         Ticket{team: "Core", minutes: 4.0},
         Ticket{team: "Core", minutes: 8.0}
     }
-    groups :: data.group_mean(rows, ticket -> ticket.team, ticket -> ticket.minutes) ?? panic("group mean")
-    print(groups[0].mean)
+    groups :: data.query(rows)
+        .group_by(ticket -> ticket.team)
+        .mean(ticket -> ticket.minutes)
+        .collect() ?? panic("group mean")
+    print(groups[0].value)
 }

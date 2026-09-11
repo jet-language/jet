@@ -90,10 +90,26 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
     identity.extend_from_slice(source.as_bytes());
     identity.push(0);
     identity.extend_from_slice(root.to_string_lossy().as_bytes());
-    let provenance = format!(
+    let mut provenance = format!(
         "schema=jet-lua-bind-v2\nsha256={}\nruntime={}\nstate=per-session\ntransport=datatree+table-view\ntable-view=zero-copy\nhook=instructions\n",
-        crate::SHA256::sha256_hex(&identity), root.display()
+        crate::SHA256::sha256_hex(&identity),
+        root.display()
     );
+    crate::ForeignBridge::append_boundary_for_artifact(
+        &mut provenance,
+        *crate::AST::binder_descriptor(crate::AST::ForeignLanguage::Lua)
+            .ok_or_else(|| BindError::Source("Lua binder descriptor is not registered".into()))?,
+        lib,
+        path,
+        &archive,
+        format!(
+            "luac={};cc={};ar={}",
+            luac.display(),
+            crate::ForeignBridge::tool_identity("cc"),
+            crate::ForeignBridge::tool_identity("ar")
+        ),
+    )
+    .map_err(BindError::IO)?;
     Ok(BindResult {
         source: render_jet(&abi, &functions),
         bound: functions,

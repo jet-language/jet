@@ -1,0 +1,395 @@
+{
+  "schema": "jet.optimization-experiments.v1",
+  "version": 1,
+  "card": "#2951",
+  "status": "authored_unexecuted",
+  "description": "Bounded optimization experiments. Legality is checked before profitability; no experiment result adopts a production rule.",
+  "driver": "tools/agent-eval/optimization/optimization.mjs",
+  "runner": {
+    "environment": "scripts/agent/jet-env",
+    "checker": "proof/compiler/optimization/check.mjs",
+    "checker_args": ["--json"],
+    "inspection": ["jet", "inspect", "compiler", "check"],
+    "harness": "gauntlet/harness/run.mjs",
+    "target_binary": "target/release/jet"
+  },
+  "contract": {
+    "path": "proof/compiler/optimization/contract.json",
+    "schema": "jet.optimization-contract.v1",
+    "observation_fields": [
+      "result",
+      "typed_failure",
+      "mutation",
+      "input_consumption",
+      "ordered_effects",
+      "cleanup",
+      "resource_premises",
+      "schedule",
+      "allowed_schedules"
+    ],
+    "preservation_dimensions": [
+      "origin_identity",
+      "side_conditions",
+      "legality",
+      "profitability",
+      "target_representation"
+    ],
+    "non_proof_states": [
+      "bounded_search",
+      "sampled_agreement",
+      "timeout",
+      "missing_premise",
+      "missing_mode",
+      "peer_substitution",
+      "unavailable_artifact"
+    ],
+    "unknown_policy": "unverified_never_passes"
+  },
+  "execution": {
+    "modes": ["plan", "execute", "report"],
+    "tiers": ["aot", "run", "dev", "check"],
+    "required_same_job": ["control", "candidate", "invalid_fast", "legal_slow", "legal_measured_improvement", "required_peers"],
+    "raw_records_required": ["checker", "compiler_inspect", "direct_run", "gauntlet"],
+    "timeout_ms": 120000,
+    "scratch_root": "$XDG_CACHE_HOME/jet-optimization/runs",
+    "no_averaging": true,
+    "no_peer_substitution": true
+  },
+  "identity": {
+    "required_fields": [
+      "manifest_sha256",
+      "family",
+      "variant",
+      "source_sha256",
+      "input_sha256",
+      "expected_sha256",
+      "peer_sha256",
+      "peer_sha256_by_language",
+      "checker_sha256",
+      "contract_sha256",
+      "compiler_sha256",
+      "target_identity",
+      "toolchain_identity",
+      "harness_sha256"
+    ],
+    "stale_or_missing": "unverified"
+  },
+  "selection": {
+    "owner_choice_required": true,
+    "adoption_requires": [
+      "checker_legality_record",
+      "all_required_observations",
+      "same_job_control_and_candidate",
+      "same_job_required_peer_and_modes",
+      "raw_loss_and_unavailable_rows",
+      "measured_improvement_without_semantic_change",
+      "exact_owner_card"
+    ],
+    "selected_rule_default": null,
+    "rejected_rule_default": null
+  },
+  "provenance": {
+    "worker_profile": "implementation",
+    "jet_variant": "Authored in each family fixture directory; no production optimizer or second compiler is introduced.",
+    "peer_variant": "Matched Python implementation consumes the same declared input and expected output.",
+    "measurement": "pending: no execution, timing, or adoption claim is authored in source",
+    "source_of_truth": "Jet and peer fixture files plus raw checker/inspect/harness records"
+  },
+  "families": [
+    {
+      "id": "checked-arithmetic-float",
+      "title": "Checked arithmetic and Float rewrites",
+      "owner_card": "#2895",
+      "production_owner": "crates/jet-foundation/src/MIROptimization.rs and Acceleration.rs",
+      "matrix_cell": "numerics.float-kernel",
+      "fixture_dir": "fixtures/checked-arithmetic-float",
+      "peer": "peer.py",
+      "required_peers": ["rust", "python", "c", "zig", "node"],
+      "peer_sources": {
+        "python": "peer.py",
+        "rust": "peer-rust.rs",
+        "c": "peer-c.c",
+        "zig": "peer-zig.zig",
+        "node": "peer-node.mjs"
+      },
+      "input": "input.json",
+      "expected": "expected.out",
+      "question": "Can a checked integer or binary64 rewrite be selected without changing overflow, NaN, signed-zero, or evaluation-order observations?",
+      "machine_domain": {
+        "integer": "Jet Int is a target-described signed fixed-width two's-complement value; checked add traps before an unrepresentable result. The target width must be recorded before a result is usable.",
+        "float": "IEEE-754 binary64, round-to-nearest-ties-to-even, with signed zero, NaN, infinity, and evaluation order observable; reassociation and fast-math are forbidden unless separately stated.",
+        "target": "The report must bind the exact compiler target triple and floating-point lowering configuration; host defaults are not a proof."
+      },
+      "premises": [
+        "Every integer operation has a checked representability premise for the declared target width.",
+        "Float operands are finite only when the source record says so; no real-number associativity premise is inferred.",
+        "The source preserves operand evaluation order and typed failure order.",
+        "The candidate and control consume byte-identical input and emit the same target representation."
+      ],
+      "observations": {
+        "result": "Byte-exact numeric output, including signed-zero and NaN spelling where the runtime exposes it.",
+        "typed_failure": "Overflow and invalid-operation class, source identity, and lowest failing operation/index.",
+        "mutation": "No mutation may be introduced or removed around the arithmetic expression.",
+        "input_consumption": "Same operands, count, and consumption order; no skipped value after a checked failure.",
+        "ordered_effects": "Print/callback effects occur in source order and are not duplicated by speculative evaluation.",
+        "cleanup": "Any failure unwinds the same owned temporaries in the same order.",
+        "resource_premises": "Target width, floating-point mode, and checked-operation availability are recorded facts.",
+        "schedule": "Single-threaded expression order is unchanged.",
+        "allowed_schedules": "Only schedules proved equivalent under the numeric contract are admitted; unrestricted reassociation is not admitted.",
+        "identity": "The inspected operation points to the same source span and compiler candidate identity as the raw record."
+      },
+      "falsifier": "Use the authored Float counterexample (1e16 + -1e16) + 1 versus 1e16 + (-1e16 + 1), and a target-width checked overflow boundary. Any changed bit, failure class, or effect order rejects the rewrite.",
+      "variants": [
+        {"id": "control", "source": "control.jet", "role": "unchanged_valid_path", "classification": "control"},
+        {"id": "candidate", "source": "candidate.jet", "role": "candidate_rewrite", "classification": "candidate"},
+        {"id": "invalid-fast", "source": "controls/invalid-fast.jet", "role": "negative_reassociation", "classification": "invalid_fast"},
+        {"id": "legal-slow", "source": "controls/legal-slow.jet", "role": "legal_but_extra_work", "classification": "legal_slow"},
+        {"id": "legal-measured-improvement", "source": "controls/legal-measured-improvement.jet", "role": "legal_candidate_for_measurement", "classification": "legal_measured_improvement"}
+      ],
+      "rule_record": {
+        "candidate_rule": "reassociate only under a checked machine-number contract",
+        "selected_rule": null,
+        "rejected_rule": null,
+        "decision": "awaiting checker, same-job cost, and owner choice",
+        "owner_card": "#2895"
+      }
+    },
+    {
+      "id": "range-alias-fusion-vectorization",
+      "title": "Range and alias facts for fusion/vectorization",
+      "owner_card": "#2895",
+      "production_owner": "crates/jet-foundation/src/MIROptimization.rs and Acceleration.rs",
+      "matrix_cell": "numerics.int-kernel",
+      "fixture_dir": "fixtures/range-alias-fusion-vectorization",
+      "peer": "peer.py",
+      "required_peers": ["rust", "python", "c", "zig", "node"],
+      "peer_sources": {
+        "python": "peer.py",
+        "rust": "peer-rust.rs",
+        "c": "peer-c.c",
+        "zig": "peer-zig.zig",
+        "node": "peer-node.mjs"
+      },
+      "input": "input.json",
+      "expected": "expected.out",
+      "question": "Can a range loop be fused or widened only when alias, bounds, lane order, and failure premises hold?",
+      "machine_domain": {
+        "index": "Finite half-open integer ranges with checked bounds; the exact input length is part of identity.",
+        "storage": "Mutable contiguous list storage with explicit alias relation; a write window cannot overlap a read window unless the contract proves the overlap-safe order.",
+        "lanes": "Integer lanes preserve element order and exact integer results; no masked lane may consume an element twice or hide a failure.",
+        "target": "The report records vector width, alignment, bounds-check policy, and target representation before comparing cost."
+      },
+      "premises": [
+        "The range endpoints and stride are unchanged.",
+        "Read/write windows are disjoint or the transformation proves an overlap-safe direction.",
+        "The body has no observable effect or early failure that lane reordering would change.",
+        "Every bounds and alias fact is attached to the source identity."
+      ],
+      "observations": {
+        "result": "Byte-exact output list and reduction value for every element.",
+        "typed_failure": "Same bounds, alias, and body failure class at the same lowest index.",
+        "mutation": "Same cells are written once, in the same visible final state; no hidden temporary replaces an observed alias.",
+        "input_consumption": "Same range cardinality and read count; no speculative extra read beyond the source window.",
+        "ordered_effects": "Effects in the loop body retain source order; effectful bodies are not widened.",
+        "cleanup": "Temporary vector buffers and borrowed views release in the same order on success and failure.",
+        "resource_premises": "Alignment, lane width, allocation, and alias proofs are present and target-bound.",
+        "schedule": "Sequential index order is the control; candidate lane order is explicit.",
+        "allowed_schedules": "Only non-overlapping, order-equivalent lanes may be fused or vectorized.",
+        "identity": "Range, storage, and alias facts carry the source and input digests into the inspect record."
+      },
+      "falsifier": "Run the negative control with overlapping read/write windows and an effectful body. A changed element, duplicate read, changed lowest failure, or reordered print rejects fusion/vectorization.",
+      "variants": [
+        {"id": "control", "source": "control.jet", "role": "unchanged_valid_path", "classification": "control"},
+        {"id": "candidate", "source": "candidate.jet", "role": "candidate_fusion_or_vectorization", "classification": "candidate"},
+        {"id": "invalid-fast", "source": "controls/invalid-fast.jet", "role": "negative_alias_or_lane_reorder", "classification": "invalid_fast"},
+        {"id": "legal-slow", "source": "controls/legal-slow.jet", "role": "legal_but_extra_helper", "classification": "legal_slow"},
+        {"id": "legal-measured-improvement", "source": "controls/legal-measured-improvement.jet", "role": "legal_candidate_for_measurement", "classification": "legal_measured_improvement"}
+      ],
+      "rule_record": {
+        "candidate_rule": "fuse or widen only from explicit range and non-overlap facts",
+        "selected_rule": null,
+        "rejected_rule": null,
+        "decision": "awaiting checker, same-job cost, and owner choice",
+        "owner_card": "#2895"
+      }
+    },
+    {
+      "id": "specialization-comptime",
+      "title": "Specialization and comptime staging",
+      "owner_card": "#2899",
+      "production_owner": "crates/jet-foundation/src/MIROptimization.rs and compiler inspect decision records",
+      "matrix_cell": "numerics.script",
+      "mode": "batch-steps",
+      "fixture_dir": "fixtures/specialization-comptime",
+      "peer": "peer.py",
+      "required_peers": ["rust", "python", "c", "zig", "node"],
+      "peer_sources": {
+        "python": "peer.py",
+        "rust": "peer-rust.rs",
+        "c": "peer-c.c",
+        "zig": "peer-zig.zig",
+        "node": "peer-node.mjs"
+      },
+      "input": "input.json",
+      "expected": "expected.out",
+      "question": "Can a stable compile-time fact specialize a hot path without stale reuse, effect loss, or loss of the runtime fallback?",
+      "machine_domain": {
+        "stage": "Comptime bindings are evaluated by the declared Jet staging evaluator and their source/environment digest is part of identity.",
+        "runtime": "Runtime inputs remain typed Int values with checked operations; a dynamic value must use the fallback path when the specialization premise is absent.",
+        "effects": "Only the declared pure/comptime effect set may execute during specialization; IO, time, environment, and mutation are not silently staged.",
+        "target": "The report records compiler target, specialization configuration, code-size identity, and invalidation key."
+      },
+      "premises": [
+        "Specialized values are stable for the full job and have a matching source/environment digest.",
+        "All effects and typed failures are preserved at the same stage or explicitly rejected.",
+        "A runtime fallback exists for changed or unavailable inputs.",
+        "Invalidation occurs before a stale specialization is reused."
+      ],
+      "observations": {
+        "result": "Warm and cold executions produce the same byte-exact result for equal inputs.",
+        "typed_failure": "The same invalid input produces the same typed failure and location, whether specialized or fallback.",
+        "mutation": "Runtime state is not frozen into a stale compile-time value; state updates remain visible.",
+        "input_consumption": "Runtime inputs consumed by the fallback are not removed by specialization.",
+        "ordered_effects": "Effects remain at their declared stage and source order.",
+        "cleanup": "Staged temporaries and runtime resources have matching cleanup obligations.",
+        "resource_premises": "Code size, retained specialization state, invalidation key, and cache lifetime are recorded.",
+        "schedule": "Specialization changes representation only; it does not change an effectful schedule.",
+        "allowed_schedules": "Only stage-equivalent pure work may move to comptime; dynamic/effectful work stays runtime.",
+        "identity": "The specialization key joins source, input, compiler, target, and environment identities."
+      },
+      "falsifier": "Re-run the authored program after changing the specialization input from 4 to 5 without rebuilding the source identity. A stale 12, lost fallback, or shifted effect rejects the specialization.",
+      "variants": [
+        {"id": "control", "source": "control.jet", "role": "runtime_fallback", "classification": "control"},
+        {"id": "candidate", "source": "candidate.jet", "role": "comptime_specialization", "classification": "candidate"},
+        {"id": "invalid-fast", "source": "controls/invalid-fast.jet", "role": "negative_stale_specialization", "classification": "invalid_fast"},
+        {"id": "legal-slow", "source": "controls/legal-slow.jet", "role": "legal_runtime_extra_work", "classification": "legal_slow"},
+        {"id": "legal-measured-improvement", "source": "controls/legal-measured-improvement.jet", "role": "legal_specialized_candidate", "classification": "legal_measured_improvement"}
+      ],
+      "rule_record": {
+        "candidate_rule": "specialize stable pure inputs and invalidate on identity change",
+        "selected_rule": null,
+        "rejected_rule": null,
+        "decision": "awaiting checker, same-job cost, and owner choice",
+        "owner_card": "#2899"
+      }
+    },
+    {
+      "id": "layout-no-semantic-copy",
+      "title": "No-semantic-copy layout selection",
+      "owner_card": "#2899",
+      "production_owner": "crates/jet-foundation/src/MIROptimization.rs and compiler inspect decision records",
+      "matrix_cell": "embedded.data",
+      "fixture_dir": "fixtures/layout-no-semantic-copy",
+      "peer": "peer.py",
+      "required_peers": ["rust", "python", "c", "zig", "node"],
+      "peer_sources": {
+        "python": "peer.py",
+        "rust": "peer-rust.rs",
+        "c": "peer-c.c",
+        "zig": "peer-zig.zig",
+        "node": "peer-node.mjs"
+      },
+      "input": "input.json",
+      "expected": "expected.out",
+      "question": "Can a layout representation change avoid a semantic copy while preserving identity, fields, ownership, and foreign-visible offsets?",
+      "machine_domain": {
+        "representation": "The candidate uses the declared C-compatible field order and target alignment; offsets and stride are target facts, not inferred host constants.",
+        "identity": "A record identity and field ownership remain observable even when storage is re-packed internally.",
+        "boundary": "No external pointer, ABI consumer, raw address, or foreign callback may observe an unapproved layout change.",
+        "target": "The report records target triple, ABI, alignment, field offsets, stride, and representation digest."
+      },
+      "premises": [
+        "No source or foreign consumer observes the old address or offset unless the declared layout contract preserves it.",
+        "All fields and ownership transitions are preserved exactly.",
+        "A copy is not removed when it is the required ownership boundary.",
+        "The selected representation is legal before cache or bandwidth cost is considered."
+      ],
+      "observations": {
+        "result": "The same field values and serialized output are observed by the Jet and peer programs.",
+        "typed_failure": "Field access, ownership, and foreign-boundary failures remain the same.",
+        "mutation": "Mutating one logical record changes the same owner and field, not a detached copy.",
+        "input_consumption": "The same records and fields are read once; no hidden materialization drops a field.",
+        "ordered_effects": "Foreign calls and visible writes retain source order.",
+        "cleanup": "The same owner releases fields and any temporary layout buffer in the same order.",
+        "resource_premises": "Copy bytes, cache-block memory, alignment, stride, and retention are recorded.",
+        "schedule": "Layout changes do not alter logical iteration order.",
+        "allowed_schedules": "Only internal layouts with an explicit no-observable-copy relation are allowed.",
+        "identity": "Layout facts, field offsets, target representation, and source identity join in the inspect record."
+      },
+      "falsifier": "Pass the layout to a consumer that reads the old field offset or mutate through an alias. A changed field, pointer identity, ownership release, or foreign-visible offset rejects no-semantic-copy.",
+      "variants": [
+        {"id": "control", "source": "control.jet", "role": "declared_c_layout", "classification": "control"},
+        {"id": "candidate", "source": "candidate.jet", "role": "no_semantic_copy_candidate", "classification": "candidate"},
+        {"id": "invalid-fast", "source": "controls/invalid-fast.jet", "role": "negative_offset_or_identity_change", "classification": "invalid_fast"},
+        {"id": "legal-slow", "source": "controls/legal-slow.jet", "role": "legal_explicit_copy", "classification": "legal_slow"},
+        {"id": "legal-measured-improvement", "source": "controls/legal-measured-improvement.jet", "role": "legal_layout_candidate", "classification": "legal_measured_improvement"}
+      ],
+      "rule_record": {
+        "candidate_rule": "remove only copies with a proven no-observable-copy relation",
+        "selected_rule": null,
+        "rejected_rule": null,
+        "decision": "awaiting checker, same-job cost, and owner choice",
+        "owner_card": "#2899"
+      }
+    },
+    {
+      "id": "conditional-parallel-scheduling",
+      "title": "Conditional parallel scheduling",
+      "owner_card": "#2922",
+      "production_owner": "crates/jet-foundation/src/Acceleration.rs and parallel crossover owner",
+      "matrix_cell": "concurrency.app",
+      "fixture_dir": "fixtures/conditional-parallel-scheduling",
+      "peer": "peer.py",
+      "required_peers": ["rust", "python", "c", "zig", "node"],
+      "peer_sources": {
+        "python": "peer.py",
+        "rust": "peer-rust.rs",
+        "c": "peer-c.c",
+        "zig": "peer-zig.zig",
+        "node": "peer-node.mjs"
+      },
+      "input": "input.json",
+      "expected": "expected.out",
+      "question": "Does a bounded parallel schedule preserve independent-kernel behavior and win only when measured work amortizes setup and bandwidth cost?",
+      "machine_domain": {
+        "kernel": "Finite independent Int iterations with no shared mutation, IO, callbacks, or early exit; each result is deterministic.",
+        "schedule": "para_map preserves source order and uses a bounded worker limit; cancellation and lowest failing index are part of the contract.",
+        "gate": "Automatic acceleration is eligible only above the 1024-item floor when projected gain is at least 2x spawn cost plus the bandwidth floor; first chunk timing is retained.",
+        "resources": "Parallelism uses the existing pool and bounded per-cache-block memory; no new threads are created by the experiment."
+      },
+      "premises": [
+        "Every iteration is independent and has the same typed result and failure behavior.",
+        "The pool limit, chunk partition, and cancellation policy are recorded.",
+        "The candidate and control consume the same 1024-item input and output all required observations.",
+        "A cost win is reported per mode/tier and is not inferred from sampled or historical probes."
+      ],
+      "observations": {
+        "result": "Byte-exact ordered output and complete result count.",
+        "typed_failure": "Same lowest failing index, failure type, and sibling cancellation behavior.",
+        "mutation": "No shared mutable cell is written by independent iterations; output slots are disjoint.",
+        "input_consumption": "Each input is consumed exactly once and no work past cancellation is reported as completed.",
+        "ordered_effects": "Effectful callbacks are excluded unless their order is explicitly preserved.",
+        "cleanup": "Every worker, chunk, and resource is joined/released on success and failure.",
+        "resource_premises": "Pool size, spawn cost, cache-block bytes, bandwidth floor, and peak memory are recorded.",
+        "schedule": "Control is sequential; candidate records chunks, worker limit, first chunk timing, and completion order.",
+        "allowed_schedules": "Only bounded schedules proved independent and order-equivalent are eligible; a sampled crossover is not proof.",
+        "identity": "Schedule, input, target, compiler, and harness identities are joined for each raw row."
+      },
+      "falsifier": "Use a callback with shared mutation or an injected failure at the lowest index. Any duplicate/missing result, changed failure index, cleanup leak, or speed claim below the gate rejects automatic parallel scheduling.",
+      "variants": [
+        {"id": "control", "source": "control.jet", "role": "unchanged_sequential_path", "classification": "control"},
+        {"id": "candidate", "source": "candidate.jet", "role": "conditional_parallel_candidate", "classification": "candidate"},
+        {"id": "invalid-fast", "source": "controls/invalid-fast.jet", "role": "negative_shared_or_wrong_result", "classification": "invalid_fast"},
+        {"id": "legal-slow", "source": "controls/legal-slow.jet", "role": "legal_sequential_extra_work", "classification": "legal_slow"},
+        {"id": "legal-measured-improvement", "source": "controls/legal-measured-improvement.jet", "role": "legal_parallel_candidate", "classification": "legal_measured_improvement"}
+      ],
+      "rule_record": {
+        "candidate_rule": "select bounded parallel scheduling only after legality and D-ACCEL1 cost gate",
+        "selected_rule": null,
+        "rejected_rule": null,
+        "decision": "awaiting checker, same-job cost, and owner choice",
+        "owner_card": "#2922"
+      }
+    }
+  ]
+}

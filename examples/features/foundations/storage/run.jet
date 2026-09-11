@@ -1,0 +1,121 @@
+use core.files as fs
+use core.process as process
+use core.sys as sys
+use core.time as time
+use "cache" as cache
+use "kv" as kv
+use "log" as log
+use "pool" as pool
+use "queue" as queue
+
+fn require(ok: Bool, message: String) {
+    if !ok -> panic(message)
+}
+
+fn crash_writer(path: Path) {
+    require(log.append_record(path, "event|1|committed"), "crash writer commit")
+    fs.append_all(path, "event|2|") ?? panic("crash writer partial append")
+    fs.fsync(path) ?? panic("crash writer partial fsync")
+    print("crash_writer_ready")
+    time.sleep(30s)
+    log.append_record(path, "event|3|late")
+}
+
+fn recover_after_sigkill(path: Path) log.Recovery -> {
+    child :: process.cmd([sys.executable(), "--storage-crash-writer", path.to_string()])
+        .stdout(.Stream)
+        .stderr(.Capture)
+        .spawn() ?? panic("crash writer spawn")
+    ready := false
+    loop line in child.stdout.lines() {
+        if line.trim() == "crash_writer_ready" {
+            ready = true
+            break
+        }
+    }
+    if !ready -> panic("crash writer did not reach partial record")
+    child.kill() ?? panic("crash writer SIGKILL")
+    _ :: child.wait() ?? panic("crash writer wait")
+    return log.recover(path)
+}
+
+fn run() {
+    args :: process.argv()
+    if args.len() > 1 && (args.get(1) ?? "") == "--storage-crash-writer" {
+        path :: args.get(2) ?? panic("missing crash log path")
+        crash_writer(Path.from(path))
+        return
+    }
+
+    scratch :: fs.temp_dir("jet-foundation-storage") ?? panic("storage temp dir")
+    root :: Path.from(scratch.path)
+
+    crash_path :: root.join("crash.log")
+    recovery :: recover_after_sigkill(crash_path)
+    require(recovery.records.len() == 1, "partial record was not discarded")
+    require(recovery.records[0] == "event|1|committed", "committed record was not recovered")
+    require(recovery.discarded_tail, "partial tail was not reported")
+    print("crash_recovery recovered_records={recovery.records.len()} discarded_tail={recovery.discarded_tail}")
+
+    log_path :: root.join("events.log")
+    require(log.append_record(log_path, "event|1|opened"), "append first event")
+    require(log.append_record(log_path, "event|2|closed"), "append second event")
+    records :: log.read_records(log_path)
+    require(records.len() == 2, "append log record count")
+    mapped :: fs.map(log_path) ?? panic("map append log")
+    window :: mapped.window_len(0, mapped.len()) ?? panic("map append window")
+    require(window.len() > 0, "mapped append window is empty")
+    print("append_log_records={records.len()} mapped_bytes={mapped.len()}")
+
+    lock_path :: root.join("storage.lock")
+    lock :: fs.lock(lock_path) ?? panic("storage lock")
+    require(fs.exists(lock.path), "storage lock was not created")
+    print("lock_held=true")
+
+    kv_path :: root.join("kv.log")
+    require(kv.kv_put(kv_path, "alpha", "one"), "put alpha")
+    require(kv.kv_put(kv_path, "beta", "two"), "put beta")
+    require(kv.kv_put(kv_path, "alpha", "updated"), "update alpha")
+    require(kv.kv_delete(kv_path, "beta"), "delete beta")
+    alpha :: kv.kv_get(kv_path, "alpha") ?? "missing"
+    beta :: kv.kv_get(kv_path, "beta") ?? "missing"
+    require(alpha == "updated", "kv update was not replayed")
+    require(beta == "missing", "kv tombstone was not replayed")
+    before :: (fs.stat(kv_path) ?? panic("kv stat")).size
+    require(kv.kv_compact(kv_path), "kv compaction")
+    after :: (fs.stat(kv_path) ?? panic("compact stat")).size
+    replayed :: kv.kv_get(kv_path, "alpha") ?? "missing"
+    require(replayed == "updated", "kv compaction changed value")
+    require(after < before, "kv compaction did not shrink log")
+    print("kv_alpha={alpha} kv_beta={beta} kv_compacted={after < before} kv_replayed={replayed}")
+
+    leases :: pool.pool_demo()
+    require(leases == [1, 1, 2, 2], "pool exceeded its two-slot bound")
+    print("pool_health=true permits={leases.len()} leases={leases}")
+
+    queue_path :: root.join("queue.log")
+    ack_path :: root.join("queue.acks")
+    require(queue.queue_publish(queue_path, "m1", "first"), "publish m1")
+    require(queue.queue_publish(queue_path, "m2", "second"), "publish m2")
+    group_a_first :: queue.queue_pending(queue_path, ack_path, "workers")
+    require(group_a_first.len() == 2, "queue initial delivery")
+    require(queue.queue_ack(ack_path, "workers", group_a_first[0]), "ack m1")
+    group_a_redelivery :: queue.queue_pending(queue_path, ack_path, "workers")
+    group_b_first :: queue.queue_pending(queue_path, ack_path, "other")
+    require(group_a_redelivery.len() == 1, "queue redelivery")
+    require(group_b_first.len() == 2, "queue group isolation")
+    require(queue.queue_ack(ack_path, "workers", group_a_redelivery[0]), "ack m2")
+    drained :: queue.queue_pending(queue_path, ack_path, "workers").len() == 0
+    require(drained, "queue did not drain")
+    print("queue_first={group_a_first} queue_redelivery={group_a_redelivery} queue_other_group={group_b_first} queue_drained={drained}")
+
+    cache_root :: root.join("cache")
+    payload :: "content addressed payload"
+    first_key :: cache.cache_store(cache_root, payload)
+    second_key :: cache.cache_store(cache_root, payload)
+    loaded :: cache.cache_load(cache_root, first_key) ?? "missing"
+    require(first_key == second_key, "cache key was not content addressed")
+    require(loaded == payload, "cache round trip")
+    print("cache_same_key={first_key == second_key} cache_roundtrip={loaded == payload}")
+    print("storage_probe_complete")
+}

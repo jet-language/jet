@@ -18,6 +18,7 @@ fn write_window_at_maximal_place(expr: Expr, start: usize) -> Expr {
             args,
             recv_type,
             resolved_ret,
+            operator_rhs,
             checked_widen,
         } => Expr::MethodCall {
             receiver: Box::new(write_window_at_maximal_place(*receiver, start)),
@@ -28,6 +29,7 @@ fn write_window_at_maximal_place(expr: Expr, start: usize) -> Expr {
             args,
             recv_type,
             resolved_ret,
+            operator_rhs,
             checked_widen,
         },
         place => {
@@ -51,6 +53,7 @@ pub(super) fn starts_shared_operand(kind: &TokKind) -> bool {
             | TokKind::Int(..)
             | TokKind::Float(..)
             | TokKind::UnitNumber { .. }
+            | TokKind::RawStr(_)
             | TokKind::Str(_)
             | TokKind::Char(_)
             | TokKind::KwTrue
@@ -716,6 +719,7 @@ impl<'a> Parser<'a> {
                     }],
                     recv_type: None,
                     resolved_ret: None,
+                    operator_rhs: None,
                     checked_widen: false,
                 })
             }
@@ -793,6 +797,9 @@ impl<'a> Parser<'a> {
                             break;
                         }
                         self.expect(TokKind::Comma, "between arguments")?;
+                        if matches!(self.peek().kind, TokKind::RParen) {
+                            break;
+                        }
                     }
                 }
                 self.expect(TokKind::RParen, "to finish the call")?;
@@ -805,6 +812,7 @@ impl<'a> Parser<'a> {
                     args,
                     recv_type: None,
                     resolved_ret: None,
+                    operator_rhs: None,
                     checked_widen: false,
                 })
             }
@@ -862,6 +870,9 @@ impl<'a> Parser<'a> {
                                 break;
                             }
                             self.expect(TokKind::Comma, "between enum variant arguments")?;
+                            if matches!(self.peek().kind, TokKind::RParen) {
+                                break;
+                            }
                         }
                     }
                     self.expect(TokKind::RParen, "to close the enum variant arguments")?;
@@ -920,6 +931,9 @@ impl<'a> Parser<'a> {
                                 break;
                             }
                             self.expect(TokKind::Comma, "between build-step arguments")?;
+                            if matches!(self.peek().kind, TokKind::RParen) {
+                                break;
+                            }
                         }
                     }
                     self.expect(TokKind::RParen, "to close the build step")?;
@@ -967,14 +981,18 @@ impl<'a> Parser<'a> {
     /// nested call site.
     fn build_step_string(&mut self) -> Result<Expr, Diagnostic> {
         let token = self.peek().clone();
-        let TokKind::Str(parts) = token.kind else {
-            return Err(Diagnostic::error(
-                "E0003",
-                "a build-step field must be quoted text".to_string(),
-                "build actions use fixed strings for tools, paths, URLs, and hashes".to_string(),
-                "write a quoted string such as `\"src/file\"`".to_string(),
-                Some(token.span),
-            ));
+        let parts = match token.kind {
+            TokKind::Str(parts) => parts,
+            TokKind::RawStr(text) => vec![StrTokPart::Lit(text)],
+            _ => {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    "a build-step field must be quoted text".to_string(),
+                    "build actions use fixed strings for tools, paths, URLs, and hashes".to_string(),
+                    "write a quoted string such as `\"src/file\"`".to_string(),
+                    Some(token.span),
+                ));
+            }
         };
         if parts
             .iter()

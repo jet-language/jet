@@ -3,9 +3,11 @@
 use crate::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
-use jet_codegen::local_cell::{JetCell, JetCellEditGuard, JetCellGetOrSet, JetCellReadGuard};
-use jet_codegen::{AST::CtReport, AST::CtValue, AST::Type};
-use std::collections::{HashMap, HashSet};
+use jet_codegen::local_cell::{
+    JetCell, JetCellEditGuard, JetCellGetOrSet, JetCellOptionLike, JetCellReadGuard,
+};
+use jet_foundation::MIR::{MirType, MirTypeKind, MirRuntimeValue};
+use std::collections::HashSet;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use crate::types_meta::JitMeta;
@@ -18,7 +20,7 @@ pub(crate) enum CellSchema {
     Bool,
     Char,
     String,
-    Option(Box<CellSchema>, Type),
+    Option(Box<CellSchema>, MirType),
     List(Box<CellSchema>),
     Struct {
         name: String,
@@ -30,7 +32,7 @@ pub(crate) enum CellSchema {
 impl CellSchema {
     fn struct_schema(
         name: &str,
-        args: &[Type],
+        args: &[MirType],
         meta: &JitMeta<'_>,
     ) -> Result<Option<Self>, String> {
         let Some((field_names, field_types)) = meta.struct_layout(name) else {
@@ -44,71 +46,67 @@ impl CellSchema {
                 args.len()
             ));
         }
-        let subst: HashMap<_, _> = params.iter().cloned().zip(args.iter().cloned()).collect();
+        if !params.is_empty() {
+            return Err(format!(
+                "jit Cell generic schema `{name}` lacks instantiated MIR field types"
+            ));
+        }
         Ok(Some(Self::Struct {
             name: name.to_string(),
             fields: field_names
                 .iter()
                 .zip(field_types)
-                .map(|(field, ty)| {
-                    let ty = jet_foundation::Generics::substitute_type(ty, &subst);
-                    Ok((
-                        field
-                            .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
-                            .unwrap_or(field)
-                            .to_string(),
-                        Self::from_type(&ty, meta)?,
-                    ))
-                })
+                .map(|(field, ty)| Ok((field.clone(), Self::from_type(ty, meta)?)))
                 .collect::<Result<_, String>>()?,
         }))
     }
 
-    pub(crate) fn from_type(ty: &Type, meta: &JitMeta<'_>) -> Result<Self, String> {
-        match ty {
-            Type::Named(name) if name == "Unit" => Ok(Self::Unit),
-            Type::Int | Type::IntN { .. } | Type::InlineRange { .. } => Ok(Self::Int),
-            Type::Float | Type::Float32 => Ok(Self::Float),
-            Type::Bool => Ok(Self::Bool),
-            Type::Char => Ok(Self::Char),
-            Type::String => Ok(Self::String),
-            Type::Option(inner) => Ok(Self::Option(
+    pub(crate) fn from_type(ty: &MirType, meta: &JitMeta<'_>) -> Result<Self, String> {
+        match ty.kind() {
+            MirTypeKind::Apply { name, args } if args.is_empty() && name.name == "Unit" => {
+                Ok(Self::Unit)
+            }
+            MirTypeKind::Int
+            | MirTypeKind::IntN { .. }
+            | MirTypeKind::InlineRange { .. } => Ok(Self::Int),
+            MirTypeKind::Float | MirTypeKind::Float32 => Ok(Self::Float),
+            MirTypeKind::Bool => Ok(Self::Bool),
+            MirTypeKind::Char => Ok(Self::Char),
+            MirTypeKind::String => Ok(Self::String),
+            MirTypeKind::Option(inner) => Ok(Self::Option(
                 Box::new(Self::from_type(inner, meta)?),
-                inner.as_ref().clone(),
+                (**inner).clone(),
             )),
-            Type::List(inner) | Type::FixedList { elem: inner, .. } => {
+            MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => {
                 Ok(Self::List(Box::new(Self::from_type(inner, meta)?)))
             }
-            Type::Tuple(fields) => Ok(Self::Struct {
+            MirTypeKind::Tuple(fields) => Ok(Self::Struct {
                 name: "tuple".to_string(),
                 fields: fields
                     .iter()
-                    .map(|(name, ty)| Ok((name.clone(), Self::from_type(ty.as_ref(), meta)?)))
+                    .map(|(name, ty)| Ok((name.clone(), Self::from_type(ty, meta)?)))
                     .collect::<Result<_, String>>()?,
             }),
-            Type::Tagged { inner, .. } => Self::from_type(inner, meta),
-            Type::Named(name) => {
-                if let Some(base) = meta.distinct_base(name) {
+            MirTypeKind::Tagged { inner, .. } => Self::from_type(inner, meta),
+            MirTypeKind::Apply { name, args } if args.is_empty() => {
+                if let Some(base) = meta.distinct_base(&name.name) {
                     Self::from_type(base, meta)
                 } else {
-                    Ok(Self::struct_schema(name, &[], meta)?.unwrap_or(Self::Handle))
+                    Ok(Self::struct_schema(&name.name, &[], meta)?.unwrap_or(Self::Handle))
                 }
             }
-            Type::Apply { name, args } => {
-                Ok(Self::struct_schema(name, args, meta)?.unwrap_or(Self::Handle))
+            MirTypeKind::Apply { name, args } => {
+                Ok(Self::struct_schema(&name.name, args, meta)?.unwrap_or(Self::Handle))
             }
-            Type::Map { .. }
-            | Type::Result { .. }
-            | Type::Shared(_)
-            | Type::Fn { .. }
-            | Type::TraitObject(_)
-            | Type::Union(_) => Ok(Self::Handle),
-            // Runtime values carry no dimension metadata (I3): a quantity's
-            // cell shape is its erased base numeric type.
-            Type::Quantity { base, .. } => Self::from_type(base, meta),
-            // A compile-time measure only ever appears as a `Vec`/`Matrix`
-            // shape arg, never as its own cell/local type.
-            Type::Measure(_) => Err("a type measure is not a JIT cell type".to_string()),
+            MirTypeKind::Map { .. }
+            | MirTypeKind::Result { .. }
+            | MirTypeKind::Shared(_)
+            | MirTypeKind::Fn(_)
+            | MirTypeKind::SendFn { .. }
+            | MirTypeKind::TraitObject(_)
+            | MirTypeKind::Union(_)
+            | MirTypeKind::Quantity { .. } => Ok(Self::Handle),
+            MirTypeKind::Measure(_) => Err("a type measure is not a JIT cell type".to_string()),
         }
     }
 }
@@ -116,6 +114,7 @@ impl CellSchema {
 #[derive(Clone)]
 pub(crate) struct CellProjection {
     pub paths: Vec<Vec<String>>,
+    pub editable: bool,
 }
 
 #[derive(Clone)]
@@ -126,15 +125,15 @@ pub(crate) enum CellGuardLayout {
 }
 
 impl CellGuardLayout {
-    pub(crate) fn from_type(ty: &Type, _meta: &JitMeta<'_>) -> Result<Option<Self>, String> {
-        Ok(match ty {
-            Type::Apply { name, .. } if name == "CellReadGuard" => Some(Self::Read),
-            Type::Apply { name, .. } if name == "CellEditGuard" => Some(Self::Edit),
-            Type::Tagged { inner, .. } => Self::from_type(inner, _meta)?,
-            Type::Tuple(fields) => {
+    pub(crate) fn from_type(ty: &MirType, meta: &JitMeta<'_>) -> Result<Option<Self>, String> {
+        Ok(match ty.kind() {
+            MirTypeKind::Apply { name, .. } if name.name == "CellReadGuard" => Some(Self::Read),
+            MirTypeKind::Apply { name, .. } if name.name == "CellEditGuard" => Some(Self::Edit),
+            MirTypeKind::Tagged { inner, .. } => Self::from_type(inner, meta)?,
+            MirTypeKind::Tuple(fields) => {
                 let fields = fields
                     .iter()
-                    .map(|(_, ty)| Self::from_type(ty, _meta))
+                    .map(|(_, ty)| Self::from_type(ty, meta))
                     .collect::<Result<Vec<_>, _>>()?;
                 fields
                     .iter()
@@ -152,9 +151,9 @@ struct GuardSlot<G> {
 }
 
 pub(crate) struct CellState {
-    cells: Vec<JetCell<CtValue>>,
-    read_guards: Vec<GuardSlot<JetCellReadGuard<CtValue>>>,
-    edit_guards: Vec<GuardSlot<JetCellEditGuard<CtValue>>>,
+    cells: Vec<JetCell<MirRuntimeValue>>,
+    read_guards: Vec<GuardSlot<JetCellReadGuard<MirRuntimeValue>>>,
+    edit_guards: Vec<GuardSlot<JetCellEditGuard<MirRuntimeValue>>>,
     schemas: Vec<CellSchema>,
     projections: Vec<CellProjection>,
     guard_layouts: Vec<CellGuardLayout>,
@@ -202,7 +201,7 @@ impl CellState {
         self.frames.last().copied().unwrap_or(0)
     }
 
-    fn insert_read(&mut self, guard: JetCellReadGuard<CtValue>, owner: u64) -> i64 {
+    fn insert_read(&mut self, guard: JetCellReadGuard<MirRuntimeValue>, owner: u64) -> i64 {
         self.read_guards.push(GuardSlot {
             guard: Some(guard),
             owner,
@@ -210,7 +209,7 @@ impl CellState {
         self.read_guards.len() as i64
     }
 
-    fn insert_edit(&mut self, guard: JetCellEditGuard<CtValue>, owner: u64) -> i64 {
+    fn insert_edit(&mut self, guard: JetCellEditGuard<MirRuntimeValue>, owner: u64) -> i64 {
         self.edit_guards.push(GuardSlot {
             guard: Some(guard),
             owner,
@@ -277,21 +276,26 @@ fn schema(rt: &crate::JitRuntime, handle: i64) -> Option<CellSchema> {
         .cloned()
 }
 
-fn decode_value(rt: &mut crate::JitRuntime, raw: i64, schema: &CellSchema) -> Option<CtValue> {
+fn decode_value(rt: &mut crate::JitRuntime, raw: i64, schema: &CellSchema) -> Option<MirRuntimeValue> {
     Some(match schema {
-        CellSchema::Unit => CtValue::Unit,
-        CellSchema::Int | CellSchema::Handle => CtValue::Int(raw),
+        CellSchema::Unit => MirRuntimeValue::Unit,
+        CellSchema::Int | CellSchema::Handle => MirRuntimeValue::Int(raw),
         CellSchema::Float => {
-            CtValue::Float(jet_codegen::AST::CtFloat::f64(f64::from_bits(raw as u64)))
+            MirRuntimeValue::Float {
+                value: f64::from_bits(raw as u64),
+                f32: false,
+            }
         }
-        CellSchema::Bool => CtValue::Bool(raw != 0),
-        CellSchema::Char => CtValue::Char(char::from_u32(raw as u32)?),
-        CellSchema::String => CtValue::Str(rt.heap.clone_string(raw)?),
+        CellSchema::Bool => MirRuntimeValue::Bool(raw != 0),
+        CellSchema::Char => MirRuntimeValue::Char(char::from_u32(raw as u32)?),
+        CellSchema::String => MirRuntimeValue::String(rt.heap.clone_string(raw)?),
         CellSchema::Option(inner, inner_ty) => {
             if raw == 0 {
-                CtValue::absent(inner_ty.clone())
+                MirRuntimeValue::Absent {
+                    element: inner_ty.clone(),
+                }
             } else {
-                CtValue::Present(Box::new(decode_value(rt, raw.wrapping_sub(1), inner)?))
+                MirRuntimeValue::Present(Box::new(decode_value(rt, raw.wrapping_sub(1), inner)?))
             }
         }
         CellSchema::List(inner) => {
@@ -304,7 +308,7 @@ fn decode_value(rt: &mut crate::JitRuntime, raw: i64, schema: &CellSchema) -> Op
                 };
                 values.push(decode_value(rt, item, inner)?);
             }
-            CtValue::List(values)
+            MirRuntimeValue::List(values)
         }
         CellSchema::Struct { name, fields } => {
             let mut values = Vec::with_capacity(fields.len());
@@ -320,7 +324,7 @@ fn decode_value(rt: &mut crate::JitRuntime, raw: i64, schema: &CellSchema) -> Op
                 };
                 values.push((field.clone(), decode_value(rt, raw, field_schema)?));
             }
-            CtValue::Struct {
+            MirRuntimeValue::Struct {
                 type_name: name.clone(),
                 fields: values,
             }
@@ -328,19 +332,19 @@ fn decode_value(rt: &mut crate::JitRuntime, raw: i64, schema: &CellSchema) -> Op
     })
 }
 
-fn encode_value(rt: &mut crate::JitRuntime, value: &CtValue, schema: &CellSchema) -> Option<i64> {
+fn encode_value(rt: &mut crate::JitRuntime, value: &MirRuntimeValue, schema: &CellSchema) -> Option<i64> {
     match (schema, value) {
-        (CellSchema::Unit, CtValue::Unit) => Some(0),
-        (CellSchema::Int | CellSchema::Handle, CtValue::Int(value)) => Some(*value),
-        (CellSchema::Float, CtValue::Float(value)) => Some(value.as_f64().to_bits() as i64),
-        (CellSchema::Bool, CtValue::Bool(value)) => Some(i64::from(*value)),
-        (CellSchema::Char, CtValue::Char(value)) => Some(*value as u32 as i64),
-        (CellSchema::String, CtValue::Str(value)) => Some(rt.heap.alloc_string(value.clone())),
-        (CellSchema::Option(_, _), CtValue::Failed(CtReport::Clean(_))) => Some(0),
-        (CellSchema::Option(inner, _), CtValue::Present(value)) => {
+        (CellSchema::Unit, MirRuntimeValue::Unit) => Some(0),
+        (CellSchema::Int | CellSchema::Handle, MirRuntimeValue::Int(value)) => Some(*value),
+        (CellSchema::Float, MirRuntimeValue::Float { value, .. }) => Some(value.to_bits() as i64),
+        (CellSchema::Bool, MirRuntimeValue::Bool(value)) => Some(i64::from(*value)),
+        (CellSchema::Char, MirRuntimeValue::Char(value)) => Some(*value as u32 as i64),
+        (CellSchema::String, MirRuntimeValue::String(value)) => Some(rt.heap.alloc_string(value.clone())),
+        (CellSchema::Option(_, _), MirRuntimeValue::Absent { .. }) => Some(0),
+        (CellSchema::Option(inner, _), MirRuntimeValue::Present(value)) => {
             Some(encode_value(rt, value, inner)?.wrapping_add(1))
         }
-        (CellSchema::List(inner), CtValue::List(values)) => {
+        (CellSchema::List(inner), MirRuntimeValue::List(values)) => {
             let list = rt.heap.alloc_empty_list();
             for value in values {
                 let raw = encode_value(rt, value, inner)?;
@@ -358,7 +362,7 @@ fn encode_value(rt: &mut crate::JitRuntime, value: &CtValue, schema: &CellSchema
                 name: expected,
                 fields: schemas,
             },
-            CtValue::Struct { type_name, fields },
+            MirRuntimeValue::Struct { type_name, fields },
         ) if expected == type_name || expected == "tuple" => {
             let record = rt.heap.alloc_record(schemas.len());
             for (index, (field, field_schema)) in schemas.iter().enumerate() {
@@ -673,11 +677,11 @@ host_fns! {
     get_or_set_begin: "jet_jit_cell_get_or_set_begin" => jet_jit_cell_get_or_set_begin: binary;
 }
 
-fn project_ref<'a>(value: &'a CtValue, path: &[String]) -> Option<&'a CtValue> {
+fn project_ref<'a>(value: &'a MirRuntimeValue, path: &[String]) -> Option<&'a MirRuntimeValue> {
     let Some((field, rest)) = path.split_first() else {
         return Some(value);
     };
-    let CtValue::Struct { fields, .. } = value else {
+    let MirRuntimeValue::Struct { fields, .. } = value else {
         return None;
     };
     let next = fields
@@ -686,11 +690,11 @@ fn project_ref<'a>(value: &'a CtValue, path: &[String]) -> Option<&'a CtValue> {
     project_ref(next, rest)
 }
 
-fn project_mut<'a>(value: &'a mut CtValue, path: &[String]) -> Option<&'a mut CtValue> {
+fn project_mut<'a>(value: &'a mut MirRuntimeValue, path: &[String]) -> Option<&'a mut MirRuntimeValue> {
     let Some((field, rest)) = path.split_first() else {
         return Some(value);
     };
-    let CtValue::Struct { fields, .. } = value else {
+    let MirRuntimeValue::Struct { fields, .. } = value else {
         return None;
     };
     let next = fields
@@ -700,13 +704,13 @@ fn project_mut<'a>(value: &'a mut CtValue, path: &[String]) -> Option<&'a mut Ct
 }
 
 fn project_pair_mut<'a>(
-    value: &'a mut CtValue,
+    value: &'a mut MirRuntimeValue,
     first: &[String],
     second: &[String],
-) -> Option<(&'a mut CtValue, &'a mut CtValue)> {
+) -> Option<(&'a mut MirRuntimeValue, &'a mut MirRuntimeValue)> {
     let (first_field, first_rest) = first.split_first()?;
     let (second_field, second_rest) = second.split_first()?;
-    let CtValue::Struct { fields, .. } = value else {
+    let MirRuntimeValue::Struct { fields, .. } = value else {
         return None;
     };
     if first_field == second_field {
@@ -737,7 +741,7 @@ mod tests {
     #[test]
     fn trap_frame_cleanup_releases_loan_before_next_borrow() {
         let mut state = CellState::new();
-        state.cells.push(JetCell::new(CtValue::Int(1)));
+        state.cells.push(JetCell::new(MirRuntimeValue::Int(1)));
         state.frames.push(1);
         let guard = state.cells[0].guard_edit();
         state.insert_edit(guard, 1);
@@ -749,6 +753,6 @@ mod tests {
         );
 
         state.leave_frame(&HashSet::new(), &HashSet::new());
-        assert_eq!(state.cells[0].guard_read().get(), CtValue::Int(1));
+        assert_eq!(state.cells[0].guard_read().get(), MirRuntimeValue::Int(1));
     }
 }

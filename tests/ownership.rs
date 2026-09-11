@@ -855,7 +855,10 @@ fn run() {
 #[test]
 fn lambda_capture_cannot_read_an_active_write_place() {
     let src = r#"
-fn both(a: &String, callback: fn() String) { print(a); print(callback()) }
+fn both(a: &String, callback: fn() String) {
+    print(a)
+    print(callback())
+}
 
 fn run() {
     x := "jet"
@@ -931,7 +934,10 @@ fn run() {
 
     let disjoint = r#"
 struct Pair { left: [Int], right: [Int] }
-fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
+fn both(callback: fn(), values: [Int]) {
+    callback()
+    print(values.len())
+}
 fn run() {
     pair := Pair{ left: [1], right: [2] }
     both(() -> pair.right.push(3), pair.left)
@@ -941,7 +947,10 @@ fn run() {
 
     let conflicting = r#"
 struct Pair { left: [Int], right: [Int] }
-fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
+fn both(callback: fn(), values: [Int]) {
+    callback()
+    print(values.len())
+}
 fn run() {
     pair := Pair{ left: [1], right: [2] }
     both(() -> pair.right.push(3), pair.right)
@@ -956,7 +965,10 @@ fn run() {
 fn move_lambda_capture_identity_matches_rust_2021_places() {
     let disjoint_owned_field = r#"
 struct Pair { left: String, right: [Int] }
-fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
+fn both(callback: fn(), values: [Int]) {
+    callback()
+    print(values.len())
+}
 fn run() {
     pair := Pair{ left: "jet", right: [1, 2] }
     both(() -> { print(pair.left) }, pair.right)
@@ -967,7 +979,10 @@ fn run() {
 
     let copy_field = r#"
 struct Pair { count: Int, values: [Int] }
-fn both(callback: fn(), pair: Pair) { callback(); print(pair.count) }
+fn both(callback: fn(), pair: Pair) {
+    callback()
+    print(pair.count)
+}
 fn run() {
     pair := Pair{ count: 2, values: [1, 2] }
     both(() -> { print(pair.count) }, pair)
@@ -988,7 +1003,10 @@ fn run() {
 
     let same_owned_field = r#"
 struct Pair { left: String, right: [Int] }
-fn both(callback: fn(), text: String) { callback(); print(text) }
+fn both(callback: fn(), text: String) {
+    callback()
+    print(text)
+}
 fn run() {
     pair := Pair{ left: "jet", right: [1, 2] }
     both(() -> { print(pair.left) }, pair.left)
@@ -999,7 +1017,10 @@ fn run() {
     assert!(diags.iter().any(|diag| diag.code == "E0121"), "{diags:?}");
 
     let conflicting_view_alias = r#"
-fn both(values: &[Int], callback: fn()) { values.push(3); callback() }
+fn both(values: &[Int], callback: fn()) {
+    values.push(3)
+    callback()
+}
 fn run() {
     values := [1, 2]
     first :: values[0..1]
@@ -1144,7 +1165,10 @@ fn if_expression_prefix_reads_use_the_call_access_frame() {
 fn both(value: &Int, count: Int) { value += count }
 fn run() {
     value := 1
-    both(&value, if true -> { seen :: value; seen } else -> { 0 })
+    both(&value, if true -> {
+        seen :: value
+        seen
+    } else -> { 0 })
 }
 "#;
     let diags =
@@ -1156,7 +1180,10 @@ fn run() {
 fn deferred_lambda_capture_reports_once() {
     let src = r#"
 fn see(value: String) String -[]> { return value }
-fn both(value: &String, callback: fn() String) { print(value); print(callback()) }
+fn both(value: &String, callback: fn() String) {
+    print(value)
+    print(callback())
+}
 fn run() {
     value := "jet"
     both(&value, () -> see(value))
@@ -1177,7 +1204,10 @@ fn evaluated_statement_accesses_are_scoped_and_mode_aware() {
 fn both(values: [Int], count: Int) { print(values.len() + count) }
 fn run() {
     values := [1, 2]
-    both(values, if true -> { values = [3]; 1 } else -> { 0 })
+    both(values, if true -> {
+        values = [3]
+        1
+    } else -> { 0 })
 }
 "#;
     let diags =
@@ -1199,20 +1229,32 @@ fn run() {
 fn lambda_capture_access_is_projection_specific_and_transitive() {
     let mixed = r#"
 struct Pair { left: [Int], right: [Int] }
-fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
+fn both(callback: fn(), values: [Int]) {
+    callback()
+    print(values.len())
+}
 fn run() {
     pair := Pair{ left: [1], right: [2] }
-    both(() -> { print(pair.left.len()); pair.right.push(3) }, pair.left)
+    both(() -> {
+        print(pair.left.len())
+        pair.right.push(3)
+    }, pair.left)
 }
 "#;
     jet::compile(mixed).expect("reading left and mutating right keeps projection modes separate");
 
     let conflict = r#"
 struct Pair { left: [Int], right: [Int] }
-fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
+fn both(callback: fn(), values: [Int]) {
+    callback()
+    print(values.len())
+}
 fn run() {
     pair := Pair{ left: [1], right: [2] }
-    both(() -> { print(pair.left.len()); pair.right.push(3) }, pair.right)
+    both(() -> {
+        print(pair.left.len())
+        pair.right.push(3)
+    }, pair.right)
 }
 "#;
     let diags = jet::compile(conflict).expect_err("the mutated projection remains write-borrowed");
@@ -1314,7 +1356,10 @@ fn run() {
 fn semantic_capture_events_drive_retention_and_deferred_clone_modes() {
     let field_write = r#"
 struct Bucket { values: [Int] }
-fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
+fn both(callback: fn(), values: [Int]) {
+    callback()
+    print(values.len())
+}
 fn run() {
     bucket := Bucket{ values: [1, 2] }
     both(() -> { bucket.values = [3] }, bucket.values)
@@ -1329,7 +1374,10 @@ struct Bucket { values: [Int] }
 impl Bucket {
     fn clear(&self) { self.values = [0] }
 }
-fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
+fn both(callback: fn(), values: [Int]) {
+    callback()
+    print(values.len())
+}
 fn run() {
     bucket := Bucket{ values: [1, 2] }
     both(() -> bucket.clear(), bucket.values)
@@ -1340,7 +1388,10 @@ fn run() {
     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
 
     let reactive_clone = r#"
-fn both(callback: fn(), values: &[Int]) { callback(); values.push(4) }
+fn both(callback: fn(), values: &[Int]) {
+    values.push(4)
+    callback()
+}
 fn run() {
     values := [1, 2]
     both(() -> {
@@ -1357,7 +1408,10 @@ fn run() {
 fn pattern_value_tests_and_reactive_clones_use_runtime_capture_places() {
     let pattern_value = r#"
 struct Incident { count: Int, label: String }
-fn both(values: &[Int], callback: fn()) { values.push(3); callback() }
+fn both(values: &[Int], callback: fn()) {
+    values.push(3)
+    callback()
+}
 fn run() {
     values := [1, 2]
     changed := [0]
@@ -1377,7 +1431,10 @@ fn run() {
 
     let reactive_root = r#"
 struct Pair { left: [Int], right: [Int] }
-fn both(values: &[Int], callback: fn()) { values.push(3); callback() }
+fn both(values: &[Int], callback: fn()) {
+    values.push(3)
+    callback()
+}
 fn run() {
     pair := Pair{ left: [1], right: [2] }
     changed := [0]
@@ -1396,7 +1453,10 @@ fn run() {
 fn reactive_root_capture_replaces_existing_owner_projections() {
     let src = r#"
 struct Pair { left: [Int], right: [Int] }
-fn both(values: &[Int], callback: fn()) { values.push(3); callback() }
+fn both(values: &[Int], callback: fn()) {
+    values.push(3)
+    callback()
+}
 fn run() {
     pair := Pair{ left: [1], right: [2] }
     both(&pair.right, () -> {
@@ -1411,7 +1471,10 @@ fn run() {
 
     let write_then_reactive = r#"
 struct Pair { left: [Int], right: [Int] }
-fn both(values: &[Int], callback: fn()) { values.push(3); callback() }
+fn both(values: &[Int], callback: fn()) {
+    values.push(3)
+    callback()
+}
 fn run() {
     pair := Pair{ left: [1], right: [2] }
     both(&pair.right, () -> {
@@ -1482,7 +1545,10 @@ fn move_lambda_construction_consumes_owned_nonscalar_captures() {
     for (source, expected) in [
         (
             r#"
-fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
+fn both(callback: fn(), values: [Int]) {
+    callback()
+    print(values.len())
+}
 fn run() {
     values := [1, 2]
     both(() -> values.len(), values)
@@ -1492,7 +1558,10 @@ fn run() {
         ),
         (
             r#"
-fn both(values: [Int], callback: fn()) { print(values.len()); callback() }
+fn both(values: [Int], callback: fn()) {
+    print(values.len())
+    callback()
+}
 fn run() {
     values := [1, 2]
     both(values, () -> values.len())
@@ -1510,7 +1579,10 @@ fn run() {
     }
 
     let scalar_copy = r#"
-fn both(callback: fn(), value: Int) { callback(); print(value) }
+fn both(callback: fn(), value: Int) {
+    callback()
+    print(value)
+}
 fn run() {
     value := 2
     both(() -> { print(value) }, value)
@@ -1523,7 +1595,10 @@ fn run() {
 fn semantic_capture_walker_covers_fallback_and_scope_member_arguments() {
     let fallback = r#"
 fn missing() ?Int -[]> { return null }
-fn both(values: &[Int], callback: fn()) { values.push(3); callback() }
+fn both(values: &[Int], callback: fn()) {
+    values.push(3)
+    callback()
+}
 fn run() {
     values := [1, 2]
     both(&values, () -> {
@@ -4440,13 +4515,15 @@ fn run() {
     let mut jit_report = None;
     if jet_jit::cranelift_host_supported() {
         assert!(
-            jet_jit::resident_jit_safe_bundle(&bundle),
+            common::cranelift_resident_safe(&bundle),
             "{}",
-            jet_jit::resident_jit_safe_bundle_detail(&bundle)
+            common::cranelift_resident_safe_detail(&bundle)
         );
-        jet_jit::try_compile_bundle(&bundle).expect("mutable view bounds must lower to JIT");
+        let policy = common::development_policy();
+        common::compile_cranelift_bundle(&bundle, &policy)
+            .expect("mutable view bounds must lower to JIT");
         let mut backend = jet_jit::CraneliftBackend::new();
-        match backend.run(&bundle, false) {
+        match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
             RunOutcome::Ran {
                 stderr, exit_code, ..
             } => {
@@ -4610,11 +4687,12 @@ fn run() {
         .collect();
     assert!(errors.is_empty(), "{errors:?}");
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "{}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle).expect("disjoint views must lower to resident JIT");
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
+        .expect("disjoint views must lower to resident JIT");
 
     for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
         jet_jit::reset_jit_trace_for_test();
@@ -5377,7 +5455,7 @@ fn core_string_view_copy_edit_names_consuming_expression() {
 /// materialized automatically (spec.md:339-340), and the return slot is an
 /// owning destination — `tests/ui/return_borrowed_param.stderr` is the same
 /// shape for a concrete `String` and expects no errors at all. E0120 survives
-/// only for the cases spec.md:340 and diagnostic-rows.md:115 name: a
+/// only for the cases whose typed rows in `Diagnostics.jet` name: a
 /// non-cloneable value or `copies: .Explicit`.
 ///
 /// The property this test defends is unchanged: a read parameter never escapes
@@ -5421,9 +5499,9 @@ fn run() {
         "the parameter must stay a read borrow, not become an owned slot: {}",
         out.rust
     );
-    // The refusal rail this test used to own now lives with the cases
-    // diagnostic-rows.md:115 names — a non-cloneable value or
-    // `copies: .Explicit` (tests/ui/param_owned_field_needs_copy_explicit) —
+    // The refusal rail this test used to own now lives with the typed rows in
+    // `Diagnostics.jet` — a non-cloneable value or `copies: .Explicit`
+    // (tests/ui/param_owned_field_needs_copy_explicit) —
     // and the `Clone` obligation is only added where a copy is actually
     // demanded (`generic_clone_bound_is_usage_sensitive`, above).
 }
@@ -5952,9 +6030,9 @@ fn run() { apply_to(Parcel{ label: "hello" }, inspect) }
 /// one is the load-bearing case for D-MEM-COPYSEM1: a move (`^`) parameter is
 /// an owning slot, so the automatic materialization applies to it too — but a
 /// bare NAME at that slot is E0209 first ("a named binding passed where it
-/// would be silently cloned — Move-param arg without the move marker `^`",
-/// diagnostic-rows.md:167; "no clone is ever silent", D-MEM1/S2). If the
-/// materialization is allowed to rewrite the name before that check reads it,
+/// would be silently cloned — Move-param arg without the move marker `^`);
+/// see the registered `Diagnostics.jet` row ("no clone is ever silent",
+/// D-MEM1/S2). If materialization rewrites the name before that check reads it,
 /// the hard error disappears and the clone becomes silent — which is why the
 /// convention check reads the argument as it was WRITTEN.
 ///
@@ -5991,6 +6069,32 @@ fn run() { print(0) }
 "#;
     let escape = jet::compile(callback_src).expect_err("plain callback parameter cannot escape");
     assert!(escape.iter().any(|d| d.code == "E0120"), "{escape:?}");
+}
+
+/// Optional constructors are owning field values. Their payload must use the
+/// same move tracking as a bare field value, so a later read is diagnosed before
+/// code generation instead of becoming a generated-Rust use-after-move.
+#[test]
+fn optional_constructor_payload_obeys_field_ownership() {
+    let src = r#"
+struct Node {
+    value: Int
+    prev: ?Node
+    next: ?Node
+}
+fn run() {
+    first := Node{value: 1, prev: None, next: None}
+    second := Node{value: 2, prev: Val(first), next: None}
+    first.next = Val(second)
+    print(first.value)
+    print(second.value)
+}
+"#;
+    let diags = jet::compile(src).expect_err("the optional payload must be tracked as an owning move");
+    assert!(
+        diags.iter().any(|diagnostic| diagnostic.code == "E0121"),
+        "expected the existing moved-value diagnostic: {diags:?}"
+    );
 }
 
 #[test]

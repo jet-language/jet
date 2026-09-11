@@ -1,0 +1,120 @@
+{
+  "schema": "jet.adapters-negative-controls.v1",
+  "schema_version": 1,
+  "execution": "retained mutation declarations only; no control is executed by the adapters stage",
+  "universal_proof": false,
+  "controls": [
+    {
+      "id": "adapter-wrong-abi-width",
+      "category": "wrong-abi-width",
+      "obligations": ["adapter:rust-aot", "adapter:cranelift", "boundary:layout"],
+      "source_refs": ["crates/jet-foundation/src/MIR.rs", "crates/jet-jit/src/Ffi.rs"],
+      "mutation": {"property": "scalar width and checked conversion", "operation": "narrow a target word without the declared width check", "must_change": ["representation", "width", "typed_failure"]},
+      "expected": {"status": "mismatch", "reason": "a width mismatch changes the adapter contract", "universal_proof": false}
+    },
+    {
+      "id": "adapter-wrong-layout",
+      "category": "wrong-layout",
+      "obligations": ["adapter:rust-aot", "adapter:cranelift", "adapter:web", "boundary:layout"],
+      "source_refs": ["crates/jet-codegen/src/Codegen/MIRRust.rs", "crates/jet-codegen/src/Codegen/MIRWeb.rs"],
+      "mutation": {"property": "aggregate layout and alignment", "operation": "change field order or alignment while retaining the same type name", "must_change": ["layout", "representation", "results"]},
+      "expected": {"status": "mismatch", "reason": "layout identity is part of the emitted ABI", "universal_proof": false}
+    },
+    {
+      "id": "adapter-wrong-event-order",
+      "category": "wrong-event-order",
+      "obligations": ["adapter:interpreter", "adapter:cranelift", "boundary:ffi"],
+      "source_refs": ["crates/jet-jit/src/Concurrency.rs", "Source/CmdCompile.rs"],
+      "mutation": {"property": "control transfer and ordered effects", "operation": "deliver completion before the shared callback or cleanup event", "must_change": ["ordered_effects", "schedule", "task_completion"]},
+      "expected": {"status": "mismatch", "reason": "event order is observable at the shared completion seam", "universal_proof": false}
+    },
+    {
+      "id": "adapter-callback-lifetime",
+      "category": "callback-lifetime",
+      "obligations": ["adapter:cranelift", "adapter:interpreter", "boundary:ffi"],
+      "source_refs": ["crates/jet-jit/src/Concurrency.rs", "crates/jet-jit/src/Ffi.rs", "crates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs"],
+      "mutation": {"property": "callback and handle lifetime", "operation": "retain or invoke a callback after its owner epoch closes", "must_change": ["handles", "callbacks", "cleanup", "resource_premises"]},
+      "expected": {"status": "mismatch", "reason": "closed callback handles cannot cross the terminal lifecycle transition", "universal_proof": false}
+    },
+    {
+      "id": "adapter-failure-mapping",
+      "category": "failure-mapping",
+      "obligations": ["adapter:rust-aot", "adapter:cranelift", "adapter:interpreter", "adapter:web", "boundary:ffi"],
+      "source_refs": ["crates/jet-codegen/src/Codegen/MIREval.rs", "crates/jet-jit/src/Ffi.rs", "crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs"],
+      "mutation": {"property": "typed result/error mapping", "operation": "turn a foreign status or trap into a Jet success or alter the typed failure carrier", "must_change": ["results", "errors", "typed_failure"]},
+      "expected": {"status": "mismatch", "reason": "foreign status does not replace the shared Jet failure contract", "universal_proof": false}
+    },
+    {
+      "id": "adapter-source-identity",
+      "category": "source-identity",
+      "obligations": ["adapter:rust-aot", "adapter:web", "boundary:ffi"],
+      "source_refs": ["crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs", "crates/jet-foundation/src/MIR.rs", "proof/compiler/obligations.json"],
+      "mutation": {"property": "shared operation/source identity", "operation": "bind an artifact to a different operation or stale source digest", "must_change": ["source_identity", "dispatch"]},
+      "expected": {"status": "mismatch", "reason": "artifact identity must name the exact shared operation and source bytes", "universal_proof": false}
+    },
+    {
+      "id": "adapter-target-identity",
+      "category": "target-identity",
+      "obligations": ["adapter:rust-aot", "adapter:cranelift", "adapter:interpreter", "adapter:web"],
+      "source_refs": ["crates/jet-foundation/src/MIR.rs", "crates/jet-codegen/src/Codegen/MIRRust.rs", "crates/jet-codegen/src/Codegen/MIRWeb.rs"],
+      "mutation": {"property": "artifact target and target layout", "operation": "reuse a RustAot, Cranelift, Interpreter, or Web artifact under another target", "must_change": ["target_identity", "tool_configuration", "layout"]},
+      "expected": {"status": "mismatch", "reason": "target applicability is closed and cannot be widened by the adapter", "universal_proof": false}
+    },
+    {
+      "id": "adapter-tool-configuration",
+      "category": "tool-configuration",
+      "obligations": ["adapter:rust-aot", "adapter:cranelift", "adapter:web"],
+      "source_refs": ["Cargo.toml", "flake.nix", "proof/compiler/toolchain/manifest.json"],
+      "mutation": {"property": "compiler, assembler/linker, browser/VM, and target configuration", "operation": "change a pinned tool or target configuration without changing the recorded identity", "must_change": ["tool_configuration", "target_identity"]},
+      "expected": {"status": "mismatch", "reason": "tool configuration is an identity input, not a tool-presence signal", "universal_proof": false}
+    },
+    {
+      "id": "adapter-forged-approval",
+      "category": "forged-approval",
+      "obligations": ["adapter:rust-aot"],
+      "source_refs": ["proof/compiler/adapters/check.mjs", "proof/compiler/toolchain/manifest.json"],
+      "mutation": {"property": "formal replay authority", "operation": "set approval.authority/status/artifact to compiler-proof values without a replay_ref", "must_change": ["source_identity", "target_identity"]},
+      "expected": {"status": "mismatch", "reason": "self-authored approval fields cannot replace an actual pinned compiler-proof replay", "universal_proof": false}
+    },
+    {
+      "id": "adapter-wrong-operation",
+      "category": "wrong-operation",
+      "obligations": ["adapter:rust-aot"],
+      "source_refs": ["proof/compiler/adapters/check.mjs", "crates/jet-codegen/src/Prelude/Core.jet"],
+      "mutation": {"property": "formal operation identity", "operation": "reuse a valid proof claim for a different shared operation", "must_change": ["source_identity", "dispatch"]},
+      "expected": {"status": "mismatch", "reason": "pinned replay must name the exact checked adapter operation", "universal_proof": false}
+    },
+    {
+      "id": "adapter-wrong-model",
+      "category": "wrong-model",
+      "obligations": ["adapter:rust-aot"],
+      "source_refs": ["proof/compiler/adapters/check.mjs", "proof/compiler/toolchain/fixtures/valid/model.lean"],
+      "mutation": {"property": "formal semantic model", "operation": "reuse a valid proof with an identity or unrelated model instead of the canonical adapter model", "must_change": ["source_identity", "representation", "results"]},
+      "expected": {"status": "mismatch", "reason": "Lean success for an unrelated model cannot discharge adapter semantics", "universal_proof": false}
+    },
+    {
+      "id": "adapter-wrong-target",
+      "category": "wrong-target",
+      "obligations": ["adapter:rust-aot", "adapter:cranelift"],
+      "source_refs": ["proof/compiler/adapters/check.mjs", "crates/jet-foundation/src/MIR.rs"],
+      "mutation": {"property": "formal target identity", "operation": "apply a proof replay for one target artifact to another target mode", "must_change": ["target_identity", "tool_configuration", "layout"]},
+      "expected": {"status": "mismatch", "reason": "formal replay must preserve the exact applicable target and tool configuration", "universal_proof": false}
+    },
+    {
+      "id": "adapter-unrelated-valid-proof",
+      "category": "unrelated-valid-proof",
+      "obligations": ["adapter:rust-aot"],
+      "source_refs": ["proof/compiler/adapters/check.mjs", "proof/compiler/toolchain/fixtures/valid/proof.lean"],
+      "mutation": {"property": "semantic claim binding", "operation": "supply a valid Lean proof for identity(value) returns value as an adapter discharge", "must_change": ["source_identity", "dispatch", "results", "errors", "cleanup"]},
+      "expected": {"status": "mismatch", "reason": "a valid proof of an unrelated proposition is not an adapter semantic discharge", "universal_proof": false}
+    },
+    {
+      "id": "adapter-incomplete-coverage",
+      "category": "incomplete-coverage",
+      "obligations": ["adapter:rust-aot", "adapter:cranelift"],
+      "source_refs": ["proof/compiler/adapters/check.mjs", "proof/compiler/obligations.json"],
+      "mutation": {"property": "formal required-row coverage", "operation": "omit one required applicable operation or target from the formal discharge carrier", "must_change": ["source_identity", "target_identity"]},
+      "expected": {"status": "mismatch", "reason": "incomplete replay coverage remains blocked and cannot promote any row to proved", "universal_proof": false}
+    }
+  ]
+}

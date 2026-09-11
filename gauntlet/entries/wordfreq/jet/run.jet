@@ -5,17 +5,17 @@ struct Args {
     path: String
 }
 
-fn run(args: Args) {
-    bytes :: files.read_bytes(args.path) ?? panic("read")
+fn run(args: Args) !IOError {
+    bytes :: files.read_bytes(args.path) ?? return
     counts := [String:Int]{}
     total := 0
     token := [U8]{}
-    space :: U8{32}
+    ascii_space :: U8{32}
     ascii_ws_start :: U8{9}
     ascii_ws_end :: U8{13}
     loop byte in bytes {
         if {
-            byte == space || (byte >= ascii_ws_start && byte <= ascii_ws_end) -> {
+            byte == ascii_space || (byte >= ascii_ws_start && byte <= ascii_ws_end) -> {
                 if !token.is_empty() {
                     word :: String.from_bytes(token) ?? panic("invalid utf8")
                     counts[word] = (counts.get(word) ?? 0) + 1

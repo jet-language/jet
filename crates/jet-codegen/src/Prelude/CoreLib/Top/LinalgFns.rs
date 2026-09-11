@@ -254,6 +254,19 @@ fn jet_math_Vec3_to_array(v: &jet_std::Vec3) -> [f64; 3] {
 fn jet_math_Vec4_to_array(v: &jet_std::Vec4) -> [f64; 4] {
     v.0
 }
+#[inline(always)]
+fn jet_math_Vec3_mul(v: &jet_std::Vec3, s: f64) -> jet_std::Vec3 {
+    jet_std::Vec3([v.0[0] * s, v.0[1] * s, v.0[2] * s])
+}
+#[inline(always)]
+fn jet_math_Vec3_div(v: &jet_std::Vec3, s: f64) -> jet_std::Vec3 {
+    jet_std::Vec3([v.0[0] / s, v.0[1] / s, v.0[2] / s])
+}
+#[inline(always)]
+fn jet_math_Float_div_Vec3(s: f64, v: &jet_std::Vec3) -> jet_std::Vec3 {
+    jet_std::Vec3([s / v.0[0], s / v.0[1], s / v.0[2]])
+}
+
 
 fn jet_math_Vec2_dot(v: &jet_std::Vec2, o: jet_std::Vec2) -> f64 {
     v.0[0] * o.0[0] + v.0[1] * o.0[1]
@@ -386,4 +399,351 @@ fn jet_math_Mat4_transpose(m: &jet_std::Mat4) -> jet_std::Mat4 {
         }
     }
     jet_std::Mat4(r)
+}
+// D-SPACE-GEOMETRY1=A: compact carriers for typed coordinate spaces.  Space
+// parameters are erased by codegen; dynamic frame ids stay on values so a
+// transform cannot silently consume a value from a different live frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct JetCoord2 {
+    pub x: f64,
+    pub y: f64,
+    pub frame_id: i64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct JetTransform2 {
+    pub m00: f64,
+    pub m01: f64,
+    pub m10: f64,
+    pub m11: f64,
+    pub tx: f64,
+    pub ty: f64,
+    pub from_frame: i64,
+    pub to_frame: i64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct JetRay2 {
+    pub origin: JetCoord2,
+    pub direction: JetCoord2,
+}
+
+#[inline]
+fn geometry_error(message: &str) -> JetErr {
+    jet_err_from_message(message.to_string())
+}
+
+#[inline]
+fn geometry_transform_point(
+    transform: &JetTransform2,
+    point: JetCoord2,
+) -> Result<JetCoord2, JetErr> {
+    if point.frame_id != 0 && point.frame_id != transform.from_frame {
+        return Err(geometry_error("coordinate point belongs to a stale frame"));
+    }
+    Ok(JetCoord2 {
+        x: transform.m00 * point.x + transform.m01 * point.y + transform.tx,
+        y: transform.m10 * point.x + transform.m11 * point.y + transform.ty,
+        frame_id: transform.to_frame,
+    })
+}
+
+#[inline]
+fn geometry_transform_then(
+    first: &JetTransform2,
+    next: JetTransform2,
+) -> Result<JetTransform2, JetErr> {
+    if first.to_frame != 0 && next.from_frame != 0 && first.to_frame != next.from_frame {
+        return Err(geometry_error("transform composition has mismatched frame identity"));
+    }
+    Ok(JetTransform2 {
+        m00: next.m00 * first.m00 + next.m01 * first.m10,
+        m01: next.m00 * first.m01 + next.m01 * first.m11,
+        m10: next.m10 * first.m00 + next.m11 * first.m10,
+        m11: next.m10 * first.m01 + next.m11 * first.m11,
+        tx: next.m00 * first.tx + next.m01 * first.ty + next.tx,
+        ty: next.m10 * first.tx + next.m11 * first.ty + next.ty,
+        from_frame: first.from_frame,
+        to_frame: next.to_frame,
+    })
+}
+
+#[inline]
+fn geometry_transform_inverse(transform: &JetTransform2) -> Result<JetTransform2, JetErr> {
+    let det = transform.m00 * transform.m11 - transform.m01 * transform.m10;
+    if !det.is_finite() || det.abs() <= f64::EPSILON {
+        return Err(geometry_error("transform is singular and has no inverse"));
+    }
+    let inv_det = 1.0 / det;
+    Ok(JetTransform2 {
+        m00: transform.m11 * inv_det,
+        m01: -transform.m01 * inv_det,
+        m10: -transform.m10 * inv_det,
+        m11: transform.m00 * inv_det,
+        tx: (transform.m01 * transform.ty - transform.m11 * transform.tx) * inv_det,
+        ty: (transform.m10 * transform.tx - transform.m00 * transform.ty) * inv_det,
+        from_frame: transform.to_frame,
+        to_frame: transform.from_frame,
+    })
+}
+#[inline]
+fn jet_math_Transform_affine(
+    m00: f64,
+    m01: f64,
+    m10: f64,
+    m11: f64,
+    tx: f64,
+    ty: f64,
+    from_frame: i64,
+    to_frame: i64,
+) -> JetTransform2 {
+    JetTransform2 {
+        m00,
+        m01,
+        m10,
+        m11,
+        tx,
+        ty,
+        from_frame,
+        to_frame,
+    }
+}
+
+#[inline]
+fn jet_math_Transform2_affine(
+    m00: f64,
+    m01: f64,
+    m10: f64,
+    m11: f64,
+    tx: f64,
+    ty: f64,
+    from_frame: i64,
+    to_frame: i64,
+) -> JetTransform2 {
+    jet_math_Transform_affine(m00, m01, m10, m11, tx, ty, from_frame, to_frame)
+}
+
+fn jet_math_Point2_new(x: f64, y: f64, frame_id: i64) -> JetCoord2 {
+    JetCoord2 { x, y, frame_id }
+}
+
+fn jet_math_Delta2_new(x: f64, y: f64, frame_id: i64) -> JetCoord2 {
+    JetCoord2 { x, y, frame_id }
+}
+
+
+
+fn jet_math_ScreenPoint_new(x: f64, y: f64) -> JetCoord2 {
+    JetCoord2 { x, y, frame_id: 0 }
+}
+fn jet_math_WorldPoint_new(x: f64, y: f64) -> JetCoord2 {
+    JetCoord2 { x, y, frame_id: 0 }
+}
+fn jet_math_ViewPoint_new(x: f64, y: f64) -> JetCoord2 {
+    JetCoord2 { x, y, frame_id: 0 }
+}
+fn jet_math_CameraPoint_new(x: f64, y: f64) -> JetCoord2 {
+    JetCoord2 { x, y, frame_id: 0 }
+}
+fn jet_math_DevicePoint_new(x: f64, y: f64) -> JetCoord2 {
+    JetCoord2 { x, y, frame_id: 0 }
+}
+fn jet_math_ScreenDelta_new(x: f64, y: f64) -> JetCoord2 {
+    JetCoord2 { x, y, frame_id: 0 }
+}
+fn jet_math_WorldDelta_new(x: f64, y: f64) -> JetCoord2 {
+    JetCoord2 { x, y, frame_id: 0 }
+}
+fn jet_math_ViewDelta_new(x: f64, y: f64) -> JetCoord2 {
+    JetCoord2 { x, y, frame_id: 0 }
+}
+fn jet_math_CameraDelta_new(x: f64, y: f64) -> JetCoord2 {
+    JetCoord2 { x, y, frame_id: 0 }
+}
+fn jet_math_DeviceDelta_new(x: f64, y: f64) -> JetCoord2 {
+    JetCoord2 { x, y, frame_id: 0 }
+}
+
+#[inline]
+fn geometry_coord_checked(
+    left: &JetCoord2,
+    right: JetCoord2,
+    subtract: bool,
+) -> Result<JetCoord2, JetErr> {
+    if left.frame_id != 0 && right.frame_id != 0 && left.frame_id != right.frame_id {
+        return Err(geometry_error("coordinate values belong to different frames"));
+    }
+    let frame_id = if left.frame_id != 0 {
+        left.frame_id
+    } else {
+        right.frame_id
+    };
+    Ok(JetCoord2 {
+        x: if subtract {
+            left.x - right.x
+        } else {
+            left.x + right.x
+        },
+        y: if subtract {
+            left.y - right.y
+        } else {
+            left.y + right.y
+        },
+        frame_id,
+    })
+}
+
+#[inline]
+fn geometry_coord_add(point: &JetCoord2, delta: JetCoord2) -> JetCoord2 {
+    JetCoord2 {
+        x: point.x + delta.x,
+        y: point.y + delta.y,
+        frame_id: point.frame_id,
+    }
+}
+
+#[inline]
+fn geometry_coord_sub(point: &JetCoord2, other: JetCoord2) -> JetCoord2 {
+    JetCoord2 {
+        x: point.x - other.x,
+        y: point.y - other.y,
+        frame_id: point.frame_id,
+    }
+}
+
+fn jet_math_ScreenPoint_add(a: &JetCoord2, b: JetCoord2) -> JetCoord2 { geometry_coord_add(a, b) }
+fn jet_math_ScreenPoint_sub(a: &JetCoord2, b: JetCoord2) -> JetCoord2 { geometry_coord_sub(a, b) }
+fn jet_math_WorldPoint_add(a: &JetCoord2, b: JetCoord2) -> JetCoord2 { geometry_coord_add(a, b) }
+fn jet_math_WorldPoint_sub(a: &JetCoord2, b: JetCoord2) -> JetCoord2 { geometry_coord_sub(a, b) }
+fn jet_math_ViewPoint_add(a: &JetCoord2, b: JetCoord2) -> JetCoord2 { geometry_coord_add(a, b) }
+fn jet_math_ViewPoint_sub(a: &JetCoord2, b: JetCoord2) -> JetCoord2 { geometry_coord_sub(a, b) }
+fn jet_math_CameraPoint_add(a: &JetCoord2, b: JetCoord2) -> JetCoord2 { geometry_coord_add(a, b) }
+fn jet_math_CameraPoint_sub(a: &JetCoord2, b: JetCoord2) -> JetCoord2 { geometry_coord_sub(a, b) }
+fn jet_math_DevicePoint_add(a: &JetCoord2, b: JetCoord2) -> JetCoord2 { geometry_coord_add(a, b) }
+fn jet_math_DevicePoint_sub(a: &JetCoord2, b: JetCoord2) -> JetCoord2 { geometry_coord_sub(a, b) }
+fn jet_math_ScreenDelta_add(a: &JetCoord2, b: JetCoord2) -> JetCoord2 { geometry_coord_add(a, b) }
+fn jet_math_ScreenDelta_sub(a: &JetCoord2, b: JetCoord2) -> JetCoord2 { geometry_coord_sub(a, b) }
+fn jet_math_WorldDelta_add(a: &JetCoord2, b: JetCoord2) -> JetCoord2 { geometry_coord_add(a, b) }
+fn jet_math_WorldDelta_sub(a: &JetCoord2, b: JetCoord2) -> JetCoord2 { geometry_coord_sub(a, b) }
+fn jet_math_ViewDelta_add(a: &JetCoord2, b: JetCoord2) -> JetCoord2 { geometry_coord_add(a, b) }
+fn jet_math_ViewDelta_sub(a: &JetCoord2, b: JetCoord2) -> JetCoord2 { geometry_coord_sub(a, b) }
+fn jet_math_CameraDelta_add(a: &JetCoord2, b: JetCoord2) -> JetCoord2 { geometry_coord_add(a, b) }
+fn jet_math_CameraDelta_sub(a: &JetCoord2, b: JetCoord2) -> JetCoord2 { geometry_coord_sub(a, b) }
+fn jet_math_DeviceDelta_add(a: &JetCoord2, b: JetCoord2) -> JetCoord2 { geometry_coord_add(a, b) }
+fn jet_math_DeviceDelta_sub(a: &JetCoord2, b: JetCoord2) -> JetCoord2 { geometry_coord_sub(a, b) }
+fn jet_math_Point2_add(a: &JetCoord2, b: JetCoord2) -> Result<JetCoord2, JetErr> {
+    geometry_coord_checked(a, b, false)
+}
+fn jet_math_Point2_sub(a: &JetCoord2, b: JetCoord2) -> Result<JetCoord2, JetErr> {
+    geometry_coord_checked(a, b, true)
+}
+fn jet_math_Delta2_add(a: &JetCoord2, b: JetCoord2) -> Result<JetCoord2, JetErr> {
+    geometry_coord_checked(a, b, false)
+}
+fn jet_math_Delta2_sub(a: &JetCoord2, b: JetCoord2) -> Result<JetCoord2, JetErr> {
+    geometry_coord_checked(a, b, true)
+}
+
+
+#[inline]
+fn jet_math_Transform_then(
+    transform: &JetTransform2,
+    next: JetTransform2,
+) -> Result<JetTransform2, JetErr> {
+    geometry_transform_then(transform, next)
+}
+
+#[inline]
+fn jet_math_Transform_inverse(transform: &JetTransform2) -> Result<JetTransform2, JetErr> {
+    geometry_transform_inverse(transform)
+}
+
+#[inline]
+fn jet_math_Transform_point(
+    transform: &JetTransform2,
+    point: JetCoord2,
+) -> Result<JetCoord2, JetErr> {
+    geometry_transform_point(transform, point)
+}
+
+#[inline]
+fn jet_math_Transform_point_at_depth(
+    transform: &JetTransform2,
+    point: JetCoord2,
+    depth: f64,
+) -> Result<JetCoord2, JetErr> {
+    if !depth.is_finite() {
+        return Err(geometry_error("perspective depth must be finite"));
+    }
+    let origin = geometry_transform_point(transform, point)?;
+    Ok(JetCoord2 {
+        x: origin.x + transform.m00 * depth,
+        y: origin.y + transform.m10 * depth,
+        frame_id: origin.frame_id,
+    })
+}
+
+#[inline]
+fn jet_math_Transform_ray(
+    transform: &JetTransform2,
+    point: JetCoord2,
+) -> Result<JetRay2, JetErr> {
+    let origin = geometry_transform_point(transform, point)?;
+    let direction = JetCoord2 {
+        x: transform.m00,
+        y: transform.m10,
+        frame_id: transform.to_frame,
+    };
+    Ok(JetRay2 { origin, direction })
+}
+#[inline]
+fn jet_math_Transform2_then(
+    transform: &JetTransform2,
+    next: JetTransform2,
+) -> Result<JetTransform2, JetErr> {
+    geometry_transform_then(transform, next)
+}
+
+#[inline]
+fn jet_math_Transform2_inverse(transform: &JetTransform2) -> Result<JetTransform2, JetErr> {
+    geometry_transform_inverse(transform)
+}
+
+#[inline]
+fn jet_math_Transform2_point(
+    transform: &JetTransform2,
+    point: JetCoord2,
+) -> Result<JetCoord2, JetErr> {
+    geometry_transform_point(transform, point)
+}
+
+#[inline]
+fn jet_math_Transform2_point_at_depth(
+    transform: &JetTransform2,
+    point: JetCoord2,
+    depth: f64,
+) -> Result<JetCoord2, JetErr> {
+    if !depth.is_finite() {
+        return Err(geometry_error("perspective depth must be finite"));
+    }
+    let origin = geometry_transform_point(transform, point)?;
+    Ok(JetCoord2 {
+        x: origin.x + transform.m00 * depth,
+        y: origin.y + transform.m10 * depth,
+        frame_id: origin.frame_id,
+    })
+}
+
+#[inline]
+fn jet_math_Transform2_ray(
+    transform: &JetTransform2,
+    point: JetCoord2,
+) -> Result<JetRay2, JetErr> {
+    let origin = geometry_transform_point(transform, point)?;
+    let direction = JetCoord2 {
+        x: transform.m00,
+        y: transform.m10,
+        frame_id: transform.to_frame,
+    };
+    Ok(JetRay2 { origin, direction })
 }

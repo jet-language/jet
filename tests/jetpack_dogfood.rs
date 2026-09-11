@@ -12,7 +12,7 @@ use std::process::{Command, Output, Stdio};
 use jet_env_model::ModuleEval;
 use jetpack::Lock::{self, LockSource};
 use jetpack::Store;
-use jetpack::JSON::JSONValue;
+use jet_foundation::DataTree::DataTree;
 
 mod common;
 #[path = "support/no_nix_namespace.rs"]
@@ -567,7 +567,7 @@ fn clean_command(program: &Path, repo: &Path, scratch: &DogfoodScratch, _offline
     command
 }
 
-fn assert_projected_paths(value: &JSONValue, scratch: &DogfoodScratch, contract: &EnvContract) {
+fn assert_projected_paths(value: &DataTree, scratch: &DogfoodScratch, contract: &EnvContract) {
     let path = value_field(value, "path")
         .as_str()
         .expect("probe PATH string");
@@ -653,7 +653,7 @@ fn assert_projected_paths(value: &JSONValue, scratch: &DogfoodScratch, contract:
     assert_snapshot(value);
 }
 
-fn assert_snapshot(value: &JSONValue) {
+fn assert_snapshot(value: &DataTree) {
     let snapshot = jetpack::JSON::parse(include_str!("cli/jetpack_dogfood_versions.json"))
         .expect("dogfood version snapshot JSON");
     let expected = value_field(&snapshot, "packages")
@@ -688,7 +688,7 @@ fn assert_snapshot(value: &JSONValue) {
     }
 }
 
-fn assert_du_matches(value: &JSONValue, expected: PhysicalUse) {
+fn assert_du_matches(value: &DataTree, expected: PhysicalUse) {
     assert_eq!(json_u64(value, "unique_bytes"), expected.unique_bytes);
     assert_eq!(json_u64(value, "shared_bytes"), expected.shared_bytes);
     assert_eq!(
@@ -843,7 +843,7 @@ fn read_phase_summary(scratch: &DogfoodScratch, mode: &str) -> PhaseSummary {
     }
 }
 
-fn extract_probe_json(output: &Output) -> JSONValue {
+fn extract_probe_json(output: &Output) -> DataTree {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let line = stdout
         .lines()
@@ -861,7 +861,7 @@ fn probe_json_text(output: &Output) -> String {
         .to_owned()
 }
 
-fn probe_identity(value: &JSONValue) -> Vec<(String, String, i64, String, String, i64)> {
+fn probe_identity(value: &DataTree) -> Vec<(String, String, i64, String, String, i64)> {
     value_field(value, "probes")
         .as_array()
         .expect("probe records")
@@ -952,24 +952,28 @@ fn version_line(output: &Output) -> String {
         .to_owned()
 }
 
-fn value_field<'a>(value: &'a JSONValue, key: &str) -> &'a JSONValue {
+fn value_field<'a>(value: &'a DataTree, key: &str) -> &'a DataTree {
     value
         .get(key)
         .unwrap_or_else(|_| panic!("JSON field {key} missing"))
 }
 
-fn object_field<'a>(value: &'a JSONValue, key: &str) -> &'a JSONValue {
+fn object_field<'a>(value: &'a DataTree, key: &str) -> &'a DataTree {
     value_field(value, key)
 }
 
-fn json_i64(value: &JSONValue) -> Result<i64, String> {
+fn json_i64(value: &DataTree) -> Result<i64, String> {
     match value {
-        JSONValue::Number(number) => Ok(*number),
+        DataTree::Int(number) => Ok(*number),
+        DataTree::Float(number) => Ok(*number as i64),
+        DataTree::Number(number) => number
+            .parse::<i64>()
+            .map_err(|_| "expected JSON integer".to_string()),
         _ => Err("expected JSON integer".into()),
     }
 }
 
-fn json_u64(value: &JSONValue, key: &str) -> u64 {
+fn json_u64(value: &DataTree, key: &str) -> u64 {
     let number = json_i64(value_field(value, key)).expect("JSON integer");
     u64::try_from(number).expect("JSON non-negative integer")
 }
@@ -1182,8 +1186,8 @@ impl Drop for DogfoodScratch {
 struct PhaseSummary {
     phase_pid: u64,
     jetpack_pid: u64,
-    probe: JSONValue,
-    du: JSONValue,
+    probe: DataTree,
+    du: DataTree,
 }
 
 struct EnvContract {

@@ -1,59 +1,3 @@
-// D-PARCAPTURE1=D: the indexed chunk scheduler is shared by AOT and resident
-// adapters. The AOT wrapper adds its failure rail; adapters only marshal the
-// callback and values into this kernel.
-const JET_PARA_CHUNK_ITEMS: usize = 64;
-
-fn jet_list_para_chunks_kernel<R, E, F>(
-    len: usize,
-    worker_limit: usize,
-    worker_cap: usize,
-    f: F,
-) -> Vec<(usize, Result<R, E>)>
-where
-    R: Send,
-    E: Send,
-    F: Fn(std::ops::Range<usize>) -> Result<R, E> + Sync,
-{
-    let chunk_count = len.div_ceil(JET_PARA_CHUNK_ITEMS);
-    if chunk_count == 0 {
-        return Vec::new();
-    }
-    let worker_count = worker_cap.min(worker_limit.max(1)).min(chunk_count);
-    if worker_count == 1 {
-        return (0..chunk_count)
-            .map(|chunk| {
-                let start = chunk * JET_PARA_CHUNK_ITEMS;
-                let end = (start + JET_PARA_CHUNK_ITEMS).min(len);
-                (chunk, f(start..end))
-            })
-            .collect();
-    }
-    std::thread::scope(|scope| {
-        let mut handles = Vec::with_capacity(worker_count);
-        let f = &f;
-        for worker in 0..worker_count {
-            handles.push(scope.spawn(move || {
-                let mut out = Vec::new();
-                for chunk in (worker..chunk_count).step_by(worker_count) {
-                    let start = chunk * JET_PARA_CHUNK_ITEMS;
-                    let end = (start + JET_PARA_CHUNK_ITEMS).min(len);
-                    out.push((chunk, f(start..end)));
-                }
-                out
-            }));
-        }
-        let mut indexed = Vec::with_capacity(chunk_count);
-        for handle in handles.into_iter().rev() {
-            match handle.join() {
-                Ok(results) => indexed.extend(results),
-                Err(payload) => std::panic::resume_unwind(payload),
-            }
-        }
-        indexed.sort_unstable_by_key(|(chunk, _)| *chunk);
-        indexed
-    })
-}
-
 // ── D-ITERTOOLS1=A: expanded collection/runtime handles ─────────────────────
 impl<K: PartialEq + Clone, V: Clone> JetLru<K, V> {
     fn add_new(&mut self, key: K, value: V) -> bool {
@@ -257,6 +201,150 @@ where
 {
     xs.into_iter().sum()
 }
+
+/// D-FRED1=A: Float collection reductions use the shared eight-lane Prelude
+/// tree; the generic `sum` helper remains the left-to-right standard fold for
+/// element types without this ratified fixed-order rule.
+#[inline(always)]
+fn jet_list_sum_fixed_f32<I: IntoIterator<Item = f32>>(xs: I) -> f32 {
+    jet_simd_reduce_fixed_iter(xs, 0.0)
+}
+
+#[inline(always)]
+fn jet_list_sum_fixed_f64<I: IntoIterator<Item = f64>>(xs: I) -> f64 {
+    jet_simd_reduce_fixed_iter(xs, 0.0)
+}
+
+/// D-FRED1=A: Float `fold` with scalar addition uses the same fixed seed
+/// placement and lane tree as `sum`.
+#[inline(always)]
+fn jet_list_fold_add_fixed_f32<I: IntoIterator<Item = f32>>(xs: I, init: f32) -> f32 {
+    jet_simd_reduce_fixed_iter(xs, init)
+}
+
+#[inline(always)]
+fn jet_list_fold_add_fixed_f64<I: IntoIterator<Item = f64>>(xs: I, init: f64) -> f64 {
+    jet_simd_reduce_fixed_iter(xs, init)
+}
+/// D-FRED1=A masked collection reductions share the same lane assignment and
+/// adjacent tree as ordinary Float sums.  A malformed resident mask is
+/// rejected instead of truncating the input.
+#[inline(always)]
+fn jet_list_masked_sum_fixed_f32(
+    values: &[f32],
+    mask: &[bool],
+    seed: f32,
+) -> Option<f32> {
+    jet_simd_masked_reduce_slice(values, mask, seed)
+}
+
+#[inline(always)]
+fn jet_list_masked_sum_fixed_f64(
+    values: &[f64],
+    mask: &[bool],
+    seed: f64,
+) -> Option<f64> {
+    jet_simd_masked_reduce_slice(values, mask, seed)
+}
+
+#[inline(always)]
+fn jet_list_first_match<T: JetSimdComparable>(
+    values: &[T],
+    needle: &T,
+    op: JetSimdCompareOp,
+) -> Option<usize> {
+    jet_simd_first_match_slice(values, needle, op)
+}
+
+/// Apply one selected D-ACCEL1 column-copy pass over bounded cache blocks.
+/// Callers that already ran a serial probe can prepend that probe's typed
+/// result and invoke this helper only for the remaining range.
+#[inline(always)]
+fn jet_list_accel_column_copy_range_map<U, R, P, C>(
+    range: std::ops::Range<usize>,
+    project: P,
+    copied_kernel: C,
+) -> Vec<R>
+where
+    P: Fn(usize) -> U,
+    C: Fn(&[U], std::ops::Range<usize>) -> Vec<R>,
+{
+    let start = range.start;
+    let end = range.end;
+    let element_bytes = std::mem::size_of::<U>().max(1);
+    let block_items = (JET_LIST_ACCEL_CACHE_BLOCK_BYTES / element_bytes).max(1);
+    let mut result = Vec::new();
+    let mut block_start = start;
+    while block_start < end {
+        let block_end = block_start.saturating_add(block_items).min(end);
+        let column = (block_start..block_end).map(&project).collect::<Vec<_>>();
+        result.extend(copied_kernel(&column, block_start..block_end));
+        block_start = block_end;
+    }
+    result
+}
+
+/// D-ACCEL1 column copy keeps one private cache-block projection at a time.
+/// Rejected or single-pass paths call the original range operation unchanged.
+#[inline(always)]
+fn jet_list_accel_column_range_map<U, R, P, C, F>(
+    range: std::ops::Range<usize>,
+    nested_reuse: bool,
+    single_pass: bool,
+    proof_proven: bool,
+    pin_active: bool,
+    gate_selected: bool,
+    project: P,
+    copied_kernel: C,
+    original_kernel: F,
+) -> Vec<R>
+where
+    P: Fn(usize) -> U,
+    C: Fn(&[U], std::ops::Range<usize>) -> Vec<R>,
+    F: FnOnce(std::ops::Range<usize>) -> Vec<R>,
+{
+    let start = range.start;
+    let end = range.end;
+    if !gate_selected || pin_active || !proof_proven || !nested_reuse || single_pass {
+        return original_kernel(start..end);
+    }
+    jet_list_accel_column_copy_range_map(start..end, project, copied_kernel)
+}
+
+const JET_LIST_ACCEL_CACHE_BLOCK_BYTES: usize = 64 * 1024;
+
+/// Slice convenience wrapper over the range kernel; it does not materialize
+/// source indices while constructing transient columns.
+#[inline(always)]
+fn jet_list_accel_column_map<T, U, R, P, C, F>(
+    source: &[T],
+    nested_reuse: bool,
+    single_pass: bool,
+    proof_proven: bool,
+    pin_active: bool,
+    gate_selected: bool,
+    project: P,
+    copied_kernel: C,
+    original_kernel: F,
+) -> Vec<R>
+where
+    P: Fn(&T) -> U,
+    C: Fn(&[U], std::ops::Range<usize>) -> Vec<R>,
+    F: FnOnce(&[T]) -> Vec<R>,
+{
+    jet_list_accel_column_range_map(
+        0..source.len(),
+        nested_reuse,
+        single_pass,
+        proof_proven,
+        pin_active,
+        gate_selected,
+        |index| project(&source[index]),
+        copied_kernel,
+        |range| original_kernel(&source[range]),
+    )
+}
+
 fn jet_list_product<T, I>(xs: I) -> T
 where
     I: IntoIterator<Item = T>,
@@ -268,46 +356,225 @@ fn jet_list_copy<T: Clone>(xs: &[T]) -> Vec<T> {
     xs.to_vec()
 }
 
-fn jet_list_sort_by<T, K: Ord, F>(xs: &mut Vec<T>, f: F)
+fn jet_list_sort_by<T, K: Ord, F>(xs: &mut Vec<T>, mut f: F)
 where
     F: FnMut(&T) -> K,
 {
-    xs.sort_by_key(f);
+    jet_list_try_sort_by_key_kernel(
+        xs,
+        |item| Ok::<_, std::convert::Infallible>(f(item)),
+        Ord::cmp,
+    )
+    .unwrap_or_else(|never| match never {});
 }
 
 fn jet_list_sort_desc<T: Ord>(xs: &mut Vec<T>) {
     xs.sort_by(|left, right| right.cmp(left));
 }
 
+#[inline(always)]
+fn jet_list_push<T>(xs: &mut Vec<T>, value: T) {
+    xs.push(value);
+}
+
+#[inline(always)]
+fn jet_list_extend<T>(xs: &mut Vec<T>, other: Vec<T>) {
+    xs.extend(other);
+}
+
+#[inline(always)]
+fn jet_list_reverse<T>(xs: &mut Vec<T>) {
+    xs.reverse();
+}
+
+#[inline(always)]
+fn jet_list_sort<T: Ord>(xs: &mut Vec<T>) {
+    xs.sort();
+}
+
+trait JetCollectionClear {
+    fn jet_clear(&mut self);
+}
+
+impl<T> JetCollectionClear for Vec<T> {
+    #[inline(always)]
+    fn jet_clear(&mut self) {
+        self.clear();
+    }
+}
+
+impl<K: Ord + Clone, V: Clone> JetCollectionClear for JetMap<K, V> {
+    #[inline(always)]
+    fn jet_clear(&mut self) {
+        self.clear();
+    }
+}
+
+#[inline(always)]
+fn jet_list_clear<C: JetCollectionClear>(collection: &mut C) {
+    collection.jet_clear();
+}
+
 fn jet_list_sort_by_desc<T, K: Ord, F>(xs: &mut Vec<T>, mut f: F)
 where
     F: FnMut(&T) -> K,
 {
-    xs.sort_by_key(|item| std::cmp::Reverse(f(item)));
+    jet_list_try_sort_by_key_kernel(
+        xs,
+        |item| Ok::<_, std::convert::Infallible>(f(item)),
+        |left, right| right.cmp(left),
+    )
+    .unwrap_or_else(|never| match never {});
 }
 
-fn jet_list_try_sort_by<T, K: Ord, E, F>(xs: &mut Vec<T>, mut f: F) -> Result<(), E>
+fn jet_list_try_sort_by<T, K: Ord, E, F>(xs: &mut Vec<T>, f: F) -> Result<(), E>
 where
     F: FnMut(&T) -> Result<K, E>,
 {
-    let keys: Result<Vec<K>, E> = xs.iter().map(|item| f(item)).collect();
-    let keys = keys?;
-    let mut keyed: Vec<_> = std::mem::take(xs).into_iter().zip(keys).collect();
-    keyed.sort_by(|left, right| left.1.cmp(&right.1));
-    *xs = keyed.into_iter().map(|(item, _)| item).collect();
-    Ok(())
+    jet_list_try_sort_by_key_kernel(xs, f, Ord::cmp)
 }
 
-fn jet_list_try_sort_by_desc<T, K: Ord, E, F>(xs: &mut Vec<T>, mut f: F) -> Result<(), E>
+fn jet_list_try_sort_by_desc<T, K: Ord, E, F>(xs: &mut Vec<T>, f: F) -> Result<(), E>
 where
     F: FnMut(&T) -> Result<K, E>,
 {
-    let keys: Result<Vec<K>, E> = xs.iter().map(|item| f(item)).collect();
-    let keys = keys?;
-    let mut keyed: Vec<_> = std::mem::take(xs).into_iter().zip(keys).collect();
-    keyed.sort_by(|left, right| right.1.cmp(&left.1));
-    *xs = keyed.into_iter().map(|(item, _)| item).collect();
-    Ok(())
+    jet_list_try_sort_by_key_kernel(xs, f, |left, right| right.cmp(left))
+}
+
+#[inline(always)]
+fn jet_list_len<T>(xs: &[T]) -> i64 {
+    xs.len() as i64
+}
+
+#[inline(always)]
+fn jet_list_is_empty<T>(xs: &[T]) -> bool {
+    xs.is_empty()
+}
+
+#[inline(always)]
+pub(crate) fn jet_list_contains<T: PartialEq>(xs: &[T], needle: &T) -> bool {
+    xs.contains(needle)
+}
+
+#[inline(always)]
+fn jet_list_get_opt<T: Clone>(xs: &[T], index: i64) -> JetOutcome<T, JetAbsent> {
+    usize::try_from(index)
+        .ok()
+        .and_then(|index| xs.get(index).cloned())
+        .ok_or(JetAbsent)
+}
+
+#[inline(always)]
+fn jet_list_first<T: Clone>(xs: &[T]) -> JetOutcome<T, JetAbsent> {
+    jet_outcome_of(xs.first().cloned())
+}
+
+#[inline(always)]
+fn jet_list_last<T: Clone>(xs: &[T]) -> JetOutcome<T, JetAbsent> {
+    jet_outcome_of(xs.last().cloned())
+}
+
+#[inline(always)]
+fn jet_map_len<K: Ord, V>(map: &JetMap<K, V>) -> i64 {
+    map.len() as i64
+}
+
+#[inline(always)]
+fn jet_map_is_empty<K: Ord, V>(map: &JetMap<K, V>) -> bool {
+    map.is_empty()
+}
+
+#[inline(always)]
+fn jet_map_get_opt<K: Ord, V: Clone>(
+    map: &JetMap<K, V>,
+    key: &K,
+) -> JetOutcome<V, JetAbsent> {
+    jet_outcome_of(map.get(key).cloned())
+}
+
+#[inline(always)]
+fn jet_set_len<T>(set: &std::collections::HashSet<T>) -> i64 {
+    set.len() as i64
+}
+
+#[inline(always)]
+fn jet_set_is_empty<T>(set: &std::collections::HashSet<T>) -> bool {
+    set.is_empty()
+}
+
+#[inline(always)]
+fn jet_sorted_set_len<T>(set: &std::collections::BTreeSet<T>) -> i64 {
+    set.len() as i64
+}
+
+#[inline(always)]
+fn jet_sorted_set_is_empty<T>(set: &std::collections::BTreeSet<T>) -> bool {
+    set.is_empty()
+}
+
+#[inline(always)]
+fn jet_priority_queue_len<T>(queue: &std::collections::BinaryHeap<T>) -> i64 {
+    queue.len() as i64
+}
+
+#[inline(always)]
+fn jet_priority_queue_is_empty<T>(queue: &std::collections::BinaryHeap<T>) -> bool {
+    queue.is_empty()
+}
+
+#[inline(always)]
+fn jet_lru_len<K: Eq + Clone, V: Clone>(cache: &JetCache<K, V>) -> i64 {
+    cache.len() as i64
+}
+
+#[inline(always)]
+fn jet_lru_is_empty<K: Eq + Clone, V: Clone>(cache: &JetCache<K, V>) -> bool {
+    cache.is_empty()
+}
+
+#[inline(always)]
+fn jet_bag_len<T>(bag: &std::collections::HashMap<T, usize>) -> i64 {
+    bag.values().sum::<usize>() as i64
+}
+
+#[inline(always)]
+fn jet_bag_is_empty<T>(bag: &std::collections::HashMap<T, usize>) -> bool {
+    bag.is_empty()
+}
+
+#[inline(always)]
+fn jet_bit_set_len(bits: &JetBitSet) -> i64 {
+    bits.len()
+}
+
+#[inline(always)]
+fn jet_bit_set_is_empty(bits: &JetBitSet) -> bool {
+    bits.is_empty()
+}
+
+#[inline(always)]
+fn jet_deque_len<T>(queue: &std::collections::VecDeque<T>) -> i64 {
+    queue.len() as i64
+}
+
+#[inline(always)]
+fn jet_deque_is_empty<T>(queue: &std::collections::VecDeque<T>) -> bool {
+    queue.is_empty()
+}
+
+#[inline(always)]
+fn jet_string_is_empty(text: &String) -> bool {
+    text.is_empty()
+}
+
+#[inline(always)]
+pub(crate) fn jet_string_contains(text: &str, needle: &str) -> bool {
+    text.contains(needle)
+}
+
+#[inline(always)]
+fn jet_string_count_bytes(text: &String) -> i64 {
+    text.len() as i64
 }
 
 // D-ALLOCFAIL1=A: collection fallibility is one Prelude path. Native
@@ -438,6 +705,20 @@ where
     }
     m
 }
+fn jet_bag_any<K, F>(bag: &JetMap<K, usize>, mut f: F) -> bool
+where
+    F: FnMut(&K) -> bool,
+{
+    bag.iter().any(|(key, count)| *count != 0 && f(key))
+}
+
+fn jet_option_map_ref<T, U, F>(value: &JetOutcome<T, JetAbsent>, f: F) -> JetOutcome<U, JetAbsent>
+where
+    F: FnOnce(&T) -> U,
+{
+    value.as_ref().map(f).map_err(|_| JetAbsent)
+}
+
 
 /// Count each item directly. `count_by(x -> x)` is the same operation with
 /// the identity projection, but this named kernel keeps the common path terse.
@@ -751,6 +1032,16 @@ impl<T: 'static> JetIter<T> {
     }
 }
 
+// Iterator terminals are free-function spellings so every target can route
+// the checked BuiltinMethod without reaching into this private carrier.
+fn jet_iter_to_list<T: 'static>(it: JetIter<T>) -> Vec<T> {
+    it.to_list()
+}
+
+fn jet_iter_collect<T: 'static>(it: JetIter<T>) -> Vec<T> {
+    it.collect()
+}
+
 impl<T> IntoIterator for JetIter<T> {
     type Item = T;
     type IntoIter = Box<dyn Iterator<Item = T>>;
@@ -766,6 +1057,606 @@ fn jet_iter_from_vec<T: 'static>(xs: Vec<T>) -> JetIter<T> {
 fn jet_iter_first<T: 'static>(it: JetIter<T>) -> JetOutcome<T, JetAbsent> {
     jet_outcome_of(it.into_iter().next())
 }
+fn jet_iter_len<T: 'static>(it: JetIter<T>) -> i64 {
+    it.len()
+}
+
+fn jet_iter_is_empty<T: 'static>(it: JetIter<T>) -> bool {
+    it.is_empty()
+}
+
+fn jet_iter_last<T: 'static>(it: JetIter<T>) -> JetOutcome<T, JetAbsent> {
+    jet_outcome_of(it.into_iter().last())
+}
+
+
+// D-TIER-ONEIR1=A: one target-neutral loop cursor protocol. The MIR adapter
+// only marshals values into these calls; source-kind identity and iteration
+// semantics stay here, beside the existing lazy iterator carrier.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum JetLoopSourceKind {
+    Plain,
+    Chars,
+    LinesFile,
+    LinesStdin,
+    LinesProcessStream,
+    ChannelReceiver,
+    EncodingReader { reader_type: &'static str },
+    Iterable {
+        coll_type: &'static str,
+        iter_type: &'static str,
+        iter_symbol: &'static str,
+        next_symbol: &'static str,
+    },
+}
+
+impl JetLoopSourceKind {
+    fn from_wire(wire: &'static str) -> Option<Self> {
+        fn take(input: &'static str) -> Option<(&'static str, &'static str)> {
+            let separator = input.find(':')?;
+            let length = input.get(..separator)?.parse::<usize>().ok()?;
+            let payload_start = separator.checked_add(1)?;
+            let payload_end = payload_start.checked_add(length)?;
+            let payload = input.get(payload_start..payload_end)?;
+            let rest = input.get(payload_end..)?;
+            Some((payload, rest))
+        }
+
+        match wire {
+            "plain" => Some(Self::Plain),
+            "chars" => Some(Self::Chars),
+            "lines:file" => Some(Self::LinesFile),
+            "lines:stdin" => Some(Self::LinesStdin),
+            "lines:process" => Some(Self::LinesProcessStream),
+            "channel" => Some(Self::ChannelReceiver),
+            _ => {
+                if let Some(payload) = wire.strip_prefix("encoding:") {
+                    let (reader_type, rest) = take(payload)?;
+                    if reader_type.is_empty() || !rest.is_empty() {
+                        return None;
+                    }
+                    return Some(Self::EncodingReader { reader_type });
+                }
+                let payload = wire.strip_prefix("iterable:")?;
+                let (coll_type, rest) = take(payload)?;
+                let rest = rest.strip_prefix(':')?;
+                let (iter_type, rest) = take(rest)?;
+                let rest = rest.strip_prefix(':')?;
+                let (iter_symbol, rest) = take(rest)?;
+                let rest = rest.strip_prefix(':')?;
+                let (next_symbol, rest) = take(rest)?;
+                if coll_type.is_empty()
+                    || iter_type.is_empty()
+                    || iter_symbol.is_empty()
+                    || next_symbol.is_empty()
+                    || !rest.is_empty()
+                {
+                    return None;
+                }
+                Some(Self::Iterable {
+                    coll_type,
+                    iter_type,
+                    iter_symbol,
+                    next_symbol,
+                })
+            }
+        }
+    }
+}
+
+// Flattened into the generated crate root: `pub(super)` has no parent there.
+#[derive(Clone, Debug)]
+pub(crate) struct JetLoopRangeCursor {
+    current: i64,
+    end: i64,
+    step: i64,
+    exclusive: bool,
+    done: bool,
+}
+
+pub(crate) fn jet_loop_range_init(
+    start: i64,
+    end: i64,
+    step_value: i64,
+    has_step: bool,
+    exclusive: bool,
+) -> JetLoopRangeCursor {
+    jet_loop_range_init_checked(start, end, step_value, has_step, exclusive)
+        .unwrap_or_else(|message| jet_panic("<core.prelude>", 0, message))
+}
+
+pub(crate) fn jet_loop_range_init_checked(
+    start: i64,
+    end: i64,
+    step_value: i64,
+    has_step: bool,
+    exclusive: bool,
+) -> Result<JetLoopRangeCursor, &'static str> {
+    let step = if has_step { step_value } else { 1 };
+    if step == 0 {
+        return Err("range loop stride must not be zero");
+    }
+    Ok(JetLoopRangeCursor {
+        current: start,
+        end,
+        step,
+        exclusive,
+        done: false,
+    })
+}
+
+pub(crate) fn jet_loop_range_has_next(cursor: &JetLoopRangeCursor) -> bool {
+    !cursor.done && if cursor.step > 0 {
+        if cursor.exclusive { cursor.current < cursor.end } else { cursor.current <= cursor.end }
+    } else {
+        if cursor.exclusive { cursor.current > cursor.end } else { cursor.current >= cursor.end }
+    }
+}
+
+pub(crate) fn jet_loop_range_value(cursor: &JetLoopRangeCursor) -> i64 {
+    if !jet_loop_range_has_next(cursor) {
+        jet_panic("<core.prelude>", 0, "range loop value requested after exhaustion");
+    }
+    cursor.current
+}
+
+pub(crate) fn jet_loop_range_advance(cursor: &mut JetLoopRangeCursor) {
+    if cursor.done {
+        return;
+    }
+    cursor.current = match cursor.current.checked_add(cursor.step) {
+        Some(value) => value,
+        None => {
+            cursor.done = true;
+            return;
+        }
+    };
+    cursor.done = !jet_loop_range_has_next(cursor);
+}
+
+type JetLoopAny = Box<dyn std::any::Any>;
+
+struct JetLoopIterCursor {
+    iter: Box<dyn Iterator<Item = JetLoopAny>>,
+    current: Option<JetLoopAny>,
+    step: usize,
+    exhausted: bool,
+}
+fn jet_loop_iter_init<C: JetLoopSource>(
+    collection: C,
+    step_value: i64,
+    has_step: bool,
+    by_value: bool,
+    source_kind: JetLoopSourceKind,
+) -> JetLoopIterCursor {
+    jet_loop_iter_init_checked(collection, step_value, has_step, by_value, source_kind)
+        .unwrap_or_else(|message| jet_panic("<core.prelude>", 0, message))
+}
+
+fn jet_loop_iter_init_checked<C: JetLoopSource>(
+    collection: C,
+    step_value: i64,
+    has_step: bool,
+    by_value: bool,
+    source_kind: JetLoopSourceKind,
+) -> Result<JetLoopIterCursor, &'static str> {
+    let step = if has_step { step_value } else { 1 };
+    if step <= 0 {
+        return Err("iterator loop stride must be positive");
+    }
+    let mut iter = collection.jet_loop_source(source_kind, by_value);
+    let current = iter.next();
+    let exhausted = current.is_none();
+    Ok(JetLoopIterCursor {
+        iter,
+        current,
+        step: step as usize,
+        exhausted,
+    })
+}
+
+fn jet_loop_iter_has_next(cursor: &JetLoopIterCursor) -> bool {
+    cursor.current.is_some()
+}
+
+fn jet_loop_iter_value<T: 'static>(cursor: &mut JetLoopIterCursor) -> T {
+    let Some(value) = cursor.current.take() else {
+        jet_panic("<core.prelude>", 0, "iterator loop value requested after exhaustion");
+    };
+    match value.downcast::<T>() {
+        Ok(value) => *value,
+        Err(_) => jet_panic("<core.prelude>", 0, "iterator loop item type does not match MIR"),
+    }
+}
+
+fn jet_loop_iter_advance(cursor: &mut JetLoopIterCursor) {
+    if cursor.exhausted {
+        return;
+    }
+    for _ in 1..cursor.step {
+        if cursor.iter.next().is_none() {
+            cursor.current = None;
+            cursor.exhausted = true;
+            return;
+        }
+    }
+    cursor.current = cursor.iter.next();
+    cursor.exhausted = cursor.current.is_none();
+}
+
+fn jet_loop_source_kind_name(kind: JetLoopSourceKind) -> String {
+    match kind {
+        JetLoopSourceKind::Plain => "Plain".to_string(),
+        JetLoopSourceKind::Chars => "Chars".to_string(),
+        JetLoopSourceKind::LinesFile => "LinesFile".to_string(),
+        JetLoopSourceKind::LinesStdin => "LinesStdin".to_string(),
+        JetLoopSourceKind::LinesProcessStream => "LinesProcessStream".to_string(),
+        JetLoopSourceKind::ChannelReceiver => "ChannelReceiver".to_string(),
+        JetLoopSourceKind::EncodingReader { reader_type } => {
+            format!("EncodingReader({reader_type})")
+        }
+        JetLoopSourceKind::Iterable { coll_type, iter_type, .. } => {
+            format!("Iterable({coll_type}::{iter_type})")
+        }
+    }
+}
+
+fn jet_loop_source_error(kind: JetLoopSourceKind) -> ! {
+    jet_panic(
+        "<core.prelude>",
+        0,
+        &format!(
+            "loop source kind {} is not supported by this collection carrier",
+            jet_loop_source_kind_name(kind)
+        ),
+    )
+}
+
+trait JetLoopSource {
+    fn jet_loop_source(
+        self,
+        source_kind: JetLoopSourceKind,
+        by_value: bool,
+    ) -> Box<dyn Iterator<Item = JetLoopAny>>;
+}
+
+impl<T: 'static> JetLoopSource for Vec<T> {
+    fn jet_loop_source(
+        self,
+        source_kind: JetLoopSourceKind,
+        by_value: bool,
+    ) -> Box<dyn Iterator<Item = JetLoopAny>> {
+        match source_kind {
+            JetLoopSourceKind::Plain => {
+                if !by_value {
+                    jet_loop_source_error(source_kind);
+                }
+                Box::new(
+                    self.into_iter()
+                        .map(|value| Box::new(value) as JetLoopAny),
+                )
+            }
+            JetLoopSourceKind::Chars
+            | JetLoopSourceKind::LinesFile
+            | JetLoopSourceKind::LinesStdin
+            | JetLoopSourceKind::LinesProcessStream
+            | JetLoopSourceKind::ChannelReceiver
+            | JetLoopSourceKind::EncodingReader { .. }
+            | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
+        }
+    }
+}
+
+impl<T: Clone + 'static> JetLoopSource for &mut Vec<T> {
+    fn jet_loop_source(
+        self,
+        source_kind: JetLoopSourceKind,
+        by_value: bool,
+    ) -> Box<dyn Iterator<Item = JetLoopAny>> {
+        match source_kind {
+            JetLoopSourceKind::Plain => {
+                if by_value {
+                    jet_loop_source_error(source_kind);
+                }
+                let values = self.clone();
+                Box::new(
+                    values
+                        .into_iter()
+                        .map(|value| Box::new(value) as JetLoopAny),
+                )
+            }
+            JetLoopSourceKind::Chars
+            | JetLoopSourceKind::LinesFile
+            | JetLoopSourceKind::LinesStdin
+            | JetLoopSourceKind::LinesProcessStream
+            | JetLoopSourceKind::ChannelReceiver
+            | JetLoopSourceKind::EncodingReader { .. }
+            | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
+        }
+    }
+}
+
+impl<T: 'static, const N: usize> JetLoopSource for [T; N] {
+    fn jet_loop_source(
+        self,
+        source_kind: JetLoopSourceKind,
+        by_value: bool,
+    ) -> Box<dyn Iterator<Item = JetLoopAny>> {
+        match source_kind {
+            JetLoopSourceKind::Plain => {
+                if !by_value {
+                    jet_loop_source_error(source_kind);
+                }
+                Box::new(
+                    self.into_iter()
+                        .map(|value| Box::new(value) as JetLoopAny),
+                )
+            }
+            JetLoopSourceKind::Chars
+            | JetLoopSourceKind::LinesFile
+            | JetLoopSourceKind::LinesStdin
+            | JetLoopSourceKind::LinesProcessStream
+            | JetLoopSourceKind::ChannelReceiver
+            | JetLoopSourceKind::EncodingReader { .. }
+            | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
+        }
+    }
+}
+
+impl<T: Clone + 'static, const N: usize> JetLoopSource for &mut [T; N] {
+    fn jet_loop_source(
+        self,
+        source_kind: JetLoopSourceKind,
+        by_value: bool,
+    ) -> Box<dyn Iterator<Item = JetLoopAny>> {
+        match source_kind {
+            JetLoopSourceKind::Plain => {
+                if by_value {
+                    jet_loop_source_error(source_kind);
+                }
+                let values = self.to_vec();
+                Box::new(
+                    values
+                        .into_iter()
+                        .map(|value| Box::new(value) as JetLoopAny),
+                )
+            }
+            JetLoopSourceKind::Chars
+            | JetLoopSourceKind::LinesFile
+            | JetLoopSourceKind::LinesStdin
+            | JetLoopSourceKind::LinesProcessStream
+            | JetLoopSourceKind::ChannelReceiver
+            | JetLoopSourceKind::EncodingReader { .. }
+            | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
+        }
+    }
+}
+
+impl<K: Ord + Clone + 'static, V: Clone + 'static> JetLoopSource for JetMap<K, V> {
+    fn jet_loop_source(
+        self,
+        source_kind: JetLoopSourceKind,
+        by_value: bool,
+    ) -> Box<dyn Iterator<Item = JetLoopAny>> {
+        match source_kind {
+            JetLoopSourceKind::Plain => {
+                if !by_value {
+                    jet_loop_source_error(source_kind);
+                }
+                // Each host owns the map representation; `jet_map_into_entries`
+                // is its by-value take (AOT/JIT unwrap the shared handle).
+                let values = jet_map_into_entries(self).into_iter();
+                Box::new(values.map(|value| Box::new(value) as JetLoopAny))
+            }
+            JetLoopSourceKind::Chars
+            | JetLoopSourceKind::LinesFile
+            | JetLoopSourceKind::LinesStdin
+            | JetLoopSourceKind::LinesProcessStream
+            | JetLoopSourceKind::ChannelReceiver
+            | JetLoopSourceKind::EncodingReader { .. }
+            | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
+        }
+    }
+}
+
+impl<K: Ord + Clone + 'static, V: Clone + 'static> JetLoopSource for &mut JetMap<K, V> {
+    fn jet_loop_source(
+        self,
+        source_kind: JetLoopSourceKind,
+        by_value: bool,
+    ) -> Box<dyn Iterator<Item = JetLoopAny>> {
+        match source_kind {
+            JetLoopSourceKind::Plain => {
+                if by_value {
+                    jet_loop_source_error(source_kind);
+                }
+                let values = self
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect::<Vec<_>>()
+                    .into_iter();
+                Box::new(values.map(|value| Box::new(value) as JetLoopAny))
+            }
+            JetLoopSourceKind::Chars
+            | JetLoopSourceKind::LinesFile
+            | JetLoopSourceKind::LinesStdin
+            | JetLoopSourceKind::LinesProcessStream
+            | JetLoopSourceKind::ChannelReceiver
+            | JetLoopSourceKind::EncodingReader { .. }
+            | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
+        }
+    }
+}
+
+impl<T: 'static> JetLoopSource for JetIter<T> {
+    fn jet_loop_source(
+        self,
+        source_kind: JetLoopSourceKind,
+        by_value: bool,
+    ) -> Box<dyn Iterator<Item = JetLoopAny>> {
+        match source_kind {
+            JetLoopSourceKind::Plain
+            | JetLoopSourceKind::EncodingReader { .. }
+            | JetLoopSourceKind::Iterable { .. } => {
+                if !by_value {
+                    jet_loop_source_error(source_kind);
+                }
+                Box::new(
+                    self.into_iter()
+                        .map(|value| Box::new(value) as JetLoopAny),
+                )
+            }
+            JetLoopSourceKind::Chars
+            | JetLoopSourceKind::LinesFile
+            | JetLoopSourceKind::LinesStdin
+            | JetLoopSourceKind::LinesProcessStream
+            | JetLoopSourceKind::ChannelReceiver => jet_loop_source_error(source_kind),
+        }
+    }
+}
+
+struct JetStringChars {
+    bytes: Vec<u8>,
+    offset: usize,
+}
+
+impl JetStringChars {
+    fn new(value: String) -> Self {
+        Self {
+            bytes: value.into_bytes(),
+            offset: 0,
+        }
+    }
+}
+
+impl Iterator for JetStringChars {
+    type Item = char;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let end = self.offset.saturating_add(4).min(self.bytes.len());
+        let bytes = self.bytes.get(self.offset..end)?;
+        // The window can end inside the following scalar.
+        let tail = match std::str::from_utf8(bytes) {
+            Ok(tail) => tail,
+            Err(error) => std::str::from_utf8(&bytes[..error.valid_up_to()]).ok()?,
+        };
+        let value = tail.chars().next()?;
+        self.offset += value.len_utf8();
+        Some(value)
+    }
+}
+
+impl JetLoopSource for String {
+    fn jet_loop_source(
+        self,
+        source_kind: JetLoopSourceKind,
+        by_value: bool,
+    ) -> Box<dyn Iterator<Item = JetLoopAny>> {
+        match source_kind {
+            JetLoopSourceKind::Plain | JetLoopSourceKind::Chars => {
+                if !by_value {
+                    jet_loop_source_error(source_kind);
+                }
+                Box::new(
+                    JetStringChars::new(self)
+                        .map(|value| Box::new(value) as JetLoopAny),
+                )
+            }
+            JetLoopSourceKind::LinesFile
+            | JetLoopSourceKind::LinesStdin
+            | JetLoopSourceKind::LinesProcessStream
+            | JetLoopSourceKind::ChannelReceiver
+            | JetLoopSourceKind::EncodingReader { .. }
+            | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
+        }
+    }
+}
+
+impl JetLoopSource for &mut String {
+    fn jet_loop_source(
+        self,
+        source_kind: JetLoopSourceKind,
+        by_value: bool,
+    ) -> Box<dyn Iterator<Item = JetLoopAny>> {
+        match source_kind {
+            JetLoopSourceKind::Plain | JetLoopSourceKind::Chars => {
+                if by_value {
+                    jet_loop_source_error(source_kind);
+                }
+                let values = JetStringChars::new(self.clone());
+                Box::new(
+                    values
+                        .map(|value| Box::new(value) as JetLoopAny),
+                )
+            }
+            JetLoopSourceKind::LinesFile
+            | JetLoopSourceKind::LinesStdin
+            | JetLoopSourceKind::LinesProcessStream
+            | JetLoopSourceKind::ChannelReceiver
+            | JetLoopSourceKind::EncodingReader { .. }
+            | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
+        }
+    }
+}
+
+impl JetLoopSource for JetRange {
+    fn jet_loop_source(
+        self,
+        source_kind: JetLoopSourceKind,
+        by_value: bool,
+    ) -> Box<dyn Iterator<Item = JetLoopAny>> {
+        match source_kind {
+            JetLoopSourceKind::Plain => {
+                if !by_value {
+                    jet_loop_source_error(source_kind);
+                }
+                let end = if self.exclusive {
+                    self.end
+                } else {
+                    self.end.saturating_add(1)
+                };
+                Box::new(
+                    (self.start..end)
+                        .map(|value| Box::new(value) as JetLoopAny),
+                )
+            }
+            JetLoopSourceKind::Chars
+            | JetLoopSourceKind::LinesFile
+            | JetLoopSourceKind::LinesStdin
+            | JetLoopSourceKind::LinesProcessStream
+            | JetLoopSourceKind::ChannelReceiver
+            | JetLoopSourceKind::EncodingReader { .. }
+            | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
+        }
+    }
+}
+
+impl JetLoopSource for &mut JetRange {
+    fn jet_loop_source(
+        self,
+        source_kind: JetLoopSourceKind,
+        by_value: bool,
+    ) -> Box<dyn Iterator<Item = JetLoopAny>> {
+        match source_kind {
+            JetLoopSourceKind::Plain => {
+                if by_value {
+                    jet_loop_source_error(source_kind);
+                }
+                let range = *self;
+                range.jet_loop_source(source_kind, true)
+            }
+            JetLoopSourceKind::Chars
+            | JetLoopSourceKind::LinesFile
+            | JetLoopSourceKind::LinesStdin
+            | JetLoopSourceKind::LinesProcessStream
+            | JetLoopSourceKind::ChannelReceiver
+            | JetLoopSourceKind::EncodingReader { .. }
+            | JetLoopSourceKind::Iterable { .. } => jet_loop_source_error(source_kind),
+        }
+    }
+}
+
+
 
 /// Lazy `String.split` — yields owned pieces on pull (no intermediate Vec of parts).
 /// Empty `sep` matches `jet_string_split` / Rust `str::split("")`: leading empty,
@@ -1095,14 +1986,16 @@ fn jet_iter_indexes(n: i64) -> JetIter<i64> {
     JetIter(Box::new((0..n).map(|i| i)))
 }
 fn jet_iter_zip<A: 'static, B: 'static, O: 'static, F: 'static>(
-    a: JetIter<A>,
-    b: JetIter<B>,
+    mut a: JetIter<A>,
+    mut b: JetIter<B>,
     mut f: F,
 ) -> JetIter<O>
 where
     F: FnMut(A, B) -> O,
 {
-    JetIter(Box::new(a.0.zip(b.0).map(move |(x, y)| f(x, y))))
+    JetIter(Box::new(std::iter::from_fn(move || {
+        jet_zip_short_step(a.0.next(), || b.0.next()).map(|(x, y)| f(x, y))
+    })))
 }
 fn jet_iter_empty<T: 'static>() -> JetIter<T> {
     JetIter(Box::new(std::iter::empty()))
@@ -1129,9 +2022,6 @@ where
     )))
 }
 
-fn jet_zip_length_mismatch_message() -> &'static str {
-    "zip length mismatch"
-}
 fn jet_iter_zip_pad<A: 'static + Clone, B: 'static + Clone, O: 'static, F: 'static>(
     mut a: JetIter<A>,
     mut b: JetIter<B>,
@@ -1266,6 +2156,19 @@ where
 {
     xs.into_iter().skip_while(|x| f(x)).collect()
 }
+fn jet_list_take_while_iter<T: 'static, F: 'static>(xs: Vec<T>, f: F) -> JetIter<T>
+where
+    F: FnMut(&T) -> bool,
+{
+    jet_iter_take_while(jet_iter_from_vec(xs), f)
+}
+fn jet_list_skip_while_iter<T: 'static, F: 'static>(xs: Vec<T>, f: F) -> JetIter<T>
+where
+    F: FnMut(&T) -> bool,
+{
+    jet_iter_skip_while(jet_iter_from_vec(xs), f)
+}
+
 fn jet_list_flat_map<T, U, F>(xs: Vec<T>, f: F) -> Vec<U>
 where
     F: FnMut(&T) -> Vec<U>,
@@ -1284,6 +2187,15 @@ where
 {
     xs.into_iter().collect()
 }
+fn jet_list_each_ref<T, F, E>(xs: &Vec<T>, mut f: F) -> JetOutcome<(), E>
+where
+    F: FnMut(&T) -> JetOutcome<(), E>,
+{
+    for x in xs.iter() {
+        f(x)?;
+    }
+    Ok(())
+}
 fn jet_list_scan<T, U: Clone, F>(xs: Vec<T>, init: U, mut f: F) -> Vec<U>
 where
     F: FnMut(&U, &T) -> U,
@@ -1296,8 +2208,20 @@ where
     }
     out
 }
+fn jet_list_scan_iter<T: 'static, U: Clone + 'static, F: 'static>(
+    xs: Vec<T>,
+    init: U,
+    f: F,
+) -> JetIter<U>
+where
+    F: FnMut(&U, &T) -> U,
+{
+    jet_iter_scan(jet_iter_from_vec(xs), init, f)
+}
+
 fn jet_list_fold<T, U, F, I>(xs: I, init: U, mut f: F) -> U
 where
+
     I: IntoIterator<Item = T>,
     F: FnMut(&U, &T) -> U,
 {
@@ -1371,15 +2295,12 @@ where
     F: FnMut(&T) -> bool,
     B: FnOnce(Vec<T>, Vec<T>) -> S,
 {
-    let mut yes: Vec<T> = Vec::new();
-    let mut no: Vec<T> = Vec::new();
-    for x in xs {
-        if f(&x) {
-            yes.push(x);
-        } else {
-            no.push(x);
-        }
-    }
+    let (yes, no) = match jet_list_try_partition_kernel(xs, |item| {
+        Ok::<_, std::convert::Infallible>(f(item))
+    }) {
+        Ok(parts) => parts,
+        Err(never) => match never {},
+    };
     build(yes, no)
 }
 
@@ -1591,7 +2512,7 @@ fn jet_list_replace<T: Clone>(xs: &[T], index: i64, new: T) -> Vec<T> {
     }
     out
 }
-fn jet_list_min_max<T: Ord + Clone, R>(
+pub(crate) fn jet_list_min_max<T: Ord + Clone, R>(
     xs: &[T],
     build: impl FnOnce(T, T) -> R,
 ) -> JetOutcome<R, JetAbsent> {
@@ -1600,7 +2521,7 @@ fn jet_list_min_max<T: Ord + Clone, R>(
         _ => Err(JetAbsent),
     }
 }
-fn jet_list_min_max_by<T: Clone, K: Ord, F, R>(
+pub(crate) fn jet_list_min_max_by<T: Clone, K: Ord, F, R>(
     xs: &[T],
     mut f: F,
     build: impl FnOnce(T, T) -> R,

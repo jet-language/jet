@@ -1,4 +1,65 @@
 // ── core.text helpers (D-TEXTUNICODE1) ───────────────────────────────
+// ── D-FOUND-VIEW1: borrowed one-pass iterator carrier ───────────────────────
+// `JetIter<T>` is intentionally `'static` because ordinary adapters own their
+// source. Text, byte, and mapped-file scans keep their source alive while
+// yielding `&str`/`&[u8]` windows, so their lifetime must remain explicit.
+pub(crate) struct JetViewIter<'a, T: 'a>(Box<dyn Iterator<Item = T> + 'a>);
+
+impl<'a, T: 'a> JetViewIter<'a, T> {
+    fn to_list(self) -> Vec<T> {
+        self.0.collect()
+    }
+    fn collect(self) -> Vec<T> {
+        self.0.collect()
+    }
+    fn len(self) -> i64 {
+        self.0.count() as i64
+    }
+    fn is_empty(mut self) -> bool {
+        self.0.next().is_none()
+    }
+}
+
+impl<'a, T: 'a> IntoIterator for JetViewIter<'a, T> {
+    type Item = T;
+    type IntoIter = Box<dyn Iterator<Item = T> + 'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0
+    }
+}
+
+pub(crate) fn jet_view_iter_from_iter<'a, I, T>(iter: I) -> JetViewIter<'a, T>
+where
+    I: Iterator<Item = T> + 'a,
+    T: 'a,
+{
+    JetViewIter(Box::new(iter))
+}
+
+fn jet_view_iter_first<'a, T: 'a>(it: JetViewIter<'a, T>) -> Option<T> {
+    it.into_iter().next()
+}
+
+fn jet_bytes_view_iter<'a>(bytes: &'a [u8]) -> JetViewIter<'a, &'a [u8]> {
+    jet_view_iter_from_iter(bytes.iter().map(std::slice::from_ref))
+}
+
+/// Split arbitrary bytes into newline-delimited borrowed windows. CRLF
+/// terminators are removed and a final newline does not create an extra item.
+fn jet_bytes_line_views<'a>(bytes: &'a [u8]) -> JetViewIter<'a, &'a [u8]> {
+    jet_view_iter_from_iter(bytes.split_inclusive(|byte| *byte == b'\n').map(|line| {
+        let mut line = line;
+        if line.last() == Some(&b'\n') {
+            line = &line[..line.len() - 1];
+        }
+        if line.last() == Some(&b'\r') {
+            line = &line[..line.len() - 1];
+        }
+        line
+    }))
+}
+
 fn jet_text_unicode_scalar_count(s: &String) -> i64 {
     s.chars().count() as i64
 }
@@ -422,6 +483,101 @@ fn jet_text_graphemes(s: &String) -> Vec<String> {
     out.push(cur);
     out
 }
+/// Borrowed grapheme iterator for D-FOUND-VIEW1. The source is scanned with
+/// `CharIndices`, so every yielded item is an exact UTF-8 subslice and no
+/// grapheme-sized `String` is allocated.
+struct JetTextGraphemeViewIter<'a> {
+    source: &'a str,
+    chars: std::str::CharIndices<'a>,
+    pending: Option<(usize, char)>,
+    ri_run: usize,
+}
+
+impl<'a> Iterator for JetTextGraphemeViewIter<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (start, first) = self.pending.take().or_else(|| self.chars.next())?;
+        let mut previous = first;
+        let mut end = start + first.len_utf8();
+        let mut ri_run = if jet_text_grapheme_class(first as u32) == JET_GB_RI {
+            self.ri_run.saturating_add(1)
+        } else {
+            0
+        };
+        let mut saw_pic = jet_text_is_ext_pictographic(first as u32);
+        let mut incb_pending = jet_text_incb_class(first as u32) == JET_INCB_CONSONANT;
+        let mut incb_linker = false;
+
+        while let Some((index, current)) = self.chars.next() {
+            let previous_class = jet_text_grapheme_class(previous as u32);
+            let current_class = jet_text_grapheme_class(current as u32);
+            let breaks = if previous_class == JET_GB_ZWJ
+                && saw_pic
+                && jet_text_is_ext_pictographic(current as u32)
+            {
+                false
+            } else if previous_class == JET_GB_RI && current_class == JET_GB_RI {
+                ri_run % 2 == 0
+            } else if incb_pending
+                && incb_linker
+                && jet_text_incb_class(current as u32) == JET_INCB_CONSONANT
+            {
+                false
+            } else {
+                jet_text_grapheme_break_classes(previous_class, current_class)
+            };
+            if breaks {
+                self.pending = Some((index, current));
+                self.ri_run = ri_run;
+                return Some(&self.source[start..index]);
+            }
+
+            previous = current;
+            end = index + current.len_utf8();
+            ri_run = if current_class == JET_GB_RI {
+                ri_run.saturating_add(1)
+            } else {
+                0
+            };
+            saw_pic = if matches!(current_class, JET_GB_EXTEND | JET_GB_ZWJ) {
+                saw_pic
+            } else {
+                jet_text_is_ext_pictographic(current as u32)
+            };
+            match jet_text_incb_class(current as u32) {
+                JET_INCB_CONSONANT => {
+                    incb_pending = true;
+                    incb_linker = false;
+                }
+                JET_INCB_LINKER => {
+                    if incb_pending {
+                        incb_linker = true;
+                    }
+                }
+                JET_INCB_EXTEND => {}
+                _ => {
+                    incb_pending = false;
+                    incb_linker = false;
+                }
+            }
+        }
+
+        self.ri_run = ri_run;
+        Some(&self.source[start..end])
+    }
+}
+
+pub(crate) fn jet_text_grapheme_views<'a>(s: &'a str) -> JetViewIter<'a, &'a str> {
+    let source = s;
+    jet_view_iter_from_iter(JetTextGraphemeViewIter {
+        source,
+        chars: source.char_indices(),
+        pending: None,
+        ri_run: 0,
+    })
+}
+
 
 // ---- WB1-WB16 word boundaries ------------------------------------------------
 const JET_WB_CR: u8 = 1;
@@ -544,6 +700,89 @@ fn jet_text_words(s: &String) -> Vec<String> {
         .filter(|w| w.chars().any(|c| jet_text_alphabetic(c as u32) || jet_text_numeric(c as u32)))
         .collect()
 }
+/// Return byte spans for the existing UAX word segmentation, retaining the
+/// exact source boundaries instead of materialising each segment. The
+/// temporary tables are per-source metadata; the yielded words themselves are
+/// borrowed slices and therefore remain zero-copy.
+fn jet_text_word_view_spans(s: &str) -> Vec<(usize, usize)> {
+    let indexed: Vec<(usize, char)> = s.char_indices().collect();
+    if indexed.is_empty() {
+        return Vec::new();
+    }
+    let cps: Vec<char> = indexed.iter().map(|(_, c)| *c).collect();
+    let (units, ends) = jet_text_word_reduce(&cps);
+    let n = units.len();
+    let mut breaks = vec![true; n.saturating_sub(1)];
+    let mut ri_run = 0usize;
+    for i in 0..n {
+        let (class, _) = units[i];
+        ri_run = if class == JET_WB_RI {
+            ri_run.saturating_add(1)
+        } else {
+            0
+        };
+        if i + 1 < n {
+            let (next_class, _) = units[i + 1];
+            breaks[i] = if class == JET_WB_RI && next_class == JET_WB_RI {
+                ri_run % 2 == 0
+            } else {
+                jet_text_word_break_at(&units, &ends, &cps, i)
+            };
+        }
+    }
+
+    let mut out = Vec::new();
+    let mut start_byte = 0usize;
+    let mut unit_index = 0usize;
+    for (char_index, (byte, current)) in indexed.iter().enumerate() {
+        if char_index != ends[unit_index] || unit_index + 1 >= n || !breaks[unit_index] {
+            continue;
+        }
+        let end_byte = byte + current.len_utf8();
+        let segment = &s[start_byte..end_byte];
+        if segment
+            .chars()
+            .any(|c| jet_text_alphabetic(c as u32) || jet_text_numeric(c as u32))
+        {
+            out.push((start_byte, end_byte));
+        }
+        start_byte = end_byte;
+        unit_index += 1;
+    }
+    if start_byte < s.len() {
+        let segment = &s[start_byte..];
+        if segment
+            .chars()
+            .any(|c| jet_text_alphabetic(c as u32) || jet_text_numeric(c as u32))
+        {
+            out.push((start_byte, s.len()));
+        }
+    }
+    out
+}
+
+pub(crate) fn jet_text_word_views<'a>(s: &'a str) -> JetViewIter<'a, &'a str> {
+    let source = s;
+    let spans = jet_text_word_view_spans(source);
+    jet_view_iter_from_iter(
+        spans
+            .into_iter()
+            .map(move |(start, end)| &source[start..end]),
+    )
+}
+
+/// Borrowed line views use Rust's Unicode line semantics: terminators are
+/// excluded, CRLF is one terminator, and a trailing newline has no extra item.
+pub(crate) fn jet_text_line_views<'a>(s: &'a str) -> JetViewIter<'a, &'a str> {
+    jet_view_iter_from_iter(s.lines())
+}
+
+/// Text bytes are exposed as one-byte windows over the original UTF-8 buffer.
+/// The byte API is intentionally independent of scalar/grapheme boundaries.
+pub(crate) fn jet_text_byte_views<'a>(s: &'a str) -> JetViewIter<'a, &'a [u8]> {
+    jet_bytes_view_iter(s.as_bytes())
+}
+
 
 // ---- SB1-SB11 sentence boundaries -------------------------------------------
 const JET_SB_CR: u8 = 1;
@@ -772,8 +1011,8 @@ fn jet_text_remove_suffix(s: &String, suffix: &String) -> String {
         None => s.clone(),
     }
 }
-fn jet_text_compare(a: &String, b: &String) -> i64 {
-    match a.as_str().cmp(b.as_str()) {
+fn jet_text_compare(a: &str, b: &str) -> i64 {
+    match a.cmp(b) {
         std::cmp::Ordering::Less => -1,
         std::cmp::Ordering::Equal => 0,
         std::cmp::Ordering::Greater => 1,
@@ -1019,4 +1258,216 @@ fn jet_std_fs_copy_dir(from: &String, to: &String) -> Result<(), jet_std::IOErro
         Ok(())
     }
     copy_tree(std::path::Path::new(from), std::path::Path::new(to), from)
+}
+// D-TEXT-WASM1: Web text routes marshal only. Unicode predicates, title
+// mapping, display-column width, and Unicode scalar offsets remain owned by
+// the compiled Prelude above. Each input slot is checked against its exact
+// TLS allocation before the bytes are copied into an owned `String`.
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static JET_TEXT_WASM_INPUT_SUBJECT: std::cell::RefCell<Vec<u8>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+    static JET_TEXT_WASM_INPUT_SEARCH: std::cell::RefCell<Vec<u8>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+    static JET_TEXT_WASM_INPUT_FILL: std::cell::RefCell<Vec<u8>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+    static JET_TEXT_WASM_OUTPUT: std::cell::RefCell<Vec<u8>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(target_arch = "wasm32")]
+fn jet_text_wasm_checked_len(length: u32) -> usize {
+    let length = length as usize;
+    assert!(
+        length <= u32::MAX as usize,
+        "text Wasm buffer length exceeds the u32 ABI"
+    );
+    length
+}
+
+#[cfg(target_arch = "wasm32")]
+fn jet_text_wasm_input_cell(
+    slot: u32,
+) -> &'static std::thread::LocalKey<std::cell::RefCell<Vec<u8>>> {
+    match slot {
+        0 => &JET_TEXT_WASM_INPUT_SUBJECT,
+        1 => &JET_TEXT_WASM_INPUT_SEARCH,
+        2 => &JET_TEXT_WASM_INPUT_FILL,
+        _ => panic!("text Wasm input slot is invalid"),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn jet_text_wasm_input_alloc_slot(slot: u32, length: u32) -> u32 {
+    let length = jet_text_wasm_checked_len(length);
+    jet_text_wasm_input_cell(slot).with(|cell| {
+        let mut bytes = cell.borrow_mut();
+        bytes.resize(length, 0);
+        bytes.as_mut_ptr() as usize as u32
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn jet_text_wasm_input_free_slot(slot: u32, pointer: u32) {
+    jet_text_wasm_input_cell(slot).with(|cell| {
+        let mut bytes = cell.borrow_mut();
+        assert_eq!(
+            pointer as usize,
+            bytes.as_ptr() as usize,
+            "text Wasm input pointer does not own the slot"
+        );
+        bytes.clear();
+        bytes.shrink_to_fit();
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn jet_text_wasm_input_string(slot: u32, pointer: u32, length: u32) -> String {
+    let length = jet_text_wasm_checked_len(length);
+    let bytes = jet_text_wasm_input_cell(slot).with(|cell| {
+        let bytes = cell.borrow();
+        assert_eq!(
+            pointer as usize,
+            bytes.as_ptr() as usize,
+            "text Wasm input pointer does not own the slot"
+        );
+        assert!(
+            length <= bytes.len(),
+            "text Wasm input length exceeds the allocated slot"
+        );
+        bytes[..length].to_vec()
+    });
+    String::from_utf8(bytes).expect("text Wasm input is not valid UTF-8")
+}
+
+#[cfg(target_arch = "wasm32")]
+fn jet_text_wasm_output_set(value: String) {
+    JET_TEXT_WASM_OUTPUT.with(|cell| {
+        *cell.borrow_mut() = value.into_bytes();
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn jet_text_wasm_input_alloc(slot: u32, length: u32) -> u32 {
+    jet_text_wasm_input_alloc_slot(slot, length)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn jet_text_wasm_input_free(slot: u32, pointer: u32) {
+    jet_text_wasm_input_free_slot(slot, pointer);
+}
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn jet_text_wasm_output_ptr() -> u32 {
+    JET_TEXT_WASM_OUTPUT.with(|cell| cell.borrow().as_ptr() as usize as u32)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn jet_text_wasm_output_len() -> u32 {
+    JET_TEXT_WASM_OUTPUT.with(|cell| {
+        u32::try_from(cell.borrow().len()).expect("text Wasm output exceeds the u32 ABI")
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn jet_text_wasm_output_clear() {
+    JET_TEXT_WASM_OUTPUT.with(|cell| {
+        let mut output = cell.borrow_mut();
+        output.clear();
+        output.shrink_to_fit();
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn jet_text_wasm_pad_start(
+    subject_pointer: u32,
+    subject_length: u32,
+    width: i64,
+    fill_pointer: u32,
+    fill_length: u32,
+) {
+    let subject = jet_text_wasm_input_string(0, subject_pointer, subject_length);
+    let fill = jet_text_wasm_input_string(2, fill_pointer, fill_length);
+    jet_text_wasm_output_set(jet_text_pad_start(&subject, width, &fill));
+}
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn jet_text_wasm_pad_end(
+    subject_pointer: u32,
+    subject_length: u32,
+    width: i64,
+    fill_pointer: u32,
+    fill_length: u32,
+) {
+    let subject = jet_text_wasm_input_string(0, subject_pointer, subject_length);
+    let fill = jet_text_wasm_input_string(2, fill_pointer, fill_length);
+    jet_text_wasm_output_set(jet_text_pad_end(&subject, width, &fill));
+}
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn jet_text_wasm_index_of(
+    subject_pointer: u32,
+    subject_length: u32,
+    search_pointer: u32,
+    search_length: u32,
+) -> i64 {
+    let subject = jet_text_wasm_input_string(0, subject_pointer, subject_length);
+    let search = jet_text_wasm_input_string(1, search_pointer, search_length);
+    jet_unicode_index_of(&subject, &search).unwrap_or(-1)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn jet_text_wasm_count(
+    subject_pointer: u32,
+    subject_length: u32,
+    search_pointer: u32,
+    search_length: u32,
+) -> i64 {
+    let subject = jet_text_wasm_input_string(0, subject_pointer, subject_length);
+    let search = jet_text_wasm_input_string(1, search_pointer, search_length);
+    jet_unicode_count(&subject, &search)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn jet_text_wasm_is_alphabetic(pointer: u32, length: u32) -> u32 {
+    let value = jet_text_wasm_input_string(0, pointer, length);
+    u32::from(jet_text_is_alphabetic(&value))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn jet_text_wasm_is_numeric(pointer: u32, length: u32) -> u32 {
+    let value = jet_text_wasm_input_string(0, pointer, length);
+    u32::from(jet_text_is_numeric(&value))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn jet_text_wasm_is_whitespace(pointer: u32, length: u32) -> u32 {
+    let value = jet_text_wasm_input_string(0, pointer, length);
+    u32::from(jet_text_is_whitespace(&value))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn jet_text_wasm_is_ascii(pointer: u32, length: u32) -> u32 {
+    let value = jet_text_wasm_input_string(0, pointer, length);
+    u32::from(jet_text_unicode_is_ascii(&value))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn jet_text_wasm_title(pointer: u32, length: u32) {
+    let value = jet_text_wasm_input_string(0, pointer, length);
+    jet_text_wasm_output_set(jet_text_title(&value));
 }

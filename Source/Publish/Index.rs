@@ -16,7 +16,8 @@
 //! `Lock::LockedPackage` — the index does not invent new hash names.
 
 use crate::Diagnostics::Diagnostic;
-use jet_foundation::JSON::{json_escape, parse_json, JSONValue};
+use jet_foundation::DataTree::DataTree;
+use jet_foundation::JSON::{json_escape, parse_json};
 use std::collections::BTreeSet;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -71,7 +72,7 @@ impl IndexEntry {
     /// types, duplicate keys, unknown fields, or a line missing required
     /// package identity and trust fields.
     pub fn parse_line(line: &str) -> Option<IndexEntry> {
-        let JSONValue::Object(fields) = parse_json(line).ok()? else {
+        let DataTree::Object(fields) = parse_json(line).ok()? else {
             return None;
         };
         const KEYS: &[&str] = &[
@@ -85,7 +86,10 @@ impl IndexEntry {
             "public_key",
             "signature",
         ];
-        if fields.keys().any(|key| !KEYS.contains(&key.as_str())) {
+        if fields
+            .iter()
+            .any(|(key, _)| !KEYS.contains(&key.as_str()))
+        {
             return None;
         }
         Some(IndexEntry {
@@ -464,34 +468,39 @@ fn json_str(s: &str) -> String {
     format!("\"{}\"", json_escape(s))
 }
 
+fn field<'a>(fields: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+    fields
+        .iter()
+        .find_map(|(name, value)| (name == key).then_some(value))
+}
 fn required_string(
-    fields: &std::collections::BTreeMap<String, JSONValue>,
+    fields: &[(String, DataTree)],
     key: &str,
 ) -> Option<String> {
-    match fields.get(key)? {
-        JSONValue::String(value) if !value.is_empty() => Some(value.clone()),
+    match field(fields, key)? {
+        DataTree::Text(value) if !value.is_empty() => Some(value.clone()),
         _ => None,
     }
 }
 
 fn optional_string(
-    fields: &std::collections::BTreeMap<String, JSONValue>,
+    fields: &[(String, DataTree)],
     key: &str,
 ) -> Option<String> {
-    match fields.get(key) {
+    match field(fields, key) {
         None => Some(String::new()),
-        Some(JSONValue::String(value)) => Some(value.clone()),
+        Some(DataTree::Text(value)) => Some(value.clone()),
         _ => None,
     }
 }
 
 fn optional_bool(
-    fields: &std::collections::BTreeMap<String, JSONValue>,
+    fields: &[(String, DataTree)],
     key: &str,
 ) -> Option<bool> {
-    match fields.get(key) {
+    match field(fields, key) {
         None => Some(false),
-        Some(JSONValue::Bool(value)) => Some(*value),
+        Some(DataTree::Bool(value)) => Some(*value),
         _ => None,
     }
 }

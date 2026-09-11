@@ -576,6 +576,59 @@ fn jet_dev_web_serves_and_rebuilds_on_save() {
 }
 
 #[test]
+fn tanstack_start_dev_reference_loop_recovers_last_good_browser_state() {
+    if !have_tool("rustc") || !have_tool("node") || !have_tool("chromium") {
+        eprintln!("note: skipping TanStack reference dev loop (need rustc + node + chromium)");
+        return;
+    }
+
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let root = std::env::temp_dir().join(format!(
+        "jet_tanstack_reference_dev_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("public")).unwrap();
+    for path in ["run.jet", "package.jet", "public/index.html", "public/app.css"] {
+        let source = repo.join("examples/features/web/tanstack_start").join(path);
+        let destination = root.join(path);
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::copy(source, destination).unwrap();
+    }
+
+    let output = Command::new("node")
+        .env("CHROMIUM", "chromium")
+        .arg(repo.join("scripts/web-dev-test/reference_app.mjs"))
+        .args([
+            "--metric",
+            "error_to_fix",
+            "--manifest",
+        ])
+        .arg(repo.join("tools/agent-eval/dx/manifest.json"))
+        .args(["--exercise", "--app", "tanstack-start-orders", "--jet-env"])
+        .arg(repo.join("scripts/agent/jet-env"))
+        .current_dir(&root)
+        .output()
+        .expect("run TanStack reference dev loop");
+    assert!(
+        output.status.success(),
+        "TanStack reference dev loop failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("REFERENCE_METRIC:error_to_fix")
+            && stdout.contains("diagnosis_ms=")
+            && stdout.contains("repair_ms="),
+        "reference dev loop did not report diagnosis and repair timing: {stdout}"
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn jet_dev_web_rejects_windows_absolute_static_paths() {
     if !have_tool("rustc") {
         eprintln!(
@@ -2240,7 +2293,7 @@ fn jet_dev_web_exposes_canvas_panel_and_graph() {
     );
     assert!(catalog.contains("\"path\":\"core.http\""), "{catalog}");
     assert!(
-        catalog.contains("\"source\":\"docs/reference/core-library.md\""),
+        catalog.contains("\"source\":\"docs/spec/reference/core-library.md\""),
         "{catalog}"
     );
 

@@ -327,13 +327,6 @@ impl<'a> Parser<'a> {
             && matches!(&self.peek3().kind, TokKind::LBrace)
     }
 
-    /// D-PROTO1/D-PROTO2: parse `[pub] protocol Name { … }`.
-    pub(super) fn protocol_decl(
-        &mut self,
-        is_pub: bool,
-    ) -> Result<crate::AST::ProtocolDecl, Diagnostic> {
-        self.protocol_decl_with_pkg(is_pub, false)
-    }
 
     pub(super) fn protocol_decl_with_pkg(
         &mut self,
@@ -803,6 +796,9 @@ impl<'a> Parser<'a> {
                     break;
                 }
                 self.expect(TokKind::Comma, "between marker parameters")?;
+                if matches!(self.peek().kind, TokKind::RParen) {
+                    break;
+                }
             }
         }
         self.expect(TokKind::RParen, "to close the marker's parameter list")?;
@@ -1176,7 +1172,7 @@ mod state_section_tests {
         for (source, owner) in [
             ("enum Door { state { Open } }\nfn run() {}\n", "enum"),
             ("trait Door { state { Open } }\nfn run() {}\n", "trait"),
-            ("alias Door :: state { Open };\nfn run() {}\n", "alias"),
+            ("alias Door :: state { Open }\nfn run() {}\n", "alias"),
             ("impl Door { state { Open } }\nfn run() {}\n", "impl"),
             ("module Door { state { Open } }\nfn run() {}\n", "module"),
             ("module Door<T> { state { Open } }\nfn run() {}\n", "module"),

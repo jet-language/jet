@@ -1,6 +1,6 @@
 //! Feature-claim acceptance lanes (UL0 / pre-push ledger).
 //!
-//! Each `#[test]` named in `docs/spec/feature-claims.json` must
+//! Each `#[test]` named in `tests/fixtures/feature-claims/manifest.json` must
 //! contain the exact lane marker `FEATURE_CLAIM: <claim-id> / <lane-id>`
 //! in its body. Proven claims run these via
 //! `check-feature-ledger.mjs --verify-focused`.
@@ -369,7 +369,7 @@ fn prelude_opt_out() {
 #[test]
 fn maturity_convention() {
     // FEATURE_CLAIM: claim.maturity-tags / maturity-convention
-    let docs = read("docs/reference/maturity-tags.md");
+    let docs = read("docs/spec/reference/maturity-tags.md");
     assert!(
         docs.contains("#Meta(maturity: .Experimental)")
             && docs.contains(".Tested")

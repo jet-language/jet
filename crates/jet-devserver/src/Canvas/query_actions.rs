@@ -10,8 +10,8 @@ use super::graph_helpers::{
     text_matches,
 };
 use super::graph_json::node_catalog;
-use super::graph_projection::Projection;
 use super::project_scan::{env_project_json, project_context_for_entry, project_file};
+use super::graph_projection::{canvas_game_fact_json, CanvasGameFact, Projection};
 use super::project_transactions::{
     module_belongs_to, normalize_and_format_project_changes, prepare_project_rename,
     project_revision_after_changes, rel_path, validate_project_rename_overlay,
@@ -862,6 +862,12 @@ pub(super) fn canvas_actions(path: &Path, src: &str) -> Result<String, String> {
         &authority,
     ));
     entries.extend(canvas_core_catalog_action_jsons(src, &authority));
+    entries.extend(
+        projection
+            .game_facts
+            .iter()
+            .map(|fact| canvas_game_action_json(fact, &authority, &source_revision(src))),
+    );
     entries.extend(canvas_structural_action_jsons(&authority));
     entries.extend(canvas_command_action_jsons(&authority));
     entries.sort();
@@ -903,7 +909,7 @@ pub(super) fn canvas_core_catalog(_path: &Path, src: &str, query: &str) -> Resul
             "\"impact\":null,\"diff\":null,\"catalog_schema_version\":{},\"authority\":[{}],\"writes\":\"none\",\"source\":{},\"modules\":[{}]",
             CORE_CATALOG_SCHEMA_VERSION,
             json_str("canvas.catalog:core.read"),
-            json_str("docs/reference/core-library.md"),
+            json_str("docs/spec/reference/core-library.md"),
             modules
         ),
     ))
@@ -992,7 +998,7 @@ struct CoreCatalogMember {
 fn core_catalog_entries(query: &str) -> Vec<CoreCatalogModule> {
     let needle = query.trim();
     let mut modules =
-        parse_core_catalog_markdown(include_str!("../../../../docs/reference/core-library.md"));
+        parse_core_catalog_markdown(include_str!("../../../../docs/spec/reference/core-library.md"));
     let exports = parse_sema_core_module_items(include_str!(
         "../../../../crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs"
     ));
@@ -1476,7 +1482,7 @@ fn core_catalog_member_from_line(line: &str) -> Option<CoreCatalogMember> {
         name,
         signature: signature.to_string(),
         summary,
-        source: "docs/reference/core-library.md".to_string(),
+        source: "docs/spec/reference/core-library.md".to_string(),
         pure: core_member_pure_for_signature(signature),
         available: true,
         stageable: false,
@@ -1668,7 +1674,7 @@ fn core_module_json(src: &str, module: &CoreCatalogModule) -> String {
         json_str(&module.path),
         json_str(&module.title),
         json_str(&module.summary),
-        json_str("docs/reference/core-library.md"),
+        json_str("docs/spec/reference/core-library.md"),
         members
     )
 }
@@ -1937,9 +1943,87 @@ pub(super) fn default_arg_for_type(ty: &str) -> String {
     match ty {
         "Bool" => "true".to_string(),
         "String" | "Path" | "Url" => "\"canvas\"".to_string(),
+
         "Float" | "F32" | "F64" | "Decimal" => "1.0".to_string(),
         _ => "1".to_string(),
     }
+}
+fn canvas_game_action_json(
+    fact: &CanvasGameFact,
+    authority: &CanvasAuthority,
+    revision: &str,
+) -> String {
+    let resource_kind = if fact.kind == "asset" {
+        "asset"
+    } else {
+        "component"
+    };
+    let title = if fact.kind == "asset" {
+        format!("Edit {} asset", fact.operation.rsplit('.').next().unwrap_or("game"))
+    } else {
+        "Edit component".to_string()
+    };
+    let target = format!(
+        "{{\"source_id\":{},\"revision\":{},\"authored_instance_id\":{},\"source_span\":{}}}",
+        json_str(&fact.source_id),
+        json_str(revision),
+        json_str(&fact.authored_instance_id),
+        span_json(fact.source_span),
+    );
+    let patch = format!(
+        "{{\"field\":{},\"value\":{}}}",
+        json_str(&fact.field),
+        json_str(&canvas_game_patch_value(fact)),
+    );
+    format!(
+        "{{\"action_id\":{},\"node_descriptor_id\":\"function_exec\",\"kind\":\"canvas.game\",\"resource_kind\":{},\"title\":{},\"op\":\"edit_game_selection\",\"engine\":\"source-transaction\",\"execution\":\"source_transaction\",\"available\":true,\"authority\":[{}],\"package_id\":{},\"version\":{},\"touched_files\":[{}],\"writes\":\"source_transaction_only\",\"requires_confirmation\":false,\"targets\":[{}],\"field_patch\":{},\"source_truth\":\"ordinary_jet_source\",\"fact\":{}}}",
+        json_str(&format!("canvas.game:{}", fact.authored_instance_id)),
+        json_str(resource_kind),
+        json_str(&title),
+        json_str(&authority.grant),
+        json_str(&authority.package_id),
+        json_str(&authority.version),
+        json_str(&fact.source_id),
+        target,
+        patch,
+        canvas_game_fact_json(fact),
+    )
+}
+
+fn canvas_game_patch_value(fact: &CanvasGameFact) -> String {
+    let value = fact.value_source.trim();
+    let Some(inner) = value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+    else {
+        return value.to_string();
+    };
+    let mut out = String::with_capacity(inner.len());
+    let mut escaped = false;
+    for character in inner.chars() {
+        if escaped {
+            match character {
+                'n' => out.push('\n'),
+                'r' => out.push('\r'),
+                't' => out.push('\t'),
+                '"' => out.push('"'),
+                '\\' => out.push('\\'),
+                other => {
+                    out.push('\\');
+                    out.push(other);
+                }
+            }
+            escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else {
+            out.push(character);
+        }
+    }
+    if escaped {
+        out.push('\\');
+    }
+    out
 }
 
 fn canvas_structural_action_jsons(authority: &CanvasAuthority) -> Vec<String> {

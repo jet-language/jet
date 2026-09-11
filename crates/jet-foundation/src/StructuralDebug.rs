@@ -20,23 +20,18 @@ static CBOR_OPTIONS_FIELD_METADATA: &[(&str, bool)] = &[
     ("require_canonical", false),
 ];
 
-static CBOR_ERROR_FIELD_METADATA: &[(&str, bool)] = &[
-    ("kind", false),
-    ("byte_offset", false),
-    ("path", false),
-    ("reason", false),
-];
 
-static JSON_ERROR_FIELD_METADATA: &[(&str, bool)] = &[("line", false), ("message", false)];
-
-static XML_ERROR_FIELD_METADATA: &[(&str, bool)] = &[
+static ENCODING_ERROR_FIELD_METADATA: &[(&str, bool)] = &[
+    ("format", false),
     ("kind", false),
     ("byte_offset", false),
     ("line", false),
     ("column", false),
     ("path", false),
     ("reason", false),
+    ("cause", false),
 ];
+
 
 static FIELD_ERROR_FIELD_METADATA: &[(&str, bool)] = &[("path", false), ("reason", false)];
 
@@ -53,9 +48,7 @@ static CSV_ROW_FIELD_METADATA: &[(&str, bool)] = &[("fields", false), ("line", f
 static CORE_FIELD_METADATA: &[(&str, &[(&str, bool)])] = &[
     ("IOContext", IO_CONTEXT_FIELD_METADATA),
     ("CBOROptions", CBOR_OPTIONS_FIELD_METADATA),
-    ("CBORError", CBOR_ERROR_FIELD_METADATA),
-    ("JSONError", JSON_ERROR_FIELD_METADATA),
-    ("XMLError", XML_ERROR_FIELD_METADATA),
+    ("EncodingError", ENCODING_ERROR_FIELD_METADATA),
     ("FieldError", FIELD_ERROR_FIELD_METADATA),
     ("AllocError", ALLOC_ERROR_FIELD_METADATA),
     ("CSVRow", CSV_ROW_FIELD_METADATA),
@@ -220,6 +213,20 @@ pub fn jet_show_io_error(
         text.push_str(&format!(": {cause}"));
     }
     text
+}
+/// Shared Prelude JetShow projection for `ProcessResourceLimit`.
+/// The resident and interpreted carriers pass the declaration-order
+/// discriminant here; the user-facing wording remains one Prelude rule.
+pub fn jet_show_process_resource_limit(variant: i64) -> String {
+    match variant {
+        0 => "wall time",
+        1 => "CPU time",
+        2 => "memory",
+        3 => "open file handles",
+        4 => "output",
+        _ => "<bad ProcessResourceLimit>",
+    }
+    .to_string()
 }
 
 /// D-TASK-PAUSE-TIER1: one formatter for Task `paused=` / `cancel=` trace text.

@@ -137,7 +137,7 @@ fn run() {
             "ffi",
             r#"
 extern rust "std" {
-    fn identity(value: String) String = "std::convert::identity";
+    fn identity(value: String) String = "std::convert::identity"
 }
 fn run() {
     value :: identity("payload")

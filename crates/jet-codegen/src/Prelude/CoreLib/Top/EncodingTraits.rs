@@ -1,3 +1,5 @@
+use jet_foundation::Shape::{ShapeProjection, ShapeProjectionKind};
+
 // ── core.encoding: Encode / Decode traits + blanket impls (D-SERDE1/2/4) ──────
 // The built-in `#[Codable]`/`#[Encode]`/`#[Decode]` derive (D-ENC1) lowers to
 // these traits. `jet_encode`/`jet_decode` are codegen-internal method names the
@@ -5,18 +7,46 @@
 // D-SERDE2 — a later increment). Pure safe std Rust, no proc-macros (I1/I6).
 #[allow(non_camel_case_types)]
 pub trait __jet_Encode {
+    /// True only for the byte scalar that carries native CBOR byte strings.
+    const __JET_IS_BYTE: bool = false;
+
     fn jet_encode(&self) -> jet_std::DataTree;
+
+    /// The byte projection is selected by the scalar fact above, never by a
+    /// runtime type-name comparison.
+    fn jet_encode_byte(&self) -> u8 {
+        unreachable!()
+    }
 }
 #[allow(non_camel_case_types)]
 pub trait __jet_Decode: Sized {
+    /// True only for the byte scalar accepted from native CBOR byte strings.
+    const __JET_IS_BYTE: bool = false;
+
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>>;
+
+    fn jet_decode_byte(value: u8) -> Result<Self, Vec<jet_std::FieldError>> {
+        Self::jet_decode(&jet_std::DataTree::Int(i64::from(value)))
+    }
 }
 
 impl __jet_Encode for i64 {
     fn jet_encode(&self) -> jet_std::DataTree {
-        jet_std::DataTree::Int(*self)
+        jet_std::jet_datatree_encode_i64(*self)
     }
 }
+
+// Exact `Int` owns its one-word carrier.  Values that fit the physical
+// DataTree::Int slot stay there; spilled values retain their decimal lexeme in
+// DataTree::Number instead of exposing the tagged owner word as a number.
+impl __jet_Encode for jet_foundation::Numeric::JetInt {
+    fn jet_encode(&self) -> jet_std::DataTree {
+        self.to_i64()
+            .map(jet_std::jet_datatree_encode_i64)
+            .unwrap_or_else(|| jet_std::DataTree::Number(self.to_string_rep()))
+    }
+}
+
 impl __jet_Encode for f64 {
     fn jet_encode(&self) -> jet_std::DataTree {
         jet_std::DataTree::Float(*self)
@@ -54,8 +84,9 @@ impl __jet_Encode for JetLocalTime {
 impl __jet_Encode for JetDateTime {
     fn jet_encode(&self) -> jet_std::DataTree {
         jet_std::DataTree::Text(jet_codec_datetime_encode(
-            self.to_timestamp(),
+            self.unix_seconds_anchor(),
             self.nanosecond() as u32,
+            self.is_leap_second(),
         ))
     }
 }
@@ -65,7 +96,20 @@ impl __jet_Encode for jet_std::Duration {
     }
 }
 impl __jet_Encode for u8 {
-    fn jet_encode(&self) -> jet_std::DataTree { jet_std::DataTree::Int(*self as i64) }
+    const __JET_IS_BYTE: bool = true;
+
+    fn jet_encode(&self) -> jet_std::DataTree {
+        jet_std::DataTree::Int(i64::from(*self))
+    }
+
+    fn jet_encode_byte(&self) -> u8 {
+        *self
+    }
+}
+impl __jet_Encode for u64 {
+    fn jet_encode(&self) -> jet_std::DataTree {
+        jet_std::jet_datatree_encode_u64(*self)
+    }
 }
 macro_rules! jet_impl_sized_int_encode {
     ($($ty:ty),* $(,)?) => {$(
@@ -92,12 +136,12 @@ impl<T: __jet_Encode> __jet_Encode for Vec<T> {
     fn jet_encode(&self) -> jet_std::DataTree {
         // D-ENC-CBOR-SURFACE1: `[U8]` carries binary identity through the shared
         // Codable tree. Text codecs already render Bytes as a number list, while
-        // CBOR emits major type 2. No downcast or raw-pointer code is needed.
-        if std::any::type_name::<T>() == "u8" {
+        // CBOR emits major type 2. The byte fact is carried by the scalar
+        // implementation rather than inferred from a Rust type name.
+        if <T as __jet_Encode>::__JET_IS_BYTE {
             let mut bytes = Vec::with_capacity(self.len());
             for value in self {
-                let jet_std::DataTree::Int(n) = value.jet_encode() else { unreachable!() };
-                bytes.push(n as u8);
+                bytes.push(value.jet_encode_byte());
             }
             return jet_std::DataTree::Bytes(bytes);
         }
@@ -106,11 +150,10 @@ impl<T: __jet_Encode> __jet_Encode for Vec<T> {
 }
 impl<T: __jet_Encode, const N: usize> __jet_Encode for [T; N] {
     fn jet_encode(&self) -> jet_std::DataTree {
-        if std::any::type_name::<T>() == "u8" {
+        if <T as __jet_Encode>::__JET_IS_BYTE {
             let mut bytes = Vec::with_capacity(N);
             for value in self {
-                let jet_std::DataTree::Int(n) = value.jet_encode() else { unreachable!() };
-                bytes.push(n as u8);
+                bytes.push(value.jet_encode_byte());
             }
             return jet_std::DataTree::Bytes(bytes);
         }
@@ -151,9 +194,26 @@ impl __jet_Encode for jet_std::DataTree {
 
 impl __jet_Decode for i64 {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
-        jet_std::decode_int(t)
+        jet_std::jet_datatree_decode_fixed_integer(t, true, 64, "I64")?
+            .try_into()
+            .map_err(|_| jet_std::FieldError::one("expected I64, found out-of-range Int"))
     }
 }
+
+impl __jet_Decode for jet_foundation::Numeric::JetInt {
+    fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+        jet_std::decode_int_with(
+            t,
+            jet_foundation::Numeric::JetInt::from_i64,
+            |text| {
+                jet_foundation::Numeric::CtBigInt::from_str(text)
+                    .map(jet_foundation::Numeric::JetInt::from_big)
+                    .map_err(|error| error.to_string())
+            },
+        )
+    }
+}
+
 
 // D-TYPE2-SPELL1: inline ranges are transparent in the Rust carrier, so a
 // generic container decoder cannot see the interval through `T = i64`. Typed
@@ -168,31 +228,28 @@ fn jet_decode_inline_range(
     jet_inline_range_from_int(value, lo, hi).map_err(jet_std::FieldError::one)
 }
 
-// D-JSON-EXACTNUM1: fixed-width integer fields must keep the exact integer
-// token until the destination width check. `I64` has the same Rust carrier as
-// default `Int`, so its ordinary trait impl cannot carry the width policy.
-fn jet_decode_fixed_int(
-    t: &jet_std::DataTree,
-    signed: bool,
-    bits: u8,
-    name: &str,
-) -> Result<i128, Vec<jet_std::FieldError>> {
-    let value = jet_std::decode_int(t)?;
-    let value = jet_std::jet_int_to_i128(value).ok_or_else(|| {
-        jet_std::FieldError::one(format!("expected {name}, found out-of-range Int"))
-    })?;
-    let in_range = if signed {
-        let max = (1i128 << u32::from(bits - 1)) - 1;
-        (-(max + 1)..=max).contains(&value)
+fn jet_decode_sequence<T, F>(
+    length: usize,
+    mut decode: F,
+) -> Result<Vec<T>, Vec<jet_std::FieldError>>
+where
+    F: FnMut(usize) -> Result<T, Vec<jet_std::FieldError>>,
+{
+    let mut out = Vec::with_capacity(length);
+    let mut errors = Vec::new();
+    for index in 0..length {
+        match decode(index) {
+            Ok(value) => out.push(value),
+            Err(error) => errors.extend(jet_std::FieldError::under_errors(
+                &format!("[{index}]"),
+                error,
+            )),
+        }
+    }
+    if errors.is_empty() {
+        Ok(out)
     } else {
-        (0..=(1i128 << u32::from(bits)) - 1).contains(&value)
-    };
-    if in_range {
-        Ok(value)
-    } else {
-        Err(jet_std::FieldError::one(format!(
-            "expected {name}, found out-of-range Int"
-        )))
+        Err(errors)
     }
 }
 
@@ -209,22 +266,7 @@ where
             jet_std::datatree_kind_for(t)
         )));
     };
-    let mut out = Vec::with_capacity(items.len());
-    let mut errors = Vec::new();
-    for (index, item) in items.iter().enumerate() {
-        match decode(item) {
-            Ok(value) => out.push(value),
-            Err(error) => errors.extend(jet_std::FieldError::under_errors(
-                &format!("[{index}]"),
-                error,
-            )),
-        }
-    }
-    if errors.is_empty() {
-        Ok(out)
-    } else {
-        Err(errors)
-    }
+    jet_decode_sequence(items.len(), |index| decode(&items[index]))
 }
 
 fn jet_decode_inline_range_fixed<T, F, const N: usize>(
@@ -332,37 +374,47 @@ impl __jet_Decode for JetDateTime {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         let value = String::jet_decode(t)?;
         jet_codec_datetime_decode(&value)
-            .map(|(secs, nanos)| JetDateTime::from_timestamp_ns(secs, nanos))
+            .map(|(secs, nanos, leap_second)| {
+                JetDateTime::from_timestamp_ns_with_leap(secs, nanos, leap_second)
+            })
             .map_err(|error| jet_std::FieldError::one(format!("expected DateTime: {error}")))
     }
 }
 impl __jet_Decode for jet_std::Duration {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
-        let value = jet_std::decode_int(t)?;
-        let ns = jet_std::jet_int_to_i64(value).ok_or_else(|| {
-            jet_std::FieldError::one("expected Duration, found out-of-range Int")
-        })?;
+        let ns = jet_std::decode_int_with(
+            t,
+            |value| value,
+            |text| {
+                text.parse::<i64>()
+                    .map_err(|_| "exact Int is outside i64".to_owned())
+            },
+        )?;
         Ok(jet_std::Duration {
             ns: jet_codec_duration_decode(ns),
         })
     }
 }
 impl __jet_Decode for u8 {
+    const __JET_IS_BYTE: bool = true;
+
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
-        let value = jet_std::decode_int(t)?;
-        jet_std::jet_int_to_i64(value)
-            .and_then(|value| u8::try_from(value).ok())
-            .ok_or_else(|| jet_std::FieldError::one("expected U8, found out-of-range Int"))
+        jet_std::jet_datatree_decode_fixed_integer(t, false, 8, "U8")?
+            .try_into()
+            .map_err(|_| jet_std::FieldError::one("expected U8, found out-of-range Int"))
+    }
+
+    fn jet_decode_byte(value: u8) -> Result<Self, Vec<jet_std::FieldError>> {
+        Ok(value)
     }
 }
 macro_rules! jet_impl_sized_int_decode {
-    ($($ty:ty => $name:literal),* $(,)?) => {$(
+    ($($ty:ty => ($signed:literal, $bits:literal, $name:literal)),* $(,)?) => {$(
         impl __jet_Decode for $ty {
             fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
-                let value = jet_std::decode_int(t)?;
-                jet_std::jet_int_to_i64(value)
-                    .and_then(|value| <$ty>::try_from(value).ok())
-                    .ok_or_else(|| {
+                jet_std::jet_datatree_decode_fixed_integer(t, $signed, $bits, $name)?
+                    .try_into()
+                    .map_err(|_| {
                         jet_std::FieldError::one(format!(
                             "expected {}, found out-of-range Int",
                             $name
@@ -373,11 +425,12 @@ macro_rules! jet_impl_sized_int_decode {
     )*};
 }
 jet_impl_sized_int_decode!(
-    i8 => "I8",
-    i16 => "I16",
-    i32 => "I32",
-    u16 => "U16",
-    u32 => "U32",
+    i8 => (true, 8, "I8"),
+    i16 => (true, 16, "I16"),
+    i32 => (true, 32, "I32"),
+    u16 => (false, 16, "U16"),
+    u32 => (false, 32, "U32"),
+    u64 => (false, 64, "U64"),
 );
 impl __jet_Decode for f32 {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
@@ -412,45 +465,11 @@ impl __jet_Decode for jet_std::JetDecimal {
 impl<T: __jet_Decode> __jet_Decode for Vec<T> {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         match t {
-            jet_std::DataTree::Bytes(bytes) if std::any::type_name::<T>() == "u8" => {
-                let mut out = Vec::with_capacity(bytes.len());
-                let mut errors = Vec::with_capacity(bytes.len());
-                for (index, byte) in bytes.iter().enumerate() {
-                    match T::jet_decode(&jet_std::DataTree::Int(*byte as i64)) {
-                        Ok(value) => out.push(value),
-                        Err(error) => {
-                            let mut framed = jet_std::FieldError::under_errors(
-                                &format!("[{}]", index),
-                                error,
-                            );
-                            errors.append(&mut framed);
-                        }
-                    }
-                }
-                if !errors.is_empty() {
-                    return Err(errors);
-                }
-                Ok(out)
+            jet_std::DataTree::Bytes(bytes) if <T as __jet_Decode>::__JET_IS_BYTE => {
+                jet_decode_sequence(bytes.len(), |index| T::jet_decode_byte(bytes[index]))
             }
             jet_std::DataTree::Array(items) => {
-                let mut out = Vec::with_capacity(items.len());
-                let mut errors = Vec::with_capacity(items.len());
-                for (i, item) in items.iter().enumerate() {
-                    match T::jet_decode(item) {
-                        Ok(value) => out.push(value),
-                        Err(error) => {
-                            let mut framed = jet_std::FieldError::under_errors(
-                                &format!("[{}]", i),
-                                error,
-                            );
-                            errors.append(&mut framed);
-                        }
-                    }
-                }
-                if !errors.is_empty() {
-                    return Err(errors);
-                }
-                Ok(out)
+                jet_decode_sequence(items.len(), |index| T::jet_decode(&items[index]))
             }
             other => Err(jet_std::FieldError::one(format!(
                 "expected a list, found {}",
@@ -517,21 +536,121 @@ impl<V: __jet_Decode> __jet_Decode for JetMap<String, V> {
     }
 }
 
+// ── core.encoding.datatree: checked DataTree projections ─────────────────────
+// Keep the carrier access policy in `JetDataTreeAccess`; these thin ABI
+// functions only expose that one implementation to generated MIR calls.
+fn jet_datatree_field(
+    tree: &jet_std::DataTree,
+    name: &String,
+) -> Result<jet_std::DataTree, Vec<jet_std::FieldError>> {
+    <jet_std::DataTree as jet_std::JetDataTreeAccess>::field(tree, name)
+}
+fn jet_datatree_at(
+    tree: &jet_std::DataTree,
+    index: i64,
+) -> Result<jet_std::DataTree, Vec<jet_std::FieldError>> {
+    <jet_std::DataTree as jet_std::JetDataTreeAccess>::at(tree, index)
+}
+fn jet_datatree_int(
+    tree: &jet_std::DataTree,
+) -> Result<i64, Vec<jet_std::FieldError>> {
+    <jet_std::DataTree as jet_std::JetDataTreeAccess>::int(tree)
+}
+fn jet_datatree_text(
+    tree: &jet_std::DataTree,
+) -> Result<String, Vec<jet_std::FieldError>> {
+    <jet_std::DataTree as jet_std::JetDataTreeAccess>::text(tree)
+}
+fn jet_datatree_bool(
+    tree: &jet_std::DataTree,
+) -> Result<bool, Vec<jet_std::FieldError>> {
+    <jet_std::DataTree as jet_std::JetDataTreeAccess>::bool(tree)
+}
+fn jet_datatree_float(
+    tree: &jet_std::DataTree,
+) -> Result<f64, Vec<jet_std::FieldError>> {
+    <jet_std::DataTree as jet_std::JetDataTreeAccess>::float(tree)
+}
+fn jet_datatree_to_text(tree: &jet_std::DataTree) -> Option<String> {
+    <jet_std::DataTree as jet_std::JetDataTreeAccess>::to_text(tree)
+}
+fn jet_datatree_equal_unordered(
+    tree: &jet_std::DataTree,
+    other: &jet_std::DataTree,
+) -> bool {
+    <jet_std::DataTree as jet_std::JetDataTreeAccess>::equal_unordered(tree, other)
+}
+
+// This route is intentionally generic: TIR carries the checked type argument,
+// while the trait keeps all scalar/container decode policy in one place.
+fn jet_codec_decode_typed<T: __jet_Decode>(
+    tree: &jet_std::DataTree,
+) -> Result<T, Vec<jet_std::FieldError>> {
+    T::jet_decode(tree)
+}
+
 // ── core.encoding: typed format verbs over Encode/Decode (D-ENC1, D-SERDE6) ────
 // `to_string`/`to_string_pretty` (D-JSONVERB1) and the typed `decode<T>` route
 // every format through the one DataTree model.
+// Internal MIR codec projections carry a checked kind ID so resident hosts can
+// use the same ABI while AOT dispatches to these trait implementations.
+fn jet_codec_encode<T: __jet_Encode>(_kind: i64, value: &T) -> jet_std::DataTree {
+    value.jet_encode()
+}
+fn jet_codec_decode<T: __jet_Decode>(
+    _kind: i64,
+    tree: &jet_std::DataTree,
+) -> Result<T, Vec<jet_std::FieldError>> {
+    T::jet_decode(tree)
+}
 fn jet_enc_json_to_string<T: __jet_Encode>(v: &T) -> String {
     jet_std::render_datatree_json(&v.jet_encode(), false, 0)
 }
 fn jet_enc_json_to_string_pretty<T: __jet_Encode>(v: &T) -> String {
     jet_std::render_datatree_json(&v.jet_encode(), true, 0)
 }
+
+fn jet_enc_json_to_string_shape<T: __jet_Encode>(
+    value: &T,
+    projection: &ShapeProjection,
+) -> Result<String, Vec<jet_std::FieldError>> {
+    if projection.kind != ShapeProjectionKind::Json {
+        return Err(jet_std::FieldError::one("JSON needs a JSON shape projection"));
+    }
+    let projected = jet_std::jet_datatree_project(&value.jet_encode(), projection)?;
+    Ok(jet_std::render_datatree_json(&projected, false, 0))
+}
+
+fn jet_enc_json_to_string_shape_pretty<T: __jet_Encode>(
+    value: &T,
+    projection: &ShapeProjection,
+) -> Result<String, Vec<jet_std::FieldError>> {
+    if projection.kind != ShapeProjectionKind::Json {
+        return Err(jet_std::FieldError::one("JSON needs a JSON shape projection"));
+    }
+    let projected = jet_std::jet_datatree_project(&value.jet_encode(), projection)?;
+    Ok(jet_std::render_datatree_json(&projected, true, 0))
+}
 fn jet_enc_json_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std::FieldError>> {
     let tree = jet_std::parse_json_typed_datatree(text).map_err(|e| {
-        jet_std::FieldError::one(format!("invalid JSON (line {}): {}", e.line, e.message))
+        let line = e.line.ok().unwrap_or(0);
+        jet_std::FieldError::one(format!("invalid JSON (line {}): {}", line, e.reason))
     })?;
     // D-MIGRATE4: migration is part of the sole canonical decode operation.
     T::jet_decode(&tree)
+}
+fn jet_data_json_decode<T: __jet_Decode>(
+    text: &String,
+) -> Result<Vec<T>, Vec<jet_std::FieldError>> {
+    jet_enc_json_decode::<Vec<T>>(text)
+}
+/// Decode an already-projected ordered object through the canonical typed
+/// DataTree trait. DB supplies the entries after its carrier-only projection;
+/// this function stays format-neutral and is shared by every host.
+fn jet_db_decode<T: __jet_Decode>(
+    entries: &[(String, jet_std::DataTree)],
+) -> Result<T, Vec<jet_std::FieldError>> {
+    T::jet_decode(&jet_std::DataTree::Object(entries.to_vec()))
 }
 
 // CSV typed decode: header row maps columns to fields by name; each data row
@@ -540,35 +659,13 @@ fn jet_enc_json_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std:
 fn jet_enc_csv_decode<T: __jet_Decode>(text: &String) -> Result<Vec<T>, Vec<jet_std::FieldError>> {
     let rows = jet_ring_csv_parse(text, &",".to_string(), false, false)
         .map_err(jet_std::FieldError::one)?;
-    let mut it = rows.into_iter();
-    let Some(header) = it.next() else {
-        return Ok(Vec::new());
-    };
-    let mut out = Vec::new();
-    let mut errors = Vec::new();
-    for (i, row) in it.enumerate() {
-        let obj: Vec<(String, jet_std::DataTree)> = header
-            .iter()
-            .enumerate()
-            .map(|(c, name)| {
-                let cell = row.get(c).cloned().unwrap_or_default();
-                (name.clone(), jet_std::DataTree::Text(cell))
-            })
-            .collect();
-        let tree = jet_std::DataTree::Object(obj);
-        // D-MIGRATE4: plain decode walks the migration chain silently (see json's).
-        match T::jet_decode(&tree) {
-            Ok(value) => out.push(value),
-            Err(error) => errors.extend(jet_std::FieldError::under_errors(
-                &format!("row {}", i + 1),
-                error,
-            )),
-        }
-    }
-    if !errors.is_empty() {
-        return Err(errors);
-    }
-    Ok(out)
+    jet_std::jet_enc_csv_decode_rows(
+        rows,
+        |tree| T::jet_decode(&tree),
+        |row, error| jet_std::FieldError::under_errors(row, error),
+        jet_std::DataTree::Text,
+        jet_std::DataTree::Object,
+    )
 }
 
 trait JetDataCount {
@@ -581,205 +678,8 @@ impl<T> JetDataCount for Vec<T> {
     }
 }
 
-impl<T> JetDataCount for jet_std::DataTable<T> {
-    fn jet_data_count(&self) -> i64 {
-        self.rows.len() as i64
-    }
-}
-
-impl<T> JetDataCount for jet_std::DataSeries<T> {
-    fn jet_data_count(&self) -> i64 {
-        self.values.len() as i64
-    }
-}
-
-impl<T: Clone> JetDataCount for jet_std::DataLazyFrame<T> {
-    fn jet_data_count(&self) -> i64 {
-        jet_data_materialize(self).len() as i64
-    }
-}
 
 fn jet_data_count<T: JetDataCount + ?Sized>(rows: &T) -> i64 {
     rows.jet_data_count()
 }
 
-fn jet_data_table<T: Clone>(rows: &Vec<T>) -> jet_std::DataTable<T> {
-    jet_std::DataTable {
-        rows: rows.clone(),
-        missing: 0,
-        plan: vec!["table".to_string()],
-    }
-}
-
-fn jet_data_rows<T: Clone>(table: &jet_std::DataTable<T>) -> Vec<T> {
-    table.rows.clone()
-}
-
-fn jet_data_series<T: Clone>(values: &Vec<T>) -> jet_std::DataSeries<T> {
-    jet_std::DataSeries {
-        values: values.clone(),
-        missing: 0,
-    }
-}
-
-fn jet_data_series_values<T: Clone>(series: &jet_std::DataSeries<T>) -> Vec<T> {
-    series.values.clone()
-}
-
-fn jet_data_missing_count<T>(series: &jet_std::DataSeries<JetOutcome<T, JetAbsent>>) -> i64 {
-    series.missing + series.values.iter().filter(|v| v.is_err()).count() as i64
-}
-
-fn jet_data_lazy<T: Clone>(table: &jet_std::DataTable<T>) -> jet_std::DataLazyFrame<T> {
-    jet_std::DataLazyFrame {
-        rows: table.rows.clone(),
-        missing: table.missing,
-        plan: table.plan.clone(),
-        operations: Vec::new(),
-    }
-}
-
-fn jet_data_materialize<T: Clone>(frame: &jet_std::DataLazyFrame<T>) -> Vec<T> {
-    let mut rows = frame.rows.clone();
-    for operation in &frame.operations {
-        match operation {
-            jet_std::DataLazyOperation::Filter(pred) => {
-                rows.retain(|row| pred(row.clone()));
-            }
-            jet_std::DataLazyOperation::SortBy(key) => {
-                rows.sort_by_key(|row| key(row.clone()));
-            }
-        }
-    }
-    rows
-}
-
-fn jet_data_lazy_filter<T, F>(
-    frame: &jet_std::DataLazyFrame<T>,
-    pred: F,
-) -> jet_std::DataLazyFrame<T>
-where
-    T: Clone + 'static,
-    F: Fn(T) -> bool + 'static,
-{
-    let mut plan = frame.plan.clone();
-    plan.push("filter".to_string());
-    let mut operations = frame.operations.clone();
-    operations.push(jet_std::DataLazyOperation::Filter(std::sync::Arc::new(pred)));
-    jet_std::DataLazyFrame {
-        rows: frame.rows.clone(),
-        missing: frame.missing,
-        plan,
-        operations,
-    }
-}
-
-fn jet_data_lazy_sort_by<T, F>(
-    frame: &jet_std::DataLazyFrame<T>,
-    key: F,
-) -> jet_std::DataLazyFrame<T>
-where
-    T: Clone + 'static,
-    F: Fn(T) -> String + 'static,
-{
-    let mut plan = frame.plan.clone();
-    plan.push("sort_by".to_string());
-    let mut operations = frame.operations.clone();
-    operations.push(jet_std::DataLazyOperation::SortBy(std::sync::Arc::new(key)));
-    jet_std::DataLazyFrame {
-        rows: frame.rows.clone(),
-        missing: frame.missing,
-        plan,
-        operations,
-    }
-}
-
-fn jet_data_collect<T: Clone>(frame: &jet_std::DataLazyFrame<T>) -> jet_std::DataTable<T> {
-    let mut plan = frame.plan.clone();
-    plan.push("collect".to_string());
-    jet_std::DataTable {
-        rows: jet_data_materialize(frame),
-        missing: frame.missing,
-        plan,
-    }
-}
-
-fn jet_data_plan<T>(frame: &jet_std::DataLazyFrame<T>) -> Vec<String> {
-    frame.plan.clone()
-}
-
-fn jet_data_filter<T, F>(rows: &Vec<T>, pred: F) -> Vec<T>
-where
-    T: Clone,
-    F: Fn(T) -> bool,
-{
-    rows.iter().cloned().filter(|row| pred(row.clone())).collect()
-}
-
-fn jet_data_sort_by<T, F>(rows: &Vec<T>, key: F) -> Vec<T>
-where
-    T: Clone,
-    F: Fn(T) -> String,
-{
-    let mut out = rows.clone();
-    out.sort_by_key(|row| key(row.clone()));
-    out
-}
-
-fn jet_data_group_count<T, F>(rows: &Vec<T>, key: F) -> Vec<jet_std::DataGroup>
-where
-    T: Clone,
-    F: Fn(T) -> String,
-{
-    let mut groups: std::collections::BTreeMap<String, (i64, f64)> =
-        std::collections::BTreeMap::new();
-    for row in rows.iter().cloned() {
-        let k = key(row);
-        let entry = groups.entry(k).or_insert((0, 0.0));
-        entry.0 += 1;
-    }
-    groups
-        .into_iter()
-        .map(|(key, (count, sum))| jet_std::DataGroup {
-            key,
-            count,
-            sum,
-            mean: 0.0,
-        })
-        .collect()
-}
-
-fn jet_data_group_sum<T, FK, FV>(rows: &Vec<T>, key: FK, value: FV) -> Vec<jet_std::DataGroup>
-where
-    T: Clone,
-    FK: Fn(T) -> String,
-    FV: Fn(T) -> f64,
-{
-    let mut groups: std::collections::BTreeMap<String, (i64, f64)> =
-        std::collections::BTreeMap::new();
-    for row in rows.iter().cloned() {
-        let k = key(row.clone());
-        let v = value(row);
-        let entry = groups.entry(k).or_insert((0, 0.0));
-        entry.0 += 1;
-        entry.1 += v;
-    }
-    groups
-        .into_iter()
-        .map(|(key, (count, sum))| jet_std::DataGroup {
-            key,
-            count,
-            sum,
-            mean: if count == 0 { 0.0 } else { sum / count as f64 },
-        })
-        .collect()
-}
-
-fn jet_data_group_mean<T, FK, FV>(rows: &Vec<T>, key: FK, value: FV) -> Vec<jet_std::DataGroup>
-where
-    T: Clone,
-    FK: Fn(T) -> String,
-    FV: Fn(T) -> f64,
-{
-    jet_data_group_sum(rows, key, value)
-}

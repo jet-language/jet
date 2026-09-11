@@ -226,6 +226,157 @@ fn prepare_acceptance_root(root: &Path) {
 }
 
 #[test]
+fn web_server_function_browser_adapter_keeps_native_and_scripted_paths_typed() {
+    let Some(node) = resolve_executable(Path::new("node")) else {
+        eprintln!("note: skipping server-function browser adapter smoke (need node)");
+        return;
+    };
+    let runtime = repo_root()
+        .join("crates/jet-codegen/src/Prelude/DomRuntime.js")
+        .canonicalize()
+        .expect("DomRuntime.js path");
+    let runtime = runtime.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+    let script = format!(
+        r#"
+globalThis.location = {{ origin: "http://localhost", href: "http://localhost/" }};
+const calls = [];
+globalThis.fetch = async (url, options) => {{
+  calls.push({{ url, options }});
+  return new Response(JSON.stringify({{ saved: true }}), {{
+    status: 200,
+    headers: {{ "content-type": "application/json" }},
+  }});
+}};
+const {{ attachWebForm, webServerFunctionCall, webServerFunctionForm }} =
+  await import("file://{runtime}");
+const boundary = {{
+  name: "save",
+  endpoint: "/actions/save",
+  method: "POST",
+  input: "SaveInput",
+  output: "SaveResult",
+  error: "SaveError",
+  csrf: "same-origin",
+  revalidate: ["orders"],
+}};
+const result = await webServerFunctionCall(boundary, {{ id: 7 }});
+if (!result.value.saved || result.attempts !== 1 || result.revalidate[0] !== "orders") {{
+  throw new Error("typed scripted call did not return its checked result");
+}}
+if (calls[0].options.credentials !== "same-origin" ||
+    calls[0].options.headers["content-type"] !== "application/json") {{
+  throw new Error("scripted call crossed the wrong transport boundary");
+}}
+const nativeAttrs = {{}};
+const nativeForm = {{
+  dataset: {{}},
+  setAttribute(name, value) {{ nativeAttrs[name] = value; }},
+  querySelector() {{ return null; }},
+}};
+const native = webServerFunctionForm(boundary, nativeForm);
+if (!native.no_script || nativeAttrs.action !== "/actions/save" ||
+    nativeAttrs.method !== "POST" || nativeForm.dataset.jetPending !== "false") {{
+  throw new Error("native form path was not configured");
+}}
+let revalidated = null;
+const enhancedAttrs = {{}};
+const enhanced = {{
+  dataset: {{}},
+  setAttribute(name, value) {{ enhancedAttrs[name] = value; }},
+  addEventListener(name, handler) {{ this.handler = handler; }},
+  removeEventListener() {{}},
+  dispatchEvent() {{}},
+}};
+attachWebForm(boundary, enhanced, {{
+  enhance: true,
+  encode: () => ({{ id: 7 }}),
+  revalidate: (keys) => {{ revalidated = keys; }},
+}});
+enhanced.handler({{ preventDefault() {{}} }});
+await new Promise((resolve) => setTimeout(resolve, 0));
+if (!Array.isArray(revalidated) || revalidated[0] !== "orders" ||
+    enhanced.dataset.jetPending !== "false") {{
+  throw new Error("hydrated form did not settle and revalidate dependencies");
+}}
+try {{
+  await webServerFunctionCall({{ endpoint: "https://evil.invalid/actions/save" }}, {{}});
+  throw new Error("cross-origin server function was accepted");
+}} catch (error) {{
+  if (!(error instanceof TypeError) && error.code !== "csrf_rejected") throw error;
+}}
+const cycle = {{}};
+cycle.self = cycle;
+try {{
+  await webServerFunctionCall(boundary, cycle);
+  throw new Error("non-serializable input was accepted");
+}} catch (error) {{
+  if (error.code !== "invalid_input") throw error;
+}}
+"#,
+    );
+    let output = Command::new(node)
+        .args(["--input-type=module", "-e", &script])
+        .output()
+        .expect("run server-function browser adapter smoke");
+    assert!(
+        output.status.success(),
+        "server-function browser adapter smoke failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn tanstack_start_browser_reference_loop_uses_rendered_routes_and_actions() {
+    if !have_tool("rustc") {
+        eprintln!("note: skipping TanStack reference browser loop (need rustc)");
+        return;
+    }
+    let Some((chromium, node)) = web_tools() else {
+        eprintln!("note: skipping TanStack reference browser loop (need chromium + node)");
+        return;
+    };
+
+    let repo = repo_root();
+    let root = std::env::temp_dir().join(format!(
+        "jet_tanstack_reference_browser_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("public")).unwrap();
+    for path in ["run.jet", "package.jet", "public/index.html", "public/app.css"] {
+        let source = repo.join("examples/features/web/tanstack_start").join(path);
+        let destination = root.join(path);
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::copy(source, destination).unwrap();
+    }
+
+    let output = Command::new(&node)
+        .env("CHROMIUM", chromium)
+        .arg(repo.join("scripts/web-dev-test/reference_app.mjs"))
+        .args(["--metric", "first_run", "--manifest"])
+        .arg(repo.join("tools/agent-eval/dx/manifest.json"))
+        .args(["--exercise", "--app", "tanstack-start-orders", "--jet-env"])
+        .arg(repo.join("scripts/agent/jet-env"))
+        .current_dir(&root)
+        .output()
+        .expect("run TanStack reference browser loop");
+    assert!(
+        output.status.success(),
+        "TanStack reference browser loop failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("REFERENCE_METRIC:first_run"),
+        "reference browser loop did not report first-run measurement"
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn web_browser_aot_acceptance_proves_dom_reactive_wasm_bundle_and_maps() {
     if !have_tool("rustc") {
         eprintln!("note: skipping web_browser acceptance (need rustc)");

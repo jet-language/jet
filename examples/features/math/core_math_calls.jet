@@ -1,0 +1,59 @@
+// D-MATH-CORE-CALLS1: executable witnesses for the exact math surfaces.
+use core.math as math
+use core.math.random as random
+use core.units as units
+
+fn run() {
+    print(math.checked_pow(2, 3) ?? -1)
+    print(math.decimal("12.34").to_string())
+    print(math.from_bits(U64{0x3ff0000000000000}))
+    print(math.pi())
+    print(math.round(2.5))
+    print(math.to_bits(Float{1.0}))
+
+    random.seed(7)
+    value :: random.float()
+    print(value >= 0.0 && value < 1.0)
+    random.seed(7)
+    integer :: random.int(2, 6)
+    print(integer >= 2 && integer <= 6)
+    random.seed(7)
+    items :: [String]{"red", "green", "blue"}
+    choice :: random.pick(items) ?? "none"
+    print(choice == "red" || choice == "green" || choice == "blue")
+    child := random.split(9)
+    print(child.int(1, 1) == 1)
+
+    one :: math.decimal("1.5")
+    two :: math.decimal("2.25")
+    print(one.add(two).to_string())
+    print(two.sub(one).to_string())
+    print(one.mul(two).to_string())
+    print(two.div(one).to_string())
+    print(one.equal(math.decimal("1.5")))
+    print(one.round().to_string())
+    print(one.floor().to_string())
+    print(one.ceil().to_string())
+
+    half :: math.fraction(1, 2) ?? panic("half")
+    quarter :: math.fraction(1, 4) ?? panic("quarter")
+    two_fraction :: math.fraction(2, 1) ?? panic("two")
+    two_quarters :: math.fraction(2, 4) ?? panic("two quarters")
+    print(half.sub(quarter).to_string())
+    print(half.mul(two_fraction).to_string())
+    print(half.div(quarter).to_string())
+    print(half.equal(two_quarters))
+
+    a :: measurement(9.0, uncertainty: 0.1)
+    b :: measurement(4.0, uncertainty: 0.2)
+    print(a.add(b).value())
+    print(a.sub(b).value())
+    print(a.mul(b).value())
+    print(a.div(b).value())
+    print(a.sqrt().value())
+    print(a.uncertainty())
+    print(a.value())
+
+    result :: units.from(12.0, 0.0)
+    print(result.value())
+}

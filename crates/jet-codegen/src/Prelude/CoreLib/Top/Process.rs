@@ -1,3 +1,58 @@
+const JET_PROCESS_TOPOLOGY_SOURCE: &str = "process-runtime";
+
+fn jet_process_topology_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| u64::try_from(duration.as_millis()).ok())
+        .unwrap_or(0)
+}
+
+fn jet_process_publish_topology(
+    pid: u32,
+    state: JetDevtoolsTopologyProcessState,
+) {
+    let fact = JetDevtoolsTopologyProcessFact::new(
+        format!("process:{pid}"),
+        JET_PROCESS_TOPOLOGY_SOURCE,
+        None,
+        state,
+        Some(u64::from(pid)),
+        Vec::new(),
+        JetDevtoolsTopologyFreshness::fresh(jet_process_topology_now()),
+    );
+    if let Ok(fact) = fact {
+        if let Ok(event) = fact.to_protocol_event(JET_PROCESS_TOPOLOGY_SOURCE) {
+            jet_devtools_publish_event(event);
+        }
+    }
+}
+fn jet_process_publish_topology_id(
+    pid: i64,
+    state: JetDevtoolsTopologyProcessState,
+) {
+    if let Ok(pid) = u32::try_from(pid) {
+        if pid != 0 {
+            jet_process_publish_topology(pid, state);
+        }
+    }
+}
+
+
+// D-FOUND-LIFECYCLE1=A: signal subscription is an infallible public operation.
+// Native arming failures use one deterministic shared Prelude panic path;
+// target capability rejection happens before a call reaches this function.
+fn jet_process_on_signal(signal: &jet_std::ProcessSignal) {
+    let _ = jet_scheduler_root_task_control();
+    let callback: std::sync::Arc<dyn Fn() + Send + Sync + 'static> =
+        std::sync::Arc::new(|| {
+            jet_scheduler_root_task_control().cancel();
+        });
+    if let Err(message) = jet_process_signal_register(signal.mask(), callback) {
+        panic!("{}", jet_process_signal_error(&message));
+    }
+}
+
 fn jet_process_spec_timeout(
     mut spec: jet_std::ProcessSpec,
     timeout: &jet_std::Duration,
@@ -202,7 +257,7 @@ fn jet_process_environment(spec: &jet_std::ProcessSpec) -> Result<JetEnvEntries,
     Ok(child_env)
 }
 
-fn jet_process_command_base_with_identity(
+fn jet_process_command_builder_with_identity(
     spec: &jet_std::ProcessSpec,
     executable_identity: Option<&str>,
 ) -> Result<std::process::Command, jet_std::IOError> {
@@ -219,9 +274,26 @@ fn jet_process_command_base_with_identity(
     if let Some(cwd) = &spec.cwd {
         command.current_dir(cwd);
     }
-    let child_env = jet_process_environment(spec)?;
-    command.env_clear();
-    command.envs(child_env);
+    if spec.env_clear || !spec.env_set.is_empty() || !spec.env_remove.is_empty() {
+        let child_env = jet_process_environment(spec)?;
+        command.env_clear();
+        command.envs(child_env);
+    } else {
+        // Keep the logical environment's raw values without cloning the
+        // entire table for every child. The lock guard lasts through the
+        // synchronous `envs` call, so the child sees one atomic snapshot.
+        let child_env = jet_env_read();
+        command.env_clear();
+        command.envs(child_env.iter().map(|(name, value)| (name, value)));
+    }
+    Ok(command)
+}
+
+fn jet_process_command_base_with_identity(
+    spec: &jet_std::ProcessSpec,
+    executable_identity: Option<&str>,
+) -> Result<std::process::Command, jet_std::IOError> {
+    let mut command = jet_process_command_builder_with_identity(spec, executable_identity)?;
     // No `.stdin(...)` call (default) closes the child's stdin —
     // no accidental terminal/parent-stdin inheritance.
     command.stdin(match &spec.stdin {
@@ -231,6 +303,27 @@ fn jet_process_command_base_with_identity(
     command.stdout(jet_process_stdio(&spec.stdout));
     command.stderr(jet_process_stdio(&spec.stderr));
     Ok(command)
+}
+
+#[cfg(unix)]
+fn jet_process_attach_process_group(
+    command: &mut std::process::Command,
+    spec: &jet_std::ProcessSpec,
+) -> std::io::Result<()> {
+    let limits = jet_process_native_limits(spec);
+    if limits.cpu_time_ms.is_none()
+        && limits.memory_bytes.is_none()
+        && limits.open_files.is_none()
+    {
+        use std::os::unix::process::CommandExt;
+        // `process_group(0)` is expressible to the platform spawn backend,
+        // unlike a `pre_exec` closure, so ordinary children can use
+        // posix_spawn while retaining the descendant process-group boundary.
+        command.process_group(0);
+        Ok(())
+    } else {
+        jet_process_pty::attach_process_group(command, limits)
+    }
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -287,24 +380,6 @@ fn jet_process_sandbox_env(
     Ok(environment)
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
-fn jet_process_sandbox_policy_scope(
-    spec: &jet_std::ProcessSpec,
-    executable_identity: &str,
-) -> Result<(bool, bool, bool), jet_std::IOError> {
-    let rights = spec
-        .policy_wire
-        .as_deref()
-        .unwrap_or_default()
-        .lines()
-        .collect::<Vec<_>>();
-    jet_process_policy_check_executable(spec, executable_identity)?;
-    Ok((
-        rights.iter().any(|right| *right == "FS.Read:repo"),
-        rights.iter().any(|right| *right == "FS.Write:.jet/build"),
-        rights.iter().any(|right| *right == "Net"),
-    ))
-}
 
 fn jet_process_receipt(
     spec: &jet_std::ProcessSpec,
@@ -440,6 +515,9 @@ fn jet_process_child_from_inner(
         output_limit_hit.clone(),
         output_read_error.clone(),
     );
+    let pid = child.id();
+    jet_process_publish_topology(pid, JetDevtoolsTopologyProcessState::Starting);
+    jet_process_publish_topology(pid, JetDevtoolsTopologyProcessState::Running);
     Ok(jet_std::ProcessChild {
         wait_result: std::rc::Rc::new(std::cell::RefCell::new(None)),
         cleanup_error: std::rc::Rc::new(std::cell::RefCell::new(None)),
@@ -565,14 +643,10 @@ fn jet_process_spec_spawn(
         let plan = launch_plan
             .as_ref()
             .expect("authority launch must have a plan");
-        let cwd = spec
-            .cwd
-            .as_deref()
-            .map(std::path::Path::new)
-            .unwrap_or_else(|| std::path::Path::new("."));
-        let (source_readable, output_writable, share_network) =
-            jet_process_sandbox_policy_scope(spec, &plan.executable_identity)?;
-        let output_dir = if output_writable {
+        let cwd = std::path::Path::new(jet_process_policy_authority_cwd(spec)?);
+        let sandbox_scope =
+            jet_process_policy_sandbox_scope(spec, &plan.executable_identity)?;
+        let output_dir = if sandbox_scope.output_writable {
             Some(
                 jet_process_sandbox::agent_output_dir(cwd)
                     .map_err(|error| jet_process_sandbox_error(spec, error))?,
@@ -587,8 +661,8 @@ fn jet_process_spec_spawn(
             cwd,
             output_dir.as_deref(),
             &environment,
-            share_network,
-            source_readable,
+            sandbox_scope.share_network,
+            sandbox_scope.source_readable,
             false,
             spec.cmd
                 .first()
@@ -636,7 +710,7 @@ fn jet_process_spec_spawn(
         command.stderr(std::process::Stdio::null());
     }
     #[cfg(unix)]
-    jet_process_pty::attach_process_group(&mut command, jet_process_native_limits(spec)).map_err(|error| {
+    jet_process_attach_process_group(&mut command, spec).map_err(|error| {
         jet_std::IOError::other(
             jet_std::IOOperation::Resolve,
             spec.cmd.first().cloned(),
@@ -707,14 +781,9 @@ fn jet_process_terminal_spawn(
     let child = if spec.policy_wire.is_some() {
         let executable =
             executable_identity.expect("authority terminal launch must have a resolved executable");
-        let cwd = spec
-            .cwd
-            .as_deref()
-            .map(std::path::Path::new)
-            .unwrap_or_else(|| std::path::Path::new("."));
-        let (source_readable, output_writable, share_network) =
-            jet_process_sandbox_policy_scope(spec, executable)?;
-        let output_dir = if output_writable {
+        let cwd = std::path::Path::new(jet_process_policy_authority_cwd(spec)?);
+        let sandbox_scope = jet_process_policy_sandbox_scope(spec, executable)?;
+        let output_dir = if sandbox_scope.output_writable {
             Some(
                 jet_process_sandbox::agent_output_dir(cwd)
                     .map_err(|error| jet_process_sandbox_error(spec, error))?,
@@ -729,8 +798,8 @@ fn jet_process_terminal_spawn(
             cwd,
             output_dir.as_deref(),
             &environment,
-            share_network,
-            source_readable,
+            sandbox_scope.share_network,
+            sandbox_scope.source_readable,
             false,
             spec.cmd
                 .first()
@@ -814,6 +883,9 @@ fn jet_process_terminal_spawn(
         output_limit_hit.clone(),
         output_read_error.clone(),
     );
+    let pid = child.id();
+    jet_process_publish_topology(pid, JetDevtoolsTopologyProcessState::Starting);
+    jet_process_publish_topology(pid, JetDevtoolsTopologyProcessState::Running);
     Ok(jet_std::ProcessChild {
         wait_result: std::rc::Rc::new(std::cell::RefCell::new(None)),
         cleanup_error: std::rc::Rc::new(std::cell::RefCell::new(None)),
@@ -904,6 +976,9 @@ fn jet_process_terminal_spawn(
         output_limit_hit.clone(),
         output_read_error.clone(),
     );
+    let pid = native.pid;
+    jet_process_publish_topology(pid, JetDevtoolsTopologyProcessState::Starting);
+    jet_process_publish_topology(pid, JetDevtoolsTopologyProcessState::Running);
     Ok(jet_std::ProcessChild {
         wait_result: std::rc::Rc::new(std::cell::RefCell::new(None)),
         cleanup_error: std::rc::Rc::new(std::cell::RefCell::new(None)),
@@ -1148,11 +1223,12 @@ struct JetProcessOutput {
 }
 
 fn jet_process_drain_reader<R>(
-    reader: Option<std::io::BufReader<R>>,
+    reader: Option<R>,
     limit: Option<usize>,
     budget: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
     limit_hit: std::sync::Arc<std::sync::atomic::AtomicBool>,
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    groups: std::sync::Arc<std::sync::Mutex<Vec<u32>>>,
 ) -> Option<std::thread::JoinHandle<std::io::Result<JetProcessOutput>>>
 where
     R: std::io::Read + Send + 'static,
@@ -1187,6 +1263,7 @@ where
                     if kept < count {
                         exceeded = true;
                         limit_hit.store(true, std::sync::atomic::Ordering::Release);
+                        jet_process_pipeline_stop_groups(&groups);
                         break;
                     }
                 }
@@ -1199,11 +1276,13 @@ where
                 Ok(result) => {
                     if result.is_err() {
                         cancel.store(true, std::sync::atomic::Ordering::Release);
+                        jet_process_pipeline_stop_groups(&groups);
                     }
                     result
                 }
                 Err(payload) => {
                     cancel.store(true, std::sync::atomic::Ordering::Release);
+                    jet_process_pipeline_stop_groups(&groups);
                     std::panic::resume_unwind(payload);
                 }
             }
@@ -1357,14 +1436,10 @@ fn jet_process_spec_run_windows(
     }
     let plan = jet_process_spec_plan(spec)?;
     jet_process_verify_launch_plan(spec, &plan)?;
-    let cwd = spec
-        .cwd
-        .as_deref()
-        .map(std::path::Path::new)
-        .unwrap_or_else(|| std::path::Path::new("."));
-    let (source_readable, output_writable, share_network) =
-        jet_process_sandbox_policy_scope(spec, &plan.executable_identity)?;
-    let output_dir = if output_writable {
+    let cwd = std::path::Path::new(jet_process_policy_authority_cwd(spec)?);
+    let sandbox_scope =
+        jet_process_policy_sandbox_scope(spec, &plan.executable_identity)?;
+    let output_dir = if sandbox_scope.output_writable {
         Some(
             jet_process_sandbox::agent_output_dir(cwd)
                 .map_err(|error| jet_process_sandbox_error_windows(spec, error))?,
@@ -1379,8 +1454,8 @@ fn jet_process_spec_run_windows(
         cwd,
         output_dir.as_deref(),
         &environment,
-        share_network,
-        source_readable,
+        sandbox_scope.share_network,
+        sandbox_scope.source_readable,
         false,
         spec.timeout_ms,
         spec.output_limit,
@@ -1499,14 +1574,10 @@ fn jet_process_sandbox_pipeline_spawn(
             "terminal sessions cannot be used as pipeline stages; spawn the session directly",
         ));
     }
-    let cwd = spec
-        .cwd
-        .as_deref()
-        .map(std::path::Path::new)
-        .unwrap_or_else(|| std::path::Path::new("."));
-    let (source_readable, output_writable, share_network) =
-        jet_process_sandbox_policy_scope(spec, &launch_plan.executable_identity)?;
-    let output_dir = if output_writable {
+    let cwd = std::path::Path::new(jet_process_policy_authority_cwd(spec)?);
+    let sandbox_scope =
+        jet_process_policy_sandbox_scope(spec, &launch_plan.executable_identity)?;
+    let output_dir = if sandbox_scope.output_writable {
         Some(
             jet_process_sandbox::agent_output_dir(cwd)
                 .map_err(|error| jet_process_sandbox_error(spec, error))?,
@@ -1521,8 +1592,8 @@ fn jet_process_sandbox_pipeline_spawn(
         cwd,
         output_dir.as_deref(),
         &environment,
-        share_network,
-        source_readable,
+        sandbox_scope.share_network,
+        sandbox_scope.source_readable,
         false,
         spec.cmd
             .first()
@@ -1607,6 +1678,22 @@ fn jet_process_pipeline_cleanup(children: &mut [JetProcessPipelineChild]) {
     }
 }
 
+fn jet_process_pipeline_stop_groups(
+    groups: &std::sync::Arc<std::sync::Mutex<Vec<u32>>>,
+) {
+    #[cfg(unix)]
+    {
+        let groups = groups
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for &pid in groups.iter() {
+            let _ = jet_process_pty::signal_group(pid, jet_process_signal_kill());
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = groups;
+}
+
 fn jet_process_forward_pipeline_output(
     mut reader: std::process::ChildStdout,
     mut writer: std::process::ChildStdin,
@@ -1614,6 +1701,7 @@ fn jet_process_forward_pipeline_output(
     budget: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     limit_hit: std::sync::Arc<std::sync::atomic::AtomicBool>,
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    groups: std::sync::Arc<std::sync::Mutex<Vec<u32>>>,
 ) -> std::io::Result<()> {
     let result = (|| {
         let mut chunk = [0u8; 8192];
@@ -1625,6 +1713,7 @@ fn jet_process_forward_pipeline_output(
             let kept = jet_process_output_reserve(limit, &budget, count);
             if kept < count {
                 limit_hit.store(true, std::sync::atomic::Ordering::Release);
+                jet_process_pipeline_stop_groups(&groups);
             }
             if kept != 0 {
                 match std::io::Write::write_all(&mut writer, &chunk[..kept]) {
@@ -1642,6 +1731,7 @@ fn jet_process_forward_pipeline_output(
     })();
     if result.is_err() {
         cancel.store(true, std::sync::atomic::Ordering::Release);
+        jet_process_pipeline_stop_groups(&groups);
     }
     result
 }
@@ -1700,22 +1790,7 @@ fn jet_process_spec_pipeline(
             "authority-bound pipelines need one auditable launch transaction; refusing before spawn",
         ));
     }
-    let launch_plans = specs
-        .iter()
-        .map(|spec| {
-            if spec.policy_wire.is_some() {
-                jet_process_spec_plan(spec).map(Some)
-            } else {
-                Ok(None)
-            }
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    for (spec, launch_plan) in specs.iter().zip(launch_plans.iter()) {
-        if let Some(plan) = launch_plan.as_ref() {
-            jet_process_verify_launch_plan(spec, plan)?;
-        }
-    }
-    let mut children: Vec<JetProcessPipelineChild> = Vec::new();
+    let mut children: Vec<JetProcessPipelineChild> = Vec::with_capacity(specs.len());
     let mut stage_started = Vec::with_capacity(specs.len());
     let mut prev_stdout: Option<std::process::ChildStdout> = None;
     let stage_budgets = specs
@@ -1727,8 +1802,11 @@ fn jet_process_spec_pipeline(
         .collect::<Vec<_>>();
     let pipeline_limit_hit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let pipeline_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let mut forwarders = Vec::new();
-    for (index, (spec, launch_plan)) in specs.iter().zip(launch_plans.iter()).enumerate() {
+    let pipeline_groups = std::sync::Arc::new(std::sync::Mutex::new(
+        Vec::with_capacity(specs.len()),
+    ));
+    let mut forwarders = Vec::with_capacity(specs.len().saturating_sub(1));
+    for (index, spec) in specs.iter().enumerate() {
         let is_last = index + 1 == specs.len();
         let input = prev_stdout.take();
         let limited_input = index
@@ -1743,84 +1821,48 @@ fn jet_process_spec_pipeline(
         let child = (|| -> Result<std::process::Child, jet_std::IOError> {
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             if spec.policy_wire.is_some() {
-                jet_process_sandbox_pipeline_spawn(
-                    spec,
-                    launch_plan
-                        .as_ref()
-                        .expect("authority pipeline stage must have a plan"),
-                    input,
-                )
+                let plan = jet_process_spec_plan(spec)?;
+                return jet_process_sandbox_pipeline_spawn(spec, &plan, input);
+            }
+            if spec.terminal.is_some() {
+                return Err(jet_std::IOError::other(
+                    jet_std::IOOperation::Resolve,
+                    spec.cmd.first().cloned(),
+                    "terminal sessions cannot be used as pipeline stages; spawn the session directly",
+                ));
+            }
+            let mut command = jet_process_command_builder_with_identity(spec, None)?;
+            if let Some(stdout) = input {
+                command.stdin(std::process::Stdio::from(stdout));
+            } else if forward_input.is_some() {
+                command.stdin(std::process::Stdio::piped());
             } else {
-                let mut command = jet_process_command_with_identity(
-                    spec,
-                    launch_plan
-                        .as_ref()
-                        .map(|plan| plan.executable_identity.as_str()),
-                )?;
-                if forward_input.is_some() {
-                    command.stdin(std::process::Stdio::piped());
-                }
-                if let Some(stdout) = input {
-                    command.stdin(std::process::Stdio::from(stdout));
-                }
-                if is_last {
-                    command.stdout(jet_process_stdio(&spec.stdout));
-                } else {
-                    command.stdout(std::process::Stdio::piped());
-                }
-                command.stderr(jet_process_stdio(&spec.stderr));
-                #[cfg(unix)]
-                jet_process_pty::attach_process_group(&mut command, jet_process_native_limits(spec)).map_err(|error| {
-                    jet_std::IOError::other(
-                        jet_std::IOOperation::Resolve,
-                        spec.cmd.first().cloned(),
-                        error,
-                    )
-                })?;
-                command.spawn().map_err(|error| {
-                    jet_std::IOError::other(
-                        jet_std::IOOperation::Resolve,
-                        spec.cmd.first().cloned(),
-                        error,
-                    )
-                })
+                command.stdin(match &spec.stdin {
+                    Some(mode) => jet_process_stdio(mode),
+                    None => std::process::Stdio::null(),
+                });
             }
-            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-            {
-                let mut command = jet_process_command_with_identity(
-                    spec,
-                    launch_plan
-                        .as_ref()
-                        .map(|plan| plan.executable_identity.as_str()),
-                )?;
-                if forward_input.is_some() {
-                    command.stdin(std::process::Stdio::piped());
-                }
-                if let Some(stdout) = input {
-                    command.stdin(std::process::Stdio::from(stdout));
-                }
-                if is_last {
-                    command.stdout(jet_process_stdio(&spec.stdout));
-                } else {
-                    command.stdout(std::process::Stdio::piped());
-                }
-                command.stderr(jet_process_stdio(&spec.stderr));
-                #[cfg(unix)]
-                jet_process_pty::attach_process_group(&mut command, jet_process_native_limits(spec)).map_err(|error| {
-                    jet_std::IOError::other(
-                        jet_std::IOOperation::Resolve,
-                        spec.cmd.first().cloned(),
-                        error,
-                    )
-                })?;
-                command.spawn().map_err(|error| {
-                    jet_std::IOError::other(
-                        jet_std::IOOperation::Resolve,
-                        spec.cmd.first().cloned(),
-                        error,
-                    )
-                })
+            if is_last {
+                command.stdout(jet_process_stdio(&spec.stdout));
+            } else {
+                command.stdout(std::process::Stdio::piped());
             }
+            command.stderr(jet_process_stdio(&spec.stderr));
+            #[cfg(unix)]
+            jet_process_attach_process_group(&mut command, spec).map_err(|error| {
+                jet_std::IOError::other(
+                    jet_std::IOOperation::Resolve,
+                    spec.cmd.first().cloned(),
+                    error,
+                )
+            })?;
+            command.spawn().map_err(|error| {
+                jet_std::IOError::other(
+                    jet_std::IOOperation::Resolve,
+                    spec.cmd.first().cloned(),
+                    error,
+                )
+            })
         })();
         let mut child = match child {
             Ok(child) => match jet_process_pipeline_child(child, spec) {
@@ -1837,6 +1879,14 @@ fn jet_process_spec_pipeline(
                 return Err(error);
             }
         };
+        let child_pid = child.child.id();
+        pipeline_groups
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(child_pid);
+        if pipeline_cancel.load(std::sync::atomic::Ordering::Acquire) {
+            jet_process_pipeline_stop_groups(&pipeline_groups);
+        }
         if let Some(stdout) = forward_input {
             let Some(previous) = index.checked_sub(1) else {
                 jet_process_pipeline_cleanup(std::slice::from_mut(&mut child));
@@ -1883,18 +1933,20 @@ fn jet_process_spec_pipeline(
                     "limited pipeline input has no shared budget",
                 ));
             };
+            let groups = pipeline_groups.clone();
             let limit_hit = pipeline_limit_hit.clone();
             let cancel = pipeline_cancel.clone();
             forwarders.push(std::thread::spawn(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     jet_process_forward_pipeline_output(
-                        stdout, stdin, limit, budget, limit_hit, cancel.clone(),
+                        stdout, stdin, limit, budget, limit_hit, cancel.clone(), groups.clone(),
                     )
                 }));
                 match result {
                     Ok(result) => result,
                     Err(payload) => {
                         cancel.store(true, std::sync::atomic::Ordering::Release);
+                        jet_process_pipeline_stop_groups(&groups);
                         std::panic::resume_unwind(payload);
                     }
                 }
@@ -1910,11 +1962,12 @@ fn jet_process_spec_pipeline(
         .map(|limit| limit.max(0) as usize);
     let output_drain = prev_stdout.take().and_then(|stdout| {
         jet_process_drain_reader(
-            Some(std::io::BufReader::new(stdout)),
+            Some(stdout),
             final_limit,
             stage_budgets.last().cloned().flatten(),
             pipeline_limit_hit.clone(),
             pipeline_cancel.clone(),
+            pipeline_groups.clone(),
         )
     });
     let stderr_drains = children
@@ -1922,11 +1975,12 @@ fn jet_process_spec_pipeline(
         .enumerate()
         .map(|(index, child)| {
             jet_process_drain_reader(
-                child.child.stderr.take().map(std::io::BufReader::new),
+                child.child.stderr.take(),
                 specs[index].output_limit.map(|limit| limit.max(0) as usize),
                 stage_budgets[index].clone(),
                 pipeline_limit_hit.clone(),
                 pipeline_cancel.clone(),
+                pipeline_groups.clone(),
             )
         })
         .collect::<Vec<_>>();
@@ -1937,6 +1991,44 @@ fn jet_process_spec_pipeline(
     let mut resource_limit = None;
     let mut wait_error = None;
     let mut stage_finished = vec![false; children.len()];
+    // With no wall-clock or live resource deadline, blocking wait avoids a
+    // scheduler poll per stage. Output workers still signal every group on
+    // overflow or I/O failure, so a blocked producer cannot strand the wait.
+    #[cfg(unix)]
+    let direct_wait = specs.iter().all(|spec| {
+        spec.timeout_ms.is_none()
+            && spec.memory_limit_bytes.is_none()
+            && spec.open_file_limit.is_none()
+    });
+    #[cfg(not(unix))]
+    let direct_wait = false;
+    if direct_wait {
+        for index in 0..children.len() {
+            let status = match children[index].child.wait() {
+                Ok(status) => status,
+                Err(error) => {
+                    jet_process_pipeline_cleanup(&mut children);
+                    wait_error = Some(jet_std::IOError::other(
+                        jet_std::IOOperation::Close,
+                        Some("pipeline process".to_string()),
+                        error,
+                    ));
+                    break;
+                }
+            };
+            stage_finished[index] = true;
+            if let Some(limit) = jet_process_status_resource_limit(&status, &specs[index]) {
+                jet_process_pipeline_cleanup(&mut children);
+                resource_limit = Some(limit);
+                break;
+            }
+            jet_process_pipeline_child_stop(&mut children[index]);
+            if !status.success() {
+                success = false;
+                code = status.code().unwrap_or(-1) as i64;
+            }
+        }
+    } else {
     'stages: for index in 0..children.len() {
         if stage_finished[index] {
             continue;
@@ -2015,6 +2107,7 @@ fn jet_process_spec_pipeline(
             break 'stages;
         };
     }
+    }
     if pipeline_cancel.load(std::sync::atomic::Ordering::Acquire) {
         jet_process_pipeline_cleanup(&mut children);
     }
@@ -2045,7 +2138,7 @@ fn jet_process_spec_pipeline(
     secret_values.dedup();
     Ok(jet_process_receipt(
         specs.last().expect("nonempty pipeline"),
-        launch_plans.last().and_then(Option::as_ref),
+        None,
         true,
         0,
         code,
@@ -2247,6 +2340,7 @@ fn jet_process_child_wait(
     if let Some(result) = child.wait_result.borrow().clone() {
         return Ok(result);
     }
+    let topology_pid = jet_process_child_id(child);
     let _cleanup = JetProcessWaitCleanup { child };
     // Every piped stream has a worker from spawn onward. Waiting first can
     // deadlock when either pipe fills; independent workers keep stdout and
@@ -2402,17 +2496,33 @@ fn jet_process_child_wait(
     }
     let (output, errors) = jet_process_collect_child_output(child)?;
     if let Some(error) = cleanup_error {
+        jet_process_publish_topology_id(
+            topology_pid,
+            JetDevtoolsTopologyProcessState::Failed,
+        );
         return Err(error);
     }
     if output_limit_hit.load(std::sync::atomic::Ordering::Acquire) {
+        jet_process_publish_topology_id(
+            topology_pid,
+            JetDevtoolsTopologyProcessState::Failed,
+        );
         return Err(jet_std::IOError::ResourceLimit(
             jet_std::ProcessResourceLimit::Output,
         ));
     }
     if let Some(limit) = resource_limit {
+        jet_process_publish_topology_id(
+            topology_pid,
+            JetDevtoolsTopologyProcessState::Failed,
+        );
         return Err(jet_std::IOError::ResourceLimit(limit));
     }
     if let Some(limit) = jet_process_status_resource_limit(&status, &child.audit_spec) {
+        jet_process_publish_topology_id(
+            topology_pid,
+            JetDevtoolsTopologyProcessState::Failed,
+        );
         return Err(jet_std::IOError::ResourceLimit(limit));
     }
     let code = status.code().unwrap_or(-1) as i64;
@@ -2433,6 +2543,14 @@ fn jet_process_child_wait(
         output,
         errors,
         None,
+    );
+    jet_process_publish_topology_id(
+        topology_pid,
+        if timed_out || !status.success() {
+            JetDevtoolsTopologyProcessState::Failed
+        } else {
+            JetDevtoolsTopologyProcessState::Exited
+        },
     );
     *child.wait_result.borrow_mut() = Some(result.clone());
     Ok(result)
@@ -2594,22 +2712,35 @@ fn jet_process_child_signal(
     child: &jet_std::ProcessChild,
     signal: i32,
 ) -> Result<(), jet_std::IOError> {
+    let pid = jet_process_child_id(child);
     if let Some(inner) = child.inner.borrow_mut().as_mut() {
         #[cfg(windows)]
         if signal == jet_process_signal_interrupt() {
-            if let jet_std::ProcessHandle::Native { pid, job, .. } = inner {
+            if let jet_std::ProcessHandle::Native {
+                pid: native_pid,
+                job,
+                ..
+            } = inner {
                 let input = child.stdin.borrow();
                 let input = input.as_ref().and_then(|input| match input {
                     jet_std::ProcessStdin::Terminal(input) => Some(input),
                     jet_std::ProcessStdin::Pipe(_) => None,
                 });
-                return jet_process_pty::interrupt(*pid, job, input).map_err(|error| {
+                let result =
+                    jet_process_pty::interrupt(*native_pid, job, input).map_err(|error| {
                     jet_std::IOError::other(
                         jet_std::IOOperation::Close,
                         Some("process".to_string()),
                         error,
                     )
                 });
+                if result.is_ok() {
+                    jet_process_publish_topology_id(
+                        pid,
+                        JetDevtoolsTopologyProcessState::Stopping,
+                    );
+                }
+                return result;
             }
         }
         jet_process_tree_signal(inner, child.terminal.is_ok() || child.process_group, signal)
@@ -2621,6 +2752,7 @@ fn jet_process_child_signal(
                 )
             })?;
     }
+    jet_process_publish_topology_id(pid, JetDevtoolsTopologyProcessState::Stopping);
     Ok(())
 }
 
@@ -2667,6 +2799,20 @@ fn jet_process_reap_unfinished(child: &jet_std::ProcessChild) -> Result<(), jet_
         Ok(())
     }
 }
+/// Close a shared ProcessChild carrier by terminating/reaping any unfinished
+/// native child, then make every clone observe the inert state.
+///
+/// The MIR evaluator keeps one resident clone in its handle registry. Clearing
+/// the shared native slots is therefore the close operation; the registry slot
+/// itself remains until the surrounding interpreter scope is torn down.
+fn jet_process_child_close(child: &jet_std::ProcessChild) {
+    if let Err(error) = jet_process_reap_unfinished(child) {
+        jet_process_record_cleanup_error(child, error);
+    }
+    child.inner.borrow_mut().take();
+    *child.stdin.borrow_mut() = None;
+}
+
 
 struct JetProcessWaitCleanup<'a> {
     child: &'a jet_std::ProcessChild,
@@ -2714,6 +2860,15 @@ fn jet_process_stdin_error(error: std::io::Error) -> jet_std::IOError {
             error,
         )
     }
+}
+
+// Closing the sole option drops ChildStdin (or the terminal input file), which
+// closes the native descriptor and sends EOF. `take` makes repeated close calls
+// harmless while guaranteeing that the owned writer is dropped exactly once.
+fn jet_process_stdin_close(
+    handle: &std::rc::Rc<std::cell::RefCell<Option<jet_std::ProcessStdin>>>,
+) {
+    let _ = handle.borrow_mut().take();
 }
 
 // `child.stdin` is a writer handle (`.write(text)`); `child.stdout`/

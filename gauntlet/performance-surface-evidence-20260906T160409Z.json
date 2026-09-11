@@ -1,0 +1,92 @@
+{
+  "schema": "jet.gauntlet.performance-surface-evidence.v1",
+  "version": 1,
+  "generated_command": "JET_TEST_SCRATCH_DIR=$HOME/.cache/jet-luna/perf-surface-pair TMPDIR=$HOME/.cache/jet-luna/perf-surface-pair JET_BUILD_LINE=\"Finished `dev` profile [unoptimized + debuginfo] target(s) in 3m 49s\" scripts/agent/jet-env node ~/.cache/jet-luna/perf-surface-pair/measure-performance-surface.mjs",
+  "generated_at": "2026-09-06T16:04:09.244Z",
+  "target": "jet run --interpret",
+  "artifact": "target/debug/jet",
+  "artifact_sha256": "8db541eed32a2b8c93860f3a3bcf6ddd4a98eb91e1c6b162a8ded82f77fbfe8b",
+  "artifact_md5": "e731d4467544cab3c7ff98c825150f46",
+  "build_line": "Finished `dev` profile [unoptimized + debuginfo] target(s) in 3m 49s",
+  "artifact_mtime_ms": 1788710503983.8928,
+  "provenance_status": "inconclusive across three unrelated clean binaries; this workload is noise-dominated and does not prove a surface benefit",
+  "historical_receipts": [
+    "gauntlet/performance-surface-evidence-20260906T154128Z.json",
+    "gauntlet/performance-surface-evidence-20260906T155749Z.json"
+  ],
+  "host": {
+    "hostname": "halcyon",
+    "platform": "linux",
+    "release": "7.0.11-cachyos",
+    "arch": "x64",
+    "cpu_count": 32
+  },
+  "input": {
+    "iterations": 100000,
+    "range": "0..<100000",
+    "expected_sum": 4999950000
+  },
+  "setup": "fresh interpreter process and fresh main.jet per warmup/trial; no generated artifact",
+  "warmups": 3,
+  "trials": 9,
+  "metric": "wall_time_ms",
+  "output_oracle": "stdout must exactly equal expected_output; both spellings run the same integer reduction",
+  "pairs": [
+    {
+      "id": "compound_assign_vs_binary_assign",
+      "canonical": "compound assignment",
+      "alternate": "binary expression followed by assignment",
+      "workload": "100000-element integer reduction with identical final stdout",
+      "artifact": "target/debug/jet",
+      "artifact_sha256": "8db541eed32a2b8c93860f3a3bcf6ddd4a98eb91e1c6b162a8ded82f77fbfe8b",
+      "artifact_md5": "e731d4467544cab3c7ff98c825150f46",
+      "build_line": "Finished `dev` profile [unoptimized + debuginfo] target(s) in 3m 49s",
+      "surface_program": "gauntlet:performance-surface:compound_assign_vs_binary_assign:surface",
+      "plain_program": "gauntlet:performance-surface:compound_assign_vs_binary_assign:plain",
+      "surface_source": "// Real paired workload: compound_assign_vs_binary_assign surface spelling\nfn run() {\n    total := 0\n    loop i in 0..<100000 {\n        total += i\n    }\n    print(\"performance-surface:compound_assign_vs_binary_assign:{total}\")\n}",
+      "plain_source": "// Real paired workload: compound_assign_vs_binary_assign plain spelling\nfn run() {\n    total := 0\n    loop i in 0..<100000 {\n        total = total + i\n    }\n    print(\"performance-surface:compound_assign_vs_binary_assign:{total}\")\n}",
+      "expected_output": "performance-surface:compound_assign_vs_binary_assign:4999950000",
+      "timing_status": "measured",
+      "verdict": "inconclusive",
+      "verdict_reason": "Measurements across three unrelated clean binaries straddle 1.00; this workload is noise-dominated and does not prove a surface benefit.",
+      "surface_output_matches": true,
+      "plain_output_matches": true,
+      "surface_warmup_ms": [
+        2241.672,
+        2311.721,
+        2231.25
+      ],
+      "plain_warmup_ms": [
+        2223.297,
+        2229.109,
+        7248.61
+      ],
+      "surface_trials_ms": [
+        2747.927,
+        2797.9,
+        2208.975,
+        2181.694,
+        2179.822,
+        2185.474,
+        2223.98,
+        2251.189,
+        2249.756
+      ],
+      "plain_trials_ms": [
+        2238.361,
+        2219.671,
+        2211.889,
+        2231.231,
+        2269.555,
+        2229.577,
+        2196.067,
+        2208.909,
+        2243.78
+      ],
+      "surface_wall_time_ms": 2223.98,
+      "plain_wall_time_ms": 2229.577,
+      "ratio": 0.9974896583522345,
+      "timing_references": []
+    }
+  ]
+}

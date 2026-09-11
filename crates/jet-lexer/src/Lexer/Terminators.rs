@@ -41,6 +41,7 @@ fn ends_statement(kind: &TokKind) -> bool {
     matches!(
         kind,
         TokKind::Ident(_)
+            | TokKind::RawStr(_)
             | TokKind::Str(_)
             | TokKind::Int(..)
             | TokKind::Float(..)

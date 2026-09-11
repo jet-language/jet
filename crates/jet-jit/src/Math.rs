@@ -23,7 +23,9 @@ mod string_concat_semantics {
     include!("../../jet-codegen/src/Prelude/Core/StringConcat.rs");
 }
 
-mod simd_lanes {
+/// One resident copy of the fixed-lane kernel; `Compute`'s parallel kernel
+/// include reaches its scalar trait here instead of compiling a third copy.
+pub(crate) mod simd_lanes {
     include!("../../jet-codegen/src/Prelude/Core/SimdLanes.rs");
 }
 
@@ -1374,6 +1376,307 @@ fn jet_jit_str_concat(a: i64, b: i64) -> i64 {
     alloc_string(string_concat_semantics::jet_string_concat(&left, &right))
 }
 
+#[derive(Clone, Copy)]
+struct JitGeometryTransform {
+    matrix: [f64; 6],
+    from_frame: i64,
+    to_frame: i64,
+}
+
+fn geometry_coord(rt: &crate::runtime_host::JitRuntime, handle: i64) -> Option<(f64, f64, i64)> {
+    Some((
+        rt.heap.record_get_float(handle, 0)?,
+        rt.heap.record_get_float(handle, 1)?,
+        rt.heap.record_get_int(handle, 2)?,
+    ))
+}
+
+fn geometry_transform(
+    rt: &crate::runtime_host::JitRuntime,
+    handle: i64,
+) -> Option<JitGeometryTransform> {
+    Some(JitGeometryTransform {
+        matrix: [
+            rt.heap.record_get_float(handle, 0)?,
+            rt.heap.record_get_float(handle, 1)?,
+            rt.heap.record_get_float(handle, 2)?,
+            rt.heap.record_get_float(handle, 3)?,
+            rt.heap.record_get_float(handle, 4)?,
+            rt.heap.record_get_float(handle, 5)?,
+        ],
+        from_frame: rt.heap.record_get_int(handle, 6)?,
+        to_frame: rt.heap.record_get_int(handle, 7)?,
+    })
+}
+
+fn geometry_coord_record(rt: &mut crate::runtime_host::JitRuntime, x: f64, y: f64, frame: i64) -> i64 {
+    let record = rt.heap.alloc_record(3);
+    let _ = rt.heap.record_set_float(record, 0, x);
+    let _ = rt.heap.record_set_float(record, 1, y);
+    let _ = rt.heap.record_set_int(record, 2, frame);
+    record
+}
+
+fn geometry_transform_record(
+    rt: &mut crate::runtime_host::JitRuntime,
+    matrix: [f64; 6],
+    from_frame: i64,
+    to_frame: i64,
+) -> i64 {
+    let record = rt.heap.alloc_record(8);
+    for (index, value) in matrix.into_iter().enumerate() {
+        let _ = rt.heap.record_set_float(record, index as i64, value);
+    }
+    let _ = rt.heap.record_set_int(record, 6, from_frame);
+    let _ = rt.heap.record_set_int(record, 7, to_frame);
+    record
+}
+
+fn geometry_ray_record(
+    rt: &mut crate::runtime_host::JitRuntime,
+    origin: i64,
+    direction: i64,
+) -> i64 {
+    let record = rt.heap.alloc_record(2);
+    let _ = rt.heap.record_set_record(record, 0, origin);
+    let _ = rt.heap.record_set_record(record, 1, direction);
+    record
+}
+
+fn geometry_error_result(rt: &mut crate::runtime_host::JitRuntime, message: &'static str) -> i64 {
+    rt.errors
+        .push(jet_foundation::Outcome::jet_err_from_message(message.to_string()));
+    let error_handle = rt.errors.len() as u64;
+    crate::runtime_host::alloc_jit_result(rt, false, error_handle)
+}
+
+fn geometry_ok_result(rt: &mut crate::runtime_host::JitRuntime, value: i64) -> i64 {
+    crate::runtime_host::alloc_jit_result(rt, true, value as u64)
+}
+
+fn jet_jit_geometry_coord_new(x: f64, y: f64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| geometry_coord_record(rt, x, y, 0))
+}
+fn jet_jit_geometry_coord_new_frame(x: f64, y: f64, frame: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| geometry_coord_record(rt, x, y, frame))
+}
+
+fn jet_jit_geometry_coord_checked_op(a: i64, b: i64, subtract: bool) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some((ax, ay, a_frame)) = geometry_coord(rt, a) else {
+            rt.set_host_fault("coordinate add received an invalid left carrier");
+            return 0;
+        };
+        let Some((bx, by, b_frame)) = geometry_coord(rt, b) else {
+            rt.set_host_fault("coordinate add received an invalid right carrier");
+            return 0;
+        };
+        if a_frame != 0 && b_frame != 0 && a_frame != b_frame {
+            return geometry_error_result(rt, "coordinate values belong to different frames");
+        }
+        let frame = if a_frame != 0 { a_frame } else { b_frame };
+        let record = geometry_coord_record(
+            rt,
+            if subtract { ax - bx } else { ax + bx },
+            if subtract { ay - by } else { ay + by },
+            frame,
+        );
+        geometry_ok_result(rt, record)
+    })
+}
+
+fn jet_jit_geometry_coord_plain_op(a: i64, b: i64, subtract: bool) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some((ax, ay, frame)) = geometry_coord(rt, a) else {
+            rt.set_host_fault("coordinate add received an invalid left carrier");
+            return 0;
+        };
+        let Some((bx, by, _)) = geometry_coord(rt, b) else {
+            rt.set_host_fault("coordinate add received an invalid right carrier");
+            return 0;
+        };
+        geometry_coord_record(
+            rt,
+            if subtract { ax - bx } else { ax + bx },
+            if subtract { ay - by } else { ay + by },
+            frame,
+        )
+    })
+}
+
+fn jet_jit_geometry_coord_add(a: i64, b: i64) -> i64 {
+    jet_jit_geometry_coord_checked_op(a, b, false)
+}
+
+fn jet_jit_geometry_coord_sub(a: i64, b: i64) -> i64 {
+    jet_jit_geometry_coord_checked_op(a, b, true)
+}
+
+fn jet_jit_geometry_coord_plain_add(a: i64, b: i64) -> i64 {
+    jet_jit_geometry_coord_plain_op(a, b, false)
+}
+
+fn jet_jit_geometry_coord_plain_sub(a: i64, b: i64) -> i64 {
+    jet_jit_geometry_coord_plain_op(a, b, true)
+}
+
+fn jet_jit_geometry_transform_new(
+    m00: f64,
+    m01: f64,
+    m10: f64,
+    m11: f64,
+    tx: f64,
+    ty: f64,
+    from_frame: i64,
+    to_frame: i64,
+) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        geometry_transform_record(rt, [m00, m01, m10, m11, tx, ty], from_frame, to_frame)
+    })
+}
+
+fn jet_jit_geometry_transform_then(first: i64, next: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(first) = geometry_transform(rt, first) else {
+            rt.set_host_fault("transform composition received an invalid left carrier");
+            return 0;
+        };
+        let Some(next) = geometry_transform(rt, next) else {
+            rt.set_host_fault("transform composition received an invalid right carrier");
+            return 0;
+        };
+        if first.to_frame != 0
+            && next.from_frame != 0
+            && first.to_frame != next.from_frame
+        {
+            return geometry_error_result(rt, "transform composition has mismatched frame identity");
+        }
+        let a = first.matrix;
+        let b = next.matrix;
+        let matrix = [
+            b[0] * a[0] + b[1] * a[2],
+            b[0] * a[1] + b[1] * a[3],
+            b[2] * a[0] + b[3] * a[2],
+            b[2] * a[1] + b[3] * a[3],
+            b[0] * a[4] + b[1] * a[5] + b[4],
+            b[2] * a[4] + b[3] * a[5] + b[5],
+        ];
+        let record = geometry_transform_record(rt, matrix, first.from_frame, next.to_frame);
+        geometry_ok_result(rt, record)
+    })
+}
+
+fn jet_jit_geometry_transform_inverse(transform: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(transform) = geometry_transform(rt, transform) else {
+            rt.set_host_fault("transform inverse received an invalid carrier");
+            return 0;
+        };
+        let m = transform.matrix;
+        let det = m[0] * m[3] - m[1] * m[2];
+        if !det.is_finite() || det.abs() <= f64::EPSILON {
+            return geometry_error_result(rt, "transform is singular and has no inverse");
+        }
+        let inv_det = 1.0 / det;
+        let matrix = [
+            m[3] * inv_det,
+            -m[1] * inv_det,
+            -m[2] * inv_det,
+            m[0] * inv_det,
+            (m[1] * m[5] - m[3] * m[4]) * inv_det,
+            (m[2] * m[4] - m[0] * m[5]) * inv_det,
+        ];
+        let record = geometry_transform_record(
+            rt,
+            matrix,
+            transform.to_frame,
+            transform.from_frame,
+        );
+        geometry_ok_result(rt, record)
+    })
+}
+
+fn jet_jit_geometry_transform_point(transform: i64, point: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(transform) = geometry_transform(rt, transform) else {
+            rt.set_host_fault("transform point received an invalid transform carrier");
+            return 0;
+        };
+        let Some((x, y, frame)) = geometry_coord(rt, point) else {
+            rt.set_host_fault("transform point received an invalid point carrier");
+            return 0;
+        };
+        if frame != 0 && frame != transform.from_frame {
+            return geometry_error_result(rt, "coordinate point belongs to a stale frame");
+        }
+        let m = transform.matrix;
+        let record = geometry_coord_record(
+            rt,
+            m[0] * x + m[1] * y + m[4],
+            m[2] * x + m[3] * y + m[5],
+            transform.to_frame,
+        );
+        geometry_ok_result(rt, record)
+    })
+}
+
+fn jet_jit_geometry_transform_point_at_depth(transform: i64, point: i64, depth: f64) -> i64 {
+    if !depth.is_finite() {
+        return Concurrency::with_runtime_mut(|rt| {
+            geometry_error_result(rt, "perspective depth must be finite")
+        });
+    }
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(transform) = geometry_transform(rt, transform) else {
+            rt.set_host_fault("transform point received an invalid transform carrier");
+            return 0;
+        };
+        let Some((x, y, frame)) = geometry_coord(rt, point) else {
+            rt.set_host_fault("transform point received an invalid point carrier");
+            return 0;
+        };
+        if frame != 0 && frame != transform.from_frame {
+            return geometry_error_result(rt, "coordinate point belongs to a stale frame");
+        }
+        let m = transform.matrix;
+        let origin_x = m[0] * x + m[1] * y + m[4];
+        let origin_y = m[2] * x + m[3] * y + m[5];
+        let record = geometry_coord_record(
+            rt,
+            origin_x + m[0] * depth,
+            origin_y + m[2] * depth,
+            transform.to_frame,
+        );
+        geometry_ok_result(rt, record)
+    })
+}
+
+fn jet_jit_geometry_transform_ray(transform: i64, point: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(transform) = geometry_transform(rt, transform) else {
+            rt.set_host_fault("transform ray received an invalid transform carrier");
+            return 0;
+        };
+        let Some((x, y, frame)) = geometry_coord(rt, point) else {
+            rt.set_host_fault("transform ray received an invalid point carrier");
+            return 0;
+        };
+        if frame != 0 && frame != transform.from_frame {
+            return geometry_error_result(rt, "coordinate point belongs to a stale frame");
+        }
+        let m = transform.matrix;
+        let origin = geometry_coord_record(
+            rt,
+            m[0] * x + m[1] * y + m[4],
+            m[2] * x + m[3] * y + m[5],
+            transform.to_frame,
+        );
+        let direction = geometry_coord_record(rt, m[0], m[2], transform.to_frame);
+        let ray = geometry_ray_record(rt, origin, direction);
+        geometry_ok_result(rt, ray)
+    })
+}
+
 pub(crate) fn clear_math_values() {
     MATH_VALUES.with(|slot| slot.borrow_mut().clear());
 }
@@ -1395,6 +1698,27 @@ host_fns! {
         let mut sig_i64_f64 = Signature::new(cc);
         sig_i64_f64.params.push(AbiParam::new(types::I64));
         sig_i64_f64.returns.push(AbiParam::new(types::F64));
+        let mut sig_float_binary = Signature::new(cc);
+        sig_float_binary.params.push(AbiParam::new(types::F64));
+        sig_float_binary.params.push(AbiParam::new(types::F64));
+        sig_float_binary.returns.push(AbiParam::new(types::I64));
+        let mut sig_float_float_int = Signature::new(cc);
+        sig_float_float_int.params.push(AbiParam::new(types::F64));
+        sig_float_float_int.params.push(AbiParam::new(types::F64));
+        sig_float_float_int.params.push(AbiParam::new(types::I64));
+        sig_float_float_int.returns.push(AbiParam::new(types::I64));
+        let mut sig_transform_new = Signature::new(cc);
+        for _ in 0..6 {
+            sig_transform_new.params.push(AbiParam::new(types::F64));
+        }
+        sig_transform_new.params.push(AbiParam::new(types::I64));
+        sig_transform_new.params.push(AbiParam::new(types::I64));
+        sig_transform_new.returns.push(AbiParam::new(types::I64));
+        let mut sig_handle_handle_float = Signature::new(cc);
+        sig_handle_handle_float.params.push(AbiParam::new(types::I64));
+        sig_handle_handle_float.params.push(AbiParam::new(types::I64));
+        sig_handle_handle_float.params.push(AbiParam::new(types::F64));
+        sig_handle_handle_float.returns.push(AbiParam::new(types::I64));
         let mut sig_unary = Signature::new(cc);
         sig_unary.params.push(AbiParam::new(types::I64));
         sig_unary.returns.push(AbiParam::new(types::I64));
@@ -1404,7 +1728,6 @@ host_fns! {
         sig_binary.returns.push(AbiParam::new(types::I64));
         let mut sig_ternary = sig_binary.clone();
         sig_ternary.params.push(AbiParam::new(types::I64));
-
     }
     call: "jet_jit_math_call" => jet_jit_math_call: sig_call;
     binary: "jet_jit_math_binary" => jet_jit_math_binary: sig_call;
@@ -1414,21 +1737,74 @@ host_fns! {
     length: "jet_jit_math_length" => jet_jit_math_length: sig_unary;
     result_is_float: "jet_jit_math_result_is_float" => jet_jit_math_result_is_float: sig_i64_i8;
     result_float: "jet_jit_math_result_float" => jet_jit_math_result_float: sig_i64_f64;
+    geometry_screen_point_new: "jet_math_ScreenPoint_new" => jet_jit_geometry_coord_new: sig_float_binary;
+    geometry_world_point_new: "jet_math_WorldPoint_new" => jet_jit_geometry_coord_new: sig_float_binary;
+    geometry_view_point_new: "jet_math_ViewPoint_new" => jet_jit_geometry_coord_new: sig_float_binary;
+    geometry_camera_point_new: "jet_math_CameraPoint_new" => jet_jit_geometry_coord_new: sig_float_binary;
+    geometry_device_point_new: "jet_math_DevicePoint_new" => jet_jit_geometry_coord_new: sig_float_binary;
+    geometry_screen_delta_new: "jet_math_ScreenDelta_new" => jet_jit_geometry_coord_new: sig_float_binary;
+    geometry_world_delta_new: "jet_math_WorldDelta_new" => jet_jit_geometry_coord_new: sig_float_binary;
+    geometry_view_delta_new: "jet_math_ViewDelta_new" => jet_jit_geometry_coord_new: sig_float_binary;
+    geometry_camera_delta_new: "jet_math_CameraDelta_new" => jet_jit_geometry_coord_new: sig_float_binary;
+    geometry_device_delta_new: "jet_math_DeviceDelta_new" => jet_jit_geometry_coord_new: sig_float_binary;
+    geometry_point2_new: "jet_math_Point2_new" => jet_jit_geometry_coord_new_frame: sig_float_float_int;
+    geometry_delta2_new: "jet_math_Delta2_new" => jet_jit_geometry_coord_new_frame: sig_float_float_int;
+    geometry_screen_point_add: "jet_math_ScreenPoint_add" => jet_jit_geometry_coord_plain_add: sig_binary;
+    geometry_screen_point_sub: "jet_math_ScreenPoint_sub" => jet_jit_geometry_coord_plain_sub: sig_binary;
+    geometry_world_point_add: "jet_math_WorldPoint_add" => jet_jit_geometry_coord_plain_add: sig_binary;
+    geometry_world_point_sub: "jet_math_WorldPoint_sub" => jet_jit_geometry_coord_plain_sub: sig_binary;
+    geometry_view_point_add: "jet_math_ViewPoint_add" => jet_jit_geometry_coord_plain_add: sig_binary;
+    geometry_view_point_sub: "jet_math_ViewPoint_sub" => jet_jit_geometry_coord_plain_sub: sig_binary;
+    geometry_camera_point_add: "jet_math_CameraPoint_add" => jet_jit_geometry_coord_plain_add: sig_binary;
+    geometry_camera_point_sub: "jet_math_CameraPoint_sub" => jet_jit_geometry_coord_plain_sub: sig_binary;
+    geometry_device_point_add: "jet_math_DevicePoint_add" => jet_jit_geometry_coord_plain_add: sig_binary;
+    geometry_device_point_sub: "jet_math_DevicePoint_sub" => jet_jit_geometry_coord_plain_sub: sig_binary;
+    geometry_screen_delta_add: "jet_math_ScreenDelta_add" => jet_jit_geometry_coord_plain_add: sig_binary;
+    geometry_screen_delta_sub: "jet_math_ScreenDelta_sub" => jet_jit_geometry_coord_plain_sub: sig_binary;
+    geometry_world_delta_add: "jet_math_WorldDelta_add" => jet_jit_geometry_coord_plain_add: sig_binary;
+    geometry_world_delta_sub: "jet_math_WorldDelta_sub" => jet_jit_geometry_coord_plain_sub: sig_binary;
+    geometry_view_delta_add: "jet_math_ViewDelta_add" => jet_jit_geometry_coord_plain_add: sig_binary;
+    geometry_view_delta_sub: "jet_math_ViewDelta_sub" => jet_jit_geometry_coord_plain_sub: sig_binary;
+    geometry_camera_delta_add: "jet_math_CameraDelta_add" => jet_jit_geometry_coord_plain_add: sig_binary;
+    geometry_camera_delta_sub: "jet_math_CameraDelta_sub" => jet_jit_geometry_coord_plain_sub: sig_binary;
+    geometry_device_delta_add: "jet_math_DeviceDelta_add" => jet_jit_geometry_coord_plain_add: sig_binary;
+    geometry_device_delta_sub: "jet_math_DeviceDelta_sub" => jet_jit_geometry_coord_plain_sub: sig_binary;
+    geometry_point2_add: "jet_math_Point2_add" => jet_jit_geometry_coord_add: sig_binary;
+    geometry_point2_sub: "jet_math_Point2_sub" => jet_jit_geometry_coord_sub: sig_binary;
+    geometry_delta2_add: "jet_math_Delta2_add" => jet_jit_geometry_coord_add: sig_binary;
+    geometry_delta2_sub: "jet_math_Delta2_sub" => jet_jit_geometry_coord_sub: sig_binary;
+    geometry_transform_affine: "jet_math_Transform_affine" => jet_jit_geometry_transform_new: sig_transform_new;
+    geometry_transform2_affine: "jet_math_Transform2_affine" => jet_jit_geometry_transform_new: sig_transform_new;
+    geometry_transform_then: "jet_math_Transform_then" => jet_jit_geometry_transform_then: sig_binary;
+    geometry_transform2_then: "jet_math_Transform2_then" => jet_jit_geometry_transform_then: sig_binary;
+    geometry_transform_inverse: "jet_math_Transform_inverse" => jet_jit_geometry_transform_inverse: sig_unary;
+    geometry_transform2_inverse: "jet_math_Transform2_inverse" => jet_jit_geometry_transform_inverse: sig_unary;
+    geometry_transform_point: "jet_math_Transform_point" => jet_jit_geometry_transform_point: sig_binary;
+    geometry_transform2_point: "jet_math_Transform2_point" => jet_jit_geometry_transform_point: sig_binary;
+    geometry_transform_point_at_depth: "jet_math_Transform_point_at_depth" => jet_jit_geometry_transform_point_at_depth: sig_handle_handle_float;
+    geometry_transform2_point_at_depth: "jet_math_Transform2_point_at_depth" => jet_jit_geometry_transform_point_at_depth: sig_handle_handle_float;
+    geometry_transform_ray: "jet_math_Transform_ray" => jet_jit_geometry_transform_ray: sig_binary;
+    geometry_transform2_ray: "jet_math_Transform2_ray" => jet_jit_geometry_transform_ray: sig_binary;
     result_int: "jet_jit_math_result_int" => jet_jit_math_result_int: sig_unary;
     result_handle: "jet_jit_math_result_handle" => jet_jit_math_result_handle: sig_unary;
     html_escape: "jet_jit_html_escape" => jet_jit_html_escape: sig_unary;
     str_concat: "jet_jit_str_concat" => jet_jit_str_concat: sig_binary;
     typed_sql_raw: "jet_jit_typed_sql_raw" => jet_jit_typed_sql_raw: sig_unary;
     typed_sql_interp: "jet_jit_typed_sql_interpolate" => jet_jit_typed_sql_interpolate: sig_binary;
+    typed_sql_interp_canonical: "jet_typed_sql_interpolate" => jet_jit_typed_sql_interpolate: sig_binary;
     typed_sql_template: "jet_jit_typed_sql_template" => jet_jit_typed_sql_template: sig_unary;
     typed_sql_params: "jet_jit_typed_sql_params" => jet_jit_typed_sql_params: sig_unary;
     typed_sh_raw: "jet_jit_typed_sh_raw" => jet_jit_typed_sh_raw: sig_unary;
     typed_sh_interp: "jet_jit_typed_sh_interpolate" => jet_jit_typed_sh_interpolate: sig_binary;
+    typed_sh_interp_canonical: "jet_typed_sh_interpolate" => jet_jit_typed_sh_interpolate: sig_binary;
     typed_html_raw: "jet_jit_typed_html_raw" => jet_jit_typed_html_raw: sig_unary;
     typed_html_text: "jet_jit_typed_html_text" => jet_jit_typed_html_text: sig_unary;
     typed_html_interp: "jet_jit_typed_html_interpolate" => jet_jit_typed_html_interpolate: sig_ternary;
+    typed_html_interp_canonical: "jet_typed_html_interpolate" => jet_jit_typed_html_interpolate: sig_ternary;
     typed_path_interp: "jet_jit_typed_path_interpolate" => jet_jit_typed_path_interpolate: sig_binary;
+    typed_path_interp_canonical: "jet_typed_path_literal" => jet_jit_typed_path_interpolate: sig_binary;
     typed_datetime_interp: "jet_jit_typed_datetime_interpolate" => jet_jit_typed_datetime_interpolate: sig_binary;
+    typed_datetime_interp_canonical: "jet_typed_datetime_literal" => jet_jit_typed_datetime_interpolate: sig_binary;
 }
 
 #[cfg(test)]

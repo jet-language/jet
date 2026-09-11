@@ -93,6 +93,10 @@ pub(super) fn source_repo(
         };
         return Ok(path);
     }
+    if upstream == crate::Batteries::UPSTREAM {
+        return crate::Batteries::materialize_package(ctx.store_dir, want_package)
+            .map_err(ProviderError::CoreBuild);
+    }
 
     let remote = parse_remote_source(upstream)?;
     fetch_remote_repo_indexed(&remote, want_package, ctx)

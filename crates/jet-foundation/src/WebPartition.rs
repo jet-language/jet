@@ -178,15 +178,15 @@ mod tests {
         assert_eq!(partition_key(None, None, "run"), "run");
         assert_eq!(
             partition_key(Some("left"), None, "helper"),
-            "__jet_left__helper"
+            "__jet_left_dhelper"
         );
         assert_eq!(
             partition_key(None, Some("math"), "double"),
-            "__jet_math__double"
+            "__jet_math_ddouble"
         );
         assert_eq!(
             partition_key(Some("left"), Some("inner"), "helper"),
-            "__jet_inner__helper"
+            "__jet_inner_dhelper"
         );
     }
 }

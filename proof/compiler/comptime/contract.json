@@ -1,0 +1,1043 @@
+{
+  "schema": "jet.comptime-contract.v1",
+  "schema_version": 1,
+  "contract_id": "jet-comptime-contract-v1",
+  "stage": "comptime",
+  "owner": "#2938",
+  "policy": {
+    "decision_id": "D-COMPILER-PROOF1",
+    "outcome": "A",
+    "status": "ratified",
+    "scope": "every Jet-controlled compile-time evaluation and build-cache boundary before 1.0",
+    "foreign_suffix": "foreign compiler tools, foreign libraries, operating systems, networks, and external services remain explicit assumptions"
+  },
+  "claim": {
+    "kind": "conditional-comptime-preservation",
+    "statement": "For an identified accepted Jet source and stated resource and foreign assumptions, the compile-time evaluator preserves the shared value, failure, mutation, input, effect, cleanup, and schedule observations allowed by the canonical source semantics; finite evidence remains bounded and cannot prove every accepted program.",
+    "preconditions": [
+      "The source bytes, imported module closure, checked body semantic hash, build facts, and dependency interfaces are identified.",
+      "The source is accepted by the published parser, sema, purity, generic-module, and build-time I/O rules.",
+      "The canonical MIR evaluator receives the checked types, Core registry route, globals, mutable bindings, gates, and finite fuel budget.",
+      "Target dossier, profile, effect policy, layout, compiler ABI/schema, evaluator artifact, toolchain, and configuration are identity-bound.",
+      "Foreign Core adapters, operating-system behavior, external resources, and build tools satisfy their named contracts.",
+      "A failed, cancelled, exhausted, unsupported, unknown, stale, or unavailable evaluation is retained as blocking evidence and never as a valid cache result."
+    ],
+    "observation_alphabet": [
+      "result",
+      "typed_failure",
+      "mutation",
+      "input_consumption",
+      "ordered_effects",
+      "cleanup",
+      "resource_premises",
+      "schedule",
+      "allowed_schedules"
+    ],
+    "permitted_resource_failures": [
+      "ResourceExhausted",
+      "InputUnavailable",
+      "Cancelled"
+    ],
+    "trusted_components": [
+      "ratified Jet comptime, generic-module, Core, Prelude, cache, and diagnostic specifications",
+      "the canonical jet-comptime MIR evaluator and its checked source inputs",
+      "the canonical sema/Facts/TIR cache and dependency identity carriers",
+      "the pinned identity claim from jet.compiler-proof.v1",
+      "named foreign compiler, runtime, operating-system, filesystem, network, and service contracts"
+    ],
+    "unsupported_cases": [
+      "an unlisted AST, TIR, MIR, Core receiver, generic value, template, or build-time operation",
+      "a missing or unknown Core registry route or a route without an executable interpreter projection",
+      "purity, fuel, panic, overflow, divide-by-zero, path, network, vault, or other registered rejection not observed through its diagnostic",
+      "unbounded scheduling, concurrency, progress, resource, FFI, ABI/layout, browser, or external-service claims",
+      "a changed source, imported fact, dependency interface, evaluator artifact, compiler configuration, target, checker, witness, or proof identity"
+    ]
+  },
+  "evaluator": {
+    "model": {
+      "id": "jet-comptime-evaluator-state-model-v1",
+      "state": [
+        "CtValue or CtReport outcome",
+        "typed globals and active scope",
+        "mutable receiver and binding updates",
+        "Core imports and registry route",
+        "purity/effect gates and impure depth",
+        "literal build inputs and their SHA-256 records",
+        "finite fuel and interruption state",
+        "checked structs, methods, conversions, and generic facts",
+        "ordered effect and cleanup observations"
+      ],
+      "transitions": [
+        "evaluate a closed expression through the installed canonical MIR evaluator",
+        "evaluate a statement block while retaining scope and receiver mutations",
+        "route user and Core calls through the checked registry and shared Prelude operation",
+        "carry Present, clean absence, and told failure through one outcome carrier",
+        "record sanctioned literal build inputs before publishing semantic cache facts",
+        "stop on purity, unsupported, resource, panic, fuel, or cancellation obligations",
+        "normalize generic module values only after finite closed evaluation",
+        "publish only a completed identity-bound result"
+      ],
+      "failure_codes": [
+        "E0952",
+        "E0953",
+        "E0955",
+        "E0956",
+        "E0957",
+        "E0958",
+        "E0959",
+        "E1265",
+        "E3401",
+        "E3413",
+        "E3414"
+      ]
+    },
+    "implementation": {
+      "id": "jet-comptime-canonical-mir-v1",
+      "crate": "crates/jet-comptime",
+      "entrypoints": [
+        "evaluate_with_imports_opts",
+        "evaluate_owned_with_imports_opts",
+        "evaluate_with_imports_opts_collecting",
+        "run_build_entry_with_policy",
+        "MirBridge::eval_expr",
+        "MirBridge::eval_block",
+        "MirBridge::mir_to_ct_value"
+      ],
+      "canonical_seam": "crates/jet-comptime/src/Comptime/MirBridge.rs",
+      "fuel_budgets": {
+        "binding": 10000000,
+        "dev": 1000000000,
+        "repl": 10000000
+      },
+      "no_second_engine": true
+    },
+    "resource_premises": [
+      "fuel is finite and exhaustion is E0952/E2202 rather than successful completion",
+      "literal embed/find/fetch inputs are project-relative, hashed, and retained as ComptimeInput facts",
+      "foreign host/effect calls require their checked gate and named adapter",
+      "allocation, stack, target layout, and external resource failures stay explicit"
+    ]
+  },
+  "cache": {
+    "key_schema": "jet.comptime-cache-key.v1",
+    "required_inputs": [
+      "source_bytes_sha256",
+      "imported_module_closure_sha256",
+      "checked_body_semantic_hash",
+      "compiler_abi_schema",
+      "target_dossier",
+      "profile",
+      "effects",
+      "layout",
+      "dependency_interfaces",
+      "build_facts",
+      "evaluator_artifact_identity",
+      "configuration",
+      "policy",
+      "toolchain"
+    ],
+    "invalidation_events": [
+      "source_dependency_changed",
+      "imported_fact_changed",
+      "compiler_abi_changed",
+      "target_profile_effect_changed",
+      "evaluator_artifact_changed",
+      "configuration_changed",
+      "interrupted_before_publish",
+      "failed_without_outputs"
+    ],
+    "publication_rules": [
+      "FrontEndCompletion::authorize_cache_lookup must succeed before any cache lookup",
+      "the action key includes source, imports, checked body, compiler ABI, target, profile, effects, layout, facts, evaluator, configuration, policy, and toolchain",
+      "a changed identity is a miss and cannot reuse a prior compile-time result",
+      "cancellation is checked under the remote commit lock before validation and before atomic publication",
+      "a cancelled or incomplete evaluation cannot publish a valid cache entry",
+      "a failed cached action retains a structured failure report and no declared outputs"
+    ],
+    "lookup_gate": "FrontEndCompletion::authorize_cache_lookup",
+    "action_key": "canonical_effective_action_key"
+  },
+  "execution": {
+    "schema": "jet.comptime-witness-mapping.v1",
+    "runner": "scripts/agent/jet-env",
+    "compiler": "target/debug/jet",
+    "operations": [
+      "run",
+      "check"
+    ],
+    "modes": [
+      "aot",
+      "jet_run",
+      "interpreter",
+      "check"
+    ],
+    "observation_fields": [
+      "result",
+      "typed_failure",
+      "mutation",
+      "input_consumption",
+      "ordered_effects",
+      "cleanup",
+      "resource_premises",
+      "schedule",
+      "allowed_schedules"
+    ],
+    "identity_fields": [
+      "source_sha256",
+      "program_sha256",
+      "dependency_closure_sha256",
+      "configuration_sha256",
+      "evaluator_sha256",
+      "compiler_identity",
+      "checker_sha256",
+      "target",
+      "obligations_sha256"
+    ],
+    "timeout_ms": 120000,
+    "unknown_status": "unverified",
+    "resource_policy": "unknown, unavailable, exhausted, cancelled, and foreign-resource observations remain unproved",
+    "observation_policy": "authored source witnesses are never executed or promoted to proof by this checker; live mode evidence must bind every identity field",
+    "observation_certificates": {
+      "path": "proof/compiler/comptime/observations.json",
+      "schema": "jet.comptime-observations.v1",
+      "positive_status": "verified",
+      "producer": "proof/compiler/comptime/observe.mjs",
+      "required_identity_fields": [
+        "source_sha256",
+        "program_sha256",
+        "dependency_closure_sha256",
+        "configuration_sha256",
+        "evaluator_sha256",
+        "compiler_identity",
+        "checker_sha256",
+        "target",
+        "obligations_sha256"
+      ],
+      "required_observations": [
+        "result",
+        "typed_failure",
+        "mutation",
+        "input_consumption",
+        "ordered_effects",
+        "cleanup",
+        "resource_premises",
+        "schedule",
+        "allowed_schedules"
+      ],
+      "universal_proof": false
+    }
+  },
+  "binding_methods": [
+    {
+      "method": "verified_construction",
+      "source": "contract.evaluator.model and ratified comptime/cache rules",
+      "implementation": "the canonical MirBridge evaluator, interpreter state, Core registry, sema, and cache publication paths",
+      "construction": "state/effect/failure/cache transition obligations carried by the one evaluator seam",
+      "checker": "proof/compiler/comptime/check.mjs",
+      "limit": "the structural model and source correspondence do not prove the complete production implementation"
+    },
+    {
+      "method": "direct_verification",
+      "source": "the identity-bound production source map and jet.compiler-proof.v1 claim",
+      "implementation": "the checked jet-comptime, jet-sema, jet-foundation, and jet-codegen artifacts named by source_bindings",
+      "candidate_binding": "identity.candidate plus exact source/dependency/configuration/evaluator digests",
+      "checker": "proof/compiler/comptime/check.mjs",
+      "limit": "foreign tools and unexecuted target modes remain explicit assumptions"
+    },
+    {
+      "method": "translation_certificate",
+      "source": "proof/compiler/comptime/witnesses.json",
+      "implementation": "the canonical evaluator and cache identity mechanisms",
+      "certificate": "mixed mutation/fallibility witnesses and explicit negative/cache invalidation controls",
+      "checker": "proof/compiler/comptime/check.mjs",
+      "limit": "finite authored evidence is unverified in this phase and never a universal preservation claim"
+    }
+  ],
+  "identity": {
+    "schema": "jet.compiler-proof.v1",
+    "manifest_path": "proof/compiler/toolchain/manifest.json",
+    "authority_key": "compiler-proof.comptime",
+    "claim_id": "compiler-proof.identity-direct",
+    "identity_digest_source": "scripts/agent/compiler-proof.mjs:identityDigest",
+    "required_fields": [
+      "claim.identity_sha256",
+      "candidate.record_identity.target_inputs_sha256",
+      "candidate.record_identity.tool_version",
+      "candidate.record_identity.engine",
+      "candidate.commit",
+      "candidate.compiler.source",
+      "candidate.compiler.artifact",
+      "candidate.configuration",
+      "candidate.target",
+      "checker.toolchain_pin_sha256",
+      "proof.artifact",
+      "raw_replay"
+    ]
+  },
+  "source_bindings": [
+    {
+      "id": "evaluator-module",
+      "path": "crates/jet-comptime/src/Comptime/mod.rs",
+      "markers": [
+        "pub mod MirBridge",
+        "evaluate_with_imports_opts",
+        "evaluate_owned_with_imports_opts",
+        "FUEL_BUDGET",
+        "ProgramInfo",
+        "expand_template_body",
+        "record_comptime_evaluator_event"
+      ],
+      "role": "public evaluator entrypoints and program context"
+    },
+    {
+      "id": "interpreter-state",
+      "path": "crates/jet-comptime/src/Comptime/Interpreter.rs",
+      "markers": [
+        "struct Interp",
+        "fuel:",
+        "core_imports",
+        "gates:",
+        "embed_inputs",
+        "mutated:",
+        "fn burn",
+        "MirBridge::eval_expr",
+        "MirBridge::eval_block"
+      ],
+      "role": "state, fuel, mutation, gate, and canonical MIR execution"
+    },
+    {
+      "id": "mir-evaluator-seam",
+      "path": "crates/jet-comptime/src/Comptime/MirBridge.rs",
+      "markers": [
+        "pub struct ExprEvalRequest",
+        "pub struct BlockEvalRequest",
+        "pub fn eval_expr",
+        "pub fn eval_block",
+        "pub fn install",
+        "pub fn mir_to_ct_value"
+      ],
+      "role": "single evaluator seam and outcome conversion"
+    },
+    {
+      "id": "purity-callgraph",
+      "path": "crates/jet-comptime/src/Comptime/Purity.rs",
+      "markers": [
+        "check_purity",
+        "reachable_func_names",
+        "E3401"
+      ],
+      "role": "shared purity call-graph policy"
+    },
+    {
+      "id": "core-registry-dispatch",
+      "path": "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
+      "markers": [
+        "CoreCallCoverage::COMPTIME",
+        "CoreCallInterpreterRoute",
+        "apply_core_call_without_ambient",
+        "validate_interpreter_route"
+      ],
+      "role": "registry-owned Core route and interpreter projection"
+    },
+    {
+      "id": "build-time-resources",
+      "path": "crates/jet-comptime/src/Comptime/Methods/dispatch.rs",
+      "markers": [
+        "eval_build_time_io",
+        "eval_net_fetch",
+        "ComptimeInput",
+        "vault_comptime_denied",
+        "E0957"
+      ],
+      "role": "literal resource inputs, path policy, and foreign gates"
+    },
+    {
+      "id": "failure-carrier",
+      "path": "crates/jet-foundation/src/AST/comptime.rs",
+      "markers": [
+        "pub enum CtValue",
+        "pub enum CtReport"
+      ],
+      "role": "shared comptime values and typed failure carrier"
+    },
+    {
+      "id": "input-carrier",
+      "path": "crates/jet-foundation/src/AST/ffi.rs",
+      "markers": [
+        "pub struct ComptimeInput"
+      ],
+      "role": "hashed build-time input fact"
+    },
+    {
+      "id": "cache-publication",
+      "path": "crates/jet-comptime/src/Comptime/Build/cache_cas.rs",
+      "markers": [
+        "FrontEndCompletion",
+        "authorize_cache_lookup",
+        "remote_execution_commit_lock",
+        "publish_execution_result",
+        "execution_is_cancelled",
+        "cancel_execution",
+        "ActionOutcome::Failed",
+        "record_comptime_cache_event"
+      ],
+      "role": "cache lookup, cancellation, atomic publication, and failure records"
+    },
+    {
+      "id": "cache-key",
+      "path": "crates/jet-comptime/src/Comptime/Build/errors_keys.rs",
+      "markers": [
+        "canonical_action_key",
+        "compiler-version",
+        "helper-versions",
+        "build-fact-contributions",
+        "canonical_effective_action_key",
+        "target"
+      ],
+      "role": "canonical semantic action identity"
+    },
+    {
+      "id": "build-runner",
+      "path": "crates/jet-comptime/src/Comptime/Build/execution_runtime.rs",
+      "markers": [
+        "execute_build_plan_with_front_end",
+        "authorize_cache_lookup",
+        "failure_report",
+        "ActionKey",
+        "record_comptime_cache_event"
+      ],
+      "role": "front-end completion before execution/cache"
+    },
+    {
+      "id": "plan-cancel",
+      "path": "crates/jet-comptime/src/Comptime/Build/plan_graph.rs",
+      "markers": [
+        "Cancelled",
+        "cancelled_actions",
+        "cache_restored_actions"
+      ],
+      "role": "build plan cancellation and cache outcome facts"
+    },
+    {
+      "id": "sema-control-flow",
+      "path": "crates/jet-sema/src/Sema/CheckerCore/control_flow.rs",
+      "markers": [
+        "check_comptime_block",
+        "check_comptime_if",
+        "run_block_with_imports",
+        "evaluate_owned_with_imports_opts"
+      ],
+      "role": "comptime block and conditional checking"
+    },
+    {
+      "id": "sema-bindings",
+      "path": "crates/jet-sema/src/Sema/CheckerCore/bindings.rs",
+      "markers": [
+        "b.is_comptime",
+        "check_build_time_io",
+        "evaluate_owned_with_imports_opts_collecting_items",
+        "ct_mutated_names",
+        "forget_ct_bindings"
+      ],
+      "role": "explicit demand, implicit fold, and mutation fallback"
+    },
+    {
+      "id": "sema-scopes",
+      "path": "crates/jet-sema/src/Sema/CheckerCore/scopes.rs",
+      "markers": [
+        "current_ct_globals",
+        "apply_ct_mutations",
+        "ct_mutated_names",
+        "evaluate_constant"
+      ],
+      "role": "comptime scope snapshots and mutation application"
+    },
+    {
+      "id": "sema-generic-values",
+      "path": "crates/jet-sema/src/Sema/Bundle/GenericModules.rs",
+      "markers": [
+        "evaluate_closed_value",
+        "source_values",
+        "source_rule_facts",
+        "build_facts"
+      ],
+      "role": "generic module normalization and build-fact provenance"
+    },
+    {
+      "id": "sema-cache",
+      "path": "crates/jet-sema/src/Sema/Bundle.rs",
+      "markers": [
+        "CachedFunctionBody",
+        "comptime_inputs",
+        "incremental_global_environment",
+        "entry.input",
+        "reverse"
+      ],
+      "role": "incremental semantic dependency cache"
+    },
+    {
+      "id": "sema-propagation",
+      "path": "crates/jet-sema/src/Sema/Bundle/Pipeline/Completion.rs",
+      "markers": [
+        "comptime_inputs",
+        "std::mem::take",
+        "bundle.comptime_inputs"
+      ],
+      "role": "comptime input propagation through completion"
+    },
+    {
+      "id": "foundation-facts",
+      "path": "crates/jet-foundation/src/Facts.rs",
+      "markers": [
+        "TargetDossier",
+        "compiler_identity",
+        "dependency_identity",
+        "artifact_identity_bytes"
+      ],
+      "role": "target and dependency artifact identity"
+    },
+    {
+      "id": "foundation-cache",
+      "path": "crates/jet-foundation/src/CanonicalAST.rs",
+      "markers": [
+        "ast_cache_key",
+        "embed_file",
+        "validation"
+      ],
+      "role": "canonical source/cache key and validation boundary"
+    },
+    {
+      "id": "core-authority",
+      "path": "crates/jet-foundation/src/Syntax/core_calls.rs",
+      "markers": [
+        "CoreCallCoverage",
+        "COMPTIME",
+        "CoreCallInterpreterRoute",
+        "CORE_CALLS",
+        "CoreCallRecord::new"
+      ],
+      "role": "canonical Core operation registry"
+    },
+    {
+      "id": "tir-authority",
+      "path": "crates/jet-codegen/src/Codegen/TIR/mod.rs",
+      "markers": [
+        "pub struct MirFragmentContext",
+        "lower_mir_fragment_expr",
+        "lower_mir_fragment_block"
+      ],
+      "role": "typed TIR to canonical MIR comptime lowering"
+    },
+    {
+      "id": "mir-authority",
+      "path": "crates/jet-foundation/src/MIR.rs",
+      "markers": [
+        "pub enum MirRuntimeValue",
+        "MirFailureCarrier",
+        "MirPreludeCall"
+      ],
+      "role": "canonical MIR values, failures, and Prelude calls"
+    },
+    {
+      "id": "syntax-authority",
+      "path": "crates/jet-foundation/src/Syntax.rs",
+      "markers": [
+        "mod core_calls",
+        "pub use core_calls"
+      ],
+      "role": "public syntax authority projection"
+    },
+    {
+      "id": "prelude-source",
+      "path": "crates/jet-codegen/src/Prelude/Core.jet",
+      "markers": [
+        "module core.compiler",
+        "module core.math",
+        "module core.net"
+      ],
+      "role": "single readable Core declaration and Prelude source"
+    },
+    {
+      "id": "tir-cache-guard",
+      "path": "crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs",
+      "markers": [
+        "D-CTCACHE1",
+        "ExprComptimeCacheGuard"
+      ],
+      "role": "separate comptime lowering memo scope"
+    },
+    {
+      "id": "obligation-generator",
+      "path": "proof/compiler/semantics/generate-obligations.mjs",
+      "markers": [
+        "buildObligations",
+        "compile-time",
+        "generated_by"
+      ],
+      "role": "canonical generated obligation source"
+    },
+    {
+      "id": "language-spec",
+      "path": "docs/spec/spec.md",
+      "markers": [
+        "@name ::",
+        "D-GENMOD-VALUE1",
+        "E3401",
+        "comptime"
+      ],
+      "role": "ratified comptime and generic-module law"
+    },
+    {
+      "id": "architecture-spec",
+      "path": "docs/spec/architecture.md",
+      "markers": [
+        "R10",
+        "R11",
+        "R12",
+        "comptime"
+      ],
+      "role": "one semantic core and Prelude architecture"
+    },
+    {
+      "id": "diagnostic-spec",
+      "path": "docs/spec/diagnostic-rows.md",
+      "markers": [
+        "E0952",
+        "E0953",
+        "E0955",
+        "E0956",
+        "E0957",
+        "E3401"
+      ],
+      "role": "registered comptime failure diagnostics"
+    },
+    {
+      "id": "known-defect",
+      "path": "docs/audits/domain-foundations-2026-09-02/defects.json",
+      "markers": [
+        "DEF-13",
+        "exact-comptime"
+      ],
+      "role": "explicit known tier mismatch blocker"
+    }
+  ],
+  "construct_families": [
+    {
+      "id": "closed-values",
+      "source_binding": "evaluator-module",
+      "observation": "result",
+      "failure_obligations": [
+        "E0956",
+        "E0953"
+      ],
+      "rule": "comptime.closed-value-evaluation"
+    },
+    {
+      "id": "control-flow",
+      "source_binding": "sema-control-flow",
+      "observation": "result",
+      "failure_obligations": [
+        "E0956",
+        "E0952"
+      ],
+      "rule": "comptime.control-flow"
+    },
+    {
+      "id": "mutable-receivers",
+      "source_binding": "interpreter-state",
+      "observation": "mutation",
+      "failure_obligations": [
+        "E0956",
+        "E0952"
+      ],
+      "rule": "comptime.receiver-mutation"
+    },
+    {
+      "id": "fallible-outcomes",
+      "source_binding": "failure-carrier",
+      "observation": "typed_failure",
+      "failure_obligations": [
+        "E0953",
+        "E0956"
+      ],
+      "rule": "comptime.failure-carrier"
+    },
+    {
+      "id": "generic-instances",
+      "source_binding": "sema-generic-values",
+      "observation": "result",
+      "failure_obligations": [
+        "E0956",
+        "E0952"
+      ],
+      "rule": "comptime.generic-value-normalization"
+    },
+    {
+      "id": "build-facts",
+      "source_binding": "sema-generic-values",
+      "observation": "resource_premises",
+      "failure_obligations": [
+        "E0955",
+        "E0957"
+      ],
+      "rule": "comptime.build-fact-provenance"
+    },
+    {
+      "id": "templates",
+      "source_binding": "evaluator-module",
+      "observation": "result",
+      "failure_obligations": [
+        "E0956",
+        "E0952"
+      ],
+      "rule": "comptime.template-expansion"
+    },
+    {
+      "id": "purity-and-gates",
+      "source_binding": "purity-callgraph",
+      "observation": "ordered_effects",
+      "failure_obligations": [
+        "E3401",
+        "E3410",
+        "E1265"
+      ],
+      "rule": "comptime.purity-and-effect-gates"
+    },
+    {
+      "id": "resource-inputs",
+      "source_binding": "build-time-resources",
+      "observation": "input_consumption",
+      "failure_obligations": [
+        "E0955",
+        "E0957",
+        "E3413",
+        "E3414"
+      ],
+      "rule": "comptime.literal-resource-inputs"
+    },
+    {
+      "id": "cache-identity",
+      "source_binding": "cache-key",
+      "observation": "resource_premises",
+      "failure_obligations": [
+        "E0956"
+      ],
+      "rule": "comptime.cache-semantic-identity"
+    },
+    {
+      "id": "cache-publication",
+      "source_binding": "cache-publication",
+      "observation": "cleanup",
+      "failure_obligations": [
+        "E0952",
+        "E0956"
+      ],
+      "rule": "comptime.cache-publication"
+    },
+    {
+      "id": "mode-parity",
+      "source_binding": "tir-cache-guard",
+      "observation": "allowed_schedules",
+      "failure_obligations": [
+        "E0956",
+        "E0952"
+      ],
+      "rule": "comptime.mode-parity"
+    },
+    {
+      "id": "cancellation",
+      "source_binding": "plan-cancel",
+      "observation": "schedule",
+      "failure_obligations": [
+        "E0952"
+      ],
+      "rule": "comptime.cancellation"
+    },
+    {
+      "id": "unsupported-and-unknown",
+      "source_binding": "diagnostic-spec",
+      "observation": "typed_failure",
+      "failure_obligations": [
+        "E0956",
+        "E0952",
+        "E3401"
+      ],
+      "rule": "comptime.explicit-blocking"
+    }
+  ],
+  "coverage": {
+    "relation_path": "proof/compiler/obligations.json",
+    "generator": "proof/compiler/comptime/check.mjs",
+    "source_generator": "proof/compiler/semantics/generate-obligations.mjs",
+    "owner": "#2938",
+    "denominator_rule": "generate one implementation-bound row for every comptime-owned canonical obligation, every source binding, every current CoreCallRecord::new operation, every declared construct family, and every explicit blocking obligation; no generated row may be proved by this source-only stage",
+    "authorities": [
+      "crates/jet-codegen/src/Codegen/TIR/mod.rs",
+      "crates/jet-codegen/src/Prelude/Core.jet",
+      "crates/jet-foundation/src/Syntax.rs",
+      "docs/spec/syntax-decisions.md",
+      "crates/jet-foundation/src/MIR.rs",
+      "docs/spec/architecture.md"
+    ],
+    "mapping_statuses": [
+      "mapped_unproved",
+      "unsupported",
+      "unmapped",
+      "proved"
+    ],
+    "qualification_rule": "The denominator remains blocked unless every row has current implementation correspondence, exact identity, complete mode observations, and no unsupported, unknown, stale, cancelled, failed, or mismatched obligation; this checker never emits proved."
+  },
+  "boundary": {
+    "proven": [
+      "The checker validates the versioned contract, witness binding, source markers, dependency digests, registry denominator, and explicit non-universal boundary.",
+      "Changed source/dependency/configuration/evaluator identities and invalid cache transitions are rejected rather than reused.",
+      "Unsupported, unknown, exhausted, failed, cancelled, unavailable, and known-mismatch evidence remains a blocking disposition."
+    ],
+    "assumed": [
+      "The ratified language, Core, Prelude, sema, MIR, and cache specifications state the intended compile-time law.",
+      "The pinned jet.compiler-proof.v1 identity identifies the candidate compiler without changing its meaning.",
+      "Named foreign compiler, runtime, filesystem, network, scheduler, and service contracts hold when a focused proof campaign executes modes."
+    ],
+    "tested": [
+      "The authored mixed reader witness records identical allowed observations for AOT, jet run, and interpreter modes.",
+      "The negative controls name unsupported, unknown, fuel, purity, resource, interruption, cache-drift, and known tier-mismatch obligations.",
+      "The cache transition witness binds source, imported facts, compiler ABI, target/profile/effects, evaluator, configuration, policy, and toolchain identities."
+    ],
+    "blocked": [
+      "Universal preservation for every compile-time AST/TIR/MIR/Core operation, generic module, template, resource, target, and evaluator state.",
+      "Fresh AOT, jet run, interpreter, and check observations for the authored witnesses are not executed in this implementation phase.",
+      "The known DEF-13 exact-comptime native-tier mismatch prevents any universal mode-parity or cache qualification claim.",
+      "Formal Lean replay of a comptime preservation theorem and all foreign assumptions remain outside this bounded source correspondence stage."
+    ],
+    "qualification": "blocked",
+    "universal_proof": false
+  },
+  "dependencies": [
+    {
+      "path": "Cargo.lock",
+      "sha256": "sha256-d5f107fbca2969bd559f570aff837ddf6c69b4d5c75e8c8ae002261ed235a6fb",
+      "role": "configuration"
+    },
+    {
+      "path": "Cargo.toml",
+      "sha256": "sha256-6d68f7c39dd255e1810e9e5cae617d6621d65178ec08a4c9053c82621c87b431",
+      "role": "configuration"
+    },
+    {
+      "path": "crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs",
+      "sha256": "sha256-b77cf8145586780738db27735fa50a06ddec9b6a2c9295be2ee23fd3d03ca70b",
+      "role": "tir-cache"
+    },
+    {
+      "path": "crates/jet-codegen/src/Codegen/TIR/mod.rs",
+      "sha256": "sha256-07459e55d3af2de55660379bada6f59b0dff1c5b5e8510c2d831ba936d4c3011",
+      "role": "tir"
+    },
+    {
+      "path": "crates/jet-codegen/src/Prelude/Core.jet",
+      "sha256": "sha256-5b8c1efaefb09a34c51ccac52bfddf1f148fd2dc21774d796ac041dcfbf380ef",
+      "role": "prelude"
+    },
+    {
+      "path": "crates/jet-comptime/build.rs",
+      "sha256": "sha256-5877e3ac369884f149bafac34f9e09ab1e3e1179496ff8d6129cb5c3f5b1da0b",
+      "role": "configuration"
+    },
+    {
+      "path": "crates/jet-comptime/Cargo.toml",
+      "sha256": "sha256-cc6722be199df10ac2615203fba63f3907d9d0a0890b77c84b8fe64b7a928fa5",
+      "role": "configuration"
+    },
+    {
+      "path": "crates/jet-comptime/src/Comptime/Build/cache_cas.rs",
+      "sha256": "sha256-682438aca436ae0468ed84979b596938b9f209cc4ac2296321f17ea1375dfcf9",
+      "role": "cache-publication"
+    },
+    {
+      "path": "crates/jet-comptime/src/Comptime/Build/errors_keys.rs",
+      "sha256": "sha256-e70252e6efd8ec7cf8fb1bd66b7f29d535d1250396831208720a17ab8d0e575e",
+      "role": "cache-key"
+    },
+    {
+      "path": "crates/jet-comptime/src/Comptime/Build/execution_runtime.rs",
+      "sha256": "sha256-9466d6eb4b7da257c62977a7ca59a494605384cb216fc593ef1e5fe36ae6c69e",
+      "role": "cache-runner"
+    },
+    {
+      "path": "crates/jet-comptime/src/Comptime/Build/plan_graph.rs",
+      "sha256": "sha256-9a711649a0bfd2129a2a4e05a322deec6c730f3c430ddb260764a26641c3d445",
+      "role": "cache-plan"
+    },
+    {
+      "path": "crates/jet-comptime/src/Comptime/Interpreter.rs",
+      "sha256": "sha256-c43f9305697c70913d4519982419e3065a365971cec5812607a67e2fdb2dae24",
+      "role": "evaluator"
+    },
+    {
+      "path": "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
+      "sha256": "sha256-75ddf8016d2bae2a9f571124ac091501db66bef0edf1c6f9d173cbb6fcb33c6e",
+      "role": "core-route"
+    },
+    {
+      "path": "crates/jet-comptime/src/Comptime/Methods/dispatch.rs",
+      "sha256": "sha256-8a0d798f45dbd6689f8b8d784bcd8a69bc81d70063504bb308189c392d6e6cd3",
+      "role": "resource-boundary"
+    },
+    {
+      "path": "crates/jet-comptime/src/Comptime/MirBridge.rs",
+      "sha256": "sha256-bf45f610d258d771c82d34c307051139a5bf87c6adbcb4e13e0095ade55e6a79",
+      "role": "evaluator"
+    },
+    {
+      "path": "crates/jet-comptime/src/Comptime/mod.rs",
+      "sha256": "sha256-072e586d9f5d390a0a00e87f2ac37e31e459f0d9bf2352dbe26bcf5e672c3460",
+      "role": "evaluator"
+    },
+    {
+      "path": "crates/jet-comptime/src/Comptime/Purity.rs",
+      "sha256": "sha256-069182ee37073a7dbf61d0a031858b9668e3806491f8d373d1e5a6edf92c945a",
+      "role": "policy"
+    },
+    {
+      "path": "crates/jet-foundation/src/AST/comptime.rs",
+      "sha256": "sha256-edcc9ebfa670519072e5e9a4ca314f8fa826ef3970c33bddf21590b6881d3219",
+      "role": "value-carrier"
+    },
+    {
+      "path": "crates/jet-foundation/src/AST/ffi.rs",
+      "sha256": "sha256-1dde644568c13bac4b8a2cda1ab98f05226211de7c5bcc8efc24ba8f80378e1c",
+      "role": "input-fact"
+    },
+    {
+      "path": "crates/jet-foundation/src/CanonicalAST.rs",
+      "sha256": "sha256-0c4eb8f4977978a3de306fb21c77557688c5474fce0502489644faefefa9c374",
+      "role": "source-cache"
+    },
+    {
+      "path": "crates/jet-foundation/src/Facts.rs",
+      "sha256": "sha256-96f999a1a11d22993ae7b1f7d7ff2c5580f3e124592724d50ba023ff79e41e71",
+      "role": "artifact-identity"
+    },
+    {
+      "path": "crates/jet-foundation/src/MIR.rs",
+      "sha256": "sha256-ef08c3974d46098e5393d05a08f74c44ad8b095540340d3348ad45faa1fce939",
+      "role": "mir"
+    },
+    {
+      "path": "crates/jet-foundation/src/Syntax.rs",
+      "sha256": "sha256-aebba0212ef253877e0c864f0bd5ec1e98383bd3d2828b391b5a99b1b1708bf6",
+      "role": "syntax"
+    },
+    {
+      "path": "crates/jet-foundation/src/Syntax/core_calls.rs",
+      "sha256": "sha256-ea39a18d2fd2cfcc382fa15ee40460e0f9a1e2705c488c581a70c8126ea8bd4c",
+      "role": "core-registry"
+    },
+    {
+      "path": "crates/jet-sema/src/Sema/Bundle.rs",
+      "sha256": "sha256-e7accfb3fe62aea37cf38f0f0a3c275c28d510d7c87cf3898bbc5c114ca47353",
+      "role": "incremental-cache"
+    },
+    {
+      "path": "crates/jet-sema/src/Sema/Bundle/GenericModules.rs",
+      "sha256": "sha256-cf8094b134029eaf94919281e847e6ab3a3a87d27dddd0c2138bb7617bf47acc",
+      "role": "generic-module"
+    },
+    {
+      "path": "crates/jet-sema/src/Sema/Bundle/Pipeline/Completion.rs",
+      "sha256": "sha256-0b2792fe54fcb997eba1956c05f7afdd654ddcf3dfc8f8d3d92aa7fb134c9b17",
+      "role": "input-propagation"
+    },
+    {
+      "path": "crates/jet-sema/src/Sema/CheckerCore/bindings.rs",
+      "sha256": "sha256-d6f8e4ee48a533d5aacc41a5a38af0c2570806b43792bb451e42b2e39dfd3f56",
+      "role": "sema"
+    },
+    {
+      "path": "crates/jet-sema/src/Sema/CheckerCore/control_flow.rs",
+      "sha256": "sha256-0c66980ca32701828c20346e004d7123fcd7a8e0088b77cef0827a3708eecd6c",
+      "role": "sema"
+    },
+    {
+      "path": "crates/jet-sema/src/Sema/CheckerCore/scopes.rs",
+      "sha256": "sha256-55a790aa735ec21abb82dfd89c8105d11e1271672198f6e172c8610f4b1a0a44",
+      "role": "sema"
+    },
+    {
+      "path": "docs/audits/domain-foundations-2026-09-02/defects.json",
+      "sha256": "sha256-f3e03c4e6a776717961547e0b31cc7540750704bf3fec6f2275bb60abce807ae",
+      "role": "known-defect"
+    },
+    {
+      "path": "docs/spec/architecture.md",
+      "sha256": "sha256-dfe09d586b9dfe5982496c63ea50118a6f0384fbfde020eb41042f95725dfbac",
+      "role": "architecture"
+    },
+    {
+      "path": "docs/spec/diagnostic-rows.md",
+      "sha256": "sha256-c4b5207a366a712735aa06ee968a821b9097ef7780c39304e51e9a89b9db7853",
+      "role": "diagnostics"
+    },
+    {
+      "path": "docs/spec/spec.md",
+      "sha256": "sha256-97a5916b12ef4cdb7f353d4eb32825c01e63d6a998a2785d7fc56fafaa2d9c31",
+      "role": "specification"
+    },
+    {
+      "path": "docs/spec/syntax-decisions.md",
+      "sha256": "sha256-91f5d414bdd120831b34632d57d49c7ec72b2b65e9911feed278a7e6a3c22696",
+      "role": "specification"
+    },
+    {
+      "path": "flake.lock",
+      "sha256": "sha256-b49b2a47c698493f5b854fa3556dffe6b6524c2323829f907e97e52f93929a52",
+      "role": "configuration"
+    },
+    {
+      "path": "flake.nix",
+      "sha256": "sha256-f7c2c9bb822735f92cc381e151db4fc8454703d5f03eaa516013b6773f0f835e",
+      "role": "configuration"
+    },
+    {
+      "path": "proof/compiler/observations/comparison-journal.mjs",
+      "sha256": "sha256-15275902d52692e580a62c025d92e403459102d353067e29f827e4d2f1602b0d",
+      "role": "shared-observation-journal"
+    },
+    {
+      "path": "proof/compiler/comptime/check.mjs",
+      "sha256": "sha256-22ae272318210a2f92aa3eb7b334a78591e3612e88b40576390522e09ba182e1",
+      "role": "checker"
+    },
+    {
+      "path": "proof/compiler/comptime/fixtures/mixed-reader.jet",
+      "sha256": "sha256-f2628acb42cdeb4f22195198f585fc44c1a59e00a8c121a71465c0b5ec984b5c",
+      "role": "authored-witness"
+    },
+    {
+      "path": "proof/compiler/comptime/observe.mjs",
+      "role": "observation-runner",
+      "sha256": "sha256-429ae357a076437545d7c074183a9a51cfe49788c1a0e589ab45bc327e98ae0c"
+    },
+    {
+      "path": "proof/compiler/obligations.json",
+      "sha256": "sha256-a2ce1e98546eb3ec76ec079b0170f8dd00323258178ad20c71ea587098d16340",
+      "role": "obligation-relation"
+    },
+    {
+      "path": "proof/compiler/semantics/generate-obligations.mjs",
+      "sha256": "sha256-ef13e2652e1ea6fb76c20314e6bc1f5415f598a65461e0ed4c5011c9bb257ec0",
+      "role": "obligation-generator"
+    },
+    {
+      "path": "scripts/agent/compiler-proof.mjs",
+      "sha256": "sha256-496b22827689284ed6530ae848fb73d270e21996f2f1ad540c17136511499384",
+      "role": "stage-driver"
+    },
+    {
+      "path": "scripts/agent/jet-env",
+      "sha256": "sha256-e027999237ae9508ff871090e0f17b923447c73967f236a895c8dc9da2725841",
+      "role": "execution-runner"
+    }
+  ],
+  "witnesses_sha256": "sha256-4019982dede3a4f63c89257bf946a39d3bd5c51143580a4f2faa9303af6691eb"
+}

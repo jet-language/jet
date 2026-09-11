@@ -74,7 +74,7 @@ function report(capsuleScore) {
     required_families: ["openai", "anthropic"],
     capsule: descriptor("capsule"),
     control: {
-      path: "llms.text",
+      path: "jet inspect digest",
       source_bytes: 20,
       source_sha256: "llms",
       context_budget_bytes: 10,

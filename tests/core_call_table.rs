@@ -674,3 +674,46 @@ fn core_call_truth_names_the_foundation_home() {
         Some("core_projection_is_complete_both_directions")
     );
 }
+
+#[test]
+fn canonical_core_module_spellings_are_the_only_public_rows() {
+    let rows = jet_foundation::Syntax::CORE_CALLS;
+    assert!(
+        rows.iter()
+            .any(|row| row.module == "core.service" && row.member == "runtime"),
+        "canonical core.service.runtime row is missing"
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row.module == "core.tasks" && row.member == "interval"),
+        "canonical core.tasks rows are missing"
+    );
+    assert!(
+        !rows
+            .iter()
+            .any(|row| matches!(row.module, "core.task" | "core.services")),
+        "retired Core module spellings leaked into the public dispatcher"
+    );
+    assert!(
+        jet_foundation::Syntax::core_call("core.task", "timeout").is_none(),
+        "retired core.task.timeout dispatcher row must be deleted"
+    );
+    assert_eq!(
+        jet_foundation::Syntax::core_module_for_alias("task"),
+        None,
+        "retired task alias must not resolve"
+    );
+    assert_eq!(
+        jet_foundation::Syntax::core_module_for_alias("services"),
+        None,
+        "retired services alias must not resolve"
+    );
+    assert_eq!(
+        jet_foundation::Syntax::core_module_for_alias("tasks"),
+        Some("core.tasks")
+    );
+    assert_eq!(
+        jet_foundation::Syntax::core_module_for_alias("service"),
+        Some("core.service")
+    );
+}

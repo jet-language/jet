@@ -2,7 +2,6 @@ use crate::Codegen::Cx;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::tir_recv_jet_ty;
-use crate::Codegen::TIR::unit_type;
 use crate::Codegen::TIR::ListRemoveMode;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::TBuiltinOp;
@@ -12,6 +11,75 @@ use crate::Codegen::TIR::TExprKind;
 use crate::Diagnostics::Span;
 use crate::AST::{Expr, IndexKind, Type};
 
+fn invariant_expr(span: Span, construct: impl Into<String>) -> TExpr {
+    TExpr {
+        ty: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
+        kind: TExprKind::InvariantViolation {
+            construct: construct.into(),
+            span,
+        },
+    }
+}
+fn base_receiver_ty(ty: &Type) -> &Type {
+    match ty {
+        Type::Tagged { inner, .. } => base_receiver_ty(inner),
+        _ => ty,
+    }
+}
+
+
+fn sequence_elem_ty(ty: &Type) -> Option<Type> {
+    match ty {
+        Type::Tagged { inner, .. } => sequence_elem_ty(inner),
+        Type::List(inner) | Type::FixedList { elem: inner, .. } => Some((**inner).clone()),
+        Type::Apply { name, args }
+            if args.len() == 1
+                && matches!(
+                    name.as_str(),
+                    crate::Syntax::TYPE_ITER
+                        | crate::Syntax::TYPE_VIEW_ITER
+                        | "View"
+                        | "ViewMut"
+                        | "ComputeViewMut"
+                ) =>
+        {
+            Some(args[0].clone())
+        }
+        _ => None,
+    }
+}
+
+fn list_receiver(ty: &Type) -> bool {
+    match ty {
+        Type::Tagged { inner, .. } => list_receiver(inner),
+        Type::List(_) | Type::FixedList { .. } => true,
+        _ => false,
+    }
+}
+
+fn view_receiver(ty: &Type) -> bool {
+    matches!(
+        base_receiver_ty(ty),
+        Type::Apply { name, args }
+            if args.len() == 1
+                && matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
+    )
+}
+fn remove_mode_variant(variant: &str) -> Option<ListRemoveMode> {
+    let variant = match variant {
+        "Val" | "Slot" => variant,
+        other => match other.strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX) {
+            Some(short) => short,
+            None => return None,
+        },
+    };
+    match variant {
+        "Val" => Some(ListRemoveMode::Value),
+        "Slot" => Some(ListRemoveMode::Slot),
+        _ => None,
+    }
+}
+
 /// #1478: Set/Rank delegate their iterator-family surface (filter, map,
 /// each, all, fold, flat_map, min, max) to the same List/Iter machinery every
 /// other container already uses — insert the exact `.to_list()` conversion a
@@ -19,16 +87,26 @@ use crate::AST::{Expr, IndexKind, Type};
 /// `BTreeSet` where they expect a `Vec`-backed list (I9: no second mechanism;
 /// I8: one canonical iteration path). Not for `values` or collection removal,
 /// which stay on the native Set API and must NOT be wrapped.
-pub(crate) fn wrap_set_receiver_as_list(recv: TExpr) -> TExpr {
+pub(crate) fn wrap_set_receiver_as_list(recv: TExpr, span: Span) -> TExpr {
     let (op, elem) = match &recv.ty {
-        Type::Apply { name, args } if name == "Set" => (
-            TBuiltinOp::SetToList,
-            args.first().cloned().unwrap_or(Type::Int),
-        ),
-        Type::Apply { name, args } if name == crate::Syntax::TYPE_RANK => (
-            TBuiltinOp::SortedSetToList,
-            args.first().cloned().unwrap_or(Type::Int),
-        ),
+        Type::Apply { name, args }
+            if name == "Set" || name == crate::Syntax::TYPE_RANK =>
+        {
+            let Some(elem) = args.as_slice().first() else {
+                return invariant_expr(span, "set receiver missing element type");
+            };
+            if args.len() != 1 {
+                return invariant_expr(span, "set receiver has invalid generic arity");
+            }
+            (
+                if name == "Set" {
+                    TBuiltinOp::SetToList
+                } else {
+                    TBuiltinOp::SortedSetToList
+                },
+                elem.clone(),
+            )
+        }
         _ => return recv,
     };
     TExpr {
@@ -43,6 +121,7 @@ pub(crate) fn wrap_set_receiver_as_list(recv: TExpr) -> TExpr {
 
 fn tuple_fields(ty: Option<&Type>) -> Option<Vec<(String, Type)>> {
     match ty {
+        Some(Type::Tagged { inner, .. }) => tuple_fields(Some(inner.as_ref())),
         Some(Type::Tuple(fields)) => Some(
             fields
                 .iter()
@@ -54,18 +133,14 @@ fn tuple_fields(ty: Option<&Type>) -> Option<Vec<(String, Type)>> {
 }
 
 fn tuple_list_elem_fields(ty: Option<&Type>) -> Option<Vec<(String, Type)>> {
-    match ty {
-        Some(Type::List(inner)) => tuple_fields(Some(inner.as_ref())),
-        // D-ITERTOOLS1=A: zip/indexed return `Iter<(…)>`, not `[…]`.
-        Some(ty) if crate::Collections::is_iter_type(ty) => {
-            crate::Collections::iter_elem(ty).and_then(|inner| tuple_fields(Some(inner)))
-        }
-        _ => None,
-    }
+    let ty = ty?;
+    let inner = sequence_elem_ty(ty)?;
+    tuple_fields(Some(&inner))
 }
 
 fn option_tuple_fields(ty: Option<&Type>) -> Option<Vec<(String, Type)>> {
     match ty {
+        Some(Type::Tagged { inner, .. }) => option_tuple_fields(Some(inner.as_ref())),
         Some(Type::Option(inner)) => tuple_fields(Some(inner.as_ref())),
         _ => None,
     }
@@ -73,6 +148,7 @@ fn option_tuple_fields(ty: Option<&Type>) -> Option<Vec<(String, Type)>> {
 
 fn result_tuple_fields(ty: Option<&Type>) -> Option<Vec<(String, Type)>> {
     match ty {
+        Some(Type::Tagged { inner, .. }) => result_tuple_fields(Some(inner.as_ref())),
         Some(Type::Result { ok, .. }) => tuple_fields(Some(ok.as_ref())),
         _ => None,
     }
@@ -130,34 +206,20 @@ fn declared_field_ty(e: &Expr, cx: &Cx, env: &LowerEnv) -> Option<Type> {
 
 /// The receiver type the built-in table dispatches on.
 ///
-/// `tir_recv_jet_ty` answers `None` for a struct field read. The table is
-/// receiver-TYPED, so that `None` does not read there as "unknown" — it reads as
-/// "take the List surface". So `file.relative.replace("\\", "/")` on a `String`
-/// field lowered to `jet_list_replace(&String, String, String)` (which wants
-/// `&[T]`, `i64`, `T`) and rustc was handed Jet's own ill-typed output, an
-/// internal compiler error by I2, never a user diagnostic. Every name the String
-/// and List surfaces share had the same hole — `replace`, `len`, `index_of`,
-/// `last_index_of`, `slice`, `count`, `copy`, `equal`, `reverse`, `split`,
-/// `split_once`, `rsplit`, `repeat`, `compare`, `concat`, `try_push`, `matches`,
-/// `match`, `remove_prefix`, `remove_suffix`, `to_int`, `to_float`, `to_title`,
-/// `capitalize`, `swapcase`, `normalize`, `is_lower`, `is_upper`, `is_ascii`,
-/// `is_alphabetic`, `is_numeric`, `is_whitespace` — plus every Map/Set/Rank/
-/// Queue/Tally/LRU/Bytes/Ordering arm the same `rty` gates. This closes it once,
-/// at the dispatch, instead of one arm at a time. Same class as card 2021 (a core
-/// record's field TYPES were not restated, so print picked the integer accessor
-/// for a `String`); one level up, because here the field's type is never asked
-/// for at all.
+/// `tir_recv_jet_ty` answers `None` for a struct field read, so this helper
+/// recovers the declaring field type before dispatch. A recovered type is
+/// accepted only when the canonical collection table has the same method row;
+/// an unrecoverable or mismatched type returns `None` rather than selecting a
+/// guessed List operation. This closes the old String-field/List-surface hole
+/// at the dispatch boundary, once for every shared method name.
 ///
 /// Sema already resolved this receiver — it type-checked the call against
 /// `Collections::builtin_method_arg_types(String, "replace")` — it just does not
-/// persist the type: a builtin's `recv_type` stays `None`, and that `None` is the
-/// subset gate's own key. So the field type is re-read from the DECLARING tables
-/// (`struct_field_type`: user structs, then every core record), and is trusted
-/// ONLY when the same builtin table sema used has a row for `(that type, method,
-/// arity)`. A receiver whose resolved field type does not carry the method — an
-/// unsubstituted struct type parameter, say — keeps the legacy `None` and the
-/// fallback arm it selects. So this can only ever swap a mis-typed op for the
-/// typed one; it cannot re-route a receiver the table does not recognize.
+/// persist the type: a builtin's `recv_type` stays `None`. So the field type is
+/// re-read from the DECLARING tables (`struct_field_type`: user structs, then
+/// every core record), and is trusted ONLY when the same builtin table sema used
+/// has a row for `(that type, method, arity)`. If the exact field type cannot be
+/// recovered, this resolver returns `None`; it never selects the legacy List arm.
 ///
 /// Deliberately NOT folded into `tir_recv_jet_ty`: its other callers read that
 /// partiality as a fact (the for-in `lines` split recognizes `child.stdout` by
@@ -209,9 +271,7 @@ fn builtin_recv_ty(
         // fallback.
         if let Expr::Ident(alias, _) = call_receiver.as_ref() {
             if !env.locals.contains_key(alias) {
-                if let Some(module) =
-                    cx.core_import_module_for_function(&env.fn_name, alias)
-                {
+                if let Some(module) = cx.core_import_module_for_function(&env.fn_name, alias) {
                     let ty = resolved_ret.clone().or_else(|| {
                         crate::Sema::core_fixed_sig(module, call_method)
                             .and_then(|(_, ret)| ret)
@@ -243,29 +303,44 @@ fn builtin_recv_ty(
 /// `s.after(sep)` / `s.before(sep)`) to the borrowed `&str`-returning
 /// `TBuiltinOp::{TrimView,AfterView,BeforeView}` — the zero-copy sibling of
 /// whatever `resolve_builtin_op` would pick for the same call written
-/// somewhere the result isn't scope-tracked. `ty` stays `Type::String` (Jet
-/// has one string type end to end — D-MEM1 gallery); only the generated Rust
-/// text is a borrow, not the Jet-level type.
+/// somewhere the result isn't scope-tracked. The return type comes from the
+/// canonical String method table; no shape or type is guessed here.
 pub(super) fn lower_string_view_init(init: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     let Expr::MethodCall {
         receiver,
         method,
+        method_span,
         args,
+        resolved_ret,
         ..
     } = init
     else {
-        unreachable!("sema sets `string_view` only for a trim/after/before MethodCall init");
+        return invariant_expr(init.span(), "string-view initializer shape");
     };
     let op = match method.as_str() {
         "trim" => TBuiltinOp::TrimView,
         "after" => TBuiltinOp::AfterView,
         "before" => TBuiltinOp::BeforeView,
-        _ => unreachable!("sema sets `string_view` only for trim/after/before"),
+        _ => return invariant_expr(*method_span, "string-view method"),
+    };
+    let Some(table_ret) =
+        crate::Collections::builtin_method_return(&Type::String, method, args.len(), false)
+            .flatten()
+    else {
+        return invariant_expr(*method_span, "string-view signature");
+    };
+    let ty = match resolved_ret {
+        Some(ret) if ret == &table_ret => ret.clone(),
+        Some(_) => return invariant_expr(*method_span, "string-view return type"),
+        None => table_ret,
     };
     let recv = lower_expr(receiver, cx, env);
+    if !matches!(recv.ty, Type::String) {
+        return invariant_expr(*method_span, "string-view receiver type");
+    }
     let targs = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
     TExpr {
-        ty: Type::String,
+        ty,
         kind: TExprKind::BuiltinMethod {
             recv: Box::new(recv),
             op,
@@ -279,21 +354,42 @@ pub(super) fn lower_string_view_init(init: &Expr, cx: &Cx, env: &mut LowerEnv) -
 /// and the String-vs-List branch (`len`/`replace`/…) both come from `rty`, so the
 /// receiver type has to be the real one: see `builtin_recv_ty` above for why a
 /// struct-field receiver used to arrive here untyped and take the List surface.
-/// A receiver no table row claims still retains the legacy list fallback (a bare
-/// list literal is exactly that: `[1, 2, 1].replace(1, 9)` —
-/// examples/features/collections/list_surface.jet). Returns `None` for any
-/// name/shape the TIR does not lower (the gate already excluded these, so this is
-/// a defensive belt).
+/// `receiver_ty` is the already-lowered receiver type when the AST shape (notably
+/// a list literal) does not retain one. Returns `None` until another analytical
+/// lowerer handles an alternate shape, or when a checked shape is inconsistent.
 pub(crate) fn resolve_builtin_op(
     receiver: &Expr,
     method: &str,
     method_span: Span,
     args: &[crate::AST::CallArg],
     resolved_ret: Option<&Type>,
+    receiver_ty: Option<&Type>,
     env: &LowerEnv,
     cx: &Cx,
 ) -> Option<TBuiltinOp> {
-    let rty = builtin_recv_ty(receiver, method, args.len(), cx, env);
+    let rty = receiver_ty
+        .cloned()
+        .map(crate::Codegen::TIR::builtin_dispatch_ty)
+        .or_else(|| builtin_recv_ty(receiver, method, args.len(), cx, env));
+    if rty.is_none() {
+        return None;
+    }
+    if rty.as_ref().is_some_and(|ty| {
+        matches!(
+            ty,
+            Type::Apply {
+                name,
+                args: generic_args
+            } if name == "Atomic"
+                && generic_args.len() == 1
+                && crate::Collections::builtin_method_return(ty, method, args.len(), false)
+                    .is_some()
+        )
+    }) {
+        return Some(TBuiltinOp::AtomicMethod {
+            method: method.to_string(),
+        });
+    }
     if matches!(&rty, Some(Type::Named(name)) if name == crate::Syntax::TYPE_ORDERING) {
         return match (method, args.len()) {
             ("then", 1) => Some(TBuiltinOp::OrderingThen),
@@ -361,21 +457,30 @@ pub(crate) fn resolve_builtin_op(
             {
                 crate::Collections::BuiltinReceiverBorrow::TwoPhaseWrite
             }
-            _ => crate::Collections::BuiltinReceiverBorrow::Read,
+            TBuiltinOp::ByteBufferToBytes => crate::Collections::BuiltinReceiverBorrow::Read,
+            TBuiltinOp::ByteBufferMethod { .. } => crate::Collections::BuiltinReceiverBorrow::Read,
+            _ => return None,
         };
         if let Some(receiver_borrow) = rty
             .as_ref()
             .map(|ty| crate::Collections::builtin_receiver_borrow(ty, method))
         {
-            debug_assert_eq!(receiver_borrow, emitted_borrow);
+            if receiver_borrow != emitted_borrow {
+                return None;
+            }
         }
         return Some(op);
+    }
+    if rty.as_ref().is_some_and(|ty| {
+        crate::Collections::builtin_method_return(ty, method, args.len(), false).is_none()
+    }) {
+        return None;
     }
     if crate::Collections::is_closure_method(method) {
         return None;
     }
     let is_string = matches!(rty, Some(Type::String));
-    let is_list = matches!(&rty, Some(Type::List(_)));
+    let is_list = rty.as_ref().is_some_and(list_receiver);
     let is_map = matches!(rty, Some(Type::Map { .. }));
     let is_set = matches!(&rty, Some(Type::Apply { name, .. }) if name == "Set");
     let is_sorted_set =
@@ -410,50 +515,31 @@ pub(crate) fn resolve_builtin_op(
     let receiver_borrow = rty
         .as_ref()
         .map(|ty| crate::Collections::builtin_receiver_borrow(ty, method));
-    let list_remove_mode = if method == "remove" {
-        match args.len() {
-            1 => Some(ListRemoveMode::Value),
-            2 => match &args[1].expr {
-                Expr::EnumLit { variant, .. } if variant == "Val" => Some(ListRemoveMode::Value),
-                Expr::EnumLit { variant, .. } if variant == "Slot" => Some(ListRemoveMode::Slot),
-                // A `@` selector is an enum value by the time codegen runs.
-                // Recover the same fixed mode from sema's evaluated fact so a
-                // non-Int list does not fall through to an unlowered method call.
-                Expr::Ident(name, _) => match cx.const_values.get(name) {
-                    Some(crate::AST::CtValue::Enum {
-                        type_name, variant, ..
-                    }) if type_name == crate::Syntax::TYPE_REMOVE_BY => {
-                        match variant
-                            .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
-                            .unwrap_or(variant)
-                        {
-                            "Val" => Some(ListRemoveMode::Value),
-                            "Slot" => Some(ListRemoveMode::Slot),
-                            _ => None,
-                        }
-                    }
-                    _ if matches!(
-                        &rty,
-                        Some(Type::List(inner)) if **inner == Type::Int
-                    ) =>
-                    {
+    let list_remove_mode = match (method, args.len()) {
+        ("remove", 1) => Some(ListRemoveMode::Value),
+        ("remove", 2) => match args.get(1).map(|arg| &arg.expr) {
+            Some(Expr::EnumLit { variant, .. }) => remove_mode_variant(variant),
+            Some(Expr::Ident(name, _)) => match cx.const_values.get(name) {
+                Some(crate::AST::CtValue::Enum {
+                    type_name, variant, ..
+                }) if type_name == crate::Syntax::TYPE_REMOVE_BY => {
+                    remove_mode_variant(variant)
+                }
+                _ => match &rty {
+                    Some(Type::List(inner)) if **inner == Type::Int => {
                         Some(ListRemoveMode::Dynamic)
                     }
                     _ => None,
                 },
-                _ if matches!(
-                    &rty,
-                    Some(Type::List(inner)) if **inner == Type::Int
-                ) =>
-                {
+            },
+            _ => match &rty {
+                Some(Type::List(inner)) if **inner == Type::Int => {
                     Some(ListRemoveMode::Dynamic)
                 }
                 _ => None,
             },
-            _ => None,
-        }
-    } else {
-        None
+        },
+        _ => None,
     };
     let op = match (method, args.len()) {
         ("len", 0) => {
@@ -495,22 +581,22 @@ pub(crate) fn resolve_builtin_op(
                 TBuiltinOp::RemoveMap
             } else if is_lru {
                 TBuiltinOp::RemoveMap
-            } else if is_priority_queue && list_remove_mode.is_some() {
+            } else if is_priority_queue {
+                let Some(mode) = list_remove_mode else {
+                    return None;
+                };
                 // D-LISTREMOVE1/F: PriorityQueue reuses List's exact selector
                 // shape and panic-line convention (criterion c6 on #1481).
                 let line = crate::Diagnostics::span_line_col(&cx.src, method_span.start).0;
-                TBuiltinOp::PriorityQueueRemove {
-                    line,
-                    mode: list_remove_mode.unwrap(),
-                }
-            } else if (is_list || rty.is_none()) && list_remove_mode.is_some() {
+                TBuiltinOp::PriorityQueueRemove { line, mode }
+            } else if is_list {
+                let Some(mode) = list_remove_mode else {
+                    return None;
+                };
                 // The list form embeds the *method-span* line for its bounds panic,
                 // exactly as `emit_builtin_method` reads `span_line_col(method_span.start)`.
                 let line = crate::Diagnostics::span_line_col(&cx.src, method_span.start).0;
-                TBuiltinOp::RemoveList {
-                    line,
-                    mode: list_remove_mode.unwrap(),
-                }
+                TBuiltinOp::RemoveList { line, mode }
             } else {
                 return None;
             }
@@ -552,20 +638,17 @@ pub(crate) fn resolve_builtin_op(
         ("split", 1) if is_deque => TBuiltinOp::DequeSplit,
         ("split", 1) if is_string => TBuiltinOp::Split,
         ("split", 1) => {
-            let elem = match &rty {
-                Some(Type::List(inner)) => (**inner).clone(),
-                Some(ty) if crate::Collections::is_iter_type(ty) => {
-                    crate::Collections::iter_elem(ty)
-                        .cloned()
-                        .unwrap_or(Type::Int)
+            let fields = match resolved_ret {
+                Some(ret) => tuple_fields(Some(ret))?,
+                None => {
+                    let elem = sequence_elem_ty(rty.as_ref()?)?;
+                    let list_ty = Type::List(Box::new(elem));
+                    vec![
+                        ("left".to_string(), list_ty.clone()),
+                        ("right".to_string(), list_ty),
+                    ]
                 }
-                _ => Type::Int,
             };
-            let list_ty = Type::List(Box::new(elem));
-            let fields = vec![
-                ("left".to_string(), list_ty.clone()),
-                ("right".to_string(), list_ty),
-            ];
             TBuiltinOp::IterSplit {
                 tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
             }
@@ -595,6 +678,7 @@ pub(crate) fn resolve_builtin_op(
         ("to_set", 0) => TBuiltinOp::SetFrom,
         ("sum", 0) => TBuiltinOp::Sum {
             float: matches!(resolved_ret, Some(Type::Float | Type::Float32)),
+            f32: matches!(resolved_ret, Some(Type::Float32)),
         },
         ("product", 0) => TBuiltinOp::Product {
             float: matches!(resolved_ret, Some(Type::Float | Type::Float32)),
@@ -641,8 +725,11 @@ pub(crate) fn resolve_builtin_op(
         ("is_whitespace", 0) if is_string => TBuiltinOp::StringIsWhitespace,
         ("is_ascii", 0) if is_string => TBuiltinOp::StringIsAscii,
         ("to_title", 0) if is_string => TBuiltinOp::StringToTitle,
-        ("is_lower" | "is_upper" | "capitalize" | "swapcase" | "copy" | "normalize", 0)
-            if is_string =>
+        (
+            "count_bytes" | "is_lower" | "is_upper" | "capitalize" | "swapcase" | "copy"
+            | "normalize",
+            0,
+        ) if is_string =>
         {
             TBuiltinOp::StringMethod {
                 method: method.to_string(),
@@ -661,23 +748,35 @@ pub(crate) fn resolve_builtin_op(
         ("to_int", 0) if is_string => TBuiltinOp::ParseInt,
         ("to_float", 0) if is_string => TBuiltinOp::ParseFloat,
         ("split_once", 1) if is_string => {
-            let fields = option_tuple_fields(resolved_ret).unwrap_or_else(|| {
-                vec![
-                    ("before".to_string(), Type::String),
-                    ("after".to_string(), Type::String),
-                ]
-            });
+            let fields = if let Some(ret) = resolved_ret {
+                option_tuple_fields(Some(ret))?
+            } else {
+                let ret = crate::Collections::builtin_method_return(
+                    &Type::String,
+                    method,
+                    args.len(),
+                    false,
+                )
+                .flatten()?;
+                option_tuple_fields(Some(&ret))?
+            };
             TBuiltinOp::StringSplitOnce {
                 tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
             }
         }
         ("cut_last", 1) if is_string => {
-            let fields = option_tuple_fields(resolved_ret).unwrap_or_else(|| {
-                vec![
-                    ("before".to_string(), Type::String),
-                    ("after".to_string(), Type::String),
-                ]
-            });
+            let fields = if let Some(ret) = resolved_ret {
+                option_tuple_fields(Some(ret))?
+            } else {
+                let ret = crate::Collections::builtin_method_return(
+                    &Type::String,
+                    method,
+                    args.len(),
+                    false,
+                )
+                .flatten()?;
+                option_tuple_fields(Some(&ret))?
+            };
             TBuiltinOp::StringCutLast {
                 tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
             }
@@ -715,40 +814,47 @@ pub(crate) fn resolve_builtin_op(
         ("difference", 1) => TBuiltinOp::ListDifference,
         ("random", 0) => TBuiltinOp::ListRandom,
         ("min_max", 0) => {
-            let fields = vec![
-                ("min".to_string(), Type::Int),
-                ("max".to_string(), Type::Int),
-            ];
+            let fields = match resolved_ret {
+                Some(ret) => option_tuple_fields(Some(ret))?,
+                None => {
+                    let elem = sequence_elem_ty(rty.as_ref()?)?;
+                    vec![("min".to_string(), elem.clone()), ("max".to_string(), elem)]
+                }
+            };
             TBuiltinOp::ListMinMax {
                 tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
             }
         }
         ("to_list", 0) if is_map => {
-            let fields = tuple_list_elem_fields(resolved_ret).unwrap_or_else(|| match &rty {
-                Some(Type::Map { key, value, .. }) => vec![
-                    ("key".to_string(), (**key).clone()),
-                    ("value".to_string(), (**value).clone()),
-                ],
-                _ => vec![
-                    ("key".to_string(), Type::Int),
-                    ("value".to_string(), Type::Int),
-                ],
-            });
+            let fields = match resolved_ret {
+                Some(ret) => tuple_list_elem_fields(Some(ret))?,
+                None => {
+                    let Some(Type::Map { key, value, .. }) = rty.as_ref() else {
+                        return None;
+                    };
+                    vec![
+                        ("key".to_string(), (**key).clone()),
+                        ("value".to_string(), (**value).clone()),
+                    ]
+                }
+            };
             TBuiltinOp::MapToList {
                 tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
             }
         }
         ("top_n", 1) if is_map => {
-            let fields = tuple_list_elem_fields(resolved_ret).unwrap_or_else(|| match &rty {
-                Some(Type::Map { key, value, .. }) => vec![
-                    ("key".to_string(), (**key).clone()),
-                    ("value".to_string(), (**value).clone()),
-                ],
-                _ => vec![
-                    ("key".to_string(), Type::Int),
-                    ("value".to_string(), Type::Int),
-                ],
-            });
+            let fields = match resolved_ret {
+                Some(ret) => tuple_list_elem_fields(Some(ret))?,
+                None => {
+                    let Some(Type::Map { key, value, .. }) = rty.as_ref() else {
+                        return None;
+                    };
+                    vec![
+                        ("key".to_string(), (**key).clone()),
+                        ("value".to_string(), (**value).clone()),
+                    ]
+                }
+            };
             TBuiltinOp::MapTopN {
                 tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
             }
@@ -759,20 +865,20 @@ pub(crate) fn resolve_builtin_op(
             TBuiltinOp::ViewNew { line }
         }
         ("split_write", 1) => {
-            let fields = result_tuple_fields(resolved_ret).unwrap_or_else(|| {
-                let elem = match &rty {
-                    Some(Type::List(inner)) => (**inner).clone(),
-                    _ => Type::Int,
-                };
-                let view = Type::Apply {
-                    name: "ViewMut".to_string(),
-                    args: vec![elem],
-                };
-                vec![
-                    ("left".to_string(), view.clone()),
-                    ("right".to_string(), view),
-                ]
-            });
+            let fields = match resolved_ret {
+                Some(ret) => result_tuple_fields(Some(ret))?,
+                None => {
+                    let elem = sequence_elem_ty(rty.as_ref()?)?;
+                    let view = Type::Apply {
+                        name: "ViewMut".to_string(),
+                        args: vec![elem],
+                    };
+                    vec![
+                        ("left".to_string(), view.clone()),
+                        ("right".to_string(), view),
+                    ]
+                }
+            };
             TBuiltinOp::SplitWrite {
                 tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
             }
@@ -794,75 +900,39 @@ pub(crate) fn resolve_builtin_op(
         ("chunks", 1) => TBuiltinOp::Chunks,
         ("windows", 1) => TBuiltinOp::Windows,
         ("indexed", 0) => {
-            // Build the tuple struct name for `(idx: Int, item: T)`.
-            // Fields are alpha-sorted: idx < item.
-            let fields = tuple_list_elem_fields(resolved_ret).unwrap_or_else(|| {
-                let elem_ty = match &rty {
-                    Some(Type::List(inner)) => *inner.clone(),
-                    Some(ty) if crate::Collections::is_iter_type(ty) => {
-                        crate::Collections::iter_elem(ty)
-                            .cloned()
-                            .unwrap_or(Type::Int)
-                    }
-                    _ => Type::Int,
-                };
-                vec![
-                    ("idx".to_string(), Type::Int),
-                    ("item".to_string(), elem_ty),
-                ]
-            });
+            let fields = match resolved_ret {
+                Some(ret) => tuple_list_elem_fields(Some(ret))?,
+                None => {
+                    let elem_ty = sequence_elem_ty(rty.as_ref()?)?;
+                    vec![
+                        ("idx".to_string(), Type::Int),
+                        ("item".to_string(), elem_ty),
+                    ]
+                }
+            };
             let ts = crate::Codegen::Tuples::tuple_struct_name(&fields);
             TBuiltinOp::Indexed { tuple_struct: ts }
         }
         ("indexes", 0) => TBuiltinOp::Indexes,
         ("zip", 1) if is_option => {
-            // D-HOLE1: `a: T?`.zip(`b: U?`) -> `(a: T, b: U)?` — heterogeneous, so
-            // (unlike list zip below) the real `b` type is read from the argument.
-            let fields = option_tuple_fields(resolved_ret).unwrap_or_else(|| {
-                let a_ty = match &rty {
-                    Some(Type::Option(inner)) => (**inner).clone(),
-                    _ => Type::Int,
-                };
-                let b_ty = match tir_recv_jet_ty(&args[0].expr, env) {
-                    Some(Type::Option(inner)) => *inner,
-                    _ => Type::Int,
-                };
-                vec![("a".to_string(), a_ty), ("b".to_string(), b_ty)]
-            });
+            // D-HOLE1: `a: T?`.zip(`b: U?`) -> `(a: T, b: U)?`.
+            let fields = option_tuple_fields(resolved_ret)?;
             let ts = crate::Codegen::Tuples::tuple_struct_name(&fields);
+            let elem_ty = Type::Tuple(
+                fields
+                    .iter()
+                    .map(|(name, ty)| (name.clone(), Box::new(ty.clone())))
+                    .collect(),
+            );
             TBuiltinOp::OptionZip {
                 tuple_struct: ts,
-                elem_ty: Type::Tuple(
-                    fields
-                        .into_iter()
-                        .map(|(name, ty)| (name, Box::new(ty)))
-                        .collect(),
-                ),
+                elem_ty,
             }
         }
         ("zip", 1) => {
-            // Build the tuple struct name for `(a: T, b: U)`.
-            let fields = tuple_list_elem_fields(resolved_ret).unwrap_or_else(|| {
-                let a_ty = match &rty {
-                    Some(Type::List(inner)) => *inner.clone(),
-                    Some(ty) if crate::Collections::is_iter_type(ty) => {
-                        crate::Collections::iter_elem(ty)
-                            .cloned()
-                            .unwrap_or(Type::Int)
-                    }
-                    _ => Type::Int,
-                };
-                let b_ty = match tir_recv_jet_ty(&args[0].expr, env) {
-                    Some(Type::List(inner)) => *inner,
-                    Some(ty) if crate::Collections::is_iter_type(&ty) => {
-                        crate::Collections::iter_elem(&ty)
-                            .cloned()
-                            .unwrap_or(Type::Int)
-                    }
-                    _ => Type::Int,
-                };
-                vec![("a".to_string(), a_ty), ("b".to_string(), b_ty)]
-            });
+            // Build the tuple struct name for `(a: T, b: U)`. Sema has already
+            // refined both element types in the resolved return.
+            let fields = tuple_list_elem_fields(resolved_ret)?;
             let ts = crate::Codegen::Tuples::tuple_struct_name(&fields);
             let field_types = fields.iter().map(|(_, ty)| ty.clone()).collect();
             TBuiltinOp::Zip {
@@ -876,35 +946,25 @@ pub(crate) fn resolve_builtin_op(
             }
         }
         ("unzip", 0) => {
-            let fields = tuple_fields(resolved_ret).unwrap_or_else(|| {
-                let pair_elem = match &rty {
-                    Some(Type::List(inner)) => Some(inner.as_ref()),
-                    Some(ty) if crate::Collections::is_iter_type(ty) => {
-                        crate::Collections::iter_elem(ty)
-                    }
-                    _ => None,
-                };
-                let (a_ty, b_ty) = match pair_elem {
-                    Some(Type::Tuple(fields)) => {
-                        let a = fields
-                            .iter()
-                            .find(|(name, _)| name == "a")
-                            .map(|(_, ty)| (**ty).clone())
-                            .unwrap_or(Type::Int);
-                        let b = fields
-                            .iter()
-                            .find(|(name, _)| name == "b")
-                            .map(|(_, ty)| (**ty).clone())
-                            .unwrap_or(Type::Int);
-                        (a, b)
-                    }
-                    _ => (Type::Int, Type::Int),
-                };
-                vec![
-                    ("a".to_string(), Type::List(Box::new(a_ty))),
-                    ("b".to_string(), Type::List(Box::new(b_ty))),
-                ]
-            });
+            let fields = match resolved_ret {
+                Some(ret) => tuple_fields(Some(ret))?,
+                None => {
+                    let pair = sequence_elem_ty(rty.as_ref()?)?;
+                    let pair_fields = tuple_fields(Some(&pair))?;
+                    let a_ty = pair_fields
+                        .iter()
+                        .find(|(name, _)| name == "a")
+                        .map(|(_, ty)| ty.clone())?;
+                    let b_ty = pair_fields
+                        .iter()
+                        .find(|(name, _)| name == "b")
+                        .map(|(_, ty)| ty.clone())?;
+                    vec![
+                        ("a".to_string(), Type::List(Box::new(a_ty))),
+                        ("b".to_string(), Type::List(Box::new(b_ty))),
+                    ]
+                }
+            };
             let ts = crate::Codegen::Tuples::tuple_struct_name(&fields);
             TBuiltinOp::Unzip { tuple_struct: ts }
         }
@@ -1018,145 +1078,123 @@ pub(crate) fn resolve_builtin_op(
         }
     };
     if let Some(receiver_borrow) = receiver_borrow {
-        let receiver_ty = rty.as_ref();
-        debug_assert_eq!(
-            receiver_borrow,
-            emitted_borrow,
-            "builtin receiver borrow disagreement for {method} on {receiver_ty:?} (op {op:?})"
-        );
+        if receiver_borrow != emitted_borrow {
+            return None;
+        }
     }
     Some(op)
 }
 
 /// c109 Phase 9: the resolved return type of a built-in collection/string method,
-/// from `Collections::builtin_method_return` (the sema table). Kept total per the
-/// design principle; rarely load-bearing in emit (a binding carries sema's `b.ty`),
-/// but resolved here so the TIR never guesses.
-///
-/// The table answers three ways — `Some(Some(t))` a return type, `Some(None)` a
-/// genuinely void method, `None` no row for this receiver/method/arity — and the
-/// last two arrive in the TIR as the SAME `Unit`. That collapse is why
-/// `LowerCtx::emit_print` once printed nothing for `Url.path_segments().join(sep)`
-/// (a `None` row wearing a printable `Unit`), and the claim this doc used to make
-/// — that a missing row is impossible for a call sema validated — is what the
-/// `JoinSep` carve-out there disproves. Anything reading a `Unit` out of the TIR
-/// must therefore treat it as "void OR unresolved", never as "a value that
-/// renders as nothing".
-pub(crate) fn builtin_result_ty(method: &str, nargs: usize, recv_ty: Option<&Type>) -> Type {
-    match recv_ty.and_then(|rt| crate::Collections::builtin_method_return(rt, method, nargs, false))
-    {
-        Some(Some(t)) => t,
-        // Void method and no-row both land on `Unit`; see the note above.
-        Some(None) | None => unit_type(),
-    }
-}
+/// from `Collections::builtin_method_return` (the sema table). `Some(Unit)` means
+/// the canonical row is a genuinely void method; `None` means no canonical row.
+
 
 /// c109 Phase 11: resolve a closure-taking collection method into a total
-/// `TClosureOp`, reproducing the closure arms exactly. The receiver-type branch
-/// (`rty = expr_jet_ty(receiver)`) picks Map (`EachMap`) vs trait-object list
-/// (`EachRef`) vs plain list; the Fn-vs-FnMut branch reads the lambda arg's
-/// `needs_fn_mut` meta. All decisions made HERE, never in emit (I3). The gate
-/// proved a literal lambda arg, so `needs_fn_mut` is always readable; a non-lambda
-/// arg defaults to the non-mut form, matching the AST `else` branch.
+/// `TClosureOp`. Every receiver and callback-dispatch fact is explicit; a missing
+/// fact returns `None` so the caller can emit an invariant violation for a checked
+/// call or try another analytical lowering form.
 pub(crate) fn resolve_closure_op(
     recv_ty: &Type,
     method: &str,
     args: &[crate::AST::CallArg],
     cx: &Cx,
     fallible_callback: bool,
-) -> TClosureOp {
-    // The lambda arg's FnMut fact (the AST checks `args[0]` for map/each).
-    let lambda_index = usize::from(method == "edit_disjoint");
-    let fn_mut = matches!(args.get(lambda_index).map(|a| &a.expr), Some(Expr::Lambda(l)) if l.meta.needs_fn_mut);
+    callback_needs_fn_mut: Option<bool>,
+    callback_param_count: Option<usize>,
+) -> Option<TClosureOp> {
+    let recv_ty = base_receiver_ty(recv_ty);
+    let elem_ty = sequence_elem_ty(recv_ty);
+    let is_sequence = elem_ty.is_some();
+    let is_list = list_receiver(recv_ty);
+    let is_iter = matches!(
+        recv_ty,
+        Type::Apply { name, args }
+            if args.len() == 1
+                && matches!(
+                    name.as_str(),
+                    crate::Syntax::TYPE_ITER | crate::Syntax::TYPE_VIEW_ITER
+                )
+    );
+    let is_map = matches!(recv_ty, Type::Map { .. });
+    let is_option = matches!(recv_ty, Type::Option(_));
+    let is_bag =
+        matches!(recv_ty, Type::Apply { name, .. } if name == crate::Syntax::TYPE_TALLY);
+    let is_view = view_receiver(recv_ty);
+    let has_args = |count: usize| args.len() == count;
     let op = match method {
-        "edit_disjoint" => TClosureOp::EditDisjoint,
-        "map" => {
-            // D-HOLE1: `.map` on `T?` uses Rust's native `Option::map` directly —
-            // never the mutable-list form.
-            if matches!(recv_ty, Type::Option(_)) {
-                TClosureOp::OptionMap
-            } else if matches!(recv_ty, Type::Map { .. }) {
-                TClosureOp::MapMap
-            } else if fallible_callback {
-                TClosureOp::TryMap
-            } else if matches!(recv_ty, Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut"))
-            {
-                // D-DYNARRAY1: map-to-owned — never the `.clone()`-into-Vec form
-                // the other list ops use (`recv` is already a borrow, not owned).
-                TClosureOp::ViewMap
-            } else if fn_mut {
-                TClosureOp::MapMut
-            } else {
-                TClosureOp::Map
-            }
-        }
-        "filter" if matches!(recv_ty, Type::Map { .. }) => TClosureOp::MapFilter,
+        "edit_disjoint" if is_list && has_args(2) => TClosureOp::EditDisjoint,
+        "map" if is_option && has_args(1) => TClosureOp::OptionMap,
+        "map" if is_map && has_args(1) => TClosureOp::MapMap,
+        "map" if !is_sequence || !has_args(1) => return None,
+        "map" if fallible_callback => TClosureOp::TryMap,
+        "map" if is_view => TClosureOp::ViewMap,
+        "map" => match callback_needs_fn_mut {
+            Some(true) => TClosureOp::MapMut,
+            Some(false) => TClosureOp::Map,
+            None => return None,
+        },
+        "filter" if is_map && has_args(1) => TClosureOp::MapFilter,
+        "filter" if !is_sequence || !has_args(1) => return None,
         "filter" if fallible_callback => TClosureOp::TryFilter,
         "filter" => TClosureOp::Filter,
-        "each" => {
-            // The AST: `match rty { Map => jet_map_each, _ => list_each }`, where
-            // `list_each` checks trait-object-list FIRST, then lambda FnMut.
-            match recv_ty {
-                Type::Map { .. } => TClosureOp::EachMap,
-                Type::List(inner) if list_carries_trait(cx, inner) => TClosureOp::EachRef,
-                _ if fn_mut => TClosureOp::EachMut,
-                _ => TClosureOp::Each,
-            }
-        }
-        "find" => TClosureOp::Find,
-        "any" if matches!(recv_ty, Type::Apply { name, .. } if name == crate::Syntax::TYPE_TALLY) => {
-            TClosureOp::BagAny
-        }
-        "any" if matches!(recv_ty, Type::Map { .. }) => TClosureOp::MapAny,
-        "any" => TClosureOp::Any,
-        "all" if matches!(recv_ty, Type::Map { .. }) => TClosureOp::MapAll,
-        "all" => TClosureOp::All,
-        "count_where" => TClosureOp::CountWhere,
-        "sort_by"
-            if fallible_callback
-                && matches!(args.first().map(|a| &a.expr), Some(Expr::Lambda(lam)) if lam.params.len() == 1) =>
+        "each" if is_map && has_args(1) => TClosureOp::EachMap,
+        "each" if !is_sequence || !has_args(1) => return None,
+        "each" if is_list
+            && elem_ty
+                .as_ref()
+                .is_some_and(|elem| list_carries_trait(cx, elem)) =>
         {
-            TClosureOp::TrySortBy
+            TClosureOp::EachRef
         }
-        "sort_by" if matches!(args.first().map(|a| &a.expr), Some(Expr::Lambda(lam)) if lam.params.len() == 2) => {
-            TClosureOp::SortByCompare
-        }
-        "sort_by" => TClosureOp::SortBy,
-        "sort_by_desc"
-            if fallible_callback
-                && matches!(args.first().map(|a| &a.expr), Some(Expr::Lambda(lam)) if lam.params.len() == 1) =>
-        {
-            TClosureOp::TrySortByDesc
-        }
-        "sort_by_desc" => TClosureOp::SortByDesc,
-        "reduce" => TClosureOp::Reduce,
-        // D-ITER1: new closure adapters.
-        "take_while" => TClosureOp::TakeWhile,
-        "skip_while" => TClosureOp::SkipWhile,
-        "flat_map" if matches!(recv_ty, Type::Map { .. }) => TClosureOp::MapFlatMap,
-        // D-CORE-EAGER2=A: one op; emit/eval choose eager List or lazy Iter
-        // behavior from the receiver, as map/filter already do.
-        "flat_map" => TClosureOp::FlatMap,
-        "binary_search_by" => TClosureOp::ListBinarySearchBy,
-        "min_max_by" => {
+        "each" => match callback_needs_fn_mut {
+            Some(true) => TClosureOp::EachMut,
+            Some(false) => TClosureOp::Each,
+            None => return None,
+        },
+        "find" if is_sequence && has_args(1) => TClosureOp::Find,
+        "any" if is_bag && has_args(1) => TClosureOp::BagAny,
+        "any" if is_map && has_args(1) => TClosureOp::MapAny,
+        "any" if is_sequence && has_args(1) => TClosureOp::Any,
+        "all" if is_map && has_args(1) => TClosureOp::MapAll,
+        "all" if is_sequence && has_args(1) => TClosureOp::All,
+        "count_where" if is_sequence && has_args(1) => TClosureOp::CountWhere,
+        "sort_by" if !is_list || !has_args(1) => return None,
+        "sort_by" => match (callback_param_count, fallible_callback) {
+            (Some(1), true) => TClosureOp::TrySortBy,
+            (Some(1), false) => TClosureOp::SortBy,
+            (Some(2), false) => TClosureOp::SortByCompare,
+            _ => return None,
+        },
+        "sort_by_desc" if !is_list || !has_args(1) => return None,
+        "sort_by_desc" => match (callback_param_count, fallible_callback) {
+            (Some(1), true) => TClosureOp::TrySortByDesc,
+            (Some(1), false) => TClosureOp::SortByDesc,
+            _ => return None,
+        },
+        "reduce" if (is_list || is_iter) && has_args(2) => TClosureOp::Reduce,
+        "take_while" if is_sequence && has_args(1) => TClosureOp::TakeWhile,
+        "skip_while" if is_sequence && has_args(1) => TClosureOp::SkipWhile,
+        "flat_map" if is_map && has_args(1) => TClosureOp::MapFlatMap,
+        "flat_map" if is_sequence && has_args(1) => TClosureOp::FlatMap,
+        "binary_search_by" if is_list && has_args(1) => TClosureOp::ListBinarySearchBy,
+        "min_max_by" if is_list && has_args(1) => {
+            let elem = elem_ty.as_ref()?;
             let fields = vec![
-                ("min".to_string(), Type::Int),
-                ("max".to_string(), Type::Int),
+                ("min".to_string(), elem.clone()),
+                ("max".to_string(), elem.clone()),
             ];
             TClosureOp::ListMinMaxBy {
                 tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
             }
         }
-        "filter_map" => TClosureOp::FilterMap,
-        "para_map" => TClosureOp::ParaMap,
-        "para_filter" => TClosureOp::ParaFilter,
-        "para_fold" => TClosureOp::ParaFold,
-        "para_partition" => {
-            let elem_ty = match recv_ty {
-                Type::List(inner) | Type::FixedList { elem: inner, .. } => (**inner).clone(),
-                _ => Type::Int,
-            };
-            let list_ty = Type::List(Box::new(elem_ty));
+        "filter_map" if is_sequence && has_args(1) => TClosureOp::FilterMap,
+        "para_map" if is_list && matches!(args.len(), 1 | 2) => TClosureOp::ParaMap,
+        "para_filter" if is_list && has_args(1) => TClosureOp::ParaFilter,
+        "para_fold" if is_list && has_args(3) => TClosureOp::ParaFold,
+        "para_partition" if is_list && has_args(1) => {
+            let elem = elem_ty.as_ref()?;
+            let list_ty = Type::List(Box::new(elem.clone()));
             let fields = vec![
                 ("false_".to_string(), list_ty.clone()),
                 ("true_".to_string(), list_ty),
@@ -1165,43 +1203,31 @@ pub(crate) fn resolve_closure_op(
                 tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
             }
         }
-        "scan" => TClosureOp::Scan,
-        "fold" => {
-            if matches!(recv_ty, Type::Map { .. }) {
-                TClosureOp::MapFold
-            } else if matches!(recv_ty, Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut"))
-            {
-                TClosureOp::ViewFold
-            } else {
-                TClosureOp::Fold
-            }
-        }
-        "position" => TClosureOp::Position,
-        "min_by" => TClosureOp::MinBy,
-        "max_by" => TClosureOp::MaxBy,
-        "group_by" => TClosureOp::GroupBy,
-        "count_by" => TClosureOp::CountBy,
-        "update_first" => TClosureOp::UpdateFirst,
-        "dedup_by" => TClosureOp::DedupBy,
-        "is_sorted_by" => TClosureOp::IsSortedBy,
-        "chunk_while" => TClosureOp::ChunkWhile,
-        "partition" => {
-            // Compute the tuple struct name from the receiver element type.
-            // recv = List<T>; partition returns (false_: [T], true_: [T]).
-            let elem_ty = match recv_ty {
-                Type::List(inner) => (**inner).clone(),
-                _ => Type::Int,
-            };
-            let list_ty = Type::List(Box::new(elem_ty.clone()));
+        "scan" if is_sequence && has_args(2) => TClosureOp::Scan,
+        "fold" if is_map && has_args(2) => TClosureOp::MapFold,
+        "fold" if is_view && has_args(2) => TClosureOp::ViewFold,
+        "fold" if (is_list || is_iter) && has_args(2) => TClosureOp::Fold,
+        "position" if is_sequence && has_args(1) => TClosureOp::Position,
+        "min_by" if is_sequence && has_args(1) => TClosureOp::MinBy,
+        "max_by" if is_sequence && has_args(1) => TClosureOp::MaxBy,
+        "group_by" if is_sequence && has_args(1) => TClosureOp::GroupBy,
+        "count_by" if is_sequence && has_args(1) => TClosureOp::CountBy,
+        "update_first" if is_list && has_args(2) => TClosureOp::UpdateFirst,
+        "dedup_by" if is_sequence && has_args(1) => TClosureOp::DedupBy,
+        "is_sorted_by" if is_sequence && has_args(1) => TClosureOp::IsSortedBy,
+        "chunk_while" if is_sequence && has_args(1) => TClosureOp::ChunkWhile,
+        "partition" if is_sequence && has_args(1) => {
+            let elem = elem_ty.as_ref()?;
+            let list_ty = Type::List(Box::new(elem.clone()));
             let fields = vec![
                 ("false_".to_string(), list_ty.clone()),
                 ("true_".to_string(), list_ty),
             ];
-            let ts = crate::Codegen::Tuples::tuple_struct_name(&fields);
-            TClosureOp::Partition { tuple_struct: ts }
+            TClosureOp::Partition {
+                tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
+            }
         }
-        // The gate (`is_closure_method`) admits only the names above.
-        _ => unreachable!("non-closure method in resolve_closure_op (gate)"),
+        _ => return None,
     };
     if matches!(
         op,
@@ -1210,13 +1236,12 @@ pub(crate) fn resolve_closure_op(
             | TClosureOp::TrySortBy
             | TClosureOp::TrySortByDesc
             | TClosureOp::SortByCompare
-    ) {
-        debug_assert_eq!(
-            crate::Collections::builtin_receiver_borrow(recv_ty, method),
-            crate::Collections::BuiltinReceiverBorrow::EagerWrite
-        );
+    ) && crate::Collections::builtin_receiver_borrow(recv_ty, method)
+        != crate::Collections::BuiltinReceiverBorrow::EagerWrite
+    {
+        return None;
     }
-    op
+    Some(op)
 }
 
 /// c109 Phase 11: TIR-local reproduction of codegen's `list_carries_trait` — a list

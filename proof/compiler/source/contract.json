@@ -1,0 +1,157 @@
+{
+  "schema": "jet.source-contract.v1",
+  "schema_version": 1,
+  "contract_id": "jet-source-contract-v1",
+  "policy": {
+    "decision_id": "D-COMPILER-PROOF1",
+    "outcome": "A",
+    "status": "ratified",
+    "scope": "source bytes, lexical structure, parsing, and rejection before semantic checking",
+    "foreign_suffix": "semantic checking, code generation, runtime, and foreign tools remain explicit downstream boundaries"
+  },
+  "claim": {
+    "kind": "source-preservation",
+    "statement": "For an identified UTF-8 source graph, the canonical Jet front end preserves source bytes and origins, consumes the complete input, builds the intended syntax, or returns a registered source diagnostic for the modeled rejection.",
+    "preconditions": [
+      "The entry bytes and every imported source byte are identified by SHA-256.",
+      "The canonical Syntax.rs and syntax decision ledger are the only user-facing grammar authorities.",
+      "The production lexer and parser are the implementation under observation.",
+      "The compiler inspection command returns the versioned front-end value without a backend fallback.",
+      "A tool crash, timeout, signal, or malformed response is not an ordinary source rejection."
+    ],
+    "observation_alphabet": [
+      "source_bytes",
+      "lexical_tokens",
+      "input_consumption",
+      "syntax_nodes",
+      "source_origins",
+      "diagnostics",
+      "source_graph",
+      "construction_identity"
+    ],
+    "unsupported_cases": [
+      "A missing or stale source witness",
+      "A parser or lexer output without exact source bytes",
+      "A source graph whose imported files are not identified",
+      "A source rejection without a registered diagnostic code and span",
+      "An unavailable compiler, tool crash, timeout, or malformed JSON response",
+      "A changed parser, lexer, grammar authority, source graph, or construction input"
+    ]
+  },
+  "execution": {
+    "schema": "jet.compiler-inspection.v1",
+    "runner": "scripts/agent/jet-env",
+    "compiler": "target/debug/jet",
+    "command": "scripts/agent/jet-env full jet inspect compiler <lex|parse|check> <entry>",
+    "operations": ["lex", "parse", "check"],
+    "timeout_ms": 120000,
+    "scratch": "$HOME/.cache/jet-source-proof",
+    "unknown_status": "unverified",
+    "crash_policy": "tool failures are unavailable or invalid_oracle, never source rejection"
+  },
+  "binding_methods": [
+    {
+      "method": "verified_construction",
+      "source": "proof/compiler/source/contract.json",
+      "implementation": "crates/jet-lexer/src, crates/jet-parser/src, Source/Compiler.rs, Source/CmdCompile.rs, and crates/jet-driver/src/Loader.rs",
+      "construction": "the canonical compiler inspection seam and its exact-byte span invariants",
+      "checker": "proof/compiler/source/check.mjs",
+      "limit": "the finite source witnesses do not establish universal preservation"
+    },
+    {
+      "method": "direct_verification",
+      "source": "crates/jet-lexer/src, crates/jet-parser/src, Source/Compiler.rs, Source/CmdCompile.rs, and crates/jet-driver/src/Loader.rs",
+      "implementation": "target/debug/jet inspect compiler lex|parse|check",
+      "candidate_binding": "the recorded source implementation file set and compiler-proof identity",
+      "checker": "proof/compiler/source/check.mjs",
+      "limit": "the checker observes the production seam; it is not a mechanized theorem about all parser states"
+    },
+    {
+      "method": "translation_certificate",
+      "source": "proof/compiler/source/witnesses.json",
+      "implementation": "proof/compiler/source/check.mjs",
+      "certificate": "retained positive, negative, graph, scope, literal, and mutation source witnesses",
+      "checker": "proof/compiler/source/check.mjs",
+      "limit": "finite witnesses are evidence and cannot claim an unbounded proof"
+    }
+  ],
+  "identity": {
+    "schema": "jet.compiler-proof.v1",
+    "manifest_path": "proof/compiler/toolchain/manifest.json",
+    "authority_key": "compiler-proof.source",
+    "claim_id": "compiler-proof.identity-direct",
+    "identity_digest_source": "scripts/agent/compiler-proof.mjs:identityDigest",
+    "driver_path": "scripts/agent/compiler-proof.mjs",
+    "required_fields": [
+      "claim.identity_sha256",
+      "candidate.record_identity.target_inputs_sha256",
+      "candidate.record_identity.tool_version",
+      "candidate.record_identity.engine",
+      "candidate.commit",
+      "candidate.compiler.source",
+      "candidate.compiler.artifact",
+      "candidate.configuration",
+      "candidate.target",
+      "checker.toolchain_pin_sha256",
+      "proof.artifact",
+      "raw_replay"
+    ]
+  },
+  "coverage": {
+    "relation_path": "proof/compiler/obligations.json",
+    "generator": "proof/compiler/semantics/generate-obligations.mjs",
+    "owner": "#2936",
+    "obligations": [
+      {
+        "id": "boundary:source-bytes",
+        "rule": "source.bytes-and-origins",
+        "subject": "source processing"
+      },
+      {
+        "id": "boundary:lexing",
+        "rule": "source.lexical-structure",
+        "subject": "lexical structure"
+      },
+      {
+        "id": "boundary:parsing",
+        "rule": "source.parse-and-rejection",
+        "subject": "parsing and rejection"
+      }
+    ],
+    "qualification_rule": "Every source boundary row stays blocked unless an implementation-bound witness and current identity are present; no finite corpus claims universal proof."
+  },
+  "certificates": [
+    "exact_source_bytes",
+    "token_spans_and_utf8_boundaries",
+    "complete_input_consumption",
+    "syntax_node_origins",
+    "precedence_token_order",
+    "nested_scope_facts",
+    "qualified_import_graph",
+    "registered_rejection",
+    "mutation_identity"
+  ],
+  "boundary": {
+    "proven": [
+      "The checker validates the source contract, witness schema, identity fields, and obligation ownership.",
+      "The canonical inspection output is checked against exact source bytes, byte spans, graph descriptors, and registered diagnostics.",
+      "Tool failures, stale identities, malformed responses, discarded witnesses, and missing source boundaries cannot qualify as source proof."
+    ],
+    "assumed": [
+      "The ratified Syntax.rs and syntax decision ledger state the intended Jet source law.",
+      "The production compiler inspection command reaches the same lexer, parser, loader, and diagnostic paths used by ordinary compilation.",
+      "The pinned jet.compiler-proof.v1 claim identifies the selected candidate toolchain."
+    ],
+    "tested": [
+      "Positive precedence, scope, Unicode/literal, and imported-graph witnesses preserve their recorded source origins.",
+      "A malformed source witness yields its registered diagnostic rather than a checker or process failure.",
+      "An appended malformed suffix is retained as a mutation and cannot be silently discarded."
+    ],
+    "blocked": [
+      "Universal preservation for every lexical, parsing, expansion, and source-graph input.",
+      "A fresh compiler replay or complete corpus qualification when the pinned compiler is unavailable.",
+      "Semantic checking, lowering, optimization, runtime, adapter, and foreign-tool preservation beyond this source boundary."
+    ],
+    "qualification": "blocked"
+  }
+}

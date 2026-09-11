@@ -6,43 +6,12 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use std::collections::BTreeSet;
-use std::sync::LazyLock;
 
-/// D-META-ONE1: the readable effect source is the only root-table input.
-pub const EFFECT_SOURCE: &str = include_str!("../../jet-codegen/src/Prelude/Effects.jet");
-
-/// Closed authority roots, read once from the embedded Prelude source.
-///
-/// `Panic` and `Mem` remain parseable deny-only rows, but are deliberately not
-/// part of this grantable root table (D-PANICROOT1, D-AUTHORITY-MEM1).
-pub static EFFECT_ROOTS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
-    EFFECT_SOURCE
-        .lines()
-        .filter_map(|line| line.trim().strip_prefix("effect "))
-        .map(str::trim)
-        .filter(|root| !root.contains('.'))
-        .collect()
-});
-
-/// Typed view of the canonical effect-root table.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Effect {
-    Net,
-    FS,
-    IO,
-    DB,
-    Time,
-    Rand,
-    Env,
-    Exec,
-    Log,
-    GPU,
-    Panic,
-    FFI,
-    Browser,
-    Secret,
-    Mem,
-}
+pub use crate::BuildEffects::BuildEffect;
+pub use crate::Effects::{
+    effect_declarations, Effect, EffectDeclaration, EFFECT_DECLARATIONS, EFFECT_ROOTS,
+    EFFECT_SOURCE,
+};
 
 impl Effect {
     pub fn requires_comptime_gate(self) -> bool {
@@ -57,128 +26,6 @@ impl Effect {
                 | Self::Browser
                 | Self::Secret
         )
-    }
-
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::Net => "Net",
-            Self::FS => "FS",
-            Self::IO => "IO",
-            Self::DB => "DB",
-            Self::Time => "Time",
-            Self::Rand => "Rand",
-            Self::Env => "Env",
-            Self::Exec => "Exec",
-            Self::Log => "Log",
-            Self::GPU => "GPU",
-            Self::Panic => "Panic",
-            Self::FFI => "FFI",
-            Self::Browser => "Browser",
-            Self::Secret => "Secret",
-            Self::Mem => "Mem",
-        }
-    }
-
-    pub fn parse(root: &str) -> Option<Self> {
-        let canonical = parse_root(root)?;
-        if canonical != root {
-            return None;
-        }
-        Some(match canonical {
-            "Net" => Self::Net,
-            "FS" => Self::FS,
-            "IO" => Self::IO,
-            "DB" => Self::DB,
-            "Time" => Self::Time,
-            "Rand" => Self::Rand,
-            "Env" => Self::Env,
-            "Exec" => Self::Exec,
-            "Log" => Self::Log,
-            "GPU" => Self::GPU,
-            "Panic" => Self::Panic,
-            "FFI" => Self::FFI,
-            "Browser" => Self::Browser,
-            "Secret" => Self::Secret,
-            "Mem" => Self::Mem,
-            _ => return None,
-        })
-    }
-
-    pub fn all() -> Holds {
-        EFFECT_ROOTS
-            .iter()
-            .map(|root| (*root).to_string())
-            .collect()
-    }
-}
-
-/// Build authority is a typed view over the same canonical root table.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum BuildEffect {
-    Net,
-    FS,
-    IO,
-    DB,
-    Time,
-    Rand,
-    Env,
-    Exec,
-    Log,
-    GPU,
-}
-
-impl BuildEffect {
-    pub const ALL: [Self; 10] = [
-        Self::Net,
-        Self::FS,
-        Self::IO,
-        Self::DB,
-        Self::Time,
-        Self::Rand,
-        Self::Env,
-        Self::Exec,
-        Self::Log,
-        Self::GPU,
-    ];
-
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::Net => "Net",
-            Self::FS => "FS",
-            Self::IO => "IO",
-            Self::DB => "DB",
-            Self::Time => "Time",
-            Self::Rand => "Rand",
-            Self::Env => "Env",
-            Self::Exec => "Exec",
-            Self::Log => "Log",
-            Self::GPU => "GPU",
-        }
-    }
-
-    pub const fn flag(self) -> &'static str {
-        match self {
-            Self::Net => "net",
-            Self::FS => "fs",
-            Self::IO => "io",
-            Self::DB => "db",
-            Self::Time => "time",
-            Self::Rand => "rand",
-            Self::Env => "env",
-            Self::Exec => "exec",
-            Self::Log => "log",
-            Self::GPU => "gpu",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        if value.contains('.') {
-            return None;
-        }
-        let canonical = parse_root(value)?;
-        Self::ALL
-            .into_iter()
-            .find(|effect| canonical == effect.name())
     }
 }
 
@@ -215,19 +62,200 @@ pub fn parse_right(right: &str) -> Option<String> {
         None => root.to_string(),
     })
 }
+/// True when the source-declared irreversible fact covers `right`.
+///
+/// A root declaration such as `effect FFI @irreversible` covers every
+/// foreign leaf through the same ancestor relation used by authority rows.
+pub fn is_declared_irreversible(right: &str) -> bool {
+    let canonical = parse_right(right).unwrap_or_else(|| right.trim().to_string());
+    effect_declarations()
+        .iter()
+        .filter(|declaration| declaration.irreversible)
+        .any(|declaration| covers(declaration.name, &canonical))
+}
 
 /// D-EFFTREE1: a bound covers itself and every descendant in the rights tree.
+///
+/// Resource-qualified rights use `:` for hosts and paths (for example,
+/// `FS.Read:/data` or `Net.Connect:api.example.com`). A qualified descendant
+/// must cross a separator boundary, so `/data` does not accidentally cover
+/// `/database`.
 pub fn covers(bound: &str, right: &str) -> bool {
     let bound = parse_right(bound).unwrap_or_else(|| bound.trim().to_string());
     let right = parse_right(right).unwrap_or_else(|| right.trim().to_string());
+    let qualified = bound.contains(':');
     right == bound
         || right
             .strip_prefix(&bound)
-            .is_some_and(|suffix| suffix.starts_with('.'))
+            .is_some_and(|suffix| {
+                suffix.as_bytes().first().is_some_and(|byte| {
+                    if qualified {
+                        *byte == b'/'
+                    } else {
+                        matches!(byte, b'.' | b':' | b'/')
+                    }
+                })
+            })
 }
 
 /// One rights carrier for every authority checkpoint.
 pub type Holds = BTreeSet<String>;
+
+/// D-AUTHORITY-MODEL1: the canonical authority value projected to runtime
+/// adapters. It owns the same `Holds` relation used by compile/build/session
+/// policy; sandbox wrappers must not maintain a second grant set.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Authority {
+    holds: Holds,
+}
+
+/// A requested scope that would widen its parent authority.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TightenError {
+    pub uncovered: Holds,
+}
+
+impl std::fmt::Display for TightenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let rights = self.uncovered.iter().cloned().collect::<Vec<_>>().join(", ");
+        write!(f, "authority scope widens its parent for `{rights}`")
+    }
+}
+
+impl std::error::Error for TightenError {}
+
+impl Authority {
+    /// Construct an authority from canonical or resource-qualified rights.
+    /// Unknown spellings are retained for the caller's diagnostic; policy
+    /// checks still fail closed because they are never covered by a known hold.
+    pub fn from_rights<I, S>(rights: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let holds = rights
+            .into_iter()
+            .map(Into::into)
+            .map(|right| parse_right(&right).unwrap_or(right))
+            .collect();
+        Self { holds }
+    }
+
+    pub fn from_holds(holds: Holds) -> Self {
+        Self { holds }
+    }
+
+    pub fn holds(&self) -> &Holds {
+        &self.holds
+    }
+
+    pub fn rights(&self) -> impl Iterator<Item = &str> {
+        self.holds.iter().map(String::as_str)
+    }
+
+    pub fn allows(&self, right: &str) -> bool {
+        covers_any(&self.holds, right)
+    }
+
+    /// True when this authority can satisfy a host operation whose declared
+    /// right is `right`.  Unlike `allows`, this also accepts a resource
+    /// qualified hold (`FS.Read:/data`) for the unqualified operation
+    /// (`FS.Read`).  The operation is still bounded by the held descendant;
+    /// callers must apply that resource to their path/host argument.
+    pub fn allows_operation(&self, right: &str) -> bool {
+        self.allows(right) || self.holds.iter().any(|held| covers(right, held))
+    }
+
+    /// Check one typed host import against this authority without letting an
+    /// adapter reinterpret the right or keep a parallel grant table.
+    pub fn decide_import(&self, import: &HostImportFact) -> Verdict {
+        if self.allows_operation(import.required_grant()) {
+            Verdict::Allowed
+        } else {
+            Verdict::Missing
+        }
+    }
+
+    /// Return a child authority only when every requested right is covered by
+    /// this authority. The child retains exactly the requested scope.
+    pub fn tighten(&self, requested: &Holds) -> Result<Self, TightenError> {
+        let uncovered = uncovered(requested, &self.holds);
+        if uncovered.is_empty() {
+            Ok(Self::from_holds(requested.clone()))
+        } else {
+            Err(TightenError { uncovered })
+        }
+    }
+}
+
+/// Stable, typed result of checking one host import.  This is deliberately
+/// data-only so AOT, JIT, interpreter, web, and host adapters all marshal the
+/// same authority verdict rather than re-solving policy locally.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostImportDecision {
+    pub import: HostImportFact,
+    pub verdict: Verdict,
+}
+
+impl HostImportDecision {
+    pub fn check(authority: &Authority, import: HostImportFact) -> Self {
+        let verdict = authority.decide_import(&import);
+        Self { import, verdict }
+    }
+
+    pub fn is_allowed(&self) -> bool {
+        self.verdict == Verdict::Allowed
+    }
+}
+
+impl HostImportFact {
+    pub fn decision(&self, authority: &Authority) -> HostImportDecision {
+        HostImportDecision::check(authority, self.clone())
+    }
+}
+
+/// Backend-neutral description of one host-provided operation. Payloads are
+/// copied at the boundary and refer to the existing interface snapshot type
+/// identities rather than introducing a second wire type registry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostImportFact {
+    pub id: String,
+    pub operation: String,
+    pub required_right: String,
+    pub parameter_type_ids: Vec<String>,
+    pub result_type_id: Option<String>,
+}
+
+impl HostImportFact {
+    pub fn new(
+        id: impl Into<String>,
+        operation: impl Into<String>,
+        required_right: impl Into<String>,
+        parameter_type_ids: impl IntoIterator<Item = String>,
+        result_type_id: Option<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            operation: operation.into(),
+            required_right: required_right.into(),
+            parameter_type_ids: parameter_type_ids.into_iter().collect(),
+            result_type_id,
+        }
+    }
+
+    /// All payload type identities crossed by this import. The host owns
+    /// copying and validation; no borrowed or untyped payload is admitted.
+    pub fn payload_type_ids(&self) -> impl Iterator<Item = &str> {
+        self.parameter_type_ids
+            .iter()
+            .map(String::as_str)
+            .chain(self.result_type_id.iter().map(String::as_str))
+    }
+
+    pub fn required_grant(&self) -> &str {
+        &self.required_right
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verdict {
@@ -364,20 +392,28 @@ impl ApplicationAuthority {
         let granted_text = render(&self.granted_effects);
         let undecided_text = render(&undecided);
         let required_text = render(&self.required_effects);
-        Some(Diagnostic::error(
-            "E1803",
-            if denied.is_empty() {
-                format!("application authority is undecided for `{undecided_text}`")
-            } else {
-                format!("application authority denies `{denied_text}`")
-            },
-            format!(
-                "required_effects={required_text}; granted_effects={granted_text}; denied_effects={denied_policy_text}; denied_required_effects={denied_text}; undecided_effects={undecided_text}; authority={}",
-                self.authority
+        Some(
+            Diagnostic::error(
+                "E1803",
+                if denied.is_empty() {
+                    format!("application authority is undecided for `{undecided_text}`")
+                } else {
+                    format!("application authority denies `{denied_text}`")
+                },
+                format!(
+                    "required_effects={required_text}; granted_effects={granted_text}; denied_effects={denied_policy_text}; denied_required_effects={denied_text}; undecided_effects={undecided_text}; authority={}",
+                    self.authority
+                ),
+                self.policy_fix(),
+                None,
+            )
+            .with_rights_chain(
+                "authority",
+                std::iter::empty::<String>(),
+                std::iter::once(self.authority.clone()),
+                None,
             ),
-            self.policy_fix(),
-            None,
-        ))
+        )
     }
 }
 
@@ -817,7 +853,10 @@ mod tests {
         authority.denied_effects.insert("Panic".to_string());
         let diagnostic = authority.policy_diagnostic().expect("E1803");
         assert!(diagnostic.what.contains("Panic"));
-        assert!(diagnostic.fix.contains("adjust the denial"));
+        assert!(diagnostic
+            .fix
+            .to_ascii_lowercase()
+            .contains("adjust the denial"));
         assert!(!diagnostic.fix.contains("allow: [Panic]"));
     }
 
@@ -867,5 +906,22 @@ mod tests {
             );
             assert!(Effect::parse(root).is_none(), "retired root parsed: {root}");
         }
+    }
+    #[test]
+    fn resource_qualified_rights_keep_tree_boundaries() {
+        assert!(covers("FS.Read", "FS.Read:/data/file"));
+        assert!(covers("Net.Connect", "Net.Connect:api.example.com"));
+        assert!(!covers("FS.Read:/data", "FS.Read:/database"));
+        assert!(!covers("Net.Connect:api.example.com", "Net.Connect:api.example.com.evil"));
+    }
+
+    #[test]
+    fn canonical_authority_tightens_without_widening() {
+        let host = Authority::from_rights(["FS.Read", "Net.Connect"]);
+        let child = Holds::from(["FS.Read:/data".to_string()]);
+        let narrowed = host.tighten(&child).expect("child scope is covered");
+        assert!(narrowed.allows("FS.Read:/data/file"));
+        assert!(!narrowed.allows("FS.Read:/other"));
+        assert!(host.tighten(&Holds::from(["Exec".to_string()])).is_err());
     }
 }

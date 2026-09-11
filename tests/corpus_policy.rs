@@ -33,7 +33,7 @@ fn inventory_is_manifest_scoped() {
     assert!(inventory
         .files
         .iter()
-        .any(|entry| entry.path == "docs/first-hour.md"));
+        .any(|entry| entry.path == "docs/spec/guides/first-hour.md"));
     assert_eq!(
         inventory.provenance.len(),
         inventory.artifacts.len(),
@@ -64,7 +64,7 @@ fn cli_recipe_inventory_is_manifest_owned_and_ast_checked() {
         "file:adoption/fixtures/clean-project/run.jet",
         "file:examples/features/basics/first_hour.jet",
         "file:examples/features/basics/onboarding/run.jet",
-        "file:docs/first-hour.md",
+        "file:docs/spec/guides/first-hour.md",
         "root:gauntlet/entries",
         "root:tests/agent_workloads/adapters",
         "root:tests/compiled_workloads/adapters/jet",
@@ -327,7 +327,7 @@ fn card_2375_rules_reject_each_reintroduced_ceremony() {
             "entry-implicit",
         ),
         (
-            "docs/first-hour.md",
+            "docs/spec/guides/first-hour.md",
             "jet build examples/features/basics/first_hour.jet",
             "first-hour-doc-recipe",
         ),
@@ -681,7 +681,7 @@ fn run(value: String) {
 
     let docs_without_runner = policy
         .evaluate_source(
-            "docs/first-hour.md",
+            "docs/spec/guides/first-hour.md",
             "```jet\n#CLI\nstruct Args { name: String }\n```\n```bash\njet build\n```",
         )
         .unwrap();

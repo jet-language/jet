@@ -1,14 +1,134 @@
-//! D-META-EFFECT1: the effect facts, owned once.
+//! D-META-EFFECT1: effect declarations are projected from one Prelude table.
 //!
-//! An effect set says what a call touches. That fact does not depend on the
-//! stage the call runs at, so it cannot live where only one stage can read
-//! it. Sema reads it to check declared bounds; the comptime evaluator reads
-//! the same table to decide which tier a call belongs to, instead of keeping
-//! a second hard-coded list of its own.
-pub use crate::Authority::{builtin_effect, Effect};
+//! `Prelude/Effects.jet` is the readable authority. This generated section
+//! owns the typed root/declaration projection; the call classifiers below are
+//! adapters for rows that have not yet crossed the deferred dispatcher census.
+
+// BEGIN GENERATED EFFECT DECLARATIONS
+// Source: crates/jet-codegen/src/Prelude/Effects.jet
+// Source SHA-256: 6271597730bff63a19dc93b24ab2ab06bb2cb54ff5b5c80042dcc3ac3f441bd2
+pub const EFFECT_SOURCE: &str = include_str!("../../jet-codegen/src/Prelude/Effects.jet");
+use std::sync::LazyLock;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EffectDeclaration {
+    pub name: &'static str,
+    pub irreversible: bool,
+}
+
+pub static EFFECT_DECLARATIONS: LazyLock<Vec<EffectDeclaration>> = LazyLock::new(|| vec![
+    EffectDeclaration { name: "Net", irreversible: true },
+    EffectDeclaration { name: "FS", irreversible: false },
+    EffectDeclaration { name: "FS.Read", irreversible: false },
+    EffectDeclaration { name: "FS.Write", irreversible: true },
+    EffectDeclaration { name: "IO", irreversible: false },
+    EffectDeclaration { name: "DB", irreversible: false },
+    EffectDeclaration { name: "Time", irreversible: false },
+    EffectDeclaration { name: "Rand", irreversible: false },
+    EffectDeclaration { name: "Env", irreversible: false },
+    EffectDeclaration { name: "Exec", irreversible: true },
+    EffectDeclaration { name: "Log", irreversible: false },
+    EffectDeclaration { name: "GPU", irreversible: false },
+    EffectDeclaration { name: "FFI", irreversible: true },
+    EffectDeclaration { name: "Browser", irreversible: false },
+    EffectDeclaration { name: "Secret", irreversible: false },
+]);
+
+pub static EFFECT_ROOTS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
+    EFFECT_DECLARATIONS
+        .iter()
+        .map(|declaration| declaration.name)
+        .filter(|root| !root.contains('.'))
+        .collect()
+});
+
+pub fn effect_declarations() -> &'static [EffectDeclaration] {
+    EFFECT_DECLARATIONS.as_slice()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Effect {
+    Net,
+    FS,
+    IO,
+    DB,
+    Time,
+    Rand,
+    Env,
+    Exec,
+    Log,
+    GPU,
+    Panic,
+    FFI,
+    Browser,
+    Secret,
+    Mem,
+}
+
+impl Effect {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Net => "Net",
+            Self::FS => "FS",
+            Self::IO => "IO",
+            Self::DB => "DB",
+            Self::Time => "Time",
+            Self::Rand => "Rand",
+            Self::Env => "Env",
+            Self::Exec => "Exec",
+            Self::Log => "Log",
+            Self::GPU => "GPU",
+            Self::Panic => "Panic",
+            Self::FFI => "FFI",
+            Self::Browser => "Browser",
+            Self::Secret => "Secret",
+            Self::Mem => "Mem",
+        }
+    }
+
+    pub fn parse(root: &str) -> Option<Self> {
+        let canonical = crate::Authority::parse_root(root)?;
+        if canonical != root {
+            return None;
+        }
+        Some(match canonical {
+            "Net" => Self::Net,
+            "FS" => Self::FS,
+            "IO" => Self::IO,
+            "DB" => Self::DB,
+            "Time" => Self::Time,
+            "Rand" => Self::Rand,
+            "Env" => Self::Env,
+            "Exec" => Self::Exec,
+            "Log" => Self::Log,
+            "GPU" => Self::GPU,
+            "Panic" => Self::Panic,
+            "FFI" => Self::FFI,
+            "Browser" => Self::Browser,
+            "Secret" => Self::Secret,
+            "Mem" => Self::Mem,
+            _ => return None,
+        })
+    }
+
+    pub fn all() -> crate::Authority::Holds {
+        EFFECT_ROOTS
+            .iter()
+            .map(|root| (*root).to_string())
+            .collect()
+    }
+}
+// END GENERATED EFFECT DECLARATIONS
+
+pub use crate::Authority::builtin_effect;
+
 /// D-EFFTREE1: an effect set's elements are canonical dotted paths (`"FS"`,
 /// `"FS.Read"`) rather than bare `Effect` roots — see the module doc.
 pub type EffectSet = crate::Authority::Holds;
+
+/// Canonical leaf for operations that may wait on external work.
+pub const TIME_WAIT_EFFECT: &str = "Time.Wait";
+
 
 /// D-DET1: Core calls whose result depends on ambient wall-clock or PRNG
 /// state. This is the one classification used by purity checking and
@@ -20,7 +140,7 @@ pub fn is_nondeterministic_core(module: &str, method: &str) -> bool {
         (
             "core.time",
             "now" | "now_utc" | "today" | "instant" | "sleep" | "start"
-        ) | ("core.task", "timeout")
+        ) | ("core.tasks", "timeout")
             | (
                 "core.math.random",
                 "int"
@@ -50,6 +170,75 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
         return row.effect;
     }
     core_effect_legacy(module, method)
+}
+
+/// The precise leaf for a Core call that may wait on external work.
+///
+/// Plain calls read the leaf from the canonical Syntax row. Special calls that
+/// have no row yet stay in this small fallback until they can join that table.
+pub fn core_effect_leaf(module: &str, method: &str) -> Option<&'static str> {
+    if let Some(row) = crate::Syntax::core_call(module, method) {
+        return row.effect_leaf();
+    }
+    core_effect_leaf_legacy(module, method)
+}
+
+fn core_effect_leaf_legacy(module: &str, method: &str) -> Option<&'static str> {
+    if (module == "core.tasks" && method == "timeout")
+        || (module == "core.http" && method == "serve")
+        || (module == "core.http.client" && matches!(method, "get" | "post" | "request"))
+        || (module == "core.http.server"
+            && matches!(method, "serve" | "serve_once" | "serve_once_listener"))
+        || (module == "core.files")
+        || (module == "core.web.browser"
+            && !matches!(method, "profile" | "timeout" | "locked"))
+        || (module == "core.net.tls"
+            && matches!(
+                method,
+                "client"
+                    | "read"
+                    | "read_text"
+                    | "write"
+                    | "write_all"
+                    | "write_text"
+                    | "close"
+            ))
+        || (module == "core.service"
+            && matches!(
+                method,
+                "send"
+                    | "send_durable"
+                    | "receive"
+                    | "workflow_sleep"
+                    | "workflow_activity_wait"
+                    | "workflow_all"
+            ))
+        || (module == "core.term"
+            && matches!(
+                method,
+                "confirm"
+                    | "choose"
+                    | "input_secret"
+                    | "read_all_input"
+                    | "readline"
+                    | "read_until"
+                    | "take"
+                    | "binread"
+                    | "binwrite"
+                    | "progress"
+                    | "read_key"
+            ))
+        || (module == "core.sys" && matches!(method, "wait" | "waitpid"))
+    {
+        Some("Time.Wait")
+    } else {
+        None
+    }
+}
+
+/// The precise leaf for a blocking method on a typed Core handle.
+pub const fn receiver_effect_leaf(type_name: &str, method: &str) -> Option<&'static str> {
+    crate::Syntax::receiver_effect_leaf(type_name, method)
 }
 
 /// Fallback for special calls that do not yet have a plain Core-call row.
@@ -87,7 +276,7 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
     }
     if is_nondeterministic_core(module, method) {
         return Some(match module {
-            "core.time" | "core.task" => Effect::Time,
+            "core.time" | "core.tasks" => Effect::Time,
             "core.math.random" | "core.crypto.random" => Effect::Rand,
             _ => return None,
         });
@@ -263,12 +452,15 @@ fn core_effect_legacy(module: &str, method: &str) -> Option<Effect> {
 pub fn core_requires_comptime_gate(module: &str, method: &str) -> bool {
     core_effect(module, method).is_some_and(Effect::requires_comptime_gate)
 }
-/// D-TXN2: the irreversible effects — a network, filesystem, or subprocess
-/// effect that, once performed, cannot be rolled back. These are rejected when
-/// reached directly inside a `#Transact { … }` block (E0746). The remaining
-/// effects (IO/Time/Rand/Env/DB/Log/GPU) are reversible-or-benign for this
-/// purpose: reads, clock/RNG reads, and logging leave no committed external
-/// state a rollback must undo, and DB rollback is the transaction's own job.
+/// D-TXN2: the irreversible effects — a root is irreversible when the
+/// Prelude declaration marks that root or one of its leaves `@irreversible`.
+/// This keeps the transaction wall on the declared effect facts instead of a
+/// second Rust-only table. The remaining effects (IO/Time/Rand/Env/DB/Log/GPU)
+/// are reversible-or-benign for this purpose: reads, clock/RNG reads, and
+/// logging leave no committed external state a rollback must undo, and DB
+/// rollback is the transaction's own job.
 pub fn is_irreversible_effect(e: Effect) -> bool {
-    matches!(e, Effect::Net | Effect::FS | Effect::Exec | Effect::FFI)
+    crate::Authority::effect_declarations().iter().any(|declaration| {
+        declaration.irreversible && crate::Authority::root(declaration.name) == e.name()
+    })
 }

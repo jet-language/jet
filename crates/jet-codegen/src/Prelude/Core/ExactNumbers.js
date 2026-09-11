@@ -2,6 +2,20 @@
 // The emitters only select these Prelude doors. Whole-number parts stay BigInt;
 // no operation crosses JavaScript Number unless the language asks for Float.
 
+// Whole-number abs remains on the exact BigInt rail; it never narrows through
+// JavaScript Number (including for values outside the safe-integer range).
+function jet_int_abs(value) {
+  const integer = BigInt(value);
+  return integer < 0n ? -integer : integer;
+}
+
+function jet_int_add(left, right) { return BigInt(left) + BigInt(right); }
+function jet_int_sub(left, right) { return BigInt(left) - BigInt(right); }
+function jet_int_mul(left, right) { return BigInt(left) * BigInt(right); }
+
+function jet_std_math_abs_f64(value) { return Math.abs(Number(value)); }
+function jet_std_math_abs_f32(value) { return Math.fround(Math.abs(Math.fround(Number(value)))); }
+
 function jet_fraction_gcd(left, right) {
   let a = left < 0n ? -left : left;
   let b = right < 0n ? -right : right;

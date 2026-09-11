@@ -7,6 +7,15 @@ description: Shared vocabulary for designing deep modules. Use when the user wan
 
 Design **deep modules**: a lot of behaviour behind a small interface, placed at a clean seam, testable through that interface. Use this language and these principles wherever code is being designed or restructured. The aim is leverage for callers, locality for maintainers, and testability for everyone.
 
+## Contract
+
+- **Requested outcome:** A deep-module design or a named deepening candidate, using the shared module/interface/seam vocabulary.
+- **Supplied inputs:** The user's design question, domain context, existing ADRs, and the highest existing seam that can answer it.
+- **Allowed child result:** The `DESIGN-IT-TWICE.md` handoff may return competing interface designs only when the user asks for alternatives. It cannot implement a design, resolve an owner decision, or open an undeclared workflow.
+- **Completion owner:** `codebase-design` owns the design comparison; the user owns the final choice.
+- **Return point:** Return to the chosen candidate after each design alternative or reference read.
+- **Stopping condition:** Stop after the requested interface/deepening recommendation is presented. Do not auto-chain implementation, grilling, or domain recording.
+
 ## Glossary
 
 Use these terms exactly — don't substitute "component," "service," "API," or "boundary." Consistent language is the whole point.

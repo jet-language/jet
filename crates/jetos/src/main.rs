@@ -11,7 +11,7 @@
 #![allow(non_snake_case)]
 
 fn main() {
-    jetpack::Codegen::TIR::install_comptime_bridge();
+    jetpack::Codegen::MIREval::install_mir_bridge();
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     args.insert(0, "os".to_string());
     std::process::exit(jetpack::run(args));

@@ -1,8 +1,7 @@
 # Compatibility & release policy (ratified)
 
-This is the promise an enterprise adopts before it depends on Jet. It is the
-ratified output of milestone E2-M2.
-Every decision below was ratified 2026-06-16 (D-REL1…D-REL5).
+This is the compatibility contract for enterprise adoption. Decisions
+D-REL1 through D-REL5 ratify the rules below.
 
 ## Glossary first
 
@@ -10,9 +9,8 @@ Every decision below was ratified 2026-06-16 (D-REL1…D-REL5).
 - **Edition** — a per-project opt-in to a specific era of Jet *syntax*
   (D-REL3), written `edition: "2026"` in `package.jet`. A toolchain supports a
   fixed set of editions and prints them in `jet --version`.
-- **Epoch** — era storytelling for marketing/roadmap (e.g. "epoch 2"). It is
-  **never** encoded into the compiler version (D-REL2); the owner bumps the
-  version manually.
+- **Epoch** — a descriptive era label. It is **never** encoded into the
+  compiler version (D-REL2); the owner bumps the version manually.
 - **Registry protocol** — the versioned index format the compiler speaks to a
   package registry, independent of the compiler's own version.
 
@@ -36,25 +34,6 @@ toolchain that still supports edition *N*. New syntax that would break old code
 lands only behind a *newer* edition; pinning an older edition opts out of it.
 A toolchain advertises the editions it supports in `jet --version`.
 
-## Stability and Release Cadence
-
-Jet 1.0 is feature-complete. This means the promised language surface, compiler,
-core library, package workflow, diagnostics, documentation, and supported
-execution tiers are shipped and have one defined meaning. It does not mean that
-Jet has no future work. Jet can add compatible features, improve performance,
-fix bugs, and publish new editions under this policy.
-
-Adopters can expect feature releases on a regular, predictable cadence. Feature
-releases follow normal SemVer forever (D-REL1); epoch names tell the story of a
-project era but never change the compiler version (D-REL2). Breaking syntax
-changes use opt-in editions (D-REL3). LTS releases follow D-ADOPT-LTS1. Jet
-does not offer an LTS branch before GA; the LTS window is set at GA (D-REL4).
-Only an explicit `jet fix` or edition upgrade rewrites source (D-REL5).
-
-A quiet period between releases means that the project is stable or that work
-is taking time to meet its quality bar. It does not mean that the project is
-abandoned. Low release volume signals stability, not abandonment.
-
 ### Enterprise LTS calendar (D-ADOPT-LTS1=A)
 
 D-ADOPT-LTS1 was ratified on 2026-08-01. Jet starts one LTS line each year.
@@ -75,22 +54,20 @@ live LTS line receive applicable security fixes.
 
 The enterprise adoption pack carries the calendar in
 [`adoption/release/calendar.json`](../../adoption/release/calendar.json). Its
-policy fields contain the ratified values. Its first GA date, replacement
-line, and edition/host matrix remain pending until the GA schedule is fixed;
-the pack does not invent those dates or support claims.
+policy fields contain the ratified values; dates and edition/host matrices are
+published only when fixed, and the pack never invents support claims.
 
 ### Environment safety correction (D-ENV-MUTATE1)
 
-`core.sys` mutations now change Jet's locked logical environment rather than
-the host process environment. Valid Jet behavior remains compatible: a later
-`core.sys.get` observes the write, and every `core.process` child inherits it.
-Foreign code that calls libc `getenv` or reads the Windows environment block
-after a Jet mutation now sees the original host value. This is the ratified
-narrow safety exception to the normal compatibility promise: mutating a
-process-global host environment while foreign threads may read it cannot meet
-Jet's memory-safety guarantee. Pass changed values to foreign APIs explicitly.
-Existing editions keep `core.sys.set ()`; its fallible
-`!EnvError` signature requires a future major release and edition opt-in.
+`core.sys` mutations change Jet's locked logical environment rather than the
+host process environment. A later `core.sys.get` observes the write, and every
+`core.process` child inherits it. Foreign code that calls libc `getenv` or reads
+the Windows environment block after a Jet mutation sees the original host
+value. This is the ratified narrow safety exception to the compatibility
+promise: mutating a process-global host environment while foreign threads may
+read it cannot meet Jet's memory-safety guarantee. Pass changed values to
+foreign APIs explicitly. Existing editions keep `core.sys.set ()`; changing
+its fallible `!EnvError` signature requires a major release and edition opt-in.
 
 ## Deprecation policy + migration window
 
@@ -140,11 +117,10 @@ program's output beyond what your own dependencies require.
 
 D-TLS1 makes `https://` work by default for the client path
 (`core.net.fetch` and `core.http.client`) through the rustls bridge and system
-certificate roots. A native Jet TLS implementation may replace rustls as the
-default only after an external security audit and an interop battery against
-rustls and OpenSSL test vectors. Advanced client configuration lives under
-`core.net.tls`; server TLS is the D-TLSSERVE1 named option
-`Server.serve(addr, mux, tls: Server.tls(cert, key))`.
+certificate roots. Replacing that default requires an external security audit
+and an interop battery against rustls and OpenSSL test vectors. Advanced client
+configuration lives under `core.net.tls`; server TLS is the D-TLSSERVE1 named
+option `Server.serve(addr, mux, tls: Server.tls(cert, key))`.
 
 ## `jet --version` contract (E2-D1)
 
@@ -185,5 +161,6 @@ bug" versus "I called `jet` wrong". Golden-tested in `tests/cli.rs`.
 - Supported editions — `manifest::SUPPORTED_EDITIONS`; the check is
   `manifest::check_edition_support` (E2001), called from `crates/jet-driver/src/Loader.rs`.
 - Banner — `manifest::version_banner`, printed by `jet --version`.
-- Diagnostics — E2001/E2002/L2001 in docs/spec/diagnostics.md, snapshotted in
-  `tests/release/`.
+- Diagnostics — E2001/E2002/L2001 in
+  `crates/jet-codegen/src/Prelude/Diagnostics.jet` and the diagnostic registry,
+  snapshotted in `tests/release/`.

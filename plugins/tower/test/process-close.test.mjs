@@ -91,10 +91,16 @@ test('milestone verify needs all cards done and all milestone criteria verified'
     (e) => e instanceof TowerError && e.code === 'E_MILESTONE' && /unverified criteria/.test(e.message),
   );
   st.mutate((s) => db.verifyMilestoneCriterion(s, milestone.id, 1, { by: 'reviewer' }));
+  assert.throws(
+    () => st.mutate((s) => db.verifyMilestone(s, milestone.id, { evidence: 'review complete', by: 'reviewer' })),
+    (e) => e instanceof TowerError && e.code === 'E_MILESTONE' && /no closeout token/.test(e.message),
+  );
+  st.mutate((s) => db.beginMilestoneCloseout(s, milestone.id, { sourceCommit: 'a'.repeat(40), by: 'orchestrator' }));
   const { result } = st.mutate((s) => db.verifyMilestone(s, milestone.id, { evidence: 'review complete', by: 'reviewer' }));
   assert.equal(result.status, 'met');
   assert.deepEqual(result.verification, { by: 'reviewer', evidence: 'review complete', at: result.verification.at });
   assert.match(result.verification.at, /^\d{4}-\d{2}-\d{2}T/);
+  assert.deepEqual(result.closeout, { sourceCommit: 'a'.repeat(40), by: 'orchestrator', at: result.closeout.at });
 });
 
 test('milestone verifier must differ from the criterion builder', () => {
@@ -118,16 +124,18 @@ test('reopening a linked card or milestone criterion clears milestone signoff', 
   st.mutate((s) => db.meetMilestoneCriterion(s, milestone.id, 1, { by: 'builder' }));
   st.mutate((s) => db.verifyMilestoneCriterion(s, milestone.id, 1, { by: 'criterion-reviewer' }));
   st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'owner' }, cfg));
+  st.mutate((s) => db.beginMilestoneCloseout(s, milestone.id, { sourceCommit: 'b'.repeat(40), by: 'orchestrator' }));
   st.mutate((s) => db.verifyMilestone(s, milestone.id, { evidence: 'first review', by: 'milestone-reviewer' }));
   assert.equal(st.load().milestones[0].status, 'met');
-
   st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'building', by: 'owner' }, cfg));
   assert.equal(st.load().milestones[0].status, 'open');
   assert.equal(st.load().milestones[0].verification, undefined);
-
+  assert.equal(st.load().milestones[0].closeout, undefined);
   st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'owner' }, cfg));
+  st.mutate((s) => db.beginMilestoneCloseout(s, milestone.id, { sourceCommit: 'c'.repeat(40), by: 'orchestrator' }));
   st.mutate((s) => db.verifyMilestone(s, milestone.id, { evidence: 'second review', by: 'milestone-reviewer' }));
   st.mutate((s) => db.reopenMilestoneCriterion(s, milestone.id, 1, { reason: 'new case', by: 'repairer' }));
   assert.equal(st.load().milestones[0].status, 'review-ready');
   assert.equal(st.load().milestones[0].verification, undefined);
+  assert.equal(st.load().milestones[0].closeout, undefined);
 });

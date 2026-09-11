@@ -369,13 +369,24 @@ impl StateTable {
                         .chain(structure.trait_impls.iter().flat_map(|block| {
                             block.methods.iter().map(|method| method.name.as_str())
                         }))
-                        .chain(items.iter().filter_map(|item| match item {
-                            Item::Impl(implementation)
-                                if implementation.type_name == structure.name => {
-                                Some(implementation.methods.iter().map(|method| method.name.as_str()))
-                            }
-                            _ => None,
-                        }).flatten())
+                        .chain(
+                            items
+                                .iter()
+                                .filter_map(|item| match item {
+                                    Item::Impl(implementation)
+                                        if implementation.type_name == structure.name =>
+                                    {
+                                        Some(
+                                            implementation
+                                                .methods
+                                                .iter()
+                                                .map(|method| method.name.as_str()),
+                                        )
+                                    }
+                                    _ => None,
+                                })
+                                .flatten(),
+                        )
                         .collect();
                 for (state, span) in decl_states {
                     if members.contains(state.as_str()) {
@@ -501,16 +512,15 @@ impl StateTable {
         }
         if let Some(tr) = &f.state_transition {
             let owner = Self::free_fn_state_owner(f, tr.from.is_none());
-            self.fn_transitions
-                .insert(
-                    f.name.clone(),
-                    (
-                        tr.from
-                            .as_deref()
-                            .map(|state| Self::state_for_owner(owner, state)),
-                        Self::state_for_owner(owner, &tr.to),
-                    ),
-                );
+            self.fn_transitions.insert(
+                f.name.clone(),
+                (
+                    tr.from
+                        .as_deref()
+                        .map(|state| Self::state_for_owner(owner, state)),
+                    Self::state_for_owner(owner, &tr.to),
+                ),
+            );
         }
     }
 
@@ -904,7 +914,6 @@ impl<'a> StateCtx<'a> {
         }
     }
 
-
     /// Walk an expression for typestate violations and apply in-place transitions
     /// (a transition call in expression-statement position advances the receiver).
     fn check_expr(&mut self, e: &Expr) {
@@ -1273,6 +1282,7 @@ mod tests {
             args: Vec::new(),
             recv_type: Some(crate::Syntax::INTERNAL_TASK_SURFACE_TYPE.to_string()),
             resolved_ret: None,
+            operator_rhs: None,
             checked_widen: false,
         };
         let table = StateTable::with_facts(Default::default());

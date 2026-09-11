@@ -1,0 +1,17 @@
+// D-ENC-CANONICAL1: canonical CBOR and XML use the encoding core directly.
+use core.encoding.cbor as cbor
+use core.encoding.xml as xml
+
+fn run() {
+    value :: DataTree.Object(["a": DataTree.Int(1)])
+    encoded :: cbor.to_bytes_canonical(value) ?? panic("to_bytes_canonical")
+    print(encoded)
+
+    document :: xml.parse("<r b=\"2\" a=\"1\"><x/></r>") ?? panic("parse")
+    options :: xml.XMLCanonical{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }
+    canonical :: xml.canonical(document, options) ?? panic("canonical")
+    print(canonical)
+
+    parsed :: xml.parse_with("<r>ok</r>", xml.XMLParseOptions.safe()) ?? panic("parse_with")
+    print(parsed)
+}

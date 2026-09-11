@@ -1,0 +1,53 @@
+{
+  "schema": "jet.frontier-study-job.v1",
+  "study_id": "H1-one-semantic-contract",
+  "job_id": "frontier2954-semantic-contract-job-001",
+  "contract_id": "frontier2954-semantic-contract-v1",
+  "operations": [
+    { "id": "bounds-check", "kind": "bounds-check", "value": 7, "bound": 10 },
+    { "id": "mutation", "kind": "mutation", "initial": 2, "delta": 3 },
+    { "id": "fallible-divide", "kind": "fallible-divide", "numerator": 12, "denominator": 3 },
+    { "id": "pure-map", "kind": "pure-map", "values": [1, 2, 3], "factor": 2 }
+  ],
+  "observation_contract": [
+    "result",
+    "typed_failure",
+    "mutation",
+    "input_consumption",
+    "event_order"
+  ],
+  "expected_observations": [
+    {
+      "id": "bounds-check",
+      "result": { "status": "ok", "value": 7 },
+      "typed_failure": null,
+      "mutation": null,
+      "input_consumption": { "items": 1 },
+      "event_order": ["bounds-check"]
+    },
+    {
+      "id": "mutation",
+      "result": { "status": "ok", "value": 5 },
+      "typed_failure": null,
+      "mutation": { "before": 2, "after": 5 },
+      "input_consumption": { "items": 1 },
+      "event_order": ["mutation"]
+    },
+    {
+      "id": "fallible-divide",
+      "result": { "status": "ok", "value": 4 },
+      "typed_failure": null,
+      "mutation": null,
+      "input_consumption": { "items": 1 },
+      "event_order": ["fallible-divide"]
+    },
+    {
+      "id": "pure-map",
+      "result": { "status": "ok", "value": [2, 4, 6] },
+      "typed_failure": null,
+      "mutation": null,
+      "input_consumption": { "items": 3 },
+      "event_order": ["pure-map:0", "pure-map:1", "pure-map:2"]
+    }
+  ]
+}

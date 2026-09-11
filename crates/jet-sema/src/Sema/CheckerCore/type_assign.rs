@@ -44,12 +44,86 @@ pub(crate) fn is_core_view_generic(ty: &Type) -> bool {
     matches!(
         ty,
         Type::Apply { name, .. }
-            if matches!(name.as_str(), "View" | "ViewMut" | Syntax::TYPE_PIN)
+            if matches!(name.as_str(), "View" | "ViewMut" | Syntax::TYPE_PIN | Syntax::TYPE_VIEW_ITER)
     )
+}
+
+/// Reject `Never` wherever a declaration stores an ordinary value. The only
+/// exceptions are a callable's successful return slot and the already-ratified
+/// failure-side `!Never` carrier.
+pub(crate) fn reject_never_value_positions(
+    ty: &Type,
+    span: Span,
+    allow_success_never: bool,
+    diags: &mut Vec<Diagnostic>,
+) {
+    match ty {
+        Type::Named(name) if name == Syntax::TYPE_NEVER && !allow_success_never => {
+            diags.push(Diagnostic::from_row("E2422", &[], Some(span)));
+        }
+        Type::List(inner)
+        | Type::Shared(inner)
+        | Type::Option(inner)
+        | Type::Tagged { inner, .. }
+        | Type::FixedList { elem: inner, .. }
+        | Type::InlineRange { base: inner, .. }
+        | Type::Quantity { base: inner, .. } => {
+            reject_never_value_positions(inner, span, false, diags);
+        }
+        Type::Map { key, value, .. } => {
+            reject_never_value_positions(key, span, false, diags);
+            reject_never_value_positions(value, span, false, diags);
+        }
+        Type::Result { ok, err } => {
+            reject_never_value_positions(ok, span, allow_success_never, diags);
+            reject_never_value_positions(err, span, true, diags);
+        }
+        Type::Fn { params, ret, .. } => {
+            for param in params {
+                reject_never_value_positions(param, span, false, diags);
+            }
+            if let Some(ret) = ret {
+                reject_never_value_positions(ret, span, true, diags);
+            }
+        }
+        Type::Apply { args, .. } | Type::Union(args) => {
+            for arg in args {
+                reject_never_value_positions(arg, span, false, diags);
+            }
+        }
+        Type::Tuple(fields) => {
+            for (_, field) in fields {
+                reject_never_value_positions(field, span, false, diags);
+            }
+        }
+        Type::Int
+        | Type::Float
+        | Type::Bool
+        | Type::String
+        | Type::Char
+        | Type::IntN { .. }
+        | Type::Float32
+        | Type::TraitObject(_)
+        | Type::Measure(_)
+        | Type::Named(_) => {}
+    }
 }
 
 impl<'a> Checker<'a> {
     pub(crate) fn check_declared_type(&mut self, ty: &Type, span: Span) {
+        self.check_declared_type_common(ty, span);
+        self.reject_never_value_positions(ty, span, false);
+    }
+
+    /// Check a function's declared return contract. `Never` is legal only in
+    /// this success slot (and nested function-type return slots); ordinary
+    /// value declarations use `check_declared_type` instead.
+    pub(crate) fn check_declared_return_type(&mut self, ty: &Type, span: Span) {
+        self.check_declared_type_common(ty, span);
+        self.reject_never_value_positions(ty, span, true);
+    }
+
+    fn check_declared_type_common(&mut self, ty: &Type, span: Span) {
         self.warn_soft_public_declared_type(ty, span);
         self.check_declared_type_rules(ty, span);
         if self.cell_guard_storage_is_unsupported(ty) {
@@ -58,6 +132,10 @@ impl<'a> Checker<'a> {
                 span,
             );
         }
+    }
+
+    fn reject_never_value_positions(&mut self, ty: &Type, span: Span, allow_success_never: bool) {
+        reject_never_value_positions(ty, span, allow_success_never, &mut self.diags);
     }
 
     pub(crate) fn warn_soft_public_declared_type(&mut self, ty: &Type, span: Span) {
@@ -218,6 +296,54 @@ impl<'a> Checker<'a> {
                     self.diags.push(diag);
                     return;
                 }
+                if let Some((alias, leaf)) = n.split_once('.') {
+                    if let Some(module) = self.core_imports.get(alias) {
+                        if let Some(kind) =
+                            jet_foundation::CoreModuleExports::core_leaf_kind(module, leaf)
+                        {
+                            match kind {
+                                jet_foundation::CoreModuleExports::CoreLeafKind::Generic(arity) => {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0119",
+                                        format!(
+                                            "`{n}` expects {arity} type argument{}, got 0",
+                                            if arity == 1 { "" } else { "s" }
+                                        ),
+                                        "every generic Core type needs a matching type argument"
+                                            .to_string(),
+                                        format!(
+                                            "write `{n}<...>` with exactly {arity} type argument{}",
+                                            if arity == 1 { "" } else { "s" }
+                                        ),
+                                        Some(span),
+                                    ));
+                                }
+                                _ => {}
+                            }
+                            return;
+                        }
+                    }
+                }
+                if !self.registry.contains(n) {
+                    if let Some(arity) =
+                        jet_foundation::CoreModuleExports::core_generic_arity(n)
+                    {
+                        self.diags.push(Diagnostic::error(
+                            "E0119",
+                            format!(
+                                "`{n}` expects {arity} type argument{}, got 0",
+                                if arity == 1 { "" } else { "s" }
+                            ),
+                            "every generic Core type needs a matching type argument".to_string(),
+                            format!(
+                                "write `{n}<...>` with exactly {arity} type argument{}",
+                                if arity == 1 { "" } else { "s" }
+                            ),
+                            Some(span),
+                        ));
+                        return;
+                    }
+                }
                 if core_type_known(n) {
                     return;
                 }
@@ -363,41 +489,128 @@ impl<'a> Checker<'a> {
                         return;
                     }
                 }
-                let unqualified_core = canonical_owner.is_none() && import_ns.is_none();
-                let is_core_generic = unqualified_core
-                    && matches!(
-                        lookup_name,
-                        "Task"
+                let core_generic_arity = match import_ns {
+                    Some(namespace) => self
+                        .core_imports
+                        .get(namespace)
+                        .and_then(|module| {
+                            match jet_foundation::CoreModuleExports::core_leaf_kind(
+                                module,
+                                lookup_name,
+                            ) {
+                                Some(
+                                    jet_foundation::CoreModuleExports::CoreLeafKind::Generic(
+                                        arity,
+                                    ),
+                                ) => Some(arity),
+                                _ => None,
+                            }
+                        }),
+                    None => jet_foundation::CoreModuleExports::core_generic_arity(lookup_name),
+                };
+                if let Some(expected) = core_generic_arity {
+                    if args.len() != expected {
+                        self.diags.push(Diagnostic::error(
+                            "E0119",
+                            format!(
+                                "`{name}` expects {expected} type argument{}, got {}",
+                                if expected == 1 { "" } else { "s" },
+                                args.len()
+                            ),
+                            "every generic Core type needs a matching type argument".to_string(),
+                            format!("write `{name}<...>` with exactly {expected} type argument{}", if expected == 1 { "" } else { "s" }),
+                            Some(span),
+                        ));
+                    }
+                }
+                let is_core_generic = core_generic_arity.is_some()
+                    || (local_alias
+                        && matches!(
+                            lookup_name,
+                            "Task"
                                 | Syntax::TYPE_RECEIVER
                                 | "Sender"
                                 | "Ptr"
                                 | "Tensor"
                                 | "Vec"
                                 | "Matrix"
-                            // D-COLLBREADTH1=A: Set<T> and Queue<T>.
+                                | Syntax::TYPE_ATOMIC
                             | "Set" | Syntax::TYPE_TALLY | Syntax::TYPE_QUEUE
                             // D-ITERTOOLS1=A: expanded generic collection handles.
                             | Syntax::TYPE_RANK | "PriorityQueue" | "Cache"
                             | "Decimal"
                             // D-REACT1=B: reactive handle types.
                             | "Signal" | "Derived" | "Computed"
-                            // D-EVENT1=D: first-party typed event/hook handles.
+                            // D-EVENT1=D: first-party typed Event/Hook family.
                             | "Event" | "Hook" | "DecisionHook" | "HookDecision" | "HookOutcome"
                             | "DispatchReport"
                             // D-STREAMYIELD1: generator return type.
                             | "Stream"
-                            // D-DATAFRAME1=A: reserved core.data generic value types.
-                            | "Table" | "Series" | "LazyFrame" | "DataJoin"
-                            // D-MEM1 S6 (D-POOLID-API1=A): generational-arena handle pair.
+                            // D-FOUND-COREAPI1 / #2853: event-time stream
+                            // intermediate and window carriers are core generics.
+                            | "StreamEventTime" | "KeyedStream" | "Window"
+                            // D-QUERY-RETAIN1=A: one deferred query and
+                            // generic grouped result replace the old wrappers.
+                            | "Query" | "DataGroupedQuery" | "Group"
+                            // D-DATAFRAME1=A: joins remain typed list products.
+                            | "DataJoin"
                             | "Pool" | "Id"
                             // D-LOCALCELL1=A: one-thread cell and projected guard types.
                             | "Cell" | "CellReadGuard" | "CellEditGuard"
                             // The one closed secret-lifetime wrapper.
                             | "ExpiringSecret" | Syntax::TYPE_SHARED_GUARD
                             | Syntax::TYPE_SHARED_WEAK
+                            // D-SHARED-REVISION1=A: owner-bound snapshot has
+                            // source and projection type arguments.
+                            | Syntax::TYPE_SHARED_SNAPSHOT
                             | "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan"
+                            // D-SPACE-GEOMETRY1=A: point/delta carry a scalar
+                            // and one nominal space; transforms carry two.
+                            | "Point2" | "Delta2" | "Transform" | "Transform2" | "Ray2"
+                        ))
+                    || (local_alias && is_core_view_generic(ty));
+                if is_core_generic
+                    && matches!(
+                        lookup_name,
+                        "Point2" | "Delta2" | "Transform" | "Transform2" | "Ray2"
                     )
-                    || (unqualified_core && is_core_view_generic(ty));
+                {
+                    let valid = match lookup_name {
+                        "Point2" | "Delta2" => {
+                            args.len() == 2
+                                && args[0].is_float()
+                                && matches!(&args[1], Type::Named(_))
+                        }
+                        "Transform" => {
+                            args.len() == 2
+                                && matches!((&args[0], &args[1]), (Type::Named(_), Type::Named(_)))
+                        }
+                        "Transform2" => {
+                            args.len() == 3
+                                && args[0].is_float()
+                                && matches!((&args[1], &args[2]), (Type::Named(_), Type::Named(_)))
+                        }
+                        "Ray2" => {
+                            args.len() == 3
+                                && args[0].is_float()
+                                && matches!((&args[1], &args[2]), (Type::Named(_), Type::Named(_)))
+                        }
+                        _ => false,
+                    };
+                    if !valid {
+                        self.diags.push(Diagnostic::error(
+                            "E0119",
+                            format!("`{name}` is not a valid coordinate-space type"),
+                            "Point2 and Delta2 are `<Float, Space>`; Transform is `<From, To>` and Transform2/Ray2 are `<Float, From, To>`".to_string(),
+                            "use a known nominal space such as `Screen`, `World`, `View`, `Camera`, or `Device` and keep the argument order".to_string(),
+                            Some(span),
+                        ));
+                    }
+                    for arg in args {
+                        self.check_declared_type_rules(arg, span);
+                    }
+                    return;
+                }
                 if is_core_generic && matches!(lookup_name, "Vec" | "Matrix") {
                     let expected = if lookup_name == "Vec" { 1 } else { 2 };
                     if args.len() != expected
@@ -419,6 +632,27 @@ impl<'a> Checker<'a> {
                                 },
                                 Some(span),
                             ));
+                    }
+                    return;
+                }
+                if is_core_generic && lookup_name == Syntax::TYPE_ATOMIC {
+                    let valid = args.len() == 1
+                        && args
+                            .first()
+                            .is_some_and(jet_foundation::Layout::atomic_scalar_type);
+                    if !valid {
+                        self.diags.push(Diagnostic::error(
+                            "E0119",
+                            format!(
+                                "`{name}` accepts exactly one closed scalar: `Bool`, `I32`, `U32`, `I64`, `Int`, or `U64`"
+                            ),
+                            "Atomic values use one compiler-owned lock-free word; arbitrary widths and compound types have no portable representation".to_string(),
+                            "use `Atomic<Bool>`, `Atomic<I32>`, `Atomic<U32>`, `Atomic<I64>`, `Atomic<Int>`, or `Atomic<U64>`".to_string(),
+                            Some(span),
+                        ));
+                    }
+                    for arg in args {
+                        self.check_declared_type_rules(arg, span);
                     }
                     return;
                 }
@@ -728,21 +962,11 @@ impl<'a> Checker<'a> {
             }
             (Type::List(want), Type::List(got))
             | (Type::Shared(want), Type::Shared(got))
-            | (Type::Option(want), Type::Option(got)) => {
+            | (Type::Option(want), Type::Option(got)) => self.checked_text_string_target(want, got),
+            (Type::List(want), Type::FixedList { elem: got, .. })
+            | (Type::FixedList { elem: want, .. }, Type::List(got)) => {
                 self.checked_text_string_target(want, got)
             }
-            (
-                Type::List(want),
-                Type::FixedList {
-                    elem: got, ..
-                },
-            )
-            | (
-                Type::FixedList {
-                    elem: want, ..
-                },
-                Type::List(got),
-            ) => self.checked_text_string_target(want, got),
             (
                 Type::Map {
                     key: want_key,
@@ -754,8 +978,10 @@ impl<'a> Checker<'a> {
                     value: got_value,
                     ..
                 },
-            ) => self.checked_text_string_target(want_key, got_key)
-                || self.checked_text_string_target(want_value, got_value),
+            ) => {
+                self.checked_text_string_target(want_key, got_key)
+                    || self.checked_text_string_target(want_value, got_value)
+            }
             (
                 Type::Result {
                     ok: want_ok,
@@ -765,34 +991,26 @@ impl<'a> Checker<'a> {
                     ok: got_ok,
                     err: got_err,
                 },
-            ) => self.checked_text_string_target(want_ok, got_ok)
-                || self.checked_text_string_target(want_err, got_err),
+            ) => {
+                self.checked_text_string_target(want_ok, got_ok)
+                    || self.checked_text_string_target(want_err, got_err)
+            }
             (
                 Type::Apply {
                     args: want_args, ..
                 },
-                Type::Apply {
-                    args: got_args, ..
-                },
+                Type::Apply { args: got_args, .. },
             ) => want_args
                 .iter()
                 .zip(got_args)
                 .any(|(want, got)| self.checked_text_string_target(want, got)),
-            (
-                Type::Tuple(want_fields),
-                Type::Tuple(got_fields),
-            ) => want_fields
+            (Type::Tuple(want_fields), Type::Tuple(got_fields)) => want_fields
                 .iter()
                 .zip(got_fields)
                 .any(|((_, want), (_, got))| self.checked_text_string_target(want, got)),
-            (
-                Type::FixedList {
-                    elem: want, ..
-                },
-                Type::FixedList {
-                    elem: got, ..
-                },
-            ) => self.checked_text_string_target(want, got),
+            (Type::FixedList { elem: want, .. }, Type::FixedList { elem: got, .. }) => {
+                self.checked_text_string_target(want, got)
+            }
             (
                 Type::Fn {
                     params: want_params,
@@ -804,33 +1022,28 @@ impl<'a> Checker<'a> {
                     ret: got_ret,
                     ..
                 },
-            ) => want_params
-                .iter()
-                .zip(got_params)
-                .any(|(want, got)| self.checked_text_string_target(want, got))
-                || want_ret
-                    .as_deref()
-                    .zip(got_ret.as_deref())
-                    .is_some_and(|(want, got)| self.checked_text_string_target(want, got)),
-            (
-                Type::Tagged { inner: want, .. },
-                Type::Tagged { inner: got, .. },
-            )
-            | (
-                Type::InlineRange { base: want, .. },
-                Type::InlineRange { base: got, .. },
-            )
-            | (
-                Type::Quantity { base: want, .. },
-                Type::Quantity { base: got, .. },
-            ) => self.checked_text_string_target(want, got),
-            (Type::Union(want_members), Type::Union(got_members)) => want_members
-                .iter()
-                .any(|want| {
+            ) => {
+                want_params
+                    .iter()
+                    .zip(got_params)
+                    .any(|(want, got)| self.checked_text_string_target(want, got))
+                    || want_ret
+                        .as_deref()
+                        .zip(got_ret.as_deref())
+                        .is_some_and(|(want, got)| self.checked_text_string_target(want, got))
+            }
+            (Type::Tagged { inner: want, .. }, Type::Tagged { inner: got, .. })
+            | (Type::InlineRange { base: want, .. }, Type::InlineRange { base: got, .. })
+            | (Type::Quantity { base: want, .. }, Type::Quantity { base: got, .. }) => {
+                self.checked_text_string_target(want, got)
+            }
+            (Type::Union(want_members), Type::Union(got_members)) => {
+                want_members.iter().any(|want| {
                     got_members
                         .iter()
                         .any(|got| self.checked_text_string_target(want, got))
-                }),
+                })
+            }
             _ => false,
         }
     }
@@ -860,6 +1073,28 @@ impl<'a> Checker<'a> {
                 return true;
             }
             return true;
+        }
+        // D-NEVER2=B: a callable promised to return `Never` cannot be
+        // satisfied by a value-producing function. Check the normalized
+        // callable returns so raw `fn() Int` and fallible `fn() Int !E`
+        // both fail this contract.
+        if let (
+            Type::Fn {
+                ret: Some(want_ret),
+                ..
+            },
+            Type::Fn {
+                ret: Some(got_ret),
+                ..
+            },
+        ) = (
+            want.with_effective_fn_returns(),
+            got.with_effective_fn_returns(),
+        ) {
+            if want_ret.has_never_success() && !got_ret.has_never_success() {
+                self.diags.push(Diagnostic::from_row("E2426", &[], Some(span)));
+                return true;
+            }
         }
         if self.checked_text_string_target(want, got) {
             self.diags.push(Diagnostic::error(

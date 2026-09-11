@@ -2,9 +2,12 @@
 
 `run-cold-context.mjs` runs the four fixed tasks (`hello`, `cli`,
 `data-transform`, and `http`) twice per adapter: once with the complete capsule
-and once with the capsule-sized UTF-8 prefix of `llms.text`. It writes the
+and once with the capsule-sized UTF-8 prefix of `jet inspect digest`. It writes the
 scoreboard named by `--output` and returns failure when `--check-baseline`
 finds a capsule score below the recorded baseline.
+
+Rebuild the compiler before a comparison. The control reference is generated
+from that compiler; `--llms PATH` selects an explicit fixture for isolated tests.
 
 ## Adapters
 

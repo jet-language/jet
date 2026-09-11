@@ -44,6 +44,8 @@ pub const MARKER_INLINE: &str = "Inline"; // D-METHODMACRO1
 /// D-SIMD3=B: native auto-vectorization is the default for native AOT builds;
 /// `#Scalar` is the explicit per-function/method opt-out.
 pub const MARKER_SCALAR: &str = "Scalar"; // D-SIMD3
+/// D-FOUND-OPMIX1=A: derives the reverse lookup for a typed Add/Mul impl.
+pub const MARKER_COMMUTATIVE: &str = "Commutative"; // D-FOUND-OPMIX1
 pub const MARKER_STATIC: &str = "Static"; // D-META-STAGE1
 /// D-CAPBUNDLE1 / D-CONTRACTCASE1: operation bundles on a nominal distinct
 /// type — each re-exposes a curated slice of the base type's operations

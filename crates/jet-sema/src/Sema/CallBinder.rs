@@ -543,7 +543,7 @@ mod tests {
             .contains("matches more than one callable body"));
         assert!(diags[0].why.contains("put(name: String, text: String)"));
         assert!(diags[0].why.contains("put(key: String, id: String)"));
-        assert!(diags[0].fix.contains("name the arguments"));
+        assert!(diags[0].fix.contains("Name the arguments"));
         assert!(diags[0].fix.contains("put(name: …, text: …)"));
     }
 

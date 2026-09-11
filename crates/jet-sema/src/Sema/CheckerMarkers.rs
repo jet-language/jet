@@ -115,7 +115,20 @@ fn validate_rule_arguments(
     let mut constants = Vec::with_capacity(bindings.len());
     let mut mismatch = false;
     for binding in &bindings {
-        let argument = &mut marker.args[binding.source_index];
+        if marker.args[binding.source_index].as_expr().is_none() {
+            if marker.name == Syntax::MARKER_INTERRUPT && binding.source_index == 1 {
+                types.push(None);
+                constants.push(None);
+                continue;
+            }
+            mismatch = true;
+            types.push(None);
+            constants.push(None);
+            continue;
+        }
+        let argument = marker.args[binding.source_index]
+            .as_expr_mut()
+            .expect("marker expression checked above");
         let source_type = binding
             .parameter_index
             .and_then(|index| rule.and_then(|rule| rule.signature.params.get(index)))
@@ -413,6 +426,18 @@ pub(crate) fn resolve_static_rule_products(
         .iter()
         .map(|(name, function)| (name.clone(), function))
         .collect::<std::collections::HashMap<_, _>>();
+    let structs_owned = module
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Struct(definition) => Some((definition.name.clone(), definition.clone())),
+            _ => None,
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    let structs = structs_owned
+        .iter()
+        .map(|(name, definition)| (name.clone(), definition))
+        .collect::<std::collections::HashMap<_, _>>();
     let mut facts = module
         .rule_facts
         .iter()
@@ -425,18 +450,18 @@ pub(crate) fn resolve_static_rule_products(
                 let mut args = Vec::new();
                 let mut arg_labels = Vec::new();
                 if let Some(expression) = &test.name_expr {
-                    args.push(expression.clone());
+                    args.push(crate::AST::MarkerCallArg::Expr(expression.clone()));
                     arg_labels.push(None);
                 }
                 if let Some(expression) = &test.faults_expr {
-                    args.push(expression.clone());
+                    args.push(crate::AST::MarkerCallArg::Expr(expression.clone()));
                     arg_labels.push(Some((
                         Syntax::TEST_FAULTS_PARAM.to_string(),
                         expression.span(),
                     )));
                 }
                 if let Some(expression) = &test.expected_fail_expr {
-                    args.push(expression.clone());
+                    args.push(crate::AST::MarkerCallArg::Expr(expression.clone()));
                     arg_labels.push(Some((
                         Syntax::TEST_EXPECTED_FAIL_PARAM.to_string(),
                         expression.span(),
@@ -468,10 +493,7 @@ pub(crate) fn resolve_static_rule_products(
     let mut static_strings = Vec::new();
     for application in &facts {
         let marker = &application.marker;
-        let Some(rule) = crate::Policy::applied_rule(&marker.name) else {
-            continue;
-        };
-        if matches!(rule.status, crate::Policy::RuleStatus::Retired { .. }) {
+        if crate::Policy::applied_rule(&marker.name).is_none() {
             continue;
         }
         let Some(site) = application.site else {
@@ -489,9 +511,9 @@ pub(crate) fn resolve_static_rule_products(
             // D-VERDICT-1455-1: site binding is no longer optional. Run the
             // comptime evaluator for dynamic sites too, but defer any type
             // error until ordinary sema can see locals and parameters.
-            for expression in &marker.args {
+            for expression in marker.expr_args() {
                 let mut expression = expression.clone();
-                let _ = crate::Comptime::evaluate_with_imports_opts_collecting(
+                let _ = crate::Comptime::evaluate_with_imports_opts_collecting_structs(
                     &mut expression,
                     &funcs,
                     &externs,
@@ -500,6 +522,7 @@ pub(crate) fn resolve_static_rule_products(
                     core_imports,
                     crate::Policy::GateSet::default(),
                     0,
+                    &structs,
                     None,
                 );
             }
@@ -507,7 +530,7 @@ pub(crate) fn resolve_static_rule_products(
         }
         let mut evaluated_marker = marker.clone();
         let arguments = match validate_rule_arguments(&mut evaluated_marker, |_, expression| {
-            let value = crate::Comptime::evaluate_with_imports_opts_collecting(
+            let value = crate::Comptime::evaluate_with_imports_opts_collecting_structs(
                 expression,
                 &funcs,
                 &externs,
@@ -516,6 +539,7 @@ pub(crate) fn resolve_static_rule_products(
                 core_imports,
                 crate::Policy::GateSet::default(),
                 0,
+                &structs,
                 None,
             );
             let Ok((value, _)) = value else {
@@ -569,7 +593,7 @@ pub(crate) fn resolve_static_rule_products(
             {
                 let marker = field.serde_markers.remove(idx);
                 if field.default.is_none() {
-                    if let Some(arg) = marker.args.first() {
+                    if let Some(arg) = marker.expr_arg(0) {
                         field.default = Some(Box::new(arg.clone()));
                     }
                 }
@@ -614,7 +638,7 @@ pub(crate) fn resolve_static_rule_products(
                 continue;
             }
             let mut expr = (*expr).clone();
-            match crate::Comptime::evaluate_with_imports_opts_collecting(
+            match crate::Comptime::evaluate_with_imports_opts_collecting_structs(
                 &mut expr,
                 &funcs,
                 &externs,
@@ -623,6 +647,7 @@ pub(crate) fn resolve_static_rule_products(
                 core_imports,
                 crate::Policy::GateSet::default(),
                 0,
+                &structs,
                 None,
             ) {
                 Ok((value, _)) => field.default_ct = Some(value),
@@ -956,7 +981,8 @@ fn is_lazy_memo_iter(ty: &crate::AST::Type) -> bool {
     matches!(
         ty,
         crate::AST::Type::Apply { name, args }
-            if name == Syntax::TYPE_ITER && args.len() == 1
+            if (name == Syntax::TYPE_ITER || name == Syntax::TYPE_VIEW_ITER)
+                && args.len() == 1
     )
 }
 
@@ -1160,6 +1186,12 @@ pub(crate) fn check_marker_vocabulary(
         if super::Guest::is_guest_marker_at(marker, marker_site) {
             continue;
         }
+        // D-PLACE1=A: retain the retired spelling as a dedicated teaching
+        // row rather than routing it through generic unknown-marker E0927.
+        if marker.name == crate::Syntax::MARKER_ALIGN_LEGACY {
+            diagnostics.push(Diagnostic::from_row("E1118", &[], Some(marker.span)));
+            continue;
+        }
         // A name known on the OTHER plane already got E0062/E0063 from the
         // parser's shared marker reader — never double-report.
         if !vocabulary.knows(&marker.name) {
@@ -1319,7 +1351,10 @@ fn declared_rule_arguments_match(marker: &Marker, declaration: &crate::AST::Mark
         if supplied[parameter] && !params[parameter].variadic {
             return false;
         }
-        if declared_argument_type_mismatch(&marker.args[index], params[parameter]) {
+        let Some(argument) = marker.expr_arg(index) else {
+            return false;
+        };
+        if declared_argument_type_mismatch(argument, params[parameter]) {
             return false;
         }
         supplied[parameter] = true;

@@ -183,8 +183,6 @@ fn checked_task_bundle(name: &str) -> (jet::AST::ProgramBundle, std::path::PathB
 #[test]
 fn stream_drop_uses_task_cancel_cleanup_path() {
     let (bundle, dir) = checked_task_bundle_for("stream", STREAM_SOURCE);
-    jet::Codegen::TIR::lower_jit_program(&bundle)
-        .expect("stream cancellation fixture must lower through TIR");
     let _ = fs::remove_dir_all(dir);
 
     let interpreted = run_forced_interpreter("stream", STREAM_SOURCE);
@@ -332,9 +330,9 @@ fn sema_resolves_direct_nested_task_control_bindings() {
             let (bundle, dir) = checked_task_bundle_for("nested", NESTED_SOURCE);
             assert!(bundle.used_core.contains("core.concurrency::task"));
             assert!(
-                jet_jit::resident_jit_safe_bundle(&bundle),
+                common::cranelift_resident_safe(&bundle),
                 "nested task source must stay resident-JIT safe: {}",
-                jet_jit::resident_jit_safe_bundle_detail(&bundle)
+                common::cranelift_resident_safe_detail(&bundle)
             );
             let _ = fs::remove_dir_all(dir);
 
@@ -361,51 +359,6 @@ fn sema_resolves_direct_nested_task_control_bindings() {
         .expect("nested sema proof must not abort");
 }
 
-#[test]
-fn tir_lowers_each_canonical_task_combinator_and_group() {
-    let (bundle, dir) = checked_task_bundle("tir");
-    let program = jet::Codegen::TIR::lower_jit_program(&bundle)
-        .expect("canonical task fixture must lower to TIR");
-    let run = program
-        .funcs
-        .iter()
-        .find(|function| function.name == "run")
-        .expect("lowered run function");
-    let mut groups = 0;
-    let mut all = 0;
-    let mut race = 0;
-    let mut any = 0;
-    fn count_expr(
-        expr: &jet::Codegen::TIR::TExpr,
-        all: &mut usize,
-        race: &mut usize,
-        any: &mut usize,
-    ) {
-        match &expr.kind {
-            jet::Codegen::TIR::TExprKind::TaskGroupAll { .. } => *all += 1,
-            jet::Codegen::TIR::TExprKind::TaskGroupRace { .. } => *race += 1,
-            jet::Codegen::TIR::TExprKind::TaskGroupAny { .. } => *any += 1,
-            jet::Codegen::TIR::TExprKind::Print(inner)
-            | jet::Codegen::TIR::TExprKind::Try { inner, .. }
-            | jet::Codegen::TIR::TExprKind::OrFallback { value: inner, .. } => {
-                count_expr(inner, all, race, any)
-            }
-            _ => {}
-        }
-    }
-    for statement in &run.body {
-        match statement {
-            jet::Codegen::TIR::TStmt::TaskGroup { .. } => groups += 1,
-            jet::Codegen::TIR::TStmt::Let { init, .. }
-            | jet::Codegen::TIR::TStmt::ExprStmt(init) => {
-                count_expr(init, &mut all, &mut race, &mut any)
-            }
-            _ => {}
-        }
-    }
-    assert_eq!((groups, all, race, any), (1, 1, 1, 1));
-    let _ = fs::remove_dir_all(dir);
-}
 
 #[test]
 fn task_control_plane_matches_on_default_run() {

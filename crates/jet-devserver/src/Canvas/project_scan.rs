@@ -828,6 +828,7 @@ fn output_kind_label(kind: &jet_driver::Package::PackageOutputKind) -> &'static 
         PackageOutputKind::Bundle => "bundle",
         PackageOutputKind::System => "system",
         PackageOutputKind::Fleet => "fleet",
+        PackageOutputKind::Model => "model",
     }
 }
 
@@ -1031,7 +1032,19 @@ fn canonical_package_project_json(
             format!(
                 "{{\"name\":{},\"source\":{}}}",
                 json_str(name),
-                json_str(&jet_driver::Package::dep_display(source))
+                json_str(&jet_driver::Package::dep_display_redacted(source))
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let target_profiles = facts
+        .targets
+        .iter()
+        .map(|selection| {
+            format!(
+                "{{\"name\":{},\"profile\":{}}}",
+                json_str(&selection.name),
+                json_str(selection.profile.as_str()),
             )
         })
         .collect::<Vec<_>>()
@@ -1046,15 +1059,20 @@ fn canonical_package_project_json(
             package_targets.push(package.name.clone());
         }
     }
+    let package_targets = package_targets
+        .iter()
+        .map(|name| json_str(name))
+        .collect::<Vec<_>>()
+        .join(",");
     Some(format!(
-        "{{\"path\":{},\"manifest\":{},\"name\":{},\"version\":{},\"target\":{},\"deps\":[{}],\"targets\":[{}],\"outputs\":[{}],\"environments\":[{}],\"configs\":[{}],\"members\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"effects_enabled\":false,\"diagnostics\":{}}}",
+        "{{\"path\":{},\"manifest\":{},\"name\":{},\"version\":{},\"targets\":[{}],\"package_targets\":[{}],\"deps\":[{}],\"outputs\":[{}],\"environments\":[{}],\"configs\":[{}],\"members\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"effects_enabled\":false,\"diagnostics\":{}}}",
         json_str(&rel_path(project_root, dir)),
         json_str(&rel_path(project_root, &dir.join(jet_driver::Syntax::PACKAGE_FILE))),
         json_str(&facts.name),
         json_optional_str(facts.version.as_deref()),
-        json_str(facts.target.as_deref().unwrap_or("native")),
+        target_profiles,
+        package_targets,
         deps,
-        package_targets.iter().map(|name| json_str(name)).collect::<Vec<_>>().join(","),
         canonical_outputs_json(&facts),
         canonical_environments_json(&facts),
         facts.configs.iter().map(|name| json_str(name)).collect::<Vec<_>>().join(","),

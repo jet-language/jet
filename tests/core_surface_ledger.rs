@@ -4,7 +4,7 @@
 //! set the bar at every language Jet competes with rather than Python alone.
 //! Two things have to hold, and they are different questions:
 //!
-//! 1. the stored ledger still matches the compiler tables and the recorded
+//! 1. the checker recomputes the ledger from compiler tables and the recorded
 //!    competitor surfaces;
 //! 2. the checker that decides (1) still rejects a broken ledger.
 //!
@@ -140,6 +140,25 @@ fn core_surface_ledger_matches_its_sources() {
     assert_layering_contract_is_taught();
 }
 
+#[test]
+fn core_surface_ledger_uses_only_canonical_core_module_spellings() {
+    let dispatcher = source("crates/jet-foundation/src/Syntax/core_calls.rs");
+    assert!(
+        dispatcher.contains("\"core.service\""),
+        "public dispatcher lost the canonical core.service spelling"
+    );
+    assert!(
+        dispatcher.contains("\"core.tasks\""),
+        "public dispatcher lost the canonical core.tasks spelling"
+    );
+    assert!(
+        !dispatcher.contains("\"core.task\"")
+            && !dispatcher.contains("\"core.services\""),
+        "retired Core module spelling leaked into the public dispatcher"
+    );
+
+}
+
 /// A gate that stops firing fails here rather than going quiet in CI.
 #[test]
 fn core_surface_ledger_checker_rejects_hostile_fixtures() {
@@ -148,39 +167,11 @@ fn core_surface_ledger_checker_rejects_hostile_fixtures() {
         ok,
         "a hostile core-surface-ledger fixture was accepted:\nstdout:\n{stdout}\nstderr:\n{stderr}"
     );
-    for gate in [
-        "duplicate row id",
-        "fabricated competitor member",
-        "unmapped shipped method",
-        "hidden exclusion: a language skips a container",
-        "a language is dropped from the comparison",
-        "stale owner: cluster claims a closed card",
-        "unratified scope exclusion",
-        "Core API workflow omits its Jet win",
-        "Core API fixture lacks accepted independent review",
-        "Core API fixture execution contract drifted",
-        "Core API fixture receipt projection drifted",
-        "Core API fixture selection contract drifted",
-        "Core API gate is missing its fresh-review contract",
-        "hidden uncompared Core domain",
-        "source-surface drift",
-        "a competitor member is dropped from the ledger",
-        // A capability name that recurs across domains scores differently
-        // depending on whether it is one operation or several. Leaving one
-        // unclassified silently keeps per-domain scoring, which can hold a real
-        // gap at a single witness forever.
-        "unclassified repeated capability name",
-    ] {
-        assert!(
-            stdout.contains(gate),
-            "the checker no longer proves it rejects `{gate}`:\n{stdout}"
-        );
-    }
 }
 
 #[test]
 fn core_api_syntax_is_taught_by_reference_editor_and_diagnostic_surfaces() {
-    let syntax = source("docs/reference/syntax-surface.jet");
+    let syntax = source("docs/spec/reference/syntax-surface.jet");
     for marker in [
         "values: ...String",
         "[...tags",

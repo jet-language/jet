@@ -1,0 +1,174 @@
+use core.data as data
+use core.files as fs
+use core.process as process
+use core.regex as re
+use core.sys as sys
+use core.term as term
+
+module cli {
+    #Codable
+    pub struct NoteRow {
+        pub title: String
+        pub tag: String
+        pub path: String
+    }
+
+    pub struct SearchHit {
+        pub relative: String
+        pub line: Int
+        pub text: String
+    }
+
+    // Write a small, appendable config file. The caller can read it back with
+    // read_config; keeping the path composition here makes this helper useful
+    // to both the CLI and a standalone library consumer.
+    pub fn write_config(root: String, color: String, format: String) {
+        dir :: Path.from(root)
+        fs.create_dir_all(dir) ?? panic("cli config mkdir")
+        path :: dir.join("notes.conf")
+        fs.write(path, "color={color}\nformat={format}\n") ?? panic("cli config write")
+        fs.append_all(path, "source=cli-battery\n") ?? panic("cli config append")
+    }
+
+    pub fn read_config(root: String) String -> {
+        path :: Path.from(root).join("notes.conf")
+        return fs.read(path) ?? panic("cli config read")
+    }
+
+    pub fn append_note(root: String, title: String, body: String) String -> {
+        dir :: Path.from(root)
+        fs.create_dir_all(dir) ?? panic("cli note mkdir")
+        path :: dir.join("notes.log")
+        fs.append_all(path, "{title}\t{body}\n") ?? panic("cli note append")
+        return fs.read(path) ?? panic("cli note read")
+    }
+
+    // Build a real recursive fixture. `ignored/` and `*.secret` are excluded
+    // by the fixture's .gitignore; the nested file proves traversal is not a
+    // single-directory scan.
+    pub fn seed_fixture(root: String) {
+        base :: Path.from(root)
+        nested :: base.join("nested")
+        ignored :: base.join("ignored")
+        fs.create_dir_all(nested) ?? panic("cli fixture nested mkdir")
+        fs.create_dir_all(ignored) ?? panic("cli fixture ignored mkdir")
+        fs.write(base.join(".gitignore"), "ignored/\n*.secret\n") ?? panic("cli fixture ignore")
+        fs.write(base.join("keep.txt"), "needle root\nother root\n") ?? panic("cli fixture root")
+        fs.write(nested.join("deep.txt"), "needle nested\n") ?? panic("cli fixture nested")
+        fs.write(ignored.join("skip.txt"), "needle ignored\n") ?? panic("cli fixture ignored")
+        fs.write(base.join("private.secret"), "needle secret\n") ?? panic("cli fixture secret")
+    }
+
+    // Search uses the core ignore-aware walk instead of reimplementing
+    // .gitignore matching in the battery. Every returned hit keeps its
+    // relative path and one-based line number for aligned presentation.
+    pub fn search(root: String, pattern: String) [SearchHit] -> {
+        regex :: re.compile(pattern) ?? panic("cli search regex")
+        entries :: fs.walk_files(root, ignore: ".gitignore") ?? panic("cli search walk")
+        hits := [SearchHit]{}
+        loop entry in entries {
+            text :: fs.read(entry.path) ?? panic("cli search read")
+            line_no := 0
+            loop line in text.lines() {
+                line_no += 1
+                if regex.is_match(line) -> hits.push(SearchHit{
+                    relative: entry.relative,
+                    line: line_no,
+                    text: line,
+                })
+            }
+        }
+        return hits
+    }
+
+    pub fn format_hit(hit: SearchHit, colored: Bool) String -> {
+        shown :: hit.relative.pad_end(24, " ")
+        value :: "{shown}:{hit.line}: {hit.text}"
+        if colored -> return term.style("cyan", value)
+        return value
+    }
+
+    // Exercise direct argv launch, stdout line streaming, child stdin writes,
+    // explicit EOF, a native pipeline, bounded capture, and a nonzero receipt.
+    // No shell parses any of these argv arrays.
+    pub fn process_demo(pattern: String) String -> {
+        argv :: process.cmd(["printf", "argv=%s/%s\n", "alpha", "two words"])
+            .stdout(.Capture)
+            .stderr(.Capture)
+            .output_limit(128)
+            .run() ?? panic("cli argv")
+
+        producer :: process.cmd(["printf", "keep-one\nskip\nkeep-two\n"])
+            .stdout(.Stream)
+            .spawn() ?? panic("cli producer")
+        matches := [String]{}
+        loop line in producer.stdout.lines() {
+            if line.contains(pattern) -> matches.push(line.trim())
+        }
+        produced :: producer.wait() ?? panic("cli producer wait")
+
+        consumer :: process.cmd(["cat"])
+            .stdin(.Stream)
+            .stdout(.Capture)
+            .stderr(.Capture)
+            .output_limit(128)
+            .spawn() ?? panic("cli consumer")
+        loop line in matches -> consumer.stdin.write("{line}\n") ?? panic("cli stdin write")
+        consumer.stdin.close()
+        consumed :: consumer.wait() ?? panic("cli consumer wait")
+
+        source_spec :: process.cmd(["printf", "pipe-one\npipe-two\n"])
+        sink_spec :: process.cmd(["cat"])
+        piped :: process.pipeline([source_spec, sink_spec]) ?? panic("cli pipeline")
+
+        bounded :: process.cmd(["printf", "bounded-output"])
+            .stdout(.Capture)
+            .stderr(.Capture)
+            .output_limit(64)
+            .run() ?? panic("cli bounded")
+        failed :: process.cmd(["false"])
+            .stdout(.Capture)
+            .stderr(.Capture)
+            .run() ?? panic("cli failed receipt")
+
+        expected := matches.join("\n")
+        if matches.len() > 0 -> expected += "\n"
+        return "argv={argv.output.trim()} stream={matches.join("|")} producer={produced.success} eof={consumed.output == expected} consumer={consumed.output.trim()} pipeline={piped.output.trim()} bounded={bounded.output.len() <= 64} exit={failed.code} success={failed.success}"
+    }
+
+    // Decode captured process output as typed CSV, then filter and sort the
+    // records before the caller reads the public fields.
+    pub fn records(wanted: String) [NoteRow] -> {
+        captured :: process.cmd(["printf", "title,tag,path\nzeta,keep,/tmp/z\nalpha,skip,/tmp/a\nbeta,keep,/tmp/b\n"])
+            .stdout(.Capture)
+            .stderr(.Capture)
+            .run() ?? panic("cli records process")
+        rows :: data.csv<NoteRow>(captured.output) ?? panic("cli records csv")
+        sorted :: data.query(rows)
+            .filter(row -> row.tag == wanted)
+            .sort_by(row -> row.title)
+            .collect() ?? panic("cli records sort")
+        return sorted
+    }
+
+    // The parent environment and a per-child overlay stay distinct. `run()`
+    // still returns a receipt for the deliberate nonzero exit, so callers can
+    // inspect its exact status without turning it into a thrown failure.
+    pub fn environment_demo() String -> {
+        sys.set("CLI_BATTERY_MODE", "parent")
+        overlay :: process.cmd(["printenv", "CLI_BATTERY_MODE"])
+            .env("CLI_BATTERY_MODE", "overlay")
+            .stdout(.Capture)
+            .stderr(.Capture)
+            .run() ?? panic("cli env overlay")
+        failed :: process.cmd(["false"])
+            .stdout(.Capture)
+            .stderr(.Capture)
+            .run() ?? panic("cli env exit")
+        return "env={overlay.output.trim()} exit={failed.code} success={failed.success}"
+    }
+
+    pub fn exit_with(code: Int) Never {
+        process.exit(code)
+    }
+}

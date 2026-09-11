@@ -178,13 +178,14 @@ fn is_loopback(addr: &str) -> bool {
 }
 
 fn serve_loopback(
-    kernel: Kernel,
+    mut kernel: Kernel,
     addr: &str,
     token: &str,
     path: Option<&Path>,
     auto_open: bool,
     _hook: ServeLoopbackHook,
 ) -> Result<i32, String> {
+    kernel.set_authority(token);
     let listener = TcpListener::bind(addr).map_err(|error| error.to_string())?;
     let bound = listener.local_addr().map_err(|error| error.to_string())?;
     #[cfg(test)]

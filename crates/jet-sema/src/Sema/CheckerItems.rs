@@ -26,6 +26,18 @@ pub(crate) fn bin_bits_type(width: u8) -> Type {
     }
 }
 
+/// D-PLACE1: an Atomic field is initialized from its checked scalar payload;
+/// the lowerer supplies the private JetAtomic carrier around that payload.
+fn atomic_field_inner(ty: &Type) -> Option<&Type> {
+    let Type::Apply { name, args } = ty else {
+        return None;
+    };
+    (name == "Atomic")
+        .then(|| args.first())
+        .flatten()
+        .filter(|inner| jet_foundation::Layout::atomic_scalar_type(inner))
+}
+
 impl<'a> Checker<'a> {
     /// D-MAP-KEY1: map keys are ordered values. Nominal structs and enums need
     /// the registry, so the foundation predicate handles only structural
@@ -477,11 +489,8 @@ impl<'a> Checker<'a> {
             ),
             Some(expr.span()),
         );
-        self.diags.push(self.with_ownership_copy_edit(
-            diagnostic,
-            expr.span(),
-            ty,
-        ));
+        self.diags
+            .push(self.with_ownership_copy_edit(diagnostic, expr.span(), ty));
         true
     }
 
@@ -767,7 +776,9 @@ impl<'a> Checker<'a> {
         // their arguments to infer the owner type, so labels must already be
         // in declaration order when that inference walks them.
         if !self.bind_method_args(method, &msig, args, span) {
-            return Some(msig.effective_return_type());
+            let mut sig = msig.clone();
+            sig.return_type = sig.return_type.take().map(|ty| self.resolve_type(ty));
+            return Some(sig.effective_return_type());
         }
         self.normalize_method_variadic_call(method, &msig, args, span);
         if method == "new" && owner_type_args.is_empty() {
@@ -1177,6 +1188,9 @@ impl<'a> Checker<'a> {
             is_must_use: sig.must_use,
             is_c_abi: false,
             c_abi_name: None,
+            callback_transport: None,
+            callback_plan_digest: None,
+            callback_identity: None,
             foreign_effect_root: None,
             undo: None,
             param_info: sig.param_info.clone(),
@@ -1298,7 +1312,9 @@ impl<'a> Checker<'a> {
             }
         }
         self.activate_call_reservations(&call_access, span);
-        sig.effective_return_type().into()
+        self.checked_return_types(sig.return_type.clone(), false)
+            .1
+            .into()
     }
 
     pub(crate) fn check_trait_method_args(
@@ -1385,6 +1401,9 @@ impl<'a> Checker<'a> {
                 is_must_use: false,
                 is_c_abi: false,
                 c_abi_name: None,
+                callback_transport: None,
+                callback_plan_digest: None,
+                callback_identity: None,
                 foreign_effect_root: None,
                 undo: None,
                 param_info: params
@@ -1499,7 +1518,6 @@ impl<'a> Checker<'a> {
                 }
             }
             self.check_callable_argument_ownership(method, index, param.convention, &param_ty, arg);
-
         }
         self.activate_call_reservations(&call_access, span);
         // Trait calls expose the declared success value to source inference;
@@ -1682,13 +1700,11 @@ impl<'a> Checker<'a> {
                     nested
                 });
                 let member_key = format!("{leaf}.{field}");
-                let Some(field_declaration) =
-                    self.name_ledger.declaration(owner, &member_key)
+                let Some(field_declaration) = self.name_ledger.declaration(owner, &member_key)
                 else {
                     continue;
                 };
-                if field_declaration.visibility
-                    == jet_foundation::Names::NameVisibility::Public
+                if field_declaration.visibility == jet_foundation::Names::NameVisibility::Public
                     || !reported_members.insert(member_key.clone())
                 {
                     continue;
@@ -1723,6 +1739,13 @@ impl<'a> Checker<'a> {
         type_name: &str,
         import_ns: Option<&str>,
     ) -> Option<usize> {
+        if let Some(module) = import_ns.and_then(|namespace| self.core_imports.get(namespace)) {
+            if jet_foundation::CoreModuleExports::core_leaf_kind(module, type_name).is_some() {
+                // Core exports do not live in a user module registry. Their
+                // canonical identity is resolved by the export descriptor.
+                return None;
+            }
+        }
         if let Some(namespace) = import_ns {
             if namespace.contains("::") {
                 let identity = format!("{namespace}::{type_name}");
@@ -1906,7 +1929,7 @@ impl<'a> Checker<'a> {
     /// before selecting the nominal's canonical bundle owner.
     pub(crate) fn is_cloneable_type(&self, ty: &Type) -> bool {
         match ty {
-            Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
+            Type::List(inner) | Type::Option(inner) => {
                 self.is_cloneable_type(inner)
             }
             Type::Map { key, value, .. } => {
@@ -2096,12 +2119,17 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        // Core-declared enums stay on the canonical declaration path; this
+        // keeps qualified and expected-type dot literals on the normal resolver.
+        if jet_foundation::CoreModuleExports::core_enum_variants(enum_name).is_some() {
+            return true;
+        }
         // D-TERM1 (ratified 2026-06-22): `Key` is a core enum, not in user registry.
         if enum_name == crate::Syntax::TYPE_KEY {
             return true;
         }
-        // D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum.
-        if enum_name == "ProcessStreamMode" {
+        // D-PROCESS1=A: `ProcessStreamMode` and `ProcessSignal` are core dot-literal enums.
+        if matches!(enum_name, "ProcessStreamMode" | "ProcessSignal") {
             return true;
         }
         // D-TEXTWIDTH1=B: `TextWidth`'s two field enums.
@@ -2113,6 +2141,10 @@ impl<'a> Checker<'a> {
             return true;
         }
         if enum_name == Syntax::DURATION_UNIT_TYPE {
+            return true;
+        }
+        // D-FOUND-COREAPI1 / #2853: closed event-time late disposition.
+        if enum_name == "LateEventDisposition" {
             return true;
         }
         if matches!(
@@ -2168,6 +2200,12 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        if let Some(v) = core_late_event_disposition_variants(enum_name) {
+            return Some(v);
+        }
+        if let Some(v) = core_declared_enum_variants(enum_name) {
+            return Some(v);
+        }
         // D-TERM1 (ratified 2026-06-22): `Key` is a core enum (not in user registry).
         // Synthesise its variant table here so `Key.Char(c)` / `Key.Enter` literals work.
         if enum_name == crate::Syntax::TYPE_KEY {
@@ -2180,6 +2218,11 @@ impl<'a> Checker<'a> {
         // table so `.Stream`/`.Inherit`/`.Capture` dot-literals resolve (D-ENUMDOT2).
         if enum_name == "ProcessStreamMode" {
             return Some(core_process_stream_mode_variants());
+        }
+        // D-PROCESS1=A: `ProcessSignal` is a closed Core enum — resolve its
+        // exact `Term`/`Hup`/`Int` variant table for literals and patterns.
+        if enum_name == "ProcessSignal" {
+            return Some(core_process_signal_variants());
         }
         if enum_name == crate::Syntax::TYPE_PROCESS_RESOURCE_LIMIT {
             return Some(core_process_resource_limit_variants());
@@ -2411,8 +2454,11 @@ impl<'a> Checker<'a> {
             return Type::Named(type_name.to_string());
         }
         // E2-M10: compiler-known constructable struct types (HTTPRequest, HTTPResponse).
-        // These have no user-module owner but are valid in struct literals.
-        if let Some(core_fields) = core_constructable_fields(type_name) {
+        // These have no user-module owner but are valid in struct literals. Generic
+        // history records use the same path with their concrete command argument.
+        if let Some(core_fields) = core_constructable_fields(type_name)
+            .or_else(|| core_generic_constructable_fields(type_name, type_args))
+        {
             let str_map_ty = Type::Map {
                 key: Box::new(Type::String),
                 key_span: None,
@@ -2430,6 +2476,7 @@ impl<'a> Checker<'a> {
                     self.expected_type = Some(et.clone());
                 }
                 let got = self.infer(fexpr);
+                self.clone_borrowed_struct_field_value(Some(fname), fexpr, got.as_ref());
                 self.expected_type = saved;
                 if type_name == Syntax::TYPE_ERR {
                     if let (Some(expected), Some(got)) = (expected_ty.as_ref(), got.as_ref()) {
@@ -2456,6 +2503,24 @@ impl<'a> Checker<'a> {
                     format!("add: {}", missing.join(", ")),
                     Some(span),
                 ));
+            }
+            return if type_args.is_empty() {
+                Type::Named(type_name.to_string())
+            } else {
+                Type::Apply {
+                    name: type_name.to_string(),
+                    args: type_args.to_vec(),
+                }
+            };
+        }
+        // `Never` has no constructible value. Keep the dedicated value-position
+        // diagnostic instead of falling through to the generic unknown-struct
+        // report for `Never { ... }`.
+        if type_name == Syntax::TYPE_NEVER {
+            self.diags
+                .push(Diagnostic::from_row("E2422", &[], Some(span)));
+            for (_, _, e) in fields.iter_mut() {
+                self.infer(e);
             }
             return Type::Named(type_name.to_string());
         }
@@ -2529,11 +2594,12 @@ impl<'a> Checker<'a> {
             let saved_esc = self.lambda_escapes;
             if let Some((_, _, fty)) = field_def {
                 let inst = self.instantiate_type_for_owner(owner_mod, fty, &subst);
-                self.expected_type = if is_patch_lit {
+                let expected = if is_patch_lit {
                     inst.unwrap_option().cloned()
                 } else {
-                    Some(inst)
+                    atomic_field_inner(&inst).cloned().or_else(|| Some(inst.clone()))
                 };
+                self.expected_type = expected;
             }
             let string_view_field = self.expected_type.as_ref().is_some_and(|ty| {
                 matches!(
@@ -2596,27 +2662,22 @@ impl<'a> Checker<'a> {
                             Expr::Ident(name, _) if self.is_string_view(name)
                         ) || self.string_view_call_source(expr).is_some());
                     if string_view_field && et == Type::String && !string_view_compatible {
-                        // #1164: owned String into View<str> is a teaching
-                        // ceiling, not a missing-provenance case.
+                        // #1164: an owned String cannot fill a declared View<str> field.
                         self.report_owned_string_as_view_str(expr.span());
                     } else if is_patch_lit {
                         if let Some(inner) = inst.unwrap_option() {
+                            let expected = atomic_field_inner(inner).unwrap_or(inner);
                             self.check_struct_field_assignable(
                                 name,
-                                &inner,
+                                expected,
                                 &et,
                                 expr,
                                 expr.span(),
                             );
                         }
                     } else if !string_view_compatible {
-                        self.check_struct_field_assignable(
-                            name,
-                            &inst,
-                            &et,
-                            expr,
-                            expr.span(),
-                        );
+                        let expected = atomic_field_inner(&inst).unwrap_or(&inst);
+                        self.check_struct_field_assignable(name, expected, &et, expr, expr.span());
                     }
                 }
             } else if self
@@ -2701,13 +2762,7 @@ impl<'a> Checker<'a> {
             if let (Some((_, _, fty)), Some(et)) = (field_def, et) {
                 let inst = self.instantiate_type_for_owner(owner_mod, fty, &subst);
                 let filled_span = filled.span();
-                self.check_struct_field_assignable(
-                    &name,
-                    &inst,
-                    &et,
-                    &mut filled,
-                    filled_span,
-                );
+                self.check_struct_field_assignable(&name, &inst, &et, &mut filled, filled_span);
             }
             fields.push((name, name_span, filled));
         }
@@ -2760,6 +2815,45 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Return the leaf expression in an owning constructor payload. Optional
+    /// (`Val`/`Present`) and fallible (`Ok`/`Err`) constructors store their
+    /// payload in the destination, so the payload follows the same field
+    /// ownership law as a bare field value. Parentheses and taint labels are
+    /// transparent; an explicit `Copy` is a complete ownership decision.
+    fn owning_field_value_mut(expr: &mut Expr) -> &mut Expr {
+        match expr {
+            Expr::Paren(inner, _)
+            | Expr::Present(inner, _)
+            | Expr::Ok(inner, _)
+            | Expr::Err(inner, _)
+            | Expr::Tainted(inner, _, _) => Self::owning_field_value_mut(inner),
+            _ => expr,
+        }
+    }
+
+    fn owning_field_value_type<'ty>(
+        expr: &Expr,
+        ty: Option<&'ty Type>,
+    ) -> Option<&'ty Type> {
+        match expr {
+            Expr::Paren(inner, _) | Expr::Tainted(inner, _, _) => {
+                Self::owning_field_value_type(inner, ty)
+            }
+            Expr::Present(inner, _) => {
+                Self::owning_field_value_type(inner, ty.and_then(Type::unwrap_option))
+            }
+            Expr::Ok(inner, _) => Self::owning_field_value_type(
+                inner,
+                ty.and_then(|ty| ty.unwrap_result().map(|(ok, _)| ok)),
+            ),
+            Expr::Err(inner, _) => Self::owning_field_value_type(
+                inner,
+                ty.and_then(|ty| ty.unwrap_result().map(|(_, err)| err)),
+            ),
+            _ => ty,
+        }
+    }
+
     /// Rewrite a struct-literal (or enum-payload, via the same call from
     /// `check_enum_lit`) field VALUE that is a bare non-`Copy` ident into an
     /// `Expr::Copy` node (D-CAP2 — the same node `~x` uses), when leaving it a
@@ -2787,15 +2881,20 @@ impl<'a> Checker<'a> {
         expr: &mut Expr,
         ty: Option<&Type>,
     ) {
-        if self.reject_borrowed_param_subplace(expr, ty, "fill an owned field") {
+        // `Val(x)`, `Ok(x)`, and `Err(x)` are owning constructors. Apply the
+        // existing field rule to `x`, not to the carrier wrapper, so an
+        // optional self-typed field cannot move a local without recording it.
+        let payload_ty = Self::owning_field_value_type(expr, ty);
+        let payload = Self::owning_field_value_mut(expr);
+        if self.reject_borrowed_param_subplace(payload, payload_ty, "fill an owned field") {
             return;
         }
         // A repeated field/parameter name is still an owning slot. Read-only
         // values materialize here under D-MEM-COPYSEM1; the explicit policy
         // restores the old refusal and its `~value` fix.
         if let Some(field_name) = field_name {
-            let borrowed = matches!(expr, Expr::Ident(name, _) if name == field_name)
-                && if let Expr::Ident(name, _) = &*expr {
+            let borrowed = matches!(payload, Expr::Ident(name, _) if name == field_name)
+                && if let Expr::Ident(name, _) = &*payload {
                     self.lookup(name).is_some_and(|info| {
                         !type_is_copy(&info.ty)
                             && !matches!(
@@ -2812,14 +2911,14 @@ impl<'a> Checker<'a> {
                 };
             if borrowed
                 && !self.copies_explicit()
-                && ty.is_some_and(|ty| is_cloneable(ty, self.registry))
+                && payload_ty.is_some_and(|ty| is_cloneable(ty, self.registry))
             {
-                let ty = ty.expect("cloneable borrowed same-name field has a type");
-                self.insert_implicit_copy(expr, ty, ty);
+                let ty = payload_ty.expect("cloneable borrowed same-name field has a type");
+                self.insert_implicit_copy(payload, ty, ty);
                 return;
             }
             if borrowed {
-                let (name, span) = match &*expr {
+                let (name, span) = match &*payload {
                     Expr::Ident(name, span) => (name, *span),
                     _ => return,
                 };
@@ -2830,15 +2929,12 @@ impl<'a> Checker<'a> {
                     format!("copy it explicitly with `{}{name}`", Syntax::SIGIL_COPY),
                     Some(span),
                 );
-                self.diags.push(self.with_ownership_copy_edit(
-                    diagnostic,
-                    span,
-                    ty,
-                ));
+                self.diags
+                    .push(self.with_ownership_copy_edit(diagnostic, span, payload_ty));
                 return;
             }
         }
-        let should_clone = match expr {
+        let should_clone = match payload {
             Expr::Ident(name, _) => {
                 let name = name.clone();
                 self.lookup(&name).is_some_and(|info| {
@@ -2859,11 +2955,16 @@ impl<'a> Checker<'a> {
         };
         if should_clone {
             // D-CAP2 (D-MEM1/S4): same node `copy x` desugars to — one
-            // mechanism for "duplicate this value".
-            let span = expr.span();
-            let old = std::mem::replace(expr, Expr::Absent(span));
-            *expr = Expr::Copy(Box::new(old), span);
+            // mechanism for "duplicate this value", whether the compiler
+            // inserts it or the user spells it.
+            let span = payload.span();
+            let old = std::mem::replace(payload, Expr::Absent(span));
+            *payload = Expr::Copy(Box::new(old), span);
         }
+        // A non-Copy payload that was not materialized is an actual transfer.
+        // Record it now so a later read reaches the existing moved-value
+        // diagnostic instead of an emitter/rustc use-after-move.
+        self.note_move_if_direct_ident(payload);
     }
 
     pub(crate) fn check_enum_lit(
@@ -3342,9 +3443,7 @@ impl<'a> Checker<'a> {
         // shared Try and validate the pattern against `T`. Explicit `.Ok` /
         // `.Err` patterns are the carrier-owned exception above.
         let saved_subject_expected = self.expected_type.clone();
-        if !preserve_result_carrier
-            && matches!(saved_subject_expected, Some(Type::Result { .. }))
-        {
+        if !preserve_result_carrier && matches!(saved_subject_expected, Some(Type::Result { .. })) {
             self.expected_type = None;
         }
         let mut subj_ty = cached_subject_ty.clone().or_else(|| {
@@ -3436,6 +3535,9 @@ impl<'a> Checker<'a> {
                     *name_span,
                     source_ty.as_ref(),
                 ));
+                return;
+            }
+            if self.is_borrowed_binding(name) {
                 return;
             }
         }

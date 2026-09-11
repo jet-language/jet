@@ -1,15 +1,18 @@
 // 72 — Typed error families + error conversion (D-ERR-CONV, ratified 2026-06-19).
 // Demonstrates `impl Source -> Target { … }` and automatic conversion.
+#Error
 enum FileErr {
     NotFound(String)
     PermDenied
 }
 
+#Error
 enum ParseErr {
     Empty
     BadInt(String)
 }
 
+#Error
 enum AppErr {
     File(FileErr)
     Parse(ParseErr)
@@ -32,7 +35,7 @@ fn parse_int(s: String) Int !ParseErr -> {
     return Ok(42)
 }
 
-// Both `?` calls cross error-type boundaries via the declared conversions.
+// Both calls cross error-type boundaries implicitly via the declared conversions.
 fn load(path: String) Int !AppErr -> {
     raw :: read_file(path)  // FileErr  -> AppErr.File  (declared)
     port :: parse_int(raw)  // ParseErr -> AppErr.Parse (declared)
@@ -40,10 +43,10 @@ fn load(path: String) Int !AppErr -> {
 }
 
 fn run() {
-    // Happy path: `?` applies declared conversions; fallback to 0.
+    // Use 0 when load fails instead of propagating its error.
     n :: load("config.txt") ?? 0
     print(n)
-    // Trigger FileErr -> AppErr conversion via ?
+    // Trigger the declared FileErr -> AppErr conversion inside load.
     if load("") == {
         .Ok(v) -> { print(v) }
         .Err(e) -> { print("error") }

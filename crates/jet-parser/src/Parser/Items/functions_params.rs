@@ -215,6 +215,7 @@ impl<'a> Parser<'a> {
                     span: Span::new(declaration_start, end),
                     is_pub,
                     is_package_pub,
+                    is_comptime: false,
                     external_type,
                     name,
                     name_span,
@@ -287,6 +288,7 @@ impl<'a> Parser<'a> {
         Ok(Func {
             span: Span::new(declaration_start, declaration_end),
             is_pub,
+            is_comptime: false,
             is_package_pub,
             external_type,
             name,
@@ -669,6 +671,9 @@ impl<'a> Parser<'a> {
                         break;
                     }
                     self.expect(TokKind::Comma, "between effects in the row")?;
+                    if self.peek().kind == close {
+                        break;
+                    }
                     continue;
                 }
                 // D-PROP2=A: `!Effect` is a prohibition — the function (and its
@@ -697,6 +702,9 @@ impl<'a> Parser<'a> {
                     break;
                 }
                 self.expect(TokKind::Comma, "between effects in the list")?;
+                if self.peek().kind == close {
+                    break;
+                }
             }
         }
         self.expect(close, "to close the effect row")?;
@@ -846,10 +854,10 @@ impl<'a> Parser<'a> {
                 if matches!(self.peek().kind, TokKind::RParen) {
                     break;
                 }
-                // No trailing comma: a parameter (or a zone separator) has
-                // to follow. D-APILABEL1 changed nothing here, and lambda
-                // and call-argument lists reject one too.
                 self.expect(TokKind::Comma, "between parameters")?;
+                if matches!(self.peek().kind, TokKind::RParen) {
+                    break;
+                }
             }
         }
         self.expect(TokKind::RParen, "to close the parameter list")?;
@@ -1092,7 +1100,7 @@ impl<'a> Parser<'a> {
                         "E1310",
                         format!("variadic parameter `{}` must be last", p.name),
                         "a `name: ...T` rest parameter collects every trailing argument, so nothing may follow it".to_string(),
-                        "move `{}` to the end of the parameter list, or remove the `...`".to_string(),
+                        format!("move `{}` to the end of the parameter list, or remove the `...`", p.name),
                         Some(p.name_span),
                     ));
             }

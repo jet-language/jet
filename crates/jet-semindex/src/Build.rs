@@ -2,6 +2,9 @@
 //! D-SEMINDEX1: shared by LSP and the public `jet-semindex` query API.
 
 use jet_foundation::Diagnostics::Span;
+use jet_foundation::Facts::{
+    DerivationIdentity, DerivationMethod, DerivationRecord,
+};
 use jet_foundation::Syntax;
 use jet_foundation::AST::{self, Item, LoadedModule, ProgramBundle};
 use jet_sema::{effect_key, SemIndexEffectFacts};
@@ -216,6 +219,25 @@ impl SymbolDB {
         let refs = convert_refs(&self.refs);
         let effects = convert_effects(facts);
         let definition_facts = build_definition_facts(&defs, &self.nodes, bundle);
+        let derivations = definition_facts
+            .iter()
+            .map(|fact| {
+                DerivationRecord::new(
+                    fact.stable_id.clone(),
+                    fact.human_identity.clone(),
+                    "jet-sema",
+                    DerivationMethod::StaticDerivation,
+                    "checked-definition",
+                    [fact.signature_id.clone(), fact.content_id.clone()],
+                    DerivationIdentity::new(
+                        fact.content_id.clone(),
+                        fact.signature_id.clone(),
+                        String::new(),
+                        fact.module_path.clone(),
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
         self.index = SemIndex::new(
             defs,
             refs,
@@ -225,6 +247,7 @@ impl SymbolDB {
             self.nodes.clone(),
             definition_facts,
         );
+        self.index.set_derivations(derivations);
         self.arithmetic.sort_by_key(|fact| {
             (
                 fact.module_path.clone(),
@@ -720,7 +743,7 @@ fn callable_policies(f: &AST::Func) -> Vec<String> {
     f.markers
         .iter()
         .find(|marker| marker.name == Syntax::MARKER_POLICY)
-        .and_then(|marker| AST::CallablePolicyChain::parse(&marker.args).ok())
+        .and_then(|marker| AST::CallablePolicyChain::parse(&marker.expr_args_owned()).ok())
         .map(|chain| {
             chain
                 .policies
@@ -977,7 +1000,7 @@ fn collect_state_marker_references_for_method(
             _ => &[],
         };
         for &slot in slots {
-            let Some((raw, span)) = marker.args.get(slot).and_then(state_marker_path) else {
+            let Some((raw, span)) = marker.expr_arg(slot).and_then(state_marker_path) else {
                 continue;
             };
             if raw == Syntax::STATE_ENTRY {
@@ -1207,7 +1230,7 @@ fn collect_allow_markers(markers: &[AST::Marker], site: &str, mp: &str, ctx: &mu
         if marker.name != "allow" {
             continue;
         }
-        for arg in &marker.args {
+        for arg in marker.expr_args() {
             if let AST::Expr::Ident(lint_name, _) = arg {
                 ctx.db.bypasses.push(BypassFact {
                     kind: BypassKind::LintAllow,
@@ -2837,7 +2860,7 @@ fn hover_for_fn(f: &AST::Func) -> String {
         .markers
         .iter()
         .find(|marker| marker.name == Syntax::MARKER_POLICY)
-        .and_then(|marker| AST::CallablePolicyChain::parse(&marker.args).ok())
+        .and_then(|marker| AST::CallablePolicyChain::parse(&marker.expr_args_owned()).ok())
         .map(|chain| chain.display())
         .filter(|chain| !chain.is_empty())
         .map_or_else(String::new, |chain| format!(" ; policies=[{chain}]"));

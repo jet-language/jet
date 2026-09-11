@@ -2,9 +2,11 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+import { FIXTURE_BINDINGS } from "./core-conformance.mjs";
 
 /*
  * One source-derived Core inventory, compared against every language Jet
@@ -12,18 +14,18 @@ import { fileURLToPath } from "node:url";
  *
  * The compiler tables are authoritative for what Jet ships. Each recorded
  * competitor surface is authoritative for what that language ships. This file
- * holds only the comparison policy and the parser for those tables; the JSON
- * and Markdown artifacts are generated, and hand-editing either is rejected
- * by --check.
+ * holds only the comparison policy and the parser for those tables. The runtime
+ * JSON report is generated from those inputs; --check rebuilds it and never
+ * reads the report.
  *
  * The ledger is a report. It records what is true today. It does not track
  * work, and coverage is a number it prints rather than a gate.
  */
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const LEDGER_PATH = join(ROOT, "docs/reference/core-surface-ledger.json");
-const README_PATH = join(ROOT, "docs/reference/core-surface-ledger.md");
-const PYTHON_SURFACE_PATH = join(ROOT, "docs/reference/python-surface.json");
+const RUNTIME_LEDGER_PATH = ".jet/reports/core-surface-ledger.json";
+const LEDGER_PATH = join(ROOT, RUNTIME_LEDGER_PATH);
+const PYTHON_SURFACE_PATH = join(ROOT, "docs/spec/reference/python-surface.json");
 // The canonical board lives in the main checkout. A worktree carries its own
 // committed copy, which goes stale the moment a card is minted, and reading it
 // reported every new owner as missing. Resolve the main checkout through git
@@ -40,6 +42,15 @@ const TOWER_PATH = (function () {
   return join(ROOT, "plugins/tower/.tower/tower.json");
 })();
 const MODULE_ITEMS_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs";
+const CORE_CALLS_PATH = "crates/jet-foundation/src/Syntax/core_calls.rs";
+const CORE_SOURCE_PATH = "crates/jet-codegen/src/Prelude/Core.jet";
+const ENCODING_TYPES_PATH = "crates/jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs";
+const CORE_EXPORTS_PATH = "crates/jet-foundation/src/CoreModuleExports.rs";
+const RING_LAYER_PATH = "crates/jet-foundation/src/RingLayer.rs";
+const CORE_CALLS_BEGIN = "// BEGIN GENERATED CORE CALLS";
+const CORE_CALLS_END = "// END GENERATED CORE CALLS";
+const ENCODING_FORMAT_BEGIN = "// BEGIN GENERATED CORE ENCODING FORMATS";
+const ENCODING_FORMAT_END = "// END GENERATED CORE ENCODING FORMATS";
 const FIXED_SIGS_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs";
 const COLLECTIONS_PATH = "crates/jet-foundation/src/Collections.rs";
 const NUMERIC_PATH = "crates/jet-foundation/src/Numeric.rs";
@@ -47,9 +58,10 @@ const NET_TEXT_TIME_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/net_text_tim
 const CORE_TYPES_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs";
 const PREDICATES_PATH = "crates/jet-foundation/src/Syntax/predicates.rs";
 const POLICY_PATH = "crates/jet-foundation/src/Policy.rs";
+const MARKERS_PATH = "crates/jet-codegen/src/Prelude/Markers.jet";
 const SYNTAX_PATH = "crates/jet-foundation/src/Syntax/core_surface.rs";
 const CORE_API_LAWS_PATH = "docs/spec/stdlib-api-laws.md";
-const SYNTAX_REFERENCE_PATH = "docs/reference/syntax-surface.jet";
+const SYNTAX_REFERENCE_PATH = "docs/spec/reference/syntax-surface.jet";
 const AGENT_MANIFEST_PATH = "tests/agent_workloads/manifest.tsv";
 const AGENT_RECEIPT_PATH = "tests/agent_workloads/baselines/receipt.tsv";
 const AGENT_REVIEW_PATH = "tests/agent_workloads/core_api_fixture_reviews.tsv";
@@ -60,6 +72,13 @@ const AGENT_CHECKSUMS_PATH = "tests/agent_workloads/SHA256SUMS";
 const AGENT_RUNNER_SOURCE_PATH = "tests/agent_workloads.rs";
 const CORE_API_REVIEW_TEST_PATH = "tests/core_surface_ledger.rs";
 const CORE_API_REVIEW_TEST = CORE_API_REVIEW_TEST_PATH + "::core_surface_ledger_matches_its_sources";
+const CORE_CONFORMANCE_PATH = "scripts/agent/core-conformance.mjs";
+const CORE_CONFORMANCE_FIXTURE_ROOT = "tests/conformance/corpus";
+const CORE_CONFORMANCE_FIXTURE_PATHS = Array.from(new Set(
+  Array.from(FIXTURE_BINDINGS.values()).flat().map(function (path) {
+    return CORE_CONFORMANCE_FIXTURE_ROOT + "/" + path;
+  }),
+));
 const AGENT_BASELINE_ADAPTERS = ["bash", "python", "node"];
 const AGENT_RUNNER_MARKERS = [
   "fn manifest_is_complete_frozen_and_non_vacuous()",
@@ -81,19 +100,6 @@ const CORE_API_REVIEW_CHECKS = [
   "syntax-coverage",
   "fixture-selection",
 ];
-const CORE_API_REVIEW_MARKERS = [
-  "fn core_surface_ledger_matches_its_sources()",
-  "let (ok, stdout, stderr) = run(\"--check\");",
-  "accepted-jet-wins=",
-  "core API fixture execution: deterministic; pinned-tools; cold-warm; exact-stdout; input-unchanged; scratch-closed",
-  "core API fixtures: independent acceptance verified tasks=",
-  "core API fresh review: fresh-context-release-check; checks=workflow-closure,construct-classifications,reasoning-evidence,syntax-coverage,fixture-selection",
-  "fn core_surface_ledger_checker_rejects_hostile_fixtures()",
-  "Core API workflow omits evidence fields",
-  "Core API fixture loses deterministic runner binding",
-  "Core API fixture selection drifts",
-  "fn core_api_syntax_is_taught_by_reference_editor_and_diagnostic_surfaces()",
-];
 const CORE_API_SYNTAX_MARKERS = [
   "values: ...String",
   "[...tags",
@@ -106,14 +112,13 @@ const CORE_API_SYNTAX_MARKERS = [
 ];
 const AGENT_RUNNER = "tests/agent_workloads.rs::equivalent_adapters_complete_declared_tasks";
 const AGENT_SCORING = "#769:v1;exit=0;stdout=exact;cold=recorded;warm=equal;input=unchanged;scratch=closed";
-// D-SERVICE1=D: fixed_sigs.rs retains private Prelude contracts under this
-// retired adapter name. It is not a user-facing Core module and must not enter
-// the public workflow inventory. Unknown names remain hard errors below.
-const PRIVATE_CORE_MODULES = new Set(["core.services"]);
 // Fake-data helpers are an internal deterministic test capability, not a
 // public collection container. Keep dispatch discovery strict without scoring
 // this private table as Core API.
-const PRIVATE_COLLECTION_METHOD_FUNCTIONS = new Set(["fake_method_return"]);
+const PRIVATE_COLLECTION_METHOD_FUNCTIONS = new Set(["fake_method_return", "view_iter_method_return"]);
+// Internal Prelude helpers may be present in the compiler dispatcher without
+// being public module members. Core.jet declares these adapter-only rows
+// alongside ordinary dispatcher rows; there is no second handwritten key list.
 const PRIVATE_CORE_TYPES = new Set(["Fake"]);
 
 // Every language the owner named on 2026-08-03, each with a recorded surface
@@ -121,16 +126,16 @@ const PRIVATE_CORE_TYPES = new Set(["Fake"]);
 // snapshot; the other ten are read from a runtime, from standard-library
 // source, or from official machine-readable documentation.
 const SURFACE_FILES = {
-  Rust: "docs/reference/surfaces/rust-surface.json",
-  Go: "docs/reference/surfaces/go-surface.json",
-  Swift: "docs/reference/surfaces/swift-surface.json",
-  Kotlin: "docs/reference/surfaces/kotlin-surface.json",
-  "C#": "docs/reference/surfaces/csharp-surface.json",
-  TypeScript: "docs/reference/surfaces/js-surface.json",
-  Ruby: "docs/reference/surfaces/ruby-surface.json",
-  Elixir: "docs/reference/surfaces/elixir-surface.json",
-  Julia: "docs/reference/surfaces/julia-surface.json",
-  R: "docs/reference/surfaces/r-surface.json",
+  Rust: "docs/spec/reference/surfaces/rust-surface.json",
+  Go: "docs/spec/reference/surfaces/go-surface.json",
+  Swift: "docs/spec/reference/surfaces/swift-surface.json",
+  Kotlin: "docs/spec/reference/surfaces/kotlin-surface.json",
+  "C#": "docs/spec/reference/surfaces/csharp-surface.json",
+  TypeScript: "docs/spec/reference/surfaces/js-surface.json",
+  Ruby: "docs/spec/reference/surfaces/ruby-surface.json",
+  Elixir: "docs/spec/reference/surfaces/elixir-surface.json",
+  Julia: "docs/spec/reference/surfaces/julia-surface.json",
+  R: "docs/spec/reference/surfaces/r-surface.json",
 };
 
 // Python's snapshot predates the container shape, so it is projected onto the
@@ -227,7 +232,6 @@ const PYTHON_ABSENT = {
 // records. Aliasing keeps one comparison per workflow instead of splitting the
 // same competitor surface across two names.
 const CONTAINER_ALIASES = {
-  "core.task": "core.tasks",
   "core.http.client": "core.http",
   "core.http.server": "core.http",
   "core.time.expiring": "core.time",
@@ -560,6 +564,18 @@ const TYPE_CONTAINER = {
   CompilerLexed: "core.compiler",
   CompilerChecked: "core.compiler",
   CompilerSourceMap: "core.compiler",
+  CompilerPackageError: "core.compiler",
+  CompilerDependency: "core.compiler",
+  CompilerPackageTarget: "core.compiler",
+  CompilerPackageOutput: "core.compiler",
+  CompilerBuildProfile: "core.compiler",
+  CompilerManifest: "core.compiler",
+  CompilerPackage: "core.compiler",
+  CompilerLockedPackage: "core.compiler",
+  CompilerLock: "core.compiler",
+  CompilerKeyValue: "core.compiler",
+  CompilerProfile: "core.compiler",
+  CompilerProfileSet: "core.compiler",
   EffectInfo: "core.reflect",
   Effect: "core.reflect",
   CompilerSyntaxTree: "core.compiler",
@@ -609,6 +625,7 @@ const TYPE_CONTAINER = {
 const COLLECTION_METHOD_FUNCTIONS = {
   list_method_return: "List",
   iter_method_return: "Iter",
+  view_iter_method_return: "Iter",
   view_method_return: "View",
   option_method_return: "Option",
   // Result is a language carrier, not a scored Core container. Its methods
@@ -618,7 +635,9 @@ const COLLECTION_METHOD_FUNCTIONS = {
   string_method_return: "String",
   stopwatch_method_return: "Stopwatch",
   clock_method_return: "Clock",
+  deterministic_world_method_return: "DeterministicWorld",
   rng_method_return: "Rng",
+  history_rng_method_return: "HistoryRng",
   solver_method_return: "Solver",
   fake_method_return: null,
   duration_method_return: "Duration",
@@ -627,6 +646,7 @@ const COLLECTION_METHOD_FUNCTIONS = {
   sender_method_return: "Sender",
   pool_method_return: "Pool",
   shared_method_return: "Shared",
+  shared_snapshot_method_return: "SharedSnapshot",
   shared_weak_method_return: "SharedWeak",
   shared_guard_method_return: "SharedGuard",
   condition_method_return: "Condition",
@@ -660,6 +680,7 @@ const COLLECTION_METHOD_FUNCTIONS = {
   is_lazy_adapter: "Iter",
   is_iter_terminal: "Iter",
   build_context_method_return: "core.compiler",
+  compiler_package_method_return: "core.compiler",
   // builtin_static_return mixes types in one match, so its arms are attributed
   // one at a time through TYPE_CONTAINER rather than to a single container.
   builtin_static_return: null,
@@ -835,7 +856,6 @@ const RATIFIED_DECLINES = {
   "gap.core.encoding.csv.fieldsizelimit": ["D-CORESURF-SMALL1", "EncodingLimits.max_item_bytes"],
   "gap.core.math.random.random": ["D-CORESURF-SMALL1", "core.math.random.float"],
   "gap.core.math.random.uniform": ["D-CORESURF-SMALL1", "core.math.random.float_range"],
-  "gap.core.args.parse": ["D-CORESURF-SMALL1", "ArgsSpec.parse"],
   "gap.core.args.parseargs": ["D-CORESURF-SMALL1", "ArgsSpec.parse"],
   "gap.core.encoding.json.dump": ["D-CORESURF-SMALL1", "to_string() + a file write, or the streaming JSONWriter"],
   "gap.core.mem.replace": ["D-CORESURF-SMALL1", "the take operator (^) + assignment"],
@@ -870,6 +890,28 @@ function read(relativePath) {
   const absolute = join(ROOT, relativePath);
   if (!existsSync(absolute)) throw new Error("missing source: " + relativePath);
   return readFileSync(absolute, "utf8");
+}
+function conformanceFixtureBinding(rowId) {
+  const relativePaths = FIXTURE_BINDINGS.get(rowId);
+  if (!relativePaths) return null;
+  const paths = relativePaths.map(function (path) {
+    return CORE_CONFORMANCE_FIXTURE_ROOT + "/" + path;
+  });
+  for (const path of paths) {
+    const source = read(path);
+    if (!/^\/\/\s*core-conformance:\s*\S+\s*$/m.test(source)) {
+      throw new Error("conformance fixture is missing its row marker: " + path);
+    }
+    if (!/^\/\/\s*coverage:\s*\S.+$/m.test(source)) {
+      throw new Error("conformance fixture is missing its coverage header: " + path);
+    }
+    if (!source.includes(
+      "// web: not-applicable (the web target has no browser scheduler)",
+    )) {
+      throw new Error("conformance fixture is missing the web applicability declaration: " + path);
+    }
+  }
+  return { sources: paths };
 }
 
 function sha256(text) {
@@ -1019,6 +1061,18 @@ function matchArms(source, needle) {
   return arms;
 }
 
+function allMatchArms(source, needle) {
+  const arms = [];
+  let offset = 0;
+  while (offset < source.length) {
+    const matchAt = source.indexOf(needle, offset);
+    if (matchAt < 0) break;
+    arms.push(...matchArms(source.slice(matchAt), needle));
+    offset = matchAt + needle.length;
+  }
+  return arms;
+}
+
 function syntaxConstants() {
   const values = new Map();
   // Every Syntax module, not two of them. TYPE_RANGE lives in math_layout.rs,
@@ -1087,101 +1141,973 @@ function canonicalModule(name) {
   if (name.startsWith("jet.")) return "core." + name.slice(4);
   return name;
 }
+// ---------------------------------------------------------------------------
+// Core declarations. `Prelude/Core.jet` is the one readable twin for the
+// compiler-owned module/member inventory. The parser is intentionally smaller
+// than the Jet parser: this file is consumed before Prelude bootstrap, and its
+// grammar is a deliberately closed, line-oriented declaration shape.
+
+function coreList(text, context, allowPaths = false) {
+  const values = text
+    .split(",")
+    .map(function (value) { return value.trim(); })
+    .filter(Boolean);
+  const pattern = allowPaths
+    ? /^[A-Za-z_][A-Za-z0-9_.]*$/
+    : /^[A-Za-z_][A-Za-z0-9_!?]*$/;
+  for (const value of values) {
+    if (!pattern.test(value)) {
+      throw new Error("invalid Core declaration name `" + value + "` in " + context);
+    }
+  }
+  return values;
+}
+
+function coreSourceLine(raw) {
+  let quoted = false;
+  let escaped = false;
+  for (let index = 0; index < raw.length - 1; index += 1) {
+    const char = raw[index];
+    const next = raw[index + 1];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === "\"") quoted = false;
+      continue;
+    }
+    if (char === "\"") {
+      quoted = true;
+      continue;
+    }
+    if (char === "/" && next === "/") return raw.slice(0, index).trim();
+  }
+  return raw.trim();
+}
+function coreCallArguments(expression, open, sourceLine) {
+  const args = [];
+  let start = open + 1;
+  let paren = 1;
+  let bracket = 0;
+  let brace = 0;
+  let quotedString = false;
+  let escaped = false;
+  for (let index = open + 1; index < expression.length; index += 1) {
+    const char = expression[index];
+    if (quotedString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === "\"") quotedString = false;
+      continue;
+    }
+    if (char === "\"") {
+      quotedString = true;
+      continue;
+    }
+    if (char === "(") {
+      paren += 1;
+      continue;
+    }
+    if (char === ")") {
+      if (paren === 1 && bracket === 0 && brace === 0) {
+        args.push(expression.slice(start, index).trim());
+        return args;
+      }
+      paren -= 1;
+      continue;
+    }
+    if (char === "[") {
+      bracket += 1;
+      continue;
+    }
+    if (char === "]") {
+      bracket -= 1;
+      continue;
+    }
+    if (char === "{") {
+      brace += 1;
+      continue;
+    }
+    if (char === "}") {
+      brace -= 1;
+      continue;
+    }
+    if (char === "," && paren === 1 && bracket === 0 && brace === 0) {
+      args.push(expression.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  throw new Error("unterminated Core dispatcher adapter at line " + sourceLine);
+}
+
+function coreCallIdentityValue(argument, field, sourceLine) {
+  const value = argument.trim();
+  const literal = value.match(/^"((?:\\.|[^"\\])*)"$/);
+  if (literal) {
+    try {
+      return JSON.parse(value);
+    } catch (error) {
+      return literal[1].replace(/\\"/g, "\"");
+    }
+  }
+  const symbolic = value.match(/^(?:(?:crate::)?Syntax::|super::)?([A-Z][A-Z0-9_]*)$/);
+  if (!symbolic) {
+    throw new Error("dispatcher row has no " + field +
+      " identity literal or known symbolic constant at line " + sourceLine);
+  }
+  const constants = syntaxConstants();
+  if (!constants.has(symbolic[1])) {
+    throw new Error("dispatcher row has unknown " + field +
+      " identity constant `" + value + "` at line " + sourceLine);
+  }
+  return constants.get(symbolic[1]);
+}
+function coreCallReceiverTypes(argument, sourceLine) {
+  const list = argument.trim().match(/^&\s*\[([\s\S]*)\]$/);
+  if (!list) {
+    throw new Error("dispatcher row receiver has no receiver-type list at line " + sourceLine);
+  }
+  return list[1].split(",").map(function (value) {
+    return value.trim();
+  }).filter(Boolean).map(function (value) {
+    return coreCallIdentityValue(value, "receiver type", sourceLine);
+  });
+}
+
+
+function coreCallIdentity(expression, sourceLine) {
+  const call = expression.match(
+    /^(?:(CoreCallRecord::(new_with_coverage|new|receiver_with_coverage|receiver_with_symbol|receiver))|(sema_web_call))\s*\(/,
+  );
+  if (!call) {
+    throw new Error("dispatcher row has no CoreCallRecord adapter at line " + sourceLine);
+  }
+  const constructor = call[1] || call[3];
+  const args = coreCallArguments(expression, call[0].length - 1, sourceLine);
+  const receiver = constructor.startsWith("CoreCallRecord::receiver");
+  const moduleIndex = receiver ? null : 0;
+  const memberIndex = 1;
+  if (args.length <= memberIndex || (moduleIndex !== null && args.length <= moduleIndex)) {
+    throw new Error("dispatcher row adapter has no module/member identity at line " + sourceLine);
+  }
+  return {
+    constructor: constructor,
+    module: moduleIndex === null ? "" : coreCallIdentityValue(args[moduleIndex], "module", sourceLine),
+    member: coreCallIdentityValue(args[memberIndex], "member", sourceLine),
+    receiverTypes: receiver ? coreCallReceiverTypes(args[0], sourceLine) : [],
+  };
+}
+
+function coreDispatcherMemberValue(member) {
+  if (!/^[A-Z][A-Z0-9_]*$/.test(member)) return member;
+  const constants = syntaxConstants();
+  return constants.get(member) || member;
+}
+
+function validateDispatcherIdentity(module, member, expression, sourceLine) {
+  const actual = coreCallIdentity(expression, sourceLine);
+  const expectedMember = coreDispatcherMemberValue(member);
+  // Receiver rows use the left label for either the method or a grouped receiver type.
+  const matches = module
+    ? actual.module === module && actual.member === expectedMember
+    : actual.module === "" && (
+      actual.member === expectedMember ||
+      actual.receiverTypes.includes(member) ||
+      actual.receiverTypes.includes(expectedMember)
+    );
+  if (!matches) {
+    const expected = (module || "-") + "." + member;
+    const emitted = (actual.module || "-") + "." + actual.member;
+    throw new Error("dispatcher row identity disagrees with emitted adapter at line " +
+      sourceLine + ": DSL " + expected + " vs " + actual.constructor + " " + emitted);
+  }
+  return actual;
+}
+
+function parseCoreSource(source) {
+  const modules = [];
+  const bootstraps = [];
+  const dispatcherRows = [];
+  const ambientRoutes = [];
+  const formatRows = [];
+  let rootTypes = [];
+  let namespaceOnly = [];
+  const seenModules = new Set();
+  const seenBootstraps = new Set();
+  const seenFormatVariants = new Set();
+  const seenFormatLabels = new Set();
+  const seenFormatModules = new Set();
+  const seenDispatcherKeys = new Set();
+  const seenAmbientRoutes = new Set();
+  for (const [index, raw] of source.split(/\r?\n/).entries()) {
+    const line = coreSourceLine(raw);
+    if (!line) continue;
+    const sourceLine = index + 1;
+    const bootstrap = line.match(
+      /^bootstrap\s+([A-Za-z_][A-Za-z0-9_.-]*)\s+depends_on\s+\[([^\]]*)\]$/,
+    );
+    if (bootstrap) {
+      const name = bootstrap[1];
+      if (seenBootstraps.has(name)) {
+        throw new Error("duplicate Core bootstrap step `" + name + "` at line " + sourceLine);
+      }
+      seenBootstraps.add(name);
+      bootstraps.push({
+        name: name,
+        dependencies: coreList(bootstrap[2], "Core.jet line " + sourceLine, true),
+        sourceLine: sourceLine,
+      });
+      continue;
+    }
+    const roots = line.match(/^root_types\s+\{([^}]*)\}$/);
+    if (roots) {
+      rootTypes = coreList(roots[1], "Core.jet line " + sourceLine);
+      continue;
+    }
+    const namespaces = line.match(/^namespace_only\s+\{([^}]*)\}$/);
+    if (namespaces) {
+      namespaceOnly = coreList(namespaces[1], "Core.jet line " + sourceLine, true);
+      continue;
+    }
+    const format = line.match(
+      /^format_row\s+([A-Z][A-Z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_.]*)\s+([A-Z][A-Z0-9_]*)$/,
+    );
+    if (format) {
+      const variant = format[1];
+      const module = format[2];
+      const label = format[3];
+      if (seenFormatVariants.has(variant)) {
+        throw new Error("duplicate Core encoding format variant `" + variant +
+          "` at line " + sourceLine);
+      }
+      if (seenFormatLabels.has(label)) {
+        throw new Error("duplicate Core encoding format label `" + label +
+          "` at line " + sourceLine);
+      }
+      if (seenFormatModules.has(module)) {
+        throw new Error("duplicate Core encoding format module `" + module +
+          "` at line " + sourceLine);
+      }
+      seenFormatVariants.add(variant);
+      seenFormatLabels.add(label);
+      seenFormatModules.add(module);
+      formatRows.push({
+        variant: variant,
+        module: module,
+        label: label,
+        sourceLine: sourceLine,
+      });
+      continue;
+    }
+    const dispatcher = line.match(
+      /^dispatcher_row\s+(plain|adapter|receiver)\s+([^\s]+)\s+([^\s]+)\s+\|\s+(.+)$/,
+    );
+    if (dispatcher) {
+      const kind = dispatcher[1];
+      const module = dispatcher[2] === "-" ? "" : dispatcher[2];
+      const member = dispatcher[3];
+      const expression = dispatcher[4].trim();
+      if (kind === "receiver" && dispatcher[2] !== "-") {
+        throw new Error("receiver dispatcher row must use `-` for its module at line " + sourceLine);
+      }
+      if (kind !== "receiver" &&
+          !/^[A-Za-z_][A-Za-z0-9_.]*$/.test(module)) {
+        throw new Error("invalid dispatcher module `" + module + "` at line " + sourceLine);
+      }
+      if (!/^[A-Za-z_][A-Za-z0-9_!?]*$/.test(member)) {
+        throw new Error("invalid dispatcher member `" + member + "` at line " + sourceLine);
+      }
+      validateDispatcherIdentity(module, member, expression, sourceLine);
+      const key = kind === "receiver" ? "receiver@" + sourceLine : module + "." + member;
+      if (seenDispatcherKeys.has(key)) {
+        throw new Error("duplicate Core dispatcher row `" + key + "` at line " + sourceLine);
+      }
+      seenDispatcherKeys.add(key);
+      dispatcherRows.push({
+        kind: kind,
+        module: module,
+        member: member,
+        expression: expression,
+        sourceLine: sourceLine,
+      });
+      continue;
+    }
+    const ambient = line.match(
+      /^ambient_route\s+([A-Za-z_][A-Za-z0-9_.]*)\s+([A-Za-z_][A-Za-z0-9_!?]*)$/,
+    );
+    if (ambient) {
+      const key = ambient[1] + "." + ambient[2];
+      if (seenAmbientRoutes.has(key)) {
+        throw new Error("duplicate Core ambient route `" + key + "` at line " + sourceLine);
+      }
+      seenAmbientRoutes.add(key);
+      ambientRoutes.push({
+        module: ambient[1],
+        member: ambient[2],
+        sourceLine: sourceLine,
+      });
+      continue;
+    }
+    const module = line.match(
+      /^module\s+([A-Za-z_][A-Za-z0-9_.]*)\s+exports\s+\{([^}]*)\}(?:\s+types\s+\{([^}]*)\})?(?:\s+depends_on\s+\[([^\]]*)\])?$/,
+    );
+    if (module) {
+      const name = module[1];
+      if (seenModules.has(name)) {
+        throw new Error("duplicate Core module `" + name + "` at line " + sourceLine);
+      }
+      seenModules.add(name);
+      const members = coreList(module[2], "Core.jet line " + sourceLine);
+      const types = [];
+      for (const rawType of (module[3] || "").split(",").map(function (value) {
+        return value.trim();
+      }).filter(Boolean)) {
+        const parts = rawType.split(":").map(function (value) { return value.trim(); });
+        if (parts.length > 2 || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(parts[0])) {
+          throw new Error("invalid Core type export `" + rawType + "` in Core.jet line " + sourceLine);
+        }
+        const descriptor = parts[1] || "plain";
+        const genericMatch = descriptor.match(/^generic\(([1-9][0-9]*)\)$/);
+        const enumMatch = descriptor.match(/^plain\(([^()]*)\)$/);
+        const kind = genericMatch || enumMatch ? "plain" : descriptor;
+        if (!["plain", "crypto_nominal"].includes(kind)) {
+          throw new Error("invalid Core type kind `" + kind + "` in Core.jet line " + sourceLine);
+        }
+        const variants = enumMatch
+          ? coreList(enumMatch[1].split("|").join(","), "Core enum `" + parts[0] + "` at line " + sourceLine)
+          : [];
+        if (enumMatch && variants.length === 0) {
+          throw new Error("Core enum export has no variants `" + rawType + "` in Core.jet line " + sourceLine);
+        }
+        for (const variant of variants) {
+          if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(variant)) {
+            throw new Error("invalid Core enum variant `" + variant + "` in Core.jet line " + sourceLine);
+          }
+        }
+        if (new Set(variants).size !== variants.length) {
+          throw new Error("duplicate Core enum variant `" + parts[0] + "` at line " + sourceLine);
+        }
+        types.push({
+          name: parts[0],
+          kind: kind,
+          variants: variants,
+          genericArity: genericMatch ? Number(genericMatch[1]) : null,
+        });
+      }
+      const memberSet = new Set();
+      for (const member of members) {
+        if (memberSet.has(member)) {
+          throw new Error("duplicate Core member `" + name + "." + member + "` at line " + sourceLine);
+        }
+        memberSet.add(member);
+      }
+      const typeSet = new Set();
+      for (const type of types) {
+        if (typeSet.has(type.name)) {
+          throw new Error("duplicate Core type export `" + name + "." + type.name +
+            "` at line " + sourceLine);
+        }
+        typeSet.add(type.name);
+      }
+      modules.push({
+        module: name,
+        members: members,
+        types: types,
+        dependencies: coreList(module[4] || "", "Core.jet line " + sourceLine, true),
+        sourceLine: sourceLine,
+      });
+      continue;
+    }
+    throw new Error("unrecognized Core declaration at line " + sourceLine + ": " + line);
+  }
+
+  if (!bootstraps.length) throw new Error("Core.jet has no bootstrap declarations");
+  const bootstrapNames = new Set(bootstraps.map(function (step) { return step.name; }));
+  for (const step of bootstraps) {
+    for (const dependency of step.dependencies) {
+      if (!bootstrapNames.has(dependency)) {
+        throw new Error("Core bootstrap step `" + step.name +
+          "` depends on missing step `" + dependency + "`");
+      }
+    }
+  }
+  const bootstrapPosition = new Map(bootstraps.map(function (step, position) {
+    return [step.name, position];
+  }));
+  for (const step of bootstraps) {
+    for (const dependency of step.dependencies) {
+      if (bootstrapPosition.get(dependency) >= bootstrapPosition.get(step.name)) {
+        throw new Error("Core bootstrap order is not deterministic: `" + step.name +
+          "` precedes dependency `" + dependency + "`");
+      }
+    }
+  }
+  const requiredBootstrap = ["Syntax", "Effects", "Core", "Derives"];
+  if (stable(bootstraps.map(function (step) { return step.name; })) !== stable(requiredBootstrap)) {
+    throw new Error("Core bootstrap order must be Syntax -> Effects -> Core -> Derives");
+  }
+  const moduleNames = modules.map(function (entry) { return entry.module; });
+  const moduleSet = new Set(moduleNames);
+  const memberSets = new Map(modules.map(function (entry) {
+    return [entry.module, new Set(entry.members)];
+  }));
+  for (const entry of modules) {
+    for (const dependency of entry.dependencies) {
+      if (!moduleSet.has(dependency)) {
+        throw new Error("Core module `" + entry.module +
+          "` depends on missing module `" + dependency + "`");
+      }
+    }
+  }
+  for (const row of formatRows) {
+    if (!moduleSet.has(row.module)) {
+      throw new Error("encoding format row names missing Core module `" + row.module + "`");
+    }
+  }
+  for (const row of dispatcherRows) {
+    if (row.kind === "receiver") continue;
+    if (!moduleSet.has(row.module) && row.kind !== "adapter") {
+      throw new Error("dispatcher row names missing Core module `" + row.module + "`");
+    }
+    if (row.kind === "plain" && !memberSets.get(row.module).has(row.member)) {
+      throw new Error("dispatcher row is not declared by Core.jet exports: " +
+        row.module + "." + row.member);
+    }
+  }
+  const nonReceiverDispatcherCounts = new Map();
+  for (const row of dispatcherRows) {
+    if (row.kind === "receiver") continue;
+    const key = row.module + "." + row.member;
+    nonReceiverDispatcherCounts.set(key, (nonReceiverDispatcherCounts.get(key) || 0) + 1);
+  }
+  for (const route of ambientRoutes) {
+    if (!moduleSet.has(route.module)) {
+      throw new Error("ambient route names missing Core module `" + route.module + "`");
+    }
+    const key = route.module + "." + route.member;
+    const matches = nonReceiverDispatcherCounts.get(key) || 0;
+    if (matches !== 1) {
+      throw new Error("ambient route must match exactly one non-receiver dispatcher row: " +
+        key + " (matches=" + matches + ")");
+    }
+  }
+  const namespaceSet = new Set(namespaceOnly);
+  if (namespaceSet.size !== namespaceOnly.length) {
+    throw new Error("Core namespace_only declarations contain a duplicate");
+  }
+  for (const module of namespaceOnly) {
+    if (!moduleSet.has(module)) {
+      throw new Error("Core namespace_only module is not declared: " + module);
+    }
+  }
+  return {
+    modules,
+    bootstraps,
+    rootTypes,
+    namespaceOnly,
+    dispatcherRows,
+    ambientRoutes,
+    formatRows,
+  };
+}
+
+function coreModuleInventory() {
+  if (!existsSync(join(ROOT, CORE_SOURCE_PATH))) {
+    throw new Error("missing canonical Core declaration source: " + CORE_SOURCE_PATH);
+  }
+  const declarations = parseCoreSource(read(CORE_SOURCE_PATH));
+  return declarations.modules.map(function (entry) {
+    return {
+      module: entry.module,
+      rawModules: [entry.module + " (Prelude/Core.jet)"],
+      members: entry.members.slice(),
+      sourceLine: entry.sourceLine,
+      types: entry.types.slice(),
+      dependencies: entry.dependencies.slice(),
+    };
+  });
+}
+
+
+// `CORE_CALLS` is the generated Core dispatcher. Keep every constructor and
+// web-call adapter accountable to the same module inventory that feeds the
+// ledger; otherwise a stale adapter spelling can become user-visible without
+// a source declaration.
+function publicDispatcherRows() {
+  const source = read(CORE_CALLS_PATH);
+  const start = source.indexOf("pub const CORE_CALLS");
+  const end = source.indexOf("\n];", start);
+  if (start < 0 || end < 0) {
+    throw new Error("CoreCall dispatcher table is missing its bounded source");
+  }
+  const body = source.slice(start, end);
+  const rows = [];
+  const seen = new Map();
+  const register = (module, member, sourceLine) => {
+    if (!/^[A-Za-z_][A-Za-z0-9_.]*$/.test(module) ||
+        !/^(?:[A-Za-z_][A-Za-z0-9_!?]*|(?:\\0|\0)[A-Za-z_][A-Za-z0-9_.]*)$/.test(member)) {
+      throw new Error("malformed CoreCall dispatcher row at line " + sourceLine +
+        ": invalid module/member");
+    }
+    const key = module + "." + member;
+    if (seen.has(key)) {
+      throw new Error("duplicate public dispatcher row `" + key + "` at lines " +
+        seen.get(key) + " and " + sourceLine);
+    }
+    seen.set(key, sourceLine);
+    rows.push({ module: module, member: member, sourceLine: sourceLine });
+  };
+  const constructors = Array.from(
+    body.matchAll(/\bCoreCallRecord::(?:new_with_coverage|new)\s*\(/g),
+  );
+  for (const match of constructors) {
+    const sourceLine = lineAt(source, start + match.index);
+    const row = coreCallIdentity(body.slice(match.index), sourceLine);
+    register(row.module, row.member, sourceLine);
+  }
+  const webCalls = Array.from(
+    body.matchAll(/\bsema_web_call\s*\(\s*"([^"\\]*)"\s*,\s*"([^"\\]*)"/g),
+  );
+  for (const match of webCalls) {
+    register(match[1], match[2], lineAt(source, start + match.index));
+  }
+  if (!constructors.length && !webCalls.length) {
+    throw new Error("CoreCall dispatcher table has no public rows");
+  }
+  return rows;
+}
+
+function validatePublicDispatcher(sourceOrModules, rows, options = {}) {
+  const declarations = Array.isArray(sourceOrModules) ? null : sourceOrModules;
+  const modules = declarations ? declarations.modules : sourceOrModules;
+  const adapterRows = options.adapterRows ||
+    (declarations && declarations.dispatcherRows
+      ? declarations.dispatcherRows.filter(function (row) { return row.kind === "adapter"; })
+      : []);
+  const adapterKeys = new Set(adapterRows.map(function (row) {
+    return row.module + "." + coreDispatcherMemberValue(row.member);
+  }));
+  const byModule = new Map(modules.map(function (entry) {
+    return [entry.module, new Set(entry.members)];
+  }));
+  const unknownModule = rows.filter(function (row) {
+    return !byModule.has(row.module) && !adapterKeys.has(row.module + "." + row.member);
+  });
+  if (unknownModule.length) {
+    throw new Error("public dispatcher row names a non-ledger module: " +
+      unknownModule.map(function (row) { return row.module + "." + row.member; }).join(", "));
+  }
+  const unknownMember = rows.filter(function (row) {
+    return byModule.has(row.module) && !byModule.get(row.module).has(row.member);
+  });
+  const unregistered = unknownMember.filter(function (row) {
+    return !adapterKeys.has(row.module + "." + row.member);
+  });
+  if (unregistered.length && options.allowUndeclared !== true) {
+    throw new Error("public dispatcher row is not declared by Core.jet: " +
+      unregistered.map(function (row) { return row.module + "." + row.member; }).join(", "));
+  }
+  return unregistered;
+}
+
 
 function moduleToken(name) {
   return name === "app" || name.startsWith("core.") || name.startsWith("jet.");
 }
 
-function moduleInventory() {
-  const source = read(MODULE_ITEMS_PATH);
+function executableModuleInventory() {
+  const source = read(CORE_EXPORTS_PATH);
   const constants = syntaxConstants();
-  const body = functionBody(source, "core_module_items");
   const entries = new Map();
-
-  for (const arm of matchArms(body, "match module")) {
-    if (!arm.rhs.includes("&[")) continue;
-    const rawModules = quoted(arm.lhs).filter(moduleToken);
-    for (const match of arm.lhs.matchAll(/\b(?:Syntax::)?([A-Z][A-Z0-9_]*)\b/g)) {
-      if (constants.has(match[1]) && moduleToken(constants.get(match[1]))) {
-        rawModules.push(constants.get(match[1]));
-      }
-    }
-    if (rawModules.length === 0) continue;
-    const members = resolveItems(arm.rhs, constants);
-    for (const raw of rawModules) {
-      const module = canonicalModule(raw);
-      if (!entries.has(module)) {
-        entries.set(module, {
-          module: module,
-          rawModules: [],
-          members: new Set(),
-          sourceLine: lineAt(source, source.indexOf("\"" + raw + "\"")),
-        });
-      }
-      const entry = entries.get(module);
-      if (!entry.rawModules.includes(raw)) entry.rawModules.push(raw);
-      for (const member of members) entry.members.add(member);
-    }
+  const declarations = rustValueBody(source, "pub const CORE_MODULE_DECLARATIONS");
+  for (const row of declarations.matchAll(
+    /CoreModuleDeclaration\s*\{\s*module:\s*"([^"]+)",\s*members:\s*([A-Z][A-Z0-9_]*)/g,
+  )) {
+    if (entries.has(row[1])) throw new Error("duplicate generated Core module: " + row[1]);
+    entries.set(row[1], {
+      module: row[1],
+      rawModules: [row[1] + " (CoreModuleDeclaration)"],
+      members: new Set(quoted(rustValueBody(source, "const " + row[2]))),
+      sourceLine: lineAt(source, source.indexOf(row[0])),
+    });
   }
+  if (!entries.size) throw new Error("generated Core module declarations are empty");
 
   const policy = read(POLICY_PATH);
-  if (!source.includes("Policy::RULE_ARG_DECLARATIONS")) {
-    throw new Error("core.compiler.lang dynamic source anchor disappeared from module_items.rs");
+  const menus = new Set(matchArms(
+    functionBody(policy, "canonical_rule_arg_variants"), "match name",
+  ).flatMap(function (arm) { return quoted(arm.lhs); }));
+  const seed = policy.match(
+    /pub static RULE_ARG_DECLARATIONS[\s\S]*?BTreeSet::from\(\[([^\]]*)\]\)/,
+  );
+  if (!seed) throw new Error("policy argument declaration seed disappeared");
+  const langMembers = new Set(quoted(seed[1]));
+  for (const line of read(MARKERS_PATH).split("\n")) {
+    if (!line.trim().startsWith("marker ")) continue;
+    for (const parameter of line.matchAll(
+      /\b[A-Za-z_][A-Za-z0-9_]*\s*:\s*(?:\.\.\.)?([A-Za-z_][A-Za-z0-9_]*)\s*(?=[{,)])/g,
+    )) {
+      if (menus.has(parameter[1])) langMembers.add(parameter[1]);
+    }
   }
-  const appliedAt = policy.indexOf("pub const APPLIED_RULES");
-  const applied = policy.slice(appliedAt, policy.indexOf("\n];", appliedAt) + 3);
-  const langMembers = new Set(["Track"]);
-  for (const match of applied.matchAll(/=>\s*"([^"]+)"/g)) langMembers.add(match[1]);
   entries.set("core.compiler.lang", {
     module: "core.compiler.lang",
     rawModules: ["core.compiler.lang (Policy::RULE_ARG_DECLARATIONS)"],
-    members: langMembers,
-    sourceLine: lineAt(source, source.indexOf("core.compiler.lang")),
+    members: new Set(Array.from(langMembers).filter(function (name) { return menus.has(name); })),
+    sourceLine: lineAt(policy, policy.indexOf("pub static RULE_ARG_DECLARATIONS")),
   });
 
-  // `core.mem` is gated by a typed table instead of a match arm. Resolve the
-  // item constants from that table so the ledger follows the same source.
-  const syntaxSource = read("crates/jet-foundation/src/Syntax/core_surface.rs");
-  const memStart = syntaxSource.indexOf("pub const CORE_MEM_GATE_TIERS");
-  const memEnd = syntaxSource.indexOf("];", memStart) + 2;
-  const memBody = syntaxSource.slice(memStart, memEnd);
-  const memItems = new Set();
-  for (const match of memBody.matchAll(/\b([A-Z][A-Z0-9_]*)\b/g)) {
-    if (constants.has(match[1])) memItems.add(constants.get(match[1]));
-  }
+  const syntaxSource = read(SYNTAX_PATH);
   entries.set("core.mem", {
     module: "core.mem",
     rawModules: ["core.mem (CORE_MEM_GATE_TIERS)"],
-    members: memItems,
-    sourceLine: lineAt(syntaxSource, memStart),
+    members: new Set(resolveItems(
+      rustValueBody(syntaxSource, "pub const CORE_MEM_GATE_TIERS"), constants,
+    )),
+    sourceLine: lineAt(syntaxSource, syntaxSource.indexOf("pub const CORE_MEM_GATE_TIERS")),
   });
-
-  const predicates = read(PREDICATES_PATH);
-  const knownAt = predicates.indexOf("pub const KNOWN_CORE_MODULES");
-  const knownBody = predicates.slice(knownAt, predicates.indexOf("];", knownAt) + 2);
-  const known = resolveItems(knownBody, constants).filter(function (name) {
-    return moduleToken(name);
-  }).map(canonicalModule);
-
-  const actual = new Set(entries.keys());
-  const missing = known.filter(function (name) { return !actual.has(name); });
-  const extra = Array.from(actual).filter(function (name) {
-    return !known.includes(name);
-  });
-  if (missing.length || extra.length) {
-    throw new Error("module_items/KNOWN_CORE_MODULES drift: missing=" +
-      missing.join(",") + " extra=" + extra.join(","));
-  }
 
   return Array.from(entries.values()).map(function (entry) {
     return {
       module: entry.module,
-      rawModules: entry.rawModules.sort(),
+      rawModules: entry.rawModules,
       members: Array.from(entry.members).sort(),
       sourceLine: entry.sourceLine,
     };
   }).sort(function (left, right) { return left.module.localeCompare(right.module); });
 }
+function rustValueBody(source, startToken) {
+  const start = source.indexOf(startToken);
+  if (start < 0) throw new Error("Rust source anchor disappeared: " + startToken);
+  const equals = source.indexOf("=", start);
+  const open = source.indexOf("[", equals);
+  if (equals < 0 || open < 0) throw new Error("Rust list value disappeared: " + startToken);
+  let depth = 0;
+  let quotedString = false;
+  let escaped = false;
+  for (let index = open; index < source.length; index += 1) {
+    const char = source[index];
+    if (quotedString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === "\"") quotedString = false;
+      continue;
+    }
+    if (char === "\"") {
+      quotedString = true;
+      continue;
+    }
+    if (char === "[") depth += 1;
+    else if (char === "]") {
+      depth -= 1;
+      if (depth === 0) return source.slice(open + 1, index);
+    }
+  }
+  throw new Error("unterminated Rust list: " + startToken);
+}
+
+
+
+
+function coreSourceFacts() {
+  return parseCoreSource(read(CORE_SOURCE_PATH));
+}
+
+function compareCoreModuleSets(sourceModules, executableModules) {
+  const expected = new Map(executableModules.map(function (entry) {
+    return [entry.module, entry.members.slice().sort()];
+  }));
+  const actual = new Map(sourceModules.map(function (entry) {
+    return [entry.module, entry.members.slice().sort()];
+  }));
+  const missing = Array.from(expected.keys()).filter(function (module) {
+    return !actual.has(module);
+  });
+  const extra = Array.from(actual.keys()).filter(function (module) {
+    return !expected.has(module);
+  });
+  const changed = Array.from(expected.keys()).filter(function (module) {
+    return actual.has(module) &&
+      stable(expected.get(module)) !== stable(actual.get(module));
+  });
+  if (missing.length || extra.length || changed.length) {
+    throw new Error("Core.jet/executable Core inventory drift: missing=" + missing.join(",") +
+      " extra=" + extra.join(",") + " changed=" + changed.join(","));
+  }
+}
+
+
+function generatedCoreExports(source, declarations) {
+  const lines = [
+    "// BEGIN GENERATED CORE DECLARATIONS",
+    "// Source: " + CORE_SOURCE_PATH,
+    "// Source SHA-256: " + sha256(source),
+    "#[derive(Debug, Clone, Copy, PartialEq, Eq)]",
+    "pub struct CoreModuleDeclaration {",
+    "    pub module: &'static str,",
+    "    pub members: &'static [&'static str],",
+    "    pub type_exports: &'static [(&'static str, CoreLeafKind)],",
+    "    pub dependencies: &'static [&'static str],",
+    "}",
+    "",
+    "#[derive(Debug, Clone, Copy, PartialEq, Eq)]",
+    "pub struct CoreBootstrapStep {",
+    "    pub name: &'static str,",
+    "    pub dependencies: &'static [&'static str],",
+    "}",
+    "",
+    "pub const CORE_BOOTSTRAP_ORDER: &[CoreBootstrapStep] = &[",
+  ];
+  for (const step of declarations.bootstraps) {
+    lines.push("    CoreBootstrapStep { name: \"" + step.name + "\", dependencies: &[" +
+      step.dependencies.map(function (dependency) { return "\"" + dependency + "\""; }).join(", ") +
+      "] },");
+  }
+  lines.push("];", "");
+
+  const moduleNames = declarations.modules.map(function (entry) { return entry.module; });
+  lines.push("pub const CORE_MODULE_NAMES: &[&str] = &[");
+  for (const module of moduleNames) {
+    lines.push("    \"" + module + "\",");
+  }
+  lines.push("];", "");
+  for (const [index, entry] of declarations.modules.entries()) {
+    const stem = "CORE_MODULE_" + index;
+    lines.push("const " + stem + "_MEMBERS: &[&str] = &[" +
+      entry.members.map(function (member) { return "\"" + member + "\""; }).join(", ") + "];");
+    lines.push("const " + stem + "_TYPES: &[(&str, CoreLeafKind)] = &[" +
+      entry.types.map(function (type) {
+        const kind = type.genericArity
+          ? "Generic(" + type.genericArity + ")"
+          : (type.variants && type.variants.length
+            ? "Enum(&[" + type.variants.map(function (variant) { return "\"" + variant + "\""; }).join(", ") + "])"
+            : (type.kind === "crypto_nominal" ? "CryptoNominal" : "Plain"));
+        return "(\"" + type.name + "\", CoreLeafKind::" + kind + ")";
+      }).join(", ") + "];");
+    lines.push("const " + stem + "_DEPENDENCIES: &[&str] = &[" +
+      entry.dependencies.map(function (dependency) { return "\"" + dependency + "\""; }).join(", ") + "];");
+    lines.push("");
+  }
+  lines.push("pub const CORE_MODULE_DECLARATIONS: &[CoreModuleDeclaration] = &[");
+  for (const [index, entry] of declarations.modules.entries()) {
+    const stem = "CORE_MODULE_" + index;
+    lines.push("    CoreModuleDeclaration { module: \"" + entry.module +
+      "\", members: " + stem + "_MEMBERS, type_exports: " + stem + "_TYPES, dependencies: " +
+      stem + "_DEPENDENCIES },");
+  }
+  lines.push("];", "");
+  lines.push("pub const CORE_ROOT_TYPES: &[&str] = &[" +
+    declarations.rootTypes.map(function (type) { return "\"" + type + "\""; }).join(", ") + "];");
+  lines.push("// END GENERATED CORE DECLARATIONS");
+  return lines.join("\n");
+}
+function generatedEncodingFormats(source, declarations) {
+  if (!declarations.formatRows.length) {
+    throw new Error("Core.jet has no encoding format rows");
+  }
+  const lines = [
+    ENCODING_FORMAT_BEGIN,
+    "// Source: " + CORE_SOURCE_PATH,
+    "// Source SHA-256: " + sha256(source),
+    "#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]",
+    "pub enum EncodingFormat {",
+  ];
+  for (const row of declarations.formatRows) {
+    lines.push("    " + row.variant + ",");
+  }
+  lines.push(
+    "}",
+    "impl EncodingFormat {",
+    "    pub const fn as_str(self) -> &'static str {",
+    "        match self {",
+  );
+  for (const row of declarations.formatRows) {
+    lines.push("            Self::" + row.variant + " => \"" + row.label + "\",");
+  }
+  lines.push(
+    "        }",
+    "    }",
+    "}",
+    ENCODING_FORMAT_END,
+  );
+  return lines.join("\n");
+}
+
+
+function writeEncodingFormatTable(source, declarations) {
+  const path = join(ROOT, ENCODING_TYPES_PATH);
+  const current = read(ENCODING_TYPES_PATH);
+  writeFileSync(path, replaceGeneratedSection(
+    current,
+    ENCODING_FORMAT_BEGIN,
+    ENCODING_FORMAT_END,
+    generatedEncodingFormats(source, declarations),
+  ));
+}
+
+function replaceGeneratedSection(source, begin, end, block) {
+  const start = source.indexOf(begin);
+  const finish = source.indexOf(end, start < 0 ? 0 : start);
+  if (start < 0 || finish < 0) {
+    throw new Error("generated section markers are missing: " + begin);
+  }
+  return source.slice(0, start) + block + source.slice(finish + end.length);
+}
+
+
+
+function writeCoreExportTable(source, declarations) {
+  const path = join(ROOT, CORE_EXPORTS_PATH);
+  const current = read(CORE_EXPORTS_PATH);
+  const block = generatedCoreExports(source, declarations);
+  writeFileSync(path, replaceGeneratedSection(
+    current,
+    "// BEGIN GENERATED CORE DECLARATIONS",
+    "// END GENERATED CORE DECLARATIONS",
+    block,
+  ));
+}
+
+
+function generatedRingDependencies(source, declarations) {
+  const lines = [
+    "// BEGIN GENERATED CORE DEPENDENCIES",
+    "// Source: " + CORE_SOURCE_PATH,
+    "// Source SHA-256: " + sha256(source),
+    "const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[",
+  ];
+  for (const entry of declarations.modules) {
+    if (!entry.dependencies.length) continue;
+    lines.push("    (\"" + entry.module + "\", &[" +
+      entry.dependencies.map(function (dependency) { return "\"" + dependency + "\""; }).join(", ") +
+      "]),");
+  }
+  lines.push("];", "");
+  lines.push("const PRELUDE_NAMESPACE_ONLY: &[&str] = &[");
+  for (const module of declarations.namespaceOnly) lines.push("    \"" + module + "\",");
+  lines.push("];", "// END GENERATED CORE DEPENDENCIES");
+  return lines.join("\n");
+}
+
+function generatedCoreCalls(source, declarations) {
+  const ambientKeys = new Set(
+    declarations.ambientRoutes.map(function (route) {
+      return route.module + "." + route.member;
+    }),
+  );
+  const lines = [
+    CORE_CALLS_BEGIN,
+    "// Source: " + CORE_SOURCE_PATH,
+    "// Source SHA-256: " + sha256(source),
+    "// Dispatcher rows and ambient routes are generated from Core.jet.",
+    "pub const CORE_CALL_AMBIENT_ROUTES: &[(&str, &str)] = &[",
+  ];
+  for (const route of declarations.ambientRoutes) {
+    lines.push("    (\"" + route.module + "\", \"" + route.member + "\"),");
+  }
+  lines.push(
+    "];",
+    "",
+    "pub const CORE_CALLS: &[CoreCallRecord] = &[",
+  );
+  for (const row of declarations.dispatcherRows) {
+    let expression = row.expression.replace(/,\s*$/, "");
+    const key = row.module + "." + row.member;
+    if (
+      ambientKeys.has(key) &&
+      !expression.includes("with_interpreter_route(") &&
+      !expression.includes("with_pure_route(") &&
+      !expression.includes("sema_web_call(")
+    ) {
+      expression += ".with_interpreter_route(CoreCallInterpreterRoute::Ambient)";
+    }
+    lines.push("    " + expression + ",");
+  }
+  lines.push("];", CORE_CALLS_END);
+  return lines.join("\n");
+}
+
+
+function writeCoreCallTable(source, declarations) {
+  const path = join(ROOT, CORE_CALLS_PATH);
+  const current = read(CORE_CALLS_PATH);
+  writeFileSync(path, replaceGeneratedSection(
+    current,
+    CORE_CALLS_BEGIN,
+    CORE_CALLS_END,
+    generatedCoreCalls(source, declarations),
+  ));
+}
+
+function writeRingDependencyTable(source, declarations) {
+  const path = join(ROOT, RING_LAYER_PATH);
+  const current = read(RING_LAYER_PATH);
+  writeFileSync(path, replaceGeneratedSection(
+    current,
+    "// BEGIN GENERATED CORE DEPENDENCIES",
+    "// END GENERATED CORE DEPENDENCIES",
+    generatedRingDependencies(source, declarations),
+  ));
+}
+
+function validateGeneratedViews(source, declarations) {
+  const exportsSource = read(CORE_EXPORTS_PATH);
+  const expectedExports = generatedCoreExports(source, declarations);
+  const actualExports = exportsSource.slice(
+    exportsSource.indexOf("// BEGIN GENERATED CORE DECLARATIONS"),
+    exportsSource.indexOf("// END GENERATED CORE DECLARATIONS") +
+      "// END GENERATED CORE DECLARATIONS".length,
+  );
+  if (actualExports !== expectedExports) {
+    throw new Error("CoreModuleExports.rs is stale; run --write to regenerate from Core.jet");
+  }
+  const ringSource = read(RING_LAYER_PATH);
+  const expectedRing = generatedRingDependencies(source, declarations);
+  const actualRing = ringSource.slice(
+    ringSource.indexOf("// BEGIN GENERATED CORE DEPENDENCIES"),
+    ringSource.indexOf("// END GENERATED CORE DEPENDENCIES") +
+      "// END GENERATED CORE DEPENDENCIES".length,
+  );
+  if (actualRing !== expectedRing) {
+    throw new Error("RingLayer.rs is stale; run --write to regenerate from Core.jet");
+  }
+  const callsSource = read(CORE_CALLS_PATH);
+  const callsStart = callsSource.indexOf(CORE_CALLS_BEGIN);
+  const callsEnd = callsSource.indexOf(CORE_CALLS_END, callsStart);
+  if (callsStart < 0 || callsEnd < callsStart) {
+    throw new Error("core_calls.rs has no generated dispatcher section");
+  }
+  const actualCalls = callsSource.slice(callsStart, callsEnd + CORE_CALLS_END.length);
+  const expectedCalls = generatedCoreCalls(source, declarations);
+  if (actualCalls !== expectedCalls) {
+    throw new Error("core_calls.rs is stale; run --write to regenerate from Core.jet");
+  }
+  const encodingSource = read(ENCODING_TYPES_PATH);
+  const encodingStart = encodingSource.indexOf(ENCODING_FORMAT_BEGIN);
+  const encodingEnd = encodingSource.indexOf(ENCODING_FORMAT_END, encodingStart);
+  if (encodingStart < 0 || encodingEnd < encodingStart) {
+    throw new Error("EncodingTypes.rs has no generated EncodingFormat section");
+  }
+  const actualEncoding = encodingSource.slice(
+    encodingStart,
+    encodingEnd + ENCODING_FORMAT_END.length,
+  );
+  const expectedEncoding = generatedEncodingFormats(source, declarations);
+  if (actualEncoding !== expectedEncoding) {
+    throw new Error("EncodingTypes.rs is stale; run --write to regenerate from Core.jet");
+  }
+}
+
+function writeCoreViews() {
+  const source = read(CORE_SOURCE_PATH);
+  const declarations = coreSourceFacts();
+  writeCoreExportTable(source, declarations);
+  writeRingDependencyTable(source, declarations);
+  writeEncodingFormatTable(source, declarations);
+  writeCoreCallTable(source, declarations);
+  process.stdout.write("wrote generated Core views and dispatcher\n");
+  return { source, declarations };
+}
+
 
 function fixedSignaturePairs(modules) {
   const source = read(FIXED_SIGS_PATH);
@@ -1202,7 +2128,6 @@ function fixedSignaturePairs(modules) {
     for (const raw of moduleIndexes.map(function (index) { return strings[index]; })) {
       const module = containerFor(canonicalModule(raw));
       if (!knownModules.has(module)) {
-        if (PRIVATE_CORE_MODULES.has(raw)) continue;
         throw new Error("fixed_sigs names an unknown Core module: " + raw);
       }
       for (const method of methods) pairs.add(module + "." + method);
@@ -1264,6 +2189,11 @@ function methodNames(body, constants) {
   for (const hit of body.matchAll(/matches!\s*\(\s*method\s*,([\s\S]*?)\)\s*\n/g)) {
     addResolved(hit[1]);
   }
+  // Front-end package values use one nested `match method` per type. Read
+  // every nested match instead of stopping at the first type's methods.
+  for (const arm of allMatchArms(body, "match method")) {
+    addResolved(arm.lhs.split(" if ")[0]);
+  }
   return methods;
 }
 
@@ -1297,20 +2227,32 @@ function discoverTables(sources) {
   const inlineArms = [];
   for (const arm of matchArms(functionBody(entry, "builtin_method_return"), "match recv_ty")) {
     const rhs = arm.rhs.trim();
-    if (arm.lhs.trim() === "_" || rhs === "None") continue;
+    const lhs = arm.lhs.replace(/\/\/[^\n]*/g, "").trim();
+    if (lhs === "_" || rhs === "None") continue;
     if (
       rhs.includes("match (method")
-      || arm.lhs.includes('"TestSuite"')
+      || lhs.includes('"TestSuite"')
     ) {
-      inlineArms.push(arm);
+      inlineArms.push({ lhs: lhs, rhs: arm.rhs });
       continue;
     }
     // Anchored: an unanchored scan matched "ome" inside Some(...).
     const inner = rhs.replace(/^\{\s*/, "").trim();
     const call = /^(?:crate::)?(?:[A-Za-z_][A-Za-z0-9_]*::)*([a-z_][a-z0-9_]*)\s*\(/.exec(inner);
     if (call && call[1] !== "builtin_method_return") { queue.push(call[1]); continue; }
+    const nestedCalls = rhs
+      .replace(/\/\/[^\n]*/g, "")
+      .matchAll(/\b([a-z_][a-z0-9_]*_return)\s*\(/g);
+    let queuedNested = false;
+    for (const nested of nestedCalls) {
+      if (nested[1] !== "builtin_method_return") {
+        queue.push(nested[1]);
+        queuedNested = true;
+      }
+    }
+    if (queuedNested) continue;
     if (call || /^Some\s*\(/.test(inner)) continue;
-    unknown.push(arm.lhs.trim().slice(0, 60));
+    unknown.push(lhs.slice(0, 60));
   }
   if (unknown.length) {
     throw new Error("builtin_method_return dispatches somewhere this reader does not follow: " +
@@ -1633,7 +2575,7 @@ function loadSurfaces() {
     if (!surface.containers) throw new Error("surface has no containers: " + path);
     surfaces[language] = { path: path, surface: surface };
   }
-  surfaces.Python = { path: "docs/reference/python-surface.json", surface: pythonSurface() };
+  surfaces.Python = { path: "docs/spec/reference/python-surface.json", surface: pythonSurface() };
   return surfaces;
 }
 
@@ -1849,8 +2791,10 @@ function rowForModule(entry, member, fixedOnly, surfaces, keys, qualifiedBy) {
 function rowForCollection(entry, method, surfaces, keys, qualifiedBy) {
   const container = containerFor(entry.type);
   const cells = competitorCells(surfaces, container, method, keys);
+  const rowId = "collection." + entry.type + "." + method;
+  const fixture = conformanceFixtureBinding(rowId);
   return {
-    id: "collection." + entry.type + "." + method,
+    id: rowId,
     source: {
       kind: "collection_method_return",
       type: entry.type,
@@ -1866,7 +2810,9 @@ function rowForCollection(entry, method, surfaces, keys, qualifiedBy) {
       : "Core type workflow for " + container,
     verdict: isTypeItem(method) ? "type_item" : verdictFor(cells),
     competitors: cells,
-    evidence: ["source:" + COLLECTIONS_PATH],
+    evidence: ["source:" + COLLECTIONS_PATH].concat(
+      fixture ? fixture.sources.map(function (path) { return "fixture:" + path; }) : [],
+    ),
   };
 }
 
@@ -2176,15 +3122,18 @@ function uncomparedDomains(modules, containers) {
 function sourceFiles() {
   return [
     MODULE_ITEMS_PATH,
+    CORE_SOURCE_PATH,
+    CORE_CALLS_PATH,
     FIXED_SIGS_PATH,
     COLLECTIONS_PATH,
     PREDICATES_PATH,
     POLICY_PATH,
+    MARKERS_PATH,
     "crates/jet-foundation/src/Syntax.rs",
     SYNTAX_PATH,
     NUMERIC_PATH,
     CORE_TYPES_PATH,
-    "docs/reference/python-surface.json",
+    "docs/spec/reference/python-surface.json",
     CORE_API_LAWS_PATH,
     SYNTAX_REFERENCE_PATH,
     AGENT_MANIFEST_PATH,
@@ -2195,6 +3144,8 @@ function sourceFiles() {
     AGENT_CHECKSUMS_PATH,
     AGENT_RUNNER_SOURCE_PATH,
     CORE_API_REVIEW_TEST_PATH,
+    CORE_CONFORMANCE_PATH,
+    ...CORE_CONFORMANCE_FIXTURE_PATHS,
     "tests/lsp.rs",
     "tests/lsp/02_hover.json",
     "tests/ui/variadic_not_last.stderr",
@@ -2760,7 +3711,6 @@ function coreApiGate(rows, surfaces) {
     competingLanguages: Object.keys(surfaces).sort(),
     inventory: {
       source: "rows",
-      sourceFile: "docs/reference/core-surface-ledger.json",
       rowIdField: "id",
       workflowField: "workflow",
       manualWorkflowInventory: false,
@@ -2790,7 +3740,13 @@ function coreApiGate(rows, surfaces) {
 function buildLedger() {
   const surfaces = loadSurfaces();
   const containers = canonicalContainers(surfaces);
-  const modules = moduleInventory();
+  const source = read(CORE_SOURCE_PATH);
+  const declarations = coreSourceFacts();
+  compareCoreModuleSets(declarations.modules, executableModuleInventory());
+  validateGeneratedViews(source, declarations);
+  const modules = coreModuleInventory();
+  const dispatcherRows = publicDispatcherRows();
+  const unregisteredDispatcherRows = validatePublicDispatcher(declarations, dispatcherRows);
   const fixedPairs = fixedSignaturePairs(modules);
   const collections = collectionInventory();
   const jetRows = buildRows(modules, fixedPairs, collections, surfaces);
@@ -2824,7 +3780,6 @@ function buildLedger() {
   return {
     schemaVersion: 2,
     title: "Jet Core surface ledger",
-    sourceOfTruth: "docs/reference/core-surface-ledger.json",
     generatedOn: new Date().toISOString().slice(0, 10),
     ruling: "Owner ruling 2026-08-03: the bar is not Python; it is every language Jet competes with.",
     sourceFiles: sourceFiles(),
@@ -2832,17 +3787,18 @@ function buildLedger() {
     containerAliases: CONTAINER_ALIASES,
     synonymGroups: SYNONYM_GROUPS,
     competitors: perLanguage,
-    consumer: {
-      card: 1398,
-      input: "docs/reference/core-surface-ledger.json",
-      manualWorkflowInventory: false,
-      rule: "Load rows from this file. Do not copy the inventory into a second workflow rubric.",
-    },
     coreApiGate: coreApiGate(rows, surfaces),
-    inventory: { modules: modules, fixedSignaturePairs: fixedPairs, collections: collections },
-    lossClusters: clusters,
+    inventory: {
+      modules: modules,
+      fixedSignaturePairs: fixedPairs,
+      collections: collections,
+      unregisteredDispatcherRows: unregisteredDispatcherRows.map(function (row) {
+        return row.module + "." + row.member;
+      }),
+    },
     repeatedOperations: repeatedOperations(rows),
     packageAttributedContainers: packageAttributedContainers(surfaces),
+    lossClusters: clusters,
     uncomparedDomains: uncompared,
     rows: rows,
     summary: {
@@ -3200,17 +4156,19 @@ function validateCoreApiSyntaxCoverage() {
   if (hover.includes("=>") || !hover.includes("-[IO]>")) {
     throw new Error("hover fixture teaches a retired arrow or misses `-[IO]>`");
   }
-  for (const [path, markers] of [
-    ["tests/ui/variadic_not_last.stderr", ["E1310", "variadic parameter"]],
-    ["tests/ui/spread_bad_call.stderr", ["E1312", "call spread"]],
-    ["tests/ui/yield_type_mismatch.stderr", ["E0807", "Stream<Int"]],
-    ["tests/ui/user_policy_bad_args.stderr", ["policy `audit`", "Fix:"]],
+  for (const [path, code] of [
+    ["tests/ui/variadic_not_last.stderr", "E1310"],
+    ["tests/ui/spread_bad_call.stderr", "E1312"],
+    ["tests/ui/yield_type_mismatch.stderr", "E0807"],
+    ["tests/ui/user_policy_bad_args.stderr", "E0104"],
   ]) {
     const diagnostics = read(path);
-    for (const marker of markers) {
-      if (!diagnostics.includes(marker)) {
-        throw new Error("diagnostic coverage does not teach Core gate form: " + path + " " + marker);
-      }
+    const report = diagnostics.split(/\n\s*\n/).find(function (entry) {
+      return entry.startsWith("Error [" + code + "]: ");
+    });
+    if (!report || !/^Error \[[A-Z]\d+\]: \S.+/m.test(report) ||
+        !/^\s*Why: \S.+/m.test(report) || !/^\s*Fix: \S.+/m.test(report)) {
+      throw new Error("diagnostic coverage lacks a complete registered report: " + path + " " + code);
     }
   }
 }
@@ -3218,12 +4176,6 @@ function validateCoreApiSyntaxCoverage() {
 function validateFreshReview(ledger) {
   const gate = ledger.coreApiGate;
   const review = gate.freshReview;
-  const reviewSource = read(CORE_API_REVIEW_TEST_PATH);
-  for (const marker of CORE_API_REVIEW_MARKERS) {
-    if (!reviewSource.includes(marker)) {
-      throw new Error("fresh Core API review lost check marker: " + marker);
-    }
-  }
 
   const checks = {
     "workflow-closure": function () {
@@ -3638,7 +4590,7 @@ function validateOwners(ledger, board) {
 }
 
 function validateCoverage(ledger) {
-  const expected = uncomparedDomains(moduleInventory(), ledger.canonicalContainers);
+  const expected = uncomparedDomains(coreModuleInventory(), ledger.canonicalContainers);
   if (stable(expected) !== stable(ledger.uncomparedDomains)) {
     const hidden = expected.filter(function (name) {
       return !ledger.uncomparedDomains.includes(name);
@@ -3654,263 +4606,68 @@ function compareLedger(stored, expected) {
   delete left.generatedOn;
   delete right.generatedOn;
   if (stable(left) !== stable(right)) {
-    throw new Error("core surface ledger drifted; run --refresh only after reviewing source and policy");
+    throw new Error("core surface ledger drifted; run --write only after reviewing source and policy");
   }
 }
 
-function loadJson(path) {
-  if (!existsSync(path)) throw new Error("missing ledger: " + path);
-  return JSON.parse(readFileSync(path, "utf8"));
-}
 
 // ---------------------------------------------------------------------------
 
-function markdown(ledger) {
-  const v = ledger.summary.verdicts;
-  const gate = ledger.coreApiGate;
-  const lines = [
-    "# Jet Core surface ledger",
-    "",
-    "Owner ruling 2026-08-03: the bar is not Python. It is every language Jet",
-    "competes with, and a missing feature is not acceptable.",
-    "",
-    "This page is the durable review index. The JSON file beside it is the",
-    "machine-readable source that card #1398 reads. Do not keep a second",
-    "hand-written workflow inventory.",
-    "",
-    "Generated on: " + ledger.generatedOn,
-    "",
-    "## What decides a row",
-    "",
-    "- What Jet ships comes from the compiler tables: module_items.rs,",
-    "  fixed_sigs.rs, and Collections.rs.",
-    "- What a competitor ships comes from that language's own recorded surface,",
-    "  read from a runtime, from standard-library source, or from official",
-    "  machine-readable documentation.",
-    "- A row carries one verdict. `equal` means at least one recorded competitor",
-    "  answers the same workflow. `jet_wins` means none does. `jet_loses` is an",
-    "  operation two or more compared languages ship and Jet has no spelling for.",
-    "  `single_witness` is an operation exactly one language ships.",
-    "  `not_compared` means no surface records that container yet.",
-    "- A gap is one workflow, not one row per language. Ten languages shipping",
-    "  `sqrt` is one missing operation with ten witnesses.",
-    "- One language is not evidence. A single-witness row is almost always that",
-    "  language's own internals, such as Rust's `align_to` and `as_mut_ptr`,",
-    "  which a memory-safe language must not expose. Those rows stay in the",
-    "  ledger and stay counted, but they are recorded rather than scored.",
-    "- A gap merges by domain, so one name can still recur across domains, and",
-    "  that has two different answers. `clone` on a List and on a Map is one",
-    "  operation asked twice, so its witnesses pool across domains before the",
-    "  two-witness threshold; scoring each domain alone can hold a real gap at",
-    "  one witness forever. `close` on a byte buffer and on a database handle",
-    "  are different operations sharing a spelling, so they keep the per-domain",
-    "  count. There is no mechanical separator — the difference is what the",
-    "  operation means. Every recurring name is classified by hand in",
-    "  `scripts/agent/check-core-surface-ledger.mjs`, in `CROSS_DOMAIN_POOLED`",
-    "  or `CROSS_DOMAIN_DISTINCT`, and `--check` rejects a recurring name that",
-    "  is in neither. A row scored on pooled evidence records the pooled count",
-    "  in `pooledWitnessCount`, so it is never mistaken for its own.",
-    "- `--check` rejects source drift, a competitor claim the recorded surface",
-    "  does not support, a duplicate row, a container a language silently",
-    "  skipped, an owner card that is closed or missing, and an unratified",
-    "  scope exclusion.",
-    "",
-    "## Inventory",
-    "",
-    "| Measure | Count |",
-    "| --- | ---: |",
-    "| Languages compared | " + ledger.summary.languageCount + " |",
-    "| Shared containers | " + ledger.summary.containerCount + " |",
-    "| Core modules | " + ledger.summary.moduleCount + " |",
-    "| Module members | " + ledger.summary.moduleMemberCount + " |",
-    "| Collection method rows | " + ledger.summary.collectionMethodCount + " |",
-    "| Jet-side rows | " + ledger.summary.jetRowCount + " |",
-    "| Total rows | " + ledger.summary.rowCount + " |",
-    "",
-    "## Verdicts",
-    "",
-    "| Verdict | Rows |",
-    "| --- | ---: |",
-    "| Jet wins | " + (v.jet_wins || 0) + " |",
-    "| Equal | " + (v.equal || 0) + " |",
-    "| Jet loses (two or more languages agree) | " + (v.jet_loses || 0) + " |",
-    "| Single witness (recorded, not scored) | " + (v.single_witness || 0) + " |",
-    "| Exported type, not an operation | " + (v.type_item || 0) + " |",
-    "| Not compared | " + (v.not_compared || 0) + " |",
-    "| Deliberately declined | " + (v.declined || 0) + " |",
-    "",
-    "## Competitors",
-    "",
-    "| Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |",
-    "| --- | --- | ---: | ---: | ---: |",
-  ];
-  for (const [language, entry] of Object.entries(ledger.competitors)) {
-    lines.push("| " + language + " | " + entry.sourceKind + " | " +
-      (entry.recordedOperations ?? 0) + " | " + entry.jetRowsMatched + " | " + entry.lossRows + " |");
-  }
-  lines.push(
-    "",
-    "## Loss clusters",
-    "",
-    "A cluster is one container's losses. Owning a gap per container is what",
-    "the existing cards already do, so the ledger folds into them rather than",
-    "opening a second owner for the same surface. `needs_card` means no card",
-    "owns that container today, and `closed` means the owning card is done",
-    "while losses remain.",
-    "",
-    "| Container | Loss rows | Owner card | Card phase | State |",
-    "| --- | ---: | --- | --- | --- |",
-  );
-  for (const cluster of ledger.lossClusters) {
-    lines.push("| " + cluster.container + " | " + cluster.lossCount + " | " +
-      (cluster.ownerCard ? "#" + cluster.ownerCard : "none") + " | " +
-      (cluster.ownerCardPhase || "n/a") + " | " + cluster.ownerState + " |");
-  }
-  lines.push(
-    "",
-    "## Containers indexed per package",
-    "",
-    "These surfaces are indexed a whole package at a time, so the index can",
-    "confirm that the language documents a name but cannot place that name in",
-    "one container. They still confirm a Jet match; they do not mint a gap row,",
-    "because that would score Jet against operations the index never attributed",
-    "here. The skip is listed so it stays countable.",
-    "",
-    "| Language | Container | Recorded operations |",
-    "| --- | --- | ---: |",
-  );
-  for (const entry of ledger.packageAttributedContainers) {
-    lines.push("| " + entry.language + " | " + entry.container + " | " + entry.recordedOperations + " |");
-  }
-  lines.push(
-    "",
-    "## Competitive Core API gate",
-    "",
-    "The release gate is owned by card #" + gate.ownerCard + " and attached to " +
-      gate.policyDocument + " at `" + gate.policyAnchor + "`. Python is the calibration arm;",
-    "the claim covers all " + gate.competingLanguages.length + " recorded competitor languages.",
-    "",
-    "| Gate measure | Value |",
-    "| --- | ---: |",
-    "| Workflow manifest entries | " + gate.summary.workflowCount + " |",
-    "| Beginner cases | " + gate.summary.caseCounts.beginner + " |",
-    "| Expert-policy cases | " + gate.summary.caseCounts["expert-policy"] + " |",
-    "| Failure cases | " + gate.summary.caseCounts.failure + " |",
-    "| Lifecycle cases | " + gate.summary.caseCounts.lifecycle + " |",
-    "| Pending evidence records | " + gate.summary.pendingEvidenceCount + " |",
-    "| Measured evidence records | " + gate.summary.measuredEvidenceCount + " |",
-    "| Accepted Jet wins | " + gate.summary.acceptedJetWinCount + " |",
-    "| Release status | `" + gate.summary.releaseStatus + "` |",
-    "",
-    "Every ledger row has one frozen task record with the same input and outcome",
-    "across language arms, allowed dependencies, tool versions, source boundary,",
-    "and competing workflow. Design declines remain scored; only ratified scope",
-    "decisions may exclude a workflow. The fixture contract reuses " +
-      gate.fixtureContract.manifest + ", " + gate.fixtureContract.receipt + ",",
-    "the existing " + gate.fixtureContract.runner + ", and the recorded #769",
-    "scoring contract. Raw source counts are evidence, not a universal ratio.",
-    "Incidental ceremony fails; accepted extra constructs need a clarity, local",
-    "reasoning, named guarantee, or expert-control benefit and an independent",
-    "fixture review. Every workflow also has one source-derived machine Jet win:",
-    "operation coverage, a typed contract, or an explicit fail-closed diagnosis.",
-    "Fixture selection is one accepted review row per frozen task, bound to the",
-    "adapter-source, input, and expected-output digests. The existing runner's",
-    "pinned tools, cold and warm runs, exact stdout, unchanged-input, and clean",
-    "scratch checks are revalidated from the receipt and artifact files.",
-    "A fresh-context release check reviews workflow closure, construct",
-    "classifications, reasoning evidence, syntax coverage, and fixture selection.",
-    "",
-    "Run the structural check and the fail-closed release check:",
-    "",
-    "~~~sh",
-    "node scripts/agent/check-core-surface-ledger.mjs --check",
-    "node scripts/agent/check-core-surface-ledger.mjs --core-api-release-check",
-    "~~~",
-    "",
-    "## Core domains not yet compared",
-    "",
-    "No competitor surface records a container for these Core modules, so no",
-    "row scores them. They are listed so the shortfall stays countable rather",
-    "than invisible.",
-    "",
-    ledger.uncomparedDomains.map(function (name) { return "`" + name + "`"; }).join(", ") || "none",
-    "",
-    "## Consumer",
-    "",
-    "Card #1398 reads docs/reference/core-surface-ledger.json as its only",
-    "workflow inventory.",
-    "",
-    "Regenerate and check from the repository root:",
-    "",
-    "~~~sh",
-    "node scripts/agent/check-core-surface-ledger.mjs --refresh",
-    "node scripts/agent/check-core-surface-ledger.mjs --check",
-    "~~~",
-    "",
-    "Full rows stay in the JSON artifact so the release rubric can read",
-    "structured data without duplicating this inventory.",
-    "",
-  );
-  return lines.join("\n");
-}
 
-function refresh() {
+function write() {
+  writeCoreViews();
   const ledger = buildLedger();
+  mkdirSync(dirname(LEDGER_PATH), { recursive: true });
   writeFileSync(LEDGER_PATH, JSON.stringify(ledger, null, 2) + "\n");
-  writeFileSync(README_PATH, markdown(ledger));
-  process.stdout.write("wrote " + LEDGER_PATH + "\n");
+  process.stdout.write("wrote " + RUNTIME_LEDGER_PATH + "\n");
   process.stdout.write("rows=" + ledger.summary.rowCount +
     " verdicts=" + JSON.stringify(ledger.summary.verdicts) + "\n");
 }
 
 function check() {
-  const stored = loadJson(LEDGER_PATH);
-  // Order matters: a hand-edited fabrication must be reported as an unverified
-  // claim, not masked by the drift hash that would otherwise fire first.
-  validateSurfaces(stored);
-  validateRows(stored);
-  validateOwners(stored);
-  validateCoverage(stored);
-  validateCoreApiGate(stored);
-  compareLedger(stored, buildLedger());
-  const v = stored.summary.verdicts;
+  const ledger = buildLedger();
+  validateSurfaces(ledger);
+  validateRows(ledger);
+  validateOwners(ledger);
+  validateCoverage(ledger);
+  validateCoreApiGate(ledger);
+  const v = ledger.summary.verdicts;
   process.stdout.write("core surface ledger: source-derived, verified against " +
-    stored.summary.languageCount + " recorded competitor surfaces, and unique\n");
-  process.stdout.write("rows=" + stored.summary.rowCount +
+    ledger.summary.languageCount + " recorded competitor surfaces, and unique\n");
+  process.stdout.write("rows=" + ledger.summary.rowCount +
     " wins=" + (v.jet_wins || 0) +
     " equal=" + (v.equal || 0) +
     " loses=" + (v.jet_loses || 0) +
     " single-witness=" + (v.single_witness || 0) +
     " types=" + (v.type_item || 0) +
     " not-compared=" + (v.not_compared || 0) +
-    " clusters-needing-a-card=" + stored.summary.clustersNeedingCard + "\n");
-  process.stdout.write("core API gate: " + stored.coreApiGate.summary.releaseStatus +
-    " workflows=" + stored.coreApiGate.summary.workflowCount +
-    " pending-evidence=" + stored.coreApiGate.summary.pendingEvidenceCount +
-    " accepted-jet-wins=" + stored.coreApiGate.summary.acceptedJetWinCount + "\n");
+    " clusters-needing-a-card=" + ledger.summary.clustersNeedingCard + "\n");
+  process.stdout.write("core API gate: " + ledger.coreApiGate.summary.releaseStatus +
+    " workflows=" + ledger.coreApiGate.summary.workflowCount +
+    " pending-evidence=" + ledger.coreApiGate.summary.pendingEvidenceCount +
+    " accepted-jet-wins=" + ledger.coreApiGate.summary.acceptedJetWinCount + "\n");
   process.stdout.write("core API fixtures: independent acceptance verified tasks=" +
-    stored.coreApiGate.fixtureContract.tasks.length + "\n");
+    ledger.coreApiGate.fixtureContract.tasks.length + "\n");
   process.stdout.write("core API fixture execution: deterministic; pinned-tools; cold-warm; " +
     "exact-stdout; input-unchanged; scratch-closed\n");
-  process.stdout.write("core API fresh review: " + stored.coreApiGate.freshReview.method +
-    "; checks=" + stored.coreApiGate.freshReview.checks.join(",") + "\n");
+  process.stdout.write("core API fresh review: " + ledger.coreApiGate.freshReview.method +
+    "; checks=" + ledger.coreApiGate.freshReview.checks.join(",") + "\n");
 }
 
 function coreApiReleaseCheck() {
-  const stored = loadJson(LEDGER_PATH);
+  const ledger = buildLedger();
   try {
-    validateSurfaces(stored);
-    validateRows(stored);
-    validateOwners(stored);
-    validateCoverage(stored);
-    validateCoreApiGate(stored);
-    compareLedger(stored, buildLedger());
+    validateSurfaces(ledger);
+    validateRows(ledger);
+    validateOwners(ledger);
+    validateCoverage(ledger);
+    validateCoreApiGate(ledger);
   } catch (error) {
     throw new Error(error.message + " (owner #1398)");
   }
 
   const failures = [];
-  for (const workflow of stored.coreApiGate.workflowManifest) {
+  for (const workflow of ledger.coreApiGate.workflowManifest) {
     const evidence = workflow.evidence;
     if (workflow.input.fixtureStatus === "stale") {
       failures.push({ task: workflow.task, reason: "fixture is stale", owner: "#1398" });
@@ -3969,7 +4726,7 @@ function coreApiReleaseCheck() {
       shown.join("\n- ") + (failures.length > shown.length ? "\n- ..." : ""));
   }
   process.stdout.write("core API release gate: ready; workflows=" +
-    stored.coreApiGate.summary.workflowCount + "\n");
+    ledger.coreApiGate.summary.workflowCount + "\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -4022,10 +4779,75 @@ function must(value, what) {
 }
 
 function hostileFixtures() {
-  const ledger = loadJson(LEDGER_PATH);
+  const ledger = buildLedger();
   const surfaces = loadSurfaces();
   const board = towerBoard();
   const results = [];
+
+  results.push(rejects("public dispatcher names a non-ledger module",
+    "public dispatcher row names a non-ledger module", function () {
+    validatePublicDispatcher(ledger.inventory.modules, [
+      { module: "core.fake", member: "call" },
+    ]);
+  }));
+
+  results.push(rejects("dispatcher identity disagrees with emitted constructor",
+    "dispatcher row identity disagrees with emitted adapter", function () {
+    parseCoreSource([
+      "bootstrap Syntax depends_on []",
+      "bootstrap Effects depends_on [Syntax]",
+      "bootstrap Core depends_on [Effects]",
+      "bootstrap Derives depends_on [Core]",
+      "module core.jobs exports {queue}",
+      "dispatcher_row plain core.jobs queue | CoreCallRecord::new(\"core.db\", \"queue\", \"jet_job_queue_default\", true, &[])",
+    ].join("\n"));
+  }));
+
+  results.push(rejects("dispatcher identity disagrees with emitted web adapter",
+    "dispatcher row identity disagrees with emitted adapter", function () {
+    parseCoreSource([
+      "bootstrap Syntax depends_on []",
+      "bootstrap Effects depends_on [Syntax]",
+      "bootstrap Core depends_on [Effects]",
+      "bootstrap Derives depends_on [Core]",
+      "module core.web exports {form}",
+      "dispatcher_row adapter core.web form | sema_web_call(\"core.db\", \"form\", \"jet_web_forms_typed\", &[])",
+    ].join("\n"));
+  }));
+
+  results.push(holds("dispatcher identity parser accepts constructor and receiver forms", function () {
+    const declarations = parseCoreSource([
+      "bootstrap Syntax depends_on []",
+      "bootstrap Effects depends_on [Syntax]",
+      "bootstrap Core depends_on [Effects]",
+      "bootstrap Derives depends_on [Core]",
+      "module core.jobs exports {queue, covered}",
+      "module core.web exports {form}",
+      "dispatcher_row plain core.jobs queue | CoreCallRecord::new(\"core.jobs\", \"queue\", \"jet_job_queue_default\", true, &[])",
+      "dispatcher_row plain core.jobs covered | CoreCallRecord::new_with_coverage(\"core.jobs\", \"covered\", \"jet_job_queue_default\", true, &[], CoreCallCoverage::from_bits(CoreCallCoverage::SEMA))",
+      "dispatcher_row adapter core.web form | sema_web_call(\"core.web\", \"form\", \"jet_web_forms_typed\", &[])",
+      "dispatcher_row receiver - Secret | CoreCallRecord::receiver(&[\"Signature\", \"Secret\"], \"bytes\", &[])",
+      "dispatcher_row receiver - METHOD_RECEIPT_ATTACH | CoreCallRecord::receiver_with_symbol(&[INTERNAL_RECEIPT_HANDLE], METHOD_RECEIPT_ATTACH, \"jet_receipt_attach\", true, &[])",
+      "dispatcher_row receiver - LocalDate | CoreCallRecord::receiver(&[\"Date\", \"LocalDate\"], \"year\", &[])",
+      "dispatcher_row receiver - facts_json | CoreCallRecord::receiver_with_coverage(&[\"WebStore\"], \"facts_json\", &[], CoreCallCoverage::from_bits(CoreCallCoverage::SEMA))",
+    ].join("\n"));
+    if (declarations.dispatcherRows.length !== 7) {
+      throw new Error("dispatcher identity parser lost a valid constructor or receiver form");
+    }
+  }));
+
+  results.push(rejects("ambient route has no dispatcher row",
+    "ambient route must match exactly one non-receiver dispatcher row", function () {
+    parseCoreSource([
+      "bootstrap Syntax depends_on []",
+      "bootstrap Effects depends_on [Syntax]",
+      "bootstrap Core depends_on [Effects]",
+      "bootstrap Derives depends_on [Core]",
+      "module core.jobs exports {queue}",
+      "dispatcher_row plain core.jobs queue | CoreCallRecord::new(\"core.jobs\", \"queue\", \"jet_job_queue_default\", true, &[])",
+      "ambient_route core.jobs missing",
+    ].join("\n"));
+  }));
 
   results.push(rejects("Core API workflow manifest drops a ledger row",
     "Core API gate workflow manifest does not cover every ledger row", function () {
@@ -4434,14 +5256,33 @@ function hostileFixtures() {
   process.stdout.write("core surface ledger: " + results.length + " fixtures all held\n");
 }
 
-const args = process.argv.slice(2);
-try {
-  if (args.includes("--refresh")) refresh();
-  else if (args.includes("--check")) check();
-  else if (args.includes("--core-api-release-check")) coreApiReleaseCheck();
-  else if (args.includes("--hostile-fixtures")) hostileFixtures();
-  else throw new Error("usage: check-core-surface-ledger.mjs --refresh|--check|--core-api-release-check|--hostile-fixtures");
-} catch (error) {
-  process.stderr.write(error.message + "\n");
-  process.exitCode = 1;
+export {
+  buildLedger,
+  coreSourceFacts,
+  publicDispatcherRows,
+  validatePublicDispatcher,
+  generatedCoreExports,
+  generatedRingDependencies,
+  generatedCoreCalls,
+  validateGeneratedViews,
+  writeCoreExportTable,
+  writeRingDependencyTable,
+  writeCoreCallTable,
+  writeCoreViews,
+  generatedEncodingFormats,
+  writeEncodingFormatTable,
+};
+
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  const args = process.argv.slice(2);
+  try {
+    if (args.includes("--write")) write();
+    else if (args.includes("--check")) check();
+    else if (args.includes("--core-api-release-check")) coreApiReleaseCheck();
+    else if (args.includes("--hostile-fixtures")) hostileFixtures();
+    else throw new Error("usage: check-core-surface-ledger.mjs --write|--check|--core-api-release-check|--hostile-fixtures");
+  } catch (error) {
+    process.stderr.write(error.message + "\n");
+    process.exitCode = 1;
+  }
 }

@@ -37,7 +37,7 @@ fn assert_resident_tier_compiles_run() {
             .any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error)),
         "terminal_parity must check: {diags:?}"
     );
-    let plan = jet_jit::plan_bundle_tiers(&bundle);
+    let plan = common::cranelift_tier_plan(&bundle);
     assert!(
         !plan.whole_interp,
         "the whole program deopted to the interpreter: {plan:?}"
@@ -272,6 +272,95 @@ fn terminal_parity_matches_non_tty_golden_and_stream_order() {
             run_non_pty_merged(mode),
             expected_merged,
             "non-PTY stream order drifted in {mode} mode"
+        );
+    }
+}
+
+#[test]
+fn stdin_lines_emit_before_eof_and_stop_at_blank() {
+    for mode in ["default", "release", "interpret"] {
+        let scratch = common::Scratch::new("stdin-lines-live");
+        let source = scratch.path.join("sentinel.jet");
+        fs::write(
+            scratch.path.join("package.jet"),
+            "name: \"stdin_stream\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [IO, Mem.Alloc, Time.Wait] } }\n",
+        )
+        .unwrap();
+        fs::write(
+            &source,
+            r#"use core.term as io
+fn run() {
+    loop line in io.stdin().lines() {
+        if line == "" { break }
+        print(line)
+    }
+    print(io.readline())
+}
+"#,
+        )
+        .unwrap();
+        let stdout_path = scratch.path.join("stdout");
+        let stderr_path = scratch.path.join("stderr");
+        let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+        command.args(["run", "--quiet"]);
+        match mode {
+            "release" => { command.arg("--release"); }
+            "interpret" => { command.arg("--interpret"); }
+            _ => {}
+        }
+        let mut child = command
+            .arg(&source)
+            .current_dir(&scratch.path)
+            .env("NO_COLOR", "1")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::from(fs::File::create(&stdout_path).unwrap()))
+            .stderr(Stdio::from(fs::File::create(&stderr_path).unwrap()))
+            .spawn()
+            .expect("start live stdin program");
+        let mut input = child.stdin.take().expect("live stdin pipe");
+        let result = (|| -> Result<(), String> {
+            input.write_all(b"a\n").map_err(|error| error.to_string())?;
+            let started = Instant::now();
+            loop {
+                let output = fs::read_to_string(&stdout_path).map_err(|error| error.to_string())?;
+                if output == "a\n" {
+                    break;
+                }
+                if child.try_wait().map_err(|error| error.to_string())?.is_some() {
+                    return Err(format!("exited before echoing the first line: {output:?}"));
+                }
+                if started.elapsed() >= Duration::from_secs(120) {
+                    return Err(format!("withheld first-line output while stdin stayed open: {output:?}"));
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            input.write_all(b"b\nc\n\nremainder\n").map_err(|error| error.to_string())?;
+            let started = Instant::now();
+            loop {
+                if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+                    if !status.success() {
+                        return Err(format!("sentinel run exited with {status}"));
+                    }
+                    let output = fs::read_to_string(&stdout_path).map_err(|error| error.to_string())?;
+                    return if output == "a\nb\nc\nremainder\n" {
+                        Ok(())
+                    } else {
+                        Err(format!("lost, duplicated, or consumed input past the sentinel: {output:?}"))
+                    };
+                }
+                if started.elapsed() >= Duration::from_secs(10) {
+                    return Err("blank sentinel did not stop the loop without EOF".to_string());
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        })();
+        drop(input);
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(
+            result.is_ok(),
+            "{mode}: {result:?}\n{}",
+            fs::read_to_string(stderr_path).unwrap_or_default(),
         );
     }
 }

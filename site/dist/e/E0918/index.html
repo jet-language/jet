@@ -34,34 +34,16 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for E0918</p>
+<p class="diag-copy fix" data-registry-field="fix">Call the `#Inline(Always)` function directly or relax the marker before taking its address.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0918</code>: <code>tests/ui/inline_always_address_taken.stderr</code>.</p>
-<pre class="diag">Error [E0112]: `apply` wants fn(Int) Int for argument 1, but this is fn(x: Int) Int
-  --&gt; tests/ui/inline_always_address_taken.jet:8:24
-    |
-  8 | fn run() { print(apply(triple, 5)) }
-    |                        ^^^^^^
- Why: every argument must match its parameter&#39;s type
- Fix: use fn(Int) Int here
-More: jet-lang.dev/e/E0112
-
-Error [E0112]: `apply` wants fn(Int) Int for argument 1, but this is fn(x: Int) Int
-  --&gt; tests/ui/inline_always_address_taken.jet:8:24
-    |
-  8 | fn run() { print(apply(triple, 5)) }
-    |                        ^^^^^^
- Why: every argument must match its parameter&#39;s type
- Fix: use fn(Int) Int here
-More: jet-lang.dev/e/E0112
-
-Error [E0918]: `triple` cannot be inlined: its address is taken
+<pre class="diag">Error [E0918]: `triple` cannot be inlined: its address is taken
   --&gt; tests/ui/inline_always_address_taken.jet:4:1
     |
   4 | #Inline(Always) fn triple(x: Int) Int -&gt; { return x * 3 }
     | ^^^^^^^^^^^^^^^
  Why: `#Inline(Always)` promises every call to `triple` expands in place — but `triple` is also used as a plain value somewhere (stored, returned, or passed as a callback), and a value needs a real function to point at.
- Fix: drop `#Inline(Always)`, or call `triple` directly instead of through a value.
+ Fix: Drop `#Inline(Always)`, or call `triple` directly instead of through a value.
 More: jet-lang.dev/e/E0918
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

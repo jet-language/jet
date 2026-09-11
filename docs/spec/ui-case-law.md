@@ -1,8 +1,8 @@
 # User-facing case law
 
-This is the implementation rule for human-readable UI text. It records
-D-CASE-CHROME1=C and D-CASE-PROSE1=A, ratified 2026-08-25 on card #2203.
-Case follows the shape of the text, not the file or the surface that prints it.
+This page defines human-readable UI text. It records D-CASE-CHROME1=C and
+D-CASE-PROSE1=A, ratified 2026-08-25 on card #2203. Case follows the shape of
+the text, not the file or the surface that prints it.
 
 ## The two cases
 
@@ -55,6 +55,3 @@ package refs, environment variable names, JSON keys, JSON values, or any
 string a machine parses. These values are data contracts. Human-readable text
 inside a machine output value is still unchanged.
 
-The application cards in milestone `e10-m08-ui-case-law` cite
-D-CASE-CHROME1=C and D-CASE-PROSE1=A. They must apply this matrix and must not
-create a second case rule.

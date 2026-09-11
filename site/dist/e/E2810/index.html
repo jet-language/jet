@@ -37,13 +37,13 @@
 <p class="diag-copy fix" data-registry-field="fix">Pass a named function, or declare `.mount(prefix, handler)` for dynamic subtrees.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E2810</code>: <code>tests/ui/web_app_dynamic_route.stderr</code>.</p>
-<pre class="diag">Error [E2810]: route `/` is not a statically known handler
-  --&gt; tests/ui/web_app_dynamic_route.jet:5:30
+<pre class="diag">Error [E2810]: Route `/` is not a statically known handler
+  --&gt; tests/ui/web_app_dynamic_route.jet:6:27
     |
-  5 | fn run() =&gt; App :: web.app().route(&quot;/&quot;, pick()).csr()
-    |                              ^^^^^
+  6 | fn run() App -&gt; web.app().route(&quot;/&quot;, pick()).csr()
+    |                           ^^^^^
  Why: D-WEBAPP1 keeps every route on the typed application graph; a runtime-built handler outside `.mount` is an unanalyzed edge
- Fix: pass a named function, or declare a typed `.mount(prefix, handler)` for dynamic subtrees
+ Fix: Pass a named function, or declare a typed `.mount(prefix, handler)` for dynamic subtrees
 More: jet-lang.dev/e/E2810
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

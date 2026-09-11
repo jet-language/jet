@@ -5,6 +5,7 @@
 //   --json on any command → machine-readable output
 //   complex payloads (decisions) → --file payload.json or `-` for stdin
 import { readFileSync, mkdirSync, existsSync, writeFileSync, readdirSync, chmodSync, statSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as db from './store.mjs';
@@ -59,11 +60,11 @@ const COMMAND_FLAGS = {
     list: ['lane', 'phase', 'epoch', 'track', 'kind', 'milestone', 'tag', 'untagged', 'parent', 'hardeningDedupKey'],
     show: ['hardeningDedupKey'],
     add: payload('title', 'body', 'kind', 'track', 'epoch', 'milestone', 'phase', 'priority', 'plan',
-      'checkSteps', 'workOrder', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'parent', 'force',
+      'checkSteps', 'probe', 'workOrder', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'parent', 'force',
       'hardeningDedupKey', 'hardeningSeam', 'hardeningRelation', 'hardeningWrongTierMask',
       'hardeningInputPartition', 'hardeningFindingId', 'hardeningFixture'),
     update: payload('title', 'body', 'kind', 'track', 'epoch', 'milestone', 'phase', 'priority', 'plan',
-      'checkSteps', 'workOrder', 'log', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'removeTag', 'parent', 'expectRev',
+      'checkSteps', 'probe', 'workOrder', 'log', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'removeTag', 'parent', 'expectRev',
       'hardeningDedupKey', 'hardeningSeam', 'hardeningRelation', 'hardeningWrongTierMask',
       'hardeningInputPartition', 'hardeningFindingId', 'hardeningFixture'),
     claim: by(),
@@ -75,6 +76,7 @@ const COMMAND_FLAGS = {
   decision: { verbs: {
     list: ['open', 'card'],
     show: [],
+    scaffold: ['id', 'out'],
     add: payload('id', 'card', 'title', 'gist', 'lesson', 'story', 'explainer', 'inWild', 'detail', 'rec',
       'group', 'ballotMode', 'shortAuthorizedBy', 'draft'),
     update: payload('title', 'gist', 'lesson', 'story', 'explainer', 'inWild', 'detail', 'rec', 'group',
@@ -116,6 +118,7 @@ const COMMAND_FLAGS = {
     add: payload('id', 'epoch', 'title', 'goal', 'criteria'),
     update: payload('title', 'goal', 'criteria', 'status', 'epoch', 'archive', 'unarchive'),
     criteria: by('add', 'meet', 'verify', 'reopen', 'reason', 'evidence', 'list'),
+    closeout: by('commit'),
     verify: by('evidence', 'expectRev'),
     delete: by(),
   }},
@@ -127,7 +130,6 @@ const COMMAND_FLAGS = {
     show: ['path', 'scratch'],
     add: payload('section', 'title', 'path', 'id', 'body'),
     update: payload('title', 'path', 'body', 'scratch'),
-    archive: ['path'],
     delete: ['path'],
   }},
   verdict: { flags: by('outcome', 'title', 'supersedes') },
@@ -172,7 +174,7 @@ const FLAG_VALUE = {
   by: 'X', file: 'FILE', stdin: null, color: '=auto|always|never',
   title: '"…"', body: '"…"', text: '"…"', path: 'PATH', section: 'SECTION',
   id: 'ID', card: 'REF', decision: 'ID', epoch: 'E', milestone: 'M',
-  phase: 'P', track: 'T', kind: 'K', priority: 'P', plan: '"…"', checkSteps: '"…"', lane: 'L',
+  phase: 'P', track: 'T', kind: 'K', priority: 'P', plan: '"…"', checkSteps: '"…"', probe: '"jet run …"', lane: 'L',
   tag: 'T', tags: 'a,b', addTag: 'T', removeTag: 'T', parent: 'REF', blockedBy: 'REF',
   refs: 'a,b', workOrder: 'N', needsAcceptance: 'true|false', log: '"…"', handoff: '"…"',
   expectRev: 'N', name: 'X', dir: 'PATH', port: 'N', days: 'N', window: 'N', goal: '"…"',
@@ -180,9 +182,9 @@ const FLAG_VALUE = {
   unarchive: null, archived: null, draft: null, ready: null, comment: '"…"', quote: '"…"',
   outcome: 'K', agent: 'A', noClaim: null, limit: 'N', burndown: null, parallel: null,
   readyAcrossEpochs: null, docs: null, docsRoot: 'DIR', scratch: null, note: '"…"',
-  manifest: 'FILE', dryRun: null, hardeningDedupKey: 'KEY', hardeningSeam: 'SEAM',
+  manifest: 'FILE', dryRun: null, commit: 'OID', hardeningDedupKey: 'KEY', hardeningSeam: 'SEAM',
   hardeningRelation: 'RELATION', hardeningWrongTierMask: 'TIERS', hardeningInputPartition: 'PARTITION',
-  hardeningFindingId: 'ID', hardeningFixture: 'PATH',
+  hardeningFindingId: 'ID', hardeningFixture: 'PATH', out: 'FILE',
 };
 
 const flagToken = (key) => {
@@ -359,7 +361,7 @@ const HARDENING_CARD_FLAGS = [
 
 function cardPayload(flags, payload, by) {
   const result = { ...(payload || {}), by };
-  for (const key of ['title', 'body', ...HARDENING_CARD_FLAGS])
+  for (const key of ['title', 'body', 'probe', ...HARDENING_CARD_FLAGS])
     if (flags[key] !== undefined) result[key] = flags[key];
   return result;
 }
@@ -442,7 +444,7 @@ function cmdCard(store, { pos, flags }) {
         title, body, kind: flags.kind ?? p.kind,
         track: flags.track ?? p.track, epoch: flags.epoch ?? p.epoch, milestoneId: flags.milestone ?? p.milestoneId,
         phase: flags.phase ?? p.phase, priority: flags.priority ?? p.priority, plan: flags.plan ?? p.plan,
-        checkSteps: flags.checkSteps ?? p.checkSteps,
+        checkSteps: flags.checkSteps ?? p.checkSteps, probe: flags.probe ?? p.probe,
         blockedBy: flags.blockedBy ? String(flags.blockedBy).split(',') : p.blockedBy,
         criteria: p.criteria,
         refs: flags.refs ? String(flags.refs).split(',').map(x => x.trim()).filter(Boolean) : p.refs,
@@ -463,7 +465,7 @@ function cmdCard(store, { pos, flags }) {
       const patch = { ...p, by };
       for (const [f, k] of [['title', 'title'], ['body', 'body'], ['kind', 'kind'], ['track', 'track'], ['epoch', 'epoch'],
         ['milestone', 'milestoneId'], ['phase', 'phase'], ['priority', 'priority'], ['plan', 'plan'],
-        ['checkSteps', 'checkSteps'],
+        ['checkSteps', 'checkSteps'], ['probe', 'probe'],
         ['workOrder', 'workOrder'], ['log', 'logEntry'], ['needsAcceptance', 'needsAcceptance']])
         if (flags[f] !== undefined) patch[k] = flags[f];
       if (flags.blockedBy !== undefined) patch.blockedBy = flags.blockedBy === '' ? [] : String(flags.blockedBy).split(',');
@@ -531,6 +533,75 @@ function cmdCard(store, { pos, flags }) {
   }
 }
 
+const NAMED_FILE_RE = /(?:^|[\s"'`(])((?:\/|\.\/|(?:docs|examples|Source|crates|tests|Tower)\/)[^\s"'`),;]+)/g;
+
+function citedEvidence(card, root) {
+  const refs = Array.isArray(card.refs) ? card.refs : [];
+  const named = [...`${card.body || ''}\n${card.plan || ''}`.matchAll(NAMED_FILE_RE)].map(m => m[1]);
+  for (const raw of [...refs, ...named]) {
+    const name = String(raw || '').trim().replace(/[.,;:!?]+$/, '').split('#', 1)[0];
+    if (!name || /^https?:\/\//.test(name)) continue;
+    const path = name.startsWith('/') ? name : resolve(root, name);
+    try {
+      if (!statSync(path).isFile()) continue;
+      const text = readFileSync(path, 'utf8').trim();
+      if (text) return text.slice(0, 64 * 1024);
+    } catch { /* a non-local citation is not scaffold evidence */ }
+  }
+  return '';
+}
+
+function runCardProbe(card, root) {
+  const command = typeof card.probe === 'string' ? card.probe.trim() : '';
+  if (!command) throw new TowerError('E_PROBE', `card #${card.num} has no probe — add --probe "jet run …" before scaffolding`);
+  const result = spawnSync('/bin/sh', ['-c', command], {
+    cwd: root,
+    env: process.env,
+    encoding: 'utf8',
+    timeout: 120000,
+    maxBuffer: 64 * 1024,
+  });
+  if (result.error) throw new TowerError('E_PROBE', `card #${card.num} probe failed: ${result.error.message}`);
+  return `${result.stdout || ''}${result.stderr || ''}`.trim();
+}
+
+function scaffoldDecision(store, ref, flags) {
+  const id = typeof flags.id === 'string' ? flags.id.trim() : '';
+  if (!id) throw new TowerError('E_USAGE', 'decision scaffold needs --id <decision-id>');
+  const state = store.load();
+  const card = db.findCard(state, ref);
+  if (!card) throw new TowerError('E_NOT_FOUND', `no card ${ref}`);
+  const root = projectRoot(store.dataDir) || process.cwd();
+  const currentCode = runCardProbe(card, root);
+  const wildCode = citedEvidence(card, root);
+  const emptyRecommendation = () => ({ rec: '', why: '', gains: [], losses: [], whyNot: [], tradeoff: '' });
+  const draft = {
+    id, cardId: card.id, title: card.title, group: 'other', ballotMode: 'full',
+    shortAuthorizedBy: null, ballotProcessVersion: 4, draft: true, status: 'open',
+    gist: '', lesson: '', explainer: '', story: '', inWild: '', detail: '', rec: '',
+    options: [], comparisons: [], recommendation: emptyRecommendation(), hybrid: null,
+    reviewPasses: { beginner: '', adversarial: '' }, checkInstructions: null,
+    surface: {
+      gist: '', lesson: '',
+      trio: {
+        current: { note: '', code: currentCode },
+        wild: { lang: '', note: '', code: wildCode },
+      },
+      options: [],
+      recommendation: emptyRecommendation(),
+    },
+  };
+  const safeId = id.replace(/[^\w.-]+/g, '-');
+  const outputPath = typeof flags.out === 'string' && flags.out.trim()
+    ? resolve(flags.out)
+    : join(process.env.XDG_CACHE_HOME || join(process.env.HOME || process.cwd(), '.cache'), 'jet-luna', `tower-ballot-${safeId}.json`);
+  if (resolve(outputPath) === resolve(store.file))
+    throw new TowerError('E_USAGE', 'decision scaffold cannot overwrite tower.json');
+  mkdirSync(dirname(outputPath), { recursive: true, mode: 0o700 });
+  writeFileSync(outputPath, `${JSON.stringify(draft, null, 2)}\n`, { mode: 0o600 });
+  return out(flags, `scaffolded ballot ${id} → ${outputPath}`, draft);
+}
+
 function cmdDecision(store, { pos, flags }) {
   const [verb, id] = pos;
   const by = flags.by;
@@ -554,6 +625,8 @@ function cmdDecision(store, { pos, flags }) {
       if (arch) return out(flags, null, { ...arch, archived: true });
       throw new TowerError('E_NOT_FOUND', `no decision ${id}`);
     }
+    case 'scaffold':
+      return scaffoldDecision(store, id, flags);
     case 'add': {
       const p = readPayload(flags) || {};
       const payload = { ...p, by };
@@ -590,7 +663,7 @@ function cmdDecision(store, { pos, flags }) {
       const { result } = store.mutate((s) => db.deleteDecision(s, id, by));
       return out(flags, `deleted decision ${id}`, result);
     }
-    default: throw new TowerError('E_USAGE', `unknown decision verb "${verb}" — list/show/add/update/ratify/reopen/delete`);
+    default: throw new TowerError('E_USAGE', `unknown decision verb "${verb}" — list/show/scaffold/add/update/ratify/reopen/delete`);
   }
 }
 
@@ -773,6 +846,12 @@ function cmdMilestone(store, { pos, flags }) {
       const found = store.load().milestones.find(m => m.id === id) || (() => { throw new TowerError('E_NOT_FOUND', `no milestone ${id}`); })();
       return out(flags, null, found.criteria || []);
     }
+    case 'closeout': {
+      const { result } = store.mutate(
+        (s, cfg, history) => db.beginMilestoneCloseout(s, id, { sourceCommit: flags.commit, by: flags.by }, history.cards),
+      );
+      return out(flags, `opened closeout for milestone ${result.id} at ${result.closeout.sourceCommit}`, result);
+    }
     case 'verify': {
       const { result } = store.mutate((s, cfg, history) => db.verifyMilestone(s, id, { evidence: flags.evidence, by: flags.by }, history.cards), { expectRev: flags.expectRev });
       return out(flags, `verified milestone ${result.id}`, result);
@@ -794,7 +873,7 @@ function cmdMilestone(store, { pos, flags }) {
       const { result } = store.mutate((s) => db.deleteMilestone(s, id, flags.by));
       return out(flags, `deleted milestone ${id}`, result);
     }
-    default: throw new TowerError('E_USAGE', `unknown milestone verb "${verb}" — list/add/update/criteria/verify/delete`);
+    default: throw new TowerError('E_USAGE', `unknown milestone verb "${verb}" — list/add/update/criteria/closeout/verify/delete`);
   }
 }
 
@@ -835,14 +914,12 @@ function cmdLint(store, { flags }) {
 
 function cmdDocs(store, { pos, flags }) {
   const dir = store.dataDir;
-  docs.migrateOwnerScratch(dir);
-  docs.migrateScratchReports(dir);
   const [verb, ref] = pos;
   switch (verb) {
     case 'list': {
       const index = docs.listDocs(dir);
       if (flags.json) return out(flags, null, index);
-      console.log(`scratchpad  ${index.scratch.updated.slice(0, 10)}  ${index.scratch.title}`);
+      console.log(`scratchpad  ${index.scratch.updated?.slice(0, 10) || 'unsaved'}  ${index.scratch.title}`);
       for (const sec of index.sections) {
         if (!sec.files.length) continue;
         console.log(`\n${sec.label}:`);
@@ -858,7 +935,7 @@ function cmdDocs(store, { pos, flags }) {
     }
     case 'add': {
       const body = flags.file ? readFileSync(flags.file === '-' ? 0 : flags.file, 'utf8') : (flags.body || '');
-      if (!flags.section && !flags.path) throw new TowerError('E_USAGE', 'docs add needs --section spec|audits|research|plans|proposals|references or --path');
+      if (!flags.section && !flags.path) throw new TowerError('E_USAGE', 'docs add needs --section spec|audits|research|proposals or --path');
       const n = docs.addDoc(dir, {
         section: flags.section,
         title: flags.title,
@@ -882,19 +959,13 @@ function cmdDocs(store, { pos, flags }) {
       const n = docs.updateDoc(dir, path, patch);
       return out(flags, `updated ${n.path}`, n);
     }
-    case 'archive': {
-      const path = ref || flags.path;
-      if (!path) throw new TowerError('E_USAGE', 'docs archive needs a path');
-      const r = docs.archiveDoc(dir, path);
-      return out(flags, `archived ${r.from} → ${r.path}`, r);
-    }
     case 'delete': {
       const path = ref || flags.path;
       if (!path) throw new TowerError('E_USAGE', 'docs delete needs a path');
       const r = docs.deleteDoc(dir, path);
       return out(flags, `deleted ${path}`, r);
     }
-    default: throw new TowerError('E_USAGE', `unknown docs verb "${verb}" — list/show/add/update/archive/delete`);
+    default: throw new TowerError('E_USAGE', `unknown docs verb "${verb}" — list/show/add/update/delete`);
   }
 }
 
@@ -914,6 +985,7 @@ function cmdBrief(store, { pos, flags }) {
     if (!picks.length) throw new TowerError('E_NOT_FOUND', 'nothing agent-workable — board is either empty, blocked on the owner, or done');
     card = db.findCard(s, picks[0].id);
   }
+  db.assertClosureBarrier(s);
   if (flags.agent && !flags.noClaim) {
     const { state } = store.mutate((s2) => db.claimCard(s2, card.id, flags.agent));
     s = state;
@@ -945,7 +1017,7 @@ function renderBrief(p, t) {
   const items = p.criteria.items;
   if (items.length) {
     L.push('', heading(`CRITERIA${p.criteria.needsAcceptance ? '  (needsAcceptance — owner visual/UX ballot on close)' : ''}`));
-    L.push(`  ${t.dim('Builder marks rows met. The orchestrator closes when every row is met or verified.')}`);
+    L.push(`  ${t.dim('Workers return a receipt. After integrated proof, the orchestrator marks rows met and closes the card.')}`);
     for (const it of items) {
       const state = (it.status === 'verified' ? t.success : it.status === 'met' ? t.warn : t.dim)(`[${it.status}]`);
       L.push(`  ${t.border(`#${it.n}`)} ${state} ${it.text}${it.metBy ? `  ${t.dim(`met:${it.metBy}`)}` : ''}${it.verifiedBy ? `  ${t.dim(`verified:${it.verifiedBy}`)}` : ''}${it.evidence ? `  ${t.border('—')} ${it.evidence}` : ''}`);

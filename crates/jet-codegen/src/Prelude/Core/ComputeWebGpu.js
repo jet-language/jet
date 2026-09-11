@@ -277,12 +277,21 @@ const JET_WEBGPU_MATMUL_SHADER = `struct Params { len: u32, rows: u32, inner: u3
   out[index] = total;
 }`;
 
+const JET_WEBGPU_REDUCTION_LANES = 8;
 const JET_WEBGPU_SUM_SHADER = `struct Params { len: u32, rows: u32, inner: u32, cols: u32, scalar: u32 };
 @group(0) @binding(0) var<storage, read> a: array<f32>;
 @group(0) @binding(1) var<storage, read_write> out: array<f32>;
 @group(0) @binding(2) var<uniform> p: Params;
-@compute @workgroup_size(1) fn main() { var total: f32 = 0.0;
-  for (var i: u32 = 0u; i < p.len; i = i + 1u) { total = total + a[i]; } out[0] = total;
+@compute @workgroup_size(1) fn main() {
+  var accumulators: array<f32, 8>;
+  for (var lane: u32 = 0u; lane < 8u; lane = lane + 1u) { accumulators[lane] = 0.0; }
+  for (var i: u32 = 0u; i < p.len; i = i + 1u) {
+    let lane = i % 8u;
+    accumulators[lane] = accumulators[lane] + a[i];
+  }
+  let left = (accumulators[0] + accumulators[1]) + (accumulators[2] + accumulators[3]);
+  let right = (accumulators[4] + accumulators[5]) + (accumulators[6] + accumulators[7]);
+  out[0] = left + right;
 }`;
 
 const JET_WEBGPU_MSE_SHADER = `struct Params { len: u32, rows: u32, inner: u32, cols: u32, scalar: u32 };
@@ -438,6 +447,34 @@ async function jet_compute_web_upload(tensor, device) {
   result.buffer = jet_compute_webgpu_buffer(await jet_compute_webgpu_device(), jet_compute_web_f32_values(await jet_compute_web_values(tensor), "WebGPU transfer"));
   return result;
 }
+// D-FRED1=A: JS marshals into the compiled Prelude export. It does not carry
+// the lane count, seed placement, or reduction tree as a second policy.
+function jet_compute_web_shared_reduce(values, seed, f32) {
+  const wasm = __jetPreludeWasm;
+  const memory = wasm?.memory;
+  const suffix = f32 ? "f32" : "f64";
+  const alloc = wasm?.[`jet_web_d_fred_${suffix}_alloc`];
+  const reduce = wasm?.[`jet_web_d_fred_${suffix}_reduce`];
+  const free = wasm?.[`jet_web_d_fred_${suffix}_free`];
+  if (!memory || typeof alloc !== "function" || typeof reduce !== "function" || typeof free !== "function") {
+    throw new Error("compiled Prelude D-FRED reduction export is unavailable");
+  }
+  const length = values.length;
+  const ptr = Number(alloc(length));
+  if (!Number.isSafeInteger(ptr) || ptr < 0) {
+    throw new Error("compiled Prelude D-FRED reduction allocation failed");
+  }
+  const view = f32
+    ? new Float32Array(memory.buffer, ptr, length)
+    : new Float64Array(memory.buffer, ptr, length);
+  view.set(values);
+  try {
+    return reduce(ptr, length, seed);
+  } finally {
+    free(ptr);
+  }
+}
+
 
 async function jet_compute_web_transfer(tensor, device) {
   const from = tensor.device;
@@ -450,15 +487,14 @@ async function jet_compute_web_transfer(tensor, device) {
 async function jet_compute_web_sum(tensor) {
   if (tensor.device === "webgpu") {
     const output = await jet_compute_webgpu_dispatch(JET_WEBGPU_SUM_SHADER, "sum", [await jet_compute_web_buffer(tensor)], [jet_compute_web_numel(tensor.shape), 0, 0, 0, 0], 1);
-    const result = jet_compute_web_tensor([1], null, "webgpu", JET_WEBGPU_PROFILE, "algorithm=webgpu-sum;arithmetic=f32;reduction=ordered");
+    const result = jet_compute_web_tensor([1], null, "webgpu", JET_WEBGPU_PROFILE, "algorithm=webgpu-sum;arithmetic=f32;reduction=d-fred1;k=8");
     result.buffer = output;
     return result;
   }
   const values = await jet_compute_web_values(tensor);
-  const sum = tensor.profile === JET_WEBGPU_PROFILE
-    ? values.reduce((total, value) => Math.fround(Math.fround(total) + Math.fround(value)), 0)
-    : values.reduce((total, value) => total + value, 0);
-  return jet_compute_web_tensor([1], [sum], "cpu", tensor.profile, "policy=explicit;selected=cpu;ability=cpu-oracle");
+  const f32 = tensor.profile === JET_WEBGPU_PROFILE;
+  const sum = jet_compute_web_shared_reduce(values, f32 ? Math.fround(0) : 0, f32);
+  return jet_compute_web_tensor([1], [sum], "cpu", tensor.profile, "policy=explicit;selected=cpu;ability=cpu-oracle;reduction=d-fred1;k=8");
 }
 
 async function jet_compute_web_mse(left, right) {

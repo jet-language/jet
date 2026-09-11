@@ -10,7 +10,8 @@
 //! against packages already realized into the hangar, without depending on
 //! Jetpack's realization engine.
 
-use crate::JSON::{self, JSONValue};
+use crate::JSON;
+use jet_foundation::DataTree::DataTree;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Read};
@@ -538,7 +539,7 @@ pub fn parse_meta(text: &str) -> Option<ParsedMeta> {
     let j = JSON::parse(text).ok()?;
     let get = |k: &str| {
         j.get(k)
-            .and_then(JSONValue::as_str)
+            .and_then(DataTree::as_str)
             .map(str::to_string)
             .ok()
     };

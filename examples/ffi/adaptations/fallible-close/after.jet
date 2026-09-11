@@ -1,0 +1,28 @@
+#Import module c.handle {
+    fn __jet_ffi_native_open_handle() Handle = "open_handle"
+    fn __jet_ffi_native_handle_value(handle: &Handle) Int = "handle_value"
+    fn __jet_ffi_native_close_handle(handle: &Handle) Int = "close_handle"
+}
+
+// Unrun expectation: ownership is transferred once and close status remains a
+// fallible cleanup result; the facade never hides a failed close.
+pub fn open_handle() Handle -> {
+    return __jet_ffi_native_open_handle()
+}
+
+pub fn handle_value(handle: &Handle) Int -> {
+    return __jet_ffi_native_handle_value(handle)
+}
+
+pub fn close_handle(handle: &Handle) Result<Unit, Int> -> {
+    status := __jet_ffi_native_close_handle(handle)
+    if status != 0 -> return Err(status)
+    return Ok(())
+}
+
+pub fn run() Result<Int, Int> -> {
+    handle := open_handle()
+    value := handle_value(&handle)
+    close_handle(&handle) ?? return Err(1)
+    return Ok(value)
+}

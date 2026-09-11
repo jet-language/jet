@@ -182,7 +182,10 @@ struct Sale {
 
 fn run() {
     rows :: data.csv<Sale>("month,value\nJan,4.0\nFeb,6.0") ?? panic("csv")
-    groups :: data.group_mean(rows, sale -> sale.month, sale -> sale.value) ?? panic("groups")
+    groups :: data.query(rows)
+        .group_by(sale -> sale.month)
+        .mean(sale -> sale.value)
+        .collect() ?? panic("groups")
     if groups.len() == 2 {
         print("checked")
     }
@@ -236,10 +239,10 @@ fn package_edition_survives_tir_eval_worker() {
 }
 
 /// An embedder holding a checked bundle reaches the JIT without ever touching
-/// the driver's compile entries, so `CraneliftBackend::run` has to own the
-/// same sized stack they own: TIR lowering inside `try_resident` and the
-/// whole-program interpreter on the deopt route are the same unbounded-depth
-/// recursive descent, and either tier alone exhausts a 2 MiB embedder thread.
+/// the driver's compile entries, so the Cranelift backend has to own the same
+/// sized stack they own: MIR lowering and the whole-program interpreter on the
+/// deopt route are the same unbounded-depth recursive descent, and either tier
+/// alone exhausts a 2 MiB embedder thread.
 #[test]
 fn the_jit_backend_owns_enough_stack_for_a_two_mib_embedder_thread() {
     let dir = common::unique_tmp("jet_compiler_stack_jit_entry");
@@ -251,7 +254,6 @@ fn the_jit_backend_owns_enough_stack_for_a_two_mib_embedder_thread() {
     let outcome = std::thread::Builder::new()
         .stack_size(2 * 1024 * 1024)
         .spawn(move || {
-            use jet::JitBackend::JitBackend;
             let bundle = jet::run_compiler_work(move || {
                 let mut bundle = jet::Loader::load_entry(&path).expect("the fixture should load");
                 let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
@@ -263,7 +265,9 @@ fn the_jit_backend_owns_enough_stack_for_a_two_mib_embedder_thread() {
                 );
                 bundle
             });
-            jet_jit::CraneliftBackend::new().run(&bundle, false)
+            let mut backend = jet_jit::CraneliftBackend::new();
+            let policy = common::development_policy();
+            common::run_cranelift_bundle(&mut backend, &bundle, false, &policy)
         })
         .expect("spawn the embedder thread")
         .join()
@@ -354,240 +358,3 @@ fn public_compile_accepts_depth_256_and_reports_depth_257() {
     assert!(diagnostic.what.contains("limit is 256"));
 }
 
-fn tir_func(
-    name: &str,
-    body: Vec<jet::Codegen::TIR::TStmt>,
-    source_span: jet::Diagnostics::Span,
-) -> jet::Codegen::TIR::TFunc {
-    jet::Codegen::TIR::TFunc {
-        name: name.to_string(),
-        source_span,
-        params: Vec::new(),
-        web_param_reconstructions: Vec::new(),
-        ret: None,
-        gc_return: false,
-        return_view_provenance: None,
-        generics: String::new(),
-        clone_types: Vec::new(),
-        is_main: name == "run",
-        line: 1,
-        // Hand-written test fixture, not derive/serde output: the source span it
-        // carries is real, so no synthetic-frame suppression applies.
-        synthetic: false,
-        is_unsafe: false,
-        unsafe_gate: None,
-        is_pure: true,
-        memo_bound: None,
-        is_reactive: false,
-        reactive_upgrades: Vec::new(),
-        is_inline: false,
-        is_inline_always: false,
-        is_scalar: false,
-        kernel_proof: None,
-        memo_field: None,
-        uses_stack_sentry: false,
-        body,
-        kind: jet::Codegen::TIR::TFuncKind::TopLevel,
-    }
-}
-
-fn nested_tir_expr(nodes: usize) -> jet::Codegen::TIR::TExpr {
-    use jet::Codegen::TIR::{TExpr, TExprKind};
-
-    let mut expr = TExpr {
-        ty: jet::AST::Type::Named("Unit".to_string()),
-        kind: TExprKind::Unit,
-    };
-    for _ in 1..nodes {
-        expr = TExpr {
-            ty: jet::AST::Type::Named("Unit".to_string()),
-            kind: TExprKind::Clone(Box::new(expr)),
-        };
-    }
-    expr
-}
-
-fn nested_tir_program(
-    nodes: usize,
-    source_span: jet::Diagnostics::Span,
-) -> jet::Codegen::TIR::JitProgram {
-    use jet::Codegen::TIR::{JitProgram, TStmt};
-
-    JitProgram {
-        source_file: "nested-tir.jet".to_string(),
-        source_text: String::new(),
-        package_hardened: false,
-        application_authority: Default::default(),
-        edition: jet::Manifest::latest_edition().to_string(),
-        entry: "run".to_string(),
-        instance_provenance: Vec::new(),
-        funcs: vec![tir_func(
-            "run",
-            vec![TStmt::ExprStmt(nested_tir_expr(nodes))],
-            source_span,
-        )],
-        spawn_lambdas: Vec::new(),
-        struct_fields: std::collections::HashMap::new(),
-        struct_field_types: std::collections::HashMap::new(),
-        memo_dependencies: std::collections::HashMap::new(),
-        reflection_fields: std::collections::HashMap::new(),
-        reflect_paths: std::collections::HashMap::new(),
-        nominal_identities: std::collections::HashMap::new(),
-        struct_type_params: std::collections::HashMap::new(),
-        enum_variants: std::collections::HashMap::new(),
-        enum_variant_payload_types: std::collections::HashMap::new(),
-        canonical_deopt: std::collections::HashSet::new(),
-        canonical_calls: std::collections::HashSet::new(),
-        int_constants: std::collections::HashMap::new(),
-        constants: std::collections::HashMap::new(),
-        distinct_bases: std::collections::HashMap::new(),
-        distinct_ranges: std::collections::HashMap::new(),
-        codec_migrations: std::collections::HashMap::new(),
-        trait_method_owners: std::collections::HashMap::new(),
-        iterable_item_types: std::collections::HashMap::new(),
-    }
-}
-
-fn run_tir_program(
-    program: jet::Codegen::TIR::JitProgram,
-) -> Result<jet::Comptime::CtValue, jet::Diagnostics::Diagnostic> {
-    run_tir_program_with_sink(program).0
-}
-
-fn run_tir_program_with_sink(
-    program: jet::Codegen::TIR::JitProgram,
-) -> (
-    Result<jet::Comptime::CtValue, jet::Diagnostics::Diagnostic>,
-    jet::Comptime::DevSink,
-) {
-    std::thread::Builder::new()
-        .stack_size(32 * 1024 * 1024)
-        .spawn(move || {
-            let mut sink = jet::Comptime::DevSink::new();
-            let result = jet::Codegen::TIR::run_program(
-                &program,
-                std::path::Path::new("."),
-                &mut sink,
-                std::collections::HashMap::new(),
-                &std::collections::HashMap::new(),
-                jet::Policy::GateSet::default(),
-            );
-            (result, sink)
-        })
-        .expect("spawn TIR boundary evaluator")
-        .join()
-        .expect("TIR boundary evaluator must not panic")
-}
-
-#[test]
-fn tir_unmatched_enum_match_cannot_report_empty_success() {
-    use jet::Codegen::TIR::{TEnumPayload, TExpr, TExprKind, TMatchArm, TPattern, TStmt, TStrPart};
-    use jet::AST::{Pattern, Type};
-
-    let source = "fn run() {\n    when Light.Blue { ... }\n    print(\"completed\")\n}\n";
-    let span = jet::Diagnostics::Span::new(0, source.len());
-    let mut program = nested_tir_program(0, span);
-    program.source_file = "unmatched-enum.jet".to_string();
-    program.source_text = source.to_string();
-    program.funcs = vec![tir_func(
-        "run",
-        vec![
-            TStmt::EnumMatch {
-                scrutinee: TExpr {
-                    ty: Type::Named("Light".to_string()),
-                    kind: TExprKind::EnumLit {
-                        enum_type: "Light".to_string(),
-                        variant: "Blue".to_string(),
-                        payload: TEnumPayload::Unit,
-                    },
-                },
-                clone_subject: false,
-                arms: vec![TMatchArm {
-                    pattern: TPattern::arm(
-                        Pattern::Variant {
-                            variant: "Red".to_string(),
-                            bindings: Vec::new(),
-                            leading_dot: false,
-                            span,
-                        },
-                        Some("Light".to_string()),
-                    ),
-                    body: Vec::new(),
-                }],
-                else_body: None,
-                fallthrough: true,
-            },
-            TStmt::ExprStmt(TExpr {
-                ty: Type::Named("Unit".to_string()),
-                kind: TExprKind::Print(Box::new(TExpr {
-                    ty: Type::String,
-                    kind: TExprKind::StrLit(vec![TStrPart::Lit("completed".to_string())]),
-                })),
-            }),
-        ],
-        span,
-    )];
-
-    let (result, sink) = run_tir_program_with_sink(program);
-    let diagnostic = result.expect_err(
-        "an unmatched sema-proved exhaustive match must not report successful completion",
-    );
-    assert_eq!(diagnostic.code, "E0956");
-    assert!(
-        diagnostic.what.contains("exhaustive match fallthrough"),
-        "wrong boundary diagnostic: {diagnostic:?}"
-    );
-    assert!(
-        sink.stdout.is_empty(),
-        "the post-match completion witness must not execute: {:?}",
-        sink.stdout
-    );
-}
-
-fn run_nested_tir(
-    nodes: usize,
-    source_span: jet::Diagnostics::Span,
-) -> Result<jet::Comptime::CtValue, jet::Diagnostics::Diagnostic> {
-    run_tir_program(nested_tir_program(nodes, source_span))
-}
-
-#[test]
-fn canonical_tir_evaluator_accepts_depth_256_and_renders_depth_257() {
-    let source = "fn run() {\n    value\n}\n";
-    let span = jet::Diagnostics::Span::new(0, source.len());
-
-    run_nested_tir(255, span).expect("one statement plus 255 expressions is depth 256");
-
-    let diagnostic =
-        run_nested_tir(256, span).expect_err("one statement plus 256 expressions is depth 257");
-    assert_eq!(diagnostic.code, "E1403");
-    assert_eq!(diagnostic.span, Some(span));
-    let rendered = jet::Diagnostics::render_all("nested-tir.jet", source, &[diagnostic]);
-    assert!(rendered.contains("nested-tir.jet:1:"), "{rendered}");
-    assert!(rendered.contains("fn run()"), "{rendered}");
-}
-
-#[test]
-fn tir_function_entry_resets_structural_depth() {
-    use jet::Codegen::TIR::{TExpr, TExprKind, TStmt};
-
-    let source = "fn helper() {}\nfn run() {}\n";
-    let span = jet::Diagnostics::Span::new(0, source.len());
-    let mut program = nested_tir_program(255, span);
-    program.funcs[0].name = "helper".to_string();
-    program.funcs[0].is_main = false;
-    program.funcs.push(tir_func(
-        "run",
-        vec![TStmt::ExprStmt(TExpr {
-            ty: jet::AST::Type::Named("Unit".to_string()),
-            kind: TExprKind::Call {
-                name: "helper".to_string(),
-                type_args: Vec::new(),
-                args: Vec::new(),
-            },
-        })],
-        span,
-    ));
-
-    run_tir_program(program).expect("runtime call depth must not count as source nesting");
-}

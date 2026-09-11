@@ -20,31 +20,20 @@ pub fn jet_deadline_remaining_ms() -> Option<i64> {
     jet_ctx_deadline_ms().map(|d| d.saturating_sub(jet_std_time_now()))
 }
 
+/// Generic consumers use the shared wait policy after their operation. This
+/// adapter supplies only the observed deadline and scheduler shield facts.
 fn jet_deadline_check(wait_kind: &str) {
-    // Deadline delivery is a wait-point raise; cleanup defers it with the same
-    // shield that protects cancellation, so a destructor cannot double-panic.
-    if !jet_scheduler_shielded()
-        && matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0)
+    let deadline =
+        jet_std::jet_task_deadline_if_expired(jet_deadline_remaining_ms(), wait_kind);
+    if let Err(jet_std::JetTaskWaitInterrupt::Deadline(_)) =
+        jet_std::jet_task_wait_policy(deadline, false, jet_scheduler_shielded())
     {
         jet_deadline_exceeded(wait_kind);
     }
 }
 
 pub fn jet_std_time_sleep(millis: i64) {
-    let want = millis.max(0);
-    if !jet_scheduler_shielded() {
-        if let Some(remaining) = jet_deadline_remaining_ms() {
-            if remaining <= 0 {
-                jet_deadline_exceeded("time sleep");
-            }
-            if want > remaining {
-                jet_scheduler_sleep_ms(remaining as u64);
-                jet_deadline_exceeded("time sleep");
-            }
-        }
-    }
-    jet_scheduler_sleep_ms(want as u64);
-    jet_deadline_check("time sleep");
+    jet_task_sleep_ms_defaulted(millis);
 }
 
 /// D-TYPE2-TIME1=A: one shared boundary from the canonical Duration carrier
@@ -58,12 +47,14 @@ pub fn jet_std_time_duration_to_millis(nanos: i64) -> i64 {
 /// carrier. The deadline policy stays in this shared Prelude kernel; engines
 /// only marshal the carrier and call this function.
 pub fn jet_task_timeout_duration_ns(nanos: i64) {
-    let millis = jet_std_time_duration_to_millis(nanos).max(0);
+    let millis = jet_std_time_duration_to_millis(nanos);
+    let millis = jet_task_delay_ms_defaulted(millis) as i64;
     jet_ctx_set_deadline_min(jet_std_time_now().saturating_add(millis));
 }
 
 /// D-TYPE2-TIME1=A: the core sleep call receives the canonical Duration
-/// carrier and only this Prelude adapter projects it to scheduler milliseconds.
+/// carrier and delegates the exact wait policy to the shared scheduler.
 pub fn jet_std_time_sleep_duration_ns(nanos: i64) {
-    jet_std_time_sleep(jet_std_time_duration_to_millis(nanos));
+    jet_task_sleep_duration_ns_defaulted(nanos);
 }
+

@@ -6,8 +6,9 @@
 use crate::Store::Roots;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use jet_foundation::base_encoding_strict::decode_base64;
-use jet_foundation::EncodingJson::{parse_json_exact_numbers, Value};
+use jet_foundation::DataTree::DataTree;
 use jet_foundation::JSON::json_escape;
+use jet_foundation::EncodingJson::parse_json_exact_numbers;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
@@ -1894,7 +1895,7 @@ fn parse_local_native_recipes(bytes: &[u8]) -> Result<Vec<NativeRecipe>, NixInde
     Ok(recipes)
 }
 
-fn parse_native_recipe(value: &Value) -> Result<NativeRecipe, NixIndexError> {
+fn parse_native_recipe(value: &DataTree) -> Result<NativeRecipe, NixIndexError> {
     let map = object(value.clone(), "local unofficial native recipe")?;
     reject_unknown(&map, &["name", "version", "kind", "url", "sha256", "bin"])?;
     let recipe = NativeRecipe {
@@ -2101,7 +2102,7 @@ fn parse_signature_strict(bytes: &[u8]) -> Result<IndexSignature, NixIndexError>
     Ok(signature)
 }
 
-fn parse_records(value: &Value) -> Result<Vec<RecordWire>, NixIndexError> {
+fn parse_records(value: &DataTree) -> Result<Vec<RecordWire>, NixIndexError> {
     let values = value_array(value, "records")?;
     if values.len() > MAX_RECORDS {
         return Err(NixIndexError::invalid("nix index has too many records"));
@@ -2109,7 +2110,7 @@ fn parse_records(value: &Value) -> Result<Vec<RecordWire>, NixIndexError> {
     values.iter().map(parse_record).collect()
 }
 
-fn parse_record(value: &Value) -> Result<RecordWire, NixIndexError> {
+fn parse_record(value: &DataTree) -> Result<RecordWire, NixIndexError> {
     let map = object(value.clone(), "nix index record")?;
     reject_unknown(&map, &["attrpath", "version", "drvPath", "outputs"])?;
     let outputs = array_field(&map, "outputs")?
@@ -2124,7 +2125,7 @@ fn parse_record(value: &Value) -> Result<RecordWire, NixIndexError> {
     })
 }
 
-fn parse_output(value: &Value) -> Result<OutputWire, NixIndexError> {
+fn parse_output(value: &DataTree) -> Result<OutputWire, NixIndexError> {
     let map = object(value.clone(), "nix index output")?;
     reject_unknown(&map, &["name", "storePath"])?;
     Ok(OutputWire {
@@ -2133,13 +2134,13 @@ fn parse_output(value: &Value) -> Result<OutputWire, NixIndexError> {
     })
 }
 
-fn parse_oracle_outputs(value: &Value) -> Result<Vec<OutputWire>, NixIndexError> {
+fn parse_oracle_outputs(value: &DataTree) -> Result<Vec<OutputWire>, NixIndexError> {
     match value {
-        Value::Array(_) => value_array(value, "oracle outputs")?
+        DataTree::Array(_) => value_array(value, "oracle outputs")?
             .iter()
             .map(parse_output)
             .collect(),
-        Value::Object(outputs) => outputs
+        DataTree::Object(outputs) => outputs
             .iter()
             .map(|(name, value)| {
                 let map = object(value.clone(), "oracle output")?;
@@ -2164,7 +2165,7 @@ fn parse_oracle_outputs(value: &Value) -> Result<Vec<OutputWire>, NixIndexError>
     }
 }
 
-fn parse_coverage(value: &Value) -> Result<Coverage, NixIndexError> {
+fn parse_coverage(value: &DataTree) -> Result<Coverage, NixIndexError> {
     let map = object(value.clone(), "nix index coverage")?;
     reject_unknown(&map, &["indexed", "notIndexed"])?;
     let indexed = array_field(&map, "indexed")?
@@ -2188,14 +2189,14 @@ fn parse_coverage(value: &Value) -> Result<Coverage, NixIndexError> {
     })
 }
 
-fn parse_attrpath(value: &Value) -> Result<Vec<String>, NixIndexError> {
+fn parse_attrpath(value: &DataTree) -> Result<Vec<String>, NixIndexError> {
     value_array(value, "attrpath")?
         .iter()
         .map(|value| Ok(string_value(value, "attrpath segment")?.to_string()))
         .collect()
 }
 
-fn parse_manifest_target(value: &Value) -> Result<ManifestTarget, NixIndexError> {
+fn parse_manifest_target(value: &DataTree) -> Result<ManifestTarget, NixIndexError> {
     let map = object(value.clone(), "nix index manifest target")?;
     reject_unknown(
         &map,
@@ -2378,21 +2379,21 @@ fn verify_digest_and_length(
     Ok(())
 }
 
-fn object(value: Value, label: &str) -> Result<Vec<(String, Value)>, NixIndexError> {
+fn object(value: DataTree, label: &str) -> Result<Vec<(String, DataTree)>, NixIndexError> {
     match value {
-        Value::Object(map) => Ok(map),
+        DataTree::Object(map) => Ok(map),
         _ => Err(NixIndexError::invalid(format!("{label} must be an object"))),
     }
 }
 
-fn field<'a>(map: &'a [(String, Value)], name: &str) -> Result<&'a Value, NixIndexError> {
+fn field<'a>(map: &'a [(String, DataTree)], name: &str) -> Result<&'a DataTree, NixIndexError> {
     map.iter()
         .find(|(key, _)| key == name)
         .map(|(_, value)| value)
         .ok_or_else(|| NixIndexError::invalid(format!("nix index is missing `{name}`")))
 }
 
-fn reject_unknown(map: &[(String, Value)], known: &[&str]) -> Result<(), NixIndexError> {
+fn reject_unknown(map: &[(String, DataTree)], known: &[&str]) -> Result<(), NixIndexError> {
     if let Some((key, _)) = map.iter().find(|(key, _)| !known.contains(&key.as_str())) {
         return Err(NixIndexError::invalid(format!(
             "nix index has unknown field `{key}`"
@@ -2401,21 +2402,21 @@ fn reject_unknown(map: &[(String, Value)], known: &[&str]) -> Result<(), NixInde
     Ok(())
 }
 
-fn string_value<'a>(value: &'a Value, label: &str) -> Result<&'a str, NixIndexError> {
+fn string_value<'a>(value: &'a DataTree, label: &str) -> Result<&'a str, NixIndexError> {
     match value {
-        Value::Text(value) => Ok(value),
+        DataTree::Text(value) => Ok(value),
         _ => Err(NixIndexError::invalid(format!("{label} must be a string"))),
     }
 }
 
-fn string_field<'a>(map: &'a [(String, Value)], name: &str) -> Result<&'a str, NixIndexError> {
+fn string_field<'a>(map: &'a [(String, DataTree)], name: &str) -> Result<&'a str, NixIndexError> {
     string_value(field(map, name)?, name)
 }
 
-fn u64_value(value: &Value, label: &str) -> Result<u64, NixIndexError> {
+fn u64_value(value: &DataTree, label: &str) -> Result<u64, NixIndexError> {
     let text = match value {
-        Value::Number(text) => text,
-        Value::Int(value) if *value >= 0 => return Ok(*value as u64),
+        DataTree::Number(text) => text,
+        DataTree::Int(value) if *value >= 0 => return Ok(*value as u64),
         _ => {
             return Err(NixIndexError::invalid(format!(
                 "{label} must be an integer"
@@ -2431,25 +2432,25 @@ fn u64_value(value: &Value, label: &str) -> Result<u64, NixIndexError> {
         .map_err(|_| NixIndexError::invalid(format!("{label} is out of range")))
 }
 
-fn u64_field(map: &[(String, Value)], name: &str) -> Result<u64, NixIndexError> {
+fn u64_field(map: &[(String, DataTree)], name: &str) -> Result<u64, NixIndexError> {
     u64_value(field(map, name)?, name)
 }
 
-fn bool_field(map: &[(String, Value)], name: &str) -> Result<bool, NixIndexError> {
+fn bool_field(map: &[(String, DataTree)], name: &str) -> Result<bool, NixIndexError> {
     match field(map, name)? {
-        Value::Bool(value) => Ok(*value),
+        DataTree::Bool(value) => Ok(*value),
         _ => Err(NixIndexError::invalid(format!("{name} must be a boolean"))),
     }
 }
 
-fn value_array<'a>(value: &'a Value, label: &str) -> Result<&'a [Value], NixIndexError> {
+fn value_array<'a>(value: &'a DataTree, label: &str) -> Result<&'a [DataTree], NixIndexError> {
     match value {
-        Value::Array(values) => Ok(values),
+        DataTree::Array(values) => Ok(values),
         _ => Err(NixIndexError::invalid(format!("{label} must be an array"))),
     }
 }
 
-fn array_field<'a>(map: &'a [(String, Value)], name: &str) -> Result<&'a [Value], NixIndexError> {
+fn array_field<'a>(map: &'a [(String, DataTree)], name: &str) -> Result<&'a [DataTree], NixIndexError> {
     value_array(field(map, name)?, name)
 }
 
@@ -2772,7 +2773,7 @@ fn parse_oracle(
     let value = parse_json_exact_numbers(text, true)
         .map_err(|error| NixIndexError::invalid(format!("parse oracle JSON: {}", error.message)))?;
     let records_value = match &value {
-        Value::Object(_) => {
+        DataTree::Object(_) => {
             let map = object(value.clone(), "oracle")?;
             reject_unknown(&map, &["revision", "system", "records"])?;
             if string_field(&map, "revision")? != revision {
@@ -2840,7 +2841,7 @@ fn parse_oracle(
                     .map(|(_, value)| value)
                 {
                     None => false,
-                    Some(Value::Bool(value)) => *value,
+                    Some(DataTree::Bool(value)) => *value,
                     Some(_) => {
                         return Err(NixIndexError::invalid("oracle cache field must be boolean"))
                     }
@@ -3631,7 +3632,7 @@ mod tests {
         assert!(report.contains("\"indexed\":[[\"ripgrep\"]]"));
         assert!(report.contains("\"notIndexed\":[{"));
         assert!(report.contains("missing-narinfo"));
-        assert!(matches!(parsed, Value::Object(_)));
+        assert!(matches!(parsed, DataTree::Object(_)));
     }
 
     #[test]

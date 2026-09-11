@@ -31,10 +31,10 @@ fn soft_public_imports_warn_once_per_outside_use() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("note.jet"),
-        "pub struct Note {\n    pub _title: String\n}\nimpl Note {\n    pub fn _length(self) => Int { return 1 }\n}\npub fn _legacy() => Int { return 2 }\n",
+        "pub struct Note {\n    pub _title: String\n}\nimpl Note {\n    pub fn _length(self) Int -> { return 1 }\n}\npub fn _legacy() Int -> { return 2 }\n",
     )
     .unwrap();
-    let source = "use \"note\"\nuse note._legacy\nfn run() {\n    n :: note.Note.{ _title: \"hi\" }\n    print(n._title)\n    print(n._length())\n    print(note._legacy())\n    print(_legacy())\n}\n";
+    let source = "use \"note\"\nuse note._legacy\nfn run() {\n    n :: note.Note{ _title: \"hi\" }\n    print(n._title)\n    print(n._length())\n    print(note._legacy())\n    print(_legacy())\n}\n";
     let main = dir.join("main.jet");
     fs::write(&main, source).unwrap();
 
@@ -68,7 +68,7 @@ fn soft_public_reexports_warn_on_the_exported_spelling_once() {
     .unwrap();
     fs::write(
         dir.join("api/implementation.jet"),
-        "pub fn _raw() => Int { return 1 }\npub fn supported() => Int { return 2 }\n",
+        "pub fn _raw() Int -> { return 1 }\npub fn supported() Int -> { return 2 }\n",
     )
     .unwrap();
     let main = dir.join("main.jet");
@@ -95,13 +95,13 @@ fn imported_soft_public_declared_types_warn_once_per_occurrence() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("models.jet"),
-        "pub struct _Cell<T> { pub value: T }\npub trait _Readable { fn read(self) => Int }\n",
+        "pub struct _Cell<T> { pub value: T }\npub trait _Readable { fn read(self) Int }\n",
     )
     .unwrap();
     let main = dir.join("main.jet");
     fs::write(
         &main,
-        "use \"models\"\nfn adapt<T: _Readable>(value: ^models._Cell<Int>) => models._Cell<Int> { return value }\nfn local(value: ^models._Cell<Int>) { cell := value }\nfn run() {}\n",
+        "use \"models\"\nfn adapt<T: _Readable>(value: ^models._Cell<Int>) models._Cell<Int> -> { return value }\nfn local(value: ^models._Cell<Int>) { cell := value }\nfn run() {}\n",
     )
     .unwrap();
 
@@ -133,13 +133,13 @@ fn local_soft_public_types_win_over_imported_name_collisions() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("library.jet"),
-        "pub struct _Thing { pub value: Int }\npub trait _Shape { fn size(self) => Int }\n",
+        "pub struct _Thing { pub value: Int }\npub trait _Shape { fn size(self) Int }\n",
     )
     .unwrap();
     let main = dir.join("main.jet");
     fs::write(
         &main,
-        "use \"library\"\nstruct _Thing { value: Int }\ntrait _Shape { fn size(self) => Int }\nfn keep<T: _Shape>(value: ^_Thing) => _Thing { return value }\nfn run() {}\n",
+        "use \"library\"\nstruct _Thing { value: Int }\ntrait _Shape { fn size(self) Int }\nfn keep<T: _Shape>(value: ^_Thing) _Thing -> { return value }\nfn run() {}\n",
     )
     .unwrap();
 
@@ -176,10 +176,10 @@ fn run() {
 }
 ";
     let adapter_src = "\
-pub fn concrete(table: ^Table<DataTree>) => Table<DataTree> {
+pub fn concrete(table: ^Table<DataTree>) Table<DataTree> -> {
     return table
 }
-pub fn generic<T>(table: ^Table<T>) => Table<T> {
+pub fn generic<T>(table: ^Table<T>) Table<T> -> {
     return table
 }
 ";
@@ -207,7 +207,7 @@ fn explicit_internal_project_module_alias_runs() {
             ),
             (
                 "arbitrary.jet",
-                "module _bench { }\npub fn fixture() => Int { return 42 }\n",
+                "module _bench { }\npub fn fixture() Int -> { return 42 }\n",
             ),
         ],
     );
@@ -225,10 +225,10 @@ fn inline_code_module_qualified_call() {
     }
     let src = "\
 module math {
-    pub fn double(n: Int) => Int {
+    pub fn double(n: Int) Int -> {
         return (n * 2)
     }
-    pub fn add(a: Int, b: Int) => Int {
+    pub fn add(a: Int, b: Int) Int -> {
         return (a + b)
     }
 }
@@ -253,7 +253,7 @@ fn unqualified_inline_module_call() {
     let src = "\
 use math.double
 module math {
-    pub fn double(n: Int) => Int {
+    pub fn double(n: Int) Int -> {
         return (n * 2)
     }
 }
@@ -273,14 +273,14 @@ fn run() {
 fn inline_module_use_list_and_pub_reexport_match_all_tiers() {
     let src = "\
 module math {
-    pub fn double(n: Int) => Int {
+    pub fn double(n: Int) Int -> {
         return (n * 2)
     }
 }
 module api {
     use math.[double as twice]
     pub use math.[double as exported]
-    pub fn local(n: Int) => Int {
+    pub fn local(n: Int) Int -> {
         return twice(n)
     }
 }
@@ -331,7 +331,7 @@ use core.math.[abs, min, max, clamp]
 module api {
     use core.[math.abs]
     pub use core.[math.abs as exported]
-    pub fn local(n: Int) => Int {
+    pub fn local(n: Int) Int -> {
         return abs(n)
     }
 }
@@ -389,7 +389,7 @@ module math
 module api {
     use math.[label as decorate]
     pub use math.[label as exported]
-    pub fn local(n: Int) => String {
+    pub fn local(n: Int) String -> {
         return decorate("x", n)
     }
 }
@@ -399,7 +399,7 @@ fn run() {
 }
 "#;
     let math_src = r#"
-pub fn label(prefix: String, n: Int) => String {
+pub fn label(prefix: String, n: Int) String -> {
     return "{prefix}:{n}"
 }
 "#;
@@ -440,9 +440,6 @@ pub fn label(prefix: String, n: Int) => String {
 /// `&(...)` Read-borrow arg form.
 #[test]
 fn file_module_qualified_call() {
-    if !have_rustc() {
-        return;
-    }
     let main_src = "\
 module math
 fn run() {
@@ -450,10 +447,11 @@ fn run() {
     print(math.label(n: 5, prefix: \"x\"))
     print(math.checked(7) ?? -1)
     print(math.checked(-1) ?? -2)
+    print(math.ready() ?? false)
 }
 ";
     let math_src = "\
-pub fn clamp(x: Int, lo: Int, hi: Int) => Int {
+pub fn clamp(x: Int, lo: Int, hi: Int) Int -> {
     if (x < lo) {
         return lo
     }
@@ -462,26 +460,33 @@ pub fn clamp(x: Int, lo: Int, hi: Int) => Int {
     }
     return x
 }
-pub fn label(prefix: String, n: Int) => String {
+pub fn label(prefix: String, n: Int) String -> {
     return \"{prefix}:{n}\"
 }
-pub fn checked(value: Int) => Int !String {
+pub fn checked(value: Int) Int !Err -> {
     if value < 0 {
         return Err(message(value))
     }
     return Ok(value)
 }
-fn message(value: Int) => String {
+fn message(value: Int) String -> {
     return \"bad {value}\"
 }
+pub fn ready() Bool -> true
 ";
-    let (code, stdout) = build_and_run_multi(
-        "tir_file_mod",
-        "main.jet",
-        &[("main.jet", main_src), ("math.jet", math_src)],
-    );
-    assert_eq!(code, 0);
-    assert_eq!(stdout, "10\nx:5\n7\n-2\n");
+    let files = [("main.jet", main_src), ("math.jet", math_src)];
+    let expected = "10\nx:5\n7\n-2\ntrue\n";
+    if have_rustc() {
+        let (code, stdout) = build_and_run_multi("tir_file_mod", "main.jet", &files);
+        assert_eq!(code, 0);
+        assert_eq!(stdout, expected);
+    }
+    let (code, stdout, stderr) = run_default_multi("tir_file_mod", "main.jet", &files);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, expected, "{stderr}");
+    let (code, stdout, stderr) = run_interpret_multi("tir_file_mod", "main.jet", &files);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, expected, "{stderr}");
 }
 
 /// A direct result handler must preserve the imported module's Result carrier
@@ -597,6 +602,13 @@ fn imported_module_aot_root_helpers() {
     }
     let main_src = "\
 module helper
+struct Count { value: Int }
+impl Count.Add {
+    fn add(self, rhs: Count) Count -> {
+        total :: helper.sum(self.value, rhs.value)
+        return Count{value: total}
+    }
+}
 fn run() {
     trimmed :: helper.trimmed(\"  ok  \")
     print(trimmed)
@@ -608,9 +620,12 @@ fn run() {
     print(empty.len())
     reset :: helper.reset_strings()
     print(reset.len())
+    total :: Count{value: 1} + Count{value: 2}
+    print(total.value)
 }
 ";
     let helper_src = "\
+pub fn sum(left: Int, right: Int) Int -> left + right
 #Error
 pub enum HelperError {
     Negative
@@ -650,7 +665,7 @@ pub fn reset_strings() [String] -> {
         &[("main.jet", main_src), ("helper.jet", helper_src)],
     );
     assert_eq!(code, 0);
-    assert_eq!(stdout, "ok\n7\n-2\nrecovered\n0\n0\n");
+    assert_eq!(stdout, "ok\n7\n-2\nrecovered\n0\n0\n3\n");
 }
 
 /// A taken `?? panic(...)` in an imported module must compile with the nested
@@ -711,57 +726,6 @@ fn run() !Err {
     );
 }
 
-#[test]
-fn file_module_qualified_call_runs_under_default_lens() {
-    let main_src = "\
-module math
-fn run() {
-    print(math.clamp(15, 0, 10))
-    print(math.label(n: 5, prefix: \"x\"))
-    print(math.checked(7) ?? -1)
-    print(math.checked(-1) ?? -2)
-}
-";
-    let math_src = "\
-pub fn clamp(x: Int, lo: Int, hi: Int) => Int {
-    if (x < lo) {
-        return lo
-    }
-    if (x > hi) {
-        return hi
-    }
-    return x
-}
-pub fn label(prefix: String, n: Int) => String {
-    return \"{prefix}:{n}\"
-}
-pub fn checked(value: Int) => Int !String {
-    if value < 0 {
-        return Err(message(value))
-    }
-    return Ok(value)
-}
-fn message(value: Int) => String {
-    return \"bad {value}\"
-}
-";
-    let (code, stdout, stderr) = run_default_multi(
-        "qualified_call",
-        "main.jet",
-        &[("main.jet", main_src), ("math.jet", math_src)],
-    );
-    assert_eq!(code, 0, "{stderr}");
-    assert_eq!(stdout, "10\nx:5\n7\n-2\n");
-    assert!(
-        stderr
-            .lines()
-            .any(|line| line.starts_with("run") && line.contains("tier1 native")),
-        "{stderr}"
-    );
-    assert!(!stderr.contains("tier0 interp"), "{stderr}");
-    assert!(!stderr.contains("E0956"), "{stderr}");
-}
-
 /// c109 Phase 14: an unqualified file-module import `use mathlib.[clamp, lo, hi]`
 /// (D-MOD3). The bare calls lower via `emit_call`'s `unqualified_file` arm
 /// (`ModuleCall::Qualified` → `__jet_mathlib::__jet_*`). `main` routes through the TIR.
@@ -779,7 +743,7 @@ fn run() {
 }
 ";
     let mathlib_src = "\
-pub fn clamp(n: Int, lo: Int, hi: Int) => Int {
+pub fn clamp(n: Int, lo: Int, hi: Int) Int -> {
     if (n < lo) {
         return lo
     }
@@ -788,10 +752,10 @@ pub fn clamp(n: Int, lo: Int, hi: Int) => Int {
     }
     return n
 }
-pub fn lo() => Int {
+pub fn lo() Int -> {
     return 0
 }
-pub fn hi() => Int {
+pub fn hi() Int -> {
     return 100
 }
 ";
@@ -824,10 +788,10 @@ pub use wrap.wrap
 module wrap
 ";
     let wrap_src = "\
-pub fn wrap(s: String) => String {
+pub fn wrap(s: String) String -> {
     return \"[{decorate(s)}]\"
 }
-fn decorate(s: String) => String {
+fn decorate(s: String) String -> {
     return \"{s}\"
 }
 ";
@@ -854,7 +818,7 @@ fn comptime_if_selected_branch() {
     }
     let src = "\
 @debug :: false
-fn pick(x: Int) => Int {
+fn pick(x: Int) Int -> {
     @if @debug {
         return x + 100
     } else {
@@ -882,7 +846,7 @@ fn mixed_comparison_switch() {
         return;
     }
     let src = "\
-fn grade(score: Int) => String {
+fn grade(score: Int) String -> {
     if score == {
         100 -> { return \"A+\" }
         90..99 -> { return \"A\" }
@@ -913,13 +877,13 @@ fn delegation_trait_method() {
     }
     let src = "\
 trait Speaker {
-    fn say(self, msg: String) => String
+    fn say(self, msg: String) String
 }
 struct Voice {
     prefix: String
 }
 impl Voice.Speaker {
-    fn say(self, msg: String) => String {
+    fn say(self, msg: String) String -> {
         p :: self.prefix
         return \"{p}: {msg}\"
     }
@@ -929,8 +893,8 @@ struct Megaphone {
 }
 impl Megaphone.Speaker using inner
 fn run() {
-    v := Voice.{ prefix: \"HEY\" }
-    m := Megaphone.{ inner: v }
+    v := Voice{ prefix: \"HEY\" }
+    m := Megaphone{ inner: v }
     print(m.say(\"go\"))
 }
 ";
@@ -949,13 +913,13 @@ fn or_fallback_panic_form() {
         return;
     }
     let src = "\
-fn maybe(n: Int) => (?Int) {
+fn maybe(n: Int) (?Int) -> {
     if n > 0 {
         return Val(n)
     }
     return None
 }
-fn risky(count: Int, ratio: Float) => Int {
+fn risky(count: Int, ratio: Float) Int -> {
     base := count + 1
     got :: maybe(count) ?? panic(\"no value at {count}\")
     return got + base
@@ -982,10 +946,10 @@ enum Msg {
     Text(String)
     Code(Int)
 }
-fn wrap(s: String) => Msg {
+fn wrap(s: String) Msg -> {
     return Msg.Text(~s)
 }
-fn render(m: Msg) => String {
+fn render(m: Msg) String -> {
     if m == {
         .Text(s) -> { return s }
         .Code(n) -> { return \"code\" }
@@ -1015,10 +979,10 @@ enum Tree {
     Leaf(Int)
     Node(Tree)
 }
-fn wrap(inner: Tree) => Tree {
+fn wrap(inner: Tree) Tree -> {
     return Tree.Node(~inner)
 }
-fn leaf_val(t: Tree) => Int {
+fn leaf_val(t: Tree) Int -> {
     if t == {
         .Leaf(n) -> { return n }
         .Node(inner) -> { return 0 }
@@ -1034,6 +998,29 @@ fn run() {
     let (code, stdout) = build_and_run("tir_recursive_boxed_enum", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "0\n");
+}
+
+/// A recursive enum may use named payload fields at both construction and
+/// pattern sites. TIR keeps `left`/`right` canonical until MIRRust mangles
+/// those names for Rust.
+#[test]
+fn recursive_named_payload_enum() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+enum Kind {
+    Leaf
+    Pair(left: Kind, right: Kind)
+}
+fn run() {
+    k :: Kind.Pair{ left: Kind.Leaf, right: Kind.Leaf }
+    if k == .Pair(left, right) -> print(\"yes\")
+}
+";
+    let (code, stdout) = build_and_run("tir_recursive_named_payload_enum", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "yes\n");
 }
 
 /// c109 Phase 16: an enum variant carrying a covered struct payload. The struct flows
@@ -1053,10 +1040,10 @@ enum Shape {
     Dot(Point)
     Line(Int)
 }
-fn mk(p: Point) => Shape {
+fn mk(p: Point) Shape -> {
     return Shape.Dot(~p)
 }
-fn first(s: Shape) => Int {
+fn first(s: Shape) Int -> {
     if s == {
         .Dot(p) -> { return p.x }
         .Line(n) -> { return n }
@@ -1064,7 +1051,7 @@ fn first(s: Shape) => Int {
     return 0
 }
 fn run() {
-    pt :: Point.{ x: 3, y: 4 }
+    pt :: Point{ x: 3, y: 4 }
     sh :: mk(pt)
     print(\"{first(sh)}\")
 }
@@ -1091,11 +1078,11 @@ enum Holder {
     Nums([Int])
     One(Int)
 }
-fn mk(xs: [Int]) => Holder {
+fn mk(xs: [Int]) Holder -> {
     return Holder.Nums(~xs)
 }
 fn run() {
-    b :: Crate.{ items: [1, 2, 3], label: \"x\" }
+    b :: Crate{ items: [1, 2, 3], label: \"x\" }
     d :: mk([4, 5])
     print(b.label)
 }
@@ -1115,19 +1102,19 @@ fn generic_free_fns() {
         return;
     }
     let src = "\
-fn id<T>(x: ^T) => T {
+fn id<T>(x: ^T) T -> {
     return x
 }
-fn pick<T>(a: ^T, b: ^T, first: Bool) => T {
+fn pick<T>(a: ^T, b: ^T, first: Bool) T -> {
     if first {
         return a
     }
     return b
 }
-fn firstof<T>(xs: ^[T]) => T {
+fn firstof<T>(xs: ^[T]) T -> {
     return ~xs[0]
 }
-fn wrap<T>(x: ^T) => [T] {
+fn wrap<T>(x: ^T) [T] -> {
     return [x]
 }
 fn run() {
@@ -1151,10 +1138,10 @@ fn prelude_struct_construction() {
     let src = "\
 use core.http.client as client
 use core.http.server as server
-fn build_resp(body: String) => HTTPResponse {
+fn build_resp(body: String) HTTPResponse -> {
     return server.response(200, body)
 }
-fn build_req() => HTTPRequest {
+fn build_req() HTTPRequest -> {
     return client.request(\"GET\", \"http://localhost/\")
 }
 fn run() {

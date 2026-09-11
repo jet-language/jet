@@ -10,6 +10,13 @@ use super::super::super::Builtins::{as_bool, as_int, cmp};
 use super::super::super::Diagnostics::{comptime_panic, unsupported};
 use super::super::super::Interpreter::Interp;
 
+#[allow(dead_code, unused_imports)]
+mod parallel_policy {
+    include!("../../../jet-codegen/src/Prelude/Core/SimdLanes.rs");
+    include!("../../../jet-codegen/src/Prelude/Core/ParallelKernel.rs");
+}
+
+
 pub(super) enum SequenceOutcome {
     Value(CtValue),
     WriteBack(CtValue),
@@ -234,39 +241,27 @@ fn eval(
             }
             CtValue::List(out)
         }
-        ("reduce" | "fold", [initial, f]) => {
-            let mut acc = initial.clone();
-            for x in xs {
-                acc = interp.call_inline_closure(f, vec![acc, x.clone()], span, scope)?;
-            }
-            acc
-        }
         ("para_fold", [seed, step, merge]) => {
-            const CHUNK_ITEMS: usize = 64;
             if xs.is_empty() {
                 interp.call_closure(seed, vec![], span)?
             } else {
-                let mut partials = Vec::new();
-                for chunk in xs.chunks(CHUNK_ITEMS) {
-                    let mut acc = interp.call_closure(seed, vec![], span)?;
-                    for x in chunk {
-                        acc = interp.call_closure(step, vec![acc, x.clone()], span)?;
-                    }
-                    partials.push(acc);
-                }
-                while partials.len() > 1 {
-                    let mut next = Vec::with_capacity((partials.len() + 1) / 2);
-                    let mut values = partials.into_iter();
-                    while let Some(left) = values.next() {
-                        if let Some(right) = values.next() {
-                            next.push(interp.call_closure(merge, vec![left, right], span)?);
-                        } else {
-                            next.push(left);
+                let indexed = parallel_policy::jet_list_para_chunks_serial_kernel(
+                    xs.len(),
+                    |range| {
+                        let mut acc = interp.call_closure(seed, vec![], span)?;
+                        for x in &xs[range] {
+                            acc = interp.call_closure(step, vec![acc, x.clone()], span)?;
                         }
-                    }
-                    partials = next;
-                }
-                partials.pop().expect("non-empty input makes one partial")
+                        Ok(acc)
+                    },
+                );
+                let partials = indexed
+                    .into_iter()
+                    .map(|(_, result)| result)
+                    .collect::<Result<Vec<_>, Diagnostic>>()?;
+                parallel_policy::jet_list_para_merge_tree(partials, |left, right| {
+                    interp.call_closure(merge, vec![left, right], span)
+                })?
             }
         }
         ("group_by", [f]) => {

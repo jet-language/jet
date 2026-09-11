@@ -1,12 +1,12 @@
 use core.process as process
 
 fn run() {
-    calc :: process.run(["python3", "-c", "print(6*7)"]) ?? panic("calc failed")
-    print("calc {calc.output.trim()}")
-    sorted :: process.pipeline([process.cmd(["python3", "-c", "print('b');print('a');print('c')"]), process.cmd(["sort"])]) ?? panic("sort failed")
-    print("sorted {sorted.output.trim().lines().join(",")}")
-    slow :: process.cmd(["python3", "-c", "import time;time.sleep(5)"]).timeout(300ms).run() ?? panic("slow failed")
-    if slow.timed_out -> print("slow timeout")
-    checked :: process.run(["python3", "-c", "import sys;sys.exit(3)"]) ?? panic("checked process failed")
-    if !checked.success -> print("exit {checked.code}")
+    calculation :: process.cmd(["python3", "-c", "print(6*7)"]).run() ?? panic("calc failed")
+    print("calc {calculation.output.trim()}")
+    sorted_output :: process.pipeline([process.cmd(["python3", "-c", "print('b');print('a');print('c')"]), process.cmd(["sort"])]) ?? panic("sort failed")
+    print("sorted {sorted_output.output.trim().lines().join(",")}")
+    timeout_probe :: process.cmd(["python3", "-c", "import time;time.sleep(5)"]).timeout(300ms).run() ?? panic("slow failed")
+    if timeout_probe.timed_out -> print("slow timeout")
+    exit_probe :: process.cmd(["python3", "-c", "import sys;sys.exit(3)"]).run() ?? panic("checked process failed")
+    if !exit_probe.success -> print("exit {exit_probe.code}")
 }

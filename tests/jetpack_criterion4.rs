@@ -1,6 +1,9 @@
 //! Card #2197 criterion 4: one Hangar usage report spans sibling roots.
 
+use jet_foundation::DataTree::DataTree;
+#[cfg(unix)]
 use std::fs;
+#[cfg(unix)]
 use std::path::Path;
 
 mod common;
@@ -83,8 +86,11 @@ fn hangar_du_all_reports_every_root_and_exact_physical_total() {
         + measured_bytes(&first.join("hangar"), &mut seen)
         + measured_bytes(&second.join("hangar"), &mut seen);
     let actual = match report.get("total_bytes").unwrap() {
-        jetpack::JSON::JSONValue::Number(value) => *value as u64,
-        jetpack::JSON::JSONValue::Flt(value) => *value as u64,
+        DataTree::Int(value) => *value as u64,
+        DataTree::Float(value) => *value as u64,
+        DataTree::Number(value) => value
+            .parse::<f64>()
+            .expect("invalid numeric total_bytes") as u64,
         value => panic!("invalid total_bytes: {value:?}"),
     };
     assert_eq!(actual, expected);

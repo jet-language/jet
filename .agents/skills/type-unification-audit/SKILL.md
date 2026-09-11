@@ -26,10 +26,14 @@ This is a **draft** skill. Improve it when a run exposes a missing lens.
 | Closed compiler tables that block user domains | Domain workload friction (`pragmatism-audit`) |
 | Keyword constructs vs their typed artifacts | Spec text vs code (`spec-compliance-audit`) |
 
-Authority order: owner instruction → ratified Tower verdicts →
-`docs/spec/philosophy.md` → `AGENTS.md` invariants (esp. I7, I8, S26,
-D-EXT1) → this skill. Check ratification **dates** — a verdict ratified the
-same day is still law.
+Authority order: owner instruction → ratified Tower verdicts and acceptance
+terms → the relevant domain spec → `AGENTS.md` invariants and owner gates →
+this skill. Check ratification dates — a
+verdict ratified the same day is still law.
+
+Before running, read `.agents/skills/_shared/audit-dispositions.md`. It owns
+shared publication, workflow-boundary, and disposition mechanics; this method
+still owns the kind census, live probes, review passes, and fix plan.
 
 ## The boundary law (calibrates every "should X be a type?")
 
@@ -121,14 +125,13 @@ Use exactly these kinds:
 
 ## Output
 
-One markdown report under `docs/audits/` via the Tower CLI:
-
-```
-node plugins/tower/tower.mjs docs add --section audits --id type-unification-audit-YYYY-MM-DD --title "…" --file -
-```
-
-Same-day revisions only via `docs update`. Never overwrite another day's
-note. Write user-visible prose with the `simple` skill.
+This is a report-only method. Write one markdown report under `docs/audits/`
+through the project-approved non-serve CLI. Do not create Tower work or
+implementation edits unless the owner explicitly asks. Read
+`.agents/skills/_shared/audit-dispositions.md` before the run and use it for
+publication rules and the required finding-disposition table. Keep the fix-first
+finding structure and review-pass record below; report completion does not
+implement a proposed type or fix.
 
 ### Required report sections
 
@@ -183,9 +186,6 @@ Card numbers and ballot IDs once created; otherwise titles only.
 - Not proposing checks that check nothing (a fact kind without a consumer is
   inert magic)
 
-Follow `AGENTS.md`. Pick this skill alone — do not chain other audit/research
-skills unless the owner asks.
-
-Before close, add the required per-finding disposition table from
-`.agents/skills/_shared/audit-dispositions.md`. Every finding must name a Tower
-card, a ratified decision, or a concrete no-action reason.
+Before close, use `.agents/skills/_shared/audit-dispositions.md` for the
+required marker table. Keep next actions as card numbers, ballot IDs, or titles;
+do not create them in this report-only run.

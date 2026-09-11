@@ -7,6 +7,8 @@
 
 use crate::SHA256::sha256_hex;
 use jet_devserver::WatchService::{PathStamp, RootKind, WatchGraph};
+use jet_foundation::MIR::MirArtifactId;
+use jet_pkg_model::Package::ReleaseDevtoolsPolicy;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -183,17 +185,18 @@ pub fn run_cache_key(entry: &Path, program_args: &[&str]) -> String {
 fn entry_dir(key: &str) -> PathBuf {
     cache_root().join(key)
 }
-
-/// Try a warm tier-1 module hit. On success returns the run outcome.
 pub fn try_warm_run(
     entry: &Path,
     program_args: &[&str],
     selected_entry: Option<&str>,
+    requested_artifact: Option<MirArtifactId>,
+    release_devtools_policy: &ReleaseDevtoolsPolicy,
 ) -> Option<jet_foundation::JitBackend::RunOutcome> {
     let key = run_cache_key(entry, program_args);
     let dir = entry_dir(&key);
     let artifact_path = dir.join("module.bin");
     let bytes = fs::read(&artifact_path).ok()?;
+    let artifact = requested_artifact.or_else(|| jet_jit::cached_artifact_id(&bytes))?;
     // Install argv exactly like the cold path (#1254). A named-job artifact
     // already has that job as its entry point, so argv[0] names the selection
     // and the selector token is not repeated as a user argument.
@@ -208,7 +211,9 @@ pub fn try_warm_run(
         |name| format!("{} {name}", entry.to_string_lossy()),
     ));
     argv.extend(runtime_args.iter().map(|arg| (*arg).to_string()));
-    match jet_jit::with_program_args(&argv, || jet_jit::run_cached_module(&bytes)) {
+    match jet_jit::with_program_args(&argv, || {
+        jet_jit::run_cached_module(&bytes, artifact, release_devtools_policy)
+    }) {
         Ok(outcome) => {
             CACHE_HIT.fetch_add(1, Ordering::Relaxed);
             if std::env::var_os("JET_RUN_TRACE").is_some() {

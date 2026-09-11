@@ -1,0 +1,67 @@
+struct Money {
+    cents: Int
+}
+
+impl Money.Add(Int) #Commutative {
+    fn add(self, rhs: Int) Money -> {
+        return Money{cents: self.cents + rhs}
+    }
+}
+
+impl Money.Mul(Int) #Commutative {
+    fn mul(self, rhs: Int) Money -> {
+        return Money{cents: self.cents * rhs}
+    }
+}
+
+impl Money.Sub(Int) {
+    fn sub(self, rhs: Int) Money -> {
+        return Money{cents: self.cents - rhs}
+    }
+}
+
+impl Money.Div(Int) {
+    fn div(self, rhs: Int) Money -> {
+        return Money{cents: self.cents /% rhs}
+    }
+}
+
+struct Price {
+    cents: Int
+}
+
+impl Price.Mul(Int) {
+    fn mul(self, rhs: Int) Price -> {
+        return Price{cents: self.cents * rhs}
+    }
+}
+
+impl Int.Mul(Price) {
+    fn mul(self, rhs: Price) Price -> {
+        return Price{cents: self + rhs.cents}
+    }
+}
+
+impl Int.Sub(Money) {
+    fn sub(self, rhs: Money) Money -> {
+        return Money{cents: self - rhs.cents}
+    }
+}
+
+fn run() {
+    money :: Money{cents: 10}
+    price :: Price{cents: 20}
+    vector :: Vec3(1.0, 2.0, 4.0)
+
+    print((money + 2).cents)
+    print((2 + money).cents)
+    print((money * 3).cents)
+    print((3 * price).cents)
+    print((20 - money).cents)
+    print((money - 2).cents)
+    print((money / 2).cents)
+    print(Vec3{vector * 2.0}.to_array())
+    print(Vec3{2.0 * vector}.to_array())
+    print(Vec3{vector / 2.0}.to_array())
+    print(Vec3{2.0 / vector}.to_array())
+}

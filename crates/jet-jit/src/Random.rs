@@ -35,6 +35,15 @@ mod ambient_random_kernel {
         }
     }
 
+    // The JIT uses the same scheduler-owned provider as AOT. Absence is
+    // meaningful only outside a deterministic world, where MathRandomFns
+    // falls back to its ordinary per-thread stream.
+    fn jet_scheduler_world_rng_next() -> Option<u64> {
+        jet_codegen::scheduler::jet_scheduler_world_rng_next()
+    }
+    fn jet_scheduler_world_rng_seed(seed: i64) -> bool {
+        jet_codegen::scheduler::jet_scheduler_world_rng_seed(seed)
+    }
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/MathRandomFns.rs");
 
     pub(crate) fn seed(seed: i64) {
@@ -649,6 +658,19 @@ host_fns! {
     rng_sample: "jet_jit_rng_sample" => jet_jit_rng_sample: sig_i64_i64_i64_i64;
     rng_bytes: "jet_jit_rng_bytes" => jet_jit_rng_bytes: sig_i64_i64_i64;
     rng_split: "jet_jit_rng_split" => jet_jit_rng_split: sig_i64_i64;
+    rng_int_prelude: "jet_rng_int" => jet_jit_rng_int: sig_i64_i64_i64_i64;
+    rng_float_prelude: "jet_rng_float" => jet_jit_rng_float: sig_rng_f;
+    rng_float_range_prelude: "jet_rng_float_range" => jet_jit_rng_float_range: sig_rng_fr;
+    rng_bool_prelude: "jet_rng_bool" => jet_jit_rng_bool: sig_rng_bool_default;
+    rng_bool_p_prelude: "jet_rng_bool_p" => jet_jit_rng_bool_p: sig_rng_bool;
+    rng_normal_prelude: "jet_rng_normal" => jet_jit_rng_normal: sig_rng_fr;
+    rng_exponential_prelude: "jet_rng_exponential" => jet_jit_rng_exponential: sig_rng_exp;
+    rng_bytes_prelude: "jet_rng_bytes" => jet_jit_rng_bytes: sig_i64_i64_i64;
+    rng_split_prelude: "jet_rng_split" => jet_jit_rng_split: sig_i64_i64;
+    rng_pick_prelude: "jet_rng_pick" => jet_jit_rng_pick: sig_i64_i64_i64;
+    rng_weighted_pick_prelude: "jet_rng_weighted_pick" => jet_jit_rng_weighted_pick: sig_i64_i64_i64_i64;
+    rng_sample_prelude: "jet_rng_sample" => jet_jit_rng_sample: sig_i64_i64_i64_i64;
+    rng_shuffle_prelude: "jet_rng_shuffle" => jet_jit_rng_shuffle: sig_void_i64_i64;
     fake_new: "jet_jit_fake_new" => jet_jit_fake_new: sig_i64_i64;
     fake_locale: "jet_jit_fake_locale" => jet_jit_fake_locale: sig_i64_i64_i64;
     fake_name: "jet_jit_fake_name" => jet_jit_fake_name: sig_i64_i64;

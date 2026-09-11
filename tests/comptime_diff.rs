@@ -179,7 +179,7 @@ const MODULE_CASES: &[&str] = &[
     // card #392 pass 3: `core.data`'s fixed-signature stats surface, ported
     // verbatim from AOT's `jet_data_*` (`EncodingTraits.rs`, see
     // `DataLite.rs`). `describe`/`status`/`bar_text`/`bar_svg` return/take
-    // builtin struct values (`DataSummary`/`DataStatus`/`DataGroup`), which
+    // builtin struct values (`DataSummary`/`DataStatus`/`Group`), which
     // this crate's generic `CtValue::Struct` display can't print the same
     // way AOT's derived struct `Display` does (a pre-existing limit shared
     // by every builtin struct type, not specific to `core.data` — see

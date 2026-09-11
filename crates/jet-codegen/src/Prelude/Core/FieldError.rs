@@ -14,3 +14,13 @@ pub(crate) fn jet_field_error_kernel_show(path: &str, reason: &str) -> String {
         format!("at `{path}`: {reason}")
     }
 }
+
+pub(crate) fn jet_field_error_kernel_under(segment: &str, path: &str) -> String {
+    if path.is_empty() {
+        segment.to_string()
+    } else if path.starts_with('[') {
+        format!("{segment}{path}")
+    } else {
+        format!("{segment}.{path}")
+    }
+}

@@ -1,0 +1,10 @@
+#Import module c.reader {
+    fn inspect_bytes(bytes: &[U8], length: U32) U32 = "inspect_bytes"
+}
+
+// Unrun expectation: the caller supplies the exact native count and keeps the
+// borrowed view alive across the call.
+pub fn run() U32 -> {
+    bytes := [0, 1, 2, 0]
+    return c.reader.inspect_bytes(&bytes, 4)
+}

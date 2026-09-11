@@ -152,6 +152,9 @@ impl Env {
         }
         cmd.env(Syntax::JETPACK_ENV_MARKER, "1");
         cmd.env(Syntax::JETPACK_REF_VAR, self.refs.join(" "));
+        if let Some(root) = self.vars.get("JET_ROOT") {
+            cmd.env(Syntax::ENV_HOOK_ACTIVE_DIR_VAR, root);
+        }
     }
 
     fn validate_cache(&self, theme: &Theme) -> bool {

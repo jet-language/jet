@@ -32,7 +32,7 @@
 <h2>What</h2>
 <p class="diag-copy what" data-registry-field="what">`Point` cannot cross the JS/WASM boundary on a `#WasmExport` parameter</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">Web exports and imports only admit ABI-safe types (scalars, `String`, `List`/`Map` of ABI-safe values, and `#Codable` structs/enums per D-JSBIND1)</p>
+<p class="diag-copy why" data-registry-field="why">Web exports and imports only admit ABI-safe types (scalars, `String`, `List`/`Map` of ABI-safe values, and `#Codable` structs/enums per D-JSBIND1). A `jet build --target=web` run reports this web-target diagnostic.</p>
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">use a scalar, `String`, a `List`/`Map` of ABI-safe values, or a `#Codable` struct/enum whose fields are ABI-safe (D-JSBIND1)</p>
 <h2>Worked example</h2>
@@ -40,10 +40,10 @@
 <pre class="diag">Error [E-WEB-ABI-TYPE]: `Fn { params: [Int], ret: Some(Int), effect_bound: None }` cannot cross the JS/WASM boundary on a `#WasmExport` parameter
   --&gt; tests/ui/web_abi_callback.jet:4:4
     |
-  4 | fn apply(cb: fn(Int) =&gt; Int, n: Int) =&gt; Int :: cb(n)
+  4 | fn apply(cb: fn(Int) Int, n: Int) Int -&gt; cb(n)
     |    ^^^^^
- Why: web exports and imports only admit ABI-safe types (scalars, `String`, `List`/`Map` of ABI-safe values, and `#[Codable]` structs/enums)
- Fix: use a scalar, `String`, a `List`/`Map` of ABI-safe values, or a `#[Codable]` struct/enum whose fields are ABI-safe
+ Why: Web exports and imports only admit ABI-safe types (scalars, `String`, `List`/`Map` of ABI-safe values, and `#[Codable]` structs/enums)
+ Fix: Use a scalar, `String`, a `List`/`Map` of ABI-safe values, or a `#[Codable]` struct/enum whose fields are ABI-safe
 More: jet-lang.dev/e/E-WEB-ABI-TYPE
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

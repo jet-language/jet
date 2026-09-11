@@ -1,18 +1,27 @@
 //! Native C-header → Jet `#Bindgen` cache generator (E2-M14).
 //!
 //! Owner 2026-06-18: this supersedes the D-CBIND3=B `bindgen` route. The shipped
-//! `jet` stays std-only (I6) — no `bindgen`, no libclang. This is a focused
-//! parser for **C function prototypes** over the type subset Jet's FFI binds
-//! (scalars, `char*` strings, `void`). A declaration it cannot map is *skipped
-//! and reported* — never faked (I3). Anything beyond this subset is hand-written
-//! as an `#Import module c.<lib>` overlay, which still wins on merge.
+//! `jet` stays std-only (I6) — no `bindgen`, no libclang. The focused parser
+//! binds scalar values, strings, uncounted object pointers, typed pointer/count
+//! slices, and complete C-layout records, while the isolated opaque-handle seam
+//! records owned nominal types plus explicit close/thread/link facts. A declaration it
+//! cannot map is skipped and reported — never faked (I3). Anything beyond this
+//! subset is an `#Import module c.<lib>` overlay, which still wins on merge.
 //!
-//! Output is a `#Bindgen module c.<lib>.__bindgen__ { … }` cache as parsed by
-//! `src/cffi.rs`; each binding is `fn name(p: T, …) R = "c_symbol";`.
+//! Output is a `#Bindgen module c.<lib>.__bindgen__` cache as parsed by
+//! `src/cffi.rs`; each binding is `fn name(p: T, …) R = "c_symbol"`.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Write as _;
+#[path = "OpaqueHandleBinder.rs"]
+mod opaque_handle_binder;
 
+pub use opaque_handle_binder::{
+    CloseSource, HandleFact, HandleOverlay, LinkClosure, ThreadSafety,
+};
+
+use crate::Bindgen::BindingPlan;
+use crate::ForeignBridge::{ForeignBoundaryContract, ForeignBoundaryIdentity};
+use std::fmt::Write as _;
 /// Compute the bind hash for a header + cflags pair (Phase 3 invalidation).
 /// The hash is SHA-256(header_src || "\0" || cflags_str) rendered as 64 hex digits.
 /// `cflags` is a space-joined list of flags; pass `""` when there are none.
@@ -47,6 +56,34 @@ pub fn write_bind_hash(
     let sidecar = hash_sidecar_path(cache_path);
     std::fs::write(sidecar, hash)
 }
+fn boundary_overlay_identity(overlay: &HandleOverlay) -> String {
+    let mut links = overlay.links.clone();
+    links.sort();
+    format!(
+        "close={:?};thread-safety={:?};links={:?}",
+        overlay.close_functions, overlay.thread_safety, links
+    )
+}
+
+fn overlay_contains_line_break(overlay: &HandleOverlay) -> bool {
+    overlay
+        .close_functions
+        .iter()
+        .any(|(handle, close)| {
+            [handle.as_str(), close.as_str()]
+                .into_iter()
+                .any(|value| value.bytes().any(|byte| matches!(byte, b'\n' | b'\r')))
+        })
+        || overlay.thread_safety.keys().any(|handle| {
+            handle
+                .bytes()
+                .any(|byte| matches!(byte, b'\n' | b'\r'))
+        })
+        || overlay
+            .links
+            .iter()
+            .any(|link| link.bytes().any(|byte| matches!(byte, b'\n' | b'\r')))
+}
 
 /// Result of translating a header: the cache source plus what was/wasn't bound.
 pub struct BindResult {
@@ -56,8 +93,19 @@ pub struct BindResult {
     pub bound: Vec<String>,
     /// `(name, reason)` for prototypes skipped because a type isn't bindable.
     pub skipped: Vec<(String, String)>,
+    /// Opaque typedefs that became owned nominal Jet handle facts.
+    pub handles: Vec<HandleFact>,
+    /// Opaque typedefs that were withheld because ownership was not resolvable.
+    pub handle_skipped: Vec<(String, String)>,
+    /// Explicit primary plus transitive native libraries for this binding.
+    pub link_closure: LinkClosure,
     /// Exact descriptor identity embedded in the generated cache.
     pub descriptor_stamp: String,
+    /// One boundary row consumed by binders, sema, inspect, and comparison
+    /// views. It retains the foreign source as authoritative.
+    pub boundary: ForeignBoundaryContract,
+    /// Caller-selected adaptation plans whose boundary digest matches `boundary`.
+    pub plans: Vec<BindingPlan>,
 }
 
 /// Translate C header source into a `#Bindgen` cache for library `lib`.
@@ -69,6 +117,98 @@ pub fn generate(header_src: &str, lib: &str) -> Result<BindResult, String> {
     generate_with_descriptor(header_src, lib, *descriptor)
 }
 
+/// Generate a binding with explicit opaque-handle overlay facts.
+pub fn generate_with_overlay(
+    header_src: &str,
+    lib: &str,
+    overlay: &HandleOverlay,
+) -> Result<BindResult, String> {
+    let descriptor = crate::AST::binder_descriptor(crate::AST::ForeignLanguage::C)
+        .ok_or_else(|| "C binder descriptor is not registered".to_string())?;
+    generate_with_descriptor_and_overlay(header_src, lib, *descriptor, overlay)
+}
+/// Generate a C cache and append caller-selected, already-resolved facades.
+/// Plans are accepted only when their canonical boundary digest matches this
+/// exact header/overlay generation.
+pub fn generate_with_overlay_and_plans(
+    header_src: &str,
+    lib: &str,
+    overlay: &HandleOverlay,
+    plans: &BTreeMap<String, BindingPlan>,
+) -> Result<BindResult, String> {
+    let mut result = generate_with_overlay(header_src, lib, overlay)?;
+    let boundary_digest = result.boundary.digest();
+    for (name, plan) in plans {
+        if name != &plan.operation.name {
+            return Err(format!(
+                "adaptation plan key `{name}` names `{}`",
+                plan.operation.name
+            ));
+        }
+        if plan.boundary_digest != boundary_digest {
+            return Err(format!(
+                "adaptation plan `{name}` is stale against the generated C boundary"
+            ));
+        }
+    }
+    for plan in plans.values() {
+        result.source.push_str(&plan.render_facade());
+        result.source.push('\n');
+    }
+    result.plans = plans.values().cloned().collect();
+    Ok(result)
+}
+/// Generate against a caller-supplied canonical boundary contract and carry
+/// the selected plans into the resulting cache. The contract identity must
+/// still refer to this exact header/library generation.
+pub fn generate_with_contract_and_plans(
+    header_src: &str,
+    lib: &str,
+    overlay: &HandleOverlay,
+    contract: ForeignBoundaryContract,
+    plans: &BTreeMap<String, BindingPlan>,
+) -> Result<BindResult, String> {
+    let mut result = generate_with_overlay(header_src, lib, overlay)?;
+    if result.boundary.identity != contract.identity || result.boundary.library != contract.library {
+        return Err("canonical foreign boundary contract is stale against the generated C source".into());
+    }
+    let previous_stamp = result.boundary.stamp();
+    let replacement_stamp = contract.stamp();
+    result.source = result
+        .source
+        .replace(&previous_stamp, &replacement_stamp);
+    result.boundary = contract;
+    let boundary_digest = result.boundary.digest();
+    for (name, plan) in plans {
+        if name != &plan.operation.name {
+            return Err(format!(
+                "adaptation plan key `{name}` names `{}`",
+                plan.operation.name
+            ));
+        }
+        if plan.boundary_digest != boundary_digest {
+            return Err(format!(
+                "adaptation plan `{name}` is stale against the canonical C boundary"
+            ));
+        }
+    }
+    for plan in plans.values() {
+        result.source.push_str(&plan.render_facade());
+        result.source.push('\n');
+    }
+    result.plans = plans.values().cloned().collect();
+    Ok(result)
+}
+
+/// Alias for callers that treat the overlay as generator options.
+pub fn generate_with_options(
+    header_src: &str,
+    lib: &str,
+    overlay: &HandleOverlay,
+) -> Result<BindResult, String> {
+    generate_with_overlay(header_src, lib, overlay)
+}
+
 /// Generate a binding from an explicit descriptor. The production entry point
 /// above supplies the canonical C descriptor; this seam makes descriptor
 /// mutation tests and future language binders use the same generator path.
@@ -77,12 +217,36 @@ pub fn generate_with_descriptor(
     lib: &str,
     descriptor: crate::AST::BinderDescriptor,
 ) -> Result<BindResult, String> {
+    generate_with_descriptor_and_overlay(
+        header_src,
+        lib,
+        descriptor,
+        &HandleOverlay::default(),
+    )
+}
+
+/// Descriptor-aware generator with explicit opaque-handle facts.
+pub fn generate_with_descriptor_and_overlay(
+    header_src: &str,
+    lib: &str,
+    descriptor: crate::AST::BinderDescriptor,
+    overlay: &HandleOverlay,
+) -> Result<BindResult, String> {
+    if overlay_contains_line_break(overlay) {
+        return Err("C binding overlay identities cannot contain line breaks".into());
+    }
     let contract = descriptor.contract;
     let cleaned = strip_comments_and_directives(header_src);
+    let discovery = opaque_handle_binder::discover(&cleaned, lib, overlay);
+    let catalog = CTypeCatalog::parse(&cleaned, &discovery);
     let mut bound = Vec::new();
     let mut skipped = Vec::new();
     let mut lines = String::new();
-    let mut used_names = BTreeSet::new();
+    let mut used_names = discovery
+        .handles
+        .iter()
+        .map(|handle| handle.jet_name.clone())
+        .collect::<BTreeSet<_>>();
 
     for decl in split_declarations(&cleaned) {
         let decl = decl.trim();
@@ -90,12 +254,35 @@ pub fn generate_with_descriptor(
             continue;
         }
         match parse_prototype(decl) {
-            Some(proto) => match render_binding(&proto, &mut used_names, contract) {
+            Some(proto) => match render_binding(
+                &proto,
+                &mut used_names,
+                contract,
+                &discovery,
+                &catalog,
+            ) {
                 Ok(line) => {
                     bound.push(proto.name.clone());
                     lines.push_str("    ");
                     lines.push_str(&line);
                     lines.push('\n');
+                    if managed_callback_param_index(&proto, &catalog).is_some() {
+                        lines.push_str("    fn ");
+                        lines.push_str(&proto.name);
+                        lines.push_str("(callback: fn(FfiCallbackEvent<I64>)) FfiCallbackRegistration = ");
+                        lines.push_str(&crate::JSON::quote(&proto.name));
+                        lines.push('\n');
+                    }
+                    if proto.name == "unsubscribe" && native_void_pointer_proto(&proto) {
+                        lines.push_str(
+                            "    fn unsubscribe(subscription: ^FfiCallbackRegistration) Task<!String> = \"__jet_ffi_callback_unsubscribe\"\n",
+                        );
+                    }
+                    if proto.name == "emit_async" {
+                        lines.push_str(
+                            "    fn emit_async(value: I64) Task<I64 ! String> = \"__jet_ffi_emit_async\"\n",
+                        );
+                    }
                 }
                 Err(reason) => skipped.push((proto.name, reason)),
             },
@@ -104,26 +291,501 @@ pub fn generate_with_descriptor(
     }
 
     if bound.is_empty() {
+        let unresolved = discovery
+            .unresolved
+            .iter()
+            .map(|(handle, reason)| format!("`{handle}`: {reason}"))
+            .collect::<Vec<_>>();
+        let suffix = if unresolved.is_empty() {
+            String::new()
+        } else {
+            format!("; opaque handle bindings were unresolved: {}", unresolved.join("; "))
+        };
         return Err(format!(
-            "no bindable C function prototypes found for `{}`",
-            lib
+            "no bindable C function prototypes found for `{}`{}",
+            lib, suffix
         ));
     }
 
     let module_lib =
         crate::Syntax::sanitize_generated_name(lib, crate::Syntax::NameCase::Snake, "library");
     let descriptor_stamp = descriptor.stamp();
+    let boundary_identity = ForeignBoundaryIdentity::new(
+        format!(
+            "header:sha256-{}",
+            crate::SHA256::sha256_hex(header_src.as_bytes())
+        ),
+        boundary_overlay_identity(overlay),
+        format!("c-bind-source-v1;descriptor={descriptor_stamp}"),
+        "generated-c-bindgen".to_string(),
+        "jet-pkg-model:c-bind".to_string(),
+        crate::ForeignBridge::foreign_host_target(),
+    );
+    let mut boundary = ForeignBoundaryContract::new(descriptor, lib, boundary_identity);
+    if discovery.handles.is_empty() {
+        boundary.ownership = "signature-declared; no opaque handles".into();
+        boundary.cleanup = "no generated close contract".into();
+    } else {
+        boundary.ownership = format!(
+            "owned opaque handles: {}",
+            discovery
+                .handles
+                .iter()
+                .map(|handle| handle.jet_name.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        boundary.cleanup = "overlay/conventional close symbol consumes each handle".into();
+    }
+    boundary.copy_cost =
+        "scalar values copy by value; records retain declared C layout; handles never copy native state"
+            .into();
+    boundary.assumptions = discovery
+        .unresolved
+        .iter()
+        .map(|(name, reason)| format!("{name}: {reason}"))
+        .collect();
+    let boundary_stamp = boundary.stamp();
+    let type_declarations = format!(
+        "{}{}",
+        discovery.render_type_declarations(),
+        catalog.render_type_declarations()
+    );
     let source = format!(
-        "// jet-ffi-descriptor={descriptor_stamp}\n#Bindgen module c.{}.__bindgen__ {{\n{}}}\n",
-        module_lib, lines
+        "// jet-ffi-descriptor={descriptor_stamp}\n// jet-ffi-boundary={boundary_stamp}\n{}#Bindgen module c.{}.__bindgen__ {{\n{}}}\n",
+        type_declarations, module_lib, lines
     );
     Ok(BindResult {
         source,
         bound,
         skipped,
+        handles: discovery.handles,
+        handle_skipped: discovery.unresolved,
+        link_closure: opaque_handle_binder::LinkClosure::new(lib, &overlay.links),
         descriptor_stamp,
+        boundary,
+        plans: Vec::new(),
     })
 }
+/// A complete C struct that can be represented by a checked `#Layout(c)`
+/// Jet struct. Unsupported fields make the whole record unavailable; emitting
+/// a partial record would change its native stride and make array marshalling
+/// unsound. C unions intentionally remain overlay-only.
+#[derive(Clone, Debug)]
+struct CStructDef {
+    jet_name: String,
+    fields: Vec<(String, String)>,
+}
+
+/// Header type facts shared by prototype rendering and generated C records.
+///
+/// This is intentionally a declaration table, not a library table: aliases
+/// resolve through the header's own typedefs, and no API name is inspected.
+#[derive(Clone, Debug, Default)]
+struct CTypeCatalog {
+    aliases: BTreeMap<String, String>,
+    records: BTreeMap<String, CStructDef>,
+    names: BTreeMap<String, String>,
+}
+
+#[derive(Clone, Debug)]
+struct RawRecord {
+    tag: Option<String>,
+    alias: Option<String>,
+    body: String,
+}
+
+impl CTypeCatalog {
+    fn parse(source: &str, handles: &opaque_handle_binder::Discovery) -> Self {
+        let declarations = split_declarations(source);
+        let mut catalog = Self::default();
+        let mut used_names = handles
+            .handles
+            .iter()
+            .map(|handle| handle.jet_name.clone())
+            .collect::<BTreeSet<_>>();
+        let mut raw_records = Vec::new();
+
+        for declaration in &declarations {
+            if let Some(record) = parse_complete_record(declaration) {
+                let seed = record
+                    .alias
+                    .as_deref()
+                    .or(record.tag.as_deref())
+                    .unwrap_or("CRecord");
+                let jet_name = unique_name(
+                    &mut used_names,
+                    &crate::Syntax::sanitize_generated_name(
+                        seed.trim_end_matches("_t"),
+                        crate::Syntax::NameCase::Pascal,
+                        "CRecord",
+                    ),
+                );
+                if let Some(tag) = record.tag.as_deref() {
+                    catalog.names.insert(tag.to_string(), jet_name.clone());
+                }
+                if let Some(alias) = record.alias.as_deref() {
+                    catalog.names.insert(alias.to_string(), jet_name.clone());
+                    catalog
+                        .aliases
+                        .insert(alias.to_string(), record.tag.clone().unwrap_or_default());
+                }
+                raw_records.push((record, jet_name));
+                continue;
+            }
+            if let Some((alias, target)) = parse_callback_alias(declaration) {
+                catalog.aliases.insert(alias, target);
+                continue;
+            }
+            if let Some((alias, target)) = parse_scalar_or_alias_typedef(declaration) {
+                catalog.aliases.insert(alias, target);
+            }
+        }
+
+        // The alias table is complete before fields are lowered. This handles
+        // the common C pattern where scalar typedefs appear after a record.
+        for (record, jet_name) in raw_records {
+            let Some(key) = record
+                .alias
+                .as_deref()
+                .or(record.tag.as_deref())
+                .map(str::to_string)
+            else {
+                continue;
+            };
+            let Some(fields) = parse_record_fields(&record.body, &catalog) else {
+                continue;
+            };
+            let def = CStructDef {
+                jet_name: jet_name.clone(),
+                fields,
+            };
+            catalog.records.insert(key.clone(), def.clone());
+            if let Some(tag) = record.tag {
+                catalog.records.insert(tag, def.clone());
+            }
+            if let Some(alias) = record.alias {
+                catalog.records.insert(alias, def);
+            }
+        }
+        catalog
+    }
+
+    fn resolved_name(&self, c_type: &str) -> Option<String> {
+        let mut current = canonical_c_type(c_type);
+        let mut seen = BTreeSet::new();
+        loop {
+            if !seen.insert(current.clone()) {
+                return None;
+            }
+            if let Some(name) = self.names.get(&current) {
+                return Some(name.clone());
+            }
+            let Some(next) = self.aliases.get(&current) else {
+                return None;
+            };
+            current = canonical_c_type(next);
+        }
+    }
+
+    fn resolved_scalar(&self, c_type: &str) -> Option<&'static str> {
+        let mut current = canonical_c_type(c_type);
+        let mut seen = BTreeSet::new();
+        loop {
+            if !seen.insert(current.clone()) {
+                return None;
+            }
+            if let Some(scalar) = c_layout_scalar(&current) {
+                return Some(scalar);
+            }
+            let next = self.aliases.get(&current)?;
+            current = canonical_c_type(next);
+        }
+    }
+    fn map_callback_alias(&self, c_type: &str) -> Option<String> {
+        let target = self.aliases.get(&canonical_c_type(c_type))?;
+        let body = target.strip_prefix("__jet_callback__")?;
+        let mut pieces = body.split('|');
+        let ret = pieces.next()?;
+        let mut params = pieces
+            .map(|param| param.trim().to_string())
+            .collect::<Vec<_>>();
+        let managed = params
+            .first()
+            .is_some_and(|param| is_void_pointer_type(param));
+        if managed {
+            params.remove(0);
+        }
+        let params = params
+            .into_iter()
+            .map(|param| {
+                let scalar = callback_scalar_type(&param)?;
+                Some(if managed {
+                    format!("FfiCallbackEvent<{scalar}>")
+                } else {
+                    scalar.to_string()
+                })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let params = params.join(", ");
+        if ret == "void" {
+            Some(format!("fn({params})"))
+        } else {
+            Some(format!("fn({params}) {}", callback_scalar_type(ret.trim())?))
+        }
+    }
+
+    fn callback_has_context(&self, c_type: &str) -> bool {
+        let Some(target) = self.aliases.get(&canonical_c_type(c_type)) else {
+            return false;
+        };
+        let Some(body) = target.strip_prefix("__jet_callback__") else {
+            return false;
+        };
+        body.split('|')
+            .nth(1)
+            .is_some_and(is_void_pointer_type)
+    }
+
+
+
+    fn map_array_element(
+        &self,
+        c_type: &str,
+        contract: crate::AST::ForeignAbiContract,
+        handles: &opaque_handle_binder::Discovery,
+    ) -> Option<String> {
+        let (base, depth) = c_pointer_base(c_type);
+        if depth != 1 {
+            return None;
+        }
+        if handles.handle_for_type(c_type).is_some() {
+            return None;
+        }
+        if let Some(scalar) = self.resolved_scalar(&base) {
+            return Some(scalar.to_string());
+        }
+        if let Some(scalar) = contract.c_scalar(&base) {
+            return scalar.jet_name().map(str::to_string);
+        }
+        self.resolved_name(&base)
+    }
+
+    fn map_length_type(&self, c_type: &str) -> Option<String> {
+        let (base, depth) = c_pointer_base(c_type);
+        (depth == 1 && self.resolved_scalar(&base).is_some()).then(|| {
+            self.resolved_scalar(&base)
+                .expect("resolved scalar checked above")
+                .to_string()
+        })
+    }
+
+    fn map_layout_type(&self, c_type: &str) -> Option<String> {
+        let (base, depth) = c_pointer_base(c_type);
+        if depth != 0 {
+            return None;
+        }
+        if let Some(scalar) = self.resolved_scalar(&base) {
+            return Some(scalar.to_string());
+        }
+        self.resolved_name(&base)
+    }
+
+    fn render_type_declarations(&self) -> String {
+        let mut seen = BTreeSet::new();
+        let mut out = String::new();
+        for record in self.records.values() {
+            if !seen.insert(record.jet_name.clone()) {
+                continue;
+            }
+            out.push_str("#Layout(c)\npub struct ");
+            out.push_str(&record.jet_name);
+            out.push_str(" {\n");
+            for (name, ty) in &record.fields {
+                let _ = writeln!(out, "    {name}: {ty},");
+            }
+            out.push_str("}\n\n");
+        }
+        out
+    }
+}
+
+fn parse_complete_record(decl: &str) -> Option<RawRecord> {
+    // C unions cannot be represented by a field-ordered Jet struct without
+    // preserving the active member and maximum-member alignment; leave them
+    // for an explicit overlay rather than emitting an unsound layout.
+    let keyword = "struct";
+    if !decl.split_whitespace().any(|token| {
+        token.trim_matches(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_') == keyword
+    }) {
+        return None;
+    }
+    let keyword_start = decl.find(keyword)?;
+    let open = decl[keyword_start..].find('{')? + keyword_start;
+    let close = decl.rfind('}')?;
+    if close <= open {
+        return None;
+    }
+    let prefix = decl[keyword_start + keyword.len()..open].trim();
+    let tag = prefix
+        .split_whitespace()
+        .find(|token| is_ident(token))
+        .map(str::to_string);
+    let suffix = decl[close + 1..].trim();
+    let alias = suffix
+        .split_whitespace()
+        .find(|token| is_ident(token))
+        .map(str::to_string);
+    Some(RawRecord {
+        tag,
+        alias,
+        body: decl[open + 1..close].to_string(),
+    })
+}
+
+/// Read a simple C function-pointer typedef. The checked surface stores it as
+/// a Jet `fn(...)` type; registration/context ownership remains on the
+/// generated callback facade, never in an untyped pointer alias.
+fn parse_callback_alias(decl: &str) -> Option<(String, String)> {
+    let text = decl.trim();
+    if !text.starts_with("typedef ") || !text.contains("(*") {
+        return None;
+    }
+    let pointer = text.find("(*")?;
+    let alias_start = pointer + 2;
+    let alias_end = text[alias_start..].find(')')? + alias_start;
+    let alias = text[alias_start..alias_end].trim();
+    if !is_ident(alias) {
+        return None;
+    }
+    let params_open = text[alias_end + 1..].find('(')? + alias_end + 1;
+    let params_close = text.rfind(')')?;
+    if params_close <= params_open || !text[params_close + 1..].trim().is_empty() {
+        return None;
+    }
+    let ret = normalize_type(text["typedef ".len()..pointer].trim());
+    if ret.is_empty() {
+        return None;
+    }
+    let params = split_params(&text[params_open + 1..params_close])?;
+    let params = params
+        .iter()
+        .map(|param| split_param_type_and_name(param, 0).0)
+        .collect::<Vec<_>>();
+    Some((
+        alias.to_string(),
+        format!("__jet_callback__{}|{}", ret, params.join("|")),
+    ))
+}
+
+fn parse_scalar_or_alias_typedef(decl: &str) -> Option<(String, String)> {
+    let mut tokens = decl.split_whitespace();
+    if tokens.next()? != "typedef" || decl.contains('{') || decl.contains('(') {
+        return None;
+    }
+    let alias = decl
+        .split_whitespace()
+        .rev()
+        .find(|token| is_ident(token))?
+        .to_string();
+    let alias_pos = decl.rfind(&alias)?;
+    let target = decl["typedef".len()..alias_pos].trim();
+    (!target.is_empty() && normalize_type(target) != normalize_type(&alias))
+        .then_some((alias, target.to_string()))
+}
+
+fn parse_record_fields(body: &str, catalog: &CTypeCatalog) -> Option<Vec<(String, String)>> {
+    let declarations = split_declarations(body);
+    if declarations.is_empty() {
+        return None;
+    }
+    let mut fields = Vec::new();
+    for (index, declaration) in declarations.iter().enumerate() {
+        let declaration = declaration.trim();
+        if declaration.is_empty() || declaration.contains(':') || declaration.contains(',') {
+            return None;
+        }
+        let (c_type, name) = split_param_type_and_name(declaration, index);
+        if !is_ident(&name) {
+            return None;
+        }
+        let ty = catalog.map_layout_type(&c_type)?;
+        fields.push((
+            crate::Syntax::sanitize_generated_name(
+                &name,
+                crate::Syntax::NameCase::Snake,
+                "field",
+            ),
+            ty,
+        ));
+    }
+    Some(fields)
+}
+fn is_void_pointer_type(c_type: &str) -> bool {
+    let (base, depth) = c_pointer_base(c_type);
+    depth == 1 && base == "void"
+}
+
+fn c_pointer_base(c_type: &str) -> (String, usize) {
+    let norm = normalize_type(c_type);
+    let depth = norm.chars().filter(|ch| *ch == '*').count();
+    let base = norm.replace('*', " ");
+    (canonical_c_type(&base), depth)
+}
+
+fn canonical_c_type(c_type: &str) -> String {
+    let norm = normalize_type(c_type);
+    norm.strip_prefix("struct ")
+        .or_else(|| norm.strip_prefix("union "))
+        .or_else(|| norm.strip_prefix("enum "))
+        .unwrap_or(&norm)
+        .to_string()
+}
+ 
+fn managed_callback_param_index(p: &Proto, catalog: &CTypeCatalog) -> Option<usize> {
+    p.params.iter().enumerate().find_map(|(idx, raw)| {
+        let (ty, _) = split_param_type_and_name(raw, idx);
+        catalog
+            .callback_has_context(&ty)
+            .then_some(idx)
+            .filter(|callback_idx| {
+                p.params
+                    .get(callback_idx + 1)
+                    .map(|ctx| {
+                        let (ctx_ty, _) = split_param_type_and_name(ctx, callback_idx + 1);
+                        is_void_pointer_type(&ctx_ty)
+                    })
+                    .unwrap_or(false)
+            })
+    })
+}
+
+fn native_void_pointer_proto(p: &Proto) -> bool {
+    p.params.len() == 1 && {
+        let (ty, _) = split_param_type_and_name(&p.params[0], 0);
+        is_void_pointer_type(&ty)
+    }
+}
+
+fn c_layout_scalar(c_type: &str) -> Option<&'static str> {
+    match c_type {
+        "char" | "signed char" | "int8_t" => Some("I8"),
+        "unsigned char" | "uint8_t" => Some("U8"),
+        "short" | "signed short" | "short int" | "signed short int" | "int16_t" => Some("I16"),
+        "unsigned short" | "unsigned short int" | "uint16_t" => Some("U16"),
+        "int" | "signed" | "signed int" | "int32_t" => Some("I32"),
+        "unsigned" | "unsigned int" | "uint32_t" => Some("U32"),
+        "long long" | "signed long long" | "int64_t" => Some("I64"),
+        "unsigned long long" | "uint64_t" => Some("U64"),
+        "float" => Some("F32"),
+        "double" => Some("Float"),
+        "_Bool" | "bool" => Some("Bool"),
+        "size_t" | "uintptr_t" => Some("U64"),
+        "ssize_t" | "intptr_t" => Some("I64"),
+        _ => None,
+    }
+}
+
 
 /// One parsed C function prototype.
 struct Proto {
@@ -132,8 +794,9 @@ struct Proto {
     params: Vec<String>,
 }
 
-/// Remove `/* … */` and `//` comments and preprocessor directives (`#…`,
-/// honouring `\`-continued lines). Conservative: keeps everything else verbatim.
+/// Remove `/* … */` and `//` comments, preprocessor directives (`#…`, honouring
+/// `\`-continued lines), and standard C++ linkage wrappers. Keeps declarations
+/// and record bodies verbatim for the focused parser.
 fn strip_comments_and_directives(src: &str) -> String {
     // 1. Strip comments.
     let mut out = String::with_capacity(src.len());
@@ -169,7 +832,87 @@ fn strip_comments_and_directives(src: &str) -> String {
         result.push_str(line);
         result.push('\n');
     }
+    strip_extern_c_wrappers(&result)
+}
+
+/// Remove standard C++ linkage wrappers while retaining their declarations.
+///
+/// C headers commonly place declarations inside `extern "C" { ... }`. The
+/// focused parser does not need the linkage spelling, but it must still see
+/// the enclosed records and prototypes. Strip only the wrapper's opening and
+/// matching close; nested record/function braces remain intact.
+fn strip_extern_c_wrappers(src: &str) -> String {
+    let mut result = src.to_string();
+    let mut search = 0usize;
+    while search < result.len() {
+        let Some(relative) = result[search..].find("extern") else {
+            break;
+        };
+        let start = search + relative;
+        let bytes = result.as_bytes();
+        let ident = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_';
+        if (start > 0 && ident(bytes[start - 1]))
+            || (start + 6 < bytes.len() && ident(bytes[start + 6]))
+        {
+            search = start + 6;
+            continue;
+        }
+        let mut cursor = start + 6;
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        if !result[cursor..].starts_with("\"C\"") {
+            search = cursor;
+            continue;
+        }
+        cursor += 3;
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        if cursor >= bytes.len() || bytes[cursor] != b'{' {
+            search = cursor;
+            continue;
+        }
+        let open = cursor;
+        let Some(close) = matching_brace(&result, open) else {
+            break;
+        };
+        result.replace_range(start..=open, &" ".repeat(open + 1 - start));
+        result.replace_range(close..=close, " ");
+        search = start;
+    }
     result
+}
+
+fn matching_brace(src: &str, open: usize) -> Option<usize> {
+    let bytes = src.as_bytes();
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+    for (index, &byte) in bytes.iter().enumerate().skip(open) {
+        if let Some(delimiter) = quote {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == delimiter {
+                quote = None;
+            }
+            continue;
+        }
+        match byte {
+            b'"' | b'\'' => quote = Some(byte),
+            b'{' => depth += 1,
+            b'}' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(index);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Split top-level declarations on `;` and skip brace-delimited bodies (struct /
@@ -286,29 +1029,85 @@ fn render_binding(
     p: &Proto,
     used_names: &mut BTreeSet<String>,
     contract: crate::AST::ForeignAbiContract,
+    handles: &opaque_handle_binder::Discovery,
+    catalog: &CTypeCatalog,
 ) -> Result<String, String> {
-    let ret_jet = match map_return_type(&p.ret, contract) {
-        Ok(t) => t,
-        Err(e) => return Err(e),
+    let managed_callback = managed_callback_param_index(p, catalog);
+    let managed_unsubscribe = p.name == "unsubscribe" && native_void_pointer_proto(p);
+    let managed_emit = p.name == "emit_async";
+    let return_array = catalog
+        .map_array_element(&p.ret, contract, handles)
+        .filter(|_| array_length_param(p, catalog).is_some());
+    let ret_jet = if managed_callback.is_some() {
+        Some("*U8".to_string())
+    } else {
+        match return_array.as_ref() {
+            Some(element) => Some(format!("[{element}]")),
+            None => map_return_type(&p.ret, contract, handles, catalog)?,
+        }
     };
+    let native_callback_name = managed_callback.map(|_| format!("__jet_native_{}", p.name));
     let function_name = unique_name(
         used_names,
         &crate::Syntax::sanitize_generated_name(
-            &p.name,
+            if let Some(name) = native_callback_name.as_deref() {
+                name
+            } else if managed_unsubscribe {
+                "__jet_native_unsubscribe"
+            } else if managed_emit {
+                "__jet_native_emit_async"
+            } else {
+                &p.name
+            },
             crate::Syntax::NameCase::Snake,
             "function",
         ),
     );
+    let length_param = return_array
+        .as_ref()
+        .and_then(|_| array_length_param(p, catalog));
     let mut params = Vec::new();
     let mut used_param_names = BTreeSet::new();
     for (idx, raw) in p.params.iter().enumerate() {
+        if managed_callback.is_some_and(|callback_idx| idx == callback_idx + 1) {
+            continue;
+        }
         let raw = raw.trim();
         if raw == "..." {
             return Err("variadic (`...`) parameters aren't bindable".to_string());
         }
         let (ty, name) = split_param_type_and_name(raw, idx);
-        let jet_ty = map_type(&ty, contract)
-            .ok_or_else(|| format!("type `{}` isn't bindable", ty.trim()))?;
+        let jet_ty = if Some(idx) == length_param {
+            let length = catalog
+                .map_length_type(&ty)
+                .ok_or_else(|| format!("array length type `{}` isn't bindable", ty.trim()))?;
+            format!("&{length}")
+        } else if let Some(element) = catalog
+            .map_array_element(&ty, contract, handles)
+            .filter(|_| has_companion_count(p, idx, catalog))
+        {
+            let access = if c_pointer_is_const(&ty) { "" } else { "&" };
+            format!("{access}[{element}]")
+        } else if let Some(handle) = handles.handle_for_type(&ty) {
+            let access = if handles.is_close_function(&p.name, &ty) {
+                "^"
+            } else {
+                "&"
+            };
+            format!("{access}{}", handle.jet_name)
+        } else {
+            let mapped = map_type(&ty, contract, handles, catalog)
+                .or_else(|| map_single_pointer(&ty, p, idx, contract, handles, catalog));
+            match mapped {
+                Some(mapped) => mapped,
+                None => {
+                    if let Some(reason) = handles.unresolved_reason_for_type(&ty) {
+                        return Err(reason.to_string());
+                    }
+                    return Err(format!("type `{}` isn't bindable", ty.trim()));
+                }
+            }
+        };
         let name = unique_name(
             &mut used_param_names,
             &crate::Syntax::sanitize_generated_name(&name, crate::Syntax::NameCase::Snake, "arg"),
@@ -316,16 +1115,20 @@ fn render_binding(
         params.push(format!("{}: {}", name, jet_ty));
     }
     let params_str = params.join(", ");
+    let close_marker = handles
+        .handle_for_type(&p.ret)
+        .map(|handle| format!("#Close({})\n", handle.close))
+        .unwrap_or_default();
     let line = match ret_jet {
         Some(r) => format!(
-            "fn {}({}) {} = {};",
+            "{close_marker}fn {}({}) {} = {}",
             function_name,
             params_str,
             r,
             crate::JSON::quote(&p.name)
         ),
         None => format!(
-            "fn {}({}) = {};",
+            "{close_marker}fn {}({}) = {}",
             function_name,
             params_str,
             crate::JSON::quote(&p.name)
@@ -334,19 +1137,115 @@ fn render_binding(
     Ok(line)
 }
 
+/// Map one uncounted C object pointer while preserving its access convention.
+///
+/// Counted pointers are lowered by `render_binding` to typed list parameters
+/// before this helper runs. A `const T *` is a Jet read parameter (`T`), while
+/// a mutable `T *` is a Jet write parameter (`&T`); this is the checked
+/// struct-out path and keeps the native record layout visible to the caller.
+fn map_single_pointer(
+    c_type: &str,
+    p: &Proto,
+    pointer_index: usize,
+    contract: crate::AST::ForeignAbiContract,
+    handles: &opaque_handle_binder::Discovery,
+    catalog: &CTypeCatalog,
+) -> Option<String> {
+    let (base, depth) = c_pointer_base(c_type);
+    if depth != 1 || has_companion_count(p, pointer_index, catalog) {
+        return None;
+    }
+    let mapped = catalog
+        .map_layout_type(&base)
+        .or_else(|| map_type(&base, contract, handles, catalog))?;
+    if mapped == "String" {
+        return None;
+    }
+    if c_pointer_is_const(c_type) {
+        Some(mapped)
+    } else {
+        Some(format!("&{mapped}"))
+    }
+}
+
 /// Map a C return type to `Some(JetType)` / `None` for `void`. Err if unbindable.
 fn map_return_type(
     c: &str,
     contract: crate::AST::ForeignAbiContract,
+    handles: &opaque_handle_binder::Discovery,
+    catalog: &CTypeCatalog,
 ) -> Result<Option<String>, String> {
     let norm = normalize_type(c);
     if norm == "void" {
         return Ok(None);
     }
-    match map_type(c, contract) {
+    match map_type(c, contract, handles, catalog) {
         Some(t) => Ok(Some(t)),
-        None => Err(format!("return type `{}` isn't bindable", c.trim())),
+        None => {
+            if let Some(reason) = handles.unresolved_reason_for_type(c) {
+                Err(reason.to_string())
+            } else {
+                Err(format!("return type `{}` isn't bindable", c.trim()))
+            }
+        }
     }
+}
+
+fn array_length_param(p: &Proto, catalog: &CTypeCatalog) -> Option<usize> {
+    p.params.iter().enumerate().find_map(|(index, raw)| {
+        let (ty, name) = split_param_type_and_name(raw, index);
+        (!c_pointer_is_const(&ty)
+            && is_length_name(&name)
+            && catalog.map_length_type(&ty).is_some())
+            .then_some(index)
+    })
+}
+
+fn has_companion_count(p: &Proto, pointer_index: usize, catalog: &CTypeCatalog) -> bool {
+    p.params.iter().enumerate().any(|(index, raw)| {
+        if index == pointer_index {
+            return false;
+        }
+        let (ty, name) = split_param_type_and_name(raw, index);
+        let (_, depth) = c_pointer_base(&ty);
+        depth == 0 && is_length_name(&name) && catalog.resolved_scalar(&ty).is_some()
+    })
+}
+
+fn is_length_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    matches!(lower.as_str(), "n" | "len" | "length" | "count" | "size" | "num" | "number")
+        || ["_len", "_length", "_count", "_size", "_num", "_number"]
+            .iter()
+            .any(|suffix| lower.ends_with(suffix))
+        || ["len_", "length_", "count_", "size_", "num_", "number_"]
+            .iter()
+            .any(|prefix| lower.starts_with(prefix))
+}
+
+fn callback_scalar_type(c_type: &str) -> Option<&'static str> {
+    match normalize_type(c_type).as_str() {
+        "void" => Some("Unit"),
+        "char" | "signed char" | "int8_t" => Some("I8"),
+        "unsigned char" | "uint8_t" => Some("U8"),
+        "short" | "signed short" | "short int" | "int16_t" => Some("I16"),
+        "unsigned short" | "unsigned short int" | "uint16_t" => Some("U16"),
+        "int" | "signed" | "signed int" | "int32_t" => Some("I32"),
+        "unsigned" | "unsigned int" | "uint32_t" => Some("U32"),
+        "long long" | "signed long long" | "int64_t" => Some("I64"),
+        "unsigned long long" | "uint64_t" => Some("U64"),
+        "float" => Some("F32"),
+        "double" => Some("Float"),
+        "_Bool" | "bool" => Some("Bool"),
+        _ => None,
+    }
+}
+
+fn c_pointer_is_const(c_type: &str) -> bool {
+    c_type
+        .split_whitespace()
+        .take_while(|token| *token != "*")
+        .any(|token| token == "const")
 }
 
 /// Separate a parameter's type from its (optional) name, synthesising `argN`.
@@ -381,19 +1280,39 @@ fn normalize_type(c: &str) -> String {
     });
     toks.join(" ")
 }
-
 /// Map a C type to a Jet FFI type, or None if it's outside the bound subset.
-fn map_type(c: &str, contract: crate::AST::ForeignAbiContract) -> Option<String> {
-    let norm = normalize_type(c);
+fn map_type(
+    c: &str,
+    contract: crate::AST::ForeignAbiContract,
+    handles: &opaque_handle_binder::Discovery,
+    catalog: &CTypeCatalog,
+) -> Option<String> {
+    if let Some(callback) = catalog.map_callback_alias(c) {
+        return Some(callback);
+    }
+    if let Some(handle) = handles.handle_for_type(c) {
+        return Some(handle.jet_name.clone());
+    }
+    let (base, depth) = c_pointer_base(c);
+    // NUL-terminated C strings are the one pointer-shaped scalar accepted by
+    // the generated bridge. Counted `char *` buffers are handled first by
+    // `render_binding` as typed `[I8]` slices; an unpaired `char *` is text.
+    if depth == 1 && base == "char" {
+        return Some("String".to_string());
+    }
+    let norm = canonical_c_type(c);
     let t = norm.trim();
-    if t == "void" {
+    // Untyped `void *` is not a Jet value. Opaque-handle typedefs and the
+    // managed-callback seam bind `*U8` explicitly; a raw allocator stays skipped.
+    if t == "void" || (depth == 1 && base == "void") {
         return None;
     }
     contract
         .c_scalar(t)
         .and_then(|scalar| scalar.jet_name().map(str::to_string))
+        .or_else(|| catalog.resolved_scalar(t).map(str::to_string))
+        .or_else(|| catalog.resolved_name(t))
 }
-
 fn is_ident(s: &str) -> bool {
     let s = s.trim();
     !s.is_empty()
@@ -4069,13 +4988,13 @@ mod tests {
 
         let valid = generate("int foo(int value);", "valid").unwrap();
         assert_eq!(valid.bound, vec!["foo"]);
-        assert!(valid.source.contains("fn foo(value: Int) Int = \"foo\";"));
+        assert!(valid.source.contains("fn foo(value: Int) Int = \"foo\"\n"));
 
         let leading_underscore = generate("int _foo(int value);", "underscore").unwrap();
         assert_eq!(leading_underscore.bound, vec!["_foo"]);
         assert!(leading_underscore
             .source
-            .contains("fn _foo(value: Int) Int = \"_foo\";"));
+            .contains("fn _foo(value: Int) Int = \"_foo\"\n"));
     }
 
     #[test]
@@ -4108,15 +5027,15 @@ mod tests {
         assert!(r.source.contains("#Bindgen module c.jetc.__bindgen__ {"));
         assert!(r
             .source
-            .contains("fn jetc_add(a: Int, b: Int) Int = \"jetc_add\";"));
+            .contains("fn jetc_add(a: Int, b: Int) Int = \"jetc_add\"\n"));
         assert!(r
             .source
-            .contains("fn scale(x: Float, k: Float) Float = \"scale\";"));
-        assert!(r.source.contains("fn reset() = \"reset\";"));
+            .contains("fn scale(x: Float, k: Float) Float = \"scale\"\n"));
+        assert!(r.source.contains("fn reset() = \"reset\"\n"));
         assert!(r
             .source
-            .contains("fn name_of(id: Int) String = \"name_of\";"));
-        assert!(r.source.contains("fn is_ready() Bool = \"is_ready\";"));
+            .contains("fn name_of(id: Int) String = \"name_of\"\n"));
+        assert!(r.source.contains("fn is_ready() Bool = \"is_ready\"\n"));
         assert_eq!(r.bound.len(), 5);
         assert!(r.skipped.is_empty());
     }
@@ -4159,13 +5078,78 @@ mod tests {
             void log_msg(const char *fmt, ...);
         "#;
         let r = generate(h, "lib").unwrap();
-        assert!(r.source.contains("fn ok(x: Int) Int = \"ok\";"));
-        // `void*` return, `int*` param, and varargs are all skipped.
+        assert!(r.source.contains("fn ok(x: Int) Int = \"ok\"\n"));
+        assert!(r
+            .source
+            .contains("fn sum(items: &[I32], n: Int) Int = \"sum\"\n"));
+        // `void*` return and varargs remain skipped; a pointer paired with a
+        // scalar count is a typed Jet slice at the generated boundary.
         let skipped: Vec<&str> = r.skipped.iter().map(|(n, _)| n.as_str()).collect();
         assert!(skipped.contains(&"raw_alloc"));
-        assert!(skipped.contains(&"sum"));
         assert!(skipped.contains(&"log_msg"));
-        assert_eq!(r.bound, vec!["ok"]);
+        assert_eq!(r.bound, vec!["ok", "sum"]);
+    }
+
+    #[test]
+    fn binds_typed_pointer_arrays_and_c_layout_records() {
+        let header = r#"
+            typedef struct Sample {
+                uint32_t value;
+                double ratio;
+            } Sample;
+            const Sample *samples(size_t *length);
+            void mutate(Sample *items, size_t count);
+            void open(Sample *out);
+            int inspect(const Sample *value);
+            void write_u8(uint8_t *out);
+        "#;
+        let result = generate(header, "arrays").unwrap();
+        assert!(result.source.contains(
+            "#Layout(c)\npub struct Sample {\n    value: U32,\n    ratio: Float,\n}"
+        ));
+        assert!(result
+            .source
+            .contains("fn samples(length: &U64) [Sample] = \"samples\"\n"));
+        assert!(result
+            .source
+            .contains("fn mutate(items: &[Sample], count: Int) = \"mutate\"\n"));
+        assert!(result
+            .source
+            .contains("fn open(out: &Sample) = \"open\"\n"));
+        assert!(result
+            .source
+            .contains("fn inspect(value: Sample) Int = \"inspect\"\n"));
+        assert!(result
+            .source
+            .contains("fn write_u8(out: &U8) = \"write_u8\"\n"));
+        assert_eq!(
+            result.bound,
+            vec!["samples", "mutate", "open", "inspect", "write_u8"]
+        );
+    }
+
+    #[test]
+    fn binds_declarations_inside_extern_c_wrapper() {
+        let header = r#"
+            #ifdef __cplusplus
+            extern "C" {
+            #endif
+            typedef struct Sample {
+                uint32_t value;
+            } Sample;
+            int open(const Sample *input, Sample *out);
+            #ifdef __cplusplus
+            }
+            #endif
+        "#;
+        let result = generate(header, "wrapped").unwrap();
+        assert!(result.source.contains(
+            "#Layout(c)\npub struct Sample {\n    value: U32,\n}"
+        ));
+        assert!(result
+            .source
+            .contains("fn open(input: Sample, out: &Sample) Int = \"open\"\n"));
+        assert_eq!(result.bound, vec!["open"]);
     }
 
     #[test]
@@ -4179,7 +5163,7 @@ mod tests {
         let r = generate("int f(int, double);", "m").unwrap();
         assert!(r
             .source
-            .contains("fn f(arg0: Int, arg1: Float) Int = \"f\";"));
+            .contains("fn f(arg0: Int, arg1: Float) Int = \"f\"\n"));
     }
 
     // c43: U32/uint32_t boundary — C integers of all widths map to Jet `Int`.
@@ -4199,22 +5183,45 @@ mod tests {
         // surface; signed vs unsigned and width are transparent to Jet callers.
         assert!(
             r.source
-                .contains("fn add_u32(a: Int, b: Int) Int = \"add_u32\";"),
+                .contains("fn add_u32(a: Int, b: Int) Int = \"add_u32\"\n"),
             "uint32_t must map to Int: got:\n{}",
             r.source
         );
         assert!(
             r.source
-                .contains("fn sub_i32(a: Int, b: Int) Int = \"sub_i32\";"),
+                .contains("fn sub_i32(a: Int, b: Int) Int = \"sub_i32\"\n"),
             "int32_t must map to Int: got:\n{}",
             r.source
         );
         assert!(
             r.source
-                .contains("fn identity_u64(x: Int) Int = \"identity_u64\";"),
+                .contains("fn identity_u64(x: Int) Int = \"identity_u64\"\n"),
             "uint64_t must map to Int: got:\n{}",
             r.source
         );
         assert_eq!(r.bound, vec!["add_u32", "sub_i32", "identity_u64"]);
+    }
+
+    #[test]
+    fn binds_opaque_zlib_handles_and_string_edges() {
+        let header = r#"
+            typedef void *gzFile;
+            gzFile gzopen(const char *path, const char *mode);
+            int gzread(gzFile file, char *buf, unsigned int len);
+            int gzclose(gzFile file);
+        "#;
+        let result = generate(header, "zlib").unwrap();
+        assert!(result.source.contains("pub struct GzFile {}"));
+        assert!(result
+            .source
+            .contains("#Close(gzclose)\nfn gzopen(path: String, mode: String) GzFile = \"gzopen\"\n"));
+        assert!(result
+            .source
+            .contains("fn gzread(file: &GzFile, buf: &[I8], len: Int) Int = \"gzread\"\n"));
+        assert!(result
+            .source
+            .contains("fn gzclose(file: ^GzFile) Int = \"gzclose\"\n"));
+        assert_eq!(result.handles.len(), 1);
+        assert_eq!(result.handles[0].close, "gzclose");
     }
 }

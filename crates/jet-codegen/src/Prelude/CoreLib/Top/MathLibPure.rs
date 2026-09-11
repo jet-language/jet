@@ -82,6 +82,10 @@ pub fn jet_complex_to_string(value: &JetComplex) -> String {
     value.to_string_rep()
 }
 
+pub fn jet_std_math_pi() -> f64 {
+    std::f64::consts::PI
+}
+
 pub fn jet_std_math_abs_i64(value: i64) -> i64 {
     value.abs()
 }
@@ -105,6 +109,78 @@ pub fn jet_std_math_is_infinite(value: f64) -> bool {
 
 pub fn jet_std_math_is_finite(value: f64) -> bool {
     value.is_finite()
+}
+
+pub fn jet_std_math_asinh(value: f64) -> f64 {
+    value.asinh()
+}
+
+pub fn jet_std_math_acosh(value: f64) -> f64 {
+    value.acosh()
+}
+
+pub fn jet_std_math_atanh(value: f64) -> f64 {
+    value.atanh()
+}
+
+pub fn jet_std_math_cbrt(value: f64) -> f64 {
+    value.cbrt()
+}
+
+pub fn jet_std_math_exp2(value: f64) -> f64 {
+    value.exp2()
+}
+
+pub fn jet_std_math_exp_m1(value: f64) -> f64 {
+    value.exp_m1()
+}
+
+pub fn jet_std_math_ln_1p(value: f64) -> f64 {
+    value.ln_1p()
+}
+
+pub fn jet_std_math_log(value: f64, base: f64) -> f64 {
+    value.log(base)
+}
+
+pub fn jet_std_math_copysign(value: f64, sign: f64) -> f64 {
+    value.copysign(sign)
+}
+
+pub fn jet_std_math_signum(value: f64) -> f64 {
+    value.signum()
+}
+
+pub fn jet_std_math_fma(a: f64, b: f64, c: f64) -> f64 {
+    a.mul_add(b, c)
+}
+
+pub fn jet_std_math_is_even(value: i64) -> bool {
+    value % 2 == 0
+}
+
+pub fn jet_std_math_is_odd(value: i64) -> bool {
+    value % 2 != 0
+}
+
+pub fn jet_std_math_checked_abs(value: i64) -> Option<i64> {
+    value.checked_abs()
+}
+
+pub fn jet_std_math_checked_neg(value: i64) -> Option<i64> {
+    value.checked_neg()
+}
+
+pub fn jet_std_math_checked_div(left: i64, right: i64) -> Option<i64> {
+    left.checked_div(right)
+}
+
+pub fn jet_std_math_checked_rem(left: i64, right: i64) -> Option<i64> {
+    left.checked_rem(right)
+}
+
+pub fn jet_std_math_is_normal(value: f64) -> bool {
+    value.is_normal()
 }
 
 /// IEEE-754 bit conversions share this Prelude symbol across AOT, resident

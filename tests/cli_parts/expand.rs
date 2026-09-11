@@ -697,8 +697,8 @@ fn expand_json_compile_error_uses_machine_diagnostics() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stdout.starts_with("{\"schema\":\"jet.report/v1\""),
-        "JSON diagnostic must use jet.report/v1: {stdout}"
+        stdout.starts_with("{\"schema\":\"jet.status/v1\""),
+        "JSON diagnostic must use jet.status/v1: {stdout}"
     );
     assert!(
         stdout.contains("\"code\":\"E0102\""),
@@ -730,7 +730,7 @@ fn expand_json_unknown_lens_uses_machine_diagnostic() {
     assert_eq!(out.status.code(), Some(1));
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.starts_with("{\"schema\":\"jet.report/v1\""),
+        stdout.starts_with("{\"schema\":\"jet.status/v1\""),
         "{stdout}"
     );
     assert!(stdout.contains("\"code\":\"E2941\""), "{stdout}");

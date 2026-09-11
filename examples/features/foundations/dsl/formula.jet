@@ -1,0 +1,235 @@
+pub struct Formula {
+    kind: Int,
+    value: Int,
+    left: String,
+    right: String,
+}
+
+pub struct Book {
+    cells: [String:Formula],
+    order: [String],
+}
+
+pub struct Recalc {
+    pub values: [String:Int],
+    pub touched: [String],
+}
+
+fn parse_formula(source: String) ?Formula -> {
+    words :: source.trim().split(" ").to_list()
+    if words.len() == 0 -> return None
+    if words.len() == 1 {
+        token :: words[0].trim()
+        if token == "" -> return None
+        if Int.parse(token) == .Val(value) {
+            return Val(Formula{
+                kind: 0,
+                value: value,
+                left: "",
+                right: "",
+            })
+        }
+        return Val(Formula{
+            kind: 3,
+            value: 0,
+            left: token,
+            right: "",
+        })
+    }
+    if words.len() != 3 -> return None
+
+    left :: words[0].trim()
+    operator :: words[1].trim()
+    right :: words[2].trim()
+    if left == "" || right == "" -> return None
+    kind :: if operator == "+" -> 1 else if operator == "-" -> 2 else if operator == "*" -> 4 else -> 9
+    if kind == 9 -> return None
+    return Val(Formula{
+        kind: kind,
+        value: 0,
+        left: left,
+        right: right,
+    })
+}
+
+pub fn parse(source: String) ?Book -> {
+    cells := [String:Formula]{}
+    order := [String]{}
+    loop raw_line in source.lines() {
+        line :: raw_line.trim()
+        if line != "" {
+            assignment :: line.split_once("=") ?? return None
+            name :: assignment.before.trim()
+            if name == "" -> return None
+            if cells.get(~name) != None -> return None
+            formula :: parse_formula(assignment.after.trim()) ?? return None
+            cells.add(name.copy(), formula).drop("formula names are unique")
+            order.push(name)
+        }
+    }
+    if order.len() == 0 -> return None
+    return Val(Book{
+        cells: cells,
+        order: order,
+    })
+}
+fn valid_operand(operand: String, book: Book, visiting: &[String]) Bool -> {
+    if Int.parse(operand) == .Val(_) -> return true
+    return valid_cell(operand, ~book, visiting)
+}
+
+fn valid_formula(formula: Formula, book: Book, visiting: &[String]) Bool -> {
+    if formula.kind == 0 -> return true
+    if formula.kind == 3 {
+        return valid_operand(formula.left, ~book, visiting)
+    }
+    return valid_operand(formula.left, ~book, visiting)
+        && valid_operand(formula.right, ~book, visiting)
+}
+
+fn valid_cell(name: String, book: Book, visiting: &[String]) Bool -> {
+    if visiting.contains(~name) -> return false
+    formula :: book.cells.get(~name) ?? return false
+    visiting.push(name)
+    result :: valid_formula(~formula, ~book, visiting)
+    _ :: visiting.pop()
+    return result
+}
+
+fn valid_book(book: Book) Bool -> {
+    loop name in book.order {
+        visiting := [String]{}
+        if !valid_cell(~name, ~book, &visiting) -> return false
+    }
+    return true
+}
+
+fn depends_on_operand(
+    operand: String,
+    target: String,
+    book: Book,
+    seen: &[String],
+) Bool -> {
+    if Int.parse(operand) == .Val(_) -> return false
+    if operand == target -> return true
+    return depends_on_cell(operand, target, ~book, seen)
+}
+
+fn depends_on_formula(
+    formula: Formula,
+    target: String,
+    book: Book,
+    seen: &[String],
+) Bool -> {
+    if formula.kind == 0 -> return false
+    if formula.kind == 3 {
+        return depends_on_operand(formula.left, target, ~book, seen)
+    }
+    return depends_on_operand(formula.left, target, ~book, seen)
+        || depends_on_operand(formula.right, target, ~book, seen)
+}
+
+fn depends_on_cell(
+    name: String,
+    target: String,
+    book: Book,
+    seen: &[String],
+) Bool -> {
+    if seen.contains(~name) -> return false
+    formula :: book.cells.get(~name) ?? return false
+    seen.push(name)
+    result :: depends_on_formula(~formula, target, ~book, seen)
+    _ :: seen.pop()
+    return result
+}
+
+fn resolve_operand(
+    operand: String,
+    book: Book,
+    values: &[String:Int],
+    visiting: &[String],
+) ?Int -> {
+    if Int.parse(operand) == .Val(value) -> return Val(value)
+    return eval_cell(operand, ~book, values, visiting)
+}
+
+fn eval_cell(
+    name: String,
+    book: Book,
+    values: &[String:Int],
+    visiting: &[String],
+) ?Int -> {
+    if values.get(~name) == .Val(cached) -> return Val(cached)
+    if visiting.contains(~name) -> return None
+    formula :: book.cells.get(~name) ?? return None
+    visiting.push(name)
+    value :: if formula.kind == 0 -> {
+        Val(formula.value)
+    } else if formula.kind == 3 -> {
+        resolve_operand(formula.left, ~book, values, visiting)
+    } else -> {
+        left :: resolve_operand(formula.left, ~book, values, visiting) ?? {
+            _ :: visiting.pop()
+            return None
+        }
+        right :: resolve_operand(formula.right, ~book, values, visiting) ?? {
+            _ :: visiting.pop()
+            return None
+        }
+        if formula.kind == 1 -> {
+            Val(left + right)
+        } else if formula.kind == 2 -> {
+            Val(left - right)
+        } else -> {
+            Val(left * right)
+        }
+    }
+    _ :: visiting.pop()
+    if value == .Val(result) {
+        values.add(name, result).drop("formula cache")
+    }
+    return value
+}
+
+pub fn recalculate(
+    book: Book,
+    previous: [String:Int],
+    changed: String,
+    new_value: Int,
+) ?Recalc -> {
+    if book.cells.get(~changed) == None -> return None
+    if !valid_book(~book) -> return None
+
+    dirty := [String:Bool]{}
+    loop name in book.order {
+        formula :: book.cells.get(~name) ?? return None
+        seen := [String]{}
+        affected :: name == changed || depends_on_formula(~formula, changed, ~book, seen)
+        dirty.add(name, affected).drop("dirty cell set")
+    }
+
+    values := [String:Int]{}
+    loop name in book.order {
+        is_dirty :: dirty.get(~name) ?? false
+        if !is_dirty {
+            if previous.get(~name) == .Val(old) {
+                values.add(name, old).drop("previous formula value")
+            }
+        }
+    }
+    values.add(changed, new_value).drop("changed formula value")
+
+    touched := [String]{}
+    loop name in book.order {
+        is_dirty :: dirty.get(~name) ?? false
+        if is_dirty {
+            visiting := [String]{}
+            if eval_cell(~name, ~book, &values, &visiting) == None -> return None
+            touched.push(name)
+        }
+    }
+    return Val(Recalc{
+        values: values,
+        touched: touched,
+    })
+}

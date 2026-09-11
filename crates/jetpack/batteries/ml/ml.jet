@@ -1,0 +1,654 @@
+use core.compute as compute
+use core.math as math
+use core.crypto as crypto
+use core.encoding.json as json
+use core.files as files
+use core.http.client as http_client
+use core.math.random as random
+use core.process as process
+use core.time as time
+
+module ml {
+    pub struct TensorReceipt {
+        pub rank: Int
+        pub shape: [Int]
+        pub broadcast: [Float]
+        pub product: [Float]
+        pub reduction: [Float]
+    }
+
+    pub fn tensor(values: [Float], shape: [Int]) Tensor -> {
+        source :: compute.from_list(values) ?? panic("ml tensor values")
+        return compute.reshape(source, shape) ?? panic("ml tensor shape")
+    }
+
+    pub fn tensor_demo() TensorReceipt -> {
+        row :: compute.vec(2, 1.0) ?? panic("ml tensor row")
+        wide :: compute.broadcast_to(row, [2, 2]) ?? panic("ml tensor broadcast")
+        bias :: tensor([0.5, 1.5], [2])
+        broadcasted :: compute.add(wide, bias) ?? panic("ml tensor add")
+
+        left :: tensor([1.0, 2.0, 3.0, 4.0], [2, 2])
+        right :: tensor([2.0, 0.0, 1.0, 2.0], [2, 2])
+        product :: compute.matmul(left, right) ?? panic("ml tensor matmul")
+        reduction :: compute.sum_axis(product, 1) ?? panic("ml tensor reduction")
+        return TensorReceipt{
+            rank: compute.rank(broadcasted),
+            shape: compute.shape(broadcasted),
+            broadcast: compute.to_list(broadcasted),
+            product: compute.to_list(product),
+            reduction: compute.to_list(reduction),
+        }
+    }
+
+    pub struct Dataset {
+        pub samples: [Int]
+        pub features: [Float]
+        pub targets: [Float]
+        pub feature_width: Int
+        pub target_width: Int
+        pub seed: Int
+    }
+
+    pub struct Batch {
+        pub epoch: Int
+        pub ordinal: Int
+        pub indices: [Int]
+    }
+
+    pub fn parity_dataset(count: Int, seed: Int) Dataset -> {
+        bounded := count
+        if bounded < 0 -> bounded = 0
+        samples := [Int]{}
+        features := [Float]{}
+        targets := [Float]{}
+        loop id in 0..<bounded {
+            samples.push(id)
+            if id % 2 == 0 {
+                features.push(1.0)
+                features.push(0.0)
+                targets.push(1.0)
+                targets.push(0.0)
+            } else {
+                features.push(0.0)
+                features.push(1.0)
+                targets.push(0.0)
+                targets.push(1.0)
+            }
+        }
+        return Dataset{
+            samples: samples,
+            features: features,
+            targets: targets,
+            feature_width: 2,
+            target_width: 2,
+            seed: seed,
+        }
+    }
+
+    pub fn loader_batches(data: Dataset, batch_size: Int, epoch: Int, shuffle: Bool) [Batch] -> {
+        if batch_size <= 0 -> panic("ml loader batch size must be positive")
+        order := data.samples.copy()
+        if shuffle {
+            rng := random.rng(data.seed + epoch)
+            rng.shuffle(&order)
+        }
+        batches := [Batch]{}
+        ordinal := 0
+        start := 0
+        loop start < order.len() {
+            stop := start + batch_size
+            if stop > order.len() -> stop = order.len()
+            indices := [Int]{}
+            loop cursor in start..<stop -> indices.push(order[cursor])
+            batches.push(Batch{epoch: epoch, ordinal: ordinal, indices: indices})
+            ordinal += 1
+            start = stop
+        }
+        return batches
+    }
+
+    pub fn collate_inputs(data: Dataset, batch: Batch) Tensor -> {
+        values := [Float]{}
+        loop sample in batch.indices {
+            offset := sample * data.feature_width
+            loop column in 0..<data.feature_width -> values.push(data.features[offset + column])
+        }
+        return tensor(values, [batch.indices.len(), data.feature_width])
+    }
+
+    pub fn collate_targets(data: Dataset, batch: Batch) Tensor -> {
+        values := [Float]{}
+        loop sample in batch.indices {
+            offset := sample * data.target_width
+            loop column in 0..<data.target_width -> values.push(data.targets[offset + column])
+        }
+        return tensor(values, [batch.indices.len(), data.target_width])
+    }
+
+    pub fn predict(w1: Tensor, w2: Tensor, inputs: Tensor) Tensor -> {
+        hidden :: compute.matmul(inputs, w1) ?? panic("ml hidden matmul")
+        return compute.matmul(hidden, w2) ?? panic("ml output matmul")
+    }
+
+    pub fn training_loss(w1: Tensor, w2: Tensor, inputs: Tensor, targets: Tensor) Tensor -> {
+        prediction :: predict(w1, w2, inputs)
+        return compute.mse_loss(prediction, targets) ?? panic("ml training loss")
+    }
+
+    pub struct TwoLayerModel {
+        pub w1: Tensor
+        pub w2: Tensor
+    }
+
+    pub struct TrainingReceipt {
+        pub model: TwoLayerModel
+        pub losses: [Float]
+        pub epochs: Int
+        pub batches: Int
+    }
+
+    pub fn train_two_layer(epochs: Int, batch_size: Int, seed: Int, learning_rate: Float) TrainingReceipt -> {
+        if epochs < 0 -> panic("ml training epochs must be non-negative")
+        data :: parity_dataset(4, seed)
+        w1 := compute.eye(2) ?? panic("ml w1")
+        w2 := compute.zeros([2, 2]) ?? panic("ml w2")
+        losses := [Float]{}
+        batches_seen := 0
+        loop epoch in 0..<epochs {
+            batches :: loader_batches(data, batch_size, epoch, true)
+            loop batch in batches {
+                inputs :: collate_inputs(data, batch)
+                targets :: collate_targets(data, batch)
+                loss :: training_loss(w1, w2, inputs, targets)
+                losses.push(compute.to_list(loss)[0])
+                gradients :: compute.gradient(
+                    training_loss,
+                    ~w1,
+                    ~w2,
+                    ~inputs,
+                    ~targets,
+                    wrt: [w1, w2]
+                )
+                w1 = compute.sgd_step(w1, gradients.w1, learning_rate) ?? panic("ml w1 update")
+                w2 = compute.sgd_step(w2, gradients.w2, learning_rate) ?? panic("ml w2 update")
+                batches_seen += 1
+            }
+        }
+        return TrainingReceipt{
+            model: TwoLayerModel{w1: w1, w2: w2},
+            losses: losses,
+            epochs: epochs,
+            batches: batches_seen,
+        }
+    }
+
+    pub struct ModelStateReceipt {
+        pub path: String
+        pub checksum: String
+        pub restored_checksum: String
+        pub equal: Bool
+        pub model: TwoLayerModel
+        pub restored: TwoLayerModel
+    }
+
+    pub fn model_state_round_trip(path: String, model: TwoLayerModel) ModelStateReceipt -> {
+        wire_w1 :: compute.serialize(model.w1) ?? panic("ml model w1 serialize")
+        wire_w2 :: compute.serialize(model.w2) ?? panic("ml model w2 serialize")
+        wire :: "{wire_w1}\n{wire_w2}"
+        checksum :: crypto.sha256(wire.bytes()).hex()
+        files.write(path, wire) ?? panic("ml model write")
+        restored_wire :: files.read(path) ?? panic("ml model read")
+        restored_checksum :: crypto.sha256(restored_wire.bytes()).hex()
+        parts :: restored_wire.lines().to_list()
+        if parts.len() != 2 -> panic("ml model state shape")
+        restored_w1 :: compute.deserialize(parts[0]) ?? panic("ml model w1 deserialize")
+        restored_w2 :: compute.deserialize(parts[1]) ?? panic("ml model w2 deserialize")
+        restored_model :: TwoLayerModel{w1: restored_w1, w2: restored_w2}
+        return ModelStateReceipt{
+            path: path,
+            checksum: checksum,
+            restored_checksum: restored_checksum,
+            equal: checksum == restored_checksum
+                && compute.to_list(model.w1) == compute.to_list(restored_model.w1)
+                && compute.to_list(model.w2) == compute.to_list(restored_model.w2),
+            model: model,
+            restored: restored_model,
+        }
+    }
+
+    pub struct Embedding {
+        pub id: Int
+        pub values: [Float]
+    }
+
+    pub struct EmbeddingIndex {
+        pub vectors: [Embedding]
+        pub dimensions: Int
+    }
+
+    pub struct EmbeddingHit {
+        pub id: Int
+        pub score: Float
+    }
+
+    pub fn embedding_vector(id: Int) [Float] -> [
+        Float{id},
+        Float{id % 7},
+        Float{id % 11},
+        Float{id % 13},
+    ]
+
+    pub fn exact_embedding_index(count: Int) EmbeddingIndex -> {
+        bounded := count
+        if bounded < 0 -> bounded = 0
+        vectors := [Embedding]{}
+        loop id in 0..<bounded -> vectors.push(Embedding{id: id, values: embedding_vector(id)})
+        return EmbeddingIndex{vectors: vectors, dimensions: 4}
+    }
+
+    pub fn cosine_similarity(left: [Float], right: [Float]) Float -> {
+        if left.len() != right.len() -> panic("ml cosine dimensions")
+        if left.len() == 0 -> panic("ml cosine empty vector")
+        dot := 0.0
+        left_norm := 0.0
+        right_norm := 0.0
+        loop index in 0..<left.len() {
+            dot += left[index] * right[index]
+            left_norm += left[index] * left[index]
+            right_norm += right[index] * right[index]
+        }
+        if left_norm == 0.0 || right_norm == 0.0 -> panic("ml cosine zero vector")
+        return dot / (math.sqrt(left_norm) * math.sqrt(right_norm))
+    }
+
+    pub fn top_k_embeddings(index: EmbeddingIndex, query: [Float], limit: Int) [EmbeddingHit] -> {
+        if limit <= 0 -> return [EmbeddingHit]{}
+        if query.len() != index.dimensions -> panic("ml embedding dimensions")
+        hits := [EmbeddingHit]{}
+        loop item in index.vectors {
+            score :: cosine_similarity(item.values, query)
+            if hits.len() < limit {
+                position := hits.len()
+                loop cursor in 0..<hits.len() {
+                    current :: hits[cursor]
+                    if score > current.score || (score == current.score && item.id < current.id) {
+                        position = cursor
+                        break
+                    }
+                }
+                hits.insert(position, EmbeddingHit{id: item.id, score: score})
+            } else {
+                worst :: hits[limit - 1]
+                if score > worst.score || (score == worst.score && item.id < worst.id) {
+                    position := hits.len()
+                    loop cursor in 0..<hits.len() {
+                        current :: hits[cursor]
+                        if score > current.score || (score == current.score && item.id < current.id) {
+                            position = cursor
+                            break
+                        }
+                    }
+                    hits.insert(position, EmbeddingHit{id: item.id, score: score})
+                    _removed :: hits.pop() ?? panic("ml embedding top-k")
+                }
+            }
+        }
+        return hits
+    }
+
+    #Codable
+    pub struct ChatMessage {
+        pub role: String
+        pub content: String
+        pub tool_call_id: ?String
+    }
+
+    #Codable
+    pub struct ChatRequest {
+        pub model: String
+        pub stream: Bool
+        pub messages: [ChatMessage]
+    }
+
+    pub fn user_message(content: String) ChatMessage -> ChatMessage{
+        role: "user",
+        content: content,
+        tool_call_id: None,
+    }
+
+    pub fn tool_result_turn(call_id: String, content: String) ChatMessage -> ChatMessage{
+        role: "tool",
+        content: content,
+        tool_call_id: Val(call_id),
+    }
+
+    pub fn chat_request(model: String, messages: [ChatMessage]) String -> {
+        return json.to_string(ChatRequest{model: model, stream: true, messages: messages})
+    }
+
+    pub struct SseEvent {
+        pub data: String
+        pub done: Bool
+        pub streamed: Bool
+        pub tool_call: Bool
+        pub call_id: String
+        pub tool_name: String
+        pub tool_arguments: String
+        pub content: String
+    }
+
+    fn parse_sse_event(data: String) SseEvent -> {
+        if data == "[DONE]" {
+            return SseEvent{
+                data: data,
+                done: true,
+                streamed: false,
+                tool_call: false,
+                call_id: "",
+                tool_name: "",
+                tool_arguments: "",
+                content: "",
+            }
+        }
+        tree :: json.parse(data) ?? panic("ml SSE JSON")
+        tool_call := false
+        call_id := ""
+        tool_name := ""
+        tool_arguments := ""
+        content := ""
+        choices :: tree.field("choices") ?? DataTree.Null
+        if choices == .Array(items) {
+            if items.len() > 0 {
+                delta :: (items[0].field("delta") ?? DataTree.Null)
+                content_value :: delta.field("content") ?? DataTree.Null
+                content = content_value.text() ?? ""
+                calls :: delta.field("tool_calls") ?? DataTree.Null
+                if calls == .Array(tool_items) {
+                    if tool_items.len() > 0 {
+                        tool_call = true
+                        call :: tool_items[0]
+                        call_id = (call.field("id") ?? DataTree.Null).text() ?? ""
+                        function :: call.field("function") ?? DataTree.Null
+                        tool_name = (function.field("name") ?? DataTree.Null).text() ?? ""
+                        tool_arguments = (function.field("arguments") ?? DataTree.Null).text() ?? ""
+                    }
+                }
+            }
+        }
+        return SseEvent{
+            data: data,
+            done: false,
+            streamed: true,
+            tool_call: tool_call,
+            call_id: call_id,
+            tool_name: tool_name,
+            tool_arguments: tool_arguments,
+            content: content,
+        }
+    }
+
+    pub fn read_sse(body: String) [SseEvent] -> {
+        events := [SseEvent]{}
+        current := ""
+        loop line in body.split("\n") {
+            trimmed :: line.trim()
+            if trimmed == "" {
+                if current != "" {
+                    events.push(parse_sse_event(current))
+                    current = ""
+                }
+            } else if trimmed.starts_with("data:") {
+                parts :: trimmed.split("data:").to_list()
+                if parts.len() > 1 {
+                    payload :: parts[1].trim()
+                    if current == "" {
+                        current = payload
+                    } else {
+                        current += "\n{payload}"
+                    }
+                }
+            }
+        }
+        if current != "" -> events.push(parse_sse_event(current))
+        return events
+    }
+
+    pub fn stream_chat(endpoint: String, request_body: String) [SseEvent] !HTTPError -> {
+        request :: http_client.request("POST", endpoint)
+            .body(request_body)
+            .header("content-type", "application/json")
+            .read_timeout(5000)
+        response :: request.send()
+        body :: response.body().text(8 * 1024 * 1024) ?? panic("ml SSE body")
+        return read_sse(body)
+    }
+
+    pub struct ToolLoopReceipt {
+        pub steps: Int
+        pub max_steps: Int
+        pub tool_calls: Int
+        pub tool_result_turns: Int
+        pub streamed_events: Int
+        pub completed: Bool
+        pub bounded: Bool
+        pub transcript: [String]
+    }
+
+    pub fn bounded_tool_loop(endpoint: String, model: String, prompt: String, max_steps: Int) ToolLoopReceipt !HTTPError -> {
+        limit := max_steps
+        if limit < 0 -> limit = 0
+        messages := [ChatMessage]{user_message(prompt)}
+        transcript := [String]{}
+        steps := 0
+        tool_calls := 0
+        tool_result_turns := 0
+        streamed_events := 0
+        completed := false
+        loop steps < limit {
+            body :: chat_request(model, messages)
+            events :: stream_chat(endpoint, body)
+            saw_tool := false
+            saw_content := false
+            loop event in events {
+                if event.done -> continue
+                streamed_events += 1
+                if event.tool_call {
+                    saw_tool = true
+                    tool_calls += 1
+                    tool_result :: tool_result_turn(event.call_id, "tool_result:{event.tool_arguments}")
+                    messages.push(tool_result)
+                    tool_result_turns += 1
+                    transcript.push("tool:{event.tool_name}")
+                    break
+                }
+                if event.content != "" {
+                    saw_content = true
+                    transcript.push(event.content)
+                }
+            }
+            steps += 1
+            if saw_tool -> continue
+            if saw_content || events.len() > 0 {
+                completed = true
+                break
+            }
+        }
+        return ToolLoopReceipt{
+            steps: steps,
+            max_steps: limit,
+            tool_calls: tool_calls,
+            tool_result_turns: tool_result_turns,
+            streamed_events: streamed_events,
+            completed: completed,
+            bounded: steps >= limit && !completed,
+            transcript: transcript,
+        }
+    }
+
+    pub struct DeviceReceipt {
+        pub requested: String
+        pub selected: String
+        pub precision: String
+        pub placement: String
+        pub available: Bool
+        pub reason: String
+    }
+
+    pub fn f32_gpu_receipt() DeviceReceipt -> {
+        seed :: compute.matrix(1, 1, 2.0) ?? panic("ml GPU seed")
+        f32_seed :: compute.matmul_f32_tile(seed, seed) ?? panic("ml GPU F32")
+        requested :: compute.device_vulkan()
+        placed :: compute.on_device(f32_seed, requested)
+        if placed == {
+            .Ok(value) -> return DeviceReceipt{
+                requested: "Vulkan",
+                selected: compute.device(value),
+                precision: compute.profile_f32_strict(),
+                placement: compute.placement(value),
+                available: true,
+                reason: "",
+            }
+            .Err(error) -> return DeviceReceipt{
+                requested: "Vulkan",
+                selected: "unavailable",
+                precision: compute.profile_f32_strict(),
+                placement: "",
+                available: false,
+                reason: "{error}",
+            }
+        }
+    }
+
+    #Codable
+    struct IncumbentResult {
+        elapsed_ms: Int
+        first: Float
+        checked: Bool
+    }
+
+    pub struct IncumbentReceipt {
+        pub command: String
+        pub available: Bool
+        pub elapsed_ms: Int
+        pub first: Float
+        pub result_check: Bool
+    }
+
+    fn run_incumbent(command: String, script: String, expected: Float) IncumbentReceipt -> {
+        outcome :: process.cmd([command, "-c", script])
+            .stdout(.Capture)
+            .stderr(.Capture)
+            .timeout(10s)
+            .output_limit(4096)
+            .run()
+        if outcome == {
+            .Ok(receipt) -> {
+                if !receipt.success -> return IncumbentReceipt{
+                    command: command,
+                    available: false,
+                    elapsed_ms: -1,
+                    first: 0.0,
+                    result_check: false,
+                }
+                result :: json.decode<IncumbentResult>(receipt.output.trim())
+                if result == {
+                    .Ok(parsed) -> return IncumbentReceipt{
+                        command: command,
+                        available: true,
+                        elapsed_ms: parsed.elapsed_ms,
+                        first: parsed.first,
+                        result_check: parsed.checked && parsed.first == expected,
+                    }
+                    .Err(_) -> return IncumbentReceipt{
+                        command: command,
+                        available: false,
+                        elapsed_ms: -1,
+                        first: 0.0,
+                        result_check: false,
+                    }
+                }
+            }
+            .Err(_) -> return IncumbentReceipt{
+                command: command,
+                available: false,
+                elapsed_ms: -1,
+                first: 0.0,
+                result_check: false,
+            }
+        }
+    }
+
+    fn numpy_script(rows: Int, inner: Int, cols: Int, repeats: Int) String -> {
+        return "import json,time,numpy as np; left=np.ones(({rows},{inner})); right=np.full(({inner},{cols}),2.0); started=time.perf_counter_ns(); results=[left@right for _ in range({repeats})]; result=results[-1]; elapsed=int((time.perf_counter_ns()-started)/1000000); print('{{\"elapsed_ms\":'+str(elapsed)+',\"first\":'+str(float(result[0,0]))+',\"checked\":'+str(bool(np.all(result=={inner}*2.0))).lower()+'}}')"
+    }
+
+    fn pytorch_script(rows: Int, inner: Int, cols: Int, repeats: Int) String -> {
+        return "import json,time,torch; left=torch.ones(({rows},{inner})); right=torch.full(({inner},{cols}),2.0); started=time.perf_counter_ns(); results=[left@right for _ in range({repeats})]; result=results[-1]; elapsed=int((time.perf_counter_ns()-started)/1000000); print('{{\"elapsed_ms\":'+str(elapsed)+',\"first\":'+str(float(result[0,0]))+',\"checked\":'+str(bool(torch.all(result=={inner}*2.0).item())).lower()+'}}')"
+    }
+
+    pub struct MatmulBenchmark {
+        pub rows: Int
+        pub inner: Int
+        pub cols: Int
+        pub repetitions: Int
+        pub tier: String
+        pub jet_elapsed_ms: Int
+        pub jet_first: Float
+        pub jet_result_check: Bool
+        pub numpy: IncumbentReceipt
+        pub pytorch: IncumbentReceipt
+    }
+
+    pub fn matmul_benchmark(rows: Int, inner: Int, cols: Int, repetitions: Int, tier: String) MatmulBenchmark -> {
+        bounded_rows := rows
+        bounded_inner := inner
+        bounded_cols := cols
+        bounded_repetitions := repetitions
+        if bounded_rows < 1 -> bounded_rows = 1
+        if bounded_inner < 1 -> bounded_inner = 1
+        if bounded_cols < 1 -> bounded_cols = 1
+        if bounded_repetitions < 1 -> bounded_repetitions = 1
+
+        left :: compute.matrix(bounded_rows, bounded_inner, 1.0) ?? panic("ml benchmark left")
+        right :: compute.matrix(bounded_inner, bounded_cols, 2.0) ?? panic("ml benchmark right")
+        result :: compute.zeros([bounded_rows, bounded_cols]) ?? panic("ml benchmark result")
+        started :: time.instant()
+        measured := result
+        loop _repeat in 0..<bounded_repetitions {
+            measured = compute.matmul(left, right) ?? panic("ml benchmark matmul")
+        }
+        elapsed :: started.elapsed().in(.Milliseconds)
+        expected :: Float{bounded_inner} * 2.0
+        first :: compute.to_list(measured)[0]
+        numpy := run_incumbent("python3", numpy_script(bounded_rows, bounded_inner, bounded_cols, bounded_repetitions), expected)
+        if !numpy.available -> numpy = run_incumbent("python", numpy_script(bounded_rows, bounded_inner, bounded_cols, bounded_repetitions), expected)
+        pytorch := run_incumbent("python3", pytorch_script(bounded_rows, bounded_inner, bounded_cols, bounded_repetitions), expected)
+        if !pytorch.available -> pytorch = run_incumbent("python", pytorch_script(bounded_rows, bounded_inner, bounded_cols, bounded_repetitions), expected)
+        return MatmulBenchmark{
+            rows: bounded_rows,
+            inner: bounded_inner,
+            cols: bounded_cols,
+            repetitions: bounded_repetitions,
+            tier: tier,
+            jet_elapsed_ms: elapsed,
+            jet_first: first,
+            jet_result_check: first == expected,
+            numpy: numpy,
+            pytorch: pytorch,
+        }
+    }
+
+    pub fn open_core_gates() [String] -> [
+        "#2772: compute.gradient closure path is not executable across all tiers",
+        "#2769: Tensor values cannot yet be carried in user model structs",
+        "#2779: checker/runtime slowdown blocks the 10,000-vector exact scan",
+        "#2778: accelerator availability and cross-tier placement proof remain open",
+    ]
+
+    pub fn future_commands() [String] -> [
+        "scripts/agent/jet-env jet run examples/features/math/ml_battery",
+        "scripts/agent/jet-env jet build examples/features/math/ml_battery --release",
+        "scripts/agent/jet-env jet build examples/features/math/ml_battery --target native --verbose",
+    ]
+}

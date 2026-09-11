@@ -1040,11 +1040,18 @@ fn parse_cargo_import(
     Ok(())
 }
 
-fn json_string(value: Option<&jet_foundation::JSON::JSONValue>) -> Option<String> {
+use jet_foundation::DataTree::DataTree;
+fn json_string(value: Option<&DataTree>) -> Option<String> {
     match value {
-        Some(jet_foundation::JSON::JSONValue::String(value)) => Some(value.clone()),
+        Some(DataTree::Text(value) | DataTree::TypedText(value)) => Some(value.clone()),
         _ => None,
     }
+}
+
+fn json_object_field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+    object
+        .iter()
+        .find_map(|(name, value)| (name == key).then_some(value))
 }
 
 fn parse_npm_import(
@@ -1055,7 +1062,7 @@ fn parse_npm_import(
     let value = jet_foundation::JSON::parse_json(source).map_err(|_| {
         legacy_import_error(LegacyWrapperKind::Npm, "package.json is not valid JSON")
     })?;
-    let jet_foundation::JSON::JSONValue::Object(object) = &value else {
+    let DataTree::Object(object) = &value else {
         return Err(legacy_import_error(
             LegacyWrapperKind::Npm,
             "package.json root must be an object",
@@ -1073,7 +1080,8 @@ fn parse_npm_import(
         "optionalDependencies",
     ];
     if let Some(field) = object
-        .keys()
+        .iter()
+        .map(|(field, _)| field)
         .find(|field| !SUPPORTED_NPM_FIELDS.contains(&field.as_str()))
     {
         return Err(legacy_import_error(
@@ -1081,30 +1089,33 @@ fn parse_npm_import(
             format!("unsupported package.json field `{field}`"),
         ));
     }
-    if object.contains_key("name") && json_string(object.get("name")).is_none() {
+    if json_object_field(object, "name").is_some()
+        && json_string(json_object_field(object, "name")).is_none()
+    {
         return Err(legacy_import_error(
             LegacyWrapperKind::Npm,
             "package name must be a string",
         ));
     }
-    if let Some(name) = json_string(object.get("name")) {
+    if let Some(name) = json_string(json_object_field(object, "name")) {
         import
             .labels
             .insert("legacy.package".to_string(), name.clone());
     }
-    if object.contains_key("version") && json_string(object.get("version")).is_none() {
+    if json_object_field(object, "version").is_some()
+        && json_string(json_object_field(object, "version")).is_none()
+    {
         return Err(legacy_import_error(
             LegacyWrapperKind::Npm,
             "package version must be a string",
         ));
     }
-    if let Some(version) = json_string(object.get("version")) {
+    if let Some(version) = json_string(json_object_field(object, "version")) {
         import.labels.insert("legacy.version".to_string(), version);
     }
-    let scripts = object
-        .get("scripts")
+    let scripts = json_object_field(object, "scripts")
         .and_then(|value| match value {
-            jet_foundation::JSON::JSONValue::Object(value) => Some(value),
+            DataTree::Object(value) => Some(value),
             _ => None,
         })
         .ok_or_else(|| {
@@ -1126,7 +1137,7 @@ fn parse_npm_import(
             .insert(format!("legacy.script.{name}"), command);
         script_names.push(name.clone());
     }
-    let script = if scripts.contains_key("build") {
+    let script = if json_object_field(scripts, "build").is_some() {
         "build".to_string()
     } else if script_names.len() == 1 {
         script_names.pop().expect("one npm script was checked")
@@ -1145,8 +1156,8 @@ fn parse_npm_import(
     ];
     let mut has_dependencies = false;
     for section in dependency_sections {
-        if let Some(value) = object.get(section) {
-            let jet_foundation::JSON::JSONValue::Object(values) = value else {
+        if let Some(value) = json_object_field(object, section) {
+            let DataTree::Object(values) = value else {
                 return Err(legacy_import_error(
                     LegacyWrapperKind::Npm,
                     format!("package {section} must be an object"),
@@ -1200,23 +1211,23 @@ fn parse_npm_import(
             "dependency closure requires package-lock.json or npm-shrinkwrap.json",
         ));
     }
-    let output = if let Some(value) = object.get("main") {
+    let output = if let Some(value) = json_object_field(object, "main") {
         import.outputs_explicit = true;
         json_string(Some(value)).ok_or_else(|| {
             legacy_import_error(LegacyWrapperKind::Npm, "package main must be a string")
         })?
-    } else if let Some(value) = object.get("module") {
+    } else if let Some(value) = json_object_field(object, "module") {
         import.outputs_explicit = true;
         match value {
-            jet_foundation::JSON::JSONValue::String(path) => path.clone(),
-            jet_foundation::JSON::JSONValue::Array(values) => {
+            DataTree::Text(path) | DataTree::TypedText(path) => path.clone(),
+            DataTree::Array(values) => {
                 if values.len() != 1 {
                     return Err(legacy_import_error(
                         LegacyWrapperKind::Npm,
                         "package module must contain exactly one string path",
                     ));
                 }
-                let Some(jet_foundation::JSON::JSONValue::String(path)) = values.first() else {
+                let Some(DataTree::Text(path) | DataTree::TypedText(path)) = values.first() else {
                     return Err(legacy_import_error(
                         LegacyWrapperKind::Npm,
                         "package module must contain one string path",

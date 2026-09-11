@@ -14,97 +14,106 @@ fn from_json_number(value: String) -> CtValue {
     exact_int_value(number)
 }
 
-fn from_json(value: jet_foundation::EncodingJson::Value) -> CtValue {
+fn from_json(value: jet_foundation::DataTree::DataTree) -> CtValue {
     match value {
-        jet_foundation::EncodingJson::Value::Null => json_variant("Null", None),
-        jet_foundation::EncodingJson::Value::Bool(value) => {
+        jet_foundation::DataTree::DataTree::Null => json_variant("Null", None),
+        jet_foundation::DataTree::DataTree::Bool(value) => {
             json_variant("Bool", Some(CtValue::Bool(value)))
         }
-        jet_foundation::EncodingJson::Value::Int(value) => {
+        jet_foundation::DataTree::DataTree::Int(value) => {
             json_variant("Int", Some(from_json_int(value)))
         }
-        jet_foundation::EncodingJson::Value::Float(value) => {
+        jet_foundation::DataTree::DataTree::Float(value) => {
             json_variant("Float", Some(CtValue::Float(CtFloat::f64(value))))
         }
-        jet_foundation::EncodingJson::Value::Number(value) => {
+        jet_foundation::DataTree::DataTree::Number(value) => {
             json_variant("Int", Some(from_json_number(value)))
         }
-        jet_foundation::EncodingJson::Value::Text(value) => {
+        jet_foundation::DataTree::DataTree::TypedText(value)
+        | jet_foundation::DataTree::DataTree::Text(value) => {
             json_variant("Text", Some(CtValue::Str(value)))
         }
-        jet_foundation::EncodingJson::Value::Array(values) => json_variant(
+        jet_foundation::DataTree::DataTree::Array(values) => json_variant(
             "Array",
             Some(CtValue::List(values.into_iter().map(from_json).collect())),
         ),
-        jet_foundation::EncodingJson::Value::Object(fields) => {
-            let map = fields
+        jet_foundation::DataTree::DataTree::Object(fields) => json_object(
+            fields
                 .into_iter()
-                .map(|(key, value)| (CtKey::Str(key), from_json(value)))
-                .collect();
-            json_variant("Object", Some(CtValue::Map(map)))
+                .map(|(key, value)| (key, from_json(value)))
+                .collect(),
+        ),
+        jet_foundation::DataTree::DataTree::Bytes(_) => {
+            unreachable!("JSON parser does not produce byte nodes")
         }
     }
 }
 
-fn from_ordered_json(value: jet_foundation::EncodingJson::Value) -> CtValue {
+fn from_ordered_json(value: jet_foundation::DataTree::DataTree) -> CtValue {
     match value {
-        jet_foundation::EncodingJson::Value::Object(fields) => json_object(
+        jet_foundation::DataTree::DataTree::Object(fields) => json_object(
             fields
                 .into_iter()
                 .map(|(key, value)| (key, from_ordered_json(value)))
                 .collect(),
         ),
-        jet_foundation::EncodingJson::Value::Null => json_variant("Null", None),
-        jet_foundation::EncodingJson::Value::Bool(value) => {
+        jet_foundation::DataTree::DataTree::Null => json_variant("Null", None),
+        jet_foundation::DataTree::DataTree::Bool(value) => {
             json_variant("Bool", Some(CtValue::Bool(value)))
         }
-        jet_foundation::EncodingJson::Value::Int(value) => {
+        jet_foundation::DataTree::DataTree::Int(value) => {
             json_variant("Int", Some(from_json_int(value)))
         }
-        jet_foundation::EncodingJson::Value::Float(value) => {
+        jet_foundation::DataTree::DataTree::Float(value) => {
             json_variant("Float", Some(CtValue::Float(CtFloat::f64(value))))
         }
-        jet_foundation::EncodingJson::Value::Number(value) => {
+        jet_foundation::DataTree::DataTree::Number(value) => {
             json_variant("Int", Some(from_json_number(value)))
         }
-        jet_foundation::EncodingJson::Value::Text(value) => {
+        jet_foundation::DataTree::DataTree::TypedText(value)
+        | jet_foundation::DataTree::DataTree::Text(value) => {
             json_variant("Text", Some(CtValue::Str(value)))
         }
-        jet_foundation::EncodingJson::Value::Array(values) => json_variant(
+        jet_foundation::DataTree::DataTree::Array(values) => json_variant(
             "Array",
             Some(CtValue::List(
                 values.into_iter().map(from_ordered_json).collect(),
             )),
         ),
+        jet_foundation::DataTree::DataTree::Bytes(_) => {
+            unreachable!("JSON parser does not produce byte nodes")
+        }
     }
 }
 
-fn from_typed_ordered_json(value: jet_foundation::EncodingJson::Value) -> CtValue {
+fn from_typed_ordered_json(value: jet_foundation::DataTree::DataTree) -> CtValue {
     match value {
-        jet_foundation::EncodingJson::Value::Object(fields) => json_object(
+        jet_foundation::DataTree::DataTree::Object(fields) => json_object(
             fields
                 .into_iter()
                 .map(|(key, value)| (key, from_typed_ordered_json(value)))
                 .collect(),
         ),
-        jet_foundation::EncodingJson::Value::Null => json_variant("Null", None),
-        jet_foundation::EncodingJson::Value::Bool(value) => {
+        jet_foundation::DataTree::DataTree::Null => json_variant("Null", None),
+        jet_foundation::DataTree::DataTree::Bool(value) => {
             json_variant("Bool", Some(CtValue::Bool(value)))
         }
-        jet_foundation::EncodingJson::Value::Number(value) => {
+        jet_foundation::DataTree::DataTree::Number(value) => {
             json_variant("Number", Some(CtValue::Str(value)))
         }
-        jet_foundation::EncodingJson::Value::Text(value) => {
+        jet_foundation::DataTree::DataTree::TypedText(value)
+        | jet_foundation::DataTree::DataTree::Text(value) => {
             json_variant("TypedText", Some(CtValue::Str(value)))
         }
-        jet_foundation::EncodingJson::Value::Array(values) => json_variant(
+        jet_foundation::DataTree::DataTree::Array(values) => json_variant(
             "Array",
             Some(CtValue::List(
                 values.into_iter().map(from_typed_ordered_json).collect(),
             )),
         ),
-        jet_foundation::EncodingJson::Value::Int(_)
-        | jet_foundation::EncodingJson::Value::Float(_) => {
+        jet_foundation::DataTree::DataTree::Int(_)
+        | jet_foundation::DataTree::DataTree::Float(_)
+        | jet_foundation::DataTree::DataTree::Bytes(_) => {
             unreachable!("lossless JSON parsing projected a number early")
         }
     }
@@ -120,14 +129,14 @@ fn json_object(fields: Vec<(String, CtValue)>) -> CtValue {
     )
 }
 
-/// D-SERDE-ACCESS=B / D-DYNAMIC-TYPE1=A: build one node of the `JSON`/`Data`
-/// dynamic-value tree — a `CtValue::Enum` so it round-trips through the exact
-/// same pattern-matching (`data == .Object(entries)`, S31) and explicit
-/// construction (`JSON.Text("jet")`) machinery a user enum already gets, with
-/// no interpreter-specific special case needed on either of those paths.
+/// D-SERDE-ACCESS=B / D-DYNAMIC-TYPE1=A: build one node of the canonical
+/// `DataTree` dynamic-value tree — a `CtValue::Enum` so it round-trips through
+/// the exact same pattern-matching (`data == .Object(entries)`, S31) and
+/// explicit construction (`DataTree.Text("jet")`) machinery a user enum already
+/// gets, with no interpreter-specific special case needed on either path.
 pub(super) fn json_variant(variant: &str, payload: Option<CtValue>) -> CtValue {
     CtValue::Enum {
-        type_name: "JSON".to_string(),
+        type_name: "DataTree".to_string(),
         variant: variant.to_string(),
         args: match payload {
             Some(v) => vec![(None, v)],
@@ -136,7 +145,7 @@ pub(super) fn json_variant(variant: &str, payload: Option<CtValue>) -> CtValue {
     }
 }
 
-/// The payload of a `JSON`-tagged `CtValue` with the given variant name, or
+/// The payload of a `DataTree`-tagged `CtValue` with the given variant name, or
 /// `None` if `v` isn't that shape (used by the `.field`/`.at`/`.int`/`.text`/
 /// `.bool`/`.float` accessor methods in `Builtins.rs`).
 pub(super) fn json_payload<'a>(v: &'a CtValue, variant: &str) -> Option<&'a CtValue> {
@@ -145,7 +154,7 @@ pub(super) fn json_payload<'a>(v: &'a CtValue, variant: &str) -> Option<&'a CtVa
             type_name,
             variant: vname,
             args,
-        } if type_name == "JSON" && vname == variant => args.first().map(|(_, v)| v),
+        } if type_name == "DataTree" && vname == variant => args.first().map(|(_, v)| v),
         _ => None,
     }
 }
@@ -163,17 +172,17 @@ pub(super) fn parse_json_ordered(
 pub(super) fn parse_json_typed_ordered(
     text: &str,
 ) -> Result<CtValue, jet_foundation::EncodingJson::Error> {
-    jet_foundation::EncodingJson::parse_json_exact_numbers(text, false).map(from_typed_ordered_json)
+    jet_foundation::EncodingJson::parse_json_typed(text, false).map(from_typed_ordered_json)
 }
 
-pub(super) fn json_error_value(e: jet_foundation::EncodingJson::Error) -> CtValue {
-    CtValue::Struct {
-        type_name: "JSONError".to_string(),
-        fields: vec![
-            ("line".to_string(), CtValue::Int(e.line)),
-            ("message".to_string(), CtValue::Str(e.message)),
-        ],
-    }
+pub(super) fn encoding_error_value(e: jet_foundation::EncodingJson::Error) -> CtValue {
+    super::EncodingLite::encoding_error_value_at(
+        "JSON",
+        "Syntax",
+        e.line,
+        1,
+        e.message,
+    )
 }
 
 /// `core.encoding.jsonl.parse` (`EncodingLite.rs`) reports a JSON parse error
@@ -181,29 +190,29 @@ pub(super) fn json_error_value(e: jet_foundation::EncodingJson::Error) -> CtValu
 /// `jet_std_jsonl_parse` (`MathRandomTime.rs`), which adds the 0-based JSONL
 /// line index to the per-line JSON parser's own line number.
 /// parity: guard tests/encoding_parity.rs::jsonl_csv_xml_cbor_streams_match_aot_and_default_dev
-pub(super) fn json_error_value_at_line(
+pub(super) fn encoding_error_value_at_line(
     e: jet_foundation::EncodingJson::Error,
     line_offset: i64,
 ) -> CtValue {
-    json_error_value(jet_foundation::EncodingJson::Error {
-        line: line_offset + e.line,
-        message: e.message,
-    })
+    super::EncodingLite::encoding_error_value_at(
+        "JSONL",
+        "Syntax",
+        line_offset + e.line,
+        1,
+        e.message,
+    )
 }
 
 /// Render the ordered `DataTree` representation used by typed codecs. Dynamic
-/// JSON keeps the canonical BTreeMap renderer below; published-schema output
-/// must retain the wire order stored in `JSONObject`.
+/// values use the same canonical tree; published-schema output retains the
+/// wire order stored in `JSONObject`.
 pub(super) fn render_ordered_datatree(v: &CtValue, pretty: bool, depth: usize) -> String {
     match v {
         CtValue::Enum {
             type_name,
             variant,
             args,
-        } if matches!(
-            type_name.as_str(),
-            "DataTree" | "JSON" | "TOML" | "YAML" | "CSV"
-        ) =>
+        } if matches!(type_name.as_str(), "DataTree" | "TOML" | "YAML" | "CSV") =>
         {
             match variant.as_str() {
                 "Null" => "null".to_string(),
@@ -216,6 +225,10 @@ pub(super) fn render_ordered_datatree(v: &CtValue, pretty: bool, depth: usize) -
                         _ => None,
                     })
                     .unwrap_or_else(|| "null".to_string()),
+                "Object" => args
+                    .first()
+                    .map(|(_, payload)| render_ordered_object_payload(payload, pretty, depth))
+                    .unwrap_or_else(|| "{}".to_string()),
                 _ => args
                     .first()
                     .map(|(_, payload)| render_ordered_datatree(payload, pretty, depth))
@@ -249,6 +262,45 @@ pub(super) fn render_ordered_datatree(v: &CtValue, pretty: bool, depth: usize) -
         }
         _ => render_json_pretty(v, pretty, depth),
     }
+}
+
+fn render_ordered_object_payload(payload: &CtValue, pretty: bool, depth: usize) -> String {
+    let fields = match payload {
+        CtValue::Map(entries) => entries
+            .iter()
+            .map(|(key, value)| match key {
+                CtKey::Str(key) => Some((key.clone(), value.clone())),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>(),
+        CtValue::Struct { type_name, fields } if type_name == "JSONObject" => {
+            return render_ordered_object(fields, pretty, depth);
+        }
+        CtValue::List(values) => values
+            .iter()
+            .map(|value| {
+                let CtValue::Struct { fields, .. } = value else {
+                    return None;
+                };
+                let key = fields
+                    .iter()
+                    .find(|(name, _)| name == "key")
+                    .map(|(_, value)| value)?;
+                let value = fields
+                    .iter()
+                    .find(|(name, _)| name == "value")
+                    .map(|(_, value)| value)?;
+                let CtValue::Str(key) = key else {
+                    return None;
+                };
+                Some((key.clone(), value.clone()))
+            })
+            .collect::<Option<Vec<_>>>(),
+        _ => None,
+    };
+    fields
+        .map(|fields| render_ordered_object(&fields, pretty, depth))
+        .unwrap_or_else(|| render_json_pretty(payload, pretty, depth))
 }
 
 fn render_ordered_object(fields: &[(String, CtValue)], pretty: bool, depth: usize) -> String {
@@ -289,17 +341,14 @@ fn render_ordered_object(fields: &[(String, CtValue)], pretty: bool, depth: usiz
 
 pub(super) fn render_json_pretty(v: &CtValue, pretty: bool, depth: usize) -> String {
     match v {
-        // D-SERDE-ACCESS=B: a `JSON`-tagged dynamic value (from `.parse()`, or
-        // built by hand with `JSON.Text(…)`/`JSON.Object(…)`) — unwrap the tag
+        // D-SERDE-ACCESS=B: a `DataTree` value (from `.parse()`, or built by
+        // hand with `DataTree.Text(…)`/`DataTree.Object(…)`) — unwrap the tag
         // and render its payload the same way the untagged shapes below do.
         CtValue::Enum {
             type_name,
             variant,
             args,
-        } if matches!(
-            type_name.as_str(),
-            "DataTree" | "JSON" | "TOML" | "YAML" | "CSV"
-        ) =>
+        } if matches!(type_name.as_str(), "DataTree" | "TOML" | "YAML" | "CSV") =>
         {
             match variant.as_str() {
                 "Null" => "null".to_string(),

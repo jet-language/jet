@@ -308,6 +308,9 @@ impl<'a> Parser<'a> {
             });
             if matches!(self.peek().kind, TokKind::Comma) {
                 self.bump();
+                if matches!(self.peek().kind, TokKind::Gt | TokKind::Shr) {
+                    break;
+                }
                 continue;
             }
             break;
@@ -325,6 +328,25 @@ impl<'a> Parser<'a> {
             Ok(bounds)
         } else {
             let (name, _) = self.expect_ident("for a trait bound")?;
+            if matches!(
+                name.as_str(),
+                Syntax::TRAIT_ADD | Syntax::TRAIT_SUB | Syntax::TRAIT_MUL | Syntax::TRAIT_DIV
+            ) && matches!(self.peek().kind, TokKind::Lt)
+            {
+                self.expect_type_args_open("operator bound")?;
+                let (rhs, _) = self.type_()?;
+                if matches!(self.peek().kind, TokKind::Comma) {
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        format!("operator bound `{name}` accepts exactly one RHS type"),
+                        "an operator bound names one right-hand operand".to_string(),
+                        "write one type between `<` and `>`".to_string(),
+                        Some(self.peek().span),
+                    ));
+                }
+                self.expect_type_args_close("after the operator bound")?;
+                return Ok(vec![format!("{name}<{}>", rhs.name())]);
+            }
             if name == Syntax::BOUND_QUANTITY && matches!(self.peek().kind, TokKind::Lt) {
                 self.expect_type_args_open("quantity bound")?;
                 let (dimension, _) = self.expect_ident("for a quantity dimension")?;
@@ -362,6 +384,9 @@ impl<'a> Parser<'a> {
             bounds.push(name);
             if matches!(self.peek().kind, TokKind::Comma) {
                 self.bump();
+                if matches!(self.peek().kind, TokKind::RBracket) {
+                    break;
+                }
                 continue;
             }
             break;
@@ -510,6 +535,9 @@ impl<'a> Parser<'a> {
             args.push(t);
             if matches!(self.peek().kind, TokKind::Comma) {
                 self.bump();
+                if matches!(self.peek().kind, TokKind::Gt | TokKind::Shr) {
+                    break;
+                }
                 continue;
             }
             break;
@@ -911,6 +939,9 @@ impl<'a> Parser<'a> {
                                 args.push(self.type_generic_arg(&name)?.0);
                                 if matches!(self.peek().kind, TokKind::Comma) {
                                     self.bump();
+                                    if matches!(self.peek().kind, TokKind::Gt | TokKind::Shr) {
+                                        break;
+                                    }
                                     continue;
                                 }
                                 break;
@@ -1217,6 +1248,9 @@ impl<'a> Parser<'a> {
                     break;
                 }
                 self.expect(TokKind::Comma, "between parameter types in `fn(...)`")?;
+                if matches!(self.peek().kind, TokKind::RParen) {
+                    break;
+                }
             }
         }
         self.expect(TokKind::RParen, "after parameter types in `fn(...)`")?;
@@ -1507,6 +1541,9 @@ impl<'a> Parser<'a> {
                     break;
                 }
                 self.expect(TokKind::Comma, "between effects in the list")?;
+                if matches!(self.peek().kind, TokKind::RParen) {
+                    break;
+                }
             }
         }
         self.expect(TokKind::RParen, "to close the callback effect list")?;

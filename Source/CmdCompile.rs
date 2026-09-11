@@ -5,57 +5,93 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io::{IsTerminal, Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::process::{exit, Command};
-use std::sync::LazyLock;
+use std::process::{exit, Command, Stdio};
+use std::sync::{mpsc, LazyLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use jet::ExitCodes;
-use jet_foundation::Report::render_status_json;
-use jet_foundation::JSON::json_escape;
-
-use jet_store::{ArtifactRestore, Store};
+use crate::OutputAdapter::{
+    write_mode_diagnostic, write_mode_machine, write_mode_progress, write_mode_renderable,
+    write_mode_status,
+};
 use crate::{report_problems, usage, BuildProfile, OutputMode, ProfileConfig};
-struct BuildProgress {
+use jet::ExitCodes;
+use jet::RecordIndex::{
+    RecordCapture, RecordIdentity, RecordIndex, RecordIndexEntry, RecordKind, RecordLink,
+};
+use jet_foundation::DataTree::DataTree;
+use jet_foundation::Report::{
+    render_status, render_status_with_reports, StatusEnvelope, StatusFields, StatusValue,
+};
+use jet_foundation::JSON::json_escape;
+use jet_foundation::JSON::parse_json;
+use jet_store::{ArtifactRestore, Store};
+
+struct BuildProgress<'profile> {
     enabled: bool,
     verbose: bool,
     started: Instant,
-    theme: jet_foundation::Terminal::Theme,
+    mode: OutputMode,
+    progress: Option<jet_cli::MultiProgress::MultiProgress<'profile>>,
+    task: Option<jet_cli::MultiProgress::TaskId>,
 }
 
-impl BuildProgress {
-    fn new(cmd: &str, emit_rust: bool, verbose: bool, mode: OutputMode) -> Self {
+impl<'profile> BuildProgress<'profile> {
+    fn new(
+        cmd: &str,
+        emit_rust: bool,
+        verbose: bool,
+        mode: OutputMode,
+        profile: Option<&'profile jet_cli::OutputProfile::OutputProfile>,
+    ) -> Self {
+        let enabled = cmd == "build" && !emit_rust && !mode.quiet && !mode.json;
+        let mut progress = enabled
+            .then_some(profile)
+            .flatten()
+            .map(jet_cli::MultiProgress::MultiProgress::new);
+        let task = progress
+            .as_mut()
+            .and_then(|progress| progress.add_unknown("build").ok());
         Self {
-            enabled: cmd == "build" && !emit_rust && !mode.quiet && !mode.json,
+            enabled,
             verbose,
             started: Instant::now(),
-            theme: jet_foundation::Terminal::Theme::new(mode.color_stderr()),
+            mode,
+            progress,
+            task,
         }
     }
 
-    fn major(&self, label: &str, detail: &str) {
+    fn render(&mut self, phase: &str, detail: &str) {
+        let (Some(progress), Some(task)) = (self.progress.as_mut(), self.task) else {
+            return;
+        };
+        if progress.set_custom_column(task, "phase", phase).is_err()
+            || progress.set_custom_column(task, "detail", detail).is_err()
+        {
+            return;
+        }
+        if let Ok(Some(frame)) = progress.frame() {
+            let text = frame.text;
+            if !text.is_empty() {
+                write_mode_progress(self.mode, &format!("{text}\n"));
+            }
+        }
+    }
+
+    fn major(&mut self, label: &str, detail: &str) {
         if self.enabled {
-            eprintln!(
-                "  {}  {} {}",
-                self.theme.accent("jet"),
-                self.theme.bold(&format!("{label:<10}")),
-                detail
-            );
+            self.render(label, detail);
         }
     }
 
-    fn minor(&self, label: &str, detail: &str) {
+    fn minor(&mut self, label: &str, detail: &str) {
         if self.enabled && self.verbose {
-            eprintln!(
-                "       {} {} {}",
-                self.theme.dim("▸"),
-                self.theme.dim(label),
-                detail
-            );
+            self.render(label, detail);
         }
     }
 
-    fn finish(&self, artifact: &str) {
+    fn finish(&mut self, artifact: &str) {
         if !self.enabled {
             return;
         }
@@ -65,14 +101,17 @@ impl BuildProgress {
         } else {
             format!("{:.1}s", elapsed.as_secs_f64())
         };
-        eprintln!(
-            "  {}  {} {} in {} {}",
-            self.theme.accent("jet"),
-            self.theme.bold("Built"),
-            artifact,
-            duration,
-            self.theme.success("✓")
-        );
+        if let (Some(progress), Some(task)) = (self.progress.as_mut(), self.task) {
+            let _ = progress.set_custom_column(task, "artifact", artifact);
+            let _ = progress.set_custom_column(task, "elapsed", &duration);
+            let _ = progress.finish(task);
+            if let Ok(Some(frame)) = progress.frame() {
+                let text = frame.text;
+                if !text.is_empty() {
+                    write_mode_progress(self.mode, &format!("{text}\n"));
+                }
+            }
+        }
     }
 }
 
@@ -86,13 +125,410 @@ fn emit_run_output(stdout: &str, stderr: &str) {
         eprint!("{stderr}");
     }
 }
+fn render_diagnostic_status(
+    action: &str,
+    ok: bool,
+    file: &jet::Diagnostics::ReportPath,
+    source: &str,
+    diagnostics: &[jet::Diagnostics::Diagnostic],
+) -> String {
+    let clears = jet::Diagnostics::report_clear_counts(diagnostics);
+    let reports = diagnostics
+        .iter()
+        .zip(clears)
+        .map(|(diagnostic, clears)| diagnostic.to_report_with_clears(file, source, clears));
+    format!(
+        "{}\n",
+        render_status_with_reports(action, ok, reports, StatusFields::new())
+    )
+}
+
+fn index_compile_artifact(
+    identity: RecordIdentity,
+    kind: RecordKind,
+    artifact_id: String,
+    path: PathBuf,
+    size: u64,
+    capture: RecordCapture,
+    consumed: Vec<RecordLink>,
+    produced: Vec<RecordLink>,
+) -> Result<(), String> {
+    let mut index = RecordIndex::load_for_project(".")
+        .map_err(|error| format!("could not load record index: {error}"))?;
+    let (recorded_sequence, saved) = if let Some(entry) = index.find(kind, &artifact_id, true) {
+        (entry.recorded_sequence, entry.saved)
+    } else {
+        (
+            index
+                .next_recorded_sequence()
+                .map_err(|error| format!("could not allocate record sequence: {error}"))?,
+            false,
+        )
+    };
+    let entry = RecordIndexEntry::new(identity, kind, artifact_id.clone(), path)
+        .map_err(|error| format!("could not construct {kind} record: {error}"))?
+        .with_links(consumed, produced)
+        .map_err(|error| format!("could not link {kind} record `{artifact_id}`: {error}"))?
+        .with_capture(capture)
+        .with_size(size)
+        .with_recorded_sequence(recorded_sequence)
+        .with_saved(saved);
+    index
+        .update_and_store(entry)
+        .map_err(|error| format!("could not store {kind} record `{artifact_id}`: {error}"))
+}
+
+fn replay_artifact_id(bytes: &[u8]) -> Result<String, String> {
+    if bytes.len() < 16 {
+        return Err("replay artifact is truncated before its header".into());
+    }
+    let header_len = u32::from_le_bytes(
+        bytes[12..16]
+            .try_into()
+            .map_err(|_| "replay header length is invalid".to_string())?,
+    ) as usize;
+    let header_end = 16usize
+        .checked_add(header_len)
+        .ok_or_else(|| "replay header length overflows".to_string())?;
+    if header_end > bytes.len() {
+        return Err("replay artifact header is truncated".into());
+    }
+    let header = std::str::from_utf8(&bytes[16..header_end])
+        .map_err(|_| "replay artifact header is not UTF-8".to_string())?;
+    let DataTree::Object(fields) =
+        parse_json(header).map_err(|_| "replay artifact header is not valid JSON".to_string())?
+    else {
+        return Err("replay artifact header is not a JSON object".into());
+    };
+    let Some(artifact_id) = fields
+        .iter()
+        .find(|(key, _)| key == "artifact_id")
+        .and_then(|(_, value)| value.as_str().ok())
+    else {
+        return Err("replay artifact header has no artifact_id".into());
+    };
+    Ok(artifact_id.to_string())
+}
+
+fn project_relative_record_path(path: &Path) -> Result<PathBuf, String> {
+    let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
+    let relative = if path.is_absolute() {
+        path.strip_prefix(&cwd)
+            .map_err(|_| format!("record artifact is outside the project: {}", path.display()))?
+            .to_path_buf()
+    } else {
+        path.to_path_buf()
+    };
+    if relative.as_os_str().is_empty()
+        || relative.components().any(|component| {
+            matches!(
+                component,
+                Component::CurDir
+                    | Component::ParentDir
+                    | Component::RootDir
+                    | Component::Prefix(_)
+            )
+        })
+    {
+        return Err(format!(
+            "record artifact path is not project-relative: {}",
+            path.display()
+        ));
+    }
+    Ok(relative)
+}
+
+fn index_named_capture(
+    capture: &crate::ProveReplay::NamedCapture,
+    name: &str,
+    capture_mode: RecordCapture,
+) -> Result<(), String> {
+    let path = PathBuf::from(format!(".jet/replays/{name}.jetproof-replay"));
+    let bytes = fs::read(&path).map_err(|error| {
+        format!(
+            "could not read replay artifact `{}`: {error}",
+            path.display()
+        )
+    })?;
+    let artifact_id = replay_artifact_id(&bytes)?;
+    let identity = capture.record_identity()?;
+    let size =
+        u64::try_from(bytes.len()).map_err(|_| "replay artifact is too large".to_string())?;
+    index_compile_artifact(
+        identity,
+        RecordKind::Replay,
+        artifact_id,
+        path,
+        size,
+        capture_mode,
+        Vec::new(),
+        Vec::new(),
+    )
+}
+
+fn index_production_receipt(context: &crate::ProductionReceipt::Context) -> Result<(), String> {
+    let Some(directory) =
+        std::env::var_os(jet::development_receipt::JET_DEVELOPMENT_RECEIPT_DIRECTORY_ENV)
+    else {
+        return Ok(());
+    };
+    let absolute_path = PathBuf::from(directory).join("receipt");
+    let metadata = match fs::symlink_metadata(&absolute_path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("could not inspect production receipt: {error}")),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(format!(
+            "production receipt is not a regular file: {}",
+            absolute_path.display()
+        ));
+    }
+    let bytes = fs::read(&absolute_path)
+        .map_err(|error| format!("could not read production receipt: {error}"))?;
+    let path = project_relative_record_path(&absolute_path)?;
+    let identity = context.record_identity()?;
+    let artifact_id = format!("sha256-{}", jet::SHA256::sha256_hex(&bytes));
+    let size =
+        u64::try_from(bytes.len()).map_err(|_| "production receipt is too large".to_string())?;
+    index_compile_artifact(
+        identity,
+        RecordKind::Receipt,
+        artifact_id,
+        path,
+        size,
+        RecordCapture::Safe,
+        Vec::new(),
+        Vec::new(),
+    )
+}
+
+fn fail_record_index(error: String) -> ! {
+    crate::cli_error!("E2105", "record index update failed: {error}");
+    exit(ExitCodes::ICE);
+}
+
+/// Rebuild one indexed `jet-receipt-v2` invocation and compare its native
+/// output with the artifact that invocation produced. Receipt inputs are
+/// authenticated before any child build is launched; a changed or missing
+/// input is reported in path order.
+pub(crate) fn run_build_verify(artifact_id: &str, mode: OutputMode) -> ! {
+    let fail = |message: String| -> ! {
+        if mode.json {
+            let diagnostic = jet::Diagnostics::Diagnostic::error(
+                "E2105",
+                format!("build verification failed: {message}"),
+                "the indexed receipt could not be verified".to_string(),
+                "repair the receipt or rerun the producing build".to_string(),
+                None,
+            );
+            let rendered = render_diagnostic_status(
+                "build.verify",
+                false,
+                &jet::Diagnostics::ReportPath::from_process("<cli>"),
+                "",
+                std::slice::from_ref(&diagnostic),
+            );
+            write_mode_machine(mode, &rendered);
+        } else {
+            crate::cli_error!("E2105", "build verification failed: {}", message);
+        }
+        exit(ExitCodes::USER_ERROR);
+    };
+    let index = RecordIndex::load_for_project(".")
+        .unwrap_or_else(|error| fail(format!("could not load record index: {error}")));
+    let indexed = index
+        .find(RecordKind::Receipt, artifact_id, true)
+        .unwrap_or_else(|| fail(format!("receipt `{artifact_id}` is not indexed")));
+    let receipt_path = PathBuf::from(".").join(&indexed.path);
+    let receipt = jet::ReceiptStore::read_path(&receipt_path)
+        .unwrap_or_else(|error| fail(format!("could not read indexed receipt: {error}")));
+
+    for input in &receipt.claim.inputs {
+        let digest = match jet::SHA256::sha256_file_hex(&input.path) {
+            Ok(digest) => digest,
+            Err(error) => fail(format!(
+                "first differing input `{}` is unavailable: {error}",
+                input.path.display()
+            )),
+        };
+        if digest != input.digest {
+            fail(format!(
+                "first differing input `{}`: expected sha256-{}, found sha256-{}",
+                input.path.display(),
+                input.digest,
+                digest
+            ));
+        }
+    }
+
+    let target =
+        indexed_receipt_target(&receipt, &indexed.identity).unwrap_or_else(|error| fail(error));
+    let artifact = receipt_artifact_path(&receipt, &target);
+    let before = fs::read(&artifact).unwrap_or_else(|error| {
+        fail(format!(
+            "recorded build output `{}` is unavailable: {error}",
+            artifact.display()
+        ))
+    });
+    if let Err(error) = rebuild_indexed_target(&target, mode) {
+        fail(error);
+    }
+    let after = fs::read(&artifact).unwrap_or_else(|error| {
+        fail(format!(
+            "rebuilt output `{}` is unavailable: {error}",
+            artifact.display()
+        ))
+    });
+
+    if before != after {
+        fail(format!(
+            "rebuilt output `{}` differs although all {} receipt inputs matched; \
+             the native toolchain/output diverged",
+            artifact.display(),
+            receipt.claim.inputs.len()
+        ));
+    }
+    if mode.json {
+        let rendered = render_status(
+            "build.verify",
+            true,
+            StatusFields::new()
+                .with("status", "identical")
+                .with("inputs", receipt.claim.inputs.len())
+                .with("outputs", 1usize)
+                .with("sha256", jet::SHA256::sha256_hex(&after)),
+        );
+        write_mode_machine(mode, &format!("{rendered}\n"));
+    } else {
+        write_mode_renderable(
+            mode,
+            &format!(
+                "identical: {} inputs, 1 output, sha256 match\n",
+                receipt.claim.inputs.len()
+            ),
+        );
+    }
+    exit(ExitCodes::OK);
+}
+
+fn indexed_receipt_target(
+    receipt: &jet::ReceiptStore::Receipt,
+    identity: &RecordIdentity,
+) -> Result<PathBuf, String> {
+    receipt
+        .claim
+        .inputs
+        .iter()
+        .filter(|input| {
+            input
+                .path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                == Some("jet")
+        })
+        .find_map(|input| {
+            let path = input.path.to_string_lossy();
+            crate::CmdProve::target_input_sha256_for_file(&path)
+                .ok()
+                .filter(|digest| digest == &identity.target_inputs_sha256)
+                .map(|_| input.path.clone())
+        })
+        .ok_or_else(|| {
+            "indexed receipt does not identify a rebuildable Jet target in its inputs".to_string()
+        })
+}
+
+fn receipt_artifact_path(receipt: &jet::ReceiptStore::Receipt, target: &Path) -> PathBuf {
+    let output = String::from_utf8_lossy(&receipt.stdout);
+    output
+        .lines()
+        .find_map(|line| line.strip_prefix("built: "))
+        .map(|line| {
+            line.split_once(" (")
+                .map(|(path, _)| path)
+                .unwrap_or(line)
+                .trim()
+        })
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| build_artifact_path(&target.to_string_lossy(), None))
+}
+
+fn rebuild_indexed_target(target: &Path, mode: OutputMode) -> Result<(), String> {
+    let executable = std::env::current_exe()
+        .map_err(|error| format!("could not locate the current jet executable: {error}"))?;
+    let output = Command::new(executable)
+        .arg("build")
+        .arg(target)
+        .env("JET_RECEIPT_BYPASS", "1")
+        .output()
+        .map_err(|error| format!("could not rebuild `{}`: {error}", target.display()))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let detail = if stderr.trim().is_empty() {
+            format!("child build exited with {}", output.status)
+        } else {
+            format!(
+                "child build exited with {}: {}",
+                output.status,
+                stderr.trim()
+            )
+        };
+        if !mode.quiet {
+            write_mode_diagnostic(mode, &format!("{detail}\n"));
+        }
+        return Err(detail);
+    }
+    Ok(())
+}
+
+fn finish_recorded_artifacts(
+    record: Option<&crate::ProveReplay::NamedCapture>,
+    record_name: Option<&str>,
+    production_receipt: Option<&crate::ProductionReceipt::Context>,
+    exit_code: i32,
+    mode: OutputMode,
+) {
+    if let Some(capture) = record {
+        crate::ProveReplay::finish_named_capture(capture, exit_code, mode.json)
+            .unwrap_or_else(|status| exit(status));
+        if let Some(name) = record_name {
+            index_named_capture(capture, name, RecordCapture::Safe)
+                .unwrap_or_else(|error| fail_record_index(error));
+        }
+    }
+    if let Some(context) = production_receipt {
+        index_production_receipt(context).unwrap_or_else(|error| fail_record_index(error));
+    }
+}
+
+fn finish_recorded_run_artifacts(
+    capture: &crate::ProveReplay::NamedCapture,
+    record_name: &str,
+    production_receipt: Option<&crate::ProductionReceipt::Context>,
+    exit_code: i32,
+    mode: OutputMode,
+    run: &jet::Debug::RecordedRun,
+) {
+    crate::ProveReplay::finish_named_capture_with_run(capture, exit_code, mode.json, run)
+        .unwrap_or_else(|status| exit(status));
+    index_named_capture(capture, record_name, RecordCapture::Safe)
+        .unwrap_or_else(|error| fail_record_index(error));
+    if let Some(context) = production_receipt {
+        index_production_receipt(context).unwrap_or_else(|error| fail_record_index(error));
+    }
+}
 
 fn try_recorded_run(
     file: &str,
+    program_args: &[&str],
     capture: &crate::ProveReplay::NamedCapture,
+    record_name: Option<&str>,
+    production_receipt: Option<&crate::ProductionReceipt::Context>,
     mode: OutputMode,
 ) -> bool {
-    let Ok(execution) = jet::Debug::record_run(file) else {
+    let Ok(execution) = jet::Debug::record_run(file, program_args) else {
         return false;
     };
     emit_run_output(&execution.stdout, &execution.stderr);
@@ -103,6 +539,13 @@ fn try_recorded_run(
         &execution.run,
     )
     .unwrap_or_else(|status| exit(status));
+    if let Some(name) = record_name {
+        index_named_capture(capture, name, RecordCapture::Safe)
+            .unwrap_or_else(|error| fail_record_index(error));
+    }
+    if let Some(context) = production_receipt {
+        index_production_receipt(context).unwrap_or_else(|error| fail_record_index(error));
+    }
     exit(execution.exit_code);
 }
 
@@ -110,19 +553,19 @@ fn render_internal_fault(what: &str) -> String {
     jet::Diagnostics::render_ice_report(what, "", false)
 }
 
-fn emit_internal_fault(stdout: &str, what: &str) -> ! {
+fn emit_internal_fault(stdout: &str, what: &str, mode: OutputMode) -> ! {
     emit_run_output(stdout, "");
     let _ = std::io::stdout().flush();
-    eprintln!("{}", render_internal_fault(what));
+    write_mode_diagnostic(mode, &render_internal_fault(what));
     exit(ExitCodes::ICE);
 }
 
-fn exit_if_internal_fault(diagnostics: &[jet::Diagnostics::Diagnostic]) {
+fn exit_if_internal_fault(diagnostics: &[jet::Diagnostics::Diagnostic], mode: OutputMode) {
     if let Some((stdout, what)) = diagnostics
         .iter()
         .find_map(jet::Diagnostics::Diagnostic::runtime_host_fault_parts)
     {
-        emit_internal_fault(stdout, what);
+        emit_internal_fault(stdout, what, mode);
     }
 }
 
@@ -133,6 +576,87 @@ fn exit_if_internal_fault(diagnostics: &[jet::Diagnostics::Diagnostic]) {
 /// status, so it falls back to the driver-reported user error.
 pub(crate) fn child_exit_code(status: std::process::ExitStatus) -> i32 {
     status.code().unwrap_or(ExitCodes::USER_ERROR)
+}
+
+fn vector_build_projection(
+    file: &str,
+) -> Vec<(String, usize, usize, String, String, String, String)> {
+    let (diagnostics, bundle, _) = jet::Driver::check_file_with_effect_facts(file, None, false);
+    if diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+    {
+        return Vec::new();
+    }
+    let Some(bundle) = bundle else {
+        return Vec::new();
+    };
+    let (mir, _) = jet::lower_checked_semantic_mir_program_for(
+        &bundle,
+        jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        ),
+    );
+    mir.functions
+        .iter()
+        .flat_map(|function| {
+            function.optimization.vector_facts.iter().map(|fact| {
+                let decision = match &fact.decision {
+                    jet_foundation::MIR::MirOptimizationDecision::Eligible => {
+                        "accepted".to_string()
+                    }
+                    jet_foundation::MIR::MirOptimizationDecision::Rejected(reason) => {
+                        reason.as_str().to_string()
+                    }
+                };
+                (
+                    function.key.clone(),
+                    fact.span.start,
+                    fact.span.end,
+                    fact.rule.as_str().to_string(),
+                    fact.layout.as_str().to_string(),
+                    fact.lane_width
+                        .map(|lane| lane.to_string())
+                        .unwrap_or_else(|| "none".to_string()),
+                    decision,
+                )
+            })
+        })
+        .collect()
+}
+
+fn vector_build_projection_json(
+    rows: &[(String, usize, usize, String, String, String, String)],
+) -> String {
+    let rows = rows
+        .iter()
+        .map(|(function, start, end, rule, layout, lane, decision)| {
+            format!(
+                "{{\"function\":\"{}\",\"span\":{{\"start\":{},\"end\":{}}},\"rule\":\"{}\",\"layout\":\"{}\",\"lane\":\"{}\",\"decision\":\"{}\"}}",
+                json_escape(function),
+                start,
+                end,
+                json_escape(rule),
+                json_escape(layout),
+                json_escape(lane),
+                json_escape(decision),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("[{rows}]")
+}
+
+fn vector_build_projection_text(
+    rows: &[(String, usize, usize, String, String, String, String)],
+) -> String {
+    rows.iter()
+        .map(|(function, start, end, rule, layout, lane, decision)| {
+            format!("vector\t{function}\t{start}..{end}\t{rule}\t{layout}\t{lane}\t{decision}\n")
+        })
+        .collect()
 }
 
 pub(crate) fn run_build_query(command: &str, args: &[&String], mode: OutputMode) {
@@ -150,13 +674,16 @@ pub(crate) fn run_build_query(command: &str, args: &[&String], mode: OutputMode)
         _ => (None, None),
     };
     let Some(file) = file else {
-        eprintln!(
-            "usage: jet {command} {}<file.jet>",
-            if command == "explain-build" {
-                "<target|action|file> "
-            } else {
-                ""
-            }
+        write_mode_diagnostic(
+            mode,
+            &format!(
+                "usage: jet {command} {}<file.jet>\n",
+                if command == "explain-build" {
+                    "<target|action|file> "
+                } else {
+                    ""
+                }
+            ),
         );
         exit(ExitCodes::USAGE);
     };
@@ -169,7 +696,7 @@ pub(crate) fn run_build_query(command: &str, args: &[&String], mode: OutputMode)
                 exit(ExitCodes::USER_ERROR);
             }
         };
-        print_build_nodes(file, &nodes, mode.json);
+        print_build_nodes(file, &nodes, mode);
         return;
     }
     let plan = match if command == "query" {
@@ -185,52 +712,82 @@ pub(crate) fn run_build_query(command: &str, args: &[&String], mode: OutputMode)
     };
     let Some(plan) = plan else {
         if mode.json {
-            println!(
-                "{}",
-                render_status_json("ok", true, "inspect.build", ",\"build\":null")
+            write_mode_machine(
+                mode,
+                &format!(
+                    "{}\n",
+                    render_status(
+                        "inspect.build",
+                        true,
+                        StatusFields::new().with("build", StatusValue::Null),
+                    )
+                ),
             );
         } else {
-            println!("default pipeline: no root fn build");
+            write_mode_renderable(mode, "default pipeline: no root fn build\n");
         }
         return;
     };
     if let Some(subject) = subject {
         if let Some(explanation) = plan.explain_target_named(subject) {
-            print_build_explanation(&explanation, mode.json);
+            print_build_explanation(&explanation, mode);
             return;
         }
         if let Some(explanation) = plan.explain_action_named(subject) {
-            print_build_explanation(&explanation, mode.json);
+            print_build_explanation(&explanation, mode);
             return;
         }
-        print_build_explanation(&plan.explain_file(subject), mode.json);
+        print_build_explanation(&plan.explain_file(subject), mode);
         return;
     }
     let graph = plan.graph();
+    let vector_rows = vector_build_projection(file);
     if mode.json {
-        let payload = jet::Driver::build_plan_json(&plan);
-        println!(
-            "{}",
-            render_status_json(
-                "ok",
-                true,
-                "inspect.build",
-                &format!(",\"build\":{payload}")
-            )
+        let payload = jet::Driver::build_plan_json(&plan, None);
+        let payload = payload
+            .strip_suffix('}')
+            .map(|payload| {
+                format!(
+                    "{payload},\"vector\":{}}}",
+                    vector_build_projection_json(&vector_rows)
+                )
+            })
+            .unwrap_or(payload);
+        write_mode_machine(
+            mode,
+            &format!(
+                "{}\n",
+                render_status(
+                    "inspect.build",
+                    true,
+                    StatusFields::new().with(
+                        "build",
+                        StatusValue::parse(&payload)
+                            .expect("build plan projection must be valid JSON"),
+                    ),
+                )
+            ),
         );
     } else {
         for target in graph.targets {
-            println!("target\t{}\t{:?}", target.name, target.kind);
+            write_mode_renderable(
+                mode,
+                &format!("target\t{}\t{:?}\n", target.name, target.kind),
+            );
         }
         for action in graph.actions {
-            println!("action\t{}\t{}", action.name, action.outputs.join(","));
+            write_mode_renderable(
+                mode,
+                &format!("action\t{}\t{}\n", action.name, action.outputs.join(",")),
+            );
         }
+        write_mode_renderable(mode, &vector_build_projection_text(&vector_rows));
     }
 }
 fn print_build_nodes(
     file: &str,
     static_nodes: &[jet::Comptime::Build::BuildPlanNode],
-    json: bool,
+    mode: OutputMode,
 ) {
     let program = build_record_program(file, None);
     let records = Store::from_env()
@@ -250,7 +807,7 @@ fn print_build_nodes(
                 })
                 .collect()
         });
-    if json {
+    if mode.json {
         let nodes = records
             .iter()
             .map(|node| {
@@ -266,21 +823,27 @@ fn print_build_nodes(
             })
             .collect::<Vec<_>>()
             .join(",");
-        println!(
-            "{{\"schema\":\"jet.explain-build/v1\",\"program\":\"{}\",\"nodes\":[{}]}}",
-            json_escape(&program),
-            nodes
+        write_mode_machine(
+            mode,
+            &format!(
+                "{{\"schema\":\"jet.explain-build/v1\",\"program\":\"{}\",\"nodes\":[{}]}}\n",
+                json_escape(&program),
+                nodes
+            ),
         );
     } else {
         for node in records {
-            println!(
-                "{}\t{}\t{}\t{:.3}\t{}\t{}",
-                node.kind,
-                node.key,
-                node.subject,
-                node.duration_ms,
-                node.why_ran,
-                node.inputs.join(","),
+            write_mode_renderable(
+                mode,
+                &format!(
+                    "{}\t{}\t{}\t{:.3}\t{}\t{}\n",
+                    node.kind,
+                    node.key,
+                    node.subject,
+                    node.duration_ms,
+                    node.why_ran,
+                    node.inputs.join(",")
+                ),
             );
         }
     }
@@ -332,28 +895,36 @@ pub(crate) fn run_compiler_api(operation: &str, file: &str, mode: OutputMode) {
             "unsupported compiler operation; choose lex, parse, check, or source-map",
         ),
     };
-    println!("{document}");
+    write_mode_machine(mode, &format!("{document}\n"));
 }
-
-fn print_build_explanation(explanation: &jet::Comptime::Build::BuildExplanation, json: bool) {
-    if json {
-        println!(
-            "{}",
-            render_status_json(
-                "ok",
-                true,
-                "inspect.build",
-                &format!(
-                    ",\"label\":\"{}\",\"provenance\":{}",
-                    json_escape(&explanation.label),
-                    json_strings(&explanation.provenance),
-                ),
-            )
+fn print_build_explanation(explanation: &jet::Comptime::Build::BuildExplanation, mode: OutputMode) {
+    if mode.json {
+        write_mode_machine(
+            mode,
+            &format!(
+                "{}\n",
+                render_status(
+                    "inspect.build",
+                    true,
+                    StatusFields::new()
+                        .with("label", explanation.label.clone())
+                        .with(
+                            "provenance",
+                            StatusValue::array(
+                                explanation
+                                    .provenance
+                                    .iter()
+                                    .cloned()
+                                    .map(StatusValue::from),
+                            ),
+                        ),
+                )
+            ),
         );
     } else {
-        println!("{}", explanation.label);
+        write_mode_renderable(mode, &format!("{}\n", explanation.label));
         for fact in &explanation.provenance {
-            println!("  {fact}");
+            write_mode_renderable(mode, &format!("  {fact}\n"));
         }
     }
 }
@@ -425,8 +996,6 @@ fn fail_authority_transaction(
     exit(ExitCodes::USER_ERROR);
 }
 
-
-
 fn authority_relative_path(root: &Path, path: &Path) -> Option<PathBuf> {
     let root = if root.as_os_str().is_empty() {
         Path::new(".")
@@ -438,8 +1007,7 @@ fn authority_relative_path(root: &Path, path: &Path) -> Option<PathBuf> {
         .filter(|relative| !relative.as_os_str().is_empty())
         .map(Path::to_path_buf)
         .or_else(|| {
-            (root == Path::new(".") || root.as_os_str().is_empty())
-                .then(|| path.to_path_buf())
+            (root == Path::new(".") || root.as_os_str().is_empty()).then(|| path.to_path_buf())
         })
 }
 
@@ -545,6 +1113,7 @@ fn resolve_run_authority_before_execution(
     package_manifest: &mut Option<(PathBuf, jet::Package::PackageFacts)>,
     source_closure: &[(PathBuf, String)],
     source_snapshot: Option<&crate::Store::AuthorityFileSnapshot>,
+    invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
 ) -> Option<jet_foundation::Authority::ApplicationAuthority> {
     if source_closure.is_empty() {
         fail_authority_transaction(
@@ -559,7 +1128,7 @@ fn resolve_run_authority_before_execution(
     let (diagnostics, bundle, facts) = jet::run_compiler_work(|| {
         jet::Driver::check_file_with_effect_facts_for_run_and_entry_with_source_closure(
             file,
-            source_closure,
+            &source_closure,
             profile,
             setting_overrides,
             entry_fn,
@@ -598,7 +1167,29 @@ fn resolve_run_authority_before_execution(
         package_manifest,
         &delegations,
         source_snapshot,
+        invocation_authority,
     )
+}
+
+fn merge_invocation_authority(
+    projection: &mut jet::EffectBudget::EffectProjection,
+    invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+) {
+    let Some(invocation_authority) = invocation_authority else {
+        return;
+    };
+    projection
+        .granted_effects
+        .extend(invocation_authority.granted_effects.iter().cloned());
+    projection
+        .denied_effects
+        .extend(invocation_authority.denied_effects.iter().cloned());
+    if !projection.authority.is_empty() && !invocation_authority.authority.is_empty() {
+        projection.authority.push_str(" + ");
+    }
+    projection
+        .authority
+        .push_str(&invocation_authority.authority);
 }
 
 fn resolve_application_authority(
@@ -611,10 +1202,12 @@ fn resolve_application_authority(
     delegations: &[jet::Sema::AuthorityDelegation],
     source_snapshot: Option<&crate::Store::AuthorityFileSnapshot>,
     transaction: &crate::Store::AuthorityTransaction,
+    invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
 ) -> Option<jet_foundation::Authority::ApplicationAuthority> {
     if !matches!(cmd, "build" | "run") {
         return None;
     }
+    merge_invocation_authority(projection, invocation_authority);
     let denied: jet::Sema::EffectSet = projection
         .required_effects
         .iter()
@@ -659,7 +1252,7 @@ fn resolve_application_authority(
                 error,
             );
         }
-        return None;
+        return invocation_authority.map(|_| projection.application_authority());
     }
     if !authority_prompt_is_interactive(mode) {
         let diagnostic =
@@ -668,13 +1261,16 @@ fn resolve_application_authority(
         exit(ExitCodes::USER_ERROR);
     }
 
-    eprintln!(
-        "authority required for {} — choose once, project, or deny [{}]\n  {}",
-        json_strings(&undecided.iter().cloned().collect::<Vec<_>>()),
-        projection.authority,
-        jet::EffectBudget::render_effect_projection_line(projection),
+    write_mode_diagnostic(
+        mode,
+        &format!(
+            "authority required for {} — choose once, project, or deny [{}]\n  {}\n",
+            json_strings(&undecided.iter().cloned().collect::<Vec<_>>()),
+            projection.authority,
+            jet::EffectBudget::render_effect_projection_line(projection),
+        ),
     );
-    eprint!("authority> ");
+    write_mode_diagnostic(mode, "authority> ");
     let _ = std::io::stderr().flush();
     let mut choice = String::new();
     let _ = std::io::stdin().read_line(&mut choice);
@@ -693,10 +1289,7 @@ fn resolve_application_authority(
                     "no package manifest is available".to_string(),
                 );
             }
-            let inline = match jet::Package::PackageFacts::parse_inline(
-                src,
-                file.to_string(),
-            ) {
+            let inline = match jet::Package::PackageFacts::parse_inline(src, file.to_string()) {
                 Ok(inline) => inline,
                 Err(error) => {
                     let diagnostic = jet::Diagnostics::Diagnostic::error(
@@ -737,8 +1330,10 @@ fn resolve_application_authority(
                         ),
                     );
                 };
-                let snapshot = transaction.snapshot_file(&relative).unwrap_or_else(|error| {
-                    fail_authority_transaction(
+                let snapshot = transaction
+                    .snapshot_file(&relative)
+                    .unwrap_or_else(|error| {
+                        fail_authority_transaction(
                         mode,
                         file,
                         src,
@@ -747,16 +1342,14 @@ fn resolve_application_authority(
                             .to_string(),
                         format!("could not snapshot `{}`: {error}", relative.display()),
                     )
-                });
+                    });
                 let mut updated_body = block.body(src).to_string();
                 for effect in &undecided {
                     updated_body = jet::Manifest::add_authority_hold(&updated_body, effect);
                 }
                 let mut updated_source = src.to_string();
-                updated_source.replace_range(
-                    block.body_span.start..block.body_span.end,
-                    &updated_body,
-                );
+                updated_source
+                    .replace_range(block.body_span.start..block.body_span.end, &updated_body);
                 let reparsed = match jet::Package::PackageFacts::parse(
                     &updated_body,
                     file.to_string(),
@@ -783,8 +1376,10 @@ fn resolve_application_authority(
                 ("project", "inline Package authority.holds")
             } else {
                 let Some(manifest_path) = jet::Loader::manifest_path(&root) else {
-                    let diagnostic =
-                        jet::EffectBudget::application_policy_diagnostic(projection, &BTreeSet::new());
+                    let diagnostic = jet::EffectBudget::application_policy_diagnostic(
+                        projection,
+                        &BTreeSet::new(),
+                    );
                     report_problems(mode, file, src, &[diagnostic]);
                     exit(ExitCodes::USER_ERROR);
                 };
@@ -882,9 +1477,13 @@ fn resolve_application_authority(
             error,
         );
     }
-    if let Err(error) =
-        write_authority_delegation_receipts(transaction, file, projection, delegations, policy_source)
-    {
+    if let Err(error) = write_authority_delegation_receipts(
+        transaction,
+        file,
+        projection,
+        delegations,
+        policy_source,
+    ) {
         fail_authority_transaction(
             mode,
             file,
@@ -953,6 +1552,7 @@ fn apply_native_effect_policy(
     package_manifest: &mut Option<(PathBuf, jet::Package::PackageFacts)>,
     delegations: &[jet::Sema::AuthorityDelegation],
     source_snapshot: Option<&crate::Store::AuthorityFileSnapshot>,
+    invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
 ) -> Option<jet_foundation::Authority::ApplicationAuthority> {
     let authority_root = package_manifest
         .as_ref()
@@ -978,15 +1578,29 @@ fn apply_native_effect_policy(
             ),
         ),
     };
-    // D-PLUGIN1=B (c81): a plugin is deny-by-default. Guest memory allocation
-    // is the only permitted root effect; every other effect fails before the
-    // backend is asked to write or instantiate a component.
+    // D-PLUGIN-AUTHORITY1: a plugin may use only effects explicitly declared
+    // by its package authority.needs. Mem remains the implicit guest-safe
+    // allocator root; every other root effect must be covered by a declared
+    // canonical right before any backend writes or instantiates a component.
     if is_plugin {
         if let Some(root) = entries.iter().find(|package| package.name == "root") {
+            let declared_needs = package_manifest
+                .as_ref()
+                .map(|(_, manifest)| manifest.authority.needs.as_slice())
+                .unwrap_or(&[]);
             let mut forbidden = root.effects.clone();
-            forbidden.retain(|effect| jet::Sema::effect_root(effect) != "Mem");
+            forbidden.retain(|effect| {
+                jet::Sema::effect_root(effect) != "Mem"
+                    && !declared_needs
+                        .iter()
+                        .any(|need| jet_foundation::Authority::covers(need, effect))
+            });
             if !forbidden.is_empty() {
-                let diagnostic = jet::Manifest::e1258(&jet::Sema::show_set(&forbidden));
+                let required = forbidden
+                    .iter()
+                    .map(|effect| format!("{effect} (declare authority.needs `{effect}`)"))
+                    .collect::<BTreeSet<_>>();
+                let diagnostic = jet::Manifest::e1258(&jet::Sema::show_set(&required));
                 report_problems(mode, file, src, &[diagnostic]);
                 exit(ExitCodes::USER_ERROR);
             }
@@ -1002,6 +1616,7 @@ fn apply_native_effect_policy(
         delegations,
         source_snapshot,
         &transaction,
+        invocation_authority,
     );
     if let Some((root, manifest)) = package_manifest.as_ref() {
         let lint_violations = jet::LintPolicy::enforce(lints, manifest);
@@ -1207,25 +1822,80 @@ pub(crate) fn resolve_named_profile(
         n if n == jet::Syntax::BUILD_PROFILE_DEBUG => BuildProfile::Debug,
         n if n == jet::Syntax::BUILD_PROFILE_CI => BuildProfile::Ci,
         _ => {
-            let diag = jet::Manifest::e1219(name);
-            if mode.json {
-                eprint!(
-                    "{}",
-                    jet::render_all_json(
-                        &jet::Diagnostics::ReportPath::from_process("<cli>"),
-                        "",
-                        &[diag],
-                    )
-                );
+            let diag = jet::Diagnostics::Diagnostic::error(
+                "E1219",
+                format!("`--profile={name}` is not a defined build profile."),
+                "Blessed profiles have built-in defaults; other names must be declared in `package.jet`.".to_string(),
+                "Use `--release`, `--profile=debug`, or `--profile=ci`, or declare the profile in `package.jet`.".to_string(),
+                None,
+            );
+            let rendered = if mode.json {
+                render_diagnostic_status(
+                    "compile.profile",
+                    false,
+                    &jet::Diagnostics::ReportPath::from_process("<cli>"),
+                    "",
+                    std::slice::from_ref(&diag),
+                )
             } else {
-                eprint!(
-                    "{}",
-                    jet::render_all_colored("<cli>", "", &[diag], mode.color_stderr())
-                );
-            }
+                jet::render_all_colored("<cli>", "", &[diag], mode.color_stderr())
+            };
+            write_mode_diagnostic(mode, &rendered);
             std::process::exit(jet::ExitCodes::USER_ERROR);
         }
     }
+}
+/// D-DX-PROD1: one release compiler gate carries both the release marker and
+/// the closed devtools-presence form. Non-release tiers receive no release
+/// inspection cfg, so ambient deployment state cannot add release code.
+fn release_profile_cfg_args(profile: &BuildProfile) -> Vec<String> {
+    let Some(inspect) = profile.release_inspect() else {
+        return Vec::new();
+    };
+    let policy = jet::Package::ReleaseDevtoolsPolicy::from_manifest_profile(inspect);
+    let Some(cfg_value) = policy.release_cfg_value() else {
+        return Vec::new();
+    };
+    vec![
+        "--cfg".to_string(),
+        "jet_release".to_string(),
+        "--cfg".to_string(),
+        format!("jet_release_inspect=\"{cfg_value}\""),
+    ]
+}
+/// Fold the selected release profile and deployment environment once at the
+/// host boundary.  A non-release profile retains the ordinary development
+/// host; release deployment variables can never add release code.
+pub(crate) fn release_devtools_policy_for_profile(
+    profile: &BuildProfile,
+) -> jet::Package::ReleaseDevtoolsPolicy {
+    let Some(inspect) = profile.release_inspect() else {
+        return jet::Package::ReleaseDevtoolsPolicy::development();
+    };
+    jet::Package::ReleaseDevtoolsPolicy::from_manifest_profile_with_env(inspect)
+        .unwrap_or_else(|error| {
+            crate::cli_error!(
+                @fix "E2104",
+                format!("invalid release devtools deployment policy: {error}"),
+                "set JET_INSPECT=1 only with a valid JET_INSPECT_TOKEN and optional IP/CIDR allowlist"
+            );
+            exit(ExitCodes::USER_ERROR);
+        })
+}
+
+/// Resolve the profile spelling retained by the watch loop and fold its
+/// manifest/profile/environment facts into one typed host policy.
+pub(crate) fn release_devtools_policy_for_name(
+    source_file: &str,
+    profile_name: &str,
+    mode: OutputMode,
+) -> jet::Package::ReleaseDevtoolsPolicy {
+    let profile = if profile_name == "dev" {
+        BuildProfile::Fast
+    } else {
+        resolve_named_profile(profile_name, source_file, mode)
+    };
+    release_devtools_policy_for_profile(&profile)
 }
 
 /// D-LINTPOLICY1: load the one canonical Package context used by compile.
@@ -1258,7 +1928,10 @@ fn load_pkg_library_output_names(source_file: &str) -> Option<Vec<String>> {
 /// Find the project's declared environment without realizing or mutating it.
 /// `jet` may inspect this boundary, but acquisition and activation belong to
 /// `jetpack` (D-VERDICT-2188-1).
-fn declared_project_environment(start: &Path) -> Option<(PathBuf, String)> {
+fn declared_project_environment(
+    start: &Path,
+    requested_environment: Option<&str>,
+) -> Option<(PathBuf, String)> {
     let search_from = if start.is_dir() {
         start
     } else {
@@ -1268,7 +1941,12 @@ fn declared_project_environment(start: &Path) -> Option<(PathBuf, String)> {
     let source = fs::read_to_string(root.join(jet::Syntax::ENV_FILE)).ok()?;
 
     if jet_env_model::ModuleEval::is_module_surface(&source) {
-        let plan = match jet_env_model::ModuleEval::evaluate_env(&source, &root) {
+        let plan = match jet_env_model::ModuleEval::evaluate_env_with_selections(
+            &source,
+            &root,
+            None,
+            requested_environment,
+        ) {
             Ok(plan) => plan,
             // A malformed typed environment still declares the boundary. Let
             // jetpack report the source diagnostic after the user enters it.
@@ -1308,7 +1986,7 @@ fn native_effect_projection(
     let projection = jet::EffectBudget::project_program_effects(
         bundle,
         summaries,
-        entry_fn.unwrap_or(jet::Codegen::ENTRY_FN),
+        entry_fn.unwrap_or("run"),
         package_manifest,
     );
     let mut delegations = summaries
@@ -1473,7 +2151,7 @@ fn project_package_import(start: &Path, environment_root: &Path) -> Option<Strin
         if !lex_diagnostics.is_empty() {
             continue;
         }
-        let Ok(program) = jet::Parser::parse(&tokens) else {
+        let Ok(program) = jet::Parser::parse_with_source(&tokens, &source_for_parse) else {
             continue;
         };
         for import in &program.imports {
@@ -1490,30 +2168,367 @@ fn project_package_import(start: &Path, environment_root: &Path) -> Option<Strin
     None
 }
 
-/// Return the inactive environment requirement for a program that actually
-/// consumes a declared package. Core-only and local-module programs return
-/// `None`, even when an `env.jet` is nearby.
-pub(crate) fn project_environment_requirement(start: &Path) -> Option<(String, String)> {
-    let (root, environment) = declared_project_environment(start)?;
+/// Return the inactive environment requirement and its authoritative project
+/// root for a program that actually consumes a declared package. Core-only and
+/// local-module programs return `None`, even when an `env.jet` is nearby.
+fn project_environment_requirement_with_root(start: &Path) -> Option<(PathBuf, String, String)> {
+    let raw = current_jet_args();
+    let (requested_preset, requested_environment) = environment_selections(&raw);
+    let (root, environment) =
+        declared_project_environment(start, requested_environment.as_deref())?;
     let import = project_package_import(start, &root)?;
-    let active = std::env::var_os(jet::Syntax::JETPACK_ENV_MARKER)
+    let active_root = std::env::var_os(jet::Syntax::JETPACK_ENV_MARKER)
         .is_some_and(|value| !value.is_empty() && value != "0")
         && std::env::var_os(jet::Syntax::ENV_HOOK_ACTIVE_DIR_VAR)
-            .is_none_or(|active| same_environment_root(&root, Path::new(&active)));
-    (!active).then_some((environment, import))
+            .is_some_and(|active| same_environment_root(&root, Path::new(&active)));
+    let active = active_root
+        && std::env::var(jet::Syntax::ENV_HOOK_ACTIVE_HASH_VAR)
+            .ok()
+            .filter(|value| !value.is_empty())
+            .is_some_and(|active_hash| {
+                jetpack::EnvHook::definition_fingerprint_with_selections(
+                    &root,
+                    requested_preset.as_deref(),
+                    requested_environment.as_deref(),
+                )
+                .is_some_and(|expected_hash| expected_hash == active_hash)
+            });
+    (!active).then_some((root, environment, import))
+}
+
+/// Return the inactive environment requirement for callers that only need its
+/// display values. Preparation uses the root-carrying helper above so its
+/// delegation cannot silently fall back to the caller's working directory.
+pub(crate) fn project_environment_requirement(start: &Path) -> Option<(String, String)> {
+    project_environment_requirement_with_root(start)
+        .map(|(_, environment, import)| (environment, import))
+}
+fn current_jet_args() -> Vec<String> {
+    std::env::args().skip(1).collect()
+}
+
+fn environment_selections(raw: &[String]) -> (Option<String>, Option<String>) {
+    let mut requested_preset = None;
+    let mut requested_environment = None;
+    let mut index = 0;
+    while index < raw.len() {
+        let argument = &raw[index];
+        if argument == "--" {
+            break;
+        }
+        if let Some(value) = argument.strip_prefix("--preset=") {
+            requested_preset = Some(value.to_string());
+        } else if argument == "--preset" {
+            if let Some(value) = raw.get(index + 1) {
+                requested_preset = Some(value.clone());
+                index += 1;
+            }
+        } else if let Some(value) = argument.strip_prefix("--env=") {
+            requested_environment = Some(value.to_string());
+        } else if argument == "--env" {
+            if let Some(value) = raw.get(index + 1) {
+                requested_environment = Some(value.clone());
+                index += 1;
+            }
+        }
+        index += 1;
+    }
+    (requested_preset, requested_environment)
+}
+
+fn current_jet_invocation() -> (Vec<String>, String) {
+    let raw = current_jet_args();
+    let command = format!("{} {}", jet::Syntax::BINARY_NAME, raw.join(" "));
+    (raw, command)
+}
+
+/// Build the one canonical Jetpack delegation used by `jet run`.
+///
+/// Jet owns only the source/target request. Jetpack owns project resolution,
+/// lock replay, trust, realization, concurrency, and the child environment.
+/// The child preserves the original argv shape; only the selected source
+/// target is made absolute so the project-root cwd cannot change its identity.
+pub(crate) fn prepare_project_environment(cmd: &str, start: &Path, mode: OutputMode) {
+    let Some((project_root, environment, import)) =
+        project_environment_requirement_with_root(start)
+    else {
+        return;
+    };
+    if cmd != "run" {
+        let (_, command) = current_jet_invocation();
+        crate::emit_cli_row_with_detail(
+            "E1355",
+            &[
+                ("environment", environment.as_str()),
+                ("command", command.as_str()),
+            ],
+            format!(
+                " Import: `use {import}` is the package import that requires this environment.\n"
+            ),
+            mode.json,
+        );
+        exit(ExitCodes::USER_ERROR);
+    }
+
+    let (raw, command) = current_jet_invocation();
+    let mut before_separator = raw.iter().take_while(|argument| argument.as_str() != "--");
+    if before_separator.any(|argument| argument.as_str() == jet::Syntax::RUN_FLAG_NO_PREPARE) {
+        crate::emit_cli_row_with_detail(
+            "E1355",
+            &[
+                ("environment", environment.as_str()),
+                ("command", command.as_str()),
+            ],
+            format!(
+                " Import: `use {import}` is the package import that requires this environment.\n"
+            ),
+            mode.json,
+        );
+        exit(ExitCodes::USER_ERROR);
+    }
+
+    let jet_binary = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(error) => {
+            crate::emit_cli_row_with_detail(
+                "E1356",
+                &[
+                    ("command", command.as_str()),
+                    ("reason", "the running Jet executable could not be located"),
+                ],
+                format!(" Import: `use {import}` is the package import that requires this environment: {error}.\n"),
+                mode.json,
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    if crate::EngineDispatch::find_engine_binary(jet::Syntax::JETPACK_BINARY_NAME).is_none() {
+        crate::emit_cli_row_with_detail(
+            "E1356",
+            &[
+                ("command", command.as_str()),
+                ("reason", "the matching Jetpack engine is not installed"),
+            ],
+            format!(
+                " Import: `use {import}` is the package import that requires this environment.\n"
+            ),
+            mode.json,
+        );
+        exit(ExitCodes::USER_ERROR);
+    }
+
+    let mut forwarded = vec!["env".to_string()];
+    forwarded.extend(jetpack_environment_flags(&raw));
+    forwarded.push("--".to_string());
+    forwarded.push(jet_binary.to_string_lossy().into_owned());
+    let child_raw = delegated_run_arguments(&raw, start);
+    forwarded.extend(child_raw);
+    exit(crate::EngineDispatch::dispatch_in(
+        jet::Syntax::JETPACK_BINARY_NAME,
+        "env",
+        &forwarded,
+        Some(&project_root),
+    ));
+}
+
+/// Copy only flags understood by `jetpack env` before its command separator.
+/// Compiler-only flags remain in the original argv and are parsed by the
+/// delegated Jet child; forwarding them to Jetpack would turn them into
+/// environment positional arguments.
+fn jetpack_environment_flags(raw: &[String]) -> Vec<String> {
+    let mut forwarded = Vec::new();
+    let mut index = 0;
+    while index < raw.len() {
+        let argument = &raw[index];
+        if argument == "--" {
+            break;
+        }
+        match argument.as_str() {
+            "--offline" | "--online" | "--trust" | "--flake" | "--pure" | "--yes" | "--json"
+            | "--no-color" => forwarded.push(argument.clone()),
+            "--fixtures" | "--env" | "--preset" => {
+                forwarded.push(argument.clone());
+                if let Some(value) = raw.get(index + 1).filter(|value| *value != "--") {
+                    let value = if argument == "--fixtures" {
+                        absolute_caller_path(value)
+                    } else {
+                        value.clone()
+                    };
+                    forwarded.push(value);
+                    index += 1;
+                }
+            }
+            value if value.starts_with("--fixtures=") => {
+                forwarded.push("--fixtures".to_string());
+                forwarded.push(absolute_caller_path(
+                    value.trim_start_matches("--fixtures="),
+                ));
+            }
+            value if value.starts_with("--env=") => {
+                forwarded.push("--env".to_string());
+                forwarded.push(value.trim_start_matches("--env=").to_string());
+            }
+            value if value.starts_with("--preset=") => {
+                forwarded.push("--preset".to_string());
+                forwarded.push(value.trim_start_matches("--preset=").to_string());
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    forwarded
+}
+
+fn absolute_caller_path(value: &str) -> String {
+    let path = Path::new(value);
+    if path.is_absolute() {
+        return value.to_string();
+    }
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join(path)
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// Keep the delegated source target bound to the path the user selected even
+/// though Jetpack resolves the project from its authoritative root. The child
+/// runs with that root as its cwd; an absolute target avoids turning a caller
+/// relative path into a different source identity. Flags and the `--` program
+/// argument boundary remain byte-for-byte unchanged.
+fn delegated_run_arguments(raw: &[String], start: &Path) -> Vec<String> {
+    let mut child = Vec::with_capacity(raw.len());
+    let Some(command) = raw.first() else {
+        return child;
+    };
+    child.push(command.clone());
+
+    let caller_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let source_path = if start.is_absolute() {
+        start.to_path_buf()
+    } else {
+        caller_cwd.join(start)
+    };
+    let source_path = fs::canonicalize(&source_path).unwrap_or(source_path);
+    let source_path = source_path.to_string_lossy().into_owned();
+    let mut target_seen = false;
+    let mut separate_value = false;
+    let mut index = 1;
+    while index < raw.len() {
+        let argument = &raw[index];
+        if argument == "--" {
+            child.extend(raw[index..].iter().cloned());
+            break;
+        }
+        if separate_value {
+            child.push(argument.clone());
+            separate_value = false;
+            index += 1;
+            continue;
+        }
+        if takes_separate_run_value(argument) {
+            child.push(argument.clone());
+            separate_value = !argument.contains('=');
+            index += 1;
+            continue;
+        }
+        if argument.starts_with("--") {
+            child.push(argument.clone());
+            index += 1;
+            continue;
+        }
+        if !target_seen {
+            child.push(source_path.clone());
+            target_seen = true;
+        } else {
+            child.push(argument.clone());
+        }
+        index += 1;
+    }
+    child
+}
+
+fn takes_separate_run_value(argument: &str) -> bool {
+    matches!(
+        argument,
+        "-p" | "--fixtures"
+            | "--env"
+            | "--preset"
+            | "--target"
+            | "--profile"
+            | "--output"
+            | "--record"
+            | "--set"
+            | "--builder"
+            | "--endpoint"
+            | "--channel"
+            | "--platform"
+            | "--trust-key"
+            | "--gate"
+            | "--allow"
+            | "--deny"
+            | "--scope"
+            | "--kind"
+            | "--live"
+            | "--replay"
+            | "--project"
+            | "--sandbox"
+            | "--console-ttl"
+            | "--app"
+            | "--share"
+            | "--token"
+            | "--base-receipt"
+            | "--receipt"
+            | "--head-receipt"
+            | "--after-receipt"
+            | "--canvas-host"
+            | "--canvas-port"
+            | "--canvas-transport"
+            | "--canvas-authority"
+            | "--canvas-audit"
+            | "--where"
+            | "--capture"
+            | "--browser"
+            | "--browser-retries"
+            | "--browser-reporter"
+            | "--filter"
+            | "--shuffle"
+            | "--verify"
+            | "--max"
+            | "--remote-builder"
+            | "--build-root"
+            | "--project-root"
+            | "--cross"
+            | "--arch"
+            | "--cpu"
+            | "--memory"
+            | "--jobs"
+            | "--timeout"
+            | "--name"
+            | "--entry"
+            | "--package"
+            | "--member"
+    )
 }
 
 /// Refuse an env-backed `jet` verb unless the caller is already inside the
-/// realized project environment. This check is intentionally before any
-/// compilation, profile, lock, or toolchain work so `jet` cannot acquire anything.
+/// realized project environment. `run` is the sole verb that delegates the
+/// existing project boundary to Jetpack; all other verbs stay refusal-only.
 pub(crate) fn require_project_environment(cmd: &str, start: &Path, mode: OutputMode) {
+    if cmd == "run" {
+        prepare_project_environment(cmd, start, mode);
+        return;
+    }
     let Some((environment, import)) = project_environment_requirement(start) else {
         return;
     };
-
+    let (_, command) = current_jet_invocation();
     crate::emit_cli_row_with_detail(
         "E1355",
-        &[("environment", environment.as_str()), ("verb", cmd)],
+        &[
+            ("environment", environment.as_str()),
+            ("command", command.as_str()),
+        ],
         format!(" Import: `use {import}` is the package import that requires this environment.\n"),
         mode.json,
     );
@@ -1533,6 +2548,7 @@ pub(crate) struct NativeExecutionRequest<'a> {
     pub(crate) no_os: bool,
     pub(crate) gates: jet::Policy::GateSet,
     pub(crate) build_grants: &'a [String],
+    pub(crate) invocation_authority: Option<&'a jet_foundation::Authority::ApplicationAuthority>,
     pub(crate) sbom: bool,
     pub(crate) remote_builder: Option<&'a str>,
     pub(crate) locked: bool,
@@ -1546,6 +2562,7 @@ pub(crate) struct NativeExecutionRequest<'a> {
     pub(crate) output: Option<&'a str>,
     pub(crate) program_args: &'a [&'a String],
     pub(crate) mode: OutputMode,
+    pub(crate) output_profile: Option<&'a jet_cli::OutputProfile::OutputProfile>,
     pub(crate) record: Option<&'a str>,
     pub(crate) interpret: bool,
     pub(crate) entry_fn: Option<&'a str>,
@@ -1556,10 +2573,51 @@ pub(crate) struct NativeExecutionRequest<'a> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum NativeTier {
+enum NativeEngine {
     Interpreter,
     Jit,
-    Aot,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct NativeTier {
+    /// The canonical execution-tier fact. Engine choice is independent from
+    /// the build profile and is kept only as a dispatch adapter below.
+    execution: jet::TargetMachine::ExecutionTier,
+    engine: Option<NativeEngine>,
+}
+
+impl NativeTier {
+    fn aot() -> Self {
+        Self {
+            execution: jet::TargetMachine::ExecutionTier::Aot,
+            engine: None,
+        }
+    }
+
+    fn dev(engine: NativeEngine) -> Self {
+        Self {
+            execution: jet::TargetMachine::ExecutionTier::Dev,
+            engine: Some(engine),
+        }
+    }
+
+    fn jit() -> Self {
+        Self {
+            execution: jet::TargetMachine::ExecutionTier::Jit,
+            engine: Some(NativeEngine::Jit),
+        }
+    }
+
+    fn is_engine(self) -> bool {
+        self.engine.is_some()
+    }
+
+    /// Project the selected tier and independent profile into the one typed
+    /// build-fact snapshot consumed by artifact/cache/query projections.
+    fn project(self, facts: &mut jet_foundation::Facts::BuildFactSnapshot, profile: &BuildProfile) {
+        facts.profile = profile.budget_name().to_string();
+        facts.target_dossier.tier_identity = self.execution.as_str().to_string();
+    }
 }
 
 enum NativeRunResult {
@@ -1614,7 +2672,6 @@ fn select_native_tier(
     no_os: bool,
     build_grants: &[String],
     sbom: bool,
-    profile_requested: bool,
     profile: &BuildProfile,
     selects_build_entry: bool,
     is_web: bool,
@@ -1622,7 +2679,7 @@ fn select_native_tier(
     src: &str,
 ) -> NativeTier {
     if command != "run" {
-        return NativeTier::Aot;
+        return NativeTier::aot();
     }
     if interpret {
         let incompatible = target.is_some()
@@ -1633,21 +2690,21 @@ fn select_native_tier(
             || small
             || no_os
             || !build_grants.is_empty()
-            || sbom
-            || profile_requested;
+            || sbom;
         if incompatible {
             let diagnostic = jet::Diagnostics::Diagnostic::error(
                 "E2102",
                 "`--interpret` cannot be combined with build or artifact flags".to_string(),
-                "`--interpret` selects the tier-0 interpreter for a one-shot native run"
+                "`--interpret` selects the interpreter engine; the build profile remains an independent fact"
                     .to_string(),
-                "run `jet run --interpret <file.jet>` without build or artifact flags".to_string(),
+                "run `jet run --interpret [--release|--profile <name>] <file.jet>` without artifact flags"
+                    .to_string(),
                 None,
             );
             report_problems(mode, file, src, &[diagnostic]);
             exit(ExitCodes::USAGE);
         }
-        return NativeTier::Interpreter;
+        return NativeTier::dev(NativeEngine::Interpreter);
     }
     if matches!(profile, BuildProfile::Fast)
         && target.is_none()
@@ -1661,9 +2718,9 @@ fn select_native_tier(
         && !is_plugin
         && !selects_build_entry
     {
-        NativeTier::Jit
+        NativeTier::jit()
     } else {
-        NativeTier::Aot
+        NativeTier::aot()
     }
 }
 
@@ -1679,17 +2736,20 @@ fn render_native_lints(
     }
 }
 
-fn finalize_tier_trace_sidecar() {
+fn finalize_tier_trace_sidecar(mode: OutputMode) {
     let aggregate = jet_jit::take_trace_aggregate();
     let Some(path) = std::env::var_os("JET_TRACE_TIERS_PATH") else {
         return;
     };
     let path = PathBuf::from(path);
     if let Err(error) = jet_jit::write_trace_sidecar(&path, &aggregate) {
-        eprintln!(
-            "couldn't write compiler-owned tier trace `{}`: {}",
-            path.display(),
-            error
+        write_mode_diagnostic(
+            mode,
+            &format!(
+                "couldn't write compiler-owned tier trace `{}`: {}\n",
+                path.display(),
+                error
+            ),
         );
     }
 }
@@ -1699,10 +2759,12 @@ fn finish_native_run(
     src: &str,
     mode: OutputMode,
     record: Option<&crate::ProveReplay::NamedCapture>,
+    record_name: Option<&str>,
+    production_receipt: Option<&crate::ProductionReceipt::Context>,
     lints: &[jet::Diagnostics::Diagnostic],
     result: NativeRunResult,
 ) -> ! {
-    finalize_tier_trace_sidecar();
+    finalize_tier_trace_sidecar(mode);
     render_native_lints(file, src, mode, lints);
     match result {
         NativeRunResult::Engine(jet::Interpreter::RunOutcome::Ran {
@@ -1711,41 +2773,38 @@ fn finish_native_run(
             exit_code,
         }) => {
             emit_run_output(&stdout, &stderr);
-            if let Some(capture) = record {
-                crate::ProveReplay::finish_named_capture(capture, exit_code, mode.json)
-                    .unwrap_or_else(|status| exit(status));
-            }
+            finish_recorded_artifacts(record, record_name, production_receipt, exit_code, mode);
             exit(exit_code);
         }
         NativeRunResult::Engine(jet::Interpreter::RunOutcome::Problems(diags)) => {
-            exit_if_internal_fault(&diags);
+            exit_if_internal_fault(&diags, mode);
             report_problems(mode, file, src, &diags);
-            if let Some(capture) = record {
-                crate::ProveReplay::finish_named_capture(capture, ExitCodes::USER_ERROR, mode.json)
-                    .unwrap_or_else(|status| exit(status));
-            }
+            finish_recorded_artifacts(
+                record,
+                record_name,
+                production_receipt,
+                ExitCodes::USER_ERROR,
+                mode,
+            );
             exit(ExitCodes::USER_ERROR);
         }
         NativeRunResult::Child(status) => {
             let exit_code = child_exit_code(status);
-            if let Some(capture) = record {
-                crate::ProveReplay::finish_named_capture(capture, exit_code, mode.json)
-                    .unwrap_or_else(|status| exit(status));
-            }
+            finish_recorded_artifacts(record, record_name, production_receipt, exit_code, mode);
             exit(exit_code);
         }
         NativeRunResult::Exit(exit_code) => {
-            if let Some(capture) = record {
-                crate::ProveReplay::finish_named_capture(capture, exit_code, mode.json)
-                    .unwrap_or_else(|status| exit(status));
-            }
+            finish_recorded_artifacts(record, record_name, production_receipt, exit_code, mode);
             exit(exit_code);
         }
         NativeRunResult::LaunchError(error) => {
-            if let Some(capture) = record {
-                crate::ProveReplay::finish_named_capture(capture, ExitCodes::USER_ERROR, mode.json)
-                    .unwrap_or_else(|status| exit(status));
-            }
+            finish_recorded_artifacts(
+                record,
+                record_name,
+                production_receipt,
+                ExitCodes::USER_ERROR,
+                mode,
+            );
             crate::cli_error!("E2105", "couldn't run the built program: {}", error);
             exit(ExitCodes::USER_ERROR);
         }
@@ -1763,9 +2822,12 @@ fn run_native_lens(
     program_args: &[&String],
     mode: OutputMode,
     record: Option<&crate::ProveReplay::NamedCapture>,
+    record_name: Option<&str>,
+    production_receipt: Option<&crate::ProductionReceipt::Context>,
     package_manifest: &mut Option<(PathBuf, jet::Package::PackageFacts)>,
     source_closure: &[(PathBuf, String)],
     source_snapshot: Option<&crate::Store::AuthorityFileSnapshot>,
+    invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
 ) -> ! {
     let application_authority = resolve_run_authority_before_execution(
         file,
@@ -1777,44 +2839,47 @@ fn run_native_lens(
         package_manifest,
         source_closure,
         source_snapshot,
+        invocation_authority,
     );
 
-    if program_args.is_empty() {
-        if let Some(capture) = record {
-            try_recorded_run(file, capture, mode);
-        }
+    let args = program_args
+        .iter()
+        .map(|arg| arg.as_str())
+        .collect::<Vec<_>>();
+    if let Some(capture) = record {
+        try_recorded_run(file, &args, capture, record_name, production_receipt, mode);
     }
 
     // The adapters marshal checked facts and runtime arguments. The workflow
     // above owns authority; the completion seam below owns all output, lint,
     // diagnostic, and capture handling.
     jet_jit::set_program_owns_streams();
-    let args = program_args
-        .iter()
-        .map(|arg| arg.as_str())
-        .collect::<Vec<_>>();
-    let run = match tier {
-        NativeTier::Interpreter => jet::Interpreter::run_interpreter_once_with_source_closure(
+    let run = match tier.engine {
+        Some(NativeEngine::Interpreter) => {
+            jet::Interpreter::run_interpreter_once_with_source_closure(
+                file,
+                source_closure,
+                &args,
+                gates,
+                profile.budget_name(),
+                setting_overrides,
+                application_authority.as_ref(),
+                entry_fn,
+                jet::Interpreter::InterpreterInvocation::RunInterpret,
+            )
+        }
+        Some(NativeEngine::Jit) => jet::Interpreter::run_jit_once_with_source_closure(
             file,
             source_closure,
             &args,
+            mode.json,
             gates,
             profile.budget_name(),
             setting_overrides,
             application_authority.as_ref(),
             entry_fn,
         ),
-        NativeTier::Jit => jet::Interpreter::run_jit_once_with_source_closure(
-            file,
-            source_closure,
-            &args,
-            mode.json,
-            gates,
-            setting_overrides,
-            application_authority.as_ref(),
-            entry_fn,
-        ),
-        NativeTier::Aot => unreachable!("AOT does not use the engine lens"),
+        None => unreachable!("AOT does not use the engine lens"),
     };
     let lints = run.lints;
     finish_native_run(
@@ -1822,6 +2887,8 @@ fn run_native_lens(
         src,
         mode,
         record,
+        record_name,
+        production_receipt,
         &lints,
         NativeRunResult::Engine(run.outcome),
     )
@@ -1852,6 +2919,7 @@ fn run_native_source_execution(source: &str) -> ! {
         no_os: false,
         gates: jet::Policy::GateSet::default(),
         build_grants: &empty_strings,
+        invocation_authority: None,
         remote_builder: None,
         locked: false,
         target: None,
@@ -1869,6 +2937,7 @@ fn run_native_source_execution(source: &str) -> ! {
             color: jet::Diagnostics::ColorChoice::Auto,
             quiet: false,
         },
+        output_profile: None,
         record: None,
         interpret: false,
         entry_fn: None,
@@ -1878,6 +2947,25 @@ fn run_native_source_execution(source: &str) -> ! {
         source_overlay: Some((&file_path, source)),
     });
     unreachable!("native REPL child execution should exit from the run pipeline")
+}
+
+/// Keep the internal web-run guard aligned with the CLI target dispatch:
+/// App-returning entries are served by the native runtime edge, while a
+/// non-App web entry still requires `jet dev` or a web artifact build.
+fn source_entry_returns_app(source: &str) -> bool {
+    let source = match jet::Package::mask_inline_package_source(source) {
+        Ok((masked, _)) => masked,
+        Err(_) => return false,
+    };
+    let (tokens, diagnostics) = jet::Lexer::lex(&source);
+    if !diagnostics.is_empty() {
+        return false;
+    }
+    let program = match jet::Parser::parse_with_source(&tokens, &source) {
+        Ok(program) => program,
+        Err(_) => return false,
+    };
+    jet::AST::app_entry_run_fn(&program.items).is_some()
 }
 
 pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
@@ -1906,6 +2994,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
         no_os,
         gates,
         build_grants,
+        invocation_authority,
         remote_builder,
         locked,
         target: cross_target,
@@ -1919,6 +3008,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
         output: output_name,
         program_args,
         mode,
+        output_profile,
         record: record_name,
         interpret: force_interpreter,
         entry_fn,
@@ -1928,10 +3018,9 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
         source_overlay,
     } = request;
     require_project_environment(cmd, Path::new(file), mode);
-    let profile =
-        select_native_profile(cmd, file, no_os, small, release, profile_name, mode);
+    let profile = select_native_profile(cmd, file, no_os, small, release, profile_name, mode);
     let release_profile = profile.is_release();
-    let progress = BuildProgress::new(cmd, emit_rust, verbose, mode);
+    let mut progress = BuildProgress::new(cmd, emit_rust, verbose, mode, output_profile);
     progress.major("Reading", file);
     progress.minor("profile", profile.budget_name());
     let (src, source_snapshot) = match source_overlay {
@@ -1944,9 +3033,9 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                     let fix = if error.kind() == std::io::ErrorKind::NotFound {
                         let default_entry_fix = path.file_name().and_then(|name| name.to_str())
                             == Some(jet::Syntax::DEFAULT_ENTRY_FILE)
-                            && path
-                                .parent()
-                                .is_some_and(|parent| jet::Loader::find_manifest_root(parent).is_some());
+                            && path.parent().is_some_and(|parent| {
+                                jet::Loader::find_manifest_root(parent).is_some()
+                            });
                         if default_entry_fix {
                             format!(
                                 "create `{}` in the project, or run `{} {} <file.{}>`",
@@ -2012,7 +3101,10 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
         }
     };
 
-    if cmd == "run" && cross_target == Some(jet::Syntax::BUILD_TARGET_WEB) {
+    if cmd == "run"
+        && cross_target == Some(jet::Syntax::BUILD_TARGET_WEB)
+        && !source_entry_returns_app(&src)
+    {
         let diagnostic = jet::Diagnostics::Diagnostic::error(
             "E2102",
             "`jet run` cannot execute a web-targeted program natively".to_string(),
@@ -2026,8 +3118,14 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
 
     let record = if cmd == "run" {
         record_name.map(|name| {
-            crate::ProveReplay::begin_named_capture(file, name, mode.json)
-                .unwrap_or_else(|status| exit(status))
+            crate::ProveReplay::begin_named_capture(
+                file,
+                name,
+                profile.budget_name(),
+                setting_overrides,
+                mode.json,
+            )
+            .unwrap_or_else(|status| exit(status))
         })
     } else {
         None
@@ -2101,31 +3199,31 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
         }
         if !mode.json && !mode.quiet {
             if let Some(projection) = checked.as_ref() {
-                print!(
-                    "{}",
-                    crate::CmdInspect::check_result_text(&projection.check)
+                write_mode_renderable(
+                    mode,
+                    &crate::CmdInspect::check_result_text(&projection.check),
                 );
             }
             if let Some(checked) = checked.as_mut() {
                 if let Some(report) =
                     crate::CmdFill::render_goal_report(checked, None, None, false, false)
                 {
-                    print!("{report}");
+                    write_mode_renderable(mode, &report);
                 }
             }
         }
         if mode.json && lints.is_empty() {
             if let Some(projection) = checked.as_ref() {
-                print!(
-                    "{}",
-                    crate::CmdInspect::check_result_json(&projection.check)
+                write_mode_machine(
+                    mode,
+                    &crate::CmdInspect::check_result_json(&projection.check),
                 );
             } else {
                 let machine_file = crate::machine_report_path_for_process(file);
-                print!("{}", jet::Diagnostics::render_success_json(&machine_file));
+                write_mode_machine(mode, &jet::Diagnostics::render_success_json(&machine_file));
             }
         } else if !mode.json && lints.is_empty() && !mode.quiet {
-            println!("ok: `{}` has no problems", file);
+            write_mode_status(mode, &format!("ok: `{file}` has no problems\n"));
         }
         return;
     }
@@ -2196,14 +3294,13 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
         no_os,
         build_grants,
         sbom,
-        release || profile_name.is_some(),
         &profile,
         selects_build_entry,
         is_web,
         is_plugin,
         &src,
     );
-    if !matches!(tier, NativeTier::Aot) {
+    if tier.is_engine() {
         run_native_lens(
             tier,
             file,
@@ -2215,9 +3312,12 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             program_args,
             mode,
             record.as_ref(),
+            record_name,
+            production_receipt.as_ref(),
             &mut package_manifest,
             &source_closure,
             source_snapshot.as_ref(),
+            invocation_authority,
         );
     }
 
@@ -2244,18 +3344,23 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
     // computes its key further down, from the one front end a build actually
     // runs, instead of from a second independently reloaded copy of the same
     // program.
-    let mut native_key =
-        if output_name.is_none() && !is_web && cross_target.is_none() && cmd == "run" && !selects_build_entry {
-            native_cache_key_with_source_closure(
-                file,
-                &source_closure,
-                profile.budget_name(),
-                &cache_profile_tag,
-                mode_tag,
-            )
-        } else {
-            None
-        };
+    let mut native_key = if output_name.is_none()
+        && !is_web
+        && cross_target.is_none()
+        && cmd == "run"
+        && !selects_build_entry
+    {
+        native_cache_key_with_source_closure(
+            file,
+            &source_closure,
+            profile.budget_name(),
+            &cache_profile_tag,
+            mode_tag,
+            invocation_authority,
+        )
+    } else {
+        None
+    };
     let native_store = Store::from_env().ok();
     debug_native_cache_event(format!(
         "compile pid={} cmd={} file={} profile={} mode={} key={:?} cwd={} store_dir={:?}",
@@ -2283,12 +3388,20 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
     // A selected `fn build` also stays on the full path: replaying a binary
     // would skip staging the build entry, so nothing would execute the action
     // graph or record the computed writers in this project's `.jet/lock`.
-    if cmd == "run" && mode_tag == "run" && !emit_rust && !selects_build_entry && entry_fn.is_none()
+    if cmd == "run"
+        && mode_tag == "run"
+        && !emit_rust
+        && !selects_build_entry
+        && entry_fn.is_none()
+        && !src.contains("core.game")
     {
         if let Some(ref key) = native_key {
             let out = bin_path(file);
             if native_store.as_ref().is_some_and(|store| {
-                matches!(store.restore_file(key, &out), Ok(ArtifactRestore::Hit { .. }))
+                matches!(
+                    store.restore_file(key, &out),
+                    Ok(ArtifactRestore::Hit { .. })
+                )
             }) {
                 let _application_authority = resolve_run_authority_before_execution(
                     file,
@@ -2300,9 +3413,13 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                     &mut package_manifest,
                     &source_closure,
                     source_snapshot.as_ref(),
+                    invocation_authority,
                 );
                 if verbose {
-                    eprintln!("[build] cache hit -> reused cached binary (front end skipped)");
+                    write_mode_status(
+                        mode,
+                        "[build] cache hit -> reused cached binary (front end skipped)\n",
+                    );
                 }
                 let mut run_cmd = Command::new(&out);
                 for arg in program_args {
@@ -2315,6 +3432,8 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                         &src,
                         mode,
                         record.as_ref(),
+                        record_name,
+                        production_receipt.as_ref(),
                         &[],
                         NativeRunResult::LaunchError(error.to_string()),
                     ),
@@ -2324,6 +3443,8 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                     &src,
                     mode,
                     record.as_ref(),
+                    record_name,
+                    production_receipt.as_ref(),
                     &[],
                     NativeRunResult::Child(status),
                 );
@@ -2409,6 +3530,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             build_front_end.as_ref(),
             &cache_profile_tag,
             mode_tag,
+            invocation_authority,
         );
     }
     // D-EFFBUDGET1's summary is a projection of the checked program, so project
@@ -2434,13 +3556,13 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             jet::EffectBudget::summary_line_for_program_with_authority(
                 program,
                 &facts.summaries,
-                entry_fn.unwrap_or(jet::Codegen::ENTRY_FN),
+                entry_fn.unwrap_or("run"),
                 package_manifest.as_ref().map(|(_, manifest)| manifest),
             ),
             jet::EffectBudget::summary_json_for_program_with_authority(
                 program,
                 &facts.summaries,
-                entry_fn.unwrap_or(jet::Codegen::ENTRY_FN),
+                entry_fn.unwrap_or("run"),
                 package_manifest.as_ref().map(|(_, manifest)| manifest),
             ),
             projection,
@@ -2472,6 +3594,11 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
         && reused_clinks
             .as_ref()
             .is_some_and(|result| matches!(result, Ok(args) if args.is_empty()))
+        && !src.contains("core.game")
+        && !build_front_end
+            .as_ref()
+            .and_then(|prepared| prepared.emitted_program())
+            .is_some_and(program_uses_game_runtime)
         && build_front_end
             .as_ref()
             .and_then(|prepared| prepared.emitted_program())
@@ -2479,7 +3606,10 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
     {
         native_key.as_ref().is_some_and(|key| {
             native_store.as_ref().is_some_and(|store| {
-                matches!(store.restore_file(key, &bin_path(file)), Ok(ArtifactRestore::Hit { .. }))
+                matches!(
+                    store.restore_file(key, &bin_path(file)),
+                    Ok(ArtifactRestore::Hit { .. })
+                )
             })
         })
     } else {
@@ -2503,7 +3633,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
         && !selects_build_entry
     {
         let machine = target_machine.expect("target machine checked above");
-        match jet::Driver::compile_bundle_path_with_target_machine_and_profile_and_settings_with_source_closure(
+        match jet::Driver::compile_bundle_path_with_target_machine_and_profile_and_settings_with_source_closure_and_runtime(
             file,
             jet::Sema::CompileMode::Run,
             machine,
@@ -2512,8 +3642,12 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             locked,
             setting_overrides,
             &source_closure,
+            invocation_authority,
         ) {
-            Ok(output) => Ok(output),
+            Ok((output, runtime)) => {
+                checked_runtime = (!emit_rust).then_some(runtime);
+                Ok(output)
+            }
             Err(jet::Driver::TargetMachineCompileError::Diagnostics(diags)) => Err(diags),
             Err(jet::Driver::TargetMachineCompileError::Machine(errors)) => {
                 Err(vec![jet::Diagnostics::Diagnostic::error(
@@ -2544,25 +3678,52 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             &source_closure,
         )
     } else if let Some(output) = output_name {
-        jet::Driver::compile_bundle_path_opts_with_source_closure(
-            file,
-            jet::Sema::CompileMode::Run,
-            no_os,
-            gates,
-            is_web,
-            is_plugin,
-            false,
-            false,
-            cross_target,
-            Some(output),
-            profile.budget_name(),
-            setting_overrides,
-            false,
-            None,
-            &source_closure,
-        )
+        if !is_web && !is_plugin {
+            match jet::Driver::compile_bundle_path_opts_with_source_closure_and_runtime(
+                file,
+                jet::Sema::CompileMode::Run,
+                no_os,
+                gates,
+                false,
+                false,
+                false,
+                false,
+                cross_target,
+                Some(output),
+                profile.budget_name(),
+                setting_overrides,
+                false,
+                None,
+                &source_closure,
+                invocation_authority,
+            ) {
+                Ok((output, runtime)) => {
+                    checked_runtime = (!emit_rust).then_some(runtime);
+                    Ok(output)
+                }
+                Err(diags) => Err(diags),
+            }
+        } else {
+            jet::Driver::compile_bundle_path_opts_with_source_closure(
+                file,
+                jet::Sema::CompileMode::Run,
+                no_os,
+                gates,
+                is_web,
+                is_plugin,
+                false,
+                false,
+                cross_target,
+                Some(output),
+                profile.budget_name(),
+                setting_overrides,
+                false,
+                None,
+                &source_closure,
+            )
+        }
     } else if cmd == "build" && emit_generated {
-        match jet::compile_programmable_build_output_with_builder_and_profile_and_settings_scoped_with_entry(
+        match jet::compile_programmable_build_output_with_builder_and_profile_and_settings_scoped_with_entry_and_authority(
             file,
             build_grants,
             no_os,
@@ -2580,6 +3741,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             build_override,
             entry_fn,
             false,
+            invocation_authority,
         ) {
             Ok(output) => {
                 programmable_build_target = programmable_build_target_name(&output);
@@ -2589,7 +3751,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             Err(diags) => Err(diags),
         }
     } else if native_cache_hit {
-        match jet::compile_programmable_build_output_with_builder_and_profile_and_settings_scoped_with_entry(
+        match jet::compile_programmable_build_output_with_builder_and_profile_and_settings_scoped_with_entry_and_authority(
             file,
             build_grants,
             no_os,
@@ -2607,6 +3769,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             build_override,
             entry_fn,
             true,
+            invocation_authority,
         ) {
             Ok(output) => {
                 programmable_build_target = programmable_build_target_name(&output);
@@ -2616,7 +3779,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             Err(diags) => Err(diags),
         }
     } else if cmd == "build" || selects_build_entry {
-        match jet::compile_programmable_build_output_with_builder_and_profile_and_settings_scoped_with_entry(
+        match jet::compile_programmable_build_output_with_builder_and_profile_and_settings_scoped_with_entry_and_authority(
             file,
             build_grants,
             no_os,
@@ -2634,11 +3797,37 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             build_override,
             entry_fn,
             false,
+            invocation_authority,
         ) {
             Ok(output) => {
                 programmable_build_target = programmable_build_target_name(&output);
                 checked_runtime = (!emit_rust).then_some(output.runtime).flatten();
                 Ok(output.compile)
+            }
+            Err(diags) => Err(diags),
+        }
+    } else if cmd == "run" && !is_web && !is_plugin {
+        match jet::Driver::compile_bundle_path_opts_with_source_closure_and_runtime(
+            file,
+            jet::Sema::CompileMode::Run,
+            no_os,
+            gates,
+            false,
+            false,
+            false,
+            false,
+            cross_target,
+            None,
+            profile.budget_name(),
+            setting_overrides,
+            false,
+            entry_fn,
+            &source_closure,
+            invocation_authority,
+        ) {
+            Ok((output, runtime)) => {
+                checked_runtime = (!emit_rust).then_some(runtime);
+                Ok(output)
             }
             Err(diags) => Err(diags),
         }
@@ -2674,7 +3863,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
         )
     };
     let (
-        rust_code,
+        mut rust_code,
         ffi_link,
         clinks,
         web_out,
@@ -2728,10 +3917,18 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             exit(ExitCodes::USER_ERROR);
         }
     };
+    let game_runtime = checked_runtime
+        .as_ref()
+        .is_some_and(program_uses_game_runtime)
+        || src.contains("core.game");
+    if let Some(bundle) = checked_runtime.as_mut() {
+        tier.project(&mut bundle.build_facts, &profile);
+    }
+    inject_game_crash_reporter_bootstrap(&mut rust_code, game_runtime);
     progress.minor("generated Rust", &format!("{} bytes", rust_code.len()));
 
     if emit_rust {
-        print!("{}", rust_code);
+        write_mode_renderable(mode, &rust_code);
     }
 
     // D-EFFBUDGET1: zero-config effect summary on every build, plus opt-in
@@ -2774,9 +3971,10 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                     }
                 };
                 let (diagnostics, bundle, facts) = checked;
-                if diagnostics.iter().any(|diagnostic| {
-                    diagnostic.severity == jet::Diagnostics::Severity::Error
-                }) {
+                if diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+                {
                     report_problems(mode, file, &src, &diagnostics);
                     exit(ExitCodes::USER_ERROR);
                 }
@@ -2808,13 +4006,13 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                     jet::EffectBudget::summary_line_for_program_with_authority(
                         &bundle,
                         &facts.summaries,
-                        entry_fn.unwrap_or(jet::Codegen::ENTRY_FN),
+                        entry_fn.unwrap_or("run"),
                         package_manifest.as_ref().map(|(_, manifest)| manifest),
                     ),
                     jet::EffectBudget::summary_json_for_program_with_authority(
                         &bundle,
                         &facts.summaries,
-                        entry_fn.unwrap_or(jet::Codegen::ENTRY_FN),
+                        entry_fn.unwrap_or("run"),
                         package_manifest.as_ref().map(|(_, manifest)| manifest),
                     ),
                     projection,
@@ -2831,7 +4029,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             delegations,
         )) = effect_view
         {
-            let _application_authority = apply_native_effect_policy(
+            let application_authority = apply_native_effect_policy(
                 cmd,
                 file,
                 &src,
@@ -2844,16 +4042,30 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                 &mut package_manifest,
                 &delegations,
                 source_snapshot.as_ref(),
+                invocation_authority,
             );
+            if let (Some(bundle), Some(application_authority)) =
+                (checked_runtime.as_mut(), application_authority.as_ref())
+            {
+                let required_effects = bundle
+                    .package_guarantees
+                    .application_authority
+                    .required_effects
+                    .clone();
+                let mut applied = application_authority.clone();
+                applied.required_effects = required_effects;
+                bundle.package_guarantees.application_authority = applied;
+            }
             let effect_summary = jet::EffectBudget::render_effect_projection_line(&projection);
-            let effect_json = jet::EffectBudget::render_effect_projection_json(&projection);
             // Program stdout stays the program's (U7 / D-DEVMODE1). The
             // effect summary is build-time tool output, not runtime stderr.
             if cmd == "build" {
                 if mode.json {
-                    build_effect_json = Some(effect_json);
+                    build_effect_json = Some(jet::EffectBudget::render_effect_projection_json(
+                        &projection,
+                    ));
                 } else {
-                    eprintln!("{effect_summary}");
+                    write_mode_status(mode, &effect_summary);
                 }
             }
         }
@@ -2864,24 +4076,24 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             progress.major("Building", "backend artifacts");
             if is_library {
                 let library = library_out.as_ref().unwrap_or_else(|| {
-                    eprintln!(
-                        "{}",
-                        jet::Diagnostics::render_ice_report(
+                    write_mode_diagnostic(
+                        mode,
+                        &jet::Diagnostics::render_ice_report(
                             "missing Library codegen output",
                             "",
                             false,
-                        )
+                        ),
                     );
                     exit(ExitCodes::ICE);
                 });
                 let config = library_config.as_ref().unwrap_or_else(|| {
-                    eprintln!(
-                        "{}",
-                        jet::Diagnostics::render_ice_report(
+                    write_mode_diagnostic(
+                        mode,
+                        &jet::Diagnostics::render_ice_report(
                             "missing Library output configuration",
                             "",
                             false,
-                        )
+                        ),
                     );
                     exit(ExitCodes::ICE);
                 });
@@ -2896,13 +4108,13 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                 ) {
                     Ok(paths) => paths,
                     Err(LibraryBuildError::GeneratedCode(stderr)) => {
-                        eprintln!(
-                            "{}",
-                            jet::Diagnostics::render_ice_report(
+                        write_mode_diagnostic(
+                            mode,
+                            &jet::Diagnostics::render_ice_report(
                                 "rustc rejected generated Library code",
                                 &stderr,
                                 true,
-                            )
+                            ),
                         );
                         exit(ExitCodes::ICE);
                     }
@@ -2917,26 +4129,29 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                 };
                 if !mode.quiet && !mode.json {
                     if let Some(shared) = &paths.shared {
-                        println!("built: {}", shared.display());
+                        write_mode_renderable(mode, &format!("built: {}\n", shared.display()));
                     }
                     if let Some(staticlib) = &paths.staticlib {
-                        println!("built: {}", staticlib.display());
+                        write_mode_renderable(mode, &format!("built: {}\n", staticlib.display()));
                     }
                     if let Some(header) = &paths.header {
-                        println!("built: {}", header.display());
+                        write_mode_renderable(mode, &format!("built: {}\n", header.display()));
                     }
                     if let Some(loadable) = &paths.loadable {
-                        println!("built: {}", loadable.display());
+                        write_mode_renderable(mode, &format!("built: {}\n", loadable.display()));
                     }
                     for binding in &paths.bindings {
-                        println!("built: {}", binding.display());
+                        write_mode_renderable(mode, &format!("built: {}\n", binding.display()));
                     }
                 }
                 progress.finish("library artifacts");
                 if mode.json {
-                    println!(
-                        "{}",
-                        build_effect_json.as_deref().unwrap_or("{\"effects\":[]}")
+                    write_mode_machine(
+                        mode,
+                        &format!(
+                            "{}\n",
+                            build_effect_json.as_deref().unwrap_or("{\"effects\":[]}")
+                        ),
                     );
                 }
                 return;
@@ -2948,7 +4163,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             };
             let budget_profile = profile.budget_name().to_string();
             let hardened_profile = matches!(profile, BuildProfile::Hardened);
-            build(
+            build_target_machine(
                 file,
                 &rust_code,
                 checked_runtime.as_ref(),
@@ -2963,6 +4178,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                 mode,
                 native_cache_hit,
                 native_key.clone(),
+                target_machine,
             );
             print_release_job_summary(&src, release_profile, mode);
             progress.major("Verifying", "build budgets");
@@ -3002,17 +4218,17 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                 if progress.enabled {
                     progress.finish(&artifact);
                 } else {
-                    println!("built: {artifact}");
+                    write_mode_renderable(mode, &format!("built: {artifact}\n"));
                 }
             }
             if explain_partition && !mode.json {
                 if let Some(report) = &web_partition_report {
-                    println!("{report}");
+                    write_mode_renderable(mode, &format!("{report}\n"));
                 }
             }
             if let Some(triple) = cross_target {
                 if !mode.quiet && !mode.json {
-                    println!("target: {}", triple);
+                    write_mode_status(mode, &format!("target: {triple}\n"));
                 }
             }
             // D-SUPPLY1: `--sbom` writes an SPDX SBOM next to the binary.
@@ -3020,9 +4236,12 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                 write_sbom_for_build(file, &artifact_path, mode);
             }
             if mode.json {
-                println!(
-                    "{}",
-                    build_effect_json.as_deref().unwrap_or("{\"effects\":[]}")
+                write_mode_machine(
+                    mode,
+                    &format!(
+                        "{}\n",
+                        build_effect_json.as_deref().unwrap_or("{\"effects\":[]}")
+                    ),
                 );
             }
         }
@@ -3036,8 +4255,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             // building/spawning so diagnostics keep the same order as the
             // program's streams; the completion seam receives no lints for
             // this branch and therefore does not print them twice.
-            render_native_lints(file, &src, mode, &execution_lints);
-            build(
+            build_target_machine(
                 file,
                 &rust_code,
                 checked_runtime.as_ref(),
@@ -3052,15 +4270,21 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                 mode,
                 false,
                 native_key.clone(),
+                target_machine,
             );
             print_release_job_summary(&src, release_profile, mode);
             if cross_target.is_some() {
-                eprintln!("note: cross-compiled binary cannot run on this host — use emulation (see docs/embedded.md)");
+                write_mode_status(
+                    mode,
+                    "note: cross-compiled binary cannot run on this host — use emulation (see docs/embedded.md)\n",
+                );
                 finish_native_run(
                     file,
                     &src,
                     mode,
                     record.as_ref(),
+                    record_name,
+                    production_receipt.as_ref(),
                     &[],
                     NativeRunResult::Exit(ExitCodes::OK),
                 );
@@ -3076,6 +4300,8 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                     &src,
                     mode,
                     record.as_ref(),
+                    record_name,
+                    production_receipt.as_ref(),
                     &[],
                     NativeRunResult::LaunchError(error.to_string()),
                 ),
@@ -3085,6 +4311,8 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                 &src,
                 mode,
                 record.as_ref(),
+                record_name,
+                production_receipt.as_ref(),
                 &[],
                 NativeRunResult::Child(status),
             );
@@ -3096,7 +4324,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                 other,
                 jet::Syntax::BINARY_NAME
             );
-            eprint!("{}", usage());
+            write_mode_diagnostic(mode, &usage());
             exit(ExitCodes::USAGE);
         }
     }
@@ -3126,12 +4354,24 @@ pub(crate) fn run_dev_entry(
     };
     // D-DEVR-PROD1=A / I9: the native `fn dev()` entry uses the same receipt
     // context as `jet run`, while the compiled program remains the adapter.
-    crate::ProductionReceipt::prepare(file, &src, program_args).install();
+    let production_receipt = crate::ProductionReceipt::prepare(file, &src, program_args);
+    production_receipt.install();
     let record = record_name.map(|name| {
-        crate::ProveReplay::begin_named_capture(file, name, mode.json)
-            .unwrap_or_else(|status| exit(status))
+        crate::ProveReplay::begin_named_capture(
+            file,
+            name,
+            profile.budget_name(),
+            setting_overrides,
+            mode.json,
+        )
+        .unwrap_or_else(|status| exit(status))
     });
-    let out = match jet::compile_with_entry_and_settings(file, "dev", setting_overrides) {
+    let out = match jet::compile_with_entry_and_settings(
+        file,
+        "dev",
+        profile.budget_name(),
+        setting_overrides,
+    ) {
         Ok(out) => out,
         Err(diags) => {
             report_problems(mode, file, &src, &diags);
@@ -3192,10 +4432,13 @@ pub(crate) fn run_dev_entry(
             exit(ExitCodes::USER_ERROR);
         });
     let exit_code = child_exit_code(status);
-    if let Some(capture) = record.as_ref() {
-        crate::ProveReplay::finish_named_capture(capture, exit_code, mode.json)
-            .unwrap_or_else(|status| exit(status));
-    }
+    finish_recorded_artifacts(
+        record.as_ref(),
+        record_name,
+        Some(&production_receipt),
+        exit_code,
+        mode,
+    );
     exit(exit_code);
 }
 
@@ -3206,6 +4449,7 @@ pub(crate) fn run_web_app_dev_entry(
     file: &str,
     mode: OutputMode,
     port: Option<u16>,
+    profile: Option<&str>,
     setting_overrides: &BTreeMap<String, String>,
     record_name: Option<&str>,
     passthrough: &[&String],
@@ -3218,8 +4462,14 @@ pub(crate) fn run_web_app_dev_entry(
         }
     };
     let record = record_name.map(|name| {
-        crate::ProveReplay::begin_named_capture(file, name, mode.json)
-            .unwrap_or_else(|status| exit(status))
+        crate::ProveReplay::begin_named_capture(
+            file,
+            name,
+            profile.unwrap_or("dev"),
+            setting_overrides,
+            mode.json,
+        )
+        .unwrap_or_else(|status| exit(status))
     });
     let dev_file = fs::canonicalize(file)
         .map(|path| path.display().to_string())
@@ -3230,11 +4480,14 @@ pub(crate) fn run_web_app_dev_entry(
     });
     let mut command = Command::new(jet_bin);
     command.arg("run").arg(file);
-    if !passthrough.is_empty() {
-        command.arg("--").args(passthrough);
+    if let Some(profile) = profile {
+        command.arg(format!("--profile={profile}"));
     }
     for (key, value) in setting_overrides {
         command.arg(format!("--set={key}={value}"));
+    }
+    if !passthrough.is_empty() {
+        command.arg("--").args(passthrough);
     }
     command.env("JET_APP_DEV", "1");
     command.env("JET_DEV_FILE", dev_file);
@@ -3246,10 +4499,7 @@ pub(crate) fn run_web_app_dev_entry(
         exit(ExitCodes::USER_ERROR);
     });
     let exit_code = child_exit_code(status);
-    if let Some(capture) = record.as_ref() {
-        crate::ProveReplay::finish_named_capture(capture, exit_code, mode.json)
-            .unwrap_or_else(|status| exit(status));
-    }
+    finish_recorded_artifacts(record.as_ref(), record_name, None, exit_code, mode);
     exit(exit_code);
 }
 
@@ -3262,7 +4512,7 @@ struct JobListing {
 }
 
 fn marker_string(marker: &jet::AST::Marker) -> Option<String> {
-    match marker.args.first() {
+    match marker.expr_arg(0) {
         Some(jet::AST::Expr::Str(parts, _)) if parts.len() == 1 => match &parts[0] {
             jet::AST::StrPart::Lit(value) => Some(value.clone()),
             _ => None,
@@ -3298,7 +4548,7 @@ fn list_job_names(src: &str) -> Result<Vec<JobListing>, Vec<jet::Diagnostics::Di
     if !lex_diags.is_empty() {
         return Err(lex_diags);
     }
-    let prog = jet::Parser::parse(&toks)?;
+    let prog = jet::Parser::parse_with_source(&toks, &source)?;
     Ok(prog
         .items
         .iter()
@@ -3324,46 +4574,6 @@ fn list_job_names(src: &str) -> Result<Vec<JobListing>, Vec<jet::Diagnostics::Di
         .collect())
 }
 
-pub(crate) fn run_jobs(file: &str, mode: OutputMode) {
-    let src = fs::read_to_string(file).unwrap_or_else(|_| {
-        crate::cli_error!("E2105", "can't find the file `{file}`");
-        exit(ExitCodes::USER_ERROR);
-    });
-    let jobs = list_job_names(&src).unwrap_or_else(|diags| {
-        report_problems(mode, file, &src, &diags);
-        exit(ExitCodes::USER_ERROR);
-    });
-    if jobs.is_empty() {
-        println!("No jobs declared.");
-        return;
-    }
-    let width = jobs.iter().map(|job| job.name.len()).max().unwrap_or(0);
-    for job in jobs {
-        let scope = match job
-            .metadata
-            .as_ref()
-            .map(|metadata| metadata.scope)
-            .unwrap_or_default()
-        {
-            jet::AST::JobScope::Dev => "dev",
-            jet::AST::JobScope::Ship => "ship",
-            jet::AST::JobScope::Internal => "internal",
-        };
-        let mut detail = job.doc.unwrap_or_default();
-        if let Some(schedule) = job.schedule {
-            if !detail.is_empty() {
-                detail.push(' ');
-            }
-            detail.push_str(&format!("(every {schedule})"));
-        }
-        if detail.is_empty() {
-            println!("{:<width$}  [{scope}]", job.name);
-        } else {
-            println!("{:<width$}  [{scope}] {}", job.name, detail);
-        }
-    }
-}
-
 /// D-JOB-SUBCMD1=C: release binaries intentionally expose only `.Ship` jobs.
 /// Keep the dropped development surface visible at the build boundary so a
 /// release cannot silently lose a command the author expected to ship.
@@ -3385,10 +4595,13 @@ fn print_release_job_summary(src: &str, release: bool, mode: OutputMode) {
         .map(|job| job.name.as_str())
         .collect::<Vec<_>>();
     if !stripped.is_empty() {
-        println!(
-            "stripped {} dev job(s): {} (mark #Job(.Ship) to include)",
-            stripped.len(),
-            stripped.join(", ")
+        write_mode_status(
+            mode,
+            &format!(
+                "stripped {} dev job(s): {} (mark #Job(.Ship) to include)\n",
+                stripped.len(),
+                stripped.join(", ")
+            ),
         );
     }
 }
@@ -3439,10 +4652,13 @@ fn write_sbom_for_build(file: &str, bin: &Path, mode: OutputMode) {
         // this confirmation line, never the warning below.
         Ok(()) => {
             if !mode.quiet && !mode.json {
-                println!("sbom: {}", out.display());
+                write_mode_status(mode, &format!("sbom: {}\n", out.display()));
             }
         }
-        Err(e) => eprintln!("warning: couldn't write SBOM to {}: {}", out.display(), e),
+        Err(e) => write_mode_diagnostic(
+            mode,
+            &format!("warning: couldn't write SBOM to {}: {}\n", out.display(), e),
+        ),
     }
 }
 
@@ -3459,7 +4675,19 @@ struct FixPlan {
 /// fix in the editor are byte-identical. `--dry-run` shows the diff without
 /// writing. With `--edition=2027`, apply encoding-surface migrations first
 /// (D-JSONCANON1 / D-ENC-CBOR-SURFACE1 / D-ENCBASE-STRICT1).
-pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>, all: bool) {
+pub(crate) fn run_fix(
+    file: &str,
+    dry_run: bool,
+    edition: Option<&str>,
+    all: bool,
+    mode: OutputMode,
+) {
+    macro_rules! status {
+        ($($args:tt)*) => {{
+            let text = format!($($args)*);
+            write_mode_status(mode, &format!("{text}\n"));
+        }};
+    }
     let src = match fs::read_to_string(file) {
         Ok(s) => s,
         Err(_) => {
@@ -3475,7 +4703,7 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>, all: boo
     let (migrated, retired_target_count) = rewrite_retired_package_targets(&edition_migrated, file);
     if edition == Some("2027") {
         for note in edition_2027_encoding_audit(&src, &edition_migrated) {
-            println!("{file}: edition 2027 migration: {note}");
+            status!("{file}: edition 2027 migration: {note}");
         }
     }
     let retired_selector_count =
@@ -3502,9 +4730,9 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>, all: boo
     };
     if plan.staged == plan.before {
         if plan.skipped_suggestions == 0 {
-            println!("{}: no changes made", file);
+            status!("{}: no changes made", file);
         } else {
-            println!(
+            status!(
                 "{}: no changes made ({} suggestion{} need review)",
                 file,
                 plan.skipped_suggestions,
@@ -3519,9 +4747,9 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>, all: boo
     }
     let n = plan.edits;
     if dry_run {
-        print!(
-            "{}",
-            jet::Formatter::unified_diff(file, &plan.before, &plan.staged)
+        write_mode_renderable(
+            mode,
+            &jet::Formatter::unified_diff(file, &plan.before, &plan.staged),
         );
         if n == 0
             && retired_target_count == 0
@@ -3529,12 +4757,12 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>, all: boo
             && retired_print_count == 0
             && retired_type_count == 0
         {
-            println!(
+            status!(
                 "{}: would apply edition migration (dry run; nothing written)",
                 file
             );
         } else if n > 0 {
-            println!(
+            status!(
                 "{}: would apply {} fix{} (dry run; nothing written)",
                 file,
                 n,
@@ -3542,7 +4770,7 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>, all: boo
             );
         }
         if retired_target_count > 0 {
-            println!(
+            status!(
                 "{}: rewrote {} retired target spelling{} from `plugin` to `sandbox` (D-ONCE-SANDBOX1=A)",
                 file,
                 retired_target_count,
@@ -3550,7 +4778,7 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>, all: boo
             );
         }
         if retired_selector_count > 0 {
-            println!(
+            status!(
                 "{}: rewrote {} retired interpolation selector{} from `#` to `:` (D-ONCE-HASH1)",
                 file,
                 retired_selector_count,
@@ -3558,7 +4786,7 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>, all: boo
             );
         }
         if retired_print_count > 0 {
-            println!(
+            status!(
                 "{}: rewrote {} retired print-family spelling{} (D-ONCE-PRINT1=A)",
                 file,
                 retired_print_count,
@@ -3566,7 +4794,7 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>, all: boo
             );
         }
         if retired_type_count > 0 {
-            println!(
+            status!(
                 "{}: rewrote {} retired Core container name{} (D-COLLNAME1=A)",
                 file,
                 retired_type_count,
@@ -3574,7 +4802,7 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>, all: boo
             );
         }
         if plan.skipped_suggestions > 0 {
-            println!(
+            status!(
                 "{}: skipped {} suggestion{} for review (dry run)",
                 file,
                 plan.skipped_suggestions,
@@ -3598,9 +4826,9 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>, all: boo
         && retired_print_count == 0
         && retired_type_count == 0
     {
-        println!("{}: applied edition migration", file);
+        status!("{}: applied edition migration", file);
     } else if n > 0 {
-        println!(
+        status!(
             "{}: applied {} fix{}",
             file,
             n,
@@ -3608,7 +4836,7 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>, all: boo
         );
     }
     if plan.skipped_suggestions > 0 {
-        println!(
+        status!(
             "{}: skipped {} suggestion{} for review",
             file,
             plan.skipped_suggestions,
@@ -3619,9 +4847,9 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>, all: boo
             }
         );
     }
-    println!("  log: {}", log.display());
+    status!("  log: {}", log.display());
     if retired_target_count > 0 {
-        println!(
+        status!(
             "{}: rewrote {} retired target spelling{} from `plugin` to `sandbox` (D-ONCE-SANDBOX1=A)",
             file,
             retired_target_count,
@@ -3629,7 +4857,7 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>, all: boo
         );
     }
     if retired_selector_count > 0 {
-        println!(
+        status!(
             "{}: rewrote {} retired interpolation selector{} from `#` to `:` (D-ONCE-HASH1)",
             file,
             retired_selector_count,
@@ -3637,7 +4865,7 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>, all: boo
         );
     }
     if retired_print_count > 0 {
-        println!(
+        status!(
             "{}: rewrote {} retired print-family spelling{} (D-ONCE-PRINT1=A)",
             file,
             retired_print_count,
@@ -3645,7 +4873,7 @@ pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>, all: boo
         );
     }
     if retired_type_count > 0 {
-        println!(
+        status!(
             "{}: rewrote {} retired Core container name{} (D-COLLNAME1=A)",
             file,
             retired_type_count,
@@ -3843,6 +5071,52 @@ fn edition_2027_encoding_audit(before: &str, after: &str) -> Vec<String> {
     notes
 }
 
+/// D-DX-BROWSERTEST1=A: create one isolated native-BiDi test project with a
+/// runnable first test and explicit cross-browser/server configuration.
+pub(crate) fn scaffold_browser_tests(root: &Path, name: &str) -> Result<PathBuf, String> {
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains('/')
+        || name.contains('\\')
+        || !name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
+    {
+        return Err("browser test project name must be a simple folder name".to_string());
+    }
+    let project = root.join(name);
+    if project.exists() {
+        return Err(format!(
+            "browser test project `{}` already exists",
+            project.display()
+        ));
+    }
+    let tests = project.join("tests");
+    fs::create_dir_all(&tests)
+        .map_err(|error| format!("couldn't create `{}`: {error}", tests.display()))?;
+    fs::write(
+        project.join("package.jet"),
+        format!(
+            "name: \"{name}_browser_tests\"\nversion: \"0.1.0\"\nedition: \"2026\"\ndescription: \"Native cross-browser tests\"\n"
+        ),
+    )
+    .map_err(|error| format!("couldn't write browser test package: {error}"))?;
+    fs::write(project.join("run.jet"), "#Target(Web)\n\nfn run() {}\n")
+        .map_err(|error| format!("couldn't write browser app entry: {error}"))?;
+    fs::write(
+        project.join("browser-tests.conf"),
+        "browsers=chromium,firefox,webkit\nserver=reuse\nwebServer=jet dev\nserver-url=http://127.0.0.1:8080\nreporter=json\n",
+    )
+    .map_err(|error| format!("couldn't write browser test configuration: {error}"))?;
+    fs::write(
+        tests.join("browser_suite.jet"),
+        "use core.web.browser\n\n#Test fn first_page(page: BrowserPage) {\n  page.goto(\"/\")\n}\n",
+    )
+    .map_err(|error| format!("couldn't write first browser test: {error}"))?;
+    Ok(project)
+}
+
 pub(crate) fn run_new(name: &str, annotated: bool, web: bool, mode: OutputMode) {
     if name.is_empty() || name.contains('/') || name.contains('\\') {
         crate::cli_error!(@fix "E2104", "project name must be a simple folder name", format!("try: {} new my_app", jet::Syntax::BINARY_NAME));
@@ -3880,6 +5154,20 @@ pub(crate) fn run_new(name: &str, annotated: bool, web: bool, mode: OutputMode) 
         );
         exit(ExitCodes::USER_ERROR);
     });
+    let running_version = env!("CARGO_PKG_VERSION");
+    let channel = jetpack::JetPin::channel_of(running_version);
+    if let Err(error) = jet::Lock::record_toolchain(
+        dir,
+        jetpack::JetPin::toolchain_record(&channel, running_version),
+    ) {
+        crate::cli_error!(
+            @fix "E1206",
+            format!("couldn't write {}", jet::Syntax::UNIFIED_LOCK_FILE),
+            format!("check the project lock permissions: {error}")
+        );
+        exit(ExitCodes::USER_ERROR);
+    }
+
     let run_src = if web {
         "// Start the live browser app: `jet dev`\n// Run the scaffold test: `jet test`\n// Build static browser files: `jet build --target web`\nuse core.ui as ui\nuse core.reactive as reactive\n#Target(Web)\n\nfn run() {\n    count :: reactive.signal(0)\n    ui.reactive_render(() -> {\n        n := count.get()\n        tree :: ui.box([\n            ui.node_color(\"Clicks: {n}\", 240.0, 40.0, \"#3366ff\"),\n            ui.button(\"Add one\", on_click: () -> {\n                count.set(count.get() + 1)\n            })\n        ])\n        backend :: ui.null_backend()\n        ui.mount(backend, tree, ui.constraint(0.0, 0.0, 320.0, 120.0))\n    })\n}\n\n#Test(\"the counter increments\") {\n    count :: reactive.signal(0)\n    count.set(count.get() + 1)\n    assert_eq(count.get(), 1)\n}\n"
     } else {
@@ -3929,15 +5217,1063 @@ pub(crate) fn run_new(name: &str, annotated: bool, web: bool, mode: OutputMode) 
     // #1659 criterion 3: `--quiet` suppresses this confirmation; the project
     // itself was still created — only the non-error status narration mutes.
     if !mode.quiet {
-        println!("created {}/", name);
-        println!("  {}", jet::Syntax::PACKAGE_FILE);
-        println!("  {}", jet::Syntax::DEFAULT_ENTRY_FILE);
+        write_mode_status(mode, &format!("created {}/\n", name));
+        write_mode_status(mode, &format!("  {}\n", jet::Syntax::PACKAGE_FILE));
+        write_mode_status(mode, &format!("  {}\n", jet::Syntax::DEFAULT_ENTRY_FILE));
         for &(file, _) in &command_files {
-            println!("  {file}");
+            write_mode_status(mode, &format!("  {file}\n"));
         }
-        println!("  .gitignore");
+        write_mode_status(mode, "  .gitignore\n");
         let next = if web { "dev" } else { "run" };
-        println!("next: cd {} && {} {}", name, jet::Syntax::BINARY_NAME, next);
+        write_mode_status(
+            mode,
+            &format!(
+                "next: cd {} && {} {}\n",
+                name,
+                jet::Syntax::BINARY_NAME,
+                next
+            ),
+        );
+    }
+}
+
+/// How much stdout/stderr a test run keeps visible. The default is intentionally
+/// failure-only so a passing package remains quiet without hiding diagnostics.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum TestCapturePolicy {
+    #[default]
+    Failed,
+    All,
+    None,
+}
+
+impl TestCapturePolicy {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Failed => "failed",
+            Self::All => "all",
+            Self::None => "none",
+        }
+    }
+}
+
+pub(crate) fn parse_test_capture(value: &str, _mode: OutputMode) -> TestCapturePolicy {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "failed" | "failure" | "failures" => TestCapturePolicy::Failed,
+        "all" => TestCapturePolicy::All,
+        "none" | "off" => TestCapturePolicy::None,
+        _ => {
+            crate::cli_error!(
+                "E2104",
+                "invalid --capture value `{}` (expected failed, all, or none)",
+                value
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
+}
+
+/// `--where` is deliberately a fact predicate, not another test-name
+/// substring. Keep the grammar small until the recorded fact vocabulary grows:
+/// conjunctions of exact `package`, `dep`, `path`, `tag`, and `status` values.
+#[derive(Clone, Debug)]
+struct TestWhereClause {
+    field: String,
+    value: String,
+}
+
+fn split_test_where_terms(expression: &str) -> Result<Vec<&str>, String> {
+    let bytes = expression.as_bytes();
+    let mut terms = Vec::new();
+    let mut start = 0usize;
+    let mut quote = None;
+    let mut index = 0usize;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if let Some(mark) = quote {
+            if byte == b'\\' {
+                index = index.saturating_add(2);
+                continue;
+            }
+            if byte == mark {
+                quote = None;
+            }
+            index += 1;
+            continue;
+        }
+        if byte == b'\'' || byte == b'"' {
+            quote = Some(byte);
+            index += 1;
+            continue;
+        }
+        if index + 3 <= bytes.len()
+            && (bytes[index] == b'a' || bytes[index] == b'A')
+            && (bytes[index + 1] == b'n' || bytes[index + 1] == b'N')
+            && (bytes[index + 2] == b'd' || bytes[index + 2] == b'D')
+            && (index == 0 || bytes[index - 1].is_ascii_whitespace())
+            && (index + 3 == bytes.len() || bytes[index + 3].is_ascii_whitespace())
+        {
+            let term = expression[start..index].trim();
+            if term.is_empty() {
+                return Err("empty predicate before `and`".to_string());
+            }
+            terms.push(term);
+            index += 3;
+            start = index;
+            continue;
+        }
+        index += 1;
+    }
+    if quote.is_some() {
+        return Err("unterminated quote in --where expression".to_string());
+    }
+    let term = expression[start..].trim();
+    if term.is_empty() {
+        return Err("empty predicate in --where expression".to_string());
+    }
+    terms.push(term);
+    Ok(terms)
+}
+
+fn parse_test_where(expression: &str) -> Result<Vec<TestWhereClause>, String> {
+    let mut clauses = Vec::new();
+    for term in split_test_where_terms(expression.trim())? {
+        let (field, raw_value) = term
+            .split_once('=')
+            .ok_or_else(|| format!("predicate `{term}` needs `field=value`"))?;
+        let field = field.trim().to_ascii_lowercase();
+        if !matches!(
+            field.as_str(),
+            "package" | "dep" | "dependency" | "path" | "tag" | "status"
+        ) {
+            return Err(format!(
+                "unknown --where field `{field}` (expected package, dep, path, tag, or status)"
+            ));
+        }
+        let raw_value = raw_value.trim();
+        if raw_value.is_empty() {
+            return Err(format!("empty value for --where field `{field}`"));
+        }
+        let value = if let Some(first) = raw_value.as_bytes().first().copied() {
+            if first == b'\'' || first == b'"' {
+                if raw_value.len() < 2 || raw_value.as_bytes().last().copied() != Some(first) {
+                    return Err(format!("unterminated quote for --where field `{field}`"));
+                }
+                raw_value[1..raw_value.len() - 1].to_string()
+            } else if raw_value.bytes().any(|byte| byte.is_ascii_whitespace()) {
+                return Err(format!(
+                    "unquoted --where value `{raw_value}` contains whitespace"
+                ));
+            } else {
+                raw_value.to_string()
+            }
+        } else {
+            return Err(format!("empty value for --where field `{field}`"));
+        };
+        clauses.push(TestWhereClause {
+            field: if field == "dependency" {
+                "dep".to_string()
+            } else {
+                field
+            },
+            value,
+        });
+    }
+    Ok(clauses)
+}
+
+#[derive(Default)]
+struct TestTargetFacts {
+    package: String,
+    deps: BTreeSet<String>,
+    path: String,
+    tags: BTreeSet<String>,
+    status: Option<&'static str>,
+}
+
+fn source_hash_tags(source: &str) -> BTreeSet<String> {
+    let mut tags = BTreeSet::new();
+    for line in source.lines() {
+        let marker = line.trim_start();
+        let Some(marker) = marker.strip_prefix('#') else {
+            continue;
+        };
+        let end = marker
+            .char_indices()
+            .find_map(|(index, ch)| (!ch.is_ascii_alphanumeric() && ch != '_').then_some(index))
+            .unwrap_or(marker.len());
+        if end != 0 {
+            tags.insert(marker[..end].to_string());
+        }
+    }
+    tags
+}
+
+fn test_target_facts(
+    path: &Path,
+    source: &str,
+    opts: &TestRunOpts,
+    package: bool,
+) -> TestTargetFacts {
+    let shown = path.to_string_lossy().into_owned();
+    let mut facts = TestTargetFacts {
+        package: path
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or("package")
+            .to_string(),
+        path: shown,
+        tags: source_hash_tags(source),
+        ..TestTargetFacts::default()
+    };
+    if let Ok(Some(package_facts)) = jet::Loader::package_facts_for_entry(path) {
+        facts.package = package_facts.name.clone();
+        facts.deps.extend(package_facts.deps.keys().cloned());
+    }
+    let entry = path.to_string_lossy();
+    let (bundle, _) = jet::Loader::load_entry_with_overlays_and_dependencies(&entry, &[], false);
+    if let Ok(bundle) = bundle {
+        facts
+            .deps
+            .extend(bundle.package_guarantees.dependency_names.iter().cloned());
+        facts.deps.extend(bundle.dep_roots.keys().cloned());
+        facts
+            .deps
+            .extend(bundle.dep_roots.values().filter_map(|root| {
+                root.file_name()
+                    .and_then(|name| name.to_str())
+                    .map(str::to_string)
+            }));
+    }
+    if !opts.fresh {
+        if let Some(cached) = test_result_cache_read(path, opts, package) {
+            facts.status = Some(if cached.ok { "pass" } else { "fail" });
+        }
+    }
+    facts
+}
+
+fn test_where_matches(expression: &str, facts: &TestTargetFacts) -> bool {
+    let Ok(clauses) = parse_test_where(expression) else {
+        return false;
+    };
+    clauses.iter().all(|clause| match clause.field.as_str() {
+        "package" => facts.package == clause.value,
+        "dep" => facts.deps.iter().any(|dep| {
+            dep == &clause.value
+                || dep
+                    .strip_prefix(&clause.value)
+                    .is_some_and(|tail| tail.starts_with('.'))
+        }),
+        "path" => {
+            facts.path == clause.value
+                || facts.path.ends_with(&format!("/{}", clause.value))
+                || facts.path.contains(&clause.value)
+        }
+        "tag" => facts.tags.contains(&clause.value),
+        "status" => {
+            let lowered = clause.value.to_ascii_lowercase();
+            let wanted = match lowered.as_str() {
+                "passed" | "success" | "ok" => "pass",
+                "failed" | "failure" | "error" => "fail",
+                value => value,
+            };
+            facts.status == Some(wanted)
+        }
+        _ => false,
+    })
+}
+
+#[derive(Clone, Debug)]
+struct TestResultCache {
+    ok: bool,
+    stdout: String,
+    stderr: String,
+}
+
+fn append_test_cache_field(bytes: &mut Vec<u8>, value: &[u8]) {
+    bytes.extend_from_slice(&(value.len() as u64).to_be_bytes());
+    bytes.extend_from_slice(value);
+}
+
+fn test_result_cache_key(path: &Path, opts: &TestRunOpts, package: bool) -> Option<String> {
+    let mut identity = Vec::new();
+    append_test_cache_field(&mut identity, b"jet-test-result-v2");
+    append_test_cache_field(
+        &mut identity,
+        fs::canonicalize(path)
+            .unwrap_or_else(|_| path.to_path_buf())
+            .to_string_lossy()
+            .as_bytes(),
+    );
+    append_test_cache_field(&mut identity, if package { b"package" } else { b"file" });
+    let entry = path.to_string_lossy();
+    let (bundle, dependencies) =
+        jet::Loader::load_entry_with_overlays_and_dependencies(&entry, &[], false);
+    let mut inputs = BTreeSet::new();
+    if let Some(root) = path.parent().and_then(jet::Loader::find_manifest_root) {
+        inputs.insert(root.join(jet::Syntax::PACKAGE_FILE));
+    }
+    inputs.insert(path.to_path_buf());
+    inputs.extend(dependencies);
+    if let Ok(bundle) = bundle {
+        for input in &bundle.comptime_inputs {
+            append_test_cache_field(&mut identity, b"comptime-input");
+            append_test_cache_field(&mut identity, input.path.as_bytes());
+            append_test_cache_field(&mut identity, input.hash.as_bytes());
+        }
+        inputs.extend(bundle.modules.into_iter().map(|module| module.path));
+    }
+    for input in inputs {
+        append_test_cache_field(&mut identity, input.to_string_lossy().as_bytes());
+        match fs::read(&input) {
+            Ok(contents) => append_test_cache_field(&mut identity, &contents),
+            Err(_) => append_test_cache_field(&mut identity, b"<missing>"),
+        }
+    }
+
+    // A test result is executable output too. Reuse the native key's complete
+    // identity so compile-time inputs, compiler/toolchain, runtime, and corelib
+    // changes cannot serve an older result. `None` is the safe no-cache answer
+    // for an uncacheable or invalid program (for example, embed_file).
+    let profile = opts
+        .profile
+        .as_deref()
+        .unwrap_or(if opts.release || opts.measure {
+            jet::Syntax::BUILD_PROFILE_RELEASE
+        } else {
+            "dev"
+        });
+    let profile_tag = format!("{profile};aot-target=native");
+    let mode_tag = if opts.coverage { "testcov" } else { "test" };
+    let native_identity = native_cache_key(entry.as_ref(), profile, &profile_tag, mode_tag, None)?;
+    append_test_cache_field(&mut identity, b"native-identity");
+    append_test_cache_field(&mut identity, native_identity.as_bytes());
+
+    let options = format!(
+        "show_default={};coverage={};release={};profile={:?};trace_tiers={};filter={:?};shuffle={:?};serial={};measure={};docs={};browser={:?};browser_retries={:?};browser_reporter={:?};browser_ui={};browser_visual={};browser_trace={};",
+        opts.show_default,
+        opts.coverage,
+        opts.release,
+        opts.profile,
+        opts.trace_tiers,
+        opts.filter,
+        opts.shuffle_seed,
+        opts.serial,
+        opts.measure,
+        opts.docs,
+        opts.browser_engines,
+        opts.browser_retries,
+        opts.browser_reporter,
+        opts.browser_ui,
+        opts.browser_visual,
+        opts.browser_trace,
+    );
+    append_test_cache_field(&mut identity, options.as_bytes());
+    Some(jet::SHA256::sha256_hex(&identity))
+}
+
+fn test_result_cache_path(path: &Path, opts: &TestRunOpts, package: bool) -> Option<PathBuf> {
+    let root = path
+        .parent()
+        .and_then(jet::Loader::find_manifest_root)
+        .unwrap_or_else(|| {
+            path.parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from("."))
+        });
+    Some(root.join(".jet").join("test-results").join(format!(
+        "{}.cache",
+        test_result_cache_key(path, opts, package)?
+    )))
+}
+
+fn read_test_cache_line<'a>(bytes: &'a [u8], cursor: &mut usize) -> Option<&'a [u8]> {
+    let start = *cursor;
+    let end = bytes.get(start..)?.iter().position(|byte| *byte == b'\n')? + start;
+    *cursor = end + 1;
+    Some(&bytes[start..end])
+}
+
+fn test_result_cache_read(
+    path: &Path,
+    opts: &TestRunOpts,
+    package: bool,
+) -> Option<TestResultCache> {
+    let bytes = fs::read(test_result_cache_path(path, opts, package)?).ok()?;
+    let mut cursor = 0usize;
+    if read_test_cache_line(&bytes, &mut cursor)? != b"JET_TEST_RESULT_V2" {
+        return None;
+    }
+    let ok = read_test_cache_line(&bytes, &mut cursor)? == b"1";
+    let stdout_len = std::str::from_utf8(read_test_cache_line(&bytes, &mut cursor)?)
+        .ok()?
+        .parse::<usize>()
+        .ok()?;
+    let stderr_len = std::str::from_utf8(read_test_cache_line(&bytes, &mut cursor)?)
+        .ok()?
+        .parse::<usize>()
+        .ok()?;
+    let stdout_end = cursor.checked_add(stdout_len)?;
+    let stderr_end = stdout_end.checked_add(stderr_len)?;
+    let stdout = String::from_utf8(bytes.get(cursor..stdout_end)?.to_vec()).ok()?;
+    let stderr = String::from_utf8(bytes.get(stdout_end..stderr_end)?.to_vec()).ok()?;
+    Some(TestResultCache { ok, stdout, stderr })
+}
+
+fn test_result_cache_write(
+    path: &Path,
+    opts: &TestRunOpts,
+    package: bool,
+    result: &TestResultCache,
+) {
+    let Some(destination) = test_result_cache_path(path, opts, package) else {
+        return;
+    };
+    if let Some(parent) = destination.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let mut bytes = b"JET_TEST_RESULT_V2\n".to_vec();
+    bytes.extend_from_slice(if result.ok { b"1\n" } else { b"0\n" });
+    bytes.extend_from_slice(result.stdout.len().to_string().as_bytes());
+    bytes.extend_from_slice(result.stderr.len().to_string().as_bytes());
+    bytes.push(b'\n');
+    bytes.extend_from_slice(result.stdout.as_bytes());
+    bytes.extend_from_slice(result.stderr.as_bytes());
+    let _ = fs::write(destination, bytes);
+}
+
+fn test_result_cache_write_allowed(opts: &TestRunOpts) -> bool {
+    !opts.docs && !opts.coverage && !opts.measure && !opts.update_snapshots && opts.record.is_none()
+}
+fn emit_test_capture(result: &TestResultCache, policy: TestCapturePolicy, mode: OutputMode) {
+    if mode.json {
+        if let Some(document) =
+            canonical_test_json(&result.stdout).or_else(|| canonical_status_json(&result.stdout))
+        {
+            write_mode_machine(mode, &format!("{document}\n"));
+        } else {
+            // Machine stdout is reserved for the canonical report. Preserve
+            // an unexpected child stream as a diagnostic rather than corrupting
+            // the JSON channel with human output.
+            if !result.stdout.is_empty() {
+                eprint!("{}", result.stdout);
+            }
+            if !result.stderr.is_empty() {
+                eprint!("{}", result.stderr);
+            }
+        }
+        return;
+    }
+    let show = matches!(policy, TestCapturePolicy::All)
+        || (!result.ok && matches!(policy, TestCapturePolicy::Failed));
+    if !show {
+        return;
+    }
+    if !result.stdout.is_empty() {
+        print!("{}", result.stdout);
+    }
+    if !result.stderr.is_empty() {
+        eprint!("{}", result.stderr);
+    }
+}
+#[derive(Clone, Debug)]
+struct HarnessTestCase {
+    name: String,
+    ok: bool,
+    expected_failure: bool,
+    skipped: bool,
+    message: String,
+}
+
+fn host_target_triple() -> String {
+    format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS)
+}
+
+fn with_test_evidence_environment<R>(
+    report_path: &Path,
+    report_id: &str,
+    toolchain: &str,
+    target: &str,
+    profile: &str,
+    source_revision: &str,
+    build_revision: &str,
+    revision: &str,
+    operation: impl FnOnce() -> R,
+) -> R {
+    let values = [
+        (
+            jet_foundation::Evidence::EVIDENCE_REPORT_ENV,
+            report_path.to_string_lossy().into_owned(),
+        ),
+        (
+            jet_foundation::Evidence::EVIDENCE_REPORT_ID_ENV,
+            report_id.to_string(),
+        ),
+        (
+            jet_foundation::Evidence::EVIDENCE_TOOLCHAIN_ENV,
+            toolchain.to_string(),
+        ),
+        (
+            jet_foundation::Evidence::EVIDENCE_TARGET_ENV,
+            target.to_string(),
+        ),
+        (
+            jet_foundation::Evidence::EVIDENCE_PROFILE_ENV,
+            profile.to_string(),
+        ),
+        (
+            jet_foundation::Evidence::EVIDENCE_SOURCE_REVISION_ENV,
+            source_revision.to_string(),
+        ),
+        (
+            jet_foundation::Evidence::EVIDENCE_BUILD_REVISION_ENV,
+            build_revision.to_string(),
+        ),
+        (
+            jet_foundation::Evidence::EVIDENCE_REVISION_ENV,
+            revision.to_string(),
+        ),
+    ];
+    let previous = values
+        .iter()
+        .map(|(name, _)| (*name, std::env::var_os(name)))
+        .collect::<Vec<_>>();
+    for (name, value) in &values {
+        std::env::set_var(name, value);
+    }
+    let result = operation();
+    for (name, value) in previous {
+        if let Some(value) = value {
+            std::env::set_var(name, value);
+        } else {
+            std::env::remove_var(name);
+        }
+    }
+    result
+}
+
+fn harness_test_cases(stdout: &str) -> Result<Option<Vec<HarnessTestCase>>, String> {
+    if let Some(document) = canonical_test_json(stdout) {
+        let value = parse_json(&document)
+            .map_err(|_| "the test harness emitted an invalid canonical JSON report".to_string())?;
+        let tests = value
+            .get("tests")
+            .map_err(|error| format!("the test harness report is missing `tests`: {error}"))?
+            .as_array()
+            .map_err(|error| format!("the test harness report has invalid `tests`: {error}"))?;
+        let mut cases = Vec::with_capacity(tests.len());
+        for test in tests {
+            let name = test
+                .get("name")
+                .and_then(|value| value.as_str())
+                .map_err(|error| format!("the test harness report has an invalid name: {error}"))?
+                .to_string();
+            let ok = match test
+                .get("ok")
+                .map_err(|error| format!("test `{name}` has no result: {error}"))?
+            {
+                DataTree::Bool(ok) => *ok,
+                _ => return Err(format!("test `{name}` has a non-boolean result")),
+            };
+            let expected_failure = match test.get_opt("expectedFailure") {
+                Some(DataTree::Bool(expected_failure)) => *expected_failure,
+                None => false,
+                _ => return Err(format!("test `{name}` has a non-boolean expectation")),
+            };
+            let skipped = match test.get_opt("skipped") {
+                Some(DataTree::Bool(skipped)) => *skipped,
+                None => false,
+                _ => return Err(format!("test `{name}` has a non-boolean skip flag")),
+            };
+            let stderr = test
+                .get_opt("stderr")
+                .and_then(|value| value.as_str().ok())
+                .unwrap_or("");
+            let message = if stderr.is_empty() && !ok {
+                "test failed".to_string()
+            } else {
+                stderr.to_string()
+            };
+            cases.push(HarnessTestCase {
+                name,
+                ok,
+                expected_failure,
+                skipped,
+                message,
+            });
+        }
+        return Ok(Some(cases));
+    }
+    let cases = stdout
+        .lines()
+        .filter_map(|line| {
+            let (name, status) = line.rsplit_once(": ")?;
+            let (ok, expected_failure, skipped) = match status {
+                "pass" => (true, false, false),
+                "expected-fail" => (true, true, false),
+                "skip" => (true, false, true),
+                "FAIL" => (false, false, false),
+                "UNEXPECTED-PASS (remove expected_fail: true)" => (false, true, false),
+                _ => return None,
+            };
+            Some(HarnessTestCase {
+                name: name.trim().to_string(),
+                ok,
+                expected_failure,
+                skipped,
+                message: if ok { String::new() } else { status.to_string() },
+            })
+        })
+        .filter(|case| !case.name.is_empty())
+        .collect::<Vec<_>>();
+    if cases.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(cases))
+    }
+}
+
+fn append_harness_test_evidence(
+    report: &mut jet_foundation::Evidence::EvidenceReport,
+    stdout: &str,
+    file: &str,
+    report_id: &str,
+    build: &jet_foundation::Evidence::EvidenceBuild,
+    revision: &jet_foundation::Evidence::EvidenceRevision,
+    child_ok: bool,
+) -> Result<(), String> {
+    let cases = harness_test_cases(stdout)?;
+    let Some(cases) = cases else {
+        if child_ok {
+            return Ok(());
+        }
+        let name = format!("{file}:harness");
+        let mut record = jet_foundation::Evidence::EvidenceRecord::from_test_codes(
+            0,
+            3,
+            &name,
+            "producer unavailable",
+            file,
+            0,
+        )?
+        .with_report_id(report_id);
+        record.build = build.clone();
+        record.revision = revision.clone();
+        let derivation = record.checked_derivation();
+        report
+            .add_record_with_derivation(record, derivation)
+            .map_err(|error| error.to_string())?;
+        return Ok(());
+    };
+    for case in cases {
+        if report
+            .records
+            .iter()
+            .any(|record| record.identity.claim_id == case.name)
+        {
+            continue;
+        }
+        let mut record = jet_foundation::Evidence::EvidenceRecord::from_test_codes(
+            0,
+            if case.skipped {
+                2
+            } else if case.ok != case.expected_failure {
+                0
+            } else {
+                1
+            },
+            &case.name,
+            &case.message,
+            file,
+            0,
+        )?
+        .with_report_id(report_id);
+        if case.expected_failure && !case.skipped {
+            record
+                .set_expectation(
+                    jet_foundation::Evidence::EvidenceExpectation::ExpectedFailure,
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        record.build = build.clone();
+        record.revision = revision.clone();
+        let derivation = record.checked_derivation();
+        report
+            .add_record_with_derivation(record, derivation)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn read_or_create_test_evidence_report(
+    path: &Path,
+    report_id: &str,
+    file: &str,
+    toolchain: &str,
+    target: &str,
+    profile: &str,
+    source_revision: &str,
+    build_revision: &str,
+    revision: &str,
+) -> Result<jet_foundation::Evidence::EvidenceReport, String> {
+    match jet_foundation::Evidence::EvidenceReport::read(path) {
+        Ok(report) => Ok(report),
+        Err(_error) if !path.exists() => Ok(jet_foundation::Evidence::EvidenceReport::new(
+            report_id,
+            jet_foundation::Evidence::EvidenceProducerKind::Test,
+            jet_foundation::Evidence::EvidenceSource::new(file, 0, 1),
+            jet_foundation::Evidence::EvidenceBuild::new(toolchain, target, profile),
+            jet_foundation::Evidence::EvidenceRevision::new(
+                source_revision,
+                build_revision,
+                revision,
+            ),
+        )),
+        Err(error) => Err(format!(
+            "could not read test evidence report `{}`: {error}",
+            path.display()
+        )),
+    }
+}
+
+fn write_test_evidence_bytes(path: &Path, bytes: &[u8]) -> Result<u64, String> {
+    let Some(parent) = path.parent() else {
+        return Err("test evidence report has no parent directory".to_string());
+    };
+    let mut current = PathBuf::from(".");
+    for component in parent.components() {
+        let std::path::Component::Normal(name) = component else {
+            continue;
+        };
+        current.push(name);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(format!(
+                    "test evidence parent is a symlink: {}",
+                    current.display()
+                ));
+            }
+            Ok(metadata) if !metadata.is_dir() => {
+                return Err(format!(
+                    "test evidence parent is not a directory: {}",
+                    current.display()
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                fs::create_dir(&current).map_err(|error| error.to_string())?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::set_permissions(&current, fs::Permissions::from_mode(0o700))
+                        .map_err(|error| error.to_string())?;
+                }
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(format!(
+                "final test evidence path is not a regular file: {}",
+                path.display()
+            ));
+        }
+        let existing = fs::read(path).map_err(|error| error.to_string())?;
+        if existing == bytes {
+            return u64::try_from(existing.len())
+                .map_err(|_| "test evidence report is too large".to_string());
+        }
+        return Err(format!(
+            "refusing to overwrite differing test evidence report at {}",
+            path.display()
+        ));
+    }
+    let temporary = path.with_extension(format!(
+        "json.tmp.{}.{}",
+        std::process::id(),
+        jet::SHA256::sha256_hex(bytes)
+            .get(..8)
+            .unwrap_or("00000000")
+    ));
+    let write_result = (|| -> Result<(), String> {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|error| error.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(fs::Permissions::from_mode(0o600))
+                .map_err(|error| error.to_string())?;
+        }
+        file.write_all(bytes).map_err(|error| error.to_string())?;
+        file.sync_all().map_err(|error| error.to_string())?;
+        fs::hard_link(&temporary, path).map_err(|error| error.to_string())?;
+        fs::remove_file(&temporary).map_err(|error| error.to_string())?;
+        #[cfg(unix)]
+        fs::File::open(parent)
+            .map_err(|error| error.to_string())?
+            .sync_all()
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    })();
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+    u64::try_from(bytes.len()).map_err(|_| "test evidence report is too large".to_string())
+}
+
+pub(crate) fn persist_evidence_report(
+    report: &jet_foundation::Evidence::EvidenceReport,
+) -> Result<(), String> {
+    persist_evidence_report_for_inputs(report, &report.revision.source)
+}
+
+pub(crate) fn persist_evidence_report_for_inputs(
+    report: &jet_foundation::Evidence::EvidenceReport,
+    target_inputs_sha256: &str,
+) -> Result<(), String> {
+    let report_id = report.identity.report_id.as_str();
+    if report_id.is_empty()
+        || report_id.contains('/')
+        || report_id.contains('\\')
+        || report_id == "."
+        || report_id == ".."
+    {
+        return Err(format!("evidence report has an unsafe id `{report_id}`"));
+    }
+    let path = PathBuf::from(".jet/evidence").join(format!("{report_id}.json"));
+    let bytes = report.encode()?;
+    let size = write_test_evidence_bytes(&path, &bytes)?;
+    let identity = RecordIdentity::new(
+        target_inputs_sha256.to_string(),
+        report.build.toolchain.clone(),
+        report.producer.as_str(),
+    )?;
+    index_compile_artifact(
+        identity,
+        RecordKind::Evidence,
+        report_id.to_string(),
+        path,
+        size,
+        RecordCapture::Safe,
+        Vec::new(),
+        Vec::new(),
+    )?;
+    Ok(())
+}
+
+fn finish_test_evidence(
+    report_path: &Path,
+    report_id: &str,
+    file: &str,
+    toolchain: &str,
+    target: &str,
+    profile: &str,
+    source_revision: &str,
+    build_revision: &str,
+    revision: &str,
+    harness_stdout: Option<&str>,
+    child_ok: bool,
+    preserve_report: bool,
+    mode: OutputMode,
+) -> Result<Option<bool>, String> {
+    let mut report = read_or_create_test_evidence_report(
+        report_path,
+        report_id,
+        file,
+        toolchain,
+        target,
+        profile,
+        source_revision,
+        build_revision,
+        revision,
+    )?;
+    let build = jet_foundation::Evidence::EvidenceBuild::new(toolchain, target, profile);
+    let evidence_revision =
+        jet_foundation::Evidence::EvidenceRevision::new(source_revision, build_revision, revision);
+    if let Some(stdout) = harness_stdout {
+        append_harness_test_evidence(
+            &mut report,
+            stdout,
+            file,
+            report_id,
+            &build,
+            &evidence_revision,
+            child_ok,
+        )?;
+    }
+    if report.records.is_empty() {
+        if !preserve_report {
+            let _ = fs::remove_file(report_path);
+        }
+        return Ok(None);
+    }
+    persist_evidence_report(&report)?;
+    let projection = jet::Package::ClaimsProjection::from_records(&report.records);
+    let floor = jet::Loader::package_facts_for_entry(Path::new(file))
+        .ok()
+        .flatten()
+        .and_then(|facts| facts.policy.claims_min);
+    let floor_met = projection.floor_met(floor);
+    let grade = projection.grade.render();
+    let claims = StatusValue::object(
+        StatusFields::new()
+            .with("grade", grade.clone())
+            .with(
+                "floor",
+                floor.map_or(StatusValue::Null, |floor| {
+                    StatusValue::String(floor.render())
+                }),
+            )
+            .with("floorMet", floor_met)
+            .with("generatedAttempts", projection.generated_attempts)
+            .with("generated", projection.generated_successes)
+            .with("examples", projection.examples_successes),
+    );
+    let summaries = StatusValue::object(StatusFields::new().with(
+        "claims",
+        StatusValue::object(StatusFields::new().with("grade", grade)),
+    ));
+    let mut passed = 0usize;
+    let mut failed = 0usize;
+    let mut skipped = 0usize;
+    let mut expected_failures = 0usize;
+    let mut unexpected_passes = 0usize;
+    for record in &report.records {
+        if !matches!(
+            record.kind,
+            jet_foundation::Evidence::EvidenceKind::Unit
+                | jet_foundation::Evidence::EvidenceKind::Property
+                | jet_foundation::Evidence::EvidenceKind::Doctest
+        ) {
+            continue;
+        }
+        if record.is_unexpected_pass() {
+            unexpected_passes += 1;
+            continue;
+        }
+        if record.is_expected_failure() {
+            expected_failures += 1;
+            continue;
+        }
+        match record.outcome {
+            jet_foundation::Evidence::EvidenceOutcome::Passed => passed += 1,
+            jet_foundation::Evidence::EvidenceOutcome::Failed
+            | jet_foundation::Evidence::EvidenceOutcome::Error => failed += 1,
+            jet_foundation::Evidence::EvidenceOutcome::Skipped => skipped += 1,
+            _ => {}
+        }
+    }
+    let test = StatusValue::object(
+        StatusFields::new()
+            .with("failed", failed)
+            .with("passed", passed)
+            .with("skipped", skipped)
+            .with(
+                "selected",
+                passed + failed + skipped + expected_failures + unexpected_passes,
+            )
+            .with("expectedFailures", expected_failures)
+            .with("unexpectedPasses", unexpected_passes),
+    );
+    let evidence = StatusValue::parse(&report.json()).map_err(|error| error.to_string())?;
+    let mut status = StatusEnvelope::new("test", failed == 0 && unexpected_passes == 0)
+        .with_field("test", test)
+        .with_field("evidence", evidence)
+        .with_field("grade", projection.grade.render())
+        .with_field("claims", claims)
+        .with_field("summaries", summaries);
+    status.ok = status.ok && child_ok && floor_met;
+    if mode.json {
+        write_mode_machine(mode, &format!("{}\n", status.json()));
+    }
+    let ok = status.ok;
+    if !preserve_report {
+        let _ = fs::remove_file(report_path);
+    }
+    Ok(Some(ok))
+}
+
+fn canonical_test_json(stdout: &str) -> Option<String> {
+    let whole = stdout.trim();
+    if is_canonical_test_report(whole) {
+        return Some(whole.to_string());
+    }
+    stdout
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| is_canonical_test_report(line))
+        .map(str::to_string)
+}
+
+fn object_field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+    object
+        .iter()
+        .find(|(name, _)| name == key)
+        .map(|(_, value)| value)
+}
+
+fn is_canonical_test_report(candidate: &str) -> bool {
+    let Ok(DataTree::Object(object)) = parse_json(candidate) else {
+        return false;
+    };
+    let schema = object_field(&object, "schema").and_then(|value| value.as_str().ok());
+    matches!(schema, Some("jet.test.v1" | "jet-test-v1"))
+        && matches!(object_field(&object, "tests"), Some(DataTree::Array(_)))
+}
+fn canonical_status_json(stdout: &str) -> Option<String> {
+    let whole = stdout.trim();
+    if is_canonical_status_report(whole) {
+        return Some(whole.to_string());
+    }
+    stdout
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| is_canonical_status_report(line))
+        .map(str::to_string)
+}
+
+fn is_canonical_status_report(candidate: &str) -> bool {
+    let Ok(DataTree::Object(object)) = parse_json(candidate) else {
+        return false;
+    };
+    matches!(
+        object_field(&object, "schema").and_then(|value| value.as_str().ok()),
+        Some("jet.status/v1")
+    )
+}
+fn emit_doctest_result(
+    label: &str,
+    ok: bool,
+    stdout: &str,
+    stderr: &str,
+    policy: TestCapturePolicy,
+    mode: OutputMode,
+) {
+    if mode.json {
+        return;
+    }
+    let show = matches!(policy, TestCapturePolicy::All)
+        || (!ok && matches!(policy, TestCapturePolicy::Failed));
+    if !show {
+        return;
+    }
+    write_mode_status(
+        mode,
+        &format!("{}: {}\n", label, if ok { "pass" } else { "FAIL" }),
+    );
+    if !stdout.is_empty() {
+        print!("{}", stdout);
+    }
+    if !stderr.is_empty() {
+        eprint!("{}", stderr);
     }
 }
 
@@ -3947,12 +6283,24 @@ pub(crate) fn run_new(name: &str, annotated: bool, web: bool, mode: OutputMode) 
 pub(crate) struct TestRunOpts {
     /// `--show-default` forces the stock harness when the entry defines `fn test`.
     pub(crate) show_default: bool,
+    /// `--watch` keeps the test command alive and retains its failed cursor.
+    pub(crate) watch: bool,
+    /// `--fresh` bypasses only the persistent test-result cache.
+    pub(crate) fresh: bool,
+    /// `--docs` selects checked documentation examples instead of `#Test` blocks.
+    pub(crate) docs: bool,
+    /// Structured package/dependency/path/tag/status fact predicate.
+    pub(crate) where_expr: Option<String>,
+    /// Captured child output policy. `failed` is the quiet default.
+    pub(crate) capture: TestCapturePolicy,
     pub(crate) update_snapshots: bool,
     pub(crate) coverage: bool,
     /// `--release`: build the test harness with the release AOT profile.
     pub(crate) release: bool,
     /// `--profile=<name>`: build the test harness with the selected profile.
     pub(crate) profile: Option<String>,
+    /// CLI build-setting contributions shared with the checked test target.
+    pub(crate) setting_overrides: BTreeMap<String, String>,
     /// `--trace-tiers`: print the harness execution tier marker.
     pub(crate) trace_tiers: bool,
     /// `--filter=<substr>`: only run tests whose name contains it.
@@ -3966,20 +6314,232 @@ pub(crate) struct TestRunOpts {
     pub(crate) measure: bool,
     /// `--record=NAME`: write the shared safe replay envelope for this target.
     pub(crate) record: Option<String>,
+    /// `--browser=<engines>` selects the locked native BiDi engines.
+    pub(crate) browser_engines: Option<String>,
+    /// `--browser-retries=<n>` bounds fresh-context retries per engine.
+    pub(crate) browser_retries: Option<i64>,
+    /// `--browser-reporter=<text|json|html>` selects the deterministic report.
+    pub(crate) browser_reporter: Option<String>,
+    /// `--browser-ui` opens the local report viewer when the report is written.
+    pub(crate) browser_ui: bool,
+    /// `--browser-visual` captures screenshots for passing attempts too.
+    pub(crate) browser_visual: bool,
+    /// `--browser-trace` records the redacted BiDi trace for every attempt.
+    pub(crate) browser_trace: bool,
+}
+impl TestRunOpts {
+    /// Parse the complete `jet test` argv once for both the bare-package and
+    /// explicit-target routes. The first positional after `test` is the
+    /// target; the optional second positional is the promised name filter.
+    pub(crate) fn parse(
+        argv: &[String],
+        mode: OutputMode,
+        setting_overrides: &BTreeMap<String, String>,
+    ) -> Self {
+        let mut opts = Self::default();
+        opts.setting_overrides = setting_overrides.clone();
+        let mut positionals = Vec::new();
+        let mut index = 0usize;
+        while index < argv.len() {
+            let arg = argv[index].as_str();
+            if index == 0 && arg == "test" {
+                index += 1;
+                continue;
+            }
+            if arg == "--" {
+                break;
+            }
+            let (name, inline) = arg
+                .split_once('=')
+                .map_or((arg, None), |(name, value)| (name, Some(value)));
+            match name {
+                "--show-default" => opts.show_default = true,
+                "--watch" => opts.watch = !matches!(inline, Some("off" | "false" | "0")),
+                "--fresh" => opts.fresh = true,
+                "--docs" => opts.docs = true,
+                "--update-snapshots" | "-u" => opts.update_snapshots = true,
+                "--coverage" => opts.coverage = true,
+                "--release" => opts.release = true,
+                "--trace-tiers" => opts.trace_tiers = true,
+                "--serial" => opts.serial = true,
+                "--measure" => opts.measure = true,
+                "--browser-ui" => opts.browser_ui = !matches!(inline, Some("off" | "false" | "0")),
+                "--browser-visual" => {
+                    opts.browser_visual = !matches!(inline, Some("off" | "false" | "0"))
+                }
+                "--browser-trace" => {
+                    opts.browser_trace = !matches!(inline, Some("off" | "false" | "0"))
+                }
+                "--where" => {
+                    opts.where_expr = Some(test_run_option_value(argv, &mut index, name, inline));
+                }
+                "--capture" => {
+                    let value = test_run_option_value(argv, &mut index, name, inline);
+                    opts.capture = parse_test_capture(&value, mode);
+                }
+                "--filter" => {
+                    let value = test_run_option_value(argv, &mut index, name, inline);
+                    merge_test_filter(&mut opts.filter, value);
+                }
+                "--profile" => {
+                    opts.profile = Some(test_run_option_value(argv, &mut index, name, inline));
+                }
+                "--set" => {
+                    if inline.is_none() {
+                        let _ = test_run_option_value(argv, &mut index, name, inline);
+                    }
+                }
+                "--shuffle" => {
+                    opts.shuffle_seed = Some(match inline {
+                        Some(value) => value.parse::<u64>().unwrap_or_else(|_| {
+                            invalid_test_run_option(format!("`--shuffle={value}` isn't a number"))
+                        }),
+                        None => test_shuffle_seed(),
+                    });
+                }
+                "--record" => {
+                    if inline.is_none() {
+                        invalid_test_run_option(
+                            "`--record` needs a closed `=NAME` value".to_string(),
+                        );
+                    }
+                    let flag = format!("--record={}", inline.unwrap_or_default());
+                    match crate::ProveReplay::parse_record_flag(&flag) {
+                        Some(Ok(value)) => opts.record = Some(value),
+                        Some(Err(error)) => invalid_test_run_option(error),
+                        None => invalid_test_run_option("invalid --record flag".to_string()),
+                    }
+                }
+                "--browser" => {
+                    opts.browser_engines =
+                        Some(test_run_option_value(argv, &mut index, name, inline));
+                }
+                "--browser-retries" => {
+                    let value = test_run_option_value(argv, &mut index, name, inline);
+                    opts.browser_retries = Some(
+                        value
+                            .parse::<i64>()
+                            .ok()
+                            .filter(|n| (0..=5).contains(n))
+                            .unwrap_or_else(|| {
+                                invalid_test_run_option(format!(
+                                    "`--browser-retries={value}` must be between 0 and 5"
+                                ))
+                            }),
+                    );
+                }
+                "--browser-reporter" => {
+                    let value = test_run_option_value(argv, &mut index, name, inline);
+                    if !matches!(value.as_str(), "text" | "json" | "html") {
+                        invalid_test_run_option(format!(
+                            "`--browser-reporter={value}` is not supported"
+                        ));
+                    }
+                    opts.browser_reporter = Some(value);
+                }
+                // Output flags are consumed by `OutputAdapterHost`; they are
+                // not test execution inputs and must not become positionals.
+                "--json" | "--machine" | "--quiet" | "--verbose" | "--no-color" => {}
+                "--color" => {
+                    if inline.is_none() {
+                        let _ = test_run_option_value(argv, &mut index, name, inline);
+                    }
+                }
+                _ if arg.starts_with('-') => {}
+                _ => positionals.push(arg.to_string()),
+            }
+            index += 1;
+        }
+        if positionals.len() > 2 {
+            invalid_test_run_option(format!(
+                "`jet test` accepts one target and one positional filter, got {} positionals",
+                positionals.len()
+            ));
+        }
+        if let Some(filter) = positionals.get(1) {
+            merge_test_filter(&mut opts.filter, filter.clone());
+        }
+        // `--release` is sugar for the named release profile and therefore
+        // wins deterministically over a simultaneous `--profile` spelling.
+        if opts.release {
+            opts.profile = Some(jet::Syntax::BUILD_PROFILE_RELEASE.to_string());
+        }
+        opts
+    }
 }
 
-/// `jet test [--release] [--trace-tiers] [--coverage] [--filter=<substr>]
-/// [--shuffle[=<seed>]] [--serial]`.
-/// With `coverage`, the harness is built with function/branch probes (D-COV1) and
-/// a function/branch coverage report prints after the test results. A directory
-/// target recurses into every subdirectory (D-TESTKIT1=A gap #2), running every
-/// non-reserved `.jet` file found, in sorted path order.
+fn test_run_option_value(
+    argv: &[String],
+    index: &mut usize,
+    name: &str,
+    inline: Option<&str>,
+) -> String {
+    if let Some(value) = inline {
+        return value.to_string();
+    }
+    let Some(value) = argv.get(*index + 1) else {
+        invalid_test_run_option(format!("`{name}` needs a value"));
+    };
+    *index += 1;
+    value.clone()
+}
+
+fn merge_test_filter(filter: &mut Option<String>, value: String) {
+    if let Some(previous) = filter.as_deref() {
+        if previous != value.as_str() {
+            invalid_test_run_option(format!(
+                "conflicting test filters `{previous}` and `{value}`"
+            ));
+        }
+    } else {
+        *filter = Some(value);
+    }
+}
+
+fn test_shuffle_seed() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos() as u64)
+        .unwrap_or_default()
+}
+
+fn invalid_test_run_option(message: String) -> ! {
+    crate::cli_error!(
+        @fix "E2104",
+        message,
+        "use the canonical `jet test` flag spelling"
+    );
+    exit(ExitCodes::USAGE);
+}
+
+/// `jet test [--watch] [--fresh] [--docs] [--where=<expr>]
+/// [--capture=<failed|all|none>] [--release] [--trace-tiers] [--coverage]
+/// [--filter=<substr>] [--shuffle[=<seed>]] [--serial]`.
+/// A finite run is quiet for passing tests and stores only test results in the
+/// result cache; native build artifacts remain in the ordinary build cache.
+/// `--watch` keeps the failed cursor and reuses that build graph.
 pub(crate) fn run_test_opts(path: &str, opts: TestRunOpts, mode: OutputMode) {
     let p = Path::new(path);
     require_project_environment("test", p, mode);
     if !p.exists() {
         crate::cli_error!("E2105", "can't find `{}`", path);
         exit(ExitCodes::USER_ERROR);
+    }
+    if let Some(expression) = opts.where_expr.as_deref() {
+        if let Err(error) = parse_test_where(expression) {
+            crate::cli_error!("E2104", "invalid --where expression: {}", error);
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
+    if opts.watch {
+        run_test_watch(path, opts, mode);
+        return;
+    }
+    if opts.fresh && !mode.quiet {
+        write_mode_status(
+            mode,
+            "jet test: fresh result run (test-result cache bypassed; build cache reusable)\n",
+        );
     }
     if p.is_dir() {
         let root = jet::Loader::find_manifest_root(p).unwrap_or_else(|| p.to_path_buf());
@@ -3993,7 +6553,9 @@ pub(crate) fn run_test_opts(path: &str, opts: TestRunOpts, mode: OutputMode) {
             {
                 let ok = matches!(
                     run_test_target(&override_file, &opts, mode, false),
-                    TestTargetOutcome::Ran(true) | TestTargetOutcome::Override(true)
+                    TestTargetOutcome::Ran(true)
+                        | TestTargetOutcome::Override(true)
+                        | TestTargetOutcome::NoTests
                 );
                 exit(if ok {
                     ExitCodes::OK
@@ -4056,7 +6618,9 @@ pub(crate) fn run_test_package(root: &Path, opts: TestRunOpts, mode: OutputMode)
         if let Some(override_file) = crate::resolve_package_command_override(root, "test", mode) {
             let ok = matches!(
                 run_test_target(&override_file, &opts, mode, false),
-                TestTargetOutcome::Ran(true) | TestTargetOutcome::Override(true)
+                TestTargetOutcome::Ran(true)
+                    | TestTargetOutcome::Override(true)
+                    | TestTargetOutcome::NoTests
             );
             exit(if ok {
                 ExitCodes::OK
@@ -4155,7 +6719,9 @@ enum TestTargetOutcome {
 fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
     matches!(
         run_test_target(path, opts, mode, false),
-        TestTargetOutcome::Ran(true) | TestTargetOutcome::Override(true)
+        TestTargetOutcome::Ran(true)
+            | TestTargetOutcome::Override(true)
+            | TestTargetOutcome::NoTests
     )
 }
 
@@ -4185,55 +6751,253 @@ fn run_test_target(
             return TestTargetOutcome::Ran(false);
         }
     };
+    // `jet prove` supplies a report path and identity for this child. Preserve
+    // that protocol so the parent can consume the same typed report; ordinary
+    // `jet test` runs create and clean up their own private report.
+    let computed_source_revision = jet::SHA256::sha256_hex(src.as_bytes());
+    let source_revision = std::env::var(jet_foundation::Evidence::EVIDENCE_SOURCE_REVISION_ENV)
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or(computed_source_revision);
+    let report_id = std::env::var(jet_foundation::Evidence::EVIDENCE_REPORT_ID_ENV)
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| {
+            let run = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("test execution starts after the Unix epoch")
+                .as_nanos();
+            format!(
+                "test:{}:{}:{run}",
+                source_revision.get(..16).unwrap_or(source_revision.as_str()),
+                std::process::id(),
+            )
+        });
+    let build_revision = std::env::var(jet_foundation::Evidence::EVIDENCE_BUILD_REVISION_ENV)
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| {
+            jet::SHA256::sha256_hex(
+                format!("jet-test-build-v1:{source_revision}:{profile_tag}").as_bytes(),
+            )
+        });
+    let revision = std::env::var(jet_foundation::Evidence::EVIDENCE_REVISION_ENV)
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| {
+            jet::SHA256::sha256_hex(
+                format!("jet-test-mir-v1:{source_revision}:{profile_tag}").as_bytes(),
+            )
+        });
+    let inherited_report_path = std::env::var_os(jet_foundation::Evidence::EVIDENCE_REPORT_ENV)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    let preserve_report = inherited_report_path.is_some();
+    let report_path = inherited_report_path.unwrap_or_else(|| {
+        std::env::temp_dir().join(format!(
+            "jet_test_{}_{}.bin",
+            std::process::id(),
+            source_revision
+                .get(..16)
+                .unwrap_or(source_revision.as_str())
+        ))
+    });
+    let evidence_toolchain = std::env::var(jet_foundation::Evidence::EVIDENCE_TOOLCHAIN_ENV)
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
+    let evidence_target = std::env::var(jet_foundation::Evidence::EVIDENCE_TARGET_ENV)
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(host_target_triple);
+    let evidence_profile = std::env::var(jet_foundation::Evidence::EVIDENCE_PROFILE_ENV)
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| profile.budget_name().to_string());
+    let _ = fs::remove_file(&report_path);
+    if let Some(expression) = opts.where_expr.as_deref() {
+        let facts = test_target_facts(path, &src, opts, package);
+        if !test_where_matches(expression, &facts) {
+            return TestTargetOutcome::NoTests;
+        }
+    }
     // D-TEST4: discover and run any `///` doctest examples first. They are
     // independent of `#Test` blocks, so a file with only doctests is testable.
     let has_doctests = !jet::Doctest::discover(&src).is_empty();
     let override_entry = !opts.show_default && jet::has_entry_fn(&shown, "test");
-    let doctests_ok = if override_entry {
-        true
-    } else {
-        run_doctests(path, &shown, &src, update_snapshots, &profile, mode)
+    let doctests_ok = with_test_evidence_environment(
+        &report_path,
+        &report_id,
+        &evidence_toolchain,
+        &evidence_target,
+        &evidence_profile,
+        &source_revision,
+        &build_revision,
+        &revision,
+        || {
+            run_doctests(
+                path,
+                &shown,
+                &src,
+                update_snapshots,
+                &profile,
+                opts.capture,
+                mode,
+            )
+        },
+    );
+    let finish_doctest_report = || -> bool {
+        match finish_test_evidence(
+            &report_path,
+            &report_id,
+            &shown,
+            &evidence_toolchain,
+            &evidence_target,
+            &evidence_profile,
+            &source_revision,
+            &build_revision,
+            &revision,
+            None,
+            doctests_ok,
+            preserve_report,
+            mode,
+        ) {
+            Ok(Some(ok)) => ok,
+            Ok(None) => doctests_ok,
+            Err(error) => {
+                if !preserve_report {
+                    let _ = fs::remove_file(&report_path);
+                }
+                crate::cli_error!(
+                    "E2105",
+                    "couldn't finalize test evidence for `{}`: {}",
+                    shown,
+                    error
+                );
+                false
+            }
+        }
     };
+    if opts.docs {
+        if !has_doctests {
+            let _ = fs::remove_file(&report_path);
+            return TestTargetOutcome::NoTests;
+        }
+        return TestTargetOutcome::Ran(finish_doctest_report());
+    }
 
     if !override_entry {
         if package {
-            // Package mode walks every member: one with no `#Test` blocks
-            // contributes nothing to the run, which is not the error an empty
-            // named target is. A member that fails to load answers `true`
-            // here, so its real compile error still surfaces below instead of
-            // being silently skipped.
-            if !jet::has_test_blocks(&shown) {
+            // Package mode walks every member: one with no `#Test` blocks or
+            // contract-bearing callables contributes nothing to the run,
+            // which is not the error an empty named target is. A member that
+            // fails to load answers `true` here, so its real compile error still
+            // surfaces below instead of being silently skipped.
+            if !jet::has_test_blocks(&shown) && !jet::has_test_contracts(&shown) {
                 return if has_doctests {
-                    TestTargetOutcome::Ran(doctests_ok)
+                    TestTargetOutcome::Ran(finish_doctest_report())
                 } else {
+                    let _ = fs::remove_file(&report_path);
                     TestTargetOutcome::NoTests
                 };
             }
-        } else if has_doctests && !jet::has_test_blocks(&shown) {
-            // A file with doctests but no `#Test` blocks is testable on its
-            // doctests alone — skip the test harness (which would otherwise
-            // error E0601 "no #Test blocks"). A file with NEITHER falls through
+        } else if has_doctests && !jet::has_test_blocks(&shown) && !jet::has_test_contracts(&shown)
+        {
+            // A file with doctests but no `#Test` blocks or contracts is
+            // testable on its doctests alone — skip the test harness (which
+            // would otherwise error E0601). A file with NEITHER falls through
             // so the harness reports E0601.
-            return TestTargetOutcome::Ran(doctests_ok);
+            return TestTargetOutcome::Ran(finish_doctest_report());
+        }
+    }
+    let cacheable = test_result_cache_write_allowed(opts) && !has_doctests && !override_entry;
+    if cacheable && !opts.fresh {
+        if let Some(cached) = test_result_cache_read(path, opts, package) {
+            let evidence_ok = match finish_test_evidence(
+                &report_path,
+                &report_id,
+                &shown,
+                &evidence_toolchain,
+                &evidence_target,
+                &evidence_profile,
+                &source_revision,
+                &build_revision,
+                &revision,
+                Some(&cached.stdout),
+                cached.ok,
+                preserve_report,
+                mode,
+            ) {
+                Ok(Some(ok)) => ok,
+                Ok(None) => cached.ok,
+                Err(error) => {
+                    if !preserve_report {
+                        let _ = fs::remove_file(&report_path);
+                    }
+                    crate::cli_error!(
+                        "E2105",
+                        "couldn't finalize test evidence for `{}`: {}",
+                        shown,
+                        error
+                    );
+                    false
+                }
+            };
+            if !mode.json {
+                emit_test_capture(&cached, opts.capture, mode);
+            }
+            return TestTargetOutcome::Ran(cached.ok && evidence_ok);
         }
     }
 
     let (rust_code, ffi_link) = match if override_entry {
-        if !mode.quiet {
-            println!("jet test: using fn test override");
+        if opts.capture == TestCapturePolicy::All {
+            write_mode_status(mode, "jet test: using fn test override\n");
         }
         jet::compile_test_override_with_path_and_profile(
             &src,
             &shown,
             coverage,
             profile.budget_name(),
+            &opts.setting_overrides,
         )
     } else {
-        jet::compile_tests_with_path_cov_and_profile(&src, &shown, coverage, profile.budget_name())
+        jet::compile_tests_with_path_cov_and_profile(
+            &src,
+            &shown,
+            coverage,
+            profile.budget_name(),
+            &opts.setting_overrides,
+        )
     } {
         Ok(r) => r,
         Err(diags) => {
             report_problems(mode, &shown, &src, &diags);
+            if let Err(error) = finish_test_evidence(
+                &report_path,
+                &report_id,
+                &shown,
+                &evidence_toolchain,
+                &evidence_target,
+                &evidence_profile,
+                &source_revision,
+                &build_revision,
+                &revision,
+                None,
+                false,
+                preserve_report,
+                mode,
+            ) {
+                crate::cli_error!(
+                    "E2105",
+                    "couldn't finalize test evidence for `{}`: {}",
+                    shown,
+                    error
+                );
+            }
+            if !preserve_report {
+                let _ = fs::remove_file(&report_path);
+            }
             return if override_entry {
                 TestTargetOutcome::Override(false)
             } else {
@@ -4261,7 +7025,13 @@ fn run_test_target(
         } else {
             "test"
         },
+        None,
     );
+    let record_request = opts
+        .record
+        .as_deref()
+        .map(|name| (name, profile.budget_name().to_owned()));
+    let coverage_profile = coverage.then(|| profile.budget_name().to_owned());
     build(
         &shown,
         &rust_code,
@@ -4289,6 +7059,9 @@ fn run_test_target(
         None
     };
     let mut cmd = Command::new(&bin);
+    if let Some(root) = path.parent().and_then(jet::Loader::find_manifest_root) {
+        cmd.env("JET_PROJECT_ROOT", root);
+    }
     // D-TOOL4: `-u`/`--update-snapshots` must reach the harness. Both
     // `expect(…).snapshot()` (any value) and `testing.snap` (`=1`) honor this.
     if update_snapshots {
@@ -4297,6 +7070,27 @@ fn run_test_target(
     if let Some(co) = &cov_out {
         let _ = fs::remove_file(co);
         cmd.env("JET_COV_OUT", co);
+    }
+    if let Some(engines) = &opts.browser_engines {
+        cmd.env("JET_TEST_BROWSERS", engines);
+    }
+    if let Some(retries) = opts.browser_retries {
+        cmd.env("JET_TEST_RETRIES", retries.to_string());
+    }
+    if let Some(reporter) = &opts.browser_reporter {
+        cmd.env("JET_TEST_REPORTER", reporter);
+    }
+    if opts.browser_ui {
+        cmd.env("JET_TEST_BROWSER_UI", "1");
+    }
+    if opts.browser_visual {
+        cmd.env("JET_TEST_BROWSER_VISUAL", "1");
+    }
+    if opts.browser_trace {
+        // Explicit browser tracing captures the first passing attempt too;
+        // retry tracing remains enabled for the same run.
+        cmd.env("JET_TEST_TRACE", "1");
+        cmd.env("JET_TEST_TRACE_ON_RETRY", "1");
     }
     // D-TESTKIT1=A gaps #3/#4: filter/shuffle/serial reach the harness the same
     // way `--coverage`/`-u` do — an env var the generated `main` reads (see
@@ -4316,12 +7110,42 @@ fn run_test_target(
     if opts.measure {
         cmd.env("JET_TEST_MEASURE", "1");
     }
+    cmd.env("JET_TEST_CAPTURE", opts.capture.as_str());
     if mode.json {
         cmd.env("JET_TEST_JSON", "1");
     }
-    let record = opts.record.as_deref().map(|name| {
-        crate::ProveReplay::begin_named_capture(&shown, name, mode.json)
-            .unwrap_or_else(|status| exit(status))
+    cmd.env(jet_foundation::Evidence::EVIDENCE_REPORT_ENV, &report_path)
+        .env(jet_foundation::Evidence::EVIDENCE_REPORT_ID_ENV, &report_id)
+        .env(
+            jet_foundation::Evidence::EVIDENCE_TOOLCHAIN_ENV,
+            &evidence_toolchain,
+        )
+        .env(
+            jet_foundation::Evidence::EVIDENCE_TARGET_ENV,
+            &evidence_target,
+        )
+        .env(
+            jet_foundation::Evidence::EVIDENCE_PROFILE_ENV,
+            &evidence_profile,
+        )
+        .env(
+            jet_foundation::Evidence::EVIDENCE_SOURCE_REVISION_ENV,
+            &source_revision,
+        )
+        .env(
+            jet_foundation::Evidence::EVIDENCE_BUILD_REVISION_ENV,
+            &build_revision,
+        )
+        .env(jet_foundation::Evidence::EVIDENCE_REVISION_ENV, &revision);
+    let record = record_request.as_ref().map(|(name, profile)| {
+        crate::ProveReplay::begin_named_capture(
+            &shown,
+            name,
+            profile,
+            &opts.setting_overrides,
+            mode.json,
+        )
+        .unwrap_or_else(|status| exit(status))
     });
     let out = match cmd.output() {
         Ok(out) => out,
@@ -4330,35 +7154,597 @@ fn run_test_target(
             if let Some(co) = &cov_out {
                 let _ = fs::remove_file(co);
             }
+            if let Err(error) = finish_test_evidence(
+                &report_path,
+                &report_id,
+                &shown,
+                &evidence_toolchain,
+                &evidence_target,
+                &evidence_profile,
+                &source_revision,
+                &build_revision,
+                &revision,
+                None,
+                false,
+                preserve_report,
+                mode,
+            ) {
+                crate::cli_error!(
+                    "E2105",
+                    "couldn't finalize test evidence for `{}`: {}",
+                    shown,
+                    error
+                );
+            }
+            if !preserve_report {
+                let _ = fs::remove_file(&report_path);
+            }
             crate::cli_error!("E2105", "couldn't run tests in `{}`: {}", shown, e);
             exit(ExitCodes::USER_ERROR);
         }
     };
-    if !(coverage && mode.json) {
-        print!("{}", String::from_utf8_lossy(&out.stdout));
+    let child_ok = out.status.success();
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    let evidence_ok = match finish_test_evidence(
+        &report_path,
+        &report_id,
+        &shown,
+        &evidence_toolchain,
+        &evidence_target,
+        &evidence_profile,
+        &source_revision,
+        &build_revision,
+        &revision,
+        Some(&stdout),
+        child_ok,
+        preserve_report,
+        mode,
+    ) {
+        Ok(Some(ok)) => ok,
+        Ok(None) => child_ok,
+        Err(error) => {
+            if !preserve_report {
+                let _ = fs::remove_file(&report_path);
+            }
+            crate::cli_error!(
+                "E2105",
+                "couldn't finalize test evidence for `{}`: {}",
+                shown,
+                error
+            );
+            false
+        }
+    };
+    let ok = child_ok && doctests_ok && evidence_ok;
+    let result = TestResultCache { ok, stdout, stderr };
+    if !mode.json {
+        emit_test_capture(&result, opts.capture, mode);
     }
-    if !out.stderr.is_empty() {
-        eprint!("{}", String::from_utf8_lossy(&out.stderr));
+    if cacheable {
+        test_result_cache_write(path, opts, package, &result);
     }
     if let Some(co) = &cov_out {
-        report_coverage(&shown, co, mode.json);
+        report_coverage(
+            &shown,
+            co,
+            mode,
+            coverage_profile.as_deref().expect("coverage profile retained before build"),
+            &opts.setting_overrides,
+        );
         let _ = fs::remove_file(co);
     }
     let _ = fs::remove_file(&bin);
-    let ok = out.status.success() && doctests_ok;
-    if let Some(capture) = record.as_ref() {
-        let status = if ok {
-            ExitCodes::OK
-        } else {
-            child_exit_code(out.status)
-        };
-        crate::ProveReplay::finish_named_capture(capture, status, mode.json)
-            .unwrap_or_else(|status| exit(status));
-    }
+    let status = if ok {
+        ExitCodes::OK
+    } else if child_ok {
+        ExitCodes::USER_ERROR
+    } else {
+        child_exit_code(out.status)
+    };
+    finish_recorded_artifacts(record.as_ref(), opts.record.as_deref(), None, status, mode);
     if override_entry {
         TestTargetOutcome::Override(ok)
     } else {
         TestTargetOutcome::Ran(ok)
+    }
+}
+
+/// Read one-byte controls for the persistent `jet test --watch` loop.
+fn spawn_test_watch_input() -> mpsc::Receiver<u8> {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let mut stdin = std::io::stdin();
+        let mut byte = [0u8; 1];
+        while stdin.read(&mut byte).ok().is_some_and(|count| count != 0) {
+            if sender.send(byte[0]).is_err() {
+                break;
+            }
+        }
+    });
+    receiver
+}
+
+fn test_watch_failure_names(stdout: &str, stderr: &str) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    let mut names = Vec::new();
+    for stream in [stdout, stderr] {
+        for line in stream.lines() {
+            let candidate = line.trim();
+            let Ok(value) = parse_json(candidate) else {
+                continue;
+            };
+            if is_canonical_test_value(&value) {
+                append_test_report_failures(&value, &mut names, &mut seen);
+            } else if is_canonical_status_value(&value) {
+                append_status_report_failures(&value, &mut names, &mut seen);
+            }
+        }
+    }
+    // Human-mode children still provide the stable marker when JSON mode is
+    // unavailable (and older generated harnesses remain watchable).
+    for line in stdout.lines().chain(stderr.lines()) {
+        let line = line.trim();
+        let name = line
+            .strip_prefix("FAIL ")
+            .or_else(|| line.strip_suffix(": FAIL"))
+            .map(str::trim)
+            .filter(|name| !name.is_empty());
+        if let Some(name) = name {
+            let name = name.to_string();
+            if seen.insert(name.clone()) {
+                names.push(name);
+            }
+        }
+    }
+    names
+}
+
+fn is_canonical_test_value(value: &DataTree) -> bool {
+    let DataTree::Object(object) = value else {
+        return false;
+    };
+    let schema = object_field(object, "schema").and_then(|value| value.as_str().ok());
+    matches!(schema, Some("jet.test.v1" | "jet-test-v1"))
+        && matches!(object_field(object, "tests"), Some(DataTree::Array(_)))
+}
+
+fn is_canonical_status_value(value: &DataTree) -> bool {
+    let DataTree::Object(object) = value else {
+        return false;
+    };
+    matches!(
+        object_field(object, "schema").and_then(|value| value.as_str().ok()),
+        Some("jet.status/v1")
+    )
+}
+
+fn append_status_report_failures(
+    value: &DataTree,
+    names: &mut Vec<String>,
+    seen: &mut BTreeSet<String>,
+) {
+    let DataTree::Object(object) = value else {
+        return;
+    };
+    let Some(DataTree::Object(evidence)) = object_field(object, "evidence") else {
+        return;
+    };
+    let Some(DataTree::Array(records)) = object_field(evidence, "evidence") else {
+        return;
+    };
+    for record in records {
+        let DataTree::Object(record) = record else {
+            continue;
+        };
+        let Some(name) = object_field(record, "claim").and_then(|value| value.as_str().ok()) else {
+            continue;
+        };
+        let failed = object_field(record, "outcome")
+            .and_then(|value| value.as_str().ok())
+            .map(|outcome| matches!(outcome, "failed" | "error" | "unavailable"))
+            .unwrap_or(false);
+        if failed {
+            let name = name.to_string();
+            if seen.insert(name.clone()) {
+                names.push(name);
+            }
+        }
+    }
+}
+
+fn append_test_report_failures(
+    value: &DataTree,
+    names: &mut Vec<String>,
+    seen: &mut BTreeSet<String>,
+) {
+    let DataTree::Object(object) = value else {
+        return;
+    };
+    let Some(DataTree::Array(tests)) = object_field(object, "tests") else {
+        return;
+    };
+    for test in tests {
+        let DataTree::Object(test) = test else {
+            continue;
+        };
+        let Some(name) = object_field(test, "name").and_then(|value| value.as_str().ok()) else {
+            continue;
+        };
+        let failed = object_field(test, "ok")
+            .and_then(|value| match value {
+                DataTree::Bool(ok) => Some(!ok),
+                _ => None,
+            })
+            .or_else(|| {
+                object_field(test, "passed").and_then(|value| match value {
+                    DataTree::Bool(passed) => Some(!passed),
+                    _ => None,
+                })
+            })
+            .or_else(|| {
+                object_field(test, "status")
+                    .and_then(|value| value.as_str().ok())
+                    .map(|status| {
+                        matches!(
+                            status.to_ascii_lowercase().as_str(),
+                            "fail" | "failed" | "error" | "panic"
+                        )
+                    })
+            })
+            .unwrap_or(false);
+        if failed {
+            let name = name.to_string();
+            if seen.insert(name.clone()) {
+                names.push(name);
+            }
+        }
+    }
+}
+
+fn append_test_watch_flags(command: &mut Command, opts: &TestRunOpts, filter: Option<&str>) {
+    command.arg("--quiet").arg("--capture=all");
+    if opts.show_default {
+        command.arg("--show-default");
+    }
+    if opts.update_snapshots {
+        command.arg("--update-snapshots");
+    }
+    if opts.coverage {
+        command.arg("--coverage");
+    }
+    if opts.release {
+        command.arg("--release");
+    }
+    if let Some(profile) = opts.profile.as_deref() {
+        command.arg(format!("--profile={profile}"));
+    }
+    for (key, value) in &opts.setting_overrides {
+        command.arg(format!("--set={key}={value}"));
+    }
+    if opts.trace_tiers {
+        command.arg("--trace-tiers");
+    }
+    if let Some(engines) = opts.browser_engines.as_deref() {
+        command.arg(format!("--browser={engines}"));
+    }
+    if let Some(retries) = opts.browser_retries {
+        command.arg(format!("--browser-retries={retries}"));
+    }
+    if let Some(reporter) = opts.browser_reporter.as_deref() {
+        command.arg(format!("--browser-reporter={reporter}"));
+    }
+    if opts.browser_ui {
+        command.arg("--browser-ui");
+    }
+    if opts.browser_visual {
+        command.arg("--browser-visual");
+    }
+    if opts.browser_trace {
+        command.arg("--browser-trace");
+    }
+    if let Some(filter) = filter.or(opts.filter.as_deref()) {
+        command.arg(format!("--filter={filter}"));
+    }
+    if let Some(seed) = opts.shuffle_seed {
+        command.arg(format!("--shuffle={seed}"));
+    }
+    if opts.serial {
+        command.arg("--serial");
+    }
+    if opts.measure {
+        command.arg("--measure");
+    }
+    if let Some(expression) = opts.where_expr.as_deref() {
+        command.arg(format!("--where={expression}"));
+    }
+    if opts.docs {
+        command.arg("--docs");
+    }
+    if opts.fresh {
+        command.arg("--fresh");
+    }
+}
+
+fn run_test_watch_child(
+    path: &str,
+    opts: &TestRunOpts,
+    filter: Option<&str>,
+    mode: OutputMode,
+) -> (i32, TestResultCache) {
+    let executable =
+        std::env::current_exe().unwrap_or_else(|_| PathBuf::from(jet::Syntax::BINARY_NAME));
+    let mut command = Command::new(executable);
+    command
+        .arg("test")
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if mode.json {
+        command.arg("--json");
+    }
+    append_test_watch_flags(&mut command, opts, filter);
+    // The parent applies the selected capture policy after collecting the
+    // complete child stream, so watch reruns always ask the canonical runner
+    // for all captures. Machine mode still receives one JSON report.
+    command.env("JET_TEST_CAPTURE", TestCapturePolicy::All.as_str());
+    if mode.json {
+        command.env("JET_TEST_JSON", "1");
+    }
+    let output = match command.output() {
+        Ok(output) => output,
+        Err(error) => {
+            return (
+                ExitCodes::USER_ERROR,
+                TestResultCache {
+                    ok: false,
+                    stdout: String::new(),
+                    stderr: format!("jet test watcher: couldn't run child: {error}\n"),
+                },
+            );
+        }
+    };
+    let status = child_exit_code(output.status);
+    (
+        status,
+        TestResultCache {
+            ok: output.status.success(),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        },
+    )
+}
+
+fn append_test_watch_failures(
+    failures: &mut Vec<String>,
+    seen: &mut BTreeSet<String>,
+    found: impl IntoIterator<Item = String>,
+) {
+    for name in found {
+        if seen.insert(name.clone()) {
+            failures.push(name);
+        }
+    }
+}
+
+fn run_test_watch_selection(
+    path: &str,
+    opts: &TestRunOpts,
+    policy: TestCapturePolicy,
+    failed: Option<&[String]>,
+    mode: OutputMode,
+) -> (i32, Vec<String>) {
+    let mut status = ExitCodes::OK;
+    let mut failures = Vec::new();
+    let mut seen = BTreeSet::new();
+    match failed {
+        Some(names) => {
+            for name in names {
+                let (child_status, result) = run_test_watch_child(path, opts, Some(name), mode);
+                emit_test_capture(&result, policy, mode);
+                if child_status != ExitCodes::OK {
+                    status = child_status;
+                    let found = test_watch_failure_names(&result.stdout, &result.stderr);
+                    if found.is_empty() {
+                        append_test_watch_failures(
+                            &mut failures,
+                            &mut seen,
+                            std::iter::once(name.clone()),
+                        );
+                    } else {
+                        append_test_watch_failures(&mut failures, &mut seen, found);
+                    }
+                }
+            }
+        }
+        None => {
+            let (child_status, result) = run_test_watch_child(path, opts, None, mode);
+            emit_test_capture(&result, policy, mode);
+            status = child_status;
+            append_test_watch_failures(
+                &mut failures,
+                &mut seen,
+                test_watch_failure_names(&result.stdout, &result.stderr),
+            );
+        }
+    }
+    (status, failures)
+}
+
+fn run_test_watch(path: &str, opts: TestRunOpts, mode: OutputMode) -> ! {
+    let target = Path::new(path);
+    let mut watch = match jet_devserver::WatchSession::open(target) {
+        Ok(watch) => watch,
+        Err(diagnostic) => {
+            write_mode_diagnostic(
+                mode,
+                &jet::render_all_colored(path, "", &[diagnostic], mode.color_stderr()),
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let mut files = Vec::new();
+    if target.is_dir() {
+        collect_source_files_recursive(target, jet::Syntax::FILE_EXT, &mut files);
+    } else {
+        files.push(target.to_path_buf());
+    }
+    for file in files {
+        watch
+            .graph_mut()
+            .upsert(file, jet_devserver::WatchService::RootKind::BuildInput);
+    }
+    watch.graph_mut().scan_runtime_inputs();
+    let manifest_search = if target.is_dir() {
+        target
+    } else {
+        target.parent().unwrap_or_else(|| Path::new("."))
+    };
+    if let Some(root) = jet::Loader::find_manifest_root(manifest_search) {
+        watch.graph_mut().upsert(
+            root.join(jet::Syntax::PACKAGE_FILE),
+            jet_devserver::WatchService::RootKind::Manifest,
+        );
+    }
+    // A watch session owns one capture authority for its lifetime. Do not pass
+    // `--record` to each child: the ordinary named artifact is intentionally
+    // create-once and a rerun must not collide with it or overwrite another
+    // explicit capture.
+    let watch_record = opts.record.as_deref().map(|name| {
+        let record_path = if target.is_dir() {
+            crate::find_project_entry(target)
+        } else {
+            target.to_path_buf()
+        };
+        let record_path = record_path.to_string_lossy().into_owned();
+        let profile = opts
+            .profile
+            .as_deref()
+            .unwrap_or(if opts.release || opts.measure {
+                jet::Syntax::BUILD_PROFILE_RELEASE
+            } else {
+                "dev"
+            });
+        crate::ProveReplay::begin_named_capture(
+            &record_path,
+            name,
+            profile,
+            &opts.setting_overrides,
+            mode.json,
+        )
+        .unwrap_or_else(|status| exit(status))
+    });
+    if !mode.json && !mode.quiet {
+        let cache_mode = if opts.fresh { "fresh" } else { "cached" };
+        write_mode_status(
+            mode,
+            &format!(
+                "jet test --watch ({cache_mode} results): r rerun failed, a run all, o cycle output, q quit\n"
+            ),
+        );
+    }
+    let input = spawn_test_watch_input();
+    let mut output = opts.capture;
+    let mut failed = Vec::new();
+    let mut last_status = ExitCodes::OK;
+    let mut last_good = false;
+    let (status, current_failures) = run_test_watch_selection(path, &opts, output, None, mode);
+    last_status = status;
+    failed = current_failures;
+    if status == ExitCodes::OK {
+        last_good = true;
+    } else if !mode.json && !mode.quiet {
+        write_mode_status(
+            mode,
+            "jet test: failure; last-good build artifact retained\n",
+        );
+    }
+    loop {
+        let mut action = None;
+        while let Ok(byte) = input.try_recv() {
+            action = Some(byte.to_ascii_lowercase());
+        }
+        if let Some(byte) = action {
+            match byte {
+                b'q' | 3 => {
+                    if let Some(capture) = watch_record.as_ref() {
+                        if let Err(status) = crate::ProveReplay::finish_named_capture(
+                            capture,
+                            last_status,
+                            mode.json,
+                        ) {
+                            exit(status);
+                        }
+                    }
+                    exit(last_status);
+                }
+                b'r' => {
+                    if failed.is_empty() {
+                        if !mode.json && !mode.quiet {
+                            write_mode_status(mode, "jet test: no failed tests to rerun\n");
+                        }
+                    } else {
+                        let (status, current_failures) =
+                            run_test_watch_selection(path, &opts, output, Some(&failed), mode);
+                        last_status = status;
+                        failed = current_failures;
+                        if status == ExitCodes::OK {
+                            last_good = true;
+                        } else if last_good && !mode.json && !mode.quiet {
+                            write_mode_status(
+                                mode,
+                                "jet test: failure; last-good build artifact retained\n",
+                            );
+                        }
+                    }
+                }
+                b'a' => {
+                    let (status, current_failures) =
+                        run_test_watch_selection(path, &opts, output, None, mode);
+                    last_status = status;
+                    failed = current_failures;
+                    if status == ExitCodes::OK {
+                        last_good = true;
+                    } else if last_good && !mode.json && !mode.quiet {
+                        write_mode_status(
+                            mode,
+                            "jet test: failure; last-good build artifact retained\n",
+                        );
+                    }
+                }
+                b'o' => {
+                    output = match output {
+                        TestCapturePolicy::Failed => TestCapturePolicy::All,
+                        TestCapturePolicy::All => TestCapturePolicy::None,
+                        TestCapturePolicy::None => TestCapturePolicy::Failed,
+                    };
+                    if !mode.json && !mode.quiet {
+                        write_mode_status(mode, &format!("jet test: output {}\n", output.as_str()));
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(receipt) = watch.poll() {
+            let _ = watch.acknowledge(&receipt);
+            let selection = (!failed.is_empty()).then_some(failed.as_slice());
+            let (status, current_failures) =
+                run_test_watch_selection(path, &opts, output, selection, mode);
+            last_status = status;
+            failed = current_failures;
+            if status == ExitCodes::OK {
+                last_good = true;
+            } else if last_good && !mode.json && !mode.quiet {
+                write_mode_status(
+                    mode,
+                    "jet test: failure; last-good build artifact retained\n",
+                );
+            }
+        }
+        thread::sleep(Duration::from_millis(
+            jet_devserver::WATCH_POLL_INTERVAL_MS.max(25),
+        ));
     }
 }
 
@@ -4373,6 +7759,7 @@ fn run_doctests(
     src: &str,
     update_snapshots: bool,
     profile: &BuildProfile,
+    capture: TestCapturePolicy,
     mode: OutputMode,
 ) -> bool {
     let blocks = jet::Doctest::discover(src);
@@ -4395,6 +7782,7 @@ fn run_doctests(
             std::process::id()
         ));
         if fs::write(&tmp, &program).is_err() {
+            emit_doctest_result(&label, false, "", "", capture, mode);
             crate::cli_error!("E2105", "couldn't stage doctest from `{}`", shown);
             all_ok = false;
             write_doctest_proof_record(
@@ -4419,7 +7807,7 @@ fn run_doctests(
             Err(diags) => {
                 // The doctest source is wrong; surface its diagnostics against the
                 // synthetic program so the author sees the exact problem.
-                println!("{}: FAIL (does not compile)", label);
+                emit_doctest_result(&label, false, "", "", capture, mode);
                 report_problems(mode, &tmp_shown, &program, &diags);
                 all_ok = false;
                 write_doctest_proof_record(
@@ -4452,9 +7840,15 @@ fn run_doctests(
             // Doctest binaries are one-shot synthetic programs; not cached.
             None,
         );
-        let out = match Command::new(&bin).output() {
+        let mut command = Command::new(&bin);
+        command.env("JET_TEST_CAPTURE", capture.as_str());
+        if mode.json {
+            command.env("JET_TEST_JSON", "1");
+        }
+        let out = match command.output() {
             Ok(o) => o,
             Err(e) => {
+                emit_doctest_result(&label, false, "", "", capture, mode);
                 crate::cli_error!("E2105", "couldn't run {}: {}", label, e);
                 all_ok = false;
                 write_doctest_proof_record(
@@ -4474,13 +7868,15 @@ fn run_doctests(
         let _ = fs::remove_file(&bin);
         let _ = fs::remove_file(&generated_rs);
         if !out.status.success() {
-            println!("{}: FAIL (runtime error)", label);
-            eprint!("{}", String::from_utf8_lossy(&out.stderr));
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            emit_doctest_result(&label, false, &stdout, &stderr, capture, mode);
             all_ok = false;
             write_doctest_proof_record(&label, shown, block.fence_line, false, "runtime error");
             continue;
         }
-        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
         let produced: Vec<&str> = stdout.lines().collect();
         let mut block_ok = true;
         for (i, e) in block.expects.iter().enumerate() {
@@ -4501,9 +7897,9 @@ fn run_doctests(
             let diag = jet::Doctest::mismatch_diag(shown, e, actual, span);
             // Render against the original file so the line points at the doc
             // comment's producing line.
-            eprint!("{}", jet::render_diagnostics(shown, src, &[diag]));
+            report_problems(mode, shown, src, &[diag]);
         }
-        println!("{}: {}", label, if block_ok { "pass" } else { "FAIL" });
+        emit_doctest_result(&label, block_ok, &stdout, &stderr, capture, mode);
         write_doctest_proof_record(
             &label,
             shown,
@@ -4527,23 +7923,18 @@ fn run_doctests(
 }
 
 fn write_doctest_proof_record(name: &str, file: &str, line: usize, passed: bool, message: &str) {
-    let Ok(path) = std::env::var("JET_TEST_PROOF_REPORT") else {
+    let Ok(path) = std::env::var(jet_foundation::Evidence::EVIDENCE_REPORT_ENV) else {
         return;
     };
-    let Ok(mut report) = fs::OpenOptions::new().create(true).append(true).open(path) else {
-        return;
-    };
-    use std::io::Write as _;
-    if report.metadata().map(|m| m.len() == 0).unwrap_or(false) {
-        let _ = report.write_all(b"JETTEST2");
-    }
-    let _ = report.write_all(&[4, if passed { 0 } else { 1 }]);
-    let _ = report.write_all(&(line as u64).to_be_bytes());
-    for bytes in [name.as_bytes(), message.as_bytes(), file.as_bytes()] {
-        let _ = report.write_all(&(bytes.len() as u64).to_be_bytes());
-        let _ = report.write_all(bytes);
-    }
-    let _ = report.flush();
+    let _ = jet_foundation::Evidence::write_record_from_codes(
+        Path::new(&path),
+        4,
+        if passed { 0 } else { 1 },
+        name,
+        message,
+        file,
+        line as u32,
+    );
 }
 
 /// Replace the `// => …` claim on 1-based `line` with `actual`. Returns false when
@@ -4641,7 +8032,19 @@ struct CoverageBranchRow {
     not_taken: u64,
 }
 
-fn report_coverage(file: &str, cov_out: &Path, json: bool) {
+fn report_coverage(
+    file: &str,
+    cov_out: &Path,
+    mode: OutputMode,
+    profile: &str,
+    setting_overrides: &std::collections::BTreeMap<String, String>,
+) {
+    macro_rules! render {
+        ($($args:tt)*) => {{
+            let text = format!($($args)*);
+            write_mode_renderable(mode, &format!("{text}\n"));
+        }};
+    }
     let mut function_hits = std::collections::BTreeSet::new();
     let mut branches = Vec::new();
     for record in fs::read_to_string(cov_out).unwrap_or_default().lines() {
@@ -4668,12 +8071,12 @@ fn report_coverage(file: &str, cov_out: &Path, json: bool) {
         }
     }
     let _ = fs::remove_file(cov_out);
-    let funcs = jet::coverable_functions(file);
+    let funcs = jet::coverable_functions(file, profile, setting_overrides);
     let mut by_line = funcs.clone();
     by_line.sort_by_key(|(_, line)| *line);
     branches.sort_by(|left, right| left.id.cmp(&right.id));
 
-    if json {
+    if mode.json {
         let functions = by_line
             .iter()
             .map(|(name, line)| {
@@ -4712,29 +8115,40 @@ fn report_coverage(file: &str, cov_out: &Path, json: bool) {
             functions,
             branch_rows
         );
-        println!(
-            "{}",
-            render_status_json("ok", true, "coverage", &format!(",\"coverage\":{payload}"),)
+        write_mode_machine(
+            mode,
+            &format!(
+                "{}\n",
+                render_status(
+                    "coverage",
+                    true,
+                    StatusFields::new().with(
+                        "coverage",
+                        StatusValue::parse(&payload)
+                            .expect("coverage projection must be valid JSON"),
+                    ),
+                )
+            ),
         );
         return;
     }
 
     if funcs.is_empty() && branches.is_empty() {
-        println!("\ncoverage: no functions to measure");
+        render!("\ncoverage: no functions to measure");
         return;
     }
 
     if funcs.is_empty() {
-        println!("\ncoverage: no functions to measure");
+        render!("\ncoverage: no functions to measure");
     } else {
-        println!("\ncoverage for {}", file);
+        render!("\ncoverage for {}", file);
         let mut covered_functions = 0usize;
         for (name, line) in &by_line {
             let hit = function_hits.contains(line);
             if hit {
                 covered_functions += 1;
             }
-            println!(
+            render!(
                 "  {:4}  {}  {}:{}",
                 if hit { "HIT " } else { "MISS" },
                 name,
@@ -4744,9 +8158,11 @@ fn report_coverage(file: &str, cov_out: &Path, json: bool) {
         }
         let total = funcs.len();
         let function_pct = (covered_functions as f64 / total as f64) * 100.0;
-        println!(
+        render!(
             "  {}/{} functions covered ({:.0}%)",
-            covered_functions, total, function_pct
+            covered_functions,
+            total,
+            function_pct
         );
     }
 
@@ -4757,7 +8173,7 @@ fn report_coverage(file: &str, cov_out: &Path, json: bool) {
             if hit {
                 covered_branches += 1;
             }
-            println!(
+            render!(
                 "  BRANCH {} {:9} {:4} hits={}  {}",
                 branch.id,
                 outcome,
@@ -4773,9 +8189,11 @@ fn report_coverage(file: &str, cov_out: &Path, json: bool) {
     } else {
         (covered_branches * 100) / total_branches
     };
-    println!(
+    render!(
         "  {}/{} branches covered ({}%)",
-        covered_branches, total_branches, branch_pct
+        covered_branches,
+        total_branches,
+        branch_pct
     );
 }
 
@@ -4798,8 +8216,8 @@ fn skip_fmt_walk_path(path: &Path) -> bool {
     } else {
         s.clone()
     };
-    if rel == "docs/reference/syntax-surface.jet"
-        || rel.ends_with("/docs/reference/syntax-surface.jet")
+    if rel == "docs/spec/reference/syntax-surface.jet"
+        || rel.ends_with("/docs/spec/reference/syntax-surface.jet")
         || rel == "syntax-surface.jet"
     {
         return true;
@@ -4931,42 +8349,57 @@ fn collect_changed_files() -> Vec<PathBuf> {
 
 /// Emit a JSON "ok" result for `--json --check` or successful format with no changes.
 fn fmt_json_ok() -> String {
-    render_status_json("ok", true, "fmt", ",\"fmt\":{\"status\":\"ok\"}")
+    render_status(
+        "fmt",
+        true,
+        StatusFields::new().with(
+            "fmt",
+            StatusValue::object(StatusFields::new().with("status", "ok")),
+        ),
+    )
 }
 
 /// Emit a JSON "dirty" result (--check found changes, no --diff).
 fn fmt_json_dirty_paths(paths: &[&str]) -> String {
-    let list: String = paths
-        .iter()
-        .map(|p| format!("\"{}\"", json_escape(p)))
-        .collect::<Vec<_>>()
-        .join(",");
-    render_status_json(
-        "dirty",
-        false,
+    let files = StatusValue::array(
+        paths
+            .iter()
+            .map(|path| StatusValue::from((*path).to_string())),
+    );
+    render_status(
         "fmt",
-        &format!(",\"fmt\":{{\"status\":\"dirty\",\"files\":[{list}]}}"),
+        false,
+        StatusFields::new().with(
+            "fmt",
+            StatusValue::object(
+                StatusFields::new()
+                    .with("status", "dirty")
+                    .with("files", files),
+            ),
+        ),
     )
 }
 
 /// Emit a JSON "dirty" result with unified diffs (--check --diff).
 fn fmt_json_dirty_diffs(entries: &[(&str, &str)]) -> String {
-    let list: String = entries
-        .iter()
-        .map(|(p, d)| {
-            format!(
-                "{{\"path\":\"{}\",\"diff\":\"{}\"}}",
-                json_escape(p),
-                json_escape(d)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-    render_status_json(
-        "dirty",
-        false,
+    let files = StatusValue::array(entries.iter().map(|(path, diff)| {
+        StatusValue::object(
+            StatusFields::new()
+                .with("path", (*path).to_string())
+                .with("diff", (*diff).to_string()),
+        )
+    }));
+    render_status(
         "fmt",
-        &format!(",\"fmt\":{{\"status\":\"dirty\",\"files\":[{list}]}}"),
+        false,
+        StatusFields::new().with(
+            "fmt",
+            StatusValue::object(
+                StatusFields::new()
+                    .with("status", "dirty")
+                    .with("files", files),
+            ),
+        ),
     )
 }
 
@@ -4996,47 +8429,60 @@ fn run_fmt_stdin(
         simplify,
     ) {
         Ok(formatted) => {
-            print!("{}", formatted);
+            write_mode_renderable(mode, &formatted);
             if retired_target_count > 0 {
-                eprintln!(
-                    "{}: rewrote {} retired target spelling{} from `plugin` to `sandbox` (D-ONCE-SANDBOX1=A)",
-                    label,
-                    retired_target_count,
-                    if retired_target_count == 1 { "" } else { "s" }
+                write_mode_status(
+                    mode,
+                    &format!(
+                        "{}: rewrote {} retired target spelling{} from `plugin` to `sandbox` (D-ONCE-SANDBOX1=A)\n",
+                        label,
+                        retired_target_count,
+                        if retired_target_count == 1 { "" } else { "s" }
+                    ),
                 );
             }
             if retired_selector_count > 0 {
-                eprintln!(
-                    "{}: rewrote {} retired interpolation selector{} from `#` to `:` (D-ONCE-HASH1)",
-                    label,
-                    retired_selector_count,
-                    if retired_selector_count == 1 { "" } else { "s" }
+                write_mode_status(
+                    mode,
+                    &format!(
+                        "{}: rewrote {} retired interpolation selector{} from `#` to `:` (D-ONCE-HASH1)\n",
+                        label,
+                        retired_selector_count,
+                        if retired_selector_count == 1 { "" } else { "s" }
+                    ),
                 );
             }
             if retired_print_count > 0 {
-                eprintln!(
-                    "{}: rewrote {} retired print-family spelling{} (D-ONCE-PRINT1=A)",
-                    label,
-                    retired_print_count,
-                    if retired_print_count == 1 { "" } else { "s" }
+                write_mode_status(
+                    mode,
+                    &format!(
+                        "{}: rewrote {} retired print-family spelling{} (D-ONCE-PRINT1=A)\n",
+                        label,
+                        retired_print_count,
+                        if retired_print_count == 1 { "" } else { "s" }
+                    ),
                 );
             }
             if retired_type_count > 0 {
-                eprintln!(
-                    "{}: rewrote {} retired Core container name{} (D-COLLNAME1=A)",
-                    label,
-                    retired_type_count,
-                    if retired_type_count == 1 { "" } else { "s" }
+                write_mode_status(
+                    mode,
+                    &format!(
+                        "{}: rewrote {} retired Core container name{} (D-COLLNAME1=A)\n",
+                        label,
+                        retired_type_count,
+                        if retired_type_count == 1 { "" } else { "s" }
+                    ),
                 );
             }
         }
         Err(diags) => {
-            if mode.json {
+            let rendered = if mode.json {
                 let machine_file = crate::machine_report_path_for_process(label);
-                eprint!("{}", jet::render_all_json(&machine_file, &src, &diags));
+                render_diagnostic_status("fmt", false, &machine_file, &src, &diags)
             } else {
-                eprint!("{}", jet::render_diagnostics(label, &src, &diags));
-            }
+                jet::render_diagnostics(label, &src, &diags)
+            };
+            write_mode_diagnostic(mode, &rendered);
             exit(ExitCodes::USAGE);
         }
     }
@@ -5090,10 +8536,8 @@ fn format_source_for_fmt(
             return Ok(formatted);
         }
     }
-    match jet::format_source_with_options(
-        &materialized,
-        jet::Formatter::FormatOptions { simplify },
-    ) {
+    match jet::format_source_with_options(&materialized, jet::Formatter::FormatOptions { simplify })
+    {
         Ok(formatted) => Ok(formatted),
         Err(diagnostics) => Err(diagnostics),
     }
@@ -5505,13 +8949,13 @@ pub(crate) fn run_external_fmt(raw: &[String], mode: OutputMode) -> i32 {
     ) {
         Ok(plan) => plan,
         Err(diagnostic) => {
-            eprint!(
-                "{}",
-                jet::Diagnostics::render_all(
+            write_mode_diagnostic(
+                mode,
+                &jet::Diagnostics::render_all(
                     jet::Syntax::ENV_FILE,
                     &source,
                     std::slice::from_ref(&diagnostic),
-                )
+                ),
             );
             return ExitCodes::USER_ERROR;
         }
@@ -5570,7 +9014,7 @@ pub(crate) fn run_external_fmt(raw: &[String], mode: OutputMode) -> i32 {
     }
     if files.is_empty() {
         if mode.json {
-            println!("{}", fmt_json_ok());
+            write_mode_machine(mode, &format!("{}\n", fmt_json_ok()));
         }
         return ExitCodes::OK;
     }
@@ -5652,7 +9096,7 @@ pub(crate) fn run_external_fmt(raw: &[String], mode: OutputMode) -> i32 {
     }
     if changed.is_empty() {
         if mode.json {
-            println!("{}", fmt_json_ok());
+            write_mode_machine(mode, &format!("{}\n", fmt_json_ok()));
         }
         return ExitCodes::OK;
     }
@@ -5677,18 +9121,21 @@ pub(crate) fn run_external_fmt(raw: &[String], mode: OutputMode) -> i32 {
                     .zip(diff_strings.iter())
                     .map(|(path, diff)| (path.as_str(), diff.as_str()))
                     .collect::<Vec<_>>();
-                println!("{}", fmt_json_dirty_diffs(&diffs));
+                write_mode_machine(mode, &format!("{}\n", fmt_json_dirty_diffs(&diffs)));
             } else {
                 let paths = paths.iter().map(String::as_str).collect::<Vec<_>>();
-                println!("{}", fmt_json_dirty_paths(&paths));
+                write_mode_machine(mode, &format!("{}\n", fmt_json_dirty_paths(&paths)));
             }
         } else {
             for ((_, before, after), path) in changed.iter().zip(paths.iter()) {
-                println!("{path}");
+                write_mode_renderable(mode, &format!("{path}\n"));
                 if show_diff {
                     let before = String::from_utf8_lossy(before);
                     let after = String::from_utf8_lossy(after);
-                    print!("{}", jet::Formatter::unified_diff(path, &before, &after));
+                    write_mode_renderable(
+                        mode,
+                        &jet::Formatter::unified_diff(path, &before, &after),
+                    );
                 }
             }
         }
@@ -5706,7 +9153,7 @@ pub(crate) fn run_external_fmt(raw: &[String], mode: OutputMode) -> i32 {
         }
     }
     if mode.json {
-        println!("{}", fmt_json_ok());
+        write_mode_machine(mode, &format!("{}\n", fmt_json_ok()));
     }
     ExitCodes::OK
 }
@@ -5835,7 +9282,7 @@ pub(crate) fn run_fmt(
 
     if files.is_empty() {
         if mode.json {
-            println!("{}", fmt_json_ok());
+            write_mode_machine(mode, &format!("{}\n", fmt_json_ok()));
         }
         return;
     }
@@ -5924,18 +9371,28 @@ pub(crate) fn run_fmt(
             if let Some(ref io_err) = r.io_error {
                 if mode.json {
                     let path_s = r.path.to_str().unwrap_or("?");
-                    eprintln!(
-                        "{}",
-                        render_status_json(
-                            "error",
-                            false,
-                            "fmt",
-                            &format!(
-                                ",\"fmt\":{{\"status\":\"error\",\"errors\":[{{\"path\":\"{}\",\"message\":\"{}\"}}]}}",
-                                json_escape(path_s),
-                                json_escape(io_err)
-                            ),
-                        )
+                    write_mode_diagnostic(
+                        mode,
+                        &format!(
+                            "{}\n",
+                            render_status(
+                                "fmt",
+                                false,
+                                StatusFields::new().with(
+                                    "fmt",
+                                    StatusValue::object(
+                                        StatusFields::new().with("status", "error").with(
+                                            "errors",
+                                            StatusValue::array([StatusValue::object(
+                                                StatusFields::new()
+                                                    .with("path", path_s.to_string())
+                                                    .with("message", io_err.to_string()),
+                                            )]),
+                                        ),
+                                    ),
+                                ),
+                            )
+                        ),
                     );
                 } else {
                     crate::cli_error!("E2105", "{}", io_err);
@@ -5944,15 +9401,21 @@ pub(crate) fn run_fmt(
             if !r.parse_diags.is_empty() {
                 let path_s = r.path.to_str().unwrap_or("?");
                 if mode.json {
-                    let machine_file = crate::machine_report_path_for_process(path_s);
-                    eprint!(
-                        "{}",
-                        jet::render_all_json(&machine_file, &r.original, &r.parse_diags)
+                    let machine_file = jet::Diagnostics::ReportPath::from_process(path_s);
+                    write_mode_diagnostic(
+                        mode,
+                        &render_diagnostic_status(
+                            "fmt",
+                            false,
+                            &machine_file,
+                            &r.original,
+                            &r.parse_diags,
+                        ),
                     );
                 } else {
-                    eprint!(
-                        "{}",
-                        jet::render_diagnostics(path_s, &r.original, &r.parse_diags)
+                    write_mode_diagnostic(
+                        mode,
+                        &jet::render_diagnostics(path_s, &r.original, &r.parse_diags),
                     );
                 }
             }
@@ -5980,7 +9443,7 @@ pub(crate) fn run_fmt(
 
         if dirty.is_empty() {
             if mode.json {
-                println!("{}", fmt_json_ok());
+                write_mode_machine(mode, &format!("{}\n", fmt_json_ok()));
             }
             return; // exit 0
         }
@@ -5999,22 +9462,22 @@ pub(crate) fn run_fmt(
                     .iter()
                     .map(|(p, d)| (p.as_str(), d.as_str()))
                     .collect();
-                println!("{}", fmt_json_dirty_diffs(&refs));
+                write_mode_machine(mode, &format!("{}\n", fmt_json_dirty_diffs(&refs)));
             } else {
                 let paths: Vec<&str> = dirty
                     .iter()
                     .map(|r| r.path.to_str().unwrap_or("?"))
                     .collect();
-                println!("{}", fmt_json_dirty_paths(&paths));
+                write_mode_machine(mode, &format!("{}\n", fmt_json_dirty_paths(&paths)));
             }
         } else {
             for r in &dirty {
-                println!("{}", make_rel(&r.path));
+                write_mode_renderable(mode, &format!("{}\n", make_rel(&r.path)));
                 if show_diff {
                     let rel = make_rel(&r.path);
-                    print!(
-                        "{}",
-                        jet::Formatter::unified_diff(&rel, &r.original, &r.formatted)
+                    write_mode_renderable(
+                        mode,
+                        &jet::Formatter::unified_diff(&rel, &r.original, &r.formatted),
                     );
                 }
             }
@@ -6028,44 +9491,48 @@ pub(crate) fn run_fmt(
             crate::cli_error!("E2105", "couldn't write `{}`: {}", r.path.display(), e);
             exit(ExitCodes::USAGE);
         }
-        if r.retired_interpolation_selectors > 0 && !mode.json {
-            println!(
-                "{}: rewrote {} retired interpolation selector{} from `#` to `:` (D-ONCE-HASH1)",
-                r.path.display(),
-                r.retired_interpolation_selectors,
-                if r.retired_interpolation_selectors == 1 {
-                    ""
-                } else {
-                    "s"
-                }
+        if r.retired_interpolation_selectors > 0 {
+            write_mode_status(
+                mode,
+                &format!(
+                    "{}: rewrote {} retired interpolation selector{} from `#` to `:` (D-ONCE-HASH1)\n",
+                    r.path.display(),
+                    r.retired_interpolation_selectors,
+                    if r.retired_interpolation_selectors == 1 { "" } else { "s" }
+                ),
             );
         }
-        if r.retired_print_family_spellings > 0 && !mode.json {
-            println!(
-                "{}: rewrote {} retired print-family spelling{} (D-ONCE-PRINT1=A)",
-                r.path.display(),
-                r.retired_print_family_spellings,
-                if r.retired_print_family_spellings == 1 {
-                    ""
-                } else {
-                    "s"
-                }
+        if r.retired_print_family_spellings > 0 {
+            write_mode_status(
+                mode,
+                &format!(
+                    "{}: rewrote {} retired print-family spelling{} from `#` to `:` (D-ONCE-PRINT1=A)\n",
+                    r.path.display(),
+                    r.retired_print_family_spellings,
+                    if r.retired_print_family_spellings == 1 { "" } else { "s" }
+                ),
             );
         }
-        if r.retired_target_spellings > 0 && !mode.json {
-            println!(
-                "{}: rewrote {} retired target spelling{} from `plugin` to `sandbox` (D-ONCE-SANDBOX1=A)",
-                r.path.display(),
-                r.retired_target_spellings,
-                if r.retired_target_spellings == 1 { "" } else { "s" }
+        if r.retired_target_spellings > 0 {
+            write_mode_status(
+                mode,
+                &format!(
+                    "{}: rewrote {} retired target spelling{} from `plugin` to `sandbox` (D-ONCE-SANDBOX1=A)\n",
+                    r.path.display(),
+                    r.retired_target_spellings,
+                    if r.retired_target_spellings == 1 { "" } else { "s" }
+                ),
             );
         }
-        if r.retired_type_names > 0 && !mode.json {
-            println!(
-                "{}: rewrote {} retired Core container name{} (D-COLLNAME1=A)",
-                r.path.display(),
-                r.retired_type_names,
-                if r.retired_type_names == 1 { "" } else { "s" }
+        if r.retired_type_names > 0 {
+            write_mode_status(
+                mode,
+                &format!(
+                    "{}: rewrote {} retired Core container name{} (D-COLLNAME1=A)\n",
+                    r.path.display(),
+                    r.retired_type_names,
+                    if r.retired_type_names == 1 { "" } else { "s" }
+                ),
             );
         }
     }
@@ -6084,9 +9551,7 @@ fn bin_path(file: &str) -> PathBuf {
     PathBuf::from("build").join(stem(file))
 }
 
-fn programmable_build_target_name(
-    output: &jet::Driver::BuildCompileOutput,
-) -> Option<String> {
+fn programmable_build_target_name(output: &jet::Driver::BuildCompileOutput) -> Option<String> {
     let build = output.build.as_ref()?;
     let target_id = build.plan.default_target()?.id().0;
     let target = build.plan.targets().get(target_id)?;
@@ -6116,116 +9581,37 @@ fn test_bin_path(path: &Path) -> PathBuf {
     ))
 }
 
-fn fuzz_bin_path(path: &Path, test_name: Option<&str>) -> PathBuf {
-    let suffix = test_name
-        .map(|n| format!("_{}", stem(n)))
-        .unwrap_or_default();
-    PathBuf::from("build").join(format!(
-        ".fuzz_{}{}.{}",
-        stem(&path.to_string_lossy()),
-        suffix,
-        std::process::id()
-    ))
-}
-
-/// `jet fuzz` flags beyond the file/test-name target (D-TESTKIT1=A gap #1).
+/// `jet fuzz` options are retained only so older dispatch code can emit the
+/// migration diagnostic. The harness itself is retired; `jet test` owns
+/// generated-assertion execution.
 #[derive(Clone, Default)]
 pub(crate) struct FuzzRunOpts {
-    /// Case budget (`--iterations=<n>`); the harness default (1000) applies
-    /// when `None`.
     pub(crate) iterations: Option<u64>,
-    /// Wall-clock budget in milliseconds (`--time=<n>` seconds, converted).
     pub(crate) time_budget_ms: Option<u64>,
-    /// Base PRNG seed (`--seed=<n>`); the harness's fixed default applies
-    /// when `None`, so a bare `jet fuzz` run is still reproducible.
     pub(crate) seed: Option<u64>,
-    /// Corpus directory (`--corpus=<dir>`); defaults to
-    /// `.jet/fuzz/<file-stem>[/<test-name>]`.
     pub(crate) corpus: Option<String>,
 }
 
-/// D-TESTKIT1=A (c308 pass 2, gap #1): `jet fuzz <file> [<name>]` — fuzz a
-/// parameterized `#Test fn` (D-TEST1's property-test form) with generated
-/// inputs: corpus dir persistence (failing seeds saved, replayed first next
-/// run), minimization (the same greedy shrink `jet test` uses), a deterministic
-/// seeded PRNG (`JetRng`, std-only, I6 — the same splitmix64 generator D-TEST1
-/// already ships), and iteration/time budget flags. Exit 0 = clean, exit 1 =
-/// found a failure (the repro is printed as a `jet test`-shaped invocation).
+/// Retire the pre-ratification standalone fuzz harness.
+///
+/// Generated property evidence is now part of the ordinary `jet test`
+/// contract. Keep this entry point until the top-level dispatcher migrates so
+/// old invocations fail with an actionable replacement rather than compiling
+/// or executing a second harness.
 pub(crate) fn run_fuzz(file: &str, test_name: Option<&str>, opts: FuzzRunOpts, mode: OutputMode) {
-    let src = match fs::read_to_string(file) {
-        Ok(s) => s,
-        Err(_) => {
-            crate::cli_error!("E2105", "can't find the file `{}`", file);
-            exit(ExitCodes::USER_ERROR);
-        }
-    };
-    let (rust_code, ffi_link) = match jet::compile_fuzz_with_path(file, test_name) {
-        Ok(r) => r,
-        Err(jet::FuzzCompileError::Diagnostics(diags)) => {
-            report_problems(mode, file, &src, &diags);
-            exit(ExitCodes::USER_ERROR);
-        }
-        Err(jet::FuzzCompileError::Target(msg)) => {
-            crate::cli_error!("E2105", "{}", msg);
-            exit(ExitCodes::USER_ERROR);
-        }
-    };
-    let path = Path::new(file);
-    let bin = fuzz_bin_path(path, test_name);
-    build(
-        file,
-        &rust_code,
-        None,
-        bin.clone(),
-        BuildProfile::Default,
-        ffi_link.as_ref(),
-        &[],
-        false,
-        None,
-        None,
-        None,
-        mode,
-        false,
-        // Fuzz harness build; not content-cached — target selection (an
-        // implicit "the file's only property test") can change without the
-        // file's bytes changing (e.g. a sibling test gains params), and a
-        // fuzz run's whole point is a fresh, honest compile of this driver.
-        None,
-    );
-    let corpus = opts.corpus.clone().unwrap_or_else(|| {
-        let mut p = format!(".jet/fuzz/{}", stem(file));
-        if let Some(n) = test_name {
-            p.push('/');
-            p.push_str(&stem(n));
-        }
-        p
-    });
-    let mut cmd = Command::new(&bin);
-    if let Some(n) = opts.iterations {
-        cmd.env("JET_FUZZ_ITERATIONS", n.to_string());
+    let mut replacement = format!("{} test --grade=generated", jet::Syntax::BINARY_NAME);
+    if let Some(iterations) = opts.iterations {
+        replacement.push_str(&format!(" --iterations={iterations}"));
     }
-    if let Some(ms) = opts.time_budget_ms {
-        cmd.env("JET_FUZZ_TIME_MS", ms.to_string());
+    replacement.push(' ');
+    replacement.push_str(file);
+    if let Some(test_name) = test_name {
+        replacement.push(' ');
+        replacement.push_str(test_name);
     }
-    if let Some(seed) = opts.seed {
-        cmd.env("JET_FUZZ_SEED", seed.to_string());
-    }
-    cmd.env("JET_FUZZ_CORPUS", &corpus);
-    let status = match cmd.status() {
-        Ok(status) => status,
-        Err(e) => {
-            let _ = fs::remove_file(&bin);
-            crate::cli_error!(
-                "E2105",
-                "couldn't run the fuzz harness for `{}`: {}",
-                file,
-                e
-            );
-            exit(ExitCodes::USER_ERROR);
-        }
-    };
-    let _ = fs::remove_file(&bin);
-    exit(child_exit_code(status));
+    let _ = (opts.time_budget_ms, opts.seed, opts.corpus, mode);
+    crate::cli_error!("E2104", "`jet fuzz` is retired; use `{}`", replacement);
+    exit(ExitCodes::USAGE);
 }
 
 /// D-BUILDNORM1=A (Tower #85): a semantic SHA-256 of the enclosing Package root's typed facts and selected build entry.
@@ -6430,6 +9816,7 @@ fn native_cache_salt(
     instance_fingerprints: &[String],
     bridge_identity: Option<&str>,
     comptime_inputs: &[jet::AST::ComptimeInput],
+    authority_identity: Option<&str>,
 ) -> String {
     native_cache_salt_with_schema(
         NATIVE_CACHE_SALT_SCHEMA,
@@ -6442,9 +9829,9 @@ fn native_cache_salt(
         instance_fingerprints,
         bridge_identity,
         comptime_inputs,
+        authority_identity,
     )
 }
-
 fn native_cache_salt_with_schema(
     schema: &[u8],
     toolchain: &str,
@@ -6456,6 +9843,7 @@ fn native_cache_salt_with_schema(
     instance_fingerprints: &[String],
     bridge_identity: Option<&str>,
     comptime_inputs: &[jet::AST::ComptimeInput],
+    authority_identity: Option<&str>,
 ) -> String {
     let mut instances = instance_fingerprints.to_vec();
     instances.sort();
@@ -6488,11 +9876,37 @@ fn native_cache_salt_with_schema(
         append_cache_field(&mut bytes, path);
         append_cache_field(&mut bytes, hash);
     }
+    if let Some(authority_identity) = authority_identity {
+        append_cache_field(&mut bytes, "application-authority");
+        append_cache_field(&mut bytes, authority_identity);
+    }
     jet::SHA256::sha256_hex(&bytes)
 }
 
+const APPLICATION_AUTHORITY_CACHE_SCHEMA: &[u8] = b"jet-application-authority-cache-v1";
 const NATIVE_CACHE_SALT_SCHEMA: &[u8] = b"jet-native-cache-salt-v7";
 const NATIVE_CACHE_COMPILER_ABI: &str = "jet.native-cache-abi.v5";
+
+fn application_authority_cache_identity(
+    authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+) -> Option<String> {
+    let authority = authority?;
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(APPLICATION_AUTHORITY_CACHE_SCHEMA);
+    append_cache_field(&mut bytes, &authority.authority);
+    for (name, holds) in [
+        ("required", &authority.required_effects),
+        ("granted", &authority.granted_effects),
+        ("denied", &authority.denied_effects),
+    ] {
+        append_cache_field(&mut bytes, name);
+        bytes.extend_from_slice(&(holds.len() as u64).to_be_bytes());
+        for hold in holds {
+            append_cache_field(&mut bytes, hold);
+        }
+    }
+    Some(jet::SHA256::sha256_hex(&bytes))
+}
 
 fn command_identity(program: &str, args: &[&str]) -> String {
     match Command::new(program).args(args).output() {
@@ -6657,6 +10071,7 @@ fn native_cache_key(
     profile: &str,
     profile_tag: &str,
     mode_tag: &str,
+    invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
 ) -> Option<String> {
     native_cache_key_with_toolchain(
         file,
@@ -6664,15 +10079,16 @@ fn native_cache_key(
         profile_tag,
         mode_tag,
         native_toolchain_identity(),
+        invocation_authority,
     )
 }
-
 fn native_cache_key_with_source_closure(
     file: &str,
     source_closure: &[(PathBuf, String)],
     profile: &str,
     profile_tag: &str,
     mode_tag: &str,
+    invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
 ) -> Option<String> {
     let overlays = source_closure
         .iter()
@@ -6685,15 +10101,16 @@ fn native_cache_key_with_source_closure(
         mode_tag,
         native_toolchain_identity(),
         &overlays,
+        invocation_authority,
     )
 }
-
 fn native_cache_key_with_toolchain(
     file: &str,
     profile: &str,
     profile_tag: &str,
     mode_tag: &str,
     toolchain_identity: &str,
+    invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
 ) -> Option<String> {
     native_cache_key_with_toolchain_and_overlays(
         file,
@@ -6702,6 +10119,7 @@ fn native_cache_key_with_toolchain(
         mode_tag,
         toolchain_identity,
         &[],
+        invocation_authority,
     )
 }
 
@@ -6712,6 +10130,7 @@ fn native_cache_key_with_toolchain_and_overlays(
     mode_tag: &str,
     toolchain_identity: &str,
     overlays: &[(&Path, &str)],
+    invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
 ) -> Option<String> {
     debug_native_cache_event(format!(
         "key-entry pid={} file={} profile={} mode={}",
@@ -6751,7 +10170,14 @@ fn native_cache_key_with_toolchain_and_overlays(
         debug_native_cache_event("key-none sema");
         return None;
     }
-    native_cache_key_for_program(file, &bundle, profile_tag, mode_tag, toolchain_identity)
+    native_cache_key_for_program(
+        file,
+        &bundle,
+        profile_tag,
+        mode_tag,
+        toolchain_identity,
+        invocation_authority,
+    )
 }
 
 fn native_cache_key_for_prepared_build(
@@ -6759,6 +10185,7 @@ fn native_cache_key_for_prepared_build(
     prepared: Option<&jet::Driver::PreparedBuildFrontEnd>,
     profile_tag: &str,
     mode_tag: &str,
+    invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
 ) -> Option<String> {
     let Some(program) = prepared.and_then(|prepared| prepared.emitted_program()) else {
         debug_native_cache_event("program-key-none no-emitted-program");
@@ -6770,6 +10197,7 @@ fn native_cache_key_for_prepared_build(
         profile_tag,
         mode_tag,
         native_toolchain_identity(),
+        invocation_authority,
     )
 }
 
@@ -6784,12 +10212,14 @@ fn native_cache_key_for_prepared_build(
 /// The inputs are canonical AST, instance identities, dependency interfaces,
 /// runtime/Core fingerprints, bridge identity, manifest, toolchain, profile,
 /// and recorded compile-time package inputs.
+
 fn native_cache_key_for_program(
     file: &str,
     bundle: &jet::AST::ProgramBundle,
     profile_tag: &str,
     mode_tag: &str,
     toolchain_identity: &str,
+    invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
 ) -> Option<String> {
     debug_native_cache_event(format!(
         "program-key-entry pid={} file={} profile={} mode={} modules={}",
@@ -6803,13 +10233,14 @@ fn native_cache_key_for_program(
         debug_native_cache_event("program-key-none prove-fresh");
         return None;
     }
-    // The output depends on external file bytes the AST does not capture, so
-    // this program must never be served from — or stored into — a cache keyed
-    // on the AST alone.
-    if program_uses_embed(bundle) {
-        debug_native_cache_event("program-key-none embed");
-        return None;
-    }
+    let devtools_policy = jet::Driver::release_devtools_policy_for_bundle(bundle, profile_tag);
+    let runtime_fingerprint =
+        jet::Codegen::cached_runtime_fingerprint_with_policy(&devtools_policy);
+    let corelib_fingerprint = jet::Codegen::corelib_emission_fingerprint_with_policy(
+        bundle,
+        mode_tag.starts_with("test"),
+        &devtools_policy,
+    );
     if !native_cacheable_program(bundle) {
         return None;
     }
@@ -6836,23 +10267,32 @@ fn native_cache_key_for_program(
         })
         .collect();
     let dependency_interfaces = dependency_interface_fingerprint(bundle);
-    let runtime_fingerprint = jet::Codegen::cached_runtime_fingerprint();
-    let corelib_fingerprint =
-        jet::Codegen::corelib_emission_fingerprint(bundle, mode_tag.starts_with("test"));
     let Some(manifest) = manifest_fingerprint(file) else {
         debug_native_cache_event("program-key-none manifest");
         return None;
     };
+    // The native cache salt must carry the selected target boundary, not the
+    // host process's OS/architecture. The canonical artifact key also frames
+    // these exact facts; keeping the dossier digest here makes the lower-level
+    // native salt independently target-aware before that key is assembled.
+    let target_identity = jet::SHA256::sha256_hex(
+        &bundle
+            .build_facts
+            .target_dossier
+            .cache_bytes(&bundle.build_facts.target_triple),
+    );
+    let authority_identity = application_authority_cache_identity(invocation_authority);
     let salt = native_cache_salt(
         toolchain_identity,
         &format!("{manifest}:{dependency_interfaces}"),
         &runtime_fingerprint,
         &corelib_fingerprint,
         mode_tag,
-        &format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
+        &target_identity,
         &instances,
         bridge_identity.as_deref(),
         &bundle.comptime_inputs,
+        authority_identity.as_deref(),
     );
     let canonical = jet::CanonicalAST::canonical_bytes(bundle);
     let canonical_fingerprint = jet::SHA256::sha256_hex(&canonical);
@@ -6901,6 +10341,15 @@ fn program_uses_embed(bundle: &jet::AST::ProgramBundle) -> bool {
             || module.source.contains(jet::Syntax::BUILTIN_EMBED_BYTES)
     })
 }
+
+/// Game package builds need a fresh code-generation pass so the startup
+/// bootstrap cannot be hidden behind an older native artifact cache entry.
+fn program_uses_game_runtime(bundle: &jet::AST::ProgramBundle) -> bool {
+    bundle
+        .modules
+        .iter()
+        .any(|module| module.source.contains("core.game"))
+}
 /// Rust FFI bridges are cacheable once their content-addressed identity is in
 /// the native key. Explicit C ABI links remain uncached because system library
 /// contents are not represented by the Jet AST or the resolved argument list.
@@ -6909,6 +10358,31 @@ fn native_cacheable_program(bundle: &jet::AST::ProgramBundle) -> bool {
         && !jet::FFI::collect_externs(bundle)
             .iter()
             .any(|entry| entry.c_abi)
+}
+/// Game package manifests are runtime configuration, so every generated game
+/// binary carries the same startup seam.  Ordinary game runs have no manifest
+/// beside them and the generated helper is therefore inert.
+fn inject_game_crash_reporter_bootstrap(rust_code: &mut String, game_runtime: bool) {
+    if !game_runtime {
+        return;
+    }
+    const MAIN: &str = "fn main() {\n";
+    let Some(main_start) = rust_code.find(MAIN) else {
+        return;
+    };
+    const MARKER_DECL: &str =
+        "\n#[used]\nstatic JET_GAME_CRASH_REPORTER_BOOTSTRAP_MARKER: &[u8] = \
+         b\"jet-game-crash-reporter-v1\";\n";
+    if !rust_code.contains("JET_GAME_CRASH_REPORTER_BOOTSTRAP_MARKER") {
+        rust_code.insert_str(main_start, MARKER_DECL);
+    }
+    let main_start = rust_code.find(MAIN).unwrap_or(main_start);
+    let insertion = "    jet_game_crash_reporter_install_from_manifest();\n";
+    let body_start = main_start + MAIN.len();
+    if rust_code[body_start..].starts_with(insertion) {
+        return;
+    }
+    rust_code.insert_str(body_start, insertion);
 }
 
 /// E2-M15 / E3302: prove that rustc knows the requested cross-compilation
@@ -6932,7 +10406,7 @@ pub(crate) fn validate_target(triple: &str, mode: OutputMode) {
     let src = format!("// cross-build for {}", triple);
     report_problems(mode, "<target>", &src, &[diag]);
     if needs_install_hint {
-        eprintln!(" why: {fix}");
+        write_mode_diagnostic(mode, &format!(" why: {fix}\n"));
     }
     exit(ExitCodes::USER_ERROR);
 }
@@ -6942,6 +10416,7 @@ pub(crate) fn validate_target(triple: &str, mode: OutputMode) {
 /// status, client leases, and last-good swapping live in `jet-devserver`.
 pub(crate) fn run_dev_web(
     file: &str,
+    profile: &BuildProfile,
     mode: OutputMode,
     verbose: bool,
     port: Option<u16>,
@@ -6949,6 +10424,7 @@ pub(crate) fn run_dev_web(
     canvas_options: Option<jet_devserver::WebHost::CanvasHostOptions>,
     setting_overrides: &BTreeMap<String, String>,
 ) {
+    let release_policy = release_devtools_policy_for_profile(profile);
     let path = Path::new(file);
     if !path.exists() {
         crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), format!("check the spelling, or run {} from the folder that contains it", jet::Syntax::BINARY_NAME));
@@ -6957,9 +10433,15 @@ pub(crate) fn run_dev_web(
 
     let host = match if canvas {
         let options = canvas_options.as_ref().cloned().unwrap_or_default();
-        jet_devserver::WebHost::WebHost::bind_web_with_canvas_options(file, verbose, port, &options)
+        jet_devserver::WebHost::WebHost::bind_web_with_canvas_options_and_policy(
+            file,
+            verbose,
+            port,
+            &options,
+            release_policy.clone(),
+        )
     } else {
-        jet_devserver::WebHost::WebHost::bind(file, verbose, port)
+        jet_devserver::WebHost::WebHost::bind_with_policy(file, verbose, port, release_policy)
     } {
         Ok(host) => host,
         Err(message) => {
@@ -6971,12 +10453,20 @@ pub(crate) fn run_dev_web(
                         .to_string(),
                 );
             } else {
-                eprintln!("{message}");
+                write_mode_diagnostic(mode, &format!("{message}\n"));
             }
             exit(ExitCodes::USER_ERROR);
         }
     };
-    if !rebuild_dev_web(file, mode, verbose, false, &host, setting_overrides) {
+    let resident_session = host.resident_session();
+    let _project_rebuild_executor = match resident_session.register_project_rebuild_executor() {
+        Ok(guard) => guard,
+        Err(error) => {
+            write_mode_diagnostic(mode, &format!("{error}\n"));
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    if rebuild_dev_web(file, mode, verbose, false, &host, setting_overrides).is_err() {
         exit(ExitCodes::USER_ERROR);
     }
     if canvas {
@@ -6990,15 +10480,15 @@ pub(crate) fn run_dev_web(
     let mut watch = match jet_devserver::WatchSession::open(path) {
         Ok(watch) => watch,
         Err(diagnostic) => {
-            eprint!(
-                "{}",
-                jet::render_all_colored(file, "", &[diagnostic], mode.color_stderr())
+            write_mode_diagnostic(
+                mode,
+                &jet::render_all_colored(file, "", &[diagnostic], mode.color_stderr()),
             );
             exit(ExitCodes::USER_ERROR);
         }
     };
     loop {
-        thread::sleep(Duration::from_millis(30));
+        thread::sleep(Duration::from_millis(jet_devserver::WATCH_POLL_INTERVAL_MS));
         if let Some(code) = host.exit_code() {
             exit(code);
         }
@@ -7006,13 +10496,25 @@ pub(crate) fn run_dev_web(
             if receipt.change_kinds.iter().all(|k| *k == "stale") {
                 continue;
             }
-            rebuild_dev_web(file, mode, verbose, true, &host, setting_overrides);
+            let _ = rebuild_dev_web(file, mode, verbose, true, &host, setting_overrides);
             if let Err(diagnostic) = watch.acknowledge(&receipt) {
-                eprint!(
-                    "{}",
-                    jet::render_all_colored(file, "", &[diagnostic], mode.color_stderr())
+                write_mode_diagnostic(
+                    mode,
+                    &jet::render_all_colored(file, "", &[diagnostic], mode.color_stderr()),
                 );
                 exit(ExitCodes::USER_ERROR);
+            }
+        }
+        match resident_session.take_project_rebuild() {
+            Ok(Some(request)) => {
+                let result = rebuild_dev_web(file, mode, verbose, true, &host, setting_overrides);
+                if let Err(error) = resident_session.finish_project_rebuild(&request, result) {
+                    write_mode_diagnostic(mode, &format!("{error}\n"));
+                }
+            }
+            Ok(None) => {}
+            Err(error) => {
+                write_mode_diagnostic(mode, &format!("{error}\n"));
             }
         }
     }
@@ -7025,7 +10527,7 @@ fn rebuild_dev_web(
     is_rebuild: bool,
     host: &jet_devserver::WebHost::WebHost,
     setting_overrides: &BTreeMap<String, String>,
-) -> bool {
+) -> Result<(), String> {
     let _source_transaction = host.lock_source_transaction();
     let started = Instant::now();
     host.mark_building();
@@ -7044,19 +10546,16 @@ fn rebuild_dev_web(
                 .first()
                 .map(|diagnostic| diagnostic.code.to_string())
                 .unwrap_or_default();
-            host.mark_error(
-                code,
-                jet::render_diagnostics(file, &src, &diags),
-                is_rebuild,
-            );
-            return false;
+            let message = jet::render_diagnostics(file, &src, &diags);
+            host.mark_error(code, message.clone(), is_rebuild);
+            return Err(message);
         }
     };
     let Some(web) = &out.web else {
         let message = jet::Diagnostics::render_ice_report("missing web codegen output", "", false);
-        eprintln!("{message}");
-        host.mark_error("ICE".to_string(), message, is_rebuild);
-        return false;
+        write_mode_diagnostic(mode, &format!("{message}\n"));
+        host.mark_error("ICE".to_string(), message.clone(), is_rebuild);
+        return Err(message);
     };
 
     let staging = PathBuf::from("build").join(".jet-dev-staging");
@@ -7065,25 +10564,35 @@ fn rebuild_dev_web(
             Ok(authority) => authority,
             Err(error) => {
                 let message = format!("error: couldn't open web staging output: {error}");
-                eprintln!("{message}");
-                host.mark_error("ICE".to_string(), message, is_rebuild);
-                return false;
+                write_mode_diagnostic(mode, &format!("{message}\n"));
+                host.mark_error("ICE".to_string(), message.clone(), is_rebuild);
+                return Err(message);
             }
         };
-    if let Err(message) = write_web_artifacts(file, web, verbose, &staging_authority, true) {
-        eprintln!("{message}");
-        host.mark_error("ICE".to_string(), message, is_rebuild);
-        return false;
+    let model_runtime = web.wasm_rust.contains("extern crate jet_rt;");
+    if let Err(message) = write_web_artifacts(
+        file,
+        web,
+        out.ffi.as_ref(),
+        model_runtime,
+        verbose,
+        &staging_authority,
+        true,
+        mode,
+    ) {
+        write_mode_diagnostic(mode, &format!("{message}\n"));
+        host.mark_error("ICE".to_string(), message.clone(), is_rebuild);
+        return Err(message);
     }
     if let Err(error) = jet_devserver::WebHost::stage_and_swap(&staging, Path::new("build")) {
         let message = format!("couldn't finalize web build: {error}");
-        crate::cli_error!("E2105", "{message}");
-        host.mark_error("ICE".to_string(), message, is_rebuild);
-        return false;
+        write_mode_diagnostic(mode, &format!("{message}\n"));
+        host.mark_error("ICE".to_string(), message.clone(), is_rebuild);
+        return Err(message);
     }
 
     host.mark_ready(started.elapsed().as_millis(), is_rebuild);
-    true
+    Ok(())
 }
 
 /// Where `write_web_artifacts` put each `build/*` file it wrote — returned so
@@ -7109,7 +10618,8 @@ pub(crate) struct WebBuildPaths {
 /// `file` is the `.jet` source path — used only to look for a companion
 /// `<stem>.html` next to it, which wins over the generic `index_html` codegen
 /// emits (an example wiring a button to an exported `#JS` function ships its
-/// own page; see `Codegen::Web::emit_web`'s `index_html` doc comment).
+/// own page; see the canonical `Codegen::MIRWeb::WebArtifacts` type for
+/// how web artifacts are typed during compilation.
 ///
 /// Returns the paths written on success. On failure to run/pass rustc for the
 /// wasm half, returns `Err` with an already-formatted message instead of
@@ -7117,16 +10627,77 @@ pub(crate) struct WebBuildPaths {
 /// compiler error, but only the caller knows whether that should abort the
 /// process (`jet build`) or just be reported while the previous good build
 /// keeps serving (`jet dev --target=web`).
+fn jet_rt_rlib(target: Option<&str>, release: bool) -> Result<PathBuf, String> {
+    if let Some(path) = std::env::var_os("JET_RT_RLIB").map(PathBuf::from) {
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|error| format!("JET_RT_RLIB `{}` is unavailable: {error}", path.display()))?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(format!(
+                "JET_RT_RLIB `{}` is not a regular file",
+                path.display()
+            ));
+        }
+        return Ok(path);
+    }
+    let profile = if release { "release" } else { "debug" };
+    let mut roots = Vec::new();
+    let target_root = std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("target"));
+    if let Some(target) = target {
+        roots.push(target_root.join(target).join(profile).join("deps"));
+    }
+    roots.push(target_root.join(profile).join("deps"));
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(parent) = executable.parent() {
+            roots.push(parent.join("deps"));
+        }
+    }
+    let mut candidates = Vec::new();
+    for root in roots {
+        let Ok(entries) = fs::read_dir(root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(metadata) = fs::symlink_metadata(&path) else {
+                continue;
+            };
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default();
+            if name.starts_with("libjet_rt-")
+                && path.extension().and_then(|extension| extension.to_str()) == Some("rlib")
+                && metadata.is_file()
+                && !metadata.file_type().is_symlink()
+            {
+                candidates.push(path);
+            }
+        }
+    }
+    candidates.sort();
+    candidates.dedup();
+    candidates.pop().ok_or_else(|| {
+        "could not locate the runtime model crate; build `jet-rt` or set JET_RT_RLIB".to_string()
+    })
+}
+
+/// Write the web artifacts and, when needed, link the neutral model runtime
+/// crate into the generated wasm module.
 pub(crate) fn write_web_artifacts(
     file: &str,
-    web: &jet::Codegen::WebArtifacts,
+    web: &jet::Codegen::MIRWeb::WebArtifacts,
+    ffi: Option<&jet::FFI::FfiLink>,
+    model_runtime: bool,
     verbose: bool,
     output: &jet_devserver::WebHost::WebOutputAuthority,
     emit_maps: bool,
+    mode: OutputMode,
 ) -> Result<WebBuildPaths, String> {
     let step = |msg: String| {
         if verbose {
-            eprintln!("[build] {}", msg);
+            write_mode_status(mode, &format!("[build] {msg}\n"));
         }
     };
     let output_path = |name: &str| {
@@ -7137,6 +10708,8 @@ pub(crate) fn write_web_artifacts(
 
     let manifest_path = output_path("web.manifest.json")?;
     let dom_path = output_path("jet_dom_runtime.js")?;
+    let onnx_runtime_path = output_path("jet_onnx_runtime.js")?;
+    let onnx_runtime_worker_path = output_path("OnnxRuntimeWebWorker.js")?;
     let js_path = output_path("app.js")?;
     let js_map_path = output_path("app.js.map")?;
     let wasm_rs_path = output_path("app_wasm.rs")?;
@@ -7182,6 +10755,48 @@ pub(crate) fn write_web_artifacts(
     output
         .replace_file("jet_dom_runtime.js", web.dom_runtime.as_bytes())
         .map_err(|e| format!("error: couldn't write {}: {}", dom_path.display(), e))?;
+    if model_runtime {
+        output
+            .replace_file("jet_onnx_runtime.js", web.onnx_runtime_js.as_bytes())
+            .map_err(|e| {
+                format!(
+                    "error: couldn't write {}: {}",
+                    onnx_runtime_path.display(),
+                    e
+                )
+            })?;
+        output
+            .replace_file(
+                "OnnxRuntimeWebWorker.js",
+                web.onnx_runtime_worker_js.as_bytes(),
+            )
+            .map_err(|e| {
+                format!(
+                    "error: couldn't write {}: {}",
+                    onnx_runtime_worker_path.display(),
+                    e
+                )
+            })?;
+    } else {
+        output
+            .remove_file_if_exists("jet_onnx_runtime.js")
+            .map_err(|e| {
+                format!(
+                    "error: couldn't remove {}: {}",
+                    onnx_runtime_path.display(),
+                    e
+                )
+            })?;
+        output
+            .remove_file_if_exists("OnnxRuntimeWebWorker.js")
+            .map_err(|e| {
+                format!(
+                    "error: couldn't remove {}: {}",
+                    onnx_runtime_worker_path.display(),
+                    e
+                )
+            })?;
+    }
     output
         .replace_file("app.js", js_app.as_bytes())
         .map_err(|e| format!("error: couldn't write {}: {}", js_path.display(), e))?;
@@ -7258,7 +10873,31 @@ pub(crate) fn write_web_artifacts(
     } else {
         rustc.arg("-O");
     }
+    if model_runtime {
+        let rlib = jet_rt_rlib(Some("wasm32-unknown-unknown"), !emit_maps)?;
+        let dependencies = rlib.parent().ok_or_else(|| {
+            format!(
+                "runtime rlib `{}` has no dependency directory",
+                rlib.display()
+            )
+        })?;
+        rustc
+            .arg("--extern")
+            .arg(format!("jet_rt={}", rlib.display()))
+            .arg("-L")
+            .arg(format!("dependency={}", dependencies.display()));
+    }
     rustc.args([wasm_source, "-o", wasm_destination]);
+    if let Some(link) = ffi {
+        rustc
+            .arg("--extern")
+            .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+        for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+            rustc
+                .arg("-L")
+                .arg(format!("dependency={}", deps_dir.display()));
+        }
+    }
     let rustc = rustc
         .output()
         .map_err(|e| format!("error: couldn't run rustc for wasm: {}", e))?;
@@ -7365,6 +11004,1281 @@ fn read_web_html_source(
     Ok(Some(text))
 }
 
+mod foreign_build_import {
+    use super::*;
+
+    const CANDIDATE_SCHEMA: &str = "jet-ffi-build-import-v1";
+    const SELECTION_PACKAGE: &str = "__jet_foreign_build__";
+
+    #[derive(Clone, Debug)]
+    enum Operation {
+        Preview,
+        Accept(String),
+    }
+
+    #[derive(Clone, Debug)]
+    struct Request {
+        kind: String,
+        build_dir: String,
+        operation: Operation,
+    }
+
+    #[derive(Clone, Debug)]
+    struct Action {
+        id: String,
+        owner: String,
+        inner_owner: Option<String>,
+        command: Vec<String>,
+        inputs: Vec<String>,
+        outputs: Vec<String>,
+        environment: Vec<(String, String)>,
+        workdir: String,
+        custom: bool,
+    }
+
+    #[derive(Clone, Debug)]
+    struct Candidate {
+        key: String,
+        build_dir: String,
+        argv: Vec<String>,
+        inputs: Vec<(String, String)>,
+        outputs: Vec<String>,
+        toolchains: Vec<(String, String)>,
+        environment: Vec<(String, String)>,
+        workdirs: Vec<String>,
+        actions: Vec<Action>,
+        unsupported: Vec<String>,
+        ownership: String,
+    }
+
+    #[derive(Debug)]
+    enum Failure {
+        User(String),
+        Internal(String),
+    }
+
+    impl Failure {
+        fn user(message: impl Into<String>) -> Self {
+            Self::User(message.into())
+        }
+
+        fn internal(message: impl Into<String>) -> Self {
+            Self::Internal(message.into())
+        }
+    }
+
+    fn relative_path(value: &str) -> Result<PathBuf, Failure> {
+        let path = Path::new(value);
+        if path.is_absolute()
+            || path.components().any(|component| {
+                matches!(
+                    component,
+                    Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                )
+            })
+        {
+            return Err(Failure::user(format!(
+                "foreign build path `{value}` must be relative to the project"
+            )));
+        }
+        Ok(path.to_path_buf())
+    }
+
+    fn display_relative(path: &Path) -> String {
+        path.to_string_lossy().replace('\\', "/")
+    }
+
+    fn ensure_directory(path: &Path) -> Result<(), Failure> {
+        match fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.file_type().is_symlink() => Err(Failure::internal(format!(
+                "refusing symlinked directory `{}`",
+                path.display()
+            ))),
+            Ok(metadata) if metadata.is_dir() => Ok(()),
+            Ok(_) => Err(Failure::internal(format!(
+                "foreign build cache path `{}` is not a directory",
+                path.display()
+            ))),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if let Some(parent) = path.parent() {
+                    ensure_directory(parent)?;
+                }
+                match fs::create_dir(path) {
+                    Ok(()) => Ok(()),
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                        ensure_directory(path)
+                    }
+                    Err(error) => Err(Failure::internal(format!(
+                        "could not create `{}`: {error}",
+                        path.display()
+                    ))),
+                }
+            }
+            Err(error) => Err(Failure::internal(format!(
+                "could not inspect `{}`: {error}",
+                path.display()
+            ))),
+        }
+    }
+
+    fn read_regular(root: &Path, relative: &str) -> Result<Vec<u8>, Failure> {
+        let relative_path = relative_path(relative)?;
+        let path = root.join(&relative_path);
+        let metadata = fs::symlink_metadata(&path).map_err(|error| {
+            Failure::user(format!(
+                "foreign build input `{relative}` is unavailable: {error}"
+            ))
+        })?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(Failure::user(format!(
+                "foreign build input `{relative}` must be a regular non-symlink file"
+            )));
+        }
+        fs::read(&path).map_err(|error| {
+            Failure::user(format!(
+                "could not read foreign build input `{relative}`: {error}"
+            ))
+        })
+    }
+
+    fn add_input(
+        root: &Path,
+        relative: &str,
+        inputs: &mut Vec<(String, String)>,
+        unsupported: &mut Vec<String>,
+    ) -> Result<(), Failure> {
+        let relative = display_relative(&relative_path(relative)?);
+        if inputs.iter().any(|(path, _)| path == &relative) {
+            return Ok(());
+        }
+        match read_regular(root, &relative) {
+            Ok(bytes) => {
+                inputs.push((
+                    relative,
+                    format!("sha256-{}", jet::SHA256::sha256_hex(&bytes)),
+                ));
+                Ok(())
+            }
+            Err(Failure::User(error)) => {
+                unsupported.push(error);
+                Ok(())
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn cmake_calls(source: &str, command: &str) -> Vec<Vec<String>> {
+        let lower = source.to_ascii_lowercase();
+        let needle = command.to_ascii_lowercase();
+        let bytes = lower.as_bytes();
+        let mut cursor = 0usize;
+        let mut calls = Vec::new();
+        while cursor < bytes.len() {
+            let Some(found) = lower[cursor..].find(&needle) else {
+                break;
+            };
+            let start = cursor + found;
+            let before = start
+                .checked_sub(1)
+                .and_then(|index| bytes.get(index).copied());
+            let after_name = start + needle.len();
+            if before.is_some_and(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+                || bytes
+                    .get(after_name)
+                    .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+            {
+                cursor = after_name;
+                continue;
+            }
+            let Some(open_offset) = lower[after_name..].find('(') else {
+                break;
+            };
+            let open = after_name + open_offset;
+            let Some(close_offset) = source[open + 1..].find(')') else {
+                break;
+            };
+            let close = open + 1 + close_offset;
+            let args = source[open + 1..close]
+                .split_whitespace()
+                .map(|value| {
+                    value
+                        .trim_matches(|character| matches!(character, '"' | '\''))
+                        .trim_end_matches(';')
+                        .to_string()
+                })
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>();
+            calls.push(args);
+            cursor = close + 1;
+        }
+        calls
+    }
+
+    fn cmake_source_tokens(
+        calls: &[Vec<String>],
+        root: &Path,
+        inputs: &mut Vec<(String, String)>,
+        unsupported: &mut Vec<String>,
+    ) -> Result<(), Failure> {
+        const FLAGS: &[&str] = &[
+            "WIN32",
+            "MACOSX_BUNDLE",
+            "EXCLUDE_FROM_ALL",
+            "STATIC",
+            "SHARED",
+            "MODULE",
+            "OBJECT",
+            "INTERFACE",
+            "ALL",
+        ];
+        for args in calls {
+            for token in args.iter().skip(1) {
+                if FLAGS.contains(&token.as_str())
+                    || token.starts_with('$')
+                    || token.contains('=')
+                    || !token.contains('.')
+                {
+                    continue;
+                }
+                let path = token.trim_matches(|character| matches!(character, '"' | '\''));
+                let extension = Path::new(path)
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
+                if !matches!(
+                    extension.as_str(),
+                    "c" | "cc" | "cpp" | "cxx" | "h" | "hh" | "hpp" | "hxx" | "m" | "mm"
+                ) {
+                    continue;
+                }
+                if root.join(path).is_file() {
+                    add_input(root, path, inputs, unsupported)?;
+                } else {
+                    unsupported.push(format!("declared CMake source `{path}` is unavailable"));
+                }
+            }
+        }
+        Ok(())
+    }
+    fn cmake_custom_dependencies(
+        calls: &[Vec<String>],
+        root: &Path,
+        inputs: &mut Vec<(String, String)>,
+        unsupported: &mut Vec<String>,
+    ) -> Result<(), Failure> {
+        const FLAGS: &[&str] = &[
+            "COMMAND",
+            "DEPENDS",
+            "OUTPUT",
+            "BYPRODUCTS",
+            "VERBATIM",
+            "WORKING_DIRECTORY",
+            "COMMENT",
+            "USES_TERMINAL",
+            "COMMAND_EXPAND_LISTS",
+        ];
+        for args in calls {
+            let Some(depends) = args.iter().position(|value| value == "DEPENDS") else {
+                continue;
+            };
+            for token in args.iter().skip(depends + 1) {
+                let token = token.trim_matches(|character| matches!(character, '"' | '\''));
+                if token.is_empty()
+                    || FLAGS.iter().any(|flag| *flag == token)
+                    || token.starts_with('$')
+                    || token.contains('=')
+                    || token.starts_with('-')
+                {
+                    continue;
+                }
+                if root.join(token).is_file() {
+                    add_input(root, token, inputs, unsupported)?;
+                } else {
+                    unsupported.push(format!(
+                        "declared CMake custom dependency `{token}` is unavailable"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn cache_value(cache: &str, key: &str) -> Option<String> {
+        cache.lines().find_map(|line| {
+            let line = line.trim();
+            let (name, value) = line.split_once('=')?;
+            let name = name.split(':').next().unwrap_or(name);
+            (name == key).then(|| value.trim().to_string())
+        })
+    }
+
+    fn cmake_target_outputs(build_dir: &str, command: &str, name: &str) -> Vec<String> {
+        let prefix = format!("{build_dir}/");
+        match command {
+            "add_library" => vec![format!("{prefix}lib{name}.a")],
+            "add_executable" => vec![format!("{prefix}{name}")],
+            _ => Vec::new(),
+        }
+    }
+
+    fn custom_outputs(build_dir: &str, calls: &[Vec<String>]) -> Vec<String> {
+        let mut outputs = Vec::new();
+        for args in calls {
+            let mut key = None;
+            for value in args {
+                if matches!(key, Some("OUTPUT" | "BYPRODUCTS")) {
+                    if !value.starts_with('$') {
+                        if !Path::new(value).is_absolute() {
+                            outputs.push(format!("{build_dir}/{value}"));
+                        }
+                    }
+                    key = None;
+                } else if matches!(value.as_str(), "OUTPUT" | "BYPRODUCTS") {
+                    key = Some(value.as_str());
+                }
+            }
+        }
+        outputs
+    }
+
+    fn candidate_path(root: &Path, key: &str) -> PathBuf {
+        let digest = jet::SHA256::sha256_hex(key.as_bytes());
+        root.join(".jet")
+            .join("cache")
+            .join("foreign-build")
+            .join(format!(
+                "{}-{}.json",
+                key.replace(':', "-").replace('/', "_"),
+                digest.get(..16).unwrap_or(&digest)
+            ))
+    }
+
+    fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), Failure> {
+        let parent = path.parent().ok_or_else(|| {
+            Failure::internal(format!("candidate `{}` has no parent", path.display()))
+        })?;
+        ensure_directory(parent)?;
+        let temporary = parent.join(format!(
+            ".foreign-build-{}-{}.tmp",
+            std::process::id(),
+            jet::SHA256::sha256_hex(bytes)
+                .get(..16)
+                .unwrap_or("candidate")
+        ));
+        let result = (|| {
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temporary)
+                .map_err(|error| {
+                    Failure::internal(format!("could not stage candidate: {error}"))
+                })?;
+            file.write_all(bytes).map_err(|error| {
+                Failure::internal(format!("could not write candidate: {error}"))
+            })?;
+            file.sync_all()
+                .map_err(|error| Failure::internal(format!("could not sync candidate: {error}")))?;
+            if let Ok(metadata) = fs::symlink_metadata(path) {
+                if metadata.file_type().is_symlink() || metadata.is_dir() {
+                    return Err(Failure::internal(format!(
+                        "candidate destination `{}` is not replaceable",
+                        path.display()
+                    )));
+                }
+            }
+            fs::rename(&temporary, path).map_err(|error| {
+                Failure::internal(format!("could not publish candidate: {error}"))
+            })?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        result
+    }
+
+    fn json_strings(values: &[String]) -> String {
+        values
+            .iter()
+            .map(|value| format!("\"{}\"", json_escape(value)))
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
+    fn json_pairs(values: &[(String, String)]) -> String {
+        values
+            .iter()
+            .map(|(key, value)| {
+                format!(
+                    "{{\"name\":\"{}\",\"value\":\"{}\"}}",
+                    json_escape(key),
+                    json_escape(value)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
+    fn action_json(action: &Action) -> String {
+        let inner = action
+            .inner_owner
+            .as_deref()
+            .map(|value| format!("\"{}\"", json_escape(value)))
+            .unwrap_or_else(|| "null".to_string());
+        format!(
+            "{{\"id\":\"{}\",\"owner\":\"{}\",\"inner_owner\":{},\"command\":[{}],\"inputs\":[{}],\"outputs\":[{}],\"environment\":[{}],\"workdir\":\"{}\",\"custom_action\":{}}}",
+            json_escape(&action.id),
+            json_escape(&action.owner),
+            inner,
+            json_strings(&action.command),
+            json_strings(&action.inputs),
+            json_strings(&action.outputs),
+            json_pairs(&action.environment),
+            json_escape(&action.workdir),
+            action.custom
+        )
+    }
+
+    fn candidate_json(candidate: &Candidate) -> String {
+        let actions = candidate
+            .actions
+            .iter()
+            .map(action_json)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{{\n  \"schema\":\"{CANDIDATE_SCHEMA}\",\n  \"selection_key\":\"{}\",\n  \"kind\":\"cmake\",\n  \"build_dir\":\"{}\",\n  \"ownership\":\"{}\",\n  \"argv\":[{}],\n  \"dependencies\":[{}],\n  \"inputs\":[{}],\n  \"outputs\":[{}],\n  \"toolchains\":[{}],\n  \"environment\":[{}],\n  \"workdirs\":[{}],\n  \"actions\":[{}],\n  \"unsupported_edges\":[{}]\n}}\n",
+            json_escape(&candidate.key),
+            json_escape(&candidate.build_dir),
+            json_escape(&candidate.ownership),
+            json_strings(&candidate.argv),
+            json_strings(
+                &candidate
+                    .inputs
+                    .iter()
+                    .map(|(path, _)| path.clone())
+                    .collect::<Vec<_>>()
+            ),
+            candidate
+                .inputs
+                .iter()
+                .map(|(path, digest)| {
+                    format!(
+                        "{{\"path\":\"{}\",\"digest\":\"{}\"}}",
+                        json_escape(path),
+                        json_escape(digest)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(","),
+            json_strings(&candidate.outputs),
+            json_pairs(&candidate.toolchains),
+            json_pairs(&candidate.environment),
+            json_strings(&candidate.workdirs),
+            actions,
+            json_strings(&candidate.unsupported)
+        )
+    }
+
+    fn build_candidate(
+        root: &Path,
+        request: &Request,
+    ) -> Result<(PathBuf, Candidate, String), Failure> {
+        if request.kind != "cmake" {
+            return Err(Failure::user(format!(
+                "unsupported foreign build importer `{}`; only `cmake:build` is currently supported",
+                request.kind
+            )));
+        }
+        let cmake_source = read_regular(root, "CMakeLists.txt")?;
+        let cmake_source = std::str::from_utf8(&cmake_source)
+            .map_err(|_| Failure::user("CMakeLists.txt must be UTF-8"))?
+            .to_string();
+        let cache_relative = display_relative(&relative_path(&format!(
+            "{}/CMakeCache.txt",
+            request.build_dir
+        ))?);
+        let cache_bytes = read_regular(root, &cache_relative)?;
+        let cache = std::str::from_utf8(&cache_bytes)
+            .map_err(|_| Failure::user("CMakeCache.txt must be UTF-8"))?
+            .to_string();
+        let compile_commands_relative = display_relative(&relative_path(&format!(
+            "{}/compile_commands.json",
+            request.build_dir
+        ))?);
+        let compile_commands_present = root.join(&compile_commands_relative).is_file();
+
+        let mut inputs = Vec::new();
+        let mut unsupported = Vec::new();
+        add_input(root, "CMakeLists.txt", &mut inputs, &mut unsupported)?;
+        add_input(root, &cache_relative, &mut inputs, &mut unsupported)?;
+        if compile_commands_present {
+            add_input(
+                root,
+                &compile_commands_relative,
+                &mut inputs,
+                &mut unsupported,
+            )?;
+            unsupported.push(
+                "compilation database is evidence only; it cannot establish the complete graph"
+                    .to_string(),
+            );
+        }
+        if root.join("package.jet").is_file() {
+            add_input(root, "package.jet", &mut inputs, &mut unsupported)?;
+        }
+        let target_calls = ["add_executable", "add_library", "add_custom_target"]
+            .iter()
+            .flat_map(|command| {
+                cmake_calls(&cmake_source, command)
+                    .into_iter()
+                    .map(move |args| ((*command).to_string(), args))
+            })
+            .collect::<Vec<_>>();
+        cmake_source_tokens(
+            &target_calls
+                .iter()
+                .map(|(_, args)| args.clone())
+                .collect::<Vec<_>>(),
+            root,
+            &mut inputs,
+            &mut unsupported,
+        )?;
+        let custom_calls = cmake_calls(&cmake_source, "add_custom_command");
+        cmake_custom_dependencies(&custom_calls, root, &mut inputs, &mut unsupported)?;
+        if !custom_calls.is_empty() {
+            unsupported.push(
+                "CMake custom actions retain their inner foreign owner until explicitly modeled"
+                    .to_string(),
+            );
+        }
+        for dynamic in ["add_dependencies(", "include(", "execute_process(", "$<"] {
+            if cmake_source.contains(dynamic) {
+                unsupported.push(format!("unsupported dynamic CMake edge `{dynamic}`"));
+            }
+        }
+        let mut argv = vec![
+            "cmake".to_string(),
+            "--build".to_string(),
+            request.build_dir.clone(),
+        ];
+        match jet::Comptime::Build::LegacyWrapperSpec::from_project_file(
+            root,
+            jet::Comptime::Build::LegacyWrapperKind::CMake,
+        ) {
+            Ok(spec) => argv = spec.argv,
+            Err(error) => unsupported.push(format!(
+                "typed CMake importer retained this edge: {error:?}"
+            )),
+        }
+
+        let mut outputs = Vec::new();
+        let mut actions = Vec::new();
+        for (index, (command, args)) in target_calls.iter().enumerate() {
+            let Some(name) = args.first() else {
+                unsupported.push(format!("{command} has no literal target name"));
+                continue;
+            };
+            let target_outputs = cmake_target_outputs(&request.build_dir, command, name);
+            outputs.extend(target_outputs.iter().cloned());
+            let action_command = vec![
+                "cmake".to_string(),
+                "--build".to_string(),
+                request.build_dir.clone(),
+                "--target".to_string(),
+                name.clone(),
+            ];
+            let action_inputs = inputs
+                .iter()
+                .map(|(path, _)| path.clone())
+                .collect::<Vec<_>>();
+            actions.push(Action {
+                id: format!("cmake.target.{index}.{name}"),
+                owner: "cmake".to_string(),
+                inner_owner: None,
+                command: action_command,
+                inputs: action_inputs,
+                outputs: target_outputs,
+                environment: Vec::new(),
+                workdir: request.build_dir.clone(),
+                custom: false,
+            });
+        }
+        for (index, args) in custom_calls.iter().enumerate() {
+            let inner_owner = args
+                .iter()
+                .position(|value| value == "COMMAND")
+                .and_then(|position| args.get(position + 1))
+                .cloned()
+                .or_else(|| Some("cmake custom command".to_string()));
+            let action_outputs = custom_outputs(&request.build_dir, std::slice::from_ref(args));
+            outputs.extend(action_outputs.iter().cloned());
+            actions.push(Action {
+                id: format!("cmake.custom.{index}"),
+                owner: "cmake".to_string(),
+                inner_owner,
+                command: vec![
+                    "cmake".to_string(),
+                    "--build".to_string(),
+                    request.build_dir.clone(),
+                ],
+                inputs: inputs
+                    .iter()
+                    .map(|(path, _)| path.clone())
+                    .collect::<Vec<_>>(),
+                outputs: action_outputs,
+                environment: Vec::new(),
+                workdir: ".".to_string(),
+                custom: true,
+            });
+        }
+        if actions.is_empty() {
+            actions.push(Action {
+                id: "cmake.build".to_string(),
+                owner: "cmake".to_string(),
+                inner_owner: Some("cmake generator".to_string()),
+                command: argv.clone(),
+                inputs: inputs
+                    .iter()
+                    .map(|(path, _)| path.clone())
+                    .collect::<Vec<_>>(),
+                outputs: Vec::new(),
+                environment: Vec::new(),
+                workdir: ".".to_string(),
+                custom: true,
+            });
+        }
+        outputs.sort();
+        outputs.dedup();
+        if outputs.is_empty() {
+            unsupported.push("CMake did not expose a declared artifact output".to_string());
+        }
+        let mut toolchains = Vec::new();
+        for key in [
+            "CMAKE_C_COMPILER",
+            "CMAKE_CXX_COMPILER",
+            "CMAKE_LINKER",
+            "CMAKE_GENERATOR",
+            "CMAKE_BUILD_TYPE",
+        ] {
+            if let Some(value) = cache_value(&cache, key) {
+                toolchains.push((key.to_string(), value));
+            }
+        }
+        let mut environment = Vec::new();
+        for key in [
+            "CMAKE_BUILD_TYPE",
+            "CMAKE_GENERATOR",
+            "CMAKE_TOOLCHAIN_FILE",
+        ] {
+            if let Some(value) = cache_value(&cache, key) {
+                environment.push((key.to_string(), value));
+            }
+        }
+        let mut unsupported = unsupported
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let ownership = "partial".to_string();
+        let mut candidate = Candidate {
+            key: format!("{}:{}", request.kind, request.build_dir),
+            build_dir: request.build_dir.clone(),
+            argv,
+            inputs,
+            outputs,
+            toolchains,
+            environment,
+            workdirs: vec![".".to_string()],
+            actions,
+            unsupported: std::mem::take(&mut unsupported),
+            ownership,
+        };
+        candidate.inputs.sort();
+        candidate.outputs.sort();
+        candidate.toolchains.sort();
+        candidate.environment.sort();
+        candidate.workdirs.sort();
+        candidate
+            .actions
+            .sort_by(|left, right| left.id.cmp(&right.id));
+        let bytes = candidate_json(&candidate).into_bytes();
+        let digest = format!("sha256-{}", jet::SHA256::sha256_hex(&bytes));
+        let path = candidate_path(root, &candidate.key);
+        write_atomic(&path, &bytes)?;
+        Ok((path, candidate, digest))
+    }
+
+    fn tree_field<'a>(tree: &'a DataTree, key: &str) -> Result<&'a DataTree, Failure> {
+        tree.get(key)
+            .map_err(|error| Failure::internal(format!("candidate {error}")))
+    }
+
+    fn tree_string(tree: &DataTree, key: &str) -> Result<String, Failure> {
+        tree_field(tree, key)?
+            .as_str()
+            .map(str::to_string)
+            .map_err(|error| Failure::internal(format!("candidate `{key}` {error}")))
+    }
+
+    fn tree_array<'a>(tree: &'a DataTree, key: &str) -> Result<&'a [DataTree], Failure> {
+        tree_field(tree, key)?
+            .as_array()
+            .map(Vec::as_slice)
+            .map_err(|error| Failure::internal(format!("candidate `{key}` {error}")))
+    }
+
+    fn tree_object_field<'a>(tree: &'a DataTree, key: &str) -> Result<&'a DataTree, Failure> {
+        let fields = tree
+            .as_object()
+            .map_err(|error| Failure::internal(format!("candidate object {error}")))?;
+        fields
+            .iter()
+            .find_map(|(name, value)| (name == key).then_some(value))
+            .ok_or_else(|| Failure::internal(format!("candidate missing `{key}`")))
+    }
+
+    fn candidate_inputs(tree: &DataTree) -> Result<Vec<(String, String)>, Failure> {
+        tree_array(tree, "inputs")?
+            .iter()
+            .map(|entry| {
+                Ok((
+                    tree_object_field(entry, "path")?
+                        .as_str()
+                        .map(str::to_string)
+                        .map_err(|error| {
+                            Failure::internal(format!("candidate input path {error}"))
+                        })?,
+                    tree_object_field(entry, "digest")?
+                        .as_str()
+                        .map(str::to_string)
+                        .map_err(|error| {
+                            Failure::internal(format!("candidate input digest {error}"))
+                        })?,
+                ))
+            })
+            .collect()
+    }
+
+    fn candidate_strings(tree: &DataTree, key: &str) -> Result<Vec<String>, Failure> {
+        tree_array(tree, key)?
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .map(str::to_string)
+                    .map_err(|error| Failure::internal(format!("candidate `{key}` {error}")))
+            })
+            .collect()
+    }
+    fn candidate_pairs(tree: &DataTree, key: &str) -> Result<Vec<(String, String)>, Failure> {
+        tree_array(tree, key)?
+            .iter()
+            .map(|entry| {
+                Ok((
+                    tree_object_field(entry, "name")?
+                        .as_str()
+                        .map(str::to_string)
+                        .map_err(|error| {
+                            Failure::internal(format!("candidate `{key}` name {error}"))
+                        })?,
+                    tree_object_field(entry, "value")?
+                        .as_str()
+                        .map(str::to_string)
+                        .map_err(|error| {
+                            Failure::internal(format!("candidate `{key}` value {error}"))
+                        })?,
+                ))
+            })
+            .collect()
+    }
+
+    fn load_candidate(
+        root: &Path,
+        request: &Request,
+        expected_digest: Option<&str>,
+    ) -> Result<(DataTree, String, PathBuf), Failure> {
+        let path = candidate_path(root, &format!("{}:{}", request.kind, request.build_dir));
+        let metadata = fs::symlink_metadata(&path).map_err(|error| {
+            Failure::user(format!(
+                "no generated candidate for `{}:{}`; run preview first: {error}",
+                request.kind, request.build_dir
+            ))
+        })?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(Failure::internal(format!(
+                "generated candidate `{}` is not a regular non-symlink file",
+                path.display()
+            )));
+        }
+        let bytes = fs::read(&path).map_err(|error| {
+            Failure::internal(format!(
+                "could not read generated candidate `{}`: {error}",
+                path.display()
+            ))
+        })?;
+        let actual = format!("sha256-{}", jet::SHA256::sha256_hex(&bytes));
+        if let Some(expected) = expected_digest {
+            if expected != actual {
+                return Err(Failure::user(format!(
+                    "stale plan digest: expected `{expected}`, found `{actual}`; previous selection was preserved"
+                )));
+            }
+        }
+        let source = std::str::from_utf8(&bytes)
+            .map_err(|_| Failure::internal("generated candidate is not UTF-8"))?;
+        let tree = parse_json(source).map_err(|error| {
+            Failure::internal(format!("generated candidate is not valid JSON: {error:?}"))
+        })?;
+        if tree_string(&tree, "schema")? != CANDIDATE_SCHEMA {
+            return Err(Failure::internal(
+                "generated candidate has an unsupported schema",
+            ));
+        }
+        if tree_string(&tree, "selection_key")? != format!("{}:{}", request.kind, request.build_dir)
+        {
+            return Err(Failure::user(
+                "generated candidate belongs to a different foreign build; previous selection was preserved",
+            ));
+        }
+        Ok((tree, actual, path))
+    }
+
+    fn verify_inputs(root: &Path, tree: &DataTree) -> Result<(), Failure> {
+        for (relative, expected) in candidate_inputs(tree)? {
+            let bytes = read_regular(root, &relative).map_err(|error| match error {
+                Failure::User(message) => Failure::user(format!(
+                    "candidate input drifted: `{relative}` is unavailable ({message}); previous selection was preserved"
+                )),
+                Failure::Internal(message) => Failure::Internal(message),
+            })?;
+            let actual = format!("sha256-{}", jet::SHA256::sha256_hex(&bytes));
+            if actual != expected {
+                return Err(Failure::user(format!(
+                    "candidate input drifted: `{relative}` expected `{expected}`, found `{actual}`; previous selection was preserved"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn lock_path(root: &Path) -> PathBuf {
+        root.join(".jet").join("lock")
+    }
+
+    fn selected_digest(root: &Path, key: &str) -> Result<Option<String>, Failure> {
+        let path = lock_path(root);
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(Failure::internal(format!(
+                    "could not inspect `{}`: {error}",
+                    path.display()
+                )))
+            }
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(Failure::internal(format!(
+                "lock `{}` is not a regular non-symlink file",
+                path.display()
+            )));
+        }
+        let raw = fs::read_to_string(&path).map_err(|error| {
+            Failure::internal(format!("could not read `{}`: {error}", path.display()))
+        })?;
+        let lock = jet::Lock::parse(&raw).map_err(|error| {
+            Failure::internal(format!("could not parse `{}`: {error}", path.display()))
+        })?;
+        Ok(lock
+            .build_contributions
+            .iter()
+            .find(|row| row.package == SELECTION_PACKAGE && row.key == key)
+            .map(|row| row.value.clone()))
+    }
+
+    fn select_plan(root: &Path, key: &str, digest: &str) -> Result<(), Failure> {
+        let path = lock_path(root);
+        let metadata = fs::symlink_metadata(&path).map_err(|error| {
+            Failure::user(format!(
+                "cannot activate a foreign build without the existing `.jet/lock`: {error}"
+            ))
+        })?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(Failure::user(format!(
+                "lock `{}` is not a regular non-symlink file",
+                path.display()
+            )));
+        }
+        let raw = fs::read_to_string(&path).map_err(|error| {
+            Failure::internal(format!("could not read `{}`: {error}", path.display()))
+        })?;
+        let mut lock = jet::Lock::parse(&raw).map_err(|error| {
+            Failure::internal(format!("could not parse `{}`: {error}", path.display()))
+        })?;
+        lock.build_contributions
+            .retain(|row| !(row.package == SELECTION_PACKAGE && row.key == key));
+        lock.build_contributions
+            .push(jet::Lock::LockedBuildContribution {
+                package: SELECTION_PACKAGE.to_string(),
+                key: key.to_string(),
+                value: digest.to_string(),
+                scope: "project".to_string(),
+                layer: "explicit-accept".to_string(),
+                source: "jet build --import".to_string(),
+                reason: "reviewed foreign build plan selected explicitly".to_string(),
+            });
+        let replacement = jet::Lock::write(&lock);
+        jet::Lock::write_lock_atomically(root, replacement.as_bytes()).map_err(|error| {
+            Failure::internal(format!("could not atomically select foreign plan: {error}"))
+        })
+    }
+
+    fn parse_request(args: &[String]) -> Result<Request, Failure> {
+        let position = args
+            .iter()
+            .position(|argument| argument == "--import")
+            .ok_or_else(|| Failure::user("foreign build import requires `--import cmake:build`"))?;
+        let spec = args.get(position + 1).ok_or_else(|| {
+            Failure::user("foreign build import requires a kind and build directory")
+        })?;
+        let (kind, build_dir) = spec
+            .split_once(':')
+            .ok_or_else(|| Failure::user("foreign build import must use `kind:build-directory`"))?;
+        if kind.is_empty() || build_dir.is_empty() {
+            return Err(Failure::user(
+                "foreign build import must use `kind:build-directory`",
+            ));
+        }
+        relative_path(build_dir)?;
+        let preview = args.iter().any(|argument| argument == "--preview");
+        let accept_position = args.iter().position(|argument| argument == "--accept");
+        if preview && accept_position.is_some() {
+            return Err(Failure::user(
+                "foreign build import accepts either `--preview` or `--accept`, not both",
+            ));
+        }
+        let operation = if preview {
+            Operation::Preview
+        } else if let Some(position) = accept_position {
+            let digest = args.get(position + 1).ok_or_else(|| {
+                Failure::user("foreign build import `--accept` requires a plan digest")
+            })?;
+            if digest.starts_with('-') {
+                return Err(Failure::user(
+                    "foreign build import `--accept` requires a plan digest",
+                ));
+            }
+            Operation::Accept(digest.clone())
+        } else {
+            return Err(Failure::user(
+                "foreign build import requires `--preview` or `--accept <plan-digest>`",
+            ));
+        };
+        Ok(Request {
+            kind: kind.to_string(),
+            build_dir: display_relative(&relative_path(build_dir)?),
+            operation,
+        })
+    }
+
+    fn import_banned() -> bool {
+        super::env_truthy("CI") && !super::env_truthy("JET_ALLOW_FOREIGN_BUILD_IMPORT")
+    }
+
+    fn report_failure(error: Failure, mode: OutputMode) -> ! {
+        match error {
+            Failure::User(message) => {
+                crate::cli_error!(
+                    @fix "E2104",
+                    message,
+                    "run the preview, review every action and input, then accept the exact plan digest"
+                );
+                exit(ExitCodes::USER_ERROR);
+            }
+            Failure::Internal(message) => {
+                write_mode_diagnostic(
+                    mode,
+                    &jet::Diagnostics::render_ice_report(
+                        "foreign build import failed",
+                        &message,
+                        false,
+                    ),
+                );
+                exit(ExitCodes::ICE);
+            }
+        }
+    }
+
+    pub(super) fn requested(args: &[String]) -> bool {
+        args.iter().any(|argument| argument == "--import")
+    }
+
+    pub(super) fn run(args: &[String], mode: OutputMode) -> ! {
+        if import_banned() {
+            report_failure(
+                Failure::user(
+                    "foreign build import is disabled by the CI build policy; set `JET_ALLOW_FOREIGN_BUILD_IMPORT=1` only for an explicitly reviewed job",
+                ),
+                mode,
+            );
+        }
+        let request = parse_request(args).unwrap_or_else(|error| report_failure(error, mode));
+        match &request.operation {
+            Operation::Preview => {
+                let root = std::env::current_dir()
+                    .map_err(|error| {
+                        Failure::internal(format!("could not resolve project root: {error}"))
+                    })
+                    .unwrap_or_else(|error| report_failure(error, mode));
+                let (path, candidate, digest) = build_candidate(&root, &request)
+                    .unwrap_or_else(|error| report_failure(error, mode));
+                let rendered = candidate_json(&candidate);
+                if mode.json {
+                    write_mode_machine(mode, &rendered);
+                } else {
+                    let custom = candidate
+                        .actions
+                        .iter()
+                        .filter(|action| action.custom)
+                        .map(|action| action.id.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let unsupported = if candidate.unsupported.is_empty() {
+                        "none".to_string()
+                    } else {
+                        candidate.unsupported.join(" | ")
+                    };
+                    write_mode_renderable(
+                        mode,
+                        &format!(
+                            "foreign build import preview\nplan-digest: {digest}\nselection: {}\nownership: {}\ndependencies: {}\ncommands: {}\ntoolchain identities: {}\ninputs: {}\noutputs: {}\nenvironment: {}\nworkdirs: {}\ncustom actions: {}\nunsupported edges: {}\ncandidate: {}\n",
+                            candidate.key,
+                            candidate.ownership,
+                            candidate
+                                .inputs
+                                .iter()
+                                .map(|(path, _)| path.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            candidate
+                                .actions
+                                .iter()
+                                .map(|action| action.command.join(" "))
+                                .collect::<Vec<_>>()
+                                .join(" | "),
+                            candidate
+                                .toolchains
+                                .iter()
+                                .map(|(key, value)| format!("{key}={value}"))
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            candidate
+                                .inputs
+                                .iter()
+                                .map(|(path, digest)| format!("{path} ({digest})"))
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            candidate.outputs.join(", "),
+                            candidate
+                                .environment
+                                .iter()
+                                .map(|(key, value)| format!("{key}={value}"))
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            candidate.workdirs.join(", "),
+                            if custom.is_empty() { "none" } else { &custom },
+                            unsupported,
+                            path.display()
+                        ),
+                    );
+                }
+            }
+            Operation::Accept(digest) => {
+                let root = std::env::current_dir()
+                    .map_err(|error| {
+                        Failure::internal(format!("could not resolve project root: {error}"))
+                    })
+                    .unwrap_or_else(|error| report_failure(error, mode));
+                let (tree, actual, _) = load_candidate(&root, &request, Some(digest))
+                    .unwrap_or_else(|error| report_failure(error, mode));
+                verify_inputs(&root, &tree).unwrap_or_else(|error| report_failure(error, mode));
+                if tree_string(&tree, "ownership").unwrap_or_default() != "partial" {
+                    report_failure(
+                        Failure::user(
+                            "foreign build candidate did not disclose partial ownership; full ownership requires every action to be modeled",
+                        ),
+                        mode,
+                    );
+                }
+                let key = format!("{}:{}", request.kind, request.build_dir);
+                select_plan(&root, &key, &actual)
+                    .unwrap_or_else(|error| report_failure(error, mode));
+                if mode.json {
+                    write_mode_machine(
+                        mode,
+                        &format!(
+                            "{{\"schema\":\"jet-ffi-build-activation-v1\",\"status\":\"accepted\",\"selection_key\":\"{}\",\"plan_digest\":\"{}\",\"ownership\":\"partial\"}}\n",
+                            json_escape(&key),
+                            json_escape(&actual)
+                        ),
+                    );
+                } else {
+                    write_mode_renderable(
+                        mode,
+                        &format!("foreign build plan accepted: {key} ({actual})\n"),
+                    );
+                }
+            }
+        }
+        exit(ExitCodes::OK);
+    }
+
+    pub(super) fn run_selected(mode: OutputMode) -> Option<i32> {
+        let root = match std::env::current_dir() {
+            Ok(root) => root,
+            Err(error) => {
+                write_mode_diagnostic(
+                    mode,
+                    &jet::Diagnostics::render_ice_report(
+                        "selected foreign build failed",
+                        &format!("could not resolve project root: {error}"),
+                        false,
+                    ),
+                );
+                return Some(ExitCodes::ICE);
+            }
+        };
+        let key = match selected_digest(&root, "cmake:build") {
+            Ok(Some(key)) => key,
+            Ok(None) => return None,
+            Err(Failure::User(message)) => {
+                crate::cli_error!("E2104", "{}", message);
+                return Some(ExitCodes::USER_ERROR);
+            }
+            Err(Failure::Internal(message)) => {
+                write_mode_diagnostic(
+                    mode,
+                    &jet::Diagnostics::render_ice_report(
+                        "selected foreign build failed",
+                        &message,
+                        false,
+                    ),
+                );
+                return Some(ExitCodes::ICE);
+            }
+        };
+        if import_banned() {
+            crate::cli_error!(
+                @fix "E2104",
+                "the selected foreign build is disabled by the CI build policy",
+                "set JET_ALLOW_FOREIGN_BUILD_IMPORT=1 only for an explicitly reviewed job"
+            );
+            return Some(ExitCodes::USER_ERROR);
+        }
+        let request = Request {
+            kind: "cmake".to_string(),
+            build_dir: "build".to_string(),
+            operation: Operation::Accept(key.clone()),
+        };
+        let result = (|| {
+            let (tree, actual, _) = load_candidate(&root, &request, Some(&key))?;
+            verify_inputs(&root, &tree)?;
+            let argv = candidate_strings(&tree, "argv")?;
+            let outputs = candidate_strings(&tree, "outputs")?;
+            let environment = candidate_pairs(&tree, "environment")?;
+            let workdir = candidate_strings(&tree, "workdirs")?
+                .into_iter()
+                .next()
+                .ok_or_else(|| {
+                    Failure::internal("selected foreign build has no working directory")
+                })?;
+            let workdir = relative_path(&workdir)?;
+            let workdir = root.join(workdir);
+            let metadata = fs::symlink_metadata(&workdir).map_err(|error| {
+                Failure::user(format!(
+                    "selected foreign build working directory is unavailable: {error}"
+                ))
+            })?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(Failure::user(
+                    "selected foreign build working directory is not a regular directory"
+                        .to_string(),
+                ));
+            }
+            if argv.is_empty() {
+                return Err(Failure::internal("selected foreign build has no command"));
+            }
+            let mut command = Command::new(&argv[0]);
+            command.args(argv.iter().skip(1));
+            command.current_dir(&workdir);
+            for (name, value) in environment {
+                command.env(name, value);
+            }
+            let status = command.status().map_err(|error| {
+                Failure::user(format!("could not run selected foreign build: {error}"))
+            })?;
+            if !status.success() {
+                return Ok(Some(status.code().unwrap_or(ExitCodes::USER_ERROR)));
+            }
+            for output in outputs {
+                let relative = relative_path(&output)?;
+                let path = root.join(relative);
+                let metadata = fs::symlink_metadata(&path).map_err(|error| {
+                    Failure::user(format!(
+                        "selected foreign build completed without declared output `{output}`: {error}"
+                    ))
+                })?;
+                if metadata.file_type().is_symlink() || !metadata.is_file() {
+                    return Err(Failure::user(format!(
+                        "selected foreign build output `{output}` is not a regular file"
+                    )));
+                }
+            }
+            if mode.json {
+                write_mode_machine(
+                    mode,
+                    &format!(
+                        "{{\"schema\":\"jet-ffi-build-execution-v1\",\"status\":\"built\",\"plan_digest\":\"{}\",\"ownership\":\"partial\"}}\n",
+                        json_escape(&actual)
+                    ),
+                );
+            }
+            Ok(Some(ExitCodes::OK))
+        })();
+        match result {
+            Ok(status) => status,
+            Err(Failure::User(message)) => {
+                crate::cli_error!("E2104", "{}", message);
+                Some(ExitCodes::USER_ERROR)
+            }
+            Err(Failure::Internal(message)) => {
+                write_mode_diagnostic(
+                    mode,
+                    &jet::Diagnostics::render_ice_report(
+                        "selected foreign build failed",
+                        &message,
+                        false,
+                    ),
+                );
+                Some(ExitCodes::ICE)
+            }
+        }
+    }
+}
+
+pub(crate) fn foreign_build_import_requested(args: &[String]) -> bool {
+    foreign_build_import::requested(args)
+}
+
+pub(crate) fn run_foreign_build_import(args: &[String], mode: OutputMode) -> ! {
+    foreign_build_import::run(args, mode)
+}
+
+pub(crate) fn run_selected_foreign_build(mode: OutputMode) -> Option<i32> {
+    foreign_build_import::run_selected(mode)
+}
 #[cfg(test)]
 
 fn ensure_web_output_dir(path: &Path) -> Result<PathBuf, String> {
@@ -7515,10 +12429,11 @@ pub(crate) fn write_plugin_artifacts(
     plugin: &jet::Codegen::PluginArtifacts,
     verbose: bool,
     out_dir: &Path,
+    mode: OutputMode,
 ) -> Result<PluginBuildPaths, PluginBuildError> {
     let step = |msg: String| {
         if verbose {
-            eprintln!("[build] {}", msg);
+            write_mode_status(mode, &format!("[build] {msg}\n"));
         }
     };
     fs::create_dir_all(out_dir).map_err(|e| {
@@ -7754,7 +12669,7 @@ fn library_owned_paths(target: &Path, stem: &str) -> Vec<PathBuf> {
     .into_iter()
     .map(|name| target.join(name))
     .chain(
-        ["h", "py", "swift"]
+        ["h", "hpp", "rs", "zig", "go", "py", "mjs", "swift"]
             .into_iter()
             .map(|extension| target.join("bindings").join(format!("{stem}.{extension}"))),
     )
@@ -7918,6 +12833,7 @@ fn library_rustc(
     verbose: bool,
     linker: &crate::NativeLinker::Selection,
     ffi: Option<&jet::FFI::FfiLink>,
+    mode: OutputMode,
 ) -> Result<(), LibraryBuildError> {
     let mut command = Command::new("rustc");
     command
@@ -7936,9 +12852,7 @@ fn library_rustc(
         .arg("-o")
         .arg(output);
     let config = profile.config();
-    if profile.is_release() {
-        command.arg("--cfg").arg("jet_release");
-    }
+    command.args(release_profile_cfg_args(&profile));
     command.args(config.rustc_args_for_target(ffi.is_some(), true));
     command.args(linker.rustc_args());
     if let Some(link) = ffi {
@@ -7952,11 +12866,14 @@ fn library_rustc(
         }
     }
     if verbose {
-        eprintln!(
-            "[build] rustc {} -> {} (linker {})",
-            source.display(),
-            output.display(),
-            linker.label()
+        write_mode_status(
+            mode,
+            &format!(
+                "[build] rustc {} -> {} (linker {})\n",
+                source.display(),
+                output.display(),
+                linker.label()
+            ),
         );
     }
     let result = command
@@ -8036,7 +12953,6 @@ fn normalize_static_archive(path: &Path) -> Result<(), LibraryBuildError> {
     Ok(())
 }
 
-
 fn build_library(
     rust_code: &str,
     artifacts: &jet::Codegen::LibraryArtifacts,
@@ -8044,7 +12960,7 @@ fn build_library(
     profile: BuildProfile,
     ffi: Option<&jet::FFI::FfiLink>,
     verbose: bool,
-    _mode: OutputMode,
+    mode: OutputMode,
 ) -> Result<LibraryBuildPaths, LibraryBuildError> {
     let stem = library_stem(&config.name);
     let target = PathBuf::from("target");
@@ -8088,6 +13004,7 @@ fn build_library(
             verbose,
             &linker,
             ffi,
+            mode,
         )?;
         if let Some(staticlib_path) = &staged_staticlib {
             library_rustc(
@@ -8098,6 +13015,7 @@ fn build_library(
                 verbose,
                 &linker,
                 ffi,
+                mode,
             )?;
             normalize_static_archive(staticlib_path)?;
         }
@@ -8114,7 +13032,12 @@ fn build_library(
         for (language, text) in &artifacts.bindings {
             let extension = match language.as_str() {
                 "c" => "h",
+                "cpp" => "hpp",
+                "rust" => "rs",
+                "zig" => "zig",
+                "go" => "go",
                 "python" => "py",
+                "javascript" => "mjs",
                 "swift" => "swift",
                 _ => continue,
             };
@@ -8140,18 +13063,18 @@ fn build_library(
             .iter()
             .map(|export| {
                 let scalar = match export.scalar {
-                    jet::Codegen::LibraryScalar::Int => jet::JetLibScalar::Int,
-                    jet::Codegen::LibraryScalar::Float => jet::JetLibScalar::Float,
-                    jet::Codegen::LibraryScalar::Bool => jet::JetLibScalar::Bool,
-                    jet::Codegen::LibraryScalar::Text => jet::JetLibScalar::Text,
+                    jet::Codegen::ExportScalar::Int => jet::JetLibScalar::Int,
+                    jet::Codegen::ExportScalar::Float => jet::JetLibScalar::Float,
+                    jet::Codegen::ExportScalar::Bool => jet::JetLibScalar::Bool,
+                    jet::Codegen::ExportScalar::Text => jet::JetLibScalar::Text,
                 };
                 let conventions = export
                     .conventions
                     .iter()
                     .map(|convention| match convention {
-                        jet::AST::AccessConvention::Read => jet::JetLibAccess::Read,
-                        jet::AST::AccessConvention::Write => jet::JetLibAccess::Write,
-                        jet::AST::AccessConvention::Move => jet::JetLibAccess::Move,
+                        jet_foundation::MIR::MirAccess::Read => jet::JetLibAccess::Read,
+                        jet_foundation::MIR::MirAccess::Write => jet::JetLibAccess::Write,
+                        jet_foundation::MIR::MirAccess::Move => jet::JetLibAccess::Move,
                     })
                     .collect();
                 jet::JetLibExport::with_conventions(export.name.clone(), scalar, conventions)
@@ -8247,8 +13170,7 @@ fn build_library(
     })
 }
 
-
-pub(crate) fn build(
+fn build_inner(
     file: &str,
     rust_code: &str,
     runtime_bundle: Option<&jet::AST::ProgramBundle>,
@@ -8258,7 +13180,7 @@ pub(crate) fn build(
     clinks: &[String],
     verbose: bool,
     cross_target: Option<&str>,
-    web: Option<&jet::Codegen::WebArtifacts>,
+    web: Option<&jet::Codegen::MIRWeb::WebArtifacts>,
     plugin: Option<&jet::Codegen::PluginArtifacts>,
     mode: OutputMode,
     _restored_cache: bool,
@@ -8267,14 +13189,14 @@ pub(crate) fn build(
     // runtime/Core, dependency-interface, instance, and optional Rust FFI bridge
     // identities. `None` when external bytes are not represented by the key,
     // such as `embed_file` or explicit C links. `build` also rejects cross-target
-    // and explicit C-link caching.
     cache_key: Option<String>,
+    target_machine: Option<&jet::TargetMachine::TargetMachine>,
 ) {
     // D-BUILD2: `jet build -v` makes the hidden Jet→Rust→native bridge honest.
     // Step labels are deterministic so they can be golden-tested.
     let step = |msg: String| {
         if verbose {
-            eprintln!("[build] {}", msg);
+            write_mode_status(mode, &format!("[build] {msg}\n"));
         }
     };
     let native_store = Store::from_env().ok();
@@ -8289,44 +13211,56 @@ pub(crate) fn build(
         })
         .unwrap_or_default();
     let record_program = build_record_program(file, runtime_bundle);
-    let previous_record = native_store.as_ref().and_then(|store| {
-        store.latest_build_record(&record_program).ok().flatten()
-    });
+    let previous_record = native_store
+        .as_ref()
+        .and_then(|store| store.latest_build_record(&record_program).ok().flatten());
 
     let output_authority =
         jet_devserver::WebHost::WebOutputAuthority::open_or_create(Path::new("build"))
             .unwrap_or_else(|error| {
                 let message = format!("error: couldn't create the build folder safely: {error}");
-                eprintln!("{message}");
+                write_mode_diagnostic(mode, &format!("{message}\n"));
                 exit(ExitCodes::USER_ERROR);
             });
     let rs_name = format!("{}.rs", stem(file));
     let rs_path = output_authority.path_for(&rs_name).unwrap_or_else(|error| {
         let message = format!("error: invalid web Rust output `{rs_name}`: {error}");
-        eprintln!("{message}");
+        write_mode_diagnostic(mode, &format!("{message}\n"));
         exit(ExitCodes::USER_ERROR);
     });
     step(format!("emit Rust  -> {}", rs_path.display()));
     output_authority
         .replace_file(&rs_name, rust_code.as_bytes())
         .unwrap_or_else(|error| {
-            crate::cli_error!("E2105", "couldn't write {}: {}", rs_path.display(), error);
-            exit(ExitCodes::USER_ERROR);
+            write_mode_diagnostic(
+                mode,
+                &format!("error: couldn't write {}: {}\n", rs_path.display(), error),
+            );
         });
     // D-WEBKIND1=A (c123 M2): `web` is a Jet backend target — emit WASM + JS.
     if cross_target == Some(jet::Syntax::BUILD_TARGET_WEB) {
         let web = web.unwrap_or_else(|| {
-            eprintln!(
-                "{}",
-                jet::Diagnostics::render_ice_report("missing web codegen output", "", false)
+            write_mode_diagnostic(
+                mode,
+                &jet::Diagnostics::render_ice_report("missing web codegen output", "", false),
             );
             exit(ExitCodes::ICE);
         });
         let emit_maps = !profile.is_release();
-        let paths = match write_web_artifacts(file, web, verbose, &output_authority, emit_maps) {
+        let model_runtime = runtime_bundle.is_some_and(|bundle| !bundle.model_outputs().is_empty());
+        let paths = match write_web_artifacts(
+            file,
+            web,
+            ffi,
+            model_runtime,
+            verbose,
+            &output_authority,
+            emit_maps,
+            mode,
+        ) {
             Ok(p) => p,
             Err(msg) => {
-                eprintln!("{}", msg);
+                write_mode_diagnostic(mode, &format!("{msg}\n"));
                 exit(ExitCodes::ICE);
             }
         };
@@ -8349,7 +13283,7 @@ pub(crate) fn build(
             if let Some(wasm_map) = &paths.wasm_map {
                 note.push_str(&format!(", `{}`", wasm_map.display()));
             }
-            eprintln!("{note}");
+            write_mode_status(mode, &format!("{note}\n"));
         }
         return;
     }
@@ -8358,22 +13292,22 @@ pub(crate) fn build(
     // sandboxed wasm32 Component Model module instead of a native binary.
     if cross_target == Some(jet::Syntax::TARGET_SANDBOX) {
         let plugin = plugin.unwrap_or_else(|| {
-            eprintln!(
-                "{}",
-                jet::Diagnostics::render_ice_report("missing sandbox codegen output", "", false)
+            write_mode_diagnostic(
+                mode,
+                &jet::Diagnostics::render_ice_report("missing sandbox codegen output", "", false),
             );
             exit(ExitCodes::ICE);
         });
-        let paths = match write_plugin_artifacts(file, plugin, verbose, Path::new("build")) {
+        let paths = match write_plugin_artifacts(file, plugin, verbose, Path::new("build"), mode) {
             Ok(p) => p,
             Err(PluginBuildError::GeneratedCodeRejected(msg)) => {
-                eprintln!(
-                    "{}",
-                    jet::Diagnostics::render_ice_report(
+                write_mode_diagnostic(
+                    mode,
+                    &jet::Diagnostics::render_ice_report(
                         "rustc rejected generated code",
                         &msg,
-                        true
-                    )
+                        true,
+                    ),
                 );
                 exit(ExitCodes::ICE);
             }
@@ -8387,15 +13321,146 @@ pub(crate) fn build(
         let _ = profile;
         let _ = ffi;
         let _ = clinks;
-        if !mode.json {
-            eprintln!(
-                "note: `--target=sandbox` wrote `{}`, `{}`, `{}`, `{}`",
+        write_mode_status(
+            mode,
+            &format!(
+                "note: `--target=sandbox` wrote `{}`, `{}`, `{}`, `{}`\n",
                 paths.wit.display(),
                 paths.guest_rust.display(),
                 paths.core_wasm.display(),
                 paths.component_wasm.display(),
+            ),
+        );
+        return;
+    }
+
+    if let Some(machine) = target_machine.filter(|machine| {
+        machine.no_os
+            && (machine.triple.contains("aarch64")
+                || machine.triple.contains("thumb")
+                || machine.triple.starts_with("arm"))
+    }) {
+        // Link a Rust static archive so the checked program brings the target
+        // core/alloc and compiler-builtins it uses. Startup alone is not the
+        // program, and a bare --emit=obj omits its Rust runtime dependencies.
+        let usage = runtime_bundle
+            .map(|bundle| {
+                jet::TargetMachine::TargetMachineUse::from_core_apis(bundle.used_core.iter())
+            })
+            .unwrap_or_default();
+        let dossier = machine.target_dossier(
+            &usage,
+            jet::TargetMachine::ExecutionTier::Aot,
+            env!("CARGO_PKG_VERSION"),
+            "none",
+        );
+        let mut identity = b"jet-firmware-build-v1\0".to_vec();
+        append_cache_field(&mut identity, rust_code);
+        append_cache_field(&mut identity, &profile.cache_tag());
+        append_cache_field(&mut identity, native_toolchain_identity());
+        identity.extend_from_slice(&dossier.cache_bytes(&machine.triple));
+        let target_digest = jet::SHA256::sha256_hex(&identity);
+        let target_dir = PathBuf::from(".jet").join("target").join(format!(
+            "{}-{target_digest}",
+            jet::Syntax::sanitize_crate_name(&machine.name)
+        ));
+        let program_object = target_dir.join(format!(
+            "{}.program.a",
+            jet::Syntax::sanitize_crate_name(&stem(file))
+        ));
+        if let Err(error) = fs::create_dir_all(&target_dir) {
+            write_mode_diagnostic(
+                mode,
+                &format!(
+                    "error: couldn't create firmware work directory {}: {error}\n",
+                    target_dir.display()
+                ),
             );
+            exit(ExitCodes::USER_ERROR);
         }
+        let rustc_started = Instant::now();
+        step(format!("rustc object -> {}", program_object.display()));
+        let mut rustc = Command::new("rustc");
+        rustc
+            .arg("--edition")
+            .arg("2021")
+            .arg("--crate-type")
+            .arg("staticlib")
+            .arg("--emit")
+            .arg("link")
+            .arg("--target")
+            .arg(&machine.triple)
+            .arg("--crate-name")
+            .arg(jet::Syntax::sanitize_crate_name(&stem(file)))
+            .args(release_profile_cfg_args(&profile))
+            .arg("-C")
+            .arg("panic=abort")
+            .arg("-C")
+            .arg("relocation-model=static")
+            .arg(&rs_path)
+            .arg("-o")
+            .arg(&program_object);
+        let rustc_output = match rustc.output() {
+            Ok(output) => output,
+            Err(error) => {
+                write_mode_diagnostic(
+                    mode,
+                    &format!("error: couldn't run rustc for firmware object: {error}\n"),
+                );
+                exit(ExitCodes::USER_ERROR);
+            }
+        };
+        if !rustc_output.status.success() {
+            let detail = String::from_utf8_lossy(&rustc_output.stderr);
+            write_mode_diagnostic(
+                mode,
+                &jet::Diagnostics::render_ice_report(
+                    "the generated Rust did not compile for the selected target.",
+                    &detail,
+                    true,
+                ),
+            );
+            exit(ExitCodes::ICE);
+        }
+        let artifacts = match jet::Driver::build_target_machine_firmware(
+            machine,
+            &usage,
+            &program_object,
+            &target_dir,
+        ) {
+            Ok(artifacts) => artifacts,
+            Err(jet::Driver::TargetMachineCompileError::Diagnostics(diags)) => {
+                report_problems(mode, file, rust_code, &diags);
+                exit(ExitCodes::USER_ERROR);
+            }
+            Err(jet::Driver::TargetMachineCompileError::Machine(errors)) => {
+                write_mode_diagnostic(
+                    mode,
+                    &format!("error: target machine firmware link failed: {errors:?}\n"),
+                );
+                exit(ExitCodes::USER_ERROR);
+            }
+        };
+        if let Err(error) = fs::copy(&artifacts.elf, &bin) {
+            write_mode_diagnostic(
+                mode,
+                &format!(
+                    "error: couldn't publish firmware {}: {error}\n",
+                    bin.display()
+                ),
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+        persist_build_record(
+            native_store.as_ref(),
+            &record_program,
+            &compiler_nodes,
+            previous_record.as_ref(),
+            false,
+            rustc_started.elapsed().as_secs_f64() * 1000.0,
+            0.0,
+        );
+        step(format!("firmware link -> {}", artifacts.elf.display()));
         return;
     }
 
@@ -8407,7 +13472,10 @@ pub(crate) fn build(
     // this build is cacheable.
     if let Some(key) = &cache_key {
         if native_store.as_ref().is_some_and(|store| {
-            matches!(store.restore_file(key, &bin), Ok(ArtifactRestore::Hit { .. }))
+            matches!(
+                store.restore_file(key, &bin),
+                Ok(ArtifactRestore::Hit { .. })
+            )
         }) {
             step("cache hit -> reused cached binary".to_string());
             persist_build_record(
@@ -8438,17 +13506,26 @@ pub(crate) fn build(
         bin.display()
     ));
     let mut rustc_flags = Vec::new();
-    // E2-M15: cross-compilation target triple.
-    if let Some(triple) = cross_target {
-        rustc_flags.push("--target".to_string());
-        rustc_flags.push(triple.to_string());
+    // A no-OS Wasm artifact is a reactor, not a hosted executable.  Keep the
+    // selected entry export explicit so wasm-ld never asks for `main` or
+    // synthesizes `_start`; the ordinary Web target still takes the separate
+    // MIRWeb artifact path above.
+    let no_os_wasm =
+        target_machine.is_some_and(|machine| machine.no_os && machine.triple.starts_with("wasm32"));
+    if no_os_wasm {
+        rustc_flags.extend([
+            "--crate-type".to_string(),
+            "cdylib".to_string(),
+            "-C".to_string(),
+            "link-arg=--no-entry".to_string(),
+            "-C".to_string(),
+            "link-arg=--export=__jet_program_entry".to_string(),
+        ]);
     }
+    // E2-M15: cross-compilation target triple.
     let ffi_present = ffi.is_some();
     let config = profile.config();
-    if profile.is_release() {
-        rustc_flags.push("--cfg".to_string());
-        rustc_flags.push("jet_release".to_string());
-    }
+    rustc_flags.extend(release_profile_cfg_args(&profile));
     rustc_flags.extend(config.rustc_args_for_target(ffi_present, cross_target.is_none()));
     let linker = crate::NativeLinker::for_target(cross_target);
     rustc_flags.extend(linker.rustc_args());
@@ -8504,6 +13581,18 @@ pub(crate) fn build(
         }
         jet_store::runtime::PreparedRuntime::inline(rust_code)
     };
+    let model_runtime = runtime_bundle.is_some_and(|bundle| !bundle.model_outputs().is_empty());
+    let model_rlib = if model_runtime {
+        match jet_rt_rlib(cross_target, profile.is_release()) {
+            Ok(path) => Some(path),
+            Err(message) => {
+                write_mode_diagnostic(mode, &format!("error: {message}\n"));
+                exit(ExitCodes::USER_ERROR);
+            }
+        }
+    } else {
+        None
+    };
     // Cache-integrity fix (Tower #85 §0): compile to a *private per-process*
     // path, never straight onto the shared `build/<stem>` display path. Two
     // concurrent `jet` processes compiling different source that happens to
@@ -8558,6 +13647,17 @@ pub(crate) fn build(
         if let Some(link) = ffi {
             append_cache_field(&mut bytes, &link.cache_identity);
         }
+        if let Some(path) = &model_rlib {
+            append_cache_field(&mut bytes, &path.display().to_string());
+            if let Ok(metadata) = fs::metadata(path) {
+                append_cache_field(&mut bytes, &metadata.len().to_string());
+                if let Ok(modified) = metadata.modified() {
+                    if let Ok(duration) = modified.duration_since(UNIX_EPOCH) {
+                        append_cache_field(&mut bytes, &duration.as_nanos().to_string());
+                    }
+                }
+            }
+        }
         append_link_identity(&mut bytes, clinks, project_root_prefix.as_deref());
         jet::SHA256::sha256_hex(&bytes)
     });
@@ -8569,7 +13669,7 @@ pub(crate) fn build(
         #[cfg(debug_assertions)]
         let rust = if std::env::var_os("JET_ICE_RUSTC_REJECTION_SELF_TEST").is_some() {
             format!(
-                "{}\ncompile_error!(\"JET_RUSTC_REJECTION_SENTINEL\");\n",
+                "{}\ncompile_error!(\"JET_RUSTC_REJECTION_SENTINEL\");\ncompile_error!(\"JET_RUSTC_REJECTION_SECOND_SENTINEL\");\n",
                 prepared.rust()
             )
         } else {
@@ -8584,8 +13684,7 @@ pub(crate) fn build(
         let mut cmd = Command::new("rustc");
         cmd.arg("--edition").arg("2021").args(&rustc_flags);
         cmd.arg("--crate-name").arg(&crate_name);
-        cmd.arg("-C")
-            .arg(format!("metadata={metadata_key}"));
+        cmd.arg("-C").arg(format!("metadata={metadata_key}"));
         // Keep project and per-process work paths out of generated DWARF and
         // ThinLTO records. Both prefixes have stable targets across checkouts.
         if let Some(project_prefix) = &project_root_prefix {
@@ -8600,6 +13699,13 @@ pub(crate) fn build(
         }
         cmd.arg(&tmp_rs).arg("-o").arg(&tmp_bin);
         prepared.add_rustc_args(&mut cmd);
+        if let Some(rlib) = &model_rlib {
+            let dependencies = rlib.parent().unwrap_or_else(|| Path::new("."));
+            cmd.arg("--extern")
+                .arg(format!("jet_rt={}", rlib.display()))
+                .arg("-L")
+                .arg(format!("dependency={}", dependencies.display()));
+        }
         if let Some(link) = ffi {
             cmd.arg("--extern")
                 .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
@@ -8653,24 +13759,54 @@ pub(crate) fn build(
             exit(ExitCodes::USER_ERROR);
         }
         if let Some(linker) = missing_linker(&stderr) {
-            eprintln!("Error [L2101]: rustc could not find linker `{}`.", linker);
-            eprintln!(
-                " Why: Jet uses rustc as its backend, and rustc needs a C linker to produce a native binary."
+            write_mode_diagnostic(
+                mode,
+                &format!(
+                    "Error [L2101]: rustc could not find linker `{linker}`.\n Why: Jet uses rustc as its backend, and rustc needs a C linker to produce a native binary.\n Fix: Run from `nix develop`, or install a C toolchain (`gcc`/`clang`; on Debian/Ubuntu: `build-essential`, on Arch: `base-devel`).\nMore: jet-lang.dev/e/L2101\n"
+                ),
             );
-            eprintln!(
-                " Fix: Run from `nix develop`, or install a C toolchain (`gcc`/`clang`; on Debian/Ubuntu: `build-essential`, on Arch: `base-devel`)."
-            );
-            eprintln!("More: jet-lang.dev/e/L2101");
             exit(ExitCodes::USER_ERROR);
         }
-        let detail = format!("  generated: {}", rs_path.display());
-        eprintln!(
-            "{}",
-            jet::Diagnostics::render_ice_report(
+        let log_name = rustc_log_name(file);
+        let rustc_log_path = output_authority.path().join(&log_name);
+        let log_detail = match output_authority.replace_file(&log_name, &out.stderr) {
+            Ok(()) => format!("  rustc log: {}", rustc_log_path.display()),
+            Err(error) => format!(
+                "  rustc log: {} (could not write: {})",
+                rustc_log_path.display(),
+                error
+            ),
+        };
+        let rustc_error = first_rustc_error_block(&stderr)
+            .map(|block| format!("  rustc error:\n{block}"))
+            .unwrap_or_else(|| {
+                let stderr = stderr.trim();
+                if stderr.is_empty() {
+                    String::new()
+                } else {
+                    format!("  rustc stderr:\n{stderr}")
+                }
+            });
+        if verbose {
+            if let Some(block) = first_rustc_error_block(&stderr) {
+                write_mode_status(mode, &format!("[build] rustc error:\n{block}\n"));
+            }
+        }
+        let detail = if rustc_error.is_empty() {
+            format!("  generated: {}\n{log_detail}", rs_path.display())
+        } else {
+            format!(
+                "  generated: {}\n{log_detail}\n{rustc_error}",
+                rs_path.display()
+            )
+        };
+        write_mode_diagnostic(
+            mode,
+            &jet::Diagnostics::render_ice_report(
                 "the generated Rust did not compile.",
                 &detail,
-                true
-            )
+                true,
+            ),
         );
         exit(ExitCodes::ICE);
     }
@@ -8712,13 +13848,80 @@ pub(crate) fn build(
     );
     // Drop the private working dir (generated `.rs` + rustc intermediates).
     let _ = fs::remove_dir_all(&work);
-
 }
 
-fn build_record_program(
+pub(crate) fn build(
     file: &str,
+    rust_code: &str,
     runtime_bundle: Option<&jet::AST::ProgramBundle>,
-) -> String {
+    bin: PathBuf,
+    profile: BuildProfile,
+    ffi: Option<&jet::FFI::FfiLink>,
+    clinks: &[String],
+    verbose: bool,
+    cross_target: Option<&str>,
+    web: Option<&jet::Codegen::MIRWeb::WebArtifacts>,
+    plugin: Option<&jet::Codegen::PluginArtifacts>,
+    mode: OutputMode,
+    restored_cache: bool,
+    cache_key: Option<String>,
+) {
+    build_inner(
+        file,
+        rust_code,
+        runtime_bundle,
+        bin,
+        profile,
+        ffi,
+        clinks,
+        verbose,
+        cross_target,
+        web,
+        plugin,
+        mode,
+        restored_cache,
+        cache_key,
+        None,
+    );
+}
+
+pub(crate) fn build_target_machine(
+    file: &str,
+    rust_code: &str,
+    runtime_bundle: Option<&jet::AST::ProgramBundle>,
+    bin: PathBuf,
+    profile: BuildProfile,
+    ffi: Option<&jet::FFI::FfiLink>,
+    clinks: &[String],
+    verbose: bool,
+    cross_target: Option<&str>,
+    web: Option<&jet::Codegen::MIRWeb::WebArtifacts>,
+    plugin: Option<&jet::Codegen::PluginArtifacts>,
+    mode: OutputMode,
+    restored_cache: bool,
+    cache_key: Option<String>,
+    target_machine: Option<&jet::TargetMachine::TargetMachine>,
+) {
+    build_inner(
+        file,
+        rust_code,
+        runtime_bundle,
+        bin,
+        profile,
+        ffi,
+        clinks,
+        verbose,
+        cross_target,
+        web,
+        plugin,
+        mode,
+        restored_cache,
+        cache_key,
+        target_machine,
+    );
+}
+
+fn build_record_program(file: &str, runtime_bundle: Option<&jet::AST::ProgramBundle>) -> String {
     let input = Path::new(file);
     let root = runtime_bundle
         .map(|bundle| bundle.project_root.clone())
@@ -8786,11 +13989,10 @@ fn persist_build_record(
 }
 
 /// D-DBG3 step 2 (dap-debugger): build + launch the native lldb-backed `jet
-/// debug` backend — a debug-profile build (full debuginfo) whose generated Rust
-/// carries the `// jet:line N` table (`emit_bundle_dbg` via
-/// `jet::compile_for_debug`), then either the `(jet)` terminal session or the
-/// DAP server (`--dap`) drives it through `crates/jet-debug/src/Inferior.rs`. Returns
-/// the process exit code.
+/// debug` backend — a debug-profile build whose checked MIR source carries
+/// the line-map metadata consumed by `crates/jet-debug/src/Inferior.rs`, then
+/// either the `(jet)` terminal session or the DAP server (`--dap`) drives it.
+/// Returns the process exit code.
 pub(crate) fn run_debug_native(file: &str, raw_frames: bool, dap: bool, mode: OutputMode) -> i32 {
     let src = match fs::read_to_string(file) {
         Ok(s) => s,
@@ -8876,6 +14078,71 @@ fn missing_linker(stderr: &str) -> Option<String> {
         }
     }
     None
+}
+fn rustc_log_name(file: &str) -> String {
+    format!("{}.rustc.log", stem(file))
+}
+
+fn is_rustc_error_header(line: &str) -> bool {
+    let line = line.trim_start();
+    line.starts_with("error:") || line.starts_with("error[")
+}
+fn is_rustc_diagnostic_header(line: &str) -> bool {
+    let line = line.trim_start();
+    is_rustc_error_header(line) || line.starts_with("warning:")
+}
+
+fn first_rustc_error_block(stderr: &str) -> Option<&str> {
+    let mut block_start = None;
+    let mut block_end = stderr.len();
+    let mut offset = 0;
+    for line in stderr.split_inclusive('\n') {
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        let content = content.strip_suffix('\r').unwrap_or(content);
+        if block_start.is_some() && is_rustc_diagnostic_header(content) {
+            block_end = offset;
+            break;
+        }
+        if block_start.is_none() && is_rustc_error_header(content) {
+            block_start = Some(offset);
+        }
+        offset += line.len();
+    }
+    let start = block_start?;
+    let block = stderr.get(start..block_end)?.trim_end();
+    (!block.is_empty()).then_some(block)
+}
+
+#[cfg(test)]
+mod rustc_ice_tests {
+    use super::first_rustc_error_block;
+
+    #[test]
+    fn first_rustc_error_block_keeps_the_first_error() {
+        let stderr = concat!(
+            "warning: unused import\n",
+            "error[E0308]: mismatched types\n",
+            "  --> build/out.rs:1:1\n",
+            "  |\n",
+            "warning: another unused import\n",
+            "  --> build/out.rs:2:1\n",
+            "error[E0425]: cannot find type\n",
+        );
+        let block = first_rustc_error_block(stderr).expect("first rustc error");
+        assert_eq!(
+            block,
+            "error[E0308]: mismatched types\n  --> build/out.rs:1:1\n  |"
+        );
+    }
+
+    #[test]
+    fn first_rustc_error_block_accepts_unnumbered_error() {
+        let stderr = "error: aborting due to previous error\n";
+        assert_eq!(
+            first_rustc_error_block(stderr),
+            Some("error: aborting due to previous error")
+        );
+    }
 }
 
 #[cfg(test)]
@@ -9018,6 +14285,7 @@ mod missing_c_lib_tests {
                 "default",
                 "run",
                 "comptime-input-test-toolchain",
+                None,
             )
             .expect("consumed-input cache key")
         }
@@ -9051,11 +14319,11 @@ mod missing_c_lib_tests {
     fn native_cache_ignores_comments_and_tracks_bridge_identity() {
         let project = ScratchProject::new();
         project.write("main.jet", "fn run() { print(1) }\n");
-        let base =
-            native_cache_key(&project.main(), "dev", "default", "run").expect("base cache key");
+        let base = native_cache_key(&project.main(), "dev", "default", "run", None)
+            .expect("base cache key");
         project.write("main.jet", "// cache-only comment\nfn run() { print(1) }\n");
-        let comment =
-            native_cache_key(&project.main(), "dev", "default", "run").expect("comment cache key");
+        let comment = native_cache_key(&project.main(), "dev", "default", "run", None)
+            .expect("comment cache key");
         assert_eq!(base, comment, "comments must not invalidate native cache");
 
         let instances = Vec::new();
@@ -9069,6 +14337,7 @@ mod missing_c_lib_tests {
             &instances,
             None,
             &[],
+            None,
         );
         let bridge_a = native_cache_salt(
             "tool",
@@ -9080,6 +14349,7 @@ mod missing_c_lib_tests {
             &instances,
             Some("bridge-a"),
             &[],
+            None,
         );
         let bridge_b = native_cache_salt(
             "tool",
@@ -9091,6 +14361,7 @@ mod missing_c_lib_tests {
             &instances,
             Some("bridge-b"),
             &[],
+            None,
         );
         assert_ne!(
             no_bridge, bridge_a,
@@ -9116,6 +14387,7 @@ mod missing_c_lib_tests {
                 instances,
                 None,
                 &[],
+                None,
             )
         };
         let base = salt(
@@ -9236,8 +14508,15 @@ mod missing_c_lib_tests {
         };
         let base_identity = identity("compiler-a", "schema-a", "backend-a", "flags-a", "linker-a");
         let key = |toolchain: &str, profile: &str| {
-            native_cache_key_with_toolchain(&project.main(), "dev", profile, "run", toolchain)
-                .expect("hostile cache fixture key")
+            native_cache_key_with_toolchain(
+                &project.main(),
+                "dev",
+                profile,
+                "run",
+                toolchain,
+                None,
+            )
+            .expect("hostile cache fixture key");
         };
         let base = key(&base_identity, "default");
         let identities = [
@@ -9287,6 +14566,7 @@ mod missing_c_lib_tests {
                 &instances,
                 None,
                 &[],
+                None,
             )
         };
         let base_salt = salt(
@@ -9308,6 +14588,7 @@ mod missing_c_lib_tests {
                 &instances,
                 None,
                 &[],
+                None,
             ),
             "cache-schema change must miss final work"
         );
@@ -9360,19 +14641,13 @@ mod missing_c_lib_tests {
         options.package_scope = true;
         options.build_override = true;
 
-        let exact_inputs =
-            jet::Driver::FrontEndInputs::for_build(&project.main(), &options);
+        let exact_inputs = jet::Driver::FrontEndInputs::for_build(&project.main(), &options);
         let exact = jet::Driver::prepare_build_front_end(exact_inputs)
             .expect("prepare exact runtime bundle");
         assert!(exact.emitted_program().is_some());
         assert!(
-            native_cache_key_for_prepared_build(
-                &project.main(),
-                Some(&exact),
-                "dev",
-                "run",
-            )
-            .is_some(),
+            native_cache_key_for_prepared_build(&project.main(), Some(&exact), "dev", "run", None,)
+                .is_some(),
             "an exact checked runtime bundle keeps native caching enabled",
         );
 
@@ -9380,8 +14655,7 @@ mod missing_c_lib_tests {
             "tools/build.jet",
             "fn build(b: BuildContext) BuildPlan -> { return b.plan() }\n",
         );
-        let package_inputs =
-            jet::Driver::FrontEndInputs::for_build(&project.main(), &options);
+        let package_inputs = jet::Driver::FrontEndInputs::for_build(&project.main(), &options);
         let package = jet::Driver::prepare_build_front_end(package_inputs)
             .expect("prepare external package build entry");
         assert!(
@@ -9394,6 +14668,7 @@ mod missing_c_lib_tests {
                 Some(&package),
                 "dev",
                 "run",
+                None,
             ),
             None,
             "without an exact emitted bundle, native cache lookup and store stay disabled",
@@ -9411,14 +14686,14 @@ mod missing_c_lib_tests {
         project.write("defs.jet", dependency);
         project.write("package.jet", manifest_v1);
 
-        let base =
-            native_cache_key(&project.main(), "dev", "default", "run").expect("base cache key");
+        let base = native_cache_key(&project.main(), "dev", "default", "run", None)
+            .expect("base cache key");
 
         project.write(
             "package.jet",
             "// semantic no-op\nname: \"cache-proof\"\nversion: \"1.0.0\"\n",
         );
-        let manifest_comment = native_cache_key(&project.main(), "dev", "default", "run")
+        let manifest_comment = native_cache_key(&project.main(), "dev", "default", "run", None)
             .expect("comment-only manifest cache key");
         assert_eq!(
             base, manifest_comment,
@@ -9432,6 +14707,7 @@ mod missing_c_lib_tests {
             "default",
             "run",
             "compiler-build-a/rustc-a/linker-a/backend-a",
+            None,
         )
         .expect("toolchain A cache key");
         let toolchain_b = native_cache_key_with_toolchain(
@@ -9440,6 +14716,7 @@ mod missing_c_lib_tests {
             "default",
             "run",
             "compiler-build-b/rustc-a/linker-a/backend-a",
+            None,
         )
         .expect("toolchain B cache key");
         assert_ne!(
@@ -9451,7 +14728,7 @@ mod missing_c_lib_tests {
             "main.jet",
             "use defs.box\nmodule defs\n\nmodule selected :: box<Int>(3)\nfn run() { print(selected.value() + 1) }\n",
         );
-        let program_body = native_cache_key(&project.main(), "dev", "default", "run")
+        let program_body = native_cache_key(&project.main(), "dev", "default", "run", None)
             .expect("program body cache key");
         assert_ne!(
             base, program_body,
@@ -9463,7 +14740,7 @@ mod missing_c_lib_tests {
             "defs.jet",
             "pub module box<T>(n: Int) { pub fn value() Int -> { return n + 1 } }\n",
         );
-        let dependency_body = native_cache_key(&project.main(), "dev", "default", "run")
+        let dependency_body = native_cache_key(&project.main(), "dev", "default", "run", None)
             .expect("dependency cache key");
         assert_ne!(
             base, dependency_body,
@@ -9475,8 +14752,8 @@ mod missing_c_lib_tests {
             "main.jet",
             "use defs.box\nmodule defs\n\nmodule selected :: box<Int>(4)\nfn run() { print(selected.value()) }\n",
         );
-        let argument =
-            native_cache_key(&project.main(), "dev", "default", "run").expect("argument cache key");
+        let argument = native_cache_key(&project.main(), "dev", "default", "run", None)
+            .expect("argument cache key");
         assert_ne!(
             base, argument,
             "normalized instance-argument edit must invalidate native cache"
@@ -9484,16 +14761,16 @@ mod missing_c_lib_tests {
 
         project.write("main.jet", main);
         project.write("package.jet", "name: \"cache-proof\"\nversion: \"2.0.0\"\n");
-        let package =
-            native_cache_key(&project.main(), "dev", "default", "run").expect("package cache key");
+        let package = native_cache_key(&project.main(), "dev", "default", "run", None)
+            .expect("package cache key");
         assert_ne!(
             base, package,
             "package manifest edit must invalidate native cache"
         );
 
         project.write("package.jet", manifest_v1);
-        let profile =
-            native_cache_key(&project.main(), "small", "small", "run").expect("profile cache key");
+        let profile = native_cache_key(&project.main(), "small", "small", "run", None)
+            .expect("profile cache key");
         assert_ne!(
             base, profile,
             "build-profile edit must invalidate native cache"

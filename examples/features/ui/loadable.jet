@@ -1,22 +1,20 @@
 // D-PENDING1=B: Loadable<T,E> — async UI state machine.
 use core.reactive.loadable as loadable
 
-fn fetch_user(id: Int) String !String -> if id == 0 -> Err("user not found") else -> Ok("Alice")
+fn fetch_user(id: Int) String -> if id == 0 -> Err("user not found") else -> Ok("Alice")
 
 fn run() {
     idle_state :: loadable.idle()
     loading_state :: loadable.loading()
     print(idle_state.is_idle())
     print(loading_state.is_loading())
-    result :: fetch_user(1)
-    if result == .Ok(name) {
+    if fetch_user(1) == .Ok(name) {
         loaded_state :: loadable.loaded(name)
         print(loaded_state.is_loaded())
         print(loaded_state.loaded() ?? "none")
         print(loaded_state.or_else("unknown"))
     }
-    fail_result :: fetch_user(0)
-    if fail_result == .Err(msg) {
+    if fetch_user(0) == .Err(msg) {
         failed_state :: loadable.failed(msg)
         print(failed_state.is_failed())
     }

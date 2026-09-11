@@ -18,7 +18,11 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
-use crate::AST::{EveryArg, EverySchedule, EveryScheduleError, Func, Item, JobScope, LoadedModule};
+use crate::AST::{
+    EveryArg, EverySchedule, EveryScheduleError, Func, Item, JobScope, LoadedModule,
+    ProgramBundle,
+};
+use std::collections::{HashMap, HashSet};
 
 fn resolve_every_arg(
     arg: &EveryArg,
@@ -258,6 +262,165 @@ pub(crate) fn check_job_collisions(modules: &[LoadedModule]) -> Vec<Diagnostic> 
     diags
 }
 
+fn job_graph_error(
+    code: &str,
+    what: String,
+    why: &str,
+    fix: &str,
+    span: Span,
+) -> Diagnostic {
+    Diagnostic::error(
+        code,
+        what,
+        why.to_string(),
+        fix.to_string(),
+        Some(span),
+    )
+}
+
+/// D-DX-JOBGRAPH1=A: validate the checked job graph before any execution tier
+/// can admit a job. Names are resolved in one deterministic package namespace;
+/// package metadata is also checked against the package authority projection.
+pub(crate) fn check_job_graph(bundle: &ProgramBundle) -> Vec<Diagnostic> {
+    let mut jobs = Vec::new();
+    let mut by_name: HashMap<String, Vec<usize>> = HashMap::new();
+    for module in &bundle.modules {
+        for item in &module.items {
+            let Item::Func(function) = item else { continue };
+            if !function.is_job {
+                continue;
+            }
+            let index = jobs.len();
+            by_name
+                .entry(function.name.clone())
+                .or_default()
+                .push(index);
+            jobs.push((
+                function.name.clone(),
+                function
+                    .job_metadata
+                    .as_ref()
+                    .map(|metadata| metadata.after.clone())
+                    .unwrap_or_default(),
+                function
+                    .job_metadata
+                    .as_ref()
+                    .map(|metadata| metadata.packages.clone())
+                    .unwrap_or_default(),
+                function.job_span.unwrap_or(function.name_span),
+            ));
+        }
+    }
+
+    let mut diagnostics = Vec::new();
+    let mut reported = HashSet::new();
+    for (name, after, packages, span) in &jobs {
+        for dependency in after {
+            if dependency == name {
+                if reported.insert(("self", name.clone(), dependency.clone())) {
+                    diagnostics.push(job_graph_error(
+                        "E1331",
+                        format!("job `{name}` depends on itself"),
+                        "a job graph must be acyclic so every prerequisite has a finite completion point",
+                        "remove the self-reference from `after`",
+                        *span,
+                    ));
+                }
+                continue;
+            }
+            match by_name.get(dependency) {
+                None => {
+                    if reported.insert(("unknown", name.clone(), dependency.clone())) {
+                        diagnostics.push(job_graph_error(
+                            "E1331",
+                            format!("job `{name}` depends on unknown job `{dependency}`"),
+                            "every `after` name is resolved against the checked #Job declarations before effects",
+                            "declare the prerequisite with `#Job`, or correct the name",
+                            *span,
+                        ));
+                    }
+                }
+                Some(candidates) if candidates.len() > 1 => {
+                    if reported.insert(("ambiguous", name.clone(), dependency.clone())) {
+                        diagnostics.push(job_graph_error(
+                            "E1331",
+                            format!("job `{name}` has an ambiguous prerequisite `{dependency}`"),
+                            "the graph uses one source identity per job name and cannot choose between scopes",
+                            "rename one declaration or make the prerequisite name unique",
+                            *span,
+                        ));
+                    }
+                }
+                Some(_) => {}
+            }
+        }
+        for package in packages {
+            let declared = bundle.package_guarantees.dependency_names.contains(package)
+                || bundle.dep_roots.contains_key(package);
+            let allowed = bundle
+                .package_guarantees
+                .deps
+                .as_ref()
+                .is_none_or(|allowlist| allowlist.iter().any(|value| value == package));
+            if !declared || !allowed {
+                diagnostics.push(job_graph_error(
+                    "E1332",
+                    format!("job `{name}` names unauthorized package `{package}`"),
+                    "job package capabilities must be declared by the checked package authority",
+                    "declare the dependency in package.jet authority, or remove it from `packages`",
+                    *span,
+                ));
+            }
+        }
+    }
+
+    let mut state = vec![0u8; jobs.len()];
+    let mut stack = Vec::new();
+    fn visit(
+        index: usize,
+        jobs: &[(String, Vec<String>, Vec<String>, Span)],
+        by_name: &HashMap<String, Vec<usize>>,
+        state: &mut [u8],
+        stack: &mut Vec<usize>,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
+        if state[index] == 2 {
+            return;
+        }
+        if state[index] == 1 {
+            let cycle_start = stack.iter().position(|candidate| *candidate == index).unwrap_or(0);
+            let cycle = stack[cycle_start..]
+                .iter()
+                .map(|candidate| jobs[*candidate].0.as_str())
+                .chain(std::iter::once(jobs[index].0.as_str()))
+                .collect::<Vec<_>>()
+                .join(" -> ");
+            diagnostics.push(job_graph_error(
+                "E1331",
+                format!("job graph contains a cycle: {cycle}"),
+                "a prerequisite graph must reach a completed root before scheduling can start",
+                "remove one `after` edge from the cycle",
+                jobs[index].3,
+            ));
+            return;
+        }
+        state[index] = 1;
+        stack.push(index);
+        for dependency in &jobs[index].1 {
+            let Some(candidates) = by_name.get(dependency) else { continue };
+            if candidates.len() == 1 {
+                visit(candidates[0], jobs, by_name, state, stack, diagnostics);
+            }
+        }
+        stack.pop();
+        state[index] = 2;
+    }
+    for index in 0..jobs.len() {
+        visit(index, &jobs, &by_name, &mut state, &mut stack, &mut diagnostics);
+    }
+    diagnostics
+}
+
 /// D-SCHEDULE1: validate `f`'s `#Every(…)` argument, if it has one. Called
 /// once per function during registration (mirrors `check_inline_always_fn`'s
 /// call sites in `Registration.rs`/`Bundle.rs`) — E0925 placement is already
@@ -284,4 +447,14 @@ pub(crate) fn check_every_marker(f: &mut Func, registry: &super::TypeRegistry) -
             diags
         }
     }
+}
+/// Project the sema-checked bundle into the shared named-job registry.
+///
+/// `Func::every.resolved` is populated by `check_every_marker` before this
+/// projection is consumed. The registry only carries the stable presentation
+/// shape; runtime schedule consumers continue reading the checked AST fact.
+pub fn checked_job_registry(
+    bundle: &crate::AST::ProgramBundle,
+) -> jet_foundation::CLISchema::JobRegistry {
+    jet_foundation::CLISchema::JobRegistry::from_bundle(bundle)
 }

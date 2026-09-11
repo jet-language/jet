@@ -1,0 +1,11 @@
+use core.data as data
+use core.files as files
+
+#Codable
+struct Row { team: String value: Float }
+
+fn run() {
+    raw :: files.read("/home/nate/.cache/jet-luna/dx3/area-data/fixture-100k.csv") ?? panic("read")
+    rows :: data.csv<Row>(raw) ?? panic("csv")
+    print("table={data.count(rows)} rows={rows.len()} schema={data.schema(rows).len()}")
+}

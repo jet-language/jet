@@ -6,7 +6,7 @@
 
 /// c77 widened battery: EVERY example either runs (interpreted stdout/stderr/exit
 /// code == compiled-binary stdout/stderr/exit code, byte for byte — I2) or stops at a named boundary
-/// (E2201/E2202/E0956 — never a silent skip). Reports the run/boundary split so
+/// (E2202/E0956 — never a silent skip). Reports the run/boundary split so
 /// the coverage can't quietly shrink.
 #[test]
 fn interpreter_matches_compiled_binary() {

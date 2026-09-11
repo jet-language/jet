@@ -10,16 +10,24 @@ pub use types::{
     FunctionObligations, InternalTag, KnowledgeEntry, KnowledgeFact, KnowledgeVector, Measure,
     MeasureRule, TagMarker, Type, TypeIdentity,
 };
+#[path = "AST/data_plan.rs"]
+mod data_plan;
+pub use data_plan::{
+    DATA_PLAN_FACT_SCHEMA_VERSION, DataPlanCallable, DataPlanColumn, DataPlanFact,
+    DataPlanLogicalNode, DataPlanNodeId, DataPlanOperationKind, DataPlanPhysicalNode,
+    DataPlanPhysicalOperatorKind, DataPlanSchema, DataPlanSchemaError, DataPlanSourceKind,
+    DataPlanStreamError, DataPlanStreamMode, DataPlanValidationError,
+};
 
 #[path = "AST/program_imports.rs"]
 mod program_imports;
 pub use crate::Names::{mangle, mangle_generated, mangle_path, member_name, NameLedger};
 pub use program_imports::{
-    core_import_maps, core_list_path, core_list_prefix, member_import_local,
+    core_import_maps, core_list_path, core_list_prefix, member_import_local, target_profile_path,
     rewrite_core_item_call, walk_imports, AppliedRuleApplication, CoreListPath, ErrorConvDef,
     FencedNames, FencedStatement, ForeignImportError, ForeignLanguage, ForeignNamespace,
     ImportBinding, ImportDecl, ImportKind, InlineVersion, LoadedModule, MigrationDecl, MigrationOp,
-    PackageGuarantees, Program, ProgramBundle, TryConvert,
+    ModelOutputFact, PackageGuarantees, Program, ProgramBundle, TryConvert,
 };
 
 #[path = "AST/items.rs"]
@@ -33,8 +41,8 @@ pub use items::{
     Field, FleetField, FleetFieldValue, FleetLit, Func, GenericModuleDef, GenericModuleParam,
     HostEntry, ImageField, ImageFieldValue, ImageFromRef, ImageLit, ImplDef, InlineForeign, Item,
     ItemTemplateLoop, JobCachePolicy, JobMetadata, JobScope, JobSkip, KernelMarker, KernelMode,
-    KernelProof, Marker, MarkerDecl, MarkerDeclParam, MaturityTag, ModuleAliasDef,
-    ModuleArg, ModuleDecl, ModuleInstanceApplication, ModuleInstanceIdentity, Namespace,
+    KernelProof, Marker, MarkerDecl, MarkerDeclParam, MaturityTag, ModuleAliasDef, ModuleArg,
+    ModuleDecl, ModuleInstanceApplication, ModuleInstanceIdentity, Namespace, OperatorMarker,
     OptionEntry, Param, ParamZone, PerfLit, ProfileLit, ProtocolDecl, ProtocolDirection,
     ProtocolMessage, QuantityKind, SerdeWireShape, ServiceEntry, SourceDecl, StateDecl,
     StateTransition, StructDef, StructLayout, SystemField, SystemFieldValue, SystemLit, TagDef,
@@ -43,6 +51,12 @@ pub use items::{
     VariantField, VariantPayload, VmTestField, VmTestFieldValue, VmTestLit, DEFAULT_MEMO_BOUND,
 };
 
+#[path = "AST/devtools.rs"]
+mod devtools;
+pub use devtools::{
+    DevPanelMarker, DevtoolsFactPublication, DevtoolsPanel, DevtoolsRegistry,
+    DevtoolsRegistryError, DevtoolsStateField,
+};
 #[path = "AST/patterns.rs"]
 mod patterns;
 pub use patterns::{
@@ -71,7 +85,7 @@ mod expressions;
 pub use expressions::{
     arithmetic_policy_facts, ArithmeticMode, ArithmeticOperation, ArithmeticPolicyFact, BinOp,
     ByteTextPart, Call, CallArg, CallArgFlags, Expr, IncDecOp, Lambda, LambdaBody, LambdaMeta,
-    LambdaParam, PlaceAccess, StrFormat, StrPart, TypedLitBody, UnOp, UnitFormat,
+    LambdaParam, MarkerCallArg, PlaceAccess, StrFormat, StrPart, TypedLitBody, UnOp, UnitFormat,
 };
 
 #[path = "AST/comptime.rs"]
@@ -87,8 +101,11 @@ mod ffi;
 pub use ffi::{
     binder_descriptor, foreign_abi_contract, BinderCapability, BinderCapabilityReport,
     BinderDescriptor, BinderRuntime, BinderStatus, BinderSurface, BindingStubKind, CFfi,
-    CImportLink, COverlayOverride, CLib, ComptimeInput, FfiLink, ForeignAbiContract, ForeignAsyncModel,
-    ForeignCallbackModel, ForeignCallingConvention, ForeignErrorModel, ForeignLayoutModel,
-    ForeignOwnershipModel, ForeignProvider, ForeignSafety, ForeignScalar, ForeignStubFile,
-    ForeignTaskBoundary, FOREIGN_ABI_CONTRACT_VERSION, FOREIGN_BINDERS, FOREIGN_DESCRIPTOR_SCHEMA,
+    CImportLink, COverlayOverride, CLib, ComptimeInput, FfiCloseAdapter, FfiCloseSource,
+    FfiBoundaryFacts, FfiHandleFact, FfiLink, FfiLinkClosure, FfiThreadSafety, ForeignAbiContract,
+    FfiBoundaryObligation, FfiEvidenceBasis,
+    ForeignAsyncModel, ForeignCallbackModel, ForeignCallingConvention, ForeignErrorModel,
+    ForeignLayoutModel, ForeignOwnershipModel, ForeignProvider, ForeignSafety, ForeignScalar,
+    ForeignStubFile, ForeignTaskBoundary, FOREIGN_ABI_CONTRACT_VERSION, FOREIGN_BINDERS,
+    FOREIGN_DESCRIPTOR_SCHEMA,
 };

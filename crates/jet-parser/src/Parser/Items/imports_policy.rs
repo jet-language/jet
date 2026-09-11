@@ -1,5 +1,5 @@
 use super::super::{
-    describe, string_literal_value, Diagnostic, Item, Parser, Program, Span, Syntax, TokKind,
+    describe, string_literal_token_value, Diagnostic, Item, Parser, Program, Span, Syntax, TokKind,
 };
 use super::helpers::format_version_segment;
 use super::TargetMarker;
@@ -84,7 +84,7 @@ impl<'a> Parser<'a> {
         &self,
         marker: &crate::AST::Marker,
     ) -> Result<crate::AST::CallablePolicyChain, Diagnostic> {
-        crate::AST::CallablePolicyChain::parse(&marker.args).map_err(|reason| {
+        crate::AST::CallablePolicyChain::parse(&marker.expr_args_owned()).map_err(|reason| {
             Diagnostic::error(
                 "E0355",
                 format!("`#Policy` needs callable policy values: {reason}"),
@@ -159,6 +159,59 @@ impl<'a> Parser<'a> {
         let marker = self.parse_registered_marker_at_site(site)?;
         self.policy_declarations_from_marker(marker, scope)
     }
+    pub(in crate::Parser) fn retired_memory_policy_diagnostic(
+        name: &str,
+        name_span: crate::Diagnostics::Span,
+        limit: Option<i64>,
+    ) -> Option<Diagnostic> {
+        if !matches!(name, "no_alloc" | "zero_rc" | "arena_bounded") {
+            return None;
+        }
+        let replacement = match (name, limit) {
+            ("no_alloc", _) => "`-[!Mem.Alloc]>`".to_string(),
+            ("zero_rc", _) => "`-[!Mem.Rc]>`".to_string(),
+            ("arena_bounded", Some(bytes)) => {
+                format!("`-[!Mem.Alloc(above: {bytes})]>`")
+            }
+            _ => "`-[!Mem.Alloc(above: N)]>`".to_string(),
+        };
+        Some(Diagnostic::error(
+            "E0355",
+            format!("`{name}` is a retired memory policy"),
+            "memory floors are rights-tree prohibitions, not policy-marker arguments".to_string(),
+            format!("write {replacement} on the function signature"),
+            Some(name_span),
+        ))
+    }
+
+    pub(in crate::Parser) fn retired_memory_policy_marker_diagnostic(
+        &self,
+        marker: &crate::AST::Marker,
+    ) -> Option<Diagnostic> {
+        marker.expr_args_owned().into_iter().find_map(|expr| {
+            let (name, name_span, limit) = match expr {
+                crate::AST::Expr::Ident(name, span) => (name, span, None),
+                crate::AST::Expr::Call(call) => {
+                    let limit = match call.args.as_slice() {
+                        [] => None,
+                        [argument]
+                            if argument.label.is_none() && !argument.spread =>
+                        {
+                            match argument.expr {
+                                crate::AST::Expr::Int(value, ..) => Some(value),
+                                _ => return None,
+                            }
+                        }
+                        _ => return None,
+                    };
+                    (call.name, call.name_span, limit)
+                }
+                _ => return None,
+            };
+            Self::retired_memory_policy_diagnostic(&name, name_span, limit)
+        })
+    }
+
 
     pub(in crate::Parser) fn policy_declarations_from_marker(
         &mut self,
@@ -169,7 +222,7 @@ impl<'a> Parser<'a> {
         self.bound_registered_rule_arguments(&marker)?;
         let labels = marker.arg_labels.clone();
         let mut out = Vec::new();
-        for (index, expr) in marker.args.into_iter().enumerate() {
+        for (index, expr) in marker.expr_args_owned().into_iter().enumerate() {
             let label = labels
                 .get(index)
                 .and_then(|label| label.as_ref())
@@ -238,23 +291,10 @@ impl<'a> Parser<'a> {
                     };
                     (name, name_span, limit, None, None)
                 };
-            if matches!(name.as_str(), "no_alloc" | "zero_rc" | "arena_bounded") {
-                let replacement = match (name.as_str(), limit) {
-                    ("no_alloc", _) => "`-[!Mem.Alloc]>`".to_string(),
-                    ("zero_rc", _) => "`-[!Mem.Rc]>`".to_string(),
-                    ("arena_bounded", Some(bytes)) => {
-                        format!("`-[!Mem.Alloc(above: {bytes})]>`")
-                    }
-                    _ => "`-[!Mem.Alloc(above: N)]>`".to_string(),
-                };
-                return Err(Diagnostic::error(
-                    "E0355",
-                    format!("`{name}` is a retired memory policy"),
-                    "memory floors are rights-tree prohibitions, not policy-marker arguments"
-                        .to_string(),
-                    format!("write {replacement} on the function signature"),
-                    Some(name_span),
-                ));
+            if let Some(diagnostic) =
+                Self::retired_memory_policy_diagnostic(&name, name_span, limit)
+            {
+                return Err(diagnostic);
             }
             let Some(key) = crate::Policy::PolicyKey::parse(&name) else {
                 let site_bound =
@@ -309,8 +349,8 @@ impl<'a> Parser<'a> {
     pub(in crate::Parser) fn import_decl(&mut self) -> Result<crate::AST::ImportDecl, Diagnostic> {
         let start = self.bump().span; // consume `use`
         match &self.peek().kind {
-            TokKind::Str(parts) => {
-                let path = string_literal_value(parts)?;
+            TokKind::Str(_) | TokKind::RawStr(_) => {
+                let path = string_literal_token_value(&self.peek().kind)?;
                 let path_span = self.bump().span;
                 let alias_default = path.rsplit('/').next().unwrap_or("module").to_string();
                 let (alias, alias_span) = if matches!(
@@ -584,15 +624,6 @@ impl<'a> Parser<'a> {
             local_spans.push(local_span);
             if matches!(self.peek().kind, TokKind::Comma) {
                 self.bump();
-                if matches!(self.peek().kind, TokKind::RBracket | TokKind::Eof) {
-                    return Err(Diagnostic::error(
-                        "E0003",
-                        "an import member list cannot end with a comma".to_string(),
-                        "the canonical `.[…]` form separates named members with commas".to_string(),
-                        "remove the trailing comma or add another member".to_string(),
-                        Some(self.peek().span),
-                    ));
-                }
             } else {
                 break;
             }
@@ -1078,7 +1109,7 @@ impl<'a> Parser<'a> {
                         }
                     }
                 }
-                // D-HTMLPAIR1 (ratified 2026-07-01, c134): `#HTML("path.html")` — explicit
+                // D-MARKERARGS1=A: `#HTML(Path{"path.html"})` — explicit
                 // companion host page for `--target=web` builds.
                 TokKind::Hash if self.at_html_marker() => match self.parse_html_marker() {
                     Ok((marker, path)) => {
@@ -1206,45 +1237,11 @@ impl<'a> Parser<'a> {
                     // D-PUBPKG1=A: `pub(package)` qualifier — peek2 is `(`.
                     if matches!(self.peek2().kind, TokKind::LParen) {
                         let (is_pub, is_package_pub) = self.parse_pub_qualifier();
-                        // Redispatch on what follows the qualifier.
-                        match self.peek().kind.clone() {
-                            TokKind::KwStruct => self
-                                .struct_def_after_pub_pkg(is_pub, is_package_pub)
-                                .map(Item::Struct),
-                            TokKind::KwEnum => self
-                                .enum_def_after_pub(is_pub, is_package_pub)
-                                .map(Item::Enum),
-                            TokKind::KwTrait => self.trait_def(false).map(|mut td| {
-                                td.is_pub = is_pub;
-                                td.is_package_pub = is_package_pub;
-                                Item::Trait(td)
-                            }),
-                            TokKind::KwTag => self.tag_def(false).map(|mut td| {
-                                td.is_pub = is_pub;
-                                td.is_package_pub = is_package_pub;
-                                Item::Tag(td)
-                            }),
-                            TokKind::KwFn => self
-                                .bump_then_func_after_fn(
-                                    is_pub,
-                                    is_package_pub,
-                                    false,
-                                    false,
-                                    false,
-                                    None,
-                                    None,
-                                    None,
-                                    None,
-                                    false,
-                                    None,
-                                    None,
-                                    None,
-                                )
-                                .map(Item::Func),
-                            TokKind::KwModule if self.is_code_module_at(1) => {
-                                self.code_module_with_pkg(is_pub, is_package_pub)
-                            }
-                            TokKind::KwUse => match self.import_decl() {
+                        // Imports are collected separately because `Item` has no
+                        // import variant; all declarations share the canonical
+                        // visibility dispatcher.
+                        if matches!(self.peek().kind, TokKind::KwUse) {
+                            match self.import_decl() {
                                 Ok(mut imp) => {
                                     imp.is_pub = is_pub;
                                     imp.is_package_pub = is_package_pub;
@@ -1256,50 +1253,19 @@ impl<'a> Parser<'a> {
                                     self.sync_stmt();
                                     continue;
                                 }
-                            },
-                            TokKind::Ident(ref n) if n.as_str() == Syntax::KW_STATE_DECL => {
-                                self.reject_top_level_state_decl(is_pub, is_package_pub)
                             }
-                            TokKind::Ident(ref n) if n.as_str() == Syntax::KW_PROTOCOL => self
-                                .protocol_decl_with_pkg(is_pub, is_package_pub)
-                                .map(Item::ProtocolDecl),
-                            TokKind::Ident(ref n) if n.as_str() == Syntax::KW_ALIAS => self
-                                .type_alias_def(is_pub, is_package_pub)
-                                .map(Item::TypeAlias),
-                            _ => self
-                                .func_after_fn(
-                                    is_pub,
-                                    is_package_pub,
-                                    false,
-                                    None,
-                                    None,
-                                    false,
-                                    false,
-                                    None,
-                                    None,
-                                    None,
-                                    false,
-                                    None,
-                                    false,
-                                    None,
-                                    None,
-                                    None,
-                                    false,
-                                    false,
-                                    None,
-                                    false,
-                                    None,
-                                    false,
-                                )
-                                .map(Item::Func),
                         }
+                        self.item_after_visibility(is_pub, is_package_pub)
                     } else {
+                        // Marker-bearing public types have a distinct parser
+                        // because the marker precedes the type keyword.
                         match self.peek2().kind {
                             // D-REPRC1: `pub #layout(c) struct Name { … }`
                             TokKind::Hash
-                                if {
-                                    matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::MARKER_LAYOUT)
-                                } =>
+                                if matches!(
+                                    &self.peek3().kind,
+                                    TokKind::Ident(n) if n == Syntax::MARKER_LAYOUT
+                                ) =>
                             {
                                 self.bump(); // consume `pub`
                                 self.layout_type_def(true)
@@ -1308,18 +1274,21 @@ impl<'a> Parser<'a> {
                             // `pub #PublishedSchema struct Name { … }` (retired
                             // `pub #PublishedSchema` teaches E0062).
                             TokKind::Hash
-                                if {
-                                    matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::MARKER_PUBLISHED_SCHEMA)
-                                } =>
+                                if matches!(
+                                    &self.peek3().kind,
+                                    TokKind::Ident(n)
+                                        if n == Syntax::MARKER_PUBLISHED_SCHEMA
+                                ) =>
                             {
                                 self.bump(); // consume `pub`
                                 self.published_schema_struct_def(true).map(Item::Struct)
                             }
                             // D-LIN1: `pub #SingleUse struct|enum Name { … }`
                             TokKind::Hash
-                                if {
-                                    matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::MARKER_SINGLE_USE)
-                                } =>
+                                if matches!(
+                                    &self.peek3().kind,
+                                    TokKind::Ident(n) if n == Syntax::MARKER_SINGLE_USE
+                                ) =>
                             {
                                 self.bump(); // consume `pub`
                                 self.single_use_type_def(true)
@@ -1328,59 +1297,34 @@ impl<'a> Parser<'a> {
                             // `pub #MustUse struct|enum Name { … }` (retired
                             // `pub #MustUse` teaches E0062).
                             TokKind::Hash
-                                if {
-                                    matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::MARKER_MUST_USE)
-                                } =>
+                                if matches!(
+                                    &self.peek3().kind,
+                                    TokKind::Ident(n) if n == Syntax::MARKER_MUST_USE
+                                ) =>
                             {
                                 self.bump(); // consume `pub`
                                 self.must_use_type_def(true)
                             }
-                            // D-QUAL3: `pub #UnitFamily(Name) { m, … }`
-                            TokKind::Hash
-                                if {
-                                    matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::MARKER_UNIT_FAMILY)
-                                } =>
-                            {
-                                self.bump(); // consume `pub`
-                                self.unit_family_def(true, false).map(Item::UnitFamily)
-                            }
-                            TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
-                            TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
-                            TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
-                            TokKind::KwTag => self.tag_def(false).map(Item::Tag),
-                            // D-STATE-HOME1=A: retired `pub state TypeName { A, B, C }`
-                            TokKind::Ident(ref n) if n.as_str() == Syntax::KW_STATE_DECL => {
-                                self.bump(); // consume `pub`
-                                self.reject_top_level_state_decl(true, false)
-                            }
-                            // D-PROTO1/D-PROTO2: `pub protocol Name { … }`
-                            TokKind::Ident(ref n) if n.as_str() == Syntax::KW_PROTOCOL => {
-                                self.bump(); // consume `pub`
-                                self.protocol_decl(true).map(Item::ProtocolDecl)
-                            }
-                            TokKind::Ident(ref n) if n.as_str() == Syntax::KW_ALIAS => {
-                                self.bump(); // consume `pub`
-                                self.type_alias_def(true, false).map(Item::TypeAlias)
-                            }
-                            TokKind::KwModule if self.is_code_module_at(2) => {
-                                self.code_module(true)
-                            }
-                            TokKind::KwUse => {
-                                self.bump(); // consume `pub`
-                                match self.import_decl() {
-                                    Ok(mut imp) => {
-                                        imp.is_pub = true;
-                                        imports.push(imp);
-                                        continue;
-                                    }
-                                    Err(d) => {
-                                        self.diags.push(d);
-                                        self.sync_stmt();
-                                        continue;
+                            _ => {
+                                let (is_pub, is_package_pub) =
+                                    self.parse_item_visibility();
+                                if matches!(self.peek().kind, TokKind::KwUse) {
+                                    match self.import_decl() {
+                                        Ok(mut imp) => {
+                                            imp.is_pub = is_pub;
+                                            imp.is_package_pub = is_package_pub;
+                                            imports.push(imp);
+                                            continue;
+                                        }
+                                        Err(d) => {
+                                            self.diags.push(d);
+                                            self.sync_stmt();
+                                            continue;
+                                        }
                                     }
                                 }
+                                self.item_after_visibility(is_pub, is_package_pub)
                             }
-                            _ => self.func().map(Item::Func),
                         }
                     }
                 }
@@ -1736,13 +1680,23 @@ impl<'a> Parser<'a> {
         let start = self.bump().span;
         let (name, name_span) =
             self.expect_effect_path_name("after the `effect` declaration keyword")?;
+        let (irreversible, declaration_end) = if matches!(
+            &self.peek().kind,
+            TokKind::Ident(fact) if fact == "@irreversible"
+        ) {
+            let fact_span = self.bump().span;
+            (true, fact_span.end)
+        } else {
+            (false, name_span.end)
+        };
         if matches!(self.peek().kind, TokKind::Semi) {
             self.bump();
         }
         Ok(crate::AST::EffectDecl {
             name,
             name_span,
-            span: Span::new(start.start, name_span.end),
+            irreversible,
+            span: Span::new(start.start, declaration_end),
         })
     }
 }

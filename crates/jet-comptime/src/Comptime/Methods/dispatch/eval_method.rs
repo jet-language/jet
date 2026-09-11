@@ -486,39 +486,65 @@ impl<'a> Interp<'a> {
                 self.poll_repl_interrupt();
                 let _runtime_call =
                     super::super::super::ReplRuntimeCallGuard::new(self.repl_interruptible);
-                // Card #392 pass 5: `core.data`'s typed table/lazy pipeline — a
-                // generic call-site-typed surface built from ordinary Jet
-                // lambdas over dynamically-typed `CtValue` rows, so (unlike
-                // `decode<T>` below) only `csv<T>`/`json<T>` actually read `type_args`.
-                // The pre-existing fixed-signature stats/plot surface (`sum`/
-                // `mean`/…/`bar_svg`, `DataLite.rs`) stays on the
-                // `apply_core_call` path below — only the table/lazy pipeline
-                // names are new here.
+                // Typed data loaders and streams have one canonical provider
+                // boundary. Do not let the generic Core fallback erase their
+                // checked carrier or turn a provider-owned operation into a
+                // locally invented value.
+                if let Some(result) =
+                    super::super::super::DataPipeline::eval_data_loader_call(
+                        self,
+                        &module,
+                        method,
+                        &argv,
+                        type_args,
+                        resolved_ret,
+                        span,
+                    )
+                {
+                    return result;
+                }
+                // Plot construction/rendering also needs the sema-resolved
+                // row type and declaration metadata. Keep this route beside
+                // the typed table path, before generic Core dispatch.
+                if matches!(
+                    (module.as_str(), method),
+                    (
+                        "core.data" | "core.data.plot",
+                        "plot" | "inspect" | "inspect_json" | "text" | "svg" | "show" | "render",
+                    )
+                ) {
+                    let arg0_ty = args.first().and_then(|a| match &a.expr {
+                        Expr::Ident(name, _) => self.binding_types.get(name).cloned(),
+                        Expr::MethodCall {
+                            resolved_ret: Some(ty),
+                            ..
+                        } => Some(ty.clone()),
+                        _ => None,
+                    });
+                    return super::super::super::DataPipeline::plot_static_call(
+                        &mut self.data_pipeline,
+                        method,
+                        &argv,
+                        arg0_ty.as_ref(),
+                        self.structs,
+                        span,
+                    );
+                }
+                // D-QUERY-RETAIN1=A: query is the one typed list adapter.
+                // `csv<T>`/`json<T>` decode lists, while query construction,
+                // schema, counts, and joins consume ordinary list values.
                 if matches!(
                     (module.as_str(), method),
                     (
                         "core.data",
                         "csv"
                             | "json"
+                            | "query"
                             | "count"
-                            | "table"
-                            | "rows"
-                            | "series"
-                            | "values"
                             | "schema"
-                            | "missing_count"
-                            | "lazy"
-                            | "lazy_filter"
-                            | "lazy_sort_by"
-                            | "collect"
-                            | "plan"
-                            | "filter"
-                            | "sort_by"
-                            | "group_count"
-                            | "group_sum"
-                            | "group_mean"
                             | "inner_join"
-                            | "left_join",
+                            | "left_join"
+                            | "pivot_sum",
                     )
                 ) {
                     let arg0_ty = args.first().and_then(|a| match &a.expr {
@@ -539,7 +565,7 @@ impl<'a> Interp<'a> {
                     );
                 }
                 if module == "core.data" && matches!(method, "line_text" | "line_svg") {
-                    return apply_data_line_call(method, argv, span);
+                    return apply_data_line_call(method, argv, resolved_ret, span);
                 }
                 // D-ENC-CBOR-SURFACE1: encoding a Codable value needs its
                 // declared field types. CtValue intentionally erases `[U8]`
@@ -586,22 +612,11 @@ impl<'a> Interp<'a> {
                             method == "to_bytes_canonical",
                         ) {
                             Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-                            Err(reason) => CtValue::failed(Box::new(CtValue::Struct {
-                                type_name: "CBORError".to_string(),
-                                fields: vec![
-                                    (
-                                        "kind".to_string(),
-                                        CtValue::Enum {
-                                            type_name: "CBORErrorKind".to_string(),
-                                            variant: "Unsupported".to_string(),
-                                            args: Vec::new(),
-                                        },
-                                    ),
-                                    ("byte_offset".to_string(), CtValue::Int(0)),
-                                    ("path".to_string(), CtValue::Str("$".to_string())),
-                                    ("reason".to_string(), CtValue::Str(reason)),
-                                ],
-                            })),
+                            Err(reason) => CtValue::failed(Box::new(
+                                super::super::super::EncodingLite::cbor_unsupported_error_value(
+                                    reason,
+                                ),
+                            )),
                         },
                     );
                 }
@@ -701,14 +716,13 @@ impl<'a> Interp<'a> {
                     && matches!(method, "to_string" | "to_string_pretty")
                 {
                     if let Some(value) = argv.first() {
-                        // Keep the dynamic JSON enum on its renderer path. Every
-                        // other value must enter the typed Encode adapter, even
-                        // when the outer value has no registered method: that
-                        // adapter recursively gives nested explicit codecs
-                        // precedence over structural fallback.
-                        let is_dynamic_json =
-                            matches!(value, CtValue::Enum { type_name, .. } if type_name == "JSON");
-                        if !is_dynamic_json {
+                        // Keep the canonical DataTree value on its renderer path.
+                        // Every other value must enter the typed Encode adapter,
+                        // which recursively gives nested explicit codecs precedence
+                        // over structural fallback.
+                        let is_dynamic_data_tree =
+                            matches!(value, CtValue::Enum { type_name, .. } if type_name == "DataTree");
+                        if !is_dynamic_data_tree {
                             let tree = self.encode_value(value, span)?;
                             return Ok(CtValue::Str(
                                 super::super::super::JSONInterp::render_ordered_datatree(
@@ -739,7 +753,7 @@ impl<'a> Interp<'a> {
                         Ok(options) => options,
                         Err(error) => {
                             return Ok(CtValue::failed(Box::new(decode_error_value(
-                                super::super::super::EncodingLite::cbor_error_value(error),
+                                super::super::super::EncodingLite::cbor_encoding_error_value(error),
                                 "invalid CBOR options",
                             ))))
                         }
@@ -750,7 +764,7 @@ impl<'a> Interp<'a> {
                         Ok(tree) => tree,
                         Err(error) => {
                             return Ok(CtValue::failed(Box::new(decode_error_value(
-                                super::super::super::EncodingLite::cbor_error_value(error),
+                                super::super::super::EncodingLite::cbor_encoding_error_value(error),
                                 "invalid CBOR input",
                             ))))
                         }
@@ -807,6 +821,52 @@ impl<'a> Interp<'a> {
                 let is_tier2 = is_tier2_core_call(&module, method, self.repl_mode);
                 if is_tier2 {
                     if self.repl_mode {
+                        if module == "core.encoding.csv"
+                            && method == "query"
+                            && !type_args.is_empty()
+                        {
+                            let sql = match argv.get(1) {
+                                Some(value) => as_string(value, span)?.to_string(),
+                                None => {
+                                    return Err(unsupported(
+                                        "`core.encoding.csv.query()`: missing SQL text",
+                                        span,
+                                    ))
+                                }
+                            };
+                            let path = argv.first().cloned().ok_or_else(|| {
+                                unsupported("`core.encoding.csv.query()`: missing path", span)
+                            })?;
+                            let read = apply_repl_authorized_core_call_with_type(
+                                "core.files",
+                                "read",
+                                vec![path],
+                                span,
+                                self.base_dir,
+                                self.sink.as_deref_mut(),
+                                &self.repl_grants,
+                                reborrow_repl_authorizer(&mut self.repl_authorizer),
+                                None,
+                            )?;
+                            let text = match read {
+                                CtValue::Present(value) => match *value {
+                                    CtValue::Str(text) => text,
+                                    _ => {
+                                        return Err(unsupported(
+                                            "`core.files.read()` returned non-text data",
+                                            span,
+                                        ))
+                                    }
+                                },
+                                other => return Ok(other),
+                            };
+                            return self.eval_typed_csv_query(
+                                &text,
+                                &sql,
+                                &type_args[0],
+                                span,
+                            );
+                        }
                         return apply_repl_authorized_core_call_with_type(
                             &module,
                             method,
@@ -846,6 +906,59 @@ impl<'a> Interp<'a> {
                             Some(span),
                         ));
                     }
+                    if module == "core.encoding.csv"
+                        && method == "query"
+                        && !type_args.is_empty()
+                    {
+                        let args = normalize_path_args(&module, method, argv, span)?;
+                        let path = match args.first() {
+                            Some(value) => as_string(value, span)?.to_string(),
+                            None => {
+                                return Err(unsupported(
+                                    "`core.encoding.csv.query()`: missing path",
+                                    span,
+                                ))
+                            }
+                        };
+                        let sql = match args.get(1) {
+                            Some(value) => as_string(value, span)?.to_string(),
+                            None => {
+                                return Err(unsupported(
+                                    "`core.encoding.csv.query()`: missing SQL text",
+                                    span,
+                                ))
+                            }
+                        };
+                        let bytes = match crate::SHA256::read_file_nofollow_at_root(
+                            self.base_dir,
+                            std::path::Path::new(&path),
+                            crate::SHA256::MAX_TREE_FILE_BYTES,
+                        ) {
+                            Ok(bytes) => bytes,
+                            Err(error) => {
+                                return Ok(CtValue::failed(Box::new(io_error_value(
+                                    IoErrorOperation::Read,
+                                    &path,
+                                    error,
+                                ))))
+                            }
+                        };
+                        let text = match String::from_utf8(bytes) {
+                            Ok(text) => text,
+                            Err(error) => {
+                                let error = std::io::Error::new(
+                                    std::io::ErrorKind::InvalidData,
+                                    error,
+                                );
+                                return Ok(CtValue::failed(Box::new(io_error_value(
+                                    IoErrorOperation::Read,
+                                    &path,
+                                    error,
+                                ))))
+                            }
+                        };
+                        return self.eval_typed_csv_query(&text, &sql, &type_args[0], span);
+                    }
                     return apply_impure_core_call_with_type(
                         &module,
                         method,
@@ -858,9 +971,6 @@ impl<'a> Interp<'a> {
                         None,
                         resolved_ret,
                     );
-                }
-                if matches!((module.as_str(), method), ("core.data", "pivot_sum")) {
-                    return self.eval_pivot_sum(argv, span);
                 }
                 return apply_core_call_with_type(
                     &module,
@@ -1627,7 +1737,7 @@ impl<'a> Interp<'a> {
                         }
                         "contains" => {
                             let needle = argv.first().cloned().unwrap_or(CtValue::Unit);
-                            CtValue::Bool(items.iter().any(|x| x == &needle))
+                            CtValue::Bool(super::super::super::CollectionEval::collection_semantics::jet_list_contains(&items, &needle))
                         }
                         "to_list" => CtValue::List(items.clone()),
                         "join" => {
@@ -1910,6 +2020,97 @@ impl<'a> Interp<'a> {
             Some(value) => value,
             None => self.eval(receiver, scope)?,
         };
+        if matches!(method, "next_u64" | "below" | "coin") {
+            let mut argv = Vec::with_capacity(args.len());
+            for argument in args {
+                argv.push(self.eval(&argument.expr, scope)?);
+            }
+            if let Some(result) = apply_history_rng_method(&recv, method, &argv, span) {
+                return result;
+            }
+        }
+        if matches!(
+            &recv,
+            CtValue::Struct { type_name, .. }
+                if matches!(type_name.as_str(), "Query" | "DataGroupedQuery")
+        ) {
+            let mut argv = Vec::with_capacity(args.len());
+            for arg in args {
+                argv.push(self.eval(&arg.expr, scope)?);
+            }
+            if let Some(result) =
+                self.eval_data_query_method(&recv, method, &argv, resolved_ret, span)
+            {
+                return result;
+            }
+        }
+        // Checked typed receivers must reach their canonical adapters before
+        // user/builtin fallback. These nominal guards come from sema; the
+        // adapters own carrier validation and provider/error semantics.
+        if matches!(
+            recv_type,
+            Some("JetDataPlot" | "DataLoader" | "DataStream" | "JobQueue")
+        ) {
+            let mut argv = Vec::with_capacity(args.len());
+            for a in args {
+                argv.push(self.eval(&a.expr, scope)?);
+            }
+            let result = match recv_type {
+                Some("JetDataPlot") => {
+                    super::super::super::DataPipeline::eval_data_plot_method(
+                        &mut self.data_pipeline,
+                        &recv,
+                        method,
+                        &argv,
+                        span,
+                    )
+                }
+                Some("DataLoader") => {
+                    super::super::super::DataPipeline::eval_data_loader_method(
+                        self,
+                        &recv,
+                        method,
+                        &argv,
+                        span,
+                    )
+                }
+                Some("DataStream") => {
+                    super::super::super::DataPipeline::eval_data_stream_method(
+                        self,
+                        &recv,
+                        method,
+                        &argv,
+                        span,
+                    )
+                }
+                Some("JobQueue") => {
+                    return super::super::super::ServicesLite::apply_jobs_method(
+                        &recv, method, &argv, span,
+                    );
+                }
+                _ => None,
+            };
+            let Some(result) = result else {
+                return Err(unsupported(
+                    &format!(
+                        "checked `{}` receiver has no canonical carrier",
+                        recv_type.unwrap_or("typed"),
+                    ),
+                    span,
+                ));
+            };
+            let result = result?;
+            if matches!(
+                &result,
+                CtValue::Struct { type_name, .. } if type_name == "JetDataPlot"
+            ) && matches!(
+                receiver,
+                Expr::Ident(..) | Expr::ComptimeName { .. } | Expr::Field(..)
+            ) {
+                self.write_back(receiver, result.clone(), scope)?;
+            }
+            return Ok(result);
+        }
         // c139: an instance method the user wrote — `impl Type { fn … }` /
         // in-struct `fn`/`impl Trait { … }`. `recv`'s own `type_name` (not the
         // receiver expression's static type) picks the impl, so a value bound
@@ -2231,6 +2432,25 @@ impl<'a> Interp<'a> {
             self.impure_depth > 0,
         ) {
             return result;
+        }
+        // D-FILES-SCOPE1: the receiver keeps the original Authority carrier;
+        // only the shared TextLite/Prelude adapter performs the rooted read.
+        if let CtValue::Struct { type_name, fields } = &recv {
+            if type_name == "FileScope" && method == "read" {
+                let authority = fields
+                    .iter()
+                    .find_map(|(name, value)| (name == "authority").then_some(value))
+                    .and_then(super::super::super::Builtins::authority_holds)
+                    .ok_or_else(|| unsupported("malformed FileScope value", span))?;
+                let path = argv
+                    .first()
+                    .ok_or_else(|| unsupported("FileScope.read expects a path", span))?;
+                let path = as_string(path, span)?;
+                return Ok(match super::super::super::TextLite::fs_scope_read(&authority, path) {
+                    Ok(text) => CtValue::Present(Box::new(CtValue::Str(text))),
+                    Err(error) => CtValue::failed(Box::new(error)),
+                });
+            }
         }
         apply_method(&recv, method, argv, span)
     }

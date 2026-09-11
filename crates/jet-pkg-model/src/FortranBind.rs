@@ -17,6 +17,7 @@ pub struct BindResult {
     pub bound: Vec<String>,
     pub archive: PathBuf,
     pub layouts: Vec<ArrayLayoutFact>,
+    pub provenance: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -177,11 +178,23 @@ pub fn bind(
                 })
         })
         .collect();
+    let mut provenance = "schema=jet-fortran-bind-v1\n".to_string();
+    crate::ForeignBridge::append_boundary_for_artifact(
+        &mut provenance,
+        *crate::AST::binder_descriptor(crate::AST::ForeignLanguage::Fortran)
+            .ok_or_else(|| BindError::Source("Fortran binder descriptor is not registered".into()))?,
+        lib,
+        source_path,
+        &archive,
+        "gfortran=-c;-fPIC;-ffree-line-length-none/ar",
+    )
+    .map_err(BindError::IO)?;
     Ok(BindResult {
         source,
         bound: routines.into_iter().map(|r| r.jet_name).collect(),
         archive,
         layouts,
+        provenance,
     })
 }
 

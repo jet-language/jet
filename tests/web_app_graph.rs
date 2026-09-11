@@ -47,14 +47,119 @@ fn example_app_hello_graph_records_policy_and_modes() {
 }
 
 #[test]
+fn server_function_action_exposes_checked_wire_contract() {
+    let path = format!(
+        "{}/examples/features/web/web_app.jet",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let graph = check_facts(&path).web_app.expect("fn run() App graph");
+    let action = graph.actions.iter().find(|action| action.name == "save").unwrap();
+    assert!(!action.input_type.is_empty());
+    assert!(!action.output_type.is_empty());
+    assert!(!action.error_type.is_empty());
+    assert_eq!(action.endpoint, "/actions/save");
+    assert_eq!(action.method, "POST");
+    assert_eq!(action.csrf, "same-origin");
+    assert_eq!(
+        action.middleware,
+        vec![
+            "context".to_string(),
+            "auth".to_string(),
+            "csp".to_string(),
+            "logging".to_string(),
+            "observability".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn tanstack_start_graph_keeps_one_typed_reference_application() {
+    let path = format!(
+        "{}/examples/features/web/tanstack_start/run.jet",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let graph = check_facts(&path).web_app.expect("tanstack_start App graph");
+
+    let route_paths: Vec<_> = graph.routes.iter().map(|route| route.path.as_str()).collect();
+    assert_eq!(
+        route_paths,
+        vec!["/", "/orders", "/orders/:id", "/settings"],
+        "reference app must register one canonical route graph"
+    );
+    let orders = graph
+        .routes
+        .iter()
+        .find(|route| route.path == "/orders")
+        .expect("orders route");
+    assert_eq!(orders.handler, "orders_page");
+    assert_eq!(
+        orders.loader.as_ref().map(|loader| loader.handler.as_str()),
+        Some("load_orders")
+    );
+    assert!(
+        orders
+            .search_params
+            .iter()
+            .any(|field| field.name == "q" && field.ty == "String")
+    );
+    assert!(
+        graph
+            .actions
+            .iter()
+            .any(|action| action.name == "ship-order" && action.endpoint == "/actions/ship-order")
+    );
+    assert!(
+        graph.actions.iter().any(|action| {
+            action.name == "ship-order-progressive"
+                && action.endpoint == "/actions/ship-order-progressive"
+        })
+    );
+    assert_eq!(graph.queries.len(), 1);
+    assert_eq!(graph.queries[0].key, "orders.list");
+    assert_eq!(graph.queries[0].footprint, "orders");
+    assert_eq!(graph.stores.len(), 1);
+    assert_eq!(graph.stores[0].name, "Cart");
+    assert_eq!(graph.stores[0].history_limit, "8");
+
+}
+#[test]
+fn query_graph_facts_keep_explicit_key_and_dependency_identity() {
+    let root = common::unique_tmp("jet_query_graph");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("app.jet"),
+        r#"use core.web as web
+#Target(Web)
+use core.web.query as query
+fn home() WebPage -> {
+    first :: query.subscribe("orders")
+    second :: query.subscribe("orders")
+    return web.page("Orders", first.get())
+}
+fn run() App -> { return web.app().route("/", home).csr() }
+"#,
+    )
+    .unwrap();
+    let graph = check_facts(root.join("app.jet").to_str().unwrap())
+        .web_app
+        .expect("fn run() App graph");
+    assert_eq!(graph.queries.len(), 1);
+    assert_eq!(graph.queries[0].key, "orders");
+    assert_eq!(graph.queries[0].footprint, "ext:orders");
+    assert_eq!(graph.queries[0].kind, "subscribe");
+    assert_eq!(graph.queries[0].source, "home");
+}
+
+
+#[test]
 fn routes_from_expands_convention_files() {
     let root = common::unique_tmp("jet_app_routes_from");
     fs::create_dir_all(root.join("routes/about")).unwrap();
     fs::write(
         root.join("app.jet"),
         r#"use core.web as web
-fn about_page() WebPage { return web.page("About", "us") }
-fn run() App { return web.app().routes(from: "routes").ssr() }
+fn about_page() WebPage -> { return web.page("About", "us") }
+fn run() App -> { return web.app().routes(from: "routes").ssr() }
 "#,
     )
     .unwrap();
@@ -130,10 +235,10 @@ fn render_modes_mount_island_and_shared_tir() {
         root.join("app.jet"),
         r#"use core.web as web
 #Target(Web)
-fn home() WebPage { return web.page("H", "b") }
-fn dash() WebPage { return web.page("D", "b") }
+fn home() WebPage -> { return web.page("H", "b") }
+fn dash() WebPage -> { return web.page("D", "b") }
 fn plugins(prefix: String) {}
-fn run() App {
+fn run() App -> {
     return web.app()
         .route("/", home)
         .ssg()
@@ -182,7 +287,7 @@ fn expand_web_lens_and_explain_web_graph_json() {
     let stdout = String::from_utf8_lossy(&expand.stdout);
     assert!(stdout.contains("web —"));
     assert!(stdout.contains("hydration: dev-overlay (shared TIR: true)"));
-    assert!(stdout.contains("  / [csr] -> home"));
+    assert!(stdout.contains("  / [client] -> home"));
 
     let explain = Command::new(&jet)
         .args(["explain", "--web-graph", &path, "--json"])
@@ -194,7 +299,8 @@ fn expand_web_lens_and_explain_web_graph_json() {
         String::from_utf8_lossy(&explain.stderr)
     );
     let json = String::from_utf8_lossy(&explain.stdout);
-    assert!(json.contains("\"shared_tir\": true"));
-    assert!(json.contains("\"hydration\": \"dev-overlay\""));
-    assert!(json.contains("\"render\": \"csr\""));
+    let compact: String = json.chars().filter(|character| !character.is_whitespace()).collect();
+    assert!(compact.contains("\"shared_tir\":true"), "{json}");
+    assert!(compact.contains("\"hydration\":\"dev-overlay\""), "{json}");
+    assert!(compact.contains("\"render\":\"csr\""), "{json}");
 }

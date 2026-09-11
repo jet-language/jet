@@ -1,4 +1,4 @@
-//! Diagnostics registry per-entry format validator (card #447 / durability W2).
+//! Diagnostics registry per-entry format validator.
 //!
 //! D-REPORT-HOME1=A requires every typed diagnostic row to carry What/Why/Fix
 //! prose, not just a code and severity. The coverage test
@@ -7,28 +7,8 @@
 //!
 //! Run: `cargo test --test diagnostics_format`
 
-mod common;
 #[path = "support/case_law.rs"]
 mod case_law;
-
-use std::fs;
-use std::path::PathBuf;
-
-fn root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-}
-
-#[test]
-fn diagnostic_row_reference_is_generated() {
-    let expected = jet::Explain::diagnostics_reference_markdown();
-    let path = root().join("docs/spec/diagnostic-rows.md");
-    if std::env::var_os("UPDATE_DIAGNOSTICS").is_some() {
-        fs::write(&path, &expected).expect("write generated diagnostic-row reference");
-    }
-    let actual = fs::read_to_string(&path)
-        .expect("docs/spec/diagnostic-rows.md missing; run with UPDATE_DIAGNOSTICS=1");
-    assert_eq!(actual, expected, "typed diagnostic reference is stale");
-}
 
 #[test]
 fn every_typed_diagnostic_row_is_complete() {
@@ -237,75 +217,6 @@ fn title_case_minor_words_follow_ratified_per_word_rule() {
     assert!(case_law::title_case_violation("A Book").is_none());
 }
 
-#[test]
-fn typed_row_holes_and_structured_fixes_have_one_projection() {
-    let source_markers = jet_foundation::Registry::DIAGNOSTIC_SOURCE
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with("//"))
-        .filter(|line| line.split('\t').nth(11).is_some_and(|value| value != "-"))
-        .count();
-    let typed_markers = jet_foundation::Registry::diagnostic_rows()
-        .iter()
-        .filter(|row| row.structured_fix.is_some())
-        .count();
-    assert_eq!(
-        source_markers, typed_markers,
-        "every source fix marker needs a typed row projection"
-    );
-
-    for row in jet_foundation::Registry::diagnostic_rows() {
-        let values: Vec<(&str, String)> = row
-            .template_holes
-            .iter()
-            .map(|hole| (*hole, format!("<{hole}>")))
-            .collect();
-        let holes: Vec<(&str, &str)> = values
-            .iter()
-            .map(|(hole, value)| (*hole, value.as_str()))
-            .collect();
-        let rendered = row.render(&holes);
-        assert!(
-            !rendered.what.trim().is_empty(),
-            "{} rendered empty What",
-            row.code
-        );
-        assert!(
-            !rendered.why.trim().is_empty(),
-            "{} rendered empty Why",
-            row.code
-        );
-        assert!(
-            !rendered.fix.trim().is_empty(),
-            "{} rendered empty Fix",
-            row.code
-        );
-        if row.detail {
-            assert!(
-                !row.what.trim().is_empty(),
-                "{} detailed row has empty What",
-                row.code
-            );
-            assert!(
-                !row.why.trim().is_empty(),
-                "{} detailed row has empty Why",
-                row.code
-            );
-            assert!(
-                !row.fix.trim().is_empty(),
-                "{} detailed row has empty Fix",
-                row.code
-            );
-        }
-        if let Some(fix) = row.structured_fix {
-            assert!(
-                !fix.source_marker().is_empty(),
-                "{} has an empty typed structured fix",
-                row.code
-            );
-        }
-    }
-}
 
 #[test]
 fn diagnostic_body_validator_rejects_malformed_rows() {

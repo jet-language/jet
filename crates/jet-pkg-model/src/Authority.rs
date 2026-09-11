@@ -6,8 +6,11 @@
 //! pathname again before a caller uses the snapshot.
 
 use crate::Diagnostics::Diagnostic;
-use crate::Package::PackageFacts;
+use crate::Package::{PackageAuthority, PackageFacts};
 use crate::Syntax;
+use jet_foundation::Authority::{
+    covers, Authority as CanonicalAuthority, HostImportFact, Holds, TightenError, Verdict,
+};
 use std::fs::{self, File, Metadata};
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
@@ -21,9 +24,195 @@ const KIND_DIRECTORY: &str = "directory";
 
 /// The kind proven by a checked open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+
 pub enum AuthorityKind {
     File,
     Directory,
+}
+/// One physical path root held without following links. The resolver remains
+/// the sole source of filesystem identity; this wrapper only associates its
+/// checked root with the canonical rights-tree entry.
+#[derive(Debug, Clone)]
+pub struct NoFollowRoot {
+    right: String,
+    resolver: AuthorityResolver,
+}
+
+impl NoFollowRoot {
+    pub fn new(
+        right: impl Into<String>,
+        resolver: AuthorityResolver,
+    ) -> Result<Self, SandboxAuthorityError> {
+        let right = right.into();
+        let right = jet_foundation::Authority::parse_right(&right)
+            .ok_or_else(|| SandboxAuthorityError::InvalidRight(right.clone()))?;
+        Ok(Self { right, resolver })
+    }
+
+    pub fn right(&self) -> &str {
+        &self.right
+    }
+
+    pub fn root(&self) -> &Path {
+        self.resolver.root()
+    }
+
+    pub fn checked_file(&self, path: &Path) -> Result<CheckedFile, SandboxAuthorityError> {
+        self.resolver
+            .checked_file(path)
+            .map_err(SandboxAuthorityError::NoFollow)
+    }
+}
+
+/// Failure while projecting a host authority into a sandbox guest.
+#[derive(Debug, Clone)]
+pub enum SandboxAuthorityError {
+    InvalidRight(String),
+    Widened(TightenError),
+    UndeclaredRight(String),
+    MissingNeed(String),
+    MissingRoot(String),
+    NoFollow(AuthorityError),
+}
+
+impl std::fmt::Display for SandboxAuthorityError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidRight(right) => write!(f, "unknown authority right `{right}`"),
+            Self::Widened(error) => error.fmt(f),
+            Self::UndeclaredRight(right) => {
+                write!(f, "sandbox authority grants undeclared right `{right}`")
+            }
+            Self::MissingNeed(need) => {
+                write!(f, "sandbox authority does not satisfy declared need `{need}`")
+            }
+            Self::MissingRoot(right) => {
+                write!(f, "sandbox authority has no no-follow root for `{right}`")
+            }
+            Self::NoFollow(error) => error.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for SandboxAuthorityError {}
+
+/// Backend-neutral guest authority projection. `authority` is the one
+/// canonical rights carrier; `needs` is copied declaration data used to
+/// prevent a host from lending unrelated capability.
+#[derive(Debug, Clone)]
+pub struct SandboxAuthority {
+    authority: CanonicalAuthority,
+    needs: Holds,
+    roots: Vec<NoFollowRoot>,
+}
+
+impl SandboxAuthority {
+    /// Lend a host scope to a guest. Every requested right must be a
+    /// tighten-only child of the host and must satisfy a declared need.
+    pub fn lend(
+        package: &PackageAuthority,
+        host: &CanonicalAuthority,
+        requested: Holds,
+        roots: Vec<NoFollowRoot>,
+    ) -> Result<Self, SandboxAuthorityError> {
+        let needs = package
+            .needs
+            .iter()
+            .map(|right| {
+                jet_foundation::Authority::parse_right(right)
+                    .ok_or_else(|| SandboxAuthorityError::InvalidRight(right.clone()))
+            })
+            .collect::<Result<Holds, _>>()?;
+        let authority = host.tighten(&requested).map_err(SandboxAuthorityError::Widened)?;
+        for right in authority.holds() {
+            if !needs.iter().any(|need| covers(need, right)) {
+                return Err(SandboxAuthorityError::UndeclaredRight(right.clone()));
+            }
+        }
+        for root in &roots {
+            if !authority.allows(root.right()) {
+                return Err(SandboxAuthorityError::MissingRoot(root.right.clone()));
+            }
+        }
+        Ok(Self {
+            authority,
+            needs,
+            roots,
+        })
+    }
+
+    pub fn authority(&self) -> &CanonicalAuthority {
+        &self.authority
+    }
+    pub fn verdict(&self, right: &str) -> Verdict {
+        if self.authority.allows(right) {
+            Verdict::Allowed
+        } else {
+            Verdict::Missing
+        }
+    }
+
+
+    pub fn needs(&self) -> impl Iterator<Item = &str> {
+        self.needs.iter().map(String::as_str)
+    }
+
+    pub fn roots(&self) -> impl Iterator<Item = &NoFollowRoot> {
+        self.roots.iter()
+    }
+
+    /// Check the exact right requested by one host import fact.  The
+    /// foundation authority computes the verdict; this wrapper only maps a
+    /// denied verdict to the package-facing error and verifies that the
+    /// guest declared the same operation.
+    pub fn authorize_import(
+        &self,
+        import: &HostImportFact,
+    ) -> Result<(), SandboxAuthorityError> {
+        if self.authority.decide_import(import) != Verdict::Allowed {
+            return Err(SandboxAuthorityError::MissingNeed(
+                import.required_grant().to_string(),
+            ));
+        }
+        if !self
+            .needs
+            .iter()
+            .any(|need| covers(need, import.required_grant()))
+        {
+            return Err(SandboxAuthorityError::UndeclaredRight(
+                import.required_grant().to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Return the canonical typed decision for a host import.  Adapters use
+    /// this row directly instead of reconstructing a policy from `needs` or
+    /// from a resource path.
+    pub fn import_decision(
+        &self,
+        import: HostImportFact,
+    ) -> jet_foundation::Authority::HostImportDecision {
+        import.decision(&self.authority)
+    }
+
+    /// Authorize and open a file import through a matching no-follow root.
+    pub fn checked_file(
+        &self,
+        import: &HostImportFact,
+        path: &Path,
+    ) -> Result<CheckedFile, SandboxAuthorityError> {
+        self.authorize_import(import)?;
+        let root = self
+            .roots
+            .iter()
+            .find(|root| {
+                covers(root.right(), import.required_grant())
+                    || covers(import.required_grant(), root.right())
+            })
+            .ok_or_else(|| SandboxAuthorityError::MissingRoot(import.required_grant().to_string()))?;
+        root.checked_file(path)
+    }
 }
 
 /// Stable identity of the object that was opened.
@@ -115,8 +304,8 @@ pub struct CheckedDirectory {
     pub relative: PathBuf,
     pub identity: FileIdentity,
     pub handle: Arc<File>,
+    allow_hardlinks: bool,
 }
-
 /// A parsed canonical `package.jet` plus the opened manifest snapshot.
 #[derive(Debug, Clone)]
 pub struct CheckedManifest {
@@ -393,6 +582,7 @@ pub struct AuthorityResolver {
     root: PathBuf,
     root_identity: FileIdentity,
     root_handle: Arc<File>,
+    allow_hardlinks: bool,
 }
 
 impl AuthorityResolver {
@@ -434,6 +624,20 @@ impl AuthorityResolver {
 
     /// Open and pin a regular authority root directory.
     pub fn open(root: &Path) -> Result<Self, AuthorityError> {
+        Self::open_with_hardlink_policy(root, false)
+    }
+
+    /// Open an immutable store object whose payload files may be shared by
+    /// hardlink. The caller must have verified the store object before using
+    /// this resolver; ordinary project authority stays single-link only.
+    pub fn open_store(root: &Path) -> Result<Self, AuthorityError> {
+        Self::open_with_hardlink_policy(root, true)
+    }
+
+    fn open_with_hardlink_policy(
+        root: &Path,
+        allow_hardlinks: bool,
+    ) -> Result<Self, AuthorityError> {
         let root = Self::effective_root(root);
         let metadata = Self::inspect_root(root)?;
         let expected_root_identity =
@@ -475,6 +679,7 @@ impl AuthorityResolver {
             root: canonical,
             root_identity,
             root_handle: Arc::new(handle),
+            allow_hardlinks,
         })
     }
 
@@ -543,6 +748,7 @@ impl AuthorityResolver {
             root: directory.path.clone(),
             root_identity: directory.identity.clone(),
             root_handle: Arc::clone(&directory.handle),
+            allow_hardlinks: directory.allow_hardlinks,
         }
     }
 
@@ -565,7 +771,7 @@ impl AuthorityResolver {
                 actual: kind_name(&metadata),
             });
         }
-        require_single_link_file(&full, &metadata)?;
+        self.check_file_links(&full, &metadata)?;
         let identity = FileIdentity::from_metadata(&metadata, AuthorityKind::File);
         if metadata.len() > crate::SHA256::MAX_TREE_FILE_BYTES {
             return Err(authority_limit_error(
@@ -607,7 +813,7 @@ impl AuthorityResolver {
         {
             return Err(AuthorityError::Changed(full));
         }
-        require_single_link_file(&full, &final_metadata)?;
+        self.check_file_links(&full, &final_metadata)?;
         let checked = CheckedFile {
             path: full,
             relative,
@@ -643,6 +849,7 @@ impl AuthorityResolver {
             relative,
             identity,
             handle: Arc::new(handle),
+            allow_hardlinks: self.allow_hardlinks,
         };
         self.revalidate_directory(&checked)?;
         Ok(checked)
@@ -930,7 +1137,9 @@ impl AuthorityResolver {
             budget.record_file(&file.path, file.bytes.len())?;
             let source = file.text()?;
             if crate::WorkspacePlan::declares_workspace_module(&source) {
-                let role = if name.to_str() == Some(crate::Syntax::WORKSPACE_FILE) {
+                let role = if name.to_str() == Some(crate::Syntax::WORKSPACE_FILE)
+                    || crate::WorkspacePlan::declares_workspace_members(&source)
+                {
                     crate::WorkspacePlan::WorkspaceSourceRole::Index
                 } else {
                     crate::WorkspacePlan::WorkspaceSourceRole::Authority
@@ -1146,17 +1355,8 @@ impl AuthorityResolver {
                     detail: error.to_string(),
                 })?;
                 budget.ensure_file(&self.root.join(&relative), metadata.len())?;
-                let file = match self.checked_file(&relative) {
-                    Ok(file) => file,
-                    Err(error) if is_hardlink_error(&error) => continue,
-                    Err(error) => return Err(error),
-                };
-                if let Err(error) = self.revalidate_file(&file) {
-                    if is_hardlink_error(&error) {
-                        continue;
-                    }
-                    return Err(error);
-                }
+                let file = self.checked_file(&relative)?;
+                self.revalidate_file(&file)?;
                 budget.record_file(&file.path, file.bytes.len())?;
                 files.push(file);
             }
@@ -1253,9 +1453,21 @@ impl AuthorityResolver {
             return Err(AuthorityError::Changed(path.to_path_buf()));
         }
         if kind == AuthorityKind::File {
-            require_single_link_file(path, &metadata)?;
+            self.check_file_links(path, &metadata)?;
         }
         Ok(())
+    }
+
+    fn check_file_links(
+        &self,
+        path: &Path,
+        metadata: &Metadata,
+    ) -> Result<(), AuthorityError> {
+        if self.allow_hardlinks {
+            Ok(())
+        } else {
+            require_single_link_file(path, metadata)
+        }
     }
 
     fn validate_checked_path(&self, path: &Path, relative: &Path) -> Result<(), AuthorityError> {
@@ -1447,12 +1659,6 @@ fn require_single_link_file(path: &Path, metadata: &Metadata) -> Result<(), Auth
     }
 }
 
-fn is_hardlink_error(error: &AuthorityError) -> bool {
-    matches!(
-        error,
-        AuthorityError::Invalid { detail, .. } if detail == HARDLINK_DETAIL
-    )
-}
 
 fn kind_name_from_file_type(file_type: &std::fs::FileType) -> &'static str {
     if file_type.is_dir() {
@@ -1618,13 +1824,25 @@ mod authority_walk_tests {
             .expect("source directory is an authority candidate");
         assert_eq!(resolver.root(), fs::canonicalize(&root).unwrap());
 
-        let temp = std::env::temp_dir();
-        assert!(
-            AuthorityResolver::open_for_authority_walk(&temp)
-                .unwrap()
-                .is_none(),
-            "shared temp must stay discovery space"
-        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // Do not assume `std::env::temp_dir()` is world-writable: agent
+            // scratch lives on disk under `$HOME` (jet-env rejects tmpfs /tmp).
+            let shared = temp_root("shared-space");
+            let _ = fs::remove_dir_all(&shared);
+            fs::create_dir_all(&shared).unwrap();
+            fs::write(shared.join("noise.jet"), "fn run() {}\n").unwrap();
+            fs::set_permissions(&shared, fs::Permissions::from_mode(0o777)).unwrap();
+            assert!(
+                AuthorityResolver::open_for_authority_walk(&shared)
+                    .unwrap()
+                    .is_none(),
+                "shared temp must stay discovery space"
+            );
+            fs::set_permissions(&shared, fs::Permissions::from_mode(0o700)).unwrap();
+            fs::remove_dir_all(&shared).unwrap();
+        }
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

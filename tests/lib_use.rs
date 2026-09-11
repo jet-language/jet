@@ -242,10 +242,14 @@ fn executable_is_not_importable() {
     );
 }
 
-/// `use <lib>;` on a declared-but-unrealized library points at `jetpack env --prep`
-/// (E0983).
+/// `use <lib>;` on a declared-but-unrealized library remains an E0983 when
+/// preparation is explicitly refused with `--no-prepare`.
+///
+/// A default `jet run` delegates project preparation to Jetpack before this
+/// compiler boundary is reached.
+///
 #[test]
-fn unrealized_library_points_at_build() {
+fn unrealized_library_points_at_build_when_preparation_is_refused() {
     let s = Scratch::new("unrealized");
     let hangar_root = s.join("hangar-root");
     fs::create_dir_all(hangar_root.join("hangar")).unwrap();
@@ -265,7 +269,7 @@ fn unrealized_library_points_at_build() {
     fs::create_dir_all(consumer.join("build")).unwrap();
 
     let out = Command::new(jet_bin())
-        .args(["run", "main.jet"])
+        .args(["run", "main.jet", "--no-prepare"])
         .current_dir(&consumer)
         .env("JETPACK_ROOT", &hangar_root)
         .output()

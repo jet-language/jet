@@ -1,7 +1,7 @@
 use super::alloc_ptrs::{db_error_ty, db_row_ty, io_error_ty, result_ty};
-use super::core_types::{encoding_error_ty, json_error_ty, json_ty, u8_ty, unit_ty};
+use super::core_types::{encoding_error_ty, json_ty, u8_ty, unit_ty};
 use crate::Syntax;
-use crate::AST::{AccessConvention, Type};
+use crate::AST::{AccessConvention, FunctionCallMetadata, Type};
 
 /// c109 Phase 20: the polymorphic core specials whose return type is resolved by
 /// `infer_core_call`'s bespoke arg-type logic (NOT the fixed `core_fixed_sig`
@@ -13,6 +13,9 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
     matches!(
         (module, name),
         ("core.prelude", "keep")
+            // D-TEST-HISTORY1=A: the operation type is explicit while the
+            // callback/result shape is resolved by the Core call arm.
+            | ("core.testing", "histories")
             | ("core.math", "abs")
             | ("core.math", "min")
             | ("core.math", "max")
@@ -140,8 +143,9 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
                 | "core.encoding.yaml",
                 "to_string" | "to_string_pretty" | "decode",
             )
-            | ("core.encoding.csv", "query")
             | ("core.sys", "decode")
+            | ("core.db", "decode")
+            | ("core.encoding.csv", "query")
             | ("core.encoding.cbor", "parse" | "decode" | "to_bytes" | "to_bytes_canonical")
             | ("core.encoding.xml", "decode" | "decode_bytes" | "expanded_name")
             // D-REACT1=B: the reactive producers return `Signal<T>`/`Derived<T>` whose
@@ -151,11 +155,14 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.tasks", "after")
             | (
                 "core.data",
-                "csv" | "json" | "csv_reader" | "json_reader" | "count" | "table" | "rows"
-                    | "series" | "values" | "schema"
-                    | "missing_count" | "lazy" | "lazy_filter" | "lazy_sort_by" | "collect"
-                    | "plan" | "filter" | "sort_by" | "group_count" | "group_sum" | "group_mean"
-                    | "inner_join" | "left_join" | "pivot_sum" | "query",
+                "csv" | "json" | "csv_reader" | "json_reader" | "count" | "schema" | "plot"
+                    | "load" | "load_default" | "file" | "file_member" | "url" | "database"
+                    | "value" | "snapshot"
+                    | "inner_join" | "left_join" | "pivot_sum" | "query" | "track",
+            )
+            | (
+                "core.data.plot",
+                "plot" | "inspect" | "inspect_json" | "text" | "svg" | "show" | "render",
             )
             | ("core.crypto.vault", "current" | "versions" | "load" | "status"
                 | "prepare_generate" | "prepare_store" | "prepare_rotate" | "prepare_retire" | "prepare_revoke"
@@ -163,6 +170,38 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
                 | "export_to_recipients" | "export_to_passphrase" | "prepare_import_wrapped"
                 | "authorize_wrapped_import" | "commit_import_wrapped")
             | ("core.compute", "gradient" | "value_and_gradient" | "vjp" | "jvp")
+            // D-FLAGSHIP-WEBAPI1=A: generic table/store wrappers resolve their
+            // element type in `infer_core_call`, not in this erased fallback.
+            | (
+                "core.web.table",
+                "new" | "new_keyed" | "column" | "with_column" | "with_server_page"
+                    | "state" | "facts" | "keys" | "page_state" | "sort" | "filter" | "page"
+                    | "sort_by" | "filter_by" | "paginate" | "set_rows" | "set_selected"
+                    | "toggle_selection" | "clear_selection" | "focus" | "clear_focus" | "focused_key"
+                    | "selected_keys" | "selected_rows"
+                    | "insert_row" | "replace_row" | "update_row" | "remove_row"
+                    | "first_page" | "next_page" | "last_page" | "visible_rows",
+            )
+            | (
+                "core.web.virtual",
+                "window" | "window_measured" | "slice" | "indices"
+                    | "plan" | "plan_measured" | "plan_from_sizes" | "plan_indices"
+                    | "plan_slice" | "plan_viewport" | "plan_measure"
+                    | "plan_viewport_state" | "plan_scroll_to" | "plan_resize"
+                    | "plan_viewport_measure" | "plan_facts",
+            )
+            | (
+                "core.web.store",
+                "new" | "with_history" | "value" | "transaction" | "update" | "batch"
+                    | "set" | "set_state" | "optimistic" | "patch" | "patch_active"
+                    | "patch_commit" | "patch_generation" | "patch_rollback"
+                    | "patch_transaction" | "back" | "forward" | "jump" | "scrub" | "restore"
+                    | "history" | "history_at" | "events" | "events_since" | "clear_history"
+                    | "history_enabled" | "history_limit" | "set_history_limit" | "cursor"
+                    | "current_generation" | "subscribe" | "subscribe_selector"
+                    | "subscription_active" | "subscription_unsubscribe" | "derived" | "selector"
+                    | "inspect" | "facts_json" | "event_json",
+            )
     )
 }
 
@@ -181,6 +220,8 @@ pub fn core_fixed_sig(
 /// A registered row is authoritative for the ordinary call path. Some
 /// polymorphic spellings still have a fixed default shape in this module; use
 /// that shape only when the row projection cannot carry the resolved type.
+/// The inner `None` remains the raw no-return marker; callers that need a
+/// concrete return type should use `core_call_semantic_signature`.
 pub fn core_call_signature(
     module: &str,
     name: &str,
@@ -191,6 +232,18 @@ pub fn core_call_signature(
         }
     }
     core_fixed_sig_impl(module, name)
+}
+/// Project a checked Core call into its concrete semantic return type.
+///
+/// The fixed-signature table uses the inner `None` to record a registered
+/// no-return call. The outer `None` remains the distinct "no checking fact"
+/// state, so an unknown call can never acquire `Unit` by projection.
+pub fn core_call_semantic_signature(
+    module: &str,
+    name: &str,
+) -> Option<(Vec<(AccessConvention, Type)>, Type)> {
+    core_call_signature(module, name)
+        .map(|(params, ret)| (params, ret.unwrap_or_else(unit_ty)))
 }
 
 /// Complete the signature projection for polymorphic Core spellings whose
@@ -284,6 +337,861 @@ pub fn core_call_has_safe_defaults(module: &str, name: &str) -> bool {
         )
 }
 
+fn web_named(name: &str) -> Type {
+    Type::Named(name.to_string())
+}
+
+fn web_list(inner: Type) -> Type {
+    Type::List(Box::new(inner))
+}
+
+fn web_map_string() -> Type {
+    Type::Map {
+        key: Box::new(Type::String),
+        key_span: None,
+        value: Box::new(Type::String),
+    }
+}
+
+fn web_fn(param: Type, ret: Type) -> Type {
+    Type::Fn {
+        params: vec![param],
+        ret: Some(Box::new(ret)),
+        effect_bound: None,
+        return_view_provenance: None,
+        param_contract: None,
+        call_metadata: None,
+    }
+}
+
+fn web_apply(name: &str, arg: Type) -> Type {
+    Type::Apply {
+        name: name.to_string(),
+        args: vec![arg],
+    }
+}
+
+fn web_result(ok: Type) -> Type {
+    result_ty(ok, Type::String)
+}
+fn web_callback_result(ok: Type) -> Type {
+    result_ty(ok, Type::Named(Syntax::TYPE_ERR.to_string()))
+}
+
+fn web_fixed_sig(
+    module: &str,
+    name: &str,
+) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
+    let read = AccessConvention::Read;
+    let string = Type::String;
+    let int = Type::Int;
+    let bool_ = Type::Bool;
+    let t = web_named("T");
+    let table = web_apply("WebTable", t.clone());
+    let table_column = web_apply("WebTableColumn", t.clone());
+    let table_page = web_apply("WebTablePage", t.clone());
+    let table_row = web_apply("WebTableRow", t.clone());
+    let table_state = web_named("WebTableState");
+    let table_direction = web_named("WebTableSortDirection");
+    let virtual_window = web_named("WebVirtualWindow");
+    let virtual_plan = web_named("WebVirtualPlan");
+    let virtual_viewport = web_named("WebVirtualPlanViewport");
+    let router = web_named("WebRouter");
+    let router_field = web_named("WebRouterField");
+    let router_codec = web_named("WebRouterSearchCodec");
+    let navigation = web_named("WebNavigation");
+    let http_router = web_named("HTTPRouter");
+    let query = web_named("WebQuery");
+    let query_mode = web_named("WebQueryNetworkMode");
+    let mutation_state = web_named("WebMutationState");
+    let query_mutation = web_fn(
+        string.clone(),
+        web_callback_result(string.clone()),
+    );
+    let query_replay = web_fn(string.clone(), web_callback_result(unit_ty()));
+    let form_action_error = web_named("WebFormActionError");
+    let signal = web_apply("Signal", t.clone());
+    let form = web_named("WebForm");
+    let form_input = web_named("WebFormInput");
+    let form_field = web_named("WebFormFieldSpec");
+    let form_typed = web_named("WebFormTyped");
+    let form_chain = web_named("WebFormValidationChain");
+    let form_decoded = web_named("WebFormDecodedInput");
+    let form_errors = web_named("WebFormErrorState");
+    let form_lifecycle = web_named("WebFormLifecycle");
+    let form_validation = web_named("WebFormTypedValidation");
+    let form_timing = web_named("WebFormValidationTiming");
+    let form_validator = web_fn(string.clone(), web_callback_result(unit_ty()));
+    let form_submission = web_named("WebFormTypedSubmission");
+    let form_subscription = web_apply("Derived", web_named("WebFormFieldState"));
+    match (module, name) {
+        // D-WEBFORM1=A: the ratified `web.form(Model, action: handler)`
+        // surface lowers to the existing typed-form runtime boundary. Sema
+        // replaces the model/action source values with a derived input and
+        // stable action name before this signature is consumed.
+        ("core.web", "openapi") => Some((vec![(read, http_router)], Some(string.clone()))),
+        ("core.web", "form") => Some((
+            vec![(read, form_input.clone()), (read, string.clone())],
+            Some(form_typed.clone()),
+        )),
+        ("core.web.router", "route") => Some((
+            vec![
+                (read, router.clone()),
+                (read, string.clone()),
+                (read, web_list(router_field.clone())),
+                (read, web_list(router_field.clone())),
+                (read, web_fn(navigation.clone(), web_callback_result(string.clone()))),
+            ],
+            Some(web_result(router.clone())),
+        )),
+        ("core.web.router", "route_with_search_codec") => Some((
+            vec![
+                (read, router.clone()),
+                (read, string.clone()),
+                (read, web_list(router_field.clone())),
+                (read, web_list(router_field.clone())),
+                (read, router_codec.clone()),
+                (read, web_fn(navigation.clone(), web_callback_result(string.clone()))),
+            ],
+            Some(web_result(router.clone())),
+        )),
+        ("core.web.router", "not_found") => Some((
+            vec![
+                (read, router.clone()),
+                (read, web_fn(string.clone(), string.clone())),
+            ],
+            Some(web_result(router.clone())),
+        )),
+        ("core.web.router", "navigate" | "preload") => Some((
+            vec![(read, router.clone()), (read, string.clone())],
+            Some(web_result(web_named("WebNavigation"))),
+        )),
+        ("core.web.router", "abort") => {
+            Some((vec![(read, router.clone())], Some(bool_.clone())))
+        }
+        ("core.web.router", "stale" | "invalidate" | "collect") => Some((
+            vec![(read, router.clone()), (read, string.clone())],
+            Some(int.clone()),
+        )),
+        ("core.web.router", "cache_state") => Some((
+            vec![(read, router.clone()), (read, string.clone())],
+            Some(web_named("WebRouterCacheState")),
+        )),
+        ("core.web.router", "cache_show") => {
+            Some((vec![(read, router)], Some(string.clone())))
+        }
+        ("core.web.router", "current") => Some((
+            vec![(read, router)],
+            Some(web_named("WebNavigationState")),
+        )),
+        ("core.web.router", "show") => Some((vec![(read, router)], Some(string.clone()))),
+        ("core.web.router", "link") => Some((
+            vec![
+                (read, router),
+                (read, string.clone()),
+                (read, web_map_string()),
+                (read, web_map_string()),
+            ],
+            Some(web_result(string.clone())),
+        )),
+        ("core.web.query", "new") => Some((
+            vec![(read, string.clone()), (read, web_named("LiveQuery"))],
+            Some(query.clone()),
+        )),
+        ("core.web.query", "live") => Some((
+            vec![
+                (read, string.clone()),
+                (read, string.clone()),
+                (read, string.clone()),
+                (read, Type::Fn {
+                    params: vec![],
+                    ret: Some(Box::new(web_callback_result(string.clone()))),
+                    effect_bound: None,
+                    return_view_provenance: None,
+                    param_contract: None,
+                    call_metadata: None,
+                }),
+            ],
+            Some(query.clone()),
+        )),
+        ("core.web.query", "mutate") => Some((
+            vec![
+                (read, query.clone()),
+                (read, string.clone()),
+                (read, Type::Option(Box::new(string.clone()))),
+                (read, query_mutation.clone()),
+            ],
+            Some(mutation_state.clone()),
+        )),
+        ("core.web.query", "mutate_with_invalidations") => Some((
+            vec![
+                (read, query.clone()),
+                (read, string.clone()),
+                (read, Type::Option(Box::new(string.clone()))),
+                (read, web_list(string.clone())),
+                (read, query_mutation),
+            ],
+            Some(mutation_state.clone()),
+        )),
+        ("core.web.query", "retry") => Some((
+            vec![(read, query.clone()), (read, query_replay)],
+            Some(web_result(int.clone())),
+        )),
+        ("core.web.query", "subscribe") => {
+            Some((vec![(read, string.clone())], Some(query.clone())))
+        }
+        ("core.web.query", "invalidate") => {
+            Some((vec![(read, query.clone())], Some(int.clone())))
+        }
+        ("core.web.query", "get" | "show") => {
+            Some((vec![(read, query.clone())], Some(string.clone())))
+        }
+        ("core.web.query", "state") => Some((
+            vec![(read, query.clone())],
+            Some(web_named("WebQueryState")),
+        )),
+        ("core.web.query", "state_signal") => Some((
+            vec![(read, query.clone())],
+            Some(web_apply("Signal", web_named("WebQueryState"))),
+        )),
+        ("core.web.query", "mutation_state") => Some((
+            vec![(read, query.clone())],
+            Some(mutation_state.clone()),
+        )),
+        ("core.web.query", "mutation_signal") => Some((
+            vec![(read, query.clone())],
+            Some(web_apply("Signal", mutation_state.clone())),
+        )),
+        ("core.web.query", "queue") => Some((
+            vec![(read, query.clone()), (read, string.clone())],
+            Some(web_result(int.clone())),
+        )),
+        ("core.web.query", "refresh") => {
+            Some((vec![(read, query)], Some(web_result(unit_ty()))))
+        }
+        ("core.web.query", "facts") => {
+            Some((vec![(read, query.clone())], Some(string.clone())))
+        }
+        ("core.web.query", "cancel") => {
+            Some((vec![(read, query.clone())], Some(bool_.clone())))
+        }
+        ("core.web.query", "set_online") => Some((
+            vec![(read, query.clone()), (read, bool_.clone())],
+            Some(unit_ty()),
+        )),
+        ("core.web.query", "set_mode") => Some((
+            vec![(read, query), (read, query_mode)],
+            Some(unit_ty()),
+        )),
+        ("core.web.forms", "new") => Some((vec![(read, string.clone())], Some(form.clone()))),
+        ("core.web.forms", "field") => Some((
+            vec![
+                (read, form.clone()),
+                (read, string.clone()),
+                (read, string.clone()),
+                (read, bool_.clone()),
+            ],
+            Some(web_result(form.clone())),
+        )),
+        ("core.web.forms", "set") => Some((
+            vec![
+                (read, form.clone()),
+                (read, string.clone()),
+                (read, string.clone()),
+            ],
+            Some(web_result(unit_ty())),
+        )),
+        ("core.web.forms", "blur") => Some((
+            vec![(read, form.clone()), (read, string.clone())],
+            Some(web_result(unit_ty())),
+        )),
+        ("core.web.forms", "validate") => {
+            Some((vec![(read, form.clone())], Some(web_result(unit_ty()))))
+        }
+        ("core.web.forms", "validate_async") => Some((
+            vec![(read, form.clone())],
+            Some(form.clone()),
+        )),
+        ("core.web.forms", "submit" | "no_script") => Some((
+            vec![(read, form.clone())],
+            Some(web_result(string.clone())),
+        )),
+        ("core.web.forms", "html" | "show") => {
+            Some((vec![(read, form.clone())], Some(string.clone())))
+        }
+        ("core.web.forms", "input") => Some((
+            vec![
+                (read, string.clone()),
+                (read, web_list(form_field.clone())),
+            ],
+            Some(web_result(form_input.clone())),
+        )),
+        ("core.web.forms", "input_rename") => Some((
+            vec![
+                (read, form_input.clone()),
+                (read, string.clone()),
+                (read, string.clone()),
+            ],
+            Some(web_result(form_input.clone())),
+        )),
+        ("core.web.forms", "input_exclude") => Some((
+            vec![(read, form_input.clone()), (read, string.clone())],
+            Some(web_result(form_input.clone())),
+        )),
+        ("core.web.forms", "input_group") => Some((
+            vec![
+                (read, form_input.clone()),
+                (read, string.clone()),
+                (read, string.clone()),
+            ],
+            Some(web_result(form_input.clone())),
+        )),
+        ("core.web.forms", "input_replace") => Some((
+            vec![
+                (read, form_input.clone()),
+                (read, string.clone()),
+                (read, form_field.clone()),
+            ],
+            Some(web_result(form_input.clone())),
+        )),
+        ("core.web.forms", "typed") => Some((
+            vec![(read, form_input.clone()), (read, string.clone())],
+            Some(web_result(form_typed.clone())),
+        )),
+        ("core.web.forms", "typed_set") => Some((
+            vec![
+                (read, form_typed.clone()),
+                (read, string.clone()),
+                (read, string.clone()),
+            ],
+            Some(web_result(unit_ty())),
+        )),
+        ("core.web.forms", "typed_set_async_validator") => Some((
+            vec![
+                (read, form_typed.clone()),
+                (read, string.clone()),
+                (read, form_timing.clone()),
+                (read, int.clone()),
+                (read, form_validator.clone()),
+            ],
+            Some(web_result(unit_ty())),
+        )),
+        ("core.web.forms", "typed_set_action") => Some((
+            vec![
+                (read, form_typed.clone()),
+                (
+                    read,
+                    web_fn(
+                        form_decoded.clone(),
+                        result_ty(string.clone(), form_action_error.clone()),
+                    ),
+                ),
+            ],
+            Some(unit_ty()),
+        )),
+        ("core.web.forms", "action_error") => Some((vec![], Some(form_action_error.clone()))),
+        ("core.web.forms", "action_field_error") => Some((
+            vec![
+                (read, form_action_error.clone()),
+                (read, string.clone()),
+                (read, string.clone()),
+            ],
+            Some(form_action_error.clone()),
+        )),
+        ("core.web.forms", "action_form_error") => Some((
+            vec![(read, form_action_error.clone()), (read, string.clone())],
+            Some(form_action_error.clone()),
+        )),
+        ("core.web.forms", "typed_blur") => Some((
+            vec![(read, form_typed.clone()), (read, string.clone())],
+            Some(web_result(unit_ty())),
+        )),
+        ("core.web.forms", "typed_validate") => Some((
+            vec![(read, form_typed.clone())],
+            Some(web_result(unit_ty())),
+        )),
+        ("core.web.forms", "typed_validate_async") => Some((
+            vec![(read, form_typed.clone())],
+            Some(form_validation.clone()),
+        )),
+        ("core.web.forms", "typed_validate_field") => Some((
+            vec![
+                (read, form_typed.clone()),
+                (read, string.clone()),
+                (read, form_timing.clone()),
+                (read, form_validator.clone()),
+            ],
+            Some(form_chain.clone()),
+        )),
+        ("core.web.forms", "typed_validation_render") => Some((
+            vec![(read, form_chain)],
+            Some(string.clone()),
+        )),
+        ("core.web.forms", "typed_submit") | ("core.web.forms", "typed_no_script") => {
+            Some((
+                vec![(read, form_typed.clone())],
+                Some(web_result(string.clone())),
+            ))
+        }
+        ("core.web.forms", "typed_submit_async") => Some((
+            vec![(read, form_typed.clone())],
+            Some(form_submission.clone()),
+        )),
+        ("core.web.forms", "typed_post") => Some((
+            vec![(read, form_typed.clone()), (read, string.clone())],
+            Some(web_result(string.clone())),
+        )),
+        ("core.web.forms", "typed_decode_post") => Some((
+            vec![(read, form_typed.clone()), (read, string.clone())],
+            Some(web_result(form_decoded.clone())),
+        )),
+        ("core.web.forms", "typed_html" | "typed_show") => Some((
+            vec![(read, form_typed.clone())],
+            Some(string.clone()),
+        )),
+        ("core.web.forms", "typed_state") => Some((
+            vec![(read, form_typed.clone())],
+            Some(web_named("WebFormState")),
+        )),
+        ("core.web.forms", "typed_lifecycle") => Some((
+            vec![(read, form_typed.clone())],
+            Some(form_lifecycle.clone()),
+        )),
+        ("core.web.forms", "typed_errors") => Some((
+            vec![(read, form_typed.clone())],
+            Some(form_errors.clone()),
+        )),
+        ("core.web.forms", "typed_focus") => Some((
+            vec![(read, form_typed.clone()), (read, string.clone())],
+            Some(web_result(unit_ty())),
+        )),
+        ("core.web.forms", "typed_cancel") => Some((
+            vec![(read, form_typed.clone())],
+            Some(unit_ty()),
+        )),
+        ("core.web.forms", "typed_select_field") => Some((
+            vec![(read, form_typed), (read, string)],
+            Some(web_result(form_subscription)),
+        )),
+        ("core.web.forms", "typed_validation_wait") => Some((
+            vec![(AccessConvention::Move, form_validation.clone())],
+            Some(web_result(unit_ty())),
+        )),
+        ("core.web.forms", "typed_validation_cancel") => Some((
+            vec![(read, form_validation)],
+            Some(unit_ty()),
+        )),
+        ("core.web.forms", "typed_submission_wait") => Some((
+            vec![(AccessConvention::Move, form_submission.clone())],
+            Some(web_result(string.clone())),
+        )),
+        ("core.web.forms", "typed_submission_cancel") => Some((
+            vec![(read, form_submission)],
+            Some(unit_ty()),
+        )),
+        ("core.web.table", "new") => Some((
+            vec![(read, string.clone()), (read, web_list(t.clone()))],
+            Some(table.clone()),
+        )),
+        ("core.web.table", "new_keyed") => Some((
+            vec![
+                (read, string.clone()),
+                (read, web_list(t.clone())),
+                (read, web_fn(t.clone(), string.clone())),
+            ],
+            Some(table.clone()),
+        )),
+        ("core.web.table", "column") => Some((
+            vec![
+                (read, string.clone()),
+                (read, string.clone()),
+                (read, web_fn(t.clone(), string.clone())),
+            ],
+            Some(table_column.clone()),
+        )),
+        ("core.web.table", "with_column") => Some((
+            vec![(read, table.clone()), (read, table_column)],
+            Some(table.clone()),
+        )),
+        ("core.web.table", "with_server_page") => Some((
+            vec![
+                (read, table.clone()),
+                (
+                    read,
+                    web_fn(
+                        table_state.clone(),
+                        web_callback_result(table_page.clone()),
+                    ),
+                ),
+            ],
+            Some(table.clone()),
+        )),
+        ("core.web.table", "state") => Some((vec![(read, table.clone())], Some(table_state.clone()))),
+        ("core.web.table", "facts") => Some((vec![(read, table.clone())], Some(string.clone()))),
+        ("core.web.table", "keys") => Some((
+            vec![(read, table.clone())],
+            Some(web_result(web_list(string.clone()))),
+        )),
+        ("core.web.table", "page_state") => Some((
+            vec![(read, table.clone())],
+            Some(web_result(table_page.clone())),
+        )),
+        ("core.web.table", "sort") => Some((
+            vec![
+                (read, web_list(t.clone())),
+                (read, bool_.clone()),
+                (read, web_fn(t.clone(), string.clone())),
+            ],
+            Some(web_list(t.clone())),
+        )),
+        ("core.web.table", "filter") => Some((
+            vec![
+                (read, web_list(t.clone())),
+                (read, web_fn(t.clone(), bool_.clone())),
+            ],
+            Some(web_list(t.clone())),
+        )),
+        ("core.web.table", "page") => Some((
+            vec![
+                (read, web_list(t.clone())),
+                (read, int.clone()),
+                (read, int.clone()),
+            ],
+            Some(table_page.clone()),
+        )),
+        ("core.web.table", "sort_by") => Some((
+            vec![(read, table.clone()), (read, string.clone()), (read, table_direction)],
+            Some(table.clone()),
+        )),
+        ("core.web.table", "filter_by") => Some((
+            vec![(read, table.clone()), (read, string.clone()), (read, string.clone())],
+            Some(table.clone()),
+        )),
+        ("core.web.table", "paginate") => Some((
+            vec![(read, table.clone()), (read, int.clone()), (read, int.clone())],
+            Some(table.clone()),
+        )),
+        ("core.web.table", "set_rows") => Some((
+            vec![(read, table.clone()), (read, web_list(t.clone()))],
+            Some(web_result(unit_ty())),
+        )),
+        ("core.web.table", "set_selected") => Some((
+            vec![(read, table.clone()), (read, string.clone()), (read, bool_.clone())],
+            Some(web_result(table.clone())),
+        )),
+        ("core.web.table", "toggle_selection") => Some((
+            vec![(read, table.clone()), (read, string.clone())],
+            Some(web_result(table.clone())),
+        )),
+        ("core.web.table", "focus") => Some((
+            vec![(read, table.clone()), (read, string.clone())],
+            Some(web_result(table.clone())),
+        )),
+        ("core.web.table", "clear_focus") => {
+            Some((vec![(read, table.clone())], Some(table.clone())))
+        }
+        ("core.web.table", "focused_key") => Some((
+            vec![(read, table.clone())],
+            Some(Type::Option(Box::new(string.clone()))),
+        )),
+        ("core.web.table", "clear_selection") => {
+            Some((vec![(read, table.clone())], Some(table.clone())))
+        }
+        ("core.web.table", "selected_keys") => Some((
+            vec![(read, table.clone())],
+            Some(web_list(string.clone())),
+        )),
+        ("core.web.table", "selected_rows") => Some((
+            vec![(read, table.clone())],
+            Some(web_result(web_list(table_row.clone()))),
+        )),
+        ("core.web.table", "insert_row") => Some((
+            vec![(read, table.clone()), (read, t.clone())],
+            Some(web_result(string.clone())),
+        )),
+        ("core.web.table", "replace_row") => Some((
+            vec![(read, table.clone()), (read, string.clone()), (read, t.clone())],
+            Some(web_result(unit_ty())),
+        )),
+        ("core.web.table", "update_row") => Some((
+            vec![
+                (read, table.clone()),
+                (read, string.clone()),
+                (read, web_fn(t.clone(), t.clone())),
+            ],
+            Some(web_result(unit_ty())),
+        )),
+        ("core.web.table", "remove_row") => Some((
+            vec![(read, table.clone()), (read, string.clone())],
+            Some(web_result(t.clone())),
+        )),
+        ("core.web.table", "first_page" | "next_page") => Some((
+            vec![(read, table.clone())],
+            Some(table.clone()),
+        )),
+        ("core.web.table", "last_page") => Some((
+            vec![(read, table.clone())],
+            Some(web_result(table.clone())),
+        )),
+        ("core.web.table", "visible_rows") => Some((
+            vec![(read, table.clone()), (read, virtual_plan.clone())],
+            Some(web_result(web_list(table_row))),
+        )),
+        ("core.web.virtual", "window") => Some((
+            vec![
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+            ],
+            Some(virtual_window.clone()),
+        )),
+        ("core.web.virtual", "window_measured") => Some((
+            vec![
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, web_list(int.clone())),
+            ],
+            Some(virtual_window.clone()),
+        )),
+        ("core.web.virtual", "slice") => Some((
+            vec![(read, web_list(t.clone())), (read, virtual_window)],
+            Some(web_list(t.clone())),
+        )),
+        ("core.web.virtual", "indices") => Some((
+            vec![(read, virtual_window)],
+            Some(web_list(int.clone())),
+        )),
+        ("core.web.virtual", "plan") => Some((
+            vec![
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+            ],
+            Some(virtual_plan.clone()),
+        )),
+        ("core.web.virtual", "plan_measured") => Some((
+            vec![
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, Type::List(Box::new(Type::Tuple(vec![
+                    ("index".to_string(), Box::new(int.clone())),
+                    ("size".to_string(), Box::new(int.clone())),
+                ])))),
+            ],
+            Some(virtual_plan.clone()),
+        )),
+        ("core.web.virtual", "plan_from_sizes") => Some((
+            vec![
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, web_list(int.clone())),
+            ],
+            Some(virtual_plan.clone()),
+        )),
+        ("core.web.virtual", "plan_measure") => Some((
+            vec![(read, virtual_plan.clone()), (read, int.clone()), (read, int.clone())],
+            Some(virtual_plan.clone()),
+        )),
+        ("core.web.virtual", "plan_slice") => Some((
+            vec![(read, web_list(t.clone())), (read, virtual_plan.clone())],
+            Some(web_list(t.clone())),
+        )),
+        ("core.web.virtual", "plan_indices") => Some((
+            vec![(read, virtual_plan.clone())],
+            Some(web_list(int.clone())),
+        )),
+        ("core.web.virtual", "plan_viewport") => Some((
+            vec![(read, virtual_plan)],
+            Some(virtual_viewport.clone()),
+        )),
+        ("core.web.virtual", "plan_viewport_state") => Some((
+            vec![(read, virtual_viewport.clone())],
+            Some(virtual_plan.clone()),
+        )),
+        ("core.web.virtual", "plan_scroll_to") => Some((
+            vec![(read, virtual_viewport.clone()), (read, int.clone())],
+            Some(unit_ty()),
+        )),
+        ("core.web.virtual", "plan_resize") => Some((
+            vec![
+                (read, virtual_viewport.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+            ],
+            Some(unit_ty()),
+        )),
+        ("core.web.virtual", "plan_viewport_measure") => Some((
+            vec![
+                (read, virtual_viewport),
+                (read, int.clone()),
+                (read, int),
+            ],
+            Some(unit_ty()),
+        )),
+        ("core.web.store", "value") => Some((
+            vec![(read, web_apply("WebStore", t.clone()))],
+            Some(t.clone()),
+        )),
+        ("core.web.store", "signal" | "state_signal") => Some((
+            vec![(read, web_apply("WebStore", t.clone()))],
+            Some(signal.clone()),
+        )),
+        ("core.web.store", "new") => Some((
+            vec![(read, string.clone()), (read, t.clone())],
+            Some(web_apply("WebStore", t.clone())),
+        )),
+        ("core.web.store", "with_history") => Some((
+            vec![
+                (read, string.clone()),
+                (read, t.clone()),
+                (read, int.clone()),
+            ],
+            Some(web_apply("WebStore", t.clone())),
+        )),
+        ("core.web.store", "transaction" | "update" | "batch") => Some((
+            vec![
+                (read, web_apply("WebStore", t.clone())),
+                (read, string.clone()),
+                (read, web_list(string.clone())),
+                (read, web_fn(t.clone(), unit_ty())),
+            ],
+            Some(web_apply("WebStoreTransaction", t.clone())),
+        )),
+        ("core.web.store", "set" | "set_state") => Some((
+            vec![(read, web_apply("WebStore", t.clone())), (read, t.clone())],
+            Some(web_apply("WebStoreTransaction", t.clone())),
+        )),
+        ("core.web.store", "optimistic" | "patch") => Some((
+            vec![
+                (read, web_apply("WebStore", t.clone())),
+                (read, string.clone()),
+                (read, web_list(string.clone())),
+                (read, web_fn(t.clone(), unit_ty())),
+            ],
+            Some(web_apply("WebStorePatch", t.clone())),
+        )),
+        ("core.web.store", "patch_generation") => Some((
+            vec![(read, web_apply("WebStorePatch", t.clone()))],
+            Some(int.clone()),
+        )),
+        ("core.web.store", "patch_transaction") => Some((
+            vec![(read, web_apply("WebStorePatch", t.clone()))],
+            Some(web_apply("WebStoreTransaction", t.clone())),
+        )),
+        ("core.web.store", "patch_active") => Some((
+            vec![(read, web_apply("WebStorePatch", t.clone()))],
+            Some(bool_.clone()),
+        )),
+        ("core.web.store", "patch_commit") => Some((
+            vec![(AccessConvention::Move, web_apply("WebStorePatch", t.clone()))],
+            Some(web_apply("WebStoreTransaction", t.clone())),
+        )),
+        ("core.web.store", "patch_rollback") => Some((
+            vec![(AccessConvention::Move, web_apply("WebStorePatch", t.clone()))],
+            Some(Type::Option(Box::new(t.clone()))),
+        )),
+        ("core.web.store", "back" | "forward" | "restore") => Some((
+            vec![(read, web_apply("WebStore", t.clone()))],
+            Some(Type::Option(Box::new(t.clone()))),
+        )),
+        ("core.web.store", "jump" | "scrub") => Some((
+            vec![(read, web_apply("WebStore", t.clone())), (read, int.clone())],
+            Some(Type::Option(Box::new(t.clone()))),
+        )),
+        ("core.web.store", "history") => Some((
+            vec![(read, web_apply("WebStore", t.clone()))],
+            Some(web_list(web_apply("WebStoreTransaction", t.clone()))),
+        )),
+        ("core.web.store", "history_at") => Some((
+            vec![(read, web_apply("WebStore", t.clone())), (read, int.clone())],
+            Some(Type::Option(Box::new(web_apply("WebStoreTransaction", t.clone())))),
+        )),
+        ("core.web.store", "events") => Some((
+            vec![(read, web_apply("WebStore", t.clone()))],
+            Some(web_list(web_named("WebStoreEvent"))),
+        )),
+        ("core.web.store", "events_since") => Some((
+            vec![(read, web_apply("WebStore", t.clone())), (read, int.clone())],
+            Some(web_list(web_named("WebStoreEvent"))),
+        )),
+        ("core.web.store", "clear_history" | "set_history_limit") => Some((
+            if name == "clear_history" {
+                vec![(read, web_apply("WebStore", t.clone()))]
+            } else {
+                vec![
+                    (read, web_apply("WebStore", t.clone())),
+                    (read, int.clone()),
+                ]
+            },
+            Some(unit_ty()),
+        )),
+        ("core.web.store", "history_enabled") => Some((
+            vec![(read, web_apply("WebStore", t.clone()))],
+            Some(bool_.clone()),
+        )),
+        ("core.web.store", "history_limit" | "cursor" | "current_generation") => Some((
+            vec![(read, web_apply("WebStore", t.clone()))],
+            Some(int.clone()),
+        )),
+        ("core.web.store", "subscribe") => Some((
+            vec![
+                (read, web_apply("WebStore", t.clone())),
+                (read, web_fn(t.clone(), unit_ty())),
+            ],
+            Some(web_named("WebStoreSubscription")),
+        )),
+        ("core.web.store", "subscription_unsubscribe") => Some((
+            vec![(read, web_named("WebStoreSubscription"))],
+            Some(unit_ty()),
+        )),
+        ("core.web.store", "subscription_active") => Some((
+            vec![(read, web_named("WebStoreSubscription"))],
+            Some(bool_.clone()),
+        )),
+        ("core.web.store", "subscribe_selector") => Some((
+            vec![
+                (read, web_apply("WebStore", t.clone())),
+                (read, web_fn(t.clone(), web_named("U"))),
+                (read, web_fn(web_named("U"), unit_ty())),
+            ],
+            Some(web_named("WebStoreSubscription")),
+        )),
+        ("core.web.store", "derived" | "selector") => Some((
+            vec![
+                (read, web_apply("WebStore", t.clone())),
+                (read, web_fn(t.clone(), web_named("U"))),
+            ],
+            Some(web_apply("Derived", web_named("U"))),
+        )),
+        ("core.web.store", "inspect") => Some((
+            vec![(read, web_apply("WebStore", t.clone()))],
+            Some(web_apply("WebStoreInspection", t.clone())),
+        )),
+        ("core.web.store", "facts_json" | "event_json") => Some((
+            vec![(read, web_apply("WebStore", t))],
+            Some(string),
+        )),
+        _ => None,
+    }
+}
+
+
 fn core_fixed_sig_impl(
     module: &str,
     name: &str,
@@ -295,19 +1203,53 @@ fn core_fixed_sig_impl(
     let float = Type::Float;
     let bool_ = Type::Bool;
     let unit = unit_ty();
+    let measurement = Type::Apply {
+        name: Syntax::TYPE_MEASUREMENT.to_string(),
+        args: vec![Type::Float],
+    };
     let io = io_error_ty();
     let json = json_ty();
     let list_u8 = Type::List(Box::new(u8_ty()));
     let path = Type::Union(vec![Type::String, Type::Named("Path".to_string())]);
     let io_unit = result_ty(unit.clone(), io.clone());
+    let ui_preview = Type::Named("UiPreview".to_string());
+    let ui_node_callback = Type::Fn {
+        params: vec![],
+        ret: Some(Box::new(Type::Named("UiNode".to_string()))),
+        effect_bound: None,
+        return_view_provenance: None,
+        param_contract: None,
+        call_metadata: None,
+    };
+    let comparison_data = Type::Named("DataTree".to_string());
+    let comparison_fn = Type::Fn {
+        params: vec![comparison_data.clone()],
+        ret: Some(Box::new(comparison_data.clone())),
+        effect_bound: None,
+        return_view_provenance: None,
+        param_contract: None,
+        call_metadata: None,
+    };
+    if let Some(signature) = web_fixed_sig(module, name) {
+        return Some(signature);
+    }
+
     match (module, name) {
-        ("core.files", "read") => Some((vec![(read, path)], Some(result_ty(string, io)))),
+        ("core.files", "scope") => Some((
+            vec![(read, Type::Named(Syntax::TYPE_AUTHORITY.to_string()))],
+            Some(Type::Named("FileScope".to_string())),
+        )),
+        ("core.files", "read") => Some((vec![(read, path)], Some(result_ty(string, io.clone())))),
         ("core.files", "read_bytes") => Some((
             vec![(
                 read,
                 Type::Union(vec![Type::String, Type::Named("Path".to_string())]),
             )],
-            Some(result_ty(list_u8, io_error_ty())),
+            Some(result_ty(list_u8, io.clone())),
+        )),
+        ("core.files", "map") => Some((
+            vec![(read, path)],
+            Some(result_ty(Type::Named("MappedFile".to_string()), io)),
         )),
         // D-FILES-WRITE1 (merge) + D-FILES-APPEND1=A: `write`/`append_all` are the
         // whole-file convenience twins of the streaming `open`/`create`/`append`
@@ -364,10 +1306,10 @@ fn core_fixed_sig_impl(
             vec![(read, path)],
             Some(result_ty(Type::String, io_error_ty())),
         )),
-        // `walk` and `walk_parallel` are one surface with one result shape: the
-        // parallel form only chooses how the directories are traversed.
+        // `walk` and `walk_parallel` share one ignore-aware surface and one
+        // result shape; the second argument names the ignore file.
         ("core.files", "walk" | "walk_parallel" | "walk_files") => Some((
-            vec![(read, path)],
+            vec![(read, path), (read, Type::Option(Box::new(Type::String)))],
             Some(result_ty(
                 Type::List(Box::new(Type::Named("WalkEntry".to_string()))),
                 io_error_ty(),
@@ -792,6 +1734,11 @@ fn core_fixed_sig_impl(
             vec![(read, int)],
             Some(Type::Named(Syntax::TYPE_NEVER.to_string())),
         )),
+        // D-FOUND-LIFECYCLE1=A: subscribe the root cancellation lifecycle to a process signal.
+        ("core.process", "on_signal") => Some((
+            vec![(read, Type::Named("ProcessSignal".to_string()))],
+            Some(unit.clone()),
+        )),
         ("core.process", "workspace") => Some((
             vec![],
             Some(Type::Named(Syntax::TYPE_AUTHORITY.to_string())),
@@ -845,6 +1792,39 @@ fn core_fixed_sig_impl(
         ("core.testing", "test_suite") => {
             Some((vec![], Some(Type::Named("TestSuite".to_string()))))
         }
+        ("core.testing", "world") => Some((
+            vec![(
+                read,
+                Type::Fn {
+                    params: vec![Type::Named(
+                        Syntax::DETERMINISTIC_WORLD_TYPE.to_string(),
+                    )],
+                    ret: Some(Box::new(unit.clone())),
+                    effect_bound: None,
+                    return_view_provenance: None,
+                    param_contract: None,
+                    call_metadata: None,
+                },
+            )],
+            Some(unit.clone()),
+        )),
+        ("core.testing", "compare") => Some((
+            vec![
+                (read, Type::List(Box::new(comparison_data.clone()))),
+                (read, comparison_fn.clone()),
+                (read, comparison_fn),
+                (read, Type::String),
+            ],
+            Some(Type::Named("TestComparison".to_string())),
+        )),
+        ("core.testing", "assert_equal") => Some((
+            vec![(read, Type::Named("TestComparison".to_string()))],
+            Some(Type::Bool),
+        )),
+        ("core.testing", "status") => Some((
+            vec![(read, Type::Named("TestComparison".to_string()))],
+            Some(Type::String),
+        )),
         ("core.math", "sqrt" | "floor" | "ceil") => {
             Some((vec![(read, float.clone())], Some(float)))
         }
@@ -891,12 +1871,40 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Int)],
             Some(Type::Named(crate::Syntax::RNG_TYPE.to_string())),
         )),
-        ("core.time", "now") => Some((vec![], Some(Type::Int))),
+        ("core.units", "from") => Some((
+            vec![(read, float.clone()), (read, float)],
+            Some(measurement),
+        )),
         ("core.time", "sleep") => Some((
             vec![(read, Type::Named(crate::Syntax::DURATION_TYPE.to_string()))],
             None,
         )),
-        ("core.task", "timeout") => Some((
+        ("core.time", "sleep_until") => Some((
+            vec![(read, Type::Named("Instant".to_string()))],
+            None,
+        )),
+        ("core.rt", "callback") => Some((
+            vec![
+                (read, Type::Int),
+                (read, Type::Int),
+                (
+                    read,
+                    Type::Fn {
+                        params: vec![Type::List(Box::new(Type::Float))],
+                        ret: None,
+                        effect_bound: Some(Vec::new()),
+                        return_view_provenance: None,
+                        param_contract: None,
+                        call_metadata: Some(FunctionCallMetadata {
+                            conventions: vec![AccessConvention::Read],
+                            ..FunctionCallMetadata::default()
+                        }),
+                    },
+                ),
+            ],
+            Some(Type::Named("RealtimeStream".to_string())),
+        )),
+        ("core.tasks", "timeout") => Some((
             vec![(read, Type::Named(crate::Syntax::DURATION_TYPE.to_string()))],
             Some(unit),
         )),
@@ -1011,6 +2019,7 @@ fn core_fixed_sig_impl(
                 (read, Type::Named("GameScene".to_string())),
                 (read, Type::Named("GameReplay".to_string())),
                 (read, Type::Named("GameBackend".to_string())),
+                (read, Type::Int),
             ],
             Some(Type::String),
         )),
@@ -1018,11 +2027,11 @@ fn core_fixed_sig_impl(
         // → lenient typed decode (D-JSON3); `to_string`/`to_string_pretty` → serialize.
         ("core.encoding.json", "parse") => Some((
             vec![(read, Type::String)],
-            Some(result_ty(json.clone(), json_error_ty())),
+            Some(result_ty(json.clone(), encoding_error_ty())),
         )),
         ("core.encoding.json", "decode") => Some((
             vec![(read, Type::String)],
-            Some(result_ty(json.clone(), json_error_ty())),
+            Some(result_ty(json.clone(), encoding_error_ty())),
         )),
         ("core.encoding.json", "to_string" | "to_string_pretty") => {
             Some((vec![(read, json)], Some(Type::String)))
@@ -1068,7 +2077,7 @@ fn core_fixed_sig_impl(
             vec![(read, Type::String)],
             Some(result_ty(
                 Type::List(Box::new(json.clone())),
-                json_error_ty(),
+                encoding_error_ty(),
             )),
         )),
         ("core.encoding.jsonl", "to_string") => Some((
@@ -1151,19 +2160,31 @@ fn core_fixed_sig_impl(
                 encoding_error_ty(),
             )),
         )),
+        // D-DX-QUEUE1=A: `jobs.queue()` validates authority and opens the
+        // provider, so the public factory preserves its Result.
+        ("core.jobs", "queue") => Some((
+            vec![],
+            Some(result_ty(
+                Type::Named("JobQueue".to_string()),
+                Type::Named("ServiceError".to_string()),
+            )),
+        )),
+        ("core.data.loader", "snapshot_reusable") => Some((
+            vec![
+                (read, Type::Named("DataSnapshotIdentity".to_string())),
+                (read, Type::Named("DataSnapshotIdentity".to_string())),
+            ],
+            Some(Type::Bool),
+        )),
         // D-DATA-SURFACE1=A / D-DATA-PLOT1=A / D-DATA-STATUS1=A: core.data
-        // facade fixed-shape calls. Generic typed table calls are handled in
+        // facade fixed-shape calls. Generic typed-list calls are handled in
         // infer_core_call so selectors stay typed by sema.
         ("core.data", "sum" | "mean" | "min" | "max" | "median" | "variance" | "stddev") => {
             let args = vec![(read, Type::List(Box::new(Type::Float)))];
-            if super::super::Edition::edition_at_least("2027") {
-                Some((
-                    args,
-                    Some(result_ty(Type::Float, Type::Named("DataError".to_string()))),
-                ))
-            } else {
-                Some((args, Some(Type::Float)))
-            }
+            Some((
+                args,
+                Some(result_ty(Type::Float, Type::Named("DataError".to_string()))),
+            ))
         }
         // D-COMPUTE1=D / D-COMPUTE-TYPE1=D (#443): Tensor storage and aliases.
         ("core.compute", "zeros" | "ones") => Some((
@@ -1491,10 +2512,7 @@ fn core_fixed_sig_impl(
         ("core.service", "delivery_at_most_once" | "delivery_durable") => {
             Some((vec![], Some(Type::Named("ServiceDelivery".to_string()))))
         }
-        ("core.services", "delivery_at_most_once" | "delivery_durable") => {
-            Some((vec![], Some(Type::Named("ServiceDelivery".to_string()))))
-        }
-        ("core.services", "set_restart") => Some((
+        ("core.service", "set_restart") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -1507,7 +2525,7 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "set_delivery") => Some((
+        ("core.service", "set_delivery") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -1520,11 +2538,23 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "worker") => Some((
+        ("core.service", "worker") => Some((
             vec![
                 (
                     AccessConvention::Write,
                     Type::Named("ServiceTree".to_string()),
+                ),
+                (read, Type::String),
+                (
+                    read,
+                    Type::Fn {
+                        params: Vec::new(),
+                        ret: None,
+                        effect_bound: None,
+                        param_contract: None,
+                        call_metadata: None,
+                        return_view_provenance: None,
+                    },
                 ),
                 (read, Type::String),
                 (read, Type::Int),
@@ -1534,7 +2564,7 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "group") => Some((
+        ("core.service", "group") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -1548,7 +2578,7 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "start" | "stop") => Some((
+        ("core.service", "start" | "stop") => Some((
             vec![(
                 AccessConvention::Write,
                 Type::Named("ServiceTree".to_string()),
@@ -1558,7 +2588,7 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "send") => Some((
+        ("core.service", "send") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -1572,7 +2602,7 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "send_durable") => Some((
+        ("core.service", "send_durable") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -1587,7 +2617,7 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "receive") => Some((
+        ("core.service", "receive") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -1600,7 +2630,7 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "mailbox_depth" | "restarts") => Some((
+        ("core.service", "mailbox_depth" | "restarts") => Some((
             vec![
                 (read, Type::Named("ServiceTree".to_string())),
                 (read, Type::Named("ServiceEndpoint".to_string())),
@@ -1611,7 +2641,7 @@ fn core_fixed_sig_impl(
             )),
         )),
         (
-            "core.services",
+            "core.service",
             "fail_worker" | "drain_worker" | "partition_worker" | "reconcile_worker",
         ) => Some((
             vec![
@@ -1626,11 +2656,11 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "dead_letter_count" | "event_count" | "directory_generation") => Some((
+        ("core.service", "dead_letter_count" | "event_count" | "directory_generation") => Some((
             vec![(read, Type::Named("ServiceTree".to_string()))],
             Some(Type::Int),
         )),
-        ("core.services", "drain_dead_letters") => Some((
+        ("core.service", "drain_dead_letters") => Some((
             vec![(
                 AccessConvention::Write,
                 Type::Named("ServiceTree".to_string()),
@@ -1640,7 +2670,7 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "set_state_empty") => Some((
+        ("core.service", "set_state_empty") => Some((
             vec![(
                 AccessConvention::Write,
                 Type::Named("ServiceTree".to_string()),
@@ -1650,7 +2680,7 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "set_state_snapshot" | "set_state_event_log") => Some((
+        ("core.service", "set_state_snapshot" | "set_state_event_log") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -1669,7 +2699,7 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "commit_snapshot" | "append_event") => Some((
+        ("core.service", "commit_snapshot" | "append_event") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -1682,18 +2712,18 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "restore_snapshot") => Some((
+        ("core.service", "restore_snapshot") => Some((
             vec![(read, Type::Named("ServiceTree".to_string()))],
             Some(result_ty(
                 Type::String,
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "replay_events" | "observe") => Some((
+        ("core.service", "replay_events" | "observe") => Some((
             vec![(read, Type::Named("ServiceTree".to_string()))],
             Some(Type::String),
         )),
-        ("core.services", "workflow_start") => Some((
+        ("core.service", "workflow_start") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -1707,7 +2737,7 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "workflow_sleep") => Some((
+        ("core.service", "workflow_sleep") => Some((
             vec![
                 (read, Type::Named("ServiceWorkflow".to_string())),
                 (read, Type::Named("Duration".to_string())),
@@ -1717,7 +2747,7 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "workflow_activity_wait") => Some((
+        ("core.service", "workflow_activity_wait") => Some((
             vec![
                 (read, Type::Named("ServiceWorkflow".to_string())),
                 (read, Type::String),
@@ -1728,7 +2758,7 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "workflow_all") => Some((
+        ("core.service", "workflow_all") => Some((
             vec![
                 (read, Type::Named("ServiceWorkflow".to_string())),
                 (read, Type::List(Box::new(Type::String))),
@@ -1738,7 +2768,7 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "workflow_step") => Some((
+        ("core.service", "workflow_step") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -1752,7 +2782,7 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "workflow_activity") => Some((
+        ("core.service", "workflow_activity") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -1768,7 +2798,7 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "workflow_activity_retry") => Some((
+        ("core.service", "workflow_activity_retry") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -1783,7 +2813,7 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "workflow_activity_complete") => Some((
+        ("core.service", "workflow_activity_complete") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -1798,7 +2828,7 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "workflow_history") => Some((
+        ("core.service", "workflow_history") => Some((
             vec![
                 (read, Type::Named("ServiceTree".to_string())),
                 (read, Type::Int),
@@ -1808,7 +2838,7 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "workflow_outcome") => Some((
+        ("core.service", "workflow_outcome") => Some((
             vec![
                 (read, Type::Named("ServiceTree".to_string())),
                 (read, Type::Int),
@@ -1818,7 +2848,7 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "directory_register") => Some((
+        ("core.service", "directory_register") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -1832,7 +2862,7 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "directory_resolve") => Some((
+        ("core.service", "directory_resolve") => Some((
             vec![
                 (read, Type::Named("ServiceTree".to_string())),
                 (read, Type::String),
@@ -1842,7 +2872,7 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "handoff_generation" | "rollback_generation" | "chaos_fail") => Some((
+        ("core.service", "handoff_generation" | "rollback_generation" | "chaos_fail") => Some((
             vec![(
                 AccessConvention::Write,
                 Type::Named("ServiceTree".to_string()),
@@ -1852,19 +2882,15 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "upgrade_receipt") => Some((
+        ("core.service", "upgrade_receipt") => Some((
             vec![(read, Type::Named("ServiceTree".to_string()))],
             Some(result_ty(
                 Type::Named("ServiceUpgradeReceipt".to_string()),
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.services", "endpoint_show") => Some((
+        ("core.service", "endpoint_show") => Some((
             vec![(read, Type::Named("ServiceEndpoint".to_string()))],
-            Some(Type::String),
-        )),
-        ("core.services", "tree_show") => Some((
-            vec![(read, Type::Named("ServiceTree".to_string()))],
             Some(Type::String),
         )),
         ("core.data", "quantile") => {
@@ -1872,42 +2898,30 @@ fn core_fixed_sig_impl(
                 (read, Type::List(Box::new(Type::Float))),
                 (read, Type::Float),
             ];
-            if super::super::Edition::edition_at_least("2027") {
-                Some((
-                    args,
-                    Some(result_ty(Type::Float, Type::Named("DataError".to_string()))),
-                ))
-            } else {
-                Some((args, Some(Type::Float)))
-            }
+            Some((
+                args,
+                Some(result_ty(Type::Float, Type::Named("DataError".to_string()))),
+            ))
         }
         ("core.data", "rolling_mean") => {
             let args = vec![(read, Type::List(Box::new(Type::Float))), (read, Type::Int)];
-            if super::super::Edition::edition_at_least("2027") {
-                Some((
-                    args,
-                    Some(result_ty(
-                        Type::List(Box::new(Type::Float)),
-                        Type::Named("DataError".to_string()),
-                    )),
-                ))
-            } else {
-                Some((args, Some(Type::List(Box::new(Type::Float)))))
-            }
+            Some((
+                args,
+                Some(result_ty(
+                    Type::List(Box::new(Type::Float)),
+                    Type::Named("DataError".to_string()),
+                )),
+            ))
         }
         ("core.data", "describe") => {
             let args = vec![(read, Type::List(Box::new(Type::Float)))];
-            if super::super::Edition::edition_at_least("2027") {
-                Some((
-                    args,
-                    Some(result_ty(
-                        Type::Named("DataSummary".to_string()),
-                        Type::Named("DataError".to_string()),
-                    )),
-                ))
-            } else {
-                Some((args, Some(Type::Named("DataSummary".to_string()))))
-            }
+            Some((
+                args,
+                Some(result_ty(
+                    Type::Named("DataSummary".to_string()),
+                    Type::Named("DataError".to_string()),
+                )),
+            ))
         }
         ("core.data", "status") => Some((
             vec![],
@@ -1917,42 +2931,43 @@ fn core_fixed_sig_impl(
             vec![(read, Type::String)],
             Some(result_ty(unit_ty(), Type::Named("DataError".to_string()))),
         )),
+        // D-QUERY-RETAIN1=A: plot reducers consume ordinary `[Group<K, V>]`
+        // lists. The fixed surface uses string keys; the runtime adapter
+        // accepts and preserves the nominal key value.
         ("core.data", "bar_text" | "bar_svg") => {
             let args = vec![(
                 read,
-                Type::List(Box::new(Type::Named("DataGroup".to_string()))),
+                Type::List(Box::new(Type::Apply {
+                    name: "Group".to_string(),
+                    args: vec![Type::String, Type::Int],
+                })),
             )];
-            if super::super::Edition::edition_at_least("2027") {
-                Some((
-                    args,
-                    Some(result_ty(
-                        Type::String,
-                        Type::Named("DataError".to_string()),
-                    )),
-                ))
-            } else {
-                Some((args, Some(Type::String)))
-            }
+            Some((
+                args,
+                Some(result_ty(
+                    Type::String,
+                    Type::Named("DataError".to_string()),
+                )),
+            ))
         }
         ("core.data", "line_text" | "line_svg") => {
             let args = vec![
                 (
                     read,
-                    Type::List(Box::new(Type::Named("DataGroup".to_string()))),
+                    Type::List(Box::new(Type::Apply {
+                        name: "Group".to_string(),
+                        args: vec![Type::String, Type::Float],
+                    })),
                 ),
                 (read, Type::Named("DataLineOptions".to_string())),
             ];
-            if super::super::Edition::edition_at_least("2027") {
-                Some((
-                    args,
-                    Some(result_ty(
-                        Type::String,
-                        Type::Named("DataError".to_string()),
-                    )),
-                ))
-            } else {
-                Some((args, Some(Type::String)))
-            }
+            Some((
+                args,
+                Some(result_ty(
+                    Type::String,
+                    Type::Named("DataError".to_string()),
+                )),
+            ))
         }
         ("core.text.fmt", "number" | "bytes" | "duration" | "ordinal") => {
             Some((vec![(read, Type::Int)], Some(Type::String)))
@@ -1994,7 +3009,7 @@ fn core_fixed_sig_impl(
         // `parse` returns `TOML` (= `Data`); `to_string` takes any encodable value.
         ("core.encoding.toml", "parse") => Some((
             vec![(read, Type::String)],
-            Some(result_ty(json.clone(), json_error_ty())),
+            Some(result_ty(json.clone(), encoding_error_ty())),
         )),
         ("core.encoding.toml", "to_string") => {
             Some((vec![(read, json.clone())], Some(Type::String)))
@@ -2002,7 +3017,7 @@ fn core_fixed_sig_impl(
         // D-ENC-YAML1 = A (c152): YAML is a full adapter over the rich `Data` value.
         ("core.encoding.yaml", "parse") => Some((
             vec![(read, Type::String)],
-            Some(result_ty(json.clone(), json_error_ty())),
+            Some(result_ty(json.clone(), encoding_error_ty())),
         )),
         ("core.encoding.yaml", "to_string") => {
             Some((vec![(read, json.clone())], Some(Type::String)))
@@ -2104,12 +3119,12 @@ fn core_fixed_sig_impl(
                 encoding_error_ty(),
             )),
         )),
-        // E2-M7: streaming file handles (D-IO2, files.open / files.create).
-        ("core.files", "open" | "append") => Some((
+        // E2-M7: streaming file handles (D-IO2).
+        ("core.files", "open") => Some((
             vec![(read, path.clone())],
             Some(result_ty(Type::Named("FileReader".to_string()), io.clone())),
         )),
-        ("core.files", "create") => Some((
+        ("core.files", "append" | "create") => Some((
             vec![(read, path)],
             Some(result_ty(Type::Named("FileWriter".to_string()), io.clone())),
         )),
@@ -2254,13 +3269,23 @@ fn core_fixed_sig_impl(
         ("core.text", "nfc" | "nfd" | "nfkc" | "nfkd" | "casefold") => {
             Some((vec![(read, Type::String)], Some(Type::String)))
         }
-        ("core.text", "caseless_eq") => Some((
-            vec![(read, Type::String), (read, Type::String)],
-            Some(Type::Bool),
-        )),
         ("core.text", "graphemes" | "words" | "sentences" | "inspect") => Some((
             vec![(read, Type::String)],
             Some(Type::List(Box::new(Type::String))),
+        )),
+        ("core.text", "grapheme_views" | "word_views" | "line_views") => Some((
+            vec![(read, Type::String)],
+            Some(crate::Collections::view_iter_ty(Type::Apply {
+                name: "View".to_string(),
+                args: vec![Type::Named("str".to_string())],
+            })),
+        )),
+        ("core.text", "byte_views") => Some((
+            vec![(read, Type::String)],
+            Some(crate::Collections::view_iter_ty(Type::Apply {
+                name: "View".to_string(),
+                args: vec![Type::List(Box::new(u8_ty()))],
+            })),
         )),
         ("core.text", "is_alphabetic" | "is_numeric" | "is_whitespace") => {
             Some((vec![(read, Type::String)], Some(Type::Bool)))
@@ -3626,6 +4651,27 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("RaylibSound".to_string()))],
             Some(Type::Bool),
         )),
+        ("core.game.raylib", "gamepad_down") => Some((
+            vec![(read, Type::Int), (read, Type::String)],
+            Some(Type::Bool),
+        )),
+        ("core.game.raylib", "gamepad_axis") => Some((
+            vec![(read, Type::Int), (read, Type::String)],
+            Some(Type::Float),
+        )),
+        ("core.game.raylib", "load_texture_atlas") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Named("RaylibTextureAtlas".to_string())),
+        )),
+        ("core.game.raylib", "draw_sprite") => Some((
+            vec![
+                (read, Type::Named("RaylibTextureAtlas".to_string())),
+                (read, Type::String),
+                (read, Type::Int),
+                (read, Type::Int),
+            ],
+            None,
+        )),
         // D-CORE-COMPRESS1=A / D-CODECS1: core.archive.gzip / zstd are the
         // only public stream-codec APIs. `compress` takes `[U8]` and is infallible;
         // `decompress` is fallible (malformed compressed stream → `Err(String)`),
@@ -3653,6 +4699,13 @@ fn core_fixed_sig_impl(
             Some(Type::Named("DBConnection".to_string())),
         )),
         ("core.db", "open_memory") => Some((vec![], Some(Type::Named("DBConnection".to_string())))),
+        ("core.db", "pool") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(result_ty(
+                Type::Named("DbPool".to_string()),
+                db_error_ty(),
+            )),
+        )),
         ("core.db", "policy") => Some((
             vec![(read, Type::String), (read, Type::String)],
             Some(result_ty(
@@ -3710,13 +4763,14 @@ fn core_fixed_sig_impl(
             Some(result_ty(Type::Int, db_error_ty())),
         )),
         // D-DEP-WASM1=A / D-PLUGIN1=B (c81): `core.plugin` — sandboxed WASM
-        // Component Model plugin loader (wasmtime, runtime-side only, I6).
-        // `load` is the only module-level entry point; it PRODUCES a `Plugin`
-        // handle (mirrors `core.db`'s `open` producing a `DBConnection`). The
-        // actual typed calls (`.call*`) are instance methods dispatched by
-        // the receiver's `Plugin` type (see `check_plugin_method` below).
+        // Component Model plugin loader. `load(path, authority)` is the one
+        // authority-bearing boundary; the host never supplies an ambient
+        // policy when the second argument is omitted.
         ("core.plugin", "load") => Some((
-            vec![(read, Type::String)],
+            vec![
+                (read, Type::String),
+                (read, Type::Named("Authority".to_string())),
+            ],
             Some(Type::Named("Plugin".to_string())),
         )),
         // D-LIB-CALLGRANT1=A: the grant is label-only so the load site cannot
@@ -3804,6 +4858,26 @@ fn core_fixed_sig_impl(
                 crate::Syntax::TYPE_FRACTION.to_string(),
             )))),
         )),
+        // D-NAMEDPREVIEW1=A: registry-free named preview values share one
+        // typed callback tree and use an optional viewport label.
+        ("core.ui", "phone" | "tablet" | "desktop") => Some((
+            vec![],
+            Some(Type::Named("UiPreviewViewport".to_string())),
+        )),
+        ("core.ui", "preview" | "playground") => Some((
+            vec![
+                (read, string.clone()),
+                (
+                    read,
+                    Type::Result {
+                        ok: Box::new(Type::Named("UiPreviewViewport".to_string())),
+                        err: Box::new(Type::Named("Absent".to_string())),
+                    },
+                ),
+                (read, ui_node_callback),
+            ],
+            Some(ui_preview),
+        )),
         // D-RENDERTGT2=A (c133 M1): UI geometry constructors.
         ("core.ui", "null_backend") => Some((vec![], Some(Type::Named("NullBackend".to_string())))),
         ("core.ui", "tui_backend") => Some((vec![], Some(Type::Named("TuiBackend".to_string())))),
@@ -3890,6 +4964,265 @@ fn core_fixed_sig_impl(
             "core.ui",
             "aria_role_button" | "aria_role_text_input" | "aria_role_label" | "aria_role_container",
         ) => Some((vec![], Some(Type::Named("UiAriaRole".to_string())))),
+        // D-FOUND-PLATFORM1=A: shared font model and scoped host service
+        // surface. Result aliases retain Completed/Cancelled/Failed as one
+        // typed value instead of collapsing cancellation into an I/O error.
+        ("core.font", "system") => Some((
+            vec![(read, Type::Named("FontStyle".to_string()))],
+            Some(Type::Named("FontFace".to_string())),
+        )),
+        ("core.font", "shape") => Some((
+            vec![
+                (read, string.clone()),
+                (read, Type::Named("FontFace".to_string())),
+            ],
+            Some(Type::Named("GlyphRun".to_string())),
+        )),
+        ("core.ui", "node_accessibility") => Some((
+            vec![
+                (read, Type::Named("UiNode".to_string())),
+                (read, Type::Named("UiAccessibility".to_string())),
+            ],
+            Some(Type::Named("UiNode".to_string())),
+        )),
+        ("core.ui", "node_shortcut") => Some((
+            vec![
+                (read, Type::Named("UiNode".to_string())),
+                (read, Type::Named("UiShortcut".to_string())),
+            ],
+            Some(Type::Named("UiNode".to_string())),
+        )),
+        ("core.ui", "text_input") => Some((
+            vec![
+                (read, string.clone()),
+                (read, Type::Named("UiImeMode".to_string())),
+            ],
+            Some(Type::Named("UiNode".to_string())),
+        )),
+        // D-DX-TUIKIT1=A: one typed model/update/view support vocabulary. The
+        // constructors stay ordinary Core calls; the shared Prelude owns
+        // event, style, constraint, and widget semantics for every tier.
+        ("core.tui", "capabilities") => Some((
+            vec![],
+            Some(Type::Named("TuiCapabilities".to_string())),
+        )),
+        ("core.tui", "key_event") => Some((
+            vec![(read, string.clone())],
+            Some(Type::Named("TuiEvent".to_string())),
+        )),
+        ("core.tui", "key_event_modifiers") => Some((
+            vec![(read, string.clone()), (read, int.clone())],
+            Some(Type::Named("TuiEvent".to_string())),
+        )),
+        ("core.tui", "resize_event") => Some((
+            vec![(read, float.clone()), (read, float.clone())],
+            Some(Type::Named("TuiEvent".to_string())),
+        )),
+        ("core.tui", "timer_event") => Some((
+            vec![(read, string.clone()), (read, int.clone())],
+            Some(Type::Named("TuiEvent".to_string())),
+        )),
+        ("core.tui", "io_event") => Some((
+            vec![
+                (read, string.clone()),
+                (moved, list_u8.clone()),
+            ],
+            Some(Type::Named("TuiEvent".to_string())),
+        )),
+        ("core.tui", "focus_event") => Some((
+            vec![(read, bool_)],
+            Some(Type::Named("TuiEvent".to_string())),
+        )),
+        ("core.tui", "interrupt_event" | "close_event") => {
+            Some((vec![], Some(Type::Named("TuiEvent".to_string()))))
+        }
+        ("core.tui", "color_ansi16" | "color_ansi256") => Some((
+            vec![(read, int.clone())],
+            Some(Type::Named("TuiColor".to_string())),
+        )),
+        ("core.tui", "color_rgb") => Some((
+            vec![
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+            ],
+            Some(Type::Named("TuiColor".to_string())),
+        )),
+        ("core.tui", "style") => Some((
+            vec![],
+            Some(Type::Named("TuiStyle".to_string())),
+        )),
+        ("core.tui", "style_foreground" | "style_background") => Some((
+            vec![
+                (moved, Type::Named("TuiStyle".to_string())),
+                (read, Type::Named("TuiColor".to_string())),
+            ],
+            Some(Type::Named("TuiStyle".to_string())),
+        )),
+        ("core.tui", "style_bold" | "style_dim" | "style_underline") => Some((
+            vec![
+                (moved, Type::Named("TuiStyle".to_string())),
+                (read, bool_),
+            ],
+            Some(Type::Named("TuiStyle".to_string())),
+        )),
+        ("core.tui", "style_text") => Some((
+            vec![
+                (read, string.clone()),
+                (read, Type::Named("TuiStyle".to_string())),
+                (read, Type::Named("TuiCapabilities".to_string())),
+            ],
+            Some(string.clone()),
+        )),
+        ("core.tui", "ascii") => Some((
+            vec![(read, string.clone())],
+            Some(string.clone()),
+        )),
+        ("core.tui", "display_width") => Some((
+            vec![(read, string.clone())],
+            Some(int.clone()),
+        )),
+        ("core.tui", "length" | "min" | "max" | "percent" | "fill") => Some((
+            vec![(read, float.clone())],
+            Some(Type::Named("TuiConstraint".to_string())),
+        )),
+        ("core.tui", "horizontal" | "vertical") => Some((
+            vec![],
+            Some(Type::Named("TuiDirection".to_string())),
+        )),
+        ("core.tui", "layout") => Some((
+            vec![
+                (read, Type::Named("Rect".to_string())),
+                (read, Type::Named("TuiDirection".to_string())),
+                (
+                    moved,
+                    Type::List(Box::new(Type::Named("TuiConstraint".to_string()))),
+                ),
+            ],
+            Some(Type::List(Box::new(Type::Named("Rect".to_string())))),
+        )),
+        ("core.tui", "list") => Some((
+            vec![(
+                moved,
+                Type::List(Box::new(string.clone())),
+            )],
+            Some(Type::Named("UiNode".to_string())),
+        )),
+        ("core.tui", "table") => Some((
+            vec![
+                (moved, Type::List(Box::new(string.clone()))),
+                (
+                    moved,
+                    Type::List(Box::new(Type::List(Box::new(string.clone())))),
+                ),
+            ],
+            Some(Type::Named("UiNode".to_string())),
+        )),
+        ("core.tui", "list_state") => Some((
+            vec![],
+            Some(Type::Named("TuiListState".to_string())),
+        )),
+        ("core.tui", "list_state_select" | "list_state_offset") => Some((
+            vec![
+                (moved, Type::Named("TuiListState".to_string())),
+                (read, int.clone()),
+            ],
+            Some(Type::Named("TuiListState".to_string())),
+        )),
+        ("core.tui", "list_state_selected") => Some((
+            vec![(read, Type::Named("TuiListState".to_string()))],
+            Some(int),
+        )),
+        ("core.ui.host", "capabilities") => Some((
+            vec![],
+            Some(Type::Named("UiCapabilityFacts".to_string())),
+        )),
+        ("core.ui.host", "file_filter") => Some((
+            vec![
+                (read, string.clone()),
+                (read, Type::List(Box::new(string.clone()))),
+                (read, Type::List(Box::new(string.clone()))),
+            ],
+            Some(Type::Named("UiFileFilterResult".to_string())),
+        )),
+        ("core.ui.host", "file_filter_text") => Some((
+            vec![],
+            Some(Type::Named("UiFileFilter".to_string())),
+        )),
+        ("core.ui.host", "fs_rights_read" | "fs_rights_write" | "fs_rights_read_write") => {
+            Some((vec![], Some(Type::Named("UiFsRights".to_string()))))
+        }
+        ("core.ui.host", "fs_grant") => Some((
+            vec![
+                (read, string.clone()),
+                (read, Type::Named("UiFsRights".to_string())),
+            ],
+            Some(Type::Named("UiFsGrantResult".to_string())),
+        )),
+        ("core.ui.host", "open_request" | "save_request") => Some((
+            vec![(read, Type::Named("UiFsGrant".to_string()))],
+            Some(Type::Named("UiFileDialogRequest".to_string())),
+        )),
+        ("core.ui.host", "open_file" | "save_file") => Some((
+            vec![(read, Type::Named("UiFileDialogRequest".to_string()))],
+            Some(Type::Named("UiFileDialogResult".to_string())),
+        )),
+        ("core.ui.host", "shortcut") => Some((
+            vec![
+                (read, string.clone()),
+                (read, Type::Named("UiShortcutModifiers".to_string())),
+            ],
+            Some(Type::Named("UiShortcutResult".to_string())),
+        )),
+        ("core.ui.host", "accessibility") => Some((
+            vec![(read, string.clone()), (read, string.clone())],
+            Some(Type::Named("UiAccessibilityResult".to_string())),
+        )),
+        ("core.ui.host.clipboard", "read_text") => Some((
+            vec![],
+            Some(Type::Named("UiClipboardTextResult".to_string())),
+        )),
+        ("core.ui.host.clipboard", "write_text") => Some((
+            vec![(read, string.clone())],
+            Some(Type::Named("UiClipboardWriteResult".to_string())),
+        )),
+        ("core.ui.host.ime", "poll") => Some((
+            vec![],
+            Some(Type::Named("UiImeResult".to_string())),
+        )),
+        ("core.ui.host.drag_drop", "poll") => Some((
+            vec![],
+            Some(Type::Named("UiDragResult".to_string())),
+        )),
+        ("core.ui.host.shortcuts", "binding") => Some((
+            vec![
+                (read, Type::Named("UiShortcut".to_string())),
+                (read, string.clone()),
+            ],
+            Some(Type::Named("UiShortcutBindingResult".to_string())),
+        )),
+        ("core.ui.host.shortcuts", "register") => Some((
+            vec![(read, Type::Named("UiShortcutBinding".to_string()))],
+            Some(Type::Named("UiShortcutBindingResult".to_string())),
+        )),
+        ("core.ui.host.shortcuts", "dispatch") => Some((
+            vec![(read, Type::Named("UiShortcut".to_string()))],
+            Some(Type::Named("UiShortcutDispatchResult".to_string())),
+        )),
+        ("core.ui.host.accessibility", "attach") => Some((
+            vec![
+                (read, Type::Named("UiNode".to_string())),
+                (read, Type::Named("UiAccessibility".to_string())),
+            ],
+            Some(Type::Named("UiAccessibilityNodeResult".to_string())),
+        )),
+        ("core.ui.host.accessibility", "project") => Some((
+            vec![
+                (read, Type::Named("UiNode".to_string())),
+                (read, Type::Named("UiNodeId".to_string())),
+            ],
+            Some(Type::Named("UiAccessibilityProjectionResult".to_string())),
+        )),
         // D-FLAGSHIP-WEBAPI1=A: first-party browser API for web flagship slices.
         ("core.web", "on") => Some((
             vec![
@@ -4064,6 +5397,7 @@ impl CoreDefault {
                 args: Vec::new(),
                 recv_type: None,
                 resolved_ret: None,
+                operator_rhs: None,
                 checked_widen: false,
             },
             CoreDefault::StaticEnum { type_name, variant } => crate::AST::Expr::EnumLit {
@@ -4085,6 +5419,13 @@ const fn required(label: &'static str) -> CoreParam {
         default: None,
     }
 }
+const fn required_either(label: &'static str) -> CoreParam {
+    CoreParam {
+        label,
+        zone: crate::AST::ParamZone::Either,
+        default: None,
+    }
+}
 
 const fn optional(label: &'static str, default: CoreDefault) -> CoreParam {
     CoreParam {
@@ -4093,6 +5434,15 @@ const fn optional(label: &'static str, default: CoreDefault) -> CoreParam {
         default: Some(default),
     }
 }
+
+const fn optional_label_only(label: &'static str) -> CoreParam {
+    CoreParam {
+        label,
+        zone: crate::AST::ParamZone::LabelOnly,
+        default: Some(CoreDefault::Absent),
+    }
+}
+
 
 /// The bounded-encoding reader/writer family (D-ENCSTREAM-SURFACE1=A). The file
 /// handle is required and positional; the policy arguments are labelled so a
@@ -4104,6 +5454,62 @@ const ENCODING_LIMITS_DEFAULT: CoreDefault = CoreDefault::StaticCall {
 
 pub fn core_param_contract(module: &str, name: &str) -> Option<Vec<CoreParam>> {
     match (module, name) {
+        // D-TEST-HISTORY1=A: histories accepts either the concise positional
+        // form or the ratified named fields without a second argument schema.
+        // Strategy is the sole optional label and remains in the canonical
+        // third slot when omitted.
+        ("core.testing", "histories") => Some(vec![
+            required_either("seed"),
+            required_either("cases"),
+            optional_label_only("strategy"),
+            required_either("model"),
+            required_either("actual"),
+            required_either("observe"),
+        ]),
+        // D-DX-PLUGIN1=D: publication is a checked two-label boundary. The
+        // field selector and value are both explicit; no positional fallback.
+        ("core.devtools", "publish") => Some(vec![
+            CoreParam {
+                label: "field",
+                zone: crate::AST::ParamZone::LabelOnly,
+                default: None,
+            },
+            CoreParam {
+                label: "value",
+                zone: crate::AST::ParamZone::LabelOnly,
+                default: None,
+            },
+        ]),
+        // D-NAMEDPREVIEW1=A: the viewport is an optional label between the
+        // required preview name and callback.
+        ("core.ui", "preview" | "playground") => Some(vec![
+            required("name"),
+            optional_label_only("viewport"),
+            required("callback"),
+        ]),
+        // D-UI-CLOSURE1=A: button keeps one fixed four-word runtime shape.
+        // The two optional metadata labels are absent when omitted; the
+        // trailing block binds to the existing click callback slot.
+        ("core.ui", "button") => Some(vec![
+            required("display"),
+            optional_label_only("shortcut"),
+            optional_label_only("label"),
+            optional_label_only("on_click"),
+        ]),
+        // D-UI-DROP1=A: text input keeps its existing state/IME constructor
+        // and adds one optional typed drop callback at the source boundary.
+        ("core.ui", "text_input") => Some(vec![
+            required("state"),
+            required("ime"),
+            optional_label_only("on_drop"),
+        ]),
+        // D-FOUND-REALTIME1=A: the callback registration surface names all
+        // three inputs, including the escaping function value.
+        ("core.rt", "callback") => Some(vec![
+            required("rate"),
+            required("frames"),
+            required("fn"),
+        ]),
         // D-TIMEDEPTH1=A: local-to-zoned construction has one explicit DST
         // policy, with Temporal's compatible choice as the beginner default.
         ("core.time", "zoned_local") => Some(vec![
@@ -4119,6 +5525,12 @@ pub fn core_param_contract(module: &str, name: &str) -> Option<Vec<CoreParam>> {
             optional("file", CoreDefault::String(".env")),
             optional("allow", CoreDefault::EmptyList),
         ]),
+        // D-FOUND-COREAPI1=A: filesystem walks accept one optional, shared
+        // ignore-file selector; omitted means no ignore rules.
+        ("core.files", "walk" | "walk_parallel" | "walk_files") => Some(vec![
+            required("root"),
+            optional("ignore", CoreDefault::Absent),
+        ]),
         ("core.game", "run") => Some(vec![
             required("scene"),
             CoreParam {
@@ -4131,12 +5543,22 @@ pub fn core_param_contract(module: &str, name: &str) -> Option<Vec<CoreParam>> {
                 zone: crate::AST::ParamZone::Either,
                 default: Some(CoreDefault::Absent),
             },
+            CoreParam {
+                label: "frames",
+                zone: crate::AST::ParamZone::Either,
+                default: Some(CoreDefault::Absent),
+            },
         ]),
         ("core.http.server", "bind" | "serve") => Some(vec![
             required("address"),
             required("mux"),
             CoreParam {
                 label: "tls",
+                zone: crate::AST::ParamZone::LabelOnly,
+                default: Some(CoreDefault::Absent),
+            },
+            CoreParam {
+                label: "deadline",
                 zone: crate::AST::ParamZone::LabelOnly,
                 default: Some(CoreDefault::Absent),
             },
@@ -4187,6 +5609,14 @@ pub fn core_param_contract(module: &str, name: &str) -> Option<Vec<CoreParam>> {
             required("path"),
             CoreParam {
                 label: "grant",
+                zone: crate::AST::ParamZone::LabelOnly,
+                default: None,
+            },
+        ]),
+        ("core.db", "pool") => Some(vec![
+            required("url"),
+            CoreParam {
+                label: "max",
                 zone: crate::AST::ParamZone::LabelOnly,
                 default: None,
             },

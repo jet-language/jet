@@ -13,6 +13,8 @@ impl<'a> Parser<'a> {
                         type_name,
                         type_span,
                         trait_name: None,
+                        operator_rhs: None,
+                        operator_marker: None,
                         trait_span: None,
                         methods: vec![f],
                         delegation_field: None,
@@ -185,7 +187,7 @@ impl<'a> Parser<'a> {
     /// S14: a bare lowercase `test` introduces a test block only when followed by
     /// a quoted name (so an ordinary identifier named `test` is unaffected).
     pub(super) fn foreign_test_follows(&self) -> bool {
-        matches!(self.peek2().kind, TokKind::Str(_))
+        matches!(self.peek2().kind, TokKind::Str(_) | TokKind::RawStr(_))
     }
 
     pub(super) fn foreign_test_diag(&self, span: Span) -> Diagnostic {
@@ -205,8 +207,9 @@ impl<'a> Parser<'a> {
         )
     }
 
-    /// D-TASK-META1=A: decode optional static fields on the existing task
-    /// marker. Task execution remains an ordinary function call.
+    /// D-TASK-META1=A / D-DX-JOBGRAPH1=A: decode optional static fields on the
+    /// existing task marker. Task execution remains an ordinary function call;
+    /// graph edges and the admission bound stay typed metadata.
     pub(in crate::Parser) fn job_metadata_from_marker(
         &self,
         marker: &crate::AST::Marker,
@@ -252,7 +255,42 @@ impl<'a> Parser<'a> {
         if let Some(limits) = arguments.parameter(7) {
             metadata.limits = Self::task_limits(limits, marker.span)?;
         }
+        metadata.after = Self::task_string_list(arguments.parameter(8), marker.span)?;
+        metadata.parallel =
+            Self::task_parallel(arguments.parameter(9), marker.span)?;
         Ok(Some(metadata))
+    }
+
+    fn task_parallel(
+        expr: Option<&crate::AST::Expr>,
+        _marker_span: Span,
+    ) -> Result<Option<usize>, Diagnostic> {
+        let Some(expr) = expr else {
+            return Ok(None);
+        };
+        if let Some(value) = Self::job_word(expr) {
+            if value == "none" || value == "None" {
+                return Ok(None);
+            }
+        }
+        let crate::AST::Expr::Int(value, ..) = expr else {
+            return Err(Self::job_metadata_error(
+                "parallel",
+                "a positive integer or none",
+                expr.span(),
+            ));
+        };
+        usize::try_from(*value)
+            .ok()
+            .filter(|value| *value > 0)
+            .map(Some)
+            .ok_or_else(|| {
+                Self::job_metadata_error(
+                    "parallel",
+                    "a positive integer or none",
+                    expr.span(),
+                )
+            })
     }
 
     fn task_string_list(
@@ -462,8 +500,7 @@ impl<'a> Parser<'a> {
     /// D-TESTPAREN1=A: `#Test` block name is a parenthesized string — `#Test("name")`.
     /// Old bare-string form `#Test "name"` emits a teaching error (E0052).
     fn expect_test_name(&mut self) -> Result<(String, Span), Diagnostic> {
-        // Detect old form: bare string directly after `#Test` — teaching error.
-        if matches!(&self.peek().kind, TokKind::Str(_)) {
+        if matches!(&self.peek().kind, TokKind::Str(_) | TokKind::RawStr(_)) {
             let span = self.peek().span;
             return Err(Diagnostic::error(
                 "E0052",
@@ -492,6 +529,7 @@ impl<'a> Parser<'a> {
     fn expect_test_name_str(&mut self) -> Result<(String, Span), Diagnostic> {
         let parts = match &self.peek().kind {
             TokKind::Str(parts) => parts.clone(),
+            TokKind::RawStr(text) => vec![StrTokPart::Lit(text.clone())],
             other => {
                 return Err(Diagnostic::error(
                     "E0003",
@@ -736,6 +774,10 @@ impl<'a> Parser<'a> {
             return_type_span,
             rust_path,
             rust_path_span,
+            generated: false,
+            callback_transport: None,
+            callback_plan_digest: None,
+            callback_identity: None,
             effect_root: None,
             undo,
             close,

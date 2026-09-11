@@ -34,35 +34,17 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for E1011</p>
+<p class="diag-copy fix" data-registry-field="fix">Align the fixed bytes and rest capture to byte boundaries.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E1011</code>: <code>tests/ui/binpat_unaligned_rest.stderr</code>.</p>
-<pre class="diag">Error [E1011]: this part of the binary pattern doesn&#39;t start on a byte boundary
+<pre class="diag">Error [E1011]: This part of the binary pattern doesn&#39;t start on a byte boundary
   --&gt; tests/ui/binpat_unaligned_rest.jet:4:22
     |
   4 |         [U8]{&quot;{a:U4}{rest:...}&quot;} -&gt; { print(&quot;x&quot;) }
     |                      ^^^^^^^^
- Why: fixed bytes and a `{rest:...}` capture are read whole-byte, so every bit-field before them must add up to a multiple of 8 bits
- Fix: pad the preceding holes to a byte boundary (e.g. add a reserved `{_:U4}`)
+ Why: Fixed bytes and a `{rest:...}` capture are read whole-byte, so every bit-field before them must add up to a multiple of 8 bits
+ Fix: Pad the preceding holes to a byte boundary (e.g. add a reserved `{_:U4}`)
 More: jet-lang.dev/e/E1011
-
-Error [E0116]: `print` doesn&#39;t hand back a value
-  --&gt; tests/ui/binpat_unaligned_rest.jet:4:39
-    |
-  4 |         [U8]{&quot;{a:U4}{rest:...}&quot;} -&gt; { print(&quot;x&quot;) }
-    |                                       ^^^^^
- Why: a call is a value only when its function declares a result after the parameter list
- Fix: inside an arm, wrap the call in `{ … }`; otherwise put `print` on its own line, or declare it as `fn print(…) Type -&gt; …`
-More: jet-lang.dev/e/E0116
-
-Error [E0116]: `print` doesn&#39;t hand back a value
-  --&gt; tests/ui/binpat_unaligned_rest.jet:6:13
-    |
-  6 |             print(&quot;no&quot;)
-    |             ^^^^^
- Why: a call is a value only when its function declares a result after the parameter list
- Fix: inside an arm, wrap the call in `{ … }`; otherwise put `print` on its own line, or declare it as `fn print(…) Type -&gt; …`
-More: jet-lang.dev/e/E0116
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

@@ -4,8 +4,8 @@
 //! under the card #510 boundary.
 
 use super::*;
-use crate::AST::{ExternFn, Func, Param, TraitMethodSig, Type};
 use crate::Sema::TypeRegistry;
+use crate::AST::{ExternFn, Func, Param, TraitMethodSig, Type};
 
 pub(crate) const CORE_SOURCE_MARKER_PREFIX: &str = "__core_source::";
 pub(crate) const CORE_INTRINSIC_MARKER_PREFIX: &str = "__core_intrinsic::";
@@ -513,6 +513,39 @@ pub(crate) fn collect_used_core(
     expand_core_reachable_closure(&mut used);
     (used, spans, ffi_cb)
 }
+/// Enforce the package's explicit UI host authority against the same Core rows
+/// that drive Prelude reachability. This keeps capability meaning in the
+/// foundation registry and reports the source call, not a backend-specific
+/// failure.
+pub(crate) fn check_ui_capabilities(
+    bundle: &ProgramBundle,
+    used_core: &HashSet<String>,
+    usage_spans: &HashMap<String, crate::Diagnostics::Span>,
+) -> Vec<crate::Diagnostics::Diagnostic> {
+    let granted = &bundle.package_guarantees.authority_needs;
+    let mut diagnostics = Vec::new();
+    for usage in used_core {
+        let Some((module, member)) = usage.split_once("::") else {
+            continue;
+        };
+        let Some(row) = jet_foundation::Syntax::core_call(module, member) else {
+            continue;
+        };
+        for capability in row.ui_capabilities() {
+            if granted.iter().any(|need| need == capability) {
+                continue;
+            }
+            let service = format!("{module}.{member}");
+            diagnostics.push(crate::Diagnostics::Diagnostic::from_row(
+                "E2937",
+                &[("capability", *capability), ("service", service.as_str())],
+                usage_spans.get(usage).copied(),
+            ));
+        }
+    }
+    diagnostics
+}
+
 
 fn note_core_usage(
     used: &mut HashSet<String>,
@@ -534,10 +567,11 @@ fn note_builtin_math_type(
     spans: &mut HashMap<String, crate::Diagnostics::Span>,
     span: Option<crate::Diagnostics::Span>,
 ) {
-    // Sema's closed math family wins only when the name is not a user type.
-    // Keep the same registry guard here so Core reachability cannot turn a
-    // user-defined `F32x8`/`Vec3` into an unrelated Prelude dependency.
-    if !registry.contains(name) && is_math_type(name) {
+    // Sema's closed math/geometry families win only when the name is not a
+    // user type.  Both families share the one LinalgFns runtime part.
+    if !registry.contains(name)
+        && (is_math_type(name) || crate::Sema::CheckerCoreLib::is_geometry_type(name))
+    {
         note_core_usage(used, spans, CORE_MATH_TYPES_USAGE, span);
     }
 }
@@ -551,13 +585,7 @@ fn collect_core_params(
     ffi_cb: &mut HashSet<String>,
 ) {
     for param in params {
-        collect_core_type_usage(
-            &param.ty,
-            registry,
-            used,
-            spans,
-            Some(param.ty_span),
-        );
+        collect_core_type_usage(&param.ty, registry, used, spans, Some(param.ty_span));
         if let Some(default) = &param.default {
             collect_core_expr(default, imports, registry, used, spans, ffi_cb);
         }
@@ -579,12 +607,7 @@ fn collect_core_func_signature(
         .iter()
         .any(|marker| marker.name == Syntax::MARKER_SCALAR)
     {
-        note_core_usage(
-            used,
-            spans,
-            CORE_MATH_TYPES_USAGE,
-            Some(function.name_span),
-        );
+        note_core_usage(used, spans, CORE_MATH_TYPES_USAGE, Some(function.name_span));
     }
     collect_core_params(&function.params, imports, registry, used, spans, ffi_cb);
     if let Some(return_type) = &function.return_type {
@@ -607,14 +630,7 @@ fn collect_core_func(
     ffi_cb: &mut HashSet<String>,
 ) {
     collect_core_func_signature(function, imports, registry, used, spans, ffi_cb);
-    collect_core_stmts(
-        &function.body,
-        imports,
-        registry,
-        used,
-        spans,
-        ffi_cb,
-    );
+    collect_core_stmts(&function.body, imports, registry, used, spans, ffi_cb);
 }
 
 fn collect_core_trait_method(
@@ -627,13 +643,7 @@ fn collect_core_trait_method(
 ) {
     collect_core_params(&method.params, imports, registry, used, spans, ffi_cb);
     if let Some(return_type) = &method.return_type {
-        collect_core_type_usage(
-            return_type,
-            registry,
-            used,
-            spans,
-            Some(method.name_span),
-        );
+        collect_core_type_usage(return_type, registry, used, spans, Some(method.name_span));
     }
     if let Some(body) = &method.default_body {
         collect_core_stmts(body, imports, registry, used, spans, ffi_cb);
@@ -692,6 +702,21 @@ fn collect_core_trait_impl(
         collect_core_type_usage(ty, registry, used, spans, Some(*span));
     }
 }
+fn note_core_type_modules(
+    name: &str,
+    registry: &TypeRegistry,
+    used: &mut HashSet<String>,
+    spans: &mut HashMap<String, crate::Diagnostics::Span>,
+    span: Option<crate::Diagnostics::Span>,
+) {
+    if registry.contains(name) {
+        return;
+    }
+    for module in jet_foundation::CoreModuleExports::core_type_modules(name) {
+        note_core_usage(used, spans, format!("{module}::__type__"), span);
+    }
+}
+
 
 fn collect_core_type_usage(
     ty: &Type,
@@ -700,9 +725,27 @@ fn collect_core_type_usage(
     spans: &mut HashMap<String, crate::Diagnostics::Span>,
     span: Option<crate::Diagnostics::Span>,
 ) {
+    let nominal_name = match ty {
+        Type::Named(name) | Type::Apply { name, .. } => Some(name.as_str()),
+        _ => None,
+    };
+    if let Some(name) = nominal_name {
+        note_core_type_modules(name, registry, used, spans, span);
+    }
     match ty {
-        Type::Named(name) if !registry.contains(name) && is_math_type(name) => {
+        Type::Named(name)
+            if !registry.contains(name)
+                && (is_math_type(name) || crate::Sema::CheckerCoreLib::is_geometry_type(name)) =>
+        {
             note_core_usage(used, spans, CORE_MATH_TYPES_USAGE, span);
+        }
+        Type::Apply { name, args }
+            if !registry.contains(name) && crate::Sema::CheckerCoreLib::is_geometry_type(name) =>
+        {
+            note_core_usage(used, spans, CORE_MATH_TYPES_USAGE, span);
+            for arg in args {
+                collect_core_type_usage(arg, registry, used, spans, span);
+            }
         }
         // D-CONFIG-ENV1: a type-only crypto carrier still needs the hidden
         // RustCrypto bridge. Most call-site paths carry the internal nominal
@@ -752,6 +795,12 @@ fn collect_core_type_usage(
         Type::Tuple(fields) => {
             for (_, field) in fields {
                 collect_core_type_usage(field, registry, used, spans, span);
+            }
+        }
+        Type::Apply { name, args } if name == "Atomic" || name.ends_with(".Atomic") => {
+            note_core_usage(used, spans, "core.mem::atomic", span);
+            for arg in args {
+                collect_core_type_usage(arg, registry, used, spans, span);
             }
         }
         Type::Apply { args, .. } | Type::Union(args) => {
@@ -817,8 +866,7 @@ pub(crate) fn apply_helper_layer_inference(
         .iter()
         .flat_map(|st| st.core_imports.iter().map(|(a, m)| (a.clone(), m.clone())))
         .collect();
-    let closure =
-        jet_foundation::RingLayer::classify_prelude_closure(bundle.used_core.iter());
+    let closure = jet_foundation::RingLayer::classify_prelude_closure(bundle.used_core.iter());
     for (usage, required) in closure {
         if required > bundle.inferred_layer {
             bundle.inferred_layer = required;
@@ -877,7 +925,9 @@ pub(crate) fn collect_core_stmts(
                 collect_core_lvalue(target, imports, registry, used, spans, ffi_cb);
                 collect_core_expr(value, imports, registry, used, spans, ffi_cb);
             }
-            Stmt::Return(Some(e), _) => collect_core_expr(e, imports, registry, used, spans, ffi_cb),
+            Stmt::Return(Some(e), _) => {
+                collect_core_expr(e, imports, registry, used, spans, ffi_cb)
+            }
             Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => {
                 collect_core_expr(e, imports, registry, used, spans, ffi_cb)
             }
@@ -1087,13 +1137,7 @@ pub(crate) fn collect_core_expr(
                 collect_core_type_usage(ty, registry, used, spans, Some(c.name_span));
             }
             if let Some(return_type) = &c.resolved_ret {
-                collect_core_type_usage(
-                    return_type,
-                    registry,
-                    used,
-                    spans,
-                    Some(c.name_span),
-                );
+                collect_core_type_usage(return_type, registry, used, spans, Some(c.name_span));
             }
         }
         Expr::MethodCall {
@@ -1115,13 +1159,7 @@ pub(crate) fn collect_core_expr(
                 collect_core_type_usage(ty, registry, used, spans, Some(*method_span));
             }
             if let Some(return_type) = resolved_ret {
-                collect_core_type_usage(
-                    return_type,
-                    registry,
-                    used,
-                    spans,
-                    Some(*method_span),
-                );
+                collect_core_type_usage(return_type, registry, used, spans, Some(*method_span));
             }
         }
         _ => {}
@@ -1166,6 +1204,19 @@ pub(crate) fn collect_core_expr(
             // the lane helpers.
             if let Some(recv_type) = recv_type {
                 note_builtin_math_type(recv_type, registry, used, spans, Some(*method_span));
+            }
+            if matches!(recv_type.as_deref(), Some("Float" | "F32"))
+                && matches!(
+                    method.as_str(),
+                    "is_nan" | "is_infinite" | "is_finite"
+                )
+            {
+                note_core_usage(
+                    used,
+                    spans,
+                    "core.math::__scalar_predicates__",
+                    Some(*method_span),
+                );
             }
             // Epoch 3 String surface delegates Unicode classification, title
             // casing, trimming, and display-width padding to the pinned
@@ -1264,8 +1315,23 @@ pub(crate) fn collect_core_expr(
                     Some(*method_span),
                 );
             }
+            if method == "cmd"
+                && matches!(
+                    receiver.as_ref(),
+                    Expr::Ident(name, _) if name.is_empty() || name == "UiShortcut"
+                )
+            {
+                // `.cmd("key")` lowers to the shared JetUiShortcut constructor,
+                // but still reaches the registered shortcut capability row so
+                // every target emits the same UI Prelude closure.
+                note_core_usage(
+                    used,
+                    spans,
+                    "core.ui.host::shortcut",
+                    Some(*method_span),
+                );
+            }
             if matches!(receiver.as_ref(), Expr::Ident(n, _) if is_json_type_name(n)) {
-                note_core_usage(used, spans, "core::json", Some(*method_span));
             }
             if matches!(
                 method.as_str(),
@@ -1357,6 +1423,23 @@ pub(crate) fn collect_core_expr(
             // head to its ordinary constructor call before this reachability
             // walk. The Syntax descriptor selects the owning prelude fragment.
             note_typed_head_core_usage(used, spans, &c.name, Some(c.name_span));
+            // Ambient `print` renders a non-String value through the shared
+            // Display route (`core.text.fmt.display`) and joins several
+            // arguments into one text, both of which build a `String`.  Only a
+            // lone string literal reaches the print row without allocating, so
+            // every other shape records the allocation-layer formatter reach
+            // here; without it the program stays in the Core layer, where AOT
+            // types `String` as `&'static str` and cannot build the text.
+            if c.name == Syntax::BUILTIN_PRINT
+                && !matches!(c.args.as_slice(), [arg] if matches!(arg.expr, Expr::Str(..)))
+            {
+                note_core_usage(
+                    used,
+                    spans,
+                    "core.text.fmt::interpolation",
+                    Some(c.name_span),
+                );
+            }
             for arg in &c.args {
                 // D-CABI-CALLBACK1: sema proved this bare function name is
                 // passed as a stable C callback at a `#Import` call site.
@@ -1376,6 +1459,13 @@ pub(crate) fn collect_core_expr(
             }
         }
         Expr::Field(inner, member, span) => {
+            if let Expr::Ident(alias, _) = inner.as_ref() {
+                if imports.get(alias).is_some_and(|module| module == "core.math")
+                    && member == "pi"
+                {
+                    note_core_usage(used, spans, "core.math::pi", Some(*span));
+                }
+            }
             if matches!(inner.as_ref(), Expr::Ident(n, _) if is_json_type_name(n))
                 && member == "Null"
             {
@@ -1431,32 +1521,22 @@ pub(crate) fn collect_core_expr(
         }
         Expr::Str(parts, _) => {
             for part in parts {
-                if let StrPart::Interp(e, format) = part {
+                if let StrPart::Interp(e, _) = part {
                     // D-FMT-INTERP1 / D-FMT-PRETTY1 / D-FMT-INTERP3: selector
                     // lowering creates a Core formatter call even when the
-                    // source has no `use core.text.fmt` import. Record that
-                    // reachability from the parsed selector so pay-for-use
-                    // AOT emission includes the shared Prelude kernel.
-                    if matches!(
-                        format,
-                        crate::AST::StrFormat::Pretty
-                            | crate::AST::StrFormat::Fixed(_)
-                            | crate::AST::StrFormat::Grouped(_)
-                            | crate::AST::StrFormat::Hex(_)
-                            | crate::AST::StrFormat::Pad { .. }
-                            | crate::AST::StrFormat::PadLeft { .. }
-                            | crate::AST::StrFormat::Sci(_)
-                            | crate::AST::StrFormat::Percent(_)
-                            | crate::AST::StrFormat::Bin
-                            | crate::AST::StrFormat::Oct
-                    ) {
-                        note_core_usage(
-                            used,
-                            spans,
-                            "core.text.fmt::interpolation",
-                            Some(e.span()),
-                        );
-                    }
+                    // source has no `use core.text.fmt` import.  Every hole,
+                    // including plain `{value}` Display, renders through
+                    // `core.text.fmt` and builds a `String`, so record that
+                    // reachability for each: pay-for-use AOT emission then
+                    // includes the shared Prelude kernel, and the program
+                    // leaves the Core layer, where AOT has no allocation and
+                    // cannot build an interpolated string at all.
+                    note_core_usage(
+                        used,
+                        spans,
+                        "core.text.fmt::interpolation",
+                        Some(e.span()),
+                    );
                     collect_core_expr(e, imports, registry, used, spans, ffi_cb);
                 }
             }

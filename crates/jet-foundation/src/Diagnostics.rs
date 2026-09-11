@@ -85,8 +85,9 @@ impl ReportMoment {
 
 /// D-REPORT-MACHINE1: one machine report schema for every Jet surface.
 pub use crate::Report::{
-    render_status_json, FixApplicability, FixSafety, ReportEdit, ReportEnvelope, ReportExtension,
-    ReportPath, ReportSpan, REPORT_SCHEMA,
+    render_status, render_status_with_reports, FixApplicability, FixSafety,
+    NoFixReason, NoFixReasonKind, ReportEdit, ReportEnvelope, ReportExtension, ReportPath,
+    ReportSpan, StatusEnvelope, StatusFields, StatusValue, REPORT_SCHEMA, STATUS_SCHEMA,
 };
 
 /// Source nesting accepted by sema and the canonical TIR evaluator.
@@ -182,7 +183,6 @@ impl DiagnosticCause {
         self.code == diagnostic.code && self.span.is_none_or(|span| diagnostic.span == Some(span))
     }
 }
-
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub moment: ReportMoment,
@@ -201,12 +201,27 @@ pub struct Diagnostic {
     pub applicability: Option<FixApplicability>,
     /// D-REPORT-FIXGRADE1=D: closed class projected into each `fix_edits` entry.
     pub safety: Option<FixSafety>,
+    /// A reviewed next action when no machine edit is available.
+    pub no_fix_reason: Option<NoFixReason>,
     /// Extra indented detail (e.g. tool output for E0704).
     pub detail: Option<String>,
     /// Decision-owned machine fields. Human prose never gets parsed back into
     /// protocol data.
     pub structured: Option<StructuredDiagnostic>,
+    /// The compiler-owned decision row that produced this report, when the
+    /// report is a projection of a checked optimization or flow fact.
+    pub decision_row: Option<crate::MIR::MirDecisionRow>,
+    /// Canonical rights-row denial classification, when this diagnostic is a
+    /// refusal produced by a rights/effect/authority row.
+    pub denial_kind: Option<String>,
+    /// The semantic call path that reached the refused right.
+    pub call_chain: Vec<String>,
+    /// The outer-to-inner authority scopes considered for the refused right.
+    pub scope_chain: Vec<String>,
+    /// The nearest scope that granted the refused right, when one exists.
+    pub nearest_granting_scope: Option<String>,
 }
+
 
 /// Control-flow sentinels used by the in-process evaluator and comptime
 /// bridge. This namespace is internal; these values never become product
@@ -230,9 +245,13 @@ pub mod internal {
 }
 
 impl Diagnostic {
-    /// E3403: ambient randomness or wall-clock state in pure evaluation.
     pub fn e3403(what: &str, span: Option<Span>) -> Self {
-        Self::from_row("E3403", &[("what", what)], span)
+        Self::from_row("E3403", &[("what", what)], span).with_rights_chain(
+            "pure",
+            std::iter::once(what.to_string()),
+            std::iter::empty::<String>(),
+            None,
+        )
     }
 
     /// Build a report from a typed row and its named hole values. The row
@@ -255,15 +274,27 @@ impl Diagnostic {
             applicability: row_applicability(row, edit.as_ref()),
             safety: row_safety(row, edit.as_ref()),
             edit,
+            no_fix_reason: row_no_fix_reason(row),
             detail: None,
             structured: None,
+            denial_kind: None,
+            call_chain: Vec::new(),
+            scope_chain: Vec::new(),
+            nearest_granting_scope: None,
+            decision_row: None,
         }
+
     }
 
     /// Attach a dynamic edit whose kind is authorized by the typed row.
     /// Emitters may supply only the source-derived replacement text and span;
     /// the row still owns whether this report has a generated fix channel.
     pub fn set_structured_edit(&mut self, edit: TextEdit) {
+        assert!(
+            self.no_fix_reason.is_none(),
+            "diagnostic `{}` cannot carry an edit and no-fix reason",
+            self.code
+        );
         let row = crate::Registry::diagnostic(&self.code)
             .unwrap_or_else(|| crate::ice!(None, "diagnostic `{}` has no typed row", self.code));
         assert!(
@@ -311,8 +342,14 @@ impl Diagnostic {
             applicability: row_applicability(row, edit.as_ref()),
             safety: row_safety(row, edit.as_ref()),
             edit,
+            no_fix_reason: row_no_fix_reason(row),
             detail: None,
             structured: None,
+            denial_kind: None,
+            call_chain: Vec::new(),
+            scope_chain: Vec::new(),
+            nearest_granting_scope: None,
+            decision_row: None,
         }
     }
 
@@ -325,6 +362,11 @@ impl Diagnostic {
         applicability: FixApplicability,
         safety: FixSafety,
     ) -> Self {
+        assert!(
+            self.no_fix_reason.is_none(),
+            "diagnostic `{}` cannot carry an edit and no-fix reason",
+            self.code
+        );
         let row = crate::Registry::diagnostic(&self.code)
             .unwrap_or_else(|| crate::ice!(None, "diagnostic `{}` has no typed row", self.code));
         assert!(
@@ -352,6 +394,11 @@ impl Diagnostic {
     /// Attach one additional source repair to this diagnostic. All attached
     /// repairs use the primary edit's row-owned applicability and safety.
     pub fn with_alternative_edit(mut self, edit: TextEdit) -> Self {
+        assert!(
+            self.no_fix_reason.is_none(),
+            "diagnostic `{}` cannot carry an edit and no-fix reason",
+            self.code
+        );
         assert!(
             self.edit.is_some() && self.applicability.is_some() && self.safety.is_some(),
             "diagnostic `{}` needs a graded primary edit before an alternative",
@@ -391,6 +438,11 @@ impl Diagnostic {
     /// Attach a source-derived edit whose grade is projected from the typed
     /// row.
     pub fn with_edit(mut self, edit: TextEdit) -> Self {
+        assert!(
+            self.no_fix_reason.is_none(),
+            "diagnostic `{}` cannot carry an edit and no-fix reason",
+            self.code
+        );
         let row = crate::Registry::diagnostic(&self.code)
             .unwrap_or_else(|| crate::ice!(None, "diagnostic `{}` has no typed row", self.code));
         assert!(
@@ -458,8 +510,14 @@ impl Diagnostic {
             applicability: row.and_then(|row| row_applicability(row, edit.as_ref())),
             safety: row.and_then(|row| row_safety(row, edit.as_ref())),
             edit,
+            no_fix_reason: row.and_then(row_no_fix_reason),
             detail: None,
             structured: None,
+            denial_kind: None,
+            call_chain: Vec::new(),
+            scope_chain: Vec::new(),
+            nearest_granting_scope: None,
+            decision_row: None,
         })
     }
 
@@ -492,8 +550,14 @@ impl Diagnostic {
             edit: None,
             applicability: None,
             safety: None,
+            no_fix_reason: None,
             detail: None,
             structured: None,
+            denial_kind: None,
+            call_chain: Vec::new(),
+            scope_chain: Vec::new(),
+            nearest_granting_scope: None,
+            decision_row: None,
         }
     }
 
@@ -569,14 +633,64 @@ impl Diagnostic {
             applicability: row_applicability(row, edit.as_ref()),
             safety: row_safety(row, edit.as_ref()),
             edit,
+            no_fix_reason: row_no_fix_reason(row),
             detail: None,
             structured: None,
+            denial_kind: None,
+            call_chain: Vec::new(),
+            scope_chain: Vec::new(),
+            nearest_granting_scope: None,
+            decision_row: None,
         }
     }
 
+    /// Attach the compiler-owned row without allowing a consumer to
+    /// reconstruct the proof from diagnostic prose.
+    pub fn with_decision_row(
+        mut self,
+        mut row: crate::MIR::MirDecisionRow,
+    ) -> Self {
+        if let Some(edit) = self.edit.as_ref() {
+            row = row.with_edit(edit.span, edit.new_text.clone());
+        }
+        self.decision_row = Some(row);
+        self
+    }
     pub fn with_detail(mut self, detail: String) -> Self {
         self.detail = Some(detail);
         self
+    }
+    /// Attach the canonical rights-row denial frame used by terminal, JSON,
+    /// and IDE projections.
+    pub fn with_rights_chain(
+        mut self,
+        denial_kind: impl Into<String>,
+        call_chain: impl IntoIterator<Item = String>,
+        scope_chain: impl IntoIterator<Item = String>,
+        nearest_granting_scope: Option<String>,
+    ) -> Self {
+        self.denial_kind = Some(denial_kind.into());
+        self.call_chain = call_chain.into_iter().collect();
+        self.scope_chain = scope_chain.into_iter().collect();
+        self.nearest_granting_scope = nearest_granting_scope;
+        self
+    }
+    /// Attach a reviewed next action when this diagnostic has no edits.
+    pub fn set_no_fix_reason(&mut self, reason: NoFixReason) -> Result<(), String> {
+        if !self.all_edits().is_empty() {
+            return Err(format!(
+                "diagnostic `{}` cannot carry fix_edits and no_fix_reason",
+                self.code
+            ));
+        }
+        reason.validate()?;
+        self.no_fix_reason = Some(reason);
+        Ok(())
+    }
+
+    pub fn with_no_fix_reason(mut self, reason: NoFixReason) -> Result<Self, String> {
+        self.set_no_fix_reason(reason)?;
+        Ok(self)
     }
 
     /// Attach a legacy code-only cause chain. New compiler-produced chains
@@ -765,39 +879,52 @@ impl Diagnostic {
                 }
             }
         }
+        if let Some(kind) = &self.denial_kind {
+            let kind = escape_terminal_text(kind);
+            out.push_str(&format!(" {} {}\n", theme.bold("Denial:"), kind));
+            if !self.call_chain.is_empty() {
+                let chain = self
+                    .call_chain
+                    .iter()
+                    .map(|part| escape_terminal_text(part))
+                    .collect::<Vec<_>>()
+                    .join(" → ");
+                out.push_str(&format!(" {} {}\n", theme.bold("Call chain:"), chain));
+            }
+            if !self.scope_chain.is_empty() {
+                let scopes = self
+                    .scope_chain
+                    .iter()
+                    .map(|scope| escape_terminal_text(scope))
+                    .collect::<Vec<_>>()
+                    .join(" → ");
+                out.push_str(&format!(" {} {}\n", theme.bold("Scope chain:"), scopes));
+            }
+            if let Some(scope) = &self.nearest_granting_scope {
+                out.push_str(&format!(
+                    " {} {}\n",
+                    theme.bold("Nearest granting scope:"),
+                    escape_terminal_text(scope)
+                ));
+            }
+        }
         out.push_str(&crate::Outcome::jet_diagnostic_more_line(&self.code));
         out.push('\n');
         out
     }
 
-    /// Render this diagnostic as one `jet.report/v1` JSON object.
-    /// Hand-rolled (invariant I6: no serde). The shape is:
-    ///
-    /// ```json
-    /// {
-    ///   "schema": "jet.report/v1", "moment": "compile",
-    ///   "severity": "error", "code": "E0102", "what": "…",
-    ///   "why": "…", "fix": "…",
-    ///   "applicability": "safe" | "suggested" | absent,
-    ///   "detail": "…" | null,
-    ///   "file": "a.jet", "line": 2, "col": 5,
-    ///   "span": { "start": 12, "end": 17 } | null,
-    ///   "fix_edits": [{ "file": "a.jet", "span": {…}, "new_text": "…",
-    ///                   "safety": "formatting" | "behavior-preserving" |
-    ///                              "api-changing" | "target-changing" | "needs-review" }],
-    ///   "cause": ["E0109", "E0108"],
-    ///   "clears": 2
-    /// }
-    /// ```
-    ///
-    /// `fix_edits` holds the machine-projected edits the LSP / fix engine
-    /// consumes; `applicability` comes from the same registry row.
-    pub fn to_json(&self, file: &ReportPath, src: &str) -> String {
-        self.to_json_with_clears(file, src, 0)
+    /// Project this diagnostic into the shared typed report envelope.
+    pub fn to_report(&self, file: &ReportPath, src: &str) -> ReportEnvelope {
+        self.to_report_with_clears(file, src, 0)
     }
 
-    /// Render one report with its batch-derived dependent count.
-    pub fn to_json_with_clears(&self, file: &ReportPath, src: &str, clears: usize) -> String {
+    /// Project one report with its batch-derived dependent count.
+    pub fn to_report_with_clears(
+        &self,
+        file: &ReportPath,
+        src: &str,
+        clears: usize,
+    ) -> ReportEnvelope {
         let sev = match self.severity {
             Severity::Error => "error",
             Severity::Lint => "warning",
@@ -811,20 +938,21 @@ impl Diagnostic {
             self.fix.clone(),
         );
         report.applicability = self.applicability;
+        report.denial_kind = self.denial_kind.clone();
+        report.call_chain = self.call_chain.clone();
+        report.scope_chain = self.scope_chain.clone();
+        report.nearest_granting_scope = self.nearest_granting_scope.clone();
         report.detail = self.detail.clone();
         if !file.is_empty() {
             report.file = Some(file.clone());
         }
-        match self.span {
-            Some(span) => {
-                let (line, col) = line_col(src, span.start);
-                report.line = Some(line);
-                report.col = Some(col);
-                report.span = Some(ReportSpan::new(span.start, span.end));
-            }
-            None => {}
+        if let Some(span) = self.span {
+            let (line, col) = line_col(src, span.start);
+            report.line = Some(line);
+            report.col = Some(col);
+            report.span = Some(ReportSpan::new(span.start, span.end));
         }
-        for e in self.all_edits() {
+        for edit in self.all_edits() {
             let safety = self.safety.unwrap_or_else(|| {
                 crate::ice!(
                     self.span,
@@ -832,12 +960,19 @@ impl Diagnostic {
                     self.code
                 )
             });
-            report.fix_edits.push(ReportEdit::new(
-                file.clone(),
-                ReportSpan::new(e.span.start, e.span.end),
-                e.new_text.clone(),
-                safety,
-            ));
+            report
+                .push_fix_edit(ReportEdit::new(
+                    file.clone(),
+                    ReportSpan::new(edit.span.start, edit.span.end),
+                    edit.new_text,
+                    safety,
+                ))
+                .unwrap_or_else(|error| crate::ice!(self.span, "{error}"));
+        }
+        if let Some(reason) = &self.no_fix_reason {
+            report
+                .set_no_fix_reason(reason.clone())
+                .unwrap_or_else(|error| crate::ice!(self.span, "{error}"));
         }
         report.cause = self.cause.iter().map(|cause| cause.code.clone()).collect();
         report.clears = clears;
@@ -863,7 +998,17 @@ impl Diagnostic {
                 report: error_report.to_json(),
             });
         }
-        report.json()
+        report
+    }
+
+    /// Render this diagnostic as one `jet.report/v2` JSON object.
+    pub fn to_json(&self, file: &ReportPath, src: &str) -> String {
+        self.to_report(file, src).json()
+    }
+
+    /// Render one report with its batch-derived dependent count.
+    pub fn to_json_with_clears(&self, file: &ReportPath, src: &str, clears: usize) -> String {
+        self.to_report_with_clears(file, src, clears).json()
     }
 }
 /// Put root diagnostics before reports that name them as causes. The stable
@@ -922,9 +1067,16 @@ fn row_applicability(
     })
 }
 
-fn row_safety(row: &crate::Registry::DiagnosticRow, edit: Option<&TextEdit>) -> Option<FixSafety> {
-    edit.and_then(|_| row.structured_fix)
-        .and_then(|_| row.fix_safety)
+fn row_safety(
+    row: &crate::Registry::DiagnosticRow,
+    edit: Option<&TextEdit>,
+) -> Option<FixSafety> {
+    edit.and(row.fix_safety)
+}
+
+fn row_no_fix_reason(row: &crate::Registry::DiagnosticRow) -> Option<NoFixReason> {
+    row.no_fix_reason
+        .map(|reason| NoFixReason::new(reason.kind, reason.next))
 }
 
 /// Escape untrusted text before it is projected to a terminal.
@@ -992,24 +1144,23 @@ pub fn json_str(s: &str) -> String {
 pub fn render_all_json(file: &ReportPath, src: &str, diags: &[Diagnostic]) -> String {
     let mut out = String::new();
     let clears = report_clear_counts(diags);
-    for (d, clears) in diags.iter().zip(clears) {
-        out.push_str(&d.to_json_with_clears(file, src, clears));
+    for (diagnostic, clears) in diags.iter().zip(clears) {
+        out.push_str(&diagnostic.to_json_with_clears(file, src, clears));
         out.push('\n');
     }
     out
 }
 
+
 /// Render the explicit success result for a clean --json check.
 pub fn render_success_json(file: &ReportPath) -> String {
-    ReportEnvelope::status_record("compile", "ok", true, "check")
-        .with_fields(&format!(
-            ",\"diagnostics\":[],\"file\":{}",
-            if file.is_empty() {
-                "null".to_string()
-            } else {
-                json_str(file.as_str())
-            },
-        ))
+    let value = if file.is_empty() {
+        StatusValue::Null
+    } else {
+        StatusValue::String(file.as_str().to_string())
+    };
+    StatusEnvelope::new("check", true)
+        .with_field("file", value)
         .json_line()
 }
 
@@ -1647,20 +1798,26 @@ mod crypto_diagnostic_contract_tests {
             "xxxx8161",
             &[diagnostic],
         );
-        assert_eq!(
-            json,
-            concat!(
-                "{\"schema\":\"jet.report/v1\",\"moment\":\"compile\",",
-                "\"severity\":\"error\",\"code\":\"E2702\",",
-                "\"what\":\"crypto API misuse\",",
-                "\"why\":\"HKDF-SHA256 output length is 8161 bytes; this operation requires 0..8160\",",
-                "\"fix\":\"pass an output length from 0 through 8160 bytes\",",
-                "\"detail\":null,\"file\":\"secret-name.jet\",\"line\":1,\"col\":5,",
-                "\"span\":{\"start\":4,\"end\":8},\"fix_edits\":[],\"cause\":[],\"clears\":0,",
-                "\"reason\":\"output_length\",\"operation\":\"hkdf_sha256\",",
-                "\"expected\":\"0..8160\",\"actual\":8161}\n"
-            )
-        );
+        let lines = json.lines().collect::<Vec<_>>();
+        assert_eq!(lines.len(), 1, "{json}");
+        let object = lines[0];
+        assert!(object.starts_with('{') && object.ends_with('}'), "{json}");
+        assert!(crate::JSON::parse_json(object).is_ok(), "{json}");
+        for required in [
+            "\"schema\":\"jet.report/v2\"",
+            "\"severity\":\"error\"",
+            "\"code\":\"E2702\"",
+            "\"what\":\"Crypto API misuse\"",
+            "\"why\":\"HKDF-SHA256 output length is 8161 bytes; this operation requires 0..8160\"",
+            "\"fix\":\"Replace the offending cryptographic argument with the concrete value or bound named in the diagnostic: pass an output length from 0 through 8160 bytes\"",
+            "\"no_fix_reason\":{\"kind\":\"behavior\"",
+            "\"reason\":\"output_length\"",
+            "\"operation\":\"hkdf_sha256\"",
+            "\"expected\":\"0..8160\"",
+            "\"actual\":8161",
+        ] {
+            assert!(object.contains(required), "missing {required:?}: {json}");
+        }
         for forbidden in [
             "password",
             "plaintext",
@@ -1683,7 +1840,7 @@ mod crypto_diagnostic_contract_tests {
             None,
         );
         let json = render_all_json(&ReportPath::from_process("x.jet"), "", &[diagnostic]);
-        assert!(json.starts_with("{\"schema\":\"jet.report/v1\",\"moment\":\"compile\""));
+        assert!(json.starts_with("{\"schema\":\"jet.report/v2\",\"moment\":\"compile\""));
         assert_eq!(json.lines().count(), 1);
         assert!(crate::JSON::parse_json(json.trim_end()).is_ok());
         assert_eq!(
@@ -1807,9 +1964,15 @@ mod crypto_diagnostic_contract_tests {
     #[test]
     fn structured_edit_comes_from_the_row_not_fix_prose() {
         let diagnostic = Diagnostic::from_row("E0373", &[], Some(Span::new(3, 4)));
+        assert!(diagnostic.edit.is_none());
+        assert_eq!(diagnostic.applicability, None);
+        let diagnostic = diagnostic.with_edit(TextEdit {
+            span: Span::new(3, 4),
+            new_text: "\n".to_string(),
+        });
         assert_eq!(
             diagnostic.edit.as_ref().map(|edit| edit.new_text.as_str()),
-            Some(",")
+            Some("\n")
         );
         assert_eq!(diagnostic.applicability, Some(FixApplicability::Safe));
     }
@@ -1895,9 +2058,9 @@ mod crypto_diagnostic_contract_tests {
         );
         assert_eq!(
             lint.what,
-            "prefer `total += …` instead of repeating the left side"
+            "Prefer `total += …` instead of repeating the left side"
         );
-        assert_eq!(lint.fix, "write `total += …`");
+        assert_eq!(lint.fix, "Write `total += …`");
 
         let unsupported = crate::Prelude::jet_e0956_unsupported("a compiler fact", Span::new(0, 1));
         assert_eq!(
@@ -1945,7 +2108,7 @@ mod crypto_diagnostic_contract_tests {
             &[diagnostic(), diagnostic()],
         );
         assert_eq!(json.lines().count(), 2);
-        assert_eq!(json.matches("\"schema\":\"jet.report/v1\"").count(), 2);
+        assert_eq!(json.matches("\"schema\":\"jet.report/v2\"").count(), 2);
         assert_eq!(json.matches("\"reason\":\"invalid_length\"").count(), 2);
     }
 
@@ -1974,11 +2137,11 @@ mod crypto_diagnostic_contract_tests {
             .iter()
             .all(|line| crate::JSON::parse_json(line).is_ok()));
         assert!(
-            lines[0].contains("\"schema\":\"jet.report/v1\"")
+            lines[0].contains("\"schema\":\"jet.report/v2\"")
                 && lines[0].contains("\"code\":\"E2702\"")
         );
         assert!(
-            lines[1].contains("\"schema\":\"jet.report/v1\"")
+            lines[1].contains("\"schema\":\"jet.report/v2\"")
                 && lines[1].contains("\"code\":\"E0001\"")
         );
     }

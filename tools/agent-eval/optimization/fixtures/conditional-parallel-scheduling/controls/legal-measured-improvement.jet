@@ -1,0 +1,9 @@
+// Legal measurement candidate: bounded parallel schedule with no effectful callback.
+fn run() {
+    values := [Int]{}
+    loop index in 0..<1024 {
+        values.push(index)
+    }
+    results :: values.para_map((value: Int) -> value * value, limit: 2)
+    print("{results[0]}:{results[1023]}")
+}

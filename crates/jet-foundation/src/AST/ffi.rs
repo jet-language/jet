@@ -795,9 +795,107 @@ impl ExternFn {
     ///
     /// Every other valid C signature stays on CModule's direct wrapper path.
     pub fn hidden_c_bridge_compatible(&self) -> bool {
-        // D-FFI-CAP1: the resident JIT/interpreter bridge is value-shaped only.
-        // A capability call must report the native boundary; it must never be
-        // re-encoded as a by-value adapter that could copy or retain storage.
+        self.hidden_c_bridge_compatible_with_handles(&[])
+    }
+
+    /// Whether this signature can use the resident bridge with the checked
+    /// opaque C handles supplied by the binder.
+    pub fn hidden_c_bridge_compatible_with_handles(
+        &self,
+        handles: &[FfiHandleFact],
+    ) -> bool {
+        // Generated managed callback facades and their native start/adapter
+        // rows are still checked bridge facts. They are not value-shaped C
+        // calls, so the ordinary scalar predicate below would incorrectly
+        // discard the producer row before TIR can lower its lifecycle.
+        if self.generated
+            && (self.callback_transport.as_deref().is_some_and(|transport| {
+                matches!(transport, "managed" | "managed-close" | "emit-task")
+            }) || self.name.starts_with("__jet_native_"))
+        {
+            return true;
+        }
+        let is_handle = |ty: &Type| {
+            matches!(ty, Type::Named(name) if handles.iter().any(|handle| handle.jet_name == *name))
+        };
+        let is_array_element = |ty: &Type| {
+            matches!(
+                ty,
+                Type::Int
+                    | Type::IntN { .. }
+                    | Type::Float
+                    | Type::Float32
+                    | Type::Bool
+                    | Type::Char
+                    | Type::InlineRange { .. }
+                    | Type::Tagged { .. }
+                    | Type::Quantity { .. }
+                    | Type::Named(_)
+            ) && !is_handle(ty)
+        };
+        let is_length_name = |name: &str| {
+            let lower = name.to_ascii_lowercase();
+            matches!(
+                lower.as_str(),
+                "n" | "len" | "length" | "count" | "size" | "num" | "number"
+            ) || [
+                "_len", "_length", "_count", "_size", "_num", "_number",
+            ]
+            .iter()
+            .any(|suffix| lower.ends_with(suffix))
+                || [
+                    "len_", "length_", "count_", "size_", "num_", "number_",
+                ]
+                .iter()
+                .any(|prefix| lower.starts_with(prefix))
+        };
+        let is_integer = |ty: &Type| ty.is_integer();
+        let companion_count = |index: usize| {
+            self.params.iter().enumerate().any(|(other, param)| {
+                other != index
+                    && is_length_name(&param.name)
+                    && is_integer(&param.ty)
+            })
+        };
+        let return_count = || {
+            self.params.iter().any(|param| {
+                param.convention == AccessConvention::Write
+                    && is_length_name(&param.name)
+                    && is_integer(&param.ty)
+            })
+        };
+        let generated_array_shape = self.generated
+            && self.params.iter().enumerate().all(|(index, param)| {
+                match &param.ty {
+                    Type::List(inner) => {
+                        param.convention != AccessConvention::Move
+                            && is_array_element(inner)
+                            && companion_count(index)
+                    }
+                    _ => {
+                        param.convention == AccessConvention::Read
+                            || (param.convention == AccessConvention::Write
+                                && self.return_type.as_ref().is_some_and(|ty| {
+                                    matches!(ty, Type::List(_))
+                                })
+                                && is_length_name(&param.name)
+                                && is_integer(&param.ty))
+                            || (param.convention == AccessConvention::Move
+                                && is_handle(&param.ty))
+                    }
+                }
+            })
+            && self
+                .return_type
+                .as_ref()
+                .map_or(true, |ty| !matches!(ty, Type::List(_)) || return_count());
+        if generated_array_shape {
+            return true;
+        }
+        // D-FFI-CAP1: the resident JIT/interpreter bridge is value-shaped only
+        // for user-authored declarations. Generated CBind arrays are the one
+        // checked exception: their pointer/count descriptor carries the
+        // native access convention and the bridge owns the temporary storage.
         if self
             .params
             .iter()
@@ -809,6 +907,7 @@ impl ExternFn {
             None => {
                 self.params.is_empty()
                     || matches!(self.params.as_slice(), [param] if param.ty == Type::Int)
+                    || matches!(self.params.as_slice(), [param] if is_handle(&param.ty))
             }
             Some(Type::Int) => {
                 self.params.is_empty()
@@ -822,6 +921,7 @@ impl ExternFn {
                         self.params.as_slice(),
                         [handle, code] if handle.ty == Type::Int && code.ty == Type::String
                     )
+                    || matches!(self.params.as_slice(), [param] if is_handle(&param.ty))
             }
             Some(Type::Float) => {
                 matches!(self.params.as_slice(), [param] if param.ty == Type::Float)
@@ -831,10 +931,12 @@ impl ExternFn {
                         self.params.as_slice(),
                         [handle, code] if handle.ty == Type::Int && code.ty == Type::String
                     )
+                    || matches!(self.params.as_slice(), [param] if is_handle(&param.ty))
             }
             Some(Type::Bool) => {
                 self.params.is_empty()
                     || matches!(self.params.as_slice(), [param] if param.ty == Type::Bool)
+                    || matches!(self.params.as_slice(), [param] if is_handle(&param.ty))
             }
             Some(Type::String) => {
                 matches!(self.params.as_slice(), [param] if param.ty == Type::String)
@@ -849,14 +951,155 @@ impl ExternFn {
                                 && code.ty == Type::String
                                 && deadline.ty == Type::Int
                     )
+                    || matches!(self.params.as_slice(), [param] if is_handle(&param.ty))
             }
+            Some(Type::Named(name)) => is_handle(&Type::Named(name.clone()))
+                && self.params.is_empty(),
             _ => false,
         }
     }
 }
+/// The close-symbol provenance attached to a generated C handle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FfiCloseSource {
+    Conventional,
+    Overlay,
+}
+
+impl FfiCloseSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Conventional => "conventional",
+            Self::Overlay => "overlay",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "conventional" => Some(Self::Conventional),
+            "overlay" => Some(Self::Overlay),
+            _ => None,
+        }
+    }
+}
+
+/// The explicit concurrency fact attached to a generated C handle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FfiThreadSafety {
+    Unspecified,
+    Safe,
+    Unsafe,
+}
+
+impl Default for FfiThreadSafety {
+    fn default() -> Self {
+        Self::Unspecified
+    }
+}
+
+impl FfiThreadSafety {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unspecified => "unspecified",
+            Self::Safe => "safe",
+            Self::Unsafe => "unsafe",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "unspecified" => Some(Self::Unspecified),
+            "safe" => Some(Self::Safe),
+            "unsafe" => Some(Self::Unsafe),
+            _ => None,
+        }
+    }
+}
+
+/// Explicit native libraries attached to one foreign binding.
+///
+/// `direct` is the set of libraries named by the program. `transitive` is the
+/// set supplied by an overlay. Neither list is inferred from headers or native
+/// symbols; both are canonicalized so cache identities remain stable.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FfiLinkClosure {
+    pub direct: Vec<String>,
+    pub transitive: Vec<String>,
+}
+
+impl FfiLinkClosure {
+    pub fn new(mut direct: Vec<String>, mut transitive: Vec<String>) -> Self {
+        direct.retain(|lib| !lib.is_empty());
+        transitive.retain(|lib| !lib.is_empty());
+        direct.sort();
+        direct.dedup();
+        transitive.sort();
+        transitive.dedup();
+        transitive.retain(|lib| !direct.binary_search(lib).is_ok());
+        Self {
+            direct,
+            transitive,
+        }
+    }
+
+    pub fn libraries(&self) -> impl Iterator<Item = &str> {
+        self.direct
+            .iter()
+            .chain(self.transitive.iter())
+            .map(String::as_str)
+    }
+
+    /// Stable human-readable encoding used by binding metadata and bridge
+    /// provenance. Empty lists stay explicit rather than becoming a missing
+    /// field.
+    pub fn stable_key(&self) -> String {
+        format!(
+            "direct={};transitive={}",
+            self.direct.join(","),
+            self.transitive.join(",")
+        )
+    }
+}
+
+/// One opaque C typedef promoted to a nominal Jet handle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FfiHandleFact {
+    pub lib: String,
+    pub typedef_name: String,
+    pub jet_name: String,
+    pub close: String,
+    pub close_source: FfiCloseSource,
+    pub thread_safety: FfiThreadSafety,
+}
+
+impl FfiHandleFact {
+    /// Stable field encoding for content-addressed bridge identities.
+    pub fn stable_key(&self) -> String {
+        format!(
+            "lib={};typedef={};jet={};close={};close-source={};thread-safety={}",
+            self.lib,
+            self.typedef_name,
+            self.jet_name,
+            self.close,
+            self.close_source.as_str(),
+            self.thread_safety.as_str()
+        )
+    }
+}
+
+/// Compiler-owned adapter used when a native close function returns a status.
+/// The raw C declaration remains available under its original name; this
+/// private Unit-returning function is the one attached to `#Close`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FfiCloseAdapter {
+    pub lib: String,
+    pub handle_type: String,
+    pub raw_function: String,
+    pub adapter_function: String,
+}
 
 /// The result of resolving one C `use` in one file.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CImportLink {
     pub importing_idx: usize,
     /// `None` is a file-wide import; `Some` names the inline module whose
@@ -868,7 +1111,7 @@ pub struct CImportLink {
 }
 
 /// One C library that the program links against.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CLib {
     pub lib: String,
     pub module_idx: usize,
@@ -883,6 +1126,181 @@ pub struct COverlayOverride {
 }
 
 
+/// Basis assigned to one foreign boundary obligation.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum FfiEvidenceBasis {
+    Proved,
+    Enforced,
+    Contained,
+    Trusted,
+    #[default]
+    Unknown,
+}
+
+impl FfiEvidenceBasis {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Proved => "proved",
+            Self::Enforced => "enforced",
+            Self::Contained => "contained",
+            Self::Trusted => "trusted",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "proved" => Some(Self::Proved),
+            "enforced" => Some(Self::Enforced),
+            "contained" => Some(Self::Contained),
+            "trusted" => Some(Self::Trusted),
+            "unknown" => Some(Self::Unknown),
+            _ => None,
+        }
+    }
+
+    pub const fn permits_guarantee(self) -> bool {
+        matches!(self, Self::Proved | Self::Enforced | Self::Contained)
+    }
+
+    pub const fn is_unknown(self) -> bool {
+        matches!(self, Self::Unknown)
+    }
+}
+
+pub const FFI_BOUNDARY_OBLIGATIONS: &[&str] = &[
+    "abi",
+    "layout",
+    "width",
+    "alignment",
+    "ownership",
+    "lifetime",
+    "cleanup",
+    "encoding",
+    "nullability",
+    "errors",
+    "exceptions",
+    "callbacks",
+    "task-thread",
+    "target",
+    "copy-cost",
+    "effects",
+];
+
+/// Lower-layer carrier projected from `jet_pkg_model::ForeignBoundaryContract`.
+///
+/// This carrier lets sema, TIR, and every execution tier consume the same
+/// checked rows without making the lower layers depend upward on pkg-model.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FfiBoundaryObligation {
+    pub name: String,
+    pub basis: FfiEvidenceBasis,
+    pub checker: String,
+    pub assumptions: Vec<String>,
+    pub coverage_digest: String,
+}
+
+/// Lower-layer boundary facts carried by `ProgramBundle::cffi`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FfiBoundaryFacts {
+    pub schema: String,
+    pub digest: String,
+    pub language: String,
+    pub library: String,
+    pub effect_root: String,
+    pub effects: String,
+    pub source_authority: String,
+    pub artifact_coverage_digest: String,
+    pub loaded_artifact: String,
+    pub transitive_dependencies: Option<Vec<String>>,
+    pub reachable_callbacks: Option<Vec<String>>,
+    pub compiler_flags: Option<Vec<String>>,
+    pub target: String,
+    pub generator: String,
+    pub obligations: Vec<FfiBoundaryObligation>,
+}
+
+impl FfiBoundaryFacts {
+    pub fn obligation(&self, name: &str) -> Option<&FfiBoundaryObligation> {
+        self.obligations
+            .iter()
+            .find(|obligation| obligation.name == name)
+    }
+
+    pub fn permits_guarantee(&self, name: &str) -> bool {
+        self.obligation(name)
+            .is_some_and(|obligation| obligation.basis.permits_guarantee())
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.schema.trim().is_empty()
+            || self.digest.trim().is_empty()
+            || self.language.trim().is_empty()
+            || self.library.trim().is_empty()
+            || self.effect_root.trim().is_empty()
+            || self.effects.trim().is_empty()
+            || self.source_authority.trim().is_empty()
+            || self.artifact_coverage_digest.trim().is_empty()
+            || self.loaded_artifact.trim().is_empty()
+            || self.target.trim().is_empty()
+            || self.generator.trim().is_empty()
+        {
+            return Err("foreign boundary carrier is incomplete".into());
+        }
+        if !self
+            .effects
+            .split(';')
+            .any(|effect| effect == self.effect_root)
+        {
+            return Err("foreign boundary carrier narrowed its effect root".into());
+        }
+        let coverage_complete = self.transitive_dependencies.is_some()
+            && self.reachable_callbacks.is_some()
+            && self.compiler_flags.is_some();
+        if !coverage_complete
+            && self
+                .obligations
+                .iter()
+                .any(|obligation| !obligation.basis.is_unknown())
+        {
+            return Err("foreign boundary carrier has incomplete artifact coverage".into());
+        }
+        let mut names = std::collections::BTreeSet::new();
+        for obligation in &self.obligations {
+            if obligation.name.trim().is_empty()
+                || obligation.checker.trim().is_empty()
+                || obligation.assumptions.is_empty()
+                || obligation.coverage_digest != self.artifact_coverage_digest
+            {
+                return Err(format!(
+                    "foreign boundary carrier has invalid `{}` obligation",
+                    obligation.name
+                ));
+            }
+            if !names.insert(obligation.name.as_str()) {
+                return Err(format!(
+                    "foreign boundary carrier repeats `{}` obligation",
+                    obligation.name
+                ));
+            }
+        }
+        for obligation in FFI_BOUNDARY_OBLIGATIONS {
+            if !names.contains(obligation) {
+                return Err(format!(
+                    "foreign boundary carrier omits `{obligation}` obligation"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn has_unknown_obligations(&self) -> bool {
+        self.obligations
+            .iter()
+            .any(|obligation| obligation.basis.is_unknown())
+    }
+}
+
 /// Gathered C-FFI artifacts threaded into sema and codegen.
 #[derive(Debug, Default, Clone)]
 pub struct CFfi {
@@ -890,7 +1308,18 @@ pub struct CFfi {
     pub libs: Vec<CLib>,
     /// Bindgen symbols replaced by matching user overlay declarations.
     pub overlay_overrides: Vec<COverlayOverride>,
+    /// Canonical boundary evidence projected from the binder provenance row.
+    /// Sema and execution tiers consume this carrier; it owns no new rules.
+    pub boundaries: Vec<FfiBoundaryFacts>,
+    /// Opaque typedef ownership and close provenance from generated bindings.
+    pub handle_facts: Vec<FfiHandleFact>,
+    /// Explicit direct and transitive native libraries for the whole bundle.
+    pub link_closure: FfiLinkClosure,
+    /// Compiler-owned Unit adapters for status-returning native closers.
+    pub close_adapters: Vec<FfiCloseAdapter>,
 }
+
+
 
 impl CFfi {
     pub fn target_for(&self, importing_idx: usize, alias: &str) -> Option<usize> {
@@ -914,7 +1343,19 @@ impl CFfi {
     pub fn links_c(&self) -> bool {
         !self.libs.is_empty()
     }
+
+    pub fn handle_fact(&self, lib: &str, jet_name: &str) -> Option<&FfiHandleFact> {
+        self.handle_facts
+            .iter()
+            .find(|fact| fact.lib == lib && fact.jet_name == jet_name)
+    }
+    pub fn boundary_for(&self, lib: &str) -> Option<&FfiBoundaryFacts> {
+        self.boundaries
+            .iter()
+            .find(|boundary| boundary.library == lib)
+    }
 }
+
 
 // ── Comptime embed input ──────────────────────────────────────────────────────
 
@@ -951,6 +1392,10 @@ pub struct FfiLink {
     /// `jetpack secrets set/get/recipients/keygen` shells out to this for the
     /// age-style encrypt/decrypt/keygen operations. `None` otherwise.
     pub secrets_helper_bin_path: Option<PathBuf>,
+    /// Opaque C handle facts captured by the bridge input.
+    pub handle_facts: Vec<FfiHandleFact>,
+    /// Explicit native link closure captured by the bridge input.
+    pub link_closure: FfiLinkClosure,
 }
 
 impl FfiLink {

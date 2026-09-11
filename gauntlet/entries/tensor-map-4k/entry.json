@@ -1,0 +1,35 @@
+{
+  "name": "tensor-map-4k",
+  "tier": "micro",
+  "cells": ["numerics.tensor-map"],
+  "mode": "batch",
+  "perf": true,
+  "languages": ["jet", "rust", "python", "c", "zig", "node"],
+  "spec": {
+    "behavior": "Allocate independent 4096x4096 Float64 arrays filled with 1 and 2, allocate their elementwise sum, validate the original shape, element count, and bottom-right corner, consume every summed element in a complete checksum, and print the validation record.",
+    "args": [],
+    "fixtureGen": null,
+    "workload": "Every implementation owns two independent 4096x4096 Float64 inputs and one separately allocated 4096x4096 Float64 output. The checksum traverses the complete output; no implementation reuses a preallocated input or boxes the Jet tensor.",
+    "expected": "expected.out"
+  },
+  "metric_applicability": {
+    "python": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is python3 main.py; no binary is built or measured."}
+    },
+    "node": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no Node executable artifact.", "evidence": "The harness run command is node main.mjs directly and no binary is built or measured."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node has no compile-phase executable artifact in the host replay.", "evidence": "The harness invokes node main.mjs directly and produces no Node binary."}
+    }
+  },
+  "authoring": {
+    "jet": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Source-only implementation uses the shipped core.compute.full, core.compute.add, core.compute.sum_axis, and core.compute.get operations; no validation command was run."},
+    "rust": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Source-only ordinary std-only Float64 implementation; no validation command was run."},
+    "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Source-only NumPy float64 implementation; it requires the existing NumPy incumbent prerequisite and adds no dependency; no validation command was run."},
+    "c": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Source-only ordinary C double implementation using the standard allocator; no validation command was run."},
+    "zig": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Source-only ordinary Zig f64 implementation using the standard page allocator; no validation command was run."},
+    "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Source-only Node Float64Array implementation with built-in typed-array operations; no validation command was run."}
+  }
+}

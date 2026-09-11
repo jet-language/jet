@@ -9,13 +9,30 @@ use super::Concurrency;
 use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_module::Module;
-use jet_codegen::AST::CtValue;
 
 pub(crate) mod time_rt {
+    // `TimeInstant.rs` names the shared sleep seam unqualified; the resident
+    // adapter below routes it to the ambient scheduler.
+    use super::jet_std_time_sleep_duration_ns;
+    fn jet_scheduler_world_monotonic_now_ns() -> Option<i64> {
+        jet_codegen::scheduler::jet_scheduler_world_monotonic_now_ns()
+    }
+    fn jet_scheduler_world_reject_uncontrolled(effect: &'static str) {
+        jet_codegen::scheduler::jet_scheduler_world_reject_uncontrolled(effect);
+    }
     include!("../../jet-codegen/src/Prelude/Core/TimeMonotonic.rs");
     include!("../../jet-codegen/src/Prelude/Core/Duration.rs");
+    fn jet_scheduler_world_now_ms() -> Option<i64> {
+        jet_codegen::scheduler::jet_scheduler_world_now_ms()
+    }
     include!("../../jet-codegen/src/Prelude/Core/Time.rs");
     include!("../../jet-codegen/src/Prelude/Core/TimeInstant.rs");
+    include!("../../jet-codegen/src/Prelude/Core/Realtime.rs");
+}
+/// The JIT adapter keeps the canonical nanosecond sleep contract while
+/// delegating parking and cancellation to the shared scheduler host.
+pub(crate) fn jet_std_time_sleep_duration_ns(nanos: i64) {
+    Concurrency::ambient_time_sleep(nanos);
 }
 
 #[derive(Clone)]
@@ -29,49 +46,239 @@ pub(crate) enum TimeValue {
     LocalTime(time_rt::JetLocalTime),
 }
 
-pub(crate) fn ambient_date_today_value() -> CtValue {
-    ambient_date_today_value_as("Date")
+pub(crate) fn ambient_days_in_month(year: i64, month: i64) -> i64 {
+    time_rt::JetDate::days_in_month_of(year, month.clamp(1, 12))
 }
 
-pub(crate) fn ambient_date_today_value_as(type_name: &str) -> CtValue {
-    let date = time_rt::JetDate::today_utc();
-    CtValue::Struct {
-        type_name: type_name.to_string(),
-        fields: vec![
-            ("year".to_string(), CtValue::Int(date.year())),
-            ("month".to_string(), CtValue::Int(date.month())),
-            ("day".to_string(), CtValue::Int(date.day())),
-        ],
-    }
+pub(crate) fn ambient_is_leap_year(year: i64) -> bool {
+    time_rt::JetDate::is_leap(year)
 }
-
-pub(crate) fn ambient_datetime_now_value() -> CtValue {
-    let datetime = time_rt::JetDateTime::now();
-    CtValue::Struct {
-        type_name: "DateTime".to_string(),
-        fields: vec![
-            ("secs".to_string(), CtValue::Int(datetime.to_timestamp())),
-            ("nanos".to_string(), CtValue::Int(datetime.nanosecond())),
-        ],
-    }
-}
-
 pub(crate) fn ambient_monotonic_now_ms() -> i64 {
-    jet_foundation::Monotonic::jet_time_monotonic_now_ns() / 1_000_000
+    jet_codegen::scheduler::jet_scheduler_world_monotonic_now_ns()
+        .unwrap_or_else(jet_foundation::Monotonic::jet_time_monotonic_now_ns)
+        / 1_000_000
+}
+/// Canonical deterministic/system Clock adapters.  The resident JIT runtime
+/// owns the manual/system timeline carrier; this module only erases the
+/// checked Prelude ABI to a handle for Cranelift.
+fn jet_std_clock_new(seed: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.clock_new_manual(seed))
 }
 
-pub(crate) fn ambient_instant_value() -> CtValue {
-    CtValue::Struct {
-        type_name: "Instant".to_string(),
-        fields: vec![(
-            "start_ns".to_string(),
-            CtValue::Int(jet_foundation::Monotonic::jet_time_monotonic_now_ns()),
-        )],
-    }
+fn jet_std_clock_system() -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.clock_new_system())
 }
+
+fn jet_clock_now(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.clock_now(handle))
+}
+
+fn jet_clock_tick(handle: i64, delta_ms: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.clock_tick(handle, delta_ms))
+}
+
+fn jet_clock_advance(handle: i64, to_ms: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.clock_advance(handle, to_ms))
+}
+
+fn jet_clock_wait(handle: i64, duration: i64) -> i64 {
+    let delta_ms = jet_codegen::scheduler::jet_std_time_duration_to_millis(duration);
+    Concurrency::with_runtime_mut(|rt| rt.clock_wait(handle, delta_ms))
+}
+
 
 fn jet_jit_time_start() -> i64 {
     ambient_monotonic_now_ms()
+}
+
+fn jet_jit_time_sleep_duration_ns(nanos: i64) {
+    jet_std_time_sleep_duration_ns(nanos);
+}
+
+fn jet_jit_time_sleep_until(deadline: i64) {
+    let instant = with_time(deadline, |value| match value {
+        TimeValue::Instant(value) => Some(value.clone()),
+        _ => None,
+    });
+    if let Some(instant) = instant {
+        time_rt::jet_time_sleep_until(&instant);
+    }
+}
+
+fn invoke_realtime_callback(
+    slot: Option<crate::runtime_host::JitCallableSlot>,
+    list: i64,
+    buffer: &Vec<f64>,
+    callback_skipped: &std::sync::atomic::AtomicBool,
+) {
+    let Some(slot) = slot else {
+        let _ = Concurrency::try_with_http_jet_runtime(|| {
+            if let Some(ptr) = Concurrency::active_runtime_ptr() {
+                // SAFETY: the nonblocking runtime guard pins this published
+                // resident until the closure returns.
+                unsafe {
+                    (*ptr).set_host_fault("MIR realtime callback has an invalid callable handle");
+                }
+            }
+        });
+        callback_skipped.store(true, std::sync::atomic::Ordering::Release);
+        return;
+    };
+
+    let Some(invoked) = Concurrency::try_with_http_jet_runtime(|| {
+        let Some(ptr) = Concurrency::active_runtime_ptr() else {
+            return false;
+        };
+        let updated = {
+            // SAFETY: the nonblocking runtime guard pins this published
+            // resident until the callback returns.
+            let rt = unsafe { &mut *ptr };
+            let mut updated = true;
+            for (index, &value) in buffer.iter().enumerate() {
+                if rt.heap.list_set_float(list, index as i64, value).is_none() {
+                    rt.set_host_fault("MIR realtime callback buffer carrier was modified");
+                    updated = false;
+                    break;
+                }
+            }
+            updated
+        };
+        if !updated {
+            return false;
+        }
+        // The mutable runtime borrow ended before entering generated user
+        // code; nested host calls may therefore borrow the same TLS runtime.
+        unsafe {
+            if slot.has_env {
+                let callback: unsafe extern "C" fn(i64, i64) =
+                    std::mem::transmute(slot.fn_ptr as usize);
+                callback(slot.env, list);
+            } else {
+                let callback: unsafe extern "C" fn(i64) = std::mem::transmute(slot.fn_ptr as usize);
+                callback(list);
+            }
+        }
+        true
+    }) else {
+        callback_skipped.store(true, std::sync::atomic::Ordering::Release);
+        return;
+    };
+    if !invoked {
+        callback_skipped.store(true, std::sync::atomic::Ordering::Release);
+    }
+}
+
+fn jet_jit_realtime_callback(rate_hz: i64, frames_per_buffer: i64, callback: i64) -> i64 {
+    assert!(rate_hz > 0, "real-time callback rate must be positive");
+    assert!(frames_per_buffer > 0, "real-time callback frame count must be positive");
+    let frame_count = usize::try_from(frames_per_buffer)
+        .expect("real-time callback frame count is outside the platform range");
+    let list = Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.alloc_empty_list();
+        for _ in 0..frame_count {
+            rt.heap
+                .list_push_float(list, 0.0)
+                .expect("MIR realtime callback buffer carrier allocation failed");
+        }
+        list
+    });
+    let slot = Concurrency::with_runtime_mut(|rt| {
+        crate::runtime_host::jit_callable_parts(rt, callback)
+    });
+    let callback_skipped =
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let callback_skipped_for_callback = callback_skipped.clone();
+    let stream = time_rt::jet_rt_callback_with_skip(
+        rate_hz,
+        frames_per_buffer,
+        move |buffer| {
+            invoke_realtime_callback(slot, list, buffer, &callback_skipped_for_callback);
+        },
+        callback_skipped,
+    );
+    Concurrency::with_runtime_mut(|rt| {
+        rt.realtime_values.push(Some(stream));
+        rt.realtime_values.len() as i64
+    })
+}
+
+fn realtime_stream(handle: i64) -> Option<time_rt::JetRealtimeStream> {
+    let index = usize::try_from(handle).ok()?.checked_sub(1)?;
+    Concurrency::with_runtime_mut(|rt| {
+        rt.realtime_values
+            .get(index)
+            .and_then(Option::as_ref)
+            .cloned()
+    })
+}
+
+fn jet_jit_realtime_next_deadline(handle: i64) -> i64 {
+    realtime_stream(handle)
+        .map(|stream| push(TimeValue::Instant(stream.next_deadline())))
+        .unwrap_or_else(|| {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_host_fault("MIR realtime next_deadline received an invalid stream handle");
+            });
+            0
+        })
+}
+
+fn jet_jit_realtime_receipt(handle: i64) -> i64 {
+    let Some(receipt) = realtime_stream(handle).map(|stream| stream.receipt()) else {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_host_fault("MIR realtime receipt received an invalid stream handle");
+        });
+        return 0;
+    };
+    Concurrency::with_runtime_mut(|rt| {
+        let record = rt.heap.alloc_record(8);
+        let values = [
+            receipt.requested_rate_hz,
+            receipt.requested_frames,
+            receipt.completed_callbacks,
+            receipt.completed_frames,
+            receipt.missed,
+            receipt.max_lateness_ns,
+            receipt.start_identity,
+            receipt.end_identity,
+        ];
+        for (index, value) in values.into_iter().enumerate() {
+            let _ = rt.heap.record_set_int(record, index as i64, value);
+        }
+        record
+    })
+}
+
+fn jet_jit_realtime_cancel(handle: i64) {
+    let Some(index) = usize::try_from(handle).ok().and_then(|value| value.checked_sub(1)) else {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_host_fault("MIR realtime cancel received an invalid stream handle");
+        });
+        return;
+    };
+    let stream = Concurrency::with_runtime_mut(|rt| {
+        rt.realtime_values
+            .get_mut(index)
+            .and_then(Option::take)
+    });
+    let Some(mut stream) = stream else {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_host_fault("MIR realtime cancel received an invalid stream handle");
+        });
+        return;
+    };
+    stream.cancel();
+}
+
+fn jet_jit_realtime_is_cancelled(handle: i64) -> i8 {
+    realtime_stream(handle)
+        .map(|stream| i8::from(stream.is_cancelled()))
+        .unwrap_or_else(|| {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_host_fault("MIR realtime is_cancelled received an invalid stream handle");
+            });
+            0
+        })
 }
 
 fn jet_jit_stopwatch_elapsed_millis(start_ms: i64) -> i64 {
@@ -108,6 +315,19 @@ pub(crate) fn show_value(rt: &crate::JitRuntime, handle: i64) -> String {
         None => String::new(),
     }
 }
+fn jet_jit_time_display(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let rendered = show_value(rt, handle);
+        rt.heap.alloc_string(rendered)
+    })
+}
+
+fn jet_jit_duration_display(nanos: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .alloc_string(time_rt::jet_duration_kernel_show(nanos))
+    })
+}
 
 fn result_err(msg: String) -> i64 {
     result_err_msg(&msg)
@@ -122,7 +342,24 @@ fn result_err_record(message: String) -> i64 {
     })
 }
 
+fn civil_int(raw: i64, context: &'static str) -> Option<i64> {
+    Concurrency::with_runtime_mut(|rt| {
+        let value = rt.heap.int_to_i64(raw);
+        if value.is_none() {
+            rt.set_host_fault(context);
+        }
+        value
+    })
+}
+
 fn jet_jit_date_new(y: i64, m: i64, d: i64) -> i64 {
+    let (Some(y), Some(m), Some(d)) = (
+        civil_int(y, "Date year is outside the shared time kernel's i64 range"),
+        civil_int(m, "Date month is outside the shared time kernel's i64 range"),
+        civil_int(d, "Date day is outside the shared time kernel's i64 range"),
+    ) else {
+        return 0;
+    };
     push(TimeValue::Date(time_rt::JetDate::new(y, m, d)))
 }
 
@@ -146,6 +383,26 @@ fn jet_jit_date_equal(left: i64, right: i64) -> i8 {
         }
     })
 }
+fn jet_jit_date_compare(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let left = left
+            .checked_sub(1)
+            .and_then(|index| rt.time_values.get(index as usize))
+            .and_then(Option::as_ref);
+        let right = right
+            .checked_sub(1)
+            .and_then(|index| rt.time_values.get(index as usize))
+            .and_then(Option::as_ref);
+        match (left, right) {
+            (Some(TimeValue::Date(left)), Some(TimeValue::Date(right))) => match left.cmp(right) {
+                std::cmp::Ordering::Less => -1,
+                std::cmp::Ordering::Equal => 0,
+                std::cmp::Ordering::Greater => 1,
+            },
+            _ => 0,
+        }
+    })
+}
 
 fn jet_jit_date_parse(s: i64) -> i64 {
     match time_rt::JetDate::parse(&clone_string(s)) {
@@ -154,7 +411,20 @@ fn jet_jit_date_parse(s: i64) -> i64 {
     }
 }
 
+fn unix_timestamp(raw: i64) -> Option<i64> {
+    Concurrency::with_runtime_mut(|rt| {
+        let value = rt.heap.int_to_i64(raw);
+        if value.is_none() {
+            rt.set_host_fault("Unix timestamp is outside the shared time kernel's i64 range");
+        }
+        value
+    })
+}
+
 fn jet_jit_datetime_from_timestamp(ts: i64) -> i64 {
+    let Some(ts) = unix_timestamp(ts) else {
+        return 0;
+    };
     push(TimeValue::DateTime(time_rt::JetDateTime::from_timestamp(
         ts,
     )))
@@ -173,22 +443,34 @@ fn jet_jit_time_parse_rfc3339(s: i64) -> i64 {
 }
 
 fn jet_jit_time_from_unix_ms(ms: i64) -> i64 {
+    let Some(ms) = unix_timestamp(ms) else {
+        return 0;
+    };
     push(TimeValue::DateTime(time_rt::JetDateTime::from_unix_ms(ms)))
 }
 
 fn jet_jit_time_from_unix_seconds(seconds: i64) -> i64 {
+    let Some(seconds) = unix_timestamp(seconds) else {
+        return 0;
+    };
     push(TimeValue::DateTime(
         time_rt::JetDateTime::from_unix_seconds(seconds),
     ))
 }
 
 fn jet_jit_time_from_unix_microseconds(microseconds: i64) -> i64 {
+    let Some(microseconds) = unix_timestamp(microseconds) else {
+        return 0;
+    };
     push(TimeValue::DateTime(
         time_rt::JetDateTime::from_unix_microseconds(microseconds),
     ))
 }
 
 fn jet_jit_time_from_unix_nanoseconds(nanoseconds: i64) -> i64 {
+    let Some(nanoseconds) = unix_timestamp(nanoseconds) else {
+        return 0;
+    };
     push(TimeValue::DateTime(
         time_rt::JetDateTime::from_unix_nanoseconds(nanoseconds),
     ))
@@ -376,6 +658,13 @@ fn jet_jit_time_datetime(
 }
 
 fn jet_jit_time_local_time(hour: i64, minute: i64, second: i64) -> i64 {
+    let (Some(hour), Some(minute), Some(second)) = (
+        civil_int(hour, "Local time hour is outside the shared time kernel's i64 range"),
+        civil_int(minute, "Local time minute is outside the shared time kernel's i64 range"),
+        civil_int(second, "Local time second is outside the shared time kernel's i64 range"),
+    ) else {
+        return 0;
+    };
     push(TimeValue::LocalTime(time_rt::JetLocalTime::new(
         hour, minute, second,
     )))
@@ -436,11 +725,16 @@ fn time_bool_tag(value: bool) -> i64 {
 }
 
 fn time_ordering_tag(value: std::cmp::Ordering) -> i64 {
-    match value {
-        std::cmp::Ordering::Less => 0,
-        std::cmp::Ordering::Equal => 1,
-        std::cmp::Ordering::Greater => 2,
-    }
+    let variant = match value {
+        std::cmp::Ordering::Less => "Less",
+        std::cmp::Ordering::Equal => "Equal",
+        std::cmp::Ordering::Greater => "Greater",
+    };
+    crate::types_meta::prelude_enum_variant_index(
+        jet_foundation::Syntax::TYPE_ORDERING,
+        variant,
+    )
+    .expect("Prelude Ordering variants must be registered")
 }
 
 fn time_optional_string(handle: i64, default: &str) -> String {
@@ -460,7 +754,9 @@ fn time_optional_increment(value: i64) -> i64 {
 }
 
 fn time_option_int(value: Option<i64>) -> i64 {
-    value.map(|value| value.wrapping_add(1)).unwrap_or(0)
+    Concurrency::with_runtime_mut(|rt| {
+        crate::runtime_host::alloc_jit_result(rt, value.is_some(), value.unwrap_or_default() as u64)
+    })
 }
 
 /// Civil-time method dispatch. `recv` is a `TimeValue` handle whose variant IS
@@ -583,9 +879,11 @@ fn jet_jit_civil_time_method(
                 Err(error) => result_err(error),
             }
         }
-        (TimeValue::DateTime(dt), "to_timestamp") => dt.to_timestamp(),
+        (TimeValue::DateTime(dt), "to_timestamp") => {
+            Concurrency::with_runtime_mut(|rt| rt.heap.int_from_i64(dt.to_timestamp()))
+        }
         (TimeValue::DateTime(dt), "date") => push(TimeValue::Date(dt.date())),
-        (TimeValue::DateTime(dt), "time") => push(TimeValue::LocalTime(dt.time())),
+        (TimeValue::DateTime(dt), "time") => push(TimeValue::LocalTime(dt.time_for_output())),
         (TimeValue::DateTime(dt), "equal") => {
             let other = with_time(arg0, |o| match o {
                 TimeValue::DateTime(other) => Some(other.clone()),
@@ -614,14 +912,22 @@ fn jet_jit_civil_time_method(
         (TimeValue::DateTime(dt), "nanosecond") => dt.nanosecond(),
         (TimeValue::DateTime(dt), "to_string") => alloc_string(dt.to_string_fmt()),
         (TimeValue::DateTime(dt), "format_rfc3339") => alloc_string(dt.format_rfc3339()),
-        (TimeValue::DateTime(dt), "to_unix_ms") => dt.to_unix_ms(),
-        (TimeValue::DateTime(dt), "to_unix_s") => dt.to_unix_seconds(),
+        (TimeValue::DateTime(dt), "to_unix_ms") => {
+            Concurrency::with_runtime_mut(|rt| rt.heap.int_from_i64(dt.to_unix_ms()))
+        }
+        (TimeValue::DateTime(dt), "to_unix_s") => {
+            Concurrency::with_runtime_mut(|rt| rt.heap.int_from_i64(dt.to_unix_seconds()))
+        }
         (TimeValue::DateTime(dt), "to_unix_us") => match dt.to_unix_microseconds() {
-            Ok(value) => result_ok(value as u64),
+            Ok(value) => result_ok(
+                Concurrency::with_runtime_mut(|rt| rt.heap.int_from_i64(value)) as u64,
+            ),
             Err(error) => result_err_record(error),
         },
         (TimeValue::DateTime(dt), "to_unix_ns") => match dt.to_unix_nanoseconds() {
-            Ok(value) => result_ok(value as u64),
+            Ok(value) => result_ok(
+                Concurrency::with_runtime_mut(|rt| rt.heap.int_from_i64(value)) as u64,
+            ),
             Err(error) => result_err_record(error),
         },
         (TimeValue::DateTime(dt), "format") => alloc_string(dt.format_pattern(&clone_string(arg0))),
@@ -656,6 +962,10 @@ fn jet_jit_civil_time_method(
         (TimeValue::DateTime(dt), "plus_duration") => {
             // Duration is raw ns i64 after Result unwrap (I9 Duration ABI).
             push(TimeValue::DateTime(dt.plus_duration_ns(arg0)))
+        }
+        (TimeValue::DateTime(dt), "add_nanoseconds") => {
+            // The checked Duration ABI is the same raw nanosecond carrier.
+            push(TimeValue::DateTime(dt.add_nanoseconds(arg0)))
         }
         (TimeValue::DateTime(dt), "subtract_duration") => {
             push(TimeValue::DateTime(dt.subtract_duration_ns(arg0)))
@@ -994,6 +1304,8 @@ host_fns! {
         let mut unary = Signature::new(cc);
         unary.params.push(AbiParam::new(types::I64));
         unary.returns.push(AbiParam::new(types::I64));
+        let mut unary_void = Signature::new(cc);
+        unary_void.params.push(AbiParam::new(types::I64));
         let mut binary = Signature::new(cc);
         binary.params.push(AbiParam::new(types::I64));
         binary.params.push(AbiParam::new(types::I64));
@@ -1033,11 +1345,27 @@ host_fns! {
 
 
     }
+    clock_new: "jet_std_clock_new" => jet_std_clock_new: unary;
+    clock_system: "jet_std_clock_system" => jet_std_clock_system: nullary;
+    clock_now: "jet_clock_now" => jet_clock_now: unary;
+    clock_tick: "jet_clock_tick" => jet_clock_tick: binary;
+    clock_advance: "jet_clock_advance" => jet_clock_advance: binary;
+    clock_wait: "jet_clock_wait" => jet_clock_wait: binary;
     date_new: "jet_jit_date_new" => jet_jit_date_new: ternary;
     date_today: "jet_jit_date_today" => jet_jit_date_today: nullary;
     date_equal: "jet_jit_date_equal" => jet_jit_date_equal: binary_i8;
+    date_compare: "jet_jit_date_compare" => jet_jit_date_compare: binary;
+    display: "jet_jit_time_display" => jet_jit_time_display: unary;
+    duration_display: "jet_jit_duration_display" => jet_jit_duration_display: unary;
     start: "jet_jit_time_start" => jet_jit_time_start: nullary;
     stopwatch_elapsed: "jet_jit_stopwatch_elapsed_millis" => jet_jit_stopwatch_elapsed_millis: unary;
+    sleep_duration: "jet_std_time_sleep_duration" => jet_jit_time_sleep_duration_ns: unary_void;
+    sleep_until: "jet_time_sleep_until" => jet_jit_time_sleep_until: unary_void;
+    realtime_callback: "jet_rt_callback" => jet_jit_realtime_callback: ternary;
+    realtime_next_deadline: "jet_rt_next_deadline" => jet_jit_realtime_next_deadline: unary;
+    realtime_receipt: "jet_rt_receipt" => jet_jit_realtime_receipt: unary;
+    realtime_cancel: "jet_rt_cancel" => jet_jit_realtime_cancel: unary_void;
+    realtime_is_cancelled: "jet_rt_is_cancelled" => jet_jit_realtime_is_cancelled: unary_i8;
     date_parse: "jet_jit_date_parse" => jet_jit_date_parse: unary;
     datetime_from_timestamp: "jet_jit_datetime_from_timestamp" => jet_jit_datetime_from_timestamp: unary;
     datetime_now: "jet_jit_datetime_now" => jet_jit_datetime_now: nullary;

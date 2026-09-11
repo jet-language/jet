@@ -11,9 +11,11 @@ use crate::Manifest;
 use crate::Parser;
 use crate::Syntax;
 use crate::AST::{
-    ConstDef, EnumLitArg, Expr, ImportDecl, ImportKind, Item, LoadedModule, OutputKind,
-    PackageGuarantees, ProgramBundle, RustConstKind, StrPart, Type,
+    ConstDef, EnumLitArg, Expr, ImportDecl, ImportKind, Item, LoadedModule, ModelOutputFact,
+    OutputKind, PackageGuarantees, ProgramBundle, RustConstKind, StrPart, Type,
+
 };
+use jet_pkg_model::ModelPackageCompiler;
 use jet_pkg_model::Authority::{AuthorityError, AuthorityResolver, CheckedFile};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -63,6 +65,8 @@ pub(crate) fn package_guarantees_for_manifest(
         deps: package_manifest.policy.deps.clone(),
         lints_deny: package_manifest.policy.lints_deny.clone(),
         memory_denials,
+        authority_needs: package_manifest.authority.needs.clone(),
+        model_outputs: Vec::new(),
         application_authority:
             jet_foundation::Authority::ApplicationAuthority::from_policy(
                 package_manifest.authority.holds.allow.as_deref(),
@@ -70,6 +74,32 @@ pub(crate) fn package_guarantees_for_manifest(
                 &format!("{} authority.holds", package_manifest.origin),
             ),
     }
+}
+
+fn model_output_facts_for_manifest(
+    package_manifest: &crate::Package::PackageFacts,
+    package_root: &Path,
+) -> Result<Vec<ModelOutputFact>, Diagnostic> {
+    let mut facts = Vec::new();
+    for (address, output) in package_manifest
+        .outputs
+        .iter()
+        .filter(|(_, output)| output.kind == crate::Package::PackageOutputKind::Model)
+    {
+        let package = jet_pkg_model::ModelPackage::from_facts(package_manifest, address)
+            .map_err(|error| error.diagnostic())?;
+        let descriptor = package.descriptor().map_err(|error| error.diagnostic())?;
+        facts.push(ModelOutputFact {
+            package: package_manifest.name.clone(),
+            output: address.clone(),
+            signature_name: output.fields.get("name").cloned(),
+            package_version: descriptor.package_version,
+            license: descriptor.license,
+            package_root: package_root.to_path_buf(),
+            fields: output.fields.clone(),
+        });
+    }
+    Ok(facts)
 }
 /// Complete one inline Package with the same file-backed Config and member
 /// checks used by the canonical `package.jet` loader. The candidate is mutated
@@ -131,10 +161,10 @@ fn verify_inline_manifest_lock(
             raw: raw.clone(),
             diagnostic: error.diagnostic(),
         })?;
-    let lock = crate::Lock::parse(&raw).map_err(|_| InlineLockFailure {
+    let lock = crate::Lock::parse_with_path(&raw, &path).map_err(|diagnostic| InlineLockFailure {
         path: path.clone(),
         raw: raw.clone(),
-        diagnostic: crate::Lock::e1202(&path.display().to_string()),
+        diagnostic,
     })?;
     crate::Lock::verify_lock_matches_manifest(
         &lock,
@@ -381,6 +411,16 @@ pub fn package_facts_for_root(
         .revalidate_file(&entry)
         .map_err(|error| vec![error.diagnostic()])?;
     Ok(facts)
+}
+
+fn package_facts_from_resolver(
+    resolver: &AuthorityResolver,
+) -> Result<Option<crate::Package::PackageFacts>, Vec<Diagnostic>> {
+    match resolver.checked_root_package() {
+        Ok(package) => Ok(Some(package.facts)),
+        Err(error) if error.is_missing() => Ok(None),
+        Err(error) => Err(vec![error.diagnostic()]),
+    }
 }
 
 fn prepare_frontend_module(source: &str) -> PreparedFrontendModule {
@@ -870,6 +910,49 @@ fn record_import_edge_fact(
 /// (`collect_dep_dirs` only links deps already present on disk; `jet fetch` is
 /// the separate realize step). So a declared-but-unbuilt library is a friendly
 /// "run `jetpack env --prep`" (E0983), never a silent network fetch.
+fn verify_realized_store_entry(
+    roots: &crate::Store::Roots,
+    entry: &crate::Store::StoreEntry,
+) -> Result<(), Diagnostic> {
+    let expected = entry.envelope.output_hash.trim();
+    if expected.is_empty() {
+        return Err(Diagnostic::error(
+            "E1206",
+            format!("realized package `{}` has no output hash", entry.name),
+            "the immutable Hangar object cannot be admitted without its recorded content identity"
+                .to_string(),
+            "repair the shared package store before loading the project".to_string(),
+            None,
+        ));
+    }
+    let actual = jet_pkg_model::Envelope::try_output_hash_of_in_hangar(
+        &entry.out,
+        &roots.hangar_dir(),
+        false,
+    )
+    .map_err(|error| {
+        Diagnostic::error(
+            "E1206",
+            format!("realized package `{}` failed integrity verification", entry.name),
+            error,
+            "repair the shared package store before loading the project".to_string(),
+            None,
+        )
+    })?;
+    if actual != expected {
+        return Err(Diagnostic::error(
+            "E1206",
+            format!("realized package `{}` failed integrity verification", entry.name),
+            format!(
+                "the immutable Hangar object hash does not match its record (expected {expected}, got {actual})"
+            ),
+            "repair the shared package store before loading the project".to_string(),
+            None,
+        ));
+    }
+    Ok(())
+}
+
 fn collect_pkg_resolution(
     facts: &crate::Package::PackageFacts,
 ) -> Result<PkgResolution, Diagnostic> {
@@ -929,7 +1012,8 @@ fn collect_pkg_resolution(
             // A realized `library` stages source with an empty `bin` (U10).
             let out = PathBuf::from(&entry.out);
             if !realized_libs.contains_key(&entry.name) {
-                let authority = match AuthorityResolver::open(&out) {
+                verify_realized_store_entry(&roots, &entry)?;
+                let authority = match AuthorityResolver::open_store(&out) {
                     Ok(authority) => authority,
                     Err(error) if error.is_missing() => continue,
                     Err(error) => return Err(error.diagnostic()),
@@ -952,7 +1036,7 @@ fn collect_pkg_resolution(
 }
 
 pub fn load_entry(entry_path: &str) -> Result<ProgramBundle, Vec<Diagnostic>> {
-    crate::boot_tir_eval();
+    crate::boot_mir_eval();
     load_entry_with_overlay(entry_path, None, false)
 }
 
@@ -960,7 +1044,7 @@ pub fn load_entry(entry_path: &str) -> Result<ProgramBundle, Vec<Diagnostic>> {
 pub fn load_entry_with_diagnostics(
     entry_path: &str,
 ) -> Result<ProgramBundle, Vec<LoaderDiagnostic>> {
-    crate::boot_tir_eval();
+    crate::boot_mir_eval();
     let (result, _, mut diagnostics) =
         load_entry_with_overlays_and_dependencies_with_diagnostics(entry_path, &[], false);
     match result {
@@ -990,7 +1074,7 @@ pub fn load_entry_with_overlay(
     overlay: Option<(&Path, &str)>,
     for_check: bool,
 ) -> Result<ProgramBundle, Vec<Diagnostic>> {
-    crate::boot_tir_eval();
+    crate::boot_mir_eval();
     let overlays: Vec<(&Path, &str)> = overlay.into_iter().collect();
     load_entry_with_overlays(entry_path, &overlays, for_check)
 }
@@ -1145,8 +1229,8 @@ fn load_entry_with_overlays_mode_on_stack(
     mut prepared_frontend: Option<&mut PreparedFrontend>,
     mut sink: Option<&mut Vec<LoaderDiagnostic>>,
 ) -> Result<ProgramBundle, Vec<Diagnostic>> {
-    // Check/LSP overlays skip `load_entry`; still need TirBridge before derive/comptime.
-    crate::boot_tir_eval();
+    // Check/LSP overlays skip `load_entry`; still need MirBridge before derive/comptime.
+    crate::boot_mir_eval();
     let entry = PathBuf::from(entry_path);
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let entry_abs = if entry.is_absolute() {
@@ -1233,13 +1317,14 @@ fn load_entry_with_overlays_mode_on_stack(
         Ok(policy) => policy,
         Err(error) => return Err(record_loader_error(&mut sink, error)),
     };
+
     let (
         project_root,
         pkg_dep_dirs,
         pkg_resolution,
         package_policy,
         package_lints_deny,
-        package_guarantees,
+        mut package_guarantees,
         package_output_roots,
         package_output_declarations,
         package_defaults,
@@ -1447,10 +1532,10 @@ fn load_entry_with_overlays_mode_on_stack(
                     ));
                 }
 
-                // If there are deps, check lock staleness (E1202) and
-                // dry-resolve path dep graph to catch version conflicts (E1201).
+                // If a lock exists, reject stale source identities (E1202).
+                // Completeness is an explicit --locked/--offline concern;
+                // generated toolchain facts do not lock unrelated paths.
                 if !mf.dependencies.is_empty() {
-                    // E1202: lock must exist and include all manifest deps.
                     let lock_file =
                         match resolver.checked_file(Path::new(Syntax::UNIFIED_LOCK_FILE)) {
                             Ok(file) => Some(file),
@@ -1491,30 +1576,33 @@ fn load_entry_with_overlays_mode_on_stack(
                                 ),
                             )
                         })?;
-                        if let Ok(lock) = crate::Lock::parse(&lock_raw) {
-                            if let Err(d) = crate::Lock::verify_lock_matches_manifest(
-                                &lock,
-                                &mf,
-                                &lock_path.display().to_string(),
-                            ) {
+                        match crate::Lock::parse_with_path(&lock_raw, &lock_path) {
+                            Ok(lock) => {
+                                if let Err(d) = crate::Lock::verify_lock_matches_manifest(
+                                    &lock,
+                                    &mf,
+                                    &lock_path.display().to_string(),
+                                ) {
+                                    return Err(record_loader_error(
+                                        &mut sink,
+                                        LoaderError::at(
+                                            &lock_path.display().to_string(),
+                                            &lock_raw,
+                                            vec![d],
+                                        ),
+                                    ));
+                                }
+                            }
+                            Err(diagnostic) => {
                                 return Err(record_loader_error(
                                     &mut sink,
                                     LoaderError::at(
                                         &lock_path.display().to_string(),
                                         &lock_raw,
-                                        vec![d],
+                                        vec![diagnostic],
                                     ),
                                 ));
                             }
-                        } else {
-                            return Err(record_loader_error(
-                                &mut sink,
-                                LoaderError::at(
-                                    &lock_path.display().to_string(),
-                                    &lock_raw,
-                                    vec![crate::Lock::e1202(&lock_path.display().to_string())],
-                                ),
-                            ));
                         }
                         resolver.revalidate_file(&lock_file).map_err(|error| {
                             record_loader_error(
@@ -1595,9 +1683,20 @@ fn load_entry_with_overlays_mode_on_stack(
                     )
                 })?;
                 let mut policy = organization_policy.clone();
-                let package_guarantees =
+                let mut package_guarantees =
                     package_guarantees_for_manifest(&package_manifest);
+                package_guarantees.model_outputs = model_output_facts_for_manifest(
+                    &package_manifest,
+                    &manifest_dir,
+                )
+                .map_err(|diagnostic| record_loader_error(&mut sink, LoaderError::at(
+                    &pack_path.display().to_string(),
+                    &raw,
+                    vec![diagnostic],
+                )))?;
+
                 let package_output_declarations = package_manifest
+
                     .outputs
                     .iter()
                     .filter_map(|(address, output)| {
@@ -1621,6 +1720,7 @@ fn load_entry_with_overlays_mode_on_stack(
                             crate::Package::PackageOutputKind::Bundle => OutputKind::Bundle,
                             crate::Package::PackageOutputKind::System => OutputKind::System,
                             crate::Package::PackageOutputKind::Fleet => OutputKind::Fleet,
+                            crate::Package::PackageOutputKind::Model => return None,
                         };
                         Some((address.clone(), output.name.clone(), kind, entry))
                     })
@@ -1989,7 +2089,14 @@ fn load_entry_with_overlays_mode_on_stack(
                 )
             })?;
             package_guarantees = package_guarantees_for_manifest(&package_manifest);
+            package_guarantees.model_outputs = model_output_facts_for_manifest(
+                &package_manifest,
+                package_source_root.as_deref().unwrap_or(&entry_dir),
+            )
+            .map_err(|diagnostic| vec![diagnostic])?;
+
             package_output_declarations = package_manifest
+
                 .outputs
                 .iter()
                 .filter_map(|(address, output)| {
@@ -2014,6 +2121,7 @@ fn load_entry_with_overlays_mode_on_stack(
                         crate::Package::PackageOutputKind::Bundle => OutputKind::Bundle,
                         crate::Package::PackageOutputKind::System => OutputKind::System,
                         crate::Package::PackageOutputKind::Fleet => OutputKind::Fleet,
+                        crate::Package::PackageOutputKind::Model => return None,
                     };
                     Some((address.clone(), output.name.clone(), kind, entry))
                 })
@@ -2046,7 +2154,7 @@ fn load_entry_with_overlays_mode_on_stack(
         } else {
             let (toks, lex_diags) = crate::Lexer::lex(&raw);
         if lex_diags.is_empty() {
-            if let Ok(prog) = crate::Parser::parse(&toks) {
+            if let Ok(prog) = crate::Parser::parse_with_source(&toks, &raw) {
                 for dep in crate::ScriptDeps::collect(&prog) {
                     if !crate::ScriptDeps::is_pinned(&dep.selector) {
                         inline_dep_lints.push(crate::ScriptDeps::l0203_unpinned(&dep));
@@ -2315,9 +2423,10 @@ fn load_entry_with_overlays_mode_on_stack(
             if is_foreign_namespace_import(imp).map_err(|diagnostic| vec![diagnostic])? {
                 continue;
             }
-            if core_module_path(imp).is_some() {
+            if core_module_path(imp).is_some() || crate::AST::target_profile_path(imp).is_some() {
                 continue;
             }
+
             if let Ok(target_path) = resolve_import(
                 imp,
                 &module_path,
@@ -2400,6 +2509,48 @@ fn load_entry_with_overlays_mode_on_stack(
     for (name, dir) in &pkg_resolution.realized_libs {
         dep_roots.entry(name.clone()).or_insert_with(|| dir.clone());
     }
+    for dependency in pkg_dep_dirs.values() {
+        let facts = match package_facts_from_resolver(&dependency.authority) {
+            Ok(facts) => facts,
+            Err(diagnostics) => return Err(diagnostics),
+        };
+        let Some(facts) = facts else {
+            continue;
+        };
+        package_guarantees
+            .model_outputs
+            .extend(
+                model_output_facts_for_manifest(&facts, &dependency.source_root)
+                    .map_err(|diagnostic| vec![diagnostic])?,
+            );
+    }
+    for authority in pkg_resolution.realized_authorities.values() {
+        let facts = match package_facts_from_resolver(authority) {
+            Ok(facts) => facts,
+            Err(diagnostics) => return Err(diagnostics),
+        };
+        let Some(facts) = facts else {
+            continue;
+        };
+        package_guarantees
+            .model_outputs
+            .extend(
+                model_output_facts_for_manifest(&facts, authority.root())
+                    .map_err(|diagnostic| vec![diagnostic])?,
+            );
+    }
+    package_guarantees.model_outputs.sort_by(|left, right| {
+        (&left.package, &left.output, &left.package_root).cmp(&(
+            &right.package,
+            &right.output,
+            &right.package_root,
+        ))
+    });
+    package_guarantees.model_outputs.dedup_by(|left, right| {
+        left.package == right.package
+            && left.output == right.output
+            && left.package_root == right.package_root
+    });
 
     let build_facts = jet_foundation::Facts::BuildFactSnapshot::script(
         &modules[entry_idx].path,
@@ -2410,6 +2561,7 @@ fn load_entry_with_overlays_mode_on_stack(
         entry: entry_idx,
         project_root,
         modules,
+        devtools_registry: jet_foundation::AST::DevtoolsRegistry::default(),
         parse_teaching,
         used_core: HashSet::new(),
         ffi_callback_fns: HashSet::new(),
@@ -2892,12 +3044,15 @@ pub fn verify_locked_dependency_sources(entry_path: &str) -> Result<(), Vec<Diag
         .map_err(|d| vec![d])?
         .unwrap_or_else(|| package_root.clone());
     let lock_path = lock_root.join(Syntax::UNIFIED_LOCK_FILE);
-    let lock = crate::Lock::load(&lock_root)
+    let lock = crate::Lock::load_strict_with_path(&lock_root)
+        .map_err(|diagnostic| vec![diagnostic])?
         .ok_or_else(|| vec![crate::Lock::e1202(&lock_path.display().to_string())])?;
     crate::Lock::verify_lock_matches_manifest(&lock, &manifest, &lock_path.display().to_string())
         .map_err(|diagnostic| vec![diagnostic])?;
     crate::Lock::verify_all_manifest_deps_locked(&manifest, &lock)
-        .map_err(|diagnostic| vec![diagnostic])?;
+        .map_err(|error| vec![error.diagnostic()])?;
+    lock.validate_completeness()
+        .map_err(|error| vec![error.diagnostic()])?;
 
     let mut visited = HashSet::new();
     let mut resolved_sources = HashMap::new();
@@ -3058,7 +3213,17 @@ fn load_locked_manifest_from_authority(
     dep_name: &str,
     source_root: &Path,
 ) -> Result<Manifest::Manifest, Vec<Diagnostic>> {
-    let facts = crate::Loader::package_facts_for_root(source_root)?;
+    let resolver = match AuthorityResolver::open_store(source_root) {
+        Ok(resolver) => resolver,
+        Err(error) if error.is_missing() => {
+            return Err(vec![locked_dependency_diagnostic(
+                dep_name,
+                "the locked source has no readable package source",
+            )]);
+        }
+        Err(error) => return Err(vec![error.diagnostic()]),
+    };
+    let facts = package_facts_from_resolver(&resolver)?;
     let Some(facts) = facts else {
         return Err(vec![locked_dependency_diagnostic(
             dep_name,
@@ -3144,6 +3309,19 @@ fn verify_locked_source_tree(
     Ok(())
 }
 
+fn locked_store_content_hash(package: &crate::Lock::LockedPackage) -> Option<&str> {
+    package
+        .content_hash
+        .as_deref()
+        .filter(|hash| !hash.trim().is_empty())
+        .or_else(|| {
+            package
+                .locked
+                .as_ref()
+                .map(|revision| revision.tree_hash.as_str())
+                .filter(|hash| !hash.trim().is_empty())
+        })
+}
 fn locked_store_source_path(
     dep_name: &str,
     package: &crate::Lock::LockedPackage,
@@ -3472,12 +3650,36 @@ fn dependency_authority_for_path<'a>(
 fn dependency_dir_from_resolver(
     resolver: AuthorityResolver,
 ) -> Result<DependencyDir, Vec<Diagnostic>> {
-    // Source root for the dep: if .jet/ subdir exists use it, else the dep root.
-    let src_root = match resolver.checked_directory(Path::new(".jet")) {
-        Ok(directory) => directory.path,
-        Err(error) if error.is_missing() => resolver.root().to_path_buf(),
+    // A canonical root package owns its source files. Only select `.jet/`
+    // when that directory is itself a canonical package root; the managed
+    // lock directory beside `package.jet` is not a source tree.
+    let src_root = match resolver.checked_manifest(Path::new(".")) {
+        Ok(_) => resolver.root().to_path_buf(),
+        Err(error) if error.is_missing() => {
+            let directory = match resolver.checked_directory(Path::new(".jet")) {
+                Ok(directory) => directory,
+                Err(error) if error.is_missing() => {
+                    let root = resolver.root().to_path_buf();
+                    return dependency_dir_with_source_root(resolver, root);
+                }
+                Err(error) => return Err(vec![error.diagnostic()]),
+            };
+            let nested = AuthorityResolver::from_checked_directory(&directory);
+            match nested.checked_manifest(Path::new(".")) {
+                Ok(_) => directory.path,
+                Err(error) if error.is_missing() => resolver.root().to_path_buf(),
+                Err(error) => return Err(vec![error.diagnostic()]),
+            }
+        }
         Err(error) => return Err(vec![error.diagnostic()]),
     };
+    dependency_dir_with_source_root(resolver, src_root)
+}
+
+fn dependency_dir_with_source_root(
+    resolver: AuthorityResolver,
+    src_root: PathBuf,
+) -> Result<DependencyDir, Vec<Diagnostic>> {
     let authority = if src_root == resolver.root() {
         resolver.clone()
     } else {
@@ -3496,7 +3698,7 @@ fn dependency_dir_from_resolver(
         AuthorityResolver::from_checked_directory(&directory)
     };
     let (boundary_policy, auto_derive_default) =
-        dependency_manifest_policy(&resolver, &src_root)?;
+        dependency_manifest_policy(&authority, &src_root)?;
     Ok(DependencyDir {
         manifest_root: resolver.root().to_path_buf(),
         source_root: src_root,
@@ -3510,30 +3712,11 @@ fn dependency_manifest_policy(
     resolver: &AuthorityResolver,
     source_root: &Path,
 ) -> Result<(Option<ImportBoundaryPolicy>, Option<bool>), Vec<Diagnostic>> {
-    let manifest = if source_root == resolver.root() {
-        let facts = package_facts_for_root(source_root)?;
-        match facts {
-            Some(facts) => crate::Package::to_manifest(&facts, "")
-                .map_err(|diagnostic| vec![diagnostic])?,
-            None => return Ok((None, None)),
-        }
-    } else {
-        let checked = match resolver.checked_manifest(Path::new(".")) {
-            Ok(checked) => checked,
-            Err(error) if error.is_missing() => return Ok((None, None)),
-            Err(error) => return Err(vec![error.diagnostic()]),
-        };
-        let raw = checked
-            .file
-            .text()
-            .map_err(|error| vec![error.diagnostic()])?;
-        let manifest =
-            Manifest::parse(&checked.file.path, &raw).map_err(|diagnostic| vec![diagnostic])?;
-        resolver
-            .revalidate_file(&checked.file)
-            .map_err(|error| vec![error.diagnostic()])?;
-        manifest
+    let Some(facts) = package_facts_from_resolver(resolver)? else {
+        return Ok((None, None));
     };
+    let manifest = crate::Package::to_manifest(&facts, "")
+        .map_err(|diagnostic| vec![diagnostic])?;
     let auto_derive_default = !jet_foundation::LintPolicy::is_denied(
         manifest.policy.lints_deny.as_deref().unwrap_or_default(),
         jet_foundation::LintPolicy::auto_derive_lint().code,
@@ -3556,34 +3739,37 @@ fn collect_dep_dirs(
         match spec {
             Manifest::DepSpec::Path { path } => {
                 let abs = normalize_path(&project_root.join(path));
-                let source = if let Some(lock) = lock.as_ref() {
+                let (source, store_authority, expected_hash) = if let Some(lock) = lock.as_ref() {
                     match lock.packages.iter().find(|package| {
                         package.name == *dep_name
                             && matches!(&package.source, crate::Lock::LockSource::Path(_))
                     }) {
-                        Some(package) => locked_store_source_path(dep_name, package)
-                            .map_err(|diagnostic| vec![diagnostic])?,
-                        None if lock.root_dependencies.iter().any(|name| name == dep_name) => {
-                            // A compiler-generated lock may carry build
-                            // provenance before a direct path dependency has
-                            // an immutable store record. The root dependency
-                            // list still proves manifest membership; keep the
-                            // declared path for unlocked source loading.
-                            abs.clone()
-                        }
-                        None => {
-                            return Err(vec![crate::Lock::e1202(
-                                &project_root
-                                    .join(Syntax::UNIFIED_LOCK_FILE)
-                                    .display()
-                                    .to_string(),
-                            )]);
-                        }
+                        Some(package) => (
+                            locked_store_source_path(dep_name, package)
+                                .map_err(|diagnostic| vec![diagnostic])?,
+                            true,
+                            locked_store_content_hash(package).map(str::to_string),
+                        ),
+                        // A generated lock that has no record for this
+                        // dependency is unrelated to source resolution (for
+                        // example, a toolchain-only lock).
+                        None => (abs.clone(), false, None),
                     }
                 } else {
-                    abs
+                    (abs, false, None)
                 };
-                let resolver = match AuthorityResolver::open(&source) {
+                if store_authority {
+                    verify_locked_source_tree(
+                        dep_name,
+                        &source,
+                        expected_hash.as_deref().unwrap_or(""),
+                    )?;
+                }
+                let resolver = match if store_authority {
+                    AuthorityResolver::open_store(&source)
+                } else {
+                    AuthorityResolver::open(&source)
+                } {
                     Ok(resolver) => resolver,
                     Err(error) if error.is_missing() => continue,
                     Err(error) => return Err(vec![error.diagnostic()]),
@@ -3597,7 +3783,7 @@ fn collect_dep_dirs(
                 // Git deps are consumed from the same immutable store entry
                 // as path deps. The project link is an output, never an
                 // authority input.
-                let source = if let Some(lock) = lock.as_ref() {
+                let (source, store_authority, expected_hash) = if let Some(lock) = lock.as_ref() {
                     let package = lock
                         .packages
                         .iter()
@@ -3614,21 +3800,39 @@ fn collect_dep_dirs(
                             )
                         })
                         .map_err(|diagnostic| vec![diagnostic])?;
-                    locked_store_source_path(dep_name, package)
-                        .map_err(|diagnostic| vec![diagnostic])?
+                    (
+                        locked_store_source_path(dep_name, package)
+                            .map_err(|diagnostic| vec![diagnostic])?,
+                        true,
+                        locked_store_content_hash(package).map(str::to_string),
+                    )
                 } else {
-                    project_root.join(".jet-build").join("deps").join(dep_name)
+                    (
+                        project_root.join(".jet-build").join("deps").join(dep_name),
+                        false,
+                        None,
+                    )
                 };
-                match AuthorityResolver::open(&source) {
+                if store_authority {
+                    verify_locked_source_tree(
+                        dep_name,
+                        &source,
+                        expected_hash.as_deref().unwrap_or(""),
+                    )?;
+                }
+                let resolver = match if store_authority {
+                    AuthorityResolver::open_store(&source)
+                } else {
+                    AuthorityResolver::open(&source)
+                } {
                     Err(error) if error.is_missing() => continue,
                     Err(error) => return Err(vec![error.diagnostic()]),
-                    Ok(resolver) => {
-                        dirs.insert(
-                            dep_name.clone(),
-                            dependency_dir_from_resolver(resolver)?,
-                        );
-                    }
-                }
+                    Ok(resolver) => resolver,
+                };
+                dirs.insert(
+                    dep_name.clone(),
+                    dependency_dir_from_resolver(resolver)?,
+                );
             }
             Manifest::DepSpec::Registry(_) => {
                 // Registry source trees are materialized by `jet fetch` before
@@ -3942,9 +4146,10 @@ fn load_file(
             stack.pop();
             return Err(LoaderError::at(display, &source, vec![d]));
         }
-        if core_module_path(imp).is_some() {
+        if core_module_path(imp).is_some() || crate::AST::target_profile_path(imp).is_some() {
             continue;
         }
+
         let target = match resolve_import(
             imp,
             path,
@@ -4265,6 +4470,9 @@ pub fn e1241_ring_platform_miss(ring: &str) -> Diagnostic {
 }
 
 fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {
+    if crate::AST::target_profile_path(imp).is_some() {
+        return Ok(());
+    }
     if let Some(module) = core_module_path(imp) {
         if !is_known_core_module(&module) {
             let span = match &imp.kind {
@@ -4691,7 +4899,7 @@ fn e0983_unrealized_library(name: &str, span: Span) -> Diagnostic {
         "a `library` package must be realized — its source staged in the shared store (hangar) — before `use` can find it (U17)"
             .to_string(),
         format!(
-            "run `jetpack env --prep` to realize `{}`, then `{} {};` will resolve it",
+            "run `jetpack env --prep` to realize `{}`, or rerun `jet run` without `--no-prepare`; then `{} {};` will resolve it",
             name, Syntax::KW_USE, name
         ),
         Some(span),
@@ -4877,9 +5085,13 @@ mod stale_manifest_name_tests {
     #[test]
     fn pkg_jet_present_means_nothing_stale() {
         let dir = tempdir("both");
-        fs::write(dir.join("pkg.jet"), "").unwrap();
+        fs::write(
+            dir.join(Syntax::PACKAGE_FILE),
+            "name: \"fixture\"\nversion: \"0.1.0\"\n",
+        )
+        .unwrap();
         fs::write(dir.join("pack.jet"), "").unwrap();
-        // pkg.jet exists right here — the walk stops with nothing to report,
+        // package.jet exists right here — the walk stops with nothing to report,
         // even though a stale name also happens to sit alongside it.
         assert_eq!(find_stale_manifest_name(&dir), None);
     }
@@ -4948,9 +5160,14 @@ mod stale_manifest_name_tests {
         symlink(outside.join("secret.jet"), root.join("escape.jet")).unwrap();
 
         let diagnostics = load_entry(entry.to_str().unwrap()).unwrap_err();
-        assert!(diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == "E0603" && diagnostic.what.contains("./escape")
-        }));
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "E1334"
+                    && diagnostic.what.to_ascii_lowercase().contains("symlink")
+                    && diagnostic.what.contains("escape.jet")
+            }),
+            "{diagnostics:#?}"
+        );
     }
 
     #[test]
@@ -5009,10 +5226,13 @@ mod stale_manifest_name_tests {
         fs::write(dir.join("broken.jet"), "module _other { }\n§\n").unwrap();
 
         let diagnostics = load_entry(entry.to_str().unwrap()).unwrap_err();
-        assert!(diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == "E0603"
-                && diagnostic.what == "can't find a project module named `project._bench`"
-        }));
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "E0603"
+                    && diagnostic.what == "Can't find a project module named `project._bench`"
+            }),
+            "{diagnostics:#?}"
+        );
     }
 
     #[test]
@@ -5034,6 +5254,11 @@ mod stale_manifest_name_tests {
         let dir = tempdir("internal-module-unimported-conflict");
         let entry = dir.join("main.jet");
         fs::write(&entry, "fn run() {}\n").unwrap();
+        fs::write(
+            dir.join(Syntax::PACKAGE_FILE),
+            "name: \"fixture\"\nversion: \"0.1.0\"\n",
+        )
+        .unwrap();
         fs::write(dir.join("a.jet"), "module _bench { }\n").unwrap();
         fs::write(dir.join("b.jet"), "module _bench { }\n").unwrap();
 
@@ -5108,6 +5333,6 @@ mod stale_manifest_name_tests {
         let msg = stale_manifest_name_message(&dir).expect("message");
         assert!(msg.contains("E1226"));
         assert!(msg.contains("pack.jet"));
-        assert!(msg.contains("pkg.jet"));
+        assert!(msg.contains(Syntax::PACKAGE_FILE));
     }
 }

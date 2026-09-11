@@ -88,8 +88,18 @@ pub(crate) fn jet_codec_local_time_encode(hour: i64, minute: i64, second: i64) -
     let second = second.clamp(0, 59);
     format!("{hour:02}:{minute:02}:{second:02}")
 }
+fn jet_codec_datetime_time_encode(hour: i64, minute: i64, second: i64) -> String {
+    let hour = hour.clamp(0, 23);
+    let minute = minute.clamp(0, 59);
+    let second = second.clamp(0, 60);
+    format!("{hour:02}:{minute:02}:{second:02}")
+}
 
-pub(crate) fn jet_codec_local_time_decode(value: &str) -> Result<(i64, i64, i64), String> {
+
+fn jet_codec_local_time_decode_parts(
+    value: &str,
+    allow_leap: bool,
+) -> Result<(i64, i64, i64, bool), String> {
     let parts: Vec<&str> = value.splitn(3, ':').collect();
     if parts.len() != 3 {
         return Err(format!("invalid time: {value}"));
@@ -103,23 +113,36 @@ pub(crate) fn jet_codec_local_time_decode(value: &str) -> Result<(i64, i64, i64)
     let second = parts[2]
         .parse::<i64>()
         .map_err(|_| format!("bad second: {}", parts[2]))?;
-    if hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59 {
+    let leap_second = second == 60;
+    if hour < 0
+        || hour > 23
+        || minute < 0
+        || minute > 59
+        || second < 0
+        || second > if allow_leap { 60 } else { 59 }
+        || (leap_second && (hour != 23 || minute != 59))
+    {
         return Err(format!("time out of range: {value}"));
     }
+    Ok((hour, minute, if leap_second { 59 } else { second }, leap_second))
+}
+
+pub(crate) fn jet_codec_local_time_decode(value: &str) -> Result<(i64, i64, i64), String> {
+    let (hour, minute, second, _) = jet_codec_local_time_decode_parts(value, false)?;
     Ok((hour, minute, second))
 }
 
-pub(crate) fn jet_codec_datetime_encode(secs: i64, nanos: u32) -> String {
+pub(crate) fn jet_codec_datetime_encode(secs: i64, nanos: u32, leap_second: bool) -> String {
     let secs = secs.saturating_add((nanos / 1_000_000_000) as i64);
     let nanos = nanos % 1_000_000_000;
     let epoch = jet_codec_date_day_number(1970, 1, 1);
     let (year, month, day) = jet_codec_date_from_day_number(epoch + secs.div_euclid(86400));
     let day_seconds = secs.rem_euclid(86400);
     let date = jet_codec_date_encode(year, month, day);
-    let time = jet_codec_local_time_encode(
+    let time = jet_codec_datetime_time_encode(
         day_seconds / 3600,
         (day_seconds / 60) % 60,
-        day_seconds % 60,
+        day_seconds % 60 + i64::from(leap_second),
     );
     if nanos == 0 {
         format!("{date}T{time}Z")
@@ -128,7 +151,7 @@ pub(crate) fn jet_codec_datetime_encode(secs: i64, nanos: u32) -> String {
     }
 }
 
-pub(crate) fn jet_codec_datetime_decode(value: &str) -> Result<(i64, u32), String> {
+pub(crate) fn jet_codec_datetime_decode(value: &str) -> Result<(i64, u32, bool), String> {
     let (date_part, rest) = value
         .split_once('T')
         .ok_or_else(|| format!("invalid RFC3339 datetime: {value}"))?;
@@ -143,7 +166,8 @@ pub(crate) fn jet_codec_datetime_decode(value: &str) -> Result<(i64, u32), Strin
         Some((time, fraction)) => (time, Some(fraction)),
         None => (time_part, None),
     };
-    let (hour, minute, second) = jet_codec_local_time_decode(clean_time)?;
+    let (hour, minute, second, leap_second) =
+        jet_codec_local_time_decode_parts(clean_time, true)?;
     let mut nanos = 0u32;
     if let Some(fraction) = frac {
         let digits: String = fraction
@@ -172,13 +196,17 @@ pub(crate) fn jet_codec_datetime_decode(value: &str) -> Result<(i64, u32), Strin
             .map_err(|_| format!("bad RFC3339 offset minute: {zone_minute}"))?;
         sign * (zone_hour * 3600 + zone_minute * 60)
     };
+    if leap_second && offset != 0 {
+        return Err(format!("time out of range: {clean_time}"));
+    }
     let epoch = jet_codec_date_day_number(1970, 1, 1);
     let secs = (jet_codec_date_day_number(year, month, day) - epoch)
         .saturating_mul(86400)
         .saturating_add(hour * 3600 + minute * 60 + second)
         .saturating_sub(offset);
-    Ok((secs, nanos))
+    Ok((secs, nanos, leap_second))
 }
+
 
 pub(crate) fn jet_codec_duration_encode(ns: i64) -> i64 {
     ns
@@ -201,5 +229,8 @@ pub(crate) fn jet_codec_decimal_decode_text(
 pub(crate) fn jet_codec_decimal_decode_int(
     value: i64,
 ) -> Result<jet_std::JetDecimal, String> {
+    // `from_str` is the one constructor spelled identically by the AOT
+    // `JetDecimal` and the in-process `CtDecimal` carrier; an integer's
+    // decimal text decodes to the same exact value as a direct `from_int`.
     jet_std::JetDecimal::from_str(&value.to_string())
 }

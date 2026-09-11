@@ -1,0 +1,69 @@
+// #2497: a Jet-authored panel using the public devtools and UI surfaces.
+// The package has no external frontend runtime: `jet dev` discovers `panel`
+// through #DevPanel and hosts the returned core.ui tree.
+//
+// Required seam provenance (these are not unsupported facts):
+// panel API #2424; protocol `jet.devtools.v1` #2429; host matrix #2423;
+// release policy #2425; live retention #2426.
+use core.ui as ui
+use core.devtools as devtools
+
+
+
+struct State {
+    selected: String{"none"}
+    event_count: Int{0}
+}
+
+fn state_summary(state: State) String -> "{state.selected}/{state.event_count}"
+
+fn panel_lines(state: State) [UiNode] -> {
+    return [UiNode]{
+        ui.text("Jet Devtools"),
+        ui.text("Selected: {state.selected}"),
+        ui.text("Events: {state.event_count}")
+    }
+}
+
+#DevPanel
+pub fn panel(state: State) UiNode -> {
+    return ui.box(panel_lines(state))
+}
+
+fn publish_selection(selected_value: String) {
+    devtools.publish(field: .selected, value: selected_value)
+}
+
+fn render_panel(tree: UiNode) {
+    backend := ui.null_backend()
+    // The host-facing panel is always mounted inside this deterministic
+    // viewport; no environment probe or alternate renderer is involved.
+    ui.mount(backend, tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
+}
+
+fn run() {
+    selected_value :: "overview"
+    publish_selection(~selected_value)
+    devtools.publish(field: .event_count, value: 1)
+    state :: State{selected: ~selected_value, event_count: 1}
+    summary :: state_summary(~state)
+    render_panel(panel(~state))
+    print("DevtoolsDogfood: {summary}")
+}
+
+#Test("devtools panel state has a default before events") {
+    state :: State{}
+    assert_eq(state.selected, "none")
+    assert_eq(state.event_count, 0)
+}
+
+#Test("devtools panel renders bounded selected state") {
+    state :: State{selected: "overview", event_count: 1}
+    tree :: panel(~state)
+    backend := ui.null_backend()
+    size :: backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
+    assert(size.width > 0.0)
+    assert(size.width <= 80.0)
+    assert(size.height <= 24.0)
+    assert_eq(state_summary(~state), "overview/1")
+}

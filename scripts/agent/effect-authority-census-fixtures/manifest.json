@@ -1,0 +1,210 @@
+{
+  "schema_version": 1,
+  "fixture_root": "scripts/agent/effect-authority-census-fixtures",
+  "denominator": {
+    "statement": "Seven executable safety rules are paired with one allow program and one refuse program. The 14 Prelude effect declarations, 12 authority facts, and 10 sandbox facts remain the static vocabulary; only the seven runtime enforcement rules below claim a three-tier verdict.",
+    "rules": [
+      {
+        "id": "effect:FS.Write",
+        "enforcement_point": "enforcement:effect-fs-write-denial",
+        "fixture": "effect-fs-write-denial",
+        "decision": "D-EFFECT-AUTHORITY1"
+      },
+      {
+        "id": "effect:Mem.Alloc",
+        "enforcement_point": "enforcement:effect-mem-alloc-denial",
+        "fixture": "effect-mem-alloc-denial",
+        "decision": "D-AUTHORITY-MEM1"
+      },
+      {
+        "id": "effect:memory-facts",
+        "enforcement_point": "enforcement:memory-fact-denial",
+        "fixture": "memory-fact-denial",
+        "decision": "D-MEM-FACTS1"
+      },
+      {
+        "id": "authority:holds",
+        "enforcement_point": "enforcement:authority-holds",
+        "fixture": "authority-holds",
+        "decision": "D-AUTHORITY-MODEL1"
+      },
+      {
+        "id": "memory:sentry",
+        "enforcement_point": "enforcement:sentry-poisoning",
+        "fixture": "sentry-release",
+        "decision": "D-MEM-SENTRY1"
+      },
+      {
+        "id": "memory:harden",
+        "enforcement_point": "enforcement:harden-fence",
+        "fixture": "harden-fence",
+        "decision": "D-MEM-GUARANTEE1"
+      },
+      {
+        "id": "sandbox:process",
+        "enforcement_point": "enforcement:process-sandbox",
+        "fixture": "process-sandbox",
+        "decision": "D-JPK-SANDBOX2"
+      }
+    ]
+  },
+  "fixtures": [
+    {
+      "id": "effect-fs-write-denial",
+      "enforcement_point": "enforcement:effect-fs-write-denial",
+      "source": "effect-denial.jet",
+      "package": "effect-fs-write.package.jet",
+      "aot_profile": "dev",
+      "pair": {
+        "allow_source": "effect-allow.jet",
+        "refuse_source": "effect-denial.jet",
+        "allow_expected": "allow",
+        "refuse_expected": "refuse"
+      },
+      "expected": {
+        "default": {
+          "decision": "refuse",
+          "diagnostic_codes": ["E0749"],
+          "meaning": "!FS.Write is denied before host execution"
+        }
+      }
+    },
+    {
+      "id": "effect-mem-alloc-denial",
+      "enforcement_point": "enforcement:effect-mem-alloc-denial",
+      "source": "effect-mem-alloc-denial.jet",
+      "package": "effect-mem-alloc.package.jet",
+      "aot_profile": "dev",
+      "pair": {
+        "allow_source": "effect-mem-alloc-allow.jet",
+        "refuse_source": "effect-mem-alloc-denial.jet",
+        "allow_expected": "allow",
+        "refuse_expected": "refuse"
+      },
+      "expected": {
+        "default": {
+          "decision": "refuse",
+          "diagnostic_codes": ["E0921"],
+          "meaning": "!Mem.Alloc is denied before allocation"
+        }
+      }
+    },
+    {
+      "id": "memory-fact-denial",
+      "enforcement_point": "enforcement:memory-fact-denial",
+      "source": "memory-fact-denial.jet",
+      "package": "memory-fact.package.jet",
+      "aot_profile": "dev",
+      "pair": {
+        "allow_source": "memory-fact-allow.jet",
+        "refuse_source": "memory-fact-denial.jet",
+        "allow_expected": "allow",
+        "refuse_expected": "refuse"
+      },
+      "expected": {
+        "default": {
+          "decision": "refuse",
+          "diagnostic_codes": ["E0921"],
+          "meaning": "package !Mem.Alloc facts reach the called allocation"
+        }
+      }
+    },
+    {
+      "id": "authority-holds",
+      "enforcement_point": "enforcement:authority-holds",
+      "source": "authority-hold.jet",
+      "package": "authority.package.jet",
+      "aot_profile": "dev",
+      "pair": {
+        "allow_source": "authority-allow.jet",
+        "refuse_source": "authority-hold.jet",
+        "allow_expected": "allow",
+        "refuse_expected": "refuse"
+      },
+      "expected": {
+        "default": {
+          "decision": "refuse",
+          "diagnostic_codes": ["E0712", "E1803"],
+          "meaning": "authority narrowing cannot widen or omit a hold"
+        }
+      }
+    },
+    {
+      "id": "sentry-release",
+      "enforcement_point": "enforcement:sentry-poisoning",
+      "source": "sentry-release.jet",
+      "package": "sentry-release.package.jet",
+      "aot_profile": "release",
+      "pair": {
+        "allow_source": "sentry-allow.jet",
+        "refuse_source": "sentry-release.jet",
+        "allow_expected": "allow",
+        "refuse_expected": "refuse"
+      },
+      "expected": {
+        "tiers": {
+          "aot": {
+            "decision": "allow",
+            "diagnostic_codes": [],
+            "meaning": "release AOT does not activate the development sentry"
+          },
+          "run": {
+            "decision": "refuse",
+            "diagnostic_codes": ["R0801", "R0802", "R0803"],
+            "meaning": "development JIT activates the sentry"
+          },
+          "interpret": {
+            "decision": "refuse",
+            "diagnostic_codes": ["E2201", "R0801", "R0802", "R0803"],
+            "meaning": "interpreter or sentry refuses the unsafe operation"
+          }
+        }
+      },
+      "intended_difference": {
+        "decision_id": "D-MEM-SENTRY1",
+        "tiers": ["aot", "run", "interpret"],
+        "reason": "#Unsafe sentries are a development-tier feature; release AOT may omit them while run and interpret retain the safety boundary"
+      }
+    },
+    {
+      "id": "harden-fence",
+      "enforcement_point": "enforcement:harden-fence",
+      "source": "harden-fence.jet",
+      "package": "harden-fence.package.jet",
+      "aot_profile": "hardened",
+      "pair": {
+        "allow_source": "harden-allow.jet",
+        "refuse_source": "harden-fence.jet",
+        "allow_expected": "allow",
+        "refuse_expected": "refuse"
+      },
+      "expected": {
+        "default": {
+          "decision": "refuse",
+          "diagnostic_codes": ["R0801", "R0802", "R0803", "E2201"],
+          "meaning": "hardened execution keeps the sentry boundary active"
+        }
+      }
+    },
+    {
+      "id": "process-sandbox",
+      "enforcement_point": "enforcement:process-sandbox",
+      "source": "process-sandbox.jet",
+      "package": "process-sandbox.package.jet",
+      "aot_profile": "dev",
+      "pair": {
+        "allow_source": "process-allow.jet",
+        "refuse_source": "process-sandbox.jet",
+        "allow_expected": "allow",
+        "refuse_expected": "refuse"
+      },
+      "expected": {
+        "default": {
+          "decision": "refuse",
+          "diagnostic_codes": ["E1803"],
+          "meaning": "a process action without Exec authority is refused before host launch"
+        }
+      }
+    }
+  ]
+}

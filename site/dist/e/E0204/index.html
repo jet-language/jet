@@ -34,7 +34,7 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for E0204</p>
+<p class="diag-copy fix" data-registry-field="fix">End the active `mut` borrow before using the value again.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0204</code>: <code>tests/ui/borrow_conflict.stderr</code>.</p>
 <pre class="diag">Error [E0204]: `x` is being changed in this call, so it can&#39;t be used again here
@@ -42,17 +42,8 @@
     |
   7 |     both(&amp;x, x)
     |              ^
- Why: while something is being changed through the write-access marker `&amp;`, nobody else may be looking at it
- Fix: pass the write-access marker `&amp;` (`&amp;x`) only once, or copy first with `~x`
-More: jet-lang.dev/e/E0204
-
-Error [E0204]: `x` is being changed in this call, so it can&#39;t be used again here
-  --&gt; tests/ui/borrow_conflict.jet:7:14
-    |
-  7 |     both(&amp;x, x)
-    |              ^
- Why: while something is being changed through the write-access marker `&amp;`, nobody else may be looking at it
- Fix: pass the write-access marker `&amp;` (`&amp;x`) only once, or copy first with `~x`
+ Why: While something is being changed through the write-access marker `&amp;`, nobody else may be looking at it
+ Fix: Pass the write-access marker `&amp;` (`&amp;x`) only once, or copy first with `~x`
 More: jet-lang.dev/e/E0204
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

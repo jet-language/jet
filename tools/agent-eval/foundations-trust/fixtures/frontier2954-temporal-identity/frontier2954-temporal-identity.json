@@ -1,0 +1,37 @@
+{
+  "schema": "jet.frontier-study-job.v1",
+  "study_id": "H2-temporal-identity",
+  "job_id": "frontier2954-temporal-identity-job-001",
+  "contract_id": "frontier2954-temporal-identity-v1",
+  "revision_history": ["read", "write", "publish"],
+  "resource_history": ["allocate original", "retain original handle", "release original", "allocate replacement", "use retained original handle"],
+  "lifetime_history": ["open", "schedule callback", "close", "run deferred callback"],
+  "clock": {
+    "total_seconds": 1,
+    "ticks_per_second": 720,
+    "fixed_step_ticks": 12,
+    "frame_rates": [30, 60, 144]
+  },
+  "observation_contract": [
+    "revision_identity",
+    "resource_generation",
+    "resource_lifetime",
+    "clock_representation",
+    "stale_acceptance",
+    "failure_reason"
+  ],
+  "expected": {
+    "baseline": {
+      "revision_stale_accepted": true,
+      "generation_stale_accepted": true,
+      "closed_callback_accepted": true,
+      "clock_schedules_match": false
+    },
+    "intervention": {
+      "revision_stale_accepted": false,
+      "generation_stale_accepted": false,
+      "closed_callback_accepted": false,
+      "clock_schedules_match": true
+    }
+  }
+}

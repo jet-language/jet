@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E2402 — Jet diagnostic</title>
-<meta name="description" content="`?` can&#39;t convert `{err}` into `Err` — no declared conversion exists">
+<meta name="description" content="A fallible call cannot convert `{err}` into `Err` — no declared conversion exists">
 <meta property="og:title" content="E2402 — Jet diagnostic">
-<meta property="og:description" content="`?` can&#39;t convert `{err}` into `Err` — no declared conversion exists">
+<meta property="og:description" content="A fallible call cannot convert `{err}` into `Err` — no declared conversion exists">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,43 +25,34 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E2402</h1>
-<p>`?` can&#39;t convert `{err}` into `Err` — no declared conversion exists</p>
+<p>A fallible call cannot convert `{err}` into `Err` — no declared conversion exists</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">`?` can&#39;t convert `{err}` into `Err` — no declared conversion exists</p>
+<p class="diag-copy what" data-registry-field="what">A fallible call cannot convert `{err}` into `Err` — no declared conversion exists</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">`?` uses the declared conversion rail; `{err}` can reach `Err` only through `impl {err} -&gt; Err`.</p>
+<p class="diag-copy why" data-registry-field="why">A fallible call uses the declared conversion rail; `{err}` can reach `Err` only through `impl {err} -&gt; Err`.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">add `impl {err} -&gt; Err { … }` before this function, or change the return type to `T !{err}`.</p>
+<p class="diag-copy fix" data-registry-field="fix">Add `impl {err} -&gt; Err { … }` before this function, or change the enclosing return type to `T !{err}`.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E2402</code>: <code>tests/ui/carrier_partial_not_kept.stderr</code>.</p>
-<pre class="diag">Error [E2417]: explicit failure domain ``ImportErr`` is not an Error type
+<pre class="diag">Error [E2417]: Explicit failure domain ``ImportErr`` is not an Error type
   --&gt; tests/ui/carrier_partial_not_kept.jet:7:32
     |
   7 | fn import_rows(rows: [String]) [String] !ImportErr -&gt; {
     |                                ^^^^^^^^^^^^^^^^^^^
  Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
- Fix: use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
+ Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
 More: jet-lang.dev/e/E2417
 
-Error [E0501]: an empty list needs a type
-  --&gt; tests/ui/carrier_partial_not_kept.jet:13:27
-    |
- 13 |     spotty :: import_rows([String]{})
-    |                           ^^^^^^^^^^
- Why: write `[]` only where the list type is already known from around it
- Fix: name the element type on the literal: `[Int].{}`
-More: jet-lang.dev/e/E0501
-
-Error [E2402]: `?` can&#39;t convert `ImportErr` into `Err` — no declared conversion exists
+Error [E2402]: This implicit fallible call can&#39;t convert `ImportErr` into `Err` — no declared conversion exists
   --&gt; tests/ui/carrier_partial_not_kept.jet:13:15
     |
  13 |     spotty :: import_rows([String]{})
     |               ^^^^^^^^^^^
- Why: `?` uses the declared conversion rail; `ImportErr` can reach `Err` only through `impl ImportErr -&gt; Err`
- Fix: add `impl ImportErr -&gt; Err { … }` before this function, or change the return type
+ Why: Ordinary fallible calls propagate automatically; `ImportErr` can reach `Err` only through `impl ImportErr -&gt; Err`
+ Fix: Handle this call locally with `??`, add `impl ImportErr -&gt; Err { … }`, or change the return type
 More: jet-lang.dev/e/E2402
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

@@ -15,16 +15,11 @@
 //!
 //! # Why this crate owns it
 //!
-//! Four independent crates install this boundary and they must share one
-//! re-entrancy flag, or a nested entry would spawn a worker inside a worker:
-//!
-//! * `jet-sema` — `check_bundle_opts_for_output_with_context`, the funnel every
-//!   public `Sema::check_bundle*` shares
+//! * `jet-sema` — the checked-bundle/effect-facts funnel
 //! * `jet-driver` — the compile/check/run funnels, and the loader funnel every
 //!   public `Loader::load_entry*` shares
-//! * `jet-codegen` — `TIR::lower_jit_program`
-//! * `jet-jit` — its public bundle entries
-//!
+//! * `jet-codegen` — checked TIR lowering, MIR lowering, and MIR optimization
+//! * `jet-jit` — its public MIR execution entries
 //! Installing at those funnels rather than at their callers is the whole
 //! point. Each one is public API, so an embedder holding its own bundle, a
 //! test harness, or the LSP reaches the recursive descent on whatever stack it
@@ -46,10 +41,12 @@ thread_local! {
     static ON_COMPILER_WORKER: Cell<bool> = const { Cell::new(false) };
 }
 
-/// 64 MiB covers the 48.75 MiB worst case with room for the parser/sema
-/// frames riding along, and matches the canonical TIR evaluator's own worker.
-/// A thread stack is reserved address space committed page by page, so an
-/// ordinary compile still touches only the pages it uses.
+/// 192 MiB covers the deepest accepted source nesting through sema. Nested
+/// ordinary calls recurse through `check_call_inner`; that function's frame
+/// is ~680 KiB per level (measured: 96 nested `id(id(...))` overflowed 64 MiB).
+/// 256 × 680 KiB = 170 MiB, with room for parser/TIR/Cranelift frames riding
+/// along. A thread stack is reserved address space committed page by page, so
+/// an ordinary compile still touches only the pages it uses.
 ///
 /// The budget is recursion depth only; unwind space is not a second term.
 /// Both unwind phases run on the panicking thread's own stack, so a raise
@@ -80,11 +77,11 @@ thread_local! {
 /// which of the two you have before touching this number — neither is a
 /// stack-space condition, and this constant answers for exactly one abort,
 /// the `has overflowed its stack` pair above.
-pub const COMPILER_STACK_SIZE: usize = 64 * 1024 * 1024;
+pub const COMPILER_STACK_SIZE: usize = 192 * 1024 * 1024;
 
 /// Raising the accepted nesting depth must raise the stack that lowers it.
 const _: () = assert!(
-    COMPILER_STACK_SIZE >= crate::Diagnostics::MAX_SOURCE_NESTING * 195 * 1024,
+    COMPILER_STACK_SIZE >= crate::Diagnostics::MAX_SOURCE_NESTING * 680 * 1024,
     "the compiler worker stack must cover the deepest nesting the front end accepts",
 );
 
@@ -108,10 +105,11 @@ pub fn on_compiler_worker() -> bool {
 /// crate knows which of its own thread-locals the work reads or publishes and
 /// wraps this with exactly that capture/restore: `jet_driver::run_compiler_work`
 /// and `Sema::check_bundle_opts_for_output_with_context` carry the comptime
-/// ambient hooks, `TIR::lower_jit_program` carries `LAST_JIT_LOWER_FAILURE`
-/// back out, and `jet_jit::on_compiler_stack` carries the trace flags, the tier
-/// rows and the `core.perf` fidelity signal. Each checks [`on_compiler_worker`]
-/// before capturing, so the inline path stays allocation-free.
+/// ambient hooks; checked TIR is lowered once to MIR, optimized, and handed
+/// to the `JitBackend`; and `jet_jit::on_compiler_stack` carries the trace
+/// flags, the tier rows and the `core.perf` fidelity signal. Each checks
+/// [`on_compiler_worker`] before capturing, so the inline path stays
+/// allocation-free.
 ///
 /// A worker's storage lasts one outermost call, so an installing crate owes the
 /// capture/restore not only to state a caller sets up or inspects around the

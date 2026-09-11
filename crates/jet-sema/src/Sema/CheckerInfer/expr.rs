@@ -18,6 +18,27 @@ use crate::AST::{
 use jet_foundation::Prelude as CorePrelude;
 use jet_foundation::Prelude::Target;
 use std::collections::HashSet;
+fn is_http_handler_type(ty: &Type) -> bool {
+    match ty {
+        Type::Named(name) => name == "HTTPHandler",
+        Type::Result { ok, .. } => is_http_handler_type(ok),
+        Type::Fn { params, ret, .. } => {
+            let params_match = params.is_empty()
+                || matches!(
+                    params.as_slice(),
+                    [Type::Named(name)] if name == "HTTPRequest"
+                );
+            let result_match = matches!(
+                ret.as_deref(),
+                Some(Type::Result { ok, err })
+                    if matches!(ok.as_ref(), Type::Named(name) if name == "HTTPResponse")
+                        && matches!(err.as_ref(), Type::Named(name) if name == "HTTPError")
+            );
+            params_match && result_match
+        }
+        _ => false,
+    }
+}
 
 fn field_path(expr: &Expr) -> Option<String> {
     fn append_field_path(expr: &Expr, path: &mut String) -> bool {
@@ -286,14 +307,29 @@ fn http_text_result() -> Type {
     }
 }
 
-
 impl<'a> Checker<'a> {
     fn expr_definitely_diverges(&self, expr: &Expr) -> bool {
         match expr.without_parens() {
             Expr::Todo { .. } | Expr::NoElse(_) => true,
             Expr::Call(call) => {
-                call.name == Syntax::BUILTIN_PANIC
-                    || self.diverging_functions.contains(&call.name)
+                if call.name == Syntax::BUILTIN_PANIC {
+                    true
+                } else if !self.diverging_functions.contains(&call.name) {
+                    false
+                } else {
+                    // A fallible `Never !E` function returns an `Err` carrier
+                    // that `??` can consume, so the call is not itself a
+                    // definitely-diverging expression.
+                    !self
+                        .funcs
+                        .get(&call.name)
+                        .is_some_and(|sig| {
+                            matches!(
+                                sig.return_type.as_ref(),
+                                Some(Type::Result { ok, .. }) if ok.is_never()
+                            )
+                        })
+                }
             }
             Expr::MethodCall {
                 receiver, method, ..
@@ -304,9 +340,9 @@ impl<'a> Checker<'a> {
                         crate::Sema::CheckerCoreLib::core_call_signature(&module, method)
                     })
                     .and_then(|(_, ret)| ret)
-                    .is_some_and(|ret| {
-                        matches!(ret, Type::Named(name) if name == Syntax::TYPE_NEVER)
-                    });
+                    .is_some_and(
+                        |ret| matches!(ret, Type::Named(name) if name == Syntax::TYPE_NEVER),
+                    );
                 core_diverges || self.imported_call_diverges(receiver, method)
             }
             Expr::If {
@@ -334,7 +370,15 @@ impl<'a> Checker<'a> {
         };
         self.modules
             .and_then(|modules| modules.get(module_idx))
-            .is_some_and(|state| state.diverging_functions.contains(method))
+            .is_some_and(|state| {
+                state.diverging_functions.contains(method)
+                    && !state.funcs.get(method).is_some_and(|sig| {
+                        matches!(
+                            sig.return_type.as_ref(),
+                            Some(Type::Result { ok, .. }) if ok.is_never()
+                        )
+                    })
+            })
     }
     pub(crate) fn expr_diverges(&self, expr: &Expr) -> bool {
         self.expr_definitely_diverges(expr)
@@ -595,6 +639,7 @@ fn normalize_bare_method_head(expr: &mut Expr) {
                 args,
                 recv_type: None,
                 resolved_ret: None,
+                operator_rhs: None,
                 checked_widen: false,
             };
         }
@@ -676,7 +721,7 @@ impl<'a> Checker<'a> {
         self.modules
             .and_then(|modules| modules.get(self.module_idx))
             .map(|state| {
-                jet_foundation::Layout::TargetLayout::from_triple(&state.build_facts.target_triple)
+                jet_foundation::Layout::TargetLayout::from_build_facts(&state.build_facts)
             })
             .unwrap_or_else(jet_foundation::Layout::TargetLayout::host)
     }
@@ -686,6 +731,43 @@ impl<'a> Checker<'a> {
         self.modules
             .and_then(|modules| modules.get(owner))
             .map(|module| &module.fact_registry)
+    }
+
+    /// Resolve a direct nominal compiler fact through the owning module's
+    /// source items. Qualified/imported type spellings use the same owner
+    /// resolver as ordinary field and method lookup; the target comes from
+    /// the checked bundle rather than the host.
+    fn direct_type_fact_value(
+        &self,
+        subject: &Expr,
+        read: jet_foundation::Registry::FactRead,
+    ) -> Option<crate::Comptime::CtValue> {
+        if !matches!(subject, Expr::Ident(..) | Expr::Field(..)) {
+            return None;
+        }
+        let type_path = field_path(subject)?;
+        let root = type_path.split('.').next()?;
+        if self.lookup(root).is_some() {
+            return None;
+        }
+        let (import_ns, leaf) = self.struct_type_name_parts(&type_path);
+        let target = self.layout_target();
+        let owner = self.struct_owner_module(leaf, import_ns);
+        if let (Some(owner), Some(modules)) = (owner, self.modules) {
+            let state = modules.get(owner)?;
+            let graph_name = format!("{leaf}.State");
+            let graph = state.fact_registry.state_graph(&graph_name);
+            return crate::Comptime::reflect_type_fact_value_with_target_and_graph_and_facts(
+                &state.items,
+                leaf,
+                &state.module_alias,
+                &target,
+                graph,
+                Some(&state.fact_registry),
+                read,
+            );
+        }
+        None
     }
 
     /// D-METAREFLECT1=A: fold a static `Type.reflect()` call from the source
@@ -753,7 +835,7 @@ impl<'a> Checker<'a> {
         let Expr::Field(inner, member, span) = expr else {
             return None;
         };
-        if let Some(path) = path {
+        if let Some(path) = &path {
             if let Some(key) = jet_foundation::Registry::build_setting_key(&path) {
                 let snapshot = self
                     .modules
@@ -833,21 +915,36 @@ impl<'a> Checker<'a> {
                 format!("fact read `{member}` is compile-time only"),
                 "a fact is a value known before code generation; it never selects runtime behavior"
                     .to_string(),
-                "move the read into an `@` binding or a compile-time block".to_string(),
+                path.as_ref()
+                    .map(|path| {
+                        format!("Write `@fact :: {path}`, then use `@fact` in this expression")
+                    })
+                    .unwrap_or_else(|| {
+                        "Move the read into an `@` binding or a compile-time block".to_string()
+                    }),
                 Some(*span),
             ));
             return Some(None);
         }
 
-        // The existing TypeInfo projection is the reader for the three
-        // original reflection facts. Keep it as the same path in comptime;
-        // only the newly typed plane values need a folded literal here.
+        // Direct nominal facts use the target-aware TypeInfo builder. A
+        // reflected TypeInfo value still follows the ordinary field path
+        // below, so derive projections keep their existing behavior.
         if matches!(
             read,
             jet_foundation::Registry::FactRead::Layout
                 | jet_foundation::Registry::FactRead::Name
                 | jet_foundation::Registry::FactRead::Fields
         ) {
+            if let Some(value) = self.direct_type_fact_value(inner, read) {
+                let ty = value.jet_type();
+                *expr = Expr::ComptimeName {
+                    name: format!("\0jet.fact.{}", span.start),
+                    span: *span,
+                    value: Some(value),
+                };
+                return Some(Some(ty));
+            }
             return None;
         }
 
@@ -1116,15 +1213,7 @@ impl<'a> Checker<'a> {
 
     fn fold_comptime_struct_field(&mut self, expr: &mut Expr) -> Option<Type> {
         if let Expr::Field(_, member, _) = &*expr {
-            if let Some(read) = Syntax::fact_read_kind(member) {
-                if matches!(
-                    read,
-                    jet_foundation::Registry::FactRead::Layout
-                        | jet_foundation::Registry::FactRead::Name
-                        | jet_foundation::Registry::FactRead::Fields
-                ) {
-                    return None;
-                }
+            if Syntax::fact_read_kind(member).is_some() {
                 if let Expr::Field(inner, _, _) = expr {
                     self.fold_comptime_struct_field(inner);
                 }
@@ -1581,6 +1670,7 @@ impl<'a> Checker<'a> {
                         }],
                         recv_type: Some(type_name.clone()),
                         resolved_ret: Some(Type::String),
+                        operator_rhs: None,
                         checked_widen: false,
                     };
                     match crate::Comptime::evaluate_checked_text_hole(
@@ -1807,11 +1897,8 @@ impl<'a> Checker<'a> {
             root = inner;
         }
         let direct_call_root = matches!(root, Expr::Call(..));
-        self.statement_expr_root_depth = Some(
-            self.source_nesting
-                + paren_depth
-                + if direct_call_root { 0 } else { 1 },
-        );
+        self.statement_expr_root_depth =
+            Some(self.source_nesting + paren_depth + if direct_call_root { 0 } else { 1 });
         let result = self.infer_fallible_stmt(expr);
         self.statement_expr_inference = saved_statement_expr_inference;
         self.statement_expr_root_depth = saved_statement_expr_root_depth;
@@ -1847,10 +1934,36 @@ impl<'a> Checker<'a> {
         // slot is already a Result, that nested call is still a source value:
         // consume its carrier once here, rather than handing Result<T, E> to
         // the outer display/argument checker.
-        // Trait methods keep their declared success type for source inference,
-        // while `resolved_ret` carries the effective Result ABI for lowering.
-        // Use that persisted carrier for propagation without changing the
-        // source type returned to the enclosing expression.
+        // Both direct and method calls retain the callee's declared return
+        // contract on `resolved_ret`; their checker result may be the
+        // effective Result-shaped ABI carrier.
+        let declared_call_return = match e.without_parens() {
+            Expr::Call(call) => call.resolved_ret.as_ref(),
+            Expr::MethodCall { resolved_ret, .. } => resolved_ret.as_ref(),
+            _ => None,
+        };
+        // D-FAILURE-FOUNDATION1=A: `!Never` is a proven-unreachable
+        // failure rail. Ordinary value positions still need the existing
+        // `Try` node so every backend unwraps the shared Result carrier once;
+        // only an explicit Result expectation keeps the carrier.
+        let declared_never_failure = matches!(
+            declared_call_return,
+            Some(Type::Result { err, .. }) if err.is_never()
+        );
+        if declared_never_failure
+            && matches!(self.expected_type.as_ref(), Some(Type::Result { .. }))
+        {
+            return result;
+        }
+        if !declared_never_failure {
+            if let Some(ret) = declared_call_return.filter(|ty| !ty.is_fallible()) {
+                // Call checking returns the effective Result-shaped carrier,
+                // but the resolved return records the callee's declared
+                // contract. A plain helper must project its declared success
+                // type instead of entering the failure rail.
+                return Some(ret.clone());
+            }
+        }
         let propagation_result = match e.without_parens() {
             Expr::MethodCall {
                 resolved_ret: Some(carrier),
@@ -1959,6 +2072,18 @@ impl<'a> Checker<'a> {
                 | Expr::Err(..)
                 | Expr::Try(..)
                 | Expr::If { .. }
+        ) || matches!(
+            e.without_parens(),
+            Expr::EnumLit {
+                type_name,
+                variant,
+                leading_dot: true,
+                ..
+            } if type_name.is_empty()
+                && matches!(
+                    contextual_literal(variant),
+                    Some(ContextualLiteral::Ok | ContextualLiteral::Err)
+                )
         );
         if !preserves_result_carrier {
             if let Some(Type::Result { ok, .. }) = saved_expected.as_ref() {
@@ -1973,7 +2098,20 @@ impl<'a> Checker<'a> {
         let result = if let Some(result) = self.fold_reflect_call(e) {
             result
         } else {
-            self.infer_checked(e)
+            // Nested `id(id(...))` must not inherit infer_inner's match-arm
+            // frame: a 96-deep cliff overflowed the compiler stack while still
+            // under MAX_SOURCE_NESTING. Keep that Call shortcut. Contextual
+            // `Ok`/`Err`/`Val`/`None` constructors parse as Calls and must be
+            // rewritten first; otherwise they take the function-lookup path
+            // and surface E0102.
+            if matches!(e, Expr::Call(_)) {
+                self.normalize_contextual_expr(e);
+            }
+            if matches!(e, Expr::Call(_) | Expr::CallValue { .. }) {
+                self.infer_call_like(e)
+            } else {
+                self.infer_checked(e)
+            }
         };
         self.expected_type = saved_expected;
         let result = if suppress_auto {
@@ -2079,6 +2217,21 @@ impl<'a> Checker<'a> {
     /// context. Give those positions the same default materialization rule,
     /// with the same `Expr::Copy` node and the same policy gate.
     pub(crate) fn infer_owning_value(&mut self, e: &mut Expr) -> Option<Type> {
+        let owns_if_arms = matches!(e.without_parens(), Expr::If { .. })
+            && !matches!(
+                self.expected_type.as_ref(),
+                Some(Type::Apply { name, .. }) if name == "View" || name == "ViewMut"
+            );
+        let saved_if_depth = self.owning_if_value_depth;
+        if owns_if_arms {
+            self.owning_if_value_depth += 1;
+        }
+        let result = self.infer_owning_value_inner(e);
+        self.owning_if_value_depth = saved_if_depth;
+        result
+    }
+
+    fn infer_owning_value_inner(&mut self, e: &mut Expr) -> Option<Type> {
         let default_copy = !self.copies_explicit();
         let borrowed_param_place = matches!(e, Expr::Field(..) | Expr::Index { .. })
             && crate::Sema::Diagnostics::expr_root_ident(e).is_some_and(|root| {
@@ -2132,6 +2285,37 @@ impl<'a> Checker<'a> {
             Some(ty)
         }
     }
+    /// Materialize a plain owned local read when it is the value of an
+    /// owning `if` arm. Direct list/tuple/map elements retain their existing
+    /// move semantics; only this conditional arm boundary needs the extra
+    /// copy because the conditional itself is the owning value.
+    fn materialize_if_arm_local_read(&mut self, e: &mut Expr, ty: &Type) {
+        let Expr::Ident(name, name_span) = e else {
+            return;
+        };
+        if type_is_copy(ty) {
+            return;
+        }
+        if self.copies_explicit() {
+            let diagnostic = Diagnostic::error(
+                "E0120",
+                format!("`{name}` was not copied here, so it cannot fill an owned conditional value"),
+                "this arm supplies a non-Copy value to an owning conditional result under `copies: .Explicit`"
+                    .to_string(),
+                format!("copy it explicitly with `{}{name}`", Syntax::SIGIL_COPY),
+                Some(*name_span),
+            );
+            self.diags
+                .push(self.with_ownership_copy_edit(diagnostic, *name_span, Some(ty)));
+            return;
+        }
+        if self.type_is_single_use(ty) || !is_cloneable(ty, self.registry) {
+            return;
+        }
+        let span = e.span();
+        let old = std::mem::replace(e, Expr::Absent(span));
+        *e = Expr::Copy(Box::new(old), span);
+    }
 
     fn active_arithmetic_policy(
         &self,
@@ -2176,12 +2360,19 @@ impl<'a> Checker<'a> {
         })
     }
 
-    fn push_hidden_cost_lint(&mut self, operation: &str, fix: &str, span: Span) {
+    fn push_hidden_cost_lint(
+        &mut self,
+        operation: &str,
+        fix: &str,
+        span: Span,
+        edit: TextEdit,
+    ) {
         let diagnostic = Diagnostic::from_row(
             "L2510",
             &[("operation", operation), ("fix", fix)],
             Some(span),
-        );
+        )
+        .with_edit(edit);
         if !self.diags.iter().any(|previous| {
             previous.code == diagnostic.code
                 && previous.span == diagnostic.span
@@ -2211,24 +2402,22 @@ impl<'a> Checker<'a> {
                             )
                     })
             });
-        let operation = if view_source {
-            format!("this copy of `{}` view into an owned slot", target.show())
-        } else {
-            format!("this implicit clone of `{}`", target.show())
+        // A generic owning clone has no safe local rewrite that reduces its
+        // cost. Keep this lint for view materialization only, where the
+        // explicit `~` source edit is concrete and applicable.
+        if !view_source {
+            return;
+        }
+        let Some(edit) = super::stdlib_lints::explicit_copy_edit(self, e) else {
+            return;
         };
-        let fix = if view_source {
-            format!(
-                "bind the copy once outside the loop, or keep views with `[View<{}>]`",
-                match target {
-                    Type::List(element) => element.show(),
-                    Type::String => "str".to_string(),
-                    _ => target.show(),
-                }
-            )
-        } else {
-            "hoist the clone, or use `~` when the copy is intentional".to_string()
-        };
-        self.push_hidden_cost_lint(&operation, &fix, e.span());
+        let operation = format!("this copy of `{}` view into an owned slot", target.show());
+        self.push_hidden_cost_lint(
+            &operation,
+            Syntax::SIGIL_COPY,
+            e.span(),
+            edit,
+        );
     }
 
     pub(crate) fn insert_implicit_copy(
@@ -2263,7 +2452,99 @@ impl<'a> Checker<'a> {
         target.clone()
     }
 
+    /// D-FOUND-LITERAL1=A (card #2789): an expected nominal type may opt into
+    /// the existing `Int`/`Float` literal carriers through one validated
+    /// compile-time constructor. This rewrites only the typed tree; all
+    /// backends continue to lower an ordinary resolved method call.
+    fn rewrite_contextual_literal(&mut self, e: &mut Expr) {
+        let expected = match self.expected_type.clone() {
+            Some(Type::Tagged { inner, .. }) => *inner,
+            Some(expected) => expected,
+            None => return,
+        };
+        let (type_name, owner_type_args) = match &expected {
+            Type::Named(name) => (name.clone(), Vec::new()),
+            Type::Apply { name, args } => (name.clone(), args.clone()),
+            _ => return,
+        };
+        let (capability, source) = match e {
+            Expr::Int(..) => (crate::Generics::LITERAL_INT, true),
+            Expr::Float(..) => (crate::Generics::LITERAL_FLOAT, false),
+            _ => return,
+        };
+        if !self.type_implements_trait_for_name(&type_name, capability) {
+            return;
+        }
+        let span = e.span();
+        let original = std::mem::replace(e, Expr::Absent(span));
+        let argument = match (source, original) {
+            (true, literal @ Expr::Int(..)) => literal,
+            (false, Expr::Float(value, _, _, raw)) => Expr::Str(
+                vec![StrPart::Lit(raw.unwrap_or_else(|| value.to_string()))],
+                span,
+            ),
+            (_, original) => {
+                *e = original;
+                return;
+            }
+        };
+        *e = Expr::MethodCall {
+            receiver: Box::new(Expr::Ident(type_name, span)),
+            method: crate::Generics::LITERAL_FROM_LITERAL.to_string(),
+            method_span: span,
+            owner_type_args,
+            type_args: Vec::new(),
+            args: vec![CallArg {
+                convention: AccessConvention::Read,
+                expr: argument,
+                span,
+                flags: CallArgFlags::default(),
+                label: None,
+                spread: false,
+            }],
+            recv_type: None,
+            resolved_ret: None,
+            operator_rhs: None,
+            checked_widen: false,
+        };
+    }
+
+    fn infer_call_like(&mut self, e: &mut Expr) -> Option<Type> {
+        match e {
+            Expr::Call(call) => {
+                let span = call.name_span;
+                self.clear_uninit_mut_args(&call.args);
+                match self.check_call(call, true) {
+                    Some(Some(t)) => Some(t),
+                    Some(None) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0116",
+                            format!("`{}` doesn't hand back a value", call.name),
+                            "a call is a value only when its function declares a result after the parameter list"
+                                .to_string(),
+                            format!(
+                                "inside an arm, wrap the call in `{{ … }}`; otherwise put `{}` on its own line, or declare it as `fn {}(…) Type -> …`",
+                                call.name, call.name
+                            ),
+                            Some(span),
+                        ));
+                        None
+                    }
+                    None => None,
+                }
+            }
+            Expr::CallValue { callee, args, span } => self.infer_call_value(callee, args, *span),
+            other => {
+                jet_foundation::ice!(
+                    Some(other.span()),
+                    "infer_call_like requires Call or CallValue, got {other:?}"
+                )
+            }
+        }
+    }
+
     fn infer_checked(&mut self, e: &mut Expr) -> Option<Type> {
+        self.rewrite_contextual_literal(e);
         if matches!(
             e,
             Expr::Field(..) | Expr::Index { .. } | Expr::MethodCall { .. }
@@ -2286,7 +2567,7 @@ impl<'a> Checker<'a> {
             ..
         } = &mut *e
         {
-            if matches!(args.len(), 1 | 3) {
+            if matches!(args.len(), 1 | 3) && method.starts_with("from_") {
                 if let Expr::Ident(destination_name, _) = receiver.as_ref() {
                     if let Some((destination_name, destination_fact)) =
                         self.unit_fact_for_type(&Type::Named(destination_name.clone()))
@@ -2561,6 +2842,7 @@ impl<'a> Checker<'a> {
                     args: call.args,
                     recv_type: None,
                     resolved_ret: call.resolved_ret,
+                    operator_rhs: None,
                     checked_widen: false,
                 };
             }
@@ -2612,6 +2894,22 @@ impl<'a> Checker<'a> {
         // literal path before sema lowers them to the existing dedicated nodes.
         // A user function still wins for bare `Ok`/`Err` calls.
         let contextual_result = match &mut *e {
+            Expr::Call(call)
+                if !self.funcs.contains_key(&call.name)
+                    && contextual_literal(&call.name) == Some(ContextualLiteral::Ok)
+                    && call.args.is_empty()
+                    && matches!(
+                        self.expected_type.as_ref(),
+                        Some(Type::Result { ok, .. })
+                            if matches!(
+                                ok.as_ref(),
+                                Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE
+                            )
+                    ) =>
+            {
+                let span = call.name_span;
+                Some(Expr::Ok(Box::new(Expr::Unit(span)), span))
+            }
             Expr::Call(call)
                 if !self.funcs.contains_key(&call.name)
                     && matches!(
@@ -2734,6 +3032,13 @@ impl<'a> Checker<'a> {
         );
         if !result_pattern {
             let branch_diverges = self.expr_definitely_diverges(value);
+            let owning_arm = self.owning_if_value_depth > 0;
+            if owning_arm {
+                // Consume one level while inferring the arm itself. A nested
+                // value-if gets its own level from `infer_owning_value`;
+                // ordinary reads inside this arm must keep their own mode.
+                self.owning_if_value_depth -= 1;
+            }
             let result = if self.statement_expr_inference || branch_diverges {
                 // A braced dispatch arm is a statement arm when the whole
                 // dispatch is used as a statement. Use the statement call
@@ -2742,24 +3047,36 @@ impl<'a> Checker<'a> {
                 // A diverging tail is also statement-shaped: it cannot
                 // contribute a value to the surrounding branch.
                 self.infer_fallible_stmt(value)
+            } else if owning_arm {
+                self.infer_owning_value(value)
             } else {
                 self.infer(value)
             };
-            if branch_diverges {
-                self.flow.reachable = false;
-                // A diverging arm has no value at the join. In particular,
-                // nested all-diverging value-ifs must not surface the Unit
-                // recovery type from their panic/todo tails as a fallback
-                // type mismatch.
-                self.expected_type = saved_expected;
-                return None;
+            if owning_arm {
+                self.owning_if_value_depth += 1;
+                if let Some(arm_ty) = result.clone() {
+                    self.materialize_if_arm_local_read(value, &arm_ty);
+                }
             }
-            self.expected_type = saved_expected;
             return result;
+        }
+        let owning_arm = self.owning_if_value_depth > 0;
+        if owning_arm {
+            self.owning_if_value_depth -= 1;
         }
         self.normalize_contextual_expr(value);
         let Expr::Call(call) = value else {
-            let result = self.infer(value);
+            let result = if owning_arm {
+                self.infer_owning_value(value)
+            } else {
+                self.infer(value)
+            };
+            if owning_arm {
+                self.owning_if_value_depth += 1;
+                if let Some(arm_ty) = result.clone() {
+                    self.materialize_if_arm_local_read(value, &arm_ty);
+                }
+            }
             self.expected_type = saved_expected;
             return result;
         };
@@ -2769,6 +3086,9 @@ impl<'a> Checker<'a> {
             Some(None) => Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
             None => None,
         };
+        if owning_arm {
+            self.owning_if_value_depth += 1;
+        }
         self.expected_type = saved_expected;
         result
     }
@@ -2779,7 +3099,10 @@ impl<'a> Checker<'a> {
             || self
                 .expected_type
                 .as_ref()
-                .is_some_and(|ty| matches!(ty, Type::Fn { .. }))
+                .is_some_and(|ty| {
+                    matches!(ty, Type::Fn { .. })
+                        || matches!(ty, Type::Named(name) if name == "UiShortcut")
+                })
         {
             normalize_bare_method_head(e);
         }
@@ -2811,6 +3134,7 @@ impl<'a> Checker<'a> {
                     args,
                     recv_type: None,
                     resolved_ret: None,
+                    operator_rhs: None,
                     checked_widen: false,
                 };
             }
@@ -3071,7 +3395,10 @@ impl<'a> Checker<'a> {
                                 ) {
                                     "make each returning branch produce the same value type; a non-returning branch needs no value".to_string()
                                 } else {
-                                    format!("make both branches produce {} (or the same type)", a.show())
+                                    format!(
+                                        "make both branches produce {} (or the same type)",
+                                        a.show()
+                                    )
                                 };
                                 self.diags.push(Diagnostic::error(
                                     "E0124",
@@ -3085,8 +3412,7 @@ impl<'a> Checker<'a> {
                                     fix,
                                     Some(span),
                                 ));
-                            }
-                            else {
+                            } else {
                                 self.diags.push(Diagnostic::error(
                                     "E0074",
                                     "this collecting loop produces incompatible item types"
@@ -3163,14 +3489,6 @@ impl<'a> Checker<'a> {
                     // when a later pass re-infers the rewritten expression.
                     Some(Type::IntN { signed, bits })
                 } else {
-                    let value = super::exact_integer_literal(n, raw.as_deref());
-                    if self.loop_depth > 0 && value.try_i64().is_none() {
-                        self.push_hidden_cost_lint(
-                            "this packed `Int` literal falls back to bigint",
-                            "hoist the literal, or use a fixed-width integer that fits",
-                            span,
-                        );
-                    }
                     *width = None;
                     Some(Type::Int)
                 }
@@ -3254,6 +3572,7 @@ impl<'a> Checker<'a> {
                         }],
                         recv_type: None,
                         resolved_ret: None,
+                        operator_rhs: None,
                         checked_widen: false,
                     };
                     *e = Expr::OrFallback {
@@ -3348,6 +3667,7 @@ impl<'a> Checker<'a> {
                     }],
                     recv_type: None,
                     resolved_ret: None,
+                    operator_rhs: None,
                     checked_widen: false,
                 };
                 self.infer(e)
@@ -3446,17 +3766,10 @@ impl<'a> Checker<'a> {
                             }
                             match fmt {
                                 crate::AST::StrFormat::Display => {
-                                    let display_migration_lint = !self.is_unit_type(&t)
-                                        && matches!(&t, Type::Named(n)
-                                        // `BuildError` is a compiler-host-only
-                                        // carrier for the `fn build` entry.
-                                        if n != "BuildError"
-                                            && (n == crate::Syntax::TYPE_IO_ERROR
-                                                || self.trait_reg.auto_printable.contains(n))
-                                            && !self.trait_reg.implements_trait(
-                                                n,
-                                                crate::Generics::DISPLAY,
-                                            ));
+                                    let display_migration_lint =
+                                        super::stdlib_lints::is_display_migration_candidate(
+                                            self, &t,
+                                        );
                                     if (!is_displayable(&t, self.registry, self.trait_reg)
                                         && !self.is_unit_type(&t))
                                         || display_migration_lint
@@ -3511,25 +3824,30 @@ impl<'a> Checker<'a> {
                                                     self.registry.distinct_granted_bundles(n),
                                                     inner.span(),
                                                 ));
-                                            } else if (n == crate::Syntax::TYPE_IO_ERROR
-                                                || self.trait_reg.auto_printable.contains(n))
-                                                && !self
-                                                    .trait_reg
-                                                    .implements_trait(n, crate::Generics::DISPLAY)
-                                            {
-                                                self.diags.push(Diagnostic::lint(
-                                                    "L0520",
-                                                    format!(
-                                                        "`{n}` has no `Display` impl — bare `{{}}` will require one soon"
-                                                    ),
-                                                    format!(
-                                                        "Display is the user-facing interpolation hook; Debug is for `{{value:{debug_selector}}}`"
-                                                    ),
-                                                    format!(
-                                                        "add `impl {n}.Display {{ fn display(self) String -> {{ … }} }}`"
-                                                    ),
-                                                    Some(inner.span()),
-                                                ));
+                                            } else if display_migration_lint {
+                                                if let Some(edit) =
+                                                    super::stdlib_lints::debug_interpolation_edit(
+                                                        self,
+                                                        inner,
+                                                        &debug_selector,
+                                                    )
+                                                {
+                                                    let Some(value) = self
+                                                        .source
+                                                        .get(edit.span.start..edit.span.end)
+                                                        .map(|value: &str| value.to_owned())
+                                                    else {
+                                                        continue;
+                                                    };
+                                                    self.diags.push(
+                                                        Diagnostic::from_row(
+                                                            "L0520",
+                                                            &[("type", n), ("value", value.as_str())],
+                                                            Some(edit.span),
+                                                        )
+                                                        .with_edit(edit),
+                                                    );
+                                                }
                                             } else {
                                                 self.diags.push(crate::Generics::e0915(
                                                     &t.show(),
@@ -3925,7 +4243,7 @@ impl<'a> Checker<'a> {
                             Some(*span),
                         ));
                     }
-                    return Some(func_sig_to_fn_type(&sig));
+                    return Some(self.checked_func_sig_to_fn_type(&sig));
                 }
                 self.unknown_name(name, *span);
                 None
@@ -4551,6 +4869,7 @@ impl<'a> Checker<'a> {
                             args: Vec::new(),
                             recv_type: None,
                             resolved_ret: None,
+                            operator_rhs: None,
                             checked_widen: false,
                         };
                         return self.infer(e);
@@ -4601,6 +4920,7 @@ impl<'a> Checker<'a> {
                 args,
                 recv_type,
                 resolved_ret,
+                operator_rhs: _,
                 checked_widen: _,
             } => {
                 // D-SHAPE3a=A: the parser's empty identifier is the unspellable
@@ -5096,6 +5416,10 @@ impl<'a> Checker<'a> {
                 is_option,
             } => self.infer_or_fallback(value, fallback, *span, is_option),
             Expr::Lambda(lam) => {
+                let http_handler = self
+                    .expected_type
+                    .as_ref()
+                    .is_some_and(is_http_handler_type);
                 let expected = match self.expected_type.as_ref() {
                     Some(Type::Named(name)) if name == "HTTPHandler" => Some(Type::Fn {
                         params: vec![Type::Named("HTTPRequest".to_string())],
@@ -5110,9 +5434,18 @@ impl<'a> Checker<'a> {
                     }),
                     _ => self.expected_type.clone(),
                 };
-                self.with_deferred_call_access(|checker| {
+                let saved_http_depth = self.http_handler_depth;
+                let saved_escapes = self.lambda_escapes;
+                if http_handler {
+                    self.http_handler_depth += 1;
+                    self.lambda_escapes = true;
+                }
+                let result = self.with_deferred_call_access(|checker| {
                     checker.check_lambda(lam, expected.as_ref())
-                })
+                });
+                self.http_handler_depth = saved_http_depth;
+                self.lambda_escapes = saved_escapes;
+                result
             }
             Expr::CallValue { callee, args, span } => self.infer_call_value(callee, args, *span),
             // D-META-STAGE1=B: a compile-time name resolves from the values the
@@ -5249,6 +5582,11 @@ impl<'a> Checker<'a> {
         };
         let head = self.resolve_type(head);
 
+        // An empty list or map literal has no element to recover its type from
+        // once the head is gone. Inference below runs on the ordinary empty
+        // literal shape, then the head goes back on the node so TIR lowering
+        // reads `[T]` / `[K:V]` from `Expr::TypedLit` in every position.
+        let mut keep_head = false;
         match (head.clone(), body) {
             (Type::List(_) | Type::FixedList { .. }, TypedLitBody::ByteText(parts)) => {
                 let Some(elems) = Self::byte_text_elements(&parts, span) else {
@@ -5273,6 +5611,7 @@ impl<'a> Checker<'a> {
             }
             (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Empty) => {
                 *e = Expr::ListLit(Vec::new(), span);
+                keep_head = true;
             }
             (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Elements(elems)) => {
                 *e = Expr::ListLit(elems, span);
@@ -5282,6 +5621,7 @@ impl<'a> Checker<'a> {
             }
             (Type::Map { .. }, TypedLitBody::Empty) => {
                 *e = Expr::MapLit(Vec::new(), span);
+                keep_head = true;
             }
             (Type::Map { .. }, TypedLitBody::Entries(entries)) => {
                 *e = Expr::MapLit(entries, span);
@@ -5392,22 +5732,30 @@ impl<'a> Checker<'a> {
         let saved = self.expected_type.replace(head.clone());
         let ty = self.infer(e);
         self.expected_type = saved;
+        if keep_head {
+            *e = Expr::TypedLit {
+                head: Some(head.clone()),
+                body: TypedLitBody::Empty,
+                span,
+            };
+        }
         // Head wins as the expression's type when inference produced something
         // assignable; mismatches already diagnosed by infer/check_type_assignable.
         match ty {
             Some(got) => {
                 if got != head {
-                    // D-FIXED-CONSTRUCT1: a runtime exact `Int` crossing into
-                    // a fixed-width scalar must use the existing checked,
-                    // destination-owned conversion seam. A typed scalar
-                    // literal is not a wrapping arithmetic operation, so its
-                    // range check remains active inside any arithmetic policy.
-                    if got == Type::Int && matches!(head, Type::IntN { .. }) {
+                    // Preserve the checked conversion when a scalar head
+                    // changes an integer's runtime representation. A type
+                    // annotation alone cannot turn integer bits into a float.
+                    if (got == Type::Int && matches!(head, Type::IntN { .. }))
+                        || (matches!(got, Type::Int | Type::IntN { .. })
+                            && matches!(head, Type::Float | Type::Float32))
+                    {
                         let source_span = e.span();
                         let source = std::mem::replace(e, Expr::Absent(source_span));
                         *e = Expr::MethodCall {
                             receiver: Box::new(Expr::Ident(head.name(), source_span)),
-                            method: Syntax::conversion_method_for_source("Int"),
+                            method: Syntax::conversion_method_for_source(&got.name()),
                             method_span: source_span,
                             owner_type_args: Vec::new(),
                             type_args: Vec::new(),
@@ -5421,6 +5769,7 @@ impl<'a> Checker<'a> {
                             }],
                             recv_type: None,
                             resolved_ret: Some(head.clone()),
+                            operator_rhs: None,
                             checked_widen: true,
                         };
                         return Some(head);
@@ -6025,7 +6374,40 @@ impl<'a> Checker<'a> {
                 return Some(Type::Named(crate::Syntax::TYPE_LAYOUT_FIELD.to_string()));
             }
         }
-        let idx_ty = self.infer(index)?;
+        // Index operands are checked from the indexed value, never from an
+        // enclosing result slot. Positional storage has canonical `Int`
+        // indices; keyed/index-trait storage supplies its declared key.
+        let index_expected = match base_ty.without_user_tags() {
+            Type::List(_) | Type::FixedList { .. } | Type::String => Some(Type::Int),
+            Type::Apply { name, args }
+                if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
+            {
+                Some(Type::Int)
+            }
+            Type::Apply { name, args } if name == "Pool" && args.len() == 1 => Some(Type::Apply {
+                name: "Id".to_string(),
+                args: vec![args[0].clone()],
+            }),
+            ty if ty.is_compute_tensor_family() => {
+                Some(Type::Named(crate::Syntax::TYPE_RANGE.to_string()))
+            }
+            Type::Map { key, .. } => Some((**key).clone()),
+            Type::Named(n) if is_simd_lane_type(n) && !self.registry.contains(n) => Some(Type::Int),
+            Type::Named(n) => self
+                .trait_reg
+                .index_types
+                .get(n)
+                .map(|(key, _)| key.clone()),
+            _ => None,
+        };
+        let idx_ty = if let Some(expected) = index_expected {
+            self.infer_with_expected(index, &expected)?
+        } else {
+            let saved_expected = self.expected_type.take();
+            let result = self.infer(index);
+            self.expected_type = saved_expected;
+            result?
+        };
         // D-QUAL4: user tags are transparent facts, so a tag around a refined
         // distinct integer must not hide the interval proof from fixed-list
         // indexing. Preserve compiler-owned tags; some carry nominal or
@@ -6389,6 +6771,20 @@ impl<'a> Checker<'a> {
             return None;
         }
         self.check_place_read(&field_expr, span);
+        if let Some(path) = field_path(inner) {
+            if let Some(alias) = path.split('.').next() {
+                if self
+                    .core_imports
+                    .get(alias)
+                    .is_some_and(|module| module.starts_with("board."))
+                {
+                    if let Expr::Ident(alias, alias_span) = &**inner {
+                        self.record_import_alias_reference(alias, *alias_span);
+                    }
+                    return Some(Type::Named("__JetHardwareField".to_string()));
+                }
+            }
+        }
         if let Expr::Field(base, leaf, _) = &**inner {
             if let Expr::Ident(alias, alias_span) = &**base {
                 self.record_import_alias_reference(alias, *alias_span);
@@ -6409,8 +6805,8 @@ impl<'a> Checker<'a> {
                 if self.core_imports.get(alias).map(String::as_str) == Some("core.encoding") {
                     let enum_name = match leaf.as_str() {
                         "DataEvent" => Some("DataEvent"),
-                        "EncodingFormat" => Some("EncodingFormat"),
                         "EncodingErrorKind" => Some("EncodingErrorKind"),
+                        "EncodingFormat" => Some("EncodingFormat"),
                         _ => None,
                     };
                     if let Some(enum_name) = enum_name {

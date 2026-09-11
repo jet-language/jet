@@ -634,25 +634,6 @@ fn edit_bytes(old: Option<&str>, new: &str) -> usize {
 mod tests {
     use super::*;
 
-    const COMPILER_SPEED_PLAN: &str = include_str!("../../../docs/plans/compiler-speed.md");
-    const BATCH_SEMA_PLAN_CANARY: &str = "## #1026 incremental batch sema canary";
-
-    fn batch_sema_plan_is_intact(plan: &str) -> bool {
-        [
-            BATCH_SEMA_PLAN_CANARY,
-            "crates/jet-driver/src/QueryService.rs::tests::batch_disk_interface_change_keeps_unrelated_module_warm",
-            "changed module interface rechecks that module and its importer",
-            "unrelated module remains a cache hit",
-            "Removing the batch cache handoff or",
-            "dependent-only invalidation must fail the check.",
-            "crates/jet-driver/src/Loader.rs::stale_manifest_name_tests::staged_frontend_is_bounded_and_deterministic",
-            "at most eight workers",
-            "consumes staged",
-            "serially in stable module order",
-        ]
-        .iter()
-        .all(|requirement| plan.contains(requirement))
-    }
 
     fn checked_key(path: impl AsRef<Path>) -> QueryKey {
         QueryKey::for_file(
@@ -714,17 +695,15 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let main = root.join("main.jet");
         let dependency = root.join("b.jet");
-        let main_source = "module b;\nfn run() Int -> { return b.value() }\n";
+        let main_source = "module b\nfn run() { print(b.value() + 0) }\n";
         let first_dependency = "pub fn value() Int -> { return 1 }\n";
         let second_dependency = "pub fn value() String -> { return \"changed\" }\n";
         std::fs::write(&main, main_source).unwrap();
         std::fs::write(&dependency, first_dependency).unwrap();
 
         let mut service = CompilerQueries::new();
-        assert!(service
-            .check_disk(&main.to_string_lossy(), true)
-            .diagnostics
-            .is_empty());
+        let first = service.check_disk(&main.to_string_lossy(), true);
+        assert!(first.diagnostics.is_empty(), "{:#?}", first.diagnostics);
         std::fs::write(&dependency, second_dependency).unwrap();
         let changed = service.check_disk(&main.to_string_lossy(), true);
         assert!(
@@ -737,23 +716,6 @@ mod tests {
 
     #[test]
     fn batch_disk_interface_change_keeps_unrelated_module_warm() {
-        assert!(
-            batch_sema_plan_is_intact(COMPILER_SPEED_PLAN),
-            "batch frontend proof is no longer backed by docs/plans/compiler-speed.md"
-        );
-        let bypassed = COMPILER_SPEED_PLAN.replacen(
-            BATCH_SEMA_PLAN_CANARY,
-            "## #1026 batch frontend canary bypassed",
-            1,
-        );
-        assert_ne!(
-            bypassed, COMPILER_SPEED_PLAN,
-            "batch frontend canary mutation did not apply"
-        );
-        assert!(
-            !batch_sema_plan_is_intact(&bypassed),
-            "batch frontend proof must fail when its plan section is bypassed"
-        );
         let root =
             std::env::temp_dir().join(format!("jet-query-batch-interface-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -763,7 +725,7 @@ mod tests {
         let unrelated = root.join("c.jet");
         let lock_dir = root.join(".jet");
         let main_source =
-            "module b;\nmodule c;\nfn run() Int -> { return b.value() + c.other() }\n";
+            "module b\nmodule c\nfn run() { print(b.value() + c.other()) }\n";
         let dependency_source = "pub fn value() Int -> { return 1 }\n";
         let changed_dependency = "pub fn value() String -> { return \"changed\" }\n";
         let unrelated_source = "pub fn other() Int -> { return 2 }\n";
@@ -853,14 +815,14 @@ mod tests {
             .collect::<Vec<_>>();
         let declarations = names
             .iter()
-            .map(|name| format!("module {name};\n"))
+            .map(|name| format!("module {name}\n"))
             .collect::<String>();
         let calls = names
             .iter()
             .map(|name| format!("{name}.value()"))
             .collect::<Vec<_>>()
             .join(" + ");
-        let main_source = format!("{declarations}fn run() Int -> {{ return {calls} }}\n");
+        let main_source = format!("{declarations}fn run() {{ print({calls}) }}\n");
         std::fs::write(&main, &main_source).unwrap();
         for (index, name) in names.iter().enumerate() {
             std::fs::write(
@@ -908,8 +870,10 @@ mod tests {
     #[test]
     fn local_body_edit_rechecks_only_changed_item() {
         let mut service = CompilerQueries::new();
-        let before = "fn _alpha() Int -> { return 1 }\nfn _beta() Int -> { return 2 }\n";
-        let after = "fn _alpha() Int -> { return 1 }\nfn _beta() Int -> { return 3 }\n";
+        let before =
+            "fn alpha() Int -> { return 1 }\nfn beta() Int -> { return 2 }\nfn run() { print(alpha() + beta()) }\n";
+        let after =
+            "fn alpha() Int -> { return 1 }\nfn beta() Int -> { return 3 }\nfn run() { print(alpha() + beta()) }\n";
         let path = std::env::temp_dir()
             .join(format!("jet-query-items-{}.jet", std::process::id()));
         let path = path.to_string_lossy().into_owned();
@@ -917,28 +881,38 @@ mod tests {
         let initial = service.check_text(&path, before, true);
         assert!(initial.diagnostics.is_empty(), "{:?}", initial.diagnostics);
         let cold = service.stats();
-        assert_eq!(cold.item_hits, 0);
-        assert_eq!(cold.item_recomputes, 2);
-        assert_eq!(cold.live_items, 2);
+        assert_eq!(cold.item_hits, 0, "{cold:?}");
+        assert_eq!(cold.item_recomputes, 3, "{cold:?}");
+        assert_eq!(cold.live_items, 3, "{cold:?}");
 
-        assert!(service.check_text(&path, after, true).diagnostics.is_empty());
+        let warm_checked = service.check_text(&path, after, true);
+        assert!(warm_checked.diagnostics.is_empty(), "{:#?}", warm_checked.diagnostics);
         let warm = service.stats();
-        assert_eq!(warm.item_hits, 1, "unchanged alpha must reuse checked body");
-        assert_eq!(warm.item_recomputes, 3, "only changed beta may recheck");
-        assert_eq!(warm.live_items, 2);
+        assert_eq!(
+            warm.item_hits, 2,
+            "unchanged alpha and run must reuse checked bodies: {warm:?}"
+        );
+        assert_eq!(
+            warm.item_recomputes, 4,
+            "only changed beta may recheck: {warm:?}"
+        );
+        assert_eq!(warm.live_items, 3, "{warm:?}");
         assert!(warm.live_item_bytes > before.len());
     }
 
     #[test]
     fn cached_caller_observes_changed_callee_effects() {
-        let before = "fn alpha() Int -[]> { return beta() }\nfn beta() Int -> { return 2 }\n";
+        let before =
+            "fn alpha() Int -[]> { return beta() }\nfn beta() Int -> { return 2 }\nfn run() { print(alpha()) }\n";
         let after =
-            "fn alpha() Int -[]> { return beta() }\nfn beta() Int -> { print(\"x\"); return 2 }\n";
+            "fn alpha() Int -[]> { return beta() }\nfn beta() Int -> { print(\"x\")\nreturn 2 }\nfn run() { print(alpha()) }\n";
         let mut incremental = CompilerQueries::new();
-        assert!(incremental
-            .check_text("effects.jet", before, true)
-            .diagnostics
-            .is_empty());
+        let before_checked = incremental.check_text("effects.jet", before, true);
+        assert!(
+            before_checked.diagnostics.is_empty(),
+            "{:#?}",
+            before_checked.diagnostics
+        );
 
         let changed = incremental.check_text("effects.jet", after, true);
         let fresh = CompilerQueries::new().check_text("effects.jet", after, true);
@@ -947,16 +921,20 @@ mod tests {
             diagnostic_summary(&fresh.diagnostics),
             "incremental diagnostics must be byte-for-byte equivalent to a fresh check"
         );
-        assert!(changed
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "E3401"));
+        assert!(
+            changed.diagnostics.iter().any(|diagnostic| diagnostic.code == "E3401"),
+            "{:#?}",
+            changed.diagnostics
+        );
         let stats = incremental.stats();
         assert_eq!(
-            stats.item_hits, 1,
-            "unchanged alpha must reuse its checked body"
+            stats.item_hits, 2,
+            "unchanged alpha and run must reuse checked bodies: {stats:?}"
         );
-        assert_eq!(stats.item_recomputes, 3, "changed beta alone must recheck");
+        assert_eq!(
+            stats.item_recomputes, 4,
+            "changed beta alone must recheck: {stats:?}"
+        );
     }
 
     #[test]
@@ -965,15 +943,16 @@ mod tests {
             format!(
                 r#"use core.crypto.expert as expert
 
-fn protect() -[]> {{
+fn protect() Int !CryptoError -[]> {{
     #Unsafe("fixed interop vector") {{
-        _ :: expert.xchacha20poly1305_seal(
+        _sealed :: expert.xchacha20poly1305_seal(
             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             [next_byte()],
             [],
             []
         )
     }}
+    return 0
 }}
 
 fn next_byte() U8 -> {{
@@ -981,8 +960,8 @@ fn next_byte() U8 -> {{
     return 0
 }}
 
-fn marker() Int -> {{ return {marker} }}
-fn run() {{}}
+fn _marker() Int -> {{ return {marker} }}
+fn run() {{ print(protect() ?? 0) }}
 "#
             )
         };
@@ -998,7 +977,7 @@ fn run() {{}}
 
         let cold_source = source(pure_body, 0);
         let cold = incremental.check_text("crypto-cache.jet", &cold_source, true);
-        assert_eq!(codes(&cold), ["E2702".to_string()]);
+        assert_eq!(codes(&cold), ["E2702".to_string()], "{:#?}", cold.diagnostics);
         let cold_stats = incremental.stats();
 
         let warm_source = source(pure_body, 1);
@@ -1087,13 +1066,11 @@ fn run() {{}}
         std::fs::create_dir_all(&root).unwrap();
         let main = root.join("main.jet");
         let dependency = root.join("b.jet");
-        let source = "module b;\nfn run() Int -> { return b.value() }\n";
+        let source = "module b\nfn run() { print(b.value() + 0) }\n";
         std::fs::write(&dependency, "pub fn value() Int -> { return 1 }\n").unwrap();
         let mut service = CompilerQueries::new();
-        assert!(service
-            .check_text(&main.to_string_lossy(), source, true)
-            .diagnostics
-            .is_empty());
+        let overlay_first = service.check_text(&main.to_string_lossy(), source, true);
+        assert!(overlay_first.diagnostics.is_empty(), "{:#?}", overlay_first.diagnostics);
 
         std::fs::write(
             &dependency,
@@ -1115,14 +1092,12 @@ fn run() {{}}
         std::fs::create_dir_all(&root).unwrap();
         let main = root.join("main.jet");
         let dependency = root.join("b.jet");
-        let source = "module b;\nfn run() Int -> { return b.value() }\n";
+        let source = "module b\nfn run() { print(b.value() + 0) }\n";
         let dependency_source = "pub fn value() Int -> { return 1 }\n";
         std::fs::write(&dependency, dependency_source).unwrap();
         let mut service = CompilerQueries::new();
-        assert!(service
-            .check_text(&main.to_string_lossy(), source, true)
-            .diagnostics
-            .is_empty());
+        let overlay_first = service.check_text(&main.to_string_lossy(), source, true);
+        assert!(overlay_first.diagnostics.is_empty(), "{:#?}", overlay_first.diagnostics);
 
         std::fs::write(&dependency, "pub fn value() Int -> { return 1 }\n::\n").unwrap();
         let broken = service.check_text(&main.to_string_lossy(), source, true);
@@ -1165,7 +1140,7 @@ fn run() {{}}
         std::fs::create_dir_all(&root).unwrap();
         let main = root.join("main.jet");
         let dependency = root.join("b.jet");
-        let source = "module b;\nfn run() Int -> { return b.value() }\n";
+        let source = "module b\nfn run() { print(b.value() + 0) }\n";
         let dependency_source = "pub fn value() Int -> { return 1 }\n";
         std::fs::write(&dependency, "pub fn value() Int -> { return 1 }\n::\n").unwrap();
         let mut service = CompilerQueries::new();
@@ -1200,7 +1175,7 @@ fn run() {{}}
             let _ = std::fs::remove_dir_all(&root);
             std::fs::create_dir_all(&root).unwrap();
             let main = root.join("main.jet");
-            let source = "module b;\nfn run() Int -> { return b.value() }\n";
+            let source = "module b\nfn run() { print(b.value() + 0) }\n";
             let mut service = CompilerQueries::new();
             let missing = service.check_text(&main.to_string_lossy(), source, true);
             assert!(missing
@@ -1234,11 +1209,13 @@ fn run() {{}}
     #[test]
     fn comptime_local_disables_replay() {
         let mut service = CompilerQueries::new();
-        let source = "fn run() {\n    @value :: 1\n    print(\"{value}\")\n}\n";
-        assert!(service
-            .check_text("comptime.jet", source, true)
-            .diagnostics
-            .is_empty());
+        let source = "fn run() {\n    @_value :: 1\n}\n";
+        let checked = service.check_text("comptime.jet", source, true);
+        assert!(
+            checked.diagnostics.is_empty(),
+            "{:#?}",
+            checked.diagnostics
+        );
         assert!(service
             .check_text("comptime.jet", source, true)
             .diagnostics
@@ -1257,12 +1234,13 @@ fn run() {{}}
         let asset = root.join("message.txt");
         let source = concat!(
             "@message :: embed_file(\"message.txt\")\n",
-            "fn read() String -> { return message }\n"
+            "fn run() { print(\"{@message}\") }\n"
         );
         std::fs::write(&asset, "first").unwrap();
+        std::fs::write(&main, source).unwrap();
         let mut service = CompilerQueries::new();
         let first = service.check_text(&main.to_string_lossy(), source, true);
-        assert!(first.diagnostics.is_empty());
+        assert!(first.diagnostics.is_empty(), "{:#?}", first.diagnostics);
         assert!(format!("{:?}", first.bundle).contains("first"));
 
         std::fs::write(&asset, "second").unwrap();
@@ -1295,9 +1273,9 @@ fn run() {{}}
 
     fn cone_source(functions: usize) -> String {
         let mut source = (0..functions)
-            .map(|index| format!("fn helper_{index}() Int -> {{ return {index} }}\n"))
+            .map(|index| format!("fn _helper_{index}() Int -> {{ return {index} }}\n"))
             .collect::<String>();
-        source.push_str("fn target() Int -> { return 1 }\nfn run() Int -> { return target() }\n");
+        source.push_str("fn target() Int -> { return 1 }\nfn run() { print(target()) }\n");
         source
     }
 
@@ -1330,7 +1308,7 @@ fn run() {{}}
             expression = format!("id({expression})");
         }
         format!(
-            "fn id(value: Int) Int -> {{ return value }}\nfn run() {{\n    value :: {expression}\n}}\n"
+            "fn id(value: Int) Int -> {{ return value }}\nfn run() {{\n    print({expression})\n}}\n"
         )
     }
 

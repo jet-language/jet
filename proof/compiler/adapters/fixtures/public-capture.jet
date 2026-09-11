@@ -1,0 +1,83 @@
+// Controlled-world/public adapter observation fixture.
+// The host observer supplies operation ids, route mode, and a cache-owned journal path.
+// Every journal field is computed by this program; no status or cleanup value is
+// filled in by the observer.
+use core.encoding.json as json
+use core.files as fs
+use core.testing as testing
+
+#Codable
+struct AdapterObservation {
+    result: String
+    typed_failure: String
+    mutation: String
+    input_consumption: String
+    ordered_effects: [String]
+    cleanup: [String]
+    resource_premises: String
+    schedule: String
+    allowed_schedules: [String]
+}
+
+#Codable
+struct AdapterObservationRecord {
+    operation_id: String
+    mode: String
+    observations: AdapterObservation
+}
+
+fn run() {
+    mode :: env.get("JET_ADAPTER_MODE") ?? "unknown"
+    journal_path :: env.get("JET_ADAPTER_OBSERVATION_PATH") ?? panic("adapter observation path missing")
+    operation_ids :: (env.get("JET_ADAPTER_OPERATION_IDS") ?? "").split(",")
+    if operation_ids.len() == 0 -> panic("adapter operation ids missing")
+
+    events := [String]{}
+    input := [Int]{7, 9, 11}
+    first :: input[0]
+    second :: input[1]
+    remaining :: input.len() - 2
+    events.push("input:{first},{second}")
+    @computed :: 7 + 9
+    events.push("comptime:{@computed}")
+
+    state := 0
+    state = state + first + second
+    events.push("mutation:{state}")
+
+    failed :: Int.parse("not-an-int")
+    typed_failure := if failed == {
+        .Err(_) -> "Err:Int.parse"
+        else -> "unexpected-success"
+    }
+    events.push("failure:{typed_failure}")
+
+    world_schedule :: testing.world(world -> {
+        world.advance(1ms)
+        return "world:advance"
+    })
+    events.push(world_schedule)
+
+    output_path :: "{journal_path}.result"
+    fs.write(output_path, "{state}:{remaining}") ?? panic("adapter observation output")
+    output_exists :: fs.exists(output_path)
+    events.push("output:{output_exists}")
+    journal :: AdapterObservation{
+        result: "{state}:{remaining}",
+        typed_failure: typed_failure,
+        mutation: "state:{state}",
+        input_consumption: "consumed:{first},{second};remaining:{remaining}",
+        ordered_effects: events,
+        cleanup: [String]{"output-written", "scope-exit"},
+        resource_premises: "journal-output;output-exists:{output_exists}",
+        schedule: world_schedule,
+        allowed_schedules: [String]{world_schedule},
+    }
+    records := [String]{}
+    loop operation_id in operation_ids {
+        record :: AdapterObservationRecord{operation_id: operation_id, mode: mode, observations: journal}
+        records.push(json.to_string(record))
+    }
+    fs.write(journal_path, records.join("\n") + "\n") ?? panic("adapter observation journal write")
+    print("adapter observation capture:{mode}:{operation_ids.len()}")
+}

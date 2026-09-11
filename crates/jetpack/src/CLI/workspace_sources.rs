@@ -329,14 +329,31 @@ pub(super) fn cwd_table() -> RefSpec::SourceTable {
         Ok(None) => RefSpec::SourceTable::empty(),
         Err(diagnostic) => report_authority_error(diagnostic),
     };
-    // Card #2166: the first native release recipe is a built-in catalog entry,
-    // but the standalone tool/profile surfaces still need its source authority
-    // available for channel writeback and manifest receipts.
+    // Built-in catalog entries remain available to standalone and project-aware
+    // surfaces, while `ensure_decl` preserves any explicit project override.
+    ensure_builtin_sources(&mut table);
+    table
+}
+
+/// Add first-party source declarations after project declarations so a project
+/// may explicitly override a built-in source without that override being lost.
+pub(super) fn ensure_builtin_sources(table: &mut RefSpec::SourceTable) {
     table.ensure_decl(
         crate::Provider::native::SOURCE_NAME,
         crate::Provider::native::UPSTREAM,
         RefSpec::ProviderKind::JetPackage,
     );
+    table.ensure_decl(
+        crate::Batteries::SOURCE_NAME,
+        crate::Batteries::UPSTREAM,
+        RefSpec::ProviderKind::Core,
+    );
+}
+
+/// The built-in source table for project-independent profile commands.
+pub(super) fn builtin_table() -> RefSpec::SourceTable {
+    let mut table = RefSpec::SourceTable::empty();
+    ensure_builtin_sources(&mut table);
     table
 }
 

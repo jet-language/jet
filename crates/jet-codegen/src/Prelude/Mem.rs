@@ -729,32 +729,12 @@
         }
     }
 
-    #[derive(Clone, Copy)]
-    struct FixedHeader {
-        previous: usize,
-        value_offset: usize,
-        drop_fn: Option<unsafe fn(*mut u8)>,
-        bytes: usize,
-    }
-
-    struct FixedState {
-        ptr: NonNull<u8>,
-        capacity: usize,
-        used: usize,
-        metadata_start: usize,
-        last_header: usize,
-        live_allocations: usize,
-        live_bytes: usize,
-        high_water_bytes: usize,
-    }
-
-    /// A fixed allocator over exactly one caller-owned inline byte buffer.
-    /// Payloads, alignment padding, and reverse-drop metadata all consume that
-    /// buffer; exhaustion therefore has one deterministic capacity boundary.
-    /// This module is private generated runtime: Jet sema proves the backing
-    /// outlives the handle and rejects every escape before this raw-pointer seam.
+    /// The canonical Fixed header/state/drop implementation is emitted once
+    /// at the generated crate root (`jet_fixed_kernel`). This hosted adapter
+    /// contributes only the inline backing constructors and sentry/metrics
+    /// observations; allocation semantics stay in that shared kernel.
     pub struct JetFixed {
-        state: RefCell<FixedState>,
+        state: RefCell<super::jet_fixed_kernel::FixedState>,
         _thread_confined: std::marker::PhantomData<std::rc::Rc<()>>,
     }
 
@@ -778,187 +758,85 @@
             assert!(capacity > 0, "Fixed allocator needs a non-empty backing buffer");
             super::jet_observe_arena_open();
             super::jet_observe_arena_retain(capacity);
+            // SAFETY: the constructor checks the non-empty backing contract;
+            // the source-level sema contract keeps it live for this handle.
+            let state = unsafe {
+                super::jet_fixed_kernel::FixedState::from_raw(ptr, capacity)
+            };
             JetFixed {
-                state: RefCell::new(FixedState {
-                    ptr: NonNull::new(ptr).expect("non-empty Fixed backing buffer was null"),
-                    capacity,
-                    used: 0,
-                    metadata_start: capacity,
-                    last_header: usize::MAX,
-                    live_allocations: 0,
-                    live_bytes: 0,
-                    high_water_bytes: 0,
-                }),
+                state: RefCell::new(state),
                 _thread_confined: std::marker::PhantomData,
             }
         }
 
-        fn aligned_offset(base: usize, cursor: usize, align: usize) -> Option<usize> {
-            let address = base.checked_add(cursor)?;
-            let padding = (align - address % align) % align;
-            cursor.checked_add(padding)
-        }
-
-        fn aligned_down_offset(
-            base: usize,
-            end: usize,
-            size: usize,
-            align: usize,
-        ) -> Option<usize> {
-            let unaligned = end.checked_sub(size)?;
-            let address = base.checked_add(unaligned)?;
-            unaligned.checked_sub(address % align)
-        }
-
-        pub fn alloc<T: 'static>(&self, val: T) -> &mut T {
-            let mut state = self.state.borrow_mut();
-            let base = state.ptr.as_ptr() as usize;
-            let value_offset = Self::aligned_offset(base, state.used, std::mem::align_of::<T>());
-            let end = value_offset.and_then(|offset| {
-                offset.checked_add(std::mem::size_of::<T>().max(1))
-            });
-            let header_offset = Self::aligned_down_offset(
-                base,
-                state.metadata_start,
-                std::mem::size_of::<FixedHeader>(),
-                std::mem::align_of::<FixedHeader>(),
-            );
-            let (header_offset, value_offset, end) = match (header_offset, value_offset, end) {
-                (Some(header), Some(value), Some(end)) if end <= header => {
-                    (header, value, end)
-                }
-                _ => panic!("Fixed allocator exhausted its inline backing buffer"),
-            };
-            // SAFETY: both offsets were aligned against the real backing address
-            // and the complete header/payload range was checked against capacity.
-            unsafe {
-                state.ptr.as_ptr().add(header_offset).cast::<FixedHeader>().write(FixedHeader {
-                    previous: state.last_header,
-                    value_offset,
-                    drop_fn: std::mem::needs_drop::<T>().then_some(drop_at::<T>),
-                    bytes: std::mem::size_of::<T>(),
-                });
-                state.ptr.as_ptr().add(value_offset).cast::<T>().write(val);
-            }
-            state.last_header = header_offset;
-            state.metadata_start = header_offset;
-            state.used = end;
-            jet_sentry_register_allocation(
-                unsafe { state.ptr.as_ptr().add(value_offset) },
-                std::mem::size_of::<T>(),
-            );
-            let bytes = observe_alloc::<T>();
-            state.live_allocations += 1;
-            state.live_bytes = state.live_bytes.saturating_add(bytes);
-            state.high_water_bytes = state.high_water_bytes.max(state.live_bytes);
-            let ptr = unsafe { state.ptr.as_ptr().add(value_offset).cast::<T>() };
-            drop(state);
-            // SAFETY: the value stays in caller-owned backing until reset/close;
-            // sema rejects reset, escape, capture, or owner mutation while live.
+        fn finish_alloc<T: 'static>(&self, ptr: *mut T) -> &mut T {
+            let bytes = std::mem::size_of::<T>();
+            jet_sentry_register_allocation(ptr.cast::<u8>(), bytes);
+            super::jet_observe_arena_alloc(bytes);
+            // SAFETY: the shared kernel placed `T` in this live backing span;
+            // the sema contract ties the returned view to this allocator.
             unsafe { &mut *ptr }
         }
 
-        pub fn try_alloc<T: 'static>(&self, val: T) -> Result<&mut T, AllocError> {
+        pub fn alloc<T: 'static>(&self, value: T) -> &mut T {
+            let ptr = {
+                let mut state = self.state.borrow_mut();
+                state
+                    .try_alloc(value)
+                    .unwrap_or_else(|_| panic!("Fixed allocator exhausted its inline backing buffer"))
+            };
+            self.finish_alloc(ptr)
+        }
+
+        pub fn try_alloc<T: 'static>(&self, value: T) -> Result<&mut T, AllocError> {
             if super::jet_fault_should_fail_allocation() {
                 return Err(super::jet_alloc_error(
                     std::mem::size_of::<T>().max(1),
                     "Fixed",
                 ));
             }
-            let mut state = self.state.borrow_mut();
-            let base = state.ptr.as_ptr() as usize;
-            let value_offset = Self::aligned_offset(base, state.used, std::mem::align_of::<T>());
-            let end = value_offset.and_then(|offset| {
-                offset.checked_add(std::mem::size_of::<T>().max(1))
-            });
-            let header_offset = Self::aligned_down_offset(
-                base,
-                state.metadata_start,
-                std::mem::size_of::<FixedHeader>(),
-                std::mem::align_of::<FixedHeader>(),
-            );
-            let (header_offset, value_offset, _end) = match (header_offset, value_offset, end) {
-                (Some(header), Some(value), Some(end)) if end <= header => {
-                    (header, value, end)
-                }
-                _ => {
-                    return Err(super::jet_alloc_error(
-                        std::mem::size_of::<T>().max(1),
-                        "Fixed",
-                    ))
-                }
-            };
-            // SAFETY: both offsets were aligned against the real backing address
-            // and the complete header/payload range was checked against capacity.
             let size = std::mem::size_of::<T>().max(1);
-            let padding = value_offset.saturating_sub(state.used);
-            let (val, next_used) = super::jet_try_alloc_value(
-                val,
-                state.used,
-                header_offset,
-                size,
-                "Fixed",
-                padding,
-            )?;
-            unsafe {
-                state.ptr.as_ptr().add(header_offset).cast::<FixedHeader>().write(FixedHeader {
-                    previous: state.last_header,
-                    value_offset,
-                    drop_fn: std::mem::needs_drop::<T>().then_some(drop_at::<T>),
-                    bytes: std::mem::size_of::<T>(),
-                });
-                state.ptr.as_ptr().add(value_offset).cast::<T>().write(val);
-            }
-            state.last_header = header_offset;
-            state.metadata_start = header_offset;
-            state.used = next_used;
-            let bytes = observe_alloc::<T>();
-            state.live_allocations += 1;
-            state.live_bytes = state.live_bytes.saturating_add(bytes);
-            state.high_water_bytes = state.high_water_bytes.max(state.live_bytes);
-            let ptr = unsafe { state.ptr.as_ptr().add(value_offset).cast::<T>() };
-            drop(state);
-            Ok(unsafe { &mut *ptr })
+            let ptr = {
+                let mut state = self.state.borrow_mut();
+                state
+                    .try_alloc(value)
+                    .map_err(|_| super::jet_alloc_error(size, "Fixed"))?
+            };
+            Ok(self.finish_alloc(ptr))
         }
 
         pub fn facts(&self) -> AllocatorFacts {
             let state = self.state.borrow();
             AllocatorFacts {
-                live_allocations: state.live_allocations,
-                live_bytes: state.live_bytes,
-                retained_bytes: state.capacity,
-                high_water_bytes: state.high_water_bytes,
+                live_allocations: state.live_allocations(),
+                live_bytes: state.live_bytes(),
+                retained_bytes: state.capacity(),
+                high_water_bytes: state.high_water_bytes(),
             }
         }
 
+        pub fn capacity(&self) -> usize {
+            self.state.borrow().capacity()
+        }
+
+        pub fn used(&self) -> usize {
+            self.state.borrow().used()
+        }
+
         pub fn reset(&mut self) {
-            let state = self.state.get_mut();
-            let mut header_offset = state.last_header;
-            while header_offset != usize::MAX {
-                // SAFETY: every link was written by alloc within this buffer.
-                let header = unsafe {
-                    state.ptr.as_ptr().add(header_offset).cast::<FixedHeader>().read()
-                };
-                let value_ptr = unsafe { state.ptr.as_ptr().add(header.value_offset) };
-                if let Some(drop_fn) = header.drop_fn {
-                    unsafe { drop_fn(value_ptr) };
-                }
-                jet_sentry_quarantine(value_ptr, header.bytes);
-                header_offset = header.previous;
-            }
-            super::jet_observe_arena_reset(state.live_allocations, state.live_bytes);
-            state.used = 0;
-            state.metadata_start = state.capacity;
-            state.last_header = usize::MAX;
-            state.live_allocations = 0;
-            state.live_bytes = 0;
+            let stats = unsafe {
+                self.state
+                    .get_mut()
+                    .reset(|ptr, bytes| jet_sentry_quarantine(ptr, bytes))
+            };
+            super::jet_observe_arena_reset(stats.live_allocations, stats.live_bytes);
         }
     }
 
     impl Drop for JetFixed {
         fn drop(&mut self) {
             self.reset();
-            super::jet_observe_arena_release(self.state.get_mut().capacity);
+            super::jet_observe_arena_release(self.state.get_mut().capacity());
             super::jet_observe_arena_close();
         }
     }

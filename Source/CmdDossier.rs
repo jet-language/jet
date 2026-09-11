@@ -3,9 +3,8 @@
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
-use jet::Diagnostics::json_str as json_string;
 use jet::ExitCodes;
-use jet_foundation::Report::render_status_json;
+use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
 /// D-CONF-MODULE1=A: explain a generic-module member's specialization input
 /// from the semantic index, including the profile/declaration chain for a
 /// build-fact value.
@@ -33,39 +32,39 @@ pub(crate) fn run_module_explain(subject: &str, file: &str, profile: &str, json:
         exit(ExitCodes::USER_ERROR);
     };
     if json {
-        let arguments = instance
-            .argument_values
-            .iter()
-            .zip(&instance.argument_provenance)
-            .map(|(value, sources)| {
-                format!(
-                    "{{\"value\":{},\"provenance\":[{}]}}",
-                    json_string(value),
-                    sources
-                        .iter()
-                        .map(|source| json_string(source))
-                        .collect::<Vec<_>>()
-                        .join(",")
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(",");
-        let payload = format!(
-            "{{\"subject\":{},\"module\":{},\"fingerprint\":{},\"arguments\":[{}],\"check\":{}}}",
-            json_string(subject),
-            json_string(&instance.name),
-            json_string(&instance.fingerprint),
-            arguments,
-            crate::CmdInspect::check_result_json(&checked.check),
+        let arguments = StatusValue::array(
+            instance
+                .argument_values
+                .iter()
+                .zip(&instance.argument_provenance)
+                .map(|(value, sources)| {
+                    StatusValue::object(
+                        StatusFields::new()
+                            .with("value", value.as_str())
+                            .with(
+                                "provenance",
+                                StatusValue::array(
+                                    sources
+                                        .iter()
+                                        .map(|source| StatusValue::from(source.as_str())),
+                                ),
+                            ),
+                    )
+                }),
+        );
+        let generic_module = StatusValue::object(
+            StatusFields::new()
+                .with("subject", subject)
+                .with("module", instance.name.as_str())
+                .with("fingerprint", instance.fingerprint.as_str())
+                .with("arguments", arguments)
+                .with("check", crate::CmdInspect::check_result_value(&checked.check)),
         );
         println!(
             "{}",
-            render_status_json(
-                "ok",
-                true,
-                "inspect.generic_module",
-                &format!(",\"generic_module\":{payload}"),
-            )
+            StatusEnvelope::new("inspect.generic_module", true)
+                .with_field("generic_module", generic_module)
+                .json()
         );
         return;
     }
@@ -96,21 +95,18 @@ pub(crate) fn run_dossier(args: &[String], json: bool, profile: &str) {
     // D-TARGET-AUDIT1=A: `jet inspect dossier target <machine>`
     if positional.first().copied() == Some("target") {
         let name = positional.get(1).copied().unwrap_or("board.sensor_v1");
-        match jet::Driver::target_machine_dossier_json(name) {
-            Ok(audit) => {
+        match jet::Driver::target_machine_dossier_value(name) {
+            Ok(target) => {
                 if json {
                     println!(
                         "{}",
-                        render_status_json(
-                            "ok",
-                            true,
-                            "inspect.target",
-                            &format!(",\"target\":{audit}"),
-                        )
+                        StatusEnvelope::new("inspect.target", true)
+                            .with_field("target", target)
+                            .json()
                     );
                 } else {
                     println!("target machine: {name}");
-                    println!("{audit}");
+                    println!("{}", jet::Driver::target_machine_dossier_json(name).unwrap_or_default());
                 }
             }
             Err(msg) => {
@@ -170,23 +166,28 @@ pub(crate) fn run_dossier(args: &[String], json: bool, profile: &str) {
     });
     let dossier = checked.index.dossier(target);
     let (budgets, command, allocator) = auxiliary_projections(&abs, &checked.bundle);
+    let target_dossier = jet::TargetMachine::target_dossier_value(
+        &checked.bundle.build_facts.target_dossier,
+        &checked.bundle.build_facts.target_triple,
+    );
     if json {
-        let mut value = dossier.to_json();
-        if value.ends_with('}') {
-            value.pop();
-            value.push_str(",\"program_allocator\":");
-            value.push_str(&allocator.audit_json());
-            value.push_str(",\"performance_budgets\":");
-            value.push_str(&budgets.to_json());
-            value.push_str(",\"command_schema\":");
-            value.push_str(&command_json(command.as_ref()));
-            value.push_str(",\"check\":");
-            value.push_str(&crate::CmdInspect::check_result_json(&checked.check));
-            value.push('}');
-        }
-        println!("{value}");
+        let envelope = dossier
+            .to_status_envelope()
+            .with_field("target_dossier", target_dossier)
+            .with_field("program_allocator", allocator.audit_value())
+            .with_field("performance_budgets", budgets.to_status_value())
+            .with_field("command_schema", command_value(command.as_ref()))
+            .with_field("check", crate::CmdInspect::check_result_value(&checked.check));
+        println!("{}", envelope.json());
     } else {
         print!("{}", dossier.render_text());
+        println!(
+            "target dossier: {}",
+            jet::TargetMachine::target_dossier_json(
+                &checked.bundle.build_facts.target_dossier,
+                &checked.bundle.build_facts.target_triple,
+            )
+        );
         print!("{}", allocator_text(&allocator));
         print!("{}", command_text(command.as_ref()));
         print!("{}", budgets.render_text());
@@ -257,110 +258,121 @@ fn entry_command_schema(
     Some(jet_foundation::CLISchema::executable_schema(bundle))
 }
 
-fn command_json(command: Option<&jet_foundation::CLISchema::CLICommandSchema>) -> String {
+fn command_input_value(input: &jet_foundation::CLISchema::CLIInputSchema) -> StatusValue {
+    let shape = match (&input.shape, input.positional) {
+        (jet_foundation::CLISchema::CLIInputShape::Flag, _) => "flag",
+        (jet_foundation::CLISchema::CLIInputShape::Value { .. }, Some(_)) => "positional",
+        (jet_foundation::CLISchema::CLIInputShape::Value { .. }, None) => "option",
+    };
+    StatusValue::object(
+        StatusFields::new()
+            .with("field", input.field.as_str())
+            .with("flag", format!("--{}", input.flag))
+            .with(
+                "short",
+                input
+                    .short
+                    .as_deref()
+                    .map(|short| StatusValue::from(format!("-{short}")))
+                    .unwrap_or(StatusValue::Null),
+            )
+            .with(
+                "env",
+                input
+                    .env
+                    .as_deref()
+                    .map(StatusValue::from)
+                    .unwrap_or(StatusValue::Null),
+            )
+            .with("shape", shape)
+            .with("value_type", input.value_kind().as_str())
+            .with("required", input.required())
+            .with(
+                "default",
+                input
+                    .default_display()
+                    .map(StatusValue::from)
+                    .unwrap_or(StatusValue::Null),
+            )
+            .with(
+                "metavar",
+                input
+                    .metavar
+                    .as_deref()
+                    .map(StatusValue::from)
+                    .unwrap_or(StatusValue::Null),
+            )
+            .with(
+                "positional",
+                input
+                    .positional
+                    .map(|order| StatusValue::from(u64::from(order)))
+                    .unwrap_or(StatusValue::Null),
+            )
+            .with("help", input.help.as_str()),
+    )
+}
+
+fn command_value(
+    command: Option<&jet_foundation::CLISchema::CLICommandSchema>,
+) -> StatusValue {
     let Some(command) = command else {
-        return "null".to_string();
+        return StatusValue::Null;
     };
-    let input_json = |input: &jet_foundation::CLISchema::CLIInputSchema| {
-        let shape = match (&input.shape, input.positional) {
-            (jet_foundation::CLISchema::CLIInputShape::Flag, _) => "flag",
-            (jet_foundation::CLISchema::CLIInputShape::Value { .. }, Some(_)) => "positional",
-            (jet_foundation::CLISchema::CLIInputShape::Value { .. }, None) => "option",
-        };
-        let default = input
-            .default_display()
-            .map(|value| json_string(&value))
-            .unwrap_or_else(|| "null".to_string());
-        let metavar = input
-            .metavar
-            .as_deref()
-            .map(json_string)
-            .unwrap_or_else(|| "null".to_string());
-        let positional = input
-            .positional
-            .map(|order| order.to_string())
-            .unwrap_or_else(|| "null".to_string());
-        let short = input
-            .short
-            .as_deref()
-            .map(|short| json_string(&format!("-{short}")))
-            .unwrap_or_else(|| "null".to_string());
-        let env = input
-            .env
-            .as_deref()
-            .map(json_string)
-            .unwrap_or_else(|| "null".to_string());
-        format!(
-                "{{\"field\":{},\"flag\":{},\"short\":{},\"env\":{},\"shape\":{},\"value_type\":{},\"required\":{},\"default\":{},\"metavar\":{},\"positional\":{},\"help\":{}}}",
-                json_string(&input.field),
-                json_string(&format!("--{}", input.flag)),
-                short,
-                env,
-                json_string(shape),
-                json_string(input.value_kind().as_str()),
-                input.required(),
-                default,
-                metavar,
-                positional,
-                json_string(&input.help),
+    let inputs = StatusValue::array(command.inputs.iter().map(command_input_value));
+    let commands = StatusValue::array(command.commands.iter().map(|subcommand| {
+        StatusValue::object(
+            StatusFields::new()
+                .with("name", subcommand.name.as_str())
+                .with(
+                    "description",
+                    subcommand
+                        .description
+                        .as_deref()
+                        .map(StatusValue::from)
+                        .unwrap_or(StatusValue::Null),
+                )
+                .with(
+                    "inputs",
+                    StatusValue::array(subcommand.inputs.iter().map(command_input_value)),
+                ),
+        )
+    }));
+    StatusValue::object(
+        StatusFields::new()
+            .with(
+                "source",
+                format!("fn run(args: {})", command.entry_type),
             )
-    };
-    let inputs = command
-        .inputs
-        .iter()
-        .map(&input_json)
-        .collect::<Vec<_>>()
-        .join(",");
-    let commands = command
-        .commands
-        .iter()
-        .map(|subcommand| {
-            let inputs = subcommand
-                .inputs
-                .iter()
-                .map(&input_json)
-                .collect::<Vec<_>>()
-                .join(",");
-            let description = subcommand
-                .description
-                .as_deref()
-                .map(json_string)
-                .unwrap_or_else(|| "null".to_string());
-            format!(
-                "{{\"name\":{},\"description\":{},\"inputs\":[{}]}}",
-                json_string(&subcommand.name),
-                description,
-                inputs
+            .with("entry_type", command.entry_type.as_str())
+            .with(
+                "description",
+                command
+                    .description
+                    .as_deref()
+                    .map(StatusValue::from)
+                    .unwrap_or(StatusValue::Null),
             )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-    let description = command
-        .description
-        .as_deref()
-        .map(json_string)
-        .unwrap_or_else(|| "null".to_string());
-    let completion = command
-        .completion_words()
-        .iter()
-        .map(|word| json_string(word))
-        .collect::<Vec<_>>()
-        .join(",");
-    let version = command
-        .version
-        .as_deref()
-        .map(json_string)
-        .unwrap_or_else(|| "null".to_string());
-    format!(
-        "{{\"source\":{},\"entry_type\":{},\"description\":{},\"inputs\":[{}],\"commands\":[{}],\"standard\":{},\"version\":{},\"completion_words\":[{}]}}",
-        json_string(&format!("fn run(args: {})", command.entry_type)),
-        json_string(&command.entry_type),
-        description,
-        inputs,
-        commands,
-        command.standard,
-        version,
-        completion,
+            .with("inputs", inputs)
+            .with("commands", commands)
+            .with("standard", command.standard)
+            .with(
+                "version",
+                command
+                    .version
+                    .as_deref()
+                    .map(StatusValue::from)
+                    .unwrap_or(StatusValue::Null),
+            )
+            .with(
+                "completion_words",
+                StatusValue::array(
+                    command
+                        .completion_words()
+                        .iter()
+                        .map(|word| StatusValue::from(word.as_str())),
+                ),
+            ),
     )
 }
 
@@ -449,26 +461,43 @@ fn absolutize(path: &str) -> PathBuf {
 fn render_data_status_dossier(json: bool) {
     let rows = jet::Comptime::data_status_rows();
     if json {
-        let body = rows
-            .iter()
-            .map(|(step, path, copy, ownership, trust, fallback, replacement)| {
-                format!(
-                    "{{\"step\":{},\"path\":{},\"copy\":{},\"ownership\":{},\"trust\":{},\"fallback\":{},\"replacement\":{}}}",
-                    json_string(step),
-                    json_string(path),
-                    json_string(copy),
-                    json_string(ownership),
-                    json_string(trust),
-                    json_string(fallback),
-                    json_string(replacement),
+        let rows = StatusValue::array(rows.iter().map(
+            |(step, path, copy, ownership, trust, fallback, replacement)| {
+                StatusValue::object(
+                    StatusFields::new()
+                        .with("step", step.as_str())
+                        .with("path", path.as_str())
+                        .with("copy", copy.as_str())
+                        .with("ownership", ownership.as_str())
+                        .with("trust", trust.as_str())
+                        .with("fallback", fallback.as_str())
+                        .with("replacement", replacement.as_str()),
                 )
-            })
-            .collect::<Vec<_>>()
-            .join(",");
-        let payload = format!("{{\"rows\":[{body}]}}");
+            },
+        ));
+        let sql_console = StatusValue::object(
+            StatusFields::new()
+                .with("kind", "facts")
+                .with("live_session", false)
+                .with("authority", "same local typed query session")
+                .with("source", StatusValue::Null)
+                .with("result", StatusValue::Null)
+                .with(
+                    "default_limits",
+                    crate::CmdDb::dossier_data_limits_value(),
+                )
+                .with("rows", crate::CmdDb::dossier_data_value()),
+        );
+        let data = StatusValue::object(
+            StatusFields::new()
+                .with("rows", rows)
+                .with("sql_console", sql_console),
+        );
         println!(
             "{}",
-            render_status_json("ok", true, "inspect.data", &format!(",\"data\":{payload}"),)
+            StatusEnvelope::new("inspect.data", true)
+                .with_field("data", data)
+                .json()
         );
         return;
     }
@@ -478,4 +507,5 @@ fn render_data_status_dossier(json: bool) {
             "  {step}: path={path} copy={copy} ownership={ownership} trust={trust} fallback={fallback} replacement={replacement}"
         );
     }
+    print!("{}", crate::CmdDb::dossier_data_text());
 }

@@ -5,8 +5,7 @@ use std::process::exit;
 
 use jet::Diagnostics::Span;
 use jet::Sema::GateLedger::{GateEntry, GateKind, GateLedger};
-use jet_foundation::Report::render_status_json;
-use jet_foundation::JSON::json_escape;
+use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
 
 const LARGE_KIND_THRESHOLD: usize = 16;
 
@@ -23,17 +22,19 @@ pub(crate) fn run(
     };
     let bundle = jet::Loader::load_entry_with_diagnostics(&file).unwrap_or_else(|diagnostics| {
         if json {
-            for entry in &diagnostics {
-                let machine_file = crate::machine_report_path_for_entry(&file, &entry.file);
-                print!(
-                    "{}",
-                    jet::render_all_json(
-                        &machine_file,
-                        &entry.source,
-                        std::slice::from_ref(&entry.diagnostic),
-                    )
-                );
-            }
+            let reports = diagnostics
+                .iter()
+                .map(|entry| {
+                    let machine_file = crate::machine_report_path_for_entry(&file, &entry.file);
+                    entry.diagnostic.to_report(&machine_file, &entry.source)
+                })
+                .collect::<Vec<_>>();
+            println!(
+                "{}",
+                StatusEnvelope::new("inspect.gates", false)
+                    .with_reports(reports)
+                    .json()
+            );
         } else {
             for (index, entry) in diagnostics.iter().enumerate() {
                 if index > 0 {
@@ -522,18 +523,22 @@ fn render_diagnostics(
     color: bool,
 ) -> ! {
     if json {
-        for entry in ledger.diagnostics() {
-            let source = module_source(bundle, &entry.source);
-            let machine_file = crate::machine_report_path_for_bundle(bundle, &entry.source);
-            print!(
-                "{}",
-                jet::render_all_json(
-                    &machine_file,
-                    &source,
-                    std::slice::from_ref(&entry.diagnostic),
-                )
-            );
-        }
+        let reports = ledger
+            .diagnostics()
+            .iter()
+            .map(|entry| {
+                let source = module_source(bundle, &entry.source);
+                let machine_file = crate::machine_report_path_for_bundle(bundle, &entry.source);
+                entry.diagnostic.to_report(&machine_file, &source)
+            })
+            .collect::<Vec<_>>();
+        println!(
+            "{}",
+            StatusEnvelope::new("inspect.gates", false)
+                .with_reports(reports)
+                .json()
+        );
+
     } else {
         for (index, entry) in ledger.diagnostics().iter().enumerate() {
             if index > 0 {
@@ -625,82 +630,135 @@ fn render_json(entries: &[&GateEntry], bundle: &jet::AST::ProgramBundle) {
     for entry in entries {
         *counts.entry(entry.kind.name()).or_default() += 1;
     }
-    let mut gates = String::from("{\"entries\":[");
-    for (index, entry) in entries.iter().enumerate() {
-        if index > 0 {
-            gates.push(',');
-        }
-        render_json_entry(&mut gates, entry, bundle);
+    let entries = StatusValue::array(
+        entries
+            .iter()
+            .map(|entry| status_entry_value(entry, bundle)),
+    );
+    let mut count_fields = StatusFields::new();
+    for (kind, count) in counts {
+        count_fields = count_fields.with(kind, count);
     }
-    gates.push_str("],\"counts\":{");
-    for (index, (kind, count)) in counts.iter().enumerate() {
-        if index > 0 {
-            gates.push(',');
-        }
-        gates.push_str(&format!("\"{}\":{}", json_escape(kind), count));
-    }
-    gates.push_str("}}");
+    let gates = StatusValue::object(
+        StatusFields::new()
+            .with("entries", entries)
+            .with("counts", StatusValue::object(count_fields)),
+    );
     println!(
         "{}",
-        render_status_json("ok", true, "inspect.gates", &format!(",\"gates\":{gates}"))
+        StatusEnvelope::new("inspect.gates", true)
+            .with_field("gates", gates)
+            .json()
     );
 }
 
-fn render_json_entry(out: &mut String, entry: &GateEntry, bundle: &jet::AST::ProgramBundle) {
+fn status_entry_value(entry: &GateEntry, bundle: &jet::AST::ProgramBundle) -> StatusValue {
     let source = module_source(bundle, &entry.source);
-    out.push_str(&format!(
-        "{{\"kind\":\"{}\",\"domain\":\"{}\",\"scope\":\"{}\",\"source\":\"{}\",\"span\":{},\"location\":{},\"subject\":\"{}\",\"reason\":{},\"status\":{},\"detail\":\"{}\",\"provenance\":[",
-        json_escape(entry.kind.name()),
-        json_escape(&entry.domain),
-        json_escape(&entry.scope),
-        json_escape(&entry.source),
-        json_span(entry.span),
-        json_location_option(&source, entry.span),
-        json_escape(&entry.subject),
-        json_option(entry.reason.as_deref()),
-        json_option(entry.status.as_deref()),
-        json_escape(&entry.detail),
-    ));
-    strings(out, &entry.provenance);
-    out.push_str("],\"operations\":[");
-    for (index, operation) in entry.operations.iter().enumerate() {
-        if index > 0 {
-            out.push(',');
-        }
-        out.push_str(&format!(
-            "{{\"kind\":\"{}\",\"span\":{{\"start\":{},\"end\":{}}},\"location\":{},\"required\":[",
-            json_escape(&operation.kind),
-            operation.span.start,
-            operation.span.end,
-            json_location(&source, operation.span),
-        ));
-        strings(out, &operation.required);
-        out.push_str("],\"asserted\":[");
-        strings(out, &operation.asserted);
-        out.push_str(&format!("],\"discharged\":{}}}", operation.discharged));
-    }
-    out.push_str("]}");
+    let span = entry
+        .span
+        .map(|span| {
+            StatusValue::object(
+                StatusFields::new()
+                    .with("start", span.start)
+                    .with("end", span.end),
+            )
+        })
+        .unwrap_or(StatusValue::Null);
+    let location = entry
+        .span
+        .map(|span| status_location_value(&source, span))
+        .unwrap_or(StatusValue::Null);
+    let reason = entry
+        .reason
+        .as_deref()
+        .map(StatusValue::from)
+        .unwrap_or(StatusValue::Null);
+    let status = entry
+        .status
+        .as_deref()
+        .map(StatusValue::from)
+        .unwrap_or(StatusValue::Null);
+    let provenance = StatusValue::array(
+        entry
+            .provenance
+            .iter()
+            .map(|value| StatusValue::from(value.as_str())),
+    );
+    let operations = StatusValue::array(entry.operations.iter().map(|operation| {
+        StatusValue::object(
+            StatusFields::new()
+                .with("kind", operation.kind.as_str())
+                .with(
+                    "span",
+                    StatusValue::object(
+                        StatusFields::new()
+                            .with("start", operation.span.start)
+                            .with("end", operation.span.end),
+                    ),
+                )
+                .with("location", status_location_value(&source, operation.span))
+                .with(
+                    "required",
+                    StatusValue::array(
+                        operation
+                            .required
+                            .iter()
+                            .map(|value| StatusValue::from(value.as_str())),
+                    ),
+                )
+                .with(
+                    "asserted",
+                    StatusValue::array(
+                        operation
+                            .asserted
+                            .iter()
+                            .map(|value| StatusValue::from(value.as_str())),
+                    ),
+                )
+                .with("discharged", operation.discharged),
+        )
+    }));
+    StatusValue::object(
+        StatusFields::new()
+            .with("kind", entry.kind.name())
+            .with("domain", entry.domain.as_str())
+            .with("scope", entry.scope.as_str())
+            .with("source", entry.source.as_str())
+            .with("span", span)
+            .with("location", location)
+            .with("subject", entry.subject.as_str())
+            .with("reason", reason)
+            .with("status", status)
+            .with("detail", entry.detail.as_str())
+            .with("provenance", provenance)
+            .with("operations", operations),
+    )
 }
 
-fn strings(out: &mut String, values: &[String]) {
-    for (index, value) in values.iter().enumerate() {
-        if index > 0 {
-            out.push(',');
-        }
-        out.push_str(&format!("\"{}\"", json_escape(value)));
-    }
+fn status_location_value(source: &str, span: Span) -> StatusValue {
+    let (start_line, start_column) = jet::Diagnostics::span_line_col(source, span.start);
+    let (end_line, end_column) = jet::Diagnostics::span_line_col(source, span.end);
+    StatusValue::object(
+        StatusFields::new()
+            .with(
+                "start",
+                StatusValue::object(
+                    StatusFields::new()
+                        .with("line", start_line)
+                        .with("column", start_column),
+                ),
+            )
+            .with(
+                "end",
+                StatusValue::object(
+                    StatusFields::new()
+                        .with("line", end_line)
+                        .with("column", end_column),
+                ),
+            ),
+    )
 }
 
-fn json_option(value: Option<&str>) -> String {
-    value
-        .map(|value| format!("\"{}\"", json_escape(value)))
-        .unwrap_or_else(|| "null".to_string())
-}
-
-fn json_span(span: Option<Span>) -> String {
-    span.map(|span| format!("{{\"start\":{},\"end\":{}}}", span.start, span.end))
-        .unwrap_or_else(|| "null".to_string())
-}
 
 fn module_source(bundle: &jet::AST::ProgramBundle, display: &str) -> String {
     bundle
@@ -716,16 +774,3 @@ fn location(source_path: &str, source: &str, span: Span) -> String {
     format!("{source_path}:{line}:{column}")
 }
 
-fn json_location_option(source: &str, span: Option<Span>) -> String {
-    span.map(|span| json_location(source, span))
-        .unwrap_or_else(|| "null".to_string())
-}
-
-fn json_location(source: &str, span: Span) -> String {
-    let (start_line, start_column) = jet::Diagnostics::span_line_col(source, span.start);
-    let (end_line, end_column) = jet::Diagnostics::span_line_col(source, span.end);
-    format!(
-        "{{\"start\":{{\"line\":{},\"column\":{}}},\"end\":{{\"line\":{},\"column\":{}}}}}",
-        start_line, start_column, end_line, end_column
-    )
-}

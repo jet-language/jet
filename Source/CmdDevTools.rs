@@ -4,17 +4,156 @@
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{IsTerminal, Read, Write};
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::Arc;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use jet::Diagnostics::{json_str as json_string, ColorChoice};
 use jet::ExitCodes;
-use jet_foundation::Report::render_status_json;
+use jet::RecordIndex::{RecordBudget, RecordCapture, RecordIndex, RecordKind};
+use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
 
 use crate::CmdCompile::{build, stem};
 use crate::{report_problems, BuildProfile, OutputMode};
 pub(crate) use jet_devserver::{watch_policy_from, WatchPolicy};
+
+struct DevCaptureSession {
+    name: String,
+    capture: crate::ProveReplay::NamedCapture,
+    budget: RecordBudget,
+}
+
+fn dev_capture_budget(file: &str) -> (jet::Package::DevCaptureSetting, RecordBudget) {
+    let records = jet::Loader::package_facts_for_entry(Path::new(file))
+        .ok()
+        .flatten()
+        .map(|facts| facts.dev.records)
+        .unwrap_or_default();
+    let budget =
+        RecordBudget::new(records.budget.max_bytes, records.budget.max_records).unwrap_or_default();
+    (records.capture, budget)
+}
+
+fn configure_dev_capture_budget(budget: RecordBudget) -> Result<(), String> {
+    let mut index = RecordIndex::load_for_project(".")?;
+    index.set_budget(budget)?;
+    index.store()
+}
+
+fn generated_dev_capture_name(source: &str) -> String {
+    let digest = jet::SHA256::sha256_hex(source.as_bytes());
+    let short = digest.get(..16).unwrap_or(&digest);
+    format!("dev-{short}-{}", std::process::id())
+}
+
+fn start_dev_capture(
+    file: &str,
+    source: &str,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    record_name: Option<&str>,
+    no_capture: bool,
+    mode: OutputMode,
+) -> Option<DevCaptureSession> {
+    let (setting, budget) = dev_capture_budget(file);
+    if no_capture {
+        if !mode.quiet && !mode.json {
+            eprintln!("capture: skipped (no-capture override)");
+        }
+        return None;
+    }
+    if matches!(setting, jet::Package::DevCaptureSetting::Off) {
+        if !mode.quiet && !mode.json {
+            eprintln!("capture: skipped (package policy)");
+        }
+        return None;
+    }
+    let explicit = record_name.is_some();
+    if profile == "release" && !explicit {
+        if !mode.quiet && !mode.json {
+            eprintln!("capture: skipped (release mode)");
+        }
+        return None;
+    }
+    if let Err(error) = configure_dev_capture_budget(budget) {
+        if explicit {
+            eprintln!("capture: record index unavailable: {error}");
+        } else if !mode.quiet && !mode.json {
+            eprintln!("capture: skipped (record index unavailable: {error})");
+        }
+        return None;
+    }
+    let name = record_name
+        .map(str::to_owned)
+        .unwrap_or_else(|| generated_dev_capture_name(source));
+    let capture =
+        crate::ProveReplay::begin_named_capture(file, &name, profile, setting_overrides, mode.json)
+            .unwrap_or_else(|status| exit(status));
+    if !mode.quiet && !mode.json {
+        eprintln!(
+            "capture: safe Time only; budget={} bytes/{} records",
+            budget.max_bytes, budget.max_records
+        );
+    }
+    Some(DevCaptureSession {
+        name,
+        capture,
+        budget,
+    })
+}
+
+fn finish_dev_capture(
+    session: &DevCaptureSession,
+    exit_code: i32,
+    mode: OutputMode,
+) -> Option<String> {
+    crate::ProveReplay::finish_named_capture(&session.capture, exit_code, mode.json)
+        .unwrap_or_else(|status| exit(status));
+    let path = PathBuf::from(format!(".jet/replays/{}.jetproof-replay", session.name));
+    let link = match crate::ProveReplay::index_named_replay_artifact(
+        &session.capture,
+        &path,
+        RecordCapture::Safe,
+    ) {
+        Ok(link) => link,
+        Err(error) => {
+            if !mode.json {
+                eprintln!("capture: index skipped ({error})");
+            }
+            return None;
+        }
+    };
+    let mut index = match RecordIndex::load_for_project(".") {
+        Ok(index) => index,
+        Err(error) => {
+            if !mode.json {
+                eprintln!("capture: retention skipped ({error})");
+            }
+            return None;
+        }
+    };
+    if let Err(error) = index
+        .set_budget(session.budget)
+        .and_then(|()| index.store())
+    {
+        if !mode.json {
+            eprintln!("capture: retention skipped ({error})");
+        }
+        return None;
+    }
+    if index
+        .find(RecordKind::Replay, &link.artifact_id, true)
+        .is_some()
+    {
+        Some(link.artifact_id)
+    } else {
+        None
+    }
+}
 
 #[derive(Clone, Copy)]
 enum DevSessionAction {
@@ -22,11 +161,37 @@ enum DevSessionAction {
     RestartFresh,
     Tests,
     FailedClaimsOnly,
+    GamePlay,
+    GameSimulate,
+    GamePause,
+    GameResume,
+    GameStep,
+    GameFrameAdvance,
+    GameEdit,
+    GameSelectCategory,
+    GameInspect,
+    GameEvaluate,
+    GameEject,
+    GameKeep,
+    GameDiscard,
     Quit,
 }
 
-fn dev_session_action(byte: u8) -> Option<DevSessionAction> {
+fn dev_session_action(byte: u8, game_controls_enabled: bool) -> Option<DevSessionAction> {
     match byte as char {
+        'P' if game_controls_enabled => Some(DevSessionAction::GamePlay),
+        'S' if game_controls_enabled => Some(DevSessionAction::GameSimulate),
+        'p' if game_controls_enabled => Some(DevSessionAction::GamePause),
+        'R' if game_controls_enabled => Some(DevSessionAction::GameResume),
+        't' if game_controls_enabled => Some(DevSessionAction::GameStep),
+        'f' if game_controls_enabled => Some(DevSessionAction::GameFrameAdvance),
+        'i' if game_controls_enabled => Some(DevSessionAction::GameEdit),
+        'c' if game_controls_enabled => Some(DevSessionAction::GameSelectCategory),
+        'o' if game_controls_enabled => Some(DevSessionAction::GameInspect),
+        'v' if game_controls_enabled => Some(DevSessionAction::GameEvaluate),
+        'e' if game_controls_enabled => Some(DevSessionAction::GameEject),
+        'k' if game_controls_enabled => Some(DevSessionAction::GameKeep),
+        'd' if game_controls_enabled => Some(DevSessionAction::GameDiscard),
         c if c == jet::Syntax::SESSION_KEY_RERUN.chars().next().unwrap() => {
             Some(DevSessionAction::Rerun)
         }
@@ -57,6 +222,19 @@ fn dev_session_label(action: DevSessionAction) -> &'static str {
         DevSessionAction::RestartFresh => "Restart Fresh",
         DevSessionAction::Tests => "Tests",
         DevSessionAction::FailedClaimsOnly => "Failed Claims Only",
+        DevSessionAction::GamePlay => "Game Play",
+        DevSessionAction::GameSimulate => "Game Simulate",
+        DevSessionAction::GamePause => "Game Pause",
+        DevSessionAction::GameResume => "Game Resume",
+        DevSessionAction::GameStep => "Game Step",
+        DevSessionAction::GameFrameAdvance => "Game Frame Advance",
+        DevSessionAction::GameEdit => "Game Edit",
+        DevSessionAction::GameSelectCategory => "Game Select Category",
+        DevSessionAction::GameInspect => "Game Inspect",
+        DevSessionAction::GameEvaluate => "Game Evaluate",
+        DevSessionAction::GameEject => "Game Eject",
+        DevSessionAction::GameKeep => "Game Keep",
+        DevSessionAction::GameDiscard => "Game Discard",
         DevSessionAction::Quit => "Quit",
     }
 }
@@ -78,6 +256,243 @@ fn spawn_dev_session_input() -> Receiver<u8> {
         }
     });
     receiver
+}
+
+fn terminal_key_from_byte(byte: u8) -> Option<jet_devserver::TerminalHost::TerminalKey> {
+    use jet_devserver::TerminalHost::TerminalKey;
+
+    Some(match byte {
+        b'\t' => TerminalKey::Tab,
+        b'\n' | b'\r' => TerminalKey::Enter,
+        0x1b => TerminalKey::Escape,
+        0x7f => TerminalKey::Character('\u{7f}'),
+        byte if byte.is_ascii() => TerminalKey::Character(byte as char),
+        _ => return None,
+    })
+}
+
+fn terminal_host_for(mode: OutputMode, profile: &str) -> jet_devserver::TerminalHost::TerminalHost {
+    use jet_devserver::TerminalHost::{
+        TerminalHost, TerminalHostAccess, TerminalHostCapabilities, TerminalHostConfig,
+        TerminalViewport, DEFAULT_TERMINAL_COLUMNS, DEFAULT_TERMINAL_ROWS,
+    };
+
+    let tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    let no_color = std::env::var_os("NO_COLOR").is_some();
+    let ansi = tty
+        && !no_color
+        && mode.color_stderr()
+        && std::env::var("TERM").map_or(true, |term| term != "dumb");
+    let width = std::env::var("COLUMNS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|width| *width > 0)
+        .unwrap_or(DEFAULT_TERMINAL_COLUMNS);
+    let access = TerminalHostAccess::new(true, profile == "release", mode.json);
+    let capabilities = TerminalHostCapabilities::new(
+        tty,
+        ansi,
+        no_color,
+        width,
+        false,
+        mode.quiet || mode.json,
+        access,
+    );
+    TerminalHost::new(TerminalHostConfig::new(
+        TerminalViewport::new(width, DEFAULT_TERMINAL_ROWS),
+        capabilities,
+    ))
+}
+
+fn apply_terminal_action(
+    session: &jet_devserver::ResidentDevSession,
+    action: &jet_devserver::TerminalHost::TerminalAction,
+) {
+    use jet_devserver::TerminalHost::TerminalAction;
+
+    let request = match action {
+        TerminalAction::FocusPanel { panel_id } => {
+            let Some(panel_id) = jet_devserver::Devtools::catalog::descriptors()
+                .iter()
+                .find(|descriptor| descriptor.id.as_str() == panel_id)
+                .map(|descriptor| descriptor.id.as_str())
+            else {
+                return;
+            };
+            format!(
+                "{{\"panel_id\":{},\"origin\":\"terminal\"}}",
+                json_string(panel_id)
+            )
+        }
+        TerminalAction::Inspect { panel_id, item_key } => {
+            let Some(panel_id) = jet_devserver::Devtools::catalog::descriptors()
+                .iter()
+                .find(|descriptor| descriptor.id.as_str() == panel_id)
+                .map(|descriptor| descriptor.id.as_str())
+            else {
+                return;
+            };
+            format!(
+                "{{\"panel_id\":{},\"item_key\":{},\"origin\":\"terminal\"}}",
+                json_string(panel_id),
+                json_string(item_key)
+            )
+        }
+        TerminalAction::FocusJob => "{\"panel_id\":\"jobs\",\"origin\":\"terminal\"}".to_string(),
+        TerminalAction::MoveCursor { cursor } => {
+            let request = format!("{{\"cursor\":{},\"origin\":\"terminal\"}}", cursor);
+            let _ = session.set_devtools_cursor(&request);
+            return;
+        }
+        _ => return,
+    };
+    let _ = session.set_devtools_selection(&request);
+}
+
+fn dispatch_terminal_game_control(
+    session: &jet_devserver::ResidentDevSession,
+    file: &str,
+    action: DevSessionAction,
+) -> Result<usize, String> {
+    use jet_foundation::DevtoolsControl::{
+        JetDevtoolsGameControlKind, JetDevtoolsGameControlRequest,
+    };
+    if matches!(action, DevSessionAction::GameKeep) {
+        return Err(
+            "game keep requires an authored source selection with revision and source span"
+                .to_string(),
+        );
+    }
+    if matches!(action, DevSessionAction::GameEvaluate) {
+        return Err(
+            "game evaluate requires a paused world selection and an evaluation expression"
+                .to_string(),
+        );
+    }
+    let kind = match action {
+        DevSessionAction::GamePlay => JetDevtoolsGameControlKind::Play,
+        DevSessionAction::GameSimulate => JetDevtoolsGameControlKind::Simulate,
+        DevSessionAction::GamePause => JetDevtoolsGameControlKind::Pause,
+        DevSessionAction::GameResume => JetDevtoolsGameControlKind::Resume,
+        DevSessionAction::GameStep => JetDevtoolsGameControlKind::Step,
+        DevSessionAction::GameFrameAdvance => JetDevtoolsGameControlKind::FrameAdvance,
+        DevSessionAction::GameEdit => JetDevtoolsGameControlKind::Edit,
+        DevSessionAction::GameSelectCategory => JetDevtoolsGameControlKind::SelectCategory,
+        DevSessionAction::GameInspect => JetDevtoolsGameControlKind::SelectWorld,
+        DevSessionAction::GameEject => JetDevtoolsGameControlKind::Eject,
+        DevSessionAction::GameDiscard => JetDevtoolsGameControlKind::Discard,
+        _ => return Err("not a game control action".to_string()),
+    };
+    let (source_id, _build_id, revision, world_id) = live_lineage_for_file(file);
+    let selected_target = session.selected_target();
+    let selected_output = session.selected_output();
+    let mut request = JetDevtoolsGameControlRequest {
+        session_id: session.id().to_string(),
+        request_id: format!("terminal-game-{}", dev_job_now_ms()),
+        kind,
+        source_id: Some(source_id),
+        revision: Some(revision),
+        world_id: None,
+        actor_id: None,
+        component_id: None,
+        authored_instance_id: None,
+        source_span_start: None,
+        source_span_end: None,
+        field: None,
+        value: None,
+        category: None,
+        expression: None,
+        required_authority: None,
+        frame_id: None,
+        budget: None,
+    };
+    match kind {
+        JetDevtoolsGameControlKind::SelectCategory => {
+            request.category = Some(
+                selected_output
+                    .or(selected_target)
+                    .ok_or_else(|| "select_category requires a selected category".to_string())?,
+            );
+        }
+        JetDevtoolsGameControlKind::SelectWorld => {
+            request.world_id = Some(world_id);
+            request.actor_id = selected_target;
+            request.component_id = selected_output;
+        }
+        JetDevtoolsGameControlKind::Eject => {
+            request.world_id = Some(world_id);
+            request.actor_id = Some(
+                selected_target
+                    .ok_or_else(|| "eject requires a selected world actor".to_string())?,
+            );
+        }
+        _ => {}
+    }
+    request.validate()?;
+    session.enqueue_game_control(request)?;
+    session.dispatch_pending_devtools_commands()
+}
+fn terminal_session_action(
+    byte: u8,
+    host: &mut jet_devserver::TerminalHost::TerminalHost,
+    session: &jet_devserver::ResidentDevSession,
+    game_controls_enabled: bool,
+) -> Option<DevSessionAction> {
+    let Some(key) = terminal_key_from_byte(byte) else {
+        return dev_session_action(byte, game_controls_enabled);
+    };
+    let action = host.handle_key(key);
+    apply_terminal_action(session, &action);
+    if matches!(
+        action,
+        jet_devserver::TerminalHost::TerminalAction::ReturnToPanel
+    ) {
+        if let Some(panel_id) = host.focus().panel_id.clone() {
+            let focus_action = jet_devserver::TerminalHost::TerminalAction::FocusPanel { panel_id };
+            apply_terminal_action(session, &focus_action);
+        }
+    }
+    match action {
+        jet_devserver::TerminalHost::TerminalAction::FocusPanel { .. }
+        | jet_devserver::TerminalHost::TerminalAction::Inspect { .. }
+        | jet_devserver::TerminalHost::TerminalAction::ReturnToPanel
+        | jet_devserver::TerminalHost::TerminalAction::MoveCursor { .. }
+        | jet_devserver::TerminalHost::TerminalAction::FocusJob => None,
+        jet_devserver::TerminalHost::TerminalAction::Rerun => Some(DevSessionAction::Rerun),
+        jet_devserver::TerminalHost::TerminalAction::Restart => {
+            Some(DevSessionAction::RestartFresh)
+        }
+        jet_devserver::TerminalHost::TerminalAction::Quit => Some(DevSessionAction::Quit),
+        jet_devserver::TerminalHost::TerminalAction::Ignored => {
+            dev_session_action(byte, game_controls_enabled)
+        }
+    }
+}
+fn refresh_terminal_host(
+    host: &mut jet_devserver::TerminalHost::TerminalHost,
+    session: &jet_devserver::ResidentDevSession,
+    previous: &mut Option<jet_devserver::TerminalHost::TerminalFrame>,
+) {
+    let Ok(frame) = host.sync_session(session) else {
+        return;
+    };
+    let changed = previous.as_ref().map_or(true, |old| {
+        old.tree != frame.tree
+            || old.status != frame.status
+            || old.focus != frame.focus
+            || old.keyboard != frame.keyboard
+            || old.cursor != frame.cursor
+            || old.revision != frame.revision
+    });
+    if changed && !frame.capabilities.quiet {
+        if frame.capabilities.tty && frame.capabilities.ansi {
+            print!("\x1b[2J\x1b[H{}", frame.text());
+        } else {
+            println!("{}", frame.plain_text());
+        }
+        let _ = std::io::stdout().flush();
+    }
+    *previous = Some(frame);
 }
 
 fn run_dev_tests(file: &str, filters: &[String]) -> Vec<String> {
@@ -227,6 +642,7 @@ pub(crate) fn run_dev(
     setting_overrides: &BTreeMap<String, String>,
     program_args: &[&String],
     record_name: Option<&str>,
+    no_capture: bool,
     canvas: bool,
     canvas_options: Option<jet_devserver::WebHost::CanvasHostOptions>,
 ) {
@@ -247,6 +663,7 @@ pub(crate) fn run_dev(
             setting_overrides,
             program_args,
             record_name,
+            no_capture,
             canvas,
             canvas_options,
         );
@@ -309,19 +726,136 @@ fn detect_static_output_root(file: &str) -> Option<PathBuf> {
     })
 }
 
-fn start_static_output_host(file: &str) -> Option<jet_devserver::WebHost::WebHost> {
+fn start_static_output_host(
+    file: &str,
+    release_policy: &jet::Package::ReleaseDevtoolsPolicy,
+    pending_application_listener: &mut Option<TcpListener>,
+    session: Arc<jet_devserver::ResidentDevSession>,
+) -> Option<jet_devserver::WebHost::WebHost> {
     let root = detect_static_output_root(file)?;
-    let host = match jet_devserver::WebHost::WebHost::bind_static(file, &root, false, None) {
+    let application_listener = pending_application_listener.take()?;
+    let host = match jet_devserver::WebHost::WebHost::bind_static_with_policy(
+        file,
+        &root,
+        false,
+        application_listener,
+        session,
+        release_policy.clone(),
+    ) {
         Ok(host) => host,
         Err(message) => {
             eprintln!("{message}");
             exit(ExitCodes::USER_ERROR);
         }
     };
-    // `run_dev` owns the session keys; the shared host only serves HTTP and
-    // polls browser clients, as it does for the Canvas-backed native path.
     host.start_canvas();
     Some(host)
+}
+
+fn execute_native_project_rebuild(
+    file: &str,
+    entry_fn: Option<&str>,
+    program_args: &[&String],
+    try_anyway: bool,
+    gates: jet::Policy::GateSet,
+    mode: OutputMode,
+    use_interpreter: bool,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    release_policy: &jet::Package::ReleaseDevtoolsPolicy,
+    resident_session: &Arc<jet_devserver::ResidentDevSession>,
+    canvas_host: Option<&jet_devserver::WebHost::WebHost>,
+    static_host: &mut Option<jet_devserver::WebHost::WebHost>,
+    pending_application_listener: &mut Option<TcpListener>,
+    prev_snapshot: &mut Option<jet::CheckedMirSnapshot>,
+    game_controls_enabled: &mut bool,
+    canvas_hint_printed: &mut bool,
+) -> Result<(), String> {
+    resident_session.mark_building();
+    let _source_transaction = canvas_host.map(|host| host.lock_source_transaction());
+    if let Some(host) = canvas_host.or(static_host.as_ref()) {
+        host.mark_building();
+    }
+    let previous_snapshot = prev_snapshot.take();
+    let persist_before_rebuild = jet_foundation::Persist::shared_clone();
+    let rebuilt_snapshot = render_dev_iteration(
+        file,
+        entry_fn,
+        program_args,
+        try_anyway,
+        gates,
+        mode,
+        use_interpreter,
+        profile,
+        setting_overrides,
+    );
+    if rebuilt_snapshot.is_none() {
+        jet_foundation::Persist::shared_replace(persist_before_rebuild);
+        jet_jit::discard_hot_swap_plan();
+    }
+    *prev_snapshot = rebuilt_snapshot.or(previous_snapshot);
+    *game_controls_enabled = prev_snapshot.as_ref().is_some_and(|snapshot| {
+        matches!(
+            jet::Interpreter::detect_dev_mode(&snapshot.bundle),
+            jet::Interpreter::DevMode::Resident
+        )
+    });
+    if prev_snapshot.is_some() {
+        resident_session.mark_ready();
+    } else {
+        resident_session.mark_error("E2105", "terminal rerun is unavailable");
+    }
+    if prev_snapshot.is_some() && canvas_host.is_none() && static_host.is_none() {
+        *static_host = start_static_output_host(
+            file,
+            release_policy,
+            pending_application_listener,
+            Arc::clone(resident_session),
+        );
+        if let Some(host) = static_host.as_ref() {
+            let (source_id, build_id, revision, world_id) = live_lineage_for_file(file);
+            let _ = host
+                .resident_session()
+                .set_live_lineage(&source_id, &build_id, &revision, &world_id);
+        }
+    }
+    if let Some(host) = canvas_host.or(static_host.as_ref()) {
+        if prev_snapshot.is_some() {
+            host.mark_ready(0, true);
+        } else {
+            host.mark_error(
+                "E2105".to_string(),
+                format!("Canvas kept the last-good program; `{file}` is not ready"),
+                true,
+            );
+        }
+    }
+    if prev_snapshot.is_some() {
+        if let Some(host) = static_host.as_ref() {
+            let (source_id, build_id, revision, world_id) = live_lineage_for_file(file);
+            let _ = host
+                .resident_session()
+                .set_live_lineage(&source_id, &build_id, &revision, &world_id);
+        }
+    }
+    if static_host.is_none() && prev_snapshot.is_some() {
+        print_canvas_hint(file, mode, canvas_hint_printed);
+    }
+    if prev_snapshot.is_some() {
+        Ok(())
+    } else {
+        Err("terminal rerun is unavailable".to_string())
+    }
+}
+
+fn register_dev_watch_paths(watch: &mut jet_devserver::WatchSession, path: &Path) {
+    watch.register_game_path(
+        path.to_path_buf(),
+        jet_foundation::Game::JetGameChangeKind::Script,
+    );
+    if let Some(parent) = path.parent() {
+        watch.register_asset_root(parent.join("assets"));
+    }
 }
 
 fn run_dev_inner(
@@ -336,6 +870,7 @@ fn run_dev_inner(
     setting_overrides: &BTreeMap<String, String>,
     program_args: &[&String],
     record_name: Option<&str>,
+    no_capture: bool,
     canvas: bool,
     canvas_options: Option<jet_devserver::WebHost::CanvasHostOptions>,
 ) {
@@ -344,10 +879,18 @@ fn run_dev_inner(
         crate::cli_error!(@fix "E2105", format!("can't find the file `{}`", file), format!("check the spelling, or run {} from the folder that contains it", jet::Syntax::BINARY_NAME));
         exit(ExitCodes::USER_ERROR);
     }
+    // Fold manifest profile and deployment environment facts before any host
+    // binds.  Every production-capable host receives this same typed policy.
+    let release_policy = crate::CmdCompile::release_devtools_policy_for_name(file, profile, mode);
 
     let canvas_host = if canvas && policy != WatchPolicy::Once {
         let options = canvas_options.unwrap_or_default();
-        match jet_devserver::WebHost::WebHost::bind_canvas_with_options(file, false, &options) {
+        match jet_devserver::WebHost::WebHost::bind_canvas_with_options_and_policy(
+            file,
+            false,
+            &options,
+            release_policy.clone(),
+        ) {
             Ok(host) => Some(host),
             Err(message) => {
                 crate::emit_cli_diagnostic_with_fix(
@@ -375,10 +918,15 @@ fn run_dev_inner(
     // in-process tiers held the bytes until the run ended.
     jet_jit::set_program_owns_streams();
 
-    let record = record_name.map(|name| {
-        crate::ProveReplay::begin_named_capture(file, name, mode.json)
-            .unwrap_or_else(|status| exit(status))
-    });
+    let record = start_dev_capture(
+        file,
+        &source,
+        profile,
+        setting_overrides,
+        record_name,
+        no_capture,
+        mode,
+    );
 
     // `--watch=off`: run once and exit (no loop).
     if policy == WatchPolicy::Once {
@@ -400,15 +948,56 @@ fn run_dev_inner(
             jet::Interpreter::RunOutcome::Problems(_) => ExitCodes::USER_ERROR,
         };
         if let Some(capture) = record.as_ref() {
-            crate::ProveReplay::finish_named_capture(capture, status, mode.json)
-                .unwrap_or_else(|status| exit(status));
+            if let Some(replay_id) = finish_dev_capture(capture, status, mode) {
+                if (status != ExitCodes::OK
+                    || matches!(&outcome, jet::Interpreter::RunOutcome::Problems(_)))
+                    && !mode.quiet
+                    && !mode.json
+                {
+                    println!("replay: {replay_id}");
+                }
+            }
         }
         exit_dev_outcome(outcome);
     }
 
-    if !mode.quiet {
-        println!("watching {} … (Ctrl-C to stop)", file);
-    }
+    let mut pending_application_listener = if canvas_host.is_none() {
+        jet_devserver::WebHost::WebHost::bind_application_preview_listener(None).ok()
+    } else {
+        None
+    };
+    let application_port = pending_application_listener
+        .as_ref()
+        .and_then(|listener| listener.local_addr().ok())
+        .map(|address| address.port())
+        .unwrap_or(0);
+    let resident_session = canvas_host
+        .as_ref()
+        .map(|host| host.resident_session())
+        .unwrap_or_else(|| {
+            Arc::new(jet_devserver::ResidentDevSession::new(
+                file,
+                0,
+                application_port,
+            ))
+        });
+    let (source_id, build_id, revision, world_id) = live_lineage_for_file(file);
+    let _ = resident_session.set_live_lineage(&source_id, &build_id, &revision, &world_id);
+    let _project_rebuild_executor = match resident_session.register_project_rebuild_executor() {
+        Ok(guard) => guard,
+        Err(error) => {
+            eprintln!("{error}");
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    provision_live_lineage_env(
+        release_policy.local_rail,
+        resident_session.id(),
+        &source_id,
+        &build_id,
+        &revision,
+        &world_id,
+    );
 
     // Open the watcher before the first run. The running callable owns stdout,
     // so a caller can edit the file as soon as its first line appears; opening
@@ -424,10 +1013,11 @@ fn run_dev_inner(
             exit(ExitCodes::USER_ERROR);
         }
     };
+    register_dev_watch_paths(&mut watch, path);
 
-    // The bundle from the last successful load, kept so a resident edit can be
-    // diffed against it for type stability (D-HOTSWAP1).
-    let mut prev_bundle = render_dev_iteration(
+    // The checked snapshot from the last successful load, kept so a resident
+    // edit can be diffed against it for type stability (D-HOTSWAP1).
+    let mut prev_snapshot = render_dev_iteration(
         file,
         entry_fn,
         program_args,
@@ -438,15 +1028,20 @@ fn run_dev_inner(
         profile,
         setting_overrides,
     );
-    let mut static_host = if canvas_host.is_none() && prev_bundle.is_some() {
-        start_static_output_host(file)
+    let mut static_host = if canvas_host.is_none() && prev_snapshot.is_some() {
+        start_static_output_host(
+            file,
+            &release_policy,
+            &mut pending_application_listener,
+            Arc::clone(&resident_session),
+        )
     } else {
         None
     };
     let mut canvas_hint_printed = false;
     if let Some(host) = canvas_host.as_ref() {
         host.start_canvas();
-        if prev_bundle.is_some() {
+        if prev_snapshot.is_some() {
             host.mark_ready(0, false);
         } else {
             host.mark_error(
@@ -456,25 +1051,74 @@ fn run_dev_inner(
             );
         }
         open_canvas_browser(&host.canvas_url());
-    } else if static_host.is_none() && prev_bundle.is_some() {
+    } else if let Some(host) = static_host.as_ref() {
+        let _ = host
+            .resident_session()
+            .set_live_lineage(&source_id, &build_id, &revision, &world_id);
+        if prev_snapshot.is_some() {
+            host.mark_ready(0, false);
+        }
+    } else if prev_snapshot.is_some() {
         print_canvas_hint(file, mode, &mut canvas_hint_printed);
     }
     // D-SCHEDULE1 (card #505): due `#Job #Every(…)` fns fire on their own
     // schedule, independent of file-change ticks.
     let mut clock = JobClock::new();
     let mut persist = jet_devserver::PersistStore::new();
-    let mut session = jet_devserver::SessionSnapshot {
-        generation: 0,
-        artifact_token: "gen-0".into(),
-        persist: persist.clone(),
-    };
+    let mut session = jet_devserver::SessionSnapshot::new(0, "gen-0", persist.clone())
+        .with_lineage(
+            source_id.clone(),
+            build_id.clone(),
+            revision.clone(),
+            world_id.clone(),
+        );
+    let _devtools_sink_guard = resident_session.install_devtools_event_sink();
+    let _native_overlay_guard = release_policy.panel_code.then(|| {
+        let native_overlay_host = Arc::new(
+            jet_devserver::NativeOverlayHost::NativeOverlayHostBridge::new(
+                resident_session.clone(),
+                false,
+            ),
+        );
+        jet_devserver::Devtools::jet_devtools_install_native_host(
+            resident_session.id().to_string(),
+            native_overlay_host,
+        )
+        .expect("failed to install native devtools overlay host")
+    });
+    let mut game_dev_session = jet_foundation::Game::JetGameDevSession::new();
+    if prev_snapshot.is_some() {
+        resident_session.mark_ready();
+    } else {
+        resident_session.mark_error("E2105", "initial devtools build is unavailable");
+    }
+    let mut terminal_host = terminal_host_for(mode, profile);
+    let mut terminal_frame = None;
+    refresh_terminal_host(&mut terminal_host, &resident_session, &mut terminal_frame);
+
     let input = spawn_dev_session_input();
     let mut failed_claims = Vec::new();
+    let mut game_controls_enabled = prev_snapshot.as_ref().is_some_and(|snapshot| {
+        matches!(
+            jet::Interpreter::detect_dev_mode(&snapshot.bundle),
+            jet::Interpreter::DevMode::Resident
+        )
+    });
 
     loop {
-        jet_jit::scheduler_sleep_ms(120);
+        jet_jit::scheduler_sleep_ms(jet_devserver::WATCH_POLL_INTERVAL_MS);
         while let Ok(byte) = input.try_recv() {
-            let Some(action) = dev_session_action(byte) else {
+            let action = if terminal_host.capabilities().tty {
+                terminal_session_action(
+                    byte,
+                    &mut terminal_host,
+                    &resident_session,
+                    game_controls_enabled,
+                )
+            } else {
+                dev_session_action(byte, game_controls_enabled)
+            };
+            let Some(action) = action else {
                 continue;
             };
             if !mode.quiet {
@@ -482,13 +1126,7 @@ fn run_dev_inner(
             }
             match action {
                 DevSessionAction::Rerun => {
-                    let _source_transaction = canvas_host
-                        .as_ref()
-                        .map(|host| host.lock_source_transaction());
-                    if let Some(host) = canvas_host.as_ref().or(static_host.as_ref()) {
-                        host.mark_building();
-                    }
-                    prev_bundle = render_dev_iteration(
+                    let _ = execute_native_project_rebuild(
                         file,
                         entry_fn,
                         program_args,
@@ -498,37 +1136,53 @@ fn run_dev_inner(
                         use_interpreter,
                         profile,
                         setting_overrides,
+                        &release_policy,
+                        &resident_session,
+                        canvas_host.as_ref(),
+                        &mut static_host,
+                        &mut pending_application_listener,
+                        &mut prev_snapshot,
+                        &mut game_controls_enabled,
+                        &mut canvas_hint_printed,
                     );
-                    if prev_bundle.is_some() && canvas_host.is_none() && static_host.is_none() {
-                        static_host = start_static_output_host(file);
-                    }
-                    if let Some(host) = canvas_host.as_ref().or(static_host.as_ref()) {
-                        if prev_bundle.is_some() {
-                            host.mark_ready(0, true);
-                        } else {
-                            host.mark_error(
-                                "E2105".to_string(),
-                                format!("Canvas kept the last-good program; `{file}` is not ready"),
-                                true,
-                            );
-                        }
-                    }
-                    if static_host.is_none() && prev_bundle.is_some() {
-                        print_canvas_hint(file, mode, &mut canvas_hint_printed);
-                    }
                 }
                 DevSessionAction::RestartFresh => {
+                    let mut launch_profile =
+                        jet::Codegen::MIREval::game_dev_protocol::GameDevLaunchProfile::new(
+                            file,
+                            jet::Codegen::MIREval::game_dev_protocol::GameDevRunMode::Headless,
+                        );
+                    launch_profile.record_phase(
+                        jet::Codegen::MIREval::game_dev_protocol::GameDevPhase::Editing,
+                        jet::Codegen::MIREval::game_dev_protocol::GameDevTransitionStatus::Applied,
+                        "stop: previous resident game session replaced",
+                    );
+                    resident_session.mark_building();
+                    game_dev_session = jet_foundation::Game::JetGameDevSession::new();
+
                     let _source_transaction = canvas_host
                         .as_ref()
                         .map(|host| host.lock_source_transaction());
                     if let Some(host) = canvas_host.as_ref().or(static_host.as_ref()) {
                         host.mark_building();
                     }
-                    session = jet_devserver::SessionSnapshot {
-                        generation: 0,
-                        artifact_token: "gen-0".into(),
-                        persist: persist.clone(),
-                    };
+                    let (source_id, build_id, revision, world_id) = live_lineage_for_file(file);
+                    let _ = resident_session
+                        .set_live_lineage(&source_id, &build_id, &revision, &world_id);
+                    provision_live_lineage_env(
+                        release_policy.local_rail,
+                        resident_session.id(),
+                        &source_id,
+                        &build_id,
+                        &revision,
+                        &world_id,
+                    );
+
+                    session = jet_devserver::SessionSnapshot::new(0, "gen-0", persist.clone())
+                        .with_lineage(source_id, build_id, revision, world_id);
+                    if let Err(error) = resident_session.reopen_game_asset_watcher(file) {
+                        eprintln!("game assets: {error}");
+                    }
                     watch = match jet_devserver::WatchSession::open(path) {
                         Ok(watch) => watch,
                         Err(diagnostic) => {
@@ -544,7 +1198,8 @@ fn run_dev_inner(
                             exit(ExitCodes::USER_ERROR);
                         }
                     };
-                    prev_bundle = render_dev_iteration(
+                    register_dev_watch_paths(&mut watch, path);
+                    prev_snapshot = render_dev_iteration(
                         file,
                         entry_fn,
                         program_args,
@@ -555,11 +1210,76 @@ fn run_dev_inner(
                         profile,
                         setting_overrides,
                     );
-                    if prev_bundle.is_some() && canvas_host.is_none() && static_host.is_none() {
-                        static_host = start_static_output_host(file);
+                    game_controls_enabled = prev_snapshot.as_ref().is_some_and(|snapshot| {
+                        matches!(
+                            jet::Interpreter::detect_dev_mode(&snapshot.bundle),
+                            jet::Interpreter::DevMode::Resident
+                        )
+                    });
+                    if prev_snapshot.is_some() {
+                        resident_session.mark_ready();
+                    } else {
+                        resident_session.mark_error("E2105", "terminal restart is unavailable");
+                    }
+
+                    let build_succeeded = prev_snapshot.is_some();
+                    launch_profile.record_phase(
+                        jet::Codegen::MIREval::game_dev_protocol::GameDevPhase::Editing,
+                        if build_succeeded {
+                            jet::Codegen::MIREval::game_dev_protocol::GameDevTransitionStatus::Applied
+                        } else {
+                            jet::Codegen::MIREval::game_dev_protocol::GameDevTransitionStatus::Rejected
+                        },
+                        if build_succeeded {
+                            "build: checked program is ready"
+                        } else {
+                            "build: checked program is unavailable"
+                        },
+                    );
+                    launch_profile.record_phase(
+                        jet::Codegen::MIREval::game_dev_protocol::GameDevPhase::Playing,
+                        if build_succeeded {
+                            jet::Codegen::MIREval::game_dev_protocol::GameDevTransitionStatus::Applied
+                        } else {
+                            jet::Codegen::MIREval::game_dev_protocol::GameDevTransitionStatus::Rejected
+                        },
+                        if build_succeeded {
+                            "run: resident game launch is ready"
+                        } else {
+                            "run: not started because build was rejected"
+                        },
+                    );
+                    launch_profile.record_phase(
+                        jet::Codegen::MIREval::game_dev_protocol::GameDevPhase::Editing,
+                        jet::Codegen::MIREval::game_dev_protocol::GameDevTransitionStatus::Applied,
+                        "stop: restart-fresh boundary complete",
+                    );
+                    // Keep the canonical profile value available in the
+                    // headless representation as well; this is the same
+                    // phase receipt, not a second policy or status path.
+                    let headless_profile = launch_profile.headless_variant();
+                    if let Err(error) = publish_game_launch_profile(
+                        &resident_session,
+                        file,
+                        &headless_profile,
+                        dev_job_now_ms(),
+                    ) {
+                        eprintln!("game launch profile: event rejected: {error}");
+                    }
+                    if !mode.quiet && !mode.json {
+                        println!("game launch profile: {}", headless_profile.render_json());
+                    }
+
+                    if prev_snapshot.is_some() && canvas_host.is_none() && static_host.is_none() {
+                        static_host = start_static_output_host(
+                            file,
+                            &release_policy,
+                            &mut pending_application_listener,
+                            Arc::clone(&resident_session),
+                        );
                     }
                     if let Some(host) = canvas_host.as_ref().or(static_host.as_ref()) {
-                        if prev_bundle.is_some() {
+                        if prev_snapshot.is_some() {
                             host.mark_ready(0, true);
                         } else {
                             host.mark_error(
@@ -569,9 +1289,40 @@ fn run_dev_inner(
                             );
                         }
                     }
-                    if static_host.is_none() && prev_bundle.is_some() {
+                    if static_host.is_none() && prev_snapshot.is_some() {
                         print_canvas_hint(file, mode, &mut canvas_hint_printed);
                     }
+                }
+                DevSessionAction::GamePlay
+                | DevSessionAction::GameSimulate
+                | DevSessionAction::GamePause
+                | DevSessionAction::GameResume
+                | DevSessionAction::GameStep
+                | DevSessionAction::GameFrameAdvance
+                | DevSessionAction::GameEdit
+                | DevSessionAction::GameSelectCategory
+                | DevSessionAction::GameInspect
+                | DevSessionAction::GameEvaluate
+                | DevSessionAction::GameEject
+                | DevSessionAction::GameKeep
+                | DevSessionAction::GameDiscard => {
+                    match dispatch_terminal_game_control(&resident_session, file, action) {
+                        Ok(dispatched) => {
+                            if !mode.quiet {
+                                println!("GAME control dispatched={dispatched}");
+                            }
+                        }
+                        Err(error) => {
+                            if !mode.quiet {
+                                eprintln!("GAME control rejected: {error}");
+                            }
+                        }
+                    }
+                    refresh_terminal_host(
+                        &mut terminal_host,
+                        &resident_session,
+                        &mut terminal_frame,
+                    );
                 }
                 DevSessionAction::Tests => {
                     failed_claims = run_dev_tests(file, &[]);
@@ -588,16 +1339,24 @@ fn run_dev_inner(
                 }
                 DevSessionAction::Quit => {
                     if let Some(capture) = record.as_ref() {
-                        crate::ProveReplay::finish_named_capture(capture, ExitCodes::OK, mode.json)
-                            .unwrap_or_else(|status| exit(status));
+                        let _ = finish_dev_capture(capture, ExitCodes::OK, mode);
                     }
                     exit(ExitCodes::OK);
                 }
             }
         }
-        if let Some(bundle) = &prev_bundle {
-            run_due_jobs(bundle, file, try_anyway, mode, &mut clock);
-            sync_persist_bindings(bundle, &mut persist);
+        if let Some(snapshot) = &prev_snapshot {
+            run_due_jobs(
+                snapshot,
+                file,
+                try_anyway,
+                use_interpreter,
+                mode,
+                &release_policy,
+                &mut clock,
+                &resident_session,
+            );
+            sync_persist_bindings(&snapshot.bundle, &mut persist);
         }
         if let Some(receipt) = watch.poll() {
             if receipt.change_kinds.iter().all(|k| *k == "stale") {
@@ -606,46 +1365,131 @@ fn run_dev_inner(
             let _source_transaction = canvas_host
                 .as_ref()
                 .map(|host| host.lock_source_transaction());
+            resident_session.mark_building();
             if let Some(host) = canvas_host.as_ref().or(static_host.as_ref()) {
                 host.mark_building();
             }
+            let mut game_facts: Vec<jet_foundation::Game::JetGameChangeFact> = Vec::new();
+            let persist_before_change = jet_foundation::Persist::shared_clone();
             let next = render_dev_change(
                 file,
                 entry_fn,
                 program_args,
                 try_anyway,
                 policy,
-                prev_bundle.as_ref(),
+                prev_snapshot.as_ref(),
                 gates,
                 mode,
                 use_interpreter,
                 profile,
+                &release_policy,
                 setting_overrides,
+                receipt.game_dev_entries(),
+                &mut game_facts,
+                canvas_host.as_ref().or(static_host.as_ref()),
             );
-            // Transactional hot replacement: commit only when the new bundle
-            // loaded; otherwise keep the prior session valid.
+            if next.is_none() {
+                jet_foundation::Persist::shared_replace(persist_before_change.clone());
+                jet_jit::discard_hot_swap_plan();
+            }
+            if let Err(reason) =
+                publish_game_asset_watch_events(file, receipt.game_dev_entries(), dev_job_now_ms())
+            {
+                if !mode.json {
+                    eprintln!("[game-assets] asset watch report rejected: {reason}");
+                }
+            }
+            // Canonical transaction: pause → preflight → stage → commit.
+            // Shared persistence is restored on every rejected path.
             let mut txn = jet_devserver::HotReplaceTxn::begin(session.clone());
-            match &next {
-                Some(bundle) => {
-                    sync_persist_bindings(bundle, &mut persist);
-                    txn.mark_server_ready();
-                    txn.mark_client_ready();
+            let transaction_result = match &next {
+                Some(snapshot) => txn.pause().and_then(|_| {
+                    sync_persist_bindings(&snapshot.bundle, &mut persist);
+                    let (source_id, build_id, revision, world_id) = live_lineage_for_file(file);
+                    let candidate = session
+                        .clone()
+                        .with_persist(persist.clone())
+                        .with_lineage(source_id, build_id, revision, world_id);
+                    txn.preflight(&candidate).and_then(|_| txn.stage())
+                }),
+                None => Err("reload failed; prior session kept".to_string()),
+            };
+            match transaction_result {
+                Ok(()) => {
+                    // Keep the typed retention plan until commit succeeds. A
+                    // rejected transaction must not publish a new live
+                    // application/session state.
+                    let decisions = txn.decisions().to_vec();
                     match txn.commit() {
                         Ok(snap) => {
                             session = snap;
-                            session.persist = persist.clone();
+                            if let Err(reason) = apply_game_watch_facts(
+                                &mut game_dev_session,
+                                &game_facts,
+                                true,
+                                "hot reload committed",
+                                dev_job_now_ms(),
+                                file,
+                            ) {
+                                resident_session.mark_error("E2105", &reason);
+                                eprintln!("[hot-replace] game swap publication rejected: {reason}");
+                            }
+                            if let Err(reason) =
+                                resident_session.record_live_transaction(&session, &decisions)
+                            {
+                                resident_session.mark_error("E2105", &reason);
+                                eprintln!("[hot-replace] live state record rejected: {reason}");
+                            } else {
+                                resident_session.mark_ready();
+                            }
+                            // The running app owns the typed UI tree. A
+                            // successful swap asks the existing terminal host
+                            // for its ordinary projection; it never rebuilds
+                            // host/session state or parses a style asset.
+                            refresh_terminal_host(
+                                &mut terminal_host,
+                                &resident_session,
+                                &mut terminal_frame,
+                            );
+
                             if canvas_host.is_none() && static_host.is_none() {
-                                static_host = start_static_output_host(file);
+                                static_host = start_static_output_host(
+                                    file,
+                                    &release_policy,
+                                    &mut pending_application_listener,
+                                    Arc::clone(&resident_session),
+                                );
                             }
                             if let Some(host) = canvas_host.as_ref().or(static_host.as_ref()) {
                                 host.mark_ready(0, true);
                             }
+                            if let Some(host) = static_host.as_ref() {
+                                let (source_id, build_id, revision, world_id) =
+                                    live_lineage_for_file(file);
+                                let _ = host
+                                    .resident_session()
+                                    .set_live_lineage(&source_id, &build_id, &revision, &world_id);
+                            }
                             if static_host.is_none() {
                                 print_canvas_hint(file, mode, &mut canvas_hint_printed);
                             }
-                            prev_bundle = next;
+                            prev_snapshot = next;
                         }
                         Err((prior, reason)) => {
+                            jet_foundation::Persist::shared_replace(persist_before_change.clone());
+                            jet_jit::discard_hot_swap_plan();
+                            if let Err(publication) = apply_game_watch_facts(
+                                &mut game_dev_session,
+                                &game_facts,
+                                false,
+                                &reason,
+                                dev_job_now_ms(),
+                                file,
+                            ) {
+                                eprintln!(
+                                    "[hot-replace] rejected game swap publication failed: {publication}"
+                                );
+                            }
                             eprintln!("[hot-replace] {reason}");
                             if let Some(host) = canvas_host.as_ref().or(static_host.as_ref()) {
                                 host.mark_error(
@@ -660,7 +1504,22 @@ fn run_dev_inner(
                         }
                     }
                 }
-                None => {
+                Err(reason) => {
+                    jet_foundation::Persist::shared_replace(persist_before_change);
+                    jet_jit::discard_hot_swap_plan();
+                    if let Err(publication) = apply_game_watch_facts(
+                        &mut game_dev_session,
+                        &game_facts,
+                        false,
+                        &reason,
+                        dev_job_now_ms(),
+                        file,
+                    ) {
+                        eprintln!(
+                            "[hot-replace] rejected game swap publication failed: {publication}"
+                        );
+                    }
+                    eprintln!("[hot-replace] {reason}");
                     if let Some(host) = canvas_host.as_ref().or(static_host.as_ref()) {
                         host.mark_error(
                             "E2105".to_string(),
@@ -670,8 +1529,7 @@ fn run_dev_inner(
                             true,
                         );
                     }
-                    txn.fail("reload failed; prior session kept");
-                    let _ = txn.commit();
+                    session = txn.rollback(reason);
                 }
             }
             if let Err(diagnostic) = watch.acknowledge(&receipt) {
@@ -690,6 +1548,45 @@ fn run_dev_inner(
                 }
             }
         }
+        let project_session = static_host
+            .as_ref()
+            .map(|host| host.resident_session())
+            .unwrap_or_else(|| resident_session.clone());
+        match project_session.take_project_rebuild() {
+            Ok(Some(request)) => {
+                let result = execute_native_project_rebuild(
+                    file,
+                    entry_fn,
+                    program_args,
+                    try_anyway,
+                    gates,
+                    mode,
+                    use_interpreter,
+                    profile,
+                    setting_overrides,
+                    &release_policy,
+                    &resident_session,
+                    canvas_host.as_ref(),
+                    &mut static_host,
+                    &mut pending_application_listener,
+                    &mut prev_snapshot,
+                    &mut game_controls_enabled,
+                    &mut canvas_hint_printed,
+                );
+                if let Err(error) = project_session.finish_project_rebuild(&request, result) {
+                    if !mode.quiet {
+                        eprintln!("Project rebuild receipt: {error}");
+                    }
+                }
+            }
+            Ok(None) => {}
+            Err(error) => {
+                if !mode.quiet {
+                    eprintln!("Project rebuild: {error}");
+                }
+            }
+        }
+        refresh_terminal_host(&mut terminal_host, &resident_session, &mut terminal_frame);
     }
 }
 
@@ -703,25 +1600,74 @@ fn sync_persist_bindings(
     for msg in &prep.messages {
         eprintln!("{msg}");
     }
+    if let Some(error) = prep.error {
+        eprintln!("[persist] transaction rejected: {error}");
+    }
     *store = jet_foundation::Persist::shared_clone();
+}
+fn live_lineage_for_file(file: &str) -> (String, String, String, String) {
+    let source_id = file.to_string();
+    let revision = fs::read(file)
+        .map(|bytes| format!("sha256-{}", jet::SHA256::sha256_hex(&bytes)))
+        .unwrap_or_default();
+    let build_id = revision.clone();
+    let world_id = format!("world-{}", jet::SHA256::sha256_hex(source_id.as_bytes()));
+    (source_id, build_id, revision, world_id)
+}
+fn provision_live_lineage_env(
+    local_rail: bool,
+    session_id: &str,
+    source_id: &str,
+    build_id: &str,
+    revision: &str,
+    world_id: &str,
+) {
+    const SESSION: &str = "JET_DEVTOOLS_RELAY_SESSION_ID";
+    const SOURCE: &str = "JET_DEVTOOLS_RELAY_SOURCE_ID";
+    const BUILD: &str = "JET_DEVTOOLS_RELAY_BUILD_ID";
+    const REVISION: &str = "JET_DEVTOOLS_RELAY_REVISION";
+    const WORLD: &str = "JET_DEVTOOLS_RELAY_WORLD_ID";
+    const COMMANDS: &str = "JET_DEVTOOLS_COMMAND_RELAY_PATH";
+    let command_directory =
+        std::env::temp_dir().join(format!("jet-devtools-commands-{}", std::process::id()));
+    let command_directory = command_directory.to_string_lossy().into_owned();
+    if !local_rail {
+        for key in [SESSION, SOURCE, BUILD, REVISION, WORLD, COMMANDS] {
+            std::env::remove_var(key);
+        }
+        return;
+    }
+    for (key, value) in [
+        (SESSION, session_id),
+        (SOURCE, source_id),
+        (BUILD, build_id),
+        (REVISION, revision),
+        (WORLD, world_id),
+        (COMMANDS, command_directory.as_str()),
+    ] {
+        std::env::set_var(key, value);
+    }
 }
 
 /// D-SCHEDULE1 (ratified 2026-07-11, card #505): the `jet dev` consumer of
-/// schedule-as-code — check every `#Job #Every(…)` fn in `bundle` against
-/// `clock`, and run whichever are due through the same interpreter tier the
-/// rest of the dev loop uses (`jet::Interpreter::run_named_job`). This is
+/// schedule-as-code — check every `#Job #Every(…)` fn in `snapshot.bundle`
+/// against `clock`, and run whichever are due through the same interpreter tier
+/// the rest of the dev loop uses (`jet::Interpreter::run_named_job`). This is
 /// the dev-loop tier only (D-DEV3); the service runtime (D-SERVICE1) and a
 /// jetos timer projection are the production/OS consumers of the identical
 /// `#Every(…)` declaration — see the D-SCHEDULE1 row in
 /// docs/spec/syntax-decisions.md for the full three-consumer law.
 fn run_due_jobs(
-    bundle: &jet::AST::ProgramBundle,
+    snapshot: &jet::CheckedMirSnapshot,
     file: &str,
     try_anyway: bool,
+    use_interpreter: bool,
     mode: OutputMode,
+    release_policy: &jet::Package::ReleaseDevtoolsPolicy,
     clock: &mut JobClock,
+    resident_session: &jet_devserver::ResidentDevSession,
 ) {
-    let jobs = jet::Interpreter::scheduled_jobs(bundle);
+    let jobs = jet::Interpreter::scheduled_jobs(&snapshot.bundle);
     if jobs.is_empty() {
         return;
     }
@@ -729,24 +1675,186 @@ fn run_due_jobs(
         if !mode.quiet {
             println!("\n— due job `{}` —", name);
         }
-        match jet::Interpreter::run_named_job(bundle, &name, try_anyway) {
+        let invocation = if use_interpreter {
+            jet::Interpreter::InterpreterInvocation::DevInterpret
+        } else {
+            jet::Interpreter::InterpreterInvocation::DevDefault
+        };
+        let job_id = format!("{name}#{}", NEXT_DEV_JOB_ID.fetch_add(1, Ordering::Relaxed));
+        let queue = name.clone();
+        let worker = if use_interpreter {
+            "dev-interpreter"
+        } else {
+            "dev-cranelift"
+        }
+        .to_string();
+        let enqueued_at_ms = dev_job_now_ms();
+        publish_dev_job_fact(
+            resident_session,
+            dev_job_fact(
+                jet_devserver::Devtools::JetDevtoolsJobPanelEventKind::Enqueue,
+                jet_devserver::Devtools::JetDevtoolsJobPanelLifecycleState::Enqueued,
+                &job_id,
+                &name,
+                &queue,
+                0,
+                None,
+                None,
+                None,
+                enqueued_at_ms,
+            ),
+        );
+        let started_at = Instant::now();
+        let started_at_ms = dev_job_now_ms().max(enqueued_at_ms);
+        publish_dev_job_fact(
+            resident_session,
+            dev_job_fact(
+                jet_devserver::Devtools::JetDevtoolsJobPanelEventKind::Start,
+                jet_devserver::Devtools::JetDevtoolsJobPanelLifecycleState::Started,
+                &job_id,
+                &name,
+                &queue,
+                1,
+                None,
+                Some(worker.clone()),
+                None,
+                started_at_ms,
+            ),
+        );
+        match jet::Interpreter::run_checked_job_snapshot(
+            snapshot,
+            file,
+            &name,
+            &[],
+            try_anyway,
+            invocation,
+            release_policy,
+        ) {
             jet::Interpreter::RunOutcome::Ran {
                 stdout,
                 stderr,
                 exit_code,
             } => {
+                let finished_at_ms = dev_job_now_ms().max(started_at_ms);
+                let duration_ms = started_at
+                    .elapsed()
+                    .as_millis()
+                    .try_into()
+                    .unwrap_or(u64::MAX);
+                if exit_code == 0 {
+                    publish_dev_job_fact(
+                        resident_session,
+                        dev_job_fact(
+                            jet_devserver::Devtools::JetDevtoolsJobPanelEventKind::Complete,
+                            jet_devserver::Devtools::JetDevtoolsJobPanelLifecycleState::Completed,
+                            &job_id,
+                            &name,
+                            &queue,
+                            1,
+                            Some(duration_ms),
+                            Some(worker),
+                            None,
+                            finished_at_ms,
+                        ),
+                    );
+                } else {
+                    publish_dev_job_fact(
+                        resident_session,
+                        dev_job_fact(
+                            jet_devserver::Devtools::JetDevtoolsJobPanelEventKind::Fail,
+                            jet_devserver::Devtools::JetDevtoolsJobPanelLifecycleState::Failed,
+                            &job_id,
+                            &name,
+                            &queue,
+                            1,
+                            Some(duration_ms),
+                            Some(worker),
+                            Some(jet_devserver::Devtools::JetDevtoolsJobPanelFailureKind::Error),
+                            finished_at_ms,
+                        ),
+                    );
+                }
                 emit_run_output(&stdout, &stderr);
                 if exit_code != 0 {
                     eprintln!("job `{name}` exited with code {exit_code}");
                 }
             }
             jet::Interpreter::RunOutcome::Problems(diags) => {
+                let finished_at_ms = dev_job_now_ms().max(started_at_ms);
+                let duration_ms = started_at
+                    .elapsed()
+                    .as_millis()
+                    .try_into()
+                    .unwrap_or(u64::MAX);
+                publish_dev_job_fact(
+                    resident_session,
+                    dev_job_fact(
+                        jet_devserver::Devtools::JetDevtoolsJobPanelEventKind::Fail,
+                        jet_devserver::Devtools::JetDevtoolsJobPanelLifecycleState::Failed,
+                        &job_id,
+                        &name,
+                        &queue,
+                        1,
+                        Some(duration_ms),
+                        Some(worker),
+                        Some(jet_devserver::Devtools::JetDevtoolsJobPanelFailureKind::Error),
+                        finished_at_ms,
+                    ),
+                );
                 exit_if_internal_fault(&diags);
                 let src = fs::read_to_string(file).unwrap_or_default();
                 report_problems(mode, file, &src, &diags);
             }
         }
     }
+}
+
+static NEXT_DEV_JOB_ID: AtomicU64 = AtomicU64::new(1);
+const DEV_JOB_FACT_SOURCE: &str = "jet-dev.jobs";
+
+fn dev_job_now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
+
+fn dev_job_fact(
+    kind: jet_devserver::Devtools::JetDevtoolsJobPanelEventKind,
+    state: jet_devserver::Devtools::JetDevtoolsJobPanelLifecycleState,
+    job_id: &str,
+    name: &str,
+    queue: &str,
+    attempts: u32,
+    duration_ms: Option<u64>,
+    worker: Option<String>,
+    failure: Option<jet_devserver::Devtools::JetDevtoolsJobPanelFailureKind>,
+    timestamp_ms: u64,
+) -> jet_devserver::Devtools::JetDevtoolsJobPanelFact {
+    jet_devserver::Devtools::JetDevtoolsJobPanelFact {
+        sequence: 0,
+        timestamp_ms,
+        kind,
+        state,
+        job_id: job_id.to_string(),
+        name: name.to_string(),
+        labels: Vec::new(),
+        queue: queue.to_string(),
+        attempts,
+        duration_ms,
+        worker,
+        request_id: None,
+        failure,
+    }
+}
+
+fn publish_dev_job_fact(
+    resident_session: &jet_devserver::ResidentDevSession,
+    fact: jet_devserver::Devtools::JetDevtoolsJobPanelFact,
+) {
+    let _ = resident_session.publish_job_fact(&fact, DEV_JOB_FACT_SOURCE);
 }
 
 /// D-SCHEDULE1: per-job last-run bookkeeping for the due-job tick. A
@@ -803,23 +1911,65 @@ fn prelude_schedule(schedule: jet::AST::EverySchedule) -> jet_jit::Job::JetJobSc
         }
     }
 }
+fn dev_artifact_request(
+    target: jet_foundation::MIR::MirArtifactTarget,
+    profile: &str,
+) -> jet_foundation::MIR::MirArtifactRequest {
+    let build_mode = match profile {
+        "dev" | "debug" | "ci" | "hardened" | "small" | "no-os" => {
+            jet_foundation::MIR::MirArtifactBuildMode::Dev
+        }
+        "release" => jet_foundation::MIR::MirArtifactBuildMode::Release,
+        "test" => jet_foundation::MIR::MirArtifactBuildMode::Test,
+        "fuzz" => jet_foundation::MIR::MirArtifactBuildMode::Fuzz,
+        "coverage" => jet_foundation::MIR::MirArtifactBuildMode::Coverage,
+        other => jet_foundation::ice!(None, "unsupported MIR artifact build profile `{other}`"),
+    };
+    let kind = match build_mode {
+        jet_foundation::MIR::MirArtifactBuildMode::Test
+        | jet_foundation::MIR::MirArtifactBuildMode::Coverage => {
+            jet_foundation::MIR::MirArtifactKind::TestExecutable
+        }
+        jet_foundation::MIR::MirArtifactBuildMode::Fuzz => {
+            jet_foundation::MIR::MirArtifactKind::FuzzExecutable
+        }
+        jet_foundation::MIR::MirArtifactBuildMode::Dev
+        | jet_foundation::MIR::MirArtifactBuildMode::Release => {
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable
+        }
+    };
+    jet_foundation::MIR::MirArtifactRequest::new(target, kind, build_mode)
+}
 
 /// Handle one detected file change: pick swap vs rerun vs restart and render.
-/// Returns the freshly loaded bundle (or `None` if it failed to load) for the
-/// next diff.
+/// Returns the freshly checked snapshot (or `None` if it failed to load) for
+/// the next watch iteration.
 fn render_dev_change(
     file: &str,
     entry_fn: Option<&str>,
     program_args: &[&String],
     try_anyway: bool,
     policy: WatchPolicy,
-    prev: Option<&jet::AST::ProgramBundle>,
+    prev: Option<&jet::CheckedMirSnapshot>,
     gates: jet::Policy::GateSet,
     mode: OutputMode,
     use_interpreter: bool,
     profile: &str,
+    release_policy: &jet::Package::ReleaseDevtoolsPolicy,
     setting_overrides: &BTreeMap<String, String>,
-) -> Option<jet::AST::ProgramBundle> {
+    game_entries: &[jet_devserver::DevWatchEntry],
+    game_facts_out: &mut Vec<jet_foundation::Game::JetGameChangeFact>,
+    devtools_host: Option<&jet_devserver::WebHost::WebHost>,
+) -> Option<jet::CheckedMirSnapshot> {
+    if !game_entries.is_empty() {
+        match game_change_facts(game_entries, None) {
+            Ok(facts) => *game_facts_out = facts,
+            Err(reason) => {
+                eprintln!("[hot-swap] checked game facts rejected: {reason}");
+                return None;
+            }
+        }
+    }
     // Load+check the new bundle so we can both diff its type surface and run it.
     let mut new_bundle = match jet::Loader::load_entry(file) {
         Ok(mut b) => {
@@ -850,12 +2000,14 @@ fn render_dev_change(
         WatchPolicy::Swap => true,
         WatchPolicy::Restart => false,
         WatchPolicy::Once => false, // unreachable here (handled in run_dev)
-        WatchPolicy::Auto => {
-            jet::Interpreter::detect_dev_mode(&new_bundle) == jet::Interpreter::DevMode::Resident
-        }
+        WatchPolicy::Auto => true,
     };
 
-    let diags = jet::Sema::check_bundle_gates(&mut new_bundle, jet::Sema::CompileMode::Run, gates);
+    let (diags, effect_facts) = jet::Sema::check_bundle_gates_with_effect_facts(
+        &mut new_bundle,
+        jet::Sema::CompileMode::Run,
+        gates,
+    );
     let errs: Vec<_> = diags
         .iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
@@ -870,6 +2022,15 @@ fn render_dev_change(
         return None;
     }
     render_dev_lints(file, mode, &diags);
+    let artifact_target = if use_interpreter {
+        jet_foundation::MIR::MirArtifactTarget::Interpreter
+    } else {
+        jet_foundation::MIR::MirArtifactTarget::Cranelift
+    };
+    let (mir, artifact) = jet::lower_checked_semantic_mir_program_for(
+        &new_bundle,
+        dev_artifact_request(artifact_target, profile),
+    );
 
     if resident {
         // The hot-reload unit is the entry module (D-HOTSWAP1).
@@ -878,96 +2039,453 @@ fn render_dev_change(
             .get(new_bundle.entry)
             .map(|m| m.display.clone())
             .unwrap_or_else(|| file.to_string());
-
         match prev {
             Some(old) => {
-                match jet::Sema::HotSwap::type_stable_check(old, &new_bundle, &module_name) {
-                    Ok(()) => {
-                        if !mode.quiet {
-                            println!(
-                                "\n[hot-swap] {} — types stable, code re-applied",
-                                module_name
-                            );
+                match jet::Sema::HotSwap::type_stable_decision(
+                    &old.bundle,
+                    &new_bundle,
+                    &module_name,
+                ) {
+                    Ok(decision) => {
+                        let facts = match game_change_facts(game_entries, Some(&decision)) {
+                            Ok(facts) => facts,
+                            Err(reason) => {
+                                eprintln!("[hot-swap] checked game facts rejected: {reason}");
+                                return None;
+                            }
+                        };
+                        *game_facts_out = facts.clone();
+                        let decision = decision.with_change_facts(facts);
+                        if let Some(host) = devtools_host {
+                            let _ = host.publish_hot_swap_decision(&decision);
                         }
-                        if !run_resident_swap(
-                            &new_bundle,
-                            try_anyway,
-                            &module_name,
-                            file,
-                            mode,
-                            use_interpreter,
-                        ) {
+                        let persist_before_migration = (!use_interpreter
+                            && !decision.schema_migrations().is_empty())
+                        .then(jet_foundation::Persist::shared_clone);
+                        let migrated_in_place = if decision.is_compatible() {
+                            if !use_interpreter {
+                                if let Err(reason) = jet_jit::apply_hot_swap(&decision) {
+                                    if !mode.json {
+                                        eprintln!(
+                                            "[hot-swap] {} — adapter preparation failed: {}",
+                                            module_name, reason
+                                        );
+                                    }
+                                    return None;
+                                }
+                            }
+                            false
+                        } else if !use_interpreter && !decision.schema_migrations().is_empty() {
+                            match jet_jit::apply_hot_swap_with_program(
+                                &mir,
+                                artifact,
+                                &decision,
+                                release_policy,
+                            ) {
+                                Ok(receipts) => {
+                                    if !receipts.is_empty() && !mode.quiet && !mode.json {
+                                        let migrated = receipts
+                                            .iter()
+                                            .filter(|receipt| !receipt.migrated.is_empty())
+                                            .count();
+                                        println!(
+                                            "[hot-swap] migrated {} published-schema value(s)",
+                                            migrated
+                                        );
+                                    }
+                                    true
+                                }
+                                Err(reason) => {
+                                    if !mode.json {
+                                        eprintln!(
+                                            "[hot-swap] {} — schema migration rejected: {}",
+                                            module_name, reason
+                                        );
+                                    }
+                                    return None;
+                                }
+                            }
+                        } else {
+                            false
+                        };
+                        let swap_ok = if decision.is_compatible() || migrated_in_place {
+                            run_resident_swap(
+                                &mir,
+                                artifact,
+                                try_anyway,
+                                &module_name,
+                                file,
+                                mode,
+                                use_interpreter,
+                                release_policy,
+                            )
+                        } else {
+                            run_resident_restart(
+                                &mir,
+                                artifact,
+                                try_anyway,
+                                file,
+                                mode,
+                                use_interpreter,
+                                release_policy,
+                            )
+                        };
+                        if !swap_ok {
+                            if let Some(store) = persist_before_migration {
+                                jet_foundation::Persist::shared_replace(store);
+                                jet_jit::discard_hot_swap_plan();
+                            }
                             return None;
                         }
+                        render_hot_swap_decision(&decision, mode, migrated_in_place);
                     }
                     Err(diags) => {
-                        // E2210 names what changed; surface it on the restart line.
-                        let what = diags.first().map(|d| d.what.clone()).unwrap_or_default();
-                        if !mode.quiet {
-                            println!("\n[restart] {} — {}", module_name, what);
-                        }
-                        if !run_resident_restart(
-                            &new_bundle,
-                            try_anyway,
-                            file,
-                            mode,
-                            use_interpreter,
-                        ) {
-                            return None;
-                        }
+                        let src = fs::read_to_string(file).unwrap_or_default();
+                        report_problems(mode, file, &src, &diags);
+                        return None;
                     }
                 }
             }
             None => {
                 // No baseline yet (first run after an error): a clean restart.
-                if !mode.quiet {
+                if !mode.quiet && !mode.json {
                     println!("\n[restart] {} — first run", module_name);
                 }
-                if !run_resident_restart(&new_bundle, try_anyway, file, mode, use_interpreter) {
+                if !run_resident_restart(
+                    &mir,
+                    artifact,
+                    try_anyway,
+                    file,
+                    mode,
+                    use_interpreter,
+                    release_policy,
+                ) {
                     return None;
                 }
             }
         }
     } else {
-        // Run-to-completion (default / `--restart`): plain rerun.
+        // Run-to-completion (default / `--restart`): run the already-checked
+        // optimized MIR instead of checking and lowering the edit a second
+        // time.
         if !mode.quiet {
             println!("\n— {} changed, re-running —", file);
         }
-        let run = run_dev_iteration_with_entry(
-            file,
-            entry_fn,
-            program_args,
-            try_anyway,
-            use_interpreter,
-            gates,
-            profile,
-            setting_overrides,
-        );
-        render_lints(file, mode, &run.lints);
-        let outcome = run.outcome;
+        let jobs = jet::Interpreter::scheduled_jobs(&new_bundle);
+        let requested = program_args
+            .first()
+            .map(|arg| arg.as_str())
+            .filter(|arg| !arg.starts_with('-'));
+        let selected = requested.filter(|name| jobs.iter().any(|(job, _)| job.as_str() == *name));
+        let runtime_args = if selected.is_some() {
+            &program_args[1..]
+        } else {
+            program_args
+        };
+        let mut args = Vec::with_capacity(runtime_args.len() + 1);
+        args.push(selected.map_or_else(|| file.to_string(), |name| format!("{file} {name}")));
+        args.extend(runtime_args.iter().map(|arg| (*arg).to_string()));
+        let outcome = jet_jit::with_program_args(&args, || {
+            jet::Interpreter::dev_run_snapshot(
+                &mir,
+                artifact,
+                try_anyway,
+                if use_interpreter {
+                    jet::Interpreter::InterpreterInvocation::DevInterpret
+                } else {
+                    jet::Interpreter::InterpreterInvocation::DevDefault
+                },
+                release_policy,
+            )
+        });
         render_dev_outcome(&outcome, file, mode);
+        if !matches!(outcome, jet::Interpreter::RunOutcome::Ran { .. }) {
+            return None;
+        }
     }
 
-    Some(new_bundle)
+    Some(jet::CheckedMirSnapshot {
+        bundle: new_bundle,
+        facts: effect_facts,
+        mir,
+        artifact,
+    })
 }
 
+fn game_change_facts(
+    entries: &[jet_devserver::DevWatchEntry],
+    decision: Option<&jet_foundation::HotSwap::HotSwapDecision>,
+) -> Result<Vec<jet_foundation::Game::JetGameChangeFact>, String> {
+    entries
+        .iter()
+        .map(|entry| {
+            let (migration, reason) = match entry.game_kind {
+                jet_foundation::Game::JetGameChangeKind::Asset => (
+                    jet_foundation::Game::JetGameMigrationDecision::Preserve,
+                    format!("checked asset watch change `{}`", entry.change_kind),
+                ),
+                jet_foundation::Game::JetGameChangeKind::Script
+                | jet_foundation::Game::JetGameChangeKind::World => {
+                    if decision.map_or(false, |decision| decision.is_compatible()) {
+                        (
+                            jet_foundation::Game::JetGameMigrationDecision::Preserve,
+                            "checked type-stable reload".to_string(),
+                        )
+                    } else {
+                        (
+                            jet_foundation::Game::JetGameMigrationDecision::Reject,
+                            decision
+                                .and_then(|decision| decision.compatibility.reason())
+                                .unwrap_or("checked restart or incompatible reload")
+                                .to_string(),
+                        )
+                    }
+                }
+            };
+            jet_foundation::Game::JetGameChangeFact::new(
+                entry.path.display().to_string(),
+                entry.game_kind,
+                entry.old_schema_id.clone(),
+                entry.new_schema_id.clone(),
+                migration,
+                reason,
+            )
+        })
+        .collect()
+}
+
+fn publish_game_asset_watch_events(
+    file: &str,
+    entries: &[jet_devserver::DevWatchEntry],
+    timestamp_ms: u64,
+) -> Result<(), String> {
+    let asset_entries = entries
+        .iter()
+        .filter(|entry| entry.game_kind == jet_foundation::Game::JetGameChangeKind::Asset)
+        .collect::<Vec<_>>();
+    if asset_entries.is_empty() {
+        return Ok(());
+    }
+    let asset_root = fs::canonicalize(
+        Path::new(file)
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("assets"),
+    )
+    .unwrap_or_else(|_| {
+        let parent = Path::new(file).parent().unwrap_or_else(|| Path::new("."));
+        if parent.is_absolute() {
+            parent.join("assets")
+        } else {
+            std::env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .join(parent)
+                .join("assets")
+        }
+    });
+    let root = jet::Codegen::MIREval::game_dev_protocol::JetGameAssetRootIdentity::new("game", ".")
+        .map_err(|error| error.to_string())?;
+    let mut events = Vec::with_capacity(asset_entries.len());
+    let mut skipped_count = 0usize;
+    for entry in asset_entries {
+        if entry.change_kind == "stale" {
+            skipped_count = skipped_count.saturating_add(1);
+            continue;
+        }
+        let relative = entry
+            .path
+            .strip_prefix(&asset_root)
+            .map_err(|_| {
+                format!(
+                    "asset watcher path `{}` is outside root `{}`",
+                    entry.path.display(),
+                    asset_root.display()
+                )
+            })?
+            .to_string_lossy()
+            .replace('\\', "/");
+        if relative.is_empty() {
+            return Err(format!(
+                "asset watcher path `{}` is the asset root",
+                entry.path.display()
+            ));
+        }
+        let logical_path = format!("assets/{relative}");
+        let kind = match entry.change_kind {
+            "created" => {
+                jet::Codegen::MIREval::game_dev_protocol::JetGameAssetWatchEventKind::Created
+            }
+            "deleted" => {
+                jet::Codegen::MIREval::game_dev_protocol::JetGameAssetWatchEventKind::Deleted
+            }
+            _ => jet::Codegen::MIREval::game_dev_protocol::JetGameAssetWatchEventKind::Changed,
+        };
+        events.push(
+            jet::Codegen::MIREval::game_dev_protocol::JetGameAssetWatchEvent::new(
+                root.clone(),
+                logical_path,
+                kind,
+            )
+            .map_err(|error| error.to_string())?,
+        );
+    }
+    let roots = jet::Codegen::MIREval::game_dev_protocol::JetGameAssetRootSet::new(vec![root])
+        .map_err(|error| error.to_string())?;
+    let projected = jet::Codegen::MIREval::game_dev_protocol::project_asset_watch_import_events(
+        timestamp_ms,
+        file,
+        roots,
+        &events,
+        skipped_count,
+    )?;
+    for event in projected {
+        jet_foundation::Devtools::jet_devtools_publish_event(event);
+    }
+    Ok(())
+}
+
+fn apply_game_watch_facts(
+    session: &mut jet_foundation::Game::JetGameDevSession,
+    facts: &[jet_foundation::Game::JetGameChangeFact],
+    accepted: bool,
+    reason: &str,
+    timestamp_ms: u64,
+    source: &str,
+) -> Result<(), String> {
+    for fact in facts {
+        let fact = if accepted {
+            fact.clone()
+        } else {
+            fact.clone().with_migration(
+                jet_foundation::Game::JetGameMigrationDecision::Reject,
+                reason,
+            )?
+        };
+        let outcome = match fact.kind {
+            jet_foundation::Game::JetGameChangeKind::Asset => session.apply_asset_swap(fact)?,
+            jet_foundation::Game::JetGameChangeKind::Script => session.apply_script_reload(fact)?,
+            jet_foundation::Game::JetGameChangeKind::World => session.apply_world_reload(fact)?,
+        };
+        let body = jet_foundation::Devtools::JetDevtoolsEventBody::GameSwap {
+            sequence: outcome.sequence,
+            path: outcome.fact.path,
+            kind: outcome.fact.kind.as_str().to_string(),
+            status: outcome.status.as_str().to_string(),
+            old_schema_id: outcome.fact.old_schema_id,
+            new_schema_id: outcome.fact.new_schema_id,
+            migration: outcome.fact.migration.as_str().to_string(),
+            reason: outcome.fact.reason,
+        };
+        let event = jet_foundation::Devtools::JetDevtoolsEvent::try_new(
+            timestamp_ms,
+            source.to_string(),
+            body,
+        )?;
+        jet_foundation::Devtools::jet_devtools_publish_event(event);
+    }
+    Ok(())
+}
+fn publish_game_launch_profile(
+    resident_session: &jet_devserver::ResidentDevSession,
+    file: &str,
+    profile: &jet::Codegen::MIREval::game_dev_protocol::GameDevLaunchProfile,
+    timestamp_ms: u64,
+) -> Result<(), String> {
+    let body = jet_foundation::Devtools::JetDevtoolsEventBody::GameLaunchProfile {
+        target: profile.target.clone(),
+        run_mode: profile.run_mode.as_str().to_string(),
+        headless_compatible: profile.headless_compatible,
+        phases: profile
+            .phases
+            .iter()
+            .map(|phase| {
+                jet_foundation::Devtools::JetDevtoolsGameLaunchPhase::new(
+                    phase.phase.as_str(),
+                    phase.status.as_str(),
+                    phase.detail.clone(),
+                )
+            })
+            .collect(),
+    };
+    let event = jet_foundation::Devtools::JetDevtoolsEvent::try_new(timestamp_ms, "game", body)?;
+    resident_session
+        .publish_devtools_event_typed(event)
+        .map(|_| ())
+}
+fn render_hot_swap_decision(
+    decision: &jet_foundation::HotSwap::HotSwapDecision,
+    mode: OutputMode,
+    migrated_in_place: bool,
+) {
+    if mode.quiet || mode.json {
+        return;
+    }
+    let list = |preserved: bool| {
+        let values = decision
+            .state_facts()
+            .iter()
+            .filter(|fact| fact.is_preserved() == preserved)
+            .map(|fact| fact.key.as_str())
+            .collect::<Vec<_>>();
+        if values.is_empty() {
+            "—".to_string()
+        } else {
+            values.join(", ")
+        }
+    };
+    let changed = if decision.changed_functions.is_empty() {
+        "—".to_string()
+    } else {
+        decision.changed_functions.join(", ")
+    };
+    if decision.is_compatible() {
+        println!(
+            "saved {}  swapped {}  kept {}",
+            decision.module,
+            changed,
+            list(true)
+        );
+    } else if migrated_in_place {
+        println!(
+            "saved {}  migrated in place  swapped {}  kept {}",
+            decision.module,
+            changed,
+            list(true)
+        );
+    } else {
+        let reason = decision
+            .compatibility
+            .reason()
+            .unwrap_or("type surface changed");
+        println!(
+            "saved {}  restarting  kept {}  reset {}  reason {}",
+            decision.module,
+            list(true),
+            list(false),
+            reason
+        );
+    }
+}
 /// Hot-swap via the strict Cranelift backend (`--interpret` uses tier-0).
 fn run_resident_swap(
-    bundle: &jet::AST::ProgramBundle,
+    program: &jet_foundation::MIR::MirProgram,
+    artifact: jet_foundation::MIR::MirArtifactId,
     try_anyway: bool,
     module_name: &str,
     file: &str,
     mode: OutputMode,
     use_interpreter: bool,
+    release_policy: &jet::Package::ReleaseDevtoolsPolicy,
 ) -> bool {
     use jet::JitBackend::{InterpreterBackend, JitBackend};
     use jet_jit::CraneliftBackend;
+
     let outcome = if use_interpreter {
-        let mut b = InterpreterBackend::new();
-        b.hot_swap(module_name, bundle, try_anyway)
+        let mut b = InterpreterBackend::new(jet::Interpreter::InterpreterInvocation::DevInterpret);
+        b.hot_swap(module_name, program, artifact, try_anyway, release_policy)
     } else {
         let mut b = CraneliftBackend::new();
-        b.hot_swap(module_name, bundle, try_anyway)
+        b.hot_swap(module_name, program, artifact, try_anyway, release_policy)
     };
     match outcome {
         Ok(o) => {
@@ -985,20 +2503,22 @@ fn run_resident_swap(
 
 /// Clean restart via the strict Cranelift backend.
 fn run_resident_restart(
-    bundle: &jet::AST::ProgramBundle,
+    program: &jet_foundation::MIR::MirProgram,
+    artifact: jet_foundation::MIR::MirArtifactId,
     try_anyway: bool,
     file: &str,
     mode: OutputMode,
     use_interpreter: bool,
+    release_policy: &jet::Package::ReleaseDevtoolsPolicy,
 ) -> bool {
     use jet::JitBackend::{InterpreterBackend, JitBackend};
     use jet_jit::CraneliftBackend;
     let outcome = if use_interpreter {
-        let mut b = InterpreterBackend::new();
-        b.restart(bundle, try_anyway)
+        let mut b = InterpreterBackend::new(jet::Interpreter::InterpreterInvocation::DevInterpret);
+        b.restart(program, artifact, try_anyway, release_policy)
     } else {
         let mut b = CraneliftBackend::new();
-        b.restart(bundle, try_anyway)
+        b.restart(program, artifact, try_anyway, release_policy)
     };
     let ok = matches!(&outcome, jet::Interpreter::RunOutcome::Ran { .. });
     render_outcome(outcome, file, mode);
@@ -1049,9 +2569,9 @@ fn render_dev_iteration(
     use_interpreter: bool,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
-) -> Option<jet::AST::ProgramBundle> {
+) -> Option<jet::CheckedMirSnapshot> {
     let started = std::time::Instant::now();
-    let run = run_dev_iteration_with_entry(
+    let mut run = run_dev_iteration_with_entry(
         file,
         entry_fn,
         program_args,
@@ -1062,37 +2582,18 @@ fn render_dev_iteration(
         setting_overrides,
     );
     render_lints(file, mode, &run.lints);
+    let snapshot = run.snapshot.take();
     let outcome = run.outcome;
     let elapsed = started.elapsed();
     let ran_ok = matches!(outcome, jet::Interpreter::RunOutcome::Ran { .. });
-    let bundle = if ran_ok {
-        match jet::Loader::load_entry(file) {
-            Ok(mut bundle) => {
-                if let Err(diags) =
-                    jet::Driver::seed_build_facts(&mut bundle, profile, false, setting_overrides)
-                {
-                    let source = fs::read_to_string(file).unwrap_or_default();
-                    report_problems(mode, file, &source, &diags);
-                    None
-                } else {
-                    if let Some(entry_fn) = entry_fn {
-                        jet::Driver::swap_entry_point(&mut bundle, entry_fn);
-                    }
-                    Some(bundle)
-                }
-            }
-            Err(_) => None,
-        }
-    } else {
-        None
-    };
     render_outcome_timed(outcome, file, Some(elapsed), mode);
-    if let Some(bundle) = bundle {
-        run_dev_budget_refresh(file, &bundle, mode);
-        Some(bundle)
-    } else {
-        None
+    if ran_ok {
+        if let Some(snapshot) = snapshot {
+            run_dev_budget_refresh(file, &snapshot.bundle, mode);
+            return Some(snapshot);
+        }
     }
+    None
 }
 
 fn render_dev_outcome(outcome: &jet::Interpreter::RunOutcome, file: &str, mode: OutputMode) {
@@ -1961,6 +3462,7 @@ pub(crate) const BLESS_TARGETS: &[&str] = &[
     "cross",
     "diagnostic_snapshots",
     "diagnostics_coverage",
+    "ice_report_codegen_rejection",
     "release_gates",
 ];
 
@@ -2135,12 +3637,7 @@ fn write_generated_section(path: &str, fresh: &str, quiet: bool) {
 /// D-BUILD1). Offline by default; `--online` enables network checks; `--fix`
 /// applies the auto-fixable problems. The advisory code for rustc/cache/PATH
 /// problems is L2101.
-pub(crate) fn run_doctor(
-    online: bool,
-    apply: bool,
-    mode: OutputMode,
-    cross_target: Option<&str>,
-) {
+pub(crate) fn run_doctor(online: bool, apply: bool, mode: OutputMode, cross_target: Option<&str>) {
     // E2-M15: main parses both `--target=<triple>` and `--target <triple>`
     // before dispatch, so Doctor receives the same effective target as build.
     let checks = jet::Doctor::run(jet::Doctor::Options {
@@ -2215,6 +3712,7 @@ pub(crate) fn run_doctor(
         println!(" Why: One or more required tools or paths are unavailable");
         println!(" Fix: Follow the fixes above, then run `jet self doctor` again");
         println!(" {}", jet::Explain::pointer_line("L2101", color));
+        println!("More: jet-lang.dev/e/L2101");
         exit(ExitCodes::USER_ERROR);
     } else {
         println!("everything looks good.");
@@ -2264,7 +3762,9 @@ pub(crate) fn run_explain_web_graph(args: &[String], mode: OutputMode) {
         if mode.json {
             println!(
                 "{}",
-                render_status_json("ok", true, "inspect.web", ",\"web_app\":null")
+                StatusEnvelope::new("inspect.web", true)
+                    .with_field("web_app", StatusValue::Null)
+                    .json()
             );
         } else {
             println!("(none)");
@@ -2287,12 +3787,13 @@ pub(crate) fn run_explain_web_graph(args: &[String], mode: OutputMode) {
                     jet::render_diagnostics(&entry, "", std::slice::from_ref(d))
                 );
             }
-            exit(ExitCodes::USER_ERROR);
         }
         if mode.json {
             println!(
                 "{}",
-                render_status_json("ok", true, "inspect.web", ",\"web_app\":null")
+                StatusEnvelope::new("inspect.web", true)
+                    .with_field("web_app", StatusValue::Null)
+                    .json()
             );
         } else {
             println!("(none)");
@@ -2300,15 +3801,13 @@ pub(crate) fn run_explain_web_graph(args: &[String], mode: OutputMode) {
         return;
     }
     if mode.json {
-        let payload = graph.to_json();
+        let web_app =
+            StatusValue::parse(&graph.to_json()).expect("web graph projection must be valid JSON");
         println!(
             "{}",
-            render_status_json(
-                "ok",
-                true,
-                "inspect.web",
-                &format!(",\"web_app\":{payload}")
-            )
+            StatusEnvelope::new("inspect.web", true)
+                .with_field("web_app", web_app)
+                .json()
         );
     } else {
         for line in graph.explain_lines() {
@@ -2417,34 +3916,23 @@ pub(crate) fn run_explain_cost(
         Err(error) => exit_cost_projection_error(file, &error),
     };
     if mode.json {
-        let rows: Vec<String> = report
-            .sites
-            .iter()
-            .map(|site| {
-                let line = source_line(&src, site.span);
-                format!(
-                    "{{\"function\":{},\"line\":{},\"kind\":{},\"state\":{},\"loop_depth\":{},\"tier\":\"{}\"}}",
-                    json_string(&site.function),
-                    line,
-                    json_string(site.kind.label()),
-                    json_string(cost_state_label(site.state)),
-                    site.loop_depth,
-                    COST_TIER,
-                )
-            })
-            .collect();
+        let sites = StatusValue::array(report.sites.iter().map(|site| {
+            StatusValue::object(
+                StatusFields::new()
+                    .with("function", site.function.clone())
+                    .with("line", source_line(&src, site.span))
+                    .with("kind", site.kind.label())
+                    .with("state", cost_state_label(site.state))
+                    .with("loop_depth", site.loop_depth)
+                    .with("tier", COST_TIER),
+            )
+        }));
         println!(
             "{}",
-            render_status_json(
-                "ok",
-                true,
-                "explain.cost",
-                &format!(
-                    ",\"file\":{},\"sites\":[{}]",
-                    json_string(file),
-                    rows.join(",")
-                ),
-            )
+            StatusEnvelope::new("explain.cost", true)
+                .with_field("file", file)
+                .with_field("sites", sites)
+                .json()
         );
         return;
     }
@@ -2472,11 +3960,20 @@ pub(crate) fn exit_cost_projection_error(
     file: &str,
     error: &jet::Codegen::TIR::TCostReportError,
 ) -> ! {
+    let fix = match error {
+        jet::Codegen::TIR::TCostReportError::Incomplete { surfaces } => format!(
+            "report the missing checked specialization for {} with this source file; its cost cannot be proved until the compiler lowers that specialization",
+            surfaces.join("; ")
+        ),
+        jet::Codegen::TIR::TCostReportError::Lowering { .. } => {
+            "report this checked-TIR lowering failure with the source file".to_string()
+        }
+    };
     crate::cli_error!(
-        "E2104",
-        "cost projection for `{}` failed: {}",
-        file,
-        error.message()
+        @full "E2104",
+        format!("cost projection for `{file}` failed"),
+        error.message(),
+        fix
     );
     exit(ExitCodes::USER_ERROR);
 }
@@ -2501,7 +3998,12 @@ fn explain_source_file(fact_file: Option<&str>) -> PathBuf {
         .map(PathBuf::from)
         .or_else(|| {
             let cwd = std::env::current_dir().ok()?;
-            crate::resolve_bare_entry("run", &cwd, None).map(|entry| entry.path)
+            let mode = OutputMode {
+                json: false,
+                color: ColorChoice::Never,
+                quiet: false,
+            };
+            crate::resolve_bare_entry("run", &cwd, None, mode, false).map(|entry| entry.path)
         })
         .unwrap_or_else(|| {
             crate::cli_error!(
@@ -2545,25 +4047,21 @@ fn print_explanation(explanation: &jet::Explain::Explanation, mode: OutputMode) 
             .unwrap_or(explanation.meaning.as_str());
         let optional = |value: Option<&String>| {
             value
-                .map(|value| json_string(value))
-                .unwrap_or_else(|| "null".to_string())
+                .map(|value| StatusValue::from(value.clone()))
+                .unwrap_or(StatusValue::Null)
         };
+        let fields = StatusFields::new()
+            .with("code", explanation.code.clone())
+            .with("stage", explanation.stage.clone())
+            .with("what", what)
+            .with("why", optional(explanation.why.as_ref()))
+            .with("fix", optional(explanation.fix.as_ref()))
+            .with("example", optional(explanation.example.as_ref()));
         println!(
             "{}",
-            jet::Diagnostics::render_status_json(
-                "ok",
-                true,
-                "explain",
-                &format!(
-                    ",\"code\":{},\"stage\":{},\"what\":{},\"why\":{},\"fix\":{},\"example\":{}",
-                    json_string(&explanation.code),
-                    json_string(&explanation.stage),
-                    json_string(what),
-                    optional(explanation.why.as_ref()),
-                    optional(explanation.fix.as_ref()),
-                    optional(explanation.example.as_ref()),
-                ),
-            )
+            StatusEnvelope::new("explain", true)
+                .with_fields(fields)
+                .json()
         );
         return;
     }
@@ -2685,13 +4183,14 @@ pub(crate) fn run_explain_marker(site: Option<&str>, key: Option<&str>, mode: Ou
     print_explanation(&explanation, mode);
 }
 
-/// `jet inspect bind <header.h> [--pkg <lib>] [-o <out.jet>]` (S59 / E2-M14 Phase 4).
+/// `jet inspect bind <header.h> [--pkg <lib>] [--overlay <path>] [--link <lib>] [-o <out.jet>]` (S59 / E2-M14 Phase 4).
 ///
 /// Generates a `#Bindgen module c.<lib>.__bindgen__` cache from a C header,
-/// using the same native std-only backend the compiler invokes on a cache miss
-/// (owner 2026-06-18, supersedes D-CBIND3=B). Parses C function prototypes
-/// over the bindable type subset; skips and reports what it cannot map (I3).
-/// **E3208** fires only when the header is unreadable or has no bindable
+/// using the same native std-only backend the compiler invokes on a cache miss.
+/// Parses C function prototypes over the bindable type subset; skips and reports
+/// what it cannot map (I3). An opaque handle without a close contract is
+/// reported as E3208 with the handle name so the caller can supply a typed
+/// overlay. E3208 also fires when the header is unreadable or has no bindable
 /// prototypes — use `#Import module c.<lib>` for those declarations.
 pub(crate) fn run_bind(args: &[&String]) {
     if matches!(
@@ -2700,6 +4199,10 @@ pub(crate) fn run_bind(args: &[&String]) {
     ) {
         let format = args[0].as_str();
         run_data_bind(format, &args[1..]);
+        return;
+    }
+    if binding_plan_command(args) {
+        run_binding_plan_command(args);
         return;
     }
     if args
@@ -2844,7 +4347,7 @@ pub(crate) fn run_bind(args: &[&String]) {
     }
     if args.is_empty() || jet::CLI::is_help_flag(args[0]) {
         eprintln!(
-            "usage: {} inspect bind <header.h> [--pkg <lib>] [-o <out.jet>]",
+            "usage: {} inspect bind <header.h> [--pkg <lib>] [--overlay <path>] [--link <lib>] [-o <out.jet>]",
             jet::Syntax::BINARY_NAME
         );
         eprintln!(
@@ -2866,6 +4369,8 @@ pub(crate) fn run_bind(args: &[&String]) {
     let header = args[0].as_str();
     let mut pkg: Option<String> = None;
     let mut out: Option<String> = None;
+    let mut overlay_path: Option<String> = None;
+    let mut links: Vec<String> = Vec::new();
     let mut quiet = false;
     let mut i = 1;
     while i < args.len() {
@@ -2876,6 +4381,22 @@ pub(crate) fn run_bind(args: &[&String]) {
                     exit(ExitCodes::USAGE);
                 };
                 pkg = Some(value.to_string());
+                i += 2;
+            }
+            "--overlay" => {
+                let Some(value) = args.get(i + 1) else {
+                    crate::cli_error!("E2102", "`inspect bind` requires a value after `--overlay`");
+                    exit(ExitCodes::USAGE);
+                };
+                overlay_path = Some(value.to_string());
+                i += 2;
+            }
+            "--link" => {
+                let Some(value) = args.get(i + 1) else {
+                    crate::cli_error!("E2102", "`inspect bind` requires a value after `--link`");
+                    exit(ExitCodes::USAGE);
+                };
+                links.push(value.to_string());
                 i += 2;
             }
             "-o" | "--out" => {
@@ -2899,7 +4420,7 @@ pub(crate) fn run_bind(args: &[&String]) {
             other => {
                 crate::cli_error!("E2102", "unknown `inspect bind` flag `{}`", other);
                 eprintln!(
-                    "usage: {} inspect bind <header.h> [--pkg <lib>] [-o <out.jet>]",
+                    "usage: {} inspect bind <header.h> [--pkg <lib>] [--overlay <path>] [--link <lib>] [-o <out.jet>]",
                     jet::Syntax::BINARY_NAME
                 );
                 exit(ExitCodes::USAGE);
@@ -2923,9 +4444,25 @@ pub(crate) fn run_bind(args: &[&String]) {
             "check the path, or install the library's dev headers.".to_string(),
         ),
     };
+    let mut handle_overlay = match overlay_path.as_deref() {
+        Some(path) => match read_c_bind_overlay(path, &lib) {
+            Ok(overlay) => overlay,
+            Err(reason) => bind_e3208(
+                format!("Could not read C binding overlay `{path}`."),
+                format!("{reason}."),
+                format!("write `#Import module c.{lib} {{ … }}` in the overlay file"),
+            ),
+        },
+        None => jet::CBind::HandleOverlay::default(),
+    };
+    for link in links {
+        if !handle_overlay.links.contains(&link) {
+            handle_overlay.links.push(link);
+        }
+    }
 
     // E2-M14 (owner 2026-06-18, supersedes D-CBIND3=B): native std-only backend.
-    let result = match jet::CBind::generate(&header_src, &lib) {
+    let result = match jet::CBind::generate_with_overlay(&header_src, &lib, &handle_overlay) {
         Ok(r) => r,
         Err(why) => bind_e3208(
             format!("Could not generate bindings from `{header}`."),
@@ -2933,6 +4470,22 @@ pub(crate) fn run_bind(args: &[&String]) {
             format!("hand-write `#Import module c.{lib} {{ … }}` for the symbols you need."),
         ),
     };
+    if !result.handle_skipped.is_empty() {
+        let details = result
+            .handle_skipped
+            .iter()
+            .map(|(handle, reason)| format!("`{handle}`: {reason}"))
+            .collect::<Vec<_>>()
+            .join("; ");
+        bind_e3208(
+            format!("Could not generate bindings from `{header}`."),
+            format!("opaque handle bindings were unresolved: {details}."),
+            format!(
+                "add `#Close(close_function)` to `{}` in the overlay",
+                overlay_path.as_deref().unwrap_or("<overlay>")
+            ),
+        );
+    }
 
     // Default cache path follows D-CBIND7: .jet/bindings/c/<lib>.jet.
     let out_path =
@@ -2948,10 +4501,21 @@ pub(crate) fn run_bind(args: &[&String]) {
         exit(ExitCodes::USER_ERROR);
     }
 
-    // Phase 3 (D-CBIND2): write a hash sidecar alongside the cache so the
-    // compiler can detect stale caches on the next build (hash invalidation).
+    // Phase 3 (D-CBIND2): write hash and typed handle/link metadata sidecars
+    // alongside the cache so compiler identities retain binding provenance.
     // cflags are not yet threaded through `jet inspect bind`; pass "" for now.
     let _ = jet::CBind::write_bind_hash(std::path::Path::new(&out_path), &header_src, "");
+    if let Err(error) = jet::CFFI::write_c_binding_metadata(
+        std::path::Path::new(&out_path),
+        &result.handles,
+        &result.link_closure,
+    ) {
+        bind_e3208(
+            format!("Could not publish C binding metadata for `{header}`."),
+            format!("{error}."),
+            "rerun `jet inspect bind` after checking the output path".to_string(),
+        );
+    }
     let project_root = std::env::current_dir().unwrap_or_else(|error| {
         bind_e3208(
             format!("Could not publish C binding provenance for `{header}`."),
@@ -2998,6 +4562,574 @@ pub(crate) fn run_bind(args: &[&String]) {
             println!("  - {} — {}", name, why);
         }
     }
+}
+
+fn binding_plan_command(args: &[&String]) -> bool {
+    args.iter().any(|arg| {
+        matches!(
+            arg.as_str(),
+            "--shape" | "--freeze" | "--policy" | "--accept" | "--update" | "--explain"
+        )
+    }) || args.first().is_some_and(|arg| arg.as_str() == "--policy")
+}
+
+fn run_binding_plan_command(args: &[&String]) {
+    let mut name: Option<String> = None;
+    let mut shape = jet::Bindgen::BindingShape::Automatic;
+    let mut policy: Option<jet::Bindgen::BindingPolicy> = None;
+    let mut explain = false;
+    let mut freeze = false;
+    let mut update = false;
+    let mut preview = false;
+    let mut accept: Option<String> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--shape" => {
+                let Some(value) = args.get(i + 1) else {
+                    crate::cli_error!("E2102", "`bind` requires a value after `--shape`");
+                    exit(ExitCodes::USAGE);
+                };
+                shape = jet::Bindgen::BindingShape::parse(value).unwrap_or_else(|error| {
+                    crate::cli_error!("E2102", "{error}");
+                    exit(ExitCodes::USAGE);
+                });
+                i += 2;
+            }
+            "--policy" => {
+                let Some(value) = args.get(i + 1) else {
+                    crate::cli_error!("E2102", "`bind` requires a value after `--policy`");
+                    exit(ExitCodes::USAGE);
+                };
+                policy = Some(
+                    jet::Bindgen::BindingPolicy::parse(value).unwrap_or_else(|error| {
+                        crate::cli_error!("E2102", "{error}");
+                        exit(ExitCodes::USAGE);
+                    }),
+                );
+                i += 2;
+            }
+            "--explain" => {
+                explain = true;
+                i += 1;
+            }
+            "--freeze" => {
+                freeze = true;
+                i += 1;
+            }
+            "--update" => {
+                update = true;
+                i += 1;
+            }
+            "--preview" => {
+                preview = true;
+                i += 1;
+            }
+            "--accept" => {
+                let Some(value) = args.get(i + 1) else {
+                    crate::cli_error!("E2102", "`bind` requires a value after `--accept`");
+                    exit(ExitCodes::USAGE);
+                };
+                accept = Some(value.to_string());
+                update = true;
+                i += 2;
+            }
+            arg if arg.starts_with('-') => {
+                crate::cli_error!("E2102", "unknown `bind` flag `{arg}`");
+                exit(ExitCodes::USAGE);
+            }
+            value => {
+                if name.replace(value.to_string()).is_some() {
+                    crate::cli_error!("E2102", "`bind` accepts one binding name");
+                    exit(ExitCodes::USAGE);
+                }
+                i += 1;
+            }
+        }
+    }
+
+    let package_path = Path::new("package.jet");
+    if let Some(policy) = policy {
+        if name.is_none() {
+            if let Err(error) =
+                update_binding_package_config(package_path, None, None, Some(policy))
+            {
+                crate::cli_error!("E2105", "{error}");
+                exit(ExitCodes::USER_ERROR);
+            }
+            println!("binding policy: {policy}");
+            return;
+        }
+    }
+    let Some(name) = name else {
+        crate::cli_error!(
+            "E2102",
+            "usage: jet bind <name> [--shape automatic|native] [--freeze]"
+        );
+        exit(ExitCodes::USAGE);
+    };
+
+    let Some(header) = binding_header_path(&name) else {
+        if explain {
+            if let Some(record) = read_binding_plan(&name) {
+                print!("{record}");
+                return;
+            }
+        }
+        crate::cli_error!(
+            "E3208",
+            "binding `{name}` has no pinned foreign header; pass an exact header through the project binding record"
+        );
+        exit(ExitCodes::USER_ERROR);
+    };
+    let header_source = fs::read_to_string(&header).unwrap_or_else(|error| {
+        crate::cli_error!(
+            "E3208",
+            "could not read binding header `{}`: {error}",
+            header.display()
+        );
+        exit(ExitCodes::USER_ERROR);
+    });
+    let lib = jet::Syntax::sanitize_generated_name(&name, jet::Syntax::NameCase::Snake, "library");
+    let generated = jet::CBind::generate_with_overlay(
+        &header_source,
+        &lib,
+        &jet::CBind::HandleOverlay::default(),
+    )
+    .unwrap_or_else(|error| {
+        crate::cli_error!("E3208", "could not generate binding `{name}`: {error}");
+        exit(ExitCodes::USER_ERROR);
+    });
+    let contract = annotate_binding_contract(generated.boundary, &header_source, &header)
+        .unwrap_or_else(|error| {
+            crate::cli_error!(
+                "E3208",
+                "binding `{name}` has invalid canonical evidence: {error}"
+            );
+            exit(ExitCodes::USER_ERROR);
+        });
+    let operation = binding_operation_from_header(&name, &header_source);
+    let target = format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS);
+    let inputs = jet::Bindgen::BindingInputs::new(
+        target,
+        "jet-bindgen-v1",
+        format!(
+            "{}:sha256-{}",
+            header.display(),
+            jet::SHA256::sha256_hex(header_source.as_bytes())
+        ),
+    )
+    .with_dependencies(std::iter::empty::<String>())
+    .with_compiler_flags(std::iter::empty::<String>());
+    let plan = jet::Bindgen::BindingPlan::resolve(&contract, operation, inputs, shape)
+        .unwrap_or_else(|error| {
+            crate::cli_error!("E3208", "{error}");
+            exit(ExitCodes::USER_ERROR);
+        });
+    if let Some(recorded) = read_binding_plan(&name) {
+        if policy == Some(jet::Bindgen::BindingPolicy::Frozen) || freeze {
+            if let Err(error) = plan.frozen_drift(recorded_digest(&recorded)) {
+                crate::cli_error!("E3208", "{error}");
+                exit(ExitCodes::USER_ERROR);
+            }
+        }
+    }
+    if explain {
+        print!("{}", plan.explain());
+        return;
+    }
+    if preview {
+        print!("{}", plan.explain());
+        println!("preview: no package, lock, or generated facade files were written");
+        return;
+    }
+    if let Some(expected) = accept {
+        if expected != plan.candidate_digest() {
+            crate::cli_error!(
+                "E3208",
+                "`--accept` digest `{expected}` does not match candidate `{}`",
+                plan.candidate_digest()
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    } else if update && !freeze && policy != Some(jet::Bindgen::BindingPolicy::Frozen) {
+        // `--update` without `--accept` is intentionally a preview-like refusal:
+        // accepting a new identity must name the exact candidate digest.
+        crate::cli_error!(
+            "E3208",
+            "`--update` requires `--preview` or `--accept {}`",
+            plan.candidate_digest()
+        );
+        exit(ExitCodes::USER_ERROR);
+    }
+    let mut selected_plans = BTreeMap::new();
+    selected_plans.insert(name.clone(), plan.clone());
+    let projected = jet::CBind::generate_with_contract_and_plans(
+        &header_source,
+        &lib,
+        &jet::CBind::HandleOverlay::default(),
+        contract,
+        &selected_plans,
+    )
+    .unwrap_or_else(|error| {
+        crate::cli_error!(
+            "E3208",
+            "could not materialize binding facade `{name}`: {error}"
+        );
+        exit(ExitCodes::USER_ERROR);
+    });
+    if let Err(error) = write_binding_cache(&name, &projected.source) {
+        crate::cli_error!("E2105", "{error}");
+        exit(ExitCodes::USER_ERROR);
+    }
+    if let Err(error) = write_binding_plan(&name, &plan) {
+        crate::cli_error!("E2105", "{error}");
+        exit(ExitCodes::USER_ERROR);
+    }
+    if let Err(error) = update_binding_package_config(
+        package_path,
+        Some(&name),
+        Some(shape),
+        policy.or_else(|| freeze.then_some(jet::Bindgen::BindingPolicy::Frozen)),
+    ) {
+        crate::cli_error!("E2105", "{error}");
+        exit(ExitCodes::USER_ERROR);
+    }
+    if let Err(error) = write_binding_facade(&name, &plan) {
+        crate::cli_error!("E2105", "{error}");
+        exit(ExitCodes::USER_ERROR);
+    }
+    println!("binding plan {} ({})", name, plan.candidate_digest());
+}
+
+fn binding_header_path(name: &str) -> Option<PathBuf> {
+    let candidates = [
+        PathBuf::from(name),
+        PathBuf::from(format!("{name}.h")),
+        PathBuf::from(format!("include/{name}.h")),
+        PathBuf::from(format!("ffi/{name}.h")),
+        PathBuf::from(format!(".jet/ffi/{name}.h")),
+    ];
+    candidates.into_iter().find(|path| path.is_file())
+}
+
+fn marker_value(source: &str, marker: &str) -> Option<String> {
+    source.lines().find_map(|line| {
+        let value = line.split_once(marker)?.1.trim();
+        let value = value.strip_prefix(':').unwrap_or(value).trim();
+        (!value.is_empty()).then(|| value.trim_matches('"').to_string())
+    })
+}
+
+fn binding_operation_from_header(name: &str, source: &str) -> jet::Bindgen::BindingOperation {
+    let declaration = source
+        .lines()
+        .map(str::trim)
+        .find(|line| line.contains(&format!("{name}(")))
+        .unwrap_or("");
+    let native_signature = declaration.trim_end_matches(';').to_string();
+    let result_type = declaration
+        .split_once(&format!("{name}("))
+        .map(|(prefix, _)| {
+            if prefix.contains("char") && prefix.contains('*') {
+                return "String".to_string();
+            }
+            prefix
+                .split_whitespace()
+                .last()
+                .unwrap_or("Unit")
+                .replace("const ", "")
+        })
+        .filter(|value| !value.is_empty())
+        .map(|value| match value.as_str() {
+            "void" => "Unit".to_string(),
+            "uint64_t" | "size_t" => "U64".to_string(),
+            "int" | "int32_t" => "Int".to_string(),
+            "float" | "double" => "Float".to_string(),
+            _ => value,
+        })
+        .unwrap_or_else(|| "Unit".to_string());
+    let mut operation = jet::Bindgen::BindingOperation::new(name, native_signature, result_type);
+    if let Some((_, params)) = declaration.split_once(&format!("{name}(")) {
+        if let Some(params) = params.split_once(')').map(|(params, _)| params) {
+            let parameters = params.split(',').map(str::trim).collect::<Vec<_>>();
+            let pointer = parameters
+                .iter()
+                .find(|parameter| parameter.contains('*'))
+                .and_then(|parameter| parameter.split_whitespace().last())
+                .map(|value| value.trim_start_matches('*').to_string());
+            let count = parameters
+                .iter()
+                .find(|parameter| {
+                    if parameter.contains('*') {
+                        return false;
+                    }
+                    let lower = parameter.to_ascii_lowercase();
+                    lower.contains("count")
+                        || lower.contains("length")
+                        || lower.contains("len")
+                        || lower == "n"
+                        || lower.ends_with(" n")
+                })
+                .and_then(|parameter| parameter.split_whitespace().last())
+                .map(str::to_string);
+            if let (Some(pointer), Some(count)) = (pointer, count) {
+                let unit = match marker_value(source, "jet-ffi-count-unit").as_deref() {
+                    Some("bytes") => jet::Bindgen::CountUnit::Bytes,
+                    Some(value) if value.starts_with("elements:") => {
+                        jet::Bindgen::CountUnit::Elements(value[9..].to_string())
+                    }
+                    _ => jet::Bindgen::CountUnit::Unknown,
+                };
+                let meaning = match marker_value(source, "jet-ffi-count-meaning").as_deref() {
+                    Some("full-extent") => jet::Bindgen::CountMeaning::FullExtent,
+                    Some("prefix") => jet::Bindgen::CountMeaning::Prefix,
+                    _ => jet::Bindgen::CountMeaning::Unknown,
+                };
+                let width = marker_value(source, "jet-ffi-count-width")
+                    .and_then(|value| value.parse::<u16>().ok())
+                    .unwrap_or(0);
+                let retention = match marker_value(source, "jet-ffi-retention").as_deref() {
+                    Some("borrowed-for-call") => jet::Bindgen::PointerRetention::BorrowedForCall,
+                    Some("may-retain") => jet::Bindgen::PointerRetention::MayRetain,
+                    _ => jet::Bindgen::PointerRetention::Unknown,
+                };
+                operation = operation.with_pointer_count(jet::Bindgen::PointerCountFact::new(
+                    pointer, count, unit, meaning, width, retention,
+                ));
+            }
+        }
+    }
+    operation.nullable_return = source.contains("jet-ffi-nullable");
+    operation.borrowed_view = source.contains("jet-ffi-borrowed-view");
+    operation.status_out = source.contains("jet-ffi-status-out");
+    operation.partial_success = source.contains("jet-ffi-partial-success");
+    operation.fallible_close = source.contains("jet-ffi-fallible-close");
+    operation.callback_transport =
+        marker_value(source, "jet-ffi-callback").unwrap_or_else(|| "none".to_string());
+    operation.effects =
+        marker_value(source, "jet-ffi-effects").unwrap_or_else(|| "foreign".to_string());
+    operation.ownership = marker_value(source, "jet-ffi-ownership")
+        .unwrap_or_else(|| "signature-declared".to_string());
+    operation.failure_mapping =
+        marker_value(source, "jet-ffi-failure").unwrap_or_else(|| "preserve".to_string());
+    operation.copies = marker_value(source, "jet-ffi-copies").unwrap_or_else(|| "none".to_string());
+    operation.placement =
+        marker_value(source, "jet-ffi-placement").unwrap_or_else(|| "caller".to_string());
+    operation.cleanup =
+        marker_value(source, "jet-ffi-cleanup").unwrap_or_else(|| "none".to_string());
+    operation
+}
+
+fn annotate_binding_contract(
+    mut contract: jet::ForeignBridge::ForeignBoundaryContract,
+    source: &str,
+    header: &Path,
+) -> Result<jet::ForeignBridge::ForeignBoundaryContract, String> {
+    let target = format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS);
+    let coverage = jet::ForeignBridge::ForeignArtifactCoverage::new(
+        format!(
+            "{}:sha256-{}",
+            header.display(),
+            jet::SHA256::sha256_hex(source.as_bytes())
+        ),
+        target,
+        "jet-bindgen-v1",
+    )
+    .with_transitive_dependencies(std::iter::empty::<String>())
+    .with_reachable_callbacks(std::iter::empty::<String>())
+    .with_compiler_flags(std::iter::empty::<String>());
+    contract = contract.with_artifact_coverage(coverage);
+    for line in source.lines().filter_map(|line| {
+        line.split_once("jet-ffi-obligation:")
+            .map(|(_, value)| value.trim())
+    }) {
+        let mut obligation = None;
+        let mut basis = jet::ForeignBridge::ForeignEvidenceBasis::Unknown;
+        let mut checker = String::new();
+        let mut assumptions = Vec::new();
+        for field in line.split(';') {
+            let Some((key, value)) = field.split_once('=') else {
+                continue;
+            };
+            match key.trim() {
+                "name" | "obligation" => obligation = Some(value.trim().to_string()),
+                "basis" => {
+                    basis = match value.trim() {
+                        "proved" => jet::ForeignBridge::ForeignEvidenceBasis::Proved,
+                        "enforced" => jet::ForeignBridge::ForeignEvidenceBasis::Enforced,
+                        "contained" => jet::ForeignBridge::ForeignEvidenceBasis::Contained,
+                        "trusted" => jet::ForeignBridge::ForeignEvidenceBasis::Trusted,
+                        "unknown" => jet::ForeignBridge::ForeignEvidenceBasis::Unknown,
+                        other => return Err(format!("unknown evidence basis `{other}`")),
+                    }
+                }
+                "checker" => checker = value.trim().to_string(),
+                "assumptions" => {
+                    assumptions = value
+                        .split('|')
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_string)
+                        .collect()
+                }
+                _ => {}
+            }
+        }
+        let Some(obligation) = obligation else {
+            return Err("an obligation marker needs `name=`".to_string());
+        };
+        contract.set_obligation(obligation, basis, checker, assumptions)?;
+    }
+    Ok(contract)
+}
+
+fn binding_plan_path(name: &str) -> PathBuf {
+    PathBuf::from(format!(".jet/lock/bindings/{name}.plan"))
+}
+
+fn read_binding_plan(name: &str) -> Option<String> {
+    fs::read_to_string(binding_plan_path(name)).ok()
+}
+
+fn recorded_digest(record: &str) -> &str {
+    record
+        .lines()
+        .find_map(|line| line.strip_prefix("digest="))
+        .unwrap_or("")
+}
+
+fn write_binding_plan(name: &str, plan: &jet::Bindgen::BindingPlan) -> Result<(), String> {
+    let path = binding_plan_path(name);
+    let Some(parent) = path.parent() else {
+        return Err("binding lock path has no parent".to_string());
+    };
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("could not create `{}`: {error}", parent.display()))?;
+    let mut record = format!(
+        "schema=jet-ffi-binding-plan-v1\nname={name}\ndigest={}\nshape={}\nboundary={}\ninputs={}\nartifact={}\n",
+        plan.digest, plan.shape, plan.boundary_digest, plan.input_digest, plan.artifact
+    );
+    record.push_str(&plan.explain());
+    record.push_str("\nfacade:\n");
+    record.push_str(&plan.render_facade());
+    fs::write(path, record).map_err(|error| format!("could not write binding lock: {error}"))
+}
+
+fn write_binding_facade(name: &str, plan: &jet::Bindgen::BindingPlan) -> Result<(), String> {
+    let path = PathBuf::from(format!(".jet/bindings/c/{name}.adapted.jet"));
+    let Some(parent) = path.parent() else {
+        return Err("binding facade path has no parent".to_string());
+    };
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("could not create `{}`: {error}", parent.display()))?;
+    fs::write(path, plan.render_facade())
+        .map_err(|error| format!("could not write generated binding facade: {error}"))
+}
+
+fn write_binding_cache(name: &str, source: &str) -> Result<(), String> {
+    let path = PathBuf::from(format!(".jet/bindings/c/{name}.jet"));
+    let Some(parent) = path.parent() else {
+        return Err("binding cache path has no parent".to_string());
+    };
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("could not create `{}`: {error}", parent.display()))?;
+    fs::write(path, source)
+        .map_err(|error| format!("could not write generated binding cache: {error}"))
+}
+
+fn update_binding_package_config(
+    package_path: &Path,
+    name: Option<&str>,
+    shape: Option<jet::Bindgen::BindingShape>,
+    policy: Option<jet::Bindgen::BindingPolicy>,
+) -> Result<(), String> {
+    let mut source = fs::read_to_string(package_path).unwrap_or_default();
+    if let (Some(name), Some(shape)) = (name, shape) {
+        if !source.contains("bindings:") {
+            source.push_str("\n\nbindings: .{\n");
+            source.push_str(&format!(
+                "    {name}: .{{ shape: .{}, frozen: {} }}\n",
+                match shape {
+                    jet::Bindgen::BindingShape::Automatic => "Automatic",
+                    jet::Bindgen::BindingShape::Native => "Native",
+                },
+                policy == Some(jet::Bindgen::BindingPolicy::Frozen)
+            ));
+            source.push_str("}\n");
+        } else if !source.contains(&format!("{name}:")) {
+            source.push_str(&format!(
+                "\n// binding plan: {name} shape={}\n",
+                shape.as_str()
+            ));
+        }
+    }
+    if let Some(policy) = policy {
+        if !source.contains("bindings: .{") || !source.contains("policy:") {
+            source.push_str(&format!(
+                "\n\npolicy: .{{ bindings: .{} }}\n",
+                match policy {
+                    jet::Bindgen::BindingPolicy::Automatic => "Automatic",
+                    jet::Bindgen::BindingPolicy::Frozen => "Frozen",
+                }
+            ));
+        }
+    }
+    if source.trim().is_empty() {
+        return Err(format!(
+            "`{}` is not a package manifest",
+            package_path.display()
+        ));
+    }
+    fs::write(package_path, source)
+        .map_err(|error| format!("could not write `{}`: {error}", package_path.display()))
+}
+
+fn read_c_bind_overlay(path: &str, lib: &str) -> Result<jet::CBind::HandleOverlay, String> {
+    let source = std::fs::read_to_string(path)
+        .map_err(|error| format!("the overlay file could not be read ({error})"))?;
+    let (tokens, lex_diagnostics) = jet::Lexer::lex(&source);
+    if !lex_diagnostics.is_empty() {
+        return Err(format!(
+            "the overlay has lexer diagnostics: {lex_diagnostics:#?}"
+        ));
+    }
+    let program = jet::Parser::parse_with_source(&tokens, &source)
+        .map_err(|diagnostics| format!("the overlay has parser diagnostics: {diagnostics:#?}"))?;
+    let mut overlay = jet::CBind::HandleOverlay::default();
+    let mut found = false;
+    for item in &program.items {
+        let jet::AST::Item::CModule(c_module) = item else {
+            continue;
+        };
+        if c_module.kind != jet::AST::CModuleKind::Extern {
+            continue;
+        }
+        if c_module.lib != lib {
+            return Err(format!(
+                "the overlay declares `c.{}` but this bind targets `c.{lib}`",
+                c_module.lib
+            ));
+        }
+        found = true;
+        for function in &c_module.functions {
+            let Some((close, _)) = &function.close else {
+                continue;
+            };
+            let Some(jet::AST::Type::Named(handle)) = &function.return_type else {
+                continue;
+            };
+            overlay
+                .close_functions
+                .insert(handle.clone(), close.clone());
+        }
+    }
+    if !found {
+        return Err(format!(
+            "the overlay has no `#Import module c.{lib} {{ … }}` block"
+        ));
+    }
+    Ok(overlay)
 }
 
 fn bind_e3208(what: String, why: String, fix: String) -> ! {
@@ -4899,9 +7031,7 @@ fn publish_com_binding_artifacts(
         Ok(metadata) if metadata.file_type().is_file() => {
             if let Err(error) = fs::rename(source_path, &source_backup) {
                 cleanup_staged();
-                return Err(format!(
-                    "could not stage the previous COM cache ({error})"
-                ));
+                return Err(format!("could not stage the previous COM cache ({error})"));
             }
             true
         }
@@ -4912,7 +7042,9 @@ fn publish_com_binding_artifacts(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
         Err(error) => {
             cleanup_staged();
-            return Err(format!("could not inspect the generated COM cache ({error})"));
+            return Err(format!(
+                "could not inspect the generated COM cache ({error})"
+            ));
         }
     };
     let had_provenance = match fs::symlink_metadata(provenance_path) {
@@ -4922,7 +7054,9 @@ fn publish_com_binding_artifacts(
                     let _ = fs::rename(&source_backup, source_path);
                 }
                 cleanup_staged();
-                return Err(format!("could not stage the previous COM provenance ({error})"));
+                return Err(format!(
+                    "could not stage the previous COM provenance ({error})"
+                ));
             }
             true
         }
@@ -4939,7 +7073,9 @@ fn publish_com_binding_artifacts(
                 let _ = fs::rename(&source_backup, source_path);
             }
             cleanup_staged();
-            return Err(format!("could not inspect the generated COM provenance ({error})"));
+            return Err(format!(
+                "could not inspect the generated COM provenance ({error})"
+            ));
         }
     };
     if let Err(error) = fs::rename(&source_stage, source_path) {
@@ -4950,7 +7086,9 @@ fn publish_com_binding_artifacts(
             let _ = fs::rename(&provenance_backup, provenance_path);
         }
         cleanup_staged();
-        return Err(format!("could not publish the generated COM cache ({error})"));
+        return Err(format!(
+            "could not publish the generated COM cache ({error})"
+        ));
     }
     if let Err(error) = fs::rename(&provenance_stage, provenance_path) {
         let _ = fs::remove_file(source_path);
@@ -5242,6 +7380,15 @@ fn run_go_bind(args: &[&String]) {
             &format!("the generated cache could not be written ({error})"),
         );
     }
+    if let Err(error) = std::fs::write(
+        cache_dir.join(format!("{lib}.provenance")),
+        &result.provenance,
+    ) {
+        go_bind_error(
+            source_path,
+            &format!("the binding provenance could not be written ({error})"),
+        );
+    }
     println!(
         "bound {} Go export{} from `{}` → {}",
         result.bound.len(),
@@ -5345,6 +7492,15 @@ fn run_fortran_bind(args: &[&String]) {
         fortran_bind_error(
             source_path,
             &format!("the generated cache could not be written ({error})"),
+        );
+    }
+    if let Err(error) = std::fs::write(
+        cache_dir.join(format!("{lib}.provenance")),
+        &result.provenance,
+    ) {
+        fortran_bind_error(
+            source_path,
+            &format!("the binding provenance could not be written ({error})"),
         );
     }
     println!(
@@ -5547,7 +7703,7 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
         );
         exit(ExitCodes::USER_ERROR);
     }
-    let prog = match jet::Parser::parse(&toks) {
+    let prog = match jet::Parser::parse_with_source(&toks, &source_for_parse) {
         Ok(p) => p,
         Err(ds) => {
             eprint!(
@@ -5590,6 +7746,9 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
                         is_extern: false,
                         is_c_abi: false,
                         c_abi_name: None,
+                        callback_transport: None,
+                        callback_plan_digest: None,
+                        callback_identity: None,
                         foreign_effect_root: None,
                         undo: None,
                         is_unsafe: f.is_unsafe,
@@ -5694,12 +7853,10 @@ fn render_eval_value(value: &jet::CtValue) -> Option<String> {
 const EVAL_EXPRESSION_LABEL: &str = "<eval>";
 
 fn render_eval_json(value: &jet::CtValue) -> String {
-    jet::Diagnostics::render_status_json(
-        "ok",
-        true,
-        "eval",
-        &format!(",\"value\":{}", value.to_json()),
-    )
+    let value = StatusValue::parse(&value.to_json()).expect("evaluated value must be valid JSON");
+    StatusEnvelope::new("eval", true)
+        .with_field("value", value)
+        .json()
 }
 
 /// S60 / D-PURE1: `jet eval "<expression>"` — the expression form of the same
@@ -5761,11 +7918,10 @@ pub(crate) fn visible_lints(
         .collect()
 }
 
-/// D-TOOL3 (E2-M11): `jet emit --rust` — print the generated Rust source for a
-/// Jet file. This is the expert-window view: the hidden Jet→Rust translation
-/// without compiling to native. Useful for debugging or learning what codegen
-/// produces.
-pub(crate) fn run_emit_rust(file: &str, mode: OutputMode) {
+/// D-TOOL3 (E2-M11): `jet emit --rust` — print Rust from optimized canonical
+/// MIR for a checked Jet file. `--metadata` adds the canonical MIR identity
+/// header used by artifact witnesses.
+pub(crate) fn run_emit_rust(file: &str, mode: OutputMode, emit_metadata: bool) {
     let src = match fs::read_to_string(file) {
         Ok(s) => s,
         Err(_) => {
@@ -5773,22 +7929,56 @@ pub(crate) fn run_emit_rust(file: &str, mode: OutputMode) {
             exit(ExitCodes::USER_ERROR);
         }
     };
-    match jet::compile_with_path(&src, file) {
-        Ok(out) => {
-            let lints = visible_lints(&out.lints);
-            if !lints.is_empty() {
-                eprint!(
-                    "{}",
-                    jet::render_all_colored(file, &src, &lints, mode.color_stderr())
-                );
-            }
-            print!("{}", out.rust);
-        }
-        Err(diags) => {
-            report_problems(mode, file, &src, &diags);
+    let (diagnostics, bundle, _facts) =
+        jet::Driver::check_file_with_effect_facts_for_run(file, "dev", &BTreeMap::new());
+    let (errors, lints): (Vec<_>, Vec<_>) = diagnostics
+        .into_iter()
+        .partition(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error);
+    if !errors.is_empty() {
+        report_problems(mode, file, &src, &errors);
+        exit(ExitCodes::USER_ERROR);
+    }
+    let bundle = match bundle {
+        Some(bundle) => bundle,
+        None => {
+            report_problems(mode, file, &src, &[]);
             exit(ExitCodes::USER_ERROR);
         }
+    };
+    let lints = visible_lints(&lints);
+    if !lints.is_empty() {
+        eprint!(
+            "{}",
+            jet::render_all_colored(file, &src, &lints, mode.color_stderr())
+        );
     }
+    let target = if bundle.build_facts.target_triple.is_empty() {
+        jet_foundation::Layout::TargetLayout::host()
+    } else {
+        jet_foundation::Layout::TargetLayout::from_triple(bundle.build_facts.target_triple.clone())
+    };
+    let (mir, artifact) = jet::lower_checked_semantic_mir_program_for(
+        &bundle,
+        jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        ),
+    );
+    let mir_digest = jet_foundation::MIR::mir_program_digest(&mir);
+    let mut execution = jet::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
+    execution.emit_metadata = emit_metadata;
+    execution.semantic_digest = emit_metadata.then_some(mir_digest);
+    let rust = jet::Codegen::MIRRust::emit_mir_program(
+        &mir,
+        &jet::Codegen::MIRRust::MirRustConfig {
+            target,
+            target_kind: jet::Codegen::MIRRust::MirRustTarget::Native,
+            root_prefix: String::new(),
+            execution,
+        },
+    );
+    print!("{rust}");
 }
 /// Project the shared cost diagnostics consumed by `jet check` and
 /// `jet lint --cost`. Sema owns view-copy diagnostics; typed TIR owns the
@@ -6024,7 +8214,7 @@ pub(crate) fn run_lint_complexity(file: &str, mode: OutputMode, max_budget: Opti
         report_problems(mode, file, &src, &lex_errors);
         exit(ExitCodes::USER_ERROR);
     }
-    let program = match jet::Parser::parse(&tokens) {
+    let program = match jet::Parser::parse_with_source(&tokens, &source_for_parse) {
         Ok(program) => program,
         Err(parse_errors) => {
             report_problems(mode, file, &src, &parse_errors);

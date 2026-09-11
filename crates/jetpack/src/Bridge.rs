@@ -18,7 +18,8 @@
 use super::Output::Theme;
 use super::Provider::ProviderError;
 use super::SemanticLock::FlakeGraph;
-use super::JSON::{self, JSONValue};
+use super::JSON;
+use jet_foundation::DataTree::DataTree;
 use crate::Diagnostics::Diagnostic;
 use crate::Syntax;
 use std::collections::BTreeSet;
@@ -363,7 +364,7 @@ fn parse_facts_json(text: &str) -> Result<DevShellFacts, ProviderError> {
     let mut packages = Vec::new();
     let mut package_field_seen = false;
     for field in ["packages", "buildInputs", "nativeBuildInputs"] {
-        let Some(value) = obj.get(field) else {
+        let Some(value) = parsed.value.get_opt(field) else {
             continue;
         };
         package_field_seen = true;
@@ -385,15 +386,16 @@ fn parse_facts_json(text: &str) -> Result<DevShellFacts, ProviderError> {
     packages.dedup();
 
     let mut unmapped = Vec::new();
-    let shell_hook = obj
-        .get("shellHook")
+    let shell_hook = parsed
+        .value
+        .get_opt("shellHook")
         .ok_or_else(|| bad_output("missing key `shellHook`".into()))?
         .as_str()
         .map_err(&bad_output)?;
     if !shell_hook.trim().is_empty() {
         unmapped.push("shellHook".to_string());
     }
-    for field in obj.keys() {
+    for (field, _) in obj {
         if !matches!(
             field.as_str(),
             "packages" | "buildInputs" | "nativeBuildInputs" | "shellHook"
@@ -830,29 +832,36 @@ fn add_catalog_json(path: &Path, names: &mut BTreeSet<String>) {
     add_catalog_value(&value, names);
 }
 
-fn add_catalog_value(value: &JSONValue, names: &mut BTreeSet<String>) {
+fn add_catalog_value(value: &DataTree, names: &mut BTreeSet<String>) {
     match value {
-        JSONValue::String(name) if is_catalog_name(name) => {
+        DataTree::Text(name) | DataTree::TypedText(name) if is_catalog_name(name) => {
             names.insert(name.clone());
         }
-        JSONValue::Array(values) => {
+        DataTree::Array(values) => {
             for value in values {
                 add_catalog_value(value, names);
             }
         }
-        JSONValue::Object(fields) => {
-            if let Some(name) = fields.get("name").and_then(|value| value.as_str().ok()) {
+        DataTree::Object(fields) => {
+            if let Some(name) = fields
+                .iter()
+                .find_map(|(key, value)| (key == "name").then_some(value))
+                .and_then(|value| value.as_str().ok())
+            {
                 if is_catalog_name(name) {
                     names.insert(name.to_string());
                 }
             }
             for field in ["packages", "records", "catalog", "recipes"] {
-                if let Some(value) = fields.get(field) {
+                if let Some(value) = fields
+                    .iter()
+                    .find_map(|(key, value)| (key == field).then_some(value))
+                {
                     add_catalog_value(value, names);
                 }
             }
         }
-        JSONValue::String(_) | JSONValue::Null | JSONValue::Bool(_) | JSONValue::Number(_) | JSONValue::Flt(_) => {}
+        _ => {}
     }
 }
 
@@ -1351,7 +1360,15 @@ pub fn cmd_import(
     add_import_evaluator_record(&mut lock, &file, &packages, &gaps, &host_system());
 
     if let Some(source_channel) = source_channel {
-        crate::Lock::record_source_channel(dir, source_channel);
+        if let Err(error) = crate::Lock::record_source_channel(dir, source_channel) {
+            theme.error_coded(
+                "E1206",
+                "couldn't write the imported source channel lock",
+                &error,
+                "fix the project lock permissions and rerun the import",
+            );
+            return 1;
+        }
     }
     if let Err(error) = super::SemanticLock::atomic_commit(dir, &lock) {
         theme.error(

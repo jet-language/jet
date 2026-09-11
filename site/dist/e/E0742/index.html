@@ -34,16 +34,16 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">A trait method may declare an effect upper bound (`fn hash(self) -[]&gt;`, `fn render(self) -[GPU]&gt;`); every implementation&#39;s inferred effects must fit inside it, so the bound holds for all impls (D-EFF3).</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">remove the offending work from the impl, or widen the bound on the trait method.</p>
+<p class="diag-copy fix" data-registry-field="fix">Remove the offending work from the impl, or widen the bound on the trait method.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0742</code>: <code>tests/ui/effect_trait_impl_bound.stderr</code>.</p>
-<pre class="diag">Error [E0742]: this `hash` impl uses the effect `FS`, which the trait doesn&#39;t allow
+<pre class="diag">Error [E0742]: This `hash` impl uses the effect `FS`, which the trait doesn&#39;t allow
   --&gt; tests/ui/effect_trait_impl_bound.jet:12:8
     |
  12 |     fn hash(self) Int -&gt; {
     |        ^^^^
  Why: `Hasher` bounds `hash` to `-[]&gt;`, so impls must be pure; `FS` is outside that bound
- Fix: remove the `FS` work from this impl, or widen the bound on the trait method
+ Fix: Remove the `FS` work from this impl, or widen the bound on the trait method
 More: jet-lang.dev/e/E0742
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

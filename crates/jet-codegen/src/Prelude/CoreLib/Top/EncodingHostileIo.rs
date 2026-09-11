@@ -8,6 +8,7 @@
 //   JET_ENC_HOSTILE_READ_ONE=1            shorthand for every read capped at 1
 //   JET_ENC_HOSTILE_WRITE_MAX=n           fixed write chunk (ignored when WRITE_PLAN set)
 
+const JET_ENCODING_IO_CHUNK: usize = 64 * 1024;
 #[derive(Clone, Copy, Debug, Default)]
 struct JetEncodingHostileIoPlan {
     read_one_byte: bool,
@@ -64,12 +65,12 @@ impl JetEncodingHostileIoState {
             if self.read_plan_idx < self.read_plan.len() {
                 self.read_plan_idx += 1;
             }
-            return cap.min(buf_len);
+            return cap.min(buf_len).min(JET_ENCODING_IO_CHUNK);
         }
         if plan.read_one_byte {
             1.min(buf_len)
         } else {
-            buf_len
+            buf_len.min(JET_ENCODING_IO_CHUNK)
         }
     }
 
@@ -80,10 +81,10 @@ impl JetEncodingHostileIoState {
             if self.write_plan_idx < self.write_plan.len() {
                 self.write_plan_idx += 1;
             }
-            return cap.min(remaining);
+            return cap.min(remaining).min(JET_ENCODING_IO_CHUNK);
         }
         if plan.write_chunk == 0 {
-            remaining
+            remaining.min(JET_ENCODING_IO_CHUNK)
         } else {
             plan.write_chunk.min(remaining)
         }
@@ -227,7 +228,8 @@ fn jet_encoding_file_read(reader: &mut JetFileReader, buf: &mut [u8]) -> std::io
     }
     let Some(plan) = jet_encoding_hostile_io_plan() else {
         use std::io::Read;
-        return reader.inner.read(buf);
+        let cap = buf.len().min(JET_ENCODING_IO_CHUNK);
+        return reader.inner.read(&mut buf[..cap]);
     };
     jet_encoding_hostile_io_with(|state| {
         state.stats.read_calls += 1;
@@ -263,7 +265,10 @@ fn jet_encoding_file_write_all(writer: &mut JetFileWriter, bytes: &[u8]) -> std:
     }
     let Some(plan) = jet_encoding_hostile_io_plan() else {
         use std::io::Write;
-        return writer.inner.write_all(bytes);
+        for chunk in bytes.chunks(JET_ENCODING_IO_CHUNK) {
+            writer.inner.write_all(chunk)?;
+        }
+        return Ok(());
     };
     jet_encoding_hostile_io_with(|state| {
         state.stats.write_calls += 1;

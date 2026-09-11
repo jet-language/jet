@@ -11,15 +11,16 @@
 //!     in the prelude (Float keeps its decimal part there, S21)
 //!   - every operator result is fully parenthesized
 
-use crate::Sema::CompileMode;
 use crate::Syntax;
-use crate::Traits;
-use crate::AST::FfiLink;
-use crate::AST::{Expr, Func, Item, Program, ProgramBundle, ResolvedOutput, Stmt, TestDef, Type};
-use std::collections::{BTreeMap, HashSet};
+use crate::AST::{FfiLink, Item, ProgramBundle, Type};
+pub(crate) use crate::AST::{mangle, mangle_generated, mangle_path};
+use jet_pkg_model::Package::ReleaseDevtoolsPolicy;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::{Mutex, OnceLock};
 
-pub(crate) use jet_foundation::Names::{mangle, mangle_generated, mangle_path};
+pub(crate) use jet_foundation::MIR::{
+    MirArtifactPlan, MirProgram, MirRuntimePartId,
+};
 
 /// The generated-name prefix used by emitter format strings. Keeping this as
 /// one allocator argument lets every emitted temporary share the same machine
@@ -41,16 +42,34 @@ pub(crate) fn rust_trait_name(trait_name: &str) -> String {
         .unwrap_or_else(|| mangle(trait_name))
 }
 
-/// Non-identifier marker used by the web source-map protocol.
-pub(crate) const SOURCE_MAP_MARKER: &str = concat!("//# __jet_", "source_map");
 
 // Native cache identity must digest the emitted stdlib closure, not the whole
 // compiler binary. Keep the fixed Prelude digest for the process and keep the
 // used-Core digests bounded: a long-lived compiler service can see many
 // programs, but the digest cache must not become another unbounded cache.
 const CORELIB_DIGEST_CACHE_LIMIT: usize = 32;
-static CACHED_RUNTIME_FINGERPRINT: OnceLock<String> = OnceLock::new();
 
+pub const JET_CANONICAL_FONT_BYTES: &[u8] =
+    include_bytes!("../../../../site/assets/fonts/exo2-700.ttf");
+pub const JET_CANONICAL_ARABIC_FONT_BYTES: &[u8] =
+    include_bytes!("../../../../site/assets/fonts/noto-sans-arabic-regular.ttf");
+pub const JET_CANONICAL_SYMBOLS_FONT_BYTES: &[u8] =
+    include_bytes!("../../../../site/assets/fonts/noto-sans-symbols2-regular.ttf");
+
+/// Emit the checked canonical font bytes into generated native sources.  The
+/// generated program must not resolve a host filesystem font, or glyph IDs and
+/// positions would vary across tiers and machines.
+fn canonical_font_prelude() -> String {
+    format!(
+        "const JET_CANONICAL_FONT_BYTES: &[u8] = &{:?};\n\
+         const JET_CANONICAL_ARABIC_FONT_BYTES: &[u8] = &{:?};\n\
+         const JET_CANONICAL_SYMBOLS_FONT_BYTES: &[u8] = &{:?};\n",
+        JET_CANONICAL_FONT_BYTES,
+        JET_CANONICAL_ARABIC_FONT_BYTES,
+        JET_CANONICAL_SYMBOLS_FONT_BYTES
+    )
+}
+static CACHED_RUNTIME_FINGERPRINT: OnceLock<String> = OnceLock::new();
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct CoreEmissionFingerprintKey {
     used_core: Vec<String>,
@@ -58,6 +77,9 @@ struct CoreEmissionFingerprintKey {
     edition: String,
     force_corelib: bool,
     test_harness: bool,
+    release_inspect: Option<String>,
+    devtools_panel_code: bool,
+    devtools_stream_code: bool,
 }
 
 static CORELIB_EMISSION_FINGERPRINTS: OnceLock<
@@ -130,7 +152,6 @@ macro_rules! jet_name_format {
     };
 }
 
-mod CModule;
 mod Context;
 pub mod Embedding;
 mod Imports;
@@ -140,6 +161,10 @@ pub mod Library;
 pub mod Plugin;
 mod Statement;
 pub mod TIR;
+pub mod MIREval;
+mod Receipt;
+pub mod MIRRust;
+pub mod MIRWeb;
 mod Tuples;
 mod Utils;
 mod VariadicBound;
@@ -150,25 +175,21 @@ mod Web;
 #[allow(dead_code)]
 pub mod test_report {
     include!("../../../jet-foundation/src/Report.rs");
+    include!("../../../jet-foundation/src/Evidence.rs");
+    include!("../Prelude/Core/TestEvidence.rs");
     include!("../Prelude/CoreLib/Top/TestingShared.rs");
     include!("../Prelude/TestReport.rs");
 }
 
-pub(crate) use CModule::*;
 pub(crate) use Context::*;
-pub use Embedding::{export_shape, export_surface, ExportFunction, ExportScalar};
+pub use Embedding::{export_surface, ExportFunction, ExportScalar};
 pub(crate) use Imports::*;
-pub(crate) use Items::*;
-pub use Library::{
-    emit_library, library_export_shape, LibraryArtifacts, LibraryExport, LibraryScalar,
-};
-pub use Plugin::{emit_plugin, plugin_export_shape, PluginArtifacts, PluginScalar};
+pub use Library::{emit_library, LibraryArtifacts, LibraryExport};
+pub use Plugin::{emit_plugin, PluginArtifacts};
 pub(crate) use Statement::*;
 pub(crate) use Tuples::*;
 pub(crate) use Utils::*;
-pub use Web::{
-    build_wasm_jet_source_map, emit_web, validate_web_tir_support, WebArtifacts, WebTirUnsupported,
-};
+pub use Web::build_wasm_jet_source_map;
 
 /// Build the interpreter's bundle-wide Core alias map from the same import
 /// resolver used by AOT and JIT lowering. In particular, member-list imports
@@ -183,20 +204,127 @@ pub fn core_imports_for_bundle(bundle: &ProgramBundle) -> BTreeMap<String, Strin
     imports
 }
 
+/// Generated-only wrappers around the Foundation-independent native host
+/// registry. The compile-time policy is emitted immediately before the
+/// Prelude, so release artifacts can dead-code-eliminate every callback.
+const DEVTOOLS_NATIVE_WRAPPERS_PRELUDE: &str = r#"
+#[inline(always)]
+pub fn jet_devtools_install_native_host(
+    session_id: impl Into<String>,
+    host: JetDevtoolsNativeHostHandle,
+) -> Result<JetDevtoolsNativeHostGuard, String> {
+    if !JET_DEVTOOLS_RUNTIME_ENABLED {
+        return Err("native devtools host is disabled by the release policy".to_string());
+    }
+    jet_devtools_install_native_host_unchecked(session_id, host)
+}
+
+#[inline(always)]
+pub fn jet_devtools_native_bind_session(session_id: &str) -> Result<(), String> {
+    if !JET_DEVTOOLS_RUNTIME_ENABLED {
+        return Err("native devtools session is disabled by the release policy".to_string());
+    }
+    jet_devtools_native_bind_session_unchecked(session_id)
+}
+
+#[inline(always)]
+pub fn jet_devtools_native_clear_session(session_id: &str) {
+    if JET_DEVTOOLS_RUNTIME_ENABLED {
+        jet_devtools_native_clear_session_unchecked(session_id);
+    }
+}
+
+#[inline(always)]
+pub fn jet_devtools_publish_event_for_session(session_id: &str, event: JetDevtoolsEvent) {
+    if JET_DEVTOOLS_RUNTIME_ENABLED {
+        jet_devtools_publish_event_for_session_unchecked(session_id, event);
+    }
+}
+
+#[inline(always)]
+pub fn jet_devtools_native_window_open(width: u32, height: u32) {
+    if JET_DEVTOOLS_RUNTIME_ENABLED {
+        jet_devtools_native_window_open_unchecked(width, height);
+    }
+}
+
+#[inline(always)]
+pub fn jet_devtools_native_window_close() {
+    if JET_DEVTOOLS_RUNTIME_ENABLED {
+        jet_devtools_native_window_close_unchecked();
+    }
+}
+
+#[inline(always)]
+pub fn jet_devtools_native_input(input: JetDevtoolsNativeInput) -> bool {
+    if JET_DEVTOOLS_RUNTIME_ENABLED {
+        return jet_devtools_native_input_unchecked(input);
+    }
+    false
+}
+
+#[inline(always)]
+pub fn jet_devtools_native_frame_begin(
+    frame_index: u64,
+    width: u32,
+    height: u32,
+) -> Vec<JetDevtoolsNativeDrawCommand> {
+    if JET_DEVTOOLS_RUNTIME_ENABLED {
+        return jet_devtools_native_frame_begin_unchecked(frame_index, width, height);
+    }
+    Vec::new()
+}
+
+#[inline(always)]
+pub fn jet_devtools_native_draw(command: JetDevtoolsNativeDrawCommand) {
+    if JET_DEVTOOLS_RUNTIME_ENABLED {
+        jet_devtools_native_draw_unchecked(command);
+    }
+}
+
+#[inline(always)]
+pub fn jet_devtools_native_frame_end() {
+    if JET_DEVTOOLS_RUNTIME_ENABLED {
+        jet_devtools_native_frame_end_unchecked();
+    }
+}
+"#;
+
 /// Emitted at the top of every program: core runtime helpers used by generated Rust.
 /// Parts stay in source order so splitting ownership never changes generated bytes.
+///
+/// Every part here is spliced flat into the generated crate root, so one
+/// namespace holds all of them: item names must be unique across parts, a part
+/// may only use `pub`, `pub(crate)`, or private visibility (`pub(super)` has
+/// no parent at the root), and Foundation items are named unqualified or
+/// through the `jet_foundation` facade (`push_foundation_facade`).
+///
+/// `Outcome.rs` is not listed: it is the `outcome` root of
+/// `EMBEDDED_PRELUDE_PARTS`, whose dependency closure (JSON kernel,
+/// `RuntimeDiagnosticCore`) `push_cached_runtime_body` emits before these.
 const PRELUDE_PARTS: &[&str] = &[
-    // D-FAIL-CARRIER1=A: the one carrier under `?T` and `T !E`. First, because
-    // every other part builds outcomes on top of it.
-    include_str!("../../../jet-foundation/src/Outcome.rs"),
+    // D-SHAPE-ONE1=A: the compiler and every generated tier consume this
+    // single shape vocabulary; no Prelude-local shape enum is permitted.
+    include_str!("../../../jet-foundation/src/Shape.rs"),
     // D-DEVR-LAW1=A / I9: every execution tier receives the same development
     // act receipt shape and serializer.
     include_str!("../Prelude/DevelopmentReceipt.rs"),
+    include_str!("../Prelude/Core/Receipt.rs"),
+    // D-DX-DEVTOOLS1: one typed observation protocol shared by every execution tier.
+    // `Prelude/Devtools.rs` is a symlink to the Foundation module; its
+    // host-crate native region is cut by `push_prelude` (see
+    // `HOST_DEVTOOLS_NATIVE_BEGIN`) and replaced by the two parts below, so the
+    // native registry source enters the program exactly once.
+    DEVTOOLS_SOURCE,
+    include_str!("../../../jet-foundation/src/DevtoolsNative.rs"),
+    DEVTOOLS_NATIVE_WRAPPERS_PRELUDE,
     include_str!("../Prelude/FaultInjection.rs"),
     // D-BENCH-KEEP1=A: every engine includes the same black-box sink source;
     // resident adapters only marshal their carrier into this function.
     include_str!("../Prelude/Core/Keep.rs"),
+    include_str!("../Prelude/JobQueueTypes.rs"),
     include_str!("../Prelude/Job.rs"),
+    include_str!("../Prelude/Core/Option.rs"),
     include_str!("../Prelude/Core/FixedList.rs"),
     // D-SOA-TIER1=A: THE shared column store and the one gather read, plus the
     // Prelude-owned `[S]` facade over it. Right after FixedList because the
@@ -233,6 +361,14 @@ const PRELUDE_PARTS: &[&str] = &[
     // AOT, JIT, TIR evaluation, comptime, and web adapters.
     include_str!("../Prelude/Core/FixedArithmetic.rs"),
     include_str!("../Prelude/Core/FloatOrdering.rs"),
+    include_str!("../Prelude/Core/ParallelKernel.rs"),
+    // D-CLAIM1: every generated producer writes the same typed evidence
+    // records as Foundation; Core.rs calls its root writer below.
+    // Evidence names crate::Facts and crate::ResourceSchedule. Keep those
+    // modules in the fixed runtime so a print-only program still typechecks.
+    RESOURCE_FACTS_PRELUDE,
+    include_str!("../../../jet-foundation/src/Evidence.rs"),
+    include_str!("../Prelude/Core/TestEvidence.rs"),
     include_str!("../Prelude/Core.rs"),
     include_str!("../Prelude/Core/ViewAccess.rs"),
     // D-EXPOP1=A / D-EXPSEM1=A: `^`. Shared verbatim with the wasm module
@@ -249,22 +385,27 @@ const PRELUDE_PARTS: &[&str] = &[
     // file, so no tier re-implements directory traversal (I9). A nested
     // `include!` inside an embedded part cannot work: the generated crate has
     // no Prelude tree to read from.
+    include_str!("../Prelude/Core/FSIgnore.rs"),
     include_str!("../Prelude/Core/FSWalk.rs"),
     include_str!("../Prelude/CoreLib/JetStd/Iter.rs"),
     include_str!("../Prelude/Core/CollectionFailure.rs"),
+    include_str!("../Prelude/Core/SortKernel.rs"),
     include_str!("../Prelude/Core/Collections.rs"),
     include_str!("../Prelude/Memo.rs"),
     include_str!("../Prelude/SharedProtocol.rs"),
-    include_str!("../Prelude/Term.rs"),
+    TERM_PRELUDE,
+    // D-DX-HUMANOUTPUT1: capability-aware human rendering shared by every tier.
+    include_str!("../Prelude/Core/HumanOutput.rs"),
     // D-TERM1 / I9: the one terminal key kernel. AOT embeds it here; the
     // canonical TIR evaluator and the resident JIT host `include!` the same
     // file, so no tier re-decodes key bytes or re-states raw-mode entry.
     include_str!("../Prelude/Core/TermKey.rs"),
     include_str!("../Prelude/Core/RuntimeControl.rs"),
-    include_str!("../Prelude/Core/JsonError.rs"),
-    include_str!("../Prelude/NumericWiden.rs"),
+    include_str!("../../../jet-foundation/src/NumericConversion.rs"),
+    include_str!("../Prelude/Core/NumericRuntime.rs"),
     include_str!("../Prelude/Observe.rs"),
     include_str!("../../../jet-foundation/src/ExactUnitConversion.rs"),
+    include_str!("../Prelude/Core/NumericWeb.rs"),
     include_str!("../../../jet-foundation/src/StructuralDebug.rs"),
     // D-SHIFT1: `binary.Reader` / `text.Cursor`. Owned by jet-foundation so the
     // AOT prelude and the canonical TIR evaluator run one kernel (I9).
@@ -279,6 +420,16 @@ const HOST_RUNTIME_STOP_BEGIN: &str = "// JET_HOST_RUNTIME_STOP_BEGIN";
 const HOST_RUNTIME_SENTRY_BEGIN: &str = "// JET_HOST_RUNTIME_SENTRY_BEGIN";
 const HOST_RUNTIME_SENTRY_END: &str = "// JET_HOST_RUNTIME_SENTRY_END";
 const HOST_RUNTIME_STOP_END: &str = "// JET_HOST_RUNTIME_STOP_END";
+const DEVTOOLS_SOURCE: &str = include_str!("../Prelude/Devtools.rs");
+const TERM_PRELUDE: &str = concat!(
+    "\n// JET_VETTED_UNSAFE_BEGIN: jet_term_kernel\n\
+     // AUDIT: D-IO-TERM1 keeps terminal detection, stream ownership, and the\n\
+     // platform raw-mode ABI in this compiler-owned shared kernel.\n",
+    include_str!("../Prelude/Term.rs"),
+    "\n// JET_VETTED_UNSAFE_END: jet_term_kernel\n",
+);
+const HOST_DEVTOOLS_NATIVE_BEGIN: &str = "// JET_HOST_DEVTOOLS_NATIVE_BEGIN";
+const HOST_DEVTOOLS_NATIVE_END: &str = "// JET_HOST_DEVTOOLS_NATIVE_END";
 
 /// Embedded Prelude parts are a dependency graph, not a list of incidental
 /// imports. A root part pulls in every transitive part it names before its own
@@ -296,6 +447,24 @@ struct EmbeddedPreludePart {
 }
 
 const EMBEDDED_PRELUDE_PARTS: &[EmbeddedPreludePart] = &[
+    EmbeddedPreludePart {
+        name: "fixed_allocator",
+        dependencies: &[],
+        source: EmbeddedPreludePartSource::Static(concat!(
+            "\n// JET_VETTED_UNSAFE_BEGIN: jet_fixed_kernel\npub mod jet_fixed_kernel {\n",
+            include_str!("../Prelude/Core/FixedAllocator.rs"),
+            "\n}\n// JET_VETTED_UNSAFE_END: jet_fixed_kernel\n",
+        )),
+    },
+    EmbeddedPreludePart {
+        name: "runtime_diagnostic_core",
+        dependencies: &[],
+        source: EmbeddedPreludePartSource::Static(concat!(
+            "\npub mod RuntimeDiagnosticCore {\n",
+            include_str!("../../../jet-foundation/src/RuntimeDiagnosticCore.rs"),
+            "\n}\n",
+        )),
+    },
     EmbeddedPreludePart {
         name: "encoding_errors",
         dependencies: &[],
@@ -325,10 +494,169 @@ const EMBEDDED_PRELUDE_PARTS: &[EmbeddedPreludePart] = &[
     },
     EmbeddedPreludePart {
         name: "outcome",
-        dependencies: &["encoding_json"],
+        dependencies: &["encoding_json", "runtime_diagnostic_core"],
         source: EmbeddedPreludePartSource::Outcome,
     },
+    // The generated runtime uses the same rooted, no-follow SHA-256
+    // implementation as Foundation. Keeping the full module here closes the
+    // `core.fs` dependency without a second host-only wrapper.
+    EmbeddedPreludePart {
+        name: "sha256",
+        dependencies: &[],
+        source: EmbeddedPreludePartSource::Static(concat!(
+            "\n// JET_VETTED_UNSAFE_BEGIN: jet_foundation_sha256\n\
+             // AUDIT: this Foundation SHA-256 module owns the bounded hostile-input\n\
+             // tree-hash file boundary; its rooted authority uses checked no-follow\n\
+             // descriptors and keeps every raw descriptor operation in this module.\n\
+             #[allow(non_snake_case)]\nmod SHA256 {\n",
+            include_str!("../../../jet-foundation/src/SHA256.rs"),
+            "\n}\n// JET_VETTED_UNSAFE_END: jet_foundation_sha256\n",
+        )),
+    },
+    EmbeddedPreludePart {
+        name: "performance_budget",
+        dependencies: &["sha256"],
+        source: EmbeddedPreludePartSource::Static(concat!(
+            "\n#[allow(non_snake_case)]\nmod PerformanceBudget {\n",
+            include_str!("../../../jet-foundation/src/PerformanceBudget.rs"),
+            "\n}\n",
+        )),
+    },
+    // D-DATA-FLOW / I9: the one data-loader kernel (identity, redaction,
+    // snapshot facts) behind `core.data`; `LazyTablePlan.rs` and `DataPlot.rs`
+    // derive column identity from it in every tier.
+    EmbeddedPreludePart {
+        name: "prelude_data_flow",
+        dependencies: &["sha256"],
+        source: EmbeddedPreludePartSource::Static(concat!(
+            "\nmod jet_prelude_data_flow {\n",
+            include_str!("../../../jet-foundation/src/PreludeDataFlow.rs"),
+            "\n}\n",
+        )),
+    },
+    // Checked Arrow C-data ownership behind `core.data.arrow`'s
+    // `DataArrowBatch`. Its pointer reads are Foundation-vetted (I1).
+    EmbeddedPreludePart {
+        name: "arrow_data",
+        dependencies: &[],
+        source: EmbeddedPreludePartSource::Static(concat!(
+            "\n// JET_VETTED_UNSAFE_BEGIN: jet_arrow_data\n\
+             // AUDIT: this region imports the Arrow C data interface, validates\n\
+             // schema/length/offset/buffer bounds, and retains release callbacks.\n\
+             // Safe Rust cannot express foreign ownership and callback ABIs.\n\
+             // Callers must provide live C records and transfer each owner once;\n\
+             // violating that contract can read outside a buffer or double-free.\n\
+             mod jet_arrow_data {\n",
+            include_str!("../../../jet-foundation/src/ArrowData.rs"),
+            "\n}\n// JET_VETTED_UNSAFE_END: jet_arrow_data\n\
+             #[allow(non_snake_case)]\n\
+             mod ArrowData { pub use crate::jet_arrow_data::*; }\n",
+        )),
+    },
+    // Checked Arrow file-reader registration depends on the C-data carrier
+    // above and uses the generated crate's DataTree/ArrowData facades.
+    EmbeddedPreludePart {
+        name: "arrow_file_reader",
+        dependencies: &["arrow_data"],
+        source: EmbeddedPreludePartSource::Static(concat!(
+            "\n// JET_VETTED_UNSAFE_BEGIN: jet_arrow_file_reader\n\
+             // AUDIT: this region crosses the registered Arrow file-reader\n\
+             // provider boundary and transfers imported batch ownership.\n\
+             mod jet_arrow_file_reader {\n",
+            include_str!("../../../jet-foundation/src/ArrowFileReader.rs"),
+            "\n}\n// JET_VETTED_UNSAFE_END: jet_arrow_file_reader\n",
+        )),
+    },
 ];
+
+/// Where a Foundation module lands in the generated crate.
+enum FoundationPlacement {
+    /// Spliced flat: its items are the crate root's own items.
+    Root,
+    /// Wrapped in this generated module.
+    Module(&'static str),
+}
+
+/// The Foundation modules a generated program embeds, by their Foundation
+/// name. Prelude sources compile both inside host crates, where
+/// `jet_foundation` is a real dependency, and inside the generated crate,
+/// which has none; this table is the one contract that lets a source spell
+/// `jet_foundation::<Module>::<Item>` identically in both. It emits the
+/// `mod jet_foundation` facade (`push_foundation_facade`) and drives the flat
+/// import merge (`flat_prelude_import_bindings`). Optional source modules
+/// emitted only under `needs_fs_runtime` use their conditional generated
+/// aliases instead of entering this unconditional facade.
+const FOUNDATION_PLACEMENTS: &[(&str, FoundationPlacement)] = &[
+    ("Outcome", FoundationPlacement::Root),
+    ("Shape", FoundationPlacement::Root),
+    ("Devtools", FoundationPlacement::Root),
+    ("DevtoolsNative", FoundationPlacement::Root),
+    ("Evidence", FoundationPlacement::Root),
+    ("NumericConversion", FoundationPlacement::Root),
+    ("ExactUnitConversion", FoundationPlacement::Root),
+    ("StructuralDebug", FoundationPlacement::Root),
+    ("StreamCursor", FoundationPlacement::Root),
+    ("RuntimeDiagnosticCore", FoundationPlacement::Module("RuntimeDiagnosticCore")),
+    ("EncodingErrors", FoundationPlacement::Module("jet_encoding_errors")),
+    ("JSONNumber", FoundationPlacement::Module("jet_json_number")),
+    ("EncodingJson", FoundationPlacement::Module("jet_encoding_json")),
+    ("DataTree", FoundationPlacement::Module("jet_foundation_datatree")),
+    ("ArrowData", FoundationPlacement::Module("jet_arrow_data")),
+    (
+        "ArrowFileReader",
+        FoundationPlacement::Module("jet_arrow_file_reader"),
+    ),
+    ("PreludeDataFlow", FoundationPlacement::Module("jet_prelude_data_flow")),
+    ("SHA256", FoundationPlacement::Module("SHA256")),
+    ("PerformanceBudget", FoundationPlacement::Module("PerformanceBudget")),
+    ("Numeric", FoundationPlacement::Module("jet_foundation_numeric")),
+    ("Facts", FoundationPlacement::Module("Facts")),
+    ("ResourceSchedule", FoundationPlacement::Module("ResourceSchedule")),
+];
+fn foundation_placement(module: &str) -> Option<&'static FoundationPlacement> {
+    FOUNDATION_PLACEMENTS
+        .iter()
+        .find(|(name, _)| *name == module)
+        .map(|(_, placement)| placement)
+}
+
+/// `mod jet_foundation { pub mod <Module> { … } }`: every embedded Foundation
+/// module re-exported under its host-crate path. Root-flat modules re-export
+/// the crate root itself, so an item keeps the visibility Foundation gave it.
+/// Arrow entries are conditional because their modules are demand-driven.
+fn push_foundation_facade(out: &mut String, include_arrow: bool) {
+    out.push_str("\n#[allow(non_snake_case, unused_imports)]\nmod jet_foundation {\n");
+    for (module, placement) in FOUNDATION_PLACEMENTS {
+        if !include_arrow && matches!(*module, "ArrowData" | "ArrowFileReader") {
+            continue;
+        }
+        let target = match placement {
+            FoundationPlacement::Root => "crate".to_string(),
+            FoundationPlacement::Module(path) => format!("crate::{path}"),
+        };
+        out.push_str(&format!("    pub mod {module} {{ pub use {target}::*; }}\n"));
+    }
+    out.push_str("}\n");
+}
+
+fn push_numeric_runtime(out: &mut String) {
+    let start = NUMERIC_FOUNDATION_SOURCE
+        .find("// ── CtFraction")
+        .expect("Numeric.rs CtFraction marker missing");
+    out.push_str(
+        "\n// JET_VETTED_UNSAFE_BEGIN: jet_foundation_numeric\n\
+         // AUDIT: D-INTBIG1/D-DECIMAL1 keep the hazard-pointer exact numeric\n\
+         // carrier and its raw i64 ownership adapters in this Foundation module.\n\
+         #[allow(non_snake_case, unused_imports, dead_code)]\nmod jet_foundation_numeric {\nuse crate::jet_json_number::{json_decimal_lexeme, json_exact_integer_text};\nuse crate::{AllocError, jet_alloc_error};\nuse std::alloc::{alloc, dealloc, Layout};\nuse std::cell::Cell;\nuse std::fmt;\nuse std::ptr::{self, NonNull};\nuse std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};\nmod Syntax {\n    pub const TYPE_DECIMAL: &'static str = \"Decimal\";\n    pub const TYPE_FRACTION: &'static str = \"Fraction\";\n}\n#[derive(Clone, Debug)]\nenum CtValue {\n    Int(i64),\n    Bool(bool),\n    Str(String),\n    BigInt(CtBigInt),\n    Struct { type_name: String, fields: Vec<(String, CtValue)> },\n}\n",
+    );
+    let body = NUMERIC_FOUNDATION_SOURCE[start..]
+        .replace("crate::AST::CtValue", "CtValue")
+        .replace("crate::Syntax::", "Syntax::")
+        .replace("crate::NumericConversion::", "crate::")
+        .replace("crate::Outcome::", "crate::");
+    out.push_str(&body);
+    out.push_str("\n}\n// JET_VETTED_UNSAFE_END: jet_foundation_numeric\n");
+}
 
 /// Native builders split this exact block into the content-addressed runtime
 /// rlib. Keep the markers stable: emitted Rust remains a complete standalone
@@ -338,22 +666,74 @@ pub const CACHED_RUNTIME_END: &str = "// jet:cached-runtime-end\n";
 pub const CACHED_CORE_BEGIN: &str = "// jet:cached-core-begin\n";
 pub const CACHED_CORE_END: &str = "// jet:cached-core-end\n";
 
-/// The fixed runtime's Int display seam (see `push_cached_runtime_body`). The
-/// `OnceLock` takes runtime input: the Core kernel's tagged decoder.
-const INT_DECODER_SEAM: &str = "static __JET_INT_DECODER: std::sync::OnceLock<fn(i64) -> String> = std::sync::OnceLock::new();\n\
-pub fn jet_int_to_string(value: i64) -> String {\n\
-\x20   match __JET_INT_DECODER.get() { Some(decode) => decode(value), None => value.to_string() }\n\
-}\n\
-pub fn jet_install_int_decoder(decode: fn(i64) -> String) { let _ = __JET_INT_DECODER.set(decode); }\n\n";
-
-fn push_prelude(out: &mut String) {
-    for (index, part) in PRELUDE_PARTS.iter().enumerate() {
-        if index == 0 {
-            push_embedded_outcome(out);
+fn push_prelude(out: &mut String, devtools_enabled: bool, local_rail_enabled: bool) {
+    // The typed MIR execution policy is lowered once into these constants.
+    // Devtools.rs and Observe.rs can then make publication/install calls
+    // compile away in stripped release artifacts without a second policy
+    // surface or a host-local semantic copy.
+    out.push_str(&format!(
+        "\nconst JET_DEVTOOLS_RUNTIME_ENABLED: bool = {devtools_enabled};\n\
+const JET_DEVTOOLS_LOCAL_RAIL_ENABLED: bool = {local_rail_enabled};\n\
+#[inline(always)]\n\
+fn jet_web_runtime_devtools_enabled() -> bool {{ JET_DEVTOOLS_RUNTIME_ENABLED }}\n\
+#[inline(always)]\n\
+fn jet_web_runtime_history_enabled() -> bool {{ JET_DEVTOOLS_LOCAL_RAIL_ENABLED }}\n"
+    ));
+    push_numeric_runtime(out);
+    for part in PRELUDE_PARTS {
+        if *part == DEVTOOLS_SOURCE {
+            push_embedded_devtools(out);
         } else {
             out.push_str(part);
         }
     }
+}
+
+/// `Prelude/Devtools.rs` is the Foundation module itself. Its host-crate
+/// native region (`include!("DevtoolsNative.rs")` plus always-on wrappers) is
+/// cut here; the program gets `DevtoolsNative.rs` as the following Prelude
+/// part and `DEVTOOLS_NATIVE_WRAPPERS_PRELUDE` as its policy-gated wrappers.
+fn push_embedded_devtools(out: &mut String) {
+    let native_start = DEVTOOLS_SOURCE
+        .find(HOST_DEVTOOLS_NATIVE_BEGIN)
+        .expect("Devtools host native region begin marker missing");
+    let native_end = DEVTOOLS_SOURCE
+        .find(HOST_DEVTOOLS_NATIVE_END)
+        .expect("Devtools host native region end marker missing")
+        + HOST_DEVTOOLS_NATIVE_END.len();
+    assert!(
+        native_start < native_end,
+        "Devtools host native region markers are out of order"
+    );
+    out.push_str(&DEVTOOLS_SOURCE[..native_start]);
+    out.push_str(&DEVTOOLS_SOURCE[native_end..]);
+}
+
+fn push_game_devtools_control_prelude(out: &mut String) {
+    let source = include_str!("../../../jet-foundation/src/DevtoolsControl.rs")
+        .replace("crate::Devtools::", "super::");
+    out.push_str("\nmod jet_devtools_control {\n");
+    out.push_str(&source);
+    out.push_str("\n}\n");
+    out.push_str(
+        "pub use jet_devtools_control::{\
+JetDevtoolsCommand, JetDevtoolsCommandReceipt, JetDevtoolsGameControlKind,\
+JetDevtoolsGameControlRequest, JetDevtoolsGameControlCallbackGuard,\
+jet_devtools_install_game_control_callback, jet_devtools_clear_commands,\
+jet_devtools_enqueue_command, jet_devtools_requeue_command_front,\
+jet_devtools_command_count, jet_devtools_poll_command,\
+jet_devtools_poll_database_explain, jet_devtools_enqueue_game_control,\
+jet_devtools_poll_game_control, jet_devtools_record_command_receipt,\
+jet_devtools_update_command_receipt, jet_devtools_poll_command_receipt,\
+jet_devtools_command_receipt_count, jet_devtools_clear_command_receipts,\
+jet_devtools_take_game_control_relays, jet_devtools_clear_game_control_relays};\n",
+    );
+}
+fn push_game_debug_policy_const(out: &mut String, policy: &ReleaseDevtoolsPolicy) {
+    out.push_str(&format!(
+        "\nconst JET_GAME_DEBUG_DATA_ENABLED: bool = {};\n",
+        !policy.is_release()
+    ));
 }
 
 fn push_prelude_dependency_closure(out: &mut String, roots: &[&str]) {
@@ -444,6 +824,36 @@ fn runtime_diagnostic_projection() -> String {
     out
 }
 
+/// Project the same active runtime rows for the no-alloc renderer. The
+/// renderer itself lives in `PortableCore.rs`; this is metadata only.
+fn portable_runtime_diagnostic_projection() -> String {
+    let rows = jet_foundation::Registry::diagnostic_rows()
+        .iter()
+        .filter(|row| {
+            row.stage == "runtime"
+                && row.status == jet_foundation::Registry::DiagnosticStatus::Active
+        });
+    let mut out = String::from(
+        "\nfn jet_runtime_diagnostic_row(code: &str) -> Option<JetRuntimeDiagnosticRow> {\n    match code {\n",
+    );
+    for row in rows {
+        let holes = row
+            .template_holes
+            .iter()
+            .map(|hole| format!("{hole:?}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str(&format!(
+            "        {code:?} => Some(JetRuntimeDiagnosticRow {{ code: {code:?}, what: {what:?}, why: {why:?}, fix: {fix:?}, template_holes: &[{holes}] }}),\n",
+            code = row.code,
+            what = row.what,
+            why = row.why,
+            fix = row.fix,
+        ));
+    }
+    out.push_str("        _ => None,\n    }\n}\n\n");
+    out
+}
 fn push_embedded_outcome(out: &mut String) {
     let stop_start = OUTCOME_SOURCE
         .find(HOST_RUNTIME_STOP_BEGIN)
@@ -469,7 +879,6 @@ fn push_embedded_outcome(out: &mut String) {
     out.push_str(&runtime_diagnostic_projection());
 }
 
-
 fn push_ffi_reporter(out: &mut String, link: Option<&FfiLink>) {
     let Some(link) = link else {
         out.push_str("fn jet_ffi_install_reporter() {}\n\n");
@@ -488,35 +897,18 @@ fn push_ffi_reporter(out: &mut String, link: Option<&FfiLink>) {
     ));
 }
 
-/// The primitive types the compiler gives a total order to. One list, read by
-/// the cached-runtime emitter below and by the module-local
-/// `emit_synthetic_operator_traits` — the two copies of the `__jet_Equatable`
-/// list above are the drift this avoids.
+/// Primitive types with a total order. The cached-runtime emitter uses this
+/// single list for its comparable implementations.
 const COMPARABLE_PRIMITIVES: &[&str] = &[
     "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "bool", "char", "String",
 ];
 
-/// Traits used by both the fixed runtime and generated root-program types.
-/// Imported Jet modules keep their module-local *trait* copies (their `impl`
-/// blocks are module-local, and the importer brings the owning trait into scope
-/// anonymously through `cx.imported_traits`); the root imports these from the
-/// cached runtime rlib after the native builder splits the source.
+/// Traits owned by the fixed runtime and shared by generated program code.
+/// The Prelude names these traits directly, so their declarations must remain
+/// inside the cached runtime block.
 ///
-/// `__jet_Ordering` and `__jet_Comparable` are runtime-owned for the same
-/// reason `__jet_Display` is: the Prelude itself names them — `jet_list_sort_by`
-/// and `jet_ordering_then` in `Prelude/Core.rs`, the fixed-runtime date/time
-/// comparisons in that same file, and the Core-local `Duration`/`Instant`
-/// comparisons in `Prelude/CoreLib/Top/MathRandomTime.rs`. Leaving them to the
-/// program crate made the cached runtime crate unbuildable (E0425 on
-/// `__jet_Ordering`), so #1785's rlib cache stored nothing and every native
-/// build re-fed rustc the whole runtime. `emit_synthetic_operator_traits` is
-/// the module-local twin for the traits;
-/// `cached_runtime_owns_every_runtime_owned_trait` guards the pairing.
-///
-/// `__jet_Ordering` has NO module-local twin. It is the one *value* type in this
-/// set, so a second declaration is a second type and every module boundary it
-/// crosses is an I2 internal compiler error; `MOD_USE` imports this declaration
-/// instead (`only_the_runtime_declares_the_ordering_enum`).
+/// `__jet_Ordering` is a value type that crosses generated-module boundaries;
+/// one runtime declaration avoids distinct Rust types at those boundaries.
 fn push_cached_runtime_traits(out: &mut String) {
     out.push_str("pub trait __jet_Display {\n");
     out.push_str("    fn display(&self) -> String;\n");
@@ -534,6 +926,16 @@ fn push_cached_runtime_traits(out: &mut String) {
     out.push_str(ORDERING_ENUM);
     out.push_str(COMPARABLE_TRAIT);
     push_comparable_primitive_impls(out);
+    for (name, method) in [
+        ("Add", "add"),
+        ("Sub", "sub"),
+        ("Mul", "mul"),
+        ("Div", "div"),
+    ] {
+        out.push_str(&format!(
+            "pub trait __jet_{name}<Rhs = Self>: Sized {{ type Output; fn {method}(&self, rhs: &Rhs) -> Self::Output; }}\n"
+        ));
+    }
     out.push('\n');
 }
 
@@ -556,62 +958,77 @@ fn push_comparable_primitive_impls(out: &mut String) {
 /// is decided by build facts alone — never by user source text — so the native
 /// builder compiles it once into a content-addressed rlib and links it
 /// (`jet_store::runtime`).
-fn push_cached_runtime_begin(out: &mut String, link: Option<&FfiLink>) {
+
+fn push_cached_runtime_begin_with_policy(
+    out: &mut String,
+    link: Option<&FfiLink>,
+    include_arrow: bool,
+    policy: &ReleaseDevtoolsPolicy,
+) {
     if link.is_some() {
         push_ffi_reporter(out, link);
     }
     out.push_str(CACHED_RUNTIME_BEGIN);
-    push_cached_runtime_body(out, link);
+    push_cached_runtime_body(out, link, include_arrow, policy);
 }
 
-fn push_cached_runtime_body(out: &mut String, link: Option<&FfiLink>) {
+fn push_cached_runtime_body(
+    out: &mut String,
+    link: Option<&FfiLink>,
+    include_arrow: bool,
+    policy: &ReleaseDevtoolsPolicy,
+) {
     if link.is_none() {
         // EnvInit is part of cached runtime and calls this hook. Keep no-FFI
         // stub inside marker block so split rlib has symbol too.
         push_ffi_reporter(out, None);
     }
     push_cached_runtime_traits(out);
-    // `Outcome::from_json` is fixed-runtime code. Keep its parser and error
-    // vocabulary in the same cached rlib instead of the optional Core closure;
-    // the latter is a separate crate when native runtime reuse is active.
-    push_prelude_dependency_closure(out, &["encoding_json"]);
-    // Exact Int (D-INTBIG1) may spill into a tagged carrier that only the
-    // optional Core kernel can decode, and that kernel is a separate crate when
-    // native runtime reuse is active. The shared Values.rs formatter renders
-    // through this seam: the kernel installs its decoder the moment it creates
-    // the first tagged value, so until then the plain decimal form is exact.
-    out.push_str(INT_DECODER_SEAM);
-    push_prelude(out);
+    // The fixed runtime is one dependency closure rooted at `Outcome`: its JSON
+    // parser, error vocabulary, and the diagnostic renderer it imports as
+    // `crate::RuntimeDiagnosticCore` all live in the same cached rlib instead
+    // of the optional Core closure, which is a separate crate when native
+    // runtime reuse is active.  Data-loader and Arrow C-data sources are
+    // demand-driven Core dependencies; keeping them here would make a print-only
+    // program carry their code and unsafe FFI surface.
+    push_prelude_dependency_closure(out, &["outcome", "prelude_data_flow", "performance_budget"]);
+    // Foundation's PerformanceBudget source names the canonical Syntax
+    // namespace. Project the compiler-owned separator into generated native
+    // code instead of maintaining a second parser constant.
+    out.push_str(&format!(
+        "\n#[allow(non_snake_case)]\nmod Syntax {{\n    pub const DIGIT_SEPARATOR: char = {:?};\n}}\n",
+        Syntax::DIGIT_SEPARATOR,
+    ));
+    // The Foundation JetInt formatter is part of the generated runtime
+    // directly. Fixed-width carriers remain ordinary Rust scalars.
+    push_prelude(
+        out,
+        !policy.is_release() || policy.stream_code,
+        policy.local_rail,
+    );
     out.push_str(ENV_INIT_PRELUDE);
     push_mem_prelude(out);
     push_gc_prelude(out);
     out.push_str(LAYOUT_PRELUDE);
+    push_foundation_facade(out, include_arrow);
 }
 
 /// The fixed part of the block on its own — what `cached_runtime_fingerprint`
-/// hashes. Program assemblers use `push_cached_runtime_begin` instead, because
-/// the Core closure follows them in its own marker pair.
-fn push_cached_runtime(out: &mut String, link: Option<&FfiLink>) {
+/// hashes. The policy argument selects the exact fixed-runtime source.
+
+fn push_cached_runtime_with_policy(
+    out: &mut String,
+    link: Option<&FfiLink>,
+    policy: &ReleaseDevtoolsPolicy,
+) {
     if link.is_some() {
         push_ffi_reporter(out, link);
     }
     out.push_str(CACHED_RUNTIME_BEGIN);
-    push_cached_runtime_body(out, link);
+    push_cached_runtime_body(out, link, false, policy);
     out.push_str(CACHED_RUNTIME_END);
 }
 
-fn is_in_cached_runtime(source: &str, position: usize) -> bool {
-    let Some(begin) = source.find(CACHED_RUNTIME_BEGIN) else {
-        return false;
-    };
-    let Some(end) = source[begin + CACHED_RUNTIME_BEGIN.len()..]
-        .find(CACHED_RUNTIME_END)
-        .map(|offset| begin + CACHED_RUNTIME_BEGIN.len() + offset)
-    else {
-        return false;
-    };
-    begin < position && position < end
-}
 
 /// Exact fixed-runtime identity used by the final native-binary cache as well
 /// as the rlib cache. A Prelude edit must invalidate both layers. The value is
@@ -620,34 +1037,105 @@ fn is_in_cached_runtime(source: &str, position: usize) -> bool {
 /// the fixed runtime block.
 pub fn cached_runtime_fingerprint() -> String {
     CACHED_RUNTIME_FINGERPRINT
-        .get_or_init(|| {
-            let mut source = String::new();
-            push_cached_runtime(&mut source, None);
-            crate::SHA256::sha256_hex(source.as_bytes())
-        })
+        .get_or_init(|| cached_runtime_fingerprint_with_policy(&ReleaseDevtoolsPolicy::development()))
         .clone()
 }
 
-fn emit_command_metadata(bundle: &ProgramBundle, active_os: Syntax::OSTarget, out: &mut String) {
-    let record = jet_foundation::CLISchema::encode_record(
-        &jet_foundation::CLISchema::executable_schema(bundle),
-    );
-    let section = match active_os {
-        Syntax::OSTarget::Linux => jet_foundation::CLISchema::ELF_SECTION,
-        Syntax::OSTarget::MacOS => "__DATA,__jetcmd",
-        Syntax::OSTarget::Windows => jet_foundation::CLISchema::PE_SECTION,
-    };
-    let bytes = record
-        .iter()
-        .map(u8::to_string)
-        .collect::<Vec<_>>()
-        .join(",");
-    out.push_str(&format!(
-        "#[used]\n#[no_mangle]\n#[link_section = {section:?}]\npub static __JET_COMMAND_SCHEMA: [u8; {}] = [{bytes}];\n\n",
-        record.len(),
-    ));
+/// Fingerprint the fixed runtime under one typed release policy. Release
+/// artifacts must not share a cache entry with development or protected
+/// Devtools emission.
+pub fn cached_runtime_fingerprint_with_policy(policy: &ReleaseDevtoolsPolicy) -> String {
+    let mut source = String::new();
+    push_cached_runtime_with_policy(&mut source, None, policy);
+    crate::SHA256::sha256_hex(source.as_bytes())
 }
+
 const ENV_INIT_PRELUDE: &str = include_str!("../Prelude/EnvInit.rs");
+
+/// D-COV1: coverage state is emitted only for coverage artifacts. The
+/// generated harness owns the flush, while these locks make function and
+/// branch hits safe when tests run in parallel.
+const COVERAGE_PRELUDE: &str = r#"
+static JET_COV_FUNCTION_HITS: std::sync::OnceLock<std::sync::Mutex<std::collections::BTreeMap<u64, u64>>> = std::sync::OnceLock::new();
+static JET_COV_BRANCH_HITS: std::sync::OnceLock<std::sync::Mutex<std::collections::BTreeMap<&'static str, (&'static str, u64, u64)>>> = std::sync::OnceLock::new();
+
+fn jet_cov_function(line: u64) {
+    let mut hits = JET_COV_FUNCTION_HITS
+        .get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *hits.entry(line).or_insert(0) += 1;
+}
+
+fn jet_cov_register_branch(id: &'static str, function: &'static str) {
+    let mut branches = JET_COV_BRANCH_HITS
+        .get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some((known_function, _, _)) = branches.get(id) {
+        assert_eq!(*known_function, function, "coverage branch identity changed");
+    } else {
+        branches.insert(id, (function, 0, 0));
+    }
+}
+
+fn jet_cov_branch(id: &'static str, function: &'static str, taken: bool) {
+    let mut branches = JET_COV_BRANCH_HITS
+        .get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let (known_function, taken_hits, not_taken_hits) = branches
+        .get_mut(id)
+        .unwrap_or_else(|| panic!("coverage branch {id} was not registered"));
+    assert_eq!(*known_function, function, "coverage branch identity changed");
+    if taken {
+        *taken_hits += 1;
+    } else {
+        *not_taken_hits += 1;
+    }
+}
+
+fn jet_cov_flush() {
+    let Some(path) = std::env::var_os("JET_COV_OUT") else {
+        return;
+    };
+    let mut output = String::new();
+    {
+        let hits = JET_COV_FUNCTION_HITS
+            .get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for line in hits.keys() {
+            output.push_str("f\t");
+            output.push_str(&line.to_string());
+            output.push('\n');
+        }
+    }
+    {
+        let branches = JET_COV_BRANCH_HITS
+            .get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for (id, (function, taken, not_taken)) in branches.iter() {
+            output.push_str("b\t");
+            output.push_str(id);
+            output.push('\t');
+            output.push_str(function);
+            output.push('\t');
+            output.push_str(&taken.to_string());
+            output.push('\t');
+            output.push_str(&not_taken.to_string());
+            output.push('\n');
+        }
+    }
+    std::fs::write(std::path::PathBuf::from(path), output)
+        .unwrap_or_else(|error| panic!("could not write coverage output: {error}"));
+}
+"#;
+
+pub(crate) fn push_coverage_prelude(out: &mut String) {
+    out.push_str(COVERAGE_PRELUDE);
+}
 
 /// Extra helpers for `jet test` harnesses only (M6/S43, E2-M11 D-TOOL4).
 const TEST_PRELUDE: &str = r#"
@@ -694,6 +1182,150 @@ fn jet_test_print(s: String) {
 fn jet_test_take_output() -> String {
     JET_TEST_OUT.with(|buf| buf.borrow_mut().split_off(0))
 }
+#[derive(Clone, Debug)]
+struct JetTestOutcome {
+    name: String,
+    ok: bool,
+    expected_failure: bool,
+    skipped: bool,
+    stdout: String,
+    stderr: String,
+    property_cases: Option<u64>,
+}
+
+fn jet_test_filter() -> Option<String> {
+    std::env::var("JET_TEST_FILTER")
+        .ok()
+        .filter(|filter| !filter.is_empty())
+}
+fn jet_test_serial() -> bool {
+    std::env::var_os("JET_TEST_SERIAL").is_some()
+}
+fn jet_test_shuffle_seed() -> Option<u64> {
+    std::env::var("JET_TEST_SHUFFLE_SEED")
+        .ok()
+        .and_then(|seed| seed.parse::<u64>().ok())
+}
+fn jet_test_capture_mode() -> &'static str {
+    match std::env::var("JET_TEST_CAPTURE").ok().as_deref() {
+        Some("all") => "all",
+        Some("none") => "none",
+        _ => "failed",
+    }
+}
+fn jet_test_should_capture(ok: bool) -> bool {
+    match jet_test_capture_mode() {
+        "all" => true,
+        "none" => false,
+        _ => !ok,
+    }
+}
+fn jet_test_json_quote(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for ch in value.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+fn jet_test_finish(results: Vec<JetTestOutcome>) -> bool {
+    for result in &results {
+        let Some(case_count) = result.property_cases else {
+            continue;
+        };
+        let state = if case_count == 0 || result.stderr.starts_with("E0613:") {
+            3
+        } else if result.ok != result.expected_failure {
+            0
+        } else {
+            1
+        };
+        jet_evidence_with_expectation(result.expected_failure, || {
+            jet_proof_record(
+                3,
+                state,
+                &result.name,
+                &result.stderr,
+                "",
+                case_count as u32,
+            );
+        });
+    }
+    let ok = results.iter().all(|result| result.skipped || result.ok);
+    let passed = results.iter().filter(|result| !result.skipped && result.ok && !result.expected_failure).count();
+    let failed = results.iter().filter(|result| !result.skipped && !result.ok && !result.expected_failure).count();
+    let skipped = results.iter().filter(|result| result.skipped).count();
+    let expected_failures = results.iter().filter(|result| !result.skipped && result.ok && result.expected_failure).count();
+    let unexpected_passes = results.iter().filter(|result| !result.skipped && !result.ok && result.expected_failure).count();
+    if std::env::var_os("JET_TEST_JSON").is_some() {
+        let tests = results
+            .iter()
+            .map(|result| {
+                let stdout = if jet_test_should_capture(result.ok) {
+                    result.stdout.as_str()
+                } else {
+                    ""
+                };
+                let stderr = if jet_test_should_capture(result.ok) {
+                    result.stderr.as_str()
+                } else {
+                    ""
+                };
+                format!(
+                    "{{\"name\":{},\"ok\":{},\"expectedFailure\":{},\"skipped\":{},\"stdout\":{},\"stderr\":{}}}",
+                    jet_test_json_quote(&result.name),
+                    result.ok,
+                    result.expected_failure,
+                    result.skipped,
+                    jet_test_json_quote(stdout),
+                    jet_test_json_quote(stderr)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        println!(
+            "{{\"schema\":\"jet.test.v1\",\"ok\":{},\"passed\":{},\"failed\":{},\"skipped\":{},\"expectedFailures\":{},\"unexpectedPasses\":{},\"tests\":[{}]}}",
+            ok, passed, failed, skipped, expected_failures, unexpected_passes, tests
+        );
+    } else {
+        for result in &results {
+            if jet_test_should_capture(result.ok) {
+                if !result.stdout.is_empty() {
+                    print!("{}", result.stdout);
+                }
+                if !result.stderr.is_empty() {
+                    eprintln!("{}", result.stderr);
+                }
+            }
+            let status = match (result.skipped, result.ok, result.expected_failure) {
+                (true, _, _) => "skip",
+                (false, true, false) => "pass",
+                (false, false, false) => "FAIL",
+                (false, true, true) => "expected-fail",
+                (false, false, true) => "UNEXPECTED-PASS (remove expected_fail: true)",
+            };
+            println!("{}: {}", result.name, status);
+        }
+        print!("{passed} passed, {failed} failed, {skipped} skipped");
+        if expected_failures != 0 {
+            print!(", {expected_failures} expected-fail");
+        }
+        if unexpected_passes != 0 {
+            print!(", {unexpected_passes} unexpected-pass");
+        }
+        println!();
+    }
+    ok
+}
 /// Install the test harness panic hook once. Runtime-stop carriers are an
 /// internal transport detail: the harness turns them into the canonical Jet
 /// report, so the previous Rust hook must not print a second panic voice.
@@ -714,33 +1346,89 @@ fn jet_test_install_panic_hook() {
     });
 }
 
-/// Catch a runtime stop inside a test and retain its product diagnostic. The
+/// Catch a panic carrier inside a test and retain its product diagnostic. The
 /// normal program boundary owns process exit; this test-only boundary converts
-/// the same typed carrier into the runner's ordinary failure result.
+/// runtime carriers into the canonical Jet report.
+fn jet_test_panic_error(
+    payload: Box<dyn std::any::Any + Send>,
+) -> Result<(), String> {
+    match payload.downcast::<JetRenderedRuntimeStop>() {
+        Ok(report) => Err(report.rendered),
+        Err(payload) => match payload.downcast::<JetRuntimeDiagnostic>() {
+            Ok(report) => Err(report.rendered),
+            Err(payload) => match payload.downcast::<String>() {
+                Ok(message) => Err(format!("panic: {message}")),
+                Err(payload) => match payload.downcast::<&'static str>() {
+                    Ok(message) => Err(format!("panic: {message}")),
+                    Err(_) => Err("panic in test".to_string()),
+                },
+            },
+        },
+    }
+}
+
 fn jet_test_run<F>(run: F) -> Result<(), String>
 where
     F: FnOnce() -> Result<(), String>,
 {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
+    let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
         Ok(result) => result,
-        Err(payload) => match payload.downcast::<JetRenderedRuntimeStop>() {
-            Ok(report) => Err(report.rendered),
-            Err(payload) => match payload.downcast::<JetRuntimeDiagnostic>() {
-                Ok(report) => Err(report.rendered),
-                Err(payload) => std::panic::resume_unwind(payload),
-            },
-        },
+        Err(payload) => jet_test_panic_error(payload),
+    };
+    if result.is_err() {
+        jet_test_skip_abort();
     }
+    jet_test_expect_fail_abort();
+    jet_test_timeout_abort();
+    result
+}
+
+enum JetPropertyCaseResult {
+    Accepted,
+    Rejected,
+}
+
+/// Evaluate one generated contract case's pre-call eligibility (D-CLAIM1,
+/// #2502). The compiler-synthesized predicate checks the candidate's own
+/// `#Pre` conditions over the generated arguments BEFORE the callable runs:
+/// `Ok(false)` is a rejected input and the callable never executes. Once the
+/// predicate accepts, the callable runs under ordinary `jet_test_run`
+/// semantics — its own `#Pre`/`#Post` and every nested callee failure are
+/// real failure evidence, never reclassified as input rejection. A panic
+/// while evaluating the predicate itself is failure evidence too (`Err`): the
+/// sampler found an input on which the precondition cannot even be evaluated.
+fn jet_test_contract_eligibility<P>(eligible: P) -> Result<bool, String>
+where
+    P: FnOnce() -> bool,
+{
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(eligible)) {
+        Ok(eligible) => Ok(eligible),
+        Err(payload) => jet_test_panic_error(payload).map(|()| true),
+    }
+}
+
+fn jet_test_run_property<F>(run: F) -> Result<JetPropertyCaseResult, String>
+where
+    F: FnOnce() -> Result<(), String>,
+{
+    jet_test_run(run).map(|()| JetPropertyCaseResult::Accepted)
 }
 /// D-E3-1905: the test child is an AOT binary. The release profile is encoded
 /// at compile time so `jet test --release --trace-tiers` proves which binary
 /// was built, without claiming that the test harness used a JIT or interpreter.
 fn jet_test_trace_tier() {
-    if std::env::var_os("JET_TEST_TRACE_TIERS").is_none() { return; }
-    if cfg!(jet_release) {
-        println!("tier aot profile=release");
+    if std::env::var_os("JET_TEST_TRACE_TIERS").is_none() {
+        return;
+    }
+    let line = if cfg!(jet_release) {
+        "tier aot profile=release"
     } else {
-        println!("tier aot profile=default");
+        "tier aot profile=default"
+    };
+    if std::env::var_os("JET_TEST_JSON").is_some() {
+        eprintln!("{line}");
+    } else {
+        println!("{line}");
     }
 }
 /// Deterministic splitmix64 step, used by `jet test --shuffle` to reorder tests.
@@ -821,6 +1509,37 @@ impl JetGen for i64 {
     }
     fn render(&self) -> String { format!("{}", self) }
 }
+macro_rules! impl_jet_gen_int {
+    ($($ty:ty),+ $(,)?) => {
+        $(
+            impl JetGen for $ty {
+                fn generate(rng: &mut JetRng) -> $ty {
+                    rng.next_u64() as $ty
+                }
+                fn shrink(&self) -> Vec<$ty> {
+                    if *self == 0 {
+                        return Vec::new();
+                    }
+                    let mut values = vec![0 as $ty];
+                    let half = *self / 2 as $ty;
+                    if half != 0 && half != *self {
+                        values.push(half);
+                    }
+                    if *self > 0 {
+                        values.push(*self - 1 as $ty);
+                    } else {
+                        values.push(*self + 1 as $ty);
+                    }
+                    values
+                }
+                fn render(&self) -> String {
+                    format!("{}", self)
+                }
+            }
+        )+
+    };
+}
+impl_jet_gen_int!(i8, i16, i32, u8, u16, u32, u64, u128, isize, usize, i128);
 impl JetGen for f64 {
     fn generate(rng: &mut JetRng) -> f64 {
         match rng.below(6) {
@@ -871,22 +1590,51 @@ impl JetGen for String {
     }
     fn render(&self) -> String { format!("{:?}", self) }
 }
-impl<T: JetGen> JetGen for Option<T> {
-    fn generate(rng: &mut JetRng) -> Option<T> {
-        if rng.below(4) == 0 { None } else { Some(T::generate(rng)) }
+impl<T: JetGen> JetGen for JetOutcome<T, JetAbsent> {
+    fn generate(rng: &mut JetRng) -> JetOutcome<T, JetAbsent> {
+        if rng.below(4) == 0 {
+            Err(JetAbsent)
+        } else {
+            Ok(T::generate(rng))
+        }
     }
-    fn shrink(&self) -> Vec<Option<T>> {
+    fn shrink(&self) -> Vec<JetOutcome<T, JetAbsent>> {
         match self {
-            None => Vec::new(),
-            Some(x) => {
-                let mut v = vec![None];
-                for s in x.shrink() { v.push(Some(s)); }
-                v
+            Err(_) => Vec::new(),
+            Ok(value) => {
+                let mut values = vec![Err(JetAbsent)];
+                for candidate in value.shrink() {
+                    values.push(Ok(candidate));
+                }
+                values
             }
         }
     }
     fn render(&self) -> String {
-        match self { None => "none".to_string(), Some(x) => format!("{}", x.render()) }
+        match self {
+            Err(_) => "none".to_string(),
+            Ok(value) => value.render(),
+        }
+    }
+}
+impl<T: JetGen, const N: usize> JetGen for [T; N] {
+    fn generate(rng: &mut JetRng) -> [T; N] {
+        std::array::from_fn(|_| T::generate(rng))
+    }
+    fn shrink(&self) -> Vec<[T; N]> {
+        let mut values = Vec::new();
+        if let Some(first) = self.first() {
+            for candidate in first.shrink() {
+                let mut value = self.clone();
+                value[0] = candidate;
+                values.push(value);
+            }
+        }
+        values
+    }
+    fn render(&self) -> String {
+        let parts: Vec<String> = self.iter().map(|value| value.render()).collect();
+        format!("[{}]", parts.join(", "))
     }
 }
 impl<T: JetGen> JetGen for Vec<T> {
@@ -921,47 +1669,31 @@ fn jet_prop_seed() -> u64 {
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(0x5EED_1234_ABCD_0001)
 }
+fn jet_prop_cases() -> u64 {
+    1_000
+}
+fn jet_prop_replay_seed() -> Option<u64> {
+    std::env::var("JET_PROP_REPLAY_SEED")
+        .ok()
+        .and_then(|seed| seed.parse::<u64>().ok())
+}
+fn jet_prop_replay_case() -> Option<u64> {
+    std::env::var("JET_PROP_REPLAY_CASE")
+        .ok()
+        .and_then(|case_index| case_index.parse::<u64>().ok())
+}
 fn jet_prop_trace_sample(engine: &str, case_index: u64, seed: u64, input: &str) {
-    if std::env::var_os("JET_PROP_TRACE").is_none() { return; }
-    println!("JET_PROP_SAMPLE engine={} case={} seed={} input={}", engine, case_index, seed, input);
-}
-"#;
-/// D-COV1 (`jet test --coverage`): the coverage recorder. Emitted only when the
-/// harness is built with `--coverage`. Function probes record the function's
-/// source line; branch probes record each condition outcome. On exit, the
-/// counters are written to `JET_COV_OUT` so `jet test` can render its report.
-/// Std-only (I6): mutex-protected ordered maps.
-const COV_PRELUDE: &str = r#"
-static JET_COV_HITS: std::sync::Mutex<std::collections::BTreeSet<usize>> =
-    std::sync::Mutex::new(std::collections::BTreeSet::new());
-static JET_COV_BRANCHES: std::sync::Mutex<
-    std::collections::BTreeMap<String, (String, u64, u64)>,
-> = std::sync::Mutex::new(std::collections::BTreeMap::new());
-fn jet_cov(line: usize) {
-    if let Ok(mut s) = JET_COV_HITS.lock() { s.insert(line); }
-}
-fn jet_cov_register_branch(id: &str, function: &str) {
-    if let Ok(mut branches) = JET_COV_BRANCHES.lock() {
-        branches.entry(id.to_string()).or_insert((function.to_string(), 0, 0));
+    if std::env::var_os("JET_PROP_TRACE").is_none() {
+        return;
     }
-}
-fn jet_cov_branch(id: &str, taken: bool) -> bool {
-    if let Ok(mut branches) = JET_COV_BRANCHES.lock() {
-        let entry = branches.entry(id.to_string()).or_insert((String::new(), 0, 0));
-        if taken { entry.1 += 1; } else { entry.2 += 1; }
-    }
-    taken
-}
-fn jet_cov_dump() {
-    if let Ok(path) = std::env::var("JET_COV_OUT") {
-        let mut lines: Vec<String> = JET_COV_HITS.lock().ok()
-            .map(|s| s.iter().map(|line| format!("f\t{}", line)).collect())
-            .unwrap_or_default();
-        if let Ok(branches) = JET_COV_BRANCHES.lock() {
-            lines.extend(branches.iter().map(|(id, (function, taken, not_taken))|
-                format!("b\t{}\t{}\t{}\t{}", id, function, taken, not_taken)));
-        }
-        let _ = std::fs::write(path, lines.join("\n"));
+    let line = format!(
+        "JET_PROP_SAMPLE engine={} case={} seed={} input={}",
+        engine, case_index, seed, input
+    );
+    if std::env::var_os("JET_TEST_JSON").is_some() {
+        eprintln!("{line}");
+    } else {
+        println!("{line}");
     }
 }
 "#;
@@ -971,6 +1703,71 @@ fn jet_cov_dump() {
 /// contiguous — those files are one audited compiler/runtime kernel. Optional
 /// fragments are selected from `bundle.used_core`. Package-owned Core behavior
 /// may use an explicit ABI bridge, but never falls back to this path.
+/// The DataTree carrier is owned by Foundation. Keep its source verbatim in a
+/// private generated module, expose the protocol path expected by Foundation
+/// encoding kernels, and let `jet_std` re-export that same type below.
+const DATATREE_FOUNDATION_ROOT: &str = concat!(
+    "\n// D-SERDE2: the generated Prelude uses Foundation's canonical carrier.\n",
+    "mod jet_foundation_datatree {\n",
+    include_str!("../../../jet-foundation/src/DataTree.rs"),
+    "\n}\n",
+    "#[allow(non_snake_case)]\nmod DataTree {\n",
+    "    pub use crate::jet_foundation_datatree::DataTree;\n",
+    "}\n",
+);
+
+const DATATREE_PRELUDE_REEXPORT: &str =
+    "\npub use crate::DataTree::DataTree;\n";
+
+const RESOURCE_FACTS_PRELUDE: &str = concat!(
+    "\n#[allow(non_snake_case, unused_imports)]\nmod ResourceSchedule {\n",
+    include_str!("../../../jet-foundation/src/ResourceSchedule.rs"),
+    "\n}\n",
+    "\n#[allow(non_snake_case, unused_imports)]\nmod Facts {\n",
+    include_str!("../../../jet-foundation/src/FactsDerivation.rs"),
+    "\n}\n",
+);
+
+const NUMERIC_FOUNDATION_SOURCE: &str =
+    include_str!("../../../jet-foundation/src/Numeric.rs");
+
+
+
+
+const MAPPED_FILE_PRELUDE: &str =
+    include_str!("../Prelude/CoreLib/JetStd/MappedFile.rs");
+const MATH_TASK_MEM_PRELUDE: &str = concat!(
+    "\n// JET_VETTED_UNSAFE_BEGIN: jet_std_math_task_mem\n\
+     // AUDIT: D-SIMD2/D-SIMD3/D-SHARED-REVISION1 keep lane representation,\n\
+     // permit-gated UnsafeCell projections, and consumed revision tickets in\n\
+     // this compiler-owned JetStd source.\n",
+    include_str!("../Prelude/CoreLib/JetStd/MathTaskMem.rs"),
+    "\n// JET_VETTED_UNSAFE_END: jet_std_math_task_mem\n",
+);
+const JETSTD_COMMON_TYPES_PRELUDE: &str = concat!(
+    "\n// JET_VETTED_UNSAFE_BEGIN: jet_std_common_types\n\
+     // AUDIT: D-INTBIG1 keeps the exact-Int raw ownership adapters and the\n\
+     // platform terminal handle seam inside this compiler-owned source.\n",
+    include_str!("../Prelude/CoreLib/JetStd/CommonTypes.rs"),
+    "\n// JET_VETTED_UNSAFE_END: jet_std_common_types\n",
+);
+const JETSTD_REACTIVE_EVENT_WATCH_PRELUDE: &str = concat!(
+    "\n// JET_VETTED_UNSAFE_BEGIN: jet_std_reactive_event_watch\n\
+     // AUDIT: D-REACT1/D-DATARACE1 keep re-entrant staged values and synchronized\n\
+     // signal storage behind this compiler-owned, opt-in reactive source.\n",
+    include_str!("../Prelude/CoreLib/JetStd/ReactiveEventWatch.rs"),
+    "\n// JET_VETTED_UNSAFE_END: jet_std_reactive_event_watch\n",
+);
+const JETSTD_FFI_CALLBACKS_PRELUDE: &str = concat!(
+    "\n// JET_VETTED_UNSAFE_BEGIN: jet_std_ffi_callbacks\n\
+     // AUDIT: D-FFI-CALLBACK2 keeps callback registration, in-flight accounting,\n\
+     // native shutdown acknowledgement, and release in one managed source.\n",
+    include_str!("../Prelude/CoreLib/JetStd/FfiCallbacks.rs"),
+    "\n// JET_VETTED_UNSAFE_END: jet_std_ffi_callbacks\n",
+);
+const SHARED_ROUTES_PRELUDE: &str =
+    include_str!("../Prelude/CoreLib/Top/SharedRoutes.rs");
+
 const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/Open.rs"),
     include_str!("../Prelude/CoreLib/JetStd/Regex.rs"),
@@ -979,19 +1776,27 @@ const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/UrlMime.rs"),
     include_str!("../Prelude/CoreLib/JetStd/JSONCodec.rs"),
     include_str!("../Prelude/CoreLib/JetStd/EncodingTypes.rs"),
-    include_str!("../Prelude/CoreLib/JetStd/CommonTypes.rs"),
+    JETSTD_COMMON_TYPES_PRELUDE,
+    MAPPED_FILE_PRELUDE,
     include_str!("../Prelude/CommandSuite.rs"),
     // D-DBPOLICY1=A: the closed row-policy language, compiled once. `DBPluginWire`
     // below and `Top/Sync.rs` both read it instead of re-deriving the rule (I9).
     include_str!("../Prelude/CoreLib/JetStd/RowPolicy.rs"),
+    "\npub mod plugin_wire {\n",
+    include_str!("../../../jet-foundation/src/PluginWire.rs"),
+    "\n}\n",
     include_str!("../Prelude/CoreLib/JetStd/DBPluginWire.rs"),
     include_str!("../Prelude/CoreLib/JetStd/WireOrder.rs"),
     include_str!("../Prelude/CoreLib/JetStd/DataTreeKind.rs"),
+    // D-VALIDATE-DECODE1=B: keep the canonical FieldError rendering beside
+    // DataTree's JetShow/JetDisplay implementations in the same JetStd scope.
+    include_str!("../Prelude/Core/FieldError.rs"),
     // D-VALIDATE-DECODE1=B: the accumulated decode/validate failure has one
     // rendering. Splice it beside the type so `impl JetShow for FieldError`
     // below, the Cranelift host, and the TIR evaluator cannot drift (I9).
-    include_str!("../Prelude/Core/FieldError.rs"),
+    DATATREE_PRELUDE_REEXPORT,
     include_str!("../Prelude/CoreLib/JetStd/DataTree.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/TestingComparison.rs"),
     "\njet_datatree_decode_helpers!();\n",
     // `EncodingStream.rs` validates exact JSON number tokens through
     // `jet_std::validate_json_number`. The root `jet_json_number` module holds
@@ -1001,12 +1806,28 @@ const CORELIB_KERNEL_PARTS: &[&str] = &[
     "\n// JET_VETTED_UNSAFE_BEGIN: jet_cell\nmod jet_cell {\n#[allow(unused_imports)]\nuse crate::{JetOutcome, JetAbsent};\n",
     include_str!("../Prelude/LocalCell.rs"),
     "\n}\npub use self::jet_cell::{JetCell, JetCellEditGuard, JetCellReadGuard};\n// JET_VETTED_UNSAFE_END: jet_cell\n",
-    include_str!("../Prelude/CoreLib/JetStd/MathTaskMem.rs"),
-    include_str!("../Prelude/CoreLib/JetStd/ReactiveEventWatch.rs"),
+    MATH_TASK_MEM_PRELUDE,
+    JETSTD_REACTIVE_EVENT_WATCH_PRELUDE,
+    // D-FFI-CALLBACK2=A: generated callback registrations share one managed
+    // ownership/ACK/quiescence runtime with the AOT and fixture paths.
+    JETSTD_FFI_CALLBACKS_PRELUDE,
+    // The DataTree renderer below and TOML.rs (`super::quote_json`) quote
+    // through the Foundation JSON kernel. The host that splices these files
+    // imports the entry beside them (jet-jit/src/Encoding.rs does the same).
+    "\nuse crate::jet_encoding_json::quote_json;\n",
     include_str!("../Prelude/CoreLib/JetStd/JSONDataTree.rs"),
     include_str!("../Prelude/CoreLib/JetStd/TOML.rs"),
     include_str!("../Prelude/CoreLib/JetStd/YAML.rs"),
+    SHARED_ROUTES_PRELUDE,
+
 ];
+#[derive(Clone, Copy, Default)]
+struct CorePreludeForces {
+    mapped_file: bool,
+    shared: bool,
+    arrow: bool,
+    testing_history: bool,
+}
 
 const CORE_SOURCE_CLOSURE_SCHEMA: &[u8] = b"jet-core-source-closure-v1";
 const CORE_SOURCE_MARKER_PREFIX: &str = "__core_source::";
@@ -1111,33 +1932,252 @@ fn core_usage_matches(used: &std::collections::HashSet<String>, prefixes: &[&str
     })
 }
 
-/// Imported modules share the root's Core runtime declarations. `JetMod` is
-/// emitted only when `core.mod` is used, so do not import it into a module
-/// that cannot see that declaration.
-fn module_use_for(bundle: &ProgramBundle) -> String {
-    let mut imports = if core_usage_matches(&bundle.used_core, &["core.mod"]) {
-        MOD_USE.to_owned()
-    } else {
-        MOD_USE.replace("JetMod, ", "")
+/// Translate the checked Core-use closure into target-neutral runtime parts.
+///
+/// This is the one lowering-time boundary that may inspect the legacy
+/// Core-use labels. Runtime adapters consume the resulting typed IDs and do
+/// not reconstruct this selection from strings.
+pub(crate) fn runtime_parts_for_used_core(
+    used_core: &BTreeSet<String>,
+) -> BTreeSet<MirRuntimePartId> {
+    use MirRuntimePartId as Part;
+
+    let matches = |prefixes: &[&str]| {
+        used_core.iter().any(|usage| {
+            prefixes.iter().any(|prefix| {
+                usage == prefix
+                    || usage.starts_with(&format!("{prefix}::"))
+                    || usage.starts_with(&format!("{prefix}."))
+            })
+        })
     };
-    imports.push_str("use super::CheckedText;\n");
-    imports
+    let mut parts = BTreeSet::new();
+    if matches(&["core.event"]) {
+        parts.insert(Part::Event);
+    }
+    if matches(&["core.rt", "core.realtime"]) {
+        parts.insert(Part::Realtime);
+    }
+    if matches(&["core.hardware", "core.embedded", "core.board", "core.device"]) {
+        parts.insert(Part::EmbeddedHardware);
+    }
+    if matches(&["core.ui", "core.font", "core.web", "app"]) {
+        parts.insert(Part::Ui);
+    }
+    if matches(&["core.ui", "core.devtools", "core.web", "app"]) {
+        parts.insert(Part::Devtools);
+    }
+    if matches(&["core.ui::gtk_backend", "core.ui.gtk_backend"]) {
+        parts.insert(Part::Gtk);
+    }
+    if matches(&[
+        "app",
+        "core.web",
+        "core.http",
+        "core.http.client",
+        "core.http.server",
+        "core.web.devserver",
+        "core.db",
+        "core.sync",
+        "core.net.ws",
+        "core.web.browser",
+    ]) {
+        parts.insert(Part::Apps);
+    }
+    if matches(&["core.email"]) {
+        parts.insert(Part::Email);
+    }
+    if matches(&["core.game", "core.game.raylib", "core.raylib"]) {
+        parts.insert(Part::Game);
+    }
+    if matches(&[
+        "core.files",
+        "core.watcher",
+        "core.term",
+        "core.sys",
+        "core.process",
+    ]) {
+        parts.insert(Part::Files);
+    }
+    if matches(&[
+        "core.sys::on_interrupt",
+        "core.sys.on_interrupt",
+        "core.process::on_signal",
+        "core.process.on_signal",
+    ]) {
+        parts.insert(Part::Interrupt);
+    }
+    if matches(&[
+        "core.files",
+        "core.watcher",
+        "core.term",
+        "core.sys",
+        "core.process",
+        "core.args",
+        "core.testing",
+        "core.perf",
+        "core.mem.scope",
+    ]) {
+        parts.insert(Part::FsRuntime);
+    }
+    if matches(&["core.crypto"]) {
+        parts.insert(Part::Crypto);
+    }
+    if matches(&[
+        "core.math",
+        "core.math.random",
+        "core.time",
+        "core.time.expiring",
+        "core.units",
+    ]) {
+        parts.insert(Part::Math);
+    }
+    if matches(&[
+        "core.encoding",
+        "core.encoding.json",
+        "core.encoding.jsonl",
+        "core.encoding.csv",
+        "core.encoding.toml",
+        "core.encoding.yaml",
+        "core.encoding.xml",
+        "core.encoding.cbor",
+        "core.encoding.hex",
+        "core.archive.gzip",
+        "core.archive.zstd",
+    ]) {
+        parts.insert(Part::Encoding);
+    }
+    if matches(&[
+        "core.data",
+        "core.data.sketch.hll",
+        "core.data.sketch.tdigest",
+        "core.data.sketch.cms",
+        "core.data.sketch.reservoir",
+        "core.db",
+        "core.encoding.csv",
+    ]) {
+        parts.insert(Part::Data);
+    }
+    if matches(&["core.text.fmt"]) {
+        parts.insert(Part::Fmt);
+    }
+    if matches(&[
+        "core.data",
+        "core.data.sketch.hll",
+        "core.data.sketch.tdigest",
+        "core.data.sketch.cms",
+        "core.data.sketch.reservoir",
+        "core.db",
+        "core.encoding",
+        "core.encoding.json",
+        "core.encoding.jsonl",
+        "core.encoding.csv",
+        "core.encoding.toml",
+        "core.encoding.yaml",
+        "core.encoding.xml",
+        "core.encoding.cbor",
+        "core.encoding.hex",
+        "core.archive.gzip",
+        "core.archive.zstd",
+    ]) {
+        parts.insert(Part::DataFmt);
+    }
+    if matches(&["core.compute"]) {
+        parts.insert(Part::Compute);
+    }
+    if matches(&[
+        "core.http",
+        "core.http.client",
+        "core.http.server",
+        "core.web",
+        "core.web.devserver",
+    ]) {
+        parts.insert(Part::Http);
+    }
+    if matches(&[
+        "core.net.ws",
+        "app",
+        "core.web",
+        "core.db",
+        "core.http",
+        "core.http.client",
+        "core.http.server",
+        "core.web.browser",
+    ]) {
+        parts.insert(Part::WebSocket);
+    }
+    if matches(&[
+        "core.web.browser",
+        "core.web",
+        "core.web.storage",
+        "core.web.storage.local",
+        "core.web.storage.session",
+    ]) {
+        parts.insert(Part::Browser);
+    }
+    if matches(&["core.args"]) {
+        parts.insert(Part::Args);
+    }
+    if matches(&["core.reflect", "core.compiler.lang"]) {
+        parts.insert(Part::Reflect);
+    }
+    if matches(&["core.auth"]) || parts.contains(&Part::Crypto) {
+        parts.insert(Part::AuthTokens);
+    }
+    if matches(&["core.auth", "app", "core.web"]) {
+        parts.insert(Part::AuthSession);
+    }
+    if matches(&["core.sync", "app", "core.web", "core.db"]) {
+        parts.insert(Part::Sync);
+    }
+    if matches(&["core.service", "core.jobs"]) {
+        parts.insert(Part::Services);
+    }
+    if matches(&["core.mod"]) {
+        parts.insert(Part::Mod);
+    }
+    parts
 }
 
-fn push_corelib_prelude(
+
+
+fn push_corelib_prelude_with_policy(
     out: &mut String,
     used_core: &std::collections::HashSet<String>,
     force: bool,
+    policy: &ReleaseDevtoolsPolicy,
 ) {
-    push_corelib_prelude_inner(out, used_core, force, false);
+    push_corelib_prelude_inner(out, used_core, force, false, policy);
 }
 
-fn push_corelib_prelude_for_test_harness(
+fn push_corelib_prelude_for_test_harness_with_policy(
     out: &mut String,
     used_core: &std::collections::HashSet<String>,
     force: bool,
+    policy: &ReleaseDevtoolsPolicy,
 ) {
-    push_corelib_prelude_inner(out, used_core, force, true);
+    push_corelib_prelude_for_test_harness_with_forces(
+        out,
+        used_core,
+        force,
+        CorePreludeForces::default(),
+        policy,
+    );
+}
+
+fn push_corelib_prelude_for_test_harness_with_forces(
+    out: &mut String,
+    used_core: &std::collections::HashSet<String>,
+    force: bool,
+    forces: CorePreludeForces,
+    policy: &ReleaseDevtoolsPolicy,
+) {
+    push_corelib_prelude_inner_with_forces(out, used_core, force, true, forces, policy);
+    out.push_str(REPORT_PRELUDE);
+    out.push_str(TEST_REPORT_PRELUDE);
+    out.push_str(TESTING_SHARED_PRELUDE);
+    out.push_str(TEST_PRELUDE);
+    out.push_str(PROP_PRELUDE);
 }
 
 fn push_corelib_prelude_inner(
@@ -1145,6 +2185,25 @@ fn push_corelib_prelude_inner(
     used_core: &std::collections::HashSet<String>,
     force: bool,
     omit_testing_shared: bool,
+    policy: &ReleaseDevtoolsPolicy,
+) {
+    push_corelib_prelude_inner_with_forces(
+        out,
+        used_core,
+        force,
+        omit_testing_shared,
+        CorePreludeForces::default(),
+        policy,
+    );
+}
+
+fn push_corelib_prelude_inner_with_forces(
+    out: &mut String,
+    used_core: &std::collections::HashSet<String>,
+    force: bool,
+    omit_testing_shared: bool,
+    forces: CorePreludeForces,
+    policy: &ReleaseDevtoolsPolicy,
 ) {
     // `core.archive` is emitted as a reachable ordinary-Jet source module. Its
     // internal ABI calls do not require a compiler prelude fragment, so no old
@@ -1153,11 +2212,13 @@ fn push_corelib_prelude_inner(
         return;
     }
     let mut body = String::new();
-    push_corelib_prelude_body(&mut body, used_core, omit_testing_shared);
+    push_corelib_prelude_body(&mut body, used_core, omit_testing_shared, forces, policy);
     out.push_str(&corelib_emission_identity(&body, used_core));
     out.push('\n');
     out.push_str(&body);
 }
+
+
 
 fn type_uses_stream(ty: &Type) -> bool {
     match ty {
@@ -1265,6 +2326,14 @@ fn force_corelib_prelude(bundle: &ProgramBundle) -> bool {
 /// this assembler shared by emission and cache identity: hashing only the
 /// JetStd kernel would let scheduler/UI/app edits reuse the wrong digest.
 fn core_runtime_body(bundle: &ProgramBundle, test_harness: bool) -> String {
+    core_runtime_body_with_policy(bundle, test_harness, &ReleaseDevtoolsPolicy::development())
+}
+
+fn core_runtime_body_with_policy(
+    bundle: &ProgramBundle,
+    test_harness: bool,
+    policy: &ReleaseDevtoolsPolicy,
+) -> String {
     let force_corelib = force_corelib_prelude(bundle);
     if !force_corelib && !core_needs_embedded_runtime(&bundle.used_core) {
         return String::new();
@@ -1273,34 +2342,82 @@ fn core_runtime_body(bundle: &ProgramBundle, test_harness: bool) -> String {
     // `Prelude/CoreLib/Top/EncodingCodecs.rs` reads this constant. It belongs
     // to the Core closure, whose identity includes the package edition.
     push_package_edition(&mut body, bundle);
-    body.push_str(&core_runtime_body_for(
+    body.push_str(&core_runtime_body_for_with_policy(
         &bundle.used_core,
         bundle.active_os,
         force_corelib,
         test_harness,
+        policy,
     ));
     body
 }
 
-fn core_runtime_body_for(
+
+fn core_runtime_body_for_with_policy(
     used_core: &std::collections::HashSet<String>,
     active_os: Syntax::OSTarget,
     force_corelib: bool,
     test_harness: bool,
+    policy: &ReleaseDevtoolsPolicy,
 ) -> String {
     if !force_corelib && !core_needs_embedded_runtime(used_core) {
         return String::new();
     }
     let mut body = String::new();
     if test_harness {
-        push_corelib_prelude_for_test_harness(&mut body, used_core, force_corelib);
+        push_corelib_prelude_for_test_harness_with_policy(
+            &mut body,
+            used_core,
+            force_corelib,
+            policy,
+        );
     } else {
-        push_corelib_prelude(&mut body, used_core, force_corelib);
+        push_corelib_prelude_with_policy(&mut body, used_core, force_corelib, policy);
     }
     body.push_str(scheduler_prelude_for_emit(uses_native_scheduler_for(
         used_core,
     )));
-    body.push_str(UI_PRELUDE);
+    if force_corelib || core_usage_matches(used_core, &["core.event"]) {
+        body.push_str(CORE_STREAM_PRELUDE_RAW);
+        body.push_str(CORE_STREAM_DURATION_ADAPTER);
+    }
+    body.push_str(include_str!("../Prelude/Core/CollectionSources.rs"));
+    if core_usage_matches(used_core, &["core.rt", "core.realtime"]) {
+        body.push_str(CORE_REALTIME_PRELUDE_RAW);
+    }
+    if core_usage_matches(
+        used_core,
+        &["core.board", "core.hardware", "core.device", "core.embedded"],
+    ) {
+        body.push_str(&flat_prelude_body(CORE_EMBEDDED_HARDWARE_PRELUDE_RAW));
+    }
+    // Explicit parallel operations use the same typed planning facts as every
+    // host adapter. The source is flat-imported once with the scheduler.
+    body.push_str(&flat_prelude_body(CORE_PARALLEL_PLAN_PRELUDE_RAW));
+    let needs_ui_host = core_usage_matches(used_core, &["core.ui", "core.font", "core.web", "app"]);
+    let needs_ui_surface = core_usage_matches(used_core, &["core.ui", "core.web", "app"]);
+    if needs_ui_host {
+        body.push_str(&canonical_font_prelude());
+        body.push_str(include_str!("../Prelude/Core/HostServices.rs"));
+    }
+    if needs_ui_surface {
+        body.push_str("\nmod jet_tui_kernel {\n");
+        body.push_str(TUI_KERNEL_PRELUDE);
+        body.push_str("\n}\n");
+        body.push_str(UI_PRELUDE);
+        body.push_str(PREVIEW_PRELUDE);
+    }
+    if policy.panel_code
+        && core_usage_matches(used_core, &["core.ui", "core.devtools"])
+    {
+        body.push_str(DEVTOOLS_PANEL_PRELUDE);
+        body.push_str(DEVTOOLS_PANEL_CATALOG_PRELUDE_RAW);
+        body.push_str(DEVTOOLS_DATABASE_PANEL_PRELUDE_RAW);
+        body.push_str(DEVTOOLS_JOBS_PANEL_PRELUDE_RAW);
+        body.push_str(DEVTOOLS_REQUEST_PANEL_PRELUDE_RAW);
+        body.push_str(DEVTOOLS_TELEMETRY_PANEL_PRELUDE_RAW);
+        body.push_str(DEVTOOLS_TOPOLOGY_PANEL_PRELUDE_RAW);
+    }
     if uses_gtk_backend_for(used_core, active_os) {
         body.push_str(UI_GTK_PRELUDE);
     }
@@ -1308,18 +2425,794 @@ fn core_runtime_body_for(
     body
 }
 
+/// Emit the checked no-OS Prelude closure. Unlike the hosted path above, this
+/// assembler never starts from `Core.rs`: the portable sources are an explicit
+/// source closure whose target operations are filled from the selected machine
+/// dossier. The generated body remains flat so MIR's existing symbol ABI does
+/// not acquire a second namespace.
+pub(crate) fn push_portable_corelib_prelude(
+    out: &mut String,
+    program: &MirProgram,
+    artifact: &MirArtifactPlan,
+) {
+    let dossier = &program.facts.target_dossier;
+    let machine = dossier
+        .machine
+        .as_deref()
+        .unwrap_or_else(|| panic!("portable Prelude emission requires a checked target machine"));
+    assert!(
+        machine.no_os,
+        "portable Prelude emission requires a no-OS target machine"
+    );
+    assert_eq!(
+        artifact.target,
+        jet_foundation::MIR::MirArtifactTarget::RustAot,
+        "portable Prelude emission requires a RustAot artifact"
+    );
+    match &machine.panic {
+        jet_foundation::TargetMachine::PanicPolicy::Abort => {}
+        jet_foundation::TargetMachine::PanicPolicy::Report { .. } => {}
+        jet_foundation::TargetMachine::PanicPolicy::HostedDefault
+        | jet_foundation::TargetMachine::PanicPolicy::Unspecified => {
+            panic!("portable Prelude requires an explicit no-OS panic policy");
+        }
+    }
+    let include_hardware = artifact
+        .runtime_parts
+        .contains(&MirRuntimePartId::EmbeddedHardware);
+    let include_alloc = match dossier.layer {
+        jet_foundation::RingLayer::RuntimeLayer::Core => false,
+        jet_foundation::RingLayer::RuntimeLayer::Alloc => true,
+        jet_foundation::RingLayer::RuntimeLayer::Std => {
+            panic!("portable Prelude cannot emit the hosted runtime layer")
+        }
+    };
+    if include_alloc
+        && !matches!(
+            &machine.allocator,
+            jet_foundation::TargetMachine::AllocatorPolicy::Fixed { .. }
+        )
+    {
+        match &machine.allocator {
+            jet_foundation::TargetMachine::AllocatorPolicy::Provider { provider } => {
+                assert!(
+                    provider.abi.calling_convention == "C" && provider.abi.version == "1",
+                    "portable target allocator provider `{}` requires the C/1 ABI",
+                    provider.provider
+                );
+            }
+            jet_foundation::TargetMachine::AllocatorPolicy::None => {
+                panic!("portable Alloc closure requires a declared allocator");
+            }
+            jet_foundation::TargetMachine::AllocatorPolicy::Unspecified => {
+                panic!("portable Alloc closure requires an explicit allocator policy");
+            }
+            jet_foundation::TargetMachine::AllocatorPolicy::HostedDefault
+            | jet_foundation::TargetMachine::AllocatorPolicy::Counting { .. } => {
+                panic!("portable Alloc closure cannot use a hosted allocator policy");
+            }
+            jet_foundation::TargetMachine::AllocatorPolicy::Fixed { .. } => unreachable!(),
+        }
+    }
+    let provider_allocator = matches!(
+        &machine.allocator,
+        jet_foundation::TargetMachine::AllocatorPolicy::Provider { .. }
+    );
+
+    let include_atomic =
+        machine.provides_capability(jet_foundation::TargetMachine::TargetCapability::Atomic64);
+    if include_atomic {
+        // D-PLACE1=A: Atomic<T> is one root Prelude carrier shared by hosted and
+        // portable AOT emission; unsupported no-OS targets never receive its
+        // AtomicU64 source and therefore do not defer rejection to rustc.
+        out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_atomic_carrier\n");
+        out.push_str(&flat_prelude_body(CORE_ATOMIC_PRELUDE_RAW));
+        out.push_str("// JET_VETTED_UNSAFE_END: jet_atomic_carrier\n");
+        // Portable Core has no exact-Int heap.  Reuse its canonical checked
+        // scalar failure rail rather than inventing a second overflow policy.
+        out.push_str(
+            "\nmod jet_std {\n\
+             \x20   #[inline(always)]\n\
+             \x20   pub fn jet_int_add(left: i64, right: i64) -> i64 {\n\
+             \x20       left.checked_add(right).unwrap_or_else(|| {\n\
+             \x20           super::jet_arithmetic_stop(\n\
+             \x20               \"\",\n\
+             \x20               0,\n\
+             \x20               super::JET_ARITHMETIC_ADD_OVERFLOW,\n\
+             \x20           )\n\
+             \x20       })\n\
+             \x20   }\n\
+             }\n",
+        );
+        out.push('\n');
+    }
+    push_prelude_dependency_closure(out, &["runtime_diagnostic_core"]);
+    out.push_str(&portable_runtime_diagnostic_projection());
+    let runtime_parts = artifact
+        .runtime_parts
+        .iter()
+        .map(|part| format!("{:?}", part.as_str()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    out.push_str(&format!(
+        "\nconst __JET_TARGET_NAME: &str = {:?};\n\
+         const __JET_TARGET_TRIPLE: &str = {:?};\n\
+         const __JET_TARGET_PROVIDER_IDENTITY: &str = {:?};\n\
+         const __JET_TARGET_CLOSURE_IDENTITY: &str = {:?};\n\
+         const __JET_TARGET_LINKER_IDENTITY: &str = {:?};\n\
+         const __JET_TARGET_ARTIFACT_IDENTITY: &str = {:?};\n\
+         const __JET_TARGET_RUNTIME_LAYER: &str = {:?};\n\
+         const __JET_TARGET_RUNTIME_PARTS: &[&str] = &[{}];\n\
+         const __JET_CHECKED_CORE_CALL_COUNT: usize = {};\n\
+         const __JET_CHECKED_PRELUDE_CALL_COUNT: usize = {};\n",
+        machine.name,
+        machine.triple,
+        artifact.provider_identity,
+        artifact.closure_identity,
+        dossier.linker_identity,
+        artifact.artifact_identity,
+        dossier.layer.as_str(),
+        runtime_parts,
+        program.core_calls.len(),
+        program.prelude_calls.len(),
+    ));
+    // Every portable fragment below is emitted through `flat_prelude_body`,
+    // so its leading imports are declared once here for the whole module.
+    push_portable_prelude_imports(out, include_atomic, include_hardware, include_alloc);
+    out.push_str(&flat_prelude_body(CORE_FIXED_ARITHMETIC_PRELUDE_RAW));
+    out.push_str(&flat_prelude_body(PORTABLE_CORE_PRELUDE_RAW));
+    out.push_str(include_str!("../../../jet-foundation/src/NumericConversion.rs"));
+    out.push_str(include_str!("../Prelude/Core/NumericRuntime.rs"));
+    out.push_str(&flat_prelude_body(CORE_POWER_PRELUDE_RAW));
+    out.push_str(&flat_prelude_body(CORE_DIVISION_PRELUDE_RAW));
+    out.push_str(&flat_prelude_body(TARGET_ADAPTERS_PRELUDE_RAW));
+    if include_hardware {
+        out.push_str(&flat_prelude_body(portable_embedded_hardware_source()));
+    }
+    if include_alloc {
+        push_prelude_dependency_closure(out, &["fixed_allocator"]);
+        out.push_str(&flat_prelude_body(PORTABLE_ALLOC_PRELUDE_RAW));
+        if provider_allocator {
+            out.push_str(
+                "\n#[global_allocator]\n\
+                 static __JET_TARGET_ALLOCATOR: JetTargetAllocator =\n\
+                     JetTargetAllocator::from_callbacks(jet_target_alloc_impl, jet_target_dealloc_impl);\n",
+            );
+        } else {
+            out.push_str(
+                "\n#[global_allocator]\n\
+                 static __JET_TARGET_ALLOCATOR: JetHeapAllocator = JetHeapAllocator::new();\n",
+            );
+        }
+    }
+    if artifact.runtime_parts.contains(&MirRuntimePartId::Gc) {
+        push_gc_prelude_for_target(out, true);
+    }
+    push_portable_target_bindings(out, machine, include_alloc);
+    out.push('\n');
+}
+
+fn push_portable_target_bindings(
+    out: &mut String,
+    machine: &jet_foundation::TargetMachine::TargetMachine,
+    include_alloc: bool,
+) {
+    let panic_provider = match &machine.panic {
+        jet_foundation::TargetMachine::PanicPolicy::Report { provider } => Some(provider),
+        jet_foundation::TargetMachine::PanicPolicy::Abort
+        | jet_foundation::TargetMachine::PanicPolicy::HostedDefault
+        | jet_foundation::TargetMachine::PanicPolicy::Unspecified => None,
+    };
+    let provider_allocator = matches!(
+        &machine.allocator,
+        jet_foundation::TargetMachine::AllocatorPolicy::Provider { .. }
+    );
+    let (read_provider, write_provider, report_provider) = match &machine.byte_sink {
+        jet_foundation::TargetMachine::ByteSinkPolicy::Provider {
+            read,
+            write,
+            report,
+        } => (read.as_ref(), write.as_ref(), report.as_ref()),
+        jet_foundation::TargetMachine::ByteSinkPolicy::HostedDefault => {
+            panic!("portable Prelude cannot inherit a hosted byte sink")
+        }
+        jet_foundation::TargetMachine::ByteSinkPolicy::None
+        | jet_foundation::TargetMachine::ByteSinkPolicy::Unspecified => (None, None, None),
+    };
+    if panic_provider.is_some() && report_provider.is_none() {
+        panic!("portable panic-report policy requires a report byte-sink provider");
+    }
+    let wall_provider = match &machine.wall_clock {
+        jet_foundation::TargetMachine::ClockPolicy::Provider { provider } => Some(provider),
+        jet_foundation::TargetMachine::ClockPolicy::HostedDefault => {
+            panic!("portable Prelude cannot inherit a hosted wall clock")
+        }
+        jet_foundation::TargetMachine::ClockPolicy::None
+        | jet_foundation::TargetMachine::ClockPolicy::Unspecified => None,
+    };
+    let monotonic_provider = match &machine.monotonic_clock {
+        jet_foundation::TargetMachine::ClockPolicy::Provider { provider } => Some(provider),
+        jet_foundation::TargetMachine::ClockPolicy::HostedDefault => {
+            panic!("portable Prelude cannot inherit a hosted monotonic clock")
+        }
+        jet_foundation::TargetMachine::ClockPolicy::None
+        | jet_foundation::TargetMachine::ClockPolicy::Unspecified => None,
+    };
+    let sleep_provider = match &machine.sleep {
+        jet_foundation::TargetMachine::ClockPolicy::Provider { provider } => Some(provider),
+        jet_foundation::TargetMachine::ClockPolicy::HostedDefault => {
+            panic!("portable Prelude cannot inherit a hosted sleep provider")
+        }
+        jet_foundation::TargetMachine::ClockPolicy::None
+        | jet_foundation::TargetMachine::ClockPolicy::Unspecified => None,
+    };
+    let entropy_provider = match &machine.entropy {
+        jet_foundation::TargetMachine::EntropyPolicy::Provider { provider } => Some(provider),
+        jet_foundation::TargetMachine::EntropyPolicy::HostedDefault => {
+            panic!("portable Prelude cannot inherit hosted entropy")
+        }
+        jet_foundation::TargetMachine::EntropyPolicy::None
+        | jet_foundation::TargetMachine::EntropyPolicy::Unspecified => None,
+    };
+    let mmio_provider = match &machine.mmio {
+        jet_foundation::TargetMachine::MmioPolicy::Provider { provider } => Some(provider),
+        jet_foundation::TargetMachine::MmioPolicy::HostedDefault => {
+            panic!("portable Prelude cannot inherit a hosted MMIO provider")
+        }
+        jet_foundation::TargetMachine::MmioPolicy::None
+        | jet_foundation::TargetMachine::MmioPolicy::Unspecified => None,
+    };
+    let scheduler_provider = match &machine.scheduler {
+        jet_foundation::TargetMachine::SchedulerPolicy::Cooperative { provider }
+        | jet_foundation::TargetMachine::SchedulerPolicy::InterruptDriven { provider }
+        | jet_foundation::TargetMachine::SchedulerPolicy::BoardRuntime { provider } => {
+            Some(provider)
+        }
+        jet_foundation::TargetMachine::SchedulerPolicy::HostedDefault => {
+            panic!("portable Prelude cannot inherit a hosted scheduler")
+        }
+        jet_foundation::TargetMachine::SchedulerPolicy::None
+        | jet_foundation::TargetMachine::SchedulerPolicy::Unspecified => None,
+    };
+    for (operation, provider) in [
+        ("read", read_provider),
+        ("write", write_provider),
+        ("report", report_provider),
+        ("panic_report", panic_provider),
+        ("wall_clock", wall_provider),
+        ("monotonic_clock", monotonic_provider),
+        ("sleep", sleep_provider),
+        ("entropy", entropy_provider),
+        ("mmio", mmio_provider),
+        ("scheduler", scheduler_provider),
+    ] {
+        if let Some(provider) = provider {
+            assert!(
+                provider.abi.calling_convention == "C" && provider.abi.version == "1",
+                "portable target provider `{}` for {operation} requires the C/1 ABI",
+                provider.provider
+            );
+        }
+    }
+
+    let mut declarations = BTreeSet::new();
+    if read_provider.is_some() {
+        declarations.insert("__jet_target_read");
+    }
+    if write_provider.is_some() {
+        declarations.insert("__jet_target_write");
+    }
+    if report_provider.is_some() {
+        declarations.insert("__jet_target_report");
+    }
+    if wall_provider.is_some() {
+        declarations.insert("__jet_target_wall_clock");
+    }
+    if monotonic_provider.is_some() {
+        declarations.insert("__jet_target_monotonic_clock");
+    }
+    if sleep_provider.is_some() {
+        declarations.insert("__jet_target_sleep");
+    }
+    if entropy_provider.is_some() {
+        declarations.insert("__jet_target_entropy");
+    }
+    if mmio_provider.is_some() {
+        declarations.insert("__jet_target_mmio_read");
+        declarations.insert("__jet_target_mmio_write");
+    }
+    if scheduler_provider.is_some() {
+        declarations.insert("__jet_target_scheduler_yield");
+    }
+    if include_alloc && provider_allocator {
+        declarations.insert("__jet_target_alloc");
+        declarations.insert("__jet_target_dealloc");
+    }
+    if !declarations.is_empty() {
+        out.push_str("\nextern \"C\" {\n");
+        for declaration in declarations {
+            match declaration {
+                "__jet_target_read" => out.push_str(
+                    "    fn __jet_target_read(dst: *mut u8, cap: usize, used: *mut usize) -> i32;\n",
+                ),
+                "__jet_target_write" => out.push_str(
+                    "    fn __jet_target_write(src: *const u8, len: usize, used: *mut usize) -> i32;\n",
+                ),
+                "__jet_target_report" => out.push_str(
+                    "    fn __jet_target_report(src: *const u8, len: usize, used: *mut usize) -> i32;\n",
+                ),
+                "__jet_target_alloc" => out.push_str(
+                    "    fn __jet_target_alloc(size: usize, align: usize) -> *mut u8;\n",
+                ),
+                "__jet_target_dealloc" => out.push_str(
+                    "    fn __jet_target_dealloc(ptr: *mut u8, size: usize, align: usize);\n",
+                ),
+                "__jet_target_wall_clock" => {
+                    out.push_str("    fn __jet_target_wall_clock(out: *mut i64) -> i32;\n")
+                }
+                "__jet_target_monotonic_clock" => {
+                    out.push_str("    fn __jet_target_monotonic_clock(out: *mut u64) -> i32;\n")
+                }
+                "__jet_target_sleep" => {
+                    out.push_str("    fn __jet_target_sleep(nanoseconds: u64) -> i32;\n")
+                }
+                "__jet_target_entropy" => out.push_str(
+                    "    fn __jet_target_entropy(dst: *mut u8, len: usize) -> i32;\n",
+                ),
+                "__jet_target_mmio_read" => out.push_str(
+                    "    fn __jet_target_mmio_read(address: u64, dst: *mut u8, len: usize, used: *mut usize) -> i32;\n",
+                ),
+                "__jet_target_mmio_write" => out.push_str(
+                    "    fn __jet_target_mmio_write(address: u64, src: *const u8, len: usize, used: *mut usize) -> i32;\n",
+                ),
+                "__jet_target_scheduler_yield" => {
+                    out.push_str("    fn __jet_target_scheduler_yield();\n")
+                }
+                _ => unreachable!("unknown portable provider declaration"),
+            }
+        }
+        out.push_str("}\n");
+    }
+    out.push_str(&format!(
+        "\nconst __JET_TARGET_PANIC_REPORT: bool = {};\n",
+        panic_provider.is_some()
+    ));
+    if include_alloc && provider_allocator {
+        out.push_str(
+            "\n#[inline(always)]\n\
+             unsafe fn jet_target_alloc_impl(size: usize, align: usize) -> *mut u8 {\n\
+                 unsafe { __jet_target_alloc(size, align) }\n\
+             }\n\
+             #[inline(always)]\n\
+             unsafe fn jet_target_dealloc_impl(ptr: *mut u8, size: usize, align: usize) {\n\
+                 unsafe { __jet_target_dealloc(ptr, size, align) };\n\
+             }\n",
+        );
+    }
+    out.push('\n');
+
+    if read_provider.is_some() {
+        out.push_str(
+            "fn jet_target_read_bytes_impl(buffer: &mut [u8]) -> Result<usize, JetTargetError> {\n\
+                 let mut used = 0usize;\n\
+                 let status = unsafe { __jet_target_read(buffer.as_mut_ptr(), buffer.len(), &mut used) };\n\
+                 if status == 0 { Ok(used) } else { Err(JetTargetError::provider(\"read\", status)) }\n\
+             }\n\n",
+        );
+    } else {
+        out.push_str(
+            "fn jet_target_read_bytes_impl(_buffer: &mut [u8]) -> Result<usize, JetTargetError> {\n\
+                 Err(JetTargetError::unavailable(\"read\"))\n\
+             }\n\n",
+        );
+    }
+    if write_provider.is_some() {
+        out.push_str(
+            "fn jet_target_write_bytes_impl(buffer: &[u8]) -> Result<usize, JetTargetError> {\n\
+                 let mut used = 0usize;\n\
+                 let status = unsafe { __jet_target_write(buffer.as_ptr(), buffer.len(), &mut used) };\n\
+                 if status == 0 { Ok(used) } else { Err(JetTargetError::provider(\"write\", status)) }\n\
+             }\n\n",
+        );
+    } else {
+        out.push_str(
+            "fn jet_target_write_bytes_impl(_buffer: &[u8]) -> Result<usize, JetTargetError> {\n\
+                 Err(JetTargetError::unavailable(\"write\"))\n\
+             }\n\n",
+        );
+    }
+    if report_provider.is_some() {
+        out.push_str(
+            "fn jet_target_report_bytes_impl(buffer: &[u8]) -> Result<usize, JetTargetError> {\n\
+                 let mut used = 0usize;\n\
+                 let status = unsafe { __jet_target_report(buffer.as_ptr(), buffer.len(), &mut used) };\n\
+                 if status == 0 { Ok(used) } else { Err(JetTargetError::provider(\"report\", status)) }\n\
+             }\n\n",
+        );
+    } else {
+        out.push_str(
+            "fn jet_target_report_bytes_impl(_buffer: &[u8]) -> Result<usize, JetTargetError> {\n\
+                 Err(JetTargetError::unavailable(\"report\"))\n\
+             }\n\n",
+        );
+    }
+    if wall_provider.is_some() {
+        out.push_str(
+            "fn jet_target_wall_clock_impl() -> Result<i64, JetTargetError> {\n\
+                 let mut value = 0i64;\n\
+                 let status = unsafe { __jet_target_wall_clock(&mut value) };\n\
+                 if status == 0 { Ok(value) } else { Err(JetTargetError::provider(\"wall_clock\", status)) }\n\
+             }\n\n",
+        );
+    } else {
+        out.push_str(
+            "fn jet_target_wall_clock_impl() -> Result<i64, JetTargetError> {\n\
+                 Err(JetTargetError::unavailable(\"wall_clock\"))\n\
+             }\n\n",
+        );
+    }
+    if monotonic_provider.is_some() {
+        out.push_str(
+            "fn jet_target_monotonic_clock_impl() -> Result<u64, JetTargetError> {\n\
+                 let mut value = 0u64;\n\
+                 let status = unsafe { __jet_target_monotonic_clock(&mut value) };\n\
+                 if status == 0 { Ok(value) } else { Err(JetTargetError::provider(\"monotonic_clock\", status)) }\n\
+             }\n\n",
+        );
+    } else {
+        out.push_str(
+            "fn jet_target_monotonic_clock_impl() -> Result<u64, JetTargetError> {\n\
+                 Err(JetTargetError::unavailable(\"monotonic_clock\"))\n\
+             }\n\n",
+        );
+    }
+    if sleep_provider.is_some() {
+        out.push_str(
+            "fn jet_target_sleep_impl(nanoseconds: u64) -> Result<(), JetTargetError> {\n\
+                 let status = unsafe { __jet_target_sleep(nanoseconds) };\n\
+                 if status == 0 { Ok(()) } else { Err(JetTargetError::provider(\"sleep\", status)) }\n\
+             }\n\n",
+        );
+    } else {
+        out.push_str(
+            "fn jet_target_sleep_impl(_nanoseconds: u64) -> Result<(), JetTargetError> {\n\
+                 Err(JetTargetError::unavailable(\"sleep\"))\n\
+             }\n\n",
+        );
+    }
+    if entropy_provider.is_some() {
+        out.push_str(
+            "fn jet_target_entropy_impl(buffer: &mut [u8]) -> Result<(), JetTargetError> {\n\
+                 let status = unsafe { __jet_target_entropy(buffer.as_mut_ptr(), buffer.len()) };\n\
+                 if status == 0 { Ok(()) } else { Err(JetTargetError::provider(\"entropy\", status)) }\n\
+             }\n\n",
+        );
+    } else {
+        out.push_str(
+            "fn jet_target_entropy_impl(_buffer: &mut [u8]) -> Result<(), JetTargetError> {\n\
+                 Err(JetTargetError::unavailable(\"entropy\"))\n\
+             }\n\n",
+        );
+    }
+    if mmio_provider.is_some() {
+        out.push_str(
+            "fn jet_target_mmio_read_impl(address: u64, buffer: &mut [u8]) -> Result<usize, JetTargetError> {\n\
+                 let mut used = 0usize;\n\
+                 let status = unsafe { __jet_target_mmio_read(address, buffer.as_mut_ptr(), buffer.len(), &mut used) };\n\
+                 if status == 0 { Ok(used) } else { Err(JetTargetError::provider(\"mmio_read\", status)) }\n\
+             }\n\n\
+             fn jet_target_mmio_write_impl(address: u64, buffer: &[u8]) -> Result<usize, JetTargetError> {\n\
+                 let mut used = 0usize;\n\
+                 let status = unsafe { __jet_target_mmio_write(address, buffer.as_ptr(), buffer.len(), &mut used) };\n\
+                 if status == 0 { Ok(used) } else { Err(JetTargetError::provider(\"mmio_write\", status)) }\n\
+             }\n\n",
+        );
+    } else {
+        out.push_str(
+            "fn jet_target_mmio_read_impl(_address: u64, _buffer: &mut [u8]) -> Result<usize, JetTargetError> {\n\
+                 Err(JetTargetError::unavailable(\"mmio_read\"))\n\
+             }\n\n\
+             fn jet_target_mmio_write_impl(_address: u64, _buffer: &[u8]) -> Result<usize, JetTargetError> {\n\
+                 Err(JetTargetError::unavailable(\"mmio_write\"))\n\
+             }\n\n",
+        );
+    }
+    if scheduler_provider.is_some() {
+        out.push_str(
+            "fn jet_target_scheduler_yield_impl() {\n\
+                 unsafe { __jet_target_scheduler_yield() };\n\
+             }\n\n",
+        );
+    } else {
+        out.push_str(
+            "fn jet_target_scheduler_yield_impl() {\n\
+                 jet_target_failure_bytes(b\"scheduler provider unavailable\", -1)\n\
+             }\n\n",
+        );
+    }
+}
+
+/// Emit the fixed Core closure plus the optional fragments selected by the
+/// checked MIR runtime-part IDs. This path deliberately never turns the IDs
+/// back into Core module strings.
+
+pub(crate) fn push_full_corelib_prelude_with_policy(
+    out: &mut String,
+    active_os: Syntax::OSTarget,
+    test_harness: bool,
+    edition: &str,
+    runtime_parts: &BTreeSet<MirRuntimePartId>,
+    uses_shared: bool,
+    uses_arrow: bool,
+    policy: &ReleaseDevtoolsPolicy,
+) {
+    push_package_edition_value(out, edition);
+    let used_core = HashSet::new();
+    let forces = CorePreludeForces {
+        mapped_file: runtime_parts.contains(&MirRuntimePartId::FsRuntime),
+        shared: uses_shared,
+        // DataFlow carries the Arrow adapter surface in the Data closure.
+        arrow: uses_arrow || runtime_parts.contains(&MirRuntimePartId::Data),
+        // MIR closure emission uses the canonical typed history carriers for
+        // function values even when no `core.testing` call is reached.
+        testing_history: true,
+    };
+    if test_harness {
+        push_corelib_prelude_for_test_harness_with_forces(
+            out,
+            &used_core,
+            true,
+            forces,
+            policy,
+        );
+    } else {
+        push_corelib_prelude_inner_with_forces(out, &used_core, true, false, forces, policy);
+    }
+    out.push_str(scheduler_prelude_for_emit(true));
+    out.push_str(CORE_STREAM_PRELUDE_RAW);
+    out.push_str(CORE_STREAM_DURATION_ADAPTER);
+    out.push_str(include_str!("../Prelude/Core/CollectionSources.rs"));
+    if runtime_parts.contains(&MirRuntimePartId::Realtime) {
+        out.push_str(CORE_REALTIME_PRELUDE_RAW);
+    }
+    if runtime_parts.contains(&MirRuntimePartId::EmbeddedHardware) {
+        out.push_str(&flat_prelude_body(CORE_EMBEDDED_HARDWARE_PRELUDE_RAW));
+    }
+    out.push_str(&flat_prelude_body(CORE_PARALLEL_PLAN_PRELUDE_RAW));
+    if runtime_parts.contains(&MirRuntimePartId::Ui) {
+        out.push_str(&canonical_font_prelude());
+        out.push_str(include_str!("../Prelude/Core/HostServices.rs"));
+        out.push_str("\nmod jet_tui_kernel {\n");
+        out.push_str(TUI_KERNEL_PRELUDE);
+        out.push_str("\n}\n");
+        out.push_str(UI_PRELUDE);
+        out.push_str(PREVIEW_PRELUDE);
+    }
+    if policy.panel_code && runtime_parts.contains(&MirRuntimePartId::Devtools) {
+        out.push_str(DEVTOOLS_PANEL_PRELUDE);
+        out.push_str(DEVTOOLS_PANEL_CATALOG_PRELUDE_RAW);
+        out.push_str(DEVTOOLS_DATABASE_PANEL_PRELUDE_RAW);
+        out.push_str(DEVTOOLS_JOBS_PANEL_PRELUDE_RAW);
+        out.push_str(DEVTOOLS_REQUEST_PANEL_PRELUDE_RAW);
+        out.push_str(DEVTOOLS_TELEMETRY_PANEL_PRELUDE_RAW);
+        out.push_str(DEVTOOLS_TOPOLOGY_PANEL_PRELUDE_RAW);
+    }
+    if runtime_parts.contains(&MirRuntimePartId::Gtk)
+        && matches!(active_os, Syntax::OSTarget::Linux)
+    {
+        out.push_str(UI_GTK_PRELUDE);
+    }
+    push_typed_core_optional_parts(out, runtime_parts, test_harness, policy);
+    push_typed_app_preludes(out, runtime_parts);
+}
+fn push_typed_core_optional_parts(
+    out: &mut String,
+    runtime_parts: &BTreeSet<MirRuntimePartId>,
+    omit_testing_shared: bool,
+    policy: &ReleaseDevtoolsPolicy,
+) {
+    let needs_data = runtime_parts.contains(&MirRuntimePartId::Data);
+    if runtime_parts.contains(&MirRuntimePartId::Game) {
+        push_game_debug_policy_const(out, policy);
+        out.push_str(&flat_prelude_body(CORE_GAME_DEV_KERNEL_PRELUDE_RAW));
+        out.push_str(&flat_prelude_body(CORE_GAME_ASSET_PIPELINE_PRELUDE_RAW));
+        out.push_str(&flat_prelude_body(CORE_GAME_HOT_SWAP_PRELUDE_RAW));
+        out.push_str(&flat_prelude_body(CORE_GAME_WORLD_INSPECTOR_PRELUDE_RAW));
+        out.push_str(&flat_prelude_body(CORE_GAME_FRAME_PROFILER_PRELUDE_RAW));
+        out.push_str(&flat_prelude_body(CORE_GAME_OVERLAY_PRELUDE_RAW));
+        push_game_devtools_control_prelude(out);
+        out.push_str(include_str!("../Prelude/CoreLib/Top/GameDevProtocol.rs"));
+        out.push_str(&flat_prelude_body(GAME_ASSETS_IMPORT_PRELUDE_RAW));
+        out.push_str(&flat_prelude_body(GAME_ASSETS_RUNTIME_PRELUDE_RAW));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Game.rs"));
+    }
+    if runtime_parts.contains(&MirRuntimePartId::Files) {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/PathFiles.rs"));
+    } else if runtime_parts.contains(&MirRuntimePartId::FsRuntime) {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/PathFiles.rs"));
+    }
+    if runtime_parts.contains(&MirRuntimePartId::Interrupt)
+        || runtime_parts.contains(&MirRuntimePartId::Process)
+        || runtime_parts.contains(&MirRuntimePartId::FsRuntime)
+    {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Interrupt.rs"));
+    }
+    if runtime_parts.contains(&MirRuntimePartId::Process)
+        || runtime_parts.contains(&MirRuntimePartId::FsRuntime)
+    {
+        out.push_str("\nmod jet_process_pty {\n");
+        out.push_str(include_str!("../Prelude/CoreLib/ProcessPty.rs"));
+        out.push_str("\n}\n");
+        out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_process_sandbox\n");
+        out.push_str("\nmod jet_process_sandbox {\n");
+        out.push_str(include_str!("../Prelude/CoreLib/Top/ProcessSandbox.rs"));
+        out.push_str(include_str!(
+            "../Prelude/CoreLib/Top/ProcessWindowsSandbox.rs"
+        ));
+        out.push_str("\n}\n");
+        out.push_str("// JET_VETTED_UNSAFE_END: jet_process_sandbox\n");
+        out.push_str(include_str!("../Prelude/CoreLib/Top/ProcessPolicy.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/ProcessSpec.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Process.rs"));
+    }
+    if runtime_parts.contains(&MirRuntimePartId::FsRuntime) {
+        if !omit_testing_shared {
+            out.push_str(include_str!("../Prelude/CoreLib/Top/TestingShared.rs"));
+        }
+        out.push_str(include_str!("../Prelude/CoreLib/Top/IoLineStream.rs"));
+        out.push_str(include_str!("../Prelude/Core/EnvConfig.rs"));
+        out.push_str(include_str!("../Prelude/Core/EnvProjection.rs"));
+        out.push_str(include_str!("../Prelude/Core/FSOps.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/FileStream.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/FSRuntimeOps.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"));
+        out.push_str(include_str!("../Prelude/Core/CollectionIoSources.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/FSWriteOps.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/PlatformFamily.rs"));
+        out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_os_extra\n");
+        out.push_str(include_str!("../Prelude/CoreLib/Top/OsExtra.rs"));
+        out.push_str("// JET_VETTED_UNSAFE_END: jet_os_extra\n");
+    }
+    if runtime_parts.contains(&MirRuntimePartId::Math) {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/MathLibPure.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/MathComplexTraits.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomFns.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/LinalgFns.rs"));
+    }
+    if needs_data {
+        out.push_str(&data_plot_prelude_body());
+    }
+    if runtime_parts.contains(&MirRuntimePartId::DataFmt) {
+        // JetTablePlan is the internal semantic plan for Query values.
+        out.push_str(&data_query_prelude_source());
+        out.push_str(include_str!("../Prelude/CoreLib/Top/DataFmt.rs"));
+    }
+    if needs_data {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/DataStats.rs"));
+        out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_data_flow\n");
+        out.push_str(include_str!("../Prelude/CoreLib/Top/DataFlow.rs"));
+        out.push_str("\n// JET_VETTED_UNSAFE_END: jet_data_flow\n");
+    }
+    if runtime_parts.contains(&MirRuntimePartId::Compute) {
+        out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_compute\n");
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Compute.rs"));
+        out.push_str("\n// JET_VETTED_UNSAFE_END: jet_compute\n");
+    }
+    if runtime_parts.contains(&MirRuntimePartId::Http) {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPMessage.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPRoute.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPClient.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPServer.rs"));
+    } else if runtime_parts.contains(&MirRuntimePartId::WebSocket)
+        || runtime_parts.contains(&MirRuntimePartId::Browser)
+    {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPMessage.rs"));
+    }
+    if runtime_parts.contains(&MirRuntimePartId::WebSocket)
+        || runtime_parts.contains(&MirRuntimePartId::Http)
+        || runtime_parts.contains(&MirRuntimePartId::Browser)
+    {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/WsClient.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Ws.rs"));
+    }
+    if runtime_parts.contains(&MirRuntimePartId::Browser) {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Browser.rs"));
+        out.push_str(include_str!("../Prelude/BrowserTest.rs"));
+    }
+    if runtime_parts.contains(&MirRuntimePartId::Args) {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Args.rs"));
+        out.push_str(include_str!("../Prelude/Core/ArgsProjectionCore.rs"));
+        out.push_str(include_str!("../Prelude/Core/ArgsProjection.rs"));
+    }
+    if runtime_parts.contains(&MirRuntimePartId::Reflect) {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Reflect.rs"));
+    }
+    if runtime_parts.contains(&MirRuntimePartId::AuthTokens) {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Auth.rs"));
+    }
+    if runtime_parts.contains(&MirRuntimePartId::AuthSession) {
+        out.push_str(include_str!("../Prelude/CoreLib/Top/AuthSession.rs"));
+    }
+    if runtime_parts.contains(&MirRuntimePartId::Sync) {
+        out.push_str("\nmod jet_sync {\n");
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Sync.rs"));
+        out.push_str("\n}\npub(crate) use jet_sync::*;\n");
+    }
+    push_runtime_devtools_panel_preludes(
+        out,
+        policy.panel_code,
+        runtime_parts.contains(&MirRuntimePartId::Devtools),
+        runtime_parts.contains(&MirRuntimePartId::Data)
+            || runtime_parts.contains(&MirRuntimePartId::DataFmt),
+        runtime_parts.contains(&MirRuntimePartId::Http),
+        runtime_parts.contains(&MirRuntimePartId::Process)
+            || runtime_parts.contains(&MirRuntimePartId::FsRuntime)
+            || runtime_parts.contains(&MirRuntimePartId::Http)
+            || runtime_parts.contains(&MirRuntimePartId::Services),
+    );
+    if runtime_parts.contains(&MirRuntimePartId::Services) {
+        out.push_str(service_authority_prelude_for_emit());
+        out.push_str(JOB_QUEUE_NATIVE_PRELUDE_RAW);
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Services.rs"));
+    }
+    if runtime_parts.contains(&MirRuntimePartId::Mod) {
+        out.push_str(&format!(
+            "\nconst __JET_COMPILER_VERSION: &str = {:?};\n",
+            env!("CARGO_PKG_VERSION")
+        ));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Mod.rs"));
+        out.push('\n');
+    }
+}
+
+/// Emit only the typed fact definitions needed by ordinary Core producers when
+/// the full panel surface is compiled out. The shared publish gate is
+/// const-folded in release, so these producer-only facts carry no live
+/// observation path in the resulting artifact.
+fn push_runtime_devtools_panel_preludes(
+    out: &mut String,
+    devtools_panel_code: bool,
+    has_devtools_panel: bool,
+    needs_database_panel: bool,
+    needs_request_panel: bool,
+    needs_topology_panel: bool,
+) {
+    if devtools_panel_code && has_devtools_panel {
+        return;
+    }
+    if needs_database_panel {
+        out.push_str(DEVTOOLS_DATABASE_PANEL_PRELUDE_RAW);
+    }
+    if needs_request_panel {
+        out.push_str(DEVTOOLS_REQUEST_PANEL_PRELUDE_RAW);
+    }
+    if needs_topology_panel {
+        out.push_str(DEVTOOLS_TOPOLOGY_PANEL_PRELUDE_RAW);
+    }
+}
+
+fn push_typed_app_preludes(out: &mut String, runtime_parts: &BTreeSet<MirRuntimePartId>) {
+    if !runtime_parts.contains(&MirRuntimePartId::Apps) {
+        return;
+    }
+    push_app_middleware_prelude(out);
+    out.push_str(APP_PRELUDE);
+    out.push_str(LIVEQUERY_PRELUDE);
+    out.push_str(&flat_prelude_body(CORE_WEB_PENDING_PRELUDE_RAW));
+    out.push_str(&flat_prelude_body(WEB_ROUTER_PRELUDE_RAW));
+    out.push_str(&flat_prelude_body(OPENAPI_PRELUDE_RAW));
+    out.push_str(&flat_prelude_body(WEB_QUERY_PRELUDE_RAW));
+    out.push_str(&flat_prelude_body(WEB_FORMS_PRELUDE_RAW));
+    out.push_str(&flat_prelude_body(WEB_TABLE_PRELUDE_RAW));
+    out.push_str(&flat_prelude_body(WEB_VIRTUAL_PRELUDE_RAW));
+    out.push_str(&flat_prelude_body(WEB_STORE_PRELUDE_RAW));
+    out.push_str(&flat_prelude_body(WEBSERVERFN_PRELUDE_RAW));
+}
+
+
 /// The R10 Core closure rides in its own content-addressed rlib. This includes
 /// scheduler/UI/app templates: Core calls them, so splitting only the kernel
 /// would create a circular dependency or force an inline fallback.
-fn push_core_runtime(out: &mut String, bundle: &ProgramBundle, test_harness: bool) {
-    let body = core_runtime_body(bundle, test_harness);
-    if body.is_empty() {
-        return;
-    }
-    out.push_str(CACHED_CORE_BEGIN);
-    out.push_str(&body);
-    out.push_str(CACHED_CORE_END);
-}
 
 /// R10 / #1133: content identity of the semantic Core closure and emitted
 /// compiler/runtime fragments a program will link. The cache key is the sorted
@@ -1327,6 +3220,18 @@ fn push_core_runtime(out: &mut String, bundle: &ProgramBundle, test_harness: boo
 /// bounded cache is process-local; the emitted source remains the source of
 /// truth.
 pub fn corelib_emission_fingerprint(bundle: &ProgramBundle, test_harness: bool) -> String {
+    corelib_emission_fingerprint_with_policy(
+        bundle,
+        test_harness,
+        &ReleaseDevtoolsPolicy::development(),
+    )
+}
+
+pub fn corelib_emission_fingerprint_with_policy(
+    bundle: &ProgramBundle,
+    test_harness: bool,
+    policy: &ReleaseDevtoolsPolicy,
+) -> String {
     let mut used_core = bundle.used_core.iter().cloned().collect::<Vec<_>>();
     used_core.sort_unstable();
     let cache_key = CoreEmissionFingerprintKey {
@@ -1335,13 +3240,16 @@ pub fn corelib_emission_fingerprint(bundle: &ProgramBundle, test_harness: bool) 
         edition: bundle.edition.clone(),
         force_corelib: force_corelib_prelude(bundle),
         test_harness,
+        release_inspect: policy.release_cfg_value().map(str::to_string),
+        devtools_panel_code: policy.panel_code,
+        devtools_stream_code: policy.stream_code,
     };
     let cache = CORELIB_EMISSION_FINGERPRINTS.get_or_init(|| Mutex::new(BTreeMap::new()));
     if let Some(fingerprint) = cache.lock().unwrap().get(&cache_key).cloned() {
         return fingerprint;
     }
 
-    let body = core_runtime_body(bundle, test_harness);
+    let body = core_runtime_body_with_policy(bundle, test_harness, policy);
     let fingerprint = corelib_emission_identity(&body, &bundle.used_core);
     let mut entries = cache.lock().unwrap();
     if entries.len() >= CORELIB_DIGEST_CACHE_LIMIT {
@@ -1409,11 +3317,28 @@ fn push_corelib_prelude_body(
     out: &mut String,
     used_core: &std::collections::HashSet<String>,
     omit_testing_shared: bool,
+    forces: CorePreludeForces,
+    policy: &ReleaseDevtoolsPolicy,
 ) {
+    // Typed live watches and the global app registry share one lifecycle
+    // transition kernel. Emit it at the Core root because DataWatch lives in
+    // the unconditional JetStd data carrier, while LiveQuery remains optional.
+    out.push_str(LIVE_LIFECYCLE_PRELUDE);
+    // Foundation EncodingJson/JSON/diagnostic kernels import
+    // `crate::DataTree::DataTree`; emit the canonical carrier at crate root
+    // before the JetStd brace chain begins. JetStd re-exports this same type
+    // through DATATREE_PRELUDE_REEXPORT below.
+    out.push_str(DATATREE_FOUNDATION_ROOT);
     // D-SIMD1/D-SIMD2/D-SIMD3 / I9: MathTaskMem's fixed-array lane values
     // call this root-level kernel. JIT and TIR/comptime include the same
     // source directly and marshal their resident carriers into its slice API.
     out.push_str(include_str!("../Prelude/Core/SimdLanes.rs"));
+    // D-PLACE1=A: keep the checked Atomic<T> carrier at crate root so its
+    // #Layout(c) representation is identical across generated AOT tiers.
+    out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_atomic_carrier\n");
+    out.push_str(&flat_prelude_body(CORE_ATOMIC_PRELUDE_RAW));
+    out.push_str("// JET_VETTED_UNSAFE_END: jet_atomic_carrier\n");
+    out.push('\n');
     out.push('\n');
     // JetStd Open/CommonTypes + EncodingStream/Codecs name these foundation
     // modules unconditionally — always emit them with the Core kernel.
@@ -1456,8 +3381,38 @@ fn push_corelib_prelude_body(
     );
     let _needs_regex = core_usage_matches(used_core, &["core.regex"]);
     // needs_xml / needs_base still drive encoding Top reachability below.
+    let needs_files = core_usage_matches(
+        used_core,
+        &[
+            "core.files",
+            "core.watcher",
+            "core.term",
+            "core.sys",
+            "core.process",
+        ],
+    );
+    let needs_fs_runtime = needs_files
+        || core_usage_matches(
+            used_core,
+            &[
+                "core.args",
+                "core.process",
+                "core.testing",
+                "core.perf",
+                "core.mem.scope",
+            ],
+        );
+    let needs_mapped_file = forces.mapped_file || needs_fs_runtime;
+    let needs_shared =
+        forces.shared || core_usage_matches(used_core, &["core.mem::pool_shared", "core.mem.pool_shared"]);
+
 
     for part in CORELIB_KERNEL_PARTS {
+        if (!needs_mapped_file && *part == MAPPED_FILE_PRELUDE)
+            || (!needs_shared && *part == SHARED_ROUTES_PRELUDE)
+        {
+            continue;
+        }
         // Host crates include UrlMime.rs directly, so it includes its sibling
         // MIME kernel. AOT already embeds that kernel as the preceding part.
         out.push_str(
@@ -1465,6 +3420,10 @@ fn push_corelib_prelude_body(
                 .unwrap_or(part),
         );
     }
+    // Typed query plans are shared semantic facts. Keep the root-level
+    // definitions available to JetStd's Query carrier even when no optional
+    // DataFmt fragment is selected.
+    out.push_str(&flat_prelude_body(CORE_LAZY_TABLE_PLAN_PRELUDE_RAW));
     // #1451: `Prelude/CommandSuite.rs` is an unconditional kernel part in the
     // loop above, so `jet_std::jet_test_suite_run` always exists. The TIR
     // emitter spells the `suite.run()` handle op unqualified at crate root and
@@ -1478,26 +3437,17 @@ fn push_corelib_prelude_body(
     // cost nothing, and a definition that is never gated cannot drift from an
     // ungated use again (same fix shape as `push_package_edition`).
     out.push_str(include_str!("../Prelude/CoreLib/Top/CommandSuite.rs"));
-    // D-CONC-FAIL1=A: the typed child-failure value lives in the optional
-    // JetStd kernel, so emit its root value traits only beside that kernel.
-    // Programs without Core runtime reachability must not name `jet_std`.
-    out.push_str(
-        "\nimpl JetShow for jet_std::JetTaskFailure {\n\
-            fn jet_show(&self) -> String { format!(\"{self:?}\") }\n\
-        }\n\
-        impl JetDisplay for jet_std::JetTaskFailure {\n\
-            fn jet_display(&self) -> String { self.jet_show() }\n\
-        }\n\
-        impl JetDebug for jet_std::JetTaskFailure {\n\
-            fn jet_debug(&self) -> String { self.jet_show() }\n\
-        }\n\
-",
-    );
     // NEVER add `JetTaskFailure` here. `jet-foundation/src/Outcome.rs` declares
     // it and rides in `PRELUDE_PARTS`, so it is already a flat top-level item in
-    // every generated program; importing `jet_std::JetTaskFailure` into that same
-    // scope is E0255. Flat fragments outside `mod jet_std` name it unqualified.
+    // every generated program. Importing it into that same scope is E0255.
+    // Flat fragments outside `mod jet_std` name it unqualified.
     out.push_str("\npub use crate::jet_std::JetTaskGroupRuntime;\n");
+    // D-SERDE-ACCESS=B: the Foundation carrier's accessors are a trait in the
+    // kernel's `DataTree.rs`; flat user code calls them by method syntax.
+    out.push_str("\npub use crate::jet_std::JetDataTreeAccess;\n");
+    // CommonTypes' exact-Int formatting adapters are always emitted.
+    out.push_str(include_str!("../Prelude/Core/Fmt.rs"));
+    out.push_str(include_str!("../Prelude/Core/FmtAot.rs"));
     // Card #1751: the one 80x24 terminal default, read by CommonTypes.rs's
     // TerminalPolicy::default (in the kernel closure above) and by
     // ProcessPty.rs's PtyConfig::default when process/PTY support is emitted.
@@ -1509,29 +3459,7 @@ fn push_corelib_prelude_body(
     let needs_email = core_usage_matches(used_core, &["core.email"]);
     let needs_raylib = core_usage_matches(used_core, &["core.game.raylib"]);
     let needs_game = core_usage_matches(used_core, &["core.game"]) || needs_raylib;
-    let needs_files = core_usage_matches(
-        used_core,
-        &[
-            "core.files",
-            "core.watcher",
-            "core.term",
-            "core.sys",
-            "core.process",
-        ],
-    );
-    let needs_interrupt = core_usage_matches(used_core, &["core.sys::on_interrupt"]);
     let needs_text = core_usage_matches(used_core, &["core.text", "core.text.fmt", "core.term"]);
-    let needs_fs_runtime = needs_files
-        || core_usage_matches(
-            used_core,
-            &[
-                "core.args",
-                "core.process",
-                "core.testing",
-                "core.perf",
-                "core.mem.scope",
-            ],
-        );
     let needs_crypto = core_usage_matches(
         used_core,
         &[
@@ -1579,13 +3507,15 @@ fn push_corelib_prelude_body(
             "core.data.sketch.cms",
             "core.data.sketch.reservoir",
             "core.db",
+            "core.encoding.csv",
         ],
     );
-    // DataFmt.rs contains the data/codec helpers filed under `core.data`, but
-    // its old `jet_fmt_*` helpers now live in the shared Fmt kernel. Keep the
-    // two emission gates separate so a fmt-only program gets only Fmt.rs.
-    let needs_fmt = core_usage_matches(used_core, &["core.text.fmt"]);
     let needs_data_fmt = needs_data || needs_encoding;
+    let needs_arrow =
+        forces.arrow || core_usage_matches(used_core, &["core.data.arrow"]) || needs_data;
+    if needs_arrow {
+        push_prelude_dependency_closure(out, &["arrow_file_reader"]);
+    }
     let needs_compute = core_usage_matches(used_core, &["core.compute"]);
     let needs_net = core_usage_matches(
         used_core,
@@ -1644,9 +3574,18 @@ fn push_corelib_prelude_body(
     let needs_args = core_usage_matches(used_core, &["core.args"]);
     let needs_reflect = core_usage_matches(used_core, &["core.reflect", "core.compiler.lang"]);
     let needs_auth_tokens = core_usage_matches(used_core, &["core.auth"]) || needs_crypto;
-    let needs_auth_session = core_usage_matches(used_core, &["core.auth", "app"]);
-    let needs_sync = core_usage_matches(used_core, &["core.sync", "app", "core.db"]);
-    let needs_services = core_usage_matches(used_core, &["core.service", "core.services"]);
+    let needs_auth_session = core_usage_matches(used_core, &["core.auth", "app", "core.web"]);
+    let needs_sync = core_usage_matches(used_core, &["core.sync", "app", "core.web", "core.db"]);
+    let needs_services = core_usage_matches(used_core, &["core.service"]);
+    let needs_jobs = core_usage_matches(used_core, &["core.jobs"]);
+    push_runtime_devtools_panel_preludes(
+        out,
+        policy.panel_code,
+        core_usage_matches(used_core, &["core.ui", "core.devtools"]),
+        needs_data_fmt,
+        needs_http,
+        needs_process || needs_fs_runtime || needs_http || needs_services,
+    );
     let needs_mod = core_usage_matches(used_core, &["core.mod"]);
     if needs_mod {
         // The generated loader must compare against the compiler that emitted
@@ -1662,12 +3601,17 @@ fn push_corelib_prelude_body(
     // Kernel closure: JetStd brace-chain files name these Top symbols
     // (FileReader, text fold, JSON frames, TCPStream, deadlines, TLS entropy).
     // NetHTTP is TCP/TLS only — HTTP serve/router lives in HTTPServer (gated).
+    // Keep the shared Raylib parser/transcript inside the existing marker so
+    // unused programs can still remove the complete unsafe bridge.
+    out.push_str("// jet:raylib-begin\n");
+    out.push_str(include_str!("../Prelude/Core/Raylib.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/HandlesRaylib.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/DbPool.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/UnicodeTables.rs"));
     out.push_str(include_str!("../Prelude/Core/Path.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/Text.rs"));
     out.push_str(include_str!("../Prelude/Core/Codec.rs"));
-    out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingTraits.rs"));
+    out.push_str(&flat_prelude_body(ENCODING_TRAITS_PRELUDE_RAW));
     // D-SOA2D: columnar-list transparency rides with the codec traits it names,
     // so it exists exactly when a program has encoding at all.
     out.push_str(include_str!("../Prelude/Core/ColumnListCodec.rs"));
@@ -1678,6 +3622,10 @@ fn push_corelib_prelude_body(
     out.push_str(include_str!("../Prelude/CoreLib/Top/EncodingCodecs.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/SHA256Raw.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/SHAFamily.rs"));
+    out.push_str("fn jet_log_write_line(line: &str) { eprintln!(\"{}\", line); }\n");
+    out.push_str("fn jet_log_process_exit(code: i64) { std::process::exit(code as i32); }\n");
+    out.push_str(include_str!("../Prelude/Core/LogState.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/Log.rs"));
     out.push_str(include_str!(
         "../Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs"
     ));
@@ -1689,6 +3637,7 @@ fn push_corelib_prelude_body(
     out.push_str(include_str!("../Prelude/CoreLib/Top/TimeSleep.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/WorkflowSleep.rs"));
     out.push_str(include_str!("../Prelude/Core/NetPure.rs"));
+    out.push_str(include_str!("../Prelude/Core/NetError.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/NetHTTP.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/Solver.rs"));
     // Scheduler waits always call the deadline raiser, and FakeData below
@@ -1709,6 +3658,19 @@ fn push_corelib_prelude_body(
         // the same source (idempotent struct defs would conflict). Skip.
     }
     if needs_game {
+        push_game_debug_policy_const(out, policy);
+        // adapters; each is one flat source and none calls a host.
+        out.push_str(&flat_prelude_body(CORE_GAME_DEV_KERNEL_PRELUDE_RAW));
+        out.push_str(&flat_prelude_body(CORE_GAME_ASSET_PIPELINE_PRELUDE_RAW));
+        out.push_str(&flat_prelude_body(CORE_GAME_HOT_SWAP_PRELUDE_RAW));
+        out.push_str(&flat_prelude_body(CORE_GAME_WORLD_INSPECTOR_PRELUDE_RAW));
+        out.push_str(&flat_prelude_body(CORE_GAME_FRAME_PROFILER_PRELUDE_RAW));
+        out.push_str(&flat_prelude_body(CORE_GAME_OVERLAY_PRELUDE_RAW));
+        push_game_devtools_control_prelude(out);
+        out.push_str(include_str!("../Prelude/CoreLib/Top/GameDevProtocol.rs"));
+        // Asset import hashing uses the raw SHA-256 helper emitted above.
+        out.push_str(&flat_prelude_body(GAME_ASSETS_IMPORT_PRELUDE_RAW));
+        out.push_str(&flat_prelude_body(GAME_ASSETS_RUNTIME_PRELUDE_RAW));
         out.push_str(include_str!("../Prelude/CoreLib/Top/Game.rs"));
     }
     if needs_files {
@@ -1727,6 +3689,9 @@ fn push_corelib_prelude_body(
     // `jet_process_spec_run_inner`) — emit whenever either surface is needed (I9).
     // Process must come before FSIoEnvOsTesting so those symbols are in scope.
     if needs_process || needs_fs_runtime {
+        // Process.rs and FSIoEnvOsTesting share the one dispatcher support
+        // source. Emit it before either adapter for process-only closures too.
+        out.push_str(include_str!("../Prelude/CoreLib/Top/Interrupt.rs"));
         out.push_str("\nmod jet_process_pty {\n");
         out.push_str(include_str!("../Prelude/CoreLib/ProcessPty.rs"));
         out.push_str("\n}\n");
@@ -1742,6 +3707,38 @@ fn push_corelib_prelude_body(
         out.push_str(include_str!("../Prelude/CoreLib/Top/ProcessSpec.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/Process.rs"));
     }
+    let needs_testing_history =
+        forces.testing_history || core_usage_matches(used_core, &["core.testing"]);
+    if needs_testing_history {
+        // D-TEST-COMPARE1=A: every generated tier reaches the same Foundation
+        // verdict engine.  The Top carrier only marshals checked callables and
+        // observations into this embedded source module.
+        out.push_str("\nmod jet_testing_comparison_foundation {\n");
+        out.push_str(include_str!("../../../jet-foundation/src/TestingComparison.rs"));
+        out.push_str("\n}\n");
+        // The Foundation history module is embedded once beside the Top
+        // adapter. Its host source names the canonical JSON and comparison
+        // modules at crate root; these aliases keep generated native and Wasm
+        // programs on that same source path without adding unused global
+        // facade entries to programs that do not use core.testing.
+        out.push_str(
+            "\n#[allow(non_snake_case)]\nmod TestingComparison { pub use crate::jet_testing_comparison_foundation::*; }\n\
+             #[allow(non_snake_case)]\nmod JSON {\n",
+        );
+        out.push_str(include_str!("../../../jet-foundation/src/JSON.rs"));
+        out.push_str(
+            "\n}\n// JET_VETTED_UNSAFE_BEGIN: jet_testing_history_foundation\n\
+             // AUDIT: D-TEST-HISTORY1 and the Foundation SAFETY CONTRACT keep\n\
+             // weak callback metadata non-owning and reads tied to live owners.\n\
+             mod jet_testing_history_foundation {\n",
+        );
+        out.push_str(include_str!("../../../jet-foundation/src/TestingHistory.rs"));
+        out.push_str("\n}\n// JET_VETTED_UNSAFE_END: jet_testing_history_foundation\n");
+        out.push_str(include_str!("../Prelude/CoreLib/Top/TestingComparison.rs"));
+        out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_testing_history_top\n");
+        out.push_str(include_str!("../Prelude/CoreLib/Top/TestingHistory.rs"));
+        out.push_str("\n// JET_VETTED_UNSAFE_END: jet_testing_history_top\n");
+    }
     if needs_fs_runtime {
         if !omit_testing_shared {
             out.push_str(include_str!("../Prelude/CoreLib/Top/TestingShared.rs"));
@@ -1749,29 +3746,21 @@ fn push_corelib_prelude_body(
         // #1480: split out of FSIoEnvOsTesting.rs so the JIT host can
         // `include!` this exact source (I9 — single Prelude source of truth).
         out.push_str(include_str!("../Prelude/CoreLib/Top/IoLineStream.rs"));
-        // D-OSINTERRUPT1: pending-count, registration-order, and boundary
-        // policy are shared by AOT, resident JIT, and the interpreter. Their
-        // callback storage remains an engine adapter. Keep the whole
-        // interrupt Prelude out of ordinary `core.sys` programs; FSIo's
-        // dispatcher is stripped below when `on_interrupt` is unused.
-        if needs_interrupt {
-            out.push_str(include_str!("../Prelude/CoreLib/Top/Interrupt.rs"));
-        }
         // D-CONFIG-ENV1 / I9: source overlay and dotenv parsing are one
         // Prelude fragment for AOT and the interpreter ambient adapter.
         out.push_str(include_str!("../Prelude/Core/EnvConfig.rs"));
+        out.push_str(include_str!("../Prelude/Core/EnvProjection.rs"));
         out.push_str(include_str!("../Prelude/Core/FSOps.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FileStream.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSRuntimeOps.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"));
+        out.push_str(include_str!("../Prelude/Core/CollectionIoSources.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSWriteOps.rs"));
         // #1465: identity / release / POSIX control — after FSIoEnvOsTesting so
         // jet_std_os_pid / env helpers and jet_std_process_exit stay in scope.
         // Vetted region: OsExtra carries POSIX `unsafe` at crate root (not only
         // inside `mod jet_os_sys`); golden I1 strips this delimiter.
-        out.push_str(include_str!(
-            "../Prelude/CoreLib/Top/PlatformFamily.rs"
-        ));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/PlatformFamily.rs"));
         out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_os_extra\n");
         out.push_str(include_str!("../Prelude/CoreLib/Top/OsExtra.rs"));
         out.push_str("// JET_VETTED_UNSAFE_END: jet_os_extra\n");
@@ -1791,14 +3780,10 @@ fn push_corelib_prelude_body(
         // Encoding templates already in kernel closure.
     }
     if needs_data {
-        out.push_str(include_str!("../Prelude/CoreLib/Top/DataPlot.rs"));
-    }
-    if needs_fmt {
-        out.push_str(include_str!("../Prelude/Core/Fmt.rs"));
-        out.push_str(include_str!("../Prelude/Core/FmtAot.rs"));
+        out.push_str(&data_plot_prelude_body());
     }
     if needs_data_fmt {
-        out.push_str(include_str!("../Prelude/CoreLib/Top/DataQuery.rs"));
+        out.push_str(&data_query_prelude_source());
         out.push_str(include_str!("../Prelude/CoreLib/Top/DataFmt.rs"));
     }
     if needs_data {
@@ -1806,7 +3791,9 @@ fn push_corelib_prelude_body(
         // comptime tier `include!` this same file, so every tier runs the same
         // compensated arithmetic and reports the same `DataError` (I9).
         out.push_str(include_str!("../Prelude/CoreLib/Top/DataStats.rs"));
+        out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_data_flow\n");
         out.push_str(include_str!("../Prelude/CoreLib/Top/DataFlow.rs"));
+        out.push_str("\n// JET_VETTED_UNSAFE_END: jet_data_flow\n");
     }
     if needs_compute {
         out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_compute\n");
@@ -1815,6 +3802,15 @@ fn push_corelib_prelude_body(
     }
     if needs_net {
         // DNS + NetHTTP (TCP/TLS) already in kernel closure.
+    }
+    if needs_http && !needs_sync {
+        // HTTP handlers install the request identity for DB scopes when Sync
+        // is present. Keep HTTP-only programs source-complete with a no-op
+        // guard rather than making the HTTP prelude depend on core.sync.
+        out.push_str(
+            "struct JetDbRequestScope;\n\
+impl JetDbRequestScope {{ fn enter(_: Option<String>) -> Self {{ Self }} }}\n",
+        );
     }
     if needs_http {
         out.push_str(include_str!("../Prelude/CoreLib/Top/HTTPMessage.rs"));
@@ -1833,9 +3829,12 @@ fn push_corelib_prelude_body(
     }
     if needs_browser {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Browser.rs"));
+        out.push_str(include_str!("../Prelude/BrowserTest.rs"));
     }
     if needs_args {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Args.rs"));
+        out.push_str(include_str!("../Prelude/Core/ArgsProjectionCore.rs"));
+        out.push_str(include_str!("../Prelude/Core/ArgsProjection.rs"));
     }
     if needs_reflect {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Reflect.rs"));
@@ -1859,8 +3858,9 @@ fn push_corelib_prelude_body(
         out.push_str(include_str!("../Prelude/CoreLib/Top/Sync.rs"));
         out.push_str("\n}\npub(crate) use jet_sync::*;\n");
     }
-    if needs_services {
+    if needs_services || needs_jobs {
         out.push_str(service_authority_prelude_for_emit());
+        out.push_str(JOB_QUEUE_NATIVE_PRELUDE_RAW);
         out.push_str(include_str!("../Prelude/CoreLib/Top/Services.rs"));
     }
 }
@@ -1868,16 +3868,100 @@ const SCHEDULER_PRELUDE_RAW: &str = include_str!("../Prelude/Scheduler.rs");
 const STREAM_PRELUDE_RAW: &str = include_str!("../Prelude/Stream.rs");
 /// D-RENDERTGT1=A + D-RENDERTGT2=A (c133 M1): UI backend trait seam + null backend.
 const UI_PRELUDE: &str = include_str!("../Prelude/Ui.rs");
+/// One physical TUI policy kernel is embedded in foundation and AOT output.
+const TUI_KERNEL_PRELUDE: &str =
+    include_str!("../../../jet-foundation/src/Prelude/TuiKernel.rs");
+/// D-DX-PREVIEW1=A: typed named previews/playgrounds use the canonical UiNode.
+const PREVIEW_PRELUDE: &str = include_str!("../Prelude/Core/Preview.rs");
 /// D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend. Emitted only when
 /// a program constructs `core.ui.gtk_backend()` (`uses_gtk_backend_for`), so no
 /// other program carries the gtk `extern "C"` surface or needs `-lgtk-4`.
 const UI_GTK_PRELUDE: &str = include_str!("../Prelude/UiGtk.rs");
+/// D-DX-PLUGIN1=D: typed panel values share the Devtools protocol and UI node.
+const DEVTOOLS_PANEL_PRELUDE: &str = include_str!("../Prelude/Core/DevtoolsPanel.rs");
+const CORE_STREAM_PRELUDE_RAW: &str = include_str!("../Prelude/Core/Stream.rs");
+const DATA_PLOT_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/DataPlot.rs");
+const DATA_PLOT_PRELUDE_IMPORTS: &str =
+    "use std::collections::{BTreeMap, BTreeSet};\nuse std::sync::Arc as JetDataPlotArc;\n";
+const CORE_STREAM_DURATION_ADAPTER: &str = r#"
+impl JetStreamDuration for jet_std::Duration {
+    fn stream_nanoseconds(self) -> i64 {
+        self.as_nanos()
+    }
+}
+"#;
+const CORE_REALTIME_PRELUDE_RAW: &str = include_str!("../Prelude/Core/Realtime.rs");
+const CORE_ATOMIC_PRELUDE_RAW: &str = include_str!("../Prelude/Core/Atomic.rs");
+const CORE_EMBEDDED_HARDWARE_PRELUDE_RAW: &str =
+    include_str!("../Prelude/Core/EmbeddedHardware.rs");
+const CORE_EMBEDDED_HARDWARE_HOST_BEGIN: &str =
+    "// JET_EMBEDDED_HARDWARE_HOST_BEGIN:";
+const CORE_FIXED_ARITHMETIC_PRELUDE_RAW: &str =
+    include_str!("../Prelude/Core/FixedArithmetic.rs");
+const CORE_POWER_PRELUDE_RAW: &str = include_str!("../Prelude/Core/Power.rs");
+const CORE_DIVISION_PRELUDE_RAW: &str = include_str!("../Prelude/Core/Division.rs");
+const PORTABLE_CORE_PRELUDE_RAW: &str = include_str!("../Prelude/PortableCore.rs");
+const TARGET_ADAPTERS_PRELUDE_RAW: &str = include_str!("../Prelude/TargetAdapters.rs");
+const PORTABLE_ALLOC_PRELUDE_RAW: &str = include_str!("../Prelude/PortableAlloc.rs");
+const CORE_LAZY_TABLE_PLAN_PRELUDE_RAW: &str =
+    include_str!("../Prelude/Core/LazyTablePlan.rs");
+const CORE_PARALLEL_PLAN_PRELUDE_RAW: &str =
+    include_str!("../Prelude/Core/ParallelPlan.rs");
+const CORE_GAME_ASSET_PIPELINE_PRELUDE_RAW: &str =
+    include_str!("../Prelude/Core/GameAssetPipeline.rs");
+const CORE_GAME_HOT_SWAP_PRELUDE_RAW: &str =
+    include_str!("../Prelude/Core/GameHotSwap.rs");
+const CORE_GAME_WORLD_INSPECTOR_PRELUDE_RAW: &str =
+    include_str!("../Prelude/Core/GameWorldInspector.rs");
+const CORE_GAME_FRAME_PROFILER_PRELUDE_RAW: &str =
+    include_str!("../Prelude/Core/GameFrameProfiler.rs");
+const CORE_GAME_OVERLAY_PRELUDE_RAW: &str =
+    include_str!("../Prelude/Core/GameOverlay.rs");
+const CORE_GAME_DEV_KERNEL_PRELUDE_RAW: &str =
+    include_str!("../../../jet-foundation/src/Game.rs");
+const CORE_WEB_PENDING_PRELUDE_RAW: &str =
+    include_str!("../Prelude/Core/WebPending.rs");
+const DEVTOOLS_PANEL_CATALOG_PRELUDE_RAW: &str =
+    include_str!("../Prelude/Core/DevtoolsPanelCatalog.rs");
+const DEVTOOLS_DATABASE_PANEL_PRELUDE_RAW: &str =
+    include_str!("../Prelude/Core/DevtoolsDatabasePanel.rs");
+const DEVTOOLS_JOBS_PANEL_PRELUDE_RAW: &str =
+    include_str!("../Prelude/Core/DevtoolsJobsPanel.rs");
+const DEVTOOLS_REQUEST_PANEL_PRELUDE_RAW: &str =
+    include_str!("../Prelude/Core/DevtoolsRequestPanel.rs");
+const DEVTOOLS_TELEMETRY_PANEL_PRELUDE_RAW: &str =
+    include_str!("../Prelude/Core/DevtoolsTelemetryPanel.rs");
+const DEVTOOLS_TOPOLOGY_PANEL_PRELUDE_RAW: &str =
+    include_str!("../Prelude/Core/DevtoolsTopologyPanel.rs");
 /// c-devserver (owner-directed 2026-07-01): `core.web.devserver` — the
 /// configurable `jet dev` server value (`for_app`/`.html`/`.port`/`.serve`).
 const DEVSERVER_PRELUDE: &str = include_str!("../Prelude/DevServer.rs");
 /// D-WEBAPP1=D: `core.web.app` full-stack application builder.
 const APP_PRELUDE: &str = include_str!("../Prelude/App.rs");
+const APP_MIDDLEWARE_PRELUDE: &str =
+    include_str!("../../../jet-foundation/src/AppMiddleware.rs");
+fn push_app_middleware_prelude(out: &mut String) {
+    out.push_str("mod jet_app_middleware {\n");
+    out.push_str(APP_MIDDLEWARE_PRELUDE);
+    out.push_str("\n}\n");
+}
+const LIVE_LIFECYCLE_PRELUDE: &str = include_str!("../../../jet-foundation/src/LiveLifecycle.rs");
 const LIVEQUERY_PRELUDE: &str = include_str!("../Prelude/CoreLib/Top/LiveQuery.rs");
+const GAME_ASSETS_IMPORT_PRELUDE_RAW: &str =
+    include_str!("../Prelude/CoreLib/Top/GameAssetsImport.rs");
+const GAME_ASSETS_RUNTIME_PRELUDE_RAW: &str =
+    include_str!("../Prelude/CoreLib/Top/GameAssetsRuntime.rs");
+const WEB_ROUTER_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/WebRouter.rs");
+const OPENAPI_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/OpenAPI.rs");
+const WEB_QUERY_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/WebQuery.rs");
+const WEB_FORMS_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/WebForms.rs");
+const WEB_TABLE_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/WebTable.rs");
+const WEB_VIRTUAL_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/WebVirtual.rs");
+const WEB_STORE_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/WebStore.rs");
+const WEBSERVERFN_PRELUDE_RAW: &str =
+    include_str!("../Prelude/CoreLib/Top/WebServerFn.rs");
+const ENCODING_TRAITS_PRELUDE_RAW: &str =
+    include_str!("../Prelude/CoreLib/Top/EncodingTraits.rs");
 /// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): allocator runtime helpers.
 const MEM_PRELUDE: &str = include_str!("../Prelude/Mem.rs");
 /// D-MEM-SENTRY1: the one sentry kernel is shared verbatim with foundation.
@@ -1912,16 +3996,30 @@ fn push_app_preludes(out: &mut String, used_core: &std::collections::HashSet<Str
             "core.web.browser",
         ],
     );
+    let needs_web_suite = core_usage_matches(used_core, &["core.web"]);
     if needs_app_runtime {
+        push_app_middleware_prelude(out);
         out.push_str(DEVSERVER_PRELUDE);
         out.push_str(APP_PRELUDE);
     }
     if needs_live {
         out.push_str(LIVEQUERY_PRELUDE);
     }
+    if needs_web_suite {
+        out.push_str(&flat_prelude_body(CORE_WEB_PENDING_PRELUDE_RAW));
+        out.push_str(&flat_prelude_body(WEB_ROUTER_PRELUDE_RAW));
+        out.push_str(&flat_prelude_body(OPENAPI_PRELUDE_RAW));
+        out.push_str(&flat_prelude_body(WEB_QUERY_PRELUDE_RAW));
+        out.push_str(&flat_prelude_body(WEB_FORMS_PRELUDE_RAW));
+        out.push_str(&flat_prelude_body(WEB_TABLE_PRELUDE_RAW));
+        out.push_str(&flat_prelude_body(WEB_VIRTUAL_PRELUDE_RAW));
+        out.push_str(&flat_prelude_body(WEB_STORE_PRELUDE_RAW));
+        out.push_str(&flat_prelude_body(WEBSERVERFN_PRELUDE_RAW));
+    }
 }
 
 fn push_mem_prelude(out: &mut String) {
+    push_prelude_dependency_closure(out, &["fixed_allocator"]);
     out.push_str("mod jet_uninit_semantics {\n");
     out.push_str(UNINIT_PRELUDE);
     out.push_str("\n}\n");
@@ -1932,26 +4030,19 @@ fn push_mem_prelude(out: &mut String) {
     out.push_str("\n}\n");
 }
 
-const PROGRAM_ALLOCATOR_PRELUDE: &str = include_str!("../Prelude/ProgramAllocator.rs");
-
-fn push_program_allocator_prelude(out: &mut String, bundle: &ProgramBundle) {
-    let crate::TargetMachine::AllocatorPolicy::Counting { cap } = &bundle.program_allocator else {
-        return;
-    };
-    let cap_bytes = cap.map_or(0, |size| size.bytes);
-    out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_program_allocator\n");
-    out.push_str(PROGRAM_ALLOCATOR_PRELUDE);
-    out.push_str("\n// JET_VETTED_UNSAFE_END: jet_program_allocator\n");
-    out.push_str("\n#[global_allocator]\n");
-    out.push_str(&format!(
-        "static __JET_PROGRAM_ALLOCATOR: JetProgramAllocator = JetProgramAllocator::counting({cap_bytes});\n\n"
-    ));
-}
 /// D-DEP-GC1=A: one collector source backs jet-rt JIT/dev and emitted AOT code.
-const GC_RUNTIME_PRELUDE: &str = include_str!("../../../jet-rt/src/__gc.rs");
+const GC_RUNTIME_PRELUDE: &str = include_str!("../../../jet-rt/src/__gc_core.rs");
+const GC_HOST_PRELUDE: &str = include_str!("../../../jet-rt/src/__gc_host.rs");
+const GC_PORTABLE_PRELUDE: &str = include_str!("../../../jet-rt/src/__gc_portable.rs");
 
 fn push_gc_prelude(out: &mut String) {
-    out.push_str("mod jet_gc {\n");
+    push_gc_prelude_for_target(out, false);
+}
+
+fn push_gc_prelude_for_target(out: &mut String, portable: bool) {
+    out.push_str("mod jet_gc {\nmod __gc_platform {\n");
+    out.push_str(if portable { GC_PORTABLE_PRELUDE } else { GC_HOST_PRELUDE });
+    out.push_str("\n}\nuse __gc_platform::*;\n");
     out.push_str(GC_RUNTIME_PRELUDE);
     out.push_str("\n}\n");
 }
@@ -1995,14 +4086,34 @@ fn strip_scheduler_region(mut source: String, name: &str) -> String {
 
 const SERVICE_AUTHORITY_PRELUDE_RAW: &str =
     include_str!("../Prelude/CoreLib/Top/ServiceAuthority.rs");
+const JOB_QUEUE_NATIVE_PRELUDE_RAW: &str =
+    include_str!("../Prelude/CoreLib/Top/JobQueueNative.rs");
 
 /// Every fragment concatenated into the generated program's ONE flat Rust
 /// module that brings its own top-level imports. `FLAT_PRELUDE_IMPORTS` merges
 /// them; each fragment is emitted through `flat_prelude_body`.
-const FLAT_PRELUDE_SOURCES: [&str; 3] = [
+const FLAT_PRELUDE_SOURCES: [&str; 21] = [
+    CORE_ATOMIC_PRELUDE_RAW,
+    ENCODING_TRAITS_PRELUDE_RAW,
     SCHEDULER_PRELUDE_RAW,
     STREAM_PRELUDE_RAW,
+    CORE_EMBEDDED_HARDWARE_PRELUDE_RAW,
+    CORE_LAZY_TABLE_PLAN_PRELUDE_RAW,
+    DATA_PLOT_PRELUDE_IMPORTS,
+    CORE_PARALLEL_PLAN_PRELUDE_RAW,
+    CORE_GAME_FRAME_PROFILER_PRELUDE_RAW,
     SERVICE_AUTHORITY_PRELUDE_RAW,
+    JOB_QUEUE_NATIVE_PRELUDE_RAW,
+    GAME_ASSETS_IMPORT_PRELUDE_RAW,
+    GAME_ASSETS_RUNTIME_PRELUDE_RAW,
+    WEB_ROUTER_PRELUDE_RAW,
+    OPENAPI_PRELUDE_RAW,
+    WEB_QUERY_PRELUDE_RAW,
+    WEB_FORMS_PRELUDE_RAW,
+    WEB_TABLE_PRELUDE_RAW,
+    WEB_VIRTUAL_PRELUDE_RAW,
+    WEB_STORE_PRELUDE_RAW,
+    WEBSERVERFN_PRELUDE_RAW,
 ];
 
 /// A fragment's leading top-level `use` items, split from the rest of its
@@ -2037,17 +4148,86 @@ fn split_leading_top_level_uses(source: &str) -> (Vec<&str>, String) {
     body.push_str(rest);
     (imports, body)
 }
+fn data_plot_prelude_body() -> String {
+    DATA_PLOT_PRELUDE_RAW
+        .replace(
+            "use std::collections::{BTreeMap, BTreeSet};\nuse std::sync::Arc as JetDataPlotArc;\n",
+            "",
+        )
+}
 
 /// One flat fragment's source as the assembler emits it: its own imports removed,
 /// because `FLAT_PRELUDE_IMPORTS` declares them for the whole module instead.
+/// DataQuery.rs include!s SqlQuery.rs relative to the Prelude tree. AOT pastes
+/// that source into build/.work.*, where the nested include cannot resolve.
+/// Inline the kernel so rustc never sees a Prelude-relative path.
+fn data_query_prelude_source() -> String {
+    include_str!("../Prelude/CoreLib/Top/DataQuery.rs").replace(
+        "    include!(\"../../Core/SqlQuery.rs\");\n",
+        include_str!("../Prelude/Core/SqlQuery.rs"),
+    )
+}
+
 fn flat_prelude_body(source: &str) -> String {
     split_leading_top_level_uses(source).1
 }
 
-/// The `(path, name)` pairs a fragment's leading top-level `use` items bring in.
-/// One parser backs both the emitted import list and its guard test (I8).
-fn flat_prelude_import_pairs(source: &str) -> Vec<(&str, &str)> {
-    let mut pairs = Vec::new();
+// Reached only from `Codegen::MIRRust`; kept while its printer body is restored.
+#[allow(dead_code)]
+fn portable_embedded_hardware_source() -> &'static str {
+    CORE_EMBEDDED_HARDWARE_PRELUDE_RAW
+        .split_once(CORE_EMBEDDED_HARDWARE_HOST_BEGIN)
+        .map(|(portable, _)| portable)
+        .unwrap_or_else(|| panic!("embedded hardware host bridge marker is missing"))
+}
+
+// Reached only from `Codegen::MIRRust`; kept while its printer body is restored.
+#[allow(dead_code)]
+fn push_portable_prelude_imports(
+    out: &mut String,
+    include_atomic: bool,
+    include_hardware: bool,
+    include_alloc: bool,
+) {
+    let mut sources = vec![PORTABLE_CORE_PRELUDE_RAW, TARGET_ADAPTERS_PRELUDE_RAW];
+    if include_atomic {
+        sources.push(CORE_ATOMIC_PRELUDE_RAW);
+    }
+    if include_hardware {
+        sources.push(portable_embedded_hardware_source());
+    }
+    if include_alloc {
+        sources.push(PORTABLE_ALLOC_PRELUDE_RAW);
+    }
+    out.push_str(&merge_flat_prelude_imports(&sources));
+}
+
+/// One binding a fragment's leading top-level `use` brings into the flat scope:
+/// `use path::{name as binding}`. `binding == name` without `as`.
+struct FlatPreludeImport<'a> {
+    path: &'a str,
+    name: &'a str,
+    binding: &'a str,
+}
+
+impl FlatPreludeImport<'_> {
+    /// Two spellings of one item: `core`/`alloc` paths are `std` re-exports, so
+    /// a `no_std`-capable fragment and a hosted one may import the same item
+    /// under either root without binding one name to two items.
+    fn identity(&self) -> (String, &str) {
+        let path = self
+            .path
+            .strip_prefix("core::")
+            .or_else(|| self.path.strip_prefix("alloc::"))
+            .map_or_else(|| self.path.to_string(), |rest| format!("std::{rest}"));
+        (path, self.name)
+    }
+}
+
+/// The bindings a fragment's leading top-level `use` items bring in. One
+/// parser backs the hosted and the portable import merge (I8).
+fn flat_prelude_import_bindings(source: &str) -> Vec<FlatPreludeImport<'_>> {
+    let mut bindings = Vec::new();
     for statement in split_leading_top_level_uses(source).0 {
         let item = statement
             .trim_start_matches("use ")
@@ -2059,13 +4239,88 @@ fn flat_prelude_import_pairs(source: &str) -> Vec<(&str, &str)> {
         };
         for name in names.split(',') {
             let name = name.trim();
-            if !name.is_empty() {
-                pairs.push((path, name));
+            if name.is_empty() {
+                continue;
+            }
+            let (name, binding) = match name.split_once(" as ") {
+                Some((name, binding)) => (name.trim(), binding.trim()),
+                None => (name, name),
+            };
+            bindings.push(FlatPreludeImport { path, name, binding });
+        }
+    }
+    bindings
+}
+
+/// Merge the leading imports of every flat fragment into one import block for
+/// the crate root. Keyed by the *binding* each import creates, because that is
+/// what rustc rejects twice (E0252): two fragments may import one item under
+/// one name through different spellings, but never two items under one name.
+///
+/// `jet_foundation::<Module>` imports go through `FOUNDATION_PLACEMENTS`: the
+/// module must be one the program embeds, and an unaliased import of a
+/// root-flat module's item is already satisfied by flattening (at the root it
+/// would be a self-import, E0255), so it is omitted; every other spelling
+/// resolves through the `jet_foundation` facade.
+fn merge_flat_prelude_imports(sources: &[&str]) -> String {
+    let mut bindings: BTreeMap<&str, FlatPreludeImport<'_>> = BTreeMap::new();
+    for source in sources {
+        for import in flat_prelude_import_bindings(source) {
+            if let Some(module) = import
+                .path
+                .strip_prefix("jet_foundation::")
+                .map(|rest| rest.split("::").next().unwrap_or(rest))
+            {
+                match foundation_placement(module) {
+                    Some(FoundationPlacement::Root) if import.binding == import.name => continue,
+                    Some(_) => {}
+                    None => panic!(
+                        "flat Prelude fragment imports `jet_foundation::{module}`, which the \
+                         generated program does not embed; add its placement to \
+                         FOUNDATION_PLACEMENTS"
+                    ),
+                }
+            }
+            match bindings.entry(import.binding) {
+                std::collections::btree_map::Entry::Vacant(slot) => {
+                    slot.insert(import);
+                }
+                std::collections::btree_map::Entry::Occupied(slot) => {
+                    let kept = slot.get();
+                    assert!(
+                        kept.identity() == import.identity(),
+                        "flat Prelude fragments bind `{}` to two items: `{}::{}` and `{}::{}`",
+                        import.binding,
+                        kept.path,
+                        kept.name,
+                        import.path,
+                        import.name
+                    );
+                }
             }
         }
     }
-    pairs
+    let mut groups: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    for import in bindings.values() {
+        let spelling = if import.binding == import.name {
+            import.name.to_string()
+        } else {
+            format!("{} as {}", import.name, import.binding)
+        };
+        groups.entry(import.path).or_default().push(spelling);
+    }
+    let mut rendered = String::new();
+    for (path, names) in groups {
+        if let [only] = names.as_slice() {
+            rendered.push_str(&format!("use {path}::{only};\n"));
+        } else {
+            rendered.push_str(&format!("use {path}::{{{}}};\n", names.join(", ")));
+        }
+    }
+    rendered.push('\n');
+    rendered
 }
+
 
 /// The generated program is ONE flat Rust module assembled from many Prelude
 /// fragments, but each fragment is also a real Rust file compiled inside a
@@ -2076,7 +4331,7 @@ fn flat_prelude_import_pairs(source: &str) -> Vec<(&str, &str)> {
 /// Concatenated, those per-fragment imports land in one scope, and two fragments
 /// importing one name make rustc reject the generated file: Scheduler.rs and
 /// ServiceAuthority.rs both imported `std::time::Duration`, so every program
-/// using `core.services` failed to build with E0252 — an internal compiler
+/// using `core.service` failed to build with E0252 — an internal compiler
 /// error (I2), never a user diagnostic.
 ///
 /// Neither per-fragment workaround closes that class. Qualifying paths inline
@@ -2094,26 +4349,8 @@ fn flat_prelude_import_pairs(source: &str) -> Vec<(&str, &str)> {
 /// carries — the harness carries `#![allow(warnings)]`, so an import a program
 /// never uses costs nothing, and no user name can shadow one because every
 /// emitted user type goes through `mangle_path` (`__jet_` prefix).
-static FLAT_PRELUDE_IMPORTS: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
-    let mut groups: std::collections::BTreeMap<&str, std::collections::BTreeSet<&str>> =
-        std::collections::BTreeMap::new();
-    for source in FLAT_PRELUDE_SOURCES {
-        for (path, name) in flat_prelude_import_pairs(source) {
-            groups.entry(path).or_default().insert(name);
-        }
-    }
-    let mut rendered = String::new();
-    for (path, names) in groups {
-        let names: Vec<&str> = names.into_iter().collect();
-        if let [only] = names[..] {
-            rendered.push_str(&format!("use {path}::{only};\n"));
-        } else {
-            rendered.push_str(&format!("use {path}::{{{}}};\n", names.join(", ")));
-        }
-    }
-    rendered.push('\n');
-    rendered
-});
+static FLAT_PRELUDE_IMPORTS: std::sync::LazyLock<String> =
+    std::sync::LazyLock::new(|| merge_flat_prelude_imports(&FLAT_PRELUDE_SOURCES));
 
 /// `Prelude/CoreLib/Top/ServiceAuthority.rs` as the assembler emits it.
 static SERVICE_AUTHORITY_PRELUDE: std::sync::LazyLock<String> =
@@ -2181,1095 +4418,11 @@ fn uses_native_scheduler_for(used_core: &std::collections::HashSet<String>) -> b
     })
 }
 
-/// D-ALLOC2: the `jet_mem` arena helper carries the one vetted lifetime-extension
-/// `unsafe` (D-LL1). It is part of the always-emitted prelude, but a program that
-/// never touches `core.mem` allocators must not carry any `unsafe` at all (I1 —
-/// golden/closures/regex/… tests assert zero `unsafe` in such output). So strip
-/// the `mod jet_mem { … }` block whenever nothing references `jet_mem::`.
-fn strip_unused_mem_prelude(out: String) -> String {
-    let Some(start) = out.find("mod jet_mem") else {
-        return out;
-    };
-    if is_in_cached_runtime(&out, start) {
-        return out;
-    }
-    // Brace-match the module body to find its end.
-    let bytes = out.as_bytes();
-    let mut depth = 0usize;
-    let mut seen = false;
-    let mut end = out.len();
-    let mut i = start;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'{' => {
-                depth += 1;
-                seen = true;
-            }
-            b'}' => {
-                depth -= 1;
-                if seen && depth == 0 {
-                    end = i + 1;
-                    break;
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    // Referenced anywhere outside its own definition? Keep it.
-    let used = out[..start].contains("jet_mem::") || out[end..].contains("jet_mem::");
-    if used {
-        return out;
-    }
-    let mut s = out[..start].to_string();
-    // Drop a trailing blank line left by the removed block.
-    let rest = out[end..].trim_start_matches('\n');
-    s.push_str(rest);
-    s
-}
-
-/// D-OPTGC1: strip `mod jet_gc { … }` when the program never references `jet_gc::`.
-fn strip_unused_gc_prelude(out: String) -> String {
-    let Some(start) = out.find("mod jet_gc") else {
-        return out;
-    };
-    if is_in_cached_runtime(&out, start) {
-        return out;
-    }
-    let bytes = out.as_bytes();
-    let mut depth = 0usize;
-    let mut seen = false;
-    let mut end = out.len();
-    let mut i = start;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'{' => {
-                depth += 1;
-                seen = true;
-            }
-            b'}' => {
-                depth -= 1;
-                if seen && depth == 0 {
-                    end = i + 1;
-                    break;
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    let used = out[..start].contains("jet_gc::") || out[end..].contains("jet_gc::");
-    if used {
-        return out;
-    }
-    let mut s = out[..start].to_string();
-    let rest = out[end..].trim_start_matches('\n');
-    s.push_str(rest);
-    s
-}
-
-/// D-FLAGSHIP-RAYLIB1=A: the raylib bridge carries vetted FFI `unsafe`.
-/// Programs that never call `core.game.raylib` must not inherit that unsafe prelude.
-fn strip_unused_raylib_prelude(out: String) -> String {
-    let prelude_end = [
-        out.find("fn __jet_"),
-        out.find("pub fn __jet_"),
-        out.find("fn main()"),
-    ]
-    .into_iter()
-    .flatten()
-    .min()
-    .unwrap_or(out.len());
-    if out[prelude_end..].contains("jet_raylib_") {
-        return out;
-    }
-    const BEGIN: &str = "// jet:raylib-begin";
-    const END: &str = "// jet:raylib-end";
-    let Some(start) = out.find(BEGIN) else {
-        return out;
-    };
-    let Some(end_marker) = out.find(END) else {
-        return out;
-    };
-    let end = end_marker + END.len();
-    let mut s = out[..start].to_string();
-    s.push_str(out[end..].trim_start_matches('\n'));
-    s
-}
-
-/// D-TXN-ROLLBACK layer 1: the `jet_txn` module carries the auto-snapshot
-/// restore mechanism, whose Drop-backed writeback uses one vetted raw-pointer
-/// deref (sound: the transaction guard outlives nothing it points at). A program
-/// that never auto-snapshots a `#Transact` value must carry no `unsafe`, so strip
-/// `mod jet_txn { … }` whenever nothing references `jet_txn::` — exactly like
-/// `strip_unused_mem_prelude`.
-fn strip_unused_txn_prelude(out: String) -> String {
-    let Some(start) = out.find("mod jet_txn") else {
-        return out;
-    };
-    if is_in_cached_runtime(&out, start) {
-        return out;
-    }
-    let bytes = out.as_bytes();
-    let mut depth = 0usize;
-    let mut seen = false;
-    let mut end = out.len();
-    let mut i = start;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'{' => {
-                depth += 1;
-                seen = true;
-            }
-            b'}' => {
-                depth -= 1;
-                if seen && depth == 0 {
-                    end = i + 1;
-                    break;
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    let used = out[..start].contains("jet_txn::") || out[end..].contains("jet_txn::");
-    if used {
-        return out;
-    }
-    let mut s = out[..start].to_string();
-    let rest = out[end..].trim_start_matches('\n');
-    s.push_str(rest);
-    s
-}
-
-/// D-TERM1: the `jet_term_unix` and `jet_term_windows` byte decoders and the
-/// `jet_term_enter`/`jet_term_leave`/`jet_term_read_key` dispatchers all come
-/// from `Prelude/Core/TermKey.rs`, and reaching a terminal needs the vetted
-/// `unsafe` termios FFI in `Prelude/Term.rs`. Strip that whole span when no
-/// `live { … }` block or `core.term` call is present in the generated user code
-/// — i.e., when `jet_term_enter` is never called. The `JetKey` type itself
-/// stays: `impl JetShow for JetKey` (`Prelude/Core/RuntimeControl.rs`) is
-/// emitted unconditionally and needs it.
-fn strip_unused_term_prelude(out: String) -> String {
-    // Fast path: if the term dispatchers are referenced in user code (after the
-    // prelude), keep the whole term section.
-    let prelude_end = [
-        out.find("fn __jet_"),
-        out.find("pub fn __jet_"),
-        out.find("fn main()"),
-    ]
-    .into_iter()
-    .flatten()
-    .min()
-    .unwrap_or(out.len());
-    let user_code = &out[prelude_end..];
-    if user_code.contains("jet_term_enter")
-        || user_code.contains("jet_term_read_key")
-        // The always-emitted helper is type-checked even when user code does
-        // not call it, so its secret-mode dispatchers must remain reachable.
-        || out.contains("fn jet_std_io_input_secret")
-    {
-        return out;
-    }
-    // The term prelude is one contiguous block: the `#[cfg(unix)]` line above
-    // `mod jet_term_unix` through the end of `fn jet_term_read_key` (the two
-    // platform modules plus the enter/leave/read_key dispatchers that call into
-    // them). Excise it as a single span — stripping only the `mod` blocks would
-    // leave the dispatchers referencing now-missing modules (I2: E0433).
-    let Some(unix_mod) = out.find("mod jet_term_unix {") else {
-        return out;
-    };
-    if is_in_cached_runtime(&out, unix_mod) {
-        return out;
-    }
-    let block_start = out[..unix_mod].rfind("#[cfg(unix)]").unwrap_or(unix_mod);
-    let Some(read_key) = out.find("fn jet_term_read_key") else {
-        return out;
-    };
-    let bytes = out.as_bytes();
-    let (mut depth, mut seen, mut i) = (0usize, false, read_key);
-    let mut end = out.len();
-    while i < bytes.len() {
-        match bytes[i] {
-            b'{' => {
-                depth += 1;
-                seen = true;
-            }
-            b'}' => {
-                depth -= 1;
-                if seen && depth == 0 {
-                    end = i + 1;
-                    break;
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    let mut s = out[..block_start].to_string();
-    s.push_str(out[end..].trim_start_matches('\n'));
-    s
-}
-
-/// D-OSFACTS1: `core.sys.on_interrupt` uses vetted Unix/Windows platform FFI.
-/// Keep ordinary programs `unsafe`-free by stripping the whole dispatcher
-/// unless generated user code actually calls it.
-fn strip_unused_os_signal_prelude(out: String) -> String {
-    // The cached runtime itself contains `fn __jet_*`, so a function-name
-    // boundary is not a user-code boundary. The wrapper definition is one
-    // occurrence; an emitted `core.sys.on_interrupt` call adds another.
-    if out.matches("jet_std_os_on_interrupt(").count() > 1 {
-        return out;
-    }
-
-    let Some(block_start) = out.find("mod jet_os_interrupt {") else {
-        return out;
-    };
-    let Some(wrapper_fn) = out[block_start..]
-        .find("fn jet_std_os_on_interrupt")
-        .map(|i| i + block_start)
-    else {
-        return out;
-    };
-
-    let bytes = out.as_bytes();
-    let (mut depth, mut seen, mut i) = (0usize, false, wrapper_fn);
-    let mut end = out.len();
-    while i < bytes.len() {
-        match bytes[i] {
-            b'{' => {
-                depth += 1;
-                seen = true;
-            }
-            b'}' => {
-                depth -= 1;
-                if seen && depth == 0 {
-                    end = i + 1;
-                    break;
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-
-    let mut s = out[..block_start].to_string();
-    s.push_str(out[end..].trim_start_matches('\n'));
-    s
-}
-
-pub(crate) fn emit_synthetic_display_trait(out: &mut String, include_runtime_owned: bool) {
-    if include_runtime_owned {
-        out.push_str("pub trait __jet_Display {\n");
-        out.push_str("    fn display(&self) -> String;\n");
-        out.push_str("}\n\n");
-    }
-    out.push_str("pub trait __jet_Debug {\n");
-    out.push_str("    fn debug(&self) -> String;\n");
-    out.push_str("}\n\n");
-}
-
-/// `include_runtime_owned` is false for the root program: the cached runtime
-/// block already defines the `__jet_Display`/`__jet_Equatable`/`__jet_Comparable`
-/// traits (`push_cached_runtime_traits`), and a second root copy would be a
-/// different trait from the one the Prelude's own `jet_list_sort_by` /
-/// `jet_ordering_then` use. An imported module still declares its own trait
-/// copies — its `impl` blocks are module-local and the importer brings the
-/// owning trait into scope anonymously (`cx.imported_traits`).
-///
-/// `__jet_Ordering` is NOT one of those copies. It is a *value* type that
-/// crosses the module boundary (an imported `compare` returns one, the Prelude
-/// takes and returns one), so a module-local copy is a distinct Rust type from
-/// the Prelude's and every crossing is an E0053/E0308 internal compiler error
-/// (I2). It is declared exactly once per generated crate — by
-/// `push_cached_runtime_traits` for a bundle, next to the inline Prelude for the
-/// single-file emitters — and reaches an imported module through `MOD_USE`.
-pub(crate) fn emit_synthetic_operator_traits(out: &mut String, include_runtime_owned: bool) {
-    for (name, method, ret) in [
-        ("Add", "add", "Self"),
-        ("Sub", "sub", "Self"),
-        ("Mul", "mul", "Self"),
-        ("Div", "div", "Self"),
-        ("Equatable", "equal", "bool"),
-        ("Comparable", "compare", "__jet_Ordering"),
-    ] {
-        if matches!(name, "Equatable" | "Comparable") && !include_runtime_owned {
-            continue;
-        }
-        if matches!(name, "Add" | "Sub" | "Mul" | "Div") {
-            let trait_rust = mangle(name);
-            out.push_str(&crate::jet_name_format!(
-                "pub trait {trait_rust}: Sized {{ fn {method}(&self, rhs: &Self) -> Self; fn {name_prefix}{method}_at(&self, rhs: &Self, _file: &str, _line: u32) -> Self {{ self.{method}(rhs) }} }}\n"
-            ));
-        } else {
-            let trait_rust = mangle(name);
-            out.push_str(&format!(
-                "pub trait {trait_rust}: Sized {{ fn {method}(&self, rhs: &Self) -> {ret}; }}\n"
-            ));
-        }
-    }
-    for ty in ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"] {
-        for (trait_name, method, checked) in [
-            ("Add", "add", "jet_add"),
-            ("Sub", "sub", "jet_sub"),
-            ("Mul", "mul", "jet_mul"),
-            ("Div", "div", "jet_div"),
-        ] {
-            let trait_rust = mangle(trait_name);
-            out.push_str(&crate::jet_name_format!(
-                "impl {trait_rust} for {ty} {{ fn {method}(&self, rhs: &Self) -> Self {{ (*self).{checked}(*rhs, \"<built-in {trait_name}>\", 0) }} fn {name_prefix}{method}_at(&self, rhs: &Self, file: &str, line: u32) -> Self {{ (*self).{checked}(*rhs, file, line) }} }}\n"
-            ));
-        }
-    }
-    for ty in ["f32", "f64"] {
-        for (trait_name, method, op) in [
-            ("Add", "add", "+"),
-            ("Sub", "sub", "-"),
-            ("Mul", "mul", "*"),
-            ("Div", "div", "/"),
-        ] {
-            let trait_rust = mangle(trait_name);
-            out.push_str(&format!(
-                "impl {trait_rust} for {ty} {{ fn {method}(&self, rhs: &Self) -> Self {{ *self {op} *rhs }} }}\n"
-            ));
-        }
-    }
-    if include_runtime_owned {
-        for ty in [
-            "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "char",
-            "String",
-        ] {
-            out.push_str(&format!(
-                "impl __jet_Equatable for {ty} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n"
-            ));
-        }
-        push_comparable_primitive_impls(out);
-    }
-    out.push('\n');
-}
-
-/// D-SHAPE-RESOURCE2=A: the one nominal consuming, infallible cleanup trait.
-pub(crate) fn emit_synthetic_close_trait(out: &mut String) {
-    out.push_str("pub trait __jet_Close {\n");
-    out.push_str("    fn close(self);\n");
-    out.push_str("}\n\n");
-    out.push_str("struct JetResource<T: __jet_Close>(Option<T>);\n");
-    out.push_str("impl<T: __jet_Close> JetResource<T> { fn new(value: T) -> Self { Self(Some(value)) } fn take(&mut self) -> T { self.0.take().expect(\"resource already consumed\") } fn close(&mut self) { if let Some(value) = self.0.take() { __jet_Close::close(value); } } }\n");
-    out.push_str("impl<T: __jet_Close> std::ops::Deref for JetResource<T> { type Target = T; fn deref(&self) -> &T { self.0.as_ref().expect(\"resource already consumed\") } }\n");
-    out.push_str("impl<T: __jet_Close> std::ops::DerefMut for JetResource<T> { fn deref_mut(&mut self) -> &mut T { self.0.as_mut().expect(\"resource already consumed\") } }\n");
-    out.push_str(
-        "impl<T: __jet_Close> Drop for JetResource<T> { fn drop(&mut self) { self.close(); } }\n\n",
-    );
-}
-
-/// D-FFI-CAP1: connect a validated `#Close(close)` descriptor to the same
-/// nominal cleanup protocol used by ordinary Jet resources. The bridge owns
-/// the foreign transport; this generated impl only marshals the consumed
-/// handle to the already-checked foreign close wrapper.
-pub(crate) fn emit_synthetic_foreign_close_impls(cx: &Cx, items: &[Item], out: &mut String) {
-    fn emit_functions(
-        cx: &Cx,
-        functions: &[crate::AST::ExternFn],
-        out: &mut String,
-        emitted: &mut HashSet<String>,
-        direct_c: bool,
-    ) {
-        let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
-        for function in functions {
-            let Some((close_name, _)) = &function.close else {
-                continue;
-            };
-            let Some(return_type) = &function.return_type else {
-                continue;
-            };
-            let ty = if direct_c {
-                qualify_named_rust_type(cx, return_type)
-            } else {
-                cx.rust_type(return_type)
-            };
-            if emitted.insert(ty.clone()) {
-                let close_call = if direct_c {
-                    format!("{}(self)", mangle(close_name))
-                } else {
-                    format!("{ffi}::jet_ffi_{close_name}(self)")
-                };
-                out.push_str(&format!(
-                    "impl __jet_Close for {ty} {{ fn close(self) {{ {close_call}; }} }}\n"
-                ));
-            }
-        }
-    }
-
-    fn collect(cx: &Cx, items: &[Item], out: &mut String, emitted: &mut HashSet<String>) {
-        for item in items {
-            match item {
-                Item::ExternRust(block) => {
-                    emit_functions(cx, &block.functions, out, emitted, false)
-                }
-                Item::CModule(module) => emit_functions(cx, &module.functions, out, emitted, true),
-                Item::CodeModule(module) => {
-                    if let Some(body) = &module.body {
-                        collect(cx, body, out, emitted);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    collect(cx, items, out, &mut HashSet::new());
-    out.push('\n');
-}
-
-/// D-FFI-CAP1: imported C modules have their own Rust namespace, but a handle
-/// consumed in the entry module must implement the entry module's `Close`
-/// trait. Emit that cross-module impl at the root and route it through the
-/// imported wrapper; otherwise rustc sees two same-named `Close` traits.
-pub(crate) fn emit_imported_foreign_close_impls(cx: &Cx, bundle: &ProgramBundle, out: &mut String) {
-    fn seed_entry_types(cx: &Cx, items: &[Item], emitted: &mut HashSet<String>) {
-        for item in items {
-            match item {
-                Item::ExternRust(block) => {
-                    for function in &block.functions {
-                        if function.close.is_some() {
-                            if let Some(return_type) = &function.return_type {
-                                emitted.insert(cx.rust_type(return_type));
-                            }
-                        }
-                    }
-                }
-                Item::CModule(module) => {
-                    for function in &module.functions {
-                        if function.close.is_some() {
-                            if let Some(return_type) = &function.return_type {
-                                emitted.insert(qualify_named_rust_type(cx, return_type));
-                            }
-                        }
-                    }
-                }
-                Item::CodeModule(module) => {
-                    if let Some(body) = &module.body {
-                        seed_entry_types(cx, body, emitted);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    let mut emitted = HashSet::new();
-    seed_entry_types(cx, &bundle.modules[bundle.entry].items, &mut emitted);
-    let imported_targets = bundle
-        .cffi
-        .import_links
-        .iter()
-        .map(|link| link.target_idx)
-        .collect::<HashSet<_>>();
-    for (module_idx, module) in bundle.modules.iter().enumerate() {
-        if module_idx == bundle.entry || !imported_targets.contains(&module_idx) {
-            continue;
-        }
-        let rust_module = mangle(&module.alias);
-        for item in &module.items {
-            match item {
-                Item::CModule(c_module) => {
-                    for function in &c_module.functions {
-                        let Some((close_name, _)) = &function.close else {
-                            continue;
-                        };
-                        let Some(return_type) = &function.return_type else {
-                            continue;
-                        };
-                        let ty = cx.rust_type(return_type);
-                        if emitted.insert(ty.clone()) {
-                            out.push_str(&format!(
-                                "impl __jet_Close for {ty} {{ fn close(self) {{ {rust_module}::{}(self); }} }}\n",
-                                mangle(close_name)
-                            ));
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    out.push('\n');
-}
-
-fn collect_allocator_constructors(
-    stmts: &[Stmt],
-    cx: &Cx,
-    locals: &mut HashSet<String>,
-    found: &mut HashSet<String>,
-) {
-    for stmt in stmts {
-        match stmt {
-            Stmt::Val(binding) => {
-                if let Expr::MethodCall {
-                    receiver, method, ..
-                } = &binding.init
-                {
-                    if let Some(name) = TIR::alloc_new_type(receiver, method, cx, locals) {
-                        found.insert(name.to_string());
-                    }
-                }
-                locals.insert(binding.name.clone());
-            }
-            Stmt::For {
-                var, var2, body, ..
-            } => {
-                let mut names = vec![var.as_str()];
-                if let Some((name, _)) = var2 {
-                    names.push(name);
-                }
-                collect_allocator_nested(body, cx, locals, found, &names);
-            }
-            Stmt::Switch {
-                arms, else_body, ..
-            }
-            | Stmt::ComptimeSwitch {
-                arms, else_body, ..
-            } => {
-                for arm in arms {
-                    collect_allocator_nested(&arm.body, cx, locals, found, &[]);
-                }
-                if let Some(body) = else_body {
-                    collect_allocator_nested(body, cx, locals, found, &[]);
-                }
-            }
-            Stmt::CountedLoop {
-                init, body, step, ..
-            } => {
-                let mut scope = locals.clone();
-                scope.insert(init.name.clone());
-                collect_allocator_constructors(body, cx, &mut scope, found);
-                if let Some(step) = step.as_deref() {
-                    collect_allocator_constructors(
-                        std::slice::from_ref(step),
-                        cx,
-                        &mut scope,
-                        found,
-                    );
-                }
-            }
-            // D-CANVASSTATE1=D: an `#Off` body is never emitted.
-            Stmt::Switched { marker, .. } if crate::AST::switched_off(marker) => {}
-            Stmt::While { body, .. }
-            | Stmt::Loop { body, .. }
-            | Stmt::Unsafe { body, .. }
-            | Stmt::Impure { body, .. }
-            | Stmt::Reactive { body, .. }
-            | Stmt::Shield { body, .. }
-            | Stmt::Switched { body, .. }
-            | Stmt::Region { body, .. }
-            | Stmt::Policy { body, .. }
-            | Stmt::TaskGroup { body, .. }
-            | Stmt::Layout { body, .. }
-            | Stmt::AuthorityScope { body, .. }
-            | Stmt::ComptimeBlock { body, .. }
-            | Stmt::ContextBlock { body, .. }
-            | Stmt::Live { body, .. }
-            | Stmt::AssumeDet { body, .. }
-            | Stmt::Transact { body, .. }
-            | Stmt::ScopeMember { body, .. } => {
-                collect_allocator_nested(body, cx, locals, found, &[])
-            }
-            Stmt::ComptimeIf {
-                then_body,
-                else_body,
-                selected_then,
-                ..
-            } => match selected_then {
-                Some(true) => collect_allocator_nested(then_body, cx, locals, found, &[]),
-                Some(false) => {
-                    if let Some(body) = else_body {
-                        collect_allocator_nested(body, cx, locals, found, &[]);
-                    }
-                }
-                None => {
-                    collect_allocator_nested(then_body, cx, locals, found, &[]);
-                    if let Some(body) = else_body {
-                        collect_allocator_nested(body, cx, locals, found, &[]);
-                    }
-                }
-            },
-            Stmt::Expr(_)
-            | Stmt::DeferClose { .. }
-            | Stmt::Assign { .. }
-            | Stmt::Return(..)
-            | Stmt::Break(_)
-            | Stmt::BreakValue(..)
-            | Stmt::Continue(_)
-            | Stmt::BreakLabel(..)
-            | Stmt::BreakLabelValue(..)
-            | Stmt::ContinueLabel(..)
-            | Stmt::Yield(..) => {}
-        }
-    }
-}
-
-fn collect_allocator_nested(
-    body: &[Stmt],
-    cx: &Cx,
-    locals: &HashSet<String>,
-    found: &mut HashSet<String>,
-    extra: &[&str],
-) {
-    let mut scope = locals.clone();
-    scope.extend(extra.iter().map(|name| (*name).to_string()));
-    collect_allocator_constructors(body, cx, &mut scope, found);
-}
-
-fn collect_func_allocator_constructors(func: &Func, cx: &Cx, found: &mut HashSet<String>) {
-    let mut locals = func.params.iter().map(|param| param.name.clone()).collect();
-    collect_allocator_constructors(&func.body, cx, &mut locals, found);
-}
-
-fn allocator_constructor_types(items: &[Item], cx: &Cx) -> HashSet<String> {
-    let mut found = HashSet::new();
-    for item in items {
-        match item {
-            Item::Func(func) => collect_func_allocator_constructors(func, cx, &mut found),
-            Item::Struct(def) => {
-                for func in &def.methods {
-                    collect_func_allocator_constructors(func, cx, &mut found);
-                }
-                for block in &def.trait_impls {
-                    for func in &block.methods {
-                        collect_func_allocator_constructors(func, cx, &mut found);
-                    }
-                }
-            }
-            Item::Enum(def) => {
-                for func in &def.methods {
-                    collect_func_allocator_constructors(func, cx, &mut found);
-                }
-                for block in &def.trait_impls {
-                    for func in &block.methods {
-                        collect_func_allocator_constructors(func, cx, &mut found);
-                    }
-                }
-            }
-            Item::Impl(def) => {
-                for func in &def.methods {
-                    collect_func_allocator_constructors(func, cx, &mut found);
-                }
-            }
-            Item::Test(def) => {
-                let mut locals = HashSet::new();
-                collect_allocator_constructors(&def.body, cx, &mut locals, &mut found);
-            }
-            Item::CodeModule(def) => {
-                if let Some(body) = &def.body {
-                    found.extend(allocator_constructor_types(body, cx));
-                }
-            }
-            _ => {}
-        }
-    }
-    found
-}
-
-pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &mut String) {
-    let root = &cx.root_prefix;
-    let uses = |module: &str| {
-        cx.used_core.iter().any(|usage| {
-            usage.strip_prefix(module).is_some_and(|suffix| {
-                suffix.is_empty() || suffix.starts_with("::") || suffix.starts_with('.')
-            })
-        })
-    };
-    if uses("core.files") {
-        for ty in [
-            format!("{root}JetFileReader"),
-            format!("{root}JetFileWriter"),
-            format!("{root}jet_std::FileLock"),
-        ] {
-            out.push_str(&format!(
-                "impl __jet_Close for {ty} {{ fn close(self) {{ drop(self); }} }}\n"
-            ));
-        }
-    }
-    if uses("core.net") {
-        for ty in [
-            format!("{root}JetTCPStream"),
-            format!("{root}JetUnixStream"),
-        ] {
-            out.push_str(&format!(
-                "impl __jet_Close for {ty} {{ fn close(self) {{ drop(self); }} }}\n"
-            ));
-        }
-        out.push_str(&format!(
-            "impl __jet_Close for {root}JetTLSStream {{ fn close(mut self) {{ let _ = {root}jet_net_tls_close(&mut self); }} }}\n"
-        ));
-    }
-    let uses_mem = uses(crate::Syntax::CORE_MEM_MODULE);
-    let constructed_allocators = allocator_constructor_types(items, cx);
-    for (name, ty) in [
-        ("Arena", format!("{root}jet_mem::JetArena")),
-        ("Bump", format!("{root}jet_mem::JetBump")),
-        ("Pool", format!("{root}jet_mem::JetPool")),
-        ("Fixed", format!("{root}jet_mem::JetFixed")),
-    ] {
-        if uses_mem || constructed_allocators.contains(name) {
-            out.push_str(&format!(
-                "impl __jet_Close for {ty} {{ fn close(self) {{ drop(self); }} }}\n"
-            ));
-        }
-    }
-    if uses("core.db") {
-        // D-TYPEDSQL-SINK1=A: `SQL` is the only database sink carrier. The
-        // policy layer may inspect its two tuple fields internally, but every
-        // public/generated sink receives one value and final driver marshalling
-        // is the only place that splits text from ordered binds.
-        out.push_str(&format!(
-            "trait JetDBDriver {{\n\
-             \tfn query(&mut self, sql: {root}jet_std::SQL) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError>;\n\
-             \tfn query_one(&mut self, sql: {root}jet_std::SQL) -> Result<JetOutcome<{root}jet_std::JetDBRow, JetAbsent>, {root}jet_std::DBError>;\n\
-             \tfn execute(&mut self, sql: {root}jet_std::SQL) -> Result<i64, {root}jet_std::DBError>;\n\
-             \tfn begin(&mut self) -> bool;\n\
-             \tfn commit(&mut self) -> bool;\n\
-             \tfn rollback(&mut self) -> bool;\n\
-             }}\n"
-        ));
-        if let Some(ffi) = &cx.ffi_crate {
-            out.push_str(&format!(
-                "impl JetDBDriver for {root}JetDbScope {{\n\
-                 \tfn query(&mut self, sql: {root}jet_std::SQL) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError> {{\n\
-                 \t\tjet_db_scope_query(self, &sql)\n\
-                 \t}}\n\
-                 \tfn query_one(&mut self, sql: {root}jet_std::SQL) -> Result<JetOutcome<{root}jet_std::JetDBRow, JetAbsent>, {root}jet_std::DBError> {{\n\
-                 \t\tjet_db_scope_query(self, &sql).map({root}jet_std::jet_db_first_row)\n\
-                 \t}}\n\
-                 \tfn execute(&mut self, sql: {root}jet_std::SQL) -> Result<i64, {root}jet_std::DBError> {{\n\
-                 \t\tjet_db_scope_execute(self, &sql)\n\
-                 \t}}\n\
-                 \tfn begin(&mut self) -> bool {{ {ffi}::jet_db_begin(self.handle) }}\n\
-                 \tfn commit(&mut self) -> bool {{ {ffi}::jet_db_commit(self.handle) }}\n\
-                 \tfn rollback(&mut self) -> bool {{ {ffi}::jet_db_rollback(self.handle) }}\n\
-                 }}\n"
-            ));
-            out.push_str(&format!(
-                "fn jet_db_scope_execute(scope: &{root}JetDbScope, sql: &{root}jet_std::SQL) -> Result<i64, {root}jet_std::DBError> {{\n\
-let __sql = {root}jet_std::jet_db_apply_compiled_policy_with_proof(sql, &scope.policy.table, {root}jet_db_policy_compiled(&scope.policy), &scope.user)?.into_sql()?;\n\
-{root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(scope.handle, &__sql.0, &{root}jet_std::jet_db_encode_params(&__sql.1)))\n\
-}}\n\
-fn jet_db_scope_query(scope: &{root}JetDbScope, sql: &{root}jet_std::SQL) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError> {{\n\
-let __sql = {root}jet_std::jet_db_apply_compiled_policy_with_proof(sql, &scope.policy.table, {root}jet_db_policy_compiled(&scope.policy), &scope.user)?.into_sql()?;\n\
-{root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(scope.handle, &__sql.0, &{root}jet_std::jet_db_encode_params(&__sql.1)))\n\
-}}\n"
-            ));
-            out.push_str(&format!(
-                "struct JetDbScopeBackend<'a> {{ scope: &'a {root}JetDbScope }}\n\
-impl {root}jet_std::JetDBBackend for JetDbScopeBackend<'_> {{\n\
-fn begin(&mut self) -> bool {{ {ffi}::jet_db_begin(self.scope.handle) }}\n\
-fn commit(&mut self) -> bool {{ {ffi}::jet_db_commit(self.scope.handle) }}\n\
-fn rollback(&mut self) {{ let _ = {ffi}::jet_db_rollback(self.scope.handle); }}\n\
-fn execute(&mut self, sql: &{root}jet_std::SQL, allow_schema: bool) -> Result<i64, {root}jet_std::DBError> {{\n\
-let __sql = if allow_schema {{ {root}jet_std::jet_db_apply_compiled_migration_policy_with_proof(sql, &self.scope.policy.table, {root}jet_db_policy_compiled(&self.scope.policy), &self.scope.user)?.into_sql()? }} else {{ {root}jet_std::jet_db_apply_compiled_policy_with_proof(sql, &self.scope.policy.table, {root}jet_db_policy_compiled(&self.scope.policy), &self.scope.user)?.into_sql()? }};\n\
-{root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(self.scope.handle, &__sql.0, &{root}jet_std::jet_db_encode_params(&__sql.1)))\n\
-}}\n\
-fn query(&mut self, sql: &{root}jet_std::SQL, allow_schema: bool) -> Result<Vec<{root}jet_std::JetDBRow>, {root}jet_std::DBError> {{\n\
-let __sql = if allow_schema {{ {root}jet_std::jet_db_apply_compiled_migration_policy_with_proof(sql, &self.scope.policy.table, {root}jet_db_policy_compiled(&self.scope.policy), &self.scope.user)?.into_sql()? }} else {{ {root}jet_std::jet_db_apply_compiled_policy_with_proof(sql, &self.scope.policy.table, {root}jet_db_policy_compiled(&self.scope.policy), &self.scope.user)?.into_sql()? }};\n\
-{root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(self.scope.handle, &__sql.0, &{root}jet_std::jet_db_encode_params(&__sql.1)))\n\
-}}\n\
-}}\n\
-fn jet_db_scope_transaction(scope: &{root}JetDbScope, label: &String, steps: &Vec<{root}jet_std::SQL>) -> Result<i64, {root}jet_std::DBError> {{\n\
-let mut backend = JetDbScopeBackend {{ scope }};\n\
-{root}jet_std::jet_db_transaction(&mut backend, label, steps)\n\
-}}\n"
-            ));
-            out.push_str(&format!(
-                "fn jet_db_scope_migrate(scope: &{root}JetDbScope, name: &String, steps: &Vec<{root}jet_std::SQL>) -> Result<i64, {root}jet_std::DBError> {{\n\
-let mut backend = JetDbScopeBackend {{ scope }};\n\
-{root}jet_std::jet_db_migrate(&mut backend, name, steps)\n\
-}}\n"
-            ));
-            out.push_str(&format!(
-                "impl __jet_Close for {root}JetDbConnection {{ fn close(self) {{ let _ = {ffi}::jet_db_close(self.handle); }} }}\n"
-            ));
-            out.push_str(&format!(
-                "impl __jet_Close for {root}JetDbScope {{ fn close(self) {{ let _ = {ffi}::jet_db_close(self.handle); }} }}\n"
-            ));
-        } else {
-            out.push_str(&format!(
-                "impl __jet_Close for {root}JetDbConnection {{ fn close(self) {{ drop(self); }} }}\nimpl __jet_Close for {root}JetDbScope {{ fn close(self) {{ drop(self); }} }}\n"
-            ));
-        }
-    }
-    if uses("core.crypto.vault") {
-        if let Some(ffi) = &cx.ffi_crate {
-            out.push_str(&format!(
-                "impl<T> JetDisplay for {ffi}::JetVaultKeyRef<T> {{ fn jet_display(&self) -> String {{ self.to_string() }} }}\nimpl<T> JetDebug for {ffi}::JetVaultKeyRef<T> {{ fn jet_debug(&self) -> String {{ format!(\"{{self:?}}\") }} }}\nimpl JetDisplay for {ffi}::JetWrappedVaultKey {{ fn jet_display(&self) -> String {{ self.to_string() }} }}\nimpl JetDebug for {ffi}::JetWrappedVaultKey {{ fn jet_debug(&self) -> String {{ format!(\"{{self:?}}\") }} }}\n"
-            ));
-        }
-    }
-    out.push('\n');
-}
-
-/// D-ITER-HOOK / D-INDEX-HOOK: emit Iterable/Iterator/Index/IndexMut when used.
-pub(crate) fn emit_synthetic_iter_index_traits(
-    out: &mut String,
-    has_iterable: bool,
-    has_iterator: bool,
-    has_index: bool,
-    has_index_mut: bool,
-) {
-    if has_iterable {
-        out.push_str("pub trait __jet_Iterable {\n");
-        out.push_str("    type Iter;\n");
-        out.push_str("    fn iter(self) -> Self::Iter;\n");
-        out.push_str("}\n\n");
-    }
-    if has_iterator {
-        out.push_str("pub trait __jet_Iterator {\n");
-        out.push_str("    type Item;\n");
-        out.push_str("    fn next(&mut self) -> JetOutcome<Self::Item, JetAbsent>;\n");
-        out.push_str("}\n\n");
-    }
-    if has_index {
-        out.push_str("pub trait __jet_Index {\n");
-        out.push_str("    type Key;\n");
-        out.push_str("    type Value;\n");
-        out.push_str("    fn get(&self, k: Self::Key) -> JetOutcome<Self::Value, JetAbsent>;\n");
-        out.push_str("}\n\n");
-    }
-    if has_index_mut {
-        out.push_str("pub trait __jet_IndexMut: __jet_Index {\n");
-        out.push_str("    fn set(&mut self, k: <Self as __jet_Index>::Key, v: <Self as __jet_Index>::Value);\n");
-        out.push_str("}\n\n");
-    }
-}
-
-pub(crate) fn program_iter_index_usage(items: &[Item]) -> (bool, bool, bool, bool) {
-    let mut has_iterable = false;
-    let mut has_iterator = false;
-    let mut has_index = false;
-    let mut has_index_mut = false;
-    for item in items {
-        match item {
-            Item::Impl(i) => match i.trait_name.as_deref() {
-                Some(Syntax::TRAIT_ITERABLE) => has_iterable = true,
-                Some(Syntax::TRAIT_ITERATOR) => has_iterator = true,
-                Some(Syntax::TRAIT_INDEX) => has_index = true,
-                Some(Syntax::TRAIT_INDEX_MUT) => has_index_mut = true,
-                _ => {}
-            },
-            Item::Struct(s) => {
-                for block in &s.trait_impls {
-                    match block.trait_name.as_str() {
-                        Syntax::TRAIT_ITERABLE => has_iterable = true,
-                        Syntax::TRAIT_ITERATOR => has_iterator = true,
-                        Syntax::TRAIT_INDEX => has_index = true,
-                        Syntax::TRAIT_INDEX_MUT => has_index_mut = true,
-                        _ => {}
-                    }
-                }
-            }
-            Item::Enum(e) => {
-                for block in &e.trait_impls {
-                    match block.trait_name.as_str() {
-                        Syntax::TRAIT_ITERABLE => has_iterable = true,
-                        Syntax::TRAIT_ITERATOR => has_iterator = true,
-                        Syntax::TRAIT_INDEX => has_index = true,
-                        Syntax::TRAIT_INDEX_MUT => has_index_mut = true,
-                        _ => {}
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    (has_iterable, has_iterator, has_index, has_index_mut)
-}
-
-/// D-TXN-ROLLBACK layer 2: emit the `trait __jet_Rollback { … }` Rust trait
-/// declaration when any impl block in the program references `Rollback`. Programs
-/// with no `Rollback` impl produce zero output here (byte-identical to before).
-pub(crate) fn emit_synthetic_rollback_trait(out: &mut String) {
-    out.push_str("pub trait __jet_Rollback {\n");
-    out.push_str("    type Snapshot;\n");
-    out.push_str("    fn snapshot(&self) -> Self::Snapshot;\n");
-    out.push_str("    fn restore(&mut self, _snap: Self::Snapshot);\n");
-    out.push_str("}\n\n");
-}
-
-pub(crate) fn program_has_rollback_impl(items: &[Item]) -> bool {
-    items.iter().any(|i| match i {
-        Item::Impl(im) => im.trait_name.as_deref() == Some(Syntax::TRAIT_ROLLBACK),
-        Item::Struct(s) => s
-            .trait_impls
-            .iter()
-            .any(|b| b.trait_name == Syntax::TRAIT_ROLLBACK),
-        Item::Enum(e) => e
-            .trait_impls
-            .iter()
-            .any(|b| b.trait_name == Syntax::TRAIT_ROLLBACK),
-        _ => false,
-    })
-}
-
-pub fn emit(prog: &Program, src: &str, file: &str) -> String {
-    let mut out = String::new();
-    out.push_str(&format!(
-        "// Generated by {} — do not edit. Edit the .{} source instead.\n",
-        Syntax::BINARY_NAME,
-        Syntax::FILE_EXT
-    ));
-    out.push_str(&format!(
-        "// If rustc rejects this file, that is a bug in {} (invariant I2).\n",
-        Syntax::BINARY_NAME
-    ));
-    // E2-M12 D-OBS1: source-map marker lets tooling resolve generated Rust back to
-    // the originating Jet file. Panic reports carry Jet file+line directly via
-    // jet_panic/jet_panic_rich, so runtime error messages already show Jet terms.
-    out.push_str(&format!("// jet:source-map source={}\n", file));
-    for item in &prog.items {
-        if let Item::CodeModule(module) = item {
-            if let Some(identity) = &module.instance_identity {
-                out.push_str(&format!(
-                    "// jet:generic-instance module={} fingerprint={} full-key={}\n",
-                    module.name,
-                    identity.fingerprint,
-                    identity
-                        .full_key
-                        .iter()
-                        .map(|byte| format!("{byte:02x}"))
-                        .collect::<String>()
-                ));
-            }
-        }
-    }
-    out.push_str("#![allow(warnings)]\n\n");
-    push_ffi_reporter(&mut out, None);
-    push_prelude(&mut out);
-    // The same Int display seam as `push_cached_runtime_body`; this path may
-    // also emit the Core kernel, which installs its decoder on first use.
-    out.push_str(INT_DECODER_SEAM);
-    // The Prelude names `__jet_Ordering` (`jet_list_sort_by`, `jet_ordering_then`),
-    // so the one declaration travels with it. `push_cached_runtime_traits` is the
-    // bundle-path twin.
-    out.push_str(ORDERING_ENUM);
-    out.push_str(ENV_INIT_PRELUDE);
-    push_mem_prelude(&mut out);
-    push_gc_prelude(&mut out);
-    out.push_str(LAYOUT_PRELUDE);
-    out.push('\n');
-
-    let cx = build_cx(prog, src, file);
-    let tuple_shapes = collect_tuple_shapes(&prog.items);
-    emit_tuple_structs(&cx, &tuple_shapes, &mut out);
-    emit_anonymous_unions(&cx, &prog.items, &mut out);
-
-    emit_synthetic_display_trait(&mut out, true);
-    emit_synthetic_operator_traits(&mut out, true);
-    emit_synthetic_close_trait(&mut out);
-    emit_synthetic_foreign_close_impls(&cx, &prog.items, &mut out);
-    emit_synthetic_close_builtin_impls(&cx, &prog.items, &mut out);
-    let (hi, hj, hk, hm) = program_iter_index_usage(&prog.items);
-    emit_synthetic_iter_index_traits(&mut out, hi, hj, hk, hm);
-
-    // D-TXN-ROLLBACK layer 2: emit the synthetic Rollback trait iff needed.
-    if program_has_rollback_impl(&prog.items) {
-        emit_synthetic_rollback_trait(&mut out);
-    }
-
-    for item in &prog.items {
-        match item {
-            Item::Trait(t) => Traits::emit_trait_def(t, &mut out, |ty, assoc| {
-                cx.rust_type_with_view_lifetime_assoc(ty, assoc)
-            }),
-            Item::Struct(s) => emit_struct(&cx, s, &mut out),
-            // D-UNIONTYPE1=A: the sema hidden enum carries checked Jet codec
-            // items, while emit_anonymous_unions owns its structural Rust
-            // representation. Emit that representation once.
-            Item::Enum(e) if e.name.starts_with("__JetUnion_") => {}
-            Item::Enum(e) => emit_enum(&cx, e, &mut out),
-            Item::Distinct(d) => emit_distinct(&cx, d, &mut out),
-            // D-QUAL3: emit one distinct newtype per unit-family member.
-            Item::UnitFamily(uf) => {
-                for d in uf.distinct_defs() {
-                    emit_distinct(&cx, &d, &mut out);
-                }
-            }
-            Item::Const(c) => emit_const(c, &mut out),
-            Item::CModule(cm) => emit_c_module(&cx, cm, &mut out),
-            Item::EffectDecl(_)
-            | Item::MarkerDecl(_)
-            | Item::FactDecl(_)
-            | Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_)
-            | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_)
-            | Item::Tag(_) // D-QUAL2: tags erase
-            | Item::TypeAlias(_) // D-TYPEALIAS1: erases
-            | Item::Migration(_) // D-MIGRATE1: migration is sema-only (I3)
-            | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
-            | Item::UserDerive(_) // D-METADERIVE1=A: erase (expanded in sema)
-            | Item::TemplateLoop(_) // D-STRUCT-ONCE1=A: expanded before codegen
-            | Item::GenericModule(_) // D-CONF-GENSPELL1=A: template — erases
-            | Item::ModuleAlias(_) => {} // D-CONF-GENSPELL1=A: alias — erases after expansion
-        }
-    }
-
-    for item in &prog.items {
-        match item {
-            Item::Struct(s) => {
-                emit_type_impl(&cx, &s.name, &s.type_params, &s.methods, &mut out);
-                for block in &s.trait_impls {
-                    emit_trait_impl(&cx, &s.name, &s.type_params, block, Some(s), &mut out);
-                }
-            }
-            Item::Enum(e) => {
-                emit_type_impl(&cx, &e.name, &e.type_params, &e.methods, &mut out);
-                for block in &e.trait_impls {
-                    emit_trait_impl(&cx, &e.name, &e.type_params, block, None, &mut out);
-                }
-            }
-            Item::Impl(i) => {
-                // D-OSTARGET1=A: skip an `impl` gated to a non-active native OS.
-                if i.os_target.is_some_and(|os| os != cx.active_os) {
-                    continue;
-                }
-                if i.trait_name.is_some() {
-                    let struct_def = prog.items.iter().find_map(|item| match item {
-                        Item::Struct(s) if s.name == i.type_name => Some(s),
-                        _ => None,
-                    });
-                    emit_external_trait_impl(&cx, i, struct_def, &mut out);
-                } else {
-                    emit_type_impl(
-                        &cx,
-                        &i.type_name,
-                        type_params_for_name(&prog.items, &i.type_name),
-                        &i.methods,
-                        &mut out,
-                    );
-                }
-            }
-            // D-ERR-CONV: emit a standalone Rust function for each declared conversion.
-            Item::ErrorConv(ec) => {
-                emit_error_conv(&cx, ec, &mut out);
-            }
-            _ => {}
-        }
-    }
-
-    for item in &prog.items {
-        if let Item::Func(f) = item {
-            emit_func(&cx, f, &mut out);
-        }
-    }
-    // S12/D-CLIFLAG1: Jet's only program entry is `fn run`; Rust still needs
-    // `fn main`, so synthesize that wrapper for zero-arg and typed-CLI forms.
-    emit_cli_entry_if_needed(&cx, &prog.items, &prog.items, None, &mut out);
-    strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(
-        strip_unused_gc_prelude(strip_unused_txn_prelude(strip_unused_mem_prelude(out))),
-    )))
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Codegen::TIR::install_comptime_bridge;
+    use crate::Sema::CompileMode;
 
     #[test]
     fn aot_ffi_host_installs_bridge_reporter() {
@@ -3283,6 +4436,8 @@ mod tests {
             host_deps_dir: "deps".into(),
             helper_bin_path: None,
             secrets_helper_bin_path: None,
+            handle_facts: vec![],
+            link_closure: crate::AST::FfiLinkClosure::default(),
         };
         let mut source = String::new();
         push_ffi_reporter(&mut source, Some(&link));
@@ -3303,7 +4458,11 @@ mod tests {
         assert!(!source.contains("panic: a foreign function panicked"));
 
         let mut cached = String::new();
-        push_cached_runtime(&mut cached, Some(&link));
+        push_cached_runtime_with_policy(
+            &mut cached,
+            Some(&link),
+            &ReleaseDevtoolsPolicy::development(),
+        );
         let reporter = cached
             .find("jet_ffi_fixture::jet_ffi_set_reporter(jet_ffi_reporter)")
             .unwrap();
@@ -3320,29 +4479,15 @@ mod tests {
         corelib_emission_fingerprint(&bundle, test_harness)
     }
 
-    #[test]
-    fn gc_runtime_source_is_shared_by_aot_and_jit() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let runtime = std::fs::read_to_string(root.join("../jet-rt/src/__gc.rs")).unwrap();
-        assert_eq!(GC_RUNTIME_PRELUDE, runtime);
-
-        let mut emitted = String::new();
-        push_gc_prelude(&mut emitted);
-        assert!(emitted.starts_with("mod jet_gc {\n"));
-        assert_eq!(emitted.matches(runtime.as_str()).count(), 1);
-
-        let unused = strip_unused_gc_prelude(format!("{emitted}fn main() {{}}\n"));
-        assert!(!unused.contains("mod jet_gc"));
-        let used = strip_unused_gc_prelude(format!(
-            "{emitted}fn main() {{ jet_gc::runtime_or_exit(jet_gc::initialize_trace()); }}\n"
-        ));
-        assert!(used.contains("mod jet_gc"));
-    }
 
     #[test]
     fn relevant_stdlib_digest_is_exact_and_core_closure_sensitive() {
         let mut runtime_source = String::new();
-        push_cached_runtime(&mut runtime_source, None);
+        push_cached_runtime_with_policy(
+            &mut runtime_source,
+            None,
+            &ReleaseDevtoolsPolicy::development(),
+        );
         assert_eq!(
             cached_runtime_fingerprint(),
             crate::SHA256::sha256_hex(runtime_source.as_bytes()),
@@ -3374,9 +4519,12 @@ mod tests {
         bundle.used_core = files.clone();
         let body = core_runtime_body(&bundle, false);
         let mut emitted = String::new();
-        push_core_runtime(&mut emitted, &bundle, false);
+        if !body.is_empty() {
+            emitted.push_str(CACHED_CORE_BEGIN);
+            emitted.push_str(&body);
+            emitted.push_str(CACHED_CORE_END);
+        }
         assert!(emitted.contains(scheduler_prelude_for_emit(true)));
-        assert!(emitted.contains(UI_PRELUDE));
         assert!(body.contains("__JET_PACKAGE_EDITION"));
         assert!(body.contains("fn jet_deadline_exceeded"));
         assert!(body.contains("fn jet_seeded_rng_int"));
@@ -3401,7 +4549,12 @@ mod tests {
         // templates into generated source.
         let files_only = HashSet::from(["core.files::read".to_string()]);
         let mut files_out = String::new();
-        push_corelib_prelude(&mut files_out, &files_only, false);
+        push_corelib_prelude_with_policy(
+            &mut files_out,
+            &files_only,
+            false,
+            &ReleaseDevtoolsPolicy::development(),
+        );
         assert!(
             files_out.contains("struct JetPath"),
             "files usage must emit PathFiles"
@@ -3419,7 +4572,12 @@ mod tests {
 
         let net_only = HashSet::from(["core.net::tcp_connect".to_string()]);
         let mut net_out = String::new();
-        push_corelib_prelude(&mut net_out, &net_only, false);
+        push_corelib_prelude_with_policy(
+            &mut net_out,
+            &net_only,
+            false,
+            &ReleaseDevtoolsPolicy::development(),
+        );
         assert!(
             net_out.contains("struct JetTCPStream") && net_out.contains("fn jet_net_tcp_connect"),
             "net usage must emit NetHTTP"
@@ -3431,7 +4589,12 @@ mod tests {
 
         let http = HashSet::from(["core.http.client::get".to_string()]);
         let mut http_out = String::new();
-        push_corelib_prelude(&mut http_out, &http, false);
+        push_corelib_prelude_with_policy(
+            &mut http_out,
+            &http,
+            false,
+            &ReleaseDevtoolsPolicy::development(),
+        );
         assert!(
             http_out.contains("JetHTTPServer") || http_out.contains("fn jet_http_"),
             "http usage must emit HTTP templates"
@@ -3451,7 +4614,12 @@ mod tests {
 
         let compute_only = HashSet::from(["core.compute::zeros".to_string()]);
         let mut compute_out = String::new();
-        push_corelib_prelude(&mut compute_out, &compute_only, false);
+        push_corelib_prelude_with_policy(
+            &mut compute_out,
+            &compute_only,
+            false,
+            &ReleaseDevtoolsPolicy::development(),
+        );
         assert!(
             compute_out.contains("fn jet_compute_zeros")
                 && compute_out.contains("struct JetTensor"),
@@ -3466,7 +4634,12 @@ mod tests {
     #[test]
     fn simd_core_marker_selects_shared_lane_closure_without_selecting_plain_programs() {
         let mut plain = String::new();
-        push_corelib_prelude(&mut plain, &HashSet::new(), false);
+        push_corelib_prelude_with_policy(
+            &mut plain,
+            &HashSet::new(),
+            false,
+            &ReleaseDevtoolsPolicy::development(),
+        );
         assert!(
             plain.is_empty(),
             "a program with no Core reachability must not emit the SIMD closure"
@@ -3474,7 +4647,12 @@ mod tests {
 
         let simd = HashSet::from(["core.math::__mathtypes__".to_string()]);
         let mut simd_out = String::new();
-        push_corelib_prelude(&mut simd_out, &simd, false);
+        push_corelib_prelude_with_policy(
+            &mut simd_out,
+            &simd,
+            false,
+            &ReleaseDevtoolsPolicy::development(),
+        );
         assert!(
             simd_out.contains("fn jet_scalar_loop_barrier"),
             "SIMD reachability must emit the shared scalar-loop barrier"
@@ -3499,7 +4677,12 @@ mod tests {
         // whose only suite contact is an unused `fn test(suite: TestSuite)`.
         let no_testing = HashSet::from(["core.compute::zeros".to_string()]);
         let mut out = String::new();
-        push_corelib_prelude(&mut out, &no_testing, false);
+        push_corelib_prelude_with_policy(
+            &mut out,
+            &no_testing,
+            false,
+            &ReleaseDevtoolsPolicy::development(),
+        );
         // The whole root fragment, not a symbol list: the `jet_std` kernel
         // defines same-named `pub fn`s, so a name check would pass even with
         // the root adapters gated away.
@@ -3511,811 +4694,21 @@ mod tests {
         );
     }
 
-    #[test]
-    fn exact_int_runtime_is_reachable() {
-        install_comptime_bridge();
-        let bundle = checked_generic_bundle("fn run() { value :: [U8].{}.len() }", "int-runtime");
-        let rust = emit_bundle(&bundle, CompileMode::Run, None);
-        assert!(rust.contains("mod jet_std"));
-        assert!(rust.contains("fn jet_int_to_string"));
-    }
 
-    #[test]
-    fn core_prelude_stays_split_by_runtime_ownership() {
-        const MAX_MODULE_LINES: usize = 2500;
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let outcome =
-            std::fs::read_to_string(root.join("../jet-foundation/src/Outcome.rs")).unwrap();
-        let development_receipt =
-            std::fs::read_to_string(root.join("src/Prelude/DevelopmentReceipt.rs")).unwrap();
-        let fault_injection =
-            std::fs::read_to_string(root.join("src/Prelude/FaultInjection.rs")).unwrap();
-        let keep = std::fs::read_to_string(root.join("src/Prelude/Core/Keep.rs")).unwrap();
-        let job = std::fs::read_to_string(root.join("src/Prelude/Job.rs")).unwrap();
-        let option = std::fs::read_to_string(root.join("src/Prelude/Core/Option.rs")).unwrap();
-        let fixed_list =
-            std::fs::read_to_string(root.join("src/Prelude/Core/FixedList.rs")).unwrap();
-        let fixed_arithmetic =
-            std::fs::read_to_string(root.join("src/Prelude/Core/FixedArithmetic.rs")).unwrap();
-        let columns = std::fs::read_to_string(root.join("src/Prelude/Core/Columns.rs")).unwrap();
-        let column_list =
-            std::fs::read_to_string(root.join("src/Prelude/Core/ColumnList.rs")).unwrap();
-        let unicode =
-            std::fs::read_to_string(root.join("src/Prelude/Core/UnicodeString.rs")).unwrap();
-        let ascii = std::fs::read_to_string(root.join("src/Prelude/Core/Ascii.rs")).unwrap();
-        let process_args =
-            std::fs::read_to_string(root.join("src/Prelude/Core/ProcessArgs.rs")).unwrap();
-        let string_concat =
-            std::fs::read_to_string(root.join("src/Prelude/Core/StringConcat.rs")).unwrap();
-        let view_copy = std::fs::read_to_string(root.join("src/Prelude/Core/ViewCopy.rs")).unwrap();
-        let loadable = std::fs::read_to_string(root.join("src/Prelude/Core/Loadable.rs")).unwrap();
-        let values = std::fs::read_to_string(root.join("src/Prelude/Core/Values.rs")).unwrap();
-        let text_values =
-            std::fs::read_to_string(root.join("src/Prelude/Core/TextValues.rs")).unwrap();
-        let range_bounds =
-            std::fs::read_to_string(root.join("src/Prelude/Core/RangeBounds.rs")).unwrap();
-        let inline_range =
-            std::fs::read_to_string(root.join("src/Prelude/Core/InlineRange.rs")).unwrap();
-        let disjoint = std::fs::read_to_string(root.join("src/Prelude/Core/Disjoint.rs")).unwrap();
-        let expiring_secret =
-            std::fs::read_to_string(root.join("src/Prelude/Core/ExpiringSecret.rs")).unwrap();
-        let set_algebra =
-            std::fs::read_to_string(root.join("src/Prelude/Core/SetAlgebra.rs")).unwrap();
-        let duration = std::fs::read_to_string(root.join("src/Prelude/Core/Duration.rs")).unwrap();
-        let measurement =
-            std::fs::read_to_string(root.join("src/Prelude/Core/Measurement.rs")).unwrap();
-        let time_monotonic =
-            std::fs::read_to_string(root.join("src/Prelude/Core/TimeMonotonic.rs")).unwrap();
-        let time = std::fs::read_to_string(root.join("src/Prelude/Core/Time.rs")).unwrap();
-        let sketch = std::fs::read_to_string(root.join("src/Prelude/Core/Sketch.rs")).unwrap();
-        let contracts =
-            std::fs::read_to_string(root.join("src/Prelude/Core/Contracts.rs")).unwrap();
-        let map_key = std::fs::read_to_string(root.join("src/Prelude/Core/MapKey.rs")).unwrap();
-        let core = std::fs::read_to_string(root.join("src/Prelude/Core.rs")).unwrap();
-        let view_access =
-            std::fs::read_to_string(root.join("src/Prelude/Core/ViewAccess.rs")).unwrap();
-        let power = std::fs::read_to_string(root.join("src/Prelude/Core/Power.rs")).unwrap();
-        let division = std::fs::read_to_string(root.join("src/Prelude/Core/Division.rs")).unwrap();
-        let typed_text = std::fs::read_to_string(root.join("src/Prelude/TypedText.rs")).unwrap();
-        let progress = std::fs::read_to_string(root.join("src/Prelude/Core/Progress.rs")).unwrap();
-        let byte_buffer = std::fs::read_to_string(root.join("src/Prelude/Core/Bytes.rs")).unwrap();
-        let iter =
-            std::fs::read_to_string(root.join("src/Prelude/CoreLib/JetStd/Iter.rs")).unwrap();
-        let collection_failure =
-            std::fs::read_to_string(root.join("src/Prelude/Core/CollectionFailure.rs")).unwrap();
-        let collections =
-            std::fs::read_to_string(root.join("src/Prelude/Core/Collections.rs")).unwrap();
-        let memo = std::fs::read_to_string(root.join("src/Prelude/Memo.rs")).unwrap();
-        let shared_protocol =
-            std::fs::read_to_string(root.join("src/Prelude/SharedProtocol.rs")).unwrap();
-        let term = std::fs::read_to_string(root.join("src/Prelude/Term.rs")).unwrap();
-        let term_key = std::fs::read_to_string(root.join("src/Prelude/Core/TermKey.rs")).unwrap();
-        let runtime_control =
-            std::fs::read_to_string(root.join("src/Prelude/Core/RuntimeControl.rs")).unwrap();
-        let numeric_widen =
-            std::fs::read_to_string(root.join("src/Prelude/NumericWiden.rs")).unwrap();
-        let observe = std::fs::read_to_string(root.join("src/Prelude/Observe.rs")).unwrap();
-        let exact_units =
-            std::fs::read_to_string(root.join("../jet-foundation/src/ExactUnitConversion.rs"))
-                .unwrap();
-        let structural_debug =
-            std::fs::read_to_string(root.join("../jet-foundation/src/StructuralDebug.rs")).unwrap();
-        let stream_cursor =
-            std::fs::read_to_string(root.join("../jet-foundation/src/StreamCursor.rs")).unwrap();
-        let match_scan =
-            std::fs::read_to_string(root.join("../jet-foundation/src/Prelude/MatchScan.rs"))
-                .unwrap();
-        for (relative, source) in [
-            ("../jet-foundation/src/Outcome.rs", outcome.as_str()),
-            (
-                "src/Prelude/DevelopmentReceipt.rs",
-                development_receipt.as_str(),
-            ),
-            ("src/Prelude/FaultInjection.rs", fault_injection.as_str()),
-            ("src/Prelude/Core/Keep.rs", keep.as_str()),
-            ("src/Prelude/Job.rs", job.as_str()),
-            ("src/Prelude/Core/Option.rs", option.as_str()),
-            ("src/Prelude/Core/FixedList.rs", fixed_list.as_str()),
-            ("src/Prelude/Core/Columns.rs", columns.as_str()),
-            ("src/Prelude/Core/ColumnList.rs", column_list.as_str()),
-            ("src/Prelude/Core/UnicodeString.rs", unicode.as_str()),
-            ("src/Prelude/Core/Ascii.rs", ascii.as_str()),
-            (
-                "src/Prelude/Core/ProcessArgs.rs",
-                process_args.as_str(),
-            ),
-            ("src/Prelude/Core/StringConcat.rs", string_concat.as_str()),
-            ("src/Prelude/Core/ViewCopy.rs", view_copy.as_str()),
-            ("src/Prelude/Core/Loadable.rs", loadable.as_str()),
-            ("src/Prelude/Core/Values.rs", values.as_str()),
-            ("src/Prelude/Core/TextValues.rs", text_values.as_str()),
-            ("src/Prelude/Core/RangeBounds.rs", range_bounds.as_str()),
-            ("src/Prelude/Core/InlineRange.rs", inline_range.as_str()),
-            ("src/Prelude/Core/Disjoint.rs", disjoint.as_str()),
-            (
-                "src/Prelude/Core/ExpiringSecret.rs",
-                expiring_secret.as_str(),
-            ),
-            ("src/Prelude/Core/SetAlgebra.rs", set_algebra.as_str()),
-            ("src/Prelude/Core/Duration.rs", duration.as_str()),
-            ("src/Prelude/Core/Measurement.rs", measurement.as_str()),
-            ("src/Prelude/Core/TimeMonotonic.rs", time_monotonic.as_str()),
-            ("src/Prelude/Core/Time.rs", time.as_str()),
-            ("src/Prelude/Core/Sketch.rs", sketch.as_str()),
-            ("src/Prelude/Core/Contracts.rs", contracts.as_str()),
-            ("src/Prelude/Core/MapKey.rs", map_key.as_str()),
-            ("src/Prelude/Core.rs", core.as_str()),
-            ("src/Prelude/Core/ViewAccess.rs", view_access.as_str()),
-            ("src/Prelude/Core/Power.rs", power.as_str()),
-            ("src/Prelude/Core/Division.rs", division.as_str()),
-            ("src/Prelude/TypedText.rs", typed_text.as_str()),
-            ("src/Prelude/Core/Progress.rs", progress.as_str()),
-            ("src/Prelude/Core/Bytes.rs", byte_buffer.as_str()),
-            ("src/Prelude/CoreLib/JetStd/Iter.rs", iter.as_str()),
-            (
-                "src/Prelude/Core/CollectionFailure.rs",
-                collection_failure.as_str(),
-            ),
-            ("src/Prelude/Core/Collections.rs", collections.as_str()),
-            ("src/Prelude/Memo.rs", memo.as_str()),
-            ("src/Prelude/SharedProtocol.rs", shared_protocol.as_str()),
-            ("src/Prelude/Term.rs", term.as_str()),
-            ("src/Prelude/Core/TermKey.rs", term_key.as_str()),
-            (
-                "src/Prelude/Core/RuntimeControl.rs",
-                runtime_control.as_str(),
-            ),
-            ("src/Prelude/NumericWiden.rs", numeric_widen.as_str()),
-            ("src/Prelude/Observe.rs", observe.as_str()),
-            (
-                "../jet-foundation/src/ExactUnitConversion.rs",
-                exact_units.as_str(),
-            ),
-            (
-                "../jet-foundation/src/StructuralDebug.rs",
-                structural_debug.as_str(),
-            ),
-            (
-                "../jet-foundation/src/StreamCursor.rs",
-                stream_cursor.as_str(),
-            ),
-            (
-                "../jet-foundation/src/Prelude/MatchScan.rs",
-                match_scan.as_str(),
-            ),
-        ] {
-            assert!(
-                source.lines().count() < MAX_MODULE_LINES,
-                "{relative} must stay below the card #510 module boundary"
-            );
-            assert!(
-                !source.contains("include!(") && !source.contains("#[path"),
-                "{relative} must remain owned source, never a code-splice shell"
-            );
-        }
 
-        let codegen = std::fs::read_to_string(root.join("src/Codegen/mod.rs")).unwrap();
-        let production_codegen = codegen.split("#[cfg(test)]\nmod tests").next().unwrap();
-        let outcome_pos = production_codegen
-            .find("include_str!(\"../../../jet-foundation/src/Outcome.rs\")")
-            .unwrap();
-        let fault_injection_pos = production_codegen
-            .find("include_str!(\"../Prelude/FaultInjection.rs\")")
-            .unwrap();
-        let job_pos = production_codegen
-            .find("include_str!(\"../Prelude/Job.rs\")")
-            .unwrap();
-        let option_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/Option.rs\")")
-            .unwrap();
-        let fixed_list_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/FixedList.rs\")")
-            .unwrap();
-        let fixed_arithmetic_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/FixedArithmetic.rs\")")
-            .unwrap();
-        let columns_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/Columns.rs\")")
-            .unwrap();
-        let column_list_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/ColumnList.rs\")")
-            .unwrap();
-        let unicode_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/UnicodeString.rs\")")
-            .unwrap();
-        let ascii_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/Ascii.rs\")")
-            .unwrap();
-        let process_args_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/ProcessArgs.rs\")")
-            .unwrap();
-        let string_concat_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/StringConcat.rs\")")
-            .unwrap();
-        let view_copy_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/ViewCopy.rs\")")
-            .unwrap();
-        let loadable_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/Loadable.rs\")")
-            .unwrap();
-        let values_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/Values.rs\")")
-            .unwrap();
-        let text_values_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/TextValues.rs\")")
-            .unwrap();
-        let range_bounds_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/RangeBounds.rs\")")
-            .unwrap();
-        let inline_range_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/InlineRange.rs\")")
-            .unwrap();
-        let disjoint_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/Disjoint.rs\")")
-            .unwrap();
-        let expiring_secret_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/ExpiringSecret.rs\")")
-            .unwrap();
-        let set_algebra_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/SetAlgebra.rs\")")
-            .unwrap();
-        let duration_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/Duration.rs\")")
-            .unwrap();
-        let measurement_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/Measurement.rs\")")
-            .unwrap();
-        let time_monotonic_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/TimeMonotonic.rs\")")
-            .unwrap();
-        let time_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/Time.rs\")")
-            .unwrap();
-        let sketch_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/Sketch.rs\")")
-            .unwrap();
-        let contracts_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/Contracts.rs\")")
-            .unwrap();
-        let map_key_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/MapKey.rs\")")
-            .unwrap();
-        let core_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core.rs\")")
-            .unwrap();
-        let view_access_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/ViewAccess.rs\")")
-            .unwrap();
-        let byte_buffer_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/Bytes.rs\")")
-            .unwrap();
-        let collections_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/Collections.rs\")")
-            .unwrap();
-        let collection_failure_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/CollectionFailure.rs\")")
-            .unwrap();
-        let iter_pos = production_codegen
-            .find("include_str!(\"../Prelude/CoreLib/JetStd/Iter.rs\")")
-            .unwrap();
-        let memo_pos = production_codegen
-            .find("include_str!(\"../Prelude/Memo.rs\")")
-            .unwrap();
-        let control_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/RuntimeControl.rs\")")
-            .unwrap();
-        let term_pos = production_codegen
-            .find("include_str!(\"../Prelude/Term.rs\")")
-            .unwrap();
-        let term_key_pos = production_codegen
-            .find("include_str!(\"../Prelude/Core/TermKey.rs\")")
-            .unwrap();
-        let observe_pos = production_codegen
-            .find("include_str!(\"../Prelude/Observe.rs\")")
-            .unwrap();
-        let exact_units_pos = production_codegen
-            .find("include_str!(\"../../../jet-foundation/src/ExactUnitConversion.rs\")")
-            .unwrap();
-        let structural_debug_pos = production_codegen
-            .find("include_str!(\"../../../jet-foundation/src/StructuralDebug.rs\")")
-            .unwrap();
-        let stream_cursor_pos = production_codegen
-            .find("include_str!(\"../../../jet-foundation/src/StreamCursor.rs\")")
-            .unwrap();
-        let match_scan_pos = production_codegen
-            .find("include_str!(\"../../../jet-foundation/src/Prelude/MatchScan.rs\")")
-            .unwrap();
-        assert!(
-            outcome_pos < unicode_pos
-                && outcome_pos < job_pos
-                && outcome_pos < fault_injection_pos
-                && fault_injection_pos < job_pos
-                && job_pos < option_pos
-                && outcome_pos < option_pos
-                && option_pos < fixed_list_pos
-                && fixed_list_pos < columns_pos
-                && columns_pos < column_list_pos
-                && column_list_pos < unicode_pos
-                && unicode_pos < ascii_pos
-                && ascii_pos < process_args_pos
-                && ascii_pos < string_concat_pos
-                && unicode_pos < loadable_pos
-                && unicode_pos < string_concat_pos
-                && string_concat_pos < view_copy_pos
-                && view_copy_pos < loadable_pos
-                && loadable_pos < values_pos
-                && values_pos < text_values_pos
-                && text_values_pos < range_bounds_pos
-                && range_bounds_pos < inline_range_pos
-                && inline_range_pos < disjoint_pos
-                && disjoint_pos < expiring_secret_pos
-                && expiring_secret_pos < set_algebra_pos
-                && set_algebra_pos < duration_pos
-                && duration_pos < measurement_pos
-                && measurement_pos < time_monotonic_pos
-                && time_monotonic_pos < time_pos
-                && measurement_pos < time_pos
-                && time_pos < sketch_pos
-                && sketch_pos < contracts_pos
-                && contracts_pos < map_key_pos
-                && map_key_pos < fixed_arithmetic_pos
-                && map_key_pos < core_pos
-                && fixed_arithmetic_pos < core_pos
-                && sketch_pos < core_pos
-                && core_pos < view_access_pos
-                && view_access_pos < collections_pos
-                && byte_buffer_pos < iter_pos
-                && iter_pos < collections_pos
-                && iter_pos < collection_failure_pos
-                && collection_failure_pos < collections_pos
-                && collections_pos < memo_pos
-                && memo_pos < term_pos
-                && term_pos < term_key_pos
-                && term_key_pos < control_pos
-                && control_pos < observe_pos
-                && observe_pos < exact_units_pos
-                && exact_units_pos < structural_debug_pos
-                && structural_debug_pos < stream_cursor_pos
-                && stream_cursor_pos < match_scan_pos,
-            "prelude ownership order is generated-byte order"
-        );
-        assert!(
-            production_codegen.contains("for (index, part) in PRELUDE_PARTS.iter().enumerate()")
-        );
-        // D-REPORT-TEST1=A: the host `test_report` module includes the same
-        // three report fragments the generated harness uses. Prelude parts
-        // themselves stay owned source (asserted per-file above); this pin
-        // forbids a fourth splice in production codegen.
-        let include_macros: Vec<&str> = production_codegen
-            .lines()
-            .filter(|line| line.trim_start().starts_with("include!("))
-            .collect();
-        assert_eq!(
-            include_macros.len(),
-            3,
-            "only Report.rs, TestingShared.rs, and TestReport.rs may include! here; found {include_macros:?}"
-        );
-        assert!(production_codegen.contains("include!(\"../../../jet-foundation/src/Report.rs\")"));
-        assert!(
-            production_codegen.contains("include!(\"../Prelude/CoreLib/Top/TestingShared.rs\")")
-        );
-        assert!(production_codegen.contains("include!(\"../Prelude/TestReport.rs\")"));
-        assert_eq!(
-            PRELUDE_PARTS,
-            [
-                outcome.as_str(),
-                development_receipt.as_str(),
-                fault_injection.as_str(),
-                keep.as_str(),
-                job.as_str(),
-                option.as_str(),
-                fixed_list.as_str(),
-                columns.as_str(),
-                column_list.as_str(),
-                unicode.as_str(),
-                ascii.as_str(),
-                process_args.as_str(),
-                string_concat.as_str(),
-                view_copy.as_str(),
-                loadable.as_str(),
-                values.as_str(),
-                text_values.as_str(),
-                range_bounds.as_str(),
-                inline_range.as_str(),
-                disjoint.as_str(),
-                expiring_secret.as_str(),
-                set_algebra.as_str(),
-                duration.as_str(),
-                measurement.as_str(),
-                time_monotonic.as_str(),
-                time.as_str(),
-                sketch.as_str(),
-                contracts.as_str(),
-                map_key.as_str(),
-                fixed_arithmetic.as_str(),
-                core.as_str(),
-                view_access.as_str(),
-                power.as_str(),
-                division.as_str(),
-                typed_text.as_str(),
-                progress.as_str(),
-                byte_buffer.as_str(),
-                iter.as_str(),
-                collection_failure.as_str(),
-                collections.as_str(),
-                memo.as_str(),
-                shared_protocol.as_str(),
-                term.as_str(),
-                term_key.as_str(),
-                runtime_control.as_str(),
-                numeric_widen.as_str(),
-                observe.as_str(),
-                exact_units.as_str(),
-                structural_debug.as_str(),
-                stream_cursor.as_str(),
-                match_scan.as_str(),
-            ],
-            "PRELUDE_PARTS must list every owned module exactly once in generated-byte order"
-        );
 
-        let mut emitted = String::new();
-        push_prelude(&mut emitted);
-        let expected = {
-            let mut expected = String::new();
-            push_embedded_outcome(&mut expected);
-            expected.push_str(
-                &[
-                    development_receipt.as_str(),
-                    fault_injection.as_str(),
-                    keep.as_str(),
-                    job.as_str(),
-                    option.as_str(),
-                    fixed_list.as_str(),
-                    columns.as_str(),
-                    column_list.as_str(),
-                    unicode.as_str(),
-                    ascii.as_str(),
-                    process_args.as_str(),
-                    string_concat.as_str(),
-                    view_copy.as_str(),
-                    loadable.as_str(),
-                    values.as_str(),
-                    text_values.as_str(),
-                    range_bounds.as_str(),
-                    inline_range.as_str(),
-                    disjoint.as_str(),
-                    expiring_secret.as_str(),
-                    set_algebra.as_str(),
-                    duration.as_str(),
-                    measurement.as_str(),
-                    time_monotonic.as_str(),
-                    time.as_str(),
-                    sketch.as_str(),
-                    contracts.as_str(),
-                    fixed_arithmetic.as_str(),
-                    core.as_str(),
-                    view_access.as_str(),
-                    power.as_str(),
-                    division.as_str(),
-                    typed_text.as_str(),
-                    progress.as_str(),
-                    byte_buffer.as_str(),
-                    iter.as_str(),
-                    collection_failure.as_str(),
-                    collections.as_str(),
-                    memo.as_str(),
-                    shared_protocol.as_str(),
-                    term.as_str(),
-                    term_key.as_str(),
-                    runtime_control.as_str(),
-                    numeric_widen.as_str(),
-                    observe.as_str(),
-                    exact_units.as_str(),
-                    structural_debug.as_str(),
-                    stream_cursor.as_str(),
-                    match_scan.as_str(),
-                ]
-                .concat(),
-            );
-            expected
-        };
-        assert_eq!(
-            emitted, expected,
-            "owned prelude modules must concatenate without byte loss or boundary changes"
-        );
-        assert!(emitted.contains("fn jet_runtime_diagnostic_row"));
-        assert!(!emitted.contains("crate::Registry"));
-    }
 
-    /// #2004: every Prelude fragment is spliced into ONE flat generated crate,
-    /// so a crate-root `mod tests` in two fragments is E0428 in every program
-    /// that carries both — and it surfaces from the middle of a 10,000-line
-    /// generated file, nowhere near the fragment that caused it. Fragment-unique
-    /// names (`auth_tests`, `typed_boundary_tests`, `shared_protocol_tests`,
-    /// `interrupt_boundary_tests`, …) are the convention; this is its
-    /// enforcement, because two violations arrived AFTER the convention existed.
-    #[test]
-    fn prelude_fragments_never_declare_a_crate_root_mod_tests() {
-        fn declares_bare_test_module(source: &str) -> bool {
-            source.lines().any(|line| {
-                // Fragments are emitted flat, so only column-zero declarations
-                // land at the generated crate root. A nested `mod tests` inside
-                // another fragment module is scoped and cannot collide.
-                if line.starts_with(char::is_whitespace) {
-                    return false;
-                }
-                let rest = line
-                    .strip_prefix("pub(crate) ")
-                    .or_else(|| line.strip_prefix("pub "))
-                    .unwrap_or(line);
-                rest.strip_prefix("mod tests").is_some_and(|tail| {
-                    let tail = tail.trim_start();
-                    tail.starts_with('{') || tail.starts_with(';')
-                })
-            })
-        }
 
-        fn collect_fragments(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
-            let mut entries = std::fs::read_dir(dir)
-                .unwrap_or_else(|error| panic!("read {}: {error}", dir.display()))
-                .map(|entry| entry.expect("prelude directory entry").path())
-                .collect::<Vec<_>>();
-            entries.sort();
-            for path in entries {
-                if path.is_dir() {
-                    collect_fragments(&path, out);
-                } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
-                    out.push(path);
-                }
-            }
-        }
 
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let mut fragments = Vec::new();
-        collect_fragments(&root.join("src/Prelude"), &mut fragments);
-        // Foundation-owned parts are spliced into the same flat crate.
-        for relative in [
-            "../jet-foundation/src/Outcome.rs",
-            "../jet-foundation/src/Report.rs",
-            "../jet-foundation/src/ExactUnitConversion.rs",
-            "../jet-foundation/src/StructuralDebug.rs",
-            "../jet-foundation/src/StreamCursor.rs",
-            "../jet-foundation/src/Prelude/MatchScan.rs",
-        ] {
-            fragments.push(root.join(relative));
-        }
-
-        let offenders = fragments
-            .iter()
-            .filter(|path| {
-                let source = std::fs::read_to_string(path)
-                    .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
-                declares_bare_test_module(&source)
-            })
-            .map(|path| path.display().to_string())
-            .collect::<Vec<_>>();
-        assert!(
-            offenders.is_empty(),
-            "these Prelude fragments declare a crate-root `mod tests`, which collides \
-             (E0428) with every other fragment that does the same once both are emitted \
-             into one generated crate. Rename each to a fragment-unique module \
-             (`<fragment>_tests`), as SharedProtocol.rs, TypedText.rs, Auth.rs and \
-             Scheduler.rs already do:\n{}",
-            offenders.join("\n")
-        );
-
-        // The emitted bytes themselves, not just the files on disk: every part
-        // in this list is in EVERY generated program.
-        for (index, part) in PRELUDE_PARTS.iter().enumerate() {
-            assert!(
-                !declares_bare_test_module(part),
-                "PRELUDE_PARTS[{index}] declares a crate-root `mod tests`; every generated \
-                 program carries it"
-            );
-        }
-    }
-
-    #[test]
-    fn cached_runtime_block_covers_every_fixed_runtime_source_part() {
-        let mut emitted = String::new();
-        push_cached_runtime(&mut emitted, None);
-        let body = emitted
-            .strip_prefix(CACHED_RUNTIME_BEGIN)
-            .and_then(|source| source.strip_suffix(CACHED_RUNTIME_END))
-            .expect("cached runtime markers must enclose one exact block");
-        assert!(body.contains("fn jet_ffi_install_reporter() {}"));
-        for (index, part) in PRELUDE_PARTS.iter().enumerate() {
-            if index == 0 {
-                continue;
-            }
-            assert!(
-                body.contains(part),
-                "every PRELUDE_PARTS byte string must affect the runtime cache key"
-            );
-        }
-        assert!(body.contains("fn jet_runtime_diagnostic_row"));
-        for module in [
-            "mod jet_encoding_errors",
-            "mod jet_json_number",
-            "mod jet_encoding_json",
-            "mod EncodingJson",
-        ] {
-            assert!(
-                body.contains(module),
-                "fixed runtime must own JSON report decoding module `{module}`"
-            );
-        }
-        for part in [
-            ENV_INIT_PRELUDE,
-            UNINIT_PRELUDE,
-            MEM_SENTRY_PRELUDE,
-            MEM_PRELUDE,
-            GC_RUNTIME_PRELUDE,
-            LAYOUT_PRELUDE,
-        ] {
-            assert!(
-                body.contains(part),
-                "every fixed runtime source part must affect the runtime cache key"
-            );
-        }
-        assert_eq!(emitted.matches(CACHED_RUNTIME_BEGIN).count(), 1);
-        assert_eq!(emitted.matches(CACHED_RUNTIME_END).count(), 1);
-
-        let program = format!("{emitted}fn main() {{}}\n");
-        let pruned = strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(
-            strip_unused_mem_prelude(program),
-        )));
-        assert!(
-            pruned.starts_with(emitted.as_str()),
-            "program-specific pruning must not create runtime-cache variants"
-        );
-    }
-
-    /// The cached runtime block and the module-local emitter are two halves of
-    /// one law: whatever `emit_synthetic_*` withholds from the root program must
-    /// already be inside the block, or the runtime crate cannot compile and
-    /// every native build silently falls back to the inline monolith. That is
-    /// exactly how `__jet_Ordering` went missing (E0425 in `jet_list_sort_by`),
-    /// leaving #1785's rlib cache storing nothing at all.
-    #[test]
-    fn cached_runtime_owns_every_runtime_owned_trait() {
-        let mut block = String::new();
-        push_cached_runtime(&mut block, None);
-        let mut module_local = String::new();
-        emit_synthetic_display_trait(&mut module_local, true);
-        emit_synthetic_operator_traits(&mut module_local, true);
-        let mut root = String::new();
-        emit_synthetic_display_trait(&mut root, false);
-        emit_synthetic_operator_traits(&mut root, false);
-        for line in module_local.lines().filter(|line| !root.contains(*line)) {
-            assert!(
-                block.contains(line),
-                "the root program does not emit `{line}`, so the cached runtime \
-                 block must — otherwise the runtime rlib cannot compile"
-            );
-        }
-    }
-
-    /// `__jet_Ordering` is a value type that crosses the generated-module
-    /// boundary: an imported `compare` returns one, `jet_list_sort_by` /
-    /// `jet_ordering_then` take one, and the Prelude-owned `__jet_Comparable`
-    /// names it in its signature. A module-local copy is therefore a *different*
-    /// Rust type from the Prelude's, and every crossing is an internal compiler
-    /// error (`modules/generic_modules_imported` failed with E0053: `expected
-    /// jet_runtime::__jet_Ordering, found __jet_defs::__jet_Ordering`). Declare
-    /// it once per generated crate and import it into each module instead.
-    #[test]
-    fn only_the_runtime_declares_the_ordering_enum() {
-        for include_runtime_owned in [false, true] {
-            let mut emitted = String::new();
-            emit_synthetic_operator_traits(&mut emitted, include_runtime_owned);
-            assert!(
-                !emitted.contains("enum __jet_Ordering"),
-                "a module-local `__jet_Ordering` is a second type; the cached \
-                 runtime block owns the only declaration"
-            );
-        }
-        let mut block = String::new();
-        push_cached_runtime(&mut block, None);
-        assert_eq!(
-            block.matches("enum __jet_Ordering").count(),
-            1,
-            "the cached runtime block must declare `__jet_Ordering` exactly once"
-        );
-        assert!(
-            MOD_USE.contains("use super::__jet_Ordering;"),
-            "every generated module must import the one `__jet_Ordering`"
-        );
-    }
-
-    /// I2: rustc rejecting generated code is an internal compiler error, never a
-    /// user diagnostic. `Prelude/Scheduler.rs` and
-    /// `Prelude/CoreLib/Top/ServiceAuthority.rs` each imported
-    /// `std::time::Duration`, and because both are concatenated into the one flat
-    /// module of a generated program, every `core.services` program failed to
-    /// build with `E0252: the name Duration is defined multiple times`.
-    ///
-    /// The assembler owns that module's imports now. Keep it owning them: a
-    /// fragment that ships its own, or a name the merged set drops or declares
-    /// twice, is the same internal compiler error again.
-    #[test]
-    fn the_assembler_owns_every_flat_prelude_import() {
-        let mut wanted: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
-        for source in FLAT_PRELUDE_SOURCES {
-            for statement in split_leading_top_level_uses(source).0 {
-                // `flat_prelude_import_pairs` merges one path level, so a nested
-                // group or an alias would be silently mis-parsed.
-                assert!(
-                    statement.matches('{').count() <= 1,
-                    "flat prelude import `{statement}` nests brace groups; \
-                     flat_prelude_import_pairs merges exactly one path level"
-                );
-                assert!(
-                    !statement.contains(" as "),
-                    "flat prelude import `{statement}` is aliased; \
-                     flat_prelude_import_pairs merges plain paths only"
-                );
-            }
-            for (path, name) in flat_prelude_import_pairs(source) {
-                if let Some(previous) = wanted.insert(name, path) {
-                    assert_eq!(
-                        previous, path,
-                        "flat fragments import `{name}` from two different paths, \
-                         so one flat module cannot hold both"
-                    );
-                }
-            }
-            // The body the assembler emits carries no import of its own.
-            assert!(
-                !split_leading_top_level_uses(source)
-                    .1
-                    .lines()
-                    .any(|line| line.starts_with("use ")),
-                "a flat prelude fragment must be emitted with no top-level import"
-            );
-        }
-
-        // The merged set declares every wanted name exactly once — and nothing
-        // else, so an import removed from a fragment stops being emitted.
-        let mut declared: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
-        for (path, name) in flat_prelude_import_pairs(&FLAT_PRELUDE_IMPORTS) {
-            assert!(
-                declared.insert(name),
-                "the merged flat import set declares `{path}::{name}` twice (E0252)"
-            );
-        }
-        assert_eq!(
-            declared,
-            wanted
-                .keys()
-                .copied()
-                .collect::<std::collections::BTreeSet<&str>>(),
-            "the merged flat import set must be exactly the union the fragments import"
-        );
-
-        // The measured failure itself: one `Duration`, in the emitted scheduler.
-        let mut emitted = String::new();
-        push_corelib_prelude(
-            &mut emitted,
-            &["core.services".to_string()].into_iter().collect(),
-            false,
-        );
-        emitted.push_str(scheduler_prelude_for_emit(true));
-        assert!(
-            emitted.contains("SERVICE_AUTH_LOCK_STALE_MS"),
-            "this fixture must actually emit the services fragment"
-        );
-        assert_eq!(
-            emitted
-                .lines()
-                .filter(|line| line.starts_with("use ") && line.contains("Duration"))
-                .count(),
-            1,
-            "a services program must import Duration once"
-        );
-    }
 
     fn checked_generic_bundle(src: &str, root: &str) -> crate::AST::ProgramBundle {
+        checked_generic_bundle_with_facts(src, root).0
+    }
+
+    fn checked_generic_bundle_with_facts(
+        src: &str,
+        root: &str,
+    ) -> (crate::AST::ProgramBundle, crate::Sema::SemIndexEffectFacts) {
         let (tokens, lex) = crate::Lexer::lex(src);
         assert!(lex.is_empty(), "{lex:?}");
         let mut program = crate::Parser::parse(&tokens).expect("parse");
@@ -4340,6 +4733,7 @@ mod tests {
                 user_policy_declarations: program.user_policy_declarations.clone(),
                 rule_facts: std::mem::take(&mut program.rule_facts),
             }],
+            devtools_registry: crate::AST::DevtoolsRegistry::default(),
             parse_teaching: Vec::new(),
             used_core: HashSet::new(),
             ffi_callback_fns: HashSet::new(),
@@ -4358,858 +4752,20 @@ mod tests {
             build_facts: Default::default(),
             edition: "2027".to_string(),
         };
-        let diagnostics = crate::Sema::check_bundle(&mut bundle, CompileMode::Run);
+        let (diagnostics, facts) =
+            crate::Sema::check_bundle_with_effect_facts(&mut bundle, CompileMode::Run);
         assert!(
             !diagnostics
                 .iter()
                 .any(|d| d.severity == crate::Diagnostics::Severity::Error),
             "{diagnostics:#?}"
         );
-        bundle
-    }
-
-    #[test]
-    fn generic_instance_provenance_reaches_tir_and_generated_rust() {
-        let source = "module boxed<T>(n: Int) { fn value() Int -> { return n } }\nmodule a :: boxed<Int>(3)\nmodule b :: boxed<Int>(3)\nfn run() {}";
-        let bundle = checked_generic_bundle(source, "pkg-a");
-        let fingerprint = bundle.modules[0]
-            .items
-            .iter()
-            .find_map(|item| match item {
-                crate::AST::Item::CodeModule(module) => module
-                    .instance_identity
-                    .as_ref()
-                    .map(|identity| identity.fingerprint.clone()),
-                _ => None,
-            })
-            .expect("instance identity");
-        let tir = crate::Codegen::TIR::lower_jit_program(&bundle).expect("JIT TIR");
-        let expected = crate::Codegen::TIR::instance_provenance(&bundle);
-        assert_eq!(tir.instance_provenance, expected);
-        assert_eq!(expected.len(), 1);
-        assert_eq!(expected[0].fingerprint, fingerprint);
-        assert!(!expected[0].full_key_hex.is_empty());
-        let rust = emit_bundle(&bundle, CompileMode::Run, None);
-        assert_eq!(rust.matches("// jet:generic-instance").count(), 1);
-        assert!(rust.contains(&format!("fingerprint={fingerprint}")));
-        assert!(rust.contains(&format!(
-            "module={} fingerprint={} full-key={}",
-            expected[0].canonical_module, expected[0].fingerprint, expected[0].full_key_hex
-        )));
-
-        let semantic_edit = checked_generic_bundle(
-            "module boxed<T>(n: Int) { fn value() Int -> { return n + 1 } }\nmodule a :: boxed<Int>(3)\nfn run() {}", "pkg-a");
-        let edited_rust = emit_bundle(&semantic_edit, CompileMode::Run, None);
-        assert!(
-            edited_rust.contains(&format!("fingerprint={fingerprint}")),
-            "body shape is a cache input, not nominal instance identity"
-        );
-        assert_ne!(
-            rust, edited_rust,
-            "semantic body edits still change generated code/cache material"
-        );
-
-        let distinct = checked_generic_bundle(
-            "module boxed<T>(n: Int) { fn value() Int -> { return n } }\nmodule a :: boxed<Int>(3)\nmodule b :: boxed<Int>(4)\nfn run() {}", "pkg-a");
-        let distinct_tir =
-            crate::Codegen::TIR::lower_jit_program(&distinct).expect("distinct JIT TIR");
-        assert_eq!(
-            distinct_tir.instance_provenance,
-            crate::Codegen::TIR::instance_provenance(&distinct)
-        );
-        assert_eq!(distinct_tir.instance_provenance.len(), 2);
-        assert_ne!(
-            distinct_tir.instance_provenance[0].full_key_hex,
-            distinct_tir.instance_provenance[1].full_key_hex
-        );
-    }
-
-    #[test]
-    fn raylib_window_example_reaches_sema_and_codegen() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let shown = "examples/features/game/raylib_window.jet";
-        let path = root.join(shown);
-        let src = std::fs::read_to_string(&path).expect("raylib example exists");
-
-        let (toks, lex_diags) = crate::Lexer::lex(&src);
-        assert!(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}");
-        let mut prog = crate::Parser::parse(&toks).expect("raylib example parses");
-        let mut bundle = crate::AST::ProgramBundle {
-            entry: 0,
-            project_root: root,
-            modules: vec![crate::AST::LoadedModule {
-                path,
-                display: shown.to_string(),
-                source: src,
-                alias: "main".to_string(),
-                imports: std::mem::take(&mut prog.imports),
-                items: std::mem::take(&mut prog.items),
-                script_body: std::mem::take(&mut prog.script_body),
-                block_spans: std::mem::take(&mut prog.block_spans),
-                web_target_ceiling: prog.web_target_ceiling,
-                pub_file: prog.pub_file,
-                no_prelude: prog.no_prelude,
-                default_target: prog.default_target,
-                html_path: prog.html_path.clone(),
-                policy_declarations: prog.policy_declarations.clone(),
-                user_policy_declarations: prog.user_policy_declarations.clone(),
-                rule_facts: std::mem::take(&mut prog.rule_facts),
-            }],
-            parse_teaching: Vec::new(),
-            used_core: HashSet::new(),
-            ffi_callback_fns: HashSet::new(),
-            cffi: crate::AST::CFfi::default(),
-            comptime_inputs: Vec::new(),
-            name_ledger: crate::AST::NameLedger::default(),
-            layer_ceiling: None,
-            inferred_layer: crate::Syntax::RuntimeLayer::Core,
-            web_partitions: HashMap::new(),
-            web_partition_enforced: false,
-            web_partition_report: None,
-            dep_roots: HashMap::new(),
-            package_guarantees: Default::default(),
-            program_allocator: Default::default(),
-            active_os: crate::Syntax::OSTarget::host(),
-            build_facts: Default::default(),
-            edition: "2027".to_string(),
-        };
-
-        let diags = crate::Sema::check_bundle(&mut bundle, CompileMode::Run);
-        let errors: Vec<_> = diags
-            .iter()
-            .filter(|d| d.severity == crate::Diagnostics::Severity::Error)
-            .collect();
-        assert!(errors.is_empty(), "sema diagnostics: {errors:?}");
-
-        let rust = emit_bundle(&bundle, CompileMode::Run, None);
-        assert!(rust.contains("fn main()"), "generated Rust has no main");
-        assert!(rust.contains("jet_raylib_window_open"));
-        assert!(rust.contains(&format!("let {}: RaylibWindow", mangle("window"))));
-        assert!(
-            !rust.contains("jet_std::Raylib"),
-            "raylib bridge handles must lower to top-level prelude types"
-        );
-        assert!(rust.contains("jet_raylib_begin_drawing"));
-        assert!(rust.contains("jet_raylib_draw_rectangle"));
-        assert!(rust.contains("jet_raylib_draw_text"));
-        assert!(rust.contains("jet_raylib_key_down"));
-        assert!(rust.contains("jet_raylib_set_target_fps"));
-        assert!(rust.contains("jet_raylib_close_window"));
-        assert!(rust.contains("dlopen"));
-        assert!(rust.contains("JET_RAYLIB_DISPLAY"));
-        assert!(
-            !rust.contains("unsafe fn __jet_"),
-            "raylib user functions must stay safe; unsafe is confined to the vetted bridge"
-        );
+        (bundle, facts)
     }
 }
 
-struct TestCase<'a> {
-    test: &'a TestDef,
-    /// Rust module path that owns the test. `None` means the generated root.
-    module: Option<String>,
-    index: usize,
-    /// D-CLAIM-BENCH1=A: this test contains a top-level `.measure` claim.
-    measure: bool,
-}
 
-fn test_fn_path(test: &TestCase<'_>) -> String {
-    let name = format!("jet_test_{}", test.index);
-    test.module
-        .as_deref()
-        .map_or(name.clone(), |module| format!("{module}::{name}"))
-}
 
-/// Emit a test harness binary: all definitions plus one `main` that runs
-/// every `#Test "…" { }` block (M6 phase 2).
-pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
-    let tests: Vec<TestCase<'_>> = prog
-        .items
-        .iter()
-        .filter_map(|i| match i {
-            Item::Test(t) => Some(t),
-            _ => None,
-        })
-        .enumerate()
-        .map(|(index, test)| TestCase {
-            test,
-            module: None,
-            index,
-            measure: test.body.iter().any(|statement| {
-                matches!(
-                    statement,
-                    crate::AST::Stmt::ScopeMember { name, .. }
-                        if name == Syntax::SCOPE_TEST_MEASURE
-                )
-            }),
-        })
-        .collect();
-    assert!(!tests.is_empty(), "emit_tests called with no test blocks");
-
-    let mut out = String::new();
-    out.push_str(&format!(
-        "// Generated by {} test harness — do not edit.\n",
-        Syntax::BINARY_NAME
-    ));
-    out.push_str("#![allow(warnings)]\n\n");
-    push_ffi_reporter(&mut out, None);
-    push_prelude(&mut out);
-    // One `__jet_Ordering` per generated crate — see `emit`.
-    out.push_str(ORDERING_ENUM);
-    out.push_str(ENV_INIT_PRELUDE);
-    push_mem_prelude(&mut out);
-    push_gc_prelude(&mut out);
-    out.push_str(LAYOUT_PRELUDE);
-    out.push_str(TEST_PRELUDE);
-    out.push_str(TESTING_SHARED_PRELUDE);
-    out.push_str(REPORT_PRELUDE);
-    out.push_str(TEST_REPORT_PRELUDE);
-    if any_property_test(&tests) {
-        out.push_str(PROP_PRELUDE);
-    }
-    out.push('\n');
-
-    let mut cx = build_cx(prog, src, file);
-    cx.test_mode = true;
-    let tuple_shapes = collect_tuple_shapes(&prog.items);
-    emit_tuple_structs(&cx, &tuple_shapes, &mut out);
-    emit_anonymous_unions(&cx, &prog.items, &mut out);
-
-    emit_synthetic_display_trait(&mut out, true);
-    emit_synthetic_operator_traits(&mut out, true);
-    emit_synthetic_close_trait(&mut out);
-    emit_synthetic_foreign_close_impls(&cx, &prog.items, &mut out);
-    emit_synthetic_close_builtin_impls(&cx, &prog.items, &mut out);
-    let (hi, hj, hk, hm) = program_iter_index_usage(&prog.items);
-    emit_synthetic_iter_index_traits(&mut out, hi, hj, hk, hm);
-
-    // D-TXN-ROLLBACK layer 2: emit the synthetic Rollback trait iff needed.
-    if program_has_rollback_impl(&prog.items) {
-        emit_synthetic_rollback_trait(&mut out);
-    }
-
-    for item in &prog.items {
-        match item {
-            Item::Trait(t) => Traits::emit_trait_def(t, &mut out, |ty, assoc| {
-                cx.rust_type_with_view_lifetime_assoc(ty, assoc)
-            }),
-            Item::Struct(s) => emit_struct(&cx, s, &mut out),
-            Item::Enum(e) if e.name.starts_with("__JetUnion_") => {}
-            Item::Enum(e) => emit_enum(&cx, e, &mut out),
-            Item::Distinct(d) => emit_distinct(&cx, d, &mut out),
-            // D-QUAL3: emit one distinct newtype per unit-family member.
-            Item::UnitFamily(uf) => {
-                for d in uf.distinct_defs() {
-                    emit_distinct(&cx, &d, &mut out);
-                }
-            }
-            Item::Const(c) => emit_const(c, &mut out),
-            Item::CModule(cm) => emit_c_module(&cx, cm, &mut out),
-            Item::EffectDecl(_)
-            | Item::MarkerDecl(_)
-            | Item::FactDecl(_)
-            | Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_)
-            | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_)
-            | Item::Tag(_) // D-QUAL2: tags erase
-            | Item::TypeAlias(_) // D-TYPEALIAS1: erases
-            | Item::Migration(_) // D-MIGRATE1: migration is sema-only (I3)
-            | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
-            | Item::UserDerive(_) // D-METADERIVE1=A: erase (expanded in sema)
-            | Item::TemplateLoop(_) // D-STRUCT-ONCE1=A: expanded before codegen
-            | Item::GenericModule(_) // D-CONF-GENSPELL1=A: template — erases
-            | Item::ModuleAlias(_) => {} // D-CONF-GENSPELL1=A: alias — erases after expansion
-        }
-    }
-
-    for item in &prog.items {
-        match item {
-            Item::Struct(s) => {
-                emit_type_impl(&cx, &s.name, &s.type_params, &s.methods, &mut out);
-                for block in &s.trait_impls {
-                    emit_trait_impl(&cx, &s.name, &s.type_params, block, Some(s), &mut out);
-                }
-            }
-            Item::Enum(e) => {
-                emit_type_impl(&cx, &e.name, &e.type_params, &e.methods, &mut out);
-                for block in &e.trait_impls {
-                    emit_trait_impl(&cx, &e.name, &e.type_params, block, None, &mut out);
-                }
-            }
-            Item::Impl(i) => {
-                // D-OSTARGET1=A: skip an `impl` gated to a non-active native OS.
-                if i.os_target.is_some_and(|os| os != cx.active_os) {
-                    continue;
-                }
-                if i.trait_name.is_some() {
-                    let struct_def = prog.items.iter().find_map(|item| match item {
-                        Item::Struct(s) if s.name == i.type_name => Some(s),
-                        _ => None,
-                    });
-                    emit_external_trait_impl(&cx, i, struct_def, &mut out);
-                } else {
-                    emit_type_impl(
-                        &cx,
-                        &i.type_name,
-                        type_params_for_name(&prog.items, &i.type_name),
-                        &i.methods,
-                        &mut out,
-                    );
-                }
-            }
-            Item::ErrorConv(ec) => {
-                emit_error_conv(&cx, ec, &mut out);
-            }
-            _ => {}
-        }
-    }
-
-    for item in &prog.items {
-        if let Item::Func(f) = item {
-            emit_func(&cx, f, &mut out);
-        }
-    }
-
-    emit_test_fns(&cx, &tests, None, &mut out);
-    emit_test_main(&tests, &mut out);
-    strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(
-        strip_unused_gc_prelude(strip_unused_txn_prelude(strip_unused_mem_prelude(out))),
-    )))
-}
-
-/// D-TEST1/S43: the shared reporting `main` for a `jet test` harness. Each test
-/// (unit or property) is invoked through its `jet_test_N()` entry; the loop is
-/// identical whichever kind it is.
-fn emit_test_main(tests: &[TestCase<'_>], out: &mut String) {
-    emit_test_main_cov(tests, &[], &[], out, false)
-}
-
-/// D-TESTKIT1=A (gaps #3/#4): filter, shuffle, and parallel-with-isolation. The
-/// harness builds a `slots` list of `(name, skip, run fn ptr)` in source order,
-/// then:
-///   - `JET_TEST_FILTER=<substr>` (CLI `--filter`) keeps only matching names;
-///   - `JET_TEST_SHUFFLE_SEED=<n>` (CLI `--shuffle[=seed]`) reorders `slots`
-///     with a seeded Fisher-Yates shuffle before running (order-dependence
-///     detection — a real bug still fails the same way, just in a different
-///     sequence);
-///   - runs are parallel by default (one thread per test; `jet_testing_temp_dir`
-///     folds in the thread id for isolation, and test-body `print()` is routed
-///     to a per-thread buffer flushed right before that test's result line —
-///     see `jet_test_print`/`TExprKind::Print`), or serial with `JET_TEST_SERIAL`
-///     set (CLI `--serial`).
-/// Reporting always walks results in (possibly shuffled) `slots` order, so
-/// output is deterministic regardless of which thread finishes first.
-fn emit_test_main_cov(
-    tests: &[TestCase<'_>],
-    checks: &[&ResolvedOutput],
-    coverage_branches: &[crate::Codegen::Context::CoverageBranch],
-    out: &mut String,
-    coverage: bool,
-) {
-    emit_test_main_cov_mode(tests, checks, coverage_branches, out, coverage, None, false);
-}
-
-fn emit_test_main_cov_mode(
-    tests: &[TestCase<'_>],
-    checks: &[&ResolvedOutput],
-    coverage_branches: &[crate::Codegen::Context::CoverageBranch],
-    out: &mut String,
-    coverage: bool,
-    override_entry: Option<&str>,
-    package_hardened: bool,
-) {
-    out.push_str("#[derive(Clone, Copy)]\n");
-    out.push_str("struct JetTestSlot { name: &'static str, skip: bool, property: bool, expected_fail: bool, measure: bool, run: fn() -> Result<(), String> }\n");
-    if override_entry.is_some() {
-        out.push_str("fn jet_test_command_run() -> (i64, i64) {\n");
-        out.push_str("    let output = jet_test_take_output();\n");
-        out.push_str("    if !output.is_empty() { print!(\"{}\", output); }\n");
-    } else {
-        out.push_str("fn main() {\n");
-        out.push_str("    jet_test_install_panic_hook();\n");
-        out.push_str("    jet_std_env_init();\n");
-        if Items::sentry_runtime_needed(out) {
-            out.push_str(&format!(
-                "    jet_mem::jet_sentry_set_hardened({package_hardened});\n"
-            ));
-        }
-        out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
-        out.push_str("    jet_test_trace_tier();\n");
-        out.push_str("    if let Ok(path) = std::env::var(\"JET_TEST_PROOF_REPORT\") { if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) { use std::io::Write as _; if file.metadata().map(|m| m.len() == 0).unwrap_or(false) { let _ = file.write_all(b\"JETTEST2\"); } } }\n");
-    }
-    if coverage {
-        for branch in coverage_branches {
-            out.push_str(&format!(
-                "    jet_cov_register_branch({}, {});\n",
-                escape_rust_str(&branch.id),
-                escape_rust_str(&branch.function),
-            ));
-        }
-    }
-    out.push_str("    let mut slots: Vec<JetTestSlot> = vec![\n");
-    for test in tests {
-        let def = test.test;
-        let name = escape_rust_str(
-            def.name
-                .as_deref()
-                .expect("sema resolves every test marker name before codegen"),
-        );
-        let skip = whole_test_skip(def);
-        out.push_str(&format!(
-            "        JetTestSlot {{ name: {}, skip: {}, property: {}, expected_fail: {}, measure: {}, run: {} }},\n",
-            name,
-            skip,
-            !def.params.is_empty(),
-            def.expected_fail,
-            test.measure,
-            test_fn_path(test),
-        ));
-    }
-    for (i, check) in checks.iter().enumerate() {
-        let name = escape_rust_str(&check.output_name);
-        out.push_str(&format!(
-            "        JetTestSlot {{ name: {}, skip: false, property: false, expected_fail: false, measure: false, run: jet_output_check_{} }},\n",
-            name, i
-        ));
-    }
-    out.push_str("    ];\n");
-    // Filter (D-TESTKIT1 gap #4): `--filter=<substr>` keeps names containing it.
-    out.push_str("    if let Ok(filter) = std::env::var(\"JET_TEST_FILTER\") {\n");
-    out.push_str("        slots.retain(|s| s.name.contains(filter.as_str()));\n");
-    out.push_str("    }\n");
-    out.push_str("    let json = std::env::var_os(\"JET_TEST_JSON\").is_some();\n");
-    // D-CLAIM-BENCH1=A: measurement is an explicit test mode. A plain test
-    // keeps every claim, while `--measure` selects only `.measure` claims.
-    out.push_str("    let measure_mode = std::env::var_os(\"JET_TEST_MEASURE\").is_some();\n");
-    out.push_str(
-        "    let measure_evidence = std::env::var_os(\"JET_TEST_MEASURE_EVIDENCE\").is_some();\n",
-    );
-    out.push_str("    if measure_mode { slots.retain(|s| s.measure && !s.skip); }\n");
-    out.push_str("    if measure_mode {\n");
-    out.push_str("        fn jet_measure_hex(bytes: &[u8]) -> String { const H: &[u8; 16] = b\"0123456789abcdef\"; let mut out = String::with_capacity(bytes.len() * 2); for byte in bytes { out.push(H[(byte >> 4) as usize] as char); out.push(H[(byte & 15) as usize] as char); } out }\n");
-    out.push_str("        const JET_MEASURE_WARMUPS: usize = 5;\n");
-    out.push_str("        const JET_MEASURE_SAMPLES: usize = 20;\n");
-    out.push_str("        const JET_MEASURE_TARGET_NS: u128 = 1_000_000;\n");
-    out.push_str("        let tier = \"aot\";\n");
-    out.push_str(
-        "        let profile = if cfg!(jet_release) { \"release\" } else { \"default\" };\n",
-    );
-    out.push_str("        let serial = true;\n");
-    out.push_str("        let mut measured = 0usize;\n");
-    out.push_str("        for slot in &slots {\n");
-    out.push_str("            let mut samples = Vec::with_capacity(JET_MEASURE_SAMPLES);\n");
-    out.push_str(
-        "            let mut exact_samples: Vec<u128> = Vec::with_capacity(JET_MEASURE_SAMPLES);\n",
-    );
-    out.push_str("            let mut allocation_samples: Vec<(usize, usize)> = Vec::with_capacity(JET_MEASURE_SAMPLES);\n");
-    out.push_str("            let run_once = || -> Result<(), String> { let result = jet_test_run(|| (slot.run)()); let _ = jet_test_take_output(); result };\n");
-    out.push_str("            for _ in 0..JET_MEASURE_WARMUPS {\n");
-    out.push_str("                if let Err(message) = run_once() { eprintln!(\"{}: FAIL during measurement [tier={}, profile={}, serial={}]: {}\", slot.name, tier, profile, serial, message);\n");
-    if override_entry.is_some() {
-        out.push_str("                        return (measured as i64, 1); }\n");
-    } else {
-        out.push_str("                        std::process::exit(1); }\n");
-    }
-    out.push_str("            }\n");
-    out.push_str("            let calibration_started = std::time::Instant::now();\n");
-    out.push_str("            if let Err(message) = run_once() { eprintln!(\"{}: FAIL during measurement [tier={}, profile={}, serial={}]: {}\", slot.name, tier, profile, serial, message);\n");
-    if override_entry.is_some() {
-        out.push_str("                return (measured as i64, 1); }\n");
-    } else {
-        out.push_str("                std::process::exit(1); }\n");
-    }
-    out.push_str("            let calibration_ns = calibration_started.elapsed().as_nanos();\n");
-    out.push_str("            let iterations = if calibration_ns == 0 { 1 } else { (JET_MEASURE_TARGET_NS / calibration_ns).max(1) as u64 };\n");
-    out.push_str("            for _ in 0..JET_MEASURE_SAMPLES {\n");
-    out.push_str("                jet_allocation_probe_reset();\n");
-    out.push_str("                let started = std::time::Instant::now();\n");
-    out.push_str("                for _ in 0..iterations {\n");
-    out.push_str("                    if let Err(message) = run_once() { eprintln!(\"{}: FAIL during measurement [tier={}, profile={}, serial={}]: {}\", slot.name, tier, profile, serial, message);\n");
-    if override_entry.is_some() {
-        out.push_str("                        return (measured as i64, 1); }\n");
-    } else {
-        out.push_str("                        std::process::exit(1); }\n");
-    }
-    out.push_str("                }\n");
-    out.push_str("                let elapsed = started.elapsed().as_nanos();\n");
-    out.push_str("                exact_samples.push(elapsed);\n");
-    out.push_str("                samples.push(elapsed as f64);\n");
-    out.push_str("                allocation_samples.push(jet_allocation_probe_take());\n");
-    out.push_str("            }\n");
-    out.push_str("            let mean = samples.iter().sum::<f64>() / samples.len() as f64 / iterations as f64;\n");
-    out.push_str("            let variance = samples.iter().map(|sample| { let sample = *sample / iterations as f64; (sample - mean) * (sample - mean) }).sum::<f64>() / samples.len() as f64;\n");
-    out.push_str("            let deviation = variance.sqrt();\n");
-    out.push_str("            if measure_evidence { print!(\"JETTESTMEASURE1\\t{}\\t{}\\t{}\\t{}\\t{}\\t{}\", jet_measure_hex(slot.name.as_bytes()), tier, profile, JET_MEASURE_WARMUPS, iterations, serial); for sample in &exact_samples { print!(\"\\t{}\", sample); } println!(); print!(\"JETALLOC1\\t{}\\t{}\\t{}\\t{}\\t{}\\t{}\", jet_measure_hex(slot.name.as_bytes()), tier, profile, JET_MEASURE_WARMUPS, iterations, serial); for (count, bytes) in &allocation_samples { print!(\"\\t{}:{}\", count, bytes); } println!(); } else if json { println!(\"{{\\\"name\\\":\\\"{}\\\",\\\"tier\\\":\\\"{}\\\",\\\"profile\\\":\\\"{}\\\",\\\"serial\\\":{},\\\"warmups\\\":{},\\\"iterations\\\":{},\\\"mean_ns\\\":{:.3},\\\"stddev_ns\\\":{:.3},\\\"samples\\\":{}}}\", slot.name, tier, profile, serial, JET_MEASURE_WARMUPS, iterations, mean, deviation, samples.len()); } else { println!(\"{}: {:.3} ns/iter ±{:.3} ({} samples, warmups={}, iterations={}) [tier={}, profile={}, serial={}]\", slot.name, mean, deviation, samples.len(), JET_MEASURE_WARMUPS, iterations, tier, profile, serial); }\n");
-    out.push_str("            measured += 1;\n");
-    out.push_str("        }\n");
-    if override_entry.is_some() {
-        out.push_str("        return (measured as i64, 0);\n");
-    } else {
-        out.push_str("        return;\n");
-    }
-    out.push_str("    }\n");
-    // Shuffle (gap #4): `--shuffle[=seed]` reorders before running; the seed is
-    // always printed so a shuffled run's order is reproducible.
-    out.push_str("    if let Ok(seed_str) = std::env::var(\"JET_TEST_SHUFFLE_SEED\") {\n");
-    out.push_str("        if let Ok(seed) = seed_str.parse::<u64>() {\n");
-    out.push_str("            if std::env::var_os(\"JET_TEST_JSON\").is_none() { println!(\"shuffle: seed={}\", seed); }\n");
-    out.push_str("            let order = jet_test_shuffle_order(slots.len(), seed);\n");
-    out.push_str("            slots = order.into_iter().map(|i| slots[i]).collect();\n");
-    out.push_str("        }\n");
-    out.push_str("    }\n");
-    // Run (gap #3): parallel by default (one thread per test, own temp-dir/output
-    // isolation), serial with `--serial` (`JET_TEST_SERIAL`) or when there is at
-    // most one test (no isolation benefit, and keeps single-test runs allocation-
-    // free of the thread machinery).
-    out.push_str("    let serial = std::env::var(\"JET_TEST_SERIAL\").is_ok();\n");
-    out.push_str("    let results: Vec<(String, bool, bool, bool, Option<Result<(), String>>, String, Option<JetTestFailure>)> = if serial || slots.len() <= 1 {\n");
-    out.push_str("        slots.iter().map(|s| {\n");
-    out.push_str("            let res = if s.skip { None } else { Some(jet_test_run(s.run)) };\n");
-    out.push_str("            let output = jet_test_take_output();\n");
-    out.push_str("            let failure = jet_test_take_failure();\n");
-    out.push_str("            (s.name.to_string(), s.skip, s.property, s.expected_fail, res, output, failure)\n");
-    out.push_str("        }).collect()\n");
-    out.push_str("    } else {\n");
-    out.push_str("        let handles: Vec<_> = slots.iter().map(|s| {\n");
-    out.push_str("            let name = s.name.to_string();\n");
-    out.push_str("            let skip = s.skip;\n");
-    out.push_str("            let property = s.property;\n");
-    out.push_str("            let expected_fail = s.expected_fail;\n");
-    out.push_str("            let run = s.run;\n");
-    out.push_str("            std::thread::spawn(move || {\n");
-                out.push_str("                let res = if skip { None } else { Some(jet_test_run(run)) };\n");
-    out.push_str("                let output = jet_test_take_output();\n");
-    out.push_str("                let failure = jet_test_take_failure();\n");
-    out.push_str("                (name, skip, property, expected_fail, res, output, failure)\n");
-    out.push_str("            })\n");
-    out.push_str("        }).collect();\n");
-    out.push_str("        handles.into_iter().map(|h| h.join().unwrap_or_else(|_| (\"<thread panicked>\".to_string(), false, false, false, Some(Err(\"test thread panicked\".to_string())), String::new(), None))).collect()\n");
-    out.push_str("    };\n");
-    out.push_str("    let mut report = JetTestReport::new(0, 0, 0);\n");
-    out.push_str(
-        "    for (name, skip, property, expected_fail, res, output, failure) in results {\n",
-    );
-    out.push_str("        if !json && !output.is_empty() { print!(\"{}\", output); }\n");
-    out.push_str("        match (skip, res) {\n");
-    out.push_str("            (true, _) => { if !json { println!(\"{}: skip\", name); } jet_proof_record(0, 2, &name, \"\", \"\", 0); report.skipped += 1; }\n");
-    out.push_str("            (false, Some(Ok(()))) if expected_fail => { if !json { println!(\"{}: UNEXPECTED-PASS (remove expected_fail: true)\", name); } report.unexpected_passes += 1; }\n");
-    out.push_str("            (false, Some(Err(_msg))) if expected_fail => { if !json { println!(\"{}: expected-fail\", name); } report.expected_failures += 1; }\n");
-    out.push_str("            (false, Some(Ok(()))) => { if !json { println!(\"{}: pass\", name); } if !property { jet_proof_record(0, 0, &name, \"\", \"\", 0); } report.passed += 1; }\n");
-    out.push_str("            (false, Some(Err(msg))) => { let mut failure = failure.unwrap_or_else(|| JetTestFailure::fallback(&msg)); if property { failure.message = msg; } if !json { println!(\"{}: FAIL\", name); eprint!(\"{}\", failure.render_detail()); } else { println!(\"{}\", failure.json()); } if !property { jet_proof_record(0, 1, &name, &failure.message, &failure.file, failure.line); } report.failed += 1; }\n");
-    out.push_str("            (false, None) => unreachable!(),\n");
-    out.push_str("        }\n");
-    out.push_str("    }\n");
-    out.push_str("    if json { println!(\"{}\", report.json()); } else { println!(\"{}\", report.summary()); }\n");
-    if coverage {
-        // D-COV1: write the hit set before any `exit` (which would skip Drop).
-        out.push_str("    jet_cov_dump();\n");
-    }
-    if override_entry.is_some() {
-        out.push_str("    (slots.len() as i64, i64::from(report.failed > 0 || report.unexpected_passes > 0))\n");
-    } else {
-        out.push_str(
-            "    if report.failed > 0 || report.unexpected_passes > 0 { std::process::exit(1); }\n",
-        );
-    }
-    out.push_str("}\n");
-    if let Some(entry) = override_entry {
-        emit_command_override_main(
-            entry,
-            "jet_test_suite_install",
-            "jet_test_command_run",
-            "jet_test_suite_status",
-            package_hardened,
-            true,
-            out,
-        );
-    }
-}
-
-/// S12: Jet's one program entry function. `Driver::swap_command_entry_point`
-/// installs the command-override wrapper under this name, and
-/// `emit_program_items`'s `include_main` decides whether that item is emitted,
-/// so neither side spells the name a second time.
-pub const ENTRY_FN: &str = "run";
-
-/// The Rust name of the entry an override harness emits — read back off the very
-/// item `emit_program_items` emits when `include_main` is set. A hand-written
-/// `run();`, and then `mangle("run")`, both named a function the harness had
-/// skipped (`include_main` was `false`, so the driver's synthesized `fn run` was
-/// dropped); I2 makes generated Rust that does not compile a compiler bug, so
-/// the name and the decision to emit it now come from this one lookup.
-fn command_override_entry(items: &[Item]) -> Option<String> {
-    items.iter().find_map(|item| match item {
-        Item::Func(function) if function.name == ENTRY_FN => Some(mangle(&function.name)),
-        _ => None,
-    })
-}
-
-/// D-CMD-OVERRIDE1=C: the `main` an overridden command gets. It installs the
-/// stock harness as the suite runner, hands control to the user's command entry
-/// (`entry`: the Rust name of the `fn run` this same harness emitted, never a
-/// literal), then reports the suite's status as the process status. `jet test`
-/// owns this adapter.
-fn emit_command_override_main(
-    entry: &str,
-    install: &str,
-    runner: &str,
-    status: &str,
-    package_hardened: bool,
-    trace_tier: bool,
-    out: &mut String,
-) {
-    out.push_str("\nfn main() {\n");
-    out.push_str("    jet_test_install_panic_hook();\n");
-    out.push_str("    jet_std_env_init();\n");
-    if Items::sentry_runtime_needed(out) {
-        out.push_str(&format!(
-            "    jet_mem::jet_sentry_set_hardened({package_hardened});\n"
-        ));
-    }
-    out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
-    if trace_tier {
-        out.push_str("    jet_test_trace_tier();\n");
-    }
-    out.push_str(&format!("    {install}({runner});\n"));
-    out.push_str(&format!("    {entry}();\n"));
-    out.push_str("    let output = jet_test_take_output();\n");
-    out.push_str("    if !output.is_empty() { print!(\"{}\", output); }\n");
-    out.push_str(&format!("    let status = {status}();\n"));
-    out.push_str("    if status != 0 { std::process::exit(status as i32); }\n");
-    out.push_str("}\n");
-}
-
-fn emit_output_check_fns(cx: &Cx, checks: &[&ResolvedOutput], out: &mut String) {
-    for (i, check) in checks.iter().enumerate() {
-        out.push_str(&format!(
-            "fn jet_output_check_{i}() -> Result<(), String> {{\n"
-        ));
-        let return_type = check.failure_contract().effective_type();
-        let check_error = mangle_generated("check_error");
-        if let Some(error_text) =
-            Items::entry_error_text_expr(cx, &return_type, &check_error)
-        {
-            out.push_str(&format!(
-                "    {}().map_err(|{check_error}| {error_text})\n",
-                check.lowered_name
-            ));
-        } else {
-            out.push_str(&format!("    {}();\n    Ok(())\n", check.lowered_name));
-        }
-        out.push_str("}\n\n");
-    }
-}
-
-/// Does any test in the set declare property parameters (D-TEST1)? Drives whether
-/// the harness needs `PROP_PRELUDE`.
-fn any_property_test(tests: &[TestCase<'_>]) -> bool {
-    tests.iter().any(|t| !t.test.params.is_empty())
-}
-
-fn fault_selector_literal(test: &TestDef) -> String {
-    let selectors = test
-        .faults
-        .iter()
-        .map(|fault| escape_rust_str(fault))
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("&[{selectors}]")
-}
-
-/// D-DOTSCOPE1: is this test whole-test-skipped — i.e. does a `.skip` scope
-/// member appear as its FIRST statement? The whole test is then not run and
-/// reports `name: skip`. A `.skip` later in the body is a region-skip instead.
-fn whole_test_skip(test: &TestDef) -> bool {
-    matches!(
-        test.body.first(),
-        Some(crate::AST::Stmt::ScopeMember { name, .. }) if name == Syntax::SCOPE_TEST_SKIP
-    )
-}
-
-/// D-TEST1: emit the per-test functions. A unit test (`#Test "name" { … }`, no
-/// params) becomes `fn jet_test_N() -> Result<(), String>` exactly as before. A
-/// property test (`#Test fn name(p…) { … }`) becomes a body fn `jet_prop_N(p…)`
-/// plus a driver `jet_test_N()` that generates inputs, runs cases, and shrinks
-/// the first failure to a minimal counterexample. Either way `jet_test_N()` is
-/// the single entry the main loop calls, so the reporting loop is shared.
-fn emit_test_fns(cx: &Cx, tests: &[TestCase<'_>], module: Option<&str>, out: &mut String) {
-    const CASES: usize = 200;
-    const SHRINK_STEPS: usize = 2000;
-    let visibility = if module.is_some() { "pub " } else { "" };
-    for test_case in tests {
-        if test_case.module.as_deref() != module {
-            continue;
-        }
-        let test = test_case.test;
-        let i = test_case.index;
-        if test.params.is_empty() {
-            *cx.current_fn.borrow_mut() = format!("jet_test_{}", i);
-            out.push_str(&format!(
-                "{visibility}fn jet_test_{}() -> Result<(), String> {{\n",
-                i
-            ));
-            if test.faults.is_empty() {
-                emit_test_body(cx, &test.body, out);
-                out.push_str("    Ok(())\n");
-            } else {
-                out.push_str(&format!(
-                    "    jet_fault_test_loop({}, || {{\n",
-                    fault_selector_literal(test)
-                ));
-                emit_test_body(cx, &test.body, out);
-                out.push_str("        Ok(())\n");
-                out.push_str("    })\n");
-            }
-            out.push_str("}\n\n");
-            continue;
-        }
-        // Property body: takes each generated input by value, returns the body's
-        // Result. Param Rust types come from `cx.rust_type` so the signature
-        // matches what the body expects.
-        let sig: Vec<String> = test
-            .params
-            .iter()
-            .map(|p| format!("{}: {}", mangle(&p.name), cx.rust_type(&p.ty)))
-            .collect();
-        out.push_str(&format!(
-            "{visibility}fn jet_prop_{}({}) -> Result<(), String> {{\n",
-            i,
-            sig.join(", ")
-        ));
-        *cx.current_fn.borrow_mut() = format!("jet_prop_{}", i);
-        if test.faults.is_empty() {
-            TIR::emit_tir_property_test_body(&test.body, &test.params, cx, out);
-            out.push_str("    Ok(())\n");
-        } else {
-            out.push_str(&format!(
-                "    jet_fault_test_loop({}, || {{\n",
-                fault_selector_literal(test)
-            ));
-            for parameter in &test.params {
-                let name = mangle(&parameter.name);
-                out.push_str(&format!("        let {name} = {name}.clone();\n"));
-            }
-            TIR::emit_tir_property_test_body(&test.body, &test.params, cx, out);
-            out.push_str("        Ok(())\n");
-            out.push_str("    })\n");
-        }
-        out.push_str("}\n\n");
-
-        // Driver: generate a tuple of inputs per case; on the first failing case,
-        // shrink each component greedily while it still fails, then report the
-        // minimal counterexample plus the assertion message.
-        let n = test.params.len();
-        let types: Vec<String> = test.params.iter().map(|p| cx.rust_type(&p.ty)).collect();
-        let tuple_ty = format!("({},)", types.join(", "));
-        out.push_str(&format!(
-            "{visibility}fn jet_test_{}() -> Result<(), String> {{\n",
-            i
-        ));
-        out.push_str("    let seed = jet_prop_seed();\n");
-        out.push_str("    let mut driver_rng = JetRng::new(seed);\n");
-        // call helper that takes the tuple, returns Result
-        let call_args: Vec<String> = (0..n).map(|k| format!("input.{}.clone()", k)).collect();
-        let sample_renders: Vec<String> = (0..n).map(|k| format!("input.{}.render()", k)).collect();
-        out.push_str(&format!(
-            "    let run = |input: &{}| -> Result<(), String> {{ jet_prop_{}({}) }};\n",
-            tuple_ty,
-            i,
-            call_args.join(", ")
-        ));
-        out.push_str(&format!("    for case_index in 0..{} {{\n", CASES));
-        out.push_str("        let case_seed = driver_rng.next_u64();\n");
-        out.push_str("        let mut rng = JetRng::new(case_seed);\n");
-        let gen_components: Vec<String> = types
-            .iter()
-            .map(|t| format!("<{} as JetGen>::generate(&mut rng)", t))
-            .collect();
-        out.push_str(&format!(
-            "        let mut input: {} = ({},);\n",
-            tuple_ty,
-            gen_components.join(", ")
-        ));
-        out.push_str(&format!(
-            "        let sample = vec![{}].join(\", \");\n",
-            sample_renders.join(", ")
-        ));
-        out.push_str(
-            "        jet_prop_trace_sample(\"jet_test\", case_index as u64, case_seed, &sample);\n",
-        );
-        out.push_str("        if let Err(first_msg) = run(&input) {\n");
-        out.push_str("            let mut msg = first_msg;\n");
-        out.push_str("            let mut improved = true;\n");
-        out.push_str("            let mut steps = 0usize;\n");
-        out.push_str(&format!(
-            "            while improved && steps < {} {{\n",
-            SHRINK_STEPS
-        ));
-        out.push_str("                improved = false;\n");
-        for k in 0..n {
-            out.push_str(&format!(
-                "                for cand in input.{}.shrink() {{\n",
-                k
-            ));
-            out.push_str("                    steps += 1;\n");
-            out.push_str("                    let mut trial = input.clone();\n");
-            out.push_str(&format!("                    trial.{} = cand;\n", k));
-            out.push_str("                    if let Err(m) = run(&trial) {\n");
-            out.push_str(
-                "                        input = trial; msg = m; improved = true; break;\n",
-            );
-            out.push_str("                    }\n");
-            out.push_str("                }\n");
-        }
-        out.push_str("            }\n");
-        // Render the minimized counterexample as `name = value` pairs.
-        let renders: Vec<String> = test
-            .params
-            .iter()
-            .enumerate()
-            .map(|(k, p)| format!("format!(\"{} = {{}}\", input.{}.render())", p.name, k))
-            .collect();
-        out.push_str(&format!(
-            "            let args = vec![{}];\n",
-            renders.join(", ")
-        ));
-        out.push_str(&format!(
-            "            jet_proof_record(3, 1, {}, &args.join(\", \"), &seed.to_string(), (case_index + 1) as u32);\n",
-            escape_rust_str(
-                test.name
-                    .as_deref()
-                    .expect("sema resolves every test marker name before codegen"),
-            )
-        ));
-        out.push_str("            return Err(format!(\"property failed for {}\\n  {}\", args.join(\", \"), msg));\n");
-        out.push_str("        }\n");
-        out.push_str("    }\n");
-        out.push_str(&format!(
-            "    jet_proof_record(3, 0, {}, \"\", &seed.to_string(), {});\n",
-            escape_rust_str(
-                test.name
-                    .as_deref()
-                    .expect("sema resolves every test marker name before codegen"),
-            ),
-            CASES
-        ));
-        out.push_str("    Ok(())\n");
-        out.push_str("}\n\n");
-    }
-}
-
-/// c109: emit a `#Test` block body through the TIR (R7 — the only codegen seam). A test
-/// body is a bare statement list (no params, unit context), emitted at indent 1 inside the
-/// `fn jet_test_N()` wrapper the caller opened. A gate-miss is an internal compiler error
-/// (I2-class), never an AST fallback — every `#Test` body routes through the TIR.
-fn emit_test_body(cx: &Cx, body: &[crate::AST::Stmt], out: &mut String) {
-    if TIR::tir_covers_test_body(body, cx) {
-        TIR::emit_tir_test_body(body, cx, out);
-        return;
-    }
-    jet_foundation::ice!(
-        None,
-        "codegen reached a #Test body construct the typed IR does not cover: {} — compiler bug (I2/R7)",
-        TIR::refusal::describe(cx)
-    );
-}
 
 /// D-UIDEVSHELL1=A (c134 Phase 8): true when the native GTK4 backend prelude
 /// should be emitted — the program constructs `core.ui.gtk_backend()` AND the
@@ -5234,967 +4790,13 @@ fn uses_gtk_backend_for(
 /// code, an I2 violation). Unconditional on purpose — the harness carries
 /// `#![allow(warnings)]`, so an unused const costs nothing, and a definition that
 /// is never gated cannot drift from the use guard again.
-fn push_package_edition(out: &mut String, bundle: &ProgramBundle) {
-    let edition_year = bundle.edition.parse::<u16>().unwrap_or(2027);
+fn push_package_edition_value(out: &mut String, edition: &str) {
+    let edition_year = edition.parse::<u16>().unwrap_or(2027);
     out.push_str(&format!(
         "const __JET_PACKAGE_EDITION: u16 = {edition_year};\n\n"
     ));
 }
 
-// D-CONFIG-ENV1: `Secret` is a bridge type, so its shared codec impl belongs
-// in the generated root only when this bundle actually links the crypto bridge.
-// Do not put this in the generic cached runtime: unrelated FFI links have no
-// `Secret` type.
-fn push_secret_decode_impl(out: &mut String, bundle: &ProgramBundle, link: Option<&FfiLink>) {
-    let Some(link) = link else { return };
-    if !core_usage_matches(&bundle.used_core, &["core.crypto::__nominal__"]) {
-        return;
-    }
-    out.push_str(&format!(
-        "impl __jet_Decode for {}::Secret {{\n    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {{\n        let text = <String as __jet_Decode>::jet_decode(tree)?;\n        Ok({}::jet_crypto_secret_from_text_impl(text))\n    }}\n}}\nimpl JetShow for {}::Secret {{ fn jet_show(&self) -> String {{ \"[REDACTED]\".to_string() }} }}\nimpl JetDebug for {}::Secret {{ fn jet_debug(&self) -> String {{ \"[REDACTED]\".to_string() }} }}\nimpl JetDisplay for {}::Secret {{ fn jet_display(&self) -> String {{ \"[REDACTED]\".to_string() }} }}\n",
-        link.crate_name, link.crate_name, link.crate_name, link.crate_name, link.crate_name
-    ));
-}
-
-pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&FfiLink>) -> String {
-    emit_bundle_dbg(bundle, link, false, Syntax::OSTarget::host())
-}
-
-/// D-DBG3 step 2 (dap-debugger): identical to `emit_bundle`, but with
-/// `debug_linemap = true` every generated statement gets a `// jet:line N` marker
-/// (`TStmt::LineMarker`) the native debug backend's line table reads back. Used ONLY
-/// by the `jet debug` native build path; `emit_bundle` (linemap off) stays
-/// byte-identical to today's output for every other build (golden tests, JIT).
-///
-/// D-OSTARGET1=A (ratified 2026-07-01, c134): `active_os` is the resolved
-/// native OS bucket this build targets (from `--target=<triple>`, or the host
-/// OS when absent) — an `impl` gated to a different `#Target(OS.*)` is
-/// skipped entirely (`Codegen/Imports.rs::emit_program_items`).
-pub fn emit_bundle_dbg(
-    bundle: &ProgramBundle,
-    link: Option<&FfiLink>,
-    debug_linemap: bool,
-    active_os: Syntax::OSTarget,
-) -> String {
-    emit_bundle_dbg_inner(bundle, link, debug_linemap, active_os)
-}
-
-
-fn emit_bundle_dbg_inner(
-    bundle: &ProgramBundle,
-    link: Option<&FfiLink>,
-    debug_linemap: bool,
-    active_os: Syntax::OSTarget,
-) -> String {
-    // D-DATAFLOW1 / D-REL3: fixed_sigs and edition-gated helpers read the TLS
-    // package edition. Keep codegen on the same edition sema checked.
-    jet_foundation::PackageEdition::with_package_edition(&bundle.edition, || {
-        let entry = &bundle.modules[bundle.entry];
-        let bundle_auto_derives =
-            crate::Traits::TraitRegistry::bundle_auto_derives(bundle, &bundle.name_ledger);
-        let mut out = String::new();
-        let module_use = module_use_for(bundle);
-        out.push_str(&format!(
-            "// Generated by {} — do not edit. Edit the .{} source instead.\n",
-            Syntax::BINARY_NAME,
-            Syntax::FILE_EXT
-        ));
-        // E2-M12 D-OBS1: source-map marker for tooling and debuggers.
-        out.push_str(&format!("// jet:source-map source={}\n", entry.display));
-        for provenance in TIR::instance_provenance(bundle) {
-            out.push_str(&format!(
-                "// jet:generic-instance module={} fingerprint={} full-key={}\n",
-                provenance.canonical_module, provenance.fingerprint, provenance.full_key_hex
-            ));
-        }
-        out.push_str("#![allow(warnings)]\n\n");
-        emit_command_metadata(bundle, active_os, &mut out);
-        if let Some(ffi) = link {
-            out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
-        }
-        push_program_allocator_prelude(&mut out, bundle);
-        push_cached_runtime_begin(&mut out, link);
-        push_target_dossier_runtime_identity(&mut out, bundle);
-        out.push_str(CACHED_RUNTIME_END);
-        push_core_runtime(&mut out, bundle, false);
-        out.push('\n');
-        push_secret_decode_impl(&mut out, bundle, link);
-
-        let import_mods = import_mod_map(bundle, bundle.entry);
-        let extern_funcs = bundle_extern_funcs(bundle);
-
-        for (i, module) in bundle.modules.iter().enumerate() {
-            if i == bundle.entry {
-                continue;
-            }
-            let ns = module.alias.clone();
-            out.push_str(&format!("mod {} {{\n", mangle(&ns)));
-            out.push_str(&module_use);
-            out.push_str("use super::jet_stack_enter;\n");
-            let mut cx = build_cx_items(
-                &module.items,
-                &module.source,
-                &module.display,
-                link,
-                &extern_funcs,
-                &bundle.edition,
-            );
-            populate_cx_module_facts(&mut cx, bundle, i);
-            cx.foreign_undos = bundle_foreign_undos(bundle, i);
-            apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
-            cx.module_alias = module.alias.clone();
-            register_bundle_reflect_paths(&mut cx, bundle, i);
-            cx.core_archive_source = bundle
-                .modules
-                .iter()
-                .any(|module| module.alias == "core_archive");
-            // D-DBG3 step 2: line markers stay scoped to the entry file only (v1, same
-            // restriction as the step-1 interpreter debugger) — a bare `// jet:line N`
-            // can't disambiguate which file N belongs to across modules.
-            cx.import_mods = import_mod_map(bundle, i);
-            cx.foreign_types = foreign_type_map(bundle, i);
-            TIR::register_imported_struct_shapes(&mut cx, bundle, i);
-            register_foreign_enum_variants(&mut cx, bundle, i);
-            update_cloneability_with_foreign_types(&mut cx, &module.items);
-            cx.reexport_calls = reexport_call_map(bundle, i);
-            cx.import_sigs = import_sig_map(bundle, i);
-            cx.import_rets = import_ret_map(bundle, i);
-            cx.core_imports = core_import_map(bundle, i);
-            register_core_import_surfaces(&mut cx);
-            cx.used_core = bundle.used_core.clone();
-            cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
-            register_bundle_unit_metadata(&mut cx, bundle, i);
-            cx.root_prefix = "super::".to_string();
-            cx.active_os = active_os;
-            let (uinline, ufile) = unqualified_import_maps(bundle, i);
-            cx.unqualified_inline = uinline;
-            cx.unqualified_file = ufile;
-            let (inline, file, names, reexports) = inline_import_maps(bundle, i);
-            cx.inline_unqualified = inline;
-            cx.inline_unqualified_file = file;
-            cx.inline_import_names = names;
-            cx.inline_reexport_inline = reexports;
-            let (inline_core, reexport_core) = inline_core_import_maps(bundle, i);
-            cx.inline_core_imports = inline_core;
-            cx.inline_reexport_core = reexport_core;
-            cx.inline_foreign_imports = inline_foreign_import_maps(bundle, i);
-            let (inline_foreign_sigs, inline_foreign_rets) =
-                inline_foreign_import_signature_maps(bundle, i);
-            cx.inline_foreign_sigs = inline_foreign_sigs;
-            cx.inline_foreign_rets = inline_foreign_rets;
-            cx.inline_reexport_foreign = inline_foreign_reexport_maps(bundle, i);
-            let (inline_foreign_reexport_sigs, inline_foreign_reexport_rets) =
-                inline_foreign_reexport_signature_maps(bundle, i);
-            cx.inline_foreign_reexport_sigs = inline_foreign_reexport_sigs;
-            cx.inline_foreign_reexport_rets = inline_foreign_reexport_rets;
-            emit_program_items(&cx, &module.items, &mut out, true, true);
-            out.push_str("}\n\n");
-        }
-
-        let mut cx = build_cx_items(
-            &entry.items,
-            &entry.source,
-            &entry.display,
-            link,
-            &extern_funcs,
-            &bundle.edition,
-        );
-        populate_cx_module_facts(&mut cx, bundle, bundle.entry);
-        cx.foreign_undos = bundle_foreign_undos(bundle, bundle.entry);
-        apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
-        cx.module_alias = entry.alias.clone();
-        cx.core_archive_source = bundle
-            .modules
-            .iter()
-            .any(|module| module.alias == "core_archive");
-        cx.debug_linemap = debug_linemap;
-        cx.active_os = active_os;
-        cx.import_mods = import_mods;
-        cx.foreign_types = foreign_type_map(bundle, bundle.entry);
-        TIR::register_imported_struct_shapes(&mut cx, bundle, bundle.entry);
-        register_foreign_enum_variants(&mut cx, bundle, bundle.entry);
-        update_cloneability_with_foreign_types(&mut cx, &entry.items);
-        cx.reexport_calls = reexport_call_map(bundle, bundle.entry);
-        cx.import_sigs = import_sig_map(bundle, bundle.entry);
-        cx.import_rets = import_ret_map(bundle, bundle.entry);
-        cx.core_imports = core_import_map(bundle, bundle.entry);
-        register_core_import_surfaces(&mut cx);
-        cx.used_core = bundle.used_core.clone();
-        cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
-        register_bundle_unit_metadata(&mut cx, bundle, bundle.entry);
-        register_bundle_reflect_paths(&mut cx, bundle, bundle.entry);
-        for import in &entry.imports {
-            if bundle
-                .name_ledger
-                .effective_alias(bundle.entry, &import.import_alias())
-                .is_none()
-            {
-                continue;
-            }
-            let Some(target) = bundle.name_ledger.import_target(bundle.entry, import.span) else {
-                continue;
-            };
-            let imported = &bundle.modules[target];
-            let has_unit_display = imported.items.iter().any(|item| {
-                let Item::Impl(implementation) = item else {
-                    return false;
-                };
-                implementation.trait_name.as_deref() == Some(Syntax::TRAIT_DISPLAY)
-                    && imported.items.iter().any(|item| {
-                        matches!(
-                            item,
-                            Item::UnitFamily(family)
-                                if family.distinct_defs().iter().any(|definition| {
-                                    definition.name == implementation.type_name
-                                })
-                        )
-                    })
-            });
-            if !has_unit_display {
-                continue;
-            }
-            out.push_str(&format!(
-                "use {}::__jet_Display as _;\n",
-                mangle(&imported.alias)
-            ));
-        }
-        let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
-        cx.unqualified_inline = uinline;
-        cx.unqualified_file = ufile;
-        let (inline, file, names, reexports) = inline_import_maps(bundle, bundle.entry);
-        cx.inline_unqualified = inline;
-        cx.inline_unqualified_file = file;
-        cx.inline_import_names = names;
-        cx.inline_reexport_inline = reexports;
-        let (inline_core, reexport_core) = inline_core_import_maps(bundle, bundle.entry);
-        cx.inline_core_imports = inline_core;
-        cx.inline_reexport_core = reexport_core;
-        cx.inline_foreign_imports = inline_foreign_import_maps(bundle, bundle.entry);
-        let (inline_foreign_sigs, inline_foreign_rets) =
-            inline_foreign_import_signature_maps(bundle, bundle.entry);
-        cx.inline_foreign_sigs = inline_foreign_sigs;
-        cx.inline_foreign_rets = inline_foreign_rets;
-        cx.inline_reexport_foreign = inline_foreign_reexport_maps(bundle, bundle.entry);
-        let (inline_foreign_reexport_sigs, inline_foreign_reexport_rets) =
-            inline_foreign_reexport_signature_maps(bundle, bundle.entry);
-        cx.inline_foreign_reexport_sigs = inline_foreign_reexport_sigs;
-        cx.inline_foreign_reexport_rets = inline_foreign_reexport_rets;
-        emit_program_items(&cx, &entry.items, &mut out, true, false);
-        emit_imported_foreign_close_impls(&cx, bundle, &mut out);
-        // D-CLIFLAG1: a typed `fn run(args: T)` is the Jet entry (S12). Synthesize
-        // the Rust `fn main` wrapper that parses `process.argv()` and dispatches to it.
-        // No-op when the entry file has no `run` (sema's E0101 already rejected it).
-        let cli_items = jet_foundation::CLISchema::entry_type_module(bundle)
-            .map(|module| bundle.modules[module].items.as_slice())
-            .unwrap_or(entry.items.as_slice());
-        emit_cli_entry_if_needed(
-            &cx,
-            &entry.items,
-            cli_items,
-            Some(bundle.build_facts.package_version.as_str()),
-            &mut out,
-        );
-        strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(
-            strip_unused_gc_prelude(strip_unused_txn_prelude(strip_unused_mem_prelude(out))),
-        )))
-    })
-}
-fn push_target_dossier_runtime_identity(out: &mut String, bundle: &ProgramBundle) {
-    out.push_str(&format!(
-        "// jet:target-dossier layer={} provider={} closure={} artifact={}\n",
-        bundle.build_facts.target_dossier.layer.as_str(),
-        &bundle.build_facts.target_dossier.provider_identity,
-        &bundle.build_facts.target_dossier.closure_identity,
-        crate::SHA256::sha256_hex(&bundle.build_facts.artifact_identity_bytes()),
-    ));
-}
-
-pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> String {
-    emit_bundle_tests_cov(bundle, link, false)
-}
-
-/// D-CMD-OVERRIDE1=C: the two command names share one compiler-generated
-/// override path and differ only in the suite value handed to user code.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CommandOverrideKind {
-    Test,
-}
-
-/// D-COV1: emit the `jet test` harness, optionally with coverage instrumentation.
-/// `coverage = false` is byte-identical to the historical `emit_bundle_tests`
-/// (golden tests rely on this), so the probes/prelude only appear under
-/// `jet test --coverage`.
-pub fn emit_bundle_tests_cov(
-    bundle: &ProgramBundle,
-    link: Option<&FfiLink>,
-    coverage: bool,
-) -> String {
-    emit_bundle_tests_cov_inner(bundle, link, coverage, false)
-}
-
-/// D-CMD-OVERRIDE1=C: emit the selected test command override.
-pub fn emit_bundle_command_override(
-    bundle: &ProgramBundle,
-    link: Option<&FfiLink>,
-    kind: CommandOverrideKind,
-    coverage: bool,
-) -> String {
-    match kind {
-        CommandOverrideKind::Test => emit_bundle_tests_cov_inner(bundle, link, coverage, true),
-    }
-}
-
-fn emit_bundle_tests_cov_inner(
-    bundle: &ProgramBundle,
-    link: Option<&FfiLink>,
-    coverage: bool,
-    command_override: bool,
-) -> String {
-    let entry = &bundle.modules[bundle.entry];
-    let bundle_auto_derives =
-        crate::Traits::TraitRegistry::bundle_auto_derives(bundle, &bundle.name_ledger);
-    let tests: Vec<TestCase<'_>> = bundle
-        .modules
-        .iter()
-        .enumerate()
-        .flat_map(|(owner, module)| {
-            let module_path = (owner != bundle.entry).then(|| mangle(&module.alias));
-            module.items.iter().filter_map(move |item| match item {
-                Item::Test(test) => Some((module_path.clone(), test)),
-                _ => None,
-            })
-        })
-        .enumerate()
-        .map(|(index, (module, test))| TestCase {
-            test,
-            module,
-            index,
-            measure: test.body.iter().any(|statement| {
-                matches!(
-                    statement,
-                    crate::AST::Stmt::ScopeMember { name, .. }
-                        if name == Syntax::SCOPE_TEST_MEASURE
-                )
-            }),
-        })
-        .collect();
-    let checks = bundle
-        .modules
-        .iter()
-        .flat_map(|module| module.items.iter())
-        .filter_map(|item| {
-            let Item::Const(value) = item else {
-                return None;
-            };
-            value
-                .resolved_output
-                .as_ref()
-                .filter(|output| output.selected && output.kind == crate::AST::OutputKind::Check)
-        })
-        .collect::<Vec<_>>();
-    if !command_override {
-        assert!(
-            !tests.is_empty() || !checks.is_empty(),
-            "emit_bundle_tests called with no test blocks or Check Outputs"
-        );
-    }
-    let want_prop_prelude = any_property_test(&tests);
-
-    let mut out = String::new();
-    let module_use = module_use_for(bundle);
-    let mut coverage_branches = Vec::new();
-    out.push_str(&format!(
-        "// Generated by {} test harness — do not edit.\n",
-        Syntax::BINARY_NAME
-    ));
-    out.push_str("#![allow(warnings)]\n\n");
-    if let Some(ffi) = link {
-        out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
-    }
-    push_cached_runtime_begin(&mut out, link);
-    push_target_dossier_runtime_identity(&mut out, bundle);
-    out.push_str(TEST_PRELUDE);
-    out.push_str(TESTING_SHARED_PRELUDE);
-    out.push_str(REPORT_PRELUDE);
-    out.push_str(TEST_REPORT_PRELUDE);
-    if want_prop_prelude {
-        out.push_str(PROP_PRELUDE);
-    }
-    if coverage {
-        out.push_str(COV_PRELUDE);
-    }
-    out.push_str(CACHED_RUNTIME_END);
-    push_core_runtime(&mut out, bundle, true);
-    out.push('\n');
-    push_secret_decode_impl(&mut out, bundle, link);
-
-    let import_mods = import_mod_map(bundle, bundle.entry);
-    let extern_funcs = bundle_extern_funcs(bundle);
-
-    for (i, module) in bundle.modules.iter().enumerate() {
-        if i == bundle.entry {
-            continue;
-        }
-        let module_path = mangle(&module.alias);
-        out.push_str(&format!("mod {} {{\n", module_path));
-        out.push_str(&module_use);
-        out.push_str("use super::jet_fault_test_loop;\n");
-        if coverage {
-            out.push_str("use super::{jet_cov, jet_cov_branch};\n");
-        }
-        out.push_str("use super::jet_stack_enter;\n");
-        out.push_str("use super::{jet_proof_record, jet_test_failure, jet_test_print};\n");
-        if tests.iter().any(|test| {
-            test.module.as_deref() == Some(module_path.as_str()) && !test.test.params.is_empty()
-        }) {
-            out.push_str("use super::{jet_prop_seed, jet_prop_trace_sample, JetGen, JetRng};\n");
-        }
-        let mut cx = build_cx_items(
-            &module.items,
-            &module.source,
-            &module.display,
-            link,
-            &extern_funcs,
-            &bundle.edition,
-        );
-        populate_cx_module_facts(&mut cx, bundle, i);
-        cx.foreign_undos = bundle_foreign_undos(bundle, i);
-        apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
-        cx.module_alias = module.alias.clone();
-        cx.core_archive_source = bundle
-            .modules
-            .iter()
-            .any(|module| module.alias == "core_archive");
-        cx.test_mode = true;
-        cx.coverage = coverage; // inline Core scope setup follows below
-        cx.import_mods = import_mod_map(bundle, i);
-        cx.foreign_types = foreign_type_map(bundle, i);
-        TIR::register_imported_struct_shapes(&mut cx, bundle, i);
-        register_foreign_enum_variants(&mut cx, bundle, i);
-        update_cloneability_with_foreign_types(&mut cx, &module.items);
-        cx.reexport_calls = reexport_call_map(bundle, i);
-        cx.import_sigs = import_sig_map(bundle, i);
-        cx.import_rets = import_ret_map(bundle, i);
-        cx.core_imports = core_import_map(bundle, i);
-        register_core_import_surfaces(&mut cx);
-        cx.used_core = bundle.used_core.clone();
-        cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
-        cx.root_prefix = "super::".to_string();
-        let (uinline, ufile) = unqualified_import_maps(bundle, i);
-        cx.unqualified_inline = uinline;
-        cx.unqualified_file = ufile;
-        let (inline, file, names, reexports) = inline_import_maps(bundle, i);
-        cx.inline_unqualified = inline;
-        cx.inline_unqualified_file = file;
-        cx.inline_import_names = names;
-        cx.inline_reexport_inline = reexports;
-        let (inline_core, reexport_core) = inline_core_import_maps(bundle, i);
-        cx.inline_core_imports = inline_core;
-        cx.inline_reexport_core = reexport_core;
-        cx.inline_foreign_imports = inline_foreign_import_maps(bundle, i);
-        let (inline_foreign_sigs, inline_foreign_rets) =
-            inline_foreign_import_signature_maps(bundle, i);
-        cx.inline_foreign_sigs = inline_foreign_sigs;
-        cx.inline_foreign_rets = inline_foreign_rets;
-        cx.inline_reexport_foreign = inline_foreign_reexport_maps(bundle, i);
-        let (inline_foreign_reexport_sigs, inline_foreign_reexport_rets) =
-            inline_foreign_reexport_signature_maps(bundle, i);
-        cx.inline_foreign_reexport_sigs = inline_foreign_reexport_sigs;
-        cx.inline_foreign_reexport_rets = inline_foreign_reexport_rets;
-        emit_program_items(&cx, &module.items, &mut out, false, true);
-        emit_test_fns(&cx, &tests, Some(&module_path), &mut out);
-        coverage_branches.extend(cx.coverage_branches.borrow().iter().cloned());
-        out.push_str("}\n\n");
-    }
-
-    let mut cx = build_cx_items(
-        &entry.items,
-        &entry.source,
-        &entry.display,
-        link,
-        &extern_funcs,
-        &bundle.edition,
-    );
-    populate_cx_module_facts(&mut cx, bundle, bundle.entry);
-    cx.foreign_undos = bundle_foreign_undos(bundle, bundle.entry);
-    apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
-    cx.module_alias = entry.alias.clone();
-    cx.core_archive_source = bundle
-        .modules
-        .iter()
-        .any(|module| module.alias == "core_archive");
-    cx.test_mode = true;
-    cx.coverage = coverage;
-    cx.coverage_entry = coverage;
-    cx.import_mods = import_mods;
-    cx.foreign_types = foreign_type_map(bundle, bundle.entry);
-    TIR::register_imported_struct_shapes(&mut cx, bundle, bundle.entry);
-    register_foreign_enum_variants(&mut cx, bundle, bundle.entry);
-    update_cloneability_with_foreign_types(&mut cx, &entry.items);
-    cx.reexport_calls = reexport_call_map(bundle, bundle.entry);
-    cx.import_sigs = import_sig_map(bundle, bundle.entry);
-    cx.import_rets = import_ret_map(bundle, bundle.entry);
-    cx.core_imports = core_import_map(bundle, bundle.entry);
-    register_core_import_surfaces(&mut cx);
-    cx.used_core = bundle.used_core.clone();
-    cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
-    let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
-    cx.unqualified_inline = uinline;
-    cx.unqualified_file = ufile;
-    let (inline, file, names, reexports) = inline_import_maps(bundle, bundle.entry);
-    cx.inline_unqualified = inline;
-    cx.inline_unqualified_file = file;
-    cx.inline_import_names = names;
-    cx.inline_reexport_inline = reexports;
-    let (inline_core, reexport_core) = inline_core_import_maps(bundle, bundle.entry);
-    cx.inline_core_imports = inline_core;
-    cx.inline_reexport_core = reexport_core;
-    cx.inline_foreign_imports = inline_foreign_import_maps(bundle, bundle.entry);
-    let (inline_foreign_sigs, inline_foreign_rets) =
-        inline_foreign_import_signature_maps(bundle, bundle.entry);
-    cx.inline_foreign_sigs = inline_foreign_sigs;
-    cx.inline_foreign_rets = inline_foreign_rets;
-    cx.inline_reexport_foreign = inline_foreign_reexport_maps(bundle, bundle.entry);
-    let (inline_foreign_reexport_sigs, inline_foreign_reexport_rets) =
-        inline_foreign_reexport_signature_maps(bundle, bundle.entry);
-    cx.inline_foreign_reexport_sigs = inline_foreign_reexport_sigs;
-    cx.inline_foreign_reexport_rets = inline_foreign_reexport_rets;
-    // D-CMD-OVERRIDE1=C: an override harness must emit the Jet entry the driver
-    // installed (`Driver::swap_command_entry_point`), because its `main` calls
-    // it; the stock harness still skips `fn run` — nothing there calls it.
-    let override_entry = command_override.then(|| {
-        command_override_entry(&entry.items)
-            .expect("Driver::swap_command_entry_point installs the override entry before codegen")
-    });
-    emit_program_items(&cx, &entry.items, &mut out, override_entry.is_some(), false);
-    emit_imported_foreign_close_impls(&cx, bundle, &mut out);
-
-    emit_test_fns(&cx, &tests, None, &mut out);
-    coverage_branches.extend(cx.coverage_branches.borrow().iter().cloned());
-    emit_output_check_fns(&cx, &checks, &mut out);
-    emit_test_main_cov_mode(
-        &tests,
-        &checks,
-        &coverage_branches,
-        &mut out,
-        coverage,
-        override_entry.as_deref(),
-        bundle.package_guarantees.harden,
-    );
-    strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(
-        strip_unused_gc_prelude(strip_unused_txn_prelude(strip_unused_mem_prelude(out))),
-    )))
-}
-
-/// D-TESTKIT1=A (c308 pass 2, gap #1): pick which property `#Test fn` a `jet
-/// fuzz` run targets. `test_name` is the CLI's optional second positional
-/// (`jet fuzz <file> [<name>]`).
-///   - named: must exist and must be a property test (have params) — else a
-///     plain-English `Err` naming the problem (CLI-level selection error, not
-///     a compiler diagnostic, same tier as a CLI missing-file message).
-///   - unnamed: exactly one property test in the file is picked automatically;
-///     zero or more-than-one is an `Err` (the latter lists the candidates).
-fn select_fuzz_target(tests: &[TestCase<'_>], test_name: Option<&str>) -> Result<usize, String> {
-    if let Some(name) = test_name {
-        match tests
-            .iter()
-            .position(|test| test.test.name.as_deref() == Some(name))
-        {
-            Some(i) if !tests[i].test.params.is_empty() => Ok(i),
-            Some(_) => Err(format!(
-                "`{}` is a unit `#Test`, not a property test — `jet fuzz` needs a parameterized `#Test fn` (D-TEST1)",
-                name
-            )),
-            None => Err(format!("no `#Test` named `{}` in this file", name)),
-        }
-    } else {
-        let candidates: Vec<usize> = tests
-            .iter()
-            .enumerate()
-            .filter(|(_, t)| !t.test.params.is_empty())
-            .map(|(i, _)| i)
-            .collect();
-        match candidates.len() {
-            0 => Err(
-                "no property `#Test fn` (D-TEST1) found to fuzz — `jet fuzz` needs one \
-                 parameterized `#Test fn(...)`, not a unit `#Test(\"name\") { ... }`"
-                    .to_string(),
-            ),
-            1 => Ok(candidates[0]),
-            _ => {
-                let names: Vec<&str> = candidates
-                    .iter()
-                    .map(|&index| {
-                        tests[index]
-                            .test
-                            .name
-                            .as_deref()
-                            .expect("sema resolves every test marker name before codegen")
-                    })
-                    .collect();
-                Err(format!(
-                    "multiple property tests in this file — say which one: {}\n  fix: `jet fuzz <file> <name>`, e.g. `jet fuzz <file> \"{}\"`",
-                    names.join(", "),
-                    names[0]
-                ))
-            }
-        }
-    }
-}
-
-/// D-TESTKIT1=A (c308 pass 2, gap #1): `jet fuzz <file> [<name>]` — reuses the
-/// whole `jet test` harness (same prelude, same `jet_test_fns` for every test,
-/// same `JetRng`/`JetGen`/shrink machinery from `PROP_PRELUDE`) but swaps the
-/// reporting `main` for a fuzz driver over exactly one property test:
-///   - replays the on-disk corpus first (each entry is a seed that reproduced
-///     a failure before — deterministic replay, not the raw decoded value, so
-///     no bespoke value serialization is needed, D-TEST1's `JetRng` already
-///     makes a seed a full, exact reproduction);
-///   - then generates fresh cases from a seeded, incrementing PRNG until the
-///     iteration or wall-clock budget runs out;
-///   - on the first failure, shrinks with the identical greedy algorithm the
-///     property-test driver uses, saves the (pre-shrink) seed to the corpus
-///     directory, and prints a `jet test`-shaped repro line.
-/// Returns `Err(message)` for a CLI-level target-selection problem (no/wrong/
-/// ambiguous test) rather than a compiler diagnostic — this is argument
-/// validation, not a semantic error in the user's program.
-pub fn emit_bundle_fuzz(
-    bundle: &ProgramBundle,
-    link: Option<&FfiLink>,
-    file_label: &str,
-    test_name: Option<&str>,
-) -> Result<String, String> {
-    let entry = &bundle.modules[bundle.entry];
-    let bundle_auto_derives =
-        crate::Traits::TraitRegistry::bundle_auto_derives(bundle, &bundle.name_ledger);
-    let tests: Vec<TestCase<'_>> = entry
-        .items
-        .iter()
-        .filter_map(|i| match i {
-            Item::Test(t) => Some(t),
-            _ => None,
-        })
-        .enumerate()
-        .map(|(index, test)| TestCase {
-            test,
-            module: None,
-            index,
-            measure: test.body.iter().any(|statement| {
-                matches!(
-                    statement,
-                    crate::AST::Stmt::ScopeMember { name, .. }
-                        if name == Syntax::SCOPE_TEST_MEASURE
-                )
-            }),
-        })
-        .collect();
-    if tests.is_empty() {
-        return Err(
-            "no `#Test` blocks in this file — `jet fuzz` needs a parameterized `#Test fn(...)`"
-                .to_string(),
-        );
-    }
-    let target = select_fuzz_target(&tests, test_name)?;
-
-    let mut out = String::new();
-    let module_use = module_use_for(bundle);
-    out.push_str(&format!(
-        "// Generated by {} fuzz harness — do not edit.\n",
-        Syntax::BINARY_NAME
-    ));
-    out.push_str("#![allow(warnings)]\n\n");
-    if let Some(ffi) = link {
-        out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));
-    }
-    push_cached_runtime_begin(&mut out, link);
-    push_target_dossier_runtime_identity(&mut out, bundle);
-    out.push_str(TEST_PRELUDE);
-    out.push_str(TESTING_SHARED_PRELUDE);
-    out.push_str(REPORT_PRELUDE);
-    out.push_str(TEST_REPORT_PRELUDE);
-    // Fuzzing always targets a property test, so the JetRng/JetGen/shrink
-    // runtime is always needed (unlike `jet test`, which only emits it when a
-    // property test is present).
-    out.push_str(PROP_PRELUDE);
-    out.push_str(CACHED_RUNTIME_END);
-    push_core_runtime(&mut out, bundle, true);
-    out.push('\n');
-    push_secret_decode_impl(&mut out, bundle, link);
-
-    let import_mods = import_mod_map(bundle, bundle.entry);
-    let extern_funcs = bundle_extern_funcs(bundle);
-
-    for (i, module) in bundle.modules.iter().enumerate() {
-        if i == bundle.entry {
-            continue;
-        }
-        let ns = module.alias.clone();
-        out.push_str(&format!("mod {} {{\n", mangle(&ns)));
-        out.push_str(&module_use);
-        out.push_str("use super::jet_stack_enter;\n");
-        let mut cx = build_cx_items(
-            &module.items,
-            &module.source,
-            &module.display,
-            link,
-            &extern_funcs,
-            &bundle.edition,
-        );
-        populate_cx_module_facts(&mut cx, bundle, i);
-        cx.foreign_undos = bundle_foreign_undos(bundle, i);
-        apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
-        cx.module_alias = module.alias.clone();
-        cx.core_archive_source = bundle
-            .modules
-            .iter()
-            .any(|module| module.alias == "core_archive");
-        cx.test_mode = true;
-        cx.import_mods = import_mod_map(bundle, i);
-        cx.foreign_types = foreign_type_map(bundle, i);
-        TIR::register_imported_struct_shapes(&mut cx, bundle, i);
-        register_foreign_enum_variants(&mut cx, bundle, i);
-        update_cloneability_with_foreign_types(&mut cx, &module.items);
-        cx.reexport_calls = reexport_call_map(bundle, i);
-        cx.import_sigs = import_sig_map(bundle, i);
-        cx.import_rets = import_ret_map(bundle, i);
-        cx.core_imports = core_import_map(bundle, i);
-        register_core_import_surfaces(&mut cx);
-        cx.used_core = bundle.used_core.clone();
-        cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
-        cx.root_prefix = "super::".to_string();
-        let (uinline, ufile) = unqualified_import_maps(bundle, i);
-        cx.unqualified_inline = uinline;
-        cx.unqualified_file = ufile;
-        let (inline, file, names, reexports) = inline_import_maps(bundle, i);
-        cx.inline_unqualified = inline;
-        cx.inline_unqualified_file = file;
-        cx.inline_import_names = names;
-        cx.inline_reexport_inline = reexports;
-        let (inline_core, reexport_core) = inline_core_import_maps(bundle, i);
-        cx.inline_core_imports = inline_core;
-        cx.inline_reexport_core = reexport_core;
-        cx.inline_foreign_imports = inline_foreign_import_maps(bundle, i);
-        let (inline_foreign_sigs, inline_foreign_rets) =
-            inline_foreign_import_signature_maps(bundle, i);
-        cx.inline_foreign_sigs = inline_foreign_sigs;
-        cx.inline_foreign_rets = inline_foreign_rets;
-        cx.inline_reexport_foreign = inline_foreign_reexport_maps(bundle, i);
-        let (inline_foreign_reexport_sigs, inline_foreign_reexport_rets) =
-            inline_foreign_reexport_signature_maps(bundle, i);
-        cx.inline_foreign_reexport_sigs = inline_foreign_reexport_sigs;
-        cx.inline_foreign_reexport_rets = inline_foreign_reexport_rets;
-        emit_program_items(&cx, &module.items, &mut out, false, true);
-        out.push_str("}\n\n");
-    }
-
-    let mut cx = build_cx_items(
-        &entry.items,
-        &entry.source,
-        &entry.display,
-        link,
-        &extern_funcs,
-        &bundle.edition,
-    );
-    populate_cx_module_facts(&mut cx, bundle, bundle.entry);
-    cx.foreign_undos = bundle_foreign_undos(bundle, bundle.entry);
-    apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
-    cx.module_alias = entry.alias.clone();
-    cx.core_archive_source = bundle
-        .modules
-        .iter()
-        .any(|module| module.alias == "core_archive");
-    cx.test_mode = true;
-    cx.import_mods = import_mods;
-    cx.foreign_types = foreign_type_map(bundle, bundle.entry);
-    TIR::register_imported_struct_shapes(&mut cx, bundle, bundle.entry);
-    register_foreign_enum_variants(&mut cx, bundle, bundle.entry);
-    update_cloneability_with_foreign_types(&mut cx, &entry.items);
-    cx.reexport_calls = reexport_call_map(bundle, bundle.entry);
-    cx.import_sigs = import_sig_map(bundle, bundle.entry);
-    cx.import_rets = import_ret_map(bundle, bundle.entry);
-    cx.core_imports = core_import_map(bundle, bundle.entry);
-    register_core_import_surfaces(&mut cx);
-    cx.used_core = bundle.used_core.clone();
-    cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
-    let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
-    cx.unqualified_inline = uinline;
-    cx.unqualified_file = ufile;
-    let (inline, file, names, reexports) = inline_import_maps(bundle, bundle.entry);
-    cx.inline_unqualified = inline;
-    cx.inline_unqualified_file = file;
-    cx.inline_import_names = names;
-    cx.inline_reexport_inline = reexports;
-    let (inline_core, reexport_core) = inline_core_import_maps(bundle, bundle.entry);
-    cx.inline_core_imports = inline_core;
-    cx.inline_reexport_core = reexport_core;
-    cx.inline_foreign_imports = inline_foreign_import_maps(bundle, bundle.entry);
-    let (inline_foreign_sigs, inline_foreign_rets) =
-        inline_foreign_import_signature_maps(bundle, bundle.entry);
-    cx.inline_foreign_sigs = inline_foreign_sigs;
-    cx.inline_foreign_rets = inline_foreign_rets;
-    cx.inline_reexport_foreign = inline_foreign_reexport_maps(bundle, bundle.entry);
-    let (inline_foreign_reexport_sigs, inline_foreign_reexport_rets) =
-        inline_foreign_reexport_signature_maps(bundle, bundle.entry);
-    cx.inline_foreign_reexport_sigs = inline_foreign_reexport_sigs;
-    cx.inline_foreign_reexport_rets = inline_foreign_reexport_rets;
-    emit_program_items(&cx, &entry.items, &mut out, false, false);
-    emit_imported_foreign_close_impls(&cx, bundle, &mut out);
-
-    emit_test_fns(&cx, &tests, None, &mut out);
-    emit_fuzz_main(&cx, &tests[target], target, file_label, &mut out);
-    Ok(strip_unused_os_signal_prelude(strip_unused_raylib_prelude(
-        strip_unused_term_prelude(strip_unused_gc_prelude(strip_unused_txn_prelude(
-            strip_unused_mem_prelude(out),
-        ))),
-    )))
-}
-
-/// See `emit_bundle_fuzz`'s doc comment for the overall shape. `test` is the
-/// chosen property test, `idx` its position (`jet_prop_{idx}` is its body fn,
-/// already emitted by `emit_test_fns`).
-fn emit_fuzz_main(
-    cx: &Cx,
-    test_case: &TestCase<'_>,
-    idx: usize,
-    file_label: &str,
-    out: &mut String,
-) {
-    const SHRINK_STEPS: usize = 2000;
-    let test = test_case.test;
-    let n = test.params.len();
-    let types: Vec<String> = test.params.iter().map(|p| cx.rust_type(&p.ty)).collect();
-    let tuple_ty = format!("({},)", types.join(", "));
-    let call_args: Vec<String> = (0..n).map(|k| format!("input.{}.clone()", k)).collect();
-    let gen_components: Vec<String> = types
-        .iter()
-        .map(|t| format!("<{} as JetGen>::generate(rng)", t))
-        .collect();
-    let renders: Vec<String> = test
-        .params
-        .iter()
-        .enumerate()
-        .map(|(k, p)| format!("format!(\"{} = {{}}\", input.{}.render())", p.name, k))
-        .collect();
-    let sample_renders: Vec<String> = (0..n).map(|k| format!("input.{}.render()", k)).collect();
-    let name_lit = escape_rust_str(
-        test.name
-            .as_deref()
-            .expect("sema resolves every test marker name before codegen"),
-    );
-    let file_lit = escape_rust_str(file_label);
-
-    out.push_str("fn main() {\n");
-    out.push_str("    jet_std_env_init();\n");
-    let sentry_init = Items::sentry_runtime_init(cx, out);
-    out.push_str(&sentry_init);
-    out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
-    out.push_str("    let corpus_dir = std::env::var(\"JET_FUZZ_CORPUS\").unwrap_or_else(|_| \".jet-fuzz-corpus\".to_string());\n");
-    out.push_str("    let _ = std::fs::create_dir_all(&corpus_dir);\n");
-    out.push_str("    let iterations: u64 = std::env::var(\"JET_FUZZ_ITERATIONS\").ok().and_then(|s| s.parse().ok()).unwrap_or(1000);\n");
-    out.push_str("    let time_budget_ms: Option<u64> = std::env::var(\"JET_FUZZ_TIME_MS\").ok().and_then(|s| s.parse().ok());\n");
-    out.push_str("    let base_seed: u64 = std::env::var(\"JET_FUZZ_SEED\").ok().and_then(|s| s.parse().ok()).unwrap_or(0x5EED_1234_ABCD_0001u64);\n");
-    out.push_str(&format!("    let name = {};\n", name_lit));
-    out.push_str(&format!("    let file_label = {};\n", file_lit));
-    out.push_str(&format!(
-        "    let run = |input: &{}| -> Result<(), String> {{ jet_prop_{}({}) }};\n",
-        tuple_ty,
-        idx,
-        call_args.join(", ")
-    ));
-    out.push_str(&format!(
-        "    let gen_input = |rng: &mut JetRng| -> {} {{ ({},) }};\n",
-        tuple_ty,
-        gen_components.join(", ")
-    ));
-
-    // Corpus replay: each entry is the seed of a past failure. A seed alone is
-    // a full, exact reproduction (same PRNG, same first draw), so the corpus
-    // never needs to serialize the generated value itself.
-    out.push_str("    let mut corpus_seeds: Vec<u64> = Vec::new();\n");
-    out.push_str("    if let Ok(entries) = std::fs::read_dir(&corpus_dir) {\n");
-    out.push_str("        for e in entries.flatten() {\n");
-    out.push_str("            if let Ok(s) = std::fs::read_to_string(e.path()) {\n");
-    out.push_str(
-        "                if let Ok(seed) = s.trim().parse::<u64>() { corpus_seeds.push(seed); }\n",
-    );
-    out.push_str("            }\n");
-    out.push_str("        }\n");
-    out.push_str("    }\n");
-    out.push_str("    corpus_seeds.sort();\n");
-    out.push_str("    for seed in &corpus_seeds {\n");
-    out.push_str("        let mut rng = JetRng::new(*seed);\n");
-    out.push_str("        let input = gen_input(&mut rng);\n");
-    out.push_str("        if let Err(msg) = run(&input) {\n");
-    out.push_str("            println!(\"{}: FAIL (corpus replay, seed={})\", name, seed);\n");
-    out.push_str("            eprintln!(\"  {}\", msg);\n");
-    out.push_str(&format!(
-        "            let args = vec![{}];\n",
-        renders.join(", ")
-    ));
-    out.push_str("            println!(\"  input: {}\", args.join(\", \"));\n");
-    out.push_str(
-        "            println!(\"repro: JET_PROP_SEED={} jet test {}\", seed, file_label);\n",
-    );
-    out.push_str("            std::process::exit(1);\n");
-    out.push_str("        }\n");
-    out.push_str("    }\n");
-    out.push_str("    println!(\"corpus: {} case(s) replayed clean\", corpus_seeds.len());\n");
-
-    out.push_str("    let start = std::time::Instant::now();\n");
-    out.push_str("    let mut driver_rng = JetRng::new(base_seed);\n");
-    out.push_str("    let mut n: u64 = 0;\n");
-    out.push_str("    loop {\n");
-    out.push_str("        if n >= iterations { break; }\n");
-    out.push_str("        if let Some(ms) = time_budget_ms { if start.elapsed().as_millis() as u64 >= ms { break; } }\n");
-    out.push_str("        let seed = driver_rng.next_u64();\n");
-    out.push_str("        let mut rng = JetRng::new(seed);\n");
-    out.push_str("        let mut input = gen_input(&mut rng);\n");
-    out.push_str(&format!(
-        "        let sample = vec![{}].join(\", \");\n",
-        sample_renders.join(", ")
-    ));
-    out.push_str("        jet_prop_trace_sample(\"jet_fuzz\", n, seed, &sample);\n");
-    out.push_str("        n += 1;\n");
-    out.push_str("        if let Err(first_msg) = run(&input) {\n");
-    out.push_str("            let mut msg = first_msg;\n");
-    out.push_str("            let mut improved = true;\n");
-    out.push_str("            let mut steps = 0usize;\n");
-    out.push_str(&format!(
-        "            while improved && steps < {} {{\n",
-        SHRINK_STEPS
-    ));
-    out.push_str("                improved = false;\n");
-    for k in 0..n {
-        out.push_str(&format!(
-            "                for cand in input.{}.shrink() {{\n",
-            k
-        ));
-        out.push_str("                    steps += 1;\n");
-        out.push_str("                    let mut trial = input.clone();\n");
-        out.push_str(&format!("                    trial.{} = cand;\n", k));
-        out.push_str("                    if let Err(m) = run(&trial) {\n");
-        out.push_str("                        input = trial; msg = m; improved = true; break;\n");
-        out.push_str("                    }\n");
-        out.push_str("                }\n");
-    }
-    out.push_str("            }\n");
-    out.push_str(&format!(
-        "            let args = vec![{}];\n",
-        renders.join(", ")
-    ));
-    out.push_str("            let file_name = format!(\"{}/seed_{}.txt\", corpus_dir, seed);\n");
-    out.push_str("            let _ = std::fs::write(&file_name, format!(\"{}\", seed));\n");
-    out.push_str("            println!(\"{}: FAIL (after {} iteration(s))\", name, n);\n");
-    out.push_str("            eprintln!(\"  {}\", msg);\n");
-    out.push_str("            println!(\"  minimized input: {}\", args.join(\", \"));\n");
-    out.push_str("            println!(\"  seed: {}\", seed);\n");
-    out.push_str("            println!(\"  saved: {}\", file_name);\n");
-    out.push_str(
-        "            println!(\"repro: JET_PROP_SEED={} jet test {}\", seed, file_label);\n",
-    );
-    out.push_str("            std::process::exit(1);\n");
-    out.push_str("        }\n");
-    out.push_str("    }\n");
-    out.push_str("    println!(\"{}: {} iteration(s), no failure found\", name, n);\n");
-    out.push_str("}\n");
+fn push_package_edition(out: &mut String, bundle: &ProgramBundle) {
+    push_package_edition_value(out, &bundle.edition);
 }

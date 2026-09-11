@@ -506,7 +506,11 @@ pub fn decide(root: &Path, running_version: &str, offline: bool) -> PinDecision 
             // Record the pin now that we've resolved for realization, so
             // re-runs read the lock instead of re-resolving the channel.
             if locked.is_none() {
-                Lock::record_toolchain(root, toolchain_record(&channel, &target_version));
+                if let Err(error) =
+                    Lock::record_toolchain(root, toolchain_record(&channel, &target_version))
+                {
+                    return PinDecision::Report(lock_write_diagnostic(&error));
+                }
             }
             PinDecision::ReExec {
                 binary,
@@ -617,7 +621,8 @@ pub fn move_pin(
         },
     };
     let version = resolve_channel(&channel)?;
-    Lock::record_toolchain(root, toolchain_record(&channel, &version));
+    Lock::record_toolchain(root, toolchain_record(&channel, &version))
+        .map_err(|error| lock_write_diagnostic(&error))?;
     Ok(format!(
         "jet: pinned toolchain {channel} → {version} (locked in {})",
         Syntax::UNIFIED_LOCK_FILE
@@ -729,6 +734,15 @@ pub fn e1251(channel: &str, version: &str, platform: &str) -> Diagnostic {
         None,
     )
 }
+fn lock_write_diagnostic(error: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1206",
+        format!("couldn't write {}", Syntax::UNIFIED_LOCK_FILE),
+        "the lock file records exact toolchain identity".to_string(),
+        format!("check write permissions: {error}"),
+        None,
+    )
+}
 
 // ──────────────────────────────────────────────
 // Tests
@@ -821,7 +835,8 @@ deps: { textkit: "1.2.0" }
         let root = scratch("locks-exact");
         let resolved = resolve_channel("0.4").unwrap();
         assert_eq!(resolved, "0.4.0");
-        Lock::record_toolchain(&root, toolchain_record("0.4", &resolved));
+        Lock::record_toolchain(&root, toolchain_record("0.4", &resolved))
+            .expect("valid test lock record");
 
         let tc = locked_toolchain(&root).expect("locked");
         assert_eq!(tc.channel, "0.4");
@@ -878,7 +893,8 @@ deps: { textkit: "1.2.0" }
         )
         .unwrap();
         // lock already resolved to 0.4.0
-        Lock::record_toolchain(&root, toolchain_record("0.4", "0.4.0"));
+        Lock::record_toolchain(&root, toolchain_record("0.4", "0.4.0"))
+            .expect("valid test lock record");
 
         std::env::set_var(Syntax::TOOLCHAIN_OBJECT_ENV, &obj);
         std::env::remove_var(Syntax::TOOLCHAIN_EXEC_MARKER_ENV);
@@ -930,7 +946,8 @@ deps: { textkit: "1.2.0" }
             "payload: { name: \"x\", version: \"1\", jet: 0.4 }\n",
         )
         .unwrap();
-        Lock::record_toolchain(&root, toolchain_record("0.4", "0.4.0"));
+        Lock::record_toolchain(&root, toolchain_record("0.4", "0.4.0"))
+            .expect("valid test lock record");
         std::env::remove_var(Syntax::TOOLCHAIN_EXEC_MARKER_ENV);
         assert!(matches!(
             decide(&root, "0.4.0", false),
@@ -958,7 +975,8 @@ deps: { textkit: "1.2.0" }
             "payload: { name: \"x\", version: \"1\", jet: 0.4 }\n",
         )
         .unwrap();
-        Lock::record_toolchain(&root, toolchain_record("0.4", "0.4.0"));
+        Lock::record_toolchain(&root, toolchain_record("0.4", "0.4.0"))
+            .expect("valid test lock record");
         let report = report_pin(&root);
         assert!(report.contains("pin:      jet 0.4"), "{report}");
         assert!(report.contains("locked:   0.4.0"), "{report}");

@@ -1145,7 +1145,7 @@ fn budget_surface_is_generated_into_help_completions_and_man() {
 #[test]
 fn exit_code_ok_check() {
     let p = std::env::temp_dir().join("jet_cli_ok.jet");
-    fs::write(&p, "fn run() {\n    print(\"hi\");\n}\n").unwrap();
+    fs::write(&p, "fn run() {\n    print(\"hi\")\n}\n").unwrap();
     let out = Command::new(jet()).arg("check").arg(&p).output().unwrap();
     assert_eq!(out.status.code(), Some(0), "clean check should exit 0");
 }
@@ -1259,22 +1259,9 @@ fn frequency_ring_groups_execute_real_handlers() {
 }
 
 #[test]
-fn shape6_groups_inspect_and_registry_while_rejecting_bare_actions() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let hello = root.join("examples/features/basics/hello.jet");
-    let dossier = Command::new(jet())
-        .args(["inspect", "dossier"])
-        .arg(&hello)
-        .output()
-        .unwrap();
-    assert!(
-        dossier.status.success(),
-        "grouped dossier did not reach its handler: {}",
-        String::from_utf8_lossy(&dossier.stderr)
-    );
-    assert!(String::from_utf8_lossy(&dossier.stdout).contains("run"));
-
+fn shape6_registry_group_rejects_bare_actions() {
     let empty = isolated_cwd("shape6_registry_publish");
+
     let publish = Command::new(jet())
         .args(["registry", "publish"])
         .current_dir(&empty)
@@ -1288,7 +1275,6 @@ fn shape6_groups_inspect_and_registry_while_rejecting_bare_actions() {
     );
 
     for (bare, canonical) in [
-        ("dossier", "jet inspect dossier"),
         ("publish", "jet registry publish"),
     ] {
         let out = Command::new(jet()).arg(bare).output().unwrap();
@@ -1362,34 +1348,6 @@ fn run(args: RunArgs) {
         "generated and Core help both claimed --help:\n{help}"
     );
 
-    let dossier = Command::new(jet())
-        .args(["inspect", "dossier", "typed.jet", "run", "--json"])
-        .current_dir(&dir)
-        .output()
-        .unwrap();
-    assert!(
-        dossier.status.success(),
-        "typed command dossier failed: {}",
-        String::from_utf8_lossy(&dossier.stderr)
-    );
-    let dossier = String::from_utf8(dossier.stdout).unwrap();
-    for projected in [
-        "\"entry_type\":\"RunArgs\"",
-        "\"flag\":\"--name\"",
-        "\"value_type\":\"String\"",
-        "\"required\":true",
-        "\"help\":\"person to greet\"",
-        "\"flag\":\"--retries\"",
-        "\"default\":\"2\"",
-        "\"flag\":\"--verbose\"",
-        "\"shape\":\"flag\"",
-        "\"completion_words\":[\"--help\",\"name\",\"--name\",\"--retries\",\"--verbose\"]",
-    ] {
-        assert!(
-            dossier.contains(projected),
-            "typed command dossier omitted {projected}: {dossier}"
-        );
-    }
 
     for shell in ["bash", "zsh", "fish", "powershell"] {
         let completion = Command::new(jet())
@@ -1565,92 +1523,8 @@ fn run(args: RunArgs) {
         String::from_utf8_lossy(&run.stderr)
     );
     assert_eq!(String::from_utf8_lossy(&run.stdout), "Ada\n2\ntrue\n");
-
-    let dossier = Command::new(jet())
-        .args(["inspect", "dossier", "run.jet", "run", "--json"])
-        .current_dir(&dir)
-        .output()
-        .unwrap();
-    assert!(
-        dossier.status.success(),
-        "imported typed command dossier failed: {}",
-        String::from_utf8_lossy(&dossier.stderr)
-    );
-    let dossier = String::from_utf8(dossier.stdout).unwrap();
-    for fact in [
-        "\"entry_type\":\"RunArgs\"",
-        "\"flag\":\"--name\"",
-        "\"default\":\"2\"",
-        "\"flag\":\"--verbose\"",
-    ] {
-        assert!(
-            dossier.contains(fact),
-            "imported CLI dossier omitted {fact}: {dossier}"
-        );
-    }
 }
 
-#[test]
-fn typed_cli_entry_accepts_an_imported_program_struct() {
-    let dir = isolated_cwd("shape_cli_imported_program_struct");
-    fs::write(
-        dir.join("commands.jet"),
-        r#"#CLI
-pub struct Commands {
-    pub fn serve(self, port: Int) {}
-    pub fn import(self, file: String) {}
-}
-"#,
-    )
-    .unwrap();
-    fs::write(
-        dir.join("run.jet"),
-        r#"use "commands"
-
-fn run(args: Commands) {}
-"#,
-    )
-    .unwrap();
-
-    let run = Command::new(jet())
-        .args([
-            "run",
-            "--profile=debug",
-            "run.jet",
-            "--",
-            "serve",
-            "--port",
-            "8080",
-        ])
-        .current_dir(&dir)
-        .output()
-        .unwrap();
-    assert!(
-        run.status.success(),
-        "imported program entry failed: {}",
-        String::from_utf8_lossy(&run.stderr)
-    );
-
-    let dossier = Command::new(jet())
-        .args(["inspect", "dossier", "run.jet", "run", "--json"])
-        .current_dir(&dir)
-        .output()
-        .unwrap();
-    assert!(dossier.status.success());
-    let dossier = String::from_utf8(dossier.stdout).unwrap();
-    for fact in [
-        "\"entry_type\":\"Commands\"",
-        "\"name\":\"serve\"",
-        "\"flag\":\"--port\"",
-        "\"name\":\"import\"",
-        "\"flag\":\"--file\"",
-    ] {
-        assert!(
-            dossier.contains(fact),
-            "imported program command dossier omitted {fact}: {dossier}"
-        );
-    }
-}
 
 #[test]
 fn colliding_imported_cli_type_resolution_stays_in_codegen_sync() {

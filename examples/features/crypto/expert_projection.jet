@@ -1,0 +1,47 @@
+// D-CRYPTO-EXPERT1: explicit expert rungs and typed byte projections.
+use core.crypto as crypto
+use core.crypto.expert as expert
+
+fn run() {
+    message :: "expert surface".bytes()
+    digest256 :: crypto.sha256(message)
+    digest512 :: crypto.sha512(message)
+    print("digests:{digest256.bytes().len()}:{digest512.bytes().len()}")
+
+    recipient :: crypto.X25519SecretKey.new_random() ?? return
+    sealed :: crypto.seal([recipient.public_key()], message, []) ?? return
+    opened :: crypto.open(recipient, sealed, []) ?? return
+    print("sealed:{sealed.bytes().len()}:{opened == message}")
+    print("public:{recipient.public_key().bytes().len()}")
+
+    signer :: crypto.SigningKey.new_random() ?? return
+    signature :: crypto.sign(signer, message) ?? return
+    verify_key :: signer.public_key()
+    verified :: crypto.verify(verify_key, message, signature) ?? return
+    print("signature:{signature.bytes().len()}:{verify_key.bytes().len()}:{verified}")
+
+    secret :: crypto.Secret.from_text("expert secret")
+    wrapped :: crypto.wrap(secret, recipient.public_key()) ?? return
+    print("wrapped:{wrapped.bytes().len()}")
+
+    shared :: crypto.x25519(recipient, recipient.public_key()) ?? return
+    print("shared:{expert.shared_secret_bytes(shared).len()}")
+
+    #Unsafe("expert cryptography is an explicit opt-in") {
+        key :: [U8]{0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x8b, 0x8c, 0x8d, 0x8e, 0x8f, 0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9a, 0x9b, 0x9c, 0x9d, 0x9e, 0x9f}
+        nonce :: [U8]{0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f, 0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57}
+        box :: expert.xchacha20poly1305_seal(key, nonce, message, []) ?? return
+        plain :: expert.xchacha20poly1305_open(key, nonce, box, []) ?? return
+        print("xchacha:{plain == message}")
+
+        password :: crypto.Secret.from_text("password")
+        derived :: expert.argon2id(password, "somesalt".bytes(), 8192, 1, 1, 16) ?? return
+        print("argon:{expert.secret_bytes(derived).len()}")
+
+        seed :: expert.signing_key_bytes(signer)
+        raw_signature :: expert.ed25519_sign(seed, message) ?? return
+        strict :: expert.ed25519_verify_strict(verify_key.bytes(), message, raw_signature) ?? return
+        print("ed25519:{raw_signature.bytes().len()}:{strict}")
+        print("secret-bytes:{expert.x25519_secret_bytes(recipient).len()}")
+    }
+}

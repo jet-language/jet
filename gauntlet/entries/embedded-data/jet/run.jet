@@ -1,5 +1,4 @@
 use core.files as files
-use core.math as math
 
 #CLI
 struct Args {
@@ -7,37 +6,43 @@ struct Args {
 }
 
 fn run(args: Args) !Err -> {
-    data :: files.read_bytes(Path.from(args.input)) ?? return
+    payload :: files.read_bytes(args.input) ?? return
 
-    checksum := 0
-    loop byte in data -> checksum += Int.from_u8(byte)
-    reader :: Reader.over(data)
-    if (reader.take(4) ?? return) != "EDB1".bytes() -> return Err("bad magic")
+    checksum := U64{0}
+    loop byte in payload -> checksum += U64.from_u8(byte)
+
+    reader :: Reader.over(payload)
+    reader.take_pattern([U8]{"EDB1"}) ?? return Err("bad magic")
     count :: Int.from_u32(reader.read_u32_le() ?? return)
 
-    channels := [Int#4]{0, 0, 0, 0}
-    sample_min := 65535
-    sample_max := 0
-    sample_sum := 0
-    energy_sum := 0
-    load_sum := 0
-    tick_sum := 0
+    valid := U64{0}
+    channels := [U64#4]{0, 0, 0, 0}
+    sample_min := U64{65535}
+    sample_max := U64{0}
+    sample_sum := U64{0}
+    energy_sum := U64{0}
+    load_sum := U64{0}
+    tick_sum := U64{0}
 
     loop _ in 0..<count {
         frame :: reader.take_pattern([U8]{"{channel:U8}{flags:U8}{sample:U16le}{tick:U32le}{energy:U16le}{load:U16le}"}) ?? return
+        channel :: Int.from_u8(frame.channel)
+        if channel >= channels.len() -> return Err("bad channel")
         if frame.flags == 0 {
-            channels[Int.from_u8(frame.channel)] = channels[Int.from_u8(frame.channel)] + 1
-            sample_min = math.min(sample_min, Int.from_u16(frame.sample))
-            sample_max = math.max(sample_max, Int.from_u16(frame.sample))
-            sample_sum += Int.from_u16(frame.sample)
-            energy_sum += Int.from_u16(frame.energy)
-            load_sum += Int.from_u16(frame.load)
-            tick_sum += Int.from_u32(frame.tick)
+            valid += U64{1}
+            channels[channel] = channels[channel] + U64{1}
+            sample :: U64.from_u16(frame.sample)
+            if sample < sample_min -> sample_min = sample
+            if sample > sample_max -> sample_max = sample
+            sample_sum += sample
+            energy_sum += U64.from_u16(frame.energy)
+            load_sum += U64.from_u16(frame.load)
+            tick_sum += U64.from_u32(frame.tick)
         }
     }
 
     print("frames {count}")
-    print("valid {channels.sum()}")
+    print("valid {valid}")
     print("channels {channels[0]} {channels[1]} {channels[2]} {channels[3]}")
     print("sample {sample_min} {sample_max} {sample_sum}")
     print("energy {energy_sum}")

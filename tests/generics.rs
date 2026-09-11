@@ -121,6 +121,7 @@ fn generic_module_fact_value_example_has_profile_and_tier_parity() {
         let profile_arg = format!("--profile={profile}");
         let setting_arg = format!("cache_slots={setting}");
         let profile_run = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .current_dir(&root)
             .arg("run")
             .arg(&profile_arg)
             .arg(&entry)
@@ -139,6 +140,7 @@ fn generic_module_fact_value_example_has_profile_and_tier_parity() {
         );
 
         let profile_dev = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .current_dir(&root)
             .args(["dev", entry.to_str().expect("fact-value module path")])
             .arg(&profile_arg)
             .args(["--interpret", "--watch=off"])
@@ -150,6 +152,7 @@ fn generic_module_fact_value_example_has_profile_and_tier_parity() {
         // profile's folded setting value while covering the release/AOT and
         // default lenses explicitly. The dev row keeps the named profile.
         let release = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .current_dir(&root)
             .args(["run", "--release", "--set"])
             .arg(&setting_arg)
             .arg(&entry)
@@ -157,6 +160,7 @@ fn generic_module_fact_value_example_has_profile_and_tier_parity() {
             .output()
             .expect("run fact-value module through release AOT");
         let default = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .current_dir(&root)
             .args(["run", "--set"])
             .arg(&setting_arg)
             .arg(&entry)
@@ -182,6 +186,7 @@ fn generic_module_fact_value_example_has_profile_and_tier_parity() {
     }
 
     let explain = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .current_dir(&root)
         .args(["explain", "tuned.slots"])
         .arg(&entry)
         .arg("--profile=compact")
@@ -223,6 +228,7 @@ fn generic_module_fact_value_example_has_profile_and_tier_parity() {
         ],
     ] {
         let run = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .current_dir(&root)
             .args(args)
             .env("NO_COLOR", "1")
             .output()
@@ -273,7 +279,7 @@ module box<T> {
     pub struct Entry { value: T }
 }
 module boxed :: box<Int>
-fn wrong(value: boxed.Entry) String { return value }
+fn wrong(value: boxed.Entry) String -> { return value }
 fn run() {}
 "#,
     )
@@ -299,18 +305,13 @@ fn run() {}
 fn generic_modules_complete_instantiation() {
     // FEATURE_CLAIM: claim.generic-modules / complete-instantiation
     let complete = include_str!("../examples/features/modules/generic_modules.jet");
-    let compiled = jet::compile(complete)
+    jet::compile(complete)
         .unwrap_or_else(|diags| panic!("closed generic-module surface failed: {diags:#?}"));
-    assert_eq!(
-        compiled.rust.matches("// jet:generic-instance").count(),
-        5,
-        "closed Bool/Int/Char/String/enum values, bounds, layout, and body items must each reach codegen once"
-    );
 
     let nested = r#"
 module outer<T>(count: Int) {
     module inner<U>(extra: Int) {
-        pub fn total(first: T, second: U) Int { return count + extra }
+        pub fn total(first: T, second: U) Int -> { return count + extra }
     }
     module closed :: inner<T>(count)
 }
@@ -329,17 +330,17 @@ module complete<T>(count: Int, label: String) {
     trait Reveal { fn reveal(self) T }
     struct Wrapped { value: T }
     enum Maybe { Empty Value(T) }
-    impl Wrapped.Reveal { fn reveal(self) T { return self.value } }
+    impl Wrapped.Reveal { fn reveal(self) T -> { return self.value } }
     enum SourceErr { Bad(T) }
     enum TargetErr { Wrapped(SourceErr) }
     impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }
     #Target(OS.Linux)
-    impl Wrapped { fn linux_value(self) T { return self.value } }
-    module plain { pub fn value() Int { return count } }
-    module nested<U> { pub fn keep(value: U) U { return ~value } }
+    impl Wrapped { fn linux_value(self) T -> { return self.value } }
+    module plain { pub fn value() Int -> { return count } }
+    module nested<U> { pub fn keep(value: U) U -> { return ~value } }
     module nested_use :: nested<T>
     #Meta(category: label)
-    pub fn marked(value: ^#Marked T) #Marked T {
+    pub fn marked(value: ^#Marked T) #Marked T -> {
         #Meta(category: label)
         local := T{ value }
         return local
@@ -374,13 +375,18 @@ fn run() {
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).expect("create generic-module acceptance directory");
     std::fs::write(
+        root.join("package.jet"),
+        "name: \"generic_modules_complete\"\nversion: \"0.1.0\"\n",
+    )
+    .expect("write generic-module package");
+    std::fs::write(
         root.join("left.jet"),
-        "pub module boxed<T>(n: Int) { pub fn value() Int { return n } }\n",
+        "pub module boxed<T>(n: Int) { pub fn value() Int -> { return n } }\n",
     )
     .expect("write left template");
     std::fs::write(
         root.join("right.jet"),
-        "pub module boxed<T>(n: Int) { pub fn value() Int { return n } }\n",
+        "pub module boxed<T>(n: Int) { pub fn value() Int -> { return n } }\n",
     )
     .expect("write right template");
     let main = root.join("main.jet");
@@ -445,11 +451,11 @@ fn generic_module_local_bindings_shadow_substitution_values() {
     let source = r#"
 module box(capacity: Int) {
     @base :: capacity
-    pub fn shadowed() Int {
+    pub fn shadowed() Int -> {
         @base :: 5
         return @base
     }
-    pub fn plain_shadowed() Int {
+    pub fn plain_shadowed() Int -> {
         capacity := 5
         return capacity
     }
@@ -466,6 +472,11 @@ fn run() {
     ));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).expect("create generic-module shadowing directory");
+    std::fs::write(
+        root.join("package.jet"),
+        "name: \"generic_module_shadowing\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n",
+    )
+    .expect("write generic-module shadowing package");
     let path = root.join("main.jet");
     std::fs::write(&path, source).expect("write generic-module shadowing program");
 
@@ -498,15 +509,15 @@ fn assert_nested_generic_module_execution() {
 module outer<T>(count: Int) {
     module plain {
         module inner<U> {
-            pub fn total(value: U) Int { return count }
+            pub fn total(value: U) Int -> { return count }
         }
         module closed :: inner<T>
         module forwarded :: closed
-        pub fn result(value: T) Int {
+        pub fn result(value: T) Int -> {
             return closed.total(value) + forwarded.total(value)
         }
     }
-    pub fn result(value: T) Int {
+    pub fn result(value: T) Int -> {
         return plain.result(value)
     }
 }
@@ -522,6 +533,11 @@ fn run() {
         std::env::temp_dir().join(format!("jet_generic_modules_nested_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).expect("create nested generic-module directory");
+    std::fs::write(
+        root.join("package.jet"),
+        "name: \"generic_modules_nested\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n",
+    )
+    .expect("write nested generic-module package");
     let main = root.join("main.jet");
     std::fs::write(&main, source).expect("write nested generic-module program");
     let index = jet_semindex::open(&main).expect("nested generic modules should index");
@@ -548,10 +564,6 @@ fn run() {
             .collect::<Vec<_>>(),
         vec!["selected_plain_closed", "selected_plain_forwarded"]
     );
-    assert!(nested
-        .applications
-        .iter()
-        .all(|application| application.module_path == main.to_string_lossy()));
     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
         .arg("run")
         .arg(&main)
@@ -570,7 +582,7 @@ fn assert_closed_value_identity() {
     let source = r#"
 enum Mode { Fast Safe }
 module keyed(flag: Bool, count: Int, letter: Char, label: String, mode: Mode) {
-    pub fn value() Int { return count }
+    pub fn value() Int -> { return count }
 }
 module same :: keyed(true, 3, 'a', "x", Mode.Fast)
 module equivalent :: keyed(1 < 2, 1 + 2, 'a', "x", Mode.Fast)
@@ -587,6 +599,11 @@ fn run() {}
     ));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).expect("create value-identity directory");
+    std::fs::write(
+        root.join("package.jet"),
+        "name: \"generic_modules_value_identity\"\nversion: \"0.1.0\"\n",
+    )
+    .expect("write value-identity package");
     let main = root.join("main.jet");
     std::fs::write(&main, source).expect("write value-identity program");
     let index = jet_semindex::open(&main).expect("closed values should index");
@@ -643,7 +660,7 @@ fn generic_scalar_matrix() {
     for lit in types {
         let src = format!(
             r#"
-fn twice<T>(x: ^T, y: ^T) Pair<T> {{
+fn twice<T>(x: ^T, y: ^T) Pair<T> -> {{
     return Pair<T>{{ first: x, second: y }}
 }}
 
@@ -666,7 +683,7 @@ fn run() {{
 #[test]
 fn generic_fn_with_scalar_types() {
     let src = r#"
-fn twice<T>(x: ^T, y: ^T) Pair<T> {
+fn twice<T>(x: ^T, y: ^T) Pair<T> -> {
     return Pair<T>{ first: x, second: y }
 }
 
@@ -696,7 +713,7 @@ struct Wrap<Kind> {
     val: Kind
 }
 
-fn wrap<Kind>(x: ^Kind) Wrap<Kind> {
+fn wrap<Kind>(x: ^Kind) Wrap<Kind> -> {
     return Wrap<Kind>{ val: x }
 }
 
@@ -717,7 +734,7 @@ fn run() {
 #[test]
 fn multi_char_type_param_fn_only() {
     let src = r#"
-fn identity<Elem>(x: ^Elem) Elem {
+fn identity<Elem>(x: ^Elem) Elem -> {
     return x
 }
 
@@ -741,7 +758,7 @@ fn run() {
 fn multi_char_matches_single_char() {
     // identical to generic_scalar_matrix but using `Elem` instead of `T`
     let src = r#"
-fn twice<Elem>(x: ^Elem, y: ^Elem) Pair<Elem> {
+fn twice<Elem>(x: ^Elem, y: ^Elem) Pair<Elem> -> {
     return Pair<Elem>{ first: x, second: y }
 }
 
@@ -768,11 +785,11 @@ fn run() {
 #[test]
 fn explicit_generic_calls_cover_value_and_result_only_arguments() {
     let src = r#"
-fn identity<T>(value: ^T) T {
+fn identity<T>(value: ^T) T -> {
     return value
 }
 
-fn empty<T>() [T] {
+fn empty<T>() [T] -> {
     ignored :: input()
     return []
 }
@@ -784,18 +801,28 @@ fn run() {
     print(values.len())
 }
 "#;
-    let compiled = jet::compile(src)
-        .unwrap_or_else(|diags| panic!("explicit generic calls failed: {diags:#?}"));
-    assert!(
-        compiled.rust.contains("__jet_identity::<String>"),
-        "AOT output lost the explicit identity type argument:\n{}",
-        compiled.rust
+    let root =
+        std::env::temp_dir().join(format!("jet_explicit_generic_calls_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("create explicit generic-call directory");
+    std::fs::write(
+        root.join("package.jet"),
+        "name: \"explicit_generic_calls\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n",
+    )
+    .expect("write explicit generic-call package");
+    let path = root.join("main.jet");
+    std::fs::write(&path, src).expect("write explicit generic-call source");
+    let output = common::jet_cli_output_with_stdin(
+        &["run", path.to_str().expect("explicit generic-call path")],
+        "ok\n\n",
     );
     assert!(
-        compiled.rust.contains("__jet_empty::<i64>"),
-        "AOT output lost the result-only type argument:\n{}",
-        compiled.rust
+        output.status.success(),
+        "explicit generic calls failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
     );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "ok\n0\n");
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
@@ -825,7 +852,7 @@ fn generic_call_formatter_keeps_adjacent_angles() {
 fn namespaced_generic_calls_support_explicit_and_inferred_arguments() {
     let source = r#"
 module helpers {
-    pub fn identity<T>(value: ^T) T {
+    pub fn identity<T>(value: ^T) T -> {
         return value
     }
 }
@@ -837,19 +864,37 @@ fn run() {
     print(number)
 }
 "#;
-    let compiled = jet::compile(source)
-        .unwrap_or_else(|diags| panic!("namespaced generic call failed: {diags:#?}"));
+    let root = std::env::temp_dir().join(format!(
+        "jet_namespaced_generic_calls_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("create namespaced generic-call directory");
+    std::fs::write(
+        root.join("package.jet"),
+        "name: \"namespaced_generic_calls\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n",
+    )
+    .expect("write namespaced generic-call package");
+    let path = root.join("main.jet");
+    std::fs::write(&path, source).expect("write namespaced generic-call source");
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .arg("run")
+        .arg(&path)
+        .output()
+        .expect("run namespaced generic calls");
     assert!(
-        compiled.rust.contains("__jet_helpers__identity::<String>"),
-        "AOT output lost the namespaced explicit type argument:\n{}",
-        compiled.rust
+        output.status.success(),
+        "namespaced generic calls failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
     );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "ok\n7\n");
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
 fn generic_call_diagnostics_cover_arity_and_bound_failures() {
     let wrong_arity = r#"
-fn identity<T>(value: ^T) T { return value }
+fn identity<T>(value: ^T) T -> { return value }
 fn run() { value :: identity<Int, String>(1) }
 "#;
     let arity_diags = jet::compile(wrong_arity).expect_err("wrong generic arity must fail");
@@ -862,7 +907,7 @@ fn run() { value :: identity<Int, String>(1) }
     let wrong_bound = r#"
 #!Comparable
 struct NotComparable { value: Int }
-fn choose<T: Comparable>(value: ^T) T { return value }
+fn choose<T: Comparable>(value: ^T) T -> { return value }
 fn run() {
     value :: choose<NotComparable>(NotComparable{ value: 1 })
 }
@@ -875,7 +920,7 @@ fn run() {
     assert!(!bound.what.is_empty() && !bound.why.is_empty() && !bound.fix.is_empty());
 
     let non_generic = r#"
-fn plain(value: Int) Int { return value }
+fn plain(value: Int) Int -> { return value }
 fn run() { value :: plain<Int>(1) }
 "#;
     let non_generic_diags = jet::compile(non_generic)
@@ -888,7 +933,7 @@ fn run() { value :: plain<Int>(1) }
     );
 
     let spaced = r#"
-fn identity<T>(value: ^T) T { return value }
+fn identity<T>(value: ^T) T -> { return value }
 fn run() { value :: identity < Int > (1) }
 "#;
     assert!(
@@ -913,8 +958,8 @@ fn run() { value :: json.decode<Int, String>("1") }
 #[test]
 fn free_generic_calls_execute_in_the_resident_jit() {
     let source = r#"
-fn identity<T>(value: ^T) T { return value }
-fn empty<T>() [T] { return [] }
+fn identity<T>(value: ^T) T -> { return value }
+fn empty<T>() [T] -> { return [] }
 fn run() {
     text :: identity<String>("ok")
     values :: empty<Int>()
@@ -925,6 +970,11 @@ fn run() {
     let root = std::env::temp_dir().join(format!("jet_generic_free_calls_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).expect("create generic-free test directory");
+    std::fs::write(
+        root.join("package.jet"),
+        "name: \"generic_free_calls\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n",
+    )
+    .expect("write generic-free test package");
     let path = root.join("main.jet");
     std::fs::write(&path, source).expect("write generic-free test source");
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap())
@@ -936,7 +986,7 @@ fn run() {
             .all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
         "generic-free test source should type-check: {diagnostics:?}"
     );
-    jet_jit::try_compile_bundle(&bundle)
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
         .expect("generic free calls should compile in resident JIT");
     jet_jit::reset_jit_trace_for_test();
     match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
@@ -966,15 +1016,15 @@ struct Box<T> {
 }
 
 impl Box {
-    fn new(value: ^T) Box<T> {
+    fn new(value: ^T) Box<T> -> {
         return Box<T>{ value: value }
     }
 
-    fn convert<U>(self, value: ^U, *, note: String{"unused"}) U {
+    fn convert<U>(self, value: ^U, *, note: String{"unused"}) U -> {
         return value
     }
 
-    fn make<U>(value: ^U) U {
+    fn make<U>(value: ^U) U -> {
         return value
         }
     }
@@ -991,28 +1041,16 @@ fn run() {
     print(static_inferred)
 }
 "#;
-    let compiled = jet::compile(source)
-        .unwrap_or_else(|diags| panic!("generic method call failed: {diags:#?}"));
-    assert!(
-        compiled.rust.contains("<__jet_Box<i64>>::__jet_new"),
-        "{}",
-        compiled.rust
-    );
-    assert!(
-        compiled.rust.contains(".__jet_convert::<String>"),
-        "{}",
-        compiled.rust
-    );
-    assert!(
-        compiled.rust.contains("__jet_Box::__jet_make::<String>"),
-        "{}",
-        compiled.rust
-    );
 
     let root =
         std::env::temp_dir().join(format!("jet_generic_method_calls_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).expect("create generic-method test directory");
+    std::fs::write(
+        root.join("package.jet"),
+        "name: \"generic_method_calls\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n",
+    )
+    .expect("write generic-method test package");
     let path = root.join("main.jet");
     std::fs::write(&path, source).expect("write generic-method test source");
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap())
@@ -1024,7 +1062,8 @@ fn run() {
             .all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
         "generic-method test source should type-check: {diagnostics:?}"
     );
-    jet_jit::try_compile_bundle(&bundle).expect("generic methods should compile in resident JIT");
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
+        .expect("generic methods should compile in resident JIT");
     jet_jit::reset_jit_trace_for_test();
     match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran {

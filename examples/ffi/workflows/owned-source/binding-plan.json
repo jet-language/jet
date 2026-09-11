@@ -1,0 +1,50 @@
+{
+  "schema": "jet-ffi-workflow-v1",
+  "workflow": "owned-source",
+  "status": "authored-unexecuted",
+  "source": {
+    "root": "native/frame",
+    "files": ["native/frame/frame.hpp", "native/frame/frame_protocol.h", "native/frame/frame_protocol_impl.hpp", "native/frame/binding.hpp"],
+    "authority": "owned",
+    "original_input": true
+  },
+  "binding": {
+    "language": "cpp",
+    "standard": "c++20 (native Frame/span)",
+    "projection": "stable C owner/view protocol",
+    "module": "c.jet_cpp_frames",
+    "imports": ["c.jet_cpp_frames as protocol", "cpp.frames as native"],
+    "native_artifact": "jet_cpp_frames",
+    "carrier": "binding.hpp includes frame_protocol_impl.hpp; CppBind discovers local C-linkage declarations automatically",
+    "cpp_cache": ".jet/bindings/cpp/frames.jet",
+    "c_cache": ".jet/bindings/c/jet_cpp_frames.jet",
+    "symbols": ["frame_document_open", "frame_document_bytes", "frame_view_at", "frame_document_replace", "frame_document_close"]
+  },
+  "contracts": {
+    "owner": "FrameDocument slot+generation over Frame",
+    "view": "FrameView slot+generation over std::span<const uint8_t>",
+    "view_lifetime": "borrowed generation token tied to Frame",
+    "invalidation": "replace/close advances generation; stale view returns FRAME_EXPIRED_VIEW",
+    "width": "uint8",
+    "effects": ["alloc", "mutate"]
+  },
+  "build": {
+    "command": "jet bind cpp native/frame/binding.hpp --target $JET_TARGET --clang $CLANG --ar $AR --pkg frames",
+    "c_command": "jet bind native/frame/frame_protocol.h --pkg jet_cpp_frames",
+    "then": ["jet build", "jet run"],
+    "output": "20 1 50 (FRAME_EXPIRED_VIEW=1)"
+  },
+  "failure_paths": [
+    {
+      "case": "view-after-owner-mutation",
+      "input": "invalid-lifetime.jet",
+      "result": "runtime-reject",
+      "diagnostics": ["FRAME_EXPIRED_VIEW", "generation", "borrowed view"]
+    },
+    {
+      "case": "native-width-mismatch",
+      "result": "reject",
+      "diagnostic": "uint8 width must remain explicit"
+    }
+  ]
+}

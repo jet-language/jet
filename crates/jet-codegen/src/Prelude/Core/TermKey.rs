@@ -57,6 +57,45 @@ pub enum JetKey {
     /// Anything else (bytes we could not parse into a known sequence).
     Unknown,
 }
+impl JetKey {
+    /// Stable spelling shared by TUI bindings and every terminal host.
+    pub fn code(&self) -> String {
+        match self {
+            Self::Char(ch) => ch.to_string(),
+            Self::Enter => "enter".to_string(),
+            Self::Escape => "escape".to_string(),
+            Self::Backspace => "backspace".to_string(),
+            Self::Tab => "tab".to_string(),
+            Self::Delete => "delete".to_string(),
+            Self::Up => "up".to_string(),
+            Self::Down => "down".to_string(),
+            Self::Left => "left".to_string(),
+            Self::Right => "right".to_string(),
+            Self::F(number) => format!("f{number}"),
+            Self::Ctrl(ch) => ch.to_string(),
+            Self::Unknown => "unknown".to_string(),
+        }
+    }
+
+    pub const fn modifier_bits(&self) -> u8 {
+        match self {
+            Self::Ctrl(_) => 1,
+            _ => 0,
+        }
+    }
+
+    pub const fn is_interrupt(&self) -> bool {
+        matches!(self, Self::Ctrl('c'))
+    }
+}
+
+pub fn jet_term_key_code(key: &JetKey) -> String {
+    key.code()
+}
+
+pub const fn jet_term_key_modifier_bits(key: &JetKey) -> u8 {
+    key.modifier_bits()
+}
 
 #[cfg(unix)]
 mod jet_term_unix {

@@ -1,0 +1,15 @@
+use core.data.arrow as arrow
+
+// A host reader supplies this checked, uniquely-owned batch. Both Core calls
+// consume their carrier so release happens after the final operation only.
+pub fn consume(batch: arrow.DataArrowBatch<()>) {
+    imported :: arrow.import(^batch)
+    query :: arrow.query(^imported) ?? panic("Arrow query")
+    rows :: query.collect() ?? panic("Arrow collect")
+    print("arrow rows={rows.len()}")
+}
+
+fn run() {
+    print("arrow owner: checked shared lifetime")
+    print("arrow owner: explicit copy and no-copy refusal")
+}

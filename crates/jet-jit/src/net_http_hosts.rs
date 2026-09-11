@@ -3,14 +3,12 @@
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
-use jet_codegen::AST::{CtKey, CtReport, CtValue, Type};
-use std::collections::BTreeMap;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::MutexGuard;
 
+use crate::runtime_host::JitCallableSlot;
 use crate::Concurrency;
 use crate::JitResultValue;
 use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
-use crate::runtime_host::JitCallableSlot;
 
 enum NetHttpHandle {
     TcpListener(Arc<JetTCPListener>),
@@ -30,6 +28,7 @@ enum NetHttpHandle {
     #[cfg(unix)]
     UnixStream(Arc<Mutex<JetUnixStream>>),
     HTTPMux(Arc<JetHTTPMux>),
+    HTTPRouter(Arc<Mutex<JetHTTPRouter>>),
     HTTPRequest(JetHTTPRequest),
     HTTPResponse(JetHTTPResponse),
     HTTPBody(JetHTTPBody),
@@ -91,10 +90,7 @@ fn with_handle<R>(handle: i64, f: impl FnOnce(&NetHttpHandle) -> Option<R>) -> O
     let idx = handle.saturating_sub(1) as usize;
     v.get(idx).and_then(|s| s.as_ref()).and_then(f)
 }
-fn with_handle_mut<R>(
-    handle: i64,
-    f: impl FnOnce(&mut NetHttpHandle) -> Option<R>,
-) -> Option<R> {
+fn with_handle_mut<R>(handle: i64, f: impl FnOnce(&mut NetHttpHandle) -> Option<R>) -> Option<R> {
     let mut v = lock_handles();
     let idx = handle.saturating_sub(1) as usize;
     v.get_mut(idx).and_then(|s| s.as_mut()).and_then(f)
@@ -119,6 +115,12 @@ fn tcp_stream(handle: i64) -> Option<Arc<Mutex<JetTCPStream>>> {
         _ => None,
     })
 }
+fn ip_addr(handle: i64) -> Option<JetIpAddr> {
+    with_handle(handle, |h| match h {
+        NetHttpHandle::IPAddr(value) => Some(value.clone()),
+        _ => None,
+    })
+}
 
 fn tls_client_config(handle: i64) -> Option<JetTLSClientConfig> {
     with_handle(handle, |h| match h {
@@ -134,9 +136,7 @@ fn tls_root_certificates(handle: i64) -> Option<JetTLSRootCertificates> {
     })
 }
 
-pub(crate) fn tls_root_certificates_for_ambient(
-    handle: i64,
-) -> Option<JetTLSRootCertificates> {
+pub(crate) fn tls_root_certificates_for_ambient(handle: i64) -> Option<JetTLSRootCertificates> {
     tls_root_certificates(handle)
 }
 
@@ -198,6 +198,65 @@ fn http_mux(handle: i64) -> Option<Arc<JetHTTPMux>> {
         NetHttpHandle::HTTPMux(m) => Some(Arc::clone(m)),
         _ => None,
     })
+}
+fn jet_jit_http_router_new() -> i64 {
+    push_handle(NetHttpHandle::HTTPRouter(Arc::new(Mutex::new(
+        jet_http_router_new(),
+    ))))
+}
+
+fn jet_jit_http_router_register(
+    router: i64,
+    method: i64,
+    pattern: i64,
+    callable: i64,
+    file: i64,
+    line: i64,
+    contract: i64,
+) -> i64 {
+    let method = clone_string(method);
+    let pattern = clone_string(pattern);
+    let file = clone_string(file);
+    let contract = clone_string(contract);
+    let handler = with_handle(callable, |handle| match handle {
+        NetHttpHandle::HTTPHandler(handler) => Some(Arc::clone(handler)),
+        _ => None,
+    })
+    .or_else(|| wrap_bound_http_handler(callable));
+    let Some(handler) = handler else {
+        Concurrency::with_runtime_mut(|runtime| runtime.set_trap("invalid resident HTTP handler"));
+        return 0;
+    };
+    let Some(router) = http_router(router) else {
+        Concurrency::with_runtime_mut(|runtime| runtime.set_trap("invalid HTTPRouter"));
+        return 0;
+    };
+    let mut router = router.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    jet_http_router_register(
+        &mut router,
+        method,
+        pattern,
+        handler,
+        &file,
+        line as u32,
+        contract,
+    );
+    0
+}
+
+fn http_router(handle: i64) -> Option<Arc<Mutex<JetHTTPRouter>>> {
+    with_handle(handle, |h| match h {
+        NetHttpHandle::HTTPRouter(router) => Some(Arc::clone(router)),
+        _ => None,
+    })
+}
+fn jet_jit_http_openapi(router: i64) -> i64 {
+    let Some(router) = http_router(router) else {
+        Concurrency::with_runtime_mut(|runtime| runtime.set_trap("invalid HTTPRouter"));
+        return 0;
+    };
+    let router = router.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+    alloc_string(crate::Web::web_rt::jet_web_openapi(&router))
 }
 
 fn http_server(handle: i64) -> Option<Arc<JetHTTPServer>> {
@@ -294,15 +353,15 @@ fn net_invalid(operation: &str, resource: &str) -> i64 {
 }
 
 fn net_err(e: JetNetError) -> i64 {
-    result_err_bits(marshal_net_error(e).0)
+    result_err_bits(marshal_net_error(e))
 }
 
 fn io_err(e: jet_std::IOError) -> i64 {
-    result_err_bits(marshal_io_error(e).0)
+    result_err_bits(marshal_io_error(e))
 }
 
 fn http_err(e: JetHTTPError) -> i64 {
-    result_err_bits(marshal_http_error(e).0)
+    result_err_bits(marshal_http_error_packed(e))
 }
 
 fn option_string(s: Option<String>) -> i64 {
@@ -310,6 +369,9 @@ fn option_string(s: Option<String>) -> i64 {
         None => 0,
         Some(v) => alloc_string(v).wrapping_add(1),
     }
+}
+fn option_int(value: Option<i64>) -> i64 {
+    value.map(|value| value.wrapping_add(1)).unwrap_or(0)
 }
 
 fn map_net_ok<T>(r: Result<T, JetNetError>, f: impl FnOnce(T) -> i64) -> i64 {
@@ -367,130 +429,31 @@ fn net_error_detail_handle(detail: JetNetErrorDetail) -> i64 {
     })
 }
 
-fn net_ct_optional_string(value: Option<String>) -> CtValue {
-    match value {
-        Some(value) => CtValue::Present(Box::new(CtValue::Str(value))),
-        None => CtValue::absent(Type::String),
-    }
-}
 
-fn net_ct_optional_int(value: Option<i64>) -> CtValue {
-    match value {
-        Some(value) => CtValue::Present(Box::new(CtValue::Int(value))),
-        None => CtValue::absent(Type::Int),
-    }
-}
-
-fn net_error_detail_value(detail: JetNetErrorDetail) -> CtValue {
-    CtValue::Struct {
-        type_name: "NetErrorDetail".to_string(),
-        fields: vec![
-            ("operation".to_string(), CtValue::Str(detail.operation)),
-            ("address".to_string(), net_ct_optional_string(detail.address)),
-            ("name".to_string(), net_ct_optional_string(detail.name)),
-            ("message".to_string(), CtValue::Str(detail.message)),
-            ("os_code".to_string(), net_ct_optional_int(detail.os_code)),
-        ],
-    }
-}
-
-fn marshal_net_error(error: JetNetError) -> (i64, CtValue) {
+fn marshal_net_error(error: JetNetError) -> i64 {
     let parts = jet_net_error_surface_parts(error);
-    let (payload_bits, args) = match parts.payload {
-        JetNetErrorSurfacePayload::Detail(detail) => (
-            net_error_detail_handle(detail.clone()),
-            vec![(None, net_error_detail_value(detail))],
-        ),
+    let payload_bits = match parts.payload {
+        JetNetErrorSurfacePayload::Detail(detail) => net_error_detail_handle(detail),
         JetNetErrorSurfacePayload::DNS {
-            variant,
             ordinal,
             value,
-        } => {
-            let value_handle = alloc_string(value.clone());
-            let packed = value_handle.wrapping_shl(8) | ordinal;
-            (
-                packed,
-                vec![
-                    (
-                        None,
-                        CtValue::Enum {
-                            type_name: "NetDnsError".to_string(),
-                            variant: variant.to_string(),
-                            args: vec![(None, CtValue::Str(value))],
-                        },
-                    ),
-                ],
-            )
-        }
+            ..
+        } => alloc_string(value).wrapping_shl(8) | ordinal,
     };
-    let packed = payload_bits.wrapping_shl(8) | parts.ordinal;
-    let value = CtValue::Enum {
-        type_name: "NetError".to_string(),
-        variant: parts.variant.to_string(),
-        args,
+    payload_bits.wrapping_shl(8) | parts.ordinal
+}
+fn marshal_http_error_packed(error: JetHTTPError) -> i64 {
+    let parts = jet_http_error_surface_parts(error);
+    let payload = match parts.payload {
+        JetHTTPErrorSurfacePayload::Unit => 0,
+        JetHTTPErrorSurfacePayload::Int { value, .. } => value,
+        JetHTTPErrorSurfacePayload::Text { value, .. } => alloc_string(value),
+        JetHTTPErrorSurfacePayload::Operation { ordinal, .. } => ordinal,
     };
-    (packed, value)
+    payload.wrapping_shl(8) | parts.ordinal
 }
 
-pub(crate) fn net_error_value(error: JetNetError) -> CtValue {
-    marshal_net_error(error).1
-}
 
-fn net_io_operation_value(operation: jet_std::IOOperation) -> CtValue {
-    let variant = match operation {
-        jet_std::IOOperation::Read => "Read",
-        jet_std::IOOperation::Write => "Write",
-        jet_std::IOOperation::Flush => "Flush",
-        jet_std::IOOperation::Connect => "Connect",
-        jet_std::IOOperation::Accept => "Accept",
-        jet_std::IOOperation::Close => "Close",
-        jet_std::IOOperation::Resolve => "Resolve",
-        jet_std::IOOperation::Codec => "Codec",
-    };
-    CtValue::Enum {
-        type_name: "IOOperation".to_string(),
-        variant: variant.to_string(),
-        args: vec![],
-    }
-}
-
-fn net_io_context_value(context: jet_std::IOContext) -> CtValue {
-    let optional_string = |value: Option<String>| match value {
-        Some(value) => CtValue::Present(Box::new(CtValue::Str(value))),
-        None => CtValue::absent(Type::String),
-    };
-    let optional_int = |value: Option<i64>| match value {
-        Some(value) => CtValue::Present(Box::new(CtValue::Int(value))),
-        None => CtValue::absent(Type::Int),
-    };
-    CtValue::Struct {
-        type_name: "IOContext".to_string(),
-        fields: vec![
-            ("operation".to_string(), net_io_operation_value(context.operation)),
-            ("resource".to_string(), optional_string(context.resource)),
-            ("os_code".to_string(), optional_int(context.os_code)),
-            ("cause".to_string(), optional_string(context.cause)),
-        ],
-    }
-}
-
-fn net_io_error_value(error: jet_std::IOError) -> CtValue {
-    let (variant, context) = match error {
-        jet_std::IOError::InvalidInput(context) => ("InvalidInput", context),
-        jet_std::IOError::NotFound(context) => ("NotFound", context),
-        jet_std::IOError::PermissionDenied(context) => ("PermissionDenied", context),
-        jet_std::IOError::TimedOut(context) => ("TimedOut", context),
-        jet_std::IOError::Cancelled(context) => ("Cancelled", context),
-        jet_std::IOError::Closed(context) => ("Closed", context),
-        jet_std::IOError::Protocol(context) => ("Protocol", context),
-        jet_std::IOError::Other(context) => ("Other", context),
-    };
-    CtValue::Enum {
-        type_name: "IOError".to_string(),
-        variant: variant.to_string(),
-        args: vec![(None, net_io_context_value(context))],
-    }
-}
 
 fn net_io_operation_ordinal(operation: jet_std::IOOperation) -> i64 {
     match operation {
@@ -523,8 +486,8 @@ fn net_io_context_handle(context: &jet_std::IOContext) -> i64 {
     })
 }
 
-fn marshal_io_error(error: jet_std::IOError) -> (i64, CtValue) {
-    let (variant, ordinal, context) = match error {
+fn marshal_io_error(error: jet_std::IOError) -> i64 {
+    let (_variant, ordinal, context) = match error {
         jet_std::IOError::InvalidInput(context) => ("InvalidInput", 0, context),
         jet_std::IOError::NotFound(context) => ("NotFound", 1, context),
         jet_std::IOError::PermissionDenied(context) => ("PermissionDenied", 2, context),
@@ -535,13 +498,7 @@ fn marshal_io_error(error: jet_std::IOError) -> (i64, CtValue) {
         jet_std::IOError::Other(context) => ("Other", 7, context),
     };
     let context_bits = net_io_context_handle(&context);
-    let packed = context_bits.wrapping_shl(8) | ordinal;
-    let value = CtValue::Enum {
-        type_name: "IOError".to_string(),
-        variant: variant.to_string(),
-        args: vec![(None, net_io_context_value(context))],
-    };
-    (packed, value)
+    context_bits.wrapping_shl(8) | ordinal
 }
 
 fn decode_result(handle: i64) -> Option<(bool, u64)> {
@@ -606,15 +563,8 @@ pub(crate) fn test_capture_http_handler(callable: i64) -> TestHttpHandler {
     TestHttpHandler(wrap_http_handler(callable))
 }
 
-pub(crate) fn test_invoke_captured_http_handler(
-    handler: &TestHttpHandler,
-) -> Result<(), String> {
-    let request = JetHTTPRequest::server(
-        "GET",
-        "/".to_string(),
-        Vec::new(),
-        JetHTTPHeaders::new(),
-    );
+pub(crate) fn test_invoke_captured_http_handler(handler: &TestHttpHandler) -> Result<(), String> {
+    let request = JetHTTPRequest::server("GET", "/".to_string(), Vec::new(), JetHTTPHeaders::new());
     match (handler.0)(request) {
         Ok(_) => Ok(()),
         Err(JetHTTPError::IO { operation }) => Err(operation),
@@ -622,32 +572,33 @@ pub(crate) fn test_invoke_captured_http_handler(
     }
 }
 
-
 fn wrap_http_handler(callable: i64) -> JetHTTPHandler {
     let Some((epoch, slot)) = resident_http_callable(callable) else {
         return invalid_http_handler();
     };
-    Arc::new(move |req: JetHTTPRequest| -> Result<JetHTTPResponse, JetHTTPError> {
-        Concurrency::try_with_http_jet_runtime_at(epoch, || {
-            let req_h = push_handle(NetHttpHandle::HTTPRequest(req));
-            Concurrency::notify_http_test_handler_entry();
-            let res_h = unsafe {
-                if slot.has_env {
-                    let f: HTTPHandlerWithEnvFn = std::mem::transmute(slot.fn_ptr as usize);
-                    f(slot.env, req_h)
-                } else {
-                    let f: HTTPHandlerFn = std::mem::transmute(slot.fn_ptr as usize);
-                    f(req_h)
-                }
-            };
-            decode_http_handler_result(res_h)
-        })
-        .unwrap_or_else(|| {
-            Err(JetHTTPError::IO {
-                operation: "HTTP handler runtime unavailable".into(),
+    Arc::new(
+        move |req: JetHTTPRequest| -> Result<JetHTTPResponse, JetHTTPError> {
+            Concurrency::try_with_http_jet_runtime_at(epoch, || {
+                let req_h = push_handle(NetHttpHandle::HTTPRequest(req));
+                Concurrency::notify_http_test_handler_entry();
+                let res_h = unsafe {
+                    if slot.has_env {
+                        let f: HTTPHandlerWithEnvFn = std::mem::transmute(slot.fn_ptr as usize);
+                        f(slot.env, req_h)
+                    } else {
+                        let f: HTTPHandlerFn = std::mem::transmute(slot.fn_ptr as usize);
+                        f(req_h)
+                    }
+                };
+                decode_http_handler_result(res_h)
             })
-        })
-    })
+            .unwrap_or_else(|| {
+                Err(JetHTTPError::IO {
+                    operation: "HTTP handler runtime unavailable".into(),
+                })
+            })
+        },
+    )
 }
 
 fn wrap_bound_http_handler(callable: i64) -> Option<JetHTTPHandler> {
@@ -658,25 +609,27 @@ fn wrap_http_zero_handler(callable: i64) -> JetHTTPHandler {
     let Some((epoch, slot)) = resident_http_callable(callable) else {
         return invalid_http_handler();
     };
-    Arc::new(move |_req: JetHTTPRequest| -> Result<JetHTTPResponse, JetHTTPError> {
-        Concurrency::try_with_http_jet_runtime_at(epoch, || {
-            let res_h = unsafe {
-                if slot.has_env {
-                    let f: HTTPZeroHandlerWithEnvFn = std::mem::transmute(slot.fn_ptr as usize);
-                    f(slot.env)
-                } else {
-                    let f: HTTPZeroHandlerFn = std::mem::transmute(slot.fn_ptr as usize);
-                    f()
-                }
-            };
-            decode_http_handler_result(res_h)
-        })
-        .unwrap_or_else(|| {
-            Err(JetHTTPError::IO {
-                operation: "HTTP handler runtime unavailable".into(),
+    Arc::new(
+        move |_req: JetHTTPRequest| -> Result<JetHTTPResponse, JetHTTPError> {
+            Concurrency::try_with_http_jet_runtime_at(epoch, || {
+                let res_h = unsafe {
+                    if slot.has_env {
+                        let f: HTTPZeroHandlerWithEnvFn = std::mem::transmute(slot.fn_ptr as usize);
+                        f(slot.env)
+                    } else {
+                        let f: HTTPZeroHandlerFn = std::mem::transmute(slot.fn_ptr as usize);
+                        f()
+                    }
+                };
+                decode_http_handler_result(res_h)
             })
-        })
-    })
+            .unwrap_or_else(|| {
+                Err(JetHTTPError::IO {
+                    operation: "HTTP handler runtime unavailable".into(),
+                })
+            })
+        },
+    )
 }
 
 // ── core.net ───────────────────────────────────────────────────────────────
@@ -686,6 +639,49 @@ fn jet_jit_net_socket_addr(host: i64, port: i64) -> i64 {
     map_net_ok(jet_net_socket_addr(&host, port), |a| {
         push_handle(NetHttpHandle::SocketAddr(a))
     })
+}
+fn jet_jit_net_ip_addr(text: i64) -> i64 {
+    let text = clone_string(text);
+    map_net_ok(jet_net_ip_addr(&text), |ip| {
+        push_handle(NetHttpHandle::IPAddr(ip))
+    })
+}
+
+fn jet_jit_net_ip_to_string(ip: i64) -> i64 {
+    ip_addr(ip)
+        .map(|ip| alloc_string(jet_net_ip_to_string(&ip)))
+        .unwrap_or_else(|| alloc_string(String::new()))
+}
+
+fn jet_jit_net_ip_is_ipv4(ip: i64) -> i64 {
+    i64::from(ip_addr(ip).is_some_and(|ip| jet_net_ip_is_ipv4(&ip)))
+}
+
+fn jet_jit_net_socket_addr_parse(text: i64) -> i64 {
+    let text = clone_string(text);
+    map_net_ok(jet_net_socket_addr_parse(&text), |addr| {
+        push_handle(NetHttpHandle::SocketAddr(addr))
+    })
+}
+
+fn jet_jit_net_tcp_connect_addr(addr: i64) -> i64 {
+    let Some(addr) = with_handle(addr, |h| match h {
+        NetHttpHandle::SocketAddr(addr) => Some(addr.clone()),
+        _ => None,
+    }) else {
+        return net_invalid("tcp connect", "SocketAddr");
+    };
+    map_net_ok(jet_net_tcp_connect_addr(&addr), |stream| {
+        push_handle(NetHttpHandle::TcpStream(Arc::new(Mutex::new(stream))))
+    })
+}
+
+fn jet_jit_net_tcp_connect_happy(host: i64, port: i64, timeout_ms: i64) -> i64 {
+    let host = clone_string(host);
+    map_net_ok(
+        jet_net_tcp_connect_happy(&host, port, timeout_ms),
+        |stream| push_handle(NetHttpHandle::TcpStream(Arc::new(Mutex::new(stream)))),
+    )
 }
 
 fn jet_jit_net_socket_to_string(addr: i64) -> i64 {
@@ -740,6 +736,71 @@ fn jet_jit_net_tcp_connect(addr: i64) -> i64 {
     map_net_ok(jet_net_tcp_connect(&addr), |s| {
         push_handle(NetHttpHandle::TcpStream(Arc::new(Mutex::new(s))))
     })
+}
+fn jet_jit_net_tcp_connect_timeout(addr: i64, timeout_ms: i64) -> i64 {
+    let Some(addr) = with_handle(addr, |h| match h {
+        NetHttpHandle::SocketAddr(a) => Some(a.clone()),
+        _ => None,
+    }) else {
+        return net_invalid("tcp connect timeout", "SocketAddr");
+    };
+    match jet_net_tcp_connect_timeout(&addr, timeout_ms) {
+        Ok(stream) => result_ok_handle(push_handle(NetHttpHandle::TcpStream(Arc::new(
+            Mutex::new(stream),
+        )))),
+        Err(error) => net_err(error),
+    }
+}
+fn jet_jit_net_tcp_read(stream: i64) -> i64 {
+    let Some(stream) = tcp_stream(stream) else {
+        return net_invalid("tcp read", "TcpStream");
+    };
+    let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    match jet_net_tcp_read(&mut guard) {
+        Ok(value) => result_ok_handle(alloc_string(value)),
+        Err(error) => net_err(error),
+    }
+}
+
+fn jet_jit_net_tcp_write(stream: i64, data: i64) -> i64 {
+    let data = clone_string(data);
+    let Some(stream) = tcp_stream(stream) else {
+        return net_invalid("tcp write", "TcpStream");
+    };
+    let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    map_net_unit(jet_net_tcp_write(&mut guard, &data))
+}
+
+fn jet_jit_net_tcp_read_bytes(stream: i64, limit: i64) -> i64 {
+    let Some(stream) = tcp_stream(stream) else {
+        return net_invalid("tcp read", "TcpStream");
+    };
+    let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    match jet_net_tcp_read_bytes(&mut guard, limit) {
+        Ok(bytes) => result_ok_handle(alloc_bytes(&bytes)),
+        Err(error) => net_err(error),
+    }
+}
+
+fn jet_jit_net_tcp_write_bytes(stream: i64, data: i64) -> i64 {
+    let data = clone_bytes(data);
+    let Some(stream) = tcp_stream(stream) else {
+        return net_invalid("tcp write", "TcpStream");
+    };
+    let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    match jet_net_tcp_write_bytes(&mut guard, &data) {
+        Ok(count) => result_ok(count as u64),
+        Err(error) => net_err(error),
+    }
+}
+
+fn jet_jit_net_tcp_write_text(stream: i64, text: i64) -> i64 {
+    let text = clone_string(text);
+    let Some(stream) = tcp_stream(stream) else {
+        return net_invalid("tcp write", "TcpStream");
+    };
+    let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    map_net_unit(jet_net_tcp_write_text(&mut guard, &text))
 }
 
 fn jet_jit_net_listener_local_socket_addr(listener: i64) -> i64 {
@@ -886,7 +947,6 @@ fn jet_jit_net_dns_srv_weight(srv: i64) -> i64 {
     .unwrap_or(0)
 }
 
-
 fn jet_jit_net_set_timeout(stream: i64, ms: i64) -> i64 {
     let Some(stream) = tcp_stream(stream) else {
         return net_invalid("set_timeout", "TcpStream");
@@ -977,7 +1037,6 @@ fn jet_jit_net_dns_txt_at(server: i64, name: i64, ms: i64) -> i64 {
     }
 }
 
-
 fn jet_jit_net_getservbyname(name: i64) -> i64 {
     let name = clone_string(name);
     match jet_net_getservbyname(&name) {
@@ -1010,6 +1069,17 @@ fn jet_jit_net_udp_bind(addr: i64) -> i64 {
     let addr = clone_string(addr);
     map_net_ok(jet_net_udp_bind(&addr), |s| {
         push_handle(NetHttpHandle::UdpSocket(Arc::new(s)))
+    })
+}
+fn jet_jit_net_udp_bind_addr(addr: i64) -> i64 {
+    let Some(addr) = with_handle(addr, |h| match h {
+        NetHttpHandle::SocketAddr(addr) => Some(addr.clone()),
+        _ => None,
+    }) else {
+        return net_invalid("udp bind", "SocketAddr");
+    };
+    map_net_ok(jet_net_udp_bind_addr(&addr), |socket| {
+        push_handle(NetHttpHandle::UdpSocket(Arc::new(socket)))
     })
 }
 
@@ -1063,7 +1133,6 @@ fn jet_jit_net_udp_send_to(socket: i64, data: i64, addr: i64) -> i64 {
     }
 }
 
-
 fn jet_jit_net_udp_receive(socket: i64, limit: i64) -> i64 {
     let Some(socket) = udp_socket(socket) else {
         return net_invalid("udp_receive", "UdpSocket");
@@ -1074,12 +1143,7 @@ fn jet_jit_net_udp_receive(socket: i64, limit: i64) -> i64 {
     }
 }
 
-fn jet_jit_net_udp_send_bytes_to_deadline(
-    socket: i64,
-    data: i64,
-    addr: i64,
-    deadline: i64,
-) -> i64 {
+fn jet_jit_net_udp_send_bytes_to_deadline(socket: i64, data: i64, addr: i64, deadline: i64) -> i64 {
     let bytes = clone_bytes(data);
     let Some(addr) = with_handle(addr, |h| match h {
         NetHttpHandle::SocketAddr(a) => Some(a.clone()),
@@ -1097,11 +1161,7 @@ fn jet_jit_net_udp_send_bytes_to_deadline(
     }
 }
 
-fn jet_jit_net_udp_receive_deadline(
-    socket: i64,
-    limit: i64,
-    deadline: i64,
-) -> i64 {
+fn jet_jit_net_udp_receive_deadline(socket: i64, limit: i64, deadline: i64) -> i64 {
     let Some(socket) = udp_socket(socket) else {
         return net_invalid("udp receive", "UdpSocket");
     };
@@ -1119,7 +1179,6 @@ fn jet_jit_net_udp_packet_data(packet: i64) -> i64 {
     .unwrap_or_default();
     alloc_string(data)
 }
-
 
 fn jet_jit_net_udp_packet_bytes(packet: i64) -> i64 {
     match with_handle(packet, |h| match h {
@@ -1160,7 +1219,6 @@ fn jet_jit_net_udp_packet_addr(packet: i64) -> i64 {
         .map(|address| push_handle(NetHttpHandle::SocketAddr(address)))
         .unwrap_or(0)
 }
-
 
 #[cfg(unix)]
 fn jet_jit_net_unix_listen(path: i64) -> i64 {
@@ -1272,6 +1330,121 @@ fn jet_jit_net_unix_close(_stream: i64) -> i64 {
     let mut stream = JetUnixStream;
     map_net_unit(jet_net_unix_close(&mut stream))
 }
+#[cfg(unix)]
+fn jet_jit_net_unix_accept_deadline(listener: i64, deadline: i64) -> i64 {
+    let Some(listener) = unix_listener(listener) else {
+        return net_invalid("unix accept", "UnixListener");
+    };
+    let deadline = jet_std::Duration { ns: deadline };
+    match jet_net_unix_accept_deadline(&listener, &deadline) {
+        Ok(stream) => result_ok_handle(push_handle(NetHttpHandle::UnixStream(Arc::new(
+            Mutex::new(stream),
+        )))),
+        Err(error) => net_err(error),
+    }
+}
+
+#[cfg(not(unix))]
+fn jet_jit_net_unix_accept_deadline(_listener: i64, deadline: i64) -> i64 {
+    let listener = JetUnixListener;
+    let deadline = jet_std::Duration { ns: deadline };
+    net_err(jet_net_unix_accept_deadline(&listener, &deadline).unwrap_err())
+}
+
+#[cfg(unix)]
+fn jet_jit_net_unix_read_bytes_deadline(stream: i64, limit: i64, deadline: i64) -> i64 {
+    let Some(stream) = unix_stream(stream) else {
+        return net_invalid("unix read", "UnixStream");
+    };
+    let deadline = jet_std::Duration { ns: deadline };
+    let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    match jet_net_unix_read_bytes_deadline(&mut guard, limit, &deadline) {
+        Ok(bytes) => result_ok_handle(alloc_bytes(&bytes)),
+        Err(error) => net_err(error),
+    }
+}
+
+#[cfg(not(unix))]
+fn jet_jit_net_unix_read_bytes_deadline(_stream: i64, _limit: i64, deadline: i64) -> i64 {
+    let mut stream = JetUnixStream;
+    let deadline = jet_std::Duration { ns: deadline };
+    net_err(
+        jet_net_unix_read_bytes_deadline(&mut stream, 0, &deadline)
+            .unwrap_err(),
+    )
+}
+
+#[cfg(unix)]
+fn jet_jit_net_unix_write_all_bytes_deadline(stream: i64, data: i64, deadline: i64) -> i64 {
+    let bytes = clone_bytes(data);
+    let Some(stream) = unix_stream(stream) else {
+        return net_invalid("unix write", "UnixStream");
+    };
+    let deadline = jet_std::Duration { ns: deadline };
+    let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    map_net_unit(jet_net_unix_write_all_bytes_deadline(
+        &mut guard,
+        &bytes,
+        &deadline,
+    ))
+}
+
+#[cfg(not(unix))]
+fn jet_jit_net_unix_write_all_bytes_deadline(
+    _stream: i64,
+    data: i64,
+    deadline: i64,
+) -> i64 {
+    let mut stream = JetUnixStream;
+    let bytes = clone_bytes(data);
+    let deadline = jet_std::Duration { ns: deadline };
+    net_err(
+        jet_net_unix_write_all_bytes_deadline(&mut stream, &bytes, &deadline)
+            .unwrap_err(),
+    )
+}
+
+#[cfg(unix)]
+fn jet_jit_net_unix_ready(stream: i64, interest: i64, deadline: i64) -> i64 {
+    let Some(interest) = net_ready_interest(interest) else {
+        return net_invalid("unix ready", "NetReadyInterest");
+    };
+    let Some(stream) = unix_stream(stream) else {
+        return net_invalid("unix ready", "UnixStream");
+    };
+    let deadline = jet_std::Duration { ns: deadline };
+    let guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    map_net_ok(jet_net_unix_ready(&guard, interest, &deadline), |ready| {
+        push_handle(NetHttpHandle::NetReady(Arc::new(ready)))
+    })
+}
+
+#[cfg(not(unix))]
+fn jet_jit_net_unix_ready(_stream: i64, interest: i64, deadline: i64) -> i64 {
+    let Some(interest) = net_ready_interest(interest) else {
+        return net_invalid("unix ready", "NetReadyInterest");
+    };
+    let stream = JetUnixStream;
+    let deadline = jet_std::Duration { ns: deadline };
+    net_err(jet_net_unix_ready(&stream, interest, &deadline).unwrap_err())
+}
+
+#[cfg(unix)]
+fn jet_jit_net_unix_set_timeout(stream: i64, timeout: i64) -> i64 {
+    let Some(stream) = unix_stream(stream) else {
+        return net_invalid("unix timeout", "UnixStream");
+    };
+    let timeout = jet_std::Duration { ns: timeout };
+    let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    map_net_unit(jet_net_unix_set_timeout(&mut guard, &timeout))
+}
+
+#[cfg(not(unix))]
+fn jet_jit_net_unix_set_timeout(_stream: i64, timeout: i64) -> i64 {
+    let mut stream = JetUnixStream;
+    let timeout = jet_std::Duration { ns: timeout };
+    net_err(jet_net_unix_set_timeout(&mut stream, &timeout).unwrap_err())
+}
 
 // ── TcpListener / TcpStream handle methods ─────────────────────────────────
 
@@ -1280,9 +1453,9 @@ fn jet_jit_tcp_listener_accept(listener: i64) -> i64 {
         return net_invalid("tcp accept", "TcpListener");
     };
     match jet_net_tcp_accept(&listener) {
-        Ok(s) => result_ok_handle(push_handle(NetHttpHandle::TcpStream(Arc::new(
-            Mutex::new(s),
-        )))),
+        Ok(s) => result_ok_handle(push_handle(NetHttpHandle::TcpStream(Arc::new(Mutex::new(
+            s,
+        ))))),
         Err(e) => net_err(e),
     }
 }
@@ -1331,7 +1504,6 @@ fn jet_jit_tcp_stream_shutdown(stream: i64, how: i64) -> i64 {
     let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
     map_net_unit(jet_net_tcp_shutdown(&mut guard, how))
 }
-
 
 fn jet_jit_tcp_stream_close(stream: i64) -> i64 {
     let Some(stream) = tcp_stream(stream) else {
@@ -1395,8 +1567,12 @@ fn tls_certificate_handle(certificate: JetTLSCertificate) -> i64 {
         let _ = rt.heap.record_set_int(record, 1, sha256);
         let _ = rt.heap.record_set_int(record, 2, spki_sha256);
         let _ = rt.heap.record_set_int(record, 3, dns_names);
-        let _ = rt.heap.record_set_int(record, 4, certificate.valid_from_unix_ms);
-        let _ = rt.heap.record_set_int(record, 5, certificate.valid_until_unix_ms);
+        let _ = rt
+            .heap
+            .record_set_int(record, 4, certificate.valid_from_unix_ms);
+        let _ = rt
+            .heap
+            .record_set_int(record, 5, certificate.valid_until_unix_ms);
         let _ = rt.heap.record_set_string(record, 6, subject);
         let _ = rt.heap.record_set_string(record, 7, issuer);
         record
@@ -1431,7 +1607,11 @@ fn tls_take_tcp_stream(stream: i64) -> Result<JetTCPStream, JetNetError> {
         return Err(net_invalid_error("tls client", "TcpStream"));
     };
     Arc::try_unwrap(stream)
-        .map(|mutex| mutex.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner()))
+        .map(|mutex| {
+            mutex
+                .into_inner()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+        })
         .map_err(|_| net_invalid_error("tls client", "shared TcpStream"))
 }
 
@@ -1454,13 +1634,33 @@ fn tls_client_default(
     );
     match deadline {
         Some(deadline) => jet_net_tls_client_scheduler_deadline(
-            stream, server_name, deadline, callbacks.0, callbacks.1, callbacks.2,
-            callbacks.3, callbacks.4, callbacks.5, callbacks.6, callbacks.7, callbacks.8,
+            stream,
+            server_name,
+            deadline,
+            callbacks.0,
+            callbacks.1,
+            callbacks.2,
+            callbacks.3,
+            callbacks.4,
+            callbacks.5,
+            callbacks.6,
+            callbacks.7,
+            callbacks.8,
             callbacks.9,
         ),
         None => jet_net_tls_client_scheduler(
-            stream, server_name, callbacks.0, callbacks.1, callbacks.2, callbacks.3,
-            callbacks.4, callbacks.5, callbacks.6, callbacks.7, callbacks.8, callbacks.9,
+            stream,
+            server_name,
+            callbacks.0,
+            callbacks.1,
+            callbacks.2,
+            callbacks.3,
+            callbacks.4,
+            callbacks.5,
+            callbacks.6,
+            callbacks.7,
+            callbacks.8,
+            callbacks.9,
         ),
     }
 }
@@ -1490,7 +1690,9 @@ fn tls_client_configured(
 }
 
 fn jet_jit_tls_client_config_default() -> i64 {
-    push_handle(NetHttpHandle::TLSClientConfig(jet_tls_client_config_default()))
+    push_handle(NetHttpHandle::TLSClientConfig(
+        jet_tls_client_config_default(),
+    ))
 }
 
 fn jet_jit_tls_root_certificates_from_pem(pem: i64) -> i64 {
@@ -1569,11 +1771,7 @@ fn jet_jit_tls_client_config_with_identity(config: i64, identity: i64) -> i64 {
     }
 }
 
-fn jet_jit_tls_client_config_with_version_bounds(
-    config: i64,
-    min: i64,
-    max: i64,
-) -> i64 {
+fn jet_jit_tls_client_config_with_version_bounds(config: i64, min: i64, max: i64) -> i64 {
     let Some(config) = tls_client_config(config) else {
         return io_err(jet_tls_config_error(
             "ClientConfig.with_version_bounds",
@@ -1617,16 +1815,23 @@ fn tls_client_stream_result(
             tls_client_default(stream, &server_name, Some(&jet_std::Duration { ns }))
         }
         (None, None) => tls_client_default(stream, &server_name, None),
-        (Some(_), None) => Err(net_invalid_error("tls client", "missing configuration deadline")),
+        (Some(_), None) => Err(net_invalid_error(
+            "tls client",
+            "missing configuration deadline",
+        )),
     }
 }
 
-fn tls_client_result(stream: i64, server_name: i64, config: Option<i64>, deadline: Option<i64>) -> i64 {
+fn tls_client_result(
+    stream: i64,
+    server_name: i64,
+    config: Option<i64>,
+    deadline: Option<i64>,
+) -> i64 {
     // I9: only the resident tier hands the name over as a JIT heap handle, so
-    // the handle→String read happens at this raw-host boundary. The CtValue
-    // adapter (`runtime_tls_client`) passes the owned String straight through —
-    // the interpreter legs run with no active resident runtime, where a heap
-    // round-trip silently reads back "".
+    // the handle→String read happens at this raw-host boundary. The direct
+    // adapter passes the owned String straight through; interpreter legs run
+    // with no active resident runtime and never perform this heap round-trip.
     let result = tls_client_stream_result(stream, clone_string(server_name), config, deadline);
     map_net_ok(result, |stream| {
         push_handle(NetHttpHandle::TLSStream(Arc::new(Mutex::new(stream))))
@@ -1657,7 +1862,9 @@ fn jet_jit_tls_read_bytes(stream: i64, limit: i64) -> i64 {
             "invalid TLSStream handle".to_string(),
         ));
     };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut stream = stream
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     match jet_net_tls_read_bytes(&mut stream, limit) {
         Ok(bytes) => result_ok_handle(alloc_bytes(&bytes)),
         Err(error) => io_err(error),
@@ -1671,7 +1878,9 @@ fn jet_jit_tls_read_bytes_deadline(stream: i64, limit: i64, deadline: i64) -> i6
             "invalid TLSStream handle".to_string(),
         ));
     };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut stream = stream
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     match jet_net_tls_read_bytes_deadline(&mut stream, limit, &jet_std::Duration { ns: deadline }) {
         Ok(bytes) => result_ok_handle(alloc_bytes(&bytes)),
         Err(error) => io_err(error),
@@ -1681,7 +1890,6 @@ fn jet_jit_net_tls_read(stream: i64) -> i64 {
     jet_jit_tls_read_text(stream, 8192)
 }
 
-
 fn jet_jit_tls_read_text(stream: i64, _limit: i64) -> i64 {
     let Some(stream) = tls_stream(stream) else {
         return io_err(jet_tls_config_error(
@@ -1689,7 +1897,9 @@ fn jet_jit_tls_read_text(stream: i64, _limit: i64) -> i64 {
             "invalid TLSStream handle".to_string(),
         ));
     };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut stream = stream
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     match jet_net_tls_read_text(&mut stream) {
         Ok(text) => result_ok_handle(alloc_string(text)),
         Err(error) => io_err(error),
@@ -1704,7 +1914,9 @@ fn jet_jit_tls_write_bytes(stream: i64, data: i64) -> i64 {
             "invalid TLSStream handle".to_string(),
         ));
     };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut stream = stream
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     match jet_net_tls_write_bytes(&mut stream, &data) {
         Ok(count) => result_ok(count as u64),
         Err(error) => io_err(error),
@@ -1719,7 +1931,9 @@ fn jet_jit_tls_write_all_bytes(stream: i64, data: i64) -> i64 {
             "invalid TLSStream handle".to_string(),
         ));
     };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut stream = stream
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     map_io_unit(jet_net_tls_write_all_bytes(&mut stream, &data))
 }
 
@@ -1731,7 +1945,9 @@ fn jet_jit_tls_write_all_bytes_deadline(stream: i64, data: i64, deadline: i64) -
             "invalid TLSStream handle".to_string(),
         ));
     };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut stream = stream
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     map_io_unit(jet_net_tls_write_all_bytes_deadline(
         &mut stream,
         &data,
@@ -1747,7 +1963,9 @@ fn jet_jit_tls_write_text(stream: i64, text: i64) -> i64 {
             "invalid TLSStream handle".to_string(),
         ));
     };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut stream = stream
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     map_io_unit(jet_net_tls_write_text(&mut stream, &text))
 }
 
@@ -1758,7 +1976,9 @@ fn jet_jit_tls_close(stream: i64) -> i64 {
             "invalid TLSStream handle".to_string(),
         ));
     };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut stream = stream
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     map_io_unit(jet_net_tls_close(&mut stream))
 }
 
@@ -1769,7 +1989,9 @@ fn jet_jit_tls_close_write(stream: i64, deadline: i64) -> i64 {
             "invalid TLSStream handle".to_string(),
         ));
     };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut stream = stream
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     map_io_unit(jet_net_tls_close_write(
         &mut stream,
         &jet_std::Duration { ns: deadline },
@@ -1789,7 +2011,9 @@ fn jet_jit_tls_ready(stream: i64, interest: i64, deadline: i64) -> i64 {
             "invalid TLSStream handle".to_string(),
         ));
     };
-    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let stream = stream
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     map_io_ok(
         jet_net_tls_ready(&stream, interest, &jet_std::Duration { ns: deadline }),
         |ready| push_handle(NetHttpHandle::NetReady(Arc::new(ready))),
@@ -1800,7 +2024,9 @@ fn jet_jit_tls_peer_identity(stream: i64) -> i64 {
     let Some(stream) = tls_stream(stream) else {
         return 0;
     };
-    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let stream = stream
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     tls_peer_identity_handle(jet_net_tls_peer_identity(&stream))
 }
 
@@ -1864,11 +2090,10 @@ fn jet_jit_http_mux_add(mux: i64, method: i64, pattern: i64, callable: i64) -> i
     0
 }
 
-
-fn jet_jit_http_mux_add_zero(mux: i64, method: i64, pattern: i64, fn_ptr: i64) -> i64 {
+fn jet_jit_http_mux_add_zero(mux: i64, method: i64, pattern: i64, callable: i64) -> i64 {
     let method = clone_string(method);
     let pattern = clone_string(pattern);
-    let handler = wrap_http_zero_handler(fn_ptr);
+    let handler = wrap_http_zero_handler(callable);
     if let Some(mux) = http_mux(mux) {
         jet_http_mux_add_handler(&mux, &method, &pattern, handler);
     }
@@ -1885,10 +2110,15 @@ fn jet_jit_http_response(status: i64, body: i64) -> i64 {
 fn jet_jit_http_server_response_header(response: i64, name: i64, value: i64) -> i64 {
     let name = clone_string(name);
     let value = clone_string(value);
-    match runtime_http_server_response_header(response, name, value) {
-        Ok(response) => response,
-        Err(_) => 0,
-    }
+    let Some(response) = take_handle(response) else {
+        return 0;
+    };
+    let NetHttpHandle::HTTPResponse(response) = response else {
+        return 0;
+    };
+    push_handle(NetHttpHandle::HTTPResponse(jet_http_srv_response_header(
+        response, &name, &value,
+    )))
 }
 
 fn jet_jit_http_req_body(req: i64) -> i64 {
@@ -1923,20 +2153,24 @@ fn jet_jit_http_req_path(req: i64) -> i64 {
 
 fn jet_jit_http_req_param(req: i64, name: i64) -> i64 {
     let name = clone_string(name);
-    option_string(with_handle(req, |h| match h {
-        NetHttpHandle::HTTPRequest(r) => Some(jet_http_srv_req_param(r, &name)),
-        _ => None,
-    })
-    .and_then(|r| r.ok()))
+    option_string(
+        with_handle(req, |h| match h {
+            NetHttpHandle::HTTPRequest(r) => Some(jet_http_request_param(r, &name)),
+            _ => None,
+        })
+        .and_then(|value| value),
+    )
 }
 
 fn jet_jit_http_req_header(req: i64, name: i64) -> i64 {
     let name = clone_string(name);
-    option_string(with_handle(req, |h| match h {
-        NetHttpHandle::HTTPRequest(r) => Some(jet_http_srv_req_header(r, &name)),
-        _ => None,
-    })
-    .and_then(|r| r.ok()))
+    option_string(
+        with_handle(req, |h| match h {
+            NetHttpHandle::HTTPRequest(r) => Some(jet_http_srv_req_header(r, &name)),
+            _ => None,
+        })
+        .and_then(|r| r.ok()),
+    )
 }
 
 fn jet_jit_http_req_text(req: i64) -> i64 {
@@ -2053,8 +2287,7 @@ fn jet_jit_http_resp_text_with_limit(resp: i64, limit: i64) -> i64 {
 fn http_file_reader_read(handle: i64, max: usize) -> Result<Option<Vec<u8>>, JetHTTPError> {
     Concurrency::with_runtime_mut(|rt| {
         let index = handle.saturating_sub(1) as usize;
-        let Some(crate::enc_stream::FileReaderSlot::Live(reader)) =
-            rt.file_readers.get_mut(index)
+        let Some(crate::enc_stream::FileReaderSlot::Live(reader)) = rt.file_readers.get_mut(index)
         else {
             return Some(Err(JetHTTPError::IO {
                 operation: "read body".to_string(),
@@ -2092,16 +2325,16 @@ fn http_file_reader_close(handle: i64) {
 fn http_file_writer_write(handle: i64, bytes: &[u8]) -> Result<(), JetHTTPError> {
     Concurrency::with_runtime_mut(|rt| {
         let index = handle.saturating_sub(1) as usize;
-        let Some(crate::enc_stream::FileWriterSlot::Live(writer)) =
-            rt.file_writers.get_mut(index)
+        let Some(crate::enc_stream::FileWriterSlot::Live(writer)) = rt.file_writers.get_mut(index)
         else {
             return Some(Err(JetHTTPError::IO {
                 operation: "copy body".to_string(),
             }));
         };
-        let result = std::io::Write::write_all(&mut writer.inner, bytes).map_err(|_| JetHTTPError::IO {
-            operation: "copy body".to_string(),
-        });
+        let result =
+            std::io::Write::write_all(&mut writer.inner, bytes).map_err(|_| JetHTTPError::IO {
+                operation: "copy body".to_string(),
+            });
         Some(result)
     })
     .unwrap_or_else(|| {
@@ -2228,9 +2461,43 @@ fn jet_jit_http_nominal_show(handle: i64) -> i64 {
 /// implementation. The JIT stores only the enum ordinal and one payload word;
 /// rebuilding that Rust value here is marshalling, not a second error renderer.
 fn jet_jit_http_error_show(bits: i64) -> i64 {
+    alloc_string(
+        net_http_error_from_packed(bits)
+            .map(|error| error.to_string())
+            .unwrap_or_default(),
+    )
+}
+/// Decode the packed `NetError` carrier produced by `marshal_net_error`.
+/// This reverses only the resident ABI; the shared Prelude `JetDisplay`
+/// implementation remains the source of the failure text (I9).
+fn net_error_detail_from_packed(payload: i64) -> Option<JetNetErrorDetail> {
+    Concurrency::with_runtime_mut(|rt| {
+        let operation = rt.heap.record_clone_string(payload, 0)?;
+        let address = rt
+            .heap
+            .record_get_int(payload, 1)
+            .filter(|encoded| *encoded > 0)
+            .and_then(|encoded| encoded.checked_sub(1))
+            .and_then(|handle| rt.heap.clone_string(handle));
+        let name = rt
+            .heap
+            .record_get_int(payload, 2)
+            .filter(|encoded| *encoded > 0)
+            .and_then(|encoded| encoded.checked_sub(1))
+            .and_then(|handle| rt.heap.clone_string(handle));
+        let message = rt.heap.record_clone_string(payload, 3)?;
+        let os_code = rt
+            .heap
+            .record_get_int(payload, 4)
+            .filter(|encoded| *encoded > 0)
+            .and_then(|encoded| encoded.checked_sub(1));
+        Some(jet_net_detail(&operation, address, name, message, os_code))
+    })
+}
+fn net_http_error_from_packed(bits: i64) -> Option<JetHTTPError> {
     let ordinal = (bits & 0xff) as u8;
     let payload = bits >> 8;
-    let error = match ordinal {
+    match ordinal {
         0 => Some(JetHTTPError::InvalidMethod),
         1 => Some(JetHTTPError::InvalidUrl),
         2 => Some(JetHTTPError::InvalidHeader),
@@ -2286,14 +2553,86 @@ fn jet_jit_http_error_show(bits: i64) -> i64 {
             _ => None,
         },
         _ => None,
-    };
-    alloc_string(error.map(|error| error.to_string()).unwrap_or_default())
+    }
 }
 
+fn jet_jit_net_error_operation(bits: i64) -> i64 {
+    net_error_from_packed(bits)
+        .map(|error| alloc_string(jet_net_error_operation(&error)))
+        .unwrap_or_else(|| alloc_string(String::new()))
+}
+
+fn jet_jit_net_error_address(bits: i64) -> i64 {
+    option_string(net_error_from_packed(bits).and_then(|error| jet_net_error_address(&error)))
+}
+
+fn jet_jit_net_error_name(bits: i64) -> i64 {
+    option_string(net_error_from_packed(bits).and_then(|error| jet_net_error_name(&error)))
+}
+
+fn jet_jit_net_error_message(bits: i64) -> i64 {
+    net_error_from_packed(bits)
+        .map(|error| alloc_string(jet_net_error_message(&error)))
+        .unwrap_or_else(|| alloc_string(String::new()))
+}
+
+fn jet_jit_net_error_os_code(bits: i64) -> i64 {
+    option_int(net_error_from_packed(bits).and_then(|error| jet_net_error_os_code(&error)))
+}
+
+fn net_error_from_packed(bits: i64) -> Option<JetNetError> {
+    let ordinal = (bits & 0xff) as u8;
+    let payload = bits >> 8;
+    match ordinal {
+        0..=13 => {
+            let detail = net_error_detail_from_packed(payload)?;
+            Some(match ordinal {
+                0 => JetNetError::InvalidInput(detail),
+                1 => JetNetError::PermissionDenied(detail),
+                2 => JetNetError::AddressInUse(detail),
+                3 => JetNetError::AddressUnavailable(detail),
+                4 => JetNetError::ConnectionRefused(detail),
+                5 => JetNetError::ConnectionReset(detail),
+                6 => JetNetError::NotConnected(detail),
+                7 => JetNetError::Closed(detail),
+                8 => JetNetError::Timeout(detail),
+                9 => JetNetError::Cancelled(detail),
+                10 => JetNetError::Unsupported(detail),
+                11 => JetNetError::TLS(detail),
+                12 => JetNetError::Protocol(detail),
+                13 => JetNetError::Other(detail),
+                _ => unreachable!(),
+            })
+        }
+        14 => {
+            let value = clone_string(payload >> 8);
+            match (payload & 0xff) as u8 {
+                0 => Some(JetNetError::DNS(JetNetDnsError::NotFound(value))),
+                1 => Some(JetNetError::DNS(JetNetDnsError::Failure(value))),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Render the packed `NetError` carrier through the Prelude's `JetDisplay`
+/// implementation. Rebuilding the enum from its shared surface ordinals is
+/// marshalling only; this host does not duplicate network failure wording.
+fn jet_jit_net_error_show(bits: i64) -> i64 {
+    alloc_string(
+        net_error_from_packed(bits)
+            .map(|error| <JetNetError as JetDisplay>::jet_display(&error))
+            .unwrap_or_default(),
+    )
+}
 
 /// D-HTTP-JSON1=A: `server.json(status, body)` — body is already JSON text.
 fn jet_jit_http_json_response(status: i64, body: i64) -> i64 {
-    runtime_json_response(status, clone_string(body))
+    let body = clone_string(body);
+    push_handle(NetHttpHandle::HTTPResponse(jet_http_srv_json_text(
+        status, &body,
+    )))
 }
 
 /// D-HTTP-STATIC-FILES1=A: mount a directory under a prefix.
@@ -2305,10 +2644,15 @@ fn jet_jit_http_static_files(
     dotfiles: i64,
     follow_links: i64,
 ) -> i64 {
-    let _ = runtime_static_files(
-        mux,
-        clone_string(prefix),
-        clone_string(root),
+    let Some(mux) = http_mux(mux) else {
+        return 0;
+    };
+    let prefix = clone_string(prefix);
+    let root = clone_string(root);
+    jet_http_srv_static_files_mount_defaulted(
+        &mux,
+        &prefix,
+        &root,
         (index >= 0).then_some(index != 0),
         (dotfiles >= 0).then_some(dotfiles != 0),
         (follow_links >= 0).then_some(follow_links != 0),
@@ -2327,22 +2671,22 @@ fn jet_jit_http_cors_policy(
     has_max_age: i64,
     max_age: i64,
 ) -> i64 {
-    let origins_any = origins_mode == 0;
-    let origin_list = if origins_any {
-        Vec::new()
+    let origins = if origins_mode == 0 {
+        JetHTTPCorsOrigins::Any
     } else {
-        clone_string_list(origins)
+        JetHTTPCorsOrigins::List(clone_string_list(origins))
     };
-    match runtime_cors_policy(
-        origins_any,
-        origin_list,
-        (methods > 0).then(|| clone_string_list(methods)),
-        (headers > 0).then(|| clone_string_list(headers)),
+    let methods = (methods > 0).then(|| clone_string_list(methods));
+    let headers = (headers > 0).then(|| clone_string_list(headers));
+    match jet_http_cors_policy_defaulted(
+        &origins,
+        methods.as_ref(),
+        headers.as_ref(),
         (credentials >= 0).then_some(credentials != 0),
         (has_max_age != 0).then_some(max_age),
     ) {
-        Ok(h) => result_ok_handle(h),
-        Err(error) => result_err_bits(error.packed),
+        Ok(policy) => result_ok_handle(push_handle(NetHttpHandle::HTTPCorsPolicy(policy))),
+        Err(error) => http_err(error),
     }
 }
 
@@ -2363,7 +2707,16 @@ fn jet_jit_http_project_json_decode_error(result: i64) -> i64 {
 
 /// D-HTTP-CORS1=A: install a policy on a mux.
 fn jet_jit_http_cors(mux: i64, policy: i64) -> i64 {
-    let _ = runtime_cors(mux, policy);
+    let Some(mux) = http_mux(mux) else {
+        return 0;
+    };
+    let Some(policy) = with_handle(policy, |h| match h {
+        NetHttpHandle::HTTPCorsPolicy(policy) => Some(policy.clone()),
+        _ => None,
+    }) else {
+        return 0;
+    };
+    jet_http_srv_install_cors(&mux, &policy);
     0
 }
 
@@ -2395,12 +2748,82 @@ fn jet_jit_http_client_resp_body(resp: i64) -> i64 {
     }
 }
 
-fn jet_jit_http_server_bind(addr: i64, mux: i64) -> i64 {
+fn jet_jit_http_server_tls(cert: i64, key: i64) -> i64 {
+    let tls = jet_http_srv_tls(&clone_string(cert), &clone_string(key));
+    let cert = alloc_string(tls.cert_pem);
+    let key = alloc_string(tls.key_pem);
+    Concurrency::with_runtime_mut(|rt| {
+        let record = rt.heap.alloc_record(2);
+        let _ = rt.heap.record_set_string(record, 0, cert);
+        let _ = rt.heap.record_set_string(record, 1, key);
+        record
+    })
+}
+
+fn decode_http_server_tls(raw: i64) -> Result<Option<JetHTTPServerTls>, String> {
+    if raw == 0 {
+        return Ok(None);
+    }
+    let record = raw
+        .checked_sub(1)
+        .ok_or_else(|| "invalid HTTPServerTls option".to_string())?;
+    let fields = Concurrency::with_runtime_mut(|rt| {
+        Some((
+            rt.heap
+                .record_get_string(record, 0)
+                .and_then(|id| rt.heap.clone_string(id))?,
+            rt.heap
+                .record_get_string(record, 1)
+                .and_then(|id| rt.heap.clone_string(id))?,
+        ))
+    })
+    .ok_or_else(|| "invalid HTTPServerTls option".to_string())?;
+    Ok(Some(jet_http_srv_tls(&fields.0, &fields.1)))
+}
+
+fn decode_http_server_deadline(raw: i64) -> Option<jet_std::Duration> {
+    (raw != 0).then_some(jet_std::Duration {
+        ns: raw.wrapping_sub(1),
+    })
+}
+
+fn jet_jit_http_server_default(mux: i64, deadline_ns: i64) -> i64 {
+    let Some(mux) = http_mux(mux) else {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_host_fault("invalid HTTPMux for default HTTP server");
+        });
+        return 0;
+    };
+    let deadline = jet_std::Duration { ns: deadline_ns };
+    let server = jet_http_server_default(&mux, &deadline);
+    push_handle(NetHttpHandle::HTTPServer(Arc::new(server)))
+}
+
+fn jet_jit_http_server_wait(server: i64) -> i64 {
+    let Some(server) = http_server(server) else {
+        return result_err("invalid HTTPServer".into());
+    };
+    match jet_http_server_wait(&server) {
+        Ok(report) => result_ok_handle(push_handle(NetHttpHandle::HTTPShutdownReport(report))),
+        Err(e) => result_err(e),
+    }
+}
+
+fn jet_jit_http_server_bind(addr: i64, mux: i64, tls: i64, deadline: i64) -> i64 {
     let addr = clone_string(addr);
     let Some(mux) = http_mux(mux) else {
         return result_err("invalid HTTPMux".into());
     };
-    match jet_http_server_bind(&addr, (*mux).clone()) {
+    let tls = match decode_http_server_tls(tls) {
+        Ok(tls) => tls,
+        Err(error) => return result_err(error),
+    };
+    match jet_http_server_bind(
+        &addr,
+        (*mux).clone(),
+        tls,
+        decode_http_server_deadline(deadline),
+    ) {
         Ok(s) => result_ok_handle(push_handle(NetHttpHandle::HTTPServer(Arc::new(s)))),
         Err(e) => result_err(e),
     }
@@ -2453,147 +2876,7 @@ fn jet_jit_http_shutdown_report_field(report: i64, field: i64) -> i64 {
     .unwrap_or(0)
 }
 
-fn native_http_error(error: native_http::JetHTTPBridgeError) -> JetHTTPError {
-    match error {
-        native_http::JetHTTPBridgeError::InvalidUrl => JetHTTPError::InvalidUrl,
-        native_http::JetHTTPBridgeError::InvalidHeader => JetHTTPError::InvalidHeader,
-        native_http::JetHTTPBridgeError::InvalidFraming => JetHTTPError::InvalidFraming,
-        native_http::JetHTTPBridgeError::UnsupportedEncoding => JetHTTPError::UnsupportedEncoding,
-        native_http::JetHTTPBridgeError::Resolve => JetHTTPError::Resolve {
-            host: "<redacted>".into(),
-        },
-        native_http::JetHTTPBridgeError::Connect => {
-            JetHTTPError::Connect {
-                address: "<redacted>".into(),
-            }
-        }
-        native_http::JetHTTPBridgeError::TLS => JetHTTPError::TLS {
-            stage: "handshake".into(),
-        },
-        native_http::JetHTTPBridgeError::Timeout => {
-            JetHTTPError::Timeout {
-                phase: "transport".into(),
-            }
-        }
-        native_http::JetHTTPBridgeError::Proxy => JetHTTPError::Proxy {
-            stage: "transport".into(),
-        },
-        native_http::JetHTTPBridgeError::Redirect => {
-            JetHTTPError::Redirect {
-                reason: "limit".into(),
-            }
-        }
-        native_http::JetHTTPBridgeError::Protocol => {
-            JetHTTPError::Protocol {
-                version: "unsupported".into(),
-            }
-        }
-        native_http::JetHTTPBridgeError::IO => JetHTTPError::IO {
-            operation: "transport".into(),
-        },
-        native_http::JetHTTPBridgeError::ResourceUnavailable => JetHTTPError::ResourceUnavailable {
-            resource: "transport".into(),
-        },
-        native_http::JetHTTPBridgeError::Cancelled => JetHTTPError::Cancelled,
-        native_http::JetHTTPBridgeError::UnsupportedTarget => JetHTTPError::UnsupportedTarget {
-            operation: JetHTTPOperation::ClientConnect,
-        },
-        native_http::JetHTTPBridgeError::Internal => JetHTTPError::Internal {
-            incident_id: "http-transport".into(),
-        },
-    }
-}
-
-fn native_http_body_close(handle: i64) {
-    native_http::jet_http_client_body_close_impl(handle);
-}
-
-fn native_http_body_read(
-    handle: i64,
-    max_chunk: usize,
-) -> Result<Option<Vec<u8>>, JetHTTPError> {
-    match native_http::jet_http_client_body_read_impl(handle, max_chunk) {
-        Ok(Some(bytes)) => Ok(Some(bytes)),
-        Ok(None) => Ok(None),
-        Err(error) => {
-            native_http_body_close(handle);
-            Err(native_http_error(error))
-        }
-    }
-}
-
-fn native_http_response(
-    result: Result<(i64, i64, Option<i64>, Vec<String>), native_http::JetHTTPBridgeError>,
-) -> Result<JetHTTPResponse, JetHTTPError> {
-    let (status, body, length, headers) = result.map_err(native_http_error)?;
-    let protocol = native_http::jet_http_client_response_protocol_impl(body);
-    let remote_address = native_http::jet_http_client_response_remote_address_impl(body);
-    let redirect_history = native_http::jet_http_client_response_redirect_history_impl(body);
-    let timings_ms = native_http::jet_http_client_response_timings_impl(body);
-    let reused_connection = native_http::jet_http_client_response_reused_impl(body);
-    let raw_content_encoding = native_http::jet_http_client_response_raw_encoding_impl(body);
-    native_http::jet_http_client_response_facts_drop_impl(body);
-    let length = match length.map(usize::try_from).transpose() {
-        Ok(length) => length,
-        Err(_) => {
-            native_http_body_close(body);
-            return Err(JetHTTPError::InvalidFraming);
-        }
-    };
-    let headers = match JetHTTPHeaders::from_flat(headers) {
-        Ok(headers) => headers,
-        Err(_) => {
-            native_http_body_close(body);
-            return Err(JetHTTPError::InvalidHeader);
-        }
-    };
-    let mut response = jet_http_srv_response(status, &String::new());
-    response.body = JetHTTPBody::bridge(
-        body,
-        length,
-        native_http_body_read,
-        native_http_body_close,
-    );
-    response.headers = headers;
-    response.protocol = protocol;
-    response.remote_address = remote_address;
-    response.redirect_history = redirect_history;
-    response.timings_ms = timings_ms;
-    response.reused_connection = reused_connection;
-    response.raw_content_encoding = raw_content_encoding;
-    Ok(response)
-}
-
-fn native_http_request(req: JetHTTPRequest) -> Result<JetHTTPResponse, JetHTTPError> {
-    if let Some(error) = req.header_error.as_ref() {
-        return Err(error.clone());
-    }
-    let body = if req.body_set {
-        Some(req.body.bytes(8 * 1024 * 1024)?)
-    } else {
-        None
-    };
-    let headers = req.headers.to_flat();
-    native_http_response(native_http::jet_http_client_send_impl(
-        &req.method,
-        &req.url,
-        &headers,
-        body.as_deref(),
-        req.timeout_ms,
-        req.connect_timeout_ms,
-        req.read_timeout_ms,
-        req.total_timeout_ms,
-        req.dns_timeout_ms,
-        req.tls_timeout_ms,
-        req.write_timeout_ms,
-        req.first_byte_timeout_ms,
-        req.redirects,
-        req.proxy.as_deref(),
-        &req.cookies,
-        &req.form,
-        &req.multipart,
-    ))
-}
+jet_http_client_bridge!(native_http);
 
 fn jet_jit_http_client_get(url: i64) -> i64 {
     let url = clone_string(url);
@@ -2625,18 +2908,91 @@ fn jet_jit_http_serve_once_listener(listener: i64, mux: i64) -> i64 {
     }
 }
 fn jet_jit_http_serve_once(addr: i64, mux: i64) -> i64 {
-    match runtime_http_serve_once(clone_string(addr), mux) {
+    let Some(mux) = http_mux(mux) else {
+        return result_err("invalid HTTPMux".into());
+    };
+    let addr = clone_string(addr);
+    match jet_http_mux_serve_once(&addr, (*mux).clone()) {
         Ok(()) => result_ok_unit(),
         Err(error) => result_err(error),
     }
 }
 
-
-fn jet_jit_http_serve(addr: i64, mux: i64) -> i64 {
-    match runtime_http_serve(clone_string(addr), mux) {
+fn jet_jit_http_mux_serve(addr: i64, mux: i64, tls: i64, deadline: i64) -> i64 {
+    let Some(mux) = http_mux(mux) else {
+        return result_err("invalid HTTPMux".into());
+    };
+    let tls = match decode_http_server_tls(tls) {
+        Ok(tls) => tls,
+        Err(error) => return result_err(error),
+    };
+    let addr = clone_string(addr);
+    match jet_http_mux_serve(
+        &addr,
+        (*mux).clone(),
+        tls,
+        decode_http_server_deadline(deadline),
+    ) {
         Ok(()) => result_ok_unit(),
         Err(error) => result_err(error),
     }
+}
+
+fn jet_jit_http_serve(addr: i64, mux: i64) -> i64 {
+    let Some(mux) = http_mux(mux) else {
+        return result_err("invalid HTTPMux".into());
+    };
+    let addr = clone_string(addr);
+    match jet_http_mux_serve(&addr, (*mux).clone(), None, None) {
+        Ok(()) => result_ok_unit(),
+        Err(error) => result_err(error),
+    }
+}
+
+fn jet_jit_core_http_serve(addr: i64, callable: i64) -> i64 {
+    let Some((epoch, slot)) = resident_http_callable(callable) else {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_host_fault("MIR HTTP serve has an invalid callable handle");
+        });
+        return 0;
+    };
+    let addr = clone_string(addr);
+    jet_http_serve(&addr, move |request| {
+        Concurrency::try_with_http_jet_runtime_at(epoch, || {
+            let request = push_handle(NetHttpHandle::HTTPRequest(request));
+            Concurrency::notify_http_test_handler_entry();
+            let response = unsafe {
+                if slot.has_env {
+                    let callback: HTTPHandlerWithEnvFn =
+                        std::mem::transmute(slot.fn_ptr as usize);
+                    callback(slot.env, request)
+                } else {
+                    let callback: HTTPHandlerFn = std::mem::transmute(slot.fn_ptr as usize);
+                    callback(request)
+                }
+            };
+            match take_handle(response) {
+                Some(NetHttpHandle::HTTPResponse(response)) => response,
+                Some(other) => {
+                    let _ = push_handle(other);
+                    Concurrency::with_runtime_mut(|rt| {
+                        rt.set_host_fault("MIR HTTP serve callback did not return HTTPResponse");
+                    });
+                    jet_http_srv_internal_response()
+                }
+                None => {
+                    Concurrency::with_runtime_mut(|rt| {
+                        rt.set_host_fault("MIR HTTP serve callback returned an invalid handle");
+                    });
+                    jet_http_srv_internal_response()
+                }
+            }
+        })
+        .unwrap_or_else(jet_http_srv_internal_response)
+    });
+    // `jet_http_serve` only returns when the accept loop ends; the row's
+    // carrier for a Unit result is the zero word.
+    0
 }
 
 fn jet_jit_ws_upgrade(req: i64) -> i64 {
@@ -2644,9 +3000,9 @@ fn jet_jit_ws_upgrade(req: i64) -> i64 {
         NetHttpHandle::HTTPRequest(r) => Some(jet_ws_upgrade(r)),
         _ => None,
     }) {
-        Some(Ok(c)) => result_ok_handle(push_handle(NetHttpHandle::WsConn(Arc::new(
-            Mutex::new(c),
-        )))),
+        Some(Ok(c)) => {
+            result_ok_handle(push_handle(NetHttpHandle::WsConn(Arc::new(Mutex::new(c)))))
+        }
         Some(Err(e)) => result_err(format!("{e:?}")),
         None => result_err("invalid HTTPRequest".into()),
     }
@@ -2655,9 +3011,7 @@ fn jet_jit_ws_upgrade(req: i64) -> i64 {
 fn jet_jit_ws_connect(url: i64) -> i64 {
     let url = clone_string(url);
     match jet_ws_connect(&url) {
-        Ok(c) => result_ok_handle(push_handle(NetHttpHandle::WsConn(Arc::new(Mutex::new(
-            c,
-        ))))),
+        Ok(c) => result_ok_handle(push_handle(NetHttpHandle::WsConn(Arc::new(Mutex::new(c))))),
         Err(e) => result_err(format!("{e:?}")),
     }
 }
@@ -2770,8 +3124,7 @@ fn jet_jit_http_handler_bind1(callable: i64, cap0: i64) -> i64 {
 }
 
 fn bind_http_closure(callable: i64, env: i64) -> i64 {
-    let Some((epoch, slot)) =
-        resident_http_callable(callable).filter(|(_, slot)| slot.has_env)
+    let Some((epoch, slot)) = resident_http_callable(callable).filter(|(_, slot)| slot.has_env)
     else {
         return push_handle(NetHttpHandle::HTTPHandler(invalid_http_handler()));
     };
@@ -2850,8 +3203,7 @@ fn jet_jit_http_mux_middleware(mux: i64, mw_fn: i64) -> i64 {
                 let next_h = push_handle(NetHttpHandle::HTTPHandler(next));
                 let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
                     if slot.has_env {
-                        let f: HTTPMiddlewareWithEnvFn =
-                            std::mem::transmute(slot.fn_ptr as usize);
+                        let f: HTTPMiddlewareWithEnvFn = std::mem::transmute(slot.fn_ptr as usize);
                         f(slot.env, next_h)
                     } else {
                         let f: HTTPMiddlewareFn = std::mem::transmute(slot.fn_ptr as usize);
@@ -2859,7 +3211,11 @@ fn jet_jit_http_mux_middleware(mux: i64, mw_fn: i64) -> i64 {
                     }
                 }));
                 let fail = |op: &'static str| -> JetHTTPHandler {
-                    Arc::new(move |_| Err(JetHTTPError::IO { operation: op.into() }))
+                    Arc::new(move |_| {
+                        Err(JetHTTPError::IO {
+                            operation: op.into(),
+                        })
+                    })
                 };
                 match out {
                     Ok(out) => {
@@ -3090,11 +3446,13 @@ fn jet_jit_http_client_request_send(req: i64) -> i64 {
 
 fn jet_jit_http_resp_header(resp: i64, name: i64) -> i64 {
     let name = clone_string(name);
-    option_string(with_handle(resp, |h| match h {
-        NetHttpHandle::HTTPResponse(r) => Some(jet_http_client_response_header(r, &name)),
-        _ => None,
-    })
-    .and_then(|r| r.ok()))
+    option_string(
+        with_handle(resp, |h| match h {
+            NetHttpHandle::HTTPResponse(r) => Some(jet_http_client_response_header(r, &name)),
+            _ => None,
+        })
+        .and_then(|r| r.ok()),
+    )
 }
 
 fn jet_jit_http_resp_cookies(resp: i64) -> i64 {
@@ -3114,7 +3472,6 @@ fn jet_jit_http_server_access_log(req: i64, status: i64) -> i64 {
     .unwrap_or_default();
     alloc_string(text)
 }
-
 
 host_fns! {
     struct NetHttpHostFns;
@@ -3165,6 +3522,7 @@ host_fns! {
     tcp_listen_str: "jet_jit_net_tcp_listen_str" => jet_jit_net_tcp_listen_str: sig1;
     tcp_listen_addr: "jet_jit_net_tcp_listen_addr" => jet_jit_net_tcp_listen_addr: sig1;
     tcp_connect: "jet_jit_net_tcp_connect" => jet_jit_net_tcp_connect: sig1;
+    tcp_connect_timeout: "jet_jit_net_tcp_connect_timeout" => jet_jit_net_tcp_connect_timeout: sig2;
     tcp_stream_local_addr: "jet_jit_net_tcp_stream_local_addr" => jet_jit_net_tcp_stream_local_addr: sig1;
     tcp_stream_peer_addr: "jet_jit_net_tcp_stream_peer_addr" => jet_jit_net_tcp_stream_peer_addr: sig1;
     tcp_stream_local_socket_addr: "jet_jit_net_tcp_stream_local_socket_addr" => jet_jit_net_tcp_stream_local_socket_addr: sig1;
@@ -3191,6 +3549,7 @@ host_fns! {
     dns_txt: "jet_jit_net_dns_txt" => jet_jit_net_dns_txt: sig2;
     dns_txt_at: "jet_jit_net_dns_txt_at" => jet_jit_net_dns_txt_at: sig3;
     getservbyname: "jet_jit_net_getservbyname" => jet_jit_net_getservbyname: sig1;
+    net_error_show: "jet_jit_net_error_show" => jet_jit_net_error_show: sig1;
     getservbyport: "jet_jit_net_getservbyport" => jet_jit_net_getservbyport: sig1;
     tcp_reply: "jet_jit_net_tcp_reply" => jet_jit_net_tcp_reply: sig3;
     udp_bind: "jet_jit_net_udp_bind" => jet_jit_net_udp_bind: sig1;
@@ -3244,11 +3603,16 @@ host_fns! {
     tls_peer_identity: "jet_jit_tls_peer_identity" => jet_jit_tls_peer_identity: sig1;
     udp_ready: "jet_jit_udp_socket_ready" => jet_jit_udp_socket_ready: sig3;
     udp_close: "jet_jit_udp_socket_close" => jet_jit_udp_socket_close: sig1;
+    http_openapi: "jet_web_openapi" => jet_jit_http_openapi: sig1;
     ready_readable: "jet_jit_net_ready_readable" => jet_jit_net_ready_readable: sig1;
     ready_writable: "jet_jit_net_ready_writable" => jet_jit_net_ready_writable: sig1;
     http_mux_new: "jet_jit_http_mux_new" => jet_jit_http_mux_new: sig0;
-    http_mux_add: "jet_jit_http_mux_add" => jet_jit_http_mux_add: sig4;
-    http_mux_add_zero: "jet_jit_http_mux_add_zero" => jet_jit_http_mux_add_zero: sig4;
+    http_router_new_prelude: "jet_http_router_new" => jet_jit_http_router_new: sig0;
+    http_mux_add: "jet_http_mux_add_handler" => jet_jit_http_mux_add: sig4;
+    http_mux_add_zero: "jet_http_mux_add_zero_handler" => jet_jit_http_mux_add_zero: sig4;
+    http_router_new: "jet_jit_http_router_new" => jet_jit_http_router_new: sig0;
+    http_router_register: "jet_jit_http_router_register" => jet_jit_http_router_register: sig7;
+    http_router_register_prelude: "jet_http_router_register" => jet_jit_http_router_register: sig7;
     http_response: "jet_jit_http_response" => jet_jit_http_response: sig2;
     http_server_response_header: "jet_jit_http_server_response_header" => jet_jit_http_server_response_header: sig3;
     http_server_access_log: "jet_jit_http_server_access_log" => jet_jit_http_server_access_log: sig2;
@@ -3259,7 +3623,10 @@ host_fns! {
     http_req_header: "jet_jit_http_req_header" => jet_jit_http_req_header: sig2;
     http_req_text: "jet_jit_http_req_text" => jet_jit_http_req_text: sig1;
     http_req_text_with_limit: "jet_jit_http_req_text_with_limit" => jet_jit_http_req_text_with_limit: sig2;
+    http_req_text_prelude: "jet_http_request_text" => jet_jit_http_req_text: sig1;
+    http_req_text_with_limit_prelude: "jet_http_request_text_with_limit" => jet_jit_http_req_text_with_limit: sig2;
     http_body_text: "jet_jit_http_body_text" => jet_jit_http_body_text: sig2;
+    http_body_text_prelude: "jet_http_body_text" => jet_jit_http_body_text: sig2;
     http_body_bytes: "jet_jit_http_body_bytes" => jet_jit_http_body_bytes: sig2;
     http_body_chunks: "jet_jit_http_body_chunks" => jet_jit_http_body_chunks: sig2;
     http_body_chunks_next: "jet_jit_http_body_chunks_next" => jet_jit_http_body_chunks_next: sig1;
@@ -3273,17 +3640,28 @@ host_fns! {
     http_cors_policy: "jet_jit_http_cors_policy" => jet_jit_http_cors_policy: sig7;
     http_cors: "jet_jit_http_cors" => jet_jit_http_cors: sig2;
     http_project_json_decode_error: "jet_jit_http_project_json_decode_error" => jet_jit_http_project_json_decode_error: sig1;
+    http_project_json_decode_error_prelude: "jet_http_project_json_decode_error" => jet_jit_http_project_json_decode_error: sig1;
     http_resp_status: "jet_jit_http_resp_status" => jet_jit_http_resp_status: sig1;
     http_resp_body: "jet_jit_http_resp_body" => jet_jit_http_resp_body: sig1;
+    core_http_serve: "jet_http_serve" => jet_jit_core_http_serve: sig2;
     http_client_resp_body: "jet_jit_http_client_resp_body" => jet_jit_http_client_resp_body: sig1;
+    http_mux_serve: "jet_http_mux_serve" => jet_jit_http_mux_serve: sig4;
     http_serve: "jet_jit_http_serve" => jet_jit_http_serve: sig2;
     http_resp_text: "jet_jit_http_resp_text" => jet_jit_http_resp_text: sig1;
     http_serve_once: "jet_jit_http_serve_once" => jet_jit_http_serve_once: sig2;
     http_resp_text_with_limit: "jet_jit_http_resp_text_with_limit" => jet_jit_http_resp_text_with_limit: sig2;
-    http_server_bind: "jet_jit_http_server_bind" => jet_jit_http_server_bind: sig2;
+    http_resp_text_prelude: "jet_http_response_text" => jet_jit_http_resp_text: sig1;
+    http_resp_text_with_limit_prelude: "jet_http_response_text_with_limit" => jet_jit_http_resp_text_with_limit: sig2;
+    http_server_tls: "jet_jit_http_server_tls" => jet_jit_http_server_tls: sig2;
+    http_server_default: "jet_http_server_default" => jet_jit_http_server_default: sig2;
+    http_server_bind: "jet_http_server_bind" => jet_jit_http_server_bind: sig4;
     http_server_local_addr: "jet_jit_http_server_local_addr" => jet_jit_http_server_local_addr: sig1;
+    http_server_local_addr_prelude: "jet_http_server_local_addr" => jet_jit_http_server_local_addr: sig1;
     http_server_serve: "jet_jit_http_server_serve" => jet_jit_http_server_serve: sig1;
+    http_server_serve_prelude: "jet_http_server_serve" => jet_jit_http_server_serve: sig1;
+    http_server_wait: "jet_http_server_wait" => jet_jit_http_server_wait: sig1;
     http_server_shutdown: "jet_jit_http_server_shutdown" => jet_jit_http_server_shutdown: sig2;
+    http_server_shutdown_prelude: "jet_http_server_shutdown" => jet_jit_http_server_shutdown: sig2;
     http_shutdown_report_field: "jet_jit_http_shutdown_report_field" => jet_jit_http_shutdown_report_field: sig2;
     http_serve_once_listener: "jet_jit_http_serve_once_listener" => jet_jit_http_serve_once_listener: sig2;
     http_client_get: "jet_jit_http_client_get" => jet_jit_http_client_get: sig1;
@@ -3321,219 +3699,13 @@ host_fns! {
     ws_message_text: "jet_jit_ws_message_text" => jet_jit_ws_message_text: sig1;
 }
 
-
-
-
-
-
-// ── I9 shared Prelude adapters (C hosts + ambient call these; no forked logic) ─
-
-/// Build a CORS policy via `jet_http_cors_policy` only. Returns an opaque handle.
-/// `origins_any`: true → `.Any`; false → `List(origins)`.
-pub(crate) struct RuntimeHttpError {
-    pub(crate) value: CtValue,
-    packed: i64,
-}
-
-pub(crate) fn runtime_cors_policy(
-    origins_any: bool,
-    origins: Vec<String>,
-    methods: Option<Vec<String>>,
-    headers: Option<Vec<String>>,
-    credentials: Option<bool>,
-    max_age: Option<i64>,
-) -> Result<i64, RuntimeHttpError> {
-    let origins = if origins_any {
-        JetHTTPCorsOrigins::Any
-    } else {
-        JetHTTPCorsOrigins::List(origins)
-    };
-    match jet_http_cors_policy_defaulted(
-        &origins,
-        methods.as_ref(),
-        headers.as_ref(),
-        credentials,
-        max_age,
-    ) {
-        Ok(policy) => Ok(push_handle(NetHttpHandle::HTTPCorsPolicy(policy))),
-        Err(error) => {
-            let (packed, value) = marshal_http_error(error);
-            Err(RuntimeHttpError { value, packed })
-        }
-    }
-}
-
-/// Install CORS via `jet_http_srv_install_cors` only.
-pub(crate) fn runtime_cors(mux: i64, policy: i64) -> Result<(), String> {
-    let mux = http_mux(mux).ok_or_else(|| "invalid HTTPMux".to_string())?;
-    let policy = with_handle(policy, |h| match h {
-        NetHttpHandle::HTTPCorsPolicy(p) => Some(p.clone()),
-        _ => None,
-    })
-    .ok_or_else(|| "invalid HTTPCorsPolicy".to_string())?;
-    jet_http_srv_install_cors(&mux, &policy);
-    Ok(())
-}
-
-/// Mount static files via `jet_http_srv_static_files_mount` only.
-pub(crate) fn runtime_static_files(
-    mux: i64,
-    prefix: String,
-    root: String,
-    index: Option<bool>,
-    dotfiles: Option<bool>,
-    follow_links: Option<bool>,
-) -> Result<(), String> {
-    let mux = http_mux(mux).ok_or_else(|| "invalid HTTPMux".to_string())?;
-    jet_http_srv_static_files_mount_defaulted(
-        &mux,
-        &prefix,
-        &root,
-        index,
-        dotfiles,
-        follow_links,
-    );
-    Ok(())
-}
-
-/// JSON response with AOT content-type — body is already JSON text (same as AOT
-/// after `jet_enc_json_to_string`).
-pub(crate) fn runtime_json_response(status: i64, body: String) -> i64 {
-    push_handle(NetHttpHandle::HTTPResponse(jet_http_srv_json_text(
-        status, &body,
-    )))
-}
-
-pub(crate) fn runtime_http_response(status: i64, body: String) -> i64 {
-    push_handle(NetHttpHandle::HTTPResponse(jet_http_srv_response(
-        status, &body,
-    )))
-}
-
-pub(crate) fn runtime_http_sse(body: String) -> i64 {
-    push_handle(NetHttpHandle::HTTPResponse(jet_http_srv_sse(&body)))
-}
-
-pub(crate) fn runtime_http_server_response_header(
-    response: i64,
-    name: String,
-    value: String,
-) -> Result<i64, String> {
-    let response = take_handle(response).ok_or_else(|| "invalid HTTPResponse".to_string())?;
-    let NetHttpHandle::HTTPResponse(response) = response else {
-        return Err("invalid HTTPResponse".to_string());
-    };
-    Ok(push_handle(NetHttpHandle::HTTPResponse(
-        jet_http_srv_response_header(response, &name, &value),
-    )))
-}
-
-/// Install an evaluator callback in the same Prelude mux used by AOT and the
-/// resident JIT. The callback only marshals CtValue request/response carriers;
-/// routing, matching, middleware, and response policy remain in HTTPServer.rs.
-pub(crate) fn runtime_http_mux_add_callback(
-    mux: i64,
-    method: String,
-    pattern: String,
-    callback: Arc<dyn Fn(CtValue) -> Result<CtValue, String> + Send + Sync>,
-) -> Result<(), String> {
-    let mux = http_mux(mux).ok_or_else(|| "invalid HTTPMux".to_string())?;
-    let handler: JetHTTPHandler = Arc::new(move |request: JetHTTPRequest| {
-        let request_handle = push_handle(NetHttpHandle::HTTPRequest(request));
-        let callback_result = callback(http_ct_handle("HTTPRequest", request_handle));
-        let _ = take_handle(request_handle);
-        let value = callback_result.map_err(|operation| JetHTTPError::IO { operation })?;
-        let value = match value {
-            CtValue::Present(value) => *value,
-            CtValue::Failed(CtReport::Told(error)) => {
-                return Err(http_error_from_value(&error).unwrap_or(JetHTTPError::IO {
-                    operation: "handler returned an error".to_string(),
-                }))
-            }
-            CtValue::Failed(CtReport::Clean(_)) => {
-                return Err(JetHTTPError::IO {
-                    operation: "handler returned an error".to_string(),
-                })
-            }
-            _ => value,
-        };
-        let handle = match value {
-            CtValue::Struct { type_name, fields } if type_name == "HTTPResponse" => fields
-                .iter()
-                .find_map(|(name, value)| match (name.as_str(), value) {
-                    ("handle", CtValue::Int(handle)) if *handle > 0 => Some(*handle),
-                    _ => None,
-                })
-                .ok_or_else(|| JetHTTPError::IO {
-                    operation: "handler response handle".to_string(),
-                })?,
-            _ => {
-                return Err(JetHTTPError::IO {
-                    operation: "handler did not return HTTPResponse".to_string(),
-                })
-            }
-        };
-        match take_handle(handle) {
-            Some(NetHttpHandle::HTTPResponse(response)) => Ok(response),
-            Some(other) => {
-                let _ = push_handle(other);
-                Err(JetHTTPError::IO {
-                    operation: "handler response handle".to_string(),
-                })
-            }
-            None => Err(JetHTTPError::IO {
-                operation: "handler response handle".to_string(),
-            }),
-        }
-    });
-    jet_http_mux_add_handler(&mux, &method, &pattern, handler);
-    Ok(())
-}
-
-pub(crate) fn runtime_http_serve_once_listener(
-    listener: i64,
-    mux: i64,
-) -> Result<(), String> {
-    let listener = tcp_listener(listener).ok_or_else(|| "invalid TcpListener".to_string())?;
-    let mux = http_mux(mux).ok_or_else(|| "invalid HTTPMux".to_string())?;
-    jet_http_mux_serve_once_listener(&listener, &mux)
-}
-
-pub(crate) fn runtime_http_serve_once(addr: String, mux: i64) -> Result<(), String> {
-    let mux = http_mux(mux).ok_or_else(|| "invalid HTTPMux".to_string())?;
-    jet_http_mux_serve_once(&addr, (*mux).clone())
-}
-
-pub(crate) fn runtime_http_serve(addr: String, mux: i64) -> Result<(), String> {
-    let mux = http_mux(mux).ok_or_else(|| "invalid HTTPMux".to_string())?;
-    jet_http_mux_serve(&addr, (*mux).clone())
-}
-
-pub(crate) fn runtime_http_server_bind(addr: String, mux: i64) -> Result<i64, String> {
-    let mux = http_mux(mux).ok_or_else(|| "invalid HTTPMux".to_string())?;
-    let server = jet_http_server_bind(&addr, (*mux).clone())?;
-    Ok(push_handle(NetHttpHandle::HTTPServer(Arc::new(server))))
-}
-
-pub(crate) fn runtime_http_server_serve(server: i64) -> Result<(), String> {
-    let server = http_server(server).ok_or_else(|| "invalid HTTPServer".to_string())?;
-    jet_http_server_serve(&server).map(|_| ())
-}
-
-pub(crate) fn runtime_http_server_shutdown(
-    server: i64,
-    grace_ms: i64,
-) -> Result<(), String> {
-    let server = http_server(server).ok_or_else(|| "invalid HTTPServer".to_string())?;
-    let grace = jet_std::Duration {
-        ns: grace_ms.saturating_mul(1_000_000),
-    };
-    jet_http_server_shutdown(&server, &grace).map(|_| ())
-}
-
-pub(crate) fn runtime_http_mux() -> i64 {
+// ── Test-only direct Prelude adapters ──────────────────────────────────────
+// The resident lifetime proof uses these adapters so it exercises the same
+// shared mux and server kernels as the live JIT host functions.
+pub(crate) fn test_http_mux() -> i64 {
     push_handle(NetHttpHandle::HTTPMux(Arc::new(jet_http_mux_new())))
 }
+
 pub(crate) fn test_http_mux_add_handler(
     mux: i64,
     method: &str,
@@ -3545,2465 +3717,30 @@ pub(crate) fn test_http_mux_add_handler(
     Ok(())
 }
 
+pub(crate) fn test_http_server_bind(addr: String, mux: i64) -> Result<i64, String> {
+    let mux = http_mux(mux).ok_or_else(|| "invalid HTTPMux".to_string())?;
+    let server = jet_http_server_bind(&addr, (*mux).clone(), None, None)?;
+    Ok(push_handle(NetHttpHandle::HTTPServer(Arc::new(server))))
+}
+
 pub(crate) fn test_http_server_local_addr(server: i64) -> Result<String, String> {
     let server = http_server(server).ok_or_else(|| "invalid HTTPServer".to_string())?;
     jet_http_server_local_addr(&server)
 }
 
-
-// ── I9 UDP ambient adapters ───────────────────────────────────────────────
-
-fn net_ct_handle(type_name: &str, handle: i64) -> CtValue {
-    let fields = if type_name == "SocketAddr" {
-        with_handle(handle, |value| match value {
-            NetHttpHandle::SocketAddr(address) => Some(vec![
-                ("handle".to_string(), CtValue::Int(handle)),
-                ("host".to_string(), CtValue::Str(jet_net_socket_host(address))),
-                ("port".to_string(), CtValue::Int(jet_net_socket_port(address))),
-                (
-                    "text".to_string(),
-                    CtValue::Str(jet_net_socket_to_string(address)),
-                ),
-            ]),
-            _ => None,
-        })
-    } else {
-        None
-    };
-    CtValue::Struct {
-        type_name: type_name.to_string(),
-        fields: fields.unwrap_or_else(|| vec![("handle".to_string(), CtValue::Int(handle))]),
-    }
-}
-fn net_ct_handle_list(type_name: &str, handles: Vec<i64>) -> CtValue {
-    CtValue::List(
-        handles
-            .into_iter()
-            .map(|handle| net_ct_handle(type_name, handle))
-            .collect(),
-    )
-}
-
-fn net_ct_ip_list(rows: Vec<JetIpAddr>) -> CtValue {
-    net_ct_handle_list(
-        "IPAddr",
-        rows.into_iter()
-            .map(|row| push_handle(NetHttpHandle::IPAddr(row)))
-            .collect(),
-    )
-}
-
-fn net_ct_dns_srv_list(rows: Vec<JetDNSSrv>) -> CtValue {
-    net_ct_handle_list(
-        "DNSSrv",
-        rows.into_iter()
-            .map(|row| push_handle(NetHttpHandle::DNSSrv(row)))
-            .collect(),
-    )
-}
-
-
-pub(crate) fn runtime_net_socket_addr(host: String, port: i64) -> CtValue {
-    match jet_net_socket_addr(&host, port) {
-        Ok(addr) => CtValue::Present(Box::new(net_ct_handle(
-            "SocketAddr",
-            push_handle(NetHttpHandle::SocketAddr(addr)),
-        ))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_net_socket_to_string(address: i64) -> CtValue {
-    CtValue::Str(
-        with_handle(address, |handle| match handle {
-            NetHttpHandle::SocketAddr(address) => Some(jet_net_socket_to_string(address)),
-            _ => None,
-        })
-        .unwrap_or_default(),
-    )
-}
-
-pub(crate) fn runtime_net_socket_host(address: i64) -> CtValue {
-    CtValue::Str(
-        with_handle(address, |handle| match handle {
-            NetHttpHandle::SocketAddr(address) => Some(jet_net_socket_host(address)),
-            _ => None,
-        })
-        .unwrap_or_default(),
-    )
-}
-
-pub(crate) fn runtime_net_socket_port(address: i64) -> CtValue {
-    CtValue::Int(
-        with_handle(address, |handle| match handle {
-            NetHttpHandle::SocketAddr(address) => Some(jet_net_socket_port(address)),
-            _ => None,
-        })
-        .unwrap_or(0),
-    )
-}
-
-fn tcp_listener_result(listener: JetTCPListener) -> CtValue {
-    CtValue::Present(Box::new(net_ct_handle(
-        "TcpListener",
-        push_handle(NetHttpHandle::TcpListener(Arc::new(listener))),
-    )))
-}
-
-fn tcp_stream_result(stream: JetTCPStream) -> CtValue {
-    CtValue::Present(Box::new(net_ct_handle(
-        "TcpStream",
-        push_handle(NetHttpHandle::TcpStream(Arc::new(Mutex::new(stream)))),
-    )))
-}
-
-fn tls_config_result(config: JetTLSClientConfig) -> CtValue {
-    CtValue::Present(Box::new(net_ct_handle(
-        "TLSClientConfig",
-        push_handle(NetHttpHandle::TLSClientConfig(config)),
-    )))
-}
-
-fn tls_stream_result(stream: JetTLSStream) -> CtValue {
-    CtValue::Present(Box::new(net_ct_handle(
-        "TLSStream",
-        push_handle(NetHttpHandle::TLSStream(Arc::new(Mutex::new(stream)))),
-    )))
-}
-
-fn tls_io_failure(operation: &str, resource: &str) -> CtValue {
-    CtValue::failed(Box::new(net_io_error_value(jet_tls_config_error(
-        operation,
-        format!("invalid {resource} handle"),
-    ))))
-}
-
-fn tls_certificate_value(certificate: JetTLSCertificate) -> CtValue {
-    CtValue::Struct {
-        type_name: "TLSCertificate".to_string(),
-        fields: vec![
-            ("der".to_string(), CtValue::Bytes(certificate.der)),
-            ("sha256".to_string(), CtValue::Bytes(certificate.sha256)),
-            ("spki_sha256".to_string(), CtValue::Bytes(certificate.spki_sha256)),
-            (
-                "dns_names".to_string(),
-                CtValue::List(certificate.dns_names.into_iter().map(CtValue::Str).collect()),
-            ),
-            (
-                "valid_from_unix_ms".to_string(),
-                CtValue::Int(certificate.valid_from_unix_ms),
-            ),
-            (
-                "valid_until_unix_ms".to_string(),
-                CtValue::Int(certificate.valid_until_unix_ms),
-            ),
-            ("subject".to_string(), CtValue::Str(certificate.subject)),
-            ("issuer".to_string(), CtValue::Str(certificate.issuer)),
-        ],
-    }
-}
-
-fn tls_peer_identity_value(identity: JetTLSPeerIdentity) -> CtValue {
-    let leaf = tls_certificate_value(identity.leaf);
-    let chain = CtValue::List(
-        identity
-            .certificate_chain
-            .into_iter()
-            .map(tls_certificate_value)
-            .collect(),
-    );
-    CtValue::Struct {
-        type_name: "TLSPeerIdentity".to_string(),
-        fields: vec![
-            ("verified_server_name".to_string(), CtValue::Str(identity.verified_server_name)),
-            ("leaf".to_string(), leaf),
-            ("certificate_chain".to_string(), chain),
-            ("cipher_suite".to_string(), CtValue::Str(identity.cipher_suite)),
-            (
-                "tls_version".to_string(),
-                CtValue::Enum {
-                    type_name: "TLSVersion".to_string(),
-                    // I9: marshalling only — the variant spelling comes from
-                    // the one Prelude renderer AOT prints through.
-                    variant: identity.tls_version.jet_show(),
-                    args: vec![],
-                },
-            ),
-        ],
-    }
-}
-
-pub(crate) fn runtime_tls_client_config_default() -> CtValue {
-    net_ct_handle(
-        "TLSClientConfig",
-        push_handle(NetHttpHandle::TLSClientConfig(jet_tls_client_config_default())),
-    )
-}
-
-pub(crate) fn runtime_tls_root_certificates_from_pem(pem: Vec<u8>) -> CtValue {
-    match jet_tls_root_certificates_from_pem(
-        &pem,
-        crate::Net::runtime::tls::jet_net_tls_validate_roots_impl,
-    ) {
-        Ok(roots) => CtValue::Present(Box::new(net_ct_handle(
-            "TLSRootCertificates",
-            push_handle(NetHttpHandle::TLSRootCertificates(roots)),
-        ))),
-        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tls_client_identity_from_pem(
-    cert_chain: Vec<u8>,
-    private_key: Vec<u8>,
-) -> CtValue {
-    match jet_tls_client_identity_from_pem(
-        &cert_chain,
-        &private_key,
-        crate::Net::runtime::tls::jet_net_tls_validate_identity_impl,
-    ) {
-        Ok(identity) => CtValue::Present(Box::new(net_ct_handle(
-            "TLSClientIdentity",
-            push_handle(NetHttpHandle::TLSClientIdentity(identity)),
-        ))),
-        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tls_client_config_with_alpn(
-    config: i64,
-    protocols: Vec<String>,
-) -> CtValue {
-    let Some(config) = tls_client_config(config) else {
-        return tls_io_failure("ClientConfig.with_alpn", "TLSClientConfig");
-    };
-    match jet_tls_client_config_with_alpn(config, &protocols) {
-        Ok(config) => tls_config_result(config),
-        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tls_client_config_with_trust(
-    config: i64,
-    trust: JetTLSTrust,
-) -> CtValue {
-    let Some(config) = tls_client_config(config) else {
-        return tls_io_failure("ClientConfig.with_trust", "TLSClientConfig");
-    };
-    match jet_tls_client_config_with_trust(config, trust) {
-        Ok(config) => tls_config_result(config),
-        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tls_client_config_with_identity(
-    config: i64,
-    identity: i64,
-) -> CtValue {
-    let Some(config) = tls_client_config(config) else {
-        return tls_io_failure("ClientConfig.with_client_identity", "TLSClientConfig");
-    };
-    let Some(identity) = tls_client_identity(identity) else {
-        return tls_io_failure("ClientConfig.with_client_identity", "TLSClientIdentity");
-    };
-    match jet_tls_client_config_with_client_identity(config, &identity) {
-        Ok(config) => tls_config_result(config),
-        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tls_client_config_with_version_bounds(
-    config: i64,
-    min: JetTLSVersion,
-    max: JetTLSVersion,
-) -> CtValue {
-    let Some(config) = tls_client_config(config) else {
-        return tls_io_failure("ClientConfig.with_version_bounds", "TLSClientConfig");
-    };
-    match jet_tls_client_config_with_version_bounds(config, min, max) {
-        Ok(config) => tls_config_result(config),
-        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tls_client(
-    stream: i64,
-    server_name: String,
-    config: Option<i64>,
-    deadline: Option<i64>,
-) -> CtValue {
-    match tls_client_stream_result(stream, server_name, config, deadline) {
-        Ok(stream) => tls_stream_result(stream),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tls_stream_read_bytes(
-    stream: i64,
-    limit: i64,
-    deadline: Option<i64>,
-) -> CtValue {
-    let Some(stream) = tls_stream(stream) else {
-        return tls_io_failure("TLSStream.read", "TLSStream");
-    };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let result = match deadline {
-        Some(ns) => jet_net_tls_read_bytes_deadline(
-            &mut stream,
-            limit,
-            &jet_std::Duration { ns },
-        ),
-        None => jet_net_tls_read_bytes(&mut stream, limit),
-    };
-    match result {
-        Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tls_stream_read_text(stream: i64, _limit: i64) -> CtValue {
-    let Some(stream) = tls_stream(stream) else {
-        return tls_io_failure("TLSStream.read_text", "TLSStream");
-    };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match jet_net_tls_read_text(&mut stream) {
-        Ok(text) => CtValue::Present(Box::new(CtValue::Str(text))),
-        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tls_stream_write_bytes(stream: i64, data: Vec<u8>) -> CtValue {
-    let Some(stream) = tls_stream(stream) else {
-        return tls_io_failure("TLSStream.write", "TLSStream");
-    };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match jet_net_tls_write_bytes(&mut stream, &data) {
-        Ok(count) => CtValue::Present(Box::new(CtValue::Int(count))),
-        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tls_stream_write_all_bytes(
-    stream: i64,
-    data: Vec<u8>,
-    deadline: Option<i64>,
-) -> CtValue {
-    let Some(stream) = tls_stream(stream) else {
-        return tls_io_failure("TLSStream.write_all", "TLSStream");
-    };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let result = match deadline {
-        Some(ns) => jet_net_tls_write_all_bytes_deadline(
-            &mut stream,
-            &data,
-            &jet_std::Duration { ns },
-        ),
-        None => jet_net_tls_write_all_bytes(&mut stream, &data),
-    };
-    match result {
-        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tls_stream_write_text(stream: i64, text: String) -> CtValue {
-    let Some(stream) = tls_stream(stream) else {
-        return tls_io_failure("TLSStream.write_text", "TLSStream");
-    };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match jet_net_tls_write_text(&mut stream, &text) {
-        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tls_stream_close(stream: i64) -> CtValue {
-    let Some(stream) = tls_stream(stream) else {
-        return tls_io_failure("TLSStream.close", "TLSStream");
-    };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match jet_net_tls_close(&mut stream) {
-        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tls_stream_close_write(stream: i64, deadline: i64) -> CtValue {
-    let Some(stream) = tls_stream(stream) else {
-        return tls_io_failure("TLSStream.close_write", "TLSStream");
-    };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match jet_net_tls_close_write(&mut stream, &jet_std::Duration { ns: deadline }) {
-        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tls_stream_ready(stream: i64, interest: i64, deadline: i64) -> CtValue {
-    let Some(interest) = net_ready_interest(interest) else {
-        return tls_io_failure("TLSStream.ready", "NetReadyInterest");
-    };
-    let Some(stream) = tls_stream(stream) else {
-        return tls_io_failure("TLSStream.ready", "TLSStream");
-    };
-    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match jet_net_tls_ready(&stream, interest, &jet_std::Duration { ns: deadline }) {
-        Ok(ready) => CtValue::Present(Box::new(net_ct_handle(
-            "NetReady",
-            push_handle(NetHttpHandle::NetReady(Arc::new(ready))),
-        ))),
-        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tls_stream_peer_identity(stream: i64) -> CtValue {
-    let Some(stream) = tls_stream(stream) else {
-        return CtValue::Struct {
-            type_name: "TLSPeerIdentity".to_string(),
-            fields: vec![],
-        };
-    };
-    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    tls_peer_identity_value(jet_net_tls_peer_identity(&stream))
-}
-
-pub(crate) fn runtime_tcp_listen(address: String) -> CtValue {
-    match jet_net_tcp_listen(&address) {
-        Ok(listener) => tcp_listener_result(listener),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-#[cfg(unix)]
-pub(crate) fn runtime_unix_listen(path: String) -> CtValue {
-    match jet_net_unix_listen(&path) {
-        Ok(listener) => CtValue::Present(Box::new(net_ct_handle(
-            "UnixListener",
-            push_handle(NetHttpHandle::UnixListener(Arc::new(listener))),
-        ))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-#[cfg(not(unix))]
-pub(crate) fn runtime_unix_listen(path: String) -> CtValue {
-    CtValue::failed(Box::new(net_error_value(net_invalid_error(
-        "unix listen",
-        &path,
-    ))))
-}
-#[cfg(unix)]
-pub(crate) fn runtime_unix_connect(path: String) -> CtValue {
-    match jet_net_unix_connect(&path) {
-        Ok(stream) => CtValue::Present(Box::new(net_ct_handle(
-            "UnixStream",
-            push_handle(NetHttpHandle::UnixStream(Arc::new(Mutex::new(stream)))),
-        ))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-#[cfg(not(unix))]
-pub(crate) fn runtime_unix_connect(path: String) -> CtValue {
-    CtValue::failed(Box::new(net_error_value(net_invalid_error(
-        "unix connect",
-        &path,
-    ))))
-}
-
-#[cfg(unix)]
-pub(crate) fn runtime_unix_accept(listener: i64) -> CtValue {
-    let Some(listener) = unix_listener(listener) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "unix accept",
-            "UnixListener",
-        ))));
-    };
-    match jet_net_unix_accept(&listener) {
-        Ok(stream) => CtValue::Present(Box::new(net_ct_handle(
-            "UnixStream",
-            push_handle(NetHttpHandle::UnixStream(Arc::new(Mutex::new(stream)))),
-        ))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-#[cfg(not(unix))]
-pub(crate) fn runtime_unix_accept(_listener: i64) -> CtValue {
-    CtValue::failed(Box::new(net_error_value(net_invalid_error(
-        "unix accept",
-        "UnixListener",
-    ))))
-}
-
-pub(crate) fn runtime_tcp_listen_addr(address: i64) -> CtValue {
-    let Some(address) = with_handle(address, |handle| match handle {
-        NetHttpHandle::SocketAddr(address) => Some(address.clone()),
-        _ => None,
-    }) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "tcp listen",
-            "SocketAddr",
-        ))));
-    };
-    match jet_net_tcp_listen_addr(&address) {
-        Ok(listener) => tcp_listener_result(listener),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_listener_accept(listener: i64, deadline: Option<i64>) -> CtValue {
-    let Some(listener) = tcp_listener(listener) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "tcp accept",
-            "TcpListener",
-        ))));
-    };
-    let result = match deadline {
-        Some(ns) => {
-            let deadline = jet_std::Duration { ns };
-            jet_net_tcp_accept_deadline(&listener, &deadline)
-        }
-        None => jet_net_tcp_accept(&listener),
-    };
-    match result {
-        Ok(stream) => tcp_stream_result(stream),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_connect(address: String) -> CtValue {
-    match jet_net_tcp_connect(&address) {
-        Ok(stream) => tcp_stream_result(stream),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_connect_addr(address: i64) -> CtValue {
-    let Some(address) = with_handle(address, |handle| match handle {
-        NetHttpHandle::SocketAddr(address) => Some(address.clone()),
-        _ => None,
-    }) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "tcp connect",
-            "SocketAddr",
-        ))));
-    };
-    match jet_net_tcp_connect_addr(&address) {
-        Ok(stream) => tcp_stream_result(stream),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_connect_timeout(address: i64, timeout_ms: i64) -> CtValue {
-    let Some(address) = with_handle(address, |handle| match handle {
-        NetHttpHandle::SocketAddr(address) => Some(address.clone()),
-        _ => None,
-    }) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "tcp connect",
-            "SocketAddr",
-        ))));
-    };
-    match jet_net_tcp_connect_timeout(&address, timeout_ms) {
-        Ok(stream) => tcp_stream_result(stream),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_connect_happy(host: String, port: i64, timeout_ms: i64) -> CtValue {
-    match jet_net_tcp_connect_happy(&host, port, timeout_ms) {
-        Ok(stream) => tcp_stream_result(stream),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_listener_local_addr(listener: i64) -> CtValue {
-    let Some(listener) = tcp_listener(listener) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "tcp listener local address",
-            "TcpListener",
-        ))));
-    };
-    match jet_net_listener_local_addr(&listener) {
-        Ok(address) => CtValue::Present(Box::new(CtValue::Str(address))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_listener_local_socket_addr(listener: i64) -> CtValue {
-    let Some(listener) = tcp_listener(listener) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "tcp listener local address",
-            "TcpListener",
-        ))));
-    };
-    match jet_net_listener_local_socket_addr(&listener) {
-        Ok(address) => CtValue::Present(Box::new(net_ct_handle(
-            "SocketAddr",
-            push_handle(NetHttpHandle::SocketAddr(address)),
-        ))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_stream_set_timeout(stream: i64, timeout_ms: i64) -> CtValue {
-    let Some(stream) = tcp_stream(stream) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "set_timeout",
-            "TcpStream",
-        ))));
-    };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match jet_net_set_timeout(&mut stream, timeout_ms) {
-        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_stream_set_read_timeout(stream: i64, timeout_ms: i64) -> CtValue {
-    let Some(stream) = tcp_stream(stream) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "set_read_timeout",
-            "TcpStream",
-        ))));
-    };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match jet_net_set_read_timeout(&mut stream, timeout_ms) {
-        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_stream_set_write_timeout(stream: i64, timeout_ms: i64) -> CtValue {
-    let Some(stream) = tcp_stream(stream) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "set_write_timeout",
-            "TcpStream",
-        ))));
-    };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match jet_net_set_write_timeout(&mut stream, timeout_ms) {
-        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_stream_nodelay(stream: i64) -> CtValue {
-    let Some(stream) = tcp_stream(stream) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "nodelay",
-            "TcpStream",
-        ))));
-    };
-    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match jet_net_nodelay(&stream) {
-        Ok(value) => CtValue::Present(Box::new(CtValue::Bool(value))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_stream_set_nodelay(stream: i64, enabled: bool) -> CtValue {
-    let Some(stream) = tcp_stream(stream) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "set_nodelay",
-            "TcpStream",
-        ))));
-    };
-    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match jet_net_set_nodelay(&stream, enabled) {
-        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_stream_ttl(stream: i64) -> CtValue {
-    let Some(stream) = tcp_stream(stream) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "ttl",
-            "TcpStream",
-        ))));
-    };
-    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match jet_net_ttl(&stream) {
-        Ok(value) => CtValue::Present(Box::new(CtValue::Int(value))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_stream_set_ttl(stream: i64, ttl: i64) -> CtValue {
-    let Some(stream) = tcp_stream(stream) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "set_ttl",
-            "TcpStream",
-        ))));
-    };
-    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match jet_net_set_ttl(&stream, ttl) {
-        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_stream_socket_type(stream: i64) -> CtValue {
-    let Some(stream) = tcp_stream(stream) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "socket_type",
-            "TcpStream",
-        ))));
-    };
-    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    CtValue::Str(jet_net_socket_type(&stream))
-}
-
-pub(crate) fn runtime_tcp_stream_sendfile(stream: i64, path: String) -> CtValue {
-    let Some(stream) = tcp_stream(stream) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "sendfile",
-            "TcpStream",
-        ))));
-    };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match jet_net_sendfile(&mut stream, &path) {
-        Ok(value) => CtValue::Present(Box::new(CtValue::Int(value))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_stream_read(stream: i64) -> CtValue {
-    let Some(stream) = tcp_stream(stream) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "tcp read",
-            "TcpStream",
-        ))));
-    };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match jet_net_tcp_read(&mut stream) {
-        Ok(value) => CtValue::Present(Box::new(CtValue::Str(value))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_stream_read_bytes(
-    stream: i64,
-    limit: i64,
-    deadline: Option<i64>,
-) -> CtValue {
-    let Some(stream) = tcp_stream(stream) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "tcp read",
-            "TcpStream",
-        ))));
-    };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let result = match deadline {
-        Some(ns) => {
-            let deadline = jet_std::Duration { ns };
-            jet_net_tcp_read_bytes_deadline(&mut stream, limit, &deadline)
-        }
-        None => jet_net_tcp_read_bytes(&mut stream, limit),
-    };
-    match result {
-        Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_stream_read_io(stream: i64, limit: i64) -> CtValue {
-    let Some(stream) = tcp_stream(stream) else {
-        return CtValue::failed(Box::new(net_io_error_value(jet_std::IOError::Other(
-            jet_std::IOContext::new(
-                jet_std::IOOperation::Read,
-                Some("TcpStream".to_string()),
-                None,
-                Some("invalid TcpStream handle".to_string()),
-            ),
-        ))));
-    };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match JetIOReader::read(&mut *stream, limit) {
-        Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
-    }
-}
-#[cfg(unix)]
-pub(crate) fn runtime_unix_stream_read_io(stream: i64, limit: i64) -> CtValue {
-    let Some(stream) = unix_stream(stream) else {
-        return CtValue::failed(Box::new(net_io_error_value(jet_std::IOError::Other(
-            jet_std::IOContext::new(
-                jet_std::IOOperation::Read,
-                Some("UnixStream".to_string()),
-                None,
-                Some("invalid UnixStream handle".to_string()),
-            ),
-        ))));
-    };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match JetIOReader::read(&mut *stream, limit) {
-        Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
-    }
-}
-#[cfg(unix)]
-pub(crate) fn runtime_unix_close(stream: i64) -> CtValue {
-    let Some(stream) = unix_stream(stream) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "unix close",
-            "UnixStream",
-        ))));
-    };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match jet_net_unix_close(&mut stream) {
-        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-#[cfg(not(unix))]
-pub(crate) fn runtime_unix_close(_stream: i64) -> CtValue {
-    CtValue::failed(Box::new(net_error_value(net_invalid_error(
-        "unix close",
-        "UnixStream",
-    ))))
-}
-
-
-pub(crate) fn runtime_tls_stream_read_io(stream: i64, limit: i64) -> CtValue {
-    let Some(stream) = tls_stream(stream) else {
-        return CtValue::failed(Box::new(net_io_error_value(jet_std::IOError::Other(
-            jet_std::IOContext::new(
-                jet_std::IOOperation::Read,
-                Some("TLSStream".to_string()),
-                None,
-                Some("invalid TLSStream handle".to_string()),
-            ),
-        ))));
-    };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match JetIOReader::read(&mut *stream, limit) {
-        Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
-        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_stream_read_text(
-    stream: i64,
-    limit: i64,
-    deadline: Option<i64>,
-) -> CtValue {
-    let Some(stream) = tcp_stream(stream) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "tcp read text",
-            "TcpStream",
-        ))));
-    };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let result = match deadline {
-        Some(ns) => {
-            let deadline = jet_std::Duration { ns };
-            jet_net_tcp_read_text_deadline(&mut stream, limit, &deadline)
-        }
-        None => jet_net_tcp_read_text(&mut stream, limit),
-    };
-    match result {
-        Ok(value) => CtValue::Present(Box::new(CtValue::Str(value))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_stream_write(stream: i64, data: String) -> CtValue {
-    let Some(stream) = tcp_stream(stream) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "tcp write",
-            "TcpStream",
-        ))));
-    };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match jet_net_tcp_write(&mut stream, &data) {
-        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_stream_write_bytes(
-    stream: i64,
-    data: Vec<u8>,
-    deadline: Option<i64>,
-) -> CtValue {
-    let Some(stream) = tcp_stream(stream) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "tcp write",
-            "TcpStream",
-        ))));
-    };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let result = match deadline {
-        Some(ns) => {
-            let deadline = jet_std::Duration { ns };
-            jet_net_tcp_write_bytes_deadline(&mut stream, &data, &deadline)
-        }
-        None => jet_net_tcp_write_bytes(&mut stream, &data),
-    };
-    match result {
-        Ok(written) => CtValue::Present(Box::new(CtValue::Int(written))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_stream_write_io(stream: i64, data: Vec<u8>) -> CtValue {
-    let Some(stream) = tcp_stream(stream) else {
-        return CtValue::failed(Box::new(net_io_error_value(jet_std::IOError::Other(
-            jet_std::IOContext::new(
-                jet_std::IOOperation::Write,
-                Some("TcpStream".to_string()),
-                None,
-                Some("invalid TcpStream handle".to_string()),
-            ),
-        ))));
-    };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match JetIOWriter::write(&mut *stream, &data) {
-        Ok(written) => CtValue::Present(Box::new(CtValue::Int(written))),
-        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_stream_write_all_bytes(
-    stream: i64,
-    data: Vec<u8>,
-    deadline: Option<i64>,
-) -> CtValue {
-    let Some(stream) = tcp_stream(stream) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "tcp write all",
-            "TcpStream",
-        ))));
-    };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let result = match deadline {
-        Some(ns) => {
-            let deadline = jet_std::Duration { ns };
-            jet_net_tcp_write_all_bytes_deadline(&mut stream, &data, &deadline)
-        }
-        None => jet_net_tcp_write_all_bytes(&mut stream, &data),
-    };
-    match result {
-        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_stream_write_all_io(stream: i64, data: Vec<u8>) -> CtValue {
-    let Some(stream) = tcp_stream(stream) else {
-        return CtValue::failed(Box::new(net_io_error_value(jet_std::IOError::Other(
-            jet_std::IOContext::new(
-                jet_std::IOOperation::Write,
-                Some("TcpStream".to_string()),
-                None,
-                Some("invalid TcpStream handle".to_string()),
-            ),
-        ))));
-    };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match JetIOWriter::write_all(&mut *stream, &data) {
-        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-        Err(error) => CtValue::failed(Box::new(net_io_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_stream_write_text(
-    stream: i64,
-    data: String,
-    deadline: Option<i64>,
-) -> CtValue {
-    runtime_tcp_stream_write_all_bytes(stream, data.into_bytes(), deadline)
-}
-
-pub(crate) fn runtime_tcp_stream_shutdown(stream: i64, how: i64) -> CtValue {
-    let Some(how) = (match how {
-        0 => Some(JetNetShutdown::Read),
-        1 => Some(JetNetShutdown::Write),
-        2 => Some(JetNetShutdown::Both),
-        _ => None,
-    }) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "tcp shutdown",
-            "NetShutdown",
-        ))));
-    };
-    let Some(stream) = tcp_stream(stream) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "tcp shutdown",
-            "TcpStream",
-        ))));
-    };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match jet_net_tcp_shutdown(&mut stream, how) {
-        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_stream_close(stream: i64) -> CtValue {
-    let Some(stream) = tcp_stream(stream) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "tcp close",
-            "TcpStream",
-        ))));
-    };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match jet_net_tcp_close(&mut stream) {
-        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-pub(crate) fn runtime_tcp_reply(stream: i64, status: String, body: String) -> CtValue {
-    let Some(NetHttpHandle::TcpStream(stream)) = take_handle(stream) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "tcp reply",
-            "TcpStream",
-        ))));
-    };
-    let Ok(stream) = Arc::try_unwrap(stream)
-        .map(|mutex| mutex.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner()))
-    else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "tcp reply",
-            "TcpStream",
-        ))));
-    };
-    match jet_net_tcp_reply(stream, &status, &body) {
-        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-
-pub(crate) fn runtime_tcp_stream_ready(stream: i64, interest: i64, deadline: i64) -> CtValue {
-    let Some(interest) = net_ready_interest(interest) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "tcp ready",
-            "NetReadyInterest",
-        ))));
-    };
-    let Some(stream) = tcp_stream(stream) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "tcp ready",
-            "TcpStream",
-        ))));
-    };
-    let deadline = jet_std::Duration { ns: deadline };
-    let mut stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match jet_net_tcp_ready_deadline(&mut stream, interest, &deadline) {
-        Ok(ready) => CtValue::Present(Box::new(net_ct_handle(
-            "NetReady",
-            push_handle(NetHttpHandle::NetReady(Arc::new(ready))),
-        ))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_stream_local_addr(stream: i64) -> CtValue {
-    let Some(stream) = tcp_stream(stream) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "tcp local address",
-            "TcpStream",
-        ))));
-    };
-    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match jet_net_tcp_local_addr(&stream) {
-        Ok(address) => CtValue::Present(Box::new(CtValue::Str(address))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_stream_peer_addr(stream: i64) -> CtValue {
-    let Some(stream) = tcp_stream(stream) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "tcp peer address",
-            "TcpStream",
-        ))));
-    };
-    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match jet_net_tcp_peer_addr(&stream) {
-        Ok(address) => CtValue::Present(Box::new(CtValue::Str(address))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-pub(crate) fn runtime_tcp_stream_local_socket_addr(stream: i64) -> CtValue {
-    let Some(stream) = tcp_stream(stream) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "tcp local address",
-            "TcpStream",
-        ))));
-    };
-    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match jet_net_tcp_local_socket_addr(&stream) {
-        Ok(address) => CtValue::Present(Box::new(net_ct_handle(
-            "SocketAddr",
-            push_handle(NetHttpHandle::SocketAddr(address)),
-        ))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_tcp_stream_peer_socket_addr(stream: i64) -> CtValue {
-    let Some(stream) = tcp_stream(stream) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "tcp peer address",
-            "TcpStream",
-        ))));
-    };
-    let stream = stream.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match jet_net_tcp_peer_socket_addr(&stream) {
-        Ok(address) => CtValue::Present(Box::new(net_ct_handle(
-            "SocketAddr",
-            push_handle(NetHttpHandle::SocketAddr(address)),
-        ))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_net_dns_aaaa(name: String, ms: i64) -> CtValue {
-    match jet_net_dns_result(jet_net_dns_aaaa(&name, ms), &name) {
-        Ok(rows) => CtValue::Present(Box::new(net_ct_ip_list(rows))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_net_dns_aaaa_at(server: String, name: String, ms: i64) -> CtValue {
-    match jet_net_dns_result(jet_net_dns_aaaa_at(&server, &name, ms), &name) {
-        Ok(rows) => CtValue::Present(Box::new(net_ct_ip_list(rows))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-pub(crate) fn runtime_net_dns_txt(name: String, ms: i64) -> CtValue {
-    match jet_net_dns_result(jet_net_dns_txt(&name, ms), &name) {
-        Ok(rows) => CtValue::Present(Box::new(CtValue::List(
-            rows.into_iter().map(CtValue::Str).collect(),
-        ))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_net_dns_txt_at(server: String, name: String, ms: i64) -> CtValue {
-    match jet_net_dns_result(jet_net_dns_txt_at(&server, &name, ms), &name) {
-        Ok(rows) => CtValue::Present(Box::new(CtValue::List(
-            rows.into_iter().map(CtValue::Str).collect(),
-        ))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-
-pub(crate) fn runtime_net_dns_srv(name: String, ms: i64) -> CtValue {
-    match jet_net_dns_result(jet_net_dns_srv(&name, ms), &name) {
-        Ok(rows) => CtValue::Present(Box::new(net_ct_dns_srv_list(rows))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_net_dns_srv_at(server: String, name: String, ms: i64) -> CtValue {
-    match jet_net_dns_result(jet_net_dns_srv_at(&server, &name, ms), &name) {
-        Ok(rows) => CtValue::Present(Box::new(net_ct_dns_srv_list(rows))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_net_dns_srv_target(srv: i64) -> CtValue {
-    CtValue::Str(
-        with_handle(srv, |handle| match handle {
-            NetHttpHandle::DNSSrv(srv) => Some(jet_net_dns_srv_target(srv)),
-            _ => None,
-        })
-        .unwrap_or_default(),
-    )
-}
-
-pub(crate) fn runtime_net_dns_srv_port(srv: i64) -> CtValue {
-    CtValue::Int(
-        with_handle(srv, |handle| match handle {
-            NetHttpHandle::DNSSrv(srv) => Some(jet_net_dns_srv_port(srv)),
-            _ => None,
-        })
-        .unwrap_or(0),
-    )
-}
-
-pub(crate) fn runtime_net_dns_srv_priority(srv: i64) -> CtValue {
-    CtValue::Int(
-        with_handle(srv, |handle| match handle {
-            NetHttpHandle::DNSSrv(srv) => Some(jet_net_dns_srv_priority(srv)),
-            _ => None,
-        })
-        .unwrap_or(0),
-    )
-}
-
-pub(crate) fn runtime_net_dns_srv_weight(srv: i64) -> CtValue {
-    CtValue::Int(
-        with_handle(srv, |handle| match handle {
-            NetHttpHandle::DNSSrv(srv) => Some(jet_net_dns_srv_weight(srv)),
-            _ => None,
-        })
-        .unwrap_or(0),
-    )
-}
-
-
-pub(crate) fn runtime_udp_bind(address: String) -> CtValue {
-    match jet_net_udp_bind(&address) {
-        Ok(socket) => CtValue::Present(Box::new(net_ct_handle(
-            "UdpSocket",
-            push_handle(NetHttpHandle::UdpSocket(Arc::new(socket))),
-        ))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_udp_bind_addr(address: i64) -> CtValue {
-    let Some(address) = with_handle(address, |handle| match handle {
-        NetHttpHandle::SocketAddr(address) => Some(address.clone()),
-        _ => None,
-    }) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "udp bind",
-            "SocketAddr",
-        ))));
-    };
-    match jet_net_udp_bind_addr(&address) {
-        Ok(socket) => CtValue::Present(Box::new(net_ct_handle(
-            "UdpSocket",
-            push_handle(NetHttpHandle::UdpSocket(Arc::new(socket))),
-        ))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_udp_local_addr(socket: i64) -> CtValue {
-    let Some(socket) = udp_socket(socket) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "udp local address",
-            "UdpSocket",
-        ))));
-    };
-    match jet_net_udp_local_addr(&socket) {
-        Ok(address) => CtValue::Present(Box::new(net_ct_handle(
-            "SocketAddr",
-            push_handle(NetHttpHandle::SocketAddr(address)),
-        ))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_udp_set_timeout(socket: i64, timeout_ms: i64) -> CtValue {
-    let Some(socket) = udp_socket(socket) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "set udp timeout",
-            "UdpSocket",
-        ))));
-    };
-    match jet_net_udp_set_timeout(&socket, timeout_ms) {
-        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_udp_send_to(socket: i64, data: String, address: i64) -> CtValue {
-    let Some(address) = with_handle(address, |handle| match handle {
-        NetHttpHandle::SocketAddr(address) => Some(address.clone()),
-        _ => None,
-    }) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "udp send",
-            "SocketAddr",
-        ))));
-    };
-    let Some(socket) = udp_socket(socket) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "udp send",
-            "UdpSocket",
-        ))));
-    };
-    match jet_net_udp_send_to(&socket, &data, &address) {
-        Ok(bytes) => CtValue::Present(Box::new(CtValue::Int(bytes))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_udp_recv_from(socket: i64, limit: i64) -> CtValue {
-    let Some(socket) = udp_socket(socket) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "udp receive",
-            "UdpSocket",
-        ))));
-    };
-    match jet_net_udp_recv_from(&socket, limit) {
-        Ok(packet) => CtValue::Present(Box::new(net_ct_handle(
-            "UDPPacket",
-            push_handle(NetHttpHandle::UDPPacket(packet)),
-        ))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_udp_send_bytes_to(socket: i64, data: Vec<u8>, address: i64) -> CtValue {
-    let Some(address) = with_handle(address, |handle| match handle {
-        NetHttpHandle::SocketAddr(address) => Some(address.clone()),
-        _ => None,
-    }) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "udp send",
-            "SocketAddr",
-        ))));
-    };
-    let Some(socket) = udp_socket(socket) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "udp send",
-            "UdpSocket",
-        ))));
-    };
-    match jet_net_udp_send_bytes_to(&socket, &data, &address) {
-        Ok(bytes) => CtValue::Present(Box::new(CtValue::Int(bytes))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_udp_receive(socket: i64, limit: i64) -> CtValue {
-    let Some(socket) = udp_socket(socket) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "udp receive",
-            "UdpSocket",
-        ))));
-    };
-    match jet_net_udp_receive(&socket, limit) {
-        Ok(packet) => CtValue::Present(Box::new(net_ct_handle(
-            "UDPPacket",
-            push_handle(NetHttpHandle::UDPPacket(packet)),
-        ))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_udp_ready(socket: i64, interest: i64, deadline: i64) -> CtValue {
-    let Some(interest) = net_ready_interest(interest) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "udp ready",
-            "NetReadyInterest",
-        ))));
-    };
-    let Some(socket) = udp_socket(socket) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "udp ready",
-            "UdpSocket",
-        ))));
-    };
-    let deadline = jet_std::Duration { ns: deadline };
-    match jet_net_udp_ready(&socket, interest, &deadline) {
-        Ok(ready) => CtValue::Present(Box::new(net_ct_handle(
-            "NetReady",
-            push_handle(NetHttpHandle::NetReady(Arc::new(ready))),
-        ))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_udp_close(socket: i64) -> CtValue {
-    let Some(socket) = udp_socket(socket) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "udp close",
-            "UdpSocket",
-        ))));
-    };
-    match jet_net_udp_close(&socket) {
-        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_udp_receive_deadline(socket: i64, limit: i64, deadline: i64) -> CtValue {
-    let Some(socket) = udp_socket(socket) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "udp receive",
-            "UdpSocket",
-        ))));
-    };
-    let deadline = jet_std::Duration { ns: deadline };
-    match jet_net_udp_receive_deadline(&socket, limit, &deadline) {
-        Ok(packet) => CtValue::Present(Box::new(net_ct_handle(
-            "UDPPacket",
-            push_handle(NetHttpHandle::UDPPacket(packet)),
-        ))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_udp_send_to_deadline(
-    socket: i64,
-    data: Vec<u8>,
-    addr: i64,
-    deadline: i64,
-) -> CtValue {
-    let Some(addr) = with_handle(addr, |handle| match handle {
-        NetHttpHandle::SocketAddr(addr) => Some(addr.clone()),
-        _ => None,
-    }) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "udp send",
-            "SocketAddr",
-        ))));
-    };
-    let Some(socket) = udp_socket(socket) else {
-        return CtValue::failed(Box::new(net_error_value(net_invalid_error(
-            "udp send",
-            "UdpSocket",
-        ))));
-    };
-    let deadline = jet_std::Duration { ns: deadline };
-    match jet_net_udp_send_bytes_to_deadline(&socket, &data, &addr, &deadline) {
-        Ok(bytes) => CtValue::Present(Box::new(CtValue::Int(bytes))),
-        Err(error) => CtValue::failed(Box::new(net_error_value(error))),
-    }
-}
-
-pub(crate) fn runtime_udp_packet_data(packet: i64) -> CtValue {
-    CtValue::Str(
-        with_handle(packet, |handle| match handle {
-            NetHttpHandle::UDPPacket(packet) => Some(jet_net_udp_packet_data(packet)),
-            _ => None,
-        })
-        .unwrap_or_default(),
-    )
-}
-
-pub(crate) fn runtime_udp_packet_addr(packet: i64) -> CtValue {
-    let address = with_handle(packet, |handle| match handle {
-        NetHttpHandle::UDPPacket(packet) => Some(jet_net_udp_packet_addr(packet)),
-        _ => None,
-    });
-    match address {
-        Some(address) => net_ct_handle(
-            "SocketAddr",
-            push_handle(NetHttpHandle::SocketAddr(address)),
-        ),
-        None => net_ct_handle("SocketAddr", 0),
-    }
-}
-
-pub(crate) fn runtime_udp_packet_bytes(packet: i64) -> CtValue {
-    CtValue::Bytes(
-        with_handle(packet, |handle| match handle {
-            NetHttpHandle::UDPPacket(packet) => Some(jet_net_udp_packet_bytes(packet)),
-            _ => None,
-        })
-        .unwrap_or_default(),
-    )
-}
-
-pub(crate) fn runtime_udp_packet_original_len(packet: i64) -> CtValue {
-    CtValue::Int(
-        with_handle(packet, |handle| match handle {
-            NetHttpHandle::UDPPacket(packet) => Some(jet_net_udp_packet_original_len(packet)),
-            _ => None,
-        })
-        .unwrap_or(0),
-    )
-}
-
-pub(crate) fn runtime_udp_packet_truncated(packet: i64) -> CtValue {
-    CtValue::Bool(
-        with_handle(packet, |handle| match handle {
-            NetHttpHandle::UDPPacket(packet) => Some(jet_net_udp_packet_truncated(packet)),
-            _ => None,
-        })
-        .unwrap_or(false),
-    )
-}
-
-pub(crate) fn runtime_net_ready_readable(ready: i64) -> CtValue {
-    CtValue::Bool(
-        net_ready(ready)
-            .map(|ready| jet_net_ready_readable(&ready))
-            .unwrap_or(false),
-    )
-}
-
-pub(crate) fn runtime_net_ready_writable(ready: i64) -> CtValue {
-    CtValue::Bool(
-        net_ready(ready)
-            .map(|ready| jet_net_ready_writable(&ready))
-            .unwrap_or(false),
-    )
-}
-
-fn marshal_http_error(error: JetHTTPError) -> (i64, CtValue) {
-    let parts = jet_http_error_surface_parts(error);
-    let (payload_bits, args) = match parts.payload {
-        JetHTTPErrorSurfacePayload::Unit => (0, vec![]),
-        JetHTTPErrorSurfacePayload::Int { field, value } => (
-            value,
-            vec![(Some(field.to_string()), CtValue::Int(value))],
-        ),
-        JetHTTPErrorSurfacePayload::Text { field, value } => (
-            alloc_string(value.clone()),
-            vec![(Some(field.to_string()), CtValue::Str(value))],
-        ),
-        JetHTTPErrorSurfacePayload::Operation {
-            field,
-            variant,
-            ordinal,
-        } => (
-            ordinal,
-            vec![(
-                Some(field.to_string()),
-                CtValue::Enum {
-                    type_name: "HTTPOperation".into(),
-                    variant: variant.to_string(),
-                    args: vec![],
-                },
-            )],
-        ),
-    };
-    let packed = payload_bits.wrapping_shl(8) | parts.ordinal;
-    let value = CtValue::Enum {
-        type_name: "HTTPError".into(),
-        variant: parts.variant.to_string(),
-        args,
-    };
-    (packed, value)
-}
-
-fn http_error_value(error: JetHTTPError) -> CtValue {
-    marshal_http_error(error).1
-}
-
-/// Decode the canonical `HTTPError` carrier when an interpreter handler
-/// returns it. This is only the CtValue/Prelude boundary adapter; the
-/// variants and fields come from `HTTPMessage.rs`.
-fn http_error_from_value(value: &CtValue) -> Option<JetHTTPError> {
-    let CtValue::Enum {
-        type_name,
-        variant,
-        args,
-    } = value
-    else {
-        return None;
-    };
-    if type_name != "HTTPError" {
-        return None;
-    }
-    let unit = || args.is_empty().then_some(());
-    let field = |name: &str| {
-        args.iter()
-            .find_map(|(field, value)| (field.as_deref() == Some(name)).then_some(value))
-            .or_else(|| {
-                args.first()
-                    .filter(|(field, _)| field.is_none())
-                    .map(|(_, value)| value)
-            })
-    };
-    let int = |name: &str| match field(name) {
-        Some(CtValue::Int(value)) => Some(*value),
-        _ => None,
-    };
-    let text = |name: &str| match field(name) {
-        Some(CtValue::Str(value)) => Some(value.clone()),
-        _ => None,
-    };
-    let operation = || match field("operation") {
-        Some(CtValue::Enum {
-            type_name,
-            variant,
-            args,
-        }) if type_name == "HTTPOperation" && args.is_empty() => match variant.as_str() {
-            "ClientConnect" => Some(JetHTTPOperation::ClientConnect),
-            "ServerBind" => Some(JetHTTPOperation::ServerBind),
-            "ServeListener" => Some(JetHTTPOperation::ServeListener),
-            _ => None,
-        },
-        _ => None,
-    };
-    match variant.as_str() {
-        "InvalidMethod" => unit().map(|_| JetHTTPError::InvalidMethod),
-        "InvalidUrl" => unit().map(|_| JetHTTPError::InvalidUrl),
-        "InvalidHeader" => unit().map(|_| JetHTTPError::InvalidHeader),
-        "InvalidStatus" => unit().map(|_| JetHTTPError::InvalidStatus),
-        "BodyConsumed" => unit().map(|_| JetHTTPError::BodyConsumed),
-        "InvalidFraming" => unit().map(|_| JetHTTPError::InvalidFraming),
-        "UnsupportedEncoding" => unit().map(|_| JetHTTPError::UnsupportedEncoding),
-        "Cancelled" => unit().map(|_| JetHTTPError::Cancelled),
-        "BodyTooLarge" => int("limit").map(|limit| JetHTTPError::BodyTooLarge { limit }),
-        "Resolve" => text("host").map(|host| JetHTTPError::Resolve { host }),
-        "Connect" => text("address").map(|address| JetHTTPError::Connect { address }),
-        "TLS" => text("stage").map(|stage| JetHTTPError::TLS { stage }),
-        "Timeout" => text("phase").map(|phase| JetHTTPError::Timeout { phase }),
-        "Proxy" => text("stage").map(|stage| JetHTTPError::Proxy { stage }),
-        "Redirect" => text("reason").map(|reason| JetHTTPError::Redirect { reason }),
-        "Protocol" => text("version").map(|version| JetHTTPError::Protocol { version }),
-        "IO" => text("operation").map(|operation| JetHTTPError::IO { operation }),
-        "Policy" => text("reason").map(|reason| JetHTTPError::Policy { reason }),
-        "ResourceUnavailable" => {
-            text("resource").map(|resource| JetHTTPError::ResourceUnavailable { resource })
-        }
-        "Internal" => text("incident_id").map(|incident_id| JetHTTPError::Internal { incident_id }),
-        "UnsupportedTarget" => operation().map(|operation| JetHTTPError::UnsupportedTarget { operation }),
-        _ => None,
-    }
-}
-
-fn http_ct_handle(type_name: &str, handle: i64) -> CtValue {
-    CtValue::Struct {
-        type_name: type_name.to_string(),
-        fields: vec![("handle".to_string(), CtValue::Int(handle))],
-    }
-}
-
-fn http_ct_outcome<T>(
-    type_name: &str,
-    result: Result<T, JetHTTPError>,
-    store: impl FnOnce(T) -> i64,
-) -> CtValue {
-    match result {
-        Ok(value) => CtValue::Present(Box::new(http_ct_handle(type_name, store(value)))),
-        Err(error) => CtValue::failed(Box::new(http_error_value(error))),
-    }
-}
-
-fn http_ct_string(value: &CtValue) -> Option<String> {
-    match value {
-        CtValue::Str(value) => Some(value.clone()),
-        _ => None,
-    }
-}
-
-fn http_ct_bytes(value: &CtValue) -> Option<Vec<u8>> {
-    match value {
-        CtValue::Bytes(value) => Some(value.clone()),
-        CtValue::List(values) => values
-            .iter()
-            .map(|value| match value {
-                CtValue::Int(value) if (0..=255).contains(value) => Some(*value as u8),
-                _ => None,
-            })
-            .collect(),
-        _ => None,
-    }
-}
-
-fn http_ct_string_map(value: &CtValue) -> Option<BTreeMap<String, String>> {
-    let CtValue::Map(values) = value else {
-        return None;
-    };
-    values
-        .iter()
-        .map(|(key, value)| match (key, value) {
-            (CtKey::Str(key), CtValue::Str(value)) => Some((key.clone(), value.clone())),
-            _ => None,
-        })
-        .collect()
-}
-
-fn http_ct_mime(value: &CtValue) -> Option<jet_std::JetMIME> {
-    let CtValue::Struct { type_name, fields } = value else {
-        return None;
-    };
-    if type_name != "Mime" {
-        return None;
-    }
-    let field = |wanted: &str| fields.iter().find_map(|(name, value)| {
-        (name == wanted).then_some(value)
-    });
-    let CtValue::Str(top) = field("top")? else {
-        return None;
-    };
-    let CtValue::Str(sub) = field("sub")? else {
-        return None;
-    };
-    let CtValue::List(params) = field("params")? else {
-        return None;
-    };
-    let params = params
-        .iter()
-        .map(|param| match param {
-            CtValue::List(pair) => match pair.as_slice() {
-                [CtValue::Str(key), CtValue::Str(value)] => Some((key.clone(), value.clone())),
-                _ => None,
-            },
-            _ => None,
-        })
-        .collect::<Option<Vec<_>>>()?;
-    Some(jet_std::JetMIME {
-        top: top.clone(),
-        sub: sub.clone(),
-        params,
-    })
-}
-
-fn http_ct_reader(reader: crate::enc_stream::runtime::JetFileReader) -> JetFileReader {
-    JetFileReader {
-        inner: reader.inner,
-        path: reader.path,
-    }
-}
-
-fn http_ct_writer(writer: crate::enc_stream::runtime::JetFileWriter) -> JetFileWriter {
-    JetFileWriter {
-        inner: writer.inner,
-        path: writer.path,
-    }
-}
-
-/// Whole-program interpreter adapter for the nominal HTTP constructors. The
-/// constructors and their validation remain in the included HTTP Prelude;
-/// this function only turns CtValue arguments into the Prelude's carriers.
-pub(crate) fn runtime_http_nominal_static(
-    path: &str,
-    method: &str,
-    args: &[CtValue],
-) -> Result<CtValue, String> {
-    let type_name = path.rsplit("::").next().unwrap_or(path);
-    let value = match (type_name, method, args.len()) {
-        ("JetHTTPMethod", "custom", 1) => {
-            let token = http_ct_string(&args[0]).ok_or_else(|| "HTTPMethod.custom text".to_string())?;
-            http_ct_outcome("HTTPMethod", JetHTTPMethod::custom(token), |value| {
-                push_handle(NetHttpHandle::HTTPMethod(value))
-            })
-        }
-        ("JetHTTPMethod", "get", 0) => {
-            http_ct_handle("HTTPMethod", push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::get())))
-        }
-        ("JetHTTPMethod", "head", 0) => {
-            http_ct_handle("HTTPMethod", push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::head())))
-        }
-        ("JetHTTPMethod", "post", 0) => {
-            http_ct_handle("HTTPMethod", push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::post())))
-        }
-        ("JetHTTPMethod", "put", 0) => {
-            http_ct_handle("HTTPMethod", push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::put())))
-        }
-        ("JetHTTPMethod", "delete", 0) => {
-            http_ct_handle("HTTPMethod", push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::delete())))
-        }
-        ("JetHTTPMethod", "connect", 0) => {
-            http_ct_handle("HTTPMethod", push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::connect())))
-        }
-        ("JetHTTPMethod", "options", 0) => {
-            http_ct_handle("HTTPMethod", push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::options())))
-        }
-        ("JetHTTPMethod", "trace", 0) => {
-            http_ct_handle("HTTPMethod", push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::trace())))
-        }
-        ("JetHTTPMethod", "patch", 0) => {
-            http_ct_handle("HTTPMethod", push_handle(NetHttpHandle::HTTPMethod(JetHTTPMethod::patch())))
-        }
-        ("JetHTTPStatus", "new", 1) => {
-            let CtValue::Int(code) = args[0] else {
-                return Err("HTTPStatus.new integer".to_string());
-            };
-            http_ct_outcome("HTTPStatus", JetHTTPStatus::new(code), |value| {
-                push_handle(NetHttpHandle::HTTPStatus(value))
-            })
-        }
-        ("JetHTTPVersion", "http_1_0", 0) => {
-            http_ct_handle("HTTPVersion", push_handle(NetHttpHandle::HTTPVersion(JetHTTPVersion::http_1_0())))
-        }
-        ("JetHTTPVersion", "http_1_1", 0) => {
-            http_ct_handle("HTTPVersion", push_handle(NetHttpHandle::HTTPVersion(JetHTTPVersion::http_1_1())))
-        }
-        ("JetHTTPVersion", "http_2", 0) => {
-            http_ct_handle("HTTPVersion", push_handle(NetHttpHandle::HTTPVersion(JetHTTPVersion::http_2())))
-        }
-        ("JetHTTPHeaderName", "new", 1) => {
-            let name = http_ct_string(&args[0]).ok_or_else(|| "HTTPHeaderName.new text".to_string())?;
-            http_ct_outcome("HTTPHeaderName", JetHTTPHeaderName::new(name), |value| {
-                push_handle(NetHttpHandle::HTTPHeaderName(value))
-            })
-        }
-        ("JetHTTPHeaderValue", "new", 1) => {
-            let value = http_ct_string(&args[0]).ok_or_else(|| "HTTPHeaderValue.new text".to_string())?;
-            http_ct_outcome("HTTPHeaderValue", JetHTTPHeaderValue::new(value), |value| {
-                push_handle(NetHttpHandle::HTTPHeaderValue(value))
-            })
-        }
-        ("JetHTTPHeaders", "new", 0) => {
-            http_ct_handle("HTTPHeaders", push_handle(NetHttpHandle::HTTPHeaders(JetHTTPHeaders::new())))
-        }
-        ("JetHTTPBody", "empty", 0) => {
-            http_ct_handle("HTTPBody", push_handle(NetHttpHandle::HTTPBody(JetHTTPBody::empty())))
-        }
-        ("JetHTTPBody", "bytes", 1) => {
-            let bytes = http_ct_bytes(&args[0]).ok_or_else(|| "HTTPBody.bytes bytes".to_string())?;
-            http_ct_handle("HTTPBody", push_handle(NetHttpHandle::HTTPBody(JetHTTPBody::from_bytes(bytes))))
-        }
-        ("JetHTTPBody", "text", 1) => {
-            let text = http_ct_string(&args[0]).ok_or_else(|| "HTTPBody.text text".to_string())?;
-            http_ct_handle("HTTPBody", push_handle(NetHttpHandle::HTTPBody(JetHTTPBody::from_text(text))))
-        }
-        ("JetHTTPBody", "text", 2) => {
-            let text = http_ct_string(&args[0]).ok_or_else(|| "HTTPBody.text text".to_string())?;
-            let mime = http_ct_mime(&args[1]).ok_or_else(|| "HTTPBody.text MIME".to_string())?;
-            http_ct_handle(
-                "HTTPBody",
-                push_handle(NetHttpHandle::HTTPBody(JetHTTPBody::from_text_with_mime(text, mime))),
-            )
-        }
-        ("JetHTTPBody", "json", 1) => {
-            let text = jet_codegen::Comptime::render_datatree_for_tir(&args[0]);
-            http_ct_handle(
-                "HTTPBody",
-                push_handle(NetHttpHandle::HTTPBody(JetHTTPBody::from_bytes_with_content_type(
-                    text.into_bytes(),
-                    Some("application/json".to_string()),
-                ))),
-            )
-        }
-        ("JetHTTPBody", "form", 1) => {
-            let values = http_ct_string_map(&args[0]).ok_or_else(|| "HTTPBody.form map".to_string())?;
-            http_ct_handle("HTTPBody", push_handle(NetHttpHandle::HTTPBody(JetHTTPBody::from_form(values))))
-        }
-        ("JetHTTPBody", "multipart", 1) => {
-            let values = http_ct_string_map(&args[0]).ok_or_else(|| "HTTPBody.multipart map".to_string())?;
-            http_ct_handle(
-                "HTTPBody",
-                push_handle(NetHttpHandle::HTTPBody(JetHTTPBody::from_multipart(values))),
-            )
-        }
-        ("JetHTTPBody", "reader", 1 | 2) => {
-            let CtValue::Int(file) = args[0] else {
-                return Err("HTTPBody.reader FileReader".to_string());
-            };
-            let reader = crate::enc_stream::take_file_reader_for_http(file)
-                .map_err(|error| format!("HTTPBody.reader: {error}"))?;
-            let reader = http_ct_reader(reader);
-            let result = if args.len() == 1 {
-                JetHTTPBody::from_reader(reader)
-            } else {
-                let CtValue::Int(limit) = args[1] else {
-                    return Err("HTTPBody.reader length".to_string());
-                };
-                JetHTTPBody::from_reader_with_length(reader, limit)
-            };
-            http_ct_outcome("HTTPBody", result, |value| {
-                push_handle(NetHttpHandle::HTTPBody(value))
-            })
-        }
-        _ => return Err(format!("unsupported HTTP nominal static {type_name}.{method}")),
-    };
-    Ok(value)
-}
-
-pub(crate) fn runtime_http_nominal_show(handle: i64) -> Result<String, String> {
-    with_handle(handle, |value| match value {
-        NetHttpHandle::HTTPMethod(value) => Some(value.jet_show()),
-        NetHttpHandle::HTTPStatus(value) => Some(value.jet_show()),
-        NetHttpHandle::HTTPVersion(value) => Some(value.jet_show()),
-        NetHttpHandle::HTTPHeaderName(value) => Some(value.jet_show()),
-        NetHttpHandle::HTTPHeaderValue(value) => Some(value.jet_show()),
-        _ => None,
-    })
-    .ok_or_else(|| "invalid HTTP nominal handle".to_string())
-}
-
-pub(crate) fn runtime_http_body_bytes(
-    body: i64,
-    limit: i64,
-) -> Result<Result<Vec<u8>, CtValue>, String> {
-    with_handle(body, |handle| match handle {
-        NetHttpHandle::HTTPBody(body) => Some(jet_http_body_bytes(body, limit).map_err(http_error_value)),
-        _ => None,
-    })
-    .ok_or_else(|| "invalid HTTPBody".to_string())
-}
-pub(crate) fn runtime_http_body_chunks(body: i64, max_chunk: i64) -> Result<i64, String> {
-    let chunks = with_handle(body, |handle| match handle {
-        NetHttpHandle::HTTPBody(body) => Some(jet_http_body_chunks(body, max_chunk)),
-        _ => None,
-    })
-    .ok_or_else(|| "invalid HTTPBody".to_string())?;
-    Ok(push_handle(NetHttpHandle::HTTPBodyChunks(chunks)))
-}
-
-pub(crate) fn runtime_http_body_chunks_next(
-    chunks: i64,
-) -> Result<Option<Result<Vec<u8>, CtValue>>, String> {
-    with_handle_mut(chunks, |handle| match handle {
-        NetHttpHandle::HTTPBodyChunks(chunks) => {
-            Some(chunks.next().map(|item| item.map_err(http_error_value)))
-        }
-        _ => None,
-    })
-    .ok_or_else(|| "invalid HTTPBodyChunks".to_string())
-}
-
-
-pub(crate) fn runtime_http_body_text(
-    body: i64,
-    limit: i64,
-) -> Result<Result<String, CtValue>, String> {
-    with_handle(body, |handle| match handle {
-        NetHttpHandle::HTTPBody(body) => Some(jet_http_body_text(body, limit).map_err(http_error_value)),
-        _ => None,
-    })
-    .ok_or_else(|| "invalid HTTPBody".to_string())
-}
-
-pub(crate) fn runtime_http_body_copy_to(
-    body: i64,
-    writer: crate::enc_stream::runtime::JetFileWriter,
-    limit: i64,
-) -> Result<Result<i64, CtValue>, String> {
-    let mut writer = http_ct_writer(writer);
-    with_handle(body, |handle| match handle {
-        NetHttpHandle::HTTPBody(body) => {
-            Some(jet_http_body_copy_to(body, &mut writer, limit).map_err(http_error_value))
-        }
-        _ => None,
-    })
-    .ok_or_else(|| "invalid HTTPBody".to_string())
-}
-
-pub(crate) fn runtime_http_req_body(request: i64) -> Result<i64, String> {
-    let body = with_handle(request, |handle| match handle {
-        NetHttpHandle::HTTPRequest(request) => Some(jet_http_srv_req_body(request)),
-        _ => None,
-    })
-    .ok_or_else(|| "invalid HTTPRequest".to_string())?;
-    Ok(push_handle(NetHttpHandle::HTTPBody(body)))
-}
-
-pub(crate) fn runtime_http_resp_body(response: i64) -> Result<i64, String> {
-    let body = with_handle(response, |handle| match handle {
-        NetHttpHandle::HTTPResponse(response) => Some(jet_http_client_response_body(response)),
-        _ => None,
-    })
-    .ok_or_else(|| "invalid HTTPResponse".to_string())?;
-    Ok(push_handle(NetHttpHandle::HTTPBody(body)))
-}
-
-pub(crate) fn runtime_http_body_json_text(
-    body: i64,
-    limit: Option<i64>,
-) -> Result<Result<String, CtValue>, String> {
-    with_handle(body, |handle| match handle {
-        NetHttpHandle::HTTPBody(body) => Some(
-            jet_http_body_json_text_defaulted(body, limit).map_err(http_error_value),
-        ),
-        _ => None,
-    })
-    .ok_or_else(|| "invalid HTTPBody".to_string())
-}
-
-pub(crate) fn runtime_http_json_decode_error() -> CtValue {
-    http_error_value(jet_http_json_decode_error())
-}
-
-pub(crate) fn runtime_http_request_body(
-    request: i64,
-    body: String,
-) -> Result<i64, String> {
-    let request =
-        take_http_request(request).ok_or_else(|| "invalid HTTPRequest".to_string())?;
-    Ok(push_handle(NetHttpHandle::HTTPRequest(
-        jet_http_client_request_body(request, &body),
-    )))
-}
-
-pub(crate) fn runtime_http_request_json(
-    request: i64,
-    body: String,
-) -> Result<i64, String> {
-    let request =
-        take_http_request(request).ok_or_else(|| "invalid HTTPRequest".to_string())?;
-    Ok(push_handle(NetHttpHandle::HTTPRequest(
-        jet_http_client_request_json_text(request, &body),
-    )))
-}
-
-// CtValue ambient adapters for the HTTP Prelude handle projections. The
-// evaluator owns no HTTP policy; these only borrow the same included Prelude
-// functions that the Cranelift host exports above.
-pub(crate) fn runtime_http_req_method(request: i64) -> Result<String, String> {
-    with_handle(request, |handle| match handle {
-        NetHttpHandle::HTTPRequest(request) => Some(jet_http_srv_req_method(request)),
-        _ => None,
-    })
-    .ok_or_else(|| "invalid HTTPRequest".to_string())
-}
-
-pub(crate) fn runtime_http_req_path(request: i64) -> Result<String, String> {
-    with_handle(request, |handle| match handle {
-        NetHttpHandle::HTTPRequest(request) => Some(jet_http_srv_req_path(request)),
-        _ => None,
-    })
-    .ok_or_else(|| "invalid HTTPRequest".to_string())
-}
-
-pub(crate) fn runtime_http_req_text(
-    request: i64,
-) -> Result<Result<String, CtValue>, String> {
-    with_handle(request, |handle| match handle {
-        NetHttpHandle::HTTPRequest(request) => {
-            Some(jet_http_request_text(request).map_err(http_error_value))
-        }
-        _ => None,
-    })
-    .ok_or_else(|| "invalid HTTPRequest".to_string())
-}
-
-pub(crate) fn runtime_http_req_text_with_limit(
-    request: i64,
-    limit: i64,
-) -> Result<Result<String, CtValue>, String> {
-    with_handle(request, |handle| match handle {
-        NetHttpHandle::HTTPRequest(request) => {
-            Some(jet_http_request_text_with_limit(request, limit).map_err(http_error_value))
-        }
-        _ => None,
-    })
-    .ok_or_else(|| "invalid HTTPRequest".to_string())
-}
-
-pub(crate) fn runtime_http_req_param(
-    request: i64,
-    name: String,
-) -> Result<Option<String>, String> {
-    with_handle(request, |handle| match handle {
-        NetHttpHandle::HTTPRequest(request) => Some(match jet_http_srv_req_param(request, &name) {
-            Ok(value) => Some(value),
-            Err(_) => None,
-        }),
-        _ => None,
-    })
-    .ok_or_else(|| "invalid HTTPRequest".to_string())
-}
-
-pub(crate) fn runtime_http_req_header(
-    request: i64,
-    name: String,
-) -> Result<Option<String>, String> {
-    with_handle(request, |handle| match handle {
-        NetHttpHandle::HTTPRequest(request) => Some(match jet_http_srv_req_header(request, &name) {
-            Ok(value) => Some(value),
-            Err(_) => None,
-        }),
-        _ => None,
-    })
-    .ok_or_else(|| "invalid HTTPRequest".to_string())
-}
-
-pub(crate) fn runtime_http_req_body_len(request: i64) -> Result<i64, String> {
-    with_handle(request, |handle| match handle {
-        NetHttpHandle::HTTPRequest(request) => Some(jet_http_srv_req_body_len(request)),
-        _ => None,
-    })
-    .ok_or_else(|| "invalid HTTPRequest".to_string())
-}
-
-pub(crate) fn runtime_http_req_under_limit(request: i64, max: i64) -> Result<bool, String> {
-    with_handle(request, |handle| match handle {
-        NetHttpHandle::HTTPRequest(request) => Some(jet_http_srv_req_under_limit(request, max)),
-        _ => None,
-    })
-    .ok_or_else(|| "invalid HTTPRequest".to_string())
-}
-
-pub(crate) fn runtime_http_req_trailers(
-    request: i64,
-) -> Result<Result<i64, CtValue>, String> {
-    let result = with_handle(request, |handle| match handle {
-        NetHttpHandle::HTTPRequest(request) => Some(
-            jet_http_srv_req_trailers(request)
-                .map(|headers| push_handle(NetHttpHandle::HTTPHeaders(headers)))
-                .map_err(http_error_value),
-        ),
-        _ => None,
-    })
-    .ok_or_else(|| "invalid HTTPRequest".to_string())?;
-    Ok(result)
-}
-
-pub(crate) fn runtime_http_resp_status(response: i64) -> Result<i64, String> {
-    with_handle(response, |handle| match handle {
-        NetHttpHandle::HTTPResponse(response) => Some(jet_http_srv_response_status(response)),
-        _ => None,
-    })
-    .ok_or_else(|| "invalid HTTPResponse".to_string())
-}
-
-pub(crate) fn runtime_http_resp_text(
-    response: i64,
-) -> Result<Result<String, CtValue>, String> {
-    with_handle(response, |handle| match handle {
-        NetHttpHandle::HTTPResponse(response) => {
-            Some(jet_http_response_text(response).map_err(http_error_value))
-        }
-        _ => None,
-    })
-    .ok_or_else(|| "invalid HTTPResponse".to_string())
-}
-
-pub(crate) fn runtime_http_resp_text_with_limit(
-    response: i64,
-    limit: i64,
-) -> Result<Result<String, CtValue>, String> {
-    with_handle(response, |handle| match handle {
-        NetHttpHandle::HTTPResponse(response) => {
-            Some(jet_http_response_text_with_limit(response, limit).map_err(http_error_value))
-        }
-        _ => None,
-    })
-    .ok_or_else(|| "invalid HTTPResponse".to_string())
-}
-
-pub(crate) fn runtime_http_resp_header(
-    response: i64,
-    name: String,
-) -> Result<Option<String>, String> {
-    with_handle(response, |handle| match handle {
-        NetHttpHandle::HTTPResponse(response) => {
-            Some(match jet_http_client_response_header(response, &name) {
-                Ok(value) => Some(value),
-                Err(_) => None,
-            })
-        }
-        _ => None,
-    })
-    .ok_or_else(|| "invalid HTTPResponse".to_string())
-}
-
-pub(crate) fn runtime_http_resp_cookies(response: i64) -> Result<Vec<String>, String> {
-    with_handle(response, |handle| match handle {
-        NetHttpHandle::HTTPResponse(response) => Some(jet_http_response_cookies(response)),
-        _ => None,
-    })
-    .ok_or_else(|| "invalid HTTPResponse".to_string())
-}
-
-pub(crate) fn runtime_http_request_form(
-    request: i64,
-    name: String,
-    value: String,
-) -> Result<i64, String> {
-    let request = take_http_request(request).ok_or_else(|| "invalid HTTPRequest".to_string())?;
-    Ok(push_handle(NetHttpHandle::HTTPRequest(jet_http_client_request_form(
-        request, &name, &value,
-    ))))
-}
-
-pub(crate) fn runtime_http_request_cookie(
-    request: i64,
-    name: String,
-    value: String,
-) -> Result<i64, String> {
-    let request = take_http_request(request).ok_or_else(|| "invalid HTTPRequest".to_string())?;
-    Ok(push_handle(NetHttpHandle::HTTPRequest(jet_http_client_request_cookie(
-        request, &name, &value,
-    ))))
-}
-
-pub(crate) fn runtime_http_request_header(
-    request: i64,
-    name: String,
-    value: String,
-) -> Result<i64, String> {
-    let request = take_http_request(request).ok_or_else(|| "invalid HTTPRequest".to_string())?;
-    Ok(push_handle(NetHttpHandle::HTTPRequest(jet_http_client_request_header(
-        request, &name, &value,
-    ))))
-}
-
-pub(crate) fn runtime_http_request_redirects(request: i64, limit: i64) -> Result<i64, String> {
-    let request = take_http_request(request).ok_or_else(|| "invalid HTTPRequest".to_string())?;
-    Ok(push_handle(NetHttpHandle::HTTPRequest(jet_http_client_request_redirects(
-        request, limit,
-    ))))
-}
-
-pub(crate) fn runtime_http_request_connect_timeout(request: i64, ms: i64) -> Result<i64, String> {
-    let request = take_http_request(request).ok_or_else(|| "invalid HTTPRequest".to_string())?;
-    Ok(push_handle(NetHttpHandle::HTTPRequest(
-        jet_http_client_request_connect_timeout(request, ms),
-    )))
-}
-
-pub(crate) fn runtime_http_request_read_timeout(request: i64, ms: i64) -> Result<i64, String> {
-    let request = take_http_request(request).ok_or_else(|| "invalid HTTPRequest".to_string())?;
-    Ok(push_handle(NetHttpHandle::HTTPRequest(
-        jet_http_client_request_read_timeout(request, ms),
-    )))
-}
-
-pub(crate) fn runtime_http_request_send(
-    request: i64,
-) -> Result<Result<i64, CtValue>, String> {
-    let request = take_http_request(request).ok_or_else(|| "invalid HTTPRequest".to_string())?;
-    Ok(native_http_request(request)
-        .map(|response| push_handle(NetHttpHandle::HTTPResponse(response)))
-        .map_err(http_error_value))
-}
-
-pub(crate) fn runtime_http_client_get(url: String) -> Result<i64, CtValue> {
-    native_http_response(native_http::jet_http_client_get_impl(&url))
-        .map(|response| push_handle(NetHttpHandle::HTTPResponse(response)))
-        .map_err(http_error_value)
-}
-
-pub(crate) fn runtime_http_client_post(url: String, body: String) -> Result<i64, CtValue> {
-    native_http_response(native_http::jet_http_client_post_impl(&url, &body))
-        .map(|response| push_handle(NetHttpHandle::HTTPResponse(response)))
-        .map_err(http_error_value)
-}
-
-pub(crate) fn runtime_http_request_new(method: String, url: String) -> i64 {
-    push_handle(NetHttpHandle::HTTPRequest(jet_http_client_request_new(
-        &method, &url,
-    )))
-}
-
-fn ws_error_value(error: JetWsError) -> CtValue {
-    let (variant, args) = match error {
-        JetWsError::InvalidUrl => ("InvalidUrl", Vec::new()),
-        JetWsError::InvalidHandshake => ("InvalidHandshake", Vec::new()),
-        JetWsError::Protocol => ("Protocol", Vec::new()),
-        JetWsError::Timeout => ("Timeout", Vec::new()),
-        JetWsError::Closed => ("Closed", Vec::new()),
-        JetWsError::Cancelled => ("Cancelled", Vec::new()),
-        JetWsError::UnsupportedTarget => ("UnsupportedTarget", Vec::new()),
-        JetWsError::MessageTooLarge { limit } => (
-            "MessageTooLarge",
-            vec![(Some("limit".to_string()), CtValue::Int(limit))],
-        ),
-        JetWsError::IO { operation } => (
-            "IO",
-            vec![(Some("operation".to_string()), CtValue::Str(operation))],
-        ),
-    };
-    CtValue::Enum {
-        type_name: "WsError".to_string(),
-        variant: variant.to_string(),
-        args,
-    }
-}
-
-fn ws_invalid_handle(type_name: &str) -> CtValue {
-    ws_error_value(JetWsError::IO {
-        operation: format!("invalid {type_name}"),
-    })
-}
-
-pub(crate) fn runtime_ws_connect(url: String) -> Result<i64, CtValue> {
-    jet_ws_connect(&url)
-        .map(|connection| {
-            push_handle(NetHttpHandle::WsConn(Arc::new(Mutex::new(connection))))
-        })
-        .map_err(ws_error_value)
-}
-
-pub(crate) fn runtime_ws_upgrade(request: i64) -> Result<i64, CtValue> {
-    match with_handle(request, |handle| match handle {
-        NetHttpHandle::HTTPRequest(request) => Some(jet_ws_upgrade(request)),
-        _ => None,
-    }) {
-        Some(Ok(connection)) => Ok(push_handle(NetHttpHandle::WsConn(Arc::new(
-            Mutex::new(connection),
-        )))),
-        Some(Err(error)) => Err(ws_error_value(error)),
-        None => Err(ws_invalid_handle("HTTPRequest")),
-    }
-}
-
-pub(crate) fn runtime_ws_send_text(connection: i64, text: String) -> Result<(), CtValue> {
-    let connection = ws_conn(connection).ok_or_else(|| ws_invalid_handle("WsConn"))?;
-    let connection = connection.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    jet_ws_send_text(&connection, &text).map_err(ws_error_value)
-}
-
-pub(crate) fn runtime_ws_send_bytes(connection: i64, bytes: Vec<u8>) -> Result<(), CtValue> {
-    let connection = ws_conn(connection).ok_or_else(|| ws_invalid_handle("WsConn"))?;
-    let connection = connection.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    jet_ws_send_binary(&connection, &bytes).map_err(ws_error_value)
-}
-
-pub(crate) fn runtime_ws_recv(connection: i64) -> Result<i64, CtValue> {
-    let connection = ws_conn(connection).ok_or_else(|| ws_invalid_handle("WsConn"))?;
-    let connection = connection.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    jet_ws_recv(&connection)
-        .map(|message| push_handle(NetHttpHandle::WsMessage(message)))
-        .map_err(ws_error_value)
-}
-
-pub(crate) fn runtime_ws_close(
-    connection: i64,
-    code: i64,
-    reason: String,
-) -> Result<(), CtValue> {
-    let connection = ws_conn(connection).ok_or_else(|| ws_invalid_handle("WsConn"))?;
-    let connection = connection.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    jet_ws_close(&connection, code, &reason).map_err(ws_error_value)
-}
-
-pub(crate) fn runtime_ws_message_is_text(message: i64) -> Result<bool, CtValue> {
-    with_handle(message, |handle| match handle {
-        NetHttpHandle::WsMessage(message) => Some(jet_ws_message_is_text(message)),
-        _ => None,
-    })
-    .ok_or_else(|| ws_invalid_handle("WsMessage"))
-}
-
-pub(crate) fn runtime_ws_message_is_binary(message: i64) -> Result<bool, CtValue> {
-    with_handle(message, |handle| match handle {
-        NetHttpHandle::WsMessage(message) => Some(jet_ws_message_is_binary(message)),
-        _ => None,
-    })
-    .ok_or_else(|| ws_invalid_handle("WsMessage"))
-}
-
-pub(crate) fn runtime_ws_message_is_close(message: i64) -> Result<bool, CtValue> {
-    with_handle(message, |handle| match handle {
-        NetHttpHandle::WsMessage(message) => Some(jet_ws_message_is_close(message)),
-        _ => None,
-    })
-    .ok_or_else(|| ws_invalid_handle("WsMessage"))
-}
-
-pub(crate) fn runtime_ws_message_text(message: i64) -> Result<String, CtValue> {
-    with_handle(message, |handle| match handle {
-        NetHttpHandle::WsMessage(message) => Some(jet_ws_message_text(message)),
-        _ => None,
-    })
-    .ok_or_else(|| ws_invalid_handle("WsMessage"))?
-    .map_err(ws_error_value)
-}
-
-pub(crate) fn runtime_ws_message_bytes(message: i64) -> Result<Vec<u8>, CtValue> {
-    with_handle(message, |handle| match handle {
-        NetHttpHandle::WsMessage(message) => Some(jet_ws_message_bytes(message)),
-        _ => None,
-    })
-    .ok_or_else(|| ws_invalid_handle("WsMessage"))?
-    .map_err(ws_error_value)
+pub(crate) fn test_http_server_serve(server: i64) -> Result<(), String> {
+    let server = http_server(server).ok_or_else(|| "invalid HTTPServer".to_string())?;
+    jet_http_server_serve(&server).map(|_| ())
 }
 
 #[cfg(test)]
-mod http_i9_adapter_tests {
+mod http_adapter_tests {
     use super::*;
-
-    #[test]
-    fn websocket_error_marshalling_uses_canonical_surface_shape() {
-        let invalid = ws_error_value(JetWsError::InvalidUrl);
-        assert!(matches!(
-            invalid,
-            CtValue::Enum { type_name, variant, args }
-                if type_name == "WsError" && variant == "InvalidUrl" && args.is_empty()
-        ));
-
-        let operation = ws_error_value(JetWsError::IO {
-            operation: "connect".to_string(),
-        });
-        assert!(matches!(
-            operation,
-            CtValue::Enum { type_name, variant, args }
-                if type_name == "WsError"
-                    && variant == "IO"
-                    && matches!(
-                        args.as_slice(),
-                        [(Some(field), CtValue::Str(value))]
-                            if field == "operation" && value == "connect"
-                    )
-        ));
-    }
-
-    #[cfg(any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "macos",
-        target_os = "ios",
-        target_os = "freebsd",
-        target_os = "openbsd",
-        target_os = "netbsd",
-        target_os = "windows"
-    ))]
-    #[test]
-    fn websocket_adapter_reaches_prelude_url_validator() {
-        let result = runtime_ws_connect("ws://127.0.0.1/path\r\nInjected: yes".to_string());
-        assert!(matches!(
-            result,
-            Err(CtValue::Enum { type_name, variant, args })
-                if type_name == "WsError" && variant == "InvalidUrl" && args.is_empty()
-        ));
-    }
-
-    #[test]
-    fn http_error_marshalling_uses_canonical_surface_shape() {
-        let (invalid, invalid_value) = marshal_http_error(JetHTTPError::InvalidFraming);
-        assert_eq!(invalid, 5);
-        assert!(matches!(
-            invalid_value,
-            CtValue::Enum { type_name, variant, args }
-                if type_name == "HTTPError" && variant == "InvalidFraming" && args.is_empty()
-        ));
-
-        let reason = "named origins required".to_string();
-        let (policy, policy_value) =
-            marshal_http_error(JetHTTPError::Policy { reason: reason.clone() });
-        assert_eq!(policy & 0xff, 17);
-        assert!(matches!(
-            policy_value,
-            CtValue::Enum { type_name, variant, args }
-                if type_name == "HTTPError"
-                    && variant == "Policy"
-                    && matches!(
-                        args.as_slice(),
-                        [(Some(field), CtValue::Str(value))]
-                            if field == "reason" && value == "named origins required"
-                    )
-        ));
-    }
-
-    #[test]
-    fn net_error_marshalling_uses_canonical_surface_shape() {
-        let detail = jet_net_detail(
-            "udp receive",
-            Some("127.0.0.1:9".to_string()),
-            None,
-            "timed out".to_string(),
-            Some(110),
-        );
-        let (timeout, timeout_value) = marshal_net_error(JetNetError::Timeout(detail));
-        assert_eq!(timeout & 0xff, 8);
-        assert!(matches!(
-            timeout_value,
-            CtValue::Enum { type_name, variant, args }
-                if type_name == "NetError"
-                    && variant == "Timeout"
-                    && matches!(
-                        args.as_slice(),
-                        [(None, CtValue::Struct { type_name: detail_type, .. })]
-                            if detail_type == "NetErrorDetail"
-                    )
-        ));
-
-        let (dns, dns_value) = marshal_net_error(JetNetError::DNS(
-            JetNetDnsError::NotFound("missing.example".to_string()),
-        ));
-        assert_eq!(dns & 0xff, 14);
-        assert!(matches!(
-            dns_value,
-            CtValue::Enum { type_name, variant, args }
-                if type_name == "NetError"
-                    && variant == "DNS"
-                    && matches!(
-                        args.as_slice(),
-                        [(None, CtValue::Enum { type_name: dns_type, variant: dns_variant, .. })]
-                            if dns_type == "NetDnsError" && dns_variant == "NotFound"
-                    )
-        ));
-    }
 
     #[test]
     fn cors_defaulting_preserves_explicit_max_age() {
         let origins = JetHTTPCorsOrigins::List(vec!["https://app.example".to_string()]);
-        let defaulted =
-            jet_http_cors_policy_defaulted(&origins, None, None, None, None).unwrap();
+        let defaulted = jet_http_cors_policy_defaulted(&origins, None, None, None, None).unwrap();
         let explicit =
             jet_http_cors_policy_defaulted(&origins, None, None, None, Some(i64::MIN)).unwrap();
         assert_eq!(defaulted.max_age_secs, 86_400);

@@ -1,0 +1,32 @@
+// D-HTTP-SERVER1: static responses and access records share the server surface.
+use core.files as files
+use core.http.client as client
+use core.http as http
+use core.http.server as server
+use core.testing as testing
+
+fn blocking_serve_example() {
+    #Unsafe("core.http.serve blocks until the listener exits") {
+        print(http.serve("127.0.0.1:0", (req: HTTPRequest) -> server.response(200, "served")))
+    }
+}
+
+fn run() {
+    request :: client.request("GET", "http://127.0.0.1/")
+    print("access:{server.access_log(request, 200)}")
+    root := testing.temp_dir("http-static")
+    path := Path.from(root).join("index.txt").to_string()
+    files.write(path, "hello") ?? return
+    response :: server.static_file(path, "text/plain")
+    if response == {
+        .Ok(_) -> print("static:ok")
+        .Err(_) -> print("static:error")
+    }
+    mux :: server.mux()
+    one_shot :: server.serve_once("127.0.0.1:65536", mux)
+    if one_shot == {
+        .Ok(_) -> print("serve-once:ok")
+        .Err(_) -> print("serve-once:error")
+    }
+    files.remove_all(root) ?? return
+}

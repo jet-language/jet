@@ -73,6 +73,15 @@ ELI5 by default: lead with the point, one new idea at a time, every term defined
 
 Before delegation, read the plan as the owner: after each screen, can you say in one sentence what you now know or must decide? Then read only the eyebrows and headlines: do they tell the story alone? Cut anything that fails either test.
 
+## Composition contract
+
+- **Requested outcome:** One complete HTML report or tool for the user's requested visual result, preserving this skill's visual and accessibility methods.
+- **Supplied inputs:** The user's goal, real content, approved report shape or tool behavior, exact target paths, project conventions, reference assets, constraints, and acceptance checks.
+- **Allowed child result:** One authorized OMP implementation worker may return the requested page within the declared scope. It cannot resolve product choices, open an undeclared workflow, delegate, or change the story.
+- **Completion owner:** The calling orchestrator owns user communication, product/design choices, integration, and final visual verification; the worker owns only the delegated page implementation.
+- **Return point:** The worker's page and evidence return to the orchestrator for diff review and browser verification.
+- **Stopping condition:** Stop after the complete page passes the focused check and the orchestrator has visually verified it. Do not turn a report into a new agenda or an implementation plan.
+
 ## Execution contract (mandatory)
 
 The calling agent is the orchestrator. The orchestrator must never write the HTML or site implementation itself. It owns all user communication, required product and design decisions, the delegation brief, diff review, and final verification.
@@ -88,16 +97,19 @@ Before delegation, the orchestrator must collect:
 - All constraints
 - Acceptance and verification requirements
 
-The orchestrator must resolve each required decision before delegation, including the design plan below. It must not ask Sol to resolve an unclear product or design choice. It must pass one complete, concrete brief and all relevant file paths, file content, and project context to exactly one GPT-5.6 Sol implementation subagent through the Codex CLI. Use this exact command form and send the brief on standard input:
+The orchestrator must resolve each required decision before delegation,
+including the design plan below. It must not ask a worker to resolve an unclear
+product or design choice. It must pass one complete, concrete brief and all
+relevant paths, content, and project context to exactly one authorized OMP
+implementation task selected under `AGENTS.md`, using
+`task` or `hub`. Do not invoke raw Codex CLI. If the host cannot provide the
+required adapter, report that routing failure instead of claiming a handoff.
 
-```sh
-codex exec -m gpt-5.6-sol -c model_reasoning_effort=high --sandbox workspace-write --skip-git-repo-check -
-```
-
-Start the brief with the executor role so Sol implements directly instead of re-orchestrating:
+Start the brief with the executor role so the worker implements directly
+instead of re-orchestrating:
 
 ```text
-Role: You are the single GPT-5.6 Sol implementation executor for this html handoff. Implement directly. Do not read this skill's SKILL.md, do not run codex, do not delegate, do not ask questions.
+Role: You are the single authorized OMP implementation worker for this HTML handoff. Implement directly. Do not read this skill's SKILL.md, do not delegate, do not ask questions, and do not change scope.
 Goal: <the complete user outcome>
 Files/scope: <exact write targets, allowed reads, and forbidden paths>
 Content/data: <all real copy, values, records, and source material; for a report, the act-by-act story, final prose, ready to set>
@@ -105,12 +117,21 @@ Reference asset: <selected asset path(s) and the patterns to reuse; always `them
 Design plan: <subject, audience, the page's one job, the shape and its acts, the hero thesis and its journey or findings, the signature moment, and every resolved layout choice>
 Constraints: <project conventions, technical limits, and resolved decisions>
 Acceptance: <observable completion criteria; require a complete, self-contained working HTML page, never a partial snippet>
-Verify: <`node .agents/skills/html/scripts/check.mjs <file>` plus focused checks Sol may run and evidence it must return>
+Verify: <the focused checker and checks the worker may run, plus evidence it must return>
 ```
 
-Sol is an executor and implementor only. Sol may inspect allowed files, implement the delegated site or HTML work within the specified scope, and run the requested focused checks. Sol must not invent requirements, make unresolved product or design decisions, ask the user questions, orchestrate other agents, or edit unrelated files.
+The worker is an executor and implementor only. It may inspect allowed files,
+implement the delegated site or HTML work within the specified scope, and run
+the requested focused checks. It must not invent requirements, make unresolved
+product or design decisions, ask the user questions, orchestrate other
+agents, or edit unrelated files.
 
-After Sol returns, the orchestrator must review Sol's diff and verify the completed surface (open it in a browser: screenshot, console, the interactive paths) before it reports to the user. For a report, read the rendered page once as the owner and apply the "so what" test to every screen. The orchestrator, not Sol, owns user communication and final verification.
+After the worker returns, the orchestrator must review the worker's diff and
+verify the completed surface (open it in a browser: screenshot, console, the
+interactive paths) before it reports to the user. For a report, read the
+rendered page once as the owner and apply the "so what" test to every screen.
+The orchestrator, not the worker, owns user communication and final
+verification.
 
 ## When to generate HTML
 
@@ -125,7 +146,7 @@ Prefer HTML over markdown when the output needs:
 
 ## Design direction
 
-The orchestrator writes a short design plan before delegating. It is part of the brief, not left to Sol.
+The orchestrator writes a short design plan before delegating. It is part of the brief, not left to the authorized worker.
 
 ### Ground it in the subject
 
@@ -295,7 +316,7 @@ Every asset is a complete page in this identity. Read the closest one for layout
 2. **Write the story** — for a report, choose the shape, then write every act in ELI5 prose with one concrete example each; strip ids, counts, and outline-mirroring sections; run the "so what" test. Ask the owner first if you want a fluid shape.
 3. **Write the design plan** — subject, audience, one job, hero thesis with its journey or findings, signature moment, layout; check it against the generic version and revise.
 4. **Read the reference file** — the matching `assets/XX-*.html` plus `theme.css`.
-5. **Delegate to Sol** with the brief template; Sol sets the story into the pattern, adding nothing.
+5. **Delegate to the authorized OMP worker** with the brief template; the worker sets the story into the pattern, adding nothing.
 6. **Verify** — `node .agents/skills/html/scripts/check.mjs <file>`, then open the page: screenshot at 1280 and 768, exercise every control, read the console, and read it once as the owner.
 
 ### Key rules

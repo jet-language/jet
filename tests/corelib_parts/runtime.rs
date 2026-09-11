@@ -673,7 +673,10 @@ fn run() {
     scope :: event.scope()
     ev :: event.new<Int>()
     late :: ev.on(scope, (n) -> { print("late {n}") })
-    ev.on_priority(scope, 10, (n) -> { print("killer {n}"); late.unsubscribe() })
+    ev.on_priority(scope, 10, (n) -> {
+        print("killer {n}")
+        late.unsubscribe()
+    })
     print(ev.emit(1).summary())
     print("listeners={ev.listener_count()}")
 
@@ -990,16 +993,16 @@ struct RightRow {
 fn run() {
     left :: [LeftRow]{LeftRow{key: "a", value: 1}, LeftRow{key: "b", value: 2}}
     right :: [RightRow]{RightRow{key: "b", owner: "Ada"}, RightRow{key: "c", owner: "Lin"}}
-    frame :: data.lazy(data.table(left))
-    filtered :: data.lazy_filter(frame, row -> row.value > 1)
-    sorted :: data.lazy_sort_by(filtered, row -> row.key)
-    collected :: data.collect(sorted) ?? panic("collect")
-    print(data.count(data.rows(collected)))
-    print(data.plan(sorted)[2])
+    query :: data.query(left)
+        .filter(row -> row.value > 1)
+        .sort_by(row -> row.key)
+    collected :: query.collect() ?? panic("collect")
+    print(collected.len())
+    print(query.plan()[2])
     joined :: data.inner_join(left, right, row -> row.key, row -> row.key) ?? panic("join")
-    print(data.count(joined))
+    print(joined.len())
     lefted :: data.left_join(left, right, row -> row.key, row -> row.key) ?? panic("left")
-    print(data.count(lefted))
+    print(lefted.len())
     loop pair in lefted {
         if pair.right == {
             Val(_) -> print("hit")

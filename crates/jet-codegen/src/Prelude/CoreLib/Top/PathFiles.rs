@@ -24,6 +24,10 @@ fn jet_path_from(s: &String) -> JetPath {
     }
 }
 
+fn jet_path_to_string(path: &JetPath) -> String {
+    path.jet_display()
+}
+
 fn jet_path_home() -> JetPath {
     jet_path_from(&jet_std_path_home())
 }
@@ -56,6 +60,13 @@ fn jet_path_stem(p: &JetPath) -> JetOutcome<String, JetAbsent> {
 }
 fn jet_path_normalize(p: &JetPath) -> JetPath {
     jet_path_from(&jet_std_path_normalize(&p.inner.to_string_lossy().into_owned()))
+}
+
+/// D-FOUND-VIEW1: typed paths enter the one shared read-only mapping carrier.
+/// Fault policy and map lifetime stay in the filesystem adapter/kernel.
+fn jet_path_map(p: &JetPath) -> Result<jet_std::JetMappedFile, jet_std::IOError> {
+    let path = p.inner.to_string_lossy().into_owned();
+    jet_std_fs_map(&path)
 }
 
 /// Lexical containment only. The receiver is the candidate and the argument
@@ -227,11 +238,14 @@ fn jet_atomic_sync_parent(_dir: &std::path::Path) -> std::io::Result<()> {
 fn jet_path_write_atomic(p: &JetPath, content: &Vec<u8>) -> Result<(), jet_std::IOError> {
     use std::io::Write;
 
-    let path_s = p.inner.to_string_lossy();
+    let path_s = p.inner.to_string_lossy().into_owned();
+    if let Some(error) = jet_std::jet_std_files_writer_refusal(&path_s) {
+        return Err(error);
+    }
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
-            Some(path_s.to_string()),
+            Some(path_s.clone()),
             "fault injected: FS.Write",
         ));
     }

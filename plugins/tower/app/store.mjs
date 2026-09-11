@@ -336,6 +336,47 @@ function validateStoredString(value, label, { nullable = true, nonEmpty = false 
     fail('E_INVALID', `${label} must be ${nullable ? 'a string or null' : 'a string'}`);
 }
 
+const VISUAL_MEDIA_ROOT = 'docs/proposals/visual-acceptance/media/';
+const VISUAL_IMAGE_EXT = /\.(png|jpe?g|webp|gif)$/i;
+const VISUAL_VIDEO_EXT = /\.(webm|mp4)$/i;
+
+function visualMediaPath(value, label, extensions) {
+  validateStoredString(value, label, { nullable: false, nonEmpty: true });
+  if (typeof value !== 'string') return;
+  if (value.includes('\\') || value.startsWith('/') || /^[a-z][a-z0-9+.-]*:/i.test(value)
+    || /[?#%]/.test(value) || value.split('/').some(part => part === '.' || part === '..')
+    || !value.startsWith(VISUAL_MEDIA_ROOT)
+    || value.length === VISUAL_MEDIA_ROOT.length || !extensions.test(value))
+    fail('E_INVALID', `${label} must be a safe ${VISUAL_MEDIA_ROOT} path`);
+}
+
+function normalizeVisualMedia(value, label = 'visualMedia') {
+  if (value == null) return [];
+  if (!Array.isArray(value)) fail('E_INVALID', `${label} must be an array`);
+  return value.map((item, index) => {
+    const at = `${label}[${index}]`;
+    if (!plainObject(item)) fail('E_INVALID', `${at} must be an object`);
+    if (item.kind !== 'image' && item.kind !== 'video') fail('E_INVALID', `${at}.kind must be image or video`);
+    visualMediaPath(item.path, `${at}.path`, item.kind === 'image' ? VISUAL_IMAGE_EXT : VISUAL_VIDEO_EXT);
+    validateStoredString(item.alt, `${at}.alt`, { nullable: false, nonEmpty: true });
+    if (item.kind === 'image' && item.alt.trim().length < 8) fail('E_INVALID', `${at}.alt must meaningfully describe the image`);
+    validateStoredString(item.caption, `${at}.caption`, { nullable: false, nonEmpty: true });
+    validateStoredString(item.state, `${at}.state`, { nullable: false, nonEmpty: true });
+    if (item.poster != null) {
+      if (item.kind !== 'video') fail('E_INVALID', `${at}.poster is only valid for video`);
+      visualMediaPath(item.poster, `${at}.poster`, VISUAL_IMAGE_EXT);
+    }
+    return {
+      kind: item.kind,
+      path: item.path,
+      alt: item.alt.trim(),
+      caption: item.caption.trim(),
+      ...(item.state != null ? { state: item.state.trim() } : {}),
+      ...(item.poster != null ? { poster: item.poster } : {}),
+    };
+  });
+}
+
 function validateStoredNumber(value, label, { integer = false, min = null } = {}) {
   if (value === undefined || value === null) return;
   if (typeof value !== 'number' || !Number.isFinite(value) || Math.abs(value) > Number.MAX_SAFE_INTEGER
@@ -393,6 +434,12 @@ function validateStoredMilestone(milestone, index, source) {
   if (milestone.status !== undefined && !MILESTONE_STATUSES.has(milestone.status))
     fail('E_INVALID', `${label}.status is not a canonical milestone status`);
   validateStoredCriteria(milestone.criteria, label);
+  if (milestone.closeout !== undefined) {
+    if (!plainObject(milestone.closeout)) fail('E_INVALID', `${label}.closeout must be an object`);
+    validateStoredString(milestone.closeout.sourceCommit, `${label}.closeout.sourceCommit`, { nullable: false, nonEmpty: true });
+    validateStoredString(milestone.closeout.by, `${label}.closeout.by`, { nullable: false, nonEmpty: true });
+    validateStoredString(milestone.closeout.at, `${label}.closeout.at`, { nullable: false, nonEmpty: true });
+  }
 }
 
 function validateStoredCard(card, index, source, seenNums, seenIds) {
@@ -412,6 +459,8 @@ function validateStoredCard(card, index, source, seenNums, seenIds) {
   validateStoredPhase(card, source);
   validateStoredString(card.epoch, `${label}.epoch` , { nullable: true, nonEmpty: true });
   validateStoredString(card.milestoneId, `${label}.milestoneId`, { nullable: true, nonEmpty: true });
+  validateStoredString(card.probe, `${label}.probe`, { nullable: true, nonEmpty: true });
+  normalizeVisualMedia(card.visualMedia, `${label}.visualMedia`);
   validateStoredCriteria(card.criteria, label);
 }
 
@@ -422,6 +471,7 @@ function validateStoredDecision(decision, index, source) {
   validateStoredString(decision.cardId, `${label}.cardId`, { nullable: true, nonEmpty: true });
   if (decision.status !== undefined && !DECISION_STATUSES.has(decision.status))
     fail('E_INVALID', `${label}.status is not a canonical decision status`);
+  if (decision.visualMedia !== undefined) normalizeVisualMedia(decision.visualMedia, `${label}.visualMedia`);
   if (decision.options !== undefined) {
     if (!Array.isArray(decision.options)) fail('E_INVALID', `${label}.options must be an array`);
     for (const [optionIndex, option] of decision.options.entries()) {
@@ -653,18 +703,29 @@ export function normalize(s, historyCards = null, sync = true) {
     if (c.hardeningDedupAliases != null && !Array.isArray(c.hardeningDedupAliases)) c.hardeningDedupAliases = [];
     if (c.hardeningEvidence != null && !Array.isArray(c.hardeningEvidence)) c.hardeningEvidence = [];
     if (!('parentId' in c)) c.parentId = null;
+    if (!('probe' in c)) c.probe = null;
+    c.visualMedia = normalizeVisualMedia(c.visualMedia);
     c.needsAcceptance = !!c.needsAcceptance;
   }
   if (historyCards != null) validateStoredHistory({ cards: historyCards }, 'history store');
   for (const m of s.milestones) {
     m.criteria = normalizeMilestoneCriteria(m.criteria);
+    if (m.closeout != null && (
+      typeof m.closeout !== 'object'
+      || !/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(String(m.closeout.sourceCommit || ''))
+      || !m.closeout.by
+      || !m.closeout.at
+    )) delete m.closeout;
     if (!['open', 'review-ready', 'met'].includes(m.status)) m.status = 'open';
     if (m.status === 'met' && !m.verification) {
       m.status = 'review-ready';
       delete m.metAt;
     }
   }
-  for (const d of s.decisions) d.draft = !!d.draft;
+  for (const d of s.decisions) {
+    d.draft = !!d.draft;
+    if (d.visualMedia !== undefined) d.visualMedia = normalizeVisualMedia(d.visualMedia);
+  }
   // D-ONCE-LEDGER1=A: preserve the first imported supersession edge even
   // when an older board snapshot predates the decision-link field.
   // ponytail: explicit legacy map; add only ratified pre-field edges.
@@ -758,9 +819,10 @@ export function milestoneProgress(m, cards, historyCards = []) {
   return { total: linked.length, done, reviewReady, met: reviewReady && m.status === 'met' && !!m.verification };
 }
 
-function clearMilestoneVerification(m) {
+function clearMilestoneVerification(m, { keepCloseout = false } = {}) {
   delete m.verification;
   delete m.metAt;
+  if (!keepCloseout) delete m.closeout;
   if (m.status === 'met') m.status = 'review-ready';
 }
 
@@ -780,8 +842,9 @@ function syncMilestone(s, id, historyCards = []) {
   }
   if (m.status === 'met' && m.verification) return;
   // Card completion only opens the milestone review. `verifyMilestone` is the
-  // sole operation that may create the met signoff.
-  clearMilestoneVerification(m);
+  // sole operation that may create the met signoff. A closeout token survives
+  // evidence recording while every linked card remains closed.
+  clearMilestoneVerification(m, { keepCloseout: true });
   m.status = 'review-ready';
 }
 
@@ -887,7 +950,7 @@ function projectCardSummary(c) {
     id: c.id, num: c.num, title: c.title, kind: c.kind, track: c.track,
     epoch: c.epoch, milestoneId: c.milestoneId, phase: c.phase,
     priority: c.priority, workOrder: c.workOrder, assignee: c.assignee,
-    needsAcceptance: c.needsAcceptance, updated: c.updated, created: c.created,
+    needsAcceptance: c.needsAcceptance, visualMedia: c.visualMedia || [], probe: c.probe || null, updated: c.updated, created: c.created,
     completedAt: c.completedAt, blockedBy: c.blockedBy, refs: c.refs,
     lane: c.lane, openQ: c.openQ, questions: c.questions,
   };
@@ -900,7 +963,7 @@ function projectCardSummary(c) {
   // The Now view needs only the small owner-verification ballot slice before
   // it can fetch the full card detail on demand.
   const acceptance = (c.decisions || []).filter(d => (d.group === 'acceptance' || d.id?.startsWith('D-ACCEPT-')) && d.status !== 'ratified')
-    .map(d => ({ id: d.id, status: d.status, created: d.created, gist: d.gist, detail: d.detail, checkInstructions: d.checkInstructions }));
+    .map(d => ({ id: d.id, status: d.status, created: d.created, gist: d.gist, detail: d.detail, checkInstructions: d.checkInstructions, visualMedia: d.visualMedia || [] }));
   if (acceptance.length) summary.decisions = acceptance;
   if (c.needsAcceptance && c.phase === 'verify') summary.criteria = c.criteria || [];
   return summary;
@@ -1160,8 +1223,8 @@ export function logEvent(s, { by = 'agent', action, ref = null, note = '' }) {
 
 // ---- mutations: cards ------------------------------------------------------
 
-// One exit-criteria item: 1-based stable n, open -> met (builder) -> verified
-// (a different reviewer). Card-embedded, no own id — addressed by (card, n).
+// One exit-criteria item: 1-based stable n, open -> met (orchestrator after
+// integrated proof) -> verified (a different reviewer).
 function normalizeCriterion(it, i) {
   const source = typeof it === 'string' ? { text: it } : (it || {});
   const n = source.n ?? (i + 1);
@@ -1254,6 +1317,8 @@ export function addCard(s, p, config, history = emptyHistory()) {
   checkCardHome({ track, epoch, phase: p.phase || 'planning' });
   checkCardMilestone(s, { epoch, track, milestoneId: p.milestoneId });
   checkRefs(p.refs);
+  validateStoredString(p.probe, 'card.probe', { nullable: true, nonEmpty: true });
+  const visualMedia = normalizeVisualMedia(p.visualMedia);
   if (p.criteria !== undefined) assertCriterionText(p.criteria);
   const num = p.num == null ? s.meta.nextNum++ : Number(p.num);
   validateStoredNumber(num, 'card.num', { integer: true, min: 1 });
@@ -1278,6 +1343,8 @@ export function addCard(s, p, config, history = emptyHistory()) {
     priority: p.priority || config.priorities[2] || config.priorities.at(-1),
     plan: p.plan || null,
     checkSteps: p.checkSteps || null,
+    probe: p.probe || null,
+    visualMedia,
     blockedBy,
     workOrder,
     assignee: p.assignee || null,
@@ -1447,7 +1514,7 @@ export function updateHardeningCard(s, ref, p, config, history = emptyHistory())
   return addOrUpdateHardeningCard(s, { ...p, ref }, config, history);
 }
 
-const CARD_FIELDS = ['title', 'body', 'kind', 'track', 'epoch', 'milestoneId', 'phase', 'priority', 'plan', 'checkSteps', 'blockedBy', 'workOrder', 'criteria', 'needsAcceptance', 'refs', 'tags', 'parentId', 'hardeningFixture', 'hardeningState'];
+const CARD_FIELDS = ['title', 'body', 'kind', 'track', 'epoch', 'milestoneId', 'phase', 'priority', 'plan', 'checkSteps', 'probe', 'visualMedia', 'blockedBy', 'workOrder', 'criteria', 'needsAcceptance', 'refs', 'tags', 'parentId', 'hardeningFixture', 'hardeningState'];
 
 // D-TWR-CRIT1=C / D-TWRGUARD1=C: gate --phase done. Agent closure needs a
 // nonempty checklist with every row met or verified. Owner writes keep the
@@ -1478,36 +1545,20 @@ function applyDoneGate(s, c, targetPhase, by, criteria = c.criteria, needsAccept
 // A needsAcceptance card parked in review with every criterion met or verified is the
 // same owner handoff as asking for done — without this the owner's Accept
 // button stays disabled forever, because the ballot only minted on a `--phase
-// done` attempt and agents park in verify directly.
-//
-// Authored check steps are the second way in. A criterion that says "owner
-// visual acceptance" can only be met BY the owner, so waiting for every
-// criterion first meant the request never appeared and the owner was never
-// asked. Writing the steps is the agent stating the handoff explicitly; the
-// ballot's proof list still shows which criteria remain open.
+// done` attempt and agents park in verify directly. Captured media may be
+// attached earlier, but evidence never bypasses incomplete machine criteria.
 function maybeMintAcceptance(s, c) {
   const items = c.criteria || [];
   if (!c.needsAcceptance || c.phase !== 'verify' || !items.length) return;
-  const settled = items.every(i => ['met', 'verified'].includes(i.status));
-  const authored = typeof c.checkSteps === 'string' && c.checkSteps.trim().length > 0;
-  if (settled || authored) mintAcceptance(s, c);
+  if (items.every(i => ['met', 'verified'].includes(i.status))) mintAcceptance(s, c);
 }
 
-// #515 pass 2 (2026-07-12, owner directive): acceptance entries were too
-// long and demanded commands the owner can't run away from his computer.
-// `proof` is one short machine-evidence line per criterion (what already
-// ran, not what to go run); `visualCheck` is AT MOST one line, and only
-// present when the change is actually visual — never an instruction to run
-// a command. Additive/replacing field on the acceptance ballot; old ballots
-// minted before this carry the old {toCheck,confirms} shape until a bounce
-// or an explicit remint refreshes them — the Now page renders both.
+// Acceptance is an evidence review, never an instruction to run commands.
 const PROOF_LINE_MAX = 100;
 const shorten = (s, n = PROOF_LINE_MAX) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
-const VISUAL_REF_RE = /Tower\/app\/ui\/|\.(png|jpe?g|gif|svg)$|canvas|screenshot|\/web(\/|$)/i;
 
 export function acceptanceCheckInstructions(c) {
   const items = c.criteria || [];
-  const refs = c.refs || [];
   // Every criterion, including the ones still open: a request that hides its
   // open rows tells the owner the card is finished when it is not.
   const proof = items.map(i => shorten(
@@ -1515,30 +1566,30 @@ export function acceptanceCheckInstructions(c) {
       ? `STILL OPEN — ${i.text}`
       : `${i.text} — ${i.status}${i.evidence ? ` (${i.evidence})` : ''}`,
   ));
-  // An owner-authored `checkSteps` block is the card's answer to "how do I
-  // see this?" It wins over the ref heuristic, because a guess about a path
-  // never tells the owner what to run or what good looks like.
-  const visualRef = refs.find(r => VISUAL_REF_RE.test(r));
-  const authored = typeof c.checkSteps === 'string' && c.checkSteps.trim() ? c.checkSteps.trim() : null;
-  const visualCheck = authored
-    || (visualRef ? `Open ${visualRef} — glance, confirm it looks right.` : null);
-  return (proof.length || visualCheck) ? { proof, visualCheck, steps: authored } : null;
+  const visualCheck = c.needsAcceptance ? 'Review the captured evidence below.' : null;
+  return (proof.length || visualCheck) ? { proof, visualCheck } : null;
 }
 
 function mintAcceptance(s, c) {
   const id = `D-ACCEPT-${c.num}`;
   const existing = s.decisions.find(d => d.id === id);
-  if (existing && existing.status !== 'ratified') return; // already awaiting owner — no duplicate mint
   const items = c.criteria || [];
   const evidence = items.length
     ? items.map(i => `${i.n}. ${i.text} — ${i.status}${i.evidence ? ` (${i.evidence})` : ''}${i.verifiedBy ? ` [verified by ${i.verifiedBy}]` : ''}`).join('\n')
     : '(no exit criteria on this card — direct acceptance request)';
   const checkInstructions = acceptanceCheckInstructions(c);
+  if (existing && existing.status !== 'ratified') {
+    existing.detail = evidence;
+    existing.checkInstructions = checkInstructions;
+    existing.visualMedia = normalizeVisualMedia(c.visualMedia);
+    return;
+  }
   if (existing) {
     // a prior round was bounced; re-open the same ballot id for round 2
     existing.status = 'open';
     existing.detail = evidence;
     existing.checkInstructions = checkInstructions;
+    existing.visualMedia = normalizeVisualMedia(c.visualMedia);
     delete existing.outcome; delete existing.comment; delete existing.ratifiedAt;
   } else {
     addDecision(s, {
@@ -1548,6 +1599,7 @@ function mintAcceptance(s, c) {
       gist: `Close #${c.num}, or bounce it back to building.`,
       detail: evidence,
       checkInstructions,
+      visualMedia: normalizeVisualMedia(c.visualMedia),
       options: [
         { key: 'accept', name: 'Accept — close the card' },
         { key: 'bounce', name: 'Bounce — back to building (comment why)' },
@@ -1596,9 +1648,10 @@ export function updateCard(s, ref, patch, config) {
     track: 'track' in patch ? patch.track : c.track,
     milestoneId: 'milestoneId' in patch ? patch.milestoneId : c.milestoneId,
   });
-  // blockedBy accepts a card ref OR a decision id (D-TWRGUARD1=C #458).
   if ('blockedBy' in patch) patch.blockedBy = normalizeBlockedBy(s, patch.blockedBy, { rejectUnknown: true });
   if ('refs' in patch) checkRefs(patch.refs);
+  if ('probe' in patch) validateStoredString(patch.probe, 'card.probe', { nullable: true, nonEmpty: true });
+  if ('visualMedia' in patch) patch.visualMedia = normalizeVisualMedia(patch.visualMedia);
   if ('tags' in patch) patch.tags = normalizeTags(patch.tags);
   if ('workOrder' in patch) {
     const workOrder = patch.workOrder == null || patch.workOrder === '' ? undefined : Number(patch.workOrder);
@@ -1655,14 +1708,7 @@ export function updateCard(s, ref, patch, config) {
       else c[k] = patch[k];
     }
   }
-  if (oldPhase !== 'verify' && c.phase === 'verify') maybeMintAcceptance(s, c);
-  // The owner reads the acceptance request, not the card's history. New check
-  // steps on a card that is already waiting must reach that request, or the
-  // owner is told to verify something with no way to see it.
-  if ('checkSteps' in patch) {
-    const waiting = s.decisions.find(d => d.cardId === c.id && d.group === 'acceptance' && d.status !== 'ratified');
-    if (waiting) waiting.checkInstructions = acceptanceCheckInstructions(c);
-  }
+  if (c.phase === 'verify' && (oldPhase !== 'verify' || 'visualMedia' in patch)) maybeMintAcceptance(s, c);
   if (c.assignee && c.assignee === patch.by) c.claimedAt = now();
   if (c.phase === 'done' || c.phase === 'frozen') {
     c.assignee = null;
@@ -1719,7 +1765,7 @@ export function verifyCriterion(s, ref, n, { evidence, by } = {}) {
   const item = mustCriterion(c, n);
   if (!by) fail('E_INVALID', 'verify needs --by <agent>');
   if (item.status === 'open') fail('E_INVALID', `criterion #${n} not met yet — meet it before verifying`);
-  if (by === item.metBy) fail('E_CRITERIA_SELF', `criterion #${n} verifier must not be the builder (${by})`);
+  if (by === item.metBy) fail('E_CRITERIA_SELF', `criterion #${n} verifier must differ from the agent that marked it met (${by})`);
   item.status = 'verified';
   item.verifiedBy = by;
   if (evidence != null) item.evidence = evidence;
@@ -1790,11 +1836,30 @@ export function hasActiveClaim(c, at = Date.now()) {
   return Number.isFinite(claimed) && at - claimed < CLAIM_TTL_MS;
 }
 
+export function closureReadyClaims(s, at = Date.now()) {
+  return s.cards.filter(c => {
+    if (!hasActiveClaim(c, at) || c.phase === 'done' || c.phase === 'frozen' || c.needsAcceptance) return false;
+    const criteria = c.criteria || [];
+    if (!criteria.length || !criteria.every(item => ['met', 'verified'].includes(item.status))) return false;
+    if (s.questions.some(q => q.cardId === c.id && q.kind !== 'message' && q.status === 'open')) return false;
+    const lane = laneOf(c, s.decisions, s.cards).lane;
+    return lane !== 'blocked' && lane !== 'decide';
+  });
+}
+
+export function assertClosureBarrier(s) {
+  const ready = closureReadyClaims(s);
+  if (!ready.length) return;
+  const refs = ready.map(c => `#${c.num}`).join(', ');
+  fail('E_CLOSE_READY', `${refs} ${ready.length === 1 ? 'has' : 'have'} an active lease, all criteria met, and no open gate — close, reopen, or block ${ready.length === 1 ? 'it' : 'them'} before any further claim or brief`);
+}
+
 export function claimCard(s, ref, by) {
   const c = mustCard(s, ref);
   if (!by) fail('E_INVALID', 'claim needs --by <agent>');
   if (by !== 'owner' && c.phase === 'frozen')
     fail('E_OWNER_LANE', `card #${c.num} is frozen — owner-only until the owner moves it out (\`tower card update --phase ... --by owner\`)`);
+  assertClosureBarrier(s);
   if (hasActiveClaim(c) && c.assignee !== by)
     fail('E_CLAIMED', `card #${c.num} has an active work lease held by ${c.assignee} — pick another or release it first`);
   c.assignee = by; c.claimedAt = now(); touchCard(c, by);
@@ -1817,23 +1882,27 @@ export function releaseCard(s, ref, by, handoff) {
 
 // ---- mutations: decisions --------------------------------------------------
 
-// D-TWRGUARD1=C (#458), D-TWR-BALLOT-PROFILES1=A (#1375): the ballot-ready
-// standard is enforced at write time. Acceptance
-// ballots (`mintAcceptance` above) are a fixed system-generated evidence
-// format, not a narrative ballot, and are exempt.
 const PLAIN_SENTENCE_WORDS = 32;
 const PLAIN_PARAGRAPH_WORDS = 90;
-const LEGACY_REVIEW_PASS_KEYS = ['base', 'boilOcean', 'hybrid', 'cooperative', 'adversarial'];
+const LEGACY_REVIEW_PASS_KEYS = ['base', 'boilOcean', 'hybrid', 'adversarial'];
 const REVIEW_PASS_KEYS = ['base', 'boilOcean', 'hybrid', 'cooperative', 'beginner', 'adversarial'];
-// Process 2 added the beginner pass; process 3 adds the reading surface.
+const CURRENT_REVIEW_PASS_KEYS = ['beginner', 'adversarial'];
+// Process 2 added the beginner pass; process 3 adds the reading surface;
+// process 4 records only the two independent readers.
 const BEGINNER_PROCESS_VERSION = 2;
-const BALLOT_PROCESS_VERSION = 3;
+const SURFACE_PROCESS_VERSION = 3;
+const BALLOT_PROCESS_VERSION = 4;
 const SYSTEM_ACCEPTANCE = Symbol('system acceptance');
 const words = (text) => String(text || '').match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) || [];
 const sentences = (text) => String(text || '').trim().split(/(?<=[.!?])\s+/).filter(Boolean);
-const orderedReviewPasses = (passes) => Object.fromEntries(REVIEW_PASS_KEYS.map(key => [key, passes[key]]));
+const reviewPassKeysFor = (version) => Number(version || 0) >= BALLOT_PROCESS_VERSION
+  ? CURRENT_REVIEW_PASS_KEYS
+  : Number(version || 0) >= BEGINNER_PROCESS_VERSION ? REVIEW_PASS_KEYS : LEGACY_REVIEW_PASS_KEYS;
+const orderedReviewPasses = (passes, version = BALLOT_PROCESS_VERSION) =>
+  Object.fromEntries(reviewPassKeysFor(version).map(key => [key, passes?.[key]]));
 const beginnerPrefix = /^Fresh agent: ([^.]+)\. Skill: rli5\./;
 const dissentPrefix = /^Author model family: ([^.]+)\. Adversarial model family: ([^.]+)\./;
+const freshReviewerPrefix = /^Fresh agent: ([^.]+)\./;
 
 function beginnerMetadata(pass) {
   if (typeof pass !== 'string') return null;
@@ -1856,19 +1925,25 @@ function dissentMetadata(pass) {
   if (typeof pass !== 'string') return null;
   const match = dissentPrefix.exec(pass);
   if (!match) return null;
+  const body = pass.slice(match[0].length).trim();
+  const reviewer = freshReviewerPrefix.exec(body);
   return {
     author: match[1].trim(),
     adversarial: match[2].trim(),
-    summary: pass.slice(match[0].length).trim(),
+    agent: reviewer?.[1].trim() || '',
+    summary: reviewer ? body.slice(reviewer[0].length).trim() : body,
   };
 }
 
-function dissentMetadataGaps(p) {
+function dissentMetadataGaps(p, { requireFresh = true } = {}) {
   const metadata = dissentMetadata(p.reviewPasses?.adversarial);
-  if (!metadata) return ['reviewPasses.adversarial (must begin with `Author model family: <family>. Adversarial model family: <family>.`)'];
-  const normalize = (family) => family.toLowerCase().replace(/[\s_-]+/g, '-');
-  if (normalize(metadata.author) === normalize(metadata.adversarial))
-    return ['reviewPasses.adversarial (author and adversarial model families must differ)'];
+  if (!metadata?.author || !metadata.adversarial) return ['reviewPasses.adversarial (must begin with `Author model family: <family>. Adversarial model family: <family>.`)'];
+  // Owner direction 2026-09-05: fresh reviewers may share the author's family.
+  // Family labels record provenance; they do not establish independence.
+  if (requireFresh && !metadata.agent)
+    return ['reviewPasses.adversarial (model provenance must be followed by `Fresh agent: <agent-id>.`)'];
+  if (requireFresh && metadata.agent === beginnerMetadata(p.reviewPasses?.beginner)?.agent)
+    return ['reviewPasses.adversarial (must use a different fresh agent from the beginner review)'];
   return [];
 }
 
@@ -1880,7 +1955,21 @@ const reviewPassSummary = (key, pass) => {
 function proseDensityGaps(label, text) {
   if (!text || !String(text).trim()) return [];
   const gaps = [];
-  const paragraphs = String(text).trim().split(/\n\s*\n/);
+  // Markdown code examples are not prose sentences. Keep the prose around them.
+  let fence = null;
+  const prose = String(text).split('\n').map(line => {
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !marker[2].trim()) fence = null;
+      return '';
+    }
+    if (marker && !(marker[1][0] === '`' && marker[2].includes('`'))) {
+      fence = marker[1];
+      return '';
+    }
+    return line;
+  }).join('\n');
+  const paragraphs = prose.trim().split(/\n\s*\n/);
   paragraphs.forEach((paragraph, pi) => {
     const paragraphWords = words(paragraph).length;
     if (paragraphWords > PLAIN_PARAGRAPH_WORDS)
@@ -1930,6 +2019,12 @@ export function plainLanguageGaps(p) {
   gaps.push(...proseDensityGaps('recommendation tradeoff', recommendation.tradeoff));
   for (const rejected of recommendation.whyNot || [])
     gaps.push(...proseDensityGaps(`recommendation why not ${rejected?.key || '?'}`, rejected?.reason));
+  for (const [i, item] of (Array.isArray(recommendation.losses) ? recommendation.losses : []).entries()) {
+    const loss = plainObject(item) ? item.loss : item;
+    const why = plainObject(item) ? item.whyUnavoidable : '';
+    gaps.push(...proseDensityGaps(`recommendation loss ${i + 1}`, loss));
+    gaps.push(...proseDensityGaps(`recommendation loss ${i + 1} whyUnavoidable`, why));
+  }
   gaps.push(...proseDensityGaps('hybrid synthesis', p.hybrid?.synthesis));
   for (const item of p.hybrid?.harvest || []) {
     gaps.push(...proseDensityGaps(`hybrid ${item?.key || '?'} aspect`, item?.aspect));
@@ -1947,6 +2042,7 @@ export function plainLanguageGaps(p) {
 // in-the-wild code trio, real gains and losses per option (never padded), why-not
 // for every losing option, no project jargon, and the recommended option is
 // always A, listed first, so it sits next to the current and in-the-wild code.
+const SURFACE_WHY_UNAVOIDABLE_WORDS = 24;
 const SURFACE_GIST_WORDS = 22;
 const SURFACE_LESSON_WORDS = 70;
 const SURFACE_WHY_WORDS = 40;
@@ -1955,7 +2051,6 @@ const SURFACE_BULLET_WORDS = 14;
 const SURFACE_TOTAL_WORDS = 430;
 const SURFACE_CODE_LINES = 14;
 const SURFACE_JARGON = /\b(ratchet|seam|facet|substrate|tier[- ]parity|ring [01]|RINGS)\b/i;
-
 export function surfaceGaps(p, { requireRecFirst = false } = {}) {
   const s = p.surface;
   if (!plainObject(s)) return ['surface (object)'];
@@ -1963,6 +2058,8 @@ export function surfaceGaps(p, { requireRecFirst = false } = {}) {
   const text = (v) => (typeof v === 'string' ? v.trim() : '');
   const count = (v) => words(text(v)).length;
   const prose = [];
+  const processVersion = Number(p.ballotProcessVersion || 0);
+  const structuredLosses = processVersion >= BALLOT_PROCESS_VERSION;
   const need = (label, v, max) => {
     if (!text(v)) { gaps.push(`surface.${label}`); return; }
     prose.push([label, text(v)]);
@@ -2009,8 +2106,31 @@ export function surfaceGaps(p, { requireRecFirst = false } = {}) {
     if (list === 'gains' && !items.length) gaps.push('surface.recommendation.gains');
     if (items.length > 3) gaps.push(`surface.recommendation.${list} (at most 3 real items)`);
     items.forEach((item, i) => {
-      need(`recommendation.${list}[${i + 1}]`, item);
-      if (count(item) > SURFACE_BULLET_WORDS) gaps.push(`surface.recommendation.${list}[${i + 1}] has ${count(item)} words (max ${SURFACE_BULLET_WORDS})`);
+      const label = `recommendation.${list}[${i + 1}]`;
+      if (structuredLosses && list === 'losses') {
+        const loss = text(item?.loss);
+        const why = text(item?.whyUnavoidable);
+        if (!plainObject(item)) {
+          const shown = text(item);
+          gaps.push(`surface.${label}${shown ? ` "${shown}"` : ''} (must include whyUnavoidable)`);
+        } else {
+          if (!loss) gaps.push(`surface.${label}.loss (required)`);
+          else {
+            prose.push([`${label}.loss`, loss]);
+            if (count(loss) >= SURFACE_BULLET_WORDS)
+              gaps.push(`surface.${label}.loss has ${count(loss)} words (under ${SURFACE_BULLET_WORDS} words)`);
+          }
+          if (!why) gaps.push(`surface.${label}.whyUnavoidable (required for "${loss || '?'}")`);
+          else {
+            prose.push([`${label}.whyUnavoidable`, why]);
+            if (count(why) >= SURFACE_WHY_UNAVOIDABLE_WORDS)
+              gaps.push(`surface.${label}.whyUnavoidable has ${count(why)} words (under ${SURFACE_WHY_UNAVOIDABLE_WORDS} words)`);
+          }
+        }
+      } else {
+        need(label, item);
+        if (count(item) > SURFACE_BULLET_WORDS) gaps.push(`surface.${label} has ${count(item)} words (max ${SURFACE_BULLET_WORDS})`);
+      }
     });
   }
   const whyNot = Array.isArray(r.whyNot) ? r.whyNot : [];
@@ -2033,8 +2153,40 @@ export function surfaceGaps(p, { requireRecFirst = false } = {}) {
   return gaps;
 }
 
-export function ballotGaps(p, { requireBeginner = Number(p.ballotProcessVersion || 0) >= BEGINNER_PROCESS_VERSION, requireSurface = Number(p.ballotProcessVersion || 0) >= BALLOT_PROCESS_VERSION, requireRecFirst = false } = {}) {
+function shortBallotGaps(p, card, processVersion) {
+  const gaps = [];
+  if (processVersion >= BALLOT_PROCESS_VERSION) {
+    const tags = new Set([
+      ...(Array.isArray(card?.tags) ? card.tags : []),
+      ...(Array.isArray(p.cardTags) ? p.cardTags : []),
+      ...(Array.isArray(p.card?.tags) ? p.card.tags : []),
+    ].map(tag => String(tag).trim().toLowerCase()));
+    const blocked = [];
+    if (String(p.group || '').trim().toLowerCase() === 'syntax')
+      blocked.push('syntax-group decisions require a full ballot');
+    if (tags.has('carve-out'))
+      blocked.push('cards tagged carve-out require a full ballot');
+    if (tags.has('full'))
+      blocked.push('cards tagged full require a full ballot');
+    if (blocked.length) gaps.push(`short ballot refused: ${blocked.join('; ')}`);
+    else if ((Array.isArray(p.options) ? p.options : []).length > 3
+      && (!p.shortAuthorizedBy || !String(p.shortAuthorizedBy).trim()))
+      gaps.push('shortAuthorizedBy (short profile without owner authorization is limited to one mechanism with at most three options)');
+  } else if (!p.shortAuthorizedBy || !String(p.shortAuthorizedBy).trim()) {
+    gaps.push('shortAuthorizedBy');
+  }
+  if (p.reviewPasses != null) gaps.push('short ballots must omit reviewPasses');
+  return gaps;
+}
+
+export function ballotGaps(p, {
+  requireBeginner = Number(p.ballotProcessVersion || 0) >= BEGINNER_PROCESS_VERSION,
+  requireSurface = Number(p.ballotProcessVersion || 0) >= SURFACE_PROCESS_VERSION,
+  requireRecFirst = false,
+  card = null,
+} = {}) {
   const missing = [];
+  const processVersion = Number(p.ballotProcessVersion || 0);
   if (p.surface != null || requireSurface) missing.push(...surfaceGaps(p, { requireRecFirst }));
   const ballotMode = p.ballotMode || 'full';
   if (!['full', 'short'].includes(ballotMode)) missing.push('ballotMode (full or short)');
@@ -2071,26 +2223,42 @@ export function ballotGaps(p, { requireBeginner = Number(p.ballotProcessVersion 
       const item = whyNot.find(x => x?.key === key);
       if (!item || !item.reason || !String(item.reason).trim()) missing.push(`recommendation.whyNot[${key}]`);
     }
+    const recommendationLosses = Array.isArray(recommendation.losses) ? recommendation.losses : [];
+    if (processVersion >= BALLOT_PROCESS_VERSION) {
+      recommendationLosses.forEach((item, i) => {
+        const loss = typeof item?.loss === 'string' ? item.loss.trim() : '';
+        const why = typeof item?.whyUnavoidable === 'string' ? item.whyUnavoidable.trim() : '';
+        if (!plainObject(item))
+          missing.push(`recommendation.losses[${i + 1}] "${String(item || '').trim()}" (must include whyUnavoidable)`);
+        else {
+          if (!loss) missing.push(`recommendation.losses[${i + 1}].loss (required)`);
+          if (!why) missing.push(`recommendation.losses[${i + 1}].whyUnavoidable (required for "${loss || '?'}")`);
+        }
+      });
+    }
   }
   if (ballotMode === 'full') {
     const passes = p.reviewPasses;
     if (!passes || typeof passes !== 'object' || Array.isArray(passes)) {
       missing.push('reviewPasses');
     } else {
-      const requiredPasses = requireBeginner ? REVIEW_PASS_KEYS : LEGACY_REVIEW_PASS_KEYS;
+      const allowedPasses = reviewPassKeysFor(processVersion);
+      const requiredPasses = processVersion >= BALLOT_PROCESS_VERSION
+        ? CURRENT_REVIEW_PASS_KEYS
+        : requireBeginner ? REVIEW_PASS_KEYS : LEGACY_REVIEW_PASS_KEYS;
       for (const key of requiredPasses) {
         const summary = reviewPassSummary(key, passes[key]);
         if (typeof summary !== 'string' || !summary.trim()) missing.push(`reviewPasses.${key} (need text)`);
         else if (sentences(summary).length > 2) missing.push(`reviewPasses.${key} (need 1-2 sentences)`);
       }
-      for (const key of Object.keys(passes).filter(key => !REVIEW_PASS_KEYS.includes(key)))
+      for (const key of Object.keys(passes).filter(key => !allowedPasses.includes(key)))
         missing.push(`reviewPasses.${key} (unexpected)`);
-      if (requireBeginner) missing.push(...beginnerMetadataGaps(p));
-      missing.push(...dissentMetadataGaps(p));
+      if (processVersion >= BEGINNER_PROCESS_VERSION || requireBeginner) missing.push(...beginnerMetadataGaps(p));
+      // Ratified review records are immutable evidence under their recorded law.
+      missing.push(...dissentMetadataGaps(p, { requireFresh: p.status !== 'ratified' }));
     }
   } else if (ballotMode === 'short') {
-    if (!p.shortAuthorizedBy || !String(p.shortAuthorizedBy).trim()) missing.push('shortAuthorizedBy');
-    if (p.reviewPasses != null) missing.push('short ballots must omit reviewPasses');
+    missing.push(...shortBallotGaps(p, card, processVersion));
   }
   const dense = plainLanguageGaps(p);
   if (dense.length) missing.push(`plain language: ${dense.join('; ')}`);
@@ -2114,11 +2282,14 @@ export function addDecision(s, p) {
   const systemAcceptance = p[SYSTEM_ACCEPTANCE] === true;
   if (!systemAcceptance && (p.group === 'acceptance' || String(p.id || '').startsWith('D-ACCEPT-')))
     fail('E_INVALID', 'acceptance ballots are system-generated; use the card acceptance workflow');
-  const draft = !!p.draft;
-  if (!systemAcceptance && p.group !== 'acceptance') {
-    const gaps = ballotGaps(p, { requireBeginner: true, requireSurface: true, requireRecFirst: true });
-    const metadataGaps = (p.ballotMode || 'full') === 'full'
-      ? [...beginnerMetadataGaps(p), ...dissentMetadataGaps(p)]
+  // Every newly authored narrative ballot is process 4. Historical process 2/3
+  // records enter through the store and keep their stored version unchanged.
+  const candidate = systemAcceptance ? p : { ...p, status: 'open', ballotProcessVersion: BALLOT_PROCESS_VERSION };
+  const draft = !!candidate.draft;
+  if (!systemAcceptance && candidate.group !== 'acceptance') {
+    const gaps = ballotGaps(candidate, { requireBeginner: true, requireSurface: true, requireRecFirst: true, card });
+    const metadataGaps = (candidate.ballotMode || 'full') === 'full'
+      ? [...beginnerMetadataGaps(candidate), ...dissentMetadataGaps(candidate)]
       : [];
     if (draft) {
       if (metadataGaps.length)
@@ -2127,20 +2298,26 @@ export function addDecision(s, p) {
       fail('E_BALLOT', `ballot not ready — missing: ${gaps.join(', ')} (pass --draft to save a work-in-progress ballot)`);
     }
   }
-  const supersededBy = verdictSupersededBy(s, p);
-  const ballotMode = p.group === 'acceptance' ? null : (p.ballotMode || 'full');
-  const d = { id: p.id || newId('D-'), cardId: card.id, group: p.group || 'other',
-    title: String(p.title).trim(), gist: p.gist || '', lesson: p.lesson || '', explainer: p.explainer || '', story: p.story || '',
-    inWild: p.inWild || '', detail: p.detail || '', options: p.options || [], comparisons: p.comparisons || [],
-    rec: p.rec || null, recommendation: p.recommendation || null, hybrid: p.hybrid || null,
-    ballotMode, shortAuthorizedBy: ballotMode === 'short' ? p.shortAuthorizedBy : null,
-    ballotProcessVersion: p.group === 'acceptance' ? null : BALLOT_PROCESS_VERSION,
-    reviewPasses: ballotMode === 'full' && p.reviewPasses ? orderedReviewPasses(p.reviewPasses) : null,
-    checkInstructions: p.checkInstructions || null, surface: p.surface ?? null, ...(supersededBy ? { supersededBy } : {}),
+  const supersededBy = verdictSupersededBy(s, candidate);
+  const ballotMode = candidate.group === 'acceptance' ? null : (candidate.ballotMode || 'full');
+  const d = { id: candidate.id || newId('D-'), cardId: card.id, group: candidate.group || 'other',
+    title: String(candidate.title).trim(), gist: candidate.gist || '', lesson: candidate.lesson || '', explainer: candidate.explainer || '', story: candidate.story || '',
+    inWild: candidate.inWild || '', detail: candidate.detail || '', options: candidate.options || [], comparisons: candidate.comparisons || [],
+    rec: candidate.rec || null, recommendation: candidate.recommendation || null, hybrid: candidate.hybrid || null,
+    ballotMode, shortAuthorizedBy: ballotMode === 'short' ? (candidate.shortAuthorizedBy || null) : null,
+    ballotProcessVersion: candidate.group === 'acceptance' ? null : candidate.ballotProcessVersion,
+    reviewPasses: ballotMode === 'full' && candidate.reviewPasses
+      ? orderedReviewPasses(candidate.reviewPasses, candidate.ballotProcessVersion) : null,
+    checkInstructions: candidate.checkInstructions || null,
+    ...(candidate.group === 'acceptance' ? { visualMedia: normalizeVisualMedia(candidate.visualMedia) } : {}),
+    surface: candidate.surface ?? null, ...(supersededBy ? { supersededBy } : {}),
+    // Owner law 2026-09-03: each loss records two elimination attempts before
+    // any mitigation. Own field so it survives ballot edits.
+    ...(candidate.designAway ? { designAway: candidate.designAway } : {}),
     draft, status: 'open', created: now() };
   s.decisions.push(d);
-  touchCard(card, p.by);
-  logEvent(s, { by: p.by, action: 'decision.add', ref: d.id, note: draft ? `${d.title} (draft)` : d.title });
+  touchCard(card, candidate.by);
+  logEvent(s, { by: candidate.by, action: 'decision.add', ref: d.id, note: draft ? `${d.title} (draft)` : d.title });
   return { ...d, cardNum: card.num };
 }
 
@@ -2188,6 +2365,11 @@ export function createAcceptanceResolver() {
     if (!provenance || provenance.kind !== 'owner-ui' || !provenance.session || !provenance.challenge)
       fail('E_ACCEPTANCE_OWNER_UI', 'missing owner-verification provenance');
     const c = s.cards.find(x => x.id === d.cardId) || fail('E_NOT_FOUND', `no card for ${d.id}`);
+    if (outcome === 'accept') {
+      const unsettled = (c.criteria || []).filter(i => !['met', 'verified'].includes(i.status));
+      if (unsettled.length)
+        fail('E_CRITERIA', `${unsettled.length} of ${c.criteria.length} criteria not met or verified (${unsettled.map(i => i.n).join(',')})`);
+    }
 
     d.status = 'ratified';
     d.outcome = outcome;
@@ -2222,6 +2404,10 @@ export function reopenDecision(s, decisionId, by) {
   if (d.status === 'ratified' && by !== 'owner')
     fail('E_OWNER_ONLY', 'reopening a ratified decision is owner-only');
   d.status = 'open'; delete d.outcome; delete d.ratifiedAt; const card = s.cards.find(c => c.id === d.cardId);
+  // A reopened narrative ballot is re-authored under the current process, so
+  // its next update is gated by today's two passes, not retired ones.
+  if (d.group !== 'acceptance' && Number(d.ballotProcessVersion || 0) < BALLOT_PROCESS_VERSION)
+    d.ballotProcessVersion = BALLOT_PROCESS_VERSION;
   if (card) touchCard(card, by);
   logEvent(s, { by, action: 'decision.reopen', ref: d.id });
   return d;
@@ -2233,12 +2419,17 @@ export function updateDecision(s, id, patch, by) {
     fail('E_INVALID', 'acceptance ballots are system-generated and cannot use decision update');
   if (d.status === 'ratified' && by !== 'owner')
     fail('E_OWNER_ONLY', 'updating a ratified decision is owner-only');
-  for (const k of ['title', 'gist', 'lesson', 'explainer', 'story', 'inWild', 'detail', 'options', 'comparisons', 'rec', 'recommendation', 'hybrid', 'checkInstructions', 'group', 'ballotMode', 'shortAuthorizedBy', 'reviewPasses', 'supersededBy', 'surface'])
+  const card = s.cards.find(c => c.id === d.cardId);
+  const storedVersion = Number(d.ballotProcessVersion || 0);
+  for (const k of ['title', 'gist', 'lesson', 'explainer', 'story', 'inWild', 'detail', 'options', 'comparisons', 'rec', 'recommendation', 'hybrid', 'checkInstructions', 'group', 'ballotMode', 'shortAuthorizedBy', 'reviewPasses', 'supersededBy', 'surface', 'designAway'])
     if (k in patch) d[k] = patch[k];
   const supersededBy = verdictSupersededBy(s, d);
   if (supersededBy) d.supersededBy = supersededBy;
   if (d.group !== 'acceptance' && d.status !== 'ratified' && d.ballotMode !== 'short') {
-    const metadataGaps = [...beginnerMetadataGaps(d), ...dissentMetadataGaps(d)];
+    const metadataGaps = [
+      ...(storedVersion >= BEGINNER_PROCESS_VERSION ? beginnerMetadataGaps(d) : []),
+      ...dissentMetadataGaps(d),
+    ];
     if (metadataGaps.length)
       fail('E_BALLOT', `ballot update missing required review metadata: ${metadataGaps.join(', ')}`);
   }
@@ -2246,18 +2437,21 @@ export function updateDecision(s, id, patch, by) {
   // same while promoting a draft. Ratified records remain historical law.
   if (d.group !== 'acceptance' && d.status !== 'ratified' && (patch.ready || !d.draft)) {
     d.ballotMode ||= 'full';
-    const gaps = ballotGaps(d, { requireBeginner: true, requireSurface: true });
+    const gaps = ballotGaps(d, {
+      requireBeginner: storedVersion >= BEGINNER_PROCESS_VERSION,
+      requireSurface: storedVersion >= SURFACE_PROCESS_VERSION,
+      card,
+    });
     if (gaps.length) fail('E_BALLOT', `ballot not ready — missing: ${gaps.join(', ')}`);
     if (d.ballotMode === 'full') {
-      d.reviewPasses = orderedReviewPasses(d.reviewPasses);
+      d.reviewPasses = orderedReviewPasses(d.reviewPasses, storedVersion);
       d.shortAuthorizedBy = null;
     } else {
       d.reviewPasses = null;
     }
-    d.ballotProcessVersion = BALLOT_PROCESS_VERSION;
+    if (storedVersion >= BALLOT_PROCESS_VERSION) d.ballotProcessVersion = BALLOT_PROCESS_VERSION;
   }
   if (patch.ready) d.draft = false;
-  const card = s.cards.find(c => c.id === d.cardId);
   if (card) touchCard(card, by);
   logEvent(s, { by, action: 'decision.update', ref: d.id, note: patch.ready ? 'marked ready' : '' });
   return d;
@@ -2559,7 +2753,7 @@ export function meetMilestoneCriterion(s, id, n, { evidence, by } = {}) {
   item.metBy = by;
   if (evidence != null) item.evidence = evidence;
   item.at = now();
-  clearMilestoneVerification(m);
+  clearMilestoneVerification(m, { keepCloseout: true });
   syncMilestone(s, m.id);
   logEvent(s, { by, action: 'milestone.criteria-meet', ref: m.id, note: `#${item.n}` });
   return { ...item, milestoneId: m.id };
@@ -2570,12 +2764,12 @@ export function verifyMilestoneCriterion(s, id, n, { evidence, by } = {}) {
   const item = mustMilestoneCriterion(m, n);
   if (!by) fail('E_INVALID', 'verify needs --by <reviewer>');
   if (item.status === 'open') fail('E_INVALID', `criterion #${n} not met yet — meet it before verifying`);
-  if (by === item.metBy) fail('E_CRITERIA_SELF', `criterion #${n} verifier must not be the builder (${by})`);
+  if (by === item.metBy) fail('E_CRITERIA_SELF', `criterion #${n} verifier must differ from the agent that marked it met (${by})`);
   item.status = 'verified';
   item.verifiedBy = by;
   if (evidence != null) item.evidence = evidence;
   item.at = now();
-  clearMilestoneVerification(m);
+  clearMilestoneVerification(m, { keepCloseout: true });
   syncMilestone(s, m.id);
   logEvent(s, { by, action: 'milestone.criteria-verify', ref: m.id, note: `#${item.n}` });
   return { ...item, milestoneId: m.id };
@@ -2598,6 +2792,20 @@ export function reopenMilestoneCriterion(s, id, n, { reason, by } = {}) {
   return { ...item, milestoneId: m.id };
 }
 
+export function beginMilestoneCloseout(s, id, { sourceCommit, by } = {}, historyCards = []) {
+  const m = mustMilestone(s, id);
+  if (!by) fail('E_INVALID', 'milestone closeout needs --by <agent>');
+  if (!/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(String(sourceCommit || '')))
+    fail('E_INVALID', 'milestone closeout needs --commit <40-or-64-character lowercase Git object id>');
+  const linked = milestoneCards(m.id, s.cards, historyCards);
+  if (!linked.length || !linked.every(c => c.phase === 'done'))
+    fail('E_MILESTONE', `milestone ${m.id} is not review-ready — every linked card must be done`);
+  m.status = 'review-ready';
+  m.closeout = { sourceCommit: String(sourceCommit), by, at: now() };
+  logEvent(s, { by, action: 'milestone.closeout', ref: m.id, note: m.closeout.sourceCommit });
+  return m;
+}
+
 export function verifyMilestone(s, id, { evidence, by } = {}, historyCards = []) {
   const m = mustMilestone(s, id);
   if (!by) fail('E_INVALID', 'milestone verify needs --by <reviewer>');
@@ -2608,8 +2816,10 @@ export function verifyMilestone(s, id, { evidence, by } = {}, historyCards = [])
   const unfinished = (m.criteria || []).filter(i => i.status !== 'verified');
   if (unfinished.length)
     fail('E_MILESTONE', `milestone ${m.id} has unverified criteria (${unfinished.map(i => i.n).join(',')})`);
+  if (!m.closeout)
+    fail('E_MILESTONE', `milestone ${m.id} has no closeout token — run \`scripts/agent/closeout-gate.mjs open ${m.id} --by <agent>\` from the frozen source commit before broad proof or review`);
   const builders = new Set((m.criteria || []).map(i => i.metBy).filter(Boolean));
-  if (builders.has(by)) fail('E_CRITERIA_SELF', `milestone reviewer must not be a builder (${by})`);
+  if (builders.has(by)) fail('E_CRITERIA_SELF', `milestone reviewer must differ from an agent that marked its criteria met (${by})`);
   m.status = 'met';
   m.verification = { by, evidence: String(evidence).trim(), at: now() };
   logEvent(s, { by, action: 'milestone.verify', ref: m.id, note: String(evidence).trim() });
@@ -2650,8 +2860,6 @@ export function nextCards(s, { epoch, track, agent, limit = 5, scope } = {}) {
     }
     return true;
   });
-  // Review work always comes before more work. Within each lane,
-  // ready-across groups by epoch; every other scope follows workOrder.
   if (scope === 'ready-across') {
     pool.sort((a, b) =>
       LANE_PREF[a.lane.lane] - LANE_PREF[b.lane.lane]
@@ -2687,12 +2895,15 @@ function harvestRefs(text) {
 
 const BRIEF_RULES = [
   'Log advances with --by.',
-  'Phase honesty: builder marks criteria met; orchestrator closes when all are met or verified.',
-  'Verified criteria are milestone-review signoff; verifier must differ from builder (E_CRITERIA_SELF).',
-  'Technical cards close directly after the exit-criteria guard. There is no separate agent verify step.',
+  'Code workers return CHECK OK from scripts/agent/lane-check.sh; prose/static-data-only workers return DOCS ONLY.',
+  'Workers never write Tower or run cargo test, generators, bless commands, cargo fmt, proof-parallel.sh, or verify-full.sh.',
+  'After integration, the orchestrator runs the exact criterion proof once, records its real evidence, and marks the row met.',
+  'The orchestrator closes immediately when every row is met or verified.',
+  'E_CLOSE_READY blocks every further brief or claim until the closure-ready card closes, reopens, or gains a real gate.',
+  'Verified criteria are milestone-review signoff; the reviewer must differ from the agent that marked the row met (E_CRITERIA_SELF).',
+  'Broad proof and fresh review run once after every milestone card closes and a commit-bound closeout token opens.',
   'Integration and no-known-blocker are orchestration evidence, not mandatory card criteria.',
   'needsAcceptance ONLY for visual/UI/UX/DX taste or real-world eyes — never technical correctness.',
-  'Owner Now/beacon shows needsAcceptance only; bare verify is agent work.',
   'Release mid-card needs --handoff.',
 ];
 
@@ -2702,6 +2913,8 @@ const BRIEF_RULES = [
 function decisionForBrief(d) {
   const base = { id: d.id, cardId: d.cardId, group: d.group, status: d.status, draft: !!d.draft,
     title: d.title, gist: d.gist, ballotMode: d.ballotMode ?? null, shortAuthorizedBy: d.shortAuthorizedBy ?? null,
+    ballotProcessVersion: d.ballotProcessVersion ?? null,
+    visualMedia: d.visualMedia || [],
     outcome: d.outcome ?? null, comment: d.comment ?? '', ratifiedAt: d.ratifiedAt ?? null };
   if (d.status === 'ratified') return base;
   return { ...base, lesson: d.lesson, story: d.story, explainer: d.explainer, inWild: d.inWild, detail: d.detail, rec: d.rec,
@@ -2728,6 +2941,8 @@ export function buildBrief(s, ref) {
   return {
     card: {
       id: card.id, num: card.num, title: card.title, body: card.body, plan: card.plan,
+      probe: card.probe || null,
+      visualMedia: card.visualMedia || [],
       phase: card.phase, priority: card.priority, workOrder: card.workOrder ?? null,
       assignee: card.assignee ?? null, track: card.track,
       epoch: card.epoch ? { id: card.epoch, name: epoch?.name ?? null, goal: epoch?.goal ?? null } : null,

@@ -135,12 +135,25 @@ fn query_engine_protocol(bin: &PathBuf) -> Option<String> {
 /// code `jet` itself should return — never panics, never prints past what the
 /// diagnostics above already print.
 pub fn dispatch(engine: &str, verb: &str, argv: &[String]) -> i32 {
+    dispatch_in(engine, verb, argv, None)
+}
+
+/// Dispatch an engine command from a project root while preserving the same
+/// binary lookup, protocol handshake, inherited stdio, and exit-code contract
+/// as [`dispatch`]. The cwd is explicit because `jet run <path>` may be
+/// launched from outside the target project's directory.
+pub fn dispatch_in(engine: &str, verb: &str, argv: &[String], cwd: Option<&Path>) -> i32 {
     let bin = match compatible_engine(engine, verb) {
         Ok(bin) => bin,
         Err(code) => return code,
     };
 
-    match engine_command(&bin).args(argv).status() {
+    let mut command = engine_command(&bin);
+    command.args(argv);
+    if let Some(cwd) = cwd {
+        command.current_dir(cwd);
+    }
+    match command.status() {
         Ok(status) => status.code().unwrap_or(ExitCodes::USER_ERROR),
         Err(e) => {
             crate::cli_error!("E2105", "couldn't run `{}`: {}", bin.display(), e);

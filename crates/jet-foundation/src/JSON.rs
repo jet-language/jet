@@ -1,20 +1,12 @@
 //! Minimal hand-rolled JSON (parse only what LSP needs) — invariant I6.
 
-use std::collections::BTreeMap;
+use crate::DataTree::DataTree;
 use std::io::{self, BufRead};
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum JSONValue {
-    Null,
-    Bool(bool),
-    Number(i64),
-    Flt(f64),
-    String(String),
-    Array(Vec<JSONValue>),
-    Object(BTreeMap<String, JSONValue>),
-}
+// JSON parsing returns the canonical ordered DataTree directly.  Duplicate object
+// keys remain rejected at this protocol boundary.
 
-pub fn parse_json(text: &str) -> Result<JSONValue, ()> {
+pub fn parse_json(text: &str) -> Result<DataTree, ()> {
     parse_json_with_limit(text, MAX_PROTOCOL_MESSAGE_BYTES)
 }
 
@@ -23,59 +15,31 @@ pub fn parse_json(text: &str) -> Result<JSONValue, ()> {
 /// LSP keeps its historical one-megabyte ceiling. DAP has a separate
 /// ratified sixteen-megabyte frame ceiling, so the adapter must not widen the
 /// shared default for every protocol consumer.
-pub fn parse_json_with_limit(text: &str, limit: usize) -> Result<JSONValue, ()> {
+pub fn parse_json_with_limit(text: &str, limit: usize) -> Result<DataTree, ()> {
     if text.len() > limit {
         return Err(());
     }
     parse_json_detailed(text).map_err(|_| ())
 }
 
-fn parse_json_detailed(text: &str) -> Result<JSONValue, String> {
+fn parse_json_detailed(text: &str) -> Result<DataTree, String> {
     let mut p = JSONParser { s: text, i: 0 };
     let v = p.value(0)?;
     p.skip_ws();
     if p.i < p.s.len() {
-        return Err("trailing characters after JSONValue value".into());
+        return Err("trailing characters after DataTree value".into());
     }
     Ok(v)
 }
 
 /// Parse JSON with the provider-facing error text and bounded tree.
-pub fn parse(text: &str) -> Result<JSONValue, String> {
+pub fn parse(text: &str) -> Result<DataTree, String> {
     if text.len() > MAX_PROTOCOL_MESSAGE_BYTES {
         return Err("JSON input exceeds the 1 MiB limit".into());
     }
     parse_json_detailed(text)
 }
 
-impl JSONValue {
-    pub fn as_array(&self) -> Result<&Vec<JSONValue>, String> {
-        match self {
-            Self::Array(values) => Ok(values),
-            _ => Err("expected a JSONValue array".into()),
-        }
-    }
-
-    pub fn as_object(&self) -> Result<&BTreeMap<String, JSONValue>, String> {
-        match self {
-            Self::Object(values) => Ok(values),
-            _ => Err("expected a JSONValue object".into()),
-        }
-    }
-
-    pub fn as_str(&self) -> Result<&str, String> {
-        match self {
-            Self::String(value) => Ok(value),
-            _ => Err("expected a JSONValue string".into()),
-        }
-    }
-
-    pub fn get<'a>(&'a self, key: &str) -> Result<&'a JSONValue, String> {
-        self.as_object()?
-            .get(key)
-            .ok_or_else(|| format!("missing key `{key}`"))
-    }
-}
 
 /// Protocol JSON is bounded so hostile LSP/DAP input cannot exhaust the stack.
 pub const MAX_JSON_DEPTH: usize = 64;
@@ -156,22 +120,22 @@ impl<'a> JSONParser<'a> {
         }
     }
 
-    fn value(&mut self, depth: usize) -> Result<JSONValue, String> {
+    fn value(&mut self, depth: usize) -> Result<DataTree, String> {
         self.skip_ws();
         match self.peek() {
             Some('n') => {
                 self.expect_literal("null")?;
-                Ok(JSONValue::Null)
+                Ok(DataTree::Null)
             }
             Some('t') => {
                 self.expect_literal("true")?;
-                Ok(JSONValue::Bool(true))
+                Ok(DataTree::Bool(true))
             }
             Some('f') => {
                 self.expect_literal("false")?;
-                Ok(JSONValue::Bool(false))
+                Ok(DataTree::Bool(false))
             }
-            Some('"') => Ok(JSONValue::String(self.string()?)),
+            Some('"') => Ok(DataTree::Text(self.string()?)),
             Some('[') => {
                 if depth >= MAX_JSON_DEPTH {
                     return Err("JSON exceeds maximum nesting depth".into());
@@ -181,7 +145,7 @@ impl<'a> JSONParser<'a> {
                 self.skip_ws();
                 if self.peek() == Some(']') {
                     self.bump();
-                    return Ok(JSONValue::Array(arr));
+                    return Ok(DataTree::Array(arr));
                 }
                 loop {
                     arr.push(self.value(depth + 1)?);
@@ -192,18 +156,18 @@ impl<'a> JSONParser<'a> {
                         _ => return Err("expected `,` or `]` in array".into()),
                     }
                 }
-                Ok(JSONValue::Array(arr))
+                Ok(DataTree::Array(arr))
             }
             Some('{') => {
                 if depth >= MAX_JSON_DEPTH {
                     return Err("JSON exceeds maximum nesting depth".into());
                 }
                 self.bump();
-                let mut obj = BTreeMap::new();
+                let mut obj = Vec::new();
                 self.skip_ws();
                 if self.peek() == Some('}') {
                     self.bump();
-                    return Ok(JSONValue::Object(obj));
+                    return Ok(DataTree::Object(obj));
                 }
                 loop {
                     self.skip_ws();
@@ -213,14 +177,10 @@ impl<'a> JSONParser<'a> {
                         return Err("expected `:` after object key".into());
                     }
                     let value = self.value(depth + 1)?;
-                    match obj.entry(key) {
-                        std::collections::btree_map::Entry::Occupied(taken) => {
-                            return Err(format!("duplicate object key `{}`", taken.key()));
-                        }
-                        std::collections::btree_map::Entry::Vacant(slot) => {
-                            slot.insert(value);
-                        }
+                    if obj.iter().any(|(existing, _)| existing == &key) {
+                        return Err(format!("duplicate object key `{key}`"));
                     }
+                    obj.push((key, value));
                     self.skip_ws();
                     match self.bump() {
                         Some(',') => continue,
@@ -228,7 +188,7 @@ impl<'a> JSONParser<'a> {
                         _ => return Err("expected `,` or `}` in object".into()),
                     }
                 }
-                Ok(JSONValue::Object(obj))
+                Ok(DataTree::Object(obj))
             }
             Some(c) if c == '-' || c.is_ascii_digit() => self.number(),
             Some(c) => Err(format!("unexpected character `{c}`")),
@@ -236,7 +196,7 @@ impl<'a> JSONParser<'a> {
         }
     }
 
-    fn number(&mut self) -> Result<JSONValue, String> {
+    fn number(&mut self) -> Result<DataTree, String> {
         let start = self.i;
         if self.peek() == Some('-') {
             self.bump();
@@ -289,9 +249,9 @@ impl<'a> JSONParser<'a> {
             if !value.is_finite() {
                 return Err(format!("number `{raw}` is out of range"));
             }
-            Ok(JSONValue::Flt(value))
+            Ok(DataTree::Float(value))
         } else {
-            Ok(JSONValue::Number(
+            Ok(DataTree::Int(
                 raw.parse().map_err(|_| format!("invalid number `{raw}`"))?,
             ))
         }
@@ -374,31 +334,28 @@ impl<'a> JSONParser<'a> {
     }
 }
 
-pub fn json_get<'a>(v: &'a JSONValue, key: &str) -> Option<&'a JSONValue> {
+pub fn json_get<'a>(v: &'a DataTree, key: &str) -> Option<&'a DataTree> {
+    v.get_opt(key)
+}
+
+pub fn json_str(v: &DataTree) -> Option<&str> {
     match v {
-        JSONValue::Object(m) => m.get(key),
+        DataTree::Text(s) | DataTree::TypedText(s) => Some(s),
         _ => None,
     }
 }
 
-pub fn json_str(v: &JSONValue) -> Option<&str> {
+pub fn json_int(v: &DataTree) -> Option<i64> {
     match v {
-        JSONValue::String(s) => Some(s),
+        DataTree::Int(n) => Some(*n),
+        DataTree::Float(f) => Some(*f as i64),
         _ => None,
     }
 }
 
-pub fn json_int(v: &JSONValue) -> Option<i64> {
+pub fn json_u32(v: &DataTree) -> Option<u32> {
     match v {
-        JSONValue::Number(n) => Some(*n),
-        JSONValue::Flt(f) => Some(*f as i64),
-        _ => None,
-    }
-}
-
-pub fn json_u32(v: &JSONValue) -> Option<u32> {
-    match v {
-        JSONValue::Number(n) => u32::try_from(*n).ok(),
+        DataTree::Int(n) => u32::try_from(*n).ok(),
         _ => None,
     }
 }
@@ -435,7 +392,7 @@ pub fn object_of(pairs: &[(&str, &str)]) -> String {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FilteredJson {
-    pub value: JSONValue,
+    pub value: DataTree,
     pub noise: Vec<String>,
 }
 
@@ -552,10 +509,10 @@ mod tests {
 
     #[test]
     fn protocol_positions_require_nonnegative_integer_u32_values() {
-        assert_eq!(json_u32(&JSONValue::Number(42)), Some(42));
-        assert_eq!(json_u32(&JSONValue::Number(-1)), None);
-        assert_eq!(json_u32(&JSONValue::Flt(1.5)), None);
-        assert_eq!(json_u32(&JSONValue::Number(i64::MAX)), None);
+        assert_eq!(json_u32(&DataTree::Int(42)), Some(42));
+        assert_eq!(json_u32(&DataTree::Int(-1)), None);
+        assert_eq!(json_u32(&DataTree::Float(1.5)), None);
+        assert_eq!(json_u32(&DataTree::Int(i64::MAX)), None);
     }
 
     #[test]

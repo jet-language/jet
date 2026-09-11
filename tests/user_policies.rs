@@ -34,8 +34,8 @@ fn load_user() Int -> 7
         .find(|marker| marker.name == Syntax::MARKER_POLICY)
         .expect("the callable policy marker");
     assert!(matches!(
-        &marker.args[0],
-        AST::Expr::Call(call) if call.name == "audit"
+        marker.args[0].as_expr(),
+        Some(AST::Expr::Call(call)) if call.name == "audit"
     ));
 
     let formatted = Formatter::format_source(source).expect("user policy source should format");

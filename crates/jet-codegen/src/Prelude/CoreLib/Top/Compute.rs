@@ -4347,20 +4347,19 @@ pub fn jet_compute_curried_drop(handle: i64) {
     let Some(index) = usize::try_from(handle).ok().and_then(|value| value.checked_sub(1)) else {
         return;
     };
-    JET_COMPUTE_CURRIED_HANDLES.with(|handles| {
+    let released = JET_COMPUTE_CURRIED_HANDLES.with(|handles| {
         let mut handles = handles.borrow_mut();
-        let remove = match handles.get_mut(index).and_then(Option::as_mut) {
-            Some(slot) if slot.refs <= 1 => true,
-            Some(slot) => {
-                slot.refs -= 1;
-                false
-            }
-            None => return,
-        };
-        if remove {
-            handles[index] = None;
+        let slot = handles.get_mut(index)?;
+        let entry = slot.as_mut()?;
+        if entry.refs > 1 {
+            entry.refs -= 1;
+            None
+        } else {
+            slot.take()
         }
     });
+    // Captured handles may release other entries in this same registry.
+    drop(released);
 }
 
 #[repr(transparent)]
@@ -4418,17 +4417,25 @@ fn jet_compute_curried_result_shape(
     Ok(values)
 }
 
-fn jet_compute_curried_gradient_result(
+fn jet_compute_seeded_gradient_rows(
     states: &[JetComputeVjpState],
     targets: &[i64],
 ) -> Result<Vec<Vec<JetTensor>>, JetComputeError> {
-    let gradients = states
+    states
         .iter()
         .map(|state| {
             let seed = jet_compute_gradient_seed(state)?;
             jet_compute_vjp_pull(state, &seed, targets)
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect()
+}
+
+fn jet_compute_curried_gradient_result(
+    states: &[JetComputeVjpState],
+    targets: &[i64],
+) -> Result<Vec<Vec<JetTensor>>, JetComputeError> {
+    let gradients = jet_compute_seeded_gradient_rows(states, targets)?;
+
     if gradients.len() == 1 {
         return Ok(gradients
             .into_iter()
@@ -6362,7 +6369,7 @@ fn jet_compute_tensor_rank(tensor: &JetTensor) -> i64 {
 }
 
 fn jet_compute_tensor_numel(tensor: &JetTensor) -> i64 {
-    i64::try_from(jet_compute_tensor_values(tensor).len()).unwrap_or(i64::MAX)
+    jet_compute_numel(&tensor.shape).unwrap_or(0)
 }
 
 fn jet_compute_tensor_device(tensor: &JetTensor) -> String {
@@ -6384,8 +6391,9 @@ fn jet_compute_tensor_to_list(tensor: &JetTensor) -> Vec<f64> {
     jet_compute_tensor_values(tensor)
 }
 
+// Kernels validate their immutable inputs once before traversing them. Keep
+// scalar addressing bounded by rank rather than rescanning the whole tensor.
 fn jet_compute_offset(tensor: &JetTensor, indices: &[i64]) -> Result<usize, JetComputeError> {
-    jet_compute_validate_tensor(tensor)?;
     if indices.len() != tensor.shape.len() {
         return Err(JetComputeError::RankMismatch(format!(
             "expected {} indices, got {}",
@@ -6433,6 +6441,7 @@ fn jet_compute_get(tensor: &JetTensor, indices: &[i64]) -> Result<f64, JetComput
             "Tensor element reads have no registered autodiff rule".to_string(),
         ));
     }
+    jet_compute_validate_tensor(tensor)?;
     jet_compute_get_raw(tensor, indices)
 }
 
@@ -6459,6 +6468,7 @@ impl JetComputeSetTarget for JetTensor {
             value,
             "Tensor write value",
         )?;
+        jet_compute_validate_tensor(self)?;
         let offset = jet_compute_offset(self, indices)?;
         let Some(data) = std::sync::Arc::get_mut(&mut self.data) else {
             return Err(JetComputeError::Unsupported(
@@ -7179,6 +7189,221 @@ fn jet_compute_unary(op: &str, tensor: &JetTensor) -> Result<JetTensor, JetCompu
     )
 }
 
+fn jet_compute_binary_element(
+    op: &str,
+    x: f64,
+    y: f64,
+    f32_profile: bool,
+) -> Result<f64, JetComputeError> {
+    if op == "div" && y == 0.0 {
+        return Err(JetComputeError::Arithmetic(
+            "division by zero in compute operation".to_string(),
+        ));
+    }
+    let output = if f32_profile {
+        let x = jet_compute_f32_value(x, "binary operation input")?;
+        let y = jet_compute_f32_value(y, "binary operation input")?;
+        let output = match op {
+            "sub" => x - y,
+            "div" => x / y,
+            "maximum" => x.max(y),
+            "minimum" => x.min(y),
+            "add" => x + y,
+            "mul" => x * y,
+            _ => unreachable!("unvalidated binary operation"),
+        };
+        f64::from(output)
+    } else {
+        match op {
+            "sub" => x - y,
+            "div" => x / y,
+            "maximum" => x.max(y),
+            "minimum" => x.min(y),
+            "add" => x + y,
+            "mul" => x * y,
+            _ => unreachable!("unvalidated binary operation"),
+        }
+    };
+    if !output.is_finite() {
+        return Err(JetComputeError::Arithmetic(
+            "compute operation produced a non-finite value".to_string(),
+        ));
+    }
+    Ok(output)
+}
+
+fn jet_compute_contiguous_broadcast_layout(
+    tensor: &JetTensor,
+    output_shape: &[i64],
+) -> Result<Option<(usize, Vec<i64>)>, JetComputeError> {
+    if tensor.shape.len() > output_shape.len() {
+        return Ok(None);
+    }
+    let source_strides = jet_compute_row_major_strides(&tensor.shape)?;
+    let (strides, offset) = jet_compute_view_metadata(tensor)?;
+    if strides != source_strides {
+        return Ok(None);
+    }
+    let rank_delta = output_shape.len() - tensor.shape.len();
+    let mut effective_strides = Vec::with_capacity(output_shape.len());
+    for axis in 0..output_shape.len() {
+        if axis < rank_delta {
+            effective_strides.push(0);
+            continue;
+        }
+        let source_axis = axis - rank_delta;
+        effective_strides.push(if tensor.shape[source_axis] == 1 {
+            0
+        } else {
+            source_strides[source_axis]
+        });
+    }
+    Ok(Some((offset, effective_strides)))
+}
+
+fn jet_compute_contiguous_row_offset(
+    row: usize,
+    shape: &[i64],
+    effective_strides: &[i64],
+    base_offset: usize,
+) -> Result<usize, JetComputeError> {
+    let mut remainder = row;
+    let mut relative_offset = 0usize;
+    for axis in (0..shape.len().saturating_sub(1)).rev() {
+        let dim = usize::try_from(shape[axis]).map_err(|_| {
+            JetComputeError::InvalidShape("Tensor shape axis is too large".to_string())
+        })?;
+        if dim == 0 {
+            return Err(JetComputeError::InvalidShape(
+                "Tensor row axis cannot be empty".to_string(),
+            ));
+        }
+        let index = remainder % dim;
+        remainder /= dim;
+        let stride = usize::try_from(effective_strides[axis]).map_err(|_| {
+            JetComputeError::InvalidShape(
+                "Tensor view strides must be non-negative and representable".to_string(),
+            )
+        })?;
+        let term = index.checked_mul(stride).ok_or_else(|| {
+            JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
+        })?;
+        relative_offset = relative_offset.checked_add(term).ok_or_else(|| {
+            JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
+        })?;
+    }
+    base_offset.checked_add(relative_offset).ok_or_else(|| {
+        JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
+    })
+}
+
+fn jet_compute_binary_contiguous(
+    op: &str,
+    a: &JetTensor,
+    b: &JetTensor,
+    shape: &[i64],
+    f32_profile: bool,
+) -> Result<Option<Vec<f64>>, JetComputeError> {
+    let Some((left_offset, left_strides)) =
+        jet_compute_contiguous_broadcast_layout(a, shape)?
+    else {
+        return Ok(None);
+    };
+    let Some((right_offset, right_strides)) =
+        jet_compute_contiguous_broadcast_layout(b, shape)?
+    else {
+        return Ok(None);
+    };
+    let n = jet_compute_storage_len(shape)?;
+    if n == 0 {
+        return Ok(Some(Vec::new()));
+    }
+    let row_width = usize::try_from(*shape.last().ok_or_else(|| {
+        JetComputeError::InvalidShape("Tensor shape must have at least one axis".to_string())
+    })?)
+    .map_err(|_| JetComputeError::InvalidShape("Tensor row width is too large".to_string()))?;
+    if row_width == 0 {
+        return Ok(Some(Vec::new()));
+    }
+    let row_count = n / row_width;
+    let left_column_stride = usize::try_from(
+        *left_strides.last().ok_or_else(|| {
+            JetComputeError::InvalidShape("Tensor shape must have at least one axis".to_string())
+        })?,
+    )
+    .map_err(|_| {
+        JetComputeError::InvalidShape(
+            "Tensor view strides must be non-negative and representable".to_string(),
+        )
+    })?;
+    let right_column_stride = usize::try_from(
+        *right_strides.last().ok_or_else(|| {
+            JetComputeError::InvalidShape("Tensor shape must have at least one axis".to_string())
+        })?,
+    )
+    .map_err(|_| {
+        JetComputeError::InvalidShape(
+            "Tensor view strides must be non-negative and representable".to_string(),
+        )
+    })?;
+    let worker_cap = std::thread::available_parallelism()
+        .map(|parallelism| parallelism.get())
+        .unwrap_or(1);
+    let indexed = jet_list_para_chunks_kernel(
+        row_count,
+        worker_cap,
+        worker_cap,
+        |rows| {
+            let chunk_len = rows
+                .len()
+                .checked_mul(row_width)
+                .ok_or_else(|| {
+                    JetComputeError::InvalidShape("Tensor row chunk is too large".to_string())
+                })?;
+            let mut chunk = Vec::with_capacity(chunk_len);
+            for row in rows {
+                let mut left_index = jet_compute_contiguous_row_offset(
+                    row,
+                    shape,
+                    &left_strides,
+                    left_offset,
+                )?;
+                let mut right_index = jet_compute_contiguous_row_offset(
+                    row,
+                    shape,
+                    &right_strides,
+                    right_offset,
+                )?;
+                for _ in 0..row_width {
+                    let x = a.data.get(left_index).copied().ok_or_else(|| {
+                        JetComputeError::OutOfBounds(
+                            "tensor index is outside storage".to_string(),
+                        )
+                    })?;
+                    let y = b.data.get(right_index).copied().ok_or_else(|| {
+                        JetComputeError::OutOfBounds(
+                            "tensor index is outside storage".to_string(),
+                        )
+                    })?;
+                    chunk.push(jet_compute_binary_element(op, x, y, f32_profile)?);
+                    left_index = left_index.checked_add(left_column_stride).ok_or_else(|| {
+                        JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
+                    })?;
+                    right_index = right_index.checked_add(right_column_stride).ok_or_else(|| {
+                        JetComputeError::OutOfBounds("tensor index offset overflow".to_string())
+                    })?;
+                }
+            }
+            Ok(chunk)
+        },
+    );
+    let mut data = Vec::with_capacity(n);
+    for (_, chunk) in indexed {
+        data.extend(chunk?);
+    }
+    Ok(Some(data))
+}
+
 fn jet_compute_binary(
     op: &str,
     a: &JetTensor,
@@ -7212,7 +7437,8 @@ fn jet_compute_binary(
                 "division by zero in compute operation".to_string(),
             ));
         }
-        let data = jet_compute_accelerator_binary_values(a.device, op, &left_values, &right_values)?;
+        let data =
+            jet_compute_accelerator_binary_values(a.device, op, &left_values, &right_values)?;
         return jet_compute_record(
             jet_compute_accelerator_result_like(a, shape, data)?,
             &[a, b],
@@ -7220,81 +7446,50 @@ fn jet_compute_binary(
             rule,
         );
     }
-    // D-COMPUTE-FUSE1: broadcast indexing and the elementwise operation are
-    // one eager Prelude loop. Do not materialize either broadcast operand;
-    // this is the shared fusion path for AOT, comptime, and dev evaluation.
     let f32_profile = a.last_placement.profile == CPU_ORACLE_F32_PROFILE;
     let n = jet_compute_storage_len(&shape)?;
-    let mut data = Vec::with_capacity(n);
-    let rank = shape.len();
-    let left_rank_delta = rank - a.shape.len();
-    let right_rank_delta = rank - b.shape.len();
-    for flat in 0..n {
-        let mut rem = i64::try_from(flat).map_err(|_| {
-            JetComputeError::InvalidShape("broadcast index is too large".to_string())
-        })?;
-        let mut output_coords = vec![0i64; rank];
-        for axis in (0..rank).rev() {
-            let dim = shape[axis];
-            output_coords[axis] = if dim == 0 { 0 } else { rem % dim };
-            rem = if dim == 0 { 0 } else { rem / dim };
-        }
-        let left_coords = (0..a.shape.len())
-            .map(|axis| {
-                if a.shape[axis] == 1 {
-                    0
-                } else {
-                    output_coords[left_rank_delta + axis]
+    let data = match jet_compute_binary_contiguous(op, a, b, &shape, f32_profile)? {
+        Some(data) => data,
+        None => {
+            let mut data = Vec::with_capacity(n);
+            let rank = shape.len();
+            let left_rank_delta = rank - a.shape.len();
+            let right_rank_delta = rank - b.shape.len();
+            for flat in 0..n {
+                let mut rem = i64::try_from(flat).map_err(|_| {
+                    JetComputeError::InvalidShape("broadcast index is too large".to_string())
+                })?;
+                let mut output_coords = vec![0i64; rank];
+                for axis in (0..rank).rev() {
+                    let dim = shape[axis];
+                    output_coords[axis] = if dim == 0 { 0 } else { rem % dim };
+                    rem = if dim == 0 { 0 } else { rem / dim };
                 }
-            })
-            .collect::<Vec<_>>();
-        let right_coords = (0..b.shape.len())
-            .map(|axis| {
-                if b.shape[axis] == 1 {
-                    0
-                } else {
-                    output_coords[right_rank_delta + axis]
-                }
-            })
-            .collect::<Vec<_>>();
-        let x = jet_compute_get_raw(a, &left_coords)?;
-        let y = jet_compute_get_raw(b, &right_coords)?;
-        if op == "div" && y == 0.0 {
-            return Err(JetComputeError::Arithmetic(
-                "division by zero in compute operation".to_string(),
-            ));
-        }
-        let output = if f32_profile {
-            let x = jet_compute_f32_value(x, "binary operation input")?;
-            let y = jet_compute_f32_value(y, "binary operation input")?;
-            let output = match op {
-                "sub" => x - y,
-                "div" => x / y,
-                "maximum" => x.max(y),
-                "minimum" => x.min(y),
-                "add" => x + y,
-                "mul" => x * y,
-                _ => unreachable!("unvalidated binary operation"),
-            };
-            f64::from(output)
-        } else {
-            match op {
-                "sub" => x - y,
-                "div" => x / y,
-                "maximum" => x.max(y),
-                "minimum" => x.min(y),
-                "add" => x + y,
-                "mul" => x * y,
-                _ => unreachable!("unvalidated binary operation"),
+                let left_coords = (0..a.shape.len())
+                    .map(|axis| {
+                        if a.shape[axis] == 1 {
+                            0
+                        } else {
+                            output_coords[left_rank_delta + axis]
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                let right_coords = (0..b.shape.len())
+                    .map(|axis| {
+                        if b.shape[axis] == 1 {
+                            0
+                        } else {
+                            output_coords[right_rank_delta + axis]
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                let x = jet_compute_get_raw(a, &left_coords)?;
+                let y = jet_compute_get_raw(b, &right_coords)?;
+                data.push(jet_compute_binary_element(op, x, y, f32_profile)?);
             }
-        };
-        if !output.is_finite() {
-            return Err(JetComputeError::Arithmetic(
-                "compute operation produced a non-finite value".to_string(),
-            ));
+            data
         }
-        data.push(output);
-    }
+    };
     let strides = jet_compute_row_major_strides(&shape)?;
     let mut output = jet_compute_tensor_from_shape_like(a, shape, 0.0)?;
     output.strides = strides;
@@ -7600,7 +7795,132 @@ fn jet_compute_solve(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetCompu
     Ok(out)
 }
 
-/// Naive DFT on a rank-1 real tensor → interleaved [re, im, re, im, …] length 2n.
+// Both precision profiles use radix-2 butterflies. Bluestein reduces other
+// lengths to a padded convolution without changing the accepted input domain.
+macro_rules! jet_compute_fft_impl {
+    ($name:ident, $scalar:ty, $pi:expr) => {
+        fn $name(values: Vec<$scalar>) -> Result<Vec<f64>, JetComputeError> {
+            fn radix2(real: &mut [$scalar], imaginary: &mut [$scalar], inverse: bool) {
+                let n = real.len();
+                let direction = if inverse { 2.0 } else { -2.0 };
+                let phase = direction * $pi / n as $scalar;
+                let twiddles = (0..n / 2)
+                    .map(|index| (phase * index as $scalar).sin_cos())
+                    .collect::<Vec<_>>();
+                let mut reversed = 0;
+                for index in 1..n {
+                    let mut bit = n >> 1;
+                    while reversed & bit != 0 {
+                        reversed ^= bit;
+                        bit >>= 1;
+                    }
+                    reversed ^= bit;
+                    if index < reversed {
+                        real.swap(index, reversed);
+                        imaginary.swap(index, reversed);
+                    }
+                }
+                let mut stage_length = 2;
+                while stage_length <= n {
+                    let half = stage_length / 2;
+                    let twiddle_step = n / stage_length;
+                    for block_start in (0..n).step_by(stage_length) {
+                        for offset in 0..half {
+                            let even = block_start + offset;
+                            let odd = even + half;
+                            let (sin, cos) = twiddles[offset * twiddle_step];
+                            let product_real = cos * real[odd] - sin * imaginary[odd];
+                            let product_imaginary = cos * imaginary[odd] + sin * real[odd];
+                            let even_real = real[even];
+                            let even_imaginary = imaginary[even];
+                            real[even] = even_real + product_real;
+                            imaginary[even] = even_imaginary + product_imaginary;
+                            real[odd] = even_real - product_real;
+                            imaginary[odd] = even_imaginary - product_imaginary;
+                        }
+                    }
+                    if stage_length == n {
+                        break;
+                    }
+                    stage_length <<= 1;
+                }
+                if inverse {
+                    let scale = 1.0 / n as $scalar;
+                    for (real, imaginary) in real.iter_mut().zip(imaginary) {
+                        *real *= scale;
+                        *imaginary *= scale;
+                    }
+                }
+            }
+
+            let n = values.len();
+            let (real, imaginary) = if n.is_power_of_two() {
+                let mut real = values;
+                let mut imaginary = vec![0.0; n];
+                radix2(&mut real, &mut imaginary, false);
+                (real, imaginary)
+            } else {
+                let padded = n.checked_mul(2)
+                    .and_then(|length| length.checked_sub(1))
+                    .and_then(usize::checked_next_power_of_two)
+                    .ok_or_else(|| JetComputeError::InvalidShape(
+                        "fft convolution length overflow".to_string(),
+                    ))?;
+                let mut real = vec![0.0; padded];
+                let mut imaginary = vec![0.0; padded];
+                let mut kernel_real = vec![0.0; padded];
+                let mut kernel_imaginary = vec![0.0; padded];
+                let chirps = (0..n)
+                    .map(|index| {
+                        // Reduce before conversion so large indexes do not lose
+                        // their phase in either numeric profile.
+                        let square = (index as u128 * index as u128) % (2 * n as u128);
+                        ($pi * square as $scalar / n as $scalar).sin_cos()
+                    })
+                    .collect::<Vec<_>>();
+                for (index, value) in values.into_iter().enumerate() {
+                    let (sin, cos) = chirps[index];
+                    real[index] = value * cos;
+                    imaginary[index] = -value * sin;
+                    kernel_real[index] = cos;
+                    kernel_imaginary[index] = sin;
+                    if index != 0 {
+                        kernel_real[padded - index] = cos;
+                        kernel_imaginary[padded - index] = sin;
+                    }
+                }
+                radix2(&mut real, &mut imaginary, false);
+                radix2(&mut kernel_real, &mut kernel_imaginary, false);
+                for index in 0..padded {
+                    let product_real =
+                        real[index] * kernel_real[index] - imaginary[index] * kernel_imaginary[index];
+                    imaginary[index] =
+                        real[index] * kernel_imaginary[index] + imaginary[index] * kernel_real[index];
+                    real[index] = product_real;
+                }
+                radix2(&mut real, &mut imaginary, true);
+                real.truncate(n);
+                imaginary.truncate(n);
+                for (index, (sin, cos)) in chirps.into_iter().enumerate() {
+                    let rotated_real = real[index] * cos + imaginary[index] * sin;
+                    imaginary[index] = imaginary[index] * cos - real[index] * sin;
+                    real[index] = rotated_real;
+                }
+                (real, imaginary)
+            };
+            let mut output = Vec::with_capacity(n * 2);
+            for (real, imaginary) in real.into_iter().zip(imaginary) {
+                output.push(f64::from(real));
+                output.push(f64::from(imaginary));
+            }
+            Ok(output)
+        }
+    };
+}
+
+jet_compute_fft_impl!(jet_compute_fft_radix2_f64, f64, std::f64::consts::PI);
+jet_compute_fft_impl!(jet_compute_fft_radix2_f32, f32, std::f32::consts::PI);
+
 fn jet_compute_fft(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
     if tensor.trace.is_some() {
         return Err(JetComputeError::Unsupported(
@@ -7610,7 +7930,7 @@ fn jet_compute_fft(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
     jet_compute_validate_tensor(tensor)?;
     if jet_compute_is_accelerator(tensor.device) {
         return Err(JetComputeError::Unsupported(
-        "accelerator backend does not support fft; transfer to CPU explicitly".to_string(),
+            "accelerator backend does not support fft; transfer to CPU explicitly".to_string(),
         ));
     }
     if tensor.shape.len() != 1 {
@@ -7624,26 +7944,31 @@ fn jet_compute_fft(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
         .checked_mul(2)
         .and_then(|length| i64::try_from(length).ok())
         .ok_or_else(|| JetComputeError::InvalidShape("fft output length overflow".to_string()))?;
-    let mut out = jet_compute_tensor_from_shape(
-        vec![output_len],
-        0.0,
-        JetComputeDevice::Cpu,
-    )?;
-    if n == 0 {
-        return Ok(out);
-    }
-    for k in 0..n {
-        let mut re = 0.0;
-        let mut im = 0.0;
-        for t in 0..n {
-            let angle = -2.0 * std::f64::consts::PI * (k as f64) * (t as f64) / (n as f64);
-            re += values[t] * angle.cos();
-            im += values[t] * angle.sin();
-        }
-        jet_compute_set(&mut out, &vec![(2 * k) as i64], re)?;
-        jet_compute_set(&mut out, &vec![(2 * k + 1) as i64], im)?;
-    }
-    Ok(out)
+    let f32_profile = tensor.last_placement.profile == CPU_ORACLE_F32_PROFILE;
+    let output_data = if n == 0 {
+        Vec::new()
+    } else if f32_profile {
+        let values = values
+            .into_iter()
+            .map(|value| value as f32)
+            .collect::<Vec<_>>();
+        jet_compute_fft_radix2_f32(values)?
+    } else {
+        jet_compute_fft_radix2_f64(values)?
+    };
+    let output_shape = vec![output_len];
+    let mut output = JetTensor {
+        strides: jet_compute_row_major_strides(&output_shape)?,
+        data: std::sync::Arc::new(output_data),
+        shape: output_shape,
+        device: JetComputeDevice::Cpu,
+        last_placement: jet_compute_place(JetComputeDevice::Cpu)?,
+        last_transfer: None,
+        trace: None,
+    };
+    output = jet_compute_inherit_placement(output, tensor);
+    jet_compute_validate_tensor(&output)?;
+    Ok(output)
 }
 
 // ── #1138 / #1145: stream + transfer receipts ───────────────────────────────
@@ -7806,6 +8131,10 @@ fn jet_compute_stream_sync(stream: &JetComputeStream) -> Result<(), JetComputeEr
         }
         _ => {}
     }
+    if jet_foundation::ResourceSchedule::current_frame_completion_state().is_some() {
+        jet_foundation::ResourceSchedule::signal_frame_completion("jet_compute_stream_sync")
+            .map_err(JetComputeError::Device)?;
+    }
     Ok(())
 }
 
@@ -7869,6 +8198,10 @@ fn jet_compute_transfer(
     };
     jet_compute_validate_transfer_receipt(&out, &receipt)?;
     out.last_transfer = Some(receipt);
+    if jet_foundation::ResourceSchedule::current_frame_completion_state().is_some() {
+        jet_foundation::ResourceSchedule::signal_frame_completion("jet_compute_transfer")
+            .map_err(JetComputeError::Device)?;
+    }
     Ok(out)
 }
 
@@ -8461,18 +8794,7 @@ fn jet_compute_nested_gradient(
     states: &[JetComputeVjpState],
     targets: &[i64],
 ) -> Result<Vec<Vec<JetTensor>>, JetComputeError> {
-    states
-        .iter()
-        .map(|state| {
-            let result = jet_compute_transform("gradient", state, &[], targets)?;
-            let JetComputeTransformResult::Gradient(values) = result else {
-                return Err(JetComputeError::Unsupported(
-                    "nested gradient did not return gradients".to_string(),
-                ));
-            };
-            Ok(values)
-        })
-        .collect()
+    jet_compute_seeded_gradient_rows(states, targets)
 }
 
 fn jet_compute_nested_gradient_or_panic(
@@ -9717,21 +10039,24 @@ fn jet_compute_simd_backend_available(backend: JetComputeSimdBackend) -> bool {
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn jet_compute_f32_dot_avx2(a: &[f32], b: &[f32]) -> f32 {
-    use std::arch::x86_64::{_mm256_loadu_ps, _mm256_mul_ps, _mm256_storeu_ps};
+    use std::arch::x86_64::{
+        _mm256_add_ps, _mm256_loadu_ps, _mm256_mul_ps, _mm256_setzero_ps, _mm256_storeu_ps,
+    };
 
-    let mut sum = 0.0_f32;
+    let mut acc = _mm256_setzero_ps();
     let mut index = 0usize;
     let limit = a.len() / 8 * 8;
     while index < limit {
         let left = _mm256_loadu_ps(a.as_ptr().add(index));
         let right = _mm256_loadu_ps(b.as_ptr().add(index));
-        let product = _mm256_mul_ps(left, right);
-        let mut lanes = [0.0_f32; 8];
-        _mm256_storeu_ps(lanes.as_mut_ptr(), product);
-        for lane in lanes {
-            sum += lane;
-        }
+        acc = _mm256_add_ps(acc, _mm256_mul_ps(left, right));
         index += 8;
+    }
+    let mut lanes = [0.0_f32; 8];
+    _mm256_storeu_ps(lanes.as_mut_ptr(), acc);
+    let mut sum = 0.0_f32;
+    for lane in lanes {
+        sum += lane;
     }
     while index < a.len() {
         sum += a[index] * b[index];
@@ -9743,21 +10068,24 @@ unsafe fn jet_compute_f32_dot_avx2(a: &[f32], b: &[f32]) -> f32 {
 #[cfg(target_arch = "x86")]
 #[target_feature(enable = "avx2")]
 unsafe fn jet_compute_f32_dot_avx2(a: &[f32], b: &[f32]) -> f32 {
-    use std::arch::x86::{_mm256_loadu_ps, _mm256_mul_ps, _mm256_storeu_ps};
+    use std::arch::x86::{
+        _mm256_add_ps, _mm256_loadu_ps, _mm256_mul_ps, _mm256_setzero_ps, _mm256_storeu_ps,
+    };
 
-    let mut sum = 0.0_f32;
+    let mut acc = _mm256_setzero_ps();
     let mut index = 0usize;
     let limit = a.len() / 8 * 8;
     while index < limit {
         let left = _mm256_loadu_ps(a.as_ptr().add(index));
         let right = _mm256_loadu_ps(b.as_ptr().add(index));
-        let product = _mm256_mul_ps(left, right);
-        let mut lanes = [0.0_f32; 8];
-        _mm256_storeu_ps(lanes.as_mut_ptr(), product);
-        for lane in lanes {
-            sum += lane;
-        }
+        acc = _mm256_add_ps(acc, _mm256_mul_ps(left, right));
         index += 8;
+    }
+    let mut lanes = [0.0_f32; 8];
+    _mm256_storeu_ps(lanes.as_mut_ptr(), acc);
+    let mut sum = 0.0_f32;
+    for lane in lanes {
+        sum += lane;
     }
     while index < a.len() {
         sum += a[index] * b[index];
@@ -9769,21 +10097,24 @@ unsafe fn jet_compute_f32_dot_avx2(a: &[f32], b: &[f32]) -> f32 {
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse2")]
 unsafe fn jet_compute_f32_dot_sse2(a: &[f32], b: &[f32]) -> f32 {
-    use std::arch::x86_64::{_mm_loadu_ps, _mm_mul_ps, _mm_storeu_ps};
+    use std::arch::x86_64::{
+        _mm_add_ps, _mm_loadu_ps, _mm_mul_ps, _mm_setzero_ps, _mm_storeu_ps,
+    };
 
-    let mut sum = 0.0_f32;
+    let mut acc = _mm_setzero_ps();
     let mut index = 0usize;
     let limit = a.len() / 4 * 4;
     while index < limit {
         let left = _mm_loadu_ps(a.as_ptr().add(index));
         let right = _mm_loadu_ps(b.as_ptr().add(index));
-        let product = _mm_mul_ps(left, right);
-        let mut lanes = [0.0_f32; 4];
-        _mm_storeu_ps(lanes.as_mut_ptr(), product);
-        for lane in lanes {
-            sum += lane;
-        }
+        acc = _mm_add_ps(acc, _mm_mul_ps(left, right));
         index += 4;
+    }
+    let mut lanes = [0.0_f32; 4];
+    _mm_storeu_ps(lanes.as_mut_ptr(), acc);
+    let mut sum = 0.0_f32;
+    for lane in lanes {
+        sum += lane;
     }
     while index < a.len() {
         sum += a[index] * b[index];
@@ -9795,21 +10126,24 @@ unsafe fn jet_compute_f32_dot_sse2(a: &[f32], b: &[f32]) -> f32 {
 #[cfg(target_arch = "x86")]
 #[target_feature(enable = "sse2")]
 unsafe fn jet_compute_f32_dot_sse2(a: &[f32], b: &[f32]) -> f32 {
-    use std::arch::x86::{_mm_loadu_ps, _mm_mul_ps, _mm_storeu_ps};
+    use std::arch::x86::{
+        _mm_add_ps, _mm_loadu_ps, _mm_mul_ps, _mm_setzero_ps, _mm_storeu_ps,
+    };
 
-    let mut sum = 0.0_f32;
+    let mut acc = _mm_setzero_ps();
     let mut index = 0usize;
     let limit = a.len() / 4 * 4;
     while index < limit {
         let left = _mm_loadu_ps(a.as_ptr().add(index));
         let right = _mm_loadu_ps(b.as_ptr().add(index));
-        let product = _mm_mul_ps(left, right);
-        let mut lanes = [0.0_f32; 4];
-        _mm_storeu_ps(lanes.as_mut_ptr(), product);
-        for lane in lanes {
-            sum += lane;
-        }
+        acc = _mm_add_ps(acc, _mm_mul_ps(left, right));
         index += 4;
+    }
+    let mut lanes = [0.0_f32; 4];
+    _mm_storeu_ps(lanes.as_mut_ptr(), acc);
+    let mut sum = 0.0_f32;
+    for lane in lanes {
+        sum += lane;
     }
     while index < a.len() {
         sum += a[index] * b[index];

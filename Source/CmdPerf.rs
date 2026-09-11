@@ -8,16 +8,18 @@
 //! Capture reuses the observe live snapshot (D-OBSERVE-LIVE1) attributed to a
 //! Jet source symbol.
 
+use jet_foundation::Devtools::JetDevtoolsEventBody;
 use jet_foundation::ExitCodes;
 use jet_foundation::JetTrace::{
     artifact_extension, build_skeleton_bytes, entrypoint_name_from_source, fn_names_from_source,
-    trace_id, verify_jettrace, CapturePolicy, JetSymbolRef, SourceIdentity, TraceAllocation,
-    TraceBrowser, TraceHardware, TraceIo, TraceLock, TraceNative, TraceSample, TraceSkeleton,
-    TraceSourceMap, TraceSpan, TraceTask, TraceToolchain, DEFAULT_EXCLUSIONS, TRACE_IO_ROW_LIMIT,
-    TRACE_SCHEMA, TRACE_SPAN_ROW_LIMIT, TRACE_TASK_ROW_LIMIT, TRACE_VERSION,
+    project_game_devtools_bodies, trace_id, verify_jettrace, CapturePolicy, JetSymbolRef,
+    SourceIdentity, TraceAllocation, TraceBrowser, TraceGameDrawEvent, TraceGameFrame,
+    TraceHardware, TraceIo, TraceLock, TraceNative, TraceReceiptSection, TraceSample,
+    TraceSkeleton, TraceSourceMap, TraceSpan, TraceTask, TraceToolchain, DEFAULT_EXCLUSIONS,
+    TRACE_IO_ROW_LIMIT, TRACE_SCHEMA, TRACE_SPAN_ROW_LIMIT, TRACE_TASK_ROW_LIMIT, TRACE_VERSION,
 };
 use jet_foundation::PerformanceBudget::CanonicalJson;
-use jet_foundation::Report::ReportEnvelope;
+use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
 use jet_foundation::Syntax::ARTIFACT_EXT_TRACE;
 use jet_foundation::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
@@ -38,12 +40,13 @@ fn perf_error(what: impl Into<String>) {
 fn perf_error_with_fix(what: impl Into<String>, fix: impl Into<String>) {
     crate::emit_cli_diagnostic_with_fix("E2102", what.into(), fix.into());
 }
-
 struct CaptureBundle {
     samples: Vec<TraceSample>,
     allocations: Vec<TraceAllocation>,
     browser: Vec<TraceBrowser>,
     browser_rows_truncated: bool,
+    game_frames: Vec<TraceGameFrame>,
+    game_draw_events: Vec<TraceGameDrawEvent>,
     tasks: Vec<TraceTask>,
     locks: Vec<TraceLock>,
     io: Vec<TraceIo>,
@@ -64,6 +67,8 @@ impl CaptureBundle {
             allocations: Vec::new(),
             browser: Vec::new(),
             browser_rows_truncated: false,
+            game_frames: Vec::new(),
+            game_draw_events: Vec::new(),
             tasks: Vec::new(),
             locks: Vec::new(),
             io: Vec::new(),
@@ -78,6 +83,18 @@ impl CaptureBundle {
         }
     }
 }
+impl CaptureBundle {
+    fn add_game_devtools_bodies(
+        &mut self,
+        bodies: &[JetDevtoolsEventBody],
+    ) -> Result<(), String> {
+        let (frames, draws) = project_game_devtools_bodies(bodies)?;
+        self.game_frames.extend(frames);
+        self.game_draw_events.extend(draws);
+        Ok(())
+    }
+}
+
 
 pub(crate) fn run(raw: &[String]) -> Outcome {
     let action = raw.get(1).map(String::as_str);
@@ -153,14 +170,32 @@ fn run_session(action: &str, args: &[String], quiet: bool) -> i32 {
     };
     let mut child_argv = vec![action.to_string()];
     child_argv.extend(parsed.child_args.iter().cloned());
-
-    let mut child = match Command::new(&exe)
+    let relay_nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let relay_path = std::env::temp_dir().join(format!(
+        "jet-perf-devtools-{}-{relay_nonce}.ring",
+        std::process::id()
+    ));
+    let relay_session_id = format!("jet-perf-{}-{relay_nonce}", std::process::id());
+    let mut child_command = Command::new(&exe);
+    child_command
         .args(&child_argv)
         .env("JET_OBSERVE", "1")
+        .env("JET_DEVTOOLS_RELAY_PATH", &relay_path)
+        .env("JET_DEVTOOLS_RELAY_SESSION_ID", &relay_session_id)
+        .env(
+            "JET_DEVTOOLS_RELAY_SOURCE_ID",
+            parsed.source.as_deref().unwrap_or(""),
+        )
+        .env("JET_DEVTOOLS_RELAY_BUILD_ID", "runtime")
+        .env("JET_DEVTOOLS_RELAY_REVISION", "runtime")
+        .env("JET_DEVTOOLS_RELAY_WORLD_ID", "game")
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn()
+        .stderr(Stdio::inherit());
+    let mut child = match child_command.spawn()
     {
         Ok(child) => child,
         Err(error) => {
@@ -203,6 +238,22 @@ fn run_session(action: &str, args: &[String], quiet: bool) -> i32 {
             }
         }
     };
+    let game_bodies = match jet::DevServer::LiveInspect::read_devtools_relay_path_with_identity(
+        &relay_path,
+        Some(&relay_session_id),
+        parsed.source.as_deref(),
+        Some("runtime"),
+        Some("runtime"),
+        Some("game"),
+    ) {
+        Ok(envelope) => envelope.game_trace_bodies(),
+        Err(_) if !relay_path.exists() => Vec::new(),
+        Err(message) => {
+            let _ = fs::remove_file(&relay_path);
+            perf_error(message);
+            return ExitCodes::USAGE;
+        }
+    };
     let wall_ns = started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
     io_timeline.finish(wall_ns);
     let capture = match &parsed.source {
@@ -222,13 +273,24 @@ fn run_session(action: &str, args: &[String], quiet: bool) -> i32 {
     };
     let mut argv = vec![action.to_string()];
     argv.extend(args.iter().cloned());
-    match write_session_trace(
+    let receipt_sections = match receipt_sections_for_command(action, &child_argv) {
+        Ok(sections) => sections,
+        Err(message) => {
+            perf_error(format!("receipt sections: {message}"));
+            return ExitCodes::USAGE;
+        }
+    };
+    let trace_result = write_session_trace(
         action,
         &argv,
         parsed.out.as_deref(),
         capture,
+        &game_bodies,
         &parsed.capture_allowlist,
-    ) {
+        receipt_sections,
+    );
+    let _ = fs::remove_file(&relay_path);
+    match trace_result {
         Ok(path) => {
             if !quiet {
                 eprintln!("trace: {}", path.display());
@@ -433,6 +495,24 @@ fn attach(args: &[String]) -> i32 {
         );
         return ExitCodes::USAGE;
     }
+    let relay_path = jet::DevServer::LiveInspect::devtools_relay_path(pid);
+    let game_bodies = match jet::DevServer::LiveInspect::read_devtools_relay_path_with_identity(
+        &relay_path,
+        None,
+        source.as_deref(),
+        None,
+        None,
+        None,
+    ) {
+        Ok(envelope) => envelope.game_trace_bodies(),
+        Err(_) if !jet::DevServer::LiveInspect::devtools_relay_path(pid).exists() => {
+            Vec::new()
+        }
+        Err(message) => {
+            perf_error(message);
+            return ExitCodes::USAGE;
+        }
+    };
 
     let browser_capture = match read_browser_capture(pid, source.is_none()) {
         Ok(capture) => Some(capture),
@@ -526,7 +606,15 @@ fn attach(args: &[String]) -> i32 {
         argv.push("--capture".into());
         argv.push(capture_allowlist.join(","));
     }
-    match write_session_trace("attach", &argv, out.as_deref(), capture, &capture_allowlist) {
+    match write_session_trace(
+        "attach",
+        &argv,
+        out.as_deref(),
+        capture,
+        &game_bodies,
+        &capture_allowlist,
+        Vec::new(),
+    ) {
         Ok(path) => {
             eprintln!("trace: {}", path.display());
             ExitCodes::OK
@@ -1048,6 +1136,8 @@ fn capture_from_source(
         allocations,
         browser: Vec::new(),
         browser_rows_truncated: false,
+        game_frames: Vec::new(),
+        game_draw_events: Vec::new(),
         tasks,
         locks,
         io,
@@ -2015,13 +2105,30 @@ fn view_json(trace: &CanonicalJson, frames: FramesMode) -> CanonicalJson {
 }
 
 fn render_perf_json(action: &str, value: CanonicalJson) -> String {
-    let payload = String::from_utf8(value.bytes())
-        .expect("canonical JSON is UTF-8")
-        .trim_end_matches('\n')
-        .to_owned();
-    ReportEnvelope::status_record("tool", "ok", true, action)
-        .with_json_field("perf", &payload)
+    StatusEnvelope::new(action, true)
+        .with_field("perf", status_value(&value))
         .json()
+}
+
+fn status_value(value: &CanonicalJson) -> StatusValue {
+    match value {
+        CanonicalJson::Null => StatusValue::Null,
+        CanonicalJson::Bool(value) => StatusValue::Bool(*value),
+        CanonicalJson::Integer(value) => StatusValue::Integer(
+            value
+                .parse()
+                .expect("canonical perf integer must fit status integer"),
+        ),
+        CanonicalJson::String(value) => StatusValue::String(value.clone()),
+        CanonicalJson::Array(values) => StatusValue::array(values.iter().map(status_value)),
+        CanonicalJson::Object(values) => {
+            let mut fields = StatusFields::new();
+            for (name, value) in values {
+                fields = fields.with(name.as_str(), status_value(value));
+            }
+            StatusValue::object(fields)
+        }
+    }
 }
 
 fn view_html(trace: &CanonicalJson, frames: FramesMode) -> String {
@@ -2171,6 +2278,13 @@ fn compare(args: &[String]) -> i32 {
         }
     }
     let deltas = compare_domain_deltas(&base, &head);
+    let receipt_deltas = match compare_receipt_sections(&base, &head) {
+        Ok(deltas) => deltas,
+        Err(message) => {
+            perf_error(format!("receipt sections: {message}"));
+            return ExitCodes::USAGE;
+        }
+    };
     let budget_line = budget_compare_line(&base, &head, baseline_name.as_deref());
     let override_note = if identity_mismatch && override_identity {
         " · identity override"
@@ -2188,6 +2302,9 @@ fn compare(args: &[String]) -> i32 {
     );
     if !deltas.is_empty() {
         println!("deltas: {}", deltas.join(" · "));
+    }
+    if !receipt_deltas.is_empty() {
+        println!("receipt deltas: {}", receipt_deltas.join(" · "));
     }
     println!("{budget_line}");
     ExitCodes::OK
@@ -2832,13 +2949,85 @@ fn export_profile_map_projection(trace: &CanonicalJson) -> CanonicalJson {
     .expect("profile-map projection keys are unique")
 }
 
+fn receipt_sections_for_command(
+    command: &str,
+    argv: &[String],
+) -> Result<Vec<TraceReceiptSection>, String> {
+    let cwd = std::env::current_dir().map_err(|error| format!("cannot resolve cwd: {error}"))?;
+    let root = jet::ReceiptStore::receipt_root_for(command, argv, &cwd);
+    let store = jet::ReceiptStore::ReceiptStore::new(root);
+    let inputs = jet::ReceiptStore::input_paths_for(command, argv, &cwd);
+    let claim = store.claim(command, argv, &inputs)?;
+    let Some(receipt) = store.lookup(&claim)? else {
+        return Ok(Vec::new());
+    };
+    trace_receipt_sections_from_receipt(&receipt)
+}
+
+fn trace_receipt_sections_from_receipt(
+    receipt: &jet::ReceiptStore::Receipt,
+) -> Result<Vec<TraceReceiptSection>, String> {
+    receipt
+        .sections
+        .iter()
+        .map(|section| {
+            let value = section.value()?;
+            Ok(TraceReceiptSection {
+                name: section.name.clone(),
+                type_name: section.type_name.clone(),
+                digest: value.sha256(),
+                value,
+            })
+        })
+        .collect()
+}
+
+fn receipt_sections_for_compare(
+    trace: &CanonicalJson,
+) -> Result<Vec<jet::ReceiptStore::ReceiptSection>, String> {
+    let items = content_object(trace)
+        .and_then(|content| content.get("receipt_sections"))
+        .and_then(|value| match value {
+            CanonicalJson::Array(items) => Some(items),
+            _ => None,
+        })
+        .ok_or_else(|| "trace content.receipt_sections is missing or not an array".to_string())?;
+    items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            let section = TraceReceiptSection::from_json(item)
+                .map_err(|error| format!("content.receipt_sections[{index}]: {error}"))?;
+            jet::ReceiptStore::ReceiptSection::from_json(
+                section.name,
+                section.type_name,
+                section.value,
+            )
+            .map_err(|error| format!("content.receipt_sections[{index}]: {error}"))
+        })
+        .collect()
+}
+
+fn compare_receipt_sections(
+    base: &CanonicalJson,
+    head: &CanonicalJson,
+) -> Result<Vec<String>, String> {
+    let before = receipt_sections_for_compare(base)?;
+    let after = receipt_sections_for_compare(head)?;
+    jet::ReceiptStore::diff_sections(&before, &after)
+        .map(|diffs| diffs.into_iter().map(|diff| diff.render()).collect())
+}
+
 fn write_session_trace(
     command: &str,
     argv: &[String],
     out: Option<&str>,
-    capture: CaptureBundle,
+    mut capture: CaptureBundle,
+    game_bodies: &[JetDevtoolsEventBody],
     capture_allowlist: &[String],
+    receipt_sections: Vec<TraceReceiptSection>,
 ) -> Result<PathBuf, String> {
+    capture.add_game_devtools_bodies(game_bodies)?;
     let mut capture_policy = CapturePolicy::default_exclusions();
     capture_policy.allowlist = capture_allowlist.to_vec();
     capture_policy.io_rows_truncated = capture.io_rows_truncated;
@@ -2855,6 +3044,8 @@ fn write_session_trace(
         samples: capture.samples,
         allocations: capture.allocations,
         browser: capture.browser,
+        game_frames: capture.game_frames,
+        game_draw_events: capture.game_draw_events,
         tasks: capture.tasks,
         locks: capture.locks,
         io: capture.io,
@@ -2862,6 +3053,7 @@ fn write_session_trace(
         spans: capture.spans,
         source_identity: capture.source_identity,
         source_maps: capture.source_maps,
+        receipt_sections,
     };
     let bytes = build_skeleton_bytes(&skeleton)?;
     let path = match out {
@@ -2999,6 +3191,7 @@ fn content_object(trace: &CanonicalJson) -> Option<&BTreeMap<String, CanonicalJs
         _ => None,
     }
 }
+
 
 fn content_array<'a>(trace: &'a CanonicalJson, key: &str) -> Option<&'a [CanonicalJson]> {
     match content_object(trace)?.get(key)? {

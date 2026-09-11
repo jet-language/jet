@@ -306,7 +306,7 @@ fn report_rejects_send_flag_without_writing_bundle() {
 #[test]
 fn zero_telemetry_policy_docs_and_source_audit() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let policy = fs::read_to_string(manifest.join("docs/reference/network-policy.md")).unwrap();
+    let policy = fs::read_to_string(manifest.join("docs/spec/reference/network-policy.md")).unwrap();
     assert!(policy.contains("D-TELEMETRY1=A"));
     assert!(policy.contains("D-REPORT-SEND1=A"));
     assert!(policy.contains("Jet sends no telemetry"));

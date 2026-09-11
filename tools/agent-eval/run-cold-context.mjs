@@ -11,7 +11,6 @@ import { fileURLToPath } from "node:url";
 
 const repoDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const capsuleDefault = path.join(repoDir, "tools/agent-eval/jet-context-capsule.md");
-const llmsDefault = path.join(repoDir, "llms.text");
 const tasksDefault = path.join(repoDir, "tools/agent-eval/tasks/tasks.json");
 const adaptersDefault = path.join(repoDir, "tools/agent-eval/adapters.json");
 const baselineDefault = path.join(repoDir, "docs/audits/cold-agent-jet-baseline.json");
@@ -62,7 +61,7 @@ item. No credentials are stored in this repository.
 Options:
   --config PATH          Adapter configuration JSON
   --capsule PATH         Capsule artifact (default: tools/agent-eval/jet-context-capsule.md)
-  --llms PATH            llms.text control source
+  --llms PATH            Explicit digest fixture; default reads jet inspect digest
   --tasks PATH           Four-task fixture JSON
   --baseline PATH        Recorded capsule baseline JSON
   --output PATH          Deterministic scoreboard JSON
@@ -78,7 +77,7 @@ function parseArgs(argv) {
   const options = {
     config: adaptersDefault,
     capsule: capsuleDefault,
-    llms: llmsDefault,
+    llms: null,
     tasks: tasksDefault,
     baseline: baselineDefault,
     output: scoreboardDefault,
@@ -203,7 +202,7 @@ export function buildControlContext(llmsText, budgetBytes) {
   if (budgetBytes < 0) throw new HarnessUsageError("context budget cannot be negative");
   const context = utf8Prefix(llmsText, budgetBytes);
   if (Buffer.byteLength(context, "utf8") !== Math.min(Buffer.byteLength(llmsText, "utf8"), budgetBytes)) {
-    throw new HarnessUsageError("llms.text control could not preserve its byte budget");
+    throw new HarnessUsageError("control digest could not preserve its byte budget");
   }
   return context;
 }
@@ -846,7 +845,7 @@ async function callAdapter(resolved, prompt, metadata, env, cwd) {
 }
 
 function promptFor(task, context, mode) {
-  const label = mode === "capsule" ? "Jet context capsule" : "truncated llms.text control";
+  const label = mode === "capsule" ? "Jet context capsule" : "truncated compiler digest control";
   return [
     "You are solving one isolated Jet programming task.",
     "You have no repository context. Return only one complete Jet source file.",
@@ -1130,14 +1129,25 @@ async function writeReport(file, report) {
 async function prepareInputs(options) {
   const capsuleText = await fs.readFile(options.capsule, "utf8");
   validateCapsule(capsuleText);
-  const llmsText = await fs.readFile(options.llms, "utf8");
+  let llmsText;
+  if (options.llms) {
+    llmsText = await fs.readFile(options.llms, "utf8");
+  } else {
+    const result = await spawnJet([...jetPrefix(options.jetBin), "inspect", "digest"], repoDir).result;
+    if (result.code !== 0 || result.timedOut || result.outputLimit || result.spawnError) {
+      throw new HarnessUsageError(`cannot generate control digest: ${fixedFailure("digest", result)}`);
+    }
+    llmsText = result.stdout.toString("utf8");
+  }
   const budgetBytes = Buffer.byteLength(capsuleText, "utf8");
-  if (Buffer.byteLength(llmsText, "utf8") < budgetBytes) throw new HarnessUsageError("llms.text is shorter than the capsule budget");
+  if (Buffer.byteLength(llmsText, "utf8") < budgetBytes) throw new HarnessUsageError("control digest is shorter than the capsule budget");
   const controlText = buildControlContext(llmsText, budgetBytes);
   const tasks = loadTasks(await readJson(options.tasks));
   const adapters = loadAdapters(await readJson(options.config));
   const capsule = await fileDescriptor(options.capsule, capsuleText);
-  const llms = await fileDescriptor(options.llms, llmsText);
+  const llms = options.llms
+    ? await fileDescriptor(options.llms, llmsText)
+    : { path: "jet inspect digest", bytes: Buffer.byteLength(llmsText, "utf8"), sha256: sha256(Buffer.from(llmsText, "utf8")) };
   const fixtures = {
     task_file: await fileDescriptor(options.tasks),
     adapter_file: await fileDescriptor(options.config),

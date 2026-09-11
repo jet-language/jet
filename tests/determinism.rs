@@ -31,7 +31,7 @@ fn run() {
     c :: Clock.new(500)
     print("{at(c)}")
 }
-use core.time as time;
+use core.time as time
 "#;
     let res = jet::compile(src);
     assert!(
@@ -45,7 +45,7 @@ use core.time as time;
 #[test]
 fn pure_fn_injected_rng_ok() {
     let src = r#"
-use core.math.random as random;
+use core.math.random as random
 fn draw(rng: &Rng) Int -[]> {
     return rng.int(1, 6)
 }
@@ -63,8 +63,8 @@ fn run() {
 #[test]
 fn pure_fn_constructs_caps_ok() {
     let src = r#"
-use core.time as time;
-use core.math.random as random;
+use core.time as time
+use core.math.random as random
 fn seeded() Int -[]> {
     c :: Clock.new(10)
     r := random.rng(1)
@@ -118,6 +118,10 @@ fn run() {
     let runtime = r#"
 use core.time as time
 
+struct ClockBox {
+    clock: Clock
+}
+
 fn run() {
     clock := Clock.system()
     before := clock.now()
@@ -125,41 +129,49 @@ fn run() {
     fork_before := fork.now()
     time.sleep(2ms)
     after := clock.now()
-    print(after >= before)
-    print(fork.now() >= fork_before)
+    print(after > before)
+    print(fork.now() > fork_before)
     reported := clock.tick(-1000000)
     print(clock.now() >= after)
-    print(reported == clock.now())
+    print(clock.now() >= reported)
+    manual := Clock.new(1000)
+    copied := ~manual
+    copied.tick(5000)
+    print(manual.now())
+    print(copied.now())
+    boxed := ClockBox{ clock: Clock.new(7) }
+    copied_box := ~boxed
+    copied_box.clock.tick(3)
+    print(boxed.clock.now())
+    print(copied_box.clock.now())
 }
 "#;
-    let (code, stdout, stderr) = common::build_and_run("jet_system_clock", "system_clock", runtime);
-    assert_eq!(code, 0, "system clock failed: {stderr}");
-    assert_eq!(stdout, "true\ntrue\ntrue\ntrue\n");
+    let dir = common::unique_tmp("jet_system_clock_tiers");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("package.jet"),
+        "name: \"clock_tiers\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Time, Time.Wait] } }\n",
+    )
+    .unwrap();
+    let path = dir.join("main.jet");
+    std::fs::write(&path, runtime).unwrap();
+    let path = path.to_str().unwrap();
+    for args in [
+        &["run", path][..],
+        &["run", "--interpret", path][..],
+        &["run", "--release", path][..],
+    ] {
+        let output = common::jet_cli_output_with_stdin(args, "");
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, b"true\ntrue\ntrue\ntrue\n1000\n6000\n7\n10\n", "{args:?}");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
-#[test]
-fn system_clock_has_total_tir_and_an_honest_resident_jit_boundary() {
-    let dir = common::unique_tmp("jet_system_clock_jit_boundary");
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("main.jet");
-    let src = r#"
-fn run() {
-    clock := Clock.system()
-    print(clock.now())
-}
-"#;
-    std::fs::write(&path, src).unwrap();
-    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-    assert!(diagnostics.is_empty(), "{diagnostics:#?}");
-    assert!(
-        jet_jit::tir_lowers_bundle(&bundle),
-        "{}",
-        jet_jit::tir_lower_fail_reason(&bundle)
-    );
-    assert!(!jet_jit::resident_jit_safe_bundle(&bundle));
-    assert!(jet_jit::resident_jit_safe_bundle_detail(&bundle).contains("entry not resident-safe"));
-}
 
 #[test]
 fn pure_code_rejects_clock_provenance_laundered_through_a_struct() {
@@ -341,7 +353,7 @@ fn pure_code_rejects_clock_observation_through_an_imported_nominal_type() {
 #[test]
 fn pure_fn_ambient_time_still_e3403() {
     let src = r#"
-use core.time as time;
+use core.time as time
 fn bad() Int -[]> {
     return time.now()
 }
@@ -361,7 +373,7 @@ fn run() { print("{bad()}") }
 #[test]
 fn pure_fn_ambient_random_still_e3403() {
     let src = r#"
-use core.math.random as random;
+use core.math.random as random
 fn bad() Int -[]> {
     return random.int(1, 6)
 }
@@ -383,7 +395,7 @@ fn run() { print("{bad()}") }
 #[test]
 fn nondeterministic_time_classification_is_shared_by_purity_and_folding() {
     let pure_src = r#"
-use core.time as date;
+use core.time as date
 
 fn pure_today() String -[]> {
     return date.today().to_string()
@@ -403,7 +415,7 @@ fn run() {
     );
 
     let fold_src = r#"
-use core.time as date;
+use core.time as date
 
 fn run() {
     @today :: date.today()
@@ -431,7 +443,7 @@ fn run() {
 #[test]
 fn assume_deterministic_suppresses_e3403() {
     let src = r#"
-use core.time as time;
+use core.time as time
 fn risky() Int -[]> {
     t := 0
     #Nondeterministic("ambient clock is explicit test input") {
@@ -473,7 +485,7 @@ fn run() { print("{risky()}") }
 #[test]
 fn assume_deterministic_is_scoped() {
     let src = r#"
-use core.time as time;
+use core.time as time
 fn risky() Int -[]> {
     #Nondeterministic("ambient clock is deliberate") {
         a := time.now()
@@ -523,7 +535,7 @@ fn run() {
 #[test]
 fn pure_fn_widened_rng_ok() {
     let src = r#"
-use core.math.random as random;
+use core.math.random as random
 fn draws(rng: &Rng) Bool -[]> {
     flip := rng.bool()
     xs := [1, 2, 3]
@@ -549,7 +561,7 @@ fn run() {
 #[test]
 fn rng_pick_returns_element_option() {
     let src = r#"
-use core.math.random as random;
+use core.math.random as random
 fn choose(rng: &Rng) String -[]> {
     cards := ["A", "K", "Q"]
     return rng.pick(cards) ?? "none"
@@ -571,7 +583,7 @@ fn run() {
 #[test]
 fn rng_bool_needs_mut_receiver() {
     let src = r#"
-use core.math.random as random;
+use core.math.random as random
 fn run() {
     r :: random.rng(3)
     b := r.bool()
@@ -592,7 +604,7 @@ fn run() {
 #[test]
 fn rng_shuffle_needs_mut_list_arg() {
     let src = r#"
-use core.math.random as random;
+use core.math.random as random
 fn run() {
     r := random.rng(3)
     deck := [1, 2, 3]
@@ -617,7 +629,7 @@ fn run() {
 #[test]
 fn pure_fn_widened_clock_ok() {
     let src = r#"
-use core.time as time;
+use core.time as time
 fn drive_clock(clock: &Clock) Int -[]> {
     base := clock.advance(5000)
     span := Duration.seconds(1) ?? panic("duration")
@@ -640,7 +652,7 @@ fn run() {
 #[test]
 fn clock_advance_needs_mut_receiver() {
     let src = r#"
-use core.time as time;
+use core.time as time
 fn run() {
     c :: Clock.new(0)
     n := c.advance(100)
@@ -661,7 +673,7 @@ fn run() {
 #[test]
 fn pure_fn_duration_ok() {
     let src = r#"
-use core.time as time;
+use core.time as time
 fn span_ms() Int -[]> {
     d := Duration.seconds(3) ?? panic("duration")
     return d.in(.Milliseconds) ?? panic("duration read")

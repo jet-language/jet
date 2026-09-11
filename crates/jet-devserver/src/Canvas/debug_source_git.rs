@@ -6,8 +6,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use jet_driver::Diagnostics::Diagnostic;
+use jet_foundation::Devtools::JetDevtoolsSourceIdentityFact;
 use jet_semindex::SourceSpan;
 
+use super::paused_debug_adapter::PausedDebugSessionAdapter;
 use super::schema_api::DEBUG_SCHEMA_VERSION;
 use super::source_model::{read_source_without_symlinks, source_revision};
 use super::validation_json::{
@@ -65,24 +67,36 @@ pub struct DebugSessions {
     sessions: Mutex<HashMap<String, DebugSession>>,
     pause_on_input_end: bool,
 }
-
 struct DebugSession {
     path: PathBuf,
+    /// Canonical source identity supplied by the typed debug request.  It is
+    /// intentionally distinct from the local filesystem path.
+    source_id: String,
     revision: String,
+    breakpoints: Vec<usize>,
     tier: DebugTier,
     created: u64,
-    breakpoints: Vec<usize>,
     commands: Vec<String>,
     watches: Vec<String>,
     native: Option<NativeDebugArtifact>,
+    /// Native Canvas retains one real paused LLDB inferior instead of
+    /// rebuilding/replaying a transcript for every HTTP request.
+    native_live: Option<jet_debug::NativeLiveSession>,
+    /// One canonical event history is captured for the interpreter session.
+    /// Later HTTP requests navigate that history without rerunning the source.
+    history: Option<jet_debug::DebugHistory>,
+    /// Last real paused-frame snapshot returned by the debugger.  It remains
+    /// attached to a live (paused) session so the devtools evaluator can
+    /// consume facts without rerunning or reconstructing the debugger.
+    snapshot: Option<jet_debug::DebugSnapshot>,
+    /// Typed bridge for the same source-owned snapshot and authority set.
+    paused_adapter: Option<PausedDebugSessionAdapter>,
 }
-
 /// Compiled debugger material owned by one live session. It is deliberately
-/// session-scoped: a new source revision gets a new compile, and dropping a
-/// finished/stopped session removes only this private scratch directory.
 struct NativeDebugArtifact {
     dir: PathBuf,
     binary: PathBuf,
+    build_id: Option<String>,
     rust_file: String,
     rust_source: String,
     jet_file: String,
@@ -123,6 +137,7 @@ impl DebugSessions {
     pub(crate) fn execute(
         &self,
         path: &Path,
+        source_id: &str,
         revision: &str,
         requested_id: Option<&str>,
         commands: &[String],
@@ -130,12 +145,23 @@ impl DebugSessions {
         watches: &[String],
         tier: DebugTier,
     ) -> Result<DebugExecution, String> {
-        validate_debug_limits(commands, breakpoints, watches)?;
-        let path = canonical_path(path);
+        if source_id.is_empty() || source_id.len() > 256 || source_id.chars().any(char::is_control) {
+            return Err(debug_error(
+                "bad_request",
+                "Canvas debug source_id must be bounded source identity text",
+            ));
+        }
+        if revision.is_empty() || revision.len() > 256 || revision.chars().any(char::is_control) {
+            return Err(debug_error(
+                "bad_request",
+                "Canvas debug revision must be bounded source identity text",
+            ));
+        }
         let mut sessions = self
             .sessions
             .lock()
             .map_err(|_| debug_error("session", "debug session store is unavailable"))?;
+        let replay_commands;
 
         let id = if let Some(id) = requested_id {
             let Some(session) = sessions.get_mut(id) else {
@@ -144,11 +170,14 @@ impl DebugSessions {
                     "debug session is no longer live; start a new session",
                 ));
             };
-            if session.path != path || session.revision != revision {
+            if session.path != path
+                || session.source_id != source_id
+                || session.revision != revision
+            {
                 sessions.remove(id);
                 return Err(debug_error(
                     "conflict",
-                    "debug session is stale for the current source revision",
+                    "debug session is stale for the current source identity or revision",
                 ));
             }
             if session.tier != tier {
@@ -171,6 +200,7 @@ impl DebugSessions {
             // Updating them keeps one live session usable while preserving the
             // same source revision and bounded replay history.
             session.breakpoints = breakpoints.to_vec();
+            replay_commands = next_commands.clone();
             session.commands.extend(next_commands);
             session.watches = watches.to_vec();
             id.to_string()
@@ -190,6 +220,7 @@ impl DebugSessions {
             if history.is_empty() {
                 history.push("s".to_string());
             }
+            replay_commands = history.clone();
             let native = match tier {
                 DebugTier::Interpreter => None,
                 DebugTier::NativeLldb => Some(NativeDebugArtifact::build(&path, &id)?),
@@ -197,7 +228,8 @@ impl DebugSessions {
             sessions.insert(
                 id.clone(),
                 DebugSession {
-                    path: path.clone(),
+                    path: path.to_path_buf(),
+                    source_id: source_id.to_string(),
                     revision: revision.to_string(),
                     tier,
                     created: serial,
@@ -205,63 +237,172 @@ impl DebugSessions {
                     commands: history,
                     watches: watches.to_vec(),
                     native,
+                    native_live: None,
+                    history: None,
+                    snapshot: None,
+                    paused_adapter: None,
                 },
             );
             id
         };
 
-        let session = sessions
+        let session_tier = sessions
             .get(&id)
+            .map(|session| session.tier)
             .ok_or_else(|| debug_error("session", "debug session disappeared"))?;
-        let session_tier = session.tier;
-        let mut inputs = session
-            .breakpoints
+        if session_tier == DebugTier::Interpreter
+            && sessions
+                .get(&id)
+                .and_then(|session| session.history.as_ref())
+                .is_none()
+        {
+            let recorded = jet_debug::run_session_recorded(&path.display().to_string());
+            if recorded.status == jet_debug::SessionStatus::Failed {
+                return Err(debug_error(
+                    "execution",
+                    &format!("debug recording failed:\n{}", recorded.transcript),
+                ));
+            }
+            if let Some(session) = sessions.get_mut(&id) {
+                session.history = Some(recorded.history);
+            }
+        }
+        let (session_breakpoints, session_watches, session_history) = {
+            let session = sessions
+                .get(&id)
+                .ok_or_else(|| debug_error("session", "debug session disappeared"))?;
+            (
+                session.breakpoints.clone(),
+                session.watches.clone(),
+                session.history.clone(),
+            )
+        };
+        let mut inputs = session_breakpoints
             .iter()
             .map(|line| format!("break {line}"))
             .collect::<Vec<_>>();
-        inputs.extend(session.commands.iter().cloned());
+        inputs.extend(
+            session_watches
+                .iter()
+                .map(|watch| format!("watch {watch}")),
+        );
+        inputs.extend(replay_commands);
         inputs.push("locals".to_string());
-        inputs.extend(session.watches.iter().map(|watch| format!("p {watch}")));
         inputs.push("bt".to_string());
         let refs = inputs.iter().map(String::as_str).collect::<Vec<_>>();
         let result = match session_tier {
             DebugTier::Interpreter => {
-                if self.pause_on_input_end {
-                    jet_debug::run_session_result_paused(&path.display().to_string(), &refs)
-                } else {
-                    jet_debug::run_session_result(&path.display().to_string(), &refs)
-                }
-            }
-            DebugTier::NativeLldb => {
-                let Some(native) = session.native.as_ref() else {
+                let Some(history) = session_history.as_ref() else {
                     return Err(debug_error(
-                        "session",
-                        "native debug session lost its compiled artifact",
+                        "execution",
+                        "interpreter debug history was not captured",
                     ));
                 };
-                if self.pause_on_input_end {
-                    jet_debug::run_native_session_result_paused(
-                        &native.binary,
-                        &native.rust_file,
-                        &native.rust_source,
-                        &native.jet_file,
-                        &native.jet_source,
+                jet_debug::run_session_replay(&path.display().to_string(), history, &refs)
+            }
+            DebugTier::NativeLldb => {
+                let session = sessions
+                    .get_mut(&id)
+                    .ok_or_else(|| debug_error("session", "debug session disappeared"))?;
+                let native = session.native.as_ref().ok_or_else(|| {
+                    debug_error("session", "native debug session lost its compiled artifact")
+                })?;
+                let binary = native.binary.clone();
+                let rust_file = native.rust_file.clone();
+                let rust_source = native.rust_source.clone();
+                let jet_file = native.jet_file.clone();
+                let jet_source = native.jet_source.clone();
+                let mut transcript = String::new();
+                let mut final_result = if session.native_live.is_none() {
+                    let (live, initial) = jet_debug::NativeLiveSession::start(
+                        &binary,
+                        &rust_file,
+                        &rust_source,
+                        &jet_file,
+                        &jet_source,
                         false,
-                        &refs,
                     )
+                    .map_err(|error| debug_error("execution", &error))?;
+                    transcript.push_str(&initial.transcript);
+                    session.native_live = Some(live);
+                    Some(initial)
                 } else {
-                    jet_debug::run_native_session_result(
-                        &native.binary,
-                        &native.rust_file,
-                        &native.rust_source,
-                        &native.jet_file,
-                        &native.jet_source,
-                        false,
-                        &refs,
-                    )
+                    None
+                };
+                for command in &refs {
+                    let Some(live) = session.native_live.as_mut() else {
+                        break;
+                    };
+                    let current = live.command(command);
+                    transcript.push_str(&current.transcript);
+                    final_result = Some(current);
+                }
+                if !self.pause_on_input_end {
+                    if let Some(live) = session.native_live.as_mut() {
+                        let current = live.command("continue");
+                        transcript.push_str(&current.transcript);
+                        final_result = Some(current);
+                    }
+                }
+                let final_result = final_result.ok_or_else(|| {
+                    debug_error("execution", "native debugger did not produce a stopped result")
+                })?;
+                let status = if final_result.paused {
+                    jet_debug::SessionStatus::Running
+                } else if final_result.code == jet_debug::ExitCodes::OK {
+                    jet_debug::SessionStatus::Finished
+                } else {
+                    jet_debug::SessionStatus::Failed
+                };
+                jet_debug::SessionResult {
+                    status,
+                    transcript,
+                    snapshot: final_result.snapshot,
+                    history: final_result.history,
                 }
             }
         };
+        if let Some(session) = sessions.get_mut(&id) {
+            if !result.history.events.is_empty() {
+                session.history = Some(result.history.clone());
+            }
+            let snapshot = result.snapshot.clone();
+            session.snapshot = snapshot.clone();
+            if result.status == jet_debug::SessionStatus::Running {
+                if let Some(snapshot) = snapshot {
+                    let source = JetDevtoolsSourceIdentityFact::new(
+                        Some(session.source_id.clone()),
+                        session
+                            .native
+                            .as_ref()
+                            .and_then(|native| native.build_id.clone()),
+                        Some(session.revision.clone()),
+                        None,
+                    );
+                    let identity = crate::PausedEvaluate::SessionIdentity::new(
+                        id.clone(),
+                        session.source_id.clone(),
+                        session.revision.clone(),
+                        snapshot.pause_id(),
+                        snapshot.frame_id(),
+                    )?;
+                    let scope_id = format!("scope-{id}");
+                    let authority =
+                        PausedDebugSessionAdapter::debugger_authority(&scope_id)?;
+                    if let Some(adapter) = session.paused_adapter.as_mut() {
+                        adapter.refresh_snapshot(identity, snapshot)?;
+                    } else {
+                        session.paused_adapter = Some(PausedDebugSessionAdapter::new(
+                            identity, source, scope_id, snapshot, authority,
+                        )?);
+                    }
+                } else {
+                    session.paused_adapter = None;
+                }
+            } else {
+                session.paused_adapter = None;
+            }
+        }
         if result.status != jet_debug::SessionStatus::Running {
             sessions.remove(&id);
         }
@@ -273,6 +414,178 @@ impl DebugSessions {
             tier: session_tier,
         })
     }
+
+
+    /// Return a stable typed view of the real paused facts for one request.
+    /// Identity is checked against the stored source session before the
+    /// adapter is cloned; filesystem paths are never used as a fallback.
+    pub(crate) fn paused_adapter(
+        &self,
+        identity: &crate::PausedEvaluate::SessionIdentity,
+    ) -> Result<PausedDebugSessionAdapter, String> {
+        let sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| debug_error("session", "debug session store is unavailable"))?;
+        let Some(session) = sessions.get(&identity.session_id) else {
+            return Err(debug_error(
+                "session",
+                "debug session is no longer live; start a new session",
+            ));
+        };
+        if session.source_id != identity.source_id || session.revision != identity.source_revision {
+            return Err(debug_error(
+                "conflict",
+                "paused request source identity is stale",
+            ));
+        }
+        let Some(adapter) = session.paused_adapter.as_ref() else {
+            return Err(debug_error(
+                "session",
+                "debug session has no live paused facts",
+            ));
+        };
+        if adapter.identity() != identity || !adapter.is_paused() {
+            return Err(debug_error(
+                "conflict",
+                "paused request identity does not match the live debug stop",
+            ));
+        }
+        Ok(adapter.clone())
+    }
+
+    /// Clear or finish the host projection when the owning Canvas session is
+    /// discarded/stopped.  A different session already injected into the
+    /// shared host is not disturbed.
+    pub(crate) fn clear_paused_session(
+        &self,
+        host: &mut crate::PausedEvaluate::PausedEvaluateHost,
+        id: &str,
+    ) -> Result<(), String> {
+        let mut sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| debug_error("session", "debug session store is unavailable"))?;
+        if let Some(session) = sessions.get_mut(id) {
+            if let Some(adapter) = session.paused_adapter.as_mut() {
+                adapter.exit(host);
+            } else if host
+                .session()
+                .is_some_and(|injected| injected.identity.session_id == id)
+            {
+                host.clear_session();
+            }
+            session.paused_adapter = None;
+        } else if host
+            .session()
+            .is_some_and(|injected| injected.identity.session_id == id)
+        {
+            host.clear_session();
+        }
+        Ok(())
+    }
+    pub(crate) fn resume_paused_session(
+        &self,
+        host: &mut crate::PausedEvaluate::PausedEvaluateHost,
+        id: &str,
+    ) -> Result<(), String> {
+        let mut sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| debug_error("session", "debug session store is unavailable"))?;
+        if let Some(session) = sessions.get_mut(id) {
+            if let Some(adapter) = session.paused_adapter.as_mut() {
+                adapter.resume(host);
+            } else if host
+                .session()
+                .is_some_and(|injected| injected.identity.session_id == id)
+            {
+                host.clear_session();
+            }
+            session.paused_adapter = None;
+        } else if host
+            .session()
+            .is_some_and(|injected| injected.identity.session_id == id)
+        {
+            host.clear_session();
+        }
+        Ok(())
+    }
+
+    pub(crate) fn cancel_paused_session(
+        &self,
+        host: &mut crate::PausedEvaluate::PausedEvaluateHost,
+        id: &str,
+        reason: &str,
+    ) -> Result<(), String> {
+        let mut sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| debug_error("session", "debug session store is unavailable"))?;
+        if let Some(session) = sessions.get_mut(id) {
+            if let Some(adapter) = session.paused_adapter.as_mut() {
+                adapter.cancel(host, reason)?;
+            } else if host
+                .session()
+                .is_some_and(|injected| injected.identity.session_id == id)
+            {
+                host.clear_session();
+            }
+            session.paused_adapter = None;
+        } else if host
+            .session()
+            .is_some_and(|injected| injected.identity.session_id == id)
+        {
+            host.clear_session();
+        }
+        Ok(())
+    }
+    pub(crate) fn cancel_all_paused_sessions(
+        &self,
+        host: &mut crate::PausedEvaluate::PausedEvaluateHost,
+        reason: &str,
+    ) -> Result<(), String> {
+        let ids = self
+            .sessions
+            .lock()
+            .map_err(|_| debug_error("session", "debug session store is unavailable"))?
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        for id in ids {
+            self.cancel_paused_session(host, &id, reason)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn stale_paused_session(
+        &self,
+        host: &mut crate::PausedEvaluate::PausedEvaluateHost,
+        id: &str,
+    ) -> Result<(), String> {
+        let mut sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| debug_error("session", "debug session store is unavailable"))?;
+        if let Some(session) = sessions.get_mut(id) {
+            if let Some(adapter) = session.paused_adapter.as_mut() {
+                adapter.stale(host);
+            } else if host
+                .session()
+                .is_some_and(|injected| injected.identity.session_id == id)
+            {
+                host.clear_session();
+            }
+            session.paused_adapter = None;
+        } else if host
+            .session()
+            .is_some_and(|injected| injected.identity.session_id == id)
+        {
+            host.clear_session();
+        }
+        Ok(())
+    }
+
 
     pub(crate) fn discard(&self, id: &str) -> Option<DebugTier> {
         self.sessions
@@ -339,7 +652,8 @@ impl Default for DebugSessions {
     }
 }
 
-fn validate_debug_limits(
+
+pub(super) fn validate_debug_limits(
     commands: &[String],
     breakpoints: &[usize],
     watches: &[String],
@@ -403,10 +717,15 @@ fn validate_debug_command(command: &str) -> Result<(), String> {
     let extra = parts.next().is_some();
     let valid = match verb {
         "step" | "s" | "next" | "n" | "continue" | "c" | "finish" | "f" | "locals"
-        | "backtrace" | "bt" | "help" | "h" | "quit" | "q" | "list" | "l" => {
+        | "backtrace" | "bt" | "help" | "h" | "quit" | "q" | "list" | "l"
+        | "reverse-continue" | "rcontinue" | "back-continue" | "fix" => {
             arg.is_none() && !extra
         }
-        "print" | "p" => arg.is_some() && !extra,
+        "back" | "reverse" | "reverse-step" | "rstep" => {
+            arg.map_or(true, |value| value.parse::<usize>().ok().is_some_and(|steps| steps >= 1))
+                && !extra
+        }
+        "print" | "p" | "watch" | "unwatch" => arg.is_some() && !extra,
         "why" => arg.is_some(),
         "when" => arg.is_some() && !extra,
         "break" | "b" => {
@@ -509,9 +828,13 @@ impl NativeDebugArtifact {
             }
         };
         let _ = compiled;
+        let build_id = jet_foundation::SHA256::sha256_file_hex(&binary)
+            .ok()
+            .map(|digest| format!("sha256-{digest}"));
         Ok(Self {
             dir,
             binary,
+            build_id,
             rust_file,
             rust_source: output.rust,
             jet_file: path

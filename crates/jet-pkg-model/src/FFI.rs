@@ -13,7 +13,8 @@
 
 use crate::Diagnostics::Diagnostic;
 use crate::AST::{
-    AccessConvention, ExternFn, ExternRustBlock, ForeignLanguage, Item, ProgramBundle, Type,
+    AccessConvention, ExternFn, ExternRustBlock, FfiHandleFact, FfiLinkClosure, ForeignLanguage,
+    Item, ProgramBundle, Type,
 };
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
@@ -23,7 +24,7 @@ use std::process::Command;
 // FfiLink struct lives in AST for cross-seam sharing; re-export here.
 pub use crate::AST::FfiLink;
 
-const INLINE_BRIDGE_SCHEMA: &str = "jet-inline-ffi-v5-cabi-failure-hook-lifecycle";
+const INLINE_BRIDGE_SCHEMA: &str = "jet-inline-ffi-v6-uniform-slot-list-cabi";
 /// v2: artifact digests are recorded relative to the SHARED Cargo target dir
 /// (#2075), so a v1 manifest's `target/<triple>/release/...` rows no longer
 /// describe where the artifacts are. A v1 sidecar simply fails verification and
@@ -31,6 +32,12 @@ const INLINE_BRIDGE_SCHEMA: &str = "jet-inline-ffi-v5-cabi-failure-hook-lifecycl
 const BRIDGE_ARTIFACTS_SCHEMA: &str = "jet-ffi-artifacts-v2";
 const SHARED_DEPS_SCHEMA: &str = "jet-ffi-shared-deps-v1";
 const BRIDGE_PROVENANCE_SCHEMA: &str = crate::ForeignBridge::PROVENANCE_SCHEMA;
+#[derive(Debug, Clone)]
+struct CargoBridgeReceipt {
+    sandbox_class: String,
+    sandbox_policy: String,
+    compile_time_code: bool,
+}
 
 /// One foreign function collected from the import graph.
 #[derive(Debug, Clone)]
@@ -39,6 +46,7 @@ pub struct ExternEntry {
     pub rust_path: String,
     pub wrapper_name: String,
     pub params: Vec<(AccessConvention, Type)>,
+    pub param_names: Vec<String>,
     pub return_type: Option<Type>,
     pub crate_spec: String,
     /// Human-facing hint for E0705 (`extern` line context).
@@ -46,12 +54,14 @@ pub struct ExternEntry {
     pub inline: Option<InlineEntry>,
     /// The declaration names a native C symbol assembled by CFFI.
     pub c_abi: bool,
+    /// Compiler-generated CBind declarations use the descriptor ABI.
+    pub generated: bool,
+    /// The entry originates in a C module rather than an `extern rust` block.
+    pub c_module: bool,
     /// D-FFI-CAP1: the sibling foreign function that consumes a returned
     /// handle, when the declaration carries `#Close(close)`.
     pub close: Option<String>,
 }
-/// A `#FFI` body carried through the existing hidden bridge. Keeping it on the
-/// same entry prevents a second call/link mechanism from growing beside S50.
 #[derive(Debug, Clone)]
 pub struct InlineEntry {
     pub lang: String,
@@ -101,7 +111,6 @@ pub(crate) fn undefined_symbol_flag_for_target(target: &str) -> &'static str {
         "-Wl,--no-undefined"
     }
 }
-
 /// Gather every foreign function across all modules.
 pub fn collect_externs(bundle: &ProgramBundle) -> Vec<ExternEntry> {
     let mut out = Vec::new();
@@ -120,11 +129,16 @@ pub fn collect_externs(bundle: &ProgramBundle) -> Vec<ExternEntry> {
                                 &import.name,
                             ),
                             params: import.params.clone(),
+                            param_names: (0..import.params.len())
+                                .map(|index| format!("arg{index}"))
+                                .collect(),
                             return_type: import.return_type.clone(),
                             crate_spec: "std".to_string(),
                             line_hint: format!("`#Import(c) fn {}`", import.name),
                             inline: None,
                             c_abi: true,
+                            generated: false,
+                            c_module: false,
                             close: None,
                         });
                     } else if let Some(inline) = &f.inline_foreign {
@@ -137,6 +151,7 @@ pub fn collect_externs(bundle: &ProgramBundle) -> Vec<ExternEntry> {
                                 .iter()
                                 .map(|p| (p.convention, p.ty.clone()))
                                 .collect(),
+                            param_names: f.params.iter().map(|p| p.name.clone()).collect(),
                             return_type: f.return_type.clone(),
                             crate_spec: "std".to_string(),
                             line_hint: format!("`#FFI({}) fn {}`", inline.lang, f.name),
@@ -146,18 +161,24 @@ pub fn collect_externs(bundle: &ProgramBundle) -> Vec<ExternEntry> {
                                 param_names: f.params.iter().map(|p| p.name.clone()).collect(),
                             }),
                             c_abi: false,
+                            generated: false,
+                            c_module: false,
                             close: None,
                         });
                     }
                 } else if let Item::CModule(c_module) = item {
-                    // The hidden crate can share primitive C ABI values, but it
-                    // cannot name or own a program-local struct, enum, distinct,
-                    // or pointer target. Those functions stay on CModule's
-                    // direct wrapper path, where codegen has the real Jet type.
+                    // The hidden crate can share primitive C ABI values,
+                    // checked opaque handles, and generated pointer/count
+                    // arrays. Other nominal values stay on CModule's direct
+                    // wrapper path, where codegen has the real Jet type.
                     for function in c_module
                         .functions
                         .iter()
-                        .filter(|function| function.hidden_c_bridge_compatible())
+                        .filter(|function| {
+                            function.hidden_c_bridge_compatible_with_handles(
+                                &bundle.cffi.handle_facts,
+                            )
+                        })
                     {
                         out.push(ExternEntry {
                             jet_name: function.name.clone(),
@@ -168,6 +189,11 @@ pub fn collect_externs(bundle: &ProgramBundle) -> Vec<ExternEntry> {
                                 .iter()
                                 .map(|param| (param.convention, param.ty.clone()))
                                 .collect(),
+                            param_names: function
+                                .params
+                                .iter()
+                                .map(|param| param.name.clone())
+                                .collect(),
                             return_type: function.return_type.clone(),
                             crate_spec: "std".to_string(),
                             line_hint: format!(
@@ -176,6 +202,8 @@ pub fn collect_externs(bundle: &ProgramBundle) -> Vec<ExternEntry> {
                             ),
                             inline: None,
                             c_abi: true,
+                            generated: function.generated,
+                            c_module: true,
                             close: function.close.as_ref().map(|(name, _)| name.clone()),
                         });
                     }
@@ -200,11 +228,14 @@ fn extern_entry(ef: &ExternFn, block: &ExternRustBlock, _file: &str) -> ExternEn
             .iter()
             .map(|p| (p.convention, p.ty.clone()))
             .collect(),
+        param_names: ef.params.iter().map(|p| p.name.clone()).collect(),
         return_type: ef.return_type.clone(),
         crate_spec: block.crate_spec.clone(),
         line_hint: format!("`{}` in `extern rust \"{}\"`", ef.name, block.crate_spec),
         inline: None,
         c_abi: false,
+        generated: ef.generated,
+        c_module: false,
         close: ef.close.as_ref().map(|(name, _)| name.clone()),
     }
 }
@@ -238,6 +269,8 @@ pub fn native_cacheable(bundle: &ProgramBundle) -> bool {
             || u.starts_with("core.archive::")
             || u == "core.db"
             || u.starts_with("core.db::")
+            || u == "core.data"
+            || u.starts_with("core.data::")
             || u == "core.archive.gzip"
             || u.starts_with("core.archive.gzip::")
             || u == "core.archive.zstd"
@@ -286,6 +319,13 @@ pub fn prepare_for_target(
         .used_core
         .iter()
         .any(|u| u == "core.db" || u.starts_with("core.db::"));
+    // D-DATA-READER1=A: all byte-source loader calls share the Foundation
+    // provider boundary; the concrete Parquet/Arrow closure stays hidden here.
+    let needs_parquet = bundle
+        .used_core
+        .iter()
+        .any(|u| u == "core.data" || u.starts_with("core.data::"));
+
     // D-CODECS1: standalone `core.archive.gzip` / `core.archive.zstd` codecs.
     let needs_compress = bundle.used_core.iter().any(|u| {
         u == "core.archive.gzip"
@@ -353,7 +393,10 @@ pub fn prepare_for_target(
             &bundle.cffi,
             &bundle.project_root,
             target,
-            bundle.modules.get(bundle.entry).map(|module| module.path.as_path()),
+            bundle
+                .modules
+                .get(bundle.entry)
+                .map(|module| module.path.as_path()),
         )?
     } else {
         Vec::new()
@@ -363,6 +406,8 @@ pub fn prepare_for_target(
         && !needs_regex
         && !needs_archive
         && !needs_db
+        && !needs_parquet
+
         && !needs_http_client
         && !needs_http_server_tls
         && !needs_net_tls
@@ -388,15 +433,20 @@ pub fn prepare_for_target(
         needs_regex,
         needs_archive,
         needs_db,
+        needs_parquet,
         needs_http_client,
         needs_http_server_tls,
         needs_net_tls,
         needs_crypto,
         needs_compress,
         needs_plugin,
+        &bundle.package_guarantees.authority_needs,
         needs_secrets,
+        &bundle.cffi.handle_facts,
+        &bundle.cffi.link_closure,
         &native_link_args,
         target,
+        Some(&bundle.project_root),
     )
     .map(Some)
 }
@@ -430,6 +480,7 @@ mod inline_asm_target_tests {
             rust_path: String::new(),
             wrapper_name: "jet_ffi_add_one".into(),
             params: vec![(AccessConvention::Read, Type::Int)],
+            param_names: vec!["value".into()],
             return_type: Some(Type::Int),
             crate_spec: "std".into(),
             line_hint: "`#FFI(asm) fn add_one`".into(),
@@ -439,6 +490,8 @@ mod inline_asm_target_tests {
                 param_names: vec!["value".into()],
             }),
             c_abi: false,
+            generated: false,
+            c_module: false,
             close: None,
         }
     }
@@ -457,6 +510,17 @@ mod inline_asm_target_tests {
 /// The `rusqlite` crate version that backs `core.db` (D-DEP-DB1).
 /// Lives only here — never in the compiler's Cargo.toml (I6).
 pub const DB_CRATE_SPEC: (&str, &str) = ("rusqlite", "0.31");
+
+/// Official Arrow Rust reader closure for `core.data` Parquet sources
+/// (D-DATA-READER1=A).  These crates live only in the hidden bridge, never in
+/// compiler or format-boundary crates (I6).
+pub const PARQUET_CRATE_SPEC: (&str, &str) = ("parquet", "59.3.0");
+pub const ARROW_ARRAY_CRATE_SPEC: (&str, &str) = ("arrow-array", "59.3.0");
+pub const ARROW_DATA_CRATE_SPEC: (&str, &str) = ("arrow-data", "59.3.0");
+pub const ARROW_SCHEMA_CRATE_SPEC: (&str, &str) = ("arrow-schema", "59.3.0");
+pub const ARROW_SELECT_CRATE_SPEC: (&str, &str) = ("arrow-select", "59.3.0");
+pub const BYTES_CRATE_SPEC: (&str, &str) = ("bytes", "1");
+const PARQUET_RUNTIME: &str = include_str!("Prelude/Parquet.rs");
 
 /// Native HTTP client runtime emitted into the bridge crate when `core.http.client` is used.
 const HTTP_CLIENT_RUNTIME: &str = include_str!("Prelude/HTTP.rs");
@@ -684,10 +748,7 @@ mod http_server_tls_persist_tests {
         use std::io::Read;
         let mut buf = [0u8; 4096];
         loop {
-            if let Some(header_end) = pending
-                .windows(4)
-                .position(|window| window == b"\r\n\r\n")
-            {
+            if let Some(header_end) = pending.windows(4).position(|window| window == b"\r\n\r\n") {
                 let headers = std::str::from_utf8(&pending[..header_end]).unwrap_or("");
                 let length = headers.lines().skip(1).find_map(|line| {
                     let (name, value) = line.split_once(':')?;
@@ -1656,6 +1717,30 @@ mod net_tls_close_tests {
 /// These are emitted verbatim as the right-hand side of the `name = …` line.
 const FEATURED_DEPS: &[(&str, &str)] = &[
     (
+        "arrow-array",
+        "{ version = \"=59.3.0\", default-features = false }",
+    ),
+    (
+        "arrow-data",
+        "{ version = \"=59.3.0\", default-features = false }",
+    ),
+    (
+        "arrow-schema",
+        "{ version = \"=59.3.0\", default-features = false }",
+    ),
+    (
+        "arrow-select",
+        "{ version = \"=59.3.0\", default-features = false }",
+    ),
+    (
+        "bytes",
+        "{ version = \"1\", default-features = false }",
+    ),
+    (
+        "parquet",
+        "{ version = \"=59.3.0\", default-features = false, features = [\"arrow\", \"brotli\", \"flate2-zlib-rs\", \"lz4\", \"simdutf8\", \"snap\", \"zstd\"] }",
+    ),
+    (
         "aes-gcm",
         "{ version = \"=0.10.3\", default-features = false, features = [\"aes\", \"alloc\"] }",
     ),
@@ -1681,7 +1766,7 @@ const FEATURED_DEPS: &[(&str, &str)] = &[
     ),
     (
         "rusqlite",
-        "{ version = \"0.31\", features = [\"bundled\"] }",
+        "{ version = \"0.31\", features = [\"bundled\", \"hooks\"] }",
     ),
     (
         "rustls",
@@ -1745,8 +1830,9 @@ pub const SUBTLE_CRATE_SPEC: (&str, &str) = ("subtle", "=2.6.1");
 /// seal/open/sign/verify is used (D-CRYPTOENV1, D-DEP-CRYPTO1).
 const CRYPTO_RUNTIME: &str = include_str!("Prelude/Crypto.rs");
 const OUTCOME_RUNTIME: &str = include_str!("../../jet-foundation/src/Outcome.rs");
-const ENCODING_ERRORS_RUNTIME: &str =
-    include_str!("../../jet-foundation/src/EncodingErrors.rs");
+const RUNTIME_DIAGNOSTIC_CORE: &str = include_str!("../../jet-foundation/src/RuntimeDiagnosticCore.rs");
+const ENCODING_ERRORS_RUNTIME: &str = include_str!("../../jet-foundation/src/EncodingErrors.rs");
+const DATATREE_RUNTIME: &str = include_str!("../../jet-foundation/src/DataTree.rs");
 const ENCODING_JSON_RUNTIME: &str = include_str!("../../jet-foundation/src/EncodingJson.rs");
 const JSON_NUMBER_RUNTIME: &str = include_str!("../../jet-foundation/src/JSONNumber.rs");
 const HOST_RUNTIME_STOP_BEGIN: &str = "// JET_HOST_RUNTIME_STOP_BEGIN";
@@ -1757,7 +1843,9 @@ const CRYPTO_ENTROPY_RUNTIME: &str =
     include_str!("../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
 
 fn strip_outcome_host_wrapper(source: &str, begin: &str, end: &str) -> String {
-    let start = source.find(begin).expect("Outcome host wrapper marker missing");
+    let start = source
+        .find(begin)
+        .expect("Outcome host wrapper marker missing");
     let end = source
         .find(end)
         .expect("Outcome host wrapper end marker missing")
@@ -1794,8 +1882,231 @@ pub const WASMTIME_CRATE_SPEC: (&str, &str) = ("wasmtime", "25");
 /// The generated bridge uses the workspace's std-only foundation crate for
 /// descriptor-relative, no-follow plugin reads. Keep the path in the cache
 /// identity through the dependency map rather than duplicating its limits.
-const JET_FOUNDATION_CRATE_PATH: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/../jet-foundation");
+const JET_FOUNDATION_CRATE_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../jet-foundation");
+const JET_FOUNDATION_SOURCE_SCHEMA: &str = "jet-ffi-foundation-source-v1";
+const JET_FOUNDATION_CODEGEN_PRELUDE_PATH: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../jet-codegen/src/Prelude");
+const JET_FOUNDATION_ARCHIVE_SOURCE_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../corelib/core.archive/pkgs/archive/src"
+);
+const JET_FOUNDATION_TESTS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests");
+const JET_FOUNDATION_CODEGEN_INPUTS: &[&str] = &[
+    "Effects.jet",
+    "Core.jet",
+    "core/prelude.jet",
+    "Facts.jet",
+    "Diagnostics.jet",
+    "Core/InlineRange.rs",
+    "Core/TimeMonotonic.rs",
+    "Core/MapKey.rs",
+    "Markers.jet",
+];
+const JET_FOUNDATION_ARCHIVE_INPUTS: &[&str] = &["lib.rs"];
+const JET_FOUNDATION_TEST_INPUTS: &[&str] = &["diagnostics_coverage_baseline.txt"];
+
+#[derive(Debug)]
+struct JetFoundationSources {
+    foundation: PathBuf,
+    codegen_prelude: PathBuf,
+    archive_source: PathBuf,
+    tests: PathBuf,
+    digest: String,
+}
+
+fn verified_source_directory(path: &Path, label: &str) -> Result<PathBuf, String> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        format!(
+            "jet-foundation {label} source `{}` is unavailable: {error}",
+            path.display()
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(format!(
+            "jet-foundation {label} source `{}` is not a real directory",
+            path.display()
+        ));
+    }
+    fs::canonicalize(path).map_err(|error| {
+        format!(
+            "could not canonicalize jet-foundation {label} source `{}`: {error}",
+            path.display()
+        )
+    })
+}
+
+fn foundation_input_digest(
+    root: &Path,
+    relative: &str,
+    label: &str,
+) -> Result<String, String> {
+    let path = root.join(relative);
+    let metadata = fs::symlink_metadata(&path).map_err(|error| {
+        format!(
+            "jet-foundation {label} input `{}` is unavailable: {error}",
+            path.display()
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(format!(
+            "jet-foundation {label} input `{}` is not a regular file",
+            path.display()
+        ));
+    }
+    crate::ForeignBridge::sha_file(&path)
+}
+
+fn jet_foundation_sources() -> Result<JetFoundationSources, String> {
+    let foundation = verified_source_directory(Path::new(JET_FOUNDATION_CRATE_PATH), "crate")?;
+    let codegen_prelude =
+        verified_source_directory(Path::new(JET_FOUNDATION_CODEGEN_PRELUDE_PATH), "codegen")?;
+    let archive_source =
+        verified_source_directory(Path::new(JET_FOUNDATION_ARCHIVE_SOURCE_PATH), "archive")?;
+    let tests = verified_source_directory(Path::new(JET_FOUNDATION_TESTS_PATH), "tests")?;
+
+    let foundation_tree = crate::SHA256::try_tree_hash(&foundation)
+        .map_err(|error| format!("could not fingerprint jet-foundation source: {error}"))?;
+    let mut identity =
+        crate::ForeignBridge::IdentityBuilder::new(JET_FOUNDATION_SOURCE_SCHEMA);
+    identity.field("foundation-tree", foundation_tree.as_bytes());
+    for relative in JET_FOUNDATION_CODEGEN_INPUTS {
+        let digest = foundation_input_digest(&codegen_prelude, relative, "codegen")?;
+        identity.field(
+            "codegen-input",
+            format!("{relative}\0{digest}").as_bytes(),
+        );
+    }
+    for relative in JET_FOUNDATION_ARCHIVE_INPUTS {
+        let digest = foundation_input_digest(&archive_source, relative, "archive")?;
+        identity.field(
+            "archive-input",
+            format!("{relative}\0{digest}").as_bytes(),
+        );
+    }
+    for relative in JET_FOUNDATION_TEST_INPUTS {
+        let digest = foundation_input_digest(&tests, relative, "tests")?;
+        identity.field("tests-input", format!("{relative}\0{digest}").as_bytes());
+    }
+
+    Ok(JetFoundationSources {
+        foundation,
+        codegen_prelude,
+        archive_source,
+        tests,
+        digest: identity.finish(),
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn stage_foundation_input(
+    source_root: &Path,
+    relative: &str,
+    destination_root: &Path,
+    label: &str,
+) -> Result<(), String> {
+    let source = source_root.join(relative);
+    let destination = destination_root.join(relative);
+    let parent = destination.parent().ok_or_else(|| {
+        format!(
+            "jet-foundation {label} input destination `{}` has no parent",
+            destination.display()
+        )
+    })?;
+    fs::create_dir_all(parent).map_err(|error| {
+        format!(
+            "could not stage jet-foundation {label} input directory `{}`: {error}",
+            parent.display()
+        )
+    })?;
+    fs::copy(&source, &destination).map_err(|error| {
+        format!(
+            "could not stage jet-foundation {label} input `{}`: {error}",
+            source.display()
+        )
+    })?;
+    Ok(())
+}
+
+// The generated manifest keeps Cargo's host path dependency, so native Cargo
+// must see that canonical path inside its namespace. Linux stages only the
+// external files that Foundation includes; other adapters expose the same
+// source directories directly because they do not remap mount destinations.
+fn jet_foundation_mounts(
+    _cache_root: &Path,
+    sources: &JetFoundationSources,
+) -> Result<Vec<jet_sema::Comptime::Build::ReadOnlyMount>, String> {
+    let mut mounts = vec![
+        jet_sema::Comptime::Build::ReadOnlyMount::new(
+            sources.foundation.clone(),
+            sources.foundation.clone(),
+        ),
+    ];
+    #[cfg(target_os = "linux")]
+    {
+        let closure_root = _cache_root.join(".jet-foundation-source-closure");
+        match fs::remove_dir_all(&closure_root) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!(
+                    "could not clear jet-foundation source closure `{}`: {error}",
+                    closure_root.display()
+                ));
+            }
+        }
+        let codegen_stage = closure_root.join("codegen/src/Prelude");
+        let archive_stage = closure_root.join("archive/src");
+        let tests_stage = closure_root.join("tests");
+        for relative in JET_FOUNDATION_CODEGEN_INPUTS {
+            stage_foundation_input(
+                &sources.codegen_prelude,
+                relative,
+                &codegen_stage,
+                "codegen",
+            )?;
+        }
+        for relative in JET_FOUNDATION_ARCHIVE_INPUTS {
+            stage_foundation_input(
+                &sources.archive_source,
+                relative,
+                &archive_stage,
+                "archive",
+            )?;
+        }
+        for relative in JET_FOUNDATION_TEST_INPUTS {
+            stage_foundation_input(&sources.tests, relative, &tests_stage, "tests")?;
+        }
+        mounts.extend([
+            jet_sema::Comptime::Build::ReadOnlyMount::new(
+                codegen_stage,
+                sources.codegen_prelude.clone(),
+            ),
+            jet_sema::Comptime::Build::ReadOnlyMount::new(
+                archive_stage,
+                sources.archive_source.clone(),
+            ),
+            jet_sema::Comptime::Build::ReadOnlyMount::new(tests_stage, sources.tests.clone()),
+        ]);
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        mounts.extend([
+            jet_sema::Comptime::Build::ReadOnlyMount::new(
+                sources.codegen_prelude.clone(),
+                sources.codegen_prelude.clone(),
+            ),
+            jet_sema::Comptime::Build::ReadOnlyMount::new(
+                sources.archive_source.clone(),
+                sources.archive_source.clone(),
+            ),
+            jet_sema::Comptime::Build::ReadOnlyMount::new(
+                sources.tests.clone(),
+                sources.tests.clone(),
+            ),
+        ]);
+    }
+    Ok(mounts)
+}
 
 /// Hand-written application plugin-loader runtime emitted into the bridge
 /// crate when `core.plugin` is used (D-PLUGIN1 / D-DEP-WASM1=A).
@@ -1857,17 +2168,24 @@ pub fn build_bridge(
         needs_regex,
         needs_archive,
         needs_db,
+        false,
         needs_http_client,
         false,
         false,
         needs_crypto,
         needs_compress,
         needs_plugin,
+        &[],
         needs_secrets,
         &[],
+        &FfiLinkClosure::default(),
+        &[],
         &target,
+        None,
     )
 }
+
+
 
 /// Path of the already-built Ed25519 helper, without creating cache state.
 /// Health checks use this instead of calling `build_bridge`.
@@ -1896,13 +2214,18 @@ pub fn cached_crypto_helper_path() -> PathBuf {
         false,
         false,
         false,
+        false,
         true,
         false,
         false,
+        &[],
         false,
+        &[],
+        &FfiLinkClosure::default(),
         &target,
         None,
         &[],
+        None,
     );
     bridge_paths(&key, &target, &[]).crypto_helper
 }
@@ -1912,20 +2235,41 @@ fn build_bridge_full(
     needs_regex: bool,
     needs_archive: bool,
     needs_db: bool,
+    needs_parquet: bool,
     needs_http_client: bool,
     needs_http_server_tls: bool,
     needs_net_tls: bool,
     needs_crypto: bool,
     needs_compress: bool,
     needs_plugin: bool,
+    authority_needs: &[String],
     needs_secrets: bool,
+    handle_facts: &[FfiHandleFact],
+    link_closure: &FfiLinkClosure,
     native_link_args: &[String],
     selected_target: &str,
+    project_root: Option<&Path>,
 ) -> Result<FfiLink, Vec<Diagnostic>> {
     let mut deps = collect_crate_deps(entries);
     let native_toolchain = inline_native_toolchain(entries, selected_target)?;
     if needs_db {
         deps.insert(DB_CRATE_SPEC.0.to_string(), DB_CRATE_SPEC.1.to_string());
+    }
+    if needs_parquet {
+        for (name, version) in [
+            PARQUET_CRATE_SPEC,
+            ARROW_ARRAY_CRATE_SPEC,
+            ARROW_DATA_CRATE_SPEC,
+            ARROW_SCHEMA_CRATE_SPEC,
+            ARROW_SELECT_CRATE_SPEC,
+            BYTES_CRATE_SPEC,
+        ] {
+            deps.insert(name.to_string(), version.to_string());
+        }
+        deps.insert(
+            "jet-foundation".to_string(),
+            JET_FOUNDATION_CRATE_PATH.to_string(),
+        );
     }
     if needs_http_client {
         deps.insert(
@@ -2014,25 +2358,32 @@ fn build_bridge_full(
             JET_FOUNDATION_CRATE_PATH.to_string(),
         );
     }
-    if needs_secrets {
-        deps.insert(AGE_CRATE_SPEC.0.to_string(), AGE_CRATE_SPEC.1.to_string());
-    }
+    let foundation_sources = if needs_parquet || needs_plugin {
+        Some(jet_foundation_sources().map_err(|error| tool_error(&error))?)
+    } else {
+        None
+    };
     let key = cache_key_full(
         entries,
         &deps,
         needs_regex,
         needs_archive,
         needs_db,
+        needs_parquet,
         needs_http_client,
         needs_http_server_tls,
         needs_net_tls,
         needs_crypto,
         needs_compress,
         needs_plugin,
+        authority_needs,
         needs_secrets,
+        handle_facts,
+        link_closure,
         selected_target,
         native_toolchain.as_ref(),
         native_link_args,
+        foundation_sources.as_ref().map(|sources| sources.digest.as_str()),
     );
     // #2075: `cache_root` owns this key's build INPUTS (generated manifest and
     // sources, the per-key lock); its OUTPUTS land in a Cargo target dir shared
@@ -2048,7 +2399,11 @@ fn build_bridge_full(
         crypto_helper,
         secrets_helper,
         provenance,
-    } = bridge_paths(&key, selected_target, native_link_args);
+    } = bridge_paths(
+        &key,
+        selected_target,
+        native_link_args,
+    );
 
     // c146: when the bridge carries crypto, it also emits a `jet-crypto-helper`
     // binary (a thin stdin wrapper around `jet_crypto_*_impl`) that `jet`'s own
@@ -2067,32 +2422,41 @@ fn build_bridge_full(
         &crate_name,
         helper_bin.as_deref(),
         secrets_helper_bin.as_deref(),
-    )
-    .filter(|artifacts| {
-        bridge_cache_verified(
+    ) {
+        if let Some(diagnostic) =
+            bridge_artifact_integrity_diagnostic(&target, &crate_name, &deps, &artifacts)
+        {
+            return Err(vec![diagnostic]);
+        }
+        if bridge_cache_verified(
             &target,
             &crate_name,
             &key,
             selected_target,
             entries,
-            artifacts,
-        )
-    }) {
-        let cdylib = artifacts[1].clone();
-        return Ok(FfiLink {
-            crate_name,
-            cache_identity: key,
-            provenance_path: provenance,
-            rlib_path: rlib,
-            cdylib_path: cdylib,
-            target_deps_dir,
-            host_deps_dir,
-            helper_bin_path: helper_bin,
-            secrets_helper_bin_path: secrets_helper_bin,
-        });
+            &artifacts,
+        ) {
+            if let Err(error) = sync_bridge_lock(project_root, &cache_root, &key, &rlib) {
+                return Err(tool_error(&error));
+            }
+            let cdylib = artifacts[1].clone();
+            return Ok(FfiLink {
+                crate_name,
+                cache_identity: key,
+                provenance_path: provenance,
+                rlib_path: rlib,
+                cdylib_path: cdylib,
+                target_deps_dir,
+                host_deps_dir,
+                helper_bin_path: helper_bin,
+                secrets_helper_bin_path: secrets_helper_bin,
+                handle_facts: handle_facts.to_vec(),
+                link_closure: link_closure.clone(),
+            });
+        }
     }
 
-    if !command_exists("cargo") {
+    let Some(cargo_path) = command_path("cargo") else {
         return Err(vec![Diagnostic::error(
             "E0703",
             "can't call foreign Rust crates without `cargo`".to_string(),
@@ -2101,7 +2465,7 @@ fn build_bridge_full(
                 .to_string(),
             None,
         )]);
-    }
+    };
 
     fs::create_dir_all(&cache_root)
         .map_err(|e| tool_error(&format!("couldn't create the FFI cache folder: {}", e)))?;
@@ -2124,29 +2488,38 @@ fn build_bridge_full(
         &crate_name,
         helper_bin.as_deref(),
         secrets_helper_bin.as_deref(),
-    )
-    .filter(|artifacts| {
-        bridge_cache_verified(
+    ) {
+        if let Some(diagnostic) =
+            bridge_artifact_integrity_diagnostic(&target, &crate_name, &deps, &artifacts)
+        {
+            return Err(vec![diagnostic]);
+        }
+        if bridge_cache_verified(
             &target,
             &crate_name,
             &key,
             selected_target,
             entries,
-            artifacts,
-        )
-    }) {
-        let cdylib = artifacts[1].clone();
-        return Ok(FfiLink {
-            crate_name,
-            cache_identity: key,
-            provenance_path: provenance,
-            rlib_path: rlib,
-            cdylib_path: cdylib,
-            target_deps_dir,
-            host_deps_dir,
-            helper_bin_path: helper_bin,
-            secrets_helper_bin_path: secrets_helper_bin,
-        });
+            &artifacts,
+        ) {
+            if let Err(error) = sync_bridge_lock(project_root, &cache_root, &key, &rlib) {
+                return Err(tool_error(&error));
+            }
+            let cdylib = artifacts[1].clone();
+            return Ok(FfiLink {
+                crate_name,
+                cache_identity: key,
+                provenance_path: provenance,
+                rlib_path: rlib,
+                cdylib_path: cdylib,
+                target_deps_dir,
+                host_deps_dir,
+                helper_bin_path: helper_bin,
+                secrets_helper_bin_path: secrets_helper_bin,
+                handle_facts: handle_facts.to_vec(),
+                link_closure: link_closure.clone(),
+            });
+        }
     }
 
     // A missing or invalid manifest must not let Cargo bless an old/corrupt
@@ -2204,23 +2577,41 @@ fn build_bridge_full(
             .map_err(|e| tool_error(&format!("couldn't write the inline foreign source: {}", e)))?;
         }
     }
-    fs::write(
-        &lib_rs,
-        emit_wrapper_lib(
-            entries,
-            needs_regex,
-            needs_archive,
-            needs_db,
-            needs_http_client,
-            needs_http_server_tls,
-            needs_net_tls,
-            needs_crypto,
-            needs_compress,
-            needs_plugin,
-            needs_secrets,
-        ),
-    )
-    .map_err(|e| tool_error(&format!("couldn't write the FFI wrappers: {}", e)))?;
+    let mut wrapper_source = emit_wrapper_lib(
+        entries,
+        needs_regex,
+        needs_archive,
+        needs_db,
+        needs_parquet,
+        needs_http_client,
+        needs_http_server_tls,
+        needs_net_tls,
+        needs_crypto,
+        needs_compress,
+        needs_plugin,
+        needs_secrets,
+    );
+    if needs_plugin {
+        // D-PLUGIN-AUTHORITY1: the hidden host receives the checked package
+        // declaration as data; it never reparses package.jet or invents needs.
+        wrapper_source.push_str(
+            "\nconst JET_PLUGIN_DECLARED_AUTHORITY_NEEDS: &[&str] = &[\n",
+        );
+        for need in authority_needs {
+            wrapper_source.push_str(&format!("    {:?},\n", need));
+        }
+        wrapper_source.push_str(
+            "];\n\
+             fn jet_plugin_declared_authority_needs() -> Result<Vec<String>, String> {\n\
+                 Ok(JET_PLUGIN_DECLARED_AUTHORITY_NEEDS\n\
+                     .iter()\n\
+                     .map(|need| (*need).to_string())\n\
+                     .collect())\n\
+             }\n",
+        );
+    }
+    fs::write(&lib_rs, wrapper_source)
+        .map_err(|e| tool_error(&format!("couldn't write the FFI wrappers: {}", e)))?;
 
     // `src/bin/` holds nothing but the generated helpers below, and #2075 keyed
     // their names. Clear it first so a helper written under the old unkeyed name
@@ -2250,27 +2641,123 @@ fn build_bridge_full(
         .map_err(|e| tool_error(&format!("couldn't write the secrets helper: {}", e)))?;
     }
 
-    let mut cargo = Command::new("cargo");
-    cargo
-        .arg("build")
-        .arg("--release")
-        .arg("--target")
-        .arg(selected_target)
-        .arg("--manifest-path")
-        .arg(&manifest)
-        .env("CARGO_TARGET_DIR", &target_dir);
-    if !native_link_args.is_empty() {
-        cargo.env("CARGO_ENCODED_RUSTFLAGS", native_link_args.join("\u{1f}"));
-    }
-    let out = cargo.output().map_err(|e| {
-        vec![Diagnostic::error(
-            "E0703",
-            format!("couldn't run `cargo`: {}", e),
-            "Jet needs `cargo` to build foreign crate wrappers".to_string(),
-            "install Rust from https://rustup.rs, then try again".to_string(),
+    let sandbox_status = jet_sema::Comptime::Build::native_sandbox_status();
+    if !sandbox_status.available {
+        return Err(vec![Diagnostic::error(
+            "E1275",
+            "build sandboxing is required but unavailable".to_string(),
+            format!(
+                "the foreign Rust bridge may execute Cargo build scripts or procedural macros, but the native sandbox is unavailable: {}",
+                sandbox_status.reason
+            ),
+            "install the native sandbox backend and retry; Jet will not run Cargo unsandboxed"
+                .to_string(),
             None,
-        )]
-    })?;
+        )]);
+    }
+
+    let metadata = match cargo_metadata(&cargo_path, &manifest) {
+        Ok(metadata) => metadata,
+        Err(detail) => {
+            let dep = deps
+                .keys()
+                .next()
+                .map(|k| format!("{}@{}", k, deps[k]))
+                .unwrap_or_else(|| "a foreign crate".to_string());
+            return Err(vec![cargo_bridge_failure_diagnostic(&dep, &detail)]);
+        }
+    };
+    let compile_time_code = match cargo_metadata_has_compile_time_code(&metadata, &crate_name) {
+        Ok(present) => present,
+        Err(detail) => {
+            let dep = deps
+                .keys()
+                .next()
+                .map(|k| format!("{}@{}", k, deps[k]))
+                .unwrap_or_else(|| "a foreign crate".to_string());
+            return Err(vec![cargo_bridge_failure_diagnostic(&dep, &detail)]);
+        }
+    };
+    fs::create_dir_all(&target_dir)
+        .map_err(|e| tool_error(&format!("couldn't create the FFI target folder: {}", e)))?;
+
+    let cargo_args = vec![
+        "build".to_string(),
+        "--release".to_string(),
+        "--target".to_string(),
+        selected_target.to_string(),
+        "--manifest-path".to_string(),
+        "/work/source/Cargo.toml".to_string(),
+    ];
+    let mut sandbox_env = BTreeMap::from([
+        (
+            "CARGO_HOME".to_string(),
+            "/work/output/cargo-home".to_string(),
+        ),
+        ("CARGO_TARGET_DIR".to_string(), "/work/output".to_string()),
+        ("HOME".to_string(), "/work/output/home".to_string()),
+        ("SOURCE_DATE_EPOCH".to_string(), "0".to_string()),
+    ]);
+    if let Some(path) = std::env::var_os("PATH") {
+        if !path.is_empty() {
+            sandbox_env.insert("PATH".to_string(), path.to_string_lossy().into_owned());
+        }
+    }
+
+    let cargo_home = std::env::var_os("CARGO_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| dirs_home().join(".cargo"));
+    let mut cargo_mounts = Vec::new();
+    if let Ok(cargo_registry) = cargo_home.join("registry").canonicalize() {
+        if cargo_registry.is_dir() {
+            cargo_mounts.push(jet_sema::Comptime::Build::ReadOnlyMount::new(
+                cargo_registry,
+                "/work/output/cargo-home/registry",
+            ));
+        }
+    }
+    if let Some(sources) = foundation_sources.as_ref() {
+        let mounts =
+            jet_foundation_mounts(&cache_root, sources).map_err(|error| tool_error(&error))?;
+        cargo_mounts.extend(mounts);
+    }
+    if !native_link_args.is_empty() {
+        sandbox_env.insert(
+            "CARGO_ENCODED_RUSTFLAGS".to_string(),
+            native_link_args.join("\u{1f}"),
+        );
+    }
+    let sandboxed = match jet_sema::Comptime::Build::run_native_sandboxed_with_mounts(
+        &cargo_path,
+        &cargo_args,
+        &cache_root,
+        Some(&target_dir),
+        &sandbox_env,
+        true,
+        &cargo_mounts,
+    ) {
+        Ok(output) => output,
+        Err(error) => {
+            let detail = match error {
+                jet_sema::Comptime::Build::NativeSandboxError::Unsupported(detail)
+                | jet_sema::Comptime::Build::NativeSandboxError::Io(detail) => detail,
+            };
+            return Err(vec![Diagnostic::error(
+                "E1275",
+                "build sandboxing is required but unavailable".to_string(),
+                detail,
+                "install the native sandbox backend and retry; Jet will not run Cargo unsandboxed"
+                    .to_string(),
+                None,
+            )]);
+        }
+    };
+    let receipt = CargoBridgeReceipt {
+        sandbox_class: sandboxed.mechanism,
+        sandbox_policy: sandboxed.policy,
+        compile_time_code,
+    };
+    let out = sandboxed.output;
 
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
@@ -2314,16 +2801,10 @@ fn build_bridge_full(
             .next()
             .map(|k| format!("{}@{}", k, deps[k]))
             .unwrap_or_else(|| "a foreign crate".to_string());
-        return Err(vec![Diagnostic::error(
-            "E0704",
-            format!("couldn't fetch or build `{}`", dep),
-            "pure-Rust crates only — crates that need system libraries or a build script aren't supported yet"
-                .to_string(),
-            "try a different crate version, check your network, or pick another crate"
-                .to_string(),
-            None,
-        )
-        .with_detail(format!("  cargo said:\n{}", stable_cargo_detail(&stderr)))]);
+        return Err(vec![cargo_bridge_failure_diagnostic(
+            &dep,
+            &stable_cargo_detail(&stderr),
+        )]);
     }
 
     if !rlib.is_file() {
@@ -2365,11 +2846,19 @@ fn build_bridge_full(
         selected_target,
         &crate_name,
         &target,
+        &manifest,
+        &receipt,
         entries,
+        handle_facts,
+        link_closure,
         &artifacts,
     ) {
         return Err(tool_error(&error));
     }
+    if let Err(error) = sync_bridge_lock(project_root, &cache_root, &key, &rlib) {
+        return Err(tool_error(&error));
+    }
+
     let cdylib = artifacts[1].clone();
     Ok(FfiLink {
         crate_name,
@@ -2381,6 +2870,8 @@ fn build_bridge_full(
         host_deps_dir,
         helper_bin_path: helper_bin,
         secrets_helper_bin_path: secrets_helper_bin,
+        handle_facts: handle_facts.to_vec(),
+        link_closure: link_closure.clone(),
     })
 }
 
@@ -2663,14 +3154,9 @@ impl Drop for BuildLock {
 /// Where one bridge cache key lives on disk. The one owner of that layout, so
 /// the builder and the health check cannot drift apart (I8).
 ///
-/// Two roots, deliberately (#2075):
-///
-/// - `cache_root` (`<ffi cache>/<key>/`) holds the key's INPUTS — the generated
-///   `Cargo.toml`, `src/`, `Cargo.lock` and the per-key `BuildLock`. Private to
-///   the key, exactly as before.
 /// - `target_dir` (`<ffi cache>/deps/<build-identity hash>/`) is the Cargo
-///   target dir, SHARED by every key built with the same toolchain, target,
-///   profile and rustflags. Compiling the dependency graph (`wasmtime`, `age`,
+///   target dir shared by every key built with the same toolchain, target,
+///   profile, and rustflags. Compiling the dependency graph (`wasmtime`, `age`,
 ///   `rustls`, `ed25519-dalek`, …) is the expensive part of a bridge build and
 ///   it is identical across keys, so sharing it turns every key after the first
 ///   into a leaf-crate-only build instead of a cold graph per key.
@@ -2689,14 +3175,18 @@ struct BridgePaths {
     /// sidecar that blesses it.
     target: PathBuf,
     rlib: PathBuf,
-    target_deps_dir: PathBuf,
-    host_deps_dir: PathBuf,
     crypto_helper: PathBuf,
     secrets_helper: PathBuf,
+    target_deps_dir: PathBuf,
+    host_deps_dir: PathBuf,
     provenance: PathBuf,
 }
 
-fn bridge_paths(key: &str, selected_target: &str, native_link_args: &[String]) -> BridgePaths {
+fn bridge_paths(
+    key: &str,
+    selected_target: &str,
+    native_link_args: &[String],
+) -> BridgePaths {
     let cache_root = cache_dir().join(key);
     let crate_name = format!("jet_ffi_{key}");
     let target_dir = shared_target_dir(selected_target, native_link_args);
@@ -2718,9 +3208,8 @@ fn bridge_paths(key: &str, selected_target: &str, native_link_args: &[String]) -
 /// The Cargo target dir shared by every bridge key with this build identity.
 ///
 /// The hash covers exactly what would make Cargo recompile the dependency graph
-/// anyway — the rustc/cargo toolchain, the selected target, and the rustflags
-/// handed to Cargo as `CARGO_ENCODED_RUSTFLAGS` — so sharing never causes a
-/// rebuild a per-key dir would have avoided. The profile is the `release` path
+/// anyway — the rustc/cargo toolchain, the selected target, and rustflags handed
+/// to Cargo as `CARGO_ENCODED_RUSTFLAGS`. The profile is the `release` path
 /// segment Cargo itself appends.
 fn shared_target_dir(selected_target: &str, native_link_args: &[String]) -> PathBuf {
     let mut identity =
@@ -2775,21 +3264,29 @@ fn cache_key_full(
     needs_regex: bool,
     needs_archive: bool,
     needs_db: bool,
+    needs_parquet: bool,
     needs_http_client: bool,
     needs_http_server_tls: bool,
     needs_net_tls: bool,
     needs_crypto: bool,
     needs_compress: bool,
     needs_plugin: bool,
+    authority_needs: &[String],
     needs_secrets: bool,
+    handle_facts: &[FfiHandleFact],
+    link_closure: &FfiLinkClosure,
     selected_target: &str,
     native_toolchain: Option<&InlineNativeToolchain>,
     native_link_args: &[String],
+    foundation_source_digest: Option<&str>,
 ) -> String {
     let mut identity =
         crate::ForeignBridge::IdentityBuilder::new(crate::ForeignBridge::IDENTITY_SCHEMA);
     identity.field("descriptor_schema", INLINE_BRIDGE_SCHEMA.as_bytes());
     identity.field("selected_target", selected_target.as_bytes());
+    if let Some(digest) = foundation_source_digest {
+        identity.field("jet-foundation-source", digest.as_bytes());
+    }
     let rust_toolchain = native_toolchain_identity();
     identity.field("rust_toolchain", rust_toolchain.as_bytes());
     if let Some(toolchain) = native_toolchain {
@@ -2818,6 +3315,20 @@ fn cache_key_full(
     if needs_db {
         identity.field("db_runtime", DB_RUNTIME.as_bytes());
     }
+    identity.field("needs_parquet", &[needs_parquet as u8]);
+    if needs_parquet {
+        identity.field("parquet_runtime", PARQUET_RUNTIME.as_bytes());
+        for (name, version) in [
+            PARQUET_CRATE_SPEC,
+            ARROW_ARRAY_CRATE_SPEC,
+            ARROW_DATA_CRATE_SPEC,
+            ARROW_SCHEMA_CRATE_SPEC,
+            ARROW_SELECT_CRATE_SPEC,
+            BYTES_CRATE_SPEC,
+        ] {
+            identity.field("parquet_dependency", format!("{name}={version}").as_bytes());
+        }
+    }
     identity.field("needs_http_client", &[needs_http_client as u8]);
     if needs_http_client {
         identity.field("http_client_runtime", HTTP_CLIENT_RUNTIME.as_bytes());
@@ -2843,9 +3354,14 @@ fn cache_key_full(
             "standalone_outcome_runtime",
             standalone_outcome_runtime().as_bytes(),
         );
-        identity.field("encoding_errors_runtime", ENCODING_ERRORS_RUNTIME.as_bytes());
+        identity.field(
+            "encoding_errors_runtime",
+            ENCODING_ERRORS_RUNTIME.as_bytes(),
+        );
+        identity.field("datatree_runtime", DATATREE_RUNTIME.as_bytes());
         identity.field("encoding_json_runtime", ENCODING_JSON_RUNTIME.as_bytes());
         identity.field("json_number_runtime", JSON_NUMBER_RUNTIME.as_bytes());
+        identity.field("runtime_diagnostic_core", RUNTIME_DIAGNOSTIC_CORE.as_bytes());
         identity.field("crypto_runtime", CRYPTO_RUNTIME.as_bytes());
         identity.field("crypto_entropy_runtime", CRYPTO_ENTROPY_RUNTIME.as_bytes());
         // The helper is a separately cached binary. Its closed status protocol
@@ -2861,6 +3377,12 @@ fn cache_key_full(
         identity.field("gzip_kernel", GZIP_KERNEL.as_bytes());
     }
     identity.field("needs_plugin", &[needs_plugin as u8]);
+    let mut sorted_authority_needs = authority_needs.to_vec();
+    sorted_authority_needs.sort();
+    sorted_authority_needs.dedup();
+    for need in sorted_authority_needs {
+        identity.field("authority_need", need.as_bytes());
+    }
     if needs_plugin {
         identity.field("plugin_runtime", PLUGIN_RUNTIME.as_bytes());
     }
@@ -2885,6 +3407,8 @@ fn cache_key_full(
         identity.field("wrapper_name", e.wrapper_name.as_bytes());
         identity.field("crate_spec", e.crate_spec.as_bytes());
         identity.field("c_abi", &[e.c_abi as u8]);
+        identity.field("generated", &[e.generated as u8]);
+        identity.field("c_module", &[e.c_module as u8]);
         if let Some(inline) = &e.inline {
             identity.field("inline_schema", INLINE_BRIDGE_SCHEMA.as_bytes());
             identity.field("inline_language", inline.lang.as_bytes());
@@ -2897,6 +3421,11 @@ fn cache_key_full(
             identity.field("parameter_convention", format!("{:?}", c).as_bytes());
             identity.field("parameter_type", type_key(t).as_bytes());
         }
+        for name in &e.param_names {
+            // Generated CBind list returns use the parameter name to identify
+            // their native count slot; it is part of the bridge input.
+            identity.field("parameter_name", name.as_bytes());
+        }
         if let Some(rt) = &e.return_type {
             identity.field("return_type", type_key(rt).as_bytes());
         }
@@ -2904,6 +3433,16 @@ fn cache_key_full(
             identity.field("close_function", close.as_bytes());
         }
     }
+    let mut sorted_handle_keys = handle_facts
+        .iter()
+        .map(FfiHandleFact::stable_key)
+        .collect::<Vec<_>>();
+    sorted_handle_keys.sort();
+    sorted_handle_keys.dedup();
+    for fact in sorted_handle_keys {
+        identity.field("handle_fact", fact.as_bytes());
+    }
+    identity.field("link_closure", link_closure.stable_key().as_bytes());
     identity.finish()
 }
 
@@ -2944,6 +3483,133 @@ fn foreign_descriptor_stamps(entries: &[ExternEntry]) -> BTreeSet<String> {
         .filter_map(|entry| foreign_language_for_entry(entry))
         .map(foreign_descriptor_stamp)
         .collect()
+}
+
+/// Build one canonical boundary row for each foreign language carried by the
+/// shared inline bridge. A mixed bridge is one Cargo artifact, but it is not
+/// one foreign contract: C, C++, and Rust retain independent descriptors,
+/// identities, and obligation rows in the same provenance sidecar.
+fn inline_boundary_rows(
+    entries: &[ExternEntry],
+    cache_identity: &str,
+    selected_target: &str,
+    crate_name: &str,
+    source: &Path,
+    toolchain_digest: &str,
+    artifact_digests: &[(String, String)],
+) -> Result<Vec<(String, String)>, String> {
+    let source_digest = crate::ForeignBridge::sha_file(source)?;
+    let mut artifact_identity =
+        crate::ForeignBridge::IdentityBuilder::new(crate::ForeignBridge::FOREIGN_BOUNDARY_SCHEMA);
+    for (path, digest) in artifact_digests {
+        artifact_identity.field("artifact-path", path.as_bytes());
+        artifact_identity.field("artifact-digest", digest.as_bytes());
+    }
+    let artifact_identity = artifact_identity.finish();
+    let Some((loaded_path, loaded_digest)) = artifact_digests.first() else {
+        return Err("inline FFI bridge produced no artifacts for boundary coverage".into());
+    };
+    let loaded_artifact = format!("{loaded_path}:sha256-{loaded_digest}");
+    let transitive_artifacts = artifact_digests.iter().skip(1).map(|(path, digest)| {
+        format!("{path}:sha256-{digest}")
+    });
+    let mut languages = BTreeSet::new();
+    for entry in entries {
+        if let Some(language) = foreign_language_for_entry(entry) {
+            languages.insert(language);
+        }
+    }
+
+    let mut rows = Vec::new();
+    for language in languages {
+        let descriptor = crate::AST::binder_descriptor(language)
+            .ok_or_else(|| format!("missing binder descriptor for {language:?}"))?;
+        let descriptor_stamp = descriptor.stamp();
+        let mut entry_identity = crate::ForeignBridge::IdentityBuilder::new(
+            crate::ForeignBridge::FOREIGN_BOUNDARY_SCHEMA,
+        );
+        entry_identity.field("cache-identity", cache_identity.as_bytes());
+        entry_identity.field("language", language.root().as_bytes());
+        entry_identity.field("descriptor", descriptor_stamp.as_bytes());
+        for entry in entries
+            .iter()
+            .filter(|entry| foreign_language_for_entry(entry) == Some(language))
+        {
+            entry_identity.field("jet-name", entry.jet_name.as_bytes());
+            entry_identity.field("rust-path", entry.rust_path.as_bytes());
+            entry_identity.field("wrapper-name", entry.wrapper_name.as_bytes());
+            entry_identity.field("crate-spec", entry.crate_spec.as_bytes());
+            entry_identity.field("c-abi", &[entry.c_abi as u8]);
+            entry_identity.field("generated", &[entry.generated as u8]);
+            entry_identity.field("c-module", &[entry.c_module as u8]);
+            for (convention, ty) in &entry.params {
+                entry_identity.field(
+                    "parameter-convention",
+                    format!("{convention:?}").as_bytes(),
+                );
+                entry_identity.field("parameter-type", type_key(ty).as_bytes());
+            }
+            for name in &entry.param_names {
+                entry_identity.field("parameter-name", name.as_bytes());
+            }
+            if let Some(return_type) = &entry.return_type {
+                entry_identity.field("return-type", type_key(return_type).as_bytes());
+            }
+            if let Some(close) = &entry.close {
+                entry_identity.field("close-function", close.as_bytes());
+            }
+            if let Some(inline) = &entry.inline {
+                entry_identity.field("inline-language", inline.lang.as_bytes());
+                entry_identity.field("inline-source", inline.source.as_bytes());
+                for name in &inline.param_names {
+                    entry_identity.field("inline-parameter", name.as_bytes());
+                }
+            }
+        }
+        let entry_identity = entry_identity.finish();
+        let coverage = crate::ForeignBridge::ForeignArtifactCoverage::new(
+            loaded_artifact.clone(),
+            selected_target,
+            descriptor_stamp.clone(),
+        )
+        .with_transitive_dependencies(transitive_artifacts.clone())
+        .with_reachable_callbacks(std::iter::empty::<String>())
+        .with_compiler_flags([
+            "cargo-build".to_string(),
+            "profile=release".to_string(),
+            format!("target={selected_target}"),
+        ]);
+        let boundary = crate::ForeignBridge::ForeignBoundaryContract::new(
+            *descriptor,
+            format!("{crate_name}:{}", language.root()),
+            crate::ForeignBridge::ForeignBoundaryIdentity::new(
+                format!("source:{}:sha256-{source_digest}", source.display()),
+                format!("overlay:inline-{}:sha256-{entry_identity}", language.root()),
+                descriptor_stamp,
+                format!("artifact-set:sha256-{artifact_identity}"),
+                format!("cargo:{toolchain_digest}"),
+                selected_target,
+            ),
+        )
+        .with_artifact_coverage(coverage);
+        boundary.validate()?;
+        rows.extend(boundary.provenance_fields());
+        let capability = crate::ForeignBridge::foreign_boundary_capability(language);
+        rows.push((
+            "boundary-mixed-debug".into(),
+            if capability.mixed_debug { "true" } else { "false" }.into(),
+        ));
+        rows.push((
+            "boundary-native-export".into(),
+            if capability.native_export { "true" } else { "false" }.into(),
+        ));
+        rows.push((
+            "boundary-build-host".into(),
+            if capability.build_host { "true" } else { "false" }.into(),
+        ));
+        rows.push(("boundary-reason".into(), capability.reason.into()));
+    }
+    Ok(rows)
 }
 
 fn identity_static_link_inputs(
@@ -3043,6 +3709,8 @@ fn bridge_cdylib(target: &Path, crate_name: &str) -> Option<PathBuf> {
         target.join(format!("{stem}.so")),
         target.join(format!("{stem}.dylib")),
         target.join(format!("{crate_name}.dll")),
+        // Cargo emits a bare `<crate>.wasm` for a wasm32 cdylib.
+        target.join(format!("{crate_name}.wasm")),
     ]
     .into_iter()
     .find(|path| path.is_file())
@@ -3091,6 +3759,7 @@ fn invalidate_bridge_artifacts(
         target.join(format!("{stem}.so")),
         target.join(format!("{stem}.dylib")),
         target.join(format!("{crate_name}.dll")),
+        target.join(format!("{crate_name}.wasm")),
         bridge_manifest_path(target, crate_name),
         bridge_provenance_path(target, crate_name),
     ]
@@ -3190,9 +3859,16 @@ fn bridge_cache_verified(
         || provenance.identity != cache_identity
         || provenance.value("target") != Some(selected_target)
         || provenance.value("crate") != Some(crate_name)
+        || provenance.value("source").is_none()
+        || provenance.value("source-digest") != Some(cache_identity)
+        || provenance.value("capabilities") != Some("exec:cargo")
+        || provenance.value("sandbox").is_none()
+        || provenance.value("sandbox-policy").is_none()
+        || provenance.value("compile-time-code").is_none()
     {
         return false;
     }
+
     let expected_descriptors = foreign_descriptor_stamps(entries);
     let actual_descriptors = provenance
         .fields
@@ -3203,6 +3879,90 @@ fn bridge_cache_verified(
         .collect::<BTreeSet<_>>();
     if actual_descriptors != expected_descriptors {
         return false;
+    }
+    let expected_languages = entries
+        .iter()
+        .filter_map(foreign_language_for_entry)
+        .map(|language| language.root().to_string())
+        .collect::<BTreeSet<_>>();
+    let actual_languages = provenance
+        .fields
+        .get("boundary-language")
+        .cloned()
+        .unwrap_or_default();
+    let actual_language_set = actual_languages.iter().cloned().collect::<BTreeSet<_>>();
+    if actual_language_set != expected_languages
+        || actual_languages.len() != expected_languages.len()
+    {
+        return false;
+    }
+    let actual_boundary_descriptors = provenance
+        .fields
+        .get("boundary-descriptor")
+        .cloned()
+        .unwrap_or_default();
+    let actual_boundary_descriptor_set = actual_boundary_descriptors
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    if actual_boundary_descriptor_set != expected_descriptors
+        || actual_boundary_descriptors.len() != expected_descriptors.len()
+    {
+        return false;
+    }
+    let actual_coverage_targets = provenance
+        .fields
+        .get("boundary-coverage-target")
+        .cloned()
+        .unwrap_or_default();
+    if actual_coverage_targets.len() != expected_languages.len()
+        || actual_coverage_targets
+            .iter()
+            .any(|target| target != selected_target)
+    {
+        return false;
+    }
+    let actual_coverage_generators = provenance
+        .fields
+        .get("boundary-coverage-generator")
+        .cloned()
+        .unwrap_or_default();
+    let actual_coverage_generator_set = actual_coverage_generators
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    if actual_coverage_generator_set != expected_descriptors
+        || actual_coverage_generators.len() != expected_descriptors.len()
+    {
+        return false;
+    }
+    let actual_loaded_artifacts = provenance
+        .fields
+        .get("boundary-loaded-artifact")
+        .cloned()
+        .unwrap_or_default();
+    if expected_languages.is_empty() {
+        if !actual_loaded_artifacts.is_empty() {
+            return false;
+        }
+    } else {
+        let Some(first_artifact) = artifacts.first() else {
+            return false;
+        };
+        let Some(relative) = artifact_relative_path(target, first_artifact) else {
+            return false;
+        };
+        let Some(digest) = expected.get(&relative) else {
+            return false;
+        };
+        let expected_loaded = format!("{relative}:sha256-{digest}");
+        if actual_loaded_artifacts.len() != expected_languages.len()
+            || actual_loaded_artifacts
+                .iter()
+                .any(|loaded| loaded != &expected_loaded)
+        {
+            return false;
+        }
     }
     artifacts.iter().all(|path| {
         let Some(relative) = artifact_relative_path(target, path) else {
@@ -3258,7 +4018,11 @@ fn publish_bridge_provenance(
     selected_target: &str,
     crate_name: &str,
     target: &Path,
+    source: &Path,
+    receipt: &CargoBridgeReceipt,
     entries: &[ExternEntry],
+    handle_facts: &[FfiHandleFact],
+    link_closure: &FfiLinkClosure,
     artifacts: &[PathBuf],
 ) -> Result<(), String> {
     let mut artifact_digests = Vec::with_capacity(artifacts.len());
@@ -3279,20 +4043,57 @@ fn publish_bridge_provenance(
     }
     let toolchain_digest = crate::SHA256::sha256_hex(native_toolchain_identity().as_bytes());
     let descriptor_stamps = foreign_descriptor_stamps(entries);
+    let boundary_rows = inline_boundary_rows(
+        entries,
+        cache_identity,
+        selected_target,
+        crate_name,
+        source,
+        &toolchain_digest,
+        &artifact_digests,
+    )?;
+    let source_path = source.to_string_lossy().into_owned();
     let mut fields = vec![
-        ("target", selected_target.to_string()),
-        ("crate", crate_name.to_string()),
-        ("bridge-descriptor", INLINE_BRIDGE_SCHEMA.to_string()),
-        ("toolchain", toolchain_digest),
+        ("target".into(), selected_target.to_string()),
+        ("crate".into(), crate_name.to_string()),
+        ("source".into(), source_path),
+        ("source-digest".into(), cache_identity.to_string()),
+        ("capabilities".into(), "exec:cargo".to_string()),
+        ("sandbox".into(), receipt.sandbox_class.clone()),
+        ("sandbox-policy".into(), receipt.sandbox_policy.clone()),
+        (
+            "compile-time-code".into(),
+            if receipt.compile_time_code {
+                "present".to_string()
+            } else {
+                "none".to_string()
+            },
+        ),
+        ("bridge-descriptor".into(), INLINE_BRIDGE_SCHEMA.to_string()),
+        ("toolchain".into(), toolchain_digest),
     ];
+
     fields.extend(
         descriptor_stamps
             .into_iter()
-            .map(|stamp| ("descriptor", stamp)),
+            .map(|stamp| ("descriptor".into(), stamp)),
     );
+    fields.extend(boundary_rows);
+    let mut sorted_handle_keys = handle_facts
+        .iter()
+        .map(FfiHandleFact::stable_key)
+        .collect::<Vec<_>>();
+    sorted_handle_keys.sort();
+    sorted_handle_keys.dedup();
+    fields.extend(
+        sorted_handle_keys
+            .into_iter()
+            .map(|fact| ("handle-fact".into(), fact)),
+    );
+    fields.push(("link-closure".into(), link_closure.stable_key()));
     let field_refs = fields
         .iter()
-        .map(|(name, value)| (*name, value.as_str()))
+        .map(|(name, value)| (name.as_str(), value.as_str()))
         .collect::<Vec<_>>();
     crate::ForeignBridge::write_provenance(path, cache_identity, &field_refs, &artifact_digests)
 }
@@ -3314,8 +4115,345 @@ fn dirs_home() -> PathBuf {
     PathBuf::from("/tmp")
 }
 
-fn command_exists(cmd: &str) -> bool {
-    Command::new(cmd).arg("--version").output().is_ok()
+fn command_path(cmd: &str) -> Option<PathBuf> {
+    let direct = Path::new(cmd);
+    if direct.components().count() > 1 && direct.is_file() {
+        return fs::canonicalize(direct).ok();
+    }
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths).find_map(|directory| {
+            let candidate = directory.join(cmd);
+            candidate
+                .is_file()
+                .then(|| fs::canonicalize(candidate).ok())
+                .flatten()
+        })
+    })
+}
+
+fn cargo_metadata(cargo: &Path, manifest: &Path) -> Result<String, String> {
+    let output = Command::new(cargo)
+        .args(["metadata", "--format-version", "1", "--manifest-path"])
+        .arg(manifest)
+        .output()
+        .map_err(|error| format!("could not run Cargo metadata: {error}"))?;
+    if !output.status.success() {
+        return Err(stable_cargo_detail(&String::from_utf8_lossy(
+            &output.stderr,
+        )));
+    }
+    String::from_utf8(output.stdout)
+        .map_err(|error| format!("Cargo metadata returned invalid UTF-8: {error}"))
+}
+
+fn cargo_metadata_has_compile_time_code(
+    metadata: &str,
+    bridge_crate_name: &str,
+) -> Result<bool, String> {
+    let document = crate::JSON::parse_json_with_limit(metadata, 16 * 1024 * 1024)
+        .map_err(|_| "Cargo returned invalid metadata JSON".to_string())?;
+    let packages = document
+        .get("packages")
+        .map_err(|error| error.to_string())?
+        .as_array()
+        .map_err(|error| error.to_string())?;
+    for package in packages {
+        let package_name = package
+            .get("name")
+            .map_err(|error| error.to_string())?
+            .as_str()
+            .map_err(|error| error.to_string())?;
+        if package_name == bridge_crate_name {
+            continue;
+        }
+        let targets = package
+            .get("targets")
+            .map_err(|error| error.to_string())?
+            .as_array()
+            .map_err(|error| error.to_string())?;
+        for target in targets {
+            let kinds = target
+                .get("kind")
+                .map_err(|error| error.to_string())?
+                .as_array()
+                .map_err(|error| error.to_string())?;
+            if kinds
+                .iter()
+                .any(|kind| matches!(kind.as_str(), Ok("custom-build" | "proc-macro")))
+            {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+#[derive(Debug, Default)]
+struct CargoLockPackage {
+    name: Option<String>,
+    version: Option<String>,
+    source: Option<String>,
+    checksum: Option<String>,
+    dependencies: Vec<String>,
+}
+
+fn sync_bridge_lock(
+    project_root: Option<&Path>,
+    cache_root: &Path,
+    bridge_identity: &str,
+    rlib: &Path,
+) -> Result<(), String> {
+    let Some(project_root) = project_root else {
+        return Ok(());
+    };
+    if !project_root.join(crate::Syntax::PACKAGE_FILE).is_file() {
+        return Ok(());
+    }
+    let cargo_lock = cache_root.join("Cargo.lock");
+    let raw = fs::read_to_string(&cargo_lock).map_err(|error| {
+        format!(
+            "could not read generated Cargo lock `{}`: {error}",
+            cargo_lock.display()
+        )
+    })?;
+    let output = format!(
+        "sha256-{}",
+        crate::SHA256::sha256_hex(&fs::read(rlib).map_err(|error| format!(
+            "could not read FFI artifact `{}`: {error}",
+            rlib.display()
+        ))?,)
+    );
+    let packages = cargo_lock_bridge_packages(&raw, bridge_identity, &output)?;
+    crate::Lock::record_rust_bridge(project_root, bridge_identity, packages)
+}
+
+fn cargo_lock_bridge_packages(
+    raw: &str,
+    bridge_identity: &str,
+    output: &str,
+) -> Result<Vec<crate::Lock::LockedPackage>, String> {
+    Ok(parse_cargo_lock(raw)?
+        .into_iter()
+        .filter_map(|package| {
+            let source = package.source?;
+            if !(source.starts_with("registry+")
+                || source.starts_with("sparse+")
+                || source.starts_with("git+"))
+            {
+                return None;
+            }
+            let name = package.name?;
+            let version = package.version?;
+            let content_hash = package
+                .checksum
+                .as_deref()
+                .map(|checksum| format!("sha256-{checksum}"));
+            let fingerprint = content_hash.clone().unwrap_or_default();
+            Some(crate::Lock::LockedPackage {
+                source: crate::Lock::LockSource::Foreign {
+                    language: ForeignLanguage::Rust,
+                    reference: format!("{name}@{version}"),
+                    output: output.to_string(),
+                },
+                name,
+                version,
+                nix_closure: None,
+                locked: None,
+                fingerprint,
+                content_hash,
+                dependencies: package.dependencies,
+                layer: None,
+                inferred_layer: None,
+                effects: Vec::new(),
+                effect_grants: Vec::new(),
+                required_effects: Vec::new(),
+                granted_effects: Vec::new(),
+                denied_effects: Vec::new(),
+                effect_authority: None,
+                envelope: None,
+                receipt: None,
+                provenance: Some(crate::Lock::DependencyProvenance {
+                    transparency: None,
+                    publisher: None,
+                    build: Some(format!(
+                        "{}{bridge_identity};cargo-source:{source}",
+                        crate::Lock::RUST_BRIDGE_PROVENANCE_PREFIX
+                    )),
+                }),
+            })
+        })
+        .collect())
+}
+
+fn parse_cargo_lock(raw: &str) -> Result<Vec<CargoLockPackage>, String> {
+    let mut packages = Vec::new();
+    let mut current = None;
+    let mut in_dependencies = false;
+    for line in raw.lines() {
+        let line = line.trim();
+        if line == "[[package]]" {
+            finish_cargo_lock_package(&mut current, &mut packages)?;
+            current = Some(CargoLockPackage::default());
+            in_dependencies = false;
+            continue;
+        }
+        if line.starts_with("[[") || line.starts_with('[') {
+            finish_cargo_lock_package(&mut current, &mut packages)?;
+            in_dependencies = false;
+            continue;
+        }
+        let Some(package) = current.as_mut() else {
+            continue;
+        };
+        if in_dependencies {
+            if line == "]" {
+                in_dependencies = false;
+            } else if let Some(dependency) = cargo_lock_quoted_value(line) {
+                let name = dependency
+                    .split_once(' ')
+                    .map_or(dependency.as_str(), |(name, _)| name)
+                    .to_string();
+                package.dependencies.push(name);
+            } else if !line.is_empty() {
+                return Err(format!("invalid Cargo lock dependency line `{line}`"));
+            }
+            continue;
+        }
+        if line == "dependencies = [" {
+            in_dependencies = true;
+            continue;
+        }
+        if let Some(value) = cargo_lock_field(line, "name") {
+            package.name = Some(value);
+        } else if let Some(value) = cargo_lock_field(line, "version") {
+            package.version = Some(value);
+        } else if let Some(value) = cargo_lock_field(line, "source") {
+            package.source = Some(value);
+        } else if let Some(value) = cargo_lock_field(line, "checksum") {
+            package.checksum = Some(value);
+        }
+    }
+    finish_cargo_lock_package(&mut current, &mut packages)?;
+    Ok(packages)
+}
+
+fn finish_cargo_lock_package(
+    current: &mut Option<CargoLockPackage>,
+    packages: &mut Vec<CargoLockPackage>,
+) -> Result<(), String> {
+    let Some(package) = current.take() else {
+        return Ok(());
+    };
+    if package.source.is_none() {
+        return Ok(());
+    }
+    let name = package
+        .name
+        .as_deref()
+        .ok_or_else(|| "Cargo lock package is missing `name`".to_string())?;
+    let version = package
+        .version
+        .as_deref()
+        .ok_or_else(|| format!("Cargo lock package `{name}` is missing `version`"))?;
+    if let Some(checksum) = package.checksum.as_deref() {
+        if !is_lower_hex(checksum) {
+            return Err(format!(
+                "Cargo lock package `{name}` {version} has an invalid checksum"
+            ));
+        }
+    }
+    packages.push(package);
+    Ok(())
+}
+
+fn cargo_lock_field(line: &str, key: &str) -> Option<String> {
+    let value = line.strip_prefix(key)?.strip_prefix(" = ")?.trim();
+    crate::JSON::parse_json(value)
+        .ok()?
+        .as_str()
+        .ok()
+        .map(str::to_string)
+}
+
+fn cargo_lock_quoted_value(line: &str) -> Option<String> {
+    let value = line.trim_end_matches(',').trim();
+    crate::JSON::parse_json(value)
+        .ok()?
+        .as_str()
+        .ok()
+        .map(str::to_string)
+}
+
+fn bridge_artifact_integrity_diagnostic(
+    target: &Path,
+    crate_name: &str,
+    deps: &BTreeMap<String, String>,
+    artifacts: &[PathBuf],
+) -> Option<Diagnostic> {
+    let manifest = fs::read_to_string(bridge_manifest_path(target, crate_name)).ok()?;
+    let mut lines = manifest.lines();
+    if lines.next() != Some(BRIDGE_ARTIFACTS_SCHEMA) {
+        return None;
+    }
+    let mut expected = BTreeMap::new();
+    for line in lines {
+        let (digest, relative) = line.split_once(' ')?;
+        if !is_lower_hex(digest) || relative.is_empty() {
+            return None;
+        }
+        let relative_path = Path::new(relative);
+        if relative_path.is_absolute()
+            || relative_path.components().any(|component| {
+                matches!(
+                    component,
+                    Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                )
+            })
+            || expected
+                .insert(relative.to_string(), digest.to_string())
+                .is_some()
+        {
+            return None;
+        }
+    }
+    if expected.len() != artifacts.len() {
+        return None;
+    }
+    for artifact in artifacts {
+        let relative = artifact_relative_path(target, artifact)?;
+        let expected_digest = expected.get(&relative)?;
+        let bytes = fs::read(artifact).ok()?;
+        let actual_digest = crate::SHA256::sha256_hex(&bytes);
+        if actual_digest == *expected_digest {
+            continue;
+        }
+        let (package, version) = deps
+            .iter()
+            .next()
+            .map(|(name, version)| (name.as_str(), version.as_str()))
+            .unwrap_or(("foreign crate", "bridge"));
+        return Some(Diagnostic::from_row(
+            "E2604",
+            &[
+                ("package", package),
+                ("version", version),
+                ("expected", &format!("sha256-{expected_digest}")),
+                ("actual", &format!("sha256-{actual_digest}")),
+            ],
+            None,
+        ));
+    }
+    None
+}
+
+fn cargo_bridge_failure_diagnostic(dep: &str, detail: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E0704",
+        format!("couldn't fetch or build `{dep}`"),
+        "Cargo could not resolve or build this foreign crate bridge".to_string(),
+        "check the crate version, network, and Cargo diagnostic, then try again".to_string(),
+        None,
+    )
+    .with_detail(format!("  cargo said:\n{detail}"))
 }
 
 fn inline_native_toolchain(
@@ -3510,6 +4648,7 @@ fn emit_wrapper_lib(
     _needs_regex: bool,
     needs_archive: bool,
     needs_db: bool,
+    needs_parquet: bool,
     needs_http_client: bool,
     needs_http_server_tls: bool,
     needs_net_tls: bool,
@@ -3520,6 +4659,14 @@ fn emit_wrapper_lib(
 ) -> String {
     let mut out = String::from(
         "// Auto-generated FFI wrappers — do not edit.\n#![allow(warnings)]\n\ntype JetFfiReporter = extern \"C\" fn(*const u8, usize);\nstatic JET_FFI_REPORTER: std::sync::Mutex<Option<JetFfiReporter>> = std::sync::Mutex::new(None);\n\ntype JetFfiPanicHook = Box<dyn Fn(&std::panic::PanicHookInfo<'_>) + Send + Sync + 'static>;\ntype JetFfiSharedPanicHook = std::sync::Arc<JetFfiPanicHook>;\nstatic JET_FFI_PREVIOUS_PANIC_HOOK: std::sync::Mutex<Option<JetFfiSharedPanicHook>> =\n    std::sync::Mutex::new(None);\n\nthread_local! {\n    static JET_FFI_FAILURE: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };\n    // The hook is process-global, but suppression is per calling thread.\n    static JET_FFI_PANIC_BOUNDARY_DEPTH: std::cell::Cell<u32> =\n        const { std::cell::Cell::new(0) };\n}\n\n// `catch_unwind` runs the panic hook before it returns the payload. Keep the\n// bridge's private conversion quiet without mutating the hook around each\n// call; FFI calls may run concurrently on unrelated threads.\nstatic JET_FFI_PANIC_HOOK: std::sync::LazyLock<()> = std::sync::LazyLock::new(|| {\n    let previous = std::sync::Arc::new(std::panic::take_hook());\n    *JET_FFI_PREVIOUS_PANIC_HOOK\n        .lock()\n        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(previous.clone());\n    std::panic::set_hook(Box::new(move |info| {\n        let private_marker = info\n            .payload()\n            .downcast_ref::<String>()\n            .is_some_and(|message| message.starts_with(\"__jet_ffi_runtime__: \"));\n        let quiet = private_marker\n            || JET_FFI_PANIC_BOUNDARY_DEPTH\n                .try_with(|depth| depth.get() != 0)\n                .unwrap_or(false);\n        if !quiet {\n            previous(info);\n        }\n    }));\n});\n\n#[no_mangle]\npub extern \"C\" fn jet_ffi_clear_panic_hook() {\n    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {\n        let previous = JET_FFI_PREVIOUS_PANIC_HOOK\n            .lock()\n            .unwrap_or_else(|poisoned| poisoned.into_inner())\n            .take();\n        let Some(previous) = previous else { return; };\n        let current = std::panic::take_hook();\n        drop(current);\n        if let Ok(previous) = std::sync::Arc::try_unwrap(previous) {\n            std::panic::set_hook(previous);\n        }\n    }));\n}\n\nfn ffi_catch_unwind<F, T>(f: F) -> Result<T, Box<dyn std::any::Any + Send>>\nwhere\n    F: FnOnce() -> T,\n{\n    let result = JET_FFI_PANIC_BOUNDARY_DEPTH.with(|depth| {\n        let previous = depth.replace(depth.get().saturating_add(1));\n        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {\n            std::sync::LazyLock::force(&JET_FFI_PANIC_HOOK);\n            std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))\n        }));\n        depth.set(previous);\n        result\n    });\n    match result {\n        Ok(result) => result,\n        Err(payload) => Err(payload),\n    }\n}\n\n#[no_mangle]\npub extern \"C\" fn jet_ffi_set_reporter(reporter: JetFfiReporter) {\n    *JET_FFI_REPORTER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(reporter);\n}\n\n#[no_mangle]\npub extern \"C\" fn jet_ffi_take_failure() -> i8 {\n    JET_FFI_FAILURE.with(|failure| failure.replace(0) as i8)\n}\n\nfn ffi_host_fault() {\n    JET_FFI_FAILURE.with(|failure| {\n        if failure.get() == 0 { failure.set(2); }\n    });\n}\n\nfn ffi_panic() -> ! {\n    JET_FFI_FAILURE.with(|failure| failure.set(1));\n    const MESSAGE: &str = \"panic: a foreign function panicked\";\n    let reporter = *JET_FFI_REPORTER.lock().unwrap_or_else(|poisoned| poisoned.into_inner());\n    if let Some(reporter) = reporter { reporter(MESSAGE.as_ptr(), MESSAGE.len()); }\n    std::panic::resume_unwind(Box::new(format!(\"__jet_ffi_runtime__: {MESSAGE}\")));\n}\n\n",
+    );
+    out.push_str(
+        "#[repr(C)]\n\
+         pub struct JetFfiSlot {\n\
+             pub value: u64,\n\
+             pub ptr: *mut u8,\n\
+             pub len: usize,\n\
+         }\n\n",
     );
     for descriptor in foreign_descriptor_stamps(entries) {
         out.push_str("// jet-ffi-descriptor=");
@@ -3561,6 +4708,14 @@ fn emit_wrapper_lib(
             out.push('\n');
         });
     }
+    if needs_parquet {
+        // D-DATA-READER1=A: the official Parquet/Arrow closure is isolated in
+        // this hidden module and registers its C export with Foundation.
+        push_runtime_mod(&mut out, "__jet_parquet", |out| {
+            out.push_str(PARQUET_RUNTIME);
+            out.push('\n');
+        });
+    }
     if needs_http_client {
         // D-HTTP-CLIENT2=A: native HTTP; rustls is the separately-ratified TLS seam.
         push_runtime_mod(&mut out, "__jet_http_client", |out| {
@@ -3594,7 +4749,9 @@ fn emit_wrapper_lib(
             for (name, source) in [
                 ("jet_encoding_errors", ENCODING_ERRORS_RUNTIME),
                 ("jet_json_number", JSON_NUMBER_RUNTIME),
+                ("DataTree", DATATREE_RUNTIME),
                 ("EncodingJson", ENCODING_JSON_RUNTIME),
+                ("RuntimeDiagnosticCore", RUNTIME_DIAGNOSTIC_CORE),
             ] {
                 out.push_str("mod ");
                 out.push_str(name);
@@ -3666,11 +4823,19 @@ fn emit_wrapper_lib(
         );
     }
     for e in entries {
+        let has_list = e
+            .params
+            .iter()
+            .any(|(_, ty)| matches!(ty, Type::List(_)))
+            || e
+                .return_type
+                .as_ref()
+                .is_some_and(|ty| matches!(ty, Type::List(_)));
         if let Some(inline) = &e.inline {
             out.push_str(&emit_inline_wrapper_fn(e, inline));
-        } else if e.c_abi {
+        } else if e.c_abi && !has_list {
             out.push_str(&emit_c_wrapper_fn(e, &names));
-        } else {
+        } else if !e.c_abi {
             out.push_str(&emit_wrapper_fn(e, &names));
         }
         if let Some(cabi) = emit_cabi_trampoline(e, &names) {
@@ -3683,8 +4848,47 @@ fn emit_wrapper_lib(
 }
 
 fn emit_c_wrapper_fn(entry: &ExternEntry, user_types: &HashSet<String>) -> String {
+    fn callback_payload(ty: &Type) -> Option<&Type> {
+        let Type::Apply { name, args } = ty else {
+            return None;
+        };
+        (name == "FfiCallbackEvent" && args.len() == 1).then(|| &args[0])
+    }
+
+    fn managed_native_start(entry: &ExternEntry) -> Option<&Type> {
+        if !entry.generated
+            || !entry.jet_name.starts_with("__jet_native_")
+            || entry.params.len() != 1
+        {
+            return None;
+        }
+        let (_, Type::Fn { params, ret, .. }) = &entry.params[0] else {
+            return None;
+        };
+        if ret.is_some() || params.len() != 1 {
+            return None;
+        }
+        callback_payload(&params[0])
+    }
+
+    if let Some(payload) = managed_native_start(entry) {
+        if !matches!(payload, Type::Int) {
+            return String::new();
+        }
+        let native_ident = format!("{}_native", entry.wrapper_name);
+        let native_symbol = format!("{:?}", entry.rust_path);
+        let callback_type = "Option<unsafe extern \"C\" fn(*mut std::os::raw::c_void, i64)>";
+        return format!(
+            "unsafe extern \"C\" {{\n    #[link_name = {native_symbol}]\n    fn {native_ident}(callback: {callback_type}, ctx: *mut std::os::raw::c_void) -> *mut std::os::raw::c_void;\n}}\n\n#[no_mangle]\npub unsafe extern \"C\" fn {wrapper}_callback_start(callback: {callback_type}, ctx: *mut std::os::raw::c_void) -> *mut std::os::raw::c_void {{\n    {native_ident}(callback, ctx)\n}}\n",
+            wrapper = entry.wrapper_name,
+        );
+    }
+
     fn bridge_type(ty: &Type, user_types: &HashSet<String>) -> String {
         match ty {
+            // C typedef pointer aliases are checked opaque handles. The
+            // bridge crate carries only their native pointer representation.
+            Type::Named(_) => "*mut std::os::raw::c_void".to_string(),
             Type::Fn { params, ret, .. } => {
                 let params = params
                     .iter()
@@ -4201,113 +5405,349 @@ fn foreign_rust_param_type(
 /// `String` uses `(ptr,len)` in and `(out_ptr,out_len)` heap buffers the JIT frees
 /// via `jet_ffi_cabi_free`.
 fn emit_cabi_trampoline(entry: &ExternEntry, _user_types: &HashSet<String>) -> Option<String> {
-    fn cabi_ok(ty: &Type) -> bool {
-        matches!(
-            ty,
-            Type::Int
-                | Type::InlineRange { .. }
-                | Type::Float
-                | Type::Float32
-                | Type::Bool
-                | Type::String
-        )
+    fn scalar_type(ty: &Type) -> Option<String> {
+        match ty {
+            Type::Int => Some("i64".to_string()),
+            Type::IntN { signed, bits } => {
+                matches!(bits, 8 | 16 | 32 | 64).then(|| {
+                    format!("{}{}", if *signed { 'i' } else { 'u' }, bits)
+                })
+            }
+            Type::Float => Some("f64".to_string()),
+            Type::Float32 => Some("f32".to_string()),
+            Type::Bool => Some("bool".to_string()),
+            Type::Char => Some("u32".to_string()),
+            Type::InlineRange { base, .. }
+            | Type::Tagged { inner: base, .. }
+            | Type::Quantity { base, .. } => scalar_type(base),
+            _ => None,
+        }
     }
-    // The C ABI trampoline is a value-only JIT adapter. Capability-bearing
-    // declarations stay on the native checked wrapper path; emitting a
-    // value-shaped trampoline for `&` or `^` would erase the ownership
-    // contract before the call (D-FFI-CAP1/I9).
-    for (convention, ty) in &entry.params {
-        if *convention != AccessConvention::Read {
+
+    fn native_type(ty: &Type, convention: AccessConvention) -> Option<String> {
+        if convention == AccessConvention::Write {
+            return Some(match ty {
+                Type::List(_) => "*mut std::os::raw::c_void".to_string(),
+                Type::String => "*mut std::os::raw::c_char".to_string(),
+                Type::Named(_) => "*mut std::os::raw::c_void".to_string(),
+                _ => format!(
+                    "*mut {}",
+                    scalar_type(ty).unwrap_or_else(|| "std::os::raw::c_void".to_string())
+                ),
+            });
+        }
+        Some(match ty {
+            Type::List(_) => "*const std::os::raw::c_void".to_string(),
+            Type::String => "*const std::os::raw::c_char".to_string(),
+            Type::Named(_) => "*mut std::os::raw::c_void".to_string(),
+            _ => scalar_type(ty)?,
+        })
+    }
+
+    fn return_native_type(ty: &Type) -> Option<String> {
+        Some(match ty {
+            Type::List(_) => "*const std::os::raw::c_void".to_string(),
+            Type::String => "*const std::os::raw::c_char".to_string(),
+            Type::Named(_) => "*mut std::os::raw::c_void".to_string(),
+            _ => scalar_type(ty)?,
+        })
+    }
+
+    fn integer(ty: &Type) -> bool {
+        matches!(ty, Type::Int | Type::IntN { .. })
+            || matches!(
+                ty,
+                Type::InlineRange { base, .. }
+                    | Type::Tagged { inner: base, .. }
+                    | Type::Quantity { base, .. }
+                    if integer(base)
+            )
+    }
+
+    fn signed_integer(ty: &Type) -> bool {
+        match ty {
+            Type::Int => true,
+            Type::IntN { signed, .. } => *signed,
+            Type::InlineRange { base, .. }
+            | Type::Tagged { inner: base, .. }
+            | Type::Quantity { base, .. } => signed_integer(base),
+            _ => false,
+        }
+    }
+
+    fn length_name(name: &str) -> bool {
+        let lower = name.to_ascii_lowercase();
+        matches!(
+            lower.as_str(),
+            "n" | "len" | "length" | "count" | "size" | "num" | "number"
+        ) || [
+            "_len", "_length", "_count", "_size", "_num", "_number",
+        ]
+        .iter()
+        .any(|suffix| lower.ends_with(suffix))
+            || [
+                "len_", "length_", "count_", "size_", "num_", "number_",
+            ]
+            .iter()
+            .any(|prefix| lower.starts_with(prefix))
+    }
+
+    let has_list = entry
+        .params
+        .iter()
+        .any(|(_, ty)| matches!(ty, Type::List(_)))
+        || entry
+            .return_type
+            .as_ref()
+            .is_some_and(|ty| matches!(ty, Type::List(_)));
+    let direct_native = entry.c_abi && has_list;
+    if !direct_native {
+        if entry
+            .params
+            .iter()
+            .any(|(convention, ty)| *convention != AccessConvention::Read
+                && !(*convention == AccessConvention::Move
+                    && entry.c_abi
+                    && matches!(ty, Type::Named(_))))
+            || entry
+                .params
+                .iter()
+                .any(|(_, ty)| matches!(ty, Type::List(_)))
+        {
             return None;
         }
-        if !cabi_ok(ty) {
-            return None;
-        }
+    }
+    if entry
+        .params
+        .iter()
+        .any(|(_, ty)| !matches!(ty, Type::List(_)) && scalar_type(ty).is_none()
+            && !matches!(ty, Type::String | Type::Named(_)))
+    {
+        return None;
     }
     if let Some(ret) = &entry.return_type {
-        if !cabi_ok(ret) {
+        if !matches!(ret, Type::List(_) | Type::String | Type::Named(_))
+            && scalar_type(ret).is_none()
+        {
             return None;
         }
     }
-    let cabi = format!("{}_cabi", entry.wrapper_name);
-    let mut params = Vec::new();
-    let mut call_args = Vec::new();
-    for (i, (_, ty)) in entry.params.iter().enumerate() {
-        match ty {
-            Type::String => {
-                params.push(format!("p{i}_ptr: *const u8, p{i}_len: usize"));
-                call_args.push(format!(
-                    "{{ let bytes = if p{i}_len == 0 {{ Vec::new() }} else if p{i}_ptr.is_null() {{ ffi_panic(); }} else {{ unsafe {{ std::slice::from_raw_parts(p{i}_ptr, p{i}_len).to_vec() }} }}; String::from_utf8(bytes).unwrap_or_else(|_| ffi_panic()) }}"
-                ));
-            }
-            Type::Int | Type::InlineRange { .. } => {
-                params.push(format!("p{i}: i64"));
-                call_args.push(format!("p{i}"));
-            }
-            Type::Float | Type::Float32 => {
-                params.push(format!("p{i}: f64"));
-                call_args.push(if matches!(ty, Type::Float32) {
-                    format!("p{i} as f32")
-                } else {
-                    format!("p{i}")
-                });
-            }
-            Type::Bool => {
-                params.push(format!("p{i}: i8"));
-                call_args.push(format!("p{i} != 0"));
-            }
-            _ => return None,
+    if direct_native {
+        for (convention, ty) in &entry.params {
+            native_type(ty, *convention)?;
         }
     }
-    let call = format!("{}({})", entry.wrapper_name, call_args.join(", "));
-    let (ret_params, ret_ty, body, panic_return) = match &entry.return_type {
-        None => (
-            String::new(),
-            String::new(),
-            format!("    let _ = {call};\n"),
-            "()",
-        ),
-        Some(Type::String) => (
-            if params.is_empty() {
-                "out_ptr: *mut *mut u8, out_len: *mut usize".to_string()
-            } else {
-                "out_ptr: *mut *mut u8, out_len: *mut usize".to_string()
-            },
-            " -> i32".to_string(),
-            format!(
-                "    if out_ptr.is_null() || out_len.is_null() {{ ffi_panic(); }}\n    let s = {call};\n    let v = s.into_bytes().into_boxed_slice();\n    let len = v.len();\n    let ptr = Box::into_raw(v) as *mut u8;\n    unsafe {{\n        *out_len = len;\n        *out_ptr = ptr;\n    }}\n    0\n"
-            ),
-            "1",
-        ),
-        Some(Type::Int) | Some(Type::InlineRange { .. }) => (
-            String::new(),
-            " -> i64".to_string(),
-            format!("    {call}\n"),
-            "0",
-        ),
-        Some(Type::Float) | Some(Type::Float32) => (
-            String::new(),
-            " -> f64".to_string(),
-            format!("    ({call}) as f64\n"),
-            "0.0",
-        ),
-        Some(Type::Bool) => (
-            String::new(),
-            " -> i8".to_string(),
-            format!("    i8::from({call})\n"),
-            "0",
-        ),
-        Some(_) => return None,
-    };
-    let all_params = {
-        let mut p = params;
-        if !ret_params.is_empty() {
-            p.push(ret_params);
+
+    let return_count = entry
+        .return_type
+        .as_ref()
+        .filter(|ty| matches!(ty, Type::List(_)))
+        .and_then(|_| {
+            entry.params.iter().enumerate().find_map(|(index, (convention, ty))| {
+                (*convention == AccessConvention::Write
+                    && integer(ty)
+                    && entry
+                        .param_names
+                        .get(index)
+                        .is_some_and(|name| length_name(name)))
+                .then_some(index)
+            })
+        });
+    if matches!(entry.return_type, Some(Type::List(_))) && return_count.is_none() {
+        return None;
+    }
+
+    let mut params = Vec::new();
+    let mut setup = Vec::new();
+    let mut call_args = Vec::new();
+    for (index, (convention, ty)) in entry.params.iter().enumerate() {
+        if direct_native {
+            let native_ty = native_type(ty, *convention)?;
+            params.push(format!("p{index}: {native_ty}"));
+            let expr = match ty {
+                Type::String => {
+                    setup.push(format!(
+                        "    let p{index}_ptr = args[{index}].ptr;\n\
+                             let p{index}_bytes = if args[{index}].len == 0 {{ Vec::new() }} \
+                         else if p{index}_ptr.is_null() {{ ffi_panic(); }} else {{ \
+                         unsafe {{ std::slice::from_raw_parts(p{index}_ptr, args[{index}].len).to_vec() }} }};\n\
+                         let p{index}_text = String::from_utf8(p{index}_bytes).unwrap_or_else(|_| ffi_panic());\n\
+                         let p{index}_cstring = std::ffi::CString::new(p{index}_text).unwrap_or_else(|_| ffi_panic());"
+                    ));
+                    format!("p{index}_cstring.as_ptr()")
+                }
+                Type::List(_) => {
+                    setup.push(format!(
+                        "    let p{index}_ptr = args[{index}].ptr;\n\
+                         if p{index}_ptr.is_null() && args[{index}].len != 0 {{ ffi_panic(); }}"
+                    ));
+                    format!("p{index}_ptr as {native_ty}")
+                }
+                _ if *convention == AccessConvention::Write => {
+                    setup.push(format!(
+                        "    let p{index}_ptr = args[{index}].ptr;\n\
+                         if p{index}_ptr.is_null() {{ ffi_panic(); }}"
+                    ));
+                    format!("p{index}_ptr as {native_ty}")
+                }
+                Type::Float => format!("f64::from_bits(args[{index}].value)"),
+                Type::Float32 => format!("f32::from_bits(args[{index}].value as u32)"),
+                Type::Bool => format!("args[{index}].value != 0"),
+                Type::Char => format!("args[{index}].value as u32"),
+                Type::Named(_) => {
+                    format!("args[{index}].value as usize as *mut std::os::raw::c_void")
+                }
+                _ => format!("args[{index}].value as {native_ty}"),
+            };
+            call_args.push(expr);
+        } else {
+            let expected = foreign_rust_param_type(*convention, ty, _user_types);
+            let expr = match ty {
+                Type::String => {
+                    setup.push(format!(
+                        "    let p{index}_ptr = args[{index}].ptr;\n\
+                         let p{index}_bytes = if args[{index}].len == 0 {{ Vec::new() }} \
+                         else if p{index}_ptr.is_null() {{ ffi_panic(); }} else {{ \
+                         unsafe {{ std::slice::from_raw_parts(p{index}_ptr, args[{index}].len).to_vec() }} }};\n\
+                         let p{index} = String::from_utf8(p{index}_bytes).unwrap_or_else(|_| ffi_panic());"
+                    ));
+                    format!("p{index}")
+                }
+                Type::Named(_) if entry.c_abi => {
+                    // CBind handles are native pointers in the C wrapper
+                    // crate, even though their checked Jet surface is nominal.
+                    format!(
+                        "args[{index}].value as usize as *mut std::os::raw::c_void"
+                    )
+                }
+                Type::Named(_) => {
+                    format!(
+                        "args[{index}].value as usize as {}",
+                        expected.trim_start_matches("&mut ")
+                    )
+                }
+                Type::Float => format!("f64::from_bits(args[{index}].value)"),
+                Type::Float32 => format!("f32::from_bits(args[{index}].value as u32)"),
+                Type::Bool => format!("args[{index}].value != 0"),
+                Type::Char => {
+                    format!(
+                        "char::from_u32(args[{index}].value as u32).unwrap_or_else(|| ffi_panic())"
+                    )
+                }
+                _ => format!("args[{index}].value as {expected}"),
+            };
+            params.push(format!("p{index}: {}", native_type(ty, *convention)?));
+            call_args.push(expr);
         }
-        p.join(", ")
+    }
+
+    let cabi = format!("{}_cabi", entry.wrapper_name);
+    let native_ident = format!("{}_native", entry.wrapper_name);
+    let call = if direct_native {
+        format!("unsafe {{ {native_ident}({}) }}", call_args.join(", "))
+    } else {
+        format!("{}({})", entry.wrapper_name, call_args.join(", "))
     };
+    let native_decl = if direct_native {
+        let raw_ret = match entry.return_type.as_ref() {
+            Some(ty) => format!(" -> {}", return_native_type(ty)?),
+            None => String::new(),
+        };
+        format!(
+            "unsafe extern \"C\" {{\n    #[link_name = {:?}]\n    fn {native_ident}({}){raw_ret};\n}}\n\n",
+            entry.rust_path,
+            params.join(", "),
+        )
+    } else {
+        String::new()
+    };
+
+    let mut body = String::new();
+    body.push_str("    if argc != ");
+    body.push_str(&entry.params.len().to_string());
+    body.push_str(" || args.is_null() || out.is_null() {\n        ffi_host_fault();\n        return 1;\n    }\n");
+    body.push_str("    let args = unsafe { std::slice::from_raw_parts(args, argc) };\n");
+    body.push_str("    let out = unsafe { &mut *out };\n");
+    body.push_str("    out.value = 0;\n    out.ptr = std::ptr::null_mut();\n    out.len = 0;\n");
+    body.push_str(&setup.join("\n"));
+    if !setup.is_empty() {
+        body.push('\n');
+    }
+
+    match &entry.return_type {
+        None => {
+            body.push_str("    let _ = ");
+            body.push_str(&call);
+            body.push_str(";\n");
+        }
+        Some(Type::List(_)) if direct_native => {
+            body.push_str("    let result = ");
+            body.push_str(&call);
+            body.push_str(";\n");
+            let count = return_count.expect("validated returned-list count");
+            let count_ty = scalar_type(&entry.params[count].1)?;
+            body.push_str(&format!(
+                "    let raw_len = unsafe {{ *(args[{count}].ptr as *const {count_ty}) }};\n"
+            ));
+            if signed_integer(&entry.params[count].1) {
+                body.push_str("    if raw_len < 0 { ffi_panic(); }\n");
+            }
+            body.push_str("    let len = raw_len as usize;\n");
+            body.push_str(
+                "    if result.is_null() && len != 0 { ffi_panic(); }\n\
+                     out.ptr = result as *mut u8;\n\
+                     out.len = len;\n",
+            );
+        }
+        Some(Type::String) => {
+            body.push_str("    let result = ");
+            body.push_str(&call);
+            body.push_str(";\n");
+            if direct_native {
+                body.push_str(
+                    "    if result.is_null() { ffi_panic(); }\n\
+                         let bytes = unsafe { std::ffi::CStr::from_ptr(result) }.to_bytes().to_vec();\n",
+                );
+            } else {
+                body.push_str("    let bytes = result.into_bytes();\n");
+            }
+            body.push_str(
+                "    let boxed = bytes.into_boxed_slice();\n\
+                     out.len = boxed.len();\n\
+                     out.ptr = Box::into_raw(boxed) as *mut u8;\n",
+            );
+        }
+        Some(Type::Float) => {
+            body.push_str(&format!("    out.value = ({call}).to_bits();\n"));
+        }
+        Some(Type::Float32) => {
+            body.push_str(&format!("    out.value = ({call}).to_bits() as u64;\n"));
+        }
+        Some(Type::Bool) => {
+            body.push_str(&format!("    out.value = u64::from({call});\n"));
+        }
+        Some(Type::Char) => {
+            body.push_str(&format!("    out.value = ({call}) as u32 as u64;\n"));
+        }
+        Some(Type::Named(_)) => {
+            body.push_str(&format!(
+                "    out.value = ({call}) as usize as u64;\n"
+            ));
+        }
+        Some(Type::Int)
+        | Some(Type::IntN { .. })
+        | Some(Type::InlineRange { .. })
+        | Some(Type::Tagged { .. })
+        | Some(Type::Quantity { .. }) => {
+            body.push_str(&format!("    out.value = ({call}) as u64;\n"));
+        }
+        Some(Type::List(_)) => return None,
+        Some(_) => return None,
+    }
+    body.push_str("    0\n");
+
     Some(format!(
-        "#[no_mangle]\npub unsafe extern \"C\" fn {cabi}({all_params}){ret_ty} {{\n    match ffi_catch_unwind(|| {{\n{body}    }}) {{\n        Ok(value) => value,\n        Err(_) => {{ ffi_host_fault(); {panic_return} }},\n    }}\n}}\n"
+        "{native_decl}#[no_mangle]\npub unsafe extern \"C\" fn {cabi}(args: *const JetFfiSlot, argc: usize, out: *mut JetFfiSlot) -> i32 {{\n    match ffi_catch_unwind(|| {{\n{body}    }}) {{\n        Ok(code) => code,\n        Err(_) => {{ ffi_host_fault(); 1 }},\n    }}\n}}\n"
     ))
 }
 
@@ -4415,12 +5855,9 @@ fn stable_cargo_detail(stderr: &str) -> String {
 }
 
 fn normalize_ffi_generated_source_line(line: &str) -> String {
-    let marker = [
-        "match std::panic::catch_unwind(",
-        "match ffi_catch_unwind(",
-    ]
-    .into_iter()
-    .find_map(|marker| line.find(marker).map(|start| (marker, start)));
+    let marker = ["match std::panic::catch_unwind(", "match ffi_catch_unwind("]
+        .into_iter()
+        .find_map(|marker| line.find(marker).map(|start| (marker, start)));
     let Some((marker, start)) = marker else {
         return line.to_string();
     };
@@ -4496,6 +5933,107 @@ mod tests {
     use super::*;
     use crate::AST::{AccessConvention, Type};
     use std::collections::HashSet;
+    #[test]
+    fn cargo_metadata_detects_transitive_compile_time_targets() {
+        let root_only =
+            r#"{"packages":[{"name":"jet_ffi_root","targets":[{"kind":["custom-build"]}]}]}"#;
+        assert!(!cargo_metadata_has_compile_time_code(root_only, "jet_ffi_root").unwrap());
+
+        let transitive_build = r#"{"packages":[{"name":"jet_ffi_root","targets":[{"kind":["lib"]}]},{"name":"arrayref","targets":[{"kind":["custom-build"]}]}]}"#;
+        assert!(cargo_metadata_has_compile_time_code(transitive_build, "jet_ffi_root").unwrap());
+
+        let transitive_proc_macro = r#"{"packages":[{"name":"jet_ffi_root","targets":[{"kind":["lib"]}]},{"name":"derive_helper","targets":[{"kind":["proc-macro"]}]}]}"#;
+        assert!(
+            cargo_metadata_has_compile_time_code(transitive_proc_macro, "jet_ffi_root").unwrap()
+        );
+    }
+    #[test]
+    fn cargo_lock_bridge_records_resolved_registry_versions() {
+        let raw = r#"
+version = 4
+
+[[package]]
+name = "base64"
+version = "0.22.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "jet_ffi_bridge"
+version = "0.1.0"
+dependencies = [
+ "base64",
+]
+"#;
+        let packages = cargo_lock_bridge_packages(raw, "bridge-key", "sha256-artifact").unwrap();
+        assert_eq!(packages.len(), 1);
+        let package = &packages[0];
+        assert_eq!(package.name, "base64");
+        assert_eq!(package.version, "0.22.1");
+        assert_eq!(package.dependencies, vec!["serde"]);
+        assert_eq!(
+            package.content_hash.as_deref(),
+            Some("sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        );
+        assert!(matches!(
+            &package.source,
+            crate::Lock::LockSource::Foreign {
+                language: ForeignLanguage::Rust,
+                reference,
+                output,
+            } if reference == "base64@0.22.1" && output == "sha256-artifact"
+        ));
+    }
+
+    #[test]
+    fn tampered_bridge_artifact_reports_e2604() {
+        let root = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".cache")
+            .join("jet-test-scratch")
+            .join("ExternRust2432")
+            .join("scratch")
+            .join(format!("ffi-integrity-{}", std::process::id()));
+        let target = root.join("target");
+        let artifact = target.join("libbridge.rlib");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&target).unwrap();
+        let original = b"bridge artifact";
+        fs::write(&artifact, original).unwrap();
+        let digest = crate::SHA256::sha256_hex(original);
+        fs::write(
+            target.join("bridge.sha256"),
+            format!("{BRIDGE_ARTIFACTS_SCHEMA}\n{digest} libbridge.rlib\n"),
+        )
+        .unwrap();
+        let tampered = b"tampered bridge artifact";
+        fs::write(&artifact, tampered).unwrap();
+        let deps = BTreeMap::from([("base64".to_string(), "0.22".to_string())]);
+        let diagnostic =
+            bridge_artifact_integrity_diagnostic(&target, "bridge", &deps, &[artifact.clone()])
+                .unwrap();
+        assert_eq!(diagnostic.code, "E2604");
+        assert_eq!(
+            diagnostic.what,
+            format!(
+                "Integrity check failed for `base64` `0.22` — expected `sha256-{digest}`, got `sha256-{}`.",
+                crate::SHA256::sha256_hex(tampered)
+            )
+        );
+        assert!(diagnostic.why.contains("changed after it was locked"));
+        assert!(diagnostic.fix.contains("`jet clean`"));
+
+        fs::write(&artifact, original).unwrap();
+        assert!(
+            bridge_artifact_integrity_diagnostic(&target, "bridge", &deps, &[artifact]).is_none(),
+            "an artifact matching its locked digest must pass"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
 
     #[test]
     fn generated_rust_bridge_carries_the_canonical_descriptor_stamp() {
@@ -4504,15 +6042,19 @@ mod tests {
             rust_path: "std::cmp::max".into(),
             wrapper_name: "jet_ffi_rust_max".into(),
             params: vec![(AccessConvention::Read, Type::Int)],
+            param_names: vec!["value".into()],
             return_type: Some(Type::Int),
             crate_spec: "std".into(),
             line_hint: "extern rust rust_max".into(),
             inline: None,
             c_abi: false,
+            generated: false,
+            c_module: false,
             close: None,
         };
         let source = emit_wrapper_lib(
             &[entry],
+            false,
             false,
             false,
             false,
@@ -4578,15 +6120,19 @@ mod tests {
             rust_path: "jet_com_office_open".into(),
             wrapper_name: "jet_ffi_open".into(),
             params: Vec::new(),
+            param_names: Vec::new(),
             return_type: Some(Type::Int),
             crate_spec: "std".into(),
             line_hint: "`open` in COM module `jet_com_office`".into(),
             inline: None,
             c_abi: true,
+            generated: false,
+            c_module: true,
             close: None,
         };
         let source = emit_wrapper_lib(
             &[entry],
+            false,
             false,
             false,
             false,
@@ -4606,6 +6152,7 @@ mod tests {
     fn generated_bridge_reports_through_host_callback() {
         let source = emit_wrapper_lib(
             &[],
+            false,
             false,
             false,
             false,
@@ -4640,22 +6187,22 @@ mod tests {
             rust_path: "std::convert::identity".into(),
             wrapper_name: "jet_ffi_echo".into(),
             params: vec![(AccessConvention::Read, Type::String)],
+            param_names: vec!["value".into()],
             return_type: Some(Type::String),
             crate_spec: "std".into(),
             line_hint: "extern rust echo".into(),
             inline: None,
             c_abi: false,
+            generated: false,
+            c_module: false,
             close: None,
         };
         let source = emit_cabi_trampoline(&value_entry, &HashSet::new()).unwrap();
-        assert!(source.contains("String::from_utf8(bytes)"), "{source}");
+        assert!(source.contains("String::from_utf8(p0_bytes)"), "{source}");
         assert!(source.contains("p0_ptr.is_null()"), "{source}");
         assert!(source.contains("ffi_catch_unwind"), "{source}");
         assert!(source.contains("ffi_host_fault(); 1"), "{source}");
-        assert!(
-            source.contains("out_ptr.is_null() || out_len.is_null()"),
-            "{source}"
-        );
+        assert!(source.contains("out.ptr"), "{source}");
         assert!(!source.contains("from_utf8_unchecked"), "{source}");
 
         let capability_entry = ExternEntry {
@@ -4672,6 +6219,7 @@ mod tests {
             rust_path: String::new(),
             wrapper_name: "jet_ffi_edit".into(),
             params: vec![(AccessConvention::Write, Type::Int)],
+            param_names: vec!["value".into()],
             return_type: None,
             crate_spec: "std".into(),
             line_hint: "#FFI(c) edit".into(),
@@ -4681,6 +6229,8 @@ mod tests {
                 param_names: vec!["value".into()],
             }),
             c_abi: false,
+            generated: false,
+            c_module: false,
             close: None,
         };
         let inline = entry.inline.as_ref().unwrap();
@@ -4703,6 +6253,7 @@ mod tests {
     fn crypto_bridge_projects_outcome_without_host_runtime_stop_adapter() {
         let source = emit_wrapper_lib(
             &[],
+            false,
             false,
             false,
             false,
@@ -4816,6 +6367,7 @@ mod tests {
             rust_path: String::new(),
             wrapper_name: "jet_ffi_probe".into(),
             params: vec![(AccessConvention::Read, Type::Int)],
+            param_names: vec!["value".into()],
             return_type: Some(Type::Int),
             crate_spec: "std".into(),
             line_hint: "`#FFI(c) fn probe`".into(),
@@ -4825,6 +6377,8 @@ mod tests {
                 param_names: vec!["value".into()],
             }),
             c_abi: false,
+            generated: false,
+            c_module: false,
             close: None,
         };
         let mut cpp_entry = entry.clone();
@@ -4860,7 +6414,6 @@ mod tests {
         assert!(!generated.contains("Command::new(\"cc\")"));
         assert!(!generated.contains("Command::new(\"ar\")"));
 
-
         let key = |toolchain: &InlineNativeToolchain| {
             cache_key_full(
                 &entries,
@@ -4875,9 +6428,14 @@ mod tests {
                 false,
                 false,
                 false,
+                &[],
+                false,
+                &[],
+                &FfiLinkClosure::default(),
                 &toolchain.target,
                 Some(toolchain),
                 &[],
+                None,
             )
         };
         let first = key(&toolchain);
@@ -4895,19 +6453,48 @@ mod tests {
             rust_path: "host-add$raw".into(),
             wrapper_name: "jet_ffi_guest___jet_mod__host_add".into(),
             params: vec![(AccessConvention::Read, Type::Int)],
+            param_names: vec!["value".into()],
             return_type: Some(Type::Int),
             crate_spec: "std".into(),
             line_hint: "`#Import(c) fn host_add`".into(),
             inline: None,
             c_abi: true,
+            generated: false,
+            c_module: true,
             close: None,
         };
         let source = emit_c_wrapper_fn(&entry, &HashSet::new());
         assert!(source.contains("#[link_name = \"host-add$raw\"]"));
-        assert!(source.contains(
-            "fn jet_ffi_guest___jet_mod__host_add_native(p0: i64) -> i64;"
-        ));
+        assert!(source.contains("fn jet_ffi_guest___jet_mod__host_add_native(p0: i64) -> i64;"));
         assert!(source.contains("unsafe { jet_ffi_guest___jet_mod__host_add_native(p0) }"));
         assert!(!source.contains("fn host-add$raw"));
     }
+    #[test]
+    fn c_handle_cabi_uses_native_pointer_for_checked_nominal_type() {
+        let entry = ExternEntry {
+            jet_name: "gzclose".into(),
+            rust_path: "gzclose".into(),
+            wrapper_name: "jet_ffi_gzclose".into(),
+            params: vec![(
+                AccessConvention::Move,
+                Type::Named("GzFile".into()),
+            )],
+            param_names: vec!["file".into()],
+            return_type: None,
+            crate_spec: "std".into(),
+            line_hint: "generated zlib close".into(),
+            inline: None,
+            c_abi: true,
+            generated: true,
+            c_module: true,
+            close: None,
+        };
+        let source = emit_cabi_trampoline(&entry, &HashSet::new()).unwrap();
+        assert!(source.contains(
+            "args[0].value as usize as *mut std::os::raw::c_void"
+        ));
+        assert!(source.contains("jet_ffi_gzclose(args[0].value"));
+        assert!(!source.contains("as GzFile"));
+    }
 }
+

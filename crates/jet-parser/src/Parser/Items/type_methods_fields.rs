@@ -90,6 +90,15 @@ impl<'a> Parser<'a> {
 
     /// S27: method inside a type body or `impl` block.
     pub(super) fn method_in_type(&mut self) -> Result<Func, Diagnostic> {
+        // D-FOUND-LITERAL1=A (card #2789): `@fn` is an existing compile-time
+        // marker followed by the ordinary `fn` keyword. Keep it on the AST
+        // instead of folding it into purity; sema gates its legal site and
+        // proves the body is effect-free before selecting a literal hook.
+        let is_comptime = matches!(self.peek().kind, TokKind::At)
+            && matches!(self.peek2().kind, TokKind::KwFn);
+        if is_comptime {
+            self.bump();
+        }
         let markers = if matches!(self.peek().kind, TokKind::Hash) {
             match self.parse_method_marker_sequence() {
                 Ok(markers) => markers,
@@ -111,7 +120,7 @@ impl<'a> Parser<'a> {
         }
         let (is_pub, is_package_pub) = self.parse_pub_qualifier();
         self.expect_kw(TokKind::KwFn, "to start a method")?;
-        let function = self.func_after_fn(
+        let mut function = self.func_after_fn(
             is_pub,
             is_package_pub,
             false,
@@ -135,6 +144,7 @@ impl<'a> Parser<'a> {
             None,
             false,
         )?;
+        function.is_comptime = is_comptime;
         self.reject_root_method_params(&function.params);
         self.apply_method_markers(function, markers)
     }
@@ -424,7 +434,9 @@ impl<'a> Parser<'a> {
         let (name, name_span) = self.expect_ident("for Output defaults")?;
         self.expect(TokKind::Colon, "after `defaults`")?;
         let value = self.expr()?;
-        self.expect(TokKind::Semi, "after Output defaults")?;
+        if matches!(self.peek().kind, TokKind::Semi) {
+            self.bump();
+        }
         Ok(ConstDef {
             span: Span::new(start, self.prev_end()),
             name,

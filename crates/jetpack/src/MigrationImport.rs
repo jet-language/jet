@@ -4,10 +4,17 @@
 //! canonical editable files and data-only TODO facts for callers/tests.
 
 use super::ProviderGraph::{normalize_provider_document, ProviderFamily};
-use super::JSON::{self, JSONValue};
+use super::JSON;
+use jet_foundation::DataTree::DataTree;
 use jet_pkg_model::ProviderFacts::{ProviderFactValue, ProviderFacts};
 use jet_pkg_model::{RefSpec, Syntax};
 use std::collections::BTreeMap;
+
+fn object_field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+    object
+        .iter()
+        .find_map(|(name, value)| (name == key).then_some(value))
+}
 
 fn canonical_package_ref(reference: &str) -> String {
     RefSpec::migrate_persisted_ref(reference).canonical
@@ -312,7 +319,7 @@ pub fn import_nix_facts(source_path: &str, facts_json: &str) -> ImportPlan {
         &root_reference,
         source_path,
     );
-    if let Some(JSONValue::Array(pkgs)) = obj.and_then(|m| m.get("packages")) {
+    if let Some(DataTree::Array(pkgs)) = obj.and_then(|object| object_field(object, "packages")) {
         for (index, pkg) in pkgs.iter().enumerate() {
             let Some((name, provider_ref, locked, immutable_source, exact)) =
                 nix_import_package(pkg)
@@ -332,7 +339,7 @@ pub fn import_nix_facts(source_path: &str, facts_json: &str) -> ImportPlan {
                 dev: false,
             });
             let mut facts = ProviderFacts::for_reference("nix", &provider_ref);
-            if let JSONValue::Object(_) = pkg {
+            if let DataTree::Object(_) = pkg {
                 let package_report =
                     normalize_provider_document(ProviderFamily::Nix, &nix_json_value(pkg));
                 merge_provider_projection(
@@ -360,7 +367,7 @@ pub fn import_nix_facts(source_path: &str, facts_json: &str) -> ImportPlan {
                     facts.add_loss("provider.selector", reason, source_path);
                 }
             }
-            if let JSONValue::Object(package) = pkg {
+            if let DataTree::Object(package) = pkg {
                 for key in [
                     "pname", "version", "revision", "rev", "narHash", "hash", "drvPath",
                 ] {
@@ -375,13 +382,13 @@ pub fn import_nix_facts(source_path: &str, facts_json: &str) -> ImportPlan {
             }
             plan.retain_provider_facts_with_source(facts, source_path);
         }
-    } else if obj.is_some_and(|object| object.contains_key("packages")) {
+    } else if obj.is_some_and(|object| object_field(object, "packages").is_some()) {
         plan.record_provider_finding(
             source_path.to_string(),
             "Nix `packages` must be an array of package names or exact records".to_string(),
         );
     }
-    if obj.and_then(|m| m.get("shellHook")).is_some() {
+    if obj.and_then(|object| object_field(object, "shellHook")).is_some() {
         plan.todos.push(ImportTodo {
             source_path: source_path.to_string(),
             message: "`shellHook` needs an explicit Jetpack realization/env action".to_string(),
@@ -396,12 +403,8 @@ pub fn import_nix_facts(source_path: &str, facts_json: &str) -> ImportPlan {
     plan
 }
 
-fn nix_import_string(
-    object: &std::collections::BTreeMap<String, JSONValue>,
-    key: &str,
-) -> Option<String> {
-    object
-        .get(key)
+fn nix_import_string(object: &[(String, DataTree)], key: &str) -> Option<String> {
+    object_field(object, key)
         .and_then(|value| value.as_str().ok())
         .filter(|value| !value.trim().is_empty())
         .map(str::to_string)
@@ -435,14 +438,23 @@ fn merge_provider_projection(
     }
 }
 
-fn nix_json_value(value: &JSONValue) -> String {
+fn nix_json_value(value: &DataTree) -> String {
     match value {
-        JSONValue::Null => "null".to_string(),
-        JSONValue::Bool(value) => value.to_string(),
-        JSONValue::Number(value) => value.to_string(),
-        JSONValue::Flt(value) => value.to_string(),
-        JSONValue::String(value) => JSON::quote(value),
-        JSONValue::Array(values) => format!(
+        DataTree::Null => "null".to_string(),
+        DataTree::Bool(value) => value.to_string(),
+        DataTree::Int(value) => value.to_string(),
+        DataTree::Float(value) => value.to_string(),
+        DataTree::Number(value) => value.clone(),
+        DataTree::Text(value) | DataTree::TypedText(value) => JSON::quote(value),
+        DataTree::Bytes(values) => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(u8::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        DataTree::Array(values) => format!(
             "[{}]",
             values
                 .iter()
@@ -450,7 +462,7 @@ fn nix_json_value(value: &JSONValue) -> String {
                 .collect::<Vec<_>>()
                 .join(",")
         ),
-        JSONValue::Object(values) => format!(
+        DataTree::Object(values) => format!(
             "{{{}}}",
             values
                 .iter()
@@ -461,9 +473,11 @@ fn nix_json_value(value: &JSONValue) -> String {
     }
 }
 
-fn nix_import_package(value: &JSONValue) -> Option<(String, String, String, Option<String>, bool)> {
+fn nix_import_package(
+    value: &DataTree,
+) -> Option<(String, String, String, Option<String>, bool)> {
     let (name, source, version, revision, digest, reference) = match value {
-        JSONValue::String(raw) => {
+        DataTree::Text(raw) | DataTree::TypedText(raw) => {
             let raw = raw.trim();
             if raw.is_empty() {
                 return None;
@@ -481,7 +495,7 @@ fn nix_import_package(value: &JSONValue) -> Option<(String, String, String, Opti
             };
             (name, None, None, None, None, Some(reference))
         }
-        JSONValue::Object(object) => (
+        DataTree::Object(object) => (
             nix_import_string(object, "name")
                 .or_else(|| nix_import_string(object, "pname"))
                 .or_else(|| nix_import_string(object, "package"))?,
@@ -524,7 +538,7 @@ fn nix_import_package(value: &JSONValue) -> Option<(String, String, String, Opti
     };
     let exact = selector_facts.selector.is_exact();
     let immutable_source = match value {
-        JSONValue::Object(object) => nix_import_string(object, "drvPath")
+        DataTree::Object(object) => nix_import_string(object, "drvPath")
             .or_else(|| nix_import_string(object, "immutableSource"))
             .or_else(|| nix_import_string(object, "sourceIdentity"))
             .or_else(|| nix_import_string(object, "sourcePath")),
@@ -691,13 +705,13 @@ pub fn import_npm(package_json: &str) -> ImportPlan {
     let parsed = JSON::parse(package_json).ok();
     let obj = parsed.as_ref().and_then(|j| j.as_object().ok());
     let source_name = obj
-        .and_then(|m| m.get("name"))
-        .and_then(|v| v.as_str().ok())
+        .and_then(|object| object_field(object, "name"))
+        .and_then(|value| value.as_str().ok())
         .unwrap_or_default()
         .to_string();
     let source_version = obj
-        .and_then(|m| m.get("version"))
-        .and_then(|v| v.as_str().ok())
+        .and_then(|object| object_field(object, "version"))
+        .and_then(|value| value.as_str().ok())
         .unwrap_or_default()
         .to_string();
     let name = if source_name.is_empty() {
@@ -735,7 +749,7 @@ pub fn import_npm(package_json: &str) -> ImportPlan {
         ("optionalDependencies", false, "optional"),
         ("peerDependencies", false, "peer"),
     ] {
-        let Some(JSONValue::Object(deps)) = obj.and_then(|m| m.get(field)) else {
+        let Some(DataTree::Object(deps)) = obj.and_then(|object| object_field(object, field)) else {
             continue;
         };
         for (name, val) in deps {
@@ -813,10 +827,12 @@ pub fn import_npm(package_json: &str) -> ImportPlan {
             plan.retain_provider_facts_with_source(facts, "package.json");
         }
     }
-    if let Some(JSONValue::Array(bundled)) = obj.and_then(|m| m.get("bundledDependencies")) {
+    if let Some(DataTree::Array(bundled)) =
+        obj.and_then(|object| object_field(object, "bundledDependencies"))
+    {
         if !bundled.is_empty() {
             for (index, value) in bundled.iter().enumerate() {
-                if !matches!(value, JSONValue::String(_)) {
+                if !matches!(value, DataTree::Text(_) | DataTree::TypedText(_)) {
                     plan.record_provider_finding(
                         "package.json".to_string(),
                         format!(
@@ -831,8 +847,10 @@ pub fn import_npm(package_json: &str) -> ImportPlan {
             );
         }
     }
-    if let Some(JSONValue::Object(scripts)) = obj.and_then(|m| m.get("scripts")) {
-        for name in scripts.keys() {
+    if let Some(DataTree::Object(scripts)) =
+        obj.and_then(|object| object_field(object, "scripts"))
+    {
+        for (name, _) in scripts {
             plan.todos.push(ImportTodo {
                 source_path: "package.json".to_string(),
                 message: format!("npm script `{name}` becomes a declared legacy build action"),

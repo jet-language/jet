@@ -5,7 +5,8 @@
 //! same binary decoder and limit checker before evidence reaches evaluation.
 
 use jet_foundation::PerformanceBudget::{stable_id, CanonicalJson, Rational};
-use jet_foundation::EncodingJson::{parse_json, Value as JsonValue};
+use jet_foundation::DataTree::DataTree;
+use jet_foundation::EncodingJson::parse_json;
 use jet_foundation::PerformanceBudget::{
     Comparison, Direction, Enforcement, Evaluation, MeasurementPolicy, Percentile,
 };
@@ -2070,19 +2071,19 @@ fn read_compile_phases(
     let value = parse_json(text.trim(), true)
         .map_err(|error| ProviderFailure::malformed(format!("explain-build output is invalid: {}", error.message)))?;
     let record = match &value {
-        JsonValue::Object(fields) => fields
+        DataTree::Object(fields) => fields
             .iter()
             .find(|(name, _)| name == "build")
             .map(|(_, value)| value)
             .unwrap_or(&value),
         _ => &value,
     };
-    let JsonValue::Object(fields) = record else {
+    let DataTree::Object(fields) = record else {
         return Err(ProviderFailure::malformed(
             "explain-build record is not an object",
         ));
     };
-    let Some((_, JsonValue::Text(schema))) =
+    let Some((_, DataTree::Text(schema) | DataTree::TypedText(schema))) =
         fields.iter().find(|(name, _)| name == "schema")
     else {
         return Err(ProviderFailure::malformed(
@@ -2096,25 +2097,27 @@ fn read_compile_phases(
     }
     if !matches!(
         fields.iter().find(|(name, _)| name == "program"),
-        Some((_, JsonValue::Text(program))) if !program.is_empty()
+        Some((_, DataTree::Text(program) | DataTree::TypedText(program))) if !program.is_empty()
     ) {
         return Err(ProviderFailure::malformed(
             "explain-build record has no program",
         ));
     }
-    let Some((_, JsonValue::Array(nodes))) = fields.iter().find(|(name, _)| name == "nodes") else {
+    let Some((_, DataTree::Array(nodes))) = fields.iter().find(|(name, _)| name == "nodes") else {
         return Err(ProviderFailure::malformed(
             "explain-build record has no nodes",
         ));
     };
     let mut phases = BTreeMap::<String, u128>::new();
     for node in nodes {
-        let JsonValue::Object(node) = node else {
+        let DataTree::Object(node) = node else {
             return Err(ProviderFailure::malformed(
                 "explain-build node is not an object",
             ));
         };
-        let Some((_, JsonValue::Text(kind))) = node.iter().find(|(name, _)| name == "kind") else {
+        let Some((_, DataTree::Text(kind) | DataTree::TypedText(kind))) =
+            node.iter().find(|(name, _)| name == "kind")
+        else {
             return Err(ProviderFailure::malformed(
                 "explain-build node has no kind",
             ));
@@ -2127,19 +2130,22 @@ fn read_compile_phases(
         for field in ["key", "subject", "why_ran"] {
             if !matches!(
                 node.iter().find(|(name, _)| name == field),
-                Some((_, JsonValue::Text(value))) if !value.is_empty()
+                Some((_, DataTree::Text(value) | DataTree::TypedText(value))) if !value.is_empty()
             ) {
                 return Err(ProviderFailure::malformed(format!(
                     "explain-build node has no {field}"
                 )));
             }
         }
-        let Some((_, JsonValue::Array(inputs))) = node.iter().find(|(name, _)| name == "inputs") else {
+        let Some((_, DataTree::Array(inputs))) = node.iter().find(|(name, _)| name == "inputs") else {
             return Err(ProviderFailure::malformed(
                 "explain-build node has no inputs",
             ));
         };
-        if inputs.iter().any(|value| !matches!(value, JsonValue::Text(_))) {
+        if inputs
+            .iter()
+            .any(|value| !matches!(value, DataTree::Text(_) | DataTree::TypedText(_)))
+        {
             return Err(ProviderFailure::malformed(
                 "explain-build node inputs are not strings",
             ));
@@ -2150,9 +2156,9 @@ fn read_compile_phases(
             ));
         };
         let duration_ms = match duration {
-            JsonValue::Float(value) => *value,
-            JsonValue::Int(value) => *value as f64,
-            JsonValue::Number(value) => value.parse::<f64>().map_err(|_| {
+            DataTree::Float(value) => *value,
+            DataTree::Int(value) => *value as f64,
+            DataTree::Number(value) => value.parse::<f64>().map_err(|_| {
                 ProviderFailure::malformed("explain-build node duration is not a number")
             })?,
             _ => {

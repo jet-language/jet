@@ -4,9 +4,16 @@
 //! native document or hide a field it cannot prove.  This record is the one
 //! identity/provenance seam consumed by package profiles and semantic locks.
 
-use crate::JSON::{self, JSONValue};
+use jet_foundation::DataTree::DataTree;
+use crate::JSON::{self};
 use crate::SHA256;
 use std::collections::BTreeMap;
+
+fn field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+    object
+        .iter()
+        .find_map(|(name, value)| (name == key).then_some(value))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderFactValue {
@@ -44,19 +51,25 @@ impl ProviderFactValue {
         }
     }
 
-    fn from_json(value: &JSONValue) -> Result<Self, String> {
+    fn from_json(value: &DataTree) -> Result<Self, String> {
         match value {
-            JSONValue::Null => Ok(Self::Null),
-            JSONValue::Bool(value) => Ok(Self::Bool(*value)),
-            JSONValue::Number(value) => Ok(Self::Number(value.to_string())),
-            JSONValue::Flt(value) => Ok(Self::Number(value.to_string())),
-            JSONValue::String(value) => Ok(Self::Text(value.clone())),
-            JSONValue::Array(values) => values
+            DataTree::Null => Ok(Self::Null),
+            DataTree::Bool(value) => Ok(Self::Bool(*value)),
+            DataTree::Int(value) => Ok(Self::Number(value.to_string())),
+            DataTree::Float(value) => Ok(Self::Number(value.to_string())),
+            DataTree::Number(value) => Ok(Self::Number(value.clone())),
+            DataTree::Text(value) | DataTree::TypedText(value) => Ok(Self::Text(value.clone())),
+            DataTree::Bytes(values) => values
+                .iter()
+                .map(|value| Ok(Self::Number(value.to_string())))
+                .collect::<Result<Vec<_>, String>>()
+                .map(Self::List),
+            DataTree::Array(values) => values
                 .iter()
                 .map(Self::from_json)
                 .collect::<Result<Vec<_>, _>>()
                 .map(Self::List),
-            JSONValue::Object(values) => values
+            DataTree::Object(values) => values
                 .iter()
                 .map(|(key, value)| Ok((key.clone(), Self::from_json(value)?)))
                 .collect::<Result<BTreeMap<_, _>, String>>()
@@ -64,7 +77,7 @@ impl ProviderFactValue {
         }
     }
 
-    pub fn from_json_value(value: &JSONValue) -> Result<Self, String> {
+    pub fn from_json_value(value: &DataTree) -> Result<Self, String> {
         Self::from_json(value)
     }
 }
@@ -919,10 +932,9 @@ impl ProviderFacts {
         Self::from_json_value(&value)
     }
 
-    pub fn from_json_value(value: &JSONValue) -> Result<ProviderFacts, String> {
+    pub fn from_json_value(value: &DataTree) -> Result<ProviderFacts, String> {
         let root = value.as_object()?;
-        if root
-            .get("schema")
+        if field(root, "schema")
             .ok_or_else(|| "provider facts lack `schema`".to_string())?
             .as_str()?
             != "jet-provider-facts-v1"
@@ -930,28 +942,28 @@ impl ProviderFacts {
             return Err("provider facts have an unsupported schema".to_string());
         }
         let string = |key: &str| {
-            root.get(key)
+            field(root, key)
                 .ok_or_else(|| format!("provider facts lack `{key}`"))?
                 .as_str()
                 .map(str::to_string)
         };
-        let selector = parse_selector_value(root.get("selector"))?;
-        let facts = match root.get("facts") {
-            Some(JSONValue::Object(values)) => values
+        let selector = parse_selector_value(field(root, "selector"))?;
+        let facts = match field(root, "facts") {
+            Some(DataTree::Object(values)) => values
                 .iter()
                 .map(|(key, value)| Ok((key.clone(), ProviderFactValue::from_json(value)?)))
                 .collect::<Result<BTreeMap<_, _>, String>>()?,
             _ => return Err("provider facts `facts` is not an object".to_string()),
         };
-        let provenance = match root.get("provenance") {
-            Some(JSONValue::Object(values)) => values
+        let provenance = match field(root, "provenance") {
+            Some(DataTree::Object(values)) => values
                 .iter()
                 .map(|(key, value)| Ok((key.clone(), value.as_str()?.to_string())))
                 .collect::<Result<BTreeMap<_, _>, String>>()?,
             _ => return Err("provider facts `provenance` is not an object".to_string()),
         };
-        let losses = parse_losses(root.get("losses"))?;
-        let conflicts = parse_conflicts(root.get("conflicts"))?;
+        let losses = parse_losses(field(root, "losses"))?;
+        let conflicts = parse_conflicts(field(root, "conflicts"))?;
         Ok(ProviderFacts {
             provider: string("provider")?,
             reference: string("reference")?,
@@ -1093,19 +1105,17 @@ fn selector_json(selector: &ProviderSelector) -> String {
     )
 }
 
-fn parse_selector_value(value: Option<&JSONValue>) -> Result<ProviderSelector, String> {
-    let Some(JSONValue::Object(object)) = value else {
+fn parse_selector_value(value: Option<&DataTree>) -> Result<ProviderSelector, String> {
+    let Some(DataTree::Object(object)) = value else {
         return Err("provider facts `selector` is not an object".to_string());
     };
     let string = |key: &str| {
-        object
-            .get(key)
+        field(object, key)
             .ok_or_else(|| format!("provider selector lacks `{key}`"))?
             .as_str()
             .map(str::to_string)
     };
-    let features = object
-        .get("features")
+    let features = field(object, "features")
         .ok_or_else(|| "provider selector lacks `features`".to_string())?
         .as_array()?
         .iter()
@@ -1122,8 +1132,8 @@ fn parse_selector_value(value: Option<&JSONValue>) -> Result<ProviderSelector, S
     })
 }
 
-fn parse_losses(value: Option<&JSONValue>) -> Result<Vec<ProviderLoss>, String> {
-    let Some(JSONValue::Array(values)) = value else {
+fn parse_losses(value: Option<&DataTree>) -> Result<Vec<ProviderLoss>, String> {
+    let Some(DataTree::Array(values)) = value else {
         return Err("provider facts `losses` is not an array".to_string());
     };
     values
@@ -1131,18 +1141,12 @@ fn parse_losses(value: Option<&JSONValue>) -> Result<Vec<ProviderLoss>, String> 
         .map(|value| {
             let object = value.as_object()?;
             Ok(ProviderLoss {
-                key: object
-                    .get("key")
-                    .ok_or("loss lacks key")?
-                    .as_str()?
-                    .to_string(),
-                reason: object
-                    .get("reason")
+                key: field(object, "key").ok_or("loss lacks key")?.as_str()?.to_string(),
+                reason: field(object, "reason")
                     .ok_or("loss lacks reason")?
                     .as_str()?
                     .to_string(),
-                source: object
-                    .get("source")
+                source: field(object, "source")
                     .ok_or("loss lacks source")?
                     .as_str()?
                     .to_string(),
@@ -1151,8 +1155,8 @@ fn parse_losses(value: Option<&JSONValue>) -> Result<Vec<ProviderLoss>, String> 
         .collect()
 }
 
-fn parse_conflicts(value: Option<&JSONValue>) -> Result<Vec<ProviderConflict>, String> {
-    let Some(JSONValue::Array(values)) = value else {
+fn parse_conflicts(value: Option<&DataTree>) -> Result<Vec<ProviderConflict>, String> {
+    let Some(DataTree::Array(values)) = value else {
         return Err("provider facts `conflicts` is not an array".to_string());
     };
     values
@@ -1160,23 +1164,19 @@ fn parse_conflicts(value: Option<&JSONValue>) -> Result<Vec<ProviderConflict>, S
         .map(|value| {
             let object = value.as_object()?;
             Ok(ProviderConflict {
-                key: object
-                    .get("key")
+                key: field(object, "key")
                     .ok_or("conflict lacks key")?
                     .as_str()?
                     .to_string(),
-                left: object
-                    .get("left")
+                left: field(object, "left")
                     .ok_or("conflict lacks left")?
                     .as_str()?
                     .to_string(),
-                right: object
-                    .get("right")
+                right: field(object, "right")
                     .ok_or("conflict lacks right")?
                     .as_str()?
                     .to_string(),
-                source: object
-                    .get("source")
+                source: field(object, "source")
                     .ok_or("conflict lacks source")?
                     .as_str()?
                     .to_string(),

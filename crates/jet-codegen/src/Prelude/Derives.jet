@@ -1,0 +1,118 @@
+// D-ONCE-DERIVE1=A: built-in derive providers are ordinary Prelude derives.
+// Their typed bodies use the same template expansion as package source,
+// including reflected enum variant payloads.
+//
+// Enum equality/order match `self` once per variant, then dispatch `rhs`
+// inside that arm. A cartesian product of separate `if self ==` tables
+// would consume a non-copy payload and then use `self` again (E0121).
+derive T.Equatable {
+    fn equal(self, rhs: T) Bool -> {
+        @if T.@kind == "enum" {
+            @loop left in T.@fields {
+                if self == {
+                    .@left -> {
+                        @loop right in T.@fields {
+                            @if left.@index == right.@index {
+                                if rhs == {
+                                    .@right -> {
+                                        @loop field in left.@fields {
+                                            @if field.@ty == T.@name {
+                                                if self.@field.equal(rhs.@field) == false -> return false
+                                            } else {
+                                                if self.@field != rhs.@field -> return false
+                                            }
+                                        }
+                                        return true
+                                    }
+                                    else -> {}
+                                }
+                            } else {
+                                if rhs == {
+                                    .@right -> return false
+                                    else -> {}
+                                }
+                            }
+                        }
+                        return false
+                    }
+                    else -> {}
+                }
+            }
+            return false
+        } else {
+            @if T.@kind == "struct" {
+                @loop field in T.@fields {
+                    if self.@field != rhs.@field -> return false
+                }
+                return true
+            } else {
+                @if T.@base == "Float" || T.@base == "Float32" {
+                    return self.raw() <= rhs.raw() && self.raw() >= rhs.raw()
+                } else {
+                    return self.raw() == rhs.raw()
+                }
+            }
+        }
+    }
+}
+
+derive T.Comparable {
+    fn compare(self, rhs: T) Ordering -> {
+        @if T.@kind == "enum" {
+            @loop left in T.@fields {
+                if self == {
+                    .@left -> {
+                        @loop right in T.@fields {
+                            @if left.@index == right.@index {
+                                if rhs == {
+                                    .@right -> {
+                                        @loop field in left.@fields {
+                                            @if field.@ty == T.@name {
+                                                if self.@field.compare(rhs.@field) == {
+                                                    .Less -> return .Less
+                                                    .Greater -> return .Greater
+                                                    .Equal -> {}
+                                                }
+                                            } else {
+                                                if self.@field < rhs.@field -> return .Less
+                                                if self.@field > rhs.@field -> return .Greater
+                                            }
+                                        }
+                                        return .Equal
+                                    }
+                                    else -> {}
+                                }
+                            } else {
+                                if rhs == {
+                                    .@right -> {
+                                        @if left.@index < right.@index {
+                                            return .Less
+                                        } else {
+                                            return .Greater
+                                        }
+                                    }
+                                    else -> {}
+                                }
+                            }
+                        }
+                        return .Equal
+                    }
+                    else -> {}
+                }
+            }
+            return .Equal
+        } else {
+            @if T.@kind == "struct" {
+                @loop field in T.@fields {
+                    if self.@field < rhs.@field -> return .Less
+                    if self.@field > rhs.@field -> return .Greater
+                }
+                return .Equal
+            } else {
+                if self.raw() < rhs.raw() -> return .Less
+                if self.raw() > rhs.raw() -> return .Greater
+                return .Equal
+            }
+        }
+    }
+}

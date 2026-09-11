@@ -6,24 +6,22 @@ pub(crate) struct JetByteBuffer {
     pub(crate) bytes: Vec<u8>,
     pub(crate) pos: usize,
 }
+
+impl From<Vec<u8>> for JetByteBuffer {
+    fn from(bytes: Vec<u8>) -> Self {
+        Self { bytes, pos: 0 }
+    }
+}
+
 impl JetByteBuffer {
     pub(crate) fn new() -> Self {
-        Self {
-            bytes: Vec::new(),
-            pos: 0,
-        }
+        <Self as From<Vec<u8>>>::from(Vec::new())
     }
     pub(crate) fn with_capacity(n: i64) -> Self {
-        Self {
-            bytes: Vec::with_capacity(n.max(0) as usize),
-            pos: 0,
-        }
+        <Self as From<Vec<u8>>>::from(Vec::with_capacity(n.max(0) as usize))
     }
     pub(crate) fn from(bytes: &Vec<u8>) -> Self {
-        Self {
-            bytes: bytes.clone(),
-            pos: 0,
-        }
+        <Self as From<Vec<u8>>>::from(bytes.clone())
     }
     pub(crate) fn write_u8(&mut self, v: u8) {
         self.bytes.push(v);

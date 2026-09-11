@@ -117,8 +117,8 @@ fn interpret_on_thread(src: String) -> String {
         diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
     );
     let mut sink = jet::Comptime::DevSink::new();
-    jet::Codegen::TIR::install_comptime_bridge();
-    jet::Comptime::TirBridge::run_bundle(
+    jet::Codegen::MIREval::install_mir_bridge();
+    jet::Comptime::MirBridge::run_bundle(
         &bundle,
         &mut sink,
         jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),

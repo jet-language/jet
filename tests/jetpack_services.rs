@@ -373,7 +373,7 @@ fn dev_health_gate_waits_for_service_before_running() {
     write_project(
         &proj.path,
         r#"fixture: { run: ["sleep", "30"] }"#,
-        "fn dev() { print(\"DEV-RAN\"); }\n",
+        "fn dev() { print(\"DEV-RAN\") }\n",
     );
     let out = jetpack()
         .args(["dev", "--no-color"])
@@ -412,7 +412,7 @@ fn dev_service_never_healthy_is_e1261() {
         &proj.path,
         // `ready: "false"` never passes (exit 1), so this never reports healthy.
         r#"fixture: { run: ["sleep", "30"], ready: "false" }"#,
-        "fn dev() { print(\"DEV-RAN\"); }\n",
+        "fn dev() { print(\"DEV-RAN\") }\n",
     );
     let out = jetpack()
         .args(["dev", "--no-color"])
@@ -448,7 +448,7 @@ fn dev_unrecognized_service_field_is_e1262() {
     write_project(
         &proj.path,
         r#"fixture: { run: ["sleep", "30"], prot: 5432 }"#,
-        "fn dev() { print(\"DEV-RAN\"); }\n",
+        "fn dev() { print(\"DEV-RAN\") }\n",
     );
     let out = jetpack()
         .args(["dev", "--no-color"])

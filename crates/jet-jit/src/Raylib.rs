@@ -5,6 +5,13 @@
 use super::Concurrency;
 use crate::runtime_host::JitRuntime;
 
+#[allow(dead_code)]
+mod raylib_kernel {
+    include!("../../jet-codegen/src/Prelude/Core/Raylib.rs");
+}
+
+pub(crate) use raylib_kernel::JetRaylibSpriteDrawCall;
+
 #[derive(Clone)]
 pub(crate) struct RaylibWindowState {
     pub(crate) width: i64,
@@ -26,12 +33,48 @@ pub(crate) struct RaylibSoundState {
     pub(crate) path: String,
 }
 
+#[derive(Clone)]
+pub(crate) struct RaylibTextureAtlasState {
+    spec: raylib_kernel::JetRaylibAtlasSpec,
+}
+
 fn with_rt<F, R>(f: F) -> R
 where
     F: FnOnce(&mut JitRuntime) -> R,
     R: Default,
 {
     Concurrency::with_runtime_mut(f)
+}
+
+/// Register the Raylib interpreter adapter in the shared ambient context.
+///
+/// The callback delegates directly to the Comptime Raylib adapter rather than
+/// re-entering the public ambient dispatcher.
+pub(crate) fn register_interpreter_ambient(context: &mut crate::InterpreterAmbientContext) {
+    context.register_core_call(jet_raylib_ambient_core_call);
+}
+
+fn jet_raylib_ambient_core_call(
+    module: &str,
+    method: &str,
+    args: Vec<jet_foundation::AST::CtValue>,
+    span: jet_foundation::Diagnostics::Span,
+    resolved_ret: Option<jet_foundation::AST::Type>,
+    sink: Option<&mut jet_codegen::Comptime::DevSink>,
+) -> Option<
+    Result<
+        jet_foundation::AST::CtValue,
+        jet_foundation::Diagnostics::Diagnostic,
+    >,
+> {
+    jet_codegen::Comptime::apply_raylib_ambient_core_call(
+        module,
+        method,
+        args,
+        span,
+        resolved_ret,
+        sink,
+    )
 }
 
 fn display_enabled() -> bool {
@@ -121,6 +164,74 @@ fn jet_jit_raylib_play_sound(sound: i64) -> i8 {
     })
 }
 
+fn jet_jit_raylib_gamepad_down(gamepad: i64, button: i64) -> i8 {
+    with_rt(|rt| {
+        let Some(button) = rt.heap.clone_string(button) else {
+            return 0;
+        };
+        if gamepad < 0
+            || i32::try_from(gamepad).is_err()
+            || raylib_kernel::jet_raylib_button_code(&button).is_none()
+        {
+            return 0;
+        }
+        // The resident JIT adapter is headless; native input remains owned by
+        // the AOT bridge. Validated input still has the same no-input result.
+        0
+    })
+}
+
+fn jet_jit_raylib_gamepad_axis(gamepad: i64, axis: i64) -> f64 {
+    with_rt(|rt| {
+        let Some(axis) = rt.heap.clone_string(axis) else {
+            return 0.0;
+        };
+        if gamepad < 0
+            || i32::try_from(gamepad).is_err()
+            || raylib_kernel::jet_raylib_axis_code(&axis).is_none()
+        {
+            return 0.0;
+        }
+        0.0
+    })
+}
+
+fn jet_jit_raylib_load_texture_atlas(path: i64) -> i64 {
+    with_rt(|rt| {
+        let path = rt.heap.clone_string(path).unwrap_or_default();
+        let spec = raylib_kernel::jet_raylib_load_texture_atlas_spec(&path);
+        rt.raylib_atlases
+            .push(RaylibTextureAtlasState { spec });
+        rt.raylib_atlases.len() as i64
+    })
+}
+
+fn jet_jit_raylib_draw_sprite(atlas: i64, region: i64, x: i64, y: i64) {
+    with_rt(|rt| {
+        let Some(atlas) = rt
+            .raylib_atlases
+            .get(atlas.saturating_sub(1) as usize)
+            .cloned()
+        else {
+            return;
+        };
+        let Some(region) = rt.heap.clone_string(region) else {
+            return;
+        };
+        let Some(call) = raylib_kernel::jet_raylib_sprite_draw_call(
+            &atlas.spec.name,
+            &atlas.spec.regions,
+            &region,
+            x,
+            y,
+        ) else {
+            return;
+        };
+        rt.raylib_draw_calls.push(call.clone());
+        raylib_kernel::jet_raylib_record_draw_call(call);
+    })
+}
+
 host_fns! {
     struct RaylibHostFns;
     register: register_raylib_symbols;
@@ -155,4 +266,8 @@ host_fns! {
     window_ready: "jet_jit_raylib_window_ready" => jet_jit_raylib_window_ready: sig(1, Some(types::I8));
     load_sound: "jet_jit_raylib_load_sound" => jet_jit_raylib_load_sound: sig(1, Some(types::I64));
     play_sound: "jet_jit_raylib_play_sound" => jet_jit_raylib_play_sound: sig(1, Some(types::I8));
+    gamepad_down: "jet_jit_raylib_gamepad_down" => jet_jit_raylib_gamepad_down: sig(2, Some(types::I8));
+    gamepad_axis: "jet_jit_raylib_gamepad_axis" => jet_jit_raylib_gamepad_axis: sig(2, Some(types::F64));
+    load_texture_atlas: "jet_jit_raylib_load_texture_atlas" => jet_jit_raylib_load_texture_atlas: sig(1, Some(types::I64));
+    draw_sprite: "jet_jit_raylib_draw_sprite" => jet_jit_raylib_draw_sprite: sig(4, None);
 }

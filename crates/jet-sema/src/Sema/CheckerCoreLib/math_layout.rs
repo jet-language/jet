@@ -464,3 +464,523 @@ pub fn precise_mix_error(lt: &Type, rt: &Type) -> Option<(&'static str, String, 
     }
     None
 }
+/// D-SPACE-GEOMETRY1=A: coordinate-space geometry stays in the ordinary type
+/// algebra.  The scalar payload is still the existing `Float`; only the point
+/// or displacement carrier and its nominal space are checked here.
+pub fn is_geometry_type(name: &str) -> bool {
+    matches!(
+        name,
+        "Point2"
+            | "Delta2"
+            | "Transform"
+            | "Transform2"
+            | "Ray2"
+            | "ScreenPoint"
+            | "WorldPoint"
+            | "ViewPoint"
+            | "CameraPoint"
+            | "DevicePoint"
+            | "ScreenDelta"
+            | "WorldDelta"
+            | "ViewDelta"
+            | "CameraDelta"
+            | "DeviceDelta"
+    )
+}
+
+pub fn geometry_point_space(name: &str) -> Option<&'static str> {
+    match name {
+        "ScreenPoint" | "ScreenDelta" => Some("Screen"),
+        "WorldPoint" | "WorldDelta" => Some("World"),
+        "ViewPoint" | "ViewDelta" => Some("View"),
+        "CameraPoint" | "CameraDelta" => Some("Camera"),
+        "DevicePoint" | "DeviceDelta" => Some("Device"),
+        _ => None,
+    }
+}
+
+pub fn geometry_is_point(ty: &Type) -> bool {
+    match ty {
+        Type::Named(name) => matches!(
+            name.as_str(),
+            "ScreenPoint" | "WorldPoint" | "ViewPoint" | "CameraPoint" | "DevicePoint"
+        ),
+        Type::Apply { name, args } => name == "Point2" && args.len() == 2,
+        _ => false,
+    }
+}
+
+pub fn geometry_is_delta(ty: &Type) -> bool {
+    match ty {
+        Type::Named(name) => matches!(
+            name.as_str(),
+            "ScreenDelta" | "WorldDelta" | "ViewDelta" | "CameraDelta" | "DeviceDelta"
+        ),
+        Type::Apply { name, args } => name == "Delta2" && args.len() == 2,
+        _ => false,
+    }
+}
+
+pub fn geometry_space(ty: &Type) -> Option<Type> {
+    match ty {
+        Type::Named(name) => geometry_point_space(name).map(|space| {
+            Type::Named(
+                space
+                    .strip_suffix("Point")
+                    .or_else(|| space.strip_suffix("Delta"))
+                    .unwrap_or(space)
+                    .to_string(),
+            )
+        }),
+        Type::Apply { name, args } if matches!(name.as_str(), "Point2" | "Delta2") => {
+            args.get(1).cloned()
+        }
+        _ => None,
+    }
+}
+
+fn geometry_scalar(ty: &Type) -> Type {
+    match ty {
+        Type::Apply { args, .. } => args.first().cloned().unwrap_or(Type::Float),
+        _ => Type::Float,
+    }
+}
+
+fn geometry_same_space(left: &Type, right: &Type) -> bool {
+    geometry_space(left).is_some_and(|space| geometry_space(right) == Some(space))
+}
+
+fn geometry_generic(name: &str, scalar: Type, space: Type) -> Type {
+    Type::Apply {
+        name: name.to_string(),
+        args: vec![scalar, space],
+    }
+}
+fn geometry_point_type(ty: &Type, dynamic: bool) -> Type {
+    if dynamic {
+        return geometry_generic("Point2", geometry_scalar(ty), geometry_space(ty).expect("point has a space"));
+    }
+    ty.clone()
+}
+
+fn geometry_delta_type(ty: &Type, dynamic: bool) -> Type {
+    if dynamic {
+        return geometry_generic("Delta2", geometry_scalar(ty), geometry_space(ty).expect("delta has a space"));
+    }
+    match ty {
+        Type::Named(name) => {
+            let stock = match name.as_str() {
+                "ScreenPoint" => Some("ScreenDelta"),
+                "WorldPoint" => Some("WorldDelta"),
+                "ViewPoint" => Some("ViewDelta"),
+                "CameraPoint" => Some("CameraDelta"),
+                "DevicePoint" => Some("DeviceDelta"),
+                _ => None,
+            };
+            stock.map_or_else(|| ty.clone(), |name| Type::Named(name.to_string()))
+        }
+        _ => geometry_generic(
+            "Delta2",
+            geometry_scalar(ty),
+            geometry_space(ty).expect("delta has a space"),
+        ),
+    }
+}
+
+
+fn geometry_dynamic(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Apply { name, .. } if matches!(name.as_str(), "Point2" | "Delta2")
+    )
+}
+
+fn geometry_result(ok: Type) -> Type {
+    Type::Result {
+        ok: Box::new(ok),
+        err: Box::new(Type::Named("TransformError".to_string())),
+    }
+}
+
+pub fn geometry_binop_result(
+    op: crate::AST::BinOp,
+    left: &Type,
+    right: &Type,
+) -> Option<Result<Type, ()>> {
+    let has_geometry = geometry_is_point(left)
+        || geometry_is_point(right)
+        || geometry_is_delta(left)
+        || geometry_is_delta(right);
+    if !has_geometry {
+        return None;
+    }
+    use crate::AST::BinOp;
+    let same = geometry_same_space(left, right);
+    let dynamic = geometry_dynamic(left) || geometry_dynamic(right);
+    let result = match op {
+        BinOp::Add if same && geometry_is_point(left) && geometry_is_delta(right) => {
+            Some(Ok(if dynamic {
+                geometry_result(geometry_point_type(left, true))
+            } else {
+                left.clone()
+            }))
+        }
+        BinOp::Add if same && geometry_is_delta(left) && geometry_is_point(right) => {
+            Some(Ok(if dynamic {
+                geometry_result(geometry_point_type(right, true))
+            } else {
+                right.clone()
+            }))
+        }
+        BinOp::Add if same && geometry_is_delta(left) && geometry_is_delta(right) => {
+            Some(Ok(if dynamic {
+                geometry_result(geometry_delta_type(left, true))
+            } else {
+                left.clone()
+            }))
+        }
+        BinOp::Sub if same && geometry_is_point(left) && geometry_is_delta(right) => {
+            Some(Ok(if dynamic {
+                geometry_result(geometry_point_type(left, true))
+            } else {
+                left.clone()
+            }))
+        }
+        BinOp::Sub if same && geometry_is_point(left) && geometry_is_point(right) => {
+            Some(Ok(if dynamic {
+                geometry_result(geometry_delta_type(left, true))
+            } else {
+                geometry_delta_type(left, false)
+            }))
+        }
+        BinOp::Sub if same && geometry_is_delta(left) && geometry_is_delta(right) => {
+            Some(Ok(if dynamic {
+                geometry_result(geometry_delta_type(left, true))
+            } else {
+                left.clone()
+            }))
+        }
+        BinOp::Eq | BinOp::Ne
+            if same
+                && ((geometry_is_point(left) && geometry_is_point(right))
+                    || (geometry_is_delta(left) && geometry_is_delta(right))) =>
+        {
+            Some(Ok(Type::Bool))
+        }
+        _ => None,
+    };
+    result.or_else(|| Some(Err(())))
+}
+
+fn geometry_transform_parts(ty: &Type) -> Option<(Type, Type, Type)> {
+    let Type::Apply { name, args } = ty else {
+        return None;
+    };
+    match (name.as_str(), args.as_slice()) {
+        ("Transform", [from, to]) => Some((Type::Float, from.clone(), to.clone())),
+        ("Transform2", [scalar, from, to]) => Some((scalar.clone(), from.clone(), to.clone())),
+        _ => None,
+    }
+}
+
+pub fn geometry_method_return(
+    recv: &Type,
+    method: &str,
+    args: &[Type],
+) -> Option<Result<Type, ()>> {
+    if let Some((scalar, from, to)) = geometry_transform_parts(recv) {
+        return Some(match method {
+            "then" if args.len() == 1 => {
+                match args.first().and_then(geometry_transform_parts) {
+                    Some((next_scalar, next_from, next_to))
+                        if next_scalar == scalar && next_from == to =>
+                    {
+                        let composed = Type::Apply {
+                            name: if scalar == Type::Float {
+                                "Transform".to_string()
+                            } else {
+                                "Transform2".to_string()
+                            },
+                            args: if scalar == Type::Float {
+                                vec![from, next_to]
+                            } else {
+                                vec![scalar, from, next_to]
+                            },
+                        };
+                        Ok(Type::Result {
+                            ok: Box::new(composed),
+                            err: Box::new(Type::Named("TransformError".to_string())),
+                        })
+                    }
+                    _ => Err(()),
+                }
+            }
+            "inverse" if args.is_empty() => Ok(Type::Result {
+                ok: Box::new(Type::Apply {
+                    name: if scalar == Type::Float {
+                        "Transform".to_string()
+                    } else {
+                        "Transform2".to_string()
+                    },
+                    args: if scalar == Type::Float {
+                        vec![to, from]
+                    } else {
+                        vec![scalar, to, from]
+                    },
+                }),
+                err: Box::new(Type::Named("TransformError".to_string())),
+            }),
+            "point" if args.len() == 1
+                && args.first().is_some_and(geometry_is_point)
+                && args.first().and_then(geometry_space) == Some(from.clone()) =>
+            {
+                Ok(Type::Result {
+                    ok: Box::new(geometry_generic("Point2", scalar, to)),
+                    err: Box::new(Type::Named("TransformError".to_string())),
+                })
+            }
+            "point_at_depth" if args.len() == 2
+                && args.first().is_some_and(geometry_is_point)
+                && args.first().and_then(geometry_space) == Some(from.clone()) =>
+            {
+                Ok(Type::Result {
+                    ok: Box::new(geometry_generic("Point2", scalar, to)),
+                    err: Box::new(Type::Named("TransformError".to_string())),
+                })
+            }
+            "ray" if args.len() == 1
+                && args.first().is_some_and(geometry_is_point)
+                && args.first().and_then(geometry_space) == Some(from.clone()) =>
+            {
+                Ok(Type::Result {
+                    ok: Box::new(Type::Apply {
+                        name: "Ray2".to_string(),
+                        args: vec![scalar, from, to],
+                    }),
+                    err: Box::new(Type::Named("TransformError".to_string())),
+                })
+            }
+            _ => Err(()),
+        });
+    }
+    if geometry_is_point(recv) {
+        if args.len() != 1 {
+            return Some(Err(()));
+        }
+        let arg = &args[0];
+        let dynamic = geometry_dynamic(recv) || geometry_dynamic(arg);
+        let output = match method {
+            "add" if geometry_is_delta(arg) => Some(geometry_point_type(recv, dynamic)),
+            "sub" if geometry_is_point(arg) => Some(geometry_delta_type(recv, dynamic)),
+            _ => None,
+        };
+        let valid = output.is_some() && geometry_space(recv) == geometry_space(arg);
+        return Some(if valid {
+            let output = output.expect("validated geometry method result");
+            Ok(if dynamic {
+                geometry_result(output)
+            } else {
+                output
+            })
+        } else {
+            Err(())
+        });
+    }
+    if geometry_is_delta(recv) {
+        if args.len() != 1 {
+            return Some(Err(()));
+        }
+        let arg = &args[0];
+        let dynamic = geometry_dynamic(recv) || geometry_dynamic(arg);
+        let valid = matches!(method, "add" | "sub")
+            && geometry_is_delta(arg)
+            && geometry_space(recv) == geometry_space(arg);
+        return Some(if valid {
+            let output = geometry_delta_type(recv, dynamic);
+            Ok(if dynamic {
+                geometry_result(output)
+            } else {
+                output
+            })
+        } else {
+            Err(())
+        });
+    }
+    None
+}
+
+/// Return the source-facing values used by the registered E2520 row.
+///
+/// The operation table above intentionally keeps only the result type.  The
+/// checker still needs stable hole values when the table rejects an operation.
+/// Keep this helper beside the table so diagnostics cannot drift from the
+/// same-space rule.
+pub fn geometry_binop_diagnostic(
+    op: crate::AST::BinOp,
+    left: &Type,
+    right: &Type,
+) -> Option<(String, String, String)> {
+    if !(geometry_is_point(left)
+        || geometry_is_delta(left)
+        || geometry_is_point(right)
+        || geometry_is_delta(right))
+    {
+        return None;
+    }
+    let operation = op.spell().to_string();
+    let mut expected = geometry_space(left)
+        .map(|space| space.show())
+        .unwrap_or_else(|| left.show());
+    let mut actual = geometry_space(right)
+        .map(|space| space.show())
+        .unwrap_or_else(|| right.show());
+    if geometry_is_point(left) && geometry_is_point(right) {
+        expected = format!("a displacement in {expected}");
+        actual = format!("a point in {actual}");
+    }
+    Some((operation, expected, actual))
+}
+
+/// Return the source-facing values used by the registered E2521 row when a
+/// transform chain has incompatible middle spaces.
+pub fn geometry_transform_diagnostic(
+    recv: &Type,
+    method: &str,
+    args: &[Type],
+) -> Option<(String, String, String, String)> {
+    if method != "then" || args.len() != 1 {
+        return None;
+    }
+    let (
+        Type::Apply {
+            name,
+            args: recv_args,
+        },
+        Type::Apply {
+            name: next_name,
+            args: next_args,
+        },
+    ) = (recv, &args[0])
+    else {
+        return None;
+    };
+    let (_, middle_a) = match (name.as_str(), recv_args.as_slice()) {
+        ("Transform", [_, to]) => ((), to),
+        ("Transform2", [_, _, to]) => ((), to),
+        _ => return None,
+    };
+    let middle_b = match (next_name.as_str(), next_args.as_slice()) {
+        ("Transform", [next_from, _]) => next_from,
+        ("Transform2", [_, next_from, _]) => next_from,
+        _ => return None,
+    };
+    if middle_a == middle_b {
+        return None;
+    }
+    Some((
+        recv.show(),
+        args[0].show(),
+        middle_a.show(),
+        middle_b.show(),
+    ))
+}
+
+/// Expected value arguments for a valid geometry constructor.  Dynamic frame
+/// identities use the existing integer carrier; the generic type parameter
+/// remains the static space proof and is never inferred from a value.
+pub fn geometry_static_arg_types(
+    name: &str,
+    method: &str,
+    owner_args: &[Type],
+) -> Option<Vec<Type>> {
+    match (name, method) {
+        (
+            "ScreenPoint"
+            | "WorldPoint"
+            | "ViewPoint"
+            | "CameraPoint"
+            | "DevicePoint"
+            | "ScreenDelta"
+            | "WorldDelta"
+            | "ViewDelta"
+            | "CameraDelta"
+            | "DeviceDelta",
+            "new",
+        ) => Some(vec![Type::Float, Type::Float]),
+        ("Point2" | "Delta2", "new") if owner_args.len() == 2 => {
+            Some(vec![Type::Float, Type::Float, Type::Int])
+        }
+        ("Transform", "affine") if owner_args.len() == 2 => {
+            Some(vec![
+                Type::Float,
+                Type::Float,
+                Type::Float,
+                Type::Float,
+                Type::Float,
+                Type::Float,
+                Type::Int,
+                Type::Int,
+            ])
+        }
+        ("Transform2", "affine") if owner_args.len() == 3 => {
+            let scalar = owner_args[0].clone();
+            Some(vec![
+                scalar.clone(),
+                scalar.clone(),
+                scalar.clone(),
+                scalar.clone(),
+                scalar.clone(),
+                scalar,
+                Type::Int,
+                Type::Int,
+            ])
+        }
+        _ => None,
+    }
+}
+
+
+pub fn geometry_static_return(name: &str, method: &str, n_args: usize) -> Option<Type> {
+    if !is_geometry_type(name) {
+        return None;
+    }
+    match (name, method, n_args) {
+        (name, "new", 2) if geometry_point_space(name).is_some() => {
+            Some(Type::Named(name.to_string()))
+        }
+        ("Point2" | "Delta2", "new", 3) => None,
+        _ => None,
+    }
+}
+/// Named affine construction keeps the matrix slots explicit at the call site.
+/// The owner type supplies the static `From`/`To` spaces (and optional scalar
+/// for `Transform2`); frame identities remain dynamic carrier data.
+pub fn geometry_static_return_with_owner(
+    name: &str,
+    method: &str,
+    n_args: usize,
+    owner_args: &[Type],
+) -> Option<Type> {
+    if matches!(name, "Point2" | "Delta2")
+        && method == "new"
+        && n_args == 3
+        && owner_args.len() == 2
+    {
+        return Some(Type::Apply {
+            name: name.to_string(),
+            args: owner_args.to_vec(),
+        });
+    }
+    if matches!(name, "Transform" | "Transform2")
+        && method == "affine"
+        && n_args == 8
+        && ((name == "Transform" && owner_args.len() == 2)
+            || (name == "Transform2" && owner_args.len() == 3))
+    {
+        return Some(Type::Apply {
+            name: name.to_string(),
+            args: owner_args.to_vec(),
+        });
+    }
+    geometry_static_return(name, method, n_args)
+}

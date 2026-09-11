@@ -1,6 +1,7 @@
 use super::parse::Parsed;
 use crate::Output::Theme;
 use crate::Store;
+use jet_foundation::Report::StatusEnvelope;
 
 pub(super) fn cmd_why(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(query) = parsed.positional.first() else {
@@ -58,13 +59,13 @@ fn why_error(
             fix.to_string(),
             None,
         );
+        let file = jet_foundation::Diagnostics::ReportPath::from_process("");
+        let report = diagnostic.to_report(&file, "");
         print!(
             "{}",
-            jet_foundation::Diagnostics::render_all_json(
-                &jet_foundation::Diagnostics::ReportPath::from_process(""),
-                "",
-                &[diagnostic],
-            )
+            StatusEnvelope::new("why", false)
+                .with_reports(std::iter::once(report))
+                .json_line()
         );
     } else {
         theme.error_coded(code, what, why, fix);
@@ -74,7 +75,8 @@ fn why_error(
 
 #[cfg(test)]
 mod tests {
-    use super::Store::{PackageWhy, WhyDisk, WhyLocation, WhyOrigin, WhyRequesting, WhyTrust};
+    use jet_foundation::DataTree::DataTree;
+    use crate::Store::{PackageWhy, WhyDisk, WhyLocation, WhyOrigin, WhyRequesting, WhyTrust};
 
     fn sample() -> PackageWhy {
         PackageWhy {
@@ -112,6 +114,12 @@ mod tests {
             dependents: vec!["tool@1.0 (tool@jetpack)".to_string()],
             receipt: "sha256-receipt".to_string(),
         }
+    }
+
+    fn field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+        object
+            .iter()
+            .find_map(|(name, value)| (name == key).then_some(value))
     }
 
     #[test]
@@ -158,52 +166,58 @@ mod tests {
             .as_object()
             .unwrap()
             .clone();
-        assert_eq!(object.get("action").unwrap().as_str().unwrap(), "why");
+
+        assert_eq!(field(&object, "action").unwrap().as_str().unwrap(), "why");
         assert_eq!(
-            object
-                .get("requesting")
-                .unwrap()
-                .get("env_file")
-                .unwrap()
-                .get("line")
-                .unwrap(),
-            &crate::JSON::JSONValue::Number(12)
+            field(
+                field(&object, "requesting")
+                    .unwrap()
+                    .as_object()
+                    .unwrap(),
+                "env_file",
+            )
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .iter()
+            .find_map(|(name, value)| (name == "line").then_some(value))
+            .unwrap(),
+            &DataTree::Int(12)
         );
         assert_eq!(
-            object
-                .get("trust")
-                .unwrap()
-                .get("grade")
+            field(field(&object, "trust").unwrap().as_object().unwrap(), "grade")
                 .unwrap()
                 .as_str()
                 .unwrap(),
             "signed"
         );
         assert_eq!(
-            object
-                .get("origin")
-                .unwrap()
-                .get("endpoint")
+            field(field(&object, "origin").unwrap().as_object().unwrap(), "endpoint")
                 .unwrap()
                 .as_str()
                 .unwrap(),
             "https://index.example"
         );
         assert_eq!(
-            object
-                .get("requesting")
-                .unwrap()
-                .get("lock_file")
-                .unwrap()
-                .get("text")
-                .unwrap()
-                .as_str()
-                .unwrap(),
+            field(
+                field(&object, "requesting")
+                    .unwrap()
+                    .as_object()
+                    .unwrap(),
+                "lock_file",
+            )
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .iter()
+            .find_map(|(name, value)| (name == "text").then_some(value))
+            .unwrap()
+            .as_str()
+            .unwrap(),
             "name = \"ripgrep\""
         );
         assert_eq!(
-            object
-                .get("dependents")
+            field(&object, "dependents")
                 .unwrap()
                 .as_array()
                 .unwrap()[0]
@@ -212,12 +226,14 @@ mod tests {
             "tool@1.0 (tool@jetpack)"
         );
         assert_eq!(
-            object
-                .get("disk")
+            field(&object, "disk")
                 .unwrap()
-                .get("bytes")
+                .as_object()
+                .unwrap()
+                .iter()
+                .find_map(|(name, value)| (name == "bytes").then_some(value))
                 .unwrap(),
-            &crate::JSON::JSONValue::Number(4096)
+            &DataTree::Int(4096)
         );
     }
 }

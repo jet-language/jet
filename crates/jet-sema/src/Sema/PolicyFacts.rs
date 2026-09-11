@@ -92,7 +92,7 @@ pub fn collect_policy_facts(src: &str) -> Result<PolicyFactGraph, Vec<Diagnostic
     if !lex_diags.is_empty() {
         return Err(lex_diags);
     }
-    let program = Parser::parse(&toks)?;
+    let program = Parser::parse_with_source(&toks, src)?;
     Ok(collect_policy_facts_from_program(&program))
 }
 

@@ -778,8 +778,8 @@ impl<'a> Parser<'a> {
         is_package_pub: bool,
         web_target: Option<crate::Syntax::WebBucket>,
     ) -> Result<Item, Diagnostic> {
-        if is_pub && !is_package_pub {
-            self.bump(); // consume `pub`
+        if is_pub && !is_package_pub && matches!(self.peek().kind, TokKind::KwPub) {
+            self.bump(); // consume `pub` when it was not already dispatched
         }
         let start = self.bump().span; // consume `module`
         let (name, name_span) = self.expect_ident("for the code module name")?;

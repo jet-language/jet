@@ -2730,4 +2730,18 @@ mod jet_devserver_impl {
     }
 }
 
-pub use jet_devserver_impl::{jet_devserver_app, jet_devserver_for_app, JetDevServer};
+pub fn jet_devserver_html(server: &JetDevServer, path: String) -> JetDevServer {
+    server.html(path)
+}
+
+pub fn jet_devserver_port(server: &JetDevServer, port: i64) -> JetDevServer {
+    server.port(port)
+}
+
+pub fn jet_devserver_serve(server: &JetDevServer) {
+    server.serve()
+}
+
+pub use jet_devserver_impl::{
+    jet_devserver_app, jet_devserver_for_app, JetDevServer,
+};

@@ -169,7 +169,6 @@ impl<'a> Parser<'a> {
             markers: Vec::new(),
             reactive_upgrade: false,
             meta: None,
-            // D-META-STAGE1=B: the mark rides the name. The lexer hands `@x` as
             // one Ident token, so the ordinary path must read stage from it.
             is_comptime: Syntax::is_comptime_name(&name),
             name,
@@ -485,6 +484,7 @@ impl<'a> Parser<'a> {
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::ComptimeBlock {
             body,
+            is_template_loop: false,
             span: Span::new(start.start, end),
         })
     }
@@ -499,6 +499,7 @@ impl<'a> Parser<'a> {
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::ComptimeBlock {
             body: vec![body],
+            is_template_loop: self.derive_template_depth > 0,
             span: Span::new(start.start, end),
         })
     }
@@ -783,6 +784,7 @@ fn desugar_layout_expr(layout_name: &str, e: &mut Expr) {
                     ],
                     recv_type: None,
                     resolved_ret: None,
+                    operator_rhs: None,
                     checked_widen: false,
                 };
                 return;

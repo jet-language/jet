@@ -23,7 +23,7 @@ impl<'m> BoundRuleArguments<'m> {
         self.bindings
             .iter()
             .find(|binding| binding.parameter_index == Some(index))
-            .map(|binding| &self.marker.args[binding.source_index])
+            .and_then(|binding| self.marker.expr_arg(binding.source_index))
     }
 
     pub(in crate::Parser) fn parameter_for_source(&self, source_index: usize) -> Option<usize> {
@@ -37,7 +37,7 @@ impl<'m> BoundRuleArguments<'m> {
         self.bindings
             .iter()
             .filter(|binding| binding.parameter_index.is_none())
-            .map(|binding| &self.marker.args[binding.source_index])
+            .filter_map(|binding| self.marker.expr_arg(binding.source_index))
     }
 }
 
@@ -117,7 +117,12 @@ impl<'a> Parser<'a> {
 
     /// D-MARKSIG1=A: complete a read head with the ordinary call-argument
     /// reader.
-    fn marker_from_head(&mut self, head: MarkerHead) -> Result<Marker, Diagnostic> {
+
+    fn marker_from_head_at_site(
+        &mut self,
+        head: MarkerHead,
+        site: Option<crate::Policy::RuleSite>,
+    ) -> Result<Marker, Diagnostic> {
         if let Some(negated_span) = head.negated_span {
             if !Syntax::is_signed_auto_derive(&head.name) {
                 return Err(Diagnostic::error(
@@ -134,7 +139,8 @@ impl<'a> Parser<'a> {
             }
         }
         let negated = head.negated_span.is_some();
-        let mut marker = self.finish_rule_marker(head.name, head.name_span)?;
+        let mut marker =
+            self.finish_rule_marker_at_site(head.name, head.name_span, site)?;
         marker.negated = negated;
         if let Some(application) = self.rule_facts.last_mut() {
             application.marker.negated = negated;
@@ -142,18 +148,21 @@ impl<'a> Parser<'a> {
         Ok(marker)
     }
 
-    /// Parse one marker whose `#` was already consumed by the group form.
-    pub(super) fn parse_one_marker(&mut self) -> Result<Marker, Diagnostic> {
+
+    fn parse_one_marker_at_site(
+        &mut self,
+        site: crate::Policy::RuleSite,
+    ) -> Result<Marker, Diagnostic> {
         let head = self.read_marker_name()?;
-        self.marker_from_head(head)
+        self.marker_from_head_at_site(head, Some(site))
     }
 
-    /// Complete a marker after its name was consumed by a placement parser.
-    /// The argument reader remains identical to an ordinary function call.
-    pub(in crate::Parser) fn finish_rule_marker(
+
+    fn finish_rule_marker_at_site(
         &mut self,
         name: String,
         name_span: Span,
+        site: Option<crate::Policy::RuleSite>,
     ) -> Result<Marker, Diagnostic> {
         let mut args = Vec::new();
         let mut arg_labels = Vec::new();
@@ -164,13 +173,16 @@ impl<'a> Parser<'a> {
             self.bump(); // `(`
             if !matches!(self.peek().kind, TokKind::RParen) {
                 loop {
-                    let arg = self.marker_call_arg()?;
-                    arg_labels.push(arg.label);
-                    args.push(arg.expr);
+                    let (arg, label) = self.marker_call_arg()?;
+                    args.push(arg);
+                    arg_labels.push(label);
                     if matches!(self.peek().kind, TokKind::RParen) {
                         break;
                     }
                     self.expect(TokKind::Comma, "between marker arguments")?;
+                    if matches!(self.peek().kind, TokKind::RParen) {
+                        break;
+                    }
                 }
             }
             end = self.peek().span.end;
@@ -185,7 +197,7 @@ impl<'a> Parser<'a> {
             span: Span::new(name_span.start, end),
             ct: None,
         };
-        self.validate_registered_rule_marker(&marker, parenthesized)?;
+        self.validate_registered_rule_marker(&marker, parenthesized, site)?;
         // D-MARK-FORM1=A: an empty pair is a leftover, not a different
         // spelling. Report it and keep parsing so `jet fmt` can apply the
         // delete edit — a hard stop would leave the file unformattable.
@@ -245,6 +257,7 @@ impl<'a> Parser<'a> {
         &self,
         marker: &Marker,
         parenthesized: bool,
+        site: Option<crate::Policy::RuleSite>,
     ) -> Result<(), Diagnostic> {
         let Some(rule) = crate::Policy::applied_rule(&marker.name) else {
             return Ok(());
@@ -253,7 +266,7 @@ impl<'a> Parser<'a> {
             return Ok(());
         }
         if marker.name == Syntax::MARKER_POLICY
-            && crate::AST::CallablePolicyChain::parse(&marker.args).is_ok()
+            && crate::AST::CallablePolicyChain::parse(&marker.expr_args_owned()).is_ok()
         {
             if !parenthesized {
                 return Err(crate::Policy::marker_argument_shape_error(
@@ -263,6 +276,27 @@ impl<'a> Parser<'a> {
             }
             self.callable_policy_chain_from_marker(marker).map(|_| ())?;
             return Ok(());
+        }
+        // D-HTML-NAME1=B: HTML uses its required file argument only at a
+        // file site; its block form carries the page expression in the DSL
+        // body and is therefore bare.
+        if marker.name == Syntax::MARKER_HTML {
+            match site {
+                Some(crate::Policy::RuleSite::Block)
+                    if !parenthesized && marker.args.is_empty() =>
+                {
+                    return Ok(());
+                }
+                Some(crate::Policy::RuleSite::Block) | Some(crate::Policy::RuleSite::File)
+                    if !parenthesized || matches!(site, Some(crate::Policy::RuleSite::Block)) =>
+                {
+                    return Err(crate::Policy::marker_argument_shape_error(
+                        &marker.name,
+                        marker.span,
+                    ));
+                }
+                _ => {}
+            }
         }
         // D-MARK-FORM1=A, one placement law: the signature alone decides
         // whether parentheses may and must appear. There is no written-form
@@ -300,7 +334,7 @@ impl<'a> Parser<'a> {
             return Ok(());
         }
         if marker.name == Syntax::MARKER_POLICY
-            && crate::AST::CallablePolicyChain::parse(&marker.args).is_ok()
+            && crate::AST::CallablePolicyChain::parse(&marker.expr_args_owned()).is_ok()
         {
             return self.callable_policy_chain_from_marker(marker).map(|_| ());
         }
@@ -327,7 +361,7 @@ impl<'a> Parser<'a> {
             }
         }
         if marker.name == Syntax::MARKER_ALLOW {
-            for argument in &marker.args {
+            for argument in marker.expr_args() {
                 let crate::AST::Expr::Ident(name, _) = argument else {
                     continue;
                 };
@@ -351,7 +385,7 @@ impl<'a> Parser<'a> {
                         .first()
                         .and_then(Option::as_ref)
                         .is_some_and(|(name, _)| name == "bound")
-                    && matches!(&marker.args[0], crate::AST::Expr::Ident(name, _) if name == "none"))
+                    && matches!(marker.expr_arg(0), Some(crate::AST::Expr::Ident(name, _)) if name == "none"))
         {
             return Err(crate::Policy::marker_argument_shape_error(
                 &marker.name,
@@ -396,12 +430,29 @@ impl<'a> Parser<'a> {
     }
 
     /// Shared entry for a bare `#Name` / `#Name(args)` application.
-    pub(in crate::Parser) fn parse_rule_marker(&mut self) -> Result<Marker, Diagnostic> {
+    fn parse_rule_marker_with_site(
+        &mut self,
+        site: Option<crate::Policy::RuleSite>,
+    ) -> Result<Marker, Diagnostic> {
         let head = self.read_marker_head()?;
         let start = head.span.start;
-        let mut marker = self.marker_from_head(head)?;
+        let mut marker = self.marker_from_head_at_site(head, site)?;
         marker.span.start = start;
+        if marker.name == Syntax::MARKER_ALIGN_LEGACY {
+            return Err(Diagnostic::from_row("E1118", &[], Some(marker.span)));
+        }
         Ok(marker)
+    }
+
+    pub(in crate::Parser) fn parse_rule_marker(&mut self) -> Result<Marker, Diagnostic> {
+        self.parse_rule_marker_with_site(None)
+    }
+
+    pub(in crate::Parser) fn parse_rule_marker_at_site(
+        &mut self,
+        site: crate::Policy::RuleSite,
+    ) -> Result<Marker, Diagnostic> {
+        self.parse_rule_marker_with_site(Some(site))
     }
 
     /// Bind and validate a marker at a site whose parser has no semantic
@@ -412,7 +463,7 @@ impl<'a> Parser<'a> {
         &mut self,
         site: crate::Policy::RuleSite,
     ) -> Result<Marker, Diagnostic> {
-        let marker = self.parse_rule_marker()?;
+        let marker = self.parse_rule_marker_at_site(site)?;
         // The caller owns the target span. Bind the site now so comptime
         // resolution sees the row even for a parser-specific projection;
         // the enclosing parser fills in the block/item span once it has
@@ -521,7 +572,7 @@ impl<'a> Parser<'a> {
         }
         let mut args = Vec::new();
         for (argument, label) in marker.args.iter().zip(&marker.arg_labels) {
-            let value = expr_source(argument)?;
+            let value = expr_source(argument.as_expr()?)?;
             args.push(match label {
                 Some((name, _)) => format!("{name}: {value}"),
                 None => value,
@@ -545,11 +596,14 @@ impl<'a> Parser<'a> {
         self.bump(); // `[`
         let mut group = Vec::new();
         loop {
-            let m = self.parse_one_marker()?;
+            let m = self.parse_one_marker_at_site(site)?;
             self.bind_rule_fact(m.name_span, None, site);
             group.push(m);
             if matches!(self.peek().kind, TokKind::Comma) {
                 self.bump();
+                if matches!(self.peek().kind, TokKind::RBracket) {
+                    break;
+                }
             } else {
                 break;
             }
@@ -635,7 +689,7 @@ impl<'a> Parser<'a> {
                 break;
             }
             chunks += 1;
-            let marker = self.parse_rule_marker()?;
+            let marker = self.parse_rule_marker_at_site(site)?;
             self.bind_rule_fact(marker.name_span, None, site);
             if crate::Policy::applied_rule(&name)
                 .is_some_and(|rule| matches!(rule.status, crate::Policy::RuleStatus::Active))
@@ -764,6 +818,34 @@ impl<'a> Parser<'a> {
         segments == [Syntax::WEB_TARGET_DEFAULT_WEB]
             || segments.ends_with(&["Target", Syntax::WEB_TARGET_DEFAULT_WEB])
     }
+    fn target_marker_selects_web_partition_at(&self, name_index: usize) -> bool {
+        if !matches!(
+            (
+                self.toks.get(name_index).map(|token| &token.kind),
+                self.toks.get(name_index + 1).map(|token| &token.kind),
+            ),
+            (Some(TokKind::Ident(name)), Some(TokKind::LParen))
+                if name == Syntax::MARKER_TARGET
+        ) {
+            return false;
+        }
+        let mut segments = Vec::new();
+        let mut cursor = name_index + 2;
+        loop {
+            match self.toks.get(cursor).map(|token| &token.kind) {
+                Some(TokKind::Ident(segment)) => segments.push(segment.as_str()),
+                Some(TokKind::Dot) => {}
+                Some(TokKind::RParen) => break,
+                _ => return false,
+            }
+            cursor += 1;
+        }
+        segments == [Syntax::WEB_BUCKET_JS]
+            || segments == [Syntax::WEB_BUCKET_WASM]
+            || segments.ends_with(&["Target", Syntax::WEB_BUCKET_JS])
+            || segments.ends_with(&["Target", Syntax::WEB_BUCKET_WASM])
+    }
+
 
     pub(in crate::Parser) fn skip_bare_marker(&self, index: usize) -> Option<usize> {
         if !matches!(
@@ -1005,6 +1087,8 @@ impl<'a> Parser<'a> {
 
     pub(in crate::Parser) fn method_starts_here(&self) -> bool {
         matches!(self.peek().kind, TokKind::KwFn)
+            || matches!(self.peek().kind, TokKind::At)
+                && matches!(self.peek2().kind, TokKind::KwFn)
             || matches!(self.peek().kind, TokKind::KwPub)
                 && matches!(self.peek2().kind, TokKind::KwFn)
             || self.marker_sequence_leads_to_function()
@@ -1053,7 +1137,22 @@ impl<'a> Parser<'a> {
         if self.marker_name_at(self.pos) == Some(Syntax::MARKER_TARGET)
             && self.target_marker_selects_file_web_at(self.pos + 1)
         {
-            return false;
+            // Keep the deliberate file-default/partition split:
+            // `#Target(Web)` belongs to the file, while an immediately
+            // following `#Target(JS|Wasm)` belongs to the function.
+            if let Some(mut next) = self.skip_bare_marker(self.pos) {
+                while matches!(
+                    self.toks.get(next).map(|token| &token.kind),
+                    Some(TokKind::Semi)
+                ) {
+                    next += 1;
+                }
+                if self.marker_name_at(next) == Some(Syntax::MARKER_TARGET)
+                    && self.target_marker_selects_web_partition_at(next + 1)
+                {
+                    return false;
+                }
+            }
         }
         if self.at_marker_list() {
             return self.marker_list_is_file_rules();
@@ -1110,8 +1209,8 @@ impl<'a> Parser<'a> {
         !marker.negated
             && marker.name == Syntax::MARKER_IMPORT
             && matches!(
-                marker.args.as_slice(),
-                [crate::AST::Expr::Ident(argument, _)] if argument == Syntax::C_MODULE_ROOT
+                marker.expr_arg(0),
+                Some(crate::AST::Expr::Ident(argument, _)) if argument == Syntax::C_MODULE_ROOT
             )
     }
 
@@ -1183,8 +1282,15 @@ impl<'a> Parser<'a> {
                 self.apply_unsafe_function_marker(&mut function, &marker)?;
                 unreachable!("a missing Unsafe reason always returns E3112");
             }
+            if marker.name == Syntax::MARKER_POLICY {
+                if let Some(diagnostic) =
+                    self.retired_memory_policy_marker_diagnostic(&marker)
+                {
+                    return Err(diagnostic);
+                }
+            }
             let callable_policy = marker.name == Syntax::MARKER_POLICY
-                && crate::AST::CallablePolicyChain::parse(&marker.args).is_ok();
+                && crate::AST::CallablePolicyChain::parse(&marker.expr_args_owned()).is_ok();
             if !callable_policy {
                 self.validate_registered_rule_arguments(&marker)?;
             } else if callable_policy_seen {
@@ -1650,19 +1756,94 @@ impl<'a> Parser<'a> {
         }
         Ok(match item {
             Item::Struct(mut s) => {
-                // D-REPRC1: a bracket marker list is the canonical way to
-                // combine `#Layout(...)` with another type marker. The
-                // dedicated bare-layout parser fills these fields for the
-                // single-marker spelling; mirror it here for
-                // `#[Layout(c), Codable]` and user derive markers.
+                // D-REPRC1 / D-PLACE1 / D-LAYOUT-ALIGN1: a bracket marker
+                // list is the canonical way to combine `#Layout(...)` with
+                // another type marker. The dedicated bare-layout parser fills
+                // these fields for the single-marker spelling; mirror both
+                // `c, align(N)` and `c, align(target, N)` here so the AST
+                // carries one layout fact.
                 if let Some(marker) = markers
                     .iter()
                     .find(|marker| marker.name == Syntax::MARKER_LAYOUT)
                 {
-                    if let Some(crate::AST::Expr::Ident(variant, _)) = marker.args.first() {
+                    if let Some(crate::AST::Expr::Ident(variant, _)) = marker.expr_arg(0) {
+                        let mut has_alignment = false;
+                        let mut alignment_target = false;
+                        let alignment = match marker.expr_arg(1) {
+                            Some(crate::AST::Expr::Call(call))
+                                if call.name == Syntax::LAYOUT_ALIGN
+                                    && (call.args.len() == 1
+                                        || (call.args.len() == 2
+                                            && matches!(
+                                                &call.args[0].expr,
+                                                crate::AST::Expr::Ident(name, _)
+                                                    if name == Syntax::LAYOUT_ALIGN_TARGET
+                                            ))) =>
+                            {
+                                has_alignment = true;
+                                alignment_target = call.args.len() == 2;
+                                let argument_index = usize::from(alignment_target);
+                                match &call.args[argument_index].expr {
+                                    crate::AST::Expr::Int(value, _, _, _) if *value >= 0 => {
+                                        // D-PLACE1/D-LAYOUT-ALIGN1: preserve
+                                        // the literal and target mode; sema
+                                        // owns positivity, power, and facts.
+                                        Some(*value as u64)
+                                    }
+                                    crate::AST::Expr::Unary(
+                                        crate::AST::UnOp::Neg,
+                                        inner,
+                                        _,
+                                    ) if matches!(&**inner, crate::AST::Expr::Int(..)) => None,
+                                    other => {
+                                        self.diags.push(Diagnostic::error(
+                                            "E1105",
+                                            "`align` requires one integer byte value (or `align(target, N)`)"
+                                                .to_string(),
+                                            "`#Layout(c, align(N))` is compiler-owned ABI metadata"
+                                                .to_string(),
+                                            "write `align(64)` or `align(target, 2097152)`"
+                                                .to_string(),
+                                            Some(other.span()),
+                                        ));
+                                        None
+                                    }
+                                }
+                            }
+                            Some(other) => {
+                                self.diags.push(Diagnostic::error(
+                                    "E1105",
+                                    "the second `#Layout` argument must be `align(N)` or `align(target, N)`"
+                                        .to_string(),
+                                    "struct alignment is a positive power-of-two integer"
+                                        .to_string(),
+                                    "write `#Layout(c, align(64))` or `#Layout(c, align(target, 2097152))`"
+                                        .to_string(),
+                                    Some(other.span()),
+                                ));
+                                None
+                            }
+                            None => None,
+                        };
                         s.layout = match variant.as_str() {
-                            Syntax::LAYOUT_C => Some(crate::AST::StructLayout::C),
-                            Syntax::LAYOUT_COLUMNAR => Some(crate::AST::StructLayout::Columnar),
+                            Syntax::LAYOUT_C => alignment
+                                .map(|alignment| crate::AST::StructLayout::CAligned {
+                                    alignment,
+                                    target: alignment_target,
+                                })
+                                .or(Some(crate::AST::StructLayout::C)),
+                            Syntax::LAYOUT_COLUMNAR => {
+                                if has_alignment {
+                                    self.diags.push(Diagnostic::error(
+                                        "E1105",
+                                        "`align` is only valid with `#Layout(c)`".to_string(),
+                                        "columnar layout has no C ABI alignment override".to_string(),
+                                        "write `#Layout(c, align(64))`".to_string(),
+                                        Some(marker.span),
+                                    ));
+                                }
+                                Some(crate::AST::StructLayout::Columnar)
+                            }
                             _ => s.layout,
                         };
                         s.layout_span = Some(marker.span);
@@ -1688,6 +1869,24 @@ impl<'a> Parser<'a> {
                 Item::Struct(s)
             }
             Item::Enum(mut e) => {
+                if let Some(marker) = markers
+                    .iter()
+                    .find(|marker| marker.name == Syntax::MARKER_LAYOUT)
+                {
+                    if matches!(
+                        marker.expr_arg(1),
+                        Some(crate::AST::Expr::Call(call))
+                            if call.name == Syntax::LAYOUT_ALIGN
+                    ) {
+                        self.diags.push(Diagnostic::error(
+                            "E1105",
+                            "alignment overrides apply only to structs".to_string(),
+                            "enum C layout uses its tag-width argument instead".to_string(),
+                            "write `#Layout(c, I32)` on an enum".to_string(),
+                            Some(marker.span),
+                        ));
+                    }
+                }
                 e.type_markers = markers.clone();
                 e.serde_markers = Self::split_type_markers(markers, &mut e.derives);
                 Item::Enum(e)

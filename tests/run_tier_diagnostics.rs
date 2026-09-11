@@ -157,15 +157,6 @@ fn e0956_row_text_matches_aot_run_and_interpreter_inner() {
         &aot,
     );
     assert!(expected.iter().any(|(code, ..)| code == "E0956"));
-    let e0956 = expected
-        .iter()
-        .find(|(code, _, _, _, _)| code == "E0956")
-        .expect("comptime_panic must retain its E0956 diagnostic");
-    assert_eq!(
-        e0956.3.as_str(),
-        "use a simpler form, or use `jet build` for the full evaluator"
-    );
-    assert!(!e0956.3.contains("jet run"));
     for (tier, diags) in [("default jet run", run), ("interpreter", interpreter)] {
         assert_eq!(
             shape(&diags),

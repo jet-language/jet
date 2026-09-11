@@ -13,17 +13,22 @@ fn run() {
     files.write(path, "service,latency_ms\napi,10.0\napi,20.0\ndb,5.0\napi,30.0") ?? panic("write")
     input :: files.open(path) ?? panic("open")
     limits := data.DataLimits.safe()
-    limits.max_groups = 1
-    limits.max_output_rows = 10
+    limits.max_output_rows = 2
     reader :: data.csv_reader<Event>(input, limits) ?? panic("reader")
     first :: reader.next() ?? panic("next")
     if first == {
         .Val(row) -> { print("first: {row.service} {row.latency_ms}") }
         .None -> panic("expected row")
     }
-    groups := data.group_mean(reader, (e) -> e.service, (e) -> e.latency_ms)
-    if groups == {
-        .Ok(rows) -> { print("unexpected ok {data.count(rows)}") }
+    remaining := data.stream.collect(reader)
+    if remaining == {
+        .Ok(rows) -> {
+            groups :: data.query(rows)
+                .group_by((e) -> e.service)
+                .mean((e) -> e.latency_ms)
+                .collect() ?? panic("group mean")
+            print("unexpected ok {data.count(groups)}")
+        }
         .Err(error) -> print("{error}")
     }
     empty_vals :: [Float]{}

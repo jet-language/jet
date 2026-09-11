@@ -1,8 +1,9 @@
 use super::alloc_ptrs::{db_error_ty, db_row_ty, result_ty};
+use super::net_text_time::require_exact_labels;
 use super::serde_diags::wrong_core_arity;
-use crate::Diagnostics::Span;
 use crate::Sema::Checker;
 use crate::Sema::Effects::Effect;
+use crate::Diagnostics::Span;
 use crate::AST::Type;
 
 /// D-EFFDBREAD1=A: the `DB.Read` effect leaf a database read call proves. Unlike
@@ -28,12 +29,7 @@ impl<'a> Checker<'a> {
     /// D-TYPEDSQL-SINK1=A: every singular database sink consumes one checked
     /// `SQL` value. The template and ordered `DBValue` bindings are one value,
     /// so no caller can pass text and binds through a separate overload.
-    fn check_db_sql_args(
-        &mut self,
-        name: &str,
-        args: &mut [crate::AST::CallArg],
-        span: Span,
-    ) {
+    fn check_db_sql_args(&mut self, name: &str, args: &mut [crate::AST::CallArg], span: Span) {
         if args.len() != 1 {
             self.diags.push(wrong_core_arity(name, 1, args.len(), span));
             for a in args.iter_mut() {
@@ -41,12 +37,7 @@ impl<'a> Checker<'a> {
             }
             return;
         }
-        self.expect_core_arg(
-            name,
-            0,
-            &Type::Named("SQL".to_string()),
-            &mut args[0],
-        );
+        self.expect_core_arg(name, 0, &Type::Named("SQL".to_string()), &mut args[0]);
     }
 
     /// D-DBPOLICY-BIND1: an unscoped connection can establish a typed policy
@@ -146,5 +137,52 @@ impl<'a> Checker<'a> {
             }
             _ => None,
         }
+    }
+}
+
+impl<'a> Checker<'a> {
+    pub(crate) fn check_db_pool_method(
+        &mut self,
+        method: &str,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Option<Type>> {
+        let result = match method {
+            "acquire" => result_ty(Type::Named("DbLease".to_string()), db_error_ty()),
+            "ready" => result_ty(Type::Bool, db_error_ty()),
+            "drain" => result_ty(
+                Type::Named("DbPoolReceipt".to_string()),
+                db_error_ty(),
+            ),
+            "receipt" => Type::Named("DbPoolReceipt".to_string()),
+            _ => return None,
+        };
+        let valid_arity = (method == "acquire" && args.len() <= 1) || args.is_empty();
+        if !valid_arity {
+            self.diags
+                .push(wrong_core_arity(method, 0, args.len(), span));
+            for arg in args {
+                self.infer(&mut arg.expr);
+            }
+        } else if method == "acquire" {
+            if args.len() == 1 {
+                let mut label_args = args.to_vec();
+                require_exact_labels(
+                    "DbPool.acquire",
+                    &mut label_args,
+                    &[(0, "deadline")],
+                    span,
+                    &mut self.diags,
+                );
+                self.expect_core_arg(
+                    "DbPool.acquire",
+                    0,
+                    &Type::Named("Duration".to_string()),
+                    &mut args[0],
+                );
+            }
+        }
+        self.record_effect(Effect::DB.name(), span);
+        Some(Some(result))
     }
 }

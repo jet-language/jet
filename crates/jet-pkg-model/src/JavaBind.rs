@@ -471,7 +471,7 @@ fn render_jet(lib: &str, s: &Surface) -> String {
     }
     o.push_str("}\nuse c.");
     o.push_str(&abi);
-    o.push_str(" as abi\n\npub struct Handle { value: Int }\npub enum JavaError { Exception }\n\n");
+    o.push_str(" as abi\n\npub struct Handle { value: Int }\n#Error\npub enum JavaError { Exception }\n\n");
     o.push_str("pub fn new(");
     params_jet(&mut o, &s.ctor);
     o.push_str(") Handle !JavaError -[FFI.Java]> {\n    value :: abi.new(");

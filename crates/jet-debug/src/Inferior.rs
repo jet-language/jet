@@ -455,6 +455,171 @@ impl Inferior {
     pub(crate) fn cmd(&mut self, line: &str) -> std::io::Result<String> {
         self.write_lines(&[line])
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NativeRebindReceipt {
+    pub(crate) changed: Vec<String>,
+}
+
+impl Inferior {
+    /// Install a compiler-published typed candidate while the target is
+    /// stopped.  Every semantic and frame check runs before `process load`;
+    /// a failed installation restores already-updated slots to their host
+    /// entry points.  This boundary never writes registers, stack slots, or
+    /// raw memory and therefore cannot pretend to restore an arbitrary frame.
+    pub(crate) fn rebind_native_candidate(
+        &mut self,
+        candidate_binary: &Path,
+        host_source: &str,
+        candidate_source: &str,
+    ) -> io::Result<NativeRebindReceipt> {
+        let host = super::Native::native_callable_metadata(host_source).map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("host native artifact has invalid rebind metadata: {error}"),
+            )
+        })?;
+        let candidate =
+            super::Native::native_callable_metadata(candidate_source).map_err(|error| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("candidate native artifact has invalid rebind metadata: {error}"),
+                )
+            })?;
+        if host.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "host native artifact does not publish typed rebind metadata",
+            ));
+        }
+        if candidate.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "candidate native artifact does not publish typed rebind metadata",
+            ));
+        }
+        let mut changed = Vec::new();
+        let mut pairs = Vec::new();
+        for candidate_row in &candidate {
+            let host_row = host.iter().find(|row| row.name == candidate_row.name).ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "candidate callable {} has no compatible host slot",
+                        candidate_row.name
+                    ),
+                )
+            })?;
+            if host_row.schema != 1 || candidate_row.schema != 1 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "native callable metadata schema is unsupported",
+                ));
+            }
+            if host_row.jet != candidate_row.jet
+                || host_row.signature != candidate_row.signature
+                || host_row.state != "none"
+                || candidate_row.state != "none"
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "native callable {} changed its ABI, Jet identity, or state contract",
+                        candidate_row.name
+                    ),
+                ));
+            }
+            if host_row.install.is_empty()
+                || host_row.entry.is_empty()
+                || candidate_row.entry.is_empty()
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("native callable {} has incomplete rebind symbols", candidate_row.name),
+                ));
+            }
+            if host_row.body != candidate_row.body {
+                changed.push(candidate_row.jet.clone());
+                pairs.push((host_row.clone(), candidate_row.clone()));
+            }
+        }
+        if changed.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "candidate native artifact contains no changed typed callable",
+            ));
+        }
+        let backtrace = self.backtrace()?;
+        for frame in Self::parse_frames(&backtrace) {
+            let frame_jet = Self::safe_jet_func(&frame.func);
+            if changed.iter().any(|name| name == &frame_jet) {
+                return Err(io::Error::new(
+                    io::ErrorKind::WouldBlock,
+                    format!(
+                        "cannot rebind native callable {} while its frame is active",
+                        frame_jet
+                    ),
+                ));
+            }
+        }
+        for (host_row, _candidate_row) in &pairs {
+            self.require_symbol(&host_row.install, "host installer")?;
+            self.require_symbol(&host_row.entry, "host entry")?;
+        }
+        let candidate_path = checked_lldb_quote(&candidate_binary.to_string_lossy())?;
+        let load_output = self.cmd(&format!("process load {candidate_path}"))?;
+        if lldb_command_failed(&load_output) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("lldb rejected the native candidate module: {}", compact_output(&load_output)),
+            ));
+        }
+        for (_host_row, candidate_row) in &pairs {
+            if let Err(error) = self.require_symbol(&candidate_row.entry, "candidate entry") {
+                let _ = self.cmd(&format!("process unload {candidate_path}"));
+                return Err(error);
+            }
+        }
+        for (index, (host_row, candidate_row)) in pairs.iter().enumerate() {
+            if let Err(error) = self.install_native_slot(&host_row.install, &candidate_row.entry) {
+                for (rollback_host, _) in pairs[..=index].iter().rev() {
+                    let _ = self.install_native_slot(&rollback_host.install, &rollback_host.entry);
+                }
+                let _ = self.cmd(&format!("process unload {candidate_path}"));
+                return Err(error);
+            }
+        }
+        Ok(NativeRebindReceipt { changed })
+    }
+
+    fn require_symbol(&mut self, symbol: &str, role: &str) -> io::Result<()> {
+        let quoted = checked_lldb_quote(symbol)?;
+        let output = self.cmd(&format!("image lookup -n {quoted}"))?;
+        if lldb_command_failed(&output) || !output.lines().any(|line| line.contains(symbol)) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("lldb could not resolve {role} symbol {symbol}"),
+            ));
+        }
+        Ok(())
+    }
+
+    fn install_native_slot(&mut self, installer: &str, entry: &str) -> io::Result<()> {
+        self.require_symbol(installer, "host installer")?;
+        self.require_symbol(entry, "typed candidate entry")?;
+        let output = self.cmd(&format!("expr -- (void) {installer}({entry})"))?;
+        if lldb_command_failed(&output) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "lldb could not install typed native callable {installer}: {}",
+                    compact_output(&output)
+                ),
+            ));
+        }
+        Ok(())
+    }
 
     /// Resume commands must be written without the sentinel. While the target
     /// is running, LLDB forwards following input to the target instead of
@@ -1077,6 +1242,28 @@ impl Inferior {
         } else {
             name
         }
+    }
+}
+
+fn lldb_command_failed(output: &str) -> bool {
+    output.lines().any(|line| {
+        let trimmed = line.trim_start();
+        trimmed.starts_with("error:")
+            || trimmed.starts_with("Error:")
+            || trimmed.contains("invalid target")
+            || trimmed.contains("doesn't exist")
+            || trimmed.contains("not found")
+    })
+}
+
+fn compact_output(output: &str) -> String {
+    let compact = output.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.len() > 600 {
+        format!("{}…", &compact[..600])
+    } else if compact.is_empty() {
+        "no debugger diagnostic".to_string()
+    } else {
+        compact
     }
 }
 

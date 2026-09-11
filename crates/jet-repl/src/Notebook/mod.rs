@@ -12,7 +12,10 @@ pub use document::{
     CellOutput, JetNotebook, LossReport, MergeConflict, NotebookCell, OutputCacheEntry,
     OUTPUT_CACHE_POLICY,
 };
-pub use kernel::{CellExecResult, ClientKind, Kernel, KernelView, RerunDecision};
+pub use kernel::{
+    CellExecResult, ClientKind, Kernel, KernelIdentity, KernelView, NotebookAppInput,
+    NotebookAppSchema, RerunDecision,
+};
 pub use protocol::{handle_message, run_headless_script, ProtocolMessage, ProtocolReply};
 pub use trust::{
     decide_render, grant_active, grant_key, is_granted, quarantine_outputs, revoke_matching,

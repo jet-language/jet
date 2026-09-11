@@ -1,6 +1,6 @@
 //! D-PERF-BROWSER-TRANSPORT1=A: payload-free browser rows relayed by `jet dev`.
 
-use std::collections::hash_map::RandomState;
+use std::collections::{BTreeMap, hash_map::RandomState};
 use std::fs::{self, File, OpenOptions};
 use std::hash::{BuildHasher, Hasher};
 use std::io::{Read, Write};
@@ -8,8 +8,9 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use jet_foundation::JSON::{json_escape, json_int, json_str, json_u32, parse, JSONValue};
-use jet_foundation::Report::{render_status_json, REPORT_SCHEMA};
+use jet_foundation::DataTree::DataTree;
+use jet_foundation::JSON::{json_int, json_str, json_u32, parse};
+use jet_foundation::Report::{StatusEnvelope, StatusFields, STATUS_SCHEMA};
 
 pub const ROW_LIMIT: usize = 4096;
 const ENVELOPE_LIMIT: usize = 512;
@@ -67,20 +68,27 @@ impl Relay {
         let pid = std::process::id();
         let started =
             process_start_marker(pid).ok_or("browser trace process identity cannot be verified")?;
-        let mut fields = format!(
-            ",\"nonce\":\"{}\",\"pid\":{},\"started\":\"{}\",\"sources\":\"{}\"",
-            json_escape(&nonce),
-            pid,
-            json_escape(&started),
-            json_escape(&hex(encode_sources(&sources).as_bytes())),
-        );
+        let mut fields = StatusFields::new();
+        fields
+            .insert("nonce", nonce.clone())
+            .expect("relay nonce field is unique");
+        fields
+            .insert("pid", pid)
+            .expect("relay pid field is unique");
+        fields
+            .insert("started", started.clone())
+            .expect("relay started field is unique");
+        fields
+            .insert("sources", hex(encode_sources(&sources).as_bytes()))
+            .expect("relay sources field is unique");
         if let Some(map) = &source_map {
-            fields.push_str(&format!(
-                ",\"source_map\":\"{}\"",
-                json_escape(&hex(map.as_bytes()))
-            ));
+            fields
+                .insert("source_map", hex(map.as_bytes()))
+                .expect("relay source_map field is unique");
         }
-        let header = render_status_json("started", true, RELAY_ACTION, &fields);
+        let header = StatusEnvelope::new(RELAY_ACTION, true)
+            .with_fields(fields)
+            .json();
         writeln!(file, "{header}")
             .map_err(|error| format!("cannot initialize browser trace relay: {error}"))?;
         file.flush()
@@ -135,26 +143,29 @@ impl Relay {
         let mut file = self.file.lock().map_err(|_| RecordError::Unavailable)?;
         if *rows >= ROW_LIMIT {
             if *rows == ROW_LIMIT {
-                let truncated = render_status_json(
-                    "truncated",
-                    true,
-                    "browser.relay.truncated",
-                    "",
-                );
+                let truncated = StatusEnvelope::new("browser.relay.truncated", true).json();
                 writeln!(file, "{truncated}").map_err(|_| RecordError::Unavailable)?;
                 file.flush().map_err(|_| RecordError::Unavailable)?;
                 *rows += 1;
             }
             return Ok(());
         }
-        let fields = format!(
-            ",\"start_ns\":{},\"duration_ns\":{},\"class\":\"{}\",\"symbol\":\"{}\"",
-            mapped_start,
-            duration,
-            json_escape(&class),
-            json_escape(&symbol),
-        );
-        let row = render_status_json("row", true, "browser.relay.row", &fields);
+        let mut fields = StatusFields::new();
+        fields
+            .insert("start_ns", mapped_start)
+            .expect("relay start_ns field is unique");
+        fields
+            .insert("duration_ns", duration)
+            .expect("relay duration_ns field is unique");
+        fields
+            .insert("class", class)
+            .expect("relay class field is unique");
+        fields
+            .insert("symbol", symbol)
+            .expect("relay symbol field is unique");
+        let row = StatusEnvelope::new("browser.relay.row", true)
+            .with_fields(fields)
+            .json();
         writeln!(file, "{row}").map_err(|_| RecordError::Unavailable)?;
         file.flush().map_err(|_| RecordError::Unavailable)?;
         *rows += 1;
@@ -249,7 +260,7 @@ fn read_with_process_state(pid: u32, process: ProcessState) -> Result<Capture, S
     let mut rows = Vec::new();
     let mut truncated = false;
     for line in lines {
-        if relay_status(line, "browser.relay.truncated", "truncated").is_ok() {
+        if relay_status(line, "browser.relay.truncated").is_ok() {
             truncated = true;
             continue;
         }
@@ -505,23 +516,23 @@ fn number(value: Option<String>) -> Result<u64, RecordError> {
         .map_err(|_| RecordError::Malformed)
 }
 
-fn relay_status(line: &str, action: &str, status: &str) -> Result<JSONValue, String> {
+fn relay_status(line: &str, action: &str) -> Result<DataTree, String> {
     let value = parse(line).map_err(|_| "browser trace relay record is malformed")?;
-    let object = value.as_object()?;
-    if object.get("schema").and_then(|value| json_str(value)) != Some(REPORT_SCHEMA)
-        || object.get("moment").and_then(|value| json_str(value)) != Some("tool")
-        || object.get("action").and_then(|value| json_str(value)) != Some(action)
-        || object.get("status").and_then(|value| json_str(value)) != Some(status)
-        || !matches!(object.get("ok"), Some(JSONValue::Bool(true)))
+    let object = object_map(&value)?;
+    if object.get("schema").and_then(json_str) != Some(STATUS_SCHEMA)
+        || object.get("action").and_then(json_str) != Some(action)
+        || !matches!(object.get("ok"), Some(DataTree::Bool(true)))
+        || !matches!(object.get("reports"), Some(DataTree::Array(_)))
+        || object.contains_key("status")
     {
-        return Err("browser trace relay record is not a shared report".into());
+        return Err("browser trace relay record is not a shared status".into());
     }
     Ok(value)
 }
 
 fn relay_row(line: &str) -> Result<(u64, u64, String, String), String> {
-    let value = relay_status(line, "browser.relay.row", "row")?;
-    let object = value.as_object()?;
+    let value = relay_status(line, "browser.relay.row")?;
+    let object = object_map(&value)?;
     let start_ns = object
         .get("start_ns")
         .and_then(json_int)
@@ -555,8 +566,8 @@ fn relay_row(line: &str) -> Result<(u64, u64, String, String), String> {
 }
 
 fn relay_header(header: &str) -> Result<(u32, String, Vec<Source>, Option<String>), String> {
-    let value = relay_status(header, RELAY_ACTION, "started")?;
-    let object = value.as_object()?;
+    let value = relay_status(header, RELAY_ACTION)?;
+    let object = object_map(&value)?;
     let _nonce = object
         .get("nonce")
         .and_then(|value| json_str(value))
@@ -619,8 +630,13 @@ fn process_start_marker(pid: u32) -> Option<String> {
     #[cfg(not(any(target_os = "linux", target_os = "android")))]
     {
         let _ = pid;
-        None
     }
+}
+fn object_map(value: &DataTree) -> Result<BTreeMap<String, DataTree>, String> {
+    let DataTree::Object(fields) = value else {
+        return Err("browser trace relay record must be an object".to_string());
+    };
+    Ok(fields.iter().cloned().collect())
 }
 
 fn process_state(pid: u32) -> ProcessState {
@@ -685,12 +701,8 @@ mod tests {
         let header = header.trim_end();
         let parsed = parse(header).unwrap();
         assert_eq!(
-            parsed
-                .as_object()
-                .unwrap()
-                .get("schema")
-                .and_then(json_str),
-            Some(REPORT_SCHEMA)
+            parsed.get_opt("schema").and_then(json_str),
+            Some(STATUS_SCHEMA)
         );
         #[cfg(unix)]
         {

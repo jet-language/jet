@@ -1,6 +1,6 @@
 mod scopes;
 mod type_assign;
-pub(crate) use type_assign::is_core_view_generic;
+pub(crate) use type_assign::{is_core_view_generic, reject_never_value_positions};
 mod blocks;
 mod control_flow;
 mod statements;

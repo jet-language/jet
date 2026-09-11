@@ -3,7 +3,7 @@
 //! `package.jet`. `jet run` resolves + locks by file-content hash, `jet fetch --lock`
 //! writes a `<script>.lock` sidecar, and `jet init` lifts the inline refs
 //! into a generated `package.jet`. See
-//! docs/plans/epoch-4/{vision,implementation}.md.
+//! docs/spec/reference/jetpack-epoch5.md.
 //!
 //! Resolution is intentionally local and offline. Inline dependencies use a
 //! committed or explicitly materialized local source tree, not an implicit

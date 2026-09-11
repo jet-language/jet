@@ -2,7 +2,10 @@
 use core.data as data
 
 fn run() {
-    groups :: data.group_count([String]{"A", "B", "A"}, value -> value) ?? panic("groups")
+    groups :: data.query([String]{"A", "B", "A"})
+        .group_by(value -> value)
+        .count()
+        .collect() ?? panic("groups")
     result :: data.bar_text(groups) ?? panic("bar text")
     print(result)
 }

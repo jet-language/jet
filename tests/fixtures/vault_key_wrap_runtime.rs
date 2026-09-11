@@ -1,3 +1,5 @@
+#[allow(non_snake_case)]
+mod RuntimeDiagnosticCore { include!("../../crates/jet-foundation/src/RuntimeDiagnosticCore.rs"); }
 use jet_codegen::scheduler::*;
 include!("../../crates/jet-foundation/src/Outcome.rs");
 include!("../../crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");

@@ -1,0 +1,14 @@
+#Import module c.handle {
+    fn open_handle() Handle = "open_handle"
+    fn handle_value(handle: &Handle) Int = "handle_value"
+    fn close_handle(handle: &Handle) Int = "close_handle"
+}
+
+// Unrun expectation: the caller manually observes and handles close status.
+pub fn run() Int -> {
+    handle := c.handle.open_handle()
+    value := c.handle.handle_value(&handle)
+    status := c.handle.close_handle(&handle)
+    if status != 0 -> return status
+    return value
+}

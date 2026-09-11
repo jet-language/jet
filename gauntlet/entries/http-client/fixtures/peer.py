@@ -14,6 +14,9 @@ ITEMS = [
     {"id": 6, "name": "zeta", "qty": 6},
 ]
 
+class PeerHTTPServer(HTTPServer):
+    allow_reuse_address = True
+
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -48,7 +51,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    server = HTTPServer(("127.0.0.1", int(sys.argv[1])), Handler)
+    server = PeerHTTPServer(("127.0.0.1", int(sys.argv[1])), Handler)
     server.serve_forever()
 
 

@@ -159,6 +159,12 @@ pub(crate) mod text_rt {
     pub(crate) fn ascii_lower(s: &str) -> String {
         jet_text_ascii_lower(&s.to_string())
     }
+    pub(crate) fn casefold(s: &str) -> String {
+        jet_text_casefold(&s.to_string())
+    }
+    pub(crate) fn unicode_scalar_count(s: &str) -> i64 {
+        jet_text_unicode_scalar_count(&s.to_string())
+    }
     pub(crate) fn ascii_upper(s: &str) -> String {
         jet_text_ascii_upper(&s.to_string())
     }
@@ -248,7 +254,7 @@ pub(crate) mod text_rt {
         jet_text_remove_suffix(&s.to_string(), &suffix.to_string())
     }
     pub(crate) fn compare(a: &str, b: &str) -> i64 {
-        jet_text_compare(&a.to_string(), &b.to_string())
+        jet_text_compare(a, b)
     }
     pub(crate) fn reverse(s: &str) -> String {
         jet_text_reverse(&s.to_string())
@@ -329,6 +335,32 @@ fn jet_jit_text_upper(s: i64) -> i64 {
     alloc_string(text_rt::upper(&clone_string(s)))
 }
 
+fn jet_jit_text_ascii_lower(s: i64) -> i64 {
+    alloc_string(text_rt::ascii_lower(&clone_string(s)))
+}
+
+fn jet_jit_text_ascii_upper(s: i64) -> i64 {
+    alloc_string(text_rt::ascii_upper(&clone_string(s)))
+}
+
+fn jet_jit_text_casefold(s: i64) -> i64 {
+    alloc_string(text_rt::casefold(&clone_string(s)))
+}
+
+fn jet_jit_text_unicode_scalar_count(s: i64) -> i64 {
+    text_rt::unicode_scalar_count(&clone_string(s))
+}
+
+fn jet_jit_string_lines(s: i64) -> i64 {
+    let text = clone_string(s);
+    list_from_strings(
+        text_rt::jet_text_line_views(&text)
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+    )
+}
+
 fn jet_jit_text_graphemes(s: i64) -> i64 {
     list_from_strings(text_rt::graphemes(&clone_string(s)))
 }
@@ -339,6 +371,104 @@ fn jet_jit_text_words(s: i64) -> i64 {
 
 fn jet_jit_text_sentences(s: i64) -> i64 {
     list_from_strings(text_rt::sentences(&clone_string(s)))
+}
+
+/// Byte spans of `parts` inside `source`, or the reason a part escaped it.
+/// Computed on a shared borrow so the caller can trap on `rt` afterwards.
+fn view_spans<'a, P: AsRef<[u8]> + 'a>(
+    source: &'a str,
+    parts: impl IntoIterator<Item = P>,
+    kind: &'static str,
+) -> Result<Vec<(usize, usize)>, String> {
+    let base = source.as_ptr() as usize;
+    let mut spans = Vec::new();
+    for part in parts {
+        let part = part.as_ref();
+        let Some(start) = (part.as_ptr() as usize).checked_sub(base) else {
+            return Err(format!("{kind} view escaped its source string"));
+        };
+        let Some(end) = start.checked_add(part.len()) else {
+            return Err(format!("{kind} view range overflow"));
+        };
+        if end > source.len() {
+            return Err(format!("{kind} view escaped its source string"));
+        }
+        spans.push((start, end));
+    }
+    Ok(spans)
+}
+
+fn alloc_text_views(
+    rt: &mut crate::JitRuntime,
+    text: i64,
+    spans: Result<Vec<(usize, usize)>, String>,
+    bytes: bool,
+) -> i64 {
+    let spans = match spans {
+        Ok(spans) => spans,
+        Err(reason) => {
+            rt.set_trap(&reason);
+            return 0;
+        }
+    };
+    let out = rt.heap.alloc_empty_list();
+    for (start, end) in spans {
+        let slot = rt.view_slots.len();
+        rt.view_slots.push(crate::runtime_host::JitViewSlot::String {
+            owner: text,
+            start,
+            end,
+            bytes,
+        });
+        rt.heap
+            .list_push_int(out, crate::runtime_host::view_handle(slot))
+            .expect("JIT text view list");
+    }
+    out
+}
+
+fn alloc_text_string_views<F>(text: i64, make: F) -> i64
+where
+    F: for<'a> FnOnce(&'a str) -> text_rt::JetViewIter<'a, &'a str>,
+{
+    Concurrency::with_runtime_mut(|rt| {
+        let spans = rt
+            .heap
+            .get_string(text)
+            .ok_or_else(|| "invalid String handle for text view".to_string())
+            .and_then(|source| view_spans(source, make(source), "text"));
+        alloc_text_views(rt, text, spans, false)
+    })
+}
+
+fn alloc_text_byte_views<F>(text: i64, make: F) -> i64
+where
+    F: for<'a> FnOnce(&'a str) -> text_rt::JetViewIter<'a, &'a [u8]>,
+{
+    Concurrency::with_runtime_mut(|rt| {
+        let spans = rt
+            .heap
+            .get_string(text)
+            .ok_or_else(|| "invalid String handle for byte view".to_string())
+            .and_then(|source| view_spans(source, make(source), "byte"));
+        alloc_text_views(rt, text, spans, true)
+    })
+}
+
+fn jet_jit_text_grapheme_views(text: i64) -> i64 {
+    alloc_text_string_views(text, text_rt::jet_text_grapheme_views)
+}
+
+fn jet_jit_text_word_views(text: i64) -> i64 {
+    alloc_text_string_views(text, text_rt::jet_text_word_views)
+}
+
+fn jet_jit_text_line_views(text: i64) -> i64 {
+    alloc_text_string_views(text, text_rt::jet_text_line_views)
+}
+
+fn jet_jit_text_byte_views(text: i64) -> i64 {
+    alloc_text_byte_views(text, text_rt::jet_text_byte_views)
 }
 
 fn jet_jit_text_nfc(s: i64) -> i64 {
@@ -795,11 +925,22 @@ host_fns! {
         }
         ternary.returns.push(AbiParam::new(types::I64));
     }
+    unicode_lower: "jet_unicode_lower" => jet_jit_text_lower: unary;
+    unicode_upper: "jet_unicode_upper" => jet_jit_text_upper: unary;
+    ascii_lower: "jet_text_ascii_lower" => jet_jit_text_ascii_lower: unary;
+    ascii_upper: "jet_text_ascii_upper" => jet_jit_text_ascii_upper: unary;
+    casefold: "jet_text_casefold" => jet_jit_text_casefold: unary;
+    unicode_scalar_count: "jet_text_unicode_scalar_count" => jet_jit_text_unicode_scalar_count: unary;
+    string_lines: "jet_string_lines" => jet_jit_string_lines: unary;
     lower: "jet_jit_text_lower" => jet_jit_text_lower: unary;
     upper: "jet_jit_text_upper" => jet_jit_text_upper: unary;
     graphemes: "jet_jit_text_graphemes" => jet_jit_text_graphemes: unary;
     words: "jet_jit_text_words" => jet_jit_text_words: unary;
     sentences: "jet_jit_text_sentences" => jet_jit_text_sentences: unary;
+    grapheme_views: "jet_jit_text_grapheme_views" => jet_jit_text_grapheme_views: unary;
+    word_views: "jet_jit_text_word_views" => jet_jit_text_word_views: unary;
+    line_views: "jet_jit_text_line_views" => jet_jit_text_line_views: unary;
+    byte_views: "jet_jit_text_byte_views" => jet_jit_text_byte_views: unary;
     nfc: "jet_jit_text_nfc" => jet_jit_text_nfc: unary;
     nfkc: "jet_jit_text_nfkc" => jet_jit_text_nfkc: unary;
     nfd: "jet_jit_text_nfd" => jet_jit_text_nfd: unary;

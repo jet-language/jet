@@ -30,5 +30,13 @@
     "c": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": ""},
     "zig": {"author": "luna-max", "turns": 2, "retries": 2, "diagnosticsHit": ["error: @bitCast must have a known result type", "main.zig:1:1: error: unable to load 'main.zig': FileNotFound"], "notes": "Rewrote the reader and stdout handling for Zig 0.16; manual little-endian decoding keeps the binary format explicit. One scratch build retry was needed after initially invoking Zig from the copied entry root without placing main.zig there."},
     "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in Node rail using Buffer decoding and BigInt FNV-1a; it reads the same JGB1 fixture and emits the canonical bytes."}
+  },
+  "rewrite_provenance": {
+    "worker": "CorpusBinparse",
+    "variant": "jet",
+    "changed": "Replaced the redundant remaining-bytes check and per-byte Reader reads with the checked bulk Reader.take(l) path, then iterated the returned name bytes in file order; made the U8-to-U64 FNV-1a XOR conversion explicit. Header validation, record order, divisibility predicate, input path, workload, and output formatting are unchanged.",
+    "matched": "Same deterministic JGB1 fixture and all 300,000 shuffled records as every peer; every record value is considered, every name byte is hashed in order, and no input, side effect, ordering, or output work was removed.",
+    "expected_output_sha256": "8c6595406cbe23446f778ad932f2296071f6325955ab7e5c5d443b5fcf7f281e",
+    "measurement": "unrun: owner-deferred source-only phase; runtime and performance proof remain pending"
   }
 }

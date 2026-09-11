@@ -5,8 +5,9 @@
 //! reports whose recorded source digests still match the requested source.
 
 use jet_foundation::PerformanceBudget::{verify_budget_report, CanonicalJson};
-use std::collections::BTreeMap;
+use jet_foundation::Report::{StatusFields, StatusValue};
 use std::fs;
+use std::collections::BTreeMap;
 use std::path::Path;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -43,6 +44,32 @@ impl BudgetProjection {
             .join(",");
         format!("{{\"mode\":\"read_only\",\"rejected\":[{rejected}],\"reports\":[{facts}]}}")
     }
+    /// Typed status projection for command envelopes. The report facts remain
+    /// owned by the canonical budget engine; this method only carries them.
+    pub fn to_status_value(&self) -> StatusValue {
+        let reports = StatusValue::array(self.facts.iter().map(|fact| {
+            StatusValue::object(
+                StatusFields::new()
+                    .with("budget_id", fact.budget_id.as_str())
+                    .with("enforcement", fact.enforcement.as_str())
+                    .with("evidence", fact.evidence.as_str())
+                    .with("evidence_id", fact.evidence_id.as_str())
+                    .with("outcome", fact.outcome.as_str())
+                    .with("report_id", fact.report_id.as_str())
+                    .with("statistical", fact.statistical),
+            )
+        }));
+        StatusValue::object(
+            StatusFields::new()
+                .with("mode", "read_only")
+                .with(
+                    "rejected",
+                    StatusValue::array(self.rejected.iter().map(|reason| StatusValue::from(reason.as_str()))),
+                )
+                .with("reports", reports),
+        )
+    }
+
 
     pub fn render_text(&self) -> String {
         let mut out = String::from("Performance budgets (read-only)\n");

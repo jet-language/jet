@@ -10,6 +10,7 @@
 // surviving payload under `partial` and what it has to say under `notes`. Two
 // outcomes therefore never share a fact, and reading one twice answers the
 // same thing both times.
+#Error
 struct ImportErr {
     broken: Int
     partial: [String]
@@ -29,7 +30,7 @@ fn import_rows(label: String, rows: [String]) [String] !ImportErr -> {
     return Ok(good)
 }
 
-fn run() {
+fn run() !ImportErr {
     // Two spotty imports, alive at the same time. Each one carries its own
     // notes, because the notes are part of the outcome and not of the program.
     people :: import_rows("people", ["ada", "", "alan", "", "grace"])

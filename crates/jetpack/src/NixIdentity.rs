@@ -6,6 +6,7 @@
 //! may construct a fallback evaluation.
 
 use crate::{JSON, Lock, SHA256};
+use jet_foundation::DataTree::DataTree;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -190,7 +191,7 @@ impl NixFallbackIdentity {
 
     /// Decode and revalidate the exact identity persisted in a lock/receipt.
     pub(crate) fn from_provenance(value: &str) -> Result<Self, NixFallbackError> {
-        let JSON::JSONValue::Object(fields) = JSON::parse(value)
+        let DataTree::Object(fields) = JSON::parse(value)
             .map_err(|error| NixFallbackError::new(format!("invalid Nix fallback provenance: {error}")))?
         else {
             return Err(NixFallbackError::new(
@@ -210,7 +211,7 @@ impl NixFallbackIdentity {
         if fields.len() != PROVENANCE_FIELDS.len()
             || PROVENANCE_FIELDS
                 .iter()
-                .any(|field| !fields.contains_key(*field))
+                .any(|field| !fields.iter().any(|(key, _)| key == field))
         {
             return Err(NixFallbackError::new(
                 "Nix fallback provenance has an unknown or missing identity field",
@@ -228,7 +229,8 @@ impl NixFallbackIdentity {
         let nixpkgs_revision = string_field(&fields, "nixpkgs_revision")?;
         let system = string_field(&fields, "system")?;
         let attr = fields
-            .get("attr")
+            .iter()
+            .find_map(|(key, value)| (key == "attr").then_some(value))
             .ok_or_else(|| NixFallbackError::new("Nix fallback provenance is missing `attr`"))?
             .as_array()
             .map_err(NixFallbackError::new)?
@@ -385,11 +387,12 @@ fn revision_from_locked_input(input: &str) -> Result<String, NixFallbackError> {
 }
 
 fn string_field(
-    fields: &std::collections::BTreeMap<String, JSON::JSONValue>,
+    fields: &[(String, DataTree)],
     name: &str,
 ) -> Result<String, NixFallbackError> {
     fields
-        .get(name)
+        .iter()
+        .find_map(|(key, value)| (key == name).then_some(value))
         .ok_or_else(|| NixFallbackError::new(format!("Nix fallback provenance is missing `{name}`")))?
         .as_str()
         .map(str::to_string)

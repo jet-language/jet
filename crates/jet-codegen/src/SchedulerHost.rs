@@ -140,15 +140,24 @@ mod scheduler_host_tests {
     fn the_jit_scheduler_is_the_prelude_scheduler() {
         // Anti-refork guard. The JIT host must compile Prelude/Scheduler.rs
         // itself, never a second copy under src/scheduler*.
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        assert!(
-            !root.join("src/scheduler.rs").exists(),
-            "src/scheduler.rs is a second scheduler; the JIT compiles Prelude/Scheduler.rs"
-        );
-        assert!(
-            !root.join("src/scheduler").exists(),
-            "src/scheduler/ is a second scheduler; the JIT compiles Prelude/Scheduler.rs"
-        );
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let root = if manifest.join("src/Prelude/Scheduler.rs").exists() {
+            manifest.to_path_buf()
+        } else {
+            // jet-comptime concatenates this host into OUT_DIR. The one
+            // Prelude scheduler still lives next to jet-codegen's lib.rs.
+            manifest.join("../jet-codegen")
+        };
+        for crate_root in [manifest, root.as_path()] {
+            assert!(
+                !crate_root.join("src/scheduler.rs").exists(),
+                "src/scheduler.rs is a second scheduler; the JIT compiles Prelude/Scheduler.rs"
+            );
+            assert!(
+                !crate_root.join("src/scheduler").exists(),
+                "src/scheduler/ is a second scheduler; the JIT compiles Prelude/Scheduler.rs"
+            );
+        }
         let lib = std::fs::read_to_string(root.join("src/lib.rs")).unwrap();
         assert!(
             lib.contains("include!(\"Prelude/Scheduler.rs\")"),
@@ -174,7 +183,7 @@ mod scheduler_host_tests {
              the producer child's JetTaskControl is the one cancel fact"
         );
         let evaluator =
-            std::fs::read_to_string(root.join("src/Codegen/TIR/eval/mod.rs")).unwrap();
+            std::fs::read_to_string(root.join("src/Codegen/MIREval.rs")).unwrap();
         assert!(
             !evaluator.contains("stream_wait_check") && !evaluator.contains("stream_cancel"),
             "the evaluator's yield wait point must be the shared task wait point \

@@ -103,7 +103,14 @@ impl<'a> Parser<'a> {
             effect_via = via;
         }
 
-        // The body is a single foreign-source string literal, not a Jet block.
+        // Value-returning signatures use the canonical callable body arrow.
+        // Unit and unit-fallible signatures keep the no-payload block form.
+        if return_type
+            .as_ref()
+            .is_some_and(Self::return_type_has_value)
+        {
+            self.expect_unified_arrow("before the `#FFI` foreign-source body")?;
+        }
         self.expect(TokKind::LBrace, "to open the `#FFI` foreign-source body")?;
         while matches!(self.peek().kind, TokKind::Semi) {
             self.bump();
@@ -120,6 +127,7 @@ impl<'a> Parser<'a> {
         let function = Func {
             span: Span::new(decl_start, declaration_end),
             is_pub,
+            is_comptime: false,
             is_package_pub,
             external_type: None,
             name,
@@ -205,6 +213,11 @@ impl<'a> Parser<'a> {
                     [StrTokPart::Lit(s)] => Ok((s.clone(), span)),
                     _ => Err(e0064(span)),
                 }
+            }
+            TokKind::RawStr(text) => {
+                let text = text.clone();
+                let span = self.bump().span;
+                Ok((text, span))
             }
             _ => Err(e0064(marker_span)),
         }
@@ -457,7 +470,46 @@ impl<'a> Parser<'a> {
                 self.bump();
                 continue;
             }
-            functions.push(self.extern_fn(matches!(kind, CModuleKind::Extern))?);
+            let mut function = self.extern_fn(matches!(kind, CModuleKind::Extern))?;
+            let callback_transport = if function.name.starts_with("__jet_native_")
+                && function
+                    .params
+                    .iter()
+                    .any(|param| matches!(&param.ty, crate::AST::Type::Fn { .. }))
+            {
+                Some("native-start")
+            } else if function
+                .params
+                .iter()
+                .any(|param| matches!(&param.ty, crate::AST::Type::Fn { .. }))
+            {
+                Some("managed")
+            } else if function.name == "unsubscribe"
+                && matches!(
+                    &function.return_type,
+                    Some(crate::AST::Type::Apply { name, .. }) if name == "Task"
+                )
+            {
+                Some("managed-close")
+            } else if function.name == "emit_async"
+                && matches!(
+                    &function.return_type,
+                    Some(crate::AST::Type::Apply { name, .. }) if name == "Task"
+                )
+            {
+                Some("emit-task")
+            } else {
+                None
+            };
+            if let Some(callback_transport) = callback_transport {
+                let identity = format!("{}.{}", lib, function.name);
+                let digest_input = format!("jet-ffi-callback-plan-v1\0{identity}");
+                function.callback_transport = Some(callback_transport.to_string());
+                function.callback_plan_digest =
+                    Some(jet_foundation::SHA256::sha256_hex(digest_input.as_bytes()));
+                function.callback_identity = Some(identity);
+            }
+            functions.push(function);
         }
         self.expect(TokKind::RBrace, "to close the C FFI module body")?;
         let end = self.toks[self.pos - 1].span.end;
@@ -478,6 +530,7 @@ impl<'a> Parser<'a> {
     ) -> Result<(String, Span), Diagnostic> {
         let parts = match &self.peek().kind {
             TokKind::Str(parts) => parts.clone(),
+            TokKind::RawStr(text) => vec![StrTokPart::Lit(text.clone())],
             other => {
                 return Err(Diagnostic::error(
                     "E0003",

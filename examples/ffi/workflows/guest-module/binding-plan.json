@@ -1,0 +1,46 @@
+{
+  "schema": "jet-ffi-workflow-v1",
+  "workflow": "guest-module",
+  "status": "authored-unexecuted",
+  "source": {
+    "root": "native/rules.cpp",
+    "files": ["rules.h", "native/rules.hpp", "native/rules.cpp", "native/game.cpp", "native/rules_bridge.cpp", "native/incompatible_width.cpp", "incompatible-contract.json"],
+    "authority": "existing-foreign-build",
+    "original_input": true
+  },
+  "binding": {
+    "language": "c",
+    "export": "on_tick",
+    "jet_entry": "library.jet",
+    "native_call_site": "rules::on_tick(tick)",
+    "plan": "ABI-preserving-bridge-to-guest-export"
+  },
+  "contracts": {
+    "width": "int64_t <-> Int",
+    "layout": "no public struct layout crosses the boundary",
+    "identity": "rules::on_tick remains the source-level identity",
+    "failure": "noexcept native call maps to explicit guest failure contract"
+  },
+  "build": {
+    "configure": "cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=../../../../tools/foreign-build-hosts/cmake/JetToolchain.cmake",
+    "command": "jet bind rules.h --pkg rules; jet bind rules --shape automatic --freeze; cmake --build build",
+    "output": "42"
+  },
+  "failure_paths": [
+    {
+      "case": "width-mismatch",
+      "result": "reject",
+      "diagnostic": "int32_t cannot replace int64_t"
+    },
+    {
+      "case": "layout-or-address-identity",
+      "result": "reject",
+      "diagnostic": "public layout or function address identity changed"
+    },
+    {
+      "case": "failure-contract",
+      "result": "reject",
+      "diagnostic": "guest panic cannot satisfy noexcept native contract"
+    }
+  ]
+}

@@ -1,7 +1,5 @@
-use crate::Codegen::TIR::{
-    integer_bounds_for_expr, integer_bounds_for_op, TIntegerBounds, TLocal,
-};
 use crate::Codegen::TIR::TirWorklist;
+use crate::Codegen::TIR::{integer_bounds_for_expr, integer_bounds_for_op, TIntegerBounds, TLocal};
 use crate::AST::{BinOp, Expr, LValue, Stmt, Type};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -26,6 +24,9 @@ use std::rc::Rc;
 #[derive(Clone)]
 pub(crate) struct LowerEnv {
     pub(super) locals: HashMap<String, (TLocal, Option<Type>)>,
+    /// D-FOUND-BOARD1: checked DMA transfer locals retain their channel fact so
+    /// a later `.wait()` keeps the same profile identity and ownership route.
+    pub(super) dma_transfers: HashMap<String, String>,
     /// c109 Phase 8: the enclosing function's unmangled Jet name, used by a `?`
     /// (`TExprKind::Try`) to embed the trace-frame function name — exactly the value
     /// the AST path reads from `cx.current_fn` at emit time (set to `f.name`).
@@ -33,6 +34,8 @@ pub(crate) struct LowerEnv {
     /// D-UNIONTYPE1=A: enclosing function return type, for member→union inject
     /// at `return` / `Ok` / `Err` / `?` boundaries.
     pub(super) ret_ty: Option<Type>,
+    /// The checked enclosing trait uses a raw host protocol return ABI.
+    pub(super) raw_protocol_return: bool,
     /// True while lowering the value consumed by `??`. Closure adapters whose
     /// source result is void retain their effective `Result` carrier in this
     /// context so the fallback can consume it as a value rather than inherit
@@ -99,8 +102,10 @@ impl LowerEnv {
     pub(crate) fn new(fn_name: String) -> LowerEnv {
         LowerEnv {
             locals: HashMap::new(),
+            dma_transfers: HashMap::new(),
             fn_name,
             ret_ty: None,
+            raw_protocol_return: false,
             fallback_subject: false,
             self_owner: None,
             string_view_locals: HashSet::new(),
@@ -203,6 +208,10 @@ impl LowerEnv {
             .map(|name| format!("{}.id()", self.place_of(name)))
             .collect()
     }
+    /// Checked GC edge identities for analytical host lowering. Unlike the
+    /// legacy statement emitter's edge strings, these are structured local
+    /// slots; adapters derive object-id reads from them.
+    
     pub(super) fn note_clone(&mut self, ty: &Type) {
         self.cloned_types.borrow_mut().push(ty.clone());
     }
@@ -212,14 +221,16 @@ impl LowerEnv {
     pub(crate) fn bind(&mut self, name: &str, slot: TLocal, ty: Option<Type>) {
         self.locals.insert(name.to_string(), (slot, ty));
     }
+    pub(super) fn mark_dma_transfer(&mut self, name: &str, channel: String) {
+        self.dma_transfers.insert(name.to_string(), channel);
+    }
+    pub(super) fn dma_transfer_channel(&self, name: &str) -> Option<&str> {
+        self.dma_transfers.get(name).map(String::as_str)
+    }
     /// Replace the dynamic interval fact for an existing lexical slot. A
     /// missing fact is intentional: the slot may still have a finite type
     /// interval, while an ordinary `Int` remains allowed to spill.
-    pub(super) fn set_integer_bounds(
-        &mut self,
-        name: &str,
-        bounds: Option<TIntegerBounds>,
-    ) {
+    pub(super) fn set_integer_bounds(&mut self, name: &str, bounds: Option<TIntegerBounds>) {
         if let Some((slot, _)) = self.locals.get_mut(name) {
             slot.integer_bounds = bounds;
         }
@@ -241,11 +252,9 @@ impl LowerEnv {
     ) {
         let bounds = match op {
             None => integer_bounds_for_expr(value),
-            Some(op) => self
-                .integer_bounds_of(name)
-                .and_then(|lhs| integer_bounds_for_expr(value).and_then(|rhs| {
-                    integer_bounds_for_op(op, lhs, rhs)
-                })),
+            Some(op) => self.integer_bounds_of(name).and_then(|lhs| {
+                integer_bounds_for_expr(value).and_then(|rhs| integer_bounds_for_op(op, lhs, rhs))
+            }),
         };
         self.set_integer_bounds(name, bounds);
     }

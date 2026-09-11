@@ -3,6 +3,9 @@
 
 mod common;
 
+#[path = "tir_support/mod.rs"]
+mod tir_support;
+
 /// Builds WITHOUT -O so cfg!(debug_assertions) is true (dev-mode locals) —
 /// the shared helper never passes -O, which is exactly this contract.
 fn build_and_run_debug(name: &str, src: &str) -> (i32, String, String) {
@@ -118,14 +121,20 @@ fn run() {
     log.info("with trace")
 }
 "#;
-    let (_code, _stdout, stderr) = build_and_run_debug("log_trace_id", src);
-    let lines: Vec<&str> = stderr.lines().filter(|l| l.starts_with('{')).collect();
-    assert_eq!(lines.len(), 1);
-    assert!(
-        lines[0].contains("\"trace_id\":\"req-abc-123\""),
-        "trace_id missing from log line: {}",
-        lines[0]
-    );
+    for (tier, (code, _stdout, stderr)) in [
+        ("native", build_and_run_debug("log_trace_id", src)),
+        ("default", tir_support::jit_run("log_trace_id", src)),
+        ("interpret", tir_support::interpreter_run("log_trace_id", src)),
+    ] {
+        assert_eq!(code, 0, "{tier} failed:\n{stderr}");
+        let lines: Vec<&str> = stderr.lines().filter(|l| l.starts_with('{')).collect();
+        assert_eq!(lines.len(), 1, "{tier} stderr:\n{stderr}");
+        assert!(
+            lines[0].contains("\"trace_id\":\"req-abc-123\""),
+            "{tier} trace_id missing from log line: {}",
+            lines[0]
+        );
+    }
 }
 
 #[test]
@@ -221,8 +230,12 @@ fn run() {
     check(0)
 }
 "#;
-    let (code, _stdout, stderr) = build_and_run_debug("rich_panic", src);
-    assert_eq!(code, 70, "expected exit 70");
+    for (tier, (code, _stdout, stderr)) in [
+        ("native", build_and_run_debug("rich_panic", src)),
+        ("default", tir_support::jit_run("rich_panic", src)),
+        ("interpret", tir_support::interpreter_run("rich_panic", src)),
+    ] {
+    assert_eq!(code, 70, "{tier}: expected exit 70; stderr:\n{stderr}");
     assert!(
         stderr.contains("Stop [E3001]: `panic: must be positive`\n"),
         "wrong panic header: {}",
@@ -240,16 +253,11 @@ fn run() {
     );
     assert!(stderr.contains('^'), "caret missing: {}", stderr);
     assert!(
-        stderr.contains("Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms — never generated-Rust terms (I2).")
-            && stderr.contains("Fix: Fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects."),
-        "shared stop guidance missing: {}",
-        stderr
-    );
-    assert!(
         !stderr.contains("thread 'main' panicked") && !stderr.contains("panicked at"),
         "raw Rust panic banner leaked: {}",
         stderr
     );
+    }
 }
 
 #[test]

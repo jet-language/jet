@@ -360,7 +360,10 @@ fn run() {
     ttl := Duration.seconds(1) ?? panic("duration")
     key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
-    _ := secret.with((borrowed) -> { consume(^borrowed); return 0 })
+    _ := secret.with((borrowed) -> {
+        consume(^borrowed)
+        return 0
+    })
 }
 "#,
         ),
@@ -376,7 +379,10 @@ fn run() {
     ttl := Duration.seconds(1) ?? panic("duration")
     key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
-    _ := secret.with((borrowed) -> { collect(borrowed); return 0 })
+    _ := secret.with((borrowed) -> {
+        collect(borrowed)
+        return 0
+    })
 }
 "#,
         ),

@@ -8,7 +8,7 @@ use jet_driver::FixEngine;
 use jet_semindex::{DefinitionAnchor, SourceSpan, SymbolDef, SymbolRef};
 
 use super::graph_helpers::{
-    edit, project_edit_conflict, project_edit_error, project_edit_ok, simple_diff,
+    edit, project_edit_conflict, project_edit_error, project_edit_ok_with_audit, simple_diff,
 };
 use super::project_scan::{
     project_context_for_entry, project_revision_from_files, ProjectChange, ProjectContext,
@@ -70,6 +70,484 @@ pub(super) fn required_project_touched_files(
         ));
     }
     Ok(files)
+}
+
+
+#[derive(Debug, Clone)]
+struct GameSelectionTargetRecord {
+    source_id: String,
+    revision: String,
+    authored_instance_id: String,
+    source_span: SourceSpan,
+}
+
+#[derive(Debug, Clone)]
+struct GameSelectionPatch {
+    field: String,
+    value: String,
+}
+
+struct GameSelectionSource {
+    path: PathBuf,
+    before: String,
+    edits: Vec<(SourceSpan, String)>,
+}
+
+/// Apply one field patch to every explicitly selected source-backed game
+/// instance. The source revisions and spans are checked before any candidate
+/// is formatted or published, so a stale or malformed selection cannot write
+/// a partial multi-object edit.
+pub(super) fn apply_project_edit_game_selection(
+    ctx: &ProjectContext,
+    request: &str,
+    touched: &[TouchedProjectFile],
+) -> Result<String, String> {
+    if json_key_present(request, "span") || json_key_present(request, "patch") {
+        return Err(project_edit_error(
+            "bad_request",
+            "edit_game_selection requires `source_span` targets and one `field_patch`",
+        ));
+    }
+    let targets = required_game_selection_targets(request)?;
+    let patch = required_game_selection_patch(request)?;
+    let mut sources = BTreeMap::<String, GameSelectionSource>::new();
+
+    for target in &targets {
+        require_touched_revision(touched, &target.source_id, &target.revision)?;
+        let file = ctx
+            .files
+            .iter()
+            .find(|file| file.path == target.source_id)
+            .ok_or_else(|| {
+                project_edit_error(
+                    "not_found",
+                    "Canvas game selection source is not in the projected source truth",
+                )
+            })?;
+        if !target.source_id.ends_with(&format!(".{}", jet_driver::Syntax::FILE_EXT)) {
+            return Err(project_edit_error(
+                "bad_request",
+                "Canvas game selections may only edit Jet source truth",
+            ));
+        }
+        let path = ctx.project_root.join(&target.source_id);
+        validate_project_path(&ctx.project_root, &path, &target.source_id)?;
+        if !sources.contains_key(&target.source_id) {
+            let before = read_source_without_symlinks(&path)
+                .map_err(|error| project_edit_error("io", &error.to_string()))?;
+            if source_revision(&before) != file.revision || source_revision(&before) != target.revision
+            {
+                return Err(project_edit_conflict(
+                    "source file changed since this Canvas game selection was drawn",
+                    &ctx.project_revision,
+                ));
+            }
+            sources.insert(
+                target.source_id.clone(),
+                GameSelectionSource {
+                    path,
+                    before,
+                    edits: Vec::new(),
+                },
+            );
+        }
+        let source = sources
+            .get_mut(&target.source_id)
+            .expect("game selection source inserted above");
+        let (span, replacement) =
+            game_field_edit(&source.before, target.source_span, &patch.field, &patch.value)?;
+        source.edits.push((span, replacement));
+    }
+
+    let mut changes = Vec::with_capacity(sources.len());
+    for (rel, source) in sources {
+        let text_edits = source
+            .edits
+            .iter()
+            .map(|(span, replacement)| edit(*span, replacement))
+            .collect::<Vec<_>>();
+        let after = FixEngine::apply_edits(&source.before, &text_edits).map_err(|_| {
+            project_edit_error(
+                "overlap",
+                "Canvas game selection source spans overlap",
+            )
+        })?;
+        changes.push(ProjectChange {
+            path: source.path,
+            rel,
+            before: source.before,
+            after,
+            existed: true,
+        });
+    }
+    let audit = game_selection_audit_json(&targets, &patch);
+    finish_project_changes_with_audit(ctx, request, "edit_game_selection", changes, &audit)
+}
+
+fn required_game_selection_targets(
+    request: &str,
+) -> Result<Vec<GameSelectionTargetRecord>, String> {
+    let body = json_array_body(request, "targets")
+        .ok_or_else(|| project_edit_error("bad_request", "missing `targets`"))?;
+    let mut targets = Vec::new();
+    for object in json_object_bodies(body) {
+        let raw_source_id = json_string_field(object, "source_id").ok_or_else(|| {
+            project_edit_error("bad_request", "game selection target missing `source_id`")
+        })?;
+        let source_id = clean_project_rel_path(&raw_source_id)?;
+        let revision = json_string_field(object, "revision").ok_or_else(|| {
+            project_edit_error("bad_request", "game selection target missing `revision`")
+        })?;
+        if revision.trim().is_empty() {
+            return Err(project_edit_error(
+                "bad_request",
+                "game selection target has an empty `revision`",
+            ));
+        }
+        let authored_instance_id =
+            json_string_field(object, "authored_instance_id").ok_or_else(|| {
+                project_edit_error(
+                    "bad_request",
+                    "game selection target missing `authored_instance_id`",
+                )
+            })?;
+        if authored_instance_id.trim().is_empty() {
+            return Err(project_edit_error(
+                "bad_request",
+                "game selection target has an empty `authored_instance_id`",
+            ));
+        }
+        let span_body = json_object_body(object, "source_span").ok_or_else(|| {
+            project_edit_error("bad_request", "game selection target missing `source_span`")
+        })?;
+        let start = json_usize_field(span_body, "start").ok_or_else(|| {
+            project_edit_error("bad_request", "game selection `source_span` missing `start`")
+        })?;
+        let end = json_usize_field(span_body, "end").ok_or_else(|| {
+            project_edit_error("bad_request", "game selection `source_span` missing `end`")
+        })?;
+        if start >= end {
+            return Err(project_edit_error(
+                "bad_request",
+                "game selection `source_span` must be non-empty",
+            ));
+        }
+        targets.push(GameSelectionTargetRecord {
+            source_id,
+            revision,
+            authored_instance_id,
+            source_span: SourceSpan { start, end },
+        });
+    }
+    if targets.is_empty() {
+        return Err(project_edit_error(
+            "bad_request",
+            "Canvas game selections must include at least one target",
+        ));
+    }
+    Ok(targets)
+}
+
+fn required_game_selection_patch(request: &str) -> Result<GameSelectionPatch, String> {
+    let body = json_object_body(request, "field_patch").ok_or_else(|| {
+        project_edit_error("bad_request", "missing `field_patch`")
+    })?;
+    let field = json_string_field(body, "field")
+        .ok_or_else(|| project_edit_error("bad_request", "game field patch missing `field`"))?;
+    let value = json_string_field(body, "value")
+        .ok_or_else(|| project_edit_error("bad_request", "game field patch missing `value`"))?;
+    if field.trim().is_empty() {
+        return Err(project_edit_error(
+            "bad_request",
+            "game field patch has an empty `field`",
+        ));
+    }
+    Ok(GameSelectionPatch { field, value })
+}
+
+fn game_selection_audit_json(
+    targets: &[GameSelectionTargetRecord],
+    patch: &GameSelectionPatch,
+) -> String {
+    let targets = targets
+        .iter()
+        .map(|target| {
+            format!(
+                "{{\"source_id\":{},\"revision\":{},\"authored_instance_id\":{},\"source_span\":{}}}",
+                json_str(&target.source_id),
+                json_str(&target.revision),
+                json_str(&target.authored_instance_id),
+                format!(
+                    "{{\"start\":{},\"end\":{}}}",
+                    target.source_span.start, target.source_span.end
+                ),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"targets\":[{}],\"field_patch\":{{\"field\":{},\"value\":{}}},\"transaction\":\"one_checked_source_transaction\",\"undo\":\"replace_source\",\"provenance\":\"authored_instance\"}}",
+        targets,
+        json_str(&patch.field),
+        json_str(&patch.value),
+    )
+}
+
+fn game_field_edit(
+    source: &str,
+    source_span: SourceSpan,
+    field: &str,
+    value: &str,
+) -> Result<(SourceSpan, String), String> {
+    let selected = source.get(source_span.start..source_span.end).ok_or_else(|| {
+        project_edit_error(
+            "bad_request",
+            "game selection `source_span` is outside the source file",
+        )
+    })?;
+    let field = field.trim();
+    match field {
+        "path" => {
+            if let Some(span) =
+                game_call_argument_span(selected, source_span.start, &["image", "sound"])
+            {
+                return Ok((span, game_string_literal(value)));
+            }
+            if is_quoted_source(selected)
+                && game_source_context_contains(source, source_span, &[".image(", ".sound("])
+            {
+                return Ok((source_span, game_string_literal(value)));
+            }
+            Err(project_edit_error(
+                "bad_request",
+                "game asset path edits must target an image or sound call",
+            ))
+        }
+        "component" | "type" | "name" => {
+            if let Some(span) = game_component_type_span(selected, source_span.start) {
+                validate_game_type_name(value)?;
+                return Ok((span, value.trim().to_string()));
+            }
+            if let Some(span) =
+                game_call_argument_span(selected, source_span.start, &["component"])
+            {
+                return Ok((span, game_string_literal(value)));
+            }
+            if is_quoted_source(selected)
+                && game_source_context_contains(
+                    source,
+                    source_span,
+                    &[".component<", ".component("],
+                )
+            {
+                return Ok((source_span, game_string_literal(value)));
+            }
+            if is_game_type_name(selected.trim())
+                && game_source_context_contains(source, source_span, &[".component<"])
+            {
+                validate_game_type_name(value)?;
+                return Ok((source_span, value.trim().to_string()));
+            }
+            Err(project_edit_error(
+                "bad_request",
+                "component edits must target a component call or type field",
+            ))
+        }
+        _ => Err(project_edit_error(
+            "bad_request",
+            "Canvas game field patches support only `path`, `component`, `type`, or `name`",
+        )),
+    }
+}
+
+fn game_source_context_contains(
+    source: &str,
+    span: SourceSpan,
+    needles: &[&str],
+) -> bool {
+    let Some(prefix) = source.get(..span.start) else {
+        return false;
+    };
+    needles.iter().any(|needle| {
+        let Some(position) = prefix.rfind(needle) else {
+            return false;
+        };
+        prefix
+            .get(position + needle.len()..)
+            .is_some_and(|between| between.trim().is_empty())
+    })
+}
+
+fn game_call_argument_span(
+    selected: &str,
+    offset: usize,
+    methods: &[&str],
+) -> Option<SourceSpan> {
+    let (method_pos, method) = methods
+        .iter()
+        .filter_map(|method| {
+            selected
+                .find(&format!(".{method}("))
+                .map(|position| (position, *method))
+        })
+        .min_by_key(|(position, _)| *position)?;
+    let open = method_pos + method.len() + 1;
+    let bytes = selected.as_bytes();
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut end = None;
+    for index in (open + 1)..bytes.len() {
+        let byte = bytes[index];
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' if depth > 0 => depth -= 1,
+            b')' | b',' if depth == 0 => {
+                end = Some(index);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let end = end?;
+    let raw_start = open + 1;
+    let (start, end) = trim_byte_range(selected, raw_start, end)?;
+    Some(SourceSpan {
+        start: offset + start,
+        end: offset + end,
+    })
+}
+
+fn game_component_type_span(selected: &str, offset: usize) -> Option<SourceSpan> {
+    let method = selected.find(".component")?;
+    let open = selected[method..].find('(')? + method;
+    let generic_start = selected[method..open].find('<')? + method;
+    let generic_end = selected[generic_start + 1..open].find('>')? + generic_start + 1;
+    let (start, end) = trim_byte_range(selected, generic_start + 1, generic_end)?;
+    let value = selected.get(start..end)?;
+    if value.is_empty() || value.contains(',') {
+        return None;
+    }
+    Some(SourceSpan {
+        start: offset + start,
+        end: offset + end,
+    })
+}
+
+fn trim_byte_range(text: &str, mut start: usize, mut end: usize) -> Option<(usize, usize)> {
+    while start < end && text.as_bytes()[start].is_ascii_whitespace() {
+        start += 1;
+    }
+    while end > start && text.as_bytes()[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+    (start < end).then_some((start, end))
+}
+
+fn is_quoted_source(source: &str) -> bool {
+    let source = source.trim();
+    source.len() >= 2 && source.starts_with('"') && source.ends_with('"')
+}
+
+fn is_game_type_name(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .split('.')
+            .all(|part| {
+                let mut chars = part.chars();
+                matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
+                    && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+            })
+}
+
+fn validate_game_type_name(value: &str) -> Result<(), String> {
+    if is_game_type_name(value.trim()) {
+        Ok(())
+    } else {
+        Err(project_edit_error(
+            "bad_request",
+            "component type must be a qualified Jet type name",
+        ))
+    }
+}
+
+fn game_string_literal(value: &str) -> String {
+    format!(
+        "\"{}\"",
+        value
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+            .replace('\t', "\\t")
+    )
+}
+
+fn json_key_present(text: &str, key: &str) -> bool {
+    let needle = format!("\"{key}\"");
+    let mut search_from = 0usize;
+    while let Some(relative) = text.get(search_from..).and_then(|rest| rest.find(&needle)) {
+        let position = search_from + relative;
+        let after = position + needle.len();
+        if text
+            .get(after..)
+            .is_some_and(|rest| rest.trim_start().starts_with(':'))
+        {
+            return true;
+        }
+        search_from = after;
+    }
+    false
+}
+
+fn json_object_body<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+    let needle = format!("\"{key}\"");
+    let key_pos = text.find(&needle)?;
+    let rest = &text[key_pos + needle.len()..];
+    let colon = rest.find(':')?;
+    let rest = rest[colon + 1..].trim_start();
+    if !rest.starts_with('{') {
+        return None;
+    }
+    let bytes = rest.as_bytes();
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (index, byte) in bytes.iter().copied().enumerate() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return rest.get(1..index);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 pub(super) fn validate_touched_project_files(
@@ -601,7 +1079,7 @@ pub(super) fn apply_project_create_package(
     {
         return Err(project_edit_error("diagnostic", &d.what));
     }
-    jet_driver::Parser::parse(&tokens)
+    jet_driver::Parser::parse_with_source(&tokens, &entry)
         .map(|_| ())
         .map_err(|mut diags| {
             let what = diags
@@ -922,7 +1400,7 @@ fn apply_canonical_dependency(
             let facts = jet_driver::Package::PackageFacts::parse(&before, manifest_rel.to_string())
                 .map_err(|error| project_edit_error("diagnostic", &error.to_string()))?;
             if let Some(existing) = facts.deps.get(name) {
-                if jet_driver::Package::dep_display(existing) != spec_text {
+                if jet_driver::Package::dep_display_redacted(existing) != spec_text {
                     return Err(project_edit_error(
                         "conflict",
                         "the canonical Package already declares this dependency with another spec",
@@ -1230,7 +1708,17 @@ fn finish_project_changes(
     ctx: &ProjectContext,
     request: &str,
     op: &str,
+    changes: Vec<ProjectChange>,
+) -> Result<String, String> {
+    finish_project_changes_with_audit(ctx, request, op, changes, "")
+}
+
+fn finish_project_changes_with_audit(
+    ctx: &ProjectContext,
+    request: &str,
+    op: &str,
     mut changes: Vec<ProjectChange>,
+    audit: &str,
 ) -> Result<String, String> {
     for change in &changes {
         validate_project_path(&ctx.project_root, &change.path, &change.rel)?;
@@ -1277,7 +1765,7 @@ fn finish_project_changes(
     } else {
         project_context_for_entry(&ctx.entry_path).project_revision
     };
-    Ok(project_edit_ok(
+    Ok(project_edit_ok_with_audit(
         op,
         preview,
         changed,
@@ -1285,6 +1773,7 @@ fn finish_project_changes(
         &next_project_revision,
         &touched_files,
         &diff,
+        audit,
     ))
 }
 

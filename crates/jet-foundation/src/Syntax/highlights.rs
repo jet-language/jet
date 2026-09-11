@@ -407,6 +407,14 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         class: HighlightClass::TypeBuiltin,
     },
     HighlightToken {
+        text: TYPE_SHARED_SNAPSHOT,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_SHARED_REVISION_ERROR,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
         text: TYPE_SHARED_GUARD,
         class: HighlightClass::TypeBuiltin,
     },
@@ -484,6 +492,10 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
     },
     HighlightToken {
         text: TYPE_ITER,
+        class: HighlightClass::TypeBuiltin,
+    },
+    HighlightToken {
+        text: TYPE_VIEW_ITER,
         class: HighlightClass::TypeBuiltin,
     },
     HighlightToken {
@@ -583,7 +595,7 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         class: HighlightClass::TypeBuiltin,
     },
     HighlightToken {
-        text: TYPE_JSON_ERROR,
+        text: TYPE_ENCODING_ERROR,
         class: HighlightClass::TypeBuiltin,
     },
     HighlightToken {
@@ -1188,11 +1200,12 @@ use super::{
     TYPE_DERIVED, TYPE_EFFECT, TYPE_ERR, TYPE_EVENT, TYPE_EVENT_POLICY, TYPE_EVENT_SCOPE,
     TYPE_EVENT_TRACE, TYPE_F32, TYPE_F64, TYPE_FIXED_SIZE_SEP, TYPE_FLOAT, TYPE_HASH_MAP,
     TYPE_HOOK, TYPE_I16, TYPE_I32, TYPE_I64, TYPE_I8, TYPE_INSTANT, TYPE_INT, TYPE_IO_ERROR,
-    TYPE_ITER, TYPE_JSON, TYPE_JSON_ERROR, TYPE_KEY, TYPE_LRU, TYPE_MEASUREMENT, TYPE_MEMO_STATS,
+    TYPE_ITER, TYPE_JSON, TYPE_ENCODING_ERROR, TYPE_KEY, TYPE_LRU, TYPE_MEASUREMENT, TYPE_MEMO_STATS,
     TYPE_PRIORITY_QUEUE, TYPE_PTR, TYPE_QUEUE, TYPE_RANK, TYPE_RECEIVER, TYPE_SENDER, TYPE_SET,
-    TYPE_SHARED, TYPE_SHARED_GUARD, TYPE_SHARED_WEAK, TYPE_SIGNAL, TYPE_STREAM, TYPE_STRING,
-    TYPE_SUBSCRIPTION, TYPE_TASK, TYPE_TASK_FAILURE, TYPE_U16, TYPE_U32, TYPE_U64, TYPE_U8,
-    TYPE_UNIT, TYPE_UTF8_ERROR, TYPE_WATCH_EVENT, TYPE_WATCH_HANDLE, TYPE_WATCH_SET,
+    TYPE_SHARED, TYPE_SHARED_GUARD, TYPE_SHARED_REVISION_ERROR, TYPE_SHARED_SNAPSHOT, TYPE_SHARED_WEAK,
+    TYPE_SIGNAL, TYPE_STREAM, TYPE_STRING, TYPE_SUBSCRIPTION, TYPE_TASK, TYPE_TASK_FAILURE, TYPE_U16,
+    TYPE_U32, TYPE_U64, TYPE_U8, TYPE_UNIT, TYPE_UTF8_ERROR, TYPE_VIEW_ITER, TYPE_WATCH_EVENT,
+    TYPE_WATCH_HANDLE, TYPE_WATCH_SET,
     VALIDATE_CHECK_FN,
 };
 use crate::JSON::json_escape;

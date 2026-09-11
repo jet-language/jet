@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E0041 — Jet diagnostic</title>
-<meta name="description" content="Teaching: `Mutex`/`lock` → channels; `Semaphore` → bounded channels">
+<meta name="description" content="`Mutex` is not a Jet API; use a channel, or `Shared&lt;T&gt;` with `Condition`">
 <meta property="og:title" content="E0041 — Jet diagnostic">
-<meta property="og:description" content="Teaching: `Mutex`/`lock` → channels; `Semaphore` → bounded channels">
+<meta property="og:description" content="`Mutex` is not a Jet API; use a channel, or `Shared&lt;T&gt;` with `Condition`">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,25 +25,25 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E0041</h1>
-<p>Teaching: `Mutex`/`lock` → channels; `Semaphore` → bounded channels</p>
+<p>`Mutex` is not a Jet API; use a channel, or `Shared&lt;T&gt;` with `Condition`</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">Teaching: `Mutex`/`lock` → channels; `Semaphore` → bounded channels</p>
+<p class="diag-copy what" data-registry-field="what">`Mutex` is not a Jet API; use a channel, or `Shared&lt;T&gt;` with `Condition`</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
+<p class="diag-copy why" data-registry-field="why">Tasks pass owned values over channels; when tasks must share memory, `Shared&lt;T&gt;` guards the state under a lock and `Condition` coordinates predicate waits.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for E0041</p>
+<p class="diag-copy fix" data-registry-field="fix">Create `channel&lt;T&gt;()` and send owned values, or write `shared value` and edit it through `guard_edit()` (a guard can `wait` on a `Condition`).</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0041</code>: <code>tests/ui/mutex_teaching.stderr</code>.</p>
-<pre class="diag">Error [E0041]: `Mutex` is not in Jet; share data through channels
+<pre class="diag">Error [E0041]: `Mutex` is not a Jet API; use a channel, or `Shared&lt;T&gt;` with `Condition`
   --&gt; tests/ui/mutex_teaching.jet:2:5
     |
   2 |     Mutex(42)
     |     ^^^^^
- Why: Jet avoids shared mutable state: tasks communicate by sending messages, not sharing memory
- Fix: create a channel, and use `sender.send`/`channel.receive`
+ Why: Tasks pass owned values over channels; when tasks must share memory, `Shared&lt;T&gt;` guards the state under a lock and `Condition` coordinates predicate waits
+ Fix: Create `channel&lt;T&gt;()` and send owned values, or write `shared value` and edit it through `guard_edit()` (a guard can `wait` on a `Condition`)
 More: jet-lang.dev/e/E0041
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

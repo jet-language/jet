@@ -36,50 +36,23 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Did you mean `print`?</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0102</code>: <code>tests/ui/channel_retired_forms.stderr</code>.</p>
-<pre class="diag">Error [E0119]: there&#39;s no type called `Channel`
-  --&gt; tests/ui/channel_retired_forms.jet:3:25
+<p>First UI snapshot mentioning <code>E0102</code>: <code>tests/ui/args_spec_bad_flag_arity.stderr</code>.</p>
+<pre class="diag">Error [E1301]: `flag` expects 2 arguments (name, help), got 1
+  --&gt; tests/ui/args_spec_bad_flag_arity.jet:5:25
     |
-  3 | fn takes_channel(value: Channel&lt;Int&gt;) {}
-    |                         ^^^^^^^^^^^^
- Why: generic types must name a struct or enum you defined
- Fix: check the spelling, or define the type first
-More: jet-lang.dev/e/E0119
+  5 |     spec :: args.spec().flag(&quot;verbose&quot;)
+    |                         ^^^^
+ Why: `ArgsSpec.flag(name, help)` registers a boolean flag like `--verbose`
+ Fix: Pass exactly two strings: the flag name and a help description
+More: jet-lang.dev/e/E1301
 
-Error [E0119]: `Channel` isn&#39;t generic
-  --&gt; tests/ui/channel_retired_forms.jet:3:25
+Error [E0102]: `Unknown` has no method `flag`
+  --&gt; tests/ui/args_spec_bad_flag_arity.jet:7:18
     |
-  3 | fn takes_channel(value: Channel&lt;Int&gt;) {}
-    |                         ^^^^^^^^^^^^
- Why: only types declared with type parameters accept `&lt;…&gt;`
- Fix: use `Channel` without type arguments
-More: jet-lang.dev/e/E0119
-
-Error [E0102]: `tasks.channel` is retired
-  --&gt; tests/ui/channel_retired_forms.jet:7:16
-    |
-  7 |     _ :: tasks.channel&lt;Int&gt;()
-    |                ^^^^^^^
- Why: channels are a readable builtin and need no module import
- Fix: write `channel&lt;T&gt;()` or `channel&lt;T&gt;(capacity: 8)
-More: jet-lang.dev/e/E0102
-
-Error [E0102]: `Group.select()` is retired
-  --&gt; tests/ui/channel_retired_forms.jet:9:16
-    |
-  9 |         _ :: g.select()
-    |                ^^^^^^
- Why: readiness waits are subjectless `if` tables on plain endpoints
- Fix: write `if { value, receiver -&gt; handle(value) }`
-More: jet-lang.dev/e/E0102
-
-Error [E0102]: `Group.select()` is retired
-  --&gt; tests/ui/channel_retired_forms.jet:10:16
-    |
- 10 |         _ :: g.select().read(receiver)
-    |                ^^^^^^
- Why: readiness waits are subjectless `if` tables on plain endpoints
- Fix: write `if { value, receiver -&gt; handle(value) }`
+  7 |     print(parsed.flag(&quot;verbose&quot;))
+    |                  ^^^^
+ Why: Check the method name on this type
+ Fix: Define it inside `struct Unknown` or `impl Unknown`
 More: jet-lang.dev/e/E0102
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

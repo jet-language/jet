@@ -1,10 +1,8 @@
 use super::*;
 use crate::Collections;
-use crate::Diagnostics::{
-    Diagnostic, FixApplicability, FixSafety, Span, TextEdit,
-};
+use crate::Diagnostics::{Diagnostic, FixApplicability, FixSafety, Span, TextEdit};
 use crate::Generics::{is_type_var_name, substitute_type};
-use crate::Sema::Diagnostics::{is_cloneable, type_requires_owned_iteration};
+use crate::Sema::Diagnostics::{is_cloneable, type_is_copy, type_requires_owned_iteration};
 use crate::Syntax;
 use crate::AST::{
     AccessConvention, BinOp, Expr, ForKind, LValue, Lambda, LambdaBody, Pattern, Stmt, Type, UnOp,
@@ -154,6 +152,38 @@ fn append_view_source_projections(
         });
     }
 }
+/// Recover the borrowed-window kind from a checked method return. The
+/// `ViewIter`/`Result` wrappers are carriers around the same view payload; the
+/// inner argument identifies the existing diagnostic family without making
+/// mapped files a special hard-coded `List` view.
+fn view_kind_from_return_type(ty: &Type) -> Option<ViewKind> {
+    match ty {
+        Type::Result { ok, .. } | Type::Option(ok) | Type::Shared(ok) => {
+            view_kind_from_return_type(ok)
+        }
+        Type::Apply { name, args }
+            if name == Syntax::TYPE_VIEW_ITER && args.len() == 1 =>
+        {
+            view_kind_from_return_type(&args[0])
+        }
+        Type::Apply { name, args }
+            if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
+        {
+            match &args[0] {
+                Type::Named(name) if name == "str" => Some(ViewKind::String),
+                Type::Named(name) if name == Syntax::TYPE_BYTES => Some(ViewKind::Buffer),
+                Type::Named(name) if name == "Tensor" => Some(ViewKind::Matrix),
+                Type::Apply { name, .. }
+                    if matches!(name.as_str(), "Vec" | "Matrix" | "Tensor") =>
+                {
+                    Some(ViewKind::Matrix)
+                }
+                _ => Some(ViewKind::List),
+            }
+        }
+        _ => None,
+    }
+}
 
 impl<'a> Checker<'a> {
     pub(crate) fn is_resource_type(&self, ty: &Type) -> bool {
@@ -204,9 +234,9 @@ impl<'a> Checker<'a> {
         let Expr::Ident(arena, _) = receiver.as_ref().without_parens() else {
             return None;
         };
-        let resolved_allocator = recv_type.as_deref().is_some_and(|name| {
-            matches!(name, "Arena" | "Bump" | "Pool" | "Fixed")
-        });
+        let resolved_allocator = recv_type
+            .as_deref()
+            .is_some_and(|name| matches!(name, "Arena" | "Bump" | "Pool" | "Fixed"));
         (resolved_allocator || self.lookup(arena).is_some_and(|i| is_allocator_type(&i.ty)))
             .then(|| arena.clone())
     }
@@ -813,17 +843,100 @@ impl<'a> Checker<'a> {
         match expr {
             Expr::Ident(name, _) => self.lookup(name).map(|info| info.ty.clone()),
             Expr::Paren(inner, _) | Expr::Place(inner, _, _) => self.place_expr_type(inner),
+            Expr::Deref(inner, _) => self
+                .place_expr_type(inner)
+                .and_then(|pointer| crate::Sema::ptr_elem(&pointer)),
             Expr::Field(base, field, _) => self
                 .place_expr_type(base)
                 .and_then(|owner| self.projected_field_type(owner, field)),
-            Expr::Index { base, .. } => match self.place_expr_type(base)? {
-                Type::List(elem) | Type::FixedList { elem, .. } => Some(*elem),
-                Type::Map { value, .. } => Some(*value),
-                _ => None,
-            },
+            Expr::Index { base, .. } => {
+                let base_ty = self.place_expr_type(base)?;
+                if self.is_simd_lane_type(&base_ty) {
+                    Some(crate::Sema::CheckerCoreLib::math_scalar_ty(
+                        base_ty.name().as_str(),
+                    ))
+                } else {
+                    match base_ty {
+                        Type::List(elem) | Type::FixedList { elem, .. } => Some(*elem),
+                        Type::Map { value, .. } => Some(*value),
+                        _ => None,
+                    }
+                }
+            }
             _ => None,
         }
     }
+
+    fn is_simd_lane_type(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Tagged { inner, .. } => self.is_simd_lane_type(inner),
+            Type::Named(name) => {
+                crate::Sema::CheckerCoreLib::is_simd_lane_type(name)
+                    && !self.registry.contains(name)
+            }
+            _ => false,
+        }
+    }
+
+    fn unowned_move_projection(&self, expr: &Expr) -> Option<&'static str> {
+        match expr {
+            Expr::Deref(_, _) => Some("dereference"),
+            Expr::Index { base, .. } if self
+                .place_expr_type(base)
+                .is_some_and(|ty| self.is_simd_lane_type(&ty)) =>
+            {
+                Some("SIMD lane")
+            }
+            Expr::Field(base, _, _)
+            | Expr::Index { base, .. }
+            | Expr::Place(base, _, _)
+            | Expr::Paren(base, _) => self.unowned_move_projection(base),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn reject_noncanonical_move_place(
+        &mut self,
+        expr: &Expr,
+        value_ty: Option<&Type>,
+        consumer: &str,
+        span: Span,
+    ) -> bool {
+        let Some(projection) = self.unowned_move_projection(expr) else {
+            return false;
+        };
+        let is_copy = match value_ty {
+            Some(ty) => type_is_copy(ty),
+            None => self
+                .place_expr_type(expr)
+                .is_some_and(|ty| type_is_copy(&ty)),
+        };
+        if is_copy {
+            return false;
+        }
+        let diagnostic = Diagnostic::error(
+            "E0201",
+            format!("`{consumer}` cannot move a non-copy {projection} place"),
+            format!(
+                "canonical ownership has no owning storage route for a non-copy {projection} place"
+            ),
+            "copy the value first, or move the owning binding instead".to_string(),
+            Some(span),
+        );
+        if !self
+            .diags
+            .iter()
+            .any(|previous| {
+                previous.code == diagnostic.code
+                    && previous.span == diagnostic.span
+                    && previous.what == diagnostic.what
+            })
+        {
+            self.diags.push(diagnostic);
+        }
+        true
+    }
+
 
     fn projected_field_type(&self, mut owner: Type, field: &str) -> Option<Type> {
         while let Type::Tagged { inner, .. } = owner {
@@ -1055,12 +1168,7 @@ impl<'a> Checker<'a> {
                         // lends its place for this call; it never moves the
                         // lambda's captured owner.
                         if arg.convention == AccessConvention::Write {
-                            self.push_evaluated_access(
-                                &arg.expr,
-                                ViewAccess::Write,
-                                bound,
-                                out,
-                            );
+                            self.push_evaluated_access(&arg.expr, ViewAccess::Write, bound, out);
                         }
                     }
                 }
@@ -1077,12 +1185,7 @@ impl<'a> Checker<'a> {
                     for arg in args {
                         self.collect_evaluated_expr_accesses(&arg.expr, mode, bound, out);
                         if arg.convention == AccessConvention::Write {
-                            self.push_evaluated_access(
-                                &arg.expr,
-                                ViewAccess::Write,
-                                bound,
-                                out,
-                            );
+                            self.push_evaluated_access(&arg.expr, ViewAccess::Write, bound, out);
                         }
                     }
                 }
@@ -1109,12 +1212,7 @@ impl<'a> Checker<'a> {
                 for arg in args {
                     self.collect_evaluated_expr_accesses(&arg.expr, mode, bound, out);
                     if arg.convention == AccessConvention::Write {
-                        self.push_evaluated_access(
-                            &arg.expr,
-                            ViewAccess::Write,
-                            bound,
-                            out,
-                        );
+                        self.push_evaluated_access(&arg.expr, ViewAccess::Write, bound, out);
                     }
                 }
             }
@@ -1124,12 +1222,7 @@ impl<'a> Checker<'a> {
                     for arg in args {
                         self.collect_evaluated_expr_accesses(&arg.expr, mode, bound, out);
                         if arg.convention == AccessConvention::Write {
-                            self.push_evaluated_access(
-                                &arg.expr,
-                                ViewAccess::Write,
-                                bound,
-                                out,
-                            );
+                            self.push_evaluated_access(&arg.expr, ViewAccess::Write, bound, out);
                         }
                     }
                 }
@@ -1666,6 +1759,20 @@ impl<'a> Checker<'a> {
         param_ty: &Type,
         borrowed_read: bool,
     ) {
+        if arg.convention == AccessConvention::Write
+            && self.reject_static_mutable_borrow(&arg.expr, arg.span)
+        {
+            return;
+        }
+        if param_conv == AccessConvention::Move && arg.convention == AccessConvention::Move {
+            self.reject_partial_static_move(&arg.expr, arg.span);
+            self.reject_noncanonical_move_place(
+                &arg.expr,
+                None,
+                "this consuming call",
+                arg.span,
+            );
+        }
         let Some(place) = self.place_from_expr(&arg.expr) else {
             let mut accesses = Vec::new();
             self.collect_evaluated_expr_accesses(
@@ -1763,15 +1870,107 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn is_static_move_root(&self, name: &str) -> bool {
+        self.items.iter().any(|item| {
+            matches!(
+                item,
+                crate::AST::Item::Const(constant)
+                    if constant.name == name
+                        && (constant.is_persist
+                            || constant
+                                .attrs
+                                .iter()
+                                .any(|attr| matches!(attr, crate::AST::ConstAttr::ForceStatic)))
+            )
+        })
+    }
+
+    fn static_expr_root(expr: &Expr) -> Option<&str> {
+        match expr {
+            Expr::Deref(inner, _)
+            | Expr::RawOf(inner, _)
+            | Expr::Place(inner, _, _)
+            | Expr::Paren(inner, _) => Self::static_expr_root(inner),
+            _ => expr_root_ident(expr),
+        }
+    }
+
+    pub(crate) fn reject_static_mutable_borrow(&mut self, expr: &Expr, span: Span) -> bool {
+        let place = self.place_from_expr(expr);
+        let owner = place
+            .as_ref()
+            .map(|place| place.owner.name.as_str())
+            .or_else(|| Self::static_expr_root(expr));
+        let Some(owner) = owner else {
+            return false;
+        };
+        if !self.is_static_move_root(owner) {
+            return false;
+        }
+        let name = place
+            .as_ref()
+            .map(Self::place_name)
+            .unwrap_or_else(|| owner.to_string());
+        let diagnostic = Diagnostic::from_row(
+            "E0223",
+            &[("name", name.as_str())],
+            Some(span),
+        );
+        let duplicate = self.diags.iter().any(|previous| {
+            previous.code == diagnostic.code
+                && previous.span == diagnostic.span
+                && previous.what == diagnostic.what
+        });
+        if !duplicate {
+            self.diags.push(diagnostic);
+        }
+        true
+    }
+
+
+    /// A persistent/static aggregate has one shared storage cell. A move may
+    /// take that cell as a whole, but it cannot leave the cell partially moved.
+    pub(crate) fn reject_partial_static_move(&mut self, expr: &Expr, span: Span) -> bool {
+        let Some(place) = self.place_from_expr(expr) else {
+            return false;
+        };
+        if place.projections.is_empty() || !self.is_static_move_root(&place.owner.name) {
+            return false;
+        }
+        let name = Self::place_name(&place);
+        self.diags.push(Diagnostic::from_row(
+            "E0222",
+            &[("name", name.as_str())],
+            Some(span),
+        ));
+        true
+    }
+
     pub(crate) fn record_call_receiver_access(
         &mut self,
         receiver: &Expr,
         convention: AccessConvention,
         span: Span,
     ) {
+        if convention == AccessConvention::Write
+            && self.reject_static_mutable_borrow(receiver, span)
+        {
+            return;
+        }
+        if convention == AccessConvention::Move {
+            self.reject_noncanonical_move_place(
+                receiver,
+                None,
+                "this consuming method",
+                span,
+            );
+        }
         let Some(place) = self.place_from_expr(receiver) else {
             return;
         };
+        if convention == AccessConvention::Move {
+            self.reject_partial_static_move(receiver, span);
+        }
         let access = if convention == AccessConvention::Write {
             ViewAccess::Write
         } else {
@@ -1782,8 +1981,10 @@ impl<'a> Checker<'a> {
             self.record_call_place_access(place, access);
         }
     }
-
     pub(crate) fn record_call_receiver_reservation(&mut self, receiver: &Expr, span: Span) {
+        if self.reject_static_mutable_borrow(receiver, span) {
+            return;
+        }
         let Some(place) = self.place_from_expr(receiver) else {
             return;
         };
@@ -1994,6 +2195,9 @@ impl<'a> Checker<'a> {
             self.report_frozen_write(name, freeze_site, "be edited", span);
             return;
         }
+        if self.reject_static_mutable_borrow(expr, span) {
+            return;
+        }
         let Some(root) = expr_root_ident(expr).map(str::to_string) else {
             return;
         };
@@ -2075,6 +2279,9 @@ impl<'a> Checker<'a> {
         if let Some(freeze_site) = self.frozen_expr_site(expr) {
             let name = expr_root_ident(expr).unwrap_or("the frozen value");
             self.report_frozen_write(name, freeze_site, action, span);
+            return;
+        }
+        if self.reject_static_mutable_borrow(expr, span) {
             return;
         }
         if let Some(name) = expr_root_ident(expr) {
@@ -2826,6 +3033,27 @@ impl<'a> Checker<'a> {
         if let Expr::MethodCall {
             receiver,
             method,
+            recv_type: Some(recv_type),
+            resolved_ret,
+            ..
+        } = init
+        {
+            if crate::Sema::is_mapped_file_view_method(recv_type, method) {
+                let Some(kind) = resolved_ret
+                    .as_ref()
+                    .and_then(view_kind_from_return_type)
+                else {
+                    return Vec::new();
+                };
+                let Some(place) = self.place_from_expr(receiver) else {
+                    return Vec::new();
+                };
+                return vec![(Vec::new(), place, kind, ViewAccess::Read)];
+            }
+        }
+        if let Expr::MethodCall {
+            receiver,
+            method,
             args,
             recv_type: Some(recv_type),
             ..
@@ -3173,11 +3401,14 @@ impl<'a> Checker<'a> {
             match ty {
                 // D-PIN1=A: a pin is a write window, so it is a view leaf too.
                 Type::Apply { name, .. }
-                    if name == "View" || name == "ViewMut" || name == Syntax::TYPE_PIN =>
+                    if name == "View"
+                        || name == Syntax::TYPE_VIEW_ITER
+                        || name == "ViewMut"
+                        || name == Syntax::TYPE_PIN =>
                 {
                     out.push((
                         path.clone(),
-                        if name == "View" {
+                        if name == "View" || name == Syntax::TYPE_VIEW_ITER {
                             ViewAccess::Read
                         } else {
                             ViewAccess::Write
@@ -3353,10 +3584,9 @@ impl<'a> Checker<'a> {
         span: Span,
     ) {
         if let Some(root) = root {
-            self.flow.moved.set(
-                root,
-                crate::Sema::FlowFacts::MoveOrigin::new(span, None),
-            );
+            self.flow
+                .moved
+                .set(root, crate::Sema::FlowFacts::MoveOrigin::new(span, None));
             self.clear_origin(root);
         }
     }
@@ -3372,10 +3602,9 @@ impl<'a> Checker<'a> {
         {
             return false;
         }
-        self.flow.moved.set(
-            name,
-            crate::Sema::FlowFacts::MoveOrigin::new(*span, None),
-        );
+        self.flow
+            .moved
+            .set(name, crate::Sema::FlowFacts::MoveOrigin::new(*span, None));
         self.clear_origin(name);
         true
     }
@@ -3419,12 +3648,11 @@ impl<'a> Checker<'a> {
 
         fn contains(registry: &TypeRegistry, ty: &Type, seen: &mut HashSet<String>) -> bool {
             match ty {
-                // D-PIN1=A: `Pin<T>` is a borrowed window like `View`/`ViewMut`,
-                // so it crosses the same provenance boundary — a returned or
-                // stored pin must name the owner it borrows from.
                 Type::Apply { name, args }
-                    if matches!(name.as_str(), "View" | "ViewMut" | Syntax::TYPE_PIN)
-                        && args.len() == 1 =>
+                    if matches!(
+                        name.as_str(),
+                        "View" | "ViewMut" | Syntax::TYPE_PIN | Syntax::TYPE_VIEW_ITER
+                    ) && args.len() == 1 =>
                 {
                     true
                 }
@@ -3790,11 +4018,8 @@ impl<'a> Checker<'a> {
             format!("write `{}{}` first, or remove `copies: .Explicit` to use the default owning copy", Syntax::SIGIL_COPY, name),
             Some(span),
         );
-        self.diags.push(self.with_ownership_copy_edit(
-            diagnostic,
-            span,
-            Some(&source_ty),
-        ));
+        self.diags
+            .push(self.with_ownership_copy_edit(diagnostic, span, Some(&source_ty)));
     }
 
     // No "fresh call made right in the return" shape exists for string views
@@ -3919,17 +4144,16 @@ impl<'a> Checker<'a> {
         if self.suppress_must_use || is_task_type(ty) {
             return;
         }
-        let target = if let Some(name) =
-            call_target.or_else(|| self.ignored_must_use_call_target(expr))
-        {
-            name
-        } else if matches!(ty, Type::Named(n) if n == "Unit") {
-            return;
-        } else if self.type_is_must_use(ty) {
-            ty.name()
-        } else {
-            return;
-        };
+        let target =
+            if let Some(name) = call_target.or_else(|| self.ignored_must_use_call_target(expr)) {
+                name
+            } else if matches!(ty, Type::Named(n) if n == "Unit") {
+                return;
+            } else if self.type_is_must_use(ty) {
+                ty.name()
+            } else {
+                return;
+            };
         self.diags.push(Diagnostic::error(
             "E0419",
             format!("`{target}` must be used — it was dropped as a bare statement"),
@@ -4087,12 +4311,11 @@ impl<'a> Checker<'a> {
             &[
                 ("name", moved_place),
                 ("consumer", consuming_callee),
-                ("fix", fix.as_str()),
             ],
             Some(reuse_span),
         )
         .with_detail(format!(
-            "move site: source bytes {}..{}; reuse site: source bytes {}..{}; consuming callee: {consuming_callee}",
+            "move site: source bytes {}..{}; reuse site: source bytes {}..{}; consuming callee: {consuming_callee}; {fix}",
             moved_at.span.start,
             moved_at.span.end,
             reuse_span.start,
@@ -4190,12 +4413,8 @@ impl<'a> Checker<'a> {
                             crate::Sema::FlowFacts::MoveOrigin::new(span, consumer),
                         )
                     });
-                let diagnostic = self.moved_use_diagnostic(
-                    &moved.0,
-                    &moved.1,
-                    span,
-                    Some(&info.ty),
-                );
+                let diagnostic =
+                    self.moved_use_diagnostic(&moved.0, &moved.1, span, Some(&info.ty));
                 self.push_moved_use_diagnostic(diagnostic);
                 return;
             }
@@ -4221,12 +4440,7 @@ impl<'a> Checker<'a> {
         );
     }
 
-    pub(crate) fn mark_moved_by(
-        &mut self,
-        name: String,
-        span: Span,
-        consumer: impl Into<String>,
-    ) {
+    pub(crate) fn mark_moved_by(&mut self, name: String, span: Span, consumer: impl Into<String>) {
         self.mark_moved_place_by(
             ViewPlace {
                 owner: self.owner_id(&name),
@@ -4246,14 +4460,10 @@ impl<'a> Checker<'a> {
         anchor: Span,
         ty: Option<&Type>,
     ) -> Diagnostic {
-        let safe = ty.is_some_and(|ty| {
-            !self.is_resource_type(ty) && is_cloneable(ty, self.registry)
-        });
+        let safe =
+            ty.is_some_and(|ty| !self.is_resource_type(ty) && is_cloneable(ty, self.registry));
         let (applicability, safety) = if safe {
-            (
-                FixApplicability::Safe,
-                FixSafety::BehaviorPreserving,
-            )
+            (FixApplicability::Safe, FixSafety::BehaviorPreserving)
         } else {
             (FixApplicability::Suggested, FixSafety::NeedsReview)
         };
@@ -4303,15 +4513,65 @@ impl<'a> Checker<'a> {
         true
     }
 
+    /// Finish one typed Core argument after its ordinary inference.  Core rows
+    /// and user functions share the same ownership fact: a `Move` parameter
+    /// must receive `^`, and a successful move invalidates the source binding.
+    /// Keeping this at the ownership boundary avoids per-API move tracking.
+    pub(crate) fn finish_core_call_ownership(
+        &mut self,
+        call_name: &str,
+        index: usize,
+        arg: &crate::AST::CallArg,
+        param_conv: AccessConvention,
+        param_ty: &Type,
+    ) {
+        if param_conv != AccessConvention::Move {
+            return;
+        }
+        if arg.convention != AccessConvention::Move {
+            self.diags.push(Diagnostic::error(
+                "E0201",
+                format!(
+                    "argument {} to `{call_name}` transfers ownership through the move marker `^`",
+                    index + 1
+                ),
+                "this Core operation retains the value's ownership until its work is complete"
+                    .to_string(),
+                format!(
+                    "write the move marker `^`: `{}value` for this argument",
+                    Syntax::SIGIL_MOVE
+                ),
+                Some(arg.span),
+            ));
+            return;
+        }
+        if type_is_copy(param_ty) {
+            return;
+        }
+        if let Expr::Ident(name, span) = &arg.expr {
+            self.mark_moved_by(name.clone(), *span, call_name.to_string());
+        }
+    }
+
     /// `x = y` / `a :: y` / `return y` where `y` is a plain name of a
-    /// non-scalar type gives the value away (assignment moves, see C1).
+    /// non-`Copy` type gives the value away (assignment moves, see C1).
+    /// Constructor wrappers (`Val(y)`, `Ok(y)`, and `Err(y)`) are owning
+    /// boundaries too, so their direct payload follows the same move rule.
     pub(crate) fn note_move_if_direct_ident(&mut self, e: &Expr) {
-        if let Expr::Ident(n, span) = e {
-            if let Some(info) = self.lookup(n) {
-                if !info.ty.is_scalar() && info.param_conv.is_none() {
-                    self.mark_moved(n.clone(), *span);
+        match e {
+            Expr::Ident(n, span) => {
+                if let Some(info) = self.lookup(n) {
+                    if !type_is_copy(&info.ty) && info.param_conv.is_none() {
+                        self.mark_moved(n.clone(), *span);
+                    }
                 }
             }
+            Expr::Paren(inner, _)
+            | Expr::Present(inner, _)
+            | Expr::Ok(inner, _)
+            | Expr::Err(inner, _)
+            | Expr::Tainted(inner, _, _) => self.note_move_if_direct_ident(inner),
+            _ => {}
         }
     }
 
@@ -4428,34 +4688,66 @@ impl<'a> Checker<'a> {
     }
 
     /// Whether an expression already has the one representation that may
-    /// cross `core.sys.on_interrupt`. This is intentionally narrower than
-    /// ordinary function typing: arbitrary function-producing expressions
-    /// must not reach codegen as an unexamined `Rc` value.
-    pub(crate) fn interrupt_callback_expr_sendable(&self, expr: &Expr, ty: &Type) -> bool {
+    /// cross a retained thread callback. Ordinary function values lower to
+    /// `Rc`; only named functions and callback-safe aliases/lambdas may use
+    /// the `Arc<dyn Fn + Send + Sync>` host representation.
+    fn thread_callback_expr_sendable(&self, expr: &Expr, ty: &Type) -> bool {
         if !matches!(ty, Type::Fn { .. }) {
             return false;
         }
         match expr {
-            Expr::Ident(name, _) => self
-                .lookup(name)
-                .map(|info| info.param_conv.is_none() && info.interrupt_sendable)
-                .unwrap_or_else(|| {
-                    self.funcs.contains_key(name)
-                        || self.unqualified.contains_key(name)
-                        || self.unqualified_file.contains_key(name)
-                }),
-            Expr::Paren(inner, _) => self.interrupt_callback_expr_sendable(inner, ty),
+            Expr::Ident(name, _) => {
+                let resolved = self
+                    .unqualified
+                    .get(name)
+                    .map(String::as_str)
+                    .or_else(|| {
+                        self.unqualified_file
+                            .get(name)
+                            .map(|(function_name, _)| function_name.as_str())
+                    })
+                    .unwrap_or(name);
+                self.lookup(name)
+                    .map(|info| {
+                        if info.param_conv.is_some() || !info.interrupt_sendable {
+                            return false;
+                        }
+                        match &info.ty {
+                            Type::Fn { ret: Some(ret), .. } => {
+                                self.sendability_problem(ret, true).is_none()
+                            }
+                            Type::Fn { .. } => true,
+                            _ => false,
+                        }
+                    })
+                    .or_else(|| {
+                        self.funcs
+                            .get(name)
+                            .or_else(|| self.funcs.get(resolved))
+                            .map(|sig| {
+                                sig.return_type
+                                    .as_ref()
+                                    .is_none_or(|ret| self.sendability_problem(ret, true).is_none())
+                            })
+                    })
+                    .unwrap_or(false)
+            }
+            Expr::Paren(inner, _) => self.thread_callback_expr_sendable(inner, ty),
             Expr::Lambda(lam) => self.lambda_interrupt_sendable(lam, ty),
             _ => false,
         }
     }
 
-    /// Reject a local function value that would otherwise reach the callback
-    /// host as an ordinary Rc. Direct named functions and callback-safe aliases
-    /// are admitted; function parameters and all other local function values
-    /// receive the normal E1102 product diagnostic before codegen.
-    pub(crate) fn check_interrupt_callback_expr(&mut self, expr: &Expr, ty: &Type) {
-        if self.interrupt_callback_depth == 0 || !matches!(ty, Type::Fn { .. }) {
+    /// Reject a function value that would otherwise reach a retained thread
+    /// callback as an ordinary `Rc`. The caller supplies the crossing so the
+    /// same proof serves interrupts and scheduler-backed stream operators.
+    fn check_thread_callback_expr_at(
+        &mut self,
+        expr: &Expr,
+        ty: &Type,
+        crossing: SendCrossing,
+    ) {
+        if !matches!(ty, Type::Fn { .. }) || self.thread_callback_expr_sendable(expr, ty) {
             return;
         }
         fn ident(expr: &Expr) -> Option<&str> {
@@ -4486,35 +4778,32 @@ impl<'a> Checker<'a> {
                 _ => None,
             }
         }
-        let Some(name) = ident(expr) else {
-            if lambda(expr) {
-                // Lambda capture checking runs while the interrupt callback
-                // depth is active. It owns the detailed Send/'static proof.
-                // A mutable capture is the one callback-specific fact that
-                // capture sendability alone cannot express: it lowers to
-                // `FnMut`, while the retained ABI is `Fn() + Send + Sync`.
-                // Reject it here, before the Arc coercion reaches rustc.
-                if needs_fn_mut(expr)
-                    && !lambda_span(expr).is_some_and(|span| {
-                        self.diags
-                            .iter()
-                            .any(|diag| diag.code == "E1102" && diag.span == Some(span))
-                    })
-                {
-                    self.report_unsendable(
-                        "this callback",
-                        ty,
-                        SendabilityProblem {
-                            root: None,
-                            path: Vec::new(),
-                            kind: SendProblemKind::ClosureCaptures,
-                        },
-                        SendCrossing::InterruptCallback,
-                        expr.span(),
-                    );
-                }
-                return;
+        if ident(expr).is_none() && lambda(expr) {
+            // Lambda capture checking already owns detailed Send/'static
+            // diagnostics. Keep the callback-specific FnMut refusal here,
+            // before an Arc coercion reaches rustc.
+            if needs_fn_mut(expr)
+                && !lambda_span(expr).is_some_and(|span| {
+                    self.diags
+                        .iter()
+                        .any(|diag| diag.code == "E1102" && diag.span == Some(span))
+                })
+            {
+                self.report_unsendable(
+                    "this callback",
+                    ty,
+                    SendabilityProblem {
+                        root: None,
+                        path: Vec::new(),
+                        kind: SendProblemKind::ClosureCaptures,
+                    },
+                    crossing,
+                    expr.span(),
+                );
             }
+            return;
+        }
+        let Some(name) = ident(expr) else {
             self.report_unsendable(
                 "this callback",
                 ty,
@@ -4523,22 +4812,11 @@ impl<'a> Checker<'a> {
                     path: Vec::new(),
                     kind: SendProblemKind::ClosureCaptures,
                 },
-                SendCrossing::InterruptCallback,
+                crossing,
                 expr.span(),
             );
             return;
         };
-        if self
-            .lookup(name)
-            .map(|info| info.param_conv.is_none() && info.interrupt_sendable)
-            .unwrap_or_else(|| {
-                self.funcs.contains_key(name)
-                    || self.unqualified.contains_key(name)
-                    || self.unqualified_file.contains_key(name)
-            })
-        {
-            return;
-        }
         let problem = self
             .sendability_problem(ty, false)
             .unwrap_or(SendabilityProblem {
@@ -4546,13 +4824,26 @@ impl<'a> Checker<'a> {
                 path: Vec::new(),
                 kind: SendProblemKind::ClosureCaptures,
             });
-        self.report_unsendable(
-            name,
-            ty,
-            problem,
-            SendCrossing::InterruptCallback,
-            expr.span(),
-        );
+        self.report_unsendable(name, ty, problem, crossing, expr.span());
+    }
+
+    /// Whether an expression already has the one representation that may
+    /// cross `core.sys.on_interrupt`.
+    pub(crate) fn interrupt_callback_expr_sendable(&self, expr: &Expr, ty: &Type) -> bool {
+        self.thread_callback_expr_sendable(expr, ty)
+    }
+
+    /// Reject a local function value that would otherwise reach the interrupt
+    /// host as an ordinary Rc.
+    pub(crate) fn check_interrupt_callback_expr(&mut self, expr: &Expr, ty: &Type) {
+        if self.interrupt_callback_depth > 0 {
+            self.check_thread_callback_expr_at(expr, ty, SendCrossing::InterruptCallback);
+        }
+    }
+
+    /// Check a callback retained by the scheduler-backed Stream kernel.
+    pub(crate) fn check_stream_callback_expr(&mut self, expr: &Expr, ty: &Type) {
+        self.check_thread_callback_expr_at(expr, ty, SendCrossing::Kernel);
     }
 
     pub(crate) fn sendability_problem(
@@ -4576,7 +4867,7 @@ impl<'a> Checker<'a> {
         let mut seen = HashSet::new();
         let strict_callable = matches!(
             crossing,
-            SendCrossing::ParallelWorker | SendCrossing::Kernel
+            SendCrossing::ParallelWorker | SendCrossing::Kernel | SendCrossing::HttpHandler
         );
         self.sendability_problem_inner(ty, closure_taken, strict_callable, false, &mut seen)
     }
@@ -4609,7 +4900,10 @@ impl<'a> Checker<'a> {
         }
         if matches!(
             crossing,
-            SendCrossing::TaskCapture | SendCrossing::ChannelSend | SendCrossing::ParallelWorker
+            SendCrossing::TaskCapture
+                | SendCrossing::ChannelSend
+                | SendCrossing::ParallelWorker
+                | SendCrossing::HttpHandler
         ) && self.lookup(name).is_some_and(|info| {
             info.reactive_local && crate::Sema::CheckerInfer::is_reactive_handle_ty(&info.ty)
         }) {
@@ -4959,7 +5253,11 @@ impl<'a> Checker<'a> {
             // D-PIN1=A: a pin is a borrow into one owner's storage too, and the
             // no-move promise only holds inside the owner's thread.
             Type::Apply { name, .. }
-                if !cell_only && matches!(name.as_str(), "View" | "ViewMut" | Syntax::TYPE_PIN) =>
+                if !cell_only
+                    && matches!(
+                        name.as_str(),
+                        "View" | "ViewMut" | Syntax::TYPE_PIN | Syntax::TYPE_VIEW_ITER
+                    ) =>
             {
                 Some(SendabilityProblem {
                     root: None,
@@ -5157,6 +5455,18 @@ impl<'a> Checker<'a> {
             (SendCrossing::TaskCapture, SendProblemKind::LocalReactive(_)) => {
                 format!("{} is pinned `#Local` and can't cross into a task", value_text)
             }
+            (SendCrossing::HttpHandler, SendProblemKind::ViewBorrow) => {
+                format!(
+                    "{} cannot be captured by an HTTP handler — it is a view that does not live long enough",
+                    value_text
+                )
+            }
+            (SendCrossing::HttpHandler, SendProblemKind::LocalReactive(_)) => {
+                format!(
+                    "{} is pinned `#Local` and can't be captured by an HTTP handler",
+                    value_text
+                )
+            }
             (SendCrossing::ChannelSend, SendProblemKind::LocalReactive(_)) => {
                 format!("{} is pinned `#Local` and can't be sent on a channel", value_text)
             }
@@ -5172,6 +5482,12 @@ impl<'a> Checker<'a> {
             (SendCrossing::ChannelSend, _) => {
                 format!(
                     "{} can't be sent because `{}` isn't sendable",
+                    value_text, type_name
+                )
+            }
+            (SendCrossing::HttpHandler, _) => {
+                format!(
+                    "{} can't be captured by an HTTP handler because `{}` isn't sendable",
                     value_text, type_name
                 )
             }
@@ -5208,6 +5524,8 @@ impl<'a> Checker<'a> {
         };
         let why = if matches!(&problem.kind, SendProblemKind::LocalReactive(_)) {
             describe_sendability_problem(&problem)
+        } else if matches!(crossing, SendCrossing::HttpHandler) {
+            "HTTP handlers are retained by the server and invoked on request workers, so their captured state must be owned and thread-safe".to_string()
         } else if matches!(crossing, SendCrossing::InterruptCallback) {
             "core.sys.on_interrupt retains callbacks until signal delivery, so the callback and its captured state must be owned and thread-safe".to_string()
         } else if matches!(
@@ -5251,6 +5569,9 @@ impl<'a> Checker<'a> {
             (SendProblemKind::LocalReactive(_), _, SendCrossing::InterruptCallback) => {
                 "remove `#Local`, or keep the callback on its creating thread"
             }
+            (SendProblemKind::LocalReactive(_), _, SendCrossing::HttpHandler) => {
+                "remove `#Local`, or keep the handler on its creating thread"
+            }
             (_, true, SendCrossing::ChannelSend) => {
                 "send the owned value instead, or use `Shared<T>` for synchronized state"
             }
@@ -5259,6 +5580,9 @@ impl<'a> Checker<'a> {
             }
             (_, true, SendCrossing::ParallelWorker) => {
                 "create the `Cell<T>` inside each worker, or use `Shared<T>` for synchronized state"
+            }
+            (_, true, SendCrossing::HttpHandler) => {
+                "capture only owned sendable values in the HTTP handler, or use `Shared<T>` for synchronized state"
             }
             (_, true, SendCrossing::Kernel) => {
                 "pass an owned sendable value to the kernel, or keep the local cell outside the kernel"
@@ -5280,6 +5604,9 @@ impl<'a> Checker<'a> {
             }
             (_, false, SendCrossing::InterruptCallback) => {
                 "pass a named function, or capture only owned sendable values in the callback"
+            }
+            (_, false, SendCrossing::HttpHandler) => {
+                "capture only plain owned data in the HTTP handler, or keep this operation sequential"
             }
         };
         // D-DETACH1: if this E1102 fires in a task spawn context, record the task
@@ -5888,6 +6215,143 @@ impl<'a> Checker<'a> {
         span: Span,
     ) -> Option<Type> {
         self.finish_shared_closure("edit", inner, args, span, true, false, None)
+    }
+
+    /// D-SHARED-REVISION1=A: capture either the whole cloneable payload or
+    /// one pure, cloneable projection. The callback runs under the Shared read
+    /// lock, so its returned value is paired with one committed revision.
+    pub(crate) fn finish_shared_capture(
+        &mut self,
+        inner: &Type,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Type> {
+        let snapshot = |projection| Type::Apply {
+            name: Syntax::TYPE_SHARED_SNAPSHOT.to_string(),
+            args: vec![inner.clone(), projection],
+        };
+        match args.len() {
+            0 => {
+                if !is_cloneable(inner, self.registry) {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!("`Shared<{}>.capture()` cannot copy its value", inner.show()),
+                        "`capture` owns an independent snapshot, so the stored type must support copying"
+                            .to_string(),
+                        "capture a cloneable projection instead, or add the required copy implementation"
+                            .to_string(),
+                        Some(span),
+                    ));
+                }
+                Some(snapshot(inner.clone()))
+            }
+            1 => {
+                let projected = self.finish_shared_closure(
+                    "capture",
+                    inner,
+                    args,
+                    span,
+                    false,
+                    false,
+                    None,
+                )?;
+                if !is_cloneable(&projected, self.registry) {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!(
+                            "`Shared<{}>.capture(projection)` returns non-copyable `{}`",
+                            inner.show(),
+                            projected.show()
+                        ),
+                        "a captured projection is an owned value retained by the snapshot".to_string(),
+                        "return a cloneable value from the projection".to_string(),
+                        Some(span),
+                    ));
+                }
+                if let Expr::Lambda(lambda) = &args[0].expr {
+                    if lambda.meta.effect_maximal || !lambda.meta.effect_solved.is_empty() {
+                        self.diags.push(crate::Sema::e3401(
+                            "Shared.capture",
+                            "capture projection",
+                            &[],
+                            args[0].expr.span(),
+                        ));
+                    }
+                }
+                Some(snapshot(projected))
+            }
+            count => {
+                self.diags.push(Diagnostic::error(
+                    "E0104",
+                    format!("`capture` expects 0 or 1 argument, got {count}"),
+                    "`capture` takes no argument or one pure projection closure".to_string(),
+                    "call `.capture(value -> …)`".to_string(),
+                    Some(span),
+                ));
+                for arg in args {
+                    self.infer(&mut arg.expr);
+                }
+                Some(snapshot(inner.clone()))
+            }
+        }
+    }
+
+    /// D-SHARED-REVISION1=A: validate and consume one owner-bound snapshot
+    /// ticket plus a replacement payload. The runtime performs the atomic
+    /// owner/revision comparison; sema only fixes the generic source type.
+    pub(crate) fn finish_shared_try_replace(
+        &mut self,
+        inner: &Type,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Type> {
+        let result = || Type::Result {
+            ok: Box::new(Type::Bool),
+            err: Box::new(Type::Named(Syntax::TYPE_SHARED_REVISION_ERROR.to_string())),
+        };
+        if args.len() != 2 {
+            self.diags.push(Diagnostic::error(
+                "E0104",
+                format!("`try_replace` expects 2 arguments, got {}", args.len()),
+                "`try_replace` takes one snapshot ticket and one replacement value".to_string(),
+                "call `.try_replace(snapshot, value)`".to_string(),
+                Some(span),
+            ));
+            for arg in args {
+                self.infer(&mut arg.expr);
+            }
+            return Some(result());
+        }
+        let snapshot_ty = self.infer(&mut args[0].expr).unwrap_or_else(|| {
+            Type::Named(Syntax::TYPE_SHARED_SNAPSHOT.to_string())
+        });
+        let valid_source = matches!(
+            &snapshot_ty,
+            Type::Apply { name, args }
+                if name == Syntax::TYPE_SHARED_SNAPSHOT
+                    && args.len() == 2
+                    && args[0] == *inner
+        );
+        if !valid_source {
+            self.diags.push(Diagnostic::error(
+                "E0112",
+                format!(
+                    "`try_replace` needs a `SharedSnapshot<{}, U>`, got `{}`",
+                    inner.show(),
+                    snapshot_ty.show()
+                ),
+                "a snapshot ticket is bound to the exact Shared payload type".to_string(),
+                "capture the snapshot from this Shared value before publishing".to_string(),
+                Some(args[0].expr.span()),
+            ));
+        }
+        let got = self.infer_with_expected(&mut args[1].expr, inner);
+        if let Some(got) = got {
+            self.check_type_assignable(inner, &got, args[1].expr.span());
+        }
+        self.check_take_arg_ownership("try_replace", 0, &snapshot_ty, &mut args[0]);
+        self.check_take_arg_ownership("try_replace", 1, inner, &mut args[1]);
+        Some(result())
     }
 
     pub(crate) fn finish_cell_get(&mut self, inner: &Type, span: Span) -> Option<Type> {

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::exit;
 
 use jet::ExitCodes;
-use jet_foundation::Report::render_status_json;
+use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
 use jet_impact::ImpactReport;
 pub(crate) fn run_impact(args: &[String], json: bool) {
     let mut depth = 3usize;
@@ -39,15 +39,12 @@ pub(crate) fn run_impact(args: &[String], json: bool) {
     });
     let report = ImpactReport::analyze(&checked.index, symbol, depth);
     if json {
-        let document = crate::CmdInspect::with_check_json(report.to_json(), &checked.check);
+        let impact = impact_value(&report, &checked.check);
         println!(
             "{}",
-            render_status_json(
-                "ok",
-                true,
-                "inspect.impact",
-                &format!(",\"impact\":{document}"),
-            )
+            StatusEnvelope::new("inspect.impact", report.found)
+                .with_field("impact", impact)
+                .json()
         );
     } else {
         print!("{}", crate::CmdInspect::check_result_text(&checked.check));
@@ -56,6 +53,66 @@ pub(crate) fn run_impact(args: &[String], json: bool) {
     if !report.found {
         exit(ExitCodes::USER_ERROR);
     }
+}
+
+fn impact_value(report: &ImpactReport, check: &crate::CmdInspect::CheckResult) -> StatusValue {
+    let span = |start: usize, end: usize| {
+        StatusValue::object(
+            StatusFields::new()
+                .with("start", start)
+                .with("end", end),
+        )
+    };
+    let reference = |value: &jet_impact::ImpactRef| {
+        StatusValue::object(
+            StatusFields::new()
+                .with("depth", value.depth)
+                .with("name", value.name.as_str())
+                .with("module_path", value.module_path.as_str())
+                .with("span", span(value.span_start, value.span_end)),
+        )
+    };
+    let edge = |value: &jet_impact::ImpactEdge| {
+        StatusValue::object(
+            StatusFields::new()
+                .with("depth", value.depth)
+                .with("caller", value.caller.as_str())
+                .with("callee", value.callee.as_str())
+                .with("module_path", value.module_path.as_str())
+                .with("span", span(value.span_start, value.span_end)),
+        )
+    };
+    StatusValue::object(
+        StatusFields::new()
+            .with("symbol", report.symbol.as_str())
+            .with("found", report.found)
+            .with("depth_limit", report.depth_limit)
+            .with(
+                "definition_module",
+                report
+                    .definition_module
+                    .as_deref()
+                    .map(StatusValue::from)
+                    .unwrap_or(StatusValue::Null),
+            )
+            .with(
+                "references",
+                StatusValue::array(report.references.iter().map(reference)),
+            )
+            .with(
+                "call_sites",
+                StatusValue::array(report.call_sites.iter().map(edge)),
+            )
+            .with(
+                "upstream_callers",
+                StatusValue::array(report.upstream_callers.iter().map(edge)),
+            )
+            .with(
+                "downstream_callees",
+                StatusValue::array(report.downstream_callees.iter().map(edge)),
+            )
+            .with("check", crate::CmdInspect::check_result_value(check)),
+    )
 }
 
 fn absolutize(path: &str) -> PathBuf {

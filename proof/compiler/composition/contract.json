@@ -1,0 +1,215 @@
+{
+  "schema": "jet.compiler-composition.v1",
+  "schema_version": 1,
+  "contract_id": "compiler-composition-v1",
+  "stage": "composition",
+  "identity": {
+    "authority_key": "compiler-proof.composition"
+  },
+  "candidate_schema": "jet.candidate.v1",
+  "candidate_schema_version": 1,
+  "compiler_proof_schema": "jet.compiler-proof-composition.v1",
+  "policy": {
+    "decision_id": "D-COMPILER-PROOF1",
+    "outcome": "A",
+    "status": "ratified",
+    "tier_decision": "D-TIER-ONEIR1",
+    "release_decision": "D-HARDENING-GATE1",
+    "scope": "one candidate-bound conditional preservation relation across every Jet-controlled compiler stage",
+    "universal_proof": false
+  },
+  "theorem": {
+    "id": "jet.compiler.composition.conditional-preservation.v1",
+    "kind": "candidate-bound-conditional-preservation",
+    "claim": "For a supported Jet source program, exact configuration and named foreign/resource premises, every completed target observation produced by this candidate is allowed by the source model; accepted source and correct Jet rejection are both required.",
+    "conditional_claim": "For each supported source program, candidate configuration, and stated environment/resource/foreign premises, if every listed Jet-controlled stage discharges its implementation-bound refinement obligation under the same identities, then every completed target observation is in the source model's allowed observation alphabet; this is conditional and does not prove rustc/LLVM, Cranelift, browser engines, linkers, operating systems, hardware, or foreign services.",
+    "relation": "jet.source-to-target.refinement.v1",
+    "universal_proof": false,
+    "finite_evidence_is_not_proof": true
+  },
+  "stage_order": [
+    "semantics",
+    "source",
+    "checking",
+    "comptime",
+    "lowering",
+    "optimization",
+    "adapters",
+    "prelude",
+    "runtime"
+  ],
+  "representations": [
+    "source-bytes+source-graph",
+    "parsed-source",
+    "checked-program",
+    "comptime-value-or-failure",
+    "canonical-tir",
+    "canonical-mir",
+    "jet-core-runtime-observation",
+    "target-adapter-observation",
+    "allowed-source-observation"
+  ],
+  "edges": [
+    { "stage": "semantics", "from": "source-bytes+source-graph", "to": "allowed-source-observation" },
+    { "stage": "source", "from": "source-bytes+source-graph", "to": "parsed-source" },
+    { "stage": "checking", "from": "parsed-source", "to": "checked-program" },
+    { "stage": "comptime", "from": "checked-program", "to": "comptime-value-or-failure" },
+    { "stage": "lowering", "from": "checked-program", "to": "canonical-tir" },
+    { "stage": "optimization", "from": "canonical-tir", "to": "canonical-mir" },
+    { "stage": "adapters", "from": "jet-core-runtime-observation", "to": "target-adapter-observation" },
+    { "stage": "prelude", "from": "canonical-mir", "to": "jet-core-runtime-observation" },
+    { "stage": "runtime", "from": "jet-core-runtime-observation", "to": "jet-core-runtime-observation" }
+  ],
+  "observation_alphabet": [
+    "result",
+    "typed_failure",
+    "mutation",
+    "input_consumption",
+    "ordered_effects",
+    "cleanup",
+    "resource_premises",
+    "schedule",
+    "allowed_schedules"
+  ],
+  "preservation_dimensions": [
+    "source_identity",
+    "origin_identity",
+    "model_identity",
+    "ir_identity",
+    "target_identity",
+    "configuration_identity",
+    "side_conditions",
+    "legality",
+    "result",
+    "typed_failure",
+    "mutation",
+    "input_consumption",
+    "ordered_effects",
+    "cleanup",
+    "resource_premises",
+    "schedule",
+    "allowed_schedules"
+  ],
+  "identity_fields": [
+    "source",
+    "model",
+    "proof",
+    "checker",
+    "compiler_artifact",
+    "candidate_binary",
+    "target",
+    "configuration",
+    "candidate"
+  ],
+  "required_execution_modes": [
+    "aot",
+    "jet_run",
+    "interpreter",
+    "check"
+  ],
+  "premises": [
+    {
+      "id": "source-input",
+      "statement": "The source bytes and imported source graph are exactly the identified inputs.",
+      "status": "explicit"
+    },
+    {
+      "id": "model-validity",
+      "statement": "The executable source model agrees with ratified language, Core, rejection, and observation contracts for the covered scope.",
+      "status": "explicit"
+    },
+    {
+      "id": "stage-preservation",
+      "statement": "Each listed stage preserves the shared observation alphabet under its stated intermediate representation and side conditions.",
+      "status": "explicit"
+    },
+    {
+      "id": "implementation-correspondence",
+      "statement": "Every stage proof object is checked against the actual implementation route, checker, artifact, and candidate identity.",
+      "status": "explicit"
+    },
+    {
+      "id": "candidate-construction",
+      "statement": "The candidate binary is produced from the identified source, configuration, target, and toolchain inputs.",
+      "status": "explicit"
+    }
+  ],
+  "foreign_assumptions": [
+    {
+      "id": "foreign-compiler-suffix",
+      "statement": "rustc/LLVM, Cranelift, assemblers, linkers, and their selected target contracts satisfy their stated semantics.",
+      "boundary": "after Jet-owned adapter/compiler artifact construction",
+      "status": "assumed",
+      "universal_proof": false
+    },
+    {
+      "id": "foreign-runtime-environment",
+      "statement": "Operating systems, browser engines, devices, allocators, filesystems, networks, and foreign libraries satisfy their named contracts.",
+      "boundary": "foreign execution and resource edges",
+      "status": "assumed",
+      "universal_proof": false
+    },
+    {
+      "id": "resource-scheduler-premises",
+      "statement": "Declared resource bounds, scheduler fairness/progress premises, and allowed schedules hold where a stage requires them.",
+      "boundary": "resource and scheduling observations",
+      "status": "assumed",
+      "universal_proof": false
+    }
+  ],
+  "proof_requirements": {
+    "stage_statuses": ["qualified", "proved", "valid"],
+    "proof_object_statuses": ["passed", "qualified", "proved"],
+    "replay_statuses": ["matched", "verified", "proved"],
+    "unknown_statuses": ["unknown", "unverified", "unavailable", "timeout", "unsupported", "blocked", "failed", "mismatch", "invalid_oracle", "rejected"],
+    "coverage_statuses": ["complete", "qualified", "proved"],
+    "no_claimant_hash_shortcut": true,
+    "requires_checker_replay": true,
+    "requires_composition_replay": true,
+    "requires_candidate_binary": true,
+    "requires_supported_acceptance": true,
+    "requires_correct_rejection": true
+  },
+  "composition_authority": {
+    "authority_key": "compiler-proof.composition",
+    "obligation_id": "compiler-proof.composition-candidate"
+  },
+  "checker": {
+    "path": "proof/compiler/composition/check.mjs",
+    "driver": "scripts/agent/compiler-proof.mjs",
+    "runner": "scripts/agent/jet-env",
+    "timeout_ms": 120000
+  },
+  "negative_controls": [
+    {
+      "id": "valid-scope",
+      "mutation": "none; retain every required stage, identity, mode, acceptance, rejection, and premise",
+      "expected_status": "qualified",
+      "executed": false
+    },
+    {
+      "id": "wrong-candidate",
+      "mutation": "substitute candidate compiler source, artifact, target, configuration, or binary identity",
+      "expected_status": "identity-mismatch",
+      "executed": false
+    },
+    {
+      "id": "missing-stage",
+      "mutation": "remove one required Jet-controlled stage or obligation row",
+      "expected_status": "blocked",
+      "executed": false
+    },
+    {
+      "id": "reject-everything",
+      "mutation": "replace supported-program acceptance with universal rejection",
+      "expected_status": "blocked",
+      "executed": false
+    },
+    {
+      "id": "wrong-diagnostic",
+      "mutation": "change the registered rejection code, reason, or source span",
+      "expected_status": "invalid_oracle",
+      "executed": false
+    }
+  ]
+}

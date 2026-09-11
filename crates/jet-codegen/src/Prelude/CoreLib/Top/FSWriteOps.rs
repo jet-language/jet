@@ -6,6 +6,9 @@ pub(crate) fn jet_std_fs_write_bytes(
     path: &String,
     bytes: &Vec<u8>,
 ) -> Result<(), jet_std::IOError> {
+    if let Some(error) = jet_std::jet_std_files_writer_refusal(path) {
+        return Err(error);
+    }
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
@@ -22,6 +25,9 @@ pub(crate) fn jet_std_fs_write_at(
     offset: i64,
     bytes: &Vec<u8>,
 ) -> Result<(), jet_std::IOError> {
+    if let Some(error) = jet_std::jet_std_files_writer_refusal(path) {
+        return Err(error);
+    }
     use std::io::{Seek, SeekFrom, Write};
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
@@ -45,6 +51,9 @@ pub(crate) fn jet_std_fs_write_atomic(
     path: &String,
     bytes: &Vec<u8>,
 ) -> Result<(), jet_std::IOError> {
+    if let Some(error) = jet_std::jet_std_files_writer_refusal(path) {
+        return Err(error);
+    }
     use std::io::Write;
 
     if jet_fault_should_fail("FS.Write") {

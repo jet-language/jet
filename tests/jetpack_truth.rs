@@ -6,8 +6,9 @@ mod common;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::process::Command;
+use jet_foundation::DataTree::DataTree;
 
-const MATRIX: &str = "docs/plans/epoch-4/truth-matrix.md";
+const MATRIX: &str = "docs/proposals/jetpack/truth-matrix.md";
 const AUDITED: &[u64] = &[
     3, 5, 6, 13, 85, 90, 99, 139, 179, 185, 187, 188, 190, 191, 192, 193, 194, 195, 196, 197, 198,
     199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 214, 215, 229, 231, 232, 233, 234, 242, 330,
@@ -228,14 +229,17 @@ fn tower_cards(root: &Path) -> BTreeMap<u64, CardState> {
 
 fn ingest_tower_card(
     cards: &mut BTreeMap<u64, CardState>,
-    card: &jetpack::JSON::JSONValue,
+    card: &DataTree,
     prefer_existing: bool,
 ) {
     let num = match card.get("num").unwrap() {
         // One JSON model now: an exact integer stays an integer, and a decimal
         // is a separate variant (jet-foundation JSON.rs).
-        jetpack::JSON::JSONValue::Number(num) => *num as u64,
-        jetpack::JSON::JSONValue::Flt(num) => *num as u64,
+        DataTree::Int(num) => *num as u64,
+        DataTree::Float(num) => *num as u64,
+        DataTree::Number(num) => num
+            .parse::<f64>()
+            .expect("card num is not numeric") as u64,
         other => panic!("card num is not numeric: {other:?}"),
     };
     if prefer_existing && cards.contains_key(&num) {

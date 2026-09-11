@@ -162,32 +162,39 @@ fn expert_item(item: &Item) -> Option<(String, Span)> {
     match item {
         Item::Func(function) => {
             if function.is_replayable {
-                return Some(("#Replayable".to_string(), function.replayable_span.unwrap_or(function.name_span)));
+                return Some((
+                    "#Replayable".to_string(),
+                    function.replayable_span.unwrap_or(function.name_span),
+                ));
             }
             expert_body(&function.body)
         }
-        Item::Struct(definition) => definition
-            .methods
-            .iter()
-            .find_map(expert_function)
-            .or_else(|| {
-                definition
-                    .trait_impls
-                    .iter()
-                    .flat_map(|implementation| implementation.methods.iter())
-                    .find_map(expert_function)
-            }),
-        Item::Enum(definition) => definition
-            .methods
-            .iter()
-            .find_map(expert_function)
-            .or_else(|| {
-                definition
-                    .trait_impls
-                    .iter()
-                    .flat_map(|implementation| implementation.methods.iter())
-                    .find_map(expert_function)
-            }),
+        Item::Struct(definition) => {
+            definition
+                .methods
+                .iter()
+                .find_map(expert_function)
+                .or_else(|| {
+                    definition
+                        .trait_impls
+                        .iter()
+                        .flat_map(|implementation| implementation.methods.iter())
+                        .find_map(expert_function)
+                })
+        }
+        Item::Enum(definition) => {
+            definition
+                .methods
+                .iter()
+                .find_map(expert_function)
+                .or_else(|| {
+                    definition
+                        .trait_impls
+                        .iter()
+                        .flat_map(|implementation| implementation.methods.iter())
+                        .find_map(expert_function)
+                })
+        }
         Item::Impl(implementation) => implementation.methods.iter().find_map(expert_function),
         Item::Test(test) => expert_body(&test.body),
         Item::CodeModule(module) => module
@@ -220,12 +227,8 @@ fn expert_body(body: &[Stmt]) -> Option<(String, Span)> {
             Stmt::Transact { span, .. } => Some(("#Transact".to_string(), *span)),
             Stmt::Live { span, .. } => Some(("#Live".to_string(), *span)),
             Stmt::AssumeDet { span, .. } => Some(("assume_deterministic".to_string(), *span)),
-            Stmt::Val(binding) if binding.uninit => {
-                Some(("uninit".to_string(), binding.name_span))
-            }
-            _ => nested_bodies(statement)
-                .into_iter()
-                .find_map(expert_body),
+            Stmt::Val(binding) if binding.uninit => Some(("uninit".to_string(), binding.name_span)),
+            _ => nested_bodies(statement).into_iter().find_map(expert_body),
         };
         if found.is_some() {
             return found;
@@ -233,7 +236,6 @@ fn expert_body(body: &[Stmt]) -> Option<(String, Span)> {
     }
     None
 }
-
 
 fn push_diagnostic(result: &mut UnsafeInspection, source: &str, diagnostic: Diagnostic) {
     result.diagnostics.push(UnsafeDiagnostic {

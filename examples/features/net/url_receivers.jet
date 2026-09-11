@@ -1,0 +1,31 @@
+// D-NETURL-RECEIVERS1: URL components, query mutation, and MIME projections stay typed.
+use core.net.mime as mime
+use core.net.url as url
+
+fn run() !String {
+    base :: url.parse("https://ada:s3cret@example.test:8443/a/./b/../c?old=1#frag")
+    assembled :: url.from_parts("https", "example.test", "/parts", [["q", "1"]], "frag")
+    print("parts:{assembled.to_string()}")
+    print("scheme:{base.scheme()}")
+    print("authority:{base.authority()}")
+    print("host:{base.host() ?? \"none\"}")
+    print("port:{base.port() ?? -1}:{base.default_port() ?? -1}")
+    print("path:{base.path()}")
+    print("segments:{base.path_segments().join(\"|\")}")
+    print("query:{base.query()}")
+    print("pairs:{base.query_pairs().len()}")
+    print("fragment:{base.fragment() ?? \"none\"}")
+    print("userinfo:{base.userinfo()}:{base.username()}:{base.password()}")
+    normalized :: base.normalize()
+    joined :: base.join("../next")
+    print("normalized:{normalized.to_string()}")
+    print("joined:{joined.to_string()}")
+    replaced :: base.set_query("old", "2")
+    added :: replaced.add_query("new", "3")
+    print("mutated:{added.to_string()}")
+    media :: mime.parse("application/json; charset=utf-8")
+    print("mime:{media.media_type()}/{media.subtype()}")
+    print("essence:{media.essence()}")
+    print("params:{media.params().len()}:{media.param(\"charset\") ?? \"none\"}")
+    print("rendered:{media.to_string()}")
+}

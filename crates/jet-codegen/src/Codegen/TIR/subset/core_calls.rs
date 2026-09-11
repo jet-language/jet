@@ -97,16 +97,11 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     if crate::Sema::is_polymorphic_core_special(module, method) {
         return true;
     }
-    // c109 Phase 25: the HTTPRouter producer + the parse/dispatch core calls (D-ROUTE1=A).
-    // NOT in `core_fixed_sig` — their return types are fixed per `(module, method)` but
-    // live in sema's bespoke `infer_core_call` (`router` → HTTPRouter, `parse` →
-    // HTTPRequest, `dispatch` → HTTPResponse). Each emits a fixed-string `CoreCall`
-    // (`{root}jet_http_router_new()` / `{root}jet_http_parse_request(&(raw))` /
-    // `{root}jet_http_router_dispatch(&(router), req)`), reproduced in `emit_tir_core_call`.
-    // `http.serve` stays out (closure-taking, covered by `CoreClosureCall`); `http.router`
-    // is arg-free so it can't collide. The producer's `HTTPRouter` value type is covered
-    // (`is_covered_handle_ty`) and its binding is forced to `let mut` (D-ROUTE1=A).
-    if module == "core.http" && matches!(method, "router" | "parse" | "dispatch") {
+    // c109 Phase 25 / D-FOUND-LIFECYCLE1: HTTP constructors. The ordinary
+    // `http.serve(mux, deadline:)` call now rides the registry like router
+    // creation and request dispatch; the legacy address/handler spelling
+    // remains a separate `CoreClosureCall` path.
+    if module == "core.http" && matches!(method, "router" | "parse" | "dispatch" | "serve") {
         return true;
     }
     // D-TEXTWIDTH1=B: `text.display_width` used to be claimed here by name.
@@ -315,31 +310,35 @@ pub(super) fn core_call_args_in_subset(
             label_ok && expr_in_subset(&arg.expr, cx, locals)
         });
     }
-    if module == "core.http.server" && matches!(method, "serve" | "bind") && args.len() == 3 {
+    // D-FOUND-LIFECYCLE1: the shared Core binder materializes both optional
+    // labeled server controls before TIR sees the call. Present values are
+    // wrapped as typed options by lowering; absent slots remain `None`.
+    if module == "core.http.server"
+        && matches!(method, "serve" | "bind")
+        && args.len() == 4
+    {
         return args.iter().enumerate().all(|(idx, a)| {
-            let label_ok = if idx == 2 {
-                matches!(
+            let label_ok = match idx {
+                2 => matches!(
                     a.label.as_ref().map(|(label, _)| label.as_str()),
                     None | Some("tls")
-                )
-            } else {
-                a.label.is_none()
+                ),
+                3 => matches!(
+                    a.label.as_ref().map(|(label, _)| label.as_str()),
+                    None | Some("deadline")
+                ),
+                _ => a.label.is_none(),
             };
             label_ok && expr_in_subset(&a.expr, cx, locals)
         });
     }
-    if module == "core.game" && method == "run" {
+    if module == "core.game" && method == "run" && args.len() == 4 {
         return args.iter().enumerate().all(|(idx, a)| {
             let label_ok = match idx {
                 0 => a.label.is_none(),
-                1 => matches!(
-                    a.label.as_ref().map(|(label, _)| label.as_str()),
-                    None | Some("replay") | Some("backend")
-                ),
-                2 => matches!(
-                    a.label.as_ref().map(|(label, _)| label.as_str()),
-                    None | Some("backend")
-                ),
+                1 => a.label.as_ref().map(|(label, _)| label.as_str()) == Some("replay"),
+                2 => a.label.as_ref().map(|(label, _)| label.as_str()) == Some("backend"),
+                3 => a.label.as_ref().map(|(label, _)| label.as_str()) == Some("frames"),
                 _ => false,
             };
             label_ok && expr_in_subset(&a.expr, cx, locals)
@@ -385,6 +384,22 @@ pub(super) fn core_call_args_in_subset(
     if module == "core.ui" && method == "button" && args.len() == 1 {
         return args[0].label.is_none() && expr_in_subset(&args[0].expr, cx, locals);
     }
+    // D-FOUND-COREAPI1=A: `files.walk(root, ignore: .gitignore)` remains a
+    // checked two-slot route after the binder fills an omitted ignore value.
+    if module == "core.files" && matches!(method, "walk" | "walk_parallel" | "walk_files") {
+        return matches!(args.len(), 1 | 2)
+            && args.iter().enumerate().all(|(index, arg)| {
+                let label_ok = if index == 1 {
+                    matches!(
+                        arg.label.as_ref().map(|(label, _)| label.as_str()),
+                        None | Some("ignore")
+                    )
+                } else {
+                    arg.label.is_none()
+                };
+                !arg.spread && label_ok && expr_in_subset(&arg.expr, cx, locals)
+            });
+    }
     if crate::Syntax::core_call(module, method).is_some() {
         return crate::Syntax::core_call_projection(
             module,
@@ -398,12 +413,11 @@ pub(super) fn core_call_args_in_subset(
     args.iter().all(|a| expr_in_subset(&a.expr, cx, locals))
 }
 
-/// c109 Phase 13: is a closure-taking core call (`tasks.spawn`, `http.serve`, or
-/// `scope.guard`)
-/// inside the subset? These are NOT in `core_fixed_sig` — each has a
-/// bespoke emit shape. We cover only
-/// the cleanest, byte-reproducible case for each, where the closure arg is a LITERAL
-/// in-subset lambda:
+/// c109 Phase 13: a closure-taking core call (`tasks.spawn`, the legacy
+/// address/handler `http.serve`, or `scope.guard`) inside the subset? These
+/// are NOT in `core_fixed_sig` — each has a bespoke emit shape. We cover only
+/// the cleanest, byte-reproducible case for each, where the closure arg is a
+/// LITERAL in-subset lambda:
 ///   - `http.serve(addr, <lambda>)` — 2 args; arg0 (addr) any in-subset value, arg1 a
 ///     literal lambda (the `jet_http_serve(&(addr), <lambda>)` branch). The
 ///     router-handler branch needs an HTTPRouter value, which can only come from
@@ -440,26 +454,11 @@ pub(crate) fn core_closure_call_in_subset(
         ("core.sys", "on_interrupt") => {
             args.len() == 1 && no_labels && expr_in_subset(&args[0].expr, cx, locals)
         }
-        // D-DATA-SURFACE1=A: typed table selectors. Rows arg is in subset; selector
-        // args must be literal lambdas so lowering can seed row param types.
-        ("core.data", "filter" | "sort_by") => {
-            args.len() == 2
-                && no_labels
-                && expr_in_subset(&args[0].expr, cx, locals)
-                && lambda_arg(1)
-        }
-        ("core.data", "group_count") => {
-            args.len() == 2
-                && no_labels
-                && expr_in_subset(&args[0].expr, cx, locals)
-                && lambda_arg(1)
-        }
-        ("core.data", "group_sum" | "group_mean") => {
-            args.len() == 3
-                && no_labels
-                && expr_in_subset(&args[0].expr, cx, locals)
-                && lambda_arg(1)
-                && lambda_arg(2)
+        // D-QUERY-RETAIN1=A: `core.data.query(rows)` builds one typed
+        // deferred Query value; its receiver methods are admitted by the
+        // method-call subset gate below.
+        ("core.data", "query") => {
+            args.len() == 1 && no_labels && expr_in_subset(&args[0].expr, cx, locals)
         }
         ("core.data", "inner_join" | "left_join") => {
             args.len() == 4
@@ -476,12 +475,6 @@ pub(crate) fn core_closure_call_in_subset(
                 && lambda_arg(1)
                 && lambda_arg(2)
                 && lambda_arg(3)
-        }
-        ("core.data", "lazy_filter" | "lazy_sort_by") => {
-            args.len() == 2
-                && no_labels
-                && expr_in_subset(&args[0].expr, cx, locals)
-                && lambda_arg(1)
         }
         // D-REACT1=B / D-SIGNAL1: `reactive.derived/computed/effect(<lambda>)` —
         // 1 arg, a literal zero-param in-subset lambda (rendered by `render_lambda_str`).

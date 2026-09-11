@@ -1,0 +1,237 @@
+{
+  "schema": "jet.checking-witnesses.v1",
+  "schema_version": 1,
+  "relation": "checking",
+  "operations": ["check"],
+  "identity_fields": [
+    "source_sha256",
+    "implementation_sha256",
+    "obligations_sha256",
+    "compiler_identity"
+  ],
+  "binding": {
+    "contract_sha256": "sha256-187abe262296ef36f66734f9b84f026e518b295925accd682184e85ddb1204dc",
+    "manifest_sha256": "sha256-3c11c881670ab7b2c0a667d20efe227442004e12c40a9ae4b7b8481ad655b649",
+    "checker": {
+      "path": "proof/compiler/checking/check.mjs",
+      "sha256": "sha256-0ed4090646486d6b01b4e853544e619082089e3cb7c4b790c595726557356d2d"
+    },
+    "driver": {
+      "path": "scripts/agent/compiler-proof.mjs",
+      "sha256": "sha256-e604d5348b21090b4222036b167e3fa1bce76ac8ea62aa44f7c7fad53100ee98"
+    },
+    "obligations": {
+      "path": "proof/compiler/obligations.json",
+      "sha256": "sha256-a2ce1e98546eb3ec76ec079b0170f8dd00323258178ad20c71ea587098d16340"
+    },
+    "authorities": [
+      {
+        "path": "crates/jet-foundation/src/Facts.rs",
+        "sha256": "sha256-2e3b0b6ecc0622ad04b949fe65bca6e62c354d820b512dfae6aa4a4e491daae1"
+      },
+      {
+        "path": "docs/spec/architecture.md",
+        "sha256": "sha256-dfe09d586b9dfe5982496c63ea50118a6f0384fbfde020eb41042f95725dfbac"
+      },
+      {
+        "path": "scripts/agent/check-core-surface-ledger.mjs",
+        "sha256": "sha256-cee0bc2f0b405de9eb2008df175d86c1b3878f0a4491e450deab9e9554592b2f"
+      }
+    ],
+    "implementation": [
+      {
+        "path": "crates/jet-foundation/src/Facts.rs",
+        "sha256": "sha256-2e3b0b6ecc0622ad04b949fe65bca6e62c354d820b512dfae6aa4a4e491daae1"
+      },
+      {
+        "path": "crates/jet-foundation/src/Names.rs",
+        "sha256": "sha256-75f5848b342befc62d61ea2227eabf45085f55069b47315ea18f80bb924a2002"
+      },
+      {
+        "path": "crates/jet-semindex/src/Build.rs",
+        "sha256": "sha256-db458227136a0c545a3cae4f98966f7b6c2d31b672a46b85f67417ebdad964c5"
+      },
+      {
+        "path": "crates/jet-semindex/src/Types.rs",
+        "sha256": "sha256-a82e444de355e0086ef4fd49ce0b49104759b7001a5af44d7b8b3d070afe8d12"
+      },
+      {
+        "path": "Source/Compiler.rs",
+        "sha256": "sha256-710ac015607e215ef0882d4e0127a4d80d2725adf1594464ccd42c65011db333"
+      },
+      {
+        "path": "Source/CmdCompile.rs",
+        "sha256": "sha256-f100e69e641e44dc94d934118eec979013281e1b421126be8cc38d802cf653bb"
+      },
+      {
+        "path": "crates/jet-driver/src/Loader.rs",
+        "sha256": "sha256-d4391bcfd24df4d3ab4a060a64d1f21c696f8934ee037d79336fe9d26744b44e"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "id": "accepted-effects-and-calls",
+      "path": "examples/features/effects/effects.jet",
+      "source_sha256": "sha256-7b1ef3f7af09a957e1fe64b8e92755d48913d9028eddc092359cd18b189c77ea",
+      "expect": {
+        "accepted": true,
+        "definitions": [
+          {"name": "square", "kind": "function", "params": [{"ty": "Int"}], "ret": "Int"},
+          {"name": "announce", "kind": "function", "params": [{"ty": "String"}, {"ty": "Int"}]},
+          {"name": "report", "kind": "function"},
+          {"name": "run", "kind": "function"}
+        ],
+        "references": [
+          {"name": "announce", "target": "announce", "scope": true},
+          {"name": "square", "target": "square", "scope": true},
+          {"name": "report", "target": "report", "scope": true}
+        ],
+        "calls": [
+          {"caller": "report", "callee": "announce"},
+          {"caller": "report", "callee": "square"},
+          {"caller": "run", "callee": "report"}
+        ],
+        "effects": [
+          {"function": "report", "requires": ["IO"]},
+          {"function": "run", "requires": ["IO"]}
+        ],
+        "facts": [{"kind": "Effect", "name": "IO", "scope": "report", "validity": "current", "premises": ["report -> announce", "announce -> print"]}],
+        "ownership": [{"subject": "report", "mode": "owned", "mutable": false, "premises": ["checked callable signature"]}],
+        "derivation_ids": ["3273be3dfa13a15004622c41dd811844", "e6b341716fc9bcdde51409aa9e08bda5"]
+      }
+    },
+    {
+      "id": "accepted-functions-and-branches",
+      "path": "tests/fixtures/coverage.jet",
+      "source_sha256": "sha256-2859bc5eea29f0e2300d7d81841aebe0f84e6b1662213a23e0c9d20750cdf478",
+      "expect": {
+        "accepted": true,
+        "definitions": [
+          {"name": "used", "kind": "function", "params": [{"ty": "Bool"}], "ret": "Int"},
+          {"name": "unused", "kind": "function", "ret": "Int"},
+          {"name": "run", "kind": "function"}
+        ],
+        "references": [{"name": "used", "target": "used", "scope": true}],
+        "facts": [{"kind": "Tag", "name": "D-COV1", "scope": "source", "validity": "current", "premises": ["fixture declaration"]}],
+        "ownership": [],
+        "derivation_ids": []
+      }
+    },
+    {
+      "id": "rejected-type-mismatch",
+      "path": "tests/ui/decimal_float_mix.jet",
+      "source_sha256": "sha256-a972b6ef92ef4e15783c372cd555f00f1e5d74ef7151a858e62cc391648ed65c",
+      "expect": {
+        "accepted": false,
+        "category": "types",
+        "diagnostics": [{"code": "E0131", "span_contains": "price + rate"}],
+        "no_semantic_index": true,
+        "facts": [{"kind": "Effect", "name": "rejected:type", "scope": "run", "validity": "stale", "premises": ["type mismatch"]}],
+        "ownership": [],
+        "derivation_ids": []
+      }
+    },
+    {
+      "id": "rejected-ownership-boundary",
+      "path": "tests/ui/gc_escape_ownership.jet",
+      "source_sha256": "sha256-cf8cbe327d68253833b045413e0f73d4d28646b89fa860dca8ae7171fab70074",
+      "expect": {
+        "accepted": false,
+        "category": "ownership",
+        "diagnostics": [{"code": "E2111"}],
+        "no_semantic_index": true,
+        "facts": [{"kind": "State", "name": "ownership:gc-escape", "scope": "promoted", "validity": "stale", "premises": ["rejected escape"]}],
+        "ownership": [],
+        "derivation_ids": []
+      }
+    },
+    {
+      "id": "rejected-effect-boundary",
+      "path": "tests/ui/effect_out_of_set.jet",
+      "source_sha256": "sha256-f23e5a637abb1b2fa49e0b9007b3f4c7a6a4ce55e1a5b132b023556ec1b675f2",
+      "expect": {
+        "accepted": false,
+        "category": "effects",
+        "diagnostics": [{"code": "E0740"}],
+        "no_semantic_index": true,
+        "facts": [{"kind": "Effect", "name": "FS", "scope": "load", "validity": "stale", "premises": ["effect bound"]}],
+        "ownership": [],
+        "derivation_ids": []
+      }
+    },
+    {
+      "id": "rejected-state-transition",
+      "path": "tests/ui/typestate_wrong_state.jet",
+      "source_sha256": "sha256-0db9c88768f690b781a33c8ac3c914945cfcd0f50b6797d68ea91dd99531f1a9",
+      "expect": {
+        "accepted": false,
+        "category": "state",
+        "diagnostics": [{"code": "E0150"}],
+        "no_semantic_index": true,
+        "facts": [{"kind": "State", "name": "Reservation", "scope": "run", "validity": "stale", "premises": ["invalid transition"]}],
+        "ownership": [],
+        "derivation_ids": ["0ec4365736cb122d67180453c52f9746"]
+      }
+    }
+  ],
+  "derivations": [
+    {
+      "id": "3273be3dfa13a15004622c41dd811844",
+      "subject": "square",
+      "claim": "checked definition square",
+      "producer": "jet-sema",
+      "method": "static_derivation",
+      "rule": "checked-definition",
+      "premises": ["content:square", "signature:square"],
+      "identity": {"source": "examples/features/effects/effects.jet", "build": "7b1ef3f7af09a957e1fe64b8e92755d48913d9028eddc092359cd18b189c77ea", "run": "", "target": "core.compiler"},
+      "assumptions": [],
+      "disposition": "current"
+    },
+    {
+      "id": "e6b341716fc9bcdde51409aa9e08bda5",
+      "subject": "report",
+      "claim": "checked effect reachability for report",
+      "producer": "jet-sema",
+      "method": "static_derivation",
+      "rule": "checked-effect",
+      "premises": ["calls:report", "effects:report"],
+      "identity": {"source": "examples/features/effects/effects.jet", "build": "7b1ef3f7af09a957e1fe64b8e92755d48913d9028eddc092359cd18b189c77ea", "run": "", "target": "core.compiler"},
+      "assumptions": [],
+      "disposition": "current"
+    },
+    {
+      "id": "0ec4365736cb122d67180453c52f9746",
+      "subject": "Reservation",
+      "claim": "checked state graph Reservation",
+      "producer": "jet-sema",
+      "method": "static_derivation",
+      "rule": "checked-state-graph",
+      "premises": ["state:Reservation", "transitions:Reservation"],
+      "identity": {"source": "tests/ui/typestate_wrong_state.jet", "build": "0db9c88768f690b781a33c8ac3c914945cfcd0f50b6797d68ea91dd99531f1a9", "run": "", "target": "core.compiler"},
+      "assumptions": [],
+      "disposition": "current"
+    }
+  ],
+  "negative_controls": [
+    {"id": "forged-type", "field": "definitions[0].kind.params[0].ty", "mutate": "Bool", "expected": "rejected"},
+    {"id": "forged-ownership", "field": "ownership[0].mutable", "mutate": true, "expected": "rejected"},
+    {"id": "forged-effect", "field": "effects[0].requires", "mutate": ["Net"], "expected": "rejected"},
+    {"id": "forged-state", "field": "facts[0].validity", "mutate": "current-without-premises", "expected": "rejected"},
+    {"id": "forged-fact-kind", "field": "facts[0].kind", "mutate": "CompilerFact", "expected": "rejected"},
+    {"id": "forged-alias", "field": "references[0].target", "mutate": "unrelated", "expected": "rejected"},
+    {"id": "forged-derivation", "field": "derivation_ids[0]", "mutate": "00000000000000000000000000000000", "expected": "rejected"}
+  ],
+  "fact_controls": {
+    "canonical_registry": "crates/jet-foundation/src/Facts.rs#FactRegistry",
+    "allowed_kinds": ["Effect", "State", "Tag"],
+    "allowed_validity": ["current", "stale", "expired", "redacted", "unavailable", "unsupported", "budget_exhausted", "unknown"],
+    "allowed_derivation_methods": ["static_derivation", "formal_proof", "recorded_execution", "sampled_agreement", "external_assumption"],
+    "allowed_dispositions": ["current", "stale", "expired", "redacted", "unavailable", "unsupported", "budget_exhausted", "unknown"]
+  },
+  "boundary": {
+    "qualification": "blocked",
+    "universal_proof": false,
+    "reason": "The checker only establishes bounded correspondence and explicit failure behavior for retained cases."
+  }
+}

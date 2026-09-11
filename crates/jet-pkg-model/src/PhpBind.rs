@@ -98,14 +98,32 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
     let result = BindResult {
         source: render_jet(lib, &functions),
         bound: functions,
+        provenance: {
+            let mut provenance = format!(
+                "schema=jet-php-bind-v1\nsha256={}\nphp={}\nscript={}\nworker={}\npool_workers=4\n",
+                crate::SHA256::sha256_hex(&identity),
+                php.display(),
+                script.display(),
+                worker.display()
+            );
+            crate::ForeignBridge::append_boundary_for_artifact(
+                &mut provenance,
+                *crate::AST::binder_descriptor(crate::AST::ForeignLanguage::Php)
+                    .ok_or_else(|| BindError::Source("PHP binder descriptor is not registered".into()))?,
+                lib,
+                &script,
+                &archive,
+                format!(
+                    "php={};cc={};ar={}",
+                    php.display(),
+                    crate::ForeignBridge::tool_identity("cc"),
+                    crate::ForeignBridge::tool_identity("ar")
+                ),
+            )
+            .map_err(BindError::IO)?;
+            provenance
+        },
         archive,
-        provenance: format!(
-            "schema=jet-php-bind-v1\nsha256={}\nphp={}\nscript={}\nworker={}\npool_workers=4\n",
-            crate::SHA256::sha256_hex(&identity),
-            php.display(),
-            script.display(),
-            worker.display()
-        ),
     };
     let _ = std::fs::remove_dir_all(&build);
     Ok(result)

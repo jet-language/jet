@@ -1,0 +1,16 @@
+// Source-side contract for the staged `.Model` output named Embedder.
+pub struct EmbeddingSpace {
+    model_digest: String
+    dimension: Int
+    metric: String
+    normalization: String
+}
+
+pub struct EmbeddingBatch {
+    values: [[Float]]
+    space: EmbeddingSpace
+}
+
+pub trait Embedder {
+    fn embed(self, documents: [String]) EmbeddingBatch !Err
+}

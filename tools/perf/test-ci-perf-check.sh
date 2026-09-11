@@ -5,7 +5,7 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 checker_source="$script_dir/ci-perf-check.sh"
 dashboard_source="$script_dir/dashboard.sh"
 corpus_source="$script_dir/corpus.tsv"
-plan_source="$script_dir/../../docs/plans/compiler-speed.md"
+plan_source="$script_dir/../../docs/spec/reference/compiler-speed.md"
 scratch_parent=${JET_PERF_SCRATCH_ROOT:-"$HOME/.cache/jet-perf"}
 scratch_parent_resolved=$(realpath -m -- "$scratch_parent")
 case "$scratch_parent_resolved" in

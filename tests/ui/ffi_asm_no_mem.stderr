@@ -1,8 +1,8 @@
-Error [E0003]: Expected `{` to open the `#FFI` foreign-source body, found `->`
-  --> tests/ui/ffi_asm_no_mem.jet:1:77
+Error [E3102]: Inline assembly is part of the low-level memory tier
+  --> tests/ui/ffi_asm_no_mem.jet:1:38
     |
   1 | #[Unsafe("register-only increment"), FFI(asm)] fn increment(value: Int) Int -> {
-    |                                                                             ^^
- Why: The structure here isn't what the compiler expected
- Fix: Use `{` to open the `#FFI` foreign-source body
-More: jet-lang.dev/e/E0003
+    |                                      ^^^^^^^^
+ Why: Assembly can read registers and memory outside Jet's safe value model, so discovery requires the explicit `core.mem` opt-in
+ Fix: Add `use core.mem` at the top of this file
+More: jet-lang.dev/e/E3102

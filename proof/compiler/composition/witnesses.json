@@ -1,0 +1,53 @@
+{
+  "schema": "jet.compiler-composition-witnesses.v1",
+  "schema_version": 1,
+  "relation": "jet.source-to-target.refinement.v1",
+  "checker": {
+    "path": "proof/compiler/composition/check.mjs",
+    "driver": "scripts/agent/compiler-proof.mjs"
+  },
+  "valid_scope": {
+    "scope": "supported source, every required Jet-controlled stage, exact candidate identities, all required execution modes, one accepted program, one correctly rejected program",
+    "status": "declared",
+    "executed": false
+  },
+  "controls": [
+    {
+      "id": "wrong-candidate",
+      "category": "identity-substitution",
+      "mutation": "replace the candidate binary, compiler source, target, configuration, or candidate record identity",
+      "expected_status": "identity-mismatch",
+      "executed": false
+    },
+    {
+      "id": "missing-stage",
+      "category": "coverage-removal",
+      "mutation": "remove source, checking, comptime, lowering, optimization, prelude, runtime, adapter, or semantics evidence",
+      "expected_status": "blocked",
+      "executed": false
+    },
+    {
+      "id": "wrong-intermediate-representation",
+      "category": "refinement-edge-substitution",
+      "mutation": "replace one stage input/output representation or observation alphabet",
+      "expected_status": "mismatch",
+      "executed": false
+    },
+    {
+      "id": "wrong-diagnostic",
+      "category": "rejection-observation",
+      "mutation": "replace registered code, reason, source identity, or UTF-8 span",
+      "expected_status": "invalid_oracle",
+      "executed": false
+    },
+    {
+      "id": "reject-everything",
+      "category": "acceptance-observation",
+      "mutation": "remove the positive supported-program acceptance or mark every mode rejected",
+      "expected_status": "blocked",
+      "executed": false
+    }
+  ],
+  "execution_requested": false,
+  "unknown_policy": "declared controls are not proof; missing, stale, unknown, timeout, wrong, or contradictory evidence remains blocking"
+}

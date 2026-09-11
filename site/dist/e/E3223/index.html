@@ -34,9 +34,18 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for E3223</p>
+<p class="diag-copy fix" data-registry-field="fix">Make the asm operands, return marker, clobbers, and target registers match the Jet signature.</p>
 <h2>Worked example</h2>
-<p>No UI snapshot currently mentions this code.</p>
+<p>First UI snapshot mentioning <code>E3223</code>: <code>tests/ui/ffi_asm_missing_return_anchor.stderr</code>.</p>
+<pre class="diag">Error [E3223]: This inline assembly operand contract is incomplete
+  --&gt; tests/ui/ffi_asm_missing_return_anchor.jet:4:5
+    |
+  4 |     &quot;&quot;&quot;
+    |     ^^^
+ Why: A value-returning assembly body needs exactly one `; -&gt; return` anchor
+ Fix: Bind each Jet parameter as `{name}`, mark one result with `; -&gt; return`, and list overwritten registers on `; clobbers …`
+More: jet-lang.dev/e/E3223
+</pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
 </main>

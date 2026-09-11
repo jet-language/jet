@@ -1,0 +1,17 @@
+// core-conformance: core.data.query.sort_by
+struct Entry {
+    rank: Int
+    name: String
+}
+
+fn run() {
+    entries :: [Entry]{
+        Entry{rank: 2, name: "two"},
+        Entry{rank: 1, name: "first"},
+        Entry{rank: 1, name: "second"},
+        Entry{rank: 9, name: "skip"}
+    }
+    view := entries.filter(entry -> entry.rank < 3).map(entry -> entry)
+    view.sort_by(entry -> entry.rank)
+    print("{view[0].rank}:{view[0].name},{view[1].rank}:{view[1].name},{view[2].rank}:{view[2].name}")
+}

@@ -40,6 +40,8 @@ mod url_kernel {
 }
 
 pub(super) type UrlParts = url_kernel::JetURL;
+/// The one MIME value the HTTP message kernel names as `jet_std::JetMIME`.
+pub(crate) use url_kernel::JetMIME;
 
 /// Re-enter the canonical URL value without reparsing or normalizing it.
 ///
@@ -120,10 +122,10 @@ pub(super) fn url_render_query(pairs: &[(String, String)]) -> String {
     url_kernel::render_query(pairs)
 }
 
-pub(super) fn url_percent_encode(value: &str, _path: bool) -> String {
-    url_kernel::percent_encode(value)
+pub(crate) fn url_percent_encode(value: &str, path: bool) -> String {
+    url_kernel::jet_url_percent_encode(value, path)
 }
 
-pub(super) fn url_percent_decode_str(value: &str) -> Result<String, String> {
+pub(crate) fn url_percent_decode_str(value: &str) -> Result<String, String> {
     url_kernel::percent_decode(value)
 }

@@ -4,8 +4,8 @@ use crate::Sema::Bundle::fn_types_compatible;
 use crate::Syntax;
 use crate::Traits::TraitRegistry;
 use crate::AST::{
-    AccessConvention, CModule, ExternFn, ExternRustBlock, FuncSig, Item, Param, Type,
-    VariantPayload,
+    AccessConvention, CModule, ExternFn, ExternRustBlock, FfiBoundaryFacts, FfiCloseAdapter,
+    FfiHandleFact, FuncSig, Item, Param, Type, VariantPayload,
 };
 use jet_foundation::Prelude as CorePrelude;
 use std::collections::HashMap;
@@ -73,7 +73,7 @@ pub(crate) fn check_extern_block(
         if !check_extern_fn(ef, registry, diags) {
             ok = false;
         }
-        if !check_close_contract(ef, &block.functions, diags) {
+        if !check_close_contract(ef, &block.functions, &[], diags) {
             ok = false;
         }
     }
@@ -144,6 +144,7 @@ pub(crate) fn register_foreign_close_impls(functions: &[ExternFn], traits: &mut 
 fn check_close_contract(
     ef: &ExternFn,
     functions: &[ExternFn],
+    adapters: &[FfiCloseAdapter],
     diags: &mut Vec<Diagnostic>,
 ) -> bool {
     let Some((close_name, close_span)) = &ef.close else {
@@ -162,10 +163,35 @@ fn check_close_contract(
         .iter()
         .find(|candidate| candidate.name == *close_name)
     else {
+        if let Some(adapter) = adapters
+            .iter()
+            .find(|adapter| adapter.adapter_function == *close_name)
+        {
+            let raw_valid = functions
+                .iter()
+                .find(|candidate| candidate.name == adapter.raw_function)
+                .is_some_and(|raw| {
+                    raw.return_type.is_some()
+                        && matches!(
+                            raw.params.as_slice(),
+                            [param]
+                                if !param.variadic
+                                    && param.convention == AccessConvention::Move
+                                    && param.ty == *return_type
+                        )
+                        && matches!(
+                            return_type,
+                            Type::Named(name) if name == &adapter.handle_type
+                        )
+                });
+            if raw_valid {
+                return true;
+            }
+        }
         diags.push(ffi_type_error(
             &format!("foreign close function `{close_name}` is not declared"),
             "the close protocol must name a function in the same foreign binding",
-            "declare `fn {close_name}(handle: ^Handle);` in this binding, or remove `#Close`",
+            &format!("declare `fn {close_name}(handle: ^Handle);` in this binding, or remove `#Close`"),
             *close_span,
         ));
         return false;
@@ -192,10 +218,12 @@ fn check_close_contract(
 
 /// S59 (E2-M14): type rules at the **C** boundary. Stricter than Rust FFI: only
 /// scalars, `Char`, and `String` (D-CBIND5) cross by value, plus structs/enums
-/// whose fields are all C-safe. Aggregates (`[T]`, `[K,V]`, `?T`, `T !E`) have
-/// no stable C ABI and are rejected (E3203). Pointers (`Ptr<T>`, M13/S58) belong
-/// to the gated tier: a `Ptr<T>` in a C signature fires E3202 unless it is behind
-/// `use core.mem` + `#Unsafe`.
+/// whose fields are all C-safe. User-authored aggregates (`[T]`, `[K,V]`, `?T`,
+/// `T !E`) have no stable C ABI and are rejected (E3203). Generated CBind
+/// caches may carry a checked `[T]` pointer/count slice; only their generated
+/// marker admits it. Pointers (`Ptr<T>`, M13/S58) belong to the gated tier: a
+/// `Ptr<T>` in a C signature fires E3202 unless it is behind `use core.mem` +
+/// `#Unsafe`.
 pub(crate) fn guest_c_abi_type_is_safe(ty: &Type, registry: &TypeRegistry) -> bool {
     match ty {
         Type::Int | Type::Float | Type::Bool | Type::Char | Type::String => true,
@@ -228,6 +256,7 @@ pub(crate) fn guest_c_abi_type_is_safe(ty: &Type, registry: &TypeRegistry) -> bo
         Type::List(_)
         | Type::Map { .. }
         | Type::Option(_)
+
         | Type::Result { .. }
         | Type::Shared(_)
         | Type::Apply { .. }
@@ -241,9 +270,7 @@ pub(crate) fn guest_c_abi_type_is_safe(ty: &Type, registry: &TypeRegistry) -> bo
             ..
         } => {
             matches!(effect_bound, Some(b) if b.is_empty())
-                && params
-                    .iter()
-                    .all(|p| guest_c_abi_type_is_safe(p, registry))
+                && params.iter().all(|p| guest_c_abi_type_is_safe(p, registry))
                 && ret
                     .as_deref()
                     .is_none_or(|r| guest_c_abi_type_is_safe(r, registry))
@@ -253,6 +280,38 @@ pub(crate) fn guest_c_abi_type_is_safe(ty: &Type, registry: &TypeRegistry) -> bo
         Type::Union(_) => false,
         Type::Quantity { .. } => false,
         Type::Measure(_) => false,
+    }
+}
+pub(crate) fn guest_c_abi_type_is_safe_with_handles(
+    ty: &Type,
+    registry: &TypeRegistry,
+    handles: &[FfiHandleFact],
+) -> bool {
+    if matches!(ty, Type::Named(name) if handles.iter().any(|fact| fact.jet_name == *name)) {
+        return true;
+    }
+    match ty {
+        Type::Fn {
+            params,
+            ret,
+            effect_bound,
+            ..
+        } => {
+            matches!(effect_bound, Some(bound) if bound.is_empty())
+                && params
+                    .iter()
+                    .all(|param| guest_c_abi_type_is_safe_with_handles(param, registry, handles))
+                && ret.as_deref().is_none_or(|ret| {
+                    guest_c_abi_type_is_safe_with_handles(ret, registry, handles)
+                })
+        }
+        Type::Tagged { inner, .. } => {
+            guest_c_abi_type_is_safe_with_handles(inner, registry, handles)
+        }
+        Type::InlineRange { base, .. } => {
+            guest_c_abi_type_is_safe_with_handles(base, registry, handles)
+        }
+        _ => guest_c_abi_type_is_safe(ty, registry),
     }
 }
 
@@ -288,11 +347,9 @@ pub(crate) fn c_named_type_ok(name: &str, registry: &TypeRegistry) -> bool {
                 && variants.values().all(|(_, payload)| match payload {
                     VariantPayload::Unit => true,
                     VariantPayload::Single(ty, _) => guest_c_abi_type_is_safe(ty, registry),
-                    VariantPayload::Named(fields) => {
-                        fields
-                            .iter()
-                            .all(|f| guest_c_abi_type_is_safe(&f.ty, registry))
-                    }
+                    VariantPayload::Named(fields) => fields
+                        .iter()
+                        .all(|f| guest_c_abi_type_is_safe(&f.ty, registry)),
                 })
         }
         // D-DIST1: distinct types are repr(transparent) over their base, so
@@ -341,6 +398,26 @@ pub(crate) fn e3203(ty: &Type, span: Span) -> Diagnostic {
         Some(span),
     )
 }
+/// E3216: foreign boundary or callback evidence failed a checked contract.
+fn e3216(subject: &str, reason: &str, fix: &str, span: Span) -> Diagnostic {
+    Diagnostic::from_row(
+        "E3216",
+        &[("subject", subject), ("reason", reason), ("fix", fix)],
+        Some(span),
+    )
+}
+
+/// E3216: a generated callback registration did not carry the complete
+/// canonical lifecycle identity into the checked call boundary.
+pub(crate) fn callback_contract_error(ty: &Type, span: Span) -> Diagnostic {
+    let subject = format!("managed callback `{}`", ty.name());
+    e3216(
+        &subject,
+        "safe foreign callbacks require retained captures, vetted thread entry, explicit completion, consuming ownership, native-access release, and the canonical FFI.C + IO.Write effects",
+        "regenerate the binding from the exact callback plan, or keep the callback capture-free and use the ordinary C callback subset",
+        span,
+    )
+}
 
 /// E3202 — a pointer type (`Ptr<T>`, S58) appears by value in a C FFI signature
 /// outside an `#Unsafe` / `core.mem` region. Ordinary C-FFI code passes by-value
@@ -387,12 +464,9 @@ pub fn e3302(triple: &str) -> Diagnostic {
 pub fn e3303(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E3303",
-        "This no-OS program allocates memory but has no allocator fact."
-            .to_string(),
-        "No-OS targets do not provide an implicit system heap."
-            .to_string(),
-        "Select a typed allocator provider, or use heap-free Core operations."
-            .to_string(),
+        "This no-OS program allocates memory but has no allocator fact.".to_string(),
+        "No-OS targets do not provide an implicit system heap.".to_string(),
+        "Select a typed allocator provider, or use heap-free Core operations.".to_string(),
         Some(span),
     )
 }
@@ -406,20 +480,55 @@ pub(crate) fn check_c_signature(
     registry: &TypeRegistry,
     diags: &mut Vec<Diagnostic>,
 ) -> bool {
+    check_c_signature_with_handles(
+        params,
+        return_type,
+        return_span,
+        registry,
+        &[],
+        false,
+        diags,
+    )
+}
+
+fn check_c_signature_with_handles(
+    params: &[Param],
+    return_type: Option<&Type>,
+    return_span: Span,
+    registry: &TypeRegistry,
+    handles: &[FfiHandleFact],
+    generated: bool,
+    diags: &mut Vec<Diagnostic>,
+) -> bool {
     let mut ok = true;
     for param in params {
         if let Type::Apply { name, args } = &param.ty {
             if name == Syntax::TYPE_PTR {
-                if args.len() != 1 || !guest_c_abi_type_is_safe(&args[0], registry) {
+                if args.len() != 1
+                    || !guest_c_abi_type_is_safe_with_handles(&args[0], registry, handles)
+                {
                     diags.push(e3203(&param.ty, param.ty_span));
                     ok = false;
                 }
-            } else if !guest_c_abi_type_is_safe(&param.ty, registry) {
+            } else if !c_abi_signature_type_is_safe(&param.ty, registry, handles, generated) {
                 diags.push(e3203(&param.ty, param.ty_span));
                 ok = false;
             }
-        } else if !guest_c_abi_type_is_safe(&param.ty, registry) {
+        } else if !c_abi_signature_type_is_safe(&param.ty, registry, handles, generated) {
             diags.push(e3203(&param.ty, param.ty_span));
+            ok = false;
+        }
+    }
+    if generated
+        && matches!(return_type, Some(Type::List(_)))
+        && !params.iter().any(|param| {
+            param.convention == AccessConvention::Write
+                && param.ty.is_integer()
+                && is_array_length_name(&param.name)
+        })
+    {
+        if let Some(return_type) = return_type {
+            diags.push(e3203(return_type, return_span));
             ok = false;
         }
     }
@@ -427,7 +536,7 @@ pub(crate) fn check_c_signature(
         if matches!(return_type, Type::Apply { name, .. } if name == Syntax::TYPE_PTR) {
             diags.push(e3202(&return_type.name(), return_span));
             ok = false;
-        } else if !guest_c_abi_type_is_safe(return_type, registry) {
+        } else if !c_abi_signature_type_is_safe(return_type, registry, handles, generated) {
             diags.push(e3203(return_type, return_span));
             ok = false;
         }
@@ -435,15 +544,73 @@ pub(crate) fn check_c_signature(
     ok
 }
 
-/// Validate one C FFI module's signatures (E3203/E3202). Registers nothing; the
-/// caller registers the functions after a clean check.
-pub(crate) fn check_c_module(
+fn is_array_length_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    matches!(lower.as_str(), "n" | "len" | "length" | "count" | "size" | "num" | "number")
+        || ["_len", "_length", "_count", "_size", "_num", "_number"]
+            .iter()
+            .any(|suffix| lower.ends_with(suffix))
+        || ["len_", "length_", "count_", "size_", "num_", "number_"]
+            .iter()
+            .any(|prefix| lower.starts_with(prefix))
+}
+
+fn c_abi_signature_type_is_safe(
+    ty: &Type,
+    registry: &TypeRegistry,
+    handles: &[FfiHandleFact],
+    generated: bool,
+) -> bool {
+    if generated {
+        if let Type::List(element) = ty {
+            return guest_c_abi_type_is_safe_with_handles(element, registry, handles);
+        }
+    }
+    guest_c_abi_type_is_safe_with_handles(ty, registry, handles)
+}
+/// Validate one C FFI module's signatures (E3203/E3202). Registers nothing;
+/// the caller registers the functions after a clean check.
+pub(crate) fn check_c_module_with_facts(
     cm: &CModule,
     registry: &TypeRegistry,
+    handles: &[FfiHandleFact],
+    adapters: &[FfiCloseAdapter],
+    boundary: Option<&FfiBoundaryFacts>,
     diags: &mut Vec<Diagnostic>,
 ) -> bool {
     let mut ok = true;
+    if let Some(boundary) = boundary {
+        if let Err(reason) = boundary.validate() {
+            let subject = format!("foreign boundary for `{}`", cm.lib);
+            let reason = format!(
+                "the loaded binder evidence must retain its complete artifact coverage and effect root; validation failed: {reason}"
+            );
+            diags.push(e3216(
+                &subject,
+                &reason,
+                "regenerate the binding from the exact foreign boundary plan",
+                cm.path_span,
+            ));
+            ok = false;
+        }
+    }
     for ef in &cm.functions {
+        if let (Some(boundary), Some(root)) = (boundary, ef.effect_root.as_deref()) {
+            if root != boundary.effect_root
+                || !boundary.effects.split(';').any(|effect| effect == root)
+            {
+                let subject = format!("foreign function `{}`", ef.name);
+                let reason = format!(
+                    "generated foreign functions must retain the descriptor-owned effect root; this declaration reports `{root}`"
+                );
+                let fix = format!(
+                    "preserve the descriptor-owned `{}` effect root",
+                    boundary.effect_root
+                );
+                diags.push(e3216(&subject, &reason, &fix, ef.span));
+                ok = false;
+            }
+        }
         if let Some((abi, span)) = &ef.abi {
             let known = matches!(
                 abi.as_str(),
@@ -470,7 +637,13 @@ pub(crate) fn check_c_module(
                     _ => false,
                 };
                 if !available {
-                    diags.push(Diagnostic::error("E3213", format!("`{abi}` is not available on this target"), "native calling conventions are restricted by operating system and architecture".to_string(), "use the default C ABI or `system` for portable declarations".to_string(), Some(*span)));
+                    diags.push(Diagnostic::error(
+                        "E3213",
+                        format!("`{abi}` is not available on this target"),
+                        "native calling conventions are restricted by operating system and architecture".to_string(),
+                        "use the default C ABI or `system` for portable declarations".to_string(),
+                        Some(*span),
+                    ));
                     ok = false;
                 }
                 if ef.params.iter().any(|p| p.variadic)
@@ -491,16 +664,18 @@ pub(crate) fn check_c_module(
         // D-CABI-RESULT1=C: raw, non-null out pointers preserve the C header
         // exactly. The call is marked unsafe by `extern_to_sig`; only a single
         // C-safe pointee is admitted.
-        if !check_c_signature(
+        if !check_c_signature_with_handles(
             &ef.params,
             ef.return_type.as_ref(),
             ef.return_type_span.unwrap_or(ef.name_span),
             registry,
+            handles,
+            ef.generated,
             diags,
         ) {
             ok = false;
         }
-        if !check_close_contract(ef, &cm.functions, diags) {
+        if !check_close_contract(ef, &cm.functions, adapters, diags) {
             ok = false;
         }
     }

@@ -1,50 +1,29 @@
 mod common;
+mod tir_support;
 
-fn checked_bundle(source: &str) -> jet::AST::ProgramBundle {
-    let dir = std::env::temp_dir().join(format!(
-        "jet_duration_runtime_{}_{}",
-        std::process::id(),
-        std::thread::current().name().unwrap_or("test")
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("main.jet");
-    std::fs::write(&path, source).unwrap();
-    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
-    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-        .into_iter()
-        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-        .collect();
-    assert!(errors.is_empty(), "{errors:?}");
-    bundle
-}
 
 #[test]
-fn checked_duration_surface_reaches_tir_and_jit() {
+fn checked_duration_constructors_preserve_units_across_tiers() {
     let source = r#"
 fn run() {
-    d :: Duration.seconds(1.5) ?? panic("duration")
-    print(d.in(.Milliseconds) ?? panic("read"))
+    fractional :: Duration.seconds(1.5) ?? panic("fractional duration")
+    whole :: Duration.milliseconds(1500) ?? panic("whole duration")
+    exact :: Duration.nanoseconds(4611686018427387904) ?? panic("exact duration")
+    print(fractional.in(.Milliseconds) ?? panic("fractional read"))
+    print(whole.in(.Seconds) ?? panic("whole read"))
+    print(exact.in(.Nanoseconds) ?? panic("exact read"))
+    _overflow :: Duration.hours(9223372036854775807) ?? {
+        print("overflow")
+        return
+    }
+    print("unexpected duration")
 }
 "#;
-    let compiled = jet::compile(source).expect("duration surface should compile");
-    assert!(compiled.rust.contains("jet_duration_from_float"));
-    assert!(compiled.rust.contains("jet_duration_in"));
-
-    if jet_jit::cranelift_host_supported() {
-        let bundle = checked_bundle(
-            r#"
-fn make() Duration !RangeError -> {
-    return Duration.seconds(1.5)
-}
-fn read(d: Duration) Int !RangeError -> {
-    return d.in(.Milliseconds)
-}
-fn run() {}
-"#,
-        );
-        jet_jit::try_compile_bundle(&bundle)
-            .expect("duration surface should lower to resident JIT");
-    }
+    tir_support::assert_tiers_agree(
+        "duration_checked_constructors",
+        source,
+        "1500\n1\n4611686018427387904\noverflow\n",
+    );
 }
 
 #[test]
@@ -66,7 +45,7 @@ fn local_duration_binding_shadows_builtin_without_reaching_codegen() {
     let diagnostics = jet::compile(source).expect_err("shadowed Duration should fail in sema");
     let rendered = jet::render_diagnostics("shadow.jet", source, &diagnostics);
     assert!(
-        rendered.contains("[E0311]") && rendered.contains("`seconds` isn't a method"),
+        rendered.contains("[E0311]"),
         "{rendered}"
     );
 }

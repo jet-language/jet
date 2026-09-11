@@ -8,6 +8,15 @@ disable-model-invocation: true
 
 Surface architectural friction and propose **deepening opportunities** — refactors that turn shallow modules into deep ones. The aim is testability and AI-navigability.
 
+## Contract
+
+- **Requested outcome:** An architecture review report that names deepening candidates, followed by a chosen-candidate discussion only when the user selects one.
+- **Supplied inputs:** The requested direction or recent-change evidence, project glossary, ADRs, and the configured scratch path for the report.
+- **Allowed child result:** One bounded read-only OMP exploration may return observed architecture facts; `/grilling` returns decisions one question at a time; `/batch-grill-me` returns a frontier round when the user requests that cadence; `/domain-modeling` returns only user-requested term or ADR records; `/codebase-design` returns alternative interfaces only when explicitly requested. Each returns to this review and cannot implement the candidate or open an undeclared agenda.
+- **Completion owner:** `improve-codebase-architecture` owns the scan and report; the user owns candidate selection and any later implementation decision.
+- **Return point:** Evidence returns to the report; each bounded handoff returns to the selected candidate's open questions.
+- **Stopping condition:** For a report-only request, stop after the rendered report and selection prompt. For a selected candidate, stop after the grilling/design result; do not jump to implementation.
+
 This command is informed by the project's domain model and built on a shared design vocabulary:
 
 - Use the `/codebase-design` vocabulary (**module**, **interface**, **depth**, **seam**, **adapter**, **leverage**, **locality**) and its principles (the deletion test, "the interface is the test surface", "one adapter = hypothetical seam, two = real"). Use these terms exactly in every suggestion — don't drift into "component," "service," "API," or "boundary." Invoke that skill only when the user explicitly asks for its separate workflow.
@@ -70,12 +79,16 @@ Do NOT propose interfaces yet. After the file is written, ask the user: "Which o
 
 ### 3. Grilling loop
 
-Once the user explicitly picks a candidate, use the `/grilling` skill to walk
-the decision tree with them — constraints, dependencies, the shape of the
-deepened module, what sits behind the seam, what tests survive.
+Once the user explicitly picks a candidate, honor the requested interview
+cadence: use `/batch-grill-me` for a frontier round when asked; otherwise use
+`/grilling` one question at a time to walk the decision tree — constraints,
+dependencies, the shape of the deepened module, what sits behind the seam, what
+tests survive. Return to this review after each answer or round; do not turn the
+discussion into implementation.
 
 Invoke `/domain-modeling` only when the user asks to record a resolved term or
-ADR. Do not make glossary or ADR writes an automatic side effect:
+ADR. Each record returns to the selected candidate and stops when that record
+is done. Do not make glossary or ADR writes an automatic side effect:
 
 - **Naming a deepened module after a concept not in `CONTEXT.md`?** Add the term to `CONTEXT.md`. Create the file lazily if it doesn't exist.
 - **Sharpening a fuzzy term during the conversation?** Update `CONTEXT.md` right there.

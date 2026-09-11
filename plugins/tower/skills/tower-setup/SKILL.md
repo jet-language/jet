@@ -1,23 +1,33 @@
 ---
 name: tower-setup
-description: Set up or configure Tower — init plugins/tower/.tower, import an older tower.json, tune config.json, and start the board server. Use for "set up tower", "configure tower", or first-run problems (no Tower data found).
+description: Set up or configure Tower — init plugins/tower/.tower, import an older tower.json, or tune config.json. Use for "set up tower", "configure tower", or first-run problems (no Tower data found).
 ---
 
 # Tower — set up in a project
 
+## Contract
+
+- **Requested outcome:** An initialized or repaired Tower data/configuration directory, ready for the owner to start the board when needed.
+- **Supplied inputs:** Project name, existing Tower state or import file, config values, and the installed Tower path.
+- **Allowed child result:** Passive reads and `tower` CLI inspection may return state/config facts. No child starts the server, edits board JSON, or changes project policy.
+- **Completion owner:** `tower-setup` owns initialization and configuration; the owner owns server startup and board exposure.
+- **Return point:** Return from each inspection or import to setup, then report the exact resulting paths and config.
+- **Stopping condition:** Stop after init/import/config is complete and the owner has the command to start the server. Do not start `tower serve` automatically.
+
 Tower's code lives where it's installed (plugin dir or vendored `Tower/`);
-its DATA lives at `plugins/tower/.tower/` beside this app. Setup = create that dir,
-shape the config, start the server.
+its DATA lives at `plugins/tower/.tower/` beside this app. Setup = create that
+dir and shape the config. The owner starts the board server when needed.
 
 ```
 # Jet (vendored):
 node plugins/tower/tower.mjs init --name "<Project>"
-node plugins/tower/tower.mjs serve --open
 
 # Plugin install (Claude Code / Cursor):
 node ${CLAUDE_PLUGIN_ROOT}/tower.mjs init --name "<Project>"
-node ${CLAUDE_PLUGIN_ROOT}/tower.mjs serve --open      # board at :7878
 ```
+
+The owner decides when to run `tower serve --open`; setup does not start a
+server or open a browser.
 
 `init` creates `plugins/tower/.tower/tower.json` (all state), public `plugins/tower/.tower/config.json`,
 and a `.gitignore` for `backups/`, `secrets.json`, and crash-residue
@@ -45,7 +55,7 @@ Migrating an older board: `tower import <old-tower.json> --name "<Project>"`
 ```
 
 - **`port`** — CLI and UI both use it; if a different tool already owns
-  7878, set another port here. The server binds on the configured port —
+  7878, set another port here. The server listens on the local network —
   treat it as trusted-network-only (LAN/tailnet).
 - **`retireAfterDays`** — the walk-back buffer: how long a done card, or a
   ratified decision, sits live before it retires into `plugins/tower/.tower/history.json`
@@ -53,15 +63,18 @@ Migrating an older board: `tower import <old-tower.json> --name "<Project>"`
   instant it's ratified — the owner sees it on Now's "Recently decided"
   strip and can reopen it in one tap while it's fresh.
 
-## Remote access, git linking
+## LAN access, git linking
 
-- Auth is OPT-IN: set `"auth": {"token": "…"}` in ignored `plugins/tower/.tower/secrets.json`
-  to require a key from non-localhost devices (unlock screen asks once per
-  device; localhost always exempt). Web push/VAPID is removed — live updates
-  use SSE only. Tower never invents secrets.
-- Never put `auth` or `push` in tracked `config.json`. Tower rejects that
-  legacy layout with migration guidance. Remove those fields, rotate any
-  committed auth token, delete leftover `push` from secrets.
+- Tower needs no credentials or setup key for LAN access. Open
+  `http://<machine-hostname>:<port>` or `http://<machine-ip>:<port>` from
+  another device. Every device on the LAN can read and change the board; do
+  not expose Tower to the public Internet.
+- Browser mutations require same-origin evidence. CLI mutations must send the
+  explicit `X-Tower-Client: cli` header.
+- Opening the board silently creates a short-lived HttpOnly owner interaction
+  session. Acceptance uses a one-time challenge tied to that session.
+- `auth` and `push` are removed fields. Tower rejects them in tracked
+  `config.json`; existing ignored `secrets.json` files are not read.
 - `tower githook` installs a post-commit hook so commits mentioning `#12`
   append to that card's log — install it once per repo.
 

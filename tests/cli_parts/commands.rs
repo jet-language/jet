@@ -46,8 +46,8 @@ fn status_renders_no_claim_without_a_receipt() {
         jet_foundation::MachineOutput::read_machine_output(&json).unwrap(),
         vec![jet_foundation::MachineOutput::MachineRecord::Status]
     );
-    assert!(json.starts_with("{\"schema\":\"jet.report/v1\""), "{json}");
-    assert!(json.contains("\"status_report\""), "{json}");
+    assert!(json.starts_with("{\"schema\":\"jet.status/v1\""), "{json}");
+    assert!(!json.contains("\"status_report\""), "{json}");
     assert!(json.contains("\"claims\":[]"), "{json}");
 }
 
@@ -1030,6 +1030,34 @@ fn retired_emit_rust_flag_teaches_canonical_command() {
 }
 
 #[test]
+fn duplicate_authority_right_is_e2102() {
+    let dir = isolated_cwd("authority_duplicate_right");
+    fs::write(dir.join("run.jet"), "fn run() { print(\"ok\") }\n").unwrap();
+    let output = Command::new(jet())
+        .args(["run", "run.jet", "--allow=Net", "--deny=Net"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "duplicate authority right must be a usage error: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Error [E2102]"), "{stderr}");
+    assert!(
+        stderr.contains("authority right `Net` is both allowed and denied"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("remove one of `--allow=Net` or `--deny=Net`"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn fix_dry_run_does_not_write() {
     // A file with an autofixable diagnostic. S14 teaching fixes are paused, so
     // use the still-live Core habit fix (`println` -> `print`).
@@ -1138,7 +1166,7 @@ fn ext_optional_check_resolves_dot_jet() {
     // path does not exist but the .jet file does.
     let stem = std::env::temp_dir().join("jet_cli_extopt_check");
     let file = stem.with_extension("jet");
-    fs::write(&file, "fn run() {\n    print(\"ok\");\n}\n").unwrap();
+    fs::write(&file, "fn run() {\n    print(\"ok\")\n}\n").unwrap();
     let out = Command::new(jet())
         .arg("check")
         .arg(&stem)
@@ -1408,7 +1436,7 @@ fn ext_optional_run_resolves_dot_jet() {
     // Same resolution for `jet run`.
     let stem = std::env::temp_dir().join("jet_cli_extopt_run");
     let file = stem.with_extension("jet");
-    fs::write(&file, "fn run() {\n    print(\"hello-extopt\");\n}\n").unwrap();
+    fs::write(&file, "fn run() {\n    print(\"hello-extopt\")\n}\n").unwrap();
     let out = Command::new(jet()).arg("run").arg(&stem).output().unwrap();
     assert_eq!(
         out.status.code(),

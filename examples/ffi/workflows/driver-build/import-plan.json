@@ -1,0 +1,72 @@
+{
+  "schema": "jet-ffi-build-import-v1",
+  "workflow": "driver-build",
+  "status": "authored-unexecuted",
+  "source": {
+    "project": ".",
+    "generator": "cmake",
+    "build_directory": "build",
+    "existing_native_build": true,
+    "original_inputs": ["CMakeLists.txt", "native/main.c", "native/support.cpp", "unsupported/native_action.sh"]
+  },
+  "candidate": {
+    "command": "jet build --import cmake:build --preview",
+    "accept": "jet build --import cmake:build --accept <plan-digest>",
+    "ordinary_build": "jet build",
+    "graph_completeness": "partial-until-all-actions-modeled",
+    "compilation_database": "evidence-only-not-a-complete-graph"
+  },
+  "actions": [
+    {
+      "id": "cmake.driver_support.compile",
+      "owner": "cmake",
+      "command": ["cmake", "--build", "build", "--target", "driver_support"],
+      "tool": "CMAKE_CXX_COMPILER",
+      "inputs": ["native/support.cpp"],
+      "outputs": ["build/libdriver_support.a"],
+      "env": ["CMAKE_CXX_COMPILER", "CXXFLAGS"],
+      "workdir": "."
+    },
+    {
+      "id": "cmake.driver_app.link",
+      "owner": "cmake",
+      "command": ["cmake", "--build", "build", "--target", "driver_app"],
+      "tool": "CMAKE_C_COMPILER",
+      "inputs": ["native/main.c", "build/libdriver_support.a"],
+      "outputs": ["build/driver_app"],
+      "env": ["CMAKE_C_COMPILER", "LDFLAGS"],
+      "workdir": "."
+    },
+    {
+      "id": "cmake.native_action",
+      "owner": "cmake",
+      "command": ["cmake", "--build", "build", "--target", "native_action"],
+      "inner_owner": "unsupported/native_action.sh",
+      "tool": "sh",
+      "inputs": ["unsupported/native_action.sh"],
+      "outputs": ["build/generated/native-action.txt"],
+      "env": [],
+      "workdir": ".",
+      "custom_action": true,
+      "opaque": true,
+      "full_ownership": "rejected-until-action-contract-is-established"
+    }
+  ],
+  "toolchains": {
+    "c": "jet-cc",
+    "cxx": "jet-c++",
+    "linker": "selected-by-cmake",
+    "target": "declared-by-driver-descriptor"
+  },
+  "unsupported_edges": [
+    "opaque custom action is retained by CMake",
+    "unmodeled generator expressions remain foreign-owned",
+    "compile_commands.json cannot establish graph completeness"
+  ],
+  "failure_paths": [
+    {"case": "stale-digest", "result": "exit-1-and-preserve-prior-selection"},
+    {"case": "input-drift", "result": "exit-1-and-preserve-prior-selection"},
+    {"case": "partial-output", "result": "receipt-invalid-until-all-declared-outputs-exist"},
+    {"case": "cancelled-action", "result": "receipt-cancelled-no-activation"}
+  ]
+}

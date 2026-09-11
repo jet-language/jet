@@ -20,15 +20,19 @@
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 use crate::Traits::TraitRegistry;
-use crate::AST::{AccessConvention, Expr, Field, Func, Item, StrPart, Type};
+use crate::AST::{AccessConvention, Expr, Field, Func, Item, StrPart, StructDef, Type};
+use jet_foundation::Shape::ShapeProjectionKind;
 
-/// D-CLIFLAG1: the dashed `--flag` name for a snake_case Jet field name.
-/// `config_file` -> `config-file`. Pure textual transform, no rename markers
-/// in v1 (I8: one mapping, not a menu of casing styles like D-SERDE3's
-/// `RenameAll` — that's a wire-format concern, not a CLI-flag concern).
-pub(crate) fn cli_flag_name(field_name: &str) -> String {
-    field_name.replace('_', "-")
+/// D-CLIFLAG1 / D-SHAPE-ONE1: the selected `Args` projection name for a
+/// snake_case Jet field. Shape markers and `RenameAll` are folded by the
+/// Foundation resolver shared with the command-schema builder.
+pub(crate) fn cli_flag_name(structure: &StructDef, field: &Field) -> String {
+    jet_foundation::CLISchema::shape_field_names(structure, field)
+        .name_for(ShapeProjectionKind::Args)
+        .expect("checked CLI field is missing its Args shape name")
+        .to_owned()
 }
+
 
 /// D-CLIFLAG1: is `ty` one of the scalar types a CLI flag can hold —
 /// `Int` (including an inline range)/`Float`/`Bool`/`String`/`Path`? (`Path` is `Type::Named("Path")`,
@@ -58,7 +62,7 @@ fn has_flag_marker(f: &Field) -> bool {
 
 fn marker_string<'a>(f: &'a Field, name: &str) -> Option<(&'a crate::AST::Marker, String)> {
     let marker = f.serde_markers.iter().find(|marker| marker.name == name)?;
-    match marker.args.first() {
+    match marker.expr_arg(0) {
         Some(Expr::Str(parts, _)) if parts.len() == 1 => match &parts[0] {
             StrPart::Lit(value) => Some((marker, value.clone())),
             _ => None,
@@ -115,16 +119,16 @@ fn e1305(field_name: &str, ty_show: &str, span: Span) -> Diagnostic {
     )
 }
 
-/// E1306: two fields (or a field and the built-in `--help`) would derive the
-/// same flag name.
+/// E1306: two fields (or a field and a built-in root flag such as
+/// `--help`, `--allow`, or `--deny`) would derive the same flag name.
 fn e1306(flag: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E1306",
         format!("two `#[CLI]` fields both derive the flag `--{}`", flag),
-        "every field needs a distinct flag name; `--help` is also reserved (every generated \
-         CLI gets one automatically)."
+        "every field needs a distinct `--flag`; generated commands reserve `--help`, \
+         `--allow`, and `--deny`."
             .to_string(),
-        "rename one of the fields".to_string(),
+        "rename the colliding field or choose a non-reserved flag name".to_string(),
         Some(span),
     )
 }
@@ -378,12 +382,13 @@ pub(crate) fn validate_cli_items(items: &[Item], reg: &TraitRegistry) -> Vec<Dia
             std::collections::HashMap::new();
         let mut seen_shorts: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
-        seen_flags.insert("help".to_string(), s.name_span);
+        for name in ["help", "allow", "deny"] {
+            seen_flags.insert(name.to_string(), s.name_span);
+        }
         let standard = s.type_markers.iter().any(|marker| {
             marker.name == Syntax::MARKER_CLI
                 && marker
-                    .args
-                    .iter()
+                    .expr_args()
                     .any(|arg| matches!(arg, Expr::Ident(name, _) if name == "Standard"))
         });
         if standard {
@@ -408,7 +413,7 @@ pub(crate) fn validate_cli_items(items: &[Item], reg: &TraitRegistry) -> Vec<Dia
                     .unwrap_or(f.name_span);
                 out.push(e1309(&f.name, span));
             }
-            let flag = cli_flag_name(&f.name);
+            let flag = cli_flag_name(s, f);
             if let Some(_prev) = seen_flags.insert(flag.clone(), f.name_span) {
                 out.push(e1306(&flag, f.name_span));
             }

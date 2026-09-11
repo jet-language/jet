@@ -1,0 +1,121 @@
+{
+  "schema": "jet.lowering-witnesses.v1",
+  "schema_version": 1,
+  "stage": "lowering",
+  "relation": "implementation_preservation",
+  "observation_fields": ["result", "typed_failure", "mutation", "input_consumption", "ordered_effects", "cleanup", "resource_premises", "schedule", "allowed_schedules"],
+  "preservation_fields": ["origin_identity", "source_identity", "ir_identity", "target_identity", "side_conditions", "legality", "profitability", "target_representation", "result", "typed_failure", "mutation", "input_consumption", "ordered_effects", "cleanup", "resource_premises", "schedule", "allowed_schedules"],
+  "identity_fields": ["model_sha256", "source_sha256", "compiler_source_sha256", "checker_sha256", "configuration_sha256", "target_sha256", "obligations_sha256"],
+  "identity": {
+    "model": {"meaning": "#2898 canonical operation denominator and observation alphabet"},
+    "source": {"meaning": "legal and invalid source witness bytes with exact SHA-256"},
+    "compiler": {"meaning": "current sema/TIR/MIR implementation files and compiler-proof driver"},
+    "checker": {"meaning": "this stage checker and shared source-bound checker implementation"},
+    "configuration": {"meaning": "stage contract, D-COMPILER-PROOF1 policy, and checker no-execution mode"},
+    "target": {"meaning": "scalar/vector/parallel/layout target facts and applicability"},
+    "obligations": {"meaning": "generated proof/compiler/obligations.json boundary and canonical operation rows"}
+  },
+  "binding": {
+    "contract": {"path": "proof/compiler/lowering/contract.json", "sha256": "sha256-8d7f53669215f7ed63a40c27737fb47f8e03f1c7d27974af96387119c5aafbfe"},
+    "checker": {"path": "proof/compiler/lowering/check.mjs", "sha256": "sha256-d9abc1e64c1f769747f74526ae65c2dba41fcaec5a3cf021e7c9e315f41b7657"},
+    "driver": {"path": "scripts/agent/compiler-proof.mjs", "sha256": "sha256-e604d5348b21090b4222036b167e3fa1bce76ac8ea62aa44f7c7fad53100ee98"},
+    "obligations": {"path": "proof/compiler/obligations.json", "sha256": "sha256-a2ce1e98546eb3ec76ec079b0170f8dd00323258178ad20c71ea587098d16340"},
+    "model": {"path": "proof/compiler/semantics/witnesses.json", "sha256": "sha256-5b5f9390c6a7af3e7e16c748a4df1a3fb9d9b3bd4e09317954f5d5366ae7d6ed"},
+    "authorities": [
+      {"path": "crates/jet-foundation/src/MIR.rs", "sha256": "sha256-e00165bdf13947e21a2b3ed5bfac7ff2279420bf236c60e3af02d707542efd19"},
+      {"path": "crates/jet-codegen/src/Codegen/TIR/mod.rs", "sha256": "sha256-773ce9f70d8c487bdf49368647ab2b275f015a5829a3fbb97993dcdcd2e931ad"},
+      {"path": "docs/spec/architecture.md", "sha256": "sha256-dfe09d586b9dfe5982496c63ea50118a6f0384fbfde020eb41042f95725dfbac"},
+      {"path": "proof/compiler/lowering/common.mjs", "sha256": "sha256-0e595dfc683203ed57c5fdc7c030cb345e8a8c0cccdf722a133a66ed5c29b58d"},
+      {"path": "proof/compiler/observations/comparison-journal.mjs", "sha256": "sha256-15275902d52692e580a62c025d92e403459102d353067e29f827e4d2f1602b0d"}
+    ]
+  },
+  "runner": {
+    "launcher": "scripts/agent/jet-env",
+    "compiler": "target/debug/jet",
+    "tiers": ["aot", "jet_run", "interpreter", "check"],
+    "operations": ["run", "check"],
+    "execution_requested": false,
+    "unknown_policy": "unverified observations never become preservation evidence",
+    "configuration": "source-bound checker only; canonical route observation is deferred to the observer and formal discharge is deferred to the compiler-proof driver"
+  },
+  "observation_certificates": {
+    "path": "proof/compiler/lowering/observations.json",
+    "schema": "jet.lowering-observations.v1",
+    "producer": "compiler-proof observation workflow",
+    "observer": "proof/compiler/lowering/observe.mjs",
+    "protocol": "canonical-tir-mir-route-v1",
+    "status": "unverified",
+    "universal_proof": false
+  },
+  "generated_relation": {
+    "path": "proof/compiler/obligations.json",
+    "authorities": ["#2898", "#2919"],
+    "id_sha256": "sha256-fd9bbe6d0065aa15fdda5fd4c66214feeef9399690e38dfd797b166354607cb6",
+    "required_ids": ["tir-expr:TExprKind.Binary", "tir-expr:TExprKind.Call", "tir-stmt:TStmt.Return"],
+    "mapping": {"default_status": "mapped_unproved", "qualification": "blocked", "proved_rows": 0, "unknown_rows": 0}
+  },
+  "certificate_defaults": {
+    "stage": "lowering",
+    "required_observations": ["result", "typed_failure", "mutation", "input_consumption", "ordered_effects", "cleanup", "resource_premises", "schedule", "allowed_schedules"],
+    "observation_order": ["result", "typed_failure", "mutation", "input_consumption", "ordered_effects", "cleanup", "resource_premises", "schedule", "allowed_schedules"],
+    "scenarios": ["short_circuit", "early_exit", "typed_errors", "checked_arithmetic", "callbacks", "resource_cleanup", "input_consumption"],
+    "premises": ["source_origin_is_retained", "typed_failure_is_retained", "mutation_is_retained", "input_consumption_is_exact", "ordered_effects_are_retained", "cleanup_edges_are_retained", "resource_premises_are_explicit", "target_applicability_is_checked"],
+    "canonical_operations": ["tir-expr:TExprKind.Binary", "tir-expr:TExprKind.Call", "tir-stmt:TStmt.Return"],
+    "origin": {"kind": "source-span", "identity": "source-origin-retained-through-shared-route"},
+    "source_identity": "source-origin-retained",
+    "ir_identity": "canonical-tir-mir-operation",
+    "target_identity": "target-facts-bound",
+    "side_conditions": ["source_order_preserved", "failure_order_preserved", "alias_and_ownership_premises_preserved", "target_and_layout_premises_preserved"],
+    "legality": {"route": "checked-sema-tir-mir-route", "required": true, "status": "unverified", "cost_cannot_legalize": true},
+    "profitability": {"separate": true, "route": "not-a-legality-decision", "status": "unverified", "cannot_override_legality": true},
+    "rejection_route": "shared-semantic-route-preserves-invalidity",
+    "effects_order": "preserve",
+    "failure_order": "preserve",
+    "input_consumption": "exact",
+    "alias_policy": "preserve-or-prove",
+    "numeric_rule": "checked",
+    "target_contract": {"choices": ["scalar", "vector", "parallel", "layout"], "numerical_contract": "same-source-numerical-contract", "failure_contract": "same-source-failure-contract", "layout_contract": "target-facts-bound"}
+  },
+  "certificates": [
+    {"operation_id": "sema.desugar-os-switches", "source": "crates/jet-sema/src/Sema/OSTarget.rs", "symbol": "desugar_os_switches", "source_sha256": "sha256-124b06841090f43f8194bd87d8795dcbab9c1ae0008ed7a4be87145921f36903"},
+    {"operation_id": "sema.desugar-migrations", "source": "crates/jet-sema/src/Sema/SchemaMigration.rs", "symbol": "desugar_migrations", "source_sha256": "sha256-211457009b037b352b99e9686bd9436efbf9bb34ee71726c0b44f17d4dfc37ab"},
+    {"operation_id": "sema.desugar-member-spreads", "source": "crates/jet-sema/src/Sema/MemberSpread.rs", "symbol": "desugar_member_spreads", "source_sha256": "sha256-05ad9acf74e5c8c8afe98b0a76fea56aaae443517292d37e6462b7d58035cab5"},
+    {"operation_id": "sema.desugar-multi-head-functions", "source": "crates/jet-sema/src/Sema/Bundle.rs", "symbol": "desugar_multi_head_functions", "source_sha256": "sha256-e7accfb3fe62aea37cf38f0f0a3c275c28d510d7c87cf3898bbc5c114ca47353"},
+    {"operation_id": "sema.normalize-operator-rhs", "source": "crates/jet-sema/src/Sema/Registration.rs", "symbol": "normalize_operator_rhs", "source_sha256": "sha256-684e45dc84b000198cf85b13525138ba6e7495465417da4a6441ea5c3f06060d"},
+    {"operation_id": "tir.lower-checked-program", "source": "crates/jet-codegen/src/Codegen/TIR/mod.rs", "symbol": "lower_checked_tir_program_for", "source_sha256": "sha256-a72e5b82344b6dc0a6fdce4643907c5f0d2a9cfda6326ce1a234bae33a346d3a"},
+    {"operation_id": "tir.canonicalize-loop-forms", "source": "crates/jet-codegen/src/Codegen/TIR/opt.rs", "symbol": "canonicalize_loop_forms", "source_sha256": "sha256-b8c1bc19f313779a6e732856ed0c77a6d42349874640dd54e46257b684041d23"},
+    {"operation_id": "tir.optimize-program", "source": "crates/jet-codegen/src/Codegen/TIR/opt.rs", "symbol": "optimize_program", "source_sha256": "sha256-b8c1bc19f313779a6e732856ed0c77a6d42349874640dd54e46257b684041d23"},
+    {"operation_id": "tir.lower-value-block", "source": "crates/jet-codegen/src/Codegen/TIR/lower/control_flow.rs", "symbol": "lower_value_block", "source_sha256": "sha256-b58192eb25c72207ebbc29060588e9ea552c2ac5b09b7820d35557bdadc81a28"},
+    {"operation_id": "tir.lower-statements", "source": "crates/jet-codegen/src/Codegen/TIR/lower/statements.rs", "symbol": "lower_stmts", "source_sha256": "sha256-6271040d53cf7a190f15e745de6dd87abc9933a886944c243955005192cf95ea"},
+    {"operation_id": "tir.lower-expression", "source": "crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs", "symbol": "lower_expr", "source_sha256": "sha256-2fb6fe3cba20c1684512e8c567734e8d603fab7244e6185472bdb7784803069b"},
+    {"operation_id": "tir.lower-function", "source": "crates/jet-codegen/src/Codegen/TIR/lower/functions.rs", "symbol": "lower_func", "source_sha256": "sha256-1a8141e8dff19faff0a46e8739f9a058145edd7c18d9635ba7715a5e4078ff6d"},
+    {"operation_id": "tir.lower-lambda", "source": "crates/jet-codegen/src/Codegen/TIR/lower/lambdas.rs", "symbol": "lower_lambda", "source_sha256": "sha256-aa558d67a8b941c35d8efd9da890be37e033fc8da503a9a234397f558b647369"},
+    {"operation_id": "mir.lower-expression", "source": "crates/jet-codegen/src/Codegen/TIR/tir_to_mir_expr.rs", "symbol": "lower_expr", "source_sha256": "sha256-9b934d1ee0d9e980c37e89184862ad4e20488e96452a70cf60766e81ea619534"},
+    {"operation_id": "mir.lower-statements", "source": "crates/jet-codegen/src/Codegen/TIR/tir_to_mir_stmt.rs", "symbol": "lower_stmts", "source_sha256": "sha256-edaecf34f681bd0392b62ada903e55fee41fa48d43ea047ef82785da2ed555c1"},
+    {"operation_id": "mir.lower-function", "source": "crates/jet-codegen/src/Codegen/TIR/mir.rs", "symbol": "lower_function", "source_sha256": "sha256-fed060120b52a20183b04e5e1c472ca0d9698e2e8c6860c3940d2da66329d6d5"},
+    {"operation_id": "mir.lower-type", "source": "crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs", "symbol": "lower_type", "source_sha256": "sha256-a64c8a49c0fbde0050dc193a5b125a8f581604be129a1b1bdda24233d90142ff"},
+    {"operation_id": "mir.lower-checked-program", "source": "crates/jet-codegen/src/Codegen/TIR/mir.rs", "symbol": "lower_checked_mir_program_for", "source_sha256": "sha256-fed060120b52a20183b04e5e1c472ca0d9698e2e8c6860c3940d2da66329d6d5"},
+    {"operation_id": "mir.lower-tir-to-mir", "source": "crates/jet-codegen/src/Codegen/TIR/mir.rs", "symbol": "lower_tir_to_mir", "source_sha256": "sha256-fed060120b52a20183b04e5e1c472ca0d9698e2e8c6860c3940d2da66329d6d5"},
+    {"operation_id": "mir.canonical-operation-model", "source": "crates/jet-foundation/src/MIR.rs", "symbol": "MirOperation", "source_sha256": "sha256-e00165bdf13947e21a2b3ed5bfac7ff2279420bf236c60e3af02d707542efd19"},
+    {"operation_id": "mir.rust-emitter", "source": "crates/jet-codegen/src/Codegen/MIRRust.rs", "symbol": "emit_mir_program_into", "source_sha256": "sha256-9ece572c842cbe7e3a238ef5e2a55d561eda2524a7f296c130380f4dd9c1b201"}
+  ],
+  "composition": {
+    "ordered_operations": ["sema.desugar-os-switches", "sema.desugar-migrations", "sema.desugar-member-spreads", "sema.desugar-multi-head-functions", "sema.normalize-operator-rhs", "tir.lower-checked-program", "tir.canonicalize-loop-forms", "tir.optimize-program", "tir.lower-value-block", "tir.lower-statements", "tir.lower-expression", "tir.lower-function", "tir.lower-lambda", "mir.lower-expression", "mir.lower-statements", "mir.lower-function", "mir.lower-type", "mir.lower-checked-program", "mir.lower-tir-to-mir", "mir.canonical-operation-model", "mir.rust-emitter"],
+    "preserves": ["origin_identity", "source_identity", "ir_identity", "target_identity", "side_conditions", "legality", "profitability", "target_representation", "result", "typed_failure", "mutation", "input_consumption", "ordered_effects", "cleanup", "resource_premises", "schedule", "allowed_schedules"],
+    "status": "unverified",
+    "engine_specific_lowerer": false
+  },
+  "witness_sources": [
+    {"id": "legal-shared-route", "stage": "lowering", "kind": "legal", "path": "proof/compiler/lowering/fixtures/legal-shared-route.jet", "source_sha256": "sha256-c883f325dc7439ddbe0400ebdada72a67d48bda6ab8bc6447ad0a83fb83eae0e", "operation_ids": ["tir.lower-expression", "mir.lower-expression", "mir.lower-tir-to-mir"], "expected_status": "preserve"},
+    {"id": "invalid-transformation", "stage": "lowering", "kind": "invalid", "path": "proof/compiler/lowering/fixtures/invalid-transformation.jet", "source_sha256": "sha256-3ec19356906815d4b80fd39d8c21f9df7cc2f929f30b53d6aee0c39d66761f57", "operation_ids": ["tir.lower-expression", "mir.lower-expression", "mir.rust-emitter"], "expected_status": "reject"}
+  ],
+  "negative_controls": [
+    {"kind": "reordered_effects", "operation_id": "sema.desugar-os-switches", "expected_status": "reject", "checked_without_execution": true},
+    {"kind": "reordered_failure", "operation_id": "tir.lower-expression", "expected_status": "reject", "checked_without_execution": true},
+    {"kind": "extra_input_consumption", "operation_id": "tir.lower-value-block", "expected_status": "reject", "checked_without_execution": true},
+    {"kind": "invalid_alias", "operation_id": "mir.lower-type", "expected_status": "reject", "checked_without_execution": true},
+    {"kind": "unsound_arithmetic_reassociation", "operation_id": "tir.lower-expression", "expected_status": "reject", "checked_without_execution": true},
+    {"kind": "wrong_operation_certificate", "operation_id": "mir.lower-tir-to-mir", "expected_status": "reject", "checked_without_execution": true},
+    {"kind": "illegal_cost_selection", "operation_id": "mir.rust-emitter", "expected_status": "reject", "checked_without_execution": true}
+  ]
+}

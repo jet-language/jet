@@ -320,6 +320,7 @@ fn authorize(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jet_foundation::DataTree::DataTree;
 
     #[test]
     fn offline_policy_refuses_before_any_nix_invocation() {
@@ -366,7 +367,7 @@ mod tests {
         assert_eq!(parsed.get("schema").unwrap().as_str().unwrap(), RECEIPT_SCHEMA);
         assert!(matches!(
             parsed.get("allowed").unwrap(),
-            JSON::JSONValue::Bool(true)
+            DataTree::Bool(true)
         ));
     }
 

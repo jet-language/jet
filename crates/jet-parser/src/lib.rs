@@ -304,10 +304,13 @@ fn run(value: Int !Err, maybe: ?Int) {
             Stmt::Switch { arms, .. }
                 if matches!(
                     arms.first().map(|arm| &arm.cond),
-                    Some(Expr::PatternTest {
-                        pattern: Pattern::Ok { binding, .. },
-                        ..
-                    }) if binding == "ok"
+                    Some(Expr::PatternTest { pattern, .. })
+                        if pattern.binding_names().iter().any(|name| name.name == "ok")
+                            && match pattern {
+                                Pattern::Ok { .. } => true,
+                                Pattern::Variant { variant, .. } => variant == "Ok",
+                                _ => false,
+                            }
                 )
         ));
         assert!(matches!(
@@ -315,10 +318,13 @@ fn run(value: Int !Err, maybe: ?Int) {
             Stmt::Switch { arms, .. }
                 if matches!(
                     arms.first().map(|arm| &arm.cond),
-                    Some(Expr::PatternTest {
-                        pattern: Pattern::Err { binding, .. },
-                        ..
-                    }) if binding == "error"
+                    Some(Expr::PatternTest { pattern, .. })
+                        if pattern.binding_names().iter().any(|name| name.name == "error")
+                            && match pattern {
+                                Pattern::Err { .. } => true,
+                                Pattern::Variant { variant, .. } => variant == "Err",
+                                _ => false,
+                            }
                 )
         ));
         assert!(matches!(
@@ -340,10 +346,15 @@ fn run(value: Int !Err, maybe: ?Int) {
                 if matches!(
                     binding.pattern.as_ref(),
                     Some(BindPattern::Refutable {
-                        pattern: Pattern::Ok { binding, .. },
+                        pattern,
                         fallback: OrFallback::Return(None, _),
                         ..
-                    }) if binding == "other"
+                    }) if pattern.binding_names().iter().any(|name| name.name == "other")
+                        && match pattern {
+                            Pattern::Ok { .. } => true,
+                            Pattern::Variant { variant, .. } => variant == "Ok",
+                            _ => false,
+                        }
                 )
         ));
     }
@@ -353,27 +364,27 @@ fn run(value: Int !Err, maybe: ?Int) {
         let cases = [
             (
                 "fn pick(value: Int !String) String -> value ? ok -> ok\n",
-                "a Result handler needs a `!` failure branch",
+                "A Result handler needs a `!` failure branch",
                 "E0003",
             ),
             (
                 "fn pick(value: Int !String) String -> value ? same -> same ! same -> same\n",
-                "a Result handler cannot bind both payloads to the same name",
+                "A Result handler cannot bind both payloads to the same name",
                 "E0003",
             ),
             (
                 "fn pick(value: Int !String) String -> value ? _ -> value ! error -> error\n",
-                "a Result handler success branch needs a payload binding",
+                "A Result handler success branch needs a payload binding",
                 "E0003",
             ),
             (
                 "fn pick(value: Int !String) String -> value ? ok => ok ! error -> error\n",
-                "this uses a retired arrow spelling",
+                "This uses a retired arrow spelling",
                 "E0070",
             ),
             (
                 "fn pick(value: Int !String) String -> value ? ok -> ok ! error -> error ! again -> again\n",
-                "a Result handler cannot have two failure branches",
+                "A Result handler cannot have two failure branches",
                 "E0003",
             ),
         ];
@@ -406,8 +417,14 @@ fn run(value: Int !Err, maybe: ?Int) {
             .iter()
             .find(|marker| marker.name == Syntax::MARKER_POLICY)
             .expect("policy marker");
-        assert!(matches!(&marker.args[0], AST::Expr::Call(call) if call.name == "retry"));
-        assert!(matches!(&marker.args[1], AST::Expr::Call(call) if call.name == "trace"));
+        assert!(matches!(
+            marker.args[0].as_expr(),
+            Some(AST::Expr::Call(call)) if call.name == "retry"
+        ));
+        assert!(matches!(
+            marker.args[1].as_expr(),
+            Some(AST::Expr::Call(call)) if call.name == "trace"
+        ));
     }
 
     #[test]

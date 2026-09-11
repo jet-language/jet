@@ -190,6 +190,17 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
         bound.join(","),
         crate::SHA256::sha256_hex(&identity)
     );
+    let mut provenance = provenance;
+    crate::ForeignBridge::append_boundary_for_artifact(
+        &mut provenance,
+        *crate::AST::binder_descriptor(crate::AST::ForeignLanguage::Pascal)
+            .ok_or_else(|| BindError::Source("Pascal binder descriptor is not registered".into()))?,
+        lib,
+        path,
+        &archive,
+        format!("fpc={};cc={};ar={}", compiler.display(), c_compiler.display(), archiver.display()),
+    )
+    .map_err(BindError::IO)?;
     let generated = render_jet(lib, &surface);
     let _ = std::fs::remove_dir_all(&build);
     Ok(BindResult {
@@ -501,7 +512,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
         &format!("{}_close", surface.handle.group),
     );
     output.push_str(
-        "}\n\npub enum PascalError {\n    InvalidHandle\n    Foreign\n    ResourceLimit\n}\n\n",
+        "}\n\n#Error\npub enum PascalError {\n    InvalidHandle\n    Foreign\n    ResourceLimit\n}\n\n",
     );
     output.push_str("pub struct ");
     output.push_str(&ty);

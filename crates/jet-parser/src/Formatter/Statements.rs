@@ -87,9 +87,16 @@ impl<'a> Fmt<'a> {
 
     fn fenced_statement_for(&self, stmt: &Stmt) -> Option<crate::AST::FencedStatement> {
         let start = stmt_start(stmt);
+        // Nested statements inside a fenced RHS (lambda/block bodies) share the
+        // outer fact span. Only the statement that begins at the fence itself
+        // should re-emit the fence; inner statements format normally.
         self.fenced_statements
             .iter()
-            .find(|fact| fact.span.start <= start && start <= fact.span.end)
+            .find(|fact| {
+                fact.fences.iter().any(|fence| {
+                    fact.span.start <= start && start <= fence.span.end
+                })
+            })
             .cloned()
     }
 
@@ -183,11 +190,9 @@ impl<'a> Fmt<'a> {
         self.write(Syntax::SIGIL_FENCE_OPEN);
         self.newline();
         self.with_indent(|formatter| {
-            for (index, name) in names.iter().enumerate() {
+            for name in &names {
                 formatter.write(name);
-                if index + 1 != names.len() {
-                    formatter.write(",");
-                }
+                formatter.write(",");
                 formatter.newline();
             }
         });
@@ -207,7 +212,7 @@ impl<'a> Fmt<'a> {
             .filter(|token| {
                 token.span.start >= start
                     && token.span.end <= end
-                    && matches!(token.kind, TokKind::Str(_) | TokKind::Char(_))
+                    && matches!(token.kind, TokKind::Str(_) | TokKind::RawStr(_) | TokKind::Char(_))
             })
             .map(|token| token.span)
             .collect::<Vec<_>>();
@@ -313,7 +318,22 @@ impl<'a> Fmt<'a> {
         self.fmt_stmt(stmt);
     }
 
-    fn fmt_block_marker(&mut self, marker: &jet_foundation::Registry::MarkerRowAndArgs) {
+    fn fmt_marker_arg_separator(&mut self, first: &mut bool, multiline: bool) {
+        if *first {
+            *first = false;
+        } else if multiline {
+            self.write(",");
+            self.newline();
+        } else {
+            self.write(", ");
+        }
+    }
+
+    fn fmt_block_marker(
+        &mut self,
+        marker: &jet_foundation::Registry::MarkerRowAndArgs,
+        source_start: usize,
+    ) {
         self.write("#");
         if marker.negated {
             self.write("!");
@@ -321,56 +341,48 @@ impl<'a> Fmt<'a> {
         self.write(marker.row.name);
         if !marker.args.is_empty() {
             self.write("(");
+            let source =
+                self.source_list_span_after(source_start, super::SourceDelimiter::Paren);
+            let multiline = source.is_some_and(|(span, _)| self.source_span_multiline(span));
+            if multiline {
+                self.newline();
+            }
             let mut first = true;
             for argument in &marker.args {
                 match argument {
                     jet_foundation::Registry::MarkerArgument::Expr { label, value } => {
-                        if !first {
-                            self.write(", ");
-                        }
+                        self.fmt_marker_arg_separator(&mut first, multiline);
                         if let Some(label) = label {
                             self.write(label);
                             self.write(": ");
                         }
                         self.fmt_expr(value, Prec::OrFallback);
-                        first = false;
                     }
                     jet_foundation::Registry::MarkerArgument::Ident(value) => {
-                        if !first {
-                            self.write(", ");
-                        }
+                        self.fmt_marker_arg_separator(&mut first, multiline);
                         self.write(value);
-                        first = false;
                     }
                     jet_foundation::Registry::MarkerArgument::Idents { label, values } => {
-                        if !first {
-                            self.write(", ");
-                        }
+                        self.fmt_marker_arg_separator(&mut first, multiline);
                         if let Some(label) = label {
                             self.write(label);
                             self.write(": ");
                         }
                         self.write(&values.join(", "));
-                        first = false;
                     }
                     jet_foundation::Registry::MarkerArgument::Text(value) => {
-                        if !first {
-                            self.write(", ");
-                        }
+                        self.fmt_marker_arg_separator(&mut first, multiline);
                         self.write("\"");
                         self.write(&escape_str_lit(value));
                         self.write("\"");
-                        first = false;
                     }
                     jet_foundation::Registry::MarkerArgument::Policy(declarations) => {
                         for declaration in declarations {
-                            if !first {
-                                self.write(", ");
-                            }
+                            self.fmt_marker_arg_separator(&mut first, multiline);
                             self.write(declaration.key.name());
                             match declaration.value {
                                 crate::Policy::PolicyValue::Limit(limit) => {
-                                    self.write(&format!("({limit})"))
+                                    self.write(&format!("({limit})"));
                                 }
                                 crate::Policy::PolicyValue::On
                                 | crate::Policy::PolicyValue::Off
@@ -380,10 +392,12 @@ impl<'a> Fmt<'a> {
                                 }
                                 _ => {}
                             }
-                            first = false;
                         }
                     }
                 }
+            }
+            if multiline && !self.at_line_start {
+                self.newline();
             }
             self.write(")");
         }
@@ -396,7 +410,7 @@ impl<'a> Fmt<'a> {
             if let Some(marker) =
                 jet_foundation::Registry::block_marker(stmt, self.policy_declarations)
             {
-                self.fmt_block_marker(&marker);
+                self.fmt_block_marker(&marker, stmt.span().start);
             }
         }
         match stmt {
@@ -460,11 +474,13 @@ impl<'a> Fmt<'a> {
             }
             Stmt::For {
                 var,
+                var_span,
                 var2,
                 kind,
                 body,
                 label,
                 arrow_body,
+                span,
                 ..
             } => {
                 if let Some((_n, _)) = label {
@@ -473,19 +489,26 @@ impl<'a> Fmt<'a> {
                 self.write("loop ");
                 // D-LOOP-SUBJECT1: the bindingless form writes its subject
                 // bare. The parser records the implicit binding as `it`, so
-                // printing the name back produces `loop it in words`, which is
-                // not a spelling the parser accepts — `it` is a keyword, not a
-                // name. Round-tripping the corpus depends on eliding it here.
+                // printing the name back produces `loop it in words`, which
+                // is not a spelling the parser accepts — `it` is a keyword,
+                // not a name.
                 let bindingless = var2.is_none() && var == Syntax::KW_IT;
                 if !bindingless {
-                    if var2.is_some() {
+                    if let Some((v2, v2_span)) = var2 {
                         self.write("(");
-                    }
-                    self.write(var);
-                    if let Some((v2, _)) = var2 {
-                        self.write(", ");
-                        self.write(v2);
+                        let bindings = [(var.as_str(), *var_span), (v2.as_str(), *v2_span)];
+                        self.fmt_comma_items(
+                            &bindings,
+                            self.source_list_span_after(
+                                span.start,
+                                super::SourceDelimiter::Paren,
+                            ),
+                            |(_, span)| *span,
+                            |f, (name, _)| f.write(name),
+                        );
                         self.write(")");
+                    } else {
+                        self.write(var);
                     }
                 }
                 let clause_width = match kind {
@@ -533,12 +556,18 @@ impl<'a> Fmt<'a> {
                             self.loop_clause_separator(step.span().start, wrap);
                             self.fmt_expr(step, Prec::OrFallback);
                         }
+                        if wrap && step.is_none() {
+                            self.write(",");
+                        }
                     }
                     ForKind::In { collection, step } => {
                         self.fmt_expr(collection, Prec::OrFallback);
                         if let Some(step) = step {
                             self.loop_clause_separator(step.span().start, wrap);
                             self.fmt_expr(step, Prec::OrFallback);
+                        }
+                        if wrap && step.is_none() {
+                            self.write(",");
                         }
                     }
                 }
@@ -627,6 +656,9 @@ impl<'a> Fmt<'a> {
                     self.loop_clause_separator(step.span().start, wrap);
                     self.fmt_stmt(step);
                 }
+                if wrap && step.is_none() {
+                    self.write(",");
+                }
                 let header_end = step
                     .as_ref()
                     .map_or(cond.span().end, |statement| statement.span().end);
@@ -691,28 +723,37 @@ impl<'a> Fmt<'a> {
             // D-LAYOUT-CTOR1: `name :: Layout{ … }` — typed-literal element
             // body (comma-separated Constraints). Re-sugar `h`/`v` calls back
             // to `box.anchor` / `self.anchor`.
-            Stmt::Layout { name, body, .. } => {
+            Stmt::Layout {
+                name,
+                body,
+                span,
+                ..
+            } => {
                 self.write(&format!(
                     "{} {} {}{{",
                     name,
                     Syntax::SIGIL_BIND_IMMUT,
                     Syntax::LAYOUT_TYPE
                 ));
-                self.newline();
                 let resugared: Vec<Stmt> =
                     body.iter().map(|s| resugar_layout_stmt(name, s)).collect();
-                self.with_indent(|f| {
-                    for (i, stmt) in resugared.iter().enumerate() {
-                        if i > 0 {
-                            f.newline();
-                        }
-                        f.fmt_stmt(stmt);
-                        if i + 1 < resugared.len() {
-                            f.write(",");
-                        }
-                    }
-                });
-                self.end_block();
+                let source =
+                    self.source_list_span_after(span.start, super::SourceDelimiter::Brace);
+                let multiline = source.is_some_and(|(span, _)| self.source_span_multiline(span));
+                if !multiline && !resugared.is_empty() {
+                    self.write(" ");
+                }
+                self.fmt_comma_items(
+                    &resugared,
+                    source,
+                    |stmt| stmt.span(),
+                    |f, stmt| f.fmt_stmt(stmt),
+                );
+                if multiline && !resugared.is_empty() {
+                    self.write("}");
+                } else {
+                    self.end_block();
+                }
             }
             // D-EFF1 / D-QUAL1: `#FX(Net, DB) { … }` effect-restriction region.
             Stmt::AuthorityScope { body, .. } => {
@@ -720,11 +761,20 @@ impl<'a> Fmt<'a> {
                 self.end_block();
             }
             // D-VERDICT-1308-1: `@ { … }` demand block.
-            Stmt::ComptimeBlock { body, .. } => {
-                self.write(&format!("{} {{", Syntax::COMPTIME_MARK));
-                self.newline();
-                self.with_indent(|f| f.fmt_block_stmts(body));
-                self.end_block();
+            Stmt::ComptimeBlock {
+                body,
+                is_template_loop,
+                ..
+            } => {
+                if *is_template_loop && body.len() == 1 {
+                    self.write(Syntax::COMPTIME_MARK);
+                    self.fmt_stmt(&body[0]);
+                } else {
+                    self.write(&format!("{} {{", Syntax::COMPTIME_MARK));
+                    self.newline();
+                    self.with_indent(|f| f.fmt_block_stmts(body));
+                    self.end_block();
+                }
             }
             // D-VERDICT-1308-2: format like `if` with an `@` lead.
             Stmt::ComptimeIf {
@@ -786,6 +836,7 @@ impl<'a> Fmt<'a> {
                 args,
                 body,
                 dsl,
+                args_span,
                 ..
             } => {
                 if *dsl || name == crate::Syntax::MARKER_ARITHMETIC {
@@ -795,12 +846,17 @@ impl<'a> Fmt<'a> {
                 }
                 if !args.is_empty() {
                     self.write("(");
-                    for (i, a) in args.iter().enumerate() {
-                        if i > 0 {
-                            self.write(", ");
-                        }
-                        self.fmt_expr(a, Prec::OrFallback);
-                    }
+                    self.fmt_comma_items(
+                        args,
+                        args_span.and_then(|span| {
+                            self.source_list_span_after(
+                                span.start,
+                                super::SourceDelimiter::Paren,
+                            )
+                        }),
+                        |arg| crate::AST::Expr::span(arg),
+                        |f, arg| f.fmt_expr(arg, Prec::OrFallback),
+                    );
                     self.write(")");
                 }
                 self.write(" {");
@@ -1663,6 +1719,7 @@ fn resugar_layout_expr(layout_name: &str, e: &Expr) -> Expr {
             args,
             recv_type,
             resolved_ret,
+            operator_rhs,
             checked_widen,
         } => Expr::MethodCall {
             receiver: Box::new(resugar_layout_expr(layout_name, receiver)),
@@ -1680,6 +1737,7 @@ fn resugar_layout_expr(layout_name: &str, e: &Expr) -> Expr {
                 .collect(),
             recv_type: recv_type.clone(),
             resolved_ret: resolved_ret.clone(),
+            operator_rhs: operator_rhs.clone(),
             checked_widen: *checked_widen,
         },
         Expr::Call(call) => {

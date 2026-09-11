@@ -86,9 +86,13 @@ pub fn fetch(
         ) {
             return Err(vec![d]);
         }
-        // D-SUPPLY1 Step 2: every manifest dep must resolve to a pinned version.
-        if let Err(d) = Lock::verify_all_manifest_deps_locked(manifest, lock) {
-            return Err(vec![d]);
+        // D-SUPPLY1 Step 2: every manifest dep must retain all facts needed by
+        // a locked/offline realization.
+        if let Err(error) = Lock::verify_all_manifest_deps_locked(manifest, lock) {
+            return Err(vec![error.diagnostic()]);
+        }
+        if let Err(error) = lock.validate_completeness() {
+            return Err(vec![error.diagnostic()]);
         }
         if let Err(d) = enforce_provenance_policy(lock, manifest) {
             return Err(vec![d]);
@@ -337,8 +341,14 @@ impl<'a> Resolver<'a> {
                 .existing_lock
                 .map(|lock| lock.workspace_overlay_policy.clone())
                 .unwrap_or_default(),
-            comptime_inputs: Vec::new(),
-            toolchains: Vec::new(),
+            comptime_inputs: self
+                .existing_lock
+                .map(|lock| lock.comptime_inputs.clone())
+                .unwrap_or_default(),
+            toolchains: self
+                .existing_lock
+                .map(|lock| lock.toolchains.clone())
+                .unwrap_or_default(),
             browsers: self
                 .existing_lock
                 .map(|lock| lock.browsers.clone())

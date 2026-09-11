@@ -1,0 +1,97 @@
+// First-party games battery: deterministic simulation helpers stay ordinary Jet
+// values. The Core game runner remains the authority for scene lifecycle,
+// replay input, rendering, and frame budgets.
+module games {
+    pub struct Aabb {
+        pub x: Int
+        pub y: Int
+        pub w: Int
+        pub h: Int
+    }
+
+    pub fn aabb_overlaps(a: Aabb, b: Aabb) Bool -[]> {
+        return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+    }
+
+    pub struct Transform {
+        pub x: Int
+        pub y: Int
+    }
+
+    pub struct SceneNode {
+        pub parent: Int
+        pub local: Transform
+    }
+
+    pub fn world_transform(nodes: [SceneNode], index: Int) Transform -[]> {
+        node :: nodes[index]
+        if node.parent < 0 -> return node.local
+        parent :: world_transform(nodes, node.parent)
+        return Transform{x: parent.x + node.local.x, y: parent.y + node.local.y}
+    }
+
+    pub struct Accumulator {
+        pub step_ms: Int
+        pub remainder_ms: Int
+        pub previous_tick: Int
+        pub current_tick: Int
+    }
+
+    pub fn accumulator_new(step_ms: Int) Accumulator -[]> {
+        return Accumulator{step_ms: step_ms, remainder_ms: 0, previous_tick: 0, current_tick: 0}
+    }
+
+    // Add elapsed wall time and advance whole simulation steps. The remainder
+    // is retained for rendering interpolation; no wall clock is consulted here.
+    pub fn accumulator_advance(state: Accumulator, elapsed_ms: Int) Accumulator -[]> {
+        if state.step_ms <= 0 -> return state
+        remainder := state.remainder_ms + elapsed_ms
+        previous := state.previous_tick
+        current := state.current_tick
+        loop remainder >= state.step_ms {
+            previous = current
+            current += 1
+            remainder -= state.step_ms
+        }
+        return Accumulator{
+            step_ms: state.step_ms,
+            remainder_ms: remainder,
+            previous_tick: previous,
+            current_tick: current,
+        }
+    }
+
+    pub fn accumulator_alpha_thousand(state: Accumulator) Int -[]> {
+        if state.step_ms <= 0 -> return 0
+        return state.remainder_ms * 1000 /% state.step_ms
+    }
+
+    pub fn interpolate(previous: Int, current: Int, alpha_thousand: Int) Int -[]> {
+        return previous + (current - previous) * alpha_thousand /% 1000
+    }
+
+    pub struct SaveState {
+        pub x: Int
+        pub paused: Bool
+    }
+
+    pub fn pause_toggle(state: SaveState) SaveState -[]> {
+        return SaveState{x: state.x, paused: !state.paused}
+    }
+
+    pub fn save_encode(state: SaveState) String -[]> {
+        return "x={state.x};paused={state.paused}"
+    }
+
+    // The battery's save format is intentionally small and inspectable. A bad
+    // field falls back to the safe initial value instead of inventing a state.
+    pub fn save_decode(raw: String) SaveState -[]> {
+        fields :: raw.split(";").to_list()
+        x_field :: fields.get(0) ?? "x=0"
+        x_parts :: x_field.split("=").to_list()
+        x :: Int.parse(x_parts.get(1) ?? "0") ?? 0
+        paused_field :: fields.get(1) ?? "paused=false"
+        paused :: paused_field == "paused=true"
+        return SaveState{x: x, paused: paused}
+    }
+}

@@ -1,0 +1,109 @@
+// Host replay of the embedded battery. The executable consumes the ordinary
+// `embedded` package; it does not copy a helper or claim to be board hardware.
+//
+// Host proof:
+//   jet run examples/embedded/battery/run.jet
+//   jet build examples/embedded/battery/run.jet --release
+//
+// Future target proof, after E3302 and the named provider gates land:
+//   jet build --target=board.sensor_v1 examples/embedded/battery/run.jet --release
+//   jet debug examples/embedded/battery/run.jet
+//   jet flash examples/embedded/battery/run.jet
+use embedded
+
+fn run() {
+    board :: embedded.board()
+    dossier :: embedded.target_dossier()
+    registers := embedded.registers()
+    embedded.gpio_init(&registers)
+    embedded.timer_init(&registers, 4)
+    embedded.uart_init(&registers)
+    embedded.dma_init(&registers)
+    mmio_echo :: embedded.uart_control_write(&registers, 1)
+
+    interrupts := embedded.interrupt_queue()
+    control := embedded.control_state(2048, 100)
+    interrupt_count := 0
+    loop tick in 0..<16 {
+        if embedded.timer_advance(&registers) {
+            _accepted :: embedded.interrupt_enqueue(&interrupts, tick)
+            interrupt_count += 1
+        }
+        event :: embedded.task_drain(&interrupts) ?? -1
+        if event >= 0 {
+            sample :: (event * 73 + 19) % 4096
+            work :: embedded.control_tick(&control, sample)
+            _within_deadline :: embedded.control_account(&control, work)
+            embedded.gpio_write(&registers, control.actuator > 0)
+        }
+    }
+
+    // Fill a second queue to exercise the explicit overflow policy, then drain
+    // one item to exercise the non-empty task path.
+    overflow := embedded.interrupt_queue()
+    loop event in 0..<5 {
+        _queued :: embedded.interrupt_enqueue(&overflow, event)
+    }
+    _drained :: embedded.task_drain(&overflow) ?? -1
+
+    // RX and TX are independent instances of the same fixed-capacity ring.
+    rx := embedded.uart_ring()
+    tx := embedded.uart_ring()
+    loop byte in 0..<9 {
+        _received :: embedded.uart_enqueue(&rx, U8{65})
+    }
+    first_rx :: embedded.uart_dequeue(&rx) ?? U8{0}
+    _sent :: embedded.uart_enqueue(&tx, U8{84})
+    first_tx :: embedded.uart_dequeue(&tx) ?? U8{0}
+    tx_empty_value :: embedded.uart_dequeue(&tx)
+    tx_empty :: tx_empty_value == None
+
+    // The checksum is taken while the buffer is pinned. Submit, complete, and
+    // reuse all use the same ownership state machine; target mapping is not
+    // invented when the board provider is absent.
+    dma := embedded.dma_buffer([Int#4]{10, 20, 30, 40})
+    checksum :: embedded.dma_checksum(&dma)
+    submitted :: embedded.dma_submit(&dma, &registers)
+    completed :: embedded.dma_complete(&dma, &registers)
+    owner_after_complete :: dma.owner
+    reused :: embedded.dma_reuse(&dma)
+    resubmitted :: embedded.dma_submit(&dma, &registers)
+    _recompleted :: embedded.dma_complete(&dma, &registers)
+
+    // The policy receives the verifier's authenticated result. It does not
+    // fabricate an image or claim flash persistence on the host.
+    slots := embedded.slot_policy(1)
+    authenticated_release :: true
+    accepted :: embedded.stage_image(&slots, checksum, authenticated_release)
+    confirmed :: embedded.confirm_trial(&slots)
+    activated :: embedded.activate_confirmed(&slots)
+    rejected :: embedded.stage_image(&slots, checksum, false)
+    rolled_back :: embedded.rollback_trial(&slots)
+    mapping_status :: embedded.dma_mapping_status()
+    timing_status :: embedded.control_timing_status()
+    slot_status :: embedded.slot_state(&slots)
+
+    receipt :: embedded.release_receipt(board.name, "", "", "", "")
+    svd :: dossier.svd ?? "none"
+
+    print("board {board.name} {board.triple}")
+    print("dossier {dossier.target} {dossier.mcu} {svd}")
+    print("memory flash {board.flash.origin}:{board.flash.bytes} ram {board.ram.origin}:{board.ram.bytes}")
+    print("peripherals {board.uart.name}@{board.uart.address}")
+    if board.dma == .Val(dma) {
+        print("dma peripheral {dma.name}@{dma.address}")
+    } else {
+        print("dma peripheral unavailable")
+    }
+    print("mmio control {registers.uart.control} echo {mmio_echo}")
+    print("timer interrupts {interrupt_count} ticks {control.ticks} dropped {interrupts.dropped}")
+    print("overflow dropped {overflow.dropped} queue_after_drain {overflow.count}")
+    print("uart rx_first {first_rx} rx_queued {rx.count} rx_dropped {rx.dropped} tx_first {first_tx} tx_empty {tx_empty}")
+    print("dma first_submit {submitted} first_complete {completed} submitted {resubmitted} completed {dma.completed} owner {owner_after_complete} checksum {checksum} reused {reused}")
+    print("control estimate_us {control.wcet_estimate_us} deadline_us {control.deadline_us} misses {control.deadline_misses}")
+    print("slots accepted {accepted} confirmed {confirmed} activated {activated} rejected {rejected} rolled_back {rolled_back} active {slots.active} rollbacks {slots.rollback_count} state {slot_status}")
+    print("receipt captured {receipt.captured} image {receipt.image}")
+    print("status {mapping_status}")
+    print("status {timing_status}")
+    loop gate in embedded.open_core_gates() -> print("gate {gate}")
+}

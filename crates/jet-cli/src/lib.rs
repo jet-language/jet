@@ -10,6 +10,14 @@
 pub use jet_foundation::Syntax;
 pub use jet_repl::{SemanticSymbols, Term};
 
+pub mod AdaptiveTable;
 pub mod CLI;
+pub mod CommandHarness;
+pub mod DynamicCompletions;
 pub mod Explain;
+pub mod Headless;
 pub mod Help;
+pub mod MultiProgress;
+pub mod OutputProfile;
+pub mod Recording;
+pub mod Tape;

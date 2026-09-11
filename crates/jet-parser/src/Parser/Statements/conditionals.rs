@@ -334,6 +334,9 @@ impl<'a> Parser<'a> {
                         break;
                     }
                     self.expect(TokKind::Comma, "between scope-member arguments")?;
+                    if matches!(self.peek().kind, TokKind::RParen) {
+                        break;
+                    }
                 }
             }
             self.expect(TokKind::RParen, "to close the scope-member arguments")?;
@@ -1872,6 +1875,9 @@ impl<'a> Parser<'a> {
                                         break;
                                     }
                                     self.expect(TokKind::Comma, "between pattern bindings")?;
+                                    if matches!(self.peek().kind, TokKind::RParen) {
+                                        break;
+                                    }
                                 }
                             }
                             self.expect(TokKind::RParen, "after pattern bindings")?;

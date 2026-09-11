@@ -11,6 +11,12 @@
 // `Prelude/TaskGroup.rs`.
 
 pub fn jet_std_time_now() -> i64 {
+    // D-TEST-WORLD1=A: controlled wall time is selected at the shared
+    // provider boundary; replay and host wall time are only fallbacks outside
+    // a deterministic world.
+    if let Some(now) = jet_scheduler_world_now_ms() {
+        return now;
+    }
     if let Ok(s) = std::env::var("JET_PROVE_REPLAY_TIME_MS") {
         if let Ok(n) = s.parse::<i64>() {
             return n;

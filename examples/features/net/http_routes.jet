@@ -1,5 +1,5 @@
-// D-ROUTE1=A: HTTP router — registration, :param extraction, 404/405.
-// mux.get/post register routes; req.param("name") reads :param segments.
+// D-ROUTE1=A: HTTP router — typed path inputs, 404/405.
+// mux.get/post register routes; dynamic fields bind to handler inputs.
 // serve_once_listener drives one connection at a time so golden output order
 // stays fixed.
 use core.http.client as http
@@ -9,8 +9,7 @@ use core.tasks as tasks
 
 fn handle_root(req: HTTPRequest) HTTPResponse !HTTPError -> Ok(server.response(200, "welcome"))
 
-fn handle_user(req: HTTPRequest) HTTPResponse !HTTPError -> {
-    id :: req.param("id") ?? "unknown"
+fn handle_user(id: String) HTTPResponse !HTTPError -> {
     return Ok(server.response(200, "user={id}"))
 }
 
@@ -21,7 +20,7 @@ fn run() !(HTTPError | NetError | TaskFailure) {
     addr :: listener.local_addr()
     mux :: server.mux()
     mux.get("/", (req: HTTPRequest) -> handle_root(req))
-    mux.get("/users/:id", (req: HTTPRequest) -> handle_user(req))
+    mux.get("/users/:id", (id: String) -> handle_user(id))
     mux.post("/users", (req: HTTPRequest) -> handle_create(req))
     t :: task {
         server.serve_once_listener(listener, mux)

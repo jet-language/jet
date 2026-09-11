@@ -42,7 +42,7 @@ fn run_with_mode(source: &str, name: &str, use_interpreter: bool) -> Output {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("package.jet"),
-        "name: \"http_i9\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS, IO, Mem.Alloc, Net] } }\n",
+        "name: \"http_i9\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS, IO, Mem.Alloc, Mem.Rc, Net, Time.Wait] } }\n",
     )
     .unwrap();
     let file = dir.join("main.jet");
@@ -316,6 +316,10 @@ use core.http.client as http
 use core.http.server as server
 use core.net as net
 
+struct HandlerState {
+    label: String
+}
+
 fn route_error(req: HTTPRequest) HTTPResponse !HTTPError -> {
     if req.path() == "/error" -> return Err(.InvalidFraming)
     return Err(.InvalidFraming)
@@ -324,16 +328,17 @@ fn route_error(req: HTTPRequest) HTTPResponse !HTTPError -> {
 fn run() !(HTTPError | NetError | TaskFailure) {
     listener :: net.tcp_listen("127.0.0.1:0")
     address :: listener.local_addr()
-    state :: "captured"
+    state :: shared HandlerState{label: "before registration"}
     mux :: server.mux()
     mux.get("/zero", () -> Ok(server.response(200, "zero")))
     mux.get("/items/:id", (req: HTTPRequest) HTTPResponse !HTTPError -> {
         header :: req.header("x-state") ?? "missing"
         id :: req.param("id") ?? "missing"
         path :: req.path()
-        return Ok(server.response(200, "{path}|{id}|{header}|{state}"))
+        return Ok(server.response(200, "{path}|{id}|{header}|{state.label}"))
     })
     mux.get("/error", route_error)
+    state.label = "captured"
     t :: task {
         server.serve_once_listener(listener, mux)
         server.serve_once_listener(listener, mux)

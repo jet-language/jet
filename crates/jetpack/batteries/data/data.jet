@@ -1,0 +1,226 @@
+module data { }
+
+use core.archive as archive
+use core.compute as compute
+use core.data as core_data
+    // The row model is shared by every typed table operation in this battery.
+    #Codable
+    pub struct Observation {
+        pub team: String
+        pub segment: String
+        pub x: Float
+        pub y: Float
+        pub value: Float
+    }
+
+    #Codable
+    pub struct Owner {
+        pub team: String
+        pub owner: String
+    }
+
+    #Codable
+    pub struct Summary {
+        pub team: String
+        pub mean: Float
+    }
+
+    #Codable
+    pub struct Joined {
+        pub team: String
+        pub owner: String
+        pub mean: Float
+    }
+
+    #Codable
+    pub struct Regression {
+        pub slope: Float
+        pub intercept: Float
+        pub r_squared: Float
+    }
+
+    // This is the typed record consumed by callers that need labels and a
+    // tensor together. Construction currently remains gated by compiler
+    // defect #2769 (Tensor fields in user records); the API stays live so its
+    // repair can be proved without changing the data model.
+    pub struct LabeledArray {
+        pub row_labels: [String]
+        pub col_labels: [String]
+        pub values: Tensor
+    }
+
+    // Parse typed rows through the canonical core.data reader.
+    pub fn load_csv(text: String) [Observation] ![FieldError] -> {
+        return core_data.csv<Observation>(text)
+    }
+
+    pub fn pivot_sum(rows: [Observation]) [DataPivotCell] !DataError -> {
+        return core_data.pivot_sum(rows, row -> row.team, row -> row.segment, row -> row.value)
+    }
+
+    pub fn rolling_mean(values: [Float], width: Int) [Float] !DataError -> {
+        return core_data.rolling_mean(values, width)
+    }
+
+    pub fn describe(values: [Float]) DataSummary !DataError -> {
+        return core_data.describe(values)
+    }
+
+    pub fn group_summaries(groups: [Group<String, Float>]) [Summary] -> {
+        out := [Summary]{}
+        loop group in groups {
+            out.push(Summary{team: group.key, mean: group.value})
+        }
+        return out
+    }
+
+    // Consume the canonical typed join. The default evaluator still reports
+    // E0956 for this core.data.inner_join path; keep that defect visible for
+    // #2919 instead of hiding it behind a handwritten substitute.
+    pub fn join_summaries(rows: [Summary], owners: [Owner]) [Joined] -> {
+        pairs :: core_data.inner_join(rows, owners, row -> row.team, owner -> owner.team)
+            ?? panic("typed inner join")
+        out := [Joined]{}
+        loop pair in pairs {
+            out.push(Joined{
+                team: pair.left.team,
+                owner: pair.right.owner,
+                mean: pair.left.mean,
+            })
+        }
+        return out
+    }
+
+    pub fn fit(rows: [Observation]) Regression -> {
+        if rows.len() == 0 -> panic("OLS requires at least one row")
+        n := 0
+        sum_x := Float{0.0}
+        sum_y := Float{0.0}
+        sum_xx := Float{0.0}
+        sum_xy := Float{0.0}
+        loop row in rows {
+            n += 1
+            sum_x += row.x
+            sum_y += row.y
+            sum_xx += row.x * row.x
+            sum_xy += row.x * row.y
+        }
+        nf :: Float.from_int(n)
+        denominator :: nf * sum_xx - sum_x * sum_x
+        if denominator == Float{0.0} -> panic("OLS requires varying x values")
+        slope :: (nf * sum_xy - sum_x * sum_y) / denominator
+        intercept :: (sum_y - slope * sum_x) / nf
+        mean_y :: sum_y / nf
+        total := Float{0.0}
+        residual := Float{0.0}
+        loop row in rows {
+            predicted :: intercept + slope * row.x
+            total += (row.y - mean_y) * (row.y - mean_y)
+            residual += (row.y - predicted) * (row.y - predicted)
+        }
+        if total == Float{0.0} -> panic("OLS requires varying y values")
+        return Regression{
+            slope: slope,
+            intercept: intercept,
+            r_squared: Float{1.0} - residual / total,
+        }
+    }
+
+
+    // Tensor-in-struct path retained as the honest API; it is expected to stay
+    // unavailable until compiler defect #2769 is repaired.
+    pub fn cell(array: LabeledArray, row: String, column: String) Float -> {
+        ri := 0
+        ci := 0
+        row_found := false
+        col_found := false
+        loop label in array.row_labels {
+            if label == row {
+                row_found = true
+                break
+            }
+            ri += 1
+        }
+        loop label in array.col_labels {
+            if label == column {
+                col_found = true
+                break
+            }
+            ci += 1
+        }
+        if !row_found -> panic("unknown labeled-array row")
+        if !col_found -> panic("unknown labeled-array column")
+        return compute.get(array.values, [ri, ci]) ?? panic("tensor cell")
+    }
+
+    pub fn plot_svg(groups: [Group<String, Int>]) String !DataError -> {
+        return core_data.bar_svg(groups)
+    }
+
+    // The core surface intentionally has no bar_png operation.  This small
+    // grayscale encoder writes a standards-valid PNG from the same grouped
+    // data, so the battery does not report a fabricated provider result.
+    fn png_chunk(kind: [U8], payload: [U8]) [U8] -> {
+        chunk := Bytes.new()
+        chunk.write_u32_be(U32{payload.len()})
+        chunk.write_bytes(kind)
+        chunk.write_bytes(payload)
+        checksum_input := Bytes.new()
+        checksum_input.write_bytes(kind)
+        checksum_input.write_bytes(payload)
+        chunk.write_u32_be(U32{archive.crc32(checksum_input.to_bytes())})
+        return chunk.to_bytes()
+    }
+
+    fn png_rows(groups: [Group<String, Int>]) [U8] -> {
+        pixels := [U8]{}
+        loop y in 0..<32 {
+            // PNG filter byte: no prediction for this deterministic raster.
+            pixels.push(U8{0})
+            loop x in 0..<64 {
+                bar := x /% 6
+                ink := false
+                if bar < groups.len() {
+                    height :: groups[bar].value /% 1000 + 1
+                    ink = y >= (32 - height)
+                }
+                pixels.push(if ink -> U8{0} else -> U8{255})
+            }
+        }
+        return pixels
+    }
+
+    pub fn plot_png(groups: [Group<String, Int>]) [U8] -> {
+        ihdr := Bytes.new()
+        ihdr.write_u32_be(U32{64})
+        ihdr.write_u32_be(U32{32})
+        ihdr.write_u8(U8{8})
+        ihdr.write_u8(U8{0})
+        ihdr.write_u8(U8{0})
+        ihdr.write_u8(U8{0})
+        ihdr.write_u8(U8{0})
+
+        raw :: png_rows(groups)
+        compressed :: archive.deflate(raw)
+        zlib := Bytes.new()
+        zlib.write_bytes([U8]{120, 156})
+        zlib.write_bytes(compressed)
+        zlib.write_u32_be(U32{archive.adler32(raw)})
+
+        png := Bytes.new()
+        png.write_bytes([U8]{137, 80, 78, 71, 13, 10, 26, 10})
+        png.write_bytes(png_chunk("IHDR".bytes(), ihdr.to_bytes()))
+        png.write_bytes(png_chunk("IDAT".bytes(), zlib.to_bytes()))
+        png.write_bytes(png_chunk("IEND".bytes(), [U8]{}))
+        return png.to_bytes()
+    }
+
+    // Native and bridge facts remain authoritative; unavailable bridges are
+    // represented by core_data.status and never replaced with made-up values.
+    pub fn bridge_status() [DataStatus] -> {
+        return core_data.status()
+    }
+
+    pub fn require_python_bridge() !DataError -> {
+        return core_data.require_bridge("py")
+    }

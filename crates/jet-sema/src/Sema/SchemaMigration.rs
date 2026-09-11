@@ -146,6 +146,7 @@ fn build_default_func(name: &str, ty: &Type, default: &Expr, span: Span) -> Func
     Func {
         span,
         is_pub: false,
+        is_comptime: false,
         is_package_pub: false,
         external_type: None,
         name: name.to_string(),
@@ -234,6 +235,7 @@ fn build_converter_func(name: &str, old_ty: &Type, new_ty: &Type, conv: &Expr, s
     Func {
         span,
         is_pub: false,
+        is_comptime: false,
         is_package_pub: false,
         external_type: None,
         name: name.to_string(),
@@ -399,7 +401,11 @@ pub fn check_schema_migrations(
         let Item::Struct(s) = item else {
             continue;
         };
-        if !s.is_published_schema {
+        let published = s.is_published_schema
+            || s.derives
+                .iter()
+                .any(|(t, _)| t == crate::Syntax::MARKER_PUBLISHED_SCHEMA);
+        if !published {
             continue;
         }
 

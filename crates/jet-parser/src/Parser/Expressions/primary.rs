@@ -396,6 +396,9 @@ impl<'a> Parser<'a> {
                         type_args.push(arg);
                         if matches!(self.peek().kind, TokKind::Comma) {
                             self.bump();
+                            if matches!(self.peek().kind, TokKind::Gt | TokKind::Shr) {
+                                break;
+                            }
                             continue;
                         }
                         break;
@@ -542,6 +545,9 @@ impl<'a> Parser<'a> {
                                     break;
                                 }
                                 self.expect(TokKind::Comma, "between arguments")?;
+                                if matches!(self.peek().kind, TokKind::RParen) {
+                                    break;
+                                }
                             }
                         }
                         self.expect(TokKind::RParen, "to finish the call")?;
@@ -557,6 +563,7 @@ impl<'a> Parser<'a> {
                             args,
                             recv_type: None,
                             resolved_ret: None,
+                            operator_rhs: None,
                             checked_widen: false,
                         };
                         self.allow_lowercase_leading_dot = previous_lowercase;
@@ -607,6 +614,10 @@ impl<'a> Parser<'a> {
                     leading_dot: false,
                     span,
                 }))
+            }
+            TokKind::RawStr(text) => {
+                let span = self.bump().span;
+                Some(Ok(Expr::Str(vec![StrPart::Lit(text)], span)))
             }
             TokKind::Str(parts) => {
                 let span = self.bump().span;
@@ -737,11 +748,12 @@ impl<'a> Parser<'a> {
                     )),
                     method: Syntax::INTERNAL_TASK_TIMEOUT_METHOD.to_string(),
                     method_span: selector_span,
+                    args: vec![arg],
                     owner_type_args: Vec::new(),
                     type_args: Vec::new(),
-                    args: vec![arg],
                     recv_type: None,
                     resolved_ret: None,
+                    operator_rhs: None,
                     checked_widen: false,
                 });
             }
@@ -797,6 +809,9 @@ impl<'a> Parser<'a> {
                         break;
                     }
                     self.expect(TokKind::Comma, "between task branches")?;
+                    if matches!(self.peek().kind, TokKind::RBrace) {
+                        break;
+                    }
                 }
             }
             self.expect(TokKind::RBrace, "to close the task combinator")?;
@@ -835,6 +850,7 @@ impl<'a> Parser<'a> {
                     }],
                     recv_type: None,
                     resolved_ret: None,
+                    operator_rhs: None,
                     checked_widen: false,
                 }
             };
@@ -884,6 +900,7 @@ impl<'a> Parser<'a> {
                 }],
                 recv_type: None,
                 resolved_ret: None,
+                operator_rhs: None,
                 checked_widen: false,
             });
             }
@@ -967,6 +984,7 @@ impl<'a> Parser<'a> {
             }],
             recv_type: None,
             resolved_ret: None,
+            operator_rhs: None,
             checked_widen: false,
         })
     }
@@ -989,6 +1007,7 @@ impl<'a> Parser<'a> {
                     let mut sub = Parser {
                         toks: &toks,
                         source: None,
+                        explicit_semicolon_reported: false,
                         pos: 0,
                         diags: Vec::new(),
                         pending_type_gt: false,
@@ -1283,14 +1302,18 @@ impl<'a> Parser<'a> {
         let fill = if matches!(&sub.peek().kind, TokKind::Comma) {
             sub.bump();
             let crate::Lexer::Token { kind, span } = sub.bump();
-            let TokKind::Str(parts) = kind else {
-                return Err(Diagnostic::error(
-                    "E0003",
-                    format!("expected a literal fill string inside `{selector_head}( )`"),
-                    format!("`{selector_head}(n, fill)` takes a quoted fill string"),
-                    format!("write a fill such as `{selector_head}(8, \"0\")`"),
-                    Some(span),
-                ));
+            let parts = match kind {
+                TokKind::Str(parts) => parts,
+                TokKind::RawStr(text) => vec![StrTokPart::Lit(text)],
+                _ => {
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        format!("expected a literal fill string inside `{selector_head}( )`"),
+                        format!("`{selector_head}(n, fill)` takes a quoted fill string"),
+                        format!("write a fill such as `{selector_head}(8, \"0\")`"),
+                        Some(span),
+                    ));
+                }
             };
             let mut fill = String::new();
             for part in parts {

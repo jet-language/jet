@@ -8,7 +8,8 @@ use crate::Diagnostics::Diagnostic;
 use crate::Publish::Index::{self, IndexEntry};
 use crate::Publish::Sign;
 use crate::SHA256;
-use jet_foundation::JSON::{json_escape, parse_json, JSONValue};
+use jet_foundation::DataTree::DataTree;
+use jet_foundation::JSON::{json_escape, parse_json};
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Read};
@@ -2124,6 +2125,11 @@ pub(super) fn verify_oci_referrers(repo: &Path, entry: &IndexEntry) -> io::Resul
     Ok(())
 }
 
+fn object_get<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+    object
+        .iter()
+        .find_map(|(name, value)| (name == key).then_some(value))
+}
 fn parse_oci_index(bytes: &[u8], subject: &str) -> io::Result<Vec<(String, String, u64)>> {
     let text = std::str::from_utf8(bytes).map_err(|_| {
         io::Error::new(
@@ -2136,19 +2142,17 @@ fn parse_oci_index(bytes: &[u8], subject: &str) -> io::Result<Vec<(String, Strin
         .as_object()
         .map_err(|_| invalid_oci("OCI referrer index is not an object"))?;
     require_oci_keys(object, &["schemaVersion", "subject", "manifests"], "index")?;
-    if !matches!(object.get("schemaVersion"), Some(JSONValue::Number(2))) {
+    if !matches!(object_get(object, "schemaVersion"), Some(DataTree::Int(2))) {
         return Err(invalid_oci(
             "OCI referrer index has an unsupported schema version",
         ));
     }
-    let subject_object = object
-        .get("subject")
+    let subject_object = object_get(object, "subject")
         .ok_or_else(|| invalid_oci("OCI referrer index has no subject"))?
         .as_object()
         .map_err(|_| invalid_oci("OCI referrer subject is not an object"))?;
     require_oci_keys(subject_object, &["digest"], "subject")?;
-    let recorded_subject = subject_object
-        .get("digest")
+    let recorded_subject = object_get(subject_object, "digest")
         .ok_or_else(|| invalid_oci("OCI referrer subject has no digest"))?
         .as_str()
         .map_err(|_| invalid_oci("OCI referrer subject digest is not a string"))?;
@@ -2157,8 +2161,7 @@ fn parse_oci_index(bytes: &[u8], subject: &str) -> io::Result<Vec<(String, Strin
             "OCI referrer subject does not match the index entry",
         ));
     }
-    let manifests = object
-        .get("manifests")
+    let manifests = object_get(object, "manifests")
         .ok_or_else(|| invalid_oci("OCI referrer index has no manifests"))?
         .as_array()
         .map_err(|_| invalid_oci("OCI referrer manifests is not an array"))?;
@@ -2178,14 +2181,12 @@ fn parse_oci_index(bytes: &[u8], subject: &str) -> io::Result<Vec<(String, Strin
             &["artifactType", "digest", "mediaType", "size"],
             "descriptor",
         )?;
-        let artifact_type = manifest
-            .get("artifactType")
+        let artifact_type = object_get(manifest, "artifactType")
             .ok_or_else(|| invalid_oci("OCI referrer descriptor has no artifact type"))?
             .as_str()
             .map_err(|_| invalid_oci("OCI referrer artifact type is not a string"))?
             .to_string();
-        let media_type = manifest
-            .get("mediaType")
+        let media_type = object_get(manifest, "mediaType")
             .ok_or_else(|| invalid_oci("OCI referrer descriptor has no media type"))?
             .as_str()
             .map_err(|_| invalid_oci("OCI referrer media type is not a string"))?;
@@ -2200,15 +2201,14 @@ fn parse_oci_index(bytes: &[u8], subject: &str) -> io::Result<Vec<(String, Strin
                 "OCI referrer descriptor has an unknown or repeated artifact type",
             ));
         }
-        let digest = manifest
-            .get("digest")
+        let digest = object_get(manifest, "digest")
             .ok_or_else(|| invalid_oci("OCI referrer descriptor has no digest"))?
             .as_str()
             .map_err(|_| invalid_oci("OCI referrer digest is not a string"))?
             .to_string();
         validate_oci_digest(&digest)?;
-        let size = match manifest.get("size") {
-            Some(JSONValue::Number(value)) if *value >= 0 => *value as u64,
+        let size = match object_get(manifest, "size") {
+            Some(DataTree::Int(value)) if *value >= 0 => *value as u64,
             _ => {
                 return Err(invalid_oci(
                     "OCI referrer descriptor size is not a non-negative integer",
@@ -2221,11 +2221,15 @@ fn parse_oci_index(bytes: &[u8], subject: &str) -> io::Result<Vec<(String, Strin
 }
 
 fn require_oci_keys(
-    object: &std::collections::BTreeMap<String, JSONValue>,
+    object: &[(String, DataTree)],
     keys: &[&str],
     label: &str,
 ) -> io::Result<()> {
-    if object.len() != keys.len() || object.keys().any(|key| !keys.contains(&key.as_str())) {
+    if object.len() != keys.len()
+        || object
+            .iter()
+            .any(|(key, _)| !keys.contains(&key.as_str()))
+    {
         return Err(invalid_oci(&format!(
             "OCI {label} has unknown or missing fields"
         )));
@@ -2507,7 +2511,7 @@ fn parse_registry_package_metadata(
     // formats registry.json across lines. JSON strings cannot contain literal
     // newlines, so trimming and joining lines preserves the parsed meaning.
     let canonical = text.lines().map(str::trim).collect::<String>();
-    let JSONValue::Object(object) = parse_json(&canonical)
+    let DataTree::Object(object) = parse_json(&canonical)
         .map_err(|_| invalid_registry_metadata("registry.json is not valid JSON"))?
     else {
         return Err(invalid_registry_metadata(
@@ -2534,10 +2538,10 @@ fn parse_registry_package_metadata(
         ("plugin_dependencies", "plugin"),
         ("target_dependencies", "target"),
     ] {
-        let Some(value) = object.get(field) else {
+        let Some(value) = object_get(&object, field) else {
             continue;
         };
-        let JSONValue::Object(values) = value else {
+        let DataTree::Object(values) = value else {
             return Err(invalid_registry_metadata(&format!(
                 "registry `{field}` dependencies must be an object"
             )));
@@ -2548,21 +2552,21 @@ fn parse_registry_package_metadata(
     }
 
     let mut feature_map = BTreeMap::<String, Vec<String>>::new();
-    if let Some(value) = object.get("features") {
-        let JSONValue::Object(features) = value else {
+    if let Some(value) = object_get(&object, "features") {
+        let DataTree::Object(features) = value else {
             return Err(invalid_registry_metadata(
                 "registry `features` must be an object of string arrays",
             ));
         };
         for (feature, values) in features {
-            let JSONValue::Array(values) = values else {
+            let DataTree::Array(values) = values else {
                 return Err(invalid_registry_metadata(
                     "registry feature values must be arrays",
                 ));
             };
             let mut names = Vec::new();
             for value in values {
-                let JSONValue::String(name) = value else {
+                let DataTree::Text(name) = value else {
                     return Err(invalid_registry_metadata(
                         "registry feature members must be strings",
                     ));
@@ -2576,8 +2580,8 @@ fn parse_registry_package_metadata(
         }
     }
 
-    if let Some(value) = object.get("constraints") {
-        let JSONValue::Object(constraints) = value else {
+    if let Some(value) = object_get(&object, "constraints") {
+        let DataTree::Object(constraints) = value else {
             return Err(invalid_registry_metadata(
                 "registry `constraints` must be an object",
             ));
@@ -2624,7 +2628,7 @@ fn parse_registry_package_metadata(
 fn merge_registry_dependency(
     dependencies: &mut BTreeMap<String, RegistryDependency>,
     name: &str,
-    descriptor: &JSONValue,
+    descriptor: &DataTree,
     role: &str,
 ) -> io::Result<()> {
     validate_registry_dependency_name(name)?;
@@ -2659,7 +2663,7 @@ fn merge_registry_dependency(
 }
 
 fn parse_registry_dependency_descriptor(
-    descriptor: &JSONValue,
+    descriptor: &DataTree,
 ) -> io::Result<(Vec<String>, Vec<String>, BTreeSet<String>, bool, bool)> {
     let mut requirements = Vec::new();
     let mut prefer = Vec::new();
@@ -2667,10 +2671,12 @@ fn parse_registry_dependency_descriptor(
     let mut strict = false;
     let mut enabled_by_default = false;
     match descriptor {
-        JSONValue::String(requirement) => requirements.push(requirement.clone()),
-        JSONValue::Object(fields) => {
-            if let Some(value) = fields.get("require").or_else(|| fields.get("version")) {
-                let JSONValue::String(requirement) = value else {
+        DataTree::Text(requirement) => requirements.push(requirement.clone()),
+        DataTree::Object(fields) => {
+            if let Some(value) =
+                object_get(fields, "require").or_else(|| object_get(fields, "version"))
+            {
+                let DataTree::Text(requirement) = value else {
                     return Err(invalid_registry_metadata(
                         "registry dependency `require` must be a string",
                     ));
@@ -2679,22 +2685,22 @@ fn parse_registry_dependency_descriptor(
             } else {
                 requirements.push("*".to_string());
             }
-            if let Some(value) = fields.get("prefer") {
-                let JSONValue::String(requirement) = value else {
+            if let Some(value) = object_get(fields, "prefer") {
+                let DataTree::Text(requirement) = value else {
                     return Err(invalid_registry_metadata(
                         "registry dependency `prefer` must be a string",
                     ));
                 };
                 prefer.push(requirement.clone());
             }
-            if let Some(value) = fields.get("reject") {
-                let JSONValue::Array(values) = value else {
+            if let Some(value) = object_get(fields, "reject") {
+                let DataTree::Array(values) = value else {
                     return Err(invalid_registry_metadata(
                         "registry dependency `reject` must be an array",
                     ));
                 };
                 for value in values {
-                    let JSONValue::String(version) = value else {
+                    let DataTree::Text(version) = value else {
                         return Err(invalid_registry_metadata(
                             "registry dependency reject values must be strings",
                         ));
@@ -2707,31 +2713,31 @@ fn parse_registry_dependency_descriptor(
                     reject.insert(version.clone());
                 }
             }
-            if let Some(value) = fields.get("strict") {
-                let JSONValue::Bool(value) = value else {
+            if let Some(value) = object_get(fields, "strict") {
+                let DataTree::Bool(value) = value else {
                     return Err(invalid_registry_metadata(
                         "registry dependency `strict` must be boolean",
                     ));
                 };
                 strict = *value;
             }
-            if let Some(value) = fields.get("default") {
-                let JSONValue::Bool(value) = value else {
+            if let Some(value) = object_get(fields, "default") {
+                let DataTree::Bool(value) = value else {
                     return Err(invalid_registry_metadata(
                         "registry dependency `default` must be boolean",
                     ));
                 };
                 enabled_by_default = *value;
             }
-            if let Some(value) = fields.get("features") {
-                let JSONValue::Array(values) = value else {
+            if let Some(value) = object_get(fields, "features") {
+                let DataTree::Array(values) = value else {
                     return Err(invalid_registry_metadata(
                         "registry dependency `features` must be an array",
                     ));
                 };
                 if values
                     .iter()
-                    .any(|value| !matches!(value, JSONValue::String(_)))
+                    .any(|value| !matches!(value, DataTree::Text(_)))
                 {
                     return Err(invalid_registry_metadata(
                         "registry dependency feature values must be strings",
@@ -2779,15 +2785,18 @@ fn activate_registry_feature(
     Ok(())
 }
 
-fn required_metadata_string(object: &BTreeMap<String, JSONValue>, key: &str) -> io::Result<String> {
-    match object.get(key) {
-        Some(JSONValue::String(value)) if !value.trim().is_empty() => Ok(value.clone()),
+fn required_metadata_string(
+    object: &[(String, DataTree)],
+    key: &str,
+) -> io::Result<String> {
+    match object_get(object, key) {
+        Some(DataTree::Text(value)) if !value.trim().is_empty() => Ok(value.clone()),
         _ => Err(invalid_registry_metadata(&format!(
             "registry.json requires a non-empty `{key}`"
         ))),
     }
-}
 
+}
 fn validate_registry_dependency_name(name: &str) -> io::Result<()> {
     if name.is_empty()
         || name == "."

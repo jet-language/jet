@@ -19,7 +19,7 @@ use super::super::Merge::{
     self, ContributionLayer, EntryContribution, FactContribution, FactValue, MergeError,
     MergedEntry, SourceScope,
 };
-use super::Computed::evaluate_named_fields;
+use super::Computed::{evaluate_expression, evaluate_named_fields};
 use super::DevService::evaluate_dev_service;
 use super::Diagnostics::{
     not_a_namespace_literal, packages_not_a_list, prompt_bad_field, prompt_bad_value,
@@ -128,10 +128,10 @@ pub fn evaluate_modules(
     src: &str,
     base_dir: &Path,
 ) -> Result<Vec<EvaluatedModule>, Diagnostic> {
-    // Module fields use the canonical comptime/TIR evaluator.  Install the
+    // Module fields use the canonical comptime/MIR evaluator. Install the
     // bridge here as well as in higher-level workspace entry points so direct
     // callers of this public evaluator get the same semantics.
-    jet_codegen::Codegen::TIR::install_comptime_bridge();
+    jet_codegen::Codegen::MIREval::install_mir_bridge();
     let funcs = collect_funcs(items);
     let reads = environment_reads(src)?;
     let globals = collect_comptime_globals(items, &funcs, base_dir, &environment_globals(&reads))?;
@@ -171,7 +171,12 @@ fn collect_comptime_globals<'a>(
         .iter()
         .filter_map(|item| match item {
             Item::Const(def) if def.is_comptime => {
-                Some((def.name.clone(), (def.name_span, &def.value)))
+                let name = def
+                    .name
+                    .strip_prefix(crate::Syntax::COMPTIME_MARK)
+                    .unwrap_or(&def.name)
+                    .to_string();
+                Some((name, (def.name_span, &def.value)))
             }
             _ => None,
         })
@@ -526,6 +531,45 @@ fn integration_arg_value(
                 }
             }
             Ok(CtValue::Map(lowered))
+        }
+        Expr::StructLit {
+            type_name, fields, ..
+        } => {
+            let fields = fields
+                .iter()
+                .map(|(name, _, value)| {
+                    integration_arg_value(value, base_dir, funcs, globals)
+                        .map(|value| (name.clone(), value))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(CtValue::Struct {
+                type_name: type_name.clone(),
+                fields,
+            })
+        }
+        Expr::EnumLit {
+            type_name,
+            variant,
+            args,
+            ..
+        } => {
+            let args = args
+                .iter()
+                .map(|arg| {
+                    let (name, value) = match arg {
+                        crate::AST::EnumLitArg::Positional(value) => (None, value),
+                        crate::AST::EnumLitArg::Named { label, expr } => {
+                            (Some(label.clone()), expr)
+                        }
+                    };
+                    integration_arg_value(value, base_dir, funcs, globals).map(|value| (name, value))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(CtValue::Enum {
+                type_name: type_name.clone(),
+                variant: variant.clone(),
+                args,
+            })
         }
         _ => {
             check_build_io(expr)?;
@@ -1286,8 +1330,7 @@ fn capture_prompt_setting(
         if type_name == Syntax::TYPE_PROMPT {
             let extern_names = HashSet::new();
             for (field, span, expr) in fields {
-                check_build_io(expr)?;
-                let v = Comptime::evaluate(expr, funcs, &extern_names, base_dir, globals)?;
+                let v = evaluate_expression(expr, globals, funcs, &extern_names, base_dir)?;
                 match field.as_str() {
                     Syntax::PROMPT_FIELD_LABEL => {
                         let Some(label) = string_value(&v) else {
@@ -1320,9 +1363,8 @@ fn capture_prompt_setting(
         }
     }
 
-    check_build_io(value)?;
     let extern_names = HashSet::new();
-    let v = Comptime::evaluate(value, funcs, &extern_names, base_dir, globals)?;
+    let v = evaluate_expression(value, globals, funcs, &extern_names, base_dir)?;
     record_setting(
         entry,
         Syntax::ENV_FIELD_PROMPT,

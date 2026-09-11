@@ -34,43 +34,52 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">An ordinary loop used as a value has one final result type. Every exit that targets it must provide that type.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">add the missing payload and make every payload the same type, or target an inner effect-only loop.</p>
+<p class="diag-copy fix" data-registry-field="fix">Add the missing payload and make every payload the same type, or target an inner effect-only loop.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0076</code>: <code>tests/ui/result_loop_break_payloads.stderr</code>.</p>
-<pre class="diag">Error [E0076]: this result loop exits without a value
+<pre class="diag">Error [E0076]: This result loop exits without a value
   --&gt; tests/ui/result_loop_break_payloads.jet:3:19
     |
   3 |         if true { break }
     |                   ^^^^^
- Why: every exit from a loop used as a value must provide the same result type
- Fix: add a break payload, or target an inner effect-only loop
+ Why: Every exit from a loop used as a value must provide the same result type
+ Fix: Add a break payload, or target an inner effect-only loop
 More: jet-lang.dev/e/E0076
 
-Error [E0076]: this loop breaks with String (text), but another exit uses Int (a whole number)
-  --&gt; tests/ui/result_loop_break_payloads.jet:12:15
+Error [E0076]: This loop breaks with String (text), but another exit uses Int (a whole number)
+  --&gt; tests/ui/result_loop_break_payloads.jet:14:15
     |
- 12 |         break &quot;other&quot;
+ 14 |         break &quot;other&quot;
     |               ^^^^^^^
- Why: an ordinary loop has one final result type
- Fix: make every break payload use the same type
+ Why: An ordinary loop has one final result type
+ Fix: Make every break payload use the same type
 More: jet-lang.dev/e/E0076
 
-Error [E0076]: this result loop exits without a value
-  --&gt; tests/ui/result_loop_break_payloads.jet:21:14
+Error [E0076]: This result loop exits without a value
+  --&gt; tests/ui/result_loop_break_payloads.jet:25:14
     |
- 21 |         } ?? break(result)
+ 25 |         } ?? break(result)
     |              ^^^^^^^^^^^^^
- Why: every exit from a loop used as a value must provide the same result type
- Fix: add a break payload, or target an inner effect-only loop
+ Why: Every exit from a loop used as a value must provide the same result type
+ Fix: Add a break payload, or target an inner effect-only loop
 More: jet-lang.dev/e/E0076
 
-Error [E0076]: this result loop exits without a value
-  --&gt; tests/ui/result_loop_break_payloads.jet:33:23
+Error [E2417]: Explicit failure domain `String (text)` is not an Error type
+  --&gt; tests/ui/result_loop_break_payloads.jet:31:15
     |
- 33 |         fallible() ?? break(result)
+ 31 | fn fallible() Int !String -&gt; { return Err(&quot;failed&quot;) }
+    |               ^^^^^^^^^^^
+ Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
+ Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
+More: jet-lang.dev/e/E2417
+
+Error [E0076]: This result loop exits without a value
+  --&gt; tests/ui/result_loop_break_payloads.jet:35:23
+    |
+ 35 |         fallible() ?? break(result)
     |                       ^^^^^^^^^^^^^
- Why: every exit from a loop used as a value must provide the same result type
- Fix: add a break payload, or target an inner effect-only loop
+ Why: Every exit from a loop used as a value must provide the same result type
+ Fix: Add a break payload, or target an inner effect-only loop
 More: jet-lang.dev/e/E0076
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

@@ -261,15 +261,16 @@ fn assert_native_and_default(source: &str, expected: &str, tag: &str) {
         .collect::<Vec<_>>();
     assert!(errors.is_empty(), "{errors:?}");
 
+    let policy = common::development_policy();
     let mut backend = jet_jit::CraneliftBackend::new();
-    let plan = jet_jit::plan_bundle_tiers(&bundle);
+    let plan = common::cranelift_tier_plan(&bundle);
     jet_jit::reset_jit_trace_for_test();
-    match backend.run(&bundle, false) {
+    match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
         jet::Interpreter::RunOutcome::Ran { stdout, .. } => {
             assert!(
                 !jet_jit::deopt_invoked_for_test(),
                 "{plan:?} strict={:?}",
-                jet_jit::run_resident_strict_for_test(&bundle)
+                common::cranelift_strict_run(&bundle, &policy)
             );
             assert!(!jet_jit::fallback_invoked_for_test());
             assert_eq!(stdout, expected);

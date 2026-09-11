@@ -96,7 +96,6 @@ fn liveness_facts_and_fixes_are_one_checked_result() {
         }
     }
 
-    jet::Codegen::TIR::lower_jit_program(&bundle).expect("liveness example lowers to TIR");
 
     let text = run_jet(&["inspect", "structure", example()]);
     assert!(text.status.success(), "structure inspect failed: {text:?}");

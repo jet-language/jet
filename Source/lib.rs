@@ -14,12 +14,13 @@
 // Seam crates — re-export everything so callers use `jet::AST`, `jet::Sema`, etc.
 // unchanged. Within Source/, `crate::AST` etc. resolve through these re-exports.
 pub use jet_driver::{
-    boot_tir_eval,
+    boot_mir_eval,
     development_receipt,
     program_allocator,
     scheduler,
     AdaBind,
     Authority,
+    Bindgen,
     CBind,
     CanonicalAST,
     CobolBind,
@@ -43,6 +44,7 @@ pub use jet_driver::{
     // the same `lock_path` etc. for the engine's own genuine store calls).
     EffectBudget,
     Foreign,
+    ForeignBridge,
     Formatter,
     FortranBind,
     Generics,
@@ -57,6 +59,7 @@ pub use jet_driver::{
     JetLibStamp,
     Lexer,
     LibraryExport,
+    Migrations,
     LintPolicy,
     Loader,
     Lock,
@@ -97,6 +100,7 @@ pub use jet_cli::{Explain, Help, CLI};
 pub use jet_devserver as DevServer;
 pub use jet_foundation::ExitCodes;
 pub use jetpack::MCP;
+pub use jet_pkg_model as Bundler;
 // D-FAIL-CARRIER1=A: the one outcome carrier. It is embedded as the first
 // prelude part, and it is a real module here too, so the compiler's own
 // interpreters call the same functions the generated program calls.
@@ -106,6 +110,11 @@ pub use jet_foundation::Outcome;
 // entirely in the workspace crate.
 pub use jet_repl as REPL;
 pub use jet_repl::{SemanticSymbols, Term};
+pub mod RecordIndex;
+pub use RecordIndex::{
+    RecordBudget, RecordCapture, RecordIdentity, RecordIndexEntry, RecordIndexError, RecordKind,
+    RecordLink,
+};
 pub mod ReceiptStore;
 pub mod RunCache;
 pub use ReceiptStore::{Receipt, ReceiptClaim, ReceiptInput};
@@ -155,6 +164,29 @@ pub fn run_compiler_work<R: Send>(work: impl FnOnce() -> R + Send) -> R {
 #[doc(hidden)]
 pub fn with_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
     run_compiler_work(work)
+}
+/// The checked package snapshot shared by every execution adapter.
+///
+/// `facts` is the exact semantic result that checked `bundle`; `mir` is the
+/// single optimized canonical lowering of that pair for `artifact`.
+pub struct CheckedMirSnapshot {
+    pub bundle: AST::ProgramBundle,
+    pub facts: Sema::SemIndexEffectFacts,
+    pub mir: jet_foundation::MIR::MirProgram,
+    pub artifact: jet_foundation::MIR::MirArtifactId,
+}
+/// Lower one checked frontend result to the canonical optimized MIR for an
+/// explicit artifact request. TIR performs the one canonical optimization pass
+/// before returning the backend-ready program.
+pub fn lower_checked_semantic_mir_program_for(
+    bundle: &AST::ProgramBundle,
+    request: jet_foundation::MIR::MirArtifactRequest,
+) -> (jet_foundation::MIR::MirProgram, jet_foundation::MIR::MirArtifactId) {
+    let (mir, artifact) = Codegen::TIR::lower_checked_mir_program_for(bundle, request)
+        .unwrap_or_else(|error| jet_foundation::ice!(Some(error.span), "{error}"));
+    mir.validate()
+        .unwrap_or_else(|error| jet_foundation::ice!(None, "canonical MIR validation failed: {error}"));
+    (mir, artifact)
 }
 
 /// Run the full front end on source text. All lex errors (then all parse
@@ -607,6 +639,7 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_sco
         false,
         false,
         None,
+        None,
     )
     .map(|output| output.compile)
 }
@@ -684,6 +717,7 @@ pub fn compile_programmable_build_opts_with_builder_and_profile_and_settings_sco
         entry_fn,
         true,
         false,
+        None,
         None,
     )
     .map(|output| output.compile)
@@ -872,6 +906,7 @@ pub fn compile_programmable_build_emit_generated_opts_with_builder_and_profile_a
         entry_fn,
         false,
         false,
+        None,
         None,
     )
     .map(|output| output.compile)
@@ -1096,6 +1131,7 @@ pub fn check_programmable_build_for_tier(
                 plugin_target: false,
                 cross_target: None,
                 profile: profile.to_string(),
+                application_authority: None,
                 setting_overrides: setting_overrides.clone(),
                 remote: None,
                 package_scope: true,
@@ -1144,13 +1180,15 @@ pub fn check_project_build_for_tier(
         false,
         true,
         None,
+        None,
     )?;
     Ok(Some(output))
 }
 
-/// Compile a programmable build and retain the checked runtime bundle for a
-/// backend that emits a native artifact directly from TIR.
-pub fn compile_programmable_build_output_with_builder_and_profile_and_settings_scoped_with_entry(
+
+/// Compile a programmable build with an invocation-local application
+/// authority merged into the checked bundle before MIR lowering and codegen.
+pub fn compile_programmable_build_output_with_builder_and_profile_and_settings_scoped_with_entry_and_authority(
     file: &str,
     grants: &[String],
     no_os: bool,
@@ -1168,6 +1206,7 @@ pub fn compile_programmable_build_output_with_builder_and_profile_and_settings_s
     build_override: bool,
     entry_fn: Option<&str>,
     without_codegen: bool,
+    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
 ) -> Result<Driver::BuildCompileOutput, Vec<Diagnostic>> {
     compile_programmable_build_opts_inner(
         file,
@@ -1189,6 +1228,7 @@ pub fn compile_programmable_build_output_with_builder_and_profile_and_settings_s
         without_codegen,
         false,
         None,
+        application_authority,
     )
 }
 /// Compile a programmable build from an authority-selected source snapshot.
@@ -1235,6 +1275,7 @@ pub fn compile_programmable_build_output_with_builder_and_profile_and_settings_s
         without_codegen,
         false,
         Some((source_path, source)),
+        None,
     )
 }
 
@@ -1258,6 +1299,7 @@ fn compile_programmable_build_opts_inner(
     without_codegen: bool,
     project_check: bool,
     overlay: Option<(&std::path::Path, &str)>,
+    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
 ) -> Result<Driver::BuildCompileOutput, Vec<Diagnostic>> {
     with_compiler_stack(|| {
         let remote = remote_builder
@@ -1294,6 +1336,7 @@ fn compile_programmable_build_opts_inner(
                 package_scope,
                 build_override,
                 project_check,
+                application_authority,
                 checked_workspace,
             );
         }
@@ -1347,6 +1390,7 @@ fn compile_programmable_build_opts_inner(
             plugin_target,
             cross_target: cross_target.map(str::to_string),
             profile: profile.to_string(),
+            application_authority: application_authority.cloned(),
             setting_overrides: setting_overrides.clone(),
             remote,
             package_scope,
@@ -1393,6 +1437,7 @@ fn compile_workspace_build_opts(
     package_scope: bool,
     build_override: bool,
     project_check: bool,
+    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
     checked_workspace: (
         jet_driver::Authority::AuthorityResolver,
         jetpack::WorkspaceFile::WorkspaceSource,
@@ -1473,6 +1518,7 @@ fn compile_workspace_build_opts(
                 plugin_target,
                 cross_target: cross_target.map(str::to_string),
                 profile: profile.to_string(),
+                application_authority: None,
                 setting_overrides: BTreeMap::new(),
                 remote: remote.clone(),
                 package_scope: true,
@@ -1561,6 +1607,7 @@ fn compile_workspace_build_opts(
             plugin_target,
             cross_target: cross_target.map(str::to_string),
             profile: profile.to_string(),
+            application_authority: application_authority.cloned(),
             setting_overrides: setting_overrides.clone(),
             remote,
             package_scope,
@@ -2559,16 +2606,22 @@ pub fn compile_for_debug(file: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
 /// swapped in as the program's real entry point instead of `run()` (see
 /// `Driver::compile_bundle_path_with_entry`).
 pub fn compile_with_entry(file: &str, entry_fn: &str) -> Result<CompileOutput, Vec<Diagnostic>> {
-    compile_with_entry_and_settings(file, entry_fn, &BTreeMap::new())
+    compile_with_entry_and_settings(file, entry_fn, "dev", &BTreeMap::new())
 }
 
 pub fn compile_with_entry_and_settings(
     file: &str,
     entry_fn: &str,
+    profile: &str,
     setting_overrides: &BTreeMap<String, String>,
 ) -> Result<CompileOutput, Vec<Diagnostic>> {
     with_compiler_stack(|| {
-        Driver::compile_bundle_path_with_entry_and_settings(file, entry_fn, setting_overrides)
+        Driver::compile_bundle_path_with_entry_and_settings(
+            file,
+            entry_fn,
+            profile,
+            setting_overrides,
+        )
     })
 }
 
@@ -2730,7 +2783,7 @@ pub fn compile_tests_with_path(
     src: &str,
     file: &str,
 ) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
-    compile_tests_with_path_cov_and_profile(src, file, false, "dev")
+    compile_tests_with_path_cov_and_profile(src, file, false, "dev", &BTreeMap::new())
 }
 
 /// Compile for `jet test`, with optional `jet test --coverage`
@@ -2741,7 +2794,7 @@ pub fn compile_tests_with_path_cov(
     file: &str,
     coverage: bool,
 ) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
-    compile_tests_with_path_cov_and_profile(src, file, coverage, "dev")
+    compile_tests_with_path_cov_and_profile(src, file, coverage, "dev", &BTreeMap::new())
 }
 
 /// Compile a test harness with the selected named profile.
@@ -2750,9 +2803,12 @@ pub fn compile_tests_with_path_cov_and_profile(
     file: &str,
     coverage: bool,
     profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
 ) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
     let _ = src;
-    with_compiler_stack(|| Driver::compile_tests_with_profile(file, coverage, profile))
+    with_compiler_stack(|| {
+        Driver::compile_tests_with_profile(file, coverage, profile, setting_overrides)
+    })
 }
 
 /// D-CMD-OVERRIDE1=C: compile the entry function override through the same
@@ -2762,7 +2818,13 @@ pub fn compile_test_override_with_path(
     file: &str,
     coverage: bool,
 ) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
-    compile_test_override_with_path_and_profile(src, file, coverage, "dev")
+    compile_test_override_with_path_and_profile(
+        src,
+        file,
+        coverage,
+        "dev",
+        &BTreeMap::new(),
+    )
 }
 
 /// Compile a test command override with the selected named profile.
@@ -2771,9 +2833,12 @@ pub fn compile_test_override_with_path_and_profile(
     file: &str,
     coverage: bool,
     profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
 ) -> Result<(String, Option<FFI::FfiLink>), Vec<Diagnostic>> {
     let _ = src;
-    with_compiler_stack(|| Driver::compile_test_override_with_profile(file, coverage, profile))
+    with_compiler_stack(|| {
+        Driver::compile_test_override_with_profile(file, coverage, profile, setting_overrides)
+    })
 }
 
 /// D-TESTKIT1=A (gap #1): compile for `jet fuzz <file> [<name>]`.
@@ -2817,21 +2882,71 @@ pub fn has_test_blocks(file: &str) -> bool {
         },
     )
 }
+fn item_has_contracts(item: &AST::Item) -> bool {
+    match item {
+        AST::Item::Func(function) => !function.pre.is_empty() || !function.post.is_empty(),
+        AST::Item::Impl(implementation) => implementation
+            .methods
+            .iter()
+            .any(|method| !method.pre.is_empty() || !method.post.is_empty()),
+        AST::Item::CodeModule(module) => module
+            .body
+            .as_ref()
+            .is_some_and(|items| items.iter().any(item_has_contracts)),
+        _ => false,
+    }
+}
+
+/// Does the entry file define any contract-bearing callable? `jet test` uses
+/// this discovery alongside `#Test` discovery so a file with only `#Pre` /
+/// `#Post` contracts still reaches the ordinary checked producer path. A load
+/// failure returns `true`, matching `has_test_blocks`, so the caller surfaces
+/// the real compile error instead of silently skipping the target.
+pub fn has_test_contracts(file: &str) -> bool {
+    with_compiler_stack(
+        || match Loader::load_entry_with_overlay(file, None, false) {
+            Ok(bundle) => bundle
+                .modules
+                .iter()
+                .flat_map(|module| module.items.iter())
+                .any(item_has_contracts),
+            Err(_) => true,
+        },
+    )
+}
 
 /// D-COV1: every user function the `jet test --coverage` probes can record, as
 /// `(name, 1-based line)`. Mirrors the probe set: free functions, inherent
 /// methods, and trait-impl methods in the entry file (`run` is excluded — it is
 /// never probed). The runner diffs the recorded hit lines against this set to
 /// report function and branch coverage.
-pub fn coverable_functions(file: &str) -> Vec<(String, usize)> {
-    with_compiler_stack(|| coverable_functions_inner(file))
+pub fn coverable_functions(
+    file: &str,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Vec<(String, usize)> {
+    with_compiler_stack(|| coverable_functions_inner(file, profile, setting_overrides))
 }
 
-fn coverable_functions_inner(file: &str) -> Vec<(String, usize)> {
-    let bundle = match Loader::load_entry_with_overlay(file, None, false) {
-        Ok(b) => b,
-        Err(_) => return Vec::new(),
-    };
+fn coverable_functions_inner(
+    file: &str,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Vec<(String, usize)> {
+    let (diagnostics, bundle, _) = Driver::check_file_with_effect_facts_profile_and_settings(
+        file,
+        None,
+        false,
+        profile,
+        setting_overrides,
+    );
+    let bundle = bundle.unwrap_or_else(|| {
+        let detail = diagnostics
+            .first()
+            .map(|diagnostic| format!("{}: {}", diagnostic.code, diagnostic.what))
+            .unwrap_or_else(|| "the checked bundle was unavailable".to_string());
+        panic!("coverage metadata unavailable for `{file}`: {detail}");
+    });
     let entry = &bundle.modules[bundle.entry];
     let src = &entry.source;
     let line_of = |off: usize| {
@@ -2941,7 +3056,7 @@ fn eval_pure_program_value_inner(
     // Use the checked eval bundle rather than rebuilding a top-level function
     // map.  The bundle carries the same impl/trait methods and sema facts that
     // the forced interpreter consumes, so eval cannot silently lose operators.
-    let (diagnostics, bundle, _) = Driver::check_eval_with_effect_facts(src, file);
+    let (diagnostics, bundle, _effect_facts) = Driver::check_eval_with_effect_facts(src, file);
     if diagnostics
         .iter()
         .any(|diagnostic| diagnostic.severity == Diagnostics::Severity::Error)
@@ -2949,75 +3064,52 @@ fn eval_pure_program_value_inner(
         return Err(diagnostics);
     }
     let bundle = bundle.ok_or(diagnostics)?;
-    let program = Codegen::TIR::lower_interp_program(&bundle).ok_or_else(|| {
-        vec![Sema::Diagnostics::render_registered(
-            "E0956",
-            "the eval program couldn't be lowered".to_string(),
-            "the interpreter needs the checked program's canonical TIR".to_string(),
-            "report this as a compiler bug".to_string(),
-            None,
-        )]
-    })?;
-
-    let mut globals = std::collections::HashMap::new();
+    let (mir, artifact) = lower_checked_semantic_mir_program_for(
+        &bundle,
+        jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::Interpreter,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        ),
+    );
+    let mut globals = BTreeMap::new();
     for module in &bundle.modules {
         for item in &module.items {
             if let AST::Item::Const(constant) = item {
                 if let Some(value) = &constant.ct {
+                    let value = crate::Comptime::MirBridge::ct_to_mir_value(
+                        value.clone(),
+                        jet_foundation::Diagnostics::Span::new(0, 0),
+                    )
+                    .map_err(|error| vec![error])?;
                     globals
                         .entry(constant.name.clone())
-                        .or_insert_with(|| value.clone());
+                        .or_insert(value);
                 }
             }
         }
     }
-    let mut struct_fields = std::collections::HashMap::new();
-    let mut struct_field_types = std::collections::HashMap::new();
-    for module in &bundle.modules {
-        for item in &module.items {
-            if let AST::Item::Struct(structure) = item {
-                struct_fields.insert(
-                    structure.name.clone(),
-                    structure
-                        .fields
-                        .iter()
-                        .map(|field| (field.name.clone(), field.redact))
-                        .collect(),
-                );
-                struct_field_types.insert(
-                    structure.name.clone(),
-                    structure
-                        .fields
-                        .iter()
-                        .map(|field| (field.name.clone(), field.ty.clone()))
-                        .collect(),
-                );
-            }
-        }
-    }
-    let core_imports = Codegen::core_imports_for_bundle(&bundle);
-    let mut sink = Comptime::DevSink::new();
-    let value = Codegen::TIR::run_program_with_structs(
-        &program,
-        &bundle.project_root,
-        &mut sink,
+    let config = Codegen::MIREval::MirEvalConfig {
+        base_dir: bundle.project_root.clone(),
         globals,
-        &core_imports,
-        Policy::GateSet::default(),
-        struct_fields,
-        struct_field_types,
-
+        ..Default::default()
+    };
+    let result = Codegen::MIREval::evaluate_mir_program_with_config(&mir, artifact, &config)
+        .map_err(|error| vec![error.into_diagnostic()])?;
+    let value = crate::Comptime::MirBridge::mir_to_ct_value(
+        result.value,
+        jet_foundation::Diagnostics::Span::new(0, 0),
     )
-    .map_err(|diagnostic| vec![diagnostic])?;
-    Ok((value, sink.stdout))
+    .map_err(|error| vec![error])?;
+    Ok((value, result.stdout))
 }
 
-/// S60 / D-PURE1 (E2-M16): evaluate a pure Jet program via the comptime
-/// interpreter and return its output as a stable JSON string. The program's
-/// `run()` function is interpreted using the comptime engine; any print calls
-/// are captured; the captured output is returned as a JSON string value.
+/// S60 / D-PURE1 (E2-M16): evaluate a pure Jet program through the canonical
+/// MIR evaluator and return the value `run()` returns, together with everything
+/// the program printed.
 ///
-/// Returns `Err` diagnostics (E3401/E0952/E0953) on failure.
+/// The captured output is returned as a JSON string value by this convenience
+/// wrapper. Returns `Err` diagnostics on failure.
 pub fn eval_pure_program(src: &str, file: &str) -> Result<String, Vec<Diagnostic>> {
     with_compiler_stack(|| eval_pure_program_inner(src, file))
 }
@@ -3029,7 +3121,7 @@ fn eval_pure_program_inner(src: &str, file: &str) -> Result<String, Vec<Diagnost
     if !lex_diags.is_empty() {
         return Err(lex_diags);
     }
-    let prog = Parser::parse(&toks)?;
+    let prog = Parser::parse_with_source(&toks, src)?;
 
     // Collect functions into a map for the comptime evaluator.
     let func_map: HashMap<String, &AST::Func> = prog

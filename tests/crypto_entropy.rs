@@ -834,11 +834,12 @@ fn run() {
             "parity source must type-check: {diagnostics:?}"
         );
         assert!(
-            jet_jit::resident_jit_safe_bundle(&bundle),
+            common::cranelift_resident_safe(&bundle),
             "parity source must be resident-JIT safe"
         );
+        let policy = common::development_policy();
         assert!(
-            jet_jit::try_compile_bundle(&bundle).is_ok(),
+            common::compile_cranelift_bundle(&bundle, &policy).is_ok(),
             "parity source must compile in the resident JIT"
         );
 
@@ -857,14 +858,16 @@ fn run() {
         jet_jit::reset_jit_trace_for_test();
         let mut backend = CraneliftBackend::new();
         let jit =
-            jet_jit::with_program_args(&[shown.clone()], || match backend.run(&bundle, false) {
-                RunOutcome::Ran {
-                    stdout,
-                    stderr,
-                    exit_code,
-                } => (stdout, stderr, exit_code),
-                RunOutcome::Problems(diagnostics) => {
-                    panic!("resident JIT entropy/UUID parity failed: {diagnostics:?}")
+            jet_jit::with_program_args(&[shown.clone()], || {
+                match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
+                    RunOutcome::Ran {
+                        stdout,
+                        stderr,
+                        exit_code,
+                    } => (stdout, stderr, exit_code),
+                    RunOutcome::Problems(diagnostics) => {
+                        panic!("resident JIT entropy/UUID parity failed: {diagnostics:?}")
+                    }
                 }
             });
         assert!(jet_jit::jit_executed_for_test());

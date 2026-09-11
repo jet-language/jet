@@ -8,9 +8,44 @@
 
 const JET_BROWSER_TRACE_LIMIT_BYTES: usize = 8 * 1024;
 const JET_BROWSER_EVENT_LIMIT: usize = 256;
+const JET_BROWSER_ACTION_LIMIT: usize = 2_048;
+const JET_BROWSER_ACTION_LIMIT_BYTES: usize = 16 * 1024;
+
+type JetBrowserTestActionSink = std::rc::Rc<std::cell::RefCell<Vec<String>>>;
+
+fn jet_browser_test_attach_actions(
+    browser: &JetBrowser,
+    actions: Option<JetBrowserTestActionSink>,
+) {
+    browser.state.borrow_mut().test_actions = actions;
+}
+
+fn jet_browser_test_actions(browser: &JetBrowser) -> Vec<String> {
+    browser
+        .state
+        .borrow()
+        .test_actions
+        .as_ref()
+        .map_or_else(Vec::new, |actions| actions.borrow().clone())
+}
+
+fn jet_browser_record_action(browser: &JetBrowser, entry: String) {
+    if entry.is_empty() || entry.len() > JET_BROWSER_ACTION_LIMIT_BYTES {
+        return;
+    }
+    let actions = browser.state.borrow().test_actions.clone();
+    let Some(actions) = actions else {
+        return;
+    };
+    let mut actions = actions.borrow_mut();
+    if actions.len() == JET_BROWSER_ACTION_LIMIT {
+        actions.remove(0);
+    }
+    actions.push(entry);
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct JetBrowserError {
+pub(crate) struct JetBrowserError {
     kind: &'static str,
 }
 
@@ -142,6 +177,7 @@ struct JetBrowserState {
     trace: Vec<String>,
     trace_bytes: usize,
     events: std::collections::VecDeque<JetBrowserEvent>,
+    test_actions: Option<JetBrowserTestActionSink>,
 }
 
 #[derive(Clone)]
@@ -226,8 +262,8 @@ fn jet_browser_fact_hash(value: &str) -> String {
     format!("{hash:016x}")
 }
 
-fn jet_browser_object(entries: Vec<(&str, jet_std::JSON)>) -> jet_std::JSON {
-    jet_std::JSON::Object(
+fn jet_browser_object(entries: Vec<(&str, jet_std::DataTree)>) -> jet_std::DataTree {
+    jet_std::DataTree::Object(
         entries
             .into_iter()
             .map(|(key, value)| (key.to_string(), value))
@@ -235,28 +271,38 @@ fn jet_browser_object(entries: Vec<(&str, jet_std::JSON)>) -> jet_std::JSON {
     )
 }
 
-fn jet_browser_text(value: &str) -> jet_std::JSON {
-    jet_std::JSON::Text(value.to_string())
+fn jet_browser_text(value: &str) -> jet_std::DataTree {
+    jet_std::DataTree::Text(value.to_string())
 }
 
-fn jet_browser_get<'a>(value: &'a jet_std::JSON, key: &str) -> Option<&'a jet_std::JSON> {
+fn jet_browser_get<'a>(
+    value: &'a jet_std::DataTree,
+    key: &str,
+) -> Option<&'a jet_std::DataTree> {
     match value {
-        jet_std::JSON::Object(fields) => fields.get(key),
+        jet_std::DataTree::Object(fields) => fields
+            .iter()
+            .find_map(|(name, value)| (name == key).then_some(value)),
         _ => None,
     }
 }
 
-fn jet_browser_string(value: &jet_std::JSON, key: &str) -> Result<String, JetBrowserError> {
+fn jet_browser_string(
+    value: &jet_std::DataTree,
+    key: &str,
+) -> Result<String, JetBrowserError> {
     match jet_browser_get(value, key) {
-        Some(jet_std::JSON::Text(text)) => Ok(text.clone()),
+        Some(jet_std::DataTree::Text(text) | jet_std::DataTree::TypedText(text)) => {
+            Ok(text.clone())
+        }
         _ => Err(JetBrowserError::new("protocol")),
     }
 }
 
-fn jet_browser_id(value: &jet_std::JSON) -> Option<i64> {
+fn jet_browser_id(value: &jet_std::DataTree) -> Option<i64> {
     match jet_browser_get(value, "id") {
-        Some(jet_std::JSON::Integer(value)) if *value >= 0 => Some(*value),
-        Some(jet_std::JSON::Number(value))
+        Some(jet_std::DataTree::Int(value)) if *value >= 0 => Some(*value),
+        Some(jet_std::DataTree::Float(value))
             if value.is_finite()
                 && value.fract() == 0.0
                 && *value >= 0.0
@@ -264,6 +310,7 @@ fn jet_browser_id(value: &jet_std::JSON) -> Option<i64> {
         {
             Some(*value as i64)
         }
+        Some(jet_std::DataTree::Number(value)) => value.parse::<i64>().ok().filter(|value| *value >= 0),
         _ => None,
     }
 }
@@ -276,21 +323,32 @@ fn jet_browser_ws_error(error: JetWsError) -> JetBrowserError {
     }
 }
 
-fn jet_browser_set_timeout(conn: &JetWsConn, milliseconds: i64) -> Result<(), JetBrowserError> {
-    let duration = Some(std::time::Duration::from_millis(milliseconds as u64));
-    let stream = conn.stream.borrow();
-    stream
-        .set_read_timeout(duration)
-        .map_err(|_| JetBrowserError::new("transport"))?;
-    stream
-        .set_write_timeout(duration)
-        .map_err(|_| JetBrowserError::new("transport"))
+impl JetWsConn {
+    fn set_timeout(&self, milliseconds: i64) -> Result<(), JetWsError> {
+        let duration = std::time::Duration::from_millis(
+            u64::try_from(milliseconds).map_err(|_| JetWsError::IO {
+                operation: "set websocket timeout".to_string(),
+            })?,
+        );
+        self.stream
+            .borrow()
+            .set_read_timeout(Some(duration))
+            .map_err(|_| JetWsError::IO {
+                operation: "set websocket read timeout".to_string(),
+            })?;
+        self.stream
+            .borrow()
+            .set_write_timeout(Some(duration))
+            .map_err(|_| JetWsError::IO {
+                operation: "set websocket write timeout".to_string(),
+            })?;
+        Ok(())
+    }
 }
-
-fn jet_browser_parse_message(text: &str) -> Result<jet_std::JSON, JetBrowserError> {
+fn jet_browser_parse_message(text: &str) -> Result<jet_std::DataTree, JetBrowserError> {
     let value =
         jet_std::parse_json_strict(text).map_err(|_| JetBrowserError::new("protocol"))?;
-    if matches!(value, jet_std::JSON::Object(_)) {
+    if matches!(value, jet_std::DataTree::Object(_)) {
         Ok(value)
     } else {
         Err(JetBrowserError::new("protocol"))
@@ -308,22 +366,25 @@ fn jet_browser_remaining_ms(deadline: std::time::Instant) -> Result<i64, JetBrow
 fn jet_browser_recv_json(
     state: &mut JetBrowserState,
     deadline: std::time::Instant,
-) -> Result<jet_std::JSON, JetBrowserError> {
-    jet_browser_set_timeout(&state.conn, jet_browser_remaining_ms(deadline)?)?;
+) -> Result<jet_std::DataTree, JetBrowserError> {
+    state
+        .conn
+        .set_timeout(jet_browser_remaining_ms(deadline)?)
+        .map_err(jet_browser_ws_error)?;
     let message = jet_ws_recv(&state.conn).map_err(jet_browser_ws_error)?;
     let text = jet_ws_message_text(&message).map_err(jet_browser_ws_error)?;
     jet_browser_parse_message(&text)
 }
 
 fn jet_browser_event_network_facts(
-    value: &jet_std::JSON,
+    value: &jet_std::DataTree,
 ) -> (String, String, String, bool, i64) {
     let Some(params) = jet_browser_get(value, "params") else {
         return (String::new(), String::new(), String::new(), false, 0);
     };
     let is_blocked = matches!(
         jet_browser_get(params, "isBlocked"),
-        Some(jet_std::JSON::Boolean(true))
+        Some(jet_std::DataTree::Bool(true))
     );
     let request = jet_browser_get(params, "request");
     let request_id = request
@@ -339,17 +400,23 @@ fn jet_browser_event_network_facts(
         .unwrap_or_default();
     let status_code = jet_browser_get(params, "response")
         .and_then(|response| match jet_browser_get(response, "status") {
-            Some(jet_std::JSON::Integer(value)) if (0..=599).contains(value) => Some(*value),
-            Some(jet_std::JSON::Number(n)) if n.is_finite() && *n >= 0.0 && *n <= 599.0 => {
-                Some(*n as i64)
+            Some(jet_std::DataTree::Int(value)) if (0..=599).contains(value) => Some(*value),
+            Some(jet_std::DataTree::Float(value))
+                if value.is_finite() && value.fract() == 0.0 && (0.0..=599.0).contains(value) =>
+            {
+                Some(*value as i64)
             }
+            Some(jet_std::DataTree::Number(value)) => value
+                .parse::<i64>()
+                .ok()
+                .filter(|value| (0..=599).contains(value)),
             _ => None,
         })
         .unwrap_or(0);
     (request_id, request_method, url_hash, is_blocked, status_code)
 }
 
-fn jet_browser_event_download_facts(value: &jet_std::JSON) -> (String, String) {
+fn jet_browser_event_download_facts(value: &jet_std::DataTree) -> (String, String) {
     let Some(params) = jet_browser_get(value, "params") else {
         return (String::new(), String::new());
     };
@@ -362,9 +429,11 @@ fn jet_browser_event_download_facts(value: &jet_std::JSON) -> (String, String) {
 
 fn jet_browser_capture_event(
     state: &mut JetBrowserState,
-    value: &jet_std::JSON,
+    value: &jet_std::DataTree,
 ) -> Result<bool, JetBrowserError> {
-    let Some(jet_std::JSON::Text(kind)) = jet_browser_get(value, "type") else {
+    let Some(jet_std::DataTree::Text(kind) | jet_std::DataTree::TypedText(kind)) =
+        jet_browser_get(value, "type")
+    else {
         return Err(JetBrowserError::new("protocol"));
     };
     if kind != "event" {
@@ -443,9 +512,9 @@ fn jet_browser_profile_allows(profile: &str, method: &str) -> bool {
 fn jet_browser_command_with_timeout(
     browser: &JetBrowser,
     method: &str,
-    params: jet_std::JSON,
+    params: jet_std::DataTree,
     timeout_ms: i64,
-) -> Result<jet_std::JSON, JetBrowserError> {
+) -> Result<jet_std::DataTree, JetBrowserError> {
     let mut state = browser.state.borrow_mut();
     if state.closed {
         return Err(JetBrowserError::new("closed"));
@@ -458,11 +527,14 @@ fn jet_browser_command_with_timeout(
     }
     let deadline =
         std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms as u64);
-    jet_browser_set_timeout(&state.conn, jet_browser_remaining_ms(deadline)?)?;
+    state
+        .conn
+        .set_timeout(jet_browser_remaining_ms(deadline)?)
+        .map_err(jet_browser_ws_error)?;
     let id = state.next_id;
     state.next_id += 1;
     let request = jet_browser_object(vec![
-        ("id", jet_std::JSON::Integer(id)),
+        ("id", jet_std::DataTree::Int(id)),
         ("method", jet_browser_text(method)),
         ("params", params),
     ]);
@@ -497,8 +569,8 @@ fn jet_browser_command_with_timeout(
 fn jet_browser_command(
     browser: &JetBrowser,
     method: &str,
-    params: jet_std::JSON,
-) -> Result<jet_std::JSON, JetBrowserError> {
+    params: jet_std::DataTree,
+) -> Result<jet_std::DataTree, JetBrowserError> {
     let timeout_ms = browser.state.borrow().timeout_ms;
     jet_browser_command_with_timeout(browser, method, params, timeout_ms)
 }
@@ -663,7 +735,8 @@ fn jet_browser_connect_profile(
     timeout: JetBrowserTimeout,
 ) -> Result<JetBrowser, JetBrowserError> {
     let conn = jet_ws_connect(endpoint).map_err(jet_browser_ws_error)?;
-    jet_browser_set_timeout(&conn, timeout.milliseconds)?;
+    conn.set_timeout(timeout.milliseconds)
+        .map_err(jet_browser_ws_error)?;
     let browser = JetBrowser {
         state: std::rc::Rc::new(std::cell::RefCell::new(JetBrowserState {
             conn,
@@ -676,6 +749,7 @@ fn jet_browser_connect_profile(
             trace: vec!["connect".to_string()],
             trace_bytes: "connect".len(),
             events: std::collections::VecDeque::new(),
+            test_actions: None,
         })),
     };
     let status = jet_browser_command(
@@ -685,9 +759,12 @@ fn jet_browser_connect_profile(
     )?;
     if !matches!(
         jet_browser_get(&status, "ready"),
-        Some(jet_std::JSON::Boolean(true))
+        Some(jet_std::DataTree::Bool(true))
     )
-        || !matches!(jet_browser_get(&status, "message"), Some(jet_std::JSON::Text(_)))
+        || !matches!(
+            jet_browser_get(&status, "message"),
+            Some(jet_std::DataTree::Text(_) | jet_std::DataTree::TypedText(_))
+        )
     {
         return Err(JetBrowserError::new("protocol"));
     }
@@ -702,10 +779,10 @@ fn jet_browser_connect_profile(
     browser.state.borrow_mut().session_started = true;
     let _session_id = jet_browser_string(&new_session, "sessionId")?;
     let capabilities = jet_browser_get(&new_session, "capabilities")
-        .filter(|value| matches!(value, jet_std::JSON::Object(_)))
+        .filter(|value| matches!(value, jet_std::DataTree::Object(_)))
         .ok_or_else(|| JetBrowserError::new("protocol"))?;
     let cdp = jet_browser_get(capabilities, "goog:cdp")
-        .is_some_and(|value| matches!(value, jet_std::JSON::Boolean(true)));
+        .is_some_and(|value| matches!(value, jet_std::DataTree::Bool(true)));
     browser.state.borrow_mut().cdp = cdp;
     Ok(browser)
 }
@@ -738,7 +815,7 @@ fn jet_browser_subscribe(
     browser: &JetBrowser,
     event: &String,
 ) -> Result<(), JetBrowserError> {
-    let events = jet_std::JSON::Array(vec![jet_browser_text(event)]);
+    let events = jet_std::DataTree::Array(vec![jet_browser_text(event)]);
     jet_browser_command(
         browser,
         "session.subscribe",
@@ -791,7 +868,7 @@ fn jet_browser_add_intercept(
         "network.addIntercept",
         jet_browser_object(vec![(
             "phases",
-            jet_std::JSON::Array(vec![jet_browser_text(phase)]),
+            jet_std::DataTree::Array(vec![jet_browser_text(phase)]),
         )]),
     )?;
     Ok(JetBrowserIntercept {
@@ -821,9 +898,9 @@ fn jet_browser_add_intercept_url(
         jet_browser_object(vec![
             (
                 "phases",
-                jet_std::JSON::Array(vec![jet_browser_text(phase)]),
+                jet_std::DataTree::Array(vec![jet_browser_text(phase)]),
             ),
-            ("urlPatterns", jet_std::JSON::Array(vec![pattern])),
+            ("urlPatterns", jet_std::DataTree::Array(vec![pattern])),
         ]),
     )?;
     Ok(JetBrowserIntercept {
@@ -899,7 +976,7 @@ fn jet_browser_fulfill_request(
         "network.provideResponse",
         jet_browser_object(vec![
             ("request", jet_browser_text(request_id)),
-            ("statusCode", jet_std::JSON::Integer(status)),
+            ("statusCode", jet_std::DataTree::Int(status)),
             ("body", body_value),
         ]),
     )
@@ -1076,6 +1153,23 @@ impl Drop for JetBrowserContextState {
     }
 }
 
+fn jet_browser_navigation_url(url: &String) -> String {
+    if url.contains("://") || url.starts_with("about:") || url.starts_with("data:") {
+        return url.clone();
+    }
+    let base = std::env::var("JET_TEST_WEB_SERVER_URL")
+        .or_else(|_| std::env::var("JET_BROWSER_TEST_SERVER_URL"))
+        .unwrap_or_default();
+    if base.is_empty() {
+        return url.clone();
+    }
+    format!(
+        "{}/{}",
+        base.trim_end_matches('/'),
+        url.trim_start_matches('/')
+    )
+}
+
 fn jet_browser_page_goto(
     page: &JetBrowserPage,
     url: &String,
@@ -1083,26 +1177,31 @@ fn jet_browser_page_goto(
     if page.state.closed.get() || page.state.context.closed.get() {
         return Err(JetBrowserError::new("closed"));
     }
+    let target_url = jet_browser_navigation_url(url);
+    jet_browser_record_action(
+        &page.state.browser,
+        format!("goto:{}", jet_browser_fact_hash(url)),
+    );
     jet_browser_command(
         &page.state.browser,
         "browsingContext.navigate",
         jet_browser_object(vec![
             ("context", jet_browser_text(&page.state.id)),
-            ("url", jet_browser_text(url)),
+            ("url", jet_browser_text(&target_url)),
             ("wait", jet_browser_text("complete")),
         ]),
     )
     .map(|_| ())
 }
 
-fn jet_browser_page_partition(page: &JetBrowserPage) -> jet_std::JSON {
+fn jet_browser_page_partition(page: &JetBrowserPage) -> jet_std::DataTree {
     jet_browser_object(vec![
         ("type", jet_browser_text("context")),
         ("context", jet_browser_text(&page.state.id)),
     ])
 }
 
-fn jet_browser_bytes_value(text: &str) -> jet_std::JSON {
+fn jet_browser_bytes_value(text: &str) -> jet_std::DataTree {
     jet_browser_object(vec![
         ("type", jet_browser_text("string")),
         ("value", jet_browser_text(text)),
@@ -1172,12 +1271,14 @@ fn jet_browser_page_set_cookie(
     .map(|_| ())
 }
 
-fn jet_browser_cookie_string_value(cookie: &jet_std::JSON) -> Result<String, JetBrowserError> {
+fn jet_browser_cookie_string_value(
+    cookie: &jet_std::DataTree,
+) -> Result<String, JetBrowserError> {
     let Some(value) = jet_browser_get(cookie, "value") else {
         return Err(JetBrowserError::new("protocol"));
     };
     match jet_browser_get(value, "type") {
-        Some(jet_std::JSON::Text(kind)) if kind == "string" || kind == "base64" => {
+        Some(jet_std::DataTree::Text(kind)) if kind == "string" || kind == "base64" => {
             jet_browser_string(value, "value")
         }
         _ => Err(JetBrowserError::new("protocol")),
@@ -1206,7 +1307,7 @@ fn jet_browser_page_cookie(
             ("partition", jet_browser_page_partition(page)),
         ]),
     )?;
-    let Some(jet_std::JSON::Array(cookies)) = jet_browser_get(&result, "cookies") else {
+    let Some(jet_std::DataTree::Array(cookies)) = jet_browser_get(&result, "cookies") else {
         return Err(JetBrowserError::new("protocol"));
     };
     match cookies.first() {
@@ -1235,8 +1336,8 @@ fn jet_browser_storage_kind_ok(kind: &str) -> bool {
 fn jet_browser_page_storage_call(
     page: &JetBrowserPage,
     function: &str,
-    args: Vec<jet_std::JSON>,
-) -> Result<jet_std::JSON, JetBrowserError> {
+    args: Vec<jet_std::DataTree>,
+) -> Result<jet_std::DataTree, JetBrowserError> {
     if page.state.closed.get() || page.state.context.closed.get() {
         return Err(JetBrowserError::new("closed"));
     }
@@ -1245,29 +1346,76 @@ fn jet_browser_page_storage_call(
         "script.callFunction",
         jet_browser_object(vec![
             ("functionDeclaration", jet_browser_text(function)),
-            ("awaitPromise", jet_std::JSON::Boolean(false)),
+            ("awaitPromise", jet_std::DataTree::Bool(false)),
             (
                 "target",
                 jet_browser_object(vec![("context", jet_browser_text(&page.state.id))]),
             ),
-            ("arguments", jet_std::JSON::Array(args)),
+            ("arguments", jet_std::DataTree::Array(args)),
         ]),
     )
 }
 
 fn jet_browser_remote_string(
-    result: &jet_std::JSON,
+    result: &jet_std::DataTree,
 ) -> Result<Option<String>, JetBrowserError> {
     let Some(value) = jet_browser_get(result, "result") else {
         return Err(JetBrowserError::new("protocol"));
     };
     match jet_browser_get(value, "type") {
-        Some(jet_std::JSON::Text(kind)) if kind == "null" || kind == "undefined" => Ok(None),
-        Some(jet_std::JSON::Text(kind)) if kind == "string" => {
+        Some(jet_std::DataTree::Text(kind)) if kind == "null" || kind == "undefined" => Ok(None),
+        Some(jet_std::DataTree::Text(kind)) if kind == "string" => {
             Ok(Some(jet_browser_string(value, "value")?))
         }
         _ => Err(JetBrowserError::new("protocol")),
     }
+}
+
+/// Browser-test facts use the ordinary BiDi script route. The expression is
+/// fixed by the caller and its result is kept out of the protocol trace.
+fn jet_browser_page_evaluate_text(
+    page: &JetBrowserPage,
+    expression: &str,
+) -> Result<String, JetBrowserError> {
+    if page.state.closed.get() || page.state.context.closed.get() {
+        return Err(JetBrowserError::new("closed"));
+    }
+    let result = jet_browser_command(
+        &page.state.browser,
+        "script.evaluate",
+        jet_browser_object(vec![
+            ("expression", jet_browser_text(expression)),
+            ("awaitPromise", jet_std::DataTree::Bool(false)),
+            ("resultOwnership", jet_browser_text("none")),
+            (
+                "target",
+                jet_browser_object(vec![("context", jet_browser_text(&page.state.id))]),
+            ),
+        ]),
+    )?;
+    jet_browser_remote_string(&result)?.ok_or_else(|| JetBrowserError::new("protocol"))
+}
+
+fn jet_browser_page_url(page: &JetBrowserPage) -> Result<String, JetBrowserError> {
+    jet_browser_page_evaluate_text(page, "String(location.href)")
+}
+
+fn jet_browser_page_title(page: &JetBrowserPage) -> Result<String, JetBrowserError> {
+    jet_browser_page_evaluate_text(page, "String(document.title || '')")
+}
+
+fn jet_browser_page_text(page: &JetBrowserPage) -> Result<String, JetBrowserError> {
+    jet_browser_page_evaluate_text(
+        page,
+        "document.body ? String(document.body.innerText || '') : ''",
+    )
+}
+
+fn jet_browser_page_dom(page: &JetBrowserPage) -> Result<String, JetBrowserError> {
+    jet_browser_page_evaluate_text(
+        page,
+        "document.documentElement ? document.documentElement.outerHTML : ''",
+    )
 }
 
 /// D-BROWSER-AUTO1=A (#1191): read local/session storage (kind: "local"|"session").
@@ -1365,6 +1513,14 @@ fn jet_browser_page_get_by_role(
     role: &String,
     name: &String,
 ) -> JetBrowserLocator {
+    jet_browser_record_action(
+        &page.state.browser,
+        format!(
+            "locator:role:{}:{}",
+            jet_browser_fact_hash(role),
+            jet_browser_fact_hash(name)
+        ),
+    );
     JetBrowserLocator {
         page: page.state.clone(),
         locator_type: "accessibility".to_string(),
@@ -1375,6 +1531,10 @@ fn jet_browser_page_get_by_role(
 }
 
 fn jet_browser_page_get_by_text(page: &JetBrowserPage, text: &String) -> JetBrowserLocator {
+    jet_browser_record_action(
+        &page.state.browser,
+        format!("locator:text:{}", jet_browser_fact_hash(text)),
+    );
     JetBrowserLocator {
         page: page.state.clone(),
         locator_type: "innerText".to_string(),
@@ -1385,6 +1545,10 @@ fn jet_browser_page_get_by_text(page: &JetBrowserPage, text: &String) -> JetBrow
 }
 
 fn jet_browser_page_get_by_label(page: &JetBrowserPage, name: &String) -> JetBrowserLocator {
+    jet_browser_record_action(
+        &page.state.browser,
+        format!("locator:label:{}", jet_browser_fact_hash(name)),
+    );
     JetBrowserLocator {
         page: page.state.clone(),
         locator_type: "accessibility".to_string(),
@@ -1398,6 +1562,10 @@ fn jet_browser_page_get_by_placeholder(
     page: &JetBrowserPage,
     text: &String,
 ) -> JetBrowserLocator {
+    jet_browser_record_action(
+        &page.state.browser,
+        format!("locator:placeholder:{}", jet_browser_fact_hash(text)),
+    );
     JetBrowserLocator {
         page: page.state.clone(),
         locator_type: "css".to_string(),
@@ -1408,6 +1576,10 @@ fn jet_browser_page_get_by_placeholder(
 }
 
 fn jet_browser_page_get_by_test_id(page: &JetBrowserPage, id: &String) -> JetBrowserLocator {
+    jet_browser_record_action(
+        &page.state.browser,
+        format!("locator:test-id:{}", jet_browser_fact_hash(id)),
+    );
     JetBrowserLocator {
         page: page.state.clone(),
         locator_type: "css".to_string(),
@@ -1418,6 +1590,10 @@ fn jet_browser_page_get_by_test_id(page: &JetBrowserPage, id: &String) -> JetBro
 }
 
 fn jet_browser_page_get_by_css(page: &JetBrowserPage, selector: &String) -> JetBrowserLocator {
+    jet_browser_record_action(
+        &page.state.browser,
+        format!("locator:css:{}", jet_browser_fact_hash(selector)),
+    );
     JetBrowserLocator {
         page: page.state.clone(),
         locator_type: "css".to_string(),
@@ -1427,7 +1603,9 @@ fn jet_browser_page_get_by_css(page: &JetBrowserPage, selector: &String) -> JetB
     }
 }
 
-fn jet_browser_locator_wire(locator: &JetBrowserLocator) -> Result<jet_std::JSON, JetBrowserError> {
+fn jet_browser_locator_wire(
+    locator: &JetBrowserLocator,
+) -> Result<jet_std::DataTree, JetBrowserError> {
     match locator.locator_type.as_str() {
         "accessibility" => {
             let mut value = Vec::new();
@@ -1451,6 +1629,27 @@ fn jet_browser_locator_wire(locator: &JetBrowserLocator) -> Result<jet_std::JSON
         ])),
         _ => Err(JetBrowserError::new("protocol")),
     }
+}
+fn jet_browser_locator_fingerprint(locator: &JetBrowserLocator) -> String {
+    let mut identity = locator.locator_type.clone();
+    identity.push(':');
+    identity.push_str(&locator.role);
+    identity.push(':');
+    identity.push_str(&locator.name);
+    identity.push(':');
+    identity.push_str(&locator.value);
+    jet_browser_fact_hash(&identity)
+}
+
+fn jet_browser_record_locator_action(locator: &JetBrowserLocator, action: &str) {
+    jet_browser_record_action(
+        &locator.page.browser,
+        format!(
+            "locator-action:{}:{}",
+            action,
+            jet_browser_locator_fingerprint(locator)
+        ),
+    );
 }
 
 fn jet_browser_frame_from_page(
@@ -1477,13 +1676,13 @@ fn jet_browser_page_main_frame(
 }
 
 fn jet_browser_collect_frame_ids(
-    node: &jet_std::JSON,
+    node: &jet_std::DataTree,
     out: &mut Vec<String>,
 ) -> Result<(), JetBrowserError> {
     out.push(jet_browser_string(node, "context")?);
     match jet_browser_get(node, "children") {
         None => Ok(()),
-        Some(jet_std::JSON::Array(children)) => {
+        Some(jet_std::DataTree::Array(children)) => {
             for child in children {
                 jet_browser_collect_frame_ids(child, out)?;
             }
@@ -1504,7 +1703,7 @@ fn jet_browser_page_frames(
         "browsingContext.getTree",
         jet_browser_object(vec![("root", jet_browser_text(&page.state.id))]),
     )?;
-    let Some(jet_std::JSON::Array(contexts)) = jet_browser_get(&result, "contexts") else {
+    let Some(jet_std::DataTree::Array(contexts)) = jet_browser_get(&result, "contexts") else {
         return Err(JetBrowserError::new("protocol"));
     };
     let mut ids = Vec::new();
@@ -1587,11 +1786,11 @@ fn jet_browser_locator_query_with_timeout(
         jet_browser_object(vec![
             ("context", jet_browser_text(&locator.page.id)),
             ("locator", jet_browser_locator_wire(locator)?),
-            ("maxNodeCount", jet_std::JSON::Number(1.0)),
+            ("maxNodeCount", jet_std::DataTree::Float(1.0)),
         ]),
         timeout_ms,
     )?;
-    let Some(jet_std::JSON::Array(nodes)) = jet_browser_get(&result, "nodes") else {
+    let Some(jet_std::DataTree::Array(nodes)) = jet_browser_get(&result, "nodes") else {
         return Err(JetBrowserError::new("protocol"));
     };
     match nodes.first() {
@@ -1604,6 +1803,7 @@ fn jet_browser_locator_wait(
     locator: &JetBrowserLocator,
     timeout: JetBrowserTimeout,
 ) -> Result<(), JetBrowserError> {
+    jet_browser_record_locator_action(locator, "wait");
     let deadline =
         std::time::Instant::now() + std::time::Duration::from_millis(timeout.milliseconds as u64);
     loop {
@@ -1619,6 +1819,7 @@ fn jet_browser_locator_wait_gone(
     locator: &JetBrowserLocator,
     timeout: JetBrowserTimeout,
 ) -> Result<(), JetBrowserError> {
+    jet_browser_record_locator_action(locator, "wait-gone");
     let deadline =
         std::time::Instant::now() + std::time::Duration::from_millis(timeout.milliseconds as u64);
     loop {
@@ -1653,18 +1854,18 @@ fn jet_browser_locator_pointer(
     ]);
     let mut actions = vec![jet_browser_object(vec![
         ("type", jet_browser_text("pointerMove")),
-        ("x", jet_std::JSON::Number(0.0)),
-        ("y", jet_std::JSON::Number(0.0)),
+        ("x", jet_std::DataTree::Float(0.0)),
+        ("y", jet_std::DataTree::Float(0.0)),
         ("origin", origin),
     ])];
     if down_up {
         actions.push(jet_browser_object(vec![
             ("type", jet_browser_text("pointerDown")),
-            ("button", jet_std::JSON::Number(0.0)),
+            ("button", jet_std::DataTree::Float(0.0)),
         ]));
         actions.push(jet_browser_object(vec![
             ("type", jet_browser_text("pointerUp")),
-            ("button", jet_std::JSON::Number(0.0)),
+            ("button", jet_std::DataTree::Float(0.0)),
         ]));
     }
     let source = jet_browser_object(vec![
@@ -1674,25 +1875,27 @@ fn jet_browser_locator_pointer(
             "parameters",
             jet_browser_object(vec![("pointerType", jet_browser_text("mouse"))]),
         ),
-        ("actions", jet_std::JSON::Array(actions)),
+        ("actions", jet_std::DataTree::Array(actions)),
     ]);
     jet_browser_command(
         &locator.page.browser,
         "input.performActions",
         jet_browser_object(vec![
             ("context", jet_browser_text(&locator.page.id)),
-            ("actions", jet_std::JSON::Array(vec![source])),
+            ("actions", jet_std::DataTree::Array(vec![source])),
         ]),
     )
     .map(|_| ())
 }
 
 fn jet_browser_locator_click(locator: &JetBrowserLocator) -> Result<(), JetBrowserError> {
+    jet_browser_record_locator_action(locator, "click");
     let shared_id = jet_browser_locator_resolve(locator)?;
     jet_browser_locator_pointer(locator, &shared_id, true)
 }
 
 fn jet_browser_locator_hover(locator: &JetBrowserLocator) -> Result<(), JetBrowserError> {
+    jet_browser_record_locator_action(locator, "hover");
     let shared_id = jet_browser_locator_resolve(locator)?;
     jet_browser_locator_pointer(locator, &shared_id, false)
 }
@@ -1701,6 +1904,10 @@ fn jet_browser_locator_fill(
     locator: &JetBrowserLocator,
     text: &String,
 ) -> Result<(), JetBrowserError> {
+    jet_browser_record_locator_action(
+        locator,
+        &format!("fill:{}", jet_browser_fact_hash(text)),
+    );
     let shared_id = jet_browser_locator_resolve(locator)?;
     // Clear then assign through the DOM value path — no page data enters the trace.
     let function = "function(el, value) {\
@@ -1716,14 +1923,14 @@ fn jet_browser_locator_fill(
         "script.callFunction",
         jet_browser_object(vec![
             ("functionDeclaration", jet_browser_text(&function)),
-            ("awaitPromise", jet_std::JSON::Boolean(false)),
+            ("awaitPromise", jet_std::DataTree::Bool(false)),
             (
                 "target",
                 jet_browser_object(vec![("context", jet_browser_text(&locator.page.id))]),
             ),
             (
                 "arguments",
-                jet_std::JSON::Array(vec![
+                jet_std::DataTree::Array(vec![
                     jet_browser_object(vec![
                         ("type", jet_browser_text("node")),
                         ("sharedId", jet_browser_text(&shared_id)),
@@ -1743,9 +1950,13 @@ fn jet_browser_locator_press(
     locator: &JetBrowserLocator,
     key: &String,
 ) -> Result<(), JetBrowserError> {
+    jet_browser_record_locator_action(
+        locator,
+        &format!("press:{}", jet_browser_fact_hash(key)),
+    );
     let shared_id = jet_browser_locator_resolve(locator)?;
     jet_browser_locator_pointer(locator, &shared_id, true)?;
-    let actions = jet_std::JSON::Array(vec![
+    let actions = jet_std::DataTree::Array(vec![
         jet_browser_object(vec![
             ("type", jet_browser_text("keyDown")),
             ("value", jet_browser_text(key)),
@@ -1765,7 +1976,7 @@ fn jet_browser_locator_press(
         "input.performActions",
         jet_browser_object(vec![
             ("context", jet_browser_text(&locator.page.id)),
-            ("actions", jet_std::JSON::Array(vec![source])),
+            ("actions", jet_std::DataTree::Array(vec![source])),
         ]),
     )
     .map(|_| ())
@@ -1779,6 +1990,10 @@ fn jet_browser_locator_set_files(
     if path.is_empty() {
         return Err(JetBrowserError::new("protocol"));
     }
+    jet_browser_record_locator_action(
+        locator,
+        &format!("set-files:{}", jet_browser_fact_hash(path)),
+    );
     let shared_id = jet_browser_locator_resolve(locator)?;
     jet_browser_command(
         &locator.page.browser,
@@ -1791,7 +2006,7 @@ fn jet_browser_locator_set_files(
             ),
             (
                 "files",
-                jet_std::JSON::Array(vec![jet_browser_text(path)]),
+                jet_std::DataTree::Array(vec![jet_browser_text(path)]),
             ),
         ]),
     )
@@ -1867,7 +2082,7 @@ fn jet_browser_protocol_send(
 ) -> Result<String, JetBrowserError> {
     let params =
         jet_std::parse_json_strict(params_json).map_err(|_| JetBrowserError::new("protocol"))?;
-    if !matches!(params, jet_std::JSON::Object(_)) {
+    if !matches!(params, jet_std::DataTree::Object(_)) {
         return Err(JetBrowserError::new("protocol"));
     }
     let result = if protocol.kind == "bidi" {

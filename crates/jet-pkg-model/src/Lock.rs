@@ -11,6 +11,7 @@ use crate::Syntax;
 use crate::SHA256::sha256_hex;
 use jet_foundation::Facts::BuildStamp;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::io::BufRead;
 use std::path::Path;
 
@@ -22,6 +23,9 @@ pub use crate::AST::ComptimeInput;
 // ──────────────────────────────────────────────
 
 pub const LOCK_VERSION: u32 = 1;
+/// `provenance.build` prefix that marks a package record as projected from a
+/// Rust FFI bridge build; `record_rust_bridge` replaces every such record.
+pub const RUST_BRIDGE_PROVENANCE_PREFIX: &str = "jet-ffi-bridge:";
 
 /// One node in the resolved package graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,7 +123,9 @@ impl NixClosureRecord {
                 return Err(format!("Nix closure record is missing `{name}`"));
             }
             if !value.is_ascii()
-                || value.bytes().any(|byte| byte == 0 || byte.is_ascii_control())
+                || value
+                    .bytes()
+                    .any(|byte| byte == 0 || byte.is_ascii_control())
                 || value.contains('/')
                 || value.contains('\\')
             {
@@ -128,10 +134,7 @@ impl NixClosureRecord {
                 ));
             }
         }
-        if !matches!(
-            self.channel.as_str(),
-            "nixpkgs-unstable" | "nixos-unstable"
-        ) {
+        if !matches!(self.channel.as_str(), "nixpkgs-unstable" | "nixos-unstable") {
             return Err("Nix closure record has an unsupported channel".into());
         }
         if !is_lower_hex(&self.revision, 40) {
@@ -211,7 +214,6 @@ fn is_nar_hash(value: &str) -> bool {
         .strip_prefix("sha256:")
         .is_some_and(|digest| is_lower_hex(digest, 64))
 }
-
 
 /// D-BOUND-PROV1: evidence recorded once per locked dependency. Empty fields
 /// are meaningful: an unattested dependency remains resolvable by default, but
@@ -487,6 +489,158 @@ pub struct LockedSourceChannel {
     pub channel: String,
     pub exact: String,
 }
+
+/// The lock record that is incomplete.  Keeping this distinction in the model
+/// lets hosts report a missing generated fact without treating it as a request
+/// to move a declared dependency.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LockRecordKind {
+    Dependency,
+    Toolchain,
+    SourceChannel,
+}
+
+impl LockRecordKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Dependency => "dependency",
+            Self::Toolchain => "toolchain",
+            Self::SourceChannel => "source channel",
+        }
+    }
+}
+
+/// Safe regeneration data for a lock diagnostic.  `argv` is deliberately
+/// separate from a shell command string so CLI hosts can execute it without
+/// interpolation or reparsing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LockRegeneration {
+    pub argv: Vec<String>,
+}
+
+impl LockRegeneration {
+    pub fn new<I, S>(argv: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self {
+            argv: argv.into_iter().map(Into::into).collect(),
+        }
+    }
+
+    pub fn dependency() -> Self {
+        Self::new([Syntax::BINARY_NAME, "fetch"])
+    }
+
+    pub fn toolchain() -> Self {
+        Self::new([Syntax::BINARY_NAME, "update", "jet"])
+    }
+
+    pub fn source_channel(name: &str) -> Self {
+        Self::new([Syntax::JETPACK_BINARY_NAME, "update", name])
+    }
+
+    fn display(&self) -> String {
+        self.argv
+            .iter()
+            .map(|arg| format!("`{arg}`"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+/// A generated lock record is missing one concrete fact required by a
+/// subsequent locked/offline realization.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LockCompletenessError {
+    pub kind: LockRecordKind,
+    pub name: String,
+    pub missing_field: String,
+    pub regeneration: LockRegeneration,
+}
+
+impl LockCompletenessError {
+    fn missing(
+        kind: LockRecordKind,
+        name: impl Into<String>,
+        missing_field: impl Into<String>,
+        regeneration: LockRegeneration,
+    ) -> Self {
+        Self {
+            kind,
+            name: name.into(),
+            missing_field: missing_field.into(),
+            regeneration,
+        }
+    }
+
+    /// Convert the typed model failure to the registered host diagnostic.
+    /// Hosts may instead inspect the structured fields and use `argv`
+    /// directly.
+    pub fn diagnostic(&self) -> Diagnostic {
+        let command = self.regeneration.display();
+        match self.kind {
+            LockRecordKind::Dependency => Diagnostic::error(
+                "E1217",
+                format!(
+                    "dependency `{}` has an incomplete lock record",
+                    self.name
+                ),
+                format!(
+                    "`{}` is missing `{}` in `{}`; a locked or offline realization \
+                     cannot reconstruct this dependency",
+                    self.name,
+                    self.missing_field,
+                    Syntax::UNIFIED_LOCK_FILE
+                ),
+                format!("run {command} and commit `{}`", Syntax::UNIFIED_LOCK_FILE),
+                None,
+            ),
+            LockRecordKind::Toolchain => Diagnostic::error(
+                "E1250",
+                format!("toolchain channel `{}` has an incomplete lock record", self.name),
+                format!(
+                    "`{}` is missing `{}` in `{}`; locked or offline builds need \
+                     the exact toolchain identity",
+                    self.name,
+                    self.missing_field,
+                    Syntax::UNIFIED_LOCK_FILE
+                ),
+                format!("run {command} and commit `{}`", Syntax::UNIFIED_LOCK_FILE),
+                None,
+            ),
+            LockRecordKind::SourceChannel => Diagnostic::error(
+                "E1271",
+                format!("source channel `{}` has an incomplete lock record", self.name),
+                format!(
+                    "`{}` is missing `{}` in `{}`; realization must use the \
+                     previously locked exact source",
+                    self.name,
+                    self.missing_field,
+                    Syntax::UNIFIED_LOCK_FILE
+                ),
+                format!("run {command} and commit `{}`", Syntax::UNIFIED_LOCK_FILE),
+                None,
+            ),
+        }
+    }
+}
+
+impl fmt::Display for LockCompletenessError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{} `{}` is missing `{}`; regenerate with {}",
+            self.kind.label(),
+            self.name,
+            self.missing_field,
+            self.regeneration.display()
+        )
+    }
+}
+
+impl std::error::Error for LockCompletenessError {}
 
 /// A presentation-only package change. The lock schema remains the source of
 /// truth; these fields are copied only so a renderer can outlive its input
@@ -796,6 +950,219 @@ pub struct LockedBuildContribution {
     pub reason: String,
 }
 
+impl LockedPackage {
+    /// Validate the facts a locked/offline dependency realization consumes.
+    /// Registry and foreign records have their own provider-specific floors;
+    /// this boundary covers the path and Git identities used directly by the
+    /// package loader.
+    pub fn validate_completeness(&self) -> Result<(), LockCompletenessError> {
+        let name = if self.name.trim().is_empty() {
+            "<unnamed>".to_string()
+        } else {
+            self.name.clone()
+        };
+        if self.version.trim().is_empty() {
+            return Err(LockCompletenessError::missing(
+                LockRecordKind::Dependency,
+                name.clone(),
+                "version",
+                LockRegeneration::dependency(),
+            ));
+        }
+
+        match &self.source {
+            LockSource::Root => {}
+            LockSource::Path(path) => {
+                if path.trim().is_empty() {
+                    return Err(LockCompletenessError::missing(
+                        LockRecordKind::Dependency,
+                        name.clone(),
+                        "source.path",
+                        LockRegeneration::dependency(),
+                    ));
+                }
+                if self
+                    .content_hash
+                    .as_deref()
+                    .is_none_or(|hash| hash.trim().is_empty())
+                {
+                    return Err(LockCompletenessError::missing(
+                        LockRecordKind::Dependency,
+                        name,
+                        "content-hash",
+                        LockRegeneration::dependency(),
+                    ));
+                }
+            }
+            LockSource::Git {
+                url, selector, ..
+            } => {
+                if url.trim().is_empty() {
+                    return Err(LockCompletenessError::missing(
+                        LockRecordKind::Dependency,
+                        name.clone(),
+                        "source.url",
+                        LockRegeneration::dependency(),
+                    ));
+                }
+                if selector.trim().is_empty() {
+                    return Err(LockCompletenessError::missing(
+                        LockRecordKind::Dependency,
+                        name.clone(),
+                        "source.selector",
+                        LockRegeneration::dependency(),
+                    ));
+                }
+                let Some(revision) = self.locked.as_ref() else {
+                    return Err(LockCompletenessError::missing(
+                        LockRecordKind::Dependency,
+                        name.clone(),
+                        "locked",
+                        LockRegeneration::dependency(),
+                    ));
+                };
+                if revision.rev.trim().is_empty() {
+                    return Err(LockCompletenessError::missing(
+                        LockRecordKind::Dependency,
+                        name.clone(),
+                        "locked.rev",
+                        LockRegeneration::dependency(),
+                    ));
+                }
+                if revision.tree_hash.trim().is_empty()
+                    && self
+                        .content_hash
+                        .as_deref()
+                        .is_none_or(|hash| hash.trim().is_empty())
+                {
+                    return Err(LockCompletenessError::missing(
+                        LockRecordKind::Dependency,
+                        name,
+                        "locked.tree-hash",
+                        LockRegeneration::dependency(),
+                    ));
+                }
+            }
+            LockSource::Nix { .. }
+            | LockSource::Cran { .. }
+            | LockSource::LuaRocks { .. }
+            | LockSource::Registry { .. }
+            | LockSource::Foreign { .. } => {}
+        }
+        Ok(())
+    }
+}
+
+impl LockedToolchain {
+    pub fn validate_completeness(&self) -> Result<(), LockCompletenessError> {
+        let name = if self.channel.trim().is_empty() {
+            "jet".to_string()
+        } else {
+            self.channel.clone()
+        };
+        for (field, value) in [
+            ("id", self.id.as_str()),
+            ("channel", self.channel.as_str()),
+            ("version", self.version.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                return Err(LockCompletenessError::missing(
+                    LockRecordKind::Toolchain,
+                    name.clone(),
+                    field,
+                    LockRegeneration::toolchain(),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl LockedSourceChannel {
+    pub fn validate_completeness(&self) -> Result<(), LockCompletenessError> {
+        let name = if self.name.trim().is_empty() {
+            "<unnamed>".to_string()
+        } else {
+            self.name.clone()
+        };
+        for (field, value) in [
+            ("name", self.name.as_str()),
+            ("channel", self.channel.as_str()),
+            ("exact", self.exact.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                return Err(LockCompletenessError::missing(
+                    LockRecordKind::SourceChannel,
+                    name.clone(),
+                    field,
+                    LockRegeneration::source_channel(&self.name),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl LockFile {
+    /// Validate every generated identity before it is consumed by a locked
+    /// or offline operation.
+    pub fn validate_completeness(&self) -> Result<(), LockCompletenessError> {
+        for package in &self.packages {
+            package.validate_completeness()?;
+        }
+        for source in &self.source_channels {
+            source.validate_completeness()?;
+        }
+        for toolchain in &self.toolchains {
+            toolchain.validate_completeness()?;
+        }
+        Ok(())
+    }
+}
+
+/// Validate only the lock material needed by the manifest's direct
+/// dependencies. Source identity mismatches are deliberately left to
+/// [`verify_lock_matches_manifest`], which reports a stale lock and asks the
+/// user to update it.
+pub fn validate_manifest_lock_completeness(
+    manifest: &Manifest,
+    lock: &LockFile,
+) -> Result<(), LockCompletenessError> {
+    for (dep_name, spec) in &manifest.dependencies {
+        let Some(package) = lock.packages.iter().find(|package| &package.name == dep_name) else {
+            return Err(LockCompletenessError::missing(
+                LockRecordKind::Dependency,
+                dep_name,
+                "package",
+                LockRegeneration::dependency(),
+            ));
+        };
+
+        if package.version.trim().is_empty() {
+            return Err(LockCompletenessError::missing(
+                LockRecordKind::Dependency,
+                dep_name,
+                "version",
+                LockRegeneration::dependency(),
+            ));
+        }
+
+        let source_matches = match (spec, &package.source) {
+            (DepSpec::Path { .. }, LockSource::Path(_))
+            | (DepSpec::Git { .. }, LockSource::Git { .. })
+            | (DepSpec::Registry(_), LockSource::Registry { .. })
+            | (DepSpec::Foreign { .. }, LockSource::Foreign { .. }) => true,
+            // A source-kind mismatch is stale manifest/lock state, not an
+            // incomplete generated record. The stale-only verifier owns it.
+            _ => false,
+        };
+        if source_matches {
+            package.validate_completeness()?;
+        }
+    }
+    Ok(())
+}
+
 // ──────────────────────────────────────────────
 // Serialisation
 // ──────────────────────────────────────────────
@@ -906,7 +1273,6 @@ pub fn write(lock: &LockFile) -> String {
         if let Some(nix) = &pkg.nix_closure {
             write_nix_closure(&mut out, nix);
         }
-
 
         if let Some(rev) = &pkg.locked {
             out.push_str(&format!(
@@ -1208,6 +1574,10 @@ fn write_authority_value(authority: &crate::Package::PackageAuthority) -> String
         fields.push(format!("holds: {{ {} }}", holds.join(", ")));
     }
 
+    if !authority.needs.is_empty() {
+        fields.push(format!("needs: {}", write_string_array(&authority.needs)));
+    }
+
     if !authority.grants.is_empty() {
         let grants = authority
             .grants
@@ -1432,7 +1802,10 @@ fn write_nix_closure(out: &mut String, closure: &NixClosureRecord) {
         "nix-derivation = \"{}\"\n",
         escape_str(&closure.derivation)
     ));
-    out.push_str(&format!("nix-output = \"{}\"\n", escape_str(&closure.output)));
+    out.push_str(&format!(
+        "nix-output = \"{}\"\n",
+        escape_str(&closure.output)
+    ));
     out.push_str(&format!(
         "nix-nar-hash = \"{}\"\n",
         escape_str(&closure.nar_hash)
@@ -1559,9 +1932,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 browsers.push(b.finish()?);
             }
             if let Some(sc) = current_source_channel.take() {
-                if let Some(c) = sc.finish() {
-                    source_channels.push(c);
-                }
+                source_channels.push(sc.finish());
             }
             if let Some(contribution) = current_build_contribution.take() {
                 build_contributions.push(contribution.finish()?);
@@ -1673,6 +2044,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                         .map_err(|error| error.to_string())?;
                     authority = Some(crate::Package::PackageAuthority {
                         holds: parsed.holds,
+                        needs: parsed.needs,
                         grants: parsed.grants,
                         trust: parsed.trust,
                         providers: parsed.providers,
@@ -1851,9 +2223,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                             .map_err(|_| format!("invalid Nix closure size: {val}"))?,
                     )
                 }
-                "nix-compression" => {
-                    pkg.nix_closure_mut().compression = Some(unescape_str(val))
-                }
+                "nix-compression" => pkg.nix_closure_mut().compression = Some(unescape_str(val)),
                 "nix-references" => {
                     pkg.nix_closure_mut().references = Some(parse_string_array(val)?)
                 }
@@ -1904,9 +2274,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         browsers.push(b.finish()?);
     }
     if let Some(sc) = current_source_channel {
-        if let Some(c) = sc.finish() {
-            source_channels.push(c);
-        }
+        source_channels.push(sc.finish());
     }
     if let Some(contribution) = current_build_contribution {
         build_contributions.push(contribution.finish()?);
@@ -1955,10 +2323,39 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
     Ok(lock)
 }
 
-/// Parse a lock for a user-facing path. A malformed or oversized lock is
-/// recoverable corruption because `.jet/lock` is regenerated by Jetpack.
+/// Parse a lock for a user-facing path. Unsupported format versions are
+/// distinct from corruption: the reader must not rewrite an input whose
+/// required meanings it cannot establish.
 pub fn parse_with_path(raw: &str, lock_path: &Path) -> Result<LockFile, Diagnostic> {
-    parse(raw).map_err(|_| e1205_lock_corrupt(&lock_path.display().to_string()))
+    parse(raw).map_err(|error| {
+        if let Some(version) = unsupported_lock_version(&error) {
+            e1214_lock_unsupported(
+                &lock_path.display().to_string(),
+                version,
+                &LOCK_VERSION.to_string(),
+            )
+        } else {
+            e1205_lock_corrupt(&lock_path.display().to_string())
+        }
+    })
+}
+
+fn unsupported_lock_version(error: &str) -> Option<&str> {
+    let version = error.strip_prefix("unsupported lock version ")?;
+    let (version, expected) = version.split_once(';')?;
+    (expected.trim() == format!("expected {LOCK_VERSION}")).then_some(version.trim())
+}
+
+/// Load a project lock with the registered diagnostic for each reader outcome.
+/// Missing locks remain optional; a present unsupported or corrupt lock stops
+/// the strict caller before it can resolve or write anything.
+pub fn load_strict_with_path(project_root: &Path) -> Result<Option<LockFile>, Diagnostic> {
+    let path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
+    match read_lock_text(&path) {
+        Ok(raw) => parse_with_path(&raw, &path).map(Some),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err(e1205_lock_corrupt(&path.display().to_string())),
+    }
 }
 
 /// Identify a lock that claims workspace authority even when its typed parse
@@ -2349,7 +2746,8 @@ impl PartialPkg {
     }
 
     fn nix_closure_mut(&mut self) -> &mut PartialNixClosure {
-        self.nix_closure.get_or_insert_with(PartialNixClosure::default)
+        self.nix_closure
+            .get_or_insert_with(PartialNixClosure::default)
     }
 
     fn provenance_mut(&mut self) -> &mut DependencyProvenance {
@@ -2361,7 +2759,10 @@ impl PartialPkg {
         let name = self.name.ok_or("missing name")?;
         let version = self.version.ok_or("missing version")?;
         let source = parse_source(self.source_raw.as_deref().unwrap_or(""))?;
-        let nix_closure = self.nix_closure.map(PartialNixClosure::finish).transpose()?;
+        let nix_closure = self
+            .nix_closure
+            .map(PartialNixClosure::finish)
+            .transpose()?;
         match (&source, &nix_closure) {
             (LockSource::Nix { output, .. }, Some(closure)) if closure.output != *output => {
                 return Err("Nix source output disagrees with its closure record".into());
@@ -2447,9 +2848,7 @@ impl PartialNixClosure {
             upstream_proof: self
                 .upstream_proof
                 .ok_or("Nix closure is missing `upstream-proof`")?,
-            cache_key: self
-                .cache_key
-                .ok_or("Nix closure is missing `cache-key`")?,
+            cache_key: self.cache_key.ok_or("Nix closure is missing `cache-key`")?,
             project_cas_bundle: self
                 .project_cas_bundle
                 .ok_or("Nix closure is missing `project-cas-bundle`")?,
@@ -2509,12 +2908,12 @@ struct PartialSourceChannel {
 }
 
 impl PartialSourceChannel {
-    fn finish(self) -> Option<LockedSourceChannel> {
-        Some(LockedSourceChannel {
-            name: self.name?,
-            channel: self.channel?,
-            exact: canonical_ref(&self.exact?),
-        })
+    fn finish(self) -> LockedSourceChannel {
+        LockedSourceChannel {
+            name: self.name.unwrap_or_default(),
+            channel: self.channel.unwrap_or_default(),
+            exact: canonical_ref(&self.exact.unwrap_or_default()),
+        }
     }
 }
 
@@ -2720,6 +3119,24 @@ pub fn load_strict(project_root: &Path) -> Result<Option<LockFile>, String> {
     }
 }
 
+fn empty_lock() -> LockFile {
+    LockFile {
+        version: LOCK_VERSION,
+        packages: Vec::new(),
+        root_dependencies: Vec::new(),
+        authority: None,
+        workspace_members: Vec::new(),
+        workspace_source_digest: None,
+        workspace_overlay_policy: Default::default(),
+        comptime_inputs: Vec::new(),
+        toolchains: Vec::new(),
+        browsers: Vec::new(),
+        source_channels: Vec::new(),
+        build_stamp: None,
+        build_contributions: Vec::new(),
+    }
+}
+
 /// D-CONF-STAMP1=B: return the lock-pinned provenance or capture one stamp
 /// for the lock-writing operation. A locked build may not fall back to the
 /// wall clock; a missing stamp is a stale lock input.
@@ -2868,7 +3285,9 @@ pub fn record_nix_realization(
 ) -> Result<(), String> {
     nix_closure.validate()?;
     if nix_closure.output != output || envelope.output_hash != output {
-        return Err("Nix closure and envelope outputs must match the realized output digest".into());
+        return Err(
+            "Nix closure and envelope outputs must match the realized output digest".into(),
+        );
     }
     if envelope.platform != nix_closure.system {
         return Err("Nix closure system does not match the lock envelope platform".into());
@@ -3095,6 +3514,64 @@ pub fn record_foreign_realization(
     } else {
         lock.packages.push(entry);
     }
+    ensure_build_stamp(project_root, &mut lock);
+    write_lock_atomically(project_root, write(&lock).as_bytes())
+}
+/// Record the resolved packages of a Rust FFI bridge in the unified package
+/// graph. The bridge uses the existing `Foreign` source kind; Cargo's generated
+/// lock is only read to fill the ordinary package records, never copied into a
+/// second lock schema. A later bridge build replaces the records emitted by an
+/// earlier bridge build while leaving user/provider records untouched.
+pub fn record_rust_bridge(
+    project_root: &Path,
+    bridge_identity: &str,
+    packages: Vec<LockedPackage>,
+) -> Result<(), String> {
+    if bridge_identity.trim().is_empty() {
+        return Err("Rust bridge lock identity is empty".to_string());
+    }
+    if packages.is_empty() {
+        return Ok(());
+    }
+    let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
+    let mut lock = match read_lock_text(&lock_path) {
+        Ok(raw) => parse(&raw).map_err(|error| {
+            format!(
+                "could not parse project lock `{}`: {error}",
+                lock_path.display()
+            )
+        })?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => LockFile {
+            version: LOCK_VERSION,
+            packages: Vec::new(),
+            root_dependencies: Vec::new(),
+            authority: None,
+            workspace_members: Vec::new(),
+            workspace_source_digest: None,
+            workspace_overlay_policy: Default::default(),
+            comptime_inputs: Vec::new(),
+            toolchains: Vec::new(),
+            browsers: Vec::new(),
+            source_channels: Vec::new(),
+            build_stamp: None,
+            build_contributions: Vec::new(),
+        },
+        Err(error) => {
+            return Err(format!(
+                "could not read project lock `{}`: {error}",
+                lock_path.display()
+            ));
+        }
+    };
+    lock.version = LOCK_VERSION;
+    lock.packages.retain(|package| {
+        !package
+            .provenance
+            .as_ref()
+            .and_then(|provenance| provenance.build.as_deref())
+            .is_some_and(|build| build.starts_with(RUST_BRIDGE_PROVENANCE_PREFIX))
+    });
+    lock.packages.extend(packages);
     ensure_build_stamp(project_root, &mut lock);
     write_lock_atomically(project_root, write(&lock).as_bytes())
 }
@@ -3653,26 +4130,10 @@ pub fn registry_realization(
 /// `jet update jet` / `jet init` may run before any dependency lock is written.
 /// The pin is upserted by channel so re-running `jet update jet <ch>` replaces
 /// the same series in place rather than accumulating stale entries.
-pub fn record_toolchain(project_root: &Path, tc: LockedToolchain) {
-    let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
-    let mut lock = read_lock_text(&lock_path)
-        .ok()
-        .and_then(|raw| parse(&raw).ok())
-        .unwrap_or_else(|| LockFile {
-            version: LOCK_VERSION,
-            packages: Vec::new(),
-            root_dependencies: Vec::new(),
-            authority: None,
-            workspace_members: Vec::new(),
-            workspace_source_digest: None,
-            workspace_overlay_policy: Default::default(),
-            comptime_inputs: Vec::new(),
-            toolchains: Vec::new(),
-            browsers: Vec::new(),
-            source_channels: Vec::new(),
-            build_stamp: None,
-            build_contributions: Vec::new(),
-        });
+pub fn record_toolchain(project_root: &Path, tc: LockedToolchain) -> Result<(), String> {
+    tc.validate_completeness()
+        .map_err(|error| error.to_string())?;
+    let mut lock = load_strict(project_root)?.unwrap_or_else(empty_lock);
     lock.version = LOCK_VERSION;
     if let Some(existing) = lock
         .toolchains
@@ -3683,8 +4144,11 @@ pub fn record_toolchain(project_root: &Path, tc: LockedToolchain) {
     } else {
         lock.toolchains.push(tc);
     }
+    lock.validate_completeness()
+        .map_err(|error| error.to_string())?;
     ensure_build_stamp(project_root, &mut lock);
-    publish_lock_or_report(project_root, &write(&lock));
+    write_lock_atomically(project_root, write(&lock).as_bytes())
+        .map_err(|error| format!("could not write `{}`: {error}", Syntax::UNIFIED_LOCK_FILE))
 }
 
 /// D-BROWSER-AUTO1=A (#1187): upsert a project-locked browser binary by engine.
@@ -3764,10 +4228,14 @@ pub fn record_generated_inputs(
     locked: bool,
     stamp: &BuildStamp,
 ) -> Result<(), Diagnostic> {
-    let lock_was_present = project_root
-        .join(Syntax::UNIFIED_LOCK_FILE)
-        .exists();
-    record_generated_inputs_with_lock_state(project_root, generated, locked, stamp, lock_was_present)
+    let lock_was_present = project_root.join(Syntax::UNIFIED_LOCK_FILE).exists();
+    record_generated_inputs_with_lock_state(
+        project_root,
+        generated,
+        locked,
+        stamp,
+        lock_was_present,
+    )
 }
 
 /// Record generated provenance while preserving whether the build started with
@@ -3859,8 +4327,11 @@ pub fn record_generated_inputs_with_lock_state(
             lock.comptime_inputs.push(input.clone());
         }
     }
-    lock.comptime_inputs
-        .sort_by(|left, right| left.path.cmp(&right.path).then_with(|| left.hash.cmp(&right.hash)));
+    lock.comptime_inputs.sort_by(|left, right| {
+        left.path
+            .cmp(&right.path)
+            .then_with(|| left.hash.cmp(&right.hash))
+    });
     write_lock_atomically(project_root, write(&lock).as_bytes())
         .map_err(|error| lock_write_error(&lock_path, std::io::Error::other(error)))?;
     Ok(())
@@ -3979,10 +4450,13 @@ pub fn record_build_contributions(
             build_stamp: None,
             build_contributions: Vec::new(),
         });
-    lock.build_contributions
-        .retain(|contribution| contribution.package != package);
-    lock.build_contributions
-        .extend(locked_build_contribution_set(package, contributions));
+    // Explicit foreign-build selections are project-level activation state,
+    // not computed package facts.  A later native package build must not
+    // silently erase the reviewed plan that ordinary `jet build` consumes.
+    lock.build_contributions.retain(|contribution| {
+        contribution.package == "__jet_foreign_build__" || contribution.package != package
+    });
+    lock.build_contributions.extend(locked_build_contribution_set(package, contributions));
     lock.build_contributions.sort_by(|left, right| {
         left.package
             .cmp(&right.package)
@@ -4021,38 +4495,30 @@ pub fn locked_source_channel(project_root: &Path, name: &str) -> Option<LockedSo
 
 /// D-JPK-CHANNEL1=A: upsert a named source channel lock. Keyed by source name
 /// so moving a channel replaces the prior exact identity.
-pub fn record_source_channel(project_root: &Path, source: LockedSourceChannel) {
-    let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
-    let mut lock = read_lock_text(&lock_path)
-        .ok()
-        .and_then(|raw| parse(&raw).ok())
-        .unwrap_or_else(|| LockFile {
-            version: LOCK_VERSION,
-            packages: Vec::new(),
-            root_dependencies: Vec::new(),
-            authority: None,
-            workspace_members: Vec::new(),
-            workspace_source_digest: None,
-            workspace_overlay_policy: Default::default(),
-            comptime_inputs: Vec::new(),
-            toolchains: Vec::new(),
-            browsers: Vec::new(),
-            source_channels: Vec::new(),
-            build_stamp: None,
-            build_contributions: Vec::new(),
-        });
+pub fn record_source_channel(
+    project_root: &Path,
+    mut source: LockedSourceChannel,
+) -> Result<(), String> {
+    source.exact = canonical_ref(&source.exact);
+    source
+        .validate_completeness()
+        .map_err(|error| error.to_string())?;
+    let mut lock = load_strict(project_root)?.unwrap_or_else(empty_lock);
     lock.version = LOCK_VERSION;
     if let Some(existing) = lock
         .source_channels
         .iter_mut()
-        .find(|s| s.name == source.name)
+        .find(|entry| entry.name == source.name)
     {
         *existing = source;
     } else {
         lock.source_channels.push(source);
     }
+    lock.validate_completeness()
+        .map_err(|error| error.to_string())?;
     ensure_build_stamp(project_root, &mut lock);
-    publish_lock_or_report(project_root, &write(&lock));
+    write_lock_atomically(project_root, write(&lock).as_bytes())
+        .map_err(|error| format!("could not write `{}`: {error}", Syntax::UNIFIED_LOCK_FILE))
 }
 
 /// D-RINGLAYER1=A M2: set manifest `runtime:` ceiling on locked packages at fetch time.
@@ -4060,57 +4526,54 @@ pub fn layer_from_manifest(manifest: &Manifest) -> Option<crate::Syntax::Runtime
     manifest.package.layer
 }
 
-/// Check that every dep in the manifest is represented in the lock file.
-/// Returns E1202 if the lock is stale.
+/// Check that the lock still describes each manifest dependency's declared
+/// source. This is intentionally stale-only: missing generated facts are
+/// returned by [`verify_all_manifest_deps_locked`] as a typed
+/// [`LockCompletenessError`].
 pub fn verify_lock_matches_manifest(
     lock: &LockFile,
     manifest: &Manifest,
     _lock_path: &str,
 ) -> Result<(), Diagnostic> {
-    let locked_names: BTreeSet<&str> = lock.packages.iter().map(|p| p.name.as_str()).collect();
+    for (dep_name, spec) in &manifest.dependencies {
+        let Some(package) = lock.packages.iter().find(|package| &package.name == dep_name) else {
+            // The stronger typed verifier owns the distinction between a
+            // missing package record and a stale source identity.
+            continue;
+        };
 
-    for (dep_name, _spec) in &manifest.dependencies {
-        // Root package deps must appear in the lock.
-        if !lock.root_dependencies.contains(dep_name) && !locked_names.contains(dep_name.as_str()) {
+        let source_matches = match (spec, &package.source) {
+            (DepSpec::Path { path }, LockSource::Path(locked_path)) => path == locked_path,
+            (
+                DepSpec::Git { url, selector },
+                LockSource::Git {
+                    url: locked_url,
+                    selector: locked_selector,
+                },
+            ) => url == locked_url && git_selector_str(selector) == *locked_selector,
+            (DepSpec::Registry(_), LockSource::Registry { .. })
+            | (DepSpec::Foreign { .. }, LockSource::Foreign { .. }) => true,
+            _ => false,
+        };
+        if !source_matches {
             return Err(e1202(Syntax::UNIFIED_LOCK_FILE));
         }
     }
     Ok(())
 }
 
-/// Stronger, bidirectional completeness check (D-SUPPLY1, Step 2): every dep
-/// named in the manifest must appear in the lock *and* resolve to a recorded
-/// version. Where `verify_lock_matches_manifest` only checks membership, this
-/// also rejects a lock entry that exists but carries no resolved version —
-/// the case a half-written or hand-edited lock can produce. Fires in
-/// `--locked` CI mode and at publish time. Returns E1217 on the first gap.
+/// Stronger, bidirectional completeness check (D-SUPPLY1, Step 2): every
+/// manifest dependency must have the exact generated facts consumed by a
+/// locked/offline realization. Source-kind mismatches stay with the stale
+/// verifier above so callers can distinguish "regenerate the lock" from
+/// "update the lock for a changed manifest".
 pub fn verify_all_manifest_deps_locked(
     manifest: &Manifest,
     lock: &LockFile,
-) -> Result<(), Diagnostic> {
-    for (dep_name, _spec) in &manifest.dependencies {
-        match lock.packages.iter().find(|p| &p.name == dep_name) {
-            None => return Err(e1217(dep_name)),
-            Some(pkg) if pkg.version.trim().is_empty() => return Err(e1217(dep_name)),
-            Some(_) => {}
-        }
-    }
-    Ok(())
+) -> Result<(), LockCompletenessError> {
+    validate_manifest_lock_completeness(manifest, lock)
 }
 
-/// E1217 — a dependency in the manifest has no locked, resolved revision.
-pub fn e1217(dep_name: &str) -> Diagnostic {
-    Diagnostic::error(
-        "E1217",
-        format!("`{}` is in {} but has no locked revision", dep_name, Syntax::PACKAGE_FILE),
-        format!(
-            "a `--locked` build (and `jet registry publish`) requires every dependency to be pinned in {} to a resolved version, so the build is reproducible. `{}` is declared but not pinned.",
-            Syntax::UNIFIED_LOCK_FILE, dep_name
-        ),
-        format!("run `jet fetch` to resolve and pin `{}`, then commit {}.", dep_name, Syntax::UNIFIED_LOCK_FILE),
-        None,
-    )
-}
 
 // ──────────────────────────────────────────────
 // Fingerprint computation
@@ -4141,34 +4604,6 @@ pub fn compute_fingerprint(tree_hash: &str, dep_fingerprints: &[&str], cap_diges
     format!("sha256-{}", sha256_hex(&data))
 }
 
-/// Verify the fingerprint of a stored package entry.
-/// Returns E1204 if it doesn't match.
-pub fn verify_store_fingerprint(
-    pkg_name: &str,
-    stored_path: &Path,
-    expected_fingerprint: &str,
-) -> Result<(), Diagnostic> {
-    if !stored_path.is_dir() {
-        return Err(Diagnostic::error(
-            "E1204",
-            format!("the store entry for `{}` is missing", pkg_name),
-            "a package source tree must be in the store before it can be used".to_string(),
-            "run `jet fetch` to re-download the package".to_string(),
-            None,
-        ));
-    }
-    let actual = crate::SHA256::tree_hash(stored_path);
-    // The stored tree hash is the first component of the fingerprint computation.
-    // For simple verification, we re-compute the tree hash and compare.
-    // (A full fingerprint would need dep fingerprints, but tree hash suffices for tamper detection.)
-    if !expected_fingerprint.is_empty() {
-        // Extract the tree hash from the stored directory by looking at the plan.
-        // For the simple case: if the directory tree hash doesn't match the expected tree hash
-        // embedded in the fingerprint, report tamper.
-        let _ = actual; // We compare against expected by rebuilding from stored path.
-    }
-    Ok(())
-}
 
 /// E1201 with two dependency chain descriptions.
 pub fn e1201(
@@ -4218,6 +4653,19 @@ pub fn e1202(_lock_path: &str) -> Diagnostic {
 pub fn e1205_lock_corrupt(lock_path: &str) -> Diagnostic {
     Diagnostic::from_row("E1205", &[("path", lock_path)], None)
 }
+/// E1214 — the lock declares a format version outside this reader's support set.
+pub fn e1214_lock_unsupported(lock_path: &str, version: &str, supported: &str) -> Diagnostic {
+    Diagnostic::from_row(
+        "E1214",
+        &[
+            ("path", lock_path),
+            ("version", version),
+            ("supported", supported),
+        ],
+        None,
+    )
+}
+
 
 /// E1202 for a workspace lock whose source/index identity cannot be trusted.
 pub fn e1202_workspace(lock_path: &str) -> Diagnostic {
@@ -4324,7 +4772,6 @@ mod a4_envelope_tests {
         }
     }
 
-
     fn pkg_with(name: &str, envelope: Option<LockEnvelope>) -> LockedPackage {
         LockedPackage {
             name: name.to_string(),
@@ -4370,10 +4817,8 @@ mod a4_envelope_tests {
 
     #[test]
     fn record_nix_lock_uses_canonical_source_exact() {
-        let root = std::env::temp_dir().join(format!(
-            "jet-lock-canonical-source-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("jet-lock-canonical-source-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join(".jet")).unwrap();
         let output = nix_digest('1');
@@ -4398,14 +4843,85 @@ mod a4_envelope_tests {
             .expect("recorded Nix source channel");
         assert_eq!(
             channel.exact,
-            format!(
-                "github:NixOS/nixpkgs#{}",
-                "a".repeat(40)
-            )
+            format!("github:NixOS/nixpkgs#{}", "a".repeat(40))
         );
         assert!(lock.packages.iter().any(|package| {
             package.name == "ripgrep" && matches!(package.source, LockSource::Nix { .. })
         }));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn record_rust_bridge_projects_into_the_unified_lock() {
+        let root = std::env::var_os("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join(".cache")
+            .join("jet-test-scratch")
+            .join("ExternRust2432")
+            .join("scratch")
+            .join(format!("lock-rust-bridge-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join(".jet")).unwrap();
+        let bridge_package = |version: &str, output: &str, bridge_key: &str| {
+            let mut package = pkg_with("base64", None);
+            package.version = version.into();
+            package.content_hash = Some("sha256-cargo-checksum".into());
+            package.source = LockSource::Foreign {
+                language: crate::AST::ForeignLanguage::Rust,
+                reference: format!("base64@{version}"),
+                output: output.into(),
+            };
+            package.provenance = Some(DependencyProvenance {
+                build: Some(format!("{RUST_BRIDGE_PROVENANCE_PREFIX}{bridge_key}")),
+                ..DependencyProvenance::default()
+            });
+            package
+        };
+        record_rust_bridge(
+            &root,
+            "bridge-key",
+            vec![bridge_package("0.22.1", "sha256-bridge", "bridge-key")],
+        )
+        .unwrap();
+        let lock = parse(&std::fs::read_to_string(root.join(".jet/lock")).unwrap()).unwrap();
+        let bridge_records = lock
+            .packages
+            .iter()
+            .filter(|package| package.name == "base64")
+            .collect::<Vec<_>>();
+        assert_eq!(bridge_records.len(), 1);
+        let record = bridge_records[0];
+        assert_eq!(record.version, "0.22.1");
+        assert_eq!(
+            record.content_hash.as_deref(),
+            Some("sha256-cargo-checksum")
+        );
+        assert!(matches!(
+            &record.source,
+            LockSource::Foreign {
+                language: crate::AST::ForeignLanguage::Rust,
+                reference,
+                output,
+            } if reference == "base64@0.22.1" && output == "sha256-bridge"
+        ));
+
+        // A later bridge build replaces the earlier projection instead of
+        // stacking a second record for the same crate.
+        record_rust_bridge(
+            &root,
+            "bridge-key-2",
+            vec![bridge_package("0.22.2", "sha256-bridge-2", "bridge-key-2")],
+        )
+        .unwrap();
+        let lock = parse(&std::fs::read_to_string(root.join(".jet/lock")).unwrap()).unwrap();
+        let versions = lock
+            .packages
+            .iter()
+            .filter(|package| package.name == "base64")
+            .map(|package| package.version.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(versions, vec!["0.22.2"]);
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -4447,12 +4963,7 @@ mod a4_envelope_tests {
         ]
         .concat();
         let output = nix_digest('a');
-        let mut envelope = env(
-            &output,
-            "x86_64-linux",
-            &tricky("signature"),
-            &local_nix,
-        );
+        let mut envelope = env(&output, "x86_64-linux", &tricky("signature"), &local_nix);
         envelope.catalog_tier = tricky("catalog-tier");
         envelope.catalog_trust = tricky("catalog-trust");
 
@@ -4583,7 +5094,6 @@ mod a4_envelope_tests {
         let invalid_non_nix = base_lock(vec![non_nix], Vec::new());
         assert!(parse(&write(&invalid_non_nix)).is_err());
     }
-
 
     #[test]
     fn lock_writer_deduplicates_replayed_records_and_stays_bounded() {
@@ -4745,7 +5255,7 @@ mod a4_envelope_tests {
         let path = dir.join(Syntax::UNIFIED_LOCK_FILE);
         let mut first = None;
         for cycle in 1..=32 {
-            record_source_channel(&dir, source.clone());
+            record_source_channel(&dir, source.clone()).expect("valid test lock record");
             let bytes = std::fs::read(&path).unwrap();
             assert!(bytes.len() <= MAX_LOCK_BYTES);
             if let Some(expected) = &first {
@@ -4823,10 +5333,11 @@ mod a4_envelope_tests {
     #[test]
     fn lock_roundtrips_the_manifest_authority_shape() {
         let authority = crate::Package::PackageAuthority {
-            holds: crate::Package::AuthorityHolds {
+            holds: crate::Package::Blocks::AuthorityHolds {
                 allow: Some(vec!["Net".to_string()]),
                 deny: Some(vec!["Exec".to_string()]),
             },
+            needs: vec!["FS.Read".to_string(), "Net.Connect".to_string()],
             grants: vec![("image-codec".to_string(), vec!["FS.Read".to_string()])],
             trust: Some(crate::Package::TrustPolicy {
                 default: Some(crate::Package::TrustDecision::Prompt),
@@ -4850,6 +5361,7 @@ mod a4_envelope_tests {
             "missing root authority: {raw}"
         );
         assert!(raw.contains("holds: {"), "missing authority holds: {raw}");
+        assert!(raw.contains("needs:"), "missing authority needs: {raw}");
         assert!(raw.contains("grants: {"), "missing authority grants: {raw}");
         assert!(raw.contains("trust: {"), "missing authority trust: {raw}");
         assert!(
@@ -5101,14 +5613,45 @@ priority = 2
         assert!(parse("version = 0\n").is_err());
         assert!(parse("version = 1\n[root]\ndependencies = nope\n").is_err());
     }
+    #[test]
+    fn previous_lock_fixture_is_rejected_with_registered_diagnostic() {
+        let raw = include_str!("../../../tests/fixtures/build-metadata-compat/lock-v0.lock");
+        assert_eq!(
+            parse(raw).expect_err("previous lock schema must be rejected"),
+            "unsupported lock version 0; expected 1"
+        );
+        let diagnostic = parse_with_path(raw, Path::new(".jet/lock"))
+            .expect_err("previous lock schema must map to the lock diagnostic");
+        assert_eq!(diagnostic.code, "E1214");
+        assert!(!diagnostic.what.is_empty());
+        assert!(!diagnostic.why.is_empty());
+        assert!(!diagnostic.fix.is_empty());
+    }
+
+    #[test]
+    fn unsupported_lock_version_renders_registered_snapshot() {
+        let raw = include_str!("../../../tests/fixtures/build-metadata-compat/lock-v0.lock");
+        let lock_path = Path::new(".jet/lock");
+        let diagnostic =
+            parse_with_path(raw, lock_path).expect_err("previous lock schema must be rejected");
+        let rendered =
+            crate::Diagnostics::render_all(&lock_path.display().to_string(), "", &[diagnostic]);
+        let snapshot = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join("tests/fixtures/jetpack-diagnostics/E1214.stderr");
+        if std::env::var_os("UPDATE_EXPECT").is_some() {
+            std::fs::write(&snapshot, &rendered).expect("write E1214 snapshot");
+        }
+        assert_eq!(rendered, std::fs::read_to_string(snapshot).expect("read E1214 snapshot"));
+    }
 
     #[test]
     fn lock_parser_preserves_empty_array_members() {
-        let lock = parse(
-            "version = 1\n[root]\ndependencies = [\"\", \"kept\"]\n",
-        )
-        .expect("valid lock array");
-        assert_eq!(lock.root_dependencies, vec![String::new(), "kept".to_string()]);
+        let lock = parse("version = 1\n[root]\ndependencies = [\"\", \"kept\"]\n")
+            .expect("valid lock array");
+        assert_eq!(
+            lock.root_dependencies,
+            vec![String::new(), "kept".to_string()]
+        );
     }
-
 }

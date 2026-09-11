@@ -1,0 +1,44 @@
+// D-SHAPE-ONE1=A / D-SHAPE-PROJECT1=A: one shape fact feeds every projection.
+// `Config` is decoded from JSON text, process arguments, the environment, and
+// an existing typed DB row. Each consumer uses its selected Shape name; no
+// consumer recases or re-derives the field names.
+//
+// Run: APP_PORT=9000 jet run examples/features/serde/shape_projection.jet -- --listen-port 7000
+use core.args as args
+use core.sys as env
+use core.encoding.json as json
+use core.db as db
+
+derive T.LayoutFacts {
+    info :: T.@layout
+    selected :: info[.port_slot]
+    layout_name :: selected.name
+    fn layout_projection(self) String -> "{@layout_name}"
+}
+#[LayoutFacts, CLI]
+struct Config {
+    #[Doc("port to listen on"), Rename(name: "port", json: "port_json", args: "listen-port", env: "APP_PORT", db: "port_col", layout: "port_slot")] port: Int{8080}
+    #[Doc("host to bind"), Rename(name: "host", json: "host_json", args: "bind-host", env: "APP_HOST", db: "host_col", layout: "host_slot")] host: String{"localhost"}
+}
+
+fn run() ![FieldError] {
+    file :: json.decode<Config>("{{\"port_json\": 9000, \"host_json\": \"example\"}}")
+    print(file.port)
+    print(file.host)
+    assert(file.layout_projection() == "port_slot", "layout shape name")
+    flags :: args.decode<Config>()
+    settings :: env.decode<Config>(prefix: "APP_")
+    cfg :: Config.merge(flags, settings)
+    print(cfg.port)
+    print(cfg.host)
+    conn := db.open_memory()
+    policy :: db.policy("shape_config", "true") ?? panic("policy")
+    scoped := conn.with_policy(policy, "owner")
+    _created :: db.migrate(scoped, "shape-config-v1", [SQL{"CREATE TABLE shape_config (port_col INTEGER, host_col TEXT)"}]) ?? panic("migrate")
+    _inserted :: scoped.execute(SQL{"INSERT INTO shape_config (port_col, host_col) VALUES (9100, 'db-host')"}) ?? panic("insert")
+    row :: scoped.query_one(SQL{"SELECT port_col, host_col FROM shape_config"}) ?? panic("query")
+    db_file :: db.decode<Config>(row)
+    print(db_file.port)
+    print(db_file.host)
+    _closed :: scoped.close()
+}

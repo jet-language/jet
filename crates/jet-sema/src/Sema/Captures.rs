@@ -668,6 +668,83 @@ pub(crate) fn block_collect_captures(
     }
 }
 
+fn collect_pattern_bindings(pattern: &Pattern, bound: &mut HashSet<String>) {
+    match pattern {
+        Pattern::Variant { bindings, .. } => {
+            for slot in bindings {
+                if let crate::AST::PatSlot::Bind { name, .. } = slot {
+                    bound.insert(name.clone());
+                }
+            }
+        }
+        Pattern::Present { binding, .. }
+        | Pattern::Ok { binding, .. }
+        | Pattern::Err { binding, .. } => {
+            bound.insert(binding.clone());
+        }
+        Pattern::Struct { fields, .. } => {
+            for field in fields {
+                if let StructPatField::Bind { local, .. } = field {
+                    bound.insert(local.clone());
+                }
+            }
+        }
+        Pattern::Or(alts, ..) => {
+            for alt in alts {
+                collect_pattern_bindings(alt, bound);
+            }
+        }
+        Pattern::StrMatch { parts, .. } => {
+            for part in parts {
+                if let crate::AST::StrMatchPart::Hole { name, .. } = part {
+                    bound.insert(name.clone());
+                }
+            }
+        }
+        Pattern::BinMatch { parts, .. } => {
+            for part in parts {
+                if let crate::AST::BinMatchPart::Hole { name, .. } = part {
+                    bound.insert(name.clone());
+                }
+            }
+        }
+        Pattern::Absent(_) | Pattern::Range { .. } => {}
+    }
+}
+
+fn collect_condition_bindings(expr: &Expr, bound: &mut HashSet<String>) {
+    match expr {
+        Expr::PatternTest { pattern, .. } => collect_pattern_bindings(pattern, bound),
+        Expr::Binary(crate::AST::BinOp::And, left, right, _) => {
+            collect_condition_bindings(left, bound);
+            collect_condition_bindings(right, bound);
+        }
+        Expr::Paren(inner, _) => collect_condition_bindings(inner, bound),
+        _ => {}
+    }
+}
+
+fn collect_condition_captures(
+    expr: &Expr,
+    bound: &HashSet<String>,
+    read: &mut HashSet<String>,
+    mut_cap: &mut HashSet<String>,
+    called: &mut HashSet<String>,
+) {
+    match expr {
+        Expr::Binary(crate::AST::BinOp::And, left, right, _) => {
+            collect_condition_captures(left, bound, read, mut_cap, called);
+            let mut right_bound = bound.clone();
+            collect_condition_bindings(left, &mut right_bound);
+            collect_condition_captures(right, &right_bound, read, mut_cap, called);
+        }
+        Expr::Paren(inner, _) => {
+            collect_condition_captures(inner, bound, read, mut_cap, called);
+        }
+        _ => expr_collect_captures(expr, bound, read, mut_cap, called),
+    }
+}
+
 pub(crate) fn expr_collect_captures(
     e: &Expr,
     bound: &HashSet<String>,
@@ -920,6 +997,26 @@ pub(crate) fn expr_collect_captures(
                 }
             }
         }
+        Expr::If {
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            ..
+        } => {
+            collect_condition_captures(cond, bound, read, mut_cap, called);
+
+            let mut then_bound = bound.clone();
+            collect_condition_bindings(cond, &mut then_bound);
+            block_collect_captures(then_body, &mut then_bound, read, mut_cap, called);
+            expr_collect_captures(then_value, &then_bound, read, mut_cap, called);
+
+            let mut else_bound = bound.clone();
+            block_collect_captures(else_body, &mut else_bound, read, mut_cap, called);
+            expr_collect_captures(else_value, &else_bound, read, mut_cap, called);
+        }
+
         Expr::Paren(inner, _) => expr_collect_captures(inner, bound, read, mut_cap, called),
         _ => {}
     }

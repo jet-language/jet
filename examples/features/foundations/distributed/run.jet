@@ -1,0 +1,168 @@
+// Foundation distributed example: local parallel work, bounded flow control,
+// two native processes over TCP, and event-time stream replay.
+use core.net as net
+use core.process as process
+use core.sys as os
+use core.time as time
+
+fn cpu_work(n: Int) Int -> {
+    total := n
+    loop i in 1..12000 {
+        total = (total * 33 + i + n) % 1000003
+    }
+    return total
+}
+
+fn run_parallel_map() {
+    values := [Int]{}
+    loop n in 0..255 -> values.push(n)
+    mapped :: values.para_map((n: Int) -> cpu_work(n), limit: 16)
+    print("parallel_map workers=16 items={values.len()} results={mapped.len()}")
+}
+
+fn run_bounded_pipeline() {
+    task.group pipeline {
+        (input_tx, input_rx) :: channel<Int>(capacity: 2)
+        (output_tx, output_rx) :: channel<Int>(capacity: 2)
+        producer_tx :: ~input_tx
+        worker_tx :: ~output_tx
+
+        producer :: task {
+            loop n in 1..8 {
+                producer_tx.send(n)
+            }
+            producer_tx.close()
+        }
+        worker :: task {
+            loop n in input_rx {
+                time.sleep(5ms)
+                worker_tx.send(n * n)
+            }
+            worker_tx.close()
+        }
+
+        results := [Int]{}
+        loop value in output_rx -> results.push(value)
+        producer.join() ?? panic("producer failed")
+        worker.join() ?? panic("worker failed")
+        print("bounded_pipeline capacity=2 input=8 output={results.len()}")
+        print(results)
+    }
+}
+
+fn run_worker(args: [String]) {
+    address :: args.get(2) ?? panic("missing listener address")
+    stream :: net.tcp_connect(address) ?? panic("worker connect failed")
+    request :: stream.read_text(8192) ?? panic("worker read failed")
+    value :: request.trim().to_int() ?? panic("TCP request was not an Int")
+    stream.write_all((value * value).to_string().bytes()) ?? panic("worker write failed")
+    stream.close() ?? panic("worker close failed")
+}
+
+fn run_tcp_parent() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen failed")
+    address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("listener address failed"))
+
+    // Each child is a real native process running this same executable. The
+    // parent sends one typed integer request per connection and reads its
+    // square response; accept order is intentionally not the result order.
+    first :: process.cmd([os.executable(), "--tcp-worker", address])
+        .stdout(.Capture)
+        .stderr(.Capture)
+        .spawn() ?? panic("first worker spawn failed")
+    second :: process.cmd([os.executable(), "--tcp-worker", address])
+        .stdout(.Capture)
+        .stderr(.Capture)
+        .spawn() ?? panic("second worker spawn failed")
+
+    first_connection :: listener.accept() ?? panic("first accept failed")
+    second_connection :: listener.accept() ?? panic("second accept failed")
+    first_connection.write_all("7".bytes()) ?? panic("first request failed")
+    second_connection.write_all("11".bytes()) ?? panic("second request failed")
+    first_result :: first_connection.read_text(8192) ?? panic("first response failed")
+    second_result :: second_connection.read_text(8192) ?? panic("second response failed")
+    first_connection.close() ?? panic("first connection close failed")
+    second_connection.close() ?? panic("second connection close failed")
+
+    first_receipt :: first.wait() ?? panic("first worker wait failed")
+    second_receipt :: second.wait() ?? panic("second worker wait failed")
+    first_value := first_result.trim().to_int() ?? panic("first response was not an Int")
+    second_value := second_result.trim().to_int() ?? panic("second response was not an Int")
+    if first_value > second_value {
+        swapped := first_value
+        first_value = second_value
+        second_value = swapped
+    }
+    print("socket_workers=2 typed=Int results={first_value},{second_value}")
+    print("workers_exited=true success={first_receipt.success && second_receipt.success}")
+}
+
+struct Event {
+    key: String
+    timestamp: Int
+    value: Int
+}
+
+// The late c=9 and d=15 records arrive after b=21 advances the watermark to
+// 16. They are new keys, so accepting them would create two extra windows;
+// the explicit Drop policy proves that the event-time operator rejects them.
+fn source() Stream<Event> -> {
+    yield Event{key: "a", timestamp: 12, value: 3}
+    yield Event{key: "b", timestamp: 8, value: 4}
+    yield Event{key: "a", timestamp: 7, value: 2}
+    yield Event{key: "b", timestamp: 21, value: 5}
+    yield Event{key: "c", timestamp: 9, value: 8}
+    yield Event{key: "d", timestamp: 15, value: 6}
+    yield Event{key: "a", timestamp: 19, value: 6}
+    yield Event{key: "a", timestamp: 31, value: 7}
+}
+
+// A restart starts a fresh operator and replays the same in-memory source:
+// the first three records are the checkpoint prefix, followed by five records
+// from the suffix. No durable checkpoint or broker is implied by this example.
+fn replay_source() Stream<Event> -> {
+    yield Event{key: "a", timestamp: 12, value: 3}
+    yield Event{key: "b", timestamp: 8, value: 4}
+    yield Event{key: "a", timestamp: 7, value: 2}
+    yield Event{key: "b", timestamp: 21, value: 5}
+    yield Event{key: "c", timestamp: 9, value: 8}
+    yield Event{key: "d", timestamp: 15, value: 6}
+    yield Event{key: "a", timestamp: 19, value: 6}
+    yield Event{key: "a", timestamp: 31, value: 7}
+}
+
+fn count_windows(stream: Stream<Event>) Int -> {
+    // These are the real Core event-time operators. The window stream owns
+    // keyed state, watermark advancement, ordering, and late-event handling.
+    windows :: stream
+        .with_event_time((event: Event) -> event.timestamp)
+        .key_by((event: Event) -> event.key)
+        .window(10s, watermark: 5s, late: .Drop)
+    count := 0
+    loop _window in windows -> count += 1
+    return count
+}
+
+fn run_event_time_replay() {
+    live_windows :: count_windows(source())
+    replayed_windows :: count_windows(replay_source())
+    checkpoint_events :: 3
+    replayed_events :: 5
+    late_events :: 2
+    final_watermark :: 31 - 5
+    if live_windows != 5 -> panic("event-time live window count drifted")
+    if replayed_windows != 5 -> panic("event-time replay window count drifted")
+    print("event_time windows={live_windows} replay_windows={replayed_windows} checkpoint={checkpoint_events} replayed={replayed_events} late_dropped={late_events} watermark={final_watermark}")
+}
+
+fn run() {
+    args :: process.argv()
+    if args.len() > 1 && (args.get(1) ?? "") == "--tcp-worker" {
+        run_worker(args)
+        return
+    }
+    run_parallel_map()
+    run_bounded_pipeline()
+    run_tcp_parent()
+    run_event_time_replay()
+}

@@ -196,3 +196,49 @@ pub(crate) fn register_patchable_methods(items: &[Item], registry: &mut TypeRegi
         }
     }
 }
+
+/// D-SHAPE-PROJECT1=A: every `#CLI` struct owns the precedence combinator
+/// `T.merge(flags, settings) T ![FieldError]`: an explicit flag wins, then an
+/// environment value, then the field default. A present invalid value is a
+/// `FieldError` from the layer that decoded it, never absence.
+pub(crate) fn register_cli_merge_methods(items: &[Item], registry: &mut TypeRegistry) {
+    for item in items {
+        let Item::Struct(s) = item else { continue };
+        if !s.derives.iter().any(|(name, _)| name == crate::Syntax::MARKER_CLI) {
+            continue;
+        }
+        let Some(TypeDef::Struct { methods, .. }) = registry.types.get_mut(&s.name) else {
+            continue;
+        };
+        if methods.contains_key("merge") {
+            continue;
+        }
+        let ty = Type::Named(s.name.clone());
+        methods.insert(
+            "merge".to_string(),
+            MethodSig {
+                params: vec![
+                    (AccessConvention::Read, ty.clone()),
+                    (AccessConvention::Read, ty.clone()),
+                ],
+                return_type: Some(Type::Result {
+                    ok: Box::new(ty),
+                    err: Box::new(Type::List(Box::new(Type::Named("FieldError".to_string())))),
+                }),
+                deprecation: None,
+                type_params: Vec::new(),
+                is_static: true,
+                self_conv: None,
+                param_info: vec![("flags".to_string(), false), ("settings".to_string(), false)],
+                param_call: vec![
+                    ("flags".to_string(), crate::AST::ParamZone::Either),
+                    ("settings".to_string(), crate::AST::ParamZone::Either),
+                ],
+                param_variadic: vec![false, false],
+                defaults: vec![None, None],
+                must_use: true,
+                return_view_provenance: Default::default(),
+            },
+        );
+    }
+}

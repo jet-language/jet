@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::io;
 use std::path::Path;
 
+use jet_foundation::DataTree::DataTree;
 use jet_foundation::JSON::{json_escape, json_get, json_int, json_str, parse_json};
 use jet_foundation::SHA256::{sha256_file_hex, sha256_hex};
 
@@ -234,7 +235,7 @@ impl LineMap {
         }
         let entries = json_get(&root, "entries")
             .and_then(|value| match value {
-                jet_foundation::JSON::JSONValue::Array(values) => Some(values),
+                DataTree::Array(values) => Some(values),
                 _ => None,
             })
             .ok_or_else(|| "debugger map has no entries".to_string())?;

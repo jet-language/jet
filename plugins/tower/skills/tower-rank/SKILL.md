@@ -10,6 +10,15 @@ description: >-
 
 # Tower — rank the queue
 
+## Contract
+
+- **Requested outcome:** A dependency-safe ordered queue for the requested Tower scope, reported or written through `workOrder`.
+- **Supplied inputs:** Fresh board state, requested scope, blockers, claims, gates, and card refs.
+- **Allowed child result:** `tower`, `tower-ballot`, and `tower-setup` may return board, gate, or setup facts. They do not plan, implement, verify, close, or create another queue.
+- **Completion owner:** `tower-rank` owns ranking; Tower owns any requested `workOrder` writes.
+- **Return point:** Return from each reference read to the same ranking pass.
+- **Stopping condition:** Stop after the queue is reported or requested `workOrder` writes are read back. Do not claim cards or open planning/implementation.
+
 One job: turn live Tower state into a dependency-safe ordered queue. Stop after
 reporting the queue or applying requested `workOrder` values. Planning is
 **tower-prep**. Closing cards is **tower-burndown**.

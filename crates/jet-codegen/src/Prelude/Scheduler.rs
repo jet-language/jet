@@ -42,10 +42,14 @@ fn jet_scheduler_wait_boundary_should_unwind() -> bool {
     JET_SCHEDULER_WAIT_BOUNDARY_DEPTH.with(|depth| depth.get() != 0)
 }
 
-struct JetTypedDeadlineBoundary;
+/// Entered by typed task operations (`JetTask::join` and friends in
+/// `MathTaskMem.rs`) that convert an inherited deadline into their own typed
+/// result. Public because hosts that compile the task kernel beside this
+/// scheduler (the resident JIT) reach it across a module boundary.
+pub struct JetTypedDeadlineBoundary;
 
 impl JetTypedDeadlineBoundary {
-    fn enter() -> Self {
+    pub fn enter() -> Self {
         JET_TYPED_DEADLINE_BOUNDARY_DEPTH
             .with(|depth| depth.set(depth.get().saturating_add(1)));
         Self
@@ -193,15 +197,21 @@ fn jet_scheduler_fatal(msg: &str) -> ! {
 // outcome instead of starting a second one.
 struct JetCancelUnwind;
 
+struct JetDeadlineUnwind {
+    rendered: String,
+}
+
 /// Identify the one internal unwind used by D-CANCELMODEL1=C. Shared
 /// lifecycle helpers use this predicate to keep cancellation out of the
 /// ordinary producer-failure rail.
 pub fn jet_scheduler_is_cancel_unwind(payload: &(dyn std::any::Any + Send)) -> bool {
     payload.is::<JetCancelUnwind>()
 }
-
-struct JetDeadlineUnwind {
-    rendered: String,
+/// Identify the internal deadline unwind used by D-CANCELMODEL1=C. Shared
+/// lifecycle helpers use this predicate to preserve deadline identity at
+/// foreign boundaries instead of classifying it as an ordinary panic.
+pub fn jet_scheduler_is_deadline_unwind(payload: &(dyn std::any::Any + Send)) -> bool {
+    payload.is::<JetDeadlineUnwind>()
 }
 
 fn jet_scheduler_panic_message(payload: &(dyn std::any::Any + Send)) -> String {
@@ -545,6 +555,23 @@ impl jet_std::JetTaskGroupWaiter for ParkSlot {
     }
 }
 
+pub struct JetTaskCancelCallbackGuard {
+    control: std::sync::Weak<JetTaskControl>,
+    id: usize,
+}
+
+impl Drop for JetTaskCancelCallbackGuard {
+    fn drop(&mut self) {
+        if let Some(control) = self.control.upgrade() {
+            control
+                .cancel_callbacks
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .remove(&self.id);
+        }
+    }
+}
+
 pub struct JetTaskControl {
     pub paused: Arc<AtomicBool>,
     pub cancelled: Arc<AtomicBool>,
@@ -553,6 +580,8 @@ pub struct JetTaskControl {
     observe_id: AtomicUsize,
     park: Arc<ParkSlot>,
     cancel_waiters: Mutex<Vec<std::sync::Weak<ParkSlot>>>,
+    cancel_callbacks: Mutex<HashMap<usize, Arc<dyn Fn() + Send + Sync + 'static>>>,
+    next_cancel_callback: AtomicUsize,
 }
 
 impl JetTaskControl {
@@ -564,7 +593,38 @@ impl JetTaskControl {
             observe_id: AtomicUsize::new(0),
             park: ParkSlot::new(),
             cancel_waiters: Mutex::new(Vec::new()),
+            cancel_callbacks: Mutex::new(HashMap::new()),
+            next_cancel_callback: AtomicUsize::new(0),
         })
+    }
+
+    /// Register a short-lived bridge for provider futures and other foreign
+    /// waits.  Cancellation invokes the callback after releasing the registry
+    /// lock, so the callback may wake or tear down its own wait state.
+    pub fn register_cancel_callback(
+        self: &Arc<Self>,
+        callback: Arc<dyn Fn() + Send + Sync + 'static>,
+    ) -> JetTaskCancelCallbackGuard {
+        let id = self.next_cancel_callback.fetch_add(1, Ordering::Relaxed);
+        let invoke_now = {
+            let mut callbacks = self
+                .cancel_callbacks
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if self.cancelled.load(Ordering::Acquire) {
+                true
+            } else {
+                callbacks.insert(id, callback.clone());
+                false
+            }
+        };
+        if invoke_now {
+            callback();
+        }
+        JetTaskCancelCallbackGuard {
+            control: Arc::downgrade(self),
+            id,
+        }
     }
 
     pub fn observe_id_slot(&self) -> &AtomicUsize {
@@ -599,7 +659,7 @@ impl JetTaskControl {
     }
 
     pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Relaxed);
+        self.cancelled.store(true, Ordering::Release);
         if let Some(registry) = jet_observe_registry() {
             let id = self.observe_id.load(Ordering::Relaxed);
             if let Some(task) = registry.tasks.lock().unwrap().get_mut(&id) {
@@ -611,6 +671,15 @@ impl JetTaskControl {
             if let Some(waiter) = waiter.upgrade() {
                 waiter.wake();
             }
+        }
+        let callbacks = std::mem::take(
+            &mut *self
+                .cancel_callbacks
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        );
+        for callback in callbacks.into_values() {
+            callback();
         }
     }
 
@@ -683,6 +752,470 @@ pub fn jet_scheduler_current_task_control() -> Option<Arc<JetTaskControl>> {
 fn current_task_control() -> Option<Arc<JetTaskControl>> {
     TASK_CONTROL.with(|t| t.borrow().clone())
 }
+// D-TEST-WORLD1=A: scoped deterministic execution worlds share this Prelude
+// scheduler. The world is an ordinary cloneable capability backed by isolated
+// state; no process-global clock or second task engine is introduced.
+const JET_WORLD_DEFAULT_BUDGET: usize = 100_000;
+
+struct JetWorldTimer {
+    deadline_ns: i64,
+    sequence: u64,
+    slot: Arc<ParkSlot>,
+}
+
+struct JetWorldState {
+    monotonic_ns: i64,
+    wall_origin_ms: i64,
+    rng: u64,
+    next_sequence: u64,
+    live_tasks: usize,
+    runnable_tasks: usize,
+    budget: usize,
+    timers: Vec<JetWorldTimer>,
+    history: Vec<String>,
+}
+
+#[derive(Clone)]
+pub struct JetDeterministicWorld {
+    state: Arc<Mutex<JetWorldState>>,
+}
+
+impl JetDeterministicWorld {
+    fn new() -> Self {
+        Self {
+            state: Arc::new(Mutex::new(JetWorldState {
+                monotonic_ns: 0,
+                // Unix epoch is a fixed origin. Monotonic advancement never
+                // changes the calendar/time-zone interpretation of the origin.
+                wall_origin_ms: 0,
+                rng: 0x4d595df4d0f33173,
+                next_sequence: 0,
+                live_tasks: 0,
+                runnable_tasks: 0,
+                budget: JET_WORLD_DEFAULT_BUDGET,
+                timers: Vec::new(),
+                history: Vec::new(),
+            })),
+        }
+    }
+
+    pub fn now(&self) -> i64 {
+        let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.wall_origin_ms.saturating_add(state.monotonic_ns / 1_000_000)
+    }
+
+    fn monotonic_ns(&self) -> i64 {
+        self.state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .monotonic_ns
+    }
+
+    fn advance_ns(&self, duration_ns: i64) -> i64 {
+        if duration_ns < 0 {
+            jet_scheduler_fatal(
+                "deterministic world cannot move time backwards; advance requires a non-negative duration",
+            );
+        }
+        let target = {
+            let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            state.monotonic_ns.checked_add(duration_ns).unwrap_or_else(|| {
+                jet_scheduler_fatal("deterministic world clock exhausted its supported range")
+            })
+        };
+        loop {
+            let due = {
+                let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+                let index = state
+                    .timers
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, timer)| timer.deadline_ns <= target)
+                    .min_by_key(|(_, timer)| (timer.deadline_ns, timer.sequence))
+                    .map(|(index, _)| index);
+                let Some(index) = index else {
+                    state.monotonic_ns = target;
+                    state.history.push(format!("advance:{duration_ns}"));
+                    break;
+                };
+                let timer = state.timers.swap_remove(index);
+                state.monotonic_ns = timer.deadline_ns;
+                state.runnable_tasks = state.runnable_tasks.saturating_add(1);
+                state.history.push(format!(
+                    "timer:{}:{}",
+                    timer.deadline_ns, timer.sequence
+                ));
+                timer.slot
+            };
+            due.wake();
+            // One due timer is released at a time. This is the stable
+            // sequence tie-break even when the host has many workers.
+            self.wait_idle();
+        }
+        self.now()
+    }
+
+    fn wait_idle(&self) {
+        let budget = self
+            .state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .budget;
+        for _ in 0..budget {
+            let idle = self
+                .state
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .runnable_tasks
+                == 0;
+            if idle {
+                return;
+            }
+            thread::yield_now();
+        }
+        jet_scheduler_fatal(
+            "deterministic world execution budget exhausted while waiting for idle",
+        );
+    }
+
+    fn ensure_closed(&self) {
+        let live = self
+            .state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .live_tasks;
+        if live != 0 {
+            jet_scheduler_fatal(
+                "deterministic world scope exited with live descendants; cancel and join every task",
+            );
+        }
+    }
+
+    fn task_spawned(&self) {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.live_tasks = state.live_tasks.saturating_add(1);
+        state.runnable_tasks = state.runnable_tasks.saturating_add(1);
+        state.history.push("task:spawn".to_string());
+    }
+
+    fn task_finished(&self, waiting: bool, slot: Option<&Arc<ParkSlot>>) {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        if waiting {
+            let removed = slot.and_then(|slot| {
+                state
+                    .timers
+                    .iter()
+                    .position(|timer| Arc::ptr_eq(&timer.slot, slot))
+            });
+            if let Some(index) = removed {
+                state.timers.swap_remove(index);
+            } else {
+                // A due timer already incremented runnable_tasks before this
+                // task was cancelled or panicked.
+                state.runnable_tasks = state.runnable_tasks.saturating_sub(1);
+            }
+        } else {
+            state.runnable_tasks = state.runnable_tasks.saturating_sub(1);
+        }
+        state.live_tasks = state.live_tasks.saturating_sub(1);
+        state.history.push("task:finish".to_string());
+    }
+
+    fn park(&self, duration_ns: i64, slot: Arc<ParkSlot>) {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        let deadline_ns = state
+            .monotonic_ns
+            .checked_add(duration_ns)
+            .unwrap_or_else(|| jet_scheduler_fatal("deterministic world timer overflowed"));
+        let sequence = state.next_sequence;
+        state.next_sequence = sequence.wrapping_add(1);
+        state.runnable_tasks = state.runnable_tasks.saturating_sub(1);
+        state.timers.push(JetWorldTimer {
+            deadline_ns,
+            sequence,
+            slot,
+        });
+        state.history.push(format!("timer:register:{deadline_ns}:{sequence}"));
+    }
+
+    fn finish_park(&self, slot: &Arc<ParkSlot>) -> bool {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        let removed = state
+            .timers
+            .iter()
+            .position(|timer| Arc::ptr_eq(&timer.slot, slot));
+        if let Some(index) = removed {
+            state.timers.swap_remove(index);
+            state.runnable_tasks = state.runnable_tasks.saturating_add(1);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn rng_next(&self) -> u64 {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        let mut x = state.rng;
+        x ^= x << 7;
+        x ^= x >> 9;
+        x = x.wrapping_mul(0x9e3779b97f4a7c15);
+        state.rng = x;
+        state.history.push(format!("rng:{x}"));
+        x
+    }
+
+    fn rng_seed(&self, seed: i64) {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.rng = seed as u64;
+        state.history.push(format!("rng:seed:{}", seed as u64));
+    }
+
+    fn history(&self) -> String {
+        self.state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .history
+            .join("\n")
+    }
+}
+
+thread_local! {
+    static JET_ACTIVE_WORLD: std::cell::RefCell<Option<JetDeterministicWorld>> =
+        const { std::cell::RefCell::new(None) };
+    static JET_WORLD_TASK_ACTIVE: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+    static JET_WORLD_TASK_WAITING: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+    static JET_WORLD_TASK_SLOT: std::cell::RefCell<Option<Arc<ParkSlot>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+pub fn jet_scheduler_current_world() -> Option<JetDeterministicWorld> {
+    JET_ACTIVE_WORLD.with(|world| world.borrow().clone())
+}
+
+pub fn jet_scheduler_world_now_ms() -> Option<i64> {
+    jet_scheduler_current_world().map(|world| world.now())
+}
+
+pub fn jet_scheduler_world_monotonic_now_ns() -> Option<i64> {
+    jet_scheduler_current_world().map(|world| world.monotonic_ns())
+}
+
+
+/// Fail closed when a host boundary has no provider that can replay inside a
+/// deterministic world. Time, seeded pseudo-randomness, and scheduler waits
+/// use their dedicated seams; external effects must never silently use host
+/// state from inside the world.
+pub fn jet_scheduler_world_reject_uncontrolled(effect: &'static str) {
+    if jet_scheduler_current_world().is_none() {
+        return;
+    }
+    let message = match effect {
+        "network" => "deterministic world has no controlled network provider",
+        "foreign" => "deterministic world has no controlled foreign provider",
+        "entropy" => "deterministic world has no controlled entropy provider",
+        "clock" => "deterministic world has no controlled clock provider",
+        _ => "deterministic world has no controlled external-effect provider",
+    };
+    jet_scheduler_fatal(message);
+}
+
+/// Whether the current thread is running one of the world's counted tasks.
+pub fn jet_scheduler_world_task_active() -> bool {
+    JET_WORLD_TASK_ACTIVE.with(|active| active.get())
+}
+
+pub fn jet_scheduler_world_rng_next() -> Option<u64> {
+    jet_scheduler_current_world().map(|world| world.rng_next())
+}
+
+pub fn jet_scheduler_world_rng_seed(seed: i64) -> bool {
+    let Some(world) = jet_scheduler_current_world() else {
+        return false;
+    };
+    world.rng_seed(seed);
+    true
+}
+
+struct JetWorldScope {
+    previous: Option<JetDeterministicWorld>,
+    previous_provider: Option<JetMonotonicProvider>,
+}
+
+impl Drop for JetWorldScope {
+    fn drop(&mut self) {
+        jet_time_monotonic_provider_set(self.previous_provider.take());
+        JET_ACTIVE_WORLD.with(|world| {
+            *world.borrow_mut() = self.previous.take();
+        });
+    }
+}
+
+impl JetDeterministicWorld {
+    fn enter(&self) -> JetWorldScope {
+        let previous = JET_ACTIVE_WORLD.with(|world| {
+            let mut world = world.borrow_mut();
+            if world.is_some() {
+                jet_scheduler_fatal(
+                    "deterministic world nesting is ambiguous; use the parent world explicitly",
+                );
+            }
+            world.replace(self.clone())
+        });
+        let previous_provider =
+            jet_time_monotonic_provider_set(Some(jet_scheduler_world_monotonic_now_ns));
+        JetWorldScope {
+            previous,
+            previous_provider,
+        }
+    }
+}
+
+struct JetWorldTaskScope {
+    world: JetDeterministicWorld,
+    previous: Option<JetDeterministicWorld>,
+    previous_provider: Option<JetMonotonicProvider>,
+}
+
+impl Drop for JetWorldTaskScope {
+    fn drop(&mut self) {
+        let waiting = JET_WORLD_TASK_WAITING.with(|waiting| waiting.get());
+        let slot = JET_WORLD_TASK_SLOT.with(|slot| slot.borrow().clone());
+        self.world.task_finished(waiting, slot.as_ref());
+        JET_WORLD_TASK_ACTIVE.with(|active| active.set(false));
+        JET_WORLD_TASK_WAITING.with(|waiting| waiting.set(false));
+        JET_WORLD_TASK_SLOT.with(|slot| *slot.borrow_mut() = None);
+        jet_time_monotonic_provider_set(self.previous_provider.take());
+        JET_ACTIVE_WORLD.with(|world| {
+            *world.borrow_mut() = self.previous.take();
+        });
+    }
+}
+
+fn jet_scheduler_world_task_enter(
+    world: Option<JetDeterministicWorld>,
+) -> Option<JetWorldTaskScope> {
+    world.map(|world| {
+        let previous = JET_ACTIVE_WORLD.with(|active| active.borrow_mut().replace(world.clone()));
+        let previous_provider =
+            jet_time_monotonic_provider_set(Some(jet_scheduler_world_monotonic_now_ns));
+        JET_WORLD_TASK_ACTIVE.with(|active| active.set(true));
+        JET_WORLD_TASK_WAITING.with(|waiting| waiting.set(false));
+        JET_WORLD_TASK_SLOT.with(|slot| *slot.borrow_mut() = None);
+        JetWorldTaskScope {
+            world,
+            previous,
+            previous_provider,
+        }
+    })
+}
+
+fn jet_scheduler_world_park(world: &JetDeterministicWorld, duration: Duration, slot: Arc<ParkSlot>) {
+    world.park(duration.as_nanos().min(i64::MAX as u128) as i64, slot.clone());
+    JET_WORLD_TASK_WAITING.with(|waiting| waiting.set(true));
+    JET_WORLD_TASK_SLOT.with(|current| *current.borrow_mut() = Some(slot));
+}
+fn jet_scheduler_world_begin_wait(world: &JetDeterministicWorld, slot: Arc<ParkSlot>) {
+    let already_waiting = JET_WORLD_TASK_WAITING.with(|waiting| waiting.get());
+    if already_waiting {
+        return;
+    }
+    let mut state = world.state.lock().unwrap_or_else(|error| error.into_inner());
+    state.runnable_tasks = state.runnable_tasks.saturating_sub(1);
+    drop(state);
+    JET_WORLD_TASK_WAITING.with(|waiting| waiting.set(true));
+    JET_WORLD_TASK_SLOT.with(|current| *current.borrow_mut() = Some(slot));
+}
+
+
+fn jet_scheduler_world_finish_park(world: &JetDeterministicWorld, slot: &Arc<ParkSlot>) {
+    if JET_WORLD_TASK_WAITING.with(|waiting| waiting.get()) {
+        world.finish_park(slot);
+        JET_WORLD_TASK_WAITING.with(|waiting| waiting.set(false));
+        JET_WORLD_TASK_SLOT.with(|current| *current.borrow_mut() = None);
+    }
+}
+
+pub fn jet_testing_world<F, T>(callback: F) -> T
+where
+    F: FnOnce(JetDeterministicWorld) -> T,
+{
+    let world = JetDeterministicWorld::new();
+    let _scope = world.enter();
+    let value = callback(world.clone());
+    world.wait_idle();
+    world.ensure_closed();
+    value
+}
+
+pub fn jet_world_now(world: &JetDeterministicWorld) -> i64 {
+    world.now()
+}
+
+pub fn jet_world_advance(world: &JetDeterministicWorld, duration_ns: i64) -> i64 {
+    world.advance_ns(duration_ns)
+}
+
+pub fn jet_world_wait_idle(world: &JetDeterministicWorld) {
+    world.wait_idle();
+}
+
+pub fn jet_world_history(world: &JetDeterministicWorld) -> String {
+    world.history()
+}
+
+
+// D-FOUND-LIFECYCLE1=A: the program root uses the same task-control carrier as
+// spawned tasks. It is lazy so a program that never subscribes to a signal
+// pays no setup cost, and replacement after cancellation keeps resident runs
+// independent without introducing a second lifecycle object.
+static JET_ROOT_TASK_CONTROL: std::sync::LazyLock<Mutex<Option<Arc<JetTaskControl>>>> =
+    std::sync::LazyLock::new(|| Mutex::new(None));
+
+pub fn jet_scheduler_root_task_control() -> Arc<JetTaskControl> {
+    let mut root = JET_ROOT_TASK_CONTROL
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let replace = root
+        .as_ref()
+        .map_or(true, |control| control.cancelled.load(Ordering::Relaxed));
+    if replace {
+        *root = Some(JetTaskControl::new());
+    }
+    root.as_ref()
+        .expect("root task control must be initialized")
+        .clone()
+}
+
+struct JetRootTaskControlScope {
+    previous: Option<Arc<JetTaskControl>>,
+}
+
+impl Drop for JetRootTaskControlScope {
+    fn drop(&mut self) {
+        TASK_CONTROL.with(|slot| {
+            *slot.borrow_mut() = self.previous.take();
+        });
+    }
+}
+
+/// Run the program entry under the shared root task control. Engines use this
+/// only to compose their entry boundary; cancellation and wait-point policy
+/// remain in this Prelude scheduler.
+pub fn jet_scheduler_with_root_control<F, T>(body: F) -> T
+where
+    F: FnOnce() -> T,
+{
+    if current_task_control().is_some() {
+        return body();
+    }
+    let control = jet_scheduler_root_task_control();
+    let previous = TASK_CONTROL.with(|slot| slot.replace(Some(control)));
+    let _scope = JetRootTaskControlScope { previous };
+    body()
+}
+
 
 pub fn jet_scheduler_task_completion_begin() {
     TASK_COMPLETION_ACTIVE.with(|active| {
@@ -761,6 +1294,12 @@ pub fn jet_scheduler_loop_pause_check() {
 }
 
 pub fn jet_scheduler_yield(wait_kind: &str, slot: &Arc<ParkSlot>, timeout: Option<Duration>) {
+    let active_world = jet_scheduler_current_world();
+    if let Some(world) = active_world.as_ref() {
+        if current_task_control().is_some() {
+            jet_scheduler_world_begin_wait(world, slot.clone());
+        }
+    }
     let observe_task = current_task_control().is_some();
     if observe_task {
         jet_observe_task_update("blocked", wait_kind, jet_deadline_remaining_ms());
@@ -790,7 +1329,17 @@ pub fn jet_scheduler_yield(wait_kind: &str, slot: &Arc<ParkSlot>, timeout: Optio
             ctrl.wait_while_paused();
         }
     }
-    if shielded {
+    let virtual_wait = JET_WORLD_TASK_WAITING.with(|waiting| waiting.get());
+    if virtual_wait {
+        // A controlled world has no wall-clock timeout. It wakes this slot only
+        // when the world advances or another controlled event signals it. A
+        // zero-duration cooperative yield remains an immediate scheduler yield.
+        slot.park(if timeout.is_some_and(|duration| duration.is_zero()) {
+            timeout
+        } else {
+            None
+        });
+    } else if shielded {
         // Shielded: ignore the deadline too; wait on the real event only.
         slot.park(timeout);
     } else if let Some(remaining) = jet_deadline_remaining_ms() {
@@ -825,6 +1374,9 @@ pub fn jet_scheduler_yield(wait_kind: &str, slot: &Arc<ParkSlot>, timeout: Optio
             }
         }
         ctrl.wait_while_paused();
+    }
+    if let Some(world) = active_world.as_ref() {
+        jet_scheduler_world_finish_park(world, slot);
     }
     if observe_task {
         jet_observe_task_update("running", "", jet_deadline_remaining_ms());
@@ -941,6 +1493,86 @@ impl TimerWheel {
         }
     }
 }
+/// Owner-thread deadline queue used by evaluator-side callback pumps.
+///
+/// The queue deliberately stores only absolute monotonic deadlines and opaque
+/// task IDs. Callback values stay in the owner runtime, so scheduler policy
+/// cannot accidentally acquire tier-specific value or closure semantics.
+#[derive(Clone, Copy)]
+struct OwnerDeadlineEntry {
+    deadline_ns: i64,
+    task_id: u64,
+}
+
+struct OwnerDeadlineQueue {
+    next_id: u64,
+    entries: Vec<OwnerDeadlineEntry>,
+}
+
+impl OwnerDeadlineQueue {
+    const fn new() -> Self {
+        Self {
+            next_id: 1,
+            entries: Vec::new(),
+        }
+    }
+}
+
+thread_local! {
+    static JET_OWNER_DEADLINE_QUEUE: std::cell::RefCell<OwnerDeadlineQueue> =
+        const { std::cell::RefCell::new(OwnerDeadlineQueue::new()) };
+}
+
+/// Register one opaque owner-thread task at an absolute monotonic deadline.
+pub fn jet_scheduler_owner_deadline_register(deadline_ns: i64) -> u64 {
+    JET_OWNER_DEADLINE_QUEUE.with(|queue| {
+        let mut queue = queue.borrow_mut();
+        let task_id = queue.next_id;
+        queue.next_id = task_id.checked_add(1).unwrap_or(1);
+        queue.entries.push(OwnerDeadlineEntry {
+            deadline_ns,
+            task_id,
+        });
+        task_id
+    })
+}
+
+/// Cancel an owner-thread task. Unknown IDs are already complete or canceled.
+pub fn jet_scheduler_owner_deadline_cancel(task_id: u64) {
+    JET_OWNER_DEADLINE_QUEUE.with(|queue| {
+        queue
+            .borrow_mut()
+            .entries
+            .retain(|entry| entry.task_id != task_id);
+    });
+}
+
+/// Return the earliest queued absolute deadline without removing its task.
+pub fn jet_scheduler_owner_deadline_next() -> Option<i64> {
+    JET_OWNER_DEADLINE_QUEUE.with(|queue| {
+        queue
+            .borrow()
+            .entries
+            .iter()
+            .min_by_key(|entry| (entry.deadline_ns, entry.task_id))
+            .map(|entry| entry.deadline_ns)
+    })
+}
+
+/// Remove and return the earliest task whose deadline is due.
+pub fn jet_scheduler_owner_deadline_pop_due(now_ns: i64) -> Option<u64> {
+    JET_OWNER_DEADLINE_QUEUE.with(|queue| {
+        let mut queue = queue.borrow_mut();
+        let index = queue
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| entry.deadline_ns <= now_ns)
+            .min_by_key(|(_, entry)| (entry.deadline_ns, entry.task_id))
+            .map(|(index, _)| index)?;
+        Some(queue.entries.swap_remove(index).task_id)
+    })
+}
 
 static TIMER_WHEEL: OnceLock<Arc<TimerWheel>> = OnceLock::new();
 
@@ -959,7 +1591,34 @@ fn timer_wheel() -> Arc<TimerWheel> {
 }
 
 pub fn jet_scheduler_sleep_ms(millis: u64) {
-    jet_scheduler_park_ms("time sleep", millis);
+    jet_scheduler_park_duration("time sleep", Duration::from_millis(millis));
+}
+
+/// Park for an exact nanosecond duration through the shared timer wheel.
+pub fn jet_scheduler_park_duration(wait_kind: &'static str, duration: Duration) {
+    if duration.is_zero() {
+        return;
+    }
+    if let Some(world) = jet_scheduler_current_world() {
+        if !JET_WORLD_TASK_ACTIVE.with(|active| active.get()) {
+            jet_scheduler_fatal(
+                "deterministic world sleep requires a controlled scheduler task",
+            );
+        }
+        let slot = ParkSlot::new();
+        jet_scheduler_world_park(&world, duration, slot.clone());
+        // The world wait path never supplies a real timeout. Its virtual
+        // timer is released only by `world.advance(...)`.
+        jet_scheduler_yield(wait_kind, &slot, None);
+        return;
+    }
+    let slot = ParkSlot::new();
+    timer_wheel().schedule(Instant::now() + duration, slot.clone());
+    jet_scheduler_yield(wait_kind, &slot, Some(duration));
+}
+
+pub fn jet_scheduler_park_ms(wait_kind: &'static str, millis: u64) {
+    jet_scheduler_park_duration(wait_kind, Duration::from_millis(millis));
 }
 
 /// Canonical default for a non-negative task delay. All execution tiers call
@@ -967,6 +1626,12 @@ pub fn jet_scheduler_sleep_ms(millis: u64) {
 pub fn jet_task_delay_ms_defaulted(millis: i64) -> u64 {
     millis.max(0) as u64
 }
+
+/// Canonical default for an exact non-negative task delay.
+pub fn jet_task_delay_duration_ns_defaulted(nanos: i64) -> Duration {
+    Duration::from_nanos(nanos.max(0) as u64)
+}
+
 
 /// Canonical default for an interval period. Intervals make progress at least
 /// once per millisecond instead of spinning on a zero or negative period.
@@ -980,13 +1645,20 @@ pub fn jet_task_interval_ms_defaulted(millis: i64) -> u64 {
 /// unwind is in flight (#2007) — a `defer`red sleep finishes the cleanup instead
 /// of raising a second time.
 pub fn jet_task_sleep_ms_defaulted(millis: i64) {
-    let delay = jet_task_delay_ms_defaulted(millis);
+    jet_task_sleep_duration_defaulted(Duration::from_millis(jet_task_delay_ms_defaulted(millis)));
+}
+
+pub fn jet_task_sleep_duration_ns_defaulted(nanos: i64) {
+    jet_task_sleep_duration_defaulted(jet_task_delay_duration_ns_defaulted(nanos));
+}
+
+fn jet_task_sleep_duration_defaulted(duration: Duration) {
     if !jet_scheduler_shielded()
         && jet_std::jet_task_deadline_if_expired(jet_deadline_remaining_ms(), "time sleep").is_some()
     {
         jet_deadline_exceeded("time sleep");
     }
-    jet_scheduler_sleep_ms(delay);
+    jet_scheduler_park_duration("time sleep", duration);
     if !jet_scheduler_shielded()
         && jet_std::jet_task_deadline_if_expired(jet_deadline_remaining_ms(), "time sleep").is_some()
     {
@@ -994,14 +1666,6 @@ pub fn jet_task_sleep_ms_defaulted(millis: i64) {
     }
 }
 
-pub fn jet_scheduler_park_ms(wait_kind: &'static str, millis: u64) {
-    if millis == 0 {
-        return;
-    }
-    let slot = ParkSlot::new();
-    timer_wheel().schedule(Instant::now() + Duration::from_millis(millis), slot.clone());
-    jet_scheduler_yield(wait_kind, &slot, Some(Duration::from_millis(millis)));
-}
 
 pub fn jet_scheduler_yield_now() {
     let slot = ParkSlot::new();
@@ -1972,6 +2636,7 @@ fn jet_scheduler_raw_io_wait(
     writable: bool,
     wait_kind: &str,
 ) -> (bool, bool) {
+    jet_scheduler_world_reject_uncontrolled("network");
     let poller = jet_raw_io_poller();
     let Some(registration) = poller.register(handle.clone(), readable, writable) else {
         return (false, false);
@@ -2128,6 +2793,7 @@ fn io_poller() -> Arc<IOPoller> {
 
 /// Park until `stream` looks readable or writable (non-blocking probe via poller).
 pub fn jet_scheduler_io_wait(stream: &TcpStream, read: bool, write: bool, wait_kind: &str) {
+    jet_scheduler_world_reject_uncontrolled("network");
     let shared = Arc::new(Mutex::new(stream.try_clone().expect("tcp clone")));
     let poller = io_poller();
     let (id, slot) = poller
@@ -2143,6 +2809,7 @@ pub fn jet_scheduler_io_wait(stream: &TcpStream, read: bool, write: bool, wait_k
         jet_scheduler_fatal(error);
     }
 }
+
 
 // ── M2: scheduler-integrated channel (wake-on-send) ────────────────────────────
 
@@ -2862,7 +3529,7 @@ pub struct JetSchedulerJoin<T> {
 pub enum JetSchedulerTaskPoll {
     Pending,
     Complete(u128),
-    Failed(jet_std::JetTaskFailure, u128),
+    Failed(JetTaskFailure, u128),
 }
 
 
@@ -2919,13 +3586,13 @@ impl<T> JetSchedulerJoin<T> {
             None => JetSchedulerTaskPoll::Pending,
             Some(JetSchedulerResult::Value(_)) => JetSchedulerTaskPoll::Complete(order),
             Some(JetSchedulerResult::Cancelled) => {
-                JetSchedulerTaskPoll::Failed(jet_std::JetTaskFailure::Cancelled, order)
+                JetSchedulerTaskPoll::Failed(JetTaskFailure::Cancelled, order)
             }
             Some(JetSchedulerResult::Deadline(_)) => {
-                JetSchedulerTaskPoll::Failed(jet_std::JetTaskFailure::DeadlineBlown, order)
+                JetSchedulerTaskPoll::Failed(JetTaskFailure::DeadlineBlown, order)
             }
             Some(JetSchedulerResult::Panicked(reason)) => JetSchedulerTaskPoll::Failed(
-                jet_std::JetTaskFailure::Panicked(reason.clone()),
+                JetTaskFailure::Panicked(reason.clone()),
                 order,
             ),
         }
@@ -2934,19 +3601,19 @@ impl<T> JetSchedulerJoin<T> {
     /// D-CONC-FAIL1=A: child control failures are ordinary values on the
     /// language failure rail. Only cancellation of the joining parent remains
     /// a scheduler unwind at this wait point.
-    pub fn join(&mut self) -> Result<T, jet_std::JetTaskFailure> {
+    pub fn join(&mut self) -> Result<T, JetTaskFailure> {
         loop {
             jet_task_wait_point_cancel_check();
             match self.take_ready() {
                 Some(JetSchedulerResult::Value(value)) => return Ok(value),
                 Some(JetSchedulerResult::Panicked(reason)) => {
-                    return Err(jet_std::JetTaskFailure::Panicked(reason));
+                    return Err(JetTaskFailure::Panicked(reason));
                 }
                 Some(JetSchedulerResult::Cancelled) => {
-                    return Err(jet_std::JetTaskFailure::Cancelled);
+                    return Err(JetTaskFailure::Cancelled);
                 }
                 Some(JetSchedulerResult::Deadline(_rendered)) => {
-                    return Err(jet_std::JetTaskFailure::DeadlineBlown);
+                    return Err(JetTaskFailure::DeadlineBlown);
                 }
                 None => {
                     jet_scheduler_yield("task join", &self.completion_wait, None);
@@ -2976,7 +3643,7 @@ fn jet_scheduler_all_wait<'a>(
     mut probes: Vec<Box<dyn FnMut() -> JetSchedulerTaskPoll + 'a>>,
     mut cancels: Vec<Box<dyn FnMut() + 'a>>,
     mut drains: Vec<Box<dyn FnMut() + 'a>>,
-) -> Result<(), jet_std::JetTaskFailure> {
+) -> Result<(), JetTaskFailure> {
     loop {
         if jet_std::jet_task_deadline_if_expired(jet_deadline_remaining_ms(), "task selection")
             .is_some()
@@ -2997,10 +3664,10 @@ fn jet_scheduler_all_wait<'a>(
                 drain();
             }
             jet_task_deliver_cancel();
-            return Err(jet_std::JetTaskFailure::Cancelled);
+            return Err(JetTaskFailure::Cancelled);
         }
         let mut all_complete = true;
-        let mut first_failure: Option<(u128, jet_std::JetTaskFailure)> = None;
+        let mut first_failure: Option<(u128, JetTaskFailure)> = None;
         for probe in &mut probes {
             match probe() {
                 JetSchedulerTaskPoll::Pending => all_complete = false,
@@ -3034,7 +3701,7 @@ fn jet_scheduler_all_wait<'a>(
 fn jet_scheduler_select_tasks<T: Send + 'static>(
     entries: Vec<(JetSchedulerJoin<T>, Arc<JetTaskControl>)>,
     mode: jet_std::JetTaskSelectMode,
-) -> Result<Vec<T>, jet_std::JetTaskFailure> {
+) -> Result<Vec<T>, JetTaskFailure> {
     use jet_std::{jet_task_select, jet_task_wait_policy, JetTaskWaitInterrupt};
     let result = jet_task_select(
         entries,
@@ -3068,16 +3735,16 @@ fn jet_scheduler_select_tasks<T: Send + 'static>(
             // Same raise door as every other wait point, so a `task.all/race/any`
             // reached from drop glue defers instead of double-panicking (#2007).
             jet_task_deliver_cancel();
-            Err(jet_std::JetTaskFailure::Cancelled)
+            Err(JetTaskFailure::Cancelled)
         }
         Err(JetSchedulerSelectError::Child(JetSchedulerResult::Deadline(_rendered))) => {
-            Err(jet_std::JetTaskFailure::DeadlineBlown)
+            Err(JetTaskFailure::DeadlineBlown)
         }
         Err(JetSchedulerSelectError::Child(JetSchedulerResult::Cancelled)) => {
-            Err(jet_std::JetTaskFailure::Cancelled)
+            Err(JetTaskFailure::Cancelled)
         }
         Err(JetSchedulerSelectError::Child(JetSchedulerResult::Panicked(reason))) => {
-            Err(jet_std::JetTaskFailure::Panicked(reason))
+            Err(JetTaskFailure::Panicked(reason))
         }
         Err(JetSchedulerSelectError::Child(JetSchedulerResult::Value(_))) => unreachable!(),
     }
@@ -3086,14 +3753,14 @@ fn jet_scheduler_select_tasks<T: Send + 'static>(
 /// D-CONCCOMB1: join every handle in list order; fail fast and cancel siblings on error.
 pub fn jet_scheduler_all<T: Send + 'static>(
     entries: Vec<(JetSchedulerJoin<T>, Arc<JetTaskControl>)>,
-) -> Result<Vec<T>, jet_std::JetTaskFailure> {
+) -> Result<Vec<T>, JetTaskFailure> {
     jet_scheduler_select_tasks(entries, jet_std::JetTaskSelectMode::All)
 }
 
 /// D-CONCCOMB1/D-RACEWIN1: first successful result wins; cancel losers.
 pub fn jet_scheduler_race<T: Send + 'static>(
     entries: Vec<(JetSchedulerJoin<T>, Arc<JetTaskControl>)>,
-) -> Result<T, jet_std::JetTaskFailure> {
+) -> Result<T, JetTaskFailure> {
     jet_scheduler_select_tasks(entries, jet_std::JetTaskSelectMode::Race)
         .map(|mut values| values.pop().expect("race result missing"))
 }
@@ -3101,7 +3768,7 @@ pub fn jet_scheduler_race<T: Send + 'static>(
 /// D-CONCCOMB1: first completed result wins (success or failure path visible).
 pub fn jet_scheduler_any<T: Send + 'static>(
     entries: Vec<(JetSchedulerJoin<T>, Arc<JetTaskControl>)>,
-) -> Result<T, jet_std::JetTaskFailure> {
+) -> Result<T, JetTaskFailure> {
     jet_scheduler_select_tasks(entries, jet_std::JetTaskSelectMode::Any)
         .map(|mut values| values.pop().expect("any result missing"))
 }
@@ -3176,13 +3843,23 @@ pub fn jet_scheduler_try_select_int_channels_tagged(
     }
 }
 
-/// Run an internal timer producer on a detached host thread. Timer producers
-/// are not user tasks: their channel send ends the producer when its receiver
-/// is gone, and the producer must not enter the observed Jet task tree.
+/// Run an internal timer producer on a detached host thread. A producer
+/// created inside a deterministic world is a child of that world: its wait
+/// state and lifetime are visible to `wait_idle` and scope close.
 pub fn jet_scheduler_spawn_detached_timer<F>(f: F)
 where
     F: FnOnce() + Send + 'static,
 {
+    let world = jet_scheduler_current_world();
+    if let Some(world) = world {
+        world.task_spawned();
+        let task_world = world.clone();
+        let _ = thread::spawn(move || {
+            let _world_scope = jet_scheduler_world_task_enter(Some(task_world));
+            f();
+        });
+        return;
+    }
     let _ = thread::spawn(f);
 }
 
@@ -3286,12 +3963,17 @@ where F:FnOnce()->T+Send+'static,T:Send+'static,
     );
     jet_observe_task_set_label(observe_id, label);
     let identity = jet_observe_task_identity(observe_id);
+    let world = jet_scheduler_current_world();
+    if let Some(world) = &world {
+        world.task_spawned();
+    }
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
     let completion_order = Arc::new(OnceLock::new());
     let task_completion_order = completion_order.clone();
     let completion_wait = ParkSlot::new();
     let task_completion_wait = completion_wait.clone();
     scheduler().submit(Job{blocking,run:Box::new(move || {
+        let _world_scope = jet_scheduler_world_task_enter(world);
         jet_observe_task_enter(observe_id);
         jet_scheduler_set_task_control(Some(control.clone()));
         jet_scheduler_task_panic_enter();

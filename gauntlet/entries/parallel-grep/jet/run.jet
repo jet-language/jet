@@ -7,7 +7,8 @@ struct Args {
 }
 
 fn scan(path: String, needle: String) Int -> {
-    (files.read(path) ?? panic("read failed")).count(needle)
+    text :: files.read(path) ?? panic("read failed")
+    text.lines().map(line -> line.count(needle)).sum()
 }
 
 fn run(args: Args) {
@@ -18,7 +19,7 @@ fn run(args: Args) {
     matched := 0
     total := 0
     loop pair in paths.zip(counts) {
-        count :: pair.b ?? panic("scan failed")
+        count :: pair.b
         if count > 0 {
             print("{pair.a}:{count}")
             matched++

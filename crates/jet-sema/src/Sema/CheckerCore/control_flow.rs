@@ -7,11 +7,18 @@ impl<'a> Checker<'a> {
         let Stmt::ComptimeBlock { body, .. } = stmt else {
             return;
         };
+        if self.defer_ct_evaluation {
+            let saved_in_comptime = self.in_comptime;
+            self.in_comptime = true;
+            self.check_block(body, true);
+            self.in_comptime = saved_in_comptime;
+            return;
+        }
         let result = {
             let globals = self.current_ct_globals();
             crate::Comptime::run_block_with_imports(
                 body,
-                self.ct_funcs,
+                self.ct_checked_funcs,
                 self.ct_externs,
                 self.ct_base_dir,
                 globals.as_ref(),
@@ -28,7 +35,6 @@ impl<'a> Checker<'a> {
             Err(diagnostic) => self.diags.push(diagnostic),
         }
     }
-
     pub(crate) fn check_comptime_if(&mut self, stmt: &mut Stmt) {
         let Stmt::ComptimeIf {
             cond,
@@ -41,11 +47,26 @@ impl<'a> Checker<'a> {
         else {
             return;
         };
+        if self.defer_ct_evaluation {
+            let saved_in_comptime = self.in_comptime;
+            self.in_comptime = true;
+            let _ = self.infer(cond);
+            let saved_flow = self.flow.clone();
+            self.check_block(then_body, true);
+            self.flow = saved_flow.clone();
+            if let Some(body) = else_body {
+                self.check_block(body, true);
+            }
+            self.flow = saved_flow;
+            self.in_comptime = saved_in_comptime;
+            *selected_then = None;
+            return;
+        }
         let selected = {
             let globals = self.current_ct_globals();
             crate::Comptime::evaluate_owned_with_imports_opts(
                 cond,
-                self.ct_funcs,
+                self.ct_checked_funcs,
                 self.ct_externs,
                 self.ct_base_dir,
                 globals.as_ref(),

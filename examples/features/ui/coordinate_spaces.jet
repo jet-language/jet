@@ -1,0 +1,59 @@
+// D-SPACE-GEOMETRY1=A / F04: nominal spaces reject accidental mixing while
+// frame ids keep dynamic scene identity checks at runtime.
+fn run() {
+    mouse :: ScreenPoint.new(240.0, 120.0)
+    offset :: ScreenDelta.new(4.0, 5.0)
+    moved :: mouse + offset
+    print("moved={moved.x},{moved.y}")
+
+    dynamic_point :: Point2<Float,World>.new(1.0, 2.0, 11)
+    dynamic_delta :: Delta2<Float,World>.new(3.0, 4.0, 12)
+    if (dynamic_point + dynamic_delta) == {
+        .Ok(_) -> print("dynamic-frame=unexpected")
+        .Err(_) -> print("dynamic-frame=error")
+    }
+
+    screen_to_world :: Transform<Screen,World>.affine(
+        1.0, 0.0, 0.0, 1.0, 10.0, 20.0, 1, 2
+    )
+    world_to_view :: Transform<World,View>.affine(
+        1.0, 0.0, 0.0, 1.0, 2.0, 3.0, 2, 3
+    )
+    _screen_to_view :: screen_to_world.then(world_to_view) ?? panic("composition")
+    world :: screen_to_world.point(mouse) ?? panic("point")
+    back :: screen_to_world.inverse() ?? panic("inverse")
+    screen :: back.point(world) ?? panic("inverse point")
+    depth :: screen_to_world.point_at_depth(mouse, 2.0) ?? panic("depth")
+    _ray :: screen_to_world.ray(mouse) ?? panic("ray")
+    depth_far :: screen_to_world.point_at_depth(mouse, 3.0) ?? panic("depth far")
+    print("world={world.x},{world.y}")
+    print("screen={screen.x},{screen.y}")
+    print("depth={depth.x},{depth.y}")
+    print("depth-far={depth_far.x},{depth_far.y}")
+    print("ray=ok")
+    print("composition=ok")
+
+    bad_view_to_screen :: Transform<View,Screen>.affine(
+        1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 4, 5
+    )
+    if world_to_view.then(bad_view_to_screen) == {
+        .Ok(_) -> print("frame-composition=unexpected")
+        .Err(_) -> print("frame-composition=error")
+    }
+
+    stale_transform :: Transform<World,View>.affine(
+        1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 3, 4
+    )
+    if stale_transform.point(world) == {
+        .Ok(_) -> print("stale-point=unexpected")
+        .Err(_) -> print("stale-point=error")
+    }
+
+    singular :: Transform<Screen,World>.affine(
+        1.0, 2.0, 2.0, 4.0, 0.0, 0.0, 1, 2
+    )
+    if singular.inverse() == {
+        .Ok(_) -> print("singular-inverse=unexpected")
+        .Err(_) -> print("singular-inverse=error")
+    }
+}

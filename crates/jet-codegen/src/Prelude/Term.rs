@@ -84,6 +84,14 @@ pub(crate) fn jet_term_stderr_is_terminal() -> bool {
 /// The name of the one process-wide fact below. The CLI sets it; every mirror
 /// of this file reads it, so no tier carries a second switch to keep in step.
 pub(crate) const JET_TERM_PROGRAM_OWNS_STREAMS: &str = "JET_PROGRAM_OWNS_STREAMS";
+/// Machine mode is set by the CLI before an in-process tier starts.  Human
+/// progress and decoration must never enter that stream.
+pub(crate) const JET_TERM_MACHINE_OUTPUT: &str = "JET_MACHINE_OUTPUT";
+
+pub(crate) fn jet_term_machine_output() -> bool {
+    std::env::var_os(JET_TERM_MACHINE_OUTPUT).is_some_and(|value| value == "1")
+}
+
 
 /// Does the running program own the process's stdout and stderr?
 ///
@@ -127,6 +135,20 @@ pub(crate) fn jet_term_write_stdout(text: &str, flush: bool) -> std::io::Result<
     jet_term_write_stdout_bytes(text.as_bytes(), flush)
 }
 
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+#[link(wasm_import_module = "env")]
+unsafe extern "C" {
+    fn jet_web_print(pointer: *const u8, length: usize);
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+pub(crate) fn jet_term_write_stdout_bytes(bytes: &[u8], _flush: bool) -> std::io::Result<()> {
+    // The host copies this borrowed frame before returning.
+    unsafe { jet_web_print(bytes.as_ptr(), bytes.len()) };
+    Ok(())
+}
+
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub(crate) fn jet_term_write_stdout_bytes(bytes: &[u8], flush: bool) -> std::io::Result<()> {
     use std::io::Write;
     let mut out = std::io::stdout().lock();
@@ -222,13 +244,21 @@ fn jet_term_size_from_stty() -> Option<(i64, i64)> {
 
 pub(crate) fn jet_term_style_enabled(
     no_color: bool,
-    term_is_dumb: bool,
+    force_color: bool,
     stdout_is_terminal: bool,
 ) -> bool {
     JET_TERM_COLOR_MODE.with(|mode| match mode.get() {
         1 => true,
         2 => false,
-        _ => !no_color && !term_is_dumb && stdout_is_terminal,
+        _ => {
+            if no_color {
+                false
+            } else if force_color {
+                true
+            } else {
+                stdout_is_terminal
+            }
+        }
     })
 }
 
@@ -410,6 +440,7 @@ pub(crate) fn jet_term_choose_with_io<E>(
         if let Ok(index) = answer.trim().parse::<usize>() {
             if let Some(item) = index.checked_sub(1).and_then(|index| items.get(index)) {
                 return Ok(item.clone());
+
             }
         }
         write(&jet_term_choose_invalid(items.len()))?;
@@ -433,6 +464,12 @@ pub(crate) fn jet_term_progress_frame(is_terminal: bool, text: &str) -> String {
 
 pub(crate) fn jet_term_progress_finish(is_terminal: bool) -> &'static str {
     if is_terminal { "\n" } else { "" }
+}
+/// Progress is a human-only terminal affordance. Redirected streams and
+/// machine output stay byte-clean; callers that need a status record serialize
+/// it through their structured output channel instead.
+pub(crate) fn jet_term_progress_enabled() -> bool {
+    jet_term_stderr_is_terminal() && !jet_term_machine_output()
 }
 
 #[cfg(any(
@@ -810,6 +847,61 @@ pub(crate) fn jet_term_mode_enter(raw: bool) -> bool {
 
 pub(crate) fn jet_term_mode_leave() {
     jet_term_mode::leave();
+}
+/// RAII terminal ownership for a TUI session.  Raw mode and the alternate
+/// screen are one guard so every normal return, error, and panic restores the
+/// terminal before the caller observes the outcome.
+pub struct JetTuiTerminalGuard {
+    alternate: bool,
+    restored: bool,
+}
+
+impl JetTuiTerminalGuard {
+    pub fn enter(alternate: bool) -> Option<Self> {
+        use std::io::IsTerminal;
+
+        if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+            return None;
+        }
+        if !jet_term_mode_enter(true) {
+            return None;
+        }
+        if alternate
+            && jet_term_write_stdout("\x1b[?1049h\x1b[?25l", true).is_err()
+        {
+            jet_term_mode_leave();
+            return None;
+        }
+        Some(Self {
+            alternate,
+            restored: false,
+        })
+    }
+
+    pub fn restore_now(&mut self) {
+        if self.restored {
+            return;
+        }
+        if self.alternate {
+            let _ = jet_term_write_stdout("\x1b[?25h\x1b[?1049l", true);
+        }
+        jet_term_mode_leave();
+        self.restored = true;
+    }
+
+    pub const fn is_active(&self) -> bool {
+        !self.restored
+    }
+}
+
+impl Drop for JetTuiTerminalGuard {
+    fn drop(&mut self) {
+        self.restore_now();
+    }
+}
+
+pub fn jet_term_tui_guard(alternate: bool) -> Option<JetTuiTerminalGuard> {
+    JetTuiTerminalGuard::enter(alternate)
 }
 
 #[cfg(all(

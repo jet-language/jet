@@ -9,11 +9,11 @@
 use super::Provider;
 use super::RefSpec::RefSpec;
 use super::Store::StoreEntry;
-use super::JSON::{self, JSONValue};
+use super::JSON;
+use jet_foundation::DataTree::DataTree;
 use crate::Lock::{LockFile, LockSource};
 use crate::Syntax;
 use jet_env_model::ModuleEval::AdapterPlan;
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 const INDEX_DIR: &str = "discovery";
@@ -437,11 +437,15 @@ fn provider_output_path(text: &str) -> Option<String> {
     let json = JSON::parse(text.trim()).ok()?;
     let first = json.as_array().ok()?.first()?;
     let outputs = first.get("outputs").ok()?.as_object().ok()?;
-    outputs
-        .get("bin")
-        .or_else(|| outputs.get("out"))
-        .and_then(|j| j.as_str().ok())
-        .map(|s| s.to_string())
+    let output = outputs
+        .iter()
+        .find_map(|(name, value)| (name == "bin").then_some(value))
+        .or_else(|| {
+            outputs
+                .iter()
+                .find_map(|(name, value)| (name == "out").then_some(value))
+        })?;
+    output.as_str().ok().map(ToString::to_string)
 }
 
 fn store_path_version(out: &str, name: &str) -> String {
@@ -551,14 +555,14 @@ fn json_string_array(items: &[String]) -> String {
     format!("[{body}]")
 }
 
-fn record_from_json(json: &JSONValue) -> Result<PackageRecord, String> {
+fn record_from_json(json: &DataTree) -> Result<PackageRecord, String> {
     let obj = json.as_object()?;
     Ok(PackageRecord {
         source: required_str(obj, "source")?.to_string(),
         name: required_str(obj, "name")?.to_string(),
         reference: required_str(obj, "reference")?.to_string(),
         version: required_str(obj, "version").unwrap_or("").to_string(),
-        platforms: string_array(obj.get("platforms")),
+        platforms: string_array(object_field(obj, "platforms")),
         docs: required_str(obj, "docs").unwrap_or("").to_string(),
         provenance: required_str(obj, "provenance").unwrap_or("").to_string(),
         tier: required_str(obj, "tier")
@@ -567,18 +571,23 @@ fn record_from_json(json: &JSONValue) -> Result<PackageRecord, String> {
         gate_status: required_str(obj, "gate_status")
             .unwrap_or("not-applicable")
             .to_string(),
-        options: option_array(obj.get("options")),
+        options: option_array(object_field(obj, "options")),
     })
 }
 
-fn required_str<'a>(obj: &'a BTreeMap<String, JSONValue>, key: &str) -> Result<&'a str, String> {
-    obj.get(key)
+fn object_field<'a>(obj: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+    obj.iter()
+        .find_map(|(name, value)| (name == key).then_some(value))
+}
+
+fn required_str<'a>(obj: &'a [(String, DataTree)], key: &str) -> Result<&'a str, String> {
+    object_field(obj, key)
         .ok_or_else(|| format!("missing key `{key}`"))?
         .as_str()
 }
 
-fn string_array(json: Option<&JSONValue>) -> Vec<String> {
-    let Some(JSONValue::Array(items)) = json else {
+fn string_array(json: Option<&DataTree>) -> Vec<String> {
+    let Some(DataTree::Array(items)) = json else {
         return Vec::new();
     };
     items
@@ -587,8 +596,8 @@ fn string_array(json: Option<&JSONValue>) -> Vec<String> {
         .collect()
 }
 
-fn option_array(json: Option<&JSONValue>) -> Vec<OptionField> {
-    let Some(JSONValue::Array(items)) = json else {
+fn option_array(json: Option<&DataTree>) -> Vec<OptionField> {
+    let Some(DataTree::Array(items)) = json else {
         return Vec::new();
     };
     items

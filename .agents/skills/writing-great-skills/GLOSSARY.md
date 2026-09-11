@@ -16,33 +16,65 @@ _Avoid_: consistency, reliability, robustness, output-determinism
 
 How a skill is reached — and the two loads you pay for the choice.
 
+### Host Support
+
+Skill metadata is a host contract, not runtime evidence. `disable-model-invocation`
+and `description` state intended reach. Whether a host loads descriptions,
+applies context load, or permits child invocation must be checked against that
+host. A passive reference remains a reference when the host cannot perform the
+declared handoff.
+
+### Child Invocation
+
+A bounded handoff from one primary skill to supporting work. The child receives
+the primary's supplied inputs, returns only its allowed result, and returns to
+the primary's completion owner. It does not become a second primary, open an
+agenda, or turn planning into implementation. Hosts may not support this
+handoff; load the existing reference in the primary run instead.
+
 ### Model-Invoked
 
-A skill that keeps its **description** field, so the agent can see it and fire it autonomously — and the human can still type its name, so model-invocation always _includes_ user reach. There is no model-only state: a description only ever _adds_ agent discovery, never removes the human's. Pays a permanent **context load** on every turn in exchange for that discoverability. Reachable by other skills, because the description that makes it agent-discoverable makes it invocable. A model-invoked skill whose content is all **reference** is also one home for shared reference: another skill can invoke it, so reference needed by several skills lives in one place. Pick model-invocation only when the agent must reach the skill on its own; if it never fires except by hand, drop the description and pay no context load.
+A **model-invoked** skill keeps its **description** field. On a host that
+supports this metadata, the agent can reach it autonomously and the human can
+still type its name. There is no model-only state: the description intends to
+add agent discovery, never remove human reach. It creates **context load** only
+when that host loads the description on every turn. Reach through another skill
+also depends on host support. A model-invoked skill whose content is all
+**reference** can house shared reference only when the host can invoke it.
+Choose it when that route is required; otherwise use a user-invoked skill.
 
 _Avoid_: ability, tool, capability
 
 ### User-Invoked
 
-A skill with its **description** stripped — invisible to the agent and reachable only by the human typing its name (user-_only_, where **model-invoked** is user-_and-agent_). Trades agent-discoverability for zero **context load**. Because it has no description, nothing but the human can reach it: no other skill can fire it.
+A skill whose description is stripped by a host that implements
+`disable-model-invocation: true`. On that host it is intended for human reach
+only, trades agent context load for human cognitive load, and cannot be reached
+by another skill. If the host ignores the metadata, these are not runtime
+guarantees.
 
 _Avoid_: procedure, workflow, command
 
 ### Description
 
-The skill's machine-readable trigger, and the one **context pointer** a **model-invoked** skill is forced to keep loaded at all times. Its mere presence _is_ the invocation axis: keep it and the skill is model-invoked (and reachable by other skills); delete it and the skill is **user-invoked**, reachable only by the human. The source of a model-invoked skill's **context load**.
+The skill's machine-readable trigger and top-level **context pointer**. A host
+may load it on every turn and use it for agent discovery, or may not implement
+that behavior. Its presence declares model invocation; it does not prove
+reachability or context load.
 
 _Avoid_: frontmatter, summary
 
 ### Context Pointer
 
-A reference held in the agent's context that names some out-of-context material and encodes the condition for reaching it. The **description** is the top-level context pointer (context window → skill); pointers to disclosed files are the same object one level down. Its wording, not the target, decides _when_ the agent reaches — and _how reliably_. A must-have target behind a weakly worded pointer is a variance bug: fix the wording first, and inline the material only if sharpening fails.
+A reference held in the agent's context that names some out-of-context material and encodes the condition for reaching it. The **description** is the top-level context pointer (context window → skill); pointers to disclosed files are the same object one level down. A supporting host decides whether and when to evaluate the pointer; its wording influences reliability when the host does. A must-have target behind a weakly worded pointer is a variance bug: fix the wording first, and inline the material only if sharpening fails.
 
 _Avoid_: link, reference, import
 
 ### Context Load
 
-The cost a **model-invoked** skill imposes on the agent's context window — its **description**, always loaded, spending both tokens and attention. What **user-invoked** skills escape by having no description, and the brake on splitting into more model-invoked skills.
+The cost a host may impose when it loads a model-invoked skill's **description**
+into the agent's context on every turn. A user-invoked skill intends to avoid
+that load, but only a supporting host implementation proves the behavior.
 
 _Avoid_: token cost, context bloat
 
@@ -54,13 +86,22 @@ _Avoid_: human index, burden, overhead
 
 ### Router Skill
 
-A **user-invoked** skill whose job is to point at your other user-invoked skills — naming each and when to reach for it — so the human has one skill to remember instead of many. It can only hint, never fire them: user-invoked skills have no **description**, so nothing but the human can reach them. The cure for **cognitive load** when user-invoked skills multiply.
+A user-invoked skill whose job is to point at other user-invoked skills. On a
+host that supports those metadata rules, it reduces human **cognitive load** by
+naming the choices; it can hint but cannot itself make an unsupported child
+invocation work. The router selects a primary outcome, not a competing ledger
+or runtime dispatcher.
 
 _Avoid_: dispatcher, menu, registry, index, router procedure
 
 ### Granularity
 
-How finely you divide skills. Finer division spends one of the two loads: more **model-invoked** skills spend **context load** (more descriptions crowding the window and competing for attention); more **user-invoked** skills spend **cognitive load** (more for the human to remember and reach for). Two cuts guide the division. By **invocation**, split off a model-invoked skill where you have a distinct **leading word** to trigger it — a trigger word you actually use in your prompts. By **sequence**, split a run of **steps** where a step's **post-completion steps** need hiding, since isolating it in its own context clears what follows. Beware the reverse: merging sequences exposes each step's post-completion steps to what follows, inviting premature completion.
+How finely you divide skills. Finer division may spend **context load** when a
+host loads more model-invoked descriptions, or **cognitive load** when more
+user-invoked skills remain human-reachable only. Treat those costs as observed
+host behavior, not as metadata proof. Split by invocation only for a distinct
+leading word that needs independent reach; split by sequence only when hiding
+post-completion steps prevents premature completion.
 
 _Avoid_: chunking, modularity
 

@@ -67,14 +67,41 @@ pub fn bind(source: &str, lib: &str, cache: &Path) -> Result<BindResult, BindErr
     identity.extend_from_slice(source.as_bytes());
     identity.push(0);
     identity.extend_from_slice(root.to_string_lossy().as_bytes());
+    let descriptor = *crate::AST::binder_descriptor(crate::AST::ForeignLanguage::Tcl)
+        .ok_or_else(|| BindError::Source("Tcl binder descriptor is not registered".into()))?;
+    let archive_digest =
+        crate::ForeignBridge::sha_file(&archive).map_err(BindError::IO)?;
+    let mut provenance = format!(
+        "schema=jet-tcl-bind-v1\nsha256={}\n",
+        crate::SHA256::sha256_hex(&identity)
+    );
+    crate::ForeignBridge::append_boundary_provenance(
+        &mut provenance,
+        descriptor,
+        lib,
+        crate::ForeignBridge::ForeignBoundaryIdentity::new(
+            format!(
+                "source:sha256-{}",
+                crate::SHA256::sha256_hex(source.as_bytes())
+            ),
+            "none",
+            descriptor.stamp(),
+            format!("archive:{}:sha256-{archive_digest}", archive.display()),
+            format!("tclsh={};cc;ar", root.display()),
+            crate::ForeignBridge::foreign_host_target(),
+        ),
+        crate::ForeignBridge::ForeignArtifactCoverage::new(
+            format!("{}:sha256-{archive_digest}", archive.display()),
+            crate::ForeignBridge::foreign_host_target(),
+            descriptor.stamp(),
+        ),
+    )
+    .map_err(BindError::IO)?;
     Ok(BindResult {
         source: render_jet(lib),
         archive,
         lib_dir,
-        provenance: format!(
-            "schema=jet-tcl-bind-v1\nsha256={}\n",
-            crate::SHA256::sha256_hex(&identity)
-        ),
+        provenance,
     })
 }
 

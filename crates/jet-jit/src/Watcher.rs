@@ -29,7 +29,7 @@ fn watch_disc(enum_name: &str, variant: &str) -> i64 {
         .expect("Prelude watch enum variants must be registered")
 }
 
-type Snapshot = BTreeMap<String, (u64, i64, bool)>;
+type Snapshot = BTreeMap<String, (u64, i64, bool, String)>;
 
 #[derive(Clone)]
 enum WatchTarget {
@@ -179,7 +179,13 @@ fn watch_snapshot(root: &str) -> Result<Snapshot, String> {
             .unwrap_or(0);
         let path_s = path.to_string_lossy().to_string();
         let is_dir = meta.is_dir();
-        out.insert(path_s, (modified, meta.len() as i64, is_dir));
+        let digest = if is_dir {
+            String::new()
+        } else {
+            let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+            jet_foundation::SHA256::sha256_hex(&bytes)
+        };
+        out.insert(path_s, (modified, meta.len() as i64, is_dir, digest));
         if is_dir {
             for entry in std::fs::read_dir(&path).map_err(|e| e.to_string())? {
                 let entry = entry.map_err(|e| e.to_string())?;

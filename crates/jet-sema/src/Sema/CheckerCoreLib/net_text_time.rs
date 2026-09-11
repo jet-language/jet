@@ -14,11 +14,7 @@ pub(crate) const HTTP_DEFAULT_BODY_LIMIT: i64 = 1024 * 1024;
 /// The default-bearing HTTP message methods expose one sema identity. The
 /// lower-level `HTTPBody.text(limit)` call has no default of its own; a lint
 /// may compare its constant argument with this exact identity.
-pub(crate) fn http_text_default_limit(
-    ty: &Type,
-    method: &str,
-    args: &[CallArg],
-) -> Option<i64> {
+pub(crate) fn http_text_default_limit(ty: &Type, method: &str, args: &[CallArg]) -> Option<i64> {
     if method != "text" || !args.is_empty() {
         return None;
     }
@@ -66,7 +62,12 @@ impl<'a> Checker<'a> {
             | ("BrowserReceipt", "entry_count" | "redacted" | "summary" | "isolated" | "cleaned")
             | ("BrowserPrivacy", "isolated_profiles" | "redact_receipts" | "shared_profiles")
             | ("BrowserLocked", "engine" | "version" | "binary" | "protocol") => Vec::new(),
-            ("BrowserLocked", "verify") => Vec::new(),
+            ("BrowserLocked", "verify")
+            | ("BrowserTestServer", "stop" | "url" | "logs")
+            | ("BrowserTestReport", "json" | "text" | "html" | "exit_code")
+            | ("BrowserTestConfig",
+                "engines" | "retries" | "filter" | "reporter" | "server_url"
+                | "artifact_dir" | "report_path" | "ui" | "visual" | "watch") => Vec::new(),
             (
                 "Browser",
                 "subscribe" | "protocol" | "add_intercept" | "continue_request" | "fail_request"
@@ -364,6 +365,16 @@ pub fn net_method_return(
         ("BrowserPrivacy", "isolated_profiles" | "redact_receipts" | "shared_profiles") => {
             Some(Some(Type::Bool))
         }
+        ("BrowserTestConfig", "engines") => Some(Some(Type::List(Box::new(Type::String)))),
+        ("BrowserTestConfig", "retries") => Some(Some(Type::Int)),
+        ("BrowserTestConfig", "filter" | "reporter" | "server_url" | "artifact_dir" | "report_path") => {
+            Some(Some(Type::String))
+        }
+        ("BrowserTestConfig", "ui" | "visual" | "watch") => Some(Some(Type::Bool)),
+        ("BrowserTestServer", "stop") => Some(Some(unit.clone())),
+        ("BrowserTestServer", "url" | "logs") => Some(Some(Type::String)),
+        ("BrowserTestReport", "json" | "text" | "html") => Some(Some(Type::String)),
+        ("BrowserTestReport", "exit_code") => Some(Some(Type::Int)),
         ("BrowserLocked", "engine" | "version" | "binary" | "protocol") => Some(Some(Type::String)),
         ("BrowserLocked", "verify") => Some(Some(Type::Result {
             ok: Box::new(unit_ty()),
@@ -663,10 +674,12 @@ pub fn http_type_method_return(
     let mk_str = || Some(Some(Type::String));
     let mk_int = || Some(Some(Type::Int));
     let mk_opt_str = || Some(Some(Type::Option(Box::new(Type::String))));
-    let mk_http_text = || Some(Some(Type::Result {
-        ok: Box::new(Type::String),
-        err: Box::new(Type::Named("HTTPError".to_string())),
-    }));
+    let mk_http_text = || {
+        Some(Some(Type::Result {
+            ok: Box::new(Type::String),
+            err: Box::new(Type::Named("HTTPError".to_string())),
+        }))
+    };
     match ty {
         Type::Named(n) if n == "HTTPRequest" => match method {
             "method" | "path" => mk_str(),
@@ -951,7 +964,7 @@ pub fn http_type_method_return(
                 ok: Box::new(Type::String),
                 err: Box::new(Type::Named("HTTPError".to_string())),
             })),
-            "serve" | "shutdown" => Some(Some(Type::Result {
+            "serve" | "shutdown" | "wait" => Some(Some(Type::Result {
                 ok: Box::new(Type::Named("HTTPShutdownReport".to_string())),
                 err: Box::new(Type::Named("HTTPError".to_string())),
             })),
@@ -1042,6 +1055,10 @@ pub fn civil_time_method_return(
             })),
             "to_string" if argc == 0 => Some(Some(Type::String)),
             "format" if argc == 1 => Some(Some(Type::String)),
+            "equal" if argc == 1 => Some(Some(Type::Bool)),
+            "compare" if argc == 1 => Some(Some(Type::Named(
+                crate::Syntax::TYPE_ORDERING.to_string(),
+            ))),
             _ => None,
         },
         Type::Named(n) if n == "LocalTime" => match method {
@@ -1066,6 +1083,10 @@ pub fn civil_time_method_return(
                 ok: Box::new(Type::String),
                 err: Box::new(Type::Named("TextError".to_string())),
             })),
+            "equal" if argc == 1 => Some(Some(Type::Bool)),
+            "compare" if argc == 1 => Some(Some(Type::Named(
+                crate::Syntax::TYPE_ORDERING.to_string(),
+            ))),
             _ => None,
         },
         Type::Named(n) if n == "DateTime" => match method {
@@ -1081,7 +1102,8 @@ pub fn civil_time_method_return(
             })),
             "date" if argc == 0 => Some(Some(Type::Named("LocalDate".to_string()))),
             "time" if argc == 0 => Some(Some(Type::Named("LocalTime".to_string()))),
-            "plus_duration" | "subtract_duration" | "add_period" | "subtract_period"
+            "plus_duration" | "subtract_duration" | "add_nanoseconds" | "add_period"
+            | "subtract_period"
                 if argc == 1 =>
             {
                 Some(Some(Type::Named("DateTime".to_string())))
@@ -1108,11 +1130,19 @@ pub fn civil_time_method_return(
                 ok: Box::new(Type::String),
                 err: Box::new(Type::Named("TextError".to_string())),
             })),
+            "equal" if argc == 1 => Some(Some(Type::Bool)),
+            "compare" if argc == 1 => Some(Some(Type::Named(
+                crate::Syntax::TYPE_ORDERING.to_string(),
+            ))),
             _ => None,
         },
         Type::Named(n) if n == "Instant" => match method {
             "elapsed_millis" if argc == 0 => Some(Some(Type::Int)),
             "elapsed" if argc == 0 => Some(Some(Type::Named("Duration".to_string()))),
+            "equal" if argc == 1 => Some(Some(Type::Bool)),
+            "compare" if argc == 1 => Some(Some(Type::Named(
+                crate::Syntax::TYPE_ORDERING.to_string(),
+            ))),
             _ => None,
         },
         Type::Named(n) if n == "Period" => match method {
@@ -1154,6 +1184,10 @@ pub fn civil_time_method_return(
                 err: Box::new(Type::String),
             })),
             "with_zone" if argc == 1 => Some(Some(Type::Named("ZonedDateTime".to_string()))),
+            "equal" if argc == 1 => Some(Some(Type::Bool)),
+            "compare" if argc == 1 => Some(Some(Type::Named(
+                crate::Syntax::TYPE_ORDERING.to_string(),
+            ))),
             "until" | "since" if (1..=5).contains(&argc) => {
                 Some(Some(Type::Named("Duration".to_string())))
             }

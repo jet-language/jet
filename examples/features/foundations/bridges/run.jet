@@ -1,0 +1,25 @@
+// D-FOUND-BRIDGE1: one executable crosses two native boundaries.  The C
+// adapter owns a gzFile-backed reader and returns an explicit handle; Jet owns
+// that handle until the matching close call.  zlibVersion is a direct C import,
+// while b64encode is a real Rust-crate bridge.
+#Import module c.z {
+    fn zlibVersion() String = "zlibVersion"
+}
+extern rust "base64@0.22" {
+    fn b64encode(s: String) String = "base64::encode"
+}
+use c.z as zl
+use c.zreader as z
+
+fn run() {
+    handle := z.jet_z_open("examples/features/foundations/bridges/sample.txt.gz")
+    if handle == 0 -> panic("zlib reader could not open sample")
+    first :: z.jet_z_read_count(handle)
+    print(first)
+    print(zl.zlibVersion())
+    second :: z.jet_z_read_count(handle)
+    print(second)
+    z.jet_z_close(handle)
+
+    print(b64encode("rust bridge file marker"))
+}

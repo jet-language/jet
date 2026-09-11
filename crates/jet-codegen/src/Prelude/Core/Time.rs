@@ -289,12 +289,15 @@ impl JetDate {
         )
     }
     pub(crate) fn today_utc() -> JetDate {
-        // Seconds since Unix epoch ÷ 86400 days.
-        let secs = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0) as i64;
-        let days_since_1970 = secs / 86400;
+        // D-TEST-WORLD1=A: the fixed wall-clock origin is supplied by the
+        // active world; outside one, preserve the host clock behavior.
+        let millis = jet_scheduler_world_now_ms().unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis().min(i64::MAX as u128) as i64)
+                .unwrap_or(0)
+        });
+        let days_since_1970 = millis.div_euclid(86_400_000);
         let epoch = JetDate::new(1970, 1, 1).to_day_number();
         JetDate::from_day_number(epoch + days_since_1970)
     }
@@ -320,6 +323,26 @@ impl JetLocalTime {
         }
     }
     pub(crate) fn parse(s: &str) -> Result<JetLocalTime, String> {
+        let (h, m, sec, nanos) = Self::parse_components(s)?;
+        if h < 0 || h > 23 || m < 0 || m > 59 || sec < 0 || sec > 59 {
+            return Err(format!("time out of range: {}", s));
+        }
+        Ok(Self::with_nanosecond(h, m, sec, nanos))
+    }
+    fn parse_rfc3339(s: &str) -> Result<(JetLocalTime, bool), String> {
+        let (h, m, sec, nanos) = Self::parse_components(s)?;
+        if h < 0 || h > 23 || m < 0 || m > 59 || sec < 0 || sec > 60 {
+            return Err(format!("time out of range: {}", s));
+        }
+        if sec == 60 {
+            if h != 23 || m != 59 {
+                return Err(format!("time out of range: {}", s));
+            }
+            return Ok((Self::with_nanosecond(h, m, 59, nanos), true));
+        }
+        Ok((Self::with_nanosecond(h, m, sec, nanos), false))
+    }
+    fn parse_components(s: &str) -> Result<(i64, i64, i64, u32), String> {
         let parts: Vec<&str> = s.splitn(3, ':').collect();
         if parts.len() != 3 {
             return Err(format!("invalid time: {}", s));
@@ -351,10 +374,7 @@ impl JetLocalTime {
         let sec = second_part
             .parse::<i64>()
             .map_err(|_| format!("bad second: {}", second_part))?;
-        if h < 0 || h > 23 || m < 0 || m > 59 || sec < 0 || sec > 59 {
-            return Err(format!("time out of range: {}", s));
-        }
-        Ok(Self::with_nanosecond(h, m, sec, nanos))
+        Ok((h, m, sec, nanos))
     }
     pub(crate) fn hour(&self) -> i64 {
         self.hour
@@ -559,7 +579,7 @@ impl JetPeriod {
         let end = anchor.add_period(self);
         let month_delta = self.years.saturating_mul(12).saturating_add(self.months);
         let calendar_date = anchor.date().add_months(month_delta);
-        let anchor_time = anchor.time();
+        let anchor_time = anchor.time_for_output();
         let calendar_anchor = JetDateTime::from_parts(
             calendar_date.year(),
             calendar_date.month(),
@@ -633,6 +653,54 @@ pub(crate) fn jet_time_instant_compare(left_ns: i64, right_ns: i64) -> i64 {
 
 const JET_NANOS_PER_SECOND: i128 = 1_000_000_000;
 const JET_NANOS_PER_DAY: i128 = 86_400_000_000_000;
+const JET_LEAP_SECOND_EPOCHS: &[i64] = &[
+    78_796_800,
+    94_694_400,
+    126_230_400,
+    157_766_400,
+    189_302_400,
+    220_924_800,
+    252_460_800,
+    283_996_800,
+    315_532_800,
+    362_793_600,
+    394_329_600,
+    425_865_600,
+    489_024_000,
+    567_993_600,
+    631_152_000,
+    662_688_000,
+    709_948_800,
+    741_484_800,
+    773_020_800,
+    820_454_400,
+    867_715_200,
+    915_148_800,
+    1_136_073_600,
+    1_230_768_000,
+    1_341_100_800,
+    1_435_708_800,
+    1_483_228_800,
+];
+
+fn jet_time_is_leap_second_epoch(seconds: i64) -> bool {
+    JET_LEAP_SECOND_EPOCHS.contains(&seconds)
+}
+
+fn jet_time_from_unix_parts(seconds: i64, nanos: u32) -> JetDateTime {
+    if jet_time_is_leap_second_epoch(seconds) {
+        JetDateTime::from_timestamp_ns_with_leap(seconds.saturating_sub(1), nanos, true)
+    } else {
+        JetDateTime::from_timestamp_ns(seconds, nanos)
+    }
+}
+
+fn jet_time_from_total_nanoseconds(total: i128) -> JetDateTime {
+    let seconds = total.div_euclid(JET_NANOS_PER_SECOND);
+    let nanos = total.rem_euclid(JET_NANOS_PER_SECOND) as u32;
+    let seconds = seconds.clamp(i64::MIN as i128, i64::MAX as i128) as i64;
+    jet_time_from_unix_parts(seconds, nanos)
+}
 
 fn jet_time_round_delta_ns(value: i128, unit: &str, mode: &str, increment: i64) -> i64 {
     jet_duration_kernel_round_i128(value, unit, increment, mode)
@@ -647,38 +715,73 @@ fn jet_time_round_epoch_ns(value: i128, unit: &str, mode: &str, increment: i64) 
 fn jet_time_epoch_ns(secs: i64, nanos: u32) -> i128 {
     (secs as i128) * JET_NANOS_PER_SECOND + nanos as i128
 }
+fn jet_time_split_unix_nanoseconds(nanoseconds: i64) -> (i64, u32) {
+    let seconds = nanoseconds.div_euclid(JET_NANOS_PER_SECOND as i64);
+    let nanos = nanoseconds.rem_euclid(JET_NANOS_PER_SECOND as i64) as u32;
+    (seconds, nanos)
+}
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct JetDateTime {
+
+#[derive(Clone, Debug)]
+pub struct JetDateTime {
     secs: i64,
     nanos: u32,
-} // seconds + nanosecond remainder since Unix epoch (UTC)
+    leap_second: bool,
+} // seconds + nanosecond remainder since Unix epoch (UTC); leap labels keep the preceding POSIX second
+
+impl PartialEq for JetDateTime {
+    fn eq(&self, other: &Self) -> bool {
+        self.secs == other.secs
+            && self.leap_second == other.leap_second
+            && self.nanos == other.nanos
+    }
+}
+
+impl Eq for JetDateTime {}
+
+impl PartialOrd for JetDateTime {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for JetDateTime {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.secs
+            .cmp(&other.secs)
+            .then_with(|| self.leap_second.cmp(&other.leap_second))
+            .then_with(|| self.nanos.cmp(&other.nanos))
+    }
+}
 impl JetDateTime {
     pub(crate) fn from_timestamp(secs: i64) -> Self {
-        JetDateTime { secs, nanos: 0 }
+        Self::from_timestamp_ns_with_leap(secs, 0, false)
     }
     pub(crate) fn from_timestamp_ns(secs: i64, nanos: u32) -> Self {
-        let mut secs = secs;
-        let mut nanos = nanos;
+        Self::from_timestamp_ns_with_leap(secs, nanos, false)
+    }
+    pub(crate) fn from_timestamp_ns_with_leap(mut secs: i64, mut nanos: u32, leap_second: bool) -> Self {
         if nanos >= 1_000_000_000 {
             secs = secs.saturating_add((nanos / 1_000_000_000) as i64);
             nanos %= 1_000_000_000;
         }
-        JetDateTime { secs, nanos }
+        JetDateTime {
+            secs,
+            nanos,
+            leap_second,
+        }
     }
     pub(crate) fn from_unix_seconds(seconds: i64) -> Self {
-        Self::from_timestamp(seconds)
+        jet_time_from_unix_parts(seconds, 0)
     }
     pub(crate) fn from_unix_microseconds(microseconds: i64) -> Self {
         let secs = microseconds.div_euclid(1_000_000);
         let nanos = microseconds.rem_euclid(1_000_000) as u32 * 1_000;
-        Self::from_timestamp_ns(secs, nanos)
+        jet_time_from_unix_parts(secs, nanos)
     }
     pub(crate) fn from_unix_nanoseconds(nanoseconds: i64) -> Self {
-        Self::from_timestamp_ns(
-            nanoseconds.div_euclid(1_000_000_000),
-            nanoseconds.rem_euclid(1_000_000_000) as u32,
-        )
+        let (secs, nanos) = jet_time_split_unix_nanoseconds(nanoseconds);
+        jet_time_from_unix_parts(secs, nanos)
     }
     pub(crate) fn from_parts(
         year: i64,
@@ -690,16 +793,31 @@ impl JetDateTime {
         nanos: u32,
     ) -> Self {
         let date = JetDate::new(year, month, day);
-        let time = JetLocalTime::new(hour, minute, second);
-        Self::from_timestamp_ns(jet_time_utc_from_parts(&date, &time), nanos)
+        let leap_second = hour == 23 && minute == 59 && second == 60;
+        let time = JetLocalTime::new(hour, minute, if leap_second { 59 } else { second });
+        Self::from_timestamp_ns_with_leap(
+            jet_time_utc_from_parts(&date, &time),
+            nanos,
+            leap_second,
+        )
     }
     pub(crate) fn now() -> Self {
+        // Keep host nanosecond precision outside a world. A controlled world
+        // intentionally exposes its millisecond wall-clock origin.
+        if let Some(millis) = jet_scheduler_world_now_ms() {
+            return JetDateTime {
+                secs: millis.div_euclid(1_000),
+                nanos: millis.rem_euclid(1_000) as u32 * 1_000_000,
+                leap_second: false,
+            };
+        }
         let d = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default();
         JetDateTime {
             secs: d.as_secs() as i64,
             nanos: d.subsec_nanos(),
+            leap_second: false,
         }
     }
     pub(crate) fn date(&self) -> JetDate {
@@ -709,7 +827,19 @@ impl JetDateTime {
     }
     pub(crate) fn time(&self) -> JetLocalTime {
         let sec = self.secs.rem_euclid(86400);
-        JetLocalTime::with_nanosecond(sec / 3600, (sec / 60) % 60, sec % 60, self.nanos)
+        let mut time =
+            JetLocalTime::with_nanosecond(sec / 3600, (sec / 60) % 60, sec % 60, self.nanos);
+        if self.leap_second {
+            time.second = 60;
+        }
+        time
+    }
+    pub(crate) fn time_for_output(&self) -> JetLocalTime {
+        let mut time = self.time();
+        if self.leap_second {
+            time.second = 60;
+        }
+        time
     }
     pub(crate) fn hour(&self) -> i64 {
         self.time().hour
@@ -718,7 +848,11 @@ impl JetDateTime {
         self.time().minute
     }
     pub(crate) fn second(&self) -> i64 {
-        self.secs.rem_euclid(60)
+        if self.leap_second {
+            60
+        } else {
+            self.secs.rem_euclid(60)
+        }
     }
     pub(crate) fn millisecond(&self) -> i64 {
         (self.nanos / 1_000_000) as i64
@@ -729,8 +863,15 @@ impl JetDateTime {
     pub(crate) fn nanosecond(&self) -> i64 {
         self.nanos as i64
     }
+    pub(crate) fn unix_seconds_anchor(&self) -> i64 {
+        self.secs
+    }
+    pub(crate) fn is_leap_second(&self) -> bool {
+        self.leap_second
+    }
     pub(crate) fn to_timestamp(&self) -> i64 {
         self.secs
+            .saturating_add(if self.leap_second { 1 } else { 0 })
     }
     pub(crate) fn to_unix_ms(&self) -> i64 {
         self.total_nanoseconds()
@@ -755,7 +896,7 @@ impl JetDateTime {
     pub(crate) fn from_unix_ms(ms: i64) -> Self {
         let secs = ms.div_euclid(1000);
         let nanos = (ms.rem_euclid(1000) as u32).saturating_mul(1_000_000);
-        JetDateTime { secs, nanos }
+        jet_time_from_unix_parts(secs, nanos)
     }
     pub(crate) fn parse_rfc3339(s: &str) -> Result<Self, String> {
         let (date_part, rest) = s
@@ -772,19 +913,29 @@ impl JetDateTime {
         } else {
             return Err(format!("RFC3339 datetime needs Z or an offset: {}", s));
         };
-        let time = JetLocalTime::parse(time_part)?;
+        let (time, leap_second) = JetLocalTime::parse_rfc3339(time_part)?;
         let nanos = time.nanosecond() as u32;
         let offset = jet_time_parse_offset(zone_part)?;
-        Ok(JetDateTime {
-            secs: jet_time_utc_from_parts(&date, &time).saturating_sub(offset),
+        if leap_second && offset != 0 {
+            return Err(format!("time out of range: {}", time_part));
+        }
+        Ok(Self::from_timestamp_ns_with_leap(
+            jet_time_utc_from_parts(&date, &time).saturating_sub(offset),
             nanos,
-        })
+            leap_second,
+        ))
     }
     pub(crate) fn format_rfc3339(&self) -> String {
         let d = self.date();
-        let t = self.time();
+        let t = self.time_for_output();
         if self.nanos == 0 {
-            format!("{}T{}Z", d.to_string_fmt(), t.to_string_fmt())
+            format!(
+                "{}T{:02}:{:02}:{:02}Z",
+                d.to_string_fmt(),
+                t.hour(),
+                t.minute(),
+                t.second()
+            )
         } else {
             format!(
                 "{}T{:02}:{:02}:{:02}.{:09}Z",
@@ -797,24 +948,30 @@ impl JetDateTime {
         }
     }
     pub(crate) fn format_pattern(&self, pattern: &String) -> String {
-        jet_time_format_pattern(pattern, &self.date(), &self.time(), None)
+        jet_time_format_pattern(pattern, &self.date(), &self.time_for_output(), None)
     }
     pub(crate) fn format_checked(&self, pattern: &String) -> Result<String, String> {
-        jet_time_format_pattern_checked(pattern, &self.date(), &self.time(), None)
+        jet_time_format_pattern_checked(pattern, &self.date(), &self.time_for_output(), None)
     }
     pub(crate) fn plus_duration_ns(&self, ns: i64) -> JetDateTime {
-        let total = (self.secs as i128)
-            .saturating_mul(1_000_000_000)
-            .saturating_add(self.nanos as i128)
+        if ns == 0 {
+            return self.clone();
+        }
+        let total = self
+            .total_nanoseconds()
             .saturating_add(ns as i128);
-        let secs = total
-            .div_euclid(1_000_000_000)
-            .clamp(i64::MIN as i128, i64::MAX as i128) as i64;
-        let nanos = total.rem_euclid(1_000_000_000) as u32;
-        JetDateTime { secs, nanos }
+        jet_time_from_total_nanoseconds(total)
+    }
+    pub(crate) fn add_nanoseconds(&self, ns: i64) -> JetDateTime {
+        self.plus_duration_ns(ns)
     }
     pub(crate) fn total_nanoseconds(&self) -> i128 {
         jet_time_epoch_ns(self.secs, self.nanos)
+            + if self.leap_second {
+                JET_NANOS_PER_SECOND
+            } else {
+                0
+            }
     }
     pub(crate) fn difference_ns(&self, other: &JetDateTime) -> i64 {
         (self.total_nanoseconds() - other.total_nanoseconds())
@@ -829,7 +986,7 @@ impl JetDateTime {
             date.day(),
             time.hour(),
             time.minute(),
-            time.second(),
+            self.second(),
             time.nanosecond() as u32,
         )
     }
@@ -853,10 +1010,12 @@ impl JetDateTime {
         if !matches!(overflow, "constrain" | "clamp" | "reject") {
             return Err(format!("invalid overflow policy: {overflow}"));
         }
+        let valid_second = (0..=59).contains(&second)
+            || (hour == 23 && minute == 59 && second == 60);
         if overflow == "reject"
             && (!(0..=23).contains(&hour)
                 || !(0..=59).contains(&minute)
-                || !(0..=59).contains(&second))
+                || !valid_second)
         {
             return Err(format!(
                 "time fields are outside the valid range: {hour:02}:{minute:02}:{second:02}"
@@ -902,26 +1061,32 @@ impl JetDateTime {
             "day" => JetDateTime {
                 secs: self.secs.div_euclid(86400) * 86400,
                 nanos: 0,
+                leap_second: false,
             },
             "hour" => JetDateTime {
                 secs: self.secs.div_euclid(3600) * 3600,
                 nanos: 0,
+                leap_second: false,
             },
             "minute" => JetDateTime {
                 secs: self.secs.div_euclid(60) * 60,
                 nanos: 0,
+                leap_second: false,
             },
             "second" => JetDateTime {
                 secs: self.secs,
                 nanos: 0,
+                leap_second: self.leap_second,
             },
             "millisecond" => JetDateTime {
                 secs: self.secs,
                 nanos: (self.nanos / 1_000_000) * 1_000_000,
+                leap_second: self.leap_second,
             },
             "microsecond" => JetDateTime {
                 secs: self.secs,
                 nanos: (self.nanos / 1_000) * 1_000,
+                leap_second: self.leap_second,
             },
             _ => self.clone(),
         }
@@ -1336,6 +1501,17 @@ impl Ord for JetZonedDateTime {
 }
 
 impl JetZonedDateTime {
+    fn display_parts(&self) -> (JetDate, JetLocalTime, i64) {
+        if self.instant.leap_second && self.zone.name == "UTC" {
+            (
+                self.instant.date(),
+                self.instant.time_for_output(),
+                0,
+            )
+        } else {
+            self.zone.local_parts(self.instant.to_timestamp())
+        }
+    }
     pub(crate) fn now(zone: &JetZone) -> Self {
         JetDateTime::now().in_zone(zone)
     }
@@ -1382,33 +1558,30 @@ impl JetZonedDateTime {
         };
         let offset = jet_time_parse_offset(offset_text)?;
         let date = JetDate::parse(date_text)?;
-        let time = JetLocalTime::parse(time_text)?;
+        let parsed = JetDateTime::parse_rfc3339(datetime_text)?;
+        let time = if parsed.leap_second {
+            parsed.time()
+        } else {
+            JetLocalTime::parse(time_text)?
+        };
         let utc = zone
             .local_to_utc_with_offset(&date, &time, offset)
             .ok_or_else(|| format!("RFC9557 offset does not match zone {}", zone.name))?;
-        let parsed = JetDateTime::parse_rfc3339(datetime_text)?;
-        Ok(Self {
-            instant: JetDateTime::from_timestamp_ns(utc, parsed.nanosecond() as u32),
-            zone,
-        })
+        let mut instant = JetDateTime::from_timestamp_ns(utc, parsed.nanosecond() as u32);
+        instant.leap_second = parsed.leap_second;
+        Ok(Self { instant, zone })
     }
     pub(crate) fn date(&self) -> JetDate {
-        self.zone.local_parts(self.instant.secs).0
+        self.display_parts().0
     }
     pub(crate) fn time(&self) -> JetLocalTime {
-        let (_, time, _) = self.zone.local_parts(self.instant.secs);
-        JetLocalTime::with_nanosecond(
-            time.hour(),
-            time.minute(),
-            time.second(),
-            self.instant.nanosecond() as u32,
-        )
+        self.display_parts().1
     }
     pub(crate) fn offset_seconds(&self) -> i64 {
-        self.zone.local_parts(self.instant.secs).2
+        self.display_parts().2
     }
     pub(crate) fn is_dst(&self) -> bool {
-        self.zone.info_at_utc(self.instant.secs).is_dst
+        self.zone.info_at_utc(self.instant.to_timestamp()).is_dst
     }
     pub(crate) fn to_datetime(&self) -> JetDateTime {
         self.instant.clone()
@@ -1518,7 +1691,7 @@ impl JetZonedDateTime {
         )
     }
     pub(crate) fn format_rfc9557(&self) -> String {
-        let (date, time, offset) = self.zone.local_parts(self.instant.to_timestamp());
+        let (date, time, offset) = self.display_parts();
         let fraction = if self.instant.nanosecond() == 0 {
             String::new()
         } else {

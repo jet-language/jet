@@ -1,13 +1,13 @@
-// Docs tab — durable markdown under project docs/ plus a pinned owner scratchpad.
+// Docs tab — durable markdown and self-contained HTML reports under project docs/ plus a pinned owner scratchpad.
 // Scratchpad: <dataDir>/scratch/owner-scratch.md
-// Everything else: <project>/docs/**/*.md (no .json, no skills).
+// Docs stay under docs/. The owner editor has one separate, fixed root AGENTS.md target.
 import {
-  closeSync, constants, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync,
+  closeSync, constants, fchmodSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync,
   readlinkSync,
   readdirSync, readFileSync, writeFileSync, unlinkSync, rmdirSync, renameSync,
 } from 'node:fs';
 import { join, basename, isAbsolute, resolve, relative, sep } from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { projectRoot as resolveProjectRoot } from './paths.mjs';
 import { TowerError } from './store.mjs';
 
@@ -15,25 +15,14 @@ const fail = (code, msg) => { throw new TowerError(code, msg); };
 
 export const SCRATCH_ID = 'owner-scratch';
 const SCRATCH_FILE = `${SCRATCH_ID}.md`;
-export const OWNER_GUIDANCE_PATH = 'docs/agents/owner-guidance.md';
+export const OWNER_GUIDANCE_PATH = 'AGENTS.md';
+
 export const SECTIONS = [
   { id: 'spec', label: 'Spec', dir: 'docs/spec' },
-  { id: 'proposals', label: 'Proposals', dir: 'docs/proposals' },
-  { id: 'plans', label: 'Plans', dir: 'docs/plans' },
-  { id: 'research', label: 'Research', dir: 'docs/research' },
   { id: 'audits', label: 'Audits', dir: 'docs/audits' },
-  { id: 'references', label: 'References', dir: 'docs/reference' },
+  { id: 'research', label: 'Research', dir: 'docs/research' },
+  { id: 'proposals', label: 'Proposals', dir: 'docs/proposals' },
 ];
-/** Top-level docs/ dirs that never appear in the Docs UI or counts. */
-export const HIDDEN_TOP_DIRS = new Set(['archive']);
-/** Fold these live dirs into another section id (no separate UI section). */
-export const SECTION_ALIASES = {
-  sidequests: 'plans',
-};
-const KNOWN_DIRS = new Set([
-  ...SECTIONS.map(s => s.dir.replace(/^docs\//, '')),
-  ...Object.keys(SECTION_ALIASES),
-]);
 
 const SLUG_RE = /^[a-z0-9][a-z0-9._-]{0,79}$/i;
 
@@ -65,6 +54,50 @@ function parseFront(raw) {
 function titleFromBody(body, fallback) {
   const m = /^#\s+(.+)$/m.exec(body || '');
   return (m && m[1].trim()) || fallback;
+}
+
+const HTML_TITLE_ENTITIES = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+  ndash: '–', mdash: '—', hellip: '…', times: '×',
+};
+
+function titleFromHtml(body, fallback) {
+  const raw = /<title\b[^>]*>([\s\S]*?)<\/title\s*>/i.exec(body || '')?.[1];
+  if (!raw) return fallback;
+  const title = raw
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/&(#x[0-9a-f]+|#\d+|[a-z][a-z0-9]+);/gi, (match, entity) => {
+      const lowerEntity = entity.toLowerCase();
+      if (Object.hasOwn(HTML_TITLE_ENTITIES, lowerEntity))
+        return HTML_TITLE_ENTITIES[lowerEntity];
+      const code = lowerEntity.startsWith('#x')
+        ? Number.parseInt(lowerEntity.slice(2), 16)
+        : Number.parseInt(lowerEntity.slice(1), 10);
+      return Number.isInteger(code) && code >= 0 && code <= 0x10ffff
+        ? String.fromCodePoint(code)
+        : match;
+    })
+    .trim();
+  return title || fallback;
+}
+
+function documentFormat(name) {
+  const lower = String(name).toLowerCase();
+  if (lower.endsWith('.md')) return 'markdown';
+  if (lower.endsWith('.html') || lower.endsWith('.htm')) return 'html';
+  return null;
+}
+
+function filenameTitle(name) {
+  return basename(name).replace(/\.(?:md|html?)$/i, '');
+}
+
+function documentPathError(allowHtml) {
+  return allowHtml
+    ? 'path must be a .md, .html, or .htm file under docs/'
+    : 'path must be a .md file under docs/';
 }
 
 function serializeScratch(title, body) {
@@ -245,10 +278,11 @@ function openDataContext(dataDir, createScratch) {
   }
 }
 
-function parseDocsPath(dataDir, relPath) {
+function parseDocsPath(dataDir, relPath, allowHtml = false) {
   const rel = String(relPath || '').replace(/\\/g, '/').replace(/^\/+/, '');
-  if (!rel || rel.includes('..') || !rel.endsWith('.md')) {
-    fail('E_INVALID', 'path must be a .md file under docs/');
+  const format = documentFormat(rel);
+  if (!rel || rel.includes('..') || format !== 'markdown' && !(allowHtml && format === 'html')) {
+    fail('E_INVALID', documentPathError(allowHtml));
   }
   if (rel !== 'docs' && !rel.startsWith('docs/')) {
     fail('E_INVALID', 'path must be under docs/');
@@ -259,15 +293,10 @@ function parseDocsPath(dataDir, relPath) {
   if (!norm.startsWith('docs/') || norm.includes('..')) fail('E_INVALID', 'path escapes docs/');
   const parts = norm.slice('docs/'.length).split('/');
   if (!parts.length || parts.some(part => !part || part === '.' || part === '..'))
-    fail('E_INVALID', 'path must be a .md file under docs/');
-  return { abs: resolve(root, norm), rel: norm, parts };
+    fail('E_INVALID', documentPathError(allowHtml));
+  return { abs: resolve(root, norm), rel: norm, parts, format };
 }
 
-function assertGeneralDocsWrite(rel) {
-  if (rel === OWNER_GUIDANCE_PATH) {
-    fail('E_OWNER_ONLY', `${OWNER_GUIDANCE_PATH} is owner-only; use the Guidance tab`);
-  }
-}
 
 function openDocsContext(dataDir, createDocs) {
   const root = resolve(projectRoot(dataDir));
@@ -427,7 +456,7 @@ function writeNewAt(parentFd, name, data) {
   } finally { closeSync(fd); }
 }
 
-function atomicWriteAt(parentFd, name, data) {
+function atomicWriteAt(parentFd, name, data, { beforeReplace, mode = 0o600 } = {}) {
   let temp;
   let fd;
   for (let attempt = 0; attempt < 64; attempt++) {
@@ -457,6 +486,7 @@ function atomicWriteAt(parentFd, name, data) {
     guardHeldDirectory(parentFd);
     tempStat = fstatSync(fd);
     requireSafeRegular(tempStat);
+    fchmodSync(fd, mode);
     guardHeldDirectory(parentFd);
     fsyncSync(fd);
     guardHeldDirectory(parentFd);
@@ -470,6 +500,7 @@ function atomicWriteAt(parentFd, name, data) {
     const existing = entryStatAt(parentFd, name);
     if (existing) requireSafeRegular(existing, 'docs destination is not a single-link regular file');
     guardHeldDirectory(parentFd);
+    beforeReplace?.();
     renameAt(parentFd, temp, parentFd, name);
     renamed = true;
     fsyncSync(parentFd);
@@ -487,15 +518,23 @@ function atomicWriteAt(parentFd, name, data) {
   }
 }
 
-function openDocTarget(dataDir, relPath, createParents = false) {
-  const parsed = parseDocsPath(dataDir, relPath);
+function openDocTarget(dataDir, relPath, createParents = false, allowHtml = false) {
+  const parsed = parseDocsPath(dataDir, relPath, allowHtml);
   const context = openDocsContext(dataDir, createParents);
   if (!context) return null;
   try {
     const parentFd = docsParent(context, parsed.parts.slice(0, -1), createParents);
     const opened = openFileAt(parentFd, parsed.parts.at(-1));
     context.fds.push(opened.fd);
-    return { ...context, parentFd, leaf: parsed.parts.at(-1), rel: parsed.rel, fd: opened.fd, stat: opened.stat };
+    return {
+      ...context,
+      parentFd,
+      leaf: parsed.parts.at(-1),
+      rel: parsed.rel,
+      format: parsed.format,
+      fd: opened.fd,
+      stat: opened.stat,
+    };
   } catch (error) {
     closeContext(context);
     if (error.code === 'ENOENT') return null;
@@ -511,13 +550,9 @@ export function resolveDocsPath(dataDir, relPath) {
 
 function ensureScratchPad(context) {
   if (readEntryAt(context.scratchFd, SCRATCH_FILE, { optional: true, message: 'scratch pad cannot be opened safely' })) return;
-  // Legacy single-file scratch at dataDir/owner-scratch.md.
-  const legacy = readEntryAt(context.dataFd, 'owner-scratch.md', {
-    optional: true, message: 'legacy scratch cannot be opened safely',
-  });
   try {
     writeNewAt(context.scratchFd, SCRATCH_FILE,
-      serializeScratch('Owner scratch', legacy?.data || ''));
+      serializeScratch('Owner scratch', ''));
   } catch (error) {
     if (error.code !== 'EEXIST') throw error;
     // A concurrent creator won. Re-open with O_NOFOLLOW below so a raced
@@ -526,11 +561,28 @@ function ensureScratchPad(context) {
   readEntryAt(context.scratchFd, SCRATCH_FILE, { message: 'scratch pad cannot be opened safely' });
 }
 
+function emptyScratchPad() {
+  return {
+    kind: 'scratch',
+    path: `scratch/${SCRATCH_ID}.md`,
+    id: SCRATCH_ID,
+    title: 'Owner scratch',
+    body: '',
+    created: null,
+    updated: null,
+    bytes: 0,
+  };
+}
+
+
 export function showScratchPad(dataDir) {
-  const context = openDataContext(dataDir, true);
+  const context = openDataContext(dataDir, false);
+  if (!context) return emptyScratchPad();
   try {
-    ensureScratchPad(context);
-    const entry = readEntryAt(context.scratchFd, SCRATCH_FILE, { message: 'scratch pad cannot be opened safely' });
+    const entry = readEntryAt(context.scratchFd, SCRATCH_FILE, {
+      optional: true, message: 'scratch pad cannot be opened safely',
+    });
+    if (!entry) return emptyScratchPad();
     const { title, body } = parseFront(entry.data);
     return {
       kind: 'scratch',
@@ -574,13 +626,19 @@ function walkMd(dirFd, prefix, out) {
         try { walkMd(childFd, rel, out); }
         finally { closeHeld(childFd); }
       }
-      else if (name.endsWith('.md')) {
-        let title = basename(name, '.md');
+      else {
+        const format = documentFormat(name);
+        if (!format) continue;
+        let title = filenameTitle(name);
         try {
           const entry = readEntryAt(dirFd, name);
-          const { title: front, body } = parseFront(entry.data);
-          title = front || titleFromBody(body, title);
-          out.push({ path: rel, title, ...fileTimes(entry.stat), bytes: entry.stat.size });
+          if (format === 'html') {
+            title = titleFromHtml(entry.data, title);
+          } else {
+            const { title: front, body } = parseFront(entry.data);
+            title = front || titleFromBody(body, title);
+          }
+          out.push({ path: rel, title, format, ...fileTimes(entry.stat), bytes: entry.stat.size });
         } catch { /* skip raced or unreadable files */ }
       }
     } catch { /* skip */ }
@@ -593,20 +651,12 @@ function topDirOf(rel) {
 }
 
 function sectionForRel(rel) {
-  // rel like docs/proposals/foo.md or docs/first-hour.md
   const top = topDirOf(rel);
-  if (!top) return 'other';
-  if (HIDDEN_TOP_DIRS.has(top)) return null;
-  if (SECTION_ALIASES[top]) return SECTION_ALIASES[top];
-  if (KNOWN_DIRS.has(top)) {
-    const sec = SECTIONS.find(s => s.dir === `docs/${top}`);
-    return sec?.id || 'other';
-  }
-  return 'other';
+  const section = SECTIONS.find(s => s.dir === `docs/${top}`);
+  return section?.id || null;
 }
 
 export function listDocs(dataDir) {
-  migrateScratchReports(dataDir);
   const scratch = showScratchPad(dataDir);
   const context = openDocsContext(dataDir, false);
   const files = [];
@@ -615,40 +665,40 @@ export function listDocs(dataDir) {
     finally { closeContext(context); }
   }
 
-  const bySection = Object.fromEntries([
-    ...SECTIONS.map(s => [s.id, []]),
-    ['other', []],
-  ]);
+  const bySection = Object.fromEntries(SECTIONS.map(s => [s.id, []]));
   for (const f of files) {
-    if (f.path === OWNER_GUIDANCE_PATH) continue; // dedicated owner-only Guidance tab
     const sec = sectionForRel(f.path);
-    if (!sec) continue; // archived — hidden from UI and counts
+    if (!sec) continue;
     bySection[sec].push(f);
   }
   for (const k of Object.keys(bySection)) {
-    bySection[k].sort((a, b) => b.updated.localeCompare(a.updated) || a.path.localeCompare(b.path));
+    bySection[k].sort((a, b) => b.created.localeCompare(a.created)
+      || b.updated.localeCompare(a.updated)
+      || a.path.localeCompare(b.path));
   }
 
-  const sections = [
-    ...SECTIONS.map(s => ({ id: s.id, label: s.label, files: bySection[s.id] })),
-    { id: 'other', label: 'Other', files: bySection.other },
-  ];
+  const sections = SECTIONS.map(s => ({ id: s.id, label: s.label, files: bySection[s.id] }));
   return { scratch, sections };
 }
 
 export function showDoc(dataDir, relPath) {
-  const target = openDocTarget(dataDir, relPath);
+  const target = openDocTarget(dataDir, relPath, false, true);
   if (!target) {
-    const { rel } = resolveDocsPath(dataDir, relPath);
+    const { rel } = parseDocsPath(dataDir, relPath, true);
     fail('E_NOT_FOUND', `no file ${rel}`);
   }
   try {
     const body = readOpenedFile(target.parentFd, target.fd, 'utf8');
-    const { title: front } = parseFront(body);
+    const { title: front, body: markdownBody } = parseFront(body);
+    const fallback = filenameTitle(target.rel);
+    const title = target.format === 'html'
+      ? titleFromHtml(body, fallback)
+      : front || titleFromBody(markdownBody, fallback);
     return {
       kind: 'doc',
+      format: target.format,
       path: target.rel,
-      title: front || titleFromBody(body, basename(target.rel, '.md')),
+      title,
       body,
       ...fileTimes(target.stat),
       bytes: target.stat.size,
@@ -684,13 +734,14 @@ function createDoc(dataDir, rel, text) {
 }
 
 export function addDoc(dataDir, { section, title, body = '', path: wantPath, id } = {}) {
-  migrateScratchReports(dataDir);
   let rel;
   let generated = false;
   let generatedDir;
   let generatedSlug;
   if (wantPath) {
     ({ rel } = resolveDocsPath(dataDir, wantPath));
+    if (!sectionForRel(rel))
+      fail('E_INVALID', `path must be under ${SECTIONS.map(s => s.dir).join(', ')}`);
   } else {
     const sec = SECTIONS.find(s => s.id === section);
     if (!sec) fail('E_INVALID', `section must be one of: ${SECTIONS.map(s => s.id).join(', ')}`);
@@ -701,7 +752,6 @@ export function addDoc(dataDir, { section, title, body = '', path: wantPath, id 
     rel = `${generatedDir}/${generatedSlug}.md`;
   }
   const norm = resolveDocsPath(dataDir, rel).rel;
-  assertGeneralDocsWrite(norm);
   const text = String(body ?? '').replace(/\r\n/g, '\n');
   const withTitle = title && !text.startsWith('#')
     ? `# ${title}\n\n${text.endsWith('\n') || !text ? text : text + '\n'}`
@@ -719,9 +769,7 @@ export function addDoc(dataDir, { section, title, body = '', path: wantPath, id 
   return showDoc(dataDir, candidate);
 }
 
-export function updateDoc(dataDir, relPath, patch = {}, { ownerGuidance = false } = {}) {
-  const parsed = resolveDocsPath(dataDir, relPath);
-  if (!ownerGuidance) assertGeneralDocsWrite(parsed.rel);
+export function updateDoc(dataDir, relPath, patch = {}) {
   const target = openDocTarget(dataDir, relPath);
   if (!target) {
     const { rel } = resolveDocsPath(dataDir, relPath);
@@ -743,19 +791,58 @@ export function updateDoc(dataDir, relPath, patch = {}, { ownerGuidance = false 
   return showDoc(dataDir, rel);
 }
 
+const guidanceRevision = body => createHash('sha256').update(body).digest('hex');
+
+function readGuidanceAt(rootFd) {
+  const entry = readEntryAt(rootFd, OWNER_GUIDANCE_PATH, {
+    optional: true, message: 'AGENTS.md must be a single-link regular file',
+  });
+  if (!entry) fail('E_NOT_FOUND', 'no root AGENTS.md');
+  return entry;
+}
+
 export function showOwnerGuidance(dataDir) {
-  return showDoc(dataDir, OWNER_GUIDANCE_PATH);
+  const rootFd = openAbsoluteDirectory(resolve(projectRoot(dataDir)));
+  try {
+    const { data: body, stat } = readGuidanceAt(rootFd);
+    return {
+      kind: 'doc',
+      format: 'markdown',
+      path: OWNER_GUIDANCE_PATH,
+      title: titleFromBody(body, OWNER_GUIDANCE_PATH),
+      body,
+      revision: guidanceRevision(body),
+      ...fileTimes(stat),
+      bytes: stat.size,
+    };
+  } finally {
+    closeHeld(rootFd);
+  }
 }
 
 export function updateOwnerGuidance(dataDir, patch = {}) {
-  return updateDoc(dataDir, OWNER_GUIDANCE_PATH, patch, { ownerGuidance: true });
+  if (typeof patch.body !== 'string') fail('E_INVALID', 'AGENTS.md body must be text');
+  const rootFd = openAbsoluteDirectory(resolve(projectRoot(dataDir)));
+  try {
+    const checkRevision = () => {
+      const current = readGuidanceAt(rootFd);
+      if (patch.expectRev !== guidanceRevision(current.data))
+        fail('E_CONFLICT', 'AGENTS.md changed or its loaded revision is missing; reload before saving');
+      return current.stat;
+    };
+    const stat = checkRevision();
+    atomicWriteAt(rootFd, OWNER_GUIDANCE_PATH, patch.body, {
+      beforeReplace: checkRevision,
+      mode: stat.mode & 0o777,
+    });
+  } finally {
+    closeHeld(rootFd);
+  }
+  return showOwnerGuidance(dataDir);
 }
 
 export function deleteDoc(dataDir, relPath) {
   const parsed = parseDocsPath(dataDir, relPath);
-  assertGeneralDocsWrite(parsed.rel);
-  if (topDirOf(parsed.rel) === 'archive')
-    fail('E_INVALID', 'delete archived files from disk outside Tower, or restore then delete');
   const target = openDocTarget(dataDir, relPath);
   if (!target) {
     fail('E_NOT_FOUND', `no file ${parsed.rel}`);
@@ -775,124 +862,4 @@ export function deleteDoc(dataDir, relPath) {
   }
 }
 
-/**
- * Move a live docs/*.md file into docs/archive/. Hidden from the Docs UI.
- * Refuses paths already under archive/.
- */
-export function archiveDoc(dataDir, relPath) {
-  const parsed = parseDocsPath(dataDir, relPath);
-  const { rel } = parsed;
-  assertGeneralDocsWrite(rel);
-  const top = topDirOf(rel);
-  if (top === 'archive') fail('E_INVALID', `${rel} is already archived`);
-  if (top === 'spec') fail('E_INVALID', 'spec files are binding — do not archive; amend the spec or open a ballot');
-  const context = openDocsContext(dataDir, false);
-  if (!context) fail('E_NOT_FOUND', `no file ${rel}`);
-  const name = basename(rel);
-  try {
-    const sourceParent = docsParent(context, parsed.parts.slice(0, -1), false);
-    const source = openFileAt(sourceParent, parsed.parts.at(-1));
-    context.fds.push(source.fd);
-    const archiveFd = docsParent(context, ['archive'], true);
-    const stem = name.replace(/\.md$/, '');
-    let destLeaf = name;
-    let n = 2;
-    for (;;) {
-      const existing = entryStatAt(archiveFd, destLeaf);
-      if (!existing) break;
-      requireSafeRegular(existing, 'archive destination is not a single-link regular file');
-      destLeaf = `${stem}-${n}.md`;
-      n++;
-    }
-    const current = entryStatAt(sourceParent, parsed.parts.at(-1));
-    if (!current || !isSafeRegular(current) || current.dev !== source.stat.dev || current.ino !== source.stat.ino)
-      fail('E_INVALID', 'docs file changed during archive');
-    renameAt(sourceParent, parsed.parts.at(-1), archiveFd, destLeaf);
-    const moved = openFileAt(archiveFd, destLeaf);
-    try {
-      if (moved.stat.dev !== source.stat.dev || moved.stat.ino !== source.stat.ino)
-        fail('E_INVALID', 'archive destination changed during move');
-    } finally {
-      closeSync(moved.fd);
-    }
-    return { ok: true, from: rel, path: `docs/archive/${destLeaf}` };
-  } catch (error) {
-    if (error.code === 'ENOENT') fail('E_NOT_FOUND', `no file ${rel}`);
-    throw error;
-  } finally {
-    closeContext(context);
-  }
-}
 
-/** Classify a legacy scratch filename into audits vs research. */
-export function classifyScratchReport(filename) {
-  const base = basename(filename, '.md').toLowerCase();
-  if (base === SCRATCH_ID || base === 'owner-scratch') return null;
-  if (/research|lessons-learned/.test(base)) return 'research';
-  if (/audit|persona|mission|field|surface|spec-compliance|garbage|cleanup/.test(base)) return 'audits';
-  if (/^surface-research/.test(base)) return 'research';
-  return 'audits'; // default leftover reports → audits
-}
-
-/**
- * One-shot: move .tower/scratch/*.md reports into docs/audits|research.
- * Leaves owner-scratch.md in place. Idempotent.
- */
-export function migrateScratchReports(dataDir) {
-  const scratch = openDataContext(dataDir, false);
-  if (!scratch) return [];
-  let context;
-  const moved = [];
-  try {
-    context = openDocsContext(dataDir, true);
-    const destinationDirs = new Map();
-    for (const id of ['audits', 'research']) {
-      const sec = SECTIONS.find(s => s.id === id);
-      destinationDirs.set(id, docsParent(context, [sec.dir.slice('docs/'.length)], true));
-    }
-    for (const name of readDirectoryAt(scratch.scratchFd)) {
-      if (!name.endsWith('.md')) continue;
-      const section = classifyScratchReport(name);
-      if (!section) continue;
-      const sourceEntry = entryStatAt(scratch.scratchFd, name);
-      if (!sourceEntry || !isSafeRegular(sourceEntry)) continue;
-      const source = readEntryAt(scratch.scratchFd, name, {
-        encoding: null, optional: true, message: 'scratch report cannot be opened safely',
-      });
-      if (!source) continue;
-      const destinationFd = destinationDirs.get(section);
-      const existing = entryStatAt(destinationFd, name);
-      let copied = false;
-      if (existing) {
-        requireSafeRegular(existing, 'scratch migration destination is unsafe');
-      } else {
-        try { writeNewAt(destinationFd, name, source.data); }
-        catch (error) {
-          if (error.code !== 'EEXIST') throw error;
-          const raced = entryStatAt(destinationFd, name);
-          if (raced && !isSafeRegular(raced))
-            fail('E_INVALID', 'scratch migration destination changed to an unsafe file');
-        }
-        copied = true;
-      }
-      const current = entryStatAt(scratch.scratchFd, name);
-      if (!current) continue;
-      if (!isSafeRegular(current) || current.dev !== source.stat.dev || current.ino !== source.stat.ino)
-        fail('E_INVALID', 'scratch report changed during migration');
-      unlinkAt(scratch.scratchFd, name);
-      if (copied) moved.push({ from: name, to: `${SECTIONS.find(s => s.id === section).dir}/${name}` });
-    }
-  } finally {
-    if (context) closeContext(context);
-    closeContext(scratch);
-  }
-  return moved;
-}
-
-/** Seed scratchpad from legacy dataDir/owner-scratch.md if needed. */
-export function migrateOwnerScratch(dataDir) {
-  const context = openDataContext(dataDir, true);
-  try { ensureScratchPad(context); }
-  finally { closeContext(context); }
-  return showScratchPad(dataDir);
-}

@@ -7,7 +7,7 @@
 //! lie about what the real build does. This mirrors `tests/comptime_diff.rs`.
 //!
 //! Also tested here:
-//!   - the E2201 honest-boundary note (FFI/`#Unsafe`/native std),
+//!   - canonical evaluator terminal diagnostics (E0956/E2202),
 //!   - the per-iteration `dev_iteration` function the watch loop is built on.
 //!
 //! The D-DEV3 save-to-diagnostic latency budget is NOT here: a wall-clock

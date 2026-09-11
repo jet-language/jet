@@ -1,6 +1,5 @@
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Checker;
-use crate::Sema::CheckerCoreLib::is_polymorphic_core_special;
 use crate::Sema::Diagnostics::{private_item, soft_public_use, type_fix_hint};
 use crate::Sema::ModuleState;
 use crate::Sema::FFI::e3211;
@@ -22,10 +21,7 @@ impl<'a> Checker<'a> {
     /// the final callable may be behind several module-alias edges. Return the
     /// root alias for reference tracking, the module that owns the callable,
     /// and the final member name for the ordinary imported-call checker.
-    pub(crate) fn resolve_import_call_path(
-        &self,
-        name: &str,
-    ) -> Option<(String, usize, String)> {
+    pub(crate) fn resolve_import_call_path(&self, name: &str) -> Option<(String, usize, String)> {
         let mut segments = name.split('.');
         let alias = segments.next()?.to_string();
         let mut module_idx = *self.imports.get(&alias)?;
@@ -88,13 +84,7 @@ impl<'a> Checker<'a> {
         {
             self.record_import_alias_reference(alias, alias_span);
             return self.infer_import_call(
-                alias,
-                real_idx,
-                &real_name,
-                alias_span,
-                span,
-                type_args,
-                args,
+                alias, real_idx, &real_name, alias_span, span, type_args, args, resolved_ret_out,
             );
         }
         if let Some((module, real_item)) = self
@@ -112,11 +102,9 @@ impl<'a> Checker<'a> {
                 type_args,
                 args,
             );
-            // D-NAME-WALK1=A: an arg-dependent Core return is a sema fact.
-            // Carry it across the re-export hop so TIR does not fall back to Unit.
-            if is_polymorphic_core_special(&module, &real_item) {
-                *resolved_ret_out = ret.clone();
-            }
+            // D-NAME-WALK1=A: the checked Core return is a sema fact. Carry it
+            // across the re-export hop so TIR never re-derives it.
+            *resolved_ret_out = ret.clone();
             return ret;
         }
         let Some(sig) = self.funcs.get(mangled).cloned() else {
@@ -185,7 +173,9 @@ impl<'a> Checker<'a> {
             for arg in args.iter_mut() {
                 self.infer(&mut arg.expr);
             }
-            return Some(sig.effective_return_type());
+            let (_, return_type) =
+                self.checked_return_types(sig.return_type.clone(), sig.is_extern);
+            return Some(return_type);
         }
         self.register_binder_refs(args);
         // Homogeneous rest parameters are lowered as one list slot after
@@ -354,9 +344,12 @@ impl<'a> Checker<'a> {
             }
             self.check_write_arg_change(arg);
         }
-        let ret = sig.effective_return_type();
-        let ret = self.trait_reg.instantiate_type(&ret, &subst);
-        Some(self.resolve_type(ret))
+        let declared = sig.return_type.clone().map(|return_type| {
+            self.trait_reg.instantiate_type(&return_type, &subst)
+        });
+        let (resolved_ret, ret) = self.checked_return_types(declared, sig.is_extern);
+        *resolved_ret_out = Some(resolved_ret);
+        Some(ret)
     }
 
     pub(crate) fn infer_import_call(
@@ -368,16 +361,10 @@ impl<'a> Checker<'a> {
         span: Span,
         type_args: &[Type],
         args: &mut Vec<crate::AST::CallArg>,
+        resolved_ret_out: &mut Option<Type>,
     ) -> Option<Type> {
         self.infer_import_call_with_warning(
-            alias,
-            mod_idx,
-            name,
-            alias_span,
-            span,
-            type_args,
-            args,
-            true,
+            alias, mod_idx, name, alias_span, span, type_args, args, resolved_ret_out, true,
         )
     }
 
@@ -390,6 +377,7 @@ impl<'a> Checker<'a> {
         span: Span,
         type_args: &[Type],
         args: &mut Vec<crate::AST::CallArg>,
+        resolved_ret_out: &mut Option<Type>,
         warn_soft_public: bool,
     ) -> Option<Type> {
         let Some(mods) = self.modules else {
@@ -409,14 +397,7 @@ impl<'a> Checker<'a> {
             }
             let (real_name, real_idx) = (real_name.clone(), *real_idx);
             return self.infer_import_call_with_warning(
-                alias,
-                real_idx,
-                &real_name,
-                alias_span,
-                span,
-                type_args,
-                args,
-                false,
+                alias, real_idx, &real_name, alias_span, span, type_args, args, resolved_ret_out, false,
             );
         }
         if target.funcs.contains_key(&semantic_name) {
@@ -466,7 +447,9 @@ impl<'a> Checker<'a> {
                     for arg in args.iter_mut() {
                         self.infer(&mut arg.expr);
                     }
-                    return Some(sig.effective_return_type());
+                    let (_, return_type) =
+                        self.checked_return_types(sig.return_type.clone(), sig.is_extern);
+                    return Some(return_type);
                 }
                 self.register_binder_refs(args);
             }
@@ -675,6 +658,10 @@ impl<'a> Checker<'a> {
                     ));
                 }
                 if crate::Sema::FFI::is_callback_boundary_param(sig.is_c_abi, pty) {
+                    let managed = sig
+                        .callback_transport
+                        .as_deref()
+                        .is_some_and(|transport| transport != "none");
                     let safe = match &arg.expr {
                         Expr::Ident(callback, _) => {
                             self.funcs
@@ -684,14 +671,30 @@ impl<'a> Checker<'a> {
                                     crate::Sema::FFI::cpp_callback_abi_type(ty).is_some()
                                 })
                         }
+                        Expr::Lambda(lam) if managed => {
+                            crate::Sema::foreign_managed_callback_lambda(lam)
+                        }
                         Expr::Lambda(lam) => crate::Sema::foreign_thread_safe_lambda(lam),
                         _ => false,
                     };
-                    if safe {
+                    let metadata_complete = !managed
+                        || (sig.callback_plan_digest.as_deref().is_some_and(|digest| !digest.is_empty())
+                            && sig
+                                .callback_identity
+                                .as_deref()
+                                .is_some_and(|identity| !identity.is_empty())
+                            && sig.foreign_effect_root.as_deref() == Some("FFI.C"));
+                    if safe && metadata_complete {
                         arg.flags.c_callback_symbol = true;
+                        arg.flags.c_callback_managed = managed;
+                        arg.flags.c_callback_plan_digest = sig.callback_plan_digest.clone();
+                        arg.flags.c_callback_identity = sig.callback_identity.clone();
                     } else {
-                        self.diags
-                            .push(crate::Sema::FFI::e3203(pty, arg.expr.span()));
+                        self.diags.push(if managed && !metadata_complete {
+                            crate::Sema::FFI::callback_contract_error(pty, arg.expr.span())
+                        } else {
+                            crate::Sema::FFI::e3203(pty, arg.expr.span())
+                        });
                     }
                 }
                 if let Some(aty) = aty {
@@ -780,20 +783,22 @@ impl<'a> Checker<'a> {
                 }
                 self.check_write_arg_change(arg);
             }
+            let declared = sig.return_type.clone().map(|return_type| {
+                self.trait_reg.instantiate_type(&return_type, &subst)
+            });
+            let (resolved_ret, effective_ret) =
+                self.checked_return_types(declared, sig.is_c_abi || sig.is_extern);
+            *resolved_ret_out = Some(qualify_unit(resolved_ret.clone()));
             // C-module wrappers expose the declared C ABI directly.  Their
             // internal `FuncSig` still uses the ordinary hidden failure
             // carrier, but that carrier must not leak into a qualified C
             // import call (D-ADOPT-GUEST1).
-            let ret = if sig.is_c_abi {
-                sig.return_type
-                    .clone()
-                    .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()))
+            let ret = if sig.is_c_abi || sig.is_extern {
+                resolved_ret
             } else {
-                sig.effective_return_type()
+                effective_ret
             };
-            return Some(qualify_unit(
-                self.resolve_type(self.trait_reg.instantiate_type(&ret, &subst)),
-            ))
+            return Some(qualify_unit(ret));
         }
         if target.registry.contains(&semantic_name) {
             let is_pub = self.type_is_pub_in(mod_idx, &semantic_name);

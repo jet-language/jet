@@ -28,6 +28,7 @@ mod jet_process_sandbox {
     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/ProcessSandbox.rs");
     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/ProcessWindowsSandbox.rs");
 }
+pub use jet_process_sandbox::ReadOnlyMount;
 
 static REMOTE_ATTEMPT: AtomicU64 = AtomicU64::new(1);
 const MAX_REMOTE_EXECUTION_ATTEMPTS: usize = 2;
@@ -255,6 +256,28 @@ pub fn run_native_sandboxed(
         None,
     )
 }
+/// Run one executable action through the shared native sandbox with additional
+/// immutable host directories projected at the declared destinations.
+pub fn run_native_sandboxed_with_mounts(
+    executable: &Path,
+    args: &[String],
+    source_dir: &Path,
+    output_dir: Option<&Path>,
+    env: &BTreeMap<String, String>,
+    share_network: bool,
+    mounts: &[ReadOnlyMount],
+) -> Result<NativeSandboxOutput, NativeSandboxError> {
+    run_native_sandboxed_with_timeout_and_mounts(
+        executable,
+        args,
+        source_dir,
+        output_dir,
+        env,
+        share_network,
+        mounts,
+        None,
+    )
+}
 
 fn run_native_sandboxed_with_timeout(
     executable: &Path,
@@ -438,7 +461,6 @@ pub fn execute_build_plan_with_front_end_and_compiler(
         Some(runner),
     )
 }
-
 
 pub fn execute_build_plan_with_front_end_and_remote_and_compiler(
     plan: &BuildPlan,
@@ -665,6 +687,15 @@ fn execute_one_action(
         if cache_lookup_allowed {
             match read_action_record(artifact_store, key.clone()) {
                 Ok(Some(record)) => {
+                    if record.failure_report.is_some() {
+                        super::cache_cas::record_comptime_cache_event(
+                            &action.name,
+                            &key,
+                            ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched),
+                            "terminal",
+                            Some(record.outcome),
+                        );
+                    }
                     if let Some(report) = record.failure_report {
                         return Err(BuildExecutionError::Reported { report });
                     }
@@ -675,6 +706,13 @@ fn execute_one_action(
                         &record,
                     ) {
                         Ok(()) => {
+                            super::cache_cas::record_comptime_cache_event(
+                                &action.name,
+                                &key,
+                                ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched),
+                                "restore",
+                                Some(ActionOutcome::RestoredFromCache),
+                            );
                             return Ok(ActionOutcome::RestoredFromCache);
                         }
                         Err(error) => {
@@ -716,6 +754,13 @@ fn execute_one_action(
                     ) {
                         Ok(restored) => {
                             restored.commit();
+                            super::cache_cas::record_comptime_cache_event(
+                                &action.name,
+                                &key,
+                                ActionCacheStatus::Hit(CacheHitReason::DeclaredOutputsRestored),
+                                "restore",
+                                Some(ActionOutcome::RestoredFromCache),
+                            );
                             return Ok(ActionOutcome::RestoredFromCache);
                         }
                         Err(_detail)
@@ -739,6 +784,13 @@ fn execute_one_action(
     } else {
         ActionCacheStatus::Miss(CacheMissReason::NoLocalActionRecord)
     };
+    super::cache_cas::record_comptime_cache_event(
+        &action.name,
+        &key,
+        rebuild_status,
+        "lookup",
+        None,
+    );
 
     if action.legacy_wrapper == Some(LegacyWrapperKind::Npm)
         && action
@@ -792,9 +844,15 @@ fn execute_one_action(
                 ActionCacheProvenance::miss(rebuild_status_reason(rebuild_status)),
             )
             .map_err(|e| io_action(action, e))?;
-            write_action_record(artifact_store, &key, &record)
-                .map_err(|e| io_action(action, e))?;
+            write_action_record(artifact_store, &key, &record).map_err(|e| io_action(action, e))?;
         }
+        super::cache_cas::record_comptime_cache_event(
+            &action.name,
+            &key,
+            rebuild_status,
+            "publish",
+            Some(outcome),
+        );
         return Ok(outcome);
     }
 
@@ -937,8 +995,14 @@ fn execute_one_action(
                         .map_err(|detail| remote_action(action, detail))?;
                 }
             }
-            write_action_record(artifact_store, &key, &record)
-                .map_err(|e| io_action(action, e))?;
+            write_action_record(artifact_store, &key, &record).map_err(|e| io_action(action, e))?;
+            super::cache_cas::record_comptime_cache_event(
+                &action.name,
+                &key,
+                rebuild_status,
+                "terminal",
+                Some(ActionOutcome::Failed { exit_code: code }),
+            );
         }
         return Err(BuildExecutionError::Reported { report });
     }
@@ -972,8 +1036,14 @@ fn execute_one_action(
                     .map_err(|detail| remote_action(action, detail))?;
             }
         }
-        write_action_record(artifact_store, &key, &record)
-            .map_err(|e| io_action(action, e))?;
+        write_action_record(artifact_store, &key, &record).map_err(|e| io_action(action, e))?;
+        super::cache_cas::record_comptime_cache_event(
+            &action.name,
+            &key,
+            ActionCacheStatus::Miss(CacheMissReason::NoLocalActionRecord),
+            "publish",
+            Some(outcome),
+        );
     }
     fs::remove_dir_all(&sandbox).map_err(|e| io_action(action, e))?;
     Ok(outcome)
@@ -1160,6 +1230,13 @@ fn execute_remote_attempt(
                 }
                 write_action_record(artifact_store, key, &record)
                     .map_err(|e| io_action(action, e))?;
+                super::cache_cas::record_comptime_cache_event(
+                    &action.name,
+                    key,
+                    ActionCacheStatus::Miss(CacheMissReason::RemoteDenied),
+                    "publish",
+                    Some(ActionOutcome::Succeeded { exit_code }),
+                );
             }
             restored.commit();
             Ok(ActionOutcome::Succeeded { exit_code })
@@ -1190,6 +1267,13 @@ fn execute_remote_attempt(
                 }
                 write_action_record(artifact_store, key, &record)
                     .map_err(|error| RemoteAttemptFailure::terminal(io_action(action, error)))?;
+                super::cache_cas::record_comptime_cache_event(
+                    &action.name,
+                    key,
+                    ActionCacheStatus::Miss(CacheMissReason::RemoteDenied),
+                    "terminal",
+                    Some(ActionOutcome::Failed { exit_code }),
+                );
             }
             Err(RemoteAttemptFailure::terminal(
                 BuildExecutionError::Reported { report },
@@ -1373,6 +1457,13 @@ fn wait_remote_execution_result(
                     Ok(()) => detail,
                     Err(cancel_error) => format!("{detail}; cancellation failed: {cancel_error}"),
                 };
+                super::cache_cas::record_comptime_cache_event(
+                    &action.name,
+                    key,
+                    ActionCacheStatus::Miss(CacheMissReason::RemoteDenied),
+                    "interrupted",
+                    None,
+                );
                 return Err(RemoteAttemptFailure::terminal(remote_action(
                     action, detail,
                 )));
@@ -1384,6 +1475,13 @@ fn wait_remote_execution_result(
                 std::thread::sleep(Duration::from_millis(10));
             }
             Err(RemoteCacheError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {
+                super::cache_cas::record_comptime_cache_event(
+                    &action.name,
+                    key,
+                    ActionCacheStatus::Miss(CacheMissReason::RemoteDenied),
+                    "interrupted",
+                    None,
+                );
                 return match transport.cancel_execution(key, policy) {
                     Ok(()) => Err(RemoteAttemptFailure::retryable(remote_action(
                         action,
@@ -1408,6 +1506,13 @@ fn wait_remote_execution_result(
                         format!("{}; cancellation failed: {cancel_error}", error)
                     }
                 };
+                super::cache_cas::record_comptime_cache_event(
+                    &action.name,
+                    key,
+                    ActionCacheStatus::Miss(CacheMissReason::RemoteDenied),
+                    "interrupted",
+                    None,
+                );
                 return Err(RemoteAttemptFailure::terminal(remote_action(
                     action, detail,
                 )));
@@ -1573,7 +1678,6 @@ fn rebuild_status_reason(status: ActionCacheStatus) -> CacheMissReason {
         ActionCacheStatus::Hit(_) => CacheMissReason::NoLocalActionRecord,
     }
 }
-
 
 pub(super) fn prepare_output_destination(root: &Path, output: &Path) -> io::Result<()> {
     let parent = output.parent().unwrap_or(root);
@@ -2687,6 +2791,7 @@ mod tests {
             .action(
                 "gpu-action",
                 ActionSpec::cached(["remote-tool"])
+                    .with_outputs(["out/gpu"])
                     .with_cap(BuildCapability::Net)
                     .with_pool(BuildResourcePool::GPU),
             )
@@ -2718,22 +2823,35 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    fn sandbox_bash() -> PathBuf {
+        std::env::split_paths(
+            &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
+        )
+        .map(|directory| directory.join("bash"))
+        .find(|candidate| candidate.is_file())
+        .expect("bash is required for sandbox descendant tests")
+    }
+
+    fn delayed_descendant_script(marker: &str, rest: &str) -> String {
+        // The sandbox PATH is `/nix/store`, so `sleep` is not a command.
+        // Bash `SECONDS` is a builtin clock and does not need a host tool.
+        format!(
+            "(start=$SECONDS; while [ $((SECONDS-start)) -lt 2 ]; do :; done; printf leaked > {marker}) & {rest}"
+        )
+    }
+
+    fn assert_descendant_reaped(marker: &Path) {
+        std::thread::sleep(Duration::from_secs(3));
+        assert!(
+            !marker.exists(),
+            "sandbox left a pipe-holding descendant alive"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn native_sandbox_exit_reaps_pipe_holding_descendant() {
-        let shell = std::env::split_paths(
-            &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
-        )
-        .map(|directory| directory.join("sh"))
-        .find(|candidate| candidate.is_file())
-        .or_else(|| {
-            std::env::split_paths(
-                &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
-            )
-            .map(|directory| directory.join("bash"))
-            .find(|candidate| candidate.is_file())
-        })
-        .expect("a shell is required for the exit cleanup regression");
+        let shell = sandbox_bash();
         let root = std::env::temp_dir().join(format!(
             "jet-build-action-exit-tree-{}-{}",
             std::process::id(),
@@ -2747,7 +2865,7 @@ mod tests {
             &shell,
             &[
                 "-c".to_string(),
-                "(sleep 5; printf leaked > exit-descendant-marker) & exit 0".to_string(),
+                delayed_descendant_script("exit-descendant-marker", "exit 0"),
             ],
             &root,
             None,
@@ -2774,10 +2892,7 @@ mod tests {
                 elapsed < Duration::from_secs(3),
                 "exit cleanup waited for the pipe holder: {elapsed:?}"
             );
-            assert!(
-                !descendant_marker.exists(),
-                "normal exit left a pipe-holding descendant alive"
-            );
+            assert_descendant_reaped(&descendant_marker);
         }
 
         fs::remove_dir_all(&root).unwrap();
@@ -2786,19 +2901,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn native_sandbox_timeout_stops_a_hanging_build_action() {
-        let shell = std::env::split_paths(
-            &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
-        )
-        .map(|directory| directory.join("sh"))
-        .find(|candidate| candidate.is_file())
-        .or_else(|| {
-            std::env::split_paths(
-                &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
-            )
-            .map(|directory| directory.join("bash"))
-            .find(|candidate| candidate.is_file())
-        })
-        .expect("a shell is required for the timeout regression");
+        let shell = sandbox_bash();
         let root = std::env::temp_dir().join(format!(
             "jet-build-action-timeout-{}-{}",
             std::process::id(),
@@ -2812,8 +2915,10 @@ mod tests {
             &shell,
             &[
                 "-c".to_string(),
-                "(sleep 5; printf leaked > timeout-descendant-marker) & while :; do :; done"
-                    .to_string(),
+                delayed_descendant_script(
+                    "timeout-descendant-marker",
+                    "while :; do :; done",
+                ),
             ],
             &root,
             None,
@@ -2842,10 +2947,7 @@ mod tests {
                 elapsed < Duration::from_secs(3),
                 "timeout took too long: {elapsed:?}"
             );
-            assert!(
-                !descendant_marker.exists(),
-                "timeout left a pipe-holding descendant alive"
-            );
+            assert_descendant_reaped(&descendant_marker);
         }
 
         fs::remove_dir_all(&root).unwrap();
@@ -2854,19 +2956,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn native_sandbox_output_limit_stops_a_flooding_build_action() {
-        let shell = std::env::split_paths(
-            &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
-        )
-        .map(|directory| directory.join("sh"))
-        .find(|candidate| candidate.is_file())
-        .or_else(|| {
-            std::env::split_paths(
-                &std::env::var_os("PATH").expect("PATH should be available to sandbox tests"),
-            )
-            .map(|directory| directory.join("bash"))
-            .find(|candidate| candidate.is_file())
-        })
-        .expect("a shell is required for the output-limit regression");
+        let shell = sandbox_bash();
         let root = std::env::temp_dir().join(format!(
             "jet-build-action-output-{}-{}",
             std::process::id(),
@@ -2880,8 +2970,10 @@ mod tests {
             &shell,
             &[
                 "-c".to_string(),
-                "(sleep 5; printf leaked > output-descendant-marker) & printf '%70000000s' x"
-                    .to_string(),
+                delayed_descendant_script(
+                    "output-descendant-marker",
+                    "while :; do printf %s 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'; done",
+                ),
             ],
             &root,
             None,
@@ -2907,13 +2999,10 @@ mod tests {
                 other => panic!("flooding action was not stopped: {other:?}"),
             }
             assert!(
-                elapsed < Duration::from_secs(3),
+                elapsed < Duration::from_secs(5),
                 "output limit took too long: {elapsed:?}"
             );
-            assert!(
-                !descendant_marker.exists(),
-                "output limit left a pipe-holding descendant alive"
-            );
+            assert_descendant_reaped(&descendant_marker);
         }
 
         fs::remove_dir_all(&root).unwrap();

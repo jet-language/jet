@@ -30,8 +30,8 @@ impl<'a> Checker<'a> {
         new_scope: bool,
         value_tail: Option<(&Type, Span)>,
     ) {
-        let redundant_tail_span =
-            value_tail.and_then(|_| Self::redundant_arm_table_parts(stmts).map(|(_, span, _, _)| span));
+        let redundant_tail_span = value_tail
+            .and_then(|_| Self::redundant_arm_table_parts(stmts).map(|(_, span, _, _)| span));
         if redundant_tail_span.is_some() {
             self.check_redundant_arm_table_return(stmts);
         }
@@ -54,6 +54,9 @@ impl<'a> Checker<'a> {
             self.liveness_frames.push((saved_ptr, saved_len));
         }
         for i in 0..stmts.len() {
+            if i > 0 {
+                self.emit_unreachable_after_loop(&stmts[i - 1], &stmts[i]);
+            }
             // tail = stmts[i+1..], i.e. the statements after index i.
             let tail = &stmts[i + 1..];
             self.stmt_tail_ptr = tail.as_ptr();
@@ -207,11 +210,9 @@ impl<'a> Checker<'a> {
             }
             if run.len() >= 3
                 && Self::dispatch_values_are_exclusive(&run)
-                && !run
-                    .iter()
-                    .any(|guard| {
-                        Self::statements_write_subject(guard.body, &guard.subject_dependencies)
-                    })
+                && !run.iter().any(|guard| {
+                    Self::statements_write_subject(guard.body, &guard.subject_dependencies)
+                })
             {
                 let span = run[0].span;
                 let subject = self
@@ -254,13 +255,8 @@ impl<'a> Checker<'a> {
             return None;
         }
         let condition_span = arms[0].cond.span();
-        let (
-            subject_path,
-            subject_span,
-            subject_key,
-            subject_dependencies,
-            values,
-        ) = Self::dispatch_condition_values(&arms[0].cond, source)?;
+        let (subject_path, subject_span, subject_key, subject_dependencies, values) =
+            Self::dispatch_condition_values(&arms[0].cond, source)?;
         Some(AdjacentDispatchGuard {
             subject: subject_path,
             subject_key,
@@ -297,14 +293,12 @@ impl<'a> Checker<'a> {
                 Expr::Binary(BinOp::Eq, left, right, _) => {
                     let left_subject = Checker::dispatch_subject(left, source);
                     let right_subject = Checker::dispatch_subject(right, source);
-                    let (subject_expr, value_expr) = match (
-                        left_subject.is_some(),
-                        right_subject.is_some(),
-                    ) {
-                        (true, false) => (left, right),
-                        (false, true) => (right, left),
-                        _ => return false,
-                    };
+                    let (subject_expr, value_expr) =
+                        match (left_subject.is_some(), right_subject.is_some()) {
+                            (true, false) => (left, right),
+                            (false, true) => (right, left),
+                            _ => return false,
+                        };
                     let Some(current) = Checker::dispatch_subject(subject_expr, source) else {
                         return false;
                     };
@@ -331,10 +325,7 @@ impl<'a> Checker<'a> {
             return None;
         }
         let subject = subject?;
-        if values
-            .iter()
-            .any(|value| value.kind != values[0].kind)
-        {
+        if values.iter().any(|value| value.kind != values[0].kind) {
             return None;
         }
         Some((
@@ -481,10 +472,9 @@ impl<'a> Checker<'a> {
         let mut seen = Vec::new();
         for guard in run {
             for value in &guard.values {
-                if seen
-                    .iter()
-                    .any(|existing: &DispatchValue| existing.kind == value.kind && existing.key == value.key)
-                {
+                if seen.iter().any(|existing: &DispatchValue| {
+                    existing.kind == value.kind && existing.key == value.key
+                }) {
                     return false;
                 }
                 seen.push(value.clone());
@@ -560,9 +550,10 @@ impl<'a> Checker<'a> {
                     || Self::statements_write_subject(body, subject)
             }
             Stmt::ContextBlock { fields, body, .. } => {
-                fields.iter().any(|(_, value, _)| {
-                    Self::expression_writes_subject(value, subject)
-                }) || Self::statements_write_subject(body, subject)
+                fields
+                    .iter()
+                    .any(|(_, value, _)| Self::expression_writes_subject(value, subject))
+                    || Self::statements_write_subject(body, subject)
             }
             Stmt::ComptimeIf {
                 then_body,
@@ -595,9 +586,7 @@ impl<'a> Checker<'a> {
                 writes |= Self::expr_path(inner)
                     .is_some_and(|path| Self::path_writes_subject(&path, subject));
             }
-            Expr::MethodCall {
-                receiver, args, ..
-            } => {
+            Expr::MethodCall { receiver, args, .. } => {
                 writes |= Self::expr_path(receiver)
                     .is_some_and(|path| Self::path_writes_subject(&path, subject));
                 writes |= Self::call_args_write_subject(args, subject);
@@ -633,14 +622,13 @@ impl<'a> Checker<'a> {
         writes
     }
 
-    fn call_args_write_subject(
-        args: &[crate::AST::CallArg],
-        subject: &[Vec<String>],
-    ) -> bool {
+    fn call_args_write_subject(args: &[crate::AST::CallArg], subject: &[Vec<String>]) -> bool {
         args.iter().any(|arg| {
-            matches!(arg.convention, AccessConvention::Write | AccessConvention::Move)
-                && Self::argument_path(&arg.expr)
-                    .is_some_and(|path| Self::path_writes_subject(&path, subject))
+            matches!(
+                arg.convention,
+                AccessConvention::Write | AccessConvention::Move
+            ) && Self::argument_path(&arg.expr)
+                .is_some_and(|path| Self::path_writes_subject(&path, subject))
         })
     }
 
@@ -699,10 +687,7 @@ impl<'a> Checker<'a> {
         left.starts_with(right) || right.starts_with(left)
     }
 
-    fn adjacent_dispatch_edit(
-        &self,
-        run: &[AdjacentDispatchGuard<'_>],
-    ) -> Option<TextEdit> {
+    fn adjacent_dispatch_edit(&self, run: &[AdjacentDispatchGuard<'_>]) -> Option<TextEdit> {
         let extents = run
             .iter()
             .map(|guard| {
@@ -711,16 +696,16 @@ impl<'a> Checker<'a> {
             .collect::<Option<Vec<_>>>()?;
         let start = extents.first()?.start;
         let end = extents.last()?.end;
-        if extents
-            .windows(2)
-            .any(|pair| pair[0].end > pair[1].start)
+        if extents.windows(2).any(|pair| pair[0].end > pair[1].start)
             || source_has_comment(self.source, start, end)
         {
             return None;
         }
-        if extents.iter().zip(run).any(|(extent, guard)| {
-            extent.braced && statements_contain_multiline_string(guard.body)
-        }) {
+        if extents
+            .iter()
+            .zip(run)
+            .any(|(extent, guard)| extent.braced && statements_contain_multiline_string(guard.body))
+        {
             // The braced-body reindent below operates on source lines. A raw
             // multiline string is source data, not code indentation; decline
             // the edit rather than changing that data while still reporting
@@ -747,11 +732,7 @@ impl<'a> Checker<'a> {
                 if index > 0 {
                     replacement.push_str(" | ");
                 }
-                replacement.push_str(
-                    self.source
-                        .get(value.span.start..value.span.end)?
-                        .trim(),
-                );
+                replacement.push_str(self.source.get(value.span.start..value.span.end)?.trim());
             }
             replacement.push_str(" ->");
             let body = self.source.get(extent.body_start..extent.body_end)?.trim();
@@ -805,17 +786,13 @@ impl<'a> Checker<'a> {
     fn redundant_arm_table_parts(
         stmts: &[Stmt],
     ) -> Option<(&[crate::AST::SwitchArm], Span, &Expr, Span)> {
-        let [
-            ..,
-            Stmt::Switch {
-                subject,
-                arms,
-                else_body: None,
-                span,
-                ..
-            },
-            Stmt::Return(Some(default), default_return_span),
-        ] = stmts
+        let [.., Stmt::Switch {
+            subject,
+            arms,
+            else_body: None,
+            span,
+            ..
+        }, Stmt::Return(Some(default), default_return_span)] = stmts
         else {
             return None;
         };
@@ -1103,8 +1080,7 @@ fn statement_source_end(source: &str, start: usize, fallback: usize) -> Option<u
             continue;
         }
         match token.kind {
-            crate::Lexer::TokKind::LineComment(_)
-            | crate::Lexer::TokKind::BlockComment(_) => {}
+            crate::Lexer::TokKind::LineComment(_) | crate::Lexer::TokKind::BlockComment(_) => {}
             crate::Lexer::TokKind::Semi
                 if saw_body && parens == 0 && brackets == 0 && braces == 0 =>
             {
@@ -1193,9 +1169,9 @@ fn statements_contain_multiline_string(stmts: &[Stmt]) -> bool {
         let mut found = false;
         stmt.for_each_expr(|expr| {
             if let Expr::Str(parts, _) = expr.without_parens() {
-                found |= parts.iter().any(|part| {
-                    matches!(part, StrPart::Lit(text) if text.contains('\n'))
-                });
+                found |= parts
+                    .iter()
+                    .any(|part| matches!(part, StrPart::Lit(text) if text.contains('\n')));
             }
         });
         found
@@ -1215,8 +1191,7 @@ fn find_source_char(source: &str, start: usize, wanted: u8) -> Option<usize> {
             }
             b'/' if bytes.get(index + 1) == Some(&b'*') => {
                 index += 2;
-                while index + 1 < bytes.len()
-                    && !(bytes[index] == b'*' && bytes[index + 1] == b'/')
+                while index + 1 < bytes.len() && !(bytes[index] == b'*' && bytes[index + 1] == b'/')
                 {
                     index += 1;
                 }
@@ -1277,8 +1252,7 @@ fn find_source_sequence(source: &str, start: usize, wanted: &[u8]) -> Option<usi
             }
             b'/' if bytes.get(index + 1) == Some(&b'*') => {
                 index += 2;
-                while index + 1 < bytes.len()
-                    && !(bytes[index] == b'*' && bytes[index + 1] == b'/')
+                while index + 1 < bytes.len() && !(bytes[index] == b'*' && bytes[index + 1] == b'/')
                 {
                     index += 1;
                 }
@@ -1319,8 +1293,7 @@ fn find_switch_close(source: &str, start: usize) -> Option<usize> {
             }
             b'/' if bytes.get(index + 1) == Some(&b'*') => {
                 index += 2;
-                while index + 1 < bytes.len()
-                    && !(bytes[index] == b'*' && bytes[index + 1] == b'/')
+                while index + 1 < bytes.len() && !(bytes[index] == b'*' && bytes[index + 1] == b'/')
                 {
                     index += 1;
                 }

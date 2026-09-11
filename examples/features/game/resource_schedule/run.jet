@@ -1,0 +1,24 @@
+use core.game as game
+
+struct Position {
+    x: Int
+}
+
+fn simulate(positions: &Position) {
+    positions.x += 1
+}
+
+fn draw_scene(positions: Position) {
+    print("draw={positions.x}")
+}
+
+fn run() {
+    scene := game.Scene.new("resource-schedule")
+    scene.on_frame(frame -> {
+        positions := Position{x: frame.index}
+        simulate(&positions) ?? panic("simulate")
+        draw_scene(positions)
+    })
+    transcript :: game.run(scene)
+    print(transcript)
+}

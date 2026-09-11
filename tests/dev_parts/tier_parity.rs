@@ -191,10 +191,11 @@ fn run() {
     };
 
     let bundle = checked_bundle_from_path(&file);
+    let policy = common::development_policy();
     jet_jit::reset_jit_trace_for_test();
     let mut backend = CraneliftBackend::new();
     let jit = jet_jit::with_program_args(std::slice::from_ref(&file), || {
-        match backend.run(&bundle, false) {
+        match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
             RunOutcome::Ran {
                 stdout,
                 stderr,

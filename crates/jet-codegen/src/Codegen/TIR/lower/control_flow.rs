@@ -1,3 +1,4 @@
+use super::patterns::resolved_enum_subject_type;
 use crate::jet_generated_format as jet_format;
 use crate::Codegen::escape_rust_str;
 use crate::Codegen::is_json_variant;
@@ -27,6 +28,7 @@ use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_fallible_match;
 use crate::Codegen::TIR::lower_range_switch;
 use crate::Codegen::TIR::static_call_type_name_unchecked;
+use crate::Codegen::TIR::tir_add_pattern_bindings;
 use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::TIR::BranchClass;
 use crate::Codegen::TIR::LowerEnv;
@@ -260,12 +262,13 @@ pub(super) fn lower_binding_free_variant_pattern_test(
         ty: Type::Bool,
         kind: TExprKind::PatternMatches {
             subj: Box::new(subj),
-            pattern: TPattern {
-                pattern: pattern.clone(),
+            pattern: TPattern::from_ast(
+                pattern.clone(),
                 enum_type,
                 position,
-                mutable: false,
-            },
+                false,
+                false,
+            ),
         },
     }
 }
@@ -447,6 +450,45 @@ fn lower_if_cond_atom(
     {
         let subj = lower_if_expr(subject, cx, env, cached);
         return (TIfCond::IsNone { subj }, Vec::new(), Vec::new());
+    }
+    if let Expr::PatternTest {
+        subject,
+        pattern: pattern @ Pattern::Or(..),
+        ..
+    } = cond
+    {
+        let subj = lower_if_expr(subject, cx, env, cached);
+        let enum_type = resolved_enum_subject_type(cx, &subj.ty)
+            .expect("checked enum or-pattern has an enum subject");
+        let mut binding_env = clone_env(env);
+        tir_add_pattern_bindings(cx, pattern, &mut binding_env, Some(&subj.ty))
+            .expect("checked enum or-pattern has consistent bindings");
+        let bindings = pattern
+            .binding_names()
+            .into_iter()
+            .map(|binding| {
+                let name = binding.local_name();
+                (
+                    name.to_owned(),
+                    binding_env.local_of(name),
+                    binding_env.ty_of(name),
+                )
+            })
+            .collect();
+        return (
+            TIfCond::IfLet {
+                pattern: TPattern::from_ast(
+                    pattern.clone(),
+                    Some(enum_type),
+                    TPatternPosition::Binding,
+                    false,
+                    false,
+                ),
+                subj,
+            },
+            bindings,
+            Vec::new(),
+        );
     }
     // D-PARSESTR1: value-form dispatch stores the string subject in a local,
     // then reuses that local for both the scan and the hole projections. The
@@ -672,11 +714,7 @@ fn lower_if_cond_atom(
                 let place = TLocal::user(name);
                 if variant == "Object" {
                     let obj_tmp = jet_format!("{jet_prefix}obj{}", pat_span.start);
-                    let map_ty = ty.clone().unwrap_or(Type::Map {
-                        key: Box::new(Type::String),
-                        key_span: None,
-                        value: Box::new(Type::Named(Syntax::TYPE_DATA.to_string())),
-                    });
+                    let map_ty = ty.expect("checked DataTree Object payload type");
                     let prefix = TStmt::Let {
                         name: name.clone(),
                         kw: "let",
@@ -690,12 +728,13 @@ fn lower_if_cond_atom(
                     };
                     return (
                         TIfCond::IfLet {
-                            pattern: TPattern {
-                                pattern: pattern.clone(),
-                                enum_type: None,
-                                position: TPatternPosition::DataEntries { temp: obj_tmp },
-                                mutable: false,
-                            },
+                            pattern: TPattern::from_ast(
+                                pattern.clone(),
+                                Some(Syntax::TYPE_DATA.to_string()),
+                                TPatternPosition::DataEntries { temp: obj_tmp },
+                                false,
+                                false,
+                            ),
                             subj,
                         },
                         vec![(name.clone(), place, Some(map_ty))],
@@ -741,42 +780,34 @@ fn lower_if_cond_atom(
                 _ => None,
             }
             .or_else(|| cx.variant_owner.get(variant).cloned());
-            if let Some(PatSlot::Bind { name, .. }) = bindings.first() {
-                let ty = enum_type
-                    .as_deref()
-                    .and_then(|owner| variant_binding_types_for_enum(cx, owner, variant))
-                    .and_then(|ts| ts.into_iter().next())
-                    .or_else(|| {
-                        variant_binding_types(cx, variant).and_then(|ts| ts.into_iter().next())
-                    });
+            let payload_tys = enum_type
+                .as_deref()
+                .and_then(|owner| variant_binding_types_for_enum(cx, owner, variant))
+                .or_else(|| variant_binding_types(cx, variant))
+                .unwrap_or_default();
+            let if_bindings: Vec<IfBinding> = bindings
+                .iter()
+                .zip(payload_tys.into_iter().map(Some).chain(std::iter::repeat(None)))
+                .filter_map(|(slot, ty)| match slot {
+                    PatSlot::Bind { name, .. } => {
+                        Some((name.clone(), TLocal::user(name), ty))
+                    }
+                    _ => None,
+                })
+                .collect();
+            if !bindings.is_empty() {
                 return (
                     TIfCond::IfLet {
-                        pattern: TPattern {
-                            pattern: pattern.clone(),
+                        pattern: TPattern::from_ast(
+                            pattern.clone(),
                             enum_type,
-                            position: TPatternPosition::Binding,
-                            mutable: false,
-                        },
+                            TPatternPosition::Binding,
+                            false,
+                            false,
+                        ),
                         subj,
                     },
-                    vec![(name.clone(), TLocal::user(name), ty)],
-                    Vec::new(),
-                );
-            }
-            // c109 (D-PATW): a WILDCARD payload slot (`if w == Some(_)`). `_` binds
-            // nothing, so the if-let introduces NO then-branch binding.
-            if let Some(PatSlot::Wildcard) = bindings.first() {
-                return (
-                    TIfCond::IfLet {
-                        pattern: TPattern {
-                            pattern: pattern.clone(),
-                            enum_type,
-                            position: TPatternPosition::Binding,
-                            mutable: false,
-                        },
-                        subj,
-                    },
-                    Vec::new(),
+                    if_bindings,
                     Vec::new(),
                 );
             }
@@ -1013,12 +1044,12 @@ fn lower_if_cond_atom(
             } else {
                 place
             };
-            let pattern = if matches!(&subj.ty, Type::Option(_)) {
+            let mut pattern = if matches!(&subj.ty, Type::Option(_)) {
                 TPattern::option_binding(pattern.clone())
             } else {
                 TPattern::binding(pattern.clone())
-            }
-            .with_mutability(mutable);
+            };
+            pattern.mutable = mutable;
             return (
                 TIfCond::IfLet { pattern, subj },
                 vec![(name, place, ty)],

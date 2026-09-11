@@ -30,6 +30,7 @@ use super::user_flatpak_perf::{
 };
 use crate::Store;
 use crate::JSON;
+use jet_foundation::DataTree::DataTree;
 use jet_env_model::ModuleEval::{EnvPlan, ServicePlan, SystemPlan};
 use jet_env_model::AST::{Expr, Item, StrPart};
 use jet_env_model::{Lexer, Parser, Syntax};
@@ -413,7 +414,7 @@ fn validate_source_proof(
         }
     }
     let real_tier = match proof.get("real_tier").map_err(invalid_generation)? {
-        JSON::JSONValue::Bool(value) => *value,
+        DataTree::Bool(value) => *value,
         _ => return Err(invalid_generation("generation source tier is not boolean")),
     };
     if real_tier != flags.real_tier {
@@ -433,7 +434,7 @@ fn generation_source_closure(config: &Path) -> std::io::Result<Vec<u8>> {
     if !diagnostics.is_empty() {
         return Err(invalid_generation("generation source closure does not lex"));
     }
-    let program = Parser::parse(&tokens)
+    let program = Parser::parse_with_source(&tokens, &source)
         .map_err(|_| invalid_generation("generation source closure does not parse"))?;
     let source_base = std::env::var_os("JETOS_STUDIO_SOURCE_BASE").map(PathBuf::from);
     let base = source_base
@@ -567,7 +568,7 @@ fn import_find_directory(import: &Expr) -> std::io::Result<String> {
     Ok(path)
 }
 
-fn json_string(value: &JSON::JSONValue, key: &str) -> std::io::Result<String> {
+fn json_string(value: &DataTree, key: &str) -> std::io::Result<String> {
     value
         .get(key)
         .map_err(invalid_generation)?
@@ -876,16 +877,17 @@ pub(super) fn read_generation_packages(dir: &Path) -> Vec<PackageSnapshot> {
     packages
         .iter()
         .filter_map(|p| {
-            let obj = p.as_object().ok()?;
-            let name = obj.get("name")?.as_str().ok()?.to_string();
-            let version = obj
+            let name = p.get("name").ok()?.as_str().ok()?.to_string();
+            let version = p
                 .get("version")
-                .and_then(|v| v.as_str().ok())
+                .ok()
+                .and_then(|value| value.as_str().ok())
                 .unwrap_or("")
                 .to_string();
-            let out = obj
+            let out = p
                 .get("out")
-                .and_then(|v| v.as_str().ok())
+                .ok()
+                .and_then(|value| value.as_str().ok())
                 .unwrap_or("")
                 .to_string();
             Some(PackageSnapshot { name, version, out })

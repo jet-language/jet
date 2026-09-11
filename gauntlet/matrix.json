@@ -42,6 +42,8 @@
     { "id": "formats.csv-cli", "domain": "formats", "kind": "cli", "personas": ["generalist", "analyst", "agent"], "description": "CSV filter/aggregate/emit pipeline." },
     { "id": "formats.json-app", "domain": "formats", "kind": "application", "personas": ["generalist", "agent"], "description": "JSON-backed persistent application state." },
     { "id": "numerics.float-kernel", "domain": "numerics", "kind": "data-numeric", "personas": ["switcher-sys", "student", "agent"], "description": "Floating-point simulation kernels (n-body class)." },
+    { "id": "numerics.fft", "domain": "numerics", "kind": "data-numeric", "personas": ["analyst", "switcher-sys", "agent"], "description": "Forward FFT with a fully materialized and validated complex spectrum." },
+    { "id": "numerics.tensor-map", "domain": "numerics", "kind": "data-numeric", "personas": ["analyst", "switcher-py", "agent"], "description": "Dense elementwise tensor mapping with independent inputs and a complete output checksum." },
     { "id": "numerics.int-kernel", "domain": "numerics", "kind": "data-numeric", "personas": ["switcher-sys", "student", "agent"], "description": "Integer/array kernels (sieve class)." },
     { "id": "numerics.script", "domain": "numerics", "kind": "scripting", "personas": ["analyst", "switcher-py"], "description": "Descriptive statistics as a one-shot script." },
     { "id": "numerics.notebook", "domain": "numerics", "kind": "notebook", "personas": ["analyst"], "description": "Exploratory incremental analysis loop." },
@@ -68,5 +70,45 @@
     "default": "required",
     "not_applicable": "explicit_structural_reason",
     "missing": "unmeasured_and_publication_blocked"
+  },
+  "strict_performance_policy": {
+    "schema": "jet.strict-performance-policy.v1",
+    "id": "AGENTS.md#strict-performance-gate",
+    "version": 1,
+    "comparison": "per_cell_and_metric",
+    "comparators": {
+      "rust": { "win": "<1", "parity": "<=1.05", "loss": ">1.05" },
+      "non_rust": { "win": "<1", "parity": null, "loss": ">=1" }
+    },
+    "failure_statuses": [
+      "missing",
+      "wrong",
+      "unavailable",
+      "uncovered",
+      "mismatched",
+      "inconclusive"
+    ],
+    "foundations": [
+      { "id": "numerics", "required": true, "cells": ["numerics.float-kernel", "numerics.fft", "numerics.tensor-map", "numerics.int-kernel"], "metrics": "all" },
+      { "id": "text", "required": true, "cells": ["text.kernel", "text.regex-kernel", "text.regex-find-all-large", "text.report-cli", "text.script"], "metrics": "all" },
+      { "id": "files", "required": true, "cells": ["files.script", "files.orchestration"], "metrics": "all" },
+      { "id": "concurrency", "required": true, "cells": ["concurrency.app", "concurrency.service"], "metrics": "all" },
+      { "id": "networking", "required": true, "cells": ["netserv.client", "netserv.service"], "metrics": "all" },
+      { "id": "build_time", "required": true, "cells": "all", "metrics": ["cold_build_seconds", "warm_build_seconds"] },
+      { "id": "run_time", "required": true, "cells": "all", "metrics": "runtime" }
+    ],
+    "critical_areas": [
+      { "id": "web", "required": true, "cells": ["webfront.widget", "webfront.app"], "metrics": "all" },
+      { "id": "games", "required": false, "activation": "first_party_battery", "cells": [], "metrics": "all" },
+      { "id": "cli_and_scripts", "required": true, "cells": ["cli.app", "text.report-cli", "text.script", "formats.csv-cli", "files.script"], "metrics": "all" },
+      { "id": "data_analysis", "required": true, "cells": ["formats.csv-cli", "numerics.script", "numerics.notebook"], "metrics": "all" },
+      { "id": "backend_services", "required": true, "cells": ["concurrency.service", "netserv.service"], "metrics": "all" },
+      { "id": "ai_ml_applications", "required": false, "activation": "first_party_battery", "cells": [], "metrics": "all" },
+      { "id": "gui_applications", "required": false, "activation": "first_party_battery", "cells": [], "metrics": "all" },
+      { "id": "embedded", "required": true, "cells": ["embedded.kernel", "embedded.data"], "metrics": "all" }
+    ],
+    "first_party_battery_required": true,
+    "historical_receipts": "immutable_recorded_policy",
+    "text": "Jet targets a strict win for every matched peer on every required cell and metric. Rust permits same-run parity only at a Jet/Rust ratio of 1.05 or lower; that band is measurement noise, not a target or a win. Every non-Rust peer requires Jet/peer below 1.00.\n\nRequired cells cover foundations (numerics, text, files, concurrency, networking, build time, and run time) plus one real workload in each critical area: web, games, CLI and scripts, data analysis, backend services, AI/ML applications, GUI applications, and embedded. A niche becomes required only when Jet ships a first-party battery for it. Do not claim a niche win without that battery.\n\nApply the comparator per cell and metric. Never average away a loss, substitute an easier workload or tier, omit a peer, or pass wrong, unavailable, uncovered, mismatched, or inconclusive evidence. A performance card, milestone, dashboard, or release gate stays open while any required cell fails. Never trade semantics, diagnostics, determinism, safety, or I9 parity for a score. Manifests and gates must encode this policy; prose alone is not evidence. Historical receipts remain immutable evidence under their recorded policy and never weaken the current gate."
   }
 }

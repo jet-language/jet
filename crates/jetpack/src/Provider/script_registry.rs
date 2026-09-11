@@ -5,7 +5,7 @@ use super::{
     ProviderError, Realized, SourceState,
 };
 use crate::RefSpec::{RefSpec, SourceTable};
-use crate::JSON::JSONValue;
+use jet_foundation::DataTree::DataTree;
 use crate::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
@@ -630,6 +630,21 @@ fn fetch_rubygems(
         Ok(out)
     }
 }
+fn object_field<'a>(
+    object: &'a [(String, DataTree)],
+    field: &str,
+) -> Option<&'a DataTree> {
+    object
+        .iter()
+        .find_map(|(key, value)| (key == field).then_some(value))
+}
+
+fn object_value<'a>(value: &'a DataTree, field: &str) -> Option<&'a DataTree> {
+    value
+        .as_object()
+        .ok()
+        .and_then(|object| object_field(object, field))
+}
 
 fn fetch_cpan(
     authority: &super::fetch::Authority,
@@ -667,7 +682,7 @@ fn fetch_cpan(
     let releases = value
         .get("hits")
         .and_then(|hits| hits.get("hits"))
-        .and_then(JSONValue::as_array)
+        .and_then(DataTree::as_array)
         .map_err(|error| {
             fail(
                 Kind::Cpan,
@@ -690,11 +705,11 @@ fn fetch_cpan(
     Ok(out)
 }
 
-fn parse_cpan_release(repository: &str, value: &JSONValue) -> Result<Package, ProviderError> {
-    let package_name = json_string(&value, "distribution", Kind::Cpan)?;
-    let version = json_string(&value, "version", Kind::Cpan)?;
-    let url = json_string(&value, "download_url", Kind::Cpan)?;
-    let checksum = json_string(&value, "checksum_sha256", Kind::Cpan)?;
+fn parse_cpan_release(repository: &str, value: &DataTree) -> Result<Package, ProviderError> {
+    let package_name = json_string(value, "distribution", Kind::Cpan)?;
+    let version = json_string(value, "version", Kind::Cpan)?;
+    let url = json_string(value, "download_url", Kind::Cpan)?;
+    let checksum = json_string(value, "checksum_sha256", Kind::Cpan)?;
     if !Kind::Cpan.valid_name(package_name)
         || !safe_piece(version, "+_-.")
         || !valid_hex(checksum, 64)
@@ -705,9 +720,7 @@ fn parse_cpan_release(repository: &str, value: &JSONValue) -> Result<Package, Pr
         ));
     }
     let mut dependencies = Vec::new();
-    if let Some(JSONValue::Array(items)) =
-        value.as_object().ok().and_then(|obj| obj.get("dependency"))
-    {
+    if let Some(DataTree::Array(items)) = object_value(value, "dependency") {
         for item in items {
             let relationship = json_string(item, "relationship", Kind::Cpan)?;
             let phase = json_string(item, "phase", Kind::Cpan)?;
@@ -727,9 +740,7 @@ fn parse_cpan_release(repository: &str, value: &JSONValue) -> Result<Package, Pr
             dependencies.push(Dependency {
                 name: dep_name.to_string(),
                 requirement: cpan_requirement(
-                    item.as_object()
-                        .ok()
-                        .and_then(|obj| obj.get("version"))
+                    object_value(item, "version")
                         .and_then(|value| value.as_str().ok())
                         .filter(|value| !value.is_empty())
                         .unwrap_or("0"),
@@ -761,7 +772,7 @@ fn fetch_packagist(
     )?;
     let packages = value
         .get("packages")
-        .and_then(JSONValue::as_object)
+        .and_then(DataTree::as_object)
         .map_err(|error| {
             fail(
                 Kind::Packagist,
@@ -769,7 +780,8 @@ fn fetch_packagist(
             )
         })?;
     let releases = packages
-        .get(name)
+        .iter()
+        .find_map(|(package, value)| (package == name).then_some(value))
         .ok_or_else(|| {
             fail(
                 Kind::Packagist,
@@ -790,10 +802,7 @@ fn fetch_packagist(
         if !safe_piece(version, "+_-.") {
             continue;
         }
-        if release
-            .as_object()
-            .ok()
-            .and_then(|obj| obj.get("type"))
+        if object_value(release, "type")
             .and_then(|value| value.as_str().ok())
             == Some("composer-plugin")
         {
@@ -840,8 +849,7 @@ fn fetch_packagist(
             }
         };
         let mut dependencies = Vec::new();
-        if let Some(JSONValue::Object(require)) =
-            release.as_object().ok().and_then(|obj| obj.get("require"))
+        if let Some(DataTree::Object(require)) = object_value(release, "require")
         {
             for (dep_name, requirement) in require {
                 if dep_name == "php" || dep_name.starts_with("ext-") || dep_name.starts_with("lib-")
@@ -864,20 +872,19 @@ fn fetch_packagist(
             }
         }
         let mut psr4 = BTreeMap::new();
-        if let Some(JSONValue::Object(autoload)) =
-            release.as_object().ok().and_then(|obj| obj.get("autoload"))
+        if let Some(DataTree::Object(autoload)) = object_value(release, "autoload")
         {
-            if autoload.keys().any(|key| key != "psr-4") {
+            if autoload.iter().any(|(key, _)| key != "psr-4") {
                 return Err(fail(
                     Kind::Packagist,
                     format!("package `{name}` {version} uses unsupported executable or non-PSR-4 autoload metadata"),
                 ));
             }
-            if let Some(JSONValue::Object(mappings)) = autoload.get("psr-4") {
+            if let Some(DataTree::Object(mappings)) = object_field(autoload, "psr-4") {
                 for (prefix, value) in mappings {
                     let paths = match value {
-                        JSONValue::String(path) => vec![path.clone()],
-                        JSONValue::Array(paths) => paths
+                        DataTree::Text(path) | DataTree::TypedText(path) => vec![path.clone()],
+                        DataTree::Array(paths) => paths
                             .iter()
                             .map(|path| {
                                 path.as_str()
@@ -926,13 +933,10 @@ fn fetch_packagist(
 }
 
 fn expand_packagist_releases(
-    metadata: &JSONValue,
-    releases: &[JSONValue],
-) -> Result<Vec<JSONValue>, ProviderError> {
-    let minified = metadata
-        .as_object()
-        .ok()
-        .and_then(|object| object.get("minified"))
+    metadata: &DataTree,
+    releases: &[DataTree],
+) -> Result<Vec<DataTree>, ProviderError> {
+    let minified = object_value(metadata, "minified")
         .and_then(|value| value.as_str().ok());
     if minified.is_none() {
         return Ok(releases.to_vec());
@@ -944,7 +948,7 @@ fn expand_packagist_releases(
         ));
     }
     let mut expanded = Vec::with_capacity(releases.len());
-    let mut previous = BTreeMap::new();
+    let mut previous: Vec<(String, DataTree)> = Vec::new();
     for release in releases {
         let changes = release.as_object().map_err(|error| {
             fail(
@@ -953,13 +957,20 @@ fn expand_packagist_releases(
             )
         })?;
         for (key, value) in changes {
-            if matches!(value, JSONValue::String(value) if value == "__unset") {
-                previous.remove(key);
+            if matches!(
+                value,
+                DataTree::Text(value) | DataTree::TypedText(value) if value == "__unset"
+            ) {
+                previous.retain(|(existing, _)| existing != key);
+            } else if let Some((_, existing)) =
+                previous.iter_mut().find(|(existing, _)| existing == key)
+            {
+                *existing = value.clone();
             } else {
-                previous.insert(key.clone(), value.clone());
+                previous.push((key.clone(), value.clone()));
             }
         }
-        expanded.push(JSONValue::Object(previous.clone()));
+        expanded.push(DataTree::Object(previous.clone()));
     }
     Ok(expanded)
 }
@@ -969,7 +980,7 @@ fn fetch_json(
     authority: &super::fetch::Authority,
     scratch: &Scratch,
     url: &str,
-) -> Result<JSONValue, ProviderError> {
+) -> Result<DataTree, ProviderError> {
     let raw = authority
         .text(url, &scratch.path)
         .map_err(|error| fail(kind, error))?;
@@ -982,7 +993,7 @@ fn fetch_json(
 }
 
 fn verified_packagist_git_source(
-    release: &JSONValue,
+    release: &DataTree,
     dist_url: &str,
     reference: &str,
 ) -> Option<String> {
@@ -991,7 +1002,7 @@ fn verified_packagist_git_source(
     {
         return None;
     }
-    let source = release.get("source").ok()?;
+    let source = object_value(release, "source")?;
     if json_string(source, "type", Kind::Packagist).ok()? != "git"
         || json_string(source, "reference", Kind::Packagist).ok()? != reference
     {
@@ -1011,13 +1022,13 @@ fn verified_packagist_git_source(
 }
 
 fn json_string<'a>(
-    value: &'a JSONValue,
+    value: &'a DataTree,
     field: &str,
     kind: Kind,
 ) -> Result<&'a str, ProviderError> {
     value
         .get(field)
-        .and_then(JSONValue::as_str)
+        .and_then(|value| value.as_str())
         .map_err(|error| fail(kind, format!("invalid metadata field `{field}`: {error}")))
 }
 

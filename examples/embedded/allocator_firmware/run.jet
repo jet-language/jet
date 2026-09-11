@@ -1,0 +1,18 @@
+// Typed firmware witness for `board.sensor_v1`.
+// Required machine facts: a typed `Fixed` allocator in `ram`, generated
+// startup (`Reset_Handler`, `vectors`, C/1, `.vectors`), abort panic, and the
+// UART byte-sink providers `board.sensor_v1.uart_rx`, `board.sensor_v1.uart_tx`,
+// and `board.sensor_v1.report_uart`. If the allocator fact is absent, target
+// admission must report the typed `HeapRequiresAllocator` error.
+// The allocation result is observed by the assertion; hosted `core.term` is
+// intentionally not imported into this Alloc-layer firmware witness.
+use core.mem as mem
+
+fn run() {
+    fixed :: mem.Fixed.new(size: 32)
+    fixed.try_alloc(7) ? value -> {
+        assert(value == 7, "firmware allocation")
+    } ! _error -> {
+        panic("firmware allocator unavailable")
+    }
+}

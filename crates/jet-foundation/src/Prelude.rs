@@ -129,7 +129,7 @@ fn parse(source: &'static str) -> Vec<Entry> {
         }
         if let Some(rest) = line.strip_prefix("pub fn ") {
             if let Some(name) = rest
-                .split(['(', ' ', '{'])
+                .split(['(', ' ', '{', '<'])
                 .next()
                 .filter(|name| !name.is_empty())
             {
@@ -179,19 +179,23 @@ fn parse(source: &'static str) -> Vec<Entry> {
     entries
 }
 
+/// Dependency-free TUI policy and geometry kernel shared by AOT, JIT, and
+/// comptime adapters.  The adapters own their value representation; this
+/// module owns the decisions that must not drift between execution tiers.
+pub mod tui {
+    include!("Prelude/TuiKernel.rs");
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        addition_is_epoch_boundary, entries, entry, introduced_epoch, jet_as_bytes,
-        migration_lint_for, names, Target, POLICY_CRITERIA, PRELUDE_EPOCH, PRELUDE_MIGRATION_LINT,
-        SOURCE,
+        addition_is_epoch_boundary, entries, entry, introduced_epoch, migration_lint_for, names,
+        Target, POLICY_CRITERIA, PRELUDE_EPOCH, PRELUDE_MIGRATION_LINT, SOURCE,
     };
-    use crate::Diagnostics::Span;
-    use crate::AST::CtValue;
 
     #[test]
     fn source_is_the_complete_ambient_registry() {
-        assert_eq!(entries().len(), 21);
+        assert_eq!(entries().len(), 20);
         assert_eq!(
             entry("print").map(|entry| entry.target),
             Some(Target::Builtin)
@@ -220,32 +224,6 @@ mod tests {
         );
         assert_eq!(entry("Clock").map(|entry| entry.target), Some(Target::Type));
         assert!(names().any(|name| name == "file_exists"));
-    }
-
-    #[test]
-    fn as_bytes_uses_one_shared_rejection() {
-        let span = Span::new(4, 7);
-        for value in [
-            CtValue::Int(1),
-            CtValue::List(vec![CtValue::Int(256)]),
-            CtValue::List(vec![CtValue::Str("not a byte".to_string())]),
-        ] {
-            let error =
-                jet_as_bytes(&value, span).expect_err("invalid byte value must be rejected");
-            assert_eq!(error.code, "E0956");
-            assert_eq!(
-                error.what,
-                "`this as_bytes call` isn't supported by the current evaluator yet"
-            );
-            assert_eq!(
-                error.why,
-                "the canonical TIR evaluator doesn't cover this construct yet"
-            );
-            assert_eq!(
-                error.fix,
-                "use a simpler form, or use `jet build` for the full evaluator"
-            );
-        }
     }
 
     #[test]

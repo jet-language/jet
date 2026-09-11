@@ -483,6 +483,7 @@ fn arm_head_text(cond: &Expr) -> String {
 fn empty_stmt(span: Span) -> Stmt {
     Stmt::ComptimeBlock {
         body: Vec::new(),
+        is_template_loop: false,
         span,
     }
 }

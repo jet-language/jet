@@ -1,18 +1,277 @@
 use super::*;
-use crate::AST::{
-    AccessConvention, BinOp, Call, CallArg, CallArgFlags, Expr, Func, ImplDef, Item, Param,
-    PatSlot, Pattern, Stmt, SwitchArm, TraitImplBlock, Type, VariantPayload,
-};
+use crate::AST::{ImplDef, Item, TraitImplBlock, Type};
 
-/// D-ONCE-DERIVE1=A / I3: compiler-owned capability requests lower to the
-/// same typed item-template engine as user-authored code. The builder supplies
-/// AST items; expansion and ordinary sema remain shared with user derives.
+use std::sync::LazyLock;
+
+/// D-ONCE-DERIVE1=A: built-in derive providers are ordinary Prelude
+/// declarations. Parse the checked-in source through the normal lexer/parser
+/// instead of maintaining a second line-oriented provider language.
+pub const DERIVE_SOURCE: &str =
+    include_str!("../../../../jet-codegen/src/Prelude/Derives.jet");
+
+static BUILTIN_DERIVE_PROVIDERS: LazyLock<Vec<crate::AST::DeriveDef>> =
+    LazyLock::new(parse_builtin_derive_source);
+
+fn parse_builtin_derive_source() -> Vec<crate::AST::DeriveDef> {
+    let (tokens, lex_diagnostics) = crate::Lexer::lex_generated(DERIVE_SOURCE);
+    if !lex_diagnostics.is_empty() {
+        panic!("invalid Prelude derive declarations: {lex_diagnostics:?}");
+    }
+    let program = crate::Parser::parse(&tokens)
+        .unwrap_or_else(|diagnostics| panic!("invalid Prelude derive declarations: {diagnostics:?}"));
+    let mut names = std::collections::HashSet::new();
+    let mut providers = Vec::new();
+    for item in program.items {
+        let Item::UserDerive(provider) = item else {
+            panic!("Prelude/Derives.jet may contain only derive provider declarations");
+        };
+        providers.push(provider);
+    }
+    if providers.is_empty() {
+        panic!("Prelude/Derives.jet declares no derive providers");
+    }
+    for provider in &providers {
+        if !names.insert(provider.trait_name.clone()) {
+            panic!(
+                "Prelude/Derives.jet declares derive provider `{}` more than once",
+                provider.trait_name
+            );
+        }
+    }
+    providers
+}
+
+fn builtin_derive_provider_enabled(trait_name: &str) -> bool {
+    BUILTIN_DERIVE_PROVIDERS
+        .iter()
+        .any(|provider| provider.trait_name == trait_name)
+}
+fn builtin_derive_provider(trait_name: &str) -> Option<&'static crate::AST::DeriveDef> {
+    BUILTIN_DERIVE_PROVIDERS
+        .iter()
+        .find(|provider| provider.trait_name == trait_name)
+}
+
+/// Expand a Prelude provider through the same typed template boundary used by
+/// package-authored derives. Provider functions are converted to the selected
+/// capability implementation only after template expansion, so their bodies
+/// remain ordinary user-template AST all the way to the sema registry.
+///
+/// A failed source expansion reports its diagnostic and produces nothing;
+/// the checked-in source templates are the only provider mechanism.
+fn expand_builtin_provider_body(
+    trait_name: &str,
+    target_name: &str,
+    target_span: Span,
+    owner_type: &Type,
+    type_info: crate::AST::CtValue,
+    diags: &mut Vec<Diagnostic>,
+) -> Vec<Item> {
+    let Some(provider) = builtin_derive_provider(trait_name) else {
+        return Vec::new();
+    };
+    let expanded = match crate::Comptime::expand_derive_body(
+        &provider.body,
+        &provider.type_param,
+        type_info,
+        &std::collections::HashMap::new(),
+        std::path::Path::new("."),
+        None,
+    ) {
+        Ok(items) => items,
+        Err(diagnostic) => {
+            diags.push(diagnostic);
+            return Vec::new();
+        }
+    };
+    let mut ordinary = Vec::new();
+    let mut methods = Vec::new();
+    for item in expanded {
+        match item {
+            Item::Func(mut function) => {
+                for parameter in &mut function.params {
+                    replace_provider_type(
+                        &mut parameter.ty,
+                        &provider.type_param,
+                        owner_type,
+                    );
+                }
+                if let Some(return_type) = &mut function.return_type {
+                    replace_provider_type(return_type, &provider.type_param, owner_type);
+                }
+                function.compiler_generated = true;
+                methods.push(function);
+            }
+            other => ordinary.push(other),
+        }
+    }
+    if !methods.is_empty() {
+        ordinary.push(Item::Impl(ImplDef {
+            span: target_span,
+            type_name: target_name.to_string(),
+            type_span: target_span,
+            trait_name: Some(trait_name.to_string()),
+            operator_marker: None,
+            operator_rhs: None,
+            trait_span: Some(target_span),
+            methods,
+            delegation_field: None,
+            assoc_type_impls: Vec::new(),
+            is_generated_serde: false,
+            os_target: None,
+        }));
+    }
+    ordinary
+}
+
+fn provider_type_info(type_info: crate::AST::CtValue, kind: &str) -> crate::AST::CtValue {
+    let mut type_info = type_info;
+    if let crate::AST::CtValue::Struct { fields, .. } = &mut type_info {
+        if !fields.iter().any(|(name, _)| name == "kind") {
+            fields.push((
+                "kind".to_string(),
+                crate::AST::CtValue::Str(kind.to_string()),
+            ));
+        }
+    }
+    type_info
+}
+
+fn replace_provider_type(ty: &mut Type, type_param: &str, owner_type: &Type) {
+    if matches!(ty, Type::Named(name) if name == type_param) {
+        *ty = owner_type.clone();
+        return;
+    }
+    match ty {
+        Type::List(inner)
+        | Type::Shared(inner)
+        | Type::Option(inner)
+        | Type::FixedList { elem: inner, .. }
+        | Type::InlineRange { base: inner, .. }
+        | Type::Tagged { inner, .. }
+        | Type::Quantity { base: inner, .. } => {
+            replace_provider_type(inner, type_param, owner_type);
+        }
+        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+            replace_provider_type(key, type_param, owner_type);
+            replace_provider_type(value, type_param, owner_type);
+        }
+        Type::Fn { params, ret, .. } => {
+            for param in params {
+                replace_provider_type(param, type_param, owner_type);
+            }
+            if let Some(ret) = ret {
+                replace_provider_type(ret, type_param, owner_type);
+            }
+        }
+        Type::Apply { args, .. } | Type::Union(args) => {
+            for arg in args {
+                replace_provider_type(arg, type_param, owner_type);
+            }
+        }
+        Type::Tuple(fields) => {
+            for (_, field) in fields {
+                replace_provider_type(field, type_param, owner_type);
+            }
+        }
+        Type::Int
+        | Type::Float
+        | Type::Bool
+        | Type::String
+        | Type::Char
+        | Type::Named(_)
+        | Type::TraitObject(_)
+        | Type::IntN { .. }
+        | Type::Float32
+        | Type::Measure(_) => {}
+    }
+}
+
+/// D-ONCE-DERIVE1=A / I3: compiler-owned capability requests use the same
+/// typed derive-template engine as user-authored code. Reflected enum variant
+/// shape supplies the same nested field primitive as struct providers.
 pub(in super::super) fn expand_builtin_derive_items(
     items: &mut Vec<Item>,
     diags: &mut Vec<Diagnostic>,
 ) {
+    normalize_recursive_enum_payloads(items);
     let auto = crate::Traits::TraitRegistry::auto_derives_for_items(items);
     expand_builtin_derive_items_with_auto(items, &auto, diags);
+}
+
+
+fn normalize_recursive_enum_payloads(items: &mut [Item]) {
+    for item in items {
+        let Item::Enum(enum_def) = item else {
+            continue;
+        };
+        let owner = enum_def.name.as_str();
+        for variant in &mut enum_def.variants {
+            normalize_variant_payload(&mut variant.payload, owner);
+        }
+    }
+}
+
+pub(super) fn normalize_variant_payload(payload: &mut crate::AST::VariantPayload, owner: &str) {
+    match payload {
+        crate::AST::VariantPayload::Unit => {}
+        crate::AST::VariantPayload::Single(ty, _) => {
+            normalize_recursive_payload_type(ty, owner);
+        }
+        crate::AST::VariantPayload::Named(fields) => {
+            for field in fields {
+                normalize_recursive_payload_type(&mut field.ty, owner);
+            }
+        }
+    }
+}
+
+pub(super) fn normalize_recursive_payload_type(ty: &mut Type, owner: &str) {
+    if matches!(ty, Type::Apply { name, args } if name == owner && args.is_empty()) {
+        *ty = Type::Named(owner.to_string());
+        return;
+    }
+    match ty {
+        Type::List(inner)
+        | Type::Shared(inner)
+        | Type::Option(inner)
+        | Type::FixedList { elem: inner, .. }
+        | Type::InlineRange { base: inner, .. }
+        | Type::Tagged { inner, .. } => normalize_recursive_payload_type(inner, owner),
+        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+            normalize_recursive_payload_type(key, owner);
+            normalize_recursive_payload_type(value, owner);
+        }
+        Type::Fn { params, ret, .. } => {
+            for param in params {
+                normalize_recursive_payload_type(param, owner);
+            }
+            if let Some(ret) = ret {
+                normalize_recursive_payload_type(ret, owner);
+            }
+        }
+        Type::Apply { args, .. } | Type::Union(args) => {
+            for arg in args {
+                normalize_recursive_payload_type(arg, owner);
+            }
+        }
+        Type::Tuple(fields) => {
+            for (_, field) in fields {
+                normalize_recursive_payload_type(field, owner);
+            }
+        }
+        Type::Quantity { base, .. } => normalize_recursive_payload_type(base, owner),
+        Type::Int
+        | Type::Float
+        | Type::Bool
+        | Type::String
+        | Type::Char
+        | Type::Named(_)
+        | Type::TraitObject(_)
+        | Type::IntN { .. }
+        | Type::Float32
+        | Type::Measure(_) => {}
+    }
 }
 
 pub(in super::super) fn expand_builtin_derive_items_with_auto(
@@ -20,6 +279,14 @@ pub(in super::super) fn expand_builtin_derive_items_with_auto(
     auto: &crate::Traits::TraitRegistry,
     diags: &mut Vec<Diagnostic>,
 ) {
+    normalize_recursive_enum_payloads(items);
+    let struct_equatable = builtin_derive_provider_enabled(crate::Generics::EQUATABLE);
+    let struct_comparable = builtin_derive_provider_enabled(crate::Generics::COMPARABLE);
+    let enum_equatable = builtin_derive_provider_enabled(crate::Generics::EQUATABLE);
+    let enum_comparable = builtin_derive_provider_enabled(crate::Generics::COMPARABLE);
+    let distinct_equatable = builtin_derive_provider_enabled(crate::Generics::EQUATABLE);
+    let distinct_comparable = builtin_derive_provider_enabled(crate::Generics::COMPARABLE);
+
     let invalid_distinct_names: std::collections::HashSet<String> = items
         .iter()
         .filter_map(|item| {
@@ -36,45 +303,132 @@ pub(in super::super) fn expand_builtin_derive_items_with_auto(
 
     let mut generated = Vec::new();
     let snapshot = items.clone();
+
     for item in &snapshot {
         match item {
             Item::Struct(s) => {
-                let comparable = has_derive(&s.derives, crate::Generics::COMPARABLE)
-                    || auto.auto_comparable.contains(&s.name);
-                let equatable = has_derive(&s.derives, crate::Generics::EQUATABLE)
-                    || auto.auto_equatable.contains(&s.name);
-                if equatable || comparable {
-                    generated.extend(struct_derive_items(s, equatable, comparable));
+                let comparable = struct_comparable
+                    && (has_derive(&s.derives, crate::Generics::COMPARABLE)
+                        || auto.auto_comparable.contains(&s.name));
+                let equatable = struct_equatable
+                    && (has_derive(&s.derives, crate::Generics::EQUATABLE)
+                        || auto.auto_equatable.contains(&s.name));
+                let owner_type = applied_owner_type(&s.name, &s.type_params);
+                if equatable {
+                    generated.extend(expand_builtin_provider_body(
+                        crate::Generics::EQUATABLE,
+                        &s.name,
+                        s.name_span,
+                        &owner_type,
+                        provider_type_info(crate::Comptime::build_struct_type_info(s), "struct"),
+                        diags,
+                    ));
+                }
+                if comparable {
+                    generated.extend(expand_builtin_provider_body(
+                        crate::Generics::COMPARABLE,
+                        &s.name,
+                        s.name_span,
+                        &owner_type,
+                        provider_type_info(crate::Comptime::build_struct_type_info(s), "struct"),
+                        diags,
+                    ));
                 }
             }
             Item::Enum(e) => {
-                let comparable = has_derive(&e.derives, crate::Generics::COMPARABLE)
-                    || auto.auto_comparable.contains(&e.name);
-                let equatable = has_derive(&e.derives, crate::Generics::EQUATABLE)
-                    || auto.auto_equatable.contains(&e.name);
-                if equatable || comparable {
-                    generated.extend(enum_derive_items(e, equatable, comparable));
+                let comparable = enum_comparable
+                    && (has_derive(&e.derives, crate::Generics::COMPARABLE)
+                        || auto.auto_comparable.contains(&e.name));
+                let equatable = enum_equatable
+                    && (has_derive(&e.derives, crate::Generics::EQUATABLE)
+                        || auto.auto_equatable.contains(&e.name));
+                let owner_type = applied_owner_type(&e.name, &e.type_params);
+                if equatable {
+                    generated.extend(expand_builtin_provider_body(
+                        crate::Generics::EQUATABLE,
+                        &e.name,
+                        e.name_span,
+                        &owner_type,
+                        provider_type_info(crate::Comptime::build_enum_type_info(e), "enum"),
+                        diags,
+                    ));
+                }
+                if comparable {
+                    generated.extend(expand_builtin_provider_body(
+                        crate::Generics::COMPARABLE,
+                        &e.name,
+                        e.name_span,
+                        &owner_type,
+                        provider_type_info(crate::Comptime::build_enum_type_info(e), "enum"),
+                        diags,
+                    ));
                 }
             }
             Item::Distinct(d) if !invalid_distinct_names.contains(&d.name) => {
-                generated.extend(distinct_derive_items(d));
+                let owner_type = Type::Named(d.name.clone());
+                let type_info = provider_type_info(
+                    crate::Comptime::build_distinct_type_info(d, ""),
+                    "distinct",
+                );
+                if distinct_equatable {
+                    generated.extend(expand_builtin_provider_body(
+                        crate::Generics::EQUATABLE,
+                        &d.name,
+                        d.name_span,
+                        &owner_type,
+                        type_info.clone(),
+                        diags,
+                    ));
+                }
+                if distinct_comparable
+                    && (has_derive(&d.derives, crate::Generics::COMPARABLE)
+                        || auto.auto_comparable.contains(&d.name))
+                {
+                    generated.extend(expand_builtin_provider_body(
+                        crate::Generics::COMPARABLE,
+                        &d.name,
+                        d.name_span,
+                        &owner_type,
+                        type_info,
+                        diags,
+                    ));
+                }
             }
             Item::UnitFamily(family) => {
                 for d in family.distinct_defs() {
-                    generated.extend(distinct_derive_items(&d));
+                    let owner_type = Type::Named(d.name.clone());
+                    let type_info = provider_type_info(
+                        crate::Comptime::build_distinct_type_info(&d, ""),
+                        "distinct",
+                    );
+                    if distinct_equatable {
+                        generated.extend(expand_builtin_provider_body(
+                            crate::Generics::EQUATABLE,
+                            &d.name,
+                            d.name_span,
+                            &owner_type,
+                            type_info.clone(),
+                            diags,
+                        ));
+                    }
+                    if distinct_comparable
+                        && (has_derive(&d.derives, crate::Generics::COMPARABLE)
+                            || auto.auto_comparable.contains(&d.name))
+                    {
+                        generated.extend(expand_builtin_provider_body(
+                            crate::Generics::COMPARABLE,
+                            &d.name,
+                            d.name_span,
+                            &owner_type,
+                            type_info,
+                            diags,
+                        ));
+                    }
                 }
             }
             _ => {}
         }
     }
-
-    let generated = match crate::Comptime::expand_generated_items(generated) {
-        Ok(items) => items,
-        Err(diagnostic) => {
-            diags.push(diagnostic);
-            return;
-        }
-    };
     for item in generated {
         attach_generated_derive_item(items, item);
     }
@@ -82,442 +436,6 @@ pub(in super::super) fn expand_builtin_derive_items_with_auto(
 
 fn has_derive(derives: &[(String, Span)], name: &str) -> bool {
     derives.iter().any(|(derive, _)| derive == name)
-}
-
-fn struct_derive_items(s: &crate::AST::StructDef, equatable: bool, comparable: bool) -> Vec<Item> {
-    let fields: Vec<_> = s
-        .fields
-        .iter()
-        .filter(|field| field.computed.is_none())
-        .collect();
-    let owner_type = applied_owner_type(&s.name, &s.type_params);
-    let mut out = Vec::new();
-    if equatable {
-        let equality = fields
-            .iter()
-            .map(|field| {
-                binary(
-                    BinOp::Eq,
-                    field_read("self", &field.name, s.name_span),
-                    field_read("rhs", &field.name, s.name_span),
-                    s.name_span,
-                )
-            })
-            .reduce(|left, right| binary(BinOp::And, left, right, s.name_span))
-            .unwrap_or_else(|| Expr::Bool(true, s.name_span));
-        out.push(Item::Impl(derive_impl(
-            &s.name,
-            crate::Generics::EQUATABLE,
-            generated_func(
-                "equal",
-                vec![
-                    self_param(s.name_span),
-                    named_param("rhs", owner_type.clone(), s.name_span),
-                ],
-                Some(Type::Bool),
-                vec![Stmt::Return(Some(equality), s.name_span)],
-                s.name_span,
-            ),
-            s.name_span,
-        )));
-    }
-    if comparable {
-        let mut body = Vec::new();
-        for field in fields {
-            let left = field_read("self", &field.name, s.name_span);
-            let right = field_read("rhs", &field.name, s.name_span);
-            body.push(if_stmt(
-                binary(BinOp::Lt, left.clone(), right.clone(), s.name_span),
-                vec![return_ordering("Less", s.name_span)],
-                s.name_span,
-            ));
-            body.push(if_stmt(
-                binary(BinOp::Gt, left, right, s.name_span),
-                vec![return_ordering("Greater", s.name_span)],
-                s.name_span,
-            ));
-        }
-        body.push(Stmt::Return(
-            Some(ordering("Equal", s.name_span)),
-            s.name_span,
-        ));
-        out.push(Item::Impl(derive_impl(
-            &s.name,
-            crate::Generics::COMPARABLE,
-            generated_func(
-                "compare",
-                vec![
-                    self_param(s.name_span),
-                    named_param("rhs", owner_type, s.name_span),
-                ],
-                Some(Type::Named(crate::Syntax::TYPE_ORDERING.to_string())),
-                body,
-                s.name_span,
-            ),
-            s.name_span,
-        )));
-    }
-    out
-}
-
-fn enum_derive_items(e: &crate::AST::EnumDef, equatable: bool, comparable: bool) -> Vec<Item> {
-    let mut out = Vec::new();
-    let owner_type = applied_owner_type(&e.name, &e.type_params);
-    let recursive = e.variants.iter().any(|variant| match &variant.payload {
-        VariantPayload::Unit => false,
-        VariantPayload::Single(ty, _) => matches!(ty, Type::Named(name) if name == &e.name),
-        VariantPayload::Named(fields) => fields
-            .iter()
-            .any(|field| matches!(&field.ty, Type::Named(name) if name == &e.name)),
-    });
-    if equatable {
-        if recursive {
-            let helper_name = format!("_jet_derive_equal_{}", e.name);
-            let helper_body = enum_dispatch_body(e, "left", "right", DispatchKind::Equality);
-            let mut helper = generated_func(
-                &helper_name,
-                vec![
-                    named_param("left", owner_type.clone(), e.name_span),
-                    named_param("right", owner_type.clone(), e.name_span),
-                ],
-                Some(Type::Bool),
-                helper_body,
-                e.name_span,
-            );
-            helper.type_params = e.type_params.clone();
-            out.push(Item::Func(helper));
-            let call = free_call(
-                &helper_name,
-                vec![ident("self", e.name_span), ident("rhs", e.name_span)],
-                e.name_span,
-            );
-            out.push(Item::Impl(derive_impl(
-                &e.name,
-                crate::Generics::EQUATABLE,
-                generated_func(
-                    "equal",
-                    vec![
-                        self_param(e.name_span),
-                        named_param("rhs", owner_type.clone(), e.name_span),
-                    ],
-                    Some(Type::Bool),
-                    vec![Stmt::Return(Some(call), e.name_span)],
-                    e.name_span,
-                ),
-                e.name_span,
-            )));
-        } else {
-            out.push(Item::Impl(derive_impl(
-                &e.name,
-                crate::Generics::EQUATABLE,
-                generated_func(
-                    "equal",
-                    vec![
-                        self_param(e.name_span),
-                        named_param("rhs", owner_type.clone(), e.name_span),
-                    ],
-                    Some(Type::Bool),
-                    enum_dispatch_body(e, "self", "rhs", DispatchKind::Equality),
-                    e.name_span,
-                ),
-                e.name_span,
-            )));
-        }
-    }
-    if comparable {
-        if recursive {
-            let helper_name = format!("_jet_derive_compare_{}", e.name);
-            let mut helper = generated_func(
-                &helper_name,
-                vec![
-                    named_param("left", owner_type.clone(), e.name_span),
-                    named_param("right", owner_type.clone(), e.name_span),
-                ],
-                Some(Type::Named(crate::Syntax::TYPE_ORDERING.to_string())),
-                enum_dispatch_body(e, "left", "right", DispatchKind::Comparison),
-                e.name_span,
-            );
-            helper.type_params = e.type_params.clone();
-            out.push(Item::Func(helper));
-            let call = free_call(
-                &helper_name,
-                vec![ident("self", e.name_span), ident("rhs", e.name_span)],
-                e.name_span,
-            );
-            out.push(Item::Impl(derive_impl(
-                &e.name,
-                crate::Generics::COMPARABLE,
-                generated_func(
-                    "compare",
-                    vec![
-                        self_param(e.name_span),
-                        named_param("rhs", owner_type.clone(), e.name_span),
-                    ],
-                    Some(Type::Named(crate::Syntax::TYPE_ORDERING.to_string())),
-                    vec![Stmt::Return(Some(call), e.name_span)],
-                    e.name_span,
-                ),
-                e.name_span,
-            )));
-        } else {
-            out.push(Item::Impl(derive_impl(
-                &e.name,
-                crate::Generics::COMPARABLE,
-                generated_func(
-                    "compare",
-                    vec![
-                        self_param(e.name_span),
-                        named_param("rhs", owner_type, e.name_span),
-                    ],
-                    Some(Type::Named(crate::Syntax::TYPE_ORDERING.to_string())),
-                    enum_dispatch_body(e, "self", "rhs", DispatchKind::Comparison),
-                    e.name_span,
-                ),
-                e.name_span,
-            )));
-        }
-    }
-    out
-}
-
-fn distinct_derive_items(d: &crate::AST::DistinctDef) -> Vec<Item> {
-    // Every distinct type is registered as auto-Equatable, unconditionally, by
-    // `Traits::register_distinct_meta` (jet-foundation/src/Traits.rs), and
-    // `implements_trait` answers `EQUATABLE` from that set. Sema then rewrites
-    // `a == b` on any nominal type that implements Equatable into the
-    // `Equatable.equal` method shape (CheckerInfer/binary.rs). So the registry
-    // promises the method for EVERY distinct type, while this builder used to
-    // generate it only when the declaration carried at least one capability
-    // marker (it read its span off `d.derives.first()` and bailed otherwise).
-    //
-    // A marker-less distinct (`UserId :: distinct Int`) therefore had `x == y`
-    // rewritten into a call to a method nobody generated: no `method_sigs` row,
-    // no `trait_methods` row, so the TIR subset gate correctly refused it and
-    // `emit_func` reached its I2 `ice!` for the whole enclosing function. The
-    // gate was telling the truth; the trait registry was the side that lied.
-    // One fact, one mechanism (I8): the span falls back to the declaration name
-    // so the promise and the generated impl come from the same place.
-    let derive_span = d
-        .derives
-        .first()
-        .map(|(_, span)| *span)
-        .unwrap_or(d.name_span);
-    let equality = if matches!(d.base, Type::Float | Type::Float32) {
-        binary(
-            BinOp::And,
-            binary(
-                BinOp::Le,
-                method(ident("self", derive_span), "raw", Vec::new(), derive_span),
-                method(ident("rhs", derive_span), "raw", Vec::new(), derive_span),
-                derive_span,
-            ),
-            binary(
-                BinOp::Ge,
-                method(ident("self", derive_span), "raw", Vec::new(), derive_span),
-                method(ident("rhs", derive_span), "raw", Vec::new(), derive_span),
-                derive_span,
-            ),
-            derive_span,
-        )
-    } else {
-        binary(
-            BinOp::Eq,
-            method(ident("self", derive_span), "raw", Vec::new(), derive_span),
-            method(ident("rhs", derive_span), "raw", Vec::new(), derive_span),
-            derive_span,
-        )
-    };
-    let mut out = vec![Item::Impl(derive_impl(
-        &d.name,
-        crate::Generics::EQUATABLE,
-        generated_func(
-            "equal",
-            vec![
-                self_param(derive_span),
-                named_param("rhs", Type::Named(d.name.clone()), derive_span),
-            ],
-            Some(Type::Bool),
-            vec![Stmt::Return(Some(equality), derive_span)],
-            derive_span,
-        ),
-        derive_span,
-    ))];
-    if has_derive(&d.derives, crate::Generics::COMPARABLE) {
-        let self_raw = method(ident("self", derive_span), "raw", Vec::new(), derive_span);
-        let rhs_raw = method(ident("rhs", derive_span), "raw", Vec::new(), derive_span);
-        out.push(Item::Impl(derive_impl(
-            &d.name,
-            crate::Generics::COMPARABLE,
-            generated_func(
-                "compare",
-                vec![
-                    self_param(derive_span),
-                    named_param("rhs", Type::Named(d.name.clone()), derive_span),
-                ],
-                Some(Type::Named(crate::Syntax::TYPE_ORDERING.to_string())),
-                vec![
-                    if_stmt(
-                        binary(BinOp::Lt, self_raw.clone(), rhs_raw.clone(), derive_span),
-                        vec![return_ordering("Less", derive_span)],
-                        derive_span,
-                    ),
-                    if_stmt(
-                        binary(BinOp::Gt, self_raw, rhs_raw, derive_span),
-                        vec![return_ordering("Greater", derive_span)],
-                        derive_span,
-                    ),
-                    Stmt::Return(Some(ordering("Equal", derive_span)), derive_span),
-                ],
-                derive_span,
-            ),
-            derive_span,
-        )));
-    }
-    out
-}
-
-#[derive(Clone, Copy)]
-enum DispatchKind {
-    Equality,
-    Comparison,
-}
-
-fn enum_dispatch_body(
-    e: &crate::AST::EnumDef,
-    left_name: &str,
-    right_name: &str,
-    kind: DispatchKind,
-) -> Vec<Stmt> {
-    let mut outer = Vec::new();
-    let mut outer_arms = Vec::new();
-    for (left_index, left_variant) in e.variants.iter().enumerate() {
-        let left_bindings = payload_bindings(&left_variant.payload, "left");
-        let mut inner_arms = Vec::new();
-        for (right_index, right_variant) in e.variants.iter().enumerate() {
-            let right_bindings = payload_bindings(&right_variant.payload, "right");
-            let body = if left_index != right_index {
-                match kind {
-                    DispatchKind::Equality => vec![Stmt::Return(
-                        Some(Expr::Bool(false, e.name_span)),
-                        e.name_span,
-                    )],
-                    DispatchKind::Comparison => vec![Stmt::Return(
-                        Some(ordering(
-                            if left_index < right_index {
-                                "Less"
-                            } else {
-                                "Greater"
-                            },
-                            e.name_span,
-                        )),
-                        e.name_span,
-                    )],
-                }
-            } else {
-                match kind {
-                    DispatchKind::Equality => vec![Stmt::Return(
-                        Some(equality_expression(
-                            &left_bindings,
-                            &right_bindings,
-                            e.name_span,
-                        )),
-                        e.name_span,
-                    )],
-                    DispatchKind::Comparison => {
-                        comparison_body(&left_bindings, &right_bindings, e.name_span)
-                    }
-                }
-            };
-            inner_arms.push(SwitchArm {
-                cond: pattern_test(right_name, right_variant, right_bindings, e.name_span),
-                body,
-                span: e.name_span,
-            });
-        }
-        outer_arms.push(SwitchArm {
-            cond: pattern_test(left_name, left_variant, left_bindings, e.name_span),
-            body: vec![Stmt::Switch {
-                subject: ident(right_name, e.name_span),
-                arms: inner_arms,
-                else_body: None,
-                span: e.name_span,
-            }],
-            span: e.name_span,
-        });
-        let _ = left_index;
-    }
-    outer.push(Stmt::Switch {
-        subject: ident(left_name, e.name_span),
-        arms: outer_arms,
-        else_body: None,
-        span: e.name_span,
-    });
-    outer.push(Stmt::Return(
-        Some(match kind {
-            DispatchKind::Equality => Expr::Bool(false, e.name_span),
-            DispatchKind::Comparison => ordering("Equal", e.name_span),
-        }),
-        e.name_span,
-    ));
-    outer
-}
-
-fn comparison_body(left: &[String], right: &[String], span: Span) -> Vec<Stmt> {
-    let mut body = Vec::new();
-    for (left, right) in left.iter().zip(right) {
-        body.push(if_stmt(
-            binary(BinOp::Lt, ident(left, span), ident(right, span), span),
-            vec![return_ordering("Less", span)],
-            span,
-        ));
-        body.push(if_stmt(
-            binary(BinOp::Gt, ident(left, span), ident(right, span), span),
-            vec![return_ordering("Greater", span)],
-            span,
-        ));
-    }
-    body.push(Stmt::Return(Some(ordering("Equal", span)), span));
-    body
-}
-
-fn equality_expression(left: &[String], right: &[String], span: Span) -> Expr {
-    left.iter()
-        .zip(right)
-        .map(|(left, right)| binary(BinOp::Eq, ident(left, span), ident(right, span), span))
-        .reduce(|left, right| binary(BinOp::And, left, right, span))
-        .unwrap_or(Expr::Bool(true, span))
-}
-
-fn payload_bindings(payload: &VariantPayload, prefix: &str) -> Vec<String> {
-    let count = match payload {
-        VariantPayload::Unit => 0,
-        VariantPayload::Single(..) => 1,
-        VariantPayload::Named(fields) => fields.len(),
-    };
-    (0..count)
-        .map(|index| format!("{prefix}_{index}"))
-        .collect()
-}
-
-fn pattern_test(
-    subject: &str,
-    variant: &crate::AST::Variant,
-    bindings: Vec<String>,
-    span: Span,
-) -> Expr {
-    Expr::PatternTest {
-        subject: Box::new(ident(subject, span)),
-        pattern: Pattern::Variant {
-            variant: variant.name.clone(),
-            bindings: bindings
-                .into_iter()
-                .map(|name| PatSlot::Bind { name, span })
-                .collect(),
-            leading_dot: true,
-            span,
-        },
-        span,
-    }
 }
 
 fn attach_generated_derive_item(items: &mut Vec<Item>, item: Item) {
@@ -548,6 +466,8 @@ fn attach_generated_derive_item(items: &mut Vec<Item>, item: Item) {
             trait_span: implementation
                 .trait_span
                 .unwrap_or(implementation.type_span),
+            operator_rhs: implementation.operator_rhs,
+            operator_marker: implementation.operator_marker,
             methods: implementation.methods,
             compiler_generated: true,
             assoc_type_impls: implementation.assoc_type_impls,
@@ -584,147 +504,42 @@ fn applied_owner_type(name: &str, type_params: &[crate::AST::TypeParam]) -> Type
     }
 }
 
-fn derive_impl(type_name: &str, trait_name: &str, method: Func, span: Span) -> ImplDef {
-    ImplDef {
-        span,
-        type_name: type_name.to_string(),
-        type_span: span,
-        trait_name: Some(trait_name.to_string()),
-        trait_span: Some(span),
-        methods: vec![method],
-        delegation_field: None,
-        assoc_type_impls: Vec::new(),
-        is_generated_serde: false,
-        os_target: None,
-    }
-}
-
-fn generated_func(
-    name: &str,
-    params: Vec<Param>,
-    return_type: Option<Type>,
-    body: Vec<Stmt>,
-    span: Span,
-) -> Func {
-    let mut function = Func::implicit_run(body, span);
-    function.name = name.to_string();
-    function.name_span = span;
-    function.params = params;
-    function.return_type = return_type;
-    function.return_type_span = function.return_type.as_ref().map(|_| span);
-    function.compiler_generated = true;
-    function
-}
-
-fn self_param(span: Span) -> Param {
-    named_param_with_ty(
-        "self",
-        Type::Named(String::new()),
-        span,
-        AccessConvention::Read,
-    )
-}
-
-fn named_param(name: &str, ty: Type, span: Span) -> Param {
-    named_param_with_ty(name, ty, span, AccessConvention::Read)
-}
-
-fn named_param_with_ty(name: &str, ty: Type, span: Span, convention: AccessConvention) -> Param {
-    Param {
-        convention,
-        root: false,
-        name: name.to_string(),
-        name_span: span,
-        public_label: None,
-        zone: crate::AST::ParamZone::Either,
-        ty,
-        ty_span: span,
-        default: None,
-        variadic: false,
-        variadic_bound_list: None,
-        declared_view_from_names: None,
-    }
-}
-
-fn ident(name: &str, span: Span) -> Expr {
-    Expr::Ident(name.to_string(), span)
-}
-
-fn field_read(base: &str, field: &str, span: Span) -> Expr {
-    Expr::Field(Box::new(ident(base, span)), field.to_string(), span)
-}
-
-fn binary(op: BinOp, left: Expr, right: Expr, span: Span) -> Expr {
-    Expr::Binary(op, Box::new(left), Box::new(right), span)
-}
-
-fn call_arg(expr: Expr, span: Span) -> CallArg {
-    CallArg {
-        convention: AccessConvention::Read,
-        expr,
-        span,
-        flags: CallArgFlags::default(),
-        label: None,
-        spread: false,
-    }
-}
-
-fn free_call(name: &str, args: Vec<Expr>, span: Span) -> Expr {
-    Expr::Call(Call {
-        name: name.to_string(),
-        name_span: span,
-        type_args: Vec::new(),
-        args: args.into_iter().map(|expr| call_arg(expr, span)).collect(),
-        resolved_ret: None,
-        range_checked: false,
-        widen_approx: false,
-    })
-}
-
-fn method(receiver: Expr, name: &str, args: Vec<Expr>, span: Span) -> Expr {
-    Expr::MethodCall {
-        receiver: Box::new(receiver),
-        method: name.to_string(),
-        method_span: span,
-        owner_type_args: Vec::new(),
-        type_args: Vec::new(),
-        args: args.into_iter().map(|expr| call_arg(expr, span)).collect(),
-        recv_type: None,
-        resolved_ret: None,
-        checked_widen: false,
-    }
-}
-
-fn ordering(variant: &str, span: Span) -> Expr {
-    Expr::EnumLit {
-        type_name: crate::Syntax::TYPE_ORDERING.to_string(),
-        variant: variant.to_string(),
-        variant_span: None,
-        args: Vec::new(),
-        leading_dot: false,
-        span,
-    }
-}
-
-fn return_ordering(variant: &str, span: Span) -> Stmt {
-    Stmt::Return(Some(ordering(variant, span)), span)
-}
-
-fn if_stmt(cond: Expr, body: Vec<Stmt>, span: Span) -> Stmt {
-    Stmt::Switch {
-        subject: Expr::Bool(true, span),
-        arms: vec![SwitchArm { cond, body, span }],
-        else_body: Some(Vec::new()),
-        span,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn builtin_derive_is_an_ast_item_not_source() {
+    fn recursive_enum_derive_uses_cartesian_payload_bindings() {
+        jet_codegen::Codegen::MIREval::install_mir_bridge();
+        let src = "enum Expr { Num(Int)\nWrap(Expr) }";
+        let (tokens, lex_diags) = crate::Lexer::lex(src);
+        assert!(lex_diags.is_empty());
+        let mut program = crate::Parser::parse(&tokens).expect("source parses");
+        let mut diags = Vec::new();
+        expand_builtin_derive_items(&mut program.items, &mut diags);
+        assert!(diags.is_empty(), "built-in derive diagnostics: {diags:?}");
+        let rendered = crate::Formatter::format_synthetic_program(&program);
+        assert!(
+            rendered.contains("left_Num_value != right_Num_Num_value"),
+            "Int payload should compare with !=, got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("left_Wrap_value.equal(right_Wrap_Wrap_value)"),
+            "recursive payload should call equal, got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains(".Wrap(right_Num_Wrap_value)"),
+            "rhs bindings must include both variants, got:\n{rendered}"
+        );
+        assert!(
+            !rendered.contains("left_Num_value.equal"),
+            "Int payload must not call equal, got:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn builtin_derive_source_expands_to_ast_item() {
+        jet_codegen::Codegen::MIREval::install_mir_bridge();
         let (tokens, lex_diags) = crate::Lexer::lex("#Comparable struct Point { value: Int }");
         assert!(lex_diags.is_empty());
         let mut program = crate::Parser::parse(&tokens).expect("source parses");
@@ -738,5 +553,83 @@ mod tests {
                     .iter()
                     .any(|implementation| implementation.trait_name == Syntax::MARKER_COMPARABLE)
         )));
+    }
+
+    #[test]
+    fn register_enum_canonicalizes_recursive_payloads() {
+        let src = "enum Expr { Num(Int)\nWrap(Expr) }";
+        let (tokens, lex_diags) = crate::Lexer::lex(src);
+        assert!(lex_diags.is_empty());
+        let program = crate::Parser::parse(&tokens).expect("source parses");
+        let Item::Enum(enum_def) = &program.items[0] else {
+            panic!("expected enum");
+        };
+        let mut registry = TypeRegistry {
+            types: std::collections::HashMap::new(),
+            error_types: std::collections::HashSet::new(),
+            unit_types: std::collections::HashSet::new(),
+            unit_facts: std::collections::HashMap::new(),
+            literal_facts: std::collections::HashMap::new(),
+            computed_fields: std::collections::HashMap::new(),
+            field_defaults: std::collections::HashMap::new(),
+            receipt_sections: std::collections::HashMap::new(),
+            devtools_publications: std::cell::RefCell::new(Vec::new()),
+        };
+        let mut diags = Vec::new();
+        register_enum(
+            enum_def,
+            &mut registry,
+            &mut diags,
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+        );
+        assert!(diags.is_empty(), "{diags:?}");
+        let variants = registry.enum_variants("Expr").expect("enum registered");
+        let (_, payload) = variants.get("Wrap").expect("Wrap variant");
+        match payload {
+            crate::AST::VariantPayload::Single(ty, _) => {
+                assert_eq!(*ty, Type::Named("Expr".to_string()));
+            }
+            other => panic!("expected single payload, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nested_derive_methods_register_on_the_type() {
+        jet_codegen::Codegen::MIREval::install_mir_bridge();
+        let src = "enum Expr { Num(Int)\nWrap(Expr) }";
+        let (tokens, lex_diags) = crate::Lexer::lex(src);
+        assert!(lex_diags.is_empty());
+        let mut program = crate::Parser::parse(&tokens).expect("source parses");
+        let mut diags = Vec::new();
+        expand_builtin_derive_items(&mut program.items, &mut diags);
+        assert!(diags.is_empty(), "built-in derive diagnostics: {diags:?}");
+        let mut registry = TypeRegistry {
+            types: std::collections::HashMap::new(),
+            error_types: std::collections::HashSet::new(),
+            unit_types: std::collections::HashSet::new(),
+            unit_facts: std::collections::HashMap::new(),
+            literal_facts: std::collections::HashMap::new(),
+            computed_fields: std::collections::HashMap::new(),
+            field_defaults: std::collections::HashMap::new(),
+            receipt_sections: std::collections::HashMap::new(),
+            devtools_publications: std::cell::RefCell::new(Vec::new()),
+        };
+        for item in &program.items {
+            if let Item::Enum(enum_def) = item {
+                register_enum(
+                    enum_def,
+                    &mut registry,
+                    &mut diags,
+                    &std::collections::HashMap::new(),
+                    &std::collections::HashMap::new(),
+                );
+            }
+        }
+        register_type_methods(&program.items, &mut registry, &mut diags);
+        assert!(
+            registry.method("Expr", "equal").is_some(),
+            "nested Equatable.equal must be visible on the enum"
+        );
     }
 }

@@ -33,7 +33,7 @@ pub struct Program {
     /// ceiling *within* a web build) — `Web` here means "build for the web
     /// backend at all," a different axis, same marker family (I8).
     pub default_target: Option<String>,
-    /// D-HTMLPAIR1 (ratified 2026-07-01, c134): `#HTML("path.html")` — this program's
+    /// D-MARKERARGS1=A: `#HTML(Path{"path.html"})` — this program's
     /// companion host page for `--target=web` builds, explicit instead of
     /// the silent `<stem>.html` sibling-filename convention. Relative to the
     /// `.jet` source file's own directory.
@@ -153,16 +153,32 @@ pub fn core_list_path(module_alias: &str, member: &str) -> Option<CoreListPath> 
     None
 }
 
+/// Return a compiler-owned target-profile import path.
+///
+/// Target profiles are source-visible namespaces backed by the selected
+/// `TargetMachine`; they are not filesystem modules and therefore must stay
+/// out of the ordinary loader resolver. Keep this list aligned with the
+/// target profiles that have authoritative fact constructors.
+pub fn target_profile_path(import: &ImportDecl) -> Option<String> {
+    let ImportKind::Module(name, _) = &import.kind else {
+        return None;
+    };
+    matches!(name.as_str(), "board.sensor_v1" | "board.virt_aarch64")
+        .then(|| name.clone())
+}
+
 /// Build the Core alias maps consumed by pre-sema comptime evaluation. The
 /// same member walk handles qualified module imports and grouped Core items,
-/// including dotted members and explicit aliases.
+/// including dotted members and explicit aliases. Target-profile aliases use
+/// this same namespace carrier so every checker sees one alias identity; the
+/// target path is still distinguished from Core by its `board.` prefix.
 pub fn core_import_maps(
     imports: &[ImportDecl],
 ) -> (HashMap<String, String>, HashMap<String, String>) {
     let mut modules = HashMap::new();
     let mut items = HashMap::new();
     for import in imports {
-        if let Some(module) = import.core_module_path() {
+        if let Some(module) = import.core_module_path().or_else(|| target_profile_path(import)) {
             modules.insert(import.import_alias(), module);
         }
         let ImportKind::Unqualified { module_alias, .. } = &import.kind else {
@@ -210,6 +226,7 @@ pub fn rewrite_core_item_call(expr: &mut Expr, method: &str) {
         args: call.args,
         recv_type: None,
         resolved_ret: call.resolved_ret,
+        operator_rhs: None,
         checked_widen: false,
     };
 }
@@ -580,6 +597,10 @@ pub struct ProgramBundle {
     /// Directory containing the entry file (project root until M12 `pkg.jet`).
     pub project_root: std::path::PathBuf,
     pub modules: Vec<LoadedModule>,
+    /// D-DX-PLUGIN1=D: one checked package-wide devtools catalog. Completion
+    /// populates this from TypeRegistry facts; inspect and codegen consume the
+    /// same typed carrier instead of re-inferring panel identity from AST.
+    pub devtools_registry: crate::AST::DevtoolsRegistry,
     /// S14 teaching diagnostics collected during a lenient parse (LSP check).
     pub parse_teaching: Vec<crate::Diagnostics::Diagnostic>,
     /// M10: Core helper names proven reachable by sema. Codegen emits only
@@ -642,6 +663,25 @@ pub struct ProgramBundle {
     pub edition: String,
 }
 
+/// One ordinary `.Model` package output projected by the loader.
+///
+/// This is deliberately a neutral fact carrier. Foundation records only the
+/// source/package identity and manifest field view; package parsing and provider
+/// execution remain outside the sema/codegen dependency direction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelOutputFact {
+    pub package: String,
+    pub output: String,
+    pub signature_name: Option<String>,
+    /// Package identity needed by the runtime-only model seam.  Keeping this
+    /// beside the one output payload lets generated programs validate the same
+    /// identity without linking the compiler/package-model crate.
+    pub package_version: String,
+    pub license: String,
+    pub package_root: std::path::PathBuf,
+    pub fields: std::collections::BTreeMap<String, String>,
+}
+
 /// The typed package-only portion of D-MEM-GUARANTEE1. These facts are kept
 /// separate from source `PolicyDeclaration`s because `contain` and `harden`
 /// govern dependency boundaries and build profiles, not lexical scopes.
@@ -674,9 +714,25 @@ pub struct PackageGuarantees {
     /// `authority.holds.deny`. The loader carries the raw canonical rights here so
     /// sema applies the same memory proof as a signature denial.
     pub memory_denials: Vec<String>,
+    /// D-PLUGIN-AUTHORITY1: guest-declared host capabilities. These are
+    /// declaration facts only; the host's tightened grant is carried
+    /// separately and must be checked against this set at import time.
+    pub authority_needs: Vec<String>,
+    /// D-MODEL-PACKAGE1=A: ordinary `.Model` outputs visible to the checked
+    /// source graph. Every source binding consumes this one registry; no
+    /// provider or execution tier reparses package manifests.
+    pub model_outputs: Vec<ModelOutputFact>,
+
     /// D-EFFECT-AUTHORITY1: the application-boundary policy and the exact
     /// sema-projected effects carried into every execution tier.
     pub application_authority: crate::Authority::ApplicationAuthority,
+}
+
+impl ProgramBundle {
+    /// Return the checked model-output registry projected by Loader.
+    pub fn model_outputs(&self) -> &[ModelOutputFact] {
+        &self.package_guarantees.model_outputs
+    }
 }
 
 impl ProgramBundle {
@@ -737,7 +793,7 @@ pub struct LoadedModule {
     /// survives loading so sema resolves App capabilities from the same
     /// target fact that the CLI uses for the web backend.
     pub default_target: Option<String>,
-    /// D-HTMLPAIR1 (ratified 2026-07-01, c134): `#HTML("path.html")` — this file's explicit
+    /// D-MARKERARGS1=A: `#HTML(Path{"path.html"})` — this file's explicit
     /// companion host page for `--target=web` builds.
     pub html_path: Option<String>,
     /// Mirrors `Program::policy_declarations` for sema/index/explain consumers.

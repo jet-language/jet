@@ -1,0 +1,36 @@
+use "units" as units
+
+fn run() {
+    target :: 10meter
+    elapsed :: 1s
+    acceleration :: units.acceleration_for(target, elapsed)
+    speed := units.speed_after(acceleration, elapsed)
+    position := 0meter
+    tick := 0
+
+    // Integrate one second of the measured acceleration on each control tick.
+    loop tick < 4 {
+        speed = units.speed_after(acceleration, elapsed)
+        increment :: units.distance_after(speed, elapsed)
+        // Preserve the fallible cross-file helper so #2776 remains an honest
+        // native-tier gate instead of being hidden behind a local shortcut.
+        position = units.checked_meters_add(position, increment) ?? panic("meter sum")
+        tick += 1
+    }
+
+    centimeters :: Centimeter.from_meter(position) ?? panic("centimeter conversion")
+    frequency :: 2hertz
+    if position.raw() != 40.0 -> panic("meter control result")
+    if centimeters.raw() != 4000.0 -> panic("centimeter conversion")
+    if elapsed.in(.Nanoseconds) != 1000000000 -> panic("second duration")
+    if speed.raw() != 10.0 -> panic("speed result")
+    if frequency.raw() != 2.0 -> panic("hertz result")
+
+    // Printing the values themselves preserves the checked nominal types in
+    // the output instead of reducing the example to untyped Float values.
+    print("position {position}")
+    print("centimeters {centimeters}")
+    print("elapsed {elapsed}")
+    print("speed {speed}")
+    print("frequency {frequency}")
+}

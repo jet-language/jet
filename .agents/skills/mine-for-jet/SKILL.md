@@ -5,7 +5,7 @@ description: Mine any external resource for Jet — YouTube videos, git reposito
 
 # Mine for Jet
 
-Extract evidence first. Persist progress. Separate the source's claims, audience signals, verified facts, Jet state, and recommendations. Never turn popularity into truth.
+Extract evidence first. Persist source captures and claim records. Separate the source's claims, audience signals, verified facts, Jet state, and recommendations. Never turn popularity into truth.
 
 A resource is anything with an argument or a surface worth mining: a YouTube video, a git repository, an article or blog post, a paper, a docs site, a talk, a discussion thread. The spine below is identical for all of them; only step 2's capture playbook changes per kind.
 
@@ -25,6 +25,12 @@ never the finding — state the real mechanism when the two differ. And the
 subject is usually a language or tool that works, so question 2 always has
 material: whatever it got wrong is on display next to whatever it got right.
 
+Before running, read `.agents/skills/_shared/audit-dispositions.md`. It owns
+shared publication, workflow-boundary, and disposition mechanics; this method
+still owns source capture, claim ledgers, cross-resource synthesis, live
+cross-checks, and Tower logging.
+
+
 ## Workflow
 
 ### 1. Establish scope
@@ -32,23 +38,42 @@ material: whatever it got wrong is on display next to whatever it got right.
 - Confirm the resource URL (or path), its kind, and any outcome the owner named.
 - Reject already-mined sources before expensive capture: run
   `scripts/check_sources.py <url>…` (from this skill's directory) against the
-  registry `docs/reference/prior-art.md`. A tracked source needs an explicit
+  registry `docs/spec/reference/prior-art.md`. A tracked source needs an explicit
   `--allow-rerun` approval from the owner; a duplicate in one batch is an error.
-- Tower logging is the default outcome (owner directive 2026-08-06): every actionable finding — gap, deferred consideration, measurement, owner gate — becomes a Tower card or ballot in the same run, never a "revisit later" line in the report. Skip Tower writes only when the owner explicitly says report-only.
+- Tower logging is the default for this method: every actionable finding —
+  gap, deferred consideration, measurement, or owner gate — becomes a Tower
+  card or ballot in the same run. Never leave a "revisit later" line without
+  its card. Skip Tower writes only when the owner explicitly changes this
+  method to report-only.
 - Repo edits remain unauthorized unless requested explicitly.
-- Read `AGENTS.md`, then its required spec files in order. Read `.agents/skills/tower/SKILL.md` and `.agents/skills/tower-ballot/SKILL.md` before any Tower work.
+- Read `AGENTS.md`. Use `AGENTS.md`'s
+  task-triggered lookup:
+  - language semantics or syntax: only relevant sections of
+    `docs/spec/philosophy.md`, `docs/spec/syntax-decisions.md`, and
+    `docs/spec/architecture.md`;
+  - diagnostics: `docs/spec/diagnostics.md` and matching snapshots;
+  - Tower board mechanics or owner decisions:
+    `plugins/tower/skills/tower/SKILL.md`, plus
+    `plugins/tower/skills/tower-ballot/SKILL.md` only for an owner-gated choice.
+  For this specialized task, read this skill. Search first and read the
+  smallest authoritative slice; do not load unrelated specs.
 - Preserve unrelated dirty-tree changes. Do not checkpoint or delegate when doing so would commit another worker's changes.
 
 ### 2. Capture source material
 
 Universal rules, all kinds:
 
-- Assign each resource a short stable `ID` and keep captures under `/tmp/jet-mine-ID.*`. `/tmp` is RAM-backed: never put multi-GB captures or clones there; use a gitignored disk path (e.g. `<repo>/target-mine-ID`) for anything large, and delete captures when the task closes.
+- Assign each resource a short stable `ID` and keep captures under a
+  gitignored disk path such as `<repo>/target-mine-ID/`. Do not use `/tmp` for
+  captures; delete the capture directory when the task closes.
 - Record: title, author/channel/org, publication or last-activity date, size (duration, page count, commit/star/issue counts), description, linked sources, and retrieval date.
 - Inspect linked articles, papers, repositories, or measurements. Prefer those primary sources when checking technical claims.
 - Never dump a whole capture into context: read metadata first, then the body in bounded slices, then stratified audience samples.
-- For long or multi-session work, keep a progress manifest (`/tmp/jet-mine-ID.manifest.json`) you update by hand: body ranges already read, capture quality notes, audience sample IDs seen, linked-source statuses (`pending`, `retrieved`, `verified`, `unavailable`), and retrieval warnings. Read it before resuming; continue missing ranges, never restart completed chunks.
-- Record capture/API problems (count mismatches, missing threads, blocked downloads, truncated pages) in the manifest and in the final report.
+- For long or multi-session work, resume from the captured source files and any
+  completed claim records; do not add a second run-tracking artifact.
+- Record capture/API problems (count mismatches, missing threads, blocked
+  downloads, truncated pages) in the final dated report and the relevant claim
+  records.
 - Treat capture completion as coverage of retrieval, not of human review.
 - Inspect captures with short ad-hoc Python (the host has no bare `python3`; run `nix shell nixpkgs#python3 --command python3 …`).
 
@@ -59,13 +84,15 @@ nix shell nixpkgs#yt-dlp --command yt-dlp \
   --skip-download \
   --write-subs --write-auto-subs --sub-langs 'en.*' --sub-format json3 \
   --write-comments --write-info-json \
-  -o '/tmp/jet-mine-%(id)s.%(ext)s' \
+-o 'target-mine-ID/%(id)s.%(ext)s' \
   'VIDEO_URL'
 ```
 
 - Prefer creator subtitles over auto-captions; label auto-caption uncertainty. Creator captions (`subtitles` in the info JSON) are high quality; auto/unknown captions are never high-confidence evidence without corroboration.
 - If captions are absent, use an available transcription path or report the gap. Never infer the video's argument from title/description alone.
-- Parse json3 into `/tmp/jet-mine-ID.transcript.txt` (`[mm:ss] text` lines): drop empty events, deduplicate, merge progressive auto-caption updates while retaining start times. Read it in chunks.
+- Parse json3 into `target-mine-ID/transcript.txt` (`[mm:ss] text` lines): drop
+  empty events, deduplicate, merge progressive auto-caption updates while
+  retaining start times. Read it in chunks.
 - Retrieve comments broadly. Keep root/reply counts and note incomplete threads or API warnings.
 
 **Repository.** Clone shallow and blobless (`git clone --depth 50 --filter=blob:none`) to a disk path, or read hosted files directly.
@@ -135,7 +162,7 @@ Before Jet recommendations, write a compact JSON claim list. Give semantically e
     "confidence": "high",
     "stance": "supports",
     "correction": null,
-    "jet_evidence": "docs/plans/compiler-speed.md",
+    "jet_evidence": "docs/spec/reference/compiler-speed.md",
     "classification": "ratified-in-progress",
     "owner": "#666",
     "action": "Add hostile invalidation cases."
@@ -145,7 +172,10 @@ Before Jet recommendations, write a compact JSON claim list. Give semantically e
 
 Allowed source kinds: `primary` (the resource body: transcript, code, docs, article text), `audience` (comments, issues, discussion threads), `linked-source`, `local-evidence`, `inference`. Confidence: `low`, `medium`, `high`. Stance: `supports`, `disputes`, `neutral`. Classifications: `already-implemented`, `ratified-in-progress`, `real-gap`, `rejected-conflict`, `needs-measurement`, `owner-gate`. Set `source_identity` to the shared upstream source when several resources repeat one article, paper, benchmark, or speaker; this prevents false independent corroboration.
 
-Write the ledger to `/tmp/jet-mine-ID.claims.json` and validate it yourself before use: parse it as JSON, check every claim uses only the allowed enum values above, and check `topic` keys are unique per distinct claim (duplicates mean two claims should merge or one needs a sharper topic).
+Write the ledger to `target-mine-ID/claims.json` and validate it yourself before
+use: parse it as JSON, check every claim uses only the allowed enum values above,
+and check `topic` keys are unique per distinct claim (duplicates mean two claims
+should merge or one needs a sharper topic).
 
 ### 6. Cross-check Jet
 
@@ -225,12 +255,18 @@ Build one ledger per resource, then group all claims by exact `topic` key (a sho
 - Do not create ballots for choices already ratified. Attach work to the existing decision/card instead.
 - Run `tower lint` after writes and read cards/decisions back.
 
+Use `.agents/skills/_shared/audit-dispositions.md` for the retained report's
+publication rules and required marker table. This shared contract does not
+weaken this method's default Tower logging or card/ballot obligations.
+
+
 ## Output contract
 
 Lead with verdict. Include:
 
 - source coverage and limitations;
-- manifest completion, capture quality (caption source, clone depth, truncated pages), retrieval warnings, and unresolved linked sources;
+- capture completion, quality (caption source, clone depth, truncated pages),
+  retrieval warnings, and unresolved linked sources;
 - strongest lessons;
 - **verified defects, with the live contrast that proves each one**;
 - corrections and disputed claims;
@@ -244,9 +280,6 @@ Lead with verdict. Include:
 - Tower card/decision IDs when created;
 - exact local file links and primary-source links.
 
-Follow the owner's report format: visual-first, tables over prose, example-led,
-no hard wrapping, no stuffiness. Lead with the reframe when the popular reading
-of the resource is wrong — say so plainly and give the real mechanism.
 
 Keep audience members anonymous unless identity materially affects credibility. Avoid long body/audience quotations.
 
@@ -268,7 +301,3 @@ more than another paragraph of confirmed findings. End with it when one exists.
 - Do not report a finding as "revisit later" without a card that carries it.
 - Do not wait to be asked for the competitive lens, the micro sweep, or the surface list. They are standing requirements of every run.
 
-The shared lens carries the rest: probe before believing a spec, name where Jet
-is behind, mark shipped versus designed, do not quote a metric from a column you
-have not checked, confirm a surprising source-level finding with a second
-reader, and never restate the subject's own conclusion as the finding.

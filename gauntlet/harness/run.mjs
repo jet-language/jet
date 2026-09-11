@@ -8,12 +8,27 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runLiveReloadAxis as runLiveReloadAxisAdapter } from "./live-reload.mjs";
 import { runMemorySafetyFuzzAxis as runMemorySafetyFuzzAxisAdapter } from "./memory-safety-fuzz.mjs";
-import { projectStatus } from "./status.mjs";
+import { applyStatusGate, projectStatus } from "./status.mjs";
+const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
 const harnessDir = path.dirname(fileURLToPath(import.meta.url));
 const repoDir = path.resolve(harnessDir, "../..");
 const envRunner = path.join(repoDir, "scripts/agent/jet-env");
 const timer = path.join(harnessDir, "timer.py");
+
+const TOOL_VERSION_COMMANDS = Object.freeze({
+  python3: ["python3", "--version"],
+  rustc: ["rustc", "--version"],
+  gcc: ["gcc", "--version"],
+  zig: ["zig", "version"],
+  go: ["go", "version"],
+  node: ["node", "--version"],
+  entr: ["entr", "-V"],
+});
+
+function toolVersionCommand(tool) {
+  return [...(TOOL_VERSION_COMMANDS[tool] ?? [tool, "--version"])];
+}
 
 const ENTRY_MODES = ["batch", "batch-steps", "service", "web", "web-app"];
 const MATRIX_UNCOVERED_DEFAULTS = [];
@@ -47,6 +62,51 @@ const RATIO_VERDICTS = {
   rust: { win: "<1", parity: "<=1.05", loss: ">1.05" },
   non_rust: { win: "<1", parity: null, loss: ">=1" },
 };
+const STRICT_PERFORMANCE_POLICY_TEXT = [
+  "Jet targets a strict win for every matched peer on every required cell and metric. Rust permits same-run parity only at a Jet/Rust ratio of 1.05 or lower; that band is measurement noise, not a target or a win. Every non-Rust peer requires Jet/peer below 1.00.",
+  "",
+  "Required cells cover foundations (numerics, text, files, concurrency, networking, build time, and run time) plus one real workload in each critical area: web, games, CLI and scripts, data analysis, backend services, AI/ML applications, GUI applications, and embedded. A niche becomes required only when Jet ships a first-party battery for it. Do not claim a niche win without that battery.",
+  "",
+  "Apply the comparator per cell and metric. Never average away a loss, substitute an easier workload or tier, omit a peer, or pass wrong, unavailable, uncovered, mismatched, or inconclusive evidence. A performance card, milestone, dashboard, or release gate stays open while any required cell fails. Never trade semantics, diagnostics, determinism, safety, or I9 parity for a score. Manifests and gates must encode this policy; prose alone is not evidence. Historical receipts remain immutable evidence under their recorded policy and never weaken the current gate.",
+].join("\n");
+
+const STRICT_PERFORMANCE_POLICY = Object.freeze({
+  schema: "jet.strict-performance-policy.v1",
+  id: "AGENTS.md#strict-performance-gate",
+  version: 1,
+  comparison: "per_cell_and_metric",
+  comparators: RATIO_VERDICTS,
+  failure_statuses: Object.freeze([
+    "missing",
+    "wrong",
+    "unavailable",
+    "uncovered",
+    "mismatched",
+    "inconclusive",
+  ]),
+  foundations: Object.freeze([
+    { id: "numerics", required: true, cells: ["numerics.float-kernel", "numerics.fft", "numerics.tensor-map", "numerics.int-kernel"], metrics: "all" },
+    { id: "text", required: true, cells: ["text.kernel", "text.regex-kernel", "text.regex-find-all-large", "text.report-cli", "text.script"], metrics: "all" },
+    { id: "files", required: true, cells: ["files.script", "files.orchestration"], metrics: "all" },
+    { id: "concurrency", required: true, cells: ["concurrency.app", "concurrency.service"], metrics: "all" },
+    { id: "networking", required: true, cells: ["netserv.client", "netserv.service"], metrics: "all" },
+    { id: "build_time", required: true, cells: "all", metrics: ["cold_build_seconds", "warm_build_seconds"] },
+    { id: "run_time", required: true, cells: "all", metrics: "runtime" },
+  ]),
+  critical_areas: Object.freeze([
+    { id: "web", required: true, cells: ["webfront.widget", "webfront.app"], metrics: "all" },
+    { id: "games", required: false, activation: "first_party_battery", cells: [], metrics: "all" },
+    { id: "cli_and_scripts", required: true, cells: ["cli.app", "text.report-cli", "text.script", "formats.csv-cli", "files.script"], metrics: "all" },
+    { id: "data_analysis", required: true, cells: ["formats.csv-cli", "numerics.script", "numerics.notebook"], metrics: "all" },
+    { id: "backend_services", required: true, cells: ["concurrency.service", "netserv.service"], metrics: "all" },
+    { id: "ai_ml_applications", required: false, activation: "first_party_battery", cells: [], metrics: "all" },
+    { id: "gui_applications", required: false, activation: "first_party_battery", cells: [], metrics: "all" },
+    { id: "embedded", required: true, cells: ["embedded.kernel", "embedded.data"], metrics: "all" },
+  ]),
+  first_party_battery_required: true,
+  historical_receipts: "immutable_recorded_policy",
+  text: STRICT_PERFORMANCE_POLICY_TEXT,
+});
 const METRIC_APPLICABILITY_POLICY = {
   default: "required",
   not_applicable: "explicit_structural_reason",
@@ -235,7 +295,7 @@ async function runProcess(cwd, args, {
   env = undefined,
 } = {}) {
   return new Promise((resolve) => {
-    const child = spawn(envRunner, [...(full ? ["full"] : []), "sh", "-c", args.map(shellQuote).join(" ")], {
+    const child = spawn(envRunner, [...(full ? ["full"] : []), ...args], {
       cwd,
       env: env === undefined ? process.env : { ...process.env, ...env },
       stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
@@ -323,7 +383,7 @@ async function timedSequence(cwd, commands, { full = false } = {}) {
 }
 
 function startProcess(cwd, args, { full = false, env = undefined } = {}) {
-  const child = spawn(envRunner, [...(full ? ["full"] : []), "sh", "-c", args.map(shellQuote).join(" ")], {
+  const child = spawn(envRunner, [...(full ? ["full"] : []), ...args], {
     cwd,
     env: env === undefined ? process.env : { ...process.env, ...env },
     stdio: ["ignore", "ignore", "pipe"],
@@ -682,12 +742,10 @@ async function collectTierTrace(cwd, commands, expected, reset = null, {
         : { command: [...command], exit_code: result.code, ...facts };
       invocations.push(invocation);
       output.push(result.stdout);
-      if (facts.error) {
-        reason = facts.error;
-        break;
-      }
-      if (result.code !== 0) {
-        reason = `trace invocation exited ${result.code}`;
+      if (result.code !== 0 || facts.error) {
+        reason = result.code !== 0
+          ? `trace invocation exited ${result.code}: ${result.stderr.toString("utf8").trim().slice(0, 300)}`
+          : facts.error;
         break;
       }
     }
@@ -767,6 +825,125 @@ function sortedUnique(values) {
 
 function equalStringArrays(left, right) {
   return Array.isArray(left) && Array.isArray(right) && left.length === right.length && left.every((value, index) => value === right[index]);
+}
+function policyTerritoryCells(area, matrixCellIds) {
+  if (area?.cells === "all") return [...matrixCellIds];
+  return Array.isArray(area?.cells) ? area.cells : [];
+}
+
+function strictPerformancePolicyIssues(matrix) {
+  const policy = matrix?.strict_performance_policy;
+  if (!isObject(policy)) return ["matrix is missing the strict performance policy"];
+  const matrixCells = Array.isArray(matrix?.cells) ? matrix.cells : [];
+  const issues = [];
+  if (policy.schema !== STRICT_PERFORMANCE_POLICY.schema) {
+    issues.push(`matrix strict performance policy schema is ${JSON.stringify(policy.schema)}`);
+  }
+  if (policy.id !== STRICT_PERFORMANCE_POLICY.id || policy.version !== STRICT_PERFORMANCE_POLICY.version) {
+    issues.push("matrix strict performance policy identity is not ratified");
+  }
+  if (policy.comparison !== STRICT_PERFORMANCE_POLICY.comparison) {
+    issues.push("matrix strict performance policy is not per-cell and per-metric");
+  }
+  if (JSON.stringify(policy.comparators) !== JSON.stringify(STRICT_PERFORMANCE_POLICY.comparators)) {
+    issues.push("matrix strict performance policy comparator differs from the ratified law");
+  }
+  if (!equalStringArrays(policy.failure_statuses, STRICT_PERFORMANCE_POLICY.failure_statuses)) {
+    issues.push("matrix strict performance policy failure statuses are incomplete");
+  }
+  for (const category of ["foundations", "critical_areas"]) {
+    if (!Array.isArray(policy[category])) {
+      issues.push(`matrix strict performance policy ${category} are missing`);
+      continue;
+    }
+    const ids = new Set();
+    for (const area of policy[category]) {
+      if (!isObject(area) || typeof area.id !== "string" || area.id.length === 0) {
+        issues.push(`matrix strict performance policy has an invalid ${category} area`);
+        continue;
+      }
+      if (ids.has(area.id)) issues.push(`matrix strict performance policy duplicates ${category} area ${area.id}`);
+      ids.add(area.id);
+      if (area.required !== true && area.activation !== "first_party_battery") {
+        issues.push(`${category}.${area.id}: inactive territory must require a first-party battery activation`);
+      }
+      const cells = policyTerritoryCells(area, matrixCells.map((cell) => cell.id));
+      if (area.required === true && cells.length === 0) {
+        issues.push(`${category}.${area.id}: required territory has no first-party battery cells`);
+      }
+      if (area.required !== true && cells.length > 0) {
+        issues.push(`${category}.${area.id}: inactive territory cannot claim battery cells`);
+      }
+      for (const cell of cells) {
+        if (typeof cell !== "string" || !matrixCells.some((candidate) => candidate.id === cell)) {
+          issues.push(`${category}.${area.id}: unknown or invalid matrix battery cell ${cell}`);
+        }
+      }
+    }
+  }
+  if (JSON.stringify(policy.foundations) !== JSON.stringify(STRICT_PERFORMANCE_POLICY.foundations)) {
+    issues.push("matrix strict performance policy foundation battery map differs from the ratified law");
+  }
+  if (JSON.stringify(policy.critical_areas) !== JSON.stringify(STRICT_PERFORMANCE_POLICY.critical_areas)) {
+    issues.push("matrix strict performance policy critical-area battery map differs from the ratified law");
+  }
+  if (policy.first_party_battery_required !== true) {
+    issues.push("matrix strict performance policy does not require a first-party battery before a niche claim");
+  }
+  if (policy.historical_receipts !== STRICT_PERFORMANCE_POLICY.historical_receipts) {
+    issues.push("matrix strict performance policy does not preserve historical receipts");
+  }
+  if (policy.text !== STRICT_PERFORMANCE_POLICY.text) {
+    issues.push("matrix strict performance policy text differs from AGENTS.md");
+  }
+  const matrixIds = matrixCells.map((cell) => cell.id);
+  if (new Set(matrixIds).size !== matrixIds.length || matrixIds.some((id) => typeof id !== "string" || id.length === 0)) {
+    issues.push("matrix strict performance policy cannot address an invalid or duplicate matrix cell");
+  }
+  const covered = new Set([
+    ...(Array.isArray(policy.foundations) ? policy.foundations : []),
+    ...(Array.isArray(policy.critical_areas) ? policy.critical_areas : []),
+  ].filter((area) => area?.required === true)
+    .flatMap((area) => policyTerritoryCells(area, matrixIds)));
+  for (const id of matrixIds) {
+    if (!covered.has(id)) issues.push(`${id}: matrix cell has no required strict-performance territory battery`);
+  }
+  return [...new Set(issues)];
+}
+
+function matrixPeerLanguages(matrix, cell = null) {
+  const rails = matrix?.rails ?? {};
+  const incumbent = cell?.domain && isObject(rails.incumbents) ? rails.incumbents[cell.domain] : null;
+  const peers = [
+    ...(Array.isArray(rails.always) ? rails.always : []),
+    ...(Array.isArray(rails.perf) ? rails.perf : []),
+    ...(typeof incumbent === "string" ? [incumbent] : (cell ? [] : Object.values(isObject(rails.incumbents) ? rails.incumbents : {}))),
+  ].filter((language) => typeof language === "string" && baseLanguage(language) !== "jet");
+  return sortedUnique(peers.length ? peers : ["rust"]);
+}
+
+function matrixCellMode(cell) {
+  const id = String(cell?.id ?? "");
+  if (id === "webfront.app") return "web-app";
+  if (cell?.kind === "service" || id.startsWith("netserv.") || id === "concurrency.service") return "service";
+  if (cell?.kind === "web" || id === "webfront.widget") return "web";
+  if (cell?.kind === "cli" || cell?.kind === "scripting") return "batch-steps";
+  return "batch";
+}
+
+function missingMatrixCellFailures(matrix, cell) {
+  const mode = matrixCellMode(cell);
+  const tiers = Object.fromEntries(Object.keys(tierPolicy(mode)).map((tier) => [
+    tier,
+    { status: "unmeasured", jet: null, peer: null, ratio: null, verdict: null },
+  ]));
+  return matrixPeerLanguages(matrix, cell).flatMap((peer) => comparisonMetrics(mode).map((metric) => ({
+    metric,
+    peer,
+    verdict: "unmeasured",
+    reason: "matrix cell has no corpus entry; peer and metric evidence are missing",
+    tiers,
+  })));
 }
 
 function tierPolicy(mode) {
@@ -972,6 +1149,10 @@ async function measureSourceManifest(entriesDir, manifest, matrix = null) {
     if (JSON.stringify(matrix.metric_applicability) !== JSON.stringify(METRIC_APPLICABILITY_POLICY)) {
       throw new Error("matrix is missing the metric applicability policy");
     }
+    const strictIssues = strictPerformancePolicyIssues(matrix);
+    if (strictIssues.length) {
+      throw new Error(`matrix strict performance policy is invalid: ${strictIssues.join("; ")}`);
+    }
     const matrixCells = (matrix.cells ?? []).map((cell) => cell.id);
     if (new Set(matrixCells).size !== matrixCells.length || corpus.matrix_cell_count !== matrixCells.length || !equalStringArrays(corpus.allowed_uncovered_cells, MATRIX_UNCOVERED_DEFAULTS)) {
       throw new Error("measurement manifest matrix denominator does not match the approved matrix");
@@ -1114,6 +1295,7 @@ function validateEntryShape(item, matrix) {
 }
 async function validateCorpus(entriesDir, loaded, skipped, matrix, manifest, fullScope) {
   const issues = [];
+  issues.push(...strictPerformancePolicyIssues(matrix));
   if (JSON.stringify(matrix?.metric_applicability) !== JSON.stringify(METRIC_APPLICABILITY_POLICY)) {
     issues.push("matrix is missing the metric applicability policy");
   }
@@ -1979,6 +2161,24 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
   } : null;
   const TIER_TIMEOUT_MS = timeoutFromEnv("JET_GAUNTLET_TIER_TIMEOUT_MS", Math.min(DEFAULT_TIMEOUT_MS, 180_000));
   const traceRequests = [];
+  let jetPeerChild = null;
+  let jetPeerFailure = null;
+  const stopJetPeer = async () => {
+    if (jetPeerChild) {
+      stopProcess(jetPeerChild);
+      await waitForExit(jetPeerChild);
+      jetPeerChild = null;
+    }
+  };
+  try {
+    if (entry.spec?.peer && jetSourceAvailable) {
+      try {
+        jetPeerChild = await startPeer(jetDir, entry.spec.peer);
+      } catch (error) {
+        jetPeerFailure = `peer unavailable: ${error.message}`;
+      }
+    }
+
   for (const tier of Object.keys(tierPolicy(entry.mode))) {
     const policy = tierPolicy(entry.mode)[tier];
     if (tier === "dev" && !dev) {
@@ -2001,6 +2201,11 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
       tiers[tier] = unavailableTier(policy.required, "Jet source was not staged");
       continue;
     }
+    if (jetPeerFailure) {
+      tiers[tier] = unavailableTier(policy.required, jetPeerFailure);
+      continue;
+    }
+
     if (entry.mode === "service") {
       const commandFor = (port) => tier === "run"
         ? [jetBin, "run", "run.jet", "--", String(port)]
@@ -2079,6 +2284,9 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
         reason: trace.reason,
       };
     }
+  }
+  } finally {
+    await stopJetPeer();
   }
   const requiredTiersReady = Object.entries(tierPolicy(entry.mode))
     .filter(([, policy]) => policy.required)
@@ -2303,6 +2511,15 @@ function validateResultShape(result, matrix = null) {
   } else if (new Set(entry.cells).size !== entry.cells.length) {
     issues.push(`${name}: result declares duplicate matrix cells`);
   }
+  if (matrix && Array.isArray(entry.cells) && Array.isArray(matrix.cells)) {
+    const expectedMatrixPeers = new Set(entry.cells.flatMap((cellId) => {
+      const matrixCell = matrix.cells.find((candidate) => candidate?.id === cellId);
+      return matrixCell ? matrixPeerLanguages(matrix, matrixCell) : [];
+    }));
+    for (const peer of expectedMatrixPeers) {
+      if (!languages.includes(peer)) issues.push(`${name}/${peer}: required matrix rail is missing`);
+    }
+  }
   for (const language of languages) {
     if (typeof language !== "string") {
       issues.push(`${name}: result declares non-string language ${JSON.stringify(language)}`);
@@ -2503,6 +2720,8 @@ function validateResultShape(result, matrix = null) {
 function buildScoreboard(matrix, results, manifest, tower) {
   const inputResults = Array.isArray(results) ? results : [];
   const resultValidationIssues = inputResults.flatMap((result) => validateResultShape(result, matrix));
+  const policyValidationIssues = strictPerformancePolicyIssues(matrix);
+  const allowedUncovered = new Set(manifest?.corpus?.allowed_uncovered_cells ?? MATRIX_UNCOVERED_DEFAULTS);
   const canonicalResults = inputResults.filter((result) => result?.entry && typeof result.entry === "object")
     .map((result) => ({
       ...result,
@@ -2617,26 +2836,45 @@ function buildScoreboard(matrix, results, manifest, tower) {
         verdict,
       };
     });
-    const verdict = records.length === 1 ? records[0].verdict : "unmeasured";
+    const structuralMetricNames = comparisonMetrics(matrixCellMode(cell));
+    const structuralFailureReason = candidates.length === 0
+      ? "matrix cell has no corpus entry; peer and metric evidence are missing"
+      : `matrix cell has ${candidates.length} corpus entries; exactly one is required`;
+    const structuralFailures = (candidates.length !== 1 && !allowedUncovered.has(cell.id))
+      ? (candidates.length === 0
+        ? missingMatrixCellFailures(matrix, cell)
+        : matrixPeerLanguages(matrix, cell).flatMap((peer) => structuralMetricNames.map((metric) => ({
+          metric,
+          peer,
+          verdict: "unmeasured",
+          reason: structuralFailureReason,
+          tiers: {},
+        }))))
+      : [];
+    const structuralMetricVerdicts = candidates.length === 1
+      ? records[0].metric_verdicts
+      : (allowedUncovered.has(cell.id)
+        ? {}
+        : Object.fromEntries(structuralMetricNames.map((metric) => [metric, "unmeasured"])));
     return {
       id: cell.id,
       domain: cell.domain,
       kind: cell.kind,
       entries: records,
-      metric_verdicts: records.length === 1 ? records[0].metric_verdicts : {},
-      metric_failures: records.flatMap((record) => record.metric_failures),
-      verdict,
+      metric_verdicts: structuralMetricVerdicts,
+      metric_failures: records.flatMap((record) => record.metric_failures).concat(structuralFailures),
+      verdict: records.length === 1 ? records[0].verdict : "unmeasured",
       loss_owners: records.flatMap((record) => record.loss_owners),
     };
   });
   const verdicts = cells.map((cell) => cell.verdict);
-  const allowedUncovered = new Set(manifest?.corpus?.allowed_uncovered_cells ?? MATRIX_UNCOVERED_DEFAULTS);
   const metricVerdicts = cells.flatMap((cell) => Object.values(cell.metric_verdicts));
   return {
+    strict_performance_policy: STRICT_PERFORMANCE_POLICY,
     contract: "gauntlet-scoreboard-v1",
     primary_metric_by_mode: MODE_PRIMARY_METRIC,
     verdict_policy: { rust: RATIO_VERDICTS.rust, non_rust: RATIO_VERDICTS.non_rust, unmeasured: "missing row, tier, metric, or byte verification" },
-    validation_issues: [...new Set(resultValidationIssues)],
+    validation_issues: [...new Set([...resultValidationIssues, ...policyValidationIssues])],
     cells,
     summary: {
       cells: cells.length,
@@ -2742,8 +2980,7 @@ async function probeAxisTool(cwd, tool, jetBin) {
   const output = result.stdout.toString("utf8").trim();
   if (result.code === 0 && output) {
     const resolved = output.split(/\r?\n/, 1)[0];
-    const versionFlag = tool === "entr" ? "-V" : "--version";
-    const versionResult = await runProcess(cwd, [tool, versionFlag], { timeoutMs: 10_000 });
+    const versionResult = await runProcess(cwd, toolVersionCommand(tool), { timeoutMs: 10_000 });
     const versionOutput = versionResult.stdout.toString("utf8").trim() || versionResult.stderr.toString("utf8").trim();
     if (versionResult.code !== 0) {
       return {
@@ -3310,6 +3547,7 @@ function publicationState({ fullScope, loaded, skipped, matrix, manifest, source
     };
   }
   const blockers = Array.isArray(validationIssues) ? [...validationIssues] : [];
+  blockers.push(...strictPerformancePolicyIssues(matrix));
   blockers.push(...measuredResults.flatMap((result) => validateResultShape(result, matrix)));
   blockers.push(...(Array.isArray(scoreboard?.validation_issues) ? scoreboard.validation_issues : []));
   if (!fullScope) blockers.push("run scope is partial; full matrix publication requires no --entry");
@@ -3353,8 +3591,17 @@ function publicationState({ fullScope, loaded, skipped, matrix, manifest, source
       blockers.push(`${cell.id}: expected exactly one published entry, found ${candidates.length}`);
     }
     for (const failure of record?.metric_failures ?? []) {
-      const reasons = failure.reasons?.length ? ` (${failure.reasons.join("; ")})` : "";
-      blockers.push(`${cell.id}/${failure.metric}: metric ${failure.verdict}${reasons}`);
+      const peerFailures = Array.isArray(failure.peers) ? failure.peers : [];
+      if (peerFailures.length > 0) {
+        for (const peerFailure of peerFailures) {
+          const reasons = [peerFailure.reason, ...(failure.reasons ?? [])].filter(Boolean);
+          const detail = reasons.length ? ` (${[...new Set(reasons)].join("; ")})` : "";
+          blockers.push(`${cell.id}/${peerFailure.peer ?? "peer"}/${failure.metric ?? "metric"}: metric ${peerFailure.verdict ?? failure.verdict ?? "unmeasured"}${detail}`);
+        }
+      } else {
+        const reasons = failure.reason ? ` (${failure.reason})` : "";
+        blockers.push(`${cell.id}/${failure.peer ?? "peer"}/${failure.metric ?? "metric"}: metric ${failure.verdict ?? "unmeasured"}${reasons}`);
+      }
     }
   }
   const covered = new Set(measuredResults.flatMap((result) => Array.isArray(result?.entry?.cells) ? result.entry.cells : []));
@@ -3415,13 +3662,13 @@ async function devAvailable(jetBin, runDir) {
 
 async function toolchainFingerprint(runDir, jetBin) {
   const commands = {
-    python: ["python3", "--version"],
-    rust: ["rustc", "--version"],
-    c: ["gcc", "--version"],
-    zig: ["zig", "version"],
-    go: ["go", "version"],
-    js: ["node", "--version"],
-    node: ["node", "--version"],
+    python: toolVersionCommand("python3"),
+    rust: toolVersionCommand("rustc"),
+    c: toolVersionCommand("gcc"),
+    zig: toolVersionCommand("zig"),
+    go: toolVersionCommand("go"),
+    js: toolVersionCommand("node"),
+    node: toolVersionCommand("node"),
   };
   const versions = {};
   for (const [language, command] of Object.entries(commands)) {
@@ -3497,7 +3744,7 @@ async function main() {
   const uncovered = axisOnly ? [] : (matrix.cells ?? []).map((cell) => cell.id).filter((id) => !covered.has(id));
   const tower = axisOnly ? null : await readLiveTowerCards();
   const scoreboard = axisOnly
-    ? { primary_metric_by_mode: MODE_PRIMARY_METRIC, verdict_policy: RATIO_VERDICTS, summary: {}, cells: [] }
+    ? { strict_performance_policy: STRICT_PERFORMANCE_POLICY, primary_metric_by_mode: MODE_PRIMARY_METRIC, verdict_policy: RATIO_VERDICTS, summary: {}, cells: [] }
     : buildScoreboard(matrix, results, sourceManifest, tower);
   const axes = await runAxes(sourceManifest, runDir, jetBin, fullScope || axisOnly, runId, options.axis);
   const publication = publicationState({ fullScope, loaded, skipped, matrix, manifest: sourceManifest, sourceMeasurements, results, scoreboard, axes, validationIssues, axisId: options.axis });
@@ -3517,6 +3764,7 @@ async function main() {
     options: { entry: options.entry, axis: options.axis, jet_bin: jetBin, runs: options.runs, scope: axisOnly ? `axis_${options.axis}` : (fullScope ? "full_matrix" : "partial_entry") },
     matrix_version: matrix.version,
     matrix_rails: matrix.rails,
+    strict_performance_policy: STRICT_PERFORMANCE_POLICY,
     entries_dir: entriesDir,
     skipped,
     validation: { issues: validationIssues },
@@ -3549,6 +3797,7 @@ async function main() {
       source_metric_token_definition: sourceManifest?.contract?.token_definition ?? null,
       tier_policy_by_mode: Object.fromEntries(Object.entries(TIER_POLICY).map(([mode, policy]) => [mode, Object.keys(policy)])),
       ratio_verdicts: RATIO_VERDICTS,
+      strict_performance_policy: STRICT_PERFORMANCE_POLICY,
       metric_applicability: METRIC_APPLICABILITY_POLICY,
       peer_measurement: PEER_MEASUREMENT_POLICY,
       missing_metric_verdict: "unmeasured",
@@ -3569,6 +3818,7 @@ async function main() {
   const statusPath = path.join(repoDir, "gauntlet/status.json");
   if (fullScope || axisOnly) {
     const status = projectStatus(report, resultPath);
+    applyStatusGate(status, matrix);
     await fs.writeFile(statusPath, `${JSON.stringify(status, null, 2)}\n`);
     console.log(`status\t${statusPath}`);
   } else {
@@ -3635,4 +3885,9 @@ export {
   probeMatches,
   collectTierTrace,
   collectServiceTierTrace,
+  probeAxisTools,
+  stageEntry,
+  STRICT_PERFORMANCE_POLICY,
+  strictPerformancePolicyIssues,
+  matrixPeerLanguages,
 };

@@ -1,7 +1,7 @@
 // D-NETSOCKET1=A: typed addresses, TCP echo, UDP datagrams, Unix sockets.
 use core.files as fs
 use core.net as net
-use core.tasks as tasks
+use core.sys as os
 use core.time as time
 
 fn run() !(Closed | IOError | NetError | RangeError | TaskFailure) {
@@ -17,7 +17,7 @@ fn run() !(Closed | IOError | NetError | RangeError | TaskFailure) {
         stream.write_all("tcp:{msg}".bytes())
     }
     addr :: ready_rx.receive()
-    client :: net.tcp_connect(addr)
+    client := net.tcp_connect(addr)
     net.set_timeout(&client, 1000)
     net.set_nodelay(&client, true)
     nd :: net.nodelay(client)
@@ -28,7 +28,7 @@ fn run() !(Closed | IOError | NetError | RangeError | TaskFailure) {
     print("socket_type:{net.socket_type(client)}")
     client.write_all("ping".bytes())
     print(client.read_text(8192))
-    sf_path :: "/tmp/jet-socket-echo-sf-{time.now()}.txt"
+    sf_path :: "{os.temp_dir()}/jet-socket-echo-sf-{time.now()}.txt"
     fs.write(sf_path, "sf")
     sent :: net.sendfile(&client, sf_path)
     print("sendfile:{sent}")
@@ -43,17 +43,17 @@ fn run() !(Closed | IOError | NetError | RangeError | TaskFailure) {
     _sent :: net.udp_send_bytes_to(udp_client, "pong".bytes(), udp_addr)
     packet :: net.udp_receive(udp_server, 128)
     print("udp:{net.udp_packet_bytes(packet)}:{net.udp_packet_original_len(packet)}:{net.udp_packet_truncated(packet)}")
-    path :: "/tmp/jet-socket-echo-{time.now()}.sock"
+    path :: "{os.temp_dir()}/jet-socket-echo-{time.now()}.sock"
     unix_listener :: net.unix_listen(path)
     (unix_tx, unix_rx) :: channel<String>()
     unix_task :: task {
         unix_tx.send("ready")
-        s :: net.unix_accept(unix_listener)
+        s := net.unix_accept(unix_listener)
         msg :: net.unix_read(&s)
         net.unix_write_all_bytes(&s, "unix:{msg}".bytes())
     }
     _ready :: unix_rx.receive()
-    unix_client :: net.unix_connect(path)
+    unix_client := net.unix_connect(path)
     net.unix_write_all_bytes(&unix_client, "ok".bytes())
     print(net.unix_read(&unix_client))
     net.unix_close(&unix_client)

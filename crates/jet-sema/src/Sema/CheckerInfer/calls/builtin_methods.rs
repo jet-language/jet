@@ -30,11 +30,7 @@ fn callable_success_type(ty: &Type) -> Type {
 /// callback owns the failure row; `map`/`filter` lift the collection result
 /// around that row instead of leaving `Result` as an element type or asking
 /// the enclosing function to consume it.
-fn fallible_collection_return(
-    recv_ty: &Type,
-    method: &str,
-    callback_ret: &Type,
-) -> Option<Type> {
+fn fallible_collection_return(recv_ty: &Type, method: &str, callback_ret: &Type) -> Option<Type> {
     let Type::Result { ok, err } = callback_ret else {
         return None;
     };
@@ -42,15 +38,21 @@ fn fallible_collection_return(
         "map" => match recv_ty {
             Type::List(_) | Type::FixedList { .. } => Type::List(ok.clone()),
             Type::Apply { name, args }
-                if name == Syntax::TYPE_ITER && args.len() == 1 => {
-                Collections::iter_ty((**ok).clone())
+                if (name == Syntax::TYPE_ITER || name == Syntax::TYPE_VIEW_ITER)
+                    && args.len() == 1 =>
+            {
+                if name == Syntax::TYPE_VIEW_ITER {
+                    Collections::view_iter_ty((**ok).clone())
+                } else {
+                    Collections::iter_ty((**ok).clone())
+                }
             }
             Type::Apply { name, .. }
-                if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut") => {
+                if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut") =>
+            {
                 Type::List(ok.clone())
             }
-            Type::Apply { name, .. }
-                if name == Syntax::TYPE_SET || name == Syntax::TYPE_RANK => {
+            Type::Apply { name, .. } if name == Syntax::TYPE_SET || name == Syntax::TYPE_RANK => {
                 Type::List(ok.clone())
             }
             _ => return None,
@@ -64,15 +66,27 @@ fn fallible_collection_return(
                     Type::List(inner.clone())
                 }
                 Type::Apply { name, args }
-                    if name == Syntax::TYPE_ITER && args.len() == 1 => {
-                    Collections::iter_ty(args[0].clone())
+                    if (name == Syntax::TYPE_ITER || name == Syntax::TYPE_VIEW_ITER)
+                        && args.len() == 1 =>
+                {
+                    if name == Syntax::TYPE_VIEW_ITER {
+                        Collections::view_iter_ty(args[0].clone())
+                    } else {
+                        Collections::iter_ty(args[0].clone())
+                    }
                 }
                 Type::Apply { name, args }
                     if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
-                        && !args.is_empty() => Type::List(Box::new(args[0].clone())),
+                        && !args.is_empty() =>
+                {
+                    Type::List(Box::new(args[0].clone()))
+                }
                 Type::Apply { name, args }
                     if (name == Syntax::TYPE_SET || name == Syntax::TYPE_RANK)
-                        && !args.is_empty() => Type::List(Box::new(args[0].clone())),
+                        && !args.is_empty() =>
+                {
+                    Type::List(Box::new(args[0].clone()))
+                }
                 _ => return None,
             }
         }
@@ -120,7 +134,10 @@ impl<'a> Checker<'a> {
         match ty {
             Type::Tagged { inner, .. } => Self::zip_sequence_elem(inner),
             Type::List(inner) | Type::FixedList { elem: inner, .. } => Some((**inner).clone()),
-            Type::Apply { name, args } if name == Syntax::TYPE_ITER && args.len() == 1 => {
+            Type::Apply { name, args }
+                if (name == Syntax::TYPE_ITER || name == Syntax::TYPE_VIEW_ITER)
+                    && args.len() == 1 =>
+            {
                 Some(args[0].clone())
             }
             _ => None,
@@ -377,7 +394,7 @@ impl<'a> Checker<'a> {
             span,
         );
         self.finish_builtin_method(receiver, method, recv_ty, args, span, Some(ret.clone()));
-        if Collections::is_iter_type(recv_ty) {
+        if Collections::is_iter_type(recv_ty) || Collections::is_view_iter_type(recv_ty) {
             self.consume_builtin_receiver(receiver, method);
         }
         *resolved_ret_out = Some(ret.clone());
@@ -537,6 +554,18 @@ impl<'a> Checker<'a> {
         }
         if let Type::Apply { name, .. } = recv_ty {
             match (name.as_str(), method) {
+                ("Atomic", "load" | "store" | "add" | "try_add" | "compare_exchange" | "publish" | "observe")
+                    if self.txn_wall_depth > 0 =>
+                {
+                    self.diags.push(Diagnostic::error(
+                        "E0041",
+                        "`Atomic` cannot be used inside `#Transact`".to_string(),
+                        "`Shared<T>` is the lock-guarded family for multi-value transactions; `Atomic<T>` is one lock-free scalar and has no transaction commit semantics".to_string(),
+                        "move the atomic operation outside `#Transact`, or use `Shared<T>` when several values must commit together".to_string(),
+                        Some(span),
+                    ));
+                    return ret;
+                }
                 ("Task", "join") => {
                     self.consume_builtin_receiver(receiver, method);
                     let _ = span;
@@ -664,9 +693,9 @@ impl<'a> Checker<'a> {
                 _ => {}
             }
         }
-        // D-ITERTOOLS1=A: every method on `Iter<T>` consumes the view (move).
-        // Driving a consumed lazy value twice is E0121, not a runtime throw.
-        if Collections::is_iter_type(recv_ty) {
+        // D-ITERTOOLS1=A / D-FOUND-VIEW1: every one-pass iterator consumes
+        // its carrier (move), so a second drive is E0121.
+        if Collections::is_iter_type(recv_ty) || Collections::is_view_iter_type(recv_ty) {
             self.consume_builtin_receiver(receiver, method);
         }
         // D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>` is `Type::Shared`, not
@@ -674,6 +703,14 @@ impl<'a> Checker<'a> {
         // comment) — a separate receiver match, same shape as the block above.
         if let Type::Shared(inner) = recv_ty {
             match method {
+                // D-SHARED-REVISION1=A: capture owns a value/revision pair;
+                // its projection form is checked for purity and copyability.
+                "capture" => {
+                    return self.finish_shared_capture(inner, args, span);
+                }
+                "try_replace" => {
+                    return self.finish_shared_try_replace(inner, args, span);
+                }
                 // D-CONC-SHARE1=A (card #1561): the closure forms are
                 // retired at the source surface. The compiler's own
                 // plain-access desugar carries the same shape into this
@@ -715,7 +752,16 @@ impl<'a> Checker<'a> {
             && Syntax::DURATION_CONSTRUCTORS.contains(&method)
         {
             for arg in args.iter_mut() {
-                let typed_numeric_head = match &arg.expr {
+                let mut literal = &arg.expr;
+                while let Expr::Paren(inner, _)
+                | Expr::Unary(crate::AST::UnOp::Neg, inner, _) = literal
+                {
+                    literal = inner;
+                }
+                let typed_numeric_head = match literal {
+                    Expr::Float(_, _, is_f32, _) => {
+                        Some(if *is_f32 { Type::Float32 } else { Type::Float })
+                    }
                     Expr::TypedLit {
                         head: Some(Type::Float32),
                         ..
@@ -727,10 +773,8 @@ impl<'a> Checker<'a> {
                     _ => None,
                 };
                 let got = self.with_call_access(&mut call_access, |checker| {
-                    // A scalar typed literal carries its numeric target in
-                    // the head. Preserve that target through this special
-                    // constructor path, which has no ordinary parameter
-                    // signature to provide an expected type.
+                    // Resolve decimal literals against the Float overload;
+                    // leave integer arguments on the exact Int path.
                     let inferred = typed_numeric_head
                         .as_ref()
                         .map(|expected| checker.infer_with_expected(&mut arg.expr, expected))
@@ -881,9 +925,7 @@ impl<'a> Checker<'a> {
                 self.expected_type = saved_exp;
                 self.lambda_escapes = saved_esc;
                 self.lambda_params_are_lending_views = saved_lending_params;
-                if Syntax::PARA_METHODS.contains(&method)
-                    && !(method == "para_map" && i == 1)
-                {
+                if Syntax::PARA_METHODS.contains(&method) && !(method == "para_map" && i == 1) {
                     self.check_para_lambda(&arg.expr);
                 }
                 if method == "para_fold" && i == 0 {
@@ -907,7 +949,8 @@ impl<'a> Checker<'a> {
                             Some((**inner).clone())
                         }
                         Type::Apply { name, args }
-                            if name == Syntax::TYPE_ITER && args.len() == 1 =>
+                            if (name == Syntax::TYPE_ITER || name == Syntax::TYPE_VIEW_ITER)
+                                && args.len() == 1 =>
                         {
                             Some(args[0].clone())
                         }
@@ -918,14 +961,20 @@ impl<'a> Checker<'a> {
                             Some((**inner).clone())
                         }
                         Some(Type::Apply { name, args })
-                            if name == Syntax::TYPE_ITER && args.len() == 1 =>
+                            if (name == Syntax::TYPE_ITER || name == Syntax::TYPE_VIEW_ITER)
+                                && args.len() == 1 =>
                         {
                             Some(args[0].clone())
                         }
                         _ => None,
                     };
                     if let (Some(a), Some(b)) = (recv_elem, arg_elem) {
-                        refined_ret = Some(Collections::iter_ty(Collections::zip_elem_ty(&a, &b)));
+                        let elem = Collections::zip_elem_ty(&a, &b);
+                        refined_ret = Some(if Collections::is_view_iter_type(recv_ty) {
+                            Collections::view_iter_ty(elem)
+                        } else {
+                            Collections::iter_ty(elem)
+                        });
                     }
                 }
                 if let (Some(et), Some(gt)) = (expected.get(i), got) {
@@ -950,8 +999,15 @@ impl<'a> Checker<'a> {
                                         refined_ret = Some(Type::List(Box::new(success.clone())));
                                         let _ = inner;
                                     }
-                                    Type::Apply { name, .. } if name == Syntax::TYPE_ITER => {
-                                        refined_ret = Some(Collections::iter_ty(success.clone()));
+                                    Type::Apply { name, .. }
+                                        if name == Syntax::TYPE_ITER
+                                            || name == Syntax::TYPE_VIEW_ITER =>
+                                    {
+                                        refined_ret = Some(if Collections::is_view_iter_type(recv_ty) {
+                                            Collections::view_iter_ty(success.clone())
+                                        } else {
+                                            Collections::iter_ty(success.clone())
+                                        });
                                     }
                                     // D-HOLE1: `opt.map(f: T -> R) -> R?`.
                                     Type::Option(_) => {
@@ -1008,7 +1064,11 @@ impl<'a> Checker<'a> {
                         } = gt
                         {
                             let success = callable_success_type(r);
-                            refined_ret = Some(Collections::iter_ty(success));
+                            refined_ret = Some(if Collections::is_view_iter_type(recv_ty) {
+                                Collections::view_iter_ty(success)
+                            } else {
+                                Collections::iter_ty(success)
+                            });
                         }
                     }
                     if Collections::is_closure_method(method) && i == 0 && method == "flat_map" {
@@ -1025,10 +1085,17 @@ impl<'a> Checker<'a> {
                                     Type::List(_) | Type::FixedList { .. } => {
                                         // D-CORE-EAGER2=A: concrete List.flat_map
                                         // returns [U]; `.lazy()` stays Iter.
-                                        refined_ret = Some(Type::List(Box::new(mapped_inner)));
+                                        refined_ret = Some(Type::List(Box::new(mapped_inner.clone())));
                                     }
-                                    Type::Apply { name, .. } if name == Syntax::TYPE_ITER => {
-                                        refined_ret = Some(Collections::iter_ty(mapped_inner));
+                                    Type::Apply { name, .. }
+                                        if name == Syntax::TYPE_ITER
+                                            || name == Syntax::TYPE_VIEW_ITER =>
+                                    {
+                                        refined_ret = Some(if Collections::is_view_iter_type(recv_ty) {
+                                            Collections::view_iter_ty(mapped_inner)
+                                        } else {
+                                            Collections::iter_ty(mapped_inner)
+                                        });
                                     }
                                     _ => {}
                                 }
@@ -1092,16 +1159,10 @@ impl<'a> Checker<'a> {
                     let callable_pair =
                         matches!(et, Type::Fn { .. }) && matches!(gt, Type::Fn { .. });
                     let callable_mismatch = callable_pair
-                        && (!fn_types_compatible(et, &gt)
-                            || !Type::obligations_satisfy(et, &gt));
-                    let obligation_mismatch = !callable_pair
-                        && gt == *et
-                        && !Type::obligations_satisfy(et, &gt);
-                    let type_mismatch = if callable_pair {
-                        false
-                    } else {
-                        gt != *et
-                    };
+                        && (!fn_types_compatible(et, &gt) || !Type::obligations_satisfy(et, &gt));
+                    let obligation_mismatch =
+                        !callable_pair && gt == *et && !Type::obligations_satisfy(et, &gt);
+                    let type_mismatch = if callable_pair { false } else { gt != *et };
                     if !open_ret
                         && !union_match
                         && (callable_mismatch || obligation_mismatch || type_mismatch)

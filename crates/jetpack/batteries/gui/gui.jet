@@ -1,0 +1,535 @@
+// D-FOUND-PLATFORM1 / #2815: the first-party GUI battery keeps editor state,
+// Unicode-safe editing, persistence policy, and view composition in ordinary Jet
+// code. Host boundaries remain the canonical core.ui.host/core.font calls.
+use core.font as font
+use core.text as text
+use core.ui as ui
+use core.ui.host as host
+use core.ui.host.clipboard as clipboard
+use core.ui.host.ime as ime
+use core.ui.host.drag_drop as drag_drop
+use core.ui.host.shortcuts as shortcuts
+use core.ui.host.accessibility as accessibility
+
+module gui {
+
+    pub struct TextSelection {
+        pub anchor: Int
+        pub active: Int
+    }
+
+    pub struct TextEdit {
+        pub text: String
+        pub selection: TextSelection
+    }
+
+    pub struct EditorState {
+        pub body: String
+        pub title: String
+        pub theme: String
+        pub settings_open: Bool
+        pub selection: TextSelection
+        pub composition: String
+        pub undo: [String]
+        pub redo: [String]
+        pub revision: Int
+        pub status: String
+    }
+
+    pub struct SessionSettings {
+        pub theme: String
+        pub settings_open: Bool
+    }
+
+    fn clamp_offset(value: String, offset: Int) Int -> {
+        limit :: text.scalar_count(value)
+        if offset < 0 -> return 0
+        if offset > limit -> return limit
+        return offset
+    }
+
+    fn snap_boundary(value: String, offset: Int) Int -> {
+        bounded :: clamp_offset(value, offset)
+        clusters :: text.graphemes(value)
+        cursor := 0
+        loop cluster in clusters {
+            next :: cursor + text.scalar_count(cluster)
+            if bounded <= cursor -> return cursor
+            if bounded < next -> return cursor
+            cursor = next
+        }
+        cursor
+    }
+
+    fn grapheme_boundary(value: String, grapheme_index: Int) Int -> {
+        clusters :: text.graphemes(value)
+        bounded :: if grapheme_index < 0 -> 0 else -> grapheme_index
+        offset := 0
+        position := 0
+        loop cluster in clusters {
+            if position >= bounded -> break
+            offset += text.scalar_count(cluster)
+            position += 1
+        }
+        offset
+    }
+
+    fn grapheme_index(value: String, offset: Int) Int -> {
+        boundary :: snap_boundary(value, offset)
+        clusters :: text.graphemes(value)
+        cursor := 0
+        index := 0
+        loop cluster in clusters {
+            if cursor >= boundary -> break
+            cursor += text.scalar_count(cluster)
+            index += 1
+        }
+        index
+    }
+
+    pub fn selection(anchor: Int, active: Int) TextSelection -> {
+        anchor: anchor,
+        active: active,
+    }
+
+    pub fn normalize_selection(value: String, current: TextSelection) TextSelection -> {
+        anchor :: snap_boundary(value, current.anchor)
+        active :: snap_boundary(value, current.active)
+        TextSelection{anchor: anchor, active: active}
+    }
+
+    pub fn selection_start(value: String, current: TextSelection) Int -> {
+        normalized :: normalize_selection(value, current)
+        if normalized.anchor < normalized.active -> normalized.anchor
+        normalized.active
+    }
+
+    pub fn selection_end(value: String, current: TextSelection) Int -> {
+        normalized :: normalize_selection(value, current)
+        if normalized.anchor > normalized.active -> normalized.anchor
+        normalized.active
+    }
+
+    pub fn selected_text(value: String, current: TextSelection) String -> {
+        start :: selection_start(value, current)
+        end :: selection_end(value, current)
+        text.scalars(value).slice(start, end).join("")
+    }
+
+    // Text offsets are stored at Unicode grapheme boundaries. The host editor
+    // can add platform-specific cursor, IME, and selection events unchanged.
+    pub fn replace_selection(value: String, current: TextSelection, replacement: String) TextEdit -> {
+        start :: selection_start(value, current)
+        end :: selection_end(value, current)
+        scalars :: text.scalars(value)
+        prefix :: scalars.slice(0, start).join("")
+        suffix :: scalars.slice(end, scalars.len()).join("")
+        next :: "{prefix}{replacement}{suffix}"
+        cursor :: start + text.scalar_count(replacement)
+        TextEdit{
+            text: ~next,
+            selection: TextSelection{anchor: cursor, active: cursor},
+        }
+    }
+
+    pub fn move_cursor(value: String, current: TextSelection, delta: Int) TextSelection -> {
+        normalized :: normalize_selection(value, current)
+        base :: if normalized.anchor == normalized.active -> normalized.active else if delta < 0 -> selection_start(value, normalized) else -> selection_end(value, normalized)
+        base_index :: grapheme_index(value, base)
+        clusters :: text.graphemes(value)
+        target_index := base_index + delta
+        if target_index < 0 -> target_index = 0
+        if target_index > clusters.len() -> target_index = clusters.len()
+        target :: grapheme_boundary(value, target_index)
+        TextSelection{anchor: target, active: target}
+    }
+
+    pub fn grapheme_cursor_boundary(value: String, grapheme_index: Int) Int -> {
+        grapheme_boundary(value, grapheme_index)
+    }
+
+    pub fn new_editor(body: String, title: String) EditorState -> {
+        cursor :: text.scalar_count(body)
+        EditorState{
+            body: ~body,
+            title: ~title,
+            theme: "dark",
+            settings_open: false,
+            selection: TextSelection{anchor: cursor, active: cursor},
+            composition: "",
+            undo: [String]{},
+            redo: [String]{},
+            revision: 0,
+            status: "new",
+        }
+    }
+
+    pub fn body_of(state: EditorState) String -> ~state.body
+
+    pub fn title_of(state: EditorState) String -> ~state.title
+
+    pub fn theme_of(state: EditorState) String -> ~state.theme
+
+    pub fn settings_open_of(state: EditorState) Bool -> state.settings_open
+
+    pub fn selection_of(state: EditorState) TextSelection -> ~state.selection
+
+    pub fn composition_of(state: EditorState) String -> ~state.composition
+
+    pub fn revision_of(state: EditorState) Int -> state.revision
+
+    pub fn status_of(state: EditorState) String -> ~state.status
+
+    fn commit_edit(state: EditorState, next: String, next_selection: TextSelection, status: String) EditorState -> {
+        if state.body == next -> return state
+        history := state.undo
+        history.push(state.body)
+        EditorState{
+            body: ~next,
+            title: ~state.title,
+            theme: ~state.theme,
+            settings_open: state.settings_open,
+            selection: next_selection,
+            composition: "",
+            undo: ~history,
+            redo: [String]{},
+            revision: state.revision + 1,
+            status: ~status,
+        }
+    }
+
+    pub fn with_selection(state: EditorState, next: TextSelection) EditorState -> {
+        normalized :: normalize_selection(state.body, next)
+        EditorState{
+            body: ~state.body,
+            title: ~state.title,
+            theme: ~state.theme,
+            settings_open: state.settings_open,
+            selection: normalized,
+            composition: ~state.composition,
+            undo: ~state.undo,
+            redo: ~state.redo,
+            revision: state.revision,
+            status: ~state.status,
+        }
+    }
+
+    pub fn apply_text(state: EditorState, replacement: String) EditorState -> {
+        edit :: replace_selection(state.body, state.selection, replacement)
+        commit_edit(state, ~edit.text, edit.selection, "edited")
+    }
+
+    pub fn start_composition(state: EditorState) EditorState -> {
+        EditorState{
+            body: ~state.body,
+            title: ~state.title,
+            theme: ~state.theme,
+            settings_open: state.settings_open,
+            selection: state.selection,
+            composition: "",
+            undo: ~state.undo,
+            redo: ~state.redo,
+            revision: state.revision,
+            status: "composing",
+        }
+    }
+
+    pub fn update_composition(state: EditorState, composition: String) EditorState -> {
+        EditorState{
+            body: ~state.body,
+            title: ~state.title,
+            theme: ~state.theme,
+            settings_open: state.settings_open,
+            selection: state.selection,
+            composition: ~composition,
+            undo: ~state.undo,
+            redo: ~state.redo,
+            revision: state.revision,
+            status: "composing",
+        }
+    }
+
+    pub fn commit_composition(state: EditorState, composition: String) EditorState -> {
+        committed :: if composition == "" -> ~state.composition else -> ~composition
+        apply_text(state, ~committed)
+    }
+
+    pub fn cancel_composition(state: EditorState) EditorState -> {
+        EditorState{
+            body: ~state.body,
+            title: ~state.title,
+            theme: ~state.theme,
+            settings_open: state.settings_open,
+            selection: state.selection,
+            composition: "",
+            undo: ~state.undo,
+            redo: ~state.redo,
+            revision: state.revision,
+            status: "composition-cancelled",
+        }
+    }
+
+    pub fn drop_text(state: EditorState, dropped: String) EditorState -> {
+        apply_text(state, dropped)
+    }
+
+    pub fn undo(state: EditorState) EditorState -> {
+        history := state.undo
+        previous :: history.pop() ?? return state
+        forward := state.redo
+        forward.push(state.body)
+        cursor :: text.scalar_count(previous)
+        EditorState{
+            body: ~previous,
+            title: ~state.title,
+            theme: ~state.theme,
+            settings_open: state.settings_open,
+            selection: TextSelection{anchor: cursor, active: cursor},
+            composition: "",
+            undo: ~history,
+            redo: ~forward,
+            revision: state.revision + 1,
+            status: "undo",
+        }
+    }
+
+    pub fn redo(state: EditorState) EditorState -> {
+        forward := state.redo
+        next :: forward.pop() ?? return state
+        history := state.undo
+        history.push(state.body)
+        cursor :: text.scalar_count(next)
+        EditorState{
+            body: ~next,
+            title: ~state.title,
+            theme: ~state.theme,
+            settings_open: state.settings_open,
+            selection: TextSelection{anchor: cursor, active: cursor},
+            composition: "",
+            undo: ~history,
+            redo: ~forward,
+            revision: state.revision + 1,
+            status: "redo",
+        }
+    }
+
+    pub fn set_theme(state: EditorState, theme: String) EditorState -> {
+        EditorState{
+            body: ~state.body,
+            title: ~state.title,
+            theme: ~theme,
+            settings_open: state.settings_open,
+            selection: state.selection,
+            composition: ~state.composition,
+            undo: ~state.undo,
+            redo: ~state.redo,
+            revision: state.revision,
+            status: ~state.status,
+        }
+    }
+
+    pub fn set_settings_open(state: EditorState, open: Bool) EditorState -> {
+        EditorState{
+            body: ~state.body,
+            title: ~state.title,
+            theme: ~state.theme,
+            settings_open: open,
+            selection: state.selection,
+            composition: ~state.composition,
+            undo: ~state.undo,
+            redo: ~state.redo,
+            revision: state.revision,
+            status: ~state.status,
+        }
+    }
+
+    pub fn mark_saved(state: EditorState) EditorState -> {
+        EditorState{
+            body: ~state.body,
+            title: ~state.title,
+            theme: ~state.theme,
+            settings_open: state.settings_open,
+            selection: state.selection,
+            composition: ~state.composition,
+            undo: ~state.undo,
+            redo: ~state.redo,
+            revision: state.revision,
+            status: "saved",
+        }
+    }
+
+    pub fn mark_error(state: EditorState, message: String) EditorState -> {
+        EditorState{
+            body: ~state.body,
+            title: ~state.title,
+            theme: ~state.theme,
+            settings_open: state.settings_open,
+            selection: state.selection,
+            composition: ~state.composition,
+            undo: ~state.undo,
+            redo: ~state.redo,
+            revision: state.revision,
+            status: ~message,
+        }
+    }
+
+    // Keep body and UI settings as separate records. This lets a reload recover
+    // the Unicode document even when a host cancels its settings transaction.
+    pub fn persisted_body(state: EditorState) String -> ~state.body
+
+    pub fn persisted_session(state: EditorState) String -> {
+        mode :: if state.settings_open -> "open" else -> "closed"
+        "JET-GUI-SESSION-1|{state.theme}|{mode}"
+    }
+
+    pub fn restore_session(raw: String) SessionSettings -> {
+        parts :: text.splitn(raw, "|", 3)
+        version :: parts.get(0) ?? ""
+        if version != "JET-GUI-SESSION-1" -> return SessionSettings{theme: "dark", settings_open: false}
+        theme := parts.get(1) ?? "dark"
+        if theme == "" -> theme = "dark"
+        mode :: parts.get(2) ?? "closed"
+        SessionSettings{theme: ~theme, settings_open: mode == "open"}
+    }
+
+    pub fn recover(body: String, raw_session: String, title: String) EditorState -> {
+        session :: restore_session(raw_session)
+        base :: new_editor(body, title)
+        themed :: set_theme(base, ~session.theme)
+        set_settings_open(themed, session.settings_open)
+    }
+
+    pub fn status_label(state: EditorState) String -> {
+        if state.status == "saved" -> return "Saved"
+        "{state.status} — revision {state.revision}"
+    }
+
+    fn settings_view(theme: String, open: Bool) UiNode -> {
+        if open -> return ui.box([
+            ui.text("SETTINGS"),
+            ui.text("Theme: {theme}"),
+            ui.text("Recovery: enabled"),
+            ui.text("Accessibility: named controls"),
+        ])
+        ui.text("SETTINGS (closed)")
+    }
+
+    pub fn sidebar_view(selected: Int) UiNode -> {
+        meeting :: if selected == 0 -> "* Meeting" else -> "  Meeting"
+        ideas :: if selected == 1 -> "* Ideas" else -> "  Ideas"
+        ui.box([
+            ui.text("NOTES"),
+            ui.node_role(meeting, 24.0, 1.0, ui.aria_role_button()),
+            ui.node_role(ideas, 24.0, 1.0, ui.aria_role_button()),
+        ])
+    }
+
+    pub fn command_bar() UiNode -> ui.box([
+        ui.node_shortcut(ui.button("Save"), .cmd("s")),
+        ui.node_shortcut(ui.button("Undo"), .cmd("z")),
+        ui.node_shortcut(ui.button("Redo"), .cmd("r")),
+        ui.node_shortcut(ui.button("Toggle theme"), .cmd("t")),
+        ui.node_shortcut(ui.button("Settings"), .cmd(",")),
+    ])
+
+    pub fn menu_view() UiNode -> ui.box([
+        ui.text("FILE"),
+        ui.text("Open   Save   Quit"),
+        ui.text("Tray fallback: host window lifecycle"),
+    ])
+
+    // Fixed child order is the identity policy for the portable tree. Hosts can
+    // reconcile this same order while a future keyed-node core gate is pending.
+    pub fn editor_view(body: String, selected: Int, theme: String, settings_open: Bool) UiNode -> {
+        background :: if theme == "dark" -> "#15181d" else -> "#f8f4ea"
+        input :: ui.text_input(body, .Native)
+        ui.box([
+            ui.node_color("JET NOTES — {theme} mode", 80.0, 1.0, background),
+            sidebar_view(selected),
+            ui.node_role("EDITOR — selected {selected}", 80.0, 1.0, ui.aria_role_label()),
+            input,
+            menu_view(),
+            command_bar(),
+            settings_view(theme, settings_open),
+            ui.text("Ctrl+S Save   Ctrl+Z Undo   Ctrl+Shift+Z Redo"),
+            ui.text("Focus order: Save → Editor → Toggle theme"),
+        ])
+    }
+
+    pub fn focus_group() [UiNode] -> [
+        ui.node_role("Save", 12.0, 1.0, ui.aria_role_button()),
+        ui.node_role("Editor", 60.0, 4.0, ui.aria_role_text_input()),
+        ui.node_role("Toggle theme", 18.0, 1.0, ui.aria_role_button()),
+    ]
+
+    pub fn save_button() UiNode -> ui.node_shortcut(ui.button("Save"), .cmd("s"))
+
+    pub fn system_font(style: FontStyle) FontFace -> font.system(style)
+
+    pub fn shape_text(value: String, face: FontFace) GlyphRun -> font.shape(value, face)
+
+    pub fn host_capabilities() UiCapabilityFacts -> host.capabilities()
+
+    pub fn text_filter() UiFileFilter -> host.file_filter_text()
+
+    pub fn file_filter(label: String, extensions: [String], mime_types: [String]) UiFileFilterResult -> {
+        host.file_filter(label, extensions, mime_types)
+    }
+
+    pub fn fs_rights() UiFsRights -> host.fs_rights_read_write()
+
+    pub fn request_grant(root: String) UiFsGrantResult -> host.fs_grant(root, host.fs_rights_read_write())
+
+    pub fn open_request(grant: UiFsGrant) UiFileDialogRequest -> host.open_request(grant)
+
+    pub fn save_request(grant: UiFsGrant) UiFileDialogRequest -> host.save_request(grant)
+
+    pub fn open_file(request: UiFileDialogRequest) UiFileDialogResult -> host.open_file(request)
+
+    pub fn save_file(request: UiFileDialogRequest) UiFileDialogResult -> host.save_file(request)
+
+    pub fn read_clipboard() UiClipboardTextResult -> clipboard.read_text()
+
+    pub fn write_clipboard(value: String) UiClipboardWriteResult -> clipboard.write_text(value)
+
+    pub fn poll_ime() UiImeResult -> ime.poll()
+
+    pub fn poll_drag_drop() UiDragResult -> drag_drop.poll()
+
+    pub fn save_shortcut() UiShortcut -> .cmd("s")
+
+    pub fn host_shortcut() UiShortcutResult -> host.shortcut("s", save_shortcut().modifiers)
+
+    pub fn bind_shortcut(shortcut: UiShortcut, action: String) UiShortcutBindingResult -> {
+        shortcuts.binding(shortcut, action)
+    }
+
+    pub fn register_shortcut(binding: UiShortcutBinding) UiShortcutBindingResult -> {
+        shortcuts.register(binding)
+    }
+
+    pub fn dispatch_shortcut(shortcut: UiShortcut) UiShortcutDispatchResult -> {
+        shortcuts.dispatch(shortcut)
+    }
+
+    pub fn accessibility_metadata(name: String, description: String) UiAccessibilityResult -> {
+        host.accessibility(name, description)
+    }
+
+    pub fn attach_accessibility(node: UiNode, metadata: UiAccessibility) UiAccessibilityAttachResult -> {
+        accessibility.attach(node, metadata)
+    }
+
+    pub fn future_commands() [String] -> [
+        "JET_UI_HEADLESS=1 scripts/agent/jet-env jet run examples/features/ui/battery/run.jet",
+        "scripts/agent/jet-env jet run --target=native examples/features/ui/battery/run.jet",
+        "scripts/agent/jet-env jet dev --target=web examples/features/ui/battery/run.jet",
+        "scripts/agent/jet-env jet build examples/features/ui/battery/run.jet",
+        "scripts/agent/jet-env jet package --kind desktop --target linux-appimage --package gui-battery-example --name gui-battery-example --version 0.1.0 --executable build/run --output build/gui-battery-example.AppImage",
+    ]
+
+    pub fn open_core_gates() [String] -> [
+        "#2771: reactive render ICEs in two compositions",
+        "Typography/mobile: native glyph hit-testing plus Android/iOS adapters remain core work",
+    ]
+}

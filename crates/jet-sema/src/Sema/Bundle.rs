@@ -38,14 +38,18 @@ use Pipeline::{
     check_bundle_opts_for_output as pipeline_check_bundle_opts_for_output,
     check_bundle_opts_for_output_with_context as pipeline_check_bundle_opts_for_output_with_context,
 };
+pub use TargetMachine::{
+    check_target_machine, target_hardware_capabilities, target_hardware_profile,
+    target_hardware_profile_id, target_hardware_use, target_hardware_use_with_effect_facts,
+    target_machine_use, validate_target_hardware,
+};
 use Validation::{apply_helper_layer_inference, qualified_effect_facts, taint_check_item};
 #[allow(unused_imports)]
 pub(crate) use Validation::{
-    check_func_body_bundle, check_module_bodies, collect_core_expr, collect_core_lvalue,
+    checker_for_module, check_module_bodies, collect_core_expr, collect_core_lvalue,
     collect_core_stmts, collect_used_core, expand_core_reachable_closure, fn_types_compatible,
-    func_sig_to_fn_type, register_func_item,
+    func_sig_to_fn_type, register_func_item, uses_raw_protocol_return,
 };
-pub use TargetMachine::{check_target_machine, target_machine_use};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct IncrementalSemaStats {
@@ -322,10 +326,10 @@ fn dedupe_unknown_names(diagnostics: &mut Vec<Diagnostic>) {
                 .span
                 .is_none_or(|span| seen_unknown.insert((span.start, span.end)));
         }
-        // E0119/E0354 can be raised once while materializing a marker and
-        // again while checking its ordinary use-site. Keep distinct messages
-        // at one span, but remove only byte-identical repeats.
-        if matches!(diagnostic.code.as_str(), "E0119" | "E0354") {
+        // Resolution and marker materialization can report the same operation
+        // again. Keep distinct messages at one span, but collapse identical
+        // reports before the module joins the public diagnostic stream.
+        if matches!(diagnostic.code.as_str(), "E0119" | "E0302" | "E0354") {
             let Some(span) = diagnostic.span else {
                 return true;
             };
@@ -817,11 +821,12 @@ impl IncrementalSemaCache {
         &mut self,
         bundle: &ProgramBundle,
         name_ledger: &jet_foundation::Names::NameLedger,
+        plugin_interfaces: &PluginInterfaceRegistry,
     ) {
         // D-INCR-UNIT1=A: dirty the module interface and its reverse import
         // closure only. Private body edits are handled by the per-function
         // input below and do not fan out to unrelated modules.
-        let environment = incremental_global_environment(bundle);
+        let environment = incremental_global_environment(bundle, plugin_interfaces.digest());
         let environment_changed = self.environment != environment;
         if environment_changed {
             self.environment = environment;
@@ -845,9 +850,13 @@ impl IncrementalSemaCache {
         // can stay unchanged while the ledger maps it to a different module
         // (for example after a file/module move), so invalidate that owner's
         // bodies before propagating the change through the current graph.
-        dirty.extend(self.module_dependencies.iter().filter_map(|(module, previous)| {
-            (dependencies.get(module) != Some(previous)).then_some(module.clone())
-        }));
+        dirty.extend(
+            self.module_dependencies
+                .iter()
+                .filter_map(|(module, previous)| {
+                    (dependencies.get(module) != Some(previous)).then_some(module.clone())
+                }),
+        );
         dirty.extend(dependencies.iter().filter_map(|(module, current)| {
             (self.module_dependencies.get(module) != Some(current)).then_some(module.clone())
         }));
@@ -907,7 +916,7 @@ impl IncrementalSemaCache {
     }
 }
 
-fn incremental_global_environment(bundle: &ProgramBundle) -> Vec<u8> {
+fn incremental_global_environment(bundle: &ProgramBundle, plugin_digest: &str) -> Vec<u8> {
     // These package facts can change between batch requests without changing
     // the source modules. Keep the sema cache keyed by the inputs that affect
     // body checking. `required_effects` is deliberately absent: completion
@@ -922,19 +931,33 @@ fn incremental_global_environment(bundle: &ProgramBundle) -> Vec<u8> {
         &bundle.package_guarantees.deps,
         &bundle.package_guarantees.lints_deny,
         &bundle.package_guarantees.memory_denials,
-        &bundle.package_guarantees.application_authority.granted_effects,
-        &bundle.package_guarantees.application_authority.denied_effects,
+        &bundle
+            .package_guarantees
+            .application_authority
+            .granted_effects,
+        &bundle
+            .package_guarantees
+            .application_authority
+            .denied_effects,
         &bundle.package_guarantees.application_authority.authority,
     );
+    // `BuildStamp.at` is a clock. Unlocked checks mint a new timestamp on
+    // every request; that must not dirty every function body. Git, dirty,
+    // and toolchain still participate because they can change lowering.
+    let mut build_facts = bundle.build_facts.clone();
+    build_facts.stamp.at.clear();
+    build_facts.contributions.remove("Build.Stamp.At");
+    build_facts.setting_provenance.remove("Build.Stamp.At");
     let mut out = crate::CanonicalAST::canonical_fragment(&(
         bundle.entry,
         &bundle.project_root,
         bundle.active_os,
         bundle.web_partition_enforced,
-        &bundle.build_facts,
+        &build_facts,
         bundle.layer_ceiling,
         &bundle.edition,
         package_policy,
+        plugin_digest,
     ));
     out.extend(format!("{:?}", bundle.project_root).into_bytes());
     out
@@ -955,7 +978,6 @@ fn incremental_module_interface(module: &crate::AST::LoadedModule) -> Vec<u8> {
         &module.policy_declarations,
     );
     out.extend(crate::CanonicalAST::canonical_fragment(&metadata));
-    out.extend(format!("{metadata:?}").into_bytes());
     let additional_metadata = (
         &module.user_policy_declarations,
         &module.rule_facts,
@@ -964,15 +986,13 @@ fn incremental_module_interface(module: &crate::AST::LoadedModule) -> Vec<u8> {
     out.extend(crate::CanonicalAST::canonical_fragment(
         &additional_metadata,
     ));
-    out.extend(format!("{additional_metadata:?}").into_bytes());
     for item in &module.items {
         let mut item = item.clone();
         clear_callable_bodies(&mut item);
+        // Span-stripped signature only. Absolute locations move when an
+        // earlier body changes length; those positions belong in the
+        // per-function cache input as origin-relative spans, not here.
         out.extend(crate::CanonicalAST::canonical_fragment(&item));
-        // Canonical AST deliberately omits locations. The exact signature
-        // locations are part of IDE facts, so include the body-free Debug
-        // form as a conservative span fingerprint.
-        out.extend(format!("{item:?}").into_bytes());
     }
     out
 }
@@ -1052,10 +1072,7 @@ fn incremental_import_target(
         .iter()
         .filter(|candidate| candidate.display != source.display)
         .find(|candidate| {
-            let directory_module = candidate
-                .path
-                .file_name()
-                .and_then(|name| name.to_str())
+            let directory_module = candidate.path.file_name().and_then(|name| name.to_str())
                 == Some(Syntax::DEFAULT_ENTRY_FILE)
                 && candidate
                     .path
@@ -1125,8 +1142,8 @@ fn clear_callable_bodies(item: &mut Item) {
 
 fn builtin_type_registry() -> TypeRegistry {
     let zero = Span::new(0, 0);
-    let variants = ["Less", "Equal", "Greater"]
-        .into_iter()
+    let variants = Syntax::ORDERING_VARIANTS
+        .iter()
         .map(|name| (name.to_string(), (zero, VariantPayload::Unit)))
         .collect::<HashMap<_, _>>();
     let mut types = HashMap::new();
@@ -1134,11 +1151,7 @@ fn builtin_type_registry() -> TypeRegistry {
         Syntax::TYPE_ORDERING.to_string(),
         TypeDef::Enum {
             variants,
-            variant_order: vec![
-                "Less".to_string(),
-                "Equal".to_string(),
-                "Greater".to_string(),
-            ],
+            variant_order: Syntax::ORDERING_VARIANTS.iter().map(|name| name.to_string()).collect(),
             groups: HashMap::new(),
             methods: HashMap::new(),
             single_use: false,
@@ -1210,6 +1223,8 @@ fn builtin_type_registry() -> TypeRegistry {
         literal_facts: HashMap::new(),
         computed_fields: HashMap::new(),
         field_defaults: HashMap::new(),
+        receipt_sections: HashMap::new(),
+        devtools_publications: std::cell::RefCell::new(Vec::new()),
     }
 }
 
@@ -1357,10 +1372,7 @@ fn declare_item_names_scoped(
                         format!("{item_path}.State.{name}"),
                         "state",
                         *span,
-                        NameVisibility::from_flags(
-                            definition.is_pub,
-                            definition.is_package_pub,
-                        ),
+                        NameVisibility::from_flags(definition.is_pub, definition.is_package_pub),
                     );
                 }
             }
@@ -1601,7 +1613,7 @@ fn record_state_marker_references_for_method(
             _ => &[],
         };
         for &slot in slots {
-            let Some((raw, span)) = marker.args.get(slot).and_then(state_marker_path) else {
+            let Some((raw, span)) = marker.expr_arg(slot).and_then(state_marker_path) else {
                 continue;
             };
             if raw == crate::Syntax::STATE_ENTRY {
@@ -1802,6 +1814,8 @@ fn populate_name_ledger(
             let (import_target, target_module) =
                 if let Some(target) = ledger.import_target(module_idx, import.span) {
                     (bundle.modules[target].alias.clone(), Some(target))
+                } else if let Some(profile) = crate::AST::target_profile_path(import) {
+                    (profile, None)
                 } else if let Some(core_path) = import.core_module_path() {
                     (core_path, None)
                 } else {
@@ -2253,16 +2267,8 @@ pub fn check_bundle_for_output_opts_with_effect_facts(
     no_os: bool,
     gates: crate::Policy::GateSet,
 ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
-    pipeline_check_bundle_opts_for_output(
-        bundle,
-        mode,
-        no_os,
-        gates,
-        Some(output),
-        None,
-    )
+    pipeline_check_bundle_opts_for_output(bundle, mode, no_os, gates, Some(output), None)
 }
-
 
 /// Like `check_bundle` but also returns effect facts for D-SEMINDEX1.
 pub fn check_bundle_with_effect_facts(
@@ -2402,6 +2408,21 @@ pub fn check_bundle_no_os(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<
     )
     .0
 }
+/// Like [`check_bundle_no_os`], but retain the exact effect facts produced by
+/// that same no-OS semantic pipeline for canonical MIR lowering.
+pub fn check_bundle_no_os_with_effect_facts(
+    bundle: &mut ProgramBundle,
+    mode: CompileMode,
+) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+    pipeline_check_bundle_opts_for_output(
+        bundle,
+        mode,
+        true,
+        crate::Policy::GateSet::default(),
+        None,
+        None,
+    )
+}
 
 pub fn check_bundle_no_os_with_gates(
     bundle: &mut ProgramBundle,
@@ -2411,13 +2432,23 @@ pub fn check_bundle_no_os_with_gates(
     pipeline_check_bundle_opts_for_output(bundle, mode, true, gates, None, None).0
 }
 
+/// Check the audited-escape family with one invocation gate set and retain the
+/// effect facts produced by that same semantic pipeline.
+pub fn check_bundle_gates_with_effect_facts(
+    bundle: &mut ProgramBundle,
+    mode: CompileMode,
+    gates: crate::Policy::GateSet,
+) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+    pipeline_check_bundle_opts_for_output(bundle, mode, false, gates, None, None)
+}
+
 /// Check the audited-escape family with one invocation gate set.
 pub fn check_bundle_gates(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
     gates: crate::Policy::GateSet,
 ) -> Vec<Diagnostic> {
-    pipeline_check_bundle_opts_for_output(bundle, mode, false, gates, None, None).0
+    check_bundle_gates_with_effect_facts(bundle, mode, gates).0
 }
 
 #[cfg(test)]
@@ -2514,7 +2545,7 @@ mod structure_tests {
 
     #[test]
     fn script_conflict_edit_splices_statement_not_shared_line() {
-        let source = "print(\"before\"); fn helper() {}\nfn run() { print(\"middle\") }\n";
+        let source = "print(\"before\")\nfn helper() {}\nfn run() { print(\"middle\") }\n";
         let (tokens, lexer_diagnostics) = crate::Lexer::lex(source);
         assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
         let mut program = crate::Parser::parse(&tokens).unwrap();
@@ -2597,6 +2628,7 @@ mod structure_tests {
                 user_policy_declarations: program.user_policy_declarations,
                 rule_facts: program.rule_facts,
             }],
+            devtools_registry: crate::AST::DevtoolsRegistry::default(),
             parse_teaching: Vec::new(),
             used_core: HashSet::new(),
             ffi_callback_fns: HashSet::new(),
@@ -2615,6 +2647,84 @@ mod structure_tests {
             build_facts: Default::default(),
             edition: "2027".to_string(),
         }
+    }
+
+
+
+    #[test]
+    fn incremental_environment_ignores_build_stamp_clock() {
+        let mut left = incremental_bundle("fn run() {}\n");
+        let mut right = incremental_bundle("fn run() {}\n");
+        left.build_facts.stamp.at = "2026-01-01T00:00:00Z".into();
+        right.build_facts.stamp.at = "2026-01-02T00:00:00Z".into();
+        assert_eq!(
+            incremental_global_environment(&left, "plugin"),
+            incremental_global_environment(&right, "plugin"),
+            "a build-stamp clock must not dirty the incremental environment"
+        );
+    }
+
+    #[test]
+    fn body_only_edit_reuses_unchanged_function() {
+        let before = concat!(
+            "fn alpha() Int -> { return 1 }\n",
+            "fn beta() Int -> { return 2 }\n",
+            "fn run() { print(alpha() + beta()) }\n",
+        );
+        let after = concat!(
+            "fn alpha() Int -> { return 1 }\n",
+            "fn beta() Int -> { return 20 }\n",
+            "fn run() { print(alpha() + beta()) }\n",
+        );
+        let before_interface = incremental_module_interface(&incremental_bundle(before).modules[0]);
+        let after_interface = incremental_module_interface(&incremental_bundle(after).modules[0]);
+        assert_eq!(
+            before_interface,
+            after_interface,
+            "a same-length body edit must not change the module interface fingerprint"
+        );
+
+        let mut cache = IncrementalSemaCache::new();
+        let mut first = incremental_bundle(before);
+        let (first_diags, _) = check_bundle_with_effect_facts_incremental(
+            &mut first,
+            CompileMode::Check,
+            &mut cache,
+        );
+        let first_errors: Vec<_> = first_diags
+            .iter()
+            .filter(|d| d.severity == crate::Diagnostics::Severity::Error)
+            .cloned()
+            .collect();
+        assert!(first_errors.is_empty(), "{first_errors:#?}");
+        let cold = cache.stats();
+        cache.clear_measurement();
+
+        let mut second = incremental_bundle(after);
+        let (second_diags, _) = check_bundle_with_effect_facts_incremental(
+            &mut second,
+            CompileMode::Check,
+            &mut cache,
+        );
+        let second_errors: Vec<_> = second_diags
+            .iter()
+            .filter(|d| d.severity == crate::Diagnostics::Severity::Error)
+            .cloned()
+            .collect();
+        assert!(second_errors.is_empty(), "{second_errors:#?}");
+        let warm = cache.stats();
+        assert_eq!(
+            warm.hits - cold.hits,
+            2,
+            "alpha and run must reuse checked bodies: cold={cold:?} warm={warm:?} recomputed={:?}",
+            warm.recomputed_items
+        );
+        assert_eq!(
+            warm.recomputes - cold.recomputes,
+            1,
+            "only beta may recheck: cold={cold:?} warm={warm:?} recomputed={:?}",
+            warm.recomputed_items
+        );
     }
 
     #[test]
@@ -2729,7 +2839,8 @@ mod structure_tests {
 
     #[test]
     fn incremental_dependencies_match_directory_module_imports() {
-        let mut bundle = incremental_bundle("use archive\nfn run() Int -> { return archive.value() }\n");
+        let mut bundle =
+            incremental_bundle("use archive\nfn run() Int -> { return archive.value() }\n");
         let mut dependency = incremental_bundle("pub fn value() Int -> { return 1 }\n")
             .modules
             .remove(0);
@@ -2739,7 +2850,10 @@ mod structure_tests {
         bundle.modules.push(dependency);
 
         let dependencies = incremental_module_dependencies(&bundle);
-        assert_eq!(dependencies["cache-accounting.jet"], vec!["archive/run.jet"]);
+        assert_eq!(
+            dependencies["cache-accounting.jet"],
+            vec!["archive/run.jet"]
+        );
     }
 
     #[test]
@@ -2786,13 +2900,16 @@ mod structure_tests {
         let units = read("src/Sema/Bundle/Units.rs");
         let generic = read("src/Sema/Bundle/GenericModules.rs");
         let substitution = read("src/Sema/Bundle/GenericModules/Substitution.rs");
+        let expansion = read("src/Sema/Bundle/GenericModules/Expansion.rs");
         let outputs = read("src/Sema/Bundle/Outputs.rs");
         let inline_calls = read("src/Sema/Bundle/InlineCalls.rs");
         let pipeline = read("src/Sema/Bundle/Pipeline.rs");
+        let check_inner = read("src/Sema/Bundle/Pipeline/CheckInner.rs");
         let inline_imports = read("src/Sema/Bundle/Pipeline/InlineImports.rs");
         let completion = read("src/Sema/Bundle/Pipeline/Completion.rs");
         let validation = read("src/Sema/Bundle/Validation.rs");
         let core_usage = read("src/Sema/Bundle/Validation/CoreUsage.rs");
+        let body_check = read("src/Sema/Bundle/Validation/BodyCheck.rs");
         let production = bundle
             .split("#[cfg(test)]\nmod structure_tests")
             .next()
@@ -2806,9 +2923,17 @@ mod structure_tests {
                 "src/Sema/Bundle/GenericModules/Substitution.rs",
                 substitution.as_str(),
             ),
+            (
+                "src/Sema/Bundle/GenericModules/Expansion.rs",
+                expansion.as_str(),
+            ),
             ("src/Sema/Bundle/InlineCalls.rs", inline_calls.as_str()),
             ("src/Sema/Bundle/Outputs.rs", outputs.as_str()),
             ("src/Sema/Bundle/Pipeline.rs", pipeline.as_str()),
+            (
+                "src/Sema/Bundle/Pipeline/CheckInner.rs",
+                check_inner.as_str(),
+            ),
             (
                 "src/Sema/Bundle/Pipeline/InlineImports.rs",
                 inline_imports.as_str(),
@@ -2822,6 +2947,10 @@ mod structure_tests {
                 "src/Sema/Bundle/Validation/CoreUsage.rs",
                 core_usage.as_str(),
             ),
+            (
+                "src/Sema/Bundle/Validation/BodyCheck.rs",
+                body_check.as_str(),
+            ),
         ] {
             assert!(
                 source.lines().count() < MAX_MODULE_LINES,
@@ -2831,10 +2960,10 @@ mod structure_tests {
             assert!(!source.contains("#[path"));
         }
         assert!(production.contains(
-            "\nmod GenericModules;\nmod InlineCalls;\nmod Outputs;\nmod Pipeline;\nmod Validation;\n"
+            "\nmod GenericModules;\nmod InlineCalls;\nmod Liveness;\nmod Outputs;\nmod Pipeline;\nmod TargetMachine;\nmod Validation;\n"
         ));
-        assert!(generic.contains("\nmod Substitution;\n"));
-        assert!(validation.contains("\nmod CoreUsage;\n"));
+        assert!(generic.contains("\nmod Substitution;\nmod Expansion;\n"));
+        assert!(validation.contains("\nmod CoreUsage;\nmod BodyCheck;\n"));
 
         let ordered = [
             "expand_generic_module_aliases(bundle, &mut diags);",
@@ -2847,7 +2976,7 @@ mod structure_tests {
             "collect_used_core(bundle, &states)",
             "apply_helper_layer_inference(bundle, &states, &usage_spans, &mut diags);",
         ];
-        let ordered_source = format!("{production}\n{pipeline}\n{inline_imports}\n{completion}");
+        let ordered_source = format!("{production}\n{pipeline}\n{check_inner}\n{inline_imports}\n{completion}");
         let positions: Vec<usize> = ordered
             .iter()
             .map(|needle| ordered_source.find(needle).unwrap())

@@ -33,6 +33,25 @@ fn run_jet(args: &[&str]) -> (i32, String, String) {
 }
 
 struct ServerChild(Child);
+impl ServerChild {
+    fn diagnostic(&mut self) -> String {
+        let status = match self.0.try_wait() {
+            Ok(Some(status)) => format!("exited with {status}"),
+            Ok(None) => "still running".to_string(),
+            Err(error) => format!("status unavailable: {error}"),
+        };
+        let stderr = if status.starts_with("exited") {
+            let mut stderr = String::new();
+            if let Some(mut pipe) = self.0.stderr.take() {
+                let _ = pipe.read_to_string(&mut stderr);
+            }
+            stderr
+        } else {
+            String::new()
+        };
+        format!("{status}; stderr={stderr}")
+    }
+}
 
 impl Drop for ServerChild {
     fn drop(&mut self) {
@@ -46,7 +65,7 @@ fn free_port() -> u16 {
     listener.local_addr().unwrap().port()
 }
 
-fn request(port: u16, method: &str, path: &str) -> String {
+fn request(port: u16, method: &str, path: &str, mut child: Option<&mut ServerChild>) -> String {
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut stream = loop {
         match TcpStream::connect(("127.0.0.1", port)) {
@@ -55,7 +74,13 @@ fn request(port: u16, method: &str, path: &str) -> String {
                 let _ = error;
                 std::thread::sleep(Duration::from_millis(50));
             }
-            Err(error) => panic!("web app did not listen on {port}: {error}"),
+            Err(error) => {
+                let diagnostic = child
+                    .as_deref_mut()
+                    .map(ServerChild::diagnostic)
+                    .unwrap_or_else(|| "child diagnostics unavailable".to_string());
+                panic!("web app did not listen on {port}: {error}; {diagnostic}");
+            }
         }
     };
     write!(
@@ -113,12 +138,14 @@ fn web_graph_facts_json() -> String {
 #[test]
 fn app_graph_facts_json() {
     let stdout = web_graph_facts_json();
-    assert!(stdout.contains("\"shared_tir\": true"), "{stdout}");
-    assert!(stdout.contains("\"path\": \"/\""), "{stdout}");
-    assert!(stdout.contains("csp-default"), "{stdout}");
-    assert!(stdout.contains("hydration"), "{stdout}");
-    assert!(stdout.contains("\"prefix\": \"/api\""), "{stdout}");
+    let compact: String = stdout.chars().filter(|character| !character.is_whitespace()).collect();
+    assert!(compact.contains("\"shared_tir\":true"), "{stdout}");
+    assert!(compact.contains("\"path\":\"/\""), "{stdout}");
+    assert!(compact.contains("csp-default"), "{stdout}");
+    assert!(compact.contains("hydration"), "{stdout}");
+    assert!(compact.contains("\"prefix\":\"/api\""), "{stdout}");
 }
+
 
 #[test]
 fn web_app_expand_facts_web() {
@@ -163,20 +190,23 @@ fn run() App {
         tmp.join("app.jet").to_str().unwrap(),
     ]);
     assert_eq!(code, 0, "stderr={stderr}\nstdout={stdout}");
-    assert!(stdout.contains("\"path\": \"/\""), "{stdout}");
-    assert!(stdout.contains("/orders/:id"), "{stdout}");
-    assert!(!stdout.contains("_helper"), "{stdout}");
+    let compact: String = stdout.chars().filter(|character| !character.is_whitespace()).collect();
+    assert!(compact.contains("\"path\":\"/\""), "{stdout}");
+    assert!(compact.contains("/orders/:id"), "{stdout}");
+    assert!(!compact.contains("_helper"), "{stdout}");
+
 }
 
 #[test]
 fn web_app_run_serves_pages_actions_and_assets() {
     let port = free_port();
-    let _server = spawn_server(&["run", "examples/features/web/web_app.jet"], port);
+    let mut _server = spawn_server(&["run", "examples/features/web/web_app.jet"], port);
 
-    let page = request(port, "GET", "/");
+    let page = request(port, "GET", "/", Some(&mut _server));
     assert!(page.starts_with("HTTP/1.1 200"), "{page}");
     assert!(page.contains("<title>Home</title>"), "{page}");
     assert!(page.contains("hello from csr"), "{page}");
+    assert!(!page.contains("jet-dev-server-functions"), "{page}");
     let expected = include_str!("../examples/features/expected/web/web_app.harness.out");
     let (expected_page, expected_facts) = expected
         .split_once("\n\n--- facts_json ---\n")
@@ -184,11 +214,14 @@ fn web_app_run_serves_pages_actions_and_assets() {
     assert_eq!(response_body(&page), expected_page);
     assert_eq!(web_graph_facts_json(), expected_facts);
 
-    let action = request(port, "POST", "/actions/save");
+    let action = request(port, "POST", "/actions/save", Some(&mut _server));
     assert!(action.starts_with("HTTP/1.1 200"), "{action}");
-    assert!(action.ends_with("ok"), "{action}");
+    assert!(action.contains("content-type: application/json"), "{action}");
+    assert!(action.contains("content-security-policy: default-src 'self'"), "{action}");
+    assert_eq!(response_body(&action), "\"saved\"");
+    assert!(!action.contains("server function input is missing"), "{action}");
 
-    let asset = request(port, "GET", "/assets/app.css");
+    let asset = request(port, "GET", "/assets/app.css", Some(&mut _server));
     assert!(asset.starts_with("HTTP/1.1 200"), "{asset}");
     assert!(asset.contains("font-family"), "{asset}");
 }
@@ -196,7 +229,7 @@ fn web_app_run_serves_pages_actions_and_assets() {
 #[test]
 fn typed_app_args_serve_in_default_and_aot_modes() {
     let port = free_port();
-    let _server = spawn_server(
+    let mut _server = spawn_server(
         &[
             "run",
             "examples/features/web/app_typed_args.jet",
@@ -205,7 +238,7 @@ fn typed_app_args_serve_in_default_and_aot_modes() {
         ],
         port,
     );
-    let response = request(port, "GET", "/");
+    let response = request(port, "GET", "/", Some(&mut _server));
     assert!(
         response.starts_with("HTTP/1.1 404"),
         "default typed App: {response}"
@@ -215,12 +248,12 @@ fn typed_app_args_serve_in_default_and_aot_modes() {
     let (code, stdout, stderr) = run_jet(&["build", "examples/features/web/app_typed_args.jet"]);
     assert_eq!(code, 0, "stderr={stderr}\nstdout={stdout}");
     let port = free_port();
-    let _server = spawn_server_with_program(
+    let mut _server = spawn_server_with_program(
         &repo_root().join("build/app_typed_args"),
         &["--port=9000"],
         port,
     );
-    let response = request(port, "GET", "/");
+    let response = request(port, "GET", "/", Some(&mut _server));
     assert!(
         response.starts_with("HTTP/1.1 404"),
         "AOT typed App: {response}"
@@ -268,7 +301,7 @@ fn typed_app_args_report_invalid_port_with_shared_fix() {
 #[test]
 fn web_app_dev_forced_interpreter_serves_callbacks() {
     let port = free_port();
-    let _server = spawn_server(
+    let mut _server = spawn_server(
         &[
             "dev",
             "examples/features/web/web_app.jet",
@@ -278,14 +311,15 @@ fn web_app_dev_forced_interpreter_serves_callbacks() {
         port,
     );
 
-    let page = request(port, "GET", "/");
+    let page = request(port, "GET", "/", Some(&mut _server));
     assert!(page.starts_with("HTTP/1.1 200"), "{page}");
     assert!(page.contains("<title>Home</title>"), "{page}");
+    assert!(page.contains("jet-dev-server-functions"), "{page}");
     assert!(page.contains("hello from csr"), "{page}");
 
-    let action = request(port, "POST", "/actions/save");
+    let action = request(port, "POST", "/actions/save", Some(&mut _server));
     assert!(action.starts_with("HTTP/1.1 200"), "{action}");
-    assert!(action.ends_with("ok"), "{action}");
+    assert_eq!(response_body(&action), "\"saved\"");
 }
 
 #[test]
@@ -295,17 +329,22 @@ fn web_app_dev_auto_serves_with_reload_without_dev_function() {
     let source = fs::read_to_string(repo_root().join("examples/features/web/web_app.jet")).unwrap();
     let app = tmp.join("app.jet");
     fs::write(&app, source).unwrap();
+    fs::copy(
+        repo_root().join("examples/features/web/package.jet"),
+        tmp.join("package.jet"),
+    )
+    .unwrap();
     let port = free_port();
-    let _server = spawn_server(
+    let mut _server = spawn_server(
         &["dev", app.to_str().unwrap(), &format!("--port={port}")],
         port,
     );
-    let page = request(port, "GET", "/");
+    let page = request(port, "GET", "/", Some(&mut _server));
     assert!(page.starts_with("HTTP/1.1 200"), "{page}");
     assert!(page.contains("EventSource(\"/__jet/reload\")"), "{page}");
     let (sent, received) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        sent.send(request(port, "GET", "/__jet/reload")).unwrap();
+        sent.send(request(port, "GET", "/__jet/reload", None)).unwrap();
     });
     assert!(
         received.recv_timeout(Duration::from_millis(250)).is_err(),
@@ -328,6 +367,7 @@ fn app_hello_graph() {
         "examples/features/web/app_hello.jet",
     ]);
     assert_eq!(code, 0, "stderr={stderr}\nstdout={stdout}");
-    assert!(stdout.contains("\"handler\": \"home\""), "{stdout}");
-    assert!(stdout.contains("csp"), "{stdout}");
+    let compact: String = stdout.chars().filter(|character| !character.is_whitespace()).collect();
+    assert!(compact.contains("\"handler\":\"home\""), "{stdout}");
+    assert!(compact.contains("csp"), "{stdout}");
 }

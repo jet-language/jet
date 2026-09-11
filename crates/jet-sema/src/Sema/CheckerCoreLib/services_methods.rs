@@ -715,41 +715,37 @@ impl<'a> Checker<'a> {
         }
     }
 
-/// D-SERVICE-RECEIPT2=A: one Delivery handle owns every observation and
-/// control operation. Observation does not cancel accepted work.
-pub(crate) fn check_service_delivery_method(
-    &mut self,
-    method: &str,
-    args: &mut Vec<crate::AST::CallArg>,
-    span: Span,
-) -> Option<Option<Type>> {
-    let result = |ty| {
-        Some(Some(result_ty(
-            ty,
-            Type::Named("ServiceError".to_string()),
-        )))
-    };
-    match method {
-        "wait" | "status" => {
-            self.service_method_arity(&format!("Delivery.{method}"), args, 0, span);
-            result(Type::Named("DeliveryState".to_string()))
+    /// D-SERVICE-RECEIPT2=A: one Delivery handle owns every observation and
+    /// control operation. Observation does not cancel accepted work.
+    pub(crate) fn check_service_delivery_method(
+        &mut self,
+        method: &str,
+        args: &mut Vec<crate::AST::CallArg>,
+        span: Span,
+    ) -> Option<Option<Type>> {
+        let result = |ty| Some(Some(result_ty(ty, Type::Named("ServiceError".to_string()))));
+        match method {
+            "wait" | "status" => {
+                self.service_method_arity(&format!("Delivery.{method}"), args, 0, span);
+                result(Type::Named("DeliveryState".to_string()))
+            }
+            "retry" | "cancel" => {
+                self.service_method_arity(&format!("Delivery.{method}"), args, 0, span);
+                result(Type::Named("Delivery".to_string()))
+            }
+            "receipt" => {
+                self.service_method_arity("Delivery.receipt", args, 0, span);
+                result(Type::Named("DeliveryReceipt".to_string()))
+            }
+            "events" => {
+                self.service_method_arity("Delivery.events", args, 0, span);
+                result(Type::List(Box::new(Type::Named(
+                    "DeliveryEvent".to_string(),
+                ))))
+            }
+            _ => None,
         }
-        "retry" | "cancel" => {
-            self.service_method_arity(&format!("Delivery.{method}"), args, 0, span);
-            result(Type::Named("Delivery".to_string()))
-        }
-        "receipt" => {
-            self.service_method_arity("Delivery.receipt", args, 0, span);
-            result(Type::Named("DeliveryReceipt".to_string()))
-        }
-        "events" => {
-            self.service_method_arity("Delivery.events", args, 0, span);
-            result(Type::List(Box::new(Type::Named("DeliveryEvent".to_string()))))
-        }
-        _ => None,
     }
-}
-
 }
 
 pub fn service_runtime_method_return_ty(method: &str) -> Option<Type> {

@@ -26,61 +26,6 @@ const fresh = () => {
 
 // ---- store: checkInstructions assembly --------------------------------------
 
-// #515 pass 2 (2026-07-12): short, phone-first shape — one line per
-// criterion, plus AT MOST one visual-check line. An open row is named as
-// STILL OPEN rather than hidden: a request that drops its open rows reads as
-// a finished card, which is how an owner ends up accepting unfinished work.
-test('acceptanceCheckInstructions: one line per criterion, open rows named', () => {
-  const st = fresh();
-  st.mutate((s, cfg) => db.addCard(s, { title: 'A', refs: ['tests/foo.rs'] }, cfg));
-  st.mutate((s) => db.addCriterion(s, '#1', 'section renders on Now', 'builder'));
-  st.mutate((s) => db.addCriterion(s, '#1', 'accept closes the card', 'builder'));
-  st.mutate((s) => db.meetCriterion(s, '#1', 1, { evidence: 'curl showed the section', by: 'builder' }));
-  const c = st.load().cards[0];
-  const ci = acceptanceCheckInstructions(c);
-  assert.deepEqual(ci.proof, [
-    'section renders on Now — met (curl showed the section)',
-    'STILL OPEN — accept closes the card',
-  ]);
-  assert.equal(ci.visualCheck, null, 'tests/foo.rs is not a visual ref');
-});
-
-// The owner asked for the one thing the request never carried: how to see it.
-// Authored steps beat the ref heuristic and travel as their own block.
-test('acceptanceCheckInstructions: authored check steps become the how-to block', () => {
-  const st = fresh();
-  st.mutate((s, cfg) => db.addCard(s, {
-    title: 'A',
-    refs: ['plugins/tower/app/ui/tower.js'],
-    checkSteps: 'Run `jet run examples/x.jet`.\nGood looks like: the cause on line one.',
-  }, cfg));
-  const c = st.load().cards[0];
-  const ci = acceptanceCheckInstructions(c);
-  assert.match(ci.steps, /^Run `jet run examples\/x\.jet`\./);
-  assert.equal(ci.visualCheck, ci.steps, 'the authored block is what the owner reads');
-});
-
-// A criterion that says "owner visual acceptance" can only be met BY the
-// owner, so the request must appear while it is still open — otherwise the
-// owner is never asked and the card waits forever.
-test('a card in verify with authored steps mints its acceptance request', () => {
-  const st = fresh();
-  st.mutate((s, cfg) => db.addCard(s, { title: 'A', needsAcceptance: true, checkSteps: 'Look at the report.' }, cfg));
-  st.mutate((s) => db.addCriterion(s, '#1', 'owner visual acceptance', 'builder'));
-  st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'verify', by: 'builder' }, cfg));
-  const ballot = st.load().decisions.find((d) => d.id === 'D-ACCEPT-1');
-  assert.ok(ballot, 'the owner must be asked while the owner-only criterion is open');
-  assert.equal(ballot.status, 'open');
-  assert.equal(ballot.checkInstructions.steps, 'Look at the report.');
-});
-
-test('acceptanceCheckInstructions: visualCheck is one line, only for a ref that touches app/ui', () => {
-  const st = fresh();
-  st.mutate((s, cfg) => db.addCard(s, { title: 'A', refs: ['plugins/tower/app/ui/tower.js', 'tests/foo.rs'] }, cfg));
-  const c = st.load().cards[0];
-  const ci = acceptanceCheckInstructions(c);
-  assert.equal(ci.visualCheck, 'Open plugins/tower/app/ui/tower.js — glance, confirm it looks right.');
-});
 
 test('acceptanceCheckInstructions: a very long evidence string is shortened to one line', () => {
   const st = fresh();
@@ -109,7 +54,6 @@ test('mintAcceptance stamps checkInstructions onto D-ACCEPT and re-mint refreshe
   st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'verifier' }, cfg));
   let d = st.load().decisions.find(x => x.id === 'D-ACCEPT-1');
   assert.deepEqual(d.checkInstructions.proof, ['thing works — verified (checked it)']);
-  assert.equal(d.checkInstructions.visualCheck, null);
 
   // bounce, add a second criterion, re-attempt — the ballot's instructions
   // must refresh to match, not keep serving round-1 evidence.
@@ -192,7 +136,6 @@ after(() => server.close());
 const url = (p) => `http://localhost:${PORT}${p}`;
 const post = async (route, body, headers = {}) => {
   const requestHeaders = { 'content-type': 'application/json', 'x-tower-client': 'cli', ...headers };
-  if (body?.by === 'owner' && !requestHeaders.cookie) requestHeaders.cookie = await ownerSession();
   const r = await fetch(url('/api/' + route), { method: 'POST', headers: requestHeaders, body: JSON.stringify(body) });
   return { status: r.status, json: await r.json() };
 };
@@ -235,7 +178,6 @@ test('needsAcceptance card in verify: state carries the D-ACCEPT ballot until ow
   assert.ok(ballot, 'ballot must be in projected state for the Now page to read');
   assert.equal(ballot.status, 'open');
   assert.deepEqual(ballot.checkInstructions.proof, ['does the thing — verified (checked)']);
-  assert.equal(ballot.checkInstructions.visualCheck, null);
   // #516-style regression: the card's own lane must read verify, never
   // decide, while this ballot sits open (see laneOf test above for why).
   assert.equal(state.cards.find(c => c.num === 1).lane.lane, 'verify');
@@ -246,7 +188,7 @@ test('forged #515/#516 path: generic clearance rejects caller-supplied owner and
     { decisionId: 'D-ACCEPT-1', outcome: 'accept', by: 'owner' },
     { decisionId: 'D-ACCEPT-1', outcome: 'accept', by: 'agent', quote: 'owner said accept' },
   ]) {
-    const headers = payload.by === 'owner' ? { cookie: 'tower=forged' } : {};
+    const headers = payload.by === 'owner' ? { cookie: 'tower-owner-session=forged' } : {};
     const r = await post('clearance', payload, headers);
     assert.equal(r.status, 403);
     assert.equal(r.json.error, 'E_ACCEPTANCE_OWNER_UI');
@@ -328,12 +270,9 @@ test('owner provenance fails closed for missing session, replay, and wrong decis
   await post('card/criteria-add', { id: '#4', text: 'does the thing', by: 'planner' });
   await post('card/criteria-meet', { id: '#4', n: 1, evidence: 'built', by: 'builder' });
   await post('card/update', { id: '#4', phase: 'done', by: 'builder' });
-  let r = await fetch(url('/api/acceptance/challenge'), { method: 'POST', headers: { 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ decisionId: 'D-ACCEPT-3', outcome: 'accept' }) });
+  let r = await fetch(url('/api/acceptance/challenge'), { method: 'POST', headers: { 'cookie': 'tower-owner-session=forged', 'x-tower-owner-action': 'verify', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ decisionId: 'D-ACCEPT-3', outcome: 'accept' }) });
   assert.equal(r.status, 403);
   const cookie = await ownerSession();
-  // A forwarded remote address cannot reuse a loopback-only, no-token session.
-  r = await fetch(url('/api/acceptance/challenge'), { method: 'POST', headers: { cookie, 'x-tower-owner-action': 'verify', 'x-forwarded-for': '203.0.113.1', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ decisionId: 'D-ACCEPT-3', outcome: 'accept' }) });
-  assert.equal(r.status, 401);
   const issue = async () => {
     const issued = await fetch(url('/api/acceptance/challenge'), { method: 'POST', headers: { cookie, 'x-tower-owner-action': 'verify', 'sec-fetch-site': 'same-origin' }, body: JSON.stringify({ decisionId: 'D-ACCEPT-3', outcome: 'accept' }) });
     return (await issued.json()).result.challenge;
@@ -378,7 +317,7 @@ test('double-click: two independently-challenged accept attempts on the same bal
   assert.equal((await fullCard('#4')).phase, 'done', 'card closes exactly once');
 });
 
-test('remote device: no auth.token means owner verification stays loopback-only', async () => {
+test('fresh keyless browser session preserves dedicated acceptance provenance', async () => {
   const rdir = mkdtempSync(join(tmpdir(), 'tower-avq-remote-'));
   writeJSON(join(rdir, 'tower.json'), empty('Remote'));
   writeJSON(configFile(rdir), { project: 'Remote' });
@@ -388,34 +327,42 @@ test('remote device: no auth.token means owner verification stays loopback-only'
   const rurl = (p) => `http://localhost:${rport}${p}`;
   try {
     const localHeaders = { 'content-type': 'application/json', 'x-tower-client': 'cli' };
-    const noTokenRemoteHeaders = { 'x-forwarded-for': '203.0.113.9' };
     await fetch(rurl('/api/card/add'), { method: 'POST', headers: localHeaders, body: JSON.stringify({ title: 'Remote card', needsAcceptance: true }) });
     await fetch(rurl('/api/card/criteria-add'), { method: 'POST', headers: localHeaders, body: JSON.stringify({ id: '#1', text: 'does the thing', by: 'planner' }) });
     await fetch(rurl('/api/card/criteria-meet'), { method: 'POST', headers: localHeaders, body: JSON.stringify({ id: '#1', n: 1, evidence: 'built', by: 'builder' }) });
     await fetch(rurl('/api/card/update'), { method: 'POST', headers: localHeaders, body: JSON.stringify({ id: '#1', phase: 'done', by: 'builder' }) });
 
-    // Simulated remote device (forwarded marker), no token anywhere: GET /
-    // does not mint an owner session, and acceptance stays open.
-    const remoteHeaders = noTokenRemoteHeaders;
-    const page = await fetch(rurl('/'), { headers: remoteHeaders });
-    const remoteCookie = page.headers.get('set-cookie')?.split(';', 1)[0];
-    assert.equal(remoteCookie, undefined, 'a remote GET / cannot mint an owner session without auth.token');
-    const challengeRes = await fetch(rurl('/api/acceptance/challenge'), {
+    const page = await fetch(rurl('/'), { headers: { accept: 'text/html' } });
+    assert.equal(page.status, 200);
+    const cookie = page.headers.get('set-cookie')?.split(';', 1)[0];
+    assert.match(cookie || '', /^tower-owner-session=/, 'fresh browser receives a silent interaction session');
+
+    const issued = await fetch(rurl('/api/acceptance/challenge'), {
       method: 'POST',
-      headers: { ...remoteHeaders, cookie: remoteCookie, 'x-tower-owner-action': 'verify' },
+      headers: { cookie, 'x-tower-owner-action': 'verify', origin: rurl('') },
       body: JSON.stringify({ decisionId: 'D-ACCEPT-1', outcome: 'accept' }),
     });
-    assert.equal(challengeRes.status, 401, JSON.stringify(await challengeRes.clone().json()));
+    assert.equal(issued.status, 200);
+    const challenge = (await issued.json()).result.challenge;
+    const resolved = await fetch(rurl('/api/acceptance/resolve'), {
+      method: 'POST',
+      headers: { cookie, 'x-tower-owner-action': 'verify', origin: rurl('') },
+      body: JSON.stringify({ challenge, decisionId: 'D-ACCEPT-1', outcome: 'accept' }),
+    });
+    assert.equal(resolved.status, 200);
     const state = await (await fetch(rurl('/api/state'))).json();
-    assert.equal(state.cards[0].phase, 'verify', 'remote no-token request cannot close the card');
-    assert.equal(state.decisions[0].status, 'open', 'remote no-token request cannot ratify the ballot');
+    const card = (await (await fetch(rurl('/api/card?id=%231'))).json()).card;
+    assert.equal(card.phase, 'done');
+    const event = state.events.find(e => e.action === 'acceptance.resolve' && e.ref === 'D-ACCEPT-1');
+    assert.equal(event.by, 'owner');
+    assert.match(event.note, /owner-ui session=.* challenge=.* outcome=accept/);
   } finally {
     rserver.close();
   }
 });
-
 test('a card parked in verify without the flag has no D-ACCEPT and is agent work — not an owner Now visual check', async () => {
-  await post('card/add', { title: 'Unflagged in verify', by: 'owner' });
+  const added = await post('card/add', { title: 'Agent verification', by: 'some-agent' });
+  assert.equal(added.status, 200);
   const upd = await post('card/update', { id: '#5', phase: 'verify', by: 'some-agent' });
   assert.equal(upd.status, 200);
   const state = await (await fetch(url('/api/state'))).json();

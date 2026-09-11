@@ -1,0 +1,11 @@
+// Typed WASI witness for `wasm.wasi`.
+// The selected machine supplies `wasm.wasi.startup` and
+// `wasm.wasi.allocator`. This uses only the canonical stdout sink
+// (`wasm.wasi.io_write`) and typed panic report (`wasm.wasi.report`); it does
+// not assume browser, MMIO, or host-only APIs.
+use core.term as term
+
+fn run() {
+    output :: term.stdout()
+    output.write_bytes([U8]{119, 97, 115, 105, 10}) ?? panic("wasi output")
+}

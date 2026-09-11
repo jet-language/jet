@@ -45,9 +45,14 @@ Conflict rule: **clarity beats mere consistency**. Consistency wins only when
 it teaches ontology. Compression wins only when it preserves or improves
 clarity.
 
-Authority: `docs/spec/philosophy.md`, `AGENTS.md` invariants (esp. I1, I7, I8),
-ratified `docs/spec/syntax-decisions.md`. Code shows implementation state, not
-design law.
+Authority: owner instruction → ratified Tower verdicts and acceptance terms →
+the relevant domain spec → `AGENTS.md` invariants and owner gates →
+this skill. Code shows implementation state,
+not design law.
+
+Before running, read `.agents/skills/_shared/audit-dispositions.md`. It owns
+shared publication, workflow-boundary, and disposition mechanics; this method
+still owns ontology classification, dual-facet analysis, probes, and findings.
 
 ## Foundation
 
@@ -106,16 +111,13 @@ Calibration examples (do not merely restate; find more):
 
 ## Output artifact
 
-One markdown report under `docs/audits/` via Tower CLI (never hand-edit board
-JSON):
-
-```
-node plugins/tower/tower.mjs docs add --section audits --id isomorphic-ontology-audit-YYYY-MM-DD --title "…" --file -
-```
-
-Or `docs update docs/audits/isomorphic-ontology-audit-YYYY-MM-DD.md --file -`
-for the same day only when the owner asks to revise that run. Never overwrite
-a different day's note. Do not write under `docs/plans/`.
+This is a report-only method. Write one markdown report under `docs/audits/`
+through the project-approved non-serve CLI. Do not create Tower work or
+implementation edits unless the owner explicitly asks. Read
+`.agents/skills/_shared/audit-dispositions.md` before the run and use it for
+publication rules and the required finding-disposition table. Keep the required
+ontology report sections below; report completion does not mean a proposed
+spelling or semantic change is implemented.
 
 ### Required report sections
 
@@ -170,8 +172,6 @@ Ballot titles or card ids only — do not create cards unless asked.
 - Not “make everything look the same”
 - Not proposing a second mechanism for one semantic job
 
-Follow `AGENTS.md`. Pick this skill alone.
-
-Before close, add the required per-finding disposition table from
-`.agents/skills/_shared/audit-dispositions.md`. Every finding must name a Tower
-card, a ratified decision, or a concrete no-action reason.
+Before close, use `.agents/skills/_shared/audit-dispositions.md` for the
+required marker table. Keep next actions as ballot titles or card IDs and do
+not create them in this report-only run.

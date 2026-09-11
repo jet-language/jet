@@ -147,5 +147,21 @@
       ],
       "notes": "Current source is the D-SIMD3 F64x4 implementation: body coordinates and velocities stay in lanes, ten pair interactions are grouped into fixed-width batches, and scalar roots feed vector force updates. Earlier scalar attempts and measurements are historical provenance only; they do not establish this source's output or performance. Fresh integrated AOT, default-run, interpreter, and strict global peer-win measurements remain open."
     }
+  },
+  "rewrite_provenance": {
+    "worker": "CorpusNbody",
+    "variant": "jet",
+    "changed": "Replaced every scalar Vec3.splat lift in force, position, and momentum updates with the ratified Vec3-scalar operators; the component-wise scalar products retain the original operand order, while the five-body constants, pair update order, momentum offset, and nine-decimal energies stay unchanged.",
+    "matched": "Same steps input, five-body n-body workload, update equations, interaction order, floating-point state transitions, and output as the standard Rust, Python, C, Zig, and Node rails.",
+    "expected_output_sha256": "bdcf7a5967f944dc85b65e0e03ed5fd5daf6b699793224d6b03c7b2c75ea8790",
+    "measurement": "unrun: owner-deferred source-only phase; runtime and performance proof remain pending"
+  },
+  "expert_rewrite_provenance": {
+    "worker": "sol-high",
+    "variant": "jet-expert",
+    "changed": "Renamed the remaining-step binding to steps_left; the D-SIMD3 F64x4 lanes, ten pair interactions, momentum offset, and energy output stay unchanged.",
+    "matched": "Same steps input and five-body equations as the sourced C and Rust expert ports; no interaction or iteration was removed.",
+    "expected_output_sha256": "bdcf7a5967f944dc85b65e0e03ed5fd5daf6b699793224d6b03c7b2c75ea8790",
+    "measurement": "pending: target/release/jet is absent"
   }
 }

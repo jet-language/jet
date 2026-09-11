@@ -1,4 +1,4 @@
-// core-conformance: core.data.group_sum
+// core-conformance: core.data.query.group_by.sum
 use core.data as data
 
 struct Ticket {
@@ -11,6 +11,9 @@ fn run() {
         Ticket{team: "Core", minutes: 4.0},
         Ticket{team: "Core", minutes: 8.0}
     }
-    groups :: data.group_sum(rows, ticket -> ticket.team, ticket -> ticket.minutes) ?? panic("group sum")
-    print(groups[0].sum)
+    groups :: data.query(rows)
+        .group_by(ticket -> ticket.team)
+        .sum(ticket -> ticket.minutes)
+        .collect() ?? panic("group sum")
+    print(groups[0].value)
 }

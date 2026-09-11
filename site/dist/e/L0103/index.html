@@ -34,25 +34,16 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">An unused import adds a name and dependency to the file without contributing to checked code.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">remove the import, or rename `{name}` to `_{name}` when the import is intentionally kept.</p>
+<p class="diag-copy fix" data-registry-field="fix">Remove the import, or rename `{name}` to `_{name}` when the import is intentionally kept.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>L0103</code>: <code>tests/ui/crypto_secret_local_operations.stderr</code>.</p>
-<pre class="diag">Error [E0112]: `Secret` can&#39;t be reflected yet
-  --&gt; tests/ui/crypto_secret_local_operations.jet:19:29
-    |
- 19 |     reflected :: reflect.of(left)
-    |                             ^^^^
- Why: `reflect.of` inspects the same values `&quot;{x}&quot;` interpolation can show
- Fix: implement `Display` for its type, or pass one of its fields instead
-More: jet-lang.dev/e/E0112
-
-Error [E0905]: `Secret` does not implement `Encode`
+<pre class="diag">Error [E0905]: `Secret` does not implement `Encode`
   --&gt; tests/ui/crypto_secret_local_operations.jet:20:21
     |
  20 |     encoded :: left.encode()
     |                     ^^^^^^
  Why: `.encode()` can only call the value&#39;s Encode contract
- Fix: derive `Encode` on `Secret`, or write `impl Secret.Encode`
+ Fix: Derive `Encode` on `Secret`, or write `impl Secret.Encode`
 More: jet-lang.dev/e/E0905
 
 Error [E0102]: `Secret` has no method `clone`
@@ -60,8 +51,8 @@ Error [E0102]: `Secret` has no method `clone`
     |
  21 |     cloned :: left.clone()
     |                    ^^^^^
- Why: check the method name on this type
- Fix: define it inside `struct Secret` or `impl Secret`
+ Why: Check the method name on this type
+ Fix: Define it inside `struct Secret` or `impl Secret`
 More: jet-lang.dev/e/E0102
 
 Error [E0102]: `Secret` has no method `hash`
@@ -69,26 +60,26 @@ Error [E0102]: `Secret` has no method `hash`
     |
  22 |     hashed :: left.hash()
     |                    ^^^^
- Why: check the method name on this type
- Fix: define it inside `struct Secret` or `impl Secret`
+ Why: Check the method name on this type
+ Fix: Define it inside `struct Secret` or `impl Secret`
 More: jet-lang.dev/e/E0102
 
-Warning [L0101] (unused_local_binding): local binding `reflected` is never read.
+Warning [L0101] (unused_local_binding): Local binding `reflected` is never read.
   --&gt; tests/ui/crypto_secret_local_operations.jet:19:5
     |
  19 |     reflected :: reflect.of(left)
     |     ^^^^^^^^^
  Why: A binding that no later expression reads adds dead code and may hide a computed result that should have been used.
- Fix: remove the binding when its initializer is side-effect free, or rename `reflected` to `_reflected` when the value must be computed.
+ Fix: Remove the binding when its initializer is side-effect free, or rename `reflected` to `_reflected` when the value must be computed.
 More: jet-lang.dev/e/L0101
 
-Warning [L0103] (unused_import): import `reflect` is never used.
+Warning [L0103] (unused_import): Import `reflect` is never used.
   --&gt; tests/ui/crypto_secret_local_operations.jet:6:21
     |
   6 | use core.reflect as reflect
     |                     ^^^^^^^
- Why: an unused import adds a name and dependency to the file without contributing to checked code.
- Fix: remove the import, or rename `reflect` to `_reflect` when the import is intentionally kept.
+ Why: An unused import adds a name and dependency to the file without contributing to checked code.
+ Fix: Remove the import, or rename `reflect` to `_reflect` when the import is intentionally kept.
 More: jet-lang.dev/e/L0103
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

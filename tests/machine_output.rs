@@ -37,7 +37,7 @@ fn assert_machine_stream(label: &str, stream: &str, bytes: &[u8], action: Option
     let text = String::from_utf8(bytes.to_vec())
         .unwrap_or_else(|error| panic!("{label} {stream} is not UTF-8 machine output: {error}"));
     let records = read_machine_output(&text).unwrap_or_else(|error| {
-        panic!("{label} {stream} is not jet.report/v1 output: {error}\n{text}")
+        panic!("{label} {stream} is not machine output: {error}\n{text}")
     });
     assert_eq!(
         records.len(),
@@ -179,13 +179,6 @@ fn every_json_report_door_uses_the_one_machine_envelope() {
             expected_stream: MachineStream::Stdout,
         },
         MachineDoor {
-            label: "facts",
-            args: &["inspect", "facts", "--json"],
-            action: Some("inspect.facts"),
-            expected_status: ExitCodes::OK,
-            expected_stream: MachineStream::Stdout,
-        },
-        MachineDoor {
             label: "digest",
             args: &["inspect", "digest", "--list-topics", "--json"],
             action: Some("inspect.digest"),
@@ -203,20 +196,6 @@ fn every_json_report_door_uses_the_one_machine_envelope() {
             label: "semindex",
             args: &["inspect", "semindex", "run.jet", "--json"],
             action: Some("inspect.semindex"),
-            expected_status: ExitCodes::OK,
-            expected_stream: MachineStream::Stdout,
-        },
-        MachineDoor {
-            label: "dossier",
-            args: &["inspect", "dossier", "run.jet", "run", "--json"],
-            action: Some("inspect.dossier"),
-            expected_status: ExitCodes::OK,
-            expected_stream: MachineStream::Stdout,
-        },
-        MachineDoor {
-            label: "dossier-ffi",
-            args: &["inspect", "dossier", "ffi", "--json"],
-            action: Some("inspect.ffi"),
             expected_status: ExitCodes::OK,
             expected_stream: MachineStream::Stdout,
         },
@@ -301,22 +280,8 @@ fn every_json_report_door_uses_the_one_machine_envelope() {
             expected_stream: MachineStream::Stdout,
         },
         MachineDoor {
-            label: "guarantees",
-            args: &["inspect", "guarantees", "run.jet", "--json"],
-            action: Some("inspect.guarantees"),
-            expected_status: ExitCodes::OK,
-            expected_stream: MachineStream::Stdout,
-        },
-        MachineDoor {
             label: "gates",
             args: &["inspect", "gates", "run.jet", "--json"],
-            action: Some("inspect.gates"),
-            expected_status: ExitCodes::OK,
-            expected_stream: MachineStream::Stdout,
-        },
-        MachineDoor {
-            label: "authority",
-            args: &["inspect", "authority", "run.jet", "--json"],
             action: Some("inspect.gates"),
             expected_status: ExitCodes::OK,
             expected_stream: MachineStream::Stdout,
@@ -325,13 +290,6 @@ fn every_json_report_door_uses_the_one_machine_envelope() {
             label: "structure",
             args: &["inspect", "structure", "run.jet", "--json"],
             action: Some("inspect.structure"),
-            expected_status: ExitCodes::OK,
-            expected_stream: MachineStream::Stdout,
-        },
-        MachineDoor {
-            label: "unsafe",
-            args: &["inspect", "unsafe", "run.jet", "--json"],
-            action: Some("inspect.unsafe"),
             expected_status: ExitCodes::OK,
             expected_stream: MachineStream::Stdout,
         },
@@ -400,7 +358,7 @@ fn every_json_report_door_uses_the_one_machine_envelope() {
         },
         // No ledger or trace exists in this scratch fixture, so these two doors
         // are error cases here, like `live`. They still have to answer with one
-        // jet.report/v1 diagnostic on stdout, which is what this test proves.
+        // machine diagnostic on stdout, which is what this test proves.
         MachineDoor {
             label: "audit-memory",
             args: &["audit", "memory", "--json"],

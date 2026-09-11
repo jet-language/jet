@@ -68,9 +68,7 @@ impl<'a> Checker<'a> {
             .any(|s| s.contains(name))
     }
 
-    pub(crate) fn current_ct_globals(
-        &self,
-    ) -> Cow<'_, HashMap<String, crate::Comptime::CtValue>> {
+    pub(crate) fn current_ct_globals(&self) -> Cow<'_, HashMap<String, crate::Comptime::CtValue>> {
         // Most semantic expressions do not open a comptime scope. Borrow the
         // immutable module globals instead of cloning every known value for
         // each node; overlays still receive the exact old merged snapshot.
@@ -137,25 +135,26 @@ impl<'a> Checker<'a> {
         &self,
         expr: &crate::AST::Expr,
     ) -> Option<crate::Comptime::CtValue> {
+        if self.defer_ct_evaluation {
+            return None;
+        }
         let mut globals = self.current_ct_globals().into_owned();
         for (name, info) in self.flow.bindings.all() {
             if let Some(value) = &info.constant_value {
                 globals.insert(name.to_string(), value.clone());
             }
         }
-        jet_foundation::Diagnostics::with_ice_panic_hook_suppressed(|| {
-            crate::Comptime::evaluate_owned_with_imports_opts(
-                expr,
-                self.ct_funcs,
-                self.ct_externs,
-                self.ct_base_dir,
-                &globals,
-                self.core_imports,
-                self.gates,
-                0,
-            )
-            .ok()
-        })
+        crate::Comptime::evaluate_owned_with_imports_opts(
+            expr,
+            self.ct_checked_funcs,
+            self.ct_externs,
+            self.ct_base_dir,
+            &globals,
+            self.core_imports,
+            self.gates,
+            0,
+        )
+        .ok()
     }
 
     /// What the checker knows about a name here: the innermost declaration,

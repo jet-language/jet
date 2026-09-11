@@ -10,7 +10,7 @@
  * Regenerate:
  *   nix build --no-link --print-out-paths nixpkgs#rustPlatform.rustcSrc
  *   node scripts/agent/surface-rust.mjs <that-path>/library <rust version> \
- *       > docs/reference/surfaces/rust-surface.json
+ *       > docs/spec/reference/surfaces/rust-surface.json
  */
 
 import { readFileSync } from "node:fs";

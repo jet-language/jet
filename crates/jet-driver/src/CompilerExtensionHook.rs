@@ -12,12 +12,13 @@
 
 use crate::Diagnostics::{Diagnostic, Severity, Span};
 use crate::Sema::SemIndexEffectFacts;
-use crate::AST::{Func, Item, ProgramBundle};
+use crate::AST::{Func, Item, ProgramBundle, StructDef, Type};
 use jet_pkg_model::CompilerExtension::{
     self, decode_and_validate_response, message_exposes_rustc, Ability, AnalyzeResponse, Finding,
-    ProtocolError, SpanFact, SymbolFact, TypeFact, TypedSnapshot, ENV_COMPILER_EXTENSION,
-    HOST_PROCESS_TIMEOUT_MS, HOST_SUBCOMMAND, MAX_SNAPSHOT_BYTES,
+    ProtocolError, SpanFact, SymbolFact, TypeFact, TypeFactShape, TypeFieldFact, TypedSnapshot,
+    ENV_COMPILER_EXTENSION, HOST_PROCESS_TIMEOUT_MS, HOST_SUBCOMMAND, MAX_SNAPSHOT_BYTES,
 };
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -284,9 +285,10 @@ fn sanitize_host_message(message: &str) -> String {
 
 /// Build a deterministic v1 snapshot from entry-module function symbols.
 ///
-/// Types come from the post-sema AST signature. Effects come from solved
-/// `SemIndexEffectFacts` when provided; otherwise `ReadEffects` is not
-/// advertised and symbol `effects` stay empty.
+/// Types come from the post-sema AST signature. Codable records and carrier
+/// types reachable from those signatures are emitted as structural facts;
+/// effects come from solved `SemIndexEffectFacts` when provided. Otherwise
+/// `ReadEffects` is not advertised and symbol `effects` stay empty.
 pub fn snapshot_from_bundle(
     bundle: &ProgramBundle,
     effect_facts: Option<&SemIndexEffectFacts>,
@@ -297,7 +299,7 @@ pub fn snapshot_from_bundle(
     if effect_facts.is_none() {
         abilities.retain(|c| *c != Ability::ReadEffects);
     }
-    let mut types = Vec::new();
+    let mut types = interface_type_facts(&module.items);
     let mut symbols = Vec::new();
     let mut spans = Vec::new();
     let mut n = 0u32;
@@ -312,6 +314,7 @@ pub fn snapshot_from_bundle(
         types.push(TypeFact {
             id: tid.clone(),
             repr: fn_type_repr(func),
+            shape: TypeFactShape::Opaque,
         });
         let effects = effect_facts
             .and_then(|facts| {
@@ -353,6 +356,126 @@ pub fn snapshot_from_bundle(
     }
     TypedSnapshot::new(abilities, types, symbols, spans)
 }
+fn interface_type_facts(items: &[Item]) -> Vec<TypeFact> {
+    let mut collector = InterfaceTypeCollector::new(items);
+    for item in items {
+        let Item::Func(func) = item else {
+            continue;
+        };
+        for param in &func.params {
+            collector.add_type(&param.ty);
+        }
+        if let Some(return_type) = &func.return_type {
+            collector.add_type(return_type);
+        }
+    }
+    collector.facts.into_values().collect()
+}
+
+struct InterfaceTypeCollector<'a> {
+    structs: BTreeMap<&'a str, &'a StructDef>,
+    facts: BTreeMap<String, TypeFact>,
+}
+
+impl<'a> InterfaceTypeCollector<'a> {
+    fn new(items: &'a [Item]) -> Self {
+        let mut structs = BTreeMap::new();
+        for item in items {
+            if let Item::Struct(def) = item {
+                structs.insert(def.name.as_str(), def);
+            }
+        }
+        Self {
+            structs,
+            facts: BTreeMap::new(),
+        }
+    }
+
+    fn add_type(&mut self, ty: &Type) -> String {
+        let id = format!("it:{}", ty.name());
+        if self.facts.contains_key(&id) {
+            return id;
+        }
+        self.facts.insert(
+            id.clone(),
+            TypeFact {
+                id: id.clone(),
+                repr: ty.name(),
+                shape: TypeFactShape::Opaque,
+            },
+        );
+        let shape = match ty {
+            Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::String
+            | Type::Char
+            | Type::IntN { .. }
+            | Type::Float32 => TypeFactShape::Scalar,
+            Type::List(inner) => TypeFactShape::List {
+                element_type_id: self.add_type(inner),
+            },
+            Type::Option(inner) => TypeFactShape::Option {
+                inner_type_id: self.add_type(inner),
+            },
+            Type::Result { ok, err } => TypeFactShape::Result {
+                ok_type_id: self.add_type(ok),
+                error_type_id: self.add_type(err),
+            },
+            Type::Named(name) => {
+                let def = self
+                    .structs
+                    .get(name.as_str())
+                    .copied()
+                    .or_else(|| {
+                        name.rsplit_once('.')
+                            .and_then(|(_, leaf)| self.structs.get(leaf).copied())
+                    });
+                match def {
+                    None => TypeFactShape::Opaque,
+                    Some(def) if !is_codable(def) => TypeFactShape::Opaque,
+                    Some(def) => {
+                        let fields = def
+                            .fields
+                            .iter()
+                            .map(|field| (field.name.clone(), field.ty.clone()))
+                            .collect::<Vec<_>>();
+                        TypeFactShape::CodableRecord {
+                            fields: fields
+                                .into_iter()
+                                .map(|(name, field_type)| TypeFieldFact {
+                                    name,
+                                    type_id: self.add_type(&field_type),
+                                })
+                                .collect(),
+                        }
+                    }
+                }
+            }
+            _ => TypeFactShape::Opaque,
+        };
+        self.facts
+            .get_mut(&id)
+            .expect("inserted interface type")
+            .shape = shape;
+        id
+    }
+}
+
+fn is_codable(def: &StructDef) -> bool {
+    let mut encode = false;
+    let mut decode = false;
+    for (derive, _) in &def.derives {
+        match derive.as_str() {
+            crate::Syntax::MARKER_CODABLE => return true,
+            crate::Syntax::MARKER_ENCODE => encode = true,
+            crate::Syntax::MARKER_DECODE => decode = true,
+            _ => {}
+        }
+    }
+    encode && decode
+}
+
 
 fn fn_type_repr(func: &Func) -> String {
     let params = func
@@ -408,6 +531,9 @@ mod tests {
     use std::sync::{Mutex, Once};
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|poison| poison.into_inner())
+    }
     static HOST_BUILD: Once = Once::new();
     const SOURCE_X: &str =
         include_str!("../../jet-pkg-model/fixtures/compiler_extension/source_x.jet");
@@ -533,7 +659,7 @@ mod tests {
 
     #[test]
     fn post_sema_custom_lint_from_driver_env() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = env_lock();
         let dir = tempfile_dir();
         let src_path = dir.join("main.jet");
         std::fs::write(&src_path, SOURCE_X).unwrap();
@@ -554,7 +680,7 @@ mod tests {
 
     #[test]
     fn post_sema_custom_lint_ignores_non_x_source() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = env_lock();
         let dir = tempfile_dir();
         let src_path = dir.join("main.jet");
         std::fs::write(&src_path, SOURCE_Y).unwrap();
@@ -572,7 +698,7 @@ mod tests {
 
     #[test]
     fn post_sema_crash_guest_fail_closed_e1402() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = env_lock();
         let dir = tempfile_dir();
         let src_path = dir.join("main.jet");
         std::fs::write(&src_path, "fn run() {\n    print(1)\n}\n").unwrap();
@@ -593,7 +719,7 @@ mod tests {
 
     #[test]
     fn sema_error_never_executes_crash_guest() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = env_lock();
         let dir = tempfile_dir();
         let src_path = dir.join("main.jet");
         std::fs::write(&src_path, "fn run() {\n    print(missing)\n}\n").unwrap();
@@ -613,7 +739,7 @@ mod tests {
 
     #[test]
     fn snapshot_uses_solved_effects_not_invented_pure() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = env_lock();
         std::env::remove_var(ENV_COMPILER_EXTENSION);
         let dir = tempfile_dir();
         let src_path = dir.join("main.jet");
@@ -660,7 +786,7 @@ mod tests {
     /// `ReadEffects` and leave symbol effects empty — never invent `"pure"`.
     #[test]
     fn snapshot_without_effect_facts_omits_read_effects() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = env_lock();
         std::env::remove_var(ENV_COMPILER_EXTENSION);
         let dir = tempfile_dir();
         let src_path = dir.join("main.jet");
@@ -697,7 +823,7 @@ mod tests {
     /// opts_full (`jet run` compile path) still runs the hook with `None` facts.
     #[test]
     fn compile_opts_full_crash_guest_fail_closed_e1402() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = env_lock();
         let dir = tempfile_dir();
         let src_path = dir.join("main.jet");
         std::fs::write(&src_path, "fn run() {\n    print(1)\n}\n").unwrap();
@@ -722,7 +848,7 @@ mod tests {
     /// Entry-swap (`jet dev` / job subcommands) still runs the hook with `None` facts.
     #[test]
     fn compile_entry_swap_crash_guest_fail_closed_e1402() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = env_lock();
         let dir = tempfile_dir();
         let src_path = dir.join("main.jet");
         std::fs::write(
@@ -750,7 +876,7 @@ mod tests {
     /// have solved effect facts (AOT build uses Run; `jet check` uses Check).
     #[test]
     fn check_and_run_mode_effect_fact_snapshots_byte_identical() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = env_lock();
         std::env::remove_var(ENV_COMPILER_EXTENSION);
         let dir = tempfile_dir();
         let src_path = dir.join("main.jet");
@@ -806,7 +932,7 @@ mod tests {
     /// `jet check` and `jet build` (facts path) surface the same L1401 finding.
     #[test]
     fn check_and_build_surface_same_l1401() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = env_lock();
         let dir = tempfile_dir();
         let src_path = dir.join("main.jet");
         std::fs::write(&src_path, SOURCE_X).unwrap();
@@ -855,7 +981,7 @@ mod tests {
     /// even with None effect facts (guest does not require ReadEffects).
     #[test]
     fn aot_opts_full_and_dev_entry_swap_surface_same_l1401() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = env_lock();
         let dir = tempfile_dir();
         let src_path = dir.join("main.jet");
         std::fs::write(&src_path, SOURCE_X).unwrap();

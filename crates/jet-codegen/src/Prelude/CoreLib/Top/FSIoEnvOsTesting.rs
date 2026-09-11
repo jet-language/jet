@@ -1,24 +1,8 @@
 fn jet_std_fs_read_link(path: &String) -> Result<String, jet_std::IOError> {
-    if jet_fault_should_fail("FS.Read") {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Read,
-            Some(path.clone()),
-            "fault injected: FS.Read",
-        ));
-    }
-    std::fs::read_link(path)
-        .map(|p| p.to_string_lossy().to_string())
-        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))
+    jet_std_fs_read_link_path(path)
 }
 fn jet_std_fs_hard_link(from: &String, to: &String) -> Result<(), jet_std::IOError> {
-    if jet_fault_should_fail("FS.Write") {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Write,
-            Some(to.clone()),
-            "fault injected: FS.Write",
-        ));
-    }
-    std::fs::hard_link(from, to).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, to, e))
+    jet_std_fs_hard_link_path(from, to)
 }
 fn jet_std_fs_stat(path: &String) -> Result<jet_std::Stat, jet_std::IOError> {
     jet_fs_stat(path).map(|stat| jet_std::Stat {
@@ -34,63 +18,22 @@ fn jet_std_fs_stat(path: &String) -> Result<jet_std::Stat, jet_std::IOError> {
     })
 }
 
-
-fn jet_std_fs_walk(path: &String) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
-    if jet_fault_should_fail("FS.Read") {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Read,
-            Some(path.clone()),
-            "fault injected: FS.Read",
-        ));
-    }
-    let root = std::path::PathBuf::from(path);
-    jet_fs_validate_walk_root(&root)
-        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, path, error))?;
-    let mut out = Vec::new();
-    fn walk_dir(
-        root: &std::path::Path,
-        dir: &std::path::Path,
-        depth: i64,
-        out: &mut Vec<jet_std::WalkEntry>,
-        shown: &str,
-    ) -> Result<(), jet_std::IOError> {
-        jet_fs_validate_walk_root(dir)
-            .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, shown, error))?;
-        let mut entries = Vec::new();
-        for entry in std::fs::read_dir(dir)
-            .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, shown, error))?
-        {
-            entries.push(
-                entry
-                    .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Read, shown, error))?,
-            );
-        }
-        entries.sort_by_key(|entry| entry.file_name());
-        for entry in entries {
-            let child = entry.path();
-            let is_dir = entry.file_type().map(|file_type| file_type.is_dir()).unwrap_or(false);
-            let relative = child
-                .strip_prefix(root)
-                .unwrap_or(&child)
-                .to_string_lossy()
-                .to_string();
-            out.push(jet_std::WalkEntry {
-                path: child.to_string_lossy().to_string(),
-                relative,
-                is_dir,
-                depth,
-            });
-            if is_dir {
-                walk_dir(root, &child, depth + 1, out, shown)?;
-            }
-        }
-        Ok(())
-    }
-    walk_dir(&root, &root, 0, &mut out, path)?;
-    Ok(out)
+fn jet_std_fs_walk(
+    path: &String,
+    ignore_name: JetOutcome<String, JetAbsent>,
+) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
+    let ignore_name = jet_std_fs_walk_ignore_name(ignore_name);
+    jet_std_fs_walk_with_ignore(path, ignore_name.as_deref())
 }
 
-fn jet_std_fs_walk_parallel(path: &String) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
+fn jet_std_fs_walk_ignore_name(ignore_name: JetOutcome<String, JetAbsent>) -> Option<String> {
+    ignore_name.ok()
+}
+
+fn jet_std_fs_walk_with_ignore(
+    path: &String,
+    ignore_name: Option<&str>,
+) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
     if jet_fault_should_fail("FS.Read") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Read,
@@ -98,9 +41,10 @@ fn jet_std_fs_walk_parallel(path: &String) -> Result<Vec<jet_std::WalkEntry>, je
             "fault injected: FS.Read",
         ));
     }
-    let mut out = jet_fs_walk_parallel(
+    let mut out = jet_fs_walk_parallel_with_ignore(
         path,
         path,
+        ignore_name,
         |path, relative, is_dir, depth| jet_std::WalkEntry {
             path,
             relative,
@@ -113,8 +57,33 @@ fn jet_std_fs_walk_parallel(path: &String) -> Result<Vec<jet_std::WalkEntry>, je
     Ok(out)
 }
 
+fn jet_std_fs_walk_parallel(
+    path: &String,
+    ignore_name: JetOutcome<String, JetAbsent>,
+) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
+    let ignore_name = jet_std_fs_walk_ignore_name(ignore_name);
+    jet_std_fs_walk_parallel_with_ignore(path, ignore_name.as_deref())
+}
 
-fn jet_std_fs_walk_files(path: &String) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
+fn jet_std_fs_walk_parallel_with_ignore(
+    path: &String,
+    ignore_name: Option<&str>,
+) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
+    jet_std_fs_walk_with_ignore(path, ignore_name)
+}
+
+fn jet_std_fs_walk_files(
+    path: &String,
+    ignore_name: JetOutcome<String, JetAbsent>,
+) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
+    let ignore_name = jet_std_fs_walk_ignore_name(ignore_name);
+    jet_std_fs_walk_files_with_ignore(path, ignore_name.as_deref())
+}
+
+fn jet_std_fs_walk_files_with_ignore(
+    path: &String,
+    ignore_name: Option<&str>,
+) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
     if jet_fault_should_fail("FS.Read") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Read,
@@ -122,9 +91,10 @@ fn jet_std_fs_walk_files(path: &String) -> Result<Vec<jet_std::WalkEntry>, jet_s
             "fault injected: FS.Read",
         ));
     }
-    let mut out = jet_fs_walk_files_parallel(
+    let mut out = jet_fs_walk_files_parallel_with_ignore(
         path,
         path,
+        ignore_name,
         |path, relative, is_dir, depth| jet_std::WalkEntry {
             path,
             relative,
@@ -137,71 +107,25 @@ fn jet_std_fs_walk_files(path: &String) -> Result<Vec<jet_std::WalkEntry>, jet_s
     Ok(out)
 }
 fn jet_std_fs_temp_dir(prefix: &String) -> Result<jet_std::TempDir, jet_std::IOError> {
-    let path = jet_temp_path(prefix);
-    if jet_fault_should_fail("FS.Write") {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Write,
-            Some(path.clone()),
-            "fault injected: FS.Write",
-        ));
-    }
-    std::fs::create_dir(&path)
-        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, &path, e))?;
+    let path = jet_std_fs_temp_dir_path(prefix)?;
     Ok(jet_std::TempDir {
         path,
         cleanup: std::rc::Rc::new(()),
     })
 }
 fn jet_std_fs_temp_file(prefix: &String) -> Result<jet_std::TempFile, jet_std::IOError> {
-    let path = jet_temp_path(prefix);
-    if jet_fault_should_fail("FS.Write") {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Write,
-            Some(path.clone()),
-            "fault injected: FS.Write",
-        ));
-    }
-    std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&path)
-        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, &path, e))?;
+    let path = jet_std_fs_temp_file_path(prefix)?;
     Ok(jet_std::TempFile {
         path,
         cleanup: std::rc::Rc::new(()),
     })
 }
 fn jet_std_fs_lock(path: &String) -> Result<jet_std::FileLock, jet_std::IOError> {
-    if jet_fault_should_fail("FS.Write") {
-        return Err(jet_std::IOError::other(
-            jet_std::IOOperation::Write,
-            Some(path.clone()),
-            "fault injected: FS.Write",
-        ));
-    }
-    std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(path)
-        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))?;
+    let path = jet_std_fs_lock_path(path)?;
     Ok(jet_std::FileLock {
-        path: path.clone(),
+        path,
         cleanup: std::rc::Rc::new(()),
     })
-}
-fn jet_temp_path(prefix: &String) -> String {
-    let clean: String = prefix
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-        .collect();
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    std::env::temp_dir()
-        .join(format!("{}_{}_{}", clean, std::process::id(), nanos))
-        .to_string_lossy()
-        .to_string()
 }
 fn jet_watcher_files(path: &String) -> Result<jet_std::WatchHandle, jet_std::IOError> {
     jet_std::WatchHandle::files(path.clone())
@@ -342,16 +266,17 @@ fn jet_std_io_input_secret(prompt: &String) -> Result<String, jet_std::IOError> 
 }
 
 // D-STDIN1=A: streaming line-by-line stdin.
+// Stdin owns the shared buffer. A loop-local BufReader would discard unread
+// bytes when a sentinel breaks the loop before a subsequent readline call.
 struct JetStdinReader {
-    inner: std::io::BufReader<std::io::Stdin>,
+    inner: std::io::Stdin,
 }
 fn jet_std_io_stdin() -> JetStdinReader {
     JetStdinReader {
-        inner: std::io::BufReader::new(std::io::stdin()),
+        inner: std::io::stdin(),
     }
 }
 fn jet_std_io_stdin_read_line(r: &mut JetStdinReader) -> Result<Option<String>, jet_std::IOError> {
-    use std::io::BufRead;
     if jet_fault_should_fail("IO.Read") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Read,
@@ -379,11 +304,9 @@ fn jet_std_io_stdin_read_line(r: &mut JetStdinReader) -> Result<Option<String>, 
 // #1480: readline / read_until / take moved to
 // IoLineStream.rs so the JIT host can `include!` the same Prelude source.
 
-
 fn jet_std_io_binread(path: &String) -> Result<Vec<u8>, jet_std::IOError> {
     jet_std_fs_read_bytes(path)
 }
-
 
 // D-COREIO1=A: stdout/stderr stream handles and TTY-aware terminal helpers.
 struct JetStdout;
@@ -512,36 +435,17 @@ fn jet_std_io_terminal_width() -> i64 {
 fn jet_std_io_terminal_height() -> i64 {
     jet_term_height(|name| jet_std_env_get(&name.to_string()))
 }
-// The colour decision has two independent halves. This is the environment
-// half, and it is a named seam on purpose: it can be observed even when
-// stdout is a pipe, which is the only way to prove the environment rule
-// without a terminal.
-//
-// PRESENCE semantics (D-ENV-MUTATE1 + #1206): `NO_COLOR` disables colour
-// because it is SET, whatever it holds — empty, `0`, or bytes that are not
-// valid Unicode all disable colour. Hence the raw `OsString` lookup: routing
-// this through `jet_std_env_get` would decode, fail, and report "absent" for
-// a variable that is plainly present. `TERM=dumb` disables colour too, and
-// that one is a value comparison, so it does decode.
-fn jet_style_env_enabled() -> bool {
-    let (no_color, term_is_dumb) = jet_style_env_facts();
-    !no_color && !term_is_dumb
-}
-// One read of the logical env table, shared by both callers, so the seam and
-// the production decision can never disagree about what the environment says.
+// Read the logical environment facts once before delegating the canonical
+// explicit > NO_COLOR > FORCE_COLOR > TTY color decision to Term.
 fn jet_style_env_facts() -> (bool, bool) {
     (
         jet_env_value_raw("NO_COLOR").is_some(),
-        jet_env_value_raw("TERM")
-            .and_then(|term| term.into_string().ok())
-            .is_some_and(|term| term == "dumb"),
+        jet_env_value_raw("FORCE_COLOR").is_some(),
     )
 }
-// The stream half joins in here: colour also needs stdout to be a terminal,
-// and `--color=always|never` overrides both (jet_term_set_color_mode).
 fn jet_style_enabled() -> bool {
-    let (no_color, term_is_dumb) = jet_style_env_facts();
-    jet_term_style_enabled(no_color, term_is_dumb, jet_term_stdout_is_terminal())
+    let (no_color, force_color) = jet_style_env_facts();
+    jet_term_style_enabled(no_color, force_color, jet_term_stdout_is_terminal())
 }
 fn jet_std_io_style(style: &String, text: &String) -> String {
     jet_term_style(style, text, jet_style_enabled())
@@ -552,13 +456,7 @@ fn jet_std_io_style_force(style: &String, text: &String) -> String {
 
 struct JetProgressIter<T> {
     inner: Box<dyn Iterator<Item = T>>,
-    total: Option<usize>,
-    description: String,
-    format: String,
-    started: std::time::Instant,
-    count: usize,
-    displayed: bool,
-    finished: bool,
+    state: JetOutputProgressIterState,
 }
 
 impl<T> Iterator for JetProgressIter<T> {
@@ -572,33 +470,21 @@ impl<T> Iterator for JetProgressIter<T> {
                 return None;
             }
         };
-        self.count += 1;
-        let text = jet_progress_render(
-            &self.description,
-            &self.format,
-            self.count,
-            self.total,
-            self.started.elapsed().as_secs_f64(),
-            jet_env_value_raw("NO_COLOR").is_some(),
-        );
-        if let Err(error) = jet_std_io_progress_emit(&text) {
+        if let Err(error) = self.state.advance(
+            jet_style_enabled(),
+            jet_std_io_progress_emit,
+            jet_std_io_progress_finish,
+        ) {
             jet_panic("<progress>", 0, &format!("{error:?}"));
         }
-        self.displayed = true;
         Some(item)
     }
 }
 
 impl<T> JetProgressIter<T> {
     fn finish(&mut self) {
-        if self.finished {
-            return;
-        }
-        self.finished = true;
-        if self.displayed {
-            if let Err(error) = jet_std_io_progress_finish() {
-                jet_panic("<progress>", 0, &format!("{error:?}"));
-            }
+        if let Err(error) = self.state.finish(jet_std_io_progress_finish) {
+            jet_panic("<progress>", 0, &format!("{error:?}"));
         }
     }
 }
@@ -627,64 +513,55 @@ fn jet_std_io_progress_iter_with_total<T: 'static>(
 ) -> JetIter<T> {
     JetIter(Box::new(JetProgressIter {
         inner: it.0,
-        total,
-        description: description.clone(),
-        format: format.clone(),
-        started: std::time::Instant::now(),
-        count: 0,
-        displayed: false,
-        finished: false,
+        state: JetOutputProgressIterState::new(description, format, total),
     }))
 }
 
-fn jet_std_io_progress_list<T: 'static>(
-    xs: Vec<T>,
-    description: &String,
-    format: &String,
-) -> JetIter<T> {
-    let total = xs.len();
-    jet_std_io_progress_iter_with_total(jet_iter_from_vec(xs), description, format, Some(total))
-}
-
 fn jet_std_io_progress_emit(text: &str) -> Result<(), jet_std::IOError> {
-    let frame = jet_term_progress_frame(jet_term_stdout_is_terminal(), text);
+    if !jet_term_progress_enabled() {
+        return Ok(());
+    }
+    let frame = jet_term_progress_frame(true, text);
     if jet_fault_should_fail("IO.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
-            Some("stdout".to_string()),
+            Some("stderr".to_string()),
             "fault injected: IO.Write",
         ));
     }
     if jet_fault_should_fail("IO.Flush") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Flush,
-            Some("stdout".to_string()),
+            Some("stderr".to_string()),
             "fault injected: IO.Flush",
         ));
     }
-    jet_term_write_stdout(&frame, true)
-        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stdout", e))
+    jet_term_write_stderr(&frame, true)
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stderr", e))
 }
 
 fn jet_std_io_progress_finish() -> Result<(), jet_std::IOError> {
-    let frame = jet_term_progress_finish(jet_term_stdout_is_terminal());
+    if !jet_term_progress_enabled() {
+        return Ok(());
+    }
+    let frame = jet_term_progress_finish(true);
     if !frame.is_empty() {
         if jet_fault_should_fail("IO.Write") {
             return Err(jet_std::IOError::other(
                 jet_std::IOOperation::Write,
-                Some("stdout".to_string()),
+                Some("stderr".to_string()),
                 "fault injected: IO.Write",
             ));
         }
         if jet_fault_should_fail("IO.Flush") {
             return Err(jet_std::IOError::other(
                 jet_std::IOOperation::Flush,
-                Some("stdout".to_string()),
+                Some("stderr".to_string()),
                 "fault injected: IO.Flush",
             ));
         }
-        jet_term_write_stdout(frame, true)
-            .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stdout", e))?;
+        jet_term_write_stderr(frame, true)
+            .map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stderr", e))?;
     }
     Ok(())
 }
@@ -747,10 +624,14 @@ fn jet_std_env_get(name: &String) -> Option<String> {
 // `__jet_Decode` codec. Keep this adapter beside the logical environment owner;
 // it snapshots once, overlays project `.env` values, then hands all coercion,
 // defaults, optionals, and unknown-field policy to the shared decoder.
+/// `names` is the checked shape map `(env name, decode key)` per field
+/// (D-SHAPE-ONE1=A): a variable equal to a field's canonical env name (with or
+/// without `prefix`) decodes under that field's key instead of its own spelling.
 fn jet_std_env_decode<T: __jet_Decode>(
     prefix: &String,
     file: &String,
     allow: &Vec<String>,
+    names: &[(&str, &str)],
 ) -> Result<T, Vec<jet_std::FieldError>> {
     let path = std::path::Path::new(file);
     if !jet_env_config_file_is_project_relative(file) {
@@ -787,7 +668,17 @@ fn jet_std_env_decode<T: __jet_Decode>(
 
     let mut tree = jet_std::DataTree::Object(Vec::new());
     let mut origins = Vec::<(String, String)>::new();
-    for entry in entries {
+    for mut entry in entries {
+        let renamed = names.iter().find(|(env_name, _)| {
+            entry.name.eq_ignore_ascii_case(env_name)
+                || entry
+                    .name
+                    .get(prefix.len()..)
+                    .is_some_and(|suffix| suffix.eq_ignore_ascii_case(env_name))
+        });
+        if let Some((_, key)) = renamed {
+            entry.segments = vec![(*key).to_string()];
+        }
         origins.push((entry.name, entry.segments.join(".")));
         jet_env_insert_tree(&mut tree, &entry.segments, entry.value);
     }
@@ -1024,7 +915,10 @@ fn jet_testing_snap(name: &String, actual: &String) -> bool {
 }
 
 fn jet_testing_temp_dir(prefix: &String) -> String {
-    jet_testing_temp_dir_path(prefix)
+    match jet_testing_temp_dir_path(prefix) {
+        Ok(path) => path,
+        Err(error) => jet_panic("<core.testing>", 0, &error.to_string()),
+    }
 }
 
 fn jet_testing_corpus(path: &String) -> Vec<String> {

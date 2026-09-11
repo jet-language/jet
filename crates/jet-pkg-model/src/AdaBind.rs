@@ -175,7 +175,25 @@ pub fn bind(
         .collect::<Vec<_>>()
         .join(",");
     let _ = std::fs::remove_dir_all(&build);
-    let provenance=format!("schema=jet-ada-bind-v1\nsha256={}\nsource={}\nbody={}\nruntime={}\nabi=C\nexports={}\nconstraints={}\n",crate::SHA256::sha256_hex(&identity),spec_path.display(),body_path.display(),runtime_dir.display(),bound.join(","),constraints);
+    let mut provenance = format!(
+        "schema=jet-ada-bind-v1\nsha256={}\nsource={}\nbody={}\nruntime={}\nabi=C\nexports={}\nconstraints={}\n",
+        crate::SHA256::sha256_hex(&identity),
+        spec_path.display(),
+        body_path.display(),
+        runtime_dir.display(),
+        bound.join(","),
+        constraints
+    );
+    crate::ForeignBridge::append_boundary_for_artifact(
+        &mut provenance,
+        *crate::AST::binder_descriptor(crate::AST::ForeignLanguage::Ada)
+            .ok_or_else(|| BindError::Source("Ada binder descriptor is not registered".into()))?,
+        lib,
+        spec_path,
+        &archive,
+        "gnatmake/gnatbind/cc/ar",
+    )
+    .map_err(BindError::IO)?;
     Ok(BindResult {
         source,
         bound,

@@ -16,7 +16,7 @@ MEASUREMENT_POLICY="$CORPUS/measurement_policy.tsv"
 TIER_MATRIX="$CORPUS/tier_matrix.tsv"
 CANARIES="$CORPUS/canaries.tsv"
 TOOLCHAINS="$CORPUS/toolchain_contract.tsv"
-CORE_LEDGER="$ROOT/docs/reference/core-surface-ledger.json"
+CORE_CHECKER="$ROOT/scripts/agent/check-core-surface-ledger.mjs"
 
 MANIFEST_HEADER=$'version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card\tloss_cards'
 DOMAIN_HEADER=$'version\ttask_id\tallowed_dependencies\tmachine_spec\tvariant\tscoring'
@@ -349,8 +349,7 @@ static_contract() {
   for file in "$MANIFEST" "$DOMAIN_CONTRACT" "$PEERS" "$PEER_ADAPTERS" "$ADAPTERS" "$METRIC_CONTRACT" "$MEASUREMENT_POLICY" "$TIER_MATRIX" "$CANARIES" "$TOOLCHAINS"; do
     [[ -f "$file" ]] || fail "missing frozen contract: ${file#$ROOT/}"
   done
-  [[ -f "$CORE_LEDGER" ]] || fail "missing Core competitor ledger"
-  node -e 'const fs = require("node:fs"); const ledger = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); if (ledger.summary?.languageCount !== 11 || !ledger.competitors?.Rust || !ledger.competitors?.Go || !ledger.competitors?.Swift) process.exit(1)' "$CORE_LEDGER" || fail "Core competitor ledger language set drifted"
+  node "$CORE_CHECKER" --check >/dev/null || fail "Core competitor ledger drifted"
   [[ "$(head -n 1 "$MANIFEST")" == "$MANIFEST_HEADER" ]] || fail "manifest schema drifted"
   [[ "$(head -n 1 "$DOMAIN_CONTRACT")" == "$DOMAIN_HEADER" ]] || fail "domain contract schema drifted"
   [[ "$(head -n 1 "$PEERS")" == "$PEER_HEADER" ]] || fail "peer ledger schema drifted"
@@ -381,7 +380,7 @@ static_contract() {
     [[ "$authority" == "$expected_authority" ]] || fail "authority drifted: $id"
     has_word "$adapters" jet || fail "Jet adapter missing: $id"
     [[ "$platforms" == *linux=* && "$platforms" == *macos=* && "$platforms" == *windows=* && "$platforms" == *cross-target=* ]] || fail "platform matrix incomplete: $id"
-    [[ "$evidence" == docs/research/card-1414-compiled-peer-task-definitions.md#* ]] || fail "public task evidence missing: $id"
+    [[ "$evidence" == docs/research/compiled-workload-source-boundary-2026-09.md#* ]] || fail "public task evidence missing: $id"
     [[ "$tower" == "#1414" ]] || fail "manifest owner drifted: $id"
     owner_ok "$loss" || fail "manifest loss owner is not auditable: $id"
     task_domain[$id]="$domain"; task_input[$id]="$input"; task_expected[$id]="$expected"

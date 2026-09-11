@@ -1,3 +1,4 @@
+use super::core_module_path_from_receiver;
 use super::refusal;
 use crate::Codegen::is_db_value_type_name;
 use crate::Codegen::is_json_type_name;
@@ -546,6 +547,15 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             if member == "clone" {
                 return false;
             }
+            // Sema types `math.pi` / `math.e` / … as module fields
+            // (`infer_core_field`). Lower them as Float literals. Admit them
+            // before the non-local ident veto, which otherwise refuses the
+            // alias and ICEs as "expression `pi`".
+            if core_module_path_from_receiver(receiver, cx, locals).as_deref() == Some("core.math")
+                && matches!(member.as_str(), "pi" | "e" | "tau" | "infinity" | "nan")
+            {
+                return true;
+            }
             if crate::Codegen::TIR::grouped_enum_unit_variant(cx, receiver, member, |name| {
                 locals.contains(name)
             })
@@ -576,6 +586,18 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                             && matches!(member.as_str(), "Read" | "Write" | "ReadWrite"))
                         || (resolved_enum == "NetShutdown"
                             && matches!(member.as_str(), "Read" | "Write" | "Both")))
+                {
+                    return true;
+                }
+                // D-FOUND-PLATFORM1=A: font enums are canonical Core values
+                // carried by the shared Prelude (not user enums, so Cx has no
+                // `enum_variants` row). The lowerer still emits the ordinary
+                // unit `EnumLit`, and `Cx::rust_type` owns the carrier spelling.
+                if !locals.contains(enum_name)
+                    && !cx.type_names.contains(enum_name)
+                    && matches!(resolved_enum, "FontStyle" | "GlyphShaper")
+                    && jet_foundation::CoreModuleExports::core_enum_variants(resolved_enum)
+                        .is_some_and(|variants| variants.contains(&member.as_str()))
                 {
                     return true;
                 }
@@ -756,10 +778,15 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                     EnumLitArg::Named { expr, .. } => expr_in_subset(expr, cx, locals),
                 });
             }
-            // D-CMP3WAY1=B: Ordering is the compiler-owned three-way comparison
-            // result. Its variants are unit values and need no user-enum registry.
-            if type_name == crate::Syntax::TYPE_ORDERING {
-                return args.is_empty() && matches!(variant.as_str(), "Less" | "Equal" | "Greater");
+            // D-FOUND-PLATFORM1=A: font enum values are canonical Core values
+            // carried by the shared Prelude. Sema represents shorthand `.Body`
+            // (and its qualified equivalent) as `EnumLit`, while the lowerer
+            // emits the same ordinary unit enum construction as the `Field`
+            // spelling. These enums have no user `Cx` variant row.
+            if matches!(resolved_type, "FontStyle" | "GlyphShaper") {
+                return args.is_empty()
+                    && jet_foundation::CoreModuleExports::core_enum_variants(resolved_type)
+                        .is_some_and(|variants| variants.contains(&variant.as_str()));
             }
             // D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum, always
             // covered — all three variants are unit (no payload args to check).

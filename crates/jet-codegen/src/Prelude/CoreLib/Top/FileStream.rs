@@ -29,6 +29,9 @@ pub(crate) fn jet_std_files_create(path: &String) -> Result<JetFileWriter, jet_s
             "fault injected: FS.Write",
         ));
     }
+    if let Some(error) = jet_std::jet_std_files_writer_refusal(path) {
+        return Err(error);
+    }
     let file = std::fs::File::create(path)
         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))?;
     Ok(JetFileWriter {
@@ -44,6 +47,9 @@ pub(crate) fn jet_std_files_append(path: &String) -> Result<JetFileWriter, jet_s
             Some(path.clone()),
             "fault injected: FS.Write",
         ));
+    }
+    if let Some(error) = jet_std::jet_std_files_writer_refusal(path) {
+        return Err(error);
     }
     let file = std::fs::OpenOptions::new()
         .create(true)

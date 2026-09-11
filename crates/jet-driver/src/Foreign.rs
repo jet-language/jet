@@ -17,8 +17,10 @@ use crate::AST::{
     ForeignAbiContract, ForeignLanguage, ForeignNamespace, ImportDecl, Item, LoadedModule,
     ProgramBundle,
 };
+use crate::ForeignBridge::{ForeignBoundaryContract, ForeignBoundaryIdentity};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use jet_foundation::Report::{StatusEnvelope, StatusValue};
 
 fn all_imports(module: &LoadedModule) -> impl Iterator<Item = &ImportDecl> {
     let mut seen = HashSet::new();
@@ -74,6 +76,7 @@ pub struct ForeignRoutePlan {
     pub type_stub: Option<PathBuf>,
     pub provenance: PathBuf,
     pub abi_contract: ForeignAbiContract,
+    pub boundary: ForeignBoundaryContract,
 }
 
 pub fn binding_cache_dir(project_root: &Path, language: ForeignLanguage) -> PathBuf {
@@ -147,14 +150,28 @@ pub fn route_plan(
     target: ForeignTarget,
 ) -> Option<ForeignRoutePlan> {
     let descriptor = *binder_for(namespace.language)?;
+    let host = host_for(namespace.language, target);
+    let boundary = ForeignBoundaryContract::new(
+        descriptor,
+        namespace.lib.clone(),
+        ForeignBoundaryIdentity::new(
+            format!("route:{}:{}", namespace.language.root(), namespace.lib),
+            "none",
+            descriptor.stamp(),
+            format!("host:{host:?}"),
+            format!("toolchain:{host:?}"),
+            crate::ForeignBridge::foreign_host_target(),
+        ),
+    );
     Some(ForeignRoutePlan {
-        host: host_for(namespace.language, target),
+        host,
         binding_cache: binding_cache_file(project_root, namespace.language, &namespace.lib),
         type_stub: type_stub_file(project_root, namespace.language, &namespace.lib),
         provenance: provenance_file(project_root, namespace.language, &namespace.lib),
         descriptor,
         namespace,
         abi_contract: descriptor.contract,
+        boundary,
     })
 }
 
@@ -224,12 +241,10 @@ pub fn capability_report_json() -> String {
         .collect::<Vec<_>>()
         .join(",");
     let payload = format!("{{\"languages\":[{rows}]}}");
-    jet_foundation::Report::render_status_json(
-        "ok",
-        true,
-        "inspect.ffi",
-        &format!(",\"ffi\":{payload}"),
-    )
+    let ffi = StatusValue::parse(&payload).expect("foreign capability payload must be valid JSON");
+    StatusEnvelope::new("inspect.ffi", true)
+        .with_field("ffi", ffi)
+        .json()
 }
 
 fn contract_name(contract: ForeignAbiContract) -> &'static str {
@@ -443,7 +458,7 @@ fn materialize_namespace(
             if !lex_diags.is_empty() {
                 return Err(lex_diags);
             }
-            let mut program = crate::Parser::parse(&tokens)?;
+            let mut program = crate::Parser::parse_with_source(&tokens, &source)?;
             if language == ForeignLanguage::Cpp {
                 mark_cpp_callback_abi(&mut program.items);
             }

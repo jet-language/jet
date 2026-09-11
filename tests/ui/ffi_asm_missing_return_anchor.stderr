@@ -1,8 +1,8 @@
-Error [E0003]: Expected `{` to open the `#FFI` foreign-source body, found `->`
-  --> tests/ui/ffi_asm_missing_return_anchor.jet:3:53
+Error [E3223]: This inline assembly operand contract is incomplete
+  --> tests/ui/ffi_asm_missing_return_anchor.jet:4:5
     |
-  3 | #[Unsafe("cycle counter"), FFI(asm)] fn rdtsc() U64 -> {
-    |                                                     ^^
- Why: The structure here isn't what the compiler expected
- Fix: Use `{` to open the `#FFI` foreign-source body
-More: jet-lang.dev/e/E0003
+  4 |     """
+    |     ^^^
+ Why: A value-returning assembly body needs exactly one `; -> return` anchor
+ Fix: Bind each Jet parameter as `{name}`, mark one result with `; -> return`, and list overwritten registers on `; clobbers …`
+More: jet-lang.dev/e/E3223

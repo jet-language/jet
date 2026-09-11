@@ -81,7 +81,7 @@ pub(crate) fn evaluate_step_with_items(
     authorizer: &mut dyn Comptime::ReplAuthorizer,
     notebook_items_preloaded: bool,
 ) -> EvalResult {
-    jet_driver::boot_tir_eval();
+    jet_driver::boot_mir_eval();
     let normalized = normalize_repl_input(input);
     let trimmed = normalized.trim();
     if trimmed.is_empty() {

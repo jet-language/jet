@@ -34,9 +34,18 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered parse rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for E0064</p>
+<p class="diag-copy fix" data-registry-field="fix">Give the foreign function one triple-quoted raw foreign-source string body.</p>
 <h2>Worked example</h2>
-<p>No UI snapshot currently mentions this code.</p>
+<p>First UI snapshot mentioning <code>E0064</code>: <code>tests/ui/ffi_body_not_string.stderr</code>.</p>
+<pre class="diag">Error [E0064]: A `#FFI(c)` function body must be one string of c source
+  --&gt; tests/ui/ffi_body_not_string.jet:1:19
+    |
+  1 | #[Unsafe(&quot;demo&quot;), FFI(c)] fn add(a: Int, b: Int) Int -&gt; {
+    |                   ^^^^^^
+ Why: The inline foreign tier carries the foreign source as a single `&quot;&quot;&quot;…&quot;&quot;&quot;` string; the Jet signature above is the checked contract (D-FFI-INLINE1)
+ Fix: Write the body as `{ &quot;&quot;&quot;&lt;c source&gt;&quot;&quot;&quot; }` — one string literal, no other statements or interpolation
+More: jet-lang.dev/e/E0064
+</pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
 </main>

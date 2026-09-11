@@ -23,10 +23,13 @@ const fresh = () => {
 
 const ballot = (extra = {}) => ({
   ballotMode: 'full',
-  reviewPasses: { base: 'The base pass completed the ballot.', boilOcean: 'The breadth review checked for missing choices.', hybrid: 'The hybrid pass combined compatible strengths.', cooperative: 'The cooperative pass strengthened every option.', beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.', adversarial: 'Author model family: family-a. Adversarial model family: family-b. The adversarial pass attacked the recommendation.' },
+  reviewPasses: {
+    beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.',
+    adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
+  },
   gist: 'a plain sentence', lesson: 'Concept, mechanics, terms, and stakes.', story: 'Dana hits this while shipping X.', inWild: 'real code in Source/foo.rs',
   rec: 'A', options: [{ key: 'A', name: 'Option A', detail: 'does A', code: 'a()' }, { key: 'B', name: 'Option B', detail: 'does B', code: 'b()' }],
-  recommendation: { why: 'A best serves this decision.', whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one visible step.' },
+  recommendation: { why: 'A best serves this decision.', gains: ['Behavior stays visible'], losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }], whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one visible step.' },
   hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Borrow its clear names.' }, { key: 'B', aspect: 'B is brief.', use: 'Keep it.' }] },
   surface: {
     gist: 'Which option should Jet ship?',
@@ -36,7 +39,7 @@ const ballot = (extra = {}) => ({
       { key: 'A', name: 'Option A', gist: 'Explicit call.', gains: ['Behavior stays visible'], losses: ['One more step'], proposed: { code: 'a()' } },
       { key: 'B', name: 'Option B', gist: 'Short call.', gains: ['Shortest first script'], losses: ['Loses the needed guarantee'], proposed: { code: 'b()' } },
     ],
-    recommendation: { rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'], losses: ['One more step'], whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step.' },
+    recommendation: { rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'], losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }], whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step.' },
   },
   ...extra,
 });
@@ -146,11 +149,10 @@ test('an open decision carries its full options text verbatim (owner decides fro
   const d = p.decisions.find(x => x.id === 'D-2');
   assert.equal(d.status, 'open');
   assert.equal(d.lesson, 'Concept, mechanics, terms, and stakes.');
-  assert.equal(d.story, 'Priya wants a terse literal.');
-  assert.equal(d.inWild, 'x := [1,2,3] in examples/features/lists.jet');
+  assert.equal(d.ballotProcessVersion, 4);
+  assert.equal(d.reviewPasses.beginner, 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.');
   assert.equal(d.rec, 'A');
   assert.equal(d.ballotMode, 'full');
-  assert.equal(d.reviewPasses.boilOcean, 'The breadth review checked for missing choices.');
   assert.equal(d.recommendation.whyNot[0].key, 'B');
   assert.equal(d.hybrid.result, 'A');
   assert.deepEqual(d.options, [
@@ -281,6 +283,23 @@ test('cli: --no-claim never assigns, and no --agent is read-only', () => {
   run(cwd, ['brief', '#1', '--json']);
   s = JSON.parse(run(cwd, ['card', 'show', '#1', '--json']).out);
   assert.equal(s.assignee, null);
+});
+
+test('cli: tower brief refuses every card while an active card is ready to close', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'tower-brief-cli-'));
+  run(cwd, ['init', '--name', 'CLI']);
+  run(cwd, ['card', 'add', '--title', 'Close me']);
+  run(cwd, ['card', 'add', '--title', 'Not yet']);
+  run(cwd, ['card', 'criteria', '#1', '--add', 'observable result', '--by', 'planner']);
+  run(cwd, ['card', 'claim', '#1', '--by', 'builder']);
+  run(cwd, ['card', 'criteria', '#1', '--meet', '1', '--evidence', 'focused proof passed', '--by', 'orchestrator']);
+  const same = run(cwd, ['brief', '#1', '--no-claim'], false);
+  assert.equal(same.code, 1);
+  assert.match(same.out, /#1 has an active lease, all criteria met/);
+
+  const r = run(cwd, ['brief', '#2', '--no-claim'], false);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /#1 has an active lease, all criteria met/);
 });
 
 test('cli: no ref picks the top card via next\'s picker (workOrder respected)', () => {

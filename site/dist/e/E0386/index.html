@@ -37,32 +37,14 @@
 <p class="diag-copy fix" data-registry-field="fix">Write `(atom | atom) &amp;&amp; guard` or `(atom | atom) || guard`.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0386</code>: <code>tests/ui/dispatch_atom_boolean_parens.stderr</code>.</p>
-<pre class="diag">Error [E0386]: distributed atom groups need parentheses before `&amp;&amp;` or `||`.
+<pre class="diag">Error [E0386]: Distributed atom groups need parentheses before `&amp;&amp;` or `||`.
   --&gt; tests/ui/dispatch_atom_boolean_parens.jet:6:9
     |
   6 |         48 | 45 &amp;&amp; ready -&gt; print(&quot;hit&quot;)
     |         ^^^^^^^
  Why: A `|` arm head is one distributed group, so its boundary must stay visible before a Boolean operator applies.
- Fix: write `(atom | atom) &amp;&amp; guard` or `(atom | atom) || guard`.
+ Fix: Write `(atom | atom) &amp;&amp; guard` or `(atom | atom) || guard`.
 More: jet-lang.dev/e/E0386
-
-Error [E0116]: `print` doesn&#39;t hand back a value
-  --&gt; tests/ui/dispatch_atom_boolean_parens.jet:6:29
-    |
-  6 |         48 | 45 &amp;&amp; ready -&gt; print(&quot;hit&quot;)
-    |                             ^^^^^
- Why: a call is a value only when its function declares a result after the parameter list
- Fix: inside an arm, wrap the call in `{ … }`; otherwise put `print` on its own line, or declare it as `fn print(…) Type -&gt; …`
-More: jet-lang.dev/e/E0116
-
-Error [E0116]: `print` doesn&#39;t hand back a value
-  --&gt; tests/ui/dispatch_atom_boolean_parens.jet:7:17
-    |
-  7 |         else -&gt; print(&quot;miss&quot;)
-    |                 ^^^^^
- Why: a call is a value only when its function declares a result after the parameter list
- Fix: inside an arm, wrap the call in `{ … }`; otherwise put `print` on its own line, or declare it as `fn print(…) Type -&gt; …`
-More: jet-lang.dev/e/E0116
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

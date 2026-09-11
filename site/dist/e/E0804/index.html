@@ -34,25 +34,25 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for E0804</p>
+<p class="diag-copy fix" data-registry-field="fix">Use a named function or a non-recursive lambda binding for recursion.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0804</code>: <code>tests/ui/lambda_self_rec.stderr</code>.</p>
-<pre class="diag">Error [E0804]: a lambda can&#39;t call itself as `f`
+<pre class="diag">Error [E0804]: A lambda can&#39;t call itself as `f`
   --&gt; tests/ui/lambda_self_rec.jet:1:17
     |
   1 | fn run() { f :: (x: Int) -&gt; f(x) }
     |                 ^^^^^^^^^^^^^
- Why: short functions stored in a binding can&#39;t recurse in v1
- Fix: write a named `fn` instead of assigning the lambda to `f`
+ Why: Short functions stored in a binding can&#39;t recurse in v1
+ Fix: Write a named `fn` instead of assigning the lambda to `f`
 More: jet-lang.dev/e/E0804
 
-Error [E0102]: nothing named `f` exists here
+Error [E0102]: Nothing named `f` exists here
   --&gt; tests/ui/lambda_self_rec.jet:1:29
     |
   1 | fn run() { f :: (x: Int) -&gt; f(x) }
     |                             ^
- Why: only functions that have been defined (or built in, like `print` / `input`) can be called
- Fix: define it first (fn f() { ... }), or call one that exists
+ Why: Only functions that have been defined (or built in, like `print` / `input`) can be called
+ Fix: Define it first (fn f() { ... }), or call one that exists
 More: jet-lang.dev/e/E0102
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

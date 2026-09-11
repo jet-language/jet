@@ -1,17 +1,5 @@
 # Registry tiers
 
-Status: current for D-REGCURATE1=C and D-1913-LIVENESS1=C, owner ratified.
-
-## Plan of record
-
-No plan of record was stored on card #1911. This implementation derives the
-plan from the card body and its exit criteria:
-
-1. record the tier and gate result in registry metadata and the lock;
-2. show that data on fetch, install, and `jet inspect info`;
-3. enforce the core review receipt at publish;
-4. refuse community publish until every named gate is open.
-
 ## Core tier
 
 The core tier contains packages reviewed by a registry maintainer. The review
@@ -46,27 +34,12 @@ The channel is closed unless all four machine gates pass:
 - #1913 maintainer liveness.
 
 The index records each result in `gate_status`. A blocked gate stops publish
-before the artifact or index changes. The current implementation keeps the
-community channel closed while #1912, #1913, #431, or the live #935 chain is
-not available.
-
+before the artifact or index changes.
 The community trust model is owner-ratified by D-REGCURATE1=C. This document
 records the ratified tier rules; it does not open the channel while a gate is
 closed.
 
 ## Package name policy (#1912)
-
-### Plan of record
-
-No plan was recorded on card #1912. This plan comes from the card body and its
-exit criteria:
-
-1. read every existing package name from the registry index;
-2. compare the candidate with a case-folded confusable skeleton;
-3. check the reserved suffix list;
-4. warn for the warning distance and block for the block distance;
-5. emit a teaching diagnostic before any artifact or index write;
-6. test the rule and record its thresholds here.
 
 ### Mechanical rule
 
@@ -98,19 +71,6 @@ community use it at publish time.
 These thresholds and rules are owner-ratified by D-1912-NAME1=A.
 
 ## Maintainer liveness and takeover (#1913)
-
-### Derived plan
-
-No plan was recorded on card #1913. This plan comes from the card body and its
-exit criteria:
-
-1. expose the signed maintainer liveness state in package detail projections;
-2. treat a changed package signing key as a takeover;
-3. require the registry maintainer review receipt before the takeover enters
-   the index;
-4. verify the new maintainer's signature over the release content hash;
-5. test both refused and accepted takeover paths;
-6. record the owner-ratified liveness and takeover rules.
 
 ### Owner-ratified liveness rule
 

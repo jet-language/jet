@@ -142,7 +142,11 @@ fn print_effect_roles(request: &crate::Comptime::ReplEffectRequest, reused: bool
     println!("  Required effects: {}", request.root);
     println!(
         "  Granted effects: {}",
-        if reused { request.root.as_str() } else { "none" }
+        if reused {
+            request.root.as_str()
+        } else {
+            "none"
+        }
     );
     println!("  Denied effects: none");
     println!(

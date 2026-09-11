@@ -1,0 +1,59 @@
+// Parquet corpus consumer for the ratified DataFlow surface.
+// The shipped seam is data.file<T>(..., "parquet", limits) followed by
+// data.snapshot<T>(loader). There is no Parquet-specific typed-row/DataQuery
+// constructor yet, so this fixture consumes the existing canonical DataTree
+// row projection instead of naming an unshipped API.
+use core.data as data
+
+fn run() {
+    int_loader :: data.file<[DataTree]>(
+        "tests/fixtures/parquet_reader/int32_with_null_pages.parquet",
+        "parquet",
+        data.DataLimits.safe()
+    ) ?? panic("int32 loader")
+    int_snapshot :: data.snapshot<[DataTree]>(int_loader) ?? panic("int32 snapshot")
+    int_rows :: int_snapshot.value
+
+    // The upstream column index documents rows 200..299 as an all-null page.
+    // Scan for a non-null value so the ordinary INT32 path is checked without
+    // hard-coding a random value from the producer's corpus.
+    index := 0
+    saw_nonnull := false
+    loop index < int_rows.len() {
+        row :: int_rows.at(index) ?? panic("int32 row")
+        cell :: row.field("int32_field") ?? panic("int32 field")
+        if !cell.equal_unordered(DataTree.Null) {
+            saw_nonnull = true
+            break
+        }
+        index += 1
+    }
+    null_page_row :: int_rows.at(200) ?? panic("int32 null-page row")
+    null_page_cell :: null_page_row.field("int32_field") ?? panic("int32 null-page field")
+    print("int32 rows={int_rows.len()} nonnull={saw_nonnull} null_page={null_page_cell.equal_unordered(DataTree.Null)}")
+
+    dictionary_loader :: data.file<[DataTree]>(
+        "tests/fixtures/parquet_reader/alltypes_tiny_pages.parquet",
+        "parquet",
+        data.DataLimits.safe()
+    ) ?? panic("dictionary loader")
+    dictionary_snapshot :: data.snapshot<[DataTree]>(dictionary_loader) ?? panic("dictionary snapshot")
+    dictionary_rows :: dictionary_snapshot.value
+    first_dictionary_row :: dictionary_rows.at(0) ?? panic("dictionary first row")
+    // `string_col` is dictionary encoded in the upstream Impala alltypes file.
+    // Accessing it through DataTree keeps this fixture independent of a missing
+    // provider-specific typed-row constructor.
+    _dictionary_value :: first_dictionary_row.field("string_col") ?? panic("dictionary string_col")
+    print("dictionary: decoded string_col")
+
+    malformed_loader :: data.file<[DataTree]>(
+        "tests/fixtures/parquet_reader/ARROW-RS-GH-6229-DICTHEADER.parquet",
+        "parquet",
+        data.DataLimits.safe()
+    ) ?? panic("malformed loader")
+    malformed :: data.snapshot<[DataTree]>(malformed_loader)
+    if malformed == {
+        .Ok(_) -> print("malformed: unexpectedly accepted")
+        .Err(error) -> print("malformed: rejected {error.kind} {error.operation}")
+    }
+}

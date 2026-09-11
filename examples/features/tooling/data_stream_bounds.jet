@@ -1,7 +1,7 @@
 // D-DATAFLOW1=A: bounded typed pull stream + typed DataError.
 use core.data as data
 use core.files as files
-
+use core.testing as testing
 #Codable
 struct Event {
     service: String
@@ -9,7 +9,8 @@ struct Event {
 }
 
 fn run() {
-    path :: "/tmp/jet_data_stream_bounds.csv"
+    root :: testing.temp_dir("jet-data-stream-bounds")
+    path :: Path.from(root).join("events.csv").to_string()
     files.write(path, "service,latency_ms\napi,10.0\napi,20.0\ndb,5.0\napi,30.0\n") ?? panic("write")
     input :: files.open(path) ?? panic("open")
     limits := data.DataLimits.safe()
@@ -21,9 +22,12 @@ fn run() {
         .Val(row) -> { print("first: {row.service} {row.latency_ms}") }
         .None -> { panic("expected row") }
     }
-    groups :: data.group_mean(reader, e -> e.service, e -> e.latency_ms)
+    groups :: data.query(reader)
+        .group_by(e -> e.service)
+        .mean(e -> e.latency_ms)
+        .collect()
     if groups == {
-        .Ok(rows) -> { print("unexpected ok {data.count(rows)}") }
+        .Ok(rows) -> { print("unexpected ok {rows.len()}") }
         .Err(error) -> { print("{error}") }
     }
     empty_vals :: [Float]{}

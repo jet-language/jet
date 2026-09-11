@@ -7,6 +7,9 @@ pub use jet_sema::{
     CanonicalAST, Collections, Comptime, Diagnostics, Formatter, Generics, Lexer, Parser, Policy,
     Sema, Syntax, TargetMachine, Traits, AST, SHA256,
 };
+pub use jet_foundation::{
+    CLISchema, DataTree, Facts, JSON, Names, Numeric, OSTarget, ResourceSchedule, WebPartition,
+};
 // `EncodingJson.rs` resolves exact-number validation through
 // `super::jet_json_number`; supply it at the root the same way `jet-jit` does.
 #[allow(unused_imports)]
@@ -185,10 +188,20 @@ pub mod scheduler {
     include!("Prelude/Deadline.rs");
     include!("Prelude/WorkflowWait.rs");
     include!("SchedulerHost.rs");
+    include!("Prelude/Core/TimeMonotonic.rs");
+    include!("Prelude/Core/Duration.rs");
+    include!("Prelude/Core/Time.rs");
+    include!("Prelude/Core/TimeInstant.rs");
+    include!("Prelude/Core/Realtime.rs");
     include!("Prelude/CoreLib/Top/TimeSleep.rs");
     include!("Prelude/Scheduler.rs");
     include!("Prelude/CoreLib/Top/WorkflowSleep.rs");
     include!("Prelude/Stream.rs");
+    include!("Prelude/Core/Stream.rs");
+    pub use jet_foundation::Devtools::*;
+    // Same policy constants AOT injects before Observe.rs / Devtools.rs.
+    const JET_DEVTOOLS_RUNTIME_ENABLED: bool = true;
+    const JET_DEVTOOLS_LOCAL_RAIL_ENABLED: bool = true;
     include!("Prelude/Observe.rs");
 }
 /// `Prelude/Scheduler.rs` calls `crate::jet_task_control_trace`. An emitted
@@ -205,6 +218,23 @@ pub mod local_cell {
     // opens with an inner doc comment still compiles as a module.
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
+
+    impl JetCellOptionLike for jet_foundation::MIR::MirRuntimeValue {
+        type Value = jet_foundation::MIR::MirRuntimeValue;
+
+        fn value(&self) -> Option<&Self::Value> {
+            match self {
+                jet_foundation::MIR::MirRuntimeValue::Absent { .. }
+                | jet_foundation::MIR::MirRuntimeValue::Moved => None,
+                jet_foundation::MIR::MirRuntimeValue::Present(inner) => Some(inner),
+                other => Some(other),
+            }
+        }
+
+        fn store(&mut self, value: Self::Value) {
+            *self = jet_foundation::MIR::MirRuntimeValue::Present(Box::new(value));
+        }
+    }
 }
 /// D-HOLE1: one option-lift operation shared by AOT, TIR, JIT, and wasm.
 pub mod option_lift2 {
@@ -233,11 +263,27 @@ pub mod columns {
 /// D-NUMWIDEN-CROSS1=E: one checked integer-to-float widening policy shared
 /// by AOT emission, TIR evaluation, and the resident JIT adapter.
 pub mod numeric_widen {
-    include!("Prelude/NumericWiden.rs");
-    // Items are order-independent; the import trails the include so a file that
-    // opens with an inner doc comment still compiles as a module.
-    #[allow(unused_imports)]
-    pub use jet_foundation::Outcome::*;
+    pub use jet_foundation::NumericConversion::*;
+}
+pub mod embedded_hardware {
+    fn jet_panic(file: &str, line: u32, message: &str) -> ! {
+        let diagnostic = jet_foundation::Outcome::jet_render_runtime_stop(
+            "E3001",
+            file,
+            line,
+            "",
+            "",
+            1,
+            1,
+            message,
+            "",
+        );
+        panic!("{}", diagnostic.rendered);
+    }
+    include!("Prelude/Core/EmbeddedHardware.rs");
+}
+pub mod inline_range {
+    include!("Prelude/Core/InlineRange.rs");
 }
 /// D-TASKGROUP-PARAM1=A: canonical structured task ownership policy. The JIT
 /// compiles the same Prelude source that AOT embeds.
@@ -297,12 +343,19 @@ pub mod command_suite {
 #[cfg(test)]
 #[test]
 fn unmatched_enum_match_fails_closed() {
-    let span = Diagnostics::Span::new(4, 12);
-    let diagnostic = Codegen::TIR::unmatched_enum_match_guard(true, span)
-        .expect_err("a sema-proved exhaustive match must not fall through");
-    assert_eq!(diagnostic.code, "E0956");
-    assert_eq!(diagnostic.span, Some(span));
-    assert!(diagnostic.what.contains("exhaustive match fallthrough"));
-    assert!(Codegen::TIR::unmatched_enum_match_guard(false, span).is_ok());
+    let lowering = include_str!("Codegen/TIR/tir_to_mir_stmt.rs");
+    assert!(
+        lowering.contains("checked exhaustive match fallthrough"),
+        "a sema-proved exhaustive match must not fall through"
+    );
+    assert!(
+        lowering.contains("MirTerminator::Unreachable"),
+        "exhaustive match fallthrough must be unreachable, not a silent continue"
+    );
+    let eval = include_str!("Codegen/MIREval.rs");
+    assert!(
+        eval.contains("MIR reached an unreachable terminator"),
+        "the evaluator must fail closed when an exhaustive match falls through"
+    );
 }
 // Prelude/ contains include_str-embedded text files, not Rust modules.

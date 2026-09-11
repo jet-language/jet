@@ -4079,6 +4079,22 @@ fn fmt_preserves_casing_errors_for_sema() {
     assert_eq!(once, jet::format_source(&once).expect("re-fmt"));
 }
 #[test]
+fn external_module_format_remains_parseable_and_idempotent() {
+    let source = "module helper\nfn run() { print(helper.value()) }\n";
+    let formatted = jet::format_source(source).expect("external module should format");
+    let parsed = jet::Compiler::parse_source(&formatted);
+    assert!(
+        parsed.diagnostics.is_empty(),
+        "formatter made a valid module declaration invalid: {:?}",
+        parsed.diagnostics
+    );
+    assert_eq!(
+        formatted,
+        jet::format_source(&formatted).expect("formatted module should reformat")
+    );
+}
+
+#[test]
 fn generic_modules_roundtrip_templates_symbolic_lengths_nested_items_and_alias_chains() {
     let src = r#"module ring<T>(capacity: Int, label: String) {
 #Meta(category: label)

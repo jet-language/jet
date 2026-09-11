@@ -3,6 +3,8 @@
 
 use super::strip_comments as strip_line_comments;
 use crate::Authority::AuthorityResolver;
+use crate::{Lexer, Parser};
+use jet_foundation::CLISchema::JobRegistry;
 use std::path::{Path, PathBuf};
 
 // ── package discovery (U10 Chunk 3) ─────────────────────────────────────────
@@ -78,6 +80,58 @@ pub fn discover_module_in(root: &Path, name: &str) -> Result<PathBuf, DiscoveryE
                 .collect(),
         }),
     }
+}
+
+/// Parse every checked source file below `root` and project its `#Job`
+/// declarations into the shared registry used by package tooling.
+///
+/// Source files are supplied by the authority resolver in sorted relative-path
+/// order. The package and payload files are metadata, not Jet modules, and are
+/// therefore excluded from the projection. Internal jobs remain in the
+/// registry so callers can apply the same visibility rule as execution.
+pub fn discover_jobs_in(root: &Path) -> Result<JobRegistry, String> {
+    let resolver = AuthorityResolver::open(root).map_err(|error| format!("{error:?}"))?;
+    let files = resolver
+        .discover_source_files()
+        .map_err(|error| format!("{error:?}"))?;
+    let mut registry = JobRegistry::default();
+    for file in &files {
+        if file
+            .relative
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| {
+                name == crate::Syntax::PACKAGE_FILE || name == crate::Syntax::PAYLOAD_FILE
+            })
+        {
+            continue;
+        }
+        let text = file.text().map_err(|error| format!("{error:?}"))?;
+        let source = super::mask_inline_package_source(&text)
+            .map_err(|error| format!("{error:?}"))?
+            .0;
+        let (tokens, lex_diags) = Lexer::lex(&source);
+        if !lex_diags.is_empty() {
+            return Err(format!(
+                "{}: lexer diagnostics: {lex_diags:#?}",
+                file.path.display()
+            ));
+        }
+        let program = Parser::parse_with_source(&tokens, &source).map_err(|diagnostics| {
+            format!(
+                "{}: parser diagnostics: {diagnostics:#?}",
+                file.path.display()
+            )
+        })?;
+        registry.append(JobRegistry::from_program(&program));
+        resolver
+            .revalidate_file(file)
+            .map_err(|error| format!("{error:?}"))?;
+    }
+    resolver
+        .revalidate_root()
+        .map_err(|error| format!("{error:?}"))?;
+    Ok(registry)
 }
 
 /// Return `true` if `text` (a `.jet` source file) declares `module <name> { … }`
@@ -216,10 +270,9 @@ mod tests {
         std::fs::create_dir(&nested).unwrap();
         symlink("..", nested.join("loop")).unwrap();
 
-        assert!(matches!(
-            discover_module_in(&dir, "workspace"),
-            Err(DiscoveryError::NotFound { .. })
-        ));
+        let found = discover_module_in(&dir, "workspace")
+            .expect("a recursive child symlink must not hide a root module");
+        assert_eq!(found, dir);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

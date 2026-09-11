@@ -12,17 +12,17 @@ pub trait CheckedText {
 /// Prelude cell. The generated module binding stays safe Rust; the execution
 /// engine only reads and writes this one storage abstraction.
 pub struct JetPersistCell<T> {
-    value: std::sync::Mutex<T>,
+    value: std::sync::Mutex<Option<T>>,
 }
 
 impl<T> JetPersistCell<T> {
     pub const fn new(value: T) -> Self {
         Self {
-            value: std::sync::Mutex::new(value),
+            value: std::sync::Mutex::new(Some(value)),
         }
     }
 
-    fn guard(&self) -> std::sync::MutexGuard<'_, T> {
+    fn guard(&self) -> std::sync::MutexGuard<'_, Option<T>> {
         self.value
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -32,11 +32,20 @@ impl<T> JetPersistCell<T> {
     where
         T: Clone,
     {
-        self.guard().clone()
+        self.guard()
+            .as_ref()
+            .expect("MIR persistent value is uninitialized")
+            .clone()
+    }
+
+    pub fn take(&self) -> T {
+        self.guard()
+            .take()
+            .expect("MIR persistent value is uninitialized")
     }
 
     pub fn set(&self, value: T) {
-        *self.guard() = value;
+        *self.guard() = Some(value);
     }
 }
 
@@ -417,7 +426,7 @@ where
     F: Fn(&U, &T) -> U + Sync,
     M: Fn(&U, &U) -> U + Sync,
 {
-    let mut partials = jet_list_para_chunks(xs.len(), usize::MAX, |range| {
+    let partials = jet_list_para_chunks(xs.len(), usize::MAX, |range| {
         let start = range.start;
         let mut acc = jet_para_call(start, &seed)?;
         for index in range {
@@ -428,21 +437,108 @@ where
     if partials.is_empty() {
         return seed();
     }
-    while partials.len() > 1 {
-        let mut next = Vec::with_capacity(partials.len().div_ceil(2));
-        let mut iter = partials.into_iter();
-        while let Some((left_index, left)) = iter.next() {
-            match iter.next() {
-                Some((_, right)) => match jet_para_call(left_index, || merge(&left, &right)) {
-                    Ok(merged) => next.push((left_index, merged)),
-                    Err(failure) => jet_para_raise_failure(failure),
-                },
-                None => next.push((left_index, left)),
-            }
-        }
-        partials = next;
-    }
-    partials.pop().expect("non-empty parallel fold lost its result").1
+    jet_list_para_merge_tree(partials, |(left_index, left), (_, right)| {
+        jet_para_call(left_index, || merge(&left, &right))
+            .map(|merged| (left_index, merged))
+    })
+    .unwrap_or_else(|failure| jet_para_raise_failure(failure))
+    .1
+}
+
+
+/// D-FRED1=A: bridge allocation checks the byte extent before touching the
+/// retained wasm-side buffer. The pointer ABI is 32-bit, so an allocation
+/// larger than the addressable linear-memory offset is rejected explicitly.
+#[cfg(target_arch = "wasm32")]
+#[inline]
+fn jet_web_d_fred_checked_len(len: u32, element_size: usize) -> usize {
+    let len = len as usize;
+    let bytes = len
+        .checked_mul(element_size)
+        .expect("Web D-FRED input byte size overflow");
+    assert!(
+        bytes <= u32::MAX as usize,
+        "Web D-FRED input exceeds wasm32 address space"
+    );
+    len
+}
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static JET_WEB_D_FRED_F32_INPUT: std::cell::RefCell<Vec<f32>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn jet_web_d_fred_f32_alloc(len: u32) -> u32 {
+    JET_WEB_D_FRED_F32_INPUT.with(|cell| {
+        let mut values = cell.borrow_mut();
+        let len = jet_web_d_fred_checked_len(len, std::mem::size_of::<f32>());
+        values.resize(len, 0.0);
+        values.as_mut_ptr() as usize as u32
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn jet_web_d_fred_f32_reduce(ptr: u32, len: u32, seed: f32) -> f32 {
+    JET_WEB_D_FRED_F32_INPUT.with(|cell| {
+        let values = cell.borrow();
+        assert_eq!(ptr as usize, values.as_ptr() as usize, "invalid Web D-FRED input pointer");
+        assert!(len as usize <= values.len(), "invalid Web D-FRED input length");
+        jet_simd_reduce_fixed(&values[..len as usize], seed)
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn jet_web_d_fred_f32_free(ptr: u32) {
+    JET_WEB_D_FRED_F32_INPUT.with(|cell| {
+        let mut values = cell.borrow_mut();
+        assert_eq!(ptr as usize, values.as_ptr() as usize, "invalid Web D-FRED input pointer");
+        values.clear();
+        values.shrink_to_fit();
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static JET_WEB_D_FRED_F64_INPUT: std::cell::RefCell<Vec<f64>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn jet_web_d_fred_f64_alloc(len: u32) -> u32 {
+    JET_WEB_D_FRED_F64_INPUT.with(|cell| {
+        let mut values = cell.borrow_mut();
+        let len = jet_web_d_fred_checked_len(len, std::mem::size_of::<f64>());
+        values.resize(len, 0.0);
+        values.as_mut_ptr() as usize as u32
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn jet_web_d_fred_f64_reduce(ptr: u32, len: u32, seed: f64) -> f64 {
+    JET_WEB_D_FRED_F64_INPUT.with(|cell| {
+        let values = cell.borrow();
+        assert_eq!(ptr as usize, values.as_ptr() as usize, "invalid Web D-FRED input pointer");
+        assert!(len as usize <= values.len(), "invalid Web D-FRED input length");
+        jet_simd_reduce_fixed(&values[..len as usize], seed)
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn jet_web_d_fred_f64_free(ptr: u32) {
+    JET_WEB_D_FRED_F64_INPUT.with(|cell| {
+        let mut values = cell.borrow_mut();
+        assert_eq!(ptr as usize, values.as_ptr() as usize, "invalid Web D-FRED input pointer");
+        values.clear();
+        values.shrink_to_fit();
+    });
 }
 
 // D-FIDELITY-API1=A: runtime-global fidelity signal. App code decides policy.
@@ -500,34 +596,146 @@ impl JetShow for JetReservoirSampler {
     }
 }
 
+struct JetTestExpectFrame {
+    scope: u64,
+    expected: Option<String>,
+    stop: Option<String>,
+}
+
 thread_local! {
     pub static JET_IN_SCHEDULER_TASK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static JET_INTERRUPT_HANDLER_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
-    static JET_TEST_EXPECT_FAIL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static JET_TEST_STOP_CODE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    static JET_TEST_EXPECT_FAIL: std::cell::RefCell<Vec<JetTestExpectFrame>> = const { std::cell::RefCell::new(Vec::new()) };
+    static JET_TEST_EXPECT_COMPLETED: std::cell::RefCell<Vec<(u64, String)>> = const { std::cell::RefCell::new(Vec::new()) };
+    static JET_TEST_TIMEOUTS: std::cell::RefCell<Vec<(u64, std::time::Instant, i64, usize)>> = const { std::cell::RefCell::new(Vec::new()) };
+    static JET_TEST_WHOLE_SKIP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// D-FAIL-BREACH1=A: a test can catch a runtime stop and assert its code.
-pub fn jet_test_expect_fail_enter() {
-    JET_TEST_EXPECT_FAIL.with(|active| active.set(true));
-    JET_TEST_STOP_CODE.with(|code| *code.borrow_mut() = None);
+pub fn jet_test_expect_fail_enter_scope(scope: u64, expected: Option<&str>) {
+    JET_TEST_EXPECT_FAIL.with(|frames| {
+        frames.borrow_mut().push(JetTestExpectFrame {
+            scope,
+            expected: expected.map(str::to_owned),
+            stop: None,
+        });
+    });
 }
 
-pub fn jet_test_expect_fail_leave() {
-    JET_TEST_EXPECT_FAIL.with(|active| active.set(false));
+pub fn jet_test_expect_fail_leave_scope(scope: u64) -> Option<String> {
+    if let Some(result) = JET_TEST_EXPECT_COMPLETED.with(|completed| {
+        let mut completed = completed.borrow_mut();
+        completed
+            .iter()
+            .rposition(|(candidate, _)| *candidate == scope)
+            .map(|index| completed.remove(index).1)
+    }) {
+        return Some(result);
+    }
+    JET_TEST_EXPECT_FAIL.with(|frames| {
+        let mut frames = frames.borrow_mut();
+        frames
+            .iter()
+            .rposition(|frame| frame.scope == scope)
+            .and_then(|index| frames.remove(index).stop)
+    })
 }
 
 pub fn jet_test_record_stop(code: &str) {
-    JET_TEST_STOP_CODE.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        if slot.is_none() {
-            *slot = Some(code.to_string());
+    JET_TEST_EXPECT_FAIL.with(|frames| {
+        for frame in frames.borrow_mut().iter_mut() {
+            if frame.stop.is_none() {
+                frame.stop = Some(code.to_string());
+            }
         }
     });
 }
 
-pub fn jet_test_take_stop_code() -> Option<String> {
-    JET_TEST_STOP_CODE.with(|slot| slot.borrow_mut().take())
+pub fn jet_test_expect_fail_matching_scope() -> Option<u64> {
+    JET_TEST_EXPECT_FAIL.with(|frames| {
+        frames.borrow().iter().rev().find_map(|frame| {
+            let code = frame.stop.as_deref()?;
+            (frame.expected.as_deref().is_none_or(|expected| expected == code)).then_some(frame.scope)
+        })
+    })
+}
+
+pub fn jet_test_expect_fail_catch_scope() -> Option<u64> {
+    let caught = JET_TEST_EXPECT_FAIL.with(|frames| {
+        let mut frames = frames.borrow_mut();
+        let index = frames.iter().rposition(|frame| {
+            let Some(code) = frame.stop.as_deref() else {
+                return false;
+            };
+            frame.expected.as_deref().is_none_or(|expected| expected == code)
+        })?;
+        let frame = frames.remove(index);
+        frames.truncate(index);
+        for parent in frames.iter_mut() {
+            parent.stop = None;
+        }
+        Some((frame.scope, frame.stop.unwrap_or_default(), index))
+    });
+    if let Some((scope, code, depth)) = caught {
+        JET_TEST_TIMEOUTS.with(|timeouts| {
+            timeouts.borrow_mut().retain(|(_, _, _, entered_depth)| *entered_depth <= depth);
+        });
+        JET_TEST_EXPECT_COMPLETED.with(|completed| completed.borrow_mut().push((scope, code)));
+        Some(scope)
+    } else {
+        None
+    }
+}
+
+pub fn jet_test_expect_fail_abort() {
+    JET_TEST_EXPECT_FAIL.with(|frames| frames.borrow_mut().clear());
+    JET_TEST_EXPECT_COMPLETED.with(|completed| completed.borrow_mut().clear());
+}
+
+pub fn jet_test_expect_fail_unmet(expected: Option<&str>) -> ! {
+    let message = jet_test_expect_fail_message(expected);
+    jet_runtime_stop("E3001", "", 0, &message)
+}
+
+pub fn jet_test_timeout_enter(scope: u64, limit_ns: i64) {
+    let depth = JET_TEST_EXPECT_FAIL.with(|frames| frames.borrow().len());
+    JET_TEST_TIMEOUTS.with(|timeouts| {
+        timeouts
+            .borrow_mut()
+            .push((scope, std::time::Instant::now(), limit_ns, depth));
+    });
+}
+
+pub fn jet_test_timeout_leave(scope: u64) -> Option<(i64, i64)> {
+    JET_TEST_TIMEOUTS.with(|timeouts| {
+        let mut timeouts = timeouts.borrow_mut();
+        let index = timeouts.iter().rposition(|(candidate, _, _, _)| *candidate == scope)?;
+        let (_, started, limit_ns, _) = timeouts.remove(index);
+        let elapsed_ns = started.elapsed().as_nanos().min(i64::MAX as u128) as i64;
+        Some((elapsed_ns, limit_ns))
+    })
+}
+
+pub fn jet_test_timeout_abort() {
+    JET_TEST_TIMEOUTS.with(|timeouts| timeouts.borrow_mut().clear());
+}
+
+pub fn jet_test_timeout_failure(elapsed_ns: i64, limit_ns: i64) -> ! {
+    let message = jet_test_timeout_message(elapsed_ns, limit_ns);
+    jet_runtime_stop("E3001", "", 0, &message)
+}
+
+pub fn jet_test_skip_scope(whole_test: bool) {
+    if whole_test {
+        JET_TEST_WHOLE_SKIP.with(|skipped| skipped.set(true));
+    }
+}
+
+pub fn jet_test_take_whole_skip() -> bool {
+    JET_TEST_WHOLE_SKIP.with(|skipped| skipped.replace(false))
+}
+
+pub fn jet_test_skip_abort() {
+    JET_TEST_WHOLE_SKIP.with(|skipped| skipped.set(false));
 }
 
 /// D-FAIL-BREACH1=A: stop before native recursion can exhaust the process
@@ -584,7 +792,7 @@ pub fn jet_interrupt_handler_panic_leave() {
 fn jet_runtime_should_unwind() -> bool {
     jet_scheduler_in_task()
         || jet_interrupt_handler_should_unwind()
-        || JET_TEST_EXPECT_FAIL.with(|active| active.get())
+        || JET_TEST_EXPECT_FAIL.with(|frames| !frames.borrow().is_empty())
 }
 
 fn jet_interrupt_handler_should_unwind() -> bool {
@@ -776,6 +984,7 @@ fn jet_ffi_runtime_call<F, T>(
 where
     F: FnOnce() -> T,
 {
+    jet_scheduler_world_reject_uncontrolled("foreign");
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
         Ok(value) => value,
         Err(payload) => {
@@ -793,6 +1002,7 @@ where
     }
 }
 
+
 /// The callback edge is below foreign code, so it cannot return a Rust unwind
 /// to the caller. Preserve Jet's typed runtime report when one exists and
 /// convert every other panic to a terminal E3001 report. Returning a default
@@ -802,6 +1012,7 @@ fn jet_ffi_callback_boundary<F, T>(run: F) -> T
 where
     F: FnOnce() -> T,
 {
+    jet_scheduler_world_reject_uncontrolled("foreign");
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
         Ok(value) => value,
         Err(payload) => jet_ffi_callback_panic(payload),
@@ -830,6 +1041,14 @@ fn jet_ffi_callback_panic(payload: Box<dyn std::any::Any + Send>) -> ! {
             },
         },
     }
+}
+
+/// A cryptographic random draw is intentionally not replayed by a
+/// deterministic world. Route the canonical AOT Core entry through this
+/// boundary so it cannot silently fall back to operating-system entropy.
+fn jet_std_crypto_random_bytes_controlled(n: i64) -> Vec<u8> {
+    jet_scheduler_world_reject_uncontrolled("entropy");
+    jet_std_crypto_random_bytes(n)
 }
 
 /// The same classification, on the one thread that is NOT the program's entry
@@ -1107,19 +1326,13 @@ fn jet_contract_fail(file: &str, line: u32, clause_kw: &str, msg: &str) -> ! {
 /// test harness. Length framing keeps user strings opaque; terminal text is
 /// never parsed as evidence.
 fn jet_proof_record(kind: u8, state: u8, name: &str, message: &str, file: &str, line: u32) {
-    let Ok(path) = std::env::var("JET_TEST_PROOF_REPORT") else { return };
-    let Ok(mut report) = std::fs::OpenOptions::new().create(true).append(true).open(path) else { return };
-    use std::io::Write as _;
-    if report.metadata().map(|m| m.len() == 0).unwrap_or(false) {
-        let _ = report.write_all(b"JETTEST2");
+    if state == 1 && jet_test_expect_fail_matching_scope().is_some() {
+        jet_evidence_with_expectation(true, || {
+            jet_evidence_record_write(kind, state, name, message, file, line);
+        });
+    } else {
+        jet_evidence_record_write(kind, state, name, message, file, line);
     }
-    let _ = report.write_all(&[kind, state]);
-    let _ = report.write_all(&(line as u64).to_be_bytes());
-    for bytes in [name.as_bytes(), message.as_bytes(), file.as_bytes()] {
-        let _ = report.write_all(&(bytes.len() as u64).to_be_bytes());
-        let _ = report.write_all(bytes);
-    }
-    let _ = report.flush();
 }
 // D-INTBIG1/D-NUMOPS1: plain arithmetic on a fixed-width integer traps on
 // overflow (safe by default) — a silent corruption becomes a caught bug. The
@@ -1127,6 +1340,59 @@ fn jet_proof_record(kind: u8, state: u8, name: &str, message: &str, file: &str, 
 // supplies the typed method adapter used by generated Rust. Exact default
 // `Int` uses packed Prelude helpers. Floats and `#Numeric` distinct types keep
 // plain Rust operators.
+impl JetFixedArithmeticError {
+    fn message(self) -> String {
+        match self {
+            Self::AddOverflow => {
+                "This addition overflows the value's type (the result is outside its range)"
+                    .to_string()
+            }
+            Self::SubOverflow => {
+                "This subtraction overflows the value's type (the result is outside its range)"
+                    .to_string()
+            }
+            Self::MulOverflow => {
+                "This multiplication overflows the value's type (the result is outside its range)"
+                    .to_string()
+            }
+            Self::DivideZero => "divided by zero".to_string(),
+            Self::DivisionOverflow => {
+                "This division overflows the value's type (the result is outside its range)"
+                    .to_string()
+            }
+            Self::RemainderOverflow => "Attempt to calculate the remainder with overflow".to_string(),
+            Self::PowerNegative => {
+                "A negative exponent has no whole-number result (make the base a Float to raise it to a negative power)"
+                    .to_string()
+            }
+            Self::PowerOverflow => {
+                "This power overflows the value's type (the result is outside its range)"
+                    .to_string()
+            }
+            Self::RotateNegative => "A rotation count cannot be negative".to_string(),
+            Self::ShiftOutOfRange {
+                direction,
+                count,
+                bits,
+            } => format!(
+                "Shifting {direction} by {count} bits is out of range (this type is {bits} bits wide)"
+            ),
+            Self::UnknownOperation => "This fixed-width arithmetic operation is unsupported".to_string(),
+        }
+    }
+}
+
+#[inline(always)]
+fn jet_fixed_error_stop(
+    error: JetFixedArithmeticError,
+    file: &str,
+    line: u32,
+) -> ! {
+    let message = error.to_string();
+    jet_arithmetic_stop(file, line, &message)
+}
+
+/// D-INTBIG1/D-NUMOPS1: plain arithmetic on a fixed-width integer traps on
 trait JetArith: Copy {
     fn jet_add(self, rhs: Self, file: &str, line: u32) -> Self;
     fn jet_sub(self, rhs: Self, file: &str, line: u32) -> Self;
@@ -1157,7 +1423,7 @@ fn jet_fixed_value(result: JetFixedArithmeticResult, file: &str, line: u32) -> i
             "This checked fixed-width operation has no result",
         ),
         JetFixedArithmeticResult::Trap(error) => {
-            let message = error.message();
+            let message = error.to_string();
             jet_arithmetic_stop(file, line, &message)
         }
     }
@@ -1266,6 +1532,445 @@ jet_arith_impl!(
     (i8, true), (i16, true), (i32, true), (i64, true),
     (u8, false), (u16, false), (u32, false), (u64, false)
 );
+#[inline(always)]
+fn jet_fixed_option<T>(
+    result: JetFixedArithmeticResult,
+    map: impl FnOnce(i64) -> T,
+) -> Option<T> {
+    match result {
+        JetFixedArithmeticResult::Value(value) => Some(map(value)),
+        JetFixedArithmeticResult::Absent | JetFixedArithmeticResult::Trap(_) => None,
+    }
+}
+
+// These wrappers are intentionally concrete at the Prelude boundary.  The
+// operation, overflow mode, and fixed width are encoded by the function item,
+// so MIR never passes a runtime operation or type descriptor to this kernel.
+macro_rules! jet_fixed_route_kernels {
+    (
+        $t:ty, $signed:expr, $bits:expr;
+        trap: {
+            $trap_add:ident, $trap_sub:ident, $trap_mul:ident,
+            $trap_div:ident, $trap_rem:ident, $trap_floor_div:ident,
+            $trap_mod:ident, $trap_pow:ident, $trap_shl:ident, $trap_shr:ident
+        };
+        wrapping: {
+            $wrapping_add:ident, $wrapping_sub:ident, $wrapping_mul:ident,
+            $wrapping_div:ident, $wrapping_pow:ident
+        };
+        saturating: {
+            $saturating_add:ident, $saturating_sub:ident, $saturating_mul:ident,
+            $saturating_div:ident, $saturating_pow:ident
+        };
+        checked: {
+            $checked_add:ident, $checked_sub:ident, $checked_mul:ident,
+            $checked_div:ident, $checked_rem:ident, $checked_pow:ident
+        };
+        rotate: {
+            $rotate_left:ident, $rotate_right:ident
+        }
+    ) => {
+        #[inline(always)]
+        pub(crate) fn $trap_add(left: $t, right: $t, file: &str, line: u32) -> $t {
+            <$t as JetArith>::jet_add(left, right, file, line)
+        }
+        #[inline(always)]
+        pub(crate) fn $trap_sub(left: $t, right: $t, file: &str, line: u32) -> $t {
+            <$t as JetArith>::jet_sub(left, right, file, line)
+        }
+        #[inline(always)]
+        pub(crate) fn $trap_mul(left: $t, right: $t, file: &str, line: u32) -> $t {
+            <$t as JetArith>::jet_mul(left, right, file, line)
+        }
+        #[inline(always)]
+        pub(crate) fn $trap_div(left: $t, right: $t, file: &str, line: u32) -> $t {
+            <$t as JetArith>::jet_div(left, right, file, line)
+        }
+        #[inline(always)]
+        pub(crate) fn $trap_rem(left: $t, right: $t, file: &str, line: u32) -> $t {
+            <$t as JetArith>::jet_rem(left, right, file, line)
+        }
+        #[inline(always)]
+        pub(crate) fn $trap_floor_div(left: $t, right: $t, file: &str, line: u32) -> $t {
+            jet_fixed_value(
+                jet_fixed_arithmetic(
+                    left as i64,
+                    right as i128,
+                    JET_FIXED_OP_FLOOR_DIV,
+                    JET_FIXED_MODE_TRAP,
+                    $signed,
+                    $bits,
+                    $signed,
+                ),
+                file,
+                line,
+            ) as $t
+        }
+        #[inline(always)]
+        pub(crate) fn $trap_mod(left: $t, right: $t, file: &str, line: u32) -> $t {
+            jet_fixed_value(
+                jet_fixed_arithmetic(
+                    left as i64,
+                    right as i128,
+                    JET_FIXED_OP_MOD,
+                    JET_FIXED_MODE_TRAP,
+                    $signed,
+                    $bits,
+                    $signed,
+                ),
+                file,
+                line,
+            ) as $t
+        }
+        #[inline(always)]
+        pub(crate) fn $trap_pow(left: $t, right: $t, file: &str, line: u32) -> $t {
+            <$t as JetPow>::jet_pow(left, right as i128, file, line)
+        }
+        #[inline(always)]
+        pub(crate) fn $trap_shl(left: $t, right: $t, file: &str, line: u32) -> $t {
+            <$t as JetArith>::jet_shl(left, right as i128, file, line)
+        }
+        #[inline(always)]
+        pub(crate) fn $trap_shr(left: $t, right: $t, file: &str, line: u32) -> $t {
+            <$t as JetArith>::jet_shr(left, right as i128, file, line)
+        }
+
+        #[inline(always)]
+        pub(crate) fn $wrapping_add(left: $t, right: $t) -> $t {
+            <$t as JetArith>::jet_wrapping_add(left, right)
+        }
+        #[inline(always)]
+        pub(crate) fn $wrapping_sub(left: $t, right: $t) -> $t {
+            <$t as JetArith>::jet_wrapping_sub(left, right)
+        }
+        #[inline(always)]
+        pub(crate) fn $wrapping_mul(left: $t, right: $t) -> $t {
+            <$t as JetArith>::jet_wrapping_mul(left, right)
+        }
+        #[inline(always)]
+        pub(crate) fn $wrapping_div(left: $t, right: $t, file: &str, line: u32) -> $t {
+            jet_fixed_value(
+                jet_fixed_arithmetic(
+                    left as i64,
+                    right as i128,
+                    JET_FIXED_OP_DIV,
+                    JET_FIXED_MODE_WRAPPING,
+                    $signed,
+                    $bits,
+                    $signed,
+                ),
+                file,
+                line,
+            ) as $t
+        }
+        #[inline(always)]
+        pub(crate) fn $wrapping_pow(left: $t, right: $t, file: &str, line: u32) -> $t {
+            <$t as JetPow>::jet_wrapping_pow(left, right as i128, file, line)
+        }
+
+        #[inline(always)]
+        pub(crate) fn $saturating_add(left: $t, right: $t) -> $t {
+            <$t as JetArith>::jet_saturating_add(left, right)
+        }
+        #[inline(always)]
+        pub(crate) fn $saturating_sub(left: $t, right: $t) -> $t {
+            <$t as JetArith>::jet_saturating_sub(left, right)
+        }
+        #[inline(always)]
+        pub(crate) fn $saturating_mul(left: $t, right: $t) -> $t {
+            <$t as JetArith>::jet_saturating_mul(left, right)
+        }
+        #[inline(always)]
+        pub(crate) fn $saturating_div(left: $t, right: $t, file: &str, line: u32) -> $t {
+            jet_fixed_value(
+                jet_fixed_arithmetic(
+                    left as i64,
+                    right as i128,
+                    JET_FIXED_OP_DIV,
+                    JET_FIXED_MODE_SATURATING,
+                    $signed,
+                    $bits,
+                    $signed,
+                ),
+                file,
+                line,
+            ) as $t
+        }
+        #[inline(always)]
+        pub(crate) fn $saturating_pow(left: $t, right: $t, file: &str, line: u32) -> $t {
+            <$t as JetPow>::jet_saturating_pow(left, right as i128, file, line)
+        }
+
+        #[inline(always)]
+        pub(crate) fn $checked_add(left: $t, right: $t) -> Option<$t> {
+            jet_fixed_option(
+                jet_fixed_arithmetic(
+                    left as i64,
+                    right as i128,
+                    JET_FIXED_OP_ADD,
+                    JET_FIXED_MODE_CHECKED,
+                    $signed,
+                    $bits,
+                    $signed,
+                ),
+                |value| value as $t,
+            )
+        }
+        #[inline(always)]
+        pub(crate) fn $checked_sub(left: $t, right: $t) -> Option<$t> {
+            jet_fixed_option(
+                jet_fixed_arithmetic(
+                    left as i64,
+                    right as i128,
+                    JET_FIXED_OP_SUB,
+                    JET_FIXED_MODE_CHECKED,
+                    $signed,
+                    $bits,
+                    $signed,
+                ),
+                |value| value as $t,
+            )
+        }
+        #[inline(always)]
+        pub(crate) fn $checked_mul(left: $t, right: $t) -> Option<$t> {
+            jet_fixed_option(
+                jet_fixed_arithmetic(
+                    left as i64,
+                    right as i128,
+                    JET_FIXED_OP_MUL,
+                    JET_FIXED_MODE_CHECKED,
+                    $signed,
+                    $bits,
+                    $signed,
+                ),
+                |value| value as $t,
+            )
+        }
+        #[inline(always)]
+        pub(crate) fn $checked_div(left: $t, right: $t) -> Option<$t> {
+            jet_fixed_option(
+                jet_fixed_arithmetic(
+                    left as i64,
+                    right as i128,
+                    JET_FIXED_OP_DIV,
+                    JET_FIXED_MODE_CHECKED,
+                    $signed,
+                    $bits,
+                    $signed,
+                ),
+                |value| value as $t,
+            )
+        }
+        #[inline(always)]
+        pub(crate) fn $checked_rem(left: $t, right: $t) -> Option<$t> {
+            jet_fixed_option(
+                jet_fixed_arithmetic(
+                    left as i64,
+                    right as i128,
+                    JET_FIXED_OP_REM,
+                    JET_FIXED_MODE_CHECKED,
+                    $signed,
+                    $bits,
+                    $signed,
+                ),
+                |value| value as $t,
+            )
+        }
+        #[inline(always)]
+        pub(crate) fn $checked_pow(left: $t, right: $t) -> Option<$t> {
+            jet_fixed_option(
+                jet_fixed_arithmetic(
+                    left as i64,
+                    right as i128,
+                    JET_FIXED_OP_POW,
+                    JET_FIXED_MODE_CHECKED,
+                    $signed,
+                    $bits,
+                    $signed,
+                ),
+                |value| value as $t,
+            )
+        }
+
+        #[inline(always)]
+        pub(crate) fn $rotate_left(left: $t, right: $t, file: &str, line: u32) -> $t {
+            <$t as JetArith>::jet_rotate_left(left, right as i128, file, line)
+        }
+        #[inline(always)]
+        pub(crate) fn $rotate_right(left: $t, right: $t, file: &str, line: u32) -> $t {
+            <$t as JetArith>::jet_rotate_right(left, right as i128, file, line)
+        }
+    };
+}
+
+jet_fixed_route_kernels!(
+    i8, true, 8;
+    trap: {
+        jet_i8_trap_add, jet_i8_trap_sub, jet_i8_trap_mul, jet_i8_trap_div,
+        jet_i8_trap_rem, jet_i8_trap_floor_div, jet_i8_trap_mod, jet_i8_trap_pow,
+        jet_i8_trap_shl, jet_i8_trap_shr
+    };
+    wrapping: {
+        jet_i8_wrapping_add, jet_i8_wrapping_sub, jet_i8_wrapping_mul,
+        jet_i8_wrapping_div, jet_i8_wrapping_pow
+    };
+    saturating: {
+        jet_i8_saturating_add, jet_i8_saturating_sub, jet_i8_saturating_mul,
+        jet_i8_saturating_div, jet_i8_saturating_pow
+    };
+    checked: {
+        jet_i8_checked_add, jet_i8_checked_sub, jet_i8_checked_mul,
+        jet_i8_checked_div, jet_i8_checked_rem, jet_i8_checked_pow
+    };
+    rotate: { jet_i8_rotate_left, jet_i8_rotate_right }
+);
+jet_fixed_route_kernels!(
+    i16, true, 16;
+    trap: {
+        jet_i16_trap_add, jet_i16_trap_sub, jet_i16_trap_mul, jet_i16_trap_div,
+        jet_i16_trap_rem, jet_i16_trap_floor_div, jet_i16_trap_mod, jet_i16_trap_pow,
+        jet_i16_trap_shl, jet_i16_trap_shr
+    };
+    wrapping: {
+        jet_i16_wrapping_add, jet_i16_wrapping_sub, jet_i16_wrapping_mul,
+        jet_i16_wrapping_div, jet_i16_wrapping_pow
+    };
+    saturating: {
+        jet_i16_saturating_add, jet_i16_saturating_sub, jet_i16_saturating_mul,
+        jet_i16_saturating_div, jet_i16_saturating_pow
+    };
+    checked: {
+        jet_i16_checked_add, jet_i16_checked_sub, jet_i16_checked_mul,
+        jet_i16_checked_div, jet_i16_checked_rem, jet_i16_checked_pow
+    };
+    rotate: { jet_i16_rotate_left, jet_i16_rotate_right }
+);
+jet_fixed_route_kernels!(
+    i32, true, 32;
+    trap: {
+        jet_i32_trap_add, jet_i32_trap_sub, jet_i32_trap_mul, jet_i32_trap_div,
+        jet_i32_trap_rem, jet_i32_trap_floor_div, jet_i32_trap_mod, jet_i32_trap_pow,
+        jet_i32_trap_shl, jet_i32_trap_shr
+    };
+    wrapping: {
+        jet_i32_wrapping_add, jet_i32_wrapping_sub, jet_i32_wrapping_mul,
+        jet_i32_wrapping_div, jet_i32_wrapping_pow
+    };
+    saturating: {
+        jet_i32_saturating_add, jet_i32_saturating_sub, jet_i32_saturating_mul,
+        jet_i32_saturating_div, jet_i32_saturating_pow
+    };
+    checked: {
+        jet_i32_checked_add, jet_i32_checked_sub, jet_i32_checked_mul,
+        jet_i32_checked_div, jet_i32_checked_rem, jet_i32_checked_pow
+    };
+    rotate: { jet_i32_rotate_left, jet_i32_rotate_right }
+);
+jet_fixed_route_kernels!(
+    i64, true, 64;
+    trap: {
+        jet_i64_trap_add, jet_i64_trap_sub, jet_i64_trap_mul, jet_i64_trap_div,
+        jet_i64_trap_rem, jet_i64_trap_floor_div, jet_i64_trap_mod, jet_i64_trap_pow,
+        jet_i64_trap_shl, jet_i64_trap_shr
+    };
+    wrapping: {
+        jet_i64_wrapping_add, jet_i64_wrapping_sub, jet_i64_wrapping_mul,
+        jet_i64_wrapping_div, jet_i64_wrapping_pow
+    };
+    saturating: {
+        jet_i64_saturating_add, jet_i64_saturating_sub, jet_i64_saturating_mul,
+        jet_i64_saturating_div, jet_i64_saturating_pow
+    };
+    checked: {
+        jet_i64_checked_add, jet_i64_checked_sub, jet_i64_checked_mul,
+        jet_i64_checked_div, jet_i64_checked_rem, jet_i64_checked_pow
+    };
+    rotate: { jet_i64_rotate_left, jet_i64_rotate_right }
+);
+jet_fixed_route_kernels!(
+    u8, false, 8;
+    trap: {
+        jet_u8_trap_add, jet_u8_trap_sub, jet_u8_trap_mul, jet_u8_trap_div,
+        jet_u8_trap_rem, jet_u8_trap_floor_div, jet_u8_trap_mod, jet_u8_trap_pow,
+        jet_u8_trap_shl, jet_u8_trap_shr
+    };
+    wrapping: {
+        jet_u8_wrapping_add, jet_u8_wrapping_sub, jet_u8_wrapping_mul,
+        jet_u8_wrapping_div, jet_u8_wrapping_pow
+    };
+    saturating: {
+        jet_u8_saturating_add, jet_u8_saturating_sub, jet_u8_saturating_mul,
+        jet_u8_saturating_div, jet_u8_saturating_pow
+    };
+    checked: {
+        jet_u8_checked_add, jet_u8_checked_sub, jet_u8_checked_mul,
+        jet_u8_checked_div, jet_u8_checked_rem, jet_u8_checked_pow
+    };
+    rotate: { jet_u8_rotate_left, jet_u8_rotate_right }
+);
+jet_fixed_route_kernels!(
+    u16, false, 16;
+    trap: {
+        jet_u16_trap_add, jet_u16_trap_sub, jet_u16_trap_mul, jet_u16_trap_div,
+        jet_u16_trap_rem, jet_u16_trap_floor_div, jet_u16_trap_mod, jet_u16_trap_pow,
+        jet_u16_trap_shl, jet_u16_trap_shr
+    };
+    wrapping: {
+        jet_u16_wrapping_add, jet_u16_wrapping_sub, jet_u16_wrapping_mul,
+        jet_u16_wrapping_div, jet_u16_wrapping_pow
+    };
+    saturating: {
+        jet_u16_saturating_add, jet_u16_saturating_sub, jet_u16_saturating_mul,
+        jet_u16_saturating_div, jet_u16_saturating_pow
+    };
+    checked: {
+        jet_u16_checked_add, jet_u16_checked_sub, jet_u16_checked_mul,
+        jet_u16_checked_div, jet_u16_checked_rem, jet_u16_checked_pow
+    };
+    rotate: { jet_u16_rotate_left, jet_u16_rotate_right }
+);
+jet_fixed_route_kernels!(
+    u32, false, 32;
+    trap: {
+        jet_u32_trap_add, jet_u32_trap_sub, jet_u32_trap_mul, jet_u32_trap_div,
+        jet_u32_trap_rem, jet_u32_trap_floor_div, jet_u32_trap_mod, jet_u32_trap_pow,
+        jet_u32_trap_shl, jet_u32_trap_shr
+    };
+    wrapping: {
+        jet_u32_wrapping_add, jet_u32_wrapping_sub, jet_u32_wrapping_mul,
+        jet_u32_wrapping_div, jet_u32_wrapping_pow
+    };
+    saturating: {
+        jet_u32_saturating_add, jet_u32_saturating_sub, jet_u32_saturating_mul,
+        jet_u32_saturating_div, jet_u32_saturating_pow
+    };
+    checked: {
+        jet_u32_checked_add, jet_u32_checked_sub, jet_u32_checked_mul,
+        jet_u32_checked_div, jet_u32_checked_rem, jet_u32_checked_pow
+    };
+    rotate: { jet_u32_rotate_left, jet_u32_rotate_right }
+);
+jet_fixed_route_kernels!(
+    u64, false, 64;
+    trap: {
+        jet_u64_trap_add, jet_u64_trap_sub, jet_u64_trap_mul, jet_u64_trap_div,
+        jet_u64_trap_rem, jet_u64_trap_floor_div, jet_u64_trap_mod, jet_u64_trap_pow,
+        jet_u64_trap_shl, jet_u64_trap_shr
+    };
+    wrapping: {
+        jet_u64_wrapping_add, jet_u64_wrapping_sub, jet_u64_wrapping_mul,
+        jet_u64_wrapping_div, jet_u64_wrapping_pow
+    };
+    saturating: {
+        jet_u64_saturating_add, jet_u64_saturating_sub, jet_u64_saturating_mul,
+        jet_u64_saturating_div, jet_u64_saturating_pow
+    };
+    checked: {
+        jet_u64_checked_add, jet_u64_checked_sub, jet_u64_checked_mul,
+        jet_u64_checked_div, jet_u64_checked_rem, jet_u64_checked_pow
+    };
+    rotate: { jet_u64_rotate_left, jet_u64_rotate_right }
+);
 /// E3001 (E2-M12, D-OBS1/D-OBS2): rich panic report — includes the function name,
 /// a source-line context box, and (in debug builds only) safe local variable values.
 /// `col` is 1-based; `caret_len` covers the highlighted span in the source line.
@@ -1303,6 +2008,114 @@ fn jet_panic_rich(
     }
     jet_runtime_stop_unwind(report.rendered, report.exit_code, msg)
 }
+/// Render a test assertion failure through the same rich diagnostic formatter
+/// used by runtime stops. Test adapters and the generated harness call this
+/// helper instead of maintaining a second report shape.
+pub(crate) fn jet_test_failure_message(
+    file: &str,
+    line: u32,
+    fn_name: &str,
+    src_line: &str,
+    col: u32,
+    caret_len: u32,
+    msg: &str,
+    locals: &str,
+) -> String {
+    jet_runtime_stop_report(
+        "E3001", file, line, fn_name, src_line, col, caret_len, msg, locals,
+    )
+    .rendered
+}
+
+/// Canonical checked equality condition used by semantic `require_eq`.
+fn jet_eq<T: PartialEq>(left: &T, right: &T) -> bool {
+    left == right
+}
+/// Rich source-context form of `#require`.
+fn jet_require(
+    condition: bool,
+    msg: &str,
+    file: &str,
+    line: u32,
+    fn_name: &str,
+    src_line: &str,
+    col: u32,
+    caret_len: u32,
+    locals: &str,
+) {
+    if !condition {
+        jet_panic_rich(file, line, fn_name, src_line, col, caret_len, msg, locals);
+    }
+}
+
+/// Rich source-context form of `#require_eq`.
+///
+/// Equality is evaluated by the checked binary `Eq` route. This formatter
+/// consumes that condition plus adapter-produced canonical debug strings.
+fn jet_require_eq(
+    condition: bool,
+    left_debug: &str,
+    right_debug: &str,
+    file: &str,
+    line: u32,
+    fn_name: &str,
+    src_line: &str,
+    col: u32,
+    caret_len: u32,
+    locals: &str,
+) {
+    if !condition {
+        let msg = format!("expected: {right_debug}, got: {left_debug}");
+        jet_panic_rich(
+            file, line, fn_name, src_line, col, caret_len, &msg, locals,
+        );
+    }
+}
+
+/// Non-panicking test carrier for rich source-context `#require`.
+fn jet_test_require(
+    condition: bool,
+    msg: &str,
+    file: &str,
+    line: u32,
+    fn_name: &str,
+    src_line: &str,
+    col: u32,
+    caret_len: u32,
+    locals: &str,
+) -> Result<(), String> {
+    if condition {
+        Ok(())
+    } else {
+        Err(jet_test_failure_message(
+            file, line, fn_name, src_line, col, caret_len, msg, locals,
+        ))
+    }
+}
+
+/// Non-panicking test carrier for rich source-context `#require_eq`.
+fn jet_test_require_eq(
+    condition: bool,
+    left_debug: &str,
+    right_debug: &str,
+    file: &str,
+    line: u32,
+    fn_name: &str,
+    src_line: &str,
+    col: u32,
+    caret_len: u32,
+    locals: &str,
+) -> Result<(), String> {
+    if condition {
+        Ok(())
+    } else {
+        let msg = format!("expected: {right_debug}, got: {left_debug}");
+        Err(jet_test_failure_message(
+            file, line, fn_name, src_line, col, caret_len, &msg, locals,
+        ))
+    }
+}
+
 /// E3002 / D-FAIL-CTX1: `?`-propagation trace.
 ///
 /// Consecutive identical frames (same fn + file + line) collapse — Go wrap-noise
@@ -1335,7 +2148,11 @@ fn jet_trace_err_note<T, E, F: FnOnce() -> String>(
 // `Vec<T>` and fixed-size `[T; N]` stack arrays coerce in without `.to_vec()`.
 #[inline(always)]
 fn jet_index_vec<T: Clone>(xs: &[T], i: i64, file: &str, line: u32) -> T {
-    jet_fixed_list_index(xs.len(), i, |index| xs[index].clone())
+    jet_index_vec_ref(xs, i, file, line).clone()
+}
+#[inline(always)]
+fn jet_index_vec_ref<'a, T>(xs: &'a [T], i: i64, file: &str, line: u32) -> &'a T {
+    jet_fixed_list_index(xs.len(), i, |index| &xs[index])
         .unwrap_or_else(|error| jet_arithmetic_stop(file, line, &error.message()))
 }
 #[inline(always)]
@@ -1348,6 +2165,13 @@ fn jet_index_vec_mut<'a, T>(
     jet_fixed_list_index(xs.len(), i, |index| &mut xs[index])
         .unwrap_or_else(|error| jet_arithmetic_stop(file, line, &error.message()))
 }
+#[inline(always)]
+fn jet_index_vec_set<T>(xs: &mut [T], i: i64, value: T, file: &str, line: u32) {
+    let index = jet_fixed_list_index(xs.len(), i, |index| index)
+        .unwrap_or_else(|error| jet_arithmetic_stop(file, line, &error.message()));
+    xs[index] = value;
+}
+
 fn jet_unpack_vec<T: Clone>(xs: &[T], want: usize, i: usize, file: &str, line: u32) -> T {
     if xs.len() != want {
         jet_panic(
@@ -1652,6 +2476,20 @@ impl<K, V> JetMap<K, V> {
         Self(std::sync::Arc::new(std::collections::BTreeMap::new()))
     }
 }
+impl<K: Ord, V> JetMap<K, V> {
+    fn from_pairs(entries: Vec<(K, V)>) -> Self {
+        entries.into_iter().collect()
+    }
+}
+
+/// Build a typed Jet map from one already-lowered runtime entry vector.
+///
+/// The checked TIR producer has already evaluated each key and value. This
+/// kernel only commits those pairs to the canonical copy-on-write map.
+#[inline(always)]
+fn jet_data_entries_to_map<K: Ord, V>(entries: Vec<(K, V)>) -> JetMap<K, V> {
+    JetMap::from_pairs(entries)
+}
 
 // Codegen lowers map construction from a sequence of pairs to
 // `.into_iter().collect()`, so the map has to be buildable from its own pairs.
@@ -1778,7 +2616,7 @@ where
     }
 }
 
-fn jet_index_map_mut<'a, M, K: Ord + Clone + JetShow + 'a, V: Clone>(
+fn jet_index_map_mut<'a, M, K: Ord + Clone + JetShow + 'a, V>(
     m: &'a mut M,
     k: K,
     file: &str,
@@ -1811,6 +2649,18 @@ where
     M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
 {
     m.insert(k, v);
+}
+
+#[inline(always)]
+fn jet_map_add_new<M, K: Ord + Clone, V: Clone>(m: &mut M, k: K, v: V) -> bool
+where
+    M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
+{
+    if m.contains_key(&k) {
+        return false;
+    }
+    m.insert(k, v);
+    true
 }
 
 /// Update one map entry through the map's storage seam. The closure receives
@@ -2184,7 +3034,7 @@ fn jet_map_values<K: Ord + Clone + 'static, V: Clone + 'static>(m: &JetMap<K, V>
     }))
 }
 
-fn jet_list_remove_value<T: Clone + PartialEq>(
+fn jet_list_remove_value_with_location<T: Clone + PartialEq>(
     xs: &mut Vec<T>,
     value: T,
     _file: &str,
@@ -2193,19 +3043,49 @@ fn jet_list_remove_value<T: Clone + PartialEq>(
     jet_outcome_of(jet_list_remove_value_kernel(xs, value))
 }
 
-fn jet_list_remove_slot<T: Clone>(xs: &mut Vec<T>, i: i64, file: &str, line: u32) -> JetOutcome<T, JetAbsent> {
+fn jet_list_remove_slot_with_location<T: Clone>(xs: &mut Vec<T>, i: i64, file: &str, line: u32) -> JetOutcome<T, JetAbsent> {
     match jet_list_remove_slot_kernel(xs, i) {
         Ok(value) => Ok(value),
         Err(message) => jet_arithmetic_stop(file, line, &message),
     }
 }
 
-fn jet_list_insert<T>(xs: &mut Vec<T>, index: i64, value: T, file: &str, line: u32) {
+fn jet_list_insert_with_location<T>(xs: &mut Vec<T>, index: i64, value: T, file: &str, line: u32) {
     match jet_list_insert_kernel(xs, index, value) {
         Ok(()) => {}
         Err(error) => {
             let message = error.message();
             jet_runtime_stop(error.code(), file, line, &message);
+        }
+    }
+}
+
+#[inline(always)]
+fn jet_list_remove_value<T: Clone + PartialEq>(
+    xs: &mut Vec<T>,
+    value: T,
+) -> JetOutcome<T, JetAbsent> {
+    jet_outcome_of(jet_list_remove_value_kernel(xs, value))
+}
+
+#[inline(always)]
+fn jet_list_remove_slot<T: Clone>(
+    xs: &mut Vec<T>,
+    index: i64,
+) -> JetOutcome<T, JetAbsent> {
+    match jet_list_remove_slot_kernel(xs, index) {
+        Ok(value) => Ok(value),
+        Err(message) => jet_arithmetic_stop("<core.collections>", 0, &message),
+    }
+}
+
+#[inline(always)]
+fn jet_list_insert<T>(xs: &mut Vec<T>, index: i64, value: T) {
+    match jet_list_insert_kernel(xs, index, value) {
+        Ok(()) => {}
+        Err(error) => {
+            let message = error.message();
+            jet_runtime_stop(error.code(), "<core.collections>", 0, &message);
         }
     }
 }
@@ -2341,15 +3221,6 @@ where
         f(&x);
     }
 }
-fn jet_list_each_ref<T, F, E>(xs: &Vec<T>, mut f: F) -> JetOutcome<(), E>
-where
-    F: FnMut(&T) -> JetOutcome<(), E>,
-{
-    for x in xs.iter() {
-        f(x)?;
-    }
-    Ok(())
-}
 fn jet_list_each_mut<T, F, I>(xs: I, mut f: F)
 where
     I: IntoIterator<Item = T>,
@@ -2402,7 +3273,7 @@ fn jet_list_sort_by_compare<T, F>(xs: &mut Vec<T>, mut f: F)
 where
     F: FnMut(&T, &T) -> __jet_Ordering,
 {
-    xs.sort_by(|left, right| match f(left, right) {
+    jet_list_sort_by_compare_kernel(xs, |left, right| match f(left, right) {
         __jet_Ordering::__jet_Less => std::cmp::Ordering::Less,
         __jet_Ordering::__jet_Equal => std::cmp::Ordering::Equal,
         __jet_Ordering::__jet_Greater => std::cmp::Ordering::Greater,

@@ -34,25 +34,16 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">`View&lt;str&gt;` follows the same inferred owner-set rule as `View&lt;T&gt;` through calls, aggregates, callbacks, and trait contracts. Local and temporary owners still die too soon; an owned `String` still cannot fill a declared `View&lt;str&gt;` slot.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Keep every possible owner alive, use a proven `View&lt;str&gt;` boundary, write `~view` at an explicit-copy boundary, or remove `copies: .Explicit` for the default owning copy.</p>
+<p class="diag-copy fix" data-registry-field="fix">Keep every possible owner alive, use a proven `View&lt;str&gt;` boundary, write `~view` at the highlighted owning expression (the checker grades that edit), or remove `copies: .Explicit` for the default owning copy.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E2307</code>: <code>tests/ui/owned_string_as_view_str.stderr</code>.</p>
-<pre class="diag">Error [E2307]: an owned `String` cannot fill a `View&lt;str&gt;` slot
-  --&gt; tests/ui/owned_string_as_view_str.jet:7:29
+<p>First UI snapshot mentioning <code>E2307</code>: <code>tests/ui/core_string_view_reuse_after_json.stderr</code>.</p>
+<pre class="diag">Error [E2307]: `view` cannot be used directly here without an owning copy
+  --&gt; tests/ui/core_string_view_reuse_after_json.jet:7:23
     |
-  7 |     return TitleView{value: title}
-    |                             ^^^^^
- Why: `View&lt;str&gt;` needs a zero-copy window from `.trim()` / `.after()` / `.before()` (or an already-tracked string-view binding); a plain `String` place owns its buffer instead
- Fix: bind a window with `.trim()`/`.after()`/`.before()`, return a `View` of the owning element and read the field through it, or store an owned `String` field and copy with `~`
-More: jet-lang.dev/e/E2307
-
-Error [E2307]: an owned `String` cannot fill a `View&lt;str&gt;` slot
-  --&gt; tests/ui/owned_string_as_view_str.jet:7:29
-    |
-  7 |     return TitleView{value: title}
-    |                             ^^^^^
- Why: `View&lt;str&gt;` needs a zero-copy window from `.trim()` / `.after()` / `.before()` (or an already-tracked string-view binding); a plain `String` place owns its buffer instead
- Fix: bind a window with `.trim()`/`.after()`/`.before()`, return a `View` of the owning element and read the field through it, or store an owned `String` field and copy with `~`
+  7 |     node :: JSON.Text(view)
+    |                       ^^^^
+ Why: `view` is a zero-copy view into `raw` (`.trim()`/`.after()`/`.before()`); this destination needs an owned `String`, and `copies: .Explicit` keeps the implicit materialization disabled
+ Fix: Write `~view` first, or remove `copies: .Explicit` to use the default owning copy
 More: jet-lang.dev/e/E2307
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

@@ -11,7 +11,10 @@ fn run() {
         Sale{month: "Jan", value: 4.0},
         Sale{month: "Feb", value: 6.0}
     }
-    groups :: data.group_mean(rows, sale -> sale.month, sale -> sale.value) ?? panic("groups")
+    groups :: data.query(rows)
+        .group_by(sale -> sale.month)
+        .mean(sale -> sale.value)
+        .collect() ?? panic("groups")
     options :: DataLineOptions{
         title: "Sales",
         x_label: "month",

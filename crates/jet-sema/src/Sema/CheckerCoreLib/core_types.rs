@@ -64,10 +64,6 @@ pub(crate) fn json_ty() -> Type {
     Type::Named(Syntax::TYPE_DATA.to_string())
 }
 
-pub(crate) fn json_error_ty() -> Type {
-    Type::Named(Syntax::TYPE_JSON_ERROR.to_string())
-}
-
 pub(crate) fn encoding_error_ty() -> Type {
     Type::Named("EncodingError".to_string())
 }
@@ -143,10 +139,6 @@ pub(crate) fn retired_acronym_spelling_diag(old: &str, canonical: &str, span: Sp
         format!("write `{canonical}` instead of `{old}`"),
         Some(span),
     )
-}
-
-pub(crate) fn is_json_error_type_name(name: &str) -> bool {
-    name == Syntax::TYPE_JSON_ERROR || name == "JSONError"
 }
 
 pub(crate) fn is_io_error_type_name(name: &str) -> bool {
@@ -236,9 +228,12 @@ pub(crate) fn core_type_known(name: &str) -> bool {
     }
     matches!(
         name,
-        "Unit" | "U8" | Syntax::TYPE_ERR | Syntax::TYPE_NEVER | Syntax::TYPE_TASK_FAILURE | "ProcessResult" | "ProcessReceipt" | "ProcessPlan" | "ProcessSpec" | "ProcessChild" | "Stopwatch" | "Closed"
-        | "Claims" | "AuthError" | "Session" | "Auth"
+        "Unit" | "U8" | Syntax::TYPE_ERR | Syntax::TYPE_NEVER | Syntax::TYPE_TASK_FAILURE
+        | "ProcessResult" | "ProcessReceipt" | "ProcessPlan" | "ProcessSpec" | "ProcessChild"
+        | "Stopwatch" | "Closed" | "RealtimeStream" | "RealtimeReceipt"
         | "SyncText" | "SyncCounter" | "SyncMap" | "SyncList" | "RowPolicy"
+        // D-FOUND-LIFECYCLE1=A: typed process signals are a closed Core enum.
+        | "ProcessSignal"
         // D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum
         // (`.Stream`/`.Inherit`/`.Capture`, D-ENUMDOT2). `ProcessStdin`/
         // `ProcessStdoutStream`/`ProcessStderrStream` are field-access-only
@@ -249,8 +244,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // controls. TerminalFact is a namespace of checked String keys, not a
         // fifth value type.
         | "TerminalPolicy" | "TerminalSize" | "TerminalMode" | "TerminalSession"
-        | "Range" | Syntax::TYPE_ALLOC_ERROR
-        | "IOContext" | "IOOperation" | Syntax::TYPE_PROCESS_RESOURCE_LIMIT
+        | Syntax::TYPE_VIEW_ITER
+        | Syntax::TYPE_RANGE | Syntax::TYPE_ALLOC_ERROR
         // D-TEXTWIDTH1=B: `TextWidth` (dot-ctor struct, `core_constructable_fields`)
         // + its two dot-literal enum fields + the `.Reject` policy error.
         | "TextWidth" | "TextWidthAmbiguous" | "TextWidthControls" | "TextError" | "EnvError"
@@ -258,12 +253,20 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-DET-CAPAPI: `Duration` value type for the widened clock surface.
         // D-AUTHORITY-NAME1=A: one ordinary, nameable rights carrier.
         | Syntax::TYPE_AUTHORITY
-        | "Clock" | "Rng" | "Fake" | "Duration" | "DurationUnit" | "RangeError" | "Condition" | "Path"
-        | "TestSuite"
-        | "GameScene" | "GameAssets" | "GameInputMap"
+        | "Clock" | "Rng" | Syntax::DETERMINISTIC_WORLD_TYPE | "Fake" | "Duration" | "DurationUnit" | "RangeError" | "Condition"
+        // D-SHARED-REVISION1=A: the opaque owner-bound snapshot carrier and
+        // its typed wrong-owner/exhaustion failures.
+        | Syntax::TYPE_SHARED_SNAPSHOT | Syntax::TYPE_SHARED_REVISION_ERROR
+        | "Path"
+        | "StreamEventTime" | "KeyedStream" | "Window" | "LateEventDisposition"
+        | "TestSuite" | "TestComparison" | "Count" | "HandleId" | "TaskId" | "EventId"
+        | "HistoryRng" | "HistoryValue" | "HistoryPrecondition" | "HistoryCase"
+        | "HistoryOperation" | "HistoryScheduleChoice" | "HistoryBounds"
+        | "HistoryDistribution" | "HistoryStrategy" | "TypedHistoryCase"
         | "GameBackend" | "GameReplay" | "GameImage" | "GameSound" | "GameFrame"
         | "GameInputSnapshot" | "GameSceneType" | "GameReplayType" | "GameBackendType"
         | "RaylibWindow" | "RaylibColor" | "RaylibSound"
+        | "RaylibTextureAtlas"
         // D-DECIMAL1: exact decimal arithmetic.
         | "Decimal" | "Fraction"
         // D-TYPE2-IMAG1=A: imaginary literals construct the shared Complex value.
@@ -271,19 +274,40 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-DBDRIVER1 / D-EFFDBREAD1=A: the `core.db` connection handle and its
         // error. Nameable so a query function can annotate its connection
         // parameter — the shape a `#(DB.Read)` live query (D-LIVEQUERY1) takes.
-        | "DBConnection" | "DBScope" | "DBError"
+        | "DBConnection" | "DBScope" | "DbPool" | "DbLease" | "DbPoolReceipt" | "DBError"
         // D-LIB-CALLGRANT1=A: a loaded Mod is opaque; its read roots are the
         // only constructable part of the host grant value.
         | "Mod" | "ModGrant"
-        | "FileReader" | "FileWriter" | "FileLines"
-        | "StdinHandle" | "StdinLines" | "Stdout" | "Stderr"
+        | "FileReader" | "FileWriter" | "FileLines" | "FileScope" | "MappedFile"
         // D-LSDIR1/D-FSOPS1/D-WATCH-SCOPE1: filesystem and watcher values.
         | "DirEntry" | "Stat" | "WalkEntry" | "TempDir" | "TempFile" | "FileLock"
         // stdlib-api-laws D4: `WatchEvent.domain`/`.kind` are closed enums.
         | "WatchEvent" | "WatchDomain" | "WatchKind" | "WatchHandle" | "WatchSet"
         // D-DATA-SURFACE1=A / D-DATA-STATUS1=A: data summary/status values.
-        | "DataGroup" | "DataLineOptions" | "DataColumn" | "DataStatus" | "DataSummary"
+        | "DataLineOptions" | "DataColumn" | "DataFormat" | "DataSchema"
+        | "DataStatus" | "DataSummary"
+        | "Query" | "DataGroupedQuery" | "DataTracked" | "DataWatch"
+        | "DataWatchStatus" | "Group"
         | "DataLimits" | "DataError" | "DataErrorKind" | "DataStream" | "DataPivotCell"
+        | "DataSourceIdentity" | "DataProvenance" | "DataSnapshotIdentity" | "DataLoaderStatus"
+        | "DataLoader" | "DataSnapshot"
+        | "JetDataPlotMark" | "JetDataPlotChannel" | "JetDataPlotAggregate"
+        | "JetDataPlotFilterOp" | "JetDataPlotValue" | "JetDataPlotScaleKind"
+        | "JetDataPlotDomain" | "JetDataPlotLegendPosition" | "JetDataPlotFacetKind"
+        | "JetDataPlotInteraction" | "JetDataPlotBackend" | "JetDataPlotSupport"
+        | "JetDataPlotErrorKind" | "JetDataPlotRenderFormat" | "JetDataPlotField"
+        | "JetDataPlotSchema" | "JetDataPlotSourceFacts" | "JetDataPlotEncoding"
+        | "JetDataPlotTransform" | "JetDataPlotScale" | "JetDataPlotAxis" | "JetDataPlotLegend"
+        | "JetDataPlotFacet" | "JetDataPlotLayer" | "JetDataPlotAccessibility" | "JetDataPlotLayout"
+        | "JetDataPlotCapability" | "JetDataPlotError" | "JetDataPlotPlan"
+        | "JetDataPlotSelectedRow" | "JetDataPlotInspection" | "JetDataPlotRender"
+        | "JetDataPlotProjection" | "JetDataPlotColumn"
+        // D-DX-QUEUE1=A: durable queue carriers. Provider policy/request
+        // internals remain private; these are the caller-visible records.
+        | "JobQueue" | "JobPayload" | "JobResult" | "JobError"
+        | "JobQueueReceipt" | "JobQueueClaim" | "JobQueueEvent"
+        | "JobQueueRecord" | "JobQueueStatus"
+        | "JobQueueState" | "JobQueueDeliveryPolicy"
         // D-LOGTRACE1=A: typed structured logging values.
         | "LogField" | "LogSpan"
         // D-ITERTOOLS1=A: expanded collection handles.
@@ -328,7 +352,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // opaque stream handles.  Handles are intentionally non-Codable and
         // acquire values only from their format module constructors.
         | "EncodingLimits" | "EncodingError" | "EncodingCause"
-        | "EncodingFormat" | "EncodingErrorKind" | "DataEvent"
+        | "EncodingFormat"
+        | "EncodingErrorKind" | "DataEvent"
         | "CBOROptions" | "CBORError" | "CBORErrorKind"
         | "XMLLimits" | "XMLParseOptions" | "XMLRenderOptions" | "XMLEncoding"
         | "XMLLexicalPolicy" | "XMLCanonical" | "XMLCanonicalMode" | "XMLError" | "XMLReason" | "XMLEntityPolicy"
@@ -338,6 +363,13 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-SIMD2 / D-LINALG1: built-in SIMD lane + linear-algebra value types.
         | "F32x4" | "F64x2" | "ReduceOp"
         | "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4"
+        // D-SPACE-GEOMETRY1=A: typed coordinate spaces.  Space names are
+        // nominal so `Point2<Float, Screen>` cannot silently cross a frame.
+        | "Point2" | "Delta2" | "Transform" | "Transform2" | "Ray2"
+        | "Screen" | "World" | "View" | "Camera" | "Device"
+        | "ScreenPoint" | "WorldPoint" | "ViewPoint" | "CameraPoint" | "DevicePoint"
+        | "ScreenDelta" | "WorldDelta" | "ViewDelta" | "CameraDelta" | "DeviceDelta"
+        | "TransformError" | "FrameId"
         // D-LAYOUT1 / D-LAYOUT-GATES1 (GATE 2, ratified 2026-06-28/29): the
         // built-in constraint-layout value types.
         | "HVar" | "VVar" | "LengthVar" | "Constraint" | "Layout"
@@ -347,6 +379,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Event" | "Hook" | "DecisionHook" | "HookPolicy" | "HookDecision" | "HookOutcome"
         | "Subscription" | "EventScope" | "EventPolicy" | "EventTrace"
         | "AsyncEvent" | "AsyncPolicy" | "Overflow" | "FailurePolicy" | "DispatchReport" | "DispatchFailure" | "DispatchState" | "EventConfigError"
+        // D-FFI-CALLBACK2=A: managed event values and consuming owners.
+        | "FfiCallbackEvent" | "FfiCallbackRegistration"
         // D-HONESTNUM1=A: Measurement<T> value ± uncertainty.
         | "Measurement"
         // D-PENDING1=B: async UI state machine.
@@ -360,6 +394,22 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "GtkBackend"
         // D-A11YGATE1=B (c134 Phase 6): accessible-role opaque type.
         | "UiAriaRole"
+        // D-FOUND-PLATFORM1=A: shared font and host service value vocabulary.
+        | "FontFace" | "FontStyle" | "Glyph" | "GlyphRun" | "GlyphShaper"
+        | "UiCapability" | "UiCapabilityFact" | "UiCapabilityFacts" | "UiCancellation"
+        | "UiHostError" | "UiServiceResult" | "UiFileDialogKind" | "UiFsAccess"
+        | "UiFsRights" | "UiFsGrant" | "UiGrantedPath" | "UiFileFilter"
+        | "UiClipboardWrite" | "UiTextRange" | "UiImeMode"
+        | "UiPlayground" | "UiPreview" | "UiPreviewAccessibility" | "UiPreviewAuthority"
+        | "UiPreviewContext" | "UiPreviewDevice" | "UiPreviewEffect"
+        | "UiPreviewInputOverride" | "UiPreviewInputValue" | "UiPreviewKind"
+        | "UiPreviewLifecycle" | "UiPreviewRegistry" | "UiPreviewSource"
+        | "UiPreviewTheme" | "UiPreviewTraits" | "UiPreviewViewport"
+        | "UiImePhase"
+        | "UiDragPhase" | "UiDragEvent" | "UiShortcutModifier" | "UiShortcutModifiers"
+        | "UiShortcut" | "UiShortcutBinding" | "UiShortcutDispatch"
+        | "UiAccessibilityState" | "UiAccessibility" | "UiNodeId"
+        | "UiAccessibilityProjection"
         // c-devserver (owner-directed 2026-07-01): the configurable `jet dev`
         // server value returned by `core.web.devserver.for_app(...)`.
         | "DevServer"
@@ -369,6 +419,23 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "WebContext"
         | "WebMount"
         | "LiveQuery"
+        // D-FLAGSHIP-WEBAPI1=A: headless first-party web suite values.
+        | "WebRouterValueType" | "WebRouterField" | "WebRouterSearchCodec"
+        | "WebRouterCacheStatus" | "WebRouterCacheState" | "WebNavigationStatus"
+        | "WebNavigation" | "WebNavigationState"
+        | "WebMutationStatus" | "WebMutationState"
+        | "WebQueryStatus" | "WebQueryNetworkMode" | "WebQueryState" | "WebQuery"
+        | "WebFormValueType" | "WebFormStatus" | "WebFormFieldState"
+        | "WebFormFieldSpec" | "WebFormInput" | "WebFormDecodedInput"
+        | "WebFormActionError" | "WebFormErrorState" | "WebFormLifecycleStatus"
+        | "WebFormLifecycle" | "WebFormTyped" | "WebFormValidationChain"
+        | "WebFormTypedValidation" | "WebFormTypedSubmission"
+        | "WebFormState" | "WebForm" | "WebFormValidation"
+        | "WebTableSortDirection" | "WebTablePageMode" | "WebTableSort" | "WebTableFilter"
+        | "WebTableState" | "WebTableColumn" | "WebTablePage" | "WebTableRow" | "WebTable"
+        | "WebVirtualWindow" | "WebVirtualPlan" | "WebVirtualPlanViewport"
+        | "WebStoreTransaction" | "WebStoreEvent" | "WebStoreInspection"
+        | "WebStorePatch" | "WebStore" | "WebStoreSubscription"
         // D-APPROX1=A: approximate sketch data structures.
         | "HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler"
         // D-TIMEDEPTH1=A: civil-time types.
@@ -389,15 +456,40 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "BrowserEvent" | "BrowserTrace" | "BrowserReceipt" | "BrowserPrivacy" | "BrowserError"
         | "BrowserAbilities"
         | "BrowserProfile" | "BrowserTimeout" | "BrowserProtocol" | "BrowserLocked"
+        | "BrowserTestConfig" | "BrowserTestSource" | "BrowserTestAction"
+        | "BrowserTestSnapshot" | "BrowserTestEventFact" | "BrowserTestArtifact"
+        | "BrowserTestAttempt" | "BrowserTestCase" | "BrowserTestReport"
+        | "BrowserTestFixture" | "BrowserTestServer"
         // D-SHIFT1 (c7shift): `binary.Reader` / `text.Cursor` — consuming,
         // fallible, `?`-composed cursors over `[U8]`/`String`.
         | "Reader" | "Cursor"
-        // D-BUILD*: selected-root build-program handles. No runtime values.
-        | "BuildContext" | "BuildPlan" | "BuildAction" | "BuildTarget"
-        | "BuildToolchain" | "BuildProbe" | "BuildSigningIdentity" | "BuildError" | "ProgramInfo" | "MemoStats" | "TypeInfo" | "LayoutInfo" | "LayoutField" | "SourceSpan"
-        | "CompilerLexed" | "CompilerSyntaxTree" | "CompilerChecked"
-        | "CompilerSemanticIndex" | "CompilerDefinition" | "CompilerSymbolKind"
-        | "CompilerParam" | "CompilerField" | "CompilerViewProvenance"
+        // D-BUILD*: selected-root build-program handles and the read-only
+        // graph/diff records returned by `core.build`.
+        | "BuildContext"
+        | "BuildPlan"
+        | "BuildAction"
+        | "BuildTarget"
+        | "BuildToolchain"
+        | "BuildProbe"
+        | "BuildSigningIdentity"
+        | "BuildError"
+        | "BuildGraph"
+        | "BuildGraphTarget"
+        | "BuildGraphAction"
+        | "BuildGraphFile"
+        | "BuildGraphNode"
+        | "BuildGraphInputDigest"
+        | "BuildGraphActionKey"
+        | "BuildGraphFileDelta"
+        | "BuildGraphKeyDelta"
+        | "BuildGraphCacheDelta"
+        | "BuildGraphDiff"
+        | "ProgramInfo"
+        | "MemoStats"
+        | "TypeInfo"
+        | "LayoutInfo"
+        | "LayoutField"
+        | "SourceSpan"
         | "CompilerViewSourcePath" | "CompilerViewSource" | "CompilerViewProjection"
         | "CompilerReference" | "CompilerDefinitionAnchor" | "CompilerCall"
         | "CompilerEffect" | "CompilerEffectProvenance" | "CompilerOutput"
@@ -418,7 +510,6 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "MaturityInfo" | "Maturity"
         | "PackageInfo" | "FunctionInfo" | "EffectInfo" | "ArithmeticOperationInfo" | "MethodInfo" | "FieldInfo" | "TypeParamInfo"
     ) || is_json_type_name(name)
-        || is_json_error_type_name(name)
         || is_io_error_type_name(name)
         || is_utf8_error_type_name(name)
 }
@@ -458,6 +549,73 @@ pub(crate) fn core_lang_variants(
             .variants
             .iter()
             .map(|variant| ((*variant).to_string(), (zero, VariantPayload::Unit)))
+            .collect(),
+    )
+}
+/// D-TEST-STRATEGY1=A: the history value and precondition enums are public
+/// records, but their payloads remain closed so every tier shares one shape.
+pub(crate) fn core_history_variants(
+    enum_name: &str,
+) -> Option<std::collections::HashMap<String, (Span, VariantPayload)>> {
+    let zero = Span::new(0, 0);
+    let field = |name: &str, ty: Type| VariantField {
+        name: name.to_string(),
+        name_span: zero,
+        ty,
+        ty_span: zero,
+    };
+    let variants = match enum_name {
+        "HistoryValue" => vec![
+            ("Integer".to_string(), VariantPayload::Single(Type::Int, zero)),
+            ("Boolean".to_string(), VariantPayload::Single(Type::Bool, zero)),
+            ("Text".to_string(), VariantPayload::Single(Type::String, zero)),
+            (
+                "Handle".to_string(),
+                VariantPayload::Single(Type::Named("HandleId".to_string()), zero),
+            ),
+            ("Redacted".to_string(), VariantPayload::Single(Type::String, zero)),
+        ],
+        "HistoryPrecondition" => vec![
+            (
+                "HandleLive".to_string(),
+                VariantPayload::Single(Type::Named("HandleId".to_string()), zero),
+            ),
+            (
+                "HandleState".to_string(),
+                VariantPayload::Named(vec![
+                    field("handle", Type::Named("HandleId".to_string())),
+                    field("state", Type::String),
+                ]),
+            ),
+            (
+                "TaskCompleted".to_string(),
+                VariantPayload::Single(Type::Named("TaskId".to_string()), zero),
+            ),
+            (
+                "EventAvailable".to_string(),
+                VariantPayload::Single(Type::Named("EventId".to_string()), zero),
+            ),
+        ],
+        _ => return None,
+    };
+    Some(variants.into_iter().map(|(name, payload)| (name, (zero, payload))).collect())
+}
+
+/// Core-declared enum variants are synthesized from the canonical Core
+/// declaration table, keeping sema's ordinary enum resolver aligned with the
+/// source used for module/type exports.
+pub(crate) fn core_declared_enum_variants(
+    enum_name: &str,
+) -> Option<std::collections::HashMap<String, (Span, VariantPayload)>> {
+    if let Some(variants) = core_history_variants(enum_name) {
+        return Some(variants);
+    }
+    let names = jet_foundation::CoreModuleExports::core_enum_variants(enum_name)?;
+    let zero = Span::new(0, 0);
+    Some(
+        names
+            .iter()
+            .map(|name| ((*name).to_string(), (zero, VariantPayload::Unit)))
             .collect(),
     )
 }
@@ -549,6 +707,17 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if type_name == "TestSuite" {
         return matches!(field, "iteration" | "result").then_some(Type::Int);
     }
+    if type_name == "TestComparison" {
+        return match field {
+            "first_difference" => Some(Type::Int),
+            "seed" => Some(Type::Option(Box::new(Type::Int))),
+            "status" | "relation" | "source" | "tool" | "target" | "reason" => {
+                Some(Type::String)
+            }
+            "universal_proof" => Some(Type::Bool),
+            _ => None,
+        };
+    }
     if type_name == "TLSPeerIdentity" {
         return match field {
             "verified_server_name" => Some(Type::String),
@@ -612,6 +781,111 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "operation" => Some(Type::Named(Syntax::TYPE_IO_OPERATION.to_string())),
             "resource" | "cause" => Some(Type::Option(Box::new(Type::String))),
             "os_code" => Some(Type::Option(Box::new(Type::Int))),
+            _ => None,
+        };
+    }
+    if type_name == Syntax::TYPE_BUILD_GRAPH {
+        let graph_list = |name: &str| Type::List(Box::new(Type::Named(name.to_string())));
+        return match field {
+            "targets" => Some(graph_list(Syntax::TYPE_BUILD_GRAPH_TARGET)),
+            "actions" => Some(graph_list(Syntax::TYPE_BUILD_GRAPH_ACTION)),
+            "action_keys" => Some(graph_list(Syntax::TYPE_BUILD_GRAPH_ACTION_KEY)),
+            "cache_hits" => Some(graph_list(Syntax::TYPE_BUILD_GRAPH_ACTION)),
+            "files" | "affected_files" => Some(graph_list(Syntax::TYPE_BUILD_GRAPH_FILE)),
+            "nodes" => Some(graph_list(Syntax::TYPE_BUILD_GRAPH_NODE)),
+            _ => None,
+        };
+    }
+    if type_name == Syntax::TYPE_BUILD_GRAPH_TARGET {
+        return match field {
+            "id" => Some(Type::Int),
+            "name" => Some(Type::String),
+            "kind" => Some(Type::String),
+            "deps" | "actions" => Some(Type::List(Box::new(Type::Int))),
+            "files" => Some(Type::List(Box::new(Type::String))),
+            "plugin" => Some(Type::Option(Box::new(Type::Int))),
+            _ => None,
+        };
+    }
+    if type_name == Syntax::TYPE_BUILD_GRAPH_ACTION {
+        return match field {
+            "id" => Some(Type::Int),
+            "name" | "kind" | "key" => Some(Type::String),
+            "inputs" | "outputs" | "caps" | "pools" => {
+                Some(Type::List(Box::new(Type::String)))
+            }
+            "target" | "plugin" => Some(Type::Option(Box::new(Type::Int))),
+            "legacy_wrapper" => Some(Type::Option(Box::new(Type::String))),
+            "compiler_owned" => Some(Type::Bool),
+            "cache_hit" => Some(Type::Option(Box::new(Type::Bool))),
+            _ => None,
+        };
+    }
+    if type_name == Syntax::TYPE_BUILD_GRAPH_FILE {
+        return match field {
+            "path" => Some(Type::String),
+            "owner" => Some(Type::Option(Box::new(Type::Int))),
+            "consumers" | "targets" => Some(Type::List(Box::new(Type::Int))),
+            _ => None,
+        };
+    }
+    if type_name == Syntax::TYPE_BUILD_GRAPH_NODE {
+        return match field {
+            "kind" | "key" | "subject" => Some(Type::String),
+            "inputs" => Some(Type::List(Box::new(Type::String))),
+            "input_digests" => Some(Type::List(Box::new(Type::Named(
+                Syntax::TYPE_BUILD_GRAPH_INPUT_DIGEST.to_string(),
+            )))),
+            _ => None,
+        };
+    }
+    if type_name == Syntax::TYPE_BUILD_GRAPH_INPUT_DIGEST {
+        return match field {
+            "name" | "digest" => Some(Type::String),
+            _ => None,
+        };
+    }
+    if type_name == Syntax::TYPE_BUILD_GRAPH_ACTION_KEY {
+        return match field {
+            "action" | "key" => Some(Type::String),
+            _ => None,
+        };
+    }
+    if type_name == Syntax::TYPE_BUILD_GRAPH_FILE_DELTA {
+        return match field {
+            "path" => Some(Type::String),
+            "before" | "after" => Some(Type::Option(Box::new(Type::Named(
+                Syntax::TYPE_BUILD_GRAPH_FILE.to_string(),
+            )))),
+            _ => None,
+        };
+    }
+    if type_name == Syntax::TYPE_BUILD_GRAPH_KEY_DELTA {
+        return match field {
+            "action" => Some(Type::String),
+            "before" | "after" => Some(Type::Option(Box::new(Type::String))),
+            _ => None,
+        };
+    }
+    if type_name == Syntax::TYPE_BUILD_GRAPH_CACHE_DELTA {
+        return match field {
+            "action" => Some(Type::String),
+            "before" | "after" => Some(Type::Option(Box::new(Type::Bool))),
+            _ => None,
+        };
+    }
+    if type_name == Syntax::TYPE_BUILD_GRAPH_DIFF {
+        return match field {
+            "file_deltas" => Some(Type::List(Box::new(Type::Named(
+                Syntax::TYPE_BUILD_GRAPH_FILE_DELTA.to_string(),
+            )))),
+            "affected_files" => Some(Type::List(Box::new(Type::String))),
+            "key_deltas" => Some(Type::List(Box::new(Type::Named(
+                Syntax::TYPE_BUILD_GRAPH_KEY_DELTA.to_string(),
+            )))),
+            "cache_deltas" => Some(Type::List(Box::new(Type::Named(
+                Syntax::TYPE_BUILD_GRAPH_CACHE_DELTA.to_string(),
+            )))),
             _ => None,
         };
     }
@@ -954,7 +1228,9 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if type_name == Syntax::TYPE_LAYOUT_INFO {
         return match field {
             "kind" | "target" | "guarantee" | "source" => Some(Type::String),
-            "size" | "alignment" | "stride" => Some(Type::Option(Box::new(Type::Int))),
+            "size" | "alignment" | "stride" | "requested_alignment" | "effective_alignment" => {
+                Some(Type::Option(Box::new(Type::Int)))
+            }
             "fields" => Some(Type::List(Box::new(Type::Named(
                 Syntax::TYPE_LAYOUT_FIELD.to_string(),
             )))),
@@ -1238,6 +1514,8 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if type_name == "FieldInfo" {
         return match field {
             "name" | "ty" => Some(Type::String),
+            "index" => Some(Type::Int),
+            "fields" => Some(Type::List(Box::new(Type::Named("FieldInfo".to_string())))),
             "markers" => Some(Type::List(Box::new(Type::Named("MarkerInfo".to_string())))),
             "dimensions" => Some(Type::List(Box::new(Type::Named(
                 "DimensionInfo".to_string(),
@@ -1259,13 +1537,6 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if type_name == Syntax::TYPE_SOURCE_SPAN {
         return match field {
             "start" | "end" => Some(Type::Int),
-            _ => None,
-        };
-    }
-    if is_json_error_type_name(type_name) {
-        return match field {
-            "line" => Some(Type::Int),
-            "message" => Some(Type::String),
             _ => None,
         };
     }
@@ -1291,14 +1562,6 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if type_name == "FieldError" {
         return match field {
             "path" | "reason" => Some(Type::String),
-            _ => None,
-        };
-    }
-    if type_name == "DataGroup" {
-        return match field {
-            "key" => Some(Type::String),
-            "count" => Some(Type::Int),
-            "sum" | "mean" => Some(Type::Float),
             _ => None,
         };
     }
@@ -1338,7 +1601,19 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     }
     if type_name == "DataColumn" {
         return match field {
-            "name" | "type_name" => Some(Type::String),
+            "id" | "name" | "type_name" => Some(Type::String),
+            "nullable" => Some(Type::Bool),
+            _ => None,
+        };
+    }
+    if type_name == "DataSchema" {
+        return match field {
+            "identity" => Some(Type::String),
+            "format" => Some(Type::Named("DataFormat".to_string())),
+            "columns" => Some(Type::List(Box::new(Type::Named("DataColumn".to_string())))),
+            "projection" => Some(Type::Option(Box::new(Type::Named(
+                "ShapeProjection".to_string(),
+            )))),
             _ => None,
         };
     }
@@ -1350,6 +1625,245 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             _ => None,
         };
     }
+    if type_name == "DataAuthority" {
+        return match field {
+            "scope" | "revision" => Some(Type::String),
+            _ => None,
+        };
+    }
+    if type_name == "DataSourceIdentity" {
+        return match field {
+            "kind" => Some(Type::Named("DataLoaderKind".to_string())),
+            "locator" | "member" => Some(Type::String),
+            "parameters" => Some(Type::List(Box::new(Type::String))),
+            _ => None,
+        };
+    }
+    if type_name == "DataProvenance" {
+        return match field {
+            "source" => Some(Type::Named("DataSourceIdentity".to_string())),
+            "format" => Some(Type::Named("DataFormat".to_string())),
+            "authority" => Some(Type::Named("DataAuthority".to_string())),
+            _ => None,
+        };
+    }
+    if type_name == "DataSnapshotIdentity" {
+        return match field {
+            "id" | "source" | "content" | "schema" => Some(Type::String),
+            "format" => Some(Type::Named("DataFormat".to_string())),
+            _ => None,
+        };
+    }
+    if type_name == "DataLoaderStatus" {
+        return match field {
+            "identity" | "error" | "cleanup" => Some(Type::String),
+            "freshness" => Some(Type::Named("DataFreshness".to_string())),
+            "invalidated_by" => Some(Type::Named("DataInvalidationCause".to_string())),
+            "buffered_bytes" => Some(Type::Int),
+            "backpressure" | "last_good" => Some(Type::Bool),
+            _ => None,
+        };
+    }
+    if type_name == "JetDataPlotField" {
+        return match field {
+            "id" | "name" | "type_name" => Some(Type::String),
+            _ => None,
+        };
+    }
+    if type_name == "JetDataPlotSchema" {
+        return match field {
+            "identity" | "row_type" => Some(Type::String),
+            "columns" => Some(Type::List(Box::new(Type::Named(
+                "JetDataPlotField".to_string(),
+            )))),
+            _ => None,
+        };
+    }
+    if type_name == "JetDataPlotSourceFacts" {
+        return match field {
+            "table_plan_identity" | "source_identity" | "schema_identity" | "row_type"
+            | "data_identity" | "provenance" => Some(Type::String),
+            "rows" => Some(Type::Int),
+            _ => None,
+        };
+    }
+    if type_name == "JetDataPlotEncoding" {
+        return match field {
+            "channel" => Some(Type::Named("JetDataPlotChannel".to_string())),
+            "field" => Some(Type::Named("JetDataPlotField".to_string())),
+            "aggregate" => Some(Type::Named("JetDataPlotAggregate".to_string())),
+            _ => None,
+        };
+    }
+    if type_name == "JetDataPlotScale" {
+        return match field {
+            "channel" => Some(Type::Named("JetDataPlotChannel".to_string())),
+            "kind" => Some(Type::Named("JetDataPlotScaleKind".to_string())),
+            "domain" => Some(Type::Named("JetDataPlotDomain".to_string())),
+            "clamp" | "reverse" => Some(Type::Bool),
+            _ => None,
+        };
+    }
+    if type_name == "JetDataPlotAxis" {
+        return match field {
+            "channel" => Some(Type::Named("JetDataPlotChannel".to_string())),
+            "title" => Some(Type::String),
+            "visible" | "grid" => Some(Type::Bool),
+            "ticks" => Some(Type::Int),
+            _ => None,
+        };
+    }
+    if type_name == "JetDataPlotLegend" {
+        return match field {
+            "channel" => Some(Type::Named("JetDataPlotChannel".to_string())),
+            "title" => Some(Type::String),
+            "position" => Some(Type::Named("JetDataPlotLegendPosition".to_string())),
+            "visible" => Some(Type::Bool),
+            _ => None,
+        };
+    }
+    if type_name == "JetDataPlotFacet" {
+        return match field {
+            "field" => Some(Type::Named("JetDataPlotField".to_string())),
+            "kind" => Some(Type::Named("JetDataPlotFacetKind".to_string())),
+            "title" => Some(Type::String),
+            "columns" | "rows" => Some(Type::Int),
+            _ => None,
+        };
+    }
+    if type_name == "JetDataPlotLayer" {
+        return match field {
+            "name" => Some(Type::String),
+            "mark" => Some(Type::Named("JetDataPlotMark".to_string())),
+            "encodings" => Some(Type::List(Box::new(Type::Named(
+                "JetDataPlotEncoding".to_string(),
+            )))),
+            "transforms" => Some(Type::List(Box::new(Type::Named(
+                "JetDataPlotTransform".to_string(),
+            )))),
+            "opacity" => Some(Type::Float),
+            _ => None,
+        };
+    }
+    if type_name == "JetDataPlotAccessibility" {
+        return match field {
+            "title" | "description" | "summary" => Some(Type::String),
+            "keyboard" | "announce_selection" => Some(Type::Bool),
+            _ => None,
+        };
+    }
+    if type_name == "JetDataPlotLayout" {
+        return match field {
+            "width" | "height" | "margin_top" | "margin_right" | "margin_bottom"
+            | "margin_left" => Some(Type::Float),
+            _ => None,
+        };
+    }
+    if type_name == "JetDataPlotCapability" {
+        return match field {
+            "backend" => Some(Type::Named("JetDataPlotBackend".to_string())),
+            "feature" | "reason" | "replacement" => Some(Type::String),
+            "support" => Some(Type::Named("JetDataPlotSupport".to_string())),
+            _ => None,
+        };
+    }
+    if type_name == "JetDataPlotError" {
+        return match field {
+            "kind" => Some(Type::Named("JetDataPlotErrorKind".to_string())),
+            "operation" | "reason" => Some(Type::String),
+            "field" | "channel" | "mark" | "expected" | "actual" => {
+                Some(Type::Option(Box::new(Type::String)))
+            }
+            "index" => Some(Type::Option(Box::new(Type::Int))),
+            _ => None,
+        };
+    }
+    if type_name == "JetDataPlotPlan" {
+        return match field {
+            "source" => Some(Type::Named("JetDataPlotSourceFacts".to_string())),
+            "schema" => Some(Type::Named("JetDataPlotSchema".to_string())),
+            "mark" => Some(Type::Named("JetDataPlotMark".to_string())),
+            "encodings" => Some(Type::List(Box::new(Type::Named(
+                "JetDataPlotEncoding".to_string(),
+            )))),
+            "transforms" => Some(Type::List(Box::new(Type::Named(
+                "JetDataPlotTransform".to_string(),
+            )))),
+            "scales" => Some(Type::List(Box::new(Type::Named(
+                "JetDataPlotScale".to_string(),
+            )))),
+            "axes" => Some(Type::List(Box::new(Type::Named(
+                "JetDataPlotAxis".to_string(),
+            )))),
+            "legends" => Some(Type::List(Box::new(Type::Named(
+                "JetDataPlotLegend".to_string(),
+            )))),
+            "facets" => Some(Type::List(Box::new(Type::Named(
+                "JetDataPlotFacet".to_string(),
+            )))),
+            "layers" => Some(Type::List(Box::new(Type::Named(
+                "JetDataPlotLayer".to_string(),
+            )))),
+            "interactions" => Some(Type::List(Box::new(Type::Named(
+                "JetDataPlotInteraction".to_string(),
+            )))),
+            "accessibility" => Some(Type::Named("JetDataPlotAccessibility".to_string())),
+            "layout" => Some(Type::Named("JetDataPlotLayout".to_string())),
+            _ => None,
+        };
+    }
+    if type_name == "JetDataPlotSelectedRow" {
+        return match field {
+            "index" => Some(Type::Int),
+            "values" => Some(Type::List(Box::new(Type::Tuple(vec![
+                (
+                    "field".to_string(),
+                    Box::new(Type::Named("JetDataPlotField".to_string())),
+                ),
+                (
+                    "value".to_string(),
+                    Box::new(Type::Named("JetDataPlotValue".to_string())),
+                ),
+            ])))),
+            _ => None,
+        };
+    }
+    if type_name == "JetDataPlotInspection" {
+        return match field {
+            "plan" => Some(Type::Named("JetDataPlotPlan".to_string())),
+            "selected_indices" => Some(Type::List(Box::new(Type::Int))),
+            "selected_columns" => Some(Type::List(Box::new(Type::Named(
+                "JetDataPlotField".to_string(),
+            )))),
+            "selected_data" => Some(Type::List(Box::new(Type::Named(
+                "JetDataPlotSelectedRow".to_string(),
+            )))),
+            _ => None,
+        };
+    }
+    if type_name == "JetDataPlotRender" {
+        return match field {
+            "backend" => Some(Type::Named("JetDataPlotBackend".to_string())),
+            "format" => Some(Type::Named("JetDataPlotRenderFormat".to_string())),
+            "body" => Some(Type::String),
+            "source" => Some(Type::Named("JetDataPlotSourceFacts".to_string())),
+            "capabilities" => Some(Type::List(Box::new(Type::Named(
+                "JetDataPlotCapability".to_string(),
+            )))),
+            _ => None,
+        };
+    }
+    if type_name == "JetDataPlotProjection" {
+        return match field {
+            "backend" => Some(Type::Named("JetDataPlotBackend".to_string())),
+            "plan" => Some(Type::Named("JetDataPlotPlan".to_string())),
+            "source" => Some(Type::Named("JetDataPlotSourceFacts".to_string())),
+            "capabilities" => Some(Type::List(Box::new(Type::Named(
+                "JetDataPlotCapability".to_string(),
+            )))),
+            _ => None,
+        };
+    }
     if type_name == "DataSummary" {
         return match field {
             "count" => Some(Type::Int),
@@ -1358,6 +1872,69 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         };
     }
     match (type_name, field) {
+        // D-DX-QUEUE1=A: queue carriers mirror the provider's typed public
+        // records. State and delivery remain nameable enum values instead of
+        // being flattened to strings.
+        ("JobPayload" | "JobResult", "type_id") => Some(Type::String),
+        ("JobPayload" | "JobResult", "bytes") => Some(Type::List(Box::new(u8_ty()))),
+        ("JobPayload" | "JobResult", "publish") => Some(Type::Bool),
+        ("JobError", "type_id" | "reason") => Some(Type::String),
+        ("JobError", "detail") => Some(Type::Option(Box::new(Type::String))),
+        ("JobQueueReceipt", "id" | "authority" | "queue" | "job_type" | "signature") => {
+            Some(Type::String)
+        }
+        ("JobQueueReceipt", "state") => Some(Type::Named("JobQueueState".to_string())),
+        ("JobQueueReceipt", "delivery") => {
+            Some(Type::Named("JobQueueDeliveryPolicy".to_string()))
+        }
+        ("JobQueueReceipt", "sequence" | "attempts" | "due_at_ms" | "accepted_at_ms") => {
+            Some(Type::Int)
+        }
+        ("JobQueueReceipt", "request_id" | "idempotency_key" | "error_reason") => {
+            Some(Type::Option(Box::new(Type::String)))
+        }
+        ("JobQueueReceipt", "lease_until_ms" | "duration_ms") => {
+            Some(Type::Option(Box::new(Type::Int)))
+        }
+        ("JobQueueReceipt", "duplicate") => Some(Type::Bool),
+        ("JobQueueClaim", "receipt") => Some(Type::Named("JobQueueReceipt".to_string())),
+        ("JobQueueClaim", "payload") => Some(Type::Named("JobPayload".to_string())),
+        ("JobQueueClaim", "worker" | "lease_token") => Some(Type::String),
+        ("JobQueueClaim", "lease_until_ms") => Some(Type::Int),
+        ("JobQueueEvent", "sequence" | "attempts" | "timestamp_ms") => Some(Type::Int),
+        ("JobQueueEvent", "state") => Some(Type::Named("JobQueueState".to_string())),
+        ("JobQueueEvent", "reason" | "worker") => Some(Type::Option(Box::new(Type::String))),
+        ("JobQueueEvent", "duration_ms") => Some(Type::Option(Box::new(Type::Int))),
+        ("JobQueueRecord", "receipt") => Some(Type::Named("JobQueueReceipt".to_string())),
+        ("JobQueueRecord", "payload") => Some(Type::Option(Box::new(Type::Named(
+            "JobPayload".to_string(),
+        )))),
+        ("JobQueueRecord", "result") => Some(Type::Option(Box::new(Type::Named(
+            "JobResult".to_string(),
+        )))),
+        ("JobQueueRecord", "error") => Some(Type::Option(Box::new(Type::Named(
+            "JobError".to_string(),
+        )))),
+        ("JobQueueRecord", "started_at_ms" | "finished_at_ms") => {
+            Some(Type::Option(Box::new(Type::Int)))
+        }
+        ("JobQueueStatus", "queue" | "authority") => Some(Type::String),
+        (
+            "JobQueueStatus",
+            "queued"
+            | "running"
+            | "retrying"
+            | "completed"
+            | "failed"
+            | "dead_lettered"
+            | "cancelled"
+            | "depth"
+            | "wait_ms"
+            | "throughput"
+            | "capacity"
+            | "freshness_ms",
+        ) => Some(Type::Int),
+        ("JobQueueStatus", "paused") => Some(Type::Bool),
         // D-LSDIR1=A: DirEntry has name (bare filename), path (full path), is_dir.
         ("DirEntry", "name" | "path") => Some(Type::String),
         ("DirEntry", "is_dir") => Some(Type::Bool),
@@ -1368,11 +1945,6 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("WalkEntry", "path" | "relative") => Some(Type::String),
         ("WalkEntry", "is_dir") => Some(Type::Bool),
         ("WalkEntry", "depth") => Some(Type::Int),
-        ("TempDir" | "TempFile" | "FileLock", "path") => Some(Type::String),
-        ("WatchEvent", "domain") => Some(Type::Named("WatchDomain".to_string())),
-        ("WatchEvent", "kind") => Some(Type::Named("WatchKind".to_string())),
-        ("WatchEvent", "path" | "detail") => Some(Type::String),
-        ("WatchEvent", "pid" | "port") => Some(Type::Int),
         // D-RENDERTGT2=A (c133 M1): UI geometry fields.
         ("Point", "x" | "y") => Some(Type::Float),
         ("Size", "width" | "height") => Some(Type::Float),
@@ -1380,8 +1952,93 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("SizeConstraint", "min_width" | "min_height" | "max_width" | "max_height") => {
             Some(Type::Float)
         }
+        // D-SPACE-GEOMETRY1=A: stock aliases expose the same scalar fields;
+        // their space is carried by the nominal type.
+        (
+            "ScreenPoint" | "WorldPoint" | "ViewPoint" | "CameraPoint" | "DevicePoint"
+                | "ScreenDelta" | "WorldDelta" | "ViewDelta" | "CameraDelta" | "DeviceDelta",
+            "x" | "y",
+        ) => Some(Type::Float),
+        // D-FOUND-PLATFORM1=A: shared font and host value fields.
+        ("FontFace", "family") => Some(Type::String),
+        ("FontFace", "size") => Some(Type::Float),
+        ("FontFace", "style") => Some(Type::Named("FontStyle".to_string())),
+        ("Glyph", "id" | "cluster") => Some(Type::Int),
+        ("Glyph", "x" | "y" | "advance_x" | "advance_y") => Some(Type::Float),
+        ("GlyphRun", "glyphs") => Some(Type::List(Box::new(Type::Named("Glyph".to_string())))),
+        ("GlyphRun", "advance_x" | "advance_y") => Some(Type::Float),
+        ("GlyphRun", "shaper") => Some(Type::Named("GlyphShaper".to_string())),
+        ("GlyphRun", "deterministic" | "approximate") => Some(Type::Bool),
         ("UiNode", "label") => Some(Type::String),
         ("UiNode", "width" | "height") => Some(Type::Float),
+        ("UiNode", "accessibility") => {
+            Some(Type::Option(Box::new(Type::Named("UiAccessibility".to_string()))))
+        }
+        ("UiNode", "ime") => {
+            Some(Type::Option(Box::new(Type::Named("UiImeMode".to_string()))))
+        }
+        ("UiNode", "shortcut") => Some(Type::Option(Box::new(Type::Named("UiShortcut".to_string())))),
+        ("UiFileFilter", "label") => Some(Type::String),
+        ("UiFileFilter", "extensions" | "mime_types") => {
+            Some(Type::List(Box::new(Type::String)))
+        }
+        ("UiFsGrant", "root") => Some(Type::String),
+        ("UiFsGrant", "rights") => Some(Type::Named("UiFsRights".to_string())),
+        ("UiGrantedPath", "path" | "grant_root") => Some(Type::String),
+        ("UiGrantedPath", "access") => Some(Type::Named("UiFsAccess".to_string())),
+        ("UiFileDialogRequest", "title") => Some(Type::String),
+        ("UiFileDialogRequest", "kind") => Some(Type::Named("UiFileDialogKind".to_string())),
+        ("UiFileDialogRequest", "grant") => Some(Type::Named("UiFsGrant".to_string())),
+        ("UiFileDialogRequest", "initial_directory") => {
+            Some(Type::Option(Box::new(Type::Named("UiGrantedPath".to_string()))))
+        }
+        ("UiFileDialogRequest", "filters") => {
+            Some(Type::List(Box::new(Type::Named("UiFileFilter".to_string()))))
+        }
+        ("UiFileDialogRequest", "allow_multiple") => Some(Type::Bool),
+        ("UiFileDialogSelection", "files") => {
+            Some(Type::List(Box::new(Type::Named("UiGrantedPath".to_string()))))
+        }
+        ("UiClipboardText", "text") => Some(Type::String),
+        ("UiClipboardText", "selection") => {
+            Some(Type::Option(Box::new(Type::Named("UiTextRange".to_string()))))
+        }
+        ("UiClipboardWrite", "characters") => Some(Type::Int),
+        ("UiTextRange", "start" | "end") => Some(Type::Int),
+        ("UiImeComposition", "text") => Some(Type::String),
+        ("UiImeComposition", "selection") => Some(Type::Named("UiTextRange".to_string())),
+        ("UiImeComposition", "marked") => {
+            Some(Type::Option(Box::new(Type::Named("UiTextRange".to_string()))))
+        }
+        ("UiImeEvent", "target") => Some(Type::Named("UiNodeId".to_string())),
+        ("UiImeEvent", "phase") => Some(Type::Named("UiImePhase".to_string())),
+        ("UiImeEvent", "composition") => {
+            Some(Type::Option(Box::new(Type::Named("UiImeComposition".to_string()))))
+        }
+        ("UiDragEvent", "target") => Some(Type::Named("UiNodeId".to_string())),
+        ("UiDragEvent", "phase") => Some(Type::Named("UiDragPhase".to_string())),
+        ("UiDragEvent", "operation") => Some(Type::Named("UiDragOperation".to_string())),
+        ("UiDragEvent", "items") => Some(Type::List(Box::new(Type::Named("UiDropItem".to_string())))),
+        ("UiShortcut", "key") => Some(Type::String),
+        ("UiShortcut", "modifiers") => Some(Type::Named("UiShortcutModifiers".to_string())),
+        ("UiShortcutBinding", "shortcut") => Some(Type::Named("UiShortcut".to_string())),
+        ("UiShortcutBinding", "action") => Some(Type::String),
+        ("UiShortcutBinding", "node") => {
+            Some(Type::Option(Box::new(Type::Named("UiNodeId".to_string()))))
+        }
+        ("UiAccessibility", "name" | "description") => Some(Type::Option(Box::new(Type::String))),
+        // D-FOUND-REALTIME1=A: bounded callback accounting is a readable receipt.
+        (
+            "RealtimeReceipt",
+            "requested_rate_hz"
+                | "requested_frames"
+                | "completed_callbacks"
+                | "completed_frames"
+                | "missed"
+                | "max_lateness_ns"
+                | "start_identity"
+                | "end_identity",
+        ) => Some(Type::Int),
         ("ProcessResult" | "ProcessReceipt", "code") => Some(Type::Int),
         ("ProcessResult" | "ProcessReceipt", "success" | "timed_out" | "redacted") => {
             Some(Type::Bool)
@@ -1424,6 +2081,8 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("HTTPResponse", "status") => Some(Type::Int),
         ("HTTPResponse", "body") => Some(Type::Named("HTTPBody".to_string())),
         ("HTTPResponse", "headers") => Some(Type::Named("HTTPHeaders".to_string())),
+        // D-HTTPLIB1=A: TLS constructor fields are public PEM values.
+        ("HTTPServerTls", "cert_pem" | "key_pem") => Some(Type::String),
         // D-LOGTRACE1=A: typed logging values are Prelude structs, so their
         // published fields are readable like every other core record.
         ("LogField", "key" | "value" | "kind") => Some(Type::String),
@@ -1435,6 +2094,111 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("GameScene", "input") => Some(Type::Named("GameInputMap".to_string())),
         ("GameFrame", "index") => Some(Type::Int),
         ("GameFrame", "input") => Some(Type::Named("GameInputSnapshot".to_string())),
+        ("WebRouterField", "name") => Some(Type::String),
+        ("WebRouterField", "value_type") => Some(Type::Named("WebRouterValueType".to_string())),
+        ("WebRouterField", "required") => Some(Type::Bool),
+        ("WebRouterField", "default") => Some(Type::Option(Box::new(Type::String))),
+        ("WebRouterCacheState", "identity" | "data") => Some(Type::String),
+        ("WebRouterCacheState", "status") => Some(Type::Named("WebRouterCacheStatus".to_string())),
+        ("WebRouterCacheState", "dependencies") => Some(Type::List(Box::new(Type::String))),
+        ("WebRouterCacheState", "generation") => Some(Type::Int),
+        ("WebNavigation", "url" | "route") => Some(Type::String),
+        ("WebNavigation", "params" | "search") => Some(Type::Map {
+            key: Box::new(Type::String),
+            key_span: None,
+            value: Box::new(Type::String),
+        }),
+        ("WebNavigationState", "status") => {
+            Some(Type::Named("WebNavigationStatus".to_string()))
+        }
+        ("WebNavigationState", "current") => {
+            Some(Type::Option(Box::new(Type::Named("WebNavigation".to_string()))))
+        }
+        ("WebNavigationState", "data" | "error") => Some(Type::String),
+        ("WebNavigationState", "pending_boundary_id" | "error_boundary_id" | "island_identity" | "hydration_trigger") => {
+            Some(Type::Option(Box::new(Type::String)))
+        }
+        ("WebQueryState", "status") => Some(Type::Named("WebQueryStatus".to_string())),
+        ("WebQueryState", "value" | "error") => Some(Type::String),
+        ("WebQueryState", "generation" | "queued") => Some(Type::Int),
+        ("WebQueryState", "offline") => Some(Type::Bool),
+        ("WebMutationState", "status") => Some(Type::Named("WebMutationStatus".to_string())),
+        ("WebMutationState", "generation") => Some(Type::Int),
+        ("WebMutationState", "optimistic" | "rollback" | "paused") => Some(Type::Bool),
+        ("WebMutationState", "value" | "result" | "error" | "context") => Some(Type::String),
+        ("WebMutationState", "queued" | "replayed") => Some(Type::Int),
+        ("WebFormFieldState", "name" | "value") => Some(Type::String),
+        ("WebFormFieldState", "value_type") => Some(Type::Named("WebFormValueType".to_string())),
+        ("WebFormFieldState", "required" | "touched" | "validating") => Some(Type::Bool),
+        ("WebFormFieldState", "errors") => Some(Type::List(Box::new(Type::String))),
+        ("WebFormFieldSpec", "name" | "label" | "wire_name") => Some(Type::String),
+        ("WebFormFieldSpec", "value_type") => Some(Type::Named("WebFormValueType".to_string())),
+        ("WebFormFieldSpec", "required") => Some(Type::Bool),
+        ("WebFormFieldSpec", "default" | "group") => Some(Type::Option(Box::new(Type::String))),
+        ("WebFormFieldSpec", "control") => Some(Type::Named("WebFormControl".to_string())),
+        ("WebFormDecodedInput", "type_name") => Some(Type::String),
+        ("WebFormDecodedInput", "values" | "wire_values") => Some(Type::Map {
+            key: Box::new(Type::String),
+            key_span: None,
+            value: Box::new(Type::String),
+        }),
+        ("WebFormActionError", "field_errors") => Some(Type::Map {
+            key: Box::new(Type::String),
+            key_span: None,
+            value: Box::new(Type::List(Box::new(Type::String))),
+        }),
+        ("WebFormActionError", "form_errors") => Some(Type::List(Box::new(Type::String))),
+        ("WebFormErrorState", "fields") => Some(Type::Map {
+            key: Box::new(Type::String),
+            key_span: None,
+            value: Box::new(Type::List(Box::new(Type::String))),
+        }),
+        ("WebFormErrorState", "form") => Some(Type::List(Box::new(Type::String))),
+        ("WebFormLifecycle", "status") => Some(Type::Named("WebFormLifecycleStatus".to_string())),
+        ("WebFormLifecycle", "result" | "error") => Some(Type::String),
+        ("WebFormLifecycle", "generation") => Some(Type::Int),
+        ("WebTableSort", "column") | ("WebTableFilter", "column") => Some(Type::String),
+        ("WebTableSort", "direction") => Some(Type::Named("WebTableSortDirection".to_string())),
+        ("WebTableFilter", "value") => Some(Type::String),
+        ("WebTableState", "sort") => Some(Type::Option(Box::new(Type::Named(
+            "WebTableSort".to_string(),
+        )))),
+        ("WebTableState", "filter") => Some(Type::Option(Box::new(Type::Named(
+            "WebTableFilter".to_string(),
+        )))),
+        ("WebTableState", "page_index" | "page_size") => Some(Type::Int),
+        ("WebTableState", "selected_keys") => Some(Type::List(Box::new(Type::String))),
+        ("WebTableState", "selection_anchor" | "focus_key") => Some(Type::Option(Box::new(Type::String))),
+        ("WebTableState", "page_mode") => Some(Type::Named("WebTablePageMode".to_string())),
+        ("WebVirtualWindow",
+            "total_count" | "scroll_offset" | "viewport_size" | "estimated_item_size"
+            | "overscan" | "start" | "end" | "total_size" | "measured_count") => Some(Type::Int),
+        ("WebVirtualPlan",
+            "total_count" | "scroll_offset" | "viewport_width" | "viewport_height"
+            | "estimated_item_size" | "overscan" | "start" | "end" | "total_size"
+            | "measured_count" | "anchor_index" | "anchor_offset") => Some(Type::Int),
+        ("WebVirtualPlan", "measurements") => Some(Type::List(Box::new(Type::Tuple(vec![
+            ("index".to_string(), Box::new(Type::Int)),
+            ("size".to_string(), Box::new(Type::Int)),
+        ])))),
+        ("WebVirtualPlanViewport",
+            "start" | "end" | "total_size" | "measured_count" | "anchor_index"
+            | "anchor_offset") => Some(Type::Int),
+        ("WebStore", "name") => Some(Type::String),
+        ("WebStoreEvent", "sequence" | "generation" | "cursor") => Some(Type::Int),
+        ("WebStoreEvent", "action") => Some(Type::String),
+        ("WebStoreEvent", "changed_fields") => Some(Type::List(Box::new(Type::String))),
+        ("WebStoreEvent", "kind") => Some(Type::String),
+        ("WebStoreInspection", "generation" | "cursor") => Some(Type::Int),
+        ("WebStoreInspection", "history_enabled") => Some(Type::Bool),
+        ("WebStoreInspection", "history_limit") => Some(Type::Int),
+        ("WebStoreInspection", "events") => Some(Type::List(Box::new(
+            Type::Named("WebStoreEvent".to_string()),
+        ))),
+        ("WebStoreInspection", "history") => Some(Type::List(Box::new(
+            Type::Named("WebStoreTransaction".to_string()),
+        ))),
+        // Generic record fields are handled by `core_generic_struct_field`.
         // Every remaining CORE struct users can construct answers from the one
         // constructable-field table instead of a second hand-kept allowlist:
         // a shape spelled once for `Type.{ … }` cannot then disagree with the
@@ -1480,8 +2244,9 @@ fn compiler_package_struct_field(type_name: &str, field: &str) -> Option<Type> {
         "CompilerManifest" | "CompilerPackage" => match field {
             "schema_version" => Some(Type::Int),
             "file" => Some(Type::String),
-            "jet" | "edition" | "description" | "license" | "repository"
-            | "layer" | "target" => Some(optional_string()),
+            "jet" | "edition" | "description" | "license" | "repository" | "layer" | "target" => {
+                Some(optional_string())
+            }
             "dependencies" => Some(Type::List(Box::new(Type::Named(
                 "CompilerDependency".to_string(),
             )))),
@@ -1594,10 +2359,210 @@ pub(crate) fn core_generic_struct_field(
     field: &str,
     args: &[Type],
 ) -> Option<Type> {
+    if type_name == "TypedHistoryCase" && args.len() == 1 {
+        return match field {
+            "case" => Some(Type::Named("HistoryCase".to_string())),
+            "commands" => Some(Type::List(Box::new(args[0].clone()))),
+            _ => None,
+        };
+    }
+    if type_name == "HistoryStrategy" && args.len() == 1 {
+        let command = args[0].clone();
+        return match field {
+            "generate" => Some(Type::Fn {
+                params: vec![
+                    Type::Named("HistoryRng".to_string()),
+                    Type::Named("Count".to_string()),
+                    Type::Named("Count".to_string()),
+                ],
+                ret: Some(Box::new(Type::Option(Box::new(Type::Apply {
+                    name: "TypedHistoryCase".to_string(),
+                    args: vec![command.clone()],
+                })))),
+                effect_bound: None,
+                param_contract: None,
+                call_metadata: None,
+                return_view_provenance: None,
+            }),
+            "rebuild" => Some(Type::Fn {
+                params: vec![Type::Named("HistoryCase".to_string())],
+                ret: Some(Box::new(Type::Option(Box::new(Type::Apply {
+                    name: "TypedHistoryCase".to_string(),
+                    args: vec![command.clone()],
+                })))),
+                effect_bound: None,
+                param_contract: None,
+                call_metadata: None,
+                return_view_provenance: None,
+            }),
+            "valid" => Some(Type::Fn {
+                params: vec![Type::Apply {
+                    name: "TypedHistoryCase".to_string(),
+                    args: vec![command],
+                }],
+                ret: Some(Box::new(Type::Bool)),
+                effect_bound: None,
+                param_contract: None,
+                call_metadata: None,
+                return_view_provenance: None,
+            }),
+            "bounds" => Some(Type::Named("HistoryBounds".to_string())),
+            "distributions" => Some(Type::List(Box::new(Type::Named(
+                "HistoryDistribution".to_string(),
+            )))),
+            _ => None,
+        };
+    }
+    if type_name == "FfiCallbackEvent" && args.len() == 1 {
+        return (field == "value").then_some(args[0].clone());
+    }
+    // D-SPACE-GEOMETRY1=A: generic coordinate carriers have only numeric
+    // payload fields; the second (and third for Transform2) arguments remain
+    // compile-time nominal space identities.
+    if matches!(type_name, "Point2" | "Delta2") && args.len() == 2 {
+        return matches!(field, "x" | "y").then_some(args[0].clone());
+    }
+    if type_name == "Ray2" && args.len() == 3 {
+        let output_space = args[2].clone();
+        return match field {
+            "origin" => Some(Type::Apply {
+                name: "Point2".to_string(),
+                args: vec![args[0].clone(), output_space.clone()],
+            }),
+            "direction" => Some(Type::Apply {
+                name: "Delta2".to_string(),
+                args: vec![args[0].clone(), output_space],
+            }),
+            _ => None,
+        };
+    }
+    if type_name == "Transform" && args.len() == 2 {
+        return matches!(field, "m00" | "m01" | "m10" | "m11" | "tx" | "ty")
+            .then_some(Type::Float);
+    }
+    if type_name == "Transform2" && args.len() == 3 {
+        return matches!(field, "m00" | "m01" | "m10" | "m11" | "tx" | "ty")
+            .then_some(args[0].clone());
+    }
+    if type_name == "WebTableColumn" && args.len() == 1 {
+        return match field {
+            "name" | "cell_type" => Some(Type::String),
+            _ => None,
+        };
+    }
+    if type_name == "WebTablePage" && args.len() == 1 {
+        return match field {
+            "rows" => Some(Type::List(Box::new(args[0].clone()))),
+            "row_keys" => Some(Type::List(Box::new(Type::String))),
+            "total_rows" | "page_index" | "page_size" | "page_count" => Some(Type::Int),
+            _ => None,
+        };
+    }
+    if type_name == "WebTableRow" && args.len() == 1 {
+        return match field {
+            "key" => Some(Type::String),
+            "value" => Some(args[0].clone()),
+            _ => None,
+        };
+    }
+    if type_name == "WebTable" && args.len() == 1 {
+        return match field {
+            "name" => Some(Type::String),
+            _ => None,
+        };
+    }
+    if type_name == "WebStoreTransaction" && args.len() == 1 {
+        return match field {
+            "generation" => Some(Type::Int),
+            "action" => Some(Type::String),
+            "changed_fields" => Some(Type::List(Box::new(Type::String))),
+            "before" | "after" => Some(args[0].clone()),
+            _ => None,
+        };
+    }
+    if type_name == "WebVirtualPlan" && args.is_empty() {
+        return match field {
+            "total_count" | "scroll_offset" | "viewport_width" | "viewport_height"
+            | "estimated_item_size" | "overscan" | "start" | "end" | "total_size"
+            | "measured_count" | "anchor_index" | "anchor_offset" => Some(Type::Int),
+            "measurements" => Some(Type::List(Box::new(Type::Tuple(vec![
+                ("index".to_string(), Box::new(Type::Int)),
+                ("size".to_string(), Box::new(Type::Int)),
+            ])))),
+            _ => None,
+        };
+    }
+    if type_name == "WebVirtualPlanViewport" && args.is_empty() {
+        return match field {
+            "start" | "end" | "total_size" | "measured_count" | "anchor_index"
+            | "anchor_offset" => Some(Type::Int),
+            _ => None,
+        };
+    }
+    if type_name == "WebStore" && args.len() == 1 {
+        return match field {
+            "name" => Some(Type::String),
+            _ => None,
+        };
+    }
+    if type_name == "WebStoreInspection" && args.len() == 1 {
+        return match field {
+            "value" => Some(args[0].clone()),
+            "generation" | "cursor" | "history_limit" => Some(Type::Int),
+            "history" => Some(Type::List(Box::new(Type::Apply {
+                name: "WebStoreTransaction".to_string(),
+                args: vec![args[0].clone()],
+            }))),
+            "events" => Some(Type::List(Box::new(Type::Named(
+                "WebStoreEvent".to_string(),
+            )))),
+            "history_enabled" => Some(Type::Bool),
+            _ => None,
+        };
+    }
+
     if type_name == "DataJoin" && args.len() == 2 {
         return match field {
             "left" => Some(args[0].clone()),
             "right" => Some(args[1].clone()),
+            _ => None,
+        };
+    }
+    if type_name == "Group" && args.len() == 2 {
+        return match field {
+            "key" => Some(args[0].clone()),
+            "value" => Some(args[1].clone()),
+            _ => None,
+        };
+    }
+    if type_name == "DataLoader" && args.len() == 1 {
+        return match field {
+            "source" => Some(Type::Named("DataSourceIdentity".to_string())),
+            "format" => Some(Type::Named("DataFormat".to_string())),
+            "authority" => Some(Type::Named("DataAuthority".to_string())),
+            "limits" => Some(Type::Named("DataLimits".to_string())),
+            "payload" | "last_good" => Some(Type::Option(Box::new(Type::List(Box::new(
+                u8_ty(),
+            ))))),
+            "cancelled" | "offline" => Some(Type::Bool),
+            "status" => Some(Type::Named("DataLoaderStatus".to_string())),
+            _ => None,
+        };
+    }
+    if type_name == "DataSnapshot" && args.len() == 1 {
+        return match field {
+            "value" => Some(args[0].clone()),
+            "identity" => Some(Type::Named("DataSnapshotIdentity".to_string())),
+            "provenance" => Some(Type::Named("DataProvenance".to_string())),
+            "schema" => Some(Type::Named("DataSchema".to_string())),
+            "status" => Some(Type::Named("DataLoaderStatus".to_string())),
+            "content" => Some(Type::List(Box::new(u8_ty()))),
+            _ => None,
+        };
+    }
+    if type_name == "JetDataPlotColumn" && args.len() == 1 {
+        return match field {
+            "field" => Some(Type::Named("JetDataPlotField".to_string())),
             _ => None,
         };
     }
@@ -1627,6 +2592,201 @@ pub(crate) fn core_generic_struct_field(
     }
     None
 }
+/// D-DX-QUEUE1=A: method return contracts for the typed durable queue.
+/// Arity is part of recognition so an invalid call remains a recognized queue
+/// method and can receive the shared wrong-arity diagnostic in method sema.
+pub(crate) fn job_queue_method_return(
+    ty: &Type,
+    method: &str,
+    n_args: usize,
+) -> Option<Option<Type>> {
+    let Type::Named(name) = ty else {
+        return None;
+    };
+    if name != "JobQueue" {
+        return None;
+    }
+    let service_error = || Type::Named("ServiceError".to_string());
+    let result = |ok| result_ty(ok, service_error());
+    let (valid, ret) = match method {
+        "enqueue" => ((2..=3).contains(&n_args), result(Type::Named(
+            "JobQueueReceipt".to_string(),
+        ))),
+        "delay" => (
+            n_args == 3,
+            result(Type::Named("JobQueueReceipt".to_string())),
+        ),
+        "receipt" => (
+            n_args == 1,
+            result(Type::Named("JobQueueReceipt".to_string())),
+        ),
+        "inspect" => (
+            n_args == 2,
+            result(Type::List(Box::new(Type::Named(
+                "JobQueueRecord".to_string(),
+            )))),
+        ),
+        "events" => (
+            n_args == 1,
+            result(Type::List(Box::new(Type::Named(
+                "JobQueueEvent".to_string(),
+            )))),
+        ),
+        "claim" => (
+            n_args == 2,
+            result(Type::List(Box::new(Type::Named(
+                "JobQueueClaim".to_string(),
+            )))),
+        ),
+        "heartbeat" | "acknowledge" | "fail" | "cancel" | "dead_letter" => {
+            let valid = match method {
+                "heartbeat" => n_args == 1,
+                "acknowledge" | "fail" => n_args == 2,
+                "cancel" | "dead_letter" => (2..=3).contains(&n_args),
+                _ => false,
+            };
+            (
+                valid,
+                result(Type::Named("JobQueueReceipt".to_string())),
+            )
+        }
+        "recover_expired" => (n_args == 0, result(unit_ty())),
+        "status" | "pause" | "resume" => (
+            n_args == 0,
+            result(Type::Named("JobQueueStatus".to_string())),
+        ),
+        "wait" => (n_args == 1, result(Type::Named("JobQueueStatus".to_string()))),
+        "prune" => (n_args == 0, result(Type::Int)),
+        _ => return None,
+    };
+    Some(valid.then_some(ret))
+}
+
+/// D-FLAGSHIP-WEBAPI1=A: instance method return types for the headless web
+/// suite. Element-bearing records stay generic through their `Type::Apply`
+/// arguments; argument validation remains in the method-call checker.
+pub fn web_method_return(
+    ty: &Type,
+    method: &str,
+    n_args: usize,
+) -> Option<Option<Type>> {
+    let (name, args) = match ty {
+        Type::Named(name) => (name.as_str(), &[][..]),
+        Type::Apply { name, args } => (name.as_str(), args.as_slice()),
+        _ => return None,
+    };
+    let element = |expected: &str| {
+        (name == expected && args.len() == 1).then(|| args[0].clone())
+    };
+    match name {
+        "JetDataPlot" => {
+            let element = element("JetDataPlot")?;
+            let plot = || Type::Apply {
+                name: "JetDataPlot".to_string(),
+                args: vec![element.clone()],
+            };
+            let fallible = || result_ty(plot(), Type::Named("DataError".to_string()));
+            match method {
+                "line" | "bar" | "point" => Some(Some(plot())),
+                "x" | "y" | "color" | "size" | "text" | "detail"
+                | "with_transform" | "with_scale" | "with_axis" | "with_legend"
+                | "facet" | "with_layer" | "with_interaction" | "accessibility"
+                | "layout" | "select_indices" => Some(Some(fallible())),
+                _ => None,
+            }
+        }
+        "WebTable" => {
+            let element = element("WebTable")?;
+            match method {
+                "with_column" | "paginate" => Some(Some(Type::Apply {
+                    name: "WebTable".to_string(),
+                    args: vec![element],
+                })),
+                "page" => Some(Some(result_ty(
+                    Type::Apply {
+                        name: "WebTablePage".to_string(),
+                        args: vec![element],
+                    },
+                    Type::String,
+                ))),
+                _ => None,
+            }
+        }
+        "WebStore" => {
+            let element = element("WebStore")?;
+            match method {
+                "set" => Some(Some(Type::Apply {
+                    name: "WebStoreTransaction".to_string(),
+                    args: vec![element.clone()],
+                })),
+                "signal" | "state_signal" => Some(Some(Type::Apply {
+                    name: "Signal".to_string(),
+                    args: vec![element],
+                })),
+                "facts_json" => Some(Some(Type::String)),
+                _ => None,
+            }
+        }
+        // D-DX-QUERY1 / D-DX-FORMS1: receiver spellings project onto the same
+        // Core rows as the module calls; no second dispatch table.
+        "WebQuery" if args.is_empty() => match method {
+            "state" => Some(Some(Type::Named("WebQueryState".to_string()))),
+            "state_signal" => Some(Some(Type::Apply {
+                name: "Signal".to_string(),
+                args: vec![Type::Named("WebQueryState".to_string())],
+            })),
+            "mutation_state" => Some(Some(Type::Named("WebMutationState".to_string()))),
+            "mutation_signal" => Some(Some(Type::Apply {
+                name: "Signal".to_string(),
+                args: vec![Type::Named("WebMutationState".to_string())],
+            })),
+            "invalidate" => Some(Some(Type::Int)),
+            "get" | "show" | "facts" => Some(Some(Type::String)),
+            "cancel" => Some(Some(Type::Bool)),
+            "refresh" => Some(Some(result_ty(unit_ty(), Type::String))),
+            _ => None,
+        },
+        "WebFormTyped" if args.is_empty() => match method {
+            "validate" if n_args == 0 => Some(Some(result_ty(unit_ty(), Type::String))),
+            "validate" => Some(Some(Type::Named("WebFormValidationChain".to_string()))),
+            "set_async_validator" | "blur" | "set" | "focus" => {
+                Some(Some(result_ty(unit_ty(), Type::String)))
+            }
+            "set_action" | "cancel" => Some(None),
+            "submit" | "no_script" | "post" => Some(Some(result_ty(Type::String, Type::String))),
+            "state" => Some(Some(Type::Named("WebFormState".to_string()))),
+            "lifecycle" => Some(Some(Type::Named("WebFormLifecycle".to_string()))),
+            "errors" => Some(Some(Type::Named("WebFormErrorState".to_string()))),
+            "render" | "show" => Some(Some(Type::String)),
+            _ => None,
+        },
+        "WebFormValidationChain" if args.is_empty() => match method {
+            "render" => Some(Some(Type::String)),
+            _ => None,
+        },
+        "WebStorePatch" => {
+            let element = element("WebStorePatch")?;
+            match method {
+                "generation" => Some(Some(Type::Int)),
+                "transaction" | "commit" => Some(Some(Type::Apply {
+                    name: "WebStoreTransaction".to_string(),
+                    args: vec![element],
+                })),
+                "active" => Some(Some(Type::Bool)),
+                "rollback" => Some(Some(Type::Option(Box::new(element)))),
+                _ => None,
+            }
+        }
+        "WebStoreSubscription" if args.is_empty() => match method {
+            "unsubscribe" => Some(None),
+            "active" => Some(Some(Type::Bool)),
+            _ => None,
+        },
+        "WebVirtualWindow" if method == "facts_json" => Some(Some(Type::String)),
+        _ => None,
+    }
+}
+
 
 pub fn core_json_pattern_types(variant: &str) -> Option<Vec<Type>> {
     let json = json_ty();
@@ -1665,6 +2825,19 @@ pub(crate) fn core_key_pattern_types(variant: &str) -> Option<Vec<Type>> {
         "F" => Some(vec![Type::Int]),
         _ => None,
     }
+}
+
+/// D-FOUND-LIFECYCLE1=A: process shutdown signals are the closed `.Term`,
+/// `.Hup`, and `.Int` Core enum values.
+pub(crate) fn core_process_signal_variants(
+) -> std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)> {
+    use crate::AST::VariantPayload;
+    use crate::Diagnostics::Span;
+    let zero = Span::new(0, 0);
+    ["Term", "Hup", "Int"]
+        .into_iter()
+        .map(|name| (name.to_string(), (zero, VariantPayload::Unit)))
+        .collect()
 }
 
 /// D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum (`.Stream`,
@@ -2050,6 +3223,25 @@ pub(crate) fn core_duration_unit_variants(
             .collect(),
     )
 }
+/// D-FOUND-COREAPI1 / #2853: the closed late-event disposition policy used by
+/// `Stream.window`.
+pub(crate) fn core_late_event_disposition_variants(
+    enum_name: &str,
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
+{
+    use crate::AST::VariantPayload;
+    use crate::Diagnostics::Span;
+    if enum_name != "LateEventDisposition" {
+        return None;
+    }
+    let zero = Span::new(0, 0);
+    Some(
+        ["Drop", "SideOutput"]
+            .into_iter()
+            .map(|name| (name.to_string(), (zero, VariantPayload::Unit)))
+            .collect(),
+    )
+}
 
 pub(crate) fn core_event_variants(
     enum_name: &str,
@@ -2278,22 +3470,28 @@ pub(crate) fn core_service_error_variants(
     )
 }
 
+/// D-FOUND-REALTIME1=A: typed lifecycle methods on the callback stream.
+pub fn realtime_stream_method_return(
+    method: &str,
+    n_args: usize,
+) -> Option<Option<Type>> {
+    match (method, n_args) {
+        ("next_deadline", 0) => Some(Some(Type::Named("Instant".to_string()))),
+        ("receipt", 0) => Some(Some(Type::Named("RealtimeReceipt".to_string()))),
+        ("cancel", 0) => Some(Some(unit_ty())),
+        ("is_cancelled", 0) => Some(Some(Type::Bool)),
+        _ => None,
+    }
+}
+
 /// D-CALLVALUE1=B: does a Core handle type own a method under this name?
 ///
-/// The builtin `.call(…)` projection is defined for function-typed receivers,
-/// and spec.md ("Function-value calls") says a field or method literally named
-/// `call` shadows it. A Core handle's methods live in these tables rather than
-/// in the user struct/impl registries, so the shadow test has to ask here too —
-/// otherwise `Plugin.call` (D-DEP-WASM1=A / D-PLUGIN1=B) is hijacked by the
-/// projection and reported as E0803 "this is `Plugin`, not a function", while
-/// its typed siblings resolve normally.
-///
-/// Only the bespoke, receiver-name-dispatched handle tables answer: the generic
-/// ones (`file_handle_method_return` and friends) diagnose as they resolve, so
-/// they cannot be consulted as a predicate.
+/// The plugin method set is interface-specific and is resolved by
+/// `check_plugin_method`; it must not be treated as a closed Core handle table.
+/// Keeping it out of this predicate prevents a stale compatibility alias from
+/// hijacking ordinary function-value projection.
 pub fn core_handle_owns_method(handle_ty: &str, method: &str) -> bool {
     match handle_ty {
-        "Plugin" => super::plugin_method_return_ty(method).is_some(),
         "Mod" => super::mod_method_return_ty(method).is_some(),
         _ => false,
     }
@@ -2312,8 +3510,27 @@ pub fn file_handle_method_return(
     let io = io_error_ty();
     let unit = unit_ty();
     match handle_ty {
+        "MappedFile" => match (method, n_args) {
+            ("window" | "window_len", 2) => Some(Some(result_ty(
+                Type::Apply {
+                    name: "View".to_string(),
+                    args: vec![Type::List(Box::new(u8_ty()))],
+                },
+                io.clone(),
+            ))),
+            ("lines", 0) => Some(Some(crate::Collections::view_iter_ty(Type::Apply {
+                name: "View".to_string(),
+                args: vec![Type::List(Box::new(u8_ty()))],
+            }))),
+            ("len", 0) => Some(Some(Type::Int)),
+            ("is_empty", 0) => Some(Some(Type::Bool)),
+            _ => None,
+        },
+        "FileScope" => match (method, n_args) {
+            ("read", 1) => Some(Some(result_ty(Type::String, io))),
+            _ => None,
+        },
         "FileReader" => match method {
-            // `.lines()` — returns the handle as a streaming source for `loop … in`.
             // We encode the return as `Named("FileLines")` so the loop body knows
             // the element type is `String`.
             "lines" if n_args == 0 => Some(Some(Type::Named("FileLines".to_string()))),
@@ -2439,6 +3656,70 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
                 Type::Option(Box::new(Type::Named(Syntax::TYPE_ERR.to_string()))),
             ),
         ]),
+        "HandleId" | "TaskId" | "EventId" => Some(vec![("value".to_string(), Type::Named("Count".to_string()))]),
+        "HistoryCase" => Some(vec![
+            ("case_id".to_string(), Type::String),
+            ("seed".to_string(), Type::Named("Count".to_string())),
+            ("operations".to_string(), Type::List(Box::new(Type::Named("HistoryOperation".to_string())))),
+            ("schedule".to_string(), Type::List(Box::new(Type::Named("HistoryScheduleChoice".to_string())))),
+        ]),
+        "HistoryOperation" => Some(vec![
+            ("index".to_string(), Type::Named("Count".to_string())),
+            ("name".to_string(), Type::String),
+            ("arguments".to_string(), Type::List(Box::new(Type::Named("HistoryValue".to_string())))),
+            ("creates".to_string(), Type::List(Box::new(Type::Named("HandleId".to_string())))),
+            ("consumes".to_string(), Type::List(Box::new(Type::Named("HandleId".to_string())))),
+            ("preconditions".to_string(), Type::List(Box::new(Type::Named("HistoryPrecondition".to_string())))),
+            ("depends_on".to_string(), Type::List(Box::new(Type::Named("Count".to_string())))),
+            ("task".to_string(), Type::Option(Box::new(Type::Named("TaskId".to_string())))),
+            ("event".to_string(), Type::Option(Box::new(Type::Named("EventId".to_string())))),
+        ]),
+        "HistoryScheduleChoice" => Some(vec![
+            ("operation".to_string(), Type::Named("Count".to_string())),
+            ("task".to_string(), Type::Option(Box::new(Type::Named("TaskId".to_string())))),
+            ("event".to_string(), Type::Option(Box::new(Type::Named("EventId".to_string())))),
+            ("choice".to_string(), Type::String),
+        ]),
+        "HistoryBounds" => Some(vec![
+            ("max_steps".to_string(), Type::Named("Count".to_string())),
+            ("max_resources".to_string(), Type::Named("Count".to_string())),
+            ("max_shrink_attempts".to_string(), Type::Named("Count".to_string())),
+            ("max_discarded_cases".to_string(), Type::Named("Count".to_string())),
+        ]),
+        "HistoryDistribution" => Some(vec![
+            ("operation".to_string(), Type::String),
+            ("weight".to_string(), Type::Named("Count".to_string())),
+        ]),
+        "HistoryRng" => Some(vec![]),
+        "TypedHistoryCase" => None,
+        "HistoryStrategy" => None,
+        "TestComparison" => Some(vec![
+            ("status".to_string(), Type::String),
+            ("relation".to_string(), Type::String),
+            ("source".to_string(), Type::String),
+            ("tool".to_string(), Type::String),
+            ("target".to_string(), Type::String),
+            ("seed".to_string(), Type::Option(Box::new(Type::Int))),
+            (
+                "case_ids".to_string(),
+                Type::List(Box::new(Type::String)),
+            ),
+            (
+                "inputs".to_string(),
+                Type::List(Box::new(Type::Named("DataTree".to_string()))),
+            ),
+            (
+                "reference".to_string(),
+                Type::List(Box::new(Type::Named("DataTree".to_string()))),
+            ),
+            (
+                "candidate".to_string(),
+                Type::List(Box::new(Type::Named("DataTree".to_string()))),
+            ),
+            ("first_difference".to_string(), Type::Int),
+            ("reason".to_string(), Type::String),
+            ("universal_proof".to_string(), Type::Bool),
+        ]),
         // D-LIB-CALLGRANT1=A: host policy is explicit and path-scoped.
         "ModGrant" => Some(vec![(
             "read".to_string(),
@@ -2486,6 +3767,29 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
         "AsyncPolicy" => Some(vec![
             ("capacity".to_string(), Type::Int),
             ("overflow".to_string(), Type::Named("Overflow".to_string())),
+        ]),
+        // D-DX-FORM1=A: generated field descriptors are compiler-known
+        // records. `web.form(Model, action: handler)` constructs these
+        // literals after projecting the model fields, so they must use the
+        // same core-record path as explicit prelude struct literals.
+        "WebFormFieldSpec" => Some(vec![
+            ("name".to_string(), str_ty.clone()),
+            (
+                "value_type".to_string(),
+                Type::Named("WebFormValueType".to_string()),
+            ),
+            ("required".to_string(), Type::Bool),
+            (
+                "default".to_string(),
+                Type::Option(Box::new(Type::String)),
+            ),
+            ("label".to_string(), str_ty.clone()),
+            (
+                "control".to_string(),
+                Type::Named("WebFormControl".to_string()),
+            ),
+            ("group".to_string(), Type::Option(Box::new(Type::String))),
+            ("wire_name".to_string(), str_ty),
         ]),
         // D-VALIDATE1 / D-VALIDATE-DECODE1: `FieldError.{ path: …, reason: … }`.
         "FieldError" => Some(vec![
@@ -2691,6 +3995,80 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
     }
 }
 
+/// Constructable fields for generic compiler-owned records. The ordinary
+/// constructable table intentionally has no type arguments, so callers with a
+/// `Type::Apply` resolve these shapes here.
+pub(crate) fn core_generic_constructable_fields(
+    type_name: &str,
+    args: &[Type],
+) -> Option<Vec<(String, Type)>> {
+    if args.len() != 1 {
+        return None;
+    }
+    let command = args[0].clone();
+    let typed_case = || Type::Apply {
+        name: "TypedHistoryCase".to_string(),
+        args: vec![command.clone()],
+    };
+    match type_name {
+        "TypedHistoryCase" => Some(vec![
+            ("case".to_string(), Type::Named("HistoryCase".to_string())),
+            ("commands".to_string(), Type::List(Box::new(command))),
+        ]),
+        "HistoryStrategy" => {
+            let typed_case = typed_case();
+            Some(vec![
+                (
+                    "generate".to_string(),
+                    Type::Fn {
+                        params: vec![
+                            Type::Named("HistoryRng".to_string()),
+                            Type::Named("Count".to_string()),
+                            Type::Named("Count".to_string()),
+                        ],
+                        ret: Some(Box::new(Type::Option(Box::new(typed_case.clone())))),
+                        effect_bound: None,
+                        return_view_provenance: None,
+                        param_contract: None,
+                        call_metadata: None,
+                    },
+                ),
+                (
+                    "rebuild".to_string(),
+                    Type::Fn {
+                        params: vec![Type::Named("HistoryCase".to_string())],
+                        ret: Some(Box::new(Type::Option(Box::new(typed_case.clone())))),
+                        effect_bound: None,
+                        return_view_provenance: None,
+                        param_contract: None,
+                        call_metadata: None,
+                    },
+                ),
+                (
+                    "valid".to_string(),
+                    Type::Fn {
+                        params: vec![typed_case],
+                        ret: Some(Box::new(Type::Bool)),
+                        effect_bound: None,
+                        return_view_provenance: None,
+                        param_contract: None,
+                        call_metadata: None,
+                    },
+                ),
+                (
+                    "bounds".to_string(),
+                    Type::Named("HistoryBounds".to_string()),
+                ),
+                (
+                    "distributions".to_string(),
+                    Type::List(Box::new(Type::Named("HistoryDistribution".to_string()))),
+                ),
+            ])
+        }
+        _ => None,
+    }
+}
+
 /// D-EMAIL-SMTP-SURFACE1=A: closed ungated email policy and error enums.
 pub(crate) fn core_email_variants(
     enum_name: &str,
@@ -2818,8 +4196,7 @@ pub(crate) fn core_encoding_variants(
     let zero = Span::new(0, 0);
     let mut variants = std::collections::HashMap::new();
     let units: &[&str] = match enum_name {
-        "EncodingFormat" => &["JSON", "JSONL", "CSV", "XML", "CBOR"],
-        "EncodingErrorKind" => &["Syntax", "Truncated", "Unsupported", "Limit", "IO", "State"],
+        "EncodingFormat" => &["JSON", "JSONL", "CSV", "TOML", "YAML", "XML", "CBOR"],
         "DataErrorKind" => &[
             "Decode",
             "Limit",
@@ -2832,6 +4209,48 @@ pub(crate) fn core_encoding_variants(
             "Bridge",
         ],
         "DataEvent" => &["Null", "ArrayStart", "ArrayEnd", "ObjectStart", "ObjectEnd"],
+        "DataFormat" => &["CSV", "JSON", "JSONL", "Parquet", "Arrow"],
+        "DataLoaderKind" => &["File", "Url", "Database", "Value"],
+        "DataFreshness" => &["Pending", "Fresh", "Stale", "Error", "Offline", "Cancelled"],
+        "DataInvalidationCause" => &[
+            "None",
+            "Loader",
+            "Input",
+            "ArchiveMember",
+            "Parameters",
+            "Credential",
+            "Capability",
+            "Manual",
+        ],
+        "JobQueueState" => &[
+            "Queued",
+            "Running",
+            "Retrying",
+            "Completed",
+            "Failed",
+            "DeadLettered",
+            "Cancelled",
+        ],
+        "JobQueueDeliveryPolicy" => &["AtLeastOnce"],
+        "JetDataPlotMark" => &["Line", "Bar", "Point"],
+        "JetDataPlotChannel" => &["X", "Y", "Color", "Size", "Text", "Detail"],
+        "JetDataPlotAggregate" => &["None", "Count", "Sum", "Mean", "Min", "Max"],
+        "JetDataPlotFilterOp" => &[
+            "Equal",
+            "NotEqual",
+            "Less",
+            "LessEqual",
+            "Greater",
+            "GreaterEqual",
+        ],
+        "JetDataPlotScaleKind" => &["Linear", "Log", "Band", "Point"],
+        "JetDataPlotLegendPosition" => &["Top", "Right", "Bottom", "Left"],
+        "JetDataPlotFacetKind" => &["Row", "Column"],
+        "JetDataPlotInteraction" => &["Hover", "Select", "Zoom", "Pan", "Brush"],
+        "JetDataPlotBackend" => &["Terminal", "Browser", "Native", "Export"],
+        "JetDataPlotSupport" => &["Supported", "Degraded", "Unsupported"],
+        "JetDataPlotErrorKind" => &["InvalidArgument", "NonFinite", "Unsupported", "Empty", "Limit"],
+        "JetDataPlotRenderFormat" => &["Text", "Svg"],
         "CBORErrorKind" => &[
             "Syntax",
             "Truncated",
@@ -2889,6 +4308,142 @@ pub(crate) fn core_encoding_variants(
                     },
                     zero,
                 ),
+            ),
+        );
+    }
+    if enum_name == "JetDataPlotValue" {
+        for (name, ty) in [
+            ("Text", Type::String),
+            ("Integer", Type::Int),
+            ("Number", Type::Float),
+            ("Boolean", Type::Bool),
+        ] {
+            variants.insert(name.to_string(), (zero, VariantPayload::Single(ty, zero)));
+        }
+    }
+    if enum_name == "JetDataPlotValue" {
+        variants.insert("Null".to_string(), (zero, VariantPayload::Unit));
+    }
+    if enum_name == "JetDataPlotDomain" {
+        variants.insert(
+            "Numeric".to_string(),
+            (
+                zero,
+                VariantPayload::Named(vec![
+                    VariantField {
+                        name: "min".to_string(),
+                        name_span: zero,
+                        ty: Type::Float,
+                        ty_span: zero,
+                    },
+                    VariantField {
+                        name: "max".to_string(),
+                        name_span: zero,
+                        ty: Type::Float,
+                        ty_span: zero,
+                    },
+                ]),
+            ),
+        );
+        variants.insert(
+            "Categories".to_string(),
+            (
+                zero,
+                VariantPayload::Single(Type::List(Box::new(Type::String)), zero),
+            ),
+        );
+    }
+    if enum_name == "JetDataPlotTransform" {
+        variants.insert(
+            "Filter".to_string(),
+            (
+                zero,
+                VariantPayload::Named(vec![
+                    VariantField {
+                        name: "field".to_string(),
+                        name_span: zero,
+                        ty: Type::Named("JetDataPlotField".to_string()),
+                        ty_span: zero,
+                    },
+                    VariantField {
+                        name: "op".to_string(),
+                        name_span: zero,
+                        ty: Type::Named("JetDataPlotFilterOp".to_string()),
+                        ty_span: zero,
+                    },
+                    VariantField {
+                        name: "value".to_string(),
+                        name_span: zero,
+                        ty: Type::Named("JetDataPlotValue".to_string()),
+                        ty_span: zero,
+                    },
+                ]),
+            ),
+        );
+        variants.insert(
+            "Sort".to_string(),
+            (
+                zero,
+                VariantPayload::Named(vec![
+                    VariantField {
+                        name: "field".to_string(),
+                        name_span: zero,
+                        ty: Type::Named("JetDataPlotField".to_string()),
+                        ty_span: zero,
+                    },
+                    VariantField {
+                        name: "descending".to_string(),
+                        name_span: zero,
+                        ty: Type::Bool,
+                        ty_span: zero,
+                    },
+                ]),
+            ),
+        );
+        variants.insert(
+            "Bin".to_string(),
+            (
+                zero,
+                VariantPayload::Named(vec![
+                    VariantField {
+                        name: "field".to_string(),
+                        name_span: zero,
+                        ty: Type::Named("JetDataPlotField".to_string()),
+                        ty_span: zero,
+                    },
+                    VariantField {
+                        name: "step".to_string(),
+                        name_span: zero,
+                        ty: Type::Float,
+                        ty_span: zero,
+                    },
+                ]),
+            ),
+        );
+        variants.insert(
+            "Aggregate".to_string(),
+            (
+                zero,
+                VariantPayload::Named(vec![
+                    VariantField {
+                        name: "group_by".to_string(),
+                        name_span: zero,
+                        ty: Type::List(Box::new(Type::Named("JetDataPlotField".to_string()))),
+                        ty_span: zero,
+                    },
+                    VariantField {
+                        name: "field".to_string(),
+                        name_span: zero,
+                        ty: Type::Named("JetDataPlotField".to_string()),
+                        ty_span: zero,
+                    },
+                    VariantField {
+                        name: "aggregate".to_string(),
+                        name_span: zero,
+                        ty: Type::Named("JetDataPlotAggregate".to_string()),
+                        ty_span: zero,
+                    },
+                ]),
             ),
         );
     }

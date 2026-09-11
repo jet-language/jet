@@ -34,7 +34,7 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">Typestate (D-STATE-HOME1=A): `struct {type} { state { … } }` defines the valid state labels; a name not in that set is likely a typo — a phantom state no transition can reach.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Correct the spelling, or add the name to the `state { … }` section inside `struct {type}`.</p>
+<p class="diag-copy fix" data-registry-field="fix">Correct the spelling, or add `{state}` inside `struct {type} { state { … } }`.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0151</code>: <code>tests/ui/typestate_unknown_state.stderr</code>.</p>
 <pre class="diag">Error [E0151]: `Stuffed` is not a declared state of `Crate`
@@ -43,7 +43,7 @@
  13 |     #State(Stuffed) fn get(self) Int -&gt; { return self.data }
     |     ^^^^^^^^^^^^^^^
  Why: typestate (D-STATE-HOME1=A): `struct Crate { state { … } }` defines the valid state labels; `Stuffed` is not among them — a typo here would silently create a phantom state that no transition reaches
- Fix: add `Stuffed` to the `state { … }` section inside `struct Crate`, or correct the spelling
+ Fix: add `Stuffed` inside `struct Crate { state { … } }`, or correct the spelling
 More: jet-lang.dev/e/E0151
 
 Error [E0150]: `get` needs `Crate` in state `Stuffed`, but `b` is in state `Full`

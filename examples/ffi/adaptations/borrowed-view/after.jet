@@ -1,0 +1,14 @@
+#Import module c.reader {
+    fn __jet_ffi_native_inspect_bytes(bytes: &[U8], length: U32) U32 = "inspect_bytes"
+}
+
+// Unrun expectation: the facade proves the borrowed-for-call contract and
+// checks the 32-bit extent before entering C; no copy or retention is invented.
+pub fn inspect_bytes(bytes: &[U8]) U32 -> {
+    return __jet_ffi_native_inspect_bytes(bytes, bytes.len())
+}
+
+pub fn run() U32 -> {
+    bytes := [0, 1, 2, 0]
+    return inspect_bytes(&bytes)
+}

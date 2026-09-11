@@ -34,34 +34,34 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">An unused parameter often means the function contract or implementation is incomplete; Jet keeps this warning-only so prototypes stay unblocked.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">use `{name}`, rename it to `_{name}` when it is intentionally unused, or remove it from the function contract.</p>
+<p class="diag-copy fix" data-registry-field="fix">Use `{name}`, rename it to `_{name}` when it is intentionally unused, or remove it from the function contract.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>L0102</code>: <code>tests/ui/hand_serde_bad_signature.stderr</code>.</p>
-<pre class="diag">Error [E0907]: `encode` doesn&#39;t match `Encode`
+<pre class="diag">Error [E0907]: `encode` doesn&#39;t match the `Encode` contract
   --&gt; tests/ui/hand_serde_bad_signature.jet:12:8
     |
  12 |     fn encode(self) String -&gt; ~self.addr
     |        ^^^^^^
- Why: impl methods must match the trait signature exactly
- Fix: check the parameter and return types for `encode` against the trait
+ Why: A trait implementation must use the trait method&#39;s receiver, parameters, return type, and effects
+ Fix: Write `fn encode(self) DataTree`, matching the `Encode` declaration exactly, including `self`, types, labels, return type, and effects
 More: jet-lang.dev/e/E0907
 
-Error [E0907]: `decode` doesn&#39;t match `Decode`
+Error [E0907]: `decode` doesn&#39;t match the `Decode` contract
   --&gt; tests/ui/hand_serde_bad_signature.jet:17:8
     |
  17 |     fn decode(self, tree: DataTree) Email ![FieldError] -&gt; { return Ok(Email{addr: &quot;x&quot;}) }
     |        ^^^^^^
- Why: impl methods must match the trait signature exactly
- Fix: check the parameter and return types for `decode` against the trait
+ Why: A trait implementation must use the trait method&#39;s receiver, parameters, return type, and effects
+ Fix: Write `fn decode(tree: DataTree) Email ![FieldError]`, matching the `Decode` declaration exactly, including `self`, types, labels, return type, and effects
 More: jet-lang.dev/e/E0907
 
-Warning [L0102] (unused_parameter): parameter `tree` is never used.
+Warning [L0102] (unused_parameter): Parameter `tree` is never used.
   --&gt; tests/ui/hand_serde_bad_signature.jet:17:21
     |
  17 |     fn decode(self, tree: DataTree) Email ![FieldError] -&gt; { return Ok(Email{addr: &quot;x&quot;}) }
     |                     ^^^^
- Why: an unused parameter often means the function contract or implementation is incomplete; Jet keeps this warning-only so prototypes stay unblocked.
- Fix: use `tree`, rename it to `_tree` when it is intentionally unused, or remove it from the function contract.
+ Why: An unused parameter often means the function contract or implementation is incomplete; Jet keeps this warning-only so prototypes stay unblocked.
+ Fix: Use `tree`, rename it to `_tree` when it is intentionally unused, or remove it from the function contract.
 More: jet-lang.dev/e/L0102
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

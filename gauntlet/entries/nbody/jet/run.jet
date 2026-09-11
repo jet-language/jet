@@ -21,23 +21,23 @@ fn advance(b: &[(p: Vec3, v: Vec3, m: Float)], n: Int) {
                 y := b[j]
                 r :: x.p - y.p
                 g :: d / (r.dot(r) * r.length())
-                x.v -= r * Vec3.splat(y.m * g)
-                y.v += r * Vec3.splat(x.m * g)
+                x.v -= r * (y.m * g)
+                y.v += r * (x.m * g)
                 b[i] = x
                 b[j] = y
             }
         }
         loop i in 0..<5 {
             x := b[i]
-            x.p += x.v * Vec3.splat(d)
+            x.p += x.v * d
             b[i] = x
         }
     }
 }
 
 fn run(args: Args) {
-    pi :: Float{3.141592653589793}
-    s :: Float{4.0} * pi * pi
+    circle_pi :: Float{3.141592653589793}
+    s :: Float{4.0} * circle_pi * circle_pi
     y :: Float{365.24}
     b := [
         (p: Vec3(0.0, 0.0, 0.0), v: Vec3(0.0, 0.0, 0.0), m: s),
@@ -47,11 +47,11 @@ fn run(args: Args) {
         (p: Vec3(15.3796971148509165, -25.9193146099879641, 0.179258772950371181), v: Vec3(0.00268067772490389322 * y, 0.00162824170038242201 * y, -0.0000951592254519715870 * y), m: Float{0.0000515138902046611451} * s)
     ]
     q := Vec3.splat(0.0)
-    q += b[1].v * Vec3.splat(b[1].m)
-    q += b[2].v * Vec3.splat(b[2].m)
-    q += b[3].v * Vec3.splat(b[3].m)
-    q += b[4].v * Vec3.splat(b[4].m)
-    b[0].v = Vec3.splat(-1.0 / b[0].m) * q
+    q += b[1].v * b[1].m
+    q += b[2].v * b[2].m
+    q += b[3].v * b[3].m
+    q += b[4].v * b[4].m
+    b[0].v = (-1.0 / b[0].m) * q
     print("{energy(b):Fixed(9)}")
     advance(&b, args.steps)
     print("{energy(b):Fixed(9)}")

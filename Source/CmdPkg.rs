@@ -12,7 +12,7 @@ use crate::flag_value;
 struct PackageInput {
     path: PathBuf,
     raw: String,
-    inline: Option<jet::Package::InlinePackageBlock>,
+    inline: Option<jet::Package::Blocks::InlinePackageBlock>,
     manifest: jet::Manifest::Manifest,
 }
 

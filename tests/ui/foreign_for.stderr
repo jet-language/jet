@@ -13,7 +13,7 @@ Error [E0003]: Expected a statement, found `while`
   5 |     while c {
     |     ^^^^^
  Why: This position accepts only Jet's current statement grammar; retired foreign loop words are not statement keywords
- Fix: Write `loop condition { … }`
+ Fix: Write `loop condition { … }`; for repeated input, use `loop line in io.stdin().lines()` and stop in the body with `if test { break }`
 More: jet-lang.dev/e/E0003
 
 Error [E0003]: Expected a statement, found `continue`
@@ -30,6 +30,6 @@ Error [E0003]: Expected a statement, found `do`
     |
   9 |     do {
     |     ^^
- Why: This position accepts only Jet's current statement grammar; retired foreign loop words are not statement keywords
- Fix: Write `loop { … }`
+ Why: Jet uses one body-first loop form; put the stop test inside the body and exit with `break`
+ Fix: Write `loop { … if test { break } }`; for repeated input, use `loop line in io.stdin().lines()`
 More: jet-lang.dev/e/E0003

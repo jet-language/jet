@@ -8,6 +8,7 @@ use crate::Output::{self, Theme};
 use crate::Store::{self, ExplainLens, Roots};
 use crate::{BuildDebug, Discovery, EnvFile, Lock, Overlay, SemanticLock, Syntax, WorkspaceFile};
 use std::path::{Path, PathBuf};
+use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
 
 pub(super) fn render_channel_update_row(
     theme: &Theme,
@@ -315,14 +316,23 @@ pub(super) fn apply_project_update(theme: &Theme, plan: ProjectUpdatePlan) -> i3
             ok = false;
             continue;
         }
-        Lock::record_source_channel(
+        if let Err(error) = Lock::record_source_channel(
             &project_dir,
             Lock::LockedSourceChannel {
                 name: source.name.clone(),
                 channel: source.lock_channel().to_string(),
                 exact: update.after.clone(),
             },
-        );
+        ) {
+            theme.error_coded(
+                "E1206",
+                &format!("couldn't write source channel `{}` to the lock", source.name),
+                &error,
+                "fix the project lock permissions and rerun the update",
+            );
+            ok = false;
+            continue;
+        }
         theme.status(&format!(
             "{} {} → {}",
             theme.bold(&source.name),
@@ -519,30 +529,29 @@ pub(super) fn cmd_explain(theme: &Theme, parsed: &Parsed) -> i32 {
         if parsed.flags.json {
             let optional = |value: Option<&String>| {
                 value
-                    .map(|value| crate::JSON::quote(value))
-                    .unwrap_or_else(|| "null".to_string())
+                    .map(|value| StatusValue::String(value.clone()))
+                    .unwrap_or(StatusValue::Null)
             };
+            let explain = StatusValue::object(
+                StatusFields::new()
+                    .with("code", explanation.code.as_str())
+                    .with("stage", explanation.stage.as_str())
+                    .with(
+                        "what",
+                        explanation
+                            .what
+                            .as_deref()
+                            .unwrap_or(explanation.meaning.as_str()),
+                    )
+                    .with("why", optional(explanation.why.as_ref()))
+                    .with("fix", optional(explanation.fix.as_ref()))
+                    .with("example", optional(explanation.example.as_ref())),
+            );
             println!(
                 "{}",
-                jet_foundation::Report::render_status_json(
-                    "ok",
-                    true,
-                    "explain",
-                    &format!(
-                        ",\"code\":{},\"stage\":{},\"what\":{},\"why\":{},\"fix\":{},\"example\":{}",
-                        crate::JSON::quote(&explanation.code),
-                        crate::JSON::quote(&explanation.stage),
-                        crate::JSON::quote(
-                            explanation
-                                .what
-                                .as_deref()
-                                .unwrap_or(explanation.meaning.as_str())
-                        ),
-                        optional(explanation.why.as_ref()),
-                        optional(explanation.fix.as_ref()),
-                        optional(explanation.example.as_ref()),
-                    ),
-                )
+                StatusEnvelope::new("explain", true)
+                    .with_field("explain", explain)
+                    .json()
             );
         } else {
             print!("{}", jet_cli::Explain::render(&explanation, theme.color));
@@ -634,13 +643,13 @@ fn explain_error(
             fix.to_string(),
             None,
         );
+        let file = jet_foundation::Diagnostics::ReportPath::from_process("");
+        let report = diagnostic.to_report(&file, "");
         print!(
             "{}",
-            jet_foundation::Diagnostics::render_all_json(
-                &jet_foundation::Diagnostics::ReportPath::from_process(""),
-                "",
-                &[diagnostic],
-            )
+            StatusEnvelope::new("explain", false)
+                .with_reports(std::iter::once(report))
+                .json_line()
         );
     } else {
         theme.error_coded(code, what, why, fix);
@@ -668,13 +677,14 @@ fn cmd_explain_overlay(theme: &Theme, parsed: &Parsed, query: &str) -> i32 {
         Ok(plan) => plan,
         Err(d) => {
             if parsed.flags.json {
+                let file =
+                    crate::Diagnostics::ReportPath::from_process(Syntax::WORKSPACE_FILE);
+                let report = d.to_report(&file, "");
                 print!(
                     "{}",
-                    crate::Diagnostics::render_all_json(
-                        &crate::Diagnostics::ReportPath::from_process(Syntax::WORKSPACE_FILE),
-                        "",
-                        std::slice::from_ref(&d),
-                    )
+                    StatusEnvelope::new("explain", false)
+                        .with_reports(std::iter::once(report))
+                        .json_line()
                 );
             } else {
                 eprint!(
@@ -718,54 +728,45 @@ fn cmd_explain_overlay(theme: &Theme, parsed: &Parsed, query: &str) -> i32 {
         );
     };
     if parsed.flags.json {
-        let owners = fact
-            .owners
-            .iter()
-            .map(|owner| crate::JSON::quote(owner))
-            .collect::<Vec<_>>()
-            .join(",");
-        let contenders = fact
-            .contenders
-            .iter()
-            .map(|contender| {
-                format!(
-                    "{{\"owner\":{},\"provider\":{},\"exact\":{},\"reason\":{},\"source\":{},\"channel\":{},\"policy\":{},\"recipe\":{},\"adapter\":{},\"signature\":{},\"cache_provenance\":{},\"update\":{}}}",
-                    crate::JSON::quote(&contender.owner_package),
-                    crate::JSON::quote(&contender.provider),
-                    crate::JSON::quote(&contender.exact_output),
-                    crate::JSON::quote(&contender.reason),
-                    crate::JSON::quote(&contender.source_ref),
-                    crate::JSON::quote(&contender.channel_input),
-                    crate::JSON::quote(&contender.policy_fingerprint),
-                    crate::JSON::quote(&contender.recipe_id),
-                    crate::JSON::quote(&contender.adapter_id),
-                    crate::JSON::quote(&contender.signature),
-                    crate::JSON::quote(&contender.cache_provenance),
-                    crate::JSON::quote(&contender.update_command),
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(",");
+        let owners = StatusValue::array(
+            fact.owners
+                .iter()
+                .map(|owner| StatusValue::String(owner.clone())),
+        );
+        let contenders = StatusValue::array(fact.contenders.iter().map(|contender| {
+            StatusValue::object(
+                StatusFields::new()
+                    .with("owner", contender.owner_package.as_str())
+                    .with("provider", contender.provider.as_str())
+                    .with("exact", contender.exact_output.as_str())
+                    .with("reason", contender.reason.as_str())
+                    .with("source", contender.source_ref.as_str())
+                    .with("channel", contender.channel_input.as_str())
+                    .with("policy", contender.policy_fingerprint.as_str())
+                    .with("recipe", contender.recipe_id.as_str())
+                    .with("adapter", contender.adapter_id.as_str())
+                    .with("signature", contender.signature.as_str())
+                    .with("cache_provenance", contender.cache_provenance.as_str())
+                    .with("update", contender.update_command.as_str()),
+            )
+        }));
+        let fields = StatusFields::new()
+            .with("query", query)
+            .with("lens", "overlay")
+            .with("semantic_key", fact.semantic_key.as_str())
+            .with("owners", owners)
+            .with("contenders", contenders)
+            .with("provider", fact.provider.as_str())
+            .with("platform", fact.platform.as_str())
+            .with("exact", fact.exact_artifact.as_str())
+            .with("policy", fact.policy_fingerprint.as_str())
+            .with("update", fact.update_command.as_str())
+            .with("offline", fact.offline_satisfied);
         println!(
             "{}",
-            jet_foundation::Report::render_status_json(
-                "ok",
-                true,
-                "explain",
-                &format!(
-                    ",\"query\":{},\"lens\":\"overlay\",\"semantic_key\":{},\"owners\":[{}],\"contenders\":[{}],\"provider\":{},\"platform\":{},\"exact\":{},\"policy\":{},\"update\":{},\"offline\":{}",
-                    crate::JSON::quote(query),
-                    crate::JSON::quote(&fact.semantic_key),
-                    owners,
-                    contenders,
-                    crate::JSON::quote(&fact.provider),
-                    crate::JSON::quote(&fact.platform),
-                    crate::JSON::quote(&fact.exact_artifact),
-                    crate::JSON::quote(&fact.policy_fingerprint),
-                    crate::JSON::quote(&fact.update_command),
-                    fact.offline_satisfied,
-                ),
-            )
+            StatusEnvelope::new("explain", true)
+                .with_fields(fields)
+                .json()
         );
         return 0;
     }

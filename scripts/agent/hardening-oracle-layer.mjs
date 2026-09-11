@@ -8,7 +8,12 @@ import os from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { validateManifest } from "./hardening-manifest.mjs";
+import {
+  CAPABILITY_DISPOSITIONS,
+  CAPABILITY_RELATION_SCHEMA,
+  validateCapabilityRelation,
+  validateManifest,
+} from "./hardening-manifest.mjs";
 
 /*
  * Layer-1 wrong-answer machinery (#2337).
@@ -65,7 +70,7 @@ export function sha256(value) {
 }
 
 function clone(value) {
-  return JSON.parse(JSON.stringify(value));
+  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 }
 
 function equalValue(left, right) {
@@ -502,6 +507,13 @@ function requireManifestArtifact(manifest) {
       }
     }
   }
+  if (manifest.capability_relation) {
+    const capabilityValidation = validateCapabilityRelation(manifest.capability_relation, {
+      sourceSnapshotHash: manifest.source_snapshot.hash,
+      sourceSnapshotFiles: manifest.source_snapshot.files || null,
+    });
+    if (!capabilityValidation.ok) throw new Error(capabilityValidation.errors.join("; "));
+  }
   return manifest;
 }
 
@@ -592,6 +604,68 @@ function catalogRow(row) {
   };
 }
 
+function capabilityCatalogRow(row) {
+  const executable = row.disposition === "passed";
+  return {
+    stable_id: row.row_id,
+    row_id: row.row_id,
+    capability_id: row.capability_id,
+    family: row.family,
+    kind: row.kind,
+    label: row.label,
+    mode: row.mode,
+    applicable_modes: [...(row.applicable_modes || [])],
+    contract: clone(row.contract),
+    route: clone(row.route),
+    observable: clone(row.observable),
+    oracle: clone(row.oracle),
+    evidence: clone(row.evidence),
+    identity: clone(row.identity),
+    source_identity: clone(row.source_identity),
+    compiler_identity: clone(row.compiler_identity),
+    tool_identity: clone(row.tool_identity),
+    target_identity: clone(row.target_identity),
+    candidate_identity: clone(row.candidate_identity),
+    owner: clone(row.owner),
+    owner_link: row.owner_link || null,
+    disposition: row.disposition,
+    status: row.disposition,
+    counted: row.counted === true,
+    executable,
+    valid: executable,
+    rejection: executable ? null : {
+      status: row.disposition,
+      reason: row.exclusion?.reason || row.contract?.failure_behavior || `capability row is ${row.disposition}`,
+      owner_link: row.owner_link || null,
+    },
+    shared_implementation_key: row.shared_implementation_key || null,
+  };
+}
+export function buildCapabilityCatalog(manifestOrRelation) {
+  const relation = manifestOrRelation?.capability_relation || manifestOrRelation;
+  const sourceSnapshotHash = manifestOrRelation?.source_snapshot?.hash || null;
+  const sourceSnapshotFiles = manifestOrRelation?.source_snapshot?.files || null;
+  const validation = validateCapabilityRelation(relation, { sourceSnapshotHash, sourceSnapshotFiles });
+  if (!validation.ok) throw new Error(validation.errors.join("; "));
+  const rows = relation.rows.map(capabilityCatalogRow).sort((left, right) => left.row_id.localeCompare(right.row_id));
+  const dispositions = Object.fromEntries(CAPABILITY_DISPOSITIONS.map((disposition) => [
+    disposition,
+    rows.filter((row) => row.disposition === disposition).length,
+  ]));
+  return {
+    schema: "jet.capability.catalog.v1",
+    source_schema: CAPABILITY_RELATION_SCHEMA,
+    source_snapshot_hash: relation.source_snapshot_hash,
+    relation_digest: relation.content_digest,
+    denominator: clone(relation.denominator),
+    dispositions,
+    rows,
+    exclusions: clone(relation.exclusions || []),
+    executable: rows.filter((row) => row.executable),
+  };
+}
+
+
 function catalogFromManifest(manifest) {
   requireManifestArtifact(manifest);
   const rows = manifest.rows.map(catalogRow).sort((left, right) => left.stable_id.localeCompare(right.stable_id));
@@ -619,6 +693,7 @@ function catalogFromManifest(manifest) {
     rows,
     exclusions: statusCounts.excluded,
     executable: statusCounts.covered,
+    capability_relation: manifest.capability_relation ? buildCapabilityCatalog(manifest) : null,
   };
 }
 
@@ -2599,7 +2674,6 @@ export function discoverCorpusSeeds(root = ROOT, {
   if (includeDifferential) paths.push(...differentialPaths(root, differentialManifest));
   const seeds = [];
   const rejected = [];
-  const seenRows = new Set();
   for (const path of paths.sort((left, right) => left.localeCompare(right))) {
     const relativePath = relative(root, path).split("\\").join("/");
     const manifestRow = path.startsWith(conformanceRoot) ? manifestBySeed.get(relativePath) : null;
@@ -2650,9 +2724,8 @@ export function discoverCorpusSeeds(root = ROOT, {
 }
 
 function printUsage() {
-  console.error(`usage: ${process.argv[1]} --self-test|--adapters|--regressions|--seeds|--catalog FILE`);
+  console.error(`usage: ${process.argv[1]} --self-test|--adapters|--regressions|--seeds|--catalog FILE|--capabilities FILE`);
 }
-
 function main(argv) {
   const command = argv[0] || "--self-test";
   if (command === "--self-test") {
@@ -2686,6 +2759,17 @@ function main(argv) {
     }
     const input = readSurfaceManifest(resolve(path));
     console.log(canonicalJson(buildOracleCatalog(input.manifest || input.rows, input.source_snapshot_hash)));
+    return 0;
+  }
+  if (command === "--capabilities") {
+    const path = argv[1];
+    if (!path) {
+      printUsage();
+      return 2;
+    }
+    const input = readSurfaceManifest(resolve(path));
+    if (!input.manifest?.capability_relation) throw new Error("hardening manifest has no capability relation");
+    console.log(canonicalJson(buildCapabilityCatalog(input.manifest)));
     return 0;
   }
   printUsage();

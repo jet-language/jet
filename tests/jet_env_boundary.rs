@@ -65,7 +65,7 @@ fn toolchain_only_run_and_dev_skip_environment_realization() {
 }
 
 #[test]
-fn declared_package_import_gates_run_dev_and_test_without_acquiring() {
+fn declared_package_import_refuses_run_without_prepare_and_gates_dev_test_without_acquiring() {
     let project = Scratch::new("jet-env-boundary");
     let jetpack_root = project.join("jetpack-root-must-not-be-created");
     fs::write(
@@ -86,7 +86,7 @@ fn declared_package_import_gates_run_dev_and_test_without_acquiring() {
     fs::write(project.join("helper.jet"), "fn help() {}\n").unwrap();
 
     for args in [
-        vec!["run", "run.jet"],
+        vec!["run", "run.jet", "--no-prepare"],
         vec!["dev", "run.jet", "--watch=off"],
         vec!["test", "run.jet"],
     ] {

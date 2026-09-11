@@ -9,6 +9,7 @@ use std::fs;
 use std::process::Command;
 
 use tir_support::{
+    assert_bare_release_tiers_agree, assert_release_tier_error_with_application_policy,
     assert_tiers_agree, build_and_run, build_and_run_multi, build_release_and_run_multi, compile,
     have_rustc, run_default_multi, run_interpret_multi,
 };
@@ -448,13 +449,15 @@ fn run() {
 }
 "#;
     let unsupported_files = [("main.jet", unsupported_src)];
-    let (code, stdout, stderr) =
-        run_default_multi("float_rows_flatten_fallback", "main.jet", &unsupported_files);
+    let (code, stdout, stderr) = run_default_multi(
+        "float_rows_flatten_fallback",
+        "main.jet",
+        &unsupported_files,
+    );
     assert_eq!(code, 0, "unsupported-shape fallback failed: {stderr}");
     assert_eq!(stdout, "2\n2.5\n", "{stderr}");
     assert_function_tier(&stderr, "flatten_float_rows", "tier0 interp");
 }
-
 
 /// #2360/#2252: Float-list arguments, ordering, and typed helper operations
 /// must stay native instead of entering a silent tier-0 fallback.
@@ -527,7 +530,6 @@ fn run() {
         "key:{\"nested\":1}\nkey:{\"nested\":1}\n",
     );
 }
-
 
 /// #2252: an imported `Bool !Never` call is a value condition, not a raw
 /// Result handle. Keep the condition's success payload intact on every tier.
@@ -1677,4 +1679,64 @@ fn run() {
 }
 "#;
     assert_tiers_agree("tir_card_2839_generic_trait_dispatch", src, "4.0\n9.0\n2\n");
+}
+
+/// Hardening finding lane-7/generic-trait-authority-tier-drift (card #2835): tier-parity regression fixture.
+#[test]
+fn card_2835_generic_trait_authority_tier_parity() {
+    let pure = r#"
+trait Measure {
+    fn measure(self) Int
+}
+
+struct Parcel {
+    n: Int
+}
+
+impl Parcel.Measure {
+    fn measure(self) Int -> self.n
+}
+
+fn via<T: Measure>(value: T) Int -> value.measure()
+
+fn run() {
+    print(via(Parcel{n: 5}))
+}
+"#;
+    assert_bare_release_tiers_agree("tir_card_2835_generic_trait_authority", pure, "5\n");
+
+    let effectful = r#"
+use core.sys as env
+
+trait Measure {
+    fn measure(self) Int
+}
+
+struct Parcel {
+    n: Int
+}
+
+impl Parcel.Measure {
+    fn measure(self) Int -> {
+        value :: env.get("JET_CARD_2835") ?? ""
+        return self.n
+    }
+}
+
+fn via<T: Measure>(value: T) Int -> value.measure()
+
+fn run() {
+    print(via(Parcel{n: 5}))
+}
+"#;
+    let limited_authority = r#"name: "tir_card_2835"
+version: "0.1.0"
+authority: { holds: { allow: [Exec, IO, Mem.Alloc] } }
+"#;
+    assert_release_tier_error_with_application_policy(
+        "tir_card_2835_generic_trait_effectful",
+        effectful,
+        limited_authority,
+        "E1803",
+    );
 }

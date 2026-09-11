@@ -68,6 +68,16 @@ pub(crate) fn source_expr_end(source: &str, expr: &Expr) -> Option<usize> {
     }
 }
 
+mod DataPlan;
+
+pub use DataPlan::{
+    classify_data_call, classify_data_receiver_call, callable_fact, physical_facts, scalar_schema,
+    DataPlanBuilder, DataPlanCallKind,
+};
+
+mod ResourceSchedule;
+pub(crate) use ResourceSchedule::check_game_frame_lambda;
+
 mod Casing;
 
 /// Re-export so existing callers (`jet::Sema::FuncSig`) keep working.
@@ -157,10 +167,7 @@ impl MethodSig {
 /// Select the return contract used while checking a function body. Ordinary
 /// Jet callables use the shared failure carrier; compiler-synthesized trait
 /// protocol methods keep the raw return ABI declared by their trait bridge.
-pub(crate) fn checked_body_return_type(
-    function: &Func,
-    raw_protocol_return: bool,
-) -> Option<Type> {
+pub(crate) fn checked_body_return_type(function: &Func, raw_protocol_return: bool) -> Option<Type> {
     if raw_protocol_return || function.name.starts_with("__errconv_") {
         function.return_type.clone()
     } else {
@@ -175,11 +182,13 @@ pub(crate) enum TypeDef {
         methods: HashMap<String, MethodSig>,
         /// D-STRUCT-LIFE1=A: type-level retiring lifecycle marker.
         deprecation: Option<Deprecation>,
-        /// D-LIN1 (ratified 2026-06-21): `#SingleUse` was present before `struct`.
-        /// Values of this type must be consumed exactly once (E0140/E0141) and
-        /// may not be aliased (E0142).
+        /// D-LIN1 (ratified 2026-06-21): `#SingleUse` was present before
+        /// `struct`. Values of this type must be consumed exactly once
+        /// (E0140/E0141) and may not be aliased (E0142).
         single_use: bool,
         /// D-MUSTUSE1 (c18iwxqx): `#MustUse` was present before `struct`.
+        /// Values of this type cannot be silently ignored as a bare expression
+        /// statement (E0419).
         must_use: bool,
         /// D-SOA1 / D-SOA2A=C: `#layout(columnar)` was present. A `[S]` of this
         /// struct is stored struct-of-arrays; sema gates the list-op surface to
@@ -234,6 +243,18 @@ pub(crate) enum TypeDef {
         deprecation: Option<Deprecation>,
     },
 }
+
+/// D-FOUND-RECEIPT1: checked metadata for one named typed receipt section.
+/// This stays in the declaration registry; execution tiers only marshal the
+/// already-proven name, type identity, and schema digest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReceiptSectionMeta {
+    pub(crate) name: String,
+    pub(crate) type_name: String,
+    pub(crate) schema_digest: String,
+    pub(crate) span: Span,
+}
+
 
 #[derive(Debug, Clone)]
 pub(crate) struct UnitFact {
@@ -319,6 +340,7 @@ impl UnitFact {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct TypeRegistry {
     types: HashMap<String, TypeDef>,
     /// D-FAILURE-FOUNDATION1=A: user-named types carrying `#Error` may be
@@ -342,9 +364,21 @@ pub(crate) struct TypeRegistry {
     /// D-DEFAULT-SHAPE1=B: struct name → field name → default expression for omitted
     /// `Type.{ … }` construction and wire/CLI absence.
     field_defaults: HashMap<String, HashMap<String, crate::AST::Expr>>,
+    /// D-DX-PLUGIN1=D: checked `core.devtools.publish` facts are owned by
+    /// the module's existing type registry until bundle completion projects
+    /// them into the shared panel registry. Interior mutability keeps the
+    /// body checker read-only over the nominal registry while still allowing
+    /// one typed fact sink.
+    devtools_publications: std::cell::RefCell<Vec<jet_foundation::AST::DevtoolsFactPublication>>,
+    /// Named checked receipt declarations keyed by canonical type identity.
+    receipt_sections: HashMap<String, ReceiptSectionMeta>,
 }
 
 impl TypeRegistry {
+
+    pub(crate) fn receipt_section(&self, type_name: &str) -> Option<&ReceiptSectionMeta> {
+        self.receipt_sections.get(type_name)
+    }
     pub(crate) fn contains(&self, name: &str) -> bool {
         self.types.contains_key(name)
     }
@@ -407,7 +441,8 @@ impl TypeRegistry {
                     valid
                 }
                 Type::Union(members) => {
-                    !members.is_empty() && members.iter().all(|member| visit(registry, member, seen))
+                    !members.is_empty()
+                        && members.iter().all(|member| visit(registry, member, seen))
                 }
                 // D-VALIDATE-DECODE1=B: typed decoding reports one
                 // accumulated Core error list, not an arbitrary list-shaped
@@ -684,6 +719,26 @@ impl TypeRegistry {
         }
         out
     }
+    /// Store one sema-typed publication fact in the module's canonical
+    /// semantic-facts owner. Duplicate inference visits at one source span do
+    /// not create duplicate protocol rows.
+    pub(crate) fn record_devtools_publication(
+        &self,
+        publication: jet_foundation::AST::DevtoolsFactPublication,
+    ) {
+        let mut facts = self.devtools_publications.borrow_mut();
+        if !facts.iter().any(|existing| existing.span == publication.span) {
+            facts.push(publication);
+        }
+    }
+
+    /// Snapshot the checked publication facts for bundle completion. The
+    /// caller projects these rows into the shared panel registry exactly once.
+    pub(crate) fn devtools_publications(
+        &self,
+    ) -> Vec<jet_foundation::AST::DevtoolsFactPublication> {
+        self.devtools_publications.borrow().clone()
+    }
 }
 
 fn marker_argument<'a>(marker: &'a Marker, name: &str, positional: usize) -> Option<&'a Expr> {
@@ -695,9 +750,9 @@ fn marker_argument<'a>(marker: &'a Marker, name: &str, positional: usize) -> Opt
             label
                 .as_ref()
                 .filter(|(label, _)| label == name)
-                .and_then(|_| marker.args.get(index))
+                .and_then(|_| marker.expr_arg(index))
         })
-        .or_else(|| marker.args.get(positional))
+        .or_else(|| marker.expr_arg(positional))
 }
 
 fn marker_string(expr: &Expr) -> Option<String> {
@@ -782,7 +837,7 @@ pub(crate) fn func_to_sig(f: &Func) -> FuncSig {
         .markers
         .iter()
         .find(|marker| marker.name == crate::Syntax::MARKER_POLICY)
-        .and_then(|marker| CallablePolicyChain::parse(&marker.args).ok())
+        .and_then(|marker| CallablePolicyChain::parse(&marker.expr_args_owned()).ok())
         .unwrap_or_default();
     FuncSig {
         params: f
@@ -822,6 +877,9 @@ pub(crate) fn func_to_sig(f: &Func) -> FuncSig {
         is_extern: f.inline_foreign.is_some(),
         is_c_abi: false,
         c_abi_name: None,
+        callback_transport: None,
+        callback_plan_digest: None,
+        callback_identity: None,
         foreign_effect_root: f
             .inline_foreign
             .as_ref()
@@ -875,9 +933,11 @@ fn extern_to_sig(ef: &ExternFn, is_c_abi: bool) -> FuncSig {
         is_extern: true,
         is_c_abi,
         c_abi_name: ef.abi.as_ref().map(|(name, _)| name.clone()),
+        callback_transport: ef.callback_transport.clone(),
+        callback_plan_digest: ef.callback_plan_digest.clone(),
+        callback_identity: ef.callback_identity.clone(),
         foreign_effect_root: ef.effect_root.clone(),
         undo: ef.undo.as_ref().map(|(name, _)| name.clone()),
-        // D-FFI-CAP1: capability-bearing foreign declarations are typed, but
         // raw calls require an audited `#Unsafe` boundary. C out-pointers keep
         // their existing E3103 gate; no Result adapter is invented here.
         is_unsafe: ef.params.iter().any(|p| p.convention != AccessConvention::Read)
@@ -930,6 +990,21 @@ pub(crate) fn foreign_thread_safe_lambda(lam: &crate::AST::Lambda) -> bool {
             crate::AST::LambdaBody::Expr(e) => foreign_thread_safe_expr(e),
             crate::AST::LambdaBody::Block(stmts) => stmts.iter().all(foreign_thread_safe_stmt),
         }
+}
+
+/// D-FFI-CALLBACK2=A: managed callbacks may retain immutable cloned captures,
+/// but cannot move resources, mutate captured state, or carry an unbounded
+/// effect row into a foreign thread. The registration runtime owns the cloned
+/// captures until shutdown completion.
+pub(crate) fn foreign_managed_callback_lambda(lam: &crate::AST::Lambda) -> bool {
+    lam.take_names.is_empty()
+        && lam.meta.mut_captures.is_empty()
+        && !lam.meta.effect_maximal
+        && lam
+            .meta
+            .effect_solved
+            .iter()
+            .all(|effect| matches!(effect.as_str(), "IO.Write" | "FFI.C"))
 }
 
 /// D-NARG-D2: Walk one default expression exhaustively and replace each
@@ -1068,6 +1143,12 @@ impl ViewKind {
     fn is_named_window(self) -> bool {
         matches!(self, Self::List | Self::Buffer | Self::Matrix)
     }
+}
+/// D-FOUND-VIEW1: core mapped-file methods all return borrowed carriers rooted
+/// at their `MappedFile` receiver. Keep this family predicate shared by
+/// inference and ownership so neither tier invents a second method list.
+pub(crate) fn is_mapped_file_view_method(handle: &str, method: &str) -> bool {
+    handle == "MappedFile" && matches!(method, "window" | "window_len" | "lines")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1482,6 +1563,9 @@ pub(crate) enum SendCrossing {
     ParallelWorker,
     Kernel,
     InterruptCallback,
+    /// HTTP handlers are retained by the server and invoked on request
+    /// workers; their captures must be `Send + Sync`.
+    HttpHandler,
 }
 
 /// What the driver is compiling — affects `run` / test requirements (M6).
@@ -1501,6 +1585,7 @@ pub enum CompileMode {
     Eval,
 }
 
+#[derive(Clone)]
 pub(crate) struct ModuleState {
     module_path: String,
     source: String,
@@ -1535,6 +1620,10 @@ pub(crate) struct ModuleState {
     inline_reexport_foreign: HashMap<(String, String), usize>,
     core_imports: HashMap<String, String>,
     tests: HashMap<String, Span>,
+    /// D-MODEL-PACKAGE1=A: the Loader-owned ordinary `.Model` output registry.
+    /// Sema consumes these neutral facts; it never imports `jet-pkg-model`.
+    model_outputs: Vec<jet_foundation::AST::ModelOutputFact>,
+
     trait_reg: TraitRegistry,
     /// D-FACTMODEL1=A: the one erased fact registry visible to body folds.
     /// State rows and checked graphs are compile-time metadata only.
@@ -1627,9 +1716,11 @@ pub(crate) struct Checker<'a> {
     /// D-NEVER1=C: sema's fixed-point bottom facts. A call consults this
     /// registry before ordinary value joining; no engine infers divergence.
     diverging_functions: &'a std::collections::HashSet<String>,
-    registry: &'a TypeRegistry,
     effect_facts: &'a jet_foundation::Facts::FactRegistry,
     consts: &'a HashMap<String, Type>,
+    pub(crate) devtools_registry: &'a jet_foundation::AST::DevtoolsRegistry,
+    registry: &'a TypeRegistry,
+    plugin_interfaces: &'a PluginInterfaceRegistry,
     modules: Option<&'a [ModuleState]>,
     /// D-COMPILE-SPEED1: unqualified nominal lookup may otherwise scan every
     /// module for each expression. This cache belongs to one body checker and
@@ -1640,6 +1731,10 @@ pub(crate) struct Checker<'a> {
     module_idx: usize,
     imports: &'a HashMap<String, usize>,
     core_imports: &'a HashMap<String, String>,
+    /// Checked ordinary `.Model` outputs available to this module's source
+    /// binding path. Kept as neutral foundation facts to preserve dependency
+    /// direction.
+    model_outputs: &'a [jet_foundation::AST::ModelOutputFact],
     /// D-MOD2: inline code module aliases in scope (alias → module name).
     code_modules: &'a HashMap<String, String>,
     code_module_identities: &'a HashMap<String, String>,
@@ -1665,6 +1760,10 @@ pub(crate) struct Checker<'a> {
     callable_policy_declarations:
         &'a BTreeMap<(String, String), (usize, crate::AST::UserPolicyDecl)>,
     rule_facts: Vec<crate::AST::AppliedRuleApplication>,
+    /// D-RESOURCE-SCHEDULE1=A: aggregate access facts for this checked frame
+    /// callback body. A second callback is checked as a candidate parallel
+    /// system; the first callback's source order remains the reference.
+    frame_schedule_systems: Vec<jet_foundation::ResourceSchedule::JetFrameOperation>,
     current_function_span: Span,
     name_ledger: &'a mut jet_foundation::Names::NameLedger,
     diags: Vec<Diagnostic>,
@@ -1715,6 +1814,10 @@ pub(crate) struct Checker<'a> {
     /// First source span that introduced each direct effect, for inspect/LSP
     /// provenance. Duplicate uses keep the earliest stable witness.
     fx_direct_spans: HashMap<String, Span>,
+    /// D-EFFECT-LAMBDA1: active lambda rows receive the same effect events as
+    /// the enclosing body, preserving nested closure facts without a second
+    /// analysis walk.
+    lambda_effect_stack: Vec<Effects::LambdaEffectAccum>,
     /// D-EFF1: user functions called in this body (call-graph edges for the
     /// whole-program transitive fixpoint).
     fx_edges: BTreeSet<String>,
@@ -1779,6 +1882,9 @@ pub(crate) struct Checker<'a> {
     /// cells — carries the commit plane without rejecting effects the author
     /// never put inside a transaction.
     txn_wall_depth: usize,
+    /// D-TEST-WORLD1=A: depth of a `testing.world` callback. Calls reached
+    /// here must use a scoped provider; external effects cannot be replayed.
+    deterministic_world_depth: usize,
     /// D-DET1: nesting depth of `assume_deterministic { … }` blocks currently
     /// being checked. While `> 0`, the determinism rejections inside a `#Pure fn`
     /// (E3403 non-deterministic Core call, E3401 impure Core call) are suspended —
@@ -1884,6 +1990,10 @@ pub(crate) struct Checker<'a> {
     /// borrow (method receivers, field/index bases, lvalues). Field reads in
     /// borrow position must NOT be rewritten to `.clone()`.
     borrow_ctx: bool,
+    /// D-MEM-COPYSEM1: depth of an owning value-if inference. Only the
+    /// value-if arm boundary consults this marker to route its tail through
+    /// the owning-position copy rule.
+    owning_if_value_depth: usize,
     /// `Fixed.new` / `Fixed.over` must be the whole initializer of one lexical
     /// binding so codegen can place and lifetime-order its inline backing.
     allow_fixed_constructor: bool,
@@ -1931,6 +2041,9 @@ pub(crate) struct Checker<'a> {
     /// (for example an `if` passed to `print`) must not inherit the
     /// statement root's Unit result policy.
     statement_expr_root_depth: Option<usize>,
+    /// HTTP handlers are retained by the server and invoked on request
+    /// workers, so captured state must cross the `Send + Sync` boundary.
+    http_handler_depth: usize,
     /// True while checking the callback stored by `core.sys.on_interrupt`.
     /// This boundary retains a callback for asynchronous signal delivery and
     /// therefore needs stricter capture facts than an ordinary higher-order call.
@@ -1968,12 +2081,24 @@ pub(crate) struct Checker<'a> {
     lambda_mut_borrow_stack: Vec<HashSet<String>>,
     /// M9: generic/trait metadata for this program.
     trait_reg: &'a TraitRegistry,
-    /// M9.5: local comptime evaluation context.
+    /// M9.5: local comptime declaration context. This retains every declared
+    /// body for semantic lookup; execution uses only `ct_checked_funcs`.
     ct_funcs: &'a HashMap<String, Func>,
+    /// Function bodies that have completed the semantic checker and are safe
+    /// to hand to the canonical comptime MIR evaluator.
+    ct_checked_funcs: &'a HashMap<String, Func>,
+    /// Source item context supplied to the checked evaluator. It may retain
+    /// declarations whose executable method bodies are filtered by
+    /// `ct_checked_funcs`.
+    ct_items: &'a [crate::AST::Item],
     ct_externs: &'a HashSet<String>,
     ct_base_dir: &'a std::path::Path,
     ct_globals: &'a HashMap<String, crate::Comptime::CtValue>,
     ct_scopes: Vec<HashMap<String, crate::Comptime::CtValue>>,
+    /// During the targeted comptime staging pass, type-check bodies without
+    /// executing any compile-time expression. The ordinary pass evaluates
+    /// mandatory and opportunistic expressions after their callees are safe.
+    defer_ct_evaluation: bool,
     /// Active generic type parameters while checking a generic item.
     type_param_scope: Vec<crate::AST::TypeParam>,
     /// E2-M15: reject OS-dependent APIs on a selected no-OS target (E3301).
@@ -2267,6 +2392,7 @@ impl<'a> Checker<'a> {
                     }],
                     recv_type: None,
                     resolved_ret: Some(destination_ty.clone()),
+                    operator_rhs: None,
                     checked_widen: false,
                 };
                 return true;
@@ -2570,6 +2696,7 @@ mod CheckerTaskGroup;
 use CheckerTaskGroup::TaskGroupCtx;
 mod CheckerValidate;
 mod CognitiveComplexity;
+mod DevtoolsPanel;
 pub mod Diagnostics;
 mod Edition;
 // The REPL's effect-name gate reads parse_effect_name and effect_covers
@@ -2577,9 +2704,9 @@ mod Edition;
 mod BudgetSpecs;
 pub mod Effects;
 mod FFI;
-mod Guest;
 mod FlowFacts;
 pub mod GateLedger;
+mod Guest;
 pub mod HotSwap;
 mod MemberSpread;
 mod MemoryFacts;
@@ -2609,7 +2736,6 @@ mod TargetSurface;
 mod WebPartition;
 pub(crate) use CheckerReferences::record_comptime_import_alias_uses;
 
-
 pub(crate) use KnowledgeLoss::{
     allows_gate as knowledge_gate_allows, requires_gate as knowledge_loss_requires_gate,
     KnowledgeGate, KnowledgePlane,
@@ -2636,22 +2762,29 @@ pub(crate) use CheckerFieldPolicy::*;
 pub(crate) use CheckerPatchable::*;
 pub(crate) use CheckerValidate::*;
 pub use CognitiveComplexity::{cognitive_complexity_reports, CognitiveComplexityReport};
-/// Shared by TIR lowering: a loop consumes any collection whose element type
-/// requires owned iteration.
-pub use Diagnostics::type_requires_owned_iteration;
+pub(crate) use DevtoolsPanel::{check_devtools_publish, registry_error};
+pub use DevtoolsPanel::{
+    check_devtools_panels, check_unfed_state_fields,
+    unfed_state_fields, E_DEVTOOLS_DUPLICATE_PANEL, E_DEVTOOLS_FIELD_TYPE,
+    E_DEVTOOLS_INVALID_PANEL, E_DEVTOOLS_PUBLISH_GATE, E_DEVTOOLS_UNKNOWN_FIELD,
+    E_DEVTOOLS_UNFED_FIELD,
+};
 pub(crate) use Diagnostics::*;
+pub use Diagnostics::type_requires_owned_iteration;
 pub(crate) use Effects::*;
-pub(crate) use Purity::*;
+pub(crate) use Guest::{
+    check_guest_export_surface, check_guest_import_surface, check_guest_symbol_collisions,
+};
 pub use Registration::*;
 pub(crate) use Taint::check_func_taint;
 pub use TargetSurface::check_target_surface;
 pub(crate) use FFI::*;
-pub(crate) use Guest::{check_guest_export_surface, check_guest_import_surface, check_guest_symbol_collisions};
 // D-STATE1: typestate pass — wrong-state operation (E0150).
-pub(crate) use State::{checked_state_graphs, check_items_state, StateTable};
+pub(crate) use State::{check_items_state, checked_state_graphs, StateTable};
 // D-LIN1: single-use (must-consume) diagnostics live in CheckerOwnership.
 pub use App::extract_app_graph;
 pub(crate) use WebPartition::check_web_partition;
+pub use WebPartition::checked_web_bucket;
 // D-OSTARGET1=A: native OS platform gating (mixed-axis + unmatched-call).
 pub(crate) use MemberSpread::desugar_member_spreads;
 pub(crate) use OSTarget::{check_os_target, desugar_os_switches};
@@ -2660,11 +2793,15 @@ pub(crate) use OSTarget::{check_os_target, desugar_os_switches};
 pub use Bundle::{
     build_entry_signature_is_valid, bundle_has_comptime_evaluation, check_bundle,
     check_bundle_for_output, check_bundle_for_output_opts,
-    check_bundle_for_output_opts_with_effect_facts, check_bundle_no_os,
-    check_bundle_no_os_with_gates, check_bundle_gates, check_bundle_with_effect_facts,
-    check_bundle_with_effect_facts_for_build, check_bundle_with_effect_facts_incremental,
+    check_bundle_for_output_opts_with_effect_facts, check_bundle_gates,
+    check_bundle_gates_with_effect_facts, check_bundle_no_os, check_bundle_no_os_with_effect_facts,
+    check_bundle_no_os_with_gates,
+    check_bundle_with_effect_facts, check_bundle_with_effect_facts_for_build,
+    check_bundle_with_effect_facts_incremental,
     check_target_machine, is_build_entry, specialize_function_types, strip_build_only_entries,
-    target_machine_use, IncrementalSemaCache, IncrementalSemaStats,
+    target_hardware_capabilities, target_hardware_profile, target_hardware_profile_id,
+    target_hardware_use, target_hardware_use_with_effect_facts, target_machine_use,
+    validate_target_hardware, IncrementalSemaCache, IncrementalSemaStats,
 };
 pub use Effects::{AuthorityDelegation, EffectSummary, SemIndexEffectFacts};
 pub use MemoryFacts::{
@@ -2684,26 +2821,45 @@ pub(crate) use CheckerInline::{check_inline_always_fn, e0918_address_taken};
 pub(crate) use CheckerMarkers::{
     check_declared_rule_facts, check_deprecated_visibility, check_marker_vocabulary,
 };
-pub(crate) use CheckerSchedule::{check_every_marker, check_job_collisions};
+pub(crate) use CheckerSchedule::{
+    check_every_marker, check_job_collisions, check_job_graph,
+};
+pub use CheckerSchedule::checked_job_registry;
 pub use Effects::{
     authority_delegations, builtin_effect, core_effect, effect_covers, effect_root, effect_row_var,
     effect_set_has_root, memory_allocation_bound, package_effect_policy_diagnostics,
-    package_policy_path_covers, package_policy_source_path,
-    parse_effect_name, reject_positive_deny_only_effect, resolve_effect_name, show_set,
-    undeclared_effect, Effect, EffectSet,
+    package_policy_path_covers, package_policy_source_path, parse_effect_name,
+    reject_positive_deny_only_effect, resolve_effect_name, show_set, undeclared_effect, Effect,
+    EffectSet,
 };
-pub use Purity::{check_pure_fn, check_pure_program_root, e3401, e3402, e3403};
-pub use Registration::effect_key;
-pub use FFI::{e3202, e3301, e3302, e3303};
+pub(crate) use Guest::{PluginExportFact, PluginInterface, PluginInterfaceRegistry};
 pub use Guest::{
     guest_export_native_symbol, guest_export_signature, guest_export_surface,
     guest_import_bridge_compatible, guest_import_function_signature, guest_import_signature,
     guest_import_surface, guest_import_symbol, guest_import_wrapper_name, guest_surface,
     is_guest_export, is_guest_export_marker, is_guest_import, is_guest_import_marker,
-    sandbox_export_signature, sandbox_export_surface, GuestDirection, GuestFunction, GuestScalar,
+    sandbox_component_type, sandbox_export_signature, sandbox_export_surface, GuestDirection,
+    GuestFunction, GuestScalar,
 };
+pub use Effects::{check_pure_fn, check_pure_program_root};
+pub use Purity::{e3401, e3402, e3403};
+pub use Registration::effect_key;
+pub use FFI::{e3202, e3301, e3302, e3303};
 // D-MIGRATE2C: `jet inspect schema status` reuses the schema-migration diff.
 pub use SchemaMigration::{check_schema_migrations, desugar_migrations};
+
+/// Free reads and direct calls in an expression, without copying its AST.
+pub fn expr_free_reads_and_calls(
+    expr: &crate::AST::Expr,
+) -> (HashSet<String>, HashSet<String>) {
+    let bound = HashSet::new();
+    let mut read = HashSet::new();
+    let mut mut_cap = HashSet::new();
+    let mut called = HashSet::new();
+    Captures::expr_collect_captures(expr, &bound, &mut read, &mut mut_cap, &mut called);
+    read.extend(mut_cap);
+    (read, called)
+}
 
 /// D-REACTCORE1: free variable reads in a statement block (for reactive-scope capture cloning).
 pub fn block_free_var_reads(stmts: &[crate::AST::Stmt]) -> HashSet<String> {

@@ -2,17 +2,9 @@ use super::*;
 
 /// #677 / D-PERFBUDGET-COMPILE1=C: the typed compile-latency proof.
 ///
-/// This case lives in its own Cargo target, not beside the rest of `cli_parts`,
-/// because the ratified policy makes it inherently expensive: `one fixed warmup,
-/// twenty samples` per workload (docs/spec/performance-budget-decisions.md:37),
-/// three cache scenarios, and two commands (`budget update --bootstrap` for the
-/// baseline, `budget check` for the candidate) is 128 real child production
-/// lens invocations. The `cli` target measured 307 s of *other* work
-/// (docs/spec/roadmap.md:168); hosting this proof there
-/// spent the whole 900 s suite guard and aborted the binary, taking every
-/// unrelated `cli` case down with it. Splitting the target is the same remedy
-/// #2020 applied to the corpus batteries (tests/dev.rs:17): each heavy proof
-/// gets its own budget instead of a longer shared deadline.
+/// Keep the production measurement loop in its own Cargo target so it cannot
+/// exhaust another suite's deadline. D-PERFBUDGET-COMPILE1 owns the sampling
+/// rule; the provider executes it.
 ///
 /// The compiles this test pays for are the ones the criteria require. Per
 /// command: 21 cold `Clean` builds, 1 cold + 20 warm `NoChange` builds, and 1

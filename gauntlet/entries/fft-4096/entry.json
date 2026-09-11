@@ -1,0 +1,46 @@
+{
+  "name": "fft-4096",
+  "tier": "micro",
+  "cells": ["numerics.fft"],
+  "mode": "batch",
+  "perf": true,
+  "languages": ["jet", "rust", "python", "c", "zig", "node"],
+  "spec": {
+    "behavior": "Prepare a real length-4096 impulse with one followed by 4095 zeros, compute its forward unnormalized FFT, materialize the interleaved real/imaginary spectrum as 8192 scalars, check every complex output against 1+0i within absolute tolerance 1e-9, and print the validation receipt.",
+    "input": "4096 Float64 values: values[0] = 1.0 and values[1..4095] = 0.0",
+    "transform": "forward unnormalized radix-2 FFT; output order is [real(0), imag(0), real(1), imag(1), ...]",
+    "allocation": "Every rail allocates/materializes the 4096-scalar input, the N-point complex spectrum, and the 8192-scalar interleaved output before checking all 4096 complex values.",
+    "tolerance": "absolute error <= 1e-9 independently for every real and imaginary scalar",
+    "args": [],
+    "fixtureGen": null,
+    "expected": "expected.out"
+  },
+  "metric_applicability": {
+    "python": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is python3 main.py; no binary is built or measured."}
+    },
+    "node": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is node main.mjs directly and no binary is built or measured."}
+    }
+  },
+  "authoring": {
+    "jet": {"author": "FftCell", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Calls shipped core.compute.fft after constructing the 4096-scalar impulse, materializes the interleaved spectrum with compute.to_list, and checks every pair against the documented tolerance. Validation commands were intentionally not run."},
+    "rust": {"author": "FftCell", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only iterative radix-2 FFT; allocates the input, complex spectrum, and 8192-scalar interleaved output before checking every pair. Validation commands were intentionally not run."},
+    "python": {"author": "FftCell", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses preinstalled NumPy np.fft.fft as the Python incumbent, then materializes an 8192-scalar interleaved output and checks every pair. NumPy availability was not probed in this source-only phase; no dependency was installed."},
+    "c": {"author": "FftCell", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Stdlib-only iterative radix-2 FFT with explicit input, complex spectrum, and interleaved output allocations; checks every pair. Validation commands were intentionally not run."},
+    "zig": {"author": "FftCell", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Stdlib-only iterative radix-2 FFT with fixed input, complex spectrum, and interleaved output arrays; checks every pair. Validation commands were intentionally not run."},
+    "node": {"author": "FftCell", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Built-in Node iterative radix-2 FFT with explicit input, complex spectrum, and interleaved output allocations; checks every pair. Validation commands were intentionally not run."}
+  },
+  "rewrite_provenance": {
+    "worker": "FftCell",
+    "variant": "jet",
+    "changed": "Added the FFT-4096 source cell and six matched rails: Jet delegates the transform to shipped core.compute.fft, while Rust, C, Zig, and Node use genuine iterative radix-2 work and Python uses preinstalled NumPy when available.",
+    "matched": "All rails prepare the same 4096-point real impulse, materialize 8192 interleaved real/imaginary scalars, check all 4096 complex outputs against 1+0i at absolute tolerance 1e-9, and emit one deterministic validation line.",
+    "expected_output_sha256": null,
+    "measurement": "unrun: source-only assignment; builds, formatters, linters, tests, and measurements were intentionally not executed"
+  }
+}

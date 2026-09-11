@@ -1,0 +1,15 @@
+// D-FOUND-CAP1: a trusted host lends the sandbox only the resource-scoped
+// FS.Read roots it needs.  The guest package declares that host-import need in
+// guest/package.jet; the host itself does not receive a broad FS grant.
+// From the repository root, build the guest and run the host with:
+//   (cd examples/features/foundations/capabilities/guest && \
+//       jet build capability_guest.jet --target=sandbox)
+//   jet run examples/features/foundations/capabilities/run.jet --allow=Exec
+name: "foundation_capabilities"
+version: "0.1.0"
+edition: "2026"
+authority: {
+    holds: {
+        allow: [Exec, IO, Mem.Alloc, "FS.Read:examples/features/foundations/capabilities"],
+    },
+}

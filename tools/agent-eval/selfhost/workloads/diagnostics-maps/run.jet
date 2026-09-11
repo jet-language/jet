@@ -1,0 +1,29 @@
+struct Span {
+    start: Int
+    end: Int
+    line: Int
+    col: Int
+}
+
+struct Diagnostic {
+    code: String
+    message: String
+    span: Span
+}
+
+fn source_map(offset: Int) Span -> {
+    if offset < 11 -> return Span{start: offset, end: offset, line: 1, col: offset + 1}
+    return Span{start: offset, end: offset + 5, line: 2, col: offset - 10}
+}
+
+fn run() {
+    source :: "fn run() {\n    pirnt(\"hi\")\n}"
+    offset :: source.index_of("pirnt")
+    diagnostic :: Diagnostic{
+        code: "E0102",
+        message: "nothing named `pirnt` exists here",
+        span: source_map(offset)
+    }
+    print("diagnostic={diagnostic.code} line={diagnostic.span.line} col={diagnostic.span.col} span={diagnostic.span.start}..{diagnostic.span.end}")
+    print("fix=print source_map=stable")
+}

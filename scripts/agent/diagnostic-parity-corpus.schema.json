@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jet-lang.dev/schemas/diagnostic-parity-corpus.v1.json",
+  "title": "Jet diagnostic parity peer corpus",
+  "description": "Checked-in capability descriptors for comparing Jet diagnostic products with peer toolchains. Diagnostic cases record field evidence, while the 19 feature rows record only unmeasured or bounded peer capability states; neither embeds a comparator result.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schema", "schema_version", "fields", "tools", "cases", "features"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema": { "const": "jet.diagnostic-parity.corpus.v1" },
+    "schema_version": { "const": 1 },
+    "fields": {
+      "type": "array",
+      "const": ["code", "what", "why", "fix", "span", "actionable_edit"],
+      "items": { "type": "string" },
+      "minItems": 6,
+      "maxItems": 6
+    },
+    "tools": {
+      "type": "array",
+      "minItems": 4,
+      "items": { "$ref": "#/$defs/tool" },
+      "uniqueItems": true
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/case" },
+      "uniqueItems": true
+    },
+    "features": {
+      "type": "array",
+      "minItems": 19,
+      "maxItems": 19,
+      "items": { "$ref": "#/$defs/feature" },
+      "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "evidence"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "pattern": "^[a-z][a-z0-9_-]*$" },
+        "label": { "type": "string", "minLength": 1 },
+        "evidence": { "type": "string", "minLength": 1 }
+      }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "evidence"],
+      "properties": {
+        "status": { "enum": ["present", "absent", "unknown"] },
+        "value": { "type": "string" },
+        "evidence": { "type": "string", "minLength": 1 }
+      }
+    },
+    "peer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fields"],
+      "properties": {
+        "fields": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "what", "why", "fix", "span", "actionable_edit"],
+          "properties": {
+            "code": { "$ref": "#/$defs/state" },
+            "what": { "$ref": "#/$defs/state" },
+            "why": { "$ref": "#/$defs/state" },
+            "fix": { "$ref": "#/$defs/state" },
+            "span": { "$ref": "#/$defs/state" },
+            "actionable_edit": { "$ref": "#/$defs/state" }
+          }
+        }
+      }
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "jet_codes", "required_jet_fields", "peers"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "pattern": "^[a-z][a-z0-9_-]*$" },
+        "title": { "type": "string", "minLength": 1 },
+        "jet_codes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9-]*$" },
+          "uniqueItems": true
+        },
+        "required_jet_fields": {
+          "type": "array",
+          "items": {
+            "enum": ["code", "what", "why", "fix", "span", "actionable_edit"]
+          },
+          "uniqueItems": true
+        },
+        "peers": {
+          "type": "object",
+          "minProperties": 4,
+          "additionalProperties": { "$ref": "#/$defs/peer" }
+        }
+      }
+    },
+    "feature_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "evidence"],
+      "properties": {
+        "status": { "enum": ["unmeasured", "unknown", "unsupported"] },
+        "evidence": { "type": "string", "minLength": 1 }
+      }
+    },
+    "feature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "feature", "jet", "peers"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "pattern": "^[a-z][a-z0-9_-]*$" },
+        "feature": { "type": "string", "minLength": 1 },
+        "jet": { "$ref": "#/$defs/feature_state" },
+        "peers": {
+          "type": "object",
+          "minProperties": 4,
+          "additionalProperties": { "$ref": "#/$defs/feature_state" }
+        }
+      }
+    }
+  }
+}

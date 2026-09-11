@@ -1,0 +1,101 @@
+{
+  "schema": "jet.refounding.incremental-model/v1",
+  "status": "bounded model passed; two mutants rejected; Float generalization refuted",
+  "runtime": "v22.23.2",
+  "script_sha256": "7470454087a8b557185baa7b813f4354a75fc4b5672be0d8e1690d892aaa1080",
+  "domain": {
+    "ids": [
+      0,
+      1,
+      2
+    ],
+    "regions": [
+      "North",
+      "South"
+    ],
+    "amounts": [
+      -1,
+      0,
+      1
+    ],
+    "arithmetic": "BigInt exact integers"
+  },
+  "states": 343,
+  "valid_transitions": 7056,
+  "mutant_witnesses": {
+    "retain_empty_group": {
+      "before": [
+        {
+          "id": 2,
+          "region": "North",
+          "amount": -1
+        }
+      ],
+      "action": {
+        "kind": "remove",
+        "id": 2,
+        "row": null
+      },
+      "expected": [],
+      "actual": [
+        [
+          "North",
+          "0"
+        ]
+      ]
+    },
+    "skip_old_group": {
+      "before": [
+        {
+          "id": 2,
+          "region": "North",
+          "amount": -1
+        }
+      ],
+      "action": {
+        "kind": "replace",
+        "id": 2,
+        "row": {
+          "region": "South",
+          "amount": -1
+        }
+      },
+      "expected": [
+        [
+          "South",
+          "-1"
+        ]
+      ],
+      "actual": [
+        [
+          "North",
+          "-1"
+        ],
+        [
+          "South",
+          "-1"
+        ]
+      ]
+    }
+  },
+  "float_counterexample": {
+    "before": [
+      10000000000000000,
+      1,
+      -10000000000000000
+    ],
+    "after": [
+      10000000000000000,
+      2,
+      -10000000000000000
+    ],
+    "candidate": 1,
+    "reference": 2
+  },
+  "limits": [
+    "No Jet parser, sema, MIR, backend, or runtime was executed.",
+    "No performance measurement or unbounded correctness proof is claimed.",
+    "No joins, source failures, output ordering law, concurrency, or publication semantics are modeled.",
+    "Group-key sorting is a comparison normalization, not a proposed Jet ordering rule."
+  ]
+}

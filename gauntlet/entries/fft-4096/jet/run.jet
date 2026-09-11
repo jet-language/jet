@@ -1,0 +1,34 @@
+use core.compute as compute
+use core.math as math
+
+// Every real and imaginary scalar must be within this absolute tolerance.
+fn run() {
+    n :: 4096
+    scalar_count :: n * 2
+    tolerance :: Float{0.000000001}
+
+    values := [Float]{}
+    loop i in 0..<n {
+        if {
+            i == 0 -> values.push(Float{1.0})
+            else -> values.push(Float{0.0})
+        }
+    }
+
+    signal :: compute.from_list(values) ?? panic("from_list")
+    spectrum :: compute.fft(signal) ?? panic("fft")
+    output :: compute.to_list(spectrum)
+
+    failures := 0
+    if {
+        output.len() != scalar_count -> failures += 1
+        else -> {
+            loop i in 0..<n {
+                if !(math.abs(output[2 * i] - Float{1.0}) <= tolerance) -> failures += 1
+                if !(math.abs(output[2 * i + 1]) <= tolerance) -> failures += 1
+            }
+        }
+    }
+    if failures != 0 -> panic("fft validation")
+    print("fft4096 checked=8192 tolerance=1e-9")
+}

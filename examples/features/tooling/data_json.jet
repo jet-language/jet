@@ -18,20 +18,21 @@ struct Box<T> {
 fn run() {
     raw :: "[{{\"team\":\"Core\",\"minutes\":4.0}},{{\"team\":\"Tools\",\"minutes\":5.0}},{{\"team\":\"Core\",\"minutes\":8.0}}]"
     rows :: data.json<Ticket>(raw) ?? panic("bad json")
-    table :: data.table(rows)
-    cols :: data.schema(table)
+    cols :: data.schema(rows)
     loop c in cols {
         print("{c.name}:{c.type_name}")
     }
-    selected :: data.filter(data.rows(table), t -> t.minutes >= 5.0)
-    print("selected:{data.count(selected)}")
+    selected :: data.query(rows)
+        .filter(t -> t.minutes >= 5.0)
+        .collect() ?? panic("filter")
+    print("selected:{selected.len()}")
     loop t in selected {
         print("{t.team}:{t.minutes}")
     }
     empty_units :: [Empty]{}
-    print("empty_struct:{data.count(data.schema(data.table(empty_units)))}")
+    print("empty_struct:{data.schema(empty_units).len()}")
     boxed :: [Box<Int>]{}
-    loop c in data.schema(data.table(boxed)) {
+    loop c in data.schema(boxed) {
         print("generic:{c.name}:{c.type_name}")
     }
     print("{data.status()[6].step}:{data.status()[6].path}")

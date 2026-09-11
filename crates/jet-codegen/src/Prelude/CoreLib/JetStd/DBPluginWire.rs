@@ -105,6 +105,27 @@ pub fn jet_db_row_text(row: &JetDBRow, key: &String) -> Result<String, String> {
 pub fn jet_db_row_bool(row: &JetDBRow, key: &String) -> Result<bool, String> {
     jet_db_row_value(row, key).and_then(|v| v.bool())
 }
+/// D-SHAPE-ONE1=A: project checked DB column names into ordered entries for
+/// the canonical DataTree adapter. The callback is supplied by each typed host
+/// so this carrier remains usable by AOT, JIT, and interpreter modules without
+/// defining a second decoder trait here.
+pub fn jet_db_row_project<T, F>(
+    row: &JetDBRow,
+    names: &[(&str, &str)],
+    mut convert: F,
+) -> Vec<(String, T)>
+where
+    F: FnMut(&DBValue) -> T,
+{
+    names
+        .iter()
+        .filter_map(|(db_name, json_name)| {
+            row.get(*db_name)
+                .map(|value| ((*json_name).to_string(), convert(value)))
+        })
+        .collect()
+}
+
 
 /// D-DBDRIVER1: `.query`/`.query_one`/`.execute` fail with a `DBError`
 /// carrying the driver's message (SQLite's error text) — never the raw SQL.
@@ -131,6 +152,219 @@ impl super::JetDisplay for DBError {
     fn jet_display(&self) -> String {
         <Self as super::JetShow>::jet_show(self)
     }
+}
+
+/// Static relation facts checked from the SQL literal.  Runtime adapters
+/// append observed counters and plans; they never infer a table from row
+/// counts or result shape.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JetDbTableFact {
+    pub table_id: String,
+    pub read: bool,
+    pub write: bool,
+}
+
+/// Source identity and checked relation projection carried to a DB driver.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JetDbQueryMetadata {
+    pub source_id: String,
+    pub source_file: String,
+    pub source_start: u64,
+    pub source_end: u64,
+    pub statement_identity: String,
+    pub table_facts: Vec<JetDbTableFact>,
+}
+
+/// One observed SQLite query-plan row, reduced to stable diagnostic facts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JetDbQueryPlanFact {
+    pub ordinal: u64,
+    pub parent: u64,
+    pub operation: String,
+    pub relation: Option<String>,
+    pub index: Option<String>,
+}
+
+/// Runtime-only facts returned by the database driver.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JetDbQueryRuntimeFacts {
+    pub rows_returned: Option<u64>,
+    pub rows_affected: Option<u64>,
+    pub elapsed_ms: u64,
+    pub plan: Vec<JetDbQueryPlanFact>,
+}
+
+/// Runtime facts returned by a bounded, read-only EXPLAIN operation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JetDbExplainRuntimeFacts {
+    pub elapsed_ms: u64,
+    pub plan: Vec<JetDbQueryPlanFact>,
+    pub timed_out: bool,
+    pub truncated: bool,
+}
+
+const DB_MAX_METADATA_BYTES: usize = 64 * 1024;
+const DB_MAX_METADATA_TABLES: usize = 256;
+const DB_MAX_PLAN_ROWS: usize = 256;
+
+fn db_read_metadata_field(bytes: &[u8], pos: &mut usize) -> Result<String, DBError> {
+    let len_start = *pos;
+    while let Some(byte) = bytes.get(*pos) {
+        if *byte == b':' {
+            break;
+        }
+        if !byte.is_ascii_digit() {
+            return Err(DBError {
+                message: "database metadata length is not decimal".to_string(),
+            });
+        }
+        *pos += 1;
+    }
+    if *pos == len_start || bytes.get(*pos) != Some(&b':') {
+        return Err(DBError {
+            message: "database metadata has no field delimiter".to_string(),
+        });
+    }
+    let length = std::str::from_utf8(&bytes[len_start..*pos])
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .ok_or_else(|| DBError {
+            message: "database metadata field length is invalid".to_string(),
+        })?;
+    *pos += 1;
+    let end = (*pos).checked_add(length).ok_or_else(|| DBError {
+        message: "database metadata field length overflow".to_string(),
+    })?;
+    let value = bytes.get(*pos..end).ok_or_else(|| DBError {
+        message: "database metadata field is truncated".to_string(),
+    })?;
+    *pos = end;
+    String::from_utf8(value.to_vec()).map_err(|_| DBError {
+        message: "database metadata field is not UTF-8".to_string(),
+    })
+}
+
+fn db_metadata_number(value: String, what: &str) -> Result<u64, DBError> {
+    value.parse::<u64>().map_err(|_| DBError {
+        message: format!("database metadata {what} is invalid"),
+    })
+}
+
+impl JetDbQueryMetadata {
+    pub fn from_wire(wire: &str) -> Result<Self, DBError> {
+        if wire.len() > DB_MAX_METADATA_BYTES {
+            return Err(DBError {
+                message: "database metadata exceeds the wire-size limit".to_string(),
+            });
+        }
+        let bytes = wire.as_bytes();
+        if !bytes.starts_with(b"JDB1:") {
+            return Err(DBError {
+                message: "database metadata has an unknown version".to_string(),
+            });
+        }
+        let mut pos = 5;
+        let source_file = db_read_metadata_field(bytes, &mut pos)?;
+        let source_id = db_read_metadata_field(bytes, &mut pos)?;
+        let source_start = db_metadata_number(
+            db_read_metadata_field(bytes, &mut pos)?,
+            "source span start",
+        )?;
+        let source_end =
+            db_metadata_number(db_read_metadata_field(bytes, &mut pos)?, "source span end")?;
+        let statement_identity = db_read_metadata_field(bytes, &mut pos)?;
+        let table_count = usize::try_from(db_metadata_number(
+            db_read_metadata_field(bytes, &mut pos)?,
+            "table count",
+        )?)
+        .map_err(|_| DBError {
+            message: "database metadata table count overflows usize".to_string(),
+        })?;
+        if source_file.is_empty() || source_id.is_empty() || statement_identity.is_empty() {
+            return Err(DBError {
+                message: "database metadata has an empty source or statement identity".to_string(),
+            });
+        }
+        if source_end < source_start {
+            return Err(DBError {
+                message: "database metadata source span is inverted".to_string(),
+            });
+        }
+        if table_count > DB_MAX_METADATA_TABLES {
+            return Err(DBError {
+                message: "database metadata table count exceeds the limit".to_string(),
+            });
+        }
+        let mut table_facts = Vec::with_capacity(table_count);
+        for _ in 0..table_count {
+            let table_id = db_read_metadata_field(bytes, &mut pos)?;
+            let read = match db_read_metadata_field(bytes, &mut pos)?.as_str() {
+                "1" => true,
+                "0" => false,
+                _ => {
+                    return Err(DBError {
+                        message: "database metadata read flag is invalid".to_string(),
+                    })
+                }
+            };
+            let write = match db_read_metadata_field(bytes, &mut pos)?.as_str() {
+                "1" => true,
+                "0" => false,
+                _ => {
+                    return Err(DBError {
+                        message: "database metadata write flag is invalid".to_string(),
+                    })
+                }
+            };
+            if table_id.is_empty() || (!read && !write) {
+                return Err(DBError {
+                    message: "database metadata has an invalid table fact".to_string(),
+                });
+            }
+            if table_facts.iter().any(|fact: &JetDbTableFact| fact.table_id == table_id) {
+                return Err(DBError {
+                    message: "database metadata repeats a table fact".to_string(),
+                });
+            }
+            table_facts.push(JetDbTableFact {
+                table_id,
+                read,
+                write,
+            });
+        }
+        if pos != bytes.len() {
+            return Err(DBError {
+                message: "database metadata has trailing bytes".to_string(),
+            });
+        }
+        Ok(Self {
+            source_id,
+            source_file,
+            source_start,
+            source_end,
+            statement_identity,
+            table_facts,
+        })
+    }
+}
+
+/// EXPLAIN is deliberately narrower than the normal DB sink: only one
+/// SELECT statement is eligible.  CTEs and transaction/schema/mutation
+/// statements are rejected before a driver sees them.
+pub fn jet_db_validate_explain_sql(sql: &SQL) -> Result<(), DBError> {
+    let text = sql.0.trim();
+    if text.is_empty() || text.contains(';') || db_sql_contains_comment(text) {
+        return Err(DBError {
+            message: "database EXPLAIN accepts one comment-free SELECT".to_string(),
+        });
+    }
+    let tokens = db_sql_tokens(text);
+    if tokens.first().map(|(_, _, word)| word.as_str()) != Some("select") {
+        return Err(DBError {
+            message: "database EXPLAIN accepts read-only SELECT statements only".to_string(),
+        });
+    }
+    Ok(())
 }
 
 /// The transformer returns the proof together with the rewritten typed SQL.
@@ -270,6 +504,48 @@ fn db_sql_target_index(tokens: &[(usize, usize, String)], kind: &str) -> Option<
 fn db_sql_target_table(tokens: &[(usize, usize, String)], kind: &str) -> Option<String> {
     let index = db_sql_target_index(tokens, kind)?;
     tokens.get(index).map(|(_, _, word)| word.clone())
+}
+/// Return the deterministic table write set carried by one transaction.
+///
+/// The policy checker already restricts ordinary scoped DML to one simple
+/// target, so this helper only extracts the target from statements that can
+/// change rows or schema.  It intentionally returns relation names rather
+/// than effect labels: `app.live` records the same table footprint, while
+/// `jet_app_transact_invalidate` performs the shared intersection check after
+/// commit.
+pub fn jet_db_write_set(steps: &Vec<SQL>) -> String {
+    let mut tables = std::collections::BTreeSet::new();
+    for sql in steps {
+        let tokens = db_sql_tokens(sql.0.trim());
+        let Some((_, _, kind)) = tokens.first() else {
+            continue;
+        };
+        let table = match kind.as_str() {
+            "insert" | "update" | "delete" => db_sql_target_table(&tokens, kind),
+            "create" | "alter" | "drop" => {
+                let table_index = tokens
+                    .iter()
+                    .position(|(_, _, word)| word == "table")
+                    .and_then(|index| index.checked_add(1));
+                table_index.and_then(|mut index| {
+                    if matches!(kind.as_str(), "create" | "drop") {
+                        while matches!(
+                            tokens.get(index).map(|(_, _, word)| word.as_str()),
+                            Some("if" | "not" | "exists")
+                        ) {
+                            index = index.checked_add(1)?;
+                        }
+                    }
+                    tokens.get(index).map(|(_, _, word)| word.clone())
+                })
+            }
+            _ => None,
+        };
+        if let Some(table) = table {
+            tables.insert(table);
+        }
+    }
+    tables.into_iter().collect::<Vec<_>>().join(",")
 }
 
 /// Reject joins, aliases, subqueries, and other shapes for which adding a
@@ -464,8 +740,11 @@ fn db_sql_is_migration_metadata(sql: &str) -> bool {
         .join(" ")
         .to_ascii_lowercase();
     normalized.starts_with("create table if not exists __jet_migrations")
-        || normalized.starts_with("select checksum from __jet_migrations where name = ?")
-        || normalized.starts_with("insert into __jet_migrations (name, checksum) values (?, ?)")
+        || normalized.starts_with("create table __jet_migrations")
+        || normalized.starts_with("pragma table_info(__jet_migrations")
+        || normalized.starts_with("select ")
+            && normalized.contains(" from __jet_migrations")
+        || normalized.starts_with("insert into __jet_migrations")
 }
 
 /// Apply the closed owner policy to one typed SQL operation. Unsupported SQL
@@ -822,6 +1101,298 @@ fn db_read_tagged(bytes: &[u8], pos: &mut usize) -> Result<(char, String), Strin
     *pos = end;
     Ok((tag, payload))
 }
+fn db_runtime_number(payload: &str, what: &str) -> Result<u64, DBError> {
+    payload.parse::<u64>().map_err(|_| DBError {
+        message: format!("database runtime {what} is invalid"),
+    })
+}
+
+fn db_runtime_bool(payload: &str, what: &str) -> Result<bool, DBError> {
+    match payload {
+        "0" => Ok(false),
+        "1" => Ok(true),
+        _ => Err(DBError {
+            message: format!("database runtime {what} is invalid"),
+        }),
+    }
+}
+
+fn db_decode_plan(payload: &str) -> Result<Vec<JetDbQueryPlanFact>, DBError> {
+    let bytes = payload.as_bytes();
+    let Some(colon) = bytes.iter().position(|byte| *byte == b':') else {
+        return Err(DBError {
+            message: "database runtime plan is missing its row-count delimiter".to_string(),
+        });
+    };
+    let count = std::str::from_utf8(&bytes[..colon])
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .ok_or_else(|| DBError {
+            message: "database runtime plan row count is invalid".to_string(),
+        })?;
+    if count > DB_MAX_PLAN_ROWS {
+        return Err(DBError {
+            message: "database runtime plan row count exceeds the limit".to_string(),
+        });
+    }
+    let mut pos = colon + 1;
+    let mut plan = Vec::with_capacity(count);
+    for _ in 0..count {
+        let mut ordinal = None;
+        let mut parent = None;
+        let mut operation = None;
+        let mut relation = None;
+        let mut index = None;
+        for _ in 0..5 {
+            let (tag, value) =
+                db_read_tagged(bytes, &mut pos).map_err(|message| DBError { message })?;
+            match tag {
+                'I' if ordinal.is_none() => {
+                    ordinal = Some(db_runtime_number(&value, "plan ordinal")?)
+                }
+                'P' if parent.is_none() => {
+                    parent = Some(db_runtime_number(&value, "plan parent")?)
+                }
+                'O' if operation.is_none() && !value.is_empty() => operation = Some(value),
+                'T' if relation.is_none() => relation = (!value.is_empty()).then_some(value),
+                'X' if index.is_none() => index = (!value.is_empty()).then_some(value),
+                _ => {
+                    return Err(DBError {
+                        message:
+                            "database runtime plan has an invalid or duplicate field".to_string(),
+                    })
+                }
+            }
+        }
+        plan.push(JetDbQueryPlanFact {
+            ordinal: ordinal.ok_or_else(|| DBError {
+                message: "database runtime plan has no ordinal".to_string(),
+            })?,
+            parent: parent.ok_or_else(|| DBError {
+                message: "database runtime plan has no parent".to_string(),
+            })?,
+            operation: operation.ok_or_else(|| DBError {
+                message: "database runtime plan has no operation".to_string(),
+            })?,
+            relation,
+            index,
+        });
+    }
+    if pos != bytes.len() {
+        return Err(DBError {
+            message: "database runtime plan has trailing bytes".to_string(),
+        });
+    }
+    Ok(plan)
+}
+
+fn db_observed_error(wire: &str) -> Option<DBError> {
+    wire.strip_prefix("E:").map(|message| DBError {
+        message: message.to_string(),
+    })
+}
+
+/// Decode the observed query envelope returned by a database driver.
+pub fn jet_db_decode_observed_query_result(
+    wire: &str,
+) -> Result<(Vec<JetDBRow>, JetDbQueryRuntimeFacts), DBError> {
+    if wire.len() > DB_MAX_WIRE_BYTES {
+        return Err(DBError {
+            message: "database observed query exceeds the wire-size limit".to_string(),
+        });
+    }
+    if let Some(error) = db_observed_error(wire) {
+        return Err(error);
+    }
+    let Some(body) = wire.strip_prefix("Q:") else {
+        return Err(DBError {
+            message: "database observed query has an unknown envelope".to_string(),
+        });
+    };
+    let bytes = body.as_bytes();
+    let mut pos = 0;
+    let mut rows_wire = None;
+    let mut row_count = None;
+    let mut elapsed_ms = None;
+    let mut plan_wire = None;
+    while pos < bytes.len() {
+        let (tag, payload) =
+            db_read_tagged(bytes, &mut pos).map_err(|message| DBError { message })?;
+        match tag {
+            'R' if rows_wire.is_none() => rows_wire = Some(payload),
+            'N' if row_count.is_none() => {
+                row_count = Some(db_runtime_number(&payload, "row count")?)
+            }
+            'D' if elapsed_ms.is_none() => {
+                elapsed_ms = Some(db_runtime_number(&payload, "elapsed time")?)
+            }
+            'P' if plan_wire.is_none() => plan_wire = Some(payload),
+            _ => {
+                return Err(DBError {
+                    message:
+                        "database observed query has an invalid or duplicate field".to_string(),
+                })
+            }
+        }
+    }
+    let rows_wire = rows_wire.ok_or_else(|| DBError {
+        message: "database observed query has no rows".to_string(),
+    })?;
+    let rows = jet_db_decode_query_result(&format!("O:{rows_wire}"))?;
+    let actual_count = row_count.ok_or_else(|| DBError {
+        message: "database observed query has no row count".to_string(),
+    })?;
+    if actual_count != rows.len() as u64 {
+        return Err(DBError {
+            message: "database observed query row count does not match its rows".to_string(),
+        });
+    }
+    let elapsed_ms = elapsed_ms.ok_or_else(|| DBError {
+        message: "database observed query has no elapsed time".to_string(),
+    })?;
+    let plan_wire = plan_wire.ok_or_else(|| DBError {
+        message: "database observed query has no plan".to_string(),
+    })?;
+    Ok((
+        rows,
+        JetDbQueryRuntimeFacts {
+            rows_returned: Some(actual_count),
+            rows_affected: None,
+            elapsed_ms,
+            plan: db_decode_plan(&plan_wire)?,
+        },
+    ))
+}
+
+/// Decode the observed execute envelope returned by a database driver.
+pub fn jet_db_decode_observed_execute_result(
+    wire: &str,
+) -> Result<(i64, JetDbQueryRuntimeFacts), DBError> {
+    if wire.len() > DB_MAX_WIRE_BYTES {
+        return Err(DBError {
+            message: "database observed execute exceeds the wire-size limit".to_string(),
+        });
+    }
+    if let Some(error) = db_observed_error(wire) {
+        return Err(error);
+    }
+    let Some(body) = wire.strip_prefix("X:") else {
+        return Err(DBError {
+            message: "database observed execute has an unknown envelope".to_string(),
+        });
+    };
+    let bytes = body.as_bytes();
+    let mut pos = 0;
+    let mut affected = None;
+    let mut elapsed_ms = None;
+    let mut plan_wire = None;
+    while pos < bytes.len() {
+        let (tag, payload) =
+            db_read_tagged(bytes, &mut pos).map_err(|message| DBError { message })?;
+        match tag {
+            'A' if affected.is_none() => {
+                affected = Some(payload.parse::<i64>().map_err(|_| DBError {
+                    message: "database runtime affected row count is invalid".to_string(),
+                })?);
+            }
+            'D' if elapsed_ms.is_none() => {
+                elapsed_ms = Some(db_runtime_number(&payload, "elapsed time")?)
+            }
+            'P' if plan_wire.is_none() => plan_wire = Some(payload),
+            _ => {
+                return Err(DBError {
+                    message:
+                        "database observed execute has an invalid or duplicate field".to_string(),
+                })
+            }
+        }
+    }
+    let affected = affected.ok_or_else(|| DBError {
+        message: "database observed execute has no affected row count".to_string(),
+    })?;
+    let elapsed_ms = elapsed_ms.ok_or_else(|| DBError {
+        message: "database observed execute has no elapsed time".to_string(),
+    })?;
+    let plan_wire = plan_wire.ok_or_else(|| DBError {
+        message: "database observed execute has no plan".to_string(),
+    })?;
+    let affected = u64::try_from(affected).map_err(|_| DBError {
+        message: "database runtime affected row count is negative".to_string(),
+    })?;
+    Ok((
+        i64::try_from(affected).unwrap_or(i64::MAX),
+        JetDbQueryRuntimeFacts {
+            rows_returned: None,
+            rows_affected: Some(affected),
+            elapsed_ms,
+            plan: db_decode_plan(&plan_wire)?,
+        },
+    ))
+}
+/// Decode the bounded EXPLAIN envelope returned by a database driver.
+pub fn jet_db_decode_explain_result(
+    wire: &str,
+) -> Result<JetDbExplainRuntimeFacts, DBError> {
+    if wire.len() > DB_MAX_WIRE_BYTES {
+        return Err(DBError {
+            message: "database EXPLAIN exceeds the wire-size limit".to_string(),
+        });
+    }
+    if let Some(error) = db_observed_error(wire) {
+        return Err(error);
+    }
+    let Some(body) = wire.strip_prefix("Y:") else {
+        return Err(DBError {
+            message: "database EXPLAIN has an unknown envelope".to_string(),
+        });
+    };
+    let bytes = body.as_bytes();
+    let mut pos = 0;
+    let mut elapsed_ms = None;
+    let mut timed_out = None;
+    let mut truncated = None;
+    let mut plan_wire = None;
+    while pos < bytes.len() {
+        let (tag, payload) =
+            db_read_tagged(bytes, &mut pos).map_err(|message| DBError { message })?;
+        match tag {
+            'D' if elapsed_ms.is_none() => {
+                elapsed_ms = Some(db_runtime_number(&payload, "elapsed time")?)
+            }
+            'T' if timed_out.is_none() => {
+                timed_out = Some(db_runtime_bool(&payload, "timeout flag")?)
+            }
+            'L' if truncated.is_none() => {
+                truncated = Some(db_runtime_bool(&payload, "truncation flag")?)
+            }
+            'P' if plan_wire.is_none() => plan_wire = Some(payload),
+            _ => {
+                return Err(DBError {
+                    message: "database EXPLAIN has an invalid or duplicate field".to_string(),
+                })
+            }
+        }
+    }
+    let elapsed_ms = elapsed_ms.ok_or_else(|| DBError {
+        message: "database EXPLAIN has no elapsed time".to_string(),
+    })?;
+    let timed_out = timed_out.ok_or_else(|| DBError {
+        message: "database EXPLAIN has no timeout flag".to_string(),
+    })?;
+    let truncated = truncated.ok_or_else(|| DBError {
+        message: "database EXPLAIN has no truncation flag".to_string(),
+    })?;
+    let plan_wire = plan_wire.ok_or_else(|| DBError {
+        message: "database EXPLAIN has no plan".to_string(),
+    })?;
+    Ok(JetDbExplainRuntimeFacts {
+        elapsed_ms,
+        plan: db_decode_plan(&plan_wire)?,
+        timed_out,
+        truncated,
+    })
+}
+
 
 fn db_hex_decode(payload: &str) -> Result<Vec<u8>, String> {
     if payload.len() % 2 != 0 {
@@ -994,9 +1565,214 @@ pub fn jet_db_decode_execute_result(wire: &str) -> Result<i64, DBError> {
     })
 }
 
-/// D-TYPEDSQL-SINK1=A: migration identity includes both the checked template
-/// and every ordered `DBValue` binding, with delimiters between steps and
-/// fields so duplicate/reordered inputs cannot collide accidentally.
+/// The migration ledger is a database-owned transition log.  These types are
+/// deliberately independent of any CLI, filesystem, or tier adapter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JetMigrationLock {
+    Shared,
+    Exclusive,
+}
+
+impl JetMigrationLock {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Shared => "shared",
+            Self::Exclusive => "exclusive",
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self, DBError> {
+        match value {
+            "shared" => Ok(Self::Shared),
+            "exclusive" => Ok(Self::Exclusive),
+            _ => Err(DBError {
+                message: format!("unknown migration lock mode `{value}`"),
+            }),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JetMigrationOperation {
+    Apply,
+    Rollback,
+    Direct,
+}
+
+impl JetMigrationOperation {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Apply => "apply",
+            Self::Rollback => "rollback",
+            Self::Direct => "direct",
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self, DBError> {
+        match value {
+            "apply" => Ok(Self::Apply),
+            "rollback" => Ok(Self::Rollback),
+            "direct" => Ok(Self::Direct),
+            _ => Err(DBError {
+                message: format!("unknown migration operation `{value}`"),
+            }),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct JetMigrationSql {
+    pub ordinal: u64,
+    pub sql: SQL,
+    pub inverse_sql: Option<SQL>,
+    pub risk: String,
+    pub lock: JetMigrationLock,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct JetMigrationRequest {
+    pub operation: JetMigrationOperation,
+    pub migration_key: String,
+    pub target: String,
+    pub target_identity: String,
+    pub database_identity: String,
+    pub source_identity: String,
+    pub schema_identity: String,
+    pub tool_identity: String,
+    pub from_version: u64,
+    pub to_version: u64,
+    pub lock: JetMigrationLock,
+    pub risk: String,
+    pub steps: Vec<JetMigrationSql>,
+}
+
+impl JetMigrationRequest {
+    pub fn direct(name: String, steps: Vec<SQL>) -> Self {
+        Self {
+            operation: JetMigrationOperation::Direct,
+            migration_key: name,
+            target: "direct".to_string(),
+            target_identity: "direct".to_string(),
+            database_identity: "runtime".to_string(),
+            source_identity: "jet.db.runtime".to_string(),
+            schema_identity: "jet.db.migration/v2".to_string(),
+            tool_identity: "jet-runtime".to_string(),
+            from_version: 0,
+            to_version: 0,
+            lock: JetMigrationLock::Exclusive,
+            risk: "runtime migration".to_string(),
+            steps: steps
+                .into_iter()
+                .enumerate()
+                .map(|(index, sql)| JetMigrationSql {
+                    ordinal: index as u64 + 1,
+                    sql,
+                    inverse_sql: None,
+                    risk: "runtime migration".to_string(),
+                    lock: JetMigrationLock::Exclusive,
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct JetMigrationOutcome {
+    pub receipt_id: String,
+    pub operation: String,
+    pub status: String,
+    pub target: String,
+    pub target_identity: String,
+    pub source_identity: String,
+    pub schema_identity: String,
+    pub database_identity: String,
+    pub tool_identity: String,
+    pub from_version: u64,
+    pub to_version: u64,
+    pub step_count: usize,
+    pub step_ids: Vec<String>,
+    pub checksum: String,
+    pub lock: JetMigrationLock,
+    pub risk: String,
+    pub started_unix_ms: u128,
+    pub finished_unix_ms: u128,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JetMigrationStateRequest {
+    pub target: String,
+    pub target_identity: String,
+    pub database_identity: String,
+    pub source_identity: String,
+    pub schema_identity: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct JetMigrationState {
+    pub target: String,
+    pub target_identity: String,
+    pub database_identity: String,
+    pub source_identity: String,
+    pub schema_identity: String,
+    pub current_version: u64,
+    pub checksum: String,
+    pub receipts: Vec<JetMigrationOutcome>,
+    pub drift: Vec<String>,
+}
+
+fn db_hash_field(hash: &mut u64, value: &str) {
+    for byte in (value.len() as u64).to_le_bytes() {
+        *hash ^= u64::from(byte);
+        *hash = hash.wrapping_mul(0x100000001b3);
+    }
+    for byte in value.as_bytes() {
+        *hash ^= u64::from(*byte);
+        *hash = hash.wrapping_mul(0x100000001b3);
+    }
+    *hash ^= 0xff;
+    *hash = hash.wrapping_mul(0x100000001b3);
+}
+
+fn db_hash_value(hash: &mut u64, value: &DBValue) {
+    match value {
+        DBValue::Null => db_hash_field(hash, "N"),
+        DBValue::Int(value) => {
+            db_hash_field(hash, "I");
+            db_hash_field(hash, &value.to_string());
+        }
+        DBValue::Float(value) => {
+            db_hash_field(hash, "F");
+            db_hash_field(hash, &value.to_bits().to_string());
+        }
+        DBValue::Text(value) => {
+            db_hash_field(hash, "T");
+            db_hash_field(hash, value);
+        }
+        DBValue::Bool(value) => db_hash_field(hash, if *value { "B1" } else { "B0" }),
+        DBValue::Blob(value) => {
+            db_hash_field(hash, "X");
+            for byte in value {
+                *hash ^= u64::from(*byte);
+                *hash = hash.wrapping_mul(0x100000001b3);
+            }
+            *hash ^= 0xff;
+            *hash = hash.wrapping_mul(0x100000001b3);
+        }
+    }
+}
+
+fn db_hash_sql(hash: &mut u64, sql: &SQL) {
+    db_hash_field(hash, &sql.0);
+    db_hash_field(hash, &(sql.1.len() as u64).to_string());
+    for value in &sql.1 {
+        db_hash_value(hash, value);
+    }
+}
+
+/// D-TYPEDSQL-SINK1=A: this checksum remains the compatibility identity for
+/// the public `db.migrate(name, steps)` operation.  The typed CLI request
+/// checksum below additionally covers target, source, lock, and version facts.
 pub fn jet_db_migration_checksum(steps: &Vec<SQL>) -> String {
     let mut hash: u64 = 0xcbf29ce484222325;
     for sql in steps {
@@ -1028,11 +1804,592 @@ pub fn jet_db_migration_checksum(steps: &Vec<SQL>) -> String {
     format!("{hash:016x}")
 }
 
-/// One transaction/migration state machine for every execution tier. The
-/// backend only supplies begin/commit/rollback and policy-bound SQL I/O;
-/// ordering, checksums, and rollback meaning stay here (I9).
+pub fn jet_db_migration_request_checksum(request: &JetMigrationRequest) -> String {
+    if matches!(request.operation, JetMigrationOperation::Direct) {
+        let steps = request
+            .steps
+            .iter()
+            .map(|step| step.sql.clone())
+            .collect::<Vec<_>>();
+        return jet_db_migration_checksum(&steps);
+    }
+    let mut hash = 0xcbf29ce484222325;
+    db_hash_field(&mut hash, "jet.db.migration/v2");
+    db_hash_field(&mut hash, request.operation.as_str());
+    db_hash_field(&mut hash, &request.migration_key);
+    db_hash_field(&mut hash, &request.target);
+    db_hash_field(&mut hash, &request.target_identity);
+    db_hash_field(&mut hash, &request.database_identity);
+    db_hash_field(&mut hash, &request.source_identity);
+    db_hash_field(&mut hash, &request.schema_identity);
+    db_hash_field(&mut hash, &request.tool_identity);
+    db_hash_field(&mut hash, &request.from_version.to_string());
+    db_hash_field(&mut hash, &request.to_version.to_string());
+    db_hash_field(&mut hash, request.lock.as_str());
+    db_hash_field(&mut hash, &request.risk);
+    db_hash_field(&mut hash, &(request.steps.len() as u64).to_string());
+    for step in &request.steps {
+        db_hash_field(&mut hash, &step.ordinal.to_string());
+        db_hash_field(&mut hash, step.lock.as_str());
+        db_hash_field(&mut hash, &step.risk);
+        db_hash_sql(&mut hash, &step.sql);
+        if let Some(inverse) = &step.inverse_sql {
+            db_hash_field(&mut hash, "inverse");
+            db_hash_sql(&mut hash, inverse);
+        } else {
+            db_hash_field(&mut hash, "no-inverse");
+        }
+    }
+    format!("migration-v2:{hash:016x}")
+}
+
+fn db_migration_step_id(step: &JetMigrationSql) -> String {
+    let mut hash = 0xcbf29ce484222325;
+    db_hash_field(&mut hash, &step.ordinal.to_string());
+    db_hash_field(&mut hash, step.lock.as_str());
+    db_hash_field(&mut hash, &step.risk);
+    db_hash_sql(&mut hash, &step.sql);
+    format!("step:{hash:016x}")
+}
+
+fn db_migration_transition_key(
+    request: &JetMigrationRequest,
+    checksum: &str,
+    predecessor: Option<&str>,
+) -> String {
+    let mut hash = 0xcbf29ce484222325;
+    db_hash_field(&mut hash, "transition");
+    db_hash_field(&mut hash, request.operation.as_str());
+    db_hash_field(&mut hash, &request.migration_key);
+    db_hash_field(&mut hash, &request.target_identity);
+    db_hash_field(&mut hash, checksum);
+    db_hash_field(&mut hash, predecessor.unwrap_or(""));
+    format!("transition:{hash:016x}")
+}
+
+fn db_migration_now_ms() -> u128 {
+    u128::try_from(super::jet_std_time_now()).unwrap_or(0)
+}
+
+fn db_migration_validate_request(request: &JetMigrationRequest) -> Result<(), DBError> {
+    for (name, value) in [
+        ("migration key", request.migration_key.as_str()),
+        ("target", request.target.as_str()),
+        ("target identity", request.target_identity.as_str()),
+        ("database identity", request.database_identity.as_str()),
+        ("source identity", request.source_identity.as_str()),
+        ("schema identity", request.schema_identity.as_str()),
+        ("tool identity", request.tool_identity.as_str()),
+        ("risk", request.risk.as_str()),
+    ] {
+        if value.is_empty() || value.chars().any(char::is_control) {
+            return Err(DBError {
+                message: format!("migration {name} is empty or contains control characters"),
+            });
+        }
+    }
+    if matches!(request.operation, JetMigrationOperation::Apply)
+        && request.to_version <= request.from_version
+    {
+        return Err(DBError {
+            message: "migration apply target version must be ahead of its source".to_string(),
+        });
+    }
+    if matches!(request.operation, JetMigrationOperation::Rollback)
+        && request.to_version >= request.from_version
+    {
+        return Err(DBError {
+            message: "migration rollback target version must be below its source".to_string(),
+        });
+    }
+    if request.steps.len() > i64::MAX as usize
+        || request.from_version > i64::MAX as u64
+        || request.to_version > i64::MAX as u64
+    {
+        return Err(DBError {
+            message: "migration request exceeds the SQLite integer range".to_string(),
+        });
+    }
+    let mut previous = 0;
+    for step in &request.steps {
+        if step.ordinal == 0 || step.ordinal <= previous {
+            return Err(DBError {
+                message: "migration step ordinals must be positive and increasing".to_string(),
+            });
+        }
+        previous = step.ordinal;
+        if step.sql.0.trim().is_empty()
+            || step.sql.0.contains('\0')
+            || step.sql.0.chars().any(char::is_control)
+            || step.risk.is_empty()
+            || step.risk.chars().any(char::is_control)
+        {
+            return Err(DBError {
+                message: "migration step contains empty or invalid SQL metadata".to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
+const MIGRATION_LEDGER_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS __jet_migrations (sequence INTEGER PRIMARY KEY AUTOINCREMENT, transition_key TEXT NOT NULL UNIQUE, migration_key TEXT NOT NULL, target TEXT NOT NULL, target_identity TEXT NOT NULL, database_identity TEXT NOT NULL, source_identity TEXT NOT NULL, schema_identity TEXT NOT NULL, tool_identity TEXT NOT NULL, operation TEXT NOT NULL, status TEXT NOT NULL, from_version INTEGER NOT NULL, to_version INTEGER NOT NULL, step_count INTEGER NOT NULL, step_ids TEXT NOT NULL, checksum TEXT NOT NULL, lock_mode TEXT NOT NULL, risk TEXT NOT NULL, started_unix_ms INTEGER NOT NULL, finished_unix_ms INTEGER NOT NULL, error TEXT)";
+
+fn db_migration_ensure_schema<B: JetDBBackend>(backend: &mut B) -> Result<(), DBError> {
+    backend.execute(&(MIGRATION_LEDGER_SCHEMA.to_string(), Vec::new()), true)?;
+    let columns = backend.query(
+        &(
+            "PRAGMA table_info(__jet_migrations)".to_string(),
+            Vec::new(),
+        ),
+        true,
+    )?;
+    let canonical = [
+        "sequence",
+        "transition_key",
+        "migration_key",
+        "target",
+        "target_identity",
+        "database_identity",
+        "source_identity",
+        "schema_identity",
+        "tool_identity",
+        "operation",
+        "status",
+        "from_version",
+        "to_version",
+        "step_count",
+        "step_ids",
+        "checksum",
+        "lock_mode",
+        "risk",
+        "started_unix_ms",
+        "finished_unix_ms",
+        "error",
+    ];
+    if columns.len() != canonical.len()
+        || columns.iter().zip(canonical).any(|(row, expected)| {
+            !row
+                .get("name")
+                .and_then(|value| value.text().ok())
+                .is_some_and(|name| name == expected)
+        })
+    {
+        return Err(DBError {
+            message: "migration ledger uses a non-canonical schema".to_string(),
+        });
+    }
+    Ok(())
+}
+
+struct JetMigrationLedgerRow {
+    transition_key: String,
+    migration_key: String,
+    outcome: JetMigrationOutcome,
+}
+
+fn db_migration_row_text(row: &JetDBRow, key: &str) -> Result<String, DBError> {
+    row.get(key)
+        .ok_or_else(|| DBError {
+            message: format!("migration ledger row has no `{key}` field"),
+        })?
+        .text()
+        .map_err(|message| DBError { message })
+}
+
+fn db_migration_row_u64(row: &JetDBRow, key: &str) -> Result<u64, DBError> {
+    let value = row
+        .get(key)
+        .ok_or_else(|| DBError {
+            message: format!("migration ledger row has no `{key}` field"),
+        })?
+        .int()
+        .map_err(|message| DBError { message })?;
+    u64::try_from(value).map_err(|_| DBError {
+        message: format!("migration ledger `{key}` is negative"),
+    })
+}
+
+fn db_migration_row_optional_text(
+    row: &JetDBRow,
+    key: &str,
+) -> Result<Option<String>, DBError> {
+    let value = row.get(key).ok_or_else(|| DBError {
+        message: format!("migration ledger row has no `{key}` field"),
+    })?;
+    if value.is_null() {
+        Ok(None)
+    } else {
+        value
+            .text()
+            .map(Some)
+            .map_err(|message| DBError { message })
+    }
+}
+
+fn db_migration_parse_row(row: &JetDBRow) -> Result<JetMigrationLedgerRow, DBError> {
+    let transition_key = db_migration_row_text(row, "transition_key")?;
+    let migration_key = db_migration_row_text(row, "migration_key")?;
+    let operation = db_migration_row_text(row, "operation")?;
+    let status = db_migration_row_text(row, "status")?;
+    let step_ids = db_migration_row_text(row, "step_ids")?;
+    let step_ids = if step_ids.is_empty() {
+        Vec::new()
+    } else {
+        step_ids.split('\n').map(str::to_string).collect()
+    };
+    let step_count = usize::try_from(db_migration_row_u64(row, "step_count")?).map_err(|_| DBError {
+        message: "migration ledger step count is outside the host range".to_string(),
+    })?;
+    let started_unix_ms = u128::from(db_migration_row_u64(row, "started_unix_ms")?);
+    let finished_unix_ms = u128::from(db_migration_row_u64(row, "finished_unix_ms")?);
+    let lock = JetMigrationLock::parse(&db_migration_row_text(row, "lock_mode")?)?;
+    let outcome = JetMigrationOutcome {
+        receipt_id: transition_key.clone(),
+        operation,
+        status,
+        target: db_migration_row_text(row, "target")?,
+        target_identity: db_migration_row_text(row, "target_identity")?,
+        source_identity: db_migration_row_text(row, "source_identity")?,
+        schema_identity: db_migration_row_text(row, "schema_identity")?,
+        database_identity: db_migration_row_text(row, "database_identity")?,
+        tool_identity: db_migration_row_text(row, "tool_identity")?,
+        from_version: db_migration_row_u64(row, "from_version")?,
+        to_version: db_migration_row_u64(row, "to_version")?,
+        step_count,
+        step_ids,
+        checksum: db_migration_row_text(row, "checksum")?,
+        lock,
+        risk: db_migration_row_text(row, "risk")?,
+        started_unix_ms,
+        finished_unix_ms,
+        error: db_migration_row_optional_text(row, "error")?,
+    };
+    Ok(JetMigrationLedgerRow {
+        transition_key,
+        migration_key,
+        outcome,
+    })
+}
+
+fn db_migration_rows<B: JetDBBackend>(backend: &mut B) -> Result<Vec<JetMigrationLedgerRow>, DBError> {
+    let rows = backend.query(
+        &(
+            "SELECT transition_key, migration_key, target, target_identity, database_identity, source_identity, schema_identity, tool_identity, operation, status, from_version, to_version, step_count, step_ids, checksum, lock_mode, risk, started_unix_ms, finished_unix_ms, error FROM __jet_migrations ORDER BY sequence"
+                .to_string(),
+            Vec::new(),
+        ),
+        true,
+    )?;
+    rows.iter().map(db_migration_parse_row).collect()
+}
+
+fn db_migration_state_from_rows(
+    query: &JetMigrationStateRequest,
+    rows: &[JetMigrationLedgerRow],
+) -> Result<JetMigrationState, DBError> {
+    let mut current_version = 0;
+    let mut receipts = Vec::new();
+    let mut drift = Vec::new();
+    let mut hash = 0xcbf29ce484222325;
+    db_hash_field(&mut hash, &query.target);
+    db_hash_field(&mut hash, &query.target_identity);
+    db_hash_field(&mut hash, &query.database_identity);
+    db_hash_field(&mut hash, &query.source_identity);
+    for row in rows {
+        let receipt = &row.outcome;
+        if receipt.target != query.target {
+            continue;
+        }
+        receipts.push(receipt.clone());
+        db_hash_field(&mut hash, &row.transition_key);
+        db_hash_field(&mut hash, &receipt.checksum);
+        if receipt.target_identity != query.target_identity {
+            drift.push(format!(
+                "migration transition `{}` has a foreign target identity",
+                row.transition_key
+            ));
+            continue;
+        }
+        if receipt.database_identity != query.database_identity {
+            drift.push(format!(
+                "migration transition `{}` has a foreign database identity",
+                row.transition_key
+            ));
+            continue;
+        }
+        if receipt.source_identity != query.source_identity {
+            drift.push(format!(
+                "migration transition `{}` was created from a different migration catalog",
+                row.transition_key
+            ));
+            continue;
+        }
+        if receipt.schema_identity != query.schema_identity {
+            drift.push(format!(
+                "migration transition `{}` has a mismatched schema identity",
+                row.transition_key
+            ));
+            continue;
+        }
+        if receipt.step_count != receipt.step_ids.len() {
+            drift.push(format!(
+                "migration transition `{}` has an invalid step count",
+                row.transition_key
+            ));
+            continue;
+        }
+        if receipt.status != "applied" {
+            drift.push(format!(
+                "migration transition `{}` has unresolved status `{}`",
+                row.transition_key, receipt.status
+            ));
+            continue;
+        }
+        match JetMigrationOperation::parse(&receipt.operation) {
+            Ok(JetMigrationOperation::Direct) => {}
+            Ok(JetMigrationOperation::Apply | JetMigrationOperation::Rollback) => {
+                if receipt.from_version != current_version {
+                    drift.push(format!(
+                        "migration transition `{}` starts at {}, but canonical state is at {}",
+                        row.transition_key, receipt.from_version, current_version
+                    ));
+                    continue;
+                }
+                current_version = receipt.to_version;
+            }
+            Err(_) => drift.push(format!(
+                "migration transition `{}` has unknown operation `{}`",
+                row.transition_key, receipt.operation
+            )),
+        }
+    }
+    Ok(JetMigrationState {
+        target: query.target.clone(),
+        target_identity: query.target_identity.clone(),
+        database_identity: query.database_identity.clone(),
+        source_identity: query.source_identity.clone(),
+        schema_identity: query.schema_identity.clone(),
+        current_version,
+        checksum: format!("migration-state:{hash:016x}"),
+        receipts,
+        drift,
+    })
+}
+
+fn db_migration_error(message: impl Into<String>) -> DBError {
+    DBError {
+        message: message.into(),
+    }
+}
+
+fn db_migration_insert_values(outcome: &JetMigrationOutcome, migration_key: &str) -> SQL {
+    let step_ids = outcome.step_ids.join("\n");
+    (
+        "INSERT INTO __jet_migrations (transition_key, migration_key, target, target_identity, database_identity, source_identity, schema_identity, tool_identity, operation, status, from_version, to_version, step_count, step_ids, checksum, lock_mode, risk, started_unix_ms, finished_unix_ms, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            .to_string(),
+        vec![
+            DBValue::Text(outcome.receipt_id.clone()),
+            DBValue::Text(migration_key.to_string()),
+            DBValue::Text(outcome.target.clone()),
+            DBValue::Text(outcome.target_identity.clone()),
+            DBValue::Text(outcome.database_identity.clone()),
+            DBValue::Text(outcome.source_identity.clone()),
+            DBValue::Text(outcome.schema_identity.clone()),
+            DBValue::Text(outcome.tool_identity.clone()),
+            DBValue::Text(outcome.operation.clone()),
+            DBValue::Text(outcome.status.clone()),
+            DBValue::Int(outcome.from_version as i64),
+            DBValue::Int(outcome.to_version as i64),
+            DBValue::Int(outcome.step_count as i64),
+            DBValue::Text(step_ids),
+            DBValue::Text(outcome.checksum.clone()),
+            DBValue::Text(outcome.lock.as_str().to_string()),
+            DBValue::Text(outcome.risk.clone()),
+            DBValue::Int(outcome.started_unix_ms as i64),
+            DBValue::Int(outcome.finished_unix_ms as i64),
+            outcome
+                .error
+                .as_ref()
+                .map(|value| DBValue::Text(value.clone()))
+                .unwrap_or(DBValue::Null),
+        ],
+    )
+}
+
+pub fn jet_db_migration_state<B: JetDBBackend>(
+    backend: &mut B,
+    query: &JetMigrationStateRequest,
+) -> Result<JetMigrationState, DBError> {
+    if query.target.is_empty()
+        || query.target_identity.is_empty()
+        || query.database_identity.is_empty()
+        || query.source_identity.is_empty()
+        || query.schema_identity.is_empty()
+    {
+        return Err(db_migration_error("migration state query has incomplete identity"));
+    }
+    // Schema bootstrap/upgrade writes the ledger, so acquire SQLite's
+    // authoritative write lock even for the read-facing state operation.
+    if !backend.begin_with_lock(JetMigrationLock::Exclusive) {
+        return Err(db_migration_error("could not begin migration state read"));
+    }
+    if let Err(error) = db_migration_ensure_schema(backend) {
+        backend.rollback();
+        return Err(error);
+    }
+    let rows = match db_migration_rows(backend) {
+        Ok(rows) => rows,
+        Err(error) => {
+            backend.rollback();
+            return Err(error);
+        }
+    };
+    let state = match db_migration_state_from_rows(query, &rows) {
+        Ok(state) => state,
+        Err(error) => {
+            backend.rollback();
+            return Err(error);
+        }
+    };
+    if backend.commit() {
+        Ok(state)
+    } else {
+        backend.rollback();
+        Err(db_migration_error("could not commit migration state read"))
+    }
+}
+
+pub fn jet_db_migration_request<B: JetDBBackend>(
+    backend: &mut B,
+    request: &JetMigrationRequest,
+) -> Result<JetMigrationOutcome, DBError> {
+    db_migration_validate_request(request)?;
+    if !backend.begin_with_lock(request.lock) {
+        return Err(db_migration_error(format!(
+            "could not begin migration `{}`",
+            request.migration_key
+        )));
+    }
+    if let Err(error) = db_migration_ensure_schema(backend) {
+        backend.rollback();
+        return Err(error);
+    }
+    let rows = match db_migration_rows(backend) {
+        Ok(rows) => rows,
+        Err(error) => {
+            backend.rollback();
+            return Err(error);
+        }
+    };
+    let query = JetMigrationStateRequest {
+        target: request.target.clone(),
+        target_identity: request.target_identity.clone(),
+        database_identity: request.database_identity.clone(),
+        source_identity: request.source_identity.clone(),
+        schema_identity: request.schema_identity.clone(),
+    };
+    let state = match db_migration_state_from_rows(&query, &rows) {
+        Ok(state) => state,
+        Err(error) => {
+            backend.rollback();
+            return Err(error);
+        }
+    };
+    if state.drift.len() > 0 {
+        backend.rollback();
+        return Err(db_migration_error(format!(
+            "migration target `{}` has unreconciled state: {}",
+            request.target,
+            state.drift.join("; ")
+        )));
+    }
+    let checksum = jet_db_migration_request_checksum(request);
+    let latest = rows
+        .iter()
+        .filter(|row| row.migration_key == request.migration_key && row.outcome.target == request.target)
+        .next_back();
+    if let Some(previous) = latest {
+        if previous.outcome.status == "applied"
+            && previous.outcome.operation == request.operation.as_str()
+        {
+            if previous.outcome.checksum == checksum {
+                if backend.commit() {
+                    return Ok(previous.outcome.clone());
+                }
+                backend.rollback();
+                return Err(db_migration_error("could not commit idempotent migration read"));
+            }
+            backend.rollback();
+            return Err(db_migration_error(format!(
+                "migration `{}` checksum changed",
+                request.migration_key
+            )));
+        }
+    }
+    if !matches!(request.operation, JetMigrationOperation::Direct)
+        && request.from_version != state.current_version
+    {
+        backend.rollback();
+        return Err(db_migration_error(format!(
+            "migration target `{}` is at version {}, not {}",
+            request.target, state.current_version, request.from_version
+        )));
+    }
+    let predecessor = latest.map(|row| row.transition_key.as_str());
+    let transition_key = db_migration_transition_key(request, &checksum, predecessor);
+    let started = db_migration_now_ms();
+    for step in &request.steps {
+        if let Err(error) = backend.execute(&step.sql, true) {
+            backend.rollback();
+            return Err(error);
+        }
+    }
+    let finished = db_migration_now_ms();
+    let outcome = JetMigrationOutcome {
+        receipt_id: transition_key,
+        operation: request.operation.as_str().to_string(),
+        status: "applied".to_string(),
+        target: request.target.clone(),
+        target_identity: request.target_identity.clone(),
+        source_identity: request.source_identity.clone(),
+        schema_identity: request.schema_identity.clone(),
+        database_identity: request.database_identity.clone(),
+        tool_identity: request.tool_identity.clone(),
+        from_version: request.from_version,
+        to_version: request.to_version,
+        step_count: request.steps.len(),
+        step_ids: request.steps.iter().map(db_migration_step_id).collect(),
+        checksum,
+        lock: request.lock,
+        risk: request.risk.clone(),
+        started_unix_ms: started,
+        finished_unix_ms: finished,
+        error: None,
+    };
+    if let Err(error) = backend.execute(
+        &db_migration_insert_values(&outcome, &request.migration_key),
+        true,
+    ) {
+        backend.rollback();
+        return Err(error);
+    }
+    if backend.commit() {
+        Ok(outcome)
+    } else {
+        backend.rollback();
+        Err(db_migration_error(format!(
+            "could not commit migration `{}`",
+            request.migration_key
+        )))
+    }
+}
+
+/// One transaction state machine for ordinary `db.transaction` calls.
 pub trait JetDBBackend {
     fn begin(&mut self) -> bool;
+    fn begin_with_lock(&mut self, _lock: JetMigrationLock) -> bool {
+        self.begin()
+    }
     fn commit(&mut self) -> bool;
     fn rollback(&mut self);
     fn execute(&mut self, sql: &SQL, allow_schema: bool) -> Result<i64, DBError>;
@@ -1078,230 +2435,7 @@ pub fn jet_db_migrate<B: JetDBBackend>(
     name: &String,
     steps: &Vec<SQL>,
 ) -> Result<i64, DBError> {
-    if !backend.begin() {
-        return Err(DBError {
-            message: format!("could not begin migration `{name}`"),
-        });
-    }
-    let create_sql: SQL = (
-        "CREATE TABLE IF NOT EXISTS __jet_migrations (name TEXT PRIMARY KEY, checksum TEXT NOT NULL)"
-            .to_string(),
-        Vec::new(),
-    );
-    if let Err(error) = backend.execute(&create_sql, true) {
-        backend.rollback();
-        return Err(error);
-    }
-    let checksum = jet_db_migration_checksum(steps);
-    let check_sql: SQL = (
-        "SELECT checksum FROM __jet_migrations WHERE name = ?".to_string(),
-        vec![DBValue::Text(name.clone())],
-    );
-    let existing = match backend.query(&check_sql, true) {
-        Ok(rows) => rows,
-        Err(error) => {
-            backend.rollback();
-            return Err(error);
-        }
-    };
-    if let Some(row) = existing.into_iter().next() {
-        let old = row
-            .get("checksum")
-            .and_then(|value| value.text().ok())
-            .unwrap_or_default();
-        if old == checksum {
-            if backend.commit() {
-                return Ok(0);
-            }
-            backend.rollback();
-            return Err(DBError {
-                message: format!("could not commit migration `{name}`"),
-            });
-        }
-        backend.rollback();
-        return Err(DBError {
-            message: format!("migration `{name}` checksum changed"),
-        });
-    }
-    let mut done = 0;
-    for sql in steps {
-        match backend.execute(sql, true) {
-            Ok(_) => done += 1,
-            Err(error) => {
-                backend.rollback();
-                return Err(error);
-            }
-        }
-    }
-    let insert_sql: SQL = (
-        "INSERT INTO __jet_migrations (name, checksum) VALUES (?, ?)".to_string(),
-        vec![
-            DBValue::Text(name.clone()),
-            DBValue::Text(checksum),
-        ],
-    );
-    if let Err(error) = backend.execute(&insert_sql, true) {
-        backend.rollback();
-        return Err(error);
-    }
-    if backend.commit() {
-        Ok(done)
-    } else {
-        backend.rollback();
-        Err(DBError {
-            message: format!("could not commit migration `{name}`"),
-        })
-    }
+    let request = JetMigrationRequest::direct(name.clone(), steps.clone());
+    jet_db_migration_request(backend, &request).map(|outcome| outcome.step_count as i64)
 }
 
-// ── D-DEP-WASM1=A / D-PLUGIN1=B (c81): core.plugin wire helpers ────────────
-// `Plugin.call*` cross the sandboxed Component Model boundary as
-// plain wire text — the always-compiled prelude here and the hidden FFI
-// bridge crate (`Prelude/Plugin.rs`, `jet_plugin_call`) are built
-// independently and share no Rust types, only this tagged-length text
-// (same house style as `jet_db_encode_params`/`jet_db_decode_query_result`
-// above; `pluginw_`-prefixed so nothing here collides with `db_*`).
-fn pluginw_encode_tagged(tag: char, payload: &str) -> String {
-    format!("{tag}{}:{payload}", payload.len())
-}
-
-fn pluginw_read_tagged(bytes: &[u8], pos: &mut usize) -> Option<(char, String)> {
-    let tag = *bytes.get(*pos)? as char;
-    *pos += 1;
-    let len_start = *pos;
-    while *bytes.get(*pos)? != b':' {
-        *pos += 1;
-    }
-    let len: usize = std::str::from_utf8(&bytes[len_start..*pos])
-        .ok()?
-        .parse()
-        .ok()?;
-    *pos += 1; // skip ':'
-    let payload = std::str::from_utf8(bytes.get(*pos..*pos + len)?)
-        .ok()?
-        .to_string();
-    *pos += len;
-    Some((tag, payload))
-}
-
-/// Encode a `[Float]` argument list for `plugin.call(name, args)`.
-pub fn jet_plugin_encode_args_float(args: &Vec<f64>) -> String {
-    let mut out = String::new();
-    out.push_str(&args.len().to_string());
-    out.push(':');
-    for a in args {
-        out.push_str(&pluginw_encode_tagged('F', &a.to_string()));
-    }
-    out
-}
-
-/// Encode an `[Int]` argument list for `plugin.call_int(name, args)`.
-pub fn jet_plugin_encode_args_int(args: &Vec<i64>) -> String {
-    let mut out = String::new();
-    out.push_str(&args.len().to_string());
-    out.push(':');
-    for a in args {
-        out.push_str(&pluginw_encode_tagged('I', &a.to_string()));
-    }
-    out
-}
-
-/// Encode a Bool argument list for plugin.call_bool(name, args).
-pub fn jet_plugin_encode_args_bool(args: &Vec<bool>) -> String {
-    let mut out = String::new();
-    out.push_str(&args.len().to_string());
-    out.push(':');
-    for a in args {
-        out.push_str(&pluginw_encode_tagged(
-            'B',
-            if *a { "true" } else { "false" },
-        ));
-    }
-    out
-}
-
-/// Encode a Text argument list for plugin.call_text(name, args).
-pub fn jet_plugin_encode_args_text(args: &Vec<String>) -> String {
-    let mut out = String::new();
-    out.push_str(&args.len().to_string());
-    out.push(':');
-    for a in args {
-        out.push_str(&pluginw_encode_tagged('T', a));
-    }
-    out
-}
-
-/// Decode the `"O:<handle>"`/`"E:<message>"` wire produced by
-/// `jet_plugin_load`. Returns the handle, or `0` (the invalid-handle
-/// sentinel, mirroring `jet_db_open`'s style) when the load failed — every
-/// later typed calls on handle `0` report "no plugin loaded for
-/// this handle" rather than ever panicking (I2).
-pub fn jet_plugin_load_handle(wire: &str) -> u64 {
-    wire.strip_prefix("O:")
-        .and_then(|n| n.parse::<u64>().ok())
-        .unwrap_or(0)
-}
-
-/// Decode the `"O:F<len>:<val>"`/`"E:<message>"` wire produced by
-/// `jet_plugin_call` for a `.call` (Float) invocation.
-pub fn jet_plugin_decode_result_float(wire: &str) -> Result<f64, String> {
-    let Some(body) = wire.strip_prefix("O:") else {
-        return Err(wire.strip_prefix("E:").unwrap_or(wire).to_string());
-    };
-    let bytes = body.as_bytes();
-    let mut pos = 0usize;
-    match pluginw_read_tagged(bytes, &mut pos) {
-        Some((_, payload)) => payload
-            .parse::<f64>()
-            .map_err(|_| "plugin returned a malformed Float result".to_string()),
-        None => Err("plugin returned a malformed result".to_string()),
-    }
-}
-
-/// Decode the `"O:I<len>:<val>"`/`"E:<message>"` wire produced by
-/// `jet_plugin_call` for a `.call_int` (Int) invocation.
-pub fn jet_plugin_decode_result_int(wire: &str) -> Result<i64, String> {
-    let Some(body) = wire.strip_prefix("O:") else {
-        return Err(wire.strip_prefix("E:").unwrap_or(wire).to_string());
-    };
-    let bytes = body.as_bytes();
-    let mut pos = 0usize;
-    match pluginw_read_tagged(bytes, &mut pos) {
-        Some((_, payload)) => payload
-            .parse::<i64>()
-            .map_err(|_| "plugin returned a malformed Int result".to_string()),
-        None => Err("plugin returned a malformed result".to_string()),
-    }
-}
-
-/// Decode a Bool result wire from jet_plugin_call.
-pub fn jet_plugin_decode_result_bool(wire: &str) -> Result<bool, String> {
-    let Some(body) = wire.strip_prefix("O:") else {
-        return Err(wire.strip_prefix("E:").unwrap_or(wire).to_string());
-    };
-    let bytes = body.as_bytes();
-    let mut pos = 0usize;
-    match pluginw_read_tagged(bytes, &mut pos) {
-        Some(('B', payload)) => match payload.as_str() {
-            "true" => Ok(true),
-            "false" => Ok(false),
-            _ => Err("plugin returned a malformed Bool result".to_string()),
-        },
-        Some(_) => Err("plugin returned a result with the wrong type".to_string()),
-        None => Err("plugin returned a malformed result".to_string()),
-    }
-}
-
-/// Decode a Text result wire from jet_plugin_call.
-pub fn jet_plugin_decode_result_text(wire: &str) -> Result<String, String> {
-    let Some(body) = wire.strip_prefix("O:") else {
-        return Err(wire.strip_prefix("E:").unwrap_or(wire).to_string());
-    };
-    let bytes = body.as_bytes();
-    let mut pos = 0usize;
-    match pluginw_read_tagged(bytes, &mut pos) {
-        Some(('T', payload)) => Ok(payload),
-        Some(_) => Err("plugin returned a result with the wrong type".to_string()),
-        None => Err("plugin returned a malformed result".to_string()),
-    }
-}

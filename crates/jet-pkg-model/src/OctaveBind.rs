@@ -120,17 +120,33 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
     identity.extend_from_slice(octave.to_string_lossy().as_bytes());
     identity.push(0);
     identity.extend_from_slice(worker_source.as_bytes());
+    let mut provenance = format!(
+        "schema=jet-octave-bind-v1\nsha256={}\noctave={}\nscript={}\nworker={}\ntransport=json\norder=column-major\nshape=rank-2\nmax_sessions=32\n",
+        crate::SHA256::sha256_hex(&identity),
+        octave.display(),
+        script.display(),
+        worker.display()
+    );
+    crate::ForeignBridge::append_boundary_for_artifact(
+        &mut provenance,
+        *crate::AST::binder_descriptor(crate::AST::ForeignLanguage::Octave)
+            .ok_or_else(|| BindError::Source("Octave binder descriptor is not registered".into()))?,
+        lib,
+        &script,
+        &archive,
+        format!(
+            "{tool_name}={};cc={};ar={}",
+            octave.display(),
+            crate::ForeignBridge::tool_identity("cc"),
+            crate::ForeignBridge::tool_identity("ar")
+        ),
+    )
+    .map_err(BindError::IO)?;
     let result = BindResult {
         source: render_jet(lib, &functions),
         bound: functions,
         archive,
-        provenance: format!(
-            "schema=jet-octave-bind-v1\nsha256={}\noctave={}\nscript={}\nworker={}\ntransport=json\norder=column-major\nshape=rank-2\nmax_sessions=32\n",
-            crate::SHA256::sha256_hex(&identity),
-            octave.display(),
-            script.display(),
-            worker.display()
-        ),
+        provenance,
     };
     let _ = std::fs::remove_dir_all(&build);
     Ok(result)

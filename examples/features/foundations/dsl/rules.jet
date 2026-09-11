@@ -1,0 +1,111 @@
+pub enum Condition {
+    AtLeast(Int)
+    Equals(Int)
+}
+
+pub enum Action {
+    Add(Int)
+    Set(Int)
+}
+
+pub struct Rule {
+    name: String,
+    fact: String,
+    condition: Condition,
+    action: Action,
+}
+
+fn parse_rule(source: String) ?Rule -> {
+    line :: source.trim()
+    if line == "" -> return None
+
+    header :: line.split_once(":") ?? return None
+    name :: header.before.trim()
+    if name == "" -> return None
+
+    command :: header.after.trim().split_once("->") ?? return None
+    condition_words :: command.before.trim().split(" ").to_list()
+    action_words :: command.after.trim().split(" ").to_list()
+    if condition_words.len() != 3 -> return None
+    if action_words.len() != 2 -> return None
+
+    fact :: condition_words[0].trim()
+    if fact == "" -> return None
+    threshold :: Int.parse(condition_words[2].trim()) ?? return None
+    condition :: if condition_words[1].trim() == ">=" -> {
+        Condition.AtLeast(threshold)
+    } else if condition_words[1].trim() == "==" -> {
+        Condition.Equals(threshold)
+    } else -> {
+        return None
+    }
+
+    amount :: Int.parse(action_words[1].trim()) ?? return None
+    action :: if action_words[0].trim() == "add" -> {
+        Action.Add(amount)
+    } else if action_words[0].trim() == "set" -> {
+        Action.Set(amount)
+    } else -> {
+        return None
+    }
+
+    return Val(Rule{
+        name: name,
+        fact: fact,
+        condition: condition,
+        action: action,
+    })
+}
+
+pub fn parse(source: String) ?[Rule] -> {
+    rules := [Rule]{}
+    loop item in source.split(";") {
+        line :: item.trim()
+        if line != "" {
+            rule :: parse_rule(line) ?? return None
+            rules.push(rule)
+        }
+    }
+    if rules.len() == 0 -> return None
+    return Val(rules)
+}
+
+fn matches(condition: Condition, value: Int) Bool -> {
+    if condition == {
+        .AtLeast(limit) -> return value >= limit
+        .Equals(expected) -> return value == expected
+    }
+    return false
+}
+
+fn apply(facts: &[String:Int], fact: String, action: Action) String -> {
+    current :: facts.get(~fact) ?? 0
+    if action == {
+        .Add(delta) -> {
+            next :: current + delta
+            event :: "{fact}={next}"
+            facts.add(fact, next).drop("rule fact update")
+            return event
+        }
+        .Set(next) -> {
+            event :: "{fact}={next}"
+            facts.add(fact, next).drop("rule fact update")
+            return event
+        }
+    }
+    return ""
+}
+
+pub fn fire(facts: &[String:Int], rules: [Rule]) [String] -> {
+    events := [String]{}
+    loop rule in rules {
+        value :: facts.get(~rule.fact) ?? 0
+        if matches(~rule.condition, value) {
+            event :: apply(&facts, ~rule.fact, ~rule.action)
+            events.push("{rule.name}:{event}")
+        } else {
+            events.push("{rule.name}:skip")
+        }
+    }
+    return events
+}

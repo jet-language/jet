@@ -1,0 +1,93 @@
+{
+  "schema": "jet.gauntlet.performance-surface-evidence.v1",
+  "version": 1,
+  "generated_command": "JET_TEST_SCRATCH_DIR=$HOME/.cache/jet-luna/perf-surface-pair TMPDIR=$HOME/.cache/jet-luna/perf-surface-pair JET_BUILD_LINE=\"Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 09s\" scripts/agent/jet-env node ~/.cache/jet-luna/perf-surface-pair/measure-performance-surface.mjs",
+  "generated_at": "2026-09-06T16:18:17.427Z",
+  "target": "jet run --interpret",
+  "artifact": "target/debug/jet",
+  "artifact_sha256": "e74f7807876e1e6c43dba29caa7fd3444835acb690c75b7574977ef3addd7c64",
+  "artifact_md5": "ae906420fbf91ac35f21a0219d457fb2",
+  "build_line": "Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 09s",
+  "artifact_mtime_ms": 1788711311412.5977,
+  "provenance_status": "inconclusive across four unrelated clean binaries; this workload is noise-dominated and does not prove a surface benefit",
+  "historical_receipts": [
+    "gauntlet/performance-surface-evidence-20260906T154128Z.json",
+    "gauntlet/performance-surface-evidence-20260906T155749Z.json",
+    "gauntlet/performance-surface-evidence-20260906T160409Z.json"
+  ],
+  "host": {
+    "hostname": "halcyon",
+    "platform": "linux",
+    "release": "7.0.11-cachyos",
+    "arch": "x64",
+    "cpu_count": 32
+  },
+  "input": {
+    "iterations": 100000,
+    "range": "0..<100000",
+    "expected_sum": 4999950000
+  },
+  "setup": "fresh interpreter process and fresh main.jet per warmup/trial; no generated artifact",
+  "warmups": 3,
+  "trials": 9,
+  "metric": "wall_time_ms",
+  "output_oracle": "stdout must exactly equal expected_output; both spellings run the same integer reduction",
+  "pairs": [
+    {
+      "id": "compound_assign_vs_binary_assign",
+      "canonical": "compound assignment",
+      "alternate": "binary expression followed by assignment",
+      "workload": "100000-element integer reduction with identical final stdout",
+      "artifact": "target/debug/jet",
+      "artifact_sha256": "e74f7807876e1e6c43dba29caa7fd3444835acb690c75b7574977ef3addd7c64",
+      "artifact_md5": "ae906420fbf91ac35f21a0219d457fb2",
+      "build_line": "Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 09s",
+      "surface_program": "gauntlet:performance-surface:compound_assign_vs_binary_assign:surface",
+      "plain_program": "gauntlet:performance-surface:compound_assign_vs_binary_assign:plain",
+      "surface_source": "// Real paired workload: compound_assign_vs_binary_assign surface spelling\nfn run() {\n    total := 0\n    loop i in 0..<100000 {\n        total += i\n    }\n    print(\"performance-surface:compound_assign_vs_binary_assign:{total}\")\n}",
+      "plain_source": "// Real paired workload: compound_assign_vs_binary_assign plain spelling\nfn run() {\n    total := 0\n    loop i in 0..<100000 {\n        total = total + i\n    }\n    print(\"performance-surface:compound_assign_vs_binary_assign:{total}\")\n}",
+      "expected_output": "performance-surface:compound_assign_vs_binary_assign:4999950000",
+      "timing_status": "measured",
+      "verdict": "inconclusive",
+      "verdict_reason": "Measurements across four unrelated clean binaries straddle 1.00; this workload is noise-dominated and does not prove a surface benefit.",
+      "surface_output_matches": true,
+      "plain_output_matches": true,
+      "surface_warmup_ms": [
+        2645.745,
+        2321.466,
+        2249.27
+      ],
+      "plain_warmup_ms": [
+        2234.972,
+        2229.057,
+        2263.473
+      ],
+      "surface_trials_ms": [
+        2269.098,
+        2241.565,
+        2241.406,
+        2251.755,
+        2251.736,
+        2275.78,
+        2238.378,
+        2251.638,
+        2271.404
+      ],
+      "plain_trials_ms": [
+        2260.711,
+        2254.306,
+        2241.276,
+        2232.34,
+        2218.917,
+        2219.969,
+        2203.503,
+        2232.175,
+        2246.034
+      ],
+      "surface_wall_time_ms": 2251.736,
+      "plain_wall_time_ms": 2232.34,
+      "ratio": 1.0086886406192603,
+      "timing_references": []
+    }
+  ]
+}

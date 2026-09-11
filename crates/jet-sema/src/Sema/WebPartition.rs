@@ -3,7 +3,7 @@
 use crate::Diagnostics::Diagnostic;
 use crate::Generics::{DECODE, ENCODE};
 use crate::Syntax::{self, WebBucket, WebPartitionMarker};
-use crate::AST::{EnumDef, Item, ProgramBundle, StructDef, Type, VariantPayload};
+use crate::AST::{EnumDef, Func, Item, ProgramBundle, StructDef, Type, VariantPayload};
 use jet_foundation::WebPartition::{partition_effect_key, partition_key};
 use std::collections::HashMap;
 
@@ -136,8 +136,10 @@ impl ABITypeIndex {
     }
 }
 
-/// Infer partition bucket for one function.
-fn assign_bucket(
+/// Apply the checked sema policy to one callable. All backends reuse this
+/// precedence: explicit marker, Browser effect, inherited ceiling, Stream
+/// producer, then the Wasm default.
+pub fn checked_web_bucket(
     marker: Option<WebPartitionMarker>,
     ceiling: Option<WebBucket>,
     effects: &EffectSet,
@@ -166,10 +168,35 @@ fn is_stream_type(ty: &Type) -> bool {
     matches!(ty, Type::Apply { name, args } if name == Syntax::TYPE_STREAM && args.len() == 1)
 }
 
+fn funcs_have_web_markers(functions: &[Func]) -> bool {
+    functions.iter().any(|function| function.web_marker.is_some())
+}
+
 fn items_have_web_markers(items: &[Item]) -> bool {
     for item in items {
         match item {
             Item::Func(f) if f.web_marker.is_some() => return true,
+            Item::Struct(s)
+                if funcs_have_web_markers(&s.methods)
+                    || s
+                        .trait_impls
+                        .iter()
+                        .any(|implementation| funcs_have_web_markers(&implementation.methods)) =>
+            {
+                return true;
+            }
+            Item::Enum(e)
+                if funcs_have_web_markers(&e.methods)
+                    || e
+                        .trait_impls
+                        .iter()
+                        .any(|implementation| funcs_have_web_markers(&implementation.methods)) =>
+            {
+                return true;
+            }
+            Item::Impl(implementation) if funcs_have_web_markers(&implementation.methods) => {
+                return true;
+            }
             Item::CodeModule(cm) => {
                 if cm.web_target.is_some() {
                     return true;
@@ -201,6 +228,64 @@ fn web_partition_active(bundle: &ProgramBundle) -> bool {
     }
     false
 }
+fn push_func_meta(
+    function: &Func,
+    owner_type: Option<&str>,
+    file_ceiling: Option<WebBucket>,
+    module_ceiling: Option<WebBucket>,
+    module_prefix: Option<&str>,
+    file_alias: &str,
+    is_entry: bool,
+    out: &mut Vec<FuncWebMeta>,
+) {
+    let ceiling = module_ceiling.or(file_ceiling);
+    let local_key = match owner_type {
+        Some(owner) => effect_key(Some(owner), &function.name),
+        None => match module_prefix {
+            Some(module) => inline_effect_key(module, &function.name),
+            None => effect_key(None, &function.name),
+        },
+    };
+    let function_name = owner_type
+        .map(|owner| format!("{owner}::{}", function.name))
+        .unwrap_or_else(|| function.name.clone());
+    let file_prefix = (!is_entry && module_prefix.is_none()).then_some(file_alias);
+    let key = partition_key(file_prefix, module_prefix, &function_name);
+    out.push(FuncWebMeta {
+        key,
+        effect_key: partition_effect_key(file_alias, &local_key),
+        name: function_name,
+        name_span: function.name_span,
+        marker: function.web_marker,
+        ceiling,
+        params: function.params.iter().map(|p| p.ty.clone()).collect(),
+        return_type: function.return_type.clone(),
+    });
+}
+
+fn collect_method_meta(
+    methods: &[Func],
+    owner_type: &str,
+    file_ceiling: Option<WebBucket>,
+    module_ceiling: Option<WebBucket>,
+    module_prefix: Option<&str>,
+    file_alias: &str,
+    is_entry: bool,
+    out: &mut Vec<FuncWebMeta>,
+) {
+    for method in methods {
+        push_func_meta(
+            method,
+            Some(owner_type),
+            file_ceiling,
+            module_ceiling,
+            module_prefix,
+            file_alias,
+            is_entry,
+            out,
+        );
+    }
+}
 
 fn collect_funcs(
     items: &[Item],
@@ -214,24 +299,74 @@ fn collect_funcs(
     let ceiling = module_ceiling.or(file_ceiling);
     for item in items {
         match item {
-            Item::Func(f) => {
-                let local_key = match module_prefix {
-                    Some(m) => inline_effect_key(m, &f.name),
-                    None => effect_key(None, &f.name),
-                };
-                let file_prefix = (!is_entry && module_prefix.is_none()).then_some(file_alias);
-                let key = partition_key(file_prefix, module_prefix, &f.name);
-                out.push(FuncWebMeta {
-                    key,
-                    effect_key: partition_effect_key(file_alias, &local_key),
-                    name: f.name.clone(),
-                    name_span: f.name_span,
-                    marker: f.web_marker,
-                    ceiling,
-                    params: f.params.iter().map(|p| p.ty.clone()).collect(),
-                    return_type: f.return_type.clone(),
-                });
+            Item::Func(function) => push_func_meta(
+                function,
+                None,
+                file_ceiling,
+                module_ceiling,
+                module_prefix,
+                file_alias,
+                is_entry,
+                out,
+            ),
+            Item::Struct(structure) => {
+                collect_method_meta(
+                    &structure.methods,
+                    &structure.name,
+                    file_ceiling,
+                    module_ceiling,
+                    module_prefix,
+                    file_alias,
+                    is_entry,
+                    out,
+                );
+                for implementation in &structure.trait_impls {
+                    collect_method_meta(
+                        &implementation.methods,
+                        &structure.name,
+                        file_ceiling,
+                        module_ceiling,
+                        module_prefix,
+                        file_alias,
+                        is_entry,
+                        out,
+                    );
+                }
             }
+            Item::Enum(enumeration) => {
+                collect_method_meta(
+                    &enumeration.methods,
+                    &enumeration.name,
+                    file_ceiling,
+                    module_ceiling,
+                    module_prefix,
+                    file_alias,
+                    is_entry,
+                    out,
+                );
+                for implementation in &enumeration.trait_impls {
+                    collect_method_meta(
+                        &implementation.methods,
+                        &enumeration.name,
+                        file_ceiling,
+                        module_ceiling,
+                        module_prefix,
+                        file_alias,
+                        is_entry,
+                        out,
+                    );
+                }
+            }
+            Item::Impl(implementation) => collect_method_meta(
+                &implementation.methods,
+                &implementation.type_name,
+                file_ceiling,
+                module_ceiling,
+                module_prefix,
+                file_alias,
+                is_entry,
+                out,
+            ),
             Item::CodeModule(cm) => {
                 let mod_ceiling = cm.web_target.or(ceiling);
                 if let Some(body) = &cm.body {
@@ -369,6 +504,48 @@ fn check_target_browser(
     }
 }
 
+/// The browser artifact has no argv-to-Jet adapter for a parameterized
+/// `run`. Reject that checked CLI shape in sema before codegen instead of
+/// allowing a CLI-only entry to reach Web emission.
+fn check_web_entry_adapter(bundle: &ProgramBundle, diags: &mut Vec<Diagnostic>) {
+    if !bundle.web_partition_enforced {
+        return;
+    }
+    let Some(entry) = bundle.modules.get(bundle.entry) else {
+        return;
+    };
+    let has_selected_executable = entry.items.iter().any(|item| {
+        matches!(
+            item,
+            Item::Const(value)
+                if value.resolved_output.as_ref().is_some_and(|output| {
+                    output.selected
+                        && output.kind == crate::AST::OutputKind::Executable
+                })
+        )
+    });
+    if has_selected_executable {
+        return;
+    }
+    if jet_foundation::CLISchema::entry_schema_for_bundle(bundle).is_none() {
+        return;
+    }
+    let Some(run) = entry.items.iter().find_map(|item| match item {
+        Item::Func(function) if function.name == "run" => Some(function),
+        _ => None,
+    }) else {
+        return;
+    };
+    if run.params.is_empty() {
+        return;
+    }
+    diags.push(Diagnostic::from_row(
+        "E-WEB-TIR-UNSUPPORTED",
+        &[("fn", "run (typed CLI entry adapter)")],
+        Some(run.name_span),
+    ));
+}
+
 /// Walk the bundle, assign buckets, and emit partition / ABI diagnostics.
 pub fn check_web_partition(
     bundle: &mut ProgramBundle,
@@ -391,7 +568,7 @@ pub fn check_web_partition(
     let mut partitions: HashMap<String, WebBucket> = HashMap::new();
     for f in &metas {
         let effects = solved.get(&f.effect_key).cloned().unwrap_or_default();
-        let bucket = assign_bucket(f.marker, f.ceiling, &effects, f.return_type.as_ref());
+        let bucket = checked_web_bucket(f.marker, f.ceiling, &effects, f.return_type.as_ref());
         partitions.insert(f.key.clone(), bucket);
     }
 
@@ -464,6 +641,7 @@ pub fn check_web_partition(
 
     let abi_idx = ABITypeIndex::from_bundle(bundle);
     let mut diags = Vec::new();
+    check_web_entry_adapter(bundle, &mut diags);
     for f in &metas {
         let effects = solved.get(&f.effect_key).cloned().unwrap_or_default();
         let bucket = partitions.get(&f.key).copied().unwrap_or(WebBucket::Wasm);

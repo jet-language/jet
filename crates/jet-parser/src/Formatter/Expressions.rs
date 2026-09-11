@@ -774,6 +774,10 @@ impl<'a> Fmt<'a> {
     }
 
     pub(super) fn fmt_type(&mut self, ty: &Type) {
+        self.fmt_type_at(ty, None);
+    }
+
+    pub(super) fn fmt_type_at(&mut self, ty: &Type, source: Option<crate::Diagnostics::Span>) {
         match ty {
             Type::Int => self.write(Syntax::TYPE_INT),
             Type::Float => self.write(Syntax::TYPE_FLOAT),
@@ -836,39 +840,56 @@ impl<'a> Fmt<'a> {
                 // labels and the `/` and `*` zone separators — so a function
                 // type round-trips with its identity intact.
                 let contract = param_contract.as_deref().unwrap_or(&[]);
-                let mut written = 0usize;
+                enum Entry<'a> {
+                    Param(usize, &'a Type),
+                    Zone(&'static str),
+                }
+                let mut entries = Vec::with_capacity(params.len() + 2);
                 let mut star_done = false;
-                for (i, p) in params.iter().enumerate() {
-                    let zone = contract.get(i).map(|(_, zone)| *zone);
+                for (index, param) in params.iter().enumerate() {
+                    let zone = contract.get(index).map(|(_, zone)| *zone);
                     if zone == Some(crate::AST::ParamZone::LabelOnly) && !star_done {
                         star_done = true;
-                        if written > 0 {
-                            self.write(", ");
-                        }
-                        self.write(Syntax::PARAM_ZONE_LABEL_ONLY);
-                        written += 1;
+                        entries.push(Entry::Zone(Syntax::PARAM_ZONE_LABEL_ONLY));
                     }
-                    if written > 0 {
-                        self.write(", ");
-                    }
-                    if let Some((label, _)) = contract.get(i) {
-                        if !label.is_empty() {
-                            self.write(label);
-                            self.write(": ");
-                        }
-                    }
-                    self.fmt_type(p);
-                    written += 1;
-                    let last_positional_only = zone == Some(crate::AST::ParamZone::PositionalOnly)
-                        && contract
-                            .get(i + 1)
-                            .is_none_or(|(_, next)| *next != crate::AST::ParamZone::PositionalOnly);
+                    entries.push(Entry::Param(index, param));
+                    let last_positional_only =
+                        zone == Some(crate::AST::ParamZone::PositionalOnly)
+                            && contract.get(index + 1).is_none_or(|(_, next)| {
+                                *next != crate::AST::ParamZone::PositionalOnly
+                            });
                     if last_positional_only {
-                        self.write(", ");
-                        self.write(Syntax::PARAM_ZONE_POSITIONAL_ONLY);
-                        written += 1;
+                        entries.push(Entry::Zone(Syntax::PARAM_ZONE_POSITIONAL_ONLY));
                     }
                 }
+                let param_source = source.and_then(|span| {
+                    self.source_list_span_after(span.start, super::SourceDelimiter::Paren)
+                });
+                let item_spans = param_source.map(|source| self.source_list_item_spans(source));
+                let fallback_span = source.unwrap_or_else(|| crate::Diagnostics::Span::new(0, 0));
+                let indexed = entries.iter().enumerate().collect::<Vec<_>>();
+                self.fmt_comma_items(
+                    &indexed,
+                    param_source,
+                    |(entry_index, _)| {
+                        item_spans
+                            .as_ref()
+                            .and_then(|spans| spans.get(*entry_index).copied())
+                            .unwrap_or(fallback_span)
+                    },
+                    |f, (_, entry)| match entry {
+                        Entry::Param(index, ty) => {
+                            if let Some((label, _)) = contract.get(*index) {
+                                if !label.is_empty() {
+                                    f.write(label);
+                                    f.write(": ");
+                                }
+                            }
+                            f.fmt_type(ty);
+                        }
+                        Entry::Zone(zone) => f.write(zone),
+                    },
+                );
                 self.write(")");
                 if let Some(r) = ret {
                     let unit_fallible = Self::is_unit_fallible_type(r);
@@ -939,12 +960,14 @@ impl<'a> Fmt<'a> {
                 if let Some(bound) = effect_bound {
                     self.write(" ");
                     self.write(Syntax::EFFECT_ARROW_OPEN);
-                    for (i, (name, _)) in bound.iter().enumerate() {
-                        if i > 0 {
-                            self.write(", ");
-                        }
-                        self.write(name);
-                    }
+                    self.fmt_comma_items(
+                        bound,
+                        source.and_then(|span| {
+                            self.source_effect_row_span_after(span.start)
+                        }),
+                        |(_, span)| *span,
+                        |f, (name, _)| f.write(name),
+                    );
                     self.write(Syntax::EFFECT_ARROW_CLOSE);
                 }
             }
@@ -959,12 +982,21 @@ impl<'a> Fmt<'a> {
             Type::Apply { name, args } => {
                 self.write(name);
                 self.write("<");
-                for (i, a) in args.iter().enumerate() {
-                    if i > 0 {
-                        self.write(", ");
-                    }
-                    self.fmt_type(a);
-                }
+                let list_source =
+                    source.and_then(|span| self.source_list_span_after(span.start, super::SourceDelimiter::Angle));
+                let item_spans = list_source.map(|source| self.source_list_item_spans(source));
+                let indexed = args.iter().enumerate().collect::<Vec<_>>();
+                let fallback_span =
+                    source.unwrap_or_else(|| crate::Diagnostics::Span::new(0, 0));
+                self.fmt_comma_items(
+                    &indexed,
+                    list_source,
+                    |(index, _)| item_spans
+                        .as_ref()
+                        .and_then(|spans| spans.get(*index).copied())
+                        .unwrap_or(fallback_span),
+                    |f, (_, arg)| f.fmt_type(arg),
+                );
                 self.write(">");
             }
             // D-QUANTITY-TYPE1=A: `Type::Quantity` is sema-synthesized (card
@@ -991,14 +1023,25 @@ impl<'a> Fmt<'a> {
             }
             Type::Tuple(fields) => {
                 self.write("(");
-                for (i, (name, ty)) in fields.iter().enumerate() {
-                    if i > 0 {
-                        self.write(", ");
-                    }
-                    self.write(name);
-                    self.write(": ");
-                    self.fmt_type(ty);
-                }
+                let list_source =
+                    source.and_then(|span| self.source_list_span_after(span.start, super::SourceDelimiter::Paren));
+                let item_spans = list_source.map(|source| self.source_list_item_spans(source));
+                let indexed = fields.iter().enumerate().collect::<Vec<_>>();
+                let fallback_span =
+                    source.unwrap_or_else(|| crate::Diagnostics::Span::new(0, 0));
+                self.fmt_comma_items(
+                    &indexed,
+                    list_source,
+                    |(index, _)| item_spans
+                        .as_ref()
+                        .and_then(|spans| spans.get(*index).copied())
+                        .unwrap_or(fallback_span),
+                    |f, (_, (name, ty))| {
+                        f.write(name);
+                        f.write(": ");
+                        f.fmt_type(ty);
+                    },
+                );
                 self.write(")");
             }
             Type::FixedList { elem, len } => {
@@ -1106,6 +1149,7 @@ impl<'a> Fmt<'a> {
         type_name: &str,
         type_args: &[Type],
         import_ns: Option<&str>,
+        source_span: Option<crate::Diagnostics::Span>,
     ) {
         if let Some(ns) = import_ns {
             self.write(ns);
@@ -1114,12 +1158,22 @@ impl<'a> Fmt<'a> {
         self.write(type_name);
         if !type_args.is_empty() {
             self.write("<");
-            for (i, arg) in type_args.iter().enumerate() {
-                if i > 0 {
-                    self.write(", ");
-                }
-                self.fmt_type(arg);
-            }
+            let source = source_span.and_then(|span| {
+                self.source_list_span_after(span.start, super::SourceDelimiter::Angle)
+            });
+            let item_spans = source.map(|source| self.source_list_item_spans(source));
+            let indexed = type_args.iter().enumerate().collect::<Vec<_>>();
+            let fallback_span =
+                source_span.unwrap_or_else(|| crate::Diagnostics::Span::new(0, 0));
+            self.fmt_comma_items(
+                &indexed,
+                source,
+                |(index, _)| item_spans
+                    .as_ref()
+                    .and_then(|spans| spans.get(*index).copied())
+                    .unwrap_or(fallback_span),
+                |f, (_, arg)| f.fmt_type(arg),
+            );
             self.write(">");
         }
     }
@@ -1152,7 +1206,7 @@ impl<'a> Fmt<'a> {
                 self.emit_leading(expr.span().start);
             }
             self.fmt_expr(expr, Prec::OrFallback);
-            if multiline && i + 1 < fields.len() {
+            if multiline {
                 self.write(",");
             }
             if multiline {
@@ -1208,8 +1262,11 @@ impl<'a> Fmt<'a> {
                 }
             }
             Expr::Str(parts, span) => {
-                // S70 (D-SG5): re-derive the triple-quoted shape from the source.
-                if self.src.get(span.start..span.start + 3) == Some("\"\"\"") {
+                // D-RAWSTR1=A: source spans identify raw ordinary strings; the
+                // AST stays the shared `Expr::Str` node.
+                if self.src.get(span.start..span.end).is_some_and(|s| s.starts_with('`')) {
+                    self.fmt_str_raw(parts);
+                } else if self.src.get(span.start..span.start + 3) == Some("\"\"\"") {
                     self.fmt_str_multiline(parts);
                 } else {
                     self.fmt_str(parts);
@@ -1254,7 +1311,12 @@ impl<'a> Fmt<'a> {
                 let repeated_head = Self::repeated_struct_list_head(elems);
                 self.write("[");
                 if let Some((type_name, type_args, import_ns)) = repeated_head {
-                    self.fmt_named_struct_head(type_name, type_args, import_ns);
+                    self.fmt_named_struct_head(
+                        type_name,
+                        type_args,
+                        import_ns,
+                        Some(elems[0].span()),
+                    );
                     self.write("]{");
                 }
                 if self.source_span_multiline(*span) {
@@ -1275,9 +1337,7 @@ impl<'a> Fmt<'a> {
                             } else {
                                 f.fmt_expr(e, Prec::OrFallback);
                             }
-                            if i + 1 < elems.len() {
-                                f.write(",");
-                            }
+                            f.write(",");
                             f.emit_trailing(e.span().end);
                         }
                         f.emit_leading(span.end);
@@ -1303,15 +1363,28 @@ impl<'a> Fmt<'a> {
                 self.write(if repeated_head.is_some() { "}" } else { "]" });
             }
             // D-SPREAD1=A: re-emit member spread sugar.
-            Expr::MemberSpread { base, members, .. } => {
+            Expr::MemberSpread {
+                base,
+                members,
+                span,
+                ..
+            } => {
                 self.fmt_expr(base, Prec::Postfix);
                 self.write(".[");
-                for (i, (name, _)) in members.iter().enumerate() {
-                    if i > 0 {
-                        self.write(", ");
-                    }
-                    self.write(name);
-                }
+                let source = self
+                    .source_list_span_after(base.span().end, super::SourceDelimiter::Bracket)
+                    .filter(|(list_span, _)| list_span.end <= span.end);
+                let indexed = members.iter().enumerate().collect::<Vec<_>>();
+                let fallback_span = *span;
+                self.fmt_comma_items(
+                    &indexed,
+                    source,
+                    |(index, _)| indexed
+                        .get(*index)
+                        .and_then(|(_, (_, member_span))| Some(*member_span))
+                        .unwrap_or(fallback_span),
+                    |f, (_, (name, _))| f.write(name),
+                );
                 self.write("]");
             }
             Expr::TupleLit(fields, span, _) => {
@@ -1338,12 +1411,9 @@ impl<'a> Fmt<'a> {
                             f.write(": ");
                             f.emit_leading(e.span().start);
                             f.fmt_expr(e, Prec::OrFallback);
-                            if i + 1 < fields.len() {
-                                f.write(",");
-                            }
+                            f.write(",");
                             f.emit_trailing(e.span().end);
                         }
-                        f.emit_leading(span.end);
                     });
                     if !self.at_line_start {
                         self.newline();
@@ -1377,9 +1447,7 @@ impl<'a> Fmt<'a> {
                             f.write(": ");
                             f.emit_leading(v.span().start);
                             f.fmt_expr(v, Prec::OrFallback);
-                            if i + 1 < pairs.len() {
-                                f.write(",");
-                            }
+                            f.write(",");
                             f.emit_trailing(v.span().end);
                         }
                         f.emit_leading(span.end);
@@ -1615,7 +1683,7 @@ impl<'a> Fmt<'a> {
                     return;
                 }
                 self.fmt_expr(receiver, Prec::Postfix);
-                self.fmt_call_type_args(owner_type_args);
+                self.fmt_call_type_args(owner_type_args, receiver.span().end);
                 // S69 (D-SG3): keep an author-placed break before `.method(...)`.
                 if self.chain_break_between(receiver.span().end, method_span.start) {
                     // The receiver's own trailing comment (e.g. `.step()  // note`)
@@ -1625,14 +1693,14 @@ impl<'a> Fmt<'a> {
                         f.newline();
                         f.write(".");
                         f.write_postfix_member(method);
-                        f.fmt_call_type_args(type_args);
-                        f.fmt_method_args(method, args);
+                        f.fmt_call_type_args(type_args, method_span.end);
+                        f.fmt_method_args(method, args, Some(method_span.end));
                     });
                 } else {
                     self.write(".");
                     self.write_postfix_member(method);
-                    self.fmt_call_type_args(type_args);
-                    self.fmt_method_args(method, args);
+                    self.fmt_call_type_args(type_args, method_span.end);
+                    self.fmt_method_args(method, args, Some(method_span.end));
                 }
             }
             Expr::StructLit {
@@ -1649,20 +1717,47 @@ impl<'a> Fmt<'a> {
                 if type_name == Syntax::TYPE_ERR {
                     self.write(Syntax::LIT_ERR);
                     self.write("(");
+                    let source =
+                        self.source_list_span_after(span.start, super::SourceDelimiter::Paren);
+                    let multiline =
+                        source.is_some_and(|(list_span, _)| self.source_span_multiline(list_span));
+                    if multiline {
+                        self.newline();
+                    }
+                    let mut first = true;
                     if let Some((_, _, message)) =
                         fields.iter().find(|(name, ..)| name == "message")
                     {
                         self.fmt_expr(message, Prec::OrFallback);
+                        if multiline {
+                            self.write(",");
+                            self.emit_trailing(message.span().end);
+                        }
+                        first = false;
                     }
                     for label in ["code", "cause"] {
                         if let Some((_, _, Expr::Present(value, _))) =
                             fields.iter().find(|(name, ..)| name == label)
                         {
-                            self.write(", ");
+                            if !first {
+                                if multiline {
+                                    self.newline();
+                                } else {
+                                    self.write(", ");
+                                }
+                            }
                             self.write(label);
                             self.write(": ");
                             self.fmt_expr(value, Prec::OrFallback);
+                            if multiline {
+                                self.write(",");
+                                self.emit_trailing(value.span().end);
+                            }
+                            first = false;
                         }
+                    }
+                    if multiline && !self.at_line_start {
+                        self.newline();
                     }
                     self.write(")");
                     return;
@@ -1678,7 +1773,12 @@ impl<'a> Fmt<'a> {
                             import_ns.as_deref(),
                         ));
                 if !inferred {
-                    self.fmt_named_struct_head(type_name, type_args, import_ns.as_deref());
+                    self.fmt_named_struct_head(
+                        type_name,
+                        type_args,
+                        import_ns.as_deref(),
+                        Some(*span),
+                    );
                 }
                 self.fmt_struct_lit_body(fields, *span);
             }
@@ -1692,13 +1792,6 @@ impl<'a> Fmt<'a> {
                 if multiline {
                     self.newline();
                 }
-                let len = match body {
-                    crate::AST::TypedLitBody::Fields(fields) => fields.len(),
-                    crate::AST::TypedLitBody::Elements(elems) => elems.len(),
-                    crate::AST::TypedLitBody::Entries(entries) => entries.len(),
-                    crate::AST::TypedLitBody::ByteText(_) => 1,
-                    _ => 0,
-                };
                 if multiline {
                     self.indent += 1;
                 }
@@ -1722,7 +1815,7 @@ impl<'a> Fmt<'a> {
                                 self.emit_leading(expr.span().start);
                             }
                             self.fmt_expr(expr, Prec::OrFallback);
-                            if multiline && i + 1 < len {
+                            if multiline {
                                 self.write(",");
                             }
                             if multiline {
@@ -1743,7 +1836,7 @@ impl<'a> Fmt<'a> {
                                 self.emit_leading(expr.span().start);
                             }
                             self.fmt_expr(expr, Prec::OrFallback);
-                            if multiline && i + 1 < len {
+                            if multiline {
                                 self.write(",");
                             }
                             if multiline {
@@ -1769,7 +1862,7 @@ impl<'a> Fmt<'a> {
                                 self.emit_leading(val.span().start);
                             }
                             self.fmt_expr(val, Prec::OrFallback);
-                            if multiline && i + 1 < len {
+                            if multiline {
                                 self.write(",");
                             }
                             if multiline {
@@ -1806,9 +1899,10 @@ impl<'a> Fmt<'a> {
             Expr::EnumLit {
                 type_name,
                 variant,
+                variant_span,
                 args,
                 leading_dot,
-                ..
+                span,
             } => {
                 if type_name.is_empty() {
                     if *leading_dot {
@@ -1824,20 +1918,35 @@ impl<'a> Fmt<'a> {
                     // brace spelling (`.Variant{ field: val }`); positional
                     // (single-payload, S30) variants keep the paren call form.
                     let named = matches!(args.first(), Some(EnumLitArg::Named { .. }));
+                    let delimiter = if named {
+                        super::SourceDelimiter::Brace
+                    } else {
+                        super::SourceDelimiter::Paren
+                    };
                     self.write(if named { "{" } else { "(" });
-                    for (i, arg) in args.iter().enumerate() {
-                        if i > 0 {
-                            self.write(", ");
-                        }
-                        match arg {
-                            EnumLitArg::Positional(e) => self.fmt_expr(e, Prec::OrFallback),
+                    let source_start = variant_span.map_or(span.start, |source| source.end);
+                    let source = self.source_list_span_after(source_start, delimiter);
+                    let item_spans = source.map(|source| self.source_list_item_spans(source));
+                    let indexed = args.iter().enumerate().collect::<Vec<_>>();
+                    self.fmt_comma_items(
+                        &indexed,
+                        source,
+                        |(index, arg)| item_spans
+                            .as_ref()
+                            .and_then(|spans| spans.get(*index).copied())
+                            .unwrap_or_else(|| match arg {
+                                EnumLitArg::Positional(expr) => expr.span(),
+                                EnumLitArg::Named { expr, .. } => expr.span(),
+                            }),
+                        |f, (_, arg)| match arg {
+                            EnumLitArg::Positional(expr) => f.fmt_expr(expr, Prec::OrFallback),
                             EnumLitArg::Named { label, expr } => {
-                                self.write(label);
-                                self.write(": ");
-                                self.fmt_expr(expr, Prec::OrFallback);
+                                f.write(label);
+                                f.write(": ");
+                                f.fmt_expr(expr, Prec::OrFallback);
                             }
-                        }
-                    }
+                        },
+                    );
                     self.write(if named { "}" } else { ")" });
                 }
             }
@@ -1941,7 +2050,7 @@ impl<'a> Fmt<'a> {
                     self.write("(");
                 }
                 self.fmt_expr(callee, Prec::Postfix);
-                self.fmt_call_args_or_trailing_block(args);
+                self.fmt_call_args_or_trailing_block(args, Some(callee.span().end));
                 if prec > Prec::Postfix {
                     self.write(")");
                 }
@@ -2274,12 +2383,12 @@ impl<'a> Fmt<'a> {
         if let Some(effects) = &lam.effects {
             self.write(" ");
             self.write(Syntax::EFFECT_ARROW_OPEN);
-            for (i, (name, _)) in effects.iter().enumerate() {
-                if i > 0 {
-                    self.write(", ");
-                }
-                self.write(name);
-            }
+            self.fmt_comma_items(
+                effects,
+                self.source_effect_row_span_after(lam.span.start),
+                |(_, span)| *span,
+                |f, (name, _)| f.write(name),
+            );
             self.write(Syntax::EFFECT_ARROW_CLOSE);
             self.write(" ");
         } else {
@@ -2300,12 +2409,6 @@ impl<'a> Fmt<'a> {
         }
     }
 
-    fn source_span_multiline(&self, span: crate::Diagnostics::Span) -> bool {
-        self.src
-            .get(span.start..span.end)
-            .is_some_and(|source| source.contains('\n'))
-            || self.span_has_comment(span.start, span.end)
-    }
 
     pub(super) fn fmt_or_fallback(&mut self, fb: &OrFallback) {
         match fb {
@@ -2552,23 +2655,32 @@ impl<'a> Fmt<'a> {
 
     fn fmt_call(&mut self, c: &Call) {
         self.write(&c.name);
-        self.fmt_call_type_args(&c.type_args);
-        self.fmt_call_args_or_trailing_block(&c.args);
+        self.fmt_call_type_args(&c.type_args, c.name_span.end);
+        self.fmt_call_args_or_trailing_block(&c.args, Some(c.name_span.end));
     }
 
     /// D-GENERIC-CALL1=A: call-site type arguments `<T, …>` on any generic call.
     /// No-op when the call carries no type arguments.
-    fn fmt_call_type_args(&mut self, type_args: &[crate::AST::Type]) {
+    fn fmt_call_type_args(&mut self, type_args: &[crate::AST::Type], start: usize) {
         if type_args.is_empty() {
             return;
         }
         self.write("<");
-        for (i, t) in type_args.iter().enumerate() {
-            if i > 0 {
-                self.write(", ");
-            }
-            self.fmt_type(t);
-        }
+        let source = self.source_list_span_after(start, super::SourceDelimiter::Angle);
+        let item_spans = source.map(|source| self.source_list_item_spans(source));
+        let indexed = type_args.iter().enumerate().collect::<Vec<_>>();
+        self.fmt_comma_items(
+            &indexed,
+            source,
+            |(index, _)| {
+                item_spans
+                    .as_ref()
+                    .and_then(|spans| spans.get(*index))
+                    .copied()
+                    .unwrap_or_else(|| crate::Diagnostics::Span::new(0, 0))
+            },
+            |f, (_, ty)| f.fmt_type(ty),
+        );
         self.write(">");
     }
 
@@ -2578,7 +2690,7 @@ impl<'a> Fmt<'a> {
     fn fmt_task_surface_method(&mut self, method: &str, args: &[CallArg]) -> bool {
         if method == Syntax::INTERNAL_TASK_TIMEOUT_METHOD && args.len() == 1 {
             self.write("task.timeout");
-            self.fmt_method_args("timeout", args);
+            self.fmt_method_args("timeout", args, None);
             return true;
         }
         if method == Syntax::INTERNAL_TASK_SPAWN_METHOD {
@@ -2698,18 +2810,24 @@ impl<'a> Fmt<'a> {
         true
     }
 
-    fn fmt_method_args(&mut self, method: &str, args: &[CallArg]) {
-        self.fmt_view_or_call_args(method, args);
+    fn fmt_method_args(
+        &mut self,
+        method: &str,
+        args: &[CallArg],
+        source_start: Option<usize>,
+    ) {
+        self.fmt_view_or_call_args(method, args, source_start);
     }
 
-    /// D-TRAILBLOCK2=A: trailing-block sugar is gone. The formatter still
-    /// recognizes a legacy `is_trailing_block` flag defensively, but the
-    /// parser no longer sets it — ordinary `(args)` with `() -> { … }` wins.
-    /// D-DYNARRAY1: `.view(a..b)` parses its two args from `start .. end`, not
-    /// a comma list — round-trip that shape here, or `jet fmt` would silently
-    /// rewrite `.view(0..9)` into the unparseable `.view(0, 9)` (own-memory
-    /// rule: new syntax needs a formatter round-trip, not just a parser).
-    fn fmt_view_or_call_args(&mut self, method: &str, args: &[CallArg]) {
+    /// D-UI-CLOSURE1=A: restore a parser-owned trailing block closure after
+    /// the ordinary call arguments. Metadata templates use the same boundary,
+    /// but remain distinct because they are not runtime arguments.
+    fn fmt_view_or_call_args(
+        &mut self,
+        method: &str,
+        args: &[CallArg],
+        source_start: Option<usize>,
+    ) {
         if method == Syntax::METHOD_VIEW && args.len() == 2 {
             self.write("(");
             self.fmt_expr(&args[0].expr, Prec::OrFallback);
@@ -2718,22 +2836,66 @@ impl<'a> Fmt<'a> {
             self.write(")");
             return;
         }
-        self.fmt_call_args_or_trailing_block(args);
+        self.fmt_call_args_or_trailing_block(args, source_start);
     }
 
-    fn fmt_call_args_or_trailing_block(&mut self, args: &[CallArg]) {
+    fn fmt_call_args_or_trailing_block(
+        &mut self,
+        args: &[CallArg],
+        source_start: Option<usize>,
+    ) {
+
         // D-META-BODY1=A: `b.generate(name) { … }` carries its typed template
         // as a hidden final argument. It is source syntax, not a runtime call
         // argument, so restore the block at this boundary before formatting
         // the ordinary arguments.
         let template = args.last().filter(|arg| arg.flags.template_items.is_some());
-        let call_args = if template.is_some() {
+        let trailing = args.last().and_then(|arg| {
+            if arg.flags.is_trailing_block {
+                match &arg.expr {
+                    Expr::Lambda(lambda) => Some(lambda.as_ref()),
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        });
+        let hidden = template.is_some() || trailing.is_some();
+        let call_args = if hidden {
             &args[..args.len().saturating_sub(1)]
         } else {
             args
         };
+        let source = source_start.and_then(|start| {
+            self.source_list_span_after(start, super::SourceDelimiter::Paren)
+        });
+        let saved_out = self.out.len();
+        let saved_col = self.col;
+        let saved_line_start = self.at_line_start;
+        let saved_pending_blank = self.pending_blank;
+        let saved_comment_i = self.comment_i;
         self.write("(");
-        self.fmt_call_args(call_args);
+        self.fmt_comma_items(call_args, source, |arg| arg.span, |f, arg| {
+            f.fmt_call_arg(arg);
+        });
+        // A nested lambda/body can introduce a line break even when the
+        // authored call was one line. Choose the expanded argument layout
+        // now, rather than making the next fmt pass discover it from the
+        // newly emitted source. Do not use the current column as a trigger:
+        // this helper also formats calls inside string interpolations, where
+        // emitting a source newline would corrupt the enclosing string.
+        let rendered_args = &self.out[saved_out..];
+        if !source.is_some_and(|(span, _)| self.source_span_multiline(span))
+            && rendered_args.contains('\n')
+        {
+            self.out.truncate(saved_out);
+            self.col = saved_col;
+            self.at_line_start = saved_line_start;
+            self.pending_blank = saved_pending_blank;
+            self.comment_i = saved_comment_i;
+            self.write("(");
+            self.fmt_call_args_multiline(call_args, source);
+        }
         self.write(")");
         if let Some(template) = template {
             self.write(" ");
@@ -2749,6 +2911,49 @@ impl<'a> Fmt<'a> {
                 self.newline();
             }
             self.write("}");
+        } else if let Some(lambda) = trailing {
+            self.fmt_trailing_lambda(lambda);
+        }
+    }
+
+    fn fmt_call_args_multiline(&mut self, args: &[CallArg], source: Option<(Span, usize)>) {
+        if !args.is_empty() {
+            self.newline();
+        }
+        for (index, arg) in args.iter().enumerate() {
+            if index > 0 {
+                self.newline();
+            }
+            self.emit_leading(arg.span.start);
+            self.fmt_call_arg(arg);
+            self.write(",");
+            self.emit_trailing(arg.span.end);
+        }
+        if let Some((_, close_start)) = source {
+            self.emit_leading(close_start);
+        }
+        if !self.at_line_start {
+            self.newline();
+        }
+    }
+
+    fn fmt_trailing_lambda(&mut self, lambda: &crate::AST::Lambda) {
+        self.write(" ");
+        match &lambda.body {
+            crate::AST::LambdaBody::Expr(expr) => {
+                self.write("{");
+                self.write(" ");
+                self.fmt_expr(expr, Prec::OrFallback);
+                self.write(" }");
+            }
+            crate::AST::LambdaBody::Block(statements) => {
+                self.write("{");
+                self.newline();
+                self.with_trailing_comment_limit(lambda.span.end, |f| {
+                    f.with_indent(|f| f.fmt_block_stmts(statements))
+                });
+                self.end_block();
+            }
         }
     }
 
@@ -2757,34 +2962,75 @@ impl<'a> Fmt<'a> {
             if i > 0 {
                 self.write(", ");
             }
-            // D-MEM1: the call-site capability is a sigil that attaches to the
-            // argument with no space (`^x`, `&x`). The parser reads it
-            // before the label, so fmt emits it in that order to round-trip.
-            // `Read` is unmarked.
-            match arg.convention {
-                AccessConvention::Read => {}
-                AccessConvention::Write => self.write(Syntax::SIGIL_WRITE),
-                AccessConvention::Move => self.write(Syntax::SIGIL_MOVE),
-            }
-            // D-VARIADIC1: `f(...xs)` call spread — the parser reads this
-            // between the access-convention sigil and the optional label
-            // (see `call_arg` in Parser/Expressions.rs), so fmt re-emits it
-            // in that same position. Dropping this silently changed a spread
-            // call into a plain one (real behavior change, not just style —
-            // caught as a genuine fmt-stability regression on
-            // examples/features/basics/variadics_spread.jet).
-            if arg.spread {
-                self.write("...");
-            }
-            // S61: preserve the call-site argument label `name:` (canonical
-            // `name: value` spacing, matching struct-literal field init).
-            if let Some((name, _)) = &arg.label {
-                self.write(name);
-                self.write(": ");
-            }
-            self.fmt_expr(&arg.expr, Prec::OrFallback);
+            self.fmt_call_arg(arg);
         }
     }
+
+    fn fmt_call_arg(&mut self, arg: &CallArg) {
+        // D-MEM1: the call-site capability is a sigil that attaches to the
+        // argument with no space (`^x`, `&x`). The parser reads it
+        // before the label, so fmt emits it in that order to round-trip.
+        // `Read` is unmarked.
+        match arg.convention {
+            AccessConvention::Read => {}
+            AccessConvention::Write => self.write(Syntax::SIGIL_WRITE),
+            AccessConvention::Move => self.write(Syntax::SIGIL_MOVE),
+        }
+        // D-VARIADIC1: `f(...xs)` call spread — the parser reads this
+        // between the access-convention sigil and the optional label.
+        if arg.spread {
+            self.write("...");
+        }
+        // S61: preserve the call-site argument label `name:` (canonical
+        // `name: value` spacing, matching struct-literal field init).
+        if let Some((name, _)) = &arg.label {
+            self.write(name);
+            self.write(": ");
+        }
+        self.fmt_expr(&arg.expr, Prec::OrFallback);
+    }
+    fn fmt_str_raw(&mut self, parts: &[StrPart]) {
+        let Some(text) = parts.iter().try_fold(String::new(), |mut text, part| {
+            match part {
+                StrPart::Lit(value) => {
+                    text.push_str(value);
+                    Some(text)
+                }
+                StrPart::Interp(_, _) => None,
+            }
+        }) else {
+            self.fmt_str(parts);
+            return;
+        };
+        if text.is_empty() {
+            self.fmt_str(parts);
+            return;
+        }
+        let mut max_run = 0usize;
+        let mut run = 0usize;
+        for byte in text.bytes() {
+            if byte == b'`' {
+                run += 1;
+                max_run = max_run.max(run);
+            } else {
+                run = 0;
+            }
+        }
+        let fence = "`".repeat(max_run + 1);
+        let padded = text.starts_with(' ')
+            && text.ends_with(' ')
+            && text.chars().any(|ch| ch != ' ');
+        self.write(&fence);
+        if padded {
+            self.write(" ");
+        }
+        self.write(&text);
+        if padded {
+            self.write(" ");
+        }
+        self.write(&fence);
+    }
+
 
     fn fmt_str(&mut self, parts: &[StrPart]) {
         self.write("\"");
@@ -2825,7 +3071,9 @@ impl<'a> Fmt<'a> {
     /// D-BOUND-RAW1=A: typed head bodies preserve written backslashes, while
     /// doubled braces remain the literal-brace spelling of the shared lexer.
     fn fmt_typed_head_str(&mut self, parts: &[StrPart], span: crate::Diagnostics::Span) {
-        if self.src.get(span.start..span.start + 3) == Some("\"\"\"") {
+        if self.src.get(span.start..span.end).is_some_and(|s| s.starts_with('`')) {
+            self.fmt_str_raw(parts);
+        } else if self.src.get(span.start..span.start + 3) == Some("\"\"\"") {
             self.fmt_typed_head_str_multiline(parts);
         } else {
             self.write("\"");

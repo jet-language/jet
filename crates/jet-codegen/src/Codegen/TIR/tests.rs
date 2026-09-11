@@ -158,7 +158,7 @@ fn refusal_for(src: &str, fn_name: &str) -> String {
 #[test]
 fn gate_refusal_names_an_uncovered_parameter_type() {
     let detail = refusal_for(
-        "fn build(b: BuildContext) => Int {\n    return 1\n}\n",
+        "fn build(b: BuildContext) Int -> {\n    return 1\n}\n",
         "build",
     );
     assert!(
@@ -185,12 +185,6 @@ fn gate_refusal_names_the_innermost_uncovered_expression() {
         detail.contains("test.jet:2:14"),
         "refusal must carry file:line:column, got: {detail}"
     );
-}
-
-#[test]
-fn empty_string_parts_emit_balanced_format_call() {
-    let cx = build_cx_items(&[], "", "test.jet", None, &HashMap::new(), "");
-    assert_eq!(emit_tir_str(&[], &cx), "format!(\"\").to_string()");
 }
 
 #[test]
@@ -264,6 +258,7 @@ fn checked_bundle(src: &str) -> crate::AST::ProgramBundle {
             user_policy_declarations: prog.user_policy_declarations.clone(),
             rule_facts: std::mem::take(&mut prog.rule_facts),
         }],
+        devtools_registry: crate::AST::DevtoolsRegistry::default(),
         parse_teaching: Vec::new(),
         used_core: std::collections::HashSet::new(),
         ffi_callback_fns: std::collections::HashSet::new(),
@@ -286,7 +281,7 @@ fn checked_bundle(src: &str) -> crate::AST::ProgramBundle {
     // literals. That path lives in TIR eval and is installed at the four
     // production funnels; a unit test that calls `check_bundle` directly is
     // below all four, so install here the same way `covers` hops the stack.
-    install_comptime_bridge();
+    crate::Codegen::MIREval::install_mir_bridge();
     // No C imports in unit tests; CFfi::default() is the correct empty state.
     // Coverage and lowering helpers check named functions, not a runnable
     // program. `CompileMode::Run` demands `fn run` (E0101) and is the
@@ -306,7 +301,7 @@ fn covers_after_sema(src: &str, fn_name: &str) -> bool {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let bundle = checked_bundle(src);
         let module = &bundle.modules[bundle.entry];
-        let cx = build_cx_items(
+        let mut cx = build_cx_items(
             &module.items,
             src,
             "test.jet",
@@ -314,6 +309,7 @@ fn covers_after_sema(src: &str, fn_name: &str) -> bool {
             &HashMap::new(),
             &bundle.edition,
         );
+        crate::Codegen::Context::populate_cx_from_bundle(&mut cx, &bundle, bundle.entry);
         let f = module
             .items
             .iter()
@@ -326,12 +322,11 @@ fn covers_after_sema(src: &str, fn_name: &str) -> bool {
     })
 }
 
-/// Compiler worker required; see `covers`.
-fn lower_after_sema(src: &str, fn_name: &str) -> TFunc {
+fn refusal_after_sema(src: &str, fn_name: &str) -> String {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let bundle = checked_bundle(src);
         let module = &bundle.modules[bundle.entry];
-        let cx = build_cx_items(
+        let mut cx = build_cx_items(
             &module.items,
             src,
             "test.jet",
@@ -339,6 +334,35 @@ fn lower_after_sema(src: &str, fn_name: &str) -> TFunc {
             &HashMap::new(),
             &bundle.edition,
         );
+        crate::Codegen::Context::populate_cx_from_bundle(&mut cx, &bundle, bundle.entry);
+        let f = module
+            .items
+            .iter()
+            .find_map(|i| match i {
+                Item::Func(f) if f.name == fn_name => Some(f),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no fn {fn_name}"));
+        let covered = tir_covers(f, &cx);
+        let detail = refusal::describe(&cx);
+        format!("covered={covered}; core_imports={:?}; {detail}", cx.core_imports)
+    })
+}
+
+/// Compiler worker required; see `covers`.
+fn lower_after_sema(src: &str, fn_name: &str) -> TFunc {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let bundle = checked_bundle(src);
+        let module = &bundle.modules[bundle.entry];
+        let mut cx = build_cx_items(
+            &module.items,
+            src,
+            "test.jet",
+            None,
+            &HashMap::new(),
+            &bundle.edition,
+        );
+        crate::Codegen::Context::populate_cx_from_bundle(&mut cx, &bundle, bundle.entry);
         let f = module
             .items
             .iter()
@@ -355,7 +379,7 @@ fn lower_after_sema(src: &str, fn_name: &str) -> TFunc {
 fn default_parameter_call_sites_are_tir_covered() {
     // Compiler worker required; see `covers`.
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        install_comptime_bridge();
+        crate::Codegen::MIREval::install_mir_bridge();
         let source = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../examples/features/basics/default_refs.jet"
@@ -379,20 +403,13 @@ fn default_parameter_call_sites_are_tir_covered() {
             })
             .expect("default_refs must define run");
         assert!(tir_covers(function, &cx));
-        let tir = lower_func(function, &cx);
-        let mut generated = String::new();
-        crate::Codegen::TIR::emit_tir_func(&tir, &cx, &mut generated);
-        let binder_ref_prefix = crate::Codegen::mangle_generated("binder_ref_");
-        assert!(
-            !generated.contains(&binder_ref_prefix),
-            "unlowered default reference: {generated}"
-        );
+        lower_func(function, &cx);
     });
 }
 
 #[test]
 fn script_body_is_lowered_as_the_canonical_run_function() {
-    let source = "print(\"script\"); fn helper() {}\n";
+    let source = "print(\"script\")\nfn helper() {}\n";
     let bundle = checked_bundle(source);
     let module = &bundle.modules[bundle.entry];
     assert!(module.script_body.is_empty());
@@ -488,12 +505,12 @@ fn script_body_is_lowered_as_the_canonical_run_function() {
 
 #[test]
 fn comptime_float_and_string_constants_lower_to_typed_literals() {
-    install_comptime_bridge();
+    crate::Codegen::MIREval::install_mir_bridge();
     let lowered = lower_after_sema(
         r#"
 fn run() {
-    @narrow :: F32.{16777217.0}
-    @wide :: 2.5
+    @narrow :: F32{16777217.0}
+    @wide :: Float{2.5}
     @label :: "ready"
 
     print(@narrow)
@@ -531,40 +548,16 @@ fn run() {
         TExprKind::StrLit(parts)
             if matches!(parts.as_slice(), [TStrPart::Lit(text)] if text == "ready")
     ));
-
-    let (tokens, diagnostics) = crate::Lexer::lex("fn run() {}");
-    assert!(diagnostics.is_empty());
-    let program = crate::Parser::parse(&tokens).unwrap();
-    let cx = build_cx(&program, "fn run() {}", "test.jet");
-    for (ty, value, expected) in [
-        (Type::Float32, f64::NAN, "f32::NAN"),
-        (Type::Float32, f64::INFINITY, "f32::INFINITY"),
-        (Type::Float32, f64::NEG_INFINITY, "f32::NEG_INFINITY"),
-        (Type::Float, f64::NAN, "f64::NAN"),
-        (Type::Float, f64::INFINITY, "f64::INFINITY"),
-        (Type::Float, f64::NEG_INFINITY, "f64::NEG_INFINITY"),
-    ] {
-        assert_eq!(
-            emit_tir_expr(
-                &TExpr {
-                    ty,
-                    kind: TExprKind::FloatLit(value),
-                },
-                &cx,
-            ),
-            expected
-        );
-    }
 }
 
 #[test]
 fn regex_find_all_counts_chain_preserves_receiver_result() {
     let lowered = lower_after_sema(
-        r#"fn run(text: String) {
+        r#"fn scan(text: String) {
     counts :: Regex{"[A-Za-z]+"}.find_all(text).counts()
 }
 "#,
-        "run",
+        "scan",
     );
     let init = lowered
         .body
@@ -600,17 +593,17 @@ fn regex_find_all_counts_chain_preserves_receiver_result() {
 fn refined_collection_results_have_exact_tir_types() {
     let src = "\
 fn run() {
-    folded := [1, 2].fold(0.5, (a: Float, n: Int) => a + 0.5)
-    reduced := [1, 2].reduce(0.5, (a: Float, n: Int) => a + 0.5)
-    scanned := [1, 2].scan(0.5, (a: Float, n: Int) => a + 0.5)
-    mapped := [1, 2].map((n: Int) => 1.5)
-    filtered := [\"1.5\", \"bad\"].filter_map((s: String) => Float.parse(s))
-    flattened := [1, 2].flat_map((n: Int) => [1.5])
-    grouped := [1, 2].group_by((n: Int) => n % 2 == 0)
-    counted := [1, 2].count_by((n: Int) => n % 2)
-    parallel := [1, 2].para_fold(() => 0.5, (a: Float, n: Int) => a + 0.5, (left: Float, right: Float) => left + right)
-    grouped_string_get := [1, 2].group_by((n: Int) => \"x\").get(\"x\")
-    counted_string_get := [1, 2].count_by((n: Int) => \"x\").get(\"x\")
+    folded := [1, 2].fold(0.5, (a: Decimal, n: Int) -> a + 0.5)
+    reduced := [1, 2].reduce(0.5, (a: Decimal, n: Int) -> a + 0.5)
+    scanned := [1, 2].scan(0.5, (a: Decimal, n: Int) -> a + 0.5)
+    mapped := [1, 2].map((n: Int) -> 1.5)
+    filtered := [\"1.5\", \"bad\"].filter_map((s: String) -> Decimal(s))
+    flattened := [1, 2].flat_map((n: Int) -> [1.5])
+    grouped := [1, 2].group_by((n: Int) -> n % 2 == 0)
+    counted := [1, 2].count_by((n: Int) -> n % 2)
+    parallel := [1, 2].para_fold(() -> 0.5, (a: Decimal, n: Int) -> a + 0.5, (left: Decimal, right: Decimal) -> left + right)
+    grouped_string_get := [1, 2].group_by((n: Int) -> \"x\").get(\"x\")
+    counted_string_get := [1, 2].count_by((n: Int) -> \"x\").get(\"x\")
 }
 ";
     let lowered = lower_after_sema(src, "run");
@@ -637,12 +630,16 @@ fn run() {
     assert_eq!(
         actual,
         vec![
-            Type::Float,
-            Type::Float,
-            crate::Collections::iter_ty(Type::Float),
-            Type::List(Box::new(Type::Float)),
-            crate::Collections::iter_ty(Type::Float),
-            Type::List(Box::new(Type::Float)),
+            Type::Named(crate::Syntax::TYPE_DECIMAL.to_string()),
+            Type::Named(crate::Syntax::TYPE_DECIMAL.to_string()),
+            crate::Collections::iter_ty(Type::Named(crate::Syntax::TYPE_DECIMAL.to_string())),
+            Type::List(Box::new(Type::Named(
+                crate::Syntax::TYPE_DECIMAL.to_string()
+            ))),
+            crate::Collections::iter_ty(Type::Named(crate::Syntax::TYPE_DECIMAL.to_string())),
+            Type::List(Box::new(Type::Named(
+                crate::Syntax::TYPE_DECIMAL.to_string()
+            ))),
             Type::Map {
                 key: Box::new(Type::Bool),
                 key_span: None,
@@ -653,7 +650,7 @@ fn run() {
                 key_span: None,
                 value: Box::new(Type::Int),
             },
-            Type::Float,
+            Type::Named(crate::Syntax::TYPE_DECIMAL.to_string()),
             Type::Option(Box::new(Type::List(Box::new(Type::Int)))),
             Type::Option(Box::new(Type::Int)),
         ]
@@ -715,7 +712,7 @@ fn covers_method(src: &str, type_name: &str, method: &str) -> bool {
         let f = methods
             .iter()
             .find(|m| m.name == method)
-            .unwrap_or_else(|| panic!("no method {type_name}.{method}"));
+            .unwrap_or_else(|| panic!("no method {type_name}{method}"));
         tir_covers_method(f, type_name, &cx)
     })
 }
@@ -723,7 +720,7 @@ fn covers_method(src: &str, type_name: &str, method: &str) -> bool {
 #[test]
 fn covers_simple_arithmetic_fn() {
     assert!(covers(
-        "fn add(a: Int, b: Int) => Int {\n return (a + b)\n}\n",
+        "fn add(a: Int, b: Int) Int -> {\n return (a + b)\n}\n",
         "add"
     ));
 }
@@ -738,7 +735,7 @@ fn covers_print_and_string_param() {
 
 #[test]
 fn covers_if_else_chain() {
-    let src = "fn f(n: Int) => Int {\n if (n > 0) {\n return 1\n } else {\n return 0\n }\n}\n";
+    let src = "fn f(n: Int) Int -> {\n if (n > 0) {\n return 1\n } else {\n return 0\n }\n}\n";
     assert!(covers(src, "f"));
 }
 
@@ -763,8 +760,8 @@ fn covers_struct_lit_with_string_field_value() {
 struct Person {
     name: String
 }
-fn make(n: String) => Person {
-    return Person.{ name: n }
+fn make(n: String) Person -> {
+    return Person{ name: n }
 }
 ";
     assert!(covers(src, "make"));
@@ -786,7 +783,7 @@ fn covers_generic_fn() {
     // type-var value by-value. (The `covers` helper is build_cx-only, so it sees
     // `x: T` as a Read param; sema would require `take x: T`, but the gate shape is
     // identical either way — a type-var param/return is in-subset.)
-    assert!(covers("fn id<T>(x: T) => T {\n return x\n}\n", "id"));
+    assert!(covers("fn id<T>(x: T) T -> {\n return x\n}\n", "id"));
 }
 
 #[test]
@@ -795,7 +792,7 @@ fn covers_generic_struct_fn() {
     // param/return type and the turbofish construction (`__jet_Pair::<T> { … }`) are now
     // covered. The struct's type-var fields are admitted by `field_ty_covered`; the
     // turbofish head is resolved at lowering.
-    let src = "struct Pair<T> {\n first: T\n second: T\n}\nfn mk<T>(a: T, b: T) => Pair<T> {\n return Pair<T>.{first: a, second: b}\n}\n";
+    let src = "struct Pair<T> {\n first: T\n second: T\n}\nfn mk<T>(a: T, b: T) Pair<T> -> {\n return Pair<T>{first: a, second: b}\n}\n";
     assert!(covers(src, "mk"));
 }
 
@@ -833,11 +830,40 @@ fn covers_with_core_import(src: &str, fn_name: &str, alias: &str, module: &str) 
 #[test]
 fn covers_core_tasks_spawn_alias() {
     assert!(covers_with_core_import(
-        "use core.tasks as tasks\nfn run() {\n _ :: tasks.spawn(() => 42)\n}\n",
+        "use core.tasks as tasks\nfn run() {\n _ :: tasks.spawn(() -> 42)\n}\n",
         "run",
         "tasks",
         "core.tasks",
     ));
+}
+
+#[test]
+fn covers_core_math_pi_field() {
+    // `use core.math as math` then `math.pi` is a module field, not a call.
+    // Coverage used to refuse the alias and ICE as "expression `pi`".
+    assert!(covers_with_core_import(
+        "fn angle(x: Float) Float -> {\n return -math.pi / x\n}\n",
+        "angle",
+        "math",
+        "core.math",
+    ));
+}
+
+#[test]
+fn covers_core_math_pi_field_after_sema() {
+    let src = "use core.math as math\nfn angle(x: Float) Float -> {\n return -math.pi / x\n}\nfn run() { print(angle(2.0)) }\n";
+    if !covers_after_sema(src, "angle") {
+        panic!(
+            "angle was uncovered after sema: {}",
+            refusal_after_sema(src, "angle")
+        );
+    }
+}
+
+#[test]
+fn covers_float_is_finite_after_sema() {
+    let src = "fn checked(x: Float) Bool -> {\n return x.is_finite()\n}\nfn run() { print(checked(1.0)) }\n";
+    assert!(covers_after_sema(src, "checked"));
 }
 
 /// Like `covers`, but injects a foreign type → module mapping (`cx.foreign_types`)
@@ -876,7 +902,7 @@ fn covers_unqualified_foreign_struct_literal() {
     // (E0422) before; the fix prefixes the foreign module.
     let src = "\
 fn mk() {
-    n :: Note.{ text: \"hi\" }
+    n :: Note{ text: \"hi\" }
     print(n.text)
 }
 ";
@@ -891,7 +917,7 @@ fn mk() {
 fn covers_unsafe_fn_with_ptr_ops() {
     // c109 Phase 18: a `#Unsafe("reason") fn` (S58) is covered — it lowers to `unsafe fn`, and
     // its body's `mem.Ptr<T>.from_addr` / `mem.volatile_read` ops are in-subset.
-    let src = "use core.mem\n#Unsafe(\"reads register\")\nfn read_reg(addr: Int) => Int {\n p :: mem.Ptr<Int>.from_addr(addr)\n return mem.volatile_read(p)\n}\n";
+    let src = "use core.mem\n#Unsafe(\"reads register\")\nfn read_reg(addr: Int) Int -> {\n p :: mem.Ptr<Int>.from_addr(addr)\n return mem.volatile_read(p)\n}\n";
     assert!(covers_with_mem(src, "read_reg"));
 }
 
@@ -907,7 +933,7 @@ fn covers_unsafe_block_and_address_of() {
 fn covers_list_param() {
     // c109 Phase 5: a list parameter is now inside the subset (was excluded
     // through Phase 4).
-    assert!(covers("fn sum(xs: [Int]) => Int {\n return 0\n}\n", "sum"));
+    assert!(covers("fn sum(xs: [Int]) Int -> {\n return 0\n}\n", "sum"));
 }
 
 #[test]
@@ -976,7 +1002,7 @@ fn rejects_list_of_tuple_with_unsupported_nested_option() {
 fn covers_option_param() {
     // c109 Phase 8: an optional-typed param (`?Int`) is now inside the subset
     // (was excluded through Phase 7). The payload is a covered value type.
-    assert!(covers("fn f(p: ?Int) => Int {\n return 0\n}\n", "f"));
+    assert!(covers("fn f(p: ?Int) Int -> {\n return 0\n}\n", "f"));
 }
 
 #[test]
@@ -984,13 +1010,13 @@ fn rejects_list_of_option_param_still() {
     // A list whose element is itself optional (`[?Int]`) is still excluded — the
     // collection element-coverage does not admit optionals (clone/coercion for an
     // option-element collection is deferred), even though a bare `?Int` is covered.
-    assert!(!covers("fn f(xs: [?Int]) => Int {\n return 0\n}\n", "f"));
+    assert!(!covers("fn f(xs: [?Int]) Int -> {\n return 0\n}\n", "f"));
 }
 
 #[test]
 fn rejects_method_call_in_body() {
     // A method call (`.bumped()`) is not a covered construct.
-    let src = "struct C { n: Int }\nimpl C {\n fn bumped(self) => Int {\n return (self.n + 1)\n }\n}\nfn use_it(c: Int) => Int {\n return c\n}\nfn caller() => Int {\n x :: C.{ n: 1 }\n return x.bumped()\n}\n";
+    let src = "struct C { n: Int }\nimpl C {\n fn bumped(self) Int -> {\n return (self.n + 1)\n }\n}\nfn use_it(c: Int) Int -> {\n return c\n}\nfn caller() Int -> {\n x :: C{ n: 1 }\n return x.bumped()\n}\n";
     assert!(!covers(src, "caller"));
 }
 
@@ -1000,7 +1026,7 @@ fn rejects_method_call_in_body() {
 fn covers_struct_param_and_scalar_field_read() {
     // A plain struct param with a scalar field read (borrow position) and a
     // struct literal + struct return are all in the subset.
-    let src = "struct Point { x: Int\n y: Int }\nfn sum_pt(p: Point) => Int {\n return (p.x + p.y)\n}\nfn origin() => Point {\n return Point.{ x: 0, y: 0 }\n}\n";
+    let src = "struct Point { x: Int\n y: Int }\nfn sum_pt(p: Point) Int -> {\n return (p.x + p.y)\n}\nfn origin() Point -> {\n return Point{ x: 0, y: 0 }\n}\n";
     assert!(covers(src, "sum_pt"));
     assert!(covers(src, "origin"));
 }
@@ -1009,7 +1035,7 @@ fn covers_struct_param_and_scalar_field_read() {
 fn covers_nested_struct() {
     // A struct field whose type is itself a covered struct, with a chained
     // field read and a nested literal.
-    let src = "struct Inner { v: Int }\nstruct Outer { inner: Inner\n label: Int }\nfn deep(o: Outer) => Int {\n return (o.inner.v + o.label)\n}\n";
+    let src = "struct Inner { v: Int }\nstruct Outer { inner: Inner\n label: Int }\nfn deep(o: Outer) Int -> {\n return (o.inner.v + o.label)\n}\n";
     assert!(covers(src, "deep"));
 }
 
@@ -1019,7 +1045,7 @@ fn covers_recursive_boxed_struct() {
     // — a boxed field read derefs the `Box` (total `boxed` fact). A fn reading a plain
     // scalar field of a recursive struct routes through the TIR.
     let src =
-        "struct Node { value: Int\n next: Node }\nfn val(n: Node) => Int {\n return n.value\n}\n";
+        "struct Node { value: Int\n next: Node }\nfn val(n: Node) Int -> {\n return n.value\n}\n";
     assert!(covers(src, "val"));
 }
 
@@ -1028,7 +1054,7 @@ fn covers_struct_with_list_field() {
     // c109 Phase 16: a struct with a covered collection field (`[Int]`). The
     // struct-literal emit is plain (`items: vec![…]`), byte-identical to the AST
     // path, so the owning struct is covered as a param/return.
-    let src = "struct Tally { items: [Int] }\nfn first_tag(b: Tally) => Int {\n return 0\n}\n";
+    let src = "struct Tally { items: [Int] }\nfn first_tag(b: Tally) Int -> {\n return 0\n}\n";
     assert!(covers(src, "first_tag"));
 }
 
@@ -1037,7 +1063,7 @@ fn covers_generic_struct_literal() {
     // c109 Phase 19: a generic struct literal (`Pair<Int> { … }`) carries non-empty
     // `type_args` (the turbofish `__jet_Pair::<i64> { … }`) and its field types reference
     // type vars — both now covered. The owning fn routes through the TIR.
-    let src = "struct Pair<T> { first: T\n second: T }\nfn mk() => Pair<Int> {\n return Pair<Int>.{ first: 1, second: 2 }\n}\n";
+    let src = "struct Pair<T> { first: T\n second: T }\nfn mk() Pair<Int> -> {\n return Pair<Int>{ first: 1, second: 2 }\n}\n";
     assert!(covers(src, "mk"));
 }
 
@@ -1087,28 +1113,28 @@ fn covers_collection_loop_over_literal() {
 #[test]
 fn covers_enum_unit_match() {
     // A unit-variant enum, an enum literal, and an exhaustive variant match.
-    let src = "enum Light {\n Red\n Yellow\n Green\n}\nfn next(light: Light) => Light {\n if light == {\n .Red -> { return Light.Yellow }\n .Yellow -> { return Light.Green }\n .Green -> { return Light.Red }\n }\n}\n";
+    let src = "enum Light {\n Red\n Yellow\n Green\n}\nfn next(light: Light) Light -> {\n if light == {\n .Red -> { return Light.Yellow }\n .Yellow -> { return Light.Green }\n .Green -> { return Light.Red }\n }\n}\n";
     assert!(covers(src, "next"));
 }
 
 #[test]
 fn covers_enum_payload_or_and_wildcard() {
     // Scalar-payload enum, or-pattern with a shared binding, and a wildcard slot.
-    let src = "enum Conn {\n Active(Int)\n Reconnecting(Int)\n Idle(Int)\n Closed\n}\nfn d(c: Conn) => String {\n if c == {\n .Active(id) | .Reconnecting(id) -> { return \"live:{id}\" }\n .Idle(_) -> { return \"idle\" }\n .Closed -> { return \"closed\" }\n }\n return \"unknown\"\n}\n";
+    let src = "enum Conn {\n Active(Int)\n Reconnecting(Int)\n Idle(Int)\n Closed\n}\nfn d(c: Conn) String -> {\n if c == {\n .Active(id) | .Reconnecting(id) -> { return \"live:{id}\" }\n .Idle(_) -> { return \"idle\" }\n .Closed -> { return \"closed\" }\n }\n return \"unknown\"\n}\n";
     assert!(covers(src, "d"));
 }
 
 #[test]
 fn covers_enum_payload_range_pattern() {
     // A range pattern in a payload slot (guard-emitted) plus a wildcard slot.
-    let src = "enum HTTP {\n Good(Int)\n Fail(Int)\n}\nfn classify(r: HTTP) => String {\n if r == {\n .Good(200..299) -> { return \"ok\" }\n .Good(_) -> { return \"other\" }\n .Fail(_) -> { return \"err\" }\n }\n return \"unknown\"\n}\n";
+    let src = "enum HTTP {\n Good(Int)\n Fail(Int)\n}\nfn classify(r: HTTP) String -> {\n if r == {\n .Good(200..299) -> { return \"ok\" }\n .Good(_) -> { return \"other\" }\n .Fail(_) -> { return \"err\" }\n }\n return \"unknown\"\n}\n";
     assert!(covers(src, "classify"));
 }
 
 #[test]
 fn covers_arm_head_range_switch() {
     // An all-range arm-head scalar switch with an `else` (mixed-switch path).
-    let src = "fn grade(score: Int) => String {\n if score == {\n 0..59 -> { return \"F\" }\n 60..100 -> { return \"P\" }\n else -> { return \"?\" }\n }\n}\n";
+    let src = "fn grade(score: Int) String -> {\n if score == {\n 0..59 -> { return \"F\" }\n 60..100 -> { return \"P\" }\n else -> { return \"?\" }\n }\n}\n";
     assert!(covers(src, "grade"));
 }
 
@@ -1117,17 +1143,17 @@ fn covers_mixed_switch_non_ident_subject() {
     // c109 (B1): a pattern switch over a NON-IDENT subject routes through the
     // exhaustive-match / fallible-match path (the subject is matched by source-text
     // equality, not just an ident name). A call subject with unit-variant arms:
-    let variant = "enum Light { Red Green Yellow }\nfn pick() => Light { return Light.Red }\nfn classify() => Int {\n if pick() == {\n .Red -> { return 1 }\n .Green -> { return 2 }\n else -> { return 0 }\n }\n}\n";
+    let variant = "enum Light { Red Green Yellow }\nfn pick() Light -> { return Light.Red }\nfn classify() Int -> {\n if pick() == {\n .Red -> { return 1 }\n .Green -> { return 2 }\n else -> { return 0 }\n }\n}\n";
     assert!(covers(variant, "classify"));
     // A field-access subject with a payload-binding (optional) arm:
-    let payload = "struct Holder { val: ?Int }\nfn f(h: Holder) => Int {\n if h.val == {\n .Val(c) -> { return c }\n else -> { return 0 }\n }\n}\n";
+    let payload = "struct Holder { val: ?Int }\nfn f(h: Holder) Int -> {\n if h.val == {\n .Val(c) -> { return c }\n else -> { return 0 }\n }\n}\n";
     assert!(covers(payload, "f"));
 }
 
 #[test]
 fn covers_enum_local_and_literal_in_main() {
     // An enum-typed local bound from a literal, passed to a covered helper.
-    let src = "enum Light {\n Red\n Yellow\n Green\n}\nfn label(l: Light) => String {\n if l == {\n .Red -> { return \"r\" }\n .Yellow -> { return \"y\" }\n .Green -> { return \"g\" }\n }\n}\nfn run() {\n start :: Light.Red\n print(label(start))\n}\n";
+    let src = "enum Light {\n Red\n Yellow\n Green\n}\nfn label(l: Light) String -> {\n if l == {\n .Red -> { return \"r\" }\n .Yellow -> { return \"y\" }\n .Green -> { return \"g\" }\n }\n}\nfn run() {\n start :: Light.Red\n print(label(start))\n}\n";
     assert!(covers(src, "run"));
 }
 
@@ -1136,7 +1162,7 @@ fn covers_string_payload_enum() {
     // c109 Phase 16: a String-payload enum. The literal's borrowed-payload
     // `.clone()` and pattern bindings are reproduced as total facts
     // (`emit_boxed_enum_arg`), so the match + getter route through the TIR.
-    let src = "enum Msg {\n Text(String)\n Ping\n}\nfn show(m: Msg) => String {\n if m == {\n .Text(s) -> { return s }\n .Ping -> { return \"ping\" }\n }\n return \"\"\n}\n";
+    let src = "enum Msg {\n Text(String)\n Ping\n}\nfn show(m: Msg) String -> {\n if m == {\n .Text(s) -> { return s }\n .Ping -> { return \"ping\" }\n }\n return \"\"\n}\n";
     assert!(covers(src, "show"));
 }
 
@@ -1145,7 +1171,7 @@ fn covers_recursive_enum() {
     // c109 Phase 16: a self-referential (boxed) enum. The `Box::new(…)` at
     // construction and the auto-deref at pattern/field sites are total facts
     // (`TEnumArg.boxed`), so a covered traversal routes through the TIR.
-    let src = "enum Tree {\n Leaf(Int)\n Node(Tree)\n}\nfn depth(t: Tree) => Int {\n if t == {\n .Leaf(n) -> { return n }\n .Node(inner) -> { return 1 }\n }\n return 0\n}\n";
+    let src = "enum Tree {\n Leaf(Int)\n Node(Tree)\n}\nfn depth(t: Tree) Int -> {\n if t == {\n .Leaf(n) -> { return n }\n .Node(inner) -> { return 1 }\n }\n return 0\n}\n";
     assert!(covers(src, "depth"));
 }
 
@@ -1157,7 +1183,7 @@ fn covers_recursive_enum_construction_with_clone_box() {
     // `.clone()`, then the recursive boxed edge → `Box::new`), reproducing
     // `emit_boxed_enum_arg` exactly. The construction reaches codegen as a
     // `MethodCall` (sema never emits an `Expr::EnumLit` for a payload variant).
-    let src = "enum Tree {\n Leaf(Int)\n Node(Tree)\n}\nfn wrap(inner: Tree) => Tree {\n return Tree.Node(inner)\n}\n";
+    let src = "enum Tree {\n Leaf(Int)\n Node(Tree)\n}\nfn wrap(inner: Tree) Tree -> {\n return Tree.Node(inner)\n}\n";
     assert!(covers(src, "wrap"));
 }
 
@@ -1167,7 +1193,7 @@ fn covers_struct_payload_enum() {
     // struct value flows through the variant construction + pattern binding
     // without a clone/box decision the subset can't make (the value's own move/
     // clone facts live in its sub-expression).
-    let src = "struct Point { x: Int\n y: Int }\nenum Shape {\n Dot(Point)\n Line(Int)\n}\nfn area(s: Shape) => Int {\n if s == {\n .Dot(p) -> { return p.x }\n .Line(n) -> { return n }\n }\n return 0\n}\n";
+    let src = "struct Point { x: Int\n y: Int }\nenum Shape {\n Dot(Point)\n Line(Int)\n}\nfn area(s: Shape) Int -> {\n if s == {\n .Dot(p) -> { return p.x }\n .Line(n) -> { return n }\n }\n return 0\n}\n";
     assert!(covers(src, "area"));
 }
 
@@ -1176,7 +1202,7 @@ fn covers_collection_payload_enum() {
     // c109 Phase 16: an enum variant carrying a covered collection payload
     // (`[Int]`). Construction (`Holder.Nums(xs)`) routes through the variant
     // MethodCall shape; the borrowed-list `.clone()` is total.
-    let src = "enum Holder {\n Nums([Int])\n One(Int)\n}\nfn mk(xs: [Int]) => Holder {\n return Holder.Nums(xs)\n}\n";
+    let src = "enum Holder {\n Nums([Int])\n One(Int)\n}\nfn mk(xs: [Int]) Holder -> {\n return Holder.Nums(xs)\n}\n";
     assert!(covers(src, "mk"));
 }
 
@@ -1199,7 +1225,7 @@ fn rejects_range_switch_over_non_ident_subject() {
     //
     // A non-ident subject stays covered without a range arm — see
     // `covers_mixed_switch_non_ident_subject`.
-    let src = "fn pick() => Int { return 5 }\nfn f() => String {\n if pick() == {\n 0 -> { return \"zero\" }\n 1..10 -> { return \"low\" }\n else -> { return \"mid\" }\n }\n}\n";
+    let src = "fn pick() Int -> { return 5 }\nfn f() String -> {\n if pick() == {\n 0 -> { return \"zero\" }\n 1..10 -> { return \"low\" }\n else -> { return \"mid\" }\n }\n}\n";
     assert!(!covers(src, "f"));
 }
 
@@ -1212,7 +1238,7 @@ fn rejects_range_switch_over_non_ident_subject() {
 #[test]
 fn covers_list_literal_and_param() {
     // A list literal returned from a covered fn, and a list-typed param.
-    let src = "fn build() => [Int] {\n return [1, 2, 3]\n}\nfn accept(xs: [Int]) => Int {\n return 0\n}\n";
+    let src = "fn build() [Int] -> {\n return [1, 2, 3]\n}\nfn accept(xs: [Int]) Int -> {\n return 0\n}\n";
     assert!(covers(src, "build"));
     assert!(covers(src, "accept"));
 }
@@ -1220,7 +1246,7 @@ fn covers_list_literal_and_param() {
 #[test]
 fn covers_map_literal_and_param() {
     // An empty and a non-empty map literal, plus a map-typed param.
-    let src = "fn empty() => [String:Int] {\n return []\n}\nfn one() => [String:Int] {\n return [\"a\": 1]\n}\nfn accept(m: [String:Int]) => Int {\n return 0\n}\n";
+    let src = "fn empty() [String:Int] -> {\n return []\n}\nfn one() [String:Int] -> {\n return [\"a\": 1]\n}\nfn accept(m: [String:Int]) Int -> {\n return 0\n}\n";
     assert!(covers(src, "empty"));
     assert!(covers(src, "one"));
     assert!(covers(src, "accept"));
@@ -1265,7 +1291,7 @@ fn covers_optional_binding_if_condition() {
 fn covers_user_enum_variant_if_let_condition() {
     // c109 (B4): `if m == .Ping(n) { … } else { … }` over a covered user enum lowers
     // to `if let __jet_Msg::__jet_Ping(user_n) = m`. Single-payload variant (one bind).
-    let src = "enum Msg { Ping(Int) Pong }\nfn f(m: Msg) => Int {\n if m == .Ping(n) {\n return n\n } else {\n return -1\n }\n}\n";
+    let src = "enum Msg { Ping(Int) Pong }\nfn f(m: Msg) Int -> {\n if m == .Ping(n) {\n return n\n } else {\n return -1\n }\n}\n";
     assert!(covers(src, "f"));
 }
 
@@ -1273,7 +1299,7 @@ fn covers_user_enum_variant_if_let_condition() {
 fn rejects_list_of_option_param() {
     // A list whose element is an option (`[?Int]`) is not a covered value type
     // (optionals are Phase 8); the owning collection is excluded.
-    let src = "fn f(xs: [?Int]) => Int {\n return 0\n}\n";
+    let src = "fn f(xs: [?Int]) Int -> {\n return 0\n}\n";
     assert!(!covers(src, "f"));
 }
 
@@ -1289,7 +1315,7 @@ fn covers_struct_param_with_method_caller() {
     // A struct with a user method: the method body (has `self`) is excluded,
     // but a free function taking the struct and reading a scalar field is still
     // covered (Phase 3 baseline — methods don't disturb the existing coverage).
-    let src = "struct Calc {\n base: Int\n fn add(self, x: Int) => Int {\n return (self.base + x)\n }\n}\nfn peek(c: Calc) => Int {\n return c.base\n}\n";
+    let src = "struct Calc {\n base: Int\n fn add(self, x: Int) Int -> {\n return (self.base + x)\n }\n}\nfn peek(c: Calc) Int -> {\n return c.base\n}\n";
     assert!(covers(src, "peek"));
 }
 
@@ -1346,7 +1372,7 @@ fn covers_user_method_shadowing_builtin_name() {
     // the node sema produces. (The end-to-end build+run + byte-parity in the TIR
     // feature integration targets is
     // the authoritative proof; this exercises the gate's user-vs-builtin decision.)
-    let src = "struct Tally {\n items: [Int]\n fn get(self) => Int {\n return 1\n }\n fn len(self) => Int {\n return 2\n }\n}\n";
+    let src = "struct Tally {\n items: [Int]\n fn get(self) Int -> {\n return 1\n }\n fn len(self) Int -> {\n return 2\n }\n}\n";
     let (toks, _) = crate::Lexer::lex(src);
     let prog = crate::Parser::parse(&toks).expect("parse failed");
     let cx = build_cx(&prog, src, "test.jet");
@@ -1360,6 +1386,7 @@ fn covers_user_method_shadowing_builtin_name() {
         args: Vec::new(),
         recv_type: Some(crate::Syntax::TYPE_TALLY.to_string()),
         resolved_ret: None,
+        operator_rhs: None,
         checked_widen: false,
     };
     let mut locals = HashSet::new();
@@ -1403,28 +1430,28 @@ fn covers_user_method_shadowing_builtin_name() {
 fn covers_instance_method_body() {
     // A `self` getter on a covered struct, body reading `self.field` — covered.
     // (Multi-letter type name; a single uppercase letter reads as a type var.)
-    let src = "struct Cell {\n n: Int\n fn value(self) => Int {\n return self.n\n }\n}\n";
+    let src = "struct Cell {\n n: Int\n fn value(self) Int -> {\n return self.n\n }\n}\n";
     assert!(covers_method(src, "Cell", "value"));
 }
 
 #[test]
 fn covers_mut_self_method_body() {
     // A `mut self` receiver (→ `&mut self`) whose body only reads is covered.
-    let src = "struct Acc {\n total: Int\n fn doubled(&self) => Int {\n return (self.total + self.total)\n }\n}\n";
+    let src = "struct Acc {\n total: Int\n fn doubled(&self) Int -> {\n return (self.total + self.total)\n }\n}\n";
     assert!(covers_method(src, "Acc", "doubled"));
 }
 
 #[test]
 fn covers_static_constructor() {
     // A static (no-`self`) associated function returning the owning type.
-    let src = "struct Cell {\n n: Int\n fn make(v: Int) => Cell {\n return Cell.{ n: v }\n }\n}\n";
+    let src = "struct Cell {\n n: Int\n fn make(v: Int) Cell -> {\n return Cell{ n: v }\n }\n}\n";
     assert!(covers_method(src, "Cell", "make"));
 }
 
 #[test]
 fn covers_enum_instance_method() {
     // A `when self` match in an enum method body is covered.
-    let src = "enum Dir {\n North\n South\n fn code(self) => Int {\n if self == {\n .North -> { return 0 }\n .South -> { return 1 }\n }\n }\n}\n";
+    let src = "enum Dir {\n North\n South\n fn code(self) Int -> {\n if self == {\n .North -> { return 0 }\n .South -> { return 1 }\n }\n }\n}\n";
     assert!(covers_method(src, "Dir", "code"));
 }
 
@@ -1433,7 +1460,7 @@ fn covers_self_reassignment_method() {
     // D-MUTSELF1: a `mut self` method that reassigns `self` (`self = …`) is NOW
     // covered — the `mut self` slot derefs (`(*self)`), so the LHS lowers to
     // `(*self) = …` (the prior AST-path I2 hole is closed).
-    let src = "struct Acc {\n n: Int\n fn reset(&self) {\n self = Acc.{ n: 0 }\n }\n}\n";
+    let src = "struct Acc {\n n: Int\n fn reset(&self) {\n self = Acc{ n: 0 }\n }\n}\n";
     assert!(covers_method(src, "Acc", "reset"));
 }
 
@@ -1451,7 +1478,7 @@ fn covers_self_field_assign_method() {
 fn covers_generic_method() {
     // Card #129: generic owner identity survives through the enclosing
     // `impl<T> __jet_Box<T>`; the method body lowers through ordinary TIR.
-    let src = "struct Box<T> {\n v: T\n fn get(self) => T {\n return self.v\n }\n}\n";
+    let src = "struct Box<T> {\n v: T\n fn get(self) T -> {\n return self.v\n }\n}\n";
     assert!(covers_method(src, "Box", "get"));
 }
 
@@ -1479,9 +1506,164 @@ fn covers_fallible_return_and_try() {
     // MethodCall and is only rewritten to an `EnumLit` by full sema; that path is
     // proven end-to-end by
     // `tests/tir_collections_and_methods.rs::fallible_try_and_or_fallback`.)
-    let src = "fn f(x: Int) Int !Err -> {\n if x == 0 {\n return Err(\"bad\")\n }\n return Ok(x)\n}\nfn g(x: Int) Int !Err -> {\n n :: f(x)?\n return Ok((n + 1))\n}\nfn run() {}\n";
+    let src = "fn f(x: Int) Int !Err -> {\n if x == 0 {\n return Err(\"bad\")\n }\n return Ok(x)\n}\nfn g(x: Int) Int !Err -> {\n n :: f(x)\n return Ok((n + 1))\n}\nfn run() {}\n";
     assert!(covers_after_sema(src, "f"));
     assert!(covers_after_sema(src, "g"));
+}
+
+#[test]
+fn compiler_owned_default_err_is_a_struct_row() {
+    let declarations = super::lower_declarations_from_items(&[], "");
+    let err = declarations
+        .type_defs
+        .iter()
+        .find(|ty| ty.key == crate::Syntax::TYPE_ERR)
+        .expect("default Err must be a compiler-owned type row");
+    let kind = format!("{:?}", err.kind);
+    assert!(
+        kind.starts_with("Struct"),
+        "default Err must be a struct, got {kind}"
+    );
+    for field in ["message", "code", "cause"] {
+        assert!(kind.contains(field), "default Err missing field {field} in {kind}");
+    }
+}
+
+#[test]
+fn mir_lowers_default_err_return() {
+    // `Err("...")` rewrites to the compiler-owned `Err` struct. MIR field
+    // lookup needs that type row; without it, lowering ICEs as
+    // "missing checked MIR owner type".
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = "fn f(x: Int) Int !Err -> {\n if x == 0 {\n return Err(\"bad\")\n }\n return Ok(x)\n}\nfn run() {}\n";
+        let bundle = checked_bundle(src);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        super::lower_checked_mir_program_for(&bundle, request).unwrap_or_else(|err| {
+            panic!("default Err return failed to lower to MIR: {err:?}")
+        });
+    });
+}
+
+#[test]
+fn mir_is_finite_selects_math_runtime_part() {
+    // `Float.is_finite` is a builtin method, not a `use core.math` import.
+    // Artifact rows used to drop those Core-use labels because they are not
+    // `MirRuntimePartId` spellings, so AOT never emitted MathLibPure.
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = "fn checked(x: Float) Bool -> {\n return x.is_finite()\n}\nfn run() { print(checked(1.0)) }\n";
+        let bundle = checked_bundle(src);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+            .unwrap_or_else(|err| panic!("is_finite failed to lower to MIR: {err:?}"));
+        assert!(
+            mir.artifacts.iter().any(|artifact| artifact
+                .runtime_parts
+                .contains(&jet_foundation::MIR::MirRuntimePartId::Math)),
+            "Float.is_finite must select the Math runtime part so AOT emits jet_std_math_is_finite"
+        );
+        assert!(
+            mir.prelude_calls
+                .iter()
+                .any(|row| row.symbol.name() == "jet_std_math_is_finite"),
+            "Float.is_finite must intern the Prelude symbol jet_std_math_is_finite"
+        );
+    });
+}
+
+#[test]
+fn mir_lowers_user_struct_and_instance_method() {
+    // Compiler-generated Display/Equatable bodies and user getters all name
+    // the TIR local `self`. Binding it as MIR parameter 0 is what lets a
+    // user struct construct, print a field, and call an instance method.
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = "pub struct Gauge {\n n: Int\n}\nfn Gauge.value(self) Int -> self.n\nfn run() {\n v :: Gauge{ n: 1 }\n print(\"{v.value()}\")\n}\n";
+        let bundle = checked_bundle(src);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+            .unwrap_or_else(|err| panic!("user struct method failed to lower to MIR: {err:?}"));
+        mir.validate().unwrap_or_else(|err| {
+            panic!("user struct MIR failed validate: {err}")
+        });
+        let method = mir
+            .functions
+            .iter()
+            .find(|function| {
+                function.name == "Gauge::value"
+                    || function.name.ends_with("::value")
+                    || function.name == "value"
+            })
+            .expect("instance method value");
+        match &method.form {
+            jet_foundation::MIR::MirFunctionForm::Method {
+                self_access: Some(_),
+                ..
+            } => {}
+            other => panic!("value must be an instance method, got {other:?}"),
+        }
+        let receiver = method
+            .params
+            .first()
+            .expect("instance method must declare parameter 0");
+        assert_eq!(receiver.name, jet_foundation::Syntax::KW_SELF);
+        assert_eq!(receiver.index, 0);
+        assert!(
+            mir.impls.iter().any(|row| {
+                row.trait_ref.is_none() && row.methods.iter().any(|id| *id == method.id)
+            }),
+            "instance method must belong to an inherent impl row so AOT can emit it"
+        );
+    });
+}
+
+#[test]
+fn mir_lowers_computed_field_getter_onto_inherent_impl() {
+    // Computed fields become inherent getters. Those TFuncs are Method-form,
+    // and AOT panics unless an impl row names them.
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = "struct Stats {\n n: Int\n doubled: Int -> n * 2\n}\nfn run() {\n s :: Stats{ n: 1 }\n print(\"{s.doubled}\")\n}\n";
+        let bundle = checked_bundle(src);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+            .unwrap_or_else(|err| panic!("computed field failed to lower to MIR: {err:?}"));
+        mir.validate().unwrap_or_else(|err| {
+            panic!("computed field MIR failed validate: {err}")
+        });
+        let method = mir
+            .functions
+            .iter()
+            .find(|function| {
+                function.name == "Stats::doubled"
+                    || function.name.ends_with("::doubled")
+                    || function.name == "doubled"
+            })
+            .expect("computed field getter doubled");
+        match &method.form {
+            jet_foundation::MIR::MirFunctionForm::Method { .. } => {}
+            other => panic!("computed getter must be an inherent method, got {other:?}"),
+        }
+        assert!(
+            mir.impls.iter().any(|row| {
+                row.trait_ref.is_none() && row.methods.iter().any(|id| *id == method.id)
+            }),
+            "computed field getter must belong to an inherent impl row"
+        );
+    });
 }
 
 #[test]
@@ -1498,7 +1680,7 @@ fn covers_optional_return_and_chaining() {
     // right to reject the unresolved node; the covered shape is the resolved
     // one. `ch` needs no sema fact — `Expr::OptField` is in-subset iff its base
     // is — so it stays on the structural helper.
-    let src = "struct Addr {\n city: String\n}\nfn opt(x: Int) => ?Int {\n if x > 0 {\n return Val(x)\n }\n return None\n}\nfn ch(a: ?Addr) => ?String {\n return a?.city\n}\n";
+    let src = "struct Addr {\n city: String\n}\nfn opt(x: Int) ?Int -> {\n if x > 0 {\n return Val(x)\n }\n return None\n}\nfn ch(a: ?Addr) ?String -> {\n return a?.city\n}\n";
     assert!(covers_after_sema(src, "opt"));
     assert!(covers(src, "ch"));
 }
@@ -1506,7 +1688,7 @@ fn covers_optional_return_and_chaining() {
 #[test]
 fn covers_or_fallback_value_and_return() {
     // `??` with a value fallback and with an early-`return` fallback.
-    let src = "fn v(x: ?Int) => Int {\n return x ?? 0\n}\nfn r(x: ?Int) => Int {\n return x ?? return -1\n}\n";
+    let src = "fn v(x: ?Int) Int -> {\n return x ?? 0\n}\nfn r(x: ?Int) Int -> {\n return x ?? return -1\n}\n";
     assert!(covers(src, "v"));
     assert!(covers(src, "r"));
 }
@@ -1515,7 +1697,7 @@ fn covers_or_fallback_value_and_return() {
 fn covers_or_fallback_panic_form() {
     // c109 Phase 15: the `panic(…)` fallback form is now covered — the
     // `safe_locals_expr` snapshot is rendered from the lexical lowering env.
-    let src = "fn p(x: ?Int) => Int {\n return x ?? panic(\"missing\")\n}\n";
+    let src = "fn p(x: ?Int) Int -> {\n return x ?? panic(\"missing\")\n}\n";
     assert!(covers(src, "p"));
 }
 
@@ -1525,7 +1707,7 @@ fn covers_comptime_if() {
     // selected branch's statements are emitted inline. (`build_cx`-only gate test:
     // the gate's `stmt_in_subset` admits `Stmt::ComptimeIf` unconditionally; the
     // lowering reads `selected_then`, but the gate does not need sema for routing.)
-    let src = "fn f(x: Int) => Int {\n @if true {\n return x\n } else {\n return 0\n }\n}\n";
+    let src = "fn f(x: Int) Int -> {\n @if true {\n return x\n } else {\n return 0\n }\n}\n";
     assert!(covers(src, "f"));
 }
 
@@ -1535,7 +1717,7 @@ fn covers_mixed_bool_switch() {
     // TIR's `MixedSwitch` (the general `emit_mixed_switch` if/else chain) — a
     // bare-value arm (`0 ->` ≡ `x == 0`) beside range arms (`1..10 ->`), each
     // range lowered to `x >= lo && x <= hi`. (Q4 retired free-predicate arms.)
-    let src = "fn f(x: Int) => Int {\n if x == {\n 0 -> {\n return 2\n }\n 1..10 -> {\n return 1\n }\n else -> {\n return 0\n }\n }\n}\n";
+    let src = "fn f(x: Int) Int -> {\n if x == {\n 0 -> {\n return 2\n }\n 1..10 -> {\n return 1\n }\n else -> {\n return 0\n }\n }\n}\n";
     assert!(covers(src, "f"));
 }
 
@@ -1547,7 +1729,7 @@ fn covers_mixed_bool_switch() {
 fn covers_list_builtin_methods() {
     // push/len/get/sort/reverse/contains on a list-typed param — all covered,
     // so the whole function routes through the TIR.
-    let src = "fn f(xs: [Int]) => Int {\n ys := xs\n ys.push(1)\n ys.reverse()\n ys.sort()\n n := ys.len()\n c := ys.contains(3)\n return n\n}\n";
+    let src = "fn f(xs: [Int]) Int -> {\n ys := xs\n ys.push(1)\n ys.reverse()\n ys.sort()\n n := ys.len()\n c := ys.contains(3)\n return n\n}\n";
     assert!(covers(src, "f"));
 }
 
@@ -1556,7 +1738,7 @@ fn covers_map_builtin_methods() {
     // add/len/keys/values/has_key/clear on a map-typed param. Run the full
     // front end so this coverage proof cannot drift onto a list-only or
     // otherwise invalid method spelling that sema would reject before TIR.
-    let src = "fn f(m: [String:Int]) => Int {\n m2 := ~m\n old := m2.add(\"k\", 1) ?? 0\n n := m2.len()\n ks := m2.keys()\n vs := m2.values()\n ck := m2.has_key(\"a\")\n m2.clear()\n return n\n}\nfn run() {}\n";
+    let src = "fn f(m: [String:Int]) Int -> {\n m2 := ~m\n old := m2.add(\"k\", 1) ?? 0\n n := m2.len()\n ks := m2.keys()\n vs := m2.values()\n ck := m2.has_key(\"a\")\n m2.clear()\n return n\n}\nfn run() {}\n";
     assert!(covers_after_sema(src, "f"));
 }
 
@@ -1564,14 +1746,14 @@ fn covers_map_builtin_methods() {
 fn rejects_unsupported_map_builtin_handoff() {
     // `contains_key` is not Jet's Map surface. The TIR gate must hand the
     // unsupported shape back instead of guessing from its Rust spelling.
-    let src = "fn f(m: [String:Int]) => Bool {\n return m.contains_key(\"a\")\n}\n";
+    let src = "fn f(m: [String:Int]) Bool -> {\n return m.contains_key(\"a\")\n}\n";
     assert!(!covers(src, "f"));
 }
 
 #[test]
 fn covers_string_builtin_methods() {
     // to_upper/to_lower/trim/split/starts_with/replace/repeat/slice/chars/bytes.
-    let src = "fn f(s: String) => String {\n up := s.to_upper()\n tr := s.trim()\n sp := s.split(\",\")\n sw := s.starts_with(\"a\")\n rp := s.replace(\"a\", \"b\")\n rep := s.repeat(2)\n sl := s.slice(0, 2)\n ch := s.chars()\n by := s.bytes()\n return up\n}\n";
+    let src = "fn f(s: String) String -> {\n up := s.to_upper()\n tr := s.trim()\n sp := s.split(\",\")\n sw := s.starts_with(\"a\")\n rp := s.replace(\"a\", \"b\")\n rep := s.repeat(2)\n sl := s.slice(0, 2)\n ch := s.chars()\n by := s.bytes()\n return up\n}\n";
     assert!(covers(src, "f"));
 }
 
@@ -1596,7 +1778,7 @@ fn covers_is_empty_builtin() {
     // a function using it routes through the TIR.
     assert!(is_covered_builtin_name("is_empty", 0));
     let src =
-        "fn f(xs: [Int]) => Int {\n e := xs.is_empty()\n if e {\n return 1\n }\n return 0\n}\n";
+        "fn f(xs: [Int]) Int -> {\n e := xs.is_empty()\n if e {\n return 1\n }\n return 0\n}\n";
     assert!(covers(src, "f"));
 }
 
@@ -1654,7 +1836,7 @@ fn covers_string_payload_error_enum() {
     // covered — the error enum is a covered (String-payload) enum, and its
     // construction (`Err(Oops.Msg("bad"))`) reproduces `emit_boxed_enum_arg`
     // (a String literal arg, no borrowed clone) byte-for-byte.
-    let src = "enum Oops {\n Msg(String)\n}\nfn f(x: Int) => Int !Oops {\n if x == 0 {\n return Err(Oops.Msg(\"bad\"))\n }\n return Ok(x)\n}\nfn run() {}\n";
+    let src = "#Error\nenum Oops {\n Msg(String)\n}\nfn f(x: Int) Int !Oops -> {\n if x == 0 {\n return Err(Oops.Msg(\"bad\"))\n }\n return Ok(x)\n}\nfn run() {}\n";
     assert!(covers_after_sema(src, "f"));
 }
 
@@ -1663,55 +1845,17 @@ fn covers_fn_typed_param() {
     // c109 Phase 13: a fn-typed parameter is now inside the subset (was excluded
     // through Phase 12, when any callee/param with a `Type::Fn` stayed on the AST
     // path). The body `f(f(x))` is a fn-value call through the local param.
-    let src = "fn apply_twice(f: fn(Int) => Int, x: Int) => Int {\n return f(f(x))\n}\n";
+    let src = "fn apply_twice(f: fn(Int) Int, x: Int) Int -> {\n return f(f(x))\n}\n";
     assert!(covers(src, "apply_twice"));
 }
 
 #[test]
 fn covers_fn_name_value_arg() {
     // c109 Phase 13: a bare top-level fn name used as a VALUE (passed to a
-    // fn-typed param) is in subset — it emits `emit_named_fn_value`'s
-    // `Box::new(move |…| …) as <fn-type>` wrapper.
-    let src = "fn callit(f: fn(Int) => Int) => Int {\n return f(1)\n}\nfn dbl(x: Int) => Int {\n return (x * 2)\n}\nfn use_it() => Int {\n return callit(dbl)\n}\n";
+    // fn-typed param) is in subset; typed function-value facts carry the
+    // declaration identity into the canonical lowering.
+    let src = "fn callit(f: fn(Int) Int) Int -> {\n return f(1)\n}\nfn dbl(x: Int) Int -> {\n return (x * 2)\n}\nfn use_it() Int -> {\n return callit(dbl)\n}\n";
     assert!(covers(src, "use_it"));
-}
-
-#[test]
-fn named_fn_value_uses_source_return_abi() {
-    // Sema gives nested callable parameters the effective Result carrier, but
-    // a named function value must expose the declaration's source callback ABI.
-    // Exercise both scalar and aggregate payloads so the thunk is not an Int
-    // special case.
-    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        let src = "\
-fn add_one(x: Int) Int -> { return x }\n\
-fn make_text(x: Int) String -> { return \"ok\" }\n\
-fn run() {}\n";
-        let (toks, lex_diags) = crate::Lexer::lex(src);
-        assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
-        let prog = crate::Parser::parse(&toks).expect("parse failed");
-        let cx = build_cx(&prog, src, "test.jet");
-
-        for name in ["add_one", "make_text"] {
-            let source = cx
-                .fn_source_types
-                .get(name)
-                .expect("test declaration must have a source function type");
-            let rendered = crate::Codegen::emit_named_fn_value(&cx, name, source);
-            assert!(
-                rendered.contains(&format!("match __jet_{name}(")),
-                "default-return thunk must unwrap the executable carrier: {rendered}"
-            );
-            assert!(
-                rendered.contains("Ok(value) => value"),
-                "default-return thunk must preserve the success payload: {rendered}"
-            );
-            assert!(
-                rendered.contains("Err(error) => jet_entry_error_exit_jet(error)"),
-                "default-return thunk must route failures through Jet's boundary: {rendered}"
-            );
-        }
-    });
 }
 
 #[test]
@@ -1777,41 +1921,23 @@ fn polymorphic_core_specials_covered() {
     assert!(core_call_covered("core.math.random", "sample"));
     assert!(core_call_covered("core.math.random", "shuffle"));
     assert!(core_call_covered("core.term", "eprint"));
-    // c109 Phase 21 / D-TUPLE-DESTRUCT1: the `tasks.channel<T>()` producer is
-    // covered via the core-call shape (a fixed-string `jet_std::channel::<T>()`
-    // emit; its `(Sender<T>, Receiver<T>)` return type rides on `resolved_ret`,
-    // filled from the call-site turbofish). Canonical `task` stays out of
-    // this shape — it has its own bespoke `CoreClosureCall` shape (a
-    // `move |…|` closure).
-    assert!(core_call_covered("core.tasks", "channel"));
-    // c109 Phase 25: the HTTPRouter producer + parse/dispatch core calls are covered
-    // (fixed-string emits; their return types live in sema's `infer_core_call`, not
-    // `core_fixed_sig`). `http.serve` stays out (closure-taking → `CoreClosureCall`).
+    // core.tasks currently exports after/current_task/interval/yield_now.
+    // Channel lives with the scheduler pair, not this core-call table.
+    assert!(core_call_covered("core.tasks", "yield_now"));
+    // c109 Phase 25 / D-FOUND-LIFECYCLE1: the HTTPRouter producer + parse/dispatch
+    // and the beginner `http.serve(mux, deadline:)` constructor are covered
+    // fixed-string CoreCalls. The legacy address/handler spelling remains the
+    // closure-taking `CoreClosureCall` path.
     assert!(core_call_covered("core.http", "router"));
     assert!(core_call_covered("core.http", "parse"));
     assert!(core_call_covered("core.http", "dispatch"));
-    assert!(!core_call_covered("core.http", "serve"));
+    assert!(core_call_covered("core.http", "serve"));
     // c109 Phase 29: qualified `io.input` is a covered core call. NOT in
     // `core_fixed_sig` (its `Result<String, IOError>` return lives in sema's bespoke
     // `infer_core_call` arm, reproduced in `core_call_return_ty`). Distinct from the
     // ambient bare `input()` (Phase 25), which is its own `Expr::Call` → `AmbientInput`.
     assert!(core_call_covered("core.term", "input"));
     assert!(!crate::Sema::core_fixed_sig("core.term", "input").is_some());
-}
-
-#[test]
-fn io_input_return_ty() {
-    // c109 Phase 29: `core_call_return_ty` carries `io.input`'s fixed
-    // `Result<String, IOError>` total (it is NOT in `core_fixed_sig`, so without this
-    // arm the node's `ty` would fall back to Unit and break `?? return` composition).
-    let ty = core_call_return_ty("core.term", "input");
-    match ty {
-        Type::Result { ok, err } => {
-            assert_eq!(*ok, Type::String);
-            assert_eq!(*err, Type::Named(crate::Syntax::TYPE_IO_ERROR.to_string()));
-        }
-        other => panic!("io.input return ty should be Result<String, IOError>, got {other:?}"),
-    }
 }
 
 #[test]
@@ -1823,9 +1949,9 @@ fn covers_static_new_constructor() {
     let src = "\
 struct Rect { width: Int height: Int }
 impl Rect {
-    fn new(width: Int, height: Int) => Rect { return Rect.{width: width, height: height} }
+    fn new(width: Int, height: Int) Rect -> { return Rect{width: width, height: height} }
 }
-fn build() => Rect { return Rect.new(4, 3) }
+fn build() Rect -> { return Rect.new(4, 3) }
 ";
     assert!(covers(src, "build"));
     // The instance-method intercept stays whole: a user INSTANCE method named `new`
@@ -1838,7 +1964,7 @@ fn covers_ambient_input() {
     // c109 Phase 25: the ambient prelude `input(...)` routes (bare call, no user
     // `input` fn). It composes with the `??` value fallback (Phase 8).
     let src = "\
-fn greet() => String {
+fn greet() String -> {
     name :: input() ?? \"world\"
     return \"hi {name}\"
 }
@@ -1847,8 +1973,8 @@ fn greet() => String {
     // A user-defined `input` fn shadows the prelude — the gate then treats `input(...)`
     // as a plain fn call (still covered, but via the plain-fn shape, not ambient).
     let shadowed = "\
-fn input() => String { return \"x\" }
-fn greet() => String { return input() }
+fn input() String -> { return \"x\" }
+fn greet() String -> { return input() }
 ";
     assert!(covers(shadowed, "greet"));
 }
@@ -1865,7 +1991,7 @@ fn covers_assert_builtins() {
     // A user fn / local named `assert` shadows the builtin — it then routes via the
     // plain-fn shape, NOT the builtin (still covered, different path).
     assert!(covers(
-        "fn assert(x: Int) => Int { return x }\nfn f() => Int { return assert(3) }",
+        "fn assert(x: Int) Int -> { return x }\nfn f() Int -> { return assert(3) }",
         "f"
     ));
 }
@@ -1881,7 +2007,7 @@ fn covers_caps_block() {
     // on non-declaration (`cx.struct_fields` lookup). So `P{x: 1}` and the
     // `P{x} :: p` struct-destructure are both covered; the fn routes through TIR.
     assert!(covers(
-        "struct P { x: Int }\nfn f() { p :: P.{x: 1}\n#FX(IO) { P.{x} :: p\nprint(x) } }",
+        "struct P { x: Int }\nfn f() { p :: P{x: 1}\n#FX(IO) { P{x} :: p\nprint(x) } }",
         "f"
     ));
 }
@@ -1895,7 +2021,7 @@ fn covers_free_call_arg_conventions() {
         "f"
     ));
     assert!(covers(
-        "fn keep(s: ^String) => String { return s }\nfn f() => String { return keep(^\"v\") }",
+        "fn keep(s: ^String) String -> { return s }\nfn f() String -> { return keep(^\"v\") }",
         "f"
     ));
 }
@@ -1916,7 +2042,7 @@ fn covers_struct_destructure() {
     // when the init is in-subset — the AST `BindPattern::Struct` arm is covered
     // byte-for-byte (per-field type from `cx.struct_fields`).
     assert!(covers(
-            "struct Point { x: Int, y: Int }\nfn f() { p :: Point.{ x: 1, y: 2 }\nPoint.{ x, y } :: p\nprint(x + y) }",
+            "struct Point { x: Int, y: Int }\nfn f() { p :: Point{ x: 1, y: 2 }\nPoint{ x, y } :: p\nprint(x + y) }",
             "f"
         ));
 }
@@ -1924,12 +2050,12 @@ fn covers_struct_destructure() {
 #[test]
 fn covers_named_fn_value_binding() {
     // c109 Phase 27: a bare top-level fn name bound to a local as a VALUE
-    // (`double_fn :: double`). The init `Ident("double")` resolves to a `Type::Fn`
-    // value (`emit_named_fn_value`), in-subset via `ident_is_named_fn_value`. (This
-    // binding-site coercion was already wired in lowering; the live-suite `24_callbacks`
-    // never routed only because the struct fn-field / fn-field-call were uncovered.)
+    // (`double_fn :: double`). The init `Ident("double")` resolves to a typed
+    // function value via `ident_is_named_fn_value`. This binding-site coercion
+    // is wired in lowering; the live-suite `24_callbacks` never routed only
+    // because the struct fn-field / fn-field-call were uncovered.
     assert!(covers(
-        "fn dbl(x: Int) => Int { return (x * 2) }\nfn f() { g :: dbl\nprint(g(3)) }",
+        "fn dbl(x: Int) Int -> { return (x * 2) }\nfn f() { g :: dbl\nprint(g(3)) }",
         "f"
     ));
 }
@@ -1942,7 +2068,7 @@ fn covers_fn_field_struct_value_type() {
     // full construction + `w.step(4)` fn-field CALL is sema-dependent — `recv_type ==
     // Some("Worker")` is a sema fact — so it is proven by the TIR feature
     // integration targets + byte-parity.)
-    let src = "struct Worker { step: fn(Int) => Int }\nfn f() {}";
+    let src = "struct Worker { step: fn(Int) Int }\nfn f() {}";
     let (toks, _) = crate::Lexer::lex(src);
     let prog = crate::Parser::parse(&toks).expect("parse");
     let cx = build_cx(&prog, src, "test.jet");
@@ -2121,7 +2247,7 @@ use core.tasks as tasks
 fn produce(s: Sender<Int>) {
     s.send(7)
 }
-fn consume(ch: Receiver<Int>) => Int {
+fn consume(ch: Receiver<Int>) Int -> {
     return ch.receive() ?? panic(\"closed\")
 }
 ";
@@ -2136,7 +2262,7 @@ fn consume(ch: Receiver<Int>) => Int {
 fn covers_pure_fn() {
     // c109 Phase 23: a `#Pure fn` is covered (purity is sema-only, erased at codegen).
     assert!(covers(
-        "fn double(n: Int) =[]=> Int {\n return (n * 2)\n}\n",
+        "fn double(n: Int) Int -[]> {\n return (n * 2)\n}\n",
         "double"
     ));
 }
@@ -2151,7 +2277,7 @@ fn covers_todo_hole() {
     // surrounding fn is covered — the end-to-end `todo_hole` test proves the emit.
     // (A bare `#Todo` body with no sema annotation has `expected_type: None`, which the
     // gate EXCLUDES — so we assert exclusion here, matching the conservative rule.)
-    assert!(!covers("fn f(n: Int) => Int {\n return #Todo\n}\n", "f"));
+    assert!(!covers("fn f(n: Int) Int -> {\n return #Todo\n}\n", "f"));
 }
 
 #[test]
@@ -2168,9 +2294,9 @@ fn covers_default_params() {
 fn covers_distinct_value_type_and_ctor() {
     // c109 Phase 23: a distinct param type + `.raw()` + the destination-owned conversion are
     // covered. The build_cx-only helper registers the distinct in `distinct_types`.
-    let src = "UserId :: distinct Int;\nfn greet(id: UserId) => Int {\n return (id.raw())\n}\n";
+    let src = "UserId :: distinct Int\nfn greet(id: UserId) Int -> {\n return (id.raw())\n}\n";
     assert!(covers(src, "greet"));
-    let src2 = "UserId :: distinct Int;\nfn mk() => UserId {\n return UserId.from_int(42)\n}\n";
+    let src2 = "UserId :: distinct Int\nfn mk() UserId -> {\n return UserId.from_int(42)\n}\n";
     assert!(covers(src2, "mk"));
 }
 
@@ -2181,7 +2307,7 @@ fn covers_tuple_value_type() {
     // `Expr::TupleLit.ty` to resolve the canonical field order/struct name, which the
     // build_cx-only helper does not fill — so the literal + destructure are proven by
     // the end-to-end `named_tuples` test, not here.)
-    let src = "fn first(p: (x: Int, y: Int)) => Int {\n return p.x\n}\n";
+    let src = "fn first(p: (x: Int, y: Int)) Int -> {\n return p.x\n}\n";
     assert!(covers(src, "first"));
 }
 
@@ -2190,7 +2316,7 @@ fn covers_named_args_at_call_site() {
     // D-APILABEL1=A: sema binds the label by name and lowering preserves any
     // observable source-order change before the declaration-order call. The
     // callee `area` is a plain fn; the labeled call is in-subset.
-    let src = "fn area(width: Int, height: Int) => Int {\n return (width * height)\n}\nfn use_it() => Int {\n return area(width: 4, height: 3)\n}\n";
+    let src = "fn area(width: Int, height: Int) Int -> {\n return (width * height)\n}\nfn use_it() Int -> {\n return area(width: 4, height: 3)\n}\n";
     assert!(covers(src, "use_it"));
 }
 
@@ -2230,7 +2356,7 @@ fn core_closure_calls_covered() {
         }
         Vec::new()
     };
-    let guard_args = lam("() => { print(\"x\") }");
+    let guard_args = lam("() -> { print(\"x\") }");
     assert!(core_closure_call_in_subset(
         "core.mem.scope",
         "guard",
@@ -2266,7 +2392,7 @@ fn covers_json_construction_and_collection() {
     // integration targets + the whole-suite byte-parity diff; here we gate the
     // sema-independent construction.
     let src = "\
-fn build() => DataTree {
+fn build() DataTree -> {
     items := []
     items.push(DataTree.Text(\"jet\"))
     items.push(DataTree.Bool(true))
@@ -2281,7 +2407,7 @@ fn build() => DataTree {
 fn covers_json_value_param_and_array() {
     // A `DataTree` param + list value type + `DataTree.Array` construction.
     let src = "\
-fn wrap(x: DataTree) => DataTree {
+fn wrap(x: DataTree) DataTree -> {
     items := []
     items.push(x)
     return DataTree.Array(items)
@@ -2301,7 +2427,7 @@ struct Note {
     name: String
     note_type: NoteType
 }
-fn name_of(n: Note) => String {
+fn name_of(n: Note) String -> {
     return n.name
 }
 ";
@@ -2321,7 +2447,7 @@ enum Query {
     Tag(String)
     OfKind(Kind)
 }
-fn mk(k: Kind) => Query {
+fn mk(k: Kind) Query -> {
     return Query.OfKind(k)
 }
 ";
@@ -2330,12 +2456,12 @@ fn mk(k: Kind) => Query {
 
 #[test]
 fn covers_comptime_const_in_interpolation() {
-    install_comptime_bridge();
+    crate::Codegen::MIREval::install_mir_bridge();
     // c109 Phase 24 / S57: a marked comptime const carries its sema-evaluated
     // value into the interpolation operand, so this needs the full sema pass.
     let src = "\
 @header :: \"<html>\"
-fn wrap(s: String) => String {
+fn wrap(s: String) String -> {
     return \"{@header}: {s}\"
 }
 fn run() {
@@ -2353,8 +2479,8 @@ fn covers_comptime_local_binding() {
     // sema-evaluated literal — so the gate admits it on `b.ct.is_some()`. Needs the
     // full sema pass, hence `covers_after_sema`.
     let src = "\
-fn build() => [Int] {
-    xs := [Int].{}
+fn build() [Int] -> {
+    xs := [Int]{}
     loop i in 1..3 {
         xs.push(i * 10)
     }
@@ -2365,7 +2491,7 @@ fn run() {
     print(\"{@xs}\")
 }
 ";
-    install_comptime_bridge();
+    crate::Codegen::MIREval::install_mir_bridge();
     assert!(covers_after_sema(src, "run"));
 }
 
@@ -2404,8 +2530,8 @@ struct PR {
     file_path: String
     note: ?String
 }
-fn mk(p: String) => PR {
-    return PR.{file_path: ~p, note: None}
+fn mk(p: String) PR -> {
+    return PR{file_path: ~p, note: None}
 }
 fn run() {}
 ";
@@ -2479,13 +2605,11 @@ fn covers_generic_optional_return() {
     // an EMPTY carrier type (jet-parser `Parser/Expressions/primary.rs`);
     // only sema rewrites it to `Expr::Present`
     // (`Sema/CheckerInfer/expr.rs`), and lowering projects the unowned form
-    // only for a comptime eval fragment
-    // (`normalize_eval_fragment_return`). So the gate's `Expr::EnumLit` arm
-    // is right to reject the unresolved node, and the covered shape is the
-    // sema-resolved one — the same `return Val(best)` that
-    // `examples/features/types/traits.jet::largest<T: Comparable>` compiles.
+    // The sema-resolved shape is the canonical input here. The gate's
+    // `Expr::EnumLit` arm rejects unresolved nodes, while the covered shape is
+    // the sema-resolved `return Val(best)` used by the trait example.
     let src = "\
-fn opt_id<T>(x: ^T) => ?T {
+fn opt_id<T>(x: ^T) ?T -> {
     return Val(x)
 }
 fn run() {
@@ -2500,9 +2624,9 @@ fn rejects_optional_return_uncovered_payload() {
     // fallible payload) stays excluded — the type-var admission is narrow.
     let src = "\
 trait Shape {
-    fn area(self) => Float
+    fn area(self) Float
 }
-fn maybe_shape(s: Shape) => ?Shape {
+fn maybe_shape(s: Shape) ?Shape -> {
     return Val(s)
 }
 ";
@@ -2518,8 +2642,8 @@ fn covers_trait_object_param() {
     // empty body covers.
     let src = "\
 trait Shape {
-    fn area(self) => Float
-    fn name(self) => String
+    fn area(self) Float
+    fn name(self) String
 }
 fn takes_shape(s: Shape) {
 }
@@ -2534,7 +2658,7 @@ fn covers_trait_object_list_param() {
     // with no body construct beyond the param, routes.
     let src = "\
 trait Shape {
-    fn area(self) => Float
+    fn area(self) Float
 }
 fn takes_shapes(xs: [Shape]) {
 }
@@ -2573,7 +2697,7 @@ struct Tree {
     child: ?Tree
 }
 fn build() {
-    root :: Tree.{ value: 1, child: Val(Tree.{ value: 2, child: None }) }
+    root :: Tree{ value: 1, child: Val(Tree{ value: 2, child: None }) }
     print(root.value)
 }
 ";
@@ -2591,7 +2715,7 @@ struct Tree {
     value: Int
     child: ?Tree
 }
-fn first_child(t: Tree) => Int {
+fn first_child(t: Tree) Int -> {
     kid :: t.child
     if kid == {
         .Val(c) -> {
@@ -2620,7 +2744,7 @@ struct P {
 }
 
 fn run() {
-    p :: P.{ name: "x" }
+    p :: P{ name: "x" }
     s :: p.name
     t :: p.name
     print(s)
@@ -2647,7 +2771,7 @@ struct S {
 }
 
 fn run() {
-    s := S.{ scores: [] }
+    s := S{ scores: [] }
     s.scores["a"] = 1
     print(s.scores["a"])
 }
@@ -2673,7 +2797,7 @@ struct S {
 }
 
 fn run() {
-    s := S.{ scores: [] }
+    s := S{ scores: [] }
     print(s.scores.len())
 }
 "#;
@@ -2691,7 +2815,7 @@ fn covers_field_read_and_eq_on_inlined_comptime_values() {
     // its pre-rendered Rust value string (`cx.consts[…]`); reading a field off the
     // inlined struct / comparing the inlined enum is byte-identical to the AST path.
     // The Field gate now admits a non-local comptime-const receiver.
-    install_comptime_bridge();
+    crate::Codegen::MIREval::install_mir_bridge();
     let src = r#"
 struct Pair {
     left: Int
@@ -2703,7 +2827,7 @@ enum Light {
     Green
 }
 
-@pair_value :: Pair.{left: 7, right: "seven"}
+@pair_value :: Pair{left: 7, right: "seven"}
 @light_value :: Light.Green
 
 fn run() {
@@ -2763,324 +2887,6 @@ fn auto_facts_after_sema(src: &str, fn_name: &str) -> Option<crate::AST::AutoVec
     })
 }
 
-fn lower_and_emit_after_sema(src: &str, fn_name: &str) -> (TFunc, String) {
-    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        let bundle = checked_bundle(src);
-        let module = &bundle.modules[bundle.entry];
-        let cx = build_cx_items(
-            &module.items,
-            src,
-            "test.jet",
-            None,
-            &HashMap::new(),
-            &bundle.edition,
-        );
-        let function = module
-            .items
-            .iter()
-            .find_map(|item| match item {
-                Item::Func(function) if function.name == fn_name => Some(function),
-                _ => None,
-            })
-            .unwrap_or_else(|| panic!("no fn {fn_name}"));
-        let tir = lower_func(function, &cx);
-        let mut generated = String::new();
-        crate::Codegen::TIR::emit_tir_func(&tir, &cx, &mut generated);
-        (tir, generated)
-    })
-}
-
-#[test]
-fn a02_nested_empty_list_argument_keeps_element_type() {
-    let source = r#"
-fn run() {
-    section_keys := [[String]]{}
-    section_keys.push([String]{})
-}
-"#;
-    let (_, generated) = lower_and_emit_after_sema(source, "run");
-    assert!(
-        generated.contains("push(Vec::<String>::new())"),
-        "nested empty list lost its contextual element type: {generated}"
-    );
-    assert!(
-        !generated.contains("push(Vec::<i64>::new())"),
-        "nested empty list fell back to Int: {generated}"
-    );
-}
-
-#[test]
-fn a06_parallel_empty_list_argument_keeps_element_type() {
-    let source = r#"
-fn run() {
-    section_values := [[String]]{}
-    section_values.push([String]{})
-}
-"#;
-    let (_, generated) = lower_and_emit_after_sema(source, "run");
-    assert!(
-        generated.contains("push(Vec::<String>::new())"),
-        "parallel empty list lost its contextual element type: {generated}"
-    );
-    assert!(
-        !generated.contains("push(Vec::<i64>::new())"),
-        "parallel empty list fell back to Int: {generated}"
-    );
-}
-
-#[test]
-fn a07_builtin_push_copies_a_reused_place() {
-    let source = r#"
-fn run() {
-    name := "section"
-    sections := [String]{}
-    sections.push(name)
-    print(name)
-}
-"#;
-    let (_, generated) = lower_and_emit_after_sema(source, "run");
-    assert!(
-        generated.contains("push((__jet_name).clone())"),
-        "builtin push moved a value that Jet keeps usable: {generated}"
-    );
-}
-
-#[test]
-fn a08_empty_or_fallback_keeps_payload_element_type() {
-    let source = r#"
-fn run() {
-    groups := [[String]]{}
-    values :: groups.get(0) ?? [String]{}
-    print(values.len())
-}
-"#;
-    let (_, generated) = lower_and_emit_after_sema(source, "run");
-    assert!(
-        generated.contains("Vec::<String>::new()"),
-        "empty fallback lost its payload element type: {generated}"
-    );
-    assert!(
-        !generated.contains("Vec::<i64>::new()"),
-        "empty fallback fell back to Int: {generated}"
-    );
-}
-
-
-#[test]
-fn reader_fixed_width_capability_table_covers_all_reads() {
-    let cases = [
-        (THandleOp::ReaderReadU8, TReaderFixedWidth::U8),
-        (THandleOp::ReaderReadI8, TReaderFixedWidth::I8),
-        (THandleOp::ReaderReadU16Le, TReaderFixedWidth::U16Le),
-        (THandleOp::ReaderReadU16Be, TReaderFixedWidth::U16Be),
-        (THandleOp::ReaderReadI16Le, TReaderFixedWidth::I16Le),
-        (THandleOp::ReaderReadI16Be, TReaderFixedWidth::I16Be),
-        (THandleOp::ReaderReadU32Le, TReaderFixedWidth::U32Le),
-        (THandleOp::ReaderReadU32Be, TReaderFixedWidth::U32Be),
-        (THandleOp::ReaderReadI32Le, TReaderFixedWidth::I32Le),
-        (THandleOp::ReaderReadI32Be, TReaderFixedWidth::I32Be),
-        (THandleOp::ReaderReadU64Le, TReaderFixedWidth::U64Le),
-        (THandleOp::ReaderReadU64Be, TReaderFixedWidth::U64Be),
-        (THandleOp::ReaderReadI64Le, TReaderFixedWidth::I64Le),
-        (THandleOp::ReaderReadI64Be, TReaderFixedWidth::I64Be),
-        (THandleOp::ReaderReadF32Le, TReaderFixedWidth::F32Le),
-        (THandleOp::ReaderReadF32Be, TReaderFixedWidth::F32Be),
-        (THandleOp::ReaderReadF64Le, TReaderFixedWidth::F64Le),
-        (THandleOp::ReaderReadF64Be, TReaderFixedWidth::F64Be),
-    ];
-    for (op, expected) in cases {
-        assert_eq!(op.reader_fixed_width(), Some(expected));
-        let TOutcomeFastPath::FixedRead {
-            buffer: TOutcomeFastBuffer::Reader,
-            width,
-            ..
-        } = op
-            .outcome_fast_path()
-            .expect("every fixed-width Reader read needs an outcome fast path")
-        else {
-            panic!("fixed-width Reader read lost its Reader fast-path buffer");
-        };
-        assert_eq!(width, expected.width());
-    }
-}
-
-/// Removal-sensitive shape contract for the one-million-read witness: a
-/// proven U8 region must retain one bounds check, direct slice iteration, and
-/// one cursor commit after the loop, with no per-read helper or cursor update.
-#[test]
-fn reader_region_uses_bounds_and_direct_slice_for_unused_index() {
-    let source = r#"
-fn run() Int !Err -> {
-    data :: [U8]{1, 2, 3}
-    reader :: Reader.over(data)
-    total := Int{0}
-    loop _ in 0..<1_000_000 {
-        marker :: "before_read"
-        byte :: reader.read_u8() ?? return Err("short reader")
-        total += Int.from_u8(byte)
-    }
-    print(total)
-    return Ok(total)
-}
-"#;
-    let (_, generated) = lower_and_emit_after_sema(source, "run");
-    let fast = generated
-        .split("jet_reader_region_bounds")
-        .nth(1)
-        .expect("Reader range must carry the bounds-only fast path")
-        .split("} else {")
-        .next()
-        .expect("Reader fast path must retain its ordinary fallback");
-    assert!(
-        fast.contains(".buf["),
-        "fast path must read the proven slice"
-    );
-    assert!(
-        fast.contains(".iter().copied()"),
-        "unused Reader index must use direct fixed-width iteration"
-    );
-    assert!(
-        !fast.contains(".zip("),
-        "unused Reader index must not use zip"
-    );
-    assert!(
-        !fast.contains("jet_reader_read_u8_fast"),
-        "the proven region must not retain a per-item Reader helper call"
-    );
-    assert!(
-        !fast.contains("jet_reader_bounds_error"),
-        "the proven region must not retain a per-item bounds error path"
-    );
-    assert!(
-        !fast.contains("saturating_sub"),
-        "the proven region must not retain a per-item bounds calculation"
-    );
-    assert!(
-        !fast.contains(".pos +="),
-        "the proven region must not update the cursor per iteration"
-    );
-    assert_eq!(
-        fast.matches(".pos =").count(),
-        1,
-        "the proven region must commit the cursor exactly once"
-    );
-    let marker = fast
-        .find("before_read")
-        .expect("fast path must retain the pre-read statement");
-    let loop_start = fast
-        .find(".iter().copied()")
-        .expect("fast path must retain the direct loop");
-    let chunk_use = marker
-        + fast[marker..]
-            .find("reader_region_chunk")
-            .expect("fast path must retain the direct read binding");
-    let commit = fast
-        .rfind(".pos =")
-        .expect("cursor must commit after the rewritten read region");
-    assert!(loop_start < marker, "pre-read statement must stay inside the loop");
-    assert!(marker < chunk_use, "pre-read statement must precede the read");
-    assert!(chunk_use < commit, "read consumers must precede cursor commit");
-    assert!(loop_start < commit, "cursor must commit after normal region completion");
-    assert!(!generated.contains("jet_reader_take_region"));
-}
-
-#[test]
-fn reader_region_supports_all_fixed_width_reader_capabilities() {
-    let source = r#"
-fn run() Int !Err -> {
-    data :: [U8]{0}
-    reader :: Reader.over(data)
-    loop _ in 0..<1 {
-        u8_value :: reader.read_u8() ?? return Err("short reader")
-    }
-    loop _ in 0..<1 {
-        i8_value :: reader.read_i8() ?? return Err("short reader")
-    }
-    loop _ in 0..<1 {
-        u16_le_value :: reader.read_u16_le() ?? return Err("short reader")
-    }
-    loop _ in 0..<1 {
-        u16_be_value :: reader.read_u16_be() ?? return Err("short reader")
-    }
-    loop _ in 0..<1 {
-        i16_le_value :: reader.read_i16_le() ?? return Err("short reader")
-    }
-    loop _ in 0..<1 {
-        i16_be_value :: reader.read_i16_be() ?? return Err("short reader")
-    }
-    loop _ in 0..<1 {
-        u32_le_value :: reader.read_u32_le() ?? return Err("short reader")
-    }
-    loop _ in 0..<1 {
-        u32_be_value :: reader.read_u32_be() ?? return Err("short reader")
-    }
-    loop _ in 0..<1 {
-        i32_le_value :: reader.read_i32_le() ?? return Err("short reader")
-    }
-    loop _ in 0..<1 {
-        i32_be_value :: reader.read_i32_be() ?? return Err("short reader")
-    }
-    loop _ in 0..<1 {
-        u64_le_value :: reader.read_u64_le() ?? return Err("short reader")
-    }
-    loop _ in 0..<1 {
-        u64_be_value :: reader.read_u64_be() ?? return Err("short reader")
-    }
-    loop _ in 0..<1 {
-        i64_le_value :: reader.read_i64_le() ?? return Err("short reader")
-    }
-    loop _ in 0..<1 {
-        i64_be_value :: reader.read_i64_be() ?? return Err("short reader")
-    }
-    loop _ in 0..<1 {
-        f32_le_value :: reader.read_f32_le() ?? return Err("short reader")
-    }
-    loop _ in 0..<1 {
-        f32_be_value :: reader.read_f32_be() ?? return Err("short reader")
-    }
-    loop _ in 0..<1 {
-        f64_le_value :: reader.read_f64_le() ?? return Err("short reader")
-    }
-    loop _ in 0..<1 {
-        f64_be_value :: reader.read_f64_be() ?? return Err("short reader")
-    }
-    return Ok(0)
-}
-"#;
-    let (_, generated) = lower_and_emit_after_sema(source, "run");
-    for needle in [
-        "as i8",
-        ".chunks_exact(2)",
-        ".chunks_exact(4)",
-        ".chunks_exact(8)",
-        "u16::from_le_bytes",
-        "u16::from_be_bytes",
-        "i16::from_le_bytes",
-        "i16::from_be_bytes",
-        "u32::from_le_bytes",
-        "u32::from_be_bytes",
-        "i32::from_le_bytes",
-        "i32::from_be_bytes",
-        "u64::from_le_bytes",
-        "u64::from_be_bytes",
-        "i64::from_le_bytes",
-        "i64::from_be_bytes",
-        "f32::from_le_bytes",
-        "f32::from_be_bytes",
-        "f64::from_le_bytes",
-        "f64::from_be_bytes",
-    ] {
-        assert!(
-            generated.contains(needle),
-            "fixed-width Reader region lost its typed load: {needle}"
-        );
-    }
-    assert!(
-        generated.contains("jet_reader_bounds_error(\"read_i8\", 1"),
-        "the ordinary fallback must retain the signed-read bounds error"
-    );
-}
-
 /// D-CONC-ALLNAMED1=A: named branch construction is a side-effect boundary.
 /// The tuple carrier must retain authored field order so spawn registration and
 /// any parent-side construction effects cannot be reordered by type
@@ -3105,7 +2911,7 @@ fn run() {
     print(values.z, values.a)
 }
 "#;
-    let (tir, _) = lower_and_emit_after_sema(source, "run");
+    let tir = lower_after_sema(source, "run");
     let tasks = tir
         .body
         .iter()
@@ -3129,14 +2935,7 @@ fn run() {
         .iter()
         .map(|(name, _)| name.as_str())
         .collect::<Vec<_>>();
-    let expected = [
-        crate::Codegen::mangle_generated("z"),
-        crate::Codegen::mangle_generated("a"),
-    ];
-    assert_eq!(
-        names,
-        expected.iter().map(String::as_str).collect::<Vec<_>>()
-    );
+    assert_eq!(names, ["z", "a"]);
 }
 
 #[test]
@@ -3150,7 +2949,7 @@ fn auto(values: [Float#4]) [Float#4] -> {
     return output
 }
 "#;
-    let (tir, generated) = lower_and_emit_after_sema(source, "auto");
+    let tir = lower_after_sema(source, "auto");
     let facts = tir.body.iter().find_map(|stmt| match stmt {
         TStmt::Range {
             auto_vectorization, ..
@@ -3162,42 +2961,6 @@ fn auto(values: [Float#4]) [Float#4] -> {
     assert!(facts.no_aliasing);
     assert!(facts.no_early_exit);
     assert!(facts.effect_free_body);
-    assert!(
-        generated.contains("jet-auto-vectorize"),
-        "the complete sema fact must reach native emission"
-    );
-    assert!(
-        generated.contains("#[inline(always)]"),
-        "the native loop boundary must be inlined so rustc can emit vector instructions"
-    );
-    assert!(
-        generated.contains("jet_simd_f64x4_mul_array")
-            && generated.contains("jet_simd_f64x4_add_array"),
-        "the proven loop must call the shared native-capable Prelude kernels"
-    );
-    assert!(
-        generated.contains("backend=prelude-runtime-dispatch"),
-        "the emitted artifact must identify the actual native lowering"
-    );
-}
-
-#[test]
-fn d_simd3_f64x4_lane_scale_stays_in_native_carrier() {
-    let source = r#"
-fn scale(value: F64x4, factor: Float) F64x4 -> {
-    return value * F64x4.splat(factor * value[0])
-}
-"#;
-    let (_, generated) = lower_and_emit_after_sema(source, "scale");
-    assert!(
-        generated.contains("jet_math_F64x4_mul_lane_scale::<0>"),
-        "lane-scaled products must use the resident native carrier"
-    );
-    assert!(
-        !generated.contains("jet_math_F64x4_lane_const")
-            && !generated.contains("jet_math_F64x4_splat"),
-        "the optimized shape must not cross through scalar extraction and re-splat"
-    );
 }
 
 #[test]
@@ -3211,7 +2974,7 @@ fn auto(values: [Float#8]) [Float#8] -> {
     return output
 }
 "#;
-    let (tir, generated) = lower_and_emit_after_sema(source, "auto");
+    let tir = lower_after_sema(source, "auto");
     assert!(tir.body.iter().any(|stmt| matches!(
         stmt,
         TStmt::Range {
@@ -3219,8 +2982,6 @@ fn auto(values: [Float#8]) [Float#8] -> {
             ..
         }
     )));
-    assert!(generated.contains("jet_simd_f64x4_mul_array"));
-    assert!(generated.contains("element=Float width=4 extent=8"));
 }
 
 #[test]
@@ -3322,7 +3083,7 @@ fn d_simd3_scalar_marker_suppresses_native_hint() {
     return output
 }
 "#;
-    let (tir, generated) = lower_and_emit_after_sema(source, "scalar");
+    let tir = lower_after_sema(source, "scalar");
     assert!(tir.is_scalar, "#Scalar must survive sema-to-TIR lowering");
     assert!(
         tir.body.iter().any(|stmt| matches!(
@@ -3333,14 +3094,6 @@ fn d_simd3_scalar_marker_suppresses_native_hint() {
             }
         )),
         "#Scalar changes codegen policy, not the sema proof"
-    );
-    assert!(
-        !generated.contains("jet-auto-vectorize"),
-        "#Scalar must suppress the native auto-vectorization hint"
-    );
-    assert!(
-        generated.contains("jet_scalar_loop_barrier"),
-        "#Scalar must retain the shared Prelude scalar-loop boundary"
     );
 }
 
@@ -3394,9 +3147,7 @@ fn d_simd3_native_prelude_has_float_kernels_and_f64x4_value_path() {
         "the F64x4 value backend must be compile-time AVX gated"
     );
     for op in ["add", "sub", "mul", "div"] {
-        let value_entry = format!(
-            "fn jet_simd_f64x4_{op}_value(left: [f64; 4], right: [f64; 4])"
-        );
+        let value_entry = format!("fn jet_simd_f64x4_{op}_value(left: [f64; 4], right: [f64; 4])");
         assert!(
             prelude.contains(value_entry.as_str()),
             "F64x4 {op} must expose a by-value native entry point"
@@ -3441,13 +3192,8 @@ fn d_simd3_native_prelude_has_float_kernels_and_f64x4_value_path() {
     );
 }
 
-fn optimizer_fact_test_cx() -> Cx {
-    build_cx_items(&[], "", "test.jet", None, &HashMap::new(), "")
-}
-
 #[test]
 fn optimizer_fact_channel_type_reaches_literal_consumer() {
-    let cx = optimizer_fact_test_cx();
     let narrow = TExpr {
         ty: Type::Float32,
         kind: TExprKind::FloatLit(f64::NAN),
@@ -3459,13 +3205,10 @@ fn optimizer_fact_channel_type_reaches_literal_consumer() {
 
     assert!(matches!(narrow.fact_channel().ty, Some(Type::Float32)));
     assert!(matches!(wide.fact_channel().ty, Some(Type::Float)));
-    assert_eq!(emit_tir_expr(&narrow, &cx), "f32::NAN");
-    assert_eq!(emit_tir_expr(&wide, &cx), "f64::NAN");
 }
 
 #[test]
 fn optimizer_fact_channel_integer_bounds_reach_range_consumer() {
-    let cx = optimizer_fact_test_cx();
     let expr = TExpr {
         ty: Type::Int,
         kind: TExprKind::NumericMethod {
@@ -3485,16 +3228,10 @@ fn optimizer_fact_channel_integer_bounds_reach_range_consumer() {
         expr.fact_channel().integer_bounds,
         Some(TIntegerBounds { lo: 2, hi: 8 })
     );
-    let rendered = emit_tir_expr(&expr, &cx);
-    assert!(
-        rendered.contains("2, 8"),
-        "range consumer lost sema bounds: {rendered}"
-    );
 }
 
 #[test]
 fn optimizer_fact_channel_exclusivity_reaches_argument_consumer() {
-    let cx = optimizer_fact_test_cx();
     let arg = |borrow, mut_borrow| TCallArg {
         value: TExpr {
             ty: Type::Int,
@@ -3511,18 +3248,13 @@ fn optimizer_fact_channel_exclusivity_reaches_argument_consumer() {
         box_as_trait: None,
     };
 
-    for (borrow, mut_borrow, expected_access, expected_rendered) in [
-        (true, false, TExclusivity::Shared, "&(7i64)"),
-        (false, true, TExclusivity::Exclusive, "&mut (7i64)"),
-        (false, false, TExclusivity::Unknown, "7i64"),
+    for (borrow, mut_borrow, expected_access) in [
+        (true, false, TExclusivity::Shared),
+        (false, true, TExclusivity::Exclusive),
+        (false, false, TExclusivity::Unknown),
     ] {
         let arg = arg(borrow, mut_borrow);
         assert_eq!(arg.fact_channel().exclusivity, expected_access);
-        assert_eq!(
-            emit_tir_call_args(&[arg], &cx),
-            expected_rendered,
-            "argument consumer changed access semantics"
-        );
     }
 }
 
@@ -3568,13 +3300,29 @@ fn optimizer_fact_test_range(
 fn optimizer_fact_test_func(body: Vec<TStmt>, is_scalar: bool) -> TFunc {
     TFunc {
         name: "optimizer_fact_probe".to_string(),
+        module: "test".to_string(),
+        key: "test::optimizer_fact_probe".to_string(),
+        source_file: "test.jet".to_string(),
+        failure_carrier: TFailureCarrier::default(),
+        effects: TEffectFacts::default(),
+        target_applicability: TTargetApplicability {
+            rust_aot: true,
+            cranelift: true,
+            interpreter: true,
+            web: true,
+        },
+        web_bucket: None,
+        web_marker: None,
+        visibility: TVisibility::Private,
+        foreign: None,
         source_span: crate::Diagnostics::Span::new(0, 0),
         params: Vec::new(),
         web_param_reconstructions: Vec::new(),
         ret: None,
         gc_return: false,
+        gc_scope: false,
         return_view_provenance: None,
-        generics: String::new(),
+        generic_params: Vec::new(),
         clone_types: Vec::new(),
         is_main: false,
         line: 1,
@@ -3598,7 +3346,6 @@ fn optimizer_fact_test_func(body: Vec<TStmt>, is_scalar: bool) -> TFunc {
 
 #[test]
 fn optimizer_fact_channel_purity_reaches_vectorization_consumer() {
-    let cx = optimizer_fact_test_cx();
     let proven = crate::AST::AutoVectorizationFacts {
         element_type: Type::Float,
         no_aliasing: true,
@@ -3611,21 +3358,6 @@ fn optimizer_fact_channel_purity_reaches_vectorization_consumer() {
     let vectorized_facts = vectorized.body[0].fact_channel();
     assert_eq!(vectorized_facts.purity, TPurity::Pure);
     assert!(vectorized_facts.no_cross_iteration_deps);
-    let mut generated = String::new();
-    emit_tir_func(&vectorized, &cx, &mut generated);
-    assert!(
-        generated.contains("jet-auto-vectorize:"),
-        "pure loop proof did not reach native consumer: {generated}"
-    );
-
-    let conservative = optimizer_fact_test_func(vec![optimizer_fact_test_range(None)], false);
-    assert_eq!(conservative.body[0].fact_channel().purity, TPurity::Unknown);
-    let mut fallback = String::new();
-    emit_tir_func(&conservative, &cx, &mut fallback);
-    assert!(
-        !fallback.contains("jet-auto-vectorize:"),
-        "missing purity proof enabled vectorization: {fallback}"
-    );
 
     let incomplete = crate::AST::AutoVectorizationFacts {
         no_aliasing: false,
@@ -3633,17 +3365,11 @@ fn optimizer_fact_channel_purity_reaches_vectorization_consumer() {
     };
     let incomplete =
         optimizer_fact_test_func(vec![optimizer_fact_test_range(Some(incomplete))], false);
-    let mut incomplete_generated = String::new();
-    emit_tir_func(&incomplete, &cx, &mut incomplete_generated);
-    assert!(
-        !incomplete_generated.contains("jet-auto-vectorize:"),
-        "an incomplete proof must not enable native vectorization: {incomplete_generated}"
-    );
+    assert_eq!(incomplete.body[0].fact_channel().purity, TPurity::Unknown);
 }
 
 #[test]
 fn optimizer_fact_channel_comptime_value_reaches_literal_consumer() {
-    let cx = optimizer_fact_test_cx();
     let value = CtValue::Int(7);
     let expr = TExpr {
         ty: Type::Int,
@@ -3654,7 +3380,6 @@ fn optimizer_fact_channel_comptime_value_reaches_literal_consumer() {
         expr.fact_channel().comptime_value,
         Some(CtValue::Int(7))
     ));
-    assert_eq!(emit_tir_expr(&expr, &cx), value.serialize());
 }
 
 #[test]

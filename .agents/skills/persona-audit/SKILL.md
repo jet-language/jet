@@ -12,6 +12,12 @@ define a concrete project and its core loop, run representative examples with
 `scripts/agent/jet-env`, and report push/pull factors plus a clear verdict
 (`ship-ready` / `usable-with-friction` / `blocked`).
 
+Before running, read `.agents/skills/_shared/audit-dispositions.md`. It owns
+shared publication, workflow-boundary, and disposition mechanics; this method
+still owns persona selection, live project loops, first-session measurements,
+and verdicts.
+
+
 ## The standing lens
 
 Apply `.agents/skills/_shared/standing-lens.md` in full: the four questions, the
@@ -73,21 +79,11 @@ before they could start, and which error text left them stuck. Record a
 throwaway "this reads nicely" or "this made me sigh" verbatim. A preference
 remark is evidence about the surface even when it is not evidence about the
 technology.
-
 ## Output
 
-Write one markdown report under `docs/audits/` via the Tower CLI (never hand-edit board JSON):
-
-```
-node plugins/tower/tower.mjs docs add --section audits --id <skill>-YYYY-MM-DD --title "…" --file -
-```
-
-Or `docs update docs/audits/<skill>-YYYY-MM-DD.md --file -` for the same day only when the owner asks to revise that run.
-Never overwrite a different day's note. Do not write reports under `docs/plans/`.
-
-Follow `AGENTS.md`. Pick this skill alone — do not chain other audit/research
-skills unless the owner asks.
-
-Before close, add the required per-finding disposition table from
-`.agents/skills/_shared/audit-dispositions.md`. Every finding must name a Tower
-card, a ratified decision, or a concrete no-action reason.
+This is a report-only method. Write one markdown report under `docs/audits/`
+through the project-approved non-serve CLI. Do not create Tower work or
+implementation edits unless the owner explicitly asks. Read
+`.agents/skills/_shared/audit-dispositions.md` before the run and use it for
+publication rules and the required finding-disposition table. Keep persona
+verdicts, first-session non-results, and implementation completion distinct.

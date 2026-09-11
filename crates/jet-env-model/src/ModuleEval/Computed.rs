@@ -5,7 +5,7 @@ use std::path::Path;
 
 use crate::Comptime::{self, CtValue};
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::AST::{Expr, Func};
+use crate::AST::{CtKey, EnumLitArg, Expr, Func};
 
 use super::Eval::check_build_io;
 
@@ -48,7 +48,77 @@ pub(crate) fn evaluate_expression(
     base_dir: &Path,
 ) -> Result<CtValue, Diagnostic> {
     check_build_io(expr)?;
-    Comptime::evaluate(expr, funcs, extern_names, base_dir, globals)
+    match expr.without_parens() {
+        Expr::Ident(name, _) if globals.contains_key(name) => Ok(globals[name].clone()),
+        Expr::ListLit(values, _) => values
+            .iter()
+            .map(|value| evaluate_expression(value, globals, funcs, extern_names, base_dir))
+            .collect::<Result<Vec<_>, _>>()
+            .map(CtValue::List),
+        Expr::StructLit {
+            type_name, fields, ..
+        } => fields
+            .iter()
+            .map(|(name, _, value)| {
+                evaluate_expression(value, globals, funcs, extern_names, base_dir)
+                    .map(|value| (name.clone(), value))
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(|fields| CtValue::Struct {
+                type_name: type_name.clone(),
+                fields,
+            }),
+        Expr::EnumLit {
+            type_name,
+            variant,
+            args,
+            ..
+        } => args
+            .iter()
+            .map(|arg| {
+                let (name, value) = match arg {
+                    EnumLitArg::Positional(value) => (None, value),
+                    EnumLitArg::Named { label, expr } => (Some(label.clone()), expr),
+                };
+                evaluate_expression(value, globals, funcs, extern_names, base_dir)
+                    .map(|value| (name, value))
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(|args| CtValue::Enum {
+                type_name: type_name.clone(),
+                variant: variant.clone(),
+                args,
+            }),
+        Expr::MapLit(entries, _) => {
+            let mut lowered = std::collections::BTreeMap::new();
+            for (key, value) in entries {
+                let key_value =
+                    evaluate_expression(key, globals, funcs, extern_names, base_dir)?;
+                let Some(key) = CtKey::from_value(key_value) else {
+                    return Err(Diagnostic::error(
+                        "E1333",
+                        "module map keys must be deterministic scalar values".to_string(),
+                        "named module facts become stable plan keys".to_string(),
+                        "use a string, integer, boolean, or character key".to_string(),
+                        Some(expr.span()),
+                    ));
+                };
+                let value = evaluate_expression(value, globals, funcs, extern_names, base_dir)?;
+                if lowered.insert(key, value).is_some() {
+                    return Err(Diagnostic::error(
+                        "E1333",
+                        "module map contains a duplicate key".to_string(),
+                        "one module fact cannot silently choose between two values for the same key"
+                            .to_string(),
+                        "remove the duplicate key or merge its values".to_string(),
+                        Some(expr.span()),
+                    ));
+                }
+            }
+            Ok(CtValue::Map(lowered))
+        }
+        _ => Comptime::evaluate(expr, funcs, extern_names, base_dir, globals),
+    }
 }
 
 pub(crate) fn evaluate_named_fields<'a>(

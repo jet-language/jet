@@ -1,0 +1,174 @@
+// Game tooling is a checked source projection, not a hidden editor database.
+// Inspector, profiler, and package metadata share this registry so an editor
+// cannot become a second authority.
+
+pub enum InspectorValueType {
+    Int
+    Bool
+    String
+}
+
+pub enum InspectorAccess {
+    ReadOnly
+    Editable
+}
+
+pub enum ProfilerMetric {
+    FrameTime
+    DrawCalls
+    Entities
+    SceneAssetBytes
+    MemoryHighWater
+}
+
+pub struct SourceProvenance {
+    source_file: String
+    source_symbol: String
+    source_revision: String
+    authority: String
+}
+
+pub struct DevExtensionBoundary {
+    dev_only: Bool
+    release_behavior: String
+    recovery_behavior: String
+}
+
+pub struct InspectorEntry {
+    name: String
+    value_type: InspectorValueType
+    access: InspectorAccess
+    provenance: SourceProvenance
+    extension: DevExtensionBoundary
+}
+
+pub struct ProfilerEntry {
+    name: String
+    metric: ProfilerMetric
+    unit: String
+    provenance: SourceProvenance
+    extension: DevExtensionBoundary
+}
+
+pub struct PackageRegistryEntry {
+    name: String
+    version: String
+    dependencies: [String]
+    provenance: SourceProvenance
+    extension: DevExtensionBoundary
+}
+
+pub struct ToolingRegistry {
+    inspector_entries: [InspectorEntry]
+    profiler_entries: [ProfilerEntry]
+    package_entries: [PackageRegistryEntry]
+    authority: String
+    source_backed: Bool
+    hidden_editor_state: Bool
+}
+
+fn dev_boundary() DevExtensionBoundary -> {
+    return DevExtensionBoundary{
+        dev_only: true,
+        release_behavior: "stripped",
+        recovery_behavior: "disabled",
+    }
+}
+
+pub fn default() ToolingRegistry -> {
+    return ToolingRegistry{
+        inspector_entries: [InspectorEntry]{
+            {
+                name: "Position.x",
+                value_type: InspectorValueType.Int,
+                access: InspectorAccess.Editable,
+                provenance: SourceProvenance{
+                    source_file: "src/Scene.jet",
+                    source_symbol: "Position.x",
+                    source_revision: "checked source",
+                    authority: "ordinary Jet source",
+                },
+                extension: dev_boundary(),
+            },
+            {
+                name: "Velocity.dx",
+                value_type: InspectorValueType.Int,
+                access: InspectorAccess.Editable,
+                provenance: SourceProvenance{
+                    source_file: "src/Scene.jet",
+                    source_symbol: "Velocity.dx",
+                    source_revision: "checked source",
+                    authority: "ordinary Jet source",
+                },
+                extension: dev_boundary(),
+            },
+        },
+        profiler_entries: [ProfilerEntry]{
+            {
+                name: "frame time",
+                metric: ProfilerMetric.FrameTime,
+                unit: "ns",
+                provenance: SourceProvenance{
+                    source_file: "src/Scene.jet",
+                    source_symbol: "Scene.on_frame",
+                    source_revision: "checked source",
+                    authority: "ordinary Jet source",
+                },
+                extension: dev_boundary(),
+            },
+            {
+                name: "draw calls",
+                metric: ProfilerMetric.DrawCalls,
+                unit: "count",
+                provenance: SourceProvenance{
+                    source_file: "src/Renderer.jet",
+                    source_symbol: "RendererSelection",
+                    source_revision: "checked source",
+                    authority: "ordinary Jet source",
+                },
+                extension: dev_boundary(),
+            },
+            {
+                name: "scene assets",
+                metric: ProfilerMetric.SceneAssetBytes,
+                unit: "bytes",
+                provenance: SourceProvenance{
+                    source_file: "src/Scene.jet",
+                    source_symbol: "Scene.assets",
+                    source_revision: "checked source",
+                    authority: "ordinary Jet source",
+                },
+                extension: dev_boundary(),
+            },
+            {
+                name: "memory high water",
+                metric: ProfilerMetric.MemoryHighWater,
+                unit: "bytes",
+                provenance: SourceProvenance{
+                    source_file: "src/Scene.jet",
+                    source_symbol: "game.run",
+                    source_revision: "checked source",
+                    authority: "ordinary Jet source",
+                },
+                extension: dev_boundary(),
+            },
+        },
+        package_entries: [PackageRegistryEntry]{
+            {
+                name: "__JET_GAME_NAME__",
+                version: "0.1.0",
+                dependencies: [String]{"core.game", "core.devtools"},
+                provenance: SourceProvenance{
+                    source_file: "package.jet",
+                    source_symbol: "package manifest",
+                    source_revision: "checked source",
+                    authority: "ordinary Package source",
+                },
+                extension: dev_boundary(),
+            },
+        },
+        authority: "ordinary Jet source; no hidden editor database",
+        source_backed: true,
+        hidden_editor_state: false,
+    }
+}

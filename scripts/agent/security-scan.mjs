@@ -109,8 +109,8 @@ const EXPLICIT_EXCLUSIONS = Object.freeze([
     reason: "Site distribution output is generated.",
   },
   {
-    pattern: "docs/reference/core-surface-ledger.json",
-    reason: "The generated core-surface ledger is derived data.",
+    pattern: ".jet/reports/**",
+    reason: "Generated current-state reports are runtime output.",
   },
   {
     pattern: "docs/audits/security-deep-scan-2026-08-03.md",

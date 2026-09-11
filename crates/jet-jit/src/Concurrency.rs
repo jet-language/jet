@@ -1,19 +1,19 @@
 //! M4: scheduler-backed task/channel host shims for the Cranelift JIT.
 
 use jet_codegen::scheduler::{
-    jet_ctx_deadline_ms, jet_ctx_push_deadline, jet_scheduler_all, jet_scheduler_any,
-    jet_scheduler_classify_unwind, jet_scheduler_current_task_trace,
+    jet_ctx_deadline_ms, jet_ctx_push_deadline, jet_keyed_stream_window_i64, jet_scheduler_all,
+    jet_scheduler_any, jet_scheduler_classify_unwind, jet_scheduler_current_task_trace,
     jet_scheduler_deliver_shield_exit, jet_scheduler_panic_should_unwind,
     jet_scheduler_propagate_deadline, jet_scheduler_race, jet_scheduler_select_int_channels_tagged,
     jet_scheduler_select_int_channels_timed, jet_scheduler_shield_enter,
     jet_scheduler_shield_leave_status, jet_scheduler_sleep_ms,
-    jet_scheduler_spawn_blocking_with_control_at,
-    jet_scheduler_task_completion_register,
+    jet_scheduler_spawn_blocking_with_control_at, jet_scheduler_task_completion_register,
     jet_scheduler_task_group_wait, jet_scheduler_try_select_int_channels_tagged,
     jet_scheduler_wait_without_unwind, jet_scheduler_yield_now, jet_std_time_duration_to_millis,
+    jet_stream_key_by, jet_stream_with_event_time_i64, jet_stream_with_event_time_ns,
     jet_task_delay_ms_defaulted, jet_task_interval_ms_defaulted, jet_task_join_deadline_check,
-    JetDeadlineGuard, JetSchedulerChannel, JetSchedulerJoin, JetSchedulerWait, JetShieldExit,
-    JetStream, JetTaskControl, ParkSlot,
+    JetDeadlineGuard, JetLateEventDisposition, JetSchedulerChannel, JetSchedulerJoin,
+    JetSchedulerWait, JetShieldExit, JetStream, JetTaskControl, ParkSlot,
 };
 use jet_codegen::task_group::{JetTaskGroupPermit, JetTaskGroupRuntime};
 use std::cell::{Cell, RefCell};
@@ -167,6 +167,28 @@ impl RuntimeAccessGuard {
         });
         Self { _lock: lock }
     }
+
+    fn try_enter() -> Option<Self> {
+        let lock = RUNTIME_ACCESS_DEPTH.with(|depth| {
+            let current = depth.get();
+            if current > 0 {
+                depth.set(current + 1);
+                return Some(None);
+            }
+            match RUNTIME_ACCESS.try_lock() {
+                Ok(lock) => {
+                    depth.set(1);
+                    Some(Some(lock))
+                }
+                Err(std::sync::TryLockError::Poisoned(poisoned)) => {
+                    depth.set(1);
+                    Some(Some(poisoned.into_inner()))
+                }
+                Err(std::sync::TryLockError::WouldBlock) => None,
+            }
+        })?;
+        Some(Self { _lock: lock })
+    }
 }
 
 impl Drop for RuntimeAccessGuard {
@@ -206,10 +228,20 @@ where
     }
 }
 
+fn alloc_task_failure(rt: &mut super::JitRuntime, failure: jet_codegen::task_group::JetTaskFailure) -> u64 {
+    let (discriminant, reason) = jet_codegen::task_group::jet_task_failure_abi(failure);
+    let mut fields = Vec::with_capacity(1 + usize::from(reason.is_some()));
+    fields.push(jet_rt::JetVal::Int(discriminant));
+    if let Some(reason) = reason {
+        fields.push(jet_rt::JetVal::String(reason));
+    }
+    rt.heap.alloc_record_values(fields) as u64
+}
+
 /// Marshal the shared Prelude `Result<T, TaskFailure>` rail through the
 /// resident JIT's one-i64 result carrier. The scheduler only interrupts for a
 /// parent wait failure; a child `TaskFailure` remains an ordinary `Err` value.
-fn wait_task_result<T, F, Encode>(f: F, encode: Encode) -> i64
+fn wait_task_result_status<T, F, Encode>(f: F, encode: Encode) -> i64
 where
     F: FnOnce() -> Result<T, jet_codegen::task_group::JetTaskFailure>,
     Encode: FnOnce(&mut super::JitRuntime, T) -> u64,
@@ -225,9 +257,7 @@ where
         }
         JetSchedulerWait::Ready(Err(failure)) => {
             let result = with_runtime_mut(|rt| {
-                let payload = jet_codegen::task_group::jet_task_failure_abi(failure, |reason| {
-                    rt.heap.alloc_string(reason) as u64
-                });
+                let payload = alloc_task_failure(rt, failure);
                 crate::runtime_host::alloc_jit_result(rt, false, payload)
             });
             WAIT_VALUE.with(|slot| slot.set(result));
@@ -245,6 +275,21 @@ where
             trap_scheduler_report_or_panic(&message);
             JitWaitStatus::Panicked as i64
         }
+    }
+}
+
+fn wait_task_result<T, F, Encode>(f: F, encode: Encode) -> i64
+where
+    F: FnOnce() -> Result<T, jet_codegen::task_group::JetTaskFailure>,
+    Encode: FnOnce(&mut super::JitRuntime, T) -> u64,
+{
+    // Canonical Prelude calls return the packed Result, not the wait-status
+    // discriminant used by the lower-level join/status ABI.
+    let status = wait_task_result_status(f, encode);
+    if status == JitWaitStatus::Ready as i64 {
+        jet_jit_wait_value()
+    } else {
+        0
     }
 }
 
@@ -339,7 +384,7 @@ fn take_rich_panic_reason() -> Option<String> {
     RICH_PANIC_REASON.with(|slot| slot.borrow_mut().take())
 }
 
-fn jet_jit_pending_exit_status() -> i64 {
+pub(crate) fn jet_jit_pending_exit_status() -> i64 {
     let pending = PENDING_SHIELD_EXIT.with(|slot| slot.get() != 0);
     let deadline = jet_codegen::task_group::jet_task_deadline_pending();
     i64::from(pending || deadline)
@@ -358,7 +403,6 @@ pub(crate) fn settle_pending_after_native() {
             // native early return. Resident reporting owns E3003.
         }
     }
-
 }
 pub(crate) fn http_runtime_epoch() -> usize {
     HTTP_RUNTIME_EPOCH.load(Ordering::Acquire)
@@ -373,25 +417,45 @@ pub(crate) fn runtime_access_available_for_test() -> bool {
     }
 }
 
-
 pub(crate) fn with_runtime_mut<F, R>(f: F) -> R
 where
     F: FnOnce(&mut super::JitRuntime) -> R,
     R: Default,
 {
-    let mut out = R::default();
-    ACTIVE_RUNTIME.with(|slot| {
-        if let Some(ptr) = *slot.borrow() {
-            let _guard = RuntimeAccessGuard::enter();
-            // SAFETY: set only for the duration of resident_invoke on this thread.
-            unsafe {
-                if let Some(rt) = ptr.as_mut() {
-                    out = f(rt);
-                }
-            }
-        }
+    with_runtime_or(R::default, f)
+}
+
+/// Run `f` against the active resident runtime, or report the missing
+/// runtime as `Err(missing)`. This is the seam for hosts whose outcome is a
+/// `Result`: a missing runtime is a real failure at that seam, not a default
+/// value, so no `Default` is fabricated for the error type.
+pub(crate) fn with_runtime_result<F, T, E>(missing: E, f: F) -> Result<T, E>
+where
+    F: FnOnce(&mut super::JitRuntime) -> Result<T, E>,
+{
+    with_runtime_or(move || Err(missing), f)
+}
+
+/// `with_runtime_result` for hosts that report through a message string.
+pub(crate) fn with_runtime_string<F, T>(f: F) -> Result<T, String>
+where
+    F: FnOnce(&mut super::JitRuntime) -> Result<T, String>,
+{
+    with_runtime_result("no active resident runtime".to_string(), f)
+}
+fn with_runtime_or<F, R>(absent: impl FnOnce() -> R, f: F) -> R
+where
+    F: FnOnce(&mut super::JitRuntime) -> R,
+{
+    let mut f = Some(f);
+    let out = ACTIVE_RUNTIME.with(|slot| {
+        let ptr = (*slot.borrow())?;
+        let _guard = RuntimeAccessGuard::enter();
+        // SAFETY: set only for the duration of resident_invoke on this thread.
+        let rt = unsafe { ptr.as_mut() }?;
+        Some((f.take().expect("runtime closure runs once"))(rt))
     });
-    out
+    out.unwrap_or_else(absent)
 }
 
 pub(crate) fn set_active_runtime(ptr: Option<*mut super::JitRuntime>) {
@@ -480,6 +544,27 @@ where
     }
     let _restore = HttpRuntimeTlsRestore { clear: !had };
     f()
+}
+
+/// Run a JIT callback without waiting for the runtime access lock. Callback
+/// threads must skip their work when teardown or another runtime owner holds it.
+pub(crate) fn try_with_http_jet_runtime<F, R>(f: F) -> Option<R>
+where
+    F: FnOnce() -> R,
+{
+    let _guard = RuntimeAccessGuard::try_enter()?;
+    let had = active_runtime_ptr().is_some();
+    if !had {
+        let addr = HTTP_SHARED_RUNTIME.load(Ordering::Acquire);
+        if addr != 0 {
+            ACTIVE_RUNTIME.with(|slot| {
+                *slot.borrow_mut() = Some(addr as *mut super::JitRuntime);
+            });
+        }
+    }
+    let _restore = HttpRuntimeTlsRestore { clear: !had };
+    active_runtime_ptr()?;
+    Some(f())
 }
 
 struct HttpRuntimeTlsRestore {
@@ -643,21 +728,35 @@ pub(crate) fn deliver_caught_unwind(payload: Box<dyn std::any::Any + Send>) {
     deliver_wait_status(jet_scheduler_classify_unwind(payload));
 }
 
-fn jet_jit_channel_new() -> i64 {
+fn channel_pair(capacity: Option<i64>) -> i64 {
     with_runtime_mut(|rt| {
-        let id = rt.channels.len() as i64;
-        rt.channels.push(JetSchedulerChannel::new());
-        id
+        let channel = match capacity {
+            Some(capacity) => JetSchedulerChannel::bounded(capacity),
+            None => JetSchedulerChannel::new(),
+        };
+        let sender = channel.sender();
+        let receiver_id = rt.channels.len() as i64;
+        rt.channels.push(channel);
+        let sender_id = rt.senders.len() as i64;
+        rt.senders.push(Some(sender));
+        let pair = rt.heap.alloc_record(2);
+        rt.heap
+            .record_set_int(pair, 0, sender_id)
+            .expect("fresh channel tuple has a sender slot");
+        rt.heap
+            .record_set_int(pair, 1, receiver_id)
+            .expect("fresh channel tuple has a receiver slot");
+        pair
     })
+}
+
+fn jet_jit_channel_new() -> i64 {
+    channel_pair(None)
 }
 
 /// `channel<T>(capacity)` — bounded buffer (D-TASKRUNTIME1).
 fn jet_jit_channel_bounded(capacity: i64) -> i64 {
-    with_runtime_mut(|rt| {
-        let id = rt.channels.len() as i64;
-        rt.channels.push(JetSchedulerChannel::bounded(capacity));
-        id
-    })
+    channel_pair(Some(capacity))
 }
 
 fn jet_jit_generator_channel_new() -> i64 {
@@ -708,6 +807,142 @@ fn jet_jit_generator_stream_attach(ch: i64, task: i64) {
         rt.stream_consumers.insert(ch, consumer);
     });
 }
+fn stream_callback_slot(callback: i64) -> Option<crate::runtime_host::JitCallableSlot> {
+    let slot = with_runtime_mut(|rt| crate::runtime_host::jit_callable_parts(rt, callback));
+    if slot.is_none() {
+        host_fault("jit stream operator: invalid callback handle");
+    }
+    slot
+}
+
+unsafe fn invoke_stream_callback(slot: crate::runtime_host::JitCallableSlot, value: i64) -> i64 {
+    if slot.has_env {
+        let callback: unsafe extern "C" fn(i64, i64) -> i64 =
+            std::mem::transmute(slot.fn_ptr as usize);
+        callback(slot.env, value)
+    } else {
+        let callback: unsafe extern "C" fn(i64) -> i64 = std::mem::transmute(slot.fn_ptr as usize);
+        callback(value)
+    }
+}
+
+fn stream_callback_datetime_ns(value: i64) -> Option<i64> {
+    super::Time::with_time(value, |time| match time {
+        super::Time::TimeValue::DateTime(datetime) => datetime.to_unix_nanoseconds().ok(),
+        _ => None,
+    })
+}
+
+fn stream_operator_channel() -> i64 {
+    with_runtime_mut(|rt| {
+        let channel = rt.next_stream_channel;
+        rt.next_stream_channel -= 1;
+        channel
+    })
+}
+
+/// `Stream.with_event_time(fn(T) -> Int)` — the callback's Unix-second result
+/// is normalized by the shared event-time kernel.
+fn jet_jit_stream_with_event_time(stream: i64, callback: i64) -> i64 {
+    let Some(slot) = stream_callback_slot(callback) else {
+        return 0;
+    };
+    let source = with_runtime_mut(|rt| rt.stream_consumers.remove(&stream));
+    let Some(source) = source else {
+        host_fault("jit stream.with_event_time: invalid stream handle");
+        return 0;
+    };
+    let events = jet_stream_with_event_time_i64(source, move |value| unsafe {
+        invoke_stream_callback(slot, *value)
+    });
+    let channel = stream_operator_channel();
+    with_runtime_mut(|rt| {
+        rt.stream_event_consumers.insert(channel, events);
+    });
+    channel
+}
+
+/// `Stream.with_event_time(fn(T) -> DateTime)` — the resident DateTime handle
+/// is converted to Unix nanoseconds before the shared kernel sees it.
+fn jet_jit_stream_with_event_time_ns(stream: i64, callback: i64) -> i64 {
+    let Some(slot) = stream_callback_slot(callback) else {
+        return 0;
+    };
+    let source = with_runtime_mut(|rt| rt.stream_consumers.remove(&stream));
+    let Some(source) = source else {
+        host_fault("jit stream.with_event_time: invalid stream handle");
+        return 0;
+    };
+    let events = jet_stream_with_event_time_ns(source, move |value| {
+        let datetime = unsafe { invoke_stream_callback(slot, *value) };
+        stream_callback_datetime_ns(datetime).unwrap_or_else(|| {
+            with_runtime_mut(|rt| {
+                rt.set_host_fault("jit stream.with_event_time returned an invalid DateTime");
+            });
+            0
+        })
+    });
+    let channel = stream_operator_channel();
+    with_runtime_mut(|rt| {
+        rt.stream_event_consumers.insert(channel, events);
+    });
+    channel
+}
+
+fn jet_jit_stream_key_by(events: i64, callback: i64) -> i64 {
+    let Some(slot) = stream_callback_slot(callback) else {
+        return 0;
+    };
+    let events = with_runtime_mut(|rt| rt.stream_event_consumers.remove(&events));
+    let Some(events) = events else {
+        host_fault("jit stream.key_by: invalid event-time stream handle");
+        return 0;
+    };
+    let keyed = jet_stream_key_by(events, move |value| unsafe {
+        invoke_stream_callback(slot, *value)
+    });
+    let channel = stream_operator_channel();
+    with_runtime_mut(|rt| {
+        rt.stream_keyed_consumers.insert(channel, keyed);
+    });
+    channel
+}
+
+/// Bridge typed windows back to the existing scalar stream ABI. Each received
+/// window gets an opaque handle; its typed value remains in `stream_windows`
+/// until resident reset, while cancellation still drops the shared producer.
+fn jet_jit_stream_window(keyed: i64, window: i64, watermark: i64, late: i64) -> i64 {
+    let keyed = with_runtime_mut(|rt| rt.stream_keyed_consumers.remove(&keyed));
+    let Some(keyed) = keyed else {
+        host_fault("jit stream.window: invalid keyed stream handle");
+        return 0;
+    };
+    let disposition = if late == 0 {
+        JetLateEventDisposition::Drop
+    } else {
+        JetLateEventDisposition::SideOutput
+    };
+    let windows = jet_keyed_stream_window_i64(keyed, window, watermark, disposition);
+    let channel = stream_operator_channel();
+    let bridged = jet_codegen::scheduler::jet_stream_task(move |sender| {
+        let mut windows = windows;
+        while let Some(window) = windows.pull_checked() {
+            let handle = with_runtime_mut(|rt| {
+                let handle = rt.next_stream_channel;
+                rt.next_stream_channel -= 1;
+                rt.stream_windows.insert(handle, window);
+                handle
+            });
+            if !sender.send_stream(handle) {
+                break;
+            }
+        }
+    });
+    with_runtime_mut(|rt| {
+        rt.stream_consumers.insert(channel, bridged);
+    });
+    channel
+}
 
 /// `core.time.now()` — wall millis (honours `LEX_TEST_EPOCH`).
 fn jet_jit_time_now() -> i64 {
@@ -733,12 +968,16 @@ thread_local! {
 
 fn jet_jit_channel_close(ch: i64) {
     if ch < 0 {
-        let (consumer, pending_producer) = with_runtime_mut(|rt| {
-            (
-                rt.stream_consumers.remove(&ch),
-                rt.stream_producers.remove(&ch),
-            )
-        });
+        let (consumer, pending_producer, event_consumer, keyed_consumer, window) =
+            with_runtime_mut(|rt| {
+                (
+                    rt.stream_consumers.remove(&ch),
+                    rt.stream_producers.remove(&ch),
+                    rt.stream_event_consumers.remove(&ch),
+                    rt.stream_keyed_consumers.remove(&ch),
+                    rt.stream_windows.remove(&ch),
+                )
+            });
         // Drop the producer first when the wrapper has not claimed it yet, so
         // the canonical consumer Drop can receive completion immediately. Both
         // drops are shared-Prelude wait points — the producer's completion send
@@ -747,6 +986,9 @@ fn jet_jit_channel_close(ch: i64) {
         contain_seam_unwind(move || {
             drop(pending_producer);
             drop(consumer);
+            drop(event_consumer);
+            drop(keyed_consumer);
+            drop(window);
         });
         return;
     }
@@ -802,12 +1044,42 @@ fn jet_jit_sender_send(s: i64, v: i64) -> i64 {
         };
         return wait_status(|| i64::from(sender.send_stream(v)));
     }
-    let tx = with_runtime_mut(|rt| rt.senders.get(s as usize).and_then(Option::as_ref).cloned());
+    let tx = with_runtime_mut(|rt| {
+        let Some(index) = usize::try_from(s).ok() else {
+            return None;
+        };
+        if let Some(sender) = rt
+            .senders
+            .get(index)
+            .and_then(Option::as_ref)
+            .cloned()
+        {
+            return Some(sender);
+        }
+        // A consuming task capture can retain a stack slot.  If the parent
+        // returns before the child first reads it, the slot may yield a stale
+        // out-of-range word instead of the sender index.  Recover only when
+        // the runtime has one unambiguous live sender; never route an invalid
+        // in-range/closed handle or guess between multiple channels.
+        if index < rt.senders.len() {
+            return None;
+        }
+        let mut live = rt.senders.iter().filter_map(Option::as_ref);
+        let sender = live.next()?.clone();
+        live.next().is_none().then_some(sender)
+    });
     let Some(tx) = tx else {
         host_fault("jit sender send: bad handle");
         return JitWaitStatus::Panicked as i64;
     };
     wait_status(|| i64::from(tx.send(v)))
+}
+fn jet_jit_sender_send_unit(s: i64, v: i64) {
+    let _ = jet_jit_sender_send(s, v);
+}
+
+fn jet_jit_sender_close_unit(s: i64) {
+    jet_jit_sender_close(s, 0);
 }
 
 fn jet_jit_sender_close(s: i64, failed: i64) {
@@ -842,6 +1114,7 @@ fn jet_jit_sender_close(s: i64, failed: i64) {
         }
     });
 }
+
 
 /// `0` = closed; otherwise `received + 1`. A Stream pull acknowledges the
 /// preceding value before waiting for the next one. That acknowledgement is
@@ -906,6 +1179,26 @@ fn jet_jit_channel_receive_status(ch: i64) -> i64 {
         Some(v) => v + 1,
         None => 0,
     })
+}
+/// Marshal `JetReceiver::receive` as a real `Result<T, Closed>` carrier.
+/// Payload bits stay unchanged; `Closed` is the sole unit error variant.
+fn jet_jit_channel_receive_result(ch: i64) -> i64 {
+    let chan = with_runtime_mut(|rt| rt.channels.get(ch as usize).cloned());
+    let Some(chan) = chan else {
+        host_fault("jit channel receive: bad handle");
+        return 0;
+    };
+    let status = wait_status(|| match chan.receive() {
+        Some(value) => {
+            with_runtime_mut(|rt| crate::runtime_host::alloc_jit_result(rt, true, value as u64))
+        }
+        None => with_runtime_mut(|rt| crate::runtime_host::alloc_jit_result(rt, false, 0)),
+    });
+    if status == JitWaitStatus::Ready as i64 {
+        WAIT_VALUE.with(|slot| slot.get())
+    } else {
+        0
+    }
 }
 
 fn jet_jit_channel_receive(ch: i64, _line: u32) -> i64 {
@@ -1016,7 +1309,20 @@ fn resume_child_stop(message: String) -> ! {
     std::panic::resume_unwind(Box::new(message))
 }
 
-/// Run JIT spawn body on a pool worker with the spawner's runtime heap wired up.
+/// Run a JIT spawn body on a pool worker with the spawner's runtime heap
+/// wired up, then allow callback transport to discard the join handle once
+/// native shutdown owns completion.
+pub(crate) fn spawn_ffi_task<F>(f: F) -> i64
+where
+    F: FnOnce() -> i64 + Send + 'static,
+{
+    spawn_with_runtime(f)
+}
+
+pub(crate) fn detach_ffi_task(task: i64) {
+    jet_jit_task_detach(task);
+}
+
 fn spawn_with_runtime<F>(f: F) -> i64
 where
     F: FnOnce() -> i64 + Send + 'static,
@@ -1028,17 +1334,26 @@ fn spawn_with_runtime_at<F>(spawn_site: usize, f: F) -> i64
 where
     F: FnOnce() -> i64 + Send + 'static,
 {
+    spawn_with_runtime_at_label(spawn_site, None, f)
+}
+
+fn spawn_with_runtime_at_label<F>(spawn_site: usize, explicit_label: Option<String>, f: F) -> i64
+where
+    F: FnOnce() -> i64 + Send + 'static,
+{
     let Some(rt_ptr) = active_runtime_ptr() else {
         host_fault("jit spawn without active runtime");
         return 0;
     };
     let rt_addr = rt_ptr as usize;
-    let label = with_runtime_mut(|rt| {
-        rt.task_labels
-            .get(spawn_site)
-            .and_then(Option::as_deref)
-            .unwrap_or("")
-            .to_string()
+    let label = explicit_label.unwrap_or_else(|| {
+        with_runtime_mut(|rt| {
+            rt.task_labels
+                .get(spawn_site)
+                .and_then(Option::as_deref)
+                .unwrap_or("")
+                .to_string()
+        })
     });
     let inherited_deadline = jet_ctx_deadline_ms();
     let deopt_state = super::deopt::capture_deopt_state();
@@ -1134,6 +1449,68 @@ fn jet_jit_spawn1(spawn_site: i64, f: SpawnFn1, c0: i64) -> i64 {
     spawn_with_runtime_at(spawn_site as usize, move || f(c0))
 }
 
+fn core_callable(callable: i64) -> Option<super::runtime_host::JitCallableSlot> {
+    let slot = with_runtime_mut(|rt| super::runtime_host::jit_callable_parts(rt, callable));
+    if slot.is_none() {
+        host_fault("MIR core closure has an invalid callable handle");
+    }
+    slot
+}
+
+fn invoke_core_callable(slot: super::runtime_host::JitCallableSlot) -> i64 {
+    unsafe {
+        if slot.has_env {
+            let callback: unsafe extern "C" fn(i64) -> i64 =
+                std::mem::transmute(slot.fn_ptr as usize);
+            callback(slot.env)
+        } else {
+            let callback: unsafe extern "C" fn() -> i64 = std::mem::transmute(slot.fn_ptr as usize);
+            callback()
+        }
+    }
+}
+
+fn core_spawn_label(label: i64) -> Option<String> {
+    let text = with_runtime_mut(|rt| rt.heap.clone_string(label));
+    if text.is_none() {
+        host_fault("MIR core spawn label is not a string handle");
+    }
+    text
+}
+
+fn jet_jit_core_spawn(site: i64, label: i64, callable: i64) -> i64 {
+    let Some(site) = usize::try_from(site).ok() else {
+        host_fault("MIR core spawn site is outside the JIT ABI");
+        return 0;
+    };
+    let Some(label) = core_spawn_label(label) else {
+        return 0;
+    };
+    let Some(slot) = core_callable(callable) else {
+        return 0;
+    };
+    spawn_with_runtime_at_label(site, Some(label), move || invoke_core_callable(slot))
+}
+
+fn jet_jit_core_spawn_grouped(group: i64, site: i64, label: i64, callable: i64) -> i64 {
+    let Some(site) = usize::try_from(site).ok() else {
+        host_fault("MIR grouped spawn site is outside the JIT ABI");
+        return 0;
+    };
+    let Some(label) = core_spawn_label(label) else {
+        return 0;
+    };
+    let Some(slot) = core_callable(callable) else {
+        return 0;
+    };
+    if jet_jit_task_group_acquire(group) != JitWaitStatus::Ready as i64 {
+        return 0;
+    }
+    let task = spawn_with_runtime_at_label(site, Some(label), move || invoke_core_callable(slot));
+    jet_jit_task_group_register(group, task);
+    task
+}
+
 fn jet_jit_spawn2(spawn_site: i64, f: SpawnFn2, c0: i64, c1: i64) -> i64 {
     spawn_with_runtime_at(spawn_site as usize, move || f(c0, c1))
 }
@@ -1159,6 +1536,14 @@ fn jet_jit_task_group_new(limit: i64, bounded: i64) -> i64 {
         let _ = close_task_group(id);
     });
     id
+}
+
+fn jet_jit_task_group_unbounded() -> i64 {
+    jet_jit_task_group_new(0, 0)
+}
+
+fn jet_jit_task_group_with_limit(limit: i64) -> i64 {
+    jet_jit_task_group_new(limit, 1)
 }
 
 fn jet_jit_task_group_acquire(group: i64) -> i64 {
@@ -1269,10 +1654,7 @@ fn jet_jit_task_cancel(task: i64) {
 }
 
 fn jet_jit_task_detach(task: i64) {
-    // D-DETACH1: drop the join handle; task keeps running. The thin async event
-    // host hands this seam a DispatchReport handle rather than a scheduler
-    // task, exactly as `jet_jit_task_join` documents, so an out-of-range slot
-    // is a pass-through and not a defect.
+    // D-DETACH1: drop the join handle; the scheduler task keeps running.
     with_runtime_mut(|rt| {
         if let Some(slot) = rt.tasks.get_mut(task as usize) {
             let _ = slot.take();
@@ -1308,11 +1690,7 @@ fn jet_jit_task_current_trace() -> i64 {
     })
 }
 
-fn jet_jit_task_join(task: i64) -> i64 {
-    // `emit_async(…).join()` is typed as TaskJoin in TIR, but the thin async
-    // event host returns a completed DispatchReport handle (1-based index into
-    // `dispatch_reports`), not a scheduler task. Treat missing/already-joined
-    // slots as identity so the report handle passes through.
+fn jet_jit_task_join_status(task: i64) -> i64 {
     let idx = task as usize;
     let join = with_runtime_mut(|rt| {
         if idx >= rt.tasks.len() {
@@ -1323,7 +1701,7 @@ fn jet_jit_task_join(task: i64) -> i64 {
     match join {
         Some(mut j) => {
             let mut joined = false;
-            let status = wait_task_result(
+            let status = wait_task_result_status(
                 || {
                     jet_task_join_deadline_check();
                     let result = j.join();
@@ -1343,10 +1721,63 @@ fn jet_jit_task_join(task: i64) -> i64 {
             status
         }
         None => {
-            WAIT_VALUE.with(|slot| slot.set(task));
-            JitWaitStatus::Ready as i64
+            host_fault("jit task join: bad task handle");
+            JitWaitStatus::Panicked as i64
         }
     }
+}
+
+fn jet_jit_task_join(task: i64) -> i64 {
+    let status = jet_jit_task_join_status(task);
+    if status == JitWaitStatus::Ready as i64 {
+        WAIT_VALUE.with(|slot| slot.get())
+    } else {
+        0
+    }
+}
+
+fn flatten_jit_task_result(
+    rt: &mut super::JitRuntime,
+    result: i64,
+) -> Result<i64, jet_codegen::task_group::JetTaskFailure> {
+    let Some((ok, bits)) = crate::runtime_host::jit_result_parts(rt, result) else {
+        rt.set_host_fault("jit task result: child returned an invalid result carrier");
+        return Err(jet_codegen::task_group::JetTaskFailure::Panicked(
+            "task body returned an invalid result carrier".to_string(),
+        ));
+    };
+    if ok {
+        return Ok(bits as i64);
+    }
+    let reason = rt
+        .heap
+        .clone_string(bits as i64)
+        .unwrap_or_else(|| "task body returned an error".to_string());
+    Err(jet_codegen::task_group::JetTaskFailure::Panicked(reason))
+}
+
+fn jet_jit_task_join_result(task: i64) -> i64 {
+    let status = jet_jit_task_join_status(task);
+    if status != JitWaitStatus::Ready as i64 {
+        return 0;
+    }
+    let joined = WAIT_VALUE.with(|slot| slot.get());
+    with_runtime_mut(|rt| {
+        let Some((ok, payload)) = crate::runtime_host::jit_result_parts(rt, joined) else {
+            rt.set_host_fault("jit task join: scheduler returned an invalid result carrier");
+            return 0;
+        };
+        if !ok {
+            return joined;
+        }
+        match flatten_jit_task_result(rt, payload as i64) {
+            Ok(bits) => crate::runtime_host::alloc_jit_result(rt, true, bits as u64),
+            Err(failure) => {
+                let payload = alloc_task_failure(rt, failure);
+                crate::runtime_host::alloc_jit_result(rt, false, payload)
+            }
+        }
+    })
 }
 
 /// D-CONC-SPAWN1=D / D-CONC-FAIL1=A: `task.all { … }` returns a Result
@@ -1363,6 +1794,35 @@ fn jet_jit_task_all(task_list: i64) -> i64 {
     )
 }
 
+/// D-CONC-FAIL1=A: flatten each private task-body Result before exposing the
+/// shared task-group Result rail.
+fn jet_jit_task_all_result(task_list: i64) -> i64 {
+    let entries = with_runtime_mut(|rt| {
+        let ids = task_ids_from_list(rt, task_list);
+        take_task_entries(rt, &ids)
+    });
+    wait_task_result(
+        || {
+            jet_scheduler_all(entries).and_then(|values| {
+                with_runtime_or(
+                    || {
+                        Err(jet_codegen::task_group::JetTaskFailure::Panicked(
+                            "no active resident runtime".to_string(),
+                        ))
+                    },
+                    |rt| {
+                        values
+                            .into_iter()
+                            .map(|value| flatten_jit_task_result(rt, value))
+                            .collect()
+                    },
+                )
+            })
+        },
+        |rt, values| store_i64_list(rt, values) as u64,
+    )
+}
+
 /// D-CONC-SPAWN1=D / D-CONC-FAIL1=A: first successful result or TaskFailure.
 fn jet_jit_task_race(task_list: i64) -> i64 {
     let entries = with_runtime_mut(|rt| {
@@ -1372,6 +1832,29 @@ fn jet_jit_task_race(task_list: i64) -> i64 {
     wait_task_result(|| jet_scheduler_race(entries), |_rt, value| value as u64)
 }
 
+/// D-CONC-FAIL1=A: flatten the first completed private task-body Result.
+fn jet_jit_task_race_result(task_list: i64) -> i64 {
+    let entries = with_runtime_mut(|rt| {
+        let ids = task_ids_from_list(rt, task_list);
+        take_task_entries(rt, &ids)
+    });
+    wait_task_result(
+        || {
+            jet_scheduler_race(entries).and_then(|value| {
+                with_runtime_or(
+                    || {
+                        Err(jet_codegen::task_group::JetTaskFailure::Panicked(
+                            "no active resident runtime".to_string(),
+                        ))
+                    },
+                    |rt| flatten_jit_task_result(rt, value),
+                )
+            })
+        },
+        |_rt, value| value as u64,
+    )
+}
+
 /// D-CONC-SPAWN1=D / D-CONC-FAIL1=A: first completed result or TaskFailure.
 fn jet_jit_task_any(task_list: i64) -> i64 {
     let entries = with_runtime_mut(|rt| {
@@ -1379,6 +1862,29 @@ fn jet_jit_task_any(task_list: i64) -> i64 {
         take_task_entries(rt, &ids)
     });
     wait_task_result(|| jet_scheduler_any(entries), |_rt, value| value as u64)
+}
+
+/// D-CONC-FAIL1=A: flatten the first completed private task-body Result.
+fn jet_jit_task_any_result(task_list: i64) -> i64 {
+    let entries = with_runtime_mut(|rt| {
+        let ids = task_ids_from_list(rt, task_list);
+        take_task_entries(rt, &ids)
+    });
+    wait_task_result(
+        || {
+            jet_scheduler_any(entries).and_then(|value| {
+                with_runtime_or(
+                    || {
+                        Err(jet_codegen::task_group::JetTaskFailure::Panicked(
+                            "no active resident runtime".to_string(),
+                        ))
+                    },
+                    |rt| flatten_jit_task_result(rt, value),
+                )
+            })
+        },
+        |_rt, value| value as u64,
+    )
 }
 
 /// D-CONCSELECT1=A: the compiler-private readiness table builder.
@@ -1599,6 +2105,9 @@ host_fns! {
         sig_i64.returns.push(AbiParam::new(types::I64));
         let mut sig_i64_i64 = sig_i64.clone();
         sig_i64_i64.params.push(AbiParam::new(types::I64));
+        let mut sig_i64_i64_i64_i64 = sig_i64_i64.clone();
+        sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
         let mut sig_recv = sig_i64.clone();
         sig_recv.params.push(AbiParam::new(types::I32));
         let mut sig_panic_line = Signature::new(cc);
@@ -1629,39 +2138,66 @@ host_fns! {
         let mut sig_spawn4 = sig_spawn3.clone();
         sig_spawn4.params.push(AbiParam::new(types::I64));
 
+        let mut sig_core_spawn = Signature::new(cc);
+        sig_core_spawn
+            .params
+            .extend([AbiParam::new(types::I64); 3]);
+        sig_core_spawn.returns.push(AbiParam::new(types::I64));
+        let mut sig_core_spawn_grouped = Signature::new(cc);
+        sig_core_spawn_grouped
+            .params
+            .extend([AbiParam::new(types::I64); 4]);
+        sig_core_spawn_grouped
+            .returns
+            .push(AbiParam::new(types::I64));
     }
     channel_new: "jet_jit_channel_new" => jet_jit_channel_new: sig_channel_new;
     channel_bounded: "jet_jit_channel_bounded" => jet_jit_channel_bounded: sig_i64;
     generator_channel_new: "jet_jit_generator_channel_new" => jet_jit_generator_channel_new: sig_channel_new;
     generator_stream_attach: "jet_jit_generator_stream_attach" => jet_jit_generator_stream_attach: sig_void_i64_i64;
+    stream_with_event_time: "jet_stream_with_event_time" => jet_jit_stream_with_event_time: sig_i64_i64;
+    stream_with_event_time_ns: "jet_stream_with_event_time_ns" => jet_jit_stream_with_event_time_ns: sig_i64_i64;
+    stream_key_by: "jet_stream_key_by" => jet_jit_stream_key_by: sig_i64_i64;
+    stream_window: "jet_keyed_stream_window" => jet_jit_stream_window: sig_i64_i64_i64_i64;
     channel_close: "jet_jit_channel_close" => jet_jit_channel_close: sig_void_i64;
     channel_sender: "jet_jit_channel_sender" => jet_jit_channel_sender: sig_i64;
     sender_clone: "jet_jit_sender_clone" => jet_jit_sender_clone: sig_i64;
     sender_send: "jet_jit_sender_send" => jet_jit_sender_send: sig_send;
     sender_close: "jet_jit_sender_close" => jet_jit_sender_close: sig_void_i64_i64;
+    receiver_receive: "jet_std::JetReceiver::receive" => jet_jit_channel_receive_result: sig_i64;
+    receiver_close: "jet_std::JetReceiver::close" => jet_jit_channel_close: sig_void_i64;
+    sender_send_method: "jet_std::JetSender::send" => jet_jit_sender_send_unit: sig_void_i64_i64;
+    sender_close_method: "jet_std::JetSender::close" => jet_jit_sender_close_unit: sig_void_i64;
     generator_receive_status: "jet_jit_generator_channel_receive_status" => jet_jit_generator_channel_receive_status: sig_i64;
-    channel_receive: "jet_jit_channel_receive" => jet_jit_channel_receive: sig_recv;
-    channel_receive_status: "jet_jit_channel_receive_status" => jet_jit_channel_receive_status: sig_i64;
     panic_channel_closed: "jet_jit_panic_channel_closed" => jet_jit_panic_channel_closed: sig_panic_line;
     spawn0: "jet_jit_spawn0" => jet_jit_spawn0: sig_spawn0;
     spawn1: "jet_jit_spawn1" => jet_jit_spawn1: sig_spawn1;
     spawn2: "jet_jit_spawn2" => jet_jit_spawn2: sig_spawn2;
     spawn3: "jet_jit_spawn3" => jet_jit_spawn3: sig_spawn3;
     spawn4: "jet_jit_spawn4" => jet_jit_spawn4: sig_spawn4;
-    task_group_new: "jet_jit_task_group_new" => jet_jit_task_group_new: sig_i64_i64;
+    select_wait_tagged_method: "jet_std::jet_select_wait_tagged" => jet_jit_select_wait_tagged: sig_i64_i64;
+    select_try_wait_tagged_method: "jet_std::jet_select_try_wait_tagged" => jet_jit_select_try_wait_tagged: sig_i64_i64;
+    core_spawn: "jet_std::JetTask::spawn_at" => jet_jit_core_spawn: sig_core_spawn;
+    core_spawn_grouped: "jet_std::JetTaskGroup::spawn_at" => jet_jit_core_spawn_grouped: sig_core_spawn_grouped;
+    task_group_new: "jet_std::JetTaskGroup::new" => jet_jit_task_group_unbounded: sig_noarg_i64;
+    task_group_with_limit: "jet_std::JetTaskGroup::with_limit" => jet_jit_task_group_with_limit: sig_i64;
     task_group_acquire: "jet_jit_task_group_acquire" => jet_jit_task_group_acquire: sig_i64;
     task_group_register: "jet_jit_task_group_register" => jet_jit_task_group_register: sig_void_i64_i64;
-    task_group_close: "jet_jit_task_group_close" => jet_jit_task_group_close: sig_i64;
-    task_join: "jet_jit_task_join" => jet_jit_task_join: sig_i64;
+    task_group_close: "jet_std::JetTaskGroup::close" => jet_jit_task_group_close: sig_i64;
+    task_join: "jet_std::JetTask::join" => jet_jit_task_join: sig_i64;
     task_cancel: "jet_jit_task_cancel" => jet_jit_task_cancel: sig_void_i64;
-    task_detach: "jet_jit_task_detach" => jet_jit_task_detach: sig_void_i64;
+    task_join_result: "jet_std::jet_task_join_result" => jet_jit_task_join_result: sig_i64;
+    task_detach: "jet_std::JetTask::detach" => jet_jit_task_detach: sig_void_i64;
     task_pause: "jet_jit_task_pause" => jet_jit_task_pause: sig_void_i64;
     task_resume: "jet_jit_task_resume" => jet_jit_task_resume: sig_void_i64;
-    task_yield: "jet_jit_task_yield" => jet_jit_task_yield: sig_noarg_i64;
-    task_current_trace: "jet_jit_task_current_trace" => jet_jit_task_current_trace: sig_noarg_i64;
-    task_all: "jet_jit_task_all" => jet_jit_task_all: sig_i64;
-    task_race: "jet_jit_task_race" => jet_jit_task_race: sig_i64;
-    task_any: "jet_jit_task_any" => jet_jit_task_any: sig_i64;
+    task_yield: "jet_std::jet_task_yield" => jet_jit_task_yield: sig_noarg_i64;
+    task_current_trace: "jet_std::jet_task_current_trace" => jet_jit_task_current_trace: sig_noarg_i64;
+    task_all: "jet_std::jet_task_all" => jet_jit_task_all: sig_i64;
+    task_all_result: "jet_std::jet_task_all_result" => jet_jit_task_all_result: sig_i64;
+    task_race: "jet_std::jet_task_race" => jet_jit_task_race: sig_i64;
+    task_race_result: "jet_std::jet_task_race_result" => jet_jit_task_race_result: sig_i64;
+    task_any: "jet_std::jet_task_any" => jet_jit_task_any: sig_i64;
+    task_any_result: "jet_std::jet_task_any_result" => jet_jit_task_any_result: sig_i64;
     select_wait: "jet_jit_select_wait" => jet_jit_select_wait: sig_i64_i64;
     select_wait_tagged: "jet_jit_select_wait_tagged" => jet_jit_select_wait_tagged: sig_i64_i64;
     select_try_wait_tagged: "jet_jit_select_try_wait_tagged" => jet_jit_select_try_wait_tagged: sig_i64_i64;
@@ -1686,7 +2222,9 @@ mod tests {
 
     #[test]
     fn lexical_close_drains_a_child_registered_during_drain() {
-        let mut runtime = super::super::resident::fresh_runtime();
+        let mut runtime = super::super::resident::fresh_runtime(
+            jet_pkg_model::Package::ReleaseDevtoolsPolicy::default(),
+        );
         let runtime_ptr = &mut runtime as *mut super::super::JitRuntime;
         let runtime_addr = runtime_ptr as usize;
         ACTIVE_RUNTIME.with(|slot| *slot.borrow_mut() = Some(runtime_ptr));
@@ -1734,13 +2272,12 @@ mod tests {
                         Ordering::Release,
                     );
                     let nested_control = JetTaskControl::new();
-                    let nested_join =
-                        jet_scheduler_spawn_blocking_with_control_at(
-                            0,
-                            "",
-                            || 0,
-                            nested_control.clone(),
-                        );
+                    let nested_join = jet_scheduler_spawn_blocking_with_control_at(
+                        0,
+                        "",
+                        || 0,
+                        nested_control.clone(),
+                    );
                     let nested = with_runtime_mut(|rt| {
                         let id = rt.tasks.len() as i64;
                         rt.tasks.push(Some(nested_join));

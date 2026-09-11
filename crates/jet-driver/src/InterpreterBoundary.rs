@@ -1,8 +1,9 @@
-//! Shared dev-interpreter/source-debugger execution boundary.
+//! Shared source-debugger execution boundary.
 //!
-//! D-ARCH-SOURCE1=A: both outer products classify the same typed program.
-//! Keeping the pure AST walk in the driver prevents either product from
-//! depending on the root host or inventing a second boundary vocabulary.
+//! D-ARCH-SOURCE1=A: the source debugger classifies the same typed program
+//! as the compiler. Keeping the pure AST walk in the driver prevents the
+//! debugger from depending on the root host or inventing a second boundary
+//! vocabulary.
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{
@@ -10,71 +11,38 @@ use crate::AST::{
 };
 use std::collections::{HashMap, HashSet};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterpreterInvocation {
+    RunInterpret,
+    DevInterpret,
+    RunDefault,
+    DevDefault,
+}
+
+impl InterpreterInvocation {
+    pub const fn command(self) -> &'static str {
+        match self {
+            Self::RunInterpret => "jet run --interpret",
+            Self::DevInterpret => "jet dev --interpret",
+            Self::RunDefault => "jet run",
+            Self::DevDefault => "jet dev",
+        }
+    }
+
+    pub const fn uses_interpreter(self) -> bool {
+        matches!(self, Self::RunInterpret | Self::DevInterpret)
+    }
+}
+
 struct Boundary {
     /// A NOUN PHRASE naming the construct, and nothing else: it is rendered
-    /// as the object of "it uses …" by `dev_boundary_diagnostic` (E2201) and
-    /// `debug_boundary_scan` (E2203), which own the whole sentence. A feature
-    /// that carries its own clause splices two sentences together — that is
-    /// exactly the E2201 garble this contract exists to prevent — so never
-    /// append a reason, a "which …" tail, or a trailing "yet" here. The
-    /// wrapper never parses this string back apart.
+    /// as the object of "it uses …" by `debug_boundary_scan` (E2203), which
+    /// owns the whole sentence. A feature that carries its own clause would
+    /// splice two sentences together, so never append a reason, a "which …"
+    /// tail, or a trailing "yet" here. The wrapper never parses this string
+    /// back apart.
     feature: String,
     span: Option<Span>,
-}
-
-pub fn dev_boundary_scan(bundle: &ProgramBundle) -> Option<Diagnostic> {
-    boundary_scan(bundle, false)
-        .map(|boundary| dev_boundary_diagnostic(boundary.feature, boundary.span))
-}
-
-/// Why/fix for every `jet dev` boundary report. `why` already carries the
-/// "that interpreter doesn't cover every feature" explanation, so no producer
-/// restates it in the sentence.
-const DEV_BOUNDARY_WHY: &str = "`jet dev` runs your program in a built-in interpreter for instant feedback, but that interpreter doesn't cover every feature; this one needs the real native build";
-const DEV_BOUNDARY_FIX: &str = "run `jet build` then the binary, or `jet run <file>` to compile and run it; `jet dev` will keep showing checks live";
-
-/// Render the dev-loop boundary around one construct. `feature` is a noun
-/// phrase (see `Boundary::feature`) and this function owns the sentence.
-pub fn dev_boundary_diagnostic(feature: impl Into<String>, span: Option<Span>) -> Diagnostic {
-    Diagnostic::error(
-        "E2201",
-        format!(
-            "`jet dev` can't interpret this program yet — it uses {}",
-            feature.into()
-        ),
-        DEV_BOUNDARY_WHY.to_string(),
-        DEV_BOUNDARY_FIX.to_string(),
-        span,
-    )
-}
-
-/// The same boundary for the shared evaluator's own mid-run refusal (E0956),
-/// which stops during execution instead of at the AST pre-scan.
-///
-/// `construct` is the noun phrase the raise site named, taken from the
-/// diagnostic's structured construct — never from E0956's rendered prose,
-/// which is a sentence and splices into an ungrammatical report. A
-/// hand-written E0956 that carries no structured construct has no noun phrase
-/// to place, so its own sentence is quoted whole after a colon rather than
-/// forced into "it uses …"; either way the dev loop replaces the
-/// comptime-voiced why/fix, which is the point of this rewrap.
-pub fn dev_boundary_for_refusal(
-    construct: Option<&str>,
-    refusal: &str,
-    span: Option<Span>,
-) -> Diagnostic {
-    match construct {
-        Some(construct) => dev_boundary_diagnostic(format!("`{construct}`"), span),
-        None => Diagnostic::error(
-            "E2201",
-            format!(
-                "`jet dev` can't interpret this program yet — the interpreter stopped here: {refusal}"
-            ),
-            DEV_BOUNDARY_WHY.to_string(),
-            DEV_BOUNDARY_FIX.to_string(),
-            span,
-        ),
-    }
 }
 
 pub fn debug_boundary_scan(bundle: &ProgramBundle) -> Option<Diagnostic> {
@@ -91,7 +59,7 @@ pub fn debug_boundary_scan(bundle: &ProgramBundle) -> Option<Diagnostic> {
 
 fn boundary_scan(bundle: &ProgramBundle, debug_impure: bool) -> Option<Boundary> {
     let has_typed_cli = jet_foundation::CLISchema::entry_schema_for_bundle(bundle).is_some();
-    // Whether the TIR evaluator runs a callee's frame depends on that callee's
+    // Whether the MIR evaluator runs a callee's frame depends on that callee's
     // own body, not on which module the call site sits in, so this set spans
     // the bundle: a `pub fn` imported unqualified and called bare is the same
     // interpretable frame as a local one. `inline_foreign` bodies are excluded
@@ -122,9 +90,7 @@ fn boundary_scan(bundle: &ProgramBundle, debug_impure: bool) -> Option<Boundary>
                 let (imported_modules, _) = core_import_maps(std::slice::from_ref(import));
                 let mut imported_modules = imported_modules.into_iter().collect::<Vec<_>>();
                 imported_modules.sort_unstable_by(|left, right| {
-                    left.0
-                        .cmp(&right.0)
-                        .then_with(|| left.1.cmp(&right.1))
+                    left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1))
                 });
                 if let Some(feature) = imported_modules
                     .iter()
@@ -176,12 +142,10 @@ fn boundary_scan(bundle: &ProgramBundle, debug_impure: bool) -> Option<Boundary>
                             span: Some(function.name_span),
                         });
                     }
-                    if !debug_impure {
-                        if let Some(boundary) =
-                            scan_stmts_for_process_edge(&function.body, &core_modules, &core_items)
-                        {
-                            return Some(boundary);
-                        }
+                    if let Some(boundary) =
+                        scan_stmts_for_process_edge(&function.body, &core_modules, &core_items)
+                    {
+                        return Some(boundary);
                     }
                     if let Some(boundary) =
                         scan_stmts_for_mut_arg(&function.body, &interpreted_functions, &core_items)
@@ -200,14 +164,13 @@ fn native_module_feature(name: &str, debug_impure: bool) -> Option<&'static str>
     match name {
         "core.mem" => Some("the low-level `core.mem` tier"),
         "core.files" if debug_impure => Some("a file read or write"),
-        // `jet debug` refuses the impure module at its IMPORT, because the
-        // source stepper has no per-call pass: `scan_stmts_for_process_edge`
-        // runs for `jet dev` only, so nothing here can tell an interpretable
-        // `env.get` from `sys.fork()`. `jet dev` classifies per leaf instead
-        // (`process_leaf_feature`), which is why these two arms name the
-        // module and that one names the call.
+        // `jet debug` classifies `core.process` per leaf: argv/args and the
+        // supported process prelude stay in the interpreter, while an
+        // unregistered process operation remains a native boundary below.
+        // `core.sys` remains import-level for now because its source stepper
+        // cannot distinguish an ambient read from unsupported process control
+        // without executing the call.
         "core.sys" if debug_impure => Some("an environment read"),
-        "core.process" if debug_impure => Some("a process launch or an early exit"),
         // `core.time` / `core.math.random` are allowed: deterministic `Clock`/`Rng`
         // injection (D-DET1) is interpreted; ambient wall-clock / OS-RNG still
         // fail at the expression if unsupported.
@@ -219,61 +182,31 @@ fn native_module_feature(name: &str, debug_impure: bool) -> Option<&'static str>
 /// the shared evaluator runs this exact leaf, `Some(feature)` is the noun
 /// phrase naming why it cannot.
 ///
-/// Keyed by LEAF, never by module. `core.sys` registers ~55 members
-/// (`jet-sema` `module_items`) and the interpreter ambient marshals only the
-/// handful listed below, so a module-level "yes" would admit `sys.fork()` along
-/// with `env.get`. The default arms therefore REFUSE: a newly registered
-/// `core.sys` / `core.process` member stays native-only until an ambient arm
-/// exists for it, rather than silently inheriting a neighbour's coverage.
+/// The Core-call registry is the one source of truth for ambient interpreter
+/// routes. A newly registered `core.sys` member stays native-only until its
+/// registry row and evaluator route both declare an executable ambient path.
 fn process_leaf_feature(module: &str, item: &str) -> Option<&'static str> {
     match (module, item) {
         // Run by the shared evaluator itself: `process.argv` reads the argv
         // installed for this run and `process.args` projects that same list
-        // through the shared `jet_process_args_view` kernel, and
-        // `process.exit` / `sys.atexit` / `sys.stop` drive its own exit and
-        // cleanup path.
+        // through the shared `jet_process_args_view` kernel.
         // `process.run` is marshalled by the interpreter ambient through the
         // same Process Prelude as AOT and Cranelift. The authority argument
         // is ordinary data at this boundary; sema has already checked it is
         // the named `Authority` carrier.
-        ("core.process", "argv" | "args" | "cmd" | "exit" | "run" | "pipeline" | "workspace")
-        | ("core.sys", "atexit" | "stop") => None,
-        // #2003: the interpreter ambient marshals these three through the one
-        // CoreHost accessor over Jet's logical environment table — the same
-        // owner AOT and the resident JIT read (`jet-jit` `ambient_interp`
-        // `("core.sys", "get" | "set" | "home_dir")`). `env.set` arrives as
-        // the `EnvSet` host call, which the TIR evaluator marshals to that
-        // same `core.sys.set` adapter.
-        ("core.sys", "get" | "set" | "home_dir") => None,
-        // `core.sys.decode` runs through the evaluator's shared environment
-        // carrier and typed DataTree decoder, so it is safe for the forced
-        // interpreter just like the other explicitly ambient sys leaves.
-        ("core.sys", "decode") => None,
-        // The platform-family fact is the one OS fact implemented by the
-        // ambient interpreter; other core.sys facts remain native-only below.
-        ("core.sys", "family") => None,
-        // Environment surfaces with no ambient arm. Without one the evaluator
-        // falls through to the comptime host-env effect, which reads the
-        // compiler's own `std::env` instead of Jet's table — so these must
-        // stay native-only or one program would see two environments.
-        ("core.sys", "vars" | "expand") => Some("an environment read"),
-        ("core.sys", "unset") => Some("an environment change"),
-        ("core.sys", "current_dir" | "set_current_dir") => {
-            Some("a working-directory read or change")
+        ("core.process", "argv" | "args" | "cmd" | "exit" | "run" | "pipeline" | "workspace") => {
+            None
         }
-        // #2027: the evaluator has the interrupt ambient this refusal predated.
-        // It arms through the ONE shared count
-        // (`Codegen/TIR/eval/mod.rs::register_interrupt_callback`, which calls
-        // `interrupt_runtime::jet_interrupt_arm`), keeps the handler as a
-        // callable-arena index, and drains through the one Prelude rule
-        // (`jet_interrupt_dispatch`) at every statement and loop boundary —
-        // including a bare `loop { }` (`eval/stmts.rs::exec_infinite`), which is
-        // the shape a signalled program actually waits in. A handler's terminal
-        // transfer is ended the way `Prelude/CoreLib/Top/Interrupt.rs` names for
-        // this tier: the drain returns the diagnostic, so `process.exit` ends the
-        // run with its code and a handler panic reports and stops with 70.
-        ("core.sys", "on_interrupt") => None,
-        ("core.sys", _) => Some("an OS fact or process control call"),
+        ("core.sys", _) => {
+            let ambient = jet_foundation::Syntax::core_call_ambient_routes()
+                .iter()
+                .any(|(known_module, known_item)| *known_module == module && *known_item == item);
+            if ambient {
+                None
+            } else {
+                Some("an OS fact or process control call")
+            }
+        }
         ("core.process", _) => Some("a process launch or an early exit"),
         _ => None,
     }
@@ -377,7 +310,7 @@ fn scan_stmt_for_mut_arg(
     }
 }
 
-/// Does the TIR evaluator itself run the frame this direct call names?
+/// Does the MIR evaluator itself run the frame this direct call names?
 ///
 /// `&ident` writeback is a property of the CALLEE, not of the argument: the
 /// evaluator copies the argument back into the caller's environment slot after

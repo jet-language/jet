@@ -10,7 +10,12 @@ use crate::runtime_host::alloc_jit_result;
 
 /// Read a heap string handle. An unknown handle reads as the empty string.
 pub(crate) fn clone_string(id: i64) -> String {
-    Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id).unwrap_or_default())
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .clone_string(id)
+            .or_else(|| crate::runtime_host::view_string(rt, id))
+            .unwrap_or_default()
+    })
 }
 
 /// Store a string on the heap and return its handle.
@@ -21,6 +26,9 @@ pub(crate) fn alloc_string(s: String) -> i64 {
 /// Read a `[Int]` byte list handle as bytes.
 pub(crate) fn clone_bytes(list: i64) -> Vec<u8> {
     Concurrency::with_runtime_mut(|rt| {
+        if let Some(bytes) = crate::runtime_host::view_bytes(rt, list) {
+            return bytes;
+        }
         let len = rt.heap.list_len(list).unwrap_or(0);
         let mut out = Vec::with_capacity(len as usize);
         for i in 0..len {

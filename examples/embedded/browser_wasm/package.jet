@@ -1,0 +1,16 @@
+// `target:` selects the canonical typed browser machine; provider identities
+// remain owned by that machine instead of being fabricated in this package.
+name: "embedded_browser_wasm"
+version: "0.1.0"
+edition: "2026"
+target: "wasm.browser"
+runtime: "hosted"
+authority: {
+    holds: {
+        allow: [IO, Mem.Alloc]
+    }
+}
+build: {
+    release: Build{ optimize: full },
+    debug: Build{ optimize: none, debug_info: true },
+}

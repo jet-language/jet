@@ -170,6 +170,17 @@ function Get-Sha256([string]$Path) {
     return "sha256-" + (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+function Get-TextSha256([string]$Text) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [Text.Encoding]::UTF8.GetBytes($Text)
+        $digest = $sha.ComputeHash($bytes)
+        return "sha256-" + ([BitConverter]::ToString($digest) -replace '-', '').ToLowerInvariant()
+    } finally {
+        $sha.Dispose()
+    }
+}
+
 function Invoke-VersionIdentity([string]$Program, [string[]]$Arguments, [string]$Label, [string]$Root) {
     $file = New-IdentityFile $Root
     try {
@@ -674,6 +685,21 @@ try {
             digest = $inputDigests[$index]
         }
     }
+    $foreignSourceJson = ConvertTo-Json -InputObject ([array]$inputRecords) -Compress -Depth 8
+    $foreignArtifactJson = ConvertTo-Json -InputObject ([array]$artifactRecords) -Compress -Depth 8
+    $foreignSourceIdentity = Get-TextSha256 $foreignSourceJson
+    $foreignImplementationIdentity = Get-TextSha256 $foreignArtifactJson
+    $foreignContractIdentity = Get-TextSha256 (
+        @(
+            "source=$foreignSourceIdentity"
+            "overlay=none"
+            "generator=$($jetInfo.identity)"
+            "implementation=$foreignImplementationIdentity"
+            "toolchain=$toolchainIdentity"
+            "linker=$linkerIdentity"
+            "target=$targetTriple"
+        ) -join "`n"
+    )
     $receiptObject = [ordered]@{
         schema = 2
         jet = [ordered]@{
@@ -703,11 +729,27 @@ try {
             version = $linkerVersion
             identity = $linkerIdentity
         }
+        foreign_boundary = [ordered]@{
+            schema = "jet-ffi-boundary-v1"
+            identity = $foreignContractIdentity
+            source_identity = $foreignSourceIdentity
+            overlay_identity = "none"
+            generator_identity = $jetInfo.identity
+            implementation_identity = $foreignImplementationIdentity
+            toolchain_identity = $toolchainIdentity
+            linker_identity = $linkerIdentity
+            target_identity = $targetTriple
+            loaded_artifact_identity = $foreignImplementationIdentity
+            transitive_dependency_identities = @($inputRecords | ForEach-Object { $_.path + ":" + $_.digest })
+            reachable_callback_identities = @()
+            compiler_flags = @($jetArgs)
+            source_authority = "foreign-until-accepted"
+            disposition = "supported"
+        }
         lock = [ordered]@{
             path = ".jet/lock"
             digest = $lockDigest
         }
-        inputs = @($inputRecords)
         build = [ordered]@{
             entry = $entryRel
             output = $Output
@@ -718,6 +760,17 @@ try {
             command = @($jetArgs)
         }
         artifacts = @($artifactRecords)
+        workflow = [ordered]@{
+            schema = "jet-ffi-workflow-receipt-v1"
+            status = "executed"
+            clean = "completed"
+            incremental = "unexecuted"
+            offline = "unexecuted"
+            input_drift = "unexecuted"
+            partial_output = "unexecuted"
+            cancel = "unexecuted"
+            tier = "host-library"
+        }
     }
     $receiptPath = Join-Path $stage "jet-host.receipt"
     $stampPath = Join-Path $stage "jet-host.stamp"

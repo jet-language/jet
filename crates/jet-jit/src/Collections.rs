@@ -8,6 +8,7 @@
 use super::Concurrency;
 use crate::runtime_host::{jit_callable_parts, JitCallableSlot};
 use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
+use std::io::BufRead;
 
 mod set_semantics {
     #[allow(unused_imports)]
@@ -45,7 +46,7 @@ mod disjoint_semantics {
     }
 }
 
-mod authority_semantics {
+pub(crate) mod authority_semantics {
     include!("../../jet-codegen/src/Prelude/Core/Authority.rs");
 }
 
@@ -63,9 +64,10 @@ mod process_args_kernel {
 // are normally present in the flat emitted program, then exposes Vec-shaped
 // adapters for JIT handles.
 #[allow(dead_code, non_camel_case_types, unused_imports)]
-mod collection_semantics {
-    use crate::Encoding::json_rt::jet_int_to_string;
+pub(crate) mod collection_semantics {
     use crate::fault_injection::jet_fault_should_fail_allocation;
+    use crate::Encoding::json_rt::jet_int_to_string;
+    use jet_foundation::Numeric::JetInt;
     pub use jet_foundation::Outcome::*;
 
     use jet_foundation::StructuralDebug::jet_debug_map;
@@ -88,7 +90,7 @@ mod collection_semantics {
     }
 
     #[derive(Clone, Debug, PartialEq, Eq)]
-    struct JetMap<K, V>(std::sync::Arc<std::collections::BTreeMap<K, V>>);
+    pub(crate) struct JetMap<K, V>(std::sync::Arc<std::collections::BTreeMap<K, V>>);
 
     impl<K, V> JetMap<K, V> {
         fn new() -> Self {
@@ -116,6 +118,18 @@ mod collection_semantics {
         }
     }
 
+    /// By-value take of the map entries (`Prelude/Core.rs` spelling): the
+    /// sole owner moves the storage out, a shared handle clones the entries.
+    fn jet_map_into_entries<K: Ord + Clone, V: Clone>(m: JetMap<K, V>) -> Vec<(K, V)> {
+        match std::sync::Arc::try_unwrap(m.0) {
+            Ok(map) => map.into_iter().collect(),
+            Err(shared) => shared
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
+        }
+    }
+
     // BTreeMap has no stable fallible reservation API. Keep this representation
     // step at the map seam; the shared Prelude owns the AllocError projection.
     fn jet_map_try_insert_storage<K: Ord + Clone, V: Clone>(
@@ -132,11 +146,17 @@ mod collection_semantics {
 
     include!("../../jet-codegen/src/Prelude/Core/Loadable.rs");
     include!("../../jet-codegen/src/Prelude/Core/Values.rs");
+    // D-DATAFRAME1 / card #2447: the JIT uses the shared typed table-plan
+    // kernel; this module only converts resident handles at its ABI boundary.
+    include!("../../jet-codegen/src/Prelude/Core/LazyTablePlan.rs");
     include!("../../jet-codegen/src/Prelude/Core/TextValues.rs");
     include!("../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs");
     include!("../../jet-codegen/src/Prelude/Memo.rs");
     include!("../../jet-codegen/src/Prelude/Core/CollectionFailure.rs");
+    include!("../../jet-codegen/src/Prelude/Core/ParallelKernel.rs");
+    include!("../../jet-codegen/src/Prelude/Core/SimdLanes.rs");
+    include!("../../jet-codegen/src/Prelude/Core/SortKernel.rs");
     include!("../../jet-codegen/src/Prelude/Core/Collections.rs");
 
     pub(super) fn list_sort_desc<T: Ord>(xs: &mut Vec<T>) {
@@ -156,6 +176,20 @@ mod collection_semantics {
     {
         jet_list_sort_by_desc(xs, f);
     }
+    pub(super) fn list_sort_by_compare<T, F>(xs: &mut Vec<T>, f: F)
+    where
+        F: FnMut(&T, &T) -> std::cmp::Ordering,
+    {
+        jet_list_sort_by_compare_kernel(xs, f);
+    }
+    /// Apply the shared Prelude partition kernel and return its named-tuple
+    /// fields in canonical (`false_`, `true_`) order.
+    pub(super) fn list_partition<T, F>(xs: Vec<T>, f: F) -> (Vec<T>, Vec<T>)
+    where
+        F: FnMut(&T) -> bool,
+    {
+        jet_list_partition(xs, f, |yes, no| (no, yes))
+    }
 
     // Core.rs owns the public any/all/each spellings. These adapters compose
     // the same eager Prelude kernels available in this shared collection seam;
@@ -173,11 +207,7 @@ mod collection_semantics {
         jet_list_count_where_kernel(&xs, |value| f(value))
     }
 
-    pub(super) fn list_closure_update_first<F>(
-        xs: &mut Vec<i64>,
-        f: F,
-        replacement: i64,
-    ) -> bool
+    pub(super) fn list_closure_update_first<F>(xs: &mut Vec<i64>, f: F, replacement: i64) -> bool
     where
         F: FnMut(&i64) -> bool,
     {
@@ -263,6 +293,65 @@ mod collection_semantics {
         });
     }
 
+    pub(super) fn list_each_ref<F, E>(xs: &Vec<i64>, f: F) -> JetOutcome<(), E>
+    where
+        F: FnMut(&i64) -> JetOutcome<(), E>,
+    {
+        jet_list_each_ref(xs, f)
+    }
+    pub(super) fn list_fold<F>(xs: Vec<i64>, init: i64, f: F) -> i64
+    where
+        F: FnMut(&i64, &i64) -> i64,
+    {
+        jet_list_fold(xs, init, f)
+    }
+    pub(super) fn list_sum_fixed_f32(xs: Vec<f64>) -> f64 {
+        jet_list_sum_fixed_f32(xs.into_iter().map(|value| value as f32)) as f64
+    }
+
+    pub(super) fn list_sum_fixed_f64(xs: Vec<f64>) -> f64 {
+        jet_list_sum_fixed_f64(xs)
+    }
+
+    pub(super) fn list_fold_add_fixed_f32(xs: Vec<f64>, init: f64) -> f64 {
+        jet_list_fold_add_fixed_f32(xs.into_iter().map(|value| value as f32), init as f32) as f64
+    }
+
+    pub(super) fn list_fold_add_fixed_f64(xs: Vec<f64>, init: f64) -> f64 {
+        jet_list_fold_add_fixed_f64(xs, init)
+    }
+
+    pub(super) fn list_para_fold_add_fixed_f32(xs: Vec<f64>, seed: f64) -> f64 {
+        let values = xs.into_iter().map(|value| value as f32).collect::<Vec<_>>();
+        jet_list_para_fold_add_fixed_f32(values, seed as f32) as f64
+    }
+
+    pub(super) fn list_para_fold_add_fixed_f64(xs: Vec<f64>, seed: f64) -> f64 {
+        jet_list_para_fold_add_fixed_f64(xs, seed)
+    }
+
+    pub(super) fn list_group_by<F>(xs: Vec<i64>, f: F) -> Vec<(String, Vec<i64>)>
+    where
+        F: FnMut(&i64) -> String,
+    {
+        jet_list_group_by(xs, f)
+            .iter()
+            .map(|(key, values)| (key.clone(), values.clone()))
+            .collect()
+    }
+
+    pub(super) fn list_clear<T>(xs: &mut Vec<T>) {
+        jet_list_clear(xs);
+    }
+
+    pub(super) fn list_extend<T>(xs: &mut Vec<T>, other: Vec<T>) {
+        jet_list_extend(xs, other);
+    }
+
+    pub(super) fn list_reverse<T>(xs: &mut Vec<T>) {
+        jet_list_reverse(xs);
+    }
+
     pub(super) fn zip_fill_at<T: Clone>(
         fill_mode: u8,
         common_fills: &[T],
@@ -334,10 +423,13 @@ mod collection_semantics {
         jet_string_try_push(text, addition)
     }
 
+    fn display<T: JetDisplay>(value: &T) -> String {
+        value.jet_display()
+    }
+
     fn debug<T: JetDebug>(value: &T) -> String {
         value.jet_debug()
     }
-
     pub(super) fn debug_i64(value: i64) -> String {
         debug(&value)
     }
@@ -357,7 +449,87 @@ mod collection_semantics {
         debug(&value)
     }
 
+    #[derive(Clone, Copy)]
+    struct NativeI64(i64);
+    pub(super) fn display_i64_list(value: Vec<i64>) -> String {
+        display(&value)
+    }
+
+    impl JetDisplay for NativeI64 {
+        fn jet_display(&self) -> String {
+            self.0.to_string()
+        }
+    }
+
+    impl JetDebug for NativeI64 {
+        fn jet_debug(&self) -> String {
+            self.0.to_string()
+        }
+    }
+
+    pub(super) fn display_i8_list(value: Vec<i8>) -> String {
+        display(&value)
+    }
+    pub(super) fn display_i16_list(value: Vec<i16>) -> String {
+        display(&value)
+    }
+    pub(super) fn display_i32_list(value: Vec<i32>) -> String {
+        display(&value)
+    }
+    pub(super) fn display_native_i64_list(value: Vec<i64>) -> String {
+        display(&value.into_iter().map(NativeI64).collect::<Vec<NativeI64>>())
+    }
+    pub(super) fn display_u8_list(value: Vec<u8>) -> String {
+        display(&value)
+    }
+    pub(super) fn display_u16_list(value: Vec<u16>) -> String {
+        display(&value)
+    }
+    pub(super) fn display_u32_list(value: Vec<u32>) -> String {
+        display(&value)
+    }
+    pub(super) fn display_u64_list(value: Vec<u64>) -> String {
+        display(&value)
+    }
+    pub(super) fn display_f64_list(value: Vec<f64>) -> String {
+        display(&value)
+    }
+    pub(super) fn display_f32_list(value: Vec<f32>) -> String {
+        display(&value)
+    }
+    pub(super) fn display_bool_list(value: Vec<bool>) -> String {
+        display(&value)
+    }
+    pub(super) fn display_char_list(value: Vec<char>) -> String {
+        display(&value)
+    }
+    pub(super) fn display_string_list(value: Vec<String>) -> String {
+        display(&value)
+    }
+
+    pub(super) fn debug_i8_list(value: Vec<i8>) -> String {
+        debug(&value)
+    }
+    pub(super) fn debug_i16_list(value: Vec<i16>) -> String {
+        debug(&value)
+    }
+    pub(super) fn debug_i32_list(value: Vec<i32>) -> String {
+        debug(&value)
+    }
     pub(super) fn debug_i64_list(value: Vec<i64>) -> String {
+        debug(&value)
+    }
+
+    pub(super) fn debug_native_i64_list(value: Vec<i64>) -> String {
+        debug(&value.into_iter().map(NativeI64).collect::<Vec<NativeI64>>())
+    }
+    pub(super) fn debug_u8_list(value: Vec<u8>) -> String {
+        debug(&value)
+    }
+    pub(super) fn debug_u16_list(value: Vec<u16>) -> String {
+        debug(&value)
+    }
+    pub(super) fn debug_u32_list(value: Vec<u32>) -> String {
         debug(&value)
     }
     pub(super) fn debug_u64_list(value: Vec<u64>) -> String {
@@ -379,12 +551,24 @@ mod collection_semantics {
         debug(&value)
     }
 
+    pub(crate) fn sequence_argument_message(method: &str, value: i64) -> Option<&'static str> {
+        jet_sequence_argument_message(method, value)
+    }
+
+    pub(super) fn list_take<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
+        jet_list_take(xs, n)
+    }
+
+    pub(super) fn list_skip<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
+        jet_list_skip(xs, n)
+    }
+
     pub(super) fn iter_take<T: 'static>(xs: Vec<T>, n: i64) -> Vec<T> {
         jet_iter_take(jet_iter_from_vec(xs), n).to_list()
     }
 
-    pub(super) fn iter_skip<T: 'static>(xs: Vec<T>, n: i64) -> Vec<T> {
-        jet_iter_skip(jet_iter_from_vec(xs), n).to_list()
+    pub(super) fn iter_string_split(text: &String, separator: &str) -> Vec<String> {
+        jet_iter_string_split(text, separator).to_list()
     }
 
     pub(super) fn iter_first<T: 'static>(xs: Vec<T>) -> Option<T> {
@@ -519,12 +703,40 @@ mod collection_semantics {
         map_pairs(&map_from_pairs(entries))
     }
 
+    fn map_from_int_pairs(entries: Vec<(String, i64)>) -> JetMap<String, JetInt> {
+        entries
+            .into_iter()
+            // SAFETY: callers are the exact-Int adapters selected from checked
+            // MIR map-value facts; each word is a live JetInt ABI carrier.
+            .map(|(key, value)| (key, unsafe { JetInt::clone_from_raw(value) }))
+            .collect()
+    }
+
+    fn int_pairs(entries: Vec<(String, JetInt)>) -> Vec<(String, i64)> {
+        entries
+            .into_iter()
+            .map(|(key, value)| (key, value.into_raw()))
+            .collect()
+    }
+
     pub(super) fn map_min_i64(entries: Vec<(String, i64)>) -> Option<i64> {
         jet_map_min_value_kernel(&map_from_pairs(entries)).ok()
     }
 
     pub(super) fn map_max_i64(entries: Vec<(String, i64)>) -> Option<i64> {
         jet_map_max_value_kernel(&map_from_pairs(entries)).ok()
+    }
+
+    pub(super) fn map_min_int(entries: Vec<(String, i64)>) -> Option<i64> {
+        jet_map_min_value_kernel(&map_from_int_pairs(entries))
+            .ok()
+            .map(JetInt::into_raw)
+    }
+
+    pub(super) fn map_max_int(entries: Vec<(String, i64)>) -> Option<i64> {
+        jet_map_max_value_kernel(&map_from_int_pairs(entries))
+            .ok()
+            .map(JetInt::into_raw)
     }
 
     pub(super) fn map_intersection_i64(
@@ -590,7 +802,31 @@ mod collection_semantics {
     }
 
     pub(super) fn map_top_n_i64(entries: Vec<(String, i64)>, n: i64) -> Vec<(String, i64)> {
+        // SAFETY: `n` is the checked Jet Int method argument; retain spilled
+        // values before converting the borrowed ABI word.
+        let n = unsafe { JetInt::clone_from_raw(n) };
+        let n = n.to_i64().unwrap_or_else(|| {
+            if n < JetInt::from_i64(0) {
+                i64::MIN
+            } else {
+                i64::MAX
+            }
+        });
         jet_map_top_n(&map_from_pairs(entries), n)
+    }
+
+    pub(super) fn map_top_n_int(entries: Vec<(String, i64)>, n: i64) -> Vec<(String, i64)> {
+        // SAFETY: `n` is the checked Jet Int method argument; retain spilled
+        // values before converting the borrowed ABI word.
+        let n = unsafe { JetInt::clone_from_raw(n) };
+        let n = n.to_i64().unwrap_or_else(|| {
+            if n < JetInt::from_i64(0) {
+                i64::MIN
+            } else {
+                i64::MAX
+            }
+        });
+        int_pairs(jet_map_top_n(&map_from_int_pairs(entries), n))
     }
 
     pub(super) fn set_pop_i64(
@@ -655,8 +891,12 @@ mod collection_semantics {
         jet_list_random(xs)
     }
 
-    pub(super) fn list_min_max_i64(xs: &[i64]) -> JetOutcome<(i64, i64), JetAbsent> {
-        jet_list_min_max(xs, |min, max| (min, max))
+    pub(super) fn list_min_max_int(xs: &[i64]) -> JetOutcome<(i64, i64), JetAbsent> {
+        jet_list_min_max_by(
+            xs,
+            |value| unsafe { JetInt::clone_from_raw(*value) },
+            |min, max| (min, max),
+        )
     }
 
     pub(super) fn list_replace<T: Clone>(xs: &[T], index: i64, new: T) -> Vec<T> {
@@ -694,6 +934,970 @@ mod collection_semantics {
         jet_priority_queue_remove_slot_kernel(pq, index, file, line)
     }
 }
+/// One lazy line source remains associated with its cursor until the loop
+/// exhausts or the cursor is dropped. The source is never materialised into a
+/// collection: `next` performs exactly one blocking read and preserves errors.
+pub(crate) enum JetLoopLineReader {
+    File(crate::enc_stream::runtime::JetFileReader),
+    Stdin,
+}
+
+impl JetLoopLineReader {
+    fn next(&mut self) -> Result<Option<String>, String> {
+        let operation = match self {
+            Self::File(_) => "FS.Read",
+            Self::Stdin => "IO.Read",
+        };
+        if crate::fault_injection::jet_fault_should_fail(operation) {
+            return Err(format!("fault injected: {operation}"));
+        }
+        match self {
+            Self::Stdin => crate::IO::term_prelude::jet_term_read_stdin_line()
+                .map_err(|error| format!("read stdin: {error}"))
+                .map(|line| match line {
+                    crate::IO::term_prelude::JetTermRead::Line(line) => Some(line),
+                    crate::IO::term_prelude::JetTermRead::EndOfInput => None,
+                }),
+            Self::File(reader) => {
+                let mut line = String::new();
+                let count = reader
+                    .inner
+                    .read_line(&mut line)
+                    .map_err(|error| format!("read {}: {error}", reader.path))?;
+                if count == 0 {
+                    return Ok(None);
+                }
+                crate::IO::term_prelude::jet_term_trim_line(&mut line);
+                Ok(Some(line))
+            }
+        }
+    }
+}
+
+/// Canonical MIR loop cursor state.  The JIT stores one typed state per
+/// one-based cursor handle; it never reparses a source expression or asks the
+/// checker for iteration semantics at runtime.
+pub(crate) enum JetLoopCursorState {
+    Range {
+        cursor: collection_semantics::JetLoopRangeCursor,
+    },
+    Values {
+        items: Vec<JetLoopItem>,
+        index: usize,
+        step: usize,
+    },
+    Lines {
+        reader: JetLoopLineReader,
+        current: Option<i64>,
+        exhausted: bool,
+        step: usize,
+    },
+    Channel {
+        channel: Option<jet_codegen::scheduler::JetSchedulerChannel<i64>>,
+        stream: Option<jet_codegen::scheduler::JetStream<i64>>,
+        current: Option<i64>,
+        step: usize,
+    },
+    Encoding {
+        reader: i64,
+        reader_type: String,
+        current: Option<i64>,
+        step: usize,
+    },
+    Iterable {
+        iterator: i64,
+        next_slot: Option<i64>,
+        current: Option<i64>,
+        step: usize,
+    },
+}
+
+pub(crate) enum JetLoopItem {
+    Int(i64),
+    FloatBits(i64),
+}
+
+fn loop_source_kind(
+    rt: &crate::JitRuntime,
+    source_handle: i64,
+) -> Result<jet_foundation::MIR::MirLoopSourceKind, String> {
+    let wire = rt
+        .heap
+        .clone_string(source_handle)
+        .ok_or_else(|| "loop source kind is not a string handle".to_string())?;
+    jet_foundation::MIR::MirLoopSourceKind::from_wire(&wire)
+        .ok_or_else(|| "invalid canonical loop source wire".to_string())
+}
+
+fn loop_handle_index(handle: i64) -> Result<usize, String> {
+    handle
+        .checked_sub(1)
+        .and_then(|value| usize::try_from(value).ok())
+        .ok_or_else(|| "invalid loop cursor handle".to_string())
+}
+
+fn loop_step(step_value: i64, has_step: i8) -> Result<usize, String> {
+    let step = if has_step == 0 { 1 } else { step_value };
+    usize::try_from(step)
+        .ok()
+        .filter(|step| *step > 0)
+        .ok_or_else(|| "loop stride must be positive".to_string())
+}
+
+fn loop_range_cursor_from_value(
+    rt: &crate::JitRuntime,
+    collection: i64,
+    step_value: i64,
+    has_step: bool,
+) -> Option<collection_semantics::JetLoopRangeCursor> {
+    let start = rt.heap.record_get_int(collection, 0)?;
+    let end = rt.heap.record_get_int(collection, 1)?;
+    let exclusive = rt
+        .heap
+        .record_get_bool(collection, 2)
+        .or_else(|| rt.heap.record_get_int(collection, 2).map(|value| value != 0))
+        .unwrap_or(false);
+    collection_semantics::jet_loop_range_init_checked(start, end, step_value, has_step, exclusive)
+        .ok()
+}
+
+fn loop_items_from_list(
+    rt: &mut crate::JitRuntime,
+    collection: i64,
+) -> Result<Vec<JetLoopItem>, String> {
+    if let Some(length) = rt.heap.list_len(collection) {
+        let length = usize::try_from(length).map_err(|_| "invalid list length".to_string())?;
+        if length == 0 {
+            return Ok(Vec::new());
+        }
+        if rt.heap.list_get_float(collection, 0).is_some() {
+            return (0..length)
+                .map(|index| {
+                    let index =
+                        i64::try_from(index).map_err(|_| "list index overflow".to_string())?;
+                    rt.heap
+                        .list_get_float(collection, index)
+                        .map(|value| JetLoopItem::FloatBits(value.to_bits() as i64))
+                        .ok_or_else(|| "list float element is not present".to_string())
+                })
+                .collect();
+        }
+        return (0..length)
+            .map(|index| {
+                let index = i64::try_from(index).map_err(|_| "list index overflow".to_string())?;
+                rt.heap
+                    .list_get_int(collection, index)
+                    .map(JetLoopItem::Int)
+                    .ok_or_else(|| "list integer element is not present".to_string())
+            })
+            .collect();
+    }
+    Err("loop collection is not an iterable carrier".to_string())
+}
+
+fn loop_items_from_chars(
+    rt: &mut crate::JitRuntime,
+    collection: i64,
+) -> Result<Vec<JetLoopItem>, String> {
+    let text = rt
+        .heap
+        .clone_string(collection)
+        .ok_or_else(|| "character loop source is not a string handle".to_string())?;
+    Ok(text
+        .chars()
+        .map(|value| JetLoopItem::Int(i64::from(u32::from(value))))
+        .collect())
+}
+
+fn loop_line_reader_from_file(handle: i64) -> Result<JetLoopLineReader, String> {
+    let index = loop_handle_index(handle)?;
+    let mut outcome = None;
+    Concurrency::with_runtime_mut(|rt| {
+        let result = match rt.file_readers.get_mut(index) {
+            Some(slot) => {
+                let slot = std::mem::replace(slot, crate::enc_stream::FileReaderSlot::Taken);
+                match slot {
+                    crate::enc_stream::FileReaderSlot::Live(reader) => {
+                        Ok(JetLoopLineReader::File(reader))
+                    }
+                    crate::enc_stream::FileReaderSlot::Taken => {
+                        Err("FileReader already moved".to_string())
+                    }
+                }
+            }
+            None => Err("bad FileReader handle".to_string()),
+        };
+        outcome = Some(result);
+    });
+    outcome.unwrap_or_else(|| Err("no active JIT runtime".to_string()))
+}
+
+fn loop_line_reader_from_stdin() -> JetLoopLineReader {
+    JetLoopLineReader::Stdin
+}
+
+fn loop_line_pull(reader: &mut JetLoopLineReader) -> Result<Option<i64>, String> {
+    reader
+        .next()
+        .map(|line| line.map(|line| Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(line))))
+}
+
+fn loop_pull(
+    channel: &mut Option<jet_codegen::scheduler::JetSchedulerChannel<i64>>,
+    stream: &mut Option<jet_codegen::scheduler::JetStream<i64>>,
+) -> Option<i64> {
+    if let Some(channel) = channel {
+        return channel.receive();
+    }
+    stream
+        .as_mut()
+        .and_then(jet_codegen::scheduler::JetStream::pull)
+}
+
+fn loop_encoding_next(reader_type: &str, reader: i64) -> Result<Option<i64>, String> {
+    let result = match reader_type {
+        "JSONReader" => crate::enc_stream::jet_jit_json_reader_next(reader),
+        "JSONLReader" => crate::enc_stream::jet_jit_jsonl_reader_next(reader),
+        "CSVReader" => crate::enc_stream::jet_jit_csv_reader_next(reader),
+        "XMLReader" => crate::enc_stream::jet_jit_xml_reader_next(reader),
+        "CBORReader" => crate::enc_stream::jet_jit_cbor_reader_next(reader),
+        _ => return Err("unknown checked encoding reader type".to_string()),
+    };
+    Concurrency::with_runtime_string(|rt| {
+        let Some((ok, bits)) = crate::runtime_host::jit_result_parts(rt, result) else {
+            return Err("encoding reader returned an invalid result handle".to_string());
+        };
+        if !ok {
+            return Err("encoding reader returned an error".to_string());
+        }
+        if bits == 0 {
+            Ok(None)
+        } else {
+            Ok(Some((bits as i64).wrapping_sub(1)))
+        }
+    })
+}
+fn invoke_iterable_slot(slot: i64, payload: i64) -> Result<i64, String> {
+    if slot == 0 {
+        return Err("MIR iterable hook has a null thunk pointer".to_string());
+    }
+    // SAFETY: the Cranelift compiler installs only env-first universal
+    // iterable thunks with this exact ABI and keeps their code pages live for
+    // the resident run.
+    let callback: unsafe extern "C" fn(i64, i64) -> i64 =
+        unsafe { std::mem::transmute(slot as usize) };
+    Ok(unsafe { callback(0, payload) })
+}
+
+fn loop_iterable_next(next_slot: Option<i64>, iterator: i64) -> Result<Option<i64>, String> {
+    let Some(next_slot) = next_slot else {
+        return Ok(Concurrency::with_runtime_mut(|rt| {
+            crate::runtime_host::lazy_iter_next(rt, iterator)
+        }));
+    };
+    let packed = invoke_iterable_slot(next_slot, iterator)?;
+    if packed == 0 {
+        Ok(None)
+    } else {
+        packed
+            .checked_sub(1)
+            .map(Some)
+            .ok_or_else(|| "MIR iterable returned an invalid Option payload".to_string())
+    }
+}
+
+fn loop_cursor_take(handle: i64) -> Result<JetLoopCursorState, String> {
+    let index = loop_handle_index(handle)?;
+    Concurrency::with_runtime_string(|rt| {
+        rt.loop_cursors
+            .get_mut(index)
+            .and_then(Option::take)
+            .ok_or_else(|| "loop cursor is not live".to_string())
+    })
+}
+
+fn loop_cursor_put(handle: i64, state: JetLoopCursorState) -> Result<(), String> {
+    let index = loop_handle_index(handle)?;
+    Concurrency::with_runtime_string(|rt| {
+        let slot = rt
+            .loop_cursors
+            .get_mut(index)
+            .ok_or_else(|| "loop cursor is not live".to_string())?;
+        *slot = Some(state);
+        Ok(())
+    })
+}
+fn loop_cursor_alloc(state: JetLoopCursorState) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.loop_cursors.push(Some(state));
+        rt.loop_cursors.len() as i64
+    })
+}
+
+fn loop_host_fault(error: String) {
+    Concurrency::with_runtime_mut(|rt| rt.set_host_fault(&error));
+}
+
+fn loop_cursor_item(state: &JetLoopCursorState) -> Option<i64> {
+    match state {
+        JetLoopCursorState::Range { cursor } => {
+            if collection_semantics::jet_loop_range_has_next(cursor) {
+                Some(collection_semantics::jet_loop_range_value(cursor))
+            } else {
+                None
+            }
+        }
+        JetLoopCursorState::Values { items, index, .. } => {
+            items.get(*index).map(|item| match item {
+                JetLoopItem::Int(value) | JetLoopItem::FloatBits(value) => *value,
+            })
+        }
+        JetLoopCursorState::Lines { current, .. }
+        | JetLoopCursorState::Channel { current, .. }
+        | JetLoopCursorState::Encoding { current, .. }
+        | JetLoopCursorState::Iterable { current, .. } => *current,
+    }
+}
+
+pub(crate) fn jet_jit_loop_range_init(
+    start: i64,
+    end: i64,
+    step_value: i64,
+    has_step: i8,
+    exclusive: i8,
+) -> i64 {
+    let cursor = match collection_semantics::jet_loop_range_init_checked(
+        start,
+        end,
+        step_value,
+        has_step != 0,
+        exclusive != 0,
+    ) {
+        Ok(cursor) => cursor,
+        Err(error) => {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_runtime_stop_at("E3001", "<core.prelude>", 0, error);
+            });
+            return 0;
+        }
+    };
+    loop_cursor_alloc(JetLoopCursorState::Range { cursor })
+}
+
+pub(crate) fn jet_jit_loop_range_has_next(handle: i64) -> i8 {
+    let state = match loop_cursor_take(handle) {
+        Ok(state) => state,
+        Err(error) => {
+            loop_host_fault(error);
+            return 0;
+        }
+    };
+    let result = match &state {
+        JetLoopCursorState::Range { cursor } => {
+            i8::from(collection_semantics::jet_loop_range_has_next(cursor))
+        }
+        JetLoopCursorState::Values { .. }
+        | JetLoopCursorState::Lines { .. }
+        | JetLoopCursorState::Channel { .. }
+        | JetLoopCursorState::Encoding { .. }
+        | JetLoopCursorState::Iterable { .. } => {
+            loop_host_fault("range operation received a non-range cursor".to_string());
+            return 0;
+        }
+    };
+    if let Err(error) = loop_cursor_put(handle, state) {
+        loop_host_fault(error);
+        return 0;
+    }
+    result
+}
+
+pub(crate) fn jet_jit_loop_range_value(handle: i64) -> i64 {
+    let state = match loop_cursor_take(handle) {
+        Ok(state) => state,
+        Err(error) => {
+            loop_host_fault(error);
+            return 0;
+        }
+    };
+    let result = match &state {
+        JetLoopCursorState::Range { cursor }
+            if collection_semantics::jet_loop_range_has_next(cursor) =>
+        {
+            collection_semantics::jet_loop_range_value(cursor)
+        }
+        JetLoopCursorState::Range { .. } => {
+            loop_host_fault("range loop value requested after exhaustion".to_string());
+            return 0;
+        }
+        JetLoopCursorState::Values { .. }
+        | JetLoopCursorState::Lines { .. }
+        | JetLoopCursorState::Channel { .. }
+        | JetLoopCursorState::Encoding { .. }
+        | JetLoopCursorState::Iterable { .. } => {
+            loop_host_fault("range operation received a non-range cursor".to_string());
+            return 0;
+        }
+    };
+    if let Err(error) = loop_cursor_put(handle, state) {
+        loop_host_fault(error);
+        return 0;
+    }
+    result
+}
+
+pub(crate) fn jet_jit_loop_range_advance(handle: i64) {
+    let mut state = match loop_cursor_take(handle) {
+        Ok(state) => state,
+        Err(error) => {
+            loop_host_fault(error);
+            return;
+        }
+    };
+    match &mut state {
+        JetLoopCursorState::Range { cursor } => {
+            collection_semantics::jet_loop_range_advance(cursor);
+        }
+        JetLoopCursorState::Values { .. }
+        | JetLoopCursorState::Lines { .. }
+        | JetLoopCursorState::Channel { .. }
+        | JetLoopCursorState::Encoding { .. }
+        | JetLoopCursorState::Iterable { .. } => {
+            loop_host_fault("range operation received a non-range cursor".to_string());
+            return;
+        }
+    };
+    if let Err(error) = loop_cursor_put(handle, state) {
+        loop_host_fault(error);
+    }
+}
+
+pub(crate) fn jet_jit_loop_map_init(
+    collection: i64,
+    step_value: i64,
+    has_step: i64,
+    key_type_id: i64,
+    value_type_id: i64,
+) -> i64 {
+    let state = Concurrency::with_runtime_string(|rt| {
+        let step = loop_step(step_value, i8::from(has_step != 0))?;
+        let key_type = rt
+            .runtime_type_descriptor(key_type_id as u64)
+            .cloned()
+            .ok_or_else(|| "map loop key type descriptor is missing".to_string())?;
+        let value_type = rt
+            .runtime_type_descriptor(value_type_id as u64)
+            .cloned()
+            .ok_or_else(|| "map loop value type descriptor is missing".to_string())?;
+        let pairs = rt
+            .heap
+            .clone_map_pairs(collection)
+            .ok_or_else(|| "map loop source is not a map carrier".to_string())?;
+        let mut items = Vec::with_capacity(pairs.len());
+        for (key, value) in pairs {
+            let pair = rt.heap.alloc_record(2);
+            crate::runtime_host::write_typed_record_field(rt, pair, 0, key, &key_type)?;
+            crate::runtime_host::write_typed_record_field(rt, pair, 1, value, &value_type)?;
+            items.push(JetLoopItem::Int(pair));
+        }
+        Ok(JetLoopCursorState::Values {
+            items,
+            index: 0,
+            step,
+        })
+    });
+    match state {
+        Ok(state) => loop_cursor_alloc(state),
+        Err(error) => {
+            loop_host_fault(error);
+            0
+        }
+    }
+}
+
+pub(crate) fn jet_jit_loop_iter_init(
+    collection: i64,
+    step_value: i64,
+    has_step: i8,
+    by_value: i8,
+    source_handle: i64,
+) -> i64 {
+    let (source_kind, step) = match Concurrency::with_runtime_string(|rt| {
+        let source_kind = loop_source_kind(rt, source_handle)?;
+        let step = loop_step(step_value, has_step)?;
+        Ok::<_, String>((source_kind, step))
+    }) {
+        Ok(values) => values,
+        Err(error) => {
+            loop_host_fault(error);
+            return 0;
+        }
+    };
+    if by_value == 0
+        && matches!(
+            source_kind,
+            jet_foundation::MIR::MirLoopSourceKind::Chars
+                | jet_foundation::MIR::MirLoopSourceKind::LinesFile
+                | jet_foundation::MIR::MirLoopSourceKind::LinesStdin
+                | jet_foundation::MIR::MirLoopSourceKind::LinesProcessStream
+                | jet_foundation::MIR::MirLoopSourceKind::ChannelReceiver
+                | jet_foundation::MIR::MirLoopSourceKind::EncodingReader { .. }
+                | jet_foundation::MIR::MirLoopSourceKind::Iterable { .. }
+        )
+    {
+        loop_host_fault("iterator loop source must be moved".to_string());
+        return 0;
+    }
+    let state = match source_kind {
+        jet_foundation::MIR::MirLoopSourceKind::Plain
+        | jet_foundation::MIR::MirLoopSourceKind::LinesProcessStream => {
+            if Concurrency::with_runtime_mut(|rt| {
+                crate::runtime_host::lazy_iter_index(rt, collection).is_some()
+            }) {
+                return loop_cursor_alloc(JetLoopCursorState::Iterable {
+                    iterator: collection,
+                    next_slot: None,
+                    current: None,
+                    step,
+                });
+            }
+            if let Some(cursor) = Concurrency::with_runtime_mut(|rt| {
+                loop_range_cursor_from_value(rt, collection, step_value, has_step != 0)
+            }) {
+                return loop_cursor_alloc(JetLoopCursorState::Range { cursor });
+            }
+            let items =
+                match Concurrency::with_runtime_string(|rt| loop_items_from_list(rt, collection)) {
+                    Ok(items) => items,
+                    Err(error) => {
+                        loop_host_fault(error);
+                        return 0;
+                    }
+                };
+            JetLoopCursorState::Values {
+                items,
+                index: 0,
+                step,
+            }
+        }
+        jet_foundation::MIR::MirLoopSourceKind::Chars => {
+            let items = match Concurrency::with_runtime_string(|rt| {
+                loop_items_from_chars(rt, collection)
+            }) {
+                Ok(items) => items,
+                Err(error) => {
+                    loop_host_fault(error);
+                    return 0;
+                }
+            };
+            JetLoopCursorState::Values {
+                items,
+                index: 0,
+                step,
+            }
+        }
+        jet_foundation::MIR::MirLoopSourceKind::LinesFile => {
+            let mut reader = match loop_line_reader_from_file(collection) {
+                Ok(reader) => reader,
+                Err(error) => {
+                    loop_host_fault(error);
+                    return 0;
+                }
+            };
+            let current = match loop_line_pull(&mut reader) {
+                Ok(current) => current,
+                Err(error) => {
+                    loop_host_fault(error);
+                    return 0;
+                }
+            };
+            let exhausted = current.is_none();
+            JetLoopCursorState::Lines {
+                reader,
+                current,
+                exhausted,
+                step,
+            }
+        }
+        jet_foundation::MIR::MirLoopSourceKind::LinesStdin => {
+            let mut reader = loop_line_reader_from_stdin();
+            let current = match loop_line_pull(&mut reader) {
+                Ok(current) => current,
+                Err(error) => {
+                    loop_host_fault(error);
+                    return 0;
+                }
+            };
+            let exhausted = current.is_none();
+            JetLoopCursorState::Lines {
+                reader,
+                current,
+                exhausted,
+                step,
+            }
+        }
+        jet_foundation::MIR::MirLoopSourceKind::ChannelReceiver => {
+            let (channel, stream) = match Concurrency::with_runtime_string(|rt| {
+                if let Some(stream) = rt.stream_consumers.remove(&collection) {
+                    Ok((None, Some(stream)))
+                } else {
+                    let index = usize::try_from(collection)
+                        .map_err(|_| "invalid channel receiver handle".to_string())?;
+                    rt.channels
+                        .get(index)
+                        .cloned()
+                        .map(|channel| (Some(channel), None))
+                        .ok_or_else(|| "invalid channel receiver handle".to_string())
+                }
+            }) {
+                Ok(value) => value,
+                Err(error) => {
+                    loop_host_fault(error);
+                    return 0;
+                }
+            };
+            let mut channel = channel;
+            let mut stream = stream;
+            let current = loop_pull(&mut channel, &mut stream);
+            JetLoopCursorState::Channel {
+                channel,
+                stream,
+                current,
+                step,
+            }
+        }
+        jet_foundation::MIR::MirLoopSourceKind::EncodingReader { reader_type } => {
+            let current = match loop_encoding_next(&reader_type, collection) {
+                Ok(current) => current,
+                Err(error) => {
+                    loop_host_fault(error);
+                    return 0;
+                }
+            };
+            JetLoopCursorState::Encoding {
+                reader: collection,
+                reader_type,
+                current,
+                step,
+            }
+        }
+        jet_foundation::MIR::MirLoopSourceKind::Iterable {
+            coll_type,
+            iter_type,
+            iter_symbol,
+            next_symbol,
+        } => {
+            let wire = jet_foundation::MIR::MirLoopSourceKind::Iterable {
+                coll_type: coll_type.clone(),
+                iter_type: iter_type.clone(),
+                iter_symbol,
+                next_symbol,
+            }
+            .wire();
+            let hook = Concurrency::with_runtime_mut(|rt| rt.iterable_hook(&wire).cloned());
+            let Some(hook) = hook else {
+                loop_host_fault("MIR iterable hook is not registered".to_string());
+                return 0;
+            };
+            if hook.coll_type != coll_type || hook.iter_type != iter_type {
+                loop_host_fault(
+                    "MIR iterable hook type metadata disagrees with source".to_string(),
+                );
+                return 0;
+            }
+            let iterator = match invoke_iterable_slot(hook.iter_slot, collection) {
+                Ok(iterator) if iterator != 0 => iterator,
+                Ok(_) => {
+                    loop_host_fault(
+                        "MIR iterable initializer returned a null iterator".to_string(),
+                    );
+                    return 0;
+                }
+                Err(error) => {
+                    loop_host_fault(error);
+                    return 0;
+                }
+            };
+            JetLoopCursorState::Iterable {
+                iterator,
+                next_slot: Some(hook.next_slot),
+                current: None,
+                step,
+            }
+        }
+    };
+    loop_cursor_alloc(state)
+}
+
+pub(crate) fn jet_jit_loop_iter_has_next(handle: i64) -> i8 {
+    let mut state = match loop_cursor_take(handle) {
+        Ok(state) => state,
+        Err(error) => {
+            loop_host_fault(error);
+            return 0;
+        }
+    };
+    let result = match &mut state {
+        JetLoopCursorState::Values { items, index, .. } => i8::from(*index < items.len()),
+        JetLoopCursorState::Lines {
+            reader,
+            current,
+            exhausted,
+            ..
+        } => {
+            if !*exhausted && current.is_none() {
+                match loop_line_pull(reader) {
+                    Ok(Some(value)) => *current = Some(value),
+                    Ok(None) => *exhausted = true,
+                    Err(error) => {
+                        loop_host_fault(error);
+                        return 0;
+                    }
+                }
+            }
+            i8::from(current.is_some())
+        }
+        JetLoopCursorState::Channel {
+            channel,
+            stream,
+            current,
+            ..
+        } => {
+            if current.is_none() {
+                *current = loop_pull(channel, stream);
+            }
+            i8::from(current.is_some())
+        }
+        JetLoopCursorState::Encoding {
+            reader,
+            reader_type,
+            current,
+            ..
+        } => {
+            if current.is_none() {
+                match loop_encoding_next(reader_type, *reader) {
+                    Ok(value) => *current = value,
+                    Err(error) => {
+                        loop_host_fault(error);
+                        return 0;
+                    }
+                }
+            }
+            i8::from(current.is_some())
+        }
+        JetLoopCursorState::Iterable {
+            iterator,
+            next_slot,
+            current,
+            ..
+        } => {
+            if current.is_none() {
+                match loop_iterable_next(*next_slot, *iterator) {
+                    Ok(value) => *current = value,
+                    Err(error) => {
+                        loop_host_fault(error);
+                        return 0;
+                    }
+                }
+            }
+            i8::from(current.is_some())
+        }
+        JetLoopCursorState::Range { cursor } => {
+            i8::from(collection_semantics::jet_loop_range_has_next(cursor))
+        }
+    };
+    if let Err(error) = loop_cursor_put(handle, state) {
+        loop_host_fault(error);
+        return 0;
+    }
+    result
+}
+
+pub(crate) fn jet_jit_loop_iter_value(handle: i64) -> i64 {
+    let state = match loop_cursor_take(handle) {
+        Ok(state) => state,
+        Err(error) => {
+            loop_host_fault(error);
+            return 0;
+        }
+    };
+    let Some(value) = loop_cursor_item(&state) else {
+        loop_host_fault("iterator loop value requested after exhaustion".to_string());
+        return 0;
+    };
+    if let Err(error) = loop_cursor_put(handle, state) {
+        loop_host_fault(error);
+        return 0;
+    }
+    value
+}
+
+pub(crate) fn jet_jit_loop_iter_advance(handle: i64) {
+    let mut state = match loop_cursor_take(handle) {
+        Ok(state) => state,
+        Err(error) => {
+            loop_host_fault(error);
+            return;
+        }
+    };
+    let _keep = match &mut state {
+        JetLoopCursorState::Values { items, index, step } => {
+            *index = index.saturating_add(*step);
+            *index < items.len()
+        }
+        JetLoopCursorState::Lines {
+            reader,
+            current,
+            exhausted,
+            step,
+        } => {
+            *current = None;
+            if *exhausted {
+                false
+            } else {
+                let mut keep = true;
+                for offset in 0..*step {
+                    match loop_line_pull(reader) {
+                        Ok(Some(value)) if offset + 1 == *step => *current = Some(value),
+                        Ok(Some(_)) => {}
+                        Ok(None) => {
+                            *exhausted = true;
+                            keep = false;
+                            break;
+                        }
+                        Err(error) => {
+                            loop_host_fault(error);
+                            return;
+                        }
+                    }
+                }
+                keep && current.is_some()
+            }
+        }
+        JetLoopCursorState::Channel {
+            channel,
+            stream,
+            current,
+            step,
+        } => {
+            *current = None;
+            let mut keep = true;
+            for _ in 1..*step {
+                if loop_pull(channel, stream).is_none() {
+                    keep = false;
+                    break;
+                }
+            }
+            if keep {
+                *current = loop_pull(channel, stream);
+                keep = current.is_some();
+            }
+            keep
+        }
+        JetLoopCursorState::Encoding {
+            reader,
+            reader_type,
+            current,
+            step,
+        } => {
+            *current = None;
+            let mut keep = true;
+            for _ in 1..*step {
+                match loop_encoding_next(reader_type, *reader) {
+                    Ok(Some(_)) => {}
+                    Ok(None) => {
+                        keep = false;
+                        break;
+                    }
+                    Err(error) => {
+                        loop_host_fault(error);
+                        return;
+                    }
+                }
+            }
+            if keep {
+                match loop_encoding_next(reader_type, *reader) {
+                    Ok(value) => {
+                        *current = value;
+                        keep = current.is_some();
+                    }
+                    Err(error) => {
+                        loop_host_fault(error);
+                        return;
+                    }
+                }
+            }
+            keep
+        }
+        JetLoopCursorState::Iterable {
+            iterator,
+            next_slot,
+            current,
+            step,
+        } => {
+            *current = None;
+            let mut keep = true;
+            for _ in 1..*step {
+                match loop_iterable_next(*next_slot, *iterator) {
+                    Ok(Some(_)) => {}
+                    Ok(None) => {
+                        keep = false;
+                        break;
+                    }
+                    Err(error) => {
+                        loop_host_fault(error);
+                        return;
+                    }
+                }
+            }
+            if keep {
+                match loop_iterable_next(*next_slot, *iterator) {
+                    Ok(value) => {
+                        *current = value;
+                        keep = current.is_some();
+                    }
+                    Err(error) => {
+                        loop_host_fault(error);
+                        return;
+                    }
+                }
+            }
+            keep
+        }
+        JetLoopCursorState::Range { cursor } => {
+            collection_semantics::jet_loop_range_advance(cursor);
+            collection_semantics::jet_loop_range_has_next(cursor)
+        }
+    };
+    if let Err(error) = loop_cursor_put(handle, state) {
+        loop_host_fault(error);
+    }
+}
+/// Scalar debug adapters reuse the shared Prelude `JetDebug` implementations.
+/// They expose only the ABI-sized values needed by rich MIR diagnostics.
+pub(crate) fn jet_debug_i64(value: i64) -> String {
+    collection_semantics::debug_i64(value)
+}
+
+pub(crate) fn jet_debug_f64(value: f64) -> String {
+    collection_semantics::debug_f64(value)
+}
+
+pub(crate) fn jet_debug_f32(value: f32) -> String {
+    collection_semantics::debug_f32(value)
+}
+
+pub(crate) fn jet_debug_bool(value: bool) -> String {
+    collection_semantics::debug_bool(value)
+}
+
+pub(crate) fn jet_debug_char(value: char) -> String {
+    collection_semantics::debug_char(value)
+}
+
+pub(crate) fn jet_debug_string(value: String) -> String {
+    collection_semantics::debug_string(value)
+}
 
 /// Result-arena Option ABI: a 1-based `rt.results` handle carrying `(ok, bits)`.
 /// `LowerCtx::uses_result_option_abi` is the ONE fact that says which host
@@ -705,7 +1909,7 @@ fn option_i64(rt: &mut crate::JitRuntime, value: Option<i64>) -> i64 {
     crate::runtime_host::alloc_jit_result(rt, value.is_some(), value.unwrap_or_default() as u64)
 }
 
-fn alloc_error_result(
+pub(crate) fn alloc_error_result(
     rt: &mut crate::JitRuntime,
     error: jet_foundation::Outcome::AllocError,
 ) -> i64 {
@@ -738,6 +1942,22 @@ fn trap_index(len: i64, index: i64, line: u32) {
             &jet_foundation::Outcome::jet_list_bounds_message(len, index),
         );
     });
+}
+/// Convert a checked MIR collection index from Jet's erased `Int` carrier to
+/// the native i64 position expected by resident collection kernels. Values
+/// outside the host range become a guaranteed invalid position, so the
+/// subsequent checked kernel reports its canonical bounds stop instead of
+/// interpreting boxed-carrier bits as an index.
+fn jet_jit_index_to_i64(value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap.int_to_i64(value).unwrap_or_else(|| {
+            if rt.heap.int_is_negative(value) {
+                -1
+            } else {
+                i64::MAX
+            }
+        })
+    })
 }
 
 fn jet_jit_list_new() -> i64 {
@@ -796,6 +2016,93 @@ fn jet_jit_list_push_f64(list: i64, v: f64) {
             .list_push_float(list, v)
             .expect("jit list push f64: bad handle");
     });
+}
+fn jet_jit_list_extend(list: i64, other: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(other) = rt.heap.clone_list_values(other) else {
+            jet_foundation::ice!(None, "jit list extend: bad source handle");
+        };
+        let Some(values) = rt.heap.list_values_mut(list) else {
+            jet_foundation::ice!(None, "jit list extend: bad destination handle");
+        };
+        collection_semantics::list_extend(values, other);
+    });
+}
+
+fn jet_jit_list_reverse(list: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(values) = rt.heap.list_values_mut(list) else {
+            jet_foundation::ice!(None, "jit list reverse: bad handle");
+        };
+        collection_semantics::list_reverse(values);
+    });
+}
+
+fn jet_jit_list_concat(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(mut values) = rt.heap.clone_list_values(left) else {
+            jet_foundation::ice!(None, "jit list concat: bad left handle");
+        };
+        let Some(other) = rt.heap.clone_list_values(right) else {
+            jet_foundation::ice!(None, "jit list concat: bad right handle");
+        };
+        collection_semantics::list_extend(&mut values, other);
+        rt.heap.alloc_list_values(values)
+    })
+}
+
+fn jet_jit_list_take(list: i64, n: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        if let Some(message) = collection_semantics::sequence_argument_message("take", n) {
+            rt.set_runtime_stop_at("E3001", "<core.collections>", 0, message);
+            return 0;
+        }
+        let Some(values) = rt.heap.clone_list_values(list) else {
+            rt.set_host_fault("jit list take: bad list handle");
+            return 0;
+        };
+        rt.heap
+            .alloc_list_values(collection_semantics::list_take(values, n))
+    })
+}
+
+fn jet_jit_list_skip(list: i64, n: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        if let Some(message) = collection_semantics::sequence_argument_message("skip", n) {
+            rt.set_runtime_stop_at("E3001", "<core.collections>", 0, message);
+            return 0;
+        }
+        let Some(values) = rt.heap.clone_list_values(list) else {
+            rt.set_host_fault("jit list skip: bad list handle");
+            return 0;
+        };
+        rt.heap
+            .alloc_list_values(collection_semantics::list_skip(values, n))
+    })
+}
+
+fn jet_jit_list_remove_slot_generic(list: i64, idx: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let removed = {
+            let Some(values) = rt.heap.list_values_mut(list) else {
+                jet_foundation::ice!(None, "jit list remove slot: bad handle");
+            };
+            collection_semantics::list_remove_slot(values, idx)
+        };
+        match removed {
+            Ok(jet_rt::JetVal::Int(value)) => option_packed(Some(value)),
+            Ok(jet_rt::JetVal::Float(value)) => option_packed(Some(value.to_bits() as i64)),
+            Ok(jet_rt::JetVal::String(value)) => {
+                let id = rt.heap.alloc_string(value);
+                option_packed(Some(id))
+            }
+            Ok(_) => 0,
+            Err(message) => {
+                rt.set_runtime_stop("E3010", 0, &message);
+                0
+            }
+        }
+    })
 }
 
 fn jet_jit_list_try_new() -> i64 {
@@ -911,7 +2218,371 @@ fn jet_jit_list_push_range(list: i64, start: i64, end: i64, exclusive: i8) {
 }
 
 fn jet_jit_list_len(list: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| rt.heap.list_len(list).expect("jit list len: bad handle"))
+    Concurrency::with_runtime_mut(|rt| {
+        let len = if crate::runtime_host::lazy_iter_index(rt, list).is_some() {
+            crate::runtime_host::lazy_iter_collect(rt, list).map(|values| values.len())
+        } else {
+            crate::runtime_host::sequence_len(rt, list)
+        };
+        let Some(len) = len else {
+            rt.set_host_fault("jit list len: bad sequence handle");
+            return 0;
+        };
+        i64::try_from(len).unwrap_or_else(|_| {
+            rt.set_host_fault("jit list len: sequence is too large");
+            0
+        })
+    })
+}
+fn jet_jit_list_is_empty(list: i64) -> i8 {
+    i8::from(jet_jit_list_len(list) == 0)
+}
+
+fn jet_jit_iter_len(list: i64) -> i64 {
+    jet_jit_list_len(list)
+}
+
+fn jet_jit_iter_is_empty(list: i64) -> i8 {
+    i8::from(jet_jit_list_len(list) == 0)
+}
+
+fn view_descriptors(
+    rt: &mut crate::runtime_host::JitRuntime,
+    element_type_id: i64,
+    result_type_id: i64,
+) -> Option<(
+    crate::runtime_host::RuntimeTypeDescriptor,
+    crate::runtime_host::RuntimeTypeDescriptor,
+)> {
+    let Some(element) = rt.runtime_type_descriptor(element_type_id as u64).cloned() else {
+        rt.set_host_fault("jit View operation: element type descriptor is missing");
+        return None;
+    };
+    let Some(result) = rt.runtime_type_descriptor(result_type_id as u64).cloned() else {
+        rt.set_host_fault("jit View operation: result type descriptor is missing");
+        return None;
+    };
+    Some((element, result))
+}
+
+fn view_payloads(
+    rt: &crate::runtime_host::JitRuntime,
+    source: i64,
+    descriptor: &crate::runtime_host::RuntimeTypeDescriptor,
+) -> Option<Vec<i64>> {
+    let len = crate::runtime_host::sequence_len(rt, source)?;
+    (0..len)
+        .map(|index| match descriptor.abi {
+            crate::runtime_host::RuntimeValueAbi::Float => {
+                crate::runtime_host::sequence_get_float(rt, source, index)
+                    .map(|value| value.to_bits() as i64)
+            }
+            crate::runtime_host::RuntimeValueAbi::Float32 => {
+                crate::runtime_host::sequence_get_float(rt, source, index)
+                    .map(|value| i64::from(f32::to_bits(value as f32)))
+            }
+            _ => crate::runtime_host::sequence_get_int(rt, source, index),
+        })
+        .collect()
+}
+
+fn alloc_view_payloads(
+    rt: &mut crate::runtime_host::JitRuntime,
+    values: Vec<i64>,
+    descriptor: &crate::runtime_host::RuntimeTypeDescriptor,
+) -> i64 {
+    match descriptor.abi {
+        crate::runtime_host::RuntimeValueAbi::Float => {
+            let list = rt.heap.alloc_empty_list();
+            for value in values {
+                if rt
+                    .heap
+                    .list_push_float(list, f64::from_bits(value as u64))
+                    .is_none()
+                {
+                    rt.set_host_fault("jit View map: float result allocation failed");
+                    return 0;
+                }
+            }
+            list
+        }
+        crate::runtime_host::RuntimeValueAbi::Float32 => {
+            let list = rt.heap.alloc_empty_list();
+            for value in values {
+                let value = f32::from_bits(value as u32) as f64;
+                if rt.heap.list_push_float(list, value).is_none() {
+                    rt.set_host_fault("jit View map: F32 result allocation failed");
+                    return 0;
+                }
+            }
+            list
+        }
+        _ => rt.heap.alloc_int_list(values),
+    }
+}
+
+/// Create one provenance-carrying View slot over a list, view, or mapped
+/// sequence. Bounds are the shared half-open View rule; no source element is
+/// copied.
+fn jet_jit_view_new(source: i64, start: i64, end: i64) -> i64 {
+    jet_jit_view_new_bounds(source, start, end, 0)
+}
+
+fn jet_jit_view_new_range(source: i64, range: i64) -> i64 {
+    let (start, end, exclusive) = Concurrency::with_runtime_mut(|rt| {
+        let start = rt.heap.record_get_int(range, 0).unwrap_or(0);
+        let end = rt.heap.record_get_int(range, 1).unwrap_or(0);
+        let exclusive = rt
+            .heap
+            .record_get_bool(range, 2)
+            .or_else(|| rt.heap.record_get_int(range, 2).map(|value| value != 0))
+            .unwrap_or(false);
+        (start, end, exclusive)
+    });
+    jet_jit_view_new_bounds(source, start, end, i8::from(exclusive))
+}
+
+fn jet_jit_view_new_bounds(source: i64, start: i64, end: i64, exclusive: i8) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(len) = crate::runtime_host::sequence_len(rt, source) else {
+            rt.set_host_fault("jit View new: bad sequence handle");
+            return 0;
+        };
+        let exclusive = exclusive != 0;
+        let Ok((start, end)) =
+            range_semantics::jet_checked_view_bounds(start, end, exclusive, len as i64)
+        else {
+            rt.set_runtime_stop(
+                "E3010",
+                rt.current_line,
+                &range_semantics::jet_view_bounds_error(start, end, exclusive, len as i64),
+            );
+            return 0;
+        };
+        let Some(start) = usize::try_from(start).ok() else {
+            rt.set_host_fault("jit View new: start bound overflow");
+            return 0;
+        };
+        let Some(end) = usize::try_from(end).ok() else {
+            rt.set_host_fault("jit View new: end bound overflow");
+            return 0;
+        };
+        let slot = rt.view_slots.len();
+        rt.view_slots
+            .push(crate::runtime_host::JitViewSlot::Sequence { source, start, end });
+        crate::runtime_host::view_handle(slot)
+    })
+}
+
+/// Universal Value-ABI View map. The compiler supplies checked element/result
+/// identities as synthetic arguments; the callback sees raw payload words and
+/// the result list is allocated only when its element ABI is heap-backed.
+fn jet_jit_view_map(source: i64, callback: i64, element_type_id: i64, result_type_id: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let Some((element, result)) =
+        Concurrency::with_runtime_mut(|rt| view_descriptors(rt, element_type_id, result_type_id))
+    else {
+        return 0;
+    };
+    let Some(values) = Concurrency::with_runtime_mut(|rt| view_payloads(rt, source, &element))
+    else {
+        Concurrency::with_runtime_mut(|rt| rt.set_host_fault("jit View map: bad sequence handle"));
+        return 0;
+    };
+    let Some(mapped) = values
+        .into_iter()
+        .map(|value| crate::runtime_host::invoke_universal_unary(slot, value))
+        .collect::<Option<Vec<_>>>()
+    else {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_host_fault("jit View map: callback has no unary universal thunk")
+        });
+        return 0;
+    };
+    if closure_trapped() {
+        return 0;
+    }
+    Concurrency::with_runtime_mut(|rt| alloc_view_payloads(rt, mapped, &result))
+}
+/// Fallible View map with the same checked descriptor ABI as `map`. The
+/// output list is allocated only after every callback succeeds, so an error
+/// leaves no partially published collection.
+fn jet_jit_view_try_map(
+    source: i64,
+    callback: i64,
+    element_type_id: i64,
+    result_type_id: i64,
+) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let Some((element, result)) =
+        Concurrency::with_runtime_mut(|rt| view_descriptors(rt, element_type_id, result_type_id))
+    else {
+        return 0;
+    };
+    let Some(values) = Concurrency::with_runtime_mut(|rt| view_payloads(rt, source, &element))
+    else {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_host_fault("jit View try_map: bad sequence handle")
+        });
+        return 0;
+    };
+    let mut mapped = Vec::with_capacity(values.len());
+    for value in values {
+        let Some(result_handle) = crate::runtime_host::invoke_universal_unary(slot, value) else {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_host_fault("jit View try_map: callback has no unary universal thunk")
+            });
+            return 0;
+        };
+        if closure_trapped() {
+            return 0;
+        }
+        let Some((ok, bits)) = Concurrency::with_runtime_mut(|rt| {
+            crate::runtime_host::jit_result_parts(rt, result_handle)
+        }) else {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_host_fault("jit View try_map: callback returned an invalid Result")
+            });
+            return 0;
+        };
+        if !ok {
+            return Concurrency::with_runtime_mut(|rt| {
+                crate::runtime_host::alloc_jit_result(rt, false, bits)
+            });
+        }
+        mapped.push(bits as i64);
+    }
+    let output = Concurrency::with_runtime_mut(|rt| alloc_view_payloads(rt, mapped, &result));
+    Concurrency::with_runtime_mut(|rt| {
+        crate::runtime_host::alloc_jit_result(rt, true, output as u64)
+    })
+}
+
+/// Fallible View filter. Its callback result is `Result<Bool, E>` while the
+/// published sequence keeps the source element descriptor and raw payloads.
+fn jet_jit_view_try_filter(
+    source: i64,
+    callback: i64,
+    element_type_id: i64,
+    result_type_id: i64,
+) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let Some((element, _callback_result)) =
+        Concurrency::with_runtime_mut(|rt| view_descriptors(rt, element_type_id, result_type_id))
+    else {
+        return 0;
+    };
+    let Some(values) = Concurrency::with_runtime_mut(|rt| view_payloads(rt, source, &element))
+    else {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_host_fault("jit View try_filter: bad sequence handle")
+        });
+        return 0;
+    };
+    let mut filtered = Vec::with_capacity(values.len());
+    for value in values {
+        let Some(result_handle) = crate::runtime_host::invoke_universal_unary(slot, value) else {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_host_fault("jit View try_filter: callback has no unary universal thunk")
+            });
+            return 0;
+        };
+        if closure_trapped() {
+            return 0;
+        }
+        let Some((ok, bits)) = Concurrency::with_runtime_mut(|rt| {
+            crate::runtime_host::jit_result_parts(rt, result_handle)
+        }) else {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_host_fault("jit View try_filter: callback returned an invalid Result")
+            });
+            return 0;
+        };
+        if !ok {
+            return Concurrency::with_runtime_mut(|rt| {
+                crate::runtime_host::alloc_jit_result(rt, false, bits)
+            });
+        }
+        if bits != 0 {
+            filtered.push(value);
+        }
+    }
+    let output = Concurrency::with_runtime_mut(|rt| alloc_view_payloads(rt, filtered, &element));
+    Concurrency::with_runtime_mut(|rt| {
+        crate::runtime_host::alloc_jit_result(rt, true, output as u64)
+    })
+}
+
+/// Universal Value-ABI View fold. The accumulator and element payloads use the
+/// raw 64-bit representation selected by their checked descriptors.
+fn jet_jit_view_fold(
+    source: i64,
+    initial: i64,
+    callback: i64,
+    element_type_id: i64,
+    accumulator_type_id: i64,
+) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let Some((element, _accumulator)) = Concurrency::with_runtime_mut(|rt| {
+        view_descriptors(rt, element_type_id, accumulator_type_id)
+    }) else {
+        return 0;
+    };
+    let Some(values) = Concurrency::with_runtime_mut(|rt| view_payloads(rt, source, &element))
+    else {
+        Concurrency::with_runtime_mut(|rt| rt.set_host_fault("jit View fold: bad sequence handle"));
+        return 0;
+    };
+    let mut folded = initial;
+    for value in values {
+        let Some(next) = crate::runtime_host::invoke_universal_pair(slot, folded, value) else {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_host_fault("jit View fold: callback has no pair universal thunk")
+            });
+            return 0;
+        };
+        folded = next;
+        if closure_trapped() {
+            return 0;
+        }
+    }
+    folded
+}
+fn jet_jit_list_clear(list: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let values = rt
+            .heap
+            .list_values_mut(list)
+            .expect("jit list clear: bad handle");
+        collection_semantics::list_clear(values);
+    });
+}
+
+fn jet_jit_map_clear(map: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        while rt.heap.map_len(map).expect("jit map clear: bad handle") > 0 {
+            let key = rt
+                .heap
+                .map_key_at(map, 0)
+                .expect("jit map clear: missing key");
+            let removed = rt
+                .heap
+                .map_remove(map, key)
+                .or_else(|| rt.heap.map_remove_int(map, key))
+                .or_else(|| rt.heap.map_remove_composite(map, key));
+            if removed.is_none() {
+                jet_foundation::ice!(None, "jit map clear: key removal failed");
+            }
+        }
+    });
 }
 
 fn closure_callback_slot(handle: i64) -> Option<JitCallableSlot> {
@@ -925,74 +2596,128 @@ fn closure_callback_slot(handle: i64) -> Option<JitCallableSlot> {
 }
 
 fn closure_trapped() -> bool {
-    Concurrency::with_runtime_mut(|rt| rt.trapped.is_some())
+    Concurrency::with_runtime_mut(|rt| crate::runtime_host::runtime_stop_pending(rt))
 }
 
-// The binder records the callback pointer, environment word, and env flag as
-// one slot. Each adapter selects the ABI declared by the callback's TIR type.
-unsafe fn invoke_closure_bool(slot: JitCallableSlot, value: i64) -> bool {
-    if slot.has_env {
-        let callback: unsafe extern "C" fn(i64, i64) -> i8 =
-            std::mem::transmute(slot.fn_ptr as usize);
-        callback(slot.env, value) != 0
-    } else {
-        let callback: unsafe extern "C" fn(i64) -> i8 = std::mem::transmute(slot.fn_ptr as usize);
-        callback(value) != 0
-    }
+// Call the exact env-first thunk installed by the checked callback binder.
+fn invoke_closure_bool(slot: JitCallableSlot, value: i64) -> bool {
+    invoke_closure_i64(slot, value) != 0
 }
 
-unsafe fn invoke_closure_i64(slot: JitCallableSlot, value: i64) -> i64 {
-    if slot.has_env {
-        let callback: unsafe extern "C" fn(i64, i64) -> i64 =
-            std::mem::transmute(slot.fn_ptr as usize);
-        callback(slot.env, value)
-    } else {
-        let callback: unsafe extern "C" fn(i64) -> i64 = std::mem::transmute(slot.fn_ptr as usize);
-        callback(value)
-    }
+fn invoke_closure_i64(slot: JitCallableSlot, value: i64) -> i64 {
+    crate::runtime_host::invoke_universal_unary(slot, value).unwrap_or_else(|| {
+        jet_foundation::ice!(None, "collection callback lacks a unary raw thunk")
+    })
+}
+fn invoke_closure_i64_pair(slot: JitCallableSlot, left: i64, right: i64) -> i64 {
+    crate::runtime_host::invoke_universal_pair(slot, left, right).unwrap_or_else(|| {
+        jet_foundation::ice!(None, "collection callback lacks a binary raw thunk")
+    })
 }
 
-unsafe fn invoke_closure_i8(slot: JitCallableSlot, value: i64) -> i8 {
-    if slot.has_env {
-        let callback: unsafe extern "C" fn(i64, i64) -> i8 =
-            std::mem::transmute(slot.fn_ptr as usize);
-        callback(slot.env, value)
-    } else {
-        let callback: unsafe extern "C" fn(i64) -> i8 = std::mem::transmute(slot.fn_ptr as usize);
-        callback(value)
-    }
+fn invoke_closure_i8(slot: JitCallableSlot, value: i64) -> i8 {
+    invoke_closure_i64(slot, value) as i8
 }
 
-unsafe fn invoke_closure_i32(slot: JitCallableSlot, value: i64) -> i32 {
-    if slot.has_env {
-        let callback: unsafe extern "C" fn(i64, i64) -> i32 =
-            std::mem::transmute(slot.fn_ptr as usize);
-        callback(slot.env, value)
-    } else {
-        let callback: unsafe extern "C" fn(i64) -> i32 = std::mem::transmute(slot.fn_ptr as usize);
-        callback(value)
-    }
+fn invoke_closure_i32(slot: JitCallableSlot, value: i64) -> i32 {
+    invoke_closure_i64(slot, value) as i32
 }
 
-unsafe fn invoke_closure_f64(slot: JitCallableSlot, value: i64) -> f64 {
-    if slot.has_env {
-        let callback: unsafe extern "C" fn(i64, i64) -> f64 =
-            std::mem::transmute(slot.fn_ptr as usize);
-        callback(slot.env, value)
-    } else {
-        let callback: unsafe extern "C" fn(i64) -> f64 = std::mem::transmute(slot.fn_ptr as usize);
-        callback(value)
-    }
+fn invoke_closure_f64(slot: JitCallableSlot, value: i64) -> f64 {
+    f64::from_bits(invoke_closure_i64(slot, value) as u64)
 }
 
-unsafe fn invoke_closure_unit(slot: JitCallableSlot, value: i64) {
-    if slot.has_env {
-        let callback: unsafe extern "C" fn(i64, i64) = std::mem::transmute(slot.fn_ptr as usize);
-        callback(slot.env, value);
-    } else {
-        let callback: unsafe extern "C" fn(i64) = std::mem::transmute(slot.fn_ptr as usize);
-        callback(value);
+fn invoke_closure_unit(slot: JitCallableSlot, value: i64) {
+    let _ = invoke_closure_i64(slot, value);
+}
+fn jet_jit_list_fold(list: i64, init: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    if is_lazy_sequence(list) {
+        let mut folded = init;
+        while let Some(value) = next_lazy_sequence(list) {
+            if closure_trapped() {
+                return 0;
+            }
+            folded = invoke_closure_i64_pair(slot, folded, value);
+            if closure_trapped() {
+                return 0;
+            }
+        }
+        return folded;
     }
+    let values = clone_list_ints(list);
+    let folded = collection_semantics::list_fold(values, init, |acc, value| {
+        if closure_trapped() {
+            0
+        } else {
+            invoke_closure_i64_pair(slot, *acc, *value)
+        }
+    });
+    if closure_trapped() {
+        0
+    } else {
+        folded
+    }
+}
+fn jet_jit_list_sum_fixed_f32(list: i64) -> f32 {
+    collection_semantics::list_sum_fixed_f32(clone_list_floats(list)) as f32
+}
+
+fn jet_jit_list_sum_fixed_f64(list: i64) -> f64 {
+    collection_semantics::list_sum_fixed_f64(clone_list_floats(list))
+}
+
+fn jet_jit_list_fold_add_fixed_f32(list: i64, init: f32) -> f32 {
+    collection_semantics::list_fold_add_fixed_f32(clone_list_floats(list), init as f64) as f32
+}
+
+fn jet_jit_list_fold_add_fixed_f64(list: i64, init: f64) -> f64 {
+    collection_semantics::list_fold_add_fixed_f64(clone_list_floats(list), init)
+}
+
+fn jet_jit_list_para_fold_add_fixed_f32(list: i64, seed: f32) -> f32 {
+    collection_semantics::list_para_fold_add_fixed_f32(clone_list_floats(list), seed as f64) as f32
+}
+
+fn jet_jit_list_para_fold_add_fixed_f64(list: i64, seed: f64) -> f64 {
+    collection_semantics::list_para_fold_add_fixed_f64(clone_list_floats(list), seed)
+}
+
+fn jet_jit_list_group_by(list: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let values = clone_list_ints(list);
+    let groups = collection_semantics::list_group_by(values, |value| {
+        if closure_trapped() {
+            return String::new();
+        }
+        let key = invoke_closure_i64(slot, *value);
+        if closure_trapped() {
+            return String::new();
+        }
+        Concurrency::with_runtime_mut(|rt| {
+            rt.heap
+                .clone_string(key)
+                .expect("jit list group_by: callback key")
+        })
+    });
+    if closure_trapped() {
+        return 0;
+    }
+    Concurrency::with_runtime_mut(|rt| {
+        let map = rt.heap.alloc_empty_map();
+        for (key, values) in groups {
+            let key_id = rt.heap.alloc_string(key);
+            let value_id = rt.heap.alloc_int_list(values);
+            rt.heap
+                .map_insert(map, key_id, value_id)
+                .expect("jit list group_by: map insert");
+        }
+        map
+    })
 }
 
 fn alloc_closure_ints(values: Vec<i64>) -> i64 {
@@ -1010,17 +2735,610 @@ fn alloc_closure_floats(values: Vec<f64>) -> i64 {
         list
     })
 }
+fn checked_descriptor(
+    element_type_id: i64,
+    result_type_id: i64,
+) -> Option<(
+    crate::runtime_host::RuntimeTypeDescriptor,
+    crate::runtime_host::RuntimeTypeDescriptor,
+)> {
+    Concurrency::with_runtime_mut(|rt| view_descriptors(rt, element_type_id, result_type_id))
+}
+fn checked_values(
+    source: i64,
+    descriptor: &crate::runtime_host::RuntimeTypeDescriptor,
+) -> Option<Vec<i64>> {
+    Concurrency::with_runtime_mut(|rt| {
+        if crate::runtime_host::lazy_iter_index(rt, source).is_some() {
+            crate::runtime_host::lazy_iter_collect(rt, source)
+        } else {
+            view_payloads(rt, source, descriptor)
+        }
+    })
+}
+
+fn checked_sequence_values(source: i64) -> Option<Vec<i64>> {
+    Concurrency::with_runtime_mut(|rt| {
+        if crate::runtime_host::lazy_iter_index(rt, source).is_some() {
+            crate::runtime_host::lazy_iter_collect(rt, source)
+        } else {
+            let len = crate::runtime_host::sequence_len(rt, source)?;
+            (0..len)
+                .map(|index| crate::runtime_host::sequence_get_raw(rt, source, index))
+                .collect()
+        }
+    })
+}
+
+fn checked_list_map_typed(
+    list: i64,
+    callback: i64,
+    element_type_id: i64,
+    result_type_id: i64,
+) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let Some((element, result)) = checked_descriptor(element_type_id, result_type_id) else {
+        return 0;
+    };
+    let Some(values) = Concurrency::with_runtime_mut(|rt| view_payloads(rt, list, &element)) else {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_host_fault("jit checked List map: bad sequence handle")
+        });
+        return 0;
+    };
+    let Some(mapped) = values
+        .into_iter()
+        .map(|value| crate::runtime_host::invoke_universal_unary(slot, value))
+        .collect::<Option<Vec<_>>>()
+    else {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_host_fault("jit checked List map: callback has no unary universal thunk")
+        });
+        return 0;
+    };
+    if closure_trapped() {
+        return 0;
+    }
+    Concurrency::with_runtime_mut(|rt| alloc_view_payloads(rt, mapped, &result))
+}
+
+fn checked_list_filter_typed(list: i64, callback: i64, element_type_id: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let Some((element, _)) = checked_descriptor(element_type_id, element_type_id) else {
+        return 0;
+    };
+    let Some(values) = Concurrency::with_runtime_mut(|rt| view_payloads(rt, list, &element)) else {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_host_fault("jit checked List filter: bad sequence handle")
+        });
+        return 0;
+    };
+    let mut filtered = Vec::with_capacity(values.len());
+    for value in values {
+        let Some(keep) = crate::runtime_host::invoke_universal_unary(slot, value) else {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_host_fault("jit checked List filter: callback has no unary universal thunk")
+            });
+            return 0;
+        };
+        if closure_trapped() {
+            return 0;
+        }
+        if keep != 0 {
+            filtered.push(value);
+        }
+    }
+    Concurrency::with_runtime_mut(|rt| alloc_view_payloads(rt, filtered, &element))
+}
+/// Checked partition for list/view/iterator carriers.  The source and both
+/// result lists use the same element descriptor; the tuple itself is emitted
+/// in MIR's canonical `(false_, true_)` field order.
+fn checked_list_partition_typed(list: i64, callback: i64, element_type_id: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let Some((element, _)) = checked_descriptor(element_type_id, element_type_id) else {
+        return 0;
+    };
+    let Some(values) = checked_values(list, &element) else {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_host_fault("jit checked List partition: bad sequence handle")
+        });
+        return 0;
+    };
+    let mut callback_ok = true;
+    let (false_values, true_values) = collection_semantics::list_partition(values, |value| {
+        if !callback_ok || closure_trapped() {
+            callback_ok = false;
+            return false;
+        }
+        let Some(keep) = crate::runtime_host::invoke_universal_unary(slot, *value) else {
+            callback_ok = false;
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_host_fault(
+                    "jit checked List partition: callback has no unary universal thunk",
+                )
+            });
+            return false;
+        };
+        if closure_trapped() {
+            callback_ok = false;
+            return false;
+        }
+        keep != 0
+    });
+    if !callback_ok || closure_trapped() {
+        return 0;
+    }
+    Concurrency::with_runtime_mut(|rt| {
+        let false_list = alloc_view_payloads(rt, false_values, &element);
+        let true_list = alloc_view_payloads(rt, true_values, &element);
+        let pair = rt.heap.alloc_record(2);
+        let _ = rt.heap.record_set_int(pair, 0, false_list);
+        let _ = rt.heap.record_set_int(pair, 1, true_list);
+        pair
+    })
+}
+
+fn checked_list_try_map_typed(
+    list: i64,
+    callback: i64,
+    element_type_id: i64,
+    result_type_id: i64,
+) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let Some((element, result)) = checked_descriptor(element_type_id, result_type_id) else {
+        return 0;
+    };
+    let Some(values) = checked_values(list, &element) else {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_host_fault("jit checked try_map: bad sequence handle")
+        });
+        return 0;
+    };
+    let mut output = Vec::with_capacity(values.len());
+    for value in values {
+        let Some(result_handle) = crate::runtime_host::invoke_universal_unary(slot, value) else {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_host_fault("jit checked try_map: callback has no unary universal thunk")
+            });
+            return 0;
+        };
+        if closure_trapped() {
+            return 0;
+        }
+        let Some((ok, bits)) = Concurrency::with_runtime_mut(|rt| {
+            crate::runtime_host::jit_result_parts(rt, result_handle)
+        }) else {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_host_fault("jit checked try_map: callback returned an invalid Result")
+            });
+            return 0;
+        };
+        if !ok {
+            return Concurrency::with_runtime_mut(|rt| {
+                crate::runtime_host::alloc_jit_result(rt, false, bits)
+            });
+        }
+        output.push(bits as i64);
+    }
+    let output = Concurrency::with_runtime_mut(|rt| alloc_view_payloads(rt, output, &result));
+    Concurrency::with_runtime_mut(|rt| {
+        crate::runtime_host::alloc_jit_result(rt, true, output as u64)
+    })
+}
+
+fn checked_list_try_filter_typed(
+    list: i64,
+    callback: i64,
+    element_type_id: i64,
+    result_type_id: i64,
+) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let Some((element, _callback_result)) = checked_descriptor(element_type_id, result_type_id)
+    else {
+        return 0;
+    };
+    let Some(values) = checked_values(list, &element) else {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_host_fault("jit checked try_filter: bad sequence handle")
+        });
+        return 0;
+    };
+    let mut output = Vec::with_capacity(values.len());
+    for value in values {
+        let Some(result_handle) = crate::runtime_host::invoke_universal_unary(slot, value) else {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_host_fault("jit checked try_filter: callback has no unary universal thunk")
+            });
+            return 0;
+        };
+        if closure_trapped() {
+            return 0;
+        }
+        let Some((ok, bits)) = Concurrency::with_runtime_mut(|rt| {
+            crate::runtime_host::jit_result_parts(rt, result_handle)
+        }) else {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_host_fault("jit checked try_filter: callback returned an invalid Result")
+            });
+            return 0;
+        };
+        if !ok {
+            return Concurrency::with_runtime_mut(|rt| {
+                crate::runtime_host::alloc_jit_result(rt, false, bits)
+            });
+        }
+        if bits != 0 {
+            output.push(value);
+        }
+    }
+    let output = Concurrency::with_runtime_mut(|rt| alloc_view_payloads(rt, output, &element));
+    Concurrency::with_runtime_mut(|rt| {
+        crate::runtime_host::alloc_jit_result(rt, true, output as u64)
+    })
+}
+
+fn checked_list_each_ref_typed(
+    list: i64,
+    callback: i64,
+    element_type_id: i64,
+    error_type_id: i64,
+) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let Some((element, _error)) = checked_descriptor(element_type_id, error_type_id) else {
+        return 0;
+    };
+    let Some(values) = checked_values(list, &element) else {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_host_fault("jit checked each_ref: bad sequence handle")
+        });
+        return 0;
+    };
+    let mut callback_ok = true;
+    let result = collection_semantics::list_each_ref(&values, |value| {
+        if closure_trapped() {
+            callback_ok = false;
+            return Err(0_i64);
+        }
+        let Some(result_handle) = crate::runtime_host::invoke_universal_unary(slot, *value) else {
+            callback_ok = false;
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_host_fault("jit checked each_ref: callback has no unary universal thunk")
+            });
+            return Err(0_i64);
+        };
+        if closure_trapped() {
+            callback_ok = false;
+            return Err(0_i64);
+        }
+        let Some((ok, bits)) = Concurrency::with_runtime_mut(|rt| {
+            crate::runtime_host::jit_result_parts(rt, result_handle)
+        }) else {
+            callback_ok = false;
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_host_fault("jit checked each_ref: callback returned an invalid Result")
+            });
+            return Err(0_i64);
+        };
+        if ok {
+            Ok(())
+        } else {
+            Err(bits as i64)
+        }
+    });
+    if !callback_ok || closure_trapped() {
+        return 0;
+    }
+    Concurrency::with_runtime_mut(|rt| match result {
+        Ok(()) => crate::runtime_host::alloc_jit_result(rt, true, 0),
+        Err(bits) => crate::runtime_host::alloc_jit_result(rt, false, bits as u64),
+    })
+}
+
+fn lazy_source_for(rt: &mut crate::runtime_host::JitRuntime, source: i64) -> i64 {
+    if crate::runtime_host::lazy_iter_index(rt, source).is_some() {
+        source
+    } else {
+        crate::runtime_host::lazy_iter_source(rt, source)
+    }
+}
+
+fn checked_iter_map_typed(source: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    Concurrency::with_runtime_mut(|rt| {
+        let source = lazy_source_for(rt, source);
+        if source == 0 {
+            return 0;
+        }
+        crate::runtime_host::lazy_iter_map(rt, source, slot)
+    })
+}
+
+fn checked_iter_filter_typed(source: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    Concurrency::with_runtime_mut(|rt| {
+        let source = lazy_source_for(rt, source);
+        if source == 0 {
+            return 0;
+        }
+        crate::runtime_host::lazy_iter_filter(rt, source, slot)
+    })
+}
+
+fn checked_list_flat_map_typed(
+    list: i64,
+    callback: i64,
+    element_type_id: i64,
+    result_type_id: i64,
+) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let Some((element, result)) = checked_descriptor(element_type_id, result_type_id) else {
+        return 0;
+    };
+    let Some(values) = checked_values(list, &element) else {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_host_fault("jit checked List flat_map: bad sequence handle")
+        });
+        return 0;
+    };
+    let mut output = Vec::new();
+    for value in values {
+        if closure_trapped() {
+            return 0;
+        }
+        let Some(nested) = crate::runtime_host::invoke_universal_unary(slot, value) else {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_host_fault(
+                    "jit checked List flat_map: callback has no unary universal thunk",
+                )
+            });
+            return 0;
+        };
+        if closure_trapped() {
+            return 0;
+        }
+        let Some(nested) = checked_values(nested, &result) else {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_host_fault(
+                    "jit checked List flat_map: callback returned a non-sequence handle",
+                )
+            });
+            return 0;
+        };
+        if closure_trapped() {
+            return 0;
+        }
+        output.extend(nested);
+    }
+    Concurrency::with_runtime_mut(|rt| alloc_view_payloads(rt, output, &result))
+}
+
+fn checked_iter_flat_map_typed(source: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    Concurrency::with_runtime_mut(|rt| {
+        let source = lazy_source_for(rt, source);
+        if source == 0 {
+            return 0;
+        }
+        crate::runtime_host::lazy_iter_flat_map(rt, source, slot)
+    })
+}
+
+fn checked_iter_filter_map_typed(source: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    Concurrency::with_runtime_mut(|rt| {
+        let source = lazy_source_for(rt, source);
+        if source == 0 {
+            return 0;
+        }
+        crate::runtime_host::lazy_iter_filter_map(rt, source, slot)
+    })
+}
+
+fn checked_list_take_while_typed(list: i64, callback: i64, element_type_id: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let Some((element, _)) = checked_descriptor(element_type_id, element_type_id) else {
+        return 0;
+    };
+    let Some(values) = Concurrency::with_runtime_mut(|rt| view_payloads(rt, list, &element)) else {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_host_fault("jit checked List take_while: bad sequence handle")
+        });
+        return 0;
+    };
+    let mut output = Vec::new();
+    for value in values {
+        let keep = invoke_closure_bool(slot, value);
+        if closure_trapped() {
+            return 0;
+        }
+        if !keep {
+            break;
+        }
+        output.push(value);
+    }
+    Concurrency::with_runtime_mut(|rt| alloc_view_payloads(rt, output, &element))
+}
+
+fn checked_list_skip_while_typed(list: i64, callback: i64, element_type_id: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let Some((element, _)) = checked_descriptor(element_type_id, element_type_id) else {
+        return 0;
+    };
+    let Some(values) = Concurrency::with_runtime_mut(|rt| view_payloads(rt, list, &element)) else {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_host_fault("jit checked List skip_while: bad sequence handle")
+        });
+        return 0;
+    };
+    let mut output = Vec::new();
+    let mut skipping = true;
+    for value in values {
+        if skipping {
+            skipping = invoke_closure_bool(slot, value);
+            if closure_trapped() {
+                return 0;
+            }
+            if skipping {
+                continue;
+            }
+        }
+        output.push(value);
+    }
+    Concurrency::with_runtime_mut(|rt| alloc_view_payloads(rt, output, &element))
+}
+
+fn checked_iter_take_while_typed(list: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    Concurrency::with_runtime_mut(|rt| {
+        let source = lazy_source_for(rt, list);
+        if source == 0 {
+            return 0;
+        }
+        crate::runtime_host::lazy_iter_take_while(rt, source, slot)
+    })
+}
+
+fn checked_iter_skip_while_typed(list: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    Concurrency::with_runtime_mut(|rt| {
+        let source = lazy_source_for(rt, list);
+        if source == 0 {
+            return 0;
+        }
+        crate::runtime_host::lazy_iter_skip_while(rt, source, slot)
+    })
+}
+
+fn checked_iter_scan_typed(list: i64, init: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    Concurrency::with_runtime_mut(|rt| {
+        let source = lazy_source_for(rt, list);
+        if source == 0 {
+            return 0;
+        }
+        crate::runtime_host::lazy_iter_scan(rt, source, init, slot)
+    })
+}
+
+fn checked_iter_zip_family_typed(
+    left: i64,
+    right: i64,
+    callback: i64,
+    mode: crate::runtime_host::JitZipMode,
+    left_fill: Option<i64>,
+    right_fill: Option<i64>,
+) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    Concurrency::with_runtime_mut(|rt| {
+        let left = lazy_source_for(rt, left);
+        if left == 0 {
+            return 0;
+        }
+        let right = lazy_source_for(rt, right);
+        if right == 0 {
+            return 0;
+        }
+        crate::runtime_host::lazy_iter_zip(rt, left, right, slot, mode, left_fill, right_fill)
+    })
+}
+
+fn checked_iter_zip_typed(left: i64, right: i64, callback: i64) -> i64 {
+    checked_iter_zip_family_typed(
+        left,
+        right,
+        callback,
+        crate::runtime_host::JitZipMode::Short,
+        None,
+        None,
+    )
+}
+
+fn checked_iter_zip_strict_typed(left: i64, right: i64, callback: i64) -> i64 {
+    checked_iter_zip_family_typed(
+        left,
+        right,
+        callback,
+        crate::runtime_host::JitZipMode::Strict,
+        None,
+        None,
+    )
+}
+
+fn checked_iter_zip_pad_typed(
+    left: i64,
+    right: i64,
+    left_fill: i64,
+    right_fill: i64,
+    callback: i64,
+) -> i64 {
+    checked_iter_zip_family_typed(
+        left,
+        right,
+        callback,
+        crate::runtime_host::JitZipMode::Pad,
+        Some(left_fill),
+        Some(right_fill),
+    )
+}
 
 fn jet_jit_list_closure_any(list: i64, callback: i64) -> i8 {
     let Some(slot) = closure_callback_slot(callback) else {
         return 0;
     };
+    if is_lazy_sequence(list) {
+        while let Some(value) = next_lazy_sequence(list) {
+            if closure_trapped() {
+                return 1;
+            }
+            if invoke_closure_bool(slot, value) {
+                return 1;
+            }
+            if closure_trapped() {
+                return 0;
+            }
+        }
+        return 0;
+    }
     let values = clone_list_ints(list);
     i8::from(collection_semantics::list_closure_any(values, |value| {
         if closure_trapped() {
             return true;
         }
-        let matched = unsafe { invoke_closure_bool(slot, *value) };
+        let matched = invoke_closure_bool(slot, *value);
         closure_trapped() || matched
     }))
 }
@@ -1029,12 +3347,26 @@ fn jet_jit_list_closure_all(list: i64, callback: i64) -> i8 {
     let Some(slot) = closure_callback_slot(callback) else {
         return 0;
     };
+    if is_lazy_sequence(list) {
+        while let Some(value) = next_lazy_sequence(list) {
+            if closure_trapped() {
+                return 0;
+            }
+            if !invoke_closure_bool(slot, value) {
+                return 0;
+            }
+            if closure_trapped() {
+                return 0;
+            }
+        }
+        return 1;
+    }
     let values = clone_list_ints(list);
     i8::from(collection_semantics::list_closure_all(values, |value| {
         if closure_trapped() {
             return false;
         }
-        let matched = unsafe { invoke_closure_bool(slot, *value) };
+        let matched = invoke_closure_bool(slot, *value);
         !closure_trapped() && matched
     }))
 }
@@ -1049,7 +3381,7 @@ fn list_closure_map_i64(list: i64, callback: i64, mutable: bool) -> i64 {
             if closure_trapped() {
                 0
             } else {
-                unsafe { invoke_closure_i64(slot, *value) }
+                invoke_closure_i64(slot, *value)
             }
         })
     } else {
@@ -1057,7 +3389,7 @@ fn list_closure_map_i64(list: i64, callback: i64, mutable: bool) -> i64 {
             if closure_trapped() {
                 0
             } else {
-                unsafe { invoke_closure_i64(slot, *value) }
+                invoke_closure_i64(slot, *value)
             }
         })
     };
@@ -1113,7 +3445,7 @@ fn jet_jit_list_closure_para_map(list: i64, callback: i64, limit: i64) -> i64 {
         list,
         callback,
         limit,
-        |slot, value| unsafe { invoke_closure_i64(slot, value) },
+        |slot, value| invoke_closure_i64(slot, value),
         alloc_closure_ints,
     )
 }
@@ -1123,7 +3455,7 @@ fn jet_jit_list_closure_para_map_i8(list: i64, callback: i64, limit: i64) -> i64
         list,
         callback,
         limit,
-        |slot, value| i64::from(unsafe { invoke_closure_i8(slot, value) }),
+        |slot, value| i64::from(invoke_closure_i8(slot, value)),
         alloc_closure_ints,
     )
 }
@@ -1133,7 +3465,7 @@ fn jet_jit_list_closure_para_map_i32(list: i64, callback: i64, limit: i64) -> i6
         list,
         callback,
         limit,
-        |slot, value| i64::from(unsafe { invoke_closure_i32(slot, value) }),
+        |slot, value| i64::from(invoke_closure_i32(slot, value)),
         alloc_closure_ints,
     )
 }
@@ -1143,7 +3475,7 @@ fn jet_jit_list_closure_para_map_f64(list: i64, callback: i64, limit: i64) -> i6
         list,
         callback,
         limit,
-        |slot, value| unsafe { invoke_closure_f64(slot, value) },
+        |slot, value| invoke_closure_f64(slot, value),
         alloc_closure_floats,
     )
 }
@@ -1158,7 +3490,7 @@ fn list_closure_map_i8(list: i64, callback: i64, mutable: bool) -> i64 {
             if closure_trapped() {
                 0
             } else {
-                i64::from(unsafe { invoke_closure_i8(slot, *value) })
+                i64::from(invoke_closure_i8(slot, *value))
             }
         })
     } else {
@@ -1166,7 +3498,7 @@ fn list_closure_map_i8(list: i64, callback: i64, mutable: bool) -> i64 {
             if closure_trapped() {
                 0
             } else {
-                i64::from(unsafe { invoke_closure_i8(slot, *value) })
+                i64::from(invoke_closure_i8(slot, *value))
             }
         })
     };
@@ -1194,7 +3526,7 @@ fn list_closure_map_i32(list: i64, callback: i64, mutable: bool) -> i64 {
             if closure_trapped() {
                 0
             } else {
-                i64::from(unsafe { invoke_closure_i32(slot, *value) })
+                i64::from(invoke_closure_i32(slot, *value))
             }
         })
     } else {
@@ -1202,7 +3534,7 @@ fn list_closure_map_i32(list: i64, callback: i64, mutable: bool) -> i64 {
             if closure_trapped() {
                 0
             } else {
-                i64::from(unsafe { invoke_closure_i32(slot, *value) })
+                i64::from(invoke_closure_i32(slot, *value))
             }
         })
     };
@@ -1230,7 +3562,7 @@ fn list_closure_map_f64(list: i64, callback: i64, mutable: bool) -> i64 {
             if closure_trapped() {
                 0.0
             } else {
-                unsafe { invoke_closure_f64(slot, *value) }
+                invoke_closure_f64(slot, *value)
             }
         })
     } else {
@@ -1238,7 +3570,7 @@ fn list_closure_map_f64(list: i64, callback: i64, mutable: bool) -> i64 {
             if closure_trapped() {
                 0.0
             } else {
-                unsafe { invoke_closure_f64(slot, *value) }
+                invoke_closure_f64(slot, *value)
             }
         })
     };
@@ -1265,7 +3597,7 @@ fn jet_jit_list_closure_filter(list: i64, callback: i64) -> i64 {
         if closure_trapped() {
             false
         } else {
-            (unsafe { invoke_closure_bool(slot, *value) }) && !closure_trapped()
+            (invoke_closure_bool(slot, *value)) && !closure_trapped()
         }
     });
     if closure_trapped() {
@@ -1278,21 +3610,300 @@ fn list_closure_each(list: i64, callback: i64, mutable: bool) -> i8 {
     let Some(slot) = closure_callback_slot(callback) else {
         return 0;
     };
+    if is_lazy_sequence(list) {
+        while let Some(value) = next_lazy_sequence(list) {
+            if closure_trapped() {
+                return 0;
+            }
+            invoke_closure_unit(slot, value);
+            if closure_trapped() {
+                return 0;
+            }
+        }
+        return 0;
+    }
     let values = clone_list_ints(list);
     if mutable {
         collection_semantics::list_closure_each_mut(values, |value| {
             if !closure_trapped() {
-                unsafe { invoke_closure_unit(slot, *value) };
+                invoke_closure_unit(slot, *value);
             }
         });
     } else {
         collection_semantics::list_closure_each(values, |value| {
             if !closure_trapped() {
-                unsafe { invoke_closure_unit(slot, *value) };
+                invoke_closure_unit(slot, *value);
             }
         });
     }
+
     0
+}
+fn checked_list_try_map(list: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let mut output = Vec::new();
+    for value in clone_list_ints(list) {
+        let result = invoke_closure_i64(slot, value);
+        if closure_trapped() {
+            return 0;
+        }
+        let Some((ok, bits)) =
+            Concurrency::with_runtime_mut(|rt| crate::runtime_host::jit_result_parts(rt, result))
+        else {
+            return 0;
+        };
+        if !ok {
+            return Concurrency::with_runtime_mut(|rt| {
+                crate::runtime_host::alloc_jit_result(rt, false, bits)
+            });
+        }
+        output.push(bits as i64);
+    }
+    Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.alloc_int_list(output);
+        crate::runtime_host::alloc_jit_result(rt, true, list as u64)
+    })
+}
+
+fn checked_list_try_filter(list: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let mut output = Vec::new();
+    for value in clone_list_ints(list) {
+        let result = invoke_closure_i64(slot, value);
+        if closure_trapped() {
+            return 0;
+        }
+        let Some((ok, bits)) =
+            Concurrency::with_runtime_mut(|rt| crate::runtime_host::jit_result_parts(rt, result))
+        else {
+            return 0;
+        };
+        if !ok {
+            return Concurrency::with_runtime_mut(|rt| {
+                crate::runtime_host::alloc_jit_result(rt, false, bits)
+            });
+        }
+        if bits != 0 {
+            output.push(value);
+        }
+    }
+    Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.alloc_int_list(output);
+        crate::runtime_host::alloc_jit_result(rt, true, list as u64)
+    })
+}
+
+fn checked_list_position(list: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    if is_lazy_sequence(list) {
+        let mut index = 0_i64;
+        while let Some(value) = next_lazy_sequence(list) {
+            let matched = invoke_closure_bool(slot, value);
+            if closure_trapped() {
+                return 0;
+            }
+            if matched {
+                return Concurrency::with_runtime_mut(|rt| option_i64(rt, Some(index)));
+            }
+            index = index.saturating_add(1);
+        }
+        return Concurrency::with_runtime_mut(|rt| option_i64(rt, None));
+    }
+    let position = clone_list_ints(list)
+        .into_iter()
+        .position(|value| invoke_closure_bool(slot, value));
+    Concurrency::with_runtime_mut(|rt| option_i64(rt, position.map(|index| index as i64)))
+}
+
+fn checked_list_flat_map(list: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let Some(values) = checked_sequence_values(list) else {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_host_fault("jit List flat_map: bad sequence handle")
+        });
+        return 0;
+    };
+    let mut output = Vec::new();
+    for value in values {
+        if closure_trapped() {
+            return 0;
+        }
+        let nested = invoke_closure_i64(slot, value);
+        if closure_trapped() {
+            return 0;
+        }
+        let Some(nested) = checked_sequence_values(nested) else {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_host_fault("jit List flat_map: callback returned a non-sequence handle")
+            });
+            return 0;
+        };
+        if closure_trapped() {
+            return 0;
+        }
+        output.extend(nested);
+    }
+    alloc_closure_ints(output)
+}
+
+fn checked_list_take_while(list: i64, callback: i64, skip: bool) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let values = clone_list_ints(list);
+    let mut output = Vec::new();
+    let mut skipping = skip;
+    for value in values {
+        let keep = invoke_closure_bool(slot, value);
+        if closure_trapped() {
+            return 0;
+        }
+        if skip {
+            if skipping && keep {
+                continue;
+            }
+            skipping = false;
+            output.push(value);
+        } else if keep {
+            output.push(value);
+        } else {
+            break;
+        }
+    }
+    alloc_closure_ints(output)
+}
+
+fn checked_list_scan(list: i64, init: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let mut accumulator = init;
+    let mut output = Vec::new();
+    for value in clone_list_ints(list) {
+        accumulator = invoke_closure_i64_pair(slot, accumulator, value);
+        if closure_trapped() {
+            return 0;
+        }
+        output.push(accumulator);
+    }
+    alloc_closure_ints(output)
+}
+
+fn checked_option_map(value: i64, callback: i64) -> i64 {
+    if value == 0 {
+        return 0;
+    }
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let mapped = invoke_closure_i64(slot, value.wrapping_sub(1));
+    if closure_trapped() {
+        return 0;
+    }
+    mapped.wrapping_add(1)
+}
+
+fn checked_bag_any(bag: i64, callback: i64) -> i8 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let keys = Concurrency::with_runtime_mut(|rt| {
+        rt.bags
+            .get((bag as usize).wrapping_sub(1))
+            .map(|bag| bag.keys().copied().collect::<Vec<_>>())
+            .unwrap_or_default()
+    });
+    for key in keys {
+        if invoke_closure_bool(slot, key) {
+            return 1;
+        }
+        if closure_trapped() {
+            return 0;
+        }
+    }
+    0
+}
+fn checked_list_find(list: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    if is_lazy_sequence(list) {
+        while let Some(value) = next_lazy_sequence(list) {
+            if invoke_closure_bool(slot, value) {
+                return Concurrency::with_runtime_mut(|rt| option_i64(rt, Some(value)));
+            }
+            if closure_trapped() {
+                return 0;
+            }
+        }
+        return Concurrency::with_runtime_mut(|rt| option_i64(rt, None));
+    }
+    for value in clone_list_ints(list) {
+        if invoke_closure_bool(slot, value) {
+            return Concurrency::with_runtime_mut(|rt| option_i64(rt, Some(value)));
+        }
+        if closure_trapped() {
+            return 0;
+        }
+    }
+    Concurrency::with_runtime_mut(|rt| option_i64(rt, None))
+}
+
+fn checked_list_by(list: i64, callback: i64, maximum: bool) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let mut best = None;
+    let mut best_key = 0_i64;
+    for value in clone_list_ints(list) {
+        let key = invoke_closure_i64(slot, value);
+        if closure_trapped() {
+            return 0;
+        }
+        if best.is_none() || (maximum && key > best_key) || (!maximum && key < best_key) {
+            best = Some(value);
+            best_key = key;
+        }
+    }
+    Concurrency::with_runtime_mut(|rt| option_i64(rt, best))
+}
+
+fn checked_list_min_by(list: i64, callback: i64) -> i64 {
+    checked_list_by(list, callback, false)
+}
+
+fn checked_list_max_by(list: i64, callback: i64) -> i64 {
+    checked_list_by(list, callback, true)
+}
+
+fn checked_list_take(list: i64, callback: i64) -> i64 {
+    checked_list_take_while(list, callback, false)
+}
+fn checked_list_count_by(list: i64, callback: i64) -> i64 {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return 0;
+    };
+    let map = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_map());
+    for value in clone_list_ints(list) {
+        let key = invoke_closure_i64(slot, value);
+        if closure_trapped() {
+            return 0;
+        }
+        jet_jit_map_increment(map, key);
+    }
+    map
+}
+
+fn checked_list_skip(list: i64, callback: i64) -> i64 {
+    checked_list_take_while(list, callback, true)
 }
 
 fn jet_jit_list_closure_each(list: i64, callback: i64) -> i8 {
@@ -1340,6 +3951,29 @@ fn jet_jit_list_eq_str(a: i64, b: i64) -> i8 {
 
 fn jet_jit_list_eq_f64(a: i64, b: i64) -> i8 {
     collection_semantics::list_equal(&clone_list_floats(a), &clone_list_floats(b)) as i8
+}
+fn jet_jit_list_eq_date(a: i64, b: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(left) = clone_list_dates_with_runtime(rt, a) else {
+            return 0;
+        };
+        let Some(right) = clone_list_dates_with_runtime(rt, b) else {
+            return 0;
+        };
+        collection_semantics::list_equal(&left, &right) as i8
+    })
+}
+
+fn jet_jit_list_order_date(a: i64, b: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(left) = clone_list_dates_with_runtime(rt, a) else {
+            return 3;
+        };
+        let Some(right) = clone_list_dates_with_runtime(rt, b) else {
+            return 3;
+        };
+        collection_semantics::list_order(&left, &right)
+    })
 }
 
 fn jet_jit_list_order(a: i64, b: i64) -> i8 {
@@ -1404,22 +4038,32 @@ fn jet_jit_loop_stride_check(stride: i64) -> i64 {
 }
 
 fn jet_jit_list_get(list: i64, idx: i64, line: u32) -> i64 {
-    Concurrency::with_runtime_mut(|rt| match rt.heap.list_get_int(list, idx) {
-        Some(value) => value,
-        None => {
-            if rt.heap.list_len(list).is_none() {
-                jet_foundation::ice!(None, "jit list get: bad handle");
-            }
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(len) = crate::runtime_host::sequence_len(rt, list) else {
+            rt.set_host_fault("jit list get: bad sequence handle");
+            return 0;
+        };
+        let Some(index) = usize::try_from(idx).ok() else {
             rt.set_runtime_stop(
                 "E3010",
                 line,
-                &jet_foundation::Outcome::jet_list_bounds_message(
-                    rt.heap.list_len(list).unwrap_or_default(),
-                    idx,
-                ),
+                &jet_foundation::Outcome::jet_list_bounds_message(len as i64, idx),
             );
-            0
+            return 0;
+        };
+        if index >= len {
+            rt.set_runtime_stop(
+                "E3010",
+                line,
+                &jet_foundation::Outcome::jet_list_bounds_message(len as i64, idx),
+            );
+            return 0;
         }
+        let Some(value) = crate::runtime_host::sequence_get_int(rt, list, index) else {
+            rt.set_host_fault("jit list get: sequence element has the wrong ABI");
+            return 0;
+        };
+        value
     })
 }
 
@@ -1428,6 +4072,10 @@ fn jet_jit_list_get(list: i64, idx: i64, line: u32) -> i64 {
 /// needs no copy; older erased carriers get one resident snapshot instead.
 fn jet_jit_list_int_ptr(list: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
+        if crate::runtime_host::view_index(rt, list).is_some() {
+            rt.set_host_fault("jit integer-list view has no stable native pointer");
+            return 0;
+        }
         if let Some(ptr) = rt.heap.int_list_ptr(list) {
             return ptr as i64;
         }
@@ -1445,6 +4093,33 @@ fn jet_jit_list_int_ptr(list: i64) -> i64 {
 fn jet_jit_list_get_f64(list: i64, idx: i64, line: u32) -> f64 {
     Concurrency::with_runtime_mut(|rt| {
         if let Some(value) = crate::Compute::try_get_list_f64(rt, list, idx) {
+            return value;
+        }
+        if crate::runtime_host::view_index(rt, list).is_some() {
+            let Some(len) = crate::runtime_host::sequence_len(rt, list) else {
+                rt.set_host_fault("jit list get f64: bad view handle");
+                return 0.0;
+            };
+            let Some(index) = usize::try_from(idx).ok() else {
+                rt.set_runtime_stop(
+                    "E3010",
+                    line,
+                    &jet_foundation::Outcome::jet_list_bounds_message(len as i64, idx),
+                );
+                return 0.0;
+            };
+            if index >= len {
+                rt.set_runtime_stop(
+                    "E3010",
+                    line,
+                    &jet_foundation::Outcome::jet_list_bounds_message(len as i64, idx),
+                );
+                return 0.0;
+            }
+            let Some(value) = crate::runtime_host::sequence_get_float(rt, list, index) else {
+                rt.set_host_fault("jit list get f64: sequence element has the wrong ABI");
+                return 0.0;
+            };
             return value;
         }
         match rt.heap.list_get_float(list, idx) {
@@ -1500,12 +4175,54 @@ fn jet_jit_columnar_gather(list: i64, idx: i64, line: u32) -> i64 {
     })
 }
 
-fn jet_jit_fixed_list_get(list: i64, idx: i64, _line: u32) -> i64 {
-    Concurrency::with_runtime_mut(|rt| rt.heap.list_get_int_proven(list, idx))
+fn jet_jit_fixed_list_get(list: i64, idx: i64, line: u32) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(len) = rt.heap.list_len(list) else {
+            jet_foundation::ice!(None, "jit fixed-list read: bad handle");
+        };
+        let Some(index) = usize::try_from(idx).ok() else {
+            rt.set_runtime_stop(
+                "E3010",
+                line,
+                &jet_foundation::Outcome::jet_list_bounds_message(len, idx),
+            );
+            return 0;
+        };
+        if index >= len as usize {
+            rt.set_runtime_stop(
+                "E3010",
+                line,
+                &jet_foundation::Outcome::jet_list_bounds_message(len, idx),
+            );
+            return 0;
+        }
+        rt.heap.list_get_int_proven(list, idx)
+    })
 }
 
-fn jet_jit_fixed_list_get_f64(list: i64, idx: i64, _line: u32) -> f64 {
-    Concurrency::with_runtime_mut(|rt| rt.heap.list_get_float_proven(list, idx))
+fn jet_jit_fixed_list_get_f64(list: i64, idx: i64, line: u32) -> f64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(len) = rt.heap.list_len(list) else {
+            jet_foundation::ice!(None, "jit fixed-list float read: bad handle");
+        };
+        let Some(index) = usize::try_from(idx).ok() else {
+            rt.set_runtime_stop(
+                "E3010",
+                line,
+                &jet_foundation::Outcome::jet_list_bounds_message(len, idx),
+            );
+            return 0.0;
+        };
+        if index >= len as usize {
+            rt.set_runtime_stop(
+                "E3010",
+                line,
+                &jet_foundation::Outcome::jet_list_bounds_message(len, idx),
+            );
+            return 0.0;
+        }
+        rt.heap.list_get_float_proven(list, idx)
+    })
 }
 
 fn jet_jit_list_get_range(list: i64, idx: i64, line: u32) -> (i64, i64, bool) {
@@ -1549,6 +4266,26 @@ fn jet_jit_list_get_range_exclusive(list: i64, idx: i64, line: u32) -> i8 {
 /// aliases `-1` and overflows at `i64::MAX`.
 fn jet_jit_list_get_opt(list: i64, idx: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
+        if crate::runtime_host::view_index(rt, list).is_some() {
+            let Some(index) = usize::try_from(idx).ok() else {
+                return option_i64(rt, None);
+            };
+            if let Some(value) = crate::runtime_host::sequence_get_int(rt, list, index) {
+                return option_i64(rt, Some(value));
+            }
+            if let Some(value) = crate::runtime_host::sequence_get_float(rt, list, index) {
+                return option_i64(rt, Some(value.to_bits() as i64));
+            }
+            let Some(len) = crate::runtime_host::sequence_len(rt, list) else {
+                rt.set_host_fault("jit list get_opt: bad view handle");
+                return option_i64(rt, None);
+            };
+            if index >= len {
+                return option_i64(rt, None);
+            }
+            rt.set_host_fault("jit list get_opt: sequence element has the wrong ABI");
+            return option_i64(rt, None);
+        }
         if rt.heap.list_len(list).is_none() {
             // An impossible handle is an engine fault, not a program stop.
             rt.set_host_fault("jit list get_opt: bad list handle");
@@ -1562,6 +4299,17 @@ fn jet_jit_list_get_opt(list: i64, idx: i64) -> i64 {
         }
         option_i64(rt, None)
     })
+}
+fn jet_jit_list_first_opt(list: i64) -> i64 {
+    jet_jit_list_get_opt(list, 0)
+}
+
+fn jet_jit_list_last_opt(list: i64) -> i64 {
+    let len = jet_jit_list_len(list);
+    if len <= 0 {
+        return Concurrency::with_runtime_mut(|rt| option_i64(rt, None));
+    }
+    jet_jit_list_get_opt(list, len - 1)
 }
 
 fn jet_jit_list_set(list: i64, idx: i64, v: i64, line: u32) {
@@ -1584,6 +4332,32 @@ fn jet_jit_list_set_f64(list: i64, idx: i64, v: f64, line: u32) {
             jet_foundation::ice!(None, "jit list set f64: bad handle");
         }
         if rt.heap.list_set_float(list, idx, v).is_none() {
+            trap_index(rt.heap.list_len(list).unwrap_or_default(), idx, line);
+        }
+    });
+}
+
+/// Checked index setter ABI for the canonical MIR route.  The file handle is
+/// diagnostic metadata owned by the route; the arena setter only needs the
+/// source line.  The value is an I64 word so one route carries both integer
+/// and floating list elements without a second semantic dispatch.
+fn jet_jit_index_vec_set(list: i64, idx: i64, value: i64, _file: i64, line: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let line = line.max(0) as u32;
+        if rt.heap.list_len(list).is_none() {
+            jet_foundation::ice!(None, "jit index vec set: bad handle");
+        }
+        if crate::Compute::try_set_list_f64(rt, list, idx, f64::from_bits(value as u64)) {
+            return;
+        }
+        if rt
+            .heap
+            .list_set_float(list, idx, f64::from_bits(value as u64))
+            .is_some()
+        {
+            return;
+        }
+        if rt.heap.list_set_int(list, idx, value).is_none() {
             trap_index(rt.heap.list_len(list).unwrap_or_default(), idx, line);
         }
     });
@@ -1613,6 +4387,29 @@ fn jet_jit_list_sort_desc(list: i64) {
 }
 
 /// Lexicographic sort of a `[String]` list (handles are string arena ids).
+fn jet_jit_list_sort_fraction(list: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(ids) = rt.heap.clone_int_list(list) else {
+            jet_foundation::ice!(None, "jit list sort_fraction: bad handle");
+        };
+        let mut pairs: Vec<(jet_foundation::Numeric::CtFraction, i64)> =
+            Vec::with_capacity(ids.len());
+        for id in ids {
+            let index = id.saturating_sub(1) as usize;
+            let Some(value) = rt.fraction_values.get(index).and_then(|slot| slot.clone()) else {
+                jet_foundation::ice!(None, "jit list sort_fraction: bad fraction handle");
+            };
+            pairs.push((value, id));
+        }
+        pairs.sort_by(|left, right| left.0.cmp(&right.0));
+        for (index, (_, id)) in pairs.into_iter().enumerate() {
+            rt.heap
+                .list_set_int(list, index as i64, id)
+                .expect("jit list sort_fraction: set");
+        }
+    });
+}
+
 fn jet_jit_list_sort_str(list: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let Some(ids) = rt.heap.clone_int_list(list) else {
@@ -1645,6 +4442,42 @@ fn jet_jit_list_sort_str_desc(list: i64) {
             rt.heap
                 .list_set_int(list, index as i64, id)
                 .expect("jit list sort_str_desc: set");
+        }
+    });
+}
+fn jet_jit_list_sort_by_compare(list: i64, callback: i64) {
+    let Some(slot) = closure_callback_slot(callback) else {
+        return;
+    };
+    let mut values = clone_list_ints(list);
+    collection_semantics::list_sort_by_compare(&mut values, |left, right| {
+        if closure_trapped() {
+            return std::cmp::Ordering::Equal;
+        }
+        let tag = invoke_closure_i64_pair(slot, *left, *right);
+        if closure_trapped() {
+            return std::cmp::Ordering::Equal;
+        }
+        match tag {
+            0 => std::cmp::Ordering::Less,
+            1 => std::cmp::Ordering::Equal,
+            2 => std::cmp::Ordering::Greater,
+            _ => {
+                Concurrency::with_runtime_mut(|rt| {
+                    rt.set_host_fault("jit list sort_by_compare: invalid Ordering result")
+                });
+                std::cmp::Ordering::Equal
+            }
+        }
+    });
+    if closure_trapped() {
+        return;
+    }
+    Concurrency::with_runtime_mut(|rt| {
+        for (index, value) in values.into_iter().enumerate() {
+            rt.heap
+                .list_set_int(list, index as i64, value)
+                .expect("jit list sort_by_compare: set");
         }
     });
 }
@@ -1686,6 +4519,20 @@ fn jet_jit_list_count(list: i64, value: i64) -> i64 {
         collection_semantics::list_count(&values, &value)
     })
 }
+fn jet_jit_list_count_f64(list: i64, value: f64) -> i64 {
+    let values = clone_list_floats(list);
+    collection_semantics::list_count(&values, &value)
+}
+
+fn jet_jit_list_count_str(list: i64, value: i64) -> i64 {
+    let needle = Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .clone_string(value)
+            .expect("jit string list count: bad value")
+    });
+    let values = clone_list_strings(list);
+    collection_semantics::list_count(&values, &needle)
+}
 fn jet_jit_list_closure_count_where(list: i64, callback: i64) -> i64 {
     let Some(slot) = closure_callback_slot(callback) else {
         return 0;
@@ -1695,7 +4542,7 @@ fn jet_jit_list_closure_count_where(list: i64, callback: i64) -> i64 {
         if closure_trapped() {
             return false;
         }
-        let matched = unsafe { invoke_closure_bool(slot, *value) };
+        let matched = invoke_closure_bool(slot, *value);
         !closure_trapped() && matched
     })
 }
@@ -1711,7 +4558,7 @@ fn jet_jit_list_closure_update_first(list: i64, callback: i64, replacement: i64)
             if closure_trapped() {
                 return false;
             }
-            let matched = unsafe { invoke_closure_bool(slot, *value) };
+            let matched = invoke_closure_bool(slot, *value);
             !closure_trapped() && matched
         },
         replacement,
@@ -1746,19 +4593,56 @@ fn jet_jit_list_remove_value(list: i64, value: i64) -> i64 {
         }
     })
 }
+fn jet_jit_list_remove_value_f64(list: i64, value: f64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(values) = rt.heap.list_values_mut(list) else {
+            jet_foundation::ice!(None, "jit float list remove value: bad handle");
+        };
+        match collection_semantics::list_remove_value(values, jet_rt::JetVal::Float(value)) {
+            Some(jet_rt::JetVal::Float(removed)) => option_packed(Some(removed.to_bits() as i64)),
+            Some(jet_rt::JetVal::Int(removed)) => option_packed(Some(removed)),
+            Some(_) | None => 0,
+        }
+    })
+}
 
-/// Element-kind preserving window (#1995).
-///
-/// The list carrier is heterogeneous at this ABI: `[Float]` stores
-/// `JetVal::Float`, `[Range]` stores `JetVal::Range`, `[String]` and record
-/// lists store handle ints. Materializing the window through the i64 element
-/// view therefore lost every non-integer list — `clone_int_list` answers
-/// `None` as soon as one element is not an `Int`, and the `.expect` behind it
-/// panicked in a seam that was then an `extern "C"` frame, aborting the process
-/// instead of reporting. `xs[1..2]` on a `[Float]` reaches here from a correct
-/// program: `jit_list_native_type` (`jit/safety.rs`) admits float slices.
-///
-/// The shared Prelude kernel keeps the window policy (I9): it runs over the
+fn jet_jit_list_remove_value_str(list: i64, value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let needle = rt
+            .heap
+            .clone_string(value)
+            .expect("jit string list remove value: bad value");
+        let Some(logical) = rt.heap.clone_list_values(list) else {
+            jet_foundation::ice!(None, "jit string list remove value: bad handle");
+        };
+        let Some(index) = logical.iter().position(|candidate| match candidate {
+            jet_rt::JetVal::Int(id) => rt.heap.clone_string(*id).is_some_and(|text| text == needle),
+            jet_rt::JetVal::String(text) => text == &needle,
+            _ => false,
+        }) else {
+            return 0;
+        };
+        let removed = {
+            let Some(values) = rt.heap.list_values_mut(list) else {
+                jet_foundation::ice!(None, "jit string list remove value: bad handle");
+            };
+            collection_semantics::list_remove_slot(values, index as i64)
+        };
+        match removed {
+            Ok(jet_rt::JetVal::Int(removed)) => option_packed(Some(removed)),
+            Ok(jet_rt::JetVal::String(removed)) => {
+                let id = rt.heap.alloc_string(removed);
+                option_packed(Some(id))
+            }
+            Ok(_) => 0,
+            Err(message) => {
+                rt.set_runtime_stop("E3010", 0, &message);
+                0
+            }
+        }
+    })
+}
+
 /// index vector, and the arena copies whatever elements those indexes name.
 fn jet_jit_list_slice(list: i64, start: i64, end: i64, _line: u32) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
@@ -1878,6 +4762,15 @@ fn jet_jit_range_contains(start: i64, end: i64, exclusive: i64, value: i64) -> i
     range_semantics::jet_range_contains(start, end, exclusive != 0, value) as i8
 }
 
+fn jet_jit_range_contains_value(range: i64, value: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        let start = rt.heap.record_get_int(range, 0).unwrap_or(0);
+        let end = rt.heap.record_get_int(range, 1).unwrap_or(0);
+        let exclusive = rt.heap.record_get_int(range, 2).unwrap_or(0);
+        range_semantics::jet_range_contains(start, end, exclusive != 0, value) as i8
+    })
+}
+
 fn jet_jit_range_show(start: i64, end: i64, exclusive: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.heap
@@ -1952,13 +4845,27 @@ fn jet_jit_map_top_n(map: i64, n: i64) -> i64 {
     alloc_map_rows(collection_semantics::map_top_n_i64(clone_map_pairs(map), n))
 }
 
+fn jet_jit_map_top_n_int(map: i64, n: i64) -> i64 {
+    alloc_map_rows(collection_semantics::map_top_n_int(clone_map_pairs(map), n))
+}
+
 fn jet_jit_map_min(map: i64) -> i64 {
     let value = collection_semantics::map_min_i64(clone_map_pairs(map));
     Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
 }
 
+fn jet_jit_map_min_int(map: i64) -> i64 {
+    let value = collection_semantics::map_min_int(clone_map_pairs(map));
+    Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+}
+
 fn jet_jit_map_max(map: i64) -> i64 {
     let value = collection_semantics::map_max_i64(clone_map_pairs(map));
+    Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
+}
+
+fn jet_jit_map_max_int(map: i64) -> i64 {
+    let value = collection_semantics::map_max_int(clone_map_pairs(map));
     Concurrency::with_runtime_mut(|rt| option_i64(rt, value))
 }
 
@@ -2064,6 +4971,12 @@ fn jet_jit_map_merge(left: i64, right: i64) -> i64 {
     })
 }
 
+/// Exact checked MIR map-index setter route.  Map assignment has the same
+/// replace-or-insert semantics as the existing map insertion host.
+fn jet_jit_index_map_set(map: i64, key: i64, value: i64) {
+    jet_jit_map_insert(map, key, value);
+}
+
 fn jet_jit_map_insert(map: i64, key: i64, value: i64) {
     Concurrency::with_runtime_mut(|rt| {
         rt.heap
@@ -2086,6 +4999,50 @@ fn jet_jit_map_insert_int(map: i64, key: i64, value: i64) {
             .map_insert_int(map, key, value)
             .expect("jit Int map insert: bad handle");
     });
+}
+fn jet_jit_map_add_new(map: i64, key: i64, value: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        if rt.heap.map_len(map).is_none() {
+            jet_foundation::ice!(None, "jit map add_new: bad handle");
+        }
+        if rt.heap.map_get(map, key).is_some() {
+            return 0;
+        }
+        rt.heap
+            .map_insert(map, key, value)
+            .expect("jit map add_new: bad handle or key");
+        1
+    })
+}
+
+fn jet_jit_map_add_new_int(map: i64, key: i64, value: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        if rt.heap.map_len(map).is_none() {
+            jet_foundation::ice!(None, "jit Int map add_new: bad handle");
+        }
+        if rt.heap.map_get_int(map, key).is_some() {
+            return 0;
+        }
+        rt.heap
+            .map_insert_int(map, key, value)
+            .expect("jit Int map add_new: bad handle");
+        1
+    })
+}
+
+fn jet_jit_map_add_new_composite(map: i64, key: i64, value: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        if rt.heap.map_len(map).is_none() {
+            jet_foundation::ice!(None, "jit composite map add_new: bad handle");
+        }
+        if rt.heap.map_get_composite(map, key).is_some() {
+            return 0;
+        }
+        rt.heap
+            .map_insert_composite(map, key, value)
+            .expect("jit composite map add_new: bad handle or key");
+        1
+    })
 }
 
 fn jet_jit_map_try_insert(map: i64, key: i64, value: i64) -> i64 {
@@ -2252,6 +5209,9 @@ fn jet_jit_map_remove_int(map: i64, key: i64) -> i64 {
 fn jet_jit_map_len(map: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.map_len(map).expect("jit map len: bad handle"))
 }
+fn jet_jit_map_is_empty(map: i64) -> i8 {
+    i8::from(jet_jit_map_len(map) == 0)
+}
 
 fn jet_jit_map_key_at(map: i64, idx: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
@@ -2295,48 +5255,68 @@ fn jet_jit_map_values(map: i64) -> i64 {
     })
 }
 
-/// Eager materialization of AOT `jet_iter_*` adapters over list handles.
-///
-/// Cranelift can't host true `JetIter` values; producers already store the same
-/// element sequence in a list handle. Adapters rewrite that sequence into a
-/// fresh list so observable `to_list` / for-in / print values match AOT.
+/// Materialize a sequence only when an eager operation or terminal requires it.
+/// Iterator handles are consumed through their resident pull carrier; ordinary
+/// lists and views retain their checked scalar representation.
+fn clone_list_ints_with_runtime(rt: &mut crate::runtime_host::JitRuntime, list: i64) -> Vec<i64> {
+    if let Some(values) = crate::runtime_host::lazy_iter_collect(rt, list) {
+        return values;
+    }
+    let len = crate::runtime_host::sequence_len(rt, list)
+        .expect("jit sequence adapter: bad sequence handle");
+    (0..len)
+        .map(|index| {
+            crate::runtime_host::sequence_get_raw(rt, list, index)
+                .expect("jit sequence adapter: sequence element has no universal ABI")
+        })
+        .collect()
+}
+
 fn clone_list_ints(list: i64) -> Vec<i64> {
-    Concurrency::with_runtime_mut(|rt| {
-        rt.heap
-            .clone_int_list(list)
-            .expect("jit iter adapter: bad list handle")
-    })
+    Concurrency::with_runtime_mut(|rt| clone_list_ints_with_runtime(rt, list))
+}
+
+fn clone_list_dates_with_runtime(
+    rt: &mut crate::runtime_host::JitRuntime,
+    list: i64,
+) -> Option<Vec<crate::Time::time_rt::JetDate>> {
+    clone_list_ints_with_runtime(rt, list)
+        .into_iter()
+        .map(|handle| {
+            let index = usize::try_from(handle.checked_sub(1)?).ok()?;
+            match rt.time_values.get(index)?.as_ref()? {
+                crate::Time::TimeValue::Date(value) => Some(value.clone()),
+                _ => None,
+            }
+        })
+        .collect()
 }
 
 fn clone_nested_int_lists(list: i64) -> Vec<Vec<i64>> {
-    Concurrency::with_runtime_mut(|rt| {
-        let len = rt
-            .heap
-            .list_len(list)
-            .expect("jit nested-list equality: bad list handle");
-        (0..len)
-            .map(|index| {
-                let child = rt
-                    .heap
-                    .list_get_int(list, index)
-                    .expect("jit nested-list equality: bad child handle");
-                rt.heap
-                    .clone_int_list(child)
-                    .expect("jit nested-list equality: bad child list")
-            })
-            .collect()
-    })
+    clone_list_ints(list)
+        .into_iter()
+        .map(|child| clone_list_ints(child))
+        .collect()
 }
 
 fn clone_list_strings(list: i64) -> Vec<String> {
     Concurrency::with_runtime_mut(|rt| {
-        rt.heap
-            .clone_int_list(list)
-            .expect("jit string-list adapter: bad list handle")
+        let values = crate::runtime_host::lazy_iter_collect(rt, list).unwrap_or_else(|| {
+            let len = crate::runtime_host::sequence_len(rt, list)
+                .expect("jit string-list adapter: bad sequence handle");
+            (0..len)
+                .map(|index| {
+                    crate::runtime_host::sequence_get_raw(rt, list, index)
+                        .expect("jit string-list adapter: bad string value")
+                })
+                .collect()
+        });
+        values
             .into_iter()
             .map(|id| {
                 rt.heap
                     .clone_string(id)
+                    .or_else(|| crate::runtime_host::view_string(rt, id))
                     .expect("jit string-list adapter: bad string handle")
             })
             .collect()
@@ -2344,19 +5324,72 @@ fn clone_list_strings(list: i64) -> Vec<String> {
 }
 
 fn clone_list_floats(list: i64) -> Vec<f64> {
-    Concurrency::with_runtime_mut(|rt| {
-        let len = rt
-            .heap
-            .list_len(list)
-            .expect("jit float-list adapter: bad list handle");
-        (0..len)
-            .map(|index| {
-                rt.heap
-                    .list_get_float(list, index)
-                    .expect("jit float-list adapter: bad element")
-            })
-            .collect()
-    })
+    clone_list_ints(list)
+        .into_iter()
+        .map(|value| f64::from_bits(value as u64))
+        .collect()
+}
+fn is_lazy_sequence(list: i64) -> bool {
+    Concurrency::with_runtime_mut(|rt| crate::runtime_host::lazy_iter_index(rt, list).is_some())
+}
+
+fn next_lazy_sequence(list: i64) -> Option<i64> {
+    Concurrency::with_runtime_mut(|rt| crate::runtime_host::lazy_iter_next(rt, list))
+}
+fn jet_jit_list_lazy(list: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| crate::runtime_host::lazy_iter_source(rt, list))
+}
+
+fn jet_jit_iter_string_split(text: i64, separator: i64) -> i64 {
+    let (text, separator) = Concurrency::with_runtime_mut(|rt| {
+        (
+            rt.heap
+                .clone_string(text)
+                .expect("jit string split: bad text handle"),
+            rt.heap
+                .clone_string(separator)
+                .expect("jit string split: bad separator handle"),
+        )
+    });
+    let parts = collection_semantics::iter_string_split(&text, &separator);
+    jet_jit_list_lazy(alloc_from_strings(&parts))
+}
+
+/// Materialize checked iterator payloads as owned list elements. Scalar raw
+/// values pass through; aggregate handles use the descriptor-aware copy kernel.
+fn typed_list_from_raw_values(
+    rt: &mut crate::runtime_host::JitRuntime,
+    mut values: Vec<i64>,
+    element: &crate::runtime_host::RuntimeTypeDescriptor,
+) -> Result<i64, String> {
+    for value in &mut values {
+        *value = crate::runtime_host::runtime_clone_with_descriptor(rt, *value, element)?;
+    }
+    Ok(alloc_view_payloads(rt, values, element))
+}
+
+fn jet_jit_iter_to_list(list: i64, element_type_id: i64) -> i64 {
+    let Some(element) = Concurrency::with_runtime_mut(|rt| {
+        rt.runtime_type_descriptor(element_type_id as u64).cloned()
+    }) else {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_host_fault("jit Iter materialization has no element descriptor")
+        });
+        return 0;
+    };
+    let values = clone_list_ints(list);
+    if closure_trapped() {
+        return 0;
+    }
+    Concurrency::with_runtime_mut(
+        |rt| match typed_list_from_raw_values(rt, values, &element) {
+            Ok(list) => list,
+            Err(message) => {
+                rt.set_host_fault(&message);
+                0
+            }
+        },
+    )
 }
 
 fn clone_map_pairs_in_runtime(heap: &mut jet_rt::JetArena, map: i64) -> Vec<(String, i64)> {
@@ -2452,31 +5485,29 @@ fn transfer_progress(source: i64, target: i64) -> i64 {
     target
 }
 
-fn transfer_progress_take(source: i64, target: i64, n: i64) -> i64 {
-    crate::IO::progress_transfer_take_state(source, target, n);
-    target
-}
-
-fn transfer_progress_skip(source: i64, target: i64, n: i64) -> i64 {
-    crate::IO::progress_transfer_skip_state(source, target, n);
-    target
-}
-
 fn transfer_progress_step(source: i64, target: i64, n: i64) -> i64 {
     crate::IO::progress_transfer_step_state(source, target, n);
     target
 }
 
 fn jet_jit_iter_take(list: i64, n: i64) -> i64 {
-    let xs = clone_list_ints(list);
-    let out = collection_semantics::iter_take(xs, n);
-    transfer_progress_take(list, alloc_from_ints(&out), n)
+    Concurrency::with_runtime_mut(|rt| {
+        let source = lazy_source_for(rt, list);
+        if source == 0 {
+            return 0;
+        }
+        crate::runtime_host::lazy_iter_take(rt, source, n)
+    })
 }
 
 fn jet_jit_iter_skip(list: i64, n: i64) -> i64 {
-    let xs = clone_list_ints(list);
-    let out = collection_semantics::iter_skip(xs, n);
-    transfer_progress_skip(list, alloc_from_ints(&out), n)
+    Concurrency::with_runtime_mut(|rt| {
+        let source = lazy_source_for(rt, list);
+        if source == 0 {
+            return 0;
+        }
+        crate::runtime_host::lazy_iter_skip(rt, source, n)
+    })
 }
 
 fn jet_jit_iter_first(list: i64) -> i64 {
@@ -2502,36 +5533,83 @@ fn jet_jit_iter_first_float(list: i64) -> i64 {
     }
 }
 
-fn jet_jit_iter_skip_string(list: i64, n: i64) -> i64 {
-    let xs = clone_list_strings(list);
-    let out = collection_semantics::iter_skip(xs, n);
-    transfer_progress_skip(list, alloc_from_strings(&out), n)
-}
-
-fn jet_jit_iter_skip_float(list: i64, n: i64) -> i64 {
-    let xs = clone_list_floats(list);
-    let out = collection_semantics::iter_skip(xs, n);
-    transfer_progress_skip(list, alloc_from_floats(&out), n)
-}
-
 fn jet_jit_iter_step_by(list: i64, n: i64) -> i64 {
     let xs = clone_list_ints(list);
     let out = collection_semantics::iter_step_by(xs, n);
     transfer_progress_step(list, alloc_from_ints(&out), n)
 }
 
-/// `string_elems != 0` → compare string contents (handles may differ); else i64 eq.
-fn jet_jit_iter_dedup(list: i64, string_elems: i64) -> i64 {
-    let string_elems = string_elems != 0;
-    let out = if string_elems {
-        let xs = clone_list_strings(list);
-        alloc_from_strings(&collection_semantics::iter_dedup(xs))
-    } else {
-        let xs = clone_list_ints(list);
-        alloc_from_ints(&collection_semantics::iter_dedup(xs))
+fn jet_jit_iter_dedup(list: i64, element_type_id: i64) -> i64 {
+    let Some(element_kind) = Concurrency::with_runtime_mut(|rt| {
+        rt.runtime_type_descriptor(element_type_id as u64)
+            .map(|descriptor| descriptor.kind)
+    }) else {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_host_fault("jit iterator dedup: missing element type descriptor")
+        });
+        return 0;
+    };
+    let string_elems = matches!(element_kind, crate::runtime_host::RuntimeValueKind::String);
+    let out = match element_kind {
+        crate::runtime_host::RuntimeValueKind::String => {
+            let xs = clone_list_strings(list);
+            alloc_from_strings(&collection_semantics::iter_dedup(xs))
+        }
+        crate::runtime_host::RuntimeValueKind::Float => {
+            let xs = clone_list_floats(list);
+            alloc_from_floats(&collection_semantics::iter_dedup(xs))
+        }
+        _ => {
+            let xs = clone_list_ints(list);
+            alloc_from_ints(&collection_semantics::iter_dedup(xs))
+        }
     };
     crate::IO::progress_transfer_dedup_state(list, out, string_elems);
     out
+}
+fn jet_jit_iter_try_collect(list: i64) -> i64 {
+    let is_lazy = Concurrency::with_runtime_mut(|rt| {
+        crate::runtime_host::lazy_iter_index(rt, list).is_some()
+    });
+    if is_lazy {
+        return Concurrency::with_runtime_mut(|rt| {
+            let mut output = Vec::new();
+            while let Some(value) = crate::runtime_host::lazy_iter_next(rt, list) {
+                let Some((ok, bits)) = crate::runtime_host::jit_result_parts(rt, value) else {
+                    rt.set_host_fault("jit iterator try_collect: invalid Result element");
+                    return 0;
+                };
+                if !ok {
+                    return crate::runtime_host::alloc_jit_result(rt, false, bits);
+                }
+                output.push(bits as i64);
+            }
+            if crate::runtime_host::runtime_stop_pending(rt) {
+                return 0;
+            }
+            let collected = rt.heap.alloc_int_list(output);
+            crate::runtime_host::alloc_jit_result(rt, true, collected as u64)
+        });
+    }
+    let values = clone_list_ints(list);
+    if closure_trapped() {
+        return 0;
+    }
+    Concurrency::with_runtime_mut(|rt| {
+        let mut output = Vec::with_capacity(values.len());
+        for value in values {
+            let Some((ok, bits)) = crate::runtime_host::jit_result_parts(rt, value) else {
+                rt.set_host_fault("jit iterator try_collect: invalid Result element");
+                return 0;
+            };
+            if !ok {
+                return crate::runtime_host::alloc_jit_result(rt, false, bits);
+            }
+            output.push(bits as i64);
+        }
+        let collected = rt.heap.alloc_int_list(output);
+        crate::runtime_host::alloc_jit_result(rt, true, collected as u64)
+    })
 }
 
 fn jet_jit_iter_chunks(list: i64, n: i64) -> i64 {
@@ -3372,7 +6450,7 @@ fn jet_jit_list_random(list: i64) -> i64 {
 
 fn jet_jit_list_min_max(list: i64) -> i64 {
     let values = clone_list_ints(list);
-    let Some((min, max)) = collection_semantics::list_min_max_i64(&values).ok() else {
+    let Some((min, max)) = collection_semantics::list_min_max_int(&values).ok() else {
         return 0;
     };
     Concurrency::with_runtime_mut(|rt| {
@@ -3463,7 +6541,18 @@ fn jet_jit_list_sort_by_str_keys_impl(list: i64, keys: i64, descending: bool) {
     });
 }
 
-fn list_text(rt: &crate::JitRuntime, list: i64, kind: i64) -> String {
+fn list_i64_value(rt: &crate::JitRuntime, value: i64) -> i64 {
+    rt.heap.int_to_i64(value).unwrap_or(value)
+}
+
+fn list_u64_value(rt: &crate::JitRuntime, value: i64) -> u64 {
+    rt.heap
+        .int_to_i128(value)
+        .map(|value| value as u64)
+        .unwrap_or(value as u64)
+}
+
+fn list_text(rt: &crate::JitRuntime, list: i64, kind: i64, debug: bool) -> String {
     match kind {
         1 => {
             let values = rt
@@ -3473,11 +6562,19 @@ fn list_text(rt: &crate::JitRuntime, list: i64, kind: i64) -> String {
                 .into_iter()
                 .map(|id| rt.heap.clone_string(id).unwrap_or_default())
                 .collect::<Vec<_>>();
-            collection_semantics::debug_string_list(values)
+            if debug {
+                collection_semantics::debug_string_list(values)
+            } else {
+                collection_semantics::display_string_list(values)
+            }
         }
         2 => {
             let values = rt.heap.clone_int_list(list).unwrap_or_default();
-            collection_semantics::debug_i64_list(values)
+            if debug {
+                collection_semantics::debug_i64_list(values)
+            } else {
+                collection_semantics::display_i64_list(values)
+            }
         }
         3 => {
             let values = rt
@@ -3485,23 +6582,35 @@ fn list_text(rt: &crate::JitRuntime, list: i64, kind: i64) -> String {
                 .clone_int_list(list)
                 .unwrap_or_default()
                 .into_iter()
-                .map(|value| value as u64)
+                .map(|value| list_u64_value(rt, value))
                 .collect::<Vec<_>>();
-            collection_semantics::debug_u64_list(values)
+            if debug {
+                collection_semantics::debug_u64_list(values)
+            } else {
+                collection_semantics::display_u64_list(values)
+            }
         }
         4 => {
             let len = rt.heap.list_len(list).unwrap_or(0);
             let values = (0..len)
                 .map(|index| rt.heap.list_get_float(list, index).unwrap_or(0.0))
                 .collect::<Vec<_>>();
-            collection_semantics::debug_f64_list(values)
+            if debug {
+                collection_semantics::debug_f64_list(values)
+            } else {
+                collection_semantics::display_f64_list(values)
+            }
         }
         7 => {
             let len = rt.heap.list_len(list).unwrap_or(0);
             let values = (0..len)
                 .map(|index| rt.heap.list_get_float(list, index).unwrap_or(0.0) as f32)
                 .collect::<Vec<_>>();
-            collection_semantics::debug_f32_list(values)
+            if debug {
+                collection_semantics::debug_f32_list(values)
+            } else {
+                collection_semantics::display_f32_list(values)
+            }
         }
         5 => {
             let values = rt
@@ -3511,7 +6620,11 @@ fn list_text(rt: &crate::JitRuntime, list: i64, kind: i64) -> String {
                 .into_iter()
                 .map(|value| value != 0)
                 .collect::<Vec<_>>();
-            collection_semantics::debug_bool_list(values)
+            if debug {
+                collection_semantics::debug_bool_list(values)
+            } else {
+                collection_semantics::display_bool_list(values)
+            }
         }
         6 => {
             let values = rt
@@ -3521,23 +6634,162 @@ fn list_text(rt: &crate::JitRuntime, list: i64, kind: i64) -> String {
                 .into_iter()
                 .map(|value| char::from_u32(value as u32).unwrap_or('?'))
                 .collect::<Vec<_>>();
-            collection_semantics::debug_char_list(values)
+            if debug {
+                collection_semantics::debug_char_list(values)
+            } else {
+                collection_semantics::display_char_list(values)
+            }
+        }
+        8 => {
+            let values = rt
+                .heap
+                .clone_int_list(list)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|value| list_i64_value(rt, value) as i8)
+                .collect::<Vec<_>>();
+            if debug {
+                collection_semantics::debug_i8_list(values)
+            } else {
+                collection_semantics::display_i8_list(values)
+            }
+        }
+        9 => {
+            let values = rt
+                .heap
+                .clone_int_list(list)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|value| list_i64_value(rt, value) as i16)
+                .collect::<Vec<_>>();
+            if debug {
+                collection_semantics::debug_i16_list(values)
+            } else {
+                collection_semantics::display_i16_list(values)
+            }
+        }
+        10 => {
+            let values = rt
+                .heap
+                .clone_int_list(list)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|value| list_i64_value(rt, value) as i32)
+                .collect::<Vec<_>>();
+            if debug {
+                collection_semantics::debug_i32_list(values)
+            } else {
+                collection_semantics::display_i32_list(values)
+            }
+        }
+        11 => {
+            let values = rt
+                .heap
+                .clone_int_list(list)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|value| list_i64_value(rt, value))
+                .collect::<Vec<_>>();
+            if debug {
+                collection_semantics::debug_native_i64_list(values)
+            } else {
+                collection_semantics::display_native_i64_list(values)
+            }
+        }
+        12 => {
+            let values = rt
+                .heap
+                .clone_int_list(list)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|value| list_u64_value(rt, value) as u8)
+                .collect::<Vec<_>>();
+            if debug {
+                collection_semantics::debug_u8_list(values)
+            } else {
+                collection_semantics::display_u8_list(values)
+            }
+        }
+        13 => {
+            let values = rt
+                .heap
+                .clone_int_list(list)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|value| list_u64_value(rt, value) as u16)
+                .collect::<Vec<_>>();
+            if debug {
+                collection_semantics::debug_u16_list(values)
+            } else {
+                collection_semantics::display_u16_list(values)
+            }
+        }
+        14 => {
+            let values = rt
+                .heap
+                .clone_int_list(list)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|value| list_u64_value(rt, value) as u32)
+                .collect::<Vec<_>>();
+            if debug {
+                collection_semantics::debug_u32_list(values)
+            } else {
+                collection_semantics::display_u32_list(values)
+            }
+        }
+        15 => {
+            let values = rt
+                .heap
+                .clone_int_list(list)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|id| {
+                    let index = id.saturating_sub(1) as usize;
+                    rt.fraction_values
+                        .get(index)
+                        .and_then(|slot| slot.as_ref())
+                        .map(|value| value.to_string_rep())
+                        .unwrap_or_else(|| "0/1".to_string())
+                })
+                .collect::<Vec<_>>();
+            if debug {
+                collection_semantics::debug_string_list(values)
+            } else {
+                collection_semantics::display_string_list(values)
+            }
         }
         _ => {
             let values = rt.heap.clone_int_list(list).unwrap_or_default();
-            collection_semantics::debug_i64_list(values)
+            if debug {
+                collection_semantics::debug_i64_list(values)
+            } else {
+                collection_semantics::display_i64_list(values)
+            }
         }
     }
 }
 
 fn list_debug_text(rt: &crate::JitRuntime, list: i64, kind: i64) -> String {
-    list_text(rt, list, kind)
+    list_text(rt, list, kind, true)
+}
+
+fn list_display_text(rt: &crate::JitRuntime, list: i64, kind: i64) -> String {
+    list_text(rt, list, kind, false)
 }
 
 /// Jet Debug list text as a string handle for structural-value marshalling.
 fn jet_jit_list_debug(list: i64, kind: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let text = list_debug_text(rt, list, kind);
+        rt.heap.alloc_string(text)
+    })
+}
+
+/// Jet Display list text as a string handle for interpolation.
+fn jet_jit_list_display(list: i64, kind: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = list_display_text(rt, list, kind);
         rt.heap.alloc_string(text)
     })
 }
@@ -3684,6 +6936,19 @@ fn jet_jit_list_insert(list: i64, idx: i64, v: i64) {
         }
     });
 }
+fn jet_jit_list_insert_f64(list: i64, idx: i64, value: f64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(values) = rt.heap.list_values_mut(list) else {
+            jet_foundation::ice!(None, "jit float list insert: bad handle");
+        };
+        if let Err(error) =
+            collection_semantics::list_insert(values, idx, jet_rt::JetVal::Float(value))
+        {
+            let message = error.message();
+            rt.set_runtime_stop(error.code(), 0, &message);
+        }
+    });
+}
 
 /// `list.remove(i, RemoveBy.Slot)` — shared Prelude bounds semantics, with the
 /// JIT only marshalling the list handle and runtime-stop boundary.
@@ -3778,6 +7043,15 @@ fn authority_record(rt: &mut crate::JitRuntime, rights: BTreeSet<String>) -> i64
     let authority = rt.heap.alloc_record(1);
     let _ = rt.heap.record_set_int(authority, 0, rights_handle);
     authority
+}
+
+pub(crate) fn authority_file_scope(
+    rt: &crate::JitRuntime,
+    authority: i64,
+) -> authority_semantics::JetFileScope {
+    let rights = authority_rights(rt, authority);
+    let authority = authority_semantics::JetAuthority::from_rights(rights.into_iter().collect());
+    authority_semantics::JetFileScope::from_authority(&authority)
 }
 
 /// D-AUTHORITY-NAME1=A: the JIT host is only a handle
@@ -4009,6 +7283,55 @@ fn jet_jit_set_has(set: i64, v: i64) -> i8 {
         }
         Some(s) if s.contains(&v) => 1,
         _ => 0,
+    })
+}
+
+fn jet_jit_set_is_empty(set: i64) -> i8 {
+    i8::from(jet_jit_set_len(set) == 0)
+}
+
+fn jet_jit_sorted_set_is_empty(handle: i64) -> i8 {
+    i8::from(jet_jit_sorted_set_len(handle) == 0)
+}
+
+fn jet_jit_priority_queue_is_empty(handle: i64) -> i8 {
+    i8::from(jet_jit_priority_queue_len(handle) == 0)
+}
+
+fn jet_jit_deque_is_empty(dq: i64) -> i8 {
+    i8::from(jet_jit_deque_len(dq) == 0)
+}
+
+fn jet_jit_bag_is_empty(bag: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        i8::from(
+            rt.bags
+                .get((bag as usize).wrapping_sub(1))
+                .is_none_or(std::collections::HashMap::is_empty),
+        )
+    })
+}
+
+fn jet_jit_lru_len(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.lrus
+            .get((handle as usize).wrapping_sub(1))
+            .map(|lru| lru.entries.len() as i64)
+            .unwrap_or(0)
+    })
+}
+
+fn jet_jit_lru_is_empty(handle: i64) -> i8 {
+    i8::from(jet_jit_lru_len(handle) == 0)
+}
+
+fn jet_jit_bit_set_is_empty(handle: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        i8::from(
+            rt.bit_sets
+                .get((handle as usize).wrapping_sub(1))
+                .is_none_or(std::collections::BTreeSet::is_empty),
+        )
     })
 }
 
@@ -5549,30 +8872,7 @@ pub(crate) fn register_packed_enum_show(enum_name: &str, variants: Vec<(String, 
 
 fn show_packed_enum(packed: i64, enum_name: &str, heap: &jet_rt::JetArena) -> String {
     if enum_name == "IOError" {
-        if (packed & 0xff) as usize
-            == jet_foundation::Syntax::IO_ERROR_VARIANTS
-                .iter()
-                .position(|name| *name == "ResourceLimit")
-                .unwrap_or(usize::MAX)
-        {
-            return show_packed_enum(packed >> 8, "ProcessResourceLimit", heap)
-                .replace("ProcessResourceLimit.", "process resource limit: ");
-        }
-        let context = packed >> 8;
-        let resource = heap
-            .record_get_int(context, 1)
-            .and_then(|encoded| encoded.checked_sub(1))
-            .and_then(|handle| heap.clone_string(handle));
-        let cause = heap
-            .record_get_int(context, 3)
-            .and_then(|encoded| encoded.checked_sub(1))
-            .and_then(|handle| heap.clone_string(handle));
-        return jet_foundation::StructuralDebug::jet_show_io_error(
-            packed & 0xff,
-            heap.record_get_int(context, 0).unwrap_or(0),
-            resource.as_deref(),
-            cause.as_deref(),
-        );
+        return crate::Process::process_error_show_text(packed, heap);
     }
     let def = PACKED_ENUM_SHOW.with(|t| t.borrow().get(enum_name).cloned());
     let Some(def) = def else {
@@ -5632,6 +8932,12 @@ fn jet_jit_enum_show(packed: i64, name_ptr: i64, name_len: i64) -> i64 {
         rt.heap.alloc_string(text)
     })
 }
+fn jet_jit_io_error_show(packed: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = show_packed_enum(packed, "IOError", &rt.heap);
+        rt.heap.alloc_string(text)
+    })
+}
 
 host_fns! {
     struct CollectionsHostFns;
@@ -5643,6 +8949,14 @@ host_fns! {
         let mut sig_new = Signature::new(cc);
         sig_new.returns.push(AbiParam::new(types::I64));
         let mut sig_zip_family = Signature::new(cc);
+        let mut sig_iter_zip = Signature::new(cc);
+        sig_iter_zip.params.extend([AbiParam::new(types::I64); 3]);
+        sig_iter_zip.returns.push(AbiParam::new(types::I64));
+        let mut sig_iter_zip_pad = Signature::new(cc);
+        sig_iter_zip_pad
+            .params
+            .extend([AbiParam::new(types::I64); 5]);
+        sig_iter_zip_pad.returns.push(AbiParam::new(types::I64));
         sig_zip_family
             .params
             .extend([AbiParam::new(types::I64); 4]);
@@ -5658,6 +8972,11 @@ host_fns! {
         let mut sig_push_f64 = Signature::new(cc);
         sig_push_f64.params.push(AbiParam::new(types::I64));
         sig_push_f64.params.push(AbiParam::new(types::F64));
+        let mut sig_list_insert_f64 = Signature::new(cc);
+        sig_list_insert_f64
+            .params
+            .extend([AbiParam::new(types::I64); 2]);
+        sig_list_insert_f64.params.push(AbiParam::new(types::F64));
         let sig_try_new = sig_new.clone();
         let mut sig_try_with_capacity = Signature::new(cc);
         sig_try_with_capacity.params.push(AbiParam::new(types::I64));
@@ -5726,6 +9045,14 @@ host_fns! {
         sig_set_f64.params.push(AbiParam::new(types::I64));
         sig_set_f64.params.push(AbiParam::new(types::F64));
         sig_set_f64.params.push(AbiParam::new(types::I32));
+        let mut sig_index_vec_set = Signature::new(cc);
+        sig_index_vec_set
+            .params
+            .extend([AbiParam::new(types::I64); 5]);
+        let mut sig_index_map_set = Signature::new(cc);
+        sig_index_map_set
+            .params
+            .extend([AbiParam::new(types::I64); 3]);
         let mut sig_sort = sig_len.clone();
         sig_sort.returns.clear();
         // list_slice(list, start, end, line) -> id
@@ -5767,6 +9094,8 @@ host_fns! {
         sig_map_insert.params.push(AbiParam::new(types::I64));
         sig_map_insert.params.push(AbiParam::new(types::I64));
         let sig_map_insert_composite = sig_map_insert.clone();
+        let mut sig_map_add_new = sig_map_insert.clone();
+        sig_map_add_new.returns.push(AbiParam::new(types::I8));
         let mut sig_three_ret = sig_map_insert.clone();
         sig_three_ret.returns.push(AbiParam::new(types::I64));
         let sig_try_map_insert = sig_three_ret.clone();
@@ -5791,6 +9120,20 @@ host_fns! {
         let mut sig_f64 = Signature::new(cc);
         sig_f64.params.push(AbiParam::new(types::I64));
         sig_f64.returns.push(AbiParam::new(types::F64));
+        let mut sig_fixed_float_reduction_f32 = Signature::new(cc);
+        sig_fixed_float_reduction_f32.params.push(AbiParam::new(types::I64));
+        sig_fixed_float_reduction_f32.params.push(AbiParam::new(types::F32));
+        sig_fixed_float_reduction_f32.returns.push(AbiParam::new(types::F32));
+        let mut sig_fixed_float_reduction_f64 = Signature::new(cc);
+        sig_fixed_float_reduction_f64.params.push(AbiParam::new(types::I64));
+        sig_fixed_float_reduction_f64.params.push(AbiParam::new(types::F64));
+        sig_fixed_float_reduction_f64.returns.push(AbiParam::new(types::F64));
+        let mut sig_fixed_float_sum_f32 = Signature::new(cc);
+        sig_fixed_float_sum_f32.params.push(AbiParam::new(types::I64));
+        sig_fixed_float_sum_f32.returns.push(AbiParam::new(types::F32));
+        let mut sig_fixed_float_sum_f64 = Signature::new(cc);
+        sig_fixed_float_sum_f64.params.push(AbiParam::new(types::I64));
+        sig_fixed_float_sum_f64.returns.push(AbiParam::new(types::F64));
         let mut sig_closure_predicate = Signature::new(cc);
         sig_closure_predicate
             .params
@@ -5804,9 +9147,39 @@ host_fns! {
         let mut sig_closure_value = sig_closure_predicate.clone();
         sig_closure_value.returns.clear();
         sig_closure_value.returns.push(AbiParam::new(types::I64));
+        let mut sig_sort_by_compare = sig_closure_value.clone();
+        sig_sort_by_compare.returns.clear();
+        let mut sig_closure_fold = Signature::new(cc);
+        sig_closure_fold
+            .params
+            .extend([AbiParam::new(types::I64); 3]);
+        sig_closure_fold.returns.push(AbiParam::new(types::I64));
+        let mut sig_view_new = Signature::new(cc);
+        sig_view_new
+            .params
+            .extend([AbiParam::new(types::I64); 3]);
+        sig_view_new.returns.push(AbiParam::new(types::I64));
+        let mut sig_view_map = Signature::new(cc);
+        sig_view_map
+            .params
+            .extend([AbiParam::new(types::I64); 4]);
+        sig_view_map.returns.push(AbiParam::new(types::I64));
+        let mut sig_view_fold = Signature::new(cc);
+        sig_view_fold
+            .params
+            .extend([AbiParam::new(types::I64); 5]);
+        sig_view_fold.returns.push(AbiParam::new(types::I64));
+        let mut sig_collection_limit = sig_closure_value.clone();
+        sig_collection_limit.params.push(AbiParam::new(types::I64));
+        let mut sig_iter_to_list = Signature::new(cc);
+        sig_iter_to_list
+            .params
+            .extend([AbiParam::new(types::I64); 2]);
+        sig_iter_to_list.returns.push(AbiParam::new(types::I64));
+
+
         let mut sig_closure_value_limit = sig_closure_value.clone();
         sig_closure_value_limit.params.push(AbiParam::new(types::I64));
-        let sig_closure_each = sig_closure_predicate.clone();
         let mut sig_priority_queue_slot = Signature::new(cc);
         sig_priority_queue_slot.params.push(AbiParam::new(types::I64));
         sig_priority_queue_slot.params.push(AbiParam::new(types::I64));
@@ -5814,41 +9187,166 @@ host_fns! {
         sig_priority_queue_slot.returns.push(AbiParam::new(types::I64));
 
 
+        let mut sig_loop_range_init = Signature::new(cc);
+        sig_loop_range_init.params.extend([
+            AbiParam::new(types::I64),
+            AbiParam::new(types::I64),
+            AbiParam::new(types::I64),
+            AbiParam::new(types::I8),
+            AbiParam::new(types::I8),
+        ]);
+        sig_loop_range_init.returns.push(AbiParam::new(types::I64));
+        let mut sig_loop_iter_init = Signature::new(cc);
+        sig_loop_iter_init.params.extend([
+            AbiParam::new(types::I64),
+            AbiParam::new(types::I64),
+            AbiParam::new(types::I8),
+            AbiParam::new(types::I8),
+            AbiParam::new(types::I64),
+        ]);
+        sig_loop_iter_init.returns.push(AbiParam::new(types::I64));
+        let mut sig_loop_cursor_has_next = Signature::new(cc);
+        sig_loop_cursor_has_next.params.push(AbiParam::new(types::I64));
+        sig_loop_cursor_has_next.returns.push(AbiParam::new(types::I8));
+        let mut sig_loop_cursor_value = Signature::new(cc);
+        sig_loop_cursor_value.params.push(AbiParam::new(types::I64));
+        sig_loop_cursor_value.returns.push(AbiParam::new(types::I64));
+        let mut sig_loop_cursor_advance = Signature::new(cc);
+        sig_loop_cursor_advance.params.push(AbiParam::new(types::I64));
     }
+    loop_range_init: "jet_loop_range_init" => jet_jit_loop_range_init: sig_loop_range_init;
+    loop_range_has_next: "jet_loop_range_has_next" => jet_jit_loop_range_has_next: sig_loop_cursor_has_next;
+    loop_range_value: "jet_loop_range_value" => jet_jit_loop_range_value: sig_loop_cursor_value;
+    loop_range_advance: "jet_loop_range_advance" => jet_jit_loop_range_advance: sig_loop_cursor_advance;
+    loop_iter_init: "jet_loop_iter_init" => jet_jit_loop_iter_init: sig_loop_iter_init;
+    loop_iter_has_next: "jet_loop_iter_has_next" => jet_jit_loop_iter_has_next: sig_loop_cursor_has_next;
+    loop_iter_value: "jet_loop_iter_value" => jet_jit_loop_iter_value: sig_loop_cursor_value;
+    loop_iter_advance: "jet_loop_iter_advance" => jet_jit_loop_iter_advance: sig_loop_cursor_advance;
     io_args: "jet_jit_io_args" => jet_jit_io_args: sig_new;
     io_process_args: "jet_jit_io_process_args" => jet_jit_io_process_args: sig_new;
     list_new: "jet_jit_list_new" => jet_jit_list_new: sig_new;
     list_try_new: "jet_jit_list_try_new" => jet_jit_list_try_new: sig_try_new;
+    view_try_map: "jet_jit_view_try_map" => jet_jit_view_try_map: sig_view_map;
+    view_try_filter: "jet_jit_view_try_filter" => jet_jit_view_try_filter: sig_view_map;
+    list_lazy: "jet_iter_from_vec" => jet_jit_list_lazy: sig_len;
+    list_take: "jet_list_take" => jet_jit_list_take: sig_get_opt;
+    list_skip: "jet_list_skip" => jet_jit_list_skip: sig_get_opt;
+    iter_to_list: "jet_iter_to_list" => jet_jit_iter_to_list: sig_iter_to_list;
+    iter_collect: "jet_iter_collect" => jet_jit_iter_to_list: sig_iter_to_list;
+    iter_try_collect: "jet_list_try_collect" => jet_jit_iter_try_collect: sig_len;
+    checked_collection_map_typed: "jet_jit_checked_collection_map" => checked_list_map_typed: sig_view_map;
+    checked_collection_filter_typed: "jet_jit_checked_collection_filter" => checked_list_filter_typed: sig_collection_limit;
+    checked_collection_partition_typed: "jet_jit_checked_collection_partition" => checked_list_partition_typed: sig_collection_limit;
+    checked_try_map_typed: "jet_jit_checked_try_map" => checked_list_try_map_typed: sig_view_map;
+    checked_try_filter_typed: "jet_jit_checked_try_filter" => checked_list_try_filter_typed: sig_view_map;
+    checked_iter_map_typed: "jet_jit_checked_iter_map" => checked_iter_map_typed: sig_closure_value;
+    checked_iter_zip_typed: "jet_jit_checked_iter_zip" => checked_iter_zip_typed: sig_iter_zip;
+    checked_iter_zip_strict_typed: "jet_jit_checked_iter_zip_strict" => checked_iter_zip_strict_typed: sig_iter_zip;
+    checked_iter_zip_pad_typed: "jet_jit_checked_iter_zip_pad" => checked_iter_zip_pad_typed: sig_iter_zip_pad;
+    checked_iter_filter_typed: "jet_jit_checked_iter_filter" => checked_iter_filter_typed: sig_closure_value;
+    checked_iter_filter_map_typed: "jet_jit_checked_iter_filter_map" => checked_iter_filter_map_typed: sig_closure_value;
+    checked_list_flat_map_typed: "jet_jit_checked_list_flat_map" => checked_list_flat_map_typed: sig_view_map;
+    checked_iter_flat_map_typed: "jet_jit_checked_iter_flat_map" => checked_iter_flat_map_typed: sig_closure_value;
+    checked_list_take_while_typed: "jet_jit_checked_list_take_while" => checked_list_take_while_typed: sig_collection_limit;
+    checked_iter_take_while_typed: "jet_jit_checked_iter_take_while" => checked_iter_take_while_typed: sig_closure_value;
+    checked_list_skip_while_typed: "jet_jit_checked_list_skip_while" => checked_list_skip_while_typed: sig_collection_limit;
+    checked_iter_skip_while_typed: "jet_jit_checked_iter_skip_while" => checked_iter_skip_while_typed: sig_closure_value;
+    checked_iter_scan_typed: "jet_jit_checked_iter_scan" => checked_iter_scan_typed: sig_closure_fold;
     list_try_with_capacity: "jet_jit_list_try_with_capacity" => jet_jit_list_try_with_capacity: sig_try_with_capacity;
     list_uninit: "jet_jit_list_uninit" => jet_jit_list_uninit: sig_uninit;
     list_push: "jet_jit_list_push" => jet_jit_list_push: sig_push;
     list_push_f64: "jet_jit_list_push_f64" => jet_jit_list_push_f64: sig_push_f64;
+    list_extend: "jet_jit_list_extend" => jet_jit_list_extend: sig_push;
+    list_reverse: "jet_jit_list_reverse" => jet_jit_list_reverse: sig_sort;
+    list_concat: "jet_jit_list_concat" => jet_jit_list_concat: sig_get_opt;
     list_try_push: "jet_jit_list_try_push" => jet_jit_list_try_push: sig_try_push;
+    view_new: "jet_jit_view_new" => jet_jit_view_new: sig_view_new;
+    checked_view_new: "jet_view_new" => jet_jit_view_new: sig_view_new;
+    view_new_range: "jet_view_new_range" => jet_jit_view_new_range: sig_get_opt;
+    view_fold: "jet_jit_view_fold" => jet_jit_view_fold: sig_view_fold;
+    view_map: "jet_jit_view_map" => jet_jit_view_map: sig_view_map;
     list_try_push_f64: "jet_jit_list_try_push_f64" => jet_jit_list_try_push_f64: sig_try_push_f64;
+    list_sum_fixed_f32: "jet_list_sum_fixed_f32" => jet_jit_list_sum_fixed_f32: sig_fixed_float_sum_f32;
+    list_sum_fixed_f64: "jet_list_sum_fixed_f64" => jet_jit_list_sum_fixed_f64: sig_fixed_float_sum_f64;
     list_try_reserve: "jet_jit_list_try_reserve" => jet_jit_list_try_reserve: sig_try_reserve;
     list_try_reserve_f64: "jet_jit_list_try_reserve_f64" => jet_jit_list_try_reserve_f64: sig_try_reserve_f64;
     string_try_push: "jet_jit_string_try_push" => jet_jit_string_try_push: sig_try_string_push;
     list_push_range: "jet_jit_list_push_range" => jet_jit_list_push_range: sig_push_range;
     list_get: "jet_jit_list_get" => jet_jit_list_get: sig_get;
-    list_int_ptr: "jet_jit_list_int_ptr" => jet_jit_list_int_ptr: sig_len;
+    index_to_i64: "jet_jit_index_to_i64" => jet_jit_index_to_i64: sig_len;
     list_get_f64: "jet_jit_list_get_f64" => jet_jit_list_get_f64: sig_get_f64;
-    columnar_gather: "jet_jit_columnar_gather" => jet_jit_columnar_gather: sig_get;
     fixed_list_get: "jet_jit_fixed_list_get" => jet_jit_fixed_list_get: sig_get;
+    checked_list_count_by: "jet_list_count_by" => checked_list_count_by: sig_closure_value;
     fixed_list_get_f64: "jet_jit_fixed_list_get_f64" => jet_jit_fixed_list_get_f64: sig_get_f64;
+    columnar_gather: "jet_jit_columnar_gather" => jet_jit_columnar_gather: sig_get;
+    list_int_ptr: "jet_jit_list_int_ptr" => jet_jit_list_int_ptr: sig_len;
+    list_fold_add_fixed_f32: "jet_list_fold_add_fixed_f32" => jet_jit_list_fold_add_fixed_f32: sig_fixed_float_reduction_f32;
+    list_fold_add_fixed_f64: "jet_list_fold_add_fixed_f64" => jet_jit_list_fold_add_fixed_f64: sig_fixed_float_reduction_f64;
+    list_para_fold_add_fixed_f32: "jet_list_para_fold_add_fixed_f32" => jet_jit_list_para_fold_add_fixed_f32: sig_fixed_float_reduction_f32;
+    list_para_fold_add_fixed_f64: "jet_list_para_fold_add_fixed_f64" => jet_jit_list_para_fold_add_fixed_f64: sig_fixed_float_reduction_f64;
     list_get_range_start: "jet_jit_list_get_range_start" => jet_jit_list_get_range_start: sig_get_range_scalar;
+    list_clear: "jet_jit_list_clear" => jet_jit_list_clear: sig_sort;
+    index_vec_set: "jet_index_vec_set" => jet_jit_index_vec_set: sig_index_vec_set;
+    checked_list_find: "jet_list_find" => checked_list_find: sig_closure_value;
+    checked_list_min_by: "jet_list_min_by" => checked_list_min_by: sig_closure_value;
+    checked_list_max_by: "jet_list_max_by" => checked_list_max_by: sig_closure_value;
+    checked_list_take_iter: "jet_list_take_while_iter" => checked_list_take: sig_closure_value;
+    checked_list_skip_iter: "jet_list_skip_while_iter" => checked_list_skip: sig_closure_value;
+    list_fold: "jet_jit_list_fold" => jet_jit_list_fold: sig_closure_fold;
+    list_group_by: "jet_jit_list_group_by" => jet_jit_list_group_by: sig_closure_value;
+
     list_get_range_end: "jet_jit_list_get_range_end" => jet_jit_list_get_range_end: sig_get_range_scalar;
     list_get_range_exclusive: "jet_jit_list_get_range_exclusive" => jet_jit_list_get_range_exclusive: sig_get_range_exclusive;
     list_get_opt: "jet_jit_list_get_opt" => jet_jit_list_get_opt: sig_get_opt;
     list_set: "jet_jit_list_set" => jet_jit_list_set: sig_set;
     list_set_f64: "jet_jit_list_set_f64" => jet_jit_list_set_f64: sig_set_f64;
     list_len: "jet_jit_list_len" => jet_jit_list_len: sig_len;
+    checked_builtin_list_len: "jet_list_len" => jet_jit_list_len: sig_len;
+    checked_builtin_list_is_empty: "jet_list_is_empty" => jet_jit_list_is_empty: sig_bool;
+    checked_builtin_list_get_opt: "jet_list_get_opt" => jet_jit_list_get_opt: sig_get_opt;
+    checked_builtin_list_first: "jet_list_first" => jet_jit_list_first_opt: sig_len;
+    checked_builtin_list_last: "jet_list_last" => jet_jit_list_last_opt: sig_len;
+    checked_builtin_iter_len: "jet_iter_len" => jet_jit_iter_len: sig_len;
+    checked_builtin_iter_is_empty: "jet_iter_is_empty" => jet_jit_iter_is_empty: sig_bool;
+    checked_builtin_iter_first: "jet_iter_first" => jet_jit_list_first_opt: sig_len;
     list_closure_any: "jet_jit_list_closure_any" => jet_jit_list_closure_any: sig_closure_predicate;
     list_closure_all: "jet_jit_list_closure_all" => jet_jit_list_closure_all: sig_closure_predicate;
     list_closure_count_where: "jet_jit_list_closure_count_where" => jet_jit_list_closure_count_where: sig_closure_count_where;
+    checked_list_count_where: "jet_list_count_where" => jet_jit_list_closure_count_where: sig_closure_count_where;
     list_closure_update_first: "jet_jit_list_closure_update_first" => jet_jit_list_closure_update_first: sig_closure_update_first;
     list_closure_map: "jet_jit_list_closure_map" => jet_jit_list_closure_map: sig_closure_value;
     list_closure_map_mut: "jet_jit_list_closure_map_mut" => jet_jit_list_closure_map_mut: sig_closure_value;
+    checked_list_map: "jet_list_map" => jet_jit_list_closure_map: sig_closure_value;
+    checked_list_map_mut: "jet_list_map_mut" => jet_jit_list_closure_map_mut: sig_closure_value;
+    checked_iter_map: "jet_iter_map" => jet_jit_list_closure_map: sig_closure_value;
+    checked_iter_map_mut: "jet_iter_map_mut" => jet_jit_list_closure_map_mut: sig_closure_value;
+    checked_list_filter: "jet_list_filter" => jet_jit_list_closure_filter: sig_closure_value;
+    checked_iter_filter: "jet_iter_filter" => jet_jit_list_closure_filter: sig_closure_value;
+    checked_list_each: "jet_list_each" => jet_jit_list_closure_each: sig_closure_predicate;
+    checked_list_each_mut: "jet_list_each_mut" => jet_jit_list_closure_each_mut: sig_closure_predicate;
+    checked_list_each_ref: "jet_list_each_ref" => checked_list_each_ref_typed: sig_view_map;
+    checked_list_any: "jet_list_any" => jet_jit_list_closure_any: sig_closure_predicate;
+    checked_list_all: "jet_list_all" => jet_jit_list_closure_all: sig_closure_predicate;
+    checked_list_reduce: "jet_list_reduce" => jet_jit_list_fold: sig_closure_fold;
+    checked_list_group_by: "jet_list_group_by" => jet_jit_list_group_by: sig_closure_value;
+    checked_list_try_map: "jet_list_try_map" => checked_list_try_map: sig_closure_value;
+    checked_iter_try_map: "jet_iter_try_map" => checked_list_try_map: sig_closure_value;
+    checked_list_try_filter: "jet_list_try_filter" => checked_list_try_filter: sig_closure_value;
+    checked_iter_try_filter: "jet_iter_try_filter" => checked_list_try_filter: sig_closure_value;
+    checked_list_position: "jet_list_position" => checked_list_position: sig_closure_value;
+    checked_iter_position: "jet_iter_position" => checked_list_position: sig_closure_value;
+    checked_list_flat_map: "jet_list_flat_map" => checked_list_flat_map: sig_closure_value;
+    checked_iter_flat_map: "jet_iter_flat_map" => checked_list_flat_map: sig_closure_value;
+    checked_list_take: "jet_list_take_while" => checked_list_take: sig_closure_value;
+    checked_list_skip: "jet_list_skip_while" => checked_list_skip: sig_closure_value;
+    checked_iter_take: "jet_iter_take_while" => checked_list_take: sig_closure_value;
+    checked_iter_skip: "jet_iter_skip_while" => checked_list_skip: sig_closure_value;
+    checked_list_scan: "jet_list_scan_iter" => checked_list_scan: sig_closure_fold;
+    checked_iter_scan: "jet_iter_scan" => checked_list_scan: sig_closure_fold;
+    checked_option_map: "jet_option_map_ref" => checked_option_map: sig_closure_value;
+    checked_bag_any: "jet_bag_any" => checked_bag_any: sig_closure_predicate;
     list_closure_para_map: "jet_jit_list_closure_para_map" => jet_jit_list_closure_para_map: sig_closure_value_limit;
+    checked_list_para_map: "jet_list_para_map" => jet_jit_list_closure_para_map: sig_closure_value_limit;
     list_closure_para_map_i8: "jet_jit_list_closure_para_map_i8" => jet_jit_list_closure_para_map_i8: sig_closure_value_limit;
     list_closure_para_map_i32: "jet_jit_list_closure_para_map_i32" => jet_jit_list_closure_para_map_i32: sig_closure_value_limit;
     list_closure_para_map_f64: "jet_jit_list_closure_para_map_f64" => jet_jit_list_closure_para_map_f64: sig_closure_value_limit;
@@ -5857,10 +9355,12 @@ host_fns! {
     list_closure_map_i32: "jet_jit_list_closure_map_i32" => jet_jit_list_closure_map_i32: sig_closure_value;
     list_closure_map_i32_mut: "jet_jit_list_closure_map_i32_mut" => jet_jit_list_closure_map_i32_mut: sig_closure_value;
     list_closure_map_f64: "jet_jit_list_closure_map_f64" => jet_jit_list_closure_map_f64: sig_closure_value;
+    list_eq_date: "jet_jit_list_eq_date" => jet_jit_list_eq_date: sig_list_eq;
     list_closure_map_f64_mut: "jet_jit_list_closure_map_f64_mut" => jet_jit_list_closure_map_f64_mut: sig_closure_value;
     list_closure_filter: "jet_jit_list_closure_filter" => jet_jit_list_closure_filter: sig_closure_value;
-    list_closure_each: "jet_jit_list_closure_each" => jet_jit_list_closure_each: sig_closure_each;
-    list_closure_each_mut: "jet_jit_list_closure_each_mut" => jet_jit_list_closure_each_mut: sig_closure_each;
+    list_closure_each: "jet_jit_list_closure_each" => jet_jit_list_closure_each: sig_closure_predicate;
+    list_closure_each_mut: "jet_jit_list_closure_each_mut" => jet_jit_list_closure_each_mut: sig_closure_predicate;
+    list_order_date: "jet_jit_list_order_date" => jet_jit_list_order_date: sig_list_eq;
     list_contains_str: "jet_jit_list_contains_str" => jet_jit_list_contains_str: sig_list_eq;
     list_eq: "jet_jit_list_eq" => jet_jit_list_eq: sig_list_eq;
     list_eq_nested: "jet_jit_list_eq_nested" => jet_jit_list_eq_nested: sig_list_eq;
@@ -5875,15 +9375,21 @@ host_fns! {
     list_sort_f64: "jet_jit_list_sort_f64" => jet_jit_list_sort_f64: sig_sort;
     list_sort_f64_desc: "jet_jit_list_sort_f64_desc" => jet_jit_list_sort_f64_desc: sig_sort;
     list_sort_str: "jet_jit_list_sort_str" => jet_jit_list_sort_str: sig_sort;
+    list_sort_fraction: "jet_jit_list_sort_fraction" => jet_jit_list_sort_fraction: sig_sort;
     list_sort_str_desc: "jet_jit_list_sort_str_desc" => jet_jit_list_sort_str_desc: sig_sort;
     list_clone: "jet_jit_list_clone" => jet_jit_list_clone: sig_len;
     list_copy: "jet_jit_list_copy" => jet_jit_list_copy: sig_len;
     list_copy_f64: "jet_jit_list_copy_f64" => jet_jit_list_copy_f64: sig_len;
     list_copy_str: "jet_jit_list_copy_str" => jet_jit_list_copy_str: sig_len;
     list_count: "jet_jit_list_count" => jet_jit_list_count: sig_get_opt;
+    list_count_f64: "jet_jit_list_count_f64" => jet_jit_list_count_f64: sig_get_opt;
+    list_count_str: "jet_jit_list_count_str" => jet_jit_list_count_str: sig_get_opt;
     list_counts: "jet_jit_list_counts" => jet_jit_list_counts: sig_len;
     list_remove_value: "jet_jit_list_remove_value" => jet_jit_list_remove_value: sig_get_opt;
     list_remove_slot: "jet_jit_list_remove_slot" => jet_jit_list_remove_slot: sig_list_remove_slot;
+    list_remove_value_f64: "jet_jit_list_remove_value_f64" => jet_jit_list_remove_value_f64: sig_get_opt;
+    list_remove_value_str: "jet_jit_list_remove_value_str" => jet_jit_list_remove_value_str: sig_get_opt;
+    list_remove_slot_generic: "jet_jit_list_remove_slot_generic" => jet_jit_list_remove_slot_generic: sig_get_opt;
     list_slice: "jet_jit_list_slice" => jet_jit_list_slice: sig_slice;
     list_starts_with: "jet_jit_list_starts_with" => jet_jit_list_starts_with: sig_list_eq;
     list_ends_with: "jet_jit_list_ends_with" => jet_jit_list_ends_with: sig_list_eq;
@@ -5899,15 +9405,22 @@ host_fns! {
     split_write: "jet_jit_split_write" => jet_jit_split_write: sig_disjoint;
     get_disjoint_write: "jet_jit_get_disjoint_write" => jet_jit_get_disjoint_write: sig_disjoint;
     range_contains: "jet_jit_range_contains" => jet_jit_range_contains: sig_range_contains;
+    checked_range_contains: "jet_range_contains" => jet_jit_range_contains_value: sig_list_eq;
+    index_map_set: "jet_index_map_set" => jet_jit_index_map_set: sig_index_map_set;
     range_show: "jet_jit_range_show" => jet_jit_range_show: sig_range_show;
     range_equal: "jet_jit_range_equal" => jet_jit_range_equal: sig_range_equal;
     loop_stride_check: "jet_jit_loop_stride_check" => jet_jit_loop_stride_check: sig_len;
     map_new: "jet_jit_map_new" => jet_jit_map_new: sig_new;
     map_clone: "jet_jit_map_clone" => jet_jit_map_clone: sig_len;
     map_merge: "jet_jit_map_merge" => jet_jit_map_merge: sig_get_opt;
+    map_clear: "jet_jit_map_clear" => jet_jit_map_clear: sig_sort;
+
     map_insert: "jet_jit_map_insert" => jet_jit_map_insert: sig_map_insert;
     map_insert_composite: "jet_jit_map_insert_composite" => jet_jit_map_insert_composite: sig_map_insert_composite;
     map_insert_int: "jet_jit_map_insert_int" => jet_jit_map_insert_int: sig_map_insert;
+    map_add_new: "jet_jit_map_add_new" => jet_jit_map_add_new: sig_map_add_new;
+    map_add_new_composite: "jet_jit_map_add_new_composite" => jet_jit_map_add_new_composite: sig_map_add_new;
+    map_add_new_int: "jet_jit_map_add_new_int" => jet_jit_map_add_new_int: sig_map_add_new;
     map_try_insert: "jet_jit_map_try_insert" => jet_jit_map_try_insert: sig_try_map_insert;
     map_try_insert_int: "jet_jit_map_try_insert_int" => jet_jit_map_try_insert_int: sig_try_map_insert;
     map_increment: "jet_jit_map_increment" => jet_jit_map_increment: sig_push;
@@ -5921,6 +9434,26 @@ host_fns! {
     map_remove_composite: "jet_jit_map_remove_composite" => jet_jit_map_remove_composite: sig_map_get_opt_composite;
     map_remove_int: "jet_jit_map_remove_int" => jet_jit_map_remove_int: sig_map_get_opt;
     map_len: "jet_jit_map_len" => jet_jit_map_len: sig_len;
+    checked_builtin_map_len: "jet_map_len" => jet_jit_map_len: sig_len;
+    checked_builtin_map_is_empty: "jet_map_is_empty" => jet_jit_map_is_empty: sig_bool;
+    checked_builtin_map_get_opt: "jet_map_get_opt" => jet_jit_map_get_opt: sig_map_get_opt;
+    checked_builtin_set_len: "jet_set_len" => jet_jit_set_len: sig_len;
+    checked_builtin_set_is_empty: "jet_set_is_empty" => jet_jit_set_is_empty: sig_bool;
+    checked_builtin_deque_len: "jet_deque_len" => jet_jit_deque_len: sig_len;
+    checked_builtin_deque_is_empty: "jet_deque_is_empty" => jet_jit_deque_is_empty: sig_bool;
+    checked_builtin_bag_len: "jet_bag_len" => jet_jit_bag_len: sig_len;
+    checked_builtin_bag_is_empty: "jet_bag_is_empty" => jet_jit_bag_is_empty: sig_bool;
+    checked_builtin_sorted_set_len: "jet_sorted_set_len" => jet_jit_sorted_set_len: sig_len;
+    checked_builtin_sorted_set_is_empty: "jet_sorted_set_is_empty" => jet_jit_sorted_set_is_empty: sig_bool;
+    checked_builtin_priority_queue_len: "jet_priority_queue_len" => jet_jit_priority_queue_len: sig_len;
+    checked_builtin_priority_queue_is_empty: "jet_priority_queue_is_empty" => jet_jit_priority_queue_is_empty: sig_bool;
+    checked_builtin_lru_len: "jet_lru_len" => jet_jit_lru_len: sig_len;
+    checked_builtin_lru_is_empty: "jet_lru_is_empty" => jet_jit_lru_is_empty: sig_bool;
+    checked_builtin_bit_set_len: "jet_bit_set_len" => jet_jit_bit_set_len: sig_len;
+    checked_builtin_bit_set_is_empty: "jet_bit_set_is_empty" => jet_jit_bit_set_is_empty: sig_bool;
+    checked_builtin_sorted_set_first: "jet_sorted_set_first" => jet_jit_sorted_set_first: sig_len;
+    checked_builtin_sorted_set_last: "jet_sorted_set_last" => jet_jit_sorted_set_last: sig_len;
+    loop_map_init: "jet_jit_loop_map_init" => jet_jit_loop_map_init: sig_view_fold;
     map_key_at: "jet_jit_map_key_at" => jet_jit_map_key_at: sig_map_at;
     map_value_at: "jet_jit_map_value_at" => jet_jit_map_value_at: sig_map_at;
     map_keys: "jet_jit_map_keys" => jet_jit_map_keys: sig_len;
@@ -5928,49 +9461,55 @@ host_fns! {
     map_equal: "jet_jit_map_equal" => jet_jit_map_equal: sig_list_eq;
     map_first: "jet_jit_map_first" => jet_jit_map_first: sig_len;
     map_to_list: "jet_jit_map_to_list" => jet_jit_map_to_list: sig_len;
-    map_top_n: "jet_jit_map_top_n" => jet_jit_map_top_n: sig_get_opt;
-    map_min: "jet_jit_map_min" => jet_jit_map_min: sig_len;
-    map_max: "jet_jit_map_max" => jet_jit_map_max: sig_len;
+    map_top_n: "jet_map_top_n" => jet_jit_map_top_n: sig_get_opt;
+    map_top_n_int: "jet_jit_map_top_n_int" => jet_jit_map_top_n_int: sig_get_opt;
+    map_min: "jet_map_min_value_kernel" => jet_jit_map_min: sig_len;
+    map_min_int: "jet_jit_map_min_int" => jet_jit_map_min_int: sig_len;
+    map_max: "jet_map_max_value_kernel" => jet_jit_map_max: sig_len;
+    map_max_int: "jet_jit_map_max_int" => jet_jit_map_max_int: sig_len;
     map_intersection: "jet_jit_map_intersection" => jet_jit_map_intersection: sig_get_opt;
     map_slice: "jet_jit_map_slice" => jet_jit_map_slice: sig_get_opt;
     map_from_keys: "jet_jit_map_from_keys" => jet_jit_map_from_keys: sig_get_opt;
     map_contains_value: "jet_jit_map_contains_value" => jet_jit_map_contains_value: sig_list_eq;
     map_pop_first: "jet_jit_map_pop_first" => jet_jit_map_pop_first: sig_len;
     iter_first: "jet_jit_iter_first" => jet_jit_iter_first: sig_len;
+    iter_string_split: "jet_iter_string_split" => jet_jit_iter_string_split: sig_get_opt;
     iter_first_string: "jet_jit_iter_first_string" => jet_jit_iter_first_string: sig_len;
     iter_first_float: "jet_jit_iter_first_float" => jet_jit_iter_first_float: sig_len;
-    iter_take: "jet_jit_iter_take" => jet_jit_iter_take: sig_get_opt;
-    iter_skip: "jet_jit_iter_skip" => jet_jit_iter_skip: sig_get_opt;
-    iter_skip_string: "jet_jit_iter_skip_string" => jet_jit_iter_skip_string: sig_get_opt;
-    iter_skip_float: "jet_jit_iter_skip_float" => jet_jit_iter_skip_float: sig_get_opt;
-    iter_step_by: "jet_jit_iter_step_by" => jet_jit_iter_step_by: sig_get_opt;
-    iter_dedup: "jet_jit_iter_dedup" => jet_jit_iter_dedup: sig_get_opt;
-    iter_chunks: "jet_jit_iter_chunks" => jet_jit_iter_chunks: sig_get_opt;
-    iter_windows: "jet_jit_iter_windows" => jet_jit_iter_windows: sig_get_opt;
-    iter_repeat: "jet_jit_iter_repeat" => jet_jit_iter_repeat: sig_get_opt;
-    iter_cycle: "jet_jit_iter_cycle" => jet_jit_iter_cycle: sig_get_opt;
-    iter_drop_last: "jet_jit_iter_drop_last" => jet_jit_iter_drop_last: sig_get_opt;
-    iter_shuffle: "jet_jit_iter_shuffle" => jet_jit_iter_shuffle: sig_len;
-    iter_is_sorted: "jet_jit_iter_is_sorted" => jet_jit_iter_is_sorted: sig_bool;
-    iter_last_index_of: "jet_jit_iter_last_index_of" => jet_jit_iter_last_index_of: sig_get_opt;
-    iter_average_int: "jet_jit_iter_average_int" => jet_jit_iter_average_int: sig_f64;
-    iter_average_float: "jet_jit_iter_average_float" => jet_jit_iter_average_float: sig_f64;
-    iter_compare: "jet_jit_iter_compare" => jet_jit_iter_compare: sig_get_opt;
-    iter_split: "jet_jit_iter_split" => jet_jit_iter_split: sig_get_opt;
+    iter_take: "jet_iter_take" => jet_jit_iter_take: sig_get_opt;
+    iter_skip: "jet_iter_skip" => jet_jit_iter_skip: sig_get_opt;
+    iter_step_by: "jet_iter_step_by" => jet_jit_iter_step_by: sig_get_opt;
+    iter_dedup: "jet_iter_dedup" => jet_jit_iter_dedup: sig_get_opt;
+    iter_chunks: "jet_iter_chunks" => jet_jit_iter_chunks: sig_get_opt;
+    iter_windows: "jet_iter_windows" => jet_jit_iter_windows: sig_get_opt;
+    iter_repeat: "jet_iter_repeat" => jet_jit_iter_repeat: sig_get_opt;
+    iter_cycle: "jet_iter_cycle" => jet_jit_iter_cycle: sig_get_opt;
+    iter_drop_last: "jet_iter_drop_last" => jet_jit_iter_drop_last: sig_get_opt;
+    iter_shuffle: "jet_iter_shuffle" => jet_jit_iter_shuffle: sig_len;
+    iter_is_sorted: "jet_iter_is_sorted" => jet_jit_iter_is_sorted: sig_bool;
+    iter_last_index_of: "jet_iter_last_index_of" => jet_jit_iter_last_index_of: sig_get_opt;
+    iter_average_int: "jet_iter_average_int" => jet_jit_iter_average_int: sig_f64;
+    iter_average_float: "jet_iter_average_float" => jet_jit_iter_average_float: sig_f64;
+    iter_compare: "jet_iter_compare" => jet_jit_iter_compare: sig_get_opt;
+    iter_split: "jet_iter_split" => jet_jit_iter_split: sig_get_opt;
     list_sum_i64: "jet_jit_list_sum_i64" => jet_jit_list_sum_i64: sig_len;
     list_product_i64: "jet_jit_list_product_i64" => jet_jit_list_product_i64: sig_len;
     list_min_i64: "jet_jit_list_min_i64" => jet_jit_list_min_i64: sig_len;
     list_max_i64: "jet_jit_list_max_i64" => jet_jit_list_max_i64: sig_len;
-    list_flatten: "jet_jit_list_flatten" => jet_jit_list_flatten: sig_len;
-    list_intersperse: "jet_jit_list_intersperse" => jet_jit_list_intersperse: sig_get_opt;
-    iter_zip_family: "jet_jit_iter_zip_family" => jet_jit_iter_zip_family: sig_zip_family;
+    list_flatten: "jet_list_flatten" => jet_jit_list_flatten: sig_len;
+    iter_flatten: "jet_iter_flatten" => jet_jit_list_flatten: sig_len;
+    iter_intersperse: "jet_iter_intersperse" => jet_jit_list_intersperse: sig_get_opt;
+    iter_zip_family: "jet_iter_zip_family" => jet_jit_iter_zip_family: sig_zip_family;
     list_unzip: "jet_jit_list_unzip" => jet_jit_list_unzip: sig_three_ret;
     list_sort_by_i64_keys: "jet_jit_list_sort_by_i64_keys" => jet_jit_list_sort_by_i64_keys: sig_sort_by_keys;
     list_sort_by_i64_keys_desc: "jet_jit_list_sort_by_i64_keys_desc" => jet_jit_list_sort_by_i64_keys_desc: sig_sort_by_keys;
     list_sort_by_str_keys: "jet_jit_list_sort_by_str_keys" => jet_jit_list_sort_by_str_keys: sig_sort_by_keys;
     list_sort_by_str_keys_desc: "jet_jit_list_sort_by_str_keys_desc" => jet_jit_list_sort_by_str_keys_desc: sig_sort_by_keys;
+    list_sort_by_compare: "jet_list_sort_by_compare" => jet_jit_list_sort_by_compare: sig_sort_by_compare;
+    io_error_show: "jet_jit_io_error_show" => jet_jit_io_error_show: sig_len;
     print_enum: "jet_jit_print_enum" => jet_jit_print_enum: sig_print_enum;
     list_debug: "jet_jit_list_debug" => jet_jit_list_debug: sig_get_opt;
+    list_display: "jet_jit_list_display" => jet_jit_list_display: sig_get_opt;
     string_debug: "jet_jit_string_debug" => jet_jit_string_debug: sig_len;
     scalar_debug: "jet_jit_scalar_debug" => jet_jit_scalar_debug: sig_scalar_debug;
     enum_show: "jet_jit_enum_show" => jet_jit_enum_show: sig_enum_show;
@@ -5980,6 +9519,7 @@ host_fns! {
     str_push_debug_variant: "jet_jit_str_push_debug_variant" => jet_jit_str_push_debug_variant: sig_debug_variant;
     list_pop: "jet_jit_list_pop" => jet_jit_list_pop: sig_len;
     list_insert: "jet_jit_list_insert" => jet_jit_list_insert: sig_map_insert;
+    list_insert_f64: "jet_jit_list_insert_f64" => jet_jit_list_insert_f64: sig_list_insert_f64;
     set_from_list: "jet_jit_set_from_list" => jet_jit_set_from_list: sig_set_from;
     set_new: "jet_jit_set_new" => jet_jit_set_new: sig_sorted_set_new;
     set_insert: "jet_jit_set_insert" => jet_jit_set_insert: sig_list_eq;

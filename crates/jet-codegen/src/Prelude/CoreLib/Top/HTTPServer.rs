@@ -14,6 +14,8 @@ struct JetHTTPMuxRoute {
     method: String,
     pattern: String,
     handler: JetHTTPHandler,
+    /// Checked endpoint contract carried through registration for inspection.
+    contract_json: String,
 }
 #[derive(Clone)]
 struct JetHTTPMuxRouteCacheEntry {
@@ -719,17 +721,29 @@ impl JetHTTPMux {
             method: method.to_string(),
             pattern: pattern.to_string(),
             handler: std::sync::Arc::new(f) as JetHTTPHandler,
+            contract_json: String::new(),
         });
         *cached = None;
     }
 
     fn add_handler(&self, method: &str, pattern: &str, handler: JetHTTPHandler) {
+        self.add_handler_with_contract(method, pattern, handler, String::new());
+    }
+
+    fn add_handler_with_contract(
+        &self,
+        method: &str,
+        pattern: &str,
+        handler: JetHTTPHandler,
+        contract_json: String,
+    ) {
         let mut cached = self.2.lock().unwrap();
         let mut routes = self.0.lock().unwrap();
         routes.push(JetHTTPMuxRoute {
             method: method.to_string(),
             pattern: pattern.to_string(),
             handler,
+            contract_json,
         });
         *cached = None;
     }
@@ -772,6 +786,420 @@ fn jet_http_mux_add_zero_handler(
 ) {
     mux.add_handler(method, pattern, std::sync::Arc::new(move |_| handler()));
 }
+fn jet_http_route_query_param(req: &JetHTTPRequest, name: &str) -> Result<Option<String>, ()> {
+    let Some(query) = req.path.split_once('?').map(|(_, query)| query) else {
+        return Ok(None);
+    };
+    for pair in query.split('&') {
+        let (raw_key, raw_value) = pair.split_once('=').unwrap_or((pair, ""));
+        let key = raw_key.replace('+', " ");
+        let key = jet_http_route_decode_path_segment(&key).map_err(|_| ())?.into_owned();
+        if key != name {
+            continue;
+        }
+        let value = raw_value.replace('+', " ");
+        return Ok(Some(
+            jet_http_route_decode_path_segment(&value)
+                .map_err(|_| ())?
+                .into_owned(),
+        ));
+    }
+    Ok(None)
+}
+fn jet_http_route_raw(req: &JetHTTPRequest, name: &str) -> Result<Option<String>, ()> {
+    if let Some(value) = req.params.get(name) {
+        return Ok(Some(value.clone()));
+    }
+    jet_http_route_query_param(req, name)
+}
+fn jet_http_route_param<T: __jet_Decode>(
+    req: &JetHTTPRequest,
+    name: &str,
+) -> Result<Option<T>, ()> {
+    let Some(raw) = jet_http_route_raw(req, name)? else {
+        return Ok(None);
+    };
+    let text = jet_std::DataTree::Text(raw.clone());
+    if let Ok(value) = T::jet_decode(&text) {
+        return Ok(Some(value));
+    }
+    let tree = jet_std::parse_json_typed_datatree(&raw).map_err(|_| ())?;
+    T::jet_decode(&tree).map(Some).map_err(|_| ())
+}
+
+fn jet_http_route_optional<T: __jet_Decode>(
+    req: &JetHTTPRequest,
+    name: &str,
+) -> Result<T, ()> {
+    let Some(raw) = jet_http_route_raw(req, name)? else {
+        return T::jet_decode(&jet_std::DataTree::Null).map_err(|_| ());
+    };
+    let text = jet_std::DataTree::Text(raw.clone());
+    if let Ok(value) = T::jet_decode(&text) {
+        return Ok(value);
+    }
+    let tree = jet_std::parse_json_typed_datatree(&raw).map_err(|_| ())?;
+    T::jet_decode(&tree).map_err(|_| ())
+}
+
+fn jet_http_contract_object(value: &jet_std::DataTree) -> Option<&[(String, jet_std::DataTree)]> {
+    match value {
+        jet_std::DataTree::Object(entries) => Some(entries.as_slice()),
+        _ => None,
+    }
+}
+
+fn jet_http_contract_field<'a>(
+    object: &'a [(String, jet_std::DataTree)],
+    name: &str,
+) -> Option<&'a jet_std::DataTree> {
+    object
+        .iter()
+        .find_map(|(field, value)| (field == name).then_some(value))
+}
+
+fn jet_http_contract_text<'a>(
+    object: &'a [(String, jet_std::DataTree)],
+    name: &str,
+) -> Option<&'a str> {
+    match jet_http_contract_field(object, name)? {
+        jet_std::DataTree::Text(value) | jet_std::DataTree::TypedText(value) => Some(value),
+        _ => None,
+    }
+}
+
+pub(crate) fn jet_http_route_schema_matches(
+    value: &jet_std::DataTree,
+    schema: &jet_std::DataTree,
+) -> bool {
+    let Some(schema_object) = jet_http_contract_object(schema) else {
+        return false;
+    };
+    if let Some(any_of) = jet_http_contract_field(schema_object, "anyOf") {
+        let jet_std::DataTree::Array(items) = any_of else {
+            return false;
+        };
+        return items
+            .iter()
+            .any(|candidate| jet_http_route_schema_matches(value, candidate));
+    }
+    if let Some(one_of) = jet_http_contract_field(schema_object, "oneOf") {
+        let jet_std::DataTree::Array(items) = one_of else {
+            return false;
+        };
+        return items
+            .iter()
+            .filter(|candidate| jet_http_route_schema_matches(value, candidate))
+            .count()
+            == 1;
+    }
+    let Some(kind) = jet_http_contract_text(schema_object, "type") else {
+        return true;
+    };
+    match kind {
+        "null" => matches!(value, jet_std::DataTree::Null),
+        "boolean" => matches!(value, jet_std::DataTree::Bool(_)),
+        "integer" => match value {
+            jet_std::DataTree::Int(_) => true,
+            jet_std::DataTree::Number(number) => number.parse::<i64>().is_ok(),
+            _ => false,
+        },
+        "number" => matches!(
+            value,
+            jet_std::DataTree::Int(_)
+                | jet_std::DataTree::Float(_)
+                | jet_std::DataTree::Number(_)
+        ),
+        "string" => matches!(
+            value,
+            jet_std::DataTree::Text(_) | jet_std::DataTree::TypedText(_)
+        ),
+        "array" => {
+            let jet_std::DataTree::Array(items) = value else {
+                return false;
+            };
+            let Some(item_schema) = jet_http_contract_field(schema_object, "items") else {
+                return false;
+            };
+            items
+                .iter()
+                .all(|item| jet_http_route_schema_matches(item, item_schema))
+        }
+        "object" => {
+            let jet_std::DataTree::Object(fields) = value else {
+                return false;
+            };
+            let Some(properties) = jet_http_contract_field(schema_object, "properties")
+                .and_then(jet_http_contract_object)
+            else {
+                return false;
+            };
+            let additional_properties = match jet_http_contract_field(
+                schema_object,
+                "additionalProperties",
+            ) {
+                Some(jet_std::DataTree::Bool(value)) => *value,
+                None => true,
+                _ => false,
+            };
+            let required = match jet_http_contract_field(schema_object, "required") {
+                None => Vec::new(),
+                Some(jet_std::DataTree::Array(names)) => names
+                    .iter()
+                    .filter_map(|name| match name {
+                        jet_std::DataTree::Text(name)
+                        | jet_std::DataTree::TypedText(name) => Some(name.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>(),
+                Some(_) => return false,
+            };
+            if required
+                .iter()
+                .any(|name| !fields.iter().any(|(field, _)| field == *name))
+            {
+                return false;
+            }
+            fields.iter().all(|(name, field_value)| {
+                let Some((_, field_schema)) =
+                    properties.iter().find(|(property, _)| property == name)
+                else {
+                    return additional_properties;
+                };
+                jet_http_route_schema_matches(field_value, field_schema)
+            })
+        }
+        _ => false,
+    }
+}
+
+fn jet_http_route_validate_body(
+    mut request: JetHTTPRequest,
+    contract_json: &str,
+) -> Result<JetHTTPRequest, ()> {
+    let contract = jet_std::parse_json_strict(contract_json).map_err(|_| ())?;
+    let contract_object = jet_http_contract_object(&contract).ok_or(())?;
+    let request_body = jet_http_contract_field(contract_object, "request_body").ok_or(())?;
+    let request_body_object = match request_body {
+        jet_std::DataTree::Null => return Ok(request),
+        value => jet_http_contract_object(value).ok_or(())?,
+    };
+    let required = match jet_http_contract_field(request_body_object, "required") {
+        Some(jet_std::DataTree::Bool(value)) => *value,
+        _ => return Err(()),
+    };
+    let schema = jet_http_contract_field(request_body_object, "schema").ok_or(())?;
+    let content_type = request.body.content_type();
+    let bytes = request
+        .body
+        .bytes(jet_http_default_body_limit() as usize)
+        .map_err(|_| ())?;
+    if bytes.is_empty() && !required {
+        request.body = JetHTTPBody::from_bytes_with_content_type(bytes, content_type);
+        return Ok(request);
+    }
+    let text = String::from_utf8(bytes.clone()).map_err(|_| ())?;
+    let value = jet_std::parse_json_typed_datatree(&text).map_err(|_| ())?;
+    if !jet_http_route_schema_matches(&value, schema) {
+        return Err(());
+    }
+    request.body = JetHTTPBody::from_bytes_with_content_type(bytes, content_type);
+    Ok(request)
+}
+
+fn jet_http_require_route_contract(
+    method: &str,
+    pattern: &str,
+    contract_json: &str,
+    file: &str,
+    line: u32,
+    allow_empty_responses: bool,
+) {
+    if contract_json.trim().is_empty() {
+        jet_panic(
+            file,
+            line,
+            &format!(
+                "E2805: route `{} {}` has no checked endpoint contract",
+                method, pattern
+            ),
+        );
+    }
+    let contract = match jet_std::parse_json_strict(contract_json) {
+        Ok(contract) => contract,
+        Err(_) => jet_panic(
+            file,
+            line,
+            &format!(
+                "E2805: route `{} {}` has an invalid checked endpoint contract",
+                method, pattern
+            ),
+        ),
+    };
+    let Some(contract_object) = jet_http_contract_object(&contract) else {
+        jet_panic(
+            file,
+            line,
+            &format!(
+                "E2805: route `{} {}` has a non-object endpoint contract",
+                method, pattern
+            ),
+        );
+    };
+    let required_fields = [
+        "method",
+        "pattern",
+        "path",
+        "operation_id",
+        "summary",
+        "parameters",
+        "request_body",
+        "responses",
+        "security",
+        "provenance",
+    ];
+    if required_fields
+        .iter()
+        .any(|field| jet_http_contract_field(contract_object, field).is_none())
+    {
+        jet_panic(
+            file,
+            line,
+            &format!(
+                "E2805: route `{} {}` has an incomplete endpoint contract",
+                method, pattern
+            ),
+        );
+    }
+    if jet_http_contract_text(contract_object, "method") != Some(method)
+        || jet_http_contract_text(contract_object, "pattern") != Some(pattern)
+    {
+        jet_panic(
+            file,
+            line,
+            &format!(
+                "E2805: route `{} {}` does not match its endpoint contract",
+                method, pattern
+            ),
+        );
+    }
+    let Some(jet_std::DataTree::Array(responses)) =
+        jet_http_contract_field(contract_object, "responses")
+    else {
+        jet_panic(
+            file,
+            line,
+            &format!(
+                "E2805: route `{} {}` has invalid endpoint responses",
+                method, pattern
+            ),
+        );
+    };
+    if responses.is_empty() && !allow_empty_responses {
+        jet_panic(
+            file,
+            line,
+            &format!(
+                "E2805: route `{} {}` has no endpoint responses",
+                method, pattern
+            ),
+        );
+    }
+    let Some(jet_std::DataTree::Array(_)) =
+        jet_http_contract_field(contract_object, "parameters")
+    else {
+        jet_panic(
+            file,
+            line,
+            &format!(
+                "E2805: route `{} {}` has invalid endpoint parameters",
+                method, pattern
+            ),
+        );
+    };
+    let Some(jet_std::DataTree::Array(_)) =
+        jet_http_contract_field(contract_object, "security")
+    else {
+        jet_panic(
+            file,
+            line,
+            &format!(
+                "E2805: route `{} {}` has invalid endpoint security policy",
+                method, pattern
+            ),
+        );
+    };
+    match jet_http_contract_field(contract_object, "request_body") {
+        Some(jet_std::DataTree::Null) => {}
+        Some(jet_std::DataTree::Object(body)) => {
+            let valid_required = matches!(
+                jet_http_contract_field(body, "required"),
+                Some(jet_std::DataTree::Bool(_))
+            );
+            let valid_content_type = jet_http_contract_text(body, "content_type")
+                .is_some_and(|value| !value.is_empty());
+            let valid_schema = jet_http_contract_field(body, "schema")
+                .is_some_and(|schema| jet_http_contract_object(schema).is_some());
+            if !(valid_required && valid_content_type && valid_schema) {
+                jet_panic(
+                    file,
+                    line,
+                    &format!(
+                        "E2805: route `{} {}` has an invalid endpoint request body",
+                        method, pattern
+                    ),
+                );
+            }
+        }
+        Some(_) | None => jet_panic(
+            file,
+            line,
+            &format!(
+                "E2805: route `{} {}` has an invalid endpoint request body",
+                method, pattern
+            ),
+        ),
+    }
+}
+
+fn jet_http_mux_register(
+    mux: &JetHTTPMux,
+    method: String,
+    pattern: String,
+    handler: JetHTTPHandler,
+    file: &str,
+    line: u32,
+    contract_json: String,
+) {
+    jet_http_require_route_contract(&method, &pattern, &contract_json, file, line, true);
+    let segments = match jet_http_router_parse_pattern(&pattern) {
+        Ok(segments) => segments,
+        Err(message) => jet_panic(file, line, &message),
+    };
+    let shape = jet_http_route_shape(&JetHTTPRoutePattern {
+        segments: segments.clone(),
+    });
+    let duplicate = mux
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|route| route.method == method)
+        .filter_map(|route| {
+            let existing = jet_http_router_parse_pattern(&route.pattern).ok()?;
+            Some(jet_http_route_shape(&JetHTTPRoutePattern { segments: existing }))
+        })
+        .any(|existing| existing == shape);
+    if duplicate {
+        jet_panic(
+            file,
+            line,
+            &format!("E2804: duplicate route `{} {}`", method, pattern),
+        );
+    }
+    mux.add_handler_with_contract(&method, &pattern, handler, contract_json);
+}
+
 
 fn jet_http_srv_response(status: i64, body: &String) -> JetHTTPResponse {
     jet_http_srv_response_owned(status, body.clone())
@@ -800,6 +1228,584 @@ fn jet_http_srv_response_owned(status: i64, body: String) -> JetHTTPResponse {
     }
 }
 
+const JET_ERROR_PAGE_MAX_ID_BYTES: usize = 128;
+const JET_ERROR_PAGE_MAX_MESSAGE_BYTES: usize = 2048;
+const JET_ERROR_PAGE_MAX_SOURCE_BYTES: usize = 512;
+const JET_ERROR_PAGE_MAX_CONTEXT: usize = 16;
+const JET_ERROR_PAGE_MAX_CONTEXT_BYTES: usize = 4096;
+const JET_ERROR_PAGE_MAX_LINKS: usize = 8;
+const JET_ERROR_PAGE_MAX_LINK_BYTES: usize = 512;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct JetErrorPageSourceFrame {
+    fn_name: String,
+    file: String,
+    line: u32,
+    note: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct JetErrorPageContext {
+    text: String,
+    file: String,
+    line: u32,
+}
+
+/// One normalized `jet.err/v1` report projected for a service boundary. The
+/// projection owns both view-independent facts and the policy that decides
+/// whether local source context is allowed to leave the process.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct JetErrorPageProjection {
+    status: i64,
+    failure_id: String,
+    request_id: String,
+    message: String,
+    code: Option<String>,
+    source_frame: Option<JetErrorPageSourceFrame>,
+    context: Vec<JetErrorPageContext>,
+    correlation_links: Vec<String>,
+}
+
+fn jet_error_page_status(status: i64) -> i64 {
+    if (100..=599).contains(&status) { status } else { 500 }
+}
+
+fn jet_error_page_bounded(value: &str, limit: usize) -> String {
+    let mut output = String::new();
+    for character in value.chars() {
+        let character = if character.is_control() || character == '\u{7f}' {
+            ' '
+        } else {
+            character
+        };
+        if output.len().saturating_add(character.len_utf8()) > limit {
+            break;
+        }
+        output.push(character);
+    }
+    output.trim().to_string()
+}
+
+fn jet_error_page_sensitive(value: &str) -> bool {
+    const MARKERS: &[&str] = &[
+        "authorization",
+        "proxy-authorization",
+        "set-cookie",
+        "cookie",
+        "password",
+        "passwd",
+        "secret",
+        "token",
+        "api_key",
+        "api-key",
+        "apikey",
+        "private_key",
+        "private-key",
+        "credential",
+        "session",
+        "jwt",
+        "bearer",
+        "access_key",
+        "access-key",
+        "refresh_token",
+        "refresh-token",
+        "client_secret",
+        "client-secret",
+        "signature",
+        "unpublished",
+    ];
+    let lower = value.to_ascii_lowercase();
+    MARKERS.iter().any(|marker| lower.contains(marker))
+}
+
+fn jet_error_page_safe_text(value: &str, limit: usize) -> String {
+    if jet_error_page_sensitive(value) {
+        "[redacted]".to_string()
+    } else {
+        jet_error_page_bounded(value, limit)
+    }
+}
+
+fn jet_error_page_identifier(value: &str, fallback: &str) -> String {
+    let value = value.trim();
+    if value.is_empty()
+        || value.len() > JET_ERROR_PAGE_MAX_ID_BYTES
+        || jet_error_page_sensitive(value)
+        || value
+            .bytes()
+            .any(|byte| !byte.is_ascii_graphic() || matches!(byte, b'"' | b'\\'))
+    {
+        fallback.to_string()
+    } else {
+        value.to_string()
+    }
+}
+
+fn jet_error_page_failure_id(
+    supplied: &str,
+    status: i64,
+    report: &JetErrorReport,
+) -> String {
+    let supplied = jet_error_page_identifier(supplied, "");
+    if !supplied.is_empty() {
+        return supplied;
+    }
+    let canonical = report.to_json();
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in status
+        .to_le_bytes()
+        .into_iter()
+        .chain(canonical.bytes())
+    {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("fail-{hash:016x}")
+}
+
+fn jet_error_page_source(report: &JetErrorReport) -> Option<JetErrorPageSourceFrame> {
+    report
+        .source_journey
+        .first()
+        .map(|frame| JetErrorPageSourceFrame {
+            fn_name: jet_error_page_safe_text(&frame.fn_name, JET_ERROR_PAGE_MAX_SOURCE_BYTES),
+            file: jet_error_page_bounded(&frame.file, JET_ERROR_PAGE_MAX_SOURCE_BYTES),
+            line: frame.line,
+            note: jet_error_page_safe_text(&frame.note, JET_ERROR_PAGE_MAX_MESSAGE_BYTES),
+        })
+        .or_else(|| {
+            report
+                .context_frames
+                .first()
+                .map(|frame| JetErrorPageSourceFrame {
+                    fn_name: String::new(),
+                    file: jet_error_page_bounded(&frame.file, JET_ERROR_PAGE_MAX_SOURCE_BYTES),
+                    line: frame.line,
+                    note: jet_error_page_safe_text(
+                        &frame.text,
+                        JET_ERROR_PAGE_MAX_MESSAGE_BYTES,
+                    ),
+                })
+        })
+}
+
+fn jet_error_page_context(report: &JetErrorReport) -> Vec<JetErrorPageContext> {
+    let mut context = Vec::new();
+    let mut bytes = 0usize;
+    for frame in report.context_frames.iter().take(JET_ERROR_PAGE_MAX_CONTEXT) {
+        let text = jet_error_page_safe_text(&frame.text, JET_ERROR_PAGE_MAX_MESSAGE_BYTES);
+        let file = jet_error_page_bounded(&frame.file, JET_ERROR_PAGE_MAX_SOURCE_BYTES);
+        let item_bytes = text.len().saturating_add(file.len()).saturating_add(16);
+        if bytes.saturating_add(item_bytes) > JET_ERROR_PAGE_MAX_CONTEXT_BYTES {
+            break;
+        }
+        bytes = bytes.saturating_add(item_bytes);
+        context.push(JetErrorPageContext {
+            text,
+            file,
+            line: frame.line,
+        });
+    }
+    context
+}
+
+fn jet_error_page_link(value: &str) -> Option<String> {
+    if value.chars().any(char::is_control) || jet_error_page_sensitive(value) {
+        return None;
+    }
+    let link = jet_error_page_bounded(value, JET_ERROR_PAGE_MAX_LINK_BYTES);
+    let lower = link.to_ascii_lowercase();
+    if link.is_empty()
+        || lower.starts_with("javascript:")
+        || lower.starts_with("data:")
+        || lower.starts_with("vbscript:")
+        || lower.starts_with("file:")
+        || !(link.starts_with('/')
+            || lower.starts_with("http://")
+            || lower.starts_with("https://")
+            || lower.starts_with("jet://"))
+    {
+        None
+    } else {
+        Some(link)
+    }
+}
+
+fn jet_error_page_json_quote(value: &str) -> String {
+    let mut output = String::with_capacity(value.len().saturating_add(2));
+    output.push('"');
+    for character in value.chars() {
+        match character {
+            '\\' => output.push_str("\\\\"),
+            '"' => output.push_str("\\\""),
+            '\n' => output.push_str("\\n"),
+            '\r' => output.push_str("\\r"),
+            '\t' => output.push_str("\\t"),
+            character if character.is_control() => {
+                output.push_str(&format!("\\u{:04x}", character as u32));
+            }
+            character => output.push(character),
+        }
+    }
+    output.push('"');
+    output
+}
+
+fn jet_error_page_html_escape(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '&' => output.push_str("&amp;"),
+            '<' => output.push_str("&lt;"),
+            '>' => output.push_str("&gt;"),
+            '"' => output.push_str("&quot;"),
+            '\'' => output.push_str("&#39;"),
+            character => output.push(character),
+        }
+    }
+    output
+}
+
+fn jet_error_page_status_text(status: i64) -> &'static str {
+    match status {
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        405 => "Method Not Allowed",
+        408 => "Request Timeout",
+        409 => "Conflict",
+        413 => "Payload Too Large",
+        415 => "Unsupported Media Type",
+        422 => "Unprocessable Content",
+        429 => "Too Many Requests",
+        500 => "Internal Server Error",
+        501 => "Not Implemented",
+        502 => "Bad Gateway",
+        503 => "Service Unavailable",
+        504 => "Gateway Timeout",
+        _ if (400..=499).contains(&status) => "Client Error",
+        _ if (500..=599).contains(&status) => "Server Error",
+        _ => "HTTP Error",
+    }
+}
+
+impl JetErrorPageProjection {
+    fn json(&self) -> String {
+        let code = self
+            .code
+            .as_deref()
+            .map(jet_error_page_json_quote)
+            .unwrap_or_else(|| "null".to_string());
+        let source_frame = self
+            .source_frame
+            .as_ref()
+            .map(|frame| {
+                format!(
+                    "{{\"fn_name\":{},\"file\":{},\"line\":{},\"note\":{}}}",
+                    jet_error_page_json_quote(&frame.fn_name),
+                    jet_error_page_json_quote(&frame.file),
+                    frame.line,
+                    jet_error_page_json_quote(&frame.note)
+                )
+            })
+            .unwrap_or_else(|| "null".to_string());
+        let context = self
+            .context
+            .iter()
+            .map(|frame| {
+                format!(
+                    "{{\"text\":{},\"file\":{},\"line\":{}}}",
+                    jet_error_page_json_quote(&frame.text),
+                    jet_error_page_json_quote(&frame.file),
+                    frame.line
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let links = self
+            .correlation_links
+            .iter()
+            .map(|link| jet_error_page_json_quote(link))
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{{\"schema\":\"jet.err/v1\",\"status\":{},\"failure_id\":{},\
+\"request_id\":{},\"message\":{},\"code\":{},\"source_frame\":{},\
+\"context\":[{}],\"correlation_links\":[{}]}}",
+            self.status,
+            jet_error_page_json_quote(&self.failure_id),
+            jet_error_page_json_quote(&self.request_id),
+            jet_error_page_json_quote(&self.message),
+            code,
+            source_frame,
+            context,
+            links
+        )
+    }
+
+    fn html(&self) -> String {
+        let status = format!(
+            "{} {}",
+            self.status,
+            jet_error_page_html_escape(jet_error_page_status_text(self.status))
+        );
+        let mut html = String::from(
+            "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\
+<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
+<title>",
+        );
+        html.push_str(&status);
+        html.push_str(
+            "</title><style>body{background:#101418;color:#e8edf2;font:16px/1.5 system-ui,sans-serif;margin:0}\
+main{box-sizing:border-box;margin:0 auto;max-width:860px;padding:48px 24px}\
+h1{font-size:2rem;margin:0 0 24px}h2{font-size:1rem;margin:28px 0 8px}\
+dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 18px;margin:0}\
+dt{color:#9aa8b5}dd{margin:0;overflow-wrap:anywhere}code{font-family:ui-monospace,monospace}\
+pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0}a{color:#8bc8ff}\
+.kind{color:#ffb454;text-transform:uppercase;letter-spacing:.08em;font-size:.75rem}</style>\
+</head><body><main><div class=\"kind\">Jet service failure</div><h1>",
+        );
+        html.push_str(&status);
+        html.push_str("</h1><dl><dt>Request ID</dt><dd><code>");
+        html.push_str(&jet_error_page_html_escape(&self.request_id));
+        html.push_str("</code></dd><dt>Failure ID</dt><dd><code>");
+        html.push_str(&jet_error_page_html_escape(&self.failure_id));
+        html.push_str("</code></dd></dl><h2>Message</h2><p>");
+        html.push_str(&jet_error_page_html_escape(&self.message));
+        html.push_str("</p>");
+        if let Some(code) = &self.code {
+            html.push_str("<p><strong>Code:</strong> <code>");
+            html.push_str(&jet_error_page_html_escape(code));
+            html.push_str("</code></p>");
+        }
+        if let Some(frame) = &self.source_frame {
+            html.push_str("<h2>Source frame</h2><p><code>");
+            if !frame.fn_name.is_empty() {
+                html.push_str(&jet_error_page_html_escape(&frame.fn_name));
+                html.push_str(" (");
+            }
+            html.push_str(&jet_error_page_html_escape(&frame.file));
+            html.push(':');
+            html.push_str(&frame.line.to_string());
+            if !frame.fn_name.is_empty() {
+                html.push(')');
+            }
+            html.push_str("</code>");
+            if !frame.note.is_empty() {
+                html.push_str(" — ");
+                html.push_str(&jet_error_page_html_escape(&frame.note));
+            }
+            html.push_str("</p>");
+        }
+        if !self.context.is_empty() {
+            html.push_str("<h2>Context</h2><ul>");
+            for frame in &self.context {
+                html.push_str("<li><code>");
+                html.push_str(&jet_error_page_html_escape(&frame.file));
+                html.push(':');
+                html.push_str(&frame.line.to_string());
+                html.push_str("</code> ");
+                html.push_str(&jet_error_page_html_escape(&frame.text));
+                html.push_str("</li>");
+            }
+            html.push_str("</ul>");
+        }
+        if !self.correlation_links.is_empty() {
+            html.push_str("<h2>Correlation</h2><ul>");
+            for link in &self.correlation_links {
+                let escaped = jet_error_page_html_escape(link);
+                html.push_str("<li><a href=\"");
+                html.push_str(&escaped);
+                html.push_str("\">");
+                html.push_str(&escaped);
+                html.push_str("</a></li>");
+            }
+            html.push_str("</ul>");
+        }
+        html.push_str("</main></body></html>");
+        html
+    }
+}
+
+/// Build the one service error projection. `local` is a server-side trust
+/// decision; release builds and non-local callers always receive the bounded
+/// generic view, even when a caller accidentally asks for local details.
+fn jet_error_page_projection(
+    status: i64,
+    failure_id: &str,
+    request_id: &str,
+    report: &JetErrorReport,
+    correlation_links: &[String],
+    local: bool,
+) -> JetErrorPageProjection {
+    let status = jet_error_page_status(status);
+    let failure_id = jet_error_page_failure_id(failure_id, status, report);
+    let request_id = jet_error_page_identifier(request_id, "request-unknown");
+    let local = local && cfg!(debug_assertions);
+    let (message, code, source_frame, context, correlation_links) = if local {
+        let message = {
+            let message = jet_error_page_safe_text(
+                &report.message,
+                JET_ERROR_PAGE_MAX_MESSAGE_BYTES,
+            );
+            if message.is_empty() {
+                jet_error_page_status_text(status).to_string()
+            } else {
+                message
+            }
+        };
+        let code = report
+            .code
+            .as_deref()
+            .map(|code| jet_error_page_identifier(code, "ERR"));
+        let links = correlation_links
+            .iter()
+            .take(JET_ERROR_PAGE_MAX_LINKS)
+            .filter_map(|link| jet_error_page_link(link))
+            .collect();
+        (
+            message,
+            code,
+            jet_error_page_source(report),
+            jet_error_page_context(report),
+            links,
+        )
+    } else {
+        (
+            jet_error_page_status_text(status).to_string(),
+            None,
+            None,
+            Vec::new(),
+            Vec::new(),
+        )
+    };
+    JetErrorPageProjection {
+        status,
+        failure_id,
+        request_id,
+        message,
+        code,
+        source_frame,
+        context,
+        correlation_links,
+    }
+}
+
+fn jet_http_accept_quality(value: &str) -> u16 {
+    let value = value.trim();
+    if value == "1" {
+        return 1000;
+    }
+    if let Some(fraction) = value.strip_prefix("1.") {
+        return if !fraction.is_empty() && fraction.bytes().all(|byte| byte == b'0') {
+            1000
+        } else {
+            0
+        };
+    }
+    let Some(fraction) = value.strip_prefix("0.") else {
+        return 0;
+    };
+    if fraction.is_empty() || fraction.len() > 3 || !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
+        return 0;
+    }
+    let mut quality = 0u16;
+    for byte in fraction.bytes() {
+        quality = quality.saturating_mul(10).saturating_add(u16::from(byte - b'0'));
+    }
+    quality * match fraction.len() {
+        1 => 100,
+        2 => 10,
+        _ => 1,
+    }
+}
+
+/// Select one representation from the request's Accept list. Explicit media
+/// types outrank wildcards; equal-quality explicit types keep client order.
+fn jet_http_error_page_accepts_json(accept: Option<&String>) -> bool {
+    let Some(accept) = accept else {
+        return false;
+    };
+    let mut found = false;
+    let mut best_quality = 0u16;
+    let mut best_specificity = 0u8;
+    let mut best_json = false;
+    for item in accept.split(',') {
+        let mut parameters = item.split(';');
+        let media = parameters.next().unwrap_or("").trim().to_ascii_lowercase();
+        let mut quality = 1000u16;
+        for parameter in parameters {
+            let Some((name, value)) = parameter.trim().split_once('=') else {
+                continue;
+            };
+            if name.trim().eq_ignore_ascii_case("q") {
+                quality = jet_http_accept_quality(value);
+            }
+        }
+        if quality == 0 {
+            continue;
+        }
+        let (supported, specificity, is_json) = match media.as_str() {
+            "application/json" => (true, 2, true),
+            "text/html" => (true, 2, false),
+            "application/*" => (true, 1, true),
+            "text/*" => (true, 1, false),
+            "*/*" => (true, 0, false),
+            _ => (false, 0, false),
+        };
+        if !supported {
+            continue;
+        }
+        if !found || quality > best_quality || (quality == best_quality && specificity > best_specificity) {
+            found = true;
+            best_quality = quality;
+            best_specificity = specificity;
+            best_json = is_json;
+        }
+    }
+    found && best_json
+}
+
+/// Negotiate and render one service failure. The caller supplies the
+/// normalized `JetErrorReport`; both media types are rendered from the same
+/// bounded projection, and request metadata is copied into either response.
+fn jet_http_error_page_response(
+    request: &JetHTTPRequest,
+    status: i64,
+    failure_id: &str,
+    report: &JetErrorReport,
+    correlation_links: &[String],
+    local: bool,
+) -> JetHTTPResponse {
+    let request_id = match request.headers.get("x-request-id") {
+        Some(value) if jet_http_request_id_valid(value) => value.clone(),
+        _ => jet_http_new_request_id(),
+    };
+    jet_http_devtools_publish_exception_report(&request_id, report);
+    let projection = jet_error_page_projection(
+        status,
+        failure_id,
+        &request_id,
+        report,
+        correlation_links,
+        local,
+    );
+    let wants_json = jet_http_error_page_accepts_json(request.headers.get("accept"));
+    let (body, content_type) = if wants_json {
+        (projection.json(), "application/json; charset=utf-8")
+    } else {
+        (projection.html(), "text/html; charset=utf-8")
+    };
+    let mut response = jet_http_srv_response_owned(projection.status, body);
+    let _ = response.headers.set("content-type", content_type);
+    let _ = response.headers.set("cache-control", "no-store");
+    let _ = response.headers.set("vary", "Accept");
+    let _ = response.headers.set("x-request-id", &projection.request_id);
+    response
+}
+
+
 fn jet_http_srv_response_with_headers(
     status: i64,
     body: &str,
@@ -827,7 +1833,16 @@ fn jet_http_srv_response_body(resp: &JetHTTPResponse) -> JetHTTPBody {
     resp.body.clone()
 }
 
-fn jet_http_mux_serve(addr: &String, mux: JetHTTPMux) -> Result<(), String> {
+fn jet_http_mux_serve(
+    addr: &String,
+    mux: JetHTTPMux,
+    tls: Option<JetHTTPServerTls>,
+    deadline: Option<jet_std::Duration>,
+) -> Result<(), String> {
+    if tls.is_some() {
+        return Err("TLS server requires the native TLS adapter".to_string());
+    }
+    let mux = jet_http_mux_with_optional_deadline(mux, deadline.as_ref());
     jet_http_mux_validate(&mux)?;
     let listener = std::net::TcpListener::bind(addr.as_str())
         .map_err(|e| format!("bind on `{}` failed: {}", addr, e))?;
@@ -844,9 +1859,37 @@ fn jet_http_mux_serve(addr: &String, mux: JetHTTPMux) -> Result<(), String> {
     .map(|_| ())
 }
 
-fn jet_http_server_bind(addr: &String, mux: JetHTTPMux) -> Result<JetHTTPServer, String> {
+fn jet_http_server_bind(
+    addr: &String,
+    mux: JetHTTPMux,
+    tls: Option<JetHTTPServerTls>,
+    deadline: Option<jet_std::Duration>,
+) -> Result<JetHTTPServer, String> {
+    if tls.is_some() {
+        return Err("TLS server requires the native TLS adapter".to_string());
+    }
+    let mux = jet_http_mux_with_optional_deadline(mux, deadline.as_ref());
     jet_http_server_bind_with_tls(addr, mux, None)
 }
+/// Bind the beginner HTTP server on the safe loopback address and install the
+/// canonical per-request deadline middleware before any request is accepted.
+fn jet_http_server_default(
+    mux: &JetHTTPMux,
+    deadline: &jet_std::Duration,
+) -> JetHTTPServer {
+    let mux = jet_http_mux_with_deadline(mux.clone(), deadline);
+    let address = "127.0.0.1:8080".to_string();
+    jet_http_server_bind(&address, mux, None, None)
+        .unwrap_or_else(|error| panic!("HTTP server bind failed: {error}"))
+}
+
+/// `HTTPServer.wait()` is the blocking lifecycle operation. Keeping the
+/// implementation on the existing serve kernel makes signal cancellation and
+/// request draining identical for the explicit and beginner surfaces.
+fn jet_http_server_wait(server: &JetHTTPServer) -> Result<JetHTTPShutdownReport, String> {
+    jet_http_server_serve(server)
+}
+
 
 fn jet_http_server_bind_with_tls(
     addr: &String,
@@ -961,7 +2004,32 @@ fn jet_http_server_shutdown(server: &JetHTTPServer, grace: &jet_std::Duration) -
     jet_http_server_wait_for_report(server)
 }
 
+/// Run every native HTTP listener under the same root task-control scope that
+/// `process.on_signal` cancels. Existing task scopes remain unchanged because
+/// `jet_scheduler_with_root_control` is a no-op when a caller already owns one.
 fn jet_http_server_run_listener(
+    listener: std::net::TcpListener,
+    mux: JetHTTPMux,
+    options: JetHTTPServerOptions,
+    shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    dynamic_grace_ms: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
+    drain_deadline_ms: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
+    tls_conn: Option<JetHTTPTlsConn>,
+) -> Result<JetHTTPShutdownReport, String> {
+    jet_scheduler_with_root_control(|| {
+        jet_http_server_run_listener_inner(
+            listener,
+            mux,
+            options,
+            shutdown,
+            dynamic_grace_ms,
+            drain_deadline_ms,
+            tls_conn,
+        )
+    })
+}
+
+fn jet_http_server_run_listener_inner(
     listener: std::net::TcpListener,
     mux: JetHTTPMux,
     options: JetHTTPServerOptions,
@@ -1055,6 +2123,10 @@ fn jet_http_server_run_listener(
     let mut report = JetHTTPShutdownReport::default();
     let mut accept_error = None;
     while !shutdown.load(Ordering::Acquire) {
+        if jet_scheduler_wait_point_cancelled() {
+            shutdown.store(true, Ordering::Release);
+            break;
+        }
         match listener.accept() {
             Ok((mut stream, peer)) => {
                 let peer_ip = peer.ip();
@@ -1181,6 +2253,10 @@ fn jet_http_server_run_listener_wasip2(
     // same Prelude protocol, limits, and request handler, but serve one
     // connection at a time on the component's main thread.
     while !shutdown.load(Ordering::Acquire) {
+        if jet_scheduler_wait_point_cancelled() {
+            shutdown.store(true, Ordering::Release);
+            break;
+        }
         match listener.accept() {
             Ok((mut stream, _peer)) => {
                 report.user_accepted += 1;
@@ -4021,6 +5097,173 @@ fn jet_http_srv_parse(raw: &[u8]) -> Result<JetHTTPRequest, JetHTTPReadError> {
     ))
 }
 
+const JET_HTTP_DEVTOOLS_SOURCE: &str = "core.http.server";
+
+fn jet_http_devtools_publish_fact(fact: JetDevtoolsRequestPanelFact) {
+    if let Ok(event) = fact.to_protocol_event(JET_HTTP_DEVTOOLS_SOURCE) {
+        jet_devtools_publish_event(event);
+    }
+}
+
+fn jet_http_devtools_request_id(req: &JetHTTPRequest) -> String {
+    match req.headers.get("x-request-id") {
+        Some(value) if jet_http_request_id_valid(value) => value.clone(),
+        _ => jet_http_new_request_id(),
+    }
+}
+
+fn jet_http_devtools_publish_request(
+    req: &JetHTTPRequest,
+    request_id: &str,
+    started_at_ms: u64,
+) {
+    let path = req.path.split('?').next().unwrap_or(req.path.as_str());
+    let route = req.route_template.as_deref().unwrap_or(path);
+    let mut fact = JetDevtoolsRequestFact::new(
+        request_id,
+        req.method.clone(),
+        route,
+        started_at_ms,
+    );
+    for (name, _) in req
+        .params
+        .iter()
+        .take(JET_DEVTOOLS_REQUEST_PANEL_MAX_ROUTE_INPUTS)
+    {
+        fact = fact.with_route_input(JetDevtoolsRouteInput::new(name.clone()));
+    }
+    jet_http_devtools_publish_fact(JetDevtoolsRequestPanelFact::Request(fact));
+}
+
+fn jet_http_devtools_publish_response(
+    request_id: &str,
+    response: &JetHTTPResponse,
+    started: &std::time::Instant,
+) {
+    let Some(status) = u16::try_from(response.status).ok() else {
+        return;
+    };
+    let size_bytes = response
+        .head_content_length
+        .or_else(|| response.body.length())
+        .and_then(|length| u64::try_from(length).ok())
+        .unwrap_or(0);
+    let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    let fact = JetDevtoolsResponseFact::new(request_id, status, size_bytes, duration_ms);
+    jet_http_devtools_publish_fact(JetDevtoolsRequestPanelFact::Response(fact));
+}
+
+fn jet_http_devtools_error_code(error: &JetHTTPError) -> &'static str {
+    match error {
+        JetHTTPError::InvalidMethod => "InvalidMethod",
+        JetHTTPError::InvalidUrl => "InvalidUrl",
+        JetHTTPError::InvalidHeader => "InvalidHeader",
+        JetHTTPError::InvalidStatus => "InvalidStatus",
+        JetHTTPError::BodyConsumed => "BodyConsumed",
+        JetHTTPError::BodyTooLarge { .. } => "BodyTooLarge",
+        JetHTTPError::InvalidFraming => "InvalidFraming",
+        JetHTTPError::UnsupportedEncoding => "UnsupportedEncoding",
+        JetHTTPError::Resolve { .. } => "Resolve",
+        JetHTTPError::Connect { .. } => "Connect",
+        JetHTTPError::TLS { .. } => "TLS",
+        JetHTTPError::Timeout { .. } => "Timeout",
+        JetHTTPError::Proxy { .. } => "Proxy",
+        JetHTTPError::Redirect { .. } => "Redirect",
+        JetHTTPError::Protocol { .. } => "Protocol",
+        JetHTTPError::IO { .. } => "IO",
+        JetHTTPError::Policy { .. } => "Policy",
+        JetHTTPError::Cancelled => "Cancelled",
+        JetHTTPError::ResourceUnavailable { .. } => "ResourceUnavailable",
+        JetHTTPError::UnsupportedTarget { .. } => "UnsupportedTarget",
+        JetHTTPError::Internal { .. } => "Internal",
+    }
+}
+
+fn jet_http_devtools_publish_exception_code(request_id: &str, code: &str) {
+    let id = format!("{request_id}:exception:{code}");
+    let fact = JetDevtoolsExceptionFact::new(
+        id,
+        request_id,
+        "HTTPError",
+        code,
+        jet_http_unix_now_ms(),
+    );
+    jet_http_devtools_publish_fact(JetDevtoolsRequestPanelFact::Exception(fact));
+}
+
+
+fn jet_http_devtools_source_text(value: &str, limit: usize) -> String {
+    value
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(limit)
+        .collect()
+}
+
+fn jet_http_devtools_publish_exception_report(request_id: &str, report: &JetErrorReport) {
+    let code = report
+        .code
+        .as_deref()
+        .filter(|value| {
+            !value.is_empty()
+                && value
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-'))
+        })
+        .unwrap_or("HTTPError");
+    let mut fact = JetDevtoolsExceptionFact::new(
+        format!("{request_id}:exception:{code}"),
+        request_id,
+        "HTTPError",
+        code,
+        jet_http_unix_now_ms(),
+    );
+    if report.source_journey.is_empty() {
+        if let Some(frame) = jet_error_page_source(report) {
+            let file = jet_http_devtools_source_text(&frame.file, JET_ERROR_PAGE_MAX_SOURCE_BYTES);
+            if !file.is_empty() {
+                fact = fact.with_source_frame(JetDevtoolsSourceFrame::new(
+                    format!("{request_id}:frame:0"),
+                    request_id,
+                    jet_http_devtools_source_text(
+                        &frame.fn_name,
+                        JET_ERROR_PAGE_MAX_SOURCE_BYTES,
+                    ),
+                    file,
+                    frame.line,
+                    0,
+                    0,
+                ));
+            }
+        }
+    } else {
+        for (index, frame) in report
+            .source_journey
+            .iter()
+            .take(JET_DEVTOOLS_REQUEST_PANEL_MAX_SOURCE_FRAMES)
+            .enumerate()
+        {
+            let file = jet_http_devtools_source_text(&frame.file, JET_ERROR_PAGE_MAX_SOURCE_BYTES);
+            if file.is_empty() {
+                continue;
+            }
+            fact = fact.with_source_frame(JetDevtoolsSourceFrame::new(
+                format!("{request_id}:frame:{index}"),
+                request_id,
+                jet_http_devtools_source_text(
+                    &frame.fn_name,
+                    JET_ERROR_PAGE_MAX_SOURCE_BYTES,
+                ),
+                file,
+                frame.line,
+                0,
+                u32::try_from(index).unwrap_or(u32::MAX),
+            ));
+        }
+    }
+    jet_http_devtools_publish_fact(JetDevtoolsRequestPanelFact::Exception(fact));
+}
+
 fn jet_http_mux_dispatch(
     mux: &JetHTTPMux,
     req: JetHTTPRequest,
@@ -4034,6 +5277,10 @@ fn jet_http_mux_dispatch_cached(
     mut req: JetHTTPRequest,
     route_cache: &JetHTTPMuxRouteCache,
 ) -> Result<JetHTTPResponse, JetHTTPError> {
+    let started = std::time::Instant::now();
+    let started_at_ms = jet_http_unix_now_ms();
+    let request_id = jet_http_devtools_request_id(&req);
+    let _ = req.headers.set("x-request-id", &request_id);
     let requested_method = req.method.as_str();
     let is_head = requested_method == "HEAD";
     if requested_method == "OPTIONS" && req.path == "*" {
@@ -4047,7 +5294,10 @@ fn jet_http_mux_dispatch_cached(
                 [("Allow".to_string(), allow.clone())].into_iter().collect(),
             ))
         });
-        return Ok(jet_http_mux_run_handler(mux, req, handler));
+        jet_http_devtools_publish_request(&req, &request_id, started_at_ms);
+        let response = jet_http_mux_run_handler(mux, req, handler);
+        jet_http_devtools_publish_response(&request_id, &response, &started);
+        return Ok(response);
     }
     // CONNECT authority-form has no path; route against "/{authority}" while
     // leaving req.path as the normalized authority for handlers.
@@ -4060,8 +5310,11 @@ fn jet_http_mux_dispatch_cached(
         let handler: JetHTTPHandler = std::sync::Arc::new(|_| {
             Ok(jet_http_srv_response_owned(400, "400 Bad Request".to_string()))
         });
+        jet_http_devtools_publish_request(&req, &request_id, started_at_ms);
         let response = jet_http_mux_run_handler(mux, req, handler);
-        return Ok(jet_http_srv_head_response(response, is_head));
+        let response = jet_http_srv_head_response(response, is_head);
+        jet_http_devtools_publish_response(&request_id, &response, &started);
+        return Ok(response);
     }
     // Route lookup uses an immutable validated snapshot. Never retain the
     // registry lock while composing middleware or running user code: handlers
@@ -4114,8 +5367,11 @@ fn jet_http_mux_dispatch_cached(
         req.params = jet_http_route_params_path(pattern, route_path)
             .expect("validated HTTP route path");
         req.route_template = Some(route.route.pattern.clone());
+        jet_http_devtools_publish_request(&req, &request_id, started_at_ms);
         let response = jet_http_mux_run_handler_ref(mux, req, &route.route.handler);
-        return Ok(jet_http_srv_head_response(response, is_head));
+        let response = jet_http_srv_head_response(response, is_head);
+        jet_http_devtools_publish_response(&request_id, &response, &started);
+        return Ok(response);
     }
     if path_match_count > 0 {
         let allow = jet_http_allowed_methods(route_cache.routes.iter().filter_map(|route| {
@@ -4129,14 +5385,20 @@ fn jet_http_mux_dispatch_cached(
                 [("Allow".to_string(), allow.clone())].into_iter().collect(),
             ))
         });
+        jet_http_devtools_publish_request(&req, &request_id, started_at_ms);
         let response = jet_http_mux_run_handler(mux, req, handler);
-        return Ok(jet_http_srv_head_response(response, is_head));
+        let response = jet_http_srv_head_response(response, is_head);
+        jet_http_devtools_publish_response(&request_id, &response, &started);
+        return Ok(response);
     }
     let handler: JetHTTPHandler = std::sync::Arc::new(|_| {
         Ok(jet_http_srv_response_owned(404, "404 Not Found".to_string()))
     });
+    jet_http_devtools_publish_request(&req, &request_id, started_at_ms);
     let response = jet_http_mux_run_handler(mux, req, handler);
-    Ok(jet_http_srv_head_response(response, is_head))
+    let response = jet_http_srv_head_response(response, is_head);
+    jet_http_devtools_publish_response(&request_id, &response, &started);
+    Ok(response)
 }
 
 fn jet_http_mux_run_handler_ref(
@@ -4144,15 +5406,29 @@ fn jet_http_mux_run_handler_ref(
     req: JetHTTPRequest,
     handler: &JetHTTPHandler,
 ) -> JetHTTPResponse {
+    let request_id = jet_http_devtools_request_id(&req);
+    let _db_request_scope = JetDbRequestScope::enter(Some(request_id.clone()));
     let middlewares_empty = match mux.1.lock() {
         Ok(middlewares) => middlewares.is_empty(),
-        Err(_) => return jet_http_srv_internal_response(),
+        Err(_) => {
+            jet_http_devtools_publish_exception_code(&request_id, "middleware_lock");
+            return jet_http_srv_internal_response();
+        }
     };
     if middlewares_empty {
         return match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(req))) {
             Ok(Ok(response)) => response,
-            Ok(Err(error)) => jet_http_srv_error_response(error),
-            Err(_) => jet_http_srv_internal_response(),
+            Ok(Err(error)) => {
+                jet_http_devtools_publish_exception_code(
+                    &request_id,
+                    jet_http_devtools_error_code(&error),
+                );
+                jet_http_srv_error_response(error)
+            }
+            Err(_) => {
+                jet_http_devtools_publish_exception_code(&request_id, "panic");
+                jet_http_srv_internal_response()
+            }
         };
     }
     jet_http_mux_run_handler(mux, req, handler.clone())
@@ -4164,12 +5440,29 @@ fn jet_http_mux_run_handler(
     req: JetHTTPRequest,
     handler: JetHTTPHandler,
 ) -> JetHTTPResponse {
-    let middlewares = mux.1.lock().unwrap().clone();
+    let request_id = jet_http_devtools_request_id(&req);
+    let _db_request_scope = JetDbRequestScope::enter(Some(request_id.clone()));
+    let middlewares = match mux.1.lock() {
+        Ok(middlewares) => middlewares.clone(),
+        Err(_) => {
+            jet_http_devtools_publish_exception_code(&request_id, "middleware_lock");
+            return jet_http_srv_internal_response();
+        }
+    };
     if middlewares.is_empty() {
         return match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(req))) {
             Ok(Ok(response)) => response,
-            Ok(Err(error)) => jet_http_srv_error_response(error),
-            Err(_) => jet_http_srv_internal_response(),
+            Ok(Err(error)) => {
+                jet_http_devtools_publish_exception_code(
+                    &request_id,
+                    jet_http_devtools_error_code(&error),
+                );
+                jet_http_srv_error_response(error)
+            }
+            Err(_) => {
+                jet_http_devtools_publish_exception_code(&request_id, "panic");
+                jet_http_srv_internal_response()
+            }
         };
     }
     let mut handler = jet_http_mux_total_handler(handler);
@@ -4177,18 +5470,41 @@ fn jet_http_mux_run_handler(
         let next = handler.clone();
         handler = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| middleware(next))) {
             Ok(handler) => jet_http_mux_total_handler(handler),
-            Err(_) => std::sync::Arc::new(|_| Ok(jet_http_srv_internal_response())),
+            Err(_) => std::sync::Arc::new(|req| {
+                let request_id = jet_http_devtools_request_id(&req);
+                jet_http_devtools_publish_exception_code(&request_id, "middleware_panic");
+                Ok(jet_http_srv_internal_response())
+            }),
         };
     }
-    handler(req).unwrap_or_else(jet_http_srv_error_response)
-}
+    match handler(req) {
+        Ok(response) => response,
+        Err(error) => {
+            jet_http_devtools_publish_exception_code(
+                &request_id,
+                jet_http_devtools_error_code(&error),
+            );
+            jet_http_srv_error_response(error)
+        }
+    }
 
+}
 fn jet_http_mux_total_handler(handler: JetHTTPHandler) -> JetHTTPHandler {
     std::sync::Arc::new(move |req| {
+        let request_id = jet_http_devtools_request_id(&req);
         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(req))) {
             Ok(Ok(response)) => Ok(response),
-            Ok(Err(error)) => Ok(jet_http_srv_error_response(error)),
-            Err(_) => Ok(jet_http_srv_internal_response()),
+            Ok(Err(error)) => {
+                jet_http_devtools_publish_exception_code(
+                    &request_id,
+                    jet_http_devtools_error_code(&error),
+                );
+                Ok(jet_http_srv_error_response(error))
+            }
+            Err(_) => {
+                jet_http_devtools_publish_exception_code(&request_id, "panic");
+                Ok(jet_http_srv_internal_response())
+            }
         }
     })
 }
@@ -4971,40 +6287,113 @@ fn jet_http_cors_allow_origin(policy: &JetHTTPCorsPolicy, origin: &str) -> Optio
     }
 }
 
-fn jet_http_mw_timeout(duration: &jet_std::Duration, next: JetHTTPHandler) -> JetHTTPHandler {
-    let budget = std::time::Duration::from_millis(duration.as_millis().max(0) as u64);
-    std::sync::Arc::new(move |req| {
-        let control = JetTaskControl::new();
-        let cancel = control.clone();
-        let timer = jet_scheduler_spawn(move || {
-            std::thread::sleep(budget);
-            cancel.cancel();
-        });
-        let next = next.clone();
-        let join = jet_scheduler_spawn_blocking_with_control(move || next(req), control.clone());
-        let deadline = std::time::Instant::now() + budget;
-        loop {
-            if let Some(result) = join.try_recv() {
-                let _ = timer.drain();
-                return match result {
-                    JetSchedulerResult::Value(response) => response,
-                    JetSchedulerResult::Cancelled => Ok(jet_http_srv_empty_response(504)),
-                    JetSchedulerResult::Panicked(_) | JetSchedulerResult::Deadline(_) => {
-                        Ok(jet_http_srv_internal_response())
-                    }
-                };
-            }
-            if std::time::Instant::now() >= deadline {
-                control.cancel();
-                let _ = join.drain();
-                let _ = timer.drain();
-                return Ok(jet_http_srv_empty_response(504));
-            }
-            std::thread::yield_now();
+fn jet_http_request_deadline_report(rendered: &str) -> JetErrorReport {
+    let message = rendered
+        .lines()
+        .next()
+        .and_then(|line| line.strip_prefix("Error [E3003]: "))
+        .filter(|message| !message.is_empty())
+        .unwrap_or("Deadline exceeded while waiting in HTTP request handler")
+        .to_string();
+    JetErrorReport {
+        code: Some("E3003".to_string()),
+        message,
+        typed_identity: None,
+        causes: Vec::new(),
+        context_frames: Vec::new(),
+        source_journey: Vec::new(),
+        conversion_history: Vec::new(),
+        details: None,
+    }
+}
+
+fn jet_http_request_deadline_response(
+    request: &JetHTTPRequest,
+    rendered: &str,
+) -> JetHTTPResponse {
+    let report = jet_http_request_deadline_report(rendered);
+    jet_http_error_page_response(request, 503, "", &report, &[], true)
+}
+
+/// Run one route inside the shared `#Context(deadline: …)` and task-control
+/// boundary. The child owns the deadline guard; the parent only waits for its
+/// typed completion, so a CPU-bound handler observes expiry at its next wait
+/// point instead of receiving a second, detached timeout signal.
+fn jet_http_request_context_deadline(
+    request: JetHTTPRequest,
+    budget_ms: i64,
+    next: JetHTTPHandler,
+) -> Result<JetHTTPResponse, JetHTTPError> {
+    let request_for_error = request.clone();
+    let configured_deadline = jet_std_time_now().saturating_add(budget_ms.max(0));
+    let deadline = jet_ctx_deadline_ms()
+        .map_or(configured_deadline, |ambient| ambient.min(configured_deadline));
+    let control = JetTaskControl::new();
+    let join = jet_scheduler_spawn_blocking_with_control(
+        move || {
+            let _deadline = jet_ctx_push_deadline(deadline);
+            next(request)
+        },
+        control.clone(),
+    );
+    let _wait = JetHTTPSchedulerBlockingWait::enter();
+    loop {
+        if let Some(result) = join.try_recv() {
+            return match result {
+                JetSchedulerResult::Value(response) => response,
+                JetSchedulerResult::Cancelled => Err(JetHTTPError::Cancelled),
+                JetSchedulerResult::Panicked(_) => {
+                    let request_id = jet_http_devtools_request_id(&request_for_error);
+                    jet_http_devtools_publish_exception_code(&request_id, "panic");
+                    Ok(jet_http_srv_internal_response())
+                },
+                JetSchedulerResult::Deadline(rendered) => {
+                    Ok(jet_http_request_deadline_response(&request_for_error, &rendered))
+                }
+            };
         }
+        if jet_scheduler_wait_point_cancelled() {
+            control.cancel();
+            join.drain();
+            jet_task_deliver_cancel();
+            return Err(JetHTTPError::Cancelled);
+        }
+        std::thread::yield_now();
+    }
+}
+
+fn jet_http_mw_timeout(duration: &jet_std::Duration, next: JetHTTPHandler) -> JetHTTPHandler {
+    let budget_ms = duration.as_millis().max(0);
+    std::sync::Arc::new(move |request| {
+        jet_http_request_context_deadline(request, budget_ms, next.clone())
     })
 }
 
+/// Clone a mux and attach the shared Context deadline wrapper. The duration is
+/// owned by the middleware so the request handler remains `'static` on every
+/// serving tier.
+fn jet_http_mux_with_deadline(
+    mux: JetHTTPMux,
+    deadline: &jet_std::Duration,
+) -> JetHTTPMux {
+    let deadline = deadline.clone();
+    jet_http_mux_middleware(
+        &mux,
+        std::sync::Arc::new(move |next| jet_http_mw_timeout(&deadline, next)),
+    );
+    mux
+}
+/// Apply a request deadline only when the named option is present. Keeping
+/// this branch beside `jet_http_mux_with_deadline` makes explicit-address
+/// servers use the same per-request Context kernel as `http.serve`.
+fn jet_http_mux_with_optional_deadline(
+    mux: JetHTTPMux,
+    deadline: Option<&jet_std::Duration>,
+) -> JetHTTPMux {
+    deadline.map_or(mux.clone(), |deadline| {
+        jet_http_mux_with_deadline(mux.clone(), deadline)
+    })
+}
 fn jet_http_mw_body_limit(max_bytes: i64, next: JetHTTPHandler) -> JetHTTPHandler {
     std::sync::Arc::new(move |req| {
         if !jet_http_srv_req_under_limit(&req, max_bytes) {
@@ -5206,12 +6595,15 @@ pub(crate) fn jet_app_http_mux_new() -> JetHTTPMux {
     jet_http_mux_new()
 }
 
-pub(crate) fn jet_app_http_page<F>(mux: &JetHTTPMux, path: &str, handler: F)
+/// Serve one App page: the App resolves the navigation, runs the loader,
+/// decodes typed inputs, and chooses the page or boundary plus its status.
+pub(crate) fn jet_app_http_page_response<F>(mux: &JetHTTPMux, path: &str, handler: F)
 where
-    F: Fn() -> String + Send + Sync + 'static,
+    F: Fn(&JetHTTPRequest) -> (i64, String) + Send + Sync + 'static,
 {
-    jet_http_mux_add(mux, "GET", path, move |_| {
-        let mut response = jet_http_srv_response(200, &handler());
+    jet_http_mux_add(mux, "GET", path, move |request| {
+        let (status, body) = handler(&request);
+        let mut response = jet_http_srv_response(status, &body);
         response
             .headers
             .append("content-type", "text/html; charset=utf-8")
@@ -5220,14 +6612,9 @@ where
     });
 }
 
-pub(crate) fn jet_app_http_action<F>(mux: &JetHTTPMux, path: &str, handler: F)
-where
-    F: Fn() + Send + Sync + 'static,
-{
-    jet_http_mux_add(mux, "POST", path, move |_| {
-        handler();
-        jet_http_srv_response_owned(200, "ok".to_string())
-    });
+/// The request target as the App router sees it: path plus query string.
+pub(crate) fn jet_app_http_request_url(request: &JetHTTPRequest) -> String {
+    request.path.clone()
 }
 
 pub(crate) fn jet_app_http_mount<F>(mux: &JetHTTPMux, path: &str, handler: F)
@@ -5289,7 +6676,7 @@ pub(crate) fn jet_app_http_reload(mux: &JetHTTPMux) {
 
 pub(crate) fn jet_app_http_serve(mux: JetHTTPMux, port: u16, dev: bool) {
     use std::io::Write;
-    let server = jet_http_server_bind(&format!("127.0.0.1:{port}"), mux)
+    let server = jet_http_server_bind(&format!("127.0.0.1:{port}"), mux, None, None)
         .unwrap_or_else(|error| {
             let message = format!("web app server failed: {error}");
             jet_runtime_stop("E3001", "", 0, &message)
@@ -5333,16 +6720,19 @@ type RouteSegment = JetHTTPRouteSegment;
 // A router is an ordinary owned value: a task that captures one takes its own
 // copy, so both halves stay cloneable. Handlers are already shared `Arc`s.
 #[derive(Clone)]
-struct JetHTTPRoute {
-    method: String,
-    template: String,
+pub(crate) struct JetHTTPRoute {
+    pub(crate) method: String,
+    pub(crate) template: String,
     segments: Vec<RouteSegment>,
     handler: JetHTTPHandler,
+    /// Checked TIR OpenAPI facts. Runtime dispatch never derives contract
+    /// metadata from handler behavior.
+    pub(crate) contract_json: String,
 }
 
 #[derive(Clone)]
 pub struct JetHTTPRouter {
-    routes: Vec<JetHTTPRoute>,
+    pub(crate) routes: Vec<JetHTTPRoute>,
 }
 
 impl JetShow for JetHTTPRequest {
@@ -5419,6 +6809,21 @@ fn jet_http_parse_request(raw: &str) -> JetHTTPRequest {
     })
 }
 
+pub(crate) fn jet_http_parse_request_carrier(
+    raw: &str,
+) -> (String, String, Vec<(String, String)>, Vec<u8>) {
+    let request = jet_http_parse_request(raw);
+    let body = request
+        .body
+        .bytes(jet_http_default_body_limit() as usize)
+        .unwrap_or_default();
+    (
+        request.method,
+        request.path,
+        request.headers.entries,
+        body,
+    )
+}
 fn jet_http_format_response(resp: &JetHTTPResponse) -> String {
     jet_http_srv_format(resp)
 }
@@ -5440,7 +6845,9 @@ fn jet_http_router_register(
     handler: JetHTTPHandler,
     file: &str,
     line: u32,
+    contract_json: String,
 ) {
+    jet_http_require_route_contract(&method, &pattern, &contract_json, file, line, false);
     // E2804 (runtime): duplicate method+pattern fails at registration time in
     // Jet-owned runtime voice, not a raw Rust panic banner.
     let segs = match jet_http_router_parse_pattern(&pattern) {
@@ -5472,6 +6879,7 @@ fn jet_http_router_register(
         template: pattern,
         segments: segs,
         handler,
+        contract_json,
     });
 }
 

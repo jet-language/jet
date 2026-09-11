@@ -235,6 +235,7 @@ fn method_call(receiver: Expr, method: &str, args: Vec<CallArg>, span: Span) -> 
         args,
         recv_type: None,
         resolved_ret: None,
+        operator_rhs: None,
         checked_widen: false,
     }
 }
@@ -357,6 +358,7 @@ fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> Imp
 
     let validate_func = Func {
         span,
+        is_comptime: false,
         is_pub: s.is_pub,
         is_package_pub: s.is_package_pub,
         external_type: None,
@@ -420,6 +422,8 @@ fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> Imp
         type_span: s.name_span,
         trait_name: None,
         trait_span: None,
+        operator_rhs: None,
+        operator_marker: None,
         methods: vec![validate_func],
         delegation_field: None,
         assoc_type_impls: Vec::new(),
@@ -670,6 +674,8 @@ fn build_validate_builder_impl(span: Span) -> ImplDef {
         type_name: Syntax::TYPE_VALIDATE_BUILDER.to_string(),
         type_span: span,
         trait_name: None,
+        operator_marker: None,
+        operator_rhs: None,
         trait_span: None,
         methods: vec![check, finish],
         delegation_field: None,

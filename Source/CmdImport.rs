@@ -9,9 +9,17 @@ use std::path::{Component, Path, PathBuf};
 
 use jet::Diagnostics::Diagnostic;
 use jet::ExitCodes;
-use jet_foundation::Report::{render_status_json, ReportEnvelope};
+use jet::RecordIndex::{RecordIndex, RecordIndexEntry, RecordKind, RecordLink};
+use jet::ReceiptStore::{read_path, receipt_root_for, ReceiptSection, ReceiptStore};
+use jet_foundation::Evidence::{
+    EvidenceBuild, EvidenceKind, EvidenceOutcome, EvidenceProducerKind, EvidenceRecord,
+    EvidenceReport, EvidenceRevision, EvidenceSource, EvidenceAttachment, EvidenceIdentity,
+};
+use jet_foundation::Facts::{DerivationDisposition, DerivationMethod, DerivationRecord};
+use jet_foundation::PerformanceBudget::CanonicalJson;
+use jet_foundation::Report::{ReportEnvelope, StatusEnvelope, StatusFields, StatusValue};
+use jet_foundation::TestingComparison::ComparisonRecord;
 use jet_foundation::JSON::json_escape;
-
 const TODO_CODE: &str = "JT0101";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -59,6 +67,11 @@ struct Plan {
     todos: Vec<Todo>,
     functions: usize,
     tests: usize,
+    boundary: Option<jet::ForeignBridge::ForeignBoundaryContract>,
+    evidence: Option<EvidenceReport>,
+    boundary_digest: String,
+    source_digest: String,
+    replacement_digest: String,
 }
 
 pub(crate) fn run(raw: &[String], json: bool) -> i32 {
@@ -169,6 +182,89 @@ fn canonical_language(language: &str) -> String {
     .to_string()
 }
 
+fn foreign_language(language: &str) -> Option<jet::AST::ForeignLanguage> {
+    Some(match language {
+        "py" => jet::AST::ForeignLanguage::Py,
+        "pascal" => jet::AST::ForeignLanguage::Pascal,
+        "ada" => jet::AST::ForeignLanguage::Ada,
+        "java" => jet::AST::ForeignLanguage::Java,
+        "csharp" => jet::AST::ForeignLanguage::DotNet,
+        "ts" | "js" => jet::AST::ForeignLanguage::JS,
+        "go" => jet::AST::ForeignLanguage::Go,
+        _ => return None,
+    })
+}
+
+fn import_tree_identity(
+    source: &Path,
+    files: &[PathBuf],
+    schema: &str,
+) -> Result<String, String> {
+    let mut identity = jet::ForeignBridge::IdentityBuilder::new(schema);
+    for path in files {
+        let relative = path.strip_prefix(source).map_err(|error| error.to_string())?;
+        let raw = fs::read(path).map_err(|error| format!("read {}: {error}", path.display()))?;
+        identity.field("path", relative.to_string_lossy().as_bytes());
+        identity.field("bytes", &raw);
+    }
+    Ok(identity.finish())
+}
+
+fn generated_tree_identity(
+    generated: &[Generated],
+    schema: &str,
+) -> String {
+    let mut identity = jet::ForeignBridge::IdentityBuilder::new(schema);
+    for file in generated {
+        identity.field("path", file.relative.to_string_lossy().as_bytes());
+        identity.field("bytes", file.contents.as_bytes());
+    }
+    identity.finish()
+}
+
+fn boundary_for_import(
+    language: &str,
+    source: &Path,
+    target: &Path,
+    source_digest: String,
+    replacement_digest: String,
+) -> Result<jet::ForeignBridge::ForeignBoundaryContract, String> {
+    let foreign_language = foreign_language(language)
+        .ok_or_else(|| format!("source importer has no foreign boundary for `{language}`"))?;
+    let target_identity = format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS);
+    let source_identity = format!("source:{}:sha256-{source_digest}", source.display());
+    let replacement_identity =
+        format!("generated:{}:sha256-{replacement_digest}", target.display());
+    let identity = jet::ForeignBridge::ForeignBoundaryIdentity::new(
+        source_identity.clone(),
+        replacement_identity,
+        "jet-source-import-v1",
+        source_identity.clone(),
+        format!("jet-source-import:{}", env!("CARGO_PKG_VERSION")),
+        target_identity.clone(),
+    );
+    let coverage = jet::ForeignBridge::ForeignArtifactCoverage::new(
+        source_identity,
+        target_identity,
+        "jet-source-import-v1",
+    )
+    .with_transitive_dependencies(std::iter::empty::<String>())
+    .with_reachable_callbacks(std::iter::empty::<String>())
+    .with_compiler_flags(std::iter::empty::<String>());
+    jet::ForeignBridge::source_import_boundary(
+        foreign_language,
+        format!("{language}:{}", source.display()),
+        identity,
+        coverage,
+    )
+    .map(|boundary| {
+        boundary.with_assumptions([
+            "D-MIGRATE-SRC1 proves only the declared source subset".to_string(),
+            "foreign source remains authoritative until an accepted comparison receipt".to_string(),
+        ])
+    })
+}
+
 fn build_plan(source: &Path, target: &Path, language: &str) -> Result<Plan, String> {
     let mut files = Vec::new();
     collect_sources(source, source, language, &mut files)?;
@@ -197,20 +293,25 @@ fn build_plan(source: &Path, target: &Path, language: &str) -> Result<Plan, Stri
         todos: Vec::new(),
         functions: 0,
         tests: 0,
+        boundary: None,
+        evidence: None,
+        boundary_digest: String::new(),
+        source_digest: String::new(),
+        replacement_digest: String::new(),
     };
-    for path in files {
+    for path in &files {
         let relative = path.strip_prefix(source).map_err(|e| e.to_string())?;
         let mut output = relative.to_path_buf();
         output.set_extension("jet");
-        let raw = fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+        let raw = fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
         let generated_target = target.join(&output);
         let translation = match language {
-            "pascal" => translate_pascal_file(&raw, &path, &generated_target),
-            "ada" => translate_ada_file(&raw, &path, &generated_target),
+            "pascal" => translate_pascal_file(&raw, path, &generated_target),
+            "ada" => translate_ada_file(&raw, path, &generated_target),
             "java" | "csharp" | "ts" | "js" | "go" => {
-                translate_enterprise_file(language, &raw, &path, &generated_target)
+                translate_enterprise_file(language, &raw, path, &generated_target)
             }
-            _ => translate_file(&raw, &path, &generated_target),
+            _ => translate_file(&raw, path, &generated_target),
         };
         plan.functions += translation.functions;
         plan.tests += translation.tests;
@@ -220,6 +321,33 @@ fn build_plan(source: &Path, target: &Path, language: &str) -> Result<Plan, Stri
             contents: translation.source,
         });
     }
+    let source_digest = import_tree_identity(source, &files, "jet-source-import-input-v1")?;
+    let replacement_digest =
+        generated_tree_identity(&plan.generated, "jet-source-import-replacement-v1");
+    let boundary = boundary_for_import(
+        language,
+        source,
+        target,
+        source_digest.clone(),
+        replacement_digest.clone(),
+    )?;
+    let boundary_digest = boundary.digest();
+    let evidence = import_evidence(
+        &boundary,
+        source,
+        target,
+        &source_digest,
+        &replacement_digest,
+        files.len(),
+        plan.functions,
+        plan.tests,
+        plan.todos.len(),
+    )?;
+    plan.boundary = Some(boundary);
+    plan.evidence = Some(evidence);
+    plan.boundary_digest = boundary_digest;
+    plan.source_digest = source_digest;
+    plan.replacement_digest = replacement_digest;
     Ok(plan)
 }
 
@@ -2217,7 +2345,699 @@ fn render_function(marker: &str, function: &Function, body: &[String]) -> String
     output
 }
 
-fn apply_plan(plan: Plan, mode: Mode, json: bool) -> i32 {
+fn import_evidence(
+    boundary: &jet::ForeignBridge::ForeignBoundaryContract,
+    source: &Path,
+    target: &Path,
+    source_digest: &str,
+    replacement_digest: &str,
+    file_count: usize,
+    function_count: usize,
+    test_count: usize,
+    omission_count: usize,
+) -> Result<EvidenceReport, String> {
+    let boundary_digest = boundary.digest();
+    let report_id = format!("source-import-{boundary_digest}");
+    let source_ref = EvidenceSource::new(source.display().to_string(), 0, 0);
+    let derivation_identity = boundary.identity.derivation_identity();
+    let revision = EvidenceRevision::new(
+        derivation_identity.source.clone(),
+        derivation_identity.build.clone(),
+        derivation_identity.run.clone(),
+    );
+    let build = EvidenceBuild::new(
+        derivation_identity.build.clone(),
+        derivation_identity.target.clone(),
+        "source-import",
+    );
+    let outcome = if omission_count == 0 {
+        EvidenceOutcome::Generated
+    } else {
+        EvidenceOutcome::Incomplete
+    };
+    let detail = if omission_count == 0 {
+        format!(
+            "source import generated {file_count} files, {function_count} functions, and {test_count} tests"
+        )
+    } else {
+        format!(
+            "source import translated {file_count} files, {function_count} functions, and {test_count} tests with {omission_count} reported omissions"
+        )
+    };
+    let count = u64::try_from(file_count)
+        .map_err(|_| "source import file count is too large".to_string())?;
+    let identity = EvidenceIdentity::for_record(
+        &report_id,
+        "source-import",
+        EvidenceProducerKind::Compile,
+        EvidenceKind::Contract,
+        &source_ref,
+        count,
+        &detail,
+    );
+    let mut evidence = EvidenceRecord::new(
+        identity,
+        EvidenceKind::Contract,
+        EvidenceProducerKind::Compile,
+        outcome,
+        count,
+        source_ref.clone(),
+        build.clone(),
+        revision.clone(),
+    );
+    evidence.detail = detail;
+    evidence.attachments.extend([
+        EvidenceAttachment::new("boundary", boundary_digest.clone()),
+        EvidenceAttachment::new("source-digest", source_digest),
+        EvidenceAttachment::new("replacement-digest", replacement_digest),
+        EvidenceAttachment::new("source-identity", boundary.identity.source.clone()),
+        EvidenceAttachment::new("replacement-identity", boundary.identity.overlay.clone()),
+        EvidenceAttachment::new("tool-identity", boundary.identity.toolchain.clone()),
+        EvidenceAttachment::new("target-identity", boundary.identity.target.clone()),
+        EvidenceAttachment::new("coverage", boundary.artifact_coverage.digest()),
+        EvidenceAttachment::new(
+            "import-report",
+            target.join("import-report.json").display().to_string(),
+        ),
+    ]);
+    evidence.attachments.extend(
+        boundary
+            .assumptions
+            .iter()
+            .cloned()
+            .map(|value| EvidenceAttachment::new("assumption", value)),
+    );
+    let disposition = if omission_count == 0 {
+        DerivationDisposition::Current
+    } else {
+        DerivationDisposition::Unavailable
+    };
+    let derivation = DerivationRecord::new(
+        evidence.identity.evidence_id.clone(),
+        evidence.identity.claim_id.clone(),
+        evidence.producer.as_str(),
+        DerivationMethod::StaticDerivation,
+        "foreign-source-import",
+        [
+            boundary_digest,
+            boundary.artifact_coverage.digest(),
+            source_digest.to_string(),
+            replacement_digest.to_string(),
+        ],
+        derivation_identity,
+    )
+    .with_disposition(disposition);
+    let mut report = EvidenceReport::new(
+        report_id,
+        EvidenceProducerKind::Compile,
+        source_ref,
+        build,
+        revision,
+    );
+    report
+        .add_record_with_derivation(evidence, derivation)
+        .map_err(|error| error.to_string())?;
+    Ok(report)
+}
+
+fn attach_import_evidence(plan: &mut Plan) -> Result<(), String> {
+    let Some(boundary) = plan.boundary.take() else {
+        return Err("source import has no foreign boundary".to_string());
+    };
+    let Some(report) = plan.evidence.as_ref() else {
+        return Err("source import has no evidence report".to_string());
+    };
+    let derivation = report
+        .derivations
+        .first()
+        .ok_or_else(|| "source import evidence has no derivation".to_string())?;
+    let evidence = report
+        .records
+        .first()
+        .ok_or_else(|| "source import evidence has no record".to_string())?;
+    let boundary = boundary
+        .attach_derivation(derivation)?
+        .attach_evidence(evidence)?;
+    boundary.validate()?;
+    plan.boundary = Some(boundary);
+    Ok(())
+}
+
+fn indexed_artifact_path(index: &RecordIndex, entry: &RecordIndexEntry, cwd: &Path) -> PathBuf {
+    if entry.path.is_absolute() {
+        entry.path.clone()
+    } else if entry.path.starts_with(Path::new(".jet")) {
+        cwd.join(&entry.path)
+    } else {
+        index.root().join(&entry.path)
+    }
+}
+
+fn receipt_store_for_artifact(path: &Path) -> Result<ReceiptStore, String> {
+    let objects = path
+        .parent()
+        .ok_or_else(|| format!("receipt artifact has no parent: {}", path.display()))?;
+    if objects.file_name().and_then(|name| name.to_str()) != Some("objects") {
+        return Err(format!(
+            "indexed comparison path is not a receipt object: {}",
+            path.display()
+        ));
+    }
+    let root = objects
+        .parent()
+        .ok_or_else(|| format!("receipt object has no store root: {}", path.display()))?;
+    Ok(ReceiptStore::new(root))
+}
+
+fn attachment_values(record: &EvidenceRecord, name: &str) -> Vec<String> {
+    record
+        .attachments
+        .iter()
+        .filter(|attachment| attachment.name == name)
+        .map(|attachment| attachment.value.clone())
+        .collect()
+}
+
+fn require_attachment(
+    record: &EvidenceRecord,
+    name: &str,
+    expected: &str,
+) -> Result<(), String> {
+    let values = attachment_values(record, name);
+    if values.len() != 1 || values.first().map(String::as_str) != Some(expected) {
+        return Err(format!(
+            "indexed evidence attachment `{name}` does not match the current import"
+        ));
+    }
+    Ok(())
+}
+
+fn require_attachment_set(
+    record: &EvidenceRecord,
+    name: &str,
+    expected: &[String],
+) -> Result<(), String> {
+    let mut values = attachment_values(record, name);
+    values.sort();
+    if values != expected {
+        return Err(format!(
+            "indexed evidence attachments `{name}` do not match the current import"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_import_binding(
+    record: &EvidenceRecord,
+    boundary: &jet::ForeignBridge::ForeignBoundaryContract,
+    boundary_digest: &str,
+    source_digest: &str,
+    replacement_digest: &str,
+) -> Result<(), String> {
+    require_attachment(record, "boundary", boundary_digest)?;
+    require_attachment(record, "source-digest", source_digest)?;
+    require_attachment(record, "replacement-digest", replacement_digest)?;
+    require_attachment(record, "source-identity", &boundary.identity.source)?;
+    require_attachment(record, "replacement-identity", &boundary.identity.overlay)?;
+    require_attachment(record, "tool-identity", &boundary.identity.toolchain)?;
+    require_attachment(record, "target-identity", &boundary.identity.target)?;
+    require_attachment(
+        record,
+        "coverage",
+        &boundary.artifact_coverage.digest(),
+    )?;
+    require_attachment_set(record, "assumption", &boundary.assumptions)?;
+    let derivation_identity = boundary.identity.derivation_identity();
+    if record.build.toolchain != derivation_identity.build
+        || record.build.target != derivation_identity.target
+        || record.build.profile != "source-import"
+    {
+        return Err("indexed import evidence build identity is stale".into());
+    }
+    if record.revision.source != derivation_identity.source
+        || record.revision.build != derivation_identity.build
+        || record.revision.revision != derivation_identity.run
+    {
+        return Err("indexed import evidence revision identity is stale".into());
+    }
+    Ok(())
+}
+
+fn indexed_import_evidence(
+    index: &RecordIndex,
+    cwd: &Path,
+    boundary: &jet::ForeignBridge::ForeignBoundaryContract,
+    boundary_digest: &str,
+    source_digest: &str,
+    replacement_digest: &str,
+) -> Result<(EvidenceRecord, DerivationRecord), String> {
+    let report_id = format!("source-import-{boundary_digest}");
+    let entry = index
+        .find(RecordKind::Evidence, &report_id, true)
+        .ok_or_else(|| {
+            "source import update requires prior indexed import evidence for the current source"
+                .to_string()
+        })?;
+    if entry.identity.target_inputs_sha256 != source_digest
+        || entry.identity.engine != EvidenceProducerKind::Compile.as_str()
+    {
+        return Err("indexed import evidence is stale against the current source digest".into());
+    }
+    let path = indexed_artifact_path(index, &entry, cwd);
+    let report = EvidenceReport::read(&path)
+        .map_err(|error| format!("cannot read indexed import evidence: {error}"))?;
+    if !report.is_complete() {
+        return Err("indexed import evidence is incomplete".into());
+    }
+    let record = report
+        .records
+        .iter()
+        .find(|record| {
+            record.identity.report_id == report_id && record.identity.claim_id == "source-import"
+        })
+        .cloned()
+        .ok_or_else(|| "indexed import evidence has no source-import record".to_string())?;
+    record
+        .validate()
+        .map_err(|error| format!("indexed import evidence is invalid: {error}"))?;
+    if record.outcome != EvidenceOutcome::Generated {
+        return Err(format!(
+            "indexed import evidence is not a complete generated candidate: {}",
+            record.outcome.as_str()
+        ));
+    }
+    validate_import_binding(
+        &record,
+        boundary,
+        boundary_digest,
+        source_digest,
+        replacement_digest,
+    )?;
+    let reference = record
+        .derivation
+        .as_ref()
+        .ok_or_else(|| "indexed import evidence has no derivation reference".to_string())?;
+    let derivation = report
+        .derivation(reference)
+        .cloned()
+        .ok_or_else(|| "indexed import evidence has no derivation payload".to_string())?;
+    derivation.validate()?;
+    if derivation.identity != boundary.identity.derivation_identity() {
+        return Err("indexed import derivation identity is stale".into());
+    }
+    if derivation.method != DerivationMethod::StaticDerivation
+        || derivation.rule != "foreign-source-import"
+        || derivation.disposition != DerivationDisposition::Current
+    {
+        return Err("indexed import derivation is not current".into());
+    }
+    let mut premises = vec![
+        boundary_digest.to_string(),
+        boundary.artifact_coverage.digest(),
+        source_digest.to_string(),
+        replacement_digest.to_string(),
+    ];
+    premises.sort();
+    premises.dedup();
+    if derivation.premises != premises {
+        return Err("indexed import derivation premises are stale".into());
+    }
+    Ok((record, derivation))
+}
+
+fn validate_comparison_binding(
+    record: &EvidenceRecord,
+    comparison: &ComparisonRecord,
+    artifact_id: &str,
+    boundary: &jet::ForeignBridge::ForeignBoundaryContract,
+    boundary_digest: &str,
+) -> Result<(), String> {
+    require_attachment(record, "comparison-artifact", artifact_id)?;
+    require_attachment(record, "boundary", boundary_digest)?;
+    require_attachment(record, "source-identity", &boundary.identity.source)?;
+    require_attachment(record, "replacement-identity", &boundary.identity.overlay)?;
+    require_attachment(record, "tool-identity", &boundary.identity.toolchain)?;
+    require_attachment(record, "target-identity", &boundary.identity.target)?;
+    require_attachment(record, "coverage", &boundary.artifact_coverage.digest())?;
+    require_attachment_set(record, "assumption", &boundary.assumptions)?;
+    if record.build.toolchain != boundary.identity.toolchain
+        || record.build.target != boundary.identity.target
+        || record.build.profile != "comparison"
+        || record.revision.source != artifact_id
+        || record.revision.build != "jet-comparison-v1"
+        || record.revision.revision != artifact_id
+    {
+        return Err("indexed comparison evidence build identity is stale".into());
+    }
+    if comparison.samples.iter().any(|sample| {
+        sample.identity.source != boundary.identity.source
+            || sample.identity.tool != boundary.identity.toolchain
+            || sample.identity.target != boundary.identity.target
+    }) {
+        return Err("indexed comparison samples are not bound to the current foreign tool and target".into());
+    }
+    Ok(())
+}
+
+fn indexed_comparison(
+    index: &RecordIndex,
+    cwd: &Path,
+    boundary: &jet::ForeignBridge::ForeignBoundaryContract,
+    boundary_digest: &str,
+) -> Result<ComparisonRecord, String> {
+    let mut entries = index.query_kind(RecordKind::Comparison, true);
+    entries.sort_by(|left, right| {
+        right
+            .recorded_sequence
+            .cmp(&left.recorded_sequence)
+            .then(left.artifact_id.cmp(&right.artifact_id))
+    });
+    let mut stale_reason = None;
+    for entry in entries {
+        let path = indexed_artifact_path(index, &entry, cwd);
+        let raw_receipt = match read_path(&path) {
+            Ok(receipt) => receipt,
+            Err(error) => {
+                stale_reason = Some(format!(
+                    "indexed comparison receipt `{}` could not be authenticated: {error}",
+                    entry.artifact_id
+                ));
+                continue;
+            }
+        };
+        let store = receipt_store_for_artifact(&path)?;
+        let receipt = match store.lookup(&raw_receipt.claim)? {
+            Some(receipt) => receipt,
+            None => {
+                stale_reason = Some(format!(
+                    "indexed comparison `{}` is stale against its current corpus inputs",
+                    entry.artifact_id
+                ));
+                continue;
+            }
+        };
+        let Some(section) = receipt.sections.iter().find(|section| {
+            section.name == "comparison" && section.type_name == "ComparisonRecord"
+        }) else {
+            continue;
+        };
+        let payload = section.value()?;
+        let comparison = ComparisonRecord::from_json(&payload)?;
+        let artifact_id = comparison.artifact_id()?;
+        if section.payload_digest != artifact_id || artifact_id != entry.artifact_id {
+            return Err(format!(
+                "indexed comparison `{}` has a non-canonical artifact digest",
+                entry.artifact_id
+            ));
+        }
+        let mut bound = false;
+        let mut bound_error = None;
+        for link in receipt
+            .consumed
+            .iter()
+            .filter(|link| link.kind == RecordKind::Evidence)
+        {
+            let Some(evidence_entry) = index.find(RecordKind::Evidence, &link.artifact_id, true)
+            else {
+                bound_error = Some(format!(
+                    "comparison `{}` links to missing evidence `{}`",
+                    entry.artifact_id, link.artifact_id
+                ));
+                continue;
+            };
+            let evidence_path = indexed_artifact_path(index, &evidence_entry, cwd);
+            let evidence_report = EvidenceReport::read(&evidence_path).map_err(|error| {
+                format!(
+                    "cannot read comparison evidence `{}`: {error}",
+                    link.artifact_id
+                )
+            })?;
+            if !evidence_report.is_complete() {
+                bound_error = Some(format!(
+                    "comparison evidence `{}` is incomplete",
+                    link.artifact_id
+                ));
+                continue;
+            }
+            for evidence in evidence_report.records.iter() {
+                if evidence.identity.report_id != link.artifact_id
+                    || evidence.identity.claim_id != "comparison"
+                {
+                    continue;
+                }
+                if validate_comparison_binding(
+                    evidence,
+                    &comparison,
+                    &artifact_id,
+                    boundary,
+                    boundary_digest,
+                )
+                .is_err()
+                {
+                    continue;
+                }
+                bound = true;
+                evidence
+                    .validate()
+                    .map_err(|error| format!("indexed comparison evidence is invalid: {error}"))?;
+                if evidence.outcome != EvidenceOutcome::Passed {
+                    return Err(format!(
+                        "indexed comparison `{}` is not accepted: evidence outcome is {}",
+                        entry.artifact_id,
+                        evidence.outcome.as_str()
+                    ));
+                }
+                let Some(reference) = evidence.derivation.as_ref() else {
+                    return Err(format!(
+                        "indexed comparison `{}` has no checked derivation",
+                        entry.artifact_id
+                    ));
+                };
+                let Some(derivation) = evidence_report.derivation(reference) else {
+                    return Err(format!(
+                        "indexed comparison `{}` has a missing derivation payload",
+                        entry.artifact_id
+                    ));
+                };
+                if derivation.disposition != DerivationDisposition::Current {
+                    return Err(format!(
+                        "indexed comparison `{}` has stale derivation evidence",
+                        entry.artifact_id
+                    ));
+                }
+                if *derivation != evidence.checked_derivation() {
+                    return Err(format!(
+                        "indexed comparison `{}` derivation does not match its evidence",
+                        entry.artifact_id
+                    ));
+                }
+            }
+        }
+        if !bound {
+            if let Some(error) = bound_error {
+                stale_reason = Some(error);
+            }
+            continue;
+        }
+        comparison.assert_equal().map_err(|error| {
+            format!(
+                "indexed comparison `{}` was not matched: {error}",
+                entry.artifact_id
+            )
+        })?;
+        return Ok(comparison);
+    }
+    Err(stale_reason.unwrap_or_else(|| {
+        "source import update requires an indexed matched comparison bound to the current source, generated candidate, tool, target, coverage, and assumptions".into()
+    }))
+}
+
+fn accept_update_replacement(
+    plan: &mut Plan,
+    cwd: &Path,
+) -> Result<jet::ForeignBridge::ForeignSourceReceipt, String> {
+    let boundary = plan
+        .boundary
+        .as_ref()
+        .ok_or_else(|| "source import has no foreign boundary".to_string())?
+        .clone();
+    if !boundary.has_complete_artifact_coverage() {
+        return Err("source import replacement coverage is incomplete".into());
+    }
+    let mut current_files = Vec::new();
+    collect_sources(
+        &plan.source,
+        &plan.source,
+        &plan.language,
+        &mut current_files,
+    )?;
+    current_files.sort();
+    let current_source_digest =
+        import_tree_identity(&plan.source, &current_files, "jet-source-import-input-v1")?;
+    if current_source_digest != plan.source_digest {
+        return Err("source import update source changed after planning".into());
+    }
+    let index = RecordIndex::load_for_project(cwd.to_path_buf())
+        .map_err(|error| format!("cannot load indexed reasoning records: {error}"))?;
+    let (evidence, derivation) = indexed_import_evidence(
+        &index,
+        cwd,
+        &boundary,
+        &plan.boundary_digest,
+        &plan.source_digest,
+        &plan.replacement_digest,
+    )?;
+    let comparison = indexed_comparison(&index, cwd, &boundary, &plan.boundary_digest)?;
+    let mut accepted = boundary;
+    let current_identity = accepted.identity.clone();
+    let current_coverage = accepted.artifact_coverage.clone();
+    let replacement_identity = current_identity.overlay.clone();
+    let receipt = accepted.accept_reasoned_replacement(
+        &current_identity,
+        &current_coverage,
+        &derivation,
+        &evidence,
+        &comparison,
+        replacement_identity,
+    )?;
+    plan.boundary = Some(accepted);
+    Ok(receipt)
+}
+
+fn accepted_receipt_json(
+    receipt: &jet::ForeignBridge::ForeignSourceReceipt,
+    assumptions: &[String],
+) -> Result<CanonicalJson, String> {
+    let identity = CanonicalJson::object([
+        ("generator".into(), CanonicalJson::String(receipt.boundary_identity.generator.clone())),
+        (
+            "implementation".into(),
+            CanonicalJson::String(receipt.boundary_identity.implementation.clone()),
+        ),
+        ("overlay".into(), CanonicalJson::String(receipt.boundary_identity.overlay.clone())),
+        ("source".into(), CanonicalJson::String(receipt.boundary_identity.source.clone())),
+        ("target".into(), CanonicalJson::String(receipt.boundary_identity.target.clone())),
+        (
+            "toolchain".into(),
+            CanonicalJson::String(receipt.boundary_identity.toolchain.clone()),
+        ),
+    ])?;
+    let evidence = receipt
+        .evidence
+        .iter()
+        .map(|identity| {
+            CanonicalJson::object([
+                ("claim_id".into(), CanonicalJson::String(identity.claim_id.clone())),
+                (
+                    "evidence_id".into(),
+                    CanonicalJson::String(identity.evidence_id.clone()),
+                ),
+                ("report_id".into(), CanonicalJson::String(identity.report_id.clone())),
+            ])
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let derivation = CanonicalJson::object([(
+        "id".into(),
+        CanonicalJson::String(receipt.derivation.id.clone()),
+    )])?;
+    CanonicalJson::object([
+        ("artifact_coverage_digest".into(), CanonicalJson::String(receipt.artifact_coverage_digest.clone())),
+        ("assumptions".into(), CanonicalJson::Array(assumptions.iter().cloned().map(CanonicalJson::String).collect())),
+        ("boundary_digest".into(), CanonicalJson::String(receipt.boundary_digest.clone())),
+        ("boundary_identity".into(), identity),
+        ("comparison_artifact_id".into(), CanonicalJson::String(receipt.comparison_artifact_id.clone())),
+        ("comparison_reason".into(), receipt.comparison_reason.clone().map(CanonicalJson::String).unwrap_or(CanonicalJson::Null)),
+        ("comparison_relation".into(), CanonicalJson::String(receipt.comparison_relation.clone())),
+        ("comparison_schema_version".into(), CanonicalJson::Integer(receipt.comparison_schema_version.to_string())),
+        ("comparison_status".into(), CanonicalJson::String(receipt.comparison_status.clone())),
+        ("compared_samples".into(), CanonicalJson::Integer(receipt.compared_samples.to_string())),
+        ("derivation".into(), derivation),
+        ("discarded_cases".into(), CanonicalJson::Integer(receipt.discarded_cases.to_string())),
+        ("evidence".into(), CanonicalJson::Array(evidence)),
+        ("first_difference".into(), receipt.first_difference.map(|value| CanonicalJson::Integer(value.to_string())).unwrap_or(CanonicalJson::Null)),
+        ("replacement_identity".into(), CanonicalJson::String(receipt.replacement_identity.clone())),
+        ("schema".into(), CanonicalJson::String(receipt.schema.into())),
+        ("source_authority".into(), CanonicalJson::String(receipt.source_authority.as_str().into())),
+        ("source_identity".into(), CanonicalJson::String(receipt.source_identity.clone())),
+    ])
+}
+
+fn persist_accepted_receipt(
+    plan: &Plan,
+    receipt: &jet::ForeignBridge::ForeignSourceReceipt,
+    cwd: &Path,
+) -> Result<(), String> {
+    let boundary = plan
+        .boundary
+        .as_ref()
+        .ok_or_else(|| "accepted source import has no boundary".to_string())?;
+    receipt.validate()?;
+    let mut files = Vec::new();
+    collect_sources(&plan.source, &plan.source, &plan.language, &mut files)?;
+    files.sort();
+    if files.is_empty() {
+        return Err("accepted source import has no source inputs".into());
+    }
+    let argv = vec![
+        "import".to_string(),
+        plan.source.display().to_string(),
+        "--update".to_string(),
+    ];
+    let root = receipt_root_for("import", &argv, cwd);
+    let store = ReceiptStore::new(root);
+    let section = ReceiptSection::from_json(
+        "foreign-source-replacement",
+        "ForeignSourceReceipt",
+        accepted_receipt_json(receipt, &boundary.assumptions)?,
+    )?;
+    let mut consumed = Vec::new();
+    for evidence in &receipt.evidence {
+        let link = RecordLink::new(RecordKind::Evidence, evidence.report_id.clone())?;
+        if !consumed.contains(&link) {
+            consumed.push(link);
+        }
+    }
+    let comparison = RecordLink::new(
+        RecordKind::Comparison,
+        receipt.comparison_artifact_id.clone(),
+    )?;
+    if !consumed.contains(&comparison) {
+        consumed.push(comparison);
+    }
+    store.record_with_sections_and_links(
+        "import",
+        &argv,
+        &files,
+        0,
+        &[],
+        &[],
+        &[section],
+        &consumed,
+        &[],
+    )?;
+    Ok(())
+}
+
+fn apply_plan(mut plan: Plan, mode: Mode, json: bool) -> i32 {
+    if mode != Mode::DryRun {
+        if let Err(error) = attach_import_evidence(&mut plan) {
+            return operation_error("attach import evidence", &error, json);
+        }
+    }
+    let accepted_receipt = if mode == Mode::Update {
+        let cwd = match std::env::current_dir() {
+            Ok(cwd) => cwd,
+            Err(error) => {
+                return operation_error("read current directory", &error.to_string(), json)
+            }
+        };
+        match accept_update_replacement(&mut plan, &cwd) {
+            Ok(receipt) => Some(receipt),
+            Err(error) => return operation_error("accept source replacement", &error, json),
+        }
+    } else {
+        None
+    };
     let report = report(&plan);
     let baseline_root = plan.target.join(".jet-import/baseline");
     let mut writes = Vec::new();
@@ -2275,23 +3095,18 @@ fn apply_plan(plan: Plan, mode: Mode, json: bool) -> i32 {
                 diagnostic.what.clone(),
                 diagnostic.why.clone(),
                 diagnostic.fix.clone(),
-            )
-            .json();
+            );
+            let paths = StatusValue::array(
+                conflicts
+                    .iter()
+                    .map(|path| StatusValue::from(path.display().to_string())),
+            );
             println!(
                 "{}",
-                render_status_json(
-                    "conflict",
-                    false,
-                    "import",
-                    &format!(
-                        ",\"diagnostics\":[{report}],\"paths\":[{}]",
-                        conflicts
-                            .iter()
-                            .map(|path| format!("\"{}\"", json_escape(&path.display().to_string())))
-                            .collect::<Vec<_>>()
-                            .join(",")
-                    ),
-                )
+                StatusEnvelope::new("import", false)
+                    .with_report(report)
+                    .with_field("paths", paths)
+                    .json()
             );
         } else {
             eprintln!("error[{}]: {}", diagnostic.code, diagnostic.what);
@@ -2313,15 +3128,39 @@ fn apply_plan(plan: Plan, mode: Mode, json: bool) -> i32 {
             return operation_error("write import output", &error.to_string(), json);
         }
     }
+    if mode != Mode::DryRun {
+        let evidence = match plan.evidence.as_ref() {
+            Some(evidence) => evidence,
+            None => return operation_error(
+                "persist import evidence",
+                "source import has no evidence report",
+                json,
+            ),
+        };
+        if let Err(error) =
+            crate::CmdCompile::persist_evidence_report_for_inputs(evidence, &plan.source_digest)
+        {
+            return operation_error("persist import evidence", &error, json);
+        }
+    }
+    if let Some(receipt) = accepted_receipt.as_ref() {
+        let cwd = match std::env::current_dir() {
+            Ok(cwd) => cwd,
+            Err(error) => {
+                return operation_error("read current directory", &error.to_string(), json)
+            }
+        };
+        if let Err(error) = persist_accepted_receipt(&plan, receipt, &cwd) {
+            return operation_error("persist accepted source receipt", &error, json);
+        }
+    }
     if json {
+        let import = report_value(&plan);
         println!(
             "{}",
-            render_status_json(
-                "ok",
-                true,
-                "import",
-                &format!(",\"import\":{}", report.trim_end()),
-            )
+            StatusEnvelope::new("import", true)
+                .with_field("import", import)
+                .json()
         );
     } else {
         let verb = if mode == Mode::DryRun {
@@ -2351,9 +3190,41 @@ fn apply_plan(plan: Plan, mode: Mode, json: bool) -> i32 {
     ExitCodes::OK
 }
 
+fn boundary_projection_json(plan: &Plan) -> String {
+    let Some(boundary) = plan.boundary.as_ref() else {
+        return "[]".into();
+    };
+    let rows = boundary
+        .provenance_fields()
+        .into_iter()
+        .map(|(name, value)| {
+            format!(
+                "{{\"name\":\"{}\",\"value\":\"{}\"}}",
+                json_escape(&name),
+                json_escape(&value)
+            )
+        })
+        .collect::<Vec<_>>();
+    format!("[{}]", rows.join(","))
+}
+
+fn boundary_projection_value(plan: &Plan) -> StatusValue {
+    let Some(boundary) = plan.boundary.as_ref() else {
+        return StatusValue::array(std::iter::empty::<StatusValue>());
+    };
+    StatusValue::array(boundary.provenance_fields().into_iter().map(|(name, value)| {
+        StatusValue::object(
+            StatusFields::new()
+                .with("name", name)
+                .with("value", value),
+        )
+    }))
+}
+
 fn report(plan: &Plan) -> String {
+    let boundary = boundary_projection_json(plan);
     let mut output = format!(
-        "{{\"schema\":\"jet.source-import.v1\",\"law\":\"D-MIGRATE-SRC1\",\"language\":\"{}\",\"source\":\"{}\",\"target\":\"{}\",\"provenance\":{{\"source_root\":\"{}\",\"generated_root\":\"{}\"}},\"summary\":{{\"files\":{},\"translated_functions\":{},\"carried_tests\":{},\"omissions\":{}}},\"omissions\":[",
+        "{{\"schema\":\"jet.source-import.v1\",\"law\":\"D-MIGRATE-SRC1\",\"language\":\"{}\",\"source\":\"{}\",\"target\":\"{}\",\"provenance\":{{\"source_root\":\"{}\",\"generated_root\":\"{}\",\"boundary\":{boundary}}},\"summary\":{{\"files\":{},\"translated_functions\":{},\"carried_tests\":{},\"omissions\":{}}},\"omissions\":[",
         json_escape(&plan.language),
         json_escape(&plan.source.display().to_string()),
         json_escape(&plan.target.display().to_string()),
@@ -2383,6 +3254,52 @@ fn report(plan: &Plan) -> String {
     }
     output.push_str("]}\n");
     output
+}
+
+fn report_value(plan: &Plan) -> StatusValue {
+    let omissions = StatusValue::array(plan.todos.iter().map(|todo| {
+        let diagnostic = todo.diagnostic();
+        StatusValue::object(
+            StatusFields::new()
+                .with("code", diagnostic.code.as_str())
+                .with("what", diagnostic.what.as_str())
+                .with("why", diagnostic.why.as_str())
+                .with("fix", diagnostic.fix.as_str())
+                .with("source", todo.source.as_str())
+                .with("source_span", todo.source.as_str())
+                .with("generated_target", todo.target.as_str())
+                .with("provenance", "D-MIGRATE-SRC1")
+                .with("migration_status", todo.status),
+        )
+    }));
+    StatusValue::object(
+        StatusFields::new()
+            .with("schema", "jet.source-import.v1")
+            .with("law", "D-MIGRATE-SRC1")
+            .with("language", plan.language.as_str())
+            .with("source", plan.source.display().to_string())
+            .with("target", plan.target.display().to_string())
+            .with(
+                "provenance",
+                StatusValue::object(
+                    StatusFields::new()
+                        .with("source_root", plan.source.display().to_string())
+                        .with("generated_root", plan.target.display().to_string())
+                        .with("boundary", boundary_projection_value(plan)),
+                ),
+            )
+            .with(
+                "summary",
+                StatusValue::object(
+                    StatusFields::new()
+                        .with("files", plan.generated.len())
+                        .with("translated_functions", plan.functions)
+                        .with("carried_tests", plan.tests)
+                        .with("omissions", plan.todos.len()),
+                ),
+            )
+            .with("omissions", omissions),
+    )
 }
 
 fn gap(
@@ -2487,15 +3404,16 @@ fn usage_error(what: &str, fix: &str, json: bool) -> i32 {
     if json {
         println!(
             "{}",
-            ReportEnvelope::new(
-                "tool",
-                "error",
-                "E2102",
-                what,
-                "D-MIGRATE-SRC1 keeps source import arguments explicit",
-                fix,
-            )
-            .json()
+            StatusEnvelope::new("import", false)
+                .with_report(ReportEnvelope::new(
+                    "tool",
+                    "error",
+                    "E2102",
+                    what,
+                    "D-MIGRATE-SRC1 keeps source import arguments explicit",
+                    fix,
+                ))
+                .json()
         );
     } else {
         crate::emit_cli_report(
@@ -2514,15 +3432,16 @@ fn operation_error(what: &str, why: &str, json: bool) -> i32 {
     if json {
         println!(
             "{}",
-            ReportEnvelope::new(
-                "tool",
-                "error",
-                diagnostic.code,
-                diagnostic.what,
-                diagnostic.why,
-                diagnostic.fix,
-            )
-            .json()
+            StatusEnvelope::new("import", false)
+                .with_report(ReportEnvelope::new(
+                    "tool",
+                    "error",
+                    diagnostic.code,
+                    diagnostic.what,
+                    diagnostic.why,
+                    diagnostic.fix,
+                ))
+                .json()
         );
     } else {
         eprintln!("error[{}]: {}", diagnostic.code, diagnostic.what);

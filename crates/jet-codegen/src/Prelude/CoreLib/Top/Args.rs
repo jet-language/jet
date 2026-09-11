@@ -546,6 +546,18 @@ fn jet_args_completion(spec: &JetArgsSpec, shell: &String) -> String {
 /// missing required positionals, or unconsumed bare arguments. `argv[0]` (the
 /// program name) is skipped.
 fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArgs, String> {
+    jet_args_parse_mode(spec, argv, false)
+}
+
+fn jet_args_parse_guided(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArgs, String> {
+    jet_args_parse_mode(spec, argv, true)
+}
+
+fn jet_args_parse_mode(
+    spec: &JetArgsSpec,
+    argv: &Vec<String>,
+    allow_missing: bool,
+) -> Result<JetParsedArgs, String> {
     let mut flags: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
     let mut options: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
     let mut fallbacks: std::collections::HashMap<String, String> =
@@ -693,7 +705,7 @@ fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArg
                 if let Some((name, nested)) = jet_args_find_subcommand(spec, arg) {
                     let mut nested_argv = vec![format!("{} {}", spec.prog, name)];
                     nested_argv.extend(argv.iter().skip(i + 1).cloned());
-                    let parsed = jet_args_parse(&nested, &nested_argv)?;
+                    let parsed = jet_args_parse_mode(&nested, &nested_argv, allow_missing)?;
                     let nested_explicit_flags = parsed.explicit_flags;
                     let nested_explicit_options = parsed.explicit_options;
                     for (name, value) in parsed.flags {
@@ -786,6 +798,7 @@ fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArg
         options.entry(name).or_insert_with(|| vec![value]);
     }
     if !missing.is_empty()
+        && !allow_missing
         && !root_help
         && !flags.get("help").copied().unwrap_or(false)
     {
@@ -799,6 +812,7 @@ fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArg
     for e in jet_args_all_entries(spec) {
         if let JetArgKind::Option { name, required, .. } = e {
             if *required
+                && !allow_missing
                 && !options.contains_key(name)
                 && !root_help
                 && !flags.get("help").copied().unwrap_or(false)
@@ -1011,4 +1025,286 @@ impl JetShow for JetParsedArgs {
             self.positionals.len()
         )
     }
+}
+
+#[derive(Clone)]
+struct JetGuidedField {
+    name: String,
+    help: String,
+    meta: String,
+    default: Option<String>,
+    env: Option<String>,
+    required: bool,
+    repeat: bool,
+    value: JetArgValueKind,
+    flag: bool,
+    positional: bool,
+    positional_index: Option<usize>,
+    page: usize,
+}
+
+fn jet_args_guided_skip_name(name: &str) -> bool {
+    matches!(name, "verbose" | "quiet" | "color" | "help" | "version")
+}
+
+fn jet_args_guided_fields(spec: &JetArgsSpec) -> Vec<JetGuidedField> {
+    let mut fields = Vec::new();
+    let mut positional_index = 0usize;
+    for entry in jet_args_all_entries(spec) {
+        if match entry {
+            JetArgKind::Flag { name, .. }
+            | JetArgKind::Option { name, .. }
+            | JetArgKind::Positional { name, .. } => jet_args_guided_skip_name(name),
+            JetArgKind::Subcommand { .. } => false,
+        } {
+            continue;
+        }
+        match entry {
+            JetArgKind::Flag { name, help, .. } => {
+                if !fields.iter().any(|field: &JetGuidedField| field.name == *name) {
+                    fields.push(JetGuidedField {
+                        name: name.clone(),
+                        help: help.clone(),
+                        meta: String::new(),
+                        default: None,
+                        env: None,
+                        required: false,
+                        repeat: false,
+                        value: JetArgValueKind::String,
+                        flag: true,
+                        positional: false,
+                        positional_index: None,
+                        page: 0,
+                    });
+                }
+            }
+            JetArgKind::Option {
+                name,
+                help,
+                meta,
+                default,
+                env,
+                required,
+                repeat,
+                value,
+                ..
+            } => {
+                if let Some(field) = fields.iter_mut().find(|field| field.name == *name) {
+                    field.help = help.clone();
+                    field.meta = meta.clone();
+                    field.default = default.clone();
+                    field.env = env.clone();
+                    field.required = *required;
+                    field.repeat = *repeat;
+                    field.value = value.clone();
+                    field.flag = false;
+                } else {
+                    fields.push(JetGuidedField {
+                        name: name.clone(),
+                        help: help.clone(),
+                        meta: meta.clone(),
+                        default: default.clone(),
+                        env: env.clone(),
+                        required: *required,
+                        repeat: *repeat,
+                        value: value.clone(),
+                        flag: false,
+                        positional: false,
+                        positional_index: None,
+                        page: 0,
+                    });
+                }
+            }
+            JetArgKind::Positional { name, help } => {
+                if let Some(field) = fields.iter_mut().find(|field| field.name == *name) {
+                    field.positional = true;
+                    field.positional_index = Some(positional_index);
+                    if field.default.is_none() {
+                        field.required = true;
+                    }
+                } else {
+                    fields.push(JetGuidedField {
+                        name: name.clone(),
+                        help: help.clone(),
+                        meta: "VALUE".to_string(),
+                        default: None,
+                        env: None,
+                        required: true,
+                        repeat: false,
+                        value: JetArgValueKind::String,
+                        flag: false,
+                        positional: true,
+                        positional_index: Some(positional_index),
+                        page: 0,
+                    });
+                }
+                positional_index += 1;
+            }
+            JetArgKind::Subcommand { .. } => {}
+        }
+    }
+    for (index, field) in fields.iter_mut().enumerate() {
+        field.page = index / 4;
+    }
+    fields
+}
+
+fn jet_args_guided_target_spec<'a>(
+    spec: &'a JetArgsSpec,
+    parsed: &JetParsedArgs,
+) -> &'a JetArgsSpec {
+    let Some(subcommand) = parsed.subcommand.as_deref() else {
+        return spec;
+    };
+    let Some((_, nested)) = jet_args_find_subcommand(spec, subcommand) else {
+        return spec;
+    };
+    jet_args_guided_target_spec(nested, parsed)
+}
+
+fn jet_args_guided_field_explicit(field: &JetGuidedField, parsed: &JetParsedArgs) -> bool {
+    if field.flag {
+        return parsed.explicit_flags.contains(&field.name);
+    }
+    if parsed.explicit_options.contains(&field.name) {
+        return true;
+    }
+    field
+        .positional_index
+        .is_some_and(|index| parsed.positionals.len() > index)
+}
+
+fn jet_args_guided_initial(field: &JetGuidedField, parsed: &JetParsedArgs) -> String {
+    if field.flag {
+        return parsed
+            .flags
+            .get(&field.name)
+            .copied()
+            .unwrap_or(false)
+            .then(|| "true".to_string())
+            .unwrap_or_default();
+    }
+    parsed
+        .options
+        .get(&field.name)
+        .and_then(|values| values.last().cloned())
+        .unwrap_or_default()
+}
+
+fn jet_args_guided_validate(field: &JetGuidedField, value: &str) -> Result<(), String> {
+    if field.flag {
+        if value.is_empty() {
+            return Ok(());
+        }
+        return match value.to_ascii_lowercase().as_str() {
+            "y" | "yes" | "true" | "1" | "on" | "n" | "no" | "false" | "0" | "off" => Ok(()),
+            _ => Err(format!(
+                "`{}` expects yes or no, got `{}`",
+                field.name, value
+            )),
+        };
+    }
+    if value.is_empty() {
+        return if field.required {
+            Err(format!("`--{}` requires a value", field.name))
+        } else {
+            Ok(())
+        };
+    }
+    let entry = JetArgKind::Option {
+        name: field.name.clone(),
+        short: None,
+        help: field.help.clone(),
+        meta: field.meta.clone(),
+        default: field.default.clone(),
+        env: field.env.clone(),
+        required: field.required,
+        repeat: field.repeat,
+        value: field.value.clone(),
+    };
+    let mut options = std::collections::HashMap::new();
+    jet_args_store_option(&mut options, &entry, value)
+}
+
+fn jet_args_guided_append(field: &JetGuidedField, value: &str, argv: &mut Vec<String>) {
+    if field.flag {
+        if matches!(
+            value.to_ascii_lowercase().as_str(),
+            "y" | "yes" | "true" | "1" | "on"
+        ) {
+            argv.push(format!("--{}", field.name));
+        }
+    } else {
+        argv.push(format!("--{}", field.name));
+        argv.push(value.to_string());
+    }
+}
+
+fn jet_args_guided_argv_with<F>(
+    spec: &JetArgsSpec,
+    argv: &Vec<String>,
+    mut read: F,
+) -> Result<Vec<String>, String>
+where
+    F: FnMut(&JetGuidedField, &str, Option<&str>) -> Result<String, String>,
+{
+    let parsed = jet_args_parse_guided(spec, argv)?;
+    if parsed.explicit_flags.contains("help") || parsed.explicit_flags.contains("version") {
+        return Ok(argv.clone());
+    }
+    let target = jet_args_guided_target_spec(spec, &parsed);
+    let fields = jet_args_guided_fields(target);
+    if fields.is_empty() {
+        return Ok(argv.clone());
+    }
+    let mut guided_argv = argv.clone();
+    let mut changed = false;
+    for field in fields {
+        if jet_args_guided_field_explicit(&field, &parsed) {
+            continue;
+        }
+        let mut initial = jet_args_guided_initial(&field, &parsed);
+        let mut candidate = initial.clone();
+        let mut error: Option<String> = None;
+        loop {
+            let raw = read(&field, &candidate, error.as_deref())?;
+            let value = if raw.is_empty() && !initial.is_empty() {
+                initial.clone()
+            } else {
+                raw
+            };
+            if let Err(next_error) = jet_args_guided_validate(&field, &value) {
+                candidate = value;
+                error = Some(next_error);
+                continue;
+            }
+            if field.repeat && !value.is_empty() {
+                jet_args_guided_append(&field, &value, &mut guided_argv);
+                changed = true;
+                initial.clear();
+                candidate.clear();
+                error = None;
+                continue;
+            }
+            if !value.is_empty() || field.flag {
+                if field.flag
+                    && matches!(
+                        value.to_ascii_lowercase().as_str(),
+                        "n" | "no" | "false" | "0" | "off"
+                    )
+                {
+                    // An absent flag and an explicit negative answer have the
+                    // same canonical representation: the flag is omitted.
+                } else if !value.is_empty() {
+                    jet_args_guided_append(&field, &value, &mut guided_argv);
+                    changed = true;
+                }
+            }
+            break;
+        }
+    }
+    if changed {
+        jet_args_parse(spec, &guided_argv)?;
+    }
+    Ok(guided_argv)
 }

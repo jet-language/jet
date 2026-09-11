@@ -12,32 +12,45 @@ mod repl_process;
 mod time_deadline_kernel;
 
 pub(crate) use core_calls::as_string;
-// The TIR evaluator uses the same receiver-level pure kernels as the
-// comptime interpreter; keep these exports at the crate boundary.
-pub use core_calls::{apply_core_pure_method, sketch_add};
-pub(super) use core_calls::{apply_regex_method, as_float, solver_require};
-// I9: the TIR evaluator calls this fake-data kernel too, so it
-// leaves this crate rather than stopping at `pub(super)`.
-pub use core_calls::apply_fake_method;
-/// Public host entry for the TIR evaluator (#777).
+pub(crate) use core_calls::data_plot_rt;
 pub use core_calls::{
-    apply_core_call, apply_core_call_with_type, apply_core_pure_call, apply_data_line_call,
-    apply_impure_core_call, apply_impure_core_call_with_type, data_status_rows,
+    apply_core_call, apply_core_call_with_type, apply_core_call_without_ambient,
+    apply_core_call_without_ambient_with_type, apply_core_call_without_ambient_with_type_args,
+    apply_core_pure_call, apply_core_pure_method,
+    apply_core_call_without_ambient_with_type_args_and_history_schema,
+    apply_data_line_call, apply_impure_core_call, apply_impure_core_call_with_type,
+    apply_impure_core_call_with_type_args, apply_raylib_ambient_core_call, data_status_rows,
+    history_callback_fingerprint, history_command_schema_from_mir, HistoryCommandSchema,
+    sketch_add, with_world_rng_provider,
+};
+pub(crate) use core_calls::eval_data_describe;
+pub(super) use core_calls::{apply_regex_method, as_float, solver_require};
+// I9: the MIR evaluator calls this fake-data kernel too, so it
+// must be reachable from outside this crate. One kernel, every tier.
+pub use core_calls::apply_fake_method;
+/// Public host entry for the MIR evaluator (#777).
+pub use core_calls::{
     display_core_pure_value, eval_regex_replace_all_with,
 };
 pub(crate) use core_calls::{
-    evaluate_typed_datetime_literal, url_parts_to_ct, validate_datetime_literal,
+    eval_data_pivot_sum, evaluate_typed_datetime_literal, url_parts_to_ct,
+    validate_datetime_literal,
 };
-/// Public for TirBridge `Rng.shuffle(&list)` write-back (#777).
+/// Public for MirBridge `Rng.shuffle(&list)` write-back (#777).
 pub use dispatch::apply_seeded_rng_method;
+pub use core_calls::apply_history_rng_method;
 pub use dispatch::apply_seeded_rng_method_with_type;
 pub(crate) use dispatch::{arg_string_literal, check_literal_embed_path, embed_path_err};
+pub(super) use dispatch::{
+    invoke_standalone_closure, invoke_standalone_closure_mut, invoke_standalone_closure_mut_args,
+};
 pub use dispatch::{
     eval_build_embed, eval_build_time_io, eval_locked_find, eval_net_fetch, is_tier2_core_call,
     project_rejection, vault_comptime_denied,
 };
-pub use repl_process::apply_repl_authorized_core_call;
-pub use repl_process::apply_repl_authorized_core_call_with_type;
+pub use repl_process::{
+    apply_repl_authorized_core_call, apply_repl_authorized_core_call_with_type,
+};
 
 pub(super) fn apply_pool(
     recv: &crate::AST::CtValue,
@@ -80,6 +93,14 @@ mod structure_tests {
             (
                 "core_calls/random",
                 include_str!("Methods/core_calls/random.rs"),
+            ),
+            (
+                "core_calls/history",
+                include_str!("Methods/core_calls/history.rs"),
+            ),
+            (
+                "core_calls/plain_calls",
+                include_str!("Methods/core_calls/plain_calls.rs"),
             ),
             ("pool", include_str!("Methods/pool.rs")),
         ] {

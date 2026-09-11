@@ -64,6 +64,20 @@ struct JetObserveEvent {
 
 const JET_OBSERVE_EVENT_LIMIT: usize = 256;
 const JET_OBSERVE_TASK_LIMIT: usize = 4096;
+const JET_OBSERVE_VALUE_LIMIT: usize = JET_DEVTOOLS_MAX_LIVE_VALUES;
+const JET_OBSERVE_DECISION_LEDGER_LIMIT_BYTES: usize = 512 * 1024;
+
+/// Complete identity supplied by a live host. No ambient/default identity is
+/// accepted.
+#[derive(Clone, PartialEq, Eq)]
+pub struct JetLiveIdentity {
+    pub session_id: String,
+    pub source_id: String,
+    pub build_id: String,
+    pub revision: String,
+    pub world_id: String,
+}
+
 // Keep the process-exit diagnostic bounded even when every registered task is
 // parked. The registry limit bounds cardinality; this limit bounds rendered
 // bytes so a pathological task forest cannot exhaust the exit path.
@@ -77,11 +91,15 @@ struct JetObserveRegistry {
     tasks: std::sync::Mutex<std::collections::HashMap<usize, JetObserveTask>>,
     channels: std::sync::Mutex<std::collections::HashMap<usize, JetObserveChannel>>,
     events: std::sync::Mutex<std::collections::VecDeque<JetObserveEvent>>,
+    values: std::sync::Mutex<std::collections::BTreeMap<String, JetLiveValueDecision>>,
+    decision_ledger: std::sync::Mutex<Option<String>>,
 }
 
 static JET_OBSERVE: std::sync::OnceLock<Option<std::sync::Arc<JetObserveRegistry>>> =
     std::sync::OnceLock::new();
 static JET_OBSERVE_STARTED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+static JET_OBSERVE_LIVE_VALUE_SINK: std::sync::LazyLock<JetLiveValueSinkGuard> =
+    std::sync::LazyLock::new(|| jet_devtools_install_live_value_sink(jet_observe_record_live_value));
 static JET_OBSERVE_EXIT_REPORTED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 static JET_OBSERVE_ARENAS: std::sync::atomic::AtomicUsize =
@@ -106,12 +124,120 @@ static JET_PROBE_ARENA_ALLOCS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 static JET_PROBE_ARENA_BYTES: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
-
 thread_local! {
     pub static JET_OBSERVE_TASK_ID: std::cell::Cell<usize> = const { std::cell::Cell::new(1) };
 }
 
+// A live devtools relay is one bounded canonical envelope snapshot. The outer
+// length prefix makes a reader reject torn writes; the envelope's own bounded
+// event deque is the ring.
+const JET_OBSERVE_DEVTOOLS_RELAY_MAX_BYTES: usize = 4 * 1024 * 1024;
+const JET_OBSERVE_DEVTOOLS_RELAY_PATH_ENV: &str = "JET_DEVTOOLS_RELAY_PATH";
+const JET_OBSERVE_DEVTOOLS_RELAY_SESSION_ENV: &str = "JET_DEVTOOLS_RELAY_SESSION_ID";
+const JET_OBSERVE_DEVTOOLS_RELAY_SOURCE_ENV: &str = "JET_DEVTOOLS_RELAY_SOURCE_ID";
+const JET_OBSERVE_DEVTOOLS_RELAY_BUILD_ENV: &str = "JET_DEVTOOLS_RELAY_BUILD_ID";
+const JET_OBSERVE_DEVTOOLS_RELAY_REVISION_ENV: &str = "JET_DEVTOOLS_RELAY_REVISION";
+const JET_OBSERVE_DEVTOOLS_RELAY_WORLD_ENV: &str = "JET_DEVTOOLS_RELAY_WORLD_ID";
+
+struct JetObserveDevtoolsRelay {
+    path: std::path::PathBuf,
+    envelope: std::sync::Mutex<JetDevtoolsEnvelope>,
+}
+
+impl JetObserveDevtoolsRelay {
+    fn write_envelope(&self, envelope: &str) {
+        if envelope.len() > JET_OBSERVE_DEVTOOLS_RELAY_MAX_BYTES
+            || envelope.len() > u32::MAX as usize
+        {
+            return;
+        }
+        let mut frame = Vec::with_capacity(4 + envelope.len());
+        frame.extend_from_slice(&(envelope.len() as u32).to_be_bytes());
+        frame.extend_from_slice(envelope.as_bytes());
+        let staging = self.path.with_extension("tmp");
+        let write_result = (|| -> std::io::Result<()> {
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create(true).truncate(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut file = options.open(&staging)?;
+            use std::io::Write;
+            file.write_all(&frame)?;
+            file.sync_all()?;
+            std::fs::rename(&staging, &self.path)?;
+            Ok(())
+        })();
+        if write_result.is_err() {
+            let _ = std::fs::remove_file(&staging);
+        }
+    }
+}
+
+impl JetDevtoolsEventSink for JetObserveDevtoolsRelay {
+    fn publish(&self, event: JetDevtoolsEvent) {
+        let Ok(mut envelope) = self.envelope.lock() else {
+            return;
+        };
+        envelope.push(event);
+        let Ok(serialized) = envelope.serialize() else {
+            return;
+        };
+        self.write_envelope(&serialized);
+    }
+}
+
+static JET_OBSERVE_DEVTOOLS_RELAY: std::sync::OnceLock<Option<JetDevtoolsEventSinkGuard>> =
+    std::sync::OnceLock::new();
+
+fn jet_observe_relay_env(key: &str) -> Option<String> {
+    let value = std::env::var(key).ok()?;
+    if value.is_empty() || value.len() > 16 * 1024 || value.chars().any(char::is_control) {
+        return None;
+    }
+    Some(value)
+}
+
+#[inline(always)]
+fn jet_observe_install_devtools_relay(identity: &JetLiveIdentity) {
+    if !JET_DEVTOOLS_LOCAL_RAIL_ENABLED {
+        return;
+    }
+    if JET_OBSERVE_DEVTOOLS_RELAY.get().is_some() {
+        return;
+    }
+    let pid = std::process::id();
+    let path = jet_observe_relay_env(JET_OBSERVE_DEVTOOLS_RELAY_PATH_ENV)
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::temp_dir().join(format!("jet-devtools-relay-{pid}.ring"))
+        });
+    let mut envelope = JetDevtoolsEnvelope::new(identity.session_id.clone(), 0);
+    let source_identity = JetDevtoolsSourceIdentityFact::new(
+        Some(identity.source_id.clone()),
+        Some(identity.build_id.clone()),
+        Some(identity.revision.clone()),
+        Some(identity.world_id.clone()),
+    );
+    if envelope.set_source_identity(Some(source_identity)).is_err() {
+        return;
+    }
+    let relay = std::sync::Arc::new(JetObserveDevtoolsRelay {
+        path,
+        envelope: std::sync::Mutex::new(envelope),
+    });
+    let sink: std::sync::Arc<dyn JetDevtoolsEventSink> = relay;
+    let guard = jet_devtools_install_event_sink(sink);
+    let _ = JET_OBSERVE_DEVTOOLS_RELAY.set(Some(guard));
+}
+
+#[inline(always)]
 fn jet_observe_registry() -> Option<&'static std::sync::Arc<JetObserveRegistry>> {
+    if !JET_DEVTOOLS_LOCAL_RAIL_ENABLED {
+        return None;
+    }
     JET_OBSERVE
         .get_or_init(|| {
             Some({
@@ -122,14 +248,56 @@ fn jet_observe_registry() -> Option<&'static std::sync::Arc<JetObserveRegistry>>
                     tasks: std::sync::Mutex::new(std::collections::HashMap::new()),
                     channels: std::sync::Mutex::new(std::collections::HashMap::new()),
                     events: std::sync::Mutex::new(std::collections::VecDeque::new()),
+                    values: std::sync::Mutex::new(std::collections::BTreeMap::new()),
+                    decision_ledger: std::sync::Mutex::new(None),
                 })
             })
         })
         .as_ref()
 }
+fn jet_observe_store_value(registry: &JetObserveRegistry, value: JetLiveValueDecision) {
+    let mut values = registry.values.lock().unwrap();
+    if values.contains_key(&value.value_id) || values.len() < JET_OBSERVE_VALUE_LIMIT {
+        values.insert(value.value_id.clone(), value);
+    }
+}
+
+fn jet_observe_record_live_value(value: JetLiveValueDecision) {
+    let Some(registry) = jet_observe_registry() else {
+        return;
+    };
+    jet_observe_store_value(registry, value);
+}
+
+fn jet_observe_live_values(registry: &JetObserveRegistry) -> Vec<JetLiveValueDecision> {
+    registry
+        .values
+        .lock()
+        .unwrap()
+        .values()
+        .cloned()
+        .collect()
+}
 
 fn jet_observe_live_enabled() -> bool {
     std::env::var("JET_OBSERVE").ok().as_deref() == Some("1")
+}
+fn jet_observe_store_decision_ledger(registry: &JetObserveRegistry, ledger: String) {
+    if ledger.len() > JET_OBSERVE_DECISION_LEDGER_LIMIT_BYTES
+        || ledger.chars().any(char::is_control)
+        || !ledger.starts_with('{')
+        || !ledger.ends_with('}')
+    {
+        return;
+    }
+    *registry.decision_ledger.lock().unwrap() = Some(ledger);
+}
+
+pub fn jet_observe_record_decision_ledger_json(ledger: String) {
+    let Some(registry) = jet_observe_registry() else {
+        return;
+    };
+    jet_observe_store_decision_ledger(registry, ledger);
 }
 
 fn jet_observe_escape(value: &str) -> String {
@@ -158,14 +326,27 @@ fn jet_observe_process_start_id() -> String {
     }
     String::new()
 }
-
-fn jet_observe_snapshot(registry: &JetObserveRegistry, start_id: &str) -> String {
+fn jet_observe_snapshot(
+    registry: &JetObserveRegistry,
+    start_id: &str,
+    identity: &JetLiveIdentity,
+) -> String {
     use std::sync::atomic::Ordering;
-    let mut tasks: Vec<_> = registry.tasks.lock().unwrap().iter()
-        .map(|(id, task)| (*id, task.clone())).collect();
+    let mut tasks: Vec<_> = registry
+        .tasks
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(id, task)| (*id, task.clone()))
+        .collect();
     tasks.sort_by_key(|(id, _)| *id);
-    let mut channels: Vec<_> = registry.channels.lock().unwrap().iter()
-        .map(|(id, channel)| (*id, channel.clone())).collect();
+    let mut channels: Vec<_> = registry
+        .channels
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(id, channel)| (*id, channel.clone()))
+        .collect();
     channels.sort_by_key(|(id, _)| *id);
     let events = registry.events.lock().unwrap().iter().cloned().collect::<Vec<_>>();
     tasks.truncate(4096);
@@ -201,10 +382,42 @@ fn jet_observe_snapshot(registry: &JetObserveRegistry, start_id: &str) -> String
     let cancelled = tasks.iter().filter(|(_, task)| task.cancelled).count();
     let running = tasks.iter().filter(|(_, task)| task.state == "running").count();
 
+    let value_json = jet_observe_live_values(registry)
+        .iter()
+        .map(|value| {
+            let rendered_value = value
+                .rendered_value
+                .as_deref()
+                .map(|rendered| format!("\"{}\"", jet_observe_escape(rendered)))
+                .unwrap_or_else(|| "null".to_string());
+            format!(
+                "{{\"value_id\":\"{}\",\"type_identity\":\"{}\",\"disposition\":\"{}\",\"reason\":\"{}\",\"rendered_value\":{}}}",
+                jet_observe_escape(&value.value_id),
+                jet_observe_escape(&value.type_identity),
+                jet_observe_escape(&value.disposition),
+                jet_observe_escape(&value.reason),
+                rendered_value,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let decision_ledger = registry
+        .decision_ledger
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap_or_else(|| "null".to_string());
     format!(
-        "{{\"schema_version\":1,\"pid\":{},\"start_id\":\"{}\",\"captured_ms\":{},\"tasks\":[{}],\"channels\":[{}],\"event_observations\":[{}],\"effects\":{{\"compute\":{},\"waiting\":{},\"channel\":{},\"time\":{},\"io\":{}}},\"resources\":{{\"workers\":{},\"running\":{},\"queued\":{},\"cancelled\":{},\"arenas\":{},\"arena_allocations\":{},\"arena_bytes\":{}}}}}",
+        "{{\"protocol\":\"jet.live.v1\",\"session_id\":\"{}\",\"source_id\":\"{}\",\"build_id\":\"{}\",\"revision\":\"{}\",\"world_id\":\"{}\",\"decisions\":{},\"values\":[{}],\"schema_version\":1,\"pid\":{},\"start_id\":\"{}\",\"captured_ms\":{},\"tasks\":[{}],\"channels\":[{}],\"event_observations\":[{}],\"effects\":{{\"compute\":{},\"waiting\":{},\"channel\":{},\"time\":{},\"io\":{}}},\"resources\":{{\"workers\":{},\"running\":{},\"queued\":{},\"cancelled\":{},\"arenas\":{},\"arena_allocations\":{},\"arena_bytes\":{}}}}}",
+        jet_observe_escape(&identity.session_id),
+        jet_observe_escape(&identity.source_id),
+        jet_observe_escape(&identity.build_id),
+        jet_observe_escape(&identity.revision),
+        jet_observe_escape(&identity.world_id),
+        decision_ledger,
+        value_json,
         std::process::id(),
-        start_id,
+        jet_observe_escape(start_id),
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default().as_millis(),
         task_json, channel_json, event_json,
@@ -354,28 +567,99 @@ pub fn jet_observe_task_finish(id: usize) {
     }
 }
 
-pub fn jet_observe_runtime_start() {
+fn jet_observe_live_identity_from_env() -> Option<JetLiveIdentity> {
+    Some(JetLiveIdentity {
+        session_id: jet_observe_relay_env(JET_OBSERVE_DEVTOOLS_RELAY_SESSION_ENV)?,
+        source_id: jet_observe_relay_env(JET_OBSERVE_DEVTOOLS_RELAY_SOURCE_ENV)?,
+        build_id: jet_observe_relay_env(JET_OBSERVE_DEVTOOLS_RELAY_BUILD_ENV)?,
+        revision: jet_observe_relay_env(JET_OBSERVE_DEVTOOLS_RELAY_REVISION_ENV)?,
+        world_id: jet_observe_relay_env(JET_OBSERVE_DEVTOOLS_RELAY_WORLD_ENV)?,
+    })
+}
+
+#[inline(always)]
+pub fn jet_observe_runtime_start_from_env(values: Vec<JetLiveValueDecision>) {
+    jet_observe_runtime_start_with_decision_ledger(
+        jet_observe_live_identity_from_env(),
+        values,
+        None,
+    );
+}
+
+#[inline(always)]
+pub fn jet_observe_runtime_start(
+    identity: Option<JetLiveIdentity>,
+    values: Vec<JetLiveValueDecision>,
+) {
+    jet_observe_runtime_start_with_decision_ledger(identity, values, None);
+}
+#[inline(always)]
+pub fn jet_observe_runtime_start_with_decision_ledger_from_env(
+    values: Vec<JetLiveValueDecision>,
+    decision_ledger: Option<String>,
+) {
+    jet_observe_runtime_start_with_decision_ledger(
+        jet_observe_live_identity_from_env(),
+        values,
+        decision_ledger,
+    );
+}
+
+#[inline(always)]
+pub fn jet_observe_runtime_start_with_decision_ledger(
+    identity: Option<JetLiveIdentity>,
+    values: Vec<JetLiveValueDecision>,
+    decision_ledger: Option<String>,
+) {
+    if !JET_DEVTOOLS_LOCAL_RAIL_ENABLED {
+        return;
+    }
     let Some(registry) = jet_observe_registry().cloned() else { return };
+    if !jet_observe_live_enabled() {
+        return;
+    }
+    let Some(identity) = identity else {
+        return;
+    };
+    if jet_observe_live_identity_from_env().is_some_and(|env_identity| env_identity != identity) {
+        return;
+    }
+    if [
+        identity.session_id.as_str(),
+        identity.source_id.as_str(),
+        identity.build_id.as_str(),
+        identity.revision.as_str(),
+        identity.world_id.as_str(),
+    ]
+    .iter()
+    .any(|value| value.is_empty() || value.chars().any(char::is_control))
+    {
+        return;
+    }
     use std::sync::atomic::Ordering;
     JET_OBSERVE_EXIT_REPORTED.store(false, Ordering::Release);
     let first_start = JET_OBSERVE_STARTED.set(()).is_ok();
-    if first_start {
-        registry.tasks.lock().unwrap().insert(1, JetObserveTask {
-            parent: 0,
-            label: String::from("root"),
-            spawn_site: 0,
-            state: "running",
-            wait: String::new(),
-            deadline_ms: None,
-            cancelled: false,
-            // The root task is the program itself, not a spawned body, so no
-            // cancellation control exists to link. `None` says that; a dangling
-            // `Weak` would claim a control that was never there.
-            control: None,
-        });
+    if let Some(ledger) = decision_ledger {
+        jet_observe_store_decision_ledger(&registry, ledger);
     }
-    if !first_start || !jet_observe_live_enabled() {
+    if !first_start {
         return;
+    }
+    jet_observe_install_devtools_relay(&identity);
+    let _ = &*JET_OBSERVE_LIVE_VALUE_SINK;
+    registry.tasks.lock().unwrap().insert(1, JetObserveTask {
+        parent: 0,
+        label: String::from("root"),
+        spawn_site: 0,
+        state: "running",
+        wait: String::new(),
+        deadline_ms: None,
+        cancelled: false,
+        // The root task is the program itself, not a spawned body.
+        control: None,
+    });
+    for value in values.into_iter().take(JET_OBSERVE_VALUE_LIMIT) {
+        jet_observe_store_value(&registry, value);
     }
     std::thread::spawn(move || {
         use std::io::Write;
@@ -385,7 +669,7 @@ pub fn jet_observe_runtime_start() {
         let mut sequence = 0_u64;
         loop {
             sequence = sequence.wrapping_add(1);
-            let snapshot = jet_observe_snapshot(&registry, &start_id);
+            let snapshot = jet_observe_snapshot(&registry, &start_id, &identity);
             let staging = std::env::temp_dir().join(format!(
                 ".jet-observe-{pid}-{start_id}-{sequence}.tmp"
             ));

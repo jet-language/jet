@@ -59,11 +59,7 @@ fn regex_is_match_method(
     Ok(CtValue::Bool(re.is_match(text)))
 }
 
-fn regex_find_method(
-    recv: &CtValue,
-    args: &[CtValue],
-    span: Span,
-) -> Result<CtValue, Diagnostic> {
+fn regex_find_method(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
     let re = regex_pattern_value(recv, span)?;
     let text = as_string(
         args.first()
@@ -172,7 +168,6 @@ pub fn eval_regex_replace_all_with(
         Ok(CtValue::Str(replaced))
     })())
 }
-
 
 fn regex_flags_value(
     value: &CtValue,
@@ -332,11 +327,7 @@ pub(super) fn regex_find_all(args: Vec<CtValue>, span: Span) -> Result<CtValue, 
             .ok_or_else(|| unsupported("regex.find_all: missing text argument", span))?,
         span,
     )?;
-    let items: Vec<CtValue> = re
-        .find_all(text)
-        .into_iter()
-        .map(CtValue::Str)
-        .collect();
+    let items: Vec<CtValue> = re.find_all(text).into_iter().map(CtValue::Str).collect();
     Ok(CtValue::List(items))
 }
 
@@ -362,11 +353,7 @@ pub(super) fn regex_split(args: Vec<CtValue>, span: Span) -> Result<CtValue, Dia
             .ok_or_else(|| unsupported("regex.split: missing text argument", span))?,
         span,
     )?;
-    let items: Vec<CtValue> = re
-        .split(text)
-        .into_iter()
-        .map(CtValue::Str)
-        .collect();
+    let items: Vec<CtValue> = re.split(text).into_iter().map(CtValue::Str).collect();
     Ok(CtValue::List(items))
 }
 

@@ -1,0 +1,9 @@
+// D-EMAIL1: envelope recipients stay separate from message serialization.
+use core.email as email
+
+fn run() {
+    sender :: email.address("sender@example.com") ?? return
+    recipient :: email.address("recipient@example.net") ?? return
+    envelope :: email.envelope(sender, [recipient]) ?? return
+    print("recipients:{envelope.recipients.len()}")
+}

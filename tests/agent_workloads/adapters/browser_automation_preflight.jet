@@ -27,19 +27,18 @@ fn run(args: WorkloadArgs) {
                 }
             }
             op == "timeout" -> {
-                if {
-                    value == "500" -> {
-                        if {
-                            browser.timeout(500) == .Ok(_) -> print("timeout|{value}|accepted")
-                            else -> print("timeout|{value}|rejected")
-                        }
+                if Int.parse(value) == {
+                    .Ok(milliseconds) -> {
+                        if milliseconds >= 1 && milliseconds <= 600000 {
+                            if {
+                                browser.timeout(milliseconds) == .Ok(_) -> {
+                                    print("timeout|{value}|accepted")
+                                }
+                                else -> print("timeout|{value}|rejected")
+                            }
+                        } else { print("timeout|{value}|rejected") }
                     }
-                    else -> {
-                        if {
-                            browser.timeout(0) == .Ok(_) -> print("timeout|{value}|accepted")
-                            else -> print("timeout|{value}|rejected")
-                        }
-                    }
+                    .Err(_) -> print("timeout|{value}|rejected")
                 }
             }
             op == "connect" -> {

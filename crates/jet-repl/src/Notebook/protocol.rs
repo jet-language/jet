@@ -1,7 +1,7 @@
 //! Headless notebook protocol — proves Jupyter adapter + first-party parity.
 
 use super::document::{export_ipynb, export_jet, import_ipynb, CellKind, JetNotebook};
-use super::kernel::{ClientKind, Kernel, RerunDecision};
+use super::kernel::{ClientKind, Kernel, KernelIdentity, RerunDecision};
 use std::path::PathBuf;
 
 #[derive(Clone, Debug)]
@@ -15,6 +15,28 @@ pub enum ProtocolMessage {
         from_id: usize,
         edited: Option<String>,
         decisions: Vec<RerunDecision>,
+    },
+    Confirm {
+        client: ClientKind,
+        cell_id: String,
+    },
+    Delete {
+        cell_id: String,
+    },
+    SetLazy {
+        cell_id: String,
+        lazy: bool,
+    },
+    Control {
+        function: String,
+        name: String,
+        value: String,
+    },
+    Reconnect {
+        source: String,
+        build: String,
+        session: String,
+        authority: String,
     },
     Interrupt,
     Stdin {
@@ -120,10 +142,10 @@ fn json_str(s: &str) -> String {
 
 pub fn handle_message(kernel: &mut Kernel, msg: ProtocolMessage) -> ProtocolReply {
     match msg {
-        ProtocolMessage::AddCell { kind, source } => {
-            let cell = kernel.notebook.add_cell(kind, source);
-            ProtocolReply::ok(format!("cell_id={}", cell.id))
-        }
+        ProtocolMessage::AddCell { kind, source } => match kernel.add_cell(kind, source) {
+            Ok(cell_id) => ProtocolReply::ok(format!("cell_id={cell_id}")),
+            Err(error) => ProtocolReply::err(error),
+        },
         ProtocolMessage::Execute { client, cell_id } => match kernel.execute_cell(client, &cell_id)
         {
             Ok(result) => {
@@ -160,6 +182,47 @@ pub fn handle_message(kernel: &mut Kernel, msg: ProtocolMessage) -> ProtocolRepl
                 Err(e) => ProtocolReply::err(e),
             }
         }
+        ProtocolMessage::Confirm { client, cell_id } => {
+            match kernel.confirm_reactive(client, &cell_id) {
+                Ok(ran) => ProtocolReply::ok(format!(
+                    "confirmed={cell_id}; reran={}",
+                    ran.join(",")
+                )),
+                Err(error) => ProtocolReply::err(error),
+            }
+        }
+        ProtocolMessage::Delete { cell_id } => match kernel.delete_cell(&cell_id) {
+            Ok(scrubbed) => ProtocolReply::ok(format!("deleted={cell_id}; scrubbed={}", scrubbed.join(","))),
+            Err(error) => ProtocolReply::err(error),
+        },
+        ProtocolMessage::SetLazy { cell_id, lazy } => {
+            match kernel.set_cell_lazy(&cell_id, lazy) {
+                Ok(()) => ProtocolReply::ok(format!("lazy={cell_id};enabled={lazy}")),
+                Err(error) => ProtocolReply::err(error),
+            }
+        }
+        ProtocolMessage::Control {
+            function,
+            name,
+            value,
+        } => match kernel.set_control(&function, &name, value) {
+            Ok(()) => ProtocolReply::ok(format!("control={function}.{name};updated")),
+            Err(error) => ProtocolReply::err(error),
+        },
+        ProtocolMessage::Reconnect {
+            source,
+            build,
+            session,
+            authority,
+        } => match kernel.reconnect(&KernelIdentity {
+            source,
+            build,
+            session,
+            authority,
+        }) {
+            Ok(()) => ProtocolReply::ok("reconnected"),
+            Err(error) => ProtocolReply::err(error),
+        },
         ProtocolMessage::Interrupt => {
             kernel.request_interrupt();
             ProtocolReply::ok("interrupt_requested")
@@ -348,6 +411,47 @@ fn parse_script_line(kernel: &Kernel, line: &str) -> Result<ProtocolMessage, Str
                 .or_else(|| kernel.notebook.cells.last().map(|c| c.id.clone()))
                 .ok_or("exec needs cell id")?;
             Ok(ProtocolMessage::Execute { client, cell_id })
+        }
+        "confirm" => {
+            let mut bits = rest.split_whitespace();
+            let first = bits.next().ok_or("confirm needs cell id")?;
+            let (client, cell_id) = match parse_client(first) {
+                Ok(client) => (
+                    client,
+                    bits.next().ok_or("confirm needs cell id")?.to_string(),
+                ),
+                Err(_) => (ClientKind::FirstParty, first.to_string()),
+            };
+            Ok(ProtocolMessage::Confirm { client, cell_id })
+        }
+        "delete" => Ok(ProtocolMessage::Delete {
+            cell_id: rest.to_string(),
+        }),
+        "lazy" => {
+            let mut bits = rest.split_whitespace();
+            let cell_id = bits.next().ok_or("lazy needs cell id")?.to_string();
+            let lazy = !matches!(bits.next(), Some("off" | "false" | "0"));
+            Ok(ProtocolMessage::SetLazy { cell_id, lazy })
+        }
+        "control" => {
+            let mut bits = rest.splitn(3, |character: char| character.is_ascii_whitespace());
+            Ok(ProtocolMessage::Control {
+                function: bits.next().ok_or("control needs function")?.to_string(),
+                name: bits.next().ok_or("control needs argument")?.to_string(),
+                value: bits.next().unwrap_or("").trim_start().to_string(),
+            })
+        }
+        "reconnect" => {
+            let mut bits = rest.split_whitespace();
+            Ok(ProtocolMessage::Reconnect {
+                source: bits.next().ok_or("reconnect needs source identity")?.into(),
+                build: bits.next().ok_or("reconnect needs build identity")?.into(),
+                session: bits.next().ok_or("reconnect needs session identity")?.into(),
+                authority: bits
+                    .next()
+                    .ok_or("reconnect needs authority identity")?
+                    .into(),
+            })
         }
         "interrupt" => Ok(ProtocolMessage::Interrupt),
         "stdin" => Ok(ProtocolMessage::Stdin {

@@ -13,6 +13,11 @@ fn workspace(name: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!("jet_prove_{name}_{}", std::process::id()));
     let _ = fs::remove_dir_all(&path);
     fs::create_dir_all(&path).unwrap();
+    fs::write(
+        path.join("package.jet"),
+        "name: \"test-fixture\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
     path
 }
 
@@ -260,7 +265,9 @@ fn prove_capture_replay_round_trip_and_corruption_fail_closed() {
         "replay identity build digest is not a SHA-256 hash: {build_digest}"
     );
     assert!(artifact_text.contains("\"source_digest\":\""));
-    assert!(artifact_text.contains("\"tir_hash\":\""));
+    assert!(artifact_text.contains("\"semantic_mir_hash\":\""));
+    assert!(artifact_text.contains("\"optimized_mir_hash\":\""));
+    assert!(artifact_text.contains("\"mir_schema\":\"mir-v1\""));
 
     let replayed = Command::new(jet())
         .current_dir(&root)
@@ -301,16 +308,21 @@ fn prove_capture_replay_round_trip_and_corruption_fail_closed() {
 }
 
 #[test]
-fn run_record_receipt_answers_debug_cause_queries() {
+fn run_recorded_alias_time_receipt_replays_without_execution() {
     let root = workspace("recorded_debug_queries");
     fs::write(
+        root.join("package.jet"),
+        "name: \"recorded-time\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc, Time, Exec] } }\n",
+    )
+    .unwrap();
+    fs::write(
         root.join("main.jet"),
-        "fn run() {\n    total := 0\n    total += 6\n    print(\"{total}\")\n}\n",
+        "use core.time as time\nuse core.process as process\nfn run() {\n    observed :: time.now()\n    argument :: process.args()[0]\n    marker :: \"recorded-{observed}\"\n    print(marker)\n    print(argument)\n}\n",
     )
     .unwrap();
     let recorded = Command::new(jet())
         .current_dir(&root)
-        .args(["run", "main.jet", "--record=causal"])
+        .args(["run", "main.jet", "--record=causal", "--", "recorded-arg"])
         .output()
         .unwrap();
     assert_eq!(
@@ -319,10 +331,19 @@ fn run_record_receipt_answers_debug_cause_queries() {
         "{}",
         String::from_utf8_lossy(&recorded.stderr)
     );
-    assert!(String::from_utf8_lossy(&recorded.stdout).contains("6"));
+    let recorded_stdout = String::from_utf8_lossy(&recorded.stdout);
+    let recorded_value = recorded_stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("recorded-"))
+        .expect("recorded run must print the captured time")
+        .to_string();
+    assert!(
+        recorded_value.parse::<i64>().is_ok(),
+        "captured time is not an integer: {recorded_value}"
+    );
+    assert!(recorded_stdout.lines().any(|line| line == "recorded-arg"));
     let artifact = root.join(".jet/replays/causal.jetproof-replay");
     assert!(artifact.is_file());
-    assert!(String::from_utf8_lossy(&fs::read(artifact).unwrap()).contains("recorded_run"));
 
     let mut debug = Command::new(jet())
         .current_dir(&root)
@@ -336,7 +357,7 @@ fn run_record_receipt_answers_debug_cause_queries() {
         .stdin
         .take()
         .unwrap()
-        .write_all(b"s\ns\nwhy total == 0\nwhen total\nc\n")
+        .write_all(format!("why observed == {recorded_value}\nwhen observed\nc\n").as_bytes())
         .unwrap();
     let output = debug.wait_with_output().unwrap();
     assert_eq!(
@@ -346,8 +367,15 @@ fn run_record_receipt_answers_debug_cause_queries() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("because act"), "{stdout}");
+    assert!(
+        stdout.contains(&format!("observed = {recorded_value} because act")),
+        "{stdout}"
+    );
     assert!(stdout.contains("last change:"), "{stdout}");
+    assert!(
+        !stdout.contains(&format!("recorded-{recorded_value}")),
+        "receipt replay re-executed program output: {stdout}"
+    );
 }
 
 #[test]

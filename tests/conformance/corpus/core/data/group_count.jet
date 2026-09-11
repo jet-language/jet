@@ -1,7 +1,10 @@
-// core-conformance: core.data.group_count
+// core-conformance: core.data.query.group_by.count
 use core.data as data
 
 fn run() {
-    groups :: data.group_count([String]{"Core", "Tools", "Core"}, value -> value) ?? panic("group count")
-    print(groups[0].count)
+    groups :: data.query([String]{"Core", "Tools", "Core"})
+        .group_by(value -> value)
+        .count()
+        .collect() ?? panic("group count")
+    print(groups[0].value)
 }

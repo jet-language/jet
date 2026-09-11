@@ -19,9 +19,46 @@
 // FEATURE_CLAIMS:END
 
 pub use crate::Syntax::edit_distance;
+use crate::OutputProfile::{ColorRequest, OutputProfileError};
 use crate::Syntax::BINARY_NAME;
-use jet_foundation::BuildEffect;
+use jet_foundation::Report::{StatusEnvelope, StatusValue};
 use std::sync::LazyLock;
+
+/// Output flags parsed once by the CLI host before command dispatch.
+///
+/// These are only caller-provided choices. Terminal and environment facts are
+/// collected by the host and resolved by `OutputProfile`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OutputFlags {
+    pub json: bool,
+    pub quiet: bool,
+    pub verbose: bool,
+    pub color: ColorRequest,
+}
+
+impl OutputFlags {
+    /// Parse output policy flags from the command-owned argv prefix.
+    pub fn parse(args: &[String]) -> Result<Self, OutputProfileError> {
+        let mut color = ColorRequest::Auto;
+        for argument in args {
+            if let Some(value) = argument.strip_prefix("--color=") {
+                color = ColorRequest::parse(value)?;
+            } else if argument == "--color" {
+                // Preserve the existing CLI spelling: a bare --color enables
+                // styling, while --color=<mode> selects an explicit mode.
+                color = ColorRequest::Always;
+            }
+        }
+        Ok(Self {
+            json: machine_output_requested(args),
+            quiet: args.iter().any(|argument| argument == "--quiet"),
+            verbose: args
+                .iter()
+                .any(|argument| argument == "--verbose" || argument == "-v"),
+            color,
+        })
+    }
+}
 
 /// One reserved word or sigil, for `jet inspect reserved` (#1659 criterion 5).
 pub struct ReservedEntry {
@@ -144,12 +181,12 @@ pub fn reserved_report_json() -> String {
         render_entries(TEACHING_RESERVED),
         render_entries(RESERVED_SIGILS),
     );
-    jet_foundation::Report::render_status_json(
-        "ok",
-        true,
-        "inspect.reserved",
-        &format!(",\"reserved\":{payload}"),
-    )
+    StatusEnvelope::new("inspect.reserved", true)
+        .with_field(
+            "reserved",
+            StatusValue::parse(&payload).expect("reserved report payload must be valid JSON"),
+        )
+        .json()
 }
 
 /// One global flag that applies across commands.
@@ -227,6 +264,251 @@ pub struct NestedCommandSpec {
     /// True when this spelling is also canonical as a top-level command.
     pub also_canonical_top_level: bool,
 }
+/// The nine canonical views under `jet inspect`.  The enum is the parser's
+/// source of truth; the help, completion, and man rows below are generated
+/// from the same values.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InspectPlane {
+    Types,
+    Rights,
+    Claims,
+    Shapes,
+    Accel,
+    Decisions,
+    Structure,
+    Build,
+    Gates,
+}
+
+impl InspectPlane {
+    pub const ALL: [Self; 9] = [
+        Self::Types,
+        Self::Rights,
+        Self::Claims,
+        Self::Shapes,
+        Self::Accel,
+        Self::Decisions,
+        Self::Structure,
+        Self::Build,
+        Self::Gates,
+    ];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Types => "types",
+            Self::Rights => "rights",
+            Self::Claims => "claims",
+            Self::Shapes => "shapes",
+            Self::Accel => "accel",
+            Self::Decisions => "decisions",
+            Self::Structure => "structure",
+            Self::Build => "build",
+            Self::Gates => "gates",
+        }
+    }
+
+    pub const fn usage(self) -> &'static str {
+        match self {
+            Self::Types => "types [TARGET] [--live PID | --replay ARTIFACT]",
+            Self::Rights => "rights [TARGET] [--live PID | --replay ARTIFACT]",
+            Self::Claims => "claims [TARGET] [--live PID | --replay ARTIFACT]",
+            Self::Shapes => "shapes [TARGET] [--live PID | --replay ARTIFACT]",
+            Self::Accel => "accel [TARGET] [--live PID | --replay ARTIFACT]",
+            Self::Decisions => "decisions [TARGET] [--live PID | --replay ARTIFACT]",
+            Self::Structure => "structure [TARGET] [--core] [--live PID | --replay ARTIFACT]",
+            Self::Build => "build [TARGET] [--coverage] [--live PID | --replay ARTIFACT]",
+            Self::Gates => "gates [TARGET] [--live PID | --replay ARTIFACT]",
+        }
+    }
+
+    pub const fn summary(self) -> &'static str {
+        match self {
+            Self::Types => "Show registered type and operator facts",
+            Self::Rights => "Show required and granted rights",
+            Self::Claims => "Show receipt-backed claims",
+            Self::Shapes => "Show semantic shapes and projections",
+            Self::Accel => "Show vector proof and acceleration gate decisions",
+            Self::Decisions => "Show compiler decisions and their evidence",
+            Self::Structure => "Show structure and lifecycle facts",
+            Self::Build => "Show build identity, provenance, and coverage",
+            Self::Gates => "Show the complete compile-time gate ledger",
+        }
+    }
+}
+impl InspectPlane {
+    fn parse(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|plane| plane.name() == name)
+    }
+}
+pub fn inspect_plane(name: &str) -> Option<InspectPlane> {
+    InspectPlane::parse(name)
+}
+
+/// Scope selected by the one inspect grammar.  `Target` accepts either a
+/// source file or a package directory; the resolver decides which one it is.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum InspectScope {
+    Package,
+    Target(String),
+    Live(u32),
+    Replay(String),
+}
+
+/// Fully parsed `jet inspect <plane>` request.  `options` retains registered
+/// plane flags for the projection backend without making the parser duplicate
+/// each plane's option vocabulary.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InspectRequest {
+    pub plane: InspectPlane,
+    pub scope: InspectScope,
+    pub options: Vec<String>,
+}
+
+/// Parse the canonical inspect grammar from the unnormalized argv.
+///
+/// Plane names come from `INSPECT_ACTIONS`; scope selection is exclusive and
+/// deterministic.  Other registered flags stay in `options` for the selected
+/// projection and are validated by the shared CLI flag checker.
+pub fn parse_inspect_args(args: &[String]) -> Result<InspectRequest, String> {
+    if args.first().map(String::as_str) != Some("inspect") {
+        return Err("inspect parser expects `jet inspect <plane>`".to_string());
+    }
+    let plane_name = args.get(1).map(String::as_str).ok_or_else(|| {
+        "missing inspect plane; choose types, rights, claims, shapes, accel, decisions, structure, build, or gates"
+            .to_string()
+    })?;
+    let plane = InspectPlane::parse(plane_name).ok_or_else(|| {
+        format!(
+            "unknown inspect plane `{plane_name}`; choose types, rights, claims, shapes, accel, decisions, structure, build, or gates"
+        )
+    })?;
+
+    let mut target = None;
+    let mut live = None;
+    let mut replay = None;
+    let mut options = Vec::new();
+    let mut index = 2;
+    while index < args.len() {
+        let argument = args[index].as_str();
+        if argument == "--live" {
+            let value = args.get(index + 1).map(String::as_str).ok_or_else(|| {
+                "`--live` needs a process id".to_string()
+            })?;
+            live = Some(parse_inspect_pid(value)?);
+            options.push("--live".to_string());
+            options.push(value.to_string());
+            index += 2;
+            continue;
+        }
+        if let Some(value) = argument.strip_prefix("--live=") {
+            live = Some(parse_inspect_pid(value)?);
+            options.push(argument.to_string());
+            index += 1;
+            continue;
+        }
+        if argument == "--replay" {
+            let value = args.get(index + 1).map(String::as_str).ok_or_else(|| {
+                "`--replay` needs a replay artifact path".to_string()
+            })?;
+            if value.starts_with('-') {
+                return Err("`--replay` needs a replay artifact path".to_string());
+            }
+            replay = Some(value.to_string());
+            options.push("--replay".to_string());
+            options.push(value.to_string());
+            index += 2;
+            continue;
+        }
+        if let Some(value) = argument.strip_prefix("--replay=") {
+            if value.is_empty() {
+                return Err("`--replay` needs a replay artifact path".to_string());
+            }
+            replay = Some(value.to_string());
+            options.push(argument.to_string());
+            index += 1;
+            continue;
+        }
+        if argument == "--" {
+            return Err("inspect planes do not accept a `--` command tail".to_string());
+        }
+        if argument.starts_with('-') {
+            options.push(argument.to_string());
+            if inspect_flag_takes_value(argument) {
+                if let Some(value) = args.get(index + 1) {
+                    if !value.starts_with('-') {
+                        options.push(value.clone());
+                        index += 2;
+                        continue;
+                    }
+                }
+            }
+            index += 1;
+            continue;
+        }
+        if target.replace(argument.to_string()).is_some() {
+            return Err("inspect accepts at most one file or package target".to_string());
+        }
+        index += 1;
+    }
+
+    if live.is_some() && replay.is_some() {
+        return Err("inspect accepts at most one of `--live PID` or `--replay ARTIFACT`".to_string());
+    }
+    if target.is_some() && (live.is_some() || replay.is_some()) {
+        return Err("inspect accepts a target, `--live PID`, or `--replay ARTIFACT` as one scope".to_string());
+    }
+    let scope = match (target, live, replay) {
+        (Some(target), None, None) => InspectScope::Target(target),
+        (None, Some(pid), None) => InspectScope::Live(pid),
+        (None, None, Some(artifact)) => InspectScope::Replay(artifact),
+        (None, None, None) => InspectScope::Package,
+        _ => unreachable!("inspect scope exclusivity is checked above"),
+    };
+    Ok(InspectRequest {
+        plane,
+        scope,
+        options,
+    })
+}
+
+fn parse_inspect_pid(value: &str) -> Result<u32, String> {
+    let pid = value
+        .parse::<u32>()
+        .map_err(|_| format!("`--live` expects a positive process id, got `{value}`"))?;
+    if pid == 0 {
+        return Err("`--live` expects a positive process id".to_string());
+    }
+    Ok(pid)
+}
+
+fn inspect_flag_takes_value(argument: &str) -> bool {
+    let name = argument.split('=').next().unwrap_or(argument);
+    matches!(
+        name,
+        "--before"
+            | "--color"
+            | "--facts"
+            | "--gate"
+            | "--kind"
+            | "--output"
+            | "--profile"
+            | "--scope"
+            | "--set"
+            | "--target"
+            | "--topic"
+    )
+}
+
+const fn inspect_plane_action(plane: InspectPlane) -> NestedCommandSpec {
+    NestedCommandSpec {
+        name: plane.name(),
+        usage: plane.usage(),
+        summary: plane.summary(),
+        handler: HandlerKey::InspectPlane,
+        also_canonical_top_level: false,
+    }
+}
+
 
 /// Closed set of real dispatcher seams reachable from nested commands.
 /// Adding a handler requires updating this exhaustive mapping and its route test.
@@ -242,23 +524,17 @@ pub enum HandlerKey {
     ExplainBuild,
     Compiler,
     Impact,
-    Dossier,
-    Guarantees,
     Provenance,
     Digest,
-    InspectEnv,
+    InspectPlane,
+    Schema,
     Semindex,
     Output,
     Expand,
-    Unsafe,
-    Gates,
-    Authority,
-    Schema,
     Codemod,
     Audit,
     Sbom,
     Bind,
-    Live,
     Logs,
     Info,
     Outdated,
@@ -281,8 +557,7 @@ pub enum HandlerKey {
     Cache,
     Perf,
     Reserved,
-    Facts,
-    Structure,
+    Db,
 }
 
 impl HandlerKey {
@@ -298,23 +573,18 @@ impl HandlerKey {
             Self::ExplainBuild => "explain-build",
             Self::Compiler => "compiler",
             Self::Impact => "impact",
-            Self::Dossier => "dossier",
-            Self::Guarantees => "guarantees",
             Self::Provenance => "provenance",
             Self::Digest => "digest",
-            Self::InspectEnv => "inspect",
+            Self::Env => "env",
             Self::Semindex => "semindex",
             Self::Output => "output",
             Self::Expand => "expand",
-            Self::Unsafe => "unsafe",
-            Self::Gates => "gates",
-            Self::Authority => "authority",
+            Self::InspectPlane => "inspect",
             Self::Schema => "schema",
             Self::Codemod => "codemod",
             Self::Audit => "audit",
             Self::Sbom => "sbom",
             Self::Bind => "bind",
-            Self::Live => "live",
             Self::Logs => "logs",
             Self::Info => "info",
             Self::Outdated => "outdated",
@@ -332,25 +602,24 @@ impl HandlerKey {
             Self::Devtools => "devtools",
             Self::Lsp => "lsp",
             Self::Exec => "exec",
-            Self::Env => "env",
             Self::SharedStore => "shared-store",
             Self::Cache => "cache",
             Self::Perf => "perf",
             Self::Reserved => "reserved",
-            Self::Facts => "facts",
-            Self::Structure => "structure",
+            Self::Db => "db",
         }
     }
 
     pub const fn keeps_group(self) -> bool {
         matches!(
             self,
-            Self::GcReport
+            Self::InspectPlane
+                | Self::GcReport
                 | Self::Perf
                 | Self::Env
-                | Self::InspectEnv
                 | Self::SharedStore
                 | Self::Cache
+                | Self::Db
         )
     }
 }
@@ -392,24 +661,34 @@ const REGISTRY_ACTIONS: &[NestedCommandSpec] = &[
         also_canonical_top_level: false,
     },
 ];
+const DB_ACTIONS: &[NestedCommandSpec] = &[NestedCommandSpec {
+    name: "migrate",
+    usage: "migrate new <Name> --up <SQL> [--down <SQL>] [--lock shared|exclusive] [--risk <note>]\nmigrate preview --target <name> [--to <version>|--step <count>]\nmigrate status --target <name>\nmigrate target --target <name> [--database <relative-path>] [--lock shared|exclusive]\nmigrate apply --target <name> [--to <version>|--step <count>] [--lock exclusive]\nmigrate step --target <name> <count> [--lock exclusive]\nmigrate rollback --target <name> [<version>|--step <count>] [--lock exclusive]\nmigrate resume --target <name>",
+    summary: "Create, preview, inspect, apply, resume, and roll back versioned database migrations",
+    handler: HandlerKey::Db,
+    also_canonical_top_level: false,
+}];
 const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "live", usage: "live <pid>", summary: "Watch a running Jet process", handler: HandlerKey::Live, also_canonical_top_level: false },
+    inspect_plane_action(InspectPlane::Types),
+    inspect_plane_action(InspectPlane::Rights),
+    inspect_plane_action(InspectPlane::Claims),
+    inspect_plane_action(InspectPlane::Shapes),
+    inspect_plane_action(InspectPlane::Accel),
+    inspect_plane_action(InspectPlane::Decisions),
+    inspect_plane_action(InspectPlane::Structure),
+    inspect_plane_action(InspectPlane::Build),
+    inspect_plane_action(InspectPlane::Gates),
     NestedCommandSpec { name: "graph", usage: "graph <file.jet>", summary: "Show the build graph", handler: HandlerKey::Graph, also_canonical_top_level: false },
     NestedCommandSpec { name: "query", usage: "query build <file.jet>", summary: "Search code and build information", handler: HandlerKey::Query, also_canonical_top_level: false },
     NestedCommandSpec { name: "explain-build", usage: "explain-build <target|action|file> <file.jet>", summary: "Explain why a target, action, or file is rebuilt", handler: HandlerKey::ExplainBuild, also_canonical_top_level: false },
     NestedCommandSpec { name: "compiler", usage: "compiler <lex|parse|check|source-map> <file>", summary: "Read compiler facts as versioned JSON", handler: HandlerKey::Compiler, also_canonical_top_level: false },
     NestedCommandSpec { name: "impact", usage: "impact <file.jet> <symbol>", summary: "Show code affected by a symbol", handler: HandlerKey::Impact, also_canonical_top_level: false },
-    NestedCommandSpec { name: "dossier", usage: "dossier <file.jet> [symbol]", summary: "show everything known about a file or symbol", handler: HandlerKey::Dossier, also_canonical_top_level: false },
-    NestedCommandSpec { name: "guarantees", usage: "guarantees [--json] <file.jet>", summary: "Show memory-safety guarantees by component", handler: HandlerKey::Guarantees, also_canonical_top_level: false },
-    NestedCommandSpec { name: "provenance", usage: "provenance [--json] [<dependency>]", summary: "read dependency provenance", handler: HandlerKey::Provenance, also_canonical_top_level: false },
+    NestedCommandSpec { name: "provenance", usage: "provenance [--json] [<dependency>]", summary: "Read dependency provenance", handler: HandlerKey::Provenance, also_canonical_top_level: false },
     NestedCommandSpec { name: "digest", usage: "digest [--json] [--list-topics] [--topic <name>]", summary: "Write the one-file LLM surface digest", handler: HandlerKey::Digest, also_canonical_top_level: false },
-    NestedCommandSpec { name: "env", usage: "env [--json] [<env.jet|config.jet>]", summary: "List typed environment reads in a config surface", handler: HandlerKey::InspectEnv, also_canonical_top_level: false },
-    NestedCommandSpec { name: "semindex", usage: "semindex <file.jet>", summary: "search the code index", handler: HandlerKey::Semindex, also_canonical_top_level: false },
-    NestedCommandSpec { name: "output", usage: "output <file.jet> [<address>]", summary: "inspect one selected Output", handler: HandlerKey::Output, also_canonical_top_level: false },
-    NestedCommandSpec { name: "expand", usage: "expand [--facts <inline|memory|web|effects|layout|derive|templates|callable-signature>] [--json] <file.jet>", summary: "show expanded meaning of Jet code (use --json for canonical facts)", handler: HandlerKey::Expand, also_canonical_top_level: false },
-    NestedCommandSpec { name: "unsafe", usage: "unsafe <file.jet>", summary: "Review unsafe code and its safeguards", handler: HandlerKey::Unsafe, also_canonical_top_level: false },
-    NestedCommandSpec { name: "gates", usage: "gates [--scope <scope>] [--kind <kind>] [--json] <file.jet>", summary: "read the complete compile-time gate ledger", handler: HandlerKey::Gates, also_canonical_top_level: false },
-    NestedCommandSpec { name: "authority", usage: "authority [--scope <scope>] [--kind <kind>] [--json] <file.jet>", summary: "read rights-bearing gates from the ledger", handler: HandlerKey::Authority, also_canonical_top_level: false },
+    NestedCommandSpec { name: "env", usage: "env [--json] [<env.jet|config.jet>]", summary: "List typed environment reads in a config surface", handler: HandlerKey::Env, also_canonical_top_level: false },
+    NestedCommandSpec { name: "semindex", usage: "semindex <file.jet>", summary: "Search the code index", handler: HandlerKey::Semindex, also_canonical_top_level: false },
+    NestedCommandSpec { name: "output", usage: "output <file.jet> [<address>]", summary: "Inspect one selected Output", handler: HandlerKey::Output, also_canonical_top_level: false },
+    NestedCommandSpec { name: "expand", usage: "expand [--facts <inline|memory|web|effects|layout|derive|templates|callable-signature>] [--json] <file.jet>", summary: "Show expanded meaning of Jet code (use --json for canonical facts)", handler: HandlerKey::Expand, also_canonical_top_level: false },
     NestedCommandSpec { name: "schema", usage: "schema status\nschema squash --before <version>", summary: "Inspect saved data schema versions", handler: HandlerKey::Schema, also_canonical_top_level: false },
     NestedCommandSpec { name: "codemod", usage: "codemod <plan.json> --dry-run\ncodemod apply <plan.json> [--yes]\ncodemod undo <log.json>", summary: "Preview or apply code changes", handler: HandlerKey::Codemod, also_canonical_top_level: false },
     NestedCommandSpec { name: "audit", usage: "audit copies [--json] [<entry.jet>]\naudit memory [--json]\naudit [--advisory-db <path>]", summary: "Inspect implicit copies, exercised memory witnesses, or dependencies", handler: HandlerKey::Audit, also_canonical_top_level: true },
@@ -422,11 +701,6 @@ const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
     // teaching-reserved words (copy/mut/take/const/unsafe) that reject valid
     // identifiers with a redirect to their current spelling.
     NestedCommandSpec { name: "reserved", usage: "reserved [--json]", summary: "List reserved words and sigils", handler: HandlerKey::Reserved, also_canonical_top_level: false },
-    // D-ONCE-LAW1=A (#1728): the one registration table, read out. Every
-    // registered truth shows its home, its renderers, and the guard that
-    // proves there is no second copy.
-    NestedCommandSpec { name: "facts", usage: "facts [--json]", summary: "List every registered truth and its guard", handler: HandlerKey::Facts, also_canonical_top_level: false },
-    NestedCommandSpec { name: "structure", usage: "structure [--json] <file.jet>", summary: "Inspect liveness, lifecycle, and import-edge facts", handler: HandlerKey::Structure, also_canonical_top_level: false },
 ];
 const GC_ACTIONS: &[NestedCommandSpec] = &[NestedCommandSpec {
     name: "report",
@@ -653,14 +927,14 @@ pub fn command_group_label(name: &str) -> String {
 /// roles users will see in those reports.
 pub fn action_help_summary(group: &str, action: &NestedCommandSpec) -> &'static str {
     match (group, action.name) {
-        ("inspect", "authority") => {
+        ("inspect", "rights") => {
             "Read required, granted, denied effects, and their authority source"
         }
+        ("inspect", "claims") => "Read receipt-backed claims and their current status",
+        ("inspect", "shapes") => "Read semantic shapes and their checked projections",
+        ("inspect", "build") => "Read build identity, inputs, and provenance",
         ("inspect", "provenance") => {
             "Read dependency provenance with required, granted, denied effects, and authority"
-        }
-        ("inspect", "dossier") => {
-            "Show symbols plus required, granted, denied effects, and authority policy"
         }
         ("inspect", "semindex") => {
             "Search code facts plus required, granted, denied effects, and authority"
@@ -678,15 +952,20 @@ pub fn action_help_summary(group: &str, action: &NestedCommandSpec) -> &'static 
     }
 }
 
-/// #1659 criterion 1: the one renderer for a group's nested-action usage
-/// block, shared by `jet help`, `jet <group> --help`, and `jet perf --help`
-/// (CmdPerf.rs) so every caller reads the same `COMMANDS` table instead
-/// of re-deriving its own text.
+/// #1659 criterion 1: the one renderer for a group's usage block, shared by
+/// `jet help`, `jet <group> --help`, and `jet perf --help` (CmdPerf.rs) so
+/// every caller reads the same `COMMANDS` table instead of re-deriving text.
 pub fn command_group_usage(name: &str) -> String {
     let Some(group) = command_group(name) else {
         return String::new();
     };
     let mut output = String::new();
+    if let Some(usage) = group.usage {
+        output.push_str(&format!(
+            "  {} {:<48} {}\n",
+            BINARY_NAME, usage, group.summary
+        ));
+    }
     for action in group.actions {
         let summary = action_help_summary(group.name, action);
         for usage in action.usage.lines() {
@@ -764,12 +1043,28 @@ pub const COMMANDS: &[CommandSpec] = &[
         usage: None,
     },
     CommandSpec {
+        name: "db",
+        summary: "Run a bounded SQL console and manage database migrations",
+        headline: false,
+        actions: DB_ACTIONS,
+        exhaustive: false,
+        usage: Some("db [PATH] [--query SQL | --script PATH]"),
+    },
+    CommandSpec {
         name: "inspect",
         summary: "Explore code, builds, packages, and bindings",
         headline: false,
         actions: INSPECT_ACTIONS,
         exhaustive: true,
         usage: None,
+    },
+    CommandSpec {
+        name: "bind",
+        summary: "Resolve and record a checked foreign binding plan",
+        headline: false,
+        actions: &[],
+        exhaustive: false,
+        usage: Some("bind <name> [--shape automatic|native] [--freeze]\nbind --policy automatic|frozen\nbind <name> --update --preview\nbind <name> --update --accept <candidate-digest>"),
     },
     CommandSpec {
         name: "project",
@@ -817,15 +1112,25 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: true,
         actions: &[],
         exhaustive: false,
-        usage: Some("run [<file.jet|dir>] [-- <args>]"),
+        usage: Some("run [<file.jet|dir>] [--no-prepare] [-- <args>]"),
     },
     CommandSpec {
         name: "jobs",
-        summary: "List project #Job functions (<file.jet> -- <job>)",
+        summary: "List, inspect, watch, or run named project jobs",
         headline: false,
         actions: &[],
         exhaustive: false,
-        usage: None,
+        usage: Some("jobs [--graph|--status|--explain|--watch[=<on|off>]] [<name>] [-- <args>]"),
+    },
+    // D-DX-GENERATE1=A: generation is source-ordered, explicit, and receipt-backed;
+    // build/check/test never call this command implicitly.
+    CommandSpec {
+        name: "generate",
+        summary: "Run an explicit source generator with authority and a receipt",
+        headline: false,
+        actions: &[],
+        exhaustive: false,
+        usage: Some("generate <GeneratorJob> [--apply|--dry-run] [--entry <file.jet>] [--json]"),
     },
     CommandSpec {
         name: "check",
@@ -849,7 +1154,15 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: true,
         actions: &[],
         exhaustive: false,
-        usage: Some("test [<file.jet|dir>] [<filter>]"),
+        usage: Some("test [<file.jet|dir>] [<filter>] [--watch] [--fresh] [--docs] [--where=<expr>] [--capture=<failed|all|none>] [--browser=<chromium,firefox,webkit>] [--browser-retries=<n>] [--browser-reporter=<text|json|html>] [--browser-ui] [--browser-visual] [--browser-trace] [--browser-scaffold=<name>]"),
+    },
+    CommandSpec {
+        name: "test-compare",
+        summary: "Compare one recorded observation corpus against its relation",
+        headline: false,
+        actions: &[],
+        exhaustive: false,
+        usage: Some("test-compare <corpus.json> [--relation=<name>] [--json]"),
     },
     CommandSpec {
         name: "prove",
@@ -875,7 +1188,23 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
-        usage: Some("build [<file.jet|dir>]"),
+        usage: Some("build [<file.jet|dir>] | build --verify <receipt-id>"),
+    },
+    CommandSpec {
+        name: "package",
+        summary: "Create a desktop or game application bundle",
+        headline: false,
+        actions: &[],
+        exhaustive: false,
+        usage: Some("package --kind <desktop|game> --target <linux-appimage|macos-app|windows-msix> [--executable <path>|<source.jet>] [--output <path>] [--profile <dev|release|name>] [--phase <build,cook,stage,package,export,deploy,run>] [--backend <aot>] [--renderer <headless|raylib>] [--cook-mode <fast|reproducible|scripts-only>] [--export-preset <default|store|headless>] [--deploy-to <path>] [--crash-reporter <off|on|opt-in>] [--crash-consent <not-requested|granted|denied>] [--dry-run] [--explain] [--resume|--cancel] [--clean|--scripts-only] [--run-now] [--package <id>] [--name <name>] [--version <version>] [--icon <path>] [--icon-format <png|icns|ico|svg>] [--icon-size <pixels>] [--publisher <name>] [--description <text>] [--update-channel <channel>] [--update-url <url>]"),
+    },
+    CommandSpec {
+        name: "flash",
+        summary: "Flash firmware to a target board",
+        headline: false,
+        actions: &[],
+        exhaustive: false,
+        usage: Some("flash --target <board.name> [--image <firmware.elf>] [--audit <target.json>] [--adapter <probe-rs|openocd|emulator>]"),
     },
     CommandSpec {
         name: "cc",
@@ -895,19 +1224,19 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     CommandSpec {
         name: "dev",
-        summary: "Watch and run a program; optionally open the Canvas IDE",
+        summary: "Watch and run a program; optionally open Canvas or a local app",
         headline: false,
         actions: &[],
         exhaustive: false,
-        usage: Some("dev [<file.jet|dir>] [--canvas] [-- <args>]"),
+        usage: Some("dev [<file.jet|dir>] [--canvas|--app <function>] [--share <loopback|lan>] [--token <token>] [-- <args>]"),
     },
     CommandSpec {
         name: "learn",
-        summary: "Run the offline first learning arc",
+        summary: "Practice Jet with offline code exercises",
         headline: false,
         actions: &[],
         exhaustive: false,
-        usage: Some("learn [--check] [--watch=off]"),
+        usage: Some("learn [--check] [--watch|--watch=off] [--json] [--quiet] [--color[=<mode>]]"),
     },
     CommandSpec {
         name: "try",
@@ -923,7 +1252,9 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
-        usage: None,
+        usage: Some(
+            "debug [<file.jet>] [--record=NAME|--replay=NAME] [--dap] [--raw-frames]",
+        ),
     },
     CommandSpec {
         name: "repl",
@@ -931,7 +1262,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
-        usage: Some("repl [<file.jet>]"),
+        usage: Some("repl [<file.jet>] [--project <dir>] [--console] [--sandbox data] [--console-ttl <milliseconds>] [--allow=<RIGHTS>] [--deny=<RIGHTS>]"),
     },
     CommandSpec {
         name: "notebook",
@@ -947,15 +1278,15 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
-        usage: None,
+        usage: Some("import <language> <dir> [--dry-run|--update]"),
     },
     CommandSpec {
         name: "new",
-        summary: "Create a Jet project",
+        summary: "Create a Jet project or backend source scaffold",
         headline: false,
         actions: &[],
         exhaustive: false,
-        usage: None,
+        usage: Some("new <name> | new service|route|job|migration <name> [--path <path>] [--route <path>] [--model <name>] [--up|--sql <SQL>] [--down <SQL>] [--risk <note>] [--lock <shared|exclusive>] [--version <n>] [--preview|--apply|--remove]"),
     },
     CommandSpec {
         name: "fmt",
@@ -1003,7 +1334,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
         actions: &[],
         exhaustive: false,
-        usage: Some("explain <CODE|FACT> [file] | explain --cost <file.jet>"),
+        usage: Some("explain <CODE|FACT> [file] | explain --cost <file.jet> | explain --reload <file.jet|dir>"),
     },
     CommandSpec {
         name: "env",
@@ -1190,14 +1521,6 @@ pub const COMMANDS: &[CommandSpec] = &[
         usage: None,
     },
     CommandSpec {
-        name: "report",
-        summary: "Write a private local report bundle",
-        headline: false,
-        actions: &[],
-        exhaustive: false,
-        usage: None,
-    },
-    CommandSpec {
         name: "fuzz",
         summary: "Find failing inputs for property tests",
         headline: false,
@@ -1241,6 +1564,7 @@ pub struct RetiredCommandSpec {
     pub fix: fn(&[String]) -> String,
     pub rewrite: Option<fn(&[String]) -> Vec<String>>,
 }
+
 
 fn retired_serve_fix(argv: &[String]) -> String {
     match argv.get(1).map(String::as_str) {
@@ -1291,7 +1615,80 @@ fn retired_store_lock_fix(argv: &[String]) -> String {
     }
 }
 
+fn retired_facts_fix(_: &[String]) -> String {
+    "jet inspect types".to_string()
+}
+
+fn retired_authority_fix(_: &[String]) -> String {
+    "jet inspect rights".to_string()
+}
+
+fn retired_unsafe_fix(_: &[String]) -> String {
+    "jet inspect gates".to_string()
+}
+
+fn retired_guarantees_fix(_: &[String]) -> String {
+    "jet inspect rights".to_string()
+}
+
+fn retired_report_fix(_: &[String]) -> String {
+    "jet inspect build".to_string()
+}
+
+fn retired_dossier_fix(_: &[String]) -> String {
+    "jet inspect build".to_string()
+}
+
+
 pub const RETIRED_COMMANDS: &[RetiredCommandSpec] = &[
+    RetiredCommandSpec {
+        spelling: "facts",
+        category: RetirementCategory::Semantic,
+        error_code: "E2101",
+        why: "the typed facts ledger is now the `inspect types` plane (D-CLI-ONE1=A)",
+        fix: retired_facts_fix,
+        rewrite: None,
+    },
+    RetiredCommandSpec {
+        spelling: "authority",
+        category: RetirementCategory::Semantic,
+        error_code: "E2101",
+        why: "authority inspection is the `inspect rights` plane (D-CLI-ONE1=A)",
+        fix: retired_authority_fix,
+        rewrite: None,
+    },
+    RetiredCommandSpec {
+        spelling: "unsafe",
+        category: RetirementCategory::Semantic,
+        error_code: "E2101",
+        why: "unsafe inspection is the `inspect gates` plane (D-CLI-ONE1=A)",
+        fix: retired_unsafe_fix,
+        rewrite: None,
+    },
+    RetiredCommandSpec {
+        spelling: "guarantees",
+        category: RetirementCategory::Semantic,
+        error_code: "E2101",
+        why: "guarantees inspection is the `inspect rights` plane (D-CLI-ONE1=A)",
+        fix: retired_guarantees_fix,
+        rewrite: None,
+    },
+    RetiredCommandSpec {
+        spelling: "report",
+        category: RetirementCategory::Semantic,
+        error_code: "E2101",
+        why: "build inspection is the `inspect build` plane (D-CLI-ONE1=A)",
+        fix: retired_report_fix,
+        rewrite: None,
+    },
+    RetiredCommandSpec {
+        spelling: "dossier",
+        category: RetirementCategory::Semantic,
+        error_code: "E2101",
+        why: "build inspection is the `inspect build` plane (D-CLI-ONE1=A)",
+        fix: retired_dossier_fix,
+        rewrite: None,
+    },
     RetiredCommandSpec {
         spelling: "bench",
         category: RetirementCategory::Semantic,
@@ -1374,6 +1771,7 @@ pub const RETIRED_COMMANDS: &[RetiredCommandSpec] = &[
     },
 ];
 
+
 pub fn retired_command(argv: &[String]) -> Option<&'static RetiredCommandSpec> {
     RETIRED_COMMANDS
         .iter()
@@ -1389,6 +1787,7 @@ pub fn retired_command(argv: &[String]) -> Option<&'static RetiredCommandSpec> {
 pub fn is_retired_root(name: &str) -> bool {
     RETIRED_COMMANDS
         .iter()
+        .filter(|spec| spec.spelling.split_whitespace().count() == 1)
         .any(|spec| spec.spelling.split_whitespace().next() == Some(name))
 }
 
@@ -1400,40 +1799,12 @@ pub fn is_canonical_top_level(name: &str) -> bool {
     moved_command_group(name).is_none() && !is_retired_root(name) && name != "install"
 }
 
-fn leaked_cli_text(text: String) -> &'static str {
-    // ponytail: leak fixed registry strings once; use owned fields only if this registry becomes reloadable.
-    Box::leak(text.into_boxed_str())
-}
 
-fn generated_effect_flags() -> Vec<FlagSpec> {
-    BuildEffect::ALL
-        .into_iter()
-        .flat_map(|effect| {
-            [
-                FlagSpec {
-                    long: leaked_cli_text(format!("--allow-{}", effect.flag())),
-                    help: leaked_cli_text(format!(
-                        "With build: Allow {} access for this run",
-                        effect.name()
-                    )),
-                },
-                FlagSpec {
-                    long: leaked_cli_text(format!("--deny-{}", effect.flag())),
-                    help: leaked_cli_text(format!(
-                        "With repl: Deny {} access; overrides allow and prompts",
-                        effect.name()
-                    )),
-                },
-            ]
-        })
-        .collect()
-}
 
 /// Every global flag the driver understands. Used to flag-check and to suggest
 /// on a typo (E2102), and to complete after `--`.
 const BASE_FLAGS: &[FlagSpec] = &[
-    FlagSpec { long: "--attach", help: "With inspect live: Process id to observe" },
-    FlagSpec { long: "--once", help: "With inspect live: Print one snapshot and exit" },
+    FlagSpec { long: "--live", help: "With inspect: Process id for a live plane scope" },
     FlagSpec { long: "--observe", help: "With run: Expose bounded live runtime facts for attachment" },
     FlagSpec { long: "--raw-frames", help: "With debug: Show generated Rust frames and scopes (expert)" },
     FlagSpec { long: "--dap", help: "With debug: Speak the Debug Adapter Protocol over stdio" },
@@ -1445,20 +1816,24 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--repo", help: "With merge install-driver: Git worktree to configure" },
     FlagSpec { long: MACHINE_OUTPUT_FLAG, help: "Emit machine-readable facts or diagnostics" },
     FlagSpec { long: "--topic", help: "With inspect digest: Emit one digest topic" },
-    FlagSpec { long: "--to", help: "With publish/cache: Foreign registry, or prune target size" },
-    FlagSpec { long: "--list-topics", help: "With inspect digest: List digest topics" },
-    FlagSpec { long: "--kind", help: "With inspect gates/authority: Filter one gate kind" },
+    FlagSpec { long: "--to", help: "With publish/cache/db migrate: Foreign registry, prune target size, or migration target version" },
+    FlagSpec { long: "--kind", help: "With inspect gates/package: Filter one gate or bundle kind" },
     // #1659 criterion 3: one spelling, every command. Suppresses non-error
     // status/progress output (watch banners, hot-swap notices,
     // confirmations); never suppresses errors or requested data.
     FlagSpec { long: "--quiet", help: "Suppress non-error status output" },
     FlagSpec { long: "--color", help: "Color: auto | always | never" },
-    FlagSpec { long: "--version", help: "Print compiler version" },
+    FlagSpec { long: "--version", help: "With package/new: Set bundle or migration version; global flag prints compiler version" },
     FlagSpec { long: "--endpoint", help: "With self-update: Signed toolchain channel endpoint" },
     FlagSpec { long: "--channel", help: "With self-update: Toolchain channel name" },
     FlagSpec { long: "--platform", help: "With self-update: Toolchain target triple" },
     FlagSpec { long: "--trust-key", help: "With self-update: Public trust-key file" },
-    FlagSpec { long: "--apply", help: "With self-update: Install the verified artifact" },
+    FlagSpec { long: "--apply", help: "With self-update/generate/new: Apply the verified artifact or planned source writes" },
+    FlagSpec { long: "--preview", help: "With new: Preview deterministic backend source writes without applying them" },
+    FlagSpec { long: "--remove", help: "With new: Remove only unchanged outputs recorded by the scaffold receipt" },
+    FlagSpec { long: "--path", help: "With new: Route or output path, defaulting to `/<name>`" },
+    FlagSpec { long: "--route", help: "With new: Alias for `--path`" },
+    FlagSpec { long: "--model", help: "With new: Model name recorded beside the route source" },
     FlagSpec { long: "--allow-unofficial", help: "With self-update: Explicitly allow a local keyless channel" },
     FlagSpec { long: "--check", help: "With fmt/learn: Check without changing files (CI gate)" },
     FlagSpec { long: "--lang", help: "With fmt: Delegate non-Jet files to the environment formatter for this language" },
@@ -1469,14 +1844,14 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--explicit-copies", help: "With fmt: Materialize implicit read-view copies as `~`" },
     FlagSpec { long: "--skipped", help: "With project parts: Show modules omitted from automatic discovery" },
     FlagSpec { long: "--stdin-path", help: "With fmt -: Path label used in diagnostics when reading from stdin" },
-    FlagSpec { long: "--small", help: "With build/run: Favor a smaller binary" },
+    FlagSpec { long: "--small", help: "With build/run/jobs: Favor a smaller binary" },
     FlagSpec { long: "--lib", help: "With build: Emit the native Library and C header" },
-    FlagSpec { long: "--output", help: "With build/run/dev: Select a named output (build --lib selects a Library; Canvas uses it as the initial selection)" },
-    FlagSpec { long: "--locked", help: "With build/fetch: Require locked dependency and provenance facts" },
+    FlagSpec { long: "--output", help: "With build/run/dev/jobs/package: Select a named output (build --lib selects a Library; Canvas uses it as the initial selection)" },
+    FlagSpec { long: "--locked", help: "With build/fetch/jobs/run: Require locked dependency and provenance facts" },
     FlagSpec { long: "--effect", help: "With find: Require an effect such as FS.Read" },
     FlagSpec { long: "--example", help: "With find: Search by input/output example" },
     // D-CLI-STORE2=A: script locking folds into `fetch`, not a separate verb.
-    FlagSpec { long: "--lock", help: "With fetch: Lock a manifest-less script's inline deps instead of fetching a project" },
+    FlagSpec { long: "--lock", help: "With fetch/db migrate/new: Lock dependency fetching or choose a migration/scaffold lock policy" },
     FlagSpec { long: "--read-only", help: "With shared-store enroll: Grant read-only broker access" },
     FlagSpec { long: "--host", help: "With cache limit: Host-wide store cap" },
     FlagSpec { long: "--fd", help: "With shared-store broker: Inherited broker socket descriptor" },
@@ -1491,29 +1866,40 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--no-sign", help: "With publish: Skip the optional author signature (registry metadata is still signed)" },
     FlagSpec { long: "--registry", help: "With keygen/key: Registry name to generate or manage a signing key for" },
     FlagSpec { long: "--pkg", help: "With bind: Library name for the generated binding module" },
+    FlagSpec { long: "--shape", help: "With bind: Binding facade shape: automatic or native" },
+    FlagSpec { long: "--freeze", help: "With bind: Record the resolved binding plan in the project lock" },
+    FlagSpec { long: "--policy", help: "With bind: Binding policy: automatic or frozen" },
+    FlagSpec { long: "--accept", help: "With bind --update: Accept exactly this candidate plan digest" },
+    FlagSpec { long: "--import", help: "With build: Import and inspect an existing foreign build graph" },
     FlagSpec { long: "--clang", help: "With bind cpp: Path to the clang binary used to parse the header" },
     FlagSpec { long: "--ar", help: "With bind cpp: Path to the ar archiver used to build the static library" },
-    FlagSpec { long: "--message", help: "With yank: Human-readable reason for yanking the version" },
     FlagSpec { long: "--before", help: "With schema squash: Re-baseline migrations before this version" },
     FlagSpec { long: "--spdx", help: "With sbom: Emit SPDX tag-value format (default)" },
     FlagSpec { long: "--cyclonedx", help: "With sbom: Emit CycloneDX JSON format" },
     FlagSpec { long: "--advisory-db", help: "With audit: Path to advisory database file" },
     FlagSpec { long: "--vendor-dir", help: "With vendor: Directory to copy dependencies into (default vendor/)" },
     FlagSpec { long: "--sbom", help: "With build: Also write an SPDX SBOM next to the binary" },
-    FlagSpec { long: "--verbose", help: "With build: Print the bridge steps" },
+    FlagSpec { long: "--verbose", help: "With build/jobs: Print the bridge steps" },
     FlagSpec { long: "--online", help: "With doctor: Allow network checks" },
     FlagSpec { long: "--fix", help: "With doctor: Apply auto-fixable problems" },
-    FlagSpec { long: DRY_RUN_FLAG, help: "With rewrite commands: Preview changes without writing" },
+    FlagSpec { long: DRY_RUN_FLAG, help: "With package/rewrite commands/generate: Preview changes without writing" },
+    FlagSpec { long: "--entry", help: "With generate: Source file containing the generator job" },
     FlagSpec { long: "--keep", help: "With try: Keep a clean speculative edit" },
     FlagSpec { long: "--edition", help: "With fix: Apply edition migration rewrites --edition=<year>" },
     FlagSpec { long: "--all", help: "With fix: Apply safety classes beyond formatting and behavior-preserving" },
     FlagSpec { long: "--try-anyway", help: "With dev: Interpret past unsupported features (no guarantees)" },
-    FlagSpec { long: "--interpret", help: "With dev: Force the tier-0 TIR interpreter" },
+    FlagSpec { long: "--interpret", help: "With dev/jobs: Force the tier-0 TIR interpreter" },
     FlagSpec { long: "--trace-tiers", help: "With run/dev: Print per-function Cranelift vs interpreter tier selection; with test: print AOT marker" },
     FlagSpec { long: "--restart", help: "With dev: Always rerun from scratch after a save" },
     FlagSpec { long: "--swap", help: "With dev: Hot-swap compatible edits and restart after type changes" },
-    FlagSpec { long: "--watch", help: "With run/dev/learn: Re-run on dependency changes; --watch=off runs once" },
+    FlagSpec { long: "--reload", help: "With explain: Explain the checked reload decision for a source or project path" },
+    FlagSpec { long: "--watch", help: "With run/dev/learn/test/jobs: Re-run on dependency changes; test default off with r=failed, a=all, o=output; jobs accepts --watch[=<on|off>]; --watch=off runs once" },
+    FlagSpec { long: "--graph", help: "With jobs: Show the checked job dependency graph" },
+    FlagSpec { long: "--status", help: "With jobs: Show fresh or stale status for declared jobs" },
+    FlagSpec { long: "--explain", help: "With jobs/package: Explain dependencies, phases, cache identity, and admission facts" },
     FlagSpec { long: CANVAS_FLAG, help: "With dev: Open the full Canvas IDE over this dev session" },
+    FlagSpec { long: "--app", help: "With dev: Select a checked local-app function" },
+    FlagSpec { long: "--share", help: "With dev: Select local-app sharing authority: loopback or lan" },
     FlagSpec { long: "--canvas-host", help: "With dev: With --canvas, bind host (loopback by default)" },
     FlagSpec { long: "--canvas-port", help: "With dev: With --canvas, bind an explicit port" },
     FlagSpec { long: "--canvas-transport", help: "With dev: With --canvas, select the named transport" },
@@ -1521,15 +1907,23 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--canvas-audit", help: "With dev: With --canvas, enable request/rebuild audit output" },
     // E2-M18 REPL flags.
     FlagSpec { long: "--project", help: "With repl: Load package settings and imports from this directory" },
+    FlagSpec { long: "--console", help: "With repl: Open the project-loaded capability-gated console" },
+    FlagSpec { long: "--sandbox", help: "With repl: Use the reversible data sandbox (`--sandbox data`)" },
+    FlagSpec { long: "--console-ttl", help: "With repl: Expire console authority after this many milliseconds" },
     // E3 interactive scripting flags.
     FlagSpec { long: "--protocol", help: "With notebook: Use the bounded headless JSONL/script session" },
     FlagSpec { long: "--headless", help: "With notebook: Use the bounded headless session" },
     FlagSpec { long: "--bind", help: "With notebook: Bind the local HTTP client to this address" },
-    FlagSpec { long: "--token", help: "With notebook: Require this bearer token for clients" },
+    FlagSpec { long: "--token", help: "With notebook/dev: Require a bearer token for the session" },
     // E2-M16 flags.
+    // D-RUN-PREPARE1=A: `jet run` delegates project environment realization
+    // to Jetpack unless the caller explicitly opts out.
+    FlagSpec { long: "--no-prepare", help: "With run: Refuse Jetpack project environment preparation" },
     FlagSpec { long: "--pure", help: "With eval: Reject code with side effects" },
-    FlagSpec { long: "--offline", help: "With cc/c++: Reuse only cached signed toolchain data" },
-    FlagSpec { long: "--fixtures", help: "With cc/c++ tests: Use an explicit fixture bundle" },
+    FlagSpec { long: "--allow", help: "With run/build/jobs/repl/db: Allow comma-separated effect roots or leaves as --allow=RIGHTS" },
+    FlagSpec { long: "--deny", help: "With run/build/jobs/repl/db: Deny comma-separated effect roots or leaves as --deny=RIGHTS" },
+    FlagSpec { long: "--offline", help: "With env/run/dev/test/cc/c++: Reuse only cached signed toolchain and package data" },
+    FlagSpec { long: "--fixtures", help: "With env/run/dev/test/cc/c++: Use an explicit fixture bundle" },
     FlagSpec { long: "--project-root", help: "With cc/c++: Scope source paths to a project directory" },
     FlagSpec { long: "--build-root", help: "With cc/c++: Scope output paths to a build directory" },
     FlagSpec { long: "-c", help: "With cc/c++: Compile sources without linking" },
@@ -1549,8 +1943,62 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "-dumpversion", help: "With cc/c++: Print the pinned compiler version" },
     FlagSpec { long: "-v", help: "With cc/c++: Print pinned toolchain details or compile verbosely" },
     // D-ONCE-GATE1=A: one invocation gate surface covers every audited escape.
-    FlagSpec { long: "--gate", help: "With build/run/dev: Allow one audited gate as --gate name=allow" },
-    FlagSpec { long: "--target", help: "With build/run/dev/cc/c++: Select a target: a rustc triple or board.<name>" },
+    FlagSpec { long: "--gate", help: "With build/run/dev/jobs: Allow one audited gate as --gate name=allow" },
+    FlagSpec { long: "--target", help: "With build/run/dev/jobs/package/cc/c++/flash: Select a target (triple, board.<name>, or named database target)" },
+    FlagSpec { long: "--up", help: "With db migrate/new: Checked forward SQL" },
+    FlagSpec { long: "--sql", help: "With db migrate/new: Alias for checked forward SQL" },
+    FlagSpec { long: "--down", help: "With db migrate/new: Checked inverse SQL for rollback" },
+    FlagSpec { long: "--database", help: "With db migrate: Project-relative database path (receipt identity is redacted)" },
+    FlagSpec { long: "--risk", help: "With db migrate/new: Data-risk note shown before writes" },
+    FlagSpec { long: "--step", help: "With db migrate: Number of ordered migrations to apply or roll back" },
+    // D-DB-CONSOLE1=A: bounded SQL console options share the canonical flag
+    // registry with migration options and generated help/completions.
+    FlagSpec { long: "--format", help: "With db: Output format: human, text, json, jsonl, or csv" },
+    FlagSpec { long: "--csv", help: "With db: Select deterministic CSV output" },
+    FlagSpec { long: "--jsonl", help: "With db: Emit one JSON value per row" },
+    FlagSpec { long: "--machine", help: "With db: Select machine-readable output" },
+    FlagSpec { long: "--human", help: "With db: Select human-readable output" },
+    FlagSpec { long: "--no-color", help: "With db: Disable color in console output" },
+    FlagSpec { long: "--force-color", help: "With db: Force color in console output" },
+    FlagSpec { long: "--query", help: "With db: Execute one SQL query" },
+    FlagSpec { long: "--script", help: "With db: Execute SQL from a script path" },
+    FlagSpec { long: "--table", help: "With db: Set an explicit table identity as NAME=PATH" },
+    FlagSpec { long: "--max-rows", help: "With db: Bound decoded input rows" },
+    FlagSpec { long: "--max-bytes", help: "With db: Bound source or script bytes" },
+    FlagSpec { long: "--max-output-bytes", help: "With db: Bound one rendered result" },
+    FlagSpec { long: "--image", help: "With flash: Firmware image to program" },
+    FlagSpec { long: "--audit", help: "With flash: Target audit JSON for the image" },
+    FlagSpec { long: "--adapter", help: "With flash: Flash adapter: probe-rs, openocd, or emulator" },
+    FlagSpec { long: "--package", help: "With package: Set the bundle package identifier" },
+    FlagSpec { long: "--name", help: "With package: Set the bundle executable name" },
+    FlagSpec { long: "--executable", help: "With package: Path to the executable to bundle" },
+    FlagSpec { long: "--icon", help: "With package: Path to the bundle icon" },
+    FlagSpec { long: "--icon-format", help: "With package: Icon format: png, icns, ico, or svg" },
+    FlagSpec { long: "--icon-size", help: "With package: Icon size in pixels" },
+    FlagSpec { long: "--publisher", help: "With package: Publisher metadata" },
+    FlagSpec { long: "--description", help: "With package: Application description metadata" },
+    FlagSpec { long: "--update-channel", help: "With package: Updater channel" },
+    FlagSpec { long: "--update-url", help: "With package: Updater URL" },
+    FlagSpec { long: "--game", help: "With package: Build a game bundle" },
+    FlagSpec { long: "--source", help: "With package: Project source or package root for a game bundle" },
+    FlagSpec { long: "--phase", help: "With package: Comma-separated game phases: build, cook, stage, package, export, deploy, run" },
+    FlagSpec { long: "--backend", help: "With package: Game build backend: aot" },
+    FlagSpec { long: "--renderer", help: "With package: Game renderer authority: headless or raylib" },
+    FlagSpec { long: "--cook", help: "With package: Alias for --cook-mode" },
+    FlagSpec { long: "--cook-mode", help: "With package: Asset cooking mode: fast, reproducible, or scripts-only" },
+    FlagSpec { long: "--export", help: "With package: Export phase or named export preset" },
+    FlagSpec { long: "--export-preset", help: "With package: Named export preset: default, store, or headless" },
+    FlagSpec { long: "--deploy", help: "With package: Include the deploy phase" },
+    FlagSpec { long: "--deploy-to", help: "With package: Explicit deployment destination" },
+    FlagSpec { long: "--crash-reporter", help: "With package: Crash reporter policy: off, on, or opt-in" },
+    FlagSpec { long: "--crash-consent", help: "With package: Crash reporter consent: not-requested, granted, or denied" },
+    FlagSpec { long: "--cancel", help: "With package: Cancel owned game staging" },
+    FlagSpec { long: "--resume", help: "With package: Resume an owned game stage" },
+    FlagSpec { long: "--clean", help: "With package: Force-clean owned game cache/staging" },
+    FlagSpec { long: "--force-clean", help: "With package: Alias for --clean" },
+    FlagSpec { long: "--scripts-only", help: "With package: Cook only script assets" },
+    FlagSpec { long: "--run-now", help: "With package: Explicitly opt into the run phase" },
+    FlagSpec { long: "--run", help: "With package: Include the run phase" },
     // D-ENVFLAG1=A: `--env` selects one environment module; it never names a
     // preset and has no retired-spelling alias.
     FlagSpec { long: "--env", help: "With env/run/dev/test: Select one declared env.<name> module" },
@@ -1560,31 +2008,47 @@ const BASE_FLAGS: &[FlagSpec] = &[
         long: "--explain-partition",
         help: "With build --target=web: Show which code becomes JavaScript or WebAssembly",
     },
+    FlagSpec { long: "--fresh", help: "With test: Bypass only cached test results (default off); the build cache remains reusable" },
+    FlagSpec { long: "--docs", help: "With test: Run checked documentation examples only (default off)" },
+    FlagSpec { long: "--where", help: "With test: Filter recorded package, dependency, path, tag, or status facts (default all) as --where=<expr>" },
+    FlagSpec { long: "--capture", help: "With test: Capture output as failed, all, or none (default failed); watch key o cycles it" },
+    FlagSpec { long: "--no-capture", help: "With dev: Disable automatic replay capture for this session" },
     FlagSpec { long: "--update-snapshots", help: "With test: Replace expected snapshot output" },
-    FlagSpec { long: "--coverage", help: "With test: Show function and branch coverage" },
+    FlagSpec { long: "--update", help: "With import: Merge generated Jet into an existing target" },
+    FlagSpec { long: "--coverage", help: "With test/inspect build: Show function or diagnostic coverage" },
+    FlagSpec { long: "--verify", help: "With build: Rebuild and compare one indexed receipt artifact" },
     FlagSpec { long: "--rust", help: "With emit: Print generated Rust source" },
     FlagSpec { long: "--emit-generated", help: "With build: Copy generated Jet sources into build/generated/" },
     FlagSpec { long: "-u", help: "Short form of --update-snapshots" },
     // D-BUILDPROFILE1 (ratified 2026-06-25): named optimization bundles.
-    FlagSpec { long: "--release", help: "With build/run/test: Optimize for release" },
-    FlagSpec { long: "--profile", help: "With build/run/test: How hard to optimize: release, debug, ci, hardened, or a named optimization bundle" },
+    FlagSpec { long: "--release", help: "With build/run/jobs/test: Optimize for release" },
+    FlagSpec { long: "--profile", help: "With build/run/jobs/package/test: How hard to optimize: release, debug, ci, hardened, or a named optimization bundle" },
     // D-CONF-KEY1=A: command-line contribution to one typed package setting.
-    FlagSpec { long: "--set", help: "With build/run: Set one declared package setting as key=value" },
-    FlagSpec { long: "--builder", help: "With build: Select a previously bound remote builder" },
+    FlagSpec { long: "--set", help: "With build/run/jobs: Set one declared package setting as key=value" },
+    FlagSpec { long: "--builder", help: "With build/jobs: Select a previously bound remote builder" },
     // D-A11YGATE1=B (c134 Phase 6): accessibility is an opt-in lint category.
     FlagSpec { long: "--a11y", help: "With lint: Check roles, labels, and other accessibility basics" },
     FlagSpec { long: "--complexity", help: "With lint: Report per-function cognitive complexity" },
     FlagSpec { long: "--cost", help: "With lint/explain: Show typed hidden-copy and fallback costs" },
     FlagSpec { long: "--max", help: "With lint --complexity: Fail when a function exceeds this score" },
-    FlagSpec { long: "--scope", help: "With inspect gates/authority or trust grant: Choose a ledger or trust scope" },
+    FlagSpec { long: "--scope", help: "With inspect: Choose a ledger or trust scope" },
+    FlagSpec { long: "--core", help: "With inspect structure: Show the canonical core module export facts" },
     // D-TESTKIT1=A: the shared test name-selection flag.
     FlagSpec { long: "--filter", help: "With test: Only run claims whose name contains --filter=<substr>" },
     FlagSpec { long: "--shuffle", help: "With test: Run tests in random (or --shuffle=<seed>) order" },
     FlagSpec { long: "--serial", help: "With test: Run tests one at a time instead of the parallel default" },
     FlagSpec { long: "--show-default", help: "With run/build/dev/test: Use and report the stock default" },
     FlagSpec { long: "--measure", help: "With test: Measure `.measure` claims" },
-    FlagSpec { long: "--record", help: "With run/dev/test: Record a named replay as --record=<name>" },
-    FlagSpec { long: "--replay", help: "With debug: Consume a named replay as --replay=<name>" },
+    // D-DX-BROWSERTEST1=A: native cross-browser test controls.
+    FlagSpec { long: "--browser", help: "With test/db: Select browser engines for tests or serve a loopback database inspector" },
+    FlagSpec { long: "--browser-retries", help: "With test: Retry each browser attempt up to five times" },
+    FlagSpec { long: "--browser-reporter", help: "With test: Browser report format: text, json, or html" },
+    FlagSpec { long: "--browser-ui", help: "With test: Write/open the local browser report viewer" },
+    FlagSpec { long: "--browser-visual", help: "With test: Capture screenshots for passing browser attempts" },
+    FlagSpec { long: "--browser-trace", help: "With test: Keep redacted BiDi trace entries for every browser attempt" },
+    FlagSpec { long: "--browser-scaffold", help: "With test: Create an isolated browser-test project as --browser-scaffold=<name>" },
+    FlagSpec { long: "--record", help: "With run/dev/test/debug: Record a named replay as --record=<name>" },
+    FlagSpec { long: "--replay", help: "With inspect/debug: Consume a named replay artifact" },
     // D-TESTKIT1=A: `jet fuzz` (its own bespoke flags below are validated by
     // `owns_flag_vocabulary`; these two are listed for completions/the man page).
     FlagSpec { long: "--iterations", help: "With fuzz: Case budget --iterations=<n> (default 1000)" },
@@ -1604,19 +2068,19 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "-y", help: "Short form of --yes" },
 ];
 
-pub static FLAGS: LazyLock<Vec<FlagSpec>> = LazyLock::new(|| {
-    let mut flags = BASE_FLAGS.to_vec();
-    flags.extend(generated_effect_flags());
-    flags
-});
+pub static FLAGS: LazyLock<Vec<FlagSpec>> = LazyLock::new(|| BASE_FLAGS.to_vec());
 
 /// Render the usage shape for a live command from the one registry: a group
-/// renders `<group> <command>`, a nested action its `NestedCommandSpec::usage`,
-/// and a flat command its own `CommandSpec::usage` (falling back to `[args]`
-/// when it takes no positional). `jet <cmd> --help`, `jet help <cmd>`, the
-/// help index, and the man page all read this one function.
+/// renders its declared `CommandSpec::usage` when present, otherwise
+/// `<group> <command>`; a nested action renders its
+/// `NestedCommandSpec::usage`, and a flat command its own usage (falling back
+/// to `[args]` when it takes no positional). Help, completions, and the man
+/// page all read this one function.
 pub fn command_usage(name: &str) -> String {
     if let Some(group) = command_group(name) {
+        if let Some(usage) = group.usage {
+            return format!("{} {}", BINARY_NAME, usage);
+        }
         return format!("{} {} <command>", BINARY_NAME, group.name);
     }
     if let Some((group, action)) = moved_command(name) {
@@ -1645,7 +2109,8 @@ pub fn flags_for_command(name: &str) -> Vec<(&'static str, &'static str)> {
     FLAGS
         .iter()
         .filter(|flag| {
-            flag.help
+            let scoped = flag
+                .help
                 .strip_prefix("with ")
                 .or_else(|| flag.help.strip_prefix("With "))
                 .and_then(|rest| rest.split_once(':'))
@@ -1655,7 +2120,12 @@ pub fn flags_for_command(name: &str) -> Vec<(&'static str, &'static str)> {
                         .map(str::trim)
                         .any(|candidate| candidate == name)
                 })
-                .unwrap_or(false)
+                .unwrap_or(false);
+            let global = matches!(
+                flag.long,
+                MACHINE_OUTPUT_FLAG | "--quiet" | "--color"
+            );
+            scoped || global
         })
         .map(|flag| {
             let help = flag
@@ -1670,8 +2140,9 @@ pub fn flags_for_command(name: &str) -> Vec<(&'static str, &'static str)> {
         .collect()
 }
 
+
 /// Full top-level help generated from the live command and flag registries.
-/// No command or retired route gets a hand-authored usage row.
+/// Completion and man generators expose the same canonical rows.
 pub fn usage_page(version: &str) -> String {
     let mut output = format!(
         "Welcome to {lang}! (v{version})\n\nUsage:\n",
@@ -1716,6 +2187,229 @@ pub fn is_builtin(name: &str) -> bool {
         || name == "install"
         || is_retired_root(name)
 }
+/// Validate the parser-facing registry before the host dispatches an argv.
+///
+/// `COMMANDS`, `InspectPlane`, and `FLAGS` are the parser's one source of
+/// truth. This guard checks the normalization invariants and exercises the
+/// real inspect parser for every registered inspect plane. The optional host
+/// projection is generated by the dispatch macro in `Source/main.rs`; it is
+/// not a second hand-maintained route table.
+pub fn parser_inventory_violations() -> Vec<String> {
+    parser_inventory_violations_against(None)
+}
+
+pub fn parser_inventory_violations_against(
+    host_dispatch_words: Option<&[&str]>,
+) -> Vec<String> {
+    match host_dispatch_words {
+        Some(words) => {
+            let groups = [words];
+            parser_inventory_violations_with_host(Some(&groups))
+        }
+        None => parser_inventory_violations_with_host(None),
+    }
+}
+
+pub fn parser_inventory_violations_against_slices(
+    host_dispatch_words: Option<&[&[&str]]>,
+) -> Vec<String> {
+    parser_inventory_violations_with_host(host_dispatch_words)
+}
+
+fn parser_inventory_violations_with_host(
+    host_dispatch_words: Option<&[&[&str]]>,
+) -> Vec<String> {
+    let host_has = |word: &str| {
+        host_dispatch_words.is_none_or(|groups| {
+            groups
+                .iter()
+                .any(|words| words.iter().any(|candidate| *candidate == word))
+        })
+    };
+    let registry_has_dispatch = |word: &str| {
+        word == "install"
+            || COMMANDS
+                .iter()
+                .any(|command| command.actions.is_empty() && command.name == word)
+            || command_groups().flat_map(|group| group.actions).any(|action| {
+                action.handler.dispatch_word() == word
+            })
+            // A non-exhaustive group owns verbs the registry deliberately does
+            // not model (`jet os check`, `jet env export`), so the host routes
+            // the group word itself and the group's own dispatcher decides.
+            || COMMANDS.iter().any(|command| {
+                command.name == word && !command.actions.is_empty() && !command.exhaustive
+            })
+    };
+    let mut violations = Vec::new();
+    let mut inspect_group = None;
+    for (index, command) in COMMANDS.iter().enumerate() {
+        if command.name.trim().is_empty() {
+            violations.push(format!("command row {index} has an empty name"));
+        }
+        if command.summary.trim().is_empty() {
+            violations.push(format!("command `{}` has an empty summary", command.name));
+        }
+        if COMMANDS[..index]
+            .iter()
+            .any(|previous| previous.name == command.name)
+        {
+            violations.push(format!("duplicate command row `{}`", command.name));
+        }
+        if command.name == "inspect" {
+            inspect_group = Some(command);
+        }
+        if host_dispatch_words.is_some()
+            && command.actions.is_empty()
+            && is_canonical_top_level(command.name)
+            && !host_has(command.name)
+        {
+            violations.push(format!(
+                "canonical command `{}` has no host dispatch route",
+                command.name
+            ));
+        }
+        let mut actions = Vec::new();
+        for action in command.actions {
+            if action.name.trim().is_empty() {
+                violations.push(format!(
+                    "command `{}` has a nested action with an empty name",
+                    command.name
+                ));
+            }
+            if action.usage.trim().is_empty() {
+                violations.push(format!(
+                    "nested action `{} {}` has empty usage",
+                    command.name, action.name
+                ));
+            }
+            if action.summary.trim().is_empty() {
+                violations.push(format!(
+                    "nested action `{} {}` has empty summary",
+                    command.name, action.name
+                ));
+            }
+            if !actions.iter().any(|name| *name == action.name) {
+                actions.push(action.name);
+            } else {
+                violations.push(format!(
+                    "duplicate nested action `{} {}`",
+                    command.name, action.name
+                ));
+            }
+            let dispatch_word = action.handler.dispatch_word();
+            if dispatch_word.trim().is_empty() {
+                violations.push(format!(
+                    "nested action `{} {}` has an empty dispatch word",
+                    command.name, action.name
+                ));
+            }
+            if host_dispatch_words.is_some() && !host_has(dispatch_word) {
+                violations.push(format!(
+                    "nested action `{} {}` routes to missing host dispatch `{}`",
+                    command.name, action.name, dispatch_word
+                ));
+            }
+            // Most grouped handlers consume the group word after
+            // normalization. `inspect env` is the one deliberate pair whose
+            // handler consumes both words without rewriting the argv.
+            let consumes_pair = command.name == "inspect" && action.name == "env";
+            if action.handler.keeps_group()
+                && dispatch_word != command.name
+                && !consumes_pair
+            {
+                violations.push(format!(
+                    "nested action `{} {}` keeps a mismatched group for `{}`",
+                    command.name, action.name, dispatch_word
+                ));
+            }
+            if !action.handler.keeps_group() && dispatch_word == command.name {
+                violations.push(format!(
+                    "nested action `{} {}` strips to its owning group `{}`",
+                    command.name, action.name, dispatch_word
+                ));
+            }
+            if action.handler == HandlerKey::InspectPlane {
+                if command.name != "inspect" {
+                    violations.push(format!(
+                        "inspect plane `{}` is registered under `{}`",
+                        action.name, command.name
+                    ));
+                } else {
+                    let args = vec!["inspect".to_string(), action.name.to_string()];
+                    match parse_inspect_args(&args) {
+                        Ok(request)
+                            if request.plane.name() == action.name
+                                && request.scope == InspectScope::Package
+                                && request.options.is_empty() => {}
+                        Ok(_) => violations.push(format!(
+                            "inspect parser normalized plane `{}` inconsistently",
+                            action.name
+                        )),
+                        Err(error) => violations.push(format!(
+                            "inspect parser rejected registered plane `{}`: {error}",
+                            action.name
+                        )),
+                    }
+                }
+            }
+        }
+    }
+    if let Some(groups) = host_dispatch_words {
+        for word in groups
+            .iter()
+            .flat_map(|words| words.iter().copied())
+            .filter(|word| !registry_has_dispatch(word))
+        {
+            violations.push(format!(
+                "host dispatch `{word}` has no registered parser route"
+            ));
+        }
+    }
+    let Some(inspect) = inspect_group else {
+        violations.push("missing `inspect` command registry row".to_string());
+        return violations;
+    };
+    for plane in InspectPlane::ALL {
+        let count = inspect
+            .actions
+            .iter()
+            .filter(|action| {
+                action.handler == HandlerKey::InspectPlane && action.name == plane.name()
+            })
+            .count();
+        if count != 1 {
+            violations.push(format!(
+                "inspect plane `{}` has {count} registry rows",
+                plane.name()
+            ));
+        }
+    }
+    for (index, flag) in FLAGS.iter().enumerate() {
+        if flag.long.trim().is_empty() {
+            violations.push(format!("flag row {index} has an empty name"));
+        }
+        if FLAGS[..index]
+            .iter()
+            .any(|previous| previous.long == flag.long)
+        {
+            violations.push(format!("duplicate flag row `{}`", flag.long));
+        }
+    }
+    for retired in RETIRED_COMMANDS {
+        if COMMANDS.iter().any(|command| command.name == retired.spelling)
+            || command_groups().any(|group| {
+                group.actions.iter().any(|action| {
+                    format!("{} {}", group.name, action.name) == retired.spelling
+                })
+            })
+        {
+            violations.push(format!("retired route `{}` remains live", retired.spelling));
+        }
+    }
+    violations
+}
+
 
 /// Commands that own a bespoke flag vocabulary or forward flags downstream.
 /// Main dispatch still reads the command set from `COMMANDS`; this only decides
@@ -1735,6 +2429,8 @@ pub fn owns_flag_vocabulary(name: &str) -> bool {
             | "bridge"
             | "services"
             | "image"
+            | "new"
+            | "flash"
             | "os"
             | "add"
             | "remove"
@@ -1759,13 +2455,12 @@ pub fn owns_flag_vocabulary(name: &str) -> bool {
             | "sbom"
             | "repl"
             | "notebook"
-            | "report"
-            | "exec"
             | "schema"
+            | "db"
             | "semindex"
-            | "dossier"
             | "impact"
             | "codemod"
+            | "generate"
             | "expand"
             | "diff"
             | "merge"
@@ -1835,6 +2530,15 @@ pub fn completions_bash() -> String {
         .collect::<Vec<_>>()
         .join(" ");
     let flags = FLAGS.iter().map(|f| f.long).collect::<Vec<_>>().join(" ");
+    let job_completion = format!(
+        "    if [[ $COMP_CWORD -eq 2 && \"${{COMP_WORDS[1]}}\" == \"jobs\" ]]; then\n\
+        local job_names\n\
+        job_names=\"$({bin} --json jobs 2>/dev/null | sed -n 's/.*\"name\":\"\\([^\"]*\\)\".*/\\1/p')\"\n\
+        COMPREPLY=( $(compgen -W \"$job_names\" -- \"$cur\") )\n\
+        return 0\n\
+    fi\n",
+        bin = BINARY_NAME,
+    );
     let nested = command_groups()
         .map(|g| {
             format!(
@@ -1865,7 +2569,7 @@ _{bin}() {{\n\
         COMPREPLY=( $(compgen -W \"$cmds\" -- \"$cur\") )\n\
         return 0\n\
     fi\n\
-    if [[ $COMP_CWORD -eq 2 ]]; then\n\
+{job_completion}    if [[ $COMP_CWORD -eq 2 ]]; then\n\
         case \"${{COMP_WORDS[1]}}\" in\n{nested}\n        esac\n\
     fi\n\
     COMPREPLY=( $(compgen -f -- \"$cur\") )\n\
@@ -1905,6 +2609,12 @@ pub fn completions_zsh() -> String {
     for f in FLAGS.iter() {
         flag_lines.push_str(&format!("        '{}[{}]'\n", f.long, escape_zsh(f.help)));
     }
+    let job_completion = format!(
+        "        local -a job_names\n\
+        job_names=(\"${{(@f)$({bin} --json jobs 2>/dev/null | sed -n 's/.*\"name\":\"\\([^\"]*\\)\".*/\\1/p')}}\")\n\
+        _describe -t job_names 'job' job_names\n",
+        bin = BINARY_NAME,
+    );
     format!(
         "#compdef {bin}\n\
 # zsh completion for {bin} (generated by `{bin} self completions zsh`)\n\
@@ -1914,11 +2624,14 @@ _{bin}() {{\n\
     flags=(\n{flags}    )\n\
     if (( CURRENT == 2 )); then\n\
         _describe -t commands 'command' commands\n\
-    elif (( CURRENT == 3 )); then\n\
-        case $words[2] in\n{nested}\n        esac\n\
-    else\n\
-        _values 'flag' $flags\n\
-        _files\n\
+    elif (( CURRENT == 3 && $words[2] == jobs )); then\n\
+{job_completion}    else\n\
+        if (( CURRENT == 3 )); then\n\
+            case $words[2] in\n{nested}\n            esac\n\
+        else\n\
+            _values 'flag' $flags\n\
+            _files\n\
+        fi\n\
     fi\n\
 }}\n\
 _{bin} \"$@\"\n",
@@ -1962,6 +2675,10 @@ pub fn completions_fish() -> String {
             desc = escape_fish(f.help),
         ));
     }
+    out.push_str(&format!(
+        "complete -c {bin} -n '__fish_seen_subcommand_from jobs' -a \"({bin} --json jobs 2>/dev/null | string match -r '\\\"name\\\":\\\"[^\\\"]+\\\"' | string replace -r '.*\\\"name\\\":\\\"([^\\\"]+)\\\".*' '$1')\" -d 'job name'\n",
+        bin = BINARY_NAME,
+    ));
     out
 }
 
@@ -1992,7 +2709,37 @@ pub fn completions_powershell() -> String {
         .map(|f| format!("'{}'", f.long))
         .collect::<Vec<_>>()
         .join(",");
-    format!("# PowerShell completion for {bin} (generated by `{bin} self completions powershell`)\n$JetCommands = @({top})\n$JetFlags = @({flags})\n$JetGroups = @{{ {groups} }}\nRegister-ArgumentCompleter -Native -CommandName {bin} -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) $words = @($commandAst.CommandElements | ForEach-Object {{ $_.Extent.Text }}); $choices = if ($wordToComplete.StartsWith('-')) {{ $JetFlags }} elseif ($words.Count -ge 2 -and $JetGroups.ContainsKey($words[1])) {{ $JetGroups[$words[1]] }} else {{ $JetCommands }}; $choices | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,\"ParameterValue\",$_) }} }}\n", bin=BINARY_NAME, top=top, flags=flags, groups=groups)
+    let job_completion = format!(
+        "$JetJobs = @((& {bin} --json jobs 2>$null | ConvertFrom-Json).jobs.name)\n",
+        bin = BINARY_NAME,
+    );
+    format!(
+        "# PowerShell completion for {bin} (generated by `{bin} self completions powershell`)\n\
+$JetCommands = @({top})\n\
+$JetFlags = @({flags})\n\
+$JetGroups = @{{ {groups} }}\n\
+{job_completion}\
+Register-ArgumentCompleter -Native -CommandName {bin} -ScriptBlock {{\n\
+    param($wordToComplete,$commandAst,$cursorPosition)\n\
+    $words = @($commandAst.CommandElements | ForEach-Object {{ $_.Extent.Text }})\n\
+    $choices = if ($wordToComplete.StartsWith('-')) {{\n\
+        $JetFlags\n\
+    }} elseif ($words.Count -ge 2 -and $words[1] -eq 'jobs') {{\n\
+        $JetJobs\n\
+    }} elseif ($words.Count -ge 2 -and $JetGroups.ContainsKey($words[1])) {{\n\
+        $JetGroups[$words[1]]\n\
+    }} else {{\n\
+        $JetCommands\n\
+    }}\n\
+    $choices | Where-Object {{ $_ -like \"$wordToComplete*\" }} |\n\
+        ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,\"ParameterValue\",$_) }}\n\
+}}\n",
+        bin = BINARY_NAME,
+        top = top,
+        flags = flags,
+        groups = groups,
+        job_completion = job_completion,
+    )
 }
 
 /// D-SHAPE-CLI-COMPLETE1=A: render a completion script for a compiled Jet
@@ -2370,6 +3117,7 @@ mod tests {
             description: None,
             inputs: Vec::new(),
             commands: Vec::new(),
+            jobs: Vec::new(),
             standard: false,
             version: None,
         };
@@ -2465,6 +3213,55 @@ mod tests {
         assert!(completions_fish().contains("canvas"));
         assert!(completions_powershell().contains("--canvas"));
         assert!(!is_builtin("canvas"));
+    }
+
+    #[test]
+    fn run_prepare_refusal_is_one_registered_surface() {
+        let flag = crate::Syntax::RUN_FLAG_NO_PREPARE;
+        assert_eq!(FLAGS.iter().filter(|entry| entry.long == flag).count(), 1);
+        assert_eq!(
+            command_usage("run"),
+            "jet run [<file.jet|dir>] [--no-prepare] [-- <args>]"
+        );
+        assert!(flags_for_command("run")
+            .iter()
+            .any(|entry| entry.0 == flag));
+        assert!(man_page("0.0.0").contains(flag));
+        assert!(completions_bash().contains(flag));
+        assert!(completions_zsh().contains(flag));
+        assert!(completions_fish().contains("no-prepare"));
+        assert!(completions_powershell().contains(flag));
+    }
+
+    #[test]
+    fn flash_registry_matches_parser_surface() {
+        assert_eq!(
+            COMMANDS.iter().filter(|command| command.name == "flash").count(),
+            1
+        );
+        assert_eq!(
+            command_usage("flash"),
+            "jet flash --target <board.name> [--image <firmware.elf>] [--audit <target.json>] [--adapter <probe-rs|openocd|emulator>]"
+        );
+        let flags = flags_for_command("flash");
+        for expected in ["--target", "--image", "--audit", "--adapter"] {
+            assert!(
+                flags.iter().any(|(long, _)| *long == expected),
+                "flash help missing {expected}"
+            );
+        }
+        assert_eq!(
+            FLAGS
+                .iter()
+                .filter(|flag| matches!(flag.long, "--image" | "--audit" | "--adapter"))
+                .count(),
+            3
+        );
+        assert!(owns_flag_vocabulary("flash"));
+        assert!(completions_bash().contains("flash"));
+        assert!(completions_zsh().contains("flash"));
+        assert!(completions_fish().contains("flash"));
+        assert!(completions_powershell().contains("flash"));
     }
 
     #[test]
@@ -2585,115 +3382,6 @@ mod tests {
 
     #[test]
     fn every_nested_action_routes_to_a_real_dispatch_seam() {
-        use HandlerKey::*;
-        let expected = [
-            ("registry", "publish", Publish, "publish", false),
-            ("registry", "yank", Yank, "yank", false),
-            ("registry", "keygen", Keygen, "keygen", false),
-            ("registry", "key", Key, "key", false),
-            ("registry", "vendor", Vendor, "vendor", false),
-            ("inspect", "graph", Graph, "graph", false),
-            ("inspect", "query", Query, "query", false),
-            (
-                "inspect",
-                "explain-build",
-                ExplainBuild,
-                "explain-build",
-                false,
-            ),
-            ("inspect", "compiler", Compiler, "compiler", false),
-            ("inspect", "impact", Impact, "impact", false),
-            ("inspect", "dossier", Dossier, "dossier", false),
-            ("inspect", "guarantees", Guarantees, "guarantees", false),
-            ("inspect", "provenance", Provenance, "provenance", false),
-            ("inspect", "digest", Digest, "digest", false),
-            ("inspect", "env", InspectEnv, "inspect", true),
-            ("inspect", "semindex", Semindex, "semindex", false),
-            ("inspect", "output", Output, "output", false),
-            ("inspect", "expand", Expand, "expand", false),
-            ("inspect", "unsafe", Unsafe, "unsafe", false),
-            ("inspect", "gates", Gates, "gates", false),
-            ("inspect", "authority", Authority, "authority", false),
-            ("inspect", "schema", Schema, "schema", false),
-            ("inspect", "codemod", Codemod, "codemod", false),
-            ("inspect", "audit", Audit, "audit", false),
-            ("inspect", "sbom", Sbom, "sbom", false),
-            ("inspect", "bind", Bind, "bind", false),
-            ("inspect", "live", Live, "live", false),
-            ("inspect", "logs", Logs, "logs", false),
-            ("inspect", "info", Info, "info", false),
-            ("inspect", "outdated", Outdated, "outdated", false),
-            ("inspect", "reserved", Reserved, "reserved", false),
-            ("inspect", "facts", Facts, "facts", false),
-            ("inspect", "structure", Structure, "structure", false),
-            ("gc", "report", GcReport, "gc", true),
-            ("project", "parts", ProjectParts, "parts", false),
-            ("self", "toolchain", Toolchain, "toolchain", false),
-            ("self", "update", SelfUpdate, "self-update", false),
-            ("self", "doctor", Doctor, "doctor", false),
-            ("self", "completions", Completions, "completions", false),
-            ("self", "man", Man, "man", false),
-            ("self", "devtools", Devtools, "devtools", false),
-            ("self", "lsp", Lsp, "lsp", false),
-            ("self", "exec", Exec, "exec", false),
-            ("cache", "status", Cache, "cache", true),
-            ("cache", "prune", Cache, "cache", true),
-            ("cache", "limit", Cache, "cache", true),
-            ("env", "test", Env, "env", true),
-            ("env", "hook", Env, "env", true),
-            ("env", "sync", Env, "env", true),
-            ("env", "info", Env, "env", true),
-            ("shared-store", "install", SharedStore, "shared-store", true),
-            ("shared-store", "enroll", SharedStore, "shared-store", true),
-            ("shared-store", "status", SharedStore, "shared-store", true),
-            ("shared-store", "broker", SharedStore, "shared-store", true),
-            ("os", "push", Push, "push", false),
-            ("os", "bridge", Bridge, "bridge", false),
-            ("os", "services", Services, "services", false),
-            ("os", "config", Config, "config", false),
-            ("perf", "run", Perf, "perf", true),
-            ("perf", "test", Perf, "perf", true),
-            ("perf", "attach", Perf, "perf", true),
-            ("perf", "view", Perf, "perf", true),
-            ("perf", "compare", Perf, "perf", true),
-            ("perf", "export", Perf, "perf", true),
-        ];
-        assert_eq!(
-            command_groups().map(|g| g.actions.len()).sum::<usize>(),
-            expected.len()
-        );
-        for (group_name, action_name, handler, dispatch_word, keeps_group) in expected {
-            let (_, action) = nested_command(group_name, action_name)
-                .unwrap_or_else(|| panic!("missing {group_name} {action_name}"));
-            assert_eq!(
-                action.handler, handler,
-                "wrong handler for {group_name} {action_name}"
-            );
-            assert_eq!(
-                action.handler.dispatch_word(),
-                dispatch_word,
-                "wrong dispatcher for {group_name} {action_name}"
-            );
-            assert_eq!(
-                action.handler.keeps_group(),
-                keeps_group,
-                "wrong argv policy for {group_name} {action_name}"
-            );
-            let mut normalized = vec![group_name, action_name, "tail"];
-            if !action.handler.keeps_group() {
-                normalized[0] = action.handler.dispatch_word();
-                normalized.remove(1);
-            }
-            let expected_argv = if keeps_group {
-                vec![group_name, action_name, "tail"]
-            } else {
-                vec![dispatch_word, "tail"]
-            };
-            assert_eq!(
-                normalized, expected_argv,
-                "wrong normalized argv for {group_name} {action_name}"
-            );
-        }
         for group in command_groups() {
             for action in group.actions {
                 assert!(
@@ -2710,7 +3398,7 @@ mod tests {
                     action.handler.dispatch_word()
                 );
                 assert_eq!(
-                    nested_command(group.name, action.name).map(|(_, a)| a.handler),
+                    nested_command(group.name, action.name).map(|(_, value)| value.handler),
                     Some(action.handler)
                 );
                 if action.handler.keeps_group() {
@@ -2720,6 +3408,25 @@ mod tests {
                         "kept group must own its dispatcher"
                     );
                 }
+                let mut normalized = vec![
+                    group.name.to_string(),
+                    action.name.to_string(),
+                    "tail".to_string(),
+                ];
+                if !action.handler.keeps_group() {
+                    normalized[0] = action.handler.dispatch_word().to_string();
+                    normalized.remove(1);
+                }
+                let expected = if action.handler.keeps_group() {
+                    vec![
+                        group.name.to_string(),
+                        action.name.to_string(),
+                        "tail".to_string(),
+                    ]
+                } else {
+                    vec![action.handler.dispatch_word().to_string(), "tail".to_string()]
+                };
+                assert_eq!(normalized, expected);
             }
         }
     }
@@ -2736,30 +3443,51 @@ mod tests {
     }
 
     #[test]
-    fn effect_flags_render_in_registry_completions_and_man() {
-        let man = man_page("0.0.0");
-        let completions = [
-            completions_bash(),
-            completions_zsh(),
-            completions_fish(),
-            completions_powershell(),
-        ];
-        for effect in BuildEffect::ALL.iter().copied() {
-            let deny = format!("--deny-{}", effect.flag());
+fn authority_flags_render_in_registry_completions_and_man() {
+    use jet_foundation::BuildEffect;
+
+    let man = man_page("0.0.0");
+    let completions = [
+        completions_bash(),
+        completions_zsh(),
+        completions_fish(),
+        completions_powershell(),
+    ];
+    for canonical in ["--allow", "--deny"] {
+        assert_eq!(
+            FLAGS.iter().filter(|flag| flag.long == canonical).count(),
+            1,
+            "registry must contain one canonical {canonical} row"
+        );
+        assert!(flags_for_command("db")
+            .iter()
+            .any(|flag| flag.0 == canonical));
+        assert!(man.contains(canonical), "man missing {canonical}");
+        for completion in &completions {
             assert!(
-                FLAGS.iter().any(|flag| flag.long == deny.as_str()),
-                "registry missing {deny}"
+                completion.contains(canonical)
+                    || completion.contains(canonical.trim_start_matches("--")),
+                "completion missing {canonical}"
             );
-            assert!(man.contains(deny.as_str()), "man missing {deny}");
+        }
+    }
+    for effect in BuildEffect::ALL {
+        for kind in ["allow", "deny"] {
+            let retired = format!("--{kind}-{}", effect.flag());
+            assert!(
+                !FLAGS.iter().any(|flag| flag.long == retired),
+                "registry must reject retired {retired}"
+            );
+            assert!(!man.contains(&retired), "man contains retired {retired}");
             for completion in &completions {
                 assert!(
-                    completion.contains(deny.as_str())
-                        || completion.contains(deny.trim_start_matches("--")),
-                    "completion missing {deny}"
+                    !completion.contains(&retired),
+                    "completion contains retired {retired}"
                 );
             }
         }
     }
+}
 
     #[test]
     fn cost_surface_is_registered_for_help_man_and_completions() {
@@ -2937,4 +3665,14 @@ mod tests {
             assert_eq!(retired.error_code, "E2101");
         }
     }
+    #[test]
+    fn parser_inventory_guard_is_clean() {
+        let violations = parser_inventory_violations();
+        assert!(
+            violations.is_empty(),
+            "CLI parser registry drift: {:?}",
+            violations
+        );
+    }
+
 }

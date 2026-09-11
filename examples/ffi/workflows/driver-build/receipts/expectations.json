@@ -1,0 +1,42 @@
+{
+  "schema": "jet-ffi-receipt-expectations-v1",
+  "status": "authored-unexecuted",
+  "source": "import-plan.json",
+  "cases": [
+    {
+      "name": "clean",
+      "status": "unexecuted",
+      "expected": {"selection": "accepted", "cache": "miss", "outputs": "complete"}
+    },
+    {
+      "name": "incremental",
+      "status": "unexecuted",
+      "expected": {"selection": "accepted", "cache": "hit-or-rebuild-by-input-digest", "outputs": "complete"}
+    },
+    {
+      "name": "offline",
+      "status": "unexecuted",
+      "expected": {"selection": "accepted-only-with-local-toolchain-and-inputs", "network": "not-required"}
+    },
+    {
+      "name": "input-drift",
+      "status": "unexecuted",
+      "expected": {"exit": 1, "selection": "prior-selection-preserved", "reason": "input-digest-changed"}
+    },
+    {
+      "name": "partial-output",
+      "status": "unexecuted",
+      "expected": {"selection": "not-activated", "reason": "declared-output-missing"}
+    },
+    {
+      "name": "cancel",
+      "status": "unexecuted",
+      "expected": {"selection": "not-activated", "reason": "action-cancelled", "cleanup": "no-partial-selection"}
+    },
+    {
+      "name": "tier",
+      "status": "unexecuted",
+      "expected": {"tier": "partial-or-full-explicit", "inner_owner": "retained-for-opaque-actions", "graph": "not-from-compilation-database-only"}
+    }
+  ]
+}

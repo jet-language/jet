@@ -1,0 +1,61 @@
+// D-FOUND-CAP1: one host program exercises three authority boundaries:
+// a sandbox Component with a resource-scoped FS.Read import, typed Component
+// values, and an OS process started under an exact Exec right.  The plugin
+// calls use frozen named exports from guest/.jet/cache/api, not retired call*.
+use core.plugin as plugin
+use core.files as fs
+use "service" as service
+
+#Codable
+struct Row {
+    label: String
+    score: Int
+}
+
+fn run() {
+    #FX(FS.Read, IO, Exec) {
+        // The guest's core.files.read is serviced by the host through this
+        // resource-scoped grant; the host does not hold broad FS authority.
+        root_policy :: Authority.from_rights(["FS.Read:examples/features/foundations/capabilities"])
+        // D-FILES-SCOPE1: the trusted host narrows ordinary file access once;
+        // the FileScope carries the same resource-qualified grant to every
+        // read without restoring ambient or package-wide FS authority.
+        host_files :: fs.scope(root_policy)
+        host_inside :: host_files.read("inputs/allowed.txt") ?? panic("host scoped read failed")
+        print("host:inside={host_inside.trim()}")
+        _host_outside :: host_files.read("/etc/passwd") ?? {
+            print("host:outside-denied {err}")
+            ""
+        }
+        guest :: plugin.load("guest/build/capability_guest.wasm", root_policy)
+        greeting :: guest.greet("Ada") ?? panic("plugin greeting failed")
+        print("plugin:greeting={greeting}")
+        scaled :: guest.scale(6.0, 7.0) ?? panic("plugin scale failed")
+        print("plugin:scale={scaled}")
+
+        rows :: [Row]{{label: "first", score: 12}, {label: "second", score: 30}}
+        indexed :: guest.index(rows) ?? panic("plugin index failed")
+        print("plugin:index={indexed}")
+
+        inside :: guest.read("inputs/allowed.txt") ?? panic("scoped host read failed")
+        print("plugin:inside={inside.trim()}")
+        _guest_outside :: guest.read("/etc/passwd") ?? {
+            print("plugin:outside-denied {err}")
+            ""
+        }
+
+        malformed :: plugin.load("guest/hostile/capability_guest.wasm", root_policy)
+        _malformed_probe :: malformed.greet("Ada") ?? {
+            print("plugin:malformed-rejected")
+            "rejected"
+        }
+
+        out_of_root :: plugin.load("/etc/capability_guest.wasm", root_policy)
+        _out_of_root_probe :: out_of_root.greet("Ada") ?? {
+            print("plugin:out-of-root-rejected")
+            "rejected"
+        }
+
+        service.lifecycle()
+    }
+}

@@ -34,34 +34,34 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">A finite source can end without a matching `break`; `next` and `break` after the closing brace would control the loop that just closed instead of naming a target.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">add `?? fallback` after the closing `}`, or write a labeled search such as `found :: loop { ... break(found, value) }`.</p>
+<p class="diag-copy fix" data-registry-field="fix">Add `?? fallback` after the closing `}`, or write a labeled search such as `found :: loop { ... break(found, value) }`.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0078</code>: <code>tests/ui/value_loop_exhaustion_route.stderr</code>.</p>
-<pre class="diag">Error [E0078]: this finite value loop needs a written exhaustion route
-  --&gt; tests/ui/value_loop_exhaustion_route.jet:4:5
+<pre class="diag">Error [E0078]: This finite value loop needs a written exhaustion route
+  --&gt; tests/ui/value_loop_exhaustion_route.jet:6:5
     |
-  4 |     }
+  6 |     }
     |     ^
- Why: the source can end without a matching break, so the expression must state what exhaustion means
- Fix: add `?? fallback` after the closing `}`, or use the labeled loop form for `next` or `break`
+ Why: The source can end without a matching break, so the expression must state what exhaustion means
+ Fix: Add `?? fallback` after the closing `}`, or use the labeled loop form for `next` or `break`
 More: jet-lang.dev/e/E0078
 
-Error [E0078]: this finite value loop cannot use `?? next` after its closing brace
-  --&gt; tests/ui/value_loop_exhaustion_route.jet:11:10
+Error [E0078]: This finite value loop cannot use `?? next` after its closing brace
+  --&gt; tests/ui/value_loop_exhaustion_route.jet:15:10
     |
- 11 |     } ?? next
+ 15 |     } ?? next
     |          ^^^^
- Why: the route would control the loop that just closed; use a labeled loop to name the target
- Fix: write a labeled search such as `found :: loop { ... break(found, value) }`
+ Why: The route would control the loop that just closed; use a labeled loop to name the target
+ Fix: Write a labeled search such as `found :: loop { ... break(found, value) }`
 More: jet-lang.dev/e/E0078
 
-Error [E0078]: this finite value loop cannot use `?? break` after its closing brace
-  --&gt; tests/ui/value_loop_exhaustion_route.jet:18:10
+Error [E0078]: This finite value loop cannot use `?? break` after its closing brace
+  --&gt; tests/ui/value_loop_exhaustion_route.jet:24:10
     |
- 18 |     } ?? break
+ 24 |     } ?? break
     |          ^^^^^
- Why: the route would control the loop that just closed; use a labeled loop to name the target
- Fix: write a labeled search such as `found :: loop { ... break(found, value) }`
+ Why: The route would control the loop that just closed; use a labeled loop to name the target
+ Fix: Write a labeled search such as `found :: loop { ... break(found, value) }`
 More: jet-lang.dev/e/E0078
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

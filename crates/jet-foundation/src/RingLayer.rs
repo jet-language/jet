@@ -14,88 +14,109 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 /// code-generation tier use one dependency authority. A namespace is not
 /// automatically a dependency: pure URL and calendar helpers stop at their
 /// own semantic part instead of inheriting an unrelated hosted service.
+// BEGIN GENERATED CORE DEPENDENCIES
+// Source: crates/jet-codegen/src/Prelude/Core.jet
+// Source SHA-256: 05686767670432ec8a8c13b33daf9748555142d14a261910a25e15cfe625a0b3
 const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
-    ("core.prelude", &["core"]),
-    ("core.units", &["core.math"]),
-    ("core.mem", &["core"]),
-    ("core.math.random", &["core.math"]),
+    ("app", &["core.web"]),
+    ("core.devtools", &["core"]),
+    ("core.archive", &["core.encoding"]),
+    ("core.archive.gzip", &["core.archive"]),
+    ("core.archive.zstd", &["core.archive"]),
+    ("core.args", &["core.text"]),
+    ("core.auth", &["core.crypto", "core.net"]),
+    ("core.compiler", &["core.text"]),
+    ("core.compiler.lang", &["core.compiler"]),
+    ("core.compute", &["core.math", "core.mem"]),
+    ("core.compute.solve", &["core.compute"]),
     ("core.crypto", &["core"]),
     ("core.crypto.random", &["core.crypto"]),
     ("core.crypto.uuid", &["core.crypto", "core.encoding.hex"]),
     ("core.crypto.vault", &["core.crypto"]),
+    ("core.data", &["core.encoding", "core.files"]),
+    ("core.data.arrow", &["core.data"]),
+    ("core.data.loader", &["core.data"]),
+    ("core.data.stream", &["core.data.loader"]),
+    ("core.data.plot", &["core.data"]),
+    ("core.data.sketch.cms", &["core.data"]),
+    ("core.data.sketch.hll", &["core.data"]),
+    ("core.data.sketch.reservoir", &["core.data"]),
+    ("core.data.sketch.tdigest", &["core.data"]),
+    ("core.db", &["core.files", "core.net"]),
+    ("core.email", &["core.net", "core.text"]),
     ("core.encoding", &["core"]),
+    ("core.encoding.base32", &["core.encoding"]),
+    ("core.encoding.base64", &["core.encoding"]),
+    ("core.encoding.cbor", &["core.encoding"]),
+    ("core.encoding.csv", &["core.encoding"]),
+    ("core.encoding.hex", &["core.encoding"]),
     ("core.encoding.json", &["core.encoding"]),
     ("core.encoding.jsonl", &["core.encoding"]),
-    ("core.encoding.csv", &["core.encoding"]),
     ("core.encoding.toml", &["core.encoding"]),
-    ("core.encoding.yaml", &["core.encoding"]),
     ("core.encoding.xml", &["core.encoding"]),
-    ("core.encoding.cbor", &["core.encoding"]),
-    ("core.encoding.hex", &["core.encoding"]),
-    ("core.encoding.base64", &["core.encoding"]),
-    ("core.encoding.base32", &["core.encoding"]),
-    ("core.text", &["core"]),
-    ("core.text.fmt", &["core.text"]),
-    ("core.args", &["core.text"]),
-    ("core.reflect", &["core.text"]),
-    ("core.compiler", &["core.text"]),
-    ("core.compiler.lang", &["core.compiler"]),
+    ("core.encoding.yaml", &["core.encoding"]),
+    ("core.event", &["core.mem"]),
+    ("core.files", &["core.text"]),
+    ("core.font", &["core.ui"]),
     ("core.game", &["core.math", "core.mem"]),
     ("core.game.raylib", &["core.game"]),
-    ("core.reactive", &["core.mem"]),
-    ("core.reactive.loadable", &["core.reactive"]),
-    ("core.event", &["core.mem"]),
-    ("core.compute", &["core.math", "core.mem"]),
-    ("core.compute.solve", &["core.compute"]),
-    ("core.data", &["core.encoding", "core.text"]),
-    ("core.data.plot", &["core.data"]),
-    ("core.data.sketch.hll", &["core.data"]),
-    ("core.data.sketch.tdigest", &["core.data"]),
-    ("core.data.sketch.reservoir", &["core.data"]),
-    ("core.data.sketch.cms", &["core.data"]),
-    ("core.log", &["core.text"]),
-    ("core.regex", &["core.text"]),
-    ("core.term", &["core.text"]),
-    ("core.sys", &["core.text"]),
-    ("core.process", &["core.args", "core.term"]),
-    ("core.files", &["core.text"]),
-    ("core.watcher", &["core.files", "core.process"]),
-    ("core.net", &["core.text"]),
-    ("core.net.tls", &["core.net", "core.crypto.random"]),
-    ("core.net.ws", &["core.net"]),
     ("core.http", &["core.net", "core.text"]),
     ("core.http.client", &["core.http"]),
     ("core.http.server", &["core.http"]),
-    ("core.time", &["core"]),
-    ("core.tasks", &["core.time"]),
-    ("core.archive", &["core.encoding"]),
-    ("core.archive.gzip", &["core.archive"]),
-    ("core.archive.zstd", &["core.archive"]),
-    ("core.db", &["core.files", "core.net"]),
+    ("core.log", &["core.text"]),
+    ("core.math.random", &["core.math"]),
+    ("core.mem", &["core"]),
+    ("core.mod", &["core.compiler", "core.files"]),
+    ("core.net", &["core.text"]),
+    ("core.net.tls", &["core.crypto.random", "core.net"]),
+    ("core.net.ws", &["core.net"]),
     ("core.plugin", &["core.files", "core.process"]),
-    ("core.email", &["core.text", "core.net"]),
-    ("core.testing", &["core.files", "core.time", "core.math.random"]),
-    ("core.mod", &["core.files", "core.compiler"]),
-    ("core.auth", &["core.crypto", "core.net"]),
+    ("core.prelude", &["core"]),
+    ("core.process", &["core.args", "core.term"]),
+    ("core.reactive", &["core.mem"]),
+    ("core.reactive.loadable", &["core.reactive"]),
+    ("core.reflect", &["core.text"]),
+    ("core.regex", &["core.text"]),
+    ("core.service", &["core.net", "core.tasks"]),
     ("core.sync", &["core.data", "core.tasks"]),
-    ("core.service", &["core.tasks", "core.net"]),
+    ("core.sys", &["core.text"]),
+    ("core.tasks", &["core.time"]),
+    ("core.term", &["core.text"]),
+    ("core.testing", &["core.files", "core.math.random", "core.time"]),
+    ("core.text", &["core"]),
+    ("core.text.fmt", &["core.text"]),
+    ("core.time", &["core"]),
     ("core.ui", &["core.text"]),
+    ("core.tui", &["core.ui", "core.text"]),
+    ("core.ui.host", &["core.ui", "core.files"]),
+    ("core.ui.host.clipboard", &["core.ui.host"]),
+    ("core.ui.host.ime", &["core.ui.host"]),
+    ("core.ui.host.drag_drop", &["core.ui.host"]),
+    ("core.ui.host.shortcuts", &["core.ui.host"]),
+    ("core.ui.host.accessibility", &["core.ui.host"]),
+    ("core.units", &["core.math"]),
+    ("core.watcher", &["core.files", "core.process"]),
     ("core.web", &["core.http"]),
     ("core.web.browser", &["core.web"]),
+    ("core.web.devserver", &["core.web"]),
+    ("core.web.forms", &["core.web"]),
+    ("core.web.query", &["core.web"]),
+    ("core.web.router", &["core.web"]),
     ("core.web.storage", &["core.web"]),
     ("core.web.storage.local", &["core.web.storage"]),
     ("core.web.storage.session", &["core.web.storage"]),
-    ("core.web.devserver", &["core.web"]),
-    ("app", &["core.web"]),
+    ("core.web.store", &["core.web"]),
+    ("core.web.table", &["core.web"]),
+    ("core.web.virtual", &["core.web"]),
 ];
 
-/// Nested names whose parent is only a namespace, not a semantic dependency.
 const PRELUDE_NAMESPACE_ONLY: &[&str] = &[
     "core.mem.scope",
-    "core.net.url",
     "core.net.mime",
+    "core.net.url",
     "core.time.expiring",
 ];
+// END GENERATED CORE DEPENDENCIES
 
 /// Minimum runtime capability a package needs: heap-free core, allocator, or hosted OS runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
@@ -128,6 +149,60 @@ impl RuntimeLayer {
             RuntimeLayer::Std => Self::HOSTED,
         }
     }
+}
+/// One source-level runtime fact for the generated Prelude closure.
+///
+/// The registry is deliberately separate from semantic module classification:
+/// source names identify the implementation that was emitted, while
+/// `RuntimeLayer` remains the admission fact. `shared` marks a source whose
+/// semantic kernel is consumed by both hosted and portable emission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PreludeSourceFact {
+    pub name: &'static str,
+    pub layer: RuntimeLayer,
+    pub shared: bool,
+}
+
+impl PreludeSourceFact {
+    pub const fn new(name: &'static str, layer: RuntimeLayer, shared: bool) -> Self {
+        Self {
+            name,
+            layer,
+            shared,
+        }
+    }
+}
+
+/// Canonical source registry for the generated runtime closure. A source may
+/// only be emitted when its checked artifact layer admits it; unknown source
+/// names are intentionally absent instead of being inferred from a target
+/// triple or module spelling.
+pub const PRELUDE_SOURCE_REGISTRY: &[PreludeSourceFact] = &[
+    PreludeSourceFact::new("Prelude/Core/PortableCore.rs", RuntimeLayer::Core, true),
+    PreludeSourceFact::new(
+        "Prelude/Core/EmbeddedHardware.rs::portable",
+        RuntimeLayer::Core,
+        true,
+    ),
+    PreludeSourceFact::new("Prelude/PortableAlloc.rs", RuntimeLayer::Alloc, true),
+    PreludeSourceFact::new("Prelude/TargetAdapters.rs", RuntimeLayer::Core, true),
+    PreludeSourceFact::new("Prelude/Core.rs", RuntimeLayer::Std, false),
+    PreludeSourceFact::new("Prelude/ProgramAllocator.rs", RuntimeLayer::Std, false),
+    PreludeSourceFact::new("Prelude/Scheduler.rs", RuntimeLayer::Std, false),
+    PreludeSourceFact::new("Prelude/Core/EmbeddedHardware.rs::host", RuntimeLayer::Std, false),
+];
+
+/// Look up a source-level runtime fact without applying a fallback policy.
+pub fn prelude_source_fact(name: &str) -> Option<PreludeSourceFact> {
+    PRELUDE_SOURCE_REGISTRY
+        .iter()
+        .copied()
+        .find(|fact| fact.name == name)
+}
+
+/// Return the admitted layer for one registered source.
+pub fn prelude_source_layer(name: &str) -> Option<RuntimeLayer> {
+    prelude_source_fact(name).map(|fact| fact.layer)
 }
 
 /// Classify a compiler-known core module path to its minimum runtime layer.
@@ -431,7 +506,7 @@ fn is_prelude_closure_marker(usage: &str) -> bool {
 }
 
 fn prelude_dependencies(usage: &str) -> Vec<String> {
-    let (module, _) = usage
+    let (module, helper) = usage
         .split_once("::")
         .map_or((usage, ""), |(module, helper)| (module, helper));
     let mut dependencies = PRELUDE_DEPENDENCY_EDGES
@@ -443,6 +518,9 @@ fn prelude_dependencies(usage: &str) -> Vec<String> {
                 .collect::<Vec<_>>()
         }))
         .unwrap_or_default();
+    if !helper.is_empty() && module != "core" {
+        dependencies.push(module.to_owned());
+    }
 
     match usage {
         "core::json" => dependencies.push("core.encoding.json".to_string()),

@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 use std::sync::{Arc, Mutex};
 
+use super::Adapter::{editor_host_error_code, EditorHostAdapter};
 use super::Check::{collect_fixes_from_diagnostics, Fix};
 use super::Completion::compute_completions;
 use super::EnvironmentResources::{self, ReadError};
@@ -17,16 +18,21 @@ use super::Features::{
     compute_definition, compute_discovery_hover, compute_generated_definition, compute_hover,
     compute_refactor_actions, compute_references, compute_rename,
     encode_semantic_tokens_in_span_with_arithmetic, encode_semantic_tokens_with_arithmetic,
-    format_inlay_hints, semantic_symbol_at, semantic_symbol_at_span, semantic_symbol_metadata_json,
-    RefactorAction,
+    format_inlay_hints, reasoning_inlay_hints, reasoning_view_json, semantic_symbol_at,
+    semantic_symbol_at_span, semantic_symbol_metadata_json, RefactorAction,
 };
 use super::Position::{
     apply_lsp_edit, byte_offset_to_lsp, byte_span_to_range, full_document_range, lsp_pos_to_offset,
     range_json, LspPos, LspRange,
 };
 use super::SymbolDB::{build_symbol_db, InlayHint, SymKind, SymbolDB};
+use jet_devserver::EditorHost::{
+    EDITOR_COMMAND_METHOD, EDITOR_NAVIGATE_METHOD, EDITOR_RECONNECT_METHOD,
+    EDITOR_SELECT_METHOD, EDITOR_WORKBENCH_METHOD,
+};
+use jet_foundation::DataTree::DataTree;
 use jet_foundation::JSON::{
-    json_escape, json_get, json_str, json_u32, parse_json, read_protocol_content_length, JSONValue,
+    json_escape, json_get, json_str, json_u32, parse_json, read_protocol_content_length,
     MAX_PROTOCOL_MESSAGE_BYTES,
 };
 
@@ -66,7 +72,6 @@ impl Document {
         true
     }
 }
-
 struct Server {
     docs: HashMap<String, Document>,
     workspace_roots: Vec<String>,
@@ -75,8 +80,11 @@ struct Server {
     dirty: std::collections::HashSet<String>,
     /// D-LSP1=C: the canonical driver query service shared with `jet check`.
     queries: std::cell::RefCell<CompilerQueries>,
+    /// One typed transport for both VS Code and Zed editor workbenches.
+    editor_host: EditorHostAdapter,
     shutdown: bool,
 }
+
 
 impl Server {
     fn new() -> Self {
@@ -86,6 +94,7 @@ impl Server {
             workspace_folders: false,
             dirty: std::collections::HashSet::new(),
             queries: std::cell::RefCell::new(CompilerQueries::new()),
+            editor_host: EditorHostAdapter::new(),
             shutdown: false,
         }
     }
@@ -115,7 +124,6 @@ impl Server {
             _ => self.queries.borrow_mut().lex_text(&doc.path, &doc.text),
         }
     }
-
 }
 
 // ── JSON-RPC main loop ────────────────────────────────────────────────────────
@@ -161,7 +169,7 @@ pub fn run_stdio() -> io::Result<()> {
             Err((code, message)) => {
                 write_message(
                     &mut stdout,
-                    &error_response(&JSONValue::Null, code, message),
+                    &error_response(&DataTree::Null, code, message),
                 )?;
                 continue;
             }
@@ -217,16 +225,16 @@ fn lock_cancelled(
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn cancellation_key(params: Option<&JSONValue>) -> Option<String> {
+fn cancellation_key(params: Option<&DataTree>) -> Option<String> {
     let id = params
         .and_then(|params| json_get(params, "id").or_else(|| json_get(params, "requestId")))?;
-    matches!(id, JSONValue::Number(_) | JSONValue::String(_)).then(|| serialize_id(id))
+    matches!(id, DataTree::Int(_) | DataTree::Text(_)).then(|| serialize_id(id))
 }
 
 fn cancellable_response<F>(
     cancelled: &Mutex<std::collections::HashSet<String>>,
     key: &str,
-    id: &JSONValue,
+    id: &DataTree,
     run: F,
 ) -> Option<String>
 where
@@ -243,20 +251,20 @@ where
     }
 }
 
-fn parse_rpc_message(body: &str) -> Result<JSONValue, (i64, &'static str)> {
+fn parse_rpc_message(body: &str) -> Result<DataTree, (i64, &'static str)> {
     let message = parse_json(body).map_err(|()| (-32700, "Parse error"))?;
-    let JSONValue::Object(_) = &message else {
+    let DataTree::Object(_) = &message else {
         return Err((-32600, "Invalid Request"));
     };
     if json_get(&message, "jsonrpc").and_then(json_str) != Some("2.0")
         || json_get(&message, "method").and_then(json_str).is_none()
         || !matches!(
             json_get(&message, "id"),
-            None | Some(JSONValue::Null | JSONValue::Number(_) | JSONValue::String(_))
+            None | Some(DataTree::Null | DataTree::Int(_) | DataTree::Text(_))
         )
         || !matches!(
             json_get(&message, "params"),
-            None | Some(JSONValue::Array(_) | JSONValue::Object(_))
+            None | Some(DataTree::Array(_) | DataTree::Object(_))
         )
     {
         return Err((-32600, "Invalid Request"));
@@ -302,8 +310,6 @@ fn write_log_line<W: Write>(sink: &mut W, line: &str) -> io::Result<()> {
     writeln!(sink, "{line}")
 }
 
-
-
 fn read_message(reader: &mut impl BufRead) -> io::Result<Option<String>> {
     let len = match read_protocol_content_length(reader)? {
         Some(l) => l,
@@ -332,8 +338,8 @@ fn write_message<W: Write>(w: &mut W, json: &str) -> io::Result<()> {
 fn handle_request(
     server: &mut Server,
     method: &str,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let out = match method {
         "initialize" => {
@@ -382,15 +388,36 @@ fn handle_request(
         "typeHierarchy/subtypes" => type_hierarchy_subtypes_response(server, params, id),
         "workspace/executeCommand" => execute_command_response(server, params, id),
         "jet/buildGraph" => build_graph_response(server, params, id),
+        EDITOR_WORKBENCH_METHOD
+        | EDITOR_RECONNECT_METHOD
+        | EDITOR_NAVIGATE_METHOD
+        | EDITOR_SELECT_METHOD
+        | EDITOR_COMMAND_METHOD => editor_host_response(server, method, params, id),
         _ => Some(response(id, "null")),
     };
     out
 }
+fn editor_host_response(
+    server: &mut Server,
+    method: &str,
+    params: Option<&DataTree>,
+    id: &DataTree,
+) -> Option<String> {
+    match server.editor_host.dispatch(method, params) {
+        Ok(result) => Some(response(id, &result)),
+        Err(error) => Some(error_response(
+            id,
+            editor_host_error_code(&error),
+            &error.to_string(),
+        )),
+    }
+}
+
 
 fn build_graph_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let uri = params
         .and_then(|params| json_get(params, "textDocument"))
@@ -407,12 +434,12 @@ fn build_graph_response(
 
 // ── Workspace roots ───────────────────────────────────────────────────────────
 
-fn configure_workspace_roots(server: &mut Server, params: Option<&JSONValue>) {
+fn configure_workspace_roots(server: &mut Server, params: Option<&DataTree>) {
     let mut roots = Vec::new();
     if let Some(params) = params {
         server.workspace_folders = json_get(params, "workspaceFolders").is_some();
         if let Some(folders) = json_get(params, "workspaceFolders") {
-            if let JSONValue::Array(folders) = folders {
+            if let DataTree::Array(folders) = folders {
                 for folder in folders {
                     if let Some(uri) = json_get(folder, "uri").and_then(json_str) {
                         push_workspace_root(&mut roots, uri_to_path(uri));
@@ -437,12 +464,12 @@ fn push_workspace_root(roots: &mut Vec<String>, path: String) {
     }
 }
 
-fn update_workspace_roots(server: &mut Server, params: Option<&JSONValue>) {
+fn update_workspace_roots(server: &mut Server, params: Option<&DataTree>) {
     let Some(event) = params.and_then(|params| json_get(params, "event")) else {
         return;
     };
     server.workspace_folders = true;
-    if let Some(JSONValue::Array(removed)) = json_get(event, "removed") {
+    if let Some(DataTree::Array(removed)) = json_get(event, "removed") {
         for folder in removed {
             let Some(uri) = json_get(folder, "uri").and_then(json_str) else {
                 continue;
@@ -451,7 +478,7 @@ fn update_workspace_roots(server: &mut Server, params: Option<&JSONValue>) {
             server.workspace_roots.retain(|root| root != &path);
         }
     }
-    if let Some(JSONValue::Array(added)) = json_get(event, "added") {
+    if let Some(DataTree::Array(added)) = json_get(event, "added") {
         for folder in added {
             if let Some(uri) = json_get(folder, "uri").and_then(json_str) {
                 push_workspace_root(&mut server.workspace_roots, uri_to_path(uri));
@@ -463,7 +490,7 @@ fn update_workspace_roots(server: &mut Server, params: Option<&JSONValue>) {
 fn handle_notification(
     server: &mut Server,
     method: &str,
-    params: Option<&JSONValue>,
+    params: Option<&DataTree>,
     stdout: &mut impl Write,
 ) -> io::Result<()> {
     match method {
@@ -499,7 +526,7 @@ fn handle_notification(
     }
 }
 
-fn initialize_response(id: &JSONValue) -> String {
+fn initialize_response(id: &DataTree) -> String {
     let result = r#"{
   "protocolVersion": "2025-11-25",
   "capabilities": {
@@ -556,7 +583,7 @@ fn initialize_response(id: &JSONValue) -> String {
       }
     },
     "executeCommandProvider": {
-      "commands": ["jet.impact", "jet.budgetReports"]
+      "commands": ["jet.impact", "jet.budgetReports", "jet.reasoning"]
     },
     "resources": {
       "subscribe": false,
@@ -570,8 +597,8 @@ fn initialize_response(id: &JSONValue) -> String {
 
 fn environment_resource_read_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let Some(uri) = params
         .and_then(|params| json_get(params, "uri"))
@@ -601,7 +628,7 @@ fn environment_resource_read_response(
     }
 }
 
-fn response(id: &JSONValue, result_json: &str) -> String {
+fn response(id: &DataTree, result_json: &str) -> String {
     let id_json = serialize_id(id);
     format!(
         r#"{{"jsonrpc":"2.0","id":{},"result":{}}}"#,
@@ -609,7 +636,7 @@ fn response(id: &JSONValue, result_json: &str) -> String {
     )
 }
 
-fn error_response(id: &JSONValue, code: i64, message: &str) -> String {
+fn error_response(id: &DataTree, code: i64, message: &str) -> String {
     let id_json = serialize_id(id);
     format!(
         r#"{{"jsonrpc":"2.0","id":{},"error":{{"code":{},"message":"{}"}}}}"#,
@@ -619,17 +646,17 @@ fn error_response(id: &JSONValue, code: i64, message: &str) -> String {
     )
 }
 
-fn serialize_id(id: &JSONValue) -> String {
+fn serialize_id(id: &DataTree) -> String {
     match id {
-        JSONValue::Number(n) => n.to_string(),
-        JSONValue::String(s) => format!("\"{}\"", json_escape(s)),
+        DataTree::Int(n) => n.to_string(),
+        DataTree::Text(s) => format!("\"{}\"", json_escape(s)),
         _ => "null".to_string(),
     }
 }
 
 fn publish_after_change(
     server: &mut Server,
-    params: Option<&JSONValue>,
+    params: Option<&DataTree>,
     stdout: &mut impl Write,
 ) -> io::Result<()> {
     publish_after_change_impl(server, params, stdout, false)
@@ -637,7 +664,7 @@ fn publish_after_change(
 
 fn publish_after_open(
     server: &mut Server,
-    params: Option<&JSONValue>,
+    params: Option<&DataTree>,
     stdout: &mut impl Write,
 ) -> io::Result<()> {
     publish_after_change_impl(server, params, stdout, true)
@@ -648,7 +675,7 @@ fn publish_after_open(
 /// Dirty documents are flushed before the next request that reads document state.
 fn publish_after_change_impl(
     server: &mut Server,
-    params: Option<&JSONValue>,
+    params: Option<&DataTree>,
     stdout: &mut impl Write,
     is_open: bool,
 ) -> io::Result<()> {
@@ -665,7 +692,7 @@ fn publish_after_change_impl(
         None => return Ok(()),
     };
     let Some(version) = json_get(td, "version").and_then(|value| match value {
-        JSONValue::Number(version) => i32::try_from(*version).ok(),
+        DataTree::Int(version) => i32::try_from(*version).ok(),
         _ => None,
     }) else {
         return Ok(());
@@ -680,7 +707,7 @@ fn publish_after_change_impl(
             Document::new(uri_to_path(&uri), text.to_string(), version),
         );
     } else {
-        let Some(JSONValue::Array(changes)) = json_get(params, "contentChanges") else {
+        let Some(DataTree::Array(changes)) = json_get(params, "contentChanges") else {
             return Ok(());
         };
         let Some(current) = server.docs.get(&uri) else {
@@ -713,24 +740,29 @@ fn publish_after_change_impl(
     }
     Ok(())
 }
+fn object_get<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+    object
+        .iter()
+        .find_map(|(name, value)| (name == key).then_some(value))
+}
 
-fn apply_content_change(doc: &mut Document, change: &JSONValue) -> bool {
+fn apply_content_change(doc: &mut Document, change: &DataTree) -> bool {
     let obj = match change {
-        JSONValue::Object(obj) => obj,
+        DataTree::Object(obj) => obj,
         _ => return false,
     };
-    let text = match obj.get("text").and_then(json_str) {
+    let text = match object_get(obj, "text").and_then(json_str) {
         Some(text) => text,
         None => return false,
     };
-    let range_length = match obj.get("rangeLength") {
+    let range_length = match object_get(obj, "rangeLength") {
         Some(value) => match lsp_uinteger(value) {
             Some(length) => Some(length),
             None => return false,
         },
         None => None,
     };
-    match obj.get("range") {
+    match object_get(obj, "range") {
         Some(value) => match range_from_json(value) {
             Some(range) => doc.apply_range_edit(range, range_length, text),
             None => false,
@@ -743,7 +775,7 @@ fn apply_content_change(doc: &mut Document, change: &JSONValue) -> bool {
     }
 }
 
-fn range_from_json(value: &JSONValue) -> Option<LspRange> {
+fn range_from_json(value: &DataTree) -> Option<LspRange> {
     let start = json_get(value, "start")?;
     let end = json_get(value, "end")?;
     Some(LspRange {
@@ -752,14 +784,14 @@ fn range_from_json(value: &JSONValue) -> Option<LspRange> {
     })
 }
 
-fn pos_from_json(value: &JSONValue) -> Option<LspPos> {
+fn pos_from_json(value: &DataTree) -> Option<LspPos> {
     Some(LspPos {
         line: lsp_uinteger(json_get(value, "line")?)?,
         character: lsp_uinteger(json_get(value, "character")?)?,
     })
 }
 
-fn lsp_uinteger(value: &JSONValue) -> Option<u32> {
+fn lsp_uinteger(value: &DataTree) -> Option<u32> {
     json_u32(value).filter(|value| *value <= i32::MAX as u32)
 }
 
@@ -881,8 +913,8 @@ fn related_information_json(
 
 fn code_action_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -986,7 +1018,7 @@ fn action_json(
     )
 }
 
-fn format_response(server: &Server, params: Option<&JSONValue>, id: &JSONValue) -> Option<String> {
+fn format_response(server: &Server, params: Option<&DataTree>, id: &DataTree) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
     let uri = json_get(td, "uri").and_then(json_str)?;
@@ -1006,8 +1038,8 @@ fn format_response(server: &Server, params: Option<&JSONValue>, id: &JSONValue) 
 
 fn range_format_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1029,8 +1061,8 @@ fn range_format_response(
 
 fn on_type_format_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1348,8 +1380,8 @@ fn line_boundary(src: &str, line: u32) -> Option<usize> {
 
 fn completion_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1362,6 +1394,20 @@ fn completion_response(
     let offset = lsp_pos_to_offset(&doc.text, lsp_pos);
 
     let checked = server.check_with_bundle(doc);
+    let workspace_root = workspace_root_for_path(server, &doc.path);
+    match super::Completion::dynamic_completion_json(
+        params,
+        &doc.text,
+        offset,
+        u64::try_from(doc.version).unwrap_or(0),
+        checked.bundle.as_deref(),
+        &checked.facts,
+        workspace_root.as_deref(),
+    ) {
+        Ok(Some(result)) => return Some(response(id, &result)),
+        Err(message) => return Some(error_response(id, -32602, &message)),
+        Ok(None) => {}
+    }
     let mut db = match checked.bundle {
         Some(b) => build_symbol_db(&b, &checked.facts),
         None => SymbolDB::new(),
@@ -1369,7 +1415,6 @@ fn completion_response(
     merge_workspace_defs(server, doc, &mut db);
 
     let discovery = load_discovery_index(&doc.path);
-    let workspace_root = workspace_root_for_path(server, &doc.path);
     let items = compute_completions(
         &db,
         &doc.text,
@@ -1393,8 +1438,8 @@ fn completion_response(
 
 fn signature_help_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1494,8 +1539,8 @@ fn signature_help_response(
 
 fn document_symbol_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1549,8 +1594,8 @@ fn document_symbol_response(
 
 fn workspace_symbol_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let query = params
         .and_then(|p| json_get(p, "query"))
@@ -1604,8 +1649,8 @@ fn workspace_symbol_response(
 
 fn folding_range_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1624,8 +1669,8 @@ fn folding_range_response(
 
 fn document_highlight_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1681,15 +1726,15 @@ fn document_highlight_response(
 
 fn selection_range_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
     let uri = json_get(td, "uri").and_then(json_str)?;
     let doc = server.docs.get(uri)?;
     let positions = match json_get(params, "positions") {
-        Some(JSONValue::Array(values)) => values,
+        Some(DataTree::Array(values)) => values,
         _ => return Some(response(id, "[]")),
     };
     let tokens = server.lex(doc);
@@ -1717,8 +1762,8 @@ fn selection_range_response(
 
 fn document_link_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1731,21 +1776,26 @@ fn document_link_response(
 
 fn code_lens_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
     let uri = json_get(td, "uri").and_then(json_str)?;
     let doc = server.docs.get(uri)?;
-    let lenses = code_lenses_for(uri, &doc.text);
+    let mut lenses = code_lenses_for(uri, &doc.text);
+    let checked = server.check_with_bundle(doc);
+    if let Some(bundle) = checked.bundle {
+        let db = build_symbol_db(&bundle, &checked.facts);
+        lenses.extend(reasoning_code_lenses(uri, &doc.path, &doc.text, &db));
+    }
     Some(response(id, &format!("[{}]", lenses.join(","))))
 }
 
 fn prepare_call_hierarchy_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1778,8 +1828,8 @@ fn prepare_call_hierarchy_response(
 
 fn call_hierarchy_incoming_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let params = params?;
     let item = json_get(params, "item")?;
@@ -1830,8 +1880,8 @@ fn call_hierarchy_incoming_response(
 
 fn call_hierarchy_outgoing_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let params = params?;
     let item = json_get(params, "item")?;
@@ -1879,8 +1929,8 @@ fn call_hierarchy_outgoing_response(
 
 fn prepare_type_hierarchy_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1913,8 +1963,8 @@ fn prepare_type_hierarchy_response(
 
 fn type_hierarchy_supertypes_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let (uri, name) = type_hierarchy_item_params(params)?;
     let doc = server.docs.get(uri)?;
@@ -1939,8 +1989,8 @@ fn type_hierarchy_supertypes_response(
 
 fn type_hierarchy_subtypes_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let (uri, name) = type_hierarchy_item_params(params)?;
     let doc = server.docs.get(uri)?;
@@ -1961,7 +2011,7 @@ fn type_hierarchy_subtypes_response(
     Some(response(id, &format!("[{}]", out.join(","))))
 }
 
-fn hover_response(server: &Server, params: Option<&JSONValue>, id: &JSONValue) -> Option<String> {
+fn hover_response(server: &Server, params: Option<&DataTree>, id: &DataTree) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
     let uri = json_get(td, "uri").and_then(json_str)?;
@@ -2018,8 +2068,8 @@ fn hover_response(server: &Server, params: Option<&JSONValue>, id: &JSONValue) -
 
 fn definition_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -2083,14 +2133,64 @@ fn definition_response(
 
 fn execute_command_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let params = params?;
     let command = json_get(params, "command").and_then(json_str)?;
+    if command == "jet.reasoning" {
+        let args = match json_get(params, "arguments") {
+            Some(DataTree::Array(args)) => args,
+            _ => {
+                return Some(error_response(
+                    id,
+                    -32602,
+                    "jet.reasoning expects arguments [uri, selection?, expanded?]",
+                ))
+            }
+        };
+        let Some(uri) = args.first().and_then(|value| match value {
+            DataTree::Text(value) => Some(value.as_str()),
+            _ => None,
+        }) else {
+            return Some(error_response(
+                id,
+                -32602,
+                "jet.reasoning expects arguments [uri, selection?, expanded?]",
+            ));
+        };
+        let selection = args.get(1).and_then(|value| match value {
+            DataTree::Text(value) if !value.is_empty() => Some(value.as_str()),
+            _ => None,
+        });
+        let expanded = args
+            .get(2)
+            .and_then(|value| match value {
+                DataTree::Bool(expanded) => Some(*expanded),
+                DataTree::Text(expanded) => Some(expanded == "true"),
+                _ => None,
+            })
+            .unwrap_or(false);
+        let Some(doc) = server.docs.get(uri) else {
+            return Some(error_response(
+                id,
+                -32602,
+                "document not open in LSP session",
+            ));
+        };
+        let checked = server.check_with_bundle(doc);
+        let Some(bundle) = checked.bundle else {
+            return Some(error_response(id, -32603, "document did not check cleanly"));
+        };
+        let db = build_symbol_db(&bundle, &checked.facts);
+        return Some(response(
+            id,
+            &reasoning_view_json(&db, &doc.path, selection, expanded),
+        ));
+    }
     if command == "jet.budgetReports" {
         let args = match json_get(params, "arguments") {
-            Some(JSONValue::Array(args)) => args,
+            Some(DataTree::Array(args)) => args,
             _ => {
                 return Some(error_response(
                     id,
@@ -2100,7 +2200,7 @@ fn execute_command_response(
             }
         };
         let Some(uri) = args.first().and_then(|value| match value {
-            JSONValue::String(value) => Some(value.as_str()),
+            DataTree::Text(value) => Some(value.as_str()),
             _ => None,
         }) else {
             return Some(error_response(
@@ -2141,7 +2241,7 @@ fn execute_command_response(
         return Some(error_response(id, -32601, "unknown executeCommand"));
     }
     let args = match json_get(params, "arguments") {
-        Some(JSONValue::Array(arr)) => arr,
+        Some(DataTree::Array(arr)) => arr,
         _ => {
             return Some(error_response(
                 id,
@@ -2151,11 +2251,11 @@ fn execute_command_response(
         }
     };
     let uri = args.first().and_then(|v| match v {
-        JSONValue::String(s) => Some(s.as_str()),
+        DataTree::Text(s) => Some(s.as_str()),
         _ => None,
     });
     let symbol = args.get(1).and_then(|v| match v {
-        JSONValue::String(s) => Some(s.as_str()),
+        DataTree::Text(s) => Some(s.as_str()),
         _ => None,
     });
     let depth = args
@@ -2201,8 +2301,8 @@ fn execute_command_response(
 
 fn references_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -2218,7 +2318,7 @@ fn references_response(
     let include_decl = ctx
         .and_then(|c| json_get(c, "includeDeclaration"))
         .and_then(|v| {
-            if let JSONValue::Bool(b) = v {
+            if let DataTree::Bool(b) = v {
                 Some(*b)
             } else {
                 None
@@ -2262,8 +2362,8 @@ fn references_response(
 
 fn prepare_rename_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -2300,7 +2400,7 @@ fn prepare_rename_response(
     }
 }
 
-fn rename_response(server: &Server, params: Option<&JSONValue>, id: &JSONValue) -> Option<String> {
+fn rename_response(server: &Server, params: Option<&DataTree>, id: &DataTree) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
     let uri = json_get(td, "uri").and_then(json_str)?;
@@ -2409,8 +2509,8 @@ fn lsp_rename_semantic_op(index: &jet_semindex::SemIndex, from: &str, to: &str) 
 
 fn semantic_tokens_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -2429,8 +2529,8 @@ fn semantic_tokens_response(
 
 fn semantic_tokens_range_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -2459,8 +2559,8 @@ fn semantic_tokens_range_response(
 
 fn semantic_tokens_delta_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -2492,8 +2592,8 @@ fn semantic_tokens_result_id(src: &str, data: &[u32]) -> String {
 
 fn inlay_hint_response(
     server: &Server,
-    params: Option<&JSONValue>,
-    id: &JSONValue,
+    params: Option<&DataTree>,
+    id: &DataTree,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -2502,14 +2602,17 @@ fn inlay_hint_response(
 
     let checked = server.check_with_bundle(doc);
 
-    // Build type-annotation hints from the symbol DB.
-    let hints: Vec<InlayHint> = match checked.bundle {
-        Some(b) => {
-            let db = build_symbol_db(&b, &checked.facts);
-            db.inlay_hints_for(&doc.path).into_iter().cloned().collect()
-        }
-        None => Vec::new(),
-    };
+    // Build type-annotation and source-backed reasoning hints from the symbol DB.
+    let mut hints: Vec<InlayHint> = Vec::new();
+    if let Some(bundle) = checked.bundle {
+        let db = build_symbol_db(&bundle, &checked.facts);
+        hints.extend(
+            db.inlay_hints_for(&doc.path)
+                .into_iter()
+                .cloned(),
+        );
+        hints.extend(reasoning_inlay_hints(&db, &doc.path));
+    }
 
     let hint_refs: Vec<&InlayHint> = hints.iter().collect();
     let json = format_inlay_hints(&hint_refs, &doc.text);
@@ -2640,10 +2743,7 @@ fn is_keyword_token(tok: &Token, text: &str) -> bool {
     if crate::Syntax::JET_KEYWORD_LIST.contains(&text) {
         return true;
     }
-    matches!(
-        tok.kind,
-        TokKind::KwSwitch | TokKind::KwMutate | TokKind::KwMove
-    )
+    matches!(tok.kind, TokKind::KwMutate | TokKind::KwMove)
 }
 
 fn document_symbol_kind(kind: &SymKind) -> Option<u8> {
@@ -2692,7 +2792,7 @@ fn type_hierarchy_item_json(def: &jet_semindex::SymDef, src: &str) -> Option<Str
     ))
 }
 
-fn type_hierarchy_item_params(params: Option<&JSONValue>) -> Option<(&str, &str)> {
+fn type_hierarchy_item_params(params: Option<&DataTree>) -> Option<(&str, &str)> {
     let item = json_get(params?, "item")?;
     let uri = json_get(item, "uri").and_then(json_str)?;
     let name = json_get(item, "name").and_then(json_str)?;
@@ -2820,7 +2920,7 @@ mod project_part_tests {
             end.character,
         ))
         .unwrap();
-        code_action_response(server, Some(&params), &JSONValue::Number(1)).unwrap()
+        code_action_response(server, Some(&params), &DataTree::Int(1)).unwrap()
     }
 
     #[test]
@@ -3575,10 +3675,10 @@ mod project_part_tests {
             worker_rendezvous.wait();
         });
 
-        let response = cancellable_response(&cancelled, "7", &JSONValue::Number(7), || {
+        let response = cancellable_response(&cancelled, "7", &DataTree::Int(7), || {
             rendezvous.wait();
             rendezvous.wait();
-            Some(response(&JSONValue::Number(7), "true"))
+            Some(response(&DataTree::Int(7), "true"))
         })
         .expect("cancel response");
         canceller.join().unwrap();
@@ -3988,7 +4088,10 @@ mod project_part_tests {
     fn lsp_panic_log_emits_to_stderr_sink() {
         let mut sink = Vec::new();
         write_log_line(&mut sink, "[jet-lsp] normal logging").unwrap();
-        assert_eq!(String::from_utf8(sink).unwrap(), "[jet-lsp] normal logging\n");
+        assert_eq!(
+            String::from_utf8(sink).unwrap(),
+            "[jet-lsp] normal logging\n"
+        );
     }
 
     #[cfg(unix)]
@@ -4378,7 +4481,7 @@ fn document_links_for(path: &str, workspace_root: Option<&str>, src: &str) -> Ve
 fn resolve_use_target(base: &std::path::Path, import: &str) -> Option<String> {
     if import.starts_with("core.") {
         let doc =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/reference/core-library.md");
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/spec/reference/core-library.md");
         return doc.exists().then(|| path_to_uri(&doc.to_string_lossy()));
     }
     let rel = import.replace('.', "/") + ".jet";
@@ -4389,7 +4492,7 @@ fn resolve_use_target(base: &std::path::Path, import: &str) -> Option<String> {
 fn workspace_root_for_path(server: &Server, path: &str) -> Option<String> {
     let path = normalize_path(path);
     let path_ref = std::path::Path::new(&path);
-    server
+    let root = server
         .workspace_roots
         .iter()
         .filter(|root| path_ref.starts_with(root.as_str()))
@@ -4404,7 +4507,30 @@ fn workspace_root_for_path(server: &Server, path: &str) -> Option<String> {
                         .map(std::path::Path::to_path_buf)
                 })
                 .map(|root| normalize_path_buf(&root))
+        });
+    root
+}
+
+fn reasoning_code_lenses(uri: &str, path: &str, src: &str, db: &SymbolDB) -> Vec<String> {
+    db.index
+        .derivations()
+        .iter()
+        .filter_map(|record| {
+            let fact = db
+                .index
+                .definition_facts()
+                .iter()
+                .find(|fact| fact.stable_id == record.subject && fact.module_path == path)?;
+            let start = byte_offset_to_lsp(src, fact.span.start);
+            let end = byte_offset_to_lsp(src, fact.span.end);
+            Some(code_lens_range_json(
+                LspRange { start, end },
+                "Explain reasoning",
+                "jet.reasoning",
+                &[uri.to_string(), record.id.clone(), "true".to_string()],
+            ))
         })
+        .collect()
 }
 
 fn code_lenses_for(uri: &str, src: &str) -> Vec<String> {
@@ -4453,6 +4579,26 @@ fn code_lens_json(
             character: end as u32,
         },
     };
+    let arguments = args
+        .iter()
+        .map(|arg| format!(r#""{}""#, json_escape(arg)))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        r#"{{"range":{},"command":{{"title":"{}","command":"{}","arguments":[{}]}}}}"#,
+        range_json(range),
+        json_escape(title),
+        json_escape(command),
+        arguments
+    )
+}
+
+fn code_lens_range_json(
+    range: LspRange,
+    title: &str,
+    command: &str,
+    args: &[String],
+) -> String {
     let arguments = args
         .iter()
         .map(|arg| format!(r#""{}""#, json_escape(arg)))

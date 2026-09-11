@@ -105,7 +105,34 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
     identity.extend_from_slice(rscript.to_string_lossy().as_bytes());
     identity.push(0);
     identity.extend_from_slice(worker_source.as_bytes());
-    let result=BindResult{source:render_jet(lib,&functions),bound:functions,archive,provenance:format!("schema=jet-r-bind-v1\nsha256={}\nrscript={}\nscript={}\nworker={}\nworkers_per_session=1\nmax_sessions=32\ntransport=jsonlite\n",crate::SHA256::sha256_hex(&identity),rscript.display(),script.display(),worker.display())};
+    let mut provenance = format!(
+        "schema=jet-r-bind-v1\nsha256={}\nrscript={}\nscript={}\nworker={}\nworkers_per_session=1\nmax_sessions=32\ntransport=jsonlite\n",
+        crate::SHA256::sha256_hex(&identity),
+        rscript.display(),
+        script.display(),
+        worker.display()
+    );
+    crate::ForeignBridge::append_boundary_for_artifact(
+        &mut provenance,
+        *crate::AST::binder_descriptor(crate::AST::ForeignLanguage::R)
+            .ok_or_else(|| BindError::Source("R binder descriptor is not registered".into()))?,
+        lib,
+        &script,
+        &archive,
+        format!(
+            "Rscript={};cc={};ar={}",
+            rscript.display(),
+            crate::ForeignBridge::tool_identity("cc"),
+            crate::ForeignBridge::tool_identity("ar")
+        ),
+    )
+    .map_err(BindError::IO)?;
+    let result = BindResult {
+        source: render_jet(lib, &functions),
+        bound: functions,
+        archive,
+        provenance,
+    };
     let _ = std::fs::remove_dir_all(&build);
     Ok(result)
 }
@@ -480,7 +507,7 @@ fn render_jet(lib: &str, functions: &[String]) -> String {
         out.push_str(&format!("    fn {name}_table(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{name}_table\"\n"));
         out.push_str(&format!("    fn {name}_plot(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{name}_plot\"\n"));
     }
-    out.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\nuse core.data as data\n\npub struct Session {{ value: Int }}\n#Error\npub enum RError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\n"));
+    out.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct Session {{ value: Int }}\n#Error\npub enum RError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\n"));
     out.push_str(&crate::Bindgen::render_decode_response(
         "RError",
         crate::Bindgen::DecoderProtocol::StandardEnvelope,
@@ -513,12 +540,11 @@ pub fn cancel(session: Session) { abi.cancel(session.value) }
 "#
         ));
         out.push_str(&format!(
-            r#"pub fn {name}_table<T: [Encode, Decode]>(session: Session, table: Table<T>, deadline_ms: Int) Table<T> !RError -> {{
-    raw :: abi.{name}_table(session.value, json.to_string(data.rows(~table)), deadline_ms)
+            r#"pub fn {name}_table<T: [Encode, Decode]>(session: Session, rows: [T], deadline_ms: Int) [T] !RError -> {{
+    raw :: abi.{name}_table(session.value, json.to_string(~rows), deadline_ms)
     code :: abi.take_error()
     value :: decode_response(raw, code)
-    rows := json.decode<[T]>(json.to_string(value)) ?? return Err(RError.Protocol)
-    return Ok(data.table(~rows))
+    return Ok(json.decode<[T]>(json.to_string(value)) ?? return Err(RError.Protocol))
 }}
 
 "#

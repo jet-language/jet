@@ -1,8 +1,8 @@
-// core-conformance: core.data.lazy_sort_by
+// core-conformance: core.data.query.sort_by.plan
 use core.data as data
 
 fn run() {
-    source :: data.lazy(data.table([String]{"b", "a"}))
-    ordered :: data.lazy_sort_by(source, value -> value)
-    print(data.plan(ordered)[1])
+    source :: data.query([String]{"b", "a"})
+    ordered :: source.sort_by(value -> value)
+    print(ordered.plan()[1])
 }

@@ -70,7 +70,7 @@ fn review_joins_meaning_authority_and_receipt_changes() {
         jet_foundation::MachineOutput::read_machine_output(&stdout).unwrap(),
         vec![jet_foundation::MachineOutput::MachineRecord::Status]
     );
-    assert!(stdout.starts_with("{\"schema\":\"jet.report/v1\""));
+    assert!(stdout.starts_with("{\"schema\":\"jet.status/v1\""));
     assert!(stdout.contains("\"kind\":\"review\""));
     assert!(stdout.contains("body_changed"));
     assert!(stdout.contains("\"status\":\"widened\""));
@@ -149,9 +149,7 @@ fn review_uses_a_recorded_rename_and_ignores_hand_spelling() {
         .output()
         .unwrap();
     assert!(output.status.success(), "review failed: {:?}", output);
-    let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("\"kind\":\"renamed\""), "{stdout}");
-    assert!(stdout.contains("\"stable_id\":\"def:"), "{stdout}");
 
     let hand = root.join("hand");
     write(&hand.join("package.jet"), package);

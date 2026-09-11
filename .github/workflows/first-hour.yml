@@ -1,0 +1,62 @@
+name: First-hour
+
+# Card #2900: keep the newcomer workflow visible and rerun it whenever its
+# scenario, scaffold template, or any command/flag it exercises changes.
+on:
+  push:
+    paths:
+      - ".github/workflows/first-hour.yml"
+      - "tests/first_hour.rs"
+      - "tests/common/mod.rs"
+      - "tests/suites.txt"
+      - "scripts/agent/jet-env"
+      - "flake.nix"
+      - "flake.lock"
+      - "Source/CmdCompile.rs"
+      - "Source/CmdInspect.rs"
+      - "Source/CmdPkg.rs"
+      - "Source/OutputAdapter.rs"
+      - "Source/main.rs"
+      - "crates/jet-cli/src/CLI.rs"
+      - "crates/jet-pkg-model/src/Package/Convert.rs"
+      - "Cargo.toml"
+      - "Cargo.lock"
+  pull_request:
+    paths:
+      - ".github/workflows/first-hour.yml"
+      - "tests/first_hour.rs"
+      - "tests/common/mod.rs"
+      - "tests/suites.txt"
+      - "scripts/agent/jet-env"
+      - "flake.nix"
+      - "flake.lock"
+      - "Source/CmdCompile.rs"
+      - "Source/CmdInspect.rs"
+      - "Source/CmdPkg.rs"
+      - "Source/OutputAdapter.rs"
+      - "Source/main.rs"
+      - "crates/jet-cli/src/CLI.rs"
+      - "crates/jet-pkg-model/src/Package/Convert.rs"
+      - "Cargo.toml"
+      - "Cargo.lock"
+  workflow_dispatch:
+
+jobs:
+  first-hour:
+    name: First-hour CLI journey (#2900)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Run the isolated first-hour scenario
+        env:
+          JET_TEST_SCRATCH_DIR: ${{ github.workspace }}/.tmp/jet-test-scratch
+        run: scripts/agent/jet-env full cargo test --test first_hour --locked -- --nocapture

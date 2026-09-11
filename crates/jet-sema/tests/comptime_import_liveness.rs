@@ -6,15 +6,15 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Once;
 
-fn ensure_tir_bridge() {
+fn ensure_mir_bridge() {
     static INSTALL: Once = Once::new();
     INSTALL.call_once(|| {
-        jet_codegen::Codegen::TIR::install_comptime_bridge();
+        jet_codegen::Codegen::MIREval::install_mir_bridge();
     });
 }
 
 fn check(source: &str) -> Vec<Diagnostic> {
-    ensure_tir_bridge();
+    ensure_mir_bridge();
     let (tokens, lex) = Lexer::lex(source);
     assert!(lex.is_empty(), "lexer diagnostics: {lex:?}");
     let mut program = Parser::parse(&tokens).expect("source parses");
@@ -39,6 +39,7 @@ fn check(source: &str) -> Vec<Diagnostic> {
             user_policy_declarations: program.user_policy_declarations.clone(),
             rule_facts: std::mem::take(&mut program.rule_facts),
         }],
+        devtools_registry: jet_sema::AST::DevtoolsRegistry::default(),
         parse_teaching: Vec::new(),
         used_core: HashSet::new(),
         ffi_callback_fns: HashSet::new(),

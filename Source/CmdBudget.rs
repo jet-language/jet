@@ -13,7 +13,7 @@ use jet_foundation::PerformanceBudget::{
     LimitDirection, MeasurementPolicy, Percentile, PolicyOutcome, Rational, RelativeGoal,
     TrendLabel,
 };
-use jet_foundation::Report::ReportEnvelope;
+use jet_foundation::Report::{ReportEnvelope, StatusEnvelope, StatusFields, StatusValue};
 use jet_foundation::SHA256::sha256_hex;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -3169,16 +3169,16 @@ fn emit_json(
     diagnostic: Option<CanonicalJson>,
 ) {
     let (failed, unavailable, stale, warn, _) = output_counts(built);
-    let (status, failure_kind) = if failed > 0 {
-        ("fail", Some("budget"))
+    let failure_kind = if failed > 0 {
+        Some("budget")
     } else if unavailable > 0 {
-        ("unavailable", Some("evidence"))
+        Some("evidence")
     } else if stale > 0 {
-        ("stale", Some("evidence"))
+        Some("evidence")
     } else if warn > 0 {
-        ("warn", None)
+        None
     } else {
-        ("pass", None)
+        None
     };
     let results = built.results.iter().map(result_json).collect();
     let plan = plan
@@ -3228,14 +3228,11 @@ fn emit_json(
         ("results".into(), CanonicalJson::Array(results)),
     ])
     .unwrap();
-    let budget = String::from_utf8(value.bytes())
-        .unwrap()
-        .trim_end_matches('\n')
-        .to_owned();
+    let budget = status_value(&value);
     print!(
         "{}",
-        ReportEnvelope::status_record("tool", status, exit == 0, options.command)
-            .with_json_field("budget", &budget)
+        StatusEnvelope::new(options.command, exit == 0)
+            .with_field("budget", budget)
             .json()
     )
 }
@@ -3362,19 +3359,25 @@ fn compiler_failure(
 ) -> i32 {
     let src = std::fs::read_to_string(entry).unwrap_or_default();
     if options.json {
-        let diagnostics = jet::Diagnostics::render_all_json(
-            &jet::Diagnostics::ReportPath::from_path(entry),
-            &src,
-            diags,
-        );
-        let budget = format!(
-            "{{\"applied\":false,\"diagnostics\":[{}],\"exit_code\":1,\"failure_kind\":\"compiler\",\"plan\":null,\"report\":null,\"report_path\":null,\"results\":[]}}",
-            diagnostics.lines().collect::<Vec<_>>().join(",")
+        let report_path = jet::Diagnostics::ReportPath::from_path(entry);
+        let diagnostics = StatusValue::array(diags.iter().map(|diagnostic| {
+            report_status_value(&diagnostic.to_report(&report_path, &src))
+        }));
+        let budget = StatusValue::object(
+            StatusFields::new()
+                .with("applied", false)
+                .with("diagnostics", diagnostics)
+                .with("exit_code", 1)
+                .with("failure_kind", "compiler")
+                .with("plan", StatusValue::Null)
+                .with("report", StatusValue::Null)
+                .with("report_path", StatusValue::Null)
+                .with("results", StatusValue::array(Vec::<StatusValue>::new())),
         );
         print!(
             "{}",
-            ReportEnvelope::status_record("tool", "fail", false, options.command)
-                .with_json_field("budget", &budget)
+            StatusEnvelope::new(options.command, false)
+                .with_field("budget", budget)
                 .json()
         )
     } else {
@@ -3394,19 +3397,226 @@ fn tool_failure(options: &Options, why: &str) -> i32 {
             "performance budget operation failed",
             why,
             "correct the named failure and retry",
-        )
-        .json();
-        let budget=format!("{{\"applied\":false,\"diagnostics\":[{}],\"exit_code\":1,\"failure_kind\":\"tool\",\"plan\":null,\"report\":null,\"report_path\":null,\"results\":[]}}",diagnostic);
+        );
+        let budget = StatusValue::object(
+            StatusFields::new()
+                .with(
+                    "applied",
+                    false,
+                )
+                .with(
+                    "diagnostics",
+                    StatusValue::array([report_status_value(&diagnostic)]),
+                )
+                .with("exit_code", 1)
+                .with("failure_kind", "tool")
+                .with("plan", StatusValue::Null)
+                .with("report", StatusValue::Null)
+                .with("report_path", StatusValue::Null)
+                .with("results", StatusValue::array(Vec::<StatusValue>::new())),
+        );
         print!(
             "{}",
-            ReportEnvelope::status_record("tool", "fail", false, options.command)
-                .with_json_field("budget", &budget)
+            StatusEnvelope::new(options.command, false)
+                .with_field("budget", budget)
                 .json()
         )
     } else {
         eprintln!("Error [E2908]: Performance budget operation failed\n Why: {why}\n Fix: Correct the named failure and retry\nMore: jet-lang.dev/e/E2908\nbudget command failed before a valid report was produced")
     }
     1
+}
+
+fn status_value(value: &CanonicalJson) -> StatusValue {
+    match value {
+        CanonicalJson::Null => StatusValue::Null,
+        CanonicalJson::Bool(value) => StatusValue::Bool(*value),
+        CanonicalJson::Integer(value) => StatusValue::Integer(
+            value
+                .parse()
+                .expect("canonical budget integer must fit status integer"),
+        ),
+        CanonicalJson::String(value) => StatusValue::String(value.clone()),
+        CanonicalJson::Array(values) => StatusValue::array(values.iter().map(status_value)),
+        CanonicalJson::Object(values) => {
+            let mut fields = StatusFields::new();
+            for (name, value) in values {
+                fields = fields.with(name.as_str(), status_value(value));
+            }
+            StatusValue::object(fields)
+        }
+    }
+}
+
+fn report_status_value(report: &ReportEnvelope) -> StatusValue {
+    let mut fields = StatusFields::new()
+        .with(
+            "schema",
+            format!("{}/v{}", report.schema_name, report.schema_version),
+        )
+        .with("moment", report.moment.as_str())
+        .with("severity", report.severity.as_str())
+        .with("code", report.code.as_str())
+        .with("what", report.what.as_str())
+        .with("why", report.why.as_str())
+        .with("fix", report.fix.as_str())
+        .with(
+            "applicability",
+            report
+                .applicability
+                .map(|value| StatusValue::from(value.as_str()))
+                .unwrap_or(StatusValue::Null),
+        )
+        .with(
+            "detail",
+            report
+                .detail
+                .as_deref()
+                .map(StatusValue::from)
+                .unwrap_or(StatusValue::Null),
+        )
+        .with(
+            "denial_kind",
+            report
+                .denial_kind
+                .as_deref()
+                .map(StatusValue::from)
+                .unwrap_or(StatusValue::Null),
+        )
+        .with(
+            "call_chain",
+            StatusValue::array(
+                report
+                    .call_chain
+                    .iter()
+                    .map(|value| StatusValue::from(value.as_str())),
+            ),
+        )
+        .with(
+            "scope_chain",
+            StatusValue::array(
+                report
+                    .scope_chain
+                    .iter()
+                    .map(|value| StatusValue::from(value.as_str())),
+            ),
+        )
+        .with(
+            "nearest_granting_scope",
+            report
+                .nearest_granting_scope
+                .as_deref()
+                .map(StatusValue::from)
+                .unwrap_or(StatusValue::Null),
+        )
+        .with(
+            "file",
+            report
+                .file
+                .as_ref()
+                .filter(|value| !value.is_empty())
+                .map(|value| StatusValue::from(value.as_str()))
+                .unwrap_or(StatusValue::Null),
+        )
+        .with(
+            "line",
+            report
+                .line
+                .map(StatusValue::from)
+                .unwrap_or(StatusValue::Null),
+        )
+        .with(
+            "col",
+            report
+                .col
+                .map(StatusValue::from)
+                .unwrap_or(StatusValue::Null),
+        )
+        .with(
+            "span",
+            report
+                .span
+                .map(|span| {
+                    StatusValue::object(
+                        StatusFields::new()
+                            .with("start", span.start)
+                            .with("end", span.end),
+                    )
+                })
+                .unwrap_or(StatusValue::Null),
+        );
+    let fix_edits = StatusValue::array(report.fix_edits().iter().map(|edit| {
+        StatusValue::object(
+            StatusFields::new()
+                .with("file", edit.file.as_str())
+                .with(
+                    "span",
+                    StatusValue::object(
+                        StatusFields::new()
+                            .with("start", edit.span.start)
+                            .with("end", edit.span.end),
+                    ),
+                )
+                .with("new_text", edit.new_text.as_str())
+                .with("safety", edit.safety.as_str()),
+        )
+    }));
+    if !report.fix_edits().is_empty() {
+        fields = fields.with("fix_edits", fix_edits);
+    } else if let Some(reason) = report.no_fix_reason() {
+        fields = fields.with(
+            "no_fix_reason",
+            StatusValue::object(
+                StatusFields::new()
+                    .with("kind", reason.kind.as_str())
+                    .with("next", reason.next.as_str()),
+            ),
+        );
+    } else {
+        fields = fields.with("fix_edits", fix_edits);
+    }
+    fields = fields
+        .with(
+            "cause",
+            StatusValue::array(
+                report
+                    .cause
+                    .iter()
+                    .map(|value| StatusValue::from(value.as_str())),
+            ),
+        )
+        .with("clears", report.clears);
+    if let Some(extension) = &report.extension {
+        match extension {
+            jet_foundation::Report::ReportExtension::Crypto {
+                reason,
+                operation,
+                expected,
+                actual,
+            } => {
+                fields = fields
+                    .with("reason", reason.as_str())
+                    .with("operation", operation.as_str())
+                    .with(
+                        "expected",
+                        expected
+                            .as_deref()
+                            .map(StatusValue::from)
+                            .unwrap_or(StatusValue::Null),
+                    )
+                    .with(
+                        "actual",
+                        actual
+                            .map(StatusValue::from)
+                            .unwrap_or(StatusValue::Null),
+                    );
+            }
+            jet_foundation::Report::ReportExtension::BuildError { report } => {
+                fields = fields.with("build_error", report.as_str());
+            }
+        }
+    }
+    StatusValue::object(fields)
 }
 fn tool_failure_with_report(options: &Options, id: &str, why: &str) -> i32 {
     if options.json {

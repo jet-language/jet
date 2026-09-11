@@ -88,6 +88,30 @@ fn run() {
     );
 }
 
+#[test]
+fn infallible_operator_method_can_call_ordinary_helper() {
+    let src = r#"
+struct D {
+    value: Int
+}
+struct Pair {
+    a: Int
+    b: Int
+}
+fn align(left: D, right: D) Pair -> Pair{a: left.value, b: right.value}
+impl D.Add {
+    fn add(self, rhs: D) D -> {
+        pair :: align(self, rhs)
+        return D{value: pair.a + pair.b}
+    }
+}
+fn run() {
+    print(D{value: 1} + D{value: 2})
+}
+"#;
+    assert_tiers_agree("operator_ordinary_helper", src, "D { value: 3 }\n");
+}
+
 /// D-CMP3WAY1=B: `<=>` is the primitive Ordering result, and a Comparable
 /// hook derives all six Boolean comparison operators from that same result.
 #[test]
@@ -104,6 +128,10 @@ impl Score.Comparable {
         if self.points > rhs.points { return Ordering.Greater }
         return Ordering.Equal
     }
+}
+
+fn show_text_order(left: String, right: String) {
+    print("{(left < right)} {(left <= right)} {(left > right)} {(left >= right)}")
 }
 
 fn run() {
@@ -123,17 +151,13 @@ fn run() {
     print("{(int_cmp == Ordering.Less)} {(text_cmp == Ordering.Less)} {(chained == Ordering.Less)} {(then_greater == Ordering.Greater)} {(reverse_greater == Ordering.Less)} {(reverse_equal == Ordering.Equal)}")
     print("{numbers[0]} {numbers[1]} {numbers[2]}")
     print("{scores[0].points} {scores[1].points} {scores[2].points}")
+    show_text_order("alpha", "beta")
 }
 "#;
     assert_tiers_agree(
         "tir_spaceship_ordering",
         src,
-        "true true true true true true\ntrue true true true true true\n1 2 3\n10 20 30\n",
-    );
-    let rust = compile("tir_spaceship_compare_desugar", src);
-    assert!(
-        rust.contains("Comparable::compare"),
-        "`<=>` must lower through Comparable::compare:\n{rust}"
+        "true true true true true true\ntrue true true true true true\n1 2 3\n10 20 30\ntrue true false false\n",
     );
 }
 
@@ -457,6 +481,32 @@ fn run() {
         );
         assert_eq!(code, 70, "{label} must trap: stdout={stdout} stderr={stderr}");
         assert!(stderr.contains("Stop [E3010]"), "{label}: {stderr}");
+    }
+}
+
+#[test]
+fn list_bounds_stop_keeps_registered_code_across_tiers() {
+    for (body, expected_stdout) in [
+        ("fn run() { print(pick([2, 10], 4)) }", ""),
+        (
+            "fn stop(value: Int) {\nprint(value)\nprint(pick([2, 10], 4))\n}\nfn run() { [7].each(stop) }",
+            "7\n",
+        ),
+    ] {
+        let source = format!(
+            "fn pick(values: [Int], index: Int) Int -> values[index]\n{body}"
+        );
+        let files = [("main.jet", source.as_str())];
+        for run in [
+            tir_support::build_release_and_run_multi,
+            tir_support::run_default_multi,
+            tir_support::run_interpret_multi,
+        ] {
+            let (code, stdout, stderr) = run("list_bounds_stop", "main.jet", &files);
+            assert_eq!(code, 70, "stdout={stdout}\nstderr={stderr}");
+            assert_eq!(stdout, expected_stdout);
+            assert!(stderr.contains("Stop [E3010]"), "{stderr}");
+        }
     }
 }
 

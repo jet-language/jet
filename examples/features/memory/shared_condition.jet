@@ -1,0 +1,28 @@
+// D-SHAREDGUARD1=A: a Shared<T> edit guard waits on a Condition with a
+// predicate; the wait returns once the predicate holds, and a notify wakes
+// waiters. One task and no panic, so every tier prints the same line.
+struct State {
+    ready: Bool
+    ticket: Int
+}
+
+fn mark_ready(state: Shared<State>, changed: Condition) {
+    guard :: state.guard_edit()
+    guard.value.ready = true
+    changed.notify_one()
+}
+
+fn take_ticket(state: Shared<State>, changed: Condition) Int -> {
+    guard :: state.guard_edit()
+    // A cancelled or failed wait hands out no ticket.
+    guard.wait(changed, value -> value.ready) ?? return 0
+    guard.value.ticket += 1
+    return guard.value.ticket
+}
+
+fn run() {
+    state :: shared State{ready: false, ticket: 0}
+    changed :: Condition.new()
+    mark_ready(state, changed)
+    print("ticket={take_ticket(state, changed)}")
+}

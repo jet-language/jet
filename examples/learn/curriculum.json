@@ -1,0 +1,241 @@
+{
+  "schema": "jet-learning-curriculum-v1",
+  "relation": "jet-learning-census-v1",
+  "relation_source": "scripts/agent/learning-census.mjs",
+  "witness_policy": "four authored witnesses project canonical capability-derived tasks; they do not replace the census denominator",
+  "revision_rule": "source-bound observations are valid only when source_identity.digest matches; a source edit invalidates the observation until the dependent projection is regenerated and the task is re-run",
+  "sequence": [
+    "prerequisite",
+    "prediction",
+    "evidence",
+    "reason",
+    "controlled_change",
+    "transfer"
+  ],
+  "tasks": [
+    {
+      "id": "language.tir-stmt.loop.predict",
+      "capability_id": "language.tir-stmt.loop",
+      "census_task_id": "language.tir-stmt.loop.predict",
+      "family": "loop",
+      "axis": "predict",
+      "concept": "Loop ranges",
+      "prerequisites": ["function body", "integer range", "print output"],
+      "prompt": "This loop should print visit 0, visit 1, and visit 2. What range belongs after in?",
+      "wrong_model": "The upper bound only describes the loop; the body always runs three times.",
+      "source": {
+        "path": "loop.jet",
+        "solution_path": "loop.solution.jet",
+        "expected_output": "visit 0\nvisit 1\nvisit 2\n",
+        "failure": "output"
+      },
+      "input_identity": {
+        "path": "loop.jet",
+        "role": "authored witness for language.tir-stmt.loop",
+        "revision": "packaged source digest"
+      },
+      "oracle": {
+        "id": "learn.loop.range-output.v1",
+        "kind": "deterministic-output",
+        "answer": "0..<3",
+        "expected_output": "visit 0\nvisit 1\nvisit 2\n",
+        "distinguishes": "0..<3 includes 0, 1, and 2. Check the three printed lines after changing the range."
+      },
+      "reveal": {
+        "policy": "predict_then_reveal",
+        "evidence": "Run the file, then compare its stdout with the expected lines.",
+        "reason": "The upper bound is exclusive, so 3 is not printed. The body runs once for each value in the range.",
+        "counterexample": "Change 0..<3 to 0..<2. The body stays the same, but visit 2 disappears."
+      },
+      "controlled_edit": {
+        "path": "loop.change.jet",
+        "solution_path": "loop.change.solution.jet",
+        "expected_output": "visit 0\nvisit 1\nvisit 2\nvisit 3\n",
+        "failure": "output",
+        "condition": "Change only the range boundary so the file prints four visits."
+      },
+      "transfer": {
+        "path": "loop.transfer.jet",
+        "solution_path": "loop.transfer.solution.jet",
+        "expected_output": "visit 2\nvisit 4\nvisit 6\n",
+        "failure": "output",
+        "structural_difference": "Iterate over a collection instead of a numeric range, while keeping the same observation in the loop body.",
+        "copy_guard": "This example has a different loop shape and input collection. The range edit will not solve it."
+      },
+      "accessibility": {
+        "keyboard": true,
+        "text_only": true,
+        "reduced_motion": true,
+        "no_auto_quiz": true
+      }
+    },
+    {
+      "id": "language.tir-expr.borrow.predict",
+      "capability_id": "language.tir-expr.borrow",
+      "census_task_id": "language.tir-expr.borrow.predict",
+      "family": "state-lifetime",
+      "axis": "predict",
+      "concept": "State changes",
+      "prerequisites": ["struct state declaration", "transition method", "terminal state"],
+      "prompt": "The builder is Queued. Which method lets it call finish?",
+      "wrong_model": "The state marker is only a comment, so any method can run on the value.",
+      "source": {
+        "path": "state.jet",
+        "solution_path": "state.solution.jet",
+        "expected_output": "finished:compile\n",
+        "failure": "diagnostic"
+      },
+      "input_identity": {
+        "path": "state.jet",
+        "role": "authored witness for language.tir-expr.borrow",
+        "revision": "packaged source digest"
+      },
+      "oracle": {
+        "id": "learn.state.transition.v1",
+        "kind": "checked-transition",
+        "answer": "start",
+        "expected_output": "finished:compile\n",
+        "distinguishes": "start changes the builder from Queued to Running. finish requires Running."
+      },
+      "reveal": {
+        "policy": "predict_then_reveal",
+        "evidence": "The compiler reports the missing Queued -> Running transition. After you add it, the solved file prints one terminal report.",
+        "reason": "The state annotations track the value's legal lifetime. finish needs Running, and report needs Finished.",
+        "counterexample": "Remove start from the solved file. The report call can no longer reach the required Finished state."
+      },
+      "controlled_edit": {
+        "path": "state.change.jet",
+        "solution_path": "state.change.solution.jet",
+        "expected_output": "finished:compile\n",
+        "failure": "diagnostic",
+        "condition": "Add the missing transition before report. Keep the state declaration and the checked receiver."
+      },
+      "transfer": {
+        "path": "state.transfer.jet",
+        "solution_path": "state.transfer.solution.jet",
+        "expected_output": "finished:ship\n",
+        "failure": "diagnostic",
+        "structural_difference": "Carry each state in a separate binding instead of reassigning one local.",
+        "copy_guard": "The bindings and value are different here. Copying the first edit leaves the transfer's report receiver unresolved."
+      },
+      "accessibility": {
+        "keyboard": true,
+        "text_only": true,
+        "reduced_motion": true,
+        "no_auto_quiz": true
+      }
+    },
+    {
+      "id": "build.effect.io.predict",
+      "capability_id": "build.effect.io",
+      "census_task_id": "build.effect.io.predict",
+      "family": "effects",
+      "axis": "predict",
+      "concept": "Effects",
+      "prerequisites": ["function call", "inferred IO", "effect bound"],
+      "prompt": "report calls announce, which prints text. Which effect must report allow?",
+      "wrong_model": "An empty effect list blocks nothing because a callee's effects do not count.",
+      "source": {
+        "path": "effects.jet",
+        "solution_path": "effects.solution.jet",
+        "expected_output": "square is 49\n",
+        "failure": "diagnostic"
+      },
+      "input_identity": {
+        "path": "effects.jet",
+        "role": "authored witness for build.effect.io",
+        "revision": "packaged source digest"
+      },
+      "oracle": {
+        "id": "learn.effects.io-bound.v1",
+        "kind": "checked-effect-set",
+        "answer": "IO",
+        "expected_output": "square is 49\n",
+        "distinguishes": "report must allow IO because announce prints a value. Check the effect bound and the printed result."
+      },
+      "reveal": {
+        "policy": "predict_then_reveal",
+        "evidence": "The compiler reports the missing IO permission. After the bound admits IO, the same call prints square is 49.",
+        "reason": "Effects flow through calls. report reaches announce, and announce prints, so an empty bound is too narrow.",
+        "counterexample": "Change -[IO]> back to -[]>. The denied effect returns without changing the body."
+      },
+      "controlled_edit": {
+        "path": "effects.change.jet",
+        "solution_path": "effects.change.solution.jet",
+        "expected_output": "square is 49\n",
+        "failure": "output",
+        "condition": "Change the argument expression to the value named by the expected output while keeping the IO bound."
+      },
+      "transfer": {
+        "path": "effects.transfer.jet",
+        "solution_path": "effects.transfer.solution.jet",
+        "expected_output": "square is 49\n",
+        "failure": "output",
+        "structural_difference": "Use inferred effects with no explicit bound. The call graph still reaches the same IO operation.",
+        "copy_guard": "This example removes the explicit bound. The primary signature edit does not apply."
+      },
+      "accessibility": {
+        "keyboard": true,
+        "text_only": true,
+        "reduced_motion": true,
+        "no_auto_quiz": true
+      }
+    },
+    {
+      "id": "ffi.binder.rust.predict",
+      "capability_id": "ffi.binder.rust",
+      "census_task_id": "ffi.binder.rust.predict",
+      "family": "foreign",
+      "axis": "predict",
+      "concept": "Calling foreign code",
+      "prerequisites": ["foreign declaration", "declared parameter type", "boundary call"],
+      "prompt": "The foreign call passes an integer. Which argument type does b64encode require?",
+      "wrong_model": "Foreign calls skip type checking and convert any argument at runtime.",
+      "source": {
+        "path": "foreign.jet",
+        "solution_path": "foreign.solution.jet",
+        "expected_output": "aGk=\n",
+        "failure": "diagnostic"
+      },
+      "input_identity": {
+        "path": "foreign.jet",
+        "role": "authored witness for ffi.binder.rust",
+        "revision": "packaged source digest"
+      },
+      "oracle": {
+        "id": "learn.foreign.rust-boundary.v1",
+        "kind": "checked-foreign-call",
+        "answer": "String",
+        "expected_output": "aGk=\n",
+        "distinguishes": "b64encode takes a String. Pass text before checking the encoded result."
+      },
+      "reveal": {
+        "policy": "predict_then_reveal",
+        "evidence": "The compiler checks the foreign declaration before calling the provider. With String input, the provider returns deterministic base64 output.",
+        "reason": "The foreign declaration is a typed boundary. The argument must match it before provider code runs.",
+        "counterexample": "Replace the solved String argument with 42. The call fails before the provider can produce output."
+      },
+      "controlled_edit": {
+        "path": "foreign.change.jet",
+        "solution_path": "foreign.change.solution.jet",
+        "expected_output": "aGk=\n",
+        "failure": "output",
+        "condition": "Restore the String input required by the foreign declaration. Keep the binder declaration unchanged."
+      },
+      "transfer": {
+        "path": "foreign.transfer.jet",
+        "solution_path": "foreign.transfer.solution.jet",
+        "expected_output": "aGk=\n",
+        "failure": "output",
+        "structural_difference": "Bind the foreign result locally before printing it instead of nesting the call in print.",
+        "copy_guard": "This example adds a local result binding. The one-line call does not exercise that step."
+      },
+      "accessibility": {
+        "keyboard": true,
+        "text_only": true,
+        "reduced_motion": true,
+        "no_auto_quiz": true
+      }
+    }
+  ]
+}

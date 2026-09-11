@@ -3,5 +3,8 @@ use core.regex as re
 
 fn run() {
     result :: re.match(Regex{"([0-9]+) shipped"}, "42 shipped")
-    print(result)
+    if result == {
+        .Val(value) -> print(value.group(0) ?? panic("group"))
+        .None -> print("none")
+    }
 }

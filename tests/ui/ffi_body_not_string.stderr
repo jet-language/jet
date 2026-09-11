@@ -1,8 +1,8 @@
-Error [E0003]: Expected `{` to open the `#FFI` foreign-source body, found `->`
-  --> tests/ui/ffi_body_not_string.jet:1:54
+Error [E0064]: A `#FFI(c)` function body must be one string of c source
+  --> tests/ui/ffi_body_not_string.jet:1:19
     |
   1 | #[Unsafe("demo"), FFI(c)] fn add(a: Int, b: Int) Int -> {
-    |                                                      ^^
- Why: The structure here isn't what the compiler expected
- Fix: Use `{` to open the `#FFI` foreign-source body
-More: jet-lang.dev/e/E0003
+    |                   ^^^^^^
+ Why: The inline foreign tier carries the foreign source as a single `"""…"""` string; the Jet signature above is the checked contract (D-FFI-INLINE1)
+ Fix: Write the body as `{ """<c source>""" }` — one string literal, no other statements or interpolation
+More: jet-lang.dev/e/E0064

@@ -7,8 +7,8 @@
 use crate::Diagnostics::Span;
 use crate::Policy::GateSet;
 use crate::AST::{Expr, Func, Item, ProgramBundle, Stmt, StrPart, Type};
-use std::collections::HashSet;
 pub use jet_foundation::Authority::{GateDiagnostic, GateEntry, GateKind, GateOperation};
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, Default)]
 pub struct GateLedger {
@@ -369,7 +369,7 @@ fn visit_function(
             source,
             marker.span,
             subject,
-            literal_text(marker.args.first()),
+            literal_text(marker.expr_arg(0)),
             detail,
             "recorded",
         ));
@@ -377,7 +377,12 @@ fn visit_function(
     visit_statements(source, &function.body, ledger, context);
 }
 
-fn visit_statements(source: &str, body: &[Stmt], ledger: &mut GateLedger, context: &GateContext<'_>) {
+fn visit_statements(
+    source: &str,
+    body: &[Stmt],
+    ledger: &mut GateLedger,
+    context: &GateContext<'_>,
+) {
     for statement in body {
         visit_statement_expressions(source, statement, ledger, context);
     }
@@ -391,7 +396,9 @@ fn visit_statement_expressions(
     context: &GateContext<'_>,
 ) {
     let mut copy = statement.clone();
-    copy.for_each_expr_mut(|expression| visit_expression_value(source, expression, ledger, context));
+    copy.for_each_expr_mut(|expression| {
+        visit_expression_value(source, expression, ledger, context)
+    });
 }
 
 fn visit_expression(
@@ -567,18 +574,12 @@ fn static_type_receiver_name(receiver: &Expr) -> Option<&str> {
     }
 }
 
-fn checked_text_raw_entry(
-    source: &str,
-    span: Span,
-    context: &GateContext<'_>,
-) -> GateEntry {
+fn checked_text_raw_entry(source: &str, span: Span, context: &GateContext<'_>) -> GateEntry {
     let enclosing = context
         .unsafe_gates
         .iter()
         .filter(|gate| {
-            gate.source == source
-                && gate.span.start <= span.start
-                && span.end <= gate.span.end
+            gate.source == source && gate.span.start <= span.start && span.end <= gate.span.end
         })
         .min_by_key(|gate| (gate.span.end - gate.span.start, gate.span.start));
     let mut entry = source_entry(

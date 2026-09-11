@@ -23,47 +23,35 @@ pub(crate) enum JetFixedArithmeticError {
     UnknownOperation,
 }
 
-impl JetFixedArithmeticError {
-    pub(crate) fn message(self) -> String {
-        match self {
-            Self::AddOverflow => {
-                "This addition overflows the value's type (the result is outside its range)"
-                    .to_string()
+impl core::fmt::Display for JetFixedArithmeticError {
+    fn fmt(&self, out: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        out.write_str(match self {
+            Self::AddOverflow =>
+                "This addition overflows the value's type (the result is outside its range)",
+            Self::SubOverflow =>
+                "This subtraction overflows the value's type (the result is outside its range)",
+            Self::MulOverflow =>
+                "This multiplication overflows the value's type (the result is outside its range)",
+            Self::DivideZero => "divided by zero",
+            Self::DivisionOverflow =>
+                "This division overflows the value's type (the result is outside its range)",
+            Self::RemainderOverflow => "Attempt to calculate the remainder with overflow",
+            Self::PowerNegative =>
+                "A negative exponent has no whole-number result (make the base a Float to raise it to a negative power)",
+            Self::PowerOverflow =>
+                "This power overflows the value's type (the result is outside its range)",
+            Self::RotateNegative => "A rotation count cannot be negative",
+            Self::ShiftOutOfRange { direction, count, bits } => {
+                return write!(
+                    out,
+                    "Shifting {direction} by {count} bits is out of range (this type is {bits} bits wide)"
+                );
             }
-            Self::SubOverflow => {
-                "This subtraction overflows the value's type (the result is outside its range)"
-                    .to_string()
-            }
-            Self::MulOverflow => {
-                "This multiplication overflows the value's type (the result is outside its range)"
-                    .to_string()
-            }
-            Self::DivideZero => "divided by zero".to_string(),
-            Self::DivisionOverflow => {
-                "This division overflows the value's type (the result is outside its range)"
-                    .to_string()
-            }
-            Self::RemainderOverflow => "Attempt to calculate the remainder with overflow".to_string(),
-            Self::PowerNegative => {
-                "A negative exponent has no whole-number result (make the base a Float to raise it to a negative power)"
-                    .to_string()
-            }
-            Self::PowerOverflow => {
-                "This power overflows the value's type (the result is outside its range)"
-                    .to_string()
-            }
-            Self::RotateNegative => "A rotation count cannot be negative".to_string(),
-            Self::ShiftOutOfRange {
-                direction,
-                count,
-                bits,
-            } => format!(
-                "Shifting {direction} by {count} bits is out of range (this type is {bits} bits wide)"
-            ),
-            Self::UnknownOperation => "This fixed-width arithmetic operation is unsupported".to_string(),
-        }
+            Self::UnknownOperation => "This fixed-width arithmetic operation is unsupported",
+        })
     }
 }
+
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum JetFixedArithmeticResult {

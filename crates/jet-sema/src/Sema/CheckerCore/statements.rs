@@ -213,7 +213,6 @@ impl<'a> Checker<'a> {
                 crate::Sema::FlowFacts::FlowFacts::merge_paths(before_loop, &break_paths)
             };
         }
-
     }
     fn check_break_value(
         &mut self,
@@ -430,10 +429,17 @@ impl<'a> Checker<'a> {
             return;
         }
         let before = self.flow.clone();
+        let before_direct = self.fx_direct.clone();
+        let before_edges = self.fx_edges.clone();
+        let before_maximal = self.fx_maximal;
         let diagnostics_start = self.diags.len();
         let allows_start = self.statement_lint_allows.len();
         self.check_stmt_inner(stmt);
+        let effect_free = self.fx_direct == before_direct
+            && self.fx_edges == before_edges
+            && self.fx_maximal == before_maximal;
         self.emit_stdlib_lints_for_stmt(stmt);
+        self.emit_loop_liveness_lints_for_stmt(stmt, before.reachable, effect_free);
         let allows = self.statement_lint_allows.split_off(allows_start);
         if !allows.is_empty() {
             let retained = self.diags.split_off(diagnostics_start);
@@ -487,6 +493,53 @@ impl<'a> Checker<'a> {
                 ));
             }
             return;
+        }
+        // D-NEVER2=B: a declared `Never` success slot has no successful
+        // return. The one legal exit in a fallible `Never !E` function is an
+        // explicit `Err(...)`; bare and value returns get their own verdict
+        // instead of the generic return-type mismatch.
+        let declared_never_type = if self.in_lambda_body {
+            // A lambda temporarily replaces `ret` with its own interface.
+            // Prefer an explicit tail expectation, then that callable
+            // contract, without letting the enclosing function's declaration
+            // leak into the nested body.
+            return_type.as_ref().or(self.ret.as_ref())
+        } else {
+            self.declared_return_type
+                .as_ref()
+                .or(return_type.as_ref())
+        };
+        if declared_never_type.is_some_and(Type::has_never_success) {
+            let allows_failure = declared_never_type.is_some_and(|ty| {
+                matches!(ty, Type::Result { ok, .. } if ok.is_never())
+            });
+            match expr {
+                None => {
+                    self.diags.push(Diagnostic::from_row(
+                        "E2424",
+                        &[("function", self.fn_name.as_str())],
+                        Some(*span),
+                    ));
+                    return;
+                }
+                Some(e) => {
+                    let is_err = matches!(e.without_parens(), Expr::Err(..))
+                        || matches!(
+                            e.without_parens(),
+                            Expr::Call(call)
+                                if !self.funcs.contains_key(&call.name)
+                                    && call.name == Syntax::LIT_ERR
+                        );
+                    if !allows_failure || !is_err {
+                        self.diags.push(Diagnostic::from_row(
+                            "E2425",
+                            &[("function", self.fn_name.as_str())],
+                            Some(e.span()),
+                        ));
+                        return;
+                    }
+                }
+            }
         }
         match (&mut *expr, resolved_ret) {
             (Some(e), Some(rt)) => {
@@ -841,8 +894,7 @@ impl<'a> Checker<'a> {
         if let Some(mut marker) = self.take_statement_rule_fact(stmt.span()) {
             let allow_names = if marker.name == Syntax::MARKER_ALLOW {
                 marker
-                    .args
-                    .iter()
+                    .expr_args()
                     .filter_map(|argument| match argument {
                         Expr::Ident(name, _) => Some(name.clone()),
                         _ => None,
@@ -851,6 +903,7 @@ impl<'a> Checker<'a> {
             } else {
                 Vec::new()
             };
+            let marker_args = marker.expr_args_owned();
             if let Some(arguments) = self.validate_rule_signature(&mut marker) {
                 if marker.name == Syntax::MARKER_ALLOW {
                     self.statement_lint_allows.extend(allow_names);
@@ -864,7 +917,7 @@ impl<'a> Checker<'a> {
                         audit, audit_expr, ..
                     } if marker.name == Syntax::KW_UNSAFE => {
                         *audit = text;
-                        *audit_expr = marker.args.into_iter().next();
+                        *audit_expr = marker_args.first().cloned();
                     }
                     Stmt::Impure {
                         reason,
@@ -872,7 +925,7 @@ impl<'a> Checker<'a> {
                         ..
                     } if marker.name == Syntax::KW_IMPURE => {
                         *reason = text;
-                        *reason_expr = marker.args.into_iter().next();
+                        *reason_expr = marker_args.first().cloned();
                     }
                     Stmt::AssumeDet {
                         reason,
@@ -882,8 +935,8 @@ impl<'a> Checker<'a> {
                         if let Some(text) = text {
                             *reason = text;
                         }
-                        if let Some(argument) = marker.args.into_iter().next() {
-                            *reason_expr = argument;
+                        if let Some(argument) = marker_args.first() {
+                            *reason_expr = argument.clone();
                         }
                     }
                     _ => {}
@@ -2044,13 +2097,14 @@ impl<'a> Checker<'a> {
             Stmt::While {
                 cond,
                 body,
-                span: _,
+                span,
                 arrow_body,
                 label,
             } => {
                 let memory_multiplier = self.memory_control_multiplier;
+                self.lint_shared_busy_wait(cond, body, *span, label.is_none());
                 self.memory_control_multiplier = None;
-                self.require_bool(cond, "a `while` condition");
+                self.require_bool(cond, "a `loop` condition");
                 if let Some((n, label_span)) = label {
                     self.declare_loop_label(n, *label_span);
                 }
@@ -2293,6 +2347,7 @@ impl<'a> Checker<'a> {
                             Some(Type::Apply { name, .. })
                                 if name == crate::Syntax::TYPE_STREAM
                                     || name == Syntax::TYPE_ITER
+                                    || name == Syntax::TYPE_VIEW_ITER
                         ) || matches!(
                             &coll_ty,
                             Some(Type::Named(name)) if name == "HTTPBodyChunks"
@@ -2374,7 +2429,9 @@ impl<'a> Checker<'a> {
                                 }
                             }
                             Some(Type::Apply { name, args })
-                                if name == Syntax::TYPE_ITER && args.len() == 1 =>
+                                if (name == Syntax::TYPE_ITER
+                                    || name == Syntax::TYPE_VIEW_ITER)
+                                    && args.len() == 1 =>
                             {
                                 self.declare_loop_var(var.clone(), *var_span, &args[0]);
                             }
@@ -2614,8 +2671,8 @@ impl<'a> Checker<'a> {
                 body,
                 step,
                 label,
+                span,
                 arrow_body,
-                ..
             } => {
                 let memory_multiplier = self.memory_control_multiplier;
                 self.memory_control_multiplier = None;
@@ -2624,8 +2681,9 @@ impl<'a> Checker<'a> {
                 }
                 self.push_scope();
                 self.check_binding(init);
+                self.lint_shared_busy_wait(cond, body, *span, false);
                 crate::Sema::Effects::record_authority_alias(self, init);
-                self.require_bool(cond, "a counted loop condition");
+                self.require_bool(cond, "a `loop` condition");
                 self.push_loop_value_frame(label.as_ref());
                 self.push_loop_break_frame();
                 self.loop_depth += 1;
@@ -2775,6 +2833,7 @@ impl<'a> Checker<'a> {
                 let flow = self.flow.clone();
                 let fx_direct = self.fx_direct.clone();
                 let fx_direct_spans = self.fx_direct_spans.clone();
+                let lambda_effect_stack = self.lambda_effect_stack.clone();
                 let fx_edges = self.fx_edges.clone();
                 let fx_maximal = self.fx_maximal;
                 let fx_maximal_span = self.fx_maximal_span;
@@ -2789,16 +2848,52 @@ impl<'a> Checker<'a> {
                 let fx_memory_unbounded_control = self.fx_memory_unbounded_control.clone();
                 let fx_memory_calls = self.fx_memory_calls.clone();
                 let memory_control_multiplier = self.memory_control_multiplier;
+                let frame_schedule_systems = self.frame_schedule_systems.clone();
+                let unused_bindings = self.unused_bindings.clone();
+                let unused_binding_refs = self.unused_binding_refs.clone();
+                let name_ledger = self.name_ledger.clone();
+                let fx_autodiff_obligations = self.fx_autodiff_obligations.clone();
+                let fx_compute_calls = self.fx_compute_calls.clone();
+                let fx_autodiff_safe_panic = self.fx_autodiff_safe_panic;
+                let fx_autodiff_unsafe_panic = self.fx_autodiff_unsafe_panic;
+                let autodiff_safe_panic_context = self.autodiff_safe_panic_context;
+                let binder_ref_types = self.binder_ref_types.clone();
+                let uses_exact_int = self.uses_exact_int;
+                let iter_borrowed = self.iter_borrowed.clone();
+                let lending_view_loop_vars = self.lending_view_loop_vars.clone();
+                let return_view_provenance = self.return_view_provenance.clone();
+                let inferred_lambda_mut_captures = self.inferred_lambda_mut_captures.clone();
+                let ret = self.ret.clone();
+                let expected_type = self.expected_type.clone();
+                let failure_carrier_inference = self.failure_carrier_inference;
+                let failure_carrier = self.failure_carrier.clone();
+                let task_body_propagates = self.task_body_propagates;
+                let view_capture_tasks = self.view_capture_tasks.clone();
+                let reactive_upgrades = self.reactive_upgrades.clone();
+                let reactive_upgrade_names = self.reactive_upgrade_names.clone();
+                let view_borrow_escape_tasks = self.view_borrow_escape_tasks.clone();
+                let inline_addr_taken = self.inline_addr_taken.clone();
+                let ct_impure_depth = self.ct_impure_depth;
+                let ct_embed_inputs = self.ct_embed_inputs.clone();
+                let in_dropped_comptime_arm = self.in_dropped_comptime_arm;
+                let in_taskgroup_spawn = self.in_taskgroup_spawn;
+                let taskgroup_stack = self.taskgroup_stack.clone();
                 let prev_suppress = self.suppress_must_use;
                 self.suppress_must_use = true;
                 self.push_scope();
                 for stmt in body {
                     self.check_stmt(stmt);
+                    stmt.for_each_expr_mut(|expr| {
+                        if let Expr::Lambda(lambda) = expr {
+                            lambda.meta.runtime_erased = true;
+                        }
+                    });
                 }
                 self.drop_scope_no_obligation_checks();
                 self.suppress_must_use = prev_suppress;
                 self.flow = flow;
                 self.fx_direct = fx_direct;
+                self.lambda_effect_stack = lambda_effect_stack;
                 self.fx_direct_spans = fx_direct_spans;
                 self.fx_edges = fx_edges;
                 self.fx_maximal = fx_maximal;
@@ -2814,6 +2909,36 @@ impl<'a> Checker<'a> {
                 self.fx_memory_unbounded_control = fx_memory_unbounded_control;
                 self.fx_memory_calls = fx_memory_calls;
                 self.memory_control_multiplier = memory_control_multiplier;
+                self.frame_schedule_systems = frame_schedule_systems;
+                self.unused_bindings = unused_bindings;
+                self.unused_binding_refs = unused_binding_refs;
+                *self.name_ledger = name_ledger;
+                self.fx_autodiff_obligations = fx_autodiff_obligations;
+                self.fx_compute_calls = fx_compute_calls;
+                self.fx_autodiff_safe_panic = fx_autodiff_safe_panic;
+                self.fx_autodiff_unsafe_panic = fx_autodiff_unsafe_panic;
+                self.autodiff_safe_panic_context = autodiff_safe_panic_context;
+                self.binder_ref_types = binder_ref_types;
+                self.uses_exact_int = uses_exact_int;
+                self.iter_borrowed = iter_borrowed;
+                self.lending_view_loop_vars = lending_view_loop_vars;
+                self.return_view_provenance = return_view_provenance;
+                self.inferred_lambda_mut_captures = inferred_lambda_mut_captures;
+                self.ret = ret;
+                self.expected_type = expected_type;
+                self.failure_carrier_inference = failure_carrier_inference;
+                self.failure_carrier = failure_carrier;
+                self.task_body_propagates = task_body_propagates;
+                self.view_capture_tasks = view_capture_tasks;
+                self.reactive_upgrades = reactive_upgrades;
+                self.reactive_upgrade_names = reactive_upgrade_names;
+                self.view_borrow_escape_tasks = view_borrow_escape_tasks;
+                self.inline_addr_taken = inline_addr_taken;
+                self.ct_impure_depth = ct_impure_depth;
+                self.ct_embed_inputs = ct_embed_inputs;
+                self.in_dropped_comptime_arm = in_dropped_comptime_arm;
+                self.in_taskgroup_spawn = in_taskgroup_spawn;
+                self.taskgroup_stack = taskgroup_stack;
             }
             Stmt::Switched { body, .. } => {
                 self.check_block(body, true);
@@ -3309,11 +3434,15 @@ impl<'a> Checker<'a> {
                 let signature_checked = rule_fact.is_some();
                 let validated = rule_fact.and_then(|mut marker| {
                     for (argument, (_, value, _)) in marker.args.iter_mut().zip(fields.iter_mut()) {
-                        std::mem::swap(argument, value);
+                        if let Some(argument) = argument.as_expr_mut() {
+                            std::mem::swap(argument, value);
+                        }
                     }
                     let validated = self.validate_rule_signature(&mut marker);
                     for (argument, (_, value, _)) in marker.args.iter_mut().zip(fields.iter_mut()) {
-                        std::mem::swap(argument, value);
+                        if let Some(argument) = argument.as_expr_mut() {
+                            std::mem::swap(argument, value);
+                        }
                     }
                     validated
                 });

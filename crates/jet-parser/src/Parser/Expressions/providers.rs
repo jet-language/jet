@@ -159,22 +159,43 @@ impl<'a> Parser<'a> {
         ));
     }
 
+    /// Lexical candidates for `expr()`. Keep this inventory aligned with the
+    /// prefix arms in `expr_unary_inner`/`expr_primary`; `TokKind` cannot
+    /// derive it because several starts are contextual (`KwMove`, `Dot`,
+    /// `Hash`, `Dollar`, and `LBrace`). The expression parser still enforces
+    /// those contexts after this shared lookahead gate.
     pub(in crate::Parser) fn starts_expr(&self, kind: &TokKind) -> bool {
         matches!(
             kind,
             TokKind::Ident(_)
                 | TokKind::Int(_, _)
                 | TokKind::Float(..)
+                | TokKind::UnitNumber { .. }
+                | TokKind::RawStr(_)
                 | TokKind::Str(_)
+                | TokKind::Char(_)
                 | TokKind::KwTrue
                 | TokKind::KwFalse
                 | TokKind::KwNull
                 | TokKind::KwIt
+                | TokKind::KwSelf
+                | TokKind::KwLoop
+                | TokKind::KwIf
+                | TokKind::KwMove
+                | TokKind::KwCopy
                 | TokKind::LParen
+                | TokKind::LBrace
+                | TokKind::LBracket
+                | TokKind::Hash
+                | TokKind::Dollar
+                | TokKind::Dot
                 | TokKind::Minus
                 | TokKind::Bang
                 | TokKind::Tilde
-                | TokKind::KwCopy
+                | TokKind::Star
+                | TokKind::Amp
+                | TokKind::PlusPlus
+                | TokKind::MinusMinus
         )
     }
 

@@ -207,7 +207,7 @@ fn source_map_api_reads_generated_rust_markers() {
 fn compiler_api_json_mirrors_are_schema_versioned() {
     let source = "fn run() { print(\"ok\") }\n";
     let lex = jet::Compiler::lex_source_json(source);
-    assert!(lex.starts_with("{\"schema\":\"jet.report/v1\""));
+    assert!(lex.starts_with("{\"schema\":\"jet.status/v1\""));
     assert!(
         lex.contains("\"compiler\":{\"schema_version\":1,\"api_version\":1,\"operation\":\"lex\"")
     );
@@ -305,7 +305,7 @@ fn compiler_api_cli_returns_the_same_json_envelope() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("\"schema\":\"jet.report/v1\""));
+    assert!(stdout.contains("\"schema\":\"jet.status/v1\""));
     assert!(stdout.contains("\"operation\":\"parse\""));
     assert!(stdout.contains("\"name\":\"run\""));
     assert_eq!(

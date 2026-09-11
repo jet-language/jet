@@ -54,9 +54,11 @@ impl<'a> Checker<'a> {
             ("core.encoding", "EncodingLimits") => Some(Type::Named("EncodingLimits".to_string())),
             ("core.encoding", "EncodingError") => Some(Type::Named("EncodingError".to_string())),
             ("core.encoding", "EncodingCause") => Some(Type::Named("EncodingCause".to_string())),
-            ("core.encoding", "EncodingFormat") => Some(Type::Named("EncodingFormat".to_string())),
             ("core.encoding", "EncodingErrorKind") => {
                 Some(Type::Named("EncodingErrorKind".to_string()))
+            }
+            ("core.encoding", "EncodingFormat") => {
+                Some(Type::Named("EncodingFormat".to_string()))
             }
             ("core.encoding.json", "JSONReader" | "JSONWriter") => {
                 Some(Type::Named(name.to_string()))

@@ -8,6 +8,9 @@ profile="core"
 if [ "${1:-}" = "full" ]; then
   profile="full"
   shift
+elif [ "${1:-}" = "proof" ]; then
+  profile="proof"
+  shift
 fi
 if [ "$#" -eq 0 ]; then
   echo "usage: scripts/agent/jet-env [full] <command> [args...]" >&2
@@ -85,6 +88,13 @@ check_target_dir "$repo"
 # cache, which beats sccache on delta rebuilds. The sccache binary lives in
 # the nix shell, so the availability check must run AFTER the shell env is
 # materialized — hence the wrapper below. JET_NO_SCCACHE=1 opts out.
+ensure_test_stack() {
+  # Recursive formatter/parser walks overflow the 2 MiB test-thread default.
+  if [ -z "${RUST_MIN_STACK:-}" ]; then
+    export RUST_MIN_STACK=8388608
+  fi
+}
+
 cache_mode_env() {
   # $1 = checkout root (baked in by the caller — the nix-develop transplant
   # below has no access to this script's variables at runtime).
@@ -106,28 +116,31 @@ if command -v direnv >/dev/null 2>&1; then
     set_default_target_dir "$repo"
     check_target_dir "$repo"
     cache_mode_env "$repo"
+    ensure_test_stack
     exec "$@"
-  fi
-fi
-
-# A dirty Git flake makes Nix copy the entire checkout into the store before
-# every command. The shell depends only on flake.nix/flake.lock, so use the
-# current clean commit whenever those two inputs are unchanged. Source edits
-# then reach target/debug/jet directly without entering the flake identity.
-flake_ref="$repo"
-if command -v git >/dev/null 2>&1 \
-  && git -C "$repo" diff --quiet -- flake.nix flake.lock \
-  && git -C "$repo" diff --cached --quiet -- flake.nix flake.lock
-then
-  if revision="$(git -C "$repo" rev-parse HEAD 2>/dev/null)"; then
-    flake_ref="git+file://$repo?rev=$revision"
   fi
 fi
 
 # Inside `nix develop`, re-enter this script's cache selection via bash -c so
 # the check sees the shell's PATH.
 joined="$(printf '%q ' "$@")"
-if [ "$profile" = "full" ]; then
-  exec nix develop "${flake_ref}#full" -c bash -c "$(declare -f check_target_dir set_default_target_dir cache_mode_env); set_default_target_dir $(printf %q "$repo"); check_target_dir $(printf %q "$repo"); cache_mode_env $(printf %q "$repo"); exec $joined"
+if [ "$profile" = "full" ] || [ "$profile" = "proof" ]; then
+  flake_shell="$profile"
+else
+  flake_shell="default"
 fi
-exec nix develop "$flake_ref" -c bash -c "$(declare -f check_target_dir set_default_target_dir cache_mode_env); set_default_target_dir $(printf %q "$repo"); check_target_dir $(printf %q "$repo"); cache_mode_env $(printf %q "$repo"); exec $joined"
+
+# The shell depends on flake.nix/flake.lock, not ordinary source edits. A
+# dirty checkout otherwise creates another whole-repository store snapshot
+# for every command. Native profiles retain the shell's toolchain across GC.
+# sha256sum includes the absolute input paths, keeping checkouts independent.
+cache_key="$(sha256sum "$repo/flake.nix" "$repo/flake.lock" | sha256sum)"
+cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/jet/dev-shells"
+cached_shell="$cache_dir/${cache_key%% *}-$flake_shell"
+if [ -e "$cached_shell" ]; then
+  shell_args=("$cached_shell")
+else
+  mkdir -p "$cache_dir"
+  shell_args=(--profile "$cached_shell" "${repo}#${flake_shell}")
+fi
+exec nix develop "${shell_args[@]}" -c bash -c "$(declare -f check_target_dir set_default_target_dir cache_mode_env ensure_test_stack); set_default_target_dir $(printf %q "$repo"); check_target_dir $(printf %q "$repo"); cache_mode_env $(printf %q "$repo"); ensure_test_stack; exec $joined"

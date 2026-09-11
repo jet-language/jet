@@ -1,9 +1,9 @@
 //! Pretty-printer for Jet source (M6 phase 1, S44).
 //!
 //! One true style: 4-space indent, same-line `{`, spaces around binary
-//! operators, semicolons on statements. Line width is not enforced in v1
-//! (S44 width-100 may land with optional org config later). Comments are
-//! preserved from the original source and re-attached by span.
+//! operators, and line-boundary statement terminators. Line width is not
+//! enforced in v1 (S44 width-100 may land with optional org config later).
+//! Comments are preserved from the original source and re-attached by span.
 
 mod Expressions;
 mod Items;
@@ -647,6 +647,129 @@ fn apply_retired_type_edits(src: &str) -> String {
     out
 }
 
+fn semicolon_has_same_line_code(src: &str, tokens: &[Token], index: usize) -> bool {
+    let Some(next) = tokens.get(index + 1..).and_then(|rest| {
+        rest.iter().find(|token| {
+            !matches!(
+                &token.kind,
+                TokKind::LineComment(_)
+                    | TokKind::BlockComment(_)
+                    | TokKind::Semi
+                    | TokKind::Eof
+            )
+        })
+    }) else {
+        return false;
+    };
+    src.get(tokens[index].span.end..next.span.start)
+        .is_some_and(|gap| !gap.contains('\n') && !gap.contains('\r'))
+}
+
+fn retired_semicolon_edits(src: &str) -> Vec<TextEdit> {
+    let (tokens, lex_diags) = crate::Lexer::lex(src);
+    if !lex_diags.is_empty() {
+        return Vec::new();
+    }
+    tokens
+        .iter()
+        .enumerate()
+        .filter_map(|(index, token)| {
+            if !matches!(&token.kind, TokKind::Semi) || token.span.start >= token.span.end {
+                return None;
+            }
+            Some(TextEdit {
+                span: token.span,
+                new_text: if semicolon_has_same_line_code(src, &tokens, index) {
+                    "\n".to_string()
+                } else {
+                    String::new()
+                },
+            })
+        })
+        .collect()
+}
+
+fn marker_group_contains(tokens: &[Token], name_index: usize) -> bool {
+    let mut nested = 0usize;
+    for index in (0..name_index).rev() {
+        match &tokens[index].kind {
+            TokKind::RBracket => nested += 1,
+            TokKind::LBracket if nested > 0 => nested -= 1,
+            TokKind::LBracket => {
+                return index > 0 && matches!(tokens[index - 1].kind, TokKind::Hash);
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+fn retired_html_marker_edits(src: &str) -> Vec<TextEdit> {
+    let (tokens, lex_diags) = crate::Lexer::lex(src);
+    if !lex_diags.is_empty() {
+        return Vec::new();
+    }
+    let mut edits = Vec::new();
+    for window in tokens.windows(5) {
+        let [
+            hash,
+            Token {
+                kind: TokKind::Ident(name),
+                ..
+            },
+            open,
+            argument,
+            close,
+        ] = window
+        else {
+            continue;
+        };
+        if !matches!(hash.kind, TokKind::Hash)
+            || name != Syntax::MARKER_HTML
+            || !matches!(open.kind, TokKind::LParen)
+            || !matches!(argument.kind, TokKind::Str(_) | TokKind::RawStr(_))
+            || !matches!(close.kind, TokKind::RParen)
+        {
+            continue;
+        }
+        let Some(literal) = src.get(argument.span.start..argument.span.end) else {
+            continue;
+        };
+        edits.push(TextEdit {
+            span: Span::new(hash.span.start, close.span.end),
+            new_text: format!("#{}({}{{{literal}}})", Syntax::MARKER_HTML, Syntax::TYPE_PATH),
+        });
+    }
+    // Grouped marker stacks (`#[Target(Web), HTML("index.html")]`) carry the
+    // same retired bare-string HTML argument, but the hash is before the
+    // group's opening bracket rather than immediately before `HTML`.
+    for index in 0..tokens.len().saturating_sub(4) {
+        let previous = &tokens[index];
+        let name = &tokens[index + 1];
+        let open = &tokens[index + 2];
+        let argument = &tokens[index + 3];
+        let close = &tokens[index + 4];
+        if !matches!(previous.kind, TokKind::Comma | TokKind::LBracket)
+            || !matches!(&name.kind, TokKind::Ident(value) if value == Syntax::MARKER_HTML)
+            || !matches!(open.kind, TokKind::LParen)
+            || !matches!(argument.kind, TokKind::Str(_) | TokKind::RawStr(_))
+            || !matches!(close.kind, TokKind::RParen)
+            || !marker_group_contains(&tokens, index + 1)
+        {
+            continue;
+        }
+        let Some(literal) = src.get(argument.span.start..argument.span.end) else {
+            continue;
+        };
+        edits.push(TextEdit {
+            span: Span::new(name.span.start, close.span.end),
+            new_text: format!("{}({}{{{literal}}})", Syntax::MARKER_HTML, Syntax::TYPE_PATH),
+        });
+    }
+    edits
+}
+
+
 fn collect_retired_selector_edits(tokens: &[Token], edits: &mut Vec<TextEdit>) {
     for token in tokens {
         let TokKind::Str(parts) = &token.kind else {
@@ -765,8 +888,9 @@ fn format_program_with_tokens(
         if let Some(html_path) = &prog.html_path {
             write_separator(&mut f);
             f.write(&format!(
-                "{}(\"{}\")",
+                "{}({}{{\"{}\"}})",
                 Syntax::MARKER_HTML,
+                Syntax::TYPE_PATH,
                 escape_str_lit(html_path)
             ));
         }
@@ -847,7 +971,7 @@ fn format_program_with_tokens(
         f.write(&format!("#{}({})", Syntax::MARKER_TARGET, bucket.name()));
         f.newline();
     }
-    // D-HTMLPAIR1 (ratified 2026-07-01, c134): `#HTML("path.html")` — the
+    // D-HTMLPAIR1 (ratified 2026-07-01, c134): `#HTML(Path{"path.html"})` — the
     // file's explicit companion host page.
     if let Some(html_path) = prog
         .html_path
@@ -858,7 +982,12 @@ fn format_program_with_tokens(
             f.blank_line_between_items();
         }
         first = false;
-        f.write(&format!("#{}(\"{}\")", Syntax::MARKER_HTML, html_path));
+        f.write(&format!(
+            "#{}({}{{\"{}\"}})",
+            Syntax::MARKER_HTML,
+            Syntax::TYPE_PATH,
+            html_path.replace('\\', "\\\\").replace('"', "\\\"")
+        ));
         f.newline();
     }
     // D-POLICY-WORD1=A: module-scoped non-memory `#Policy(...)` — fixed
@@ -947,6 +1076,14 @@ fn format_program_with_tokens(
 struct Comment {
     text: String,
     span: Span,
+}
+
+#[derive(Clone, Copy)]
+enum SourceDelimiter {
+    Paren,
+    Bracket,
+    Brace,
+    Angle,
 }
 
 struct Fmt<'a> {
@@ -1557,6 +1694,192 @@ impl<'a> Fmt<'a> {
         (end > start).then(|| &self.src[start..end])
     }
 
+    fn source_list_span_after(
+        &self,
+        start: usize,
+        delimiter: SourceDelimiter,
+    ) -> Option<(Span, usize)> {
+        let first = self
+            .source_toks
+            .partition_point(|token| token.span.start < start);
+        let mut depth = 0usize;
+        let mut open_start = None;
+        for token in &self.source_toks[first..] {
+            let (is_open, is_close) = match delimiter {
+                SourceDelimiter::Paren => (
+                    matches!(&token.kind, TokKind::LParen),
+                    matches!(&token.kind, TokKind::RParen),
+                ),
+                SourceDelimiter::Bracket => (
+                    matches!(&token.kind, TokKind::LBracket),
+                    matches!(&token.kind, TokKind::RBracket),
+                ),
+                SourceDelimiter::Brace => (
+                    matches!(&token.kind, TokKind::LBrace),
+                    matches!(&token.kind, TokKind::RBrace),
+                ),
+                SourceDelimiter::Angle => (
+                    matches!(&token.kind, TokKind::Lt),
+                    matches!(&token.kind, TokKind::Gt | TokKind::Shr),
+                ),
+            };
+            if depth == 0 {
+                if is_open {
+                    depth = 1;
+                    open_start = Some(token.span.start);
+                }
+                continue;
+            }
+            if is_open {
+                depth += 1;
+            } else if is_close {
+                let consumed = match delimiter {
+                    SourceDelimiter::Angle if matches!(&token.kind, TokKind::Shr) => 2,
+                    _ => 1,
+                };
+                depth = depth.saturating_sub(consumed);
+                if depth == 0 {
+                    return Some((
+                        Span::new(open_start?, token.span.end),
+                        token.span.start,
+                    ));
+                }
+            }
+        }
+        None
+    }
+    fn source_effect_row_span_after(&self, start: usize) -> Option<(Span, usize)> {
+        let first = self
+            .source_toks
+            .partition_point(|token| token.span.start < start);
+        for index in first..self.source_toks.len().saturating_sub(1) {
+            let token = &self.source_toks[index];
+            if !matches!(&token.kind, TokKind::Minus) {
+                continue;
+            }
+            let Some(next) = self.source_toks.get(index + 1) else {
+                continue;
+            };
+            if matches!(&next.kind, TokKind::LBracket) {
+                return self.source_list_span_after(
+                    next.span.start,
+                    SourceDelimiter::Bracket,
+                );
+            }
+        }
+        None
+    }
+
+
+    fn source_marker_group_span(&self, start: usize) -> Option<(Span, usize)> {
+        let first = self
+            .source_toks
+            .partition_point(|token| token.span.start < start);
+        let open = self.source_toks[..first]
+            .iter()
+            .rposition(|token| matches!(&token.kind, TokKind::LBracket))?;
+        self.source_list_span_after(
+            self.source_toks[open].span.start,
+            SourceDelimiter::Bracket,
+        )
+    }
+
+    fn source_span_multiline(&self, span: Span) -> bool {
+        self.src
+            .get(span.start..span.end)
+            .is_some_and(|source| source.contains('\n'))
+            || self.span_has_comment(span.start, span.end)
+    }
+
+    fn fmt_comma_items<T>(
+        &mut self,
+        items: &[T],
+        source: Option<(Span, usize)>,
+        item_span: impl Fn(&T) -> Span,
+        mut render: impl FnMut(&mut Self, &T),
+    ) {
+        let multiline = source.is_some_and(|(span, _)| self.source_span_multiline(span));
+        if multiline && !items.is_empty() {
+            self.newline();
+        }
+        for (index, item) in items.iter().enumerate() {
+            if index > 0 {
+                if multiline {
+                    self.newline();
+                } else {
+                    self.write(", ");
+                }
+            }
+            let span = item_span(item);
+            if multiline {
+                self.emit_leading(span.start);
+            }
+            render(self, item);
+            if multiline {
+                self.write(",");
+                self.emit_trailing(span.end);
+            }
+        }
+        if multiline {
+            if let Some((_, close_start)) = source {
+                self.emit_leading(close_start);
+            }
+            if !self.at_line_start {
+                self.newline();
+            }
+        }
+    }
+
+    fn source_list_item_spans(&self, source: (Span, usize)) -> Vec<Span> {
+        let (span, close_start) = source;
+        let first = self
+            .source_toks
+            .partition_point(|token| token.span.start < span.start);
+        let opening = self.source_toks.get(first).map(|token| &token.kind);
+        let mut parens = usize::from(matches!(opening, Some(TokKind::LParen)));
+        let mut brackets = usize::from(matches!(opening, Some(TokKind::LBracket)));
+        let mut braces = usize::from(matches!(opening, Some(TokKind::LBrace)));
+        let mut angles = usize::from(matches!(opening, Some(TokKind::Lt)));
+        let mut item_start = None;
+        let mut item_end = None;
+        let mut items = Vec::new();
+        for token in &self.source_toks[first..] {
+            if token.span.start >= close_start {
+                break;
+            }
+            if token.span.start == span.start {
+                continue;
+            }
+            if matches!(&token.kind, TokKind::LineComment(_) | TokKind::BlockComment(_)) {
+                continue;
+            }
+            let top_level = parens == 0 && brackets == 0 && braces == 0 && angles == 0;
+            if top_level && matches!(&token.kind, TokKind::Comma) {
+                if let (Some(start), Some(end)) = (item_start.take(), item_end.take()) {
+                    items.push(Span::new(start, end));
+                }
+                continue;
+            }
+            item_start.get_or_insert(token.span.start);
+            item_end = Some(token.span.end);
+            match &token.kind {
+                TokKind::LParen => parens += 1,
+                TokKind::RParen => parens = parens.saturating_sub(1),
+                TokKind::LBracket => brackets += 1,
+                TokKind::RBracket => brackets = brackets.saturating_sub(1),
+                TokKind::LBrace => braces += 1,
+                TokKind::RBrace => braces = braces.saturating_sub(1),
+                TokKind::Lt => angles += 1,
+                TokKind::Gt => angles = angles.saturating_sub(1),
+                TokKind::Shr => angles = angles.saturating_sub(2),
+                _ => {}
+            }
+        }
+        if let (Some(start), Some(end)) = (item_start, item_end) {
+            items.push(Span::new(start, end));
+        }
+        items
+    }
     fn end_block(&mut self) {
         self.newline();
         self.write("}");
@@ -1862,11 +2185,11 @@ pub(super) fn escape_str_lit(s: &str) -> String {
     let mut out = String::new();
     for ch in s.chars() {
         match ch {
-            '"' => out.push_str("\\\""),
             '\\' => out.push_str("\\\\"),
             '\n' => out.push_str("\\n"),
             '\t' => out.push_str("\\t"),
             '\r' => out.push_str("\\r"),
+            '"' => out.push_str("\\\""),
             c if c == '{' || c == '}' => {
                 out.push(c);
                 out.push(c);
@@ -1892,7 +2215,12 @@ pub fn format_source_with_options(
 ) -> Result<String, Vec<crate::Diagnostics::Diagnostic>> {
     let print_edits = retired_print_family_edits(src);
     let print_migrated = apply_source_edits(src, &print_edits).unwrap_or_else(|| src.to_string());
-    let migrated = apply_retired_type_edits(&print_migrated);
+    let html_edits = retired_html_marker_edits(&print_migrated);
+    let html_migrated =
+        apply_source_edits(&print_migrated, &html_edits).unwrap_or(print_migrated);
+    let semi_edits = retired_semicolon_edits(&html_migrated);
+    let semi_migrated = apply_source_edits(&html_migrated, &semi_edits).unwrap_or(html_migrated);
+    let migrated = apply_retired_type_edits(&semi_migrated);
     let (toks, lex_diags) = crate::Lexer::lex(&migrated);
     if !lex_diags.is_empty() {
         return Err(lex_diags);
@@ -2050,7 +2378,7 @@ mod tests {
             );
             let formatted = format_source(&source).expect("retired selector should be rewritable");
             let expected_fragment = [
-                "    print(\"{x",
+                "print(\"{x",
                 crate::Syntax::INTERPOLATION_SELECTOR_RAIL,
                 selector.name,
                 arguments,
@@ -2170,7 +2498,7 @@ fn run() {
             "{once}"
         );
         assert!(
-            once.contains("spread := [Point]{\n        {x: 3},\n        {x: 4}\n    }"),
+            once.contains("spread := [Point]{\n        {x: 3},\n        {x: 4},\n    }"),
             "{once}"
         );
         assert_eq!(

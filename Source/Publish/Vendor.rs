@@ -2,8 +2,8 @@ use crate::Diagnostics::Diagnostic;
 use crate::Lock::LockFile;
 use crate::Store;
 use std::ffi::OsStr;
-use std::path::{Component, Path, PathBuf};
 use std::io;
+use std::path::{Component, Path, PathBuf};
 
 // ──────────────────────────────────────────────
 // `jet registry vendor` — copy resolved deps into vendor/
@@ -24,9 +24,8 @@ pub fn vendor(
     vendor_dir: &Path,
 ) -> Result<Vec<String>, Diagnostic> {
     let _ = project_root; // resolved by the caller into `vendor_dir`
-    let vendor = Store::ensure_directory_authority(vendor_dir).map_err(|error| {
-        vendor_io_error("creating vendor directory", vendor_dir, error)
-    })?;
+    let vendor = Store::ensure_directory_authority(vendor_dir)
+        .map_err(|error| vendor_io_error("creating vendor directory", vendor_dir, error))?;
 
     let mut copied = Vec::new();
     for (name, src_dir) in dep_dirs {
@@ -40,12 +39,10 @@ pub fn vendor(
             ));
         }
 
-        let source = Store::open_directory_authority(src_dir).map_err(|error| {
-            vendor_io_error("inspecting dependency source", src_dir, error)
-        })?;
-        let source_hash = Store::hash_directory_authority(&source, true).map_err(|error| {
-            vendor_io_error("hashing dependency source", src_dir, error)
-        })?;
+        let source = Store::open_directory_authority(src_dir)
+            .map_err(|error| vendor_io_error("inspecting dependency source", src_dir, error))?;
+        let source_hash = Store::hash_directory_authority(&source, true)
+            .map_err(|error| vendor_io_error("hashing dependency source", src_dir, error))?;
         let destination_name = OsStr::new(name);
 
         match vendor.open_child_directory(destination_name) {
@@ -66,11 +63,7 @@ pub fn vendor(
                 vendor
                     .remove_child_tree(destination_name)
                     .map_err(|error| {
-                        vendor_io_error(
-                            "removing stale vendor copy",
-                            &vendor_dir.join(name),
-                            error,
-                        )
+                        vendor_io_error("removing stale vendor copy", &vendor_dir.join(name), error)
                     })?;
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
@@ -83,20 +76,16 @@ pub fn vendor(
             }
         }
 
-        let (staging_name, staging) = vendor
-            .create_private_child("vendor")
-            .map_err(|error| vendor_io_error("creating vendor staging directory", vendor_dir, error))?;
+        let (staging_name, staging) = vendor.create_private_child("vendor").map_err(|error| {
+            vendor_io_error("creating vendor staging directory", vendor_dir, error)
+        })?;
         let result = (|| {
             Store::copy_directory_authority(&source, &staging, true).map_err(|error| {
                 vendor_io_error("copying dependency into vendor tree", src_dir, error)
             })?;
             let staging_hash =
                 Store::hash_directory_authority(&staging, false).map_err(|error| {
-                    vendor_io_error(
-                        "checking staged vendor copy",
-                        &vendor_dir.join(name),
-                        error,
-                    )
+                    vendor_io_error("checking staged vendor copy", &vendor_dir.join(name), error)
                 })?;
             if staging_hash != source_hash {
                 return Err(vendor_io_error(
@@ -111,15 +100,16 @@ pub fn vendor(
             match Store::publish_directory(&vendor, &staging_name, &vendor, destination_name) {
                 Ok(()) => Ok(()),
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                    let winner = vendor
-                        .open_child_directory(destination_name)
-                        .map_err(|error| {
-                            vendor_io_error(
-                                "opening concurrent vendor copy",
-                                &vendor_dir.join(name),
-                                error,
-                            )
-                        })?;
+                    let winner =
+                        vendor
+                            .open_child_directory(destination_name)
+                            .map_err(|error| {
+                                vendor_io_error(
+                                    "opening concurrent vendor copy",
+                                    &vendor_dir.join(name),
+                                    error,
+                                )
+                            })?;
                     let winner_hash =
                         Store::hash_directory_authority(&winner, false).map_err(|error| {
                             vendor_io_error(
@@ -213,7 +203,6 @@ fn vendor_io_error(action: &str, path: &Path, error: io::Error) -> Diagnostic {
     )
 }
 
-
 fn safe_component(value: &str) -> bool {
     !value.is_empty()
         && value != "."
@@ -226,4 +215,3 @@ fn safe_component(value: &str) -> bool {
         )
         && Path::new(value).components().nth(1).is_none()
 }
-

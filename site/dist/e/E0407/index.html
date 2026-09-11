@@ -34,34 +34,25 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for E0407</p>
+<p class="diag-copy fix" data-registry-field="fix">Provide a valid reason string to `.drop()`.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0407</code>: <code>tests/ui/drop_method_empty_reason.stderr</code>.</p>
-<pre class="diag">Error [E2417]: explicit failure domain ``E`` is not an Error type
+<pre class="diag">Error [E2417]: Explicit failure domain ``E`` is not an Error type
   --&gt; tests/ui/drop_method_empty_reason.jet:5:8
     |
   5 | fn f() Int !E -&gt; Ok(1)
     |        ^^^^^^
  Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
- Fix: use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
+ Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
 More: jet-lang.dev/e/E2417
-
-Error [E2402]: `?` can&#39;t convert `E` into `Err` — no declared conversion exists
-  --&gt; tests/ui/drop_method_empty_reason.jet:7:12
-    |
-  7 | fn run() { f().drop(&quot;&quot;) }
-    |            ^
- Why: `?` uses the declared conversion rail; `E` can reach `Err` only through `impl E -&gt; Err`
- Fix: add `impl E -&gt; Err { … }` before this function, or change the return type
-More: jet-lang.dev/e/E2402
 
 Error [E0407]: `.drop()` reason must not be empty
   --&gt; tests/ui/drop_method_empty_reason.jet:7:16
     |
   7 | fn run() { f().drop(&quot;&quot;) }
     |                ^^^^
- Why: the reason documents why this result is intentionally discarded
- Fix: write `.drop(&quot;why this is fine to ignore&quot;)` with a real explanation
+ Why: The reason documents why this result is intentionally discarded
+ Fix: Write `.drop(&quot;why this is fine to ignore&quot;)` with a real explanation
 More: jet-lang.dev/e/E0407
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

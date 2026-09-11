@@ -44,6 +44,97 @@ impl<'a> Lexer<'a> {
             span: Span::new(start, self.pos(self.i)),
         })
     }
+    /// D-RAWSTR1=A: backtick fences carry an ordinary `String` without escape
+    /// or interpolation processing. A fence is a maximal run of backticks; a
+    /// closing run must have exactly the same length. Runs of other lengths
+    /// remain payload, which lets the formatter preserve embedded backticks.
+    pub(super) fn raw_string(&mut self, start: usize) -> Option<Token> {
+        let opening = self.i;
+        let mut fence_len = 0usize;
+        while self.at(opening + fence_len) == '`' {
+            fence_len += 1;
+        }
+        let content_start = opening + fence_len;
+        let mut cursor = content_start;
+        let mut close = None;
+        while cursor < self.chars.len() {
+            if self.at(cursor) != '`' {
+                cursor += 1;
+                continue;
+            }
+            let run_start = cursor;
+            while self.at(cursor) == '`' {
+                cursor += 1;
+            }
+            if cursor - run_start == fence_len {
+                close = Some(run_start);
+                break;
+            }
+        }
+        let Some(close) = close else {
+            self.diags.push(Diagnostic::error(
+                "E0002",
+                "this raw text never gets a closing backtick fence".to_string(),
+                "a raw string closes with a backtick run that has the same length as its opening run"
+                    .to_string(),
+                format!(
+                    "add a closing fence of {} backtick{}",
+                    fence_len,
+                    if fence_len == 1 { "" } else { "s" }
+                ),
+                Some(Span::new(start, self.end)),
+            ));
+            self.i = self.chars.len();
+            return None;
+        };
+
+        let mut text = self.src[self.pos(content_start)..self.pos(close)].to_string();
+        // The fence itself cannot be escaped. One ASCII-space pad preserves
+        // leading/trailing spaces when the content would otherwise resemble
+        // Markdown code-span padding; an all-space payload is left untouched.
+        if text.starts_with(' ')
+            && text.ends_with(' ')
+            && text.as_bytes().iter().any(|byte| *byte != b' ')
+        {
+            text.remove(0);
+            text.pop();
+        }
+        self.i = close + fence_len;
+        Some(Token {
+            kind: TokKind::RawStr(text),
+            span: Span::new(start, self.pos(self.i)),
+        })
+    }
+    /// Skip a raw fence while matching an enclosing ordinary-string
+    /// interpolation. Braces and quotes inside the fence are payload, not
+    /// delimiters for the outer `{…}` hole.
+    fn raw_fence_end(&self, opening: usize, limit: usize) -> Option<usize> {
+        let limit = limit.min(self.chars.len());
+        if opening >= limit || self.at(opening) != '`' {
+            return None;
+        }
+        let mut fence_len = 0usize;
+        while opening + fence_len < limit && self.at(opening + fence_len) == '`' {
+            fence_len += 1;
+        }
+        let mut cursor = opening + fence_len;
+        while cursor < limit {
+            if self.at(cursor) != '`' {
+                cursor += 1;
+                continue;
+            }
+            let run_start = cursor;
+            while cursor < limit && self.at(cursor) == '`' {
+                cursor += 1;
+            }
+            if cursor - run_start == fence_len {
+                return Some(cursor);
+            }
+        }
+        None
+    }
+
+
 
     /// Lex a string literal. Plain strings own the four-entry escape table
     /// (S20); a typed-head body leaves backslashes for its head grammar
@@ -175,6 +266,16 @@ impl<'a> Lexer<'a> {
                         } else {
                             match c2 {
                                 '"' => in_quote = true,
+                                '`' => {
+                                    if let Some(end) =
+                                        self.raw_fence_end(self.i, self.chars.len())
+                                    {
+                                        self.i = end;
+                                        continue;
+                                    }
+                                    self.i = self.chars.len();
+                                    break;
+                                }
                                 '{' => depth += 1,
                                 '}' => {
                                     depth -= 1;
@@ -221,13 +322,11 @@ impl<'a> Lexer<'a> {
                     if !lit.is_empty() {
                         parts.push(StrTokPart::Lit(std::mem::take(&mut lit)));
                     }
-                    parts.push(StrTokPart::Interp(
-                        self.lex_interpolation(
-                            inner_start_byte,
-                            inner_end_byte,
-                            Span::new(open_pos, self.pos(self.i)),
-                        ),
-                    ));
+                    parts.push(StrTokPart::Interp(self.lex_interpolation(
+                        inner_start_byte,
+                        inner_end_byte,
+                        Span::new(open_pos, self.pos(self.i)),
+                    )));
                 }
                 _ => {
                     lit.push(ch);
@@ -283,6 +382,14 @@ impl<'a> Lexer<'a> {
                 match c {
                     '{' => depth += 1,
                     '}' => depth -= 1,
+                    '`' => {
+                        if let Some(end) = self.raw_fence_end(j, self.chars.len()) {
+                            j = end;
+                            continue;
+                        }
+                        j = self.chars.len();
+                        continue;
+                    }
                     '"' => {
                         j += 1;
                         while j < self.chars.len() && self.at(j) != '"' {
@@ -479,6 +586,14 @@ impl<'a> Lexer<'a> {
                         } else {
                             match c2 {
                                 '"' => in_quote = true,
+                                '`' => {
+                                    if let Some(end) = self.raw_fence_end(k, content_end) {
+                                        k = end;
+                                        continue;
+                                    }
+                                    k = content_end;
+                                    break;
+                                }
                                 '{' => bdepth += 1,
                                 '}' => {
                                     bdepth -= 1;
@@ -521,13 +636,11 @@ impl<'a> Lexer<'a> {
                     if !lit.is_empty() {
                         parts.push(StrTokPart::Lit(std::mem::take(&mut lit)));
                     }
-                    parts.push(StrTokPart::Interp(
-                        self.lex_interpolation(
-                            inner_start_byte,
-                            inner_end_byte,
-                            Span::new(open_pos, self.pos(k)),
-                        ),
-                    ));
+                    parts.push(StrTokPart::Interp(self.lex_interpolation(
+                        inner_start_byte,
+                        inner_end_byte,
+                        Span::new(open_pos, self.pos(k)),
+                    )));
                 }
                 _ => {
                     lit.push(ch);

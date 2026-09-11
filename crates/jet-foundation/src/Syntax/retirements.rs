@@ -802,7 +802,13 @@ mod tests {
 
     #[test]
     fn a_rename_that_names_a_code_fails_the_guard() {
-        let mut wrong = vec![RETIREMENTS[0]];
+        let mut wrong = vec![
+            RETIREMENTS
+                .iter()
+                .copied()
+                .find(|row| row.kind == RetirementKind::Rename)
+                .expect("retirement table needs a rename row"),
+        ];
         wrong[0].code = Some("E1206");
         assert!(!law_violations_of(&wrong).is_empty());
     }

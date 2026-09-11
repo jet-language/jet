@@ -3,9 +3,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
-
-static SEQ: AtomicU64 = AtomicU64::new(0);
 
 // Tier-parity scratch programs exercise the language and Core surface, not an
 // application manifest. Give every scratch project one explicit test
@@ -14,15 +11,15 @@ static SEQ: AtomicU64 = AtomicU64::new(0);
 pub(crate) const TIR_TEST_PACKAGE: &str = "name: \"tir_support\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time] } }\n";
 
 fn unique_tmp(prefix: &str) -> PathBuf {
-    let n = SEQ.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("{prefix}_{}_{}", std::process::id(), n))
+    crate::common::unique_tmp(prefix)
 }
 
 pub(crate) fn write_test_package(dir: &Path, source: &str) {
     let temp = std::env::temp_dir();
+    let scratch = crate::common::test_scratch_root("scratch");
     assert!(
-        dir.parent() == Some(temp.as_path()),
-        "TIR test package must live in its own strict TMPDIR child: {}",
+        dir.parent() == Some(temp.as_path()) || dir.parent() == Some(scratch.as_path()),
+        "TIR test package must live in its own scratch child: {}",
         dir.display()
     );
     fs::write(dir.join("package.jet"), source).unwrap();
@@ -48,6 +45,7 @@ pub fn build_and_run(name: &str, src: &str) -> (i32, String) {
 pub fn compile(name: &str, src: &str) -> String {
     let dir = unique_tmp("jet_tir_compile");
     fs::create_dir_all(&dir).unwrap();
+    write_test_package(&dir, TIR_TEST_PACKAGE);
     let jet_path = dir.join(format!("{name}.jet"));
     fs::write(&jet_path, src).unwrap();
     let shown = jet_path.to_string_lossy().into_owned();
@@ -69,6 +67,7 @@ pub fn compile_source(
 ) -> Result<jet::CompileOutput, Vec<jet::Diagnostics::Diagnostic>> {
     let dir = unique_tmp("jet_tir_compile_source");
     fs::create_dir_all(&dir).unwrap();
+    write_test_package(&dir, TIR_TEST_PACKAGE);
     let filename = if name.ends_with(".jet") {
         name.to_string()
     } else {
@@ -119,11 +118,15 @@ fn jit_run_with_package(
         command.env(key, value);
     }
     let out = command.output().unwrap();
+    let stderr = normalize_workspace_root_paths(
+        &String::from_utf8_lossy(&out.stderr),
+        &dir,
+    );
     let _ = fs::remove_dir_all(&dir);
     (
         out.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&out.stdout).into_owned(),
-        String::from_utf8_lossy(&out.stderr).into_owned(),
+        stderr,
     )
 }
 
@@ -221,11 +224,15 @@ fn interpreter_run_with_package(
         .env("JETPACK_ROOT", dir.join("jetpack"))
         .output()
         .unwrap();
+    let stderr = normalize_workspace_root_paths(
+        &String::from_utf8_lossy(&out.stderr),
+        &dir,
+    );
     let _ = fs::remove_dir_all(&dir);
     (
         out.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&out.stdout).into_owned(),
-        String::from_utf8_lossy(&out.stderr).into_owned(),
+        stderr,
     )
 }
 
@@ -406,13 +413,37 @@ pub fn assert_example_cli_tiers_agree_with_package<F>(
     }
 }
 
-/// Replace only a workspace-root prefix. The oracle keeps project-relative
-/// paths, while a tier may embed the canonical workspace path.
+/// Replace only the exact generated source/scratch-root prefix. The oracle
+/// keeps project-relative paths, while a tier may embed its unique temp root.
 fn normalize_workspace_root_paths(stderr: &str, root: &std::path::Path) -> String {
     let root = root.display().to_string();
     stderr
         .replace(&format!("{root}/"), "")
         .replace(&format!("{root}\\"), "")
+}
+
+/// Render compile-time Jet lints exactly as the non-interactive CLI does.
+fn render_compile_lints(
+    file: &str,
+    src: &str,
+    lints: &[jet::Diagnostics::Diagnostic],
+) -> String {
+    if lints.is_empty() {
+        return String::new();
+    }
+    let mut rendered = jet::render_all_linked(file, src, lints, false, false);
+    rendered.push_str(&format!(
+        "\n{} problem{} found\n",
+        lints.len(),
+        if lints.len() == 1 { "" } else { "s" }
+    ));
+    if let Some(first) = lints.first() {
+        rendered.push_str(&format!(
+            "{}\n",
+            jet::Explain::pointer_line(&first.code, false)
+        ));
+    }
+    rendered
 }
 
 /// Run an executable error example through debug/release AOT, default jet run,
@@ -500,6 +531,7 @@ fn build_and_run_full_inner(
 ) -> (i32, String, String) {
     let dir = unique_tmp(prefix);
     fs::create_dir_all(&dir).unwrap();
+    write_test_package(&dir, TIR_TEST_PACKAGE);
     let jet_path = dir.join(format!("{name}.jet"));
     fs::write(&jet_path, src).unwrap();
     let shown = jet_path.to_string_lossy().into_owned();
@@ -509,6 +541,7 @@ fn build_and_run_full_inner(
             jet::render_diagnostics(&shown, src, &diags)
         )
     });
+    let compile_stderr = render_compile_lints(&shown, src, &out.lints);
     let rs = dir.join(format!("{name}.rs"));
     let bin = dir.join(name);
     fs::write(&rs, &out.rust).unwrap();
@@ -540,7 +573,11 @@ fn build_and_run_full_inner(
         String::from_utf8_lossy(&rustc.stderr)
     );
     let run = Command::new(&bin).output().unwrap();
-    let stderr = String::from_utf8_lossy(&run.stderr).into_owned();
+    let run_stderr = String::from_utf8_lossy(&run.stderr);
+    let stderr = normalize_workspace_root_paths(
+        &format!("{compile_stderr}{run_stderr}"),
+        &dir,
+    );
     (
         run.status.code().unwrap_or(0),
         String::from_utf8_lossy(&run.stdout).into_owned(),
@@ -604,6 +641,7 @@ pub fn build_release_and_run_multi(
 ) -> (i32, String, String) {
     let dir = unique_tmp(&format!("jet_release_multi_{name}"));
     fs::create_dir_all(&dir).unwrap();
+    write_test_package(&dir, TIR_TEST_PACKAGE);
     for (rel, src) in files {
         let path = dir.join(rel);
         if let Some(parent) = path.parent() {
@@ -657,6 +695,108 @@ pub fn assert_release_tiers_agree(name: &str, src: &str, expected_stdout: &str) 
         assert_eq!(result.0, baseline.0, "{mode} exit code disagreed");
         assert_eq!(result.1, baseline.1, "{mode} stdout disagreed");
     }
+}
+/// Run a bare single-file source through release AOT, resident JIT, and the
+/// forced interpreter. Unlike `assert_tiers_agree`, this intentionally writes
+/// no `package.jet`, so the source exercises the driver's standalone path.
+pub fn assert_bare_release_tiers_agree(name: &str, src: &str, expected_stdout: &str) {
+    let dir = unique_tmp(&format!("jet_bare_tiers_{name}"));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.jet");
+    fs::write(&path, src).unwrap();
+    let path = path.to_string_lossy().into_owned();
+    let modes = [
+        ("release AOT", vec!["run", "--release", path.as_str()]),
+        ("default resident JIT", vec!["run", path.as_str()]),
+        (
+            "forced interpreter",
+            vec!["run", "--interpret", path.as_str()],
+        ),
+    ];
+    let mut baseline = None;
+    for (mode, args) in modes {
+        let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(args)
+            .current_dir(&dir)
+            .env("JET_STORE_DIR", dir.join(format!("cache-{mode}")))
+            .env("JETPACK_ROOT", dir.join(format!("jetpack-{mode}")))
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        let result = (
+            output.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        );
+        assert_eq!(result.0, 0, "{mode} failed:\n{}", result.2);
+        assert_eq!(result.1, expected_stdout, "{mode} output disagreed");
+        if let Some((baseline_mode, baseline_result)) = &baseline {
+            assert_eq!(
+                &result, baseline_result,
+                "{mode} disagreed with {baseline_mode}"
+            );
+        } else {
+            baseline = Some((mode, result));
+        }
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// Assert one authority-denied generic call has the same diagnostic on every
+/// execution tier. The package grants the ordinary default roots but omits
+/// the effect under test, so no tier receives that authority.
+pub fn assert_release_tier_error_with_application_policy(
+    name: &str,
+    src: &str,
+    package_source: &str,
+    expected_code: &str,
+) {
+    let dir = unique_tmp(&format!("jet_policy_tiers_{name}"));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.jet");
+    fs::write(&path, src).unwrap();
+    fs::write(dir.join("package.jet"), package_source).unwrap();
+    let path = path.to_string_lossy().into_owned();
+    let modes = [
+        ("release AOT", vec!["run", "--release", path.as_str()]),
+        ("default resident JIT", vec!["run", path.as_str()]),
+        (
+            "forced interpreter",
+            vec!["run", "--interpret", path.as_str()],
+        ),
+    ];
+    let mut baseline = None;
+    for (mode, args) in modes {
+        let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(args)
+            .current_dir(&dir)
+            .env("JET_STORE_DIR", dir.join(format!("cache-{mode}")))
+            .env("JETPACK_ROOT", dir.join(format!("jetpack-{mode}")))
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        let result = (
+            output.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        );
+        assert_ne!(result.0, 0, "{mode} unexpectedly succeeded");
+        assert!(result.1.is_empty(), "{mode} wrote stdout: {:?}", result.1);
+        assert!(
+            result.2.contains(expected_code),
+            "{mode} did not report {expected_code}:\n{}",
+            result.2
+        );
+        if let Some((baseline_mode, baseline_result)) = &baseline {
+            assert_eq!(
+                &result, baseline_result,
+                "{mode} disagreed with {baseline_mode}"
+            );
+        } else {
+            baseline = Some((mode, result));
+        }
+    }
+    let _ = fs::remove_dir_all(&dir);
 }
 
 /// Assert the stable E3010 code/message across release AOT, resident JIT, and

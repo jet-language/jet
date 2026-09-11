@@ -94,8 +94,8 @@ const CONTRACT = `
 
 - Repo \`${REPO}\`, branch \`master\`, that checkout only. NEVER touch \`plugins/tower/**\`, \`.claude/**\`, or a sibling worktree.
 - No commits, no board writes, no branch or worktree operations. Many other workers share this tree right now.
-- \`scripts/agent/lane-check.sh\` must end with \`CHECK OK\`. Quote that line verbatim as the FIRST line of your report. If a file you did not touch fails, name it and continue — someone else owns it.
-- You MAY run \`./target/debug/jet check|run|fmt --check\` on files you touched. Do NOT run \`cargo test\`, a generator, a bless command, \`cargo fmt\`, or the full suite. Verification is batched at the end of the epoch, not per card.
+- If you change Rust, JavaScript, shell, Python, Ruby, Elixir, or Jet code, \`scripts/agent/lane-check.sh\` must end with \`CHECK OK\`. Quote \`CHECK OK\` verbatim as the FIRST line of your report. A receipt without it is rejected, not integrated. If every changed file is prose or static data, write \`DOCS ONLY\` as the first line instead.
+- You MAY run \`./target/debug/jet check|run|fmt --check\` on files you touched. Do NOT run \`cargo test\`, a generator, a bless command, \`cargo fmt\`, \`proof-parallel.sh\`, or \`verify-full.sh\`. The orchestrator runs the exact criterion proof immediately after integration; broad proof runs once behind the milestone closeout token.
 - Build a complete vertical slice. NO stubs, placeholders, mocks, no-ops, \`TODO: implement\`, or "foundation for later". If you cannot finish a criterion, leave it untouched and say so.
 
 ## Invariants
@@ -115,8 +115,8 @@ Read \`docs/spec/syntax-decisions.md\` when unsure — it carries every ratified
 
 ## Return shape
 
-1. \`CHECK OK\`, verbatim.
-2. One line per criterion: number, done or open, \`file:line\`, and the command output that proves it.
+1. \`CHECK OK\`, verbatim, for any code change; otherwise \`DOCS ONLY\`.
+2. One line per criterion: number, done or open, \`file:line\`, and the command that the orchestrator must run to prove it.
 3. Changed files with line ranges.
 4. Anything unfinished, and why. An honest partial beats a claimed pass.
 
@@ -174,6 +174,7 @@ function cmdBrief(args) {
   }
   const made = [];
   for (const c of picked) {
+    tower(["card", "claim", c.id, "--by", BY]);
     const full = JSON.parse(tower(["card", "show", c.id, "--json"]));
     const name = writeBrief(full.card ?? full);
     if (name) made.push(name);
@@ -236,17 +237,26 @@ function cmdHarvest() {
   const seen = new Set(existsSync(readFile) ? readFileSync(readFile, "utf8").split("\n").filter(Boolean) : []);
   const fresh = lanes().filter((l) => l.yielded && !seen.has(l.name));
   if (!fresh.length) return console.log("(nothing new)");
+  let rejected = false;
   for (const l of fresh) {
     const path = join(DIR, `${l.name}.out`);
     const s = tailOf(path, statSync(path).size).replace(/\u001b\[[0-9;]*m/g, "");
     const i = s.lastIndexOf("] codex");
     let tail = i < 0 ? s.slice(-1200) : s.slice(i);
-    const c = tail.search(/CHECK (OK|FAILED)/);
+    const codeReceipt = /(?:^|\n)CHECK OK(?:\r?\n|$)/.test(tail);
+    const docsReceipt = /(?:^|\n)DOCS ONLY(?:\s|$)/.test(tail);
+    if (!codeReceipt && !docsReceipt) {
+      rejected = true;
+      console.error(`\n===== ${l.name} REJECTED =====\nmissing CHECK OK or DOCS ONLY receipt; rebrief the same card`);
+      continue;
+    }
+    const c = tail.search(/(?:CHECK OK|DOCS ONLY)/);
     if (c > 0) tail = tail.slice(c);
     console.log(`\n===== ${l.name} =====\n${tail.slice(0, 1200)}`);
     seen.add(l.name);
   }
   writeFileSync(readFile, [...seen].join("\n"));
+  if (rejected) process.exitCode = 1;
 }
 
 function undecided(c) {

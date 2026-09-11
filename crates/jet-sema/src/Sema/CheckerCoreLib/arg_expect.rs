@@ -203,6 +203,8 @@ impl<'a> Checker<'a> {
         let got = self.infer(&mut arg.expr);
         self.expected_type = saved_expected;
         if let Some(mut got) = got {
+            let query_callback_effect_bad =
+                self.check_query_callback_effect(call_name, param_ty, &got, arg.expr.span());
             self.check_interrupt_callback_expr(&arg.expr, &got);
             if got != *param_ty && got.numeric_widening_to(param_ty).is_some() {
                 self.widen_numeric_expr(&mut arg.expr, &got, param_ty);
@@ -211,7 +213,8 @@ impl<'a> Checker<'a> {
             let reads_expiring_secret_loan = !consumes
                 && arg.convention == AccessConvention::Read
                 && crate::Sema::Diagnostics::expiring_secret_loan_matches(param_ty, &got);
-            let reported = reads_expiring_secret_loan
+            let reported = query_callback_effect_bad
+                || reads_expiring_secret_loan
                 || self.check_type_assignable(param_ty, &got, arg.expr.span());
             let fixed_widens = matches!(
                 (param_ty, &got),

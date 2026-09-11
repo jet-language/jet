@@ -50,6 +50,50 @@ pub(super) fn no_run_error() -> Diagnostic {
 fn output_error(what: String, why: String, fix: String, span: Span) -> Diagnostic {
     Diagnostic::error("E1321", what, why, fix, Some(span))
 }
+fn validate_entry_contract(
+    kind: crate::AST::OutputKind,
+    source_name: &str,
+    signature: &FuncSig,
+    module_items: &[Item],
+    trait_reg: &TraitRegistry,
+    span: Span,
+    fix: String,
+    diags: &mut Vec<Diagnostic>,
+) -> bool {
+    let params_ok = match kind {
+        crate::AST::OutputKind::Executable if signature.params.len() == 1 => {
+            let param_ty = &signature.params[0].1;
+            matches!(
+                cli_entry_param_shape(module_items, param_ty, trait_reg),
+                CLIEntryShape::Struct
+            )
+        }
+        crate::AST::OutputKind::Executable => signature.params.is_empty(),
+        crate::AST::OutputKind::Service | crate::AST::OutputKind::Check => {
+            signature.params.is_empty()
+        }
+        _ => false,
+    };
+    let return_ok = signature.return_type.as_ref().is_none_or(|ty| {
+        matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+            || is_fallible_void_entry_return(ty)
+    });
+    if params_ok && return_ok {
+        return true;
+    }
+    let contract = if kind == crate::AST::OutputKind::Executable {
+        "an Executable takes zero or one typed CLI parameter and returns `()` or `() ?`"
+    } else {
+        "a Service or Check takes no parameters and returns `()` or `() ?`"
+    };
+    diags.push(output_error(
+        format!("Output entry `{source_name}` has the wrong callable contract"),
+        contract.to_string(),
+        fix,
+        span,
+    ));
+    false
+}
 
 fn output_string(expr: &Expr) -> Option<String> {
     let Expr::Str(parts, _) = expr else {
@@ -116,7 +160,6 @@ fn record_output_import_use(
         name_ledger.record_alias_use(module_idx, span);
     }
 }
-
 
 fn output_module_alias_visible(
     from_module: usize,
@@ -374,42 +417,16 @@ fn resolve_output_callable(
         ));
         return None;
     }
-    let contract_diags = Vec::new();
-    let params_ok = match kind {
-        crate::AST::OutputKind::Executable if signature.params.len() == 1 => {
-            let param_ty = &signature.params[0].1;
-            match cli_entry_param_shape(
-                &bundle.modules[target].items,
-                param_ty,
-                &states[target].trait_reg,
-            ) {
-                CLIEntryShape::Struct => true,
-                CLIEntryShape::Invalid => false,
-            }
-        }
-        crate::AST::OutputKind::Executable => signature.params.is_empty(),
-        crate::AST::OutputKind::Service | crate::AST::OutputKind::Check => {
-            signature.params.is_empty()
-        }
-        _ => false,
-    };
-    let return_ok = signature.return_type.as_ref().is_none_or(|ty| {
-        matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
-            || is_fallible_void_entry_return(ty)
-    });
-    if !params_ok || !return_ok {
-        diags.extend(contract_diags);
-        let contract = if kind == crate::AST::OutputKind::Executable {
-            "an Executable takes zero or one typed CLI parameter and returns `()` or `() ?`"
-        } else {
-            "a Service or Check takes no parameters and returns `()` or `() ?`"
-        };
-        diags.push(output_error(
-            format!("Output entry `{source_name}` has the wrong callable contract"),
-            contract.to_string(),
-            format!("change `fn {source_name}` to match the {kind:?} contract"),
-            entry.span(),
-        ));
+    if !validate_entry_contract(
+        kind,
+        &source_name,
+        signature,
+        &bundle.modules[target].items,
+        &states[target].trait_reg,
+        entry.span(),
+        format!("change `fn {source_name}` to match the {kind:?} contract"),
+        diags,
+    ) {
         return None;
     }
     let module_alias = name_ledger
@@ -680,6 +697,41 @@ pub(super) fn resolve_outputs(
             fact.selected = fact.kind == crate::AST::OutputKind::Check;
             if fact.selected {
                 fact.selection_reason = "all Check Outputs".to_string();
+            }
+        }
+    }
+    let selected_output = resolved.iter().any(|(_, _, fact)| fact.selected);
+    if has_legacy_run
+        && matches!(mode, CompileMode::Run | CompileMode::Check)
+        && !selected_output
+    {
+        if let Some(signature) = states[bundle.entry].funcs.get("run") {
+            let span = bundle.modules[bundle.entry]
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    Item::Func(function) if function.name == "run" => Some(function.span),
+                    _ => None,
+                })
+                .unwrap_or_else(|| Span::new(0, 0));
+            // D-WEBAPP1=D: an App-returning `fn run` is a serving entry, not
+            // an Executable entry. `bundle_serves_until_stopped` and the App
+            // graph use this same canonical return-type fact.
+            if !signature
+                .return_type
+                .as_ref()
+                .is_some_and(crate::AST::type_is_app)
+            {
+                validate_entry_contract(
+                    crate::AST::OutputKind::Executable,
+                    "run",
+                    signature,
+                    &bundle.modules[bundle.entry].items,
+                    &states[bundle.entry].trait_reg,
+                    span,
+                    "declare the entry as `fn run()` or `fn run() ()?`".to_string(),
+                    diags,
+                );
             }
         }
     }

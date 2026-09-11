@@ -204,8 +204,6 @@ fn structure_plane_keeps_parser_sema_tir_and_runtime_tier_parity() {
     ] {
         assert!(kinds.contains(&kind), "missing {kind:?} in {kinds:?}");
     }
-    jet::Codegen::TIR::lower_jit_program(&bundle).expect("structure example lowers to TIR");
-
     let cache =
         std::env::temp_dir().join(format!("jet_structure_plane_tiers_{}", std::process::id()));
     let _ = fs::remove_dir_all(&cache);

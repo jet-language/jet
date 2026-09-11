@@ -1,0 +1,368 @@
+{
+  "schema": "jet.ffi-assurance.v1",
+  "version": 1,
+  "status": "source_only_unrun",
+  "qualification": "conditional",
+  "safe_claim_allowed": false,
+  "purpose": "Exercise checked foreign memory edges and an isolated binary protocol without turning wrappers, sentries, sanitizers, or a process boundary into a universal guarantee.",
+  "provenance": {
+    "author_profile": "implementation-worker",
+    "matched_workload": "sum-bytes",
+    "pairing": "checked-native and isolated-binary consume the same bounded byte payload and explicit adversarial case names",
+    "measurements": "not authored; driver emits later receipts only",
+    "author_cost": "not claimed"
+  },
+  "ratified_decisions": [
+    "D-FFI-CONTRACT1",
+    "D-FFI-AUTO1",
+    "D-FFI-GUEST1",
+    "D-FFI-CALLBACK2",
+    "D-FFI-BUILD1"
+  ],
+  "canonical_inputs": {
+    "contract_decisions": "/home/nate/.cache/jet-luna/resume-implementation/ffi-ratified.json",
+    "syntax_law": "docs/spec/syntax-decisions.md",
+    "boundary_proposal": "docs/audits/ffi-owned-source-and-boundaries.md",
+    "foreign_reasoning_producer": [
+      "crates/jet-pkg-model/src/ForeignBridge.rs",
+      "crates/jet-pkg-model/src/CBind.rs",
+      "crates/jet-pkg-model/src/CppBind.rs",
+      "crates/jet-pkg-model/src/CFFI.rs"
+    ],
+    "containment": {
+      "launcher": "tools/ci/compiled-workload-peer-launcher.rs",
+      "contract": "compiled-workload-peer-isolation-v1",
+      "authority_runner": "tools/ci/compiled-workload-runner.mjs"
+    },
+    "matched_comparator": {
+      "compiled_workloads": "tools/ci/compiled-workload-runner.mjs",
+      "metric_contract": "tests/compiled_workloads/metric_contract.tsv",
+      "gauntlet_manifest": "gauntlet/measurement-manifest.json",
+      "gauntlet_harness": "gauntlet/harness/run.mjs",
+      "integration_mode": "adapter_plan_only_until_owner_adds_a_canonical_workload"
+    },
+    "environment": "scripts/agent/jet-env"
+  },
+  "roles": {
+    "safe_jet_caller": {
+      "trust": "managed_values_only",
+      "surface": "jet/run.jet and jet/library.jet",
+      "allowed_input": "String value through the generated C binding",
+      "not_proven": [
+        "arbitrary in-process native memory safety",
+        "raw pointer provenance",
+        "foreign implementation correctness"
+      ],
+      "ordinary_facade": "conditional_on_descriptor_and_artifact_pairing"
+    },
+    "unsafe_native_body": {
+      "trust": "foreign_unverified",
+      "surface": "native/checked_native.c and isolated/worker.c",
+      "rule": "Native code is not promoted to safe merely because a Jet caller is safe.",
+      "admission": "Only named checked entry points are callable by this experiment; unknown raw edges reject or remain TRUSTED outside hardening."
+    },
+    "hostile_input": {
+      "trust": "untrusted",
+      "surface": "native/checked_driver.c and isolated/host-driver.mjs",
+      "rule": "Every malformed length, generation, initialization, alias, protocol, checksum, and result case is an authored adversarial execution.",
+      "raw_expectation": "unrun"
+    },
+    "process_authority": {
+      "trust": "explicitly_bounded_but_not_host_sandboxed",
+      "launcher": "compiled-workload-peer-isolation-v1",
+      "network": "disabled",
+      "external_write": "disabled",
+      "host": "ambient",
+      "filesystem": "read-only ambient host view plus writable experiment root",
+      "fallback": "none",
+      "rule": "Unsupported containment is a failed experiment, never a direct-process success."
+    },
+    "external_runtime": {
+      "checked_native": "C compiler, dynamic loader, libc, and Jet generated library are named dependencies; none are silently folded into the safety claim.",
+      "isolated_binary": "The worker uses libc and the containment launcher; Node is a host driver only and does not receive worker pointers.",
+      "trust": "dependency_and_target_identity_required"
+    }
+  },
+  "profiles": {
+    "checked-native": {
+      "sources": [
+        "native/checked_native.h",
+        "native/checked_native.c",
+        "native/checked_driver.c",
+        "jet/package.jet",
+        "jet/library.jet",
+        "jet/run.jet",
+        "jet/foreign.c",
+        "jet/host.c"
+      ],
+      "caller_path": [
+        "Jet String value",
+        "generated C binding",
+        "fa_checked_probe",
+        "fa_document_init/load/borrow",
+        "fa_view_sum/copy",
+        "typed status and output"
+      ],
+      "native_body": "native/checked_native.c",
+      "build": {
+        "compiler": "CC or cc",
+        "language": "C11",
+        "flags": ["-std=c11", "-O2", "-fPIC", "-fno-omit-frame-pointer", "-pthread"],
+        "artifacts": ["libffi-assurance.so", "checked-driver"],
+        "dynamic_loader": "trusted_only_with_exact_artifact_and_toolchain_identity"
+      },
+      "authority": {
+        "filesystem": "ambient for direct checked binary",
+        "network": "inherited and not claimed as restricted",
+        "foreign_pointer": "descriptor capacity and generation are required; OS address validity remains outside this source proof"
+      }
+    },
+    "isolated-binary": {
+      "sources": [
+        "isolated/worker.c",
+        "isolated/host-driver.mjs"
+      ],
+      "caller_path": [
+        "host-owned copied request bytes",
+        "stdin framed message",
+        "worker header/type/length/checksum validation",
+        "worker result header",
+        "host result/type/length/checksum/value validation"
+      ],
+      "worker": "isolated/worker.c",
+      "driver": "isolated/host-driver.mjs",
+      "protocol": "fa-isolated-v1",
+      "authority": {
+        "launcher_arguments": [
+          "--contract", "compiled-workload-peer-isolation-v1",
+          "--network", "disabled",
+          "--external-write", "disabled",
+          "--host", "ambient"
+        ],
+        "stdin_stdout_only": true,
+        "pointer_crossing": false,
+        "copy_boundary": "request and response are byte copies; copied/shared output remains untrusted until host validation",
+        "failure_contract": "worker may reject a frame or exit nonzero; host reports that failure and never rewrites it as equivalent success"
+      }
+    }
+  },
+  "boundaries": [
+    {
+      "id": "spatial",
+      "status": "enforced",
+      "fixture": "checked-native/spatial",
+      "guard": "length <= owner.length <= owner.capacity and data identity checked before the loop or memcpy",
+      "fault_order": "reject_before_memory_read_or_write",
+      "evidence": "checked-driver output status=rejected-spatial"
+    },
+    {
+      "id": "temporal",
+      "status": "enforced",
+      "fixture": "checked-native/temporal",
+      "guard": "active owner and generation equality checked before access",
+      "fault_order": "reject_before_stale_view_access",
+      "evidence": "checked-driver output status=rejected-temporal"
+    },
+    {
+      "id": "initialization",
+      "status": "enforced",
+      "fixture": "checked-native/initialization",
+      "guard": "initialized flag checked before borrow or read",
+      "fault_order": "reject_before_uninitialized_read",
+      "evidence": "checked-driver output status=rejected-uninitialized"
+    },
+    {
+      "id": "alias",
+      "status": "enforced",
+      "fixture": "checked-native/alias",
+      "guard": "source and destination ranges are rejected when overlap",
+      "fault_order": "reject_before_copy",
+      "evidence": "checked-driver output status=rejected-alias"
+    },
+    {
+      "id": "race",
+      "status": "enforced_for_admitted_api",
+      "fixture": "checked-native/race",
+      "guard": "atomic owner gate serializes load, borrow, read, copy, and close; generation changes surface stale views",
+      "fault_order": "serialize_or_reject_before_access",
+      "uncovered": "foreign threads that mutate raw pointers without the owner gate",
+      "evidence": "checked-driver concurrent mutator receipt"
+    },
+    {
+      "id": "optimizer",
+      "status": "conditional",
+      "fixture": "checked-native/optimizer",
+      "guard": "same adversarial cases are run against the declared compiler options and artifact digest",
+      "not_proven": "matching O0/O2 output is not a compiler proof and does not cover an unrecorded optimizer or LTO pass",
+      "evidence": "per-build compiler command, target, flags, and artifact identity"
+    },
+    {
+      "id": "assembly",
+      "status": "rejected",
+      "fixture": "checked-native/assembly",
+      "guard": "hand-written or inline assembly has no admitted checked entry point",
+      "fault_order": "typed rejection before foreign assembly invocation",
+      "evidence": "checked-driver output status=rejected-unchecked"
+    },
+    {
+      "id": "dynamic-link",
+      "status": "conditional_trusted",
+      "fixture": "checked-native/dynamic-link",
+      "guard": "dynamic loader and libc remain TRUSTED outside hardening; any accepted run must bind loaded artifact paths and hashes exactly",
+      "fault_order": "unknown or mismatched loaded artifact rejects before execution",
+      "evidence": "loaded artifact closure, loader identity, target, compiler, and dependency hashes"
+    },
+    {
+      "id": "allocator",
+      "status": "enforced_for_owned_document",
+      "fixture": "checked-native/allocator",
+      "guard": "document allocation and release stay inside one owner API; allocator mismatch is typed rejection",
+      "fault_order": "reject_before_foreign_free",
+      "uncovered": "a raw pointer allocated by an external allocator",
+      "evidence": "checked-driver output status=rejected-allocator"
+    }
+  ],
+  "uncovered_edges": [
+    {
+      "id": "pointer-provenance",
+      "status": "trusted_outside_hardening",
+      "reason": "C cannot establish that an arbitrary incoming address is mapped; descriptor capacity is a caller contract, not an OS memory proof.",
+      "required_action": "retain TRUSTED label or reject safe projection"
+    },
+    {
+      "id": "handwritten-assembly",
+      "status": "rejected",
+      "reason": "No assembly source is admitted by the checked profile."
+    },
+    {
+      "id": "unknown-dynamic-artifact",
+      "status": "rejected",
+      "reason": "A source/header match without loaded-artifact identity cannot reuse evidence."
+    },
+    {
+      "id": "raw-foreign-allocator",
+      "status": "trusted_outside_hardening",
+      "reason": "Only fa_document owns its allocator path."
+    },
+    {
+      "id": "ambient-host-read",
+      "status": "trusted_outside_hardening",
+      "reason": "The existing launcher restricts network and external writes but intentionally exposes the ambient read-only host view."
+    }
+  ],
+  "isolated_protocol": {
+    "schema": "fa-isolated-v1",
+    "header_bytes": 40,
+    "encoding": "little_endian",
+    "magic": "FAIS",
+    "version": 1,
+    "request": {
+      "kind": 1,
+      "request_id": "nonzero_u64",
+      "payload_length": "0..4096",
+      "status": 0,
+      "value": 0,
+      "checksum": "FNV-1a-64(payload)",
+      "payload": "copied bytes"
+    },
+    "response": {
+      "kind": "2 for success, 3 for typed error",
+      "request_id": "must match request on success",
+      "payload_length": 0,
+      "status": "typed status",
+      "value": "sum(payload) on success",
+      "checksum": "request checksum on success"
+    },
+    "validation_order": [
+      "magic",
+      "version",
+      "kind",
+      "request id and status",
+      "bounded payload length",
+      "payload copy",
+      "checksum",
+      "operation",
+      "response kind/status/length/id/checksum/value"
+    ]
+  },
+  "adversarial_cases": {
+    "checked-native": [
+      {"id": "valid", "input": "owned initialized document", "expected": "ok", "raw_expectation": "unrun"},
+      {"id": "spatial", "input": "forged length > owner capacity", "expected": "rejected-spatial before read", "raw_expectation": "unrun"},
+      {"id": "temporal", "input": "view after owner generation change", "expected": "rejected-temporal before read", "raw_expectation": "unrun"},
+      {"id": "initialization", "input": "borrow before load", "expected": "rejected-uninitialized before read", "raw_expectation": "unrun"},
+      {"id": "alias", "input": "destination overlaps source", "expected": "rejected-alias before copy", "raw_expectation": "unrun"},
+      {"id": "race", "input": "concurrent admitted load and view operations", "expected": "serialized or temporal rejection", "raw_expectation": "unrun"},
+      {"id": "optimizer", "input": "same valid and hostile corpus under declared optimization", "expected": "conditional receipt only", "raw_expectation": "unrun"},
+      {"id": "assembly", "input": "unadmitted assembly path", "expected": "rejected-unchecked before call", "raw_expectation": "unrun"},
+      {"id": "dynamic-link", "input": "unidentified loaded artifact", "expected": "rejected-unchecked before call", "raw_expectation": "unrun"},
+      {"id": "allocator", "input": "foreign allocator release request", "expected": "rejected-allocator before free", "raw_expectation": "unrun"}
+    ],
+    "isolated-binary": [
+      {"id": "valid", "input": "bounded sum request", "expected": "validated response", "raw_expectation": "unrun"},
+      {"id": "bad-magic", "input": "wrong magic", "expected": "typed error before payload access", "raw_expectation": "unrun"},
+      {"id": "bad-version", "input": "unsupported version", "expected": "typed error before payload access", "raw_expectation": "unrun"},
+      {"id": "bad-kind", "input": "unsupported message kind", "expected": "typed error before payload access", "raw_expectation": "unrun"},
+      {"id": "bad-length", "input": "payload length > 4096", "expected": "typed error before allocation/read", "raw_expectation": "unrun"},
+      {"id": "bad-checksum", "input": "copied payload with wrong checksum", "expected": "typed error before operation", "raw_expectation": "unrun"},
+      {"id": "wrong-result", "input": "response value mismatch", "expected": "host validation failure, not equivalence", "raw_expectation": "unrun"}
+    ]
+  },
+  "equivalence": {
+    "scope": "only the declared sum-bytes operation and explicit failure statuses",
+    "preserved": ["input bytes", "bounded length", "status kind", "result value", "checksum", "exit code for declared failure"],
+    "not_preserved_and_not_erased": ["pointer identity", "thread scheduling", "callback timing", "process identity", "allocator identity", "crash versus typed failure outside the protocol", "host ambient read authority"],
+    "rule": "A byte-equal result cannot make an unpreserved identity, scheduling, failure, or authority effect equivalent."
+  },
+  "evidence_contract": {
+    "schema": "jet.ffi-assurance-evidence.v1",
+    "each_receipt_must_bind": [
+      "profile",
+      "case",
+      "source_closure_sha256",
+      "native_artifact_sha256",
+      "artifact_size_bytes",
+      "compiler_command_and_version",
+      "target_os_and_arch",
+      "optimization_and_link_flags",
+      "loaded_dependency_paths_and_sha256",
+      "launcher_contract_and_sha256_when_isolated",
+      "authority_arguments",
+      "input_sha256",
+      "expected_output_or_failure_sha256",
+      "actual_output_or_failure_sha256"
+    ],
+    "unmatched_source_or_binary": "reject_evidence_reuse",
+    "missing_identity": "unmeasured_and_claim_blocked",
+    "status_labels": ["conditional", "trusted_outside_hardening", "rejected", "unrun"]
+  },
+  "metrics": {
+    "matched_workload": "sum-bytes",
+    "profiles": ["checked-native", "isolated-binary"],
+    "per_profile_and_case": true,
+    "no_aggregate": true,
+    "dimensions": [
+      {"id": "runtime", "unit": "nanoseconds", "source": "receipt.metrics.runtime_ns", "comparator_metric": "runtime"},
+      {"id": "build", "unit": "nanoseconds", "source": "build.receipt.metrics.build_ns", "comparator_metric": "build_time"},
+      {"id": "startup", "unit": "seconds", "source": "receipt.metrics.startup_ns / 1000000000", "comparator_metric": "runtime_first_stdout_seconds"},
+      {"id": "memory", "unit": "bytes", "source": "receipt.metrics.peak_rss_bytes", "comparator_metric": "memory"},
+      {"id": "copy", "unit": "count_and_time", "source": "receipt.metrics.copy_count and receipt.metrics.copy_ns", "comparator_metric": "deployment"},
+      {"id": "artifact", "unit": "bytes", "source": "receipt.metrics.artifact_size_bytes", "comparator_metric": "artifact_size"}
+    ],
+    "comparator_binding": {
+      "runner": "tools/ci/compiled-workload-runner.mjs",
+      "gauntlet_runner": "gauntlet/harness/run.mjs",
+      "adapter_output": "driver.mjs --comparator-plan",
+      "membership": "does_not_modify_existing_matrix_or_peer_rows",
+      "publication": "owner_must_add_a_canonical_entry_before_comparison_claims"
+    }
+  },
+  "commands": {
+    "plan": "node tools/agent-eval/ffi-assurance/driver.mjs --plan",
+    "build": "node tools/agent-eval/ffi-assurance/driver.mjs --build --out DIR",
+    "checked_run": "node tools/agent-eval/ffi-assurance/driver.mjs --run --profile checked-native --case CASE --out DIR",
+    "isolated_run": "JET_FFI_ASSURANCE_LAUNCHER=PATH node tools/agent-eval/ffi-assurance/driver.mjs --run --profile isolated-binary --case CASE --out DIR",
+    "jet_library": "node tools/agent-eval/ffi-assurance/driver.mjs --run-jet --out DIR",
+    "comparator_plan": "node tools/agent-eval/ffi-assurance/driver.mjs --comparator-plan"
+  }
+}

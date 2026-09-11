@@ -1,0 +1,64 @@
+// Generated opaque C handles stay checked at the Jet boundary. No raw-FFI
+// escape is needed for the zlib reader or the HarfBuzz shaper. A vendor
+// `zlib.h` is generated with `jet inspect bind <vendor-zlib.h> --pkg z`;
+// this minimal fixture is named `z.h` so the canonical `c.z` link key stays
+// declaration-driven.
+use "include/z.h" as zlib
+use "include/harfbuzz.h" as hb
+
+// The generated binder discovers this conventional close function too. The
+// explicit overlay marker demonstrates that a source overlay can name the
+// close contract when a vendor header does not use a conventional verb.
+#Import module c.harfbuzz {
+    #Close(hb_buffer_destroy)
+    fn hb_buffer_create() HbBuffer = "hb_buffer_create"
+}
+
+fn run() {
+    gzip :: zlib.gzopen("examples/features/foundations/bridges/sample.txt.gz", "rb")
+    bytes := [I8]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    expected := [I8]{99, 112, 112, 32, 98, 114, 105, 100, 103, 101, 32, 108, 105, 110, 101, 32}
+    read_count :: zlib.gzread(&gzip, &bytes, bytes.len())
+    if read_count != expected.len() -> panic("gzip fixture length changed")
+    if bytes != expected -> panic("gzip fixture decoded content changed")
+    print("gzip-bytes={read_count} decoded-ok={bytes == expected}")
+    // `^` consumes the generated #Close handle; scope cleanup must not close it
+    // a second time. Keep the native status visible for this explicit close.
+    close_status :: zlib.gzclose(^gzip)
+    if close_status != 0 -> panic("gzclose failed")
+
+    blob :: hb.hb_blob_create_from_file("site/assets/fonts/noto-sans-arabic-regular.ttf")
+    face :: hb.hb_face_create(&blob, 0)
+    font :: hb.hb_font_create(&face)
+    hb.hb_font_set_scale(&font, 2048, 2048)
+
+    buffer :: hb.hb_buffer_create()
+    text := [U32]{1587, 1604, 1575, 1605}
+    hb.hb_buffer_add_codepoints(&buffer, text, text.len(), 0, text.len())
+    hb.hb_buffer_guess_segment_properties(&buffer)
+    features := [hb.HbFeature]{}
+    hb.hb_shape(&font, &buffer, features, features.len())
+
+    // CBind carries each native `unsigned int *length` into the bounded list
+    // view returned with its const glyph pointer; no raw pointer indexing.
+    info_length := U32{0}
+    infos :: hb.hb_buffer_get_glyph_infos(&buffer, &info_length)
+    position_length := U32{0}
+    positions :: hb.hb_buffer_get_glyph_positions(&buffer, &position_length)
+    print("glyphs={info_length} position-len={position_length}")
+    zero :: U32{0}
+    if info_length > zero && position_length > zero {
+        if infos.get(0) == .Val(info) {
+            if positions.get(0) == .Val(position) {
+                print("glyph0={info.codepoint} xadvance={position.x_advance}")
+            }
+        }
+    }
+
+    // Close dependents before the handles they borrow; each `^` consumes one
+    // generated close contract exactly once.
+    hb.hb_buffer_destroy(^buffer)
+    hb.hb_font_destroy(^font)
+    hb.hb_face_destroy(^face)
+    hb.hb_blob_destroy(^blob)
+}

@@ -34,16 +34,16 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule names the effect or panic site and keeps the three legal exits</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">remove the offending effect, return a fallible result, add facts or a `#Pre`/refinement proof, or drop the prohibition</p>
+<p class="diag-copy fix" data-registry-field="fix">Remove the offending effect, return a fallible result, add facts or a `#Pre`/refinement proof, or drop the prohibition</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0749</code>: <code>tests/ui/crypto_expert_nonce_effect_prohibition_precedence.stderr</code>.</p>
-<pre class="diag">Error [E2402]: `?` can&#39;t convert `CryptoError` into `Err` — no declared conversion exists
+<pre class="diag">Error [E2402]: This implicit fallible call can&#39;t convert `CryptoError` into `Err` — no declared conversion exists
   --&gt; tests/ui/crypto_expert_nonce_effect_prohibition_precedence.jet:11:26
     |
  11 |         sealed :: expert.xchacha20poly1305_seal([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [next_byte()], [], [])
     |                          ^^^^^^^^^^^^^^^^^^^^^^
- Why: `?` uses the declared conversion rail; `CryptoError` can reach `Err` only through `impl CryptoError -&gt; Err`
- Fix: add `impl CryptoError -&gt; Err { … }` before this function, or change the return type
+ Why: Ordinary fallible calls propagate automatically; `CryptoError` can reach `Err` only through `impl CryptoError -&gt; Err`
+ Fix: Handle this call locally with `??`, add `impl CryptoError -&gt; Err { … }`, or change the return type
 More: jet-lang.dev/e/E2402
 
 Error [E0749]: `protect` reaches the `IO` effect, which it prohibits with `-[!IO]&gt;`
@@ -51,8 +51,8 @@ Error [E0749]: `protect` reaches the `IO` effect, which it prohibits with `-[!IO
     |
   9 | fn protect() Int -[!IO]&gt; {
     |                     ^^
- Why: a `-[!IO]&gt;` row means the function and every callee it can reach must not use `IO`
- Fix: remove the call that introduces `IO`, or drop the `-[!IO]&gt;` prohibition
+ Why: A `-[!IO]&gt;` row means the function and every callee it can reach must not use `IO`
+ Fix: Remove the call that introduces `IO`, or drop the `-[!IO]&gt;` prohibition
 More: jet-lang.dev/e/E0749
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

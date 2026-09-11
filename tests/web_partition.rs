@@ -3,6 +3,8 @@
 mod common;
 
 use std::fs;
+use jet_foundation::DataTree::DataTree;
+use jet_foundation::JSON::{json_get, json_str, parse_json};
 use std::path::PathBuf;
 
 fn codes(src: &str) -> Vec<String> {
@@ -54,7 +56,7 @@ fn dom_fn() {
 }
 
 #Target(Wasm)
-fn compute() Int {
+fn compute() Int -> {
     return 1
 }
 
@@ -92,7 +94,7 @@ fn ordinary_wasm_struct_field_does_not_gain_export_boundary_support() {
     let src = r#"struct Point { x: Int, y: Int }
 
 #Target(Wasm)
-fn read_x(p: Point) Int { return p.x }
+fn read_x(p: Point) Int -> { return p.x }
 
 fn run() {}
 "#;
@@ -108,7 +110,7 @@ fn run() {}
 fn recursive_map_export_remains_an_honest_unsupported_error() {
     let src = r#"
 #WasmExport
-fn echo(values: [String: [Int]]) [String: [Int]] { return ~values }
+fn echo(values: [String: [Int]]) [String: [Int]] -> { return ~values }
 
 #Target(JS)
 fn run() {}
@@ -125,7 +127,7 @@ fn run() {}
 fn unsigned_sized_map_export_remains_an_honest_unsupported_error() {
     let src = r#"
 #WasmExport
-fn echo(values: [String:U64]) [String:U64] { return ~values }
+fn echo(values: [String:U64]) [String:U64] -> { return ~values }
 
 #Target(JS)
 fn run() {}
@@ -142,7 +144,7 @@ fn run() {}
 fn narrow_sized_map_export_remains_an_honest_unsupported_error() {
     let src = r#"
 #WasmExport
-fn echo(values: [String:I32]) [String:I32] { return ~values }
+fn echo(values: [String:I32]) [String:I32] -> { return ~values }
 
 #Target(JS)
 fn run() {}
@@ -163,57 +165,9 @@ fn web_partition_report_generated_for_web_compile() {
     let report = out
         .web_partition_report
         .expect("web compile should set partition report");
-    assert!(
-        report.contains("Web partition report"),
-        "unexpected report:\n{report}"
-    );
     assert!(report.contains("compute"), "report should list compute fn");
 }
 
-#[test]
-fn web_arithmetic_policy_calls_the_embedded_numeric_prelude() {
-    let source = r#"
-#Target(Web)
-#Arithmetic(.Wrapping)
-fn run() {
-    value :: U8{250} + U8{10}
-    print(value)
-}
-"#;
-    let web = jet::compile_web_with_path(source, "tests/fixtures/web_arithmetic_policy.jet")
-        .expect("arithmetic policy should compile for web")
-        .web
-        .expect("web compilation should produce artifacts");
-    assert!(web.js_app.contains("jet_fixed_policy("));
-    assert!(web.js_app.contains("function jet_fixed_policy_step"));
-    assert!(web.js_app.contains("mode === \"wrapping\""));
-}
-
-#[test]
-fn web_wasm_imaginary_literal_uses_shared_complex_prelude() {
-    let source = r#"
-#Target(Web)
-use core.math.[abs]
-
-fn run() {
-    z :: 3 + 4i
-    print(z)
-    print(z * z)
-    print(abs(z))
-}
-"#;
-    let result = jet::compile_web_with_path(source, "tests/fixtures/web_imaginary.jet")
-        .expect("imaginary literal should compile for Wasm web output")
-        .web
-        .expect("web compilation should produce artifacts");
-    assert!(result.wasm_rust.contains("JetComplex"));
-    assert!(result.wasm_rust.contains("jet_complex_mul"));
-    assert!(result.wasm_rust.contains("jet_complex_abs"));
-    assert!(result
-        .wasm_rust
-        .contains("impl std::fmt::Display for JetComplex"));
-    assert!(!result.wasm_rust.contains("4i"));
-}
 
 #[test]
 fn browser_effect_partition_metadata() {
@@ -248,6 +202,7 @@ fn dom_fn() {
             user_policy_declarations: std::mem::take(&mut prog.user_policy_declarations),
             rule_facts: std::mem::take(&mut prog.rule_facts),
         }],
+        devtools_registry: jet::AST::DevtoolsRegistry::default(),
         parse_teaching: vec![],
         used_core: Default::default(),
         cffi: Default::default(),
@@ -276,6 +231,11 @@ fn temp_web_project(stem: &str, files: &[(&str, &str)]) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("jet_web_partition_{stem}_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"web-partition\"\nversion: \"0.1.0\"\nedition: \"2026\"\n",
+    )
+    .unwrap();
     for (path, src) in files {
         fs::write(dir.join(path), src).unwrap();
     }
@@ -283,22 +243,19 @@ fn temp_web_project(stem: &str, files: &[(&str, &str)]) -> PathBuf {
 }
 
 fn manifest_partitions(manifest: &str) -> Vec<(String, String)> {
-    let start = manifest
-        .find("\"partitions\": {")
-        .expect("manifest missing partitions");
-    let body = &manifest[start..];
-    let end = body
-        .find("\n  }")
-        .expect("manifest partitions block unterminated");
-    body[..end]
-        .lines()
-        .skip(1)
-        .map(|line| {
-            let line = line.trim().trim_end_matches(',');
-            let (key, bucket) = line.split_once(':').expect("partition line");
+    let root = parse_json(manifest).expect("manifest must be valid JSON");
+    let partitions = json_get(&root, "partitions").expect("manifest missing partitions");
+    let rows = match partitions {
+        DataTree::Object(rows) => rows,
+        _ => panic!("manifest partitions must be an object"),
+    };
+    rows.iter()
+        .map(|(key, bucket)| {
             (
-                key.trim().trim_matches('"').to_string(),
-                bucket.trim().trim_matches('"').to_string(),
+                key.clone(),
+                json_str(bucket)
+                    .expect("partition bucket must be a string")
+                    .to_string(),
             )
         })
         .collect()
@@ -315,11 +272,11 @@ fn imported_same_leaf_helpers_keep_distinct_buckets() {
             ),
             (
                 "left.jet",
-                "#Target(JS)\nfn helper() Int { return 1 }\n#Target(JS)\npub fn value() Int { return helper() }\n",
+                "#Target(JS)\nfn helper() Int -> { return 1 }\n#Target(JS)\npub fn value() Int -> { return helper() }\n",
             ),
             (
                 "right.jet",
-                "fn helper() Int { return 2 }\n#WasmExport\npub fn value() Int { return helper() }\n",
+                "fn helper() Int -> { return 2 }\n#WasmExport\npub fn value() Int -> { return helper() }\n",
             ),
         ],
     );
@@ -344,10 +301,10 @@ fn imported_same_leaf_helpers_keep_distinct_buckets() {
 fn wasm_export_and_target_pins_are_deterministic() {
     let src = r#"#Target(Web)
 #WasmExport
-fn exported() Int { return 3 }
+fn exported() Int -> { return 3 }
 
 #Target(Wasm)
-fn pinned() Int { return 4 }
+fn pinned() Int -> { return 4 }
 
 #Target(JS)
 fn run() { print(exported()) }

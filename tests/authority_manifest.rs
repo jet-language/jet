@@ -1,3 +1,5 @@
+mod common;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -89,11 +91,23 @@ fn run() {
         .lines()
         .find(|line| line.contains("\"kind\":\"delegation\""))
         .expect("default run should write a delegation receipt");
-    assert!(delegation.contains("\"scope\":\"authority@"), "{delegation}");
-    assert!(delegation.contains("\"resource\":\"process\""), "{delegation}");
+    assert!(
+        delegation.contains("\"scope\":\"authority@"),
+        "{delegation}"
+    );
+    assert!(
+        delegation.contains("\"resource\":\"process\""),
+        "{delegation}"
+    );
     assert!(delegation.contains("\"operation\":\"run\""), "{delegation}");
-    assert!(delegation.contains("\"source\":\"run.jet\""), "{delegation}");
-    assert!(delegation.contains("\"authority\":\"authority\""), "{delegation}");
+    assert!(
+        delegation.contains("\"source\":\"run.jet\""),
+        "{delegation}"
+    );
+    assert!(
+        delegation.contains("\"authority\":\"authority\""),
+        "{delegation}"
+    );
     assert!(
         delegation.contains("\"policy_source\":\"#FX; declared policy\""),
         "{delegation}"
@@ -153,10 +167,7 @@ fn run() {
 #[test]
 fn malformed_authority_fields_share_e1221() {
     let cases = [
-        (
-            "holds",
-            "authority: { holds: { allow: [NotAnAuthority] } }",
-        ),
+        ("holds", "authority: { holds: { allow: [NotAnAuthority] } }"),
         (
             "grants",
             "authority: { grants: { \"dep\": [NotAnAuthority] } }",
@@ -274,6 +285,7 @@ fn e1220_keeps_dependency_and_effect_provenance_after_key_move() {
     let entries = [jet::EffectBudget::PackageEffects {
         name: "netdep".to_string(),
         effects: jet::Sema::EffectSet::from(["Net".to_string()]),
+        effect_sites: std::collections::BTreeMap::new(),
         panic_sites: Vec::new(),
         boundary_span: Some(jet::Diagnostics::Span::new(4, 12)),
     }];
@@ -371,25 +383,6 @@ fn i9_sema_consumes_authority_holds() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-#[test]
-fn i9_tir_receives_the_authority_project() {
-    let root = authority_project("tir");
-    let entry = root.join("run.jet");
-    let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap())
-        .expect("TIR front end accepts authority project");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-    assert!(
-        diagnostics.is_empty(),
-        "TIR sema changed authority meaning: {diagnostics:#?}"
-    );
-    let program = jet::Codegen::TIR::lower_jit_program(&bundle)
-        .expect("authority project lowers through TIR");
-    let mut sink = jet::Comptime::DevSink::default();
-    jet::Codegen::TIR::run_named_func(&program, "run", Vec::new(), &mut sink)
-        .expect("authority project runs through TIR");
-    assert_eq!(sink.stdout, "authority\n");
-    let _ = std::fs::remove_dir_all(root);
-}
 
 #[test]
 fn i9_interpreter_runs_the_authority_project() {
@@ -403,7 +396,12 @@ fn i9_interpreter_runs_the_authority_project() {
         "interpreter sema changed authority meaning: {diagnostics:#?}"
     );
 
-    match jet::Interpreter::run_checked(&bundle, true) {
+    match common::run_interpreter_checked_bundle(
+        &bundle,
+        true,
+        jet::Interpreter::InterpreterInvocation::RunInterpret,
+        &common::development_policy(),
+    ) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,

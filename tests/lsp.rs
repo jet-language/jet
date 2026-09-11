@@ -11,7 +11,8 @@
 
 mod common;
 
-use jet_foundation::JSON::{json_get, json_str, parse_json, JSONValue};
+use jet_foundation::DataTree::DataTree;
+use jet_foundation::JSON::{json_get, json_str, parse_json};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -91,43 +92,48 @@ fn json_string(s: &str) -> String {
     out
 }
 
-fn json_object_field<'a>(value: &'a JSONValue, key: &str) -> &'a JSONValue {
+fn json_object_field<'a>(value: &'a DataTree, key: &str) -> &'a DataTree {
     json_get(value, key).unwrap_or_else(|| panic!("missing JSON field `{key}`"))
 }
 
-fn json_array<'a>(value: &'a JSONValue, context: &str) -> &'a [JSONValue] {
+fn json_array<'a>(value: &'a DataTree, context: &str) -> &'a [DataTree] {
     match value {
-        JSONValue::Array(values) => values,
+        DataTree::Array(values) => values,
         other => panic!("{context} is not an array: {other:?}"),
     }
 }
 
-fn json_array_field<'a>(value: &'a JSONValue, key: &str) -> &'a [JSONValue] {
+fn json_array_field<'a>(value: &'a DataTree, key: &str) -> &'a [DataTree] {
     json_array(
         json_object_field(value, key),
         &format!("JSON field `{key}`"),
     )
 }
 
-fn json_values_equal(left: &JSONValue, right: &JSONValue) -> bool {
+fn json_values_equal(left: &DataTree, right: &DataTree) -> bool {
     match (left, right) {
-        (JSONValue::Null, JSONValue::Null) => true,
-        (JSONValue::Bool(left), JSONValue::Bool(right)) => left == right,
-        (JSONValue::Number(left), JSONValue::Number(right)) => left == right,
-        (JSONValue::Flt(left), JSONValue::Flt(right)) => left == right,
-        (JSONValue::String(left), JSONValue::String(right)) => left == right,
-        (JSONValue::Array(left), JSONValue::Array(right)) => {
+        (DataTree::Null, DataTree::Null) => true,
+        (DataTree::Bool(left), DataTree::Bool(right)) => left == right,
+        (DataTree::Int(left), DataTree::Int(right)) => left == right,
+        (DataTree::Float(left), DataTree::Float(right)) => left == right,
+        (DataTree::Number(left), DataTree::Number(right)) => left == right,
+        (DataTree::Text(left) | DataTree::TypedText(left), DataTree::Text(right) | DataTree::TypedText(right)) => {
+            left == right
+        }
+        (DataTree::Bytes(left), DataTree::Bytes(right)) => left == right,
+        (DataTree::Array(left), DataTree::Array(right)) => {
             left.len() == right.len()
                 && left
                     .iter()
                     .zip(right)
                     .all(|(left, right)| json_values_equal(left, right))
         }
-        (JSONValue::Object(left), JSONValue::Object(right)) => {
+        (DataTree::Object(left), DataTree::Object(right)) => {
             left.len() == right.len()
                 && left.iter().all(|(key, left)| {
                     right
-                        .get(key)
+                        .iter()
+                        .find_map(|(right_key, right)| (right_key == key).then_some(right))
                         .is_some_and(|right| json_values_equal(left, right))
                 })
         }
@@ -135,7 +141,7 @@ fn json_values_equal(left: &JSONValue, right: &JSONValue) -> bool {
     }
 }
 
-fn assert_json_values_equal(label: &str, actual: &JSONValue, expected: &JSONValue) {
+fn assert_json_values_equal(label: &str, actual: &DataTree, expected: &DataTree) {
     assert!(
         json_values_equal(actual, expected),
         "{label}: actual={actual:?}, expected={expected:?}"
@@ -1546,7 +1552,7 @@ fn lsp_diagnostic_and_code_action_match_all_tier_reports() {
         "{diagnostics}"
     );
     assert!(
-        diagnostics.contains(r#""data":{"schema":"jet.report/v1""#),
+        diagnostics.contains(r#""data":{"schema":"jet.report/v2""#),
         "{diagnostics}"
     );
     assert!(

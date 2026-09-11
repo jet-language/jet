@@ -22,15 +22,25 @@ node ${CLAUDE_PLUGIN_ROOT}/tower.mjs help
 Alias once per session: `alias tower='node <path>/tower.mjs'`.
 No `plugins/tower/.tower/` yet → use the **tower-setup** skill.
 
+## Contract
+
+- **Requested outcome:** One requested Tower board operation, with state and authority kept truthful.
+- **Supplied inputs:** The user's board request, fresh Tower state, the card/decision context, and the owner guide plus nearest project rules.
+- **Allowed child result:** `tower-rank`, `tower-prep`, `tower-ballot`, `tower-burndown`, `tower-setup`, and `verify` may return only their declared queue, plan/ballot, closeout, setup, or proof result. They do not become a second board owner or create competing state.
+- **Completion owner:** `tower` owns board reads and writes; owner guidance owns shared dispatch, proof, and closure authority.
+- **Return point:** Each sibling handoff returns to the current board operation before the next phase or write.
+- **Stopping condition:** Stop after the requested board operation is recorded and read back. Do not jump from planning to implementation, start a server for the owner, or hand-edit Tower state.
+
 ## The one rule that governs everything
 
 **The owner's decisions are the only allowed bottleneck.** The owner must
-never wait on you for a plan or a decision writeup. Full ballots receive every
-required review pass; short ballots exist only on the owner's explicit request.
-Do plans and decision development
-eagerly; the owner only picks. There is no greenlight/activate gate — a
-fresh card lands straight in an agent lane; a ballot is the only way the
-owner confirms anything.
+never wait on you for a plan or a decision writeup. Full ballots receive the
+current two-reader review; short ballots are the default for one mechanism with
+at most three options. Use full for new syntax, invariant carve-outs, or cards
+the owner marks full.
+Do plans and decision development eagerly; the owner only picks. There is no
+greenlight/activate gate — a fresh card lands straight in an agent lane; a
+ballot is the only way the owner confirms anything.
 
 ## The model
 
@@ -50,35 +60,29 @@ everything as JSON; `tower status` is the human summary.
 
 ## Session loop
 
-1. `tower status` for the overview, then answer questions first
-   (`tower question list --open`).
-2. `tower brief --agent <me>` — one call replaces reading
-   `status`/`next`/`card show`/`decision show`/`question list` separately:
-   picks the top card by the canonical order (verify > building > implement >
-   plan, then lowest `workOrder`; respects `blockedBy` — never route
-   around a gate) and takes a renewable 24-hour work lease in the same step
-   (someone else holds an active lease → `E_CLAIMED`, pick another with
-   `tower brief '#N' --agent <me>`). Normal card writes by the holder renew
-   it. Expired leases never block selection or takeover; done and frozen
-   cards clear them.
-   The packet returned is everything needed to start: card, live blockers,
-   full criteria checklist, every linked decision copied verbatim, open
-   questions, refs, recent log, and the rules footer — no other reads
-   needed. Omit `--agent`, or add `--no-claim`, to read without claiming.
-   Release with `tower card release <#> --by <me>` if you stop — releasing a
-   card that's `building` needs `--handoff "what's done, what's left,
-   gotchas"` (`E_HANDOFF` otherwise) so the next agent isn't starting cold.
+1. `tower status` for the overview, then inspect open questions
+   (`tower question list --open`). Block only affected slices; continue independent work.
+2. `tower brief --agent <me>` picks the top card and takes a renewable
+   24-hour work lease. `E_CLAIMED` means another agent owns it. `E_CLOSE_READY`
+   means an actively claimed card already has every criterion met and no open
+   gate: close, reopen, or block that card before briefing anything else.
+   This barrier also applies to read-only briefs so work cannot silently move
+   past closure.
+   The packet contains card, live blockers, criteria, decisions, questions,
+   refs, recent log, and rules. Release unfinished `building` work with
+   `tower card release <#> --by <me> --handoff "done; left; gotchas"`.
 3. Do the work per the host repo's own conventions (its CLAUDE.md/AGENTS.md
-   rule the *how*; Tower rules the *what/when*).
-4. Advance with attribution:
+   rule the *how*; Tower rules the *what/when*). In orchestrated campaigns,
+   workers return `CHECK OK` or `DOCS ONLY` and never write Tower.
+4. The orchestrator advances with attribution:
    `tower card update <#> --phase building --log "started: X" --by <me>`.
    Phase honesty: `planning`→(`deciding` if decisions raised, else `ready`);
-   `ready`→`building`; `building`→`done` after the orchestrator confirms robust
-   observable criteria, concrete evidence, an integrated patch, and no known
-   contradictory blocker. The orchestrator records each criterion's evidence before
-   close.
-   A per-card reviewer, duplicate proof, and `--verify` step are not closure
-   requirements.
+   `ready`→`building`; after integration and the exact focused proof, mark
+   criteria `met`; then `building`→`done` as soon as every observable criterion
+   has concrete evidence and no contradictory blocker remains. Record the final
+   evidence, close immediately, then query `done` before another brief. No
+   per-card reviewer, duplicate proof, broad suite, or separate technical
+   verify step.
    **Owner verification is not technical review.** Do not leave technical cards
    sitting in `verify` for the owner. Use `verify` only when a card needs the owner's
    visual acceptance or an explicit closeout follow-up.
@@ -89,9 +93,12 @@ everything as JSON; `tower status` is the human summary.
    hardware/platforms/real environments. Never for tests, criteria, diffs,
    builds, or other machine-verifiable correctness. Give the owner only a brief
    observable look-and-feel checklist; omit machine-verification details.
-5. Report through the board itself: a `--log` entry on each card you advanced
-   and a question/ballot for anything newly blocked on the owner — those are
-   what the owner sees (live SSE UI — web push removed).
+   After all cards in a milestone close, commit the frozen source and run
+   `scripts/agent/closeout-gate.mjs open <milestone> --by <me>`. Broad proof
+   and `tower milestone verify` refuse without that commit-bound token.
+5. The orchestrator reports through the board itself: a `--log` entry on each
+   card advanced and a question/ballot for anything newly blocked on the owner.
+   Workers report only through their receipt or handoff.
 
 ## Multi-card campaigns + durability sweep (#457)
 
@@ -153,12 +160,14 @@ everything (bypass event-logged). Full table in the plugin's `AGENTS.md`; headli
 
 - `decision add` needs a plain-language ballot with
   gist/lesson/story/inWild/options[].code/rec plus structured recommendation
-  reasons for the winner and every loser. Full ballots also need ordered base,
-  boil-the-ocean, hybrid, cooperative, fresh-agent RLI5 beginner, and
-  rival-family adversarial summaries. Short ballots need the owner's quoted
-  request and must omit reviews. Use the `simple` skill for every user-visible
-  ballot field or `E_BALLOT` — save unfinished work with `--draft`, finish
-  later with `decision update <id> --ready`.
+  reasons for the winner and every loser. New full ballots need the base draft,
+  a fresh-agent RLI5 beginner pass, and a separate fresh-agent adversarial pass.
+  The adversarial reviewer may share the author's model family.
+  Stored process 2/3 ballots retain their historical six-pass records.
+  Short ballots are the default for one mechanism with at most three options,
+  omit reviews, and need no `shortAuthorizedBy`. Use the `simple` skill for
+  every user-visible ballot field or `E_BALLOT` — save unfinished work with
+  `--draft`, finish later with `decision update <id> --ready`.
 - `decision ratify` is owner-only (`E_OWNER_ONLY`) unless
   you pass `--quote "owner's words"` for an on-behalf-of action.
 - Any write to a frozen card is owner-only (`E_OWNER_LANE`); the owner moves
@@ -185,19 +194,19 @@ automatically once something isn't live any more.
 The board's open count is a promise. A stated remaining count that turns out to be far
 higher is the same failure as one that turns out to be far lower. Before `tower card add`:
 
-1. **Probe.** Re-run the failure. A cause already fixed means retarget or close the
-   existing card — never duplicate it.
-2. **Retarget over close-and-remint.** A test still red for a *new* reason keeps its card;
-   update title, body, and log. One card per persistent problem.
-3. **One card per work slice.** Defects one worker fixes in one pass with one proof run are
-   ONE card with a discrete criterion per defect. Log absorbed content on the survivor,
-   then `tower card delete` the folded duplicates. Grouping cuts dispatch, build, review,
-   and merge cost per defect.
-4. **Mint only separate, uncovered work** — and say plainly that you did.
+1. **Probe the named symptom once.** A cause already fixed closes or retargets the
+   current card; it never creates a duplicate.
+2. **Separate unrelated defects.** Add one deduplicated card and continue the current
+   card. Fix the new defect immediately only when it blocks the current criterion or
+   violates I1/I2 on that exact path.
+3. **Retarget only the same persistent problem.** A named symptom still red for a new
+   cause keeps its card. Do not absorb unrelated failures.
+4. **One card per worker-sized mechanism.** Group only work one bounded worker can fix
+   coherently with the same proof boundary.
+5. **Mint only separate, uncovered work** — and say plainly that you did.
 
-Never quote a scope number you have not measured; front-load discovery with one
-full-corpus census instead of streaming surprises card by card. `tower lint` reports
-board health; a rising open count during a burndown is a defect in the burndown.
+Never quote an unmeasured scope. A full-corpus census runs before a campaign or under
+a milestone closeout token, never inside the active close-and-refill loop.
 
 ## Non-negotiables
 

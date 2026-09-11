@@ -1,0 +1,31 @@
+// core-conformance: core.sync.condition_deadline
+// coverage: Condition.new, guard.wait, already-passed deadline, structured E3003
+// web: not-applicable (the web target has no browser scheduler)
+
+struct State {
+    ready: Bool
+}
+
+fn wait_for_deadline(state: Shared<State>, changed: Condition) {
+    guard :: state.guard_edit()
+    guard.wait(changed, value -> value.ready) ?? panic("wait failed")
+    panic("deadline wait completed")
+}
+
+fn run() {
+    state :: shared State{ready: false}
+    changed :: Condition.new()
+    #Context(deadline: 0) {
+        waiter :: task wait_for_deadline(state, changed)
+        outcome :: waiter.join()
+        if outcome == {
+            .Ok(_) -> print("deadline:unexpected-success")
+            .Err(error) -> {
+                if error == {
+                    .DeadlineBlown -> print("deadline:E3003")
+                    else -> print("deadline:wrong-failure")
+                }
+            }
+        }
+    }
+}

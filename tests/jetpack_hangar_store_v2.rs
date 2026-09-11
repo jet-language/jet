@@ -1,6 +1,7 @@
 //! E4-JP1 Hangar Store v2 — atomic ingest, path law (E1299), verify (E1315).
 
 use std::fs;
+use jet_foundation::DataTree::DataTree;
 use std::io::Write;
 use std::path::Path;
 use std::process::Stdio;
@@ -684,7 +685,7 @@ fn hangar_export_plan_does_not_create_archive_or_signer() {
     assert_eq!(json_string(&planned_report, "action"), "export");
     assert!(matches!(
         planned_report.get("applied").unwrap(),
-        jetpack::JSON::JSONValue::Bool(false)
+        DataTree::Bool(false)
     ));
     assert!(!archive.exists());
     assert!(!root.path.join("trust/hangar.key").exists());

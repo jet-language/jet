@@ -5,21 +5,18 @@ use crate::Codegen::mangle;
 use crate::Codegen::mangle_generated;
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::clone_env;
-use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::integer_bounds_for_expr;
-use crate::Codegen::TIR::TIntegerBounds;
 use crate::Codegen::TIR::label_name;
 use crate::Codegen::TIR::lower::collect_txn_mut_roots;
 use crate::Codegen::TIR::lower::encoding_reader_item_type;
 use crate::Codegen::TIR::lower::in_own_frame;
 use crate::Codegen::TIR::lower::lower_comptime_scalar;
+use crate::Codegen::TIR::lower::lower_discarded_expr;
 use crate::Codegen::TIR::lower::lower_lambda_with_shared_block;
 use crate::Codegen::TIR::lower::lower_panic_stop;
 use crate::Codegen::TIR::lower::lower_spawn_lambda_for_jit_with_shared_block;
 use crate::Codegen::TIR::lower::lower_string_view_init;
-use crate::Codegen::TIR::lower::lower_discarded_expr;
 use crate::Codegen::TIR::lower::reactive_block_env;
-use crate::Codegen::TIR::lower::render_reactive_block_closure;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_expr_as_mut_place;
 use crate::Codegen::TIR::lower_forin_collection;
@@ -31,14 +28,17 @@ use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::TIR::unit_type;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::ScopeMemberKind;
-use crate::Codegen::TIR::TCallArg;
-use crate::Codegen::TIR::TExpr;
-use crate::Codegen::TIR::TCoreClosureKind;
-use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::TBuiltinOp;
+use crate::Codegen::TIR::TCallArg;
+use crate::Codegen::TIR::TContract;
+use crate::Codegen::TIR::TCoreClosureKind;
+use crate::Codegen::TIR::TExpr;
+use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::TFnValueKind;
 use crate::Codegen::TIR::TForInMethod;
+use crate::Codegen::TIR::TIfCond;
 use crate::Codegen::TIR::TIndexFieldAssign;
+use crate::Codegen::TIR::TIntegerBounds;
 use crate::Codegen::TIR::TLetTy;
 use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TPattern;
@@ -46,17 +46,16 @@ use crate::Codegen::TIR::TPlace;
 use crate::Codegen::TIR::TRequireKind;
 use crate::Codegen::TIR::TStaticOwner;
 use crate::Codegen::TIR::TStmt;
+use jet_foundation::CanonicalPass;
 use crate::Codegen::TIR::TUnsafeGate;
 use crate::Codegen::TIR::TirWorklist;
-use crate::Codegen::TIR::TIfCond;
-use crate::Codegen::TIR::TContract;
- 
+
 #[cfg(test)]
 use crate::Diagnostics::Span;
 use crate::Syntax;
 use crate::AST::{
-    BindPattern, Expr, ForKind, IndexKind, LValue, OrFallback, PatSlot, Pattern, PlaceAccess, Stmt,
-    Type, UnOp,
+    BindPattern, Expr, ForKind, IndexKind, LValue, OrFallback, Pattern, PlaceAccess, Stmt, Type,
+    UnOp,
 };
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
@@ -68,14 +67,9 @@ use std::sync::Arc;
 pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
     fn walk_expr(node: &TExpr) -> bool {
         match &node.kind {
-            TExprKind::CoreCall {
-                module,
-                method,
-                args,
-                ..
-            } => {
-                (module == "core.mem"
-                    && method == "address_of"
+            TExprKind::CoreCall { record, args, .. } => {
+                (record.module == "core.mem"
+                    && record.member == "address_of"
                     && args.first().is_some_and(|arg| {
                         matches!(
                             tir_address_lifetime(arg),
@@ -126,15 +120,10 @@ pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
             } => walk_expr(lhs) || walk_expr(rhs),
             TExprKind::Unary { operand, .. }
             | TExprKind::LayoutLit { inner: operand }
-            | TExprKind::Borrow {
-                place: operand, ..
-            } => walk_expr(operand),
+            | TExprKind::Borrow { place: operand, .. } => walk_expr(operand),
             TExprKind::CompareChain { operands, .. } => operands.iter().any(walk_expr),
             TExprKind::UnitConvert { arg, rounding, .. } => {
-                walk_expr(arg)
-                    || rounding
-                        .as_ref()
-                        .is_some_and(|(_, value)| walk_expr(value))
+                walk_expr(arg) || rounding.as_ref().is_some_and(|(_, value)| walk_expr(value))
             }
             TExprKind::MathBuiltin { args, .. } | TExprKind::PreciseBuiltin { args, .. } => {
                 args.iter().any(walk_expr)
@@ -151,9 +140,7 @@ pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
             | TExprKind::TaskGroupRace { tasks: recv }
             | TExprKind::TaskGroupAny { tasks: recv } => walk_expr(recv),
             TExprKind::SharedGuardWait {
-                guard,
-                condition,
-                ..
+                guard, condition, ..
             } => walk_expr(guard) || walk_expr(condition),
             TExprKind::ConditionNotify { condition, .. } => walk_expr(condition),
             TExprKind::ListLit(values) | TExprKind::ColumnarListLit { elems: values, .. } => {
@@ -167,9 +154,7 @@ pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
             | TExprKind::ColumnarColumnRead { base, index, .. }
             | TExprKind::Index { base, index, .. }
             | TExprKind::IndexHook { base, index, .. }
-            | TExprKind::MathLaneIndex { base, index, .. } => {
-                walk_expr(base) || walk_expr(index)
-            }
+            | TExprKind::MathLaneIndex { base, index, .. } => walk_expr(base) || walk_expr(index),
             TExprKind::PoolSlot { pool, id, .. } => walk_expr(pool) || walk_expr(id),
             TExprKind::Slice {
                 base,
@@ -183,13 +168,10 @@ pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
                     || walk_expr(end)
                     || range.as_deref().is_some_and(walk_expr)
             }
-            TExprKind::MethodCall { recv, args, .. }
-            | TExprKind::FnFieldCall { recv, args, .. } => {
+            TExprKind::MethodCall { recv, args, .. } => {
                 walk_expr(recv) || args.iter().any(|arg| walk_expr(&arg.value))
             }
-            TExprKind::DecodeUnder { segment, inner } => {
-                walk_expr(segment) || walk_expr(inner)
-            }
+            TExprKind::DecodeUnder { segment, inner } => walk_expr(segment) || walk_expr(inner),
             TExprKind::BuiltinMethod { recv, args, .. }
             | TExprKind::ClosureMethod { recv, args, .. }
             | TExprKind::HandleMethod { recv, args, .. } => {
@@ -220,26 +202,18 @@ pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
                         _ => false,
                     }
             }
-            TExprKind::OptionLift2 { f, a, b } => {
-                walk_expr(f) || walk_expr(a) || walk_expr(b)
-            }
+            TExprKind::OptionLift2 { f, a, b } => walk_expr(f) || walk_expr(a) || walk_expr(b),
             TExprKind::HostBorrowCallback { callable, .. } => walk_expr(callable),
-            TExprKind::SelectRecv { builder, channel } => {
-                walk_expr(builder) || walk_expr(channel)
-            }
+            TExprKind::SelectRecv { builder, channel } => walk_expr(builder) || walk_expr(channel),
             TExprKind::SelectAfter {
                 builder,
                 duration,
                 value,
             } => {
-                walk_expr(builder)
-                    || walk_expr(duration)
-                    || value.as_deref().is_some_and(walk_expr)
+                walk_expr(builder) || walk_expr(duration) || value.as_deref().is_some_and(walk_expr)
             }
             TExprKind::SelectWait { builder, .. } => walk_expr(builder),
-            TExprKind::TupleLit { fields, .. } => {
-                fields.iter().any(|(_, value)| walk_expr(value))
-            }
+            TExprKind::TupleLit { fields, .. } => fields.iter().any(|(_, value)| walk_expr(value)),
             TExprKind::MapLit(fields) => fields
                 .iter()
                 .any(|(left, right)| walk_expr(left) || walk_expr(right)),
@@ -257,9 +231,7 @@ pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
             | TIfCond::IsNone { subj: value }
             | TIfCond::Matches { subj: value, .. } => walk_expr(value),
             TIfCond::And { left, right } => walk_cond(left) || walk_cond(right),
-            TIfCond::WithPrelude { prelude, cond } => {
-                walk_stmts(prelude) || walk_cond(cond)
-            }
+            TIfCond::WithPrelude { prelude, cond } => walk_stmts(prelude) || walk_cond(cond),
         }
     }
 
@@ -279,14 +251,14 @@ pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
             TStmt::Contract { contract } => walk_contract(contract),
             TStmt::ContractScope {
                 pre, body, post, ..
-            } => pre.iter().any(walk_contract) || walk_stmts(body) || post.iter().any(walk_contract),
+            } => {
+                pre.iter().any(walk_contract) || walk_stmts(body) || post.iter().any(walk_contract)
+            }
             TStmt::Let { init, .. }
             | TStmt::TupleDestructure { init, .. }
             | TStmt::StructDestructure { init, .. }
             | TStmt::ListDestructure { init, .. } => walk_expr(init),
-            TStmt::RefutableBind { init, fallback, .. } => {
-                walk_expr(init) || walk_stmts(fallback)
-            }
+            TStmt::RefutableBind { init, fallback, .. } => walk_expr(init) || walk_stmts(fallback),
             TStmt::GcEdit {
                 index_temp, stmt, ..
             } => {
@@ -294,7 +266,7 @@ pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
                     .as_ref()
                     .is_some_and(|(_, index)| walk_expr(index))
                     || walk_stmts(std::slice::from_ref(stmt.as_ref()))
-            },
+            }
             TStmt::SplitViews { owner, .. } => owner.as_ref().is_some_and(walk_expr),
             TStmt::Assign { place, value, .. } => walk_place(place) || walk_expr(value),
             TStmt::Return(value) => value.as_ref().is_some_and(walk_expr),
@@ -312,7 +284,7 @@ pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
                 walk_cond(cond)
                     || walk_stmts(then_body)
                     || else_body.as_ref().is_some_and(|body| walk_stmts(body))
-            },
+            }
             TStmt::Loop { body, .. }
             | TStmt::Inline(body)
             | TStmt::DebugOnly(body)
@@ -339,7 +311,7 @@ pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
                         .as_deref()
                         .is_some_and(|step| walk_stmts(std::slice::from_ref(step)))
                     || walk_stmts(body)
-            },
+            }
             TStmt::Range {
                 source,
                 start,
@@ -353,7 +325,7 @@ pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
                     || walk_expr(end)
                     || step.as_ref().is_some_and(walk_expr)
                     || walk_stmts(body)
-            },
+            }
             TStmt::BreakValue { value, .. } => walk_expr(value),
             TStmt::EnumMatch {
                 scrutinee,
@@ -364,7 +336,7 @@ pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
                 walk_expr(scrutinee)
                     || arms.iter().any(|arm| walk_stmts(&arm.body))
                     || else_body.as_ref().is_some_and(|body| walk_stmts(body))
-            },
+            }
             TStmt::RangeSwitch {
                 subject,
                 arms,
@@ -373,25 +345,17 @@ pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
                 walk_expr(subject)
                     || arms.iter().any(|(_, _, body)| walk_stmts(body))
                     || walk_stmts(else_body)
-            },
+            }
             TStmt::IndexAssign {
-                base,
-                index,
-                value,
-                ..
+                base, index, value, ..
             }
             | TStmt::IndexHookAssign {
-                base,
-                index,
-                value,
-                ..
+                base, index, value, ..
             } => walk_expr(base) || walk_expr(index) || walk_expr(value),
             TStmt::IndexFieldAssign(assign) => {
                 walk_expr(&assign.base) || walk_expr(&assign.index) || walk_expr(&assign.value)
             }
-            TStmt::MathSwizzleAssign { base, value, .. } => {
-                walk_expr(base) || walk_expr(value)
-            }
+            TStmt::MathSwizzleAssign { base, value, .. } => walk_expr(base) || walk_expr(value),
             TStmt::ForIn {
                 source,
                 collection,
@@ -403,7 +367,7 @@ pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
                     || walk_expr(collection)
                     || step.as_ref().is_some_and(walk_expr)
                     || walk_stmts(body)
-            },
+            }
             TStmt::MixedSwitch {
                 subject,
                 arms,
@@ -415,15 +379,17 @@ pub(crate) fn note_stack_sentry_in_tir(nodes: &[TStmt], env: &LowerEnv) {
                         .iter()
                         .any(|(condition, body)| walk_expr(condition) || walk_stmts(body))
                     || else_body.as_ref().is_some_and(|body| walk_stmts(body))
-            },
+            }
             TStmt::ContextBlock { guards, body } => {
                 guards.iter().any(|(_, value)| walk_expr(value)) || walk_stmts(body)
-            },
+            }
             TStmt::Reactive { .. }
             | TStmt::Break(_)
             | TStmt::Continue(_)
             | TStmt::LineMarker(_)
-            | TStmt::SourceSpan(_) => false,
+            | TStmt::SourceSpan(_)
+            | TStmt::Erased { .. }
+            | TStmt::InvariantViolation { .. } => false,
         })
     }
 
@@ -485,7 +451,7 @@ fn bake_comptime_value_with_type(
     }
 }
 
-fn interrupt_callback_ident(expr: &Expr) -> Option<&str> {
+fn thread_callback_ident(expr: &Expr) -> Option<&str> {
     let mut expr = expr;
     loop {
         match expr {
@@ -496,15 +462,15 @@ fn interrupt_callback_ident(expr: &Expr) -> Option<&str> {
     }
 }
 
-fn interrupt_lambda(expr: &Expr) -> Option<&crate::AST::Lambda> {
+fn thread_callback_lambda(expr: &Expr) -> Option<&crate::AST::Lambda> {
     match expr {
         Expr::Lambda(lam) => Some(lam),
-        Expr::Paren(inner, _) => interrupt_lambda(inner),
+        Expr::Paren(inner, _) => thread_callback_lambda(inner),
         _ => None,
     }
 }
 
-fn interrupt_lambda_captures(lam: &crate::AST::Lambda) -> HashSet<String> {
+fn thread_callback_lambda_captures(lam: &crate::AST::Lambda) -> HashSet<String> {
     match &lam.body {
         crate::AST::LambdaBody::Expr(body) => {
             crate::Sema::block_free_var_reads(&[Stmt::Expr((**body).clone())])
@@ -528,21 +494,21 @@ fn is_core_os_receiver(expr: &Expr, cx: &Cx) -> bool {
     }
 }
 
-enum InterruptScanTask<'a> {
+enum ThreadCallbackScanTask<'a> {
     Expr(&'a Expr),
     Stmts(&'a [Stmt]),
 }
 
-fn collect_interrupt_callback_names_expr(expr: &Expr, cx: &Cx, names: &mut HashSet<String>) {
-    collect_interrupt_callback_scan(InterruptScanTask::Expr(expr), cx, names);
+fn collect_thread_callback_names_expr(expr: &Expr, cx: &Cx, names: &mut HashSet<String>) {
+    collect_thread_callback_scan(ThreadCallbackScanTask::Expr(expr), cx, names);
 }
 
-fn collect_interrupt_callback_names(stmts: &[Stmt], cx: &Cx, names: &mut HashSet<String>) {
-    collect_interrupt_callback_scan(InterruptScanTask::Stmts(stmts), cx, names);
+fn collect_thread_callback_names(stmts: &[Stmt], cx: &Cx, names: &mut HashSet<String>) {
+    collect_thread_callback_scan(ThreadCallbackScanTask::Stmts(stmts), cx, names);
 }
 
-fn collect_interrupt_callback_scan(
-    root: InterruptScanTask<'_>,
+fn collect_thread_callback_scan(
+    root: ThreadCallbackScanTask<'_>,
     cx: &Cx,
     names: &mut HashSet<String>,
 ) {
@@ -550,38 +516,41 @@ fn collect_interrupt_callback_scan(
     work.push(root);
     while let Some(task) = work.pop() {
         match task {
-            InterruptScanTask::Expr(expr) => match expr {
+            ThreadCallbackScanTask::Expr(expr) => match expr {
                 Expr::MethodCall {
                     receiver,
                     method,
                     args,
                     ..
                 } => {
-                    if method == "on_interrupt" && is_core_os_receiver(receiver, cx) {
+                    let thread_callback =
+                        (method == "on_interrupt" && is_core_os_receiver(receiver, cx))
+                            || matches!(method.as_str(), "with_event_time" | "key_by");
+                    if thread_callback {
                         if let Some(callback) = args.first().map(|arg| &arg.expr) {
-                            if let Some(name) = interrupt_callback_ident(callback) {
+                            if let Some(name) = thread_callback_ident(callback) {
                                 names.insert(name.to_string());
                             }
-                            if let Some(lam) = interrupt_lambda(callback) {
-                                names.extend(interrupt_lambda_captures(lam));
+                            if let Some(lam) = thread_callback_lambda(callback) {
+                                names.extend(thread_callback_lambda_captures(lam));
                             }
                         }
                     }
                     for arg in args.iter().rev() {
-                        work.push(InterruptScanTask::Expr(&arg.expr));
+                        work.push(ThreadCallbackScanTask::Expr(&arg.expr));
                     }
-                    work.push(InterruptScanTask::Expr(receiver));
+                    work.push(ThreadCallbackScanTask::Expr(receiver));
                 }
                 Expr::Call(call) => {
                     for arg in call.args.iter().rev() {
-                        work.push(InterruptScanTask::Expr(&arg.expr));
+                        work.push(ThreadCallbackScanTask::Expr(&arg.expr));
                     }
                 }
                 Expr::CallValue { callee, args, .. } => {
                     for arg in args.iter().rev() {
-                        work.push(InterruptScanTask::Expr(&arg.expr));
+                        work.push(ThreadCallbackScanTask::Expr(&arg.expr));
                     }
-                    work.push(InterruptScanTask::Expr(callee));
+                    work.push(ThreadCallbackScanTask::Expr(callee));
                 }
                 // A normal lambda is its own function boundary. Its body gets one scan
                 // when that lambda is lowered; collecting/result loops are inline blocks
@@ -589,10 +558,10 @@ fn collect_interrupt_callback_scan(
                 Expr::Lambda(lam) if lam.meta.collecting_loop || lam.meta.result_loop => {
                     match &lam.body {
                         crate::AST::LambdaBody::Expr(body) => {
-                            work.push(InterruptScanTask::Expr(body));
+                            work.push(ThreadCallbackScanTask::Expr(body));
                         }
                         crate::AST::LambdaBody::Block(body) => {
-                            work.push(InterruptScanTask::Stmts(body));
+                            work.push(ThreadCallbackScanTask::Stmts(body));
                         }
                     }
                 }
@@ -609,40 +578,40 @@ fn collect_interrupt_callback_scan(
                 | Expr::Err(inner, _)
                 | Expr::Spread(inner, _)
                 | Expr::IncDec { operand: inner, .. } => {
-                    work.push(InterruptScanTask::Expr(inner));
+                    work.push(ThreadCallbackScanTask::Expr(inner));
                 }
                 Expr::Try(inner, _, _, note) => {
-                    work.push(InterruptScanTask::Expr(inner));
+                    work.push(ThreadCallbackScanTask::Expr(inner));
                     if let Some(note) = note {
-                        work.push(InterruptScanTask::Expr(note));
+                        work.push(ThreadCallbackScanTask::Expr(note));
                     }
                 }
                 Expr::Binary(_, left, right, _) => {
-                    work.push(InterruptScanTask::Expr(right));
-                    work.push(InterruptScanTask::Expr(left));
+                    work.push(ThreadCallbackScanTask::Expr(right));
+                    work.push(ThreadCallbackScanTask::Expr(left));
                 }
                 Expr::CompareChain { operands, .. } => {
                     for operand in operands.iter().rev() {
-                        work.push(InterruptScanTask::Expr(operand));
+                        work.push(ThreadCallbackScanTask::Expr(operand));
                     }
                 }
                 Expr::ListLit(items, _) => {
                     for item in items.iter().rev() {
-                        work.push(InterruptScanTask::Expr(item));
+                        work.push(ThreadCallbackScanTask::Expr(item));
                     }
                 }
                 Expr::MemberSpread { base, .. } => {
-                    work.push(InterruptScanTask::Expr(base));
+                    work.push(ThreadCallbackScanTask::Expr(base));
                 }
                 Expr::MapLit(entries, _) => {
                     for (key, value) in entries.iter().rev() {
-                        work.push(InterruptScanTask::Expr(value));
-                        work.push(InterruptScanTask::Expr(key));
+                        work.push(ThreadCallbackScanTask::Expr(value));
+                        work.push(ThreadCallbackScanTask::Expr(key));
                     }
                 }
                 Expr::Index { base, index, .. } => {
-                    work.push(InterruptScanTask::Expr(index));
-                    work.push(InterruptScanTask::Expr(base));
+                    work.push(ThreadCallbackScanTask::Expr(index));
+                    work.push(ThreadCallbackScanTask::Expr(base));
                 }
                 Expr::Slice {
                     base,
@@ -652,43 +621,43 @@ fn collect_interrupt_callback_scan(
                     ..
                 } => {
                     if let Some(range) = range {
-                        work.push(InterruptScanTask::Expr(range));
+                        work.push(ThreadCallbackScanTask::Expr(range));
                     }
-                    work.push(InterruptScanTask::Expr(end));
-                    work.push(InterruptScanTask::Expr(start));
-                    work.push(InterruptScanTask::Expr(base));
+                    work.push(ThreadCallbackScanTask::Expr(end));
+                    work.push(ThreadCallbackScanTask::Expr(start));
+                    work.push(ThreadCallbackScanTask::Expr(base));
                 }
                 Expr::Range { start, end, .. } => {
-                    work.push(InterruptScanTask::Expr(end));
-                    work.push(InterruptScanTask::Expr(start));
+                    work.push(ThreadCallbackScanTask::Expr(end));
+                    work.push(ThreadCallbackScanTask::Expr(start));
                 }
                 Expr::Field(base, _, _) | Expr::OptField { base, .. } => {
-                    work.push(InterruptScanTask::Expr(base));
+                    work.push(ThreadCallbackScanTask::Expr(base));
                 }
                 Expr::StructLit { fields, .. } => {
                     for (_, _, value) in fields.iter().rev() {
-                        work.push(InterruptScanTask::Expr(value));
+                        work.push(ThreadCallbackScanTask::Expr(value));
                     }
                 }
                 Expr::TypedLit { body, .. } => match body {
                     crate::AST::TypedLitBody::Fields(fields) => {
                         for (_, _, value) in fields.iter().rev() {
-                            work.push(InterruptScanTask::Expr(value));
+                            work.push(ThreadCallbackScanTask::Expr(value));
                         }
                     }
                     crate::AST::TypedLitBody::Elements(elements) => {
                         for value in elements.iter().rev() {
-                            work.push(InterruptScanTask::Expr(value));
+                            work.push(ThreadCallbackScanTask::Expr(value));
                         }
                     }
                     crate::AST::TypedLitBody::Entries(entries) => {
                         for (key, value) in entries.iter().rev() {
-                            work.push(InterruptScanTask::Expr(value));
-                            work.push(InterruptScanTask::Expr(key));
+                            work.push(ThreadCallbackScanTask::Expr(value));
+                            work.push(ThreadCallbackScanTask::Expr(key));
                         }
                     }
                     crate::AST::TypedLitBody::Value(value) => {
-                        work.push(InterruptScanTask::Expr(value));
+                        work.push(ThreadCallbackScanTask::Expr(value));
                     }
                     crate::AST::TypedLitBody::ByteText(_) => {}
                     crate::AST::TypedLitBody::Empty => {}
@@ -699,18 +668,18 @@ fn collect_interrupt_callback_scan(
                             crate::AST::EnumLitArg::Positional(value)
                             | crate::AST::EnumLitArg::Named { expr: value, .. } => value,
                         };
-                        work.push(InterruptScanTask::Expr(value));
+                        work.push(ThreadCallbackScanTask::Expr(value));
                     }
                 }
                 Expr::Str(parts, _) => {
                     for part in parts.iter().rev() {
                         if let crate::AST::StrPart::Interp(value, _) = part {
-                            work.push(InterruptScanTask::Expr(value));
+                            work.push(ThreadCallbackScanTask::Expr(value));
                         }
                     }
                 }
                 Expr::PatternTest { subject, .. } => {
-                    work.push(InterruptScanTask::Expr(subject));
+                    work.push(ThreadCallbackScanTask::Expr(subject));
                 }
                 Expr::If {
                     cond,
@@ -720,51 +689,51 @@ fn collect_interrupt_callback_scan(
                     else_value,
                     ..
                 } => {
-                    work.push(InterruptScanTask::Expr(else_value));
-                    work.push(InterruptScanTask::Stmts(else_body));
-                    work.push(InterruptScanTask::Expr(then_value));
-                    work.push(InterruptScanTask::Stmts(then_body));
-                    work.push(InterruptScanTask::Expr(cond));
+                    work.push(ThreadCallbackScanTask::Expr(else_value));
+                    work.push(ThreadCallbackScanTask::Stmts(else_body));
+                    work.push(ThreadCallbackScanTask::Expr(then_value));
+                    work.push(ThreadCallbackScanTask::Stmts(then_body));
+                    work.push(ThreadCallbackScanTask::Expr(cond));
                 }
                 Expr::TupleLit(fields, _, _) => {
                     for (_, value) in fields.iter().rev() {
-                        work.push(InterruptScanTask::Expr(value));
+                        work.push(ThreadCallbackScanTask::Expr(value));
                     }
                 }
                 Expr::PtrFromAddr { addr, .. } => {
-                    work.push(InterruptScanTask::Expr(addr));
+                    work.push(ThreadCallbackScanTask::Expr(addr));
                 }
                 Expr::OrFallback { value, .. } => {
-                    work.push(InterruptScanTask::Expr(value));
+                    work.push(ThreadCallbackScanTask::Expr(value));
                 }
                 _ => {}
             },
-            InterruptScanTask::Stmts(stmts) => {
+            ThreadCallbackScanTask::Stmts(stmts) => {
                 for stmt in stmts.iter().rev() {
                     match stmt {
                         Stmt::Expr(expr) | Stmt::DeferClose { close: expr, .. } => {
-                            work.push(InterruptScanTask::Expr(expr))
+                            work.push(ThreadCallbackScanTask::Expr(expr))
                         }
                         Stmt::Val(binding) => {
-                            work.push(InterruptScanTask::Expr(&binding.init));
+                            work.push(ThreadCallbackScanTask::Expr(&binding.init));
                         }
                         Stmt::Assign { value, .. } => {
-                            work.push(InterruptScanTask::Expr(value));
+                            work.push(ThreadCallbackScanTask::Expr(value));
                         }
                         Stmt::Return(Some(value), _) | Stmt::Yield(value, _) => {
-                            work.push(InterruptScanTask::Expr(value));
+                            work.push(ThreadCallbackScanTask::Expr(value));
                         }
                         Stmt::While { cond, body, .. } => {
-                            work.push(InterruptScanTask::Stmts(body));
-                            work.push(InterruptScanTask::Expr(cond));
+                            work.push(ThreadCallbackScanTask::Stmts(body));
+                            work.push(ThreadCallbackScanTask::Expr(cond));
                         }
                         Stmt::For { kind, body, .. } => {
-                            work.push(InterruptScanTask::Stmts(body));
+                            work.push(ThreadCallbackScanTask::Stmts(body));
                             if let ForKind::In { collection, step } = kind {
                                 if let Some(step) = step {
-                                    work.push(InterruptScanTask::Expr(step));
+                                    work.push(ThreadCallbackScanTask::Expr(step));
                                 }
-                                work.push(InterruptScanTask::Expr(collection));
+                                work.push(ThreadCallbackScanTask::Expr(collection));
                             }
                         }
                         Stmt::Switch {
@@ -774,13 +743,13 @@ fn collect_interrupt_callback_scan(
                             ..
                         } => {
                             if let Some(body) = else_body {
-                                work.push(InterruptScanTask::Stmts(body));
+                                work.push(ThreadCallbackScanTask::Stmts(body));
                             }
                             for arm in arms.iter().rev() {
-                                work.push(InterruptScanTask::Stmts(&arm.body));
-                                work.push(InterruptScanTask::Expr(&arm.cond));
+                                work.push(ThreadCallbackScanTask::Stmts(&arm.body));
+                                work.push(ThreadCallbackScanTask::Expr(&arm.cond));
                             }
-                            work.push(InterruptScanTask::Expr(subject));
+                            work.push(ThreadCallbackScanTask::Expr(subject));
                         }
                         Stmt::Loop { body, .. }
                         | Stmt::Unsafe { body, .. }
@@ -798,7 +767,7 @@ fn collect_interrupt_callback_scan(
                         | Stmt::AssumeDet { body, .. }
                         | Stmt::Transact { body, .. }
                         | Stmt::ComptimeBlock { body, .. } => {
-                            work.push(InterruptScanTask::Stmts(body));
+                            work.push(ThreadCallbackScanTask::Stmts(body));
                         }
                         Stmt::CountedLoop {
                             init,
@@ -807,14 +776,14 @@ fn collect_interrupt_callback_scan(
                             body,
                             ..
                         } => {
-                            work.push(InterruptScanTask::Stmts(body));
+                            work.push(ThreadCallbackScanTask::Stmts(body));
                             if let Some(step) = step {
-                                work.push(InterruptScanTask::Stmts(std::slice::from_ref(
+                                work.push(ThreadCallbackScanTask::Stmts(std::slice::from_ref(
                                     step.as_ref(),
                                 )));
                             }
-                            work.push(InterruptScanTask::Expr(cond));
-                            work.push(InterruptScanTask::Expr(&init.init));
+                            work.push(ThreadCallbackScanTask::Expr(cond));
+                            work.push(ThreadCallbackScanTask::Expr(&init.init));
                         }
                         Stmt::ComptimeIf {
                             cond,
@@ -823,15 +792,15 @@ fn collect_interrupt_callback_scan(
                             ..
                         } => {
                             if let Some(body) = else_body {
-                                work.push(InterruptScanTask::Stmts(body));
+                                work.push(ThreadCallbackScanTask::Stmts(body));
                             }
-                            work.push(InterruptScanTask::Stmts(then_body));
-                            work.push(InterruptScanTask::Expr(cond));
+                            work.push(ThreadCallbackScanTask::Stmts(then_body));
+                            work.push(ThreadCallbackScanTask::Expr(cond));
                         }
                         Stmt::ScopeMember { args, body, .. } => {
-                            work.push(InterruptScanTask::Stmts(body));
+                            work.push(ThreadCallbackScanTask::Stmts(body));
                             for arg in args.iter().rev() {
-                                work.push(InterruptScanTask::Expr(arg));
+                                work.push(ThreadCallbackScanTask::Expr(arg));
                             }
                         }
                         Stmt::ComptimeSwitch {
@@ -841,12 +810,12 @@ fn collect_interrupt_callback_scan(
                             ..
                         } => {
                             if let Some(body) = else_body {
-                                work.push(InterruptScanTask::Stmts(body));
+                                work.push(ThreadCallbackScanTask::Stmts(body));
                             }
                             for arm in arms.iter().rev() {
-                                work.push(InterruptScanTask::Stmts(&arm.body));
+                                work.push(ThreadCallbackScanTask::Stmts(&arm.body));
                             }
-                            work.push(InterruptScanTask::Expr(subject));
+                            work.push(ThreadCallbackScanTask::Expr(subject));
                         }
                         _ => {}
                     }
@@ -856,27 +825,27 @@ fn collect_interrupt_callback_scan(
     }
 }
 
-fn collect_interrupt_aliases_expr(expr: &Expr, aliases: &mut Vec<(String, String)>) {
+fn collect_thread_aliases_expr(expr: &Expr, aliases: &mut Vec<(String, String)>) {
     match expr {
         Expr::Lambda(lambda) => match &lambda.body {
-            crate::AST::LambdaBody::Expr(body) => collect_interrupt_aliases_expr(body, aliases),
-            crate::AST::LambdaBody::Block(body) => collect_interrupt_aliases(body, aliases),
+            crate::AST::LambdaBody::Expr(body) => collect_thread_aliases_expr(body, aliases),
+            crate::AST::LambdaBody::Block(body) => collect_thread_aliases(body, aliases),
         },
         Expr::MethodCall { receiver, args, .. } => {
-            collect_interrupt_aliases_expr(receiver, aliases);
+            collect_thread_aliases_expr(receiver, aliases);
             for arg in args {
-                collect_interrupt_aliases_expr(&arg.expr, aliases);
+                collect_thread_aliases_expr(&arg.expr, aliases);
             }
         }
         Expr::Call(call) => {
             for arg in &call.args {
-                collect_interrupt_aliases_expr(&arg.expr, aliases);
+                collect_thread_aliases_expr(&arg.expr, aliases);
             }
         }
         Expr::CallValue { callee, args, .. } => {
-            collect_interrupt_aliases_expr(callee, aliases);
+            collect_thread_aliases_expr(callee, aliases);
             for arg in args {
-                collect_interrupt_aliases_expr(&arg.expr, aliases);
+                collect_thread_aliases_expr(&arg.expr, aliases);
             }
         }
         Expr::If {
@@ -887,11 +856,11 @@ fn collect_interrupt_aliases_expr(expr: &Expr, aliases: &mut Vec<(String, String
             else_value,
             ..
         } => {
-            collect_interrupt_aliases_expr(cond, aliases);
-            collect_interrupt_aliases(then_body, aliases);
-            collect_interrupt_aliases_expr(then_value, aliases);
-            collect_interrupt_aliases(else_body, aliases);
-            collect_interrupt_aliases_expr(else_value, aliases);
+            collect_thread_aliases_expr(cond, aliases);
+            collect_thread_aliases(then_body, aliases);
+            collect_thread_aliases_expr(then_value, aliases);
+            collect_thread_aliases(else_body, aliases);
+            collect_thread_aliases_expr(else_value, aliases);
         }
         Expr::Paren(inner, _)
         | Expr::Unary(_, inner, _)
@@ -904,44 +873,44 @@ fn collect_interrupt_aliases_expr(expr: &Expr, aliases: &mut Vec<(String, String
         | Expr::Ok(inner, _)
         | Expr::Err(inner, _)
         | Expr::Spread(inner, _)
-        | Expr::IncDec { operand: inner, .. } => collect_interrupt_aliases_expr(inner, aliases),
+        | Expr::IncDec { operand: inner, .. } => collect_thread_aliases_expr(inner, aliases),
         Expr::Try(inner, _, _, note) => {
-            collect_interrupt_aliases_expr(inner, aliases);
+            collect_thread_aliases_expr(inner, aliases);
             if let Some(note) = note {
-                collect_interrupt_aliases_expr(note, aliases);
+                collect_thread_aliases_expr(note, aliases);
             }
         }
         _ => {}
     }
 }
 
-fn collect_interrupt_aliases(stmts: &[Stmt], aliases: &mut Vec<(String, String)>) {
+fn collect_thread_aliases(stmts: &[Stmt], aliases: &mut Vec<(String, String)>) {
     let mut work = TirWorklist::new();
     work.push(stmts);
     while let Some(stmts) = work.pop() {
         for stmt in stmts {
             match stmt {
                 Stmt::Val(binding) => {
-                    if let Some(source) = interrupt_callback_ident(&binding.init) {
+                    if let Some(source) = thread_callback_ident(&binding.init) {
                         aliases.push((binding.name.clone(), source.to_string()));
                     }
-                    collect_interrupt_aliases_expr(&binding.init, aliases);
+                    collect_thread_aliases_expr(&binding.init, aliases);
                 }
                 Stmt::CountedLoop {
                     init, step, body, ..
                 } => {
-                    if let Some(source) = interrupt_callback_ident(&init.init) {
+                    if let Some(source) = thread_callback_ident(&init.init) {
                         aliases.push((init.name.clone(), source.to_string()));
                     }
-                    collect_interrupt_aliases_expr(&init.init, aliases);
+                    collect_thread_aliases_expr(&init.init, aliases);
                     if let Some(step) = step.as_deref() {
                         if let Stmt::Assign { target, value, .. } = step {
                             if let LValue::Local { name, .. } = target {
-                                if let Some(source) = interrupt_callback_ident(value) {
+                                if let Some(source) = thread_callback_ident(value) {
                                     aliases.push((name.clone(), source.to_string()));
                                 }
                             }
-                            collect_interrupt_aliases_expr(value, aliases);
+                            collect_thread_aliases_expr(value, aliases);
                         }
                     }
                     work.push(body);
@@ -996,49 +965,49 @@ fn collect_interrupt_aliases(stmts: &[Stmt], aliases: &mut Vec<(String, String)>
                     }
                 }
                 Stmt::Expr(expr) | Stmt::DeferClose { close: expr, .. } => {
-                    collect_interrupt_aliases_expr(expr, aliases)
+                    collect_thread_aliases_expr(expr, aliases)
                 }
                 Stmt::Assign { target, value, .. } => {
                     if let LValue::Local { name, .. } = target {
-                        if let Some(source) = interrupt_callback_ident(value) {
+                        if let Some(source) = thread_callback_ident(value) {
                             aliases.push((name.clone(), source.to_string()));
                         }
                     }
-                    collect_interrupt_aliases_expr(value, aliases);
+                    collect_thread_aliases_expr(value, aliases);
                 }
                 Stmt::Return(Some(value), _) | Stmt::Yield(value, _) => {
-                    collect_interrupt_aliases_expr(value, aliases)
+                    collect_thread_aliases_expr(value, aliases)
                 }
                 _ => {}
             }
         }
     }
 }
-fn collect_interrupt_lambda_captures_expr(expr: &Expr, captures: &mut Vec<(String, String)>) {
+fn collect_thread_lambda_captures_expr(expr: &Expr, captures: &mut Vec<(String, String)>) {
     match expr {
         Expr::Lambda(lambda) => match &lambda.body {
             crate::AST::LambdaBody::Expr(body) => {
-                collect_interrupt_lambda_captures_expr(body, captures)
+                collect_thread_lambda_captures_expr(body, captures)
             }
             crate::AST::LambdaBody::Block(body) => {
-                collect_interrupt_lambda_captures(body, captures)
+                collect_thread_lambda_captures(body, captures)
             }
         },
         Expr::MethodCall { receiver, args, .. } => {
-            collect_interrupt_lambda_captures_expr(receiver, captures);
+            collect_thread_lambda_captures_expr(receiver, captures);
             for arg in args {
-                collect_interrupt_lambda_captures_expr(&arg.expr, captures);
+                collect_thread_lambda_captures_expr(&arg.expr, captures);
             }
         }
         Expr::Call(call) => {
             for arg in &call.args {
-                collect_interrupt_lambda_captures_expr(&arg.expr, captures);
+                collect_thread_lambda_captures_expr(&arg.expr, captures);
             }
         }
         Expr::CallValue { callee, args, .. } => {
-            collect_interrupt_lambda_captures_expr(callee, captures);
+            collect_thread_lambda_captures_expr(callee, captures);
             for arg in args {
-                collect_interrupt_lambda_captures_expr(&arg.expr, captures);
+                collect_thread_lambda_captures_expr(&arg.expr, captures);
             }
         }
         Expr::If {
@@ -1049,11 +1018,11 @@ fn collect_interrupt_lambda_captures_expr(expr: &Expr, captures: &mut Vec<(Strin
             else_value,
             ..
         } => {
-            collect_interrupt_lambda_captures_expr(cond, captures);
-            collect_interrupt_lambda_captures(then_body, captures);
-            collect_interrupt_lambda_captures_expr(then_value, captures);
-            collect_interrupt_lambda_captures(else_body, captures);
-            collect_interrupt_lambda_captures_expr(else_value, captures);
+            collect_thread_lambda_captures_expr(cond, captures);
+            collect_thread_lambda_captures(then_body, captures);
+            collect_thread_lambda_captures_expr(then_value, captures);
+            collect_thread_lambda_captures(else_body, captures);
+            collect_thread_lambda_captures_expr(else_value, captures);
         }
         Expr::Paren(inner, _)
         | Expr::Unary(_, inner, _)
@@ -1067,67 +1036,67 @@ fn collect_interrupt_lambda_captures_expr(expr: &Expr, captures: &mut Vec<(Strin
         | Expr::Err(inner, _)
         | Expr::Spread(inner, _)
         | Expr::IncDec { operand: inner, .. } => {
-            collect_interrupt_lambda_captures_expr(inner, captures)
+            collect_thread_lambda_captures_expr(inner, captures)
         }
         Expr::Try(inner, _, _, note) => {
-            collect_interrupt_lambda_captures_expr(inner, captures);
+            collect_thread_lambda_captures_expr(inner, captures);
             if let Some(note) = note {
-                collect_interrupt_lambda_captures_expr(note, captures);
+                collect_thread_lambda_captures_expr(note, captures);
             }
         }
         _ => {}
     }
 }
 
-fn collect_interrupt_lambda_captures(stmts: &[Stmt], captures: &mut Vec<(String, String)>) {
+fn collect_thread_lambda_captures(stmts: &[Stmt], captures: &mut Vec<(String, String)>) {
     for stmt in stmts {
         match stmt {
             Stmt::Val(binding) => {
-                if let Some(lam) = interrupt_lambda(&binding.init) {
-                    for capture in interrupt_lambda_captures(lam) {
+                if let Some(lam) = thread_callback_lambda(&binding.init) {
+                    for capture in thread_callback_lambda_captures(lam) {
                         captures.push((binding.name.clone(), capture));
                     }
                 }
-                collect_interrupt_lambda_captures_expr(&binding.init, captures);
+                collect_thread_lambda_captures_expr(&binding.init, captures);
             }
             Stmt::Expr(expr) | Stmt::DeferClose { close: expr, .. } => {
-                collect_interrupt_lambda_captures_expr(expr, captures)
+                collect_thread_lambda_captures_expr(expr, captures)
             }
             Stmt::Assign { target, value, .. } => {
                 if let LValue::Local { name, .. } = target {
-                    if let Some(lam) = interrupt_lambda(value) {
-                        for capture in interrupt_lambda_captures(lam) {
+                    if let Some(lam) = thread_callback_lambda(value) {
+                        for capture in thread_callback_lambda_captures(lam) {
                             captures.push((name.clone(), capture));
                         }
                     }
                 }
-                collect_interrupt_lambda_captures_expr(value, captures);
+                collect_thread_lambda_captures_expr(value, captures);
             }
             Stmt::Return(Some(value), _) | Stmt::Yield(value, _) => {
-                collect_interrupt_lambda_captures_expr(value, captures)
+                collect_thread_lambda_captures_expr(value, captures)
             }
             Stmt::CountedLoop {
                 init, step, body, ..
             } => {
-                if let Some(lam) = interrupt_lambda(&init.init) {
-                    for capture in interrupt_lambda_captures(lam) {
+                if let Some(lam) = thread_callback_lambda(&init.init) {
+                    for capture in thread_callback_lambda_captures(lam) {
                         captures.push((init.name.clone(), capture));
                     }
                 }
-                collect_interrupt_lambda_captures_expr(&init.init, captures);
+                collect_thread_lambda_captures_expr(&init.init, captures);
                 if let Some(step) = step.as_deref() {
                     if let Stmt::Assign { target, value, .. } = step {
                         if let LValue::Local { name, .. } = target {
-                            if let Some(lam) = interrupt_lambda(value) {
-                                for capture in interrupt_lambda_captures(lam) {
+                            if let Some(lam) = thread_callback_lambda(value) {
+                                for capture in thread_callback_lambda_captures(lam) {
                                     captures.push((name.clone(), capture));
                                 }
                             }
                         }
-                        collect_interrupt_lambda_captures_expr(value, captures);
+                        collect_thread_lambda_captures_expr(value, captures);
                     }
                 }
-                collect_interrupt_lambda_captures(body, captures);
+                collect_thread_lambda_captures(body, captures);
             }
             Stmt::While { body, .. }
             | Stmt::For { body, .. }
@@ -1146,15 +1115,15 @@ fn collect_interrupt_lambda_captures(stmts: &[Stmt], captures: &mut Vec<(String,
             | Stmt::Live { body, .. }
             | Stmt::AssumeDet { body, .. }
             | Stmt::Transact { body, .. }
-            | Stmt::ComptimeBlock { body, .. } => collect_interrupt_lambda_captures(body, captures),
+            | Stmt::ComptimeBlock { body, .. } => collect_thread_lambda_captures(body, captures),
             Stmt::Switch {
                 arms, else_body, ..
             } => {
                 for arm in arms {
-                    collect_interrupt_lambda_captures(&arm.body, captures);
+                    collect_thread_lambda_captures(&arm.body, captures);
                 }
                 if let Some(body) = else_body {
-                    collect_interrupt_lambda_captures(body, captures);
+                    collect_thread_lambda_captures(body, captures);
                 }
             }
             Stmt::ComptimeIf {
@@ -1162,20 +1131,20 @@ fn collect_interrupt_lambda_captures(stmts: &[Stmt], captures: &mut Vec<(String,
                 else_body,
                 ..
             } => {
-                collect_interrupt_lambda_captures(then_body, captures);
+                collect_thread_lambda_captures(then_body, captures);
                 if let Some(body) = else_body {
-                    collect_interrupt_lambda_captures(body, captures);
+                    collect_thread_lambda_captures(body, captures);
                 }
             }
-            Stmt::ScopeMember { body, .. } => collect_interrupt_lambda_captures(body, captures),
+            Stmt::ScopeMember { body, .. } => collect_thread_lambda_captures(body, captures),
             Stmt::ComptimeSwitch {
                 arms, else_body, ..
             } => {
                 for arm in arms {
-                    collect_interrupt_lambda_captures(&arm.body, captures);
+                    collect_thread_lambda_captures(&arm.body, captures);
                 }
                 if let Some(body) = else_body {
-                    collect_interrupt_lambda_captures(body, captures);
+                    collect_thread_lambda_captures(body, captures);
                 }
             }
             _ => {}
@@ -1184,13 +1153,21 @@ fn collect_interrupt_lambda_captures(stmts: &[Stmt], captures: &mut Vec<(String,
 }
 
 pub(super) fn prepare_interrupt_callback_locals(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) {
+    prepare_thread_callback_locals(stmts, cx, env)
+}
+
+pub(super) fn prepare_interrupt_callback_local_expr(expr: &Expr, cx: &Cx, env: &mut LowerEnv) {
+    prepare_thread_callback_local_expr(expr, cx, env)
+}
+
+pub(super) fn prepare_thread_callback_locals(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) {
     let mut names = HashSet::new();
-    collect_interrupt_callback_names(stmts, cx, &mut names);
+    collect_thread_callback_names(stmts, cx, &mut names);
     let mut send = names;
     let mut aliases = Vec::new();
-    collect_interrupt_aliases(stmts, &mut aliases);
+    collect_thread_aliases(stmts, &mut aliases);
     let mut lambda_captures = Vec::new();
-    collect_interrupt_lambda_captures(stmts, &mut lambda_captures);
+    collect_thread_lambda_captures(stmts, &mut lambda_captures);
     loop {
         let before = send.len();
         for (target, source) in &aliases {
@@ -1215,13 +1192,13 @@ pub(super) fn prepare_interrupt_callback_locals(stmts: &[Stmt], cx: &Cx, env: &m
     }
 }
 
-pub(super) fn prepare_interrupt_callback_local_expr(expr: &Expr, cx: &Cx, env: &mut LowerEnv) {
+pub(super) fn prepare_thread_callback_local_expr(expr: &Expr, cx: &Cx, env: &mut LowerEnv) {
     let mut names = HashSet::new();
-    collect_interrupt_callback_names_expr(expr, cx, &mut names);
+    collect_thread_callback_names_expr(expr, cx, &mut names);
     let mut aliases = Vec::new();
-    collect_interrupt_aliases_expr(expr, &mut aliases);
+    collect_thread_aliases_expr(expr, &mut aliases);
     let mut lambda_captures = Vec::new();
-    collect_interrupt_lambda_captures_expr(expr, &mut lambda_captures);
+    collect_thread_lambda_captures_expr(expr, &mut lambda_captures);
     loop {
         let before = names.len();
         for (target, source) in &aliases {
@@ -1246,11 +1223,11 @@ pub(super) fn prepare_interrupt_callback_local_expr(expr: &Expr, cx: &Cx, env: &
     }
 }
 
-fn force_interrupt_callback_value(mut init: TExpr, cx: &Cx) -> TExpr {
+pub(crate) fn force_thread_callback_value(mut init: TExpr, _cx: &Cx) -> TExpr {
     if matches!(
         &init.kind,
         TExprKind::FnValue {
-            kind: TFnValueKind::Interrupt { .. },
+            kind: TFnValueKind::Send { .. },
         }
     ) {
         return init;
@@ -1266,10 +1243,8 @@ fn force_interrupt_callback_value(mut init: TExpr, cx: &Cx) -> TExpr {
         } => Some(name.clone()),
         _ => None,
     } {
-        let ty = init.ty.clone();
         init.kind = TExprKind::FnValue {
             kind: TFnValueKind::NamedFn {
-                wrapper: crate::Codegen::emit_named_fn_value_sync(cx, &name, &ty),
                 name: Some(name),
                 lambda: None,
             },
@@ -1279,7 +1254,7 @@ fn force_interrupt_callback_value(mut init: TExpr, cx: &Cx) -> TExpr {
     TExpr {
         ty,
         kind: TExprKind::FnValue {
-            kind: TFnValueKind::Interrupt {
+            kind: TFnValueKind::Send {
                 value: Box::new(init),
             },
         },
@@ -1761,7 +1736,9 @@ fn mark_resource_binding_mutability(stmt: &mut TStmt, targets: &HashSet<String>)
         | TStmt::MathSwizzleAssign { .. }
         | TStmt::Contract { .. }
         | TStmt::LineMarker(_)
-        | TStmt::SourceSpan(_) => {}
+        | TStmt::SourceSpan(_)
+        | TStmt::Erased { .. }
+        | TStmt::InvariantViolation { .. } => {}
     }
 }
 
@@ -1804,11 +1781,14 @@ pub(crate) fn lower_return_value(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TStmt
         }
     }
     in_own_frame(|| {
-        let normalized = normalize_eval_fragment_return(e, env.ret_ty.as_ref());
-        let return_expr = normalized.as_ref().unwrap_or(e);
+        let return_expr = e;
         let annotated = annotate_return_todo(return_expr, env.ret_ty.as_ref());
         let mut value = lower_owned_expr(annotated.as_ref().unwrap_or(return_expr), cx, env);
+        super::expressions::suppress_module_call_target_return(&mut value);
         if let Some(want) = &env.ret_ty {
+            if matches!(value.kind, TExprKind::Absent) && matches!(want, Type::Option(_)) {
+                value.ty = want.clone();
+            }
             // Sema erases the type head from an empty typed list literal.
             // At a return boundary the success payload is the contextual
             // element shape, not the internal Result/Option carrier.
@@ -1821,27 +1801,48 @@ pub(crate) fn lower_return_value(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TStmt
             // `??` consumes its input carrier and leaves a bare success value.
             // Restore the enclosing callable's Result carrier exactly once,
             // matching sema's implicit `Ok` for ordinary source returns.
-            if matches!(want, Type::Result { .. })
-                && !matches!(value.ty, Type::Result { .. })
-            {
-                value = TExpr {
-                    ty: want.clone(),
-                    kind: TExprKind::Ok(Box::new(value)),
-                };
+            if matches!(want, Type::Result { .. }) {
+                if matches!(value.kind, TExprKind::Ok(_) | TExprKind::Err(_)) {
+                    value.ty = want.clone();
+                } else if !matches!(value.ty, Type::Result { .. }) {
+                    value = TExpr {
+                        ty: want.clone(),
+                        kind: TExprKind::Ok(Box::new(value)),
+                    };
+                }
             }
         }
         TStmt::Return(Some(value))
     })
 }
-
 #[inline(never)]
 pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
+    let before_payload = CanonicalPass::enabled().then(|| {
+        CanonicalPass::debug_payload("ast", "tir.lower-statements", &stmts)
+    });
+    let before_identity = CanonicalPass::enabled().then(|| {
+        CanonicalPass::debug_identity("ast", "tir.lower-statements", &stmts)
+    });
     // Child blocks are heap tasks. A nested source block therefore resumes its
     // parent through `LowerBlock::resume` instead of keeping the parent lowering
     // frame on the native stack.
     let mut lowered = lower_stmts_with_markers(stmts, cx, env, true);
     let targets = env.resource_take_targets();
     mark_resource_bindings_mutable(&mut lowered, &targets);
+    if let (Some(before_payload), Some(before_identity)) = (before_payload, before_identity) {
+        CanonicalPass::record(
+            "lowering",
+            "tir.lower-statements",
+            "crates/jet-codegen/src/Codegen/TIR/lower/statements.rs",
+            "ast",
+            before_payload,
+            before_identity,
+            "tir",
+            crate::Codegen::TIR::canonical_statements_payload(&lowered),
+            crate::Codegen::TIR::canonical_statements_identity(&lowered),
+            "preserve",
+        );
+    }
     lowered
 }
 
@@ -2286,35 +2287,11 @@ pub(crate) fn preserve_typed_list_shape(expr: TExpr, expected: &Type, cx: &Cx) -
 
 fn is_refutable_unwrap_pattern(pattern: &Pattern) -> bool {
     matches!(pattern, Pattern::Ok { .. } | Pattern::Present { .. })
-        || (super::is_eval_fragment()
-            && matches!(
-                pattern,
-                Pattern::Variant { variant, .. }
-                    if variant == Syntax::LIT_OK || variant == Syntax::LIT_VALUE
-            ))
 }
 
-fn refutable_binding_name<'a>(pattern: &'a Pattern, init: &TExpr) -> Option<&'a str> {
+fn refutable_binding_name<'a>(pattern: &'a Pattern, _init: &TExpr) -> Option<&'a str> {
     match pattern {
         Pattern::Ok { binding, .. } | Pattern::Present { binding, .. } => Some(binding),
-        Pattern::Variant {
-            variant,
-            bindings,
-            leading_dot,
-            ..
-        } if super::is_eval_fragment() && bindings.len() == 1 => {
-            let TExprKind::OrFallback { value, .. } = &init.kind else {
-                return None;
-            };
-            let carrier_matches = match &value.ty {
-                Type::Result { .. } => variant == Syntax::LIT_OK,
-                Type::Option(_) => *leading_dot && variant == Syntax::LIT_VALUE,
-                _ => false,
-            };
-            carrier_matches
-                .then(|| bindings.first().and_then(PatSlot::as_bind))
-                .flatten()
-        }
         _ => None,
     }
 }
@@ -2371,46 +2348,6 @@ fn lower_refutable_fallback(fallback: &OrFallback, cx: &Cx, env: &LowerEnv) -> V
     }
 }
 
-/// Before body sema, a comptime fragment still carries a contextual return
-/// head as an unowned enum literal. Project it onto the existing Option/Result
-/// AST nodes from the function's declared return type, then let their ordinary
-/// lowering own the carrier representation on every tier.
-pub(crate) fn normalize_eval_fragment_return(expr: &Expr, expected: Option<&Type>) -> Option<Expr> {
-    if !super::is_eval_fragment() {
-        return None;
-    }
-    let Expr::EnumLit {
-        type_name,
-        variant,
-        args,
-        leading_dot,
-        span,
-        ..
-    } = expr
-    else {
-        return None;
-    };
-    if !type_name.is_empty() {
-        return None;
-    }
-    match (expected, variant.as_str(), args.as_slice()) {
-        (
-            Some(Type::Result { .. }),
-            Syntax::LIT_OK,
-            [crate::AST::EnumLitArg::Positional(value)],
-        ) if *leading_dot => Some(Expr::Ok(Box::new(value.clone()), *span)),
-        (
-            Some(Type::Result { .. }),
-            Syntax::LIT_ERR,
-            [crate::AST::EnumLitArg::Positional(value)],
-        ) if *leading_dot => Some(Expr::Err(Box::new(value.clone()), *span)),
-        (Some(Type::Option(_)), Syntax::LIT_VALUE, [crate::AST::EnumLitArg::Positional(value)]) => {
-            Some(Expr::Present(Box::new(value.clone()), *span))
-        }
-        (Some(Type::Option(_)), Syntax::LIT_NULL, []) => Some(Expr::Absent(*span)),
-        _ => None,
-    }
-}
 const INT_SMALL_MIN: i128 = -(1i128 << 62);
 const INT_SMALL_MAX: i128 = (1i128 << 62) - 1;
 
@@ -2484,12 +2421,7 @@ fn refine_loop_local(
     }
 }
 
-fn refine_loop_comparison(
-    env: &mut LowerEnv,
-    op: crate::AST::BinOp,
-    lhs: &TExpr,
-    rhs: &TExpr,
-) {
+fn refine_loop_comparison(env: &mut LowerEnv, op: crate::AST::BinOp, lhs: &TExpr, rhs: &TExpr) {
     let rhs_bounds = integer_bounds_for_expr(rhs);
     if matches!(&lhs.kind, TExprKind::Local(_)) {
         if let Some(bounds) = rhs_bounds {
@@ -2547,7 +2479,6 @@ fn refine_loop_condition(env: &mut LowerEnv, condition: &TExpr) {
 #[inline(never)]
 fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmtPlan<'a> {
     macro_rules! ready_return {
-
         ($stmt:expr) => {
             return LowerStmtPlan::ready($stmt);
         };
@@ -2627,11 +2558,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
         Stmt::Val(b) if matches!(&b.pattern, Some(BindPattern::Struct { .. })) => {
             return in_own_frame(|| {
                 // c109: a struct-destructuring binding `Type { x, y } :: <init>`. Lower the
-                // init ONCE; its total `.ty` is a `Type::Named`/`Apply` naming a struct
-                // (sema guarantees it). The per-field type comes from `cx.struct_fields`,
-                // reproducing `emit_stmt`'s `BindPattern::Struct` arm. Each field binds with
-                // its resolved type and a non-deref'd slot (the clone owns the value); the
-                // pattern's field name is BOTH the bound local and the `.field` read.
+                // init ONCE; its total `.ty` is a checked `Type::Named`/`Apply` struct.
+                // TIR carries source local and checked field labels; MIR resolves the
+                // field type and stable field ID from that checked owner row.
                 let Some(BindPattern::Struct { fields, span, .. }) = &b.pattern else {
                     unreachable!("guard matched a struct pattern")
                 };
@@ -2653,9 +2582,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 let kw = if b.mutable { "let mut" } else { "let" };
                 let mut binds = Vec::new();
                 for f in fields {
-                    let field_rust = mangle(&f.name).to_string();
-                    let local_rust = mangle(f.local_name()).to_string();
-                    binds.push((local_rust, field_rust));
+                    let local_name = f.local_name().to_string();
+                    let field_name = f.name.clone();
+                    binds.push((local_name, field_name));
                     env.bind(
                         f.local_name(),
                         TLocal::user(f.local_name()),
@@ -2674,10 +2603,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
         Stmt::Val(b) if matches!(&b.pattern, Some(BindPattern::Tuple { .. })) => {
             return in_own_frame(|| {
                 // c109 Phase 23: a tuple-destructuring binding `(a, b) :: <init>`. Lower the
-                // init ONCE; its total `.ty` is a `Type::Tuple` (sema guarantees it). Pair the
-                // pattern elements to the tuple's CANONICAL fields by position, reproducing
-                // `emit_stmt`'s `BindPattern::Tuple` arm. Each element binds with its resolved
-                // field type and a non-deref'd slot (the clone owns the value).
+                // init ONCE; checked tuple fields (or the VjpRun field prefix) determine
+                // canonical labels and types by position. TIR carries source names; MIR
+                // resolves the stable field IDs from the checked shape.
                 let Some(BindPattern::Tuple { elems, span }) = &b.pattern else {
                     unreachable!("guard matched a tuple pattern")
                 };
@@ -2714,11 +2642,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 let kw = if b.mutable { "let mut" } else { "let" };
                 let mut binds = Vec::new();
                 for (e, (fname, fty)) in elems.iter().zip(canonical.iter()) {
-                    let elem_rust = mangle(&e.name).to_string();
-                    let field_rust =
-                        crate::Codegen::TIR::core_struct_field_rust_name(cx, &init.ty, fname)
-                            .unwrap_or_else(|| mangle(fname).to_string());
-                    binds.push((elem_rust, field_rust));
+                    let local_name = e.name.clone();
+                    let field_name = fname.clone();
+                    binds.push((local_name, field_name));
                     env.bind(&e.name, TLocal::user(&e.name), Some(fty.clone()));
                 }
                 ready_return!(TStmt::TupleDestructure {
@@ -2825,9 +2751,19 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 }
                 let fallback = lower_refutable_fallback(fallback, cx, env);
                 let subject_ty = init.ty.clone();
-                super::patterns::tir_add_pattern_bindings(cx, pattern, env, Some(&subject_ty));
+                if let Err(reason) =
+                    super::patterns::tir_add_pattern_bindings(cx, pattern, env, Some(&subject_ty))
+                {
+                    return LowerStmtPlan::ready(TStmt::InvariantViolation {
+                        construct: reason.to_string(),
+                        span: pattern.span(),
+                    });
+                }
                 ready_return!(TStmt::RefutableBind {
-                    pattern: TPattern::binding(pattern.clone()),
+                    pattern: TPattern::binding_with_values(
+                        pattern.clone(),
+                        |value| lower_expr(value, cx, env),
+                    ),
                     init,
                     fallback,
                 });
@@ -2863,8 +2799,6 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                 kw: "let mut",
                                 let_ty: crate::Codegen::TIR::let_ty_for_opt(
                                     Some(ty),
-                                    cx,
-                                    false,
                                     false,
                                     false
                                 ),
@@ -2919,8 +2853,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             let address_lifetime = tir_address_lifetime(&init);
                             let range = matches!(inner, Expr::Slice { .. });
                             let slot = if range {
-                                TLocal::user(&b.name)
-                                    .with_address_lifetime(address_lifetime)
+                                TLocal::user(&b.name).with_address_lifetime(address_lifetime)
                             } else {
                                 TLocal::user(&b.name)
                                     .through_ref()
@@ -3037,8 +2970,6 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         return in_own_frame(|| {
                             let let_ty = crate::Codegen::TIR::let_ty_for_opt(
                                 b.ty.as_ref(),
-                                cx,
-                                false,
                                 false,
                                 false,
                             );
@@ -3095,19 +3026,19 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         });
                     }
                     in_own_frame(|| {
+                        let dma_transfer_channel = hardware_dma_channel(&b.init, cx);
                         let mut init =
                             moved_view.unwrap_or_else(|| lower_owned_expr(&b.init, cx, env));
-                        // Inline result loops lower their body as the bare
                         // success value. A fallible binding still needs the
                         // enclosing Result carrier at this binding boundary.
                         // Inline loop lowering produces a bare value in an
                         // InlineBlock, even when its cached TIR type has already
                         // been widened to the Result carrier.
-                        let result_loop_binding =
-                            matches!(&init.kind, TExprKind::InlineBlock(_));
+                        let result_loop_binding = matches!(&init.kind, TExprKind::InlineBlock(_));
                         if result_loop_binding {
                             if let Some(Type::Result { ok, .. }) = &b.ty {
-                                let carrier = b.ty.as_ref().expect("matched Result binding").clone();
+                                let carrier =
+                                    b.ty.as_ref().expect("matched Result binding").clone();
                                 if !matches!(&init.kind, TExprKind::Ok(_)) {
                                     let success_ty = (**ok).clone();
                                     init.ty = success_ty;
@@ -3160,10 +3091,15 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                 .map(|ty| ty.without_user_tags().clone())
                                 .unwrap_or_else(|| init.ty.clone())
                         };
+                        if matches!(&init.kind, TExprKind::Absent)
+                            && matches!(&want, Type::Option(_))
+                        {
+                            init.ty = want.clone();
+                        }
                         init = preserve_typed_list_shape(init, &want, cx);
-                        // D-MAPTYPE1: sema elaborates an empty typed map head to `MapLit([])`;
-                        // retain declared key/value types so emit does not default the map key to
-                        // `String` before task-group codegen consumes the value.
+                        // D-EMPTYLIT1: a bare `[]` under a map expectation reaches lowering as
+                        // `MapLit([])`; retain declared key/value types so emit does not default
+                        // the map key to `String` before task-group codegen consumes the value.
                         if matches!(&want, Type::Map { .. })
                             && matches!(&init.kind, TExprKind::MapLit(_))
                         {
@@ -3201,64 +3137,23 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                 }
                             }
                         }
-                        // c109 Phase 13: reproduce `emit_let`'s `mut_fn` form — every
-                        // lambda binding that mutates a capture gets `let mut` AND an
-                        // `as <fn-trait(mut)>` init coercion plus a matching annotation.
+                        // S47: a lambda binding has exactly one of two shapes.
+                        // An escaping lambda already carries the owned
+                        // function-value carrier from its lambda lowering
+                        // (`boxed`); the binding and every container see the
+                        // same slot type. A non-escaping lambda stays a bare
+                        // closure that borrows this frame: its Rust borrow
+                        // ends at its last direct call, so the enclosing
+                        // locals remain readable afterwards, and its capture
+                        // writes land in those locals on every tier.
                         let mut_fn = matches!(
                             &b.init,
                             Expr::Lambda(l) if l.meta.needs_fn_mut
                         );
-                        let escaping_mut_fn = matches!(
-                            &b.init,
-                            Expr::Lambda(l) if l.meta.escapes && l.meta.needs_fn_mut
+                        let direct_closure = matches!(
+                            &init.kind,
+                            TExprKind::Lambda(lambda) if !lambda.boxed && !lambda.rc && !lambda.arc
                         );
-                        let nonescaping_lambda =
-                            matches!(&b.init, Expr::Lambda(l) if !l.meta.escapes);
-                        if mut_fn {
-                            if let Some(Type::Fn {
-                                params,
-                                ret,
-                                return_view_provenance,
-                                ..
-                            }) = &b.ty
-                            {
-                                let coerced = if escaping_mut_fn {
-                                    format!(
-                                        "Box::new({}) as {}",
-                                        emit_tir_expr(&init, cx),
-                                        cx.rust_fn_trait(
-                                            params,
-                                            ret.as_deref(),
-                                            return_view_provenance.as_ref(),
-                                            true,
-                                        )
-                                    )
-                                } else {
-                                    // A same-scope FnMut keeps a direct closure
-                                    // carrier so its borrow ends at its last call.
-                                    emit_tir_expr(&init, cx)
-                                };
-                                let init_ty = init.ty.clone();
-                                let lambda =
-                                    match std::mem::replace(&mut init.kind, TExprKind::Unit) {
-                                        TExprKind::Lambda(lambda) => Some(lambda),
-                                        other => {
-                                            init.kind = other;
-                                            None
-                                        }
-                                    };
-                                init = TExpr {
-                                    ty: init_ty,
-                                    kind: TExprKind::FnValue {
-                                        kind: TFnValueKind::NamedFn {
-                                            wrapper: coerced,
-                                            name: None,
-                                            lambda,
-                                        },
-                                    },
-                                };
-                            }
-                        }
                         // Totality: if the source omitted the type, infer it ONCE here from
                         // the init's already-resolved type. Codegen never infers.
                         // A named function value is an executable callable,
@@ -3268,10 +3163,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         // selection, not for the Rust local ABI.
                         let named_fn_value_ty = match &init.kind {
                             TExprKind::FnValue {
-                                kind:
-                                    TFnValueKind::NamedFn {
-                                        name: Some(_), ..
-                                    },
+                                kind: TFnValueKind::NamedFn { name: Some(_), .. },
                             } => Some(init.ty.clone()),
                             _ => None,
                         };
@@ -3300,7 +3192,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         let send_fn =
                             env.is_send_fn(&b.name) && matches!(&ty, Type::Fn { .. }) && !mut_fn;
                         if send_fn {
-                            init = force_interrupt_callback_value(init, cx);
+                            init = force_thread_callback_value(init, cx);
                         }
                         let is_resource = match &ty {
                             Type::Named(name) | Type::Apply { name, .. } => {
@@ -3375,9 +3267,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             // The effective spawn carrier binds unannotated;
                             // its Rust type is fixed by the closure initializer.
                             TLetTy::Inferred
-                        } else if nonescaping_lambda {
-                            // Every local lambda keeps its concrete closure
-                            // carrier; only escaping values need a trait object.
+                        } else if direct_closure {
+                            // A bare closure keeps its concrete Rust type;
+                            // only the owned carrier spells a trait object.
                             TLetTy::Inferred
                         } else if send_fn {
                             TLetTy::SendFn(ty.clone())
@@ -3386,16 +3278,12 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             // declaration, not sema's effective failure carrier.
                             crate::Codegen::TIR::let_ty_for_opt(
                                 Some(&ty),
-                                cx,
-                                escaping_mut_fn,
                                 is_resource,
                                 b.gc_promotion.is_some() || b.gc_transferred,
                             )
                         } else {
                             crate::Codegen::TIR::let_ty_for_opt(
                                 b.ty.as_ref(),
-                                cx,
-                                escaping_mut_fn,
                                 is_resource,
                                 b.gc_promotion.is_some() || b.gc_transferred,
                             )
@@ -3414,7 +3302,15 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         } else {
                             TLocal::user(&binding_name)
                         };
+                        let slot = if direct_closure {
+                            slot.as_direct_closure()
+                        } else {
+                            slot
+                        };
                         env.bind(&b.name, slot, Some(ty));
+                        if let Some(channel) = dma_transfer_channel {
+                            env.mark_dma_transfer(&b.name, channel);
+                        }
                         env.set_integer_bounds(&b.name, integer_bounds_for_expr(&init));
                         if b.gc_promotion.is_some() || b.gc_transferred {
                             env.mark_gc(&b.name);
@@ -3463,7 +3359,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                             // canonical representation as its declaration. Otherwise
                             // a later hot-swapped registration could load an ordinary
                             // Rc/raw function value into the Send crossing.
-                            value_t = force_interrupt_callback_value(value_t, cx);
+                            value_t = force_thread_callback_value(value_t, cx);
                         }
                         env.update_integer_bounds(name, *op, &value_t);
                         TStmt::Assign {
@@ -3492,22 +3388,9 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 return in_own_frame(|| {
                     LowerStmtPlan::ready({
                         debug_assert!(
-                            super::is_eval_fragment() || !matches!(kind, IndexKind::Unknown),
-                            "sema-to-TIR handoff violated"
-                        );
-                        // Sema-to-TIR handoff assert (ice_regressions b5 bug class): the
-                        // subset gate must have already excluded `IndexKind::Unknown` before
-                        // routing here — an `Unknown` default reaching lowering means sema
-                        // left an index kind unresolved and the gate missed it.
-                        debug_assert!(
-                            super::is_eval_fragment() || !matches!(kind, IndexKind::Unknown),
+                            !matches!(kind, IndexKind::Unknown),
                             "sema-to-TIR handoff violated: unresolved index kind"
                         );
-                        let kind = if matches!(kind, IndexKind::Unknown) {
-                            &IndexKind::List
-                        } else {
-                            kind
-                        };
                         let base_t = lower_expr(base, cx, env);
                         let index_t = lower_expr(index, cx, env);
                         let value_t = lower_expr(value, cx, env);
@@ -3888,12 +3771,12 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 // binding. Lower all of them in one child env so none survives the loop.
                 let init_val = lower_expr(&init.init, cx, env);
                 let init_ty = init.ty.clone().unwrap_or_else(|| init_val.ty.clone());
-                let mut_fn = interrupt_lambda(&init.init)
+                let mut_fn = thread_callback_lambda(&init.init)
                     .is_some_and(|lam| lam.meta.escapes && lam.meta.needs_fn_mut);
                 let send_fn =
                     env.is_send_fn(&init.name) && matches!(&init_ty, Type::Fn { .. }) && !mut_fn;
                 let init_val = if send_fn {
-                    force_interrupt_callback_value(init_val, cx)
+                    force_thread_callback_value(init_val, cx)
                 } else {
                     init_val
                 };
@@ -3942,6 +3825,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         init: init_stmt,
                         cond,
                         step,
+                        auto_vectorization: None,
                         body,
                     }
                 });
@@ -4005,9 +3889,7 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     // resolving the receiver/collection string off the SAME node shape the
                     // AST path reads. `method_kind == None` is the plain `.iter()` form.
                     let (iter_source, method_kind) = lower_forin_collection(collection, cx, env);
-                    // Infer the element type from the lowered collection so the loop
-                    // variable binds with its concrete type. This lets `core_struct_field_rust_name`
-                    // emit plain field names (not `__jet_<field>`) for core types like DirEntry.
+                    // Keep the concrete element type for checked field projection.
                     let lowered_coll = lower_expr(collection, cx, env);
                     if matches!(&lowered_coll.ty, Type::Named(name) if name == Syntax::TYPE_RANGE) {
                         return in_own_frame(|| {
@@ -4150,6 +4032,8 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                                 method_kind = Some(TForInMethod::Iterable {
                                     coll_type: n.clone(),
                                     iter_type: hook.iter_type.clone(),
+                                    iter_symbol: hook.iter_symbol.clone(),
+                                    next_symbol: hook.next_symbol.clone(),
                                 });
                                 coll_elem_ty = Some(hook.item_type.clone());
                             }
@@ -4345,8 +4229,6 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                     move |mut lowered| {
                         let lowered = lowered.pop().expect("reactive body was deferred");
                         let shared: Arc<[TStmt]> = Arc::from(lowered.into_boxed_slice());
-                        let closure =
-                            render_reactive_block_closure(body, &shared[..], cx, &outer_env);
                         let executable = Box::new(lower_lambda_with_shared_block(
                             &synthetic,
                             cx,
@@ -4358,7 +4240,6 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                         );
                         cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
                         TStmt::Reactive {
-                            closure,
                             executable,
                         }
                     },
@@ -4742,12 +4623,69 @@ fn lower_stmt_plan<'a>(s: &'a Stmt, cx: &'a Cx, env: &mut LowerEnv) -> LowerStmt
                 });
             });
         }
-        // Forward-safety default: a Stmt variant not in the subset never reaches
-        // lowering (`stmt_in_subset` returns false for it). Kept as a guard against a
-        // future variant; currently unreachable because every covered variant is matched.
-        #[allow(unreachable_patterns)]
-        _ => unreachable!("statement not in TIR subset"),
+        // D-TIER-FORM1=A: the OS/settings switch is sema-desugared into
+        // `ComptimeIf` before checked executable lowering. Retain an explicit
+        // typed erasure row if a parser-recovery fragment reaches this seam.
+        Stmt::ComptimeSwitch { span, .. } => TStmt::Erased {
+            construct: "ComptimeSwitch".to_string(),
+            span: *span,
+            reason: crate::Codegen::TIR::TirErasureReason::CompileTimeOnly,
+        },
     })
+}
+
+fn hardware_dma_channel(
+    expr: &crate::AST::Expr,
+    cx: &Cx,
+) -> Option<String> {
+    let crate::AST::Expr::MethodCall {
+        receiver,
+        method,
+        args,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    if method != "start"
+        || !matches!(receiver.as_ref(), crate::AST::Expr::Ident(name, _) if name == "dma")
+        || args.len() < 2
+    {
+        return None;
+    }
+    let crate::AST::Expr::Field(base, channel, _) = &args[0].expr else {
+        return None;
+    };
+    let crate::AST::Expr::Field(root, block, _) = base.as_ref() else {
+        return None;
+    };
+    let crate::AST::Expr::Ident(alias, _) = root.as_ref() else {
+        return None;
+    };
+    if !cx
+        .core_imports
+        .get(alias)
+        .is_some_and(|profile| profile.starts_with("board."))
+    {
+        return None;
+    }
+    let fallback = format!(
+        "{}_{}",
+        block.to_ascii_uppercase(),
+        channel.to_ascii_uppercase()
+    );
+    Some(
+        cx.hardware_profile
+            .as_ref()
+            .and_then(|facts| {
+                facts
+                    .dma_channels
+                    .iter()
+                    .find(|fact| fact.name.eq_ignore_ascii_case(&fallback))
+                    .map(|fact| fact.name.clone())
+            })
+            .unwrap_or(fallback),
+    )
 }
 
 /// W4 (durability): proves the sema-to-TIR handoff `debug_assert`s in

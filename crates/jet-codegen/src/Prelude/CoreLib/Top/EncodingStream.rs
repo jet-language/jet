@@ -308,8 +308,8 @@ fn jet_encoding_validate_limits(
         Some(format!("max_depth {} is outside 1..4096", limits.max_depth))
     } else if !(1..=1073741824).contains(&limits.max_item_bytes) {
         Some(format!("max_item_bytes {} is outside 1..1073741824", limits.max_item_bytes))
-    } else if limits.max_total_bytes.is_ok_and(|n| n < 0) {
-        Some(format!("max_total_bytes {} is outside 0..Int.max", limits.max_total_bytes.unwrap_or(0)))
+    } else if let Ok(value) = limits.max_total_bytes {
+        (value < 0).then(|| format!("max_total_bytes {value} is outside 0..Int.max"))
     } else if !(0..=256).contains(&limits.max_expansion_depth) {
         Some(format!("max_expansion_depth {} is outside 0..256", limits.max_expansion_depth))
     } else if !(0..=1073741824).contains(&limits.max_expansion_bytes) {
@@ -860,7 +860,21 @@ impl jet_std::JSONReader {
             self.release_item_heap(bytes.capacity());
             return Err(error);
         }
-        let text = std::str::from_utf8(&bytes).unwrap_or("");
+        let start = self.offset - bytes.len() as i64;
+        let text = match std::str::from_utf8(&bytes) {
+            Ok(text) => text,
+            Err(_) => {
+                self.release_item_heap(bytes.capacity());
+                drop(bytes);
+                return Err(jet_encoding_error(
+                    jet_std::EncodingErrorKind::Syntax,
+                    start,
+                    self.line,
+                    self.column,
+                    "JSON number is not valid UTF-8",
+                ));
+            }
+        };
         let valid = {
             let b = text.as_bytes();
             let mut i = usize::from(b.first() == Some(&b'-'));
@@ -869,7 +883,6 @@ impl jet_std::JSONReader {
             if i != usize::MAX && matches!(b.get(i), Some(b'e' | b'E')) { i += 1; if matches!(b.get(i), Some(b'+' | b'-')) { i += 1; } let start = i; while matches!(b.get(i), Some(b'0'..=b'9')) { i += 1; } if i == start { i = usize::MAX; } }
             i == b.len()
         };
-        let start = self.offset - bytes.len() as i64;
         if !valid {
             self.release_item_heap(bytes.capacity());
             drop(bytes);
@@ -1602,6 +1615,314 @@ fn jet_enc_jsonl_reader(
     })
 }
 
+fn jet_json_fold_limit_error(
+    reader: &jet_std::JSONReader,
+    heap_limit: bool,
+) -> jet_std::EncodingError {
+    let mut error = jet_encoding_error(
+        jet_std::EncodingErrorKind::Limit,
+        reader.offset,
+        reader.line,
+        reader.column,
+        if heap_limit {
+            format!(
+                "JSON value heap exceeded the bounded allocator ceiling for max_item_bytes {}",
+                reader.limits.max_item_bytes
+            )
+        } else {
+            format!("max_item_bytes {} exceeded", reader.limits.max_item_bytes)
+        },
+    );
+    error.path = reader.path();
+    error
+}
+
+fn jet_json_fold_budget(
+    reader: &jet_std::JSONReader,
+) -> Result<JetJsonlHeapBudget, jet_std::EncodingError> {
+    let allocation = reader.allocation_budget.clone().ok_or_else(|| {
+        jet_encoding_error(
+            jet_std::EncodingErrorKind::State,
+            reader.offset,
+            reader.line,
+            reader.column,
+            "JSON reader allocation budget is unavailable",
+        )
+    })?;
+    let decoded_limit = usize::try_from(reader.limits.max_item_bytes).map_err(|_| {
+        jet_encoding_error(
+            jet_std::EncodingErrorKind::Limit,
+            reader.offset,
+            reader.line,
+            reader.column,
+            "max_item_bytes cannot be represented by this target",
+        )
+    })?;
+    Ok(JetJsonlHeapBudget {
+        allocation,
+        decoded: 0,
+        decoded_limit,
+        tracked: 0,
+    })
+}
+
+fn jet_json_fold_push_value(
+    reader: &jet_std::JSONReader,
+    heap: &mut JetJsonlHeapBudget,
+    root: &mut Option<jet_std::DataTree>,
+    frames: &mut Vec<JetJsonlFoldFrame>,
+    value: jet_std::DataTree,
+) -> Result<(), jet_std::EncodingError> {
+    match frames.last_mut() {
+        Some(JetJsonlFoldFrame::Array(items)) => {
+            if !jet_jsonl_reserve_push(heap, items) {
+                return Err(jet_json_fold_limit_error(reader, true));
+            }
+            items.push(value);
+        }
+        Some(JetJsonlFoldFrame::Object { entries, key }) => {
+            let Some(key) = key.take() else {
+                return Err(jet_encoding_error(
+                    jet_std::EncodingErrorKind::State,
+                    reader.offset,
+                    reader.line,
+                    reader.column,
+                    "JSON event stream produced an object value without a key",
+                ));
+            };
+            if !jet_jsonl_reserve_push(heap, entries) {
+                return Err(jet_json_fold_limit_error(reader, true));
+            }
+            entries.push((key, value));
+        }
+        None if root.is_none() => *root = Some(value),
+        None => {
+            return Err(jet_encoding_error(
+                jet_std::EncodingErrorKind::State,
+                reader.offset,
+                reader.line,
+                reader.column,
+                "JSON event stream produced two roots for one value",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Fold one complete JSON value from the shared tokenizer event stream.
+///
+/// Data rows and JSONL records use this same bounded tree fold. The caller
+/// supplies the first event because a data array has already consumed its
+/// opening delimiter; no adapter owns a second parser or an unbounded
+/// materialization fallback.
+fn jet_json_fold_from_event(
+    reader: &mut jet_std::JSONReader,
+    first: jet_std::DataEvent,
+    heap: &mut JetJsonlHeapBudget,
+) -> Result<jet_std::DataTree, jet_std::EncodingError> {
+    let mut root = None;
+    let mut frames = Vec::new();
+    let mut pending = Some(first);
+    loop {
+        let event = match pending.take() {
+            Some(event) => event,
+            None => match reader.next_event()? {
+                Some(event) => event,
+                None => {
+                    return Err(jet_encoding_error(
+                        jet_std::EncodingErrorKind::Truncated,
+                        reader.offset,
+                        reader.line,
+                        reader.column,
+                        "JSON value ended before it was closed",
+                    ));
+                }
+            },
+        };
+        let result = match event {
+            jet_std::DataEvent::Null => {
+                if !heap.charge_decoded(1) {
+                    Err(jet_json_fold_limit_error(reader, false))
+                } else {
+                    jet_json_fold_push_value(
+                        reader,
+                        heap,
+                        &mut root,
+                        &mut frames,
+                        jet_std::DataTree::Null,
+                    )
+                }
+            }
+            jet_std::DataEvent::Bool(value) => {
+                if !heap.charge_decoded(1) {
+                    Err(jet_json_fold_limit_error(reader, false))
+                } else {
+                    jet_json_fold_push_value(
+                        reader,
+                        heap,
+                        &mut root,
+                        &mut frames,
+                        jet_std::DataTree::Bool(value),
+                    )
+                }
+            }
+            jet_std::DataEvent::Int(value) => {
+                if !heap.charge_decoded(8) {
+                    Err(jet_json_fold_limit_error(reader, false))
+                } else {
+                    jet_json_fold_push_value(
+                        reader,
+                        heap,
+                        &mut root,
+                        &mut frames,
+                        jet_std::DataTree::Int(value),
+                    )
+                }
+            }
+            jet_std::DataEvent::Float(value) => {
+                if !heap.charge_decoded(8) {
+                    Err(jet_json_fold_limit_error(reader, false))
+                } else {
+                    jet_json_fold_push_value(
+                        reader,
+                        heap,
+                        &mut root,
+                        &mut frames,
+                        jet_std::DataTree::Float(value),
+                    )
+                }
+            }
+            jet_std::DataEvent::Number(value) => {
+                if !heap.charge_decoded(value.len()) {
+                    Err(jet_json_fold_limit_error(reader, false))
+                } else {
+                    jet_json_fold_push_value(
+                        reader,
+                        heap,
+                        &mut root,
+                        &mut frames,
+                        jet_std::DataTree::Number(value),
+                    )
+                }
+            }
+            jet_std::DataEvent::Text(value) => {
+                if !heap.charge_decoded(value.len()) {
+                    Err(jet_json_fold_limit_error(reader, false))
+                } else {
+                    jet_json_fold_push_value(
+                        reader,
+                        heap,
+                        &mut root,
+                        &mut frames,
+                        jet_std::DataTree::TypedText(value),
+                    )
+                }
+            }
+            jet_std::DataEvent::Bytes(value) => {
+                if !heap.charge_decoded(value.len()) {
+                    Err(jet_json_fold_limit_error(reader, false))
+                } else {
+                    jet_json_fold_push_value(
+                        reader,
+                        heap,
+                        &mut root,
+                        &mut frames,
+                        jet_std::DataTree::Bytes(value),
+                    )
+                }
+            }
+            jet_std::DataEvent::ArrayStart => {
+                if !heap.charge_decoded(1) {
+                    Err(jet_json_fold_limit_error(reader, false))
+                } else if !jet_jsonl_reserve_push(heap, &mut frames) {
+                    Err(jet_json_fold_limit_error(reader, true))
+                } else {
+                    frames.push(JetJsonlFoldFrame::Array(Vec::new()));
+                    Ok(())
+                }
+            }
+            jet_std::DataEvent::ObjectStart => {
+                if !heap.charge_decoded(1) {
+                    Err(jet_json_fold_limit_error(reader, false))
+                } else if !jet_jsonl_reserve_push(heap, &mut frames) {
+                    Err(jet_json_fold_limit_error(reader, true))
+                } else {
+                    frames.push(JetJsonlFoldFrame::Object {
+                        entries: Vec::new(),
+                        key: None,
+                    });
+                    Ok(())
+                }
+            }
+            jet_std::DataEvent::Key(value) => match frames.last_mut() {
+                Some(JetJsonlFoldFrame::Object { key, .. }) if key.is_none() => {
+                    if !heap.charge_decoded(value.len()) {
+                        Err(jet_json_fold_limit_error(reader, false))
+                    } else {
+                        *key = Some(value);
+                        Ok(())
+                    }
+                }
+                _ => Err(jet_encoding_error(
+                    jet_std::EncodingErrorKind::State,
+                    reader.offset,
+                    reader.line,
+                    reader.column,
+                    "JSON event stream produced a key outside an object",
+                )),
+            },
+            jet_std::DataEvent::ArrayEnd => match frames.pop() {
+                Some(JetJsonlFoldFrame::Array(items)) => jet_json_fold_push_value(
+                    reader,
+                    heap,
+                    &mut root,
+                    &mut frames,
+                    jet_std::DataTree::Array(items),
+                ),
+                _ => Err(jet_encoding_error(
+                    jet_std::EncodingErrorKind::State,
+                    reader.offset,
+                    reader.line,
+                    reader.column,
+                    "JSON event stream closed the wrong container",
+                )),
+            },
+            jet_std::DataEvent::ObjectEnd => match frames.pop() {
+                Some(JetJsonlFoldFrame::Object {
+                    entries,
+                    key: None,
+                }) => jet_json_fold_push_value(
+                    reader,
+                    heap,
+                    &mut root,
+                    &mut frames,
+                    jet_std::DataTree::Object(entries),
+                ),
+                _ => Err(jet_encoding_error(
+                    jet_std::EncodingErrorKind::State,
+                    reader.offset,
+                    reader.line,
+                    reader.column,
+                    "JSON event stream closed an incomplete object",
+                )),
+            },
+        };
+        result?;
+        if frames.is_empty() {
+            let Some(value) = root.take() else {
+                return Err(jet_encoding_error(
+                    jet_std::EncodingErrorKind::State,
+                    reader.offset,
+                    reader.line,
+                    reader.column,
+                    "JSON event stream produced no root value",
+                ));
+            };
+            return Ok(value);
+        }
+    }
+}
+
 impl jet_std::JSONLReader {
     fn fail<T>(&mut self, error: jet_std::EncodingError) -> Result<T, jet_std::EncodingError> {
         let error = jet_jsonl_project_error(error, Some(self.record_index));
@@ -1641,66 +1962,6 @@ impl jet_std::JSONLReader {
         }
     }
 
-    fn limit_error(&self, heap_limit: bool) -> jet_std::EncodingError {
-        // Terminal metadata is owned by the latched error, not by the
-        // decoded-record heap.  Keep it explicit even when the triggering
-        // data allocation has exhausted that budget; never turn a budget
-        // failure into a missing or sentinel path.
-        let path = self.json.path();
-        let mut error = jet_encoding_error(
-            jet_std::EncodingErrorKind::Limit,
-            self.json.offset,
-            self.json.line,
-            self.json.column,
-            if heap_limit {
-                format!("JSONL record heap exceeded the bounded allocator ceiling for max_item_bytes {}", self.json.limits.max_item_bytes)
-            } else {
-                format!("max_item_bytes {} exceeded", self.json.limits.max_item_bytes)
-            },
-        );
-        error.path = path;
-        error
-    }
-
-    fn push_value(
-        &mut self,
-        heap: &mut JetJsonlHeapBudget,
-        root: &mut Option<jet_std::DataTree>,
-        frames: &mut Vec<JetJsonlFoldFrame>,
-        value: jet_std::DataTree,
-    ) -> Result<(), jet_std::EncodingError> {
-        match frames.last_mut() {
-            Some(JetJsonlFoldFrame::Array(items)) => {
-                if !jet_jsonl_reserve_push(heap, items) { return Err(self.limit_error(true)); }
-                items.push(value);
-            }
-            Some(JetJsonlFoldFrame::Object { entries, key }) => {
-                let Some(key) = key.take() else {
-                    return Err(jet_encoding_error(
-                        jet_std::EncodingErrorKind::State,
-                        self.json.offset,
-                        self.json.line,
-                        self.json.column,
-                        "JSON event stream produced an object value without a key",
-                    ));
-                };
-                if !jet_jsonl_reserve_push(heap, entries) { return Err(self.limit_error(true)); }
-                entries.push((key, value));
-            }
-            None if root.is_none() => *root = Some(value),
-            None => {
-                return Err(jet_encoding_error(
-                    jet_std::EncodingErrorKind::State,
-                    self.json.offset,
-                    self.json.line,
-                    self.json.column,
-                    "JSON event stream produced two roots for one JSONL record",
-                ));
-            }
-        }
-        Ok(())
-    }
-
     fn next_record(&mut self) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
         if let Some(error) = &self.terminal {
             return Err(error.clone());
@@ -1715,40 +1976,33 @@ impl jet_std::JSONLReader {
             return Ok(None);
         }
 
-        let mut root = None;
-        let mut frames = Vec::new();
-        let allocation = JetEncodingAllocationBudget::new(jet_encoding_codec_heap_ceiling(&self.json.limits));
-        self.json.allocation_budget = Some(allocation.clone());
-        let mut heap = JetJsonlHeapBudget {
-            allocation,
-            decoded: 0,
-            decoded_limit: self.json.limits.max_item_bytes as usize,
-            tracked: 0,
+        let allocation = JetEncodingAllocationBudget::new(jet_encoding_codec_heap_ceiling(
+            &self.json.limits,
+        ));
+        self.json.allocation_budget = Some(allocation);
+        let mut heap = match jet_json_fold_budget(&self.json) {
+            Ok(heap) => heap,
+            Err(error) => return self.fail(error),
         };
-        loop {
-            let event = match self.json.next_event() {
-                Ok(event) => event,
-                Err(error) => return self.fail(error),
-            };
-            let Some(event) = event else {
-                let Some(value) = root else {
-                    return self.fail(jet_encoding_error(
-                        jet_std::EncodingErrorKind::Truncated,
-                        self.json.offset,
-                        self.json.line,
-                        self.json.column,
-                        "JSONL record ended before a complete value",
-                    ));
-                };
-                if !frames.is_empty() {
-                    return self.fail(jet_encoding_error(
-                        jet_std::EncodingErrorKind::Truncated,
-                        self.json.offset,
-                        self.json.line,
-                        self.json.column,
-                        "JSONL record ended before its value was closed",
-                    ));
-                }
+        let first = match self.json.next_event() {
+            Ok(Some(event)) => event,
+            Ok(None) => {
+                return self.fail(jet_encoding_error(
+                    jet_std::EncodingErrorKind::Truncated,
+                    self.json.offset,
+                    self.json.line,
+                    self.json.column,
+                    "JSONL record ended before a complete value",
+                ));
+            }
+            Err(error) => return self.fail(error),
+        };
+        let value = match jet_json_fold_from_event(&mut self.json, first, &mut heap) {
+            Ok(value) => value,
+            Err(error) => return self.fail(error),
+        };
+        match self.json.next_event() {
+            Ok(None) => {
                 let parser_frames = std::mem::take(&mut self.json.frames);
                 let parser_frame_bytes = parser_frames
                     .capacity()
@@ -1756,109 +2010,16 @@ impl jet_std::JSONLReader {
                 drop(parser_frames);
                 heap.allocation.release(parser_frame_bytes);
                 self.record_index += 1;
-                return Ok(Some(value));
-            };
-            let result = (|| -> Result<(), jet_std::EncodingError> { match event {
-                jet_std::DataEvent::Null => {
-                    if !heap.charge_decoded(1) { return Err(self.limit_error(false)); }
-                    self.push_value(&mut heap, &mut root, &mut frames, jet_std::DataTree::Null)
-                }
-                jet_std::DataEvent::Bool(value) => {
-                    if !heap.charge_decoded(1) { return Err(self.limit_error(false)); }
-                    self.push_value(&mut heap, &mut root, &mut frames, jet_std::DataTree::Bool(value))
-                }
-                jet_std::DataEvent::Int(value) => {
-                    if !heap.charge_decoded(8) { return Err(self.limit_error(false)); }
-                    self.push_value(&mut heap, &mut root, &mut frames, jet_std::DataTree::Int(value))
-                }
-                jet_std::DataEvent::Float(value) => {
-                    if !heap.charge_decoded(8) { return Err(self.limit_error(false)); }
-                    self.push_value(&mut heap, &mut root, &mut frames, jet_std::DataTree::Float(value))
-                }
-                jet_std::DataEvent::Text(value) => {
-                    if !heap.charge_decoded(value.len()) { return Err(self.limit_error(false)); }
-                    self.push_value(&mut heap, &mut root, &mut frames, jet_std::DataTree::Text(value))
-                }
-                jet_std::DataEvent::Number(_) => Err(jet_encoding_error(
-                    jet_std::EncodingErrorKind::State,
-                    self.json.offset,
-                    self.json.line,
-                    self.json.column,
-                    "JSONL tokenizer produced an internal number carrier",
-                )),
-                jet_std::DataEvent::Bytes(_) => Err(jet_encoding_error(
-                    jet_std::EncodingErrorKind::State,
-                    self.json.offset,
-                    self.json.line,
-                    self.json.column,
-                    "JSON tokenizer produced Bytes",
-                )),
-                jet_std::DataEvent::ArrayStart => {
-                    if !heap.charge_decoded(1) { return Err(self.limit_error(false)); }
-                    if !jet_jsonl_reserve_push(&mut heap, &mut frames) {
-                        return Err(self.limit_error(true));
-                    }
-                    frames.push(JetJsonlFoldFrame::Array(Vec::new()));
-                    Ok(())
-                }
-                jet_std::DataEvent::ObjectStart => {
-                    if !heap.charge_decoded(1) { return Err(self.limit_error(false)); }
-                    if !jet_jsonl_reserve_push(&mut heap, &mut frames) {
-                        return Err(self.limit_error(true));
-                    }
-                    frames.push(JetJsonlFoldFrame::Object { entries: Vec::new(), key: None });
-                    Ok(())
-                }
-                jet_std::DataEvent::Key(value) => {
-                    match frames.last_mut() {
-                        Some(JetJsonlFoldFrame::Object { key, .. }) if key.is_none() => {
-                            if !heap.charge_decoded(value.len()) { return Err(self.limit_error(false)); }
-                            *key = Some(value);
-                            Ok(())
-                        }
-                        _ => Err(jet_encoding_error(
-                            jet_std::EncodingErrorKind::State,
-                            self.json.offset,
-                            self.json.line,
-                            self.json.column,
-                            "JSON event stream produced a key outside an object",
-                        )),
-                    }
-                }
-                jet_std::DataEvent::ArrayEnd => match frames.pop() {
-                    Some(JetJsonlFoldFrame::Array(items)) => self.push_value(
-                        &mut heap,
-                        &mut root,
-                        &mut frames,
-                        jet_std::DataTree::Array(items),
-                    ),
-                    _ => Err(jet_encoding_error(
-                        jet_std::EncodingErrorKind::State,
-                        self.json.offset,
-                        self.json.line,
-                        self.json.column,
-                        "JSON event stream closed the wrong container",
-                    )),
-                },
-                jet_std::DataEvent::ObjectEnd => match frames.pop() {
-                    Some(JetJsonlFoldFrame::Object { entries, key: None }) => self.push_value(
-                        &mut heap,
-                        &mut root,
-                        &mut frames,
-                        jet_std::DataTree::Object(entries),
-                    ),
-                    _ => Err(jet_encoding_error(
-                        jet_std::EncodingErrorKind::State,
-                        self.json.offset,
-                        self.json.line,
-                        self.json.column,
-                        "JSON event stream closed an incomplete object",
-                    )),
-                },
-            } })();
-            if let Err(error) = result {
-                return self.fail(error);
+                Ok(Some(value))
             }
+            Ok(Some(_)) => self.fail(jet_encoding_error(
+                jet_std::EncodingErrorKind::State,
+                self.json.offset,
+                self.json.line,
+                self.json.column,
+                "JSONL record did not end at a record boundary",
+            )),
+            Err(error) => self.fail(error),
         }
     }
 }

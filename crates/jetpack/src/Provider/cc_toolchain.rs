@@ -21,6 +21,7 @@ use crate::Store::{
     NixOutputRequest, ProducerRecord, Roots, StoreEntry,
 };
 use crate::{Envelope, JSON, SHA256};
+use jet_foundation::DataTree::DataTree;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::Read;
@@ -1900,12 +1901,17 @@ fn read_bounded_file_named(path: &Path, limit: u64, label: &str) -> Result<Vec<u
     Ok(bytes)
 }
 
+fn object_field<'a>(object: &'a [(String, DataTree)], field: &str) -> Option<&'a DataTree> {
+    object
+        .iter()
+        .find_map(|(name, value)| (name == field).then_some(value))
+}
+
 fn json_string(
-    object: &BTreeMap<String, JSON::JSONValue>,
+    object: &[(String, DataTree)],
     field: &str,
 ) -> Result<String, String> {
-    object
-        .get(field)
+    object_field(object, field)
         .ok_or_else(|| format!("C toolchain manifest misses `{field}`"))?
         .as_str()
         .map(str::to_string)
@@ -1913,11 +1919,11 @@ fn json_string(
 }
 
 fn json_number(
-    object: &BTreeMap<String, JSON::JSONValue>,
+    object: &[(String, DataTree)],
     field: &str,
 ) -> Result<i64, String> {
-    match object.get(field) {
-        Some(JSON::JSONValue::Number(value)) => Ok(*value),
+    match object_field(object, field) {
+        Some(DataTree::Int(value)) => Ok(*value),
         _ => Err(format!("C toolchain manifest field `{field}` is not a number")),
     }
 }

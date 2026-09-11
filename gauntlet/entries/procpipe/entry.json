@@ -29,5 +29,14 @@
     "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": ""},
     "go": {"author": "luna-max", "turns": 2, "retries": 1, "diagnosticsHit": [], "notes": "Initial run blocked because producer was not started; added source.Start()."},
     "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in Node child_process rail with capture, sort pipeline, timeout, and exit-code observation."}
+  },
+  "rewrite_provenance": {
+    "worker": "CorpusProcpipe",
+    "variant": "jet",
+    "changed": "Migrated both direct argv invocations from compatibility `process.run([...])` to the canonical `process.cmd([...]).run()` ProcessSpec path; the pipeline and timeout already use canonical ProcessSpec APIs and remain unchanged. Child argv, ordering, timeout, failure propagation, status/code observation, and transcript stay unchanged.",
+    "matched": "Same four deterministic child-process steps, Python arithmetic and timeout/exit inputs, generated-line sort pipeline, 300ms timeout, exit-code observation, and transcript as Rust, Python, Go, and Node.",
+    "expected_output_sha256": "7eb23a488fff7f09383623c43f730fa8de3573f1b9b1c271e1b21f9e51b44c50",
+    "measurement": "unrun: source-only rewrite; runtime and performance proof intentionally not executed",
+    "compiler_observations": "No compiler or harness command was run. Historical diagnostics remain unchanged in authoring.jet.diagnosticsHit; fresh compiler observations are unavailable by design."
   }
 }

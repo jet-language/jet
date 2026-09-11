@@ -13,6 +13,22 @@ pub fn db_connection_method_return_ty(method: &str) -> Option<Type> {
     }
 }
 
+pub fn db_pool_method_return_ty(method: &str) -> Option<Type> {
+    match method {
+        "acquire" => Some(result_ty(
+            Type::Named("DbLease".into()),
+            db_error_ty(),
+        )),
+        "ready" => Some(result_ty(Type::Bool, db_error_ty())),
+        "drain" => Some(result_ty(
+            Type::Named("DbPoolReceipt".into()),
+            db_error_ty(),
+        )),
+        "receipt" => Some(Type::Named("DbPoolReceipt".into())),
+        _ => None,
+    }
+}
+
 pub fn db_scope_method_return_ty(method: &str) -> Option<Type> {
     match method {
         "query" => Some(result_ty(Type::List(Box::new(db_row_ty())), db_error_ty())),

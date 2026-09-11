@@ -46,6 +46,17 @@ In order:
 After `cargo build` the running server picks up the new binary via
 **Jet: Restart Language Server** (or reload the window).
 
+## Reasoning
+
+Run **Jet: Explain Reasoning** with a Jet file active. The panel groups checked
+facts by value, ownership, and relationships, with source links and producer
+details. It does not execute the program.
+
+**Pin panel** keeps the view on its current file. **Refresh** checks that file
+again. Source edits mark the view stale; refresh before following a fact's
+source span so the link cannot select shifted text. **Open source** can still
+open the file while the facts are stale.
+
 ## Native debugging
 
 The extension registers the `jet` DAP adapter. Use **Jet: Debug File** or press

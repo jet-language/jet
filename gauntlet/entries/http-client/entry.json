@@ -30,5 +30,13 @@
     "python": {"author": "luna-max", "turns": 2, "retries": 1, "diagnosticsHit": ["python3: can't open file `python/main.py`: [Errno 2] No such file or directory"], "notes": "Uses urllib and stdlib json."},
     "go": {"author": "luna-max", "turns": 2, "retries": 1, "diagnosticsHit": ["package `go/main.go` is not in std"], "notes": "Uses net/http and encoding/json."},
     "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in fetch rail against the same peer, preserving item lines, 404 handling, and total quantity."}
+  },
+  "rewrite_provenance": {
+    "worker": "CorpusHttpClient",
+    "variant": "jet",
+    "changed": "Replaced manual response-text reads plus standalone JSON decoding with canonical typed response decoding via `response.json<T>()`, removed the unused JSON module import, and narrowed the run error contract to `HTTPError`; endpoint, GET sequence, item IDs, existing GET/decode panic messages, quantity sum, and output formatting remain unchanged.",
+    "matched": "Same peer server, request sequence, item IDs, typed records, missing-item branch, quantity reduction, and transcript as Rust, Python, Go, and Node.",
+    "expected_output_sha256": "cd697dbc0bc338028df40e66703de6d88405ea30011e9df1725da30c80cac1da",
+    "measurement": "unrun per assignment: runtime, performance, and output proof remain pending; no validation command was executed"
   }
 }

@@ -218,9 +218,7 @@ pub(crate) fn annotate_scoped_gc_promotions(bundle: &mut ProgramBundle) -> Vec<D
             }
             for stmt in &function.body {
                 let Stmt::Val(binding) = stmt else { continue };
-                if called_function_name(&binding.init)
-                    .is_some_and(|name| promoted.contains(name))
-                {
+                if called_function_name(&binding.init).is_some_and(|name| promoted.contains(name)) {
                     diagnostics.push(Diagnostic::error(
                         "E2111",
                         format!("`{}` cannot leave its scoped GC policy here", binding.name),
@@ -374,6 +372,11 @@ fn annotate_scope(
                         edges,
                         collection_len: match &binding.init {
                             Expr::ListLit(items, _) => Some(items.len()),
+                            Expr::TypedLit {
+                                head: Some(Type::List(_) | Type::FixedList { .. }),
+                                body: crate::AST::TypedLitBody::Empty,
+                                ..
+                            } => Some(0),
                             _ => None,
                         },
                     });
@@ -443,8 +446,7 @@ fn propagate_gc_transfers(function: &mut Func, promoted: &HashSet<String>) -> bo
     for stmt in &mut function.body {
         if let Stmt::Val(binding) = stmt {
             if function.gc_scope
-                && called_function_name(&binding.init)
-                    .is_some_and(|name| promoted.contains(name))
+                && called_function_name(&binding.init).is_some_and(|name| promoted.contains(name))
                 && !binding.gc_transferred
             {
                 binding.gc_transferred = true;

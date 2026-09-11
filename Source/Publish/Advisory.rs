@@ -859,6 +859,28 @@ pub fn audit_advisory_feed_with_source_exceptions(
         crate::Lock::enforce_provenance_requirement(lock, requirement)
             .map_err(|error| e2610("lock provenance", &error))?;
     }
+    let (maturity, applied_source_exceptions) =
+        lock_maturity_diagnostics(lock, feed, receipt.maturity_seconds, now, source_exceptions)?;
+    Ok(PolicyAudit {
+        receipt,
+        matches: audit_lockfile(lock, &feed.advisories)?,
+        maturity,
+        source_exceptions: applied_source_exceptions,
+    })
+}
+
+/// D-JPK-FRESHNESS1=D: walk every locked package against the verified feed's
+/// release records. Only the root and path-sourced packages are exempt from
+/// needing a trusted release record; registry, git, and foreign (FFI bridge)
+/// packages all pass through the same maturity window. Returns the maturity
+/// diagnostics and the summaries of the source exceptions that were applied.
+pub(crate) fn lock_maturity_diagnostics(
+    lock: &LockFile,
+    feed: &AdvisoryFeed,
+    maturity_seconds: u64,
+    now: u64,
+    source_exceptions: &[PackagePolicyException],
+) -> Result<(Vec<Diagnostic>, Vec<String>), Diagnostic> {
     let mut maturity = Vec::new();
     let mut applied_source_exceptions = Vec::new();
     for package in &lock.packages {
@@ -880,7 +902,7 @@ pub fn audit_advisory_feed_with_source_exceptions(
             continue;
         };
         let required = match release.source_class {
-            SourceClass::ThirdParty => receipt.maturity_seconds,
+            SourceClass::ThirdParty => maturity_seconds,
             SourceClass::FirstParty | SourceClass::Workspace => 0,
         };
         let mature_at = release.first_seen.saturating_add(required);
@@ -895,12 +917,8 @@ pub fn audit_advisory_feed_with_source_exceptions(
                 && !exception.reason.trim().is_empty()
                 && exception.expires_at > now
         });
-        if source_exception.is_some() {
-            applied_source_exceptions.push(
-                source_exception
-                    .expect("source exception was found")
-                    .summary(),
-            );
+        if let Some(exception) = source_exception {
+            applied_source_exceptions.push(exception.summary());
         }
         if now < mature_at && !feed_exception && source_exception.is_none() {
             maturity.push(e2609(
@@ -911,12 +929,7 @@ pub fn audit_advisory_feed_with_source_exceptions(
             ));
         }
     }
-    Ok(PolicyAudit {
-        receipt,
-        matches: audit_lockfile(lock, &feed.advisories)?,
-        maturity,
-        source_exceptions: applied_source_exceptions,
-    })
+    Ok((maturity, applied_source_exceptions))
 }
 
 fn current_unix_time() -> u64 {

@@ -18,12 +18,16 @@ const fresh = () => {
 };
 
 const reviewPasses = () => ({
+  beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.',
+  adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
+});
+
+const historicalReviewPasses = () => ({
   base: 'The complete first draft compared all options.',
   boilOcean: 'The breadth pass checked for missing choices.',
   hybrid: 'The hybrid pass combined compatible strengths.',
   cooperative: 'The cooperative pass strengthened every option.',
-  beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.',
-  adversarial: 'Author model family: family-a. Adversarial model family: family-b. The adversarial pass attacked the recommendation.',
+  ...reviewPasses(),
 });
 
 const surface = () => ({
@@ -34,14 +38,14 @@ const surface = () => ({
     { key: 'A', name: 'Option A', gist: 'Explicit call.', gains: ['Behavior stays visible'], losses: ['One more step'], proposed: { code: 'a()' } },
     { key: 'B', name: 'Option B', gist: 'Short call.', gains: ['Shortest first script'], losses: ['Loses the needed guarantee'], proposed: { code: 'b()' } },
   ],
-  recommendation: { rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'], losses: ['One more step'], whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step.' },
+  recommendation: { rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'], losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }], whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step.' },
 });
 
 const ballot = (extra = {}) => ({
   ballotMode: 'full', reviewPasses: reviewPasses(), surface: surface(),
   gist: 'a plain sentence', lesson: 'This short paragraph explains the situation and stakes.', story: 'Dana hits this while shipping X.', inWild: 'real code here', rec: 'A',
   options: [{ key: 'A', name: 'Option A', detail: 'A is explicit.', code: 'a()' }, { key: 'B', name: 'Option B', detail: 'B is brief.', code: 'b()' }],
-  recommendation: { why: 'A best serves this decision.', whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step, which keeps behavior visible.' },
+  recommendation: { why: 'A best serves this decision.', gains: ['Behavior stays visible'], losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }], whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step, which keeps behavior visible.' },
   hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Keep it.' }, { key: 'B', aspect: 'B is brief.', use: 'Borrow its short names.' }] },
   ...extra,
 });
@@ -64,7 +68,7 @@ test('addDecision requires a reading surface and names its gaps', () => {
     (e) => e.code === 'E_BALLOT' && /must be a question/.test(e.message) && /options\[B\]\.gains/.test(e.message)
       && /whyNot\[B\]/.test(e.message) && /project jargon "facet"/.test(e.message));
   const { result } = st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-S1', title: 'Good surface', ...ballot() }));
-  assert.equal(result.ballotProcessVersion, 3);
+  assert.equal(result.ballotProcessVersion, 4);
   assert.equal(result.surface.gist, 'Which option should Jet ship?');
 });
 
@@ -73,10 +77,10 @@ test('new ballots list the recommended option first as A; open ballots keep thei
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
   const recB = ballot({ rec: 'B', recommendation: { why: 'B wins here.', whyNot: [{ key: 'A', reason: 'A loses the needed behavior.' }], tradeoff: 'B adds one visible step.' } });
   recB.surface.recommendation = { ...recB.surface.recommendation, rec: 'B', whyNot: [{ key: 'A', reason: 'A loses the needed behavior.' }] };
+  assert.deepEqual(db.ballotGaps({ ...recB, ballotProcessVersion: 4 }, { requireBeginner: true, requireSurface: true }), [], 'edits of an open ballot do not enforce A-first');
   assert.throws(
     () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Rec B', ...recB })),
     (e) => e.code === 'E_BALLOT' && /recommended option first, as A/.test(e.message));
-  assert.deepEqual(db.ballotGaps({ ...recB, ballotProcessVersion: 3 }, { requireBeginner: true, requireSurface: true }), [], 'edits of an open ballot do not enforce A-first');
 });
 
 test('surface option keys and rec must match the ballot; drafts may omit it; older ballots are not forced', () => {
@@ -92,8 +96,8 @@ test('surface option keys and rec must match the ballot; drafts may omit it; old
   const s1 = st.load();
   const legacy = s1.decisions.find(d => d.id === 'D-D1');
   assert.equal(legacy.surface, null);
-  assert.deepEqual(db.ballotGaps({ ...ballot(), surface: undefined, ballotProcessVersion: 2 }), [], 'process-2 ballots stay valid without a surface');
-  assert.ok(db.ballotGaps({ ...ballot(), surface: undefined, ballotProcessVersion: 3 }).includes('surface (object)'));
+  assert.deepEqual(db.ballotGaps({ ...ballot(), reviewPasses: historicalReviewPasses(), surface: undefined, ballotProcessVersion: 2 }), [], 'process-2 ballots stay valid without a surface');
+  assert.ok(db.ballotGaps({ ...ballot(), reviewPasses: historicalReviewPasses(), surface: undefined, ballotProcessVersion: 3 }).includes('surface (object)'));
 });
 
 // ---- 1. ballot-ready validation on decision add ----------------------------
@@ -125,7 +129,7 @@ test('addDecision accepts a full ballot', () => {
   assert.equal(result.draft, false);
   assert.equal(result.ballotMode, 'full');
   assert.deepEqual(result.reviewPasses, reviewPasses());
-  assert.deepEqual(Object.keys(result.reviewPasses), ['base', 'boilOcean', 'hybrid', 'cooperative', 'beginner', 'adversarial']);
+  assert.deepEqual(Object.keys(result.reviewPasses), ['beginner', 'adversarial']);
 });
 
 test('verdicts require an existing supersession link', () => {
@@ -148,14 +152,13 @@ test('normalize restores the imported tier-verdict supersession link', () => {
   assert.equal(s.decisions[0].supersededBy, 'D-ONCE-TIER1');
 });
 
-test('full ballot requires every ordered review summary', () => {
+test('full ballot rejects retired review summaries', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
-  const passes = reviewPasses();
-  delete passes.cooperative;
+  const passes = { ...reviewPasses(), base: 'Retired review.' };
   assert.throws(
     () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot({ reviewPasses: passes }) })),
-    (e) => e.code === 'E_BALLOT' && /reviewPasses\.cooperative/.test(e.message));
+    (e) => e.code === 'E_BALLOT' && /reviewPasses\.base.*unexpected/.test(e.message));
 });
 
 test('full ballot requires the fresh-agent beginner review', () => {
@@ -182,10 +185,10 @@ test('full ballot requires string review summaries', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
   const passes = reviewPasses();
-  passes.base = { text: 'Not a string.' };
+  passes.beginner = { text: 'Not a string.' };
   assert.throws(
     () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot({ reviewPasses: passes }) })),
-    (e) => e.code === 'E_BALLOT' && /reviewPasses\.base.*need text/.test(e.message));
+    (e) => e.code === 'E_BALLOT' && /reviewPasses\.beginner.*need text/.test(e.message));
 });
 
 test('ballot option keys are unique so every loser needs its own reason', () => {
@@ -208,33 +211,86 @@ test('review summaries contain one or two sentences', () => {
     (e) => e.code === 'E_BALLOT' && /reviewPasses\.adversarial.*1-2 sentences/.test(e.message));
 });
 
-test('adversarial review rejects the author family and accepts a rival family', () => {
+test('adversarial review accepts a fresh reviewer from the same or another model family', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
   const sameFamily = reviewPasses();
-  sameFamily.adversarial = 'Author model family: Family A. Adversarial model family: family_a. The adversarial pass attacked the recommendation.';
-  assert.throws(
-    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Same family', ...ballot({ reviewPasses: sameFamily }) })),
-    (e) => e.code === 'E_BALLOT' && /author and adversarial model families must differ/.test(e.message));
+  sameFamily.adversarial = 'Author model family: Family A. Adversarial model family: family_a. Fresh agent: reader-2. The adversarial pass attacked the recommendation.';
+  const same = st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-SAME', title: 'Same family', ...ballot({ reviewPasses: sameFamily }) }));
+  assert.equal(same.result.reviewPasses.adversarial, sameFamily.adversarial);
   const { result } = st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-RIVAL', title: 'Rival family', ...ballot() }));
   assert.equal(result.reviewPasses.adversarial, reviewPasses().adversarial);
 });
 
-
-test('short ballot needs the owner request and rejects review records', () => {
+test('technical code fences do not count as prose but surrounding text still does', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
-  const short = ballot({ ballotMode: 'short', shortAuthorizedBy: 'Owner: make this a short ballot.', reviewPasses: undefined });
+  const code = 'int values[] = { ' + Array(100).fill('1,').join(' ') + ' 0 };';
+  for (const [open, close] of [['```cpp', '```'], ['~~~~c', '~~~~~']]) {
+    const p = ballot();
+    p.options[0].technical = ['This example preserves every value.', open, code, close, 'Cleanup still runs once.'].join('\n');
+    st.mutate(s => db.addDecision(s, { cardId: '#1', title: 'Worked code', ...p }));
+    p.options[0].technical += '\n\n' + Array(40).fill('word').join(' ') + '.';
+    assert.throws(() => st.mutate(s => db.addDecision(s, { cardId: '#1', title: 'Dense explanation', ...p })),
+      e => e.code === 'E_BALLOT' && /plain language.*technical sentence/.test(e.message));
+  }
+});
+
+test('new full ballots require a named adversarial reader separate from the beginner', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  for (const summary of [
+    'The adversarial pass attacked the recommendation.',
+    'Fresh agent:   . The adversarial pass attacked the recommendation.',
+    'Fresh agent: reader-1. The adversarial pass attacked the recommendation.',
+  ]) {
+    const passes = reviewPasses();
+    passes.adversarial = 'Author model family: family-a. Adversarial model family: family-a. ' + summary;
+    for (const draft of [false, true]) {
+      assert.throws(
+        () => st.mutate(s => db.addDecision(s, { cardId: '#1', title: 'Missing independent reader', status: 'ratified', draft, ...ballot({ reviewPasses: passes }) })),
+        e => e.code === 'E_BALLOT' && /Fresh agent:|different fresh agent/.test(e.message));
+    }
+  }
+});
+
+test('ratified review evidence stays intact but an open update requires a fresh reader', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  const historical = reviewPasses();
+  historical.adversarial = 'Author model family: family-a. Adversarial model family: family-b. The adversarial pass attacked the recommendation.';
+  st.mutate(s => {
+    const d = db.addDecision(s, { cardId: '#1', id: 'D-HISTORICAL-REVIEW', title: 'Historical review', ...ballot() });
+    s.decisions.find(x => x.id === d.id).reviewPasses = historical;
+    s.decisions.find(x => x.id === d.id).status = 'ratified';
+  });
+  const d = st.load().decisions.find(x => x.id === 'D-HISTORICAL-REVIEW');
+  assert.deepEqual(db.ballotGaps(d), []);
+  assert.equal(d.reviewPasses.adversarial, historical.adversarial);
+  st.mutate(s => db.reopenDecision(s, d.id, 'owner'));
+  assert.throws(() => st.mutate(s => db.updateDecision(s, d.id, { title: 'Reopened review' }, 'agent')),
+    e => e.code === 'E_BALLOT' && /Fresh agent:/.test(e.message));
+});
+
+
+test('short ballot defaults to one mechanism and rejects restricted profiles or review records', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  const short = ballot({ ballotMode: 'short', reviewPasses: undefined });
   const { result } = st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Short choice', ...short }));
   assert.equal(result.ballotMode, 'short');
-  assert.equal(result.shortAuthorizedBy, 'Owner: make this a short ballot.');
+  assert.equal(result.shortAuthorizedBy, null);
   assert.equal(result.reviewPasses, null);
 
   assert.throws(
-    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'No owner request', ...ballot({ ballotMode: 'short', reviewPasses: undefined }) })),
-    (e) => e.code === 'E_BALLOT' && /shortAuthorizedBy/.test(e.message));
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Syntax short', group: 'syntax', ...short })),
+    (e) => e.code === 'E_BALLOT' && /short ballot refused.*syntax-group/.test(e.message));
+  st.mutate((s, cfg) => db.addCard(s, { title: 'Full card', tags: ['full'] }, cfg));
   assert.throws(
-    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Short with reviews', ...ballot({ ballotMode: 'short', shortAuthorizedBy: 'Owner said short.' }) })),
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#2', title: 'Tagged short', ...short })),
+    (e) => e.code === 'E_BALLOT' && /short ballot refused.*cards tagged full/.test(e.message));
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Short with reviews', ...ballot({ ballotMode: 'short' }) })),
     (e) => e.code === 'E_BALLOT' && /short.*reviewPasses/.test(e.message));
 });
 
@@ -279,6 +335,18 @@ test('recommendation must explain every losing option', () => {
   assert.throws(
     () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot({ recommendation: { why: 'A wins.', whyNot: [], tradeoff: 'A costs one step.' } }) })),
     (e) => e.code === 'E_BALLOT' && /recommendation\.whyNot\[B\]/.test(e.message));
+});
+test('new recommendation losses require an unavoidable reason', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  const bad = ballot();
+  bad.recommendation.losses = [{ loss: 'One more step' }];
+  bad.surface.recommendation.losses = [{ loss: 'One more step' }];
+  assert.throws(
+    () => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Missing loss reason', ...bad })),
+    (e) => e.code === 'E_BALLOT' && /recommendation\.losses\[1\].*whyUnavoidable/.test(e.message));
+  const { result } = st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-LOSS', title: 'Reasoned loss', ...ballot() }));
+  assert.equal(result.recommendation.losses[0].whyUnavoidable, 'The explicit step keeps behavior visible.');
 });
 
 test('hybrid metadata is optional and does not gate a ballot', () => {

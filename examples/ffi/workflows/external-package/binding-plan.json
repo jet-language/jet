@@ -1,0 +1,48 @@
+{
+  "schema": "jet-ffi-workflow-v1",
+  "workflow": "external-package",
+  "status": "authored-unexecuted",
+  "source": {
+    "package": "c@nixpkgs:libpng",
+    "files": ["native/png_protocol.h", "native/png_protocol.overlay.jet", "logo.png"],
+    "input": "logo.png",
+    "original_input": true,
+    "algorithm_owner": "libpng"
+  },
+  "binding": {
+    "language": "c",
+    "module": "c.png",
+    "entry": "png.Image.open",
+    "format": "RGBA",
+    "plan": "protocol-adapter-over-existing-decoder"
+  },
+  "protocol": [
+    "initialize decoder and read signature",
+    "read dimensions and select explicit RGBA output",
+    "allocate output with the declared owner",
+    "decode rows and report native error state",
+    "close decoder and release output on every success or failure path"
+  ],
+  "contracts": {
+    "errors": "typed native error, never silent fallback",
+    "cleanup": "defer close after decoder initialization",
+    "ownership": "returned image owns decoded RGBA bytes",
+    "unknown_protocol": "remain at lower-level C binding"
+  },
+  "build": {
+    "command": "jet bind native/png_protocol.h --pkg png --overlay native/png_protocol.overlay.jet",
+    "then": ["jet build", "jet run"],
+    "output": "1x1"
+  },
+  "failure_paths": [
+    {
+      "case": "missing-input",
+      "input": "missing-or-corrupt.png",
+      "result": "typed-error-and-cleanup"
+    },
+    {
+      "case": "invalid-signature",
+      "result": "reject-before-row-allocation"
+    }
+  ]
+}

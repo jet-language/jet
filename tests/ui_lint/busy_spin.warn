@@ -1,0 +1,8 @@
+Warning [L0207] (shared_busy_wait): This unbounded loop polls `Shared` state without waiting
+  --> tests/ui_lint/busy_spin.jet:6:15
+    |
+  6 |     loop flag.ready == false {}
+    |               ^^^^^^^^^^^^^^
+ Why: Each turn reads a lock-backed value again; a non-blocking body can consume a core while another task makes progress
+ Fix: Wait on a `Condition` through an edit guard, or receive from a channel; an empty plain-field predicate can use that wait directly
+More: jet-lang.dev/e/L0207

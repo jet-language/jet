@@ -1,24 +1,8 @@
 // ── core.encoding: format-agnostic value tree (D-SERDE2 = A) ───────────────
-// The one tree every format adapter speaks. The built-in `#[Codable]` derive
-// (D-ENC1) lowers `encode`/`decode` to walks over this; each adapter turns it
-// into / parses it from wire text. Distinct from the dynamic `JSON` enum:
-// `DataTree` preserves field order (ordered `Object`) and keeps Int vs Float.
-#[derive(Clone, Debug, PartialEq)]
-pub enum DataTree {
-    Null,
-    Bool(bool),
-    Int(i64),
-    Float(f64),
-    // Internal typed-JSON carriers. Sema does not expose these as public
-    // DataTree constructors; the typed visitor consumes them before a
-    // user-visible tree can escape.
-    Number(String),
-    TypedText(String),
-    Text(String),
-    Bytes(Vec<u8>),
-    Array(Vec<DataTree>),
-    Object(Vec<(String, DataTree)>),
-}
+// The shared Foundation DataTree carrier is embedded by Codegen before this
+// runtime extension. The built-in `#[Codable]` derive (D-ENC1) lowers
+// `encode`/`decode` to walks over the carrier; adapters turn it into wire data.
+// The carrier preserves field order (ordered `Object`) and keeps Int vs Float.
 
 // D-VALIDATE-DECODE1=B (ratified 2026-08-03): every typed decoder returns
 // the same accumulated field-error list. Structural failures use the empty
@@ -48,19 +32,11 @@ impl FieldError {
     // Prefix every failure from a child decode. Keeping this operation on
     // the canonical error type makes nested records, lists, and maps
     // preserve all failures instead of collapsing to the first one.
-    pub fn under_errors(seg: &str, errors: Vec<FieldError>) -> Vec<FieldError> {
-        let mut framed = Vec::with_capacity(errors.len());
-        for mut error in errors {
-            error.path = if error.path.is_empty() {
-                seg.to_string()
-            } else if error.path.starts_with('[') {
-                format!("{}{}", seg, error.path)
-            } else {
-                format!("{}.{}", seg, error.path)
-            };
-            framed.push(error);
+    pub fn under_errors(seg: &str, mut errors: Vec<FieldError>) -> Vec<FieldError> {
+        for error in &mut errors {
+            error.path = jet_field_error_kernel_under(seg, &error.path);
         }
-        framed
+        errors
     }
 
     // The Jet-facing transform keeps a child Result intact on success and
@@ -85,6 +61,27 @@ impl super::JetDisplay for DataTree {
 impl super::JetDebug for DataTree {
     fn jet_debug(&self) -> String {
         <Self as super::JetShow>::jet_show(self)
+    }
+}
+/// Preserve exact integer semantics at the DataTree boundary. The Int variant
+/// carries only the inline JetInt payload; larger values stay lexical Numbers
+/// so a tagged owner word is never mistaken for a host integer.
+pub(crate) fn jet_datatree_encode_i64(value: i64) -> DataTree {
+    if (jet_foundation::Numeric::JetInt::inline_min()
+        ..=jet_foundation::Numeric::JetInt::inline_max())
+        .contains(&value)
+    {
+        DataTree::Int(value)
+    } else {
+        DataTree::Number(value.to_string())
+    }
+}
+
+pub(crate) fn jet_datatree_encode_u64(value: u64) -> DataTree {
+    if value <= jet_foundation::Numeric::JetInt::inline_max() as u64 {
+        DataTree::Int(value as i64)
+    } else {
+        DataTree::Number(value.to_string())
     }
 }
 
@@ -113,6 +110,84 @@ pub fn jet_datatree_merge_wire_order(known: &DataTree, original: &DataTree) -> D
     DataTree::Object(jet_wire_order_merge(known, original))
 }
 
+/// D-SHAPE-ONE1=A: apply one already-resolved shape projection to a
+/// `DataTree`. The front end selects each `ShapeProjectedField::name` for its
+/// consumer (including per-format Rename); codec adapters only render the
+/// resulting ordered tree and never rediscover field names.
+pub fn jet_datatree_project(
+    tree: &DataTree,
+    projection: &ShapeProjection,
+) -> Result<DataTree, Vec<FieldError>> {
+    let project_object = |value: &DataTree| {
+        let DataTree::Object(entries) = value else {
+            return Err(FieldError::one("shape projection needs object values"));
+        };
+        let mut projected = Vec::with_capacity(projection.fields.len());
+        for field in &projection.fields {
+            let Some((_, value)) = entries
+                .iter()
+                .find(|(name, _)| name == &field.decode_name)
+            else {
+                continue;
+            };
+            projected.push((field.name.clone(), value.clone()));
+        }
+        Ok(DataTree::Object(projected))
+    };
+
+    match tree {
+        DataTree::Object(_) => project_object(tree),
+        DataTree::Array(values) => values
+            .iter()
+            .map(project_object)
+            .collect::<Result<Vec<_>, _>>()
+            .map(DataTree::Array),
+        _ => Err(FieldError::one("shape projection needs object values")),
+    }
+}
+/// Reverse a resolved shape projection before typed decoding. Projected names
+/// must be known and unique; arrays of records retain their order.
+pub fn jet_datatree_unproject(
+    tree: &DataTree,
+    projection: &ShapeProjection,
+) -> Result<DataTree, Vec<FieldError>> {
+    let unproject_object = |value: &DataTree| {
+        let DataTree::Object(entries) = value else {
+            return Err(FieldError::one("shape unprojection needs object values"));
+        };
+        let mut restored = Vec::with_capacity(entries.len());
+        let mut seen = std::collections::BTreeSet::new();
+        for (name, child) in entries {
+            let Some(field) = projection.fields.iter().find(|field| field.name == *name)
+            else {
+                return Err(FieldError::at(
+                    name,
+                    format!("field `{name}` is not part of the shape projection"),
+                ));
+            };
+            if !seen.insert(field.decode_name.clone()) {
+                return Err(FieldError::at(
+                    name,
+                    format!("duplicate projected field `{name}`"),
+                ));
+            }
+            restored.push((field.decode_name.clone(), child.clone()));
+        }
+        Ok(DataTree::Object(restored))
+    };
+
+    match tree {
+        DataTree::Object(_) => unproject_object(tree),
+        DataTree::Array(values) => values
+            .iter()
+            .map(unproject_object)
+            .collect::<Result<Vec<_>, _>>()
+            .map(DataTree::Array),
+        _ => Err(FieldError::one("shape unprojection needs object values")),
+    }
+}
+
+
 // Engine adapters reduce their resident value to this tag before calling
 // the Prelude-owned diagnostic vocabulary.
 pub fn datatree_kind_for(t: &DataTree) -> &'static str {
@@ -135,8 +210,30 @@ pub fn datatree_kind_for(t: &DataTree) -> &'static str {
 // inside a hand `decode`. `.field`/`.at` auto-fill the path with the
 // segment they read; scalar readers leave it empty, so a containing
 // field/list/map decoder frames the child result with `FieldError.under`.
-impl DataTree {
-    pub fn field(&self, name: &str) -> Result<DataTree, Vec<FieldError>> {
+//
+// The carrier type is owned by Foundation; this tier-side extension is a
+// trait because Rust only admits inherent impls in the defining crate, and the
+// accessors read the tier's `jet_int_*` marshalling (D-INTBIG1). AOT, the
+// Cranelift host, and the TIR evaluator each include this one file.
+pub trait JetDataTreeAccess {
+    fn field(&self, name: &str) -> Result<DataTree, Vec<FieldError>>;
+    fn at(&self, i: i64) -> Result<DataTree, Vec<FieldError>>;
+    fn int(&self) -> Result<i64, Vec<FieldError>>;
+    fn text(&self) -> Result<String, Vec<FieldError>>;
+    fn bool(&self) -> Result<bool, Vec<FieldError>>;
+    fn float(&self) -> Result<f64, Vec<FieldError>>;
+    /// D-DATATREE-ERGO1=A: project scalar leaves to text without weakening the
+    /// strict `.text()` accessor. Containers and non-textual leaves have no
+    /// scalar projection.
+    fn to_text(&self) -> Option<String>;
+    /// D-DATATREE-ERGO1=A: compare trees while ignoring object insertion
+    /// order. Arrays stay ordered, numeric variants stay distinct, and NaN is
+    /// never equal to anything, including another NaN.
+    fn equal_unordered(&self, other: &DataTree) -> bool;
+}
+
+impl JetDataTreeAccess for DataTree {
+    fn field(&self, name: &str) -> Result<DataTree, Vec<FieldError>> {
         match self {
             DataTree::Object(pairs) => pairs
                 .iter()
@@ -152,7 +249,7 @@ impl DataTree {
             )),
         }
     }
-    pub fn at(&self, i: i64) -> Result<DataTree, Vec<FieldError>> {
+    fn at(&self, i: i64) -> Result<DataTree, Vec<FieldError>> {
         match self {
             DataTree::Array(items) => {
                 let idx = if i < 0 {
@@ -184,7 +281,7 @@ impl DataTree {
             )),
         }
     }
-    pub fn int(&self) -> Result<i64, Vec<FieldError>> {
+    fn int(&self) -> Result<i64, Vec<FieldError>> {
         match self {
             DataTree::Int(n) => Ok(*n),
             // D-SERDE2: a hand `decode` runs inside the typed walk, so the
@@ -206,7 +303,7 @@ impl DataTree {
             ))),
         }
     }
-    pub fn text(&self) -> Result<String, Vec<FieldError>> {
+    fn text(&self) -> Result<String, Vec<FieldError>> {
         match self {
             DataTree::Text(s) | DataTree::TypedText(s) => Ok(s.clone()),
             _ => Err(FieldError::one(format!(
@@ -215,7 +312,7 @@ impl DataTree {
             ))),
         }
     }
-    pub fn bool(&self) -> Result<bool, Vec<FieldError>> {
+    fn bool(&self) -> Result<bool, Vec<FieldError>> {
         match self {
             DataTree::Bool(b) => Ok(*b),
             _ => Err(FieldError::one(format!(
@@ -224,7 +321,7 @@ impl DataTree {
             ))),
         }
     }
-    pub fn float(&self) -> Result<f64, Vec<FieldError>> {
+    fn float(&self) -> Result<f64, Vec<FieldError>> {
         match self {
             DataTree::Float(f) => Ok(*f),
             DataTree::Int(n) => {
@@ -253,10 +350,7 @@ impl DataTree {
         }
     }
 
-    /// D-DATATREE-ERGO1=A: project scalar leaves to text without weakening the
-    /// strict `.text()` accessor. Containers and non-textual leaves have no
-    /// scalar projection.
-    pub fn to_text(&self) -> Option<String> {
+    fn to_text(&self) -> Option<String> {
         match self {
             DataTree::Text(text) | DataTree::TypedText(text) => Some(text.clone()),
             DataTree::Int(value) => Some(jet_int_to_string(*value)),
@@ -267,10 +361,7 @@ impl DataTree {
         }
     }
 
-    /// D-DATATREE-ERGO1=A: compare trees while ignoring object insertion
-    /// order. Arrays stay ordered, numeric variants stay distinct, and NaN is
-    /// never equal to anything, including another NaN.
-    pub fn equal_unordered(&self, other: &DataTree) -> bool {
+    fn equal_unordered(&self, other: &DataTree) -> bool {
         match (self, other) {
             (DataTree::Null, DataTree::Null) => true,
             (DataTree::Bool(left), DataTree::Bool(right)) => left == right,
@@ -319,33 +410,86 @@ impl DataTree {
     }
 }
 
+/// Decode one fixed-width integer from the exact DataTree number carrier.
+///
+/// The result is an exact `i128` after the shared numeric kernel has checked
+/// the destination width. `TypedText` never reaches `decode_int_with`, so JSON
+/// quoted numerals remain rejected; callers perform the final native cast.
+pub(crate) fn jet_datatree_decode_fixed_integer(
+    t: &DataTree,
+    signed: bool,
+    bits: u8,
+    type_name: &str,
+) -> Result<i128, Vec<FieldError>> {
+    let kind = match (signed, bits) {
+        (true, 8) => 0,
+        (true, 16) => 1,
+        (true, 32) => 2,
+        (true, 64) => 3,
+        (false, 8) => 4,
+        (false, 16) => 5,
+        (false, 32) => 6,
+        (false, 64) => 7,
+        _ => {
+            return Err(FieldError::one(format!(
+                "expected {type_name}, found out-of-range Int"
+            )))
+        }
+    };
+    let value = decode_int_with(
+        t,
+        i128::from,
+        |text| {
+            text.parse::<i128>()
+                .map_err(|_| "exact Int is outside i128".to_string())
+        },
+    )?;
+    if jet_foundation::NumericConversion::jet_numeric_fixed_from_i128(value, kind).is_some() {
+        Ok(value)
+    } else {
+        Err(FieldError::one(format!(
+            "expected {type_name}, found out-of-range Int"
+        )))
+    }
+}
+
 macro_rules! jet_datatree_decode_helpers {
     () => {
         // Primitive typed-decode rules live beside the tree and are shared by the
         // AOT Prelude and the JIT's handle marshalling adapter. The engines only
         // convert their resident representation to this tree and back.
-        pub fn decode_int(t: &DataTree) -> Result<i64, Vec<FieldError>> {
+        /// Decode exact `Int` values through an engine-owned carrier pair.
+        ///
+        /// `from_i64` owns every integral `Int`/`Float` conversion, while
+        /// `parse_exact` owns the destination's exact text carrier. Number
+        /// exponents are normalized here, and all coercion diagnostics stay on
+        /// this one Prelude path.
+        pub fn decode_int_with<T>(
+            t: &DataTree,
+            from_i64: impl Fn(i64) -> T,
+            parse_exact: impl Fn(&str) -> Result<T, String>,
+        ) -> Result<T, Vec<FieldError>> {
             match t {
-                DataTree::Int(n) => Ok(*n),
+                DataTree::Int(n) => Ok(from_i64(*n)),
                 DataTree::Float(f)
                     if f.is_finite()
                         && f.fract() == 0.0
                         && *f >= i64::MIN as f64
                         && *f < i64::MAX as f64 =>
                 {
-                    Ok(jet_int_from_i64(*f as i64))
+                    Ok(from_i64(*f as i64))
                 }
                 DataTree::Number(text) => {
                     let integer = crate::jet_json_number::json_exact_integer_text(text)
                         .map_err(FieldError::one)?;
-                    jet_int_from_str(&integer)
+                    parse_exact(&integer)
                         .map_err(|_| FieldError::one(format!("expected Int, found number {text}")))
                 }
                 DataTree::TypedText(text) => Err(FieldError::one(format!(
                     "expected Int, found text {:?}",
                     text
                 ))),
-                DataTree::Text(text) => jet_int_from_str(text.trim())
+                DataTree::Text(text) => parse_exact(text.trim())
                     .map_err(|_| FieldError::one(format!("expected Int, found text {:?}", text))),
                 other => Err(FieldError::one(format!(
                     "expected Int, found {}",
@@ -354,6 +498,11 @@ macro_rules! jet_datatree_decode_helpers {
             }
         }
 
+        /// Resident raw exact-Int wrapper. Every successful result is a
+        /// managed carrier, including a large `DataTree::Int`.
+        pub fn decode_int(t: &DataTree) -> Result<i64, Vec<FieldError>> {
+            decode_int_with(t, jet_int_from_i64, |text| jet_int_from_str(text))
+        }
         pub fn decode_float(t: &DataTree) -> Result<f64, Vec<FieldError>> {
             match t {
                 DataTree::Float(f) => Ok(*f),

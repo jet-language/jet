@@ -29,6 +29,12 @@ so and seed. In build/update with an existing corpus, never blind re-seed —
 re-derive against the current tree and propose additions, retirements, and
 definition changes as a diff for owner approval.
 
+Before activation, read `.agents/skills/_shared/audit-dispositions.md`. It owns
+shared publication, workflow-boundary, and disposition mechanics; the
+gauntlet's mode, comparator, tier gates, ratchet, and Tower-card rules remain
+local.
+
+
 ## Shared laws (both modes)
 
 **Day-zero frame.** Judge every language, Jet included, as if all shipped
@@ -38,7 +44,7 @@ must name work Jet can do to close it.
 
 **Authorship (level playing field).** Every headline implementation — Jet,
 every port, every fixture — is authored by a Luna max worker (dispatch per
-`docs/agents/orchestration.md`). Same author, same reasoning budget, both
+`.agents/skills/orchestration/SKILL.md`). Same author, same reasoning budget, both
 sides. Record authoring cost per implementation in `entry.json`: worker
 turns, retries, diagnostics hit — a first-class metric. Expert tier (optional,
 perf entries only): when an established expert implementation exists
@@ -132,16 +138,13 @@ report produced from the result.
 win/parity/loss/failure colored, losses and failures first (a report with no
 loss or failure has not looked hard enough). Show each peer-specific ratio
 ceiling and distinguish strict wins from Rust-only measurement-noise parity.
-Include the beat table — where Jet categorically wins
-and what a peer must break to match it — marking shipped versus
-ratified-but-unbuilt per row. Prose follows the `simple` skill rules. Write
-under `docs/audits/` via the Tower CLI (never hand-edit board JSON):
+Include the beat table — where Jet categorically wins and what a peer must
+break to match it — marking shipped versus ratified-but-unbuilt per row. Prose
+follows the `simple` skill rules. Write under `docs/audits/` through the
+project-approved non-serve CLI. Read `.agents/skills/_shared/audit-dispositions.md`
+before the run and use it for publication rules and the required
+finding-disposition table.
 
-```
-node plugins/tower/tower.mjs docs add --section audits --id gauntlet-YYYY-MM-DD --title "…" --file -
-```
-
-Never overwrite a different day's note.
 **The ratchet.** Historical result files and reports are immutable evidence:
 never rewrite an earlier day's artifact to make a new threshold appear green.
 Record the active policy with each new run and explain any policy change.
@@ -152,10 +155,8 @@ Deduplicate against existing cards first; new evidence for a known cause goes
 on the existing card. Each loss or failure blocks the owning performance card,
 milestone, and release gate until a fresh valid run satisfies the law; it
 remains carded even after later repair. Every uncovered cell worth filling
-mints or updates a build-mode corpus card. Close with the per-finding
-disposition table from `.agents/skills/_shared/audit-dispositions.md`; card
-rows satisfy it.
-
+mints or updates a build-mode corpus card. The shared disposition table does
+not weaken these gauntlet-owned card obligations.
 
 ## The standing lens
 
@@ -163,6 +164,3 @@ Apply `.agents/skills/_shared/standing-lens.md` in full: the four questions,
 the five agent-optimality quantities, the micro sweep, probe the running
 binary, and the honesty rules. Where the lens and the day-zero frame appear
 to disagree, the day-zero frame wins here.
-
-Follow `AGENTS.md`. Pick this skill alone — do not chain other audit/research
-skills unless the owner asks.

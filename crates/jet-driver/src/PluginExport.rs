@@ -1,7 +1,7 @@
 //! D-PLUGIN1=B / D-PLUGIN-EXPORT1=A / D-PLUGIN-VERSION1=A
 //! (c81): the driver-layer half of `target: sandbox` — resolving the manifest
 //! `export:` name, validating the entry module's top-level `pub fn` surface
-//! (v1: homogeneous `Int`/`Float`/`Bool`/`Text` scalars only), and the
+//! (homogeneous scalar or recursively closed Component Model shapes), and the
 //! ApiFreeze-based version handshake.
 
 //!
@@ -52,39 +52,46 @@ fn resolve_version(bundle: &ProgramBundle) -> String {
         .unwrap_or_else(|| "0.0.0".to_string())
 }
 
-/// E1260: a sandbox's exported `pub fn` isn't one homogeneous Component Model
-/// scalar shape (v1 scope; see `Codegen::Plugin` module doc).
+/// E1260: a sandbox's exported `pub fn` has no homogeneous scalar or closed
+/// Component Model shape.
 fn e1260(detail: &str) -> Diagnostic {
     Diagnostic::error(
         "E1260",
         "a sandbox's exported function has an unsupported signature".to_string(),
         detail.to_string(),
-        "every parameter and the return type must use the same scalar type: `Int`, `Float`, `Bool`, or `Text` — narrow the signature, or drop `pub` if this function isn't meant to be called across the sandbox boundary".to_string(),
+        "every parameter and the return type must use one scalar type, or a recursively closed `#Codable` Component Model shape — narrow the signature, or drop `pub` if this function isn't meant to be called across the sandbox boundary".to_string(),
         None,
     )
 }
 
-/// Validate the entry module's top-level `pub fn` surface for a
-/// `target: sandbox` build. Every public function must be exportable
-/// (`Codegen::plugin_export_shape`); a non-conforming one is E1260, not a
-/// silent skip (I3/I4 — codegen's own skip is a defensive fallback, this is
-/// the real enforcement point).
+fn component_signature(bundle: &ProgramBundle, guest: &crate::Sema::GuestFunction) -> bool {
+    guest
+        .return_type
+        .as_ref()
+        .is_some_and(|ty| crate::Sema::sandbox_component_type(bundle, ty))
+        && guest
+            .params
+            .iter()
+            .all(|(_, ty)| crate::Sema::sandbox_component_type(bundle, ty))
+}
 
+/// Validate the entry module's top-level `pub fn` surface for a
+/// `target: sandbox` build. Every public function is checked through the sema
+/// guest projection; a non-conforming one is E1260, not a silent skip.
 pub fn validate_export_surface(bundle: &ProgramBundle) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     for item in &bundle.modules[bundle.entry].items {
         let Item::Func(f) = item else { continue };
-        if crate::Sema::sandbox_export_signature(f).is_none() {
+        let Some(guest) = crate::Sema::sandbox_export_signature(f) else {
             continue;
-        }
-        if crate::Codegen::plugin_export_shape(f).is_none() {
+        };
+        if guest.scalar.is_none() && !component_signature(bundle, &guest) {
             diags.push(e1260(&format!(
-                "`pub fn {}` isn't one homogeneous `Int`, `Float`, `Bool`, or `Text` shape across its parameters and return type",
+                "`pub fn {}` has neither one homogeneous scalar shape nor a recursively closed `#Codable` Component Model shape",
                 f.name
             )));
         }
     }
-
     diags
 }
 
@@ -110,14 +117,13 @@ fn snapshot_package_key(export_name: &str) -> String {
     format!("plugin__{export_name}")
 }
 
-/// D-PLUGIN-VERSION1=A: freeze/diff the plugin's exported interface using
-/// `Sema::ApiFreeze`'s existing pub-metadata snapshot mechanism (re-grounded
-/// from the retired D-CAP4 system — see module doc). Builds the current
-/// snapshot from exactly the functions `Codegen::emit_plugin` actually
-/// exported, diffs it against the prior frozen snapshot (if any), and — when
-/// compatible (no prior snapshot, or nothing removed/changed) — saves the new
-/// snapshot as the fresh baseline. Returns `Err` diagnostics on an
-/// incompatible change; never touches disk when it does.
+/// `ApiFreeze`'s existing pub-metadata snapshot mechanism (re-grounded from
+/// the retired D-CAP4 system — see module doc). Builds the current snapshot
+/// from exactly the sema scalar functions that the checked MIR plan projects,
+/// diffs it against the prior frozen snapshot (if any), and — when compatible
+/// (no prior snapshot, or nothing removed/changed) — saves the new snapshot as
+/// the fresh baseline. Returns `Err` diagnostics on an incompatible change;
+/// never touches disk when it does.
 pub fn check_and_freeze_version(
     bundle: &ProgramBundle,
     export_name: &str,
@@ -127,9 +133,10 @@ pub fn check_and_freeze_version(
     let mut funcs = Vec::new();
     for item in &bundle.modules[bundle.entry].items {
         let Item::Func(f) = item else { continue };
-        if crate::Sema::sandbox_export_signature(f).is_none()
-            || crate::Codegen::plugin_export_shape(f).is_none()
-        {
+        let Some(guest) = crate::Sema::sandbox_export_signature(f) else {
+            continue;
+        };
+        if guest.scalar.is_none() && !component_signature(bundle, &guest) {
             continue;
         }
         funcs.push(ApiFreeze::FrozenFn {

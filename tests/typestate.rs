@@ -395,9 +395,9 @@ fn typestate_graph_runs_on_resident_jit_without_runtime_state() {
         "typestate fixture diagnostics: {diagnostics:#?}"
     );
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "typestate fixture must be resident-safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
     jet_jit::reset_jit_trace_for_test();
     let outcome = jet::Interpreter::dev_iteration(&shown, false, false);

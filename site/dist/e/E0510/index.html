@@ -34,7 +34,7 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for E0510</p>
+<p class="diag-copy fix" data-registry-field="fix">Import `core.crypto.expert` and use the required `#Unsafe` gate, or use `crypto.seal`/`open`.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0510</code>: <code>tests/ui/crypto_argon2id_literal_policy_e0510_precedence.stderr</code>.</p>
 <pre class="diag">Error [E0510]: `core.crypto.expert.argon2id` requires an audited `#Unsafe` region
@@ -42,27 +42,9 @@
     |
   7 |     _ :: expert.argon2id(password, [0], 8191, 0, 0, 15)
     |                 ^^^^^^^^
- Why: raw crypto primitives may only run inside an explicit expert-tier gate (I1)
- Fix: wrap the call in `#Unsafe(&quot;crypto expert: …&quot;) { … }` or use `crypto.seal`/`open` instead
+ Why: Raw crypto primitives may only run inside an explicit expert-tier gate (I1)
+ Fix: Wrap the call in `#Unsafe(&quot;crypto expert: …&quot;) { … }` or use `crypto.seal`/`open` instead
 More: jet-lang.dev/e/E0510
-
-Error [E0510]: `core.crypto.expert.argon2id` requires an audited `#Unsafe` region
-  --&gt; tests/ui/crypto_argon2id_literal_policy_e0510_precedence.jet:7:17
-    |
-  7 |     _ :: expert.argon2id(password, [0], 8191, 0, 0, 15)
-    |                 ^^^^^^^^
- Why: raw crypto primitives may only run inside an explicit expert-tier gate (I1)
- Fix: wrap the call in `#Unsafe(&quot;crypto expert: …&quot;) { … }` or use `crypto.seal`/`open` instead
-More: jet-lang.dev/e/E0510
-
-Error [E2402]: `?` can&#39;t convert `CryptoError` into `Err` — no declared conversion exists
-  --&gt; tests/ui/crypto_argon2id_literal_policy_e0510_precedence.jet:7:17
-    |
-  7 |     _ :: expert.argon2id(password, [0], 8191, 0, 0, 15)
-    |                 ^^^^^^^^
- Why: `?` uses the declared conversion rail; `CryptoError` can reach `Err` only through `impl CryptoError -&gt; Err`
- Fix: add `impl CryptoError -&gt; Err { … }` before this function, or change the return type
-More: jet-lang.dev/e/E2402
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

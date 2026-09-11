@@ -1,0 +1,62 @@
+use core.encoding.json as json
+
+module rules
+module filter
+module formula
+module symbolic
+
+@comptime_seed :: 2 * 3 + 0
+
+fn run() {
+    rule_source :: "bonus: score >= 5 -> add 3; cap: score >= 20 -> set 20; award: score == 10 -> add 1"
+    rule_set :: rules.parse(rule_source) ?? panic("rules parse")
+    facts := [String:Int]{"score": 7}
+    events :: rules.fire(&facts, rule_set)
+    assert(events == [String]{"bonus:score=10", "cap:skip", "award:score=11"})
+    score :: facts.get("score") ?? -1
+    assert(score == 11)
+    assert(rules.parse("bad: score >> 5 -> add 1") == None)
+    assert(rules.parse("bad: score >= nope -> add 1") == None)
+    print("rules={events}")
+
+    raw_json :: "{{\"items\":[{{\"price\":3,\"sku\":\"a\"}},{{\"price\":8,\"sku\":\"b\"}},{{\"name\":\"free\"}}]}}"
+    document :: json.parse(raw_json) ?? panic("json parse")
+    query :: ".items[] | select(.price >= 5) | .price"
+    selected :: filter.run(~document, query) ?? panic("filter parse")
+    assert(selected == [DataTree]{DataTree.Int(8)})
+    projected :: filter.run(~document, ".items[] | .price") ?? panic("projection parse")
+    assert(projected == [DataTree]{DataTree.Int(3), DataTree.Int(8)})
+    assert(filter.parse(".items[] | price") == None)
+    assert((filter.run(~document, ".missing[]") ?? [DataTree]{}).len() == 0)
+    print("filter={selected}")
+
+    first_book :: formula.parse("a = 2\none = 1\nb = a + one\ntotal = b + a\nunrelated = 99") ?? panic("formula parse")
+    first :: formula.recalculate(~first_book, [String:Int]{}, "a", 2) ?? panic("first recalc")
+    first_value :: first.values.get("total") ?? -1
+    assert(first_value == 5)
+    assert(first.touched == [String]{"a", "b", "total"})
+    second :: formula.recalculate(~first_book, ~first.values, "a", 5) ?? panic("second recalc")
+    second_value :: second.values.get("total") ?? -1
+    assert(second_value == 11)
+    assert(second.touched == [String]{"a", "b", "total"})
+    assert(formula.parse("broken = a +") == None)
+    cycle :: formula.parse("a = b + 1\nb = a + 1") ?? panic("cycle parse")
+    assert(formula.recalculate(cycle, [String:Int]{}, "a", 1) == None)
+    first_total :: first.values.get("total") ?? -1
+    second_total :: second.values.get("total") ?? -1
+    print("formula=first:{first_total} second:{second_total} touched:{second.touched}")
+
+    expression :: symbolic.parse("2 * x + 0") ?? panic("symbolic parse")
+    simplified :: symbolic.simplify(~expression)
+    derivative :: symbolic.simplify(symbolic.differentiate(~expression, "x"))
+    evaluated :: symbolic.evaluate(~expression, [String:Float]{"x": 3.0}) ?? panic("symbolic evaluate")
+    assert(symbolic.show(~simplified) == "(2.0 * x)")
+    assert(symbolic.show(~derivative) == "2.0")
+    assert(evaluated == 6.0)
+    zero_identity :: symbolic.parse("0 * x + x * 1") ?? panic("identity parse")
+    assert(symbolic.show(symbolic.simplify(zero_identity)) == "x")
+    assert(symbolic.parse("x / 2") == None)
+    assert(symbolic.parse("(x + 2") == None)
+    assert(@comptime_seed == 6)
+    print("symbolic={symbolic.show(~simplified)} d/dx={symbolic.show(~derivative)} value={evaluated} comptime={@comptime_seed}")
+}

@@ -28,6 +28,13 @@ pub struct PackageTargetView {
     pub name: String,
     pub targets: Vec<String>,
 }
+/// One package target name and its exact selected profile identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetProfileView {
+    pub name: String,
+    pub profile: String,
+}
+
 
 /// One declared output.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,6 +52,8 @@ pub struct BuildProfileView {
     pub debug_info: bool,
     pub small: bool,
     pub panic: Option<String>,
+    pub game_development_stripping: Option<bool>,
+    pub game_cook_mode: Option<String>,
 }
 
 /// The uncomposed `package.jet` declaration view.
@@ -58,7 +67,7 @@ pub struct ManifestView {
     pub license: Option<String>,
     pub repository: Option<String>,
     pub layer: Option<String>,
-    pub target: Option<String>,
+    pub targets: Vec<TargetProfileView>,
     pub dependencies: Vec<DependencyView>,
     pub packages: Vec<PackageTargetView>,
     pub outputs: Vec<OutputView>,
@@ -76,7 +85,7 @@ pub struct PackageView {
     pub license: Option<String>,
     pub repository: Option<String>,
     pub layer: Option<String>,
-    pub target: Option<String>,
+    pub targets: Vec<TargetProfileView>,
     pub dependencies: Vec<DependencyView>,
     pub packages: Vec<PackageTargetView>,
     pub outputs: Vec<OutputView>,
@@ -178,7 +187,7 @@ pub fn manifest_view_from_facts(facts: &PackageFacts) -> ManifestView {
         license: facts.license.clone(),
         repository: facts.repository.as_deref().map(redact_repository_url),
         layer: option_layer(facts.layer),
-        target: facts.target.clone(),
+        targets: target_profile_views(&facts.targets),
         dependencies: dependency_views(&facts.deps),
         packages: package_target_views(&facts.packages),
         outputs: output_views(&facts.outputs),
@@ -197,7 +206,7 @@ pub fn package_view_from_facts(facts: &PackageFacts) -> PackageView {
         license: facts.license.clone(),
         repository: facts.repository.as_deref().map(redact_repository_url),
         layer: option_layer(facts.layer),
-        target: facts.target.clone(),
+        targets: target_profile_views(&facts.targets),
         dependencies: dependency_views(&facts.deps),
         packages: package_target_views(&facts.packages),
         outputs: output_views(&facts.outputs),
@@ -269,6 +278,16 @@ fn package_target_views(packages: &[Package::PackageEntry]) -> Vec<PackageTarget
         })
         .collect()
 }
+fn target_profile_views(targets: &Package::PackageTargets) -> Vec<TargetProfileView> {
+    targets
+        .iter()
+        .map(|selection| TargetProfileView {
+            name: selection.name.clone(),
+            profile: selection.profile.as_str().to_string(),
+        })
+        .collect()
+}
+
 
 fn output_kind_name(kind: PackageOutputKind) -> &'static str {
     match kind {
@@ -281,6 +300,7 @@ fn output_kind_name(kind: PackageOutputKind) -> &'static str {
         PackageOutputKind::Bundle => "bundle",
         PackageOutputKind::System => "system",
         PackageOutputKind::Fleet => "fleet",
+        PackageOutputKind::Model => "model",
     }
 }
 
@@ -307,6 +327,8 @@ fn build_profile_views(profiles: &[Package::BuildProfileDef]) -> Vec<BuildProfil
                 Package::BuildPanic::Unwind => "unwind".to_string(),
                 Package::BuildPanic::Abort => "abort".to_string(),
             }),
+            game_development_stripping: profile.game_development_stripping,
+            game_cook_mode: profile.game_cook_mode.clone(),
         })
         .collect()
 }

@@ -188,7 +188,15 @@ pub(crate) fn router_register_in_subset(
 
 pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Option<THandleOp> {
     let op = match (handle, method, nargs) {
+        (Syntax::INTERNAL_RECEIPT_HANDLE, Syntax::METHOD_RECEIPT_ATTACH, 1) => {
+            THandleOp::ReceiptAttach
+        }
         ("FileReader", "read_line", 0) => THandleOp::FileReaderReadLine,
+        ("MappedFile", "window", 2) => THandleOp::MappedFileWindow,
+        ("MappedFile", "window_len", 2) => THandleOp::MappedFileWindowLen,
+        ("MappedFile", "lines", 0) => THandleOp::MappedFileLines,
+        ("MappedFile", "len", 0) => THandleOp::MappedFileLen,
+        ("MappedFile", "is_empty", 0) => THandleOp::MappedFileIsEmpty,
         ("FileWriter", "write_line", 1) => THandleOp::FileWriterWriteLine,
         ("FileWriter", "flush", 0) => THandleOp::FileWriterFlush,
         ("JSONReader", "next", 0) => THandleOp::JSONReaderNext,
@@ -201,6 +209,10 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("JSONLWriter", "finish", 0) => THandleOp::JSONLWriterFinish,
         ("CSVReader", "next", 0) => THandleOp::CSVReaderNext,
         ("DataStream", "next", 0) => THandleOp::DataStreamNext,
+        // D-FOUND-COREAPI1 / #2853: event-time Stream handles.
+        ("Stream", "with_event_time", 1) => THandleOp::StreamWithEventTime,
+        ("StreamEventTime", "key_by", 1) => THandleOp::StreamKeyBy,
+        ("KeyedStream", "window", 3) => THandleOp::StreamWindow,
         ("CSVWriter", "write", 1) => THandleOp::CSVWriterWrite,
         ("CSVWriter", "flush", 0) => THandleOp::CSVWriterFlush,
         ("CSVWriter", "finish", 0) => THandleOp::CSVWriterFinish,
@@ -228,9 +240,17 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         // D-DET1: deterministic injected Clock/Rng capability methods.
         ("Clock", "now", 0) => THandleOp::ClockNow,
         ("Clock", "tick", 1) => THandleOp::ClockTick,
+        (Syntax::DETERMINISTIC_WORLD_TYPE, "now", 0) => THandleOp::WorldNow,
+        (Syntax::DETERMINISTIC_WORLD_TYPE, "advance", 1) => THandleOp::WorldAdvance,
+        (Syntax::DETERMINISTIC_WORLD_TYPE, "wait_idle", 0) => THandleOp::WorldWaitIdle,
+        (Syntax::DETERMINISTIC_WORLD_TYPE, "history", 0) => THandleOp::WorldHistory,
         // D-DET-CAPAPI: absolute set + Duration advance; the widened Rng draws; Duration read.
         ("Clock", "advance", 1) => THandleOp::ClockAdvance,
         ("Clock", "wait", 1) => THandleOp::ClockWait,
+        ("RealtimeStream", "next_deadline", 0) => THandleOp::RealtimeNextDeadline,
+        ("RealtimeStream", "receipt", 0) => THandleOp::RealtimeReceipt,
+        ("RealtimeStream", "cancel", 0) => THandleOp::RealtimeCancel,
+        ("RealtimeStream", "is_cancelled", 0) => THandleOp::RealtimeIsCancelled,
         ("Rng", "int", 2) => THandleOp::RngInt,
         ("Rng", "float", 0) => THandleOp::RngFloat,
         ("Rng", "float_range", 2) => THandleOp::RngFloatRange,
@@ -244,7 +264,8 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Rng", "weighted_pick", 2) => THandleOp::RngWeightedPick,
         ("Rng", "sample", 2) => THandleOp::RngSample,
         ("Rng", "shuffle", 1) => THandleOp::RngShuffle,
-        ("Fake", "locale", 1) => THandleOp::FakeLocale,
+        ("HistoryRng", "next_u64", 0) => THandleOp::HistoryRngNextU64,
+        ("HistoryRng", "below", 1) => THandleOp::HistoryRngBelow,
         ("Fake", "name", 0) => THandleOp::FakeName,
         ("Fake", "email", 0) => THandleOp::FakeEmail,
         ("Fake", "host", 0) => THandleOp::FakeHost,
@@ -252,7 +273,10 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Solver", "require", 1) => THandleOp::SolverRequire,
         ("Solver", "failure_count", 0) => THandleOp::SolverFailureCount,
         ("Solver", "status", 0) => THandleOp::SolverStatus,
-        ("GameScene", "on_frame", 1) => THandleOp::GameSceneOnFrame,
+        ("GameScene", "on_frame", 1) => THandleOp::GameSceneOnFrame {
+            schedule: None,
+            derivation: None,
+        },
         ("GameScene", "component", 1) => THandleOp::GameSceneComponent,
         ("GameScene", "query", 1) => THandleOp::GameSceneQuery,
         ("GameAssets", "image", 1) => THandleOp::GameAssetsImage,
@@ -478,15 +502,20 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Path", "walk", 0) => THandleOp::PathWalk,
         // D-DBPOLICY-BIND1: only a DBScope can perform row reads/writes.
         ("DBConnection", "with_policy", 2) => THandleOp::DBWithPolicy,
+        ("DbPool", "acquire", 0) => THandleOp::DBPoolAcquire,
+        ("DbPool", "acquire", 1) => THandleOp::DBPoolAcquireDeadline,
+        ("DbPool", "ready", 0) => THandleOp::DBPoolReady,
+        ("DbPool", "drain", 0) => THandleOp::DBPoolDrain,
+        ("DbPool", "receipt", 0) => THandleOp::DBPoolReceipt,
         // D-SERVICE-AUTHORITY1: durable send/retry lifecycle is a handle
         // operation so AOT, JIT deopt, and the ambient interpreter share it.
         ("ServiceRuntime", "send", 3) => THandleOp::ServiceRuntimeSend,
         ("ServiceRuntime", "retry", 1) => THandleOp::ServiceRuntimeRetry,
         ("ServiceRuntime", "dead_letter", 1) => THandleOp::ServiceRuntimeDeadLetter,
         ("ServiceRuntime", "retain", 1) => THandleOp::ServiceRuntimeRetain,
-        ("DBScope", "query", 1) => THandleOp::DBQuery,
-        ("DBScope", "query_one", 1) => THandleOp::DBQueryOne,
-        ("DBScope", "execute", 1) => THandleOp::DBExecute,
+        ("DBScope", "query", 1) => THandleOp::DBQuery { metadata: None },
+        ("DBScope", "query_one", 1) => THandleOp::DBQueryOne { metadata: None },
+        ("DBScope", "execute", 1) => THandleOp::DBExecute { metadata: None },
         ("DBScope", "live", 1) => THandleOp::DBLive,
         ("DBConnection", "begin", 0) => THandleOp::DBBegin,
         ("DBConnection", "commit", 0) => THandleOp::DBCommit,
@@ -503,11 +532,6 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("DBValue", "bool", 0) => THandleOp::DBValueBool,
         ("DBValue", "blob", 0) => THandleOp::DBValueBlob,
         ("DBValue", "is_null", 0) => THandleOp::DBValueIsNull,
-        // D-DEP-WASM1=A / D-PLUGIN1=B (c81): `Plugin` instance methods.
-        ("Plugin", "call", 2) => THandleOp::PluginCall,
-        ("Plugin", "call_int", 2) => THandleOp::PluginCallInt,
-        ("Plugin", "call_bool", 2) => THandleOp::PluginCallBool,
-        ("Plugin", "call_text", 2) => THandleOp::PluginCallText,
         // D-LIB-CALLGRANT1=A: the first pinned-library call is a checked
         // homogeneous Int entry point.
         ("Mod", "on_tick", 1) => THandleOp::ModOnTick,
@@ -548,7 +572,11 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
     };
     if matches!(
         handle,
-        Syntax::CLOCK_TYPE | Syntax::RNG_TYPE | Syntax::FAKE_TYPE | Syntax::SOLVER_TYPE
+        Syntax::CLOCK_TYPE
+            | Syntax::RNG_TYPE
+            | "HistoryRng"
+            | Syntax::FAKE_TYPE
+            | Syntax::SOLVER_TYPE
     ) {
         let emitted_borrow = match &op {
             THandleOp::ClockTick
@@ -567,6 +595,8 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
             | THandleOp::RngWeightedPick
             | THandleOp::RngSample
             | THandleOp::RngShuffle
+            | THandleOp::HistoryRngNextU64
+            | THandleOp::HistoryRngBelow
             | THandleOp::FakeName
             | THandleOp::FakeEmail
             | THandleOp::FakeHost
@@ -597,6 +627,28 @@ pub(crate) fn handle_method_return_ty(
     if let Some(ret) = resolved_ret {
         return ret.clone();
     }
+    if handle == "HistoryRng" {
+        return match (method, nargs) {
+            ("next_u64", 0) | ("below", 1) => Type::IntN {
+                signed: false,
+                bits: 64,
+            },
+            _ => unit_type(),
+        };
+    }
+    if handle == "RealtimeStream" {
+        return crate::Sema::realtime_stream_method_return(method, nargs)
+            .flatten()
+            .unwrap_or_else(unit_type);
+    }
+    if handle == crate::Syntax::DETERMINISTIC_WORLD_TYPE {
+        return match (method, nargs) {
+            ("now", 0) | ("advance", 1) => Type::Int,
+            ("history", 0) => Type::String,
+            ("wait_idle", 0) => unit_type(),
+            _ => unit_type(),
+        };
+    }
     if handle == "TestSuite" && method == "run" && nargs == 0 {
         return Type::Int;
     }
@@ -614,17 +666,10 @@ pub(crate) fn handle_method_return_ty(
                 Some(crate::Sema::db_connection_method_return_ty(method))
             } else if handle == "DBScope" {
                 Some(crate::Sema::db_scope_method_return_ty(method))
+            } else if handle == "DbPool" {
+                Some(crate::Sema::db_pool_method_return_ty(method))
             } else if handle == "ServiceRuntime" {
                 crate::Sema::service_runtime_method_return_ty(method).map(Some)
-            } else {
-                None
-            }
-        })
-        .or_else(|| {
-            if handle == "Plugin" {
-                Some(crate::Sema::plugin_method_return_ty(method))
-            } else if handle == "Mod" {
-                Some(crate::Sema::mod_method_return_ty(method))
             } else {
                 None
             }
@@ -764,228 +809,7 @@ pub(crate) fn core_closure_call_return_ty(module: &str, method: &str, body_ty: T
     }
 }
 
-/// c109 Phase 10: the resolved return type of a covered core call, read from the
-/// authoritative `Sema::core_fixed_sig` table (totality). A `None` return (a
-/// void-effect call like `fs.write`/`env.set`/`process.exit`) lowers to `Unit`.
-pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
-    // c109 Phase 25: the http producer/parse/dispatch calls aren't in `core_fixed_sig`;
-    // their return types are fixed (sema's `infer_core_call`). Carried total per the
-    // design principle (the binding's annotation/inference is the load-bearing fact, but
-    // this keeps the node's `ty` honest — `dispatch` → HTTPResponse composes with the
-    // `.status()`/`.body()` accessors that read it).
-    match (module, method) {
-        ("core.http", "router") => return Type::Named("HTTPRouter".to_string()),
-        ("core.http", "parse") => return Type::Named("HTTPRequest".to_string()),
-        ("core.http", "dispatch") => return Type::Named("HTTPResponse".to_string()),
-        // c109 Phase 29: qualified `io.input(prompt)`. NOT in `core_fixed_sig` — its return
-        // type is fixed (`Result<String, IOError>`) but lives in sema's bespoke
-        // `infer_core_call` arm (CheckerCoreLib.rs `("core.term", "input")`), NOT the table.
-        // Same type the ambient bare `input(...)` (Phase 25 `AmbientInput`) carries, so it
-        // composes with the Phase-8 `??`/`?? return <value>` fallback.
-        ("core.term", "input") => {
-            return Type::Result {
-                ok: Box::new(Type::String),
-                err: Box::new(Type::Named(Syntax::TYPE_IO_ERROR.to_string())),
-            }
-        }
-        // D-ENC-CBOR1: the raw comptime fragment is lowered before sema can
-        // attach `resolved_ret` to these polymorphic calls. Preserve the same
-        // public result carriers that `infer_core_call` writes so a nested
-        // `json.parse -> cbor.to_bytes -> cbor.parse` chain never collapses to
-        // the defensive `Unit` fallback.
-        ("core.encoding.cbor", "parse") => {
-            return Type::Result {
-                ok: Box::new(Type::Named("DataTree".to_string())),
-                err: Box::new(Type::Named("CBORError".to_string())),
-            }
-        }
-        ("core.encoding.cbor", "to_bytes" | "to_bytes_canonical") => {
-            return Type::Result {
-                ok: Box::new(Type::List(Box::new(Type::IntN {
-                    signed: false,
-                    bits: 8,
-                }))),
-                err: Box::new(Type::Named("CBORError".to_string())),
-            }
-        }
-        // The dynamic JSON family is also marked polymorphic in sema, so its
-        // fixed table is intentionally unavailable to this pre-sema fallback.
-        ("core.encoding.json", "parse" | "decode") => {
-            return Type::Result {
-                ok: Box::new(Type::Named("DataTree".to_string())),
-                err: Box::new(Type::Named("JSONError".to_string())),
-            }
-        }
-        ("core.encoding.json", "to_string" | "to_string_pretty") => return Type::String,
-        ("core.text.fmt", "decimal" | "grouped") => return Type::String,
-        // D-TYPE2-UNCERT1=A: internal canonical measurement constructor route.
-        ("core.units", "from") => {
-            return Type::Apply {
-                name: Syntax::TYPE_MEASUREMENT.to_string(),
-                args: vec![Type::Float],
-            }
-        }
-        // D-PENDING1=B: Loadable constructors — type carries T from the loaded(val) arg.
-        ("core.reactive.loadable", "idle") | ("core.reactive.loadable", "loading") => {
-            return Type::Apply {
-                name: "Loadable".to_string(),
-                args: vec![
-                    Type::Named("Unknown".to_string()),
-                    Type::Named("Unknown".to_string()),
-                ],
-            }
-        }
-        ("core.reactive.loadable", "loaded") => {
-            // Type is Loadable<T, Unknown> — T comes from the arg; Unknown for E.
-            return Type::Apply {
-                name: "Loadable".to_string(),
-                args: vec![Type::Int, Type::Named("Unknown".to_string())], // sema refines T
-            };
-        }
-        ("core.reactive.loadable", "failed") => {
-            return Type::Apply {
-                name: "Loadable".to_string(),
-                args: vec![Type::Named("Unknown".to_string()), Type::String], // sema refines E
-            };
-        }
-        // D-ANY-JAI1 (c7jaiany §6): `reflect.of(x)` always returns `Value`,
-        // regardless of the arg's type.
-        ("core.reflect", "of") => return Type::Named("Value".to_string()),
-        // D-APPROX1=A: sketch constructors → opaque named types.
-        ("core.data.sketch.hll", "new") => return Type::Named("HyperLogLog".to_string()),
-        ("core.data.sketch.tdigest", "new") => return Type::Named("TDigest".to_string()),
-        ("core.data.sketch.cms", "new") => return Type::Named("CountMinSketch".to_string()),
-        ("core.data.sketch.reservoir", "new") => {
-            return Type::Named("ReservoirSampler".to_string())
-        }
-        // D-TIMEDEPTH1=A: civil-time constructors.
-        ("core.time", "new") | ("core.time", "today") => return Type::Named("Date".to_string()),
-        ("core.time", "parse") => {
-            return Type::Result {
-                ok: Box::new(Type::Named("Date".to_string())),
-                err: Box::new(Type::String),
-            }
-        }
-        ("core.time", "from_timestamp") => return Type::Named("DateTime".to_string()),
-        // D-CORE-SECRETS1=A: generic TTL constructor; T comes from argument 0.
-        // D-EVENT1=D: generic constructors; sema normally writes the precise
-        // resolved return type and lowering reads that. Placeholders keep node
-        // totality for defensive/fallback paths.
-        ("core.event", "new" | "with_policy") => {
-            return Type::Apply {
-                name: "Event".to_string(),
-                args: vec![Type::Named("Unknown".to_string())],
-            }
-        }
-        ("core.event", "async_result") => {
-            return Type::Result {
-                ok: Box::new(Type::Apply {
-                    name: "AsyncEvent".to_string(),
-                    args: vec![
-                        Type::Named("Unknown".to_string()),
-                        Type::Named("Unknown".to_string()),
-                    ],
-                }),
-                err: Box::new(Type::Named("EventConfigError".to_string())),
-            }
-        }
-        ("core.event", "hook") => {
-            return Type::Apply {
-                name: "Hook".to_string(),
-                args: vec![
-                    Type::Named("Unknown".to_string()),
-                    Type::Named("Unknown".to_string()),
-                ],
-            }
-        }
-        ("core.event", "decision_hook") => {
-            return Type::Apply {
-                name: "DecisionHook".to_string(),
-                args: vec![
-                    Type::Named("Unknown".to_string()),
-                    Type::Named("Unknown".to_string()),
-                ],
-            }
-        }
-        ("core.event", "scope") => return Type::Named("EventScope".to_string()),
-        ("core.event", "policy_sync") => return Type::Named("EventPolicy".to_string()),
-        // D-NETDEP1=A / D-HTTPLIB1=A: HTTP constructors.
-        ("core.http.client", "get") | ("core.http.client", "post") => {
-            return Type::Result {
-                ok: Box::new(Type::Named("HTTPResponse".to_string())),
-                err: Box::new(Type::Named("HTTPError".to_string())),
-            }
-        }
-        ("core.http.client", "request") => return Type::Named("HTTPRequest".to_string()),
-        ("core.http.server", "mux") => return Type::Named("HTTPMux".to_string()),
-        ("core.net.ws", "connect") | ("core.net.ws", "upgrade") => {
-            return Type::Result {
-                ok: Box::new(Type::Named("WsConn".to_string())),
-                err: Box::new(Type::Named("WsError".to_string())),
-            };
-        }
-        ("core.web.browser", "profile") => {
-            return Type::Result {
-                ok: Box::new(Type::Named("BrowserProfile".to_string())),
-                err: Box::new(Type::Named("BrowserError".to_string())),
-            };
-        }
-        ("core.web.browser", "timeout") => {
-            return Type::Result {
-                ok: Box::new(Type::Named("BrowserTimeout".to_string())),
-                err: Box::new(Type::Named("BrowserError".to_string())),
-            };
-        }
-        ("core.web.browser", "locked") => {
-            return Type::Result {
-                ok: Box::new(Type::Named("BrowserLocked".to_string())),
-                err: Box::new(Type::Named("BrowserError".to_string())),
-            };
-        }
-        ("core.web.browser", "connect" | "connect_profile") => {
-            return Type::Result {
-                ok: Box::new(Type::Named("Browser".to_string())),
-                err: Box::new(Type::Named("BrowserError".to_string())),
-            };
-        }
-        ("core.http.server", "bind") => {
-            return Type::Result {
-                ok: Box::new(Type::Named("HTTPServer".to_string())),
-                err: Box::new(Type::String),
-            }
-        }
-        ("core.http.server", "tls") => return Type::Named("HTTPServerTls".to_string()),
-        ("core.http.server", "serve" | "serve_once" | "serve_once_listener") => {
-            return Type::Result {
-                ok: Box::new(Type::Tuple(vec![])),
-                err: Box::new(Type::String),
-            }
-        }
-        ("core.http.server", "static_file" | "static_file_range") => {
-            return Type::Result {
-                ok: Box::new(Type::Named("HTTPResponse".to_string())),
-                err: Box::new(Type::String),
-            }
-        }
-        ("core.http.server", "response") => return Type::Named("HTTPResponse".to_string()),
-        ("core.http.server", "sse") => return Type::Named("HTTPResponse".to_string()),
-        // D-HTTP-JSON1=A / D-HTTP-STATIC-FILES1=A / D-HTTP-CORS1=A.
-        ("core.http.server", "json") => return Type::Named("HTTPResponse".to_string()),
-        ("core.http.server", "static_files" | "cors") => return unit_type(),
-        ("core.http.server", "cors_policy") => {
-            return Type::Result {
-                ok: Box::new(Type::Named("HTTPCorsPolicy".to_string())),
-                err: Box::new(Type::Named("HTTPError".to_string())),
-            }
-        }
-        ("core.http.server", "access_log") => return Type::String,
-        ("core.http.server", "request_id") => return unit_type(),
-        _ => {}
-    }
-    crate::Sema::core_fixed_sig(module, method)
-        .and_then(|(_, ret)| ret)
-        .unwrap_or_else(unit_type)
-}
+
 
 // ---------------------------------------------------------------------------
 // Lowering: AST -> TIR. This is where every fact is resolved ONCE.

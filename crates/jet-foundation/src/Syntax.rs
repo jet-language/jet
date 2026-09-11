@@ -7,6 +7,44 @@
 //!
 //! Agents: do NOT add an entry here without a decision ID approved by the
 //! owner in docs/spec/syntax-decisions.md.
+/// One machine-readable row for the owner-controlled lexical ledger (I7).
+/// Surface audits and future front ends consume this table instead of
+/// maintaining a second spelling/decision inventory.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LexicalEntry {
+    pub spelling: &'static str,
+    pub meaning: &'static str,
+    pub decision: &'static str,
+}
+
+pub const LEXICAL_LEDGER: &[LexicalEntry] = &[
+    LexicalEntry { spelling: "::", meaning: "immutable binding", decision: "D-BIND1" },
+    LexicalEntry { spelling: ":=", meaning: "mutable binding", decision: "D-BIND1" },
+    LexicalEntry { spelling: "#", meaning: "attached marker; #[A, B] stacks", decision: "D-VERDICT-732-1; D-MARK-STACK1" },
+    LexicalEntry { spelling: "#DevPanel", meaning: "exported typed devtools panel marker", decision: "D-DX-PLUGIN1=D" },
+    LexicalEntry { spelling: "web.form(Model, action: handler)", meaning: "struct-derived headless form with progressive action", decision: "D-DX-FORM1" },
+    LexicalEntry { spelling: "#Layout(c, align(N)) / #Layout(c, align(target, N))", meaning: "C layout with portable or target-supported explicit alignment", decision: "D-PLACE1=A; D-LAYOUT-ALIGN1=A" },
+    LexicalEntry { spelling: "#Align", meaning: "retired standalone alignment marker", decision: "D-PLACE1=A" },
+    LexicalEntry { spelling: "Atomic<T>", meaning: "safe lock-free scalar cell", decision: "D-PLACE1=A; D-ATOMIC-WIDTH1=A" },
+    LexicalEntry { spelling: "@", meaning: "compile-time block, name, or fact", decision: "D-ONCE-AT1" },
+    LexicalEntry { spelling: "-[…]", meaning: "effect row on a callable", decision: "D-EFF1" },
+    LexicalEntry { spelling: "!", meaning: "error type in a signature; deny-only root", decision: "D-RESULT1; D-EFF4" },
+    LexicalEntry { spelling: "?", meaning: "optional type", decision: "D-OPT1" },
+    LexicalEntry { spelling: "??", meaning: "fallback", decision: "D-RESULT-DECON2" },
+    LexicalEntry { spelling: "T{expr}", meaning: "field default", decision: "D-DEFAULT-SHAPE1" },
+    LexicalEntry { spelling: "Name{\"…\"}", meaning: "checked text head", decision: "S8; D-CHECKED-TEXT1" },
+    LexicalEntry { spelling: ".{ … }", meaning: "typed anonymous value", decision: "D-POLICY-WORD1" },
+    LexicalEntry { spelling: "`", meaning: "raw ordinary String fence", decision: "D-RAWSTR1" },
+    LexicalEntry { spelling: ",", meaning: "separator with optional trailing item in every comma list", decision: "D-TRAILCOMMA1" },
+    LexicalEntry { spelling: "r\"…\", raw\"…\", $\"…\"", meaning: "unclaimed raw-string prefixes", decision: "" },
+    LexicalEntry { spelling: ";", meaning: "retired explicit statement terminator", decision: "D-SEMI1" },
+    LexicalEntry { spelling: "_name", meaning: "ordinary identifier", decision: "" },
+    LexicalEntry { spelling: "__core_intrinsic", meaning: "compiler-only namespace", decision: "D-CORE-CALL1" },
+];
+/// D-PLACE1=A: the old standalone marker gets a dedicated teaching diagnostic;
+/// it is not part of the active marker registry.
+pub const MARKER_ALIGN_LEGACY: &str = "Align";
+
 // D-WRAP-SCOPE1=A (owner outcome, card #2171): MARKER_ARITHMETIC is the one
 // lexical fixed-width arithmetic policy; its menu is Checked, Wrapping, or
 // Saturating and its scope is function, method, or block.
@@ -193,6 +231,11 @@
 // `[?Success] [!Error]` or `[?Success] [!(E1 | E2)]`. A missing contract is
 // the beginner route: the callable is fallible with the implicit default `Err`.
 // Bare `!`, suffix `Error!`, and infix failure spellings are diagnostic-only.
+// D-NEVER2=B (ratified 2026-09-02, card #2437): the existing `Never`
+// failure-domain name also occupies callable success-return slots
+// (`fn usage() Never`, `fn serve(addr: String) Never !NetError`, and
+// `fn() Never`). It remains uninhabited in ordinary value positions; a
+// declared function must have no normal path.
 // D-STRUCT-PLANE1=A and D-STRUCT-LIVE1=A add no spelling: structure facts use
 // the existing fact registry, and liveness uses the existing `_name` ladder
 // (D-NAME-SIGIL1). D-STRUCT-ONCE1=A adds no spelling: it extends the existing
@@ -230,6 +273,11 @@
 // source-loop parsing while the postfix lexer/parser carve-out admits it after
 // `.`. Thus `duration.in(.Seconds)` is a normal method call without making
 // `in` a general identifier.
+// D-LOOPREAD1=A (ratified 2026-09-04, card #2896) keeps the state-loop
+// initializer one-shot. A condition that reads unchanged header state can
+// repeat forever; L0529 teaches repeated input with the existing source-loop
+// `in` form and the body-first `if test { break }` exit shape. No new loop
+// syntax enters.
 // D-LOOPSTATE1 owns break/next target arguments, and
 // D-COMPREHENSION1 fixes yielding-loop results to eager List.
 // D-IFGUARD1=A adds no spelling: subjectless statement/value guard tables
@@ -371,6 +419,9 @@ pub const TYPE_TASK: &str = "Task";
 
 /// D-CONC-CHAN1=A: builtin channel constructor.
 pub const BUILTIN_CHANNEL: &str = "channel";
+/// Compiler-private runtime rows; the source constructor remains `channel<T>`.
+pub const INTERNAL_CHANNEL_NEW_METHOD: &str = "\0jet.channel.new";
+pub const INTERNAL_CHANNEL_BOUNDED_METHOD: &str = "\0jet.channel.bounded";
 /// D-CONC-CHAN1=A: receiver endpoint type is nameable in signatures.
 pub const TYPE_RECEIVER: &str = "Receiver";
 /// D-CONC-CHAN1=A: sender endpoint type is nameable in signatures.

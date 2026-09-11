@@ -169,6 +169,7 @@ policy: {
         assert!(diagnostic.what.contains("package.jet"));
         assert!(diagnostic
             .why
+            .to_ascii_lowercase()
             .contains("package metadata policy is malformed"));
         assert!(diagnostic.fix.contains("syntax-decisions.md"));
     }
@@ -711,17 +712,18 @@ pub fn e1213(_file: &str, name: &str, paths: &[std::path::PathBuf]) -> Diagnosti
     )
 }
 
-/// E1258 (D-PLUGIN1=B, c81): a `target: sandbox` package's own code uses a
-/// host effect — sandboxes are deny-by-default (the wasmtime host registers
-/// zero host imports), so any host effect would fail to instantiate at load time.
+/// E1258 (D-PLUGIN-AUTHORITY1): a `target: sandbox` package's own code uses a
+/// host effect that is not covered by its declared `authority.needs` rights.
+/// `Mem` remains implicit for guest allocation; every other effect must name
+/// the canonical right that authorizes its host import.
 pub fn e1258(effects: &str) -> Diagnostic {
     Diagnostic::error(
         "E1258",
-        "a sandbox can't use any effect".to_string(),
+        "a sandbox effect is not declared".to_string(),
         format!(
-            "this package builds as `target: sandbox` (D-PLUGIN1=B) — it uses: {effects}. Sandboxes run with zero host authority; there is no gate or grant to widen this (I1 — the sandbox is the safety boundary, not an opt-in)."
+            "this package builds as `target: sandbox` and uses: {effects}. Every non-memory effect must be covered by the package's canonical `authority.needs` declaration before a host import can be registered."
         ),
-        "remove the effectful call, or move it out of the sandbox into the host program that loads it".to_string(),
+        "declare each required canonical right in `authority.needs`, or remove the effectful call from the sandbox guest".to_string(),
         None,
     )
 }

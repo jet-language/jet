@@ -8,14 +8,14 @@ struct Args {
 fn run(args: Args) {
     n :: args.n
     slots :: n /% 2
-    prime := [U8]{if n > 2 -> 1 else -> 0}.cycle(slots).to_list()
+    odd_prime := [U8]{if n > 2 -> 1 else -> 0}.cycle(slots).to_list()
     loop p := 3, p * p < n {
-        if prime[p /% 2] == 1 {
-            loop m in p * p /% 2..<slots, p -> prime[m] = 0
+        if odd_prime[p /% 2] == 1 {
+            loop m in p * p /% 2..<slots, p -> odd_prime[m] = 0
         }
         p += 2
     }
-    count :: prime.count(1)
-    largest :: if n > 2 -> math.max(2, (prime.last_index_of(1) ?? 0) * 2 + 1) else -> 0
+    count :: odd_prime.count(1)
+    largest :: if n > 2 -> math.max(2, (odd_prime.last_index_of(1) ?? 0) * 2 + 1) else -> 0
     print("count {count}\nlargest {largest}")
 }

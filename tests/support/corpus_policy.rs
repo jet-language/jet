@@ -10,6 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use jet::Diagnostics::Span;
+use jet::Lexer::{TokKind, Token};
 use jet::AST::{
     AccessConvention, BinOp, BindPattern, CallArg, Expr, ForKind, Item, LambdaBody, OrFallback,
     Pattern, Program, Stmt, StrFormat, StrPart, StructPatField, Type, UnOp,
@@ -605,7 +606,7 @@ impl CorpusPolicy {
             all.extend(evaluate_program(&self.manifest, path, row, &program));
         }
         if applies(&self.manifest, path, row, "first-hour-doc-recipe")
-            && path == "docs/first-hour.md"
+            && path == "docs/spec/guides/first-hour.md"
         {
             let typed = jet_fences(source).iter().any(|fence| {
                 parse_program(path, fence)
@@ -652,7 +653,7 @@ impl CorpusPolicy {
             let Some(target) = application.target else {
                 continue;
             };
-            for argument in &application.marker.args {
+            for argument in application.marker.expr_args() {
                 let Expr::Ident(rule, _) = argument else {
                     continue;
                 };
@@ -2049,8 +2050,12 @@ fn collect_statement_facts<'a>(
                     body: task_body,
                     ..
                 } => {
-                    let is_single_combinator = task_body.len() == 1
-                        && task_body.first().is_some_and(is_task_combinator_statement);
+                    let task_combinator_count = task_body
+                        .iter()
+                        .filter(|statement| is_task_combinator_statement(statement))
+                        .count();
+                    let has_task_all = task_body.iter().any(is_task_all_statement);
+                    let is_single_combinator = task_combinator_count == 1 && !has_task_all;
                     facts.task_groups.push((*span, is_single_combinator));
                     bodies.push(task_body);
                 }
@@ -2170,6 +2175,32 @@ fn skip_directory(name: &str) -> bool {
         || name.starts_with("result-")
 }
 
+/// Package `ConfigFacts` files use the package model's record parser, not the
+/// ordinary Jet AST parser. Exclude only a `config/` directory explicitly
+/// named by its sibling `package.jet`; an ordinary directory with that name
+/// remains in the corpus.
+fn is_declared_package_config_dir(path: &Path) -> bool {
+    if path.file_name().and_then(|name| name.to_str()) != Some("config") {
+        return false;
+    }
+    let Some(package_root) = path.parent() else {
+        return false;
+    };
+    let manifest_path = package_root.join("package.jet");
+    let Ok(source) = fs::read_to_string(&manifest_path) else {
+        return false;
+    };
+    let Ok(facts) =
+        jet::Package::PackageFacts::parse_uncomposed(&source, manifest_path.display().to_string())
+    else {
+        return false;
+    };
+    facts
+        .configs
+        .iter()
+        .any(|config| config == "config" || config.starts_with("config/"))
+}
+
 fn discover_manifest_files(
     root: &Path,
     manifest: &CorpusManifest,
@@ -2209,10 +2240,11 @@ fn discover_files(root: &Path, current: &Path, out: &mut Vec<String>) -> Result<
                 continue;
             }
             if file_type.is_dir() {
-                if path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(skip_directory)
+                if is_declared_package_config_dir(&path)
+                    || path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(skip_directory)
                 {
                     continue;
                 }
@@ -2294,10 +2326,53 @@ fn parse_program(source_label: &str, source: &str) -> Result<Program, String> {
                 "Jet lexer rejected corpus source `{source_label}`: {lexer_diagnostics:?}"
             ));
         }
-        jet::Parser::parse(&tokens).map_err(|diagnostics| {
+        let parse_source = strip_inline_package(source, &tokens);
+        let (parse_tokens, parse_diagnostics) = jet::Lexer::lex(parse_source);
+        if !parse_diagnostics.is_empty() {
+            return Err(format!(
+                "Jet lexer rejected corpus source `{source_label}`: {parse_diagnostics:?}"
+            ));
+        }
+        jet::Parser::parse(&parse_tokens).map_err(|diagnostics| {
             format!("Jet parser rejected corpus source `{source_label}`: {diagnostics:?}")
         })
     })
+}
+
+fn strip_inline_package<'a>(source: &'a str, tokens: &[Token]) -> &'a str {
+    let Some((package_index, package_token)) = tokens.iter().enumerate().find(|(_, token)| {
+        !matches!(
+            &token.kind,
+            TokKind::LineComment(_) | TokKind::BlockComment(_)
+        )
+    }) else {
+        return source;
+    };
+    if !matches!(&package_token.kind, TokKind::Ident(name) if name == "package") {
+        return source;
+    }
+    let Some(open_index) = tokens
+        .iter()
+        .enumerate()
+        .skip(package_index + 1)
+        .find_map(|(index, token)| matches!(&token.kind, TokKind::LBrace).then_some(index))
+    else {
+        return source;
+    };
+    let mut depth = 0usize;
+    for token in tokens.iter().skip(open_index) {
+        match &token.kind {
+            TokKind::LBrace => depth += 1,
+            TokKind::RBrace => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return &source[token.span.end..];
+                }
+            }
+            _ => {}
+        }
+    }
+    source
 }
 
 fn evaluate_program(
@@ -3522,6 +3597,40 @@ fn is_task_combinator_statement(statement: &Stmt) -> bool {
     }
 }
 
+fn is_task_all_statement(statement: &Stmt) -> bool {
+    match statement {
+        Stmt::Expr(expr) => is_task_all_expr(expr),
+        Stmt::Val(binding) => is_task_all_expr(&binding.init),
+        _ => false,
+    }
+}
+
+fn is_task_all_expr(expr: &Expr) -> bool {
+    let mut current = expr;
+    loop {
+        match current.without_parens() {
+            Expr::Call(call) => {
+                return matches!(
+                    call.name.as_str(),
+                    jet::Syntax::TASK_ALL | jet::Syntax::INTERNAL_TASK_ALL_METHOD
+                );
+            }
+            Expr::MethodCall {
+                receiver, method, ..
+            } => {
+                return matches!(receiver.without_parens(), Expr::Ident(name, _)
+                    if name == "task" || name == jet::Syntax::INTERNAL_TASK_RECEIVER)
+                    && matches!(
+                        method.as_str(),
+                        "all" | jet::Syntax::INTERNAL_TASK_ALL_METHOD
+                    );
+            }
+            Expr::OrFallback { value, .. } => current = value,
+            _ => return false,
+        }
+    }
+}
+
 fn is_task_combinator_expr(expr: &Expr) -> bool {
     let mut current = expr;
     loop {
@@ -3529,8 +3638,10 @@ fn is_task_combinator_expr(expr: &Expr) -> bool {
             Expr::Call(call) => {
                 return matches!(
                     call.name.as_str(),
-                    "task.race"
-                        | "task.any"
+                    jet::Syntax::TASK_ALL
+                        | jet::Syntax::TASK_RACE
+                        | jet::Syntax::TASK_ANY
+                        | jet::Syntax::INTERNAL_TASK_ALL_METHOD
                         | jet::Syntax::INTERNAL_TASK_RACE_METHOD
                         | jet::Syntax::INTERNAL_TASK_ANY_METHOD
                 );
@@ -3542,8 +3653,10 @@ fn is_task_combinator_expr(expr: &Expr) -> bool {
                     if name == "task" || name == jet::Syntax::INTERNAL_TASK_RECEIVER)
                     && matches!(
                         method.as_str(),
-                        "race"
+                        "all"
+                            | "race"
                             | "any"
+                            | jet::Syntax::INTERNAL_TASK_ALL_METHOD
                             | jet::Syntax::INTERNAL_TASK_RACE_METHOD
                             | jet::Syntax::INTERNAL_TASK_ANY_METHOD
                     );

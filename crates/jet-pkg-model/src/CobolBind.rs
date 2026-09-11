@@ -201,6 +201,7 @@ pub fn bind(
         &layout,
         &runtime_dir,
         &archive,
+        lib,
     )?;
     Ok(BindResult {
         source: generated_source,
@@ -449,7 +450,6 @@ fn prove_link(command: &mut Command) -> Result<(), BindError> {
         Err(error) => Err(error),
     }
 }
-
 fn render_provenance(
     source_path: &Path,
     foreign_source: &str,
@@ -460,6 +460,7 @@ fn render_provenance(
     layout: &RecordLayout,
     runtime_dir: &Path,
     archive: &Path,
+    lib: &str,
 ) -> Result<String, BindError> {
     let descriptor = descriptor_stamp();
     let program_symbol = cobol_c_symbol(program);
@@ -488,7 +489,7 @@ fn render_provenance(
             "could not read the COBOL archive for provenance: {error}"
         ))
     })?;
-    Ok(format!(
+    let mut provenance = format!(
         "schema=jet-cobol-bind-v1\nidentity={}\ndescriptor={}\nabi=C\nprogram={}\nprogram_symbol={}\nsource_path={}\nsource_sha256={}\ngenerated_sha256={}\ncopybook_path={}\ncopybook_sha256={}\nrecord={}\nrecord_width={}\nfields={}\nruntime={}\narchive_sha256={}\n",
         identity.finish(),
         descriptor,
@@ -504,7 +505,18 @@ fn render_provenance(
         layout_facts,
         runtime_dir.display(),
         crate::SHA256::sha256_hex(&archive_bytes),
-    ))
+    );
+    crate::ForeignBridge::append_boundary_for_artifact(
+        &mut provenance,
+        *crate::AST::binder_descriptor(crate::AST::ForeignLanguage::Cobol)
+            .ok_or_else(|| BindError::Source("COBOL binder descriptor is not registered".into()))?,
+        lib,
+        source_path,
+        archive,
+        "cobc/cc/ar",
+    )
+    .map_err(BindError::IO)?;
+    Ok(provenance)
 }
 
 fn pic_digits(s: &str) -> Option<usize> {

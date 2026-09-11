@@ -1,10 +1,11 @@
 //! D-COMPUTE-KERNEL-SURFACE1=B: the conservative safe-kernel proof.
 //!
-//! A marker is not a proof. This pass accepts only a read-only, effect-free
-//! expression kernel whose safety obligations are either structural or
-//! delegated to the checked Core compute family. More general loops, indexed
-//! writes, captures, barriers, and provider calls remain rejected until their
-//! proof facts exist.
+//! A marker is not a proof. This pass accepts only read-only, effect-free
+//! expression kernels whose safety obligations are either structural or
+//! delegated to the checked Core compute family. Flat and projected accesses,
+//! masked additions, first-match exits, and fixed-order reductions are admitted
+//! only when their exact loop shape is proven; calls, aliases, and unsupported
+//! operations remain rejected until their proof facts exist.
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::SendCrossing;
@@ -49,18 +50,23 @@ struct KernelFailure {
     span: Span,
 }
 
+struct AutoVectorBodyProof {
+    outputs: std::collections::BTreeSet<String>,
+    inputs: std::collections::BTreeSet<String>,
+    element_type: Type,
+    no_early_exit: bool,
+    no_cross_iteration_deps: bool,
+}
+
+
 impl<'a> super::Checker<'a> {
-    /// D-SIMD3=B: prove the deliberately small source shape that the native
-    /// backend may mark as vectorizable. The proof is conservative: one
-    /// half-open, unit-stride range; one or more distinct indexed stores; and
-    /// expressions made only from same-lane reads, loop-invariant scalar
-    /// reads, and scalar arithmetic. A dynamic list is admitted only for one
-    /// in-place root bounded by that root's `len()`, which proves the root is
-    /// the only storage participating in the loop. Calls, control flow,
-    /// aliases, and cross-lane reads stay scalar until a later proof adds
-    /// them.
+    /// D-SIMD3=B: prove a safe source shape before the native backend can mark
+    /// it vectorizable. The proof accepts flat elementwise stores, projected
+    /// AoS/columnar field stores, masked additive reductions, first-match
+    /// exits, and the ratified fixed-order Float reduction. Every control-flow
+    /// form remains narrow and effect-free so MIR can re-check the exact CFG.
     pub(crate) fn prove_auto_vectorization_loop(
-        &self,
+        &mut self,
         kind: &ForKind,
         loop_var: &str,
         body: &[Stmt],
@@ -109,97 +115,14 @@ impl<'a> super::Checker<'a> {
                 }
             }
         };
-        let mut outputs = std::collections::BTreeSet::new();
-        let mut inputs = std::collections::BTreeSet::new();
-        let mut element_type = None;
-        for stmt in body {
-            let Stmt::Assign {
-                target,
-                op: None,
-                value,
-                ..
-            } = stmt
-            else {
-                return None;
-            };
-            let LValue::Index { base, index, .. } = target else {
-                return None;
-            };
-            let Expr::Ident(output, _) = base.without_parens() else {
-                return None;
-            };
-            if !matches!(index.without_parens(), Expr::Ident(name, _) if name == loop_var) {
-                return None;
-            }
-            // Repeated stores to one root have an order-sensitive shape that
-            // the native loop consumer does not model. Distinct roots remain
-            // independent fixed-list destinations.
-            if !outputs.insert(output.clone()) {
-                return None;
-            }
-
-            let output_info = self.lookup(output)?;
-            let (output_elem, same_lane_output) = match &output_info.ty {
-                Type::FixedList { elem, len } => {
-                    if Some(len.literal_value()?) != extent {
-                        return None;
-                    }
-                    // The write target must be a local value, not a borrowed
-                    // parameter. Fixed-list scalar values have no interior
-                    // references, so distinct local roots are disjoint
-                    // storage by construction.
-                    if output_info.param_conv.is_some() || !output_info.mutable {
-                        return None;
-                    }
-                    (elem, false)
-                }
-                Type::List(elem) => {
-                    // A dynamic destination is safe only when the range is
-                    // its own length. This is the single-root in-place case;
-                    // the final root check below rejects a second collection.
-                    if end_root != Some(output.as_str()) {
-                        return None;
-                    }
-                    if output_info.param_conv.is_some_and(|conv| {
-                        conv != AccessConvention::Write
-                    }) || (!output_info.mutable
-                        && output_info.param_conv != Some(AccessConvention::Write))
-                    {
-                        return None;
-                    }
-                    (elem, true)
-                }
-                _ => return None,
-            };
-            if !is_auto_vectorizable_scalar(output_elem) {
-                return None;
-            }
-            if let Some(expected) = &element_type {
-                if expected != output_elem.as_ref() {
-                    return None;
-                }
-            } else {
-                element_type = Some((**output_elem).clone());
-            }
-
-            if !self.prove_auto_element_expr(
-                value,
-                loop_var,
-                output_elem,
-                extent,
-                output,
-                same_lane_output,
-                &mut inputs,
-            ) {
-                return None;
-            }
-        }
-        if outputs.is_empty() {
+        let proof = self.prove_auto_body(body, loop_var, extent)?;
+        if proof.outputs.is_empty() && proof.inputs.is_empty() {
             return None;
         }
-        let collection_roots = outputs
+        let collection_roots = proof
+            .outputs
             .iter()
-            .chain(inputs.iter())
+            .chain(proof.inputs.iter())
             .collect::<std::collections::BTreeSet<_>>();
         if collection_roots.iter().any(|root| {
             self.lookup(root.as_str())
@@ -212,14 +135,10 @@ impl<'a> super::Checker<'a> {
         {
             return None;
         }
-        let no_cross_iteration_deps = !inputs.iter().any(|input| outputs.contains(input));
-        if !no_cross_iteration_deps {
-            return None;
-        }
         // Two shared parameter roots could name the same backing storage. A
         // single input is safe; multiple inputs must be owned local arrays.
-        if inputs.len() > 1
-            && inputs.iter().any(|name| {
+        if proof.inputs.len() > 1
+            && proof.inputs.iter().any(|name| {
                 self.lookup(name)
                     .is_some_and(|info| info.param_conv == Some(AccessConvention::Read))
             })
@@ -235,16 +154,434 @@ impl<'a> super::Checker<'a> {
         }
 
         Some(AutoVectorizationFacts {
-            element_type: element_type?,
+            element_type: proof.element_type,
             no_aliasing: true,
-            no_early_exit: true,
+            no_early_exit: proof.no_early_exit,
             effect_free_body,
-            no_cross_iteration_deps,
+            no_cross_iteration_deps: proof.no_cross_iteration_deps,
         })
     }
 
-    fn prove_auto_element_expr(
+    fn prove_auto_body(
+        &mut self,
+        body: &[Stmt],
+        loop_var: &str,
+        extent: Option<u64>,
+    ) -> Option<AutoVectorBodyProof> {
+        self.prove_auto_control_body(body, loop_var, extent)
+            .or_else(|| self.prove_auto_reduction_body(body, loop_var, extent))
+            .or_else(|| self.prove_auto_elementwise_body(body, loop_var, extent))
+    }
+
+    /// Runtime `if` statements are normalized to a subjectless `Stmt::Switch`.
+    /// Keep the source proof narrow: one pure guard, one straight-line arm,
+    /// and either one masked add or one first-match exit.
+    fn prove_auto_control_body(
+        &mut self,
+        body: &[Stmt],
+        loop_var: &str,
+        extent: Option<u64>,
+    ) -> Option<AutoVectorBodyProof> {
+        let [Stmt::Switch {
+            subject,
+            arms,
+            else_body: None,
+            ..
+        }] = body
+        else {
+            return None;
+        };
+        let [arm] = arms.as_slice() else {
+            return None;
+        };
+        if !matches!(subject.without_parens(), Expr::Bool(true, _)) {
+            return None;
+        }
+        let mut inputs = std::collections::BTreeSet::new();
+        let mut condition_type = None;
+        if !self.prove_auto_condition_expr(
+            &arm.cond,
+            loop_var,
+            extent,
+            &mut condition_type,
+            &mut inputs,
+        ) {
+            return None;
+        }
+        let element_type = condition_type?;
+        if !is_auto_scalar(&element_type) || inputs.is_empty() {
+            return None;
+        }
+        match arm.body.as_slice() {
+            [Stmt::Assign {
+                target: LValue::Local { name, .. },
+                op: Some(BinOp::Add),
+                value,
+                ..
+            }] => {
+                let info = self.lookup(name)?;
+                if !is_auto_vectorizable_scalar(&element_type)
+                    || info.ty != element_type
+                    || !info.mutable
+                    || info.param_conv.is_some()
+                {
+                    return None;
+                }
+                if self.expr_mentions_ident(value, name) {
+                    return None;
+                }
+                if !self.prove_auto_element_expr(
+                    value,
+                    loop_var,
+                    &element_type,
+                    extent,
+                    "",
+                    false,
+                    &mut inputs,
+                ) {
+                    return None;
+                }
+                Some(AutoVectorBodyProof {
+                    outputs: std::collections::BTreeSet::new(),
+                    inputs,
+                    element_type,
+                    no_early_exit: true,
+                    no_cross_iteration_deps: false,
+                })
+            }
+            [Stmt::Return(Some(value), _)]
+                if self.prove_auto_condition_expr(
+                    value,
+                    loop_var,
+                    extent,
+                    &mut Some(element_type.clone()),
+                    &mut inputs,
+                ) =>
+            {
+                Some(AutoVectorBodyProof {
+                    outputs: std::collections::BTreeSet::new(),
+                    inputs,
+                    element_type,
+                    no_early_exit: false,
+                    no_cross_iteration_deps: true,
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn prove_auto_condition_expr(
+        &mut self,
+        expr: &Expr,
+        loop_var: &str,
+        extent: Option<u64>,
+        element_type: &mut Option<Type>,
+        inputs: &mut std::collections::BTreeSet<String>,
+    ) -> bool {
+        match expr.without_parens() {
+            Expr::Int(..) | Expr::Float(..) | Expr::Bool(..) => true,
+            Expr::Ident(name, _) if name == loop_var => true,
+            Expr::Ident(name, _) => self.lookup(name).is_some_and(|info| {
+                is_auto_scalar(&info.ty)
+                    && element_type
+                        .as_ref()
+                        .is_none_or(|expected| expected == &info.ty)
+            }),
+            Expr::Unary(UnOp::Neg | UnOp::Not, inner, ..) => self.prove_auto_condition_expr(
+                inner,
+                loop_var,
+                extent,
+                element_type,
+                inputs,
+            ),
+            Expr::Binary(op, left, right, ..)
+                if op.is_comparison()
+                    || matches!(
+                        op,
+                        BinOp::And | BinOp::Or | BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div
+                    ) =>
+            {
+                self.prove_auto_condition_expr(
+                    left,
+                    loop_var,
+                    extent,
+                    element_type,
+                    inputs,
+                ) && self.prove_auto_condition_expr(
+                    right,
+                    loop_var,
+                    extent,
+                    element_type,
+                    inputs,
+                )
+            }
+            Expr::Index { base, index, .. } => {
+                let Expr::Ident(root, _) = base.without_parens() else {
+                    return false;
+                };
+                let Some(ty) = self.auto_collection_element_type(root, index, loop_var, extent)
+                else {
+                    return false;
+                };
+                if !is_auto_scalar(&ty) {
+                    return false;
+                }
+                if element_type.as_ref().is_some_and(|expected| expected != &ty) {
+                    return false;
+                }
+                *element_type = Some(ty);
+                inputs.insert(root.clone());
+                true
+            }
+            Expr::Field(base, field, span) => {
+                let Expr::Index { base, index, .. } = base.without_parens() else {
+                    return false;
+                };
+                let Expr::Ident(root, _) = base.without_parens() else {
+                    return false;
+                };
+                let Some(elem) = self.auto_collection_element_type(root, index, loop_var, extent)
+                else {
+                    return false;
+                };
+                let Some(ty) = self.field_type(&elem, field, *span) else {
+                    return false;
+                };
+                if !is_auto_scalar(&ty)
+                    || element_type.as_ref().is_some_and(|expected| expected != &ty)
+                {
+                    return false;
+                }
+                *element_type = Some(ty);
+                inputs.insert(root.clone());
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn prove_auto_elementwise_body(
+        &mut self,
+        body: &[Stmt],
+        loop_var: &str,
+        extent: Option<u64>,
+    ) -> Option<AutoVectorBodyProof> {
+        let mut outputs = std::collections::BTreeSet::new();
+        let mut inputs = std::collections::BTreeSet::new();
+        let mut written = std::collections::BTreeSet::new();
+        let mut element_type = None;
+        for stmt in body {
+            let Stmt::Assign {
+                target,
+                op: None,
+                value,
+                ..
+            } = stmt
+            else {
+                return None;
+            };
+            let (root, field, output_elem) =
+                self.auto_output_place(target, loop_var, extent)?;
+            if !written.insert((root.clone(), field)) {
+                return None;
+            }
+            outputs.insert(root.clone());
+            if !is_auto_vectorizable_scalar(&output_elem) {
+                return None;
+            }
+            if let Some(expected) = &element_type {
+                if expected != &output_elem {
+                    return None;
+                }
+            } else {
+                element_type = Some(output_elem.clone());
+            }
+            if !self.prove_auto_element_expr(
+                value,
+                loop_var,
+                &output_elem,
+                extent,
+                &root,
+                true,
+                &mut inputs,
+            ) {
+                return None;
+            }
+        }
+        Some(AutoVectorBodyProof {
+            outputs,
+            inputs,
+            element_type: element_type?,
+            no_early_exit: true,
+            no_cross_iteration_deps: true,
+        })
+    }
+
+    fn auto_output_place(
+        &mut self,
+        target: &LValue,
+        loop_var: &str,
+        extent: Option<u64>,
+    ) -> Option<(String, Option<String>, Type)> {
+        let (root, field, index) = match target {
+            LValue::Index { base, index, .. } => {
+                let Expr::Ident(root, _) = base.without_parens() else {
+                    return None;
+                };
+                (root.clone(), None, index.as_ref())
+            }
+            LValue::Field { base, field, span } => {
+                let Expr::Index { base, index, .. } = base.without_parens() else {
+                    return None;
+                };
+                let Expr::Ident(root, _) = base.without_parens() else {
+                    return None;
+                };
+                let elem = self.auto_collection_element_type(root, index, loop_var, extent)?;
+                let ty = self.field_type(&elem, field, *span)?;
+                return self.check_auto_output_root(root, extent).map(|_| {
+                    (root.clone(), Some(field.clone()), ty)
+                });
+            }
+            LValue::Local { .. } => return None,
+        };
+        if !matches!(index.without_parens(), Expr::Ident(name, _) if name == loop_var) {
+            return None;
+        }
+        let elem = self.auto_collection_element_type(&root, index, loop_var, extent)?;
+        self.check_auto_output_root(&root, extent)?;
+        Some((root, field, elem))
+    }
+
+    fn check_auto_output_root(&self, root: &str, extent: Option<u64>) -> Option<()> {
+        let info = self.lookup(root)?;
+        match &info.ty {
+            Type::FixedList { len, .. } => {
+                if Some(len.literal_value()?) != extent {
+                    return None;
+                }
+                if info.param_conv.is_some() || !info.mutable {
+                    return None;
+                }
+            }
+            Type::List(_) => {
+                if info
+                    .param_conv
+                    .is_some_and(|conv| conv != AccessConvention::Write)
+                    || (!info.mutable && info.param_conv != Some(AccessConvention::Write))
+                {
+                    return None;
+                }
+            }
+            _ => return None,
+        }
+        Some(())
+    }
+
+    fn auto_collection_element_type(
         &self,
+        root: &str,
+        index: &Expr,
+        loop_var: &str,
+        extent: Option<u64>,
+    ) -> Option<Type> {
+        if !matches!(index.without_parens(), Expr::Ident(name, _) if name == loop_var) {
+            return None;
+        }
+        let info = self.lookup(root)?;
+        match &info.ty {
+            Type::FixedList { elem, len } => {
+                if Some(len.literal_value()?) != extent {
+                    return None;
+                }
+                Some((**elem).clone())
+            }
+            Type::List(elem) => Some((**elem).clone()),
+            _ => None,
+        }
+    }
+
+
+    fn prove_auto_reduction_body(
+        &mut self,
+        body: &[Stmt],
+        loop_var: &str,
+        extent: Option<u64>,
+    ) -> Option<AutoVectorBodyProof> {
+        let [Stmt::Assign {
+            target: LValue::Local { name, .. },
+            op,
+            value,
+            ..
+        }] = body
+        else {
+            return None;
+        };
+        let info = self.lookup(name)?;
+        let element_type = info.ty.clone();
+        if !is_auto_vectorizable_scalar(&element_type)
+            || !info.mutable
+            || info.param_conv.is_some()
+        {
+            return None;
+        }
+        let addend = match op {
+            Some(BinOp::Add) if !self.expr_mentions_ident(value, name) => value,
+            None => {
+                let Expr::Binary(BinOp::Add, left, right, _) = value.without_parens() else {
+                    return None;
+                };
+                let left_has = self.expr_mentions_ident(left, name);
+                let right_has = self.expr_mentions_ident(right, name);
+                match (left_has, right_has) {
+                    (true, false) => right.as_ref(),
+                    (false, true) => left.as_ref(),
+                    _ => return None,
+                }
+            }
+            _ => return None,
+        };
+        let mut inputs = std::collections::BTreeSet::new();
+        if !self.prove_auto_element_expr(
+            addend,
+            loop_var,
+            &element_type,
+            extent,
+            "",
+            false,
+            &mut inputs,
+        ) || inputs.is_empty()
+        {
+            return None;
+        }
+        Some(AutoVectorBodyProof {
+            outputs: std::collections::BTreeSet::new(),
+            inputs,
+            element_type,
+            no_early_exit: true,
+            // The source accumulator is loop-carried. MIR replaces it with
+            // the ratified fixed-width lane tree before packing.
+            no_cross_iteration_deps: false,
+        })
+    }
+
+
+    fn expr_mentions_ident(&self, expr: &Expr, name: &str) -> bool {
+        match expr.without_parens() {
+            Expr::Ident(current, _) => current == name,
+            Expr::Unary(_, inner, ..) => self.expr_mentions_ident(inner, name),
+            Expr::Binary(_, left, right, ..) => {
+                self.expr_mentions_ident(left, name) || self.expr_mentions_ident(right, name)
+            }
+            Expr::Field(base, _, _) | Expr::Index { base, .. } => {
+                self.expr_mentions_ident(base, name)
+            }
+            _ => false,
+        }
+    }
+
+    fn prove_auto_element_expr(
+        &mut self,
         expr: &Expr,
         loop_var: &str,
         element_type: &Type,
@@ -256,9 +593,9 @@ impl<'a> super::Checker<'a> {
         match expr.without_parens() {
             Expr::Int(..) | Expr::Float(..) => true,
             Expr::Ident(name, _) if name == loop_var => true,
-            Expr::Ident(name, _) => self
-                .lookup(name)
-                .is_some_and(|info| is_auto_vectorizable_scalar(&info.ty)),
+            Expr::Ident(name, _) => self.lookup(name).is_some_and(|info| {
+                is_auto_vectorizable_scalar(&info.ty) && &info.ty == element_type
+            }),
             Expr::Unary(UnOp::Neg, inner, ..) => self.prove_auto_element_expr(
                 inner,
                 loop_var,
@@ -293,33 +630,47 @@ impl<'a> super::Checker<'a> {
                 let Expr::Ident(root, _) = base.without_parens() else {
                     return false;
                 };
-                if !matches!(index.without_parens(), Expr::Ident(name, _) if name == loop_var) {
-                    return false;
-                }
-                let Some(info) = self.lookup(root) else {
+                let Some(ty) = self.auto_collection_element_type(root, index, loop_var, extent)
+                else {
                     return false;
                 };
-                match &info.ty {
-                    Type::FixedList { elem, len } => {
-                        let Some(length) = len.literal_value() else {
-                            return false;
-                        };
-                        if elem.as_ref() != element_type || Some(length) != extent {
-                            return false;
-                        }
-                    }
-                    Type::List(elem) if elem.as_ref() == element_type => {}
-                    _ => return false,
+                if &ty != element_type || !is_auto_vectorizable_scalar(&ty) {
+                    return false;
                 }
-                if !(same_lane_output && root == output) {
-                    inputs.insert(root.clone());
+                if root == output {
+                    return false;
                 }
+                let _ = same_lane_output;
+                inputs.insert(root.clone());
+                true
+            }
+            Expr::Field(base, field, span) => {
+                let Expr::Index { base, index, .. } = base.without_parens() else {
+                    return false;
+                };
+                let Expr::Ident(root, _) = base.without_parens() else {
+                    return false;
+                };
+                let Some(elem) = self.auto_collection_element_type(root, index, loop_var, extent)
+                else {
+                    return false;
+                };
+                let Some(ty) = self.field_type(&elem, field, *span) else {
+                    return false;
+                };
+                if &ty != element_type || !is_auto_vectorizable_scalar(&ty) {
+                    return false;
+                }
+                if root == output {
+                    return false;
+                }
+                let _ = same_lane_output;
+                inputs.insert(root.clone());
                 true
             }
             _ => false,
         }
     }
-
     /// Attach a proof only after the ordinary function body has been checked.
     /// The TIR and every execution tier then receive the same proof record.
     pub(crate) fn check_kernel_marker(&mut self, f: &mut Func, owner_type: Option<&str>) {
@@ -472,7 +823,14 @@ impl<'a> super::Checker<'a> {
                 obligation: "closed captures",
                 span: *span,
             }),
-            Expr::Unary(_, inner, _) | Expr::Paren(inner, _) => {
+            Expr::Unary(_, inner, _)
+            | Expr::Paren(inner, _)
+            | Expr::Copy(inner, _)
+            | Expr::Ok(inner, _)
+            | Expr::Err(inner, _)
+            | Expr::Present(inner, _)
+            | Expr::Tainted(inner, _, _)
+            | Expr::Place(inner, crate::AST::PlaceAccess::Read, _) => {
                 self.prove_kernel_expr(inner, names)
             }
             Expr::Binary(_, left, right, _) => {
@@ -536,6 +894,13 @@ impl<'a> super::Checker<'a> {
 
 fn is_auto_vectorizable_scalar(ty: &Type) -> bool {
     matches!(ty, Type::Float | Type::Float32)
+}
+
+fn is_auto_scalar(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Int | Type::Float | Type::Bool | Type::IntN { .. } | Type::Float32
+    )
 }
 
 fn kernel_failure(obligation: &str, span: Span) -> Diagnostic {

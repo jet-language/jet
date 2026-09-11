@@ -34,13 +34,13 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for E0141</p>
+<p class="diag-copy fix" data-registry-field="fix">Consume the `#SingleUse` value on every control-flow branch.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0141</code>: <code>tests/ui/single_use_branch.stderr</code>.</p>
 <pre class="diag">Error [E0141]: `db` must be used exactly once, but one path through this `if` leaves it unused
-  --&gt; tests/ui/single_use_branch.jet:15:5
+  --&gt; tests/ui/single_use_branch.jet:11:5
     |
- 15 |     db :: acquire(&quot;db&quot;)
+ 11 |     db :: acquire(&quot;db&quot;)
     |     ^^
  Why: a `#SingleUse` value has to be used on every path — here it is consumed on one branch but not the other, so the program could reach the end of its scope without doing its job
  Fix: use `db` exactly once on every branch: consume it in the missing arm, or move it out before the `if`

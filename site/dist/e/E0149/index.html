@@ -34,9 +34,45 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for E0149</p>
+<p class="diag-copy fix" data-registry-field="fix">Use `Type.from(text)` to construct the checked text value before using it.</p>
 <h2>Worked example</h2>
-<p>No UI snapshot currently mentions this code.</p>
+<p>First UI snapshot mentioning <code>E0149</code>: <code>tests/ui/db_typed_sql_all_sinks_plain_string.stderr</code>.</p>
+<pre class="diag">Error [E0149]: A runtime `String` can&#39;t be used as `SQL`
+  --&gt; tests/ui/db_typed_sql_all_sinks_plain_string.jet:8:26
+    |
+  8 |     _rows :: scope.query(text)
+    |                          ^^^^
+ Why: Interpolating untrusted text into a query or page is how injection happens; only a checked literal (its `{value}` holes become bound parameters or escaped insertions) may build one
+ Fix: Write `SQL{&quot;...&quot;}` with `{value}` holes, or use `SQL.raw(&quot;…&quot;)` if you have audited the text
+More: jet-lang.dev/e/E0149
+
+Error [E0149]: A runtime `String` can&#39;t be used as `SQL`
+  --&gt; tests/ui/db_typed_sql_all_sinks_plain_string.jet:9:29
+    |
+  9 |     _one :: scope.query_one(text)
+    |                             ^^^^
+ Why: Interpolating untrusted text into a query or page is how injection happens; only a checked literal (its `{value}` holes become bound parameters or escaped insertions) may build one
+ Fix: Write `SQL{&quot;...&quot;}` with `{value}` holes, or use `SQL.raw(&quot;…&quot;)` if you have audited the text
+More: jet-lang.dev/e/E0149
+
+Error [E0149]: A runtime `String` can&#39;t be used as `SQL`
+  --&gt; tests/ui/db_typed_sql_all_sinks_plain_string.jet:10:31
+    |
+ 10 |     _changed :: scope.execute(text)
+    |                               ^^^^
+ Why: Interpolating untrusted text into a query or page is how injection happens; only a checked literal (its `{value}` holes become bound parameters or escaped insertions) may build one
+ Fix: Write `SQL{&quot;...&quot;}` with `{value}` holes, or use `SQL.raw(&quot;…&quot;)` if you have audited the text
+More: jet-lang.dev/e/E0149
+
+Error [E0149]: A runtime `String` can&#39;t be used as `SQL`
+  --&gt; tests/ui/db_typed_sql_all_sinks_plain_string.jet:11:25
+    |
+ 11 |     _live :: scope.live(text)
+    |                         ^^^^
+ Why: Interpolating untrusted text into a query or page is how injection happens; only a checked literal (its `{value}` holes become bound parameters or escaped insertions) may build one
+ Fix: Write `SQL{&quot;...&quot;}` with `{value}` holes, or use `SQL.raw(&quot;…&quot;)` if you have audited the text
+More: jet-lang.dev/e/E0149
+</pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
 </main>

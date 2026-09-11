@@ -1,0 +1,87 @@
+pub enum Step {
+    Identity
+    Field(String)
+    Each
+    AtLeast(field: String, limit: Int)
+}
+
+fn parse_stage(source: String) ?[Step] -> {
+    stage :: source.trim()
+    if stage == "." -> return Val([Step]{Step.Identity})
+
+    if stage.starts_with("select(") && stage.ends_with(")") {
+        body :: stage.remove_prefix("select(").remove_suffix(")").trim()
+        words :: body.split(" ").to_list()
+        if words.len() != 3 -> return None
+        path :: words[0].trim()
+        if !path.starts_with(".") || path.len() < 2 -> return None
+        if words[1].trim() != ">=" -> return None
+        limit :: Int.parse(words[2].trim()) ?? return None
+        field :: path.remove_prefix(".")
+        return Val([Step]{Step.AtLeast{field: field, limit: limit}})
+    }
+
+    if stage.ends_with("[]") {
+        path :: stage.remove_suffix("[]").trim()
+        if !path.starts_with(".") || path.len() < 2 -> return None
+        field :: path.remove_prefix(".")
+        return Val([Step]{Step.Field(field), Step.Each})
+    }
+
+    if stage.starts_with(".") && stage.len() > 1 {
+        return Val([Step]{Step.Field(stage.remove_prefix("."))})
+    }
+    return None
+}
+
+pub fn parse(source: String) ?[Step] -> {
+    steps := [Step]{}
+    stages :: source.split("|").to_list()
+    if stages.len() == 0 -> return None
+    loop stage in stages {
+        parsed :: parse_stage(stage) ?? return None
+        steps.extend(parsed)
+    }
+    if steps.len() == 0 -> return None
+    return Val(steps)
+}
+
+fn field(value: DataTree, name: String) ?DataTree -> {
+    if value == .Object(entries) {
+        if entries.get(~name) == .Val(found) -> return Val(found)
+    }
+    return None
+}
+
+fn apply_step(values: [DataTree], step: Step) [DataTree] -> {
+    output := [DataTree]{}
+    loop value in values {
+        if step == {
+            .Identity -> output.push(value)
+            .Field(name) -> {
+                if field(~value, ~name) == .Val(found) -> output.push(found)
+            }
+            .Each -> {
+                if value == .Array(items) {
+                    loop item in items -> output.push(item)
+                }
+            }
+            .AtLeast(name, limit) -> {
+                if field(~value, ~name) == .Val(found) {
+                    score :: found.int() ?? Int.MIN
+                    if score >= limit -> output.push(value)
+                }
+            }
+        }
+    }
+    return output
+}
+
+pub fn run(data: DataTree, query: String) ?[DataTree] -> {
+    steps :: parse(query) ?? return None
+    values := [DataTree]{data}
+    loop step in steps {
+        values = apply_step(values, step)
+    }
+    return Val(values)
+}

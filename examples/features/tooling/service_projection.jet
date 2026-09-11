@@ -1,0 +1,11 @@
+// D-SERVICE-PROJECTION1: runtime retention and delivery policy are explicit values.
+use core.service as service
+
+fn run() {
+    retention :: Duration.milliseconds(1000) ?? return
+    runtime :: service.runtime("teaching-runtime", retention: retention)
+    delivery :: service.delivery_at_most_once()
+    durable :: service.delivery_durable()
+    print("runtime:{runtime}")
+    print("delivery:{delivery}:{durable}")
+}

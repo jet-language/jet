@@ -105,14 +105,32 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
     let result = BindResult {
         source: render_jet(lib, &functions),
         bound: functions.clone(),
+        provenance: {
+            let mut provenance = format!(
+                "schema=jet-ruby-bind-v1\nsha256={}\nruby={}\nscript={}\nworker={}\n",
+                crate::SHA256::sha256_hex(&identity),
+                ruby.display(),
+                script.display(),
+                worker.display()
+            );
+            crate::ForeignBridge::append_boundary_for_artifact(
+                &mut provenance,
+                *crate::AST::binder_descriptor(crate::AST::ForeignLanguage::Ruby)
+                    .ok_or_else(|| BindError::Source("Ruby binder descriptor is not registered".into()))?,
+                lib,
+                &script,
+                &archive,
+                format!(
+                    "ruby={};cc={};ar={}",
+                    ruby.display(),
+                    crate::ForeignBridge::tool_identity("cc"),
+                    crate::ForeignBridge::tool_identity("ar")
+                ),
+            )
+            .map_err(BindError::IO)?;
+            provenance
+        },
         archive,
-        provenance: format!(
-            "schema=jet-ruby-bind-v1\nsha256={}\nruby={}\nscript={}\nworker={}\n",
-            crate::SHA256::sha256_hex(&identity),
-            ruby.display(),
-            script.display(),
-            worker.display()
-        ),
     };
     let _ = std::fs::remove_dir_all(&build);
     Ok(result)

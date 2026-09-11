@@ -69,7 +69,7 @@ where
     )
 }
 
-fn jet_zip_strict_step<A, B>(left: Option<A>, right: Option<B>) -> Result<Option<(A, B)>, ()> {
+pub fn jet_zip_strict_step<A, B>(left: Option<A>, right: Option<B>) -> Result<Option<(A, B)>, ()> {
     match (left, right) {
         (Some(left), Some(right)) => Ok(Some((left, right))),
         (None, None) => Ok(None),
@@ -77,7 +77,17 @@ fn jet_zip_strict_step<A, B>(left: Option<A>, right: Option<B>) -> Result<Option
     }
 }
 
-fn jet_zip_pad_step<A: Clone, B: Clone>(
+pub fn jet_zip_short_step<A, B>(
+    left: Option<A>,
+    right: impl FnOnce() -> Option<B>,
+) -> Option<(A, B)> {
+    match left {
+        Some(left) => right().map(|right| (left, right)),
+        None => None,
+    }
+}
+
+pub fn jet_zip_pad_step<A: Clone, B: Clone>(
     left: Option<A>,
     right: Option<B>,
     left_fill: A,
@@ -89,6 +99,10 @@ fn jet_zip_pad_step<A: Clone, B: Clone>(
         (None, Some(right)) => Some((left_fill, right)),
         (None, None) => None,
     }
+}
+
+pub fn jet_zip_length_mismatch_message() -> &'static str {
+    "zip length mismatch"
 }
 
 /// Shared predicate count kernel for eager List adapters.

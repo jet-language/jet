@@ -71,13 +71,28 @@ mod jet_std {
         }
     }
 
-    pub struct JetMIME(pub String);
-
-    impl JetMIME {
-        pub fn to_string_value(&self) -> String {
-            self.0.clone()
-        }
+    #[derive(Clone, Debug)]
+    pub struct JetURL {
+        pub scheme: String,
+        pub username: Option<String>,
+        pub password: Option<String>,
+        pub host: Option<String>,
+        pub port: Option<i64>,
+        pub path: String,
+        pub query: Vec<(String, String)>,
+        pub fragment: Option<String>,
+        pub typed_host: Option<Vec<(String, bool)>>,
+        pub typed_path: Option<Vec<(String, bool)>>,
     }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct JetMIME {
+        pub top: String,
+        pub sub: String,
+        pub params: Vec<(String, String)>,
+    }
+
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs");
 }
 
 enum JetParaRuntimeFailure {
@@ -247,6 +262,41 @@ fn jet_log_emit(_level: &str, msg: &str, _fields: &[LogField]) {
         .unwrap()
         .push(msg.to_string());
 }
+#[allow(unused_imports)]
+use jet_foundation::Devtools::*;
+include!("../crates/jet-codegen/src/Prelude/Core/DevtoolsRequestPanel.rs");
+
+include!("../crates/jet-codegen/src/Prelude/Core/TimeMonotonic.rs");
+include!("../crates/jet-codegen/src/Prelude/Deadline.rs");
+
+thread_local! {
+    static JET_DB_REQUEST_ID: std::cell::RefCell<Option<String>> =
+        std::cell::RefCell::new(None);
+}
+
+fn jet_db_current_request_id() -> Option<String> {
+    JET_DB_REQUEST_ID.with(|request_id| request_id.borrow().clone())
+}
+
+struct JetDbRequestScope {
+    previous: Option<String>,
+}
+
+impl JetDbRequestScope {
+    fn enter(request_id: Option<String>) -> Self {
+        let previous = JET_DB_REQUEST_ID.with(|current| current.replace(request_id));
+        Self { previous }
+    }
+}
+
+impl Drop for JetDbRequestScope {
+    fn drop(&mut self) {
+        JET_DB_REQUEST_ID.with(|current| {
+            let _ = current.replace(self.previous.take());
+        });
+    }
+}
+
 
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
@@ -3769,7 +3819,8 @@ fn server_handle_binds_serves_and_rejects_second_shutdown() {
     jet_http_mux_add(&mux, "GET", "/", |_| {
         jet_http_srv_response(200, &"handle".to_string())
     });
-    let server = jet_http_server_bind(&"127.0.0.1:0".to_string(), mux).expect("bind");
+    let server =
+        jet_http_server_bind(&"127.0.0.1:0".to_string(), mux, None, None).expect("bind");
     let addr: std::net::SocketAddr = jet_http_server_local_addr(&server)
         .expect("addr")
         .parse()
@@ -3874,7 +3925,7 @@ fn canonical_router_precedence_methods_and_conflicts() {
     jet_http_mux_add(&conflict, "GET", "/users/:name", |_| {
         jet_http_srv_response(200, &String::new())
     });
-    assert!(jet_http_server_bind(&"127.0.0.1:0".to_string(), conflict)
+    assert!(jet_http_server_bind(&"127.0.0.1:0".to_string(), conflict, None, None)
         .err()
         .expect("conflict")
         .contains("route conflict"));
@@ -3882,7 +3933,7 @@ fn canonical_router_precedence_methods_and_conflicts() {
     jet_http_mux_add(&legacy, "GET", "/users/{id}", |_| {
         jet_http_srv_response(200, &String::new())
     });
-    assert!(jet_http_server_bind(&"127.0.0.1:0".to_string(), legacy)
+    assert!(jet_http_server_bind(&"127.0.0.1:0".to_string(), legacy, None, None)
         .err()
         .expect("brace pattern")
         .contains("E2805"));
@@ -3891,7 +3942,7 @@ fn canonical_router_precedence_methods_and_conflicts() {
     jet_http_mux_add(&bare, "GET", "/files/*", |_| {
         jet_http_srv_response(200, &String::new())
     });
-    assert!(jet_http_server_bind(&"127.0.0.1:0".to_string(), bare)
+    assert!(jet_http_server_bind(&"127.0.0.1:0".to_string(), bare, None, None)
         .err()
         .expect("bare wildcard")
         .contains("`*wildcard`"));
@@ -3964,7 +4015,7 @@ fn canonical_router_precedence_methods_and_conflicts() {
             jet_http_srv_response(200, &String::new())
         });
         assert!(
-            jet_http_server_bind(&"127.0.0.1:0".to_string(), invalid_mux).is_err(),
+            jet_http_server_bind(&"127.0.0.1:0".to_string(), invalid_mux, None, None).is_err(),
             "accepted {invalid}"
         );
     }
@@ -4438,7 +4489,8 @@ fn builtin_request_id_middleware_assigns_preserves_and_echoes_on_wire() {
             .is_some_and(|value| value.starts_with("req-")),
         "factory panic response was not correlated",
     );
-    let server = jet_http_server_bind(&"127.0.0.1:0".to_string(), mux).expect("bind");
+    let server =
+        jet_http_server_bind(&"127.0.0.1:0".to_string(), mux, None, None).expect("bind");
     let addr: std::net::SocketAddr = jet_http_server_local_addr(&server)
         .expect("addr")
         .parse()
@@ -6272,7 +6324,8 @@ fn http2_server_api_shutdown_grace_reaches_h2_drain() {
         jet_http_srv_response(200, &"late".to_string())
     });
 
-    let server = jet_http_server_bind(&"127.0.0.1:0".to_string(), mux).expect("bind");
+    let server =
+        jet_http_server_bind(&"127.0.0.1:0".to_string(), mux, None, None).expect("bind");
     let addr = jet_http_server_local_addr(&server).expect("local addr");
     let serving = server.clone();
     let serve = std::thread::spawn(move || jet_http_server_serve(&serving));

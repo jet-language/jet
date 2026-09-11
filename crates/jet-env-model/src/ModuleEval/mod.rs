@@ -129,7 +129,7 @@ mod tests {
     fn evaluates_plain_fact_and_packages() {
         let src = r#"
 module dev {
-    env.dev: Env.{
+    env.dev: Env{
         packages: [default.ripgrep, default.fd, unstable.neovim],
         prompt: "wordstats",
     }
@@ -277,10 +277,10 @@ module profile.dev {
 
     #[test]
     fn package_profile_provider_facts_preserve_selector_and_provenance() {
-        let source = "module profile.dev { packages: [\"ripgrep#version=1.2.3@default\"] }\n";
+        let source = "module profile.dev { packages: [\"ripgrep@default#version=1.2.3\"] }\n";
         let plan = evaluate_package_profile(&source, &base_dir(), "dev").unwrap();
         let facts = &plan.packages[0].provider_facts;
-        assert_eq!(facts.reference, "ripgrep#version=1.2.3@default");
+        assert_eq!(facts.reference, "ripgrep@default#version=1.2.3");
         assert_eq!(facts.target, "ripgrep");
         assert_eq!(facts.selector.version, "1.2.3");
         assert_eq!(facts.profile, "dev");
@@ -292,7 +292,7 @@ module profile.dev {
     fn package_profile_named_source_retains_resolved_external_selector() {
         let source = r#"
 module app {
-    sources: { catalog: widget#version=1.2.3@cran }
+    sources: { catalog: widget@cran#version=1.2.3 }
 }
 module profile.dev {
     packages: [catalog.widget]
@@ -326,9 +326,9 @@ module profile.b { extends: ["a"] }
             r#"
 module env.dev {{
     presets: [
-        "ambient": .{{ hostname: "{hostname}", extends: ["cycle"] }},
-        "cycle": .{{ extends: ["ambient"] }},
-        "explicit": .{{ packages: ["git@nixpkgs"] }}
+        "ambient": {{ hostname: "{hostname}", extends: ["cycle"] }},
+        "cycle": {{ extends: ["ambient"] }},
+        "explicit": {{ packages: ["git@jetpack"] }}
     ]
 }}
 "#
@@ -340,24 +340,25 @@ module env.dev {{
                 .map(|preset| preset.name.as_str()),
             Some("explicit")
         );
-        assert!(plan.package_refs.contains(&"git@nixpkgs".to_string()));
+        assert!(plan.package_refs.contains(&"git@jetpack".to_string()));
     }
 
     #[test]
     fn conflicting_reload_policies_are_rejected_with_module_provenance() {
         let source = r#"
 module first {
-    env.one: Env.{ reload: "never" }
+    env.dev: Env{ reload: "never" }
 }
 module second {
-    env.two: Env.{ reload: "prompt" }
+    env.dev: Env{ reload: "prompt" }
 }
 "#;
         let error =
             evaluate_env(source, &base_dir()).expect_err("reload conflict must be explicit");
         assert_eq!(error.code, "E1333");
         assert!(
-            error.what.contains("reload policy") && error.what.contains("second"),
+            error.what.to_ascii_lowercase().contains("reload policy")
+                && error.what.contains("second"),
             "{}",
             error.what
         );
@@ -367,7 +368,7 @@ module second {
     fn evaluates_computed_fact_via_if_else() {
         let src = r#"
 module dev {
-    env.dev: Env.{
+    env.dev: Env{
         prompt: if 3 > 2 -> { "yes" } else -> { "no" },
     }
 }
@@ -384,7 +385,7 @@ module dev {
     fn computed_module_fields_resolve_sibling_values_independent_of_source_order() {
         let src = r#"
 module dev {
-    env.dev: Env.{
+    env.dev: Env{
         port: base + 1,
         prompt: if port > 8000 -> "ready" else -> "waiting",
         base: 8000,
@@ -408,7 +409,7 @@ module dev {
         let src = r#"
 @base :: 8000
 module dev {
-    env.dev: Env.{
+    env.dev: Env{
         port: base + 1,
     }
 }
@@ -425,7 +426,7 @@ module dev {
     fn computed_module_field_cycles_are_reported_before_evaluation() {
         let src = r#"
 module dev {
-    env.dev: Env.{
+    env.dev: Env{
         first: second + 1,
         second: first + 1,
     }
@@ -440,7 +441,7 @@ module dev {
     fn computed_module_field_self_cycles_are_reported_before_evaluation() {
         let src = r#"
 module dev {
-    env.dev: Env.{
+    env.dev: Env{
         port: port + 1,
     }
 }
@@ -454,7 +455,7 @@ module dev {
     fn internal_module_is_skipped_by_automatic_merge() {
         let src = r#"
 module _gaming {
-    env.gaming: Env.{
+    env.gaming: Env{
         prompt: "should not appear",
     }
 }
@@ -466,20 +467,16 @@ module _gaming {
     #[test]
     fn wrong_namespace_type_is_a_pinned_diagnostic() {
         let src =
-            "\nmodule dev {\n    env.dev: System.{\n        prompt: \"wrong type\",\n    }\n}\n";
+            "\nmodule dev {\n    env.dev: System{\n        prompt: \"wrong type\",\n    }\n}\n";
         let err = evaluate_source(src, &base_dir()).unwrap_err();
         assert_eq!(err.code, "E0966");
         let rendered = crate::Diagnostics::render_all("env.jet", src, std::slice::from_ref(&err));
-        assert_eq!(
-            rendered,
-            "Error [E0966]: expected a `Env` literal here, found `System`\n  --> env.jet:3:14\n    |\n  3 |     env.dev: System.{\n    |              ^^^^^^^^\n Why: a contribution to this namespace must use the matching type `Env`\n Fix: change `System.{…}` to `Env.{…}`\n"
-        );
         check_diagnostic_snapshot("E0966", &rendered);
     }
 
     #[test]
     fn ambient_io_in_build_is_e3402() {
-        let src = "\nmodule dev {\n    env.dev: Env.{\n        prompt: read_file(\"/etc/hostname\"),\n    }\n}\n";
+        let src = "\nmodule dev {\n    env.dev: Env{\n        prompt: read_file(\"/etc/hostname\"),\n    }\n}\n";
         let err = evaluate_source(src, &base_dir()).unwrap_err();
         assert_eq!(err.code, "E3402");
         let rendered = crate::Diagnostics::render_all("env.jet", src, std::slice::from_ref(&err));
@@ -488,7 +485,7 @@ module _gaming {
             "unexpected render:\n{rendered}"
         );
         assert!(rendered
-            .contains("package builds run with ambient I/O and network access disabled (D-PURE2)"));
+            .contains("Package builds run with ambient I/O and network access disabled (D-PURE2)"));
         check_diagnostic_snapshot("E3402", &rendered);
     }
 
@@ -508,7 +505,7 @@ module _gaming {
         let src = r#"
 module dev {
     sources: { default: NixOS/nixpkgs/nixos-24.05@github }
-    env.dev: Env.{
+    env.dev: Env{
         packages: [default.ripgrep, default.fd],
         prompt: "wordstats",
     }
@@ -529,8 +526,8 @@ module dev {
     fn evaluate_env_captures_structured_prompt_config() {
         let src = r#"
 module dev {
-    env.dev: Env.{
-        prompt: Prompt.{ label: "web-api", path: .Short, strip: .On },
+    env.dev: Env{
+        prompt: Prompt{ label: "web-api", path: .Short, strip: .On },
     }
 }
 "#;
@@ -544,7 +541,7 @@ module dev {
     fn evaluate_env_prompt_shorthand_keeps_default_modes() {
         let src = r#"
 module dev {
-    env.dev: Env.{ prompt: "wordstats" }
+    env.dev: Env{ prompt: "wordstats" }
 }
 "#;
         let plan = evaluate_env(src, &base_dir()).unwrap();
@@ -561,7 +558,7 @@ module dev {
         let src = r#"
 module dev {
     sources: { up: acme/jet-pkgs/v1@github }
-    env.dev: Env.{ packages: [up.hello] }
+    env.dev: Env{ packages: [up.hello] }
 }
 "#;
         let plan = evaluate_env(src, &base_dir()).unwrap();
@@ -573,8 +570,8 @@ module dev {
     fn nixpkgs_source_kind_stays_nix() {
         let src = r#"
 module dev {
-    sources: { default: nixpkgs-unstable@nixpkgs }
-    env.dev: Env.{ packages: [default.fd] }
+    sources: { default: nixpkgs-unstable@jetpack }
+    env.dev: Env{ packages: [default.fd] }
 }
 "#;
         let plan = evaluate_env(src, &base_dir()).unwrap();
@@ -585,8 +582,8 @@ module dev {
     fn evaluate_env_bare_package_resolves_to_default_source() {
         let src = r#"
 module dev {
-    sources: { default: nixpkgs-unstable@nixpkgs }
-    env.dev: Env.{ packages: [ripgrep] }
+    sources: { default: nixpkgs-unstable@jetpack }
+    env.dev: Env{ packages: [ripgrep] }
 }
 "#;
         let plan = evaluate_env(src, &base_dir()).unwrap();
@@ -597,7 +594,7 @@ module dev {
     fn evaluate_env_captures_adapt_package() {
         let src = r#"
 module dev {
-    env.dev: Env.{
+    env.dev: Env{
         packages: [
             Pkg.adapt(
                 name: "weirdctl",
@@ -632,7 +629,7 @@ module dev {
     fn evaluate_env_captures_copy_adapter() {
         let src = r#"
 module dev {
-    env.dev: Env.{
+    env.dev: Env{
         packages: [
             Pkg.adapt(
                 name: "tool",
@@ -652,7 +649,7 @@ module dev {
     fn evaluate_env_rejects_empty_prebuilt_recipe() {
         let src = r#"
 module dev {
-    env.dev: Env.{
+    env.dev: Env{
         packages: [Pkg.adapt(
             name: "tool",
             source: "./vendor/tool",
@@ -669,7 +666,7 @@ module dev {
     fn evaluate_env_captures_finite_build_recipe() {
         let src = r#"
 module dev {
-    env.dev: Env.{
+    env.dev: Env{
         packages: [
             Pkg.adapt(
                 name: "wiretool",
@@ -712,7 +709,7 @@ module dev {
     fn evaluate_env_rejects_unknown_build_step_fields() {
         let src = r#"
 module dev {
-    env.dev: Env.{
+    env.dev: Env{
         packages: [Pkg.adapt(
             name: "tool",
             source: "./vendor/tool",
@@ -731,7 +728,7 @@ module dev {
     fn evaluate_env_bad_adapter_is_e1270() {
         let src = r#"
 module dev {
-    env.dev: Env.{
+    env.dev: Env{
         packages: [
             Pkg.adapt(
                 name: "tool",
@@ -750,14 +747,10 @@ module dev {
 
     #[test]
     fn evaluate_env_rejects_non_provider_source_ref() {
-        let src = "\nmodule dev {\n    sources: { default: nixos-24.05 }\n    env.dev: Env.{ packages: [default.ripgrep] }\n}\n";
+        let src = "\nmodule dev {\n    sources: { default: nixos-24.05 }\n    env.dev: Env{ packages: [default.ripgrep] }\n}\n";
         let err = evaluate_env(src, &base_dir()).unwrap_err();
         assert_eq!(err.code, "E0968");
         let rendered = crate::Diagnostics::render_all("env.jet", src, std::slice::from_ref(&err));
-        assert_eq!(
-            rendered,
-            "Error [E0968]: `nixos-24.05` isn't a `target@provider` source ref or bare path\n  --> env.jet:3:25\n    |\n  3 |     sources: { default: nixos-24.05 }\n    |                         ^^^^^^^^^^^\n Why: D-JPK-REF1 puts the upstream target before `@` and its provider after it; local `./`, `../`, and `/` paths stay bare\n Fix: write `NixOS/nixpkgs/nixos-24.05@github`, `nixos-unstable@nixpkgs`, or a bare path such as `../local`\n"
-        );
         check_diagnostic_snapshot("E0968", &rendered);
     }
 
@@ -766,11 +759,11 @@ module dev {
         let src = r#"
 module a {
     sources: { default: NixOS/nixpkgs/nixos-24.05@github }
-    env.dev: Env.{ packages: [default.ripgrep] }
+    env.dev: Env{ packages: [default.ripgrep] }
 }
 module b {
     sources: { default: NixOS/nixpkgs/nixos-23.11@github }
-    env.dev: Env.{ packages: [default.fd] }
+    env.dev: Env{ packages: [default.fd] }
 }
     "#;
         let err = evaluate_env(src, &base_dir()).unwrap_err();
@@ -783,12 +776,12 @@ module b {
     fn merges_packages_across_modules_and_dedupes() {
         let src = r#"
 module a {
-    env.dev: Env.{
+    env.dev: Env{
         packages: [default.ripgrep],
     }
 }
 module b {
-    env.dev: Env.{
+    env.dev: Env{
         packages: [default.ripgrep, default.fd],
     }
 }
@@ -809,12 +802,12 @@ module b {
     fn conflicting_fact_contributions_are_a_merge_error() {
         let src = r#"
 module a {
-    env.dev: Env.{
+    env.dev: Env{
         prompt: "one",
     }
 }
 module b {
-    env.dev: Env.{
+    env.dev: Env{
         prompt: "two",
     }
 }
@@ -824,7 +817,7 @@ module b {
         let diag = merge_error_to_diagnostic(&err);
         assert_eq!(diag.code, "E3521");
         let rendered = crate::Diagnostics::render_all("env.jet", src, std::slice::from_ref(&diag));
-        assert!(rendered.contains("Error [E3521]: fact `prompt` has conflicting values"));
+        assert!(rendered.contains("Error [E3521]: Fact `prompt` has conflicting values"));
         assert!(rendered.contains("a.dev.prompt"), "{rendered}");
         assert!(rendered.contains("b.dev.prompt"), "{rendered}");
         assert!(rendered.contains("\"one\""), "{rendered}");
@@ -840,22 +833,22 @@ module b {
         std::fs::create_dir_all(dir.join("modules")).unwrap();
         std::fs::write(
             dir.join("modules/tools.jet"),
-            "module tools { env.dev: Env.{ packages: [default.jq] } }",
+            "module tools { env.dev: Env{ packages: [default.jq] } }",
         )
         .unwrap();
-        let src = "module dev {\n    sources: { default: nixpkgs-unstable@nixpkgs }\n    imports: find(\"./modules\")\n    env.dev: Env.{ packages: [default.ripgrep] }\n}\n";
+        let src = "module dev {\n    sources: { default: nixpkgs-unstable@jetpack }\n    imports: find(\"./modules\")\n    env.dev: Env{ packages: [default.ripgrep] }\n}\n";
         let plan = evaluate_env(src, &dir).unwrap();
         assert_eq!(plan.package_refs, vec!["ripgrep@default", "jq@default"]);
         assert_eq!(
             plan.table.upstream("default"),
-            Some("nixpkgs:nixpkgs-unstable")
+            Some("jetpack:nixpkgs-unstable")
         );
         std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn find_missing_directory_is_a_pinned_diagnostic() {
-        let src = "\nmodule dev {\n    imports: find(\"./nope\")\n    env.dev: Env.{ packages: [default.ripgrep] }\n}\n";
+        let src = "\nmodule dev {\n    imports: find(\"./nope\")\n    env.dev: Env{ packages: [default.ripgrep] }\n}\n";
         let dir = fresh_dir("find-missing");
         let err = evaluate_env(src, &dir).unwrap_err();
         assert_eq!(err.code, "E0970");
@@ -872,14 +865,10 @@ module b {
 
     #[test]
     fn non_find_import_directive_is_e0969() {
-        let src = "\nmodule dev {\n    imports: gather(\"./modules\")\n    env.dev: Env.{ packages: [default.ripgrep] }\n}\n";
+        let src = "\nmodule dev {\n    imports: gather(\"./modules\")\n    env.dev: Env{ packages: [default.ripgrep] }\n}\n";
         let err = evaluate_env(src, &base_dir()).unwrap_err();
         assert_eq!(err.code, "E0969");
         let rendered = crate::Diagnostics::render_all("env.jet", src, std::slice::from_ref(&err));
-        assert_eq!(
-            rendered,
-            "Error [E0969]: an `imports:` directive must be `find(\"<dir>\")`\n  --> env.jet:3:14\n    |\n  3 |     imports: gather(\"./modules\")\n    |              ^^^^^^\n Why: imports auto-discover a directory of modules (U4); discovery uses `find` with one string-literal path, while recognized first-party integrations use their typed calls\n Fix: write `imports: find(\"./modules\")`\n"
-        );
         check_diagnostic_snapshot("E0969", &rendered);
     }
 
@@ -1234,17 +1223,17 @@ module net {
         assert_eq!(plan.images[0].from, "my-host");
     }
 
-    /// U18: an explicit `System.{ … }` / `Service { … }` / `Image { … }` is still
+    /// U18: an explicit `System{ … }` / `Service { … }` / `Image { … }` is still
     /// legal alongside the inferred bare form.
     #[test]
     fn explicit_type_names_still_parse() {
         let src = r#"
 module m {
-    system.box: System.{
+    system.box: System{
         target: linux.arm64,
-        services: { sshd: Service.{ enable: false } },
+        services: { sshd: Service{ enable: false } },
     }
-    image.box_iso: Image.{ from: system.box }
+    image.box_iso: Image{ from: system.box }
 }
 "#;
         let plan = evaluate_env(src, &base_dir()).unwrap();
@@ -1260,10 +1249,6 @@ module m {
         assert_eq!(err.code, "E0972");
         let rendered =
             crate::Diagnostics::render_all("config.jet", src, std::slice::from_ref(&err));
-        assert_eq!(
-            rendered,
-            "Error [E0972]: `gpu` isn't a field of `System`\n  --> config.jet:1:43\n    |\n  1 | module m { system.s: { target: linux.x64, gpu: true } }\n    |                                           ^^^\n Why: a `System` has a fixed set of fields: `target`, `packages`, `services`, `options`\n Fix: remove `gpu`, or use one of `target`, `packages`, `services`, `options`\n"
-        );
         check_diagnostic_snapshot("E0972", &rendered);
     }
 
@@ -1368,7 +1353,7 @@ module m {
 
     // ── U14/D-JPK-IMAGE1: `.Oci` container images ────────────────────────
 
-    /// A fresh temp dir with a `pkg.jet` declaring `app: executable` — the
+    /// A fresh temp dir with a `package.jet` declaring `app: executable` — the
     /// package an `.Oci` image's `from: packages.app` cross-checks against
     /// (E1267). Unique per call (thread + nanos) so parallel test threads
     /// never race on the same directory the way a shared `base_dir()` would.
@@ -1383,8 +1368,8 @@ module m {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
-            dir.join("pkg.jet"),
-            "payload: { name: \"t\", version: \"0.1.0\" }\npackages: { app: executable }\n",
+            dir.join(crate::Syntax::PACKAGE_FILE),
+            "name: \"t\"\nversion: \"0.1.0\"\npackages: { app: executable }\n",
         )
         .unwrap();
         dir
@@ -1392,7 +1377,7 @@ module m {
 
     /// `kind: .Oci` + `from: packages.<name>` captures an `ImagePlan` with
     /// `ImageKind::Oci` and every `.Oci`-only field, cross-checking clean
-    /// against a `pkg.jet`-declared executable package.
+    /// against a `package.jet`-declared executable package.
     #[test]
     fn worked_example_captures_oci_image() {
         let dir = oci_base_dir("worked-example");
@@ -1491,8 +1476,8 @@ module image.server {
     fn oci_from_library_package_is_e1267() {
         let dir = oci_base_dir("library-rejected");
         std::fs::write(
-            dir.join("pkg.jet"),
-            "payload: { name: \"t\", version: \"0.1.0\" }\npackages: { app: library }\n",
+            dir.join(crate::Syntax::PACKAGE_FILE),
+            "name: \"t\"\nversion: \"0.1.0\"\npackages: { app: library }\n",
         )
         .unwrap();
         let src = "module image.server { from: packages.app }";
@@ -1504,7 +1489,7 @@ module image.server {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// An `.Oci` image's `from:` naming a package `pkg.jet` never declares is
+    /// An `.Oci` image's `from:` naming a package `package.jet` never declares is
     /// also E1267 (there's nothing to confirm as executable).
     #[test]
     fn oci_from_undeclared_package_is_e1267() {
@@ -1768,10 +1753,10 @@ module system.box {
         std::fs::create_dir_all(dir.join("modules")).unwrap();
         std::fs::write(
             dir.join("modules/nested.jet"),
-            "module nested {\n    imports: find(\"./more\")\n    env.dev: Env.{ packages: [default.jq] }\n}\n",
+            "module nested {\n    imports: find(\"./more\")\n    env.dev: Env{ packages: [default.jq] }\n}\n",
         )
         .unwrap();
-        let src = "module dev {\n    imports: find(\"./modules\")\n    env.dev: Env.{ packages: [default.ripgrep] }\n}\n";
+        let src = "module dev {\n    imports: find(\"./modules\")\n    env.dev: Env{ packages: [default.ripgrep] }\n}\n";
         let err = evaluate_env(src, &dir).unwrap_err();
         assert_eq!(err.code, "E0971");
         let rendered = crate::Diagnostics::render_all("env.jet", src, std::slice::from_ref(&err));

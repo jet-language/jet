@@ -1,0 +1,79 @@
+// D-QUERY-RETAIN1=A: one typed query collects to an ordinary list.
+use core.data as data
+use core.encoding.csv as csv
+use core.files as files
+use core.testing as testing
+#Codable
+enum Region {
+    North
+    South
+}
+
+#Codable
+struct Sale {
+    item: String
+    cents: Int
+}
+
+#Codable
+struct RegionalSale {
+    region: Region
+    cents: Int
+}
+
+fn region_name(region: Region) String -> {
+    return if region == {
+        .North -> "North"
+        .South -> "South"
+    }
+}
+
+fn show_sales(label: String, rows: [Sale]) {
+    print("{label}: {rows.len()}")
+    loop sale in rows -> print("  {sale.item}:{sale.cents}")
+}
+
+fn run() {
+    rows :: [Sale]{
+        Sale{item: "small", cents: 40},
+        Sale{item: "large", cents: 125},
+        Sale{item: "medium", cents: 80}
+    }
+    list_rows :: data.query(rows)
+        .filter(s -> s.cents > 50)
+        .sort_by(s -> s.item)
+        .collect() ?? panic("list query")
+    sql_query :: rows.query(SQL{"SELECT * FROM sales WHERE cents > 50 ORDER BY item"})
+        ?? panic("SQL query")
+    sql_rows :: sql_query.collect() ?? panic("SQL collect")
+
+    temp :: testing.temp_dir("jet-typed-query")
+    path :: Path.from(temp).join("sales.csv").to_string()
+    files.write(path, "item,cents\nsmall,40\nlarge,125\nmedium,80")
+        ?? panic("CSV fixture")
+    file_query :: csv.query<Sale>(
+        path,
+        SQL{"SELECT * FROM sales WHERE cents > 50 ORDER BY item"}
+    ) ?? panic("file query")
+    file_rows :: file_query.collect() ?? panic("file collect")
+
+    show_sales("list", list_rows)
+    show_sales("sql", sql_rows)
+    show_sales("file", file_rows)
+
+    mapped :: list_rows.map(s -> s.cents * 2)
+    selected :: mapped.filter(cents -> cents >= 160)
+    print("mapped: {mapped}")
+    print("selected: {selected}")
+
+    regional :: [RegionalSale]{
+        RegionalSale{region: .North, cents: 125},
+        RegionalSale{region: .South, cents: 80},
+        RegionalSale{region: .North, cents: 75}
+    }
+    totals :: data.query(regional)
+        .group_by(s -> s.region)
+        .sum(s -> s.cents)
+        .collect() ?? panic("group sum")
+    loop total in totals -> print("{region_name(total.key)} total={total.value}")
+}

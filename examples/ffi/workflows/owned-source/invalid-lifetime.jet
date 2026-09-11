@@ -1,0 +1,20 @@
+use c.jet_cpp_frames as protocol
+// Keep the generated C++ artifact import in the invalid-lifetime journey too;
+// the CBind cache and C++ archive share the `jet_cpp_frames` link identity.
+use cpp.frames as native
+
+pub fn run() {
+    input := [U8]{10, 20, 30}
+    owner := protocol.FrameDocument{slot: U64{0}, generation: U64{0}}
+    if protocol.frame_document_open(input, U64{3}, &owner) != 0 -> panic("Frame open failed")
+    view := protocol.FrameView{slot: U64{0}, generation: U64{0}}
+    if protocol.frame_document_bytes(owner, &view) != 0 -> panic("Frame view failed")
+
+    next := [U8]{40, 50}
+    if protocol.frame_document_replace(&owner, next, U64{2}) != 0 -> panic("Frame replacement failed")
+    stale := U8{0}
+    stale_status :: protocol.frame_view_at(view, U64{1}, &stale)
+    if stale_status != 1 -> panic("stale borrowed view was accepted")
+    if protocol.frame_document_close(&owner) != 0 -> panic("Frame close failed")
+    print("expired-view={stale_status}")
+}

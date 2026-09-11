@@ -10,6 +10,8 @@
 
 mod common;
 
+use jet::Syntax::RuntimeLayer;
+use jet_foundation::Facts::TargetDossier;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -31,6 +33,23 @@ fn key_with(src: &str, profile_tag: &str, version: &str) -> String {
         jet::CanonicalAST::ast_cache_key(&bundle, profile_tag, version, &bundle.build_facts);
     std::fs::remove_dir_all(&dir).ok();
     key
+}
+
+/// Re-key one parsed bundle after changing only its target dossier.
+fn key_with_target_dossier(
+    bundle: &jet::AST::ProgramBundle,
+    mutate: impl FnOnce(&mut TargetDossier),
+) -> String {
+    let mut facts = bundle.build_facts.clone();
+    mutate(&mut facts.target_dossier);
+    jet::CanonicalAST::ast_cache_key(bundle, "default", "test-version", &facts)
+}
+
+/// Re-key one parsed bundle after changing only its target triple.
+fn key_with_target_triple(bundle: &jet::AST::ProgramBundle, target_triple: &str) -> String {
+    let mut facts = bundle.build_facts.clone();
+    facts.target_triple = target_triple.to_string();
+    jet::CanonicalAST::ast_cache_key(bundle, "default", "test-version", &facts)
 }
 
 /// The common case: default profile, a fixed version salt.
@@ -144,4 +163,57 @@ fn stable_across_reloads() {
     let src = "fn add(a: Int, b: Int) {\n    print(a + b)\n}\n";
     assert_eq!(key(src), key(src), "same input must yield the same key");
     assert_eq!(key(src).len(), 64, "key is a 64-hex SHA-256 digest");
+}
+
+#[test]
+fn target_dossier_inputs_invalidate_artifact_key() {
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir =
+        std::env::temp_dir().join(format!("jet-buildnorm-dossier-{}-{}", std::process::id(), n));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("prog.jet");
+    let src = "fn add(a: Int, b: Int) {\n    print(a + b)\n}\n";
+    std::fs::write(&file, src).unwrap();
+    let bundle = jet::Loader::load_entry_with_overlay(file.to_str().unwrap(), None, false)
+        .unwrap_or_else(|d| panic!("test program should parse:\n{src}\n{:?}", d));
+
+    let baseline = key_with_target_dossier(&bundle, |_| {});
+    assert_eq!(
+        baseline,
+        key_with_target_dossier(&bundle, |_| {}),
+        "identical input must keep the artifact key stable"
+    );
+
+    let assert_changes = |name: &str, mutate: fn(&mut TargetDossier)| {
+        assert_ne!(
+            baseline,
+            key_with_target_dossier(&bundle, mutate),
+            "{name} must invalidate the artifact key"
+        );
+    };
+    assert_changes("runtime layer", |dossier| dossier.layer = RuntimeLayer::Core);
+    assert_changes("provider digest/identity", |dossier| {
+        dossier.provider_identity = "target-providers-v1:sha256:provider-b".to_string()
+    });
+    assert_changes("Prelude closure", |dossier| {
+        dossier.closure_identity = "prelude-hosted-v2:sha256:closure-b".to_string()
+    });
+    assert_changes("linker", |dossier| {
+        dossier.linker_identity = "lld:sha256:linker-b".to_string()
+    });
+    assert_changes("execution tier", |dossier| dossier.tier_identity = "aot".to_string());
+    assert_changes("compiler", |dossier| dossier.compiler_identity = "jet@next".to_string());
+    assert_changes("environment", |dossier| {
+        dossier.environment_identity = "wasi".to_string()
+    });
+    assert_changes("dependency graph", |dossier| {
+        dossier.dependency_identity = "deps:sha256:dependency-b".to_string()
+    });
+    assert_ne!(
+        baseline,
+        key_with_target_triple(&bundle, "wasm32-unknown-unknown"),
+        "target triple must invalidate the artifact key"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
 }

@@ -7,6 +7,10 @@
 
 use super::{Concurrency, JitRuntime};
 use crate::MathExtra::math_rt::JetComplex;
+use crate::runtime_host::fixed_arithmetic_kernel::{
+    self, JetFixedArithmeticResult, JET_FIXED_MODE_TRAP, JET_FIXED_MODE_WRAPPING,
+    JET_FIXED_MODE_SATURATING, JET_FIXED_MODE_CHECKED,
+};
 use jet_foundation::Numeric::{CtBigInt, CtDecimal, CtFraction};
 
 fn trap_decimal(msg: &str) {
@@ -294,6 +298,199 @@ fn jet_jit_int_pow(a: i64, b: i64) -> i64 {
         }
     })
 }
+
+/// The canonical row set (`Codegen/TIR/routes.rs`, `exact_int_binary_route`)
+/// declares the division-family `Int` operators with the AOT Prelude ABI
+/// `(value, divisor, file, line)`; the source location travels with the call
+/// so a zero divisor, a negative exponent, or a bad shift count stops at the
+/// operator's own line exactly as `jet_std::jet_int_div` does on AOT. These
+/// adapters are what the row symbols `jet_std::jet_int_{div,rem,floor_div,
+/// mod,pow,shl,shr}` resolve to; the two-argument `jet_jit_int_*` hosts above
+/// stay for the receiver-method rows that carry no location.
+fn located_int_op(
+    line: i64,
+    failure: &str,
+    op: impl FnOnce(&mut JitRuntime) -> Option<i64>,
+) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match op(rt) {
+        Some(value) => value,
+        None => {
+            rt.set_arithmetic_stop(line as u32, failure);
+            0
+        }
+    })
+}
+
+fn jet_jit_int_div_at(a: i64, b: i64, _file: i64, line: i64) -> i64 {
+    located_int_op(line, divide_by_zero_message(), |rt| rt.heap.int_div(a, b))
+}
+
+fn jet_jit_int_rem_at(a: i64, b: i64, _file: i64, line: i64) -> i64 {
+    located_int_op(line, divide_by_zero_message(), |rt| rt.heap.int_rem(a, b))
+}
+
+fn jet_jit_int_floor_div_at(a: i64, b: i64, _file: i64, line: i64) -> i64 {
+    located_int_op(line, divide_by_zero_message(), |rt| rt.heap.int_floor_div(a, b))
+}
+
+fn jet_jit_int_mod_at(a: i64, b: i64, _file: i64, line: i64) -> i64 {
+    located_int_op(line, divide_by_zero_message(), |rt| rt.heap.int_mod(a, b))
+}
+
+fn jet_jit_int_pow_at(a: i64, b: i64, _file: i64, line: i64) -> i64 {
+    located_int_op(line, "Negative default Int exponent", |rt| rt.heap.int_pow(a, b))
+}
+
+fn jet_jit_int_shl_at(a: i64, b: i64, _file: i64, line: i64) -> i64 {
+    located_int_op(line, "Invalid shift count", |rt| rt.heap.int_shl(a, b))
+}
+
+fn jet_jit_int_shr_at(a: i64, b: i64, _file: i64, line: i64) -> i64 {
+    located_int_op(line, "Invalid shift count", |rt| rt.heap.int_shr(a, b))
+}
+
+fn jet_jit_fixed_trap(
+    left: i64,
+    right: i64,
+    _file: i64,
+    line: i64,
+    op: i64,
+    signed: bool,
+    bits: u8,
+) -> i64 {
+    jet_jit_fixed_arith(left, right, _file, line, op, JET_FIXED_MODE_TRAP, signed, bits)
+}
+
+fn jet_jit_fixed_arith(
+    left: i64,
+    right: i64,
+    _file: i64,
+    line: i64,
+    op: i64,
+    mode: i64,
+    signed: bool,
+    bits: u8,
+) -> i64 {
+    match fixed_arithmetic_kernel::jet_fixed_arithmetic(
+        left,
+        right as i128,
+        op,
+        mode,
+        signed,
+        bits,
+        signed,
+    ) {
+        JetFixedArithmeticResult::Value(value) => value,
+        JetFixedArithmeticResult::Absent => 0,
+        JetFixedArithmeticResult::Trap(error) => {
+            let message = error.to_string();
+            Concurrency::with_runtime_mut(|rt| rt.set_arithmetic_stop(line as u32, &message));
+            0
+        }
+    }
+}
+
+macro_rules! fixed_trap_hosts {
+    ($( $host:ident => ($op:ident, $signed:expr, $bits:expr) ),+ $(,)?) => {
+        $(
+            fn $host(left: i64, right: i64, file: i64, line: i64) -> i64 {
+                jet_jit_fixed_trap(
+                    left,
+                    right,
+                    file,
+                    line,
+                    fixed_arithmetic_kernel::$op,
+                    $signed,
+                    $bits,
+                )
+            }
+        )+
+    };
+}
+
+fixed_trap_hosts! {
+    jet_jit_i8_trap_add => (JET_FIXED_OP_ADD, true, 8),
+    jet_jit_i8_trap_sub => (JET_FIXED_OP_SUB, true, 8),
+    jet_jit_i8_trap_mul => (JET_FIXED_OP_MUL, true, 8),
+    jet_jit_i8_trap_div => (JET_FIXED_OP_DIV, true, 8),
+    jet_jit_i8_trap_rem => (JET_FIXED_OP_REM, true, 8),
+    jet_jit_u8_trap_add => (JET_FIXED_OP_ADD, false, 8),
+    jet_jit_u8_trap_sub => (JET_FIXED_OP_SUB, false, 8),
+    jet_jit_u8_trap_mul => (JET_FIXED_OP_MUL, false, 8),
+    jet_jit_u8_trap_div => (JET_FIXED_OP_DIV, false, 8),
+    jet_jit_u8_trap_rem => (JET_FIXED_OP_REM, false, 8),
+    jet_jit_i16_trap_add => (JET_FIXED_OP_ADD, true, 16),
+    jet_jit_i16_trap_sub => (JET_FIXED_OP_SUB, true, 16),
+    jet_jit_i16_trap_mul => (JET_FIXED_OP_MUL, true, 16),
+    jet_jit_i16_trap_div => (JET_FIXED_OP_DIV, true, 16),
+    jet_jit_i16_trap_rem => (JET_FIXED_OP_REM, true, 16),
+    jet_jit_u16_trap_add => (JET_FIXED_OP_ADD, false, 16),
+    jet_jit_u16_trap_sub => (JET_FIXED_OP_SUB, false, 16),
+    jet_jit_u16_trap_mul => (JET_FIXED_OP_MUL, false, 16),
+    jet_jit_u16_trap_div => (JET_FIXED_OP_DIV, false, 16),
+    jet_jit_u16_trap_rem => (JET_FIXED_OP_REM, false, 16),
+    jet_jit_i32_trap_add => (JET_FIXED_OP_ADD, true, 32),
+    jet_jit_i32_trap_sub => (JET_FIXED_OP_SUB, true, 32),
+    jet_jit_i32_trap_mul => (JET_FIXED_OP_MUL, true, 32),
+    jet_jit_i32_trap_div => (JET_FIXED_OP_DIV, true, 32),
+    jet_jit_i32_trap_rem => (JET_FIXED_OP_REM, true, 32),
+    jet_jit_u32_trap_add => (JET_FIXED_OP_ADD, false, 32),
+    jet_jit_u32_trap_sub => (JET_FIXED_OP_SUB, false, 32),
+    jet_jit_u32_trap_mul => (JET_FIXED_OP_MUL, false, 32),
+    jet_jit_u32_trap_div => (JET_FIXED_OP_DIV, false, 32),
+    jet_jit_u32_trap_rem => (JET_FIXED_OP_REM, false, 32),
+    jet_jit_i64_trap_add => (JET_FIXED_OP_ADD, true, 64),
+    jet_jit_i64_trap_sub => (JET_FIXED_OP_SUB, true, 64),
+    jet_jit_i64_trap_mul => (JET_FIXED_OP_MUL, true, 64),
+    jet_jit_i64_trap_div => (JET_FIXED_OP_DIV, true, 64),
+    jet_jit_i64_trap_rem => (JET_FIXED_OP_REM, true, 64),
+    jet_jit_u64_trap_add => (JET_FIXED_OP_ADD, false, 64),
+    jet_jit_u64_trap_sub => (JET_FIXED_OP_SUB, false, 64),
+    jet_jit_u64_trap_mul => (JET_FIXED_OP_MUL, false, 64),
+    jet_jit_u64_trap_div => (JET_FIXED_OP_DIV, false, 64),
+    jet_jit_u64_trap_rem => (JET_FIXED_OP_REM, false, 64),
+    jet_jit_i8_trap_shl => (JET_FIXED_OP_SHL, true, 8),
+    jet_jit_i8_trap_shr => (JET_FIXED_OP_SHR, true, 8),
+    jet_jit_i8_trap_pow => (JET_FIXED_OP_POW, true, 8),
+    jet_jit_i8_trap_floor_div => (JET_FIXED_OP_FLOOR_DIV, true, 8),
+    jet_jit_i8_trap_mod => (JET_FIXED_OP_MOD, true, 8),
+    jet_jit_u8_trap_shl => (JET_FIXED_OP_SHL, false, 8),
+    jet_jit_u8_trap_shr => (JET_FIXED_OP_SHR, false, 8),
+    jet_jit_u8_trap_pow => (JET_FIXED_OP_POW, false, 8),
+    jet_jit_u8_trap_floor_div => (JET_FIXED_OP_FLOOR_DIV, false, 8),
+    jet_jit_u8_trap_mod => (JET_FIXED_OP_MOD, false, 8),
+    jet_jit_i16_trap_shl => (JET_FIXED_OP_SHL, true, 16),
+    jet_jit_i16_trap_shr => (JET_FIXED_OP_SHR, true, 16),
+    jet_jit_i16_trap_pow => (JET_FIXED_OP_POW, true, 16),
+    jet_jit_i16_trap_floor_div => (JET_FIXED_OP_FLOOR_DIV, true, 16),
+    jet_jit_i16_trap_mod => (JET_FIXED_OP_MOD, true, 16),
+    jet_jit_u16_trap_shl => (JET_FIXED_OP_SHL, false, 16),
+    jet_jit_u16_trap_shr => (JET_FIXED_OP_SHR, false, 16),
+    jet_jit_u16_trap_pow => (JET_FIXED_OP_POW, false, 16),
+    jet_jit_u16_trap_floor_div => (JET_FIXED_OP_FLOOR_DIV, false, 16),
+    jet_jit_u16_trap_mod => (JET_FIXED_OP_MOD, false, 16),
+    jet_jit_i32_trap_shl => (JET_FIXED_OP_SHL, true, 32),
+    jet_jit_i32_trap_shr => (JET_FIXED_OP_SHR, true, 32),
+    jet_jit_i32_trap_pow => (JET_FIXED_OP_POW, true, 32),
+    jet_jit_i32_trap_floor_div => (JET_FIXED_OP_FLOOR_DIV, true, 32),
+    jet_jit_i32_trap_mod => (JET_FIXED_OP_MOD, true, 32),
+    jet_jit_u32_trap_shl => (JET_FIXED_OP_SHL, false, 32),
+    jet_jit_u32_trap_shr => (JET_FIXED_OP_SHR, false, 32),
+    jet_jit_u32_trap_pow => (JET_FIXED_OP_POW, false, 32),
+    jet_jit_u32_trap_floor_div => (JET_FIXED_OP_FLOOR_DIV, false, 32),
+    jet_jit_u32_trap_mod => (JET_FIXED_OP_MOD, false, 32),
+    jet_jit_i64_trap_shl => (JET_FIXED_OP_SHL, true, 64),
+    jet_jit_i64_trap_shr => (JET_FIXED_OP_SHR, true, 64),
+    jet_jit_i64_trap_pow => (JET_FIXED_OP_POW, true, 64),
+    jet_jit_i64_trap_floor_div => (JET_FIXED_OP_FLOOR_DIV, true, 64),
+    jet_jit_i64_trap_mod => (JET_FIXED_OP_MOD, true, 64),
+    jet_jit_u64_trap_shl => (JET_FIXED_OP_SHL, false, 64),
+    jet_jit_u64_trap_shr => (JET_FIXED_OP_SHR, false, 64),
+    jet_jit_u64_trap_pow => (JET_FIXED_OP_POW, false, 64),
+    jet_jit_u64_trap_floor_div => (JET_FIXED_OP_FLOOR_DIV, false, 64),
+    jet_jit_u64_trap_mod => (JET_FIXED_OP_MOD, false, 64),
+}
+
 
 /// Packed legacy option ABI: `0` is absent, otherwise payload + 1.
 fn jet_jit_int_factorial(a: i64) -> i64 {
@@ -662,6 +859,167 @@ fn jet_jit_complex_to_string(a: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
 }
 
+macro_rules! fixed_wrap_hosts {
+    ($( $host:ident => ($op:ident, $signed:expr, $bits:expr) ),+ $(,)?) => {
+        $(
+            fn $host(left: i64, right: i64) -> i64 {
+                jet_jit_fixed_arith(left, right, 0, 0, fixed_arithmetic_kernel::$op, JET_FIXED_MODE_WRAPPING, $signed, $bits)
+            }
+        )+
+    };
+}
+
+
+macro_rules! fixed_sat_hosts {
+    ($( $host:ident => ($op:ident, $signed:expr, $bits:expr) ),+ $(,)?) => {
+        $(
+            fn $host(left: i64, right: i64) -> i64 {
+                jet_jit_fixed_arith(left, right, 0, 0, fixed_arithmetic_kernel::$op, JET_FIXED_MODE_SATURATING, $signed, $bits)
+            }
+        )+
+    };
+}
+
+
+macro_rules! fixed_checked_hosts {
+    ($( $host:ident => ($op:ident, $signed:expr, $bits:expr) ),+ $(,)?) => {
+        $(
+            fn $host(left: i64, right: i64) -> i64 {
+                jet_jit_fixed_arith(left, right, 0, 0, fixed_arithmetic_kernel::$op, JET_FIXED_MODE_CHECKED, $signed, $bits)
+            }
+        )+
+    };
+}
+
+fixed_sat_hosts! {
+    jet_jit_i8_saturating_add => (JET_FIXED_OP_ADD, true, 8),
+    jet_jit_i8_saturating_sub => (JET_FIXED_OP_SUB, true, 8),
+    jet_jit_i8_saturating_mul => (JET_FIXED_OP_MUL, true, 8),
+    jet_jit_u8_saturating_add => (JET_FIXED_OP_ADD, false, 8),
+    jet_jit_u8_saturating_sub => (JET_FIXED_OP_SUB, false, 8),
+    jet_jit_u8_saturating_mul => (JET_FIXED_OP_MUL, false, 8),
+    jet_jit_i16_saturating_add => (JET_FIXED_OP_ADD, true, 16),
+    jet_jit_i16_saturating_sub => (JET_FIXED_OP_SUB, true, 16),
+    jet_jit_i16_saturating_mul => (JET_FIXED_OP_MUL, true, 16),
+    jet_jit_u16_saturating_add => (JET_FIXED_OP_ADD, false, 16),
+    jet_jit_u16_saturating_sub => (JET_FIXED_OP_SUB, false, 16),
+    jet_jit_u16_saturating_mul => (JET_FIXED_OP_MUL, false, 16),
+    jet_jit_i32_saturating_add => (JET_FIXED_OP_ADD, true, 32),
+    jet_jit_i32_saturating_sub => (JET_FIXED_OP_SUB, true, 32),
+    jet_jit_i32_saturating_mul => (JET_FIXED_OP_MUL, true, 32),
+    jet_jit_u32_saturating_add => (JET_FIXED_OP_ADD, false, 32),
+    jet_jit_u32_saturating_sub => (JET_FIXED_OP_SUB, false, 32),
+    jet_jit_u32_saturating_mul => (JET_FIXED_OP_MUL, false, 32),
+    jet_jit_i64_saturating_add => (JET_FIXED_OP_ADD, true, 64),
+    jet_jit_i64_saturating_sub => (JET_FIXED_OP_SUB, true, 64),
+    jet_jit_i64_saturating_mul => (JET_FIXED_OP_MUL, true, 64),
+    jet_jit_u64_saturating_add => (JET_FIXED_OP_ADD, false, 64),
+    jet_jit_u64_saturating_sub => (JET_FIXED_OP_SUB, false, 64),
+    jet_jit_u64_saturating_mul => (JET_FIXED_OP_MUL, false, 64),
+}
+
+fixed_checked_hosts! {
+    jet_jit_i8_checked_add => (JET_FIXED_OP_ADD, true, 8),
+    jet_jit_i8_checked_sub => (JET_FIXED_OP_SUB, true, 8),
+    jet_jit_i8_checked_mul => (JET_FIXED_OP_MUL, true, 8),
+    jet_jit_i8_checked_div => (JET_FIXED_OP_DIV, true, 8),
+    jet_jit_i8_checked_rem => (JET_FIXED_OP_REM, true, 8),
+    jet_jit_u8_checked_add => (JET_FIXED_OP_ADD, false, 8),
+    jet_jit_u8_checked_sub => (JET_FIXED_OP_SUB, false, 8),
+    jet_jit_u8_checked_mul => (JET_FIXED_OP_MUL, false, 8),
+    jet_jit_u8_checked_div => (JET_FIXED_OP_DIV, false, 8),
+    jet_jit_u8_checked_rem => (JET_FIXED_OP_REM, false, 8),
+    jet_jit_i16_checked_add => (JET_FIXED_OP_ADD, true, 16),
+    jet_jit_i16_checked_sub => (JET_FIXED_OP_SUB, true, 16),
+    jet_jit_i16_checked_mul => (JET_FIXED_OP_MUL, true, 16),
+    jet_jit_i16_checked_div => (JET_FIXED_OP_DIV, true, 16),
+    jet_jit_i16_checked_rem => (JET_FIXED_OP_REM, true, 16),
+    jet_jit_u16_checked_add => (JET_FIXED_OP_ADD, false, 16),
+    jet_jit_u16_checked_sub => (JET_FIXED_OP_SUB, false, 16),
+    jet_jit_u16_checked_mul => (JET_FIXED_OP_MUL, false, 16),
+    jet_jit_u16_checked_div => (JET_FIXED_OP_DIV, false, 16),
+    jet_jit_u16_checked_rem => (JET_FIXED_OP_REM, false, 16),
+    jet_jit_i32_checked_add => (JET_FIXED_OP_ADD, true, 32),
+    jet_jit_i32_checked_sub => (JET_FIXED_OP_SUB, true, 32),
+    jet_jit_i32_checked_mul => (JET_FIXED_OP_MUL, true, 32),
+    jet_jit_i32_checked_div => (JET_FIXED_OP_DIV, true, 32),
+    jet_jit_i32_checked_rem => (JET_FIXED_OP_REM, true, 32),
+    jet_jit_u32_checked_add => (JET_FIXED_OP_ADD, false, 32),
+    jet_jit_u32_checked_sub => (JET_FIXED_OP_SUB, false, 32),
+    jet_jit_u32_checked_mul => (JET_FIXED_OP_MUL, false, 32),
+    jet_jit_u32_checked_div => (JET_FIXED_OP_DIV, false, 32),
+    jet_jit_u32_checked_rem => (JET_FIXED_OP_REM, false, 32),
+    jet_jit_i64_checked_add => (JET_FIXED_OP_ADD, true, 64),
+    jet_jit_i64_checked_sub => (JET_FIXED_OP_SUB, true, 64),
+    jet_jit_i64_checked_mul => (JET_FIXED_OP_MUL, true, 64),
+    jet_jit_i64_checked_div => (JET_FIXED_OP_DIV, true, 64),
+    jet_jit_i64_checked_rem => (JET_FIXED_OP_REM, true, 64),
+    jet_jit_u64_checked_add => (JET_FIXED_OP_ADD, false, 64),
+    jet_jit_u64_checked_sub => (JET_FIXED_OP_SUB, false, 64),
+    jet_jit_u64_checked_mul => (JET_FIXED_OP_MUL, false, 64),
+    jet_jit_u64_checked_div => (JET_FIXED_OP_DIV, false, 64),
+    jet_jit_u64_checked_rem => (JET_FIXED_OP_REM, false, 64),
+}
+
+fixed_wrap_hosts! {
+    jet_jit_i8_wrapping_add => (JET_FIXED_OP_ADD, true, 8),
+    jet_jit_i8_wrapping_sub => (JET_FIXED_OP_SUB, true, 8),
+    jet_jit_i8_wrapping_mul => (JET_FIXED_OP_MUL, true, 8),
+    jet_jit_i8_wrapping_div => (JET_FIXED_OP_DIV, true, 8),
+    jet_jit_i8_wrapping_rem => (JET_FIXED_OP_REM, true, 8),
+    jet_jit_i8_wrapping_shl => (JET_FIXED_OP_SHL, true, 8),
+    jet_jit_i8_wrapping_shr => (JET_FIXED_OP_SHR, true, 8),
+    jet_jit_u8_wrapping_add => (JET_FIXED_OP_ADD, false, 8),
+    jet_jit_u8_wrapping_sub => (JET_FIXED_OP_SUB, false, 8),
+    jet_jit_u8_wrapping_mul => (JET_FIXED_OP_MUL, false, 8),
+    jet_jit_u8_wrapping_div => (JET_FIXED_OP_DIV, false, 8),
+    jet_jit_u8_wrapping_rem => (JET_FIXED_OP_REM, false, 8),
+    jet_jit_u8_wrapping_shl => (JET_FIXED_OP_SHL, false, 8),
+    jet_jit_u8_wrapping_shr => (JET_FIXED_OP_SHR, false, 8),
+    jet_jit_i16_wrapping_add => (JET_FIXED_OP_ADD, true, 16),
+    jet_jit_i16_wrapping_sub => (JET_FIXED_OP_SUB, true, 16),
+    jet_jit_i16_wrapping_mul => (JET_FIXED_OP_MUL, true, 16),
+    jet_jit_i16_wrapping_div => (JET_FIXED_OP_DIV, true, 16),
+    jet_jit_i16_wrapping_rem => (JET_FIXED_OP_REM, true, 16),
+    jet_jit_i16_wrapping_shl => (JET_FIXED_OP_SHL, true, 16),
+    jet_jit_i16_wrapping_shr => (JET_FIXED_OP_SHR, true, 16),
+    jet_jit_u16_wrapping_add => (JET_FIXED_OP_ADD, false, 16),
+    jet_jit_u16_wrapping_sub => (JET_FIXED_OP_SUB, false, 16),
+    jet_jit_u16_wrapping_mul => (JET_FIXED_OP_MUL, false, 16),
+    jet_jit_u16_wrapping_div => (JET_FIXED_OP_DIV, false, 16),
+    jet_jit_u16_wrapping_rem => (JET_FIXED_OP_REM, false, 16),
+    jet_jit_u16_wrapping_shl => (JET_FIXED_OP_SHL, false, 16),
+    jet_jit_u16_wrapping_shr => (JET_FIXED_OP_SHR, false, 16),
+    jet_jit_i32_wrapping_add => (JET_FIXED_OP_ADD, true, 32),
+    jet_jit_i32_wrapping_sub => (JET_FIXED_OP_SUB, true, 32),
+    jet_jit_i32_wrapping_mul => (JET_FIXED_OP_MUL, true, 32),
+    jet_jit_i32_wrapping_div => (JET_FIXED_OP_DIV, true, 32),
+    jet_jit_i32_wrapping_rem => (JET_FIXED_OP_REM, true, 32),
+    jet_jit_i32_wrapping_shl => (JET_FIXED_OP_SHL, true, 32),
+    jet_jit_i32_wrapping_shr => (JET_FIXED_OP_SHR, true, 32),
+    jet_jit_u32_wrapping_add => (JET_FIXED_OP_ADD, false, 32),
+    jet_jit_u32_wrapping_sub => (JET_FIXED_OP_SUB, false, 32),
+    jet_jit_u32_wrapping_mul => (JET_FIXED_OP_MUL, false, 32),
+    jet_jit_u32_wrapping_div => (JET_FIXED_OP_DIV, false, 32),
+    jet_jit_u32_wrapping_rem => (JET_FIXED_OP_REM, false, 32),
+    jet_jit_u32_wrapping_shl => (JET_FIXED_OP_SHL, false, 32),
+    jet_jit_u32_wrapping_shr => (JET_FIXED_OP_SHR, false, 32),
+    jet_jit_i64_wrapping_add => (JET_FIXED_OP_ADD, true, 64),
+    jet_jit_i64_wrapping_sub => (JET_FIXED_OP_SUB, true, 64),
+    jet_jit_i64_wrapping_mul => (JET_FIXED_OP_MUL, true, 64),
+    jet_jit_i64_wrapping_div => (JET_FIXED_OP_DIV, true, 64),
+    jet_jit_i64_wrapping_rem => (JET_FIXED_OP_REM, true, 64),
+    jet_jit_i64_wrapping_shl => (JET_FIXED_OP_SHL, true, 64),
+    jet_jit_i64_wrapping_shr => (JET_FIXED_OP_SHR, true, 64),
+    jet_jit_u64_wrapping_add => (JET_FIXED_OP_ADD, false, 64),
+    jet_jit_u64_wrapping_sub => (JET_FIXED_OP_SUB, false, 64),
+    jet_jit_u64_wrapping_mul => (JET_FIXED_OP_MUL, false, 64),
+    jet_jit_u64_wrapping_div => (JET_FIXED_OP_DIV, false, 64),
+    jet_jit_u64_wrapping_rem => (JET_FIXED_OP_REM, false, 64),
+    jet_jit_u64_wrapping_shl => (JET_FIXED_OP_SHL, false, 64),
+    jet_jit_u64_wrapping_shr => (JET_FIXED_OP_SHR, false, 64),
+}
+
 host_fns! {
     struct NumericHostFns;
     register: register_numeric_symbols;
@@ -694,9 +1052,247 @@ host_fns! {
         sig_complex_parts.params.push(AbiParam::new(types::F64));
         sig_complex_parts.params.push(AbiParam::new(types::F64));
         sig_complex_parts.returns.push(AbiParam::new(types::I64));
-
-
+        let mut sig_located = Signature::new(cc);
+        sig_located.params.extend([AbiParam::new(types::I64); 4]);
+        sig_located.returns.push(AbiParam::new(types::I64));
     }
+    // Canonical MIR Prelude rows (`routes.rs` `exact_int_binary_route`,
+    // `TNumericOp`, `compare_route`, `precise_builtin_route`) resolve by the
+    // exact symbol the row declares. These entries are that resolution; the
+    // `jet_jit_*` spellings below stay for Core rows projected through
+    // `CoreCallRecord::jit_symbol_candidates`.
+    i8_trap_add: "jet_i8_trap_add" => jet_jit_i8_trap_add: sig_located;
+    i8_trap_sub: "jet_i8_trap_sub" => jet_jit_i8_trap_sub: sig_located;
+    i8_trap_mul: "jet_i8_trap_mul" => jet_jit_i8_trap_mul: sig_located;
+    i8_trap_div: "jet_i8_trap_div" => jet_jit_i8_trap_div: sig_located;
+    i8_trap_rem: "jet_i8_trap_rem" => jet_jit_i8_trap_rem: sig_located;
+    u8_trap_add: "jet_u8_trap_add" => jet_jit_u8_trap_add: sig_located;
+    u8_trap_sub: "jet_u8_trap_sub" => jet_jit_u8_trap_sub: sig_located;
+    u8_trap_mul: "jet_u8_trap_mul" => jet_jit_u8_trap_mul: sig_located;
+    u8_trap_div: "jet_u8_trap_div" => jet_jit_u8_trap_div: sig_located;
+    u8_trap_rem: "jet_u8_trap_rem" => jet_jit_u8_trap_rem: sig_located;
+    i16_trap_add: "jet_i16_trap_add" => jet_jit_i16_trap_add: sig_located;
+    i16_trap_sub: "jet_i16_trap_sub" => jet_jit_i16_trap_sub: sig_located;
+    i16_trap_mul: "jet_i16_trap_mul" => jet_jit_i16_trap_mul: sig_located;
+    i16_trap_div: "jet_i16_trap_div" => jet_jit_i16_trap_div: sig_located;
+    i16_trap_rem: "jet_i16_trap_rem" => jet_jit_i16_trap_rem: sig_located;
+    u16_trap_add: "jet_u16_trap_add" => jet_jit_u16_trap_add: sig_located;
+    u16_trap_sub: "jet_u16_trap_sub" => jet_jit_u16_trap_sub: sig_located;
+    u16_trap_mul: "jet_u16_trap_mul" => jet_jit_u16_trap_mul: sig_located;
+    u16_trap_div: "jet_u16_trap_div" => jet_jit_u16_trap_div: sig_located;
+    u16_trap_rem: "jet_u16_trap_rem" => jet_jit_u16_trap_rem: sig_located;
+    i32_trap_add: "jet_i32_trap_add" => jet_jit_i32_trap_add: sig_located;
+    i32_trap_sub: "jet_i32_trap_sub" => jet_jit_i32_trap_sub: sig_located;
+    i32_trap_mul: "jet_i32_trap_mul" => jet_jit_i32_trap_mul: sig_located;
+    i32_trap_div: "jet_i32_trap_div" => jet_jit_i32_trap_div: sig_located;
+    i32_trap_rem: "jet_i32_trap_rem" => jet_jit_i32_trap_rem: sig_located;
+    u32_trap_add: "jet_u32_trap_add" => jet_jit_u32_trap_add: sig_located;
+    u32_trap_sub: "jet_u32_trap_sub" => jet_jit_u32_trap_sub: sig_located;
+    u32_trap_mul: "jet_u32_trap_mul" => jet_jit_u32_trap_mul: sig_located;
+    u32_trap_div: "jet_u32_trap_div" => jet_jit_u32_trap_div: sig_located;
+    u32_trap_rem: "jet_u32_trap_rem" => jet_jit_u32_trap_rem: sig_located;
+    i64_trap_add: "jet_i64_trap_add" => jet_jit_i64_trap_add: sig_located;
+    i64_trap_sub: "jet_i64_trap_sub" => jet_jit_i64_trap_sub: sig_located;
+    i64_trap_mul: "jet_i64_trap_mul" => jet_jit_i64_trap_mul: sig_located;
+    i64_trap_div: "jet_i64_trap_div" => jet_jit_i64_trap_div: sig_located;
+    i64_trap_rem: "jet_i64_trap_rem" => jet_jit_i64_trap_rem: sig_located;
+    u64_trap_add: "jet_u64_trap_add" => jet_jit_u64_trap_add: sig_located;
+    u64_trap_sub: "jet_u64_trap_sub" => jet_jit_u64_trap_sub: sig_located;
+    u64_trap_mul: "jet_u64_trap_mul" => jet_jit_u64_trap_mul: sig_located;
+    u64_trap_div: "jet_u64_trap_div" => jet_jit_u64_trap_div: sig_located;
+    u64_trap_rem: "jet_u64_trap_rem" => jet_jit_u64_trap_rem: sig_located;
+    i8_trap_shl: "jet_i8_trap_shl" => jet_jit_i8_trap_shl: sig_located;
+    i8_trap_shr: "jet_i8_trap_shr" => jet_jit_i8_trap_shr: sig_located;
+    i8_trap_pow: "jet_i8_trap_pow" => jet_jit_i8_trap_pow: sig_located;
+    i8_trap_floor_div: "jet_i8_trap_floor_div" => jet_jit_i8_trap_floor_div: sig_located;
+    i8_trap_mod: "jet_i8_trap_mod" => jet_jit_i8_trap_mod: sig_located;
+    u8_trap_shl: "jet_u8_trap_shl" => jet_jit_u8_trap_shl: sig_located;
+    u8_trap_shr: "jet_u8_trap_shr" => jet_jit_u8_trap_shr: sig_located;
+    u8_trap_pow: "jet_u8_trap_pow" => jet_jit_u8_trap_pow: sig_located;
+    u8_trap_floor_div: "jet_u8_trap_floor_div" => jet_jit_u8_trap_floor_div: sig_located;
+    u8_trap_mod: "jet_u8_trap_mod" => jet_jit_u8_trap_mod: sig_located;
+    i16_trap_shl: "jet_i16_trap_shl" => jet_jit_i16_trap_shl: sig_located;
+    i16_trap_shr: "jet_i16_trap_shr" => jet_jit_i16_trap_shr: sig_located;
+    i16_trap_pow: "jet_i16_trap_pow" => jet_jit_i16_trap_pow: sig_located;
+    i16_trap_floor_div: "jet_i16_trap_floor_div" => jet_jit_i16_trap_floor_div: sig_located;
+    i16_trap_mod: "jet_i16_trap_mod" => jet_jit_i16_trap_mod: sig_located;
+    u16_trap_shl: "jet_u16_trap_shl" => jet_jit_u16_trap_shl: sig_located;
+    u16_trap_shr: "jet_u16_trap_shr" => jet_jit_u16_trap_shr: sig_located;
+    u16_trap_pow: "jet_u16_trap_pow" => jet_jit_u16_trap_pow: sig_located;
+    u16_trap_floor_div: "jet_u16_trap_floor_div" => jet_jit_u16_trap_floor_div: sig_located;
+    u16_trap_mod: "jet_u16_trap_mod" => jet_jit_u16_trap_mod: sig_located;
+    i32_trap_shl: "jet_i32_trap_shl" => jet_jit_i32_trap_shl: sig_located;
+    i32_trap_shr: "jet_i32_trap_shr" => jet_jit_i32_trap_shr: sig_located;
+    i32_trap_pow: "jet_i32_trap_pow" => jet_jit_i32_trap_pow: sig_located;
+    i32_trap_floor_div: "jet_i32_trap_floor_div" => jet_jit_i32_trap_floor_div: sig_located;
+    i32_trap_mod: "jet_i32_trap_mod" => jet_jit_i32_trap_mod: sig_located;
+    u32_trap_shl: "jet_u32_trap_shl" => jet_jit_u32_trap_shl: sig_located;
+    u32_trap_shr: "jet_u32_trap_shr" => jet_jit_u32_trap_shr: sig_located;
+    u32_trap_pow: "jet_u32_trap_pow" => jet_jit_u32_trap_pow: sig_located;
+    u32_trap_floor_div: "jet_u32_trap_floor_div" => jet_jit_u32_trap_floor_div: sig_located;
+    u32_trap_mod: "jet_u32_trap_mod" => jet_jit_u32_trap_mod: sig_located;
+    i64_trap_shl: "jet_i64_trap_shl" => jet_jit_i64_trap_shl: sig_located;
+    i64_trap_shr: "jet_i64_trap_shr" => jet_jit_i64_trap_shr: sig_located;
+    i64_trap_pow: "jet_i64_trap_pow" => jet_jit_i64_trap_pow: sig_located;
+    i64_trap_floor_div: "jet_i64_trap_floor_div" => jet_jit_i64_trap_floor_div: sig_located;
+    i64_trap_mod: "jet_i64_trap_mod" => jet_jit_i64_trap_mod: sig_located;
+    u64_trap_shl: "jet_u64_trap_shl" => jet_jit_u64_trap_shl: sig_located;
+    u64_trap_shr: "jet_u64_trap_shr" => jet_jit_u64_trap_shr: sig_located;
+    u64_trap_pow: "jet_u64_trap_pow" => jet_jit_u64_trap_pow: sig_located;
+    u64_trap_floor_div: "jet_u64_trap_floor_div" => jet_jit_u64_trap_floor_div: sig_located;
+    u64_trap_mod: "jet_u64_trap_mod" => jet_jit_u64_trap_mod: sig_binary;
+    i8_wrapping_add: "jet_i8_wrapping_add" => jet_jit_i8_wrapping_add: sig_binary;
+    i8_wrapping_sub: "jet_i8_wrapping_sub" => jet_jit_i8_wrapping_sub: sig_binary;
+    i8_wrapping_mul: "jet_i8_wrapping_mul" => jet_jit_i8_wrapping_mul: sig_binary;
+    i8_wrapping_div: "jet_i8_wrapping_div" => jet_jit_i8_wrapping_div: sig_binary;
+    i8_wrapping_rem: "jet_i8_wrapping_rem" => jet_jit_i8_wrapping_rem: sig_binary;
+    i8_wrapping_shl: "jet_i8_wrapping_shl" => jet_jit_i8_wrapping_shl: sig_binary;
+    i8_wrapping_shr: "jet_i8_wrapping_shr" => jet_jit_i8_wrapping_shr: sig_binary;
+    u8_wrapping_add: "jet_u8_wrapping_add" => jet_jit_u8_wrapping_add: sig_binary;
+    u8_wrapping_sub: "jet_u8_wrapping_sub" => jet_jit_u8_wrapping_sub: sig_binary;
+    u8_wrapping_mul: "jet_u8_wrapping_mul" => jet_jit_u8_wrapping_mul: sig_binary;
+    u8_wrapping_div: "jet_u8_wrapping_div" => jet_jit_u8_wrapping_div: sig_binary;
+    u8_wrapping_rem: "jet_u8_wrapping_rem" => jet_jit_u8_wrapping_rem: sig_binary;
+    u8_wrapping_shl: "jet_u8_wrapping_shl" => jet_jit_u8_wrapping_shl: sig_binary;
+    u8_wrapping_shr: "jet_u8_wrapping_shr" => jet_jit_u8_wrapping_shr: sig_binary;
+    i16_wrapping_add: "jet_i16_wrapping_add" => jet_jit_i16_wrapping_add: sig_binary;
+    i16_wrapping_sub: "jet_i16_wrapping_sub" => jet_jit_i16_wrapping_sub: sig_binary;
+    i16_wrapping_mul: "jet_i16_wrapping_mul" => jet_jit_i16_wrapping_mul: sig_binary;
+    i16_wrapping_div: "jet_i16_wrapping_div" => jet_jit_i16_wrapping_div: sig_binary;
+    i16_wrapping_rem: "jet_i16_wrapping_rem" => jet_jit_i16_wrapping_rem: sig_binary;
+    i16_wrapping_shl: "jet_i16_wrapping_shl" => jet_jit_i16_wrapping_shl: sig_binary;
+    i16_wrapping_shr: "jet_i16_wrapping_shr" => jet_jit_i16_wrapping_shr: sig_binary;
+    u16_wrapping_add: "jet_u16_wrapping_add" => jet_jit_u16_wrapping_add: sig_binary;
+    u16_wrapping_sub: "jet_u16_wrapping_sub" => jet_jit_u16_wrapping_sub: sig_binary;
+    u16_wrapping_mul: "jet_u16_wrapping_mul" => jet_jit_u16_wrapping_mul: sig_binary;
+    u16_wrapping_div: "jet_u16_wrapping_div" => jet_jit_u16_wrapping_div: sig_binary;
+    u16_wrapping_rem: "jet_u16_wrapping_rem" => jet_jit_u16_wrapping_rem: sig_binary;
+    u16_wrapping_shl: "jet_u16_wrapping_shl" => jet_jit_u16_wrapping_shl: sig_binary;
+    u16_wrapping_shr: "jet_u16_wrapping_shr" => jet_jit_u16_wrapping_shr: sig_binary;
+    i32_wrapping_add: "jet_i32_wrapping_add" => jet_jit_i32_wrapping_add: sig_binary;
+    i32_wrapping_sub: "jet_i32_wrapping_sub" => jet_jit_i32_wrapping_sub: sig_binary;
+    i32_wrapping_mul: "jet_i32_wrapping_mul" => jet_jit_i32_wrapping_mul: sig_binary;
+    i32_wrapping_div: "jet_i32_wrapping_div" => jet_jit_i32_wrapping_div: sig_binary;
+    i32_wrapping_rem: "jet_i32_wrapping_rem" => jet_jit_i32_wrapping_rem: sig_binary;
+    i32_wrapping_shl: "jet_i32_wrapping_shl" => jet_jit_i32_wrapping_shl: sig_binary;
+    i32_wrapping_shr: "jet_i32_wrapping_shr" => jet_jit_i32_wrapping_shr: sig_binary;
+    u32_wrapping_add: "jet_u32_wrapping_add" => jet_jit_u32_wrapping_add: sig_binary;
+    u32_wrapping_sub: "jet_u32_wrapping_sub" => jet_jit_u32_wrapping_sub: sig_binary;
+    u32_wrapping_mul: "jet_u32_wrapping_mul" => jet_jit_u32_wrapping_mul: sig_binary;
+    u32_wrapping_div: "jet_u32_wrapping_div" => jet_jit_u32_wrapping_div: sig_binary;
+    u32_wrapping_rem: "jet_u32_wrapping_rem" => jet_jit_u32_wrapping_rem: sig_binary;
+    u32_wrapping_shl: "jet_u32_wrapping_shl" => jet_jit_u32_wrapping_shl: sig_binary;
+    u32_wrapping_shr: "jet_u32_wrapping_shr" => jet_jit_u32_wrapping_shr: sig_binary;
+    i64_wrapping_add: "jet_i64_wrapping_add" => jet_jit_i64_wrapping_add: sig_binary;
+    i64_wrapping_sub: "jet_i64_wrapping_sub" => jet_jit_i64_wrapping_sub: sig_binary;
+    i64_wrapping_mul: "jet_i64_wrapping_mul" => jet_jit_i64_wrapping_mul: sig_binary;
+    i64_wrapping_div: "jet_i64_wrapping_div" => jet_jit_i64_wrapping_div: sig_binary;
+    i64_wrapping_rem: "jet_i64_wrapping_rem" => jet_jit_i64_wrapping_rem: sig_binary;
+    i64_wrapping_shl: "jet_i64_wrapping_shl" => jet_jit_i64_wrapping_shl: sig_binary;
+    i64_wrapping_shr: "jet_i64_wrapping_shr" => jet_jit_i64_wrapping_shr: sig_binary;
+    u64_wrapping_add: "jet_u64_wrapping_add" => jet_jit_u64_wrapping_add: sig_binary;
+    u64_wrapping_sub: "jet_u64_wrapping_sub" => jet_jit_u64_wrapping_sub: sig_binary;
+    u64_wrapping_mul: "jet_u64_wrapping_mul" => jet_jit_u64_wrapping_mul: sig_binary;
+    u64_wrapping_div: "jet_u64_wrapping_div" => jet_jit_u64_wrapping_div: sig_binary;
+    u64_wrapping_rem: "jet_u64_wrapping_rem" => jet_jit_u64_wrapping_rem: sig_binary;
+    u64_wrapping_shl: "jet_u64_wrapping_shl" => jet_jit_u64_wrapping_shl: sig_binary;
+    u64_wrapping_shr: "jet_u64_wrapping_shr" => jet_jit_u64_wrapping_shr: sig_binary;
+    i8_saturating_add: "jet_i8_saturating_add" => jet_jit_i8_saturating_add: sig_binary;
+    i8_saturating_sub: "jet_i8_saturating_sub" => jet_jit_i8_saturating_sub: sig_binary;
+    i8_saturating_mul: "jet_i8_saturating_mul" => jet_jit_i8_saturating_mul: sig_binary;
+    u8_saturating_add: "jet_u8_saturating_add" => jet_jit_u8_saturating_add: sig_binary;
+    u8_saturating_sub: "jet_u8_saturating_sub" => jet_jit_u8_saturating_sub: sig_binary;
+    u8_saturating_mul: "jet_u8_saturating_mul" => jet_jit_u8_saturating_mul: sig_binary;
+    i16_saturating_add: "jet_i16_saturating_add" => jet_jit_i16_saturating_add: sig_binary;
+    i16_saturating_sub: "jet_i16_saturating_sub" => jet_jit_i16_saturating_sub: sig_binary;
+    i16_saturating_mul: "jet_i16_saturating_mul" => jet_jit_i16_saturating_mul: sig_binary;
+    u16_saturating_add: "jet_u16_saturating_add" => jet_jit_u16_saturating_add: sig_binary;
+    u16_saturating_sub: "jet_u16_saturating_sub" => jet_jit_u16_saturating_sub: sig_binary;
+    u16_saturating_mul: "jet_u16_saturating_mul" => jet_jit_u16_saturating_mul: sig_binary;
+    i32_saturating_add: "jet_i32_saturating_add" => jet_jit_i32_saturating_add: sig_binary;
+    i32_saturating_sub: "jet_i32_saturating_sub" => jet_jit_i32_saturating_sub: sig_binary;
+    i32_saturating_mul: "jet_i32_saturating_mul" => jet_jit_i32_saturating_mul: sig_binary;
+    u32_saturating_add: "jet_u32_saturating_add" => jet_jit_u32_saturating_add: sig_binary;
+    u32_saturating_sub: "jet_u32_saturating_sub" => jet_jit_u32_saturating_sub: sig_binary;
+    u32_saturating_mul: "jet_u32_saturating_mul" => jet_jit_u32_saturating_mul: sig_binary;
+    i64_saturating_add: "jet_i64_saturating_add" => jet_jit_i64_saturating_add: sig_binary;
+    i64_saturating_sub: "jet_i64_saturating_sub" => jet_jit_i64_saturating_sub: sig_binary;
+    i64_saturating_mul: "jet_i64_saturating_mul" => jet_jit_i64_saturating_mul: sig_binary;
+    u64_saturating_add: "jet_u64_saturating_add" => jet_jit_u64_saturating_add: sig_binary;
+    u64_saturating_sub: "jet_u64_saturating_sub" => jet_jit_u64_saturating_sub: sig_binary;
+    u64_saturating_mul: "jet_u64_saturating_mul" => jet_jit_u64_saturating_mul: sig_binary;
+    i8_checked_add: "jet_i8_checked_add" => jet_jit_i8_checked_add: sig_binary;
+    i8_checked_sub: "jet_i8_checked_sub" => jet_jit_i8_checked_sub: sig_binary;
+    i8_checked_mul: "jet_i8_checked_mul" => jet_jit_i8_checked_mul: sig_binary;
+    i8_checked_div: "jet_i8_checked_div" => jet_jit_i8_checked_div: sig_binary;
+    i8_checked_rem: "jet_i8_checked_rem" => jet_jit_i8_checked_rem: sig_binary;
+    u8_checked_add: "jet_u8_checked_add" => jet_jit_u8_checked_add: sig_binary;
+    u8_checked_sub: "jet_u8_checked_sub" => jet_jit_u8_checked_sub: sig_binary;
+    u8_checked_mul: "jet_u8_checked_mul" => jet_jit_u8_checked_mul: sig_binary;
+    u8_checked_div: "jet_u8_checked_div" => jet_jit_u8_checked_div: sig_binary;
+    u8_checked_rem: "jet_u8_checked_rem" => jet_jit_u8_checked_rem: sig_binary;
+    i16_checked_add: "jet_i16_checked_add" => jet_jit_i16_checked_add: sig_binary;
+    i16_checked_sub: "jet_i16_checked_sub" => jet_jit_i16_checked_sub: sig_binary;
+    i16_checked_mul: "jet_i16_checked_mul" => jet_jit_i16_checked_mul: sig_binary;
+    i16_checked_div: "jet_i16_checked_div" => jet_jit_i16_checked_div: sig_binary;
+    i16_checked_rem: "jet_i16_checked_rem" => jet_jit_i16_checked_rem: sig_binary;
+    u16_checked_add: "jet_u16_checked_add" => jet_jit_u16_checked_add: sig_binary;
+    u16_checked_sub: "jet_u16_checked_sub" => jet_jit_u16_checked_sub: sig_binary;
+    u16_checked_mul: "jet_u16_checked_mul" => jet_jit_u16_checked_mul: sig_binary;
+    u16_checked_div: "jet_u16_checked_div" => jet_jit_u16_checked_div: sig_binary;
+    u16_checked_rem: "jet_u16_checked_rem" => jet_jit_u16_checked_rem: sig_binary;
+    i32_checked_add: "jet_i32_checked_add" => jet_jit_i32_checked_add: sig_binary;
+    i32_checked_sub: "jet_i32_checked_sub" => jet_jit_i32_checked_sub: sig_binary;
+    i32_checked_mul: "jet_i32_checked_mul" => jet_jit_i32_checked_mul: sig_binary;
+    i32_checked_div: "jet_i32_checked_div" => jet_jit_i32_checked_div: sig_binary;
+    i32_checked_rem: "jet_i32_checked_rem" => jet_jit_i32_checked_rem: sig_binary;
+    u32_checked_add: "jet_u32_checked_add" => jet_jit_u32_checked_add: sig_binary;
+    u32_checked_sub: "jet_u32_checked_sub" => jet_jit_u32_checked_sub: sig_binary;
+    u32_checked_mul: "jet_u32_checked_mul" => jet_jit_u32_checked_mul: sig_binary;
+    u32_checked_div: "jet_u32_checked_div" => jet_jit_u32_checked_div: sig_binary;
+    u32_checked_rem: "jet_u32_checked_rem" => jet_jit_u32_checked_rem: sig_binary;
+    i64_checked_add: "jet_i64_checked_add" => jet_jit_i64_checked_add: sig_binary;
+    i64_checked_sub: "jet_i64_checked_sub" => jet_jit_i64_checked_sub: sig_binary;
+    i64_checked_mul: "jet_i64_checked_mul" => jet_jit_i64_checked_mul: sig_binary;
+    i64_checked_div: "jet_i64_checked_div" => jet_jit_i64_checked_div: sig_binary;
+    i64_checked_rem: "jet_i64_checked_rem" => jet_jit_i64_checked_rem: sig_binary;
+    u64_checked_add: "jet_u64_checked_add" => jet_jit_u64_checked_add: sig_binary;
+    u64_checked_sub: "jet_u64_checked_sub" => jet_jit_u64_checked_sub: sig_binary;
+    u64_checked_mul: "jet_u64_checked_mul" => jet_jit_u64_checked_mul: sig_binary;
+    u64_checked_div: "jet_u64_checked_div" => jet_jit_u64_checked_div: sig_binary;
+    u64_checked_rem: "jet_u64_checked_rem" => jet_jit_u64_checked_rem: sig_binary;
+    row_int_add: "jet_std::jet_int_add" => jet_jit_int_add: sig_binary;
+    row_int_sub: "jet_std::jet_int_sub" => jet_jit_int_sub: sig_binary;
+    row_int_mul: "jet_std::jet_int_mul" => jet_jit_int_mul: sig_binary;
+    row_int_bit_and: "jet_std::jet_int_bit_and" => jet_jit_int_bit_and: sig_binary;
+    row_int_bit_or: "jet_std::jet_int_bit_or" => jet_jit_int_bit_or: sig_binary;
+    row_int_bit_xor: "jet_std::jet_int_bit_xor" => jet_jit_int_bit_xor: sig_binary;
+    row_int_div: "jet_std::jet_int_div" => jet_jit_int_div_at: sig_located;
+    row_int_rem: "jet_std::jet_int_rem" => jet_jit_int_rem_at: sig_located;
+    row_int_floor_div: "jet_std::jet_int_floor_div" => jet_jit_int_floor_div_at: sig_located;
+    row_int_mod: "jet_std::jet_int_mod" => jet_jit_int_mod_at: sig_located;
+    row_int_pow: "jet_std::jet_int_pow" => jet_jit_int_pow_at: sig_located;
+    row_int_shl: "jet_std::jet_int_shl" => jet_jit_int_shl_at: sig_located;
+    row_int_shr: "jet_std::jet_int_shr" => jet_jit_int_shr_at: sig_located;
+    row_int_div_euclid: "jet_std::jet_int_div_euclid" => jet_jit_int_div_euclid: sig_binary;
+    row_int_rem_euclid: "jet_std::jet_int_rem_euclid" => jet_jit_int_rem_euclid: sig_binary;
+    row_int_abs: "jet_std::jet_int_abs" => jet_jit_int_abs: sig_unary;
+    row_int_compare: "jet_int_compare" => jet_jit_int_compare: sig_compare_i64;
+    row_decimal_from_str: "jet_decimal_from_str" => jet_jit_decimal_from_str: sig_unary;
+    row_decimal_add: "jet_decimal_add" => jet_jit_decimal_add: sig_binary;
+    row_decimal_sub: "jet_decimal_sub" => jet_jit_decimal_sub: sig_binary;
+    row_decimal_mul: "jet_decimal_mul" => jet_jit_decimal_mul: sig_binary;
+    row_decimal_equal: "jet_decimal_equal" => jet_jit_decimal_equal: sig_compare;
+    row_decimal_to_string: "jet_decimal_to_string" => jet_jit_decimal_to_string: sig_unary;
+    row_decimal_to_float: "jet_decimal_to_float" => jet_jit_decimal_to_float: sig_unary_f64;
+    row_fraction_from_parts: "jet_fraction_from_parts" => jet_jit_fraction_from_parts: sig_binary;
+    row_fraction_add: "jet_fraction_add" => jet_jit_fraction_add: sig_binary;
+    row_fraction_sub: "jet_fraction_sub" => jet_jit_fraction_sub: sig_binary;
+    row_fraction_mul: "jet_fraction_mul" => jet_jit_fraction_mul: sig_binary;
+    row_fraction_div: "jet_fraction_div" => jet_jit_fraction_div: sig_binary;
+    row_fraction_equal: "jet_fraction_equal" => jet_jit_fraction_equal: sig_compare;
+    row_fraction_to_string: "jet_fraction_to_string" => jet_jit_fraction_to_string: sig_unary;
+    row_fraction_to_float: "jet_fraction_to_float" => jet_jit_fraction_to_float: sig_unary_f64;
     int_from_int: "jet_jit_int_from_int" => jet_jit_int_from_int: sig_unary;
     int_from_u64: "jet_jit_int_from_u64" => jet_jit_int_from_u64: sig_unary;
     int_from_str: "jet_jit_int_from_str" => jet_jit_int_from_str: sig_unary;
@@ -767,10 +1363,17 @@ host_fns! {
     fraction_to_float: "jet_jit_fraction_to_float" => jet_jit_fraction_to_float: sig_unary_f64;
     fraction_is_zero: "jet_jit_fraction_is_zero" => jet_jit_fraction_is_zero: sig_unary_bool;
     complex_from_parts: "jet_jit_complex_from_parts" => jet_jit_complex_from_parts: sig_complex_parts;
+    row_complex_from_parts: "jet_complex_from_parts" => jet_jit_complex_from_parts: sig_complex_parts;
     complex_add: "jet_jit_complex_add" => jet_jit_complex_add: sig_binary;
+    row_complex_add: "jet_complex_add" => jet_jit_complex_add: sig_binary;
     complex_sub: "jet_jit_complex_sub" => jet_jit_complex_sub: sig_binary;
+    row_complex_sub: "jet_complex_sub" => jet_jit_complex_sub: sig_binary;
     complex_mul: "jet_jit_complex_mul" => jet_jit_complex_mul: sig_binary;
+    row_complex_mul: "jet_complex_mul" => jet_jit_complex_mul: sig_binary;
     complex_div: "jet_jit_complex_div" => jet_jit_complex_div: sig_binary;
+    row_complex_div: "jet_complex_div" => jet_jit_complex_div: sig_binary;
     complex_abs: "jet_jit_complex_abs" => jet_jit_complex_abs: sig_unary_f64;
+    row_complex_abs: "jet_complex_abs" => jet_jit_complex_abs: sig_unary_f64;
     complex_to_string: "jet_jit_complex_to_string" => jet_jit_complex_to_string: sig_unary;
+    row_complex_to_string: "jet_complex_to_string" => jet_jit_complex_to_string: sig_unary;
 }

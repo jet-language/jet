@@ -2,8 +2,8 @@
 //! + `core.encoding.json.{canonical,events}`, ported verbatim into the
 //! comptime/REPL tier-0 interpreter so they match AOT byte-for-byte (R12
 //! parity). Sources (std-only, I6, no changes to logic — only the target
-//! value type changes from `jet_std::DataTree` to the `JSON`-tagged
-//! `CtValue` shape `JSONInterp.rs` already established for `core.encoding.json`):
+//! value type changes from `jet_std::DataTree` to the canonical `DataTree`
+//! `CtValue` shape `JSONInterp.rs` established for `core.encoding.json`):
 //!
 //! - csv: `jet_ring_csv_parse`/`jet_ring_csv_render`,
 //!   `crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs`.
@@ -19,12 +19,12 @@
 //!   same file.
 //!
 //! sema (`fixed_sigs.rs`) types `core.encoding.{toml,yaml,xml,cbor}`'s
-//! parsed value as the same `json` type as `core.encoding.json` — AOT backs
-//! every one of these with the single `jet_std::DataTree`. Comptime mirrors
-//! that with the same `JSON`-tagged `CtValue::Enum` (`JSONInterp::json_variant`/
+//! parsed value as the same `DataTree` type as `core.encoding.json` — AOT
+//! backs every one of these with the single `jet_std::DataTree`. Comptime
+//! mirrors that with the same canonical `CtValue::Enum` (`JSONInterp::json_variant`/
 //! `json_payload`) every accessor method (`.field`/`.at`/...) already reads,
 //! so no new value machinery is needed — just new parse/render walkers that
-//! build/consume that shape instead of `DataTree`.
+//! build/consume that shape.
 //! parity: guard tests/encoding_parity.rs::whole_value_codecs_match_aot_comptime_and_default_dev
 
 use std::collections::{BTreeMap, HashMap};
@@ -56,18 +56,11 @@ pub(super) fn csv_render(rows: &[Vec<String>]) -> String {
     jet_foundation::CsvKernel::render(rows)
 }
 
-// ── shared: JSONError-shaped CtValue::Struct (line/message) ────────────────
-// Mirrors `JSONInterp::json_error_value` — toml/yaml `parse` share the same
-// sema-declared `JSONError` return type (`fixed_sigs.rs`'s `json_error_ty()`
-// is reused for `core.encoding.{toml,yaml}` exactly like `core.encoding.json`).
-fn json_error_struct(line: i64, message: String) -> CtValue {
-    CtValue::Struct {
-        type_name: "JSONError".to_string(),
-        fields: vec![
-            ("line".to_string(), CtValue::Int(line)),
-            ("message".to_string(), CtValue::Str(message)),
-        ],
-    }
+// ── shared: canonical EncodingError CtValue::Struct ─────────────────────────
+// Whole-value format parsers expose the same eight-field error carrier as
+// AOT/JIT; only the format and source location differ.
+fn encoding_error_struct(format: &str, line: i64, message: String) -> CtValue {
+    encoding_error_value_at(format, "Syntax", line, 1, message)
 }
 
 // ── core.encoding.toml ──────────────────────────────────────────────────────
@@ -106,7 +99,7 @@ pub(super) fn toml_parse(raw: &str) -> Result<CtValue, CtValue> {
         }
         if let Some(item) = p
             .statement()
-            .map_err(|e| json_error_struct(e.line as i64, e.message))?
+            .map_err(|e| encoding_error_struct("TOML", e.line as i64, e.message))?
         {
             if let TOMLItem::Header { path, .. } = &item {
                 p.current_path_len = path.len();
@@ -1012,7 +1005,8 @@ pub(super) fn yaml_parse(raw: &str) -> Result<CtValue, CtValue> {
         .count()
         .checked_add(1);
     if raw.len() > MAX_YAML_BYTES || !line_count.is_some_and(|count| count <= MAX_YAML_NODES) {
-        return Err(json_error_struct(
+        return Err(encoding_error_struct(
+            "YAML",
             1,
             "YAML input exceeds its byte or line budget".to_string(),
         ));
@@ -1035,7 +1029,8 @@ pub(super) fn yaml_parse(raw: &str) -> Result<CtValue, CtValue> {
     if p.pos >= p.lines.len() || p.at_doc_end() {
         let line = p.pos.saturating_add(1) as i64;
         return p.null().map_err(|_| {
-            json_error_struct(
+            encoding_error_struct(
+                "YAML",
                 line,
                 "YAML value exceeds its node or byte budget".to_string(),
             )
@@ -1044,10 +1039,11 @@ pub(super) fn yaml_parse(raw: &str) -> Result<CtValue, CtValue> {
     let base = p.indent(p.pos);
     let value = p
         .parse_node(base, 0)
-        .map_err(|e| json_error_struct(e.line as i64, e.message))?;
+        .map_err(|e| encoding_error_struct("YAML", e.line as i64, e.message))?;
     p.skip_ignorable();
     if p.pos < p.lines.len() && !p.at_doc_marker() && !p.at_doc_end() {
-        return Err(json_error_struct(
+        return Err(encoding_error_struct(
+            "YAML",
             p.pos.saturating_add(1) as i64,
             jet_foundation::EncodingErrors::YAML_EXPECTED_KEY_VALUE.to_string(),
         ));
@@ -1137,7 +1133,7 @@ fn yaml_clone(value: &CtValue, budget: &mut YamlBudget) -> Result<CtValue, ()> {
             type_name,
             variant,
             args,
-        } if type_name == "JSON" && variant == "Null" && args.is_empty()
+        } if type_name == "DataTree" && variant == "Null" && args.is_empty()
     ) {
         budget.node(0)?;
     } else if let Some(CtValue::List(items)) = json_payload(value, "Array") {
@@ -1902,7 +1898,7 @@ fn xml_value_from_ct(value: &CtValue) -> Result<jet_foundation::XmlPull::Value, 
             type_name,
             variant,
             args,
-        } if type_name == "JSON" && variant == "Null" && args.is_empty()
+        } if type_name == "DataTree" && variant == "Null" && args.is_empty()
     ) {
         return Ok(Value::Null);
     }
@@ -2120,46 +2116,33 @@ fn xml_options(
     Ok(options)
 }
 
+fn xml_error_kind(kind: jet_foundation::XmlPull::Reason) -> &'static str {
+    use jet_foundation::XmlPull::Reason;
+    match kind {
+        Reason::EntityCycle | Reason::Limit => "Limit",
+        Reason::Canonicalization | Reason::Unsupported => "Unsupported",
+        _ => "Syntax",
+    }
+}
+
 fn xml_error_value_with_source(
     error: jet_foundation::XmlPull::Error,
     source_bytes: bool,
 ) -> CtValue {
-    let kind = format!("{:?}", error.kind);
     let byte_offset = if source_bytes || error.line.is_some() {
-        CtValue::Present(Box::new(CtValue::Int(error.offset as i64)))
+        error.offset as i64
     } else {
-        CtValue::absent(Type::Int)
+        0
     };
-    CtValue::Struct {
-        type_name: "XMLError".to_string(),
-        fields: vec![
-            (
-                "kind".to_string(),
-                CtValue::Enum {
-                    type_name: "XMLReason".to_string(),
-                    variant: kind,
-                    args: Vec::new(),
-                },
-            ),
-            ("byte_offset".to_string(), byte_offset),
-            (
-                "line".to_string(),
-                error
-                    .line
-                    .map(|value| CtValue::Present(Box::new(CtValue::Int(value as i64))))
-                    .unwrap_or(CtValue::absent(Type::Int)),
-            ),
-            (
-                "column".to_string(),
-                error
-                    .column
-                    .map(|value| CtValue::Present(Box::new(CtValue::Int(value as i64))))
-                    .unwrap_or(CtValue::absent(Type::Int)),
-            ),
-            ("path".to_string(), CtValue::Str(error.path)),
-            ("reason".to_string(), CtValue::Str(error.reason)),
-        ],
-    }
+    encoding_error_value_fields(
+        "XML",
+        xml_error_kind(error.kind),
+        byte_offset,
+        error.line.map(|value| value as i64),
+        error.column.map(|value| value as i64),
+        error.path,
+        error.reason,
+    )
 }
 
 pub(super) fn xml_error_value(error: jet_foundation::XmlPull::Error) -> CtValue {
@@ -2170,25 +2153,8 @@ pub(super) fn xml_source_error_value(error: jet_foundation::XmlPull::Error) -> C
     xml_error_value_with_source(error, true)
 }
 
-fn xml_shape_error_value(reason: String) -> CtValue {
-    CtValue::Struct {
-        type_name: "XMLError".to_string(),
-        fields: vec![
-            (
-                "kind".to_string(),
-                CtValue::Enum {
-                    type_name: "XMLReason".to_string(),
-                    variant: "Shape".to_string(),
-                    args: Vec::new(),
-                },
-            ),
-            ("byte_offset".to_string(), CtValue::absent(Type::Int)),
-            ("line".to_string(), CtValue::absent(Type::Int)),
-            ("column".to_string(), CtValue::absent(Type::Int)),
-            ("path".to_string(), CtValue::Str(String::new())),
-            ("reason".to_string(), CtValue::Str(reason)),
-        ],
-    }
+pub(super) fn xml_shape_error_value(reason: String) -> CtValue {
+    encoding_error_value_fields("XML", "Syntax", 0, None, None, String::new(), reason)
 }
 
 pub(super) fn xml_render(value: &CtValue) -> String {
@@ -2599,14 +2565,7 @@ fn cbor_codable_value(
         CtValue::Failed(CtReport::Told(_)) => {
             Err("CBOR cannot encode a Result without an explicit Codable schema".to_string())
         }
-        CtValue::Enum {
-            type_name,
-            variant,
-            args,
-        } if type_name == "Float" && variant == "NAN" && args.is_empty() => {
-            Ok(CtValue::Float(CtFloat::f64(f64::NAN)))
-        }
-        CtValue::Enum { type_name, .. } if type_name != "JSON" => Err(format!(
+        CtValue::Enum { type_name, .. } if type_name != "DataTree" => Err(format!(
             "CBOR comptime encoder does not own the Codable schema for enum `{type_name}`"
         )),
         _ => Ok(value.clone()),
@@ -2645,14 +2604,14 @@ pub(super) fn cbor_struct_fields(
         .collect()
 }
 #[derive(Clone, Debug)]
-pub(super) struct CBORError {
+pub(super) struct CborFailure {
     kind: &'static str,
     byte_offset: usize,
     path: String,
     pub(super) reason: String,
 }
 
-impl CBORError {
+impl CborFailure {
     fn new(
         kind: &'static str,
         byte_offset: usize,
@@ -2668,26 +2627,29 @@ impl CBORError {
     }
 }
 
-pub(super) fn cbor_error_value(error: CBORError) -> CtValue {
-    CtValue::Struct {
-        type_name: "CBORError".to_string(),
-        fields: vec![
-            (
-                "kind".to_string(),
-                CtValue::Enum {
-                    type_name: "CBORErrorKind".to_string(),
-                    variant: error.kind.to_string(),
-                    args: Vec::new(),
-                },
-            ),
-            (
-                "byte_offset".to_string(),
-                CtValue::Int(error.byte_offset as i64),
-            ),
-            ("path".to_string(), CtValue::Str(error.path)),
-            ("reason".to_string(), CtValue::Str(error.reason)),
-        ],
+fn cbor_encoding_kind(kind: &str) -> &'static str {
+    match kind {
+        "Truncated" => "Truncated",
+        "Unsupported" | "NonCanonical" => "Unsupported",
+        "Limit" => "Limit",
+        _ => "Syntax",
     }
+}
+
+pub(super) fn cbor_encoding_error_value(error: CborFailure) -> CtValue {
+    encoding_error_value_fields(
+        "CBOR",
+        cbor_encoding_kind(error.kind),
+        error.byte_offset as i64,
+        None,
+        None,
+        error.path,
+        error.reason,
+    )
+}
+
+pub(super) fn cbor_unsupported_error_value(reason: impl Into<String>) -> CtValue {
+    cbor_encoding_error_value(CborFailure::new("Unsupported", 0, "$", reason))
 }
 
 pub(super) fn cbor_safe_options() -> jet_foundation::CborKernel::Options {
@@ -2696,7 +2658,7 @@ pub(super) fn cbor_safe_options() -> jet_foundation::CborKernel::Options {
 
 pub(super) fn cbor_options(
     value: Option<&CtValue>,
-) -> Result<jet_foundation::CborKernel::Options, CBORError> {
+) -> Result<jet_foundation::CborKernel::Options, CborFailure> {
     let mut max_depth = None;
     let mut max_items = None;
     let mut max_bytes = None;
@@ -2721,7 +2683,7 @@ pub(super) fn cbor_options(
     .map_err(cbor_kernel_error)
 }
 
-fn cbor_kernel_error(error: jet_foundation::CborKernel::Error) -> CBORError {
+fn cbor_kernel_error(error: jet_foundation::CborKernel::Error) -> CborFailure {
     let kind = match error.kind {
         jet_foundation::CborKernel::ErrorKind::Syntax => "Syntax",
         jet_foundation::CborKernel::ErrorKind::Truncated => "Truncated",
@@ -2731,7 +2693,7 @@ fn cbor_kernel_error(error: jet_foundation::CborKernel::Error) -> CBORError {
         jet_foundation::CborKernel::ErrorKind::TrailingData => "TrailingData",
         jet_foundation::CborKernel::ErrorKind::NonCanonical => "NonCanonical",
     };
-    CBORError::new(kind, error.byte_offset, error.path, error.reason)
+    CborFailure::new(kind, error.byte_offset, error.path, error.reason)
 }
 
 fn cbor_kernel_value(value: &CtValue) -> Result<jet_foundation::CborKernel::Value, String> {
@@ -2786,29 +2748,29 @@ fn cbor_kernel_value(value: &CtValue) -> Result<jet_foundation::CborKernel::Valu
             type_name,
             variant,
             args,
-        } if type_name == "JSON" => match variant.as_str() {
+        } if type_name == "DataTree" => match variant.as_str() {
             "Null" => Ok(jet_foundation::CborKernel::Value::Null),
             "Bool" => match args.first().map(|(_, value)| value) {
                 Some(CtValue::Bool(value)) => Ok(jet_foundation::CborKernel::Value::Bool(*value)),
-                _ => Err("JSON.Bool has an invalid payload".to_string()),
+                _ => Err("DataTree.Bool has an invalid payload".to_string()),
             },
             "Int" => match args.first().map(|(_, value)| value) {
                 Some(CtValue::Int(value)) => Ok(jet_foundation::CborKernel::Value::Int(*value)),
-                _ => Err("JSON.Int has an invalid payload".to_string()),
+                _ => Err("DataTree.Int has an invalid payload".to_string()),
             },
             "Float" => match args.first().map(|(_, value)| value) {
                 Some(CtValue::Float(value)) => {
                     Ok(jet_foundation::CborKernel::Value::Float(value.as_f64()))
                 }
-                _ => Err("JSON.Float has an invalid payload".to_string()),
+                _ => Err("DataTree.Float has an invalid payload".to_string()),
             },
-            "Text" => match args.first().map(|(_, value)| value) {
+            "Text" | "TypedText" => match args.first().map(|(_, value)| value) {
                 Some(CtValue::Str(value)) => {
                     Ok(jet_foundation::CborKernel::Value::Text(value.clone()))
                 }
-                _ => Err("JSON.Text has an invalid payload".to_string()),
+                _ => Err("DataTree.Text has an invalid payload".to_string()),
             },
-            _ => Err(format!("unsupported JSON variant `{variant}`")),
+            _ => Err(format!("unsupported DataTree variant `{variant}`")),
         },
         CtValue::Enum { type_name, .. } => {
             Err(format!("CBOR encoder does not own enum `{type_name}`"))
@@ -2846,15 +2808,15 @@ fn cbor_kernel_tree(value: jet_foundation::CborKernel::Value) -> CtValue {
     }
 }
 
-pub(super) fn cbor_encode(v: &CtValue) -> Result<Vec<u8>, CBORError> {
+pub(super) fn cbor_encode(v: &CtValue) -> Result<Vec<u8>, CborFailure> {
     let value =
-        cbor_kernel_value(v).map_err(|reason| CBORError::new("Unsupported", 0, "$", reason))?;
+        cbor_kernel_value(v).map_err(|reason| CborFailure::new("Unsupported", 0, "$", reason))?;
     jet_foundation::CborKernel::encode(&value, false).map_err(cbor_kernel_error)
 }
 
-pub(super) fn cbor_encode_canonical(v: &CtValue) -> Result<Vec<u8>, CBORError> {
+pub(super) fn cbor_encode_canonical(v: &CtValue) -> Result<Vec<u8>, CborFailure> {
     let value =
-        cbor_kernel_value(v).map_err(|reason| CBORError::new("Unsupported", 0, "$", reason))?;
+        cbor_kernel_value(v).map_err(|reason| CborFailure::new("Unsupported", 0, "$", reason))?;
     jet_foundation::CborKernel::encode(&value, true).map_err(cbor_kernel_error)
 }
 
@@ -2862,7 +2824,7 @@ pub(super) fn cbor_decode(
     bytes: &[u8],
     options: &jet_foundation::CborKernel::Options,
     allow_bytes: bool,
-) -> Result<CtValue, CBORError> {
+) -> Result<CtValue, CborFailure> {
     jet_foundation::CborKernel::decode(bytes, options, allow_bytes)
         .map(cbor_kernel_tree)
         .map_err(cbor_kernel_error)
@@ -2956,7 +2918,7 @@ pub(super) fn jsonl_parse(text: &str) -> Result<Vec<CtValue>, CtValue> {
         }
         match super::JSONInterp::parse_json(trimmed) {
             Ok(v) => out.push(v),
-            Err(e) => return Err(super::JSONInterp::json_error_value_at_line(e, idx as i64)),
+            Err(e) => return Err(super::JSONInterp::encoding_error_value_at_line(e, idx as i64)),
         }
     }
     Ok(out)
@@ -3055,6 +3017,18 @@ pub(super) fn encoding_limits_from_value(v: &CtValue) -> Result<EncodingLimitsLi
 }
 
 fn encoding_error_value(kind: &str, reason: impl Into<String>) -> CtValue {
+    encoding_error_value_at("JSON", kind, 1, 1, reason)
+}
+
+fn encoding_error_value_fields(
+    format: &str,
+    kind: &str,
+    byte_offset: i64,
+    line: Option<i64>,
+    column: Option<i64>,
+    path: String,
+    reason: impl Into<String>,
+) -> CtValue {
     CtValue::Struct {
         type_name: "EncodingError".to_string(),
         fields: vec![
@@ -3062,7 +3036,7 @@ fn encoding_error_value(kind: &str, reason: impl Into<String>) -> CtValue {
                 "format".to_string(),
                 CtValue::Enum {
                     type_name: "EncodingFormat".to_string(),
-                    variant: "JSON".to_string(),
+                    variant: format.to_string(),
                     args: Vec::new(),
                 },
             ),
@@ -3074,16 +3048,19 @@ fn encoding_error_value(kind: &str, reason: impl Into<String>) -> CtValue {
                     args: Vec::new(),
                 },
             ),
-            ("byte_offset".to_string(), CtValue::Int(0)),
+            ("byte_offset".to_string(), CtValue::Int(byte_offset)),
             (
                 "line".to_string(),
-                CtValue::Present(Box::new(CtValue::Int(1))),
+                line.map(|value| CtValue::Present(Box::new(CtValue::Int(value))))
+                    .unwrap_or(CtValue::absent(Type::Int)),
             ),
             (
                 "column".to_string(),
-                CtValue::Present(Box::new(CtValue::Int(1))),
+                column
+                    .map(|value| CtValue::Present(Box::new(CtValue::Int(value))))
+                    .unwrap_or(CtValue::absent(Type::Int)),
             ),
-            ("path".to_string(), CtValue::Str(String::new())),
+            ("path".to_string(), CtValue::Str(path)),
             ("reason".to_string(), CtValue::Str(reason.into())),
             (
                 "cause".to_string(),
@@ -3091,6 +3068,24 @@ fn encoding_error_value(kind: &str, reason: impl Into<String>) -> CtValue {
             ),
         ],
     }
+}
+
+pub(super) fn encoding_error_value_at(
+    format: &str,
+    kind: &str,
+    line: i64,
+    column: i64,
+    reason: impl Into<String>,
+) -> CtValue {
+    encoding_error_value_fields(
+        format,
+        kind,
+        0,
+        Some(line),
+        Some(column),
+        String::new(),
+        reason,
+    )
 }
 
 fn validate_encoding_limits(limits: &EncodingLimitsLite) -> Result<(), CtValue> {
@@ -3106,10 +3101,10 @@ fn validate_encoding_limits(limits: &EncodingLimitsLite) -> Result<(), CtValue> 
             "max_item_bytes {} is outside 1..1073741824",
             limits.max_item_bytes
         ))
-    } else if limits.max_total_bytes.is_some_and(|n| n < 0) {
+    } else if limits.max_total_bytes.is_some_and(|value| value < 0) {
         Some(format!(
             "max_total_bytes {} is outside 0..Int.max",
-            limits.max_total_bytes.unwrap_or(0)
+            limits.max_total_bytes.unwrap_or_default()
         ))
     } else if !(0..=256).contains(&limits.max_expansion_depth) {
         Some(format!(
@@ -3366,7 +3361,7 @@ fn jcs_tree(value: &CtValue, limits: &EncodingLimitsLite, depth: i64) -> Result<
         args,
     } = value
     {
-        if type_name == "JSON" {
+        if type_name == "DataTree" {
             match variant.as_str() {
                 "Null" => return Ok(b"null".to_vec()),
                 "Bool" => {

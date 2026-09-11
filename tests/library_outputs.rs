@@ -129,13 +129,17 @@ fn native_and_component_exports_share_one_typed_surface() {
         .plugin
         .expect("sandbox Component artifacts");
 
+    assert!(
+        plugin.exports.iter().all(|export| export.scalar.is_some()),
+        "the scalar library fixture must expose a concrete scalar for every Component export"
+    );
     let library_rows: Vec<_> = library
         .exports
         .iter()
         .map(|export| {
             (
                 export.name.clone(),
-                export.scalar,
+                Some(export.scalar),
                 export.conventions.clone(),
             )
         })

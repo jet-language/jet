@@ -14,9 +14,9 @@ fn worker(receiver: Receiver<Int>, sender: Sender<Int>) {
 
 fn run_batch(count: Int, jobs: Sender<Int>, results: Receiver<Int>) Int -> {
     loop value in 1..count -> jobs.send(value)
-    total := 0
-    loop _ in 0..<count -> total += results.receive() ?? 0
-    total
+    sum := 0
+    loop _ in 0..<count -> sum += results.receive() ?? 0
+    sum
 }
 
 fn response(command: String, jobs: Sender<Int>, results: Receiver<Int>) String -> {

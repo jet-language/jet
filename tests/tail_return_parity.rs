@@ -25,10 +25,32 @@ fn early(flag: Bool) String -> {
     "late"
 }
 
+enum Packet {
+    Data(Int)
+    Retry(Int)
+    Empty
+}
+
+fn packet_value(packet: Packet) Int -> {
+    if packet == {
+        .Data(10..19) -> { 100 }
+        .Data(value) | .Retry(value) -> {
+            if value == 0 -> return 9
+            if value > 0 -> { value + 1 } else -> { -1 }
+        }
+        .Empty -> { 0 }
+        else -> -2
+    }
+}
+
 @expected_one :: label(1)
 @expected_other :: label(2)
 @expected_early :: early(true)
 @expected_late :: early(false)
+@expected_range :: packet_value(Packet.Data(12))
+@expected_or :: packet_value(Packet.Retry(2))
+@expected_nested_return :: packet_value(Packet.Data(0))
+@expected_empty :: packet_value(Packet.Empty)
 
 fn run() {
     print(@expected_one)
@@ -39,6 +61,14 @@ fn run() {
     print(label(2))
     print(early(true))
     print(early(false))
+    print(@expected_range)
+    print(@expected_or)
+    print(@expected_nested_return)
+    print(@expected_empty)
+    print(packet_value(Packet.Data(12)))
+    print(packet_value(Packet.Retry(2)))
+    print(packet_value(Packet.Data(0)))
+    print(packet_value(Packet.Empty))
 }
 "#;
 
@@ -66,6 +96,25 @@ fn js_early(flag: Bool) Int -[]> {
     40
 }
 
+enum Packet {
+    Data(Int)
+    Retry(Int)
+    Empty
+}
+
+#Target(JS)
+fn packet_value(packet: Packet) Int -[]> {
+    if packet == {
+        .Data(10..19) -> { 100 }
+        .Data(value) | .Retry(value) -> {
+            if value == 0 -> return 9
+            if value > 0 -> { value + 1 } else -> { -1 }
+        }
+        .Empty -> { 0 }
+        else -> -2
+    }
+}
+
 #WasmExport
 fn wasm_block(flag: Bool) Int -[]> {
     if flag -> { 7 } else -> { 3 }
@@ -91,6 +140,14 @@ fn run() {
     print(js_arm(2))
     print(js_early(true))
     print(js_early(false))
+    print(packet_value(Packet.Data(12)))
+    print(packet_value(Packet.Retry(2)))
+    print(packet_value(Packet.Data(0)))
+    print(packet_value(Packet.Empty))
+    print(wasm_block(true))
+    print(wasm_arm(2))
+    print(wasm_early(true))
+    print(wasm_early(false))
 }
 "#;
 
@@ -98,7 +155,7 @@ fn run() {
 fn block_values_arm_tables_and_early_returns_match_comptime_and_hosted_tiers() {
     assert_packaged_cli_tiers_agree(
         COMPTIME_SOURCE,
-        "one\nother\nearly\nlate\none\nother\nearly\nlate\n",
+        "one\nother\nearly\nlate\none\nother\nearly\nlate\n100\n3\n9\n0\n100\n3\n9\n0\n",
     );
 }
 
@@ -112,14 +169,25 @@ fn block_values_arm_tables_and_early_returns_match_web_runtime() {
     let out = jet::compile_web_with_path(WEB_SOURCE, "tests/fixtures/tail_return_web.jet")
         .expect("tail-return web source must compile");
     let web = out.web.expect("web compile must return web artifacts");
-    assert!(web.wasm_rust.contains("wasm_block"));
-    assert!(web.wasm_rust.contains("wasm_arm"));
-    assert!(web.wasm_rust.contains("wasm_early"));
 
     let dir = common::unique_tmp("jet_tail_return_web");
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("app.js"), &web.js_app).unwrap();
     fs::write(dir.join("jet_dom_runtime.js"), &web.dom_runtime).unwrap();
+    fs::write(dir.join("app_wasm.rs"), &web.wasm_rust).unwrap();
+    let wasm = Command::new("rustc")
+        .current_dir(&dir)
+        .args([
+            "--edition", "2021", "--target", "wasm32-unknown-unknown",
+            "--crate-type", "cdylib", "-O", "app_wasm.rs", "-o", "app.wasm",
+        ])
+        .output()
+        .expect("rustc must build the generated Wasm partition");
+    assert!(
+        wasm.status.success(),
+        "generated Wasm failed to compile:\n{}",
+        String::from_utf8_lossy(&wasm.stderr)
+    );
     let output = Command::new("node")
         .current_dir(&dir)
         .arg("app.js")
@@ -131,7 +199,10 @@ fn block_values_arm_tables_and_early_returns_match_web_runtime() {
         "generated web app failed:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "7\n20\n30\n40\n");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "7\n20\n30\n40\n100\n3\n9\n0\n7\n20\n30\n40\n"
+    );
 }
 
 fn have_tool(name: &str) -> bool {

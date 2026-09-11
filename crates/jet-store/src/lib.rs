@@ -1,6 +1,7 @@
 #![deny(warnings)]
 
-use jet_foundation::JSON::{json_escape, parse_json, JSONValue};
+use jet_foundation::DataTree::DataTree;
+use jet_foundation::JSON::{json_escape, parse_json};
 use jet_foundation::SHA256::{sha256, sha256_hex};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -12,6 +13,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+fn field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+    object
+        .iter()
+        .find_map(|(name, value)| (name == key).then_some(value))
+}
 
 pub mod runtime;
 pub const STORE_VERSION: &str = "jet.store.v1";
@@ -436,8 +443,7 @@ impl BuildRecord {
         let object = value
             .as_object()
             .map_err(|error| format!("build record must be an object: {error}"))?;
-        let schema = object
-            .get("schema")
+        let schema = field(object, "schema")
             .ok_or_else(|| "build record is missing schema".to_string())?
             .as_str()
             .map_err(|error| format!("build record schema is invalid: {error}"))?
@@ -445,14 +451,12 @@ impl BuildRecord {
         if schema != Self::SCHEMA {
             return Err(format!("unsupported build record schema `{schema}`"));
         }
-        let program = object
-            .get("program")
+        let program = field(object, "program")
             .ok_or_else(|| "build record is missing program".to_string())?
             .as_str()
             .map_err(|error| format!("build record program is invalid: {error}"))?
             .to_string();
-        let values = object
-            .get("nodes")
+        let values = field(object, "nodes")
             .ok_or_else(|| "build record is missing nodes".to_string())?
             .as_array()
             .map_err(|error| format!("build record nodes are invalid: {error}"))?;
@@ -462,25 +466,23 @@ impl BuildRecord {
                 .as_object()
                 .map_err(|error| format!("build record node is invalid: {error}"))?;
             let string_field = |name: &str| -> Result<String, String> {
-                node.get(name)
+                field(node, name)
                     .ok_or_else(|| format!("build record node is missing {name}"))?
                     .as_str()
                     .map(|value| value.to_string())
                     .map_err(|error| format!("build record node {name} is invalid: {error}"))
             };
-            let duration_ms = match node
-                .get("duration_ms")
+            let duration_ms = match field(node, "duration_ms")
                 .ok_or_else(|| "build record node is missing duration_ms".to_string())?
             {
-                JSONValue::Number(value) => *value as f64,
-                JSONValue::Flt(value) => *value,
+                DataTree::Int(value) => *value as f64,
+                DataTree::Float(value) => *value,
                 _ => return Err("build record node duration_ms is invalid".to_string()),
             };
             if !duration_ms.is_finite() || duration_ms < 0.0 {
                 return Err("build record node duration_ms is out of range".to_string());
             }
-            let inputs = node
-                .get("inputs")
+            let inputs = field(node, "inputs")
                 .ok_or_else(|| "build record node is missing inputs".to_string())?
                 .as_array()
                 .map_err(|error| format!("build record node inputs are invalid: {error}"))?
@@ -870,6 +872,7 @@ impl Store {
                     self.touch_after_read(&key, bytes.len() as u64);
                     Ok(Some(record))
                 }
+                Err(_) if is_unsupported_store_version(&bytes) => Ok(None),
                 Err(reason) => {
                     self.quarantine_after_read(&key, &path, &reason);
                     Ok(None)
@@ -1035,6 +1038,9 @@ impl Store {
             }
             RawRead::Bytes(bytes) => match decode_action(action, &bytes) {
                 Ok(record) => record,
+                Err(_) if is_unsupported_store_version(&bytes) => {
+                    return Ok(ArtifactLookup::Missing);
+                }
                 Err(reason) => {
                     self.quarantine_after_read(&EntryKey::Action(action.key()), &action_path, &reason);
                     return Ok(ArtifactLookup::Corrupt);
@@ -1719,6 +1725,16 @@ fn decode_action(action: ActionHandle, bytes: &[u8]) -> Result<Vec<u8>, String> 
         return Err("action record payload digest mismatch".to_string());
     }
     Ok(payload.to_vec())
+}
+
+fn is_unsupported_store_version(bytes: &[u8]) -> bool {
+    let Some(versioned) = bytes.strip_prefix(b"jet.store.v") else {
+        return false;
+    };
+    let Some((&version, suffix)) = versioned.split_first() else {
+        return false;
+    };
+    version.is_ascii_digit() && version != b'1' && suffix.first() == Some(&0)
 }
 
 fn action_for_key(key: &str) -> Result<ActionHandle, StoreError> {
@@ -2575,5 +2591,23 @@ mod tests {
         let report = store.prune_to(0).unwrap();
         assert!(!report.blocked);
         cleanup(&root);
+    }
+    #[test]
+    fn previous_store_and_build_record_fixtures_fail_closed() {
+        let action = ActionHandle::from_key("build-metadata-compat");
+        let legacy_action =
+            include_bytes!("../../../tests/fixtures/build-metadata-compat/store-v0.magic");
+        assert_eq!(
+            decode_action(action, legacy_action).expect_err("previous store schema must be rejected"),
+            "action record has an unknown version or short header"
+        );
+
+        assert_eq!(
+            BuildRecord::from_json(include_str!(
+                "../../../tests/fixtures/build-metadata-compat/build-record-v0.json"
+            ))
+            .expect_err("previous build-record schema must be rejected"),
+            "unsupported build record schema `jet.build-record/v0`"
+        );
     }
 }

@@ -40,6 +40,183 @@ pub(crate) fn jet_data_normalize_zero(value: f64) -> f64 {
         value
     }
 }
+/// Numeric bounds shared by every data-flow adapter.  The surrounding
+/// `DataLimits` carriers differ between generated AOT and resident JIT code,
+/// so the checked aggregation kernel accepts this tier-neutral projection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct JetDataKernelLimits {
+    pub(crate) max_groups: i64,
+    pub(crate) max_sort_rows: i64,
+    pub(crate) max_join_rows: i64,
+    pub(crate) max_output_rows: i64,
+}
+
+pub(crate) const fn jet_data_kernel_limits(
+    max_groups: i64,
+    max_sort_rows: i64,
+    max_join_rows: i64,
+    max_output_rows: i64,
+) -> JetDataKernelLimits {
+    JetDataKernelLimits {
+        max_groups,
+        max_sort_rows,
+        max_join_rows,
+        max_output_rows,
+    }
+}
+
+pub(crate) fn jet_data_kernel_validate_limits(
+    limits: &JetDataKernelLimits,
+) -> Result<(), jet_std::DataError> {
+    for (name, value) in [
+        ("max_groups", limits.max_groups),
+        ("max_sort_rows", limits.max_sort_rows),
+        ("max_join_rows", limits.max_join_rows),
+        ("max_output_rows", limits.max_output_rows),
+    ] {
+        if value < 1 {
+            return Err(jet_data_error(
+                jet_std::DataErrorKind::InvalidArgument,
+                "DataLimits",
+                format!("{name} must be positive"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Position-only join result.  Adapters own row handles; this kernel owns
+/// deterministic matching, cardinality limits, and the left-join absence.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct JetDataJoinIndex {
+    pub(crate) left: usize,
+    pub(crate) right: Option<usize>,
+}
+
+pub(crate) fn jet_data_join_indices(
+    left_keys: &[String],
+    right_keys: &[String],
+    left_join: bool,
+    limits: &JetDataKernelLimits,
+) -> Result<Vec<JetDataJoinIndex>, jet_std::DataError> {
+    jet_data_kernel_validate_limits(limits)?;
+    let operation = if left_join { "left_join" } else { "inner_join" };
+    let mut right_rows = std::collections::BTreeMap::<&str, Vec<usize>>::new();
+    for (index, key) in right_keys.iter().enumerate() {
+        right_rows.entry(key.as_str()).or_default().push(index);
+    }
+    let mut joined = Vec::new();
+    for (left, key) in left_keys.iter().enumerate() {
+        match right_rows.get(key.as_str()) {
+            Some(matches) => {
+                for &right in matches {
+                    if joined.len() as i64 >= limits.max_join_rows {
+                        return Err(jet_data_error(
+                            jet_std::DataErrorKind::Limit,
+                            operation,
+                            format!("max_join_rows {} exceeded", limits.max_join_rows),
+                        ));
+                    }
+                    joined.push(JetDataJoinIndex {
+                        left,
+                        right: Some(right),
+                    });
+                }
+            }
+            None if left_join => {
+                if joined.len() as i64 >= limits.max_join_rows {
+                    return Err(jet_data_error(
+                        jet_std::DataErrorKind::Limit,
+                        operation,
+                        format!("max_join_rows {} exceeded", limits.max_join_rows),
+                    ));
+                }
+                joined.push(JetDataJoinIndex { left, right: None });
+            }
+            None => {}
+        }
+    }
+    if joined.len() as i64 > limits.max_output_rows {
+        return Err(jet_data_error(
+            jet_std::DataErrorKind::Limit,
+            operation,
+            format!(
+                "max_output_rows {} exceeded",
+                limits.max_output_rows
+            ),
+        ));
+    }
+    Ok(joined)
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct JetDataPivotCell {
+    pub(crate) row_key: String,
+    pub(crate) column_key: String,
+    pub(crate) count: i64,
+    pub(crate) sum: f64,
+    pub(crate) mean: f64,
+}
+
+pub(crate) fn jet_data_pivot_sum_values(
+    values: &[(String, String, f64)],
+    limits: &JetDataKernelLimits,
+) -> Result<Vec<JetDataPivotCell>, jet_std::DataError> {
+    jet_data_kernel_validate_limits(limits)?;
+    let mut groups =
+        std::collections::BTreeMap::<(String, String), (i64, f64)>::new();
+    for (row_key, column_key, value) in values {
+        if !value.is_finite() {
+            return Err(jet_data_error(
+                jet_std::DataErrorKind::NonFinite,
+                "pivot_sum",
+                "pivot values must be finite",
+            ));
+        }
+        let key = (row_key.clone(), column_key.clone());
+        if !groups.contains_key(&key) && groups.len() as i64 >= limits.max_groups {
+            return Err(jet_data_error(
+                jet_std::DataErrorKind::Limit,
+                "pivot_sum",
+                format!("max_groups {} exceeded", limits.max_groups),
+            ));
+        }
+        let entry = groups.entry(key).or_insert((0, 0.0));
+        entry.0 += 1;
+        entry.1 += *value;
+        if !entry.1.is_finite() {
+            return Err(jet_data_error(
+                jet_std::DataErrorKind::Overflow,
+                "pivot_sum",
+                "finite overflow while pivoting",
+            ));
+        }
+    }
+    if groups.len() as i64 > limits.max_output_rows {
+        return Err(jet_data_error(
+            jet_std::DataErrorKind::Limit,
+            "pivot_sum",
+            format!(
+                "max_output_rows {} exceeded",
+                limits.max_output_rows
+            ),
+        ));
+    }
+    Ok(groups
+        .into_iter()
+        .map(|((row_key, column_key), (count, sum))| JetDataPivotCell {
+            row_key,
+            column_key,
+            count,
+            sum: jet_data_normalize_zero(sum),
+            mean: jet_data_normalize_zero(if count == 0 {
+                0.0
+            } else {
+                sum / count as f64
+            }),
+        })
+        .collect())
+}
 
 pub(crate) fn jet_data_reject_nonfinite(operation: &str, values: &[f64]) -> Result<(), jet_std::DataError> {
     for (index, value) in values.iter().copied().enumerate() {
@@ -247,46 +424,36 @@ pub(crate) fn jet_data_rolling_mean_checked(
     Ok(out)
 }
 
-pub(crate) fn jet_data_bar_text_checked(
-    groups: &Vec<jet_std::DataGroup>,
-) -> Result<String, jet_std::DataError> {
+pub(crate) fn jet_data_bar_text_checked<K, V>(
+    groups: &Vec<jet_std::GroupValue<K, V>>,
+) -> Result<String, jet_std::DataError>
+where
+    K: crate::JetShow,
+    V: Clone + Ord + From<i64> + TryInto<i64> + std::fmt::Display,
+{
     for (index, group) in groups.iter().enumerate() {
-        if group.count < 0 {
+        if group.value < V::from(0) {
             return Err(jet_data_error_at(
                 jet_std::DataErrorKind::InvalidArgument,
                 "bar_text",
                 Ok(index as i64),
                 "plot counts must be non-negative",
-            ));
-        }
-        if !group.sum.is_finite() || !group.mean.is_finite() {
-            return Err(jet_data_error_at(
-                jet_std::DataErrorKind::NonFinite,
-                "bar_text",
-                Ok(index as i64),
-                "plot values must be finite",
             ));
         }
     }
     Ok(jet_data_bar_text(groups))
 }
 
-pub(crate) fn jet_data_bar_svg_checked(groups: &Vec<jet_std::DataGroup>) -> Result<String, jet_std::DataError> {
+pub(crate) fn jet_data_bar_svg_checked<K: crate::JetShow>(
+    groups: &Vec<jet_std::GroupValue<K, i64>>,
+) -> Result<String, jet_std::DataError> {
     for (index, group) in groups.iter().enumerate() {
-        if group.count < 0 {
+        if group.value < 0 {
             return Err(jet_data_error_at(
                 jet_std::DataErrorKind::InvalidArgument,
                 "bar_svg",
                 Ok(index as i64),
                 "plot counts must be non-negative",
-            ));
-        }
-        if !group.sum.is_finite() || !group.mean.is_finite() {
-            return Err(jet_data_error_at(
-                jet_std::DataErrorKind::NonFinite,
-                "bar_svg",
-                Ok(index as i64),
-                "plot values must be finite",
             ));
         }
     }
@@ -393,7 +560,7 @@ pub(crate) fn jet_data_bridge_status(step: &str) -> jet_std::DataStatus {
             ownership: "python-sidecar".to_string(),
             trust: "untrusted-foreign".to_string(),
             fallback: "none".to_string(),
-            replacement: "core.data native table/series/stats".to_string(),
+            replacement: "core.data native lists/query/stats".to_string(),
         },
         "r.*" => jet_std::DataStatus {
             step: "r.*".to_string(),
@@ -402,7 +569,7 @@ pub(crate) fn jet_data_bridge_status(step: &str) -> jet_std::DataStatus {
             ownership: "r-sidecar".to_string(),
             trust: "untrusted-foreign".to_string(),
             fallback: "none".to_string(),
-            replacement: "core.data.Table typed round-trip".to_string(),
+            replacement: "core.data Query<T> typed round-trip".to_string(),
         },
         "gpu.*" => jet_std::DataStatus {
             step: "gpu.*".to_string(),
@@ -429,9 +596,8 @@ pub(crate) fn jet_data_status() -> Vec<jet_std::DataStatus> {
     vec![
         jet_data_status_native("core.data.csv"),
         jet_data_status_native("core.data.stats"),
-        jet_data_status_native("core.data.table"),
-        jet_data_status_native("core.data.lazy"),
-        jet_data_status_native("core.data.missing"),
+        jet_data_status_native("core.data.query"),
+        jet_data_status_native("core.data.stream"),
         jet_data_status_native("core.data.schema"),
         jet_data_status_native("core.data.json"),
         jet_data_bridge_status("py.*"),
@@ -474,33 +640,53 @@ pub(crate) fn jet_data_require_bridge(provider: &String) -> Result<(), jet_std::
     ))
 }
 
-pub(crate) fn jet_data_bar_text(groups: &Vec<jet_std::DataGroup>) -> String {
+pub(crate) fn jet_data_bar_text<K, V>(
+    groups: &Vec<jet_std::GroupValue<K, V>>,
+) -> String
+where
+    K: crate::JetShow,
+    V: Clone + Ord + From<i64> + TryInto<i64> + std::fmt::Display,
+{
     let mut lines = Vec::new();
-    for g in groups {
-        let n = if g.count < 0 { 0 } else { g.count.min(40) } as usize;
-        lines.push(format!("{} | {} {}", g.key, "#".repeat(n), g.count));
+    for group in groups {
+        let n: i64 = group.value.clone().clamp(V::from(0), V::from(40))
+            .try_into().ok().expect("plot width is clamped to 0..40");
+        let n = n as usize;
+        lines.push(format!(
+            "{} | {} {}",
+            group.key.jet_show(),
+            "#".repeat(n),
+            group.value
+        ));
     }
     lines.join("\n")
 }
 
-pub(crate) fn jet_data_bar_svg(groups: &Vec<jet_std::DataGroup>) -> String {
+pub(crate) fn jet_data_bar_svg<K: crate::JetShow>(
+    groups: &Vec<jet_std::GroupValue<K, i64>>,
+) -> String {
     let width = 320.0f64;
     let row_h = 24.0f64;
     let height = 24.0 + row_h * groups.len() as f64;
-    let max = groups.iter().map(|g| g.count).max().unwrap_or(1).max(1) as f64;
+    let max = groups
+        .iter()
+        .map(|group| group.value)
+        .max()
+        .unwrap_or(1)
+        .max(1) as f64;
     let mut out = format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"320\" height=\"{}\" viewBox=\"0 0 320 {}\">",
         height as i64,
         height as i64
     );
     out.push_str("<rect width=\"320\" height=\"100%\" fill=\"white\"/>");
-    for (i, g) in groups.iter().enumerate() {
-        let y = 18.0 + i as f64 * row_h;
-        let bar_w = ((g.count as f64 / max) * (width - 120.0)).round();
+    for (index, group) in groups.iter().enumerate() {
+        let y = 18.0 + index as f64 * row_h;
+        let bar_w = ((group.value.max(0) as f64 / max) * (width - 120.0)).round();
         out.push_str(&format!(
             "<text x=\"8\" y=\"{}\" font-family=\"monospace\" font-size=\"12\">{}</text>",
             y as i64,
-            jet_data_svg_escape(&g.key)
+            jet_data_svg_escape(&group.key.jet_show())
         ));
         out.push_str(&format!(
             "<rect x=\"96\" y=\"{}\" width=\"{}\" height=\"14\" fill=\"#2f6f73\"/>",
@@ -511,7 +697,7 @@ pub(crate) fn jet_data_bar_svg(groups: &Vec<jet_std::DataGroup>) -> String {
             "<text x=\"{}\" y=\"{}\" font-family=\"monospace\" font-size=\"12\">{}</text>",
             (104.0 + bar_w) as i64,
             y as i64,
-            g.count
+            group.value
         ));
     }
     out.push_str("</svg>");

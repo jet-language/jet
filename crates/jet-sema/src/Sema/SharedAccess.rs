@@ -35,7 +35,7 @@
 //! D-TXN2 effect wall stays with transactions the author wrote.
 
 use super::*;
-use crate::Diagnostics::Span;
+use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::AST::{
     AccessConvention, BinOp, CallArg, CallArgFlags, Expr, LValue, Lambda, LambdaBody, LambdaMeta,
     LambdaParam, Stmt, Type,
@@ -97,6 +97,7 @@ fn shared_access_call(handle: Expr, method: &str, body: LambdaBody, span: Span) 
         }],
         recv_type: None,
         resolved_ret: None,
+        operator_rhs: None,
         checked_widen: false,
     }
 }
@@ -140,6 +141,347 @@ fn edit_field_stmt(field: &str, op: Option<BinOp>, op_span: Span, value: Expr, s
         op,
         op_span,
         value,
+    }
+}
+
+#[derive(Debug)]
+struct SharedPoll {
+    handle: String,
+    field: String,
+}
+
+fn expr_root_is(expr: &Expr, name: &str) -> bool {
+    match expr.without_parens() {
+        Expr::Ident(candidate, _) => candidate == name,
+        Expr::Field(base, ..)
+        | Expr::Index { base, .. }
+        | Expr::Slice { base, .. }
+        | Expr::OptField { base, .. } => expr_root_is(base, name),
+        _ => false,
+    }
+}
+
+fn body_has_blocking_call(body: &[Stmt]) -> bool {
+    body.iter().any(|stmt| {
+        let mut found = false;
+        stmt.for_each_expr(|expr| {
+            if found {
+                return;
+            }
+            found = match expr.without_parens() {
+                Expr::MethodCall { method, .. } => matches!(
+                    method.as_str(),
+                    "join"
+                        | "read"
+                        | "read_line"
+                        | "receive"
+                        | "recv"
+                        | "sleep"
+                        | "sleep_until"
+                        | "wait"
+                        | "yield_now"
+                ),
+                Expr::Call(call) => matches!(
+                    call.name.as_str(),
+                    "join"
+                        | "read"
+                        | "read_line"
+                        | "receive"
+                        | "recv"
+                        | "sleep"
+                        | "sleep_until"
+                        | "wait"
+                        | "yield_now"
+                ),
+                _ => false,
+            };
+        });
+        found
+    })
+}
+
+fn body_writes_shared_field(body: &[Stmt], poll: &SharedPoll) -> bool {
+    body.iter()
+        .any(|stmt| stmt_writes_shared_field(stmt, poll))
+}
+
+fn expr_writes_shared_field(expr: &Expr, poll: &SharedPoll) -> bool {
+    match expr.without_parens() {
+        Expr::Field(base, field, _) => {
+            expr_root_is(base, &poll.handle) && field == &poll.field
+        }
+        Expr::Index { base, .. } => expr_root_is(base, &poll.handle),
+        _ => false,
+    }
+}
+
+fn stmt_writes_shared_field(stmt: &Stmt, poll: &SharedPoll) -> bool {
+    let mut writes_incdec = false;
+    stmt.for_each_expr(|expr| {
+        if let Expr::IncDec { operand, .. } = expr.without_parens() {
+            writes_incdec |= expr_writes_shared_field(operand, poll);
+        }
+    });
+    if writes_incdec {
+        return true;
+    }
+    match stmt {
+        Stmt::Assign { target, .. } => match target {
+            LValue::Local { .. } => false,
+            LValue::Index { base, .. } => expr_root_is(base, &poll.handle),
+            LValue::Field { base, field, .. } => {
+                expr_root_is(base, &poll.handle) && field == &poll.field
+            }
+        },
+        Stmt::While { body, .. }
+        | Stmt::For { body, .. }
+        | Stmt::Loop { body, .. }
+        | Stmt::Unsafe { body, .. }
+        | Stmt::Impure { body, .. }
+        | Stmt::Reactive { body, .. }
+        | Stmt::Shield { body, .. }
+        | Stmt::Switched { body, .. }
+        | Stmt::Region { body, .. }
+        | Stmt::Policy { body, .. }
+        | Stmt::TaskGroup { body, .. }
+        | Stmt::Layout { body, .. }
+        | Stmt::AuthorityScope { body, .. }
+        | Stmt::ComptimeBlock { body, .. }
+        | Stmt::ContextBlock { body, .. }
+        | Stmt::Live { body, .. }
+        | Stmt::AssumeDet { body, .. }
+        | Stmt::Transact { body, .. }
+        | Stmt::ScopeMember { body, .. } => body_writes_shared_field(body, poll),
+        Stmt::CountedLoop { step, body, .. } => {
+            step.as_deref()
+                .is_some_and(|step| stmt_writes_shared_field(step, poll))
+                || body_writes_shared_field(body, poll)
+        }
+        Stmt::Switch {
+            arms, else_body, ..
+        }
+        | Stmt::ComptimeSwitch {
+            arms, else_body, ..
+        } => {
+            arms.iter()
+                .any(|arm| body_writes_shared_field(&arm.body, poll))
+                || else_body
+                    .as_deref()
+                    .is_some_and(|body| body_writes_shared_field(body, poll))
+        }
+        Stmt::ComptimeIf {
+            then_body,
+            else_body,
+            ..
+        } => {
+            body_writes_shared_field(then_body, poll)
+                || else_body
+                    .as_deref()
+                    .is_some_and(|body| body_writes_shared_field(body, poll))
+        }
+        Stmt::Expr(_)
+        | Stmt::Val(_)
+        | Stmt::Return(_, _)
+        | Stmt::Break(_)
+        | Stmt::BreakValue(_, _)
+        | Stmt::Continue(_)
+        | Stmt::BreakLabel(_, _)
+        | Stmt::BreakLabelValue(_, _, _, _)
+        | Stmt::ContinueLabel(_, _)
+        | Stmt::Yield(_, _)
+        | Stmt::DeferClose { .. } => false,
+    }
+}
+
+fn source_loop_open(source: &str, start: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut index = start;
+    while index < bytes.len() {
+        match bytes[index] {
+            b' ' | b'\t' | b'\r' | b'\n' => index += 1,
+            b'/' if bytes.get(index + 1) == Some(&b'/') => {
+                index += 2;
+                while index < bytes.len() && bytes[index] != b'\n' {
+                    index += 1;
+                }
+            }
+            b'/' if bytes.get(index + 1) == Some(&b'*') => {
+                index += 2;
+                while index + 1 < bytes.len()
+                    && bytes.get(index..index + 2) != Some(b"*/")
+                {
+                    index += 1;
+                }
+                if index + 1 >= bytes.len() {
+                    return None;
+                }
+                index += 2;
+            }
+            b'{' => return Some(index),
+            _ => return None,
+        }
+    }
+    None
+}
+
+fn source_matching_brace(source: &str, open: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut depth = 0usize;
+    let mut index = open;
+    let mut string = false;
+    let mut line_comment = false;
+    let mut block_comment = false;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if line_comment {
+            if byte == b'\n' {
+                line_comment = false;
+            }
+            index += 1;
+            continue;
+        }
+        if block_comment {
+            if bytes.get(index..index + 2) == Some(b"*/") {
+                block_comment = false;
+                index += 2;
+            } else {
+                index += 1;
+            }
+            continue;
+        }
+        if string {
+            if byte == b'\\' {
+                index += 2;
+            } else {
+                string = byte != b'"';
+                index += 1;
+            }
+            continue;
+        }
+        if bytes.get(index..index + 2) == Some(b"//") {
+            line_comment = true;
+            index += 2;
+        } else if bytes.get(index..index + 2) == Some(b"/*") {
+            block_comment = true;
+            index += 2;
+        } else if byte == b'"' {
+            string = true;
+            index += 1;
+        } else if byte == b'{' {
+            depth += 1;
+            index += 1;
+        } else if byte == b'}' {
+            depth = depth.checked_sub(1)?;
+            if depth == 0 {
+                return Some(index);
+            }
+            index += 1;
+        } else {
+            index += 1;
+        }
+    }
+    None
+}
+
+impl<'a> Checker<'a> {
+    fn shared_poll(&self, expr: &Expr) -> Option<SharedPoll> {
+        let Expr::Field(base, field, _) = expr.without_parens() else {
+            return None;
+        };
+        let Expr::Ident(handle, _) = base.without_parens() else {
+            return None;
+        };
+        self.place_type_is_shared(base).then(|| SharedPoll {
+            handle: handle.clone(),
+            field: field.clone(),
+        })
+    }
+
+    fn find_shared_poll(&self, cond: &Expr) -> Option<SharedPoll> {
+        let mut found = None;
+        cond.for_each_expr(|expr| {
+            if found.is_none() {
+                found = self.shared_poll(expr);
+            }
+        });
+        found
+    }
+
+    fn unique_condition_name(&self) -> Option<String> {
+        let mut names = self
+            .visible_names()
+            .into_iter()
+            .filter(|name| {
+                self.lookup(name).is_some_and(|info| {
+                    matches!(&info.ty, Type::Named(type_name) if type_name == crate::Syntax::TYPE_CONDITION)
+                })
+            })
+            .collect::<Vec<_>>();
+        (names.len() == 1).then(|| names.pop().expect("one Condition name"))
+    }
+
+    fn shared_busy_wait_edit(
+        &self,
+        loop_span: Span,
+        cond: &Expr,
+        body: &[Stmt],
+        poll: &SharedPoll,
+    ) -> Option<TextEdit> {
+        if !body.is_empty() {
+            return None;
+        }
+        let Expr::Binary(BinOp::Eq, lhs, rhs, _) = cond.without_parens() else {
+            return None;
+        };
+        let Expr::Field(base, field, _) = lhs.without_parens() else {
+            return None;
+        };
+        let Expr::Ident(handle, _) = base.without_parens() else {
+            return None;
+        };
+        if handle != &poll.handle
+            || field != &poll.field
+            || !matches!(rhs.without_parens(), Expr::Bool(false, _))
+        {
+            return None;
+        }
+        let condition = self.unique_condition_name()?;
+        let close = source_loop_open(self.source, cond.span().end)
+            .and_then(|open| source_matching_brace(self.source, open))?;
+        Some(TextEdit {
+            span: Span::new(loop_span.start, close + 1),
+            new_text: format!(
+                "{handle}.guard_edit().wait({condition}, value -> value.{field}) ?? panic(\"wait failed\")"
+            ),
+        })
+    }
+
+    /// D-CONC-SHARE2: warn when an unbounded conditional loop repeatedly polls
+    /// a shared field without a wait point, a sleep, a channel receive, or a
+    /// write that can change the polled state.
+    pub(crate) fn lint_shared_busy_wait(
+        &mut self,
+        cond: &Expr,
+        body: &[Stmt],
+        loop_span: Span,
+        allow_auto_fix: bool,
+    ) {
+        if !self.flow.reachable {
+            return;
+        }
+        let Some(poll) = self.find_shared_poll(cond) else {
+            return;
+        };
+        if body_has_blocking_call(body) || body_writes_shared_field(body, &poll) {
+            return;
+        }
+        let mut diagnostic = Diagnostic::from_row("L0207", &[], Some(cond.span()));
+        if allow_auto_fix {
+            if let Some(edit) = self.shared_busy_wait_edit(loop_span, cond, body, &poll) {
+                diagnostic = diagnostic.with_edit(edit);
+            }
+        }
+        self.diags.push(diagnostic);
     }
 }
 

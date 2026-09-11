@@ -1,0 +1,11 @@
+Error [E2967]: Frame resource schedule refused: parallel frame refused: `on_frame@230` write `positions` before `on_frame@302` write it
+  --> tests/ui/resource_schedule_conflict.jet:17:20
+    |
+ 17 |     scene.on_frame(frame -> {
+    |                    ^^^^^^^^^^
+ Why: The scheduler derives dependencies, transfers, lifetimes, and reuse only from checked access and completion facts; an unresolved alias or completion would make execution unsafe.
+ Fix: Preserve source order, declare the complete resource access, or provide the real completion event before requesting parallel execution.
+More: jet-lang.dev/e/E2967
+
+1 problem found
+run `jet explain E2967` to learn more

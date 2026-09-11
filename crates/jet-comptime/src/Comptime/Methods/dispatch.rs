@@ -21,9 +21,11 @@ use super::super::Diagnostics::{comptime_panic, unsupported};
 use super::super::Diagnostics::{EARLY_RETURN_CODE, ERR_PROPAGATE_CODE};
 use super::super::Interpreter::{Flow, Interp};
 use super::core_calls::{
-    apply_core_call_with_type, apply_data_line_call, apply_impure_core_call_with_type, as_float,
-    display_core_pure_value, eval_regex_replace_all_with, jet_term_print_frame, sketch_add,
-    solver_new, solver_require,
+    apply_core_call_with_type, apply_data_line_call, apply_history_rng_method,
+    apply_impure_core_call_with_type, as_float,
+    as_string, display_core_pure_value, eval_regex_replace_all_with, io_error_value,
+    jet_term_print_frame, normalize_path_args, sketch_add, solver_new, solver_require,
+    IoErrorOperation,
 };
 use super::repl_process::apply_repl_authorized_core_call_with_type;
 use crate::AST::CtValue;
@@ -1321,6 +1323,133 @@ impl<'a> Interp<'a> {
     ) -> Result<CtValue, Diagnostic> {
         self.call_closure_inner(f, args, span, None)
     }
+    /// Invoke one closure with a mutable state argument. Store transactions use
+    /// this path so field assignments in the closure write back to the value
+    /// handed to the shared Prelude transaction kernel.
+    pub(in super::super) fn call_closure_mut_arg(
+        &mut self,
+        f: &CtValue,
+        arg: &mut CtValue,
+        span: Span,
+    ) -> Result<CtValue, Diagnostic> {
+        let mut args = vec![arg.clone()];
+        if let Some(result) =
+            crate::Comptime::try_ambient_standalone_closure_mut(f, &mut args, span)
+        {
+            let result = result?;
+            *arg = args
+                .into_iter()
+                .next()
+                .expect("ambient mutable closure received one argument");
+            return Ok(result);
+        }
+        let CtValue::Closure(data) = f else {
+            return Err(unsupported(
+                "calling this value (it isn't a function)",
+                span,
+            ));
+        };
+        if data.lambda.params.len() != 1 {
+            return Err(unsupported(
+                "this closure (wrong number of arguments)",
+                span,
+            ));
+        }
+        let mut frame = data.captured.clone();
+        let parameter = &data.lambda.params[0];
+        frame.insert(
+            parameter.name.clone(),
+            parameter.ty.as_ref().map_or_else(
+                || arg.clone(),
+                |ty| super::super::Interpreter::coerce_value_to_type(arg.clone(), ty),
+            ),
+        );
+        let previous_types = self.binding_types.clone();
+        if let Some(ty) = &parameter.ty {
+            self.binding_types.insert(parameter.name.clone(), ty.clone());
+        }
+        let result = (|| match &data.lambda.body {
+            LambdaBody::Expr(e) => self.eval(e, &mut frame),
+            LambdaBody::Block(stmts) => match self.exec_block(stmts, &mut frame)? {
+                Flow::Return(v) => Ok(v),
+                _ => Ok(CtValue::Unit),
+            },
+        })();
+        self.binding_types = previous_types;
+        if result.is_ok() {
+            if let Some(value) = frame.get(&parameter.name) {
+                *arg = value.clone();
+            }
+        }
+        result.map(|value| {
+            data.return_type.as_ref().map_or(value.clone(), |ty| {
+                super::super::Interpreter::coerce_value_to_type(value, ty)
+            })
+        })
+    }
+    /// Invoke a closure with mutable arguments. This is the callback seam for
+    /// APIs whose callback mutates more than one value (for example a history
+    /// generator that advances its borrowed RNG argument).
+    pub(in super::super) fn call_closure_mut_args(
+        &mut self,
+        f: &CtValue,
+        args: &mut Vec<CtValue>,
+        span: Span,
+    ) -> Result<CtValue, Diagnostic> {
+        if let Some(result) =
+            crate::Comptime::try_ambient_standalone_closure_mut(f, args, span)
+        {
+            return result;
+        }
+        let CtValue::Closure(data) = f else {
+            return Err(unsupported(
+                "calling this value (it isn't a function)",
+                span,
+            ));
+        };
+        if data.lambda.params.len() != args.len() {
+            return Err(unsupported(
+                "this closure (wrong number of arguments)",
+                span,
+            ));
+        }
+        let mut frame = data.captured.clone();
+        let previous_types = self.binding_types.clone();
+        for (parameter, argument) in data.lambda.params.iter().zip(args.iter().cloned()) {
+            if let Some(ty) = &parameter.ty {
+                self.binding_types
+                    .insert(parameter.name.clone(), ty.clone());
+                frame.insert(
+                    parameter.name.clone(),
+                    super::super::Interpreter::coerce_value_to_type(argument, ty),
+                );
+            } else {
+                frame.insert(parameter.name.clone(), argument);
+            }
+        }
+        let result = (|| match &data.lambda.body {
+            LambdaBody::Expr(expr) => self.eval(expr, &mut frame),
+            LambdaBody::Block(stmts) => match self.exec_block(stmts, &mut frame)? {
+                Flow::Return(value) => Ok(value),
+                _ => Ok(CtValue::Unit),
+            },
+        })();
+        self.binding_types = previous_types;
+        if result.is_ok() {
+            for (index, parameter) in data.lambda.params.iter().enumerate() {
+                if let Some(value) = frame.get(&parameter.name) {
+                    args[index] = value.clone();
+                }
+            }
+        }
+        result.map(|value| {
+            data.return_type.as_ref().map_or(value.clone(), |ty| {
+                super::super::Interpreter::coerce_value_to_type(value, ty)
+            })
+        })
+    }
+
+
 
     pub(in super::super) fn call_inline_closure(
         &mut self,
@@ -1339,6 +1468,11 @@ impl<'a> Interp<'a> {
         span: Span,
         mut writeback_scope: Option<&mut HashMap<String, CtValue>>,
     ) -> Result<CtValue, Diagnostic> {
+        if let Some(result) =
+            crate::Comptime::try_ambient_standalone_closure(f, args.clone(), span)
+        {
+            return result;
+        }
         let CtValue::Closure(data) = f else {
             return Err(unsupported(
                 "calling this value (it isn't a function)",
@@ -1674,6 +1808,128 @@ impl<'a> Interp<'a> {
             _ => None,
         }
     }
+}
+/// Standalone variant of [`invoke_standalone_closure`] for mutable Store
+/// transaction state.
+pub(in super::super) fn invoke_standalone_closure_mut(
+    closure: &CtValue,
+    arg: &mut CtValue,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let mut args = vec![arg.clone()];
+    let result = invoke_standalone_closure_mut_args(closure, &mut args, span);
+    if result.is_ok() {
+        *arg = args
+            .into_iter()
+            .next()
+            .expect("mutable standalone closure received one argument");
+    }
+    result
+}
+
+/// Standalone mutable-argument closure invocation for callbacks that carry
+/// more than one writable value.
+pub(in super::super) fn invoke_standalone_closure_mut_args(
+    closure: &CtValue,
+    args: &mut Vec<CtValue>,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let funcs: HashMap<String, &Func> = HashMap::new();
+    let error_conversions: Vec<crate::AST::ErrorConvDef> = Vec::new();
+    let core_imports: HashMap<String, String> = HashMap::new();
+    let globals: HashMap<String, CtValue> = HashMap::new();
+    let methods: HashMap<(String, String), &Func> = HashMap::new();
+    let structs: HashMap<String, &crate::AST::StructDef> = HashMap::new();
+    let computed_fields: HashMap<(String, String), &crate::AST::Expr> = HashMap::new();
+    let distinct_ranges: HashMap<String, Option<(i64, i64)>> = HashMap::new();
+    let distinct_bases: HashMap<String, Type> = HashMap::new();
+    let migrations: HashMap<String, Vec<&crate::AST::MigrationDecl>> = HashMap::new();
+    let base_dir = Path::new(".");
+    let mut interp = Interp {
+        funcs: &funcs,
+        error_conversions: &error_conversions,
+        base_dir,
+        fuel: super::super::Interpreter::FUEL_BUDGET,
+        sink: None,
+        core_imports: &core_imports,
+        checked_nominals: None,
+        debugger: None,
+        runtime_execution: false,
+        depth: 0,
+        cur_func: String::new(),
+        impure_depth: 0,
+        gates: jet_foundation::Policy::GateSet::default(),
+        repl_mode: false,
+        repl_grants: Vec::new(),
+        repl_authorizer: None,
+        repl_interruptible: false,
+        embed_inputs: Vec::new(),
+        binding_types: HashMap::new(),
+        globals: &globals,
+        methods: &methods,
+        structs: &structs,
+        computed_fields: &computed_fields,
+        distinct_ranges: &distinct_ranges,
+        distinct_bases: &distinct_bases,
+        migrations: &migrations,
+        list_write_windows: HashMap::new(),
+        data_pipeline: super::super::DataPipeline::DataPipelineState::default(),
+    };
+    interp.call_closure_mut_args(closure, args, span)
+}
+
+
+/// Invoke a retained closure through the same evaluator used by ordinary
+/// interpreter calls. Web table columns can outlive the call-site `Interp`, so
+/// they retain only the closure value and create this short-lived evaluator
+/// when a renderer asks for a cell.
+pub(in super::super) fn invoke_standalone_closure(
+    closure: &CtValue,
+    args: Vec<CtValue>,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let funcs: HashMap<String, &Func> = HashMap::new();
+    let error_conversions: Vec<crate::AST::ErrorConvDef> = Vec::new();
+    let core_imports: HashMap<String, String> = HashMap::new();
+    let globals: HashMap<String, CtValue> = HashMap::new();
+    let methods: HashMap<(String, String), &Func> = HashMap::new();
+    let structs: HashMap<String, &crate::AST::StructDef> = HashMap::new();
+    let computed_fields: HashMap<(String, String), &crate::AST::Expr> = HashMap::new();
+    let distinct_ranges: HashMap<String, Option<(i64, i64)>> = HashMap::new();
+    let distinct_bases: HashMap<String, Type> = HashMap::new();
+    let migrations: HashMap<String, Vec<&crate::AST::MigrationDecl>> = HashMap::new();
+    let base_dir = Path::new(".");
+    let mut interp = Interp {
+        funcs: &funcs,
+        error_conversions: &error_conversions,
+        base_dir,
+        fuel: super::super::Interpreter::FUEL_BUDGET,
+        sink: None,
+        core_imports: &core_imports,
+        checked_nominals: None,
+        debugger: None,
+        runtime_execution: false,
+        depth: 0,
+        cur_func: String::new(),
+        impure_depth: 0,
+        gates: jet_foundation::Policy::GateSet::default(),
+        repl_mode: false,
+        repl_grants: Vec::new(),
+        repl_authorizer: None,
+        repl_interruptible: false,
+        embed_inputs: Vec::new(),
+        binding_types: HashMap::new(),
+        globals: &globals,
+        methods: &methods,
+        structs: &structs,
+        computed_fields: &computed_fields,
+        distinct_ranges: &distinct_ranges,
+        distinct_bases: &distinct_bases,
+        migrations: &migrations,
+        list_write_windows: HashMap::new(),
+        data_pipeline: super::super::DataPipeline::DataPipelineState::default(),
+    };
+    interp.call_closure(closure, args, span)
 }
 
 #[cfg(test)]

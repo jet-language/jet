@@ -1,7 +1,10 @@
 use core.files
 #CLI struct Args { input: String }
 fn run(args: Args) {
-lines:=(files.read(args.input)??panic("read failed")).lines().filter(line->line.trim()!="").map(line->line.trim())
-lines.sort()
-print("lines {lines.len()}\n{lines.join("\n")}")
+    cleaned := (files.read(args.input) ?? panic("read failed"))
+        .lines()
+        .map(line -> line.trim())
+        .filter(line -> line != "")
+    cleaned.sort()
+    print("lines {cleaned.len()}\n{cleaned.join("\n")}")
 }

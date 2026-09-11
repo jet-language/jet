@@ -9,6 +9,7 @@ use super::realize::{project_env_root, realize_ref_outcome, RealizeScope, RefOut
 use crate::Output::Theme;
 use crate::{EnvFile, ProviderFacts, RefSpec, Store, Syntax, JSON, SHA256};
 use jet_env_model::ModuleEval;
+use jet_foundation::DataTree::DataTree;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
@@ -865,26 +866,34 @@ fn ensure_collision_selection_current(
     Ok(())
 }
 
+fn profile_tree_field<'a>(
+    object: &'a [(String, DataTree)],
+    key: &str,
+) -> Option<&'a DataTree> {
+    object
+        .iter()
+        .find_map(|(name, value)| (name == key).then_some(value))
+}
 fn collision_record(
     metadata: &str,
     path: &str,
 ) -> io::Result<Option<(Option<String>, Vec<(String, String, String)>)>> {
     let value = JSON::parse(metadata).map_err(io::Error::other)?;
     let object = value.as_object().map_err(io::Error::other)?;
-    let Some(collisions) = object.get("collisions") else {
+    let Some(DataTree::Object(collisions)) = profile_tree_field(object, "collisions") else {
         return Ok(None);
     };
-    let collisions = collisions.as_object().map_err(io::Error::other)?;
-    let Some(record) = collisions.get(path) else {
+    let Some(record) = profile_tree_field(collisions, path) else {
         return Ok(None);
     };
-    let record = record.as_object().map_err(io::Error::other)?;
-    let selected = match record.get("selected") {
-        Some(crate::JSON::JSONValue::Null) | None => None,
+    let DataTree::Object(record) = record else {
+        return Err(io::Error::other("profile collision record is not an object"));
+    };
+    let selected = match profile_tree_field(record, "selected") {
+        Some(DataTree::Null) | None => None,
         Some(value) => Some(value.as_str().map_err(io::Error::other)?.to_string()),
     };
-    let contenders = record
-        .get("contenders")
+    let contenders = profile_tree_field(record, "contenders")
         .ok_or_else(|| io::Error::other("profile collision record lacks contenders"))?
         .as_array()
         .map_err(io::Error::other)?;
@@ -892,26 +901,24 @@ fn collision_record(
         .iter()
         .map(|value| {
             let contender = value.as_object().map_err(io::Error::other)?;
-            Ok((
-                contender
-                    .get("provider")
-                    .ok_or_else(|| io::Error::other("profile collision contender lacks provider"))?
-                    .as_str()
-                    .map_err(io::Error::other)?
-                    .to_string(),
-                contender
-                    .get("kind")
-                    .ok_or_else(|| io::Error::other("profile collision contender lacks kind"))?
-                    .as_str()
-                    .map_err(io::Error::other)?
-                    .to_string(),
-                contender
-                    .get("digest")
-                    .ok_or_else(|| io::Error::other("profile collision contender lacks digest"))?
-                    .as_str()
-                    .map_err(io::Error::other)?
-                    .to_string(),
-            ))
+            let provider = profile_tree_field(contender, "provider")
+                .ok_or_else(|| {
+                    io::Error::other("profile collision contender lacks provider")
+                })?
+                .as_str()
+                .map_err(io::Error::other)?
+                .to_string();
+            let kind = profile_tree_field(contender, "kind")
+                .ok_or_else(|| io::Error::other("profile collision contender lacks kind"))?
+                .as_str()
+                .map_err(io::Error::other)?
+                .to_string();
+            let digest = profile_tree_field(contender, "digest")
+                .ok_or_else(|| io::Error::other("profile collision contender lacks digest"))?
+                .as_str()
+                .map_err(io::Error::other)?
+                .to_string();
+            Ok((provider, kind, digest))
         })
         .collect::<io::Result<Vec<_>>>()?;
     contenders.sort();
@@ -1355,8 +1362,7 @@ fn read_generation_record(state: &Path, generation: u64) -> io::Result<Generatio
     let metadata = super::tool::read_bounded(&metadata_path)?;
     let value = JSON::parse(&metadata).map_err(io::Error::other)?;
     let object = value.as_object().map_err(io::Error::other)?;
-    let schema = object
-        .get("schema")
+    let schema = profile_tree_field(object, "schema")
         .ok_or_else(|| io::Error::other("profile generation metadata lacks schema"))?
         .as_str()
         .map_err(io::Error::other)?;
@@ -1365,8 +1371,7 @@ fn read_generation_record(state: &Path, generation: u64) -> io::Result<Generatio
             "profile generation metadata schema is unsupported",
         ));
     }
-    let recorded_profile = object
-        .get("profile")
+    let recorded_profile = profile_tree_field(object, "profile")
         .ok_or_else(|| io::Error::other("profile generation metadata lacks profile"))?
         .as_str()
         .map_err(io::Error::other)?;
@@ -1379,10 +1384,9 @@ fn read_generation_record(state: &Path, generation: u64) -> io::Result<Generatio
             "profile generation metadata profile disagrees with its path",
         ));
     }
-    let actual_generation = object
-        .get("generation")
+    let actual_generation = profile_tree_field(object, "generation")
         .and_then(|value| match value {
-            crate::JSON::JSONValue::Number(value) if *value > 0 => Some(*value as u64),
+            DataTree::Int(value) if *value > 0 => Some(*value as u64),
             _ => None,
         })
         .ok_or_else(|| io::Error::other("profile generation metadata lacks generation"))?;
@@ -1391,8 +1395,7 @@ fn read_generation_record(state: &Path, generation: u64) -> io::Result<Generatio
             "profile generation metadata number disagrees with its path",
         ));
     }
-    let fingerprint = object
-        .get("fingerprint")
+    let fingerprint = profile_tree_field(object, "fingerprint")
         .ok_or_else(|| io::Error::other("profile generation metadata lacks fingerprint"))?
         .as_str()
         .map_err(io::Error::other)?
@@ -1405,8 +1408,7 @@ fn read_generation_record(state: &Path, generation: u64) -> io::Result<Generatio
             "profile generation fingerprint is not canonical",
         ));
     }
-    let root_hash = object
-        .get("root_hash")
+    let root_hash = profile_tree_field(object, "root_hash")
         .ok_or_else(|| io::Error::other("profile generation metadata lacks root hash"))?
         .as_str()
         .map_err(io::Error::other)?;
@@ -1415,16 +1417,14 @@ fn read_generation_record(state: &Path, generation: u64) -> io::Result<Generatio
             "profile generation root hash is not canonical",
         ));
     }
-    let packages = object
-        .get("packages")
+    let packages = profile_tree_field(object, "packages")
         .ok_or_else(|| io::Error::other("profile generation metadata lacks packages"))?
         .as_array()
         .map_err(io::Error::other)?;
     let mut targets = BTreeSet::new();
     for package in packages {
         let package = package.as_object().map_err(io::Error::other)?;
-        let output_hash = package
-            .get("output_hash")
+        let output_hash = profile_tree_field(package, "output_hash")
             .ok_or_else(|| io::Error::other("profile generation package lacks output hash"))?
             .as_str()
             .map_err(io::Error::other)?;
@@ -1433,8 +1433,7 @@ fn read_generation_record(state: &Path, generation: u64) -> io::Result<Generatio
                 "profile generation package has invalid output hash",
             ));
         }
-        let facts = package
-            .get("provider_facts")
+        let facts = profile_tree_field(package, "provider_facts")
             .ok_or_else(|| io::Error::other("profile generation package lacks provider facts"))?;
         let parsed_facts = ProviderFacts::from_json_value(facts).map_err(|error| {
             io::Error::other(format!(
@@ -1446,8 +1445,7 @@ fn read_generation_record(state: &Path, generation: u64) -> io::Result<Generatio
                 "profile generation provider facts fail validation: {error}"
             ))
         })?;
-        let digest = package
-            .get("provider_facts_digest")
+        let digest = profile_tree_field(package, "provider_facts_digest")
             .ok_or_else(|| {
                 io::Error::other("profile generation package lacks provider facts digest")
             })?
@@ -1458,8 +1456,7 @@ fn read_generation_record(state: &Path, generation: u64) -> io::Result<Generatio
                 "profile generation provider facts digest disagrees with its record",
             ));
         }
-        let raw = package
-            .get("raw")
+        let raw = profile_tree_field(package, "raw")
             .ok_or_else(|| io::Error::other("profile generation package lacks raw ref"))?
             .as_str()
             .map_err(io::Error::other)?;
@@ -1468,8 +1465,7 @@ fn read_generation_record(state: &Path, generation: u64) -> io::Result<Generatio
                 "profile generation provider reference disagrees with its raw ref",
             ));
         }
-        let target = package
-            .get("target")
+        let target = profile_tree_field(package, "target")
             .ok_or_else(|| io::Error::other("profile generation package lacks target"))?
             .as_str()
             .map_err(io::Error::other)?;
@@ -1478,8 +1474,7 @@ fn read_generation_record(state: &Path, generation: u64) -> io::Result<Generatio
                 "profile generation provider target disagrees with its package target",
             ));
         }
-        let provider = package
-            .get("provider")
+        let provider = profile_tree_field(package, "provider")
             .ok_or_else(|| io::Error::other("profile generation package lacks provider"))?
             .as_str()
             .map_err(io::Error::other)?;
@@ -1498,7 +1493,7 @@ fn read_generation_record(state: &Path, generation: u64) -> io::Result<Generatio
             "losses",
             "conflicts",
         ] {
-            if !facts.contains_key(key) {
+            if profile_tree_field(facts, key).is_none() {
                 return Err(io::Error::other(format!(
                     "profile generation provider facts lack `{key}`"
                 )));
@@ -1573,8 +1568,7 @@ fn read_current_pointer(state: &Path) -> io::Result<Option<CurrentPointer>> {
     let text = super::tool::read_bounded(&path)?;
     let value = JSON::parse(&text).map_err(io::Error::other)?;
     let object = value.as_object().map_err(io::Error::other)?;
-    let schema = object
-        .get("schema")
+    let schema = profile_tree_field(object, "schema")
         .ok_or_else(|| io::Error::other("profile current pointer lacks schema"))?
         .as_str()
         .map_err(io::Error::other)?;
@@ -1583,15 +1577,13 @@ fn read_current_pointer(state: &Path) -> io::Result<Option<CurrentPointer>> {
             "profile current pointer schema is unsupported",
         ));
     }
-    let generation = object
-        .get("generation")
+    let generation = profile_tree_field(object, "generation")
         .and_then(|value| match value {
-            crate::JSON::JSONValue::Number(value) if *value > 0 => Some(*value as u64),
+            DataTree::Int(value) if *value > 0 => Some(*value as u64),
             _ => None,
         })
         .ok_or_else(|| io::Error::other("profile current pointer lacks generation"))?;
-    let witness = object
-        .get("witness")
+    let witness = profile_tree_field(object, "witness")
         .ok_or_else(|| io::Error::other("profile current pointer lacks witness"))?
         .as_str()
         .map_err(io::Error::other)?

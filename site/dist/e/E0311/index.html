@@ -34,25 +34,34 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">Method lookup follows the receiver&#39;s actual method set; static methods belong to types and instance methods belong to values</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">use the receiver form named by the diagnostic, or correct the method name</p>
+<p class="diag-copy fix" data-registry-field="fix">Use the receiver form named by the diagnostic, or correct the method name</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0311</code>: <code>tests/ui/args_spec_bad_flag_arity.stderr</code>.</p>
-<pre class="diag">Error [E1301]: `flag` expects 2 arguments (name, help), got 1
-  --&gt; tests/ui/args_spec_bad_flag_arity.jet:5:25
+<p>First UI snapshot mentioning <code>E0311</code>: <code>tests/ui/camel_case_method_names.stderr</code>.</p>
+<pre class="diag">Error [E0311]: `indexOf` isn&#39;t a method on this value
+  --&gt; tests/ui/camel_case_method_names.jet:3:15
     |
-  5 |     spec :: args.spec().flag(&quot;verbose&quot;)
-    |                         ^^^^
- Why: `ArgsSpec.flag(name, help)` registers a boolean flag like `--verbose`
- Fix: pass exactly two strings: the flag name and a help description
-More: jet-lang.dev/e/E1301
+  3 |     _ :: text.indexOf(&quot;i&quot;)
+    |               ^^^^^^^
+ Why: This `String` value has no instance method named `indexOf`
+ Fix: Did you mean `index_of`? Jet method names are snake_case
+More: jet-lang.dev/e/E0311
 
-Error [E0311]: `flag` isn&#39;t a method on this value
-  --&gt; tests/ui/args_spec_bad_flag_arity.jet:7:18
+Error [E0311]: `toString` isn&#39;t a method on this value
+  --&gt; tests/ui/camel_case_method_names.jet:4:15
     |
-  7 |     print(parsed.flag(&quot;verbose&quot;))
-    |                  ^^^^
- Why: this `Int` value has no instance method named `flag`
- Fix: check the spelling of `flag`
+  4 |     _ :: text.toString()
+    |               ^^^^^^^^
+ Why: This `String` value has no instance method named `toString`
+ Fix: Did you mean `to_string`? Jet method names are snake_case
+More: jet-lang.dev/e/E0311
+
+Error [E0311]: `containsKey` isn&#39;t a method on this value
+  --&gt; tests/ui/camel_case_method_names.jet:6:17
+    |
+  6 |     _ :: scores.containsKey(&quot;a&quot;)
+    |                 ^^^^^^^^^^^
+ Why: This `Map` value has no instance method named `containsKey`
+ Fix: Did you mean `has_key`? `containsKey` is another language&#39;s name for the same operation
 More: jet-lang.dev/e/E0311
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

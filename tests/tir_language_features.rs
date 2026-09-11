@@ -1056,12 +1056,11 @@ fn http_router_dispatch() {
     let src = "\
 use core.http as http
 use core.http.server as server
-fn handle_root(req: HTTPRequest) HTTPResponse !HTTPError {
+fn handle_root(req: HTTPRequest) HTTPResponse !HTTPError -> {
     return Ok(server.response(200, \"welcome\"))
 }
 
-fn handle_user(req: HTTPRequest) HTTPResponse !HTTPError {
-    id :: req.param(\"id\") ?? \"unknown\"
+fn handle_user(id: String) HTTPResponse !HTTPError -> {
     return Ok(server.response(200, \"user={id}\"))
 }
 fn run() {
@@ -1106,10 +1105,9 @@ fn http_router_duplicate_route_is_jet_runtime_error() {
     let src = "\
 use core.http as http
 use core.http.server as server
-fn handle(req: HTTPRequest) HTTPResponse !HTTPError {
+fn handle(id: String, name: String) HTTPResponse !HTTPError -> {
     return Ok(server.response(200, \"ok\"))
 }
-fn run() {
     router :: http.router()
     router.get(\"/users/:id\", handle)
     router.get(\"/users/:name\", handle)
@@ -1140,22 +1138,22 @@ fn http_router_named_catchall_and_encoded_marker_literals() {
     let src = "\
 use core.http as http
 use core.http.server as server
-fn asset(req: HTTPRequest) HTTPResponse !HTTPError {
-    return Ok(server.response(200, req.param(\"path\") ?? \"missing\"))
+fn asset(path: String) HTTPResponse !HTTPError -> {
+    return Ok(server.response(200, \"{path}\"))
 }
-fn literal(req: HTTPRequest) HTTPResponse !HTTPError {
+fn literal(req: HTTPRequest) HTTPResponse !HTTPError -> {
     return Ok(server.response(200, \"literal\"))
 }
-fn catch(req: HTTPRequest) HTTPResponse !HTTPError {
+fn catch(rest: String) HTTPResponse !HTTPError -> {
     return Ok(server.response(200, \"catch\"))
 }
-fn param_catch(req: HTTPRequest) HTTPResponse !HTTPError {
+fn param_catch(id: String, rest: String) HTTPResponse !HTTPError -> {
     return Ok(server.response(200, \"param-catch\"))
 }
-fn param_first(req: HTTPRequest) HTTPResponse !HTTPError {
+fn param_first(first: String) HTTPResponse !HTTPError -> {
     return Ok(server.response(200, \"param-first\"))
 }
-fn static_first(req: HTTPRequest) HTTPResponse !HTTPError {
+fn static_first(last: String) HTTPResponse !HTTPError -> {
     return Ok(server.response(200, \"static-first\"))
 }
 fn run() {

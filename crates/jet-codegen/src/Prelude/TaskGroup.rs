@@ -18,13 +18,6 @@ pub fn jet_task_deadline_clear_pending() {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum JetTaskFailure {
-    Cancelled,
-    DeadlineBlown,
-    Panicked(String),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JetTaskCancellation {
     pub code: &'static str,
     pub what: &'static str,
@@ -79,17 +72,13 @@ pub fn jet_task_flatten_results<T, E: std::fmt::Debug>(
     })
 }
 
-/// One ABI spelling for the typed failure rail. Engines may pack the returned
-/// tag beside their representation-specific reason handle, but the failure
-/// meaning and tag values live here with `JetTaskFailure`.
-pub fn jet_task_failure_abi(
-    failure: JetTaskFailure,
-    encode_reason: impl FnOnce(String) -> u64,
-) -> u64 {
+/// One ABI spelling for the typed failure rail. Engines marshal the canonical
+/// discriminant and optional reason into their own enum representation.
+pub fn jet_task_failure_abi(failure: JetTaskFailure) -> (i64, Option<String>) {
     match failure {
-        JetTaskFailure::Cancelled => 0,
-        JetTaskFailure::DeadlineBlown => 1,
-        JetTaskFailure::Panicked(reason) => (encode_reason(reason) << 8) | 2,
+        JetTaskFailure::Cancelled => (0, None),
+        JetTaskFailure::DeadlineBlown => (1, None),
+        JetTaskFailure::Panicked(reason) => (2, Some(reason)),
     }
 }
 

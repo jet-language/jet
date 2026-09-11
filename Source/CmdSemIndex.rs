@@ -4,14 +4,15 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
-use jet::Diagnostics::ReportPath;
+use jet::Diagnostics::{ColorChoice, ReportPath};
 use jet::ExitCodes;
-use jet_foundation::Report::render_status_json;
-use jet_foundation::JSON::json_escape;
+use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
 use jet_semindex::{
     open, EffectFact, SemIndexError, SemanticProvenance, SemanticSymbol, SemanticSymbolIndex,
     SemanticSymbolKind, SCHEMA_VERSION,
 };
+
+use crate::OutputMode;
 
 pub(crate) fn run_semindex(args: &[String], json: bool) {
     let path = args
@@ -28,7 +29,7 @@ pub(crate) fn run_semindex(args: &[String], json: bool) {
     match open(&abs) {
         Ok(idx) => {
             if json {
-                println!("{}", idx.to_json());
+                println!("{}", idx.to_status_envelope().json());
             } else {
                 println!("semantic index (schema v{})", SCHEMA_VERSION);
                 println!("  definitions: {}", idx.definitions().len());
@@ -219,15 +220,21 @@ pub(crate) fn run_find(args: &[String], json: bool) {
         (Some(_), Some(_)) => unreachable!(),
     };
 
+    let resolution_mode = OutputMode {
+        json,
+        color: ColorChoice::Never,
+        quiet: false,
+    };
     let entry = match target.as_deref() {
         Some(raw) if Path::new(raw).is_dir() => {
-            crate::resolve_bare_entry("find", Path::new(raw), member.as_deref())
+            crate::resolve_bare_entry("find", Path::new(raw), member.as_deref(), resolution_mode, false)
                 .map(|entry| entry.path)
         }
         Some(raw) => Some(PathBuf::from(crate::resolve_source_path(raw))),
         None => {
             let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-            crate::resolve_bare_entry("find", &cwd, member.as_deref()).map(|entry| entry.path)
+            crate::resolve_bare_entry("find", &cwd, member.as_deref(), resolution_mode, false)
+                .map(|entry| entry.path)
         }
     };
 
@@ -665,30 +672,22 @@ fn normalize_text(value: &str) -> String {
 
 fn render_find(mode: &FindMode, query: &str, matches: &[FindMatch], json: bool) {
     if json {
-        let rows = matches
-            .iter()
-            .map(|item| {
-                format!(
-                    "{{\"name\":\"{}\",\"signature\":\"{}\",\"why\":\"{}\"}}",
-                    json_escape(&item.name),
-                    json_escape(&item.signature),
-                    json_escape(&item.why),
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(",");
+        let matches = StatusValue::array(matches.iter().map(|item| {
+            StatusValue::object(
+                StatusFields::new()
+                    .with("name", item.name.as_str())
+                    .with("signature", item.signature.as_str())
+                    .with("why", item.why.as_str()),
+            )
+        }));
+        let fields = StatusFields::new()
+            .with("query", query)
+            .with("matches", matches);
         println!(
             "{}",
-            render_status_json(
-                "ok",
-                true,
-                "find",
-                &format!(
-                    ",\"query\":\"{}\",\"matches\":[{}]",
-                    json_escape(query),
-                    rows
-                ),
-            )
+            StatusEnvelope::new("find", true)
+                .with_fields(fields)
+                .json()
         );
         return;
     }

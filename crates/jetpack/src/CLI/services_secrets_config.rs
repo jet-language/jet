@@ -10,6 +10,7 @@ use crate::Store;
 use crate::Syntax;
 use crate::Trust;
 use jet_env_model::ModuleEval;
+use jet_foundation::CLISchema::JobRegistry;
 use jet_pkg_model::Authority::AuthorityResolver;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -1357,7 +1358,7 @@ pub(super) fn has_dev_or_run_entry(file: &Path) -> bool {
     if !diags.is_empty() {
         return false;
     }
-    let Ok(prog) = crate::Parser::parse(&toks) else {
+    let Ok(prog) = crate::Parser::parse_with_source(&toks, &src) else {
         return false;
     };
     prog.items
@@ -1365,61 +1366,46 @@ pub(super) fn has_dev_or_run_entry(file: &Path) -> bool {
         .any(|i| matches!(i, crate::AST::Item::Func(f) if f.name == "dev" || f.name == "run"))
 }
 
-/// D-JPK-TASKRUN1: top-level `#Job fn` names in the project entry (sorted).
-/// Parse failure → empty list (real diagnostics surface when jet compiles).
-pub(super) fn list_project_jobs(file: &Path) -> Vec<String> {
-    project_job_names(file).unwrap_or_default()
-}
-
-/// Return job names when the entry can be parsed. `None` preserves the
-/// compiler's own diagnostic path for unreadable or malformed entries.
-fn project_job_names(file: &Path) -> Option<Vec<String>> {
-    let Ok(src) = std::fs::read_to_string(file) else {
-        return None;
-    };
-    let (toks, diags) = crate::Lexer::lex(&src);
-    if !diags.is_empty() {
-        return None;
-    }
-    let Ok(prog) = crate::Parser::parse(&toks) else {
-        return None;
-    };
-    let mut names: Vec<String> = prog
-        .items
-        .iter()
-        .filter_map(|i| match i {
-            crate::AST::Item::Func(f) if f.is_job => Some(f.name.clone()),
-            _ => None,
-        })
-        .collect();
-    names.sort();
-    names.dedup();
-    Some(names)
-}
-
-/// Distinguish a parsed entry with no matching job from an entry whose
-/// syntax must be diagnosed by the compiler handoff.
-pub(super) fn project_job_declared(file: &Path, job: &str) -> Option<bool> {
-    project_job_names(file).map(|names| names.iter().any(|name| name == job))
-}
-
-/// D-TASK-META1: return the checked static metadata for one job. A parse
-/// failure is intentionally treated as absence here; the compiler invocation
-/// below remains the source of the complete diagnostic.
-pub(super) fn project_job_metadata(file: &Path, job: &str) -> Option<crate::AST::JobMetadata> {
-    let src = std::fs::read_to_string(file).ok()?;
-    let (toks, diags) = crate::Lexer::lex(&src);
-    if !diags.is_empty() {
-        return None;
-    }
-    let prog = crate::Parser::parse(&toks).ok()?;
-    prog.items.iter().find_map(|item| match item {
-        crate::AST::Item::Func(function) if function.name == job && function.is_job => {
-            function.job_metadata.clone()
+/// Load and sema-check the complete entry/import bundle before exposing any
+/// project job fact to a host. Parser-only discovery cannot resolve imported
+/// jobs or reject an invalid `after` edge. Job-only projects need no `run` entry.
+pub(super) fn checked_project_job_registry(
+    file: &Path,
+) -> Result<JobRegistry, Vec<jet_driver::Diagnostics::Diagnostic>> {
+    let entry = file.to_string_lossy().into_owned();
+    jet_driver::run_compiler_work(move || {
+        let mut bundle = jet_driver::Loader::load_entry(&entry)?;
+        let diagnostics = jet_driver::Sema::check_bundle(
+            &mut bundle,
+            jet_driver::Sema::CompileMode::Check,
+        );
+        if diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == jet_driver::Diagnostics::Severity::Error)
+        {
+            Err(diagnostics)
+        } else {
+            Ok(JobRegistry::from_bundle(&bundle))
         }
-        _ => None,
     })
 }
+
+/// D-JPK-TASKRUN1: checked `#Job fn` names in the complete project bundle.
+pub(super) fn list_project_jobs(file: &Path) -> Vec<String> {
+    let mut names = checked_project_job_registry(file)
+        .map(|registry| {
+            registry
+                .jobs()
+                .iter()
+                .map(|job| job.name.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    names.sort();
+    names.dedup();
+    names
+}
+
 
 /// `jet os config trust add/list/remove` (U19) — durable glob/prefix patterns
 /// that pre-authorize matching projects with no per-hash prompt at all.

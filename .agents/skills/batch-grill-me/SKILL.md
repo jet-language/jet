@@ -3,6 +3,14 @@ name: batch-grill-me
 description: A relentless interview that asks every frontier question at once, round by round.
 disable-model-invocation: true
 ---
+## Contract
+
+- **Requested outcome:** Shared understanding of one plan, decision, or idea through frontier rounds.
+- **Supplied inputs:** The user's topic, current conversation, and facts that can be checked in the environment.
+- **Allowed child result:** One read-only OMP fact lookup may return environment facts for a frontier question. It cannot invoke an undeclared workflow, change the cadence, open an agenda, or start implementation.
+- **Completion owner:** `batch-grill-me` owns frontier calculation and round order; the user owns the confirmation of shared understanding.
+- **Return point:** After each answer round, recompute the frontier and ask the next round in the same interview.
+- **Stopping condition:** Stop when the frontier is empty and the user confirms shared understanding. Do not act on the decision or open a new agenda.
 
 Interview the user relentlessly until you reach a shared understanding. Map this as a **design tree**: every decision branches into the decisions that hang off it.
 

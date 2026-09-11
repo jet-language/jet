@@ -2,10 +2,10 @@
 
 use super::parse::Parsed;
 use super::realize::{classify_or_report, RunPlan};
+use super::workspace_sources::cwd_table;
 use super::trust_env_build::compose_env;
 use crate::BrowserLock;
 use crate::Output::Theme;
-use crate::RefSpec;
 use crate::Store;
 use crate::Syntax;
 use jet_env_model::ModuleEval;
@@ -147,7 +147,7 @@ fn browser_provision(theme: &Theme, parsed: &Parsed) -> i32 {
         project_root: std::env::current_dir().unwrap_or_default(),
         refs: vec![spec.clone()],
         adapters: Vec::new(),
-        table: RefSpec::SourceTable::empty(),
+        table: cwd_table(),
         label: Syntax::JETPACK_PROMPT_LABEL.to_string(),
         prompt_path: ModuleEval::PromptPathMode::default(),
         prompt_strip: ModuleEval::PromptStripMode::default(),

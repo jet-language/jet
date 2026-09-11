@@ -144,14 +144,14 @@ fn percent_encode_path(value: &str) -> String {
             out.push(char::from(byte));
         } else {
             out.push('%');
-            out.push(hex_digit(byte >> 4));
-            out.push(hex_digit(byte & 0x0f));
+            out.push(typed_text_hex_digit(byte >> 4));
+            out.push(typed_text_hex_digit(byte & 0x0f));
         }
     }
     out
 }
 
-fn hex_digit(nibble: u8) -> char {
+fn typed_text_hex_digit(nibble: u8) -> char {
     match nibble {
         0..=9 => char::from(b'0' + nibble),
         10..=15 => char::from(b'A' + nibble - 10),

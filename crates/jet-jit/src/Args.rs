@@ -347,30 +347,31 @@ host_fns! {
             quinary.params.push(AbiParam::new(types::I64));
         }
         quinary.returns.push(AbiParam::new(types::I64));
-
-
     }
-    spec: "jet_jit_args_spec" => runtime::jet_jit_args_spec: nullary;
-    description: "jet_jit_args_description" => runtime::jet_jit_args_description: binary;
-    flag: "jet_jit_args_flag" => runtime::jet_jit_args_flag: ternary;
-    flag_short: "jet_jit_args_flag_short" => runtime::jet_jit_args_flag_short: quaternary;
-    option: "jet_jit_args_option" => runtime::jet_jit_args_option: quaternary;
-    option_default: "jet_jit_args_option_default" => runtime::jet_jit_args_option_default: quinary;
-    option_int: "jet_jit_args_option_int" => runtime::jet_jit_args_option_int: quaternary;
-    option_choice: "jet_jit_args_option_choice" => runtime::jet_jit_args_option_choice: quinary;
-    repeat: "jet_jit_args_repeat" => runtime::jet_jit_args_repeat: quaternary;
-    positional: "jet_jit_args_positional" => runtime::jet_jit_args_positional: ternary;
-    subcommand: "jet_jit_args_subcommand" => runtime::jet_jit_args_subcommand: quaternary;
-    version: "jet_jit_args_version" => runtime::jet_jit_args_version: binary;
+
+    spec: "jet_args_spec" => runtime::jet_jit_args_spec: nullary;
+    description: "jet_args_description" => runtime::jet_jit_args_description: binary;
+    flag: "jet_args_flag" => runtime::jet_jit_args_flag: ternary;
+    flag_short: "jet_args_flag_short" => runtime::jet_jit_args_flag_short: quaternary;
+    option: "jet_args_option" => runtime::jet_jit_args_option: quaternary;
+    option_default: "jet_args_option_default" => runtime::jet_jit_args_option_default: quinary;
+    option_int: "jet_args_option_int" => runtime::jet_jit_args_option_int: quaternary;
+    option_choice: "jet_args_option_choice" => runtime::jet_jit_args_option_choice: quinary;
+    repeat: "jet_args_repeat" => runtime::jet_jit_args_repeat: quaternary;
+    positional: "jet_args_positional" => runtime::jet_jit_args_positional: ternary;
+    subcommand: "jet_args_subcommand" => runtime::jet_jit_args_subcommand: quaternary;
+    version: "jet_args_version" => runtime::jet_jit_args_version: binary;
     help: "jet_jit_args_help" => runtime::jet_jit_args_help: unary;
-    completion: "jet_jit_args_completion" => runtime::jet_jit_args_completion: binary;
-    parse: "jet_jit_args_parse" => runtime::jet_jit_args_parse: binary;
-    parse_or_exit: "jet_jit_args_parse_or_exit" => runtime::jet_jit_args_parse_or_exit: binary;
-    parsed_flag: "jet_jit_parsed_flag" => runtime::jet_jit_parsed_flag: binary_i8;
-    parsed_option: "jet_jit_parsed_option" => runtime::jet_jit_parsed_option: binary;
-    parsed_option_int: "jet_jit_parsed_option_int" => runtime::jet_jit_parsed_option_int: binary;
-    parsed_option_float: "jet_jit_parsed_option_float_opt" => runtime::jet_jit_parsed_option_float_opt: binary;
-    parsed_options: "jet_jit_parsed_options" => runtime::jet_jit_parsed_options: binary;
-    parsed_positional: "jet_jit_parsed_positional" => runtime::jet_jit_parsed_positional: binary;
-    parsed_subcommand: "jet_jit_parsed_subcommand" => runtime::jet_jit_parsed_subcommand: unary;
+    typed_decode: "jet_jit_args_decode" => crate::CLI::jet_jit_args_decode: unary;
+    typed_merge: "jet_jit_args_merge" => crate::CLI::jet_jit_args_merge: ternary;
+    completion: "jet_args_completion" => runtime::jet_jit_args_completion: binary;
+    parse: "jet_args_parse" => runtime::jet_jit_args_parse: binary;
+    parse_or_exit: "jet_args_parse_or_exit" => runtime::jet_jit_args_parse_or_exit: binary;
+    parsed_flag: "jet_parsed_flag" => runtime::jet_jit_parsed_flag: binary_i8;
+    parsed_option: "jet_parsed_option" => runtime::jet_jit_parsed_option: binary;
+    parsed_option_int: "jet_parsed_option_int" => runtime::jet_jit_parsed_option_int: binary;
+    parsed_option_float: "jet_parsed_option_float" => runtime::jet_jit_parsed_option_float_opt: binary;
+    parsed_options: "jet_parsed_options" => runtime::jet_jit_parsed_options: binary;
+    parsed_positional: "jet_parsed_positional" => runtime::jet_jit_parsed_positional: binary;
+    parsed_subcommand: "jet_parsed_subcommand" => runtime::jet_jit_parsed_subcommand: unary;
 }

@@ -1,0 +1,57 @@
+// D-DATA-WEB-TYPED-PROOF1: generated Web DataFlow proof input.
+// The bytes are declared with embed_bytes, then bound through the canonical
+// provider loader path before typed snapshot/decode. No parser lives here.
+use core.data as data
+use core.ui as ui
+
+#[Target(Web), HTML("index.html")]
+
+#Codable
+struct IntCell {
+    int32_field: ?Int
+}
+
+#Codable
+struct WrongCell {
+    required_text: String
+}
+
+@good_parquet :: embed_bytes("../int32_with_null_pages.parquet")
+@bad_parquet :: embed_bytes("../ARROW-RS-GH-6229-DICTHEADER.parquet")
+
+fn typed_success() String -> {
+    loader :: data.url<[IntCell]>("https://typed-data.invalid/embedded.parquet", "parquet", "typed-data.invalid", data.DataLimits.safe()) ?? panic("typed loader")
+    loader.bind(@good_parquet) ?? panic("typed bind")
+    snapshot :: data.snapshot<[IntCell]>(loader) ?? panic("typed snapshot")
+    row :: snapshot.value.at(200) ?? panic("null-page row")
+    return "good rows={snapshot.value.len()} null_page={row.int32_field == None}"
+}
+
+fn typed_decode_failure() Bool -> {
+    loader :: data.url<[WrongCell]>("https://typed-data.invalid/embedded.parquet", "parquet", "typed-data.invalid", data.DataLimits.safe()) ?? panic("malformed typed loader")
+    loader.bind(@good_parquet) ?? panic("malformed typed bind")
+    snapshot :: data.snapshot<[WrongCell]>(loader)
+    return if snapshot == {
+        .Err(_) -> true
+        .Ok(_) -> false
+    }
+}
+
+fn provider_failure() Bool -> {
+    loader :: data.url<[IntCell]>("https://typed-data.invalid/malformed.parquet", "parquet", "typed-data.invalid", data.DataLimits.safe()) ?? panic("provider loader")
+    loader.bind(@bad_parquet) ?? panic("provider bind")
+    snapshot :: data.snapshot<[IntCell]>(loader)
+    return if snapshot == {
+        .Err(_) -> true
+        .Ok(_) -> false
+    }
+}
+
+fn run() {
+    typed :: typed_success()
+    typed_failed :: typed_decode_failure()
+    provider_failed :: provider_failure()
+    report :: "{typed}; typed_decode_failed={typed_failed}; provider_failed={provider_failed}"
+    backend :: ui.null_backend()
+    ui.mount(backend, ui.box([ui.text(report)]), ui.constraint(0.0, 0.0, 720.0, 80.0))
+}

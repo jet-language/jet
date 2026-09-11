@@ -9,15 +9,15 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 
 /*
  * Registry-driven Core conformance corpus (#2286).
  *
- * module_items.rs is the denominator. The corpus is deliberately not guessed
- * from fixed_sigs.rs or core_calls.rs: an exported operation without a second
- * route is still a public operation that needs a witness or a named carve-out.
+ * CoreModuleExports.rs is the denominator consumed by sema. The corpus is not
+ * guessed from fixed_sigs.rs or core_calls.rs: an exported operation without a
+ * second route still needs a witness or a named carve-out.
  * Recipes below are only small, known-good seeds. Hard or effectful operations
  * are hand-authored under tests/conformance/corpus and remain visible as
  * uncovered until someone supplies their real arguments and authority.
@@ -28,12 +28,11 @@ import { fileURLToPath } from "node:url";
  */
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const MODULE_ITEMS = join(ROOT, "crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs");
-const MEM_SURFACE = join(ROOT, "crates/jet-foundation/src/Syntax/core_surface.rs");
+const MODULE_EXPORTS = join(ROOT, "crates/jet-foundation/src/CoreModuleExports.rs");
 const CORPUS = join(ROOT, "tests/conformance/corpus");
 const EXCLUSIONS = join(ROOT, "tests/conformance/exclusions.tsv");
 
-// `module_items.rs` also publishes these math fields. `zero` is deliberately
+// The Core registry also publishes these math fields. `zero` is deliberately
 // absent: sema treats `core.math.zero()` as a callable operation.
 const VALUE_NAMES = new Set(["pi", "e", "tau", "infinity", "nan"]);
 
@@ -137,6 +136,46 @@ fn run() {
 }
 `],
 ]);
+// Dynamic Core types do not have module_items rows, but their witnesses still
+// belong to the conformance corpus. Keep the ledger's canonical row IDs here
+// instead of inventing denominator keys from fixture filenames. A fixture may
+// prove several rows, and each row may require several deterministic witnesses.
+// Paths are relative to the conformance corpus root.
+const FIXTURE_BINDINGS = new Map([
+  ["collection.Condition.notify_one", [
+    "core/sync/condition_deadline.jet",
+    "core/sync/condition_notify_all.jet",
+    "core/sync/condition_notify_one.jet",
+    "core/sync/condition_spurious.jet",
+  ]],
+  ["collection.Condition.notify_all", [
+    "core/sync/condition_deadline.jet",
+    "core/sync/condition_notify_all.jet",
+    "core/sync/condition_notify_one.jet",
+    "core/sync/condition_spurious.jet",
+  ]],
+  ["core.data.query.collect", ["core/data/collect.jet"]],
+  ["core.data.query.filter", [
+    "core/data/filter.jet",
+    "core/data/lazy_filter.jet",
+    "core/data/missing_count.jet",
+  ]],
+  ["core.data.query.group_by.count", ["core/data/group_count.jet"]],
+  ["core.data.query.group_by.mean", ["core/data/group_mean.jet"]],
+  ["core.data.query.group_by.sum", ["core/data/group_sum.jet"]],
+  ["core.data.query.plan", [
+    "core/data/lazy.jet",
+    "core/data/lazy_filter.jet",
+    "core/data/lazy_sort_by.jet",
+  ]],
+  ["core.data.query.sort_by", [
+    "core/data/sort_by.jet",
+    "core/data/lazy_sort_by.jet",
+    "core/data/sort_by_selector.jet",
+    "core/data/sort_by_view.jet",
+  ]],
+]);
+
 // Calls whose checked result is exactly Unit must still be observed without
 // asking Display to render Unit.  Keep this list aligned with the sema return
 // projections; the generator applies one observer shape to every such seed.
@@ -172,14 +211,25 @@ const UNIT_RESULT_KEYS = new Set([
   "core.files.hard_link",
   "core.files.write_bytes",
   "core.mem.volatile_write",
+  "core.log.fatal",
   "core.http.server.static_files",
   "core.http.server.cors",
   "core.http.server.request_id",
   "core.http.server.serve_once_listener",
   "core.perf.reset_fidelity",
   "core.perf.override_fidelity",
+  "core.math.random.seed",
+  "core.math.random.shuffle",
+  "core.time.sleep",
+  "core.sys.close_fd",
+  "core.sys.sync",
+  "core.sys.set",
+  "core.sys.stop",
   "core.tasks.yield_now",
 ]);
+// Never-returning Core effects terminate the witness instead of yielding a
+// value. Their standalone call is the observable contract.
+const NEVER_RESULT_KEYS = new Set(["core.process.exit"]);
 
 function matching(text, start, opening, closing) {
   let depth = 0;
@@ -413,34 +463,6 @@ function decodeRustString(value) {
   }
 }
 
-function rustStringConstants(source) {
-  const constants = new Map();
-  const clean = withoutComments(source);
-  const pattern = /pub\s+const\s+([A-Z][A-Z0-9_]*)\s*:\s*&str\s*=\s*"([^"\\]*(?:\\.[^"\\]*)*)"/g;
-  for (const match of clean.matchAll(pattern)) {
-    constants.set(match[1], decodeRustString(match[2]));
-  }
-  return constants;
-}
-
-function rustStringExpressions(text, constants, { preserveDuplicates = false } = {}) {
-  const clean = withoutComments(text);
-  const values = quoted(clean);
-  const names = preserveDuplicates ? values : new Set(values);
-  for (const match of clean.matchAll(/\b(?:Syntax::)?([A-Z][A-Z0-9_]*)\b/g)) {
-    if (!constants.has(match[1])) continue;
-    const value = constants.get(match[1]);
-    if (preserveDuplicates) values.push(value);
-    else names.add(value);
-  }
-  for (const match of clean.matchAll(/\bSyntax::([A-Z][A-Z0-9_]*)\b/g)) {
-    if (!constants.has(match[1])) {
-      throw new Error(`unresolved Syntax string constant: ${match[1]}`);
-    }
-  }
-  return preserveDuplicates ? values : Array.from(names);
-}
-
 function quoted(text) {
   return Array.from(text.matchAll(/"([^"\\]*(?:\\.[^"\\]*)*)"/g), (m) => decodeRustString(m[1]));
 }
@@ -450,58 +472,28 @@ function escapedRegExp(value) {
 }
 
 function moduleItems() {
-  const source = readFileSync(MODULE_ITEMS, "utf8");
-  const start = source.indexOf("pub fn core_module_items");
-  const end = source.indexOf("/// Ratified nominal types", start);
-  if (start < 0 || end < 0) throw new Error("core_module_items source anchors disappeared");
-  const body = withoutComments(source.slice(start, end));
-  const constants = rustStringConstants(readFileSync(MEM_SURFACE, "utf8"));
-  const out = new Map();
-  const duplicateRows = new Set();
-  const arms = /^\s*((?:"[^"]+"\s*(?:\|\s*)?)+)=>\s*&\[/gm;
-  for (const arm of body.matchAll(arms)) {
-    const modules = rustStringExpressions(arm[1], constants);
-    const opening = body.indexOf("[", arm.index + arm[0].length - 1);
-    const close = matching(body, opening, "[", "]");
-    const names = rustStringExpressions(body.slice(opening + 1, close), constants, { preserveDuplicates: true });
-    for (const module of modules) {
-      if (!out.has(module)) out.set(module, new Set());
-      for (const name of names) {
-        const values = out.get(module);
-        if (module !== "core.mem" && values.has(name)) duplicateRows.add(`${module}.${name}`);
-        values.add(name);
-      }
+  const source = withoutComments(readFileSync(MODULE_EXPORTS, "utf8"));
+  const members = new Map();
+  const arrays = /const\s+(CORE_MODULE_\d+_MEMBERS)\s*:\s*&\[&str\]\s*=\s*&\[([^\]]*)\];/g;
+  for (const match of source.matchAll(arrays)) {
+    const names = quoted(match[2]);
+    const values = new Set(names);
+    if (values.size !== names.length || members.has(match[1])) {
+      throw new Error(`duplicate Core export members in ${match[1]}`);
     }
+    members.set(match[1], values);
   }
-
-  // This branch is registry-owned too, although its names are generated from
-  // policy declarations rather than written as a literal array. The current
-  // declarations are type-like and therefore contribute no function rows.
-  if (body.includes('module == "core.compiler.lang"')) {
-    out.set("core.compiler.lang", new Set());
+  const out = new Map();
+  const modules = /CoreModuleDeclaration\s*\{\s*module:\s*"([^"]+)",\s*members:\s*(CORE_MODULE_\d+_MEMBERS),/g;
+  for (const match of source.matchAll(modules)) {
+    const values = members.get(match[2]);
+    if (!values) throw new Error(`missing Core export members for ${match[1]}`);
+    if (out.has(match[1])) throw new Error(`duplicate Core module ${match[1]}`);
+    out.set(match[1], values);
   }
-
-  // core.mem is intentionally a typed gate table instead of a literal match
-  // arm. Resolve its string constants from the same source that owns the gate.
-  const memSource = withoutComments(readFileSync(MEM_SURFACE, "utf8"));
-  const memStart = memSource.indexOf("pub const CORE_MEM_GATE_TIERS");
-  const table = memSource.indexOf("= &[", memStart);
-  if (memStart < 0 || table < 0) throw new Error("CORE_MEM_GATE_TIERS source anchor disappeared");
-  const opening = memSource.indexOf("[", table);
-  const close = matching(memSource, opening, "[", "]");
-  const memValues = rustStringExpressions(memSource.slice(opening + 1, close), constants, { preserveDuplicates: true });
-  const mem = new Set(memValues);
-  if (mem.size !== memValues.length) {
-    throw new Error("CORE_MEM_GATE_TIERS contains duplicate item names");
+  if (out.size === 0 || out.size !== members.size) {
+    throw new Error("Core export declarations do not account for every member table");
   }
-  if (mem.size === 0) throw new Error("CORE_MEM_GATE_TIERS resolved no item names");
-  out.set("core.mem", mem);
-  if (duplicateRows.size) {
-    throw new Error(
-      `core_module_items contains duplicate denominator row(s): ${Array.from(duplicateRows).sort().join(", ")}`,
-    );
-  }
-  if (out.size === 0) throw new Error("core_module_items yielded no modules");
   return out;
 }
 
@@ -536,6 +528,33 @@ function keyForPath(path) {
   const parts = rel.split("/");
   const name = parts.pop().replace(/\.jet$/, "");
   return `${parts.join(".")}.${name}`;
+}
+
+function fixtureBindingPaths(bindings) {
+  const byPath = new Map();
+  for (const [row, paths] of bindings) {
+    if (!Array.isArray(paths) || paths.length === 0) {
+      throw new Error(`fixture binding row has no paths: ${row}`);
+    }
+    const seen = new Set();
+    for (const path of paths) {
+      if (
+        typeof path !== "string"
+        || path.length === 0
+        || path.startsWith("/")
+        || path.includes("\\")
+        || path.split("/").some((part) => !part || part === "." || part === "..")
+      ) {
+        throw new Error(`invalid conformance fixture binding path: ${path}`);
+      }
+      if (seen.has(path)) throw new Error(`duplicate fixture binding path: ${row} -> ${path}`);
+      seen.add(path);
+      if (!byPath.has(path)) byPath.set(path, []);
+      byPath.get(path).push(row);
+    }
+  }
+  for (const rows of byPath.values()) rows.sort();
+  return byPath;
 }
 
 function parseExclusions(source = existsSync(EXCLUSIONS) ? readFileSync(EXCLUSIONS, "utf8") : "") {
@@ -765,13 +784,20 @@ function sourceErrors(key, source) {
     // observer in the same witness records that effect without manufacturing
     // a value or wrapping the call in a lambda.
     const observesUnitEffect = UNIT_RESULT_KEYS.has(key) && observesSuccess;
-    if (!directObserver && !(propagated && observesSuccess) && !observesUnitEffect) {
+    // Never-returning effects terminate before any later observer can run;
+    // their standalone call is the witness's complete observation.
+    const observesNeverEffect = NEVER_RESULT_KEYS.has(key);
+    if (
+      !directObserver
+      && !(propagated && observesSuccess)
+      && !observesUnitEffect
+      && !observesNeverEffect
+    ) {
       errors.push("direct result is not consumed by print/eprint/assert or explicit error propagation");
     }
   }
   return errors;
 }
-
 function auditEntries(expected, witnesses, exclusions) {
   const expectedRows = Array.from(expected).sort();
   const expectedSet = new Set(expectedRows);
@@ -813,17 +839,52 @@ function auditEntries(expected, witnesses, exclusions) {
 
 function audit() {
   const expected = inventory();
-  const witnesses = walk(CORPUS).map((path) => ({
-    key: keyForPath(path),
-    path,
-    source: readFileSync(path, "utf8"),
-  }));
+  const bindingPaths = fixtureBindingPaths(FIXTURE_BINDINGS);
+  const discovered = walk(CORPUS);
+  const mappedPaths = new Set(
+    Array.from(bindingPaths.keys(), (path) => join(CORPUS, path)),
+  );
+  const witnesses = discovered
+    .filter((path) => !mappedPaths.has(path))
+    .map((path) => ({
+      key: keyForPath(path),
+      path,
+      source: readFileSync(path, "utf8"),
+    }));
   const result = auditEntries(expected, witnesses, parseExclusions());
-  const { errors, exclusions, files, missing } = result;
+  const bindingErrors = [];
+  for (const [relativePath] of bindingPaths) {
+    const path = join(CORPUS, relativePath);
+    if (!discovered.includes(path)) {
+      bindingErrors.push(`fixture binding path does not name a discovered witness: ${relativePath}`);
+      continue;
+    }
+    const key = keyForPath(path);
+    if (expected.includes(key)) {
+      bindingErrors.push(`fixture binding path collides with denominator row: ${relativePath}`);
+      continue;
+    }
+    // Supplemental semantic witnesses are counted by the strict corpus gate,
+    // but do not become denominator rows or pass through sourceErrors' module
+    // call-shape contract. Their canonical path-key marker remains in each
+    // source file; the map is the explicit binding contract for this shape.
+    result.files.set(`fixture:${relativePath}`, path);
+  }
+  const { exclusions, files, missing } = result;
+  const errors = [...result.errors, ...bindingErrors].sort();
   console.log(`core conformance denominator: ${expected.length} public function(s); ${files.size} program(s); ${exclusions.size} carve-out(s); ${missing.length} uncovered row(s)`);
   for (const key of missing) console.log(`  ${key}`);
   for (const error of errors) console.error(`error: ${error}`);
   return missing.length || errors.length ? 1 : 0;
+}
+
+function fixtureBindingsJson() {
+  fixtureBindingPaths(FIXTURE_BINDINGS);
+  return Object.fromEntries(
+    Array.from(FIXTURE_BINDINGS.entries())
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([row, paths]) => [row, [...paths].sort()]),
+  );
 }
 
 function unitObserver(expression, indent) {
@@ -1269,18 +1330,24 @@ fn run() {
   return 0;
 }
 
-const command = process.argv[2] || "--check";
-try {
-  if (command === "--generate") process.exitCode = generate();
-  else if (command === "--check") process.exitCode = audit();
-  else if (command === "--hostile-fixtures") process.exitCode = hostileFixtures();
-  else if (command === "--inventory") {
-    console.log(JSON.stringify(inventory(), null, 2));
-  } else {
-    console.error(`usage: ${process.argv[1]} --generate|--check|--hostile-fixtures|--inventory`);
+export { FIXTURE_BINDINGS };
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const command = process.argv[2] || "--check";
+  try {
+    if (command === "--generate") process.exitCode = generate();
+    else if (command === "--check") process.exitCode = audit();
+    else if (command === "--hostile-fixtures") process.exitCode = hostileFixtures();
+    else if (command === "--inventory") {
+      console.log(JSON.stringify(inventory(), null, 2));
+    } else if (command === "--fixture-bindings") {
+      console.log(JSON.stringify(fixtureBindingsJson(), null, 2));
+    } else {
+      console.error(`usage: ${process.argv[1]} --generate|--check|--hostile-fixtures|--inventory|--fixture-bindings`);
+      process.exitCode = 2;
+    }
+  } catch (error) {
+    console.error(`error: ${error.message}`);
     process.exitCode = 2;
   }
-} catch (error) {
-  console.error(`error: ${error.message}`);
-  process.exitCode = 2;
 }

@@ -34,25 +34,25 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">`#FX(…)` allows exactly the listed effects; an effect reached inside — even transitively through a call — that the list omits has no authority backing it.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">add the named effect to the `#FX(…)` list, or move that work outside the region.</p>
+<p class="diag-copy fix" data-registry-field="fix">Add the named effect to the `#FX(…)` list, or move that work outside the region.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0712</code>: <code>tests/ui/crypto_expert_nonce_region_authority_precedence.stderr</code>.</p>
-<pre class="diag">Error [E2402]: `?` can&#39;t convert `CryptoError` into `Err` — no declared conversion exists
+<pre class="diag">Error [E2402]: This implicit fallible call can&#39;t convert `CryptoError` into `Err` — no declared conversion exists
   --&gt; tests/ui/crypto_expert_nonce_region_authority_precedence.jet:10:21
     |
  10 |         _ :: expert.xchacha20poly1305_seal([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0], [], [])
     |                     ^^^^^^^^^^^^^^^^^^^^^^
- Why: `?` uses the declared conversion rail; `CryptoError` can reach `Err` only through `impl CryptoError -&gt; Err`
- Fix: add `impl CryptoError -&gt; Err { … }` before this function, or change the return type
+ Why: Ordinary fallible calls propagate automatically; `CryptoError` can reach `Err` only through `impl CryptoError -&gt; Err`
+ Fix: Handle this call locally with `??`, add `impl CryptoError -&gt; Err { … }`, or change the return type
 More: jet-lang.dev/e/E2402
 
-Error [E0712]: this `#FX` region uses the effect `FS`, which it has no authority for
+Error [E0712]: This `#FX` region uses the effect `FS`, which it has no authority for
   --&gt; tests/ui/crypto_expert_nonce_region_authority_precedence.jet:6:8
     |
   6 |     #FX(Net) {
     |        ^^^^^
  Why: `#FX(…)` allows only `Net`; an effect reached inside — even through a call — must be in that list
- Fix: add `FS` to the `#FX(…)` list, or move that work outside the region
+ Fix: Add `FS` to the `#FX(…)` list, or move that work outside the region
 More: jet-lang.dev/e/E0712
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

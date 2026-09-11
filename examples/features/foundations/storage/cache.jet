@@ -1,0 +1,21 @@
+use core.files as fs
+use core.crypto as crypto
+
+pub fn cache_key(value: String) String -> crypto.sha256(value.bytes()).hex()
+
+pub fn cache_store(root: Path, value: String) String -> {
+    fs.create_dir_all(root) ?? panic("cache root")
+    key :: cache_key(value)
+    target :: root.join(key)
+    if !fs.exists(target) {
+        fs.write_atomic(target, value.bytes()) ?? panic("cache write")
+        fs.fsync(target) ?? panic("cache fsync")
+    }
+    return key
+}
+
+pub fn cache_load(root: Path, key: String) ?String -> {
+    target :: root.join(key)
+    if !fs.exists(target) -> return .None
+    return Val(fs.read(target) ?? "")
+}

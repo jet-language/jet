@@ -6,8 +6,8 @@ mod common;
 mod tir_support;
 
 use tir_support::{
-    assert_example_cli_tiers_agree_with, assert_tiers_agree, build_and_run, jit_run_traced,
-    run_default_multi,
+    assert_example_cli_tiers_agree_with_package, assert_tiers_agree, build_and_run,
+    jit_run_traced, run_default_multi,
 };
 
 fn assert_aot_and_default_parity(name: &str, source: &str, required: &[&str]) {
@@ -31,6 +31,34 @@ fn linalg_and_fft_use_the_cpu_oracle() {
         "compute_linalg_targeted",
         include_str!("../examples/features/tooling/compute_linalg.jet"),
         &["det:10", "solve:", "fft_len:8"],
+    );
+}
+
+#[test]
+fn fft_preserves_prime_and_composite_length_inputs() {
+    assert_tiers_agree(
+        "compute_fft_arbitrary_lengths",
+        r#"
+use core.compute as compute
+use core.math as math
+
+fn verify(input: [Float], expected: [Float]) {
+    tensor :: compute.from_list(input) ?? panic("input")
+    spectrum :: compute.fft(tensor) ?? panic("fft")
+    actual :: compute.to_list(spectrum)
+    error := Float{0.0}
+    loop index in 0..<expected.len() {
+        error += math.abs(actual[index] - expected[index])
+    }
+    print(actual.len() == expected.len() && error < 0.00001)
+}
+
+fn run() {
+    verify([Float{1.0}, Float{2.0}, Float{3.0}], [Float{6.0}, Float{0.0}, Float{-1.5}, Float{0.866025403784}, Float{-1.5}, Float{-0.866025403784}])
+    verify([Float{1.0}, Float{0.0}, Float{0.0}, Float{0.0}, Float{0.0}, Float{0.0}], [Float{1.0}, Float{0.0}, Float{1.0}, Float{0.0}, Float{1.0}, Float{0.0}, Float{1.0}, Float{0.0}, Float{1.0}, Float{0.0}, Float{1.0}, Float{0.0}])
+}
+"#,
+        "true\ntrue\n",
     );
 }
 
@@ -254,21 +282,18 @@ fn run() {
     print("tiled:{compute.to_list(tiled)}")
 
     wrong :: compute.full([14, 7], 2.0) ?? panic("wrong")
-    bad_shape :: compute.matmul_f32_tile(left, wrong)
-    if bad_shape == {
+    if compute.matmul_f32_tile(left, wrong) == {
         .Ok(_) -> { print("bad_shape:accepted") }
         .Err(_) -> { print("bad_shape:rejected") }
     }
 
     wide :: compute.full([1, 1], 1e40) ?? panic("wide")
-    bad_f32 :: compute.matmul_f32_tile(wide, wide)
-    if bad_f32 == {
+    if compute.matmul_f32_tile(wide, wide) == {
         .Ok(_) -> { print("bad_f32:accepted") }
         .Err(_) -> { print("bad_f32:rejected") }
     }
 
-    overflow :: compute.matrix(9223372036854775807, 2, 0.0)
-    if overflow == {
+    if compute.matrix(9223372036854775807, 2, 0.0) == {
         .Ok(_) -> { print("overflow:accepted") }
         .Err(_) -> { print("overflow:rejected") }
     }
@@ -290,7 +315,7 @@ fn run() {
 #[test]
 fn safe_kernel_rejects_effectful_bodies_before_codegen() {
     let diagnostics = jet::compile(
-        "#Kernel(.parallel) fn noisy(value: Int) Int -[IO]> { print(value); return value }\n",
+        "#Kernel(.parallel) fn noisy(value: Int) Int -[IO]> { print(value)\n    return value }\n",
     )
     .expect_err("a safe kernel must not lower an effectful body");
     assert!(
@@ -317,36 +342,14 @@ fn raw_kernel_contract_cannot_be_forged_without_a_provider() {
 }
 
 #[test]
-fn safe_kernel_proof_reaches_tir_without_rederivation() {
-    let compiled = jet::compile(
-        "#Kernel(.parallel) fn add(left: Int, right: Int) Int -> left + right;\nfn run() { print(add(1, 2)) }\n",
-    )
-    .expect("the checked kernel should compile");
-    assert!(
-        compiled.rust.contains(
-            "jet-kernel-proof: mode=parallel bounds=true alias_free=true captures=true race_free=true barriers_uniform=true control_flow=true"
-        ),
-        "missing sema kernel proof in TIR output"
-    );
-    assert!(
-        compiled
-            .rust
-            .contains("const _: () = assert!(true, \"Jet kernel proof must be complete\")"),
-        "AOT backend did not consume the complete kernel proof"
-    );
-}
-
-#[test]
 fn data_series_feeds_the_same_compute_tensor_path() {
     assert_aot_and_default_parity(
         "compute_data_integration",
         r#"
-use core.data as data
 use core.compute as compute
 
 fn run() {
-    series :: data.series([Float]{1.0, 2.0, 3.0})
-    values :: data.values(series)
+    values :: [Float]{1.0, 2.0, 3.0}
     tensor :: compute.from_list(values) ?? panic("tensor")
     doubled :: compute.mul(tensor, compute.full([3], 2.0) ?? panic("factor")) ?? panic("doubled")
     print("data_tensor:{compute.to_list(doubled)}")
@@ -367,10 +370,10 @@ fn run() {
     vulkan :: compute.device_vulkan()
     webgpu :: compute.device_webgpu()
     tensor :: compute.full([1], 1.0) ?? panic("tensor")
-    vulkan_tensor :: compute.on_device(tensor, vulkan)
-    webgpu_tensor :: compute.on_device(tensor, webgpu)
-    print(compute.device(vulkan_tensor ?? panic("vulkan")))
-    print(compute.device(webgpu_tensor ?? panic("webgpu")))
+    vulkan_tensor :: compute.on_device(tensor, vulkan) ?? panic("vulkan")
+    webgpu_tensor :: compute.on_device(tensor, webgpu) ?? panic("webgpu")
+    print(compute.device(vulkan_tensor))
+    print(compute.device(webgpu_tensor))
 }
 "#,
     )
@@ -379,19 +382,23 @@ fn run() {
 
 #[test]
 fn portable_accelerator_example_uses_vulkan_and_fails_closed_for_native_webgpu() {
-    assert_example_cli_tiers_agree_with("tooling/compute_vulkan_webgpu", |stdout| {
-        let lines: Vec<_> = stdout.lines().collect();
-        assert_eq!(
-            lines.len(),
-            2,
-            "unexpected accelerator example output: {stdout:?}"
-        );
-        assert!(
-            matches!(lines[0], "vulkan:accepted" | "vulkan:rejected"),
-            "Vulkan must report its real availability: {stdout:?}"
-        );
-        assert_eq!(lines[1], "webgpu:rejected");
-    });
+    assert_example_cli_tiers_agree_with_package(
+        "tooling/compute_vulkan_webgpu",
+        Some(tir_support::TIR_TEST_PACKAGE),
+        |stdout| {
+            let lines: Vec<_> = stdout.lines().collect();
+            assert_eq!(
+                lines.len(),
+                2,
+                "unexpected accelerator example output: {stdout:?}"
+            );
+            assert!(
+                matches!(lines[0], "vulkan:accepted" | "vulkan:rejected"),
+                "Vulkan must report its real availability: {stdout:?}"
+            );
+            assert_eq!(lines[1], "webgpu:rejected");
+        },
+    );
 }
 
 #[test]
@@ -406,8 +413,7 @@ fn run() {
     right_cpu :: compute.full([2, 2], 3.0) ?? panic("right")
     left_f32 :: compute.matmul_f32_tile(left_cpu, compute.eye(2) ?? panic("eye")) ?? panic("left f32")
     right_f32 :: compute.matmul_f32_tile(right_cpu, compute.eye(2) ?? panic("eye")) ?? panic("right f32")
-    left_request :: compute.on_device(left_f32, compute.device_vulkan())
-    if left_request == {
+    if compute.on_device(left_f32, compute.device_vulkan()) == {
         .Err(_) -> print("vulkan:unavailable")
         .Ok(left) -> {
             right :: compute.on_device(right_f32, compute.device_vulkan()) ?? panic("right Vulkan")
@@ -462,12 +468,10 @@ fn run() {
     seed :: compute.matrix(1, 1, 100.0) ?? panic("seed")
     one :: compute.matrix(1, 1, 1.0) ?? panic("one")
     f32_seed :: compute.matmul_f32_tile(seed, one) ?? panic("f32")
-    request :: compute.on_device(f32_seed, compute.device_vulkan())
-    if request == {
+    if compute.on_device(f32_seed, compute.device_vulkan()) == {
         .Err(_) -> print("vulkan:unavailable")
         .Ok(value) -> {
-            result :: compute.exp(value)
-            if result == {
+            if compute.exp(value) == {
                 .Ok(_) -> print("nonfinite:accepted")
                 .Err(_) -> print("nonfinite:rejected")
             }

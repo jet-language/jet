@@ -4,7 +4,7 @@ Error [E2404]: `?` can't turn the `Err` from `leaky` into `[FieldError]` here
   9 |     validate { check(leaky(), at: email, "required") }
     |                      ^^^^^
  Why: `leaky` is defined at `validate_impure_rule.jet:1:4` with effective failure contract `implicit default !Err`; the caller's `explicit ![FieldError]` contract has no route from `Err` to `[FieldError]`
- Fix: declare the caller with `Err` as its failure domain, or add `impl Err -> [FieldError] { … }`; otherwise handle `leaky` locally with `??`
+ Fix: Declare the caller with `Err` as its failure domain, or add `impl Err -> [FieldError] { … }`; otherwise handle `leaky` locally with `??`
 More: jet-lang.dev/e/E2404
 
 Error [E3401]: `validate` calls the impure function `leaky`
@@ -13,5 +13,5 @@ Error [E3401]: `validate` calls the impure function `leaky`
   9 |     validate { check(leaky(), at: email, "required") }
     |                      ^^^^^
  Why: `leaky` is impure, but `validate` declares `-[]>`
- Fix: give `leaky` an explicit `-[]>` bound, or remove the call from `validate`
+ Fix: Give `leaky` an explicit `-[]>` bound, or remove the call from `validate`
 More: jet-lang.dev/e/E3401

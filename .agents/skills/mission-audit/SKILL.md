@@ -12,6 +12,11 @@ beginner defaults, expert control, one mechanism, hidden rustc, diagnostics as
 product, batteries, systems path, one package graph, lean tools. Mark
 `aligned` / `drift` / `unknown` with evidence and the smallest corrective action.
 
+Before running, read `.agents/skills/_shared/audit-dispositions.md`. It owns
+shared publication, workflow-boundary, and disposition mechanics; this method
+still owns the mission scorecard, third-facet pass, evidence, and stopping rule.
+
+
 ## The standing lens
 
 Apply `.agents/skills/_shared/standing-lens.md` in full: the four questions, the
@@ -40,18 +45,10 @@ agent thrashing between several valid repairs.
 
 ## Output
 
-Write one markdown report under `docs/audits/` via the Tower CLI (never hand-edit board JSON):
-
-```
-node plugins/tower/tower.mjs docs add --section audits --id <skill>-YYYY-MM-DD --title "…" --file -
-```
-
-Or `docs update docs/audits/<skill>-YYYY-MM-DD.md --file -` for the same day only when the owner asks to revise that run.
-Never overwrite a different day's note. Do not write reports under `docs/plans/`.
-
-Follow `AGENTS.md`. Pick this skill alone — do not chain other audit/research
-skills unless the owner asks.
-
-Before close, add the required per-finding disposition table from
-`.agents/skills/_shared/audit-dispositions.md`. Every finding must name a Tower
-card, a ratified decision, or a concrete no-action reason.
+This is a report-only method. Write one markdown report under `docs/audits/`
+through the project-approved non-serve CLI. Do not create Tower work or
+implementation edits unless the owner explicitly asks. Read
+`.agents/skills/_shared/audit-dispositions.md` before the run and use it for
+publication rules and the required finding-disposition table. Keep the
+aligned/drift/unknown score and corrective action separate from implementation
+completion.

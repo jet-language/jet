@@ -119,7 +119,11 @@ fn qualify_imported_nominal_name(
     target: usize,
     name: &str,
     owned: &HashSet<String>,
+    binders: &[String],
 ) -> String {
+    if binders.iter().any(|binder| binder == name) {
+        return name.to_string();
+    }
     canonical_nominal_name(bundle, target, name, owned, &mut HashSet::new())
         .unwrap_or_else(|| name.to_string())
 }
@@ -209,15 +213,16 @@ pub(crate) fn qualify_imported_type(
     bundle: &ProgramBundle,
     target: usize,
     _owner: &str,
+    binders: &[String],
     ty: &Type,
 ) -> Type {
     let owned = module_owned_type_names(&bundle.modules[target].items);
     let mapped = ty.map_named_types(&|name| {
-        let qualified = qualify_imported_nominal_name(bundle, target, name, &owned);
+        let qualified = qualify_imported_nominal_name(bundle, target, name, &owned, binders);
         (qualified != name).then_some(qualified)
     });
     rewrite_apply_heads(&mapped, &|name| {
-        qualify_imported_nominal_name(bundle, target, name, &owned)
+        qualify_imported_nominal_name(bundle, target, name, &owned, binders)
     })
 }
 
@@ -335,6 +340,11 @@ fn register_enum_shape(
         .module_identity(target)
         .expect("name ledger must contain every loaded module");
     let qualified = imported_type_name(&owner, &definition.name);
+    let binders = definition
+        .type_params
+        .iter()
+        .map(|param| param.name.clone())
+        .collect::<Vec<_>>();
     cx.local_type_identities
         .insert(definition.name.clone(), qualified.clone());
     let variants = definition
@@ -343,7 +353,7 @@ fn register_enum_shape(
         .map(|variant| {
             (
                 variant.name.clone(),
-                qualify_variant_payload(bundle, target, &owner, &variant.payload),
+                qualify_variant_payload(bundle, target, &owner, &binders, &variant.payload),
             )
         })
         .collect();
@@ -362,12 +372,13 @@ fn qualify_variant_payload(
     bundle: &ProgramBundle,
     target: usize,
     owner: &str,
+    binders: &[String],
     payload: &crate::AST::VariantPayload,
 ) -> crate::AST::VariantPayload {
     match payload {
         crate::AST::VariantPayload::Unit => crate::AST::VariantPayload::Unit,
         crate::AST::VariantPayload::Single(ty, span) => crate::AST::VariantPayload::Single(
-            qualify_imported_type(bundle, target, owner, ty),
+            qualify_imported_type(bundle, target, owner, binders, ty),
             *span,
         ),
         crate::AST::VariantPayload::Named(fields) => crate::AST::VariantPayload::Named(
@@ -375,7 +386,8 @@ fn qualify_variant_payload(
                 .iter()
                 .map(|field| {
                     let mut qualified = field.clone();
-                    qualified.ty = qualify_imported_type(bundle, target, owner, &field.ty);
+                    qualified.ty =
+                        qualify_imported_type(bundle, target, owner, binders, &field.ty);
                     qualified
                 })
                 .collect(),
@@ -397,6 +409,11 @@ fn register_struct_shape(
         .module_identity(target)
         .expect("name ledger must contain every loaded module");
     let qualified = imported_type_name(&owner, &definition.name);
+    let binders = definition
+        .type_params
+        .iter()
+        .map(|param| param.name.clone())
+        .collect::<Vec<_>>();
     cx.local_type_identities
         .insert(definition.name.clone(), qualified.clone());
     let rust_mod = crate::Codegen::mangle(&bundle.modules[target].alias);
@@ -420,14 +437,14 @@ fn register_struct_shape(
         .map(|field| {
             (
                 field.name.clone(),
-                qualify_imported_type(bundle, target, &owner, &field.ty),
+                qualify_imported_type(bundle, target, &owner, &binders, &field.ty),
             )
         })
         .collect::<Vec<(String, Type)>>();
     let reflection_fields = jet_foundation::Reflection::fields(definition)
         .into_iter()
         .map(|mut field| {
-            field.ty = qualify_imported_type(bundle, target, &owner, &field.ty);
+            field.ty = qualify_imported_type(bundle, target, &owner, &binders, &field.ty);
             field
         })
         .collect::<Vec<_>>();
@@ -506,321 +523,6 @@ pub(crate) fn ast_operand_is_integer(e: &Expr, env: &LowerEnv) -> Option<bool> {
         Expr::Str(..) => Some(false),
         Expr::Char(..) => Some(false),
         _ => None,
-    }
-}
-
-/// c109 Phase 15: the PLAIN Rust field name for a CORE-struct field read, keyed on the
-/// RESOLVED receiver type (the TIR's total `recv.ty`) instead of `expr_jet_ty(env)`.
-/// Returns `Some(plain_name)` for a known core-struct field (so it is emitted
-/// unprefixed, B2), `None` otherwise (the caller falls back to `mangle(member)`).
-pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str) -> Option<String> {
-    if let Type::Apply { name, .. } = recv_ty {
-        if name == "DataJoin" && !cx.type_names.contains(name) && matches!(member, "left" | "right")
-        {
-            return Some(member.to_string());
-        }
-        if name == "Rotation"
-            && !cx.type_names.contains(name)
-            && matches!(member, "previous" | "current")
-        {
-            return Some(member.to_string());
-        }
-        if name == "VjpRun"
-            && !cx.type_names.contains(name)
-            && matches!(member, "value" | "pull" | "grads")
-        {
-            return Some(member.to_string());
-        }
-        return None;
-    }
-    let Type::Named(type_name) = recv_ty else {
-        return None;
-    };
-    if type_name == "VjpRun"
-        && !cx.type_names.contains(type_name)
-        && matches!(member, "value" | "pull" | "grads")
-    {
-        return Some(member.to_string());
-    }
-    // User structs named Point/Rect/Size keep `__jet_<field>` lowering.
-    let ui_name_collision = matches!(
-        type_name.as_str(),
-        "Point"
-            | "Size"
-            | "Rect"
-            | "SizeConstraint"
-            | "UiNode"
-            | "DataGroup"
-            | "DataLineOptions"
-            | "DataPivotCell"
-            | "DataLimits"
-            | "DataError"
-            | "DataColumn"
-            | "DataStatus"
-            | "DataSummary"
-            | "CSVRow"
-            | "Claims"
-    );
-    // `type_names` also contains imported/core leaves.  Only a nominal declared
-    // by the module being emitted can make this surface a user struct; core
-    // carriers must retain their ABI field names when their names are imported.
-    if ui_name_collision && cx.local_type_names.contains(type_name) {
-        return None;
-    }
-    let known = match type_name.as_str() {
-        // `Err` and `GameFrame` are Prelude-owned carriers.  Their Rust
-        // fields stay plain even when a lowered expression has already been
-        // mapped to the carrier's Rust name.
-        n if n == Syntax::TYPE_ERR || n == "JetErr" => {
-            matches!(member, "message" | "code" | "cause")
-        }
-        n if n == Syntax::TYPE_ALLOC_ERROR => {
-            matches!(member, "requested_bytes" | "allocator")
-        }
-        "TextError" => member == "message",
-        "RangeError" => member == "reason",
-        "ProcessResult" | "ProcessReceipt" => matches!(
-            member,
-            "code"
-                | "output"
-                | "errors"
-                | "success"
-                | "signal"
-                | "timed_out"
-                | "executable_identity"
-                | "input_digest"
-                | "argv"
-                | "policy_digest"
-                | "backend"
-                | "authority"
-                | "descendants"
-                | "limits"
-                | "outputs"
-                | "redacted"
-                | "pid"
-                | "limit_hit"
-        ),
-        "ProcessPlan" => matches!(
-            member,
-            "executable_identity"
-                | "argv"
-                | "input_digest"
-                | "policy_digest"
-                | "backend"
-                | "authority"
-                | "descendants"
-                | "limits"
-                | "outputs"
-        ),
-        // D-PROCESS1=A: `child.stdin`/`.stdout`/`.stderr` read the real
-        // `ProcessChild` Rust struct field directly (a writer/reader handle),
-        // not a `__jet_<field>` name.
-        "ProcessChild" => matches!(member, "stdin" | "stdout" | "stderr" | "terminal"),
-        "TerminalSize" => matches!(member, "cols" | "rows"),
-        "TerminalPolicy" => matches!(member, "size" | "mode"),
-        "TestSuite" => matches!(member, "iteration" | "result"),
-        "Range" => matches!(member, "start" | "end" | "exclusive"),
-        "DimensionAxis" => matches!(member, "name" | "exponent"),
-        "DimensionInfo" => matches!(member, "axes" | "identity" | "display"),
-        "StateRef" => matches!(member, "owner" | "name" | "path"),
-        "StateInfo" => matches!(member, "name" | "path" | "terminal" | "reachable"),
-        "EffectInfo" => member == "values",
-        "OriginInfo" => {
-            matches!(
-                member,
-                "tracked" | "source" | "line" | "column" | "ambiguity"
-            )
-        }
-        n if n == Syntax::TYPE_JSON_ERROR || n == "JSONError" => {
-            matches!(member, "line" | "message")
-        }
-        n if n == Syntax::TYPE_UTF8_ERROR || n == "UTF8Error" => member == "message",
-        n if n == Syntax::TYPE_IO_CONTEXT => Syntax::IO_CONTEXT_FIELDS.contains(&member),
-        // D-LSDIR1=A: DirEntry fields — name (bare filename), path (full path), is_dir.
-        "DirEntry" => matches!(member, "name" | "path" | "is_dir"),
-        // D-FSOPS1/D-WATCH-SCOPE1: core filesystem/watch structs use plain Rust fields.
-        "Stat" => matches!(
-            member,
-            "size"
-                | "modified_ms"
-                | "created_ms"
-                | "readonly"
-                | "is_file"
-                | "is_dir"
-                | "is_symlink"
-                | "kind"
-                | "mode"
-        ),
-        "WalkEntry" => matches!(member, "path" | "relative" | "is_dir" | "depth"),
-        "TempDir" | "TempFile" | "FileLock" => member == "path",
-        "WatchEvent" => matches!(
-            member,
-            "domain" | "kind" | "path" | "detail" | "pid" | "port"
-        ),
-        // D-DATA-SURFACE1=A / D-DATA-STATUS1=A / D-DATA-PLOT1=A: core.data fields
-        // use plain Rust names.
-        "DataGroup" => matches!(member, "key" | "count" | "sum" | "mean"),
-        "CSVRow" => matches!(member, "fields" | "line"),
-        "DataLineOptions" => matches!(
-            member,
-            "title"
-                | "x_label"
-                | "y_label"
-                | "markers"
-                | "reference"
-                | "style"
-                | "color"
-                | "legend"
-        ),
-        "DataPivotCell" => matches!(member, "row_key" | "column_key" | "count" | "sum" | "mean"),
-        "DataLimits" => matches!(
-            member,
-            "encoding" | "max_groups" | "max_sort_rows" | "max_join_rows" | "max_output_rows"
-        ),
-        "DataError" => matches!(
-            member,
-            "kind" | "operation" | "row" | "column" | "index" | "reason" | "cause"
-        ),
-        "DataColumn" => matches!(member, "name" | "type_name"),
-        "DataStatus" => matches!(
-            member,
-            "step" | "path" | "copy" | "ownership" | "trust" | "fallback" | "replacement"
-        ),
-        "DataSummary" => matches!(
-            member,
-            "count" | "sum" | "mean" | "min" | "max" | "median" | "variance" | "stddev"
-        ),
-        // D-RENDERTGT2=A (c133 M1): UI geometry fields.
-        "Point" => matches!(member, "x" | "y"),
-        "Size" => matches!(member, "width" | "height"),
-        "Rect" => matches!(member, "x" | "y" | "width" | "height"),
-        "SizeConstraint" => {
-            matches!(
-                member,
-                "min_width" | "min_height" | "max_width" | "max_height"
-            )
-        }
-        "UiNode" => matches!(member, "label" | "width" | "height"),
-        // D-LOGTRACE1=A: Prelude logging records expose plain Rust fields.
-        "LogField" => matches!(member, "key" | "value" | "kind" | "redacted"),
-        "LogSpan" => matches!(member, "id" | "name"),
-        // E2-M10: HTTPRequest / HTTPResponse field access.
-        "HTTPRequest" | "HTTPResponse" => {
-            matches!(member, "method" | "path" | "body" | "headers" | "status")
-        }
-        "HTTPShutdownReport" => {
-            matches!(
-                member,
-                "accepted" | "overloaded" | "completed" | "cancelled"
-            )
-        }
-        "TLSPeerIdentity" => {
-            matches!(
-                member,
-                "verified_server_name"
-                    | "leaf"
-                    | "certificate_chain"
-                    | "cipher_suite"
-                    | "tls_version"
-            )
-        }
-        "TLSCertificate" => matches!(
-            member,
-            "der"
-                | "sha256"
-                | "spki_sha256"
-                | "dns_names"
-                | "valid_from_unix_ms"
-                | "valid_until_unix_ms"
-                | "subject"
-                | "issuer"
-        ),
-        "GameScene" => matches!(member, "assets" | "input"),
-        "GameFrame" | "JetGameFrame" => matches!(member, "index" | "input"),
-        n if n == Syntax::TYPE_MEMO_STATS => {
-            matches!(member, "hits" | "misses" | "size" | "bound")
-        }
-        "FieldError" => matches!(member, "path" | "reason"),
-        "EncodingLimits" => matches!(
-            member,
-            "buffer_bytes"
-                | "max_depth"
-                | "max_item_bytes"
-                | "max_total_bytes"
-                | "max_expansion_depth"
-                | "max_expansion_bytes"
-        ),
-        "EncodingCause" => matches!(member, "kind" | "os_code" | "message"),
-        "EncodingError" => matches!(
-            member,
-            "format" | "kind" | "byte_offset" | "line" | "column" | "path" | "reason" | "cause"
-        ),
-        "CBOROptions" => matches!(
-            member,
-            "max_depth" | "max_items" | "max_bytes" | "require_canonical"
-        ),
-        "CBORError" => matches!(member, "kind" | "byte_offset" | "path" | "reason"),
-        "XMLLimits" => matches!(
-            member,
-            "max_depth"
-                | "max_nodes"
-                | "max_attributes_per_element"
-                | "max_name_bytes"
-                | "max_text_bytes"
-                | "max_entity_declarations"
-                | "max_entity_depth"
-                | "max_entity_replacement_bytes"
-        ),
-        "XMLParseOptions" => matches!(member, "entities" | "limits"),
-        "XMLRenderOptions" => matches!(member, "encoding" | "lexical"),
-        "XMLCanonical" => matches!(member, "mode" | "comments" | "inclusive_prefixes"),
-        "XMLError" => matches!(
-            member,
-            "kind" | "byte_offset" | "line" | "column" | "path" | "reason"
-        ),
-        "Envelope" => matches!(member, "from" | "recipients"),
-        "RecipientReport" => matches!(member, "address" | "accepted" | "code" | "message"),
-        "Limits" => matches!(
-            member,
-            "max_reply_line_bytes"
-                | "max_reply_lines"
-                | "max_capabilities"
-                | "max_recipients"
-                | "max_message_bytes"
-                | "max_auth_challenge_bytes"
-        ),
-        "SendReport" => matches!(
-            member,
-            "server" | "accepted" | "rejected" | "response_code" | "response" | "accepted_at"
-        ),
-        "Claims" => matches!(
-            member,
-            "subject" | "audience" | "issuer" | "expires_at" | "not_before" | "issued_at"
-        ),
-        "Session" => matches!(member, "id" | "user_id" | "expires_at" | "cookie"),
-        "Auth" => matches!(member, "users_table"),
-        n if n == Syntax::TYPE_TYPE_INFO => {
-            matches!(member, "layout")
-        }
-        n if n == Syntax::TYPE_LAYOUT_INFO => matches!(
-            member,
-            "kind" | "size" | "alignment" | "stride" | "target" | "guarantee" | "source" | "fields"
-        ),
-        n if n == Syntax::TYPE_LAYOUT_FIELD => {
-            matches!(
-                member,
-                "name" | "ty" | "offset" | "size" | "target" | "guarantee" | "source"
-            )
-        }
-        _ => false,
-    };
-    if known {
-        if type_name == "HTTPShutdownReport" {
-            return Some(format!("user_{member}"));
-        }
-        Some(member.to_string())
-    } else {
-        None
     }
 }
 
@@ -951,12 +653,10 @@ pub(crate) fn unit_type() -> Type {
 
 pub(crate) fn let_ty_for_opt(
     ty: Option<&Type>,
-    cx: &Cx,
-    mut_fn: bool,
     is_resource: bool,
     gc: bool,
 ) -> crate::Codegen::TIR::TLetTy {
-    use crate::Codegen::TIR::{TLetTy, TLetWrapper};
+    use crate::Codegen::TIR::TLetTy;
     let Some(ty) = ty else {
         return TLetTy::Inferred;
     };
@@ -966,10 +666,6 @@ pub(crate) fn let_ty_for_opt(
     if gc {
         return TLetTy::automatic_root(ty.clone());
     }
-    if let Type::Fn { .. } = ty {
-        return TLetTy::of(ty.clone(), mut_fn, TLetWrapper::None);
-    }
-    let _ = cx;
     TLetTy::plain(ty.clone())
 }
 
@@ -999,6 +695,31 @@ pub(crate) fn lower_comptime_scalar(
         crate::AST::CtValue::Char(ch) => Some(TExprKind::CharLit(*ch)),
         crate::AST::CtValue::Str(text) => {
             Some(TExprKind::StrLit(vec![TStrPart::Lit(text.clone())]))
+        }
+        // D-TYPE2-DEFAULT1 / #2774: a folded Fraction is still an opaque
+        // Prelude carrier, not a generated user struct. Rebuild it through
+        // the canonical constructor so AOT receives the same reduced ratio
+        // as the comptime and resident engines.
+        crate::AST::CtValue::Struct { type_name, .. }
+            if type_name == Syntax::TYPE_FRACTION =>
+        {
+            let fraction = crate::Numeric::CtFraction::from_value(value?).ok()?;
+            let numerator = fraction.numerator.try_i64()?;
+            let denominator = fraction.denominator.try_i64()?;
+            Some(TExprKind::PreciseBuiltin {
+                type_name: Syntax::TYPE_FRACTION.to_string(),
+                func: "from_parts".to_string(),
+                args: vec![
+                    TExpr {
+                        ty: Type::Int,
+                        kind: TExprKind::IntLit(numerator, None),
+                    },
+                    TExpr {
+                        ty: Type::Int,
+                        kind: TExprKind::IntLit(denominator, None),
+                    },
+                ],
+            })
         }
         // D-TYPE2-IMAG1=A: a folded Complex still enters the canonical
         // precise constructor seam. This keeps AOT, resident JIT, and web

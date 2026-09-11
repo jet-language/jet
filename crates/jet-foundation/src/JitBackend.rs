@@ -8,8 +8,7 @@
 //! `InterpreterBackend` (the tier-0 interpreter impl).
 
 use crate::Diagnostics::Diagnostic;
-use crate::AST::ProgramBundle;
-
+use crate::MIR::{MirArtifactId, MirProgram};
 /// What a single dev/serve iteration produced.
 ///
 /// Identical shape to the AOT compilation result (Q2 hard rule):
@@ -25,21 +24,35 @@ pub enum RunOutcome {
         stderr: String,
         exit_code: i32,
     },
-    /// Front-end or runtime diagnostics. Includes E2201 boundary notes and
-    /// E2202 fuel stops.
+    /// Front-end or runtime diagnostics, including E2202 fuel stops and
+    /// canonical-evaluator refusals.
     Problems(Vec<Diagnostic>),
 }
 
 /// The execution seam shared by every tier (interpreter now, Cranelift later).
 ///
 /// Callers hold a `&mut dyn JitBackend` and never name a concrete engine, so
-/// a future tier-1 (or the c140 bytecode VM / c141 native JIT) is a drop-in.
+/// a future tier-1 (or c140 bytecode VM / c141 native JIT) is a drop-in.
 pub trait JitBackend {
-    /// Run a checked bundle to completion.
-    /// `try_anyway` skips the E2201 boundary scan (D-DEV1).
-    fn run(&mut self, bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome;
+    /// The canonical, invocation-local policy carried by this backend.
+    ///
+    /// Foundation cannot depend on the package model without creating a
+    /// dependency cycle, so the concrete adapters bind this projection to
+    /// `ReleaseDevtoolsPolicy` themselves.  The policy is deliberately an
+    /// input to every execution transition rather than backend-global state.
+    type InvocationPolicy: ?Sized;
 
-    /// Apply a type-stable edit to `module_name` and run the new bundle.
+    /// Run an optimized canonical MIR artifact to completion.
+    /// `try_anyway` is an invocation option passed to the canonical evaluator.
+    fn run(
+        &mut self,
+        program: &MirProgram,
+        artifact: MirArtifactId,
+        try_anyway: bool,
+        policy: &Self::InvocationPolicy,
+    ) -> RunOutcome;
+
+    /// Apply a type-stable edit to `module_name` and run the new artifact.
     ///
     /// The caller has already confirmed type stability via
     /// `Sema::HotSwap::type_stable_check`. `Err` means the run produced
@@ -50,13 +63,21 @@ pub trait JitBackend {
     fn hot_swap(
         &mut self,
         module_name: &str,
-        bundle: &ProgramBundle,
+        program: &MirProgram,
+        artifact: MirArtifactId,
         try_anyway: bool,
+        policy: &Self::InvocationPolicy,
     ) -> Result<RunOutcome, Vec<Diagnostic>>;
 
-    /// Restart cleanly on a type/layout-changing edit and run the new bundle.
+    /// Restart cleanly on a type/layout-changing edit and run the new artifact.
     ///
     /// Tier-0: same as `run`. Tier-1: tear down the resident process, rebuild,
     /// and announce the restart per D-HOTSWAP1.
-    fn restart(&mut self, bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome;
+    fn restart(
+        &mut self,
+        program: &MirProgram,
+        artifact: MirArtifactId,
+        try_anyway: bool,
+        policy: &Self::InvocationPolicy,
+    ) -> RunOutcome;
 }

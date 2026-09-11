@@ -4,6 +4,7 @@
 //! `check_file` directly for document checking.
 
 use crate::Diagnostics::{Diagnostic, Severity};
+use jet_foundation::Report::StatusValue;
 use jet_pkg_model::Authority::AuthorityResolver;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -30,21 +31,13 @@ impl BuildArtifactStoreHandle {
 }
 
 impl crate::Comptime::Build::BuildArtifactStore for BuildArtifactStoreHandle {
-    fn put_blob(
-        &self,
-        bytes: &[u8],
-    ) -> std::io::Result<crate::Comptime::Build::ContentDigest> {
-        let object = self
-            .store
-            .publish_blob(bytes)
-            .map_err(store_io_error)?;
+    fn put_blob(&self, bytes: &[u8]) -> std::io::Result<crate::Comptime::Build::ContentDigest> {
+        let object = self.store.publish_blob(bytes).map_err(store_io_error)?;
         crate::Comptime::Build::ContentDigest::parse(&format!(
             "sha256:{}",
             object.digest().to_hex()
         ))
-        .map_err(|error| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string())
-        })
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string()))
     }
 
     fn get_blob(
@@ -616,7 +609,7 @@ pub fn compile_bundle_path_with_target_machine_and_profile_and_settings_with_sou
     source_closure: &[(std::path::PathBuf, String)],
 ) -> Result<crate::CompileOutput, TargetMachineCompileError> {
     crate::run_compiler_work(|| {
-        compile_bundle_path_with_target_machine_on_compiler_stack(
+        compile_bundle_path_with_target_machine_on_compiler_stack_with_runtime(
             file,
             mode,
             machine,
@@ -625,11 +618,14 @@ pub fn compile_bundle_path_with_target_machine_and_profile_and_settings_with_sou
             locked,
             setting_overrides,
             source_closure,
+            None,
         )
+        .map(|(output, _)| output)
     })
 }
-
-fn compile_bundle_path_with_target_machine_on_compiler_stack(
+/// Compile a selected target machine with an optional invocation-local
+/// authority merged into the checked bundle before MIR lowering and codegen.
+pub fn compile_bundle_path_with_target_machine_and_profile_and_settings_with_source_closure_and_runtime(
     file: &str,
     mode: crate::Sema::CompileMode,
     machine: &crate::TargetMachine::TargetMachine,
@@ -638,7 +634,34 @@ fn compile_bundle_path_with_target_machine_on_compiler_stack(
     locked: bool,
     setting_overrides: &BTreeMap<String, String>,
     source_closure: &[(std::path::PathBuf, String)],
-) -> Result<crate::CompileOutput, TargetMachineCompileError> {
+    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+) -> Result<(crate::CompileOutput, crate::AST::ProgramBundle), TargetMachineCompileError> {
+    crate::run_compiler_work(|| {
+        compile_bundle_path_with_target_machine_on_compiler_stack_with_runtime(
+            file,
+            mode,
+            machine,
+            gates,
+            profile,
+            locked,
+            setting_overrides,
+            source_closure,
+            application_authority,
+        )
+    })
+}
+
+fn compile_bundle_path_with_target_machine_on_compiler_stack_with_runtime(
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    machine: &crate::TargetMachine::TargetMachine,
+    gates: crate::Policy::GateSet,
+    profile: &str,
+    locked: bool,
+    setting_overrides: &BTreeMap<String, String>,
+    source_closure: &[(std::path::PathBuf, String)],
+    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+) -> Result<(crate::CompileOutput, crate::AST::ProgramBundle), TargetMachineCompileError> {
     let usage = target_machine_usage_for_file(
         file,
         mode,
@@ -649,19 +672,8 @@ fn compile_bundle_path_with_target_machine_on_compiler_stack(
         source_closure,
     )
     .map_err(TargetMachineCompileError::Diagnostics)?;
-    let compiler_identity = format!(
-        "{}@{}#{}",
-        crate::Syntax::BINARY_NAME,
-        env!("CARGO_PKG_VERSION"),
-        option_env!("JET_COMPILER_BUILD_ID").unwrap_or(env!("CARGO_PKG_VERSION")),
-    );
-    let dossier = machine.target_dossier(
-        &usage,
-        crate::TargetMachine::ExecutionTier::Aot,
-        compiler_identity,
-        "none",
-    );
-    compile_bundle_path_opts_full_with_target_dossier(
+    let dossier = target_dossier_for_usage(machine, &usage, "none");
+    compile_bundle_path_opts_on_compiler_stack_with_runtime(
         file,
         mode,
         machine.no_os,
@@ -676,35 +688,58 @@ fn compile_bundle_path_with_target_machine_on_compiler_stack(
         setting_overrides,
         locked,
         None,
-        dossier,
-        source_closure,
+        None,
+        Some(dossier),
+        Some(source_closure),
+        application_authority,
     )
     .map_err(TargetMachineCompileError::Diagnostics)
 }
 
-/// Artifacts from a typed no-OS machine build (linker, map, audit, size, ELF).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Artifacts from a typed no-OS machine build (checked program object,
+/// startup/provider adapters, linker, map, audit, size, ELF).
 pub struct TargetFirmwareArtifacts {
     pub out_dir: std::path::PathBuf,
     pub linker_script: std::path::PathBuf,
     pub startup: std::path::PathBuf,
+    pub startup_object: std::path::PathBuf,
+    pub provider: std::path::PathBuf,
+    pub provider_object: std::path::PathBuf,
+    pub program_object: std::path::PathBuf,
     pub map: std::path::PathBuf,
     pub elf: std::path::PathBuf,
     pub audit_json: std::path::PathBuf,
     pub size_budget: crate::TargetMachine::SizeBudgetReport,
     pub audit: String,
 }
-
-/// D-TARGET-*: validate machine, generate linker/startup, link firmware ELF,
-/// write audit + size budget under `out_dir` (typically `.jet/target/<name>/`).
 pub fn build_target_machine_firmware(
     machine: &crate::TargetMachine::TargetMachine,
     usage: &crate::TargetMachine::TargetMachineUse,
+    program_object: &std::path::Path,
     out_dir: &std::path::Path,
 ) -> Result<TargetFirmwareArtifacts, TargetMachineCompileError> {
     use crate::TargetMachine::{ExecutionTier, TargetMachineError};
     use std::fs;
     use std::process::Command;
+
+    let program_bytes = fs::read(program_object).map_err(|error| {
+        TargetMachineCompileError::Machine(vec![TargetMachineError::FirmwareBuildFailed {
+            detail: format!(
+                "read checked program object `{}`: {error}",
+                program_object.display()
+            ),
+        }])
+    })?;
+    if program_bytes.is_empty() {
+        return Err(TargetMachineCompileError::Machine(vec![
+            TargetMachineError::FirmwareBuildFailed {
+                detail: format!(
+                    "checked program object `{}` is empty",
+                    program_object.display()
+                ),
+            },
+        ]));
+    }
 
     if let Err(err) = machine.supports_execution_tier(ExecutionTier::Aot) {
         return Err(TargetMachineCompileError::Machine(vec![err]));
@@ -728,6 +763,9 @@ pub fn build_target_machine_firmware(
     let startup = machine
         .generate_startup_source()
         .map_err(|e| TargetMachineCompileError::Machine(vec![e]))?;
+    let provider = machine
+        .generate_provider_source()
+        .map_err(|e| TargetMachineCompileError::Machine(vec![e]))?;
 
     fs::create_dir_all(out_dir).map_err(|e| {
         TargetMachineCompileError::Machine(vec![TargetMachineError::FirmwareBuildFailed {
@@ -737,7 +775,9 @@ pub fn build_target_machine_firmware(
 
     let linker_path = out_dir.join("memory.ld");
     let startup_path = out_dir.join(&startup.filename);
-    let obj_path = out_dir.join("startup.o");
+    let startup_obj_path = out_dir.join("startup.o");
+    let provider_path = out_dir.join(&provider.filename);
+    let provider_obj_path = out_dir.join("target_providers.o");
     let map_path = out_dir.join("firmware.map");
     let elf_path = out_dir.join("firmware.elf");
     let audit_path = out_dir.join(format!("{}.target.json", sanitize_name(&machine.name)));
@@ -752,45 +792,64 @@ pub fn build_target_machine_firmware(
             detail: format!("write startup: {e}"),
         }])
     })?;
+    fs::write(&provider_path, &provider.contents).map_err(|e| {
+        TargetMachineCompileError::Machine(vec![TargetMachineError::FirmwareBuildFailed {
+            detail: format!("write target providers: {e}"),
+        }])
+    })?;
 
     let clang = resolve_target_clang().map_err(TargetMachineCompileError::Machine)?;
     let lld = resolve_tool("ld.lld").map_err(TargetMachineCompileError::Machine)?;
-
-    let mut clang_cmd = Command::new(&clang);
-    clang_cmd
-        .arg(format!("--target={}", machine.triple))
-        .arg("-nostdlib")
-        .arg("-ffreestanding")
-        .arg("-fno-builtin")
-        .arg("-c")
-        .arg(&startup_path)
-        .arg("-o")
-        .arg(&obj_path);
-    let clang_out = clang_cmd.output().map_err(|e| {
-        TargetMachineCompileError::Machine(vec![TargetMachineError::FirmwareBuildFailed {
-            detail: format!("spawn clang: {e}"),
-        }])
-    })?;
-    if !clang_out.status.success() {
-        return Err(TargetMachineCompileError::Machine(vec![
-            TargetMachineError::FirmwareBuildFailed {
-                detail: format!(
-                    "clang failed: {}",
-                    String::from_utf8_lossy(&clang_out.stderr).trim()
-                ),
-            },
-        ]));
-    }
+    let compile_source = |source: &std::path::Path,
+                          object: &std::path::Path|
+     -> Result<(), TargetMachineCompileError> {
+        let output = Command::new(&clang)
+            .arg(format!("--target={}", machine.triple))
+            .arg("-nostdlib")
+            .arg("-ffreestanding")
+            .arg("-fno-builtin")
+            .arg("-c")
+            .arg(source)
+            .arg("-o")
+            .arg(object)
+            .output()
+            .map_err(|error| {
+                TargetMachineCompileError::Machine(vec![TargetMachineError::FirmwareBuildFailed {
+                    detail: format!("spawn clang for `{}`: {error}", source.display()),
+                }])
+            })?;
+        if !output.status.success() {
+            return Err(TargetMachineCompileError::Machine(vec![
+                TargetMachineError::FirmwareBuildFailed {
+                    detail: format!(
+                        "clang failed for `{}`: {}",
+                        source.display(),
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    ),
+                },
+            ]));
+        }
+        Ok(())
+    };
+    compile_source(&startup_path, &startup_obj_path)?;
+    compile_source(&provider_path, &provider_obj_path)?;
 
     let mut link_cmd = Command::new(&lld);
     link_cmd
         .arg(format!("-T{}", linker_path.display()))
         .arg(format!("-Map={}", map_path.display()))
+        .arg("--gc-sections")
         .arg("-o")
         .arg(&elf_path)
-        .arg(&obj_path);
+        // The checked program is an input, not an optional witness. Startup
+        // reaches its canonical `__jet_program_entry` symbol.
+        .arg(program_object)
+        .arg(&startup_obj_path)
+        .arg(&provider_obj_path);
     if machine.triple.contains("aarch64") {
-        link_cmd.arg("--image-base=0x40000000");
+        link_cmd.arg("-m").arg("aarch64elf");
+    } else if machine.triple.contains("thumb") || machine.triple.starts_with("arm") {
+        link_cmd.arg("-m").arg("armelf");
     }
     let link_out = link_cmd.output().map_err(|e| {
         TargetMachineCompileError::Machine(vec![TargetMachineError::FirmwareBuildFailed {
@@ -817,7 +876,28 @@ pub fn build_target_machine_firmware(
             },
         ]));
     }
-    let audit = machine.audit_json_with_budget(usage, Some(&size_budget));
+    let machine_audit = machine.audit_json_with_budget(usage, Some(&size_budget));
+    let digest = |path: &std::path::Path| -> String {
+        fs::read(path)
+            .map(|bytes| format!("sha256:{}", crate::SHA256::sha256_hex(&bytes)))
+            .unwrap_or_else(|_| "unreadable".to_string())
+    };
+    let audit = format!(
+        "{{\"machine\":{},\"firmware\":{{\"program_object\":{{\"path\":\"{}\",\"sha256\":\"{}\"}},\"startup_source\":{{\"path\":\"{}\",\"sha256\":\"{}\"}},\"provider_source\":{{\"path\":\"{}\",\"sha256\":\"{}\"}},\"linker_script\":{{\"path\":\"{}\",\"sha256\":\"{}\"}},\"startup_object\":\"{}\",\"provider_object\":\"{}\",\"elf\":{{\"path\":\"{}\",\"sha256\":\"{}\"}}}}}}",
+        machine_audit,
+        graph_json_escape(&program_object.display().to_string()),
+        digest(program_object),
+        graph_json_escape(&startup_path.display().to_string()),
+        digest(&startup_path),
+        graph_json_escape(&provider_path.display().to_string()),
+        digest(&provider_path),
+        graph_json_escape(&linker_path.display().to_string()),
+        digest(&linker_path),
+        graph_json_escape(&startup_obj_path.display().to_string()),
+        graph_json_escape(&provider_obj_path.display().to_string()),
+        graph_json_escape(&elf_path.display().to_string()),
+        digest(&elf_path),
+    );
     fs::write(&audit_path, &audit).map_err(|e| {
         TargetMachineCompileError::Machine(vec![TargetMachineError::FirmwareBuildFailed {
             detail: format!("write audit: {e}"),
@@ -828,6 +908,10 @@ pub fn build_target_machine_firmware(
         out_dir: out_dir.to_path_buf(),
         linker_script: linker_path,
         startup: startup_path,
+        startup_object: startup_obj_path,
+        provider: provider_path,
+        provider_object: provider_obj_path,
+        program_object: program_object.to_path_buf(),
         map: map_path,
         elf: elf_path,
         audit_json: audit_path,
@@ -836,22 +920,35 @@ pub fn build_target_machine_firmware(
     })
 }
 
-/// Run QEMU virt smoke for an aarch64 no-OS ELF; returns serial output.
-pub fn qemu_virt_aarch64_smoke(
+/// Run a supported proof board under QEMU and return its serial output.
+/// Callers must assert the checked program's expected output, not just timeout.
+pub fn qemu_target_machine_smoke(
+    machine: &crate::TargetMachine::TargetMachine,
     elf: &std::path::Path,
 ) -> Result<String, Vec<crate::TargetMachine::TargetMachineError>> {
     use crate::TargetMachine::TargetMachineError;
     use std::process::Command;
 
-    let qemu = resolve_tool("qemu-system-aarch64")?;
-    // `timeout` keeps the smoke bounded; virt UART prints "OK\n" from startup.
+    let (tool, model, cpu) = match machine.name.as_str() {
+        "board.sensor_v1" => ("qemu-system-arm", "mps2-an386", "cortex-m4"),
+        "board.virt_aarch64" => ("qemu-system-aarch64", "virt", "cortex-a57"),
+        _ => {
+            return Err(vec![TargetMachineError::FirmwareBuildFailed {
+                detail: format!("no QEMU model declared for `{}`", machine.name),
+            }]);
+        }
+    };
+    let qemu = resolve_tool(tool)?;
+    // Bound the smoke without requiring startup or the checked program to
+    // print a fixture marker. A timeout is the expected result for firmware
+    // that halts after returning from `__jet_program_entry`.
     let output = Command::new("timeout")
         .arg("3")
         .arg(&qemu)
         .arg("-machine")
-        .arg("virt")
+        .arg(model)
         .arg("-cpu")
-        .arg("cortex-a57")
+        .arg(cpu)
         .arg("-nographic")
         .arg("-kernel")
         .arg(elf)
@@ -866,15 +963,11 @@ pub fn qemu_virt_aarch64_smoke(
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    if serial.contains("OK") {
-        Ok(serial)
-    } else {
-        Err(vec![TargetMachineError::FirmwareBuildFailed {
-            detail: format!(
-                "qemu smoke missing OK marker (status={:?}); serial={serial:?}",
-                output.status.code()
-            ),
-        }])
+    match output.status.code() {
+        Some(0) | Some(124) => Ok(serial),
+        status => Err(vec![TargetMachineError::FirmwareBuildFailed {
+            detail: format!("qemu smoke failed (status={status:?}); serial={serial:?}"),
+        }]),
     }
 }
 
@@ -918,6 +1011,18 @@ pub fn target_machine_dossier_json(machine_name: &str) -> Result<String, String>
     };
     let usage = crate::TargetMachine::TargetMachineUse::default();
     Ok(machine.audit_json(&usage))
+}
+
+/// Typed target audit for command status envelopes.
+pub fn target_machine_dossier_value(machine_name: &str) -> Result<StatusValue, String> {
+    let Some(machine) = target_machine_by_name(machine_name) else {
+        return Err(format!(
+            "unknown target machine `{machine_name}` (try {})",
+            TARGET_MACHINE_NAMES.join(", ")
+        ));
+    };
+    let usage = crate::TargetMachine::TargetMachineUse::default();
+    Ok(machine.audit_value(&usage))
 }
 
 fn sanitize_name(name: &str) -> String {
@@ -1132,11 +1237,10 @@ pub fn compile_bundle_path_opts_library_with_gates_and_profile_and_settings(
     )
 }
 
-/// Like `compile_bundle_path_opts`, but `debug_linemap = true` routes codegen
-/// through `emit_bundle_dbg` (D-DBG3 step 2 / dap-debugger): every generated
-/// statement gets a `// jet:line N` marker the native `jet debug` backend reads
-/// back into a rust-line -> jet-line table. Used ONLY by the native debug build
-/// path — every other caller keeps `debug_linemap = false` (byte-identical output).
+/// Like `compile_bundle_path_opts`, with the debug line-map request carried
+/// through the checked MIR compile boundary (D-DBG3 step 2 / dap-debugger).
+/// The MIR Rust adapter owns the generated source; ordinary callers keep
+/// `debug_linemap = false`.
 pub fn compile_bundle_path_opts_dbg(
     file: &str,
     mode: crate::Sema::CompileMode,
@@ -1254,6 +1358,87 @@ pub fn compile_bundle_path_output_opts_with_profile_and_settings(
     )
 }
 
+fn compiler_toolchain_identity() -> String {
+    format!(
+        "{}@{}#{}",
+        crate::Syntax::BINARY_NAME,
+        env!("CARGO_PKG_VERSION"),
+        option_env!("JET_COMPILER_BUILD_ID").unwrap_or(env!("CARGO_PKG_VERSION")),
+    )
+}
+
+fn target_layer_for_usage(
+    usage: &crate::TargetMachine::TargetMachineUse,
+) -> crate::Syntax::RuntimeLayer {
+    jet_foundation::RingLayer::classify_prelude_closure(usage.core_apis.iter())
+        .values()
+        .copied()
+        .max()
+        .unwrap_or_default()
+}
+
+fn target_dossier_for_usage(
+    machine: &crate::TargetMachine::TargetMachine,
+    usage: &crate::TargetMachine::TargetMachineUse,
+    dependency_identity: &str,
+) -> jet_foundation::Facts::TargetDossier {
+    let mut dossier = machine.target_dossier(
+        usage,
+        crate::TargetMachine::ExecutionTier::Aot,
+        compiler_toolchain_identity(),
+        dependency_identity,
+    );
+    // The machine's maximum layer is an admission ceiling. The dossier names
+    // the layer actually selected by the sema-owned Prelude closure.
+    dossier.layer = target_layer_for_usage(usage);
+    dossier
+}
+
+fn target_machine_for_facts(
+    no_os: bool,
+    web_target: bool,
+    target_triple: &str,
+) -> crate::TargetMachine::TargetMachine {
+    if web_target {
+        crate::TargetMachine::TargetMachine::wasm_browser()
+    } else if target_triple == crate::Syntax::BUILD_TARGET_WASI_SERVER {
+        crate::TargetMachine::TargetMachine::wasm_wasi()
+    } else if no_os {
+        crate::TargetMachine::TargetMachine::bare_metal("no-os", target_triple)
+    } else {
+        crate::TargetMachine::TargetMachine::hosted(target_triple)
+    }
+}
+
+fn refresh_target_dossier(bundle: &mut crate::AST::ProgramBundle, no_os: bool, web_target: bool) {
+    let target_triple = bundle.build_facts.target_triple.clone();
+    let selected_machine = bundle
+        .build_facts
+        .target_dossier
+        .machine
+        .as_deref()
+        .cloned();
+    let machine = selected_machine
+        .unwrap_or_else(|| target_machine_for_facts(no_os, web_target, &target_triple));
+    if web_target {
+        bundle.build_facts.target_triple = machine.triple.clone();
+    }
+    let usage = crate::TargetMachine::TargetMachineUse::from_core_apis(bundle.used_core.iter());
+    let mut dossier = target_dossier_for_usage(&machine, &usage, "none");
+    // Sema records the complete selected closure, including helper-level
+    // exceptions that are not visible in a raw import list.
+    dossier.layer = bundle.inferred_layer;
+    bundle.build_facts.target_dossier = dossier;
+}
+
+fn compiler_action_identity(facts: &jet_foundation::Facts::BuildFactSnapshot) -> String {
+    let target_digest = crate::SHA256::sha256_hex(&facts.artifact_identity_bytes());
+    format!(
+        "{};target-dossier={target_digest}",
+        compiler_toolchain_identity()
+    )
+}
+
 fn target_machine_usage_for_file(
     file: &str,
     mode: crate::Sema::CompileMode,
@@ -1269,12 +1454,14 @@ fn target_machine_usage_for_file(
         .collect::<Vec<_>>();
     let mut bundle = crate::Loader::load_entry_with_overlays(file, &overlays, false)?;
     seed_build_facts(&mut bundle, profile, locked, setting_overrides)?;
-    let diags = crate::Sema::check_bundle(&mut bundle, mode);
+    let (diags, effect_facts) = crate::Sema::check_bundle_with_effect_facts(&mut bundle, mode);
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
     let _lints = gate_diagnostics(&bundle, parse_teaching, diags, Vec::new())?;
     let mut usage = crate::Sema::target_machine_use(&bundle);
     usage.mmio = collect_mmio_usage(&bundle);
-    let target_diags = crate::Sema::check_target_machine(machine, &usage);
+    let hardware = crate::Sema::target_hardware_use_with_effect_facts(&bundle, &effect_facts);
+    let mut target_diags = crate::Sema::check_target_machine(machine, &usage);
+    target_diags.extend(crate::Sema::validate_target_hardware(machine, &hardware));
     if target_diags.is_empty() {
         Ok(usage)
     } else {
@@ -1648,6 +1835,8 @@ pub struct BuildRunOptions {
     /// D-CONF-WORD1=A: the selected optimization bundle, exposed as the
     /// compile-time `@build.profile` fact.
     pub profile: String,
+    /// Invocation-local policy merged into the checked runtime before codegen.
+    pub application_authority: Option<jet_foundation::Authority::ApplicationAuthority>,
     /// D-CONF-KEY1: command-line contributions to declared package settings.
     pub setting_overrides: BTreeMap<String, String>,
     /// Optional host-owned remote builder binding. Source and CLI input cannot
@@ -1657,7 +1846,6 @@ pub struct BuildRunOptions {
     /// the package; an explicit file or `--show-default` keeps that function
     /// selection inside the requested file.
     pub package_scope: bool,
-    /// D-CMDOVERRIDE1=A: `--show-default` disables both package and local
     /// command-function selection.
     pub build_override: bool,
     /// Selected package output callable. The checked runtime file remains the
@@ -1680,6 +1868,7 @@ impl Default for BuildRunOptions {
             plugin_target: false,
             cross_target: None,
             profile: "dev".to_string(),
+            application_authority: None,
             setting_overrides: BTreeMap::new(),
             remote: None,
             package_scope: true,
@@ -1744,13 +1933,31 @@ fn set_bundle_target(bundle: &mut crate::AST::ProgramBundle, cross_target: Optio
         .unwrap_or_else(jet_foundation::Layout::TargetLayout::host_triple);
 }
 
-/// D-MEM-SENTRY1: the named hardened profile is a command fact that tightens
-/// the same package guarantee consumed by AOT, JIT, and interpreter adapters.
-/// Engines never rediscover the profile or policy on their own.
-fn apply_profile_guarantees(bundle: &mut crate::AST::ProgramBundle, profile: &str) {
-    if profile == crate::Syntax::BUILD_PROFILE_HARDENED {
-        bundle.package_guarantees.harden = true;
+/// Project the manifest's selected release inspect form into the one typed
+/// policy consumed by MIR Rust emission. Host deployment environment belongs
+/// to the host boundary and never changes this compile-time projection.
+pub fn release_devtools_policy_for_bundle(
+    bundle: &crate::AST::ProgramBundle,
+    profile: &str,
+) -> crate::Package::ReleaseDevtoolsPolicy {
+    if !matches!(
+        profile,
+        crate::Syntax::BUILD_PROFILE_RELEASE | crate::Syntax::BUILD_PROFILE_HARDENED
+    ) {
+        return crate::Package::ReleaseDevtoolsPolicy::development();
     }
+    let inspect = crate::Loader::package_facts_for_bundle(bundle)
+        .ok()
+        .flatten()
+        .and_then(|facts| {
+            facts
+                .build_profiles
+                .iter()
+                .find(|candidate| candidate.name == profile)
+                .map(|candidate| candidate.inspect)
+        })
+        .unwrap_or(crate::Package::ReleaseInspect::Local);
+    crate::Package::ReleaseDevtoolsPolicy::from_manifest_profile(inspect)
 }
 
 fn seed_build_facts_from_stamp(
@@ -1760,7 +1967,7 @@ fn seed_build_facts_from_stamp(
     computed_contributions: &[jet_foundation::Policy::FactContribution],
     stamp: &jet_foundation::Facts::BuildStamp,
 ) -> Result<(), Vec<Diagnostic>> {
-    apply_profile_guarantees(bundle, profile);
+    bundle.package_guarantees.harden |= profile == crate::Syntax::BUILD_PROFILE_HARDENED;
     let target_triple = if bundle.build_facts.target_triple.is_empty() {
         jet_foundation::Layout::TargetLayout::host_triple()
     } else {
@@ -2564,12 +2771,8 @@ pub fn query_build_plan(
 pub fn query_build_nodes(
     file: &str,
 ) -> Result<Vec<crate::Comptime::Build::BuildPlanNode>, Vec<Diagnostic>> {
-    compile_bundle_path_build_with_front_end_for_project_check(
-        file,
-        build_query_options(),
-        None,
-    )
-    .map(|output| output.compiler_nodes)
+    compile_bundle_path_build_with_front_end_for_project_check(file, build_query_options(), None)
+        .map(|output| output.compiler_nodes)
 }
 
 /// Read the one build-fact snapshot produced by the query path. This keeps
@@ -2607,6 +2810,7 @@ fn build_query_options() -> BuildRunOptions {
         plugin_target: false,
         cross_target: None,
         profile: "dev".to_string(),
+        application_authority: None,
         setting_overrides: BTreeMap::new(),
         remote: None,
         package_scope: true,
@@ -2649,32 +2853,221 @@ pub fn query_build_plan_with_overlay(
 }
 
 /// One canonical graph representation shared by CLI and LSP.
-pub fn build_plan_json(plan: &crate::Comptime::Build::BuildPlan) -> String {
-    fn escape(value: &str) -> String {
-        value
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace('\n', "\\n")
-    }
-    fn strings(values: &[String]) -> String {
-        format!(
-            "[{}]",
-            values
+pub fn build_plan_json(
+    plan: &crate::Comptime::Build::BuildPlan,
+    execution: Option<&crate::Comptime::Build::BuildExecutionReport>,
+) -> String {
+    let graph = crate::Comptime::Build::graph_for_build_query(plan, execution);
+    let targets = graph
+        .targets
+        .iter()
+        .map(|target| {
+            format!(
+                "{{\"id\":{},\"name\":\"{}\",\"kind\":\"{:?}\",\"deps\":[{}],\"actions\":[{}],\"files\":{}}}",
+                target.id.0,
+                graph_json_escape(&target.name),
+                target.kind,
+                target
+                    .deps
+                    .iter()
+                    .map(|id| id.0.to_string())
+                    .collect::<Vec<_>>()
+                    .join(","),
+                target
+                    .actions
+                    .iter()
+                    .map(|id| id.0.to_string())
+                    .collect::<Vec<_>>()
+                    .join(","),
+                graph_json_strings(&target.files),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let actions = graph
+        .actions
+        .iter()
+        .map(|action| {
+            let real = &plan.actions()[action.id.0];
+            let probes = real
+                .probes
                 .iter()
-                .map(|value| format!("\"{}\"", escape(value)))
-                .collect::<Vec<_>>()
-                .join(",")
-        )
+                .map(|probe| plan.probes()[probe.id().0].name.clone())
+                .collect::<Vec<_>>();
+            let provenance = plan
+                .explain_action_named(&action.name)
+                .map(|fact| fact.provenance)
+                .unwrap_or_default();
+            format!(
+                "{{\"id\":{},\"name\":\"{}\",\"inputs\":{},\"outputs\":{},\"caps\":{},\"pools\":{},\"toolchain\":\"{}\",\"probes\":{},\"cache\":\"{:?}\",\"cache_status\":\"{}\",\"key\":\"{}\",\"compiler_owned\":{},\"provenance\":{}}}",
+                action.id.0,
+                graph_json_escape(&action.name),
+                graph_json_strings(&action.inputs),
+                graph_json_strings(&action.outputs),
+                graph_json_strings(
+                    &action
+                        .caps
+                        .iter()
+                        .map(|cap| cap.name().to_string())
+                        .collect::<Vec<_>>(),
+                ),
+                graph_json_strings(
+                    &action
+                        .pools
+                        .iter()
+                        .map(|pool| pool.as_str().to_string())
+                        .collect::<Vec<_>>(),
+                ),
+                graph_json_escape(&plan.toolchains()[real.toolchain.id().0].name),
+                graph_json_strings(&probes),
+                real.cache,
+                graph_cache_status(action.cache_hit),
+                graph_json_escape(action.key.as_str()),
+                real.compiler_owned,
+                graph_json_strings(&provenance),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let files = graph
+        .files
+        .iter()
+        .map(graph_file_json)
+        .collect::<Vec<_>>()
+        .join(",");
+    let affected_files = graph
+        .affected_files()
+        .iter()
+        .map(graph_file_json)
+        .collect::<Vec<_>>()
+        .join(",");
+    let action_keys = graph
+        .action_keys()
+        .iter()
+        .map(|entry| {
+            format!(
+                "{{\"action\":\"{}\",\"key\":\"{}\"}}",
+                graph_json_escape(&entry.action),
+                graph_json_escape(entry.key.as_str()),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let cache_hits = graph
+        .cache_hits()
+        .iter()
+        .map(|action| {
+            format!(
+                "{{\"action\":\"{}\",\"key\":\"{}\"}}",
+                graph_json_escape(&action.name),
+                graph_json_escape(action.key.as_str()),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"schema_version\":1,\"default\":{},\"targets\":[{}],\"actions\":[{}],\"action_keys\":[{}],\"cache_hits\":[{}],\"files\":[{}],\"affected_files\":[{}],\"toolchains\":[{}],\"probes\":[{}],\"generated\":[{}]}}",
+        plan.default_target()
+            .map(|target| target.id().0.to_string())
+            .unwrap_or_else(|| "null".to_string()),
+        targets,
+        actions,
+        action_keys,
+        cache_hits,
+        files,
+        affected_files,
+        plan.toolchains()
+            .iter()
+            .map(|tool| {
+                format!(
+                    "{{\"name\":\"{}\",\"target\":\"{}\"}}",
+                    graph_json_escape(&tool.name),
+                    graph_json_escape(&tool.target_triple),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(","),
+        plan.probes()
+            .iter()
+            .map(|probe| {
+                format!(
+                    "{{\"name\":\"{}\",\"kind\":\"{:?}\",\"reproducibility\":\"{:?}\"}}",
+                    graph_json_escape(&probe.name),
+                    probe.kind,
+                    probe.reproducibility,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(","),
+        plan.generated_modules()
+            .iter()
+            .map(|module| {
+                format!(
+                    "{{\"name\":\"{}\",\"path\":\"{}\",\"digest\":\"{}\"}}",
+                    graph_json_escape(&module.name),
+                    graph_json_escape(module.path.as_str()),
+                    graph_json_escape(module.source_digest.as_str()),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(","),
+    )
+}
+
+fn graph_cache_status(hit: Option<bool>) -> &'static str {
+    match hit {
+        Some(true) => "hit",
+        Some(false) => "miss",
+        None => "unknown",
     }
-    let graph = plan.graph();
-    format!("{{\"schema_version\":1,\"default\":{},\"targets\":[{}],\"actions\":[{}],\"files\":[{}],\"toolchains\":[{}],\"probes\":[{}],\"generated\":[{}]}}",
-        plan.default_target().map(|target| target.id().0.to_string()).unwrap_or_else(|| "null".to_string()),
-        graph.targets.iter().map(|target| format!("{{\"id\":{},\"name\":\"{}\",\"kind\":\"{:?}\",\"deps\":[{}],\"actions\":[{}],\"files\":{}}}", target.id.0, escape(&target.name), target.kind, target.deps.iter().map(|id| id.0.to_string()).collect::<Vec<_>>().join(","), target.actions.iter().map(|id| id.0.to_string()).collect::<Vec<_>>().join(","), strings(&target.files))).collect::<Vec<_>>().join(","),
-        graph.actions.iter().map(|action| { let real = &plan.actions()[action.id.0]; format!("{{\"id\":{},\"name\":\"{}\",\"inputs\":{},\"outputs\":{},\"caps\":{},\"pools\":{},\"toolchain\":\"{}\",\"probes\":{},\"cache\":\"{:?}\",\"compiler_owned\":{},\"provenance\":{}}}", action.id.0, escape(&action.name), strings(&action.inputs), strings(&action.outputs), strings(&action.caps.iter().map(|cap| cap.name().to_string()).collect::<Vec<_>>()), strings(&action.pools.iter().map(|pool| pool.as_str().to_string()).collect::<Vec<_>>()), escape(&plan.toolchains()[real.toolchain.id().0].name), strings(&real.probes.iter().map(|probe| plan.probes()[probe.id().0].name.clone()).collect::<Vec<_>>()), real.cache, real.compiler_owned, strings(&plan.explain_action_named(&action.name).map(|fact| fact.provenance).unwrap_or_default())) }).collect::<Vec<_>>().join(","),
-        graph.files.iter().map(|file| format!("{{\"path\":\"{}\",\"owner\":{},\"consumers\":[{}],\"targets\":[{}]}}", escape(&file.path), file.owner.map(|id| id.0.to_string()).unwrap_or_else(|| "null".to_string()), file.consumers.iter().map(|id| id.0.to_string()).collect::<Vec<_>>().join(","), file.targets.iter().map(|id| id.0.to_string()).collect::<Vec<_>>().join(","))).collect::<Vec<_>>().join(","),
-        plan.toolchains().iter().map(|tool| format!("{{\"name\":\"{}\",\"target\":\"{}\"}}", escape(&tool.name), escape(&tool.target_triple))).collect::<Vec<_>>().join(","),
-        plan.probes().iter().map(|probe| format!("{{\"name\":\"{}\",\"kind\":\"{:?}\",\"reproducibility\":\"{:?}\"}}", escape(&probe.name), probe.kind, probe.reproducibility)).collect::<Vec<_>>().join(","),
-        plan.generated_modules().iter().map(|module| format!("{{\"name\":\"{}\",\"path\":\"{}\",\"digest\":\"{}\"}}", escape(&module.name), escape(module.path.as_str()), module.source_digest.as_str())).collect::<Vec<_>>().join(",")
+}
+
+fn graph_json_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            character if character.is_control() => {
+                escaped.push_str(&format!("\\u{:04x}", character as u32));
+            }
+            character => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+fn graph_json_strings(values: &[String]) -> String {
+    format!(
+        "[{}]",
+        values
+            .iter()
+            .map(|value| format!("\"{}\"", graph_json_escape(value)))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
+fn graph_file_json(file: &crate::Comptime::Build::BuildGraphFile) -> String {
+    format!(
+        "{{\"path\":\"{}\",\"owner\":{},\"consumers\":[{}],\"targets\":[{}]}}",
+        graph_json_escape(&file.path),
+        file.owner
+            .map(|id| id.0.to_string())
+            .unwrap_or_else(|| "null".to_string()),
+        file.consumers
+            .iter()
+            .map(|id| id.0.to_string())
+            .collect::<Vec<_>>()
+            .join(","),
+        file.targets
+            .iter()
+            .map(|id| id.0.to_string())
+            .collect::<Vec<_>>()
+            .join(","),
     )
 }
 
@@ -2797,7 +3190,6 @@ impl PreparedBuildFrontEnd {
     pub fn source_closure(&self) -> &[(std::path::PathBuf, String)] {
         &self.source_closure
     }
-
 }
 
 /// Run the build front end once, without compiling. The caller computes the
@@ -2806,9 +3198,7 @@ impl PreparedBuildFrontEnd {
 pub fn prepare_build_front_end(
     inputs: FrontEndInputs,
 ) -> Result<PreparedBuildFrontEnd, Vec<Diagnostic>> {
-    crate::run_compiler_work(move || {
-        prepare_build_front_end_on_compiler_stack(inputs, None, &[])
-    })
+    crate::run_compiler_work(move || prepare_build_front_end_on_compiler_stack(inputs, None, &[]))
 }
 
 /// Run the build front end against the complete authority-selected source
@@ -3248,11 +3638,8 @@ fn prepare_build_front_end_on_compiler_stack(
                 .collect::<Vec<_>>();
             runtime_bundle_for_package = Some(bundle);
             let package_path_string = package_path.to_string_lossy().into_owned();
-            bundle = crate::Loader::load_entry_with_overlays(
-                &package_path_string,
-                &overlays,
-                false,
-            )?;
+            bundle =
+                crate::Loader::load_entry_with_overlays(&package_path_string, &overlays, false)?;
             package_build_fingerprint = Some(crate::SHA256::sha256_hex(
                 &crate::CanonicalAST::canonical_bytes(&bundle),
             ));
@@ -3381,6 +3768,9 @@ fn compile_build_from_front_end(
         runtime_source_paths,
         source_closure,
     } = prepared;
+    // The checked source closure selects the target dossier before any build
+    // action identity or compiler-owned package action is constructed.
+    refresh_target_dossier(&mut bundle, options.no_os, options.web_target);
     // Capture lock presence before runtime reload can publish any lock update.
     // The first build must bootstrap dependency names once; later builds must
     // remain fail-closed when the manifest and lock drift.
@@ -3639,16 +4029,8 @@ fn compile_build_from_front_end(
                 package_build_fingerprint.as_deref(),
             )
         };
-        let compiler_identity = format!(
-            "{}@{}#{}",
-            env!("CARGO_PKG_NAME"),
-            env!("CARGO_PKG_VERSION"),
-            option_env!("JET_COMPILER_BUILD_ID").unwrap_or(env!("CARGO_PKG_VERSION")),
-        );
-        let compiler_target = options
-            .cross_target
-            .clone()
-            .unwrap_or_else(|| format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH));
+        let compiler_identity = compiler_action_identity(&bundle.build_facts);
+        let compiler_target = bundle.build_facts.target_triple.clone();
         let compiler_profile = options.profile.clone();
         if !package_specs.is_empty() && !evaluated.plan.targets().is_empty() {
             evaluated
@@ -3747,10 +4129,9 @@ fn compile_build_from_front_end(
             .collect::<Vec<_>>();
         if !project_check {
             filesystem_transaction = Some(
-                BuildFilesystemTransaction::new(transaction_paths)
-                    .map_err(|error| {
-                        vec![generated_io_diag("build filesystem transaction", &error)]
-                    })?,
+                BuildFilesystemTransaction::new(transaction_paths).map_err(|error| {
+                    vec![generated_io_diag("build filesystem transaction", &error)]
+                })?,
             );
         }
         if options.locked {
@@ -3797,7 +4178,8 @@ fn compile_build_from_front_end(
                     "E3505",
                     "build artifact store is unavailable".to_string(),
                     detail,
-                    "Jet needs a writable artifact store before it can execute build actions".to_string(),
+                    "Jet needs a writable artifact store before it can execute build actions"
+                        .to_string(),
                     None,
                 )]
             })?;
@@ -3820,6 +4202,7 @@ fn compile_build_from_front_end(
                 probes: Vec::new(),
             }
         };
+        crate::Comptime::Build::install_build_execution_receipt(&evaluated.plan, &executed.report);
         if options.locked {
             crate::Loader::verify_locked_dependency_sources(file)?;
         }
@@ -3878,9 +4261,7 @@ fn compile_build_from_front_end(
                     });
                 }
             }
-            locked_provenance.sort_by(|a, b| {
-                a.path.cmp(&b.path).then_with(|| a.hash.cmp(&b.hash))
-            });
+            locked_provenance.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.hash.cmp(&b.hash)));
             locked_provenance.dedup_by(|a, b| a.path == b.path && a.hash == b.hash);
             // Keep lock publication until the fresh selected runtime bundle has
             // passed its complete sema check. A package dependency loader may
@@ -3955,32 +4336,29 @@ fn compile_build_from_front_end(
     //
     // The re-check below runs the same projection before runtime emission and
     // for project-check; static graph queries stop before codegen.
+    apply_application_authority(&mut bundle, options.application_authority.as_ref());
     crate::Sema::strip_build_only_entries(&mut bundle);
 
     // The selected target source closure and generated modules are a fresh
     // program, not syntax checked in isolation. Re-run the complete front end
     // before any runtime codegen.
-    let mut runtime_effect_facts = None;
+    let mut runtime_effect_facts = if !project_check && build_run.is_none() {
+        Some(effect_facts)
+    } else {
+        None
+    };
     if project_check || (build_run.is_some() && options.execute) {
-        let (planned_diags, planned_facts) = if options.no_os && !options.gates.is_empty() {
-            (
-                crate::Sema::check_bundle_no_os_with_gates(
-                    &mut bundle,
-                    compile_mode,
-                    options.gates,
-                ),
-                None,
-            )
-        } else if options.no_os {
-            (
-                crate::Sema::check_bundle_no_os(&mut bundle, compile_mode),
-                None,
-            )
+        let (planned_diags, planned_facts) = if options.no_os {
+            let (diags, facts) =
+                crate::Sema::check_bundle_no_os_with_effect_facts(&mut bundle, compile_mode);
+            (diags, Some(facts))
         } else if !options.gates.is_empty() {
-            (
-                crate::Sema::check_bundle_gates(&mut bundle, compile_mode, options.gates),
-                None,
-            )
+            let (diags, facts) = crate::Sema::check_bundle_gates_with_effect_facts(
+                &mut bundle,
+                compile_mode,
+                options.gates,
+            );
+            (diags, Some(facts))
         } else {
             let (diags, facts) =
                 crate::Sema::check_bundle_with_effect_facts(&mut bundle, compile_mode);
@@ -4008,6 +4386,9 @@ fn compile_build_from_front_end(
         lints.extend(planned_lints);
         runtime_effect_facts = planned_facts;
     }
+    // Recompute after generated sources replace the runtime bundle. The final
+    // source-owned closure, not the build-entry projection, is authoritative.
+    refresh_target_dossier(&mut bundle, options.no_os, options.web_target);
     if let Some(target) = options.cross_target.as_deref() {
         let target_diags = crate::Sema::check_target_surface(&bundle, target);
         lints.extend(classify_diagnostics(&bundle, target_diags, false)?);
@@ -4130,31 +4511,54 @@ fn compile_build_from_front_end(
             runtime_effect_facts,
         });
     }
-    if options.web_target {
-        let misses = crate::Codegen::validate_web_tir_support(&bundle, ffi.as_ref());
-        if !misses.is_empty() {
-            return Err(misses.into_iter().map(|miss| Diagnostic::error(
-                "E-WEB-TIR-UNSUPPORTED",
-                format!("web output cannot compile `{}` yet", miss.func_name),
-                "the selected BuildPlan program uses a construct unavailable to web lowering".to_string(),
-                "select web-covered sources or simplify the named function".to_string(),
-                Some(miss.span),
-            )).collect());
-        }
-    }
-    let rust = crate::Codegen::emit_bundle_dbg(&bundle, ffi.as_ref(), false, active_os);
+    let plugin_name = if options.plugin_target {
+        Some(crate::PluginExport::resolve_export_name(&bundle))
+    } else {
+        None
+    };
+    let request = mir_artifact_request_for_build(
+        &bundle,
+        compile_mode,
+        &options.profile,
+        options.web_target,
+        options.plugin_target,
+        false,
+    );
+    let request = match plugin_name.as_deref() {
+        Some(name) => request.with_name(name),
+        None => request,
+    };
+    let (mir, artifact) = lower_checked_mir_program_for(&bundle, request);
+    let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
+    execution.ffi = ffi.as_ref();
+    execution.release_devtools_policy =
+        release_devtools_policy_for_bundle(&bundle, &options.profile);
+    execution.emit_types = true;
+    execution.emit_foreign = true;
+    execution.emit_metadata = false;
+    execution.emit_debug_linemap = false;
+    execution.emit_runtime = true;
+    let web_release_devtools_policy = execution.release_devtools_policy.clone();
+    let rust = crate::Codegen::MIRRust::emit_mir_program(
+        &mir,
+        &crate::Codegen::MIRRust::MirRustConfig {
+            target: jet_foundation::Layout::TargetLayout::from_build_facts(&bundle.build_facts),
+            target_kind: if options.web_target {
+                crate::Codegen::MIRRust::MirRustTarget::WebWasm
+            } else {
+                crate::Codegen::MIRRust::MirRustTarget::Native
+            },
+            root_prefix: String::new(),
+            execution,
+        },
+    );
     let web = if options.web_target {
-        Some(
-            crate::Codegen::emit_web(&bundle, compile_mode, ffi.as_ref()).map_err(|miss| {
-                vec![Diagnostic::error(
-                    "E-WEB-TIR-UNSUPPORTED",
-                    format!("web output cannot compile `{}` yet", miss.func_name),
-                    "web emitter ability facts drifted after validation".to_string(),
-                    "report this compiler bug with the named function".to_string(),
-                    Some(miss.span),
-                )]
-            })?,
-        )
+        Some(emit_web_from_mir(
+            &bundle,
+            &mir,
+            artifact,
+            &web_release_devtools_policy,
+        ))
     } else {
         None
     };
@@ -4163,9 +4567,11 @@ fn compile_build_from_front_end(
         if !errors.is_empty() {
             return Err(errors);
         }
-        let name = crate::PluginExport::resolve_export_name(&bundle);
-        crate::PluginExport::check_and_freeze_version(&bundle, &name)?;
-        Some(crate::Codegen::emit_plugin(&bundle, &rust, &name))
+        let name = plugin_name
+            .as_deref()
+            .expect("plugin artifact request has no selected export name");
+        crate::PluginExport::check_and_freeze_version(&bundle, name)?;
+        Some(crate::Codegen::emit_plugin(&mir, artifact, &rust))
     } else {
         None
     };
@@ -4197,9 +4603,7 @@ fn compile_build_from_front_end(
     })
 }
 
-fn bundle_source_closure(
-    bundle: &crate::AST::ProgramBundle,
-) -> Vec<(std::path::PathBuf, String)> {
+fn bundle_source_closure(bundle: &crate::AST::ProgramBundle) -> Vec<(std::path::PathBuf, String)> {
     let mut closure = bundle
         .modules
         .iter()
@@ -4249,10 +4653,17 @@ pub fn compiler_nodes_for_bundle_with_outputs(
     if outputs.is_empty() {
         if let Some(plan) = plan {
             let selected = plan.default_target().map(|target| target.id());
-            for target in plan.targets().iter().filter(|target| {
-                selected.is_none_or(|selected| target.id == selected)
-            }) {
-                outputs.extend(target.outputs.iter().map(|output| output.as_str().to_string()));
+            for target in plan
+                .targets()
+                .iter()
+                .filter(|target| selected.is_none_or(|selected| target.id == selected))
+            {
+                outputs.extend(
+                    target
+                        .outputs
+                        .iter()
+                        .map(|output| output.as_str().to_string()),
+                );
             }
         }
     }
@@ -4270,8 +4681,9 @@ pub fn compiler_nodes_for_bundle_with_outputs(
     let checks = modules
         .iter()
         .map(|(subject, source)| {
-            let digest =
-                crate::Comptime::Build::ContentDigest::from_bytes(source.as_bytes()).as_str().to_string();
+            let digest = crate::Comptime::Build::ContentDigest::from_bytes(source.as_bytes())
+                .as_str()
+                .to_string();
             crate::Comptime::Build::BuildPlanNode::new(
                 crate::Comptime::Build::BuildNodeKind::Check,
                 subject.clone(),
@@ -4336,18 +4748,16 @@ fn load_planned_source(
         .collect::<Vec<_>>();
     if let Some(source) = generated
         .iter()
-        .find(|item| normalize_project_path(project_root, &item.path) == normalize_project_path(project_root, path))
+        .find(|item| {
+            normalize_project_path(project_root, &item.path)
+                == normalize_project_path(project_root, path)
+        })
         .map(|item| item.source.as_str())
         .or_else(|| generated_source_for_path(path, project_root, generated_sources))
     {
         overlays.push((path, source));
     }
-    crate::Loader::load_entry_with_overlays(
-        path.to_str().unwrap_or(build_file),
-        &overlays,
-        false,
-    )
-
+    crate::Loader::load_entry_with_overlays(path.to_str().unwrap_or(build_file), &overlays, false)
 }
 fn load_planned_runtime_bundle(
     build_file: &str,
@@ -4358,7 +4768,6 @@ fn load_planned_runtime_bundle(
     source_closure: &[(std::path::PathBuf, String)],
     fallback_bundle: impl FnOnce() -> Result<crate::AST::ProgramBundle, Vec<Diagnostic>>,
 ) -> Result<crate::AST::ProgramBundle, Vec<Diagnostic>> {
-
     let sources = plan
         .selected_sources()
         .map_err(|error| vec![build_plan_diagnostic(&error)])?;
@@ -4392,14 +4801,11 @@ fn load_planned_runtime_bundle(
             source_closure,
         )?;
         let has_run = |bundle: &crate::AST::ProgramBundle| {
-            bundle
-                .modules
-                .get(bundle.entry)
-                .is_some_and(|module| {
-                    module.items.iter().any(|item| {
+            bundle.modules.get(bundle.entry).is_some_and(|module| {
+                module.items.iter().any(|item| {
                         matches!(item, crate::AST::Item::Func(function) if function.name == "run")
                     })
-                })
+            })
         };
         if has_run(&first) {
             (0, first)
@@ -5029,7 +5435,7 @@ fn source_has_build_entry(source: &str) -> Option<bool> {
     if !lex_diags.is_empty() {
         return None;
     }
-    let (program, _) = crate::Parser::parse_for_check(&tokens).ok()?;
+    let (program, _) = crate::Parser::parse_for_check_with_source(&tokens, &source).ok()?;
     Some(program.items.iter().any(
         |item| matches!(item, crate::AST::Item::Func(func) if crate::Sema::is_build_entry(func)),
     ))
@@ -5539,7 +5945,7 @@ fn generated_dependencies(
     if !lex_diags.is_empty() {
         return Err(annotate_generated_frontend_diags(&module.name, lex_diags));
     }
-    let program = crate::Parser::parse(&tokens)
+    let program = crate::Parser::parse_with_source(&tokens, &module.source)
         .map_err(|diags| annotate_generated_frontend_diags(&module.name, diags))?;
     let mut dependencies = std::collections::BTreeSet::new();
     for import in program.imports {
@@ -5861,7 +6267,7 @@ fn compile_bundle_path_opts_full(
     entry_fn: Option<&str>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     crate::run_compiler_work(|| {
-        compile_bundle_path_opts_on_compiler_stack(
+        compile_bundle_path_opts_on_compiler_stack_with_runtime(
             file,
             mode,
             no_os,
@@ -5879,47 +6285,9 @@ fn compile_bundle_path_opts_full(
             None,
             None,
             None,
-        )
-    })
-}
-fn compile_bundle_path_opts_full_with_target_dossier(
-    file: &str,
-    mode: crate::Sema::CompileMode,
-    no_os: bool,
-    gates: crate::Policy::GateSet,
-    web_target: bool,
-    plugin_target: bool,
-    library_target: bool,
-    debug_linemap: bool,
-    cross_target: Option<&str>,
-    explicit_output: Option<&str>,
-    profile: &str,
-    setting_overrides: &BTreeMap<String, String>,
-    locked: bool,
-    entry_fn: Option<&str>,
-    target_dossier: jet_foundation::Facts::TargetDossier,
-    source_closure: &[(std::path::PathBuf, String)],
-) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-    crate::run_compiler_work(|| {
-        compile_bundle_path_opts_on_compiler_stack(
-            file,
-            mode,
-            no_os,
-            gates,
-            web_target,
-            plugin_target,
-            library_target,
-            debug_linemap,
-            cross_target,
-            explicit_output,
-            profile,
-            setting_overrides,
-            locked,
-            entry_fn,
             None,
-            Some(target_dossier),
-            Some(source_closure),
         )
+        .map(|(output, _)| output)
     })
 }
 
@@ -5945,7 +6313,7 @@ pub fn compile_bundle_path_opts_with_overlay(
     source: &str,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     crate::run_compiler_work(|| {
-        compile_bundle_path_opts_on_compiler_stack(
+        compile_bundle_path_opts_on_compiler_stack_with_runtime(
             file,
             mode,
             no_os,
@@ -5963,7 +6331,9 @@ pub fn compile_bundle_path_opts_with_overlay(
             Some((source_path, source)),
             None,
             None,
+            None,
         )
+        .map(|(output, _)| output)
     })
 }
 /// Compile every module from one immutable authority-selected source closure.
@@ -5988,7 +6358,7 @@ pub fn compile_bundle_path_opts_with_source_closure(
     source_closure: &[(std::path::PathBuf, String)],
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     crate::run_compiler_work(|| {
-        compile_bundle_path_opts_on_compiler_stack(
+        compile_bundle_path_opts_on_compiler_stack_with_runtime(
             file,
             mode,
             no_os,
@@ -6006,12 +6376,229 @@ pub fn compile_bundle_path_opts_with_source_closure(
             None,
             None,
             Some(source_closure),
+            None,
+        )
+        .map(|(output, _)| output)
+    })
+}
+
+/// Compile an immutable source closure with an optional invocation-local
+/// authority merged into the checked bundle before MIR lowering and codegen;
+/// return that same checked runtime bundle alongside the generated output.
+pub fn compile_bundle_path_opts_with_source_closure_and_runtime(
+    file: &str,
+    mode: crate::Sema::CompileMode,
+    no_os: bool,
+    gates: crate::Policy::GateSet,
+    web_target: bool,
+    plugin_target: bool,
+    library_target: bool,
+    debug_linemap: bool,
+    cross_target: Option<&str>,
+    explicit_output: Option<&str>,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+    locked: bool,
+    entry_fn: Option<&str>,
+    source_closure: &[(std::path::PathBuf, String)],
+    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+) -> Result<(crate::CompileOutput, crate::AST::ProgramBundle), Vec<Diagnostic>> {
+    crate::run_compiler_work(|| {
+        compile_bundle_path_opts_on_compiler_stack_with_runtime(
+            file,
+            mode,
+            no_os,
+            gates,
+            web_target,
+            plugin_target,
+            library_target,
+            debug_linemap,
+            cross_target,
+            explicit_output,
+            profile,
+            setting_overrides,
+            locked,
+            entry_fn,
+            None,
+            None,
+            Some(source_closure),
+            application_authority,
         )
     })
 }
 
+pub fn mir_artifact_build_mode_for(
+    bundle: &crate::AST::ProgramBundle,
+    compile_mode: crate::Sema::CompileMode,
+    profile: &str,
+) -> jet_foundation::MIR::MirArtifactBuildMode {
+    let mode = match (compile_mode, profile) {
+        (_, "fuzz") => jet_foundation::MIR::MirArtifactBuildMode::Fuzz,
+        (_, "coverage") => jet_foundation::MIR::MirArtifactBuildMode::Coverage,
+        (crate::Sema::CompileMode::Test | crate::Sema::CompileMode::TestOverride, _) => {
+            jet_foundation::MIR::MirArtifactBuildMode::Test
+        }
+        (_, "release" | "hardened") => jet_foundation::MIR::MirArtifactBuildMode::Release,
+        (_, "dev" | "debug" | "ci" | "small" | "no-os" | "default" | "fast") => {
+            jet_foundation::MIR::MirArtifactBuildMode::Dev
+        }
+        (_, "test") => jet_foundation::MIR::MirArtifactBuildMode::Test,
+        (_, name)
+            if crate::Loader::package_facts_for_bundle(bundle)
+                .ok()
+                .flatten()
+                .is_some_and(|facts| {
+                    facts
+                        .build_profiles
+                        .iter()
+                        .any(|profile| profile.name == name)
+                }) =>
+        {
+            // Named profiles contribute settings without selecting release mode.
+            jet_foundation::MIR::MirArtifactBuildMode::Dev
+        }
+        (_, other) => {
+            jet_foundation::ice!(None, "unsupported MIR artifact build profile `{other}`")
+        }
+    };
+    mode
+}
 
-fn compile_bundle_path_opts_on_compiler_stack(
+fn mir_artifact_request_for(
+    bundle: &crate::AST::ProgramBundle,
+    target: jet_foundation::MIR::MirArtifactTarget,
+    kind: jet_foundation::MIR::MirArtifactKind,
+    compile_mode: crate::Sema::CompileMode,
+    profile: &str,
+) -> jet_foundation::MIR::MirArtifactRequest {
+    let mode = mir_artifact_build_mode_for(bundle, compile_mode, profile);
+    jet_foundation::MIR::MirArtifactRequest::new(target, kind, mode)
+}
+
+fn mir_artifact_request_for_build(
+    bundle: &crate::AST::ProgramBundle,
+    compile_mode: crate::Sema::CompileMode,
+    profile: &str,
+    web_target: bool,
+    plugin_target: bool,
+    library_target: bool,
+) -> jet_foundation::MIR::MirArtifactRequest {
+    if web_target && plugin_target {
+        jet_foundation::ice!(
+            None,
+            "MIR artifact request cannot select both Web and sandbox targets"
+        );
+    }
+    let target = if web_target {
+        jet_foundation::MIR::MirArtifactTarget::Web
+    } else {
+        jet_foundation::MIR::MirArtifactTarget::RustAot
+    };
+    let kind = if web_target {
+        jet_foundation::MIR::MirArtifactKind::WebApplication
+    } else if plugin_target {
+        jet_foundation::MIR::MirArtifactKind::SandboxPlugin
+    } else if library_target {
+        jet_foundation::MIR::MirArtifactKind::NativeLibrary
+    } else if matches!(compile_mode, crate::Sema::CompileMode::TestOverride) {
+        jet_foundation::MIR::MirArtifactKind::TestOverride
+    } else {
+        match profile {
+            "fuzz" => jet_foundation::MIR::MirArtifactKind::FuzzExecutable,
+            _ if matches!(compile_mode, crate::Sema::CompileMode::Test) => {
+                jet_foundation::MIR::MirArtifactKind::TestExecutable
+            }
+            _ => jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+        }
+    };
+    mir_artifact_request_for(bundle, target, kind, compile_mode, profile)
+}
+
+fn lower_checked_mir_program_for(
+    bundle: &crate::AST::ProgramBundle,
+    request: jet_foundation::MIR::MirArtifactRequest,
+) -> (
+    jet_foundation::MIR::MirProgram,
+    jet_foundation::MIR::MirArtifactId,
+) {
+    let (mir, artifact) = crate::Codegen::TIR::lower_checked_mir_program_for(bundle, request)
+        .unwrap_or_else(|error| jet_foundation::ice!(Some(error.span), "{error}"));
+    mir.validate().unwrap_or_else(|error| {
+        jet_foundation::ice!(None, "canonical MIR validation failed: {error}")
+    });
+    (mir, artifact)
+}
+
+fn mir_web_target(
+    bundle: &crate::AST::ProgramBundle,
+    mir: &jet_foundation::MIR::MirProgram,
+    artifact: jet_foundation::MIR::MirArtifactId,
+    release_devtools_policy: &crate::Package::ReleaseDevtoolsPolicy,
+) -> crate::Codegen::MIRWeb::MirWebTarget {
+    let mut assets = crate::Codegen::MIRWeb::MirWebAssets::with_default_shell();
+    assets.explicit_html_path = bundle
+        .modules
+        .get(bundle.entry)
+        .and_then(|module| module.html_path.clone());
+    assets.source_names = bundle
+        .modules
+        .iter()
+        .map(|module| module.display.clone())
+        .collect();
+    assets.source_contents = bundle
+        .modules
+        .iter()
+        .map(|module| module.source.clone())
+        .collect();
+    crate::Codegen::MIRWeb::MirWebTarget {
+        layout: if bundle.build_facts.target_triple.is_empty() {
+            jet_foundation::Layout::TargetLayout::host()
+        } else {
+            jet_foundation::Layout::TargetLayout::from_build_facts(&bundle.build_facts)
+        },
+        assets,
+        semantic_digest: jet_foundation::MIR::mir_program_digest(mir),
+        artifact,
+        release_devtools_policy: release_devtools_policy.clone(),
+    }
+}
+
+fn emit_web_from_mir(
+    bundle: &crate::AST::ProgramBundle,
+    mir: &jet_foundation::MIR::MirProgram,
+    artifact: jet_foundation::MIR::MirArtifactId,
+    release_devtools_policy: &crate::Package::ReleaseDevtoolsPolicy,
+) -> crate::Codegen::MIRWeb::WebArtifacts {
+    crate::Codegen::MIRWeb::emit_web(
+        mir,
+        &mir_web_target(bundle, mir, artifact, release_devtools_policy),
+    )
+    .unwrap_or_else(|error| jet_foundation::ice!(None, "MIR Web emission failed: {error}"))
+}
+
+fn apply_application_authority(
+    bundle: &mut crate::AST::ProgramBundle,
+    invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+) {
+    let Some(invocation_authority) = invocation_authority else {
+        return;
+    };
+    let authority = &mut bundle.package_guarantees.application_authority;
+    authority
+        .granted_effects
+        .extend(invocation_authority.granted_effects.iter().cloned());
+    authority
+        .denied_effects
+        .extend(invocation_authority.denied_effects.iter().cloned());
+    if !authority.authority.is_empty() && !invocation_authority.authority.is_empty() {
+        authority.authority.push_str(" + ");
+    }
+    authority
+        .authority
+        .push_str(&invocation_authority.authority);
+}
+
+fn compile_bundle_path_opts_on_compiler_stack_with_runtime(
     file: &str,
     mode: crate::Sema::CompileMode,
     no_os: bool,
@@ -6029,11 +6616,8 @@ fn compile_bundle_path_opts_on_compiler_stack(
     overlay: Option<(&std::path::Path, &str)>,
     target_dossier: Option<jet_foundation::Facts::TargetDossier>,
     source_closure: Option<&[(std::path::PathBuf, String)]>,
-) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-    // D-OSTARGET1=A: resolve the active native OS bucket once, from the same
-    // `--target=<triple>` flag E2-M15 already threads through (host OS when
-    // absent or unrecognized, e.g. a wasm/web pseudo-target).
-    let active_os = crate::Syntax::OSTarget::active(cross_target);
+    application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
+) -> Result<(crate::CompileOutput, crate::AST::ProgramBundle), Vec<Diagnostic>> {
     if locked {
         crate::Loader::verify_locked_dependency_sources(file)?;
     }
@@ -6045,12 +6629,8 @@ fn compile_bundle_path_opts_on_compiler_stack(
     if let Some((path, source)) = overlay {
         overlays.push((path, source));
     }
-    let mut bundle =
-        crate::Loader::load_entry_with_overlays(file, &overlays, false)?;
-    // D-OSTARGET2=B: the `@if @build.os == { … }` desugar (run in sema)
-    // must fold to the same OS bucket codegen filters `impl`s by, so seed the
-    // bundle from the same resolved `active_os` as `emit_bundle`.
-    bundle.active_os = active_os;
+    let mut bundle = crate::Loader::load_entry_with_overlays(file, &overlays, false)?;
+    // The sema build facts and MIR adapter share this target resolution.
     set_bundle_target(&mut bundle, cross_target);
     seed_build_facts(&mut bundle, profile, locked, setting_overrides)?;
     let has_target_dossier = target_dossier.is_some();
@@ -6069,121 +6649,46 @@ fn compile_bundle_path_opts_on_compiler_stack(
         explicit_output
     };
     let (diags, effect_facts) = if let Some(output) = runnable_output {
-        (
-            crate::Sema::check_bundle_for_output_opts(
-                &mut bundle,
-                mode,
-                output,
-                no_os,
-                gates,
-            ),
-            None,
+        crate::Sema::check_bundle_for_output_opts_with_effect_facts(
+            &mut bundle,
+            mode,
+            output,
+            no_os,
+            gates,
         )
     } else if no_os {
-        (
-            crate::Sema::check_bundle_no_os(&mut bundle, mode),
-            None,
-        )
+        crate::Sema::check_bundle_no_os_with_effect_facts(&mut bundle, mode)
     } else if !gates.is_empty() {
-        (
-            crate::Sema::check_bundle_gates(&mut bundle, mode, gates),
-            None,
-        )
+        crate::Sema::check_bundle_gates_with_effect_facts(&mut bundle, mode, gates)
     } else {
-        let (diags, facts) = crate::Sema::check_bundle_with_effect_facts(&mut bundle, mode);
-        (diags, Some(facts))
+        crate::Sema::check_bundle_with_effect_facts(&mut bundle, mode)
     };
-    // A web build without an explicitly selected machine still has a real
-    // browser boundary. Fold the built-in browser provider facts after sema
-    // has discovered the complete Core closure, so the web artifact manifest
-    // and every downstream identity describe the same closure.
-    if web_target && !has_target_dossier {
-        let machine = crate::TargetMachine::TargetMachine::wasm_browser();
-        bundle.build_facts.target_triple = machine.triple.clone();
-        let usage =
-            crate::TargetMachine::TargetMachineUse::from_core_apis(bundle.used_core.iter());
-        let compiler_identity = format!(
-            "{}@{}#{}",
-            crate::Syntax::BINARY_NAME,
-            env!("CARGO_PKG_VERSION"),
-            option_env!("JET_COMPILER_BUILD_ID").unwrap_or(env!("CARGO_PKG_VERSION")),
-        );
-        bundle.build_facts.target_dossier = machine.target_dossier(
-            &usage,
-            crate::TargetMachine::ExecutionTier::Aot,
-            compiler_identity,
-            "none",
-        );
+    // Fold the selected target boundary and the complete sema-owned Prelude
+    // closure into the same dossier used by codegen and artifact identity.
+    if !has_target_dossier {
+        refresh_target_dossier(&mut bundle, no_os, web_target);
     }
-    let mut diags = match effect_facts.as_ref() {
-        Some(facts) => apply_package_effect_budget(&bundle, facts, diags)?,
-        None => diags,
-    };
+    let mut diags = apply_package_effect_budget(&bundle, &effect_facts, diags)?;
     if let Some(target) = cross_target {
         diags.extend(crate::Sema::check_target_surface(&bundle, target));
     }
     let extension_diags =
-        crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, effect_facts.as_ref(), &diags);
+        crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, Some(&effect_facts), &diags);
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
     let lints = gate_diagnostics(&bundle, parse_teaching, diags, extension_diags)?;
     let ffi_result = match cross_target {
         Some(target) => crate::FFI::prepare_for_target(&bundle, target),
+        None if web_target => {
+            crate::FFI::prepare_for_target(&bundle, &bundle.build_facts.target_triple)
+        }
         None => crate::FFI::prepare(&bundle),
     };
     let ffi = match ffi_result {
         Ok(link) => link,
         Err(ffi_diags) => return Err(ffi_diags),
     };
-    if web_target {
-        let web_tir_errors: Vec<_> =
-            crate::Codegen::validate_web_tir_support(&bundle, ffi.as_ref())
-                .into_iter()
-                .map(|miss| {
-                    Diagnostic::error(
-                        "E-WEB-TIR-UNSUPPORTED",
-                        format!("web output cannot compile `{}` yet", miss.func_name),
-                        "web builds use the same checked executable body path as native builds; this function uses a construct the web output cannot lower today".to_string(),
-                        "move the unsupported work behind a Wasm export that uses covered Jet constructs, or simplify this function for the web target".to_string(),
-                        Some(miss.span),
-                    )
-                })
-                .collect();
-        if !web_tir_errors.is_empty() {
-            return Err(web_tir_errors);
-        }
-    }
-    let rust =
-        crate::Codegen::emit_bundle_dbg(&bundle, ffi.as_ref(), debug_linemap, active_os);
-    let web = if web_target {
-        Some(
-            crate::Codegen::emit_web(&bundle, mode, ffi.as_ref()).map_err(|miss| {
-                vec![Diagnostic::error(
-                    "E-WEB-TIR-UNSUPPORTED",
-                    format!("web output cannot compile `{}` yet", miss.func_name),
-                    "web emitter ability facts drifted after validation".to_string(),
-                    "report this compiler bug with the named function".to_string(),
-                    Some(miss.span),
-                )]
-            })?,
-        )
-    } else {
-        None
-    };
-    // D-PLUGIN1=B / D-DEP-WASM1=A / D-PLUGIN-EXPORT1=A (c81): the guest side of
-    // a `target: sandbox` build — a `.wit` world + wasm32 guest Rust, generated
-    // from the entry module's exportable (`Int`/`Float`-only) `pub fn`s.
-    let plugin = if plugin_target {
-        // E1260: every `pub fn` in the entry module must be exportable —
-        // never a silent skip (I3/I4).
-        let surface_errors = crate::PluginExport::validate_export_surface(&bundle);
-        if !surface_errors.is_empty() {
-            return Err(surface_errors);
-        }
-        let export_name = crate::PluginExport::resolve_export_name(&bundle);
-        // D-PLUGIN-VERSION1=A: freeze/diff the exported interface (E1257 on an
-        // incompatible change) before handing artifacts to the wasm build step.
-        crate::PluginExport::check_and_freeze_version(&bundle, &export_name)?;
-        Some(crate::Codegen::emit_plugin(&bundle, &rust, &export_name))
+    let plugin_name = if plugin_target {
+        Some(crate::PluginExport::resolve_export_name(&bundle))
     } else {
         None
     };
@@ -6197,19 +6702,91 @@ fn compile_bundle_path_opts_on_compiler_stack(
                 None,
             )]);
         }
-        let config = crate::LibraryExport::resolve_config(&bundle, explicit_output)?;
+        Some(crate::LibraryExport::resolve_config(
+            &bundle,
+            explicit_output,
+        )?)
+    } else {
+        None
+    };
+
+    apply_application_authority(&mut bundle, application_authority);
+    let request = mir_artifact_request_for_build(
+        &bundle,
+        mode,
+        profile,
+        web_target,
+        plugin_target,
+        library_target,
+    );
+    let request = if let Some(name) = plugin_name.as_deref() {
+        request.with_name(name)
+    } else if let Some(config) = library_config.as_ref() {
+        request.with_name(&config.name)
+    } else {
+        request
+    };
+    let (mir, artifact) = lower_checked_mir_program_for(&bundle, request);
+    let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
+    execution.ffi = ffi.as_ref();
+    execution.release_devtools_policy = release_devtools_policy_for_bundle(&bundle, profile);
+    execution.emit_types = true;
+    execution.emit_foreign = true;
+    execution.emit_metadata = false;
+    execution.emit_debug_linemap = debug_linemap;
+    execution.emit_runtime = true;
+    let web_release_devtools_policy = execution.release_devtools_policy.clone();
+    let rust = crate::Codegen::MIRRust::emit_mir_program(
+        &mir,
+        &crate::Codegen::MIRRust::MirRustConfig {
+            target: jet_foundation::Layout::TargetLayout::from_build_facts(&bundle.build_facts),
+            target_kind: if web_target {
+                crate::Codegen::MIRRust::MirRustTarget::WebWasm
+            } else {
+                crate::Codegen::MIRRust::MirRustTarget::Native
+            },
+            root_prefix: String::new(),
+            execution,
+        },
+    );
+    let web = if web_target {
+        Some(emit_web_from_mir(
+            &bundle,
+            &mir,
+            artifact,
+            &web_release_devtools_policy,
+        ))
+    } else {
+        None
+    };
+    // D-PLUGIN1=B / D-DEP-WASM1=A / D-PLUGIN-EXPORT1=A (c81): the guest side of
+    // a `target: sandbox` build — a `.wit` world + wasm32 guest Rust, generated
+    // from the checked MIR artifact plan's `Int`/`Float`/`Bool`/`Text` exports.
+    let plugin = if plugin_target {
+        // E1260: every `pub fn` in the entry module must be exportable —
+        // never a silent skip (I3/I4).
+        let surface_errors = crate::PluginExport::validate_export_surface(&bundle);
+        if !surface_errors.is_empty() {
+            return Err(surface_errors);
+        }
+        let export_name = plugin_name
+            .as_deref()
+            .expect("plugin artifact request has no selected export name");
+        crate::PluginExport::check_and_freeze_version(&bundle, export_name)?;
+        Some(crate::Codegen::emit_plugin(&mir, artifact, &rust))
+    } else {
+        None
+    };
+    if let Some(config) = library_config.as_ref() {
         let surface_errors = crate::LibraryExport::validate_export_surface(&bundle);
         if !surface_errors.is_empty() {
             return Err(surface_errors);
         }
         crate::LibraryExport::check_and_freeze_version(&bundle, &config.name)?;
-        Some(config)
-    } else {
-        None
-    };
+    }
     let library = library_config
         .as_ref()
-        .map(|config| crate::Codegen::emit_library(&bundle, &rust, &config.name, &config.bindings));
+        .map(|config| crate::Codegen::emit_library(&mir, artifact, &rust, &config.bindings));
     let comptime_inputs = std::mem::take(&mut bundle.comptime_inputs);
     let resolver = match AuthorityResolver::open(&bundle.project_root) {
         Ok(resolver) => Some(resolver),
@@ -6239,7 +6816,7 @@ fn compile_bundle_path_opts_on_compiler_stack(
             );
         }
     }
-    Ok(crate::CompileOutput {
+    let output = crate::CompileOutput {
         rust,
         lints,
         ffi,
@@ -6255,7 +6832,8 @@ fn compile_bundle_path_opts_on_compiler_stack(
         library_config,
         inferred_layer: bundle.inferred_layer,
         layer_ceiling: bundle.layer_ceiling,
-    })
+    };
+    Ok((output, bundle))
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -6308,7 +6886,7 @@ fn compile_src_on_compiler_stack(
     options: CompileSrcOptions,
     generated: bool,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-    crate::boot_tir_eval();
+    crate::boot_mir_eval();
     let source_for_parse = if generated {
         src.to_string()
     } else {
@@ -6324,7 +6902,7 @@ fn compile_src_on_compiler_stack(
     if !lex_diags.is_empty() {
         return Err(lex_diags);
     }
-    let mut prog = crate::Parser::parse(&toks)?;
+    let mut prog = crate::Parser::parse_with_source(&toks, &source_for_parse)?;
     let mut bundle = crate::AST::ProgramBundle {
         entry: 0,
         project_root: std::path::PathBuf::from("."),
@@ -6346,6 +6924,7 @@ fn compile_src_on_compiler_stack(
             user_policy_declarations: prog.user_policy_declarations.clone(),
             rule_facts: std::mem::take(&mut prog.rule_facts),
         }],
+        devtools_registry: crate::AST::DevtoolsRegistry::default(),
         parse_teaching: Vec::new(),
         used_core: std::collections::HashSet::new(),
         ffi_callback_fns: std::collections::HashSet::new(),
@@ -6389,59 +6968,46 @@ fn compile_src_on_compiler_stack(
     if !errors.is_empty() {
         return Err(errors);
     }
-    if options.web_target {
-        let machine = crate::TargetMachine::TargetMachine::wasm_browser();
-        bundle.build_facts.target_triple = machine.triple.clone();
-        let usage =
-            crate::TargetMachine::TargetMachineUse::from_core_apis(bundle.used_core.iter());
-        let compiler_identity = format!(
-            "{}@{}#{}",
-            crate::Syntax::BINARY_NAME,
-            env!("CARGO_PKG_VERSION"),
-            option_env!("JET_COMPILER_BUILD_ID").unwrap_or(env!("CARGO_PKG_VERSION")),
-        );
-        bundle.build_facts.target_dossier = machine.target_dossier(
-            &usage,
-            crate::TargetMachine::ExecutionTier::Aot,
-            compiler_identity,
-            "none",
-        );
-    }
-    let ffi = match crate::FFI::prepare(&bundle) {
+    refresh_target_dossier(&mut bundle, false, options.web_target);
+    let ffi = match options.web_target {
+        true => crate::FFI::prepare_for_target(&bundle, &bundle.build_facts.target_triple),
+        false => crate::FFI::prepare(&bundle),
+    };
+    let ffi = match ffi {
         Ok(link) => link,
         Err(ffi_diags) => return Err(ffi_diags),
     };
-    if options.web_target {
-        let web_tir_errors: Vec<_> =
-            crate::Codegen::validate_web_tir_support(&bundle, ffi.as_ref())
-                .into_iter()
-                .map(|miss| {
-                    Diagnostic::error(
-                        "E-WEB-TIR-UNSUPPORTED",
-                        format!("web output cannot compile `{}` yet", miss.func_name),
-                        "web builds use the same checked executable body path as native builds; this function uses a construct the web output cannot lower today".to_string(),
-                        "move the unsupported work behind a Wasm export that uses covered Jet constructs, or simplify this function for the web target".to_string(),
-                        Some(miss.span),
-                    )
-                })
-                .collect();
-        if !web_tir_errors.is_empty() {
-            return Err(web_tir_errors);
-        }
-    }
-    let rust = crate::Codegen::emit_bundle(&bundle, mode, ffi.as_ref());
+    let request =
+        mir_artifact_request_for_build(&bundle, mode, "dev", options.web_target, false, false);
+    let (mir, artifact) = lower_checked_mir_program_for(&bundle, request);
+    let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
+    execution.ffi = ffi.as_ref();
+    execution.emit_types = true;
+    execution.emit_foreign = true;
+    execution.emit_metadata = false;
+    execution.emit_debug_linemap = false;
+    execution.emit_runtime = true;
+    let web_release_devtools_policy = execution.release_devtools_policy.clone();
+    let rust = crate::Codegen::MIRRust::emit_mir_program(
+        &mir,
+        &crate::Codegen::MIRRust::MirRustConfig {
+            target: jet_foundation::Layout::TargetLayout::host(),
+            target_kind: if options.web_target {
+                crate::Codegen::MIRRust::MirRustTarget::WebWasm
+            } else {
+                crate::Codegen::MIRRust::MirRustTarget::Native
+            },
+            root_prefix: String::new(),
+            execution,
+        },
+    );
     let web = if options.web_target {
-        Some(
-            crate::Codegen::emit_web(&bundle, mode, ffi.as_ref()).map_err(|miss| {
-                vec![Diagnostic::error(
-                    "E-WEB-TIR-UNSUPPORTED",
-                    format!("web output cannot compile `{}` yet", miss.func_name),
-                    "web emitter ability facts drifted after validation".to_string(),
-                    "report this compiler bug with the named function".to_string(),
-                    Some(miss.span),
-                )]
-            })?,
-        )
+        Some(emit_web_from_mir(
+            &bundle,
+            &mir,
+            artifact,
+            &web_release_devtools_policy,
+        ))
     } else {
         None
     };
@@ -6624,14 +7190,13 @@ pub fn check_file_with_effect_facts_for_run_and_entry_with_overlay(
     crate::Sema::SemIndexEffectFacts,
 ) {
     let overlays = overlay.into_iter().collect::<Vec<_>>();
-    let (diagnostics, bundle, facts, _) =
-        check_file_with_effect_facts_impl_for_run_with_overlays(
-            file,
-            &overlays,
-            profile,
-            setting_overrides,
-            entry_fn,
-        );
+    let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl_for_run_with_overlays(
+        file,
+        &overlays,
+        profile,
+        setting_overrides,
+        entry_fn,
+    );
     (diagnostics, bundle, facts)
 }
 
@@ -6650,14 +7215,13 @@ pub fn check_file_with_effect_facts_for_run_and_entry_with_source_closure(
         .iter()
         .map(|(path, source)| (path.as_path(), source.as_str()))
         .collect::<Vec<_>>();
-    let (diagnostics, bundle, facts, _) =
-        check_file_with_effect_facts_impl_for_run_with_overlays(
-            file,
-            &overlays,
-            profile,
-            setting_overrides,
-            entry_fn,
-        );
+    let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl_for_run_with_overlays(
+        file,
+        &overlays,
+        profile,
+        setting_overrides,
+        entry_fn,
+    );
     (diagnostics, bundle, facts)
 }
 
@@ -6723,19 +7287,16 @@ pub fn check_file_with_checked_source_bundle_for_run_and_entry(
     setting_overrides: &BTreeMap<String, String>,
     entry_fn: Option<&str>,
 ) -> (Vec<Diagnostic>, Option<CheckedSourceBundle>) {
-    let (diagnostics, bundle, facts, _) =
-        check_file_with_effect_facts_impl_for_run_with_overlays(
-            file,
-            overlays,
-            profile,
-            setting_overrides,
-            entry_fn,
-        );
+    let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl_for_run_with_overlays(
+        file,
+        overlays,
+        profile,
+        setting_overrides,
+        entry_fn,
+    );
     let checked = bundle.map(|bundle| CheckedSourceBundle::new(bundle, facts));
     (diagnostics, checked)
 }
-
-
 
 pub fn check_file_with_effect_facts_for_output(
     file: &str,
@@ -6816,7 +7377,6 @@ pub fn check_file_with_effect_facts_for_output_with_source_closure(
     (diagnostics, bundle, facts)
 }
 
-
 pub fn check_file_with_effect_facts_incremental(
     file: &str,
     overlay: Option<(&Path, &str)>,
@@ -6862,6 +7422,69 @@ pub fn check_file_with_effect_facts_incremental_overlays(
         &BTreeMap::new(),
         None,
     )
+}
+
+/// Check an edited source through the incremental bundle pipeline and attach
+/// the sema-owned hot-swap verdict to the resulting semantic facts.
+///
+/// `old` is the resident generation's bundle. The returned decision carries
+/// canonical changed-function identities and the cache's measured recheck
+/// cone; adapters must consume those facts instead of re-deriving invalidation.
+pub fn check_file_with_hot_swap_incremental(
+    old: &crate::AST::ProgramBundle,
+    file: &str,
+    overlay: Option<(&Path, &str)>,
+    is_lsp: bool,
+    module_name: &str,
+    cache: &mut crate::Sema::IncrementalSemaCache,
+) -> (
+    Vec<Diagnostic>,
+    Option<crate::AST::ProgramBundle>,
+    crate::Sema::SemIndexEffectFacts,
+    Option<jet_foundation::HotSwap::HotSwapDecision>,
+) {
+    let overlays = overlay.into_iter().collect::<Vec<_>>();
+    let (diagnostics, bundle, facts, decision, _) = check_file_with_hot_swap_incremental_overlays(
+        old,
+        file,
+        &overlays,
+        is_lsp,
+        module_name,
+        cache,
+    );
+    (diagnostics, bundle, facts, decision)
+}
+
+/// Overlay-aware form of [`check_file_with_hot_swap_incremental`].
+pub fn check_file_with_hot_swap_incremental_overlays(
+    old: &crate::AST::ProgramBundle,
+    file: &str,
+    overlays: &[(&Path, &str)],
+    is_lsp: bool,
+    module_name: &str,
+    cache: &mut crate::Sema::IncrementalSemaCache,
+) -> (
+    Vec<Diagnostic>,
+    Option<crate::AST::ProgramBundle>,
+    crate::Sema::SemIndexEffectFacts,
+    Option<jet_foundation::HotSwap::HotSwapDecision>,
+    Vec<std::path::PathBuf>,
+) {
+    cache.clear_measurement();
+    let (mut diagnostics, bundle, facts, source_closure) =
+        check_file_with_effect_facts_incremental_overlays(file, overlays, is_lsp, cache);
+    let rechecked_items = cache.stats().recomputed_items;
+    let decision =
+        bundle.as_ref().and_then(|new| {
+            match crate::Sema::HotSwap::type_stable_decision(old, new, module_name) {
+                Ok(decision) => Some(decision.with_rechecked_items(rechecked_items)),
+                Err(errors) => {
+                    diagnostics.extend(errors);
+                    None
+                }
+            }
+        });
+    (diagnostics, bundle, facts, decision, source_closure)
 }
 
 pub(crate) fn check_file_with_effect_facts_incremental_overlays_prepared(
@@ -7216,7 +7839,7 @@ fn check_eval_on_compiler_stack(
     if !lex_diags.is_empty() {
         return (lex_diags, None, crate::Sema::SemIndexEffectFacts::default());
     }
-    let mut prog = match crate::Parser::parse(&toks) {
+    let mut prog = match crate::Parser::parse_with_source(&toks, &source_for_parse) {
         Ok(p) => p,
         Err(ds) => return (ds, None, crate::Sema::SemIndexEffectFacts::default()),
     };
@@ -7245,6 +7868,7 @@ fn check_eval_on_compiler_stack(
             user_policy_declarations: prog.user_policy_declarations.clone(),
             rule_facts: std::mem::take(&mut prog.rule_facts),
         }],
+        devtools_registry: crate::AST::DevtoolsRegistry::default(),
         parse_teaching: Vec::new(),
         used_core: std::collections::HashSet::new(),
         ffi_callback_fns: std::collections::HashSet::new(),
@@ -7290,7 +7914,7 @@ pub fn compile_tests(
     file: &str,
     coverage: bool,
 ) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
-    compile_tests_with_profile(file, coverage, "dev")
+    compile_tests_with_profile(file, coverage, "dev", &BTreeMap::new())
 }
 
 /// Compile a test harness with the selected named profile.
@@ -7298,18 +7922,23 @@ pub fn compile_tests_with_profile(
     file: &str,
     coverage: bool,
     profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
 ) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
-    crate::run_compiler_work(|| compile_tests_on_compiler_stack(file, coverage, profile))
+    crate::run_compiler_work(|| {
+        compile_tests_on_compiler_stack(file, coverage, profile, setting_overrides)
+    })
 }
 
 fn compile_tests_on_compiler_stack(
     file: &str,
     coverage: bool,
     profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
 ) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
-    seed_build_facts(&mut bundle, profile, false, &BTreeMap::new())?;
-    let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Test);
+    seed_build_facts(&mut bundle, profile, false, setting_overrides)?;
+    let mode = crate::Sema::CompileMode::Test;
+    let diags = crate::Sema::check_bundle(&mut bundle, mode);
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
     let _lints = classify_diagnostics(
         &bundle,
@@ -7320,20 +7949,45 @@ fn compile_tests_on_compiler_stack(
         Ok(link) => link,
         Err(ffi_diags) => return Err(ffi_diags),
     };
-    Ok((
-        crate::Codegen::emit_bundle_tests_cov(&bundle, ffi.as_ref(), coverage),
-        ffi,
-    ))
+    let build_mode = if coverage {
+        jet_foundation::MIR::MirArtifactBuildMode::Coverage
+    } else {
+        jet_foundation::MIR::MirArtifactBuildMode::Test
+    };
+    let request = jet_foundation::MIR::MirArtifactRequest::new(
+        jet_foundation::MIR::MirArtifactTarget::RustAot,
+        jet_foundation::MIR::MirArtifactKind::TestExecutable,
+        build_mode,
+    );
+    let (mir, artifact) = lower_checked_mir_program_for(&bundle, request);
+    let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
+    execution.ffi = ffi.as_ref();
+    execution.release_devtools_policy = release_devtools_policy_for_bundle(&bundle, profile);
+    execution.emit_types = true;
+    execution.emit_foreign = true;
+    execution.emit_metadata = false;
+    execution.emit_debug_linemap = false;
+    execution.emit_runtime = true;
+    let rust = crate::Codegen::MIRRust::emit_mir_program(
+        &mir,
+        &crate::Codegen::MIRRust::MirRustConfig {
+            target: jet_foundation::Layout::TargetLayout::host(),
+            target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+            root_prefix: String::new(),
+            execution,
+        },
+    );
+    Ok((rust, ffi))
 }
 
-/// D-CMD-OVERRIDE1=C: compile an expert `fn test(...)` command override. The
-/// entry wrapper is synthesized before sema; codegen receives the same checked
-/// bundle as the stock harness and only changes the outer command adapter.
+/// D-CMD-OVERRIDE1=C: compile an expert `fn test(...)` command override.
+/// The checked TestOverride artifact selects that callable as its entry; the
+/// canonical MIRRust adapter owns the outer command harness.
 pub fn compile_test_override(
     file: &str,
     coverage: bool,
 ) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
-    compile_test_override_with_profile(file, coverage, "dev")
+    compile_test_override_with_profile(file, coverage, "dev", &BTreeMap::new())
 }
 
 /// Compile a command override with the selected named profile.
@@ -7341,13 +7995,11 @@ pub fn compile_test_override_with_profile(
     file: &str,
     coverage: bool,
     profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
 ) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
-    compile_command_override(
-        file,
-        crate::Codegen::CommandOverrideKind::Test,
-        coverage,
-        profile,
-    )
+    crate::run_compiler_work(|| {
+        compile_test_override_on_compiler_stack(file, coverage, profile, setting_overrides)
+    })
 }
 
 /// D-TESTKIT1=A (c308 pass 2, gap #1): a CLI-level error selecting the `jet
@@ -7387,10 +8039,29 @@ fn compile_fuzz_on_compiler_stack(
         Ok(link) => link,
         Err(ffi_diags) => return Err(FuzzCompileError::Diagnostics(ffi_diags)),
     };
-    match crate::Codegen::emit_bundle_fuzz(&bundle, ffi.as_ref(), file, test_name) {
-        Ok(code) => Ok((code, ffi)),
-        Err(msg) => Err(FuzzCompileError::Target(msg)),
-    }
+    let _ = test_name;
+    let request = jet_foundation::MIR::MirArtifactRequest::new(
+        jet_foundation::MIR::MirArtifactTarget::RustAot,
+        jet_foundation::MIR::MirArtifactKind::FuzzExecutable,
+        jet_foundation::MIR::MirArtifactBuildMode::Fuzz,
+    );
+    let (mir, artifact) = crate::Codegen::TIR::lower_checked_mir_program_for(&bundle, request)
+        .unwrap_or_else(|error| jet_foundation::ice!(Some(error.span), "{error}"));
+    mir.validate().unwrap_or_else(|error| {
+        jet_foundation::ice!(None, "canonical MIR validation failed: {error}")
+    });
+    let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
+    execution.ffi = ffi.as_ref();
+    let rust = crate::Codegen::MIRRust::emit_mir_program(
+        &mir,
+        &crate::Codegen::MIRRust::MirRustConfig {
+            target: jet_foundation::Layout::TargetLayout::host(),
+            target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+            root_prefix: String::new(),
+            execution,
+        },
+    );
+    Ok((rust, ffi))
 }
 
 /// c-devserver (owner-directed 2026-07-01): `jet dev <file>` when the file
@@ -7409,33 +8080,38 @@ pub fn compile_bundle_path_with_entry(
     file: &str,
     entry_fn: &str,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-    compile_bundle_path_with_entry_and_settings(file, entry_fn, &BTreeMap::new())
+    compile_bundle_path_with_entry_and_settings(file, entry_fn, "dev", &BTreeMap::new())
 }
 
 pub fn compile_bundle_path_with_entry_and_settings(
     file: &str,
     entry_fn: &str,
+    profile: &str,
     setting_overrides: &BTreeMap<String, String>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     crate::run_compiler_work(|| {
-        compile_bundle_path_with_entry_on_compiler_stack(file, entry_fn, setting_overrides)
+        compile_bundle_path_with_entry_on_compiler_stack(
+            file,
+            entry_fn,
+            profile,
+            setting_overrides,
+        )
     })
 }
 
 fn compile_bundle_path_with_entry_on_compiler_stack(
     file: &str,
     entry_fn: &str,
+    profile: &str,
     setting_overrides: &BTreeMap<String, String>,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
-    seed_build_facts(&mut bundle, "dev", false, setting_overrides)?;
+    seed_build_facts(&mut bundle, profile, false, setting_overrides)?;
     swap_entry_point(&mut bundle, entry_fn);
     let mode = crate::Sema::CompileMode::Run;
-    let diags = crate::Sema::check_bundle(&mut bundle, mode);
+    let (diags, effect_facts) = crate::Sema::check_bundle_with_effect_facts(&mut bundle, mode);
     let extension_diags =
-        crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, None, &diags);
-    // Entry-swap uses plain `check_bundle` (no effect-facts return). Pass
-    // `None` → omit `ReadEffects`; do not invent effect rows (D-DX5-HOOK1).
+        crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, Some(&effect_facts), &diags);
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
     let lints = gate_diagnostics(&bundle, parse_teaching, diags, extension_diags)?;
     let ffi = match crate::FFI::prepare(&bundle) {
@@ -7443,11 +8119,24 @@ fn compile_bundle_path_with_entry_on_compiler_stack(
         Err(ffi_diags) => return Err(ffi_diags),
     };
     // D-OSTARGET1=A: `jet dev`'s entry-swap path never cross-compiles — host OS.
-    let rust = crate::Codegen::emit_bundle_dbg(
-        &bundle,
-        ffi.as_ref(),
-        false,
-        crate::Syntax::OSTarget::host(),
+    let request = mir_artifact_request_for_build(&bundle, mode, profile, false, false, false);
+    let (mir, artifact) = lower_checked_mir_program_for(&bundle, request);
+    let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
+    execution.ffi = ffi.as_ref();
+    execution.release_devtools_policy = release_devtools_policy_for_bundle(&bundle, profile);
+    execution.emit_types = true;
+    execution.emit_foreign = true;
+    execution.emit_metadata = false;
+    execution.emit_debug_linemap = false;
+    execution.emit_runtime = true;
+    let rust = crate::Codegen::MIRRust::emit_mir_program(
+        &mir,
+        &crate::Codegen::MIRRust::MirRustConfig {
+            target: jet_foundation::Layout::TargetLayout::host(),
+            target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+            root_prefix: String::new(),
+            execution,
+        },
     );
     let comptime_inputs = std::mem::take(&mut bundle.comptime_inputs);
     Ok(crate::CompileOutput {
@@ -7579,26 +8268,23 @@ pub fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) 
         .collect();
     let call = Expr::Call(Call {
         name: call_name,
-        name_span: target.name_span,
+        name_span: zero,
         type_args: Vec::new(),
         args,
         resolved_ret: None,
         range_checked: false,
         widen_approx: false,
     });
-    let body = if target.return_type.is_some() {
-        vec![Stmt::Return(Some(call), zero)]
-    } else {
-        vec![Stmt::Expr(call)]
-    };
+    let body = vec![Stmt::Return(Some(call), zero)];
 
     items.push(Item::Func(Func {
-        span: target.span,
+        span: zero,
         is_pub: false,
+        is_comptime: false,
         is_package_pub: false,
         external_type: None,
         name: "run".to_string(),
-        name_span: target.name_span,
+        name_span: zero,
         meta: None,
         type_params: target.type_params.clone(),
         head_pattern: None,
@@ -7642,34 +8328,20 @@ pub fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) 
         inline_foreign: None,
         undo: None,
         markers: Vec::new(),
-        compiler_generated: false,
+        compiler_generated: true,
         body,
     }));
 }
 
-fn compile_command_override(
+fn compile_test_override_on_compiler_stack(
     file: &str,
-    kind: crate::Codegen::CommandOverrideKind,
     coverage: bool,
     profile: &str,
-) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
-    crate::run_compiler_work(|| {
-        compile_command_override_on_compiler_stack(file, kind, coverage, profile)
-    })
-}
-
-fn compile_command_override_on_compiler_stack(
-    file: &str,
-    kind: crate::Codegen::CommandOverrideKind,
-    coverage: bool,
-    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
 ) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
-    seed_build_facts(&mut bundle, profile, false, &BTreeMap::new())?;
-    swap_command_entry_point(&mut bundle, kind);
-    let mode = match kind {
-        crate::Codegen::CommandOverrideKind::Test => crate::Sema::CompileMode::TestOverride,
-    };
+    seed_build_facts(&mut bundle, profile, false, setting_overrides)?;
+    let mode = crate::Sema::CompileMode::TestOverride;
     let diags = crate::Sema::check_bundle(&mut bundle, mode);
     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
     let _lints = classify_diagnostics(
@@ -7681,166 +8353,35 @@ fn compile_command_override_on_compiler_stack(
         Ok(link) => link,
         Err(ffi_diags) => return Err(ffi_diags),
     };
-    let rust = crate::Codegen::emit_bundle_command_override(&bundle, ffi.as_ref(), kind, coverage);
+    let build_mode = if coverage {
+        jet_foundation::MIR::MirArtifactBuildMode::Coverage
+    } else {
+        jet_foundation::MIR::MirArtifactBuildMode::Test
+    };
+    let request = jet_foundation::MIR::MirArtifactRequest::new(
+        jet_foundation::MIR::MirArtifactTarget::RustAot,
+        jet_foundation::MIR::MirArtifactKind::TestOverride,
+        build_mode,
+    );
+    let (mir, artifact) = lower_checked_mir_program_for(&bundle, request);
+    let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
+    execution.ffi = ffi.as_ref();
+    execution.release_devtools_policy = release_devtools_policy_for_bundle(&bundle, profile);
+    execution.emit_types = true;
+    execution.emit_foreign = true;
+    execution.emit_metadata = false;
+    execution.emit_debug_linemap = false;
+    execution.emit_runtime = true;
+    let rust = crate::Codegen::MIRRust::emit_mir_program(
+        &mir,
+        &crate::Codegen::MIRRust::MirRustConfig {
+            target: jet_foundation::Layout::TargetLayout::host(),
+            target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+            root_prefix: String::new(),
+            execution,
+        },
+    );
     Ok((rust, ffi))
-}
-
-/// D-CMD-OVERRIDE1=C: install the command override as the program entry.
-///
-/// `fn test(suite: TestSuite)` owns command policy, but Jet's only entry is
-/// `fn run` (S12), so park any existing one as
-/// `__jet___unused_run` (still callable under that name) and inject
-/// `fn run() { test(core.testing.test_suite()) }` — zero params, built from the
-/// target's own first-parameter convention so the suite is passed exactly as
-/// declared.
-///
-/// The installed name is `Codegen::ENTRY_FN`, which is also what
-/// `Codegen::command_override_entry` looks up to decide the harness emits this
-/// item and to name it in the generated `main`. One constant, one lookup: the
-/// call site cannot name an entry this function did not install.
-fn swap_command_entry_point(
-    bundle: &mut crate::AST::ProgramBundle,
-    kind: crate::Codegen::CommandOverrideKind,
-) {
-    use crate::Diagnostics::Span;
-    use crate::AST::{Call, CallArg, CallArgFlags, Expr, Func, ImportDecl, ImportKind, Item, Stmt};
-
-    // S12: the program entry the override wrapper is installed as, and the name
-    // `Codegen::command_override_entry` looks up when it emits the harness.
-    let run_fn = crate::Codegen::ENTRY_FN;
-    let (entry_name, suite_name, suite_method) = match kind {
-        crate::Codegen::CommandOverrideKind::Test => ("test", "TestSuite", "test_suite"),
-    };
-    let entry_module = &mut bundle.modules[bundle.entry];
-    let Some(target) = entry_module.items.iter().find_map(|item| match item {
-        Item::Func(function) if function.name == entry_name => Some(function.clone()),
-        _ => None,
-    }) else {
-        return;
-    };
-    if entry_module
-        .items
-        .iter()
-        .any(|item| matches!(item, Item::Func(function) if function.name == run_fn))
-        && !entry_module.script_body.is_empty()
-    {
-        return;
-    }
-
-    let zero = Span::new(0, 0);
-    let alias_base = format!("__jet_command_{}", suite_name.to_ascii_lowercase());
-    let mut alias = alias_base.clone();
-    let mut suffix = 0;
-    while entry_module
-        .imports
-        .iter()
-        .any(|import| import.import_alias() == alias)
-    {
-        suffix += 1;
-        alias = format!("{alias_base}_{suffix}");
-    }
-    let existing_testing_alias = entry_module.imports.iter().find_map(|import| {
-        matches!(&import.kind, ImportKind::Module(name, _) if name == "core.testing")
-            .then(|| (!import.alias.is_empty()).then(|| import.alias.clone()))
-            .flatten()
-    });
-    if let Some(existing_alias) = existing_testing_alias {
-        alias = existing_alias;
-    } else {
-        entry_module.imports.push(ImportDecl {
-            kind: ImportKind::Module("core.testing".to_string(), zero),
-            alias: alias.clone(),
-            alias_span: zero,
-            span: zero,
-            item_spans: Vec::new(),
-            local_spans: Vec::new(),
-            is_pub: false,
-            is_package_pub: false,
-            inline_version: None,
-        });
-    }
-
-    for item in entry_module.items.iter_mut() {
-        if let Item::Func(function) = item {
-            if function.name == run_fn {
-                function.name = jet_foundation::Names::mangle_generated("unused_run");
-                if function.span == function.name_span {
-                    function.return_type = None;
-                    function.return_type_span = None;
-                }
-            }
-        }
-    }
-
-    let suite_expr = Expr::MethodCall {
-        receiver: Box::new(Expr::Ident(alias, zero)),
-        method: suite_method.to_string(),
-        method_span: zero,
-        owner_type_args: Vec::new(),
-        type_args: Vec::new(),
-        args: Vec::new(),
-        recv_type: None,
-        resolved_ret: None,
-        checked_widen: false,
-    };
-    let args = if target.params.is_empty() {
-        Vec::new()
-    } else {
-        vec![CallArg {
-            convention: target.params[0].convention,
-            expr: suite_expr,
-            span: zero,
-            flags: CallArgFlags::default(),
-            label: None,
-            spread: false,
-        }]
-    };
-    let call = Expr::Call(Call {
-        name: entry_name.to_string(),
-        name_span: target.name_span,
-        type_args: Vec::new(),
-        args,
-        resolved_ret: None,
-        range_checked: false,
-        widen_approx: false,
-    });
-    let body = if target.return_type.is_some() {
-        vec![Stmt::Return(Some(call), zero)]
-    } else {
-        vec![Stmt::Expr(call)]
-    };
-    let mut wrapper = target;
-    wrapper.name = run_fn.to_string();
-    wrapper.name_span = zero;
-    wrapper.params = Vec::new();
-    wrapper.type_params = Vec::new();
-    wrapper.head_pattern = None;
-    wrapper.meta = None;
-    wrapper.is_pub = false;
-    wrapper.is_package_pub = false;
-    wrapper.external_type = None;
-    wrapper.is_unsafe = false;
-    wrapper.unsafe_reason = None;
-    wrapper.unsafe_span = None;
-    wrapper.is_pure = false;
-    wrapper.is_job = false;
-    wrapper.job_span = None;
-    wrapper.job_metadata = None;
-    wrapper.every = None;
-    // The wrapper deletes the target's parameters, so every decoded fact that
-    // names one has to go with them: a copied `#Pre`/`#Post` clause would read
-    // `suite` in an item with no `suite`, and sema would report E0102 against a
-    // body the compiler wrote (I2). The contracts still run where they belong —
-    // on the target this wrapper calls. `inline_foreign` goes for the same
-    // reason in the other direction: the wrapper's body is Jet statements, so a
-    // copied `#FFI(<lang>)` marker would make codegen emit the target's foreign
-    // source as the entry and never call the target at all.
-    wrapper.pre = Vec::new();
-    wrapper.post = Vec::new();
-    wrapper.inline_foreign = None;
-    wrapper.markers = Vec::new();
-    wrapper.body = body;
-    entry_module.items.push(Item::Func(Func { ..wrapper }));
 }
 
 #[cfg(test)]
@@ -7856,8 +8397,7 @@ mod tests {
         });
         assert_eq!(
             diagnostic.fix,
-            "pass `--allow-gpu` for this run, or grant it in package/workspace policy"
+            "Pass `--allow-gpu` for this run, or grant it in package/workspace policy"
         );
     }
-
 }

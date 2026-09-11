@@ -1,9 +1,16 @@
 //! D-FFI-CPP1=A: clang-AST C++ surfaces lowered to a cached C ABI shim.
 //! Clang's JSONValue is the declaration source of truth. The binder never parses
 //! header text, and every native input participates in provenance/cache identity.
+//! A local C-linkage declaration may also select the archive as the implementation
+//! carrier for the canonical C binder; that path emits no invented C++ facade.
 
-use crate::ForeignBridge::IdentityBuilder;
-use crate::JSON::{self, JSONValue};
+use crate::Bindgen::BindingPlan;
+use crate::ForeignBridge::{
+    ForeignArtifactCoverage, ForeignBoundaryContract, ForeignBoundaryIdentity,
+    ForeignEvidenceBasis, IdentityBuilder,
+};
+use jet_foundation::DataTree::DataTree;
+use crate::JSON;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -32,6 +39,40 @@ pub struct BindOptions {
     pub templates: Vec<TemplateInstantiation>,
 }
 
+/// Checked descriptor overlay for a C++ library.
+///
+/// The binder does not infer semantics from generated names. Callers provide
+/// the stable overlay identity and its source identity explicitly; both are
+/// carried into cache/provenance and therefore invalidate a replacement when
+/// the overlay changes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CppOverlay {
+    pub identity: String,
+    pub source: String,
+}
+
+impl Default for CppOverlay {
+    fn default() -> Self {
+        Self {
+            identity: "none".into(),
+            source: "none".into(),
+        }
+    }
+}
+
+impl CppOverlay {
+    pub fn new(identity: impl Into<String>, source: impl Into<String>) -> Self {
+        Self {
+            identity: identity.into(),
+            source: source.into(),
+        }
+    }
+
+    fn stable_identity(&self) -> String {
+        format!("identity={};source={}", self.identity, self.source)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BindResult {
     pub source: String,
@@ -40,6 +81,11 @@ pub struct BindResult {
     /// ordinary `use cpp.<lib>` discovery.
     pub archive: PathBuf,
     pub provenance: String,
+    /// Adaptation plans carried with this generated surface; every plan points
+    /// back to the same canonical boundary digest.
+    pub plans: Vec<BindingPlan>,
+    /// One boundary row consumed by inspect, comparison, and mixed debugging.
+    pub boundary: ForeignBoundaryContract,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,7 +177,25 @@ struct Surface {
 }
 
 pub fn bind(header: &Path, cache: &Path, options: &BindOptions) -> Result<BindResult, BindError> {
+    bind_with_overlay(header, cache, options, &CppOverlay::default())
+}
+
+/// Bind C++ with an explicit checked overlay identity.
+pub fn bind_with_overlay(
+    header: &Path,
+    cache: &Path,
+    options: &BindOptions,
+    overlay: &CppOverlay,
+) -> Result<BindResult, BindError> {
     validate_options(options)?;
+    if [overlay.identity.as_str(), overlay.source.as_str()]
+        .into_iter()
+        .any(|value| value.bytes().any(|byte| matches!(byte, b'\n' | b'\r')))
+    {
+        return Err(BindError::Source(
+            "C++ overlay identities cannot contain line breaks".into(),
+        ));
+    }
     let mut resolved = options.clone();
     resolved.clang = std::fs::canonicalize(&options.clang).map_err(|e| {
         BindError::IO(format!(
@@ -151,7 +215,9 @@ pub fn bind(header: &Path, cache: &Path, options: &BindOptions) -> Result<BindRe
     let header_bytes = std::fs::read(&canonical)
         .map_err(|e| BindError::IO(format!("could not read `{}`: {e}", canonical.display())))?;
     let asts = clang_asts(&canonical, options)?;
+    let source_dir = canonical.parent().unwrap_or_else(|| Path::new("."));
     let mut ast_identity = Vec::new();
+    let mut has_c_abi_declarations = false;
     let mut surface = Surface {
         classes: Vec::new(),
         functions: Vec::new(),
@@ -163,20 +229,25 @@ pub fn bind(header: &Path, cache: &Path, options: &BindOptions) -> Result<BindRe
         let parsed = JSON::parse(&String::from_utf8_lossy(&ast.stdout)).map_err(|e| {
             BindError::ToolFailed(format!("clang returned malformed AST data: {e}"))
         })?;
+        has_c_abi_declarations |= has_local_c_abi_declaration(&parsed, source_dir);
         let projected = project_surface(&parsed, &canonical, &options.namespaces)?;
         surface.classes.extend(projected.classes);
         surface.functions.extend(projected.functions);
         surface.templates.extend(projected.templates);
     }
     instantiate_templates(&mut surface, &options.templates)?;
-    if surface.classes.is_empty() && surface.functions.is_empty() {
+    if surface.classes.is_empty()
+        && surface.functions.is_empty()
+        && !has_c_abi_declarations
+    {
         return Err(BindError::Source(
-            "clang found no bindable public scalar declarations in the selected namespaces".into(),
+            "clang found no bindable public scalar declarations in the selected namespaces"
+                .to_string(),
         ));
     }
 
     let shim = render_cpp(&canonical, &options.lib, &surface);
-    let jet = render_jet(&options.lib, &surface);
+    let jet_without_boundary = render_jet(&options.lib, &surface);
     let clang_version = tool_version(&options.clang, "clang++")?;
     let archiver_version = tool_version(&options.archiver, "ar")?;
     let digest = binding_identity(
@@ -186,10 +257,84 @@ pub fn bind(header: &Path, cache: &Path, options: &BindOptions) -> Result<BindRe
         &clang_version,
         &archiver_version,
         &shim,
-        &jet,
+        &jet_without_boundary,
         options,
         &options.target,
+        overlay,
     );
+    let descriptor = crate::AST::binder_descriptor(crate::AST::ForeignLanguage::Cpp)
+        .ok_or_else(|| BindError::Source("C++ binder descriptor is not registered".into()))?;
+    let boundary_identity = ForeignBoundaryIdentity::new(
+        format!(
+            "header:{}:sha256-{}",
+            canonical.display(),
+            crate::SHA256::sha256_hex(&header_bytes)
+        ),
+        overlay.stable_identity(),
+        format!("cpp-clang;schema={SCHEMA};descriptor={}", descriptor.stamp()),
+        format!(
+            "shim:sha256-{};jet:sha256-{}",
+            crate::SHA256::sha256_hex(shim.as_bytes()),
+            crate::SHA256::sha256_hex(jet_without_boundary.as_bytes())
+        ),
+        format!(
+            "clang={};ar={}",
+            flatten_tool_version(&clang_version),
+            flatten_tool_version(&archiver_version),
+        ),
+        options.target.clone(),
+    );
+    let mut boundary =
+        ForeignBoundaryContract::new(*descriptor, options.lib.clone(), boundary_identity);
+    let c_abi_carrier = surface.classes.is_empty() && surface.functions.is_empty();
+    if c_abi_carrier {
+        boundary.ownership =
+            "canonical C owner/view contract remains authoritative; no C++ handle facade".into();
+        boundary.cleanup =
+            "canonical C close operation owns cleanup; CppBind materializes implementation only"
+                .into();
+        boundary.errors =
+            "native C status values remain observable through the canonical C projection".into();
+        boundary.exceptions =
+            "C++ implementation is compiled in the carrier; no C++ exception facade is generated"
+                .into();
+        boundary.callbacks = "no CppBind callback projection is added by the carrier".into();
+        boundary.task_thread =
+            "no CppBind task/thread projection is added by the carrier".into();
+        boundary.copy_cost =
+            "the carrier adds no C++ facade conversions; canonical C projection owns ABI copies"
+                .into();
+    } else {
+        boundary.ownership =
+            "constructors return owned opaque handles; methods and close consume handles".into();
+        boundary.cleanup =
+            "generated close and consuming methods release native slots exactly once".into();
+        boundary.errors =
+            "caught C++ exceptions map to checked CppError; native error slot is consumed".into();
+        boundary.exceptions = "std::exception and unknown exceptions are caught at the shim".into();
+        boundary.callbacks =
+            "callback pointers cross only through declared scalar signatures; captured state is not inferred"
+                .into();
+        boundary.task_thread =
+            "callback/task/thread crossing remains an explicit overlay and is not guessed from names"
+                .into();
+        boundary.copy_cost =
+            "scalar arguments/results copy at the C ABI; classes never copy native state".into();
+    }
+    boundary.assumptions = vec![
+        "clang JSON AST is the declaration source of truth".into(),
+        "templates are instantiated only from explicit options".into(),
+    ];
+    if c_abi_carrier {
+        boundary.assumptions.push(
+            "local C-linkage declarations selected implementation-carrier projection".into(),
+        );
+    }
+    if overlay.identity != "none" || overlay.source != "none" {
+        boundary
+            .assumptions
+            .push("checked C++ overlay identity is supplied by the caller".into());
+    }
     let store = cache.join(&digest);
     let archive = store.join(format!("libjet_cpp_{}.a", options.lib));
     std::fs::create_dir_all(&store)
@@ -198,7 +343,81 @@ pub fn bind(header: &Path, cache: &Path, options: &BindOptions) -> Result<BindRe
     if !archive.is_file() {
         build_archive(&canonical, &shim, &archive, &store, options)?;
     }
-    materialize_projection(cache, &archive, options)?;
+    let mut dependencies = crate::ForeignBridge::local_archive_inputs(
+        &options.library_dirs,
+        &options.libraries,
+    )
+    .into_iter()
+    .map(|input| {
+        format!(
+            "{}:{}:{}",
+            input.library,
+            input.path.display(),
+            input
+                .bytes
+                .as_deref()
+                .map(crate::SHA256::sha256_hex)
+                .unwrap_or_else(|| "missing".into()),
+        )
+    })
+    .collect::<Vec<_>>();
+    dependencies.extend(options.libraries.iter().map(|library| format!("library:{library}")));
+    dependencies.push(format!(
+        "runtime:{}",
+        crate::FFI::cxx_runtime_for_target(&options.target)
+    ));
+    let mut compiler_flags = vec![
+        "-std=c++17".into(),
+        "-fPIC".into(),
+        format!("-target={}", options.target),
+        format!(
+            "undefined-symbols={}",
+            crate::FFI::undefined_symbol_flag_for_target(&options.target)
+        ),
+    ];
+    compiler_flags.extend(
+        options
+            .include_dirs
+            .iter()
+            .map(|directory| format!("-I{}", directory.display())),
+    );
+    compiler_flags.extend(
+        options
+            .library_dirs
+            .iter()
+            .map(|directory| format!("-L{}", directory.display())),
+    );
+    compiler_flags.extend(options.libraries.iter().map(|library| format!("-l{library}")));
+    let loaded_artifact = format!(
+        "{}:sha256-{}",
+        archive.display(),
+        crate::ForeignBridge::sha_file(&archive).map_err(BindError::Source)?
+    );
+    let coverage = ForeignArtifactCoverage::new(
+        loaded_artifact,
+        options.target.clone(),
+        boundary.identity.generator.clone(),
+    )
+    .with_transitive_dependencies(dependencies)
+    .with_reachable_callbacks(Vec::<String>::new())
+    .with_compiler_flags(compiler_flags);
+    boundary = boundary.with_artifact_coverage(coverage);
+    for obligation in crate::ForeignBridge::FOREIGN_BOUNDARY_OBLIGATIONS {
+        boundary
+            .set_obligation(
+                (*obligation).to_string(),
+                ForeignEvidenceBasis::Trusted,
+                "cpp-clang-generated-shim",
+                [
+                    "native implementation is TRUSTED outside hardening".into(),
+                    "descriptor and loaded artifact identities are exact".into(),
+                ],
+            )
+            .map_err(BindError::Source)?;
+    }
+    let boundary_stamp = boundary.stamp();
+    let jet = format!("// jet-ffi-boundary={boundary_stamp}\n{jet_without_boundary}");
+    materialize_projection(cache, &archive, options, &boundary)?;
 
     let provenance = render_provenance(
         &canonical,
@@ -209,6 +428,8 @@ pub fn bind(header: &Path, cache: &Path, options: &BindOptions) -> Result<BindRe
         &archiver_version,
         &archive,
         &cache.join(format!("{}.link", options.lib)),
+        overlay,
+        &boundary,
     )
     .map_err(BindError::Source)?;
     let bound = surface
@@ -234,7 +455,42 @@ pub fn bind(header: &Path, cache: &Path, options: &BindOptions) -> Result<BindRe
         bound,
         archive,
         provenance,
+        plans: Vec::new(),
+        boundary,
     })
+}
+
+/// Bind C++ and append only caller-selected, already-resolved adaptation
+/// facades. The boundary producer remains authoritative; a stale plan is
+/// rejected instead of silently regenerating against a different artifact.
+pub fn bind_with_overlay_and_plans(
+    header: &Path,
+    cache: &Path,
+    options: &BindOptions,
+    overlay: &CppOverlay,
+    plans: &BTreeMap<String, BindingPlan>,
+) -> Result<BindResult, BindError> {
+    let mut result = bind_with_overlay(header, cache, options, overlay)?;
+    let boundary_digest = result.boundary.digest();
+    for (name, plan) in plans {
+        if name != &plan.operation.name {
+            return Err(BindError::Source(format!(
+                "adaptation plan key `{name}` names `{}`",
+                plan.operation.name
+            )));
+        }
+        if plan.boundary_digest != boundary_digest {
+            return Err(BindError::Source(format!(
+                "adaptation plan `{name}` is stale against the generated C++ boundary"
+            )));
+        }
+    }
+    for plan in plans.values() {
+        result.source.push_str(&plan.render_facade());
+        result.source.push('\n');
+    }
+    result.plans = plans.values().cloned().collect();
+    Ok(result)
 }
 
 #[doc(hidden)]
@@ -261,6 +517,7 @@ pub fn cache_identity_for_test(header: &Path, options: &BindOptions, target: &st
         "",
         options,
         target,
+        &CppOverlay::default(),
     )
 }
 
@@ -350,10 +607,13 @@ fn binding_identity(
     jet: &str,
     options: &BindOptions,
     target: &str,
+    overlay: &CppOverlay,
 ) -> String {
     let mut identity = IdentityBuilder::new(crate::ForeignBridge::IDENTITY_SCHEMA);
     identity.field("binder_schema", SCHEMA.as_bytes());
     identity.field("descriptor", cpp_descriptor_stamp().as_bytes());
+    identity.field("overlay_identity", overlay.identity.as_bytes());
+    identity.field("overlay_source", overlay.source.as_bytes());
     identity.field("header", header.as_os_str().as_encoded_bytes());
     identity.field("header_bytes", header_bytes);
     identity.field("ast", ast);
@@ -437,7 +697,7 @@ fn binding_identity(
 }
 
 fn project_surface(
-    ast: &JSONValue,
+    ast: &DataTree,
     header: &Path,
     selected: &[String],
 ) -> Result<Surface, BindError> {
@@ -460,7 +720,7 @@ fn project_surface(
 }
 
 fn walk_ast(
-    value: &JSONValue,
+    value: &DataTree,
     header: &str,
     inherited_main: bool,
     namespace: &mut Vec<String>,
@@ -517,7 +777,7 @@ fn walk_ast(
 }
 
 fn parse_class(
-    map: &BTreeMap<String, JSONValue>,
+    map: &[(String, DataTree)],
     namespace: &[String],
 ) -> Result<Class, BindError> {
     let name = string(map, "name").unwrap_or("");
@@ -565,7 +825,7 @@ fn parse_class(
 }
 
 fn parse_template(
-    map: &BTreeMap<String, JSONValue>,
+    map: &[(String, DataTree)],
     namespace: &[String],
 ) -> Result<FunctionTemplate, BindError> {
     let name = string(map, "name").unwrap_or("");
@@ -673,7 +933,7 @@ fn instantiate_templates(
 }
 
 fn parse_routine(
-    map: &BTreeMap<String, JSONValue>,
+    map: &[(String, DataTree)],
     cpp_name: String,
     jet_name: Option<String>,
 ) -> Result<Routine, BindError> {
@@ -691,7 +951,7 @@ fn parse_routine(
 }
 
 fn parse_params(
-    map: &BTreeMap<String, JSONValue>,
+    map: &[(String, DataTree)],
     substitutions: &BTreeMap<String, String>,
 ) -> Result<Vec<Param>, BindError> {
     raw_params(map)?
@@ -709,7 +969,7 @@ fn parse_params(
         .collect()
 }
 
-fn raw_params(map: &BTreeMap<String, JSONValue>) -> Result<Vec<(String, String)>, BindError> {
+fn raw_params(map: &[(String, DataTree)]) -> Result<Vec<(String, String)>, BindError> {
     children(map)
         .iter()
         .filter_map(|value| object(value))
@@ -727,15 +987,15 @@ fn raw_params(map: &BTreeMap<String, JSONValue>) -> Result<Vec<(String, String)>
         .collect()
 }
 
-fn return_type(map: &BTreeMap<String, JSONValue>) -> Result<&str, BindError> {
+fn return_type(map: &[(String, DataTree)]) -> Result<&str, BindError> {
     let ty = qual_type(map)?;
     ty.split_once(" (")
         .map(|(result, _)| result.trim())
         .ok_or_else(|| BindError::Source(format!("clang returned an invalid function type `{ty}`")))
 }
 
-fn qual_type(map: &BTreeMap<String, JSONValue>) -> Result<&str, BindError> {
-    map.get("type")
+fn qual_type(map: &[(String, DataTree)]) -> Result<&str, BindError> {
+    field(map, "type")
         .and_then(object)
         .and_then(|value| string(value, "qualType"))
         .ok_or_else(|| BindError::Source("clang omitted a declaration type".into()))
@@ -783,35 +1043,60 @@ fn qualified(namespace: &[String], name: &str) -> String {
     }
 }
 
-fn object(value: &JSONValue) -> Option<&BTreeMap<String, JSONValue>> {
+fn field<'a>(map: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+    map.iter()
+        .find_map(|(name, value)| (name == key).then_some(value))
+}
+
+fn object(value: &DataTree) -> Option<&[(String, DataTree)]> {
     match value {
-        JSONValue::Object(value) => Some(value),
+        DataTree::Object(value) => Some(value),
         _ => None,
     }
 }
-
-fn string<'a>(map: &'a BTreeMap<String, JSONValue>, key: &str) -> Option<&'a str> {
-    map.get(key).and_then(|value| match value {
-        JSONValue::String(value) => Some(value.as_str()),
+fn string<'a>(map: &'a [(String, DataTree)], key: &str) -> Option<&'a str> {
+    field(map, key).and_then(|value| match value {
+        DataTree::Text(value) | DataTree::TypedText(value) => Some(value.as_str()),
         _ => None,
     })
 }
 
-fn bool_field(map: &BTreeMap<String, JSONValue>, key: &str) -> bool {
-    matches!(map.get(key), Some(JSONValue::Bool(true)))
+fn bool_field(map: &[(String, DataTree)], key: &str) -> bool {
+    matches!(field(map, key), Some(DataTree::Bool(true)))
 }
 
-fn children(map: &BTreeMap<String, JSONValue>) -> &[JSONValue] {
-    match map.get("inner") {
-        Some(JSONValue::Array(values)) => values,
+fn children(map: &[(String, DataTree)]) -> &[DataTree] {
+    match field(map, "inner") {
+        Some(DataTree::Array(values)) => values,
         _ => &[],
     }
 }
 
-fn location_file(map: &BTreeMap<String, JSONValue>) -> Option<&str> {
-    map.get("loc")
+fn location_file(map: &[(String, DataTree)]) -> Option<&str> {
+    field(map, "loc")
         .and_then(object)
         .and_then(|loc| string(loc, "file"))
+}
+
+/// Detect a local C-linkage declaration so a C++ header can be used as the
+/// native implementation carrier for the canonical C binder. This is derived
+/// from clang's AST rather than a command flag or a guessed filename; system
+/// headers and unrelated C++ surfaces do not unlock the empty-surface path.
+fn has_local_c_abi_declaration(value: &DataTree, source_dir: &Path) -> bool {
+    let Some(map) = object(value) else {
+        return false;
+    };
+    if string(map, "kind") == Some("FunctionDecl")
+        && string(map, "languageLinkage") == Some("C")
+        && location_file(map).is_some_and(|file| {
+            !file.starts_with('<') && Path::new(file).starts_with(source_dir)
+        })
+    {
+        return true;
+    }
+    children(map)
+        .iter()
+        .any(|child| has_local_c_abi_declaration(child, source_dir))
 }
 
 fn disambiguate(routines: &mut [Routine]) {
@@ -831,6 +1116,7 @@ fn disambiguate(routines: &mut [Routine]) {
                 "{}_{}",
                 routines[index].jet_name,
                 if labels.is_empty() {
+
                     "no_args"
                 } else {
                     &labels
@@ -915,6 +1201,7 @@ fn materialize_projection(
     cache: &Path,
     archive: &Path,
     options: &BindOptions,
+    boundary: &ForeignBoundaryContract,
 ) -> Result<(), BindError> {
     std::fs::create_dir_all(cache)
         .map_err(|e| BindError::IO(format!("could not create the C++ binding directory: {e}")))?;
@@ -923,6 +1210,9 @@ fn materialize_projection(
     let mut links = String::new();
     links.push_str("target\t");
     links.push_str(&options.target);
+    links.push('\n');
+    links.push_str("boundary\t");
+    links.push_str(&boundary.digest());
     links.push('\n');
     for dir in &options.library_dirs {
         links.push_str("L\t");
@@ -950,51 +1240,64 @@ fn render_provenance(
     archiver_version: &[u8],
     archive: &Path,
     link: &Path,
+    overlay: &CppOverlay,
+    boundary: &ForeignBoundaryContract,
 ) -> Result<String, String> {
+
     let link = link
         .canonicalize()
         .map_err(|error| format!("could not resolve C++ link provenance: {error}"))?;
-    let version = |bytes: &[u8]| {
-        String::from_utf8_lossy(bytes)
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-            .collect::<Vec<_>>()
-            .join(" | ")
-    };
-    let mut fields = vec![
-        ("language", "cpp".to_string()),
-        ("abi", format!("jet_cpp_{}", options.lib)),
-        ("transport", "clang-cxx-shim".to_string()),
-        ("binder-schema", SCHEMA.to_string()),
-        ("descriptor", cpp_descriptor_stamp()),
-        ("source", header.to_string_lossy().into_owned()),
-        ("source-sha256", crate::ForeignBridge::sha_file(header)?),
-        ("link", link.to_string_lossy().into_owned()),
-        ("link-sha256", crate::ForeignBridge::sha_file(&link)?),
-        ("target", options.target.clone()),
-        ("clang", options.clang.display().to_string()),
-        ("archiver", options.archiver.display().to_string()),
-        ("clang-version", version(clang_version)),
-        ("archiver-version", version(archiver_version)),
-        ("classes", surface.classes.len().to_string()),
-        ("functions", surface.functions.len().to_string()),
+    let version = flatten_tool_version;
+    let mut fields: Vec<(String, String)> = vec![
+        ("language".into(), "cpp".to_string()),
+        ("abi".into(), format!("jet_cpp_{}", options.lib)),
+        ("transport".into(), "clang-cxx-shim".to_string()),
+        ("binder-schema".into(), SCHEMA.to_string()),
+        ("descriptor".into(), cpp_descriptor_stamp()),
+        ("source".into(), header.to_string_lossy().into_owned()),
+        (
+            "source-sha256".into(),
+            crate::ForeignBridge::sha_file(header)?,
+        ),
+        ("link".into(), link.to_string_lossy().into_owned()),
+        (
+            "link-sha256".into(),
+            crate::ForeignBridge::sha_file(&link)?,
+        ),
+        ("target".into(), options.target.clone()),
+        ("clang".into(), options.clang.display().to_string()),
+        ("archiver".into(), options.archiver.display().to_string()),
+        ("clang-version".into(), version(clang_version)),
+        ("archiver-version".into(), version(archiver_version)),
+        ("classes".into(), surface.classes.len().to_string()),
+        ("functions".into(), surface.functions.len().to_string()),
+        (
+            "surface".into(),
+            (if surface.classes.is_empty() && surface.functions.is_empty() {
+                "c-abi-implementation-carrier"
+            } else {
+                "cpp-facade"
+            })
+            .to_string(),
+        ),
+        ("overlay".into(), overlay.stable_identity()),
     ];
+    fields.extend(boundary.provenance_fields());
     for namespace in &options.namespaces {
-        fields.push(("namespace", namespace.clone()));
+        fields.push(("namespace".into(), namespace.clone()));
     }
     for dir in &options.include_dirs {
-        fields.push(("include", dir.display().to_string()));
+        fields.push(("include".into(), dir.display().to_string()));
     }
     for dir in &options.library_dirs {
-        fields.push(("library-search", dir.display().to_string()));
+        fields.push(("library-search".into(), dir.display().to_string()));
     }
     for library in &options.libraries {
-        fields.push(("library", library.clone()));
+        fields.push(("library".into(), library.clone()));
     }
     for template in &options.templates {
         fields.push((
-            "template",
+            "template".into(),
             format!(
                 "{}<{}> as {}",
                 template.qualified_name,
@@ -1007,13 +1310,13 @@ fn render_provenance(
         &options.library_dirs,
         &options.libraries,
     ) {
-        fields.push(("linked-library", input.library));
+        fields.push(("linked-library".into(), input.library));
         fields.push((
-            "linked-archive",
+            "linked-archive".into(),
             input.path.to_string_lossy().into_owned(),
         ));
         fields.push((
-            "linked-archive-sha256",
+            "linked-archive-sha256".into(),
             input
                 .bytes
                 .as_deref()
@@ -1023,7 +1326,7 @@ fn render_provenance(
     }
     let field_refs: Vec<(&str, &str)> = fields
         .iter()
-        .map(|(name, value)| (*name, value.as_str()))
+        .map(|(name, value)| (name.as_str(), value.as_str()))
         .collect();
     let artifacts = vec![(
         archive
@@ -1306,6 +1609,20 @@ fn run(command: &mut Command, tool: &str) -> Result<(), BindError> {
             "{tool}: {}",
             launder(&output.stderr)
         )))
+    }
+}
+
+fn flatten_tool_version(bytes: &[u8]) -> String {
+    let flat = String::from_utf8_lossy(bytes)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" | ");
+    if flat.is_empty() {
+        "unknown".to_string()
+    } else {
+        flat
     }
 }
 

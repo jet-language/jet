@@ -48,8 +48,8 @@ struct JetPlugin {
 // jet:raylib-begin
 // -- core.game.raylib bridge (D-RAYLIB1=A / D-FLAGSHIP-RAYLIB1=A) -----------------
 // Display remains explicit: without JET_RAYLIB_DISPLAY=1 the bridge is a
-// deterministic headless no-op. With the flag set, Jet dynamically loads the
-// native raylib shared library and calls the real C API without adding a
+// deterministic headless adapter. With the flag set, Jet dynamically loads
+// the native raylib shared library and calls the real C API without adding a
 // compile-time link requirement to every CI run.
 #[derive(Clone, Debug)]
 struct RaylibWindow {
@@ -73,13 +73,65 @@ struct RaylibSound {
     path: String,
 }
 
+type RaylibAtlasRegion = JetRaylibAtlasRegion;
+
+/// Typed atlas metadata. The optional native texture is loaded only when a
+/// display is active and the atlas declares a texture asset.
+#[derive(Clone, Debug)]
+struct RaylibTextureAtlas {
+    path: String,
+    name: String,
+    texture_path: Option<String>,
+    regions: Vec<RaylibAtlasRegion>,
+    native_texture: Option<JetRaylibCTexture2D>,
+}
+
+type RaylibSpriteDrawCall = JetRaylibSpriteDrawCall;
+
+impl JetShow for RaylibTextureAtlas {
+    fn jet_show(&self) -> String {
+        format!("RaylibTextureAtlas({})", self.name)
+    }
+}
+impl JetDebug for RaylibTextureAtlas {
+    fn jet_debug(&self) -> String {
+        self.jet_show()
+    }
+}
+
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
+struct JetRaylibCTexture2D {
+    id: i32,
+    width: i32,
+    height: i32,
+    mipmaps: i32,
+    format: i32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
 struct JetRaylibCColor {
     r: u8,
     g: u8,
     b: u8,
     a: u8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+struct JetRaylibCRectangle {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+struct JetRaylibCVector2 {
+    x: f32,
+    y: f32,
 }
 
 type JetRaylibInitWindow = unsafe extern "C" fn(i32, i32, *const std::os::raw::c_char);
@@ -92,7 +144,19 @@ type JetRaylibDrawText =
 type JetRaylibEndDrawing = unsafe extern "C" fn();
 type JetRaylibCloseWindow = unsafe extern "C" fn();
 type JetRaylibIsKeyDown = unsafe extern "C" fn(i32) -> bool;
+type JetRaylibIsGamepadButtonDown = unsafe extern "C" fn(i32, i32) -> bool;
+type JetRaylibGetGamepadAxisMovement = unsafe extern "C" fn(i32, i32) -> f32;
 type JetRaylibSetTargetFps = unsafe extern "C" fn(i32);
+type JetRaylibLoadTexture =
+    unsafe extern "C" fn(*const std::os::raw::c_char) -> JetRaylibCTexture2D;
+type JetRaylibDrawTexturePro = unsafe extern "C" fn(
+    JetRaylibCTexture2D,
+    JetRaylibCRectangle,
+    JetRaylibCRectangle,
+    JetRaylibCVector2,
+    f32,
+    JetRaylibCColor,
+);
 
 #[derive(Clone, Copy)]
 struct JetRaylibApi {
@@ -105,11 +169,18 @@ struct JetRaylibApi {
     end_drawing: JetRaylibEndDrawing,
     close_window: JetRaylibCloseWindow,
     is_key_down: JetRaylibIsKeyDown,
+    is_gamepad_button_down: Option<JetRaylibIsGamepadButtonDown>,
+    get_gamepad_axis_movement: Option<JetRaylibGetGamepadAxisMovement>,
     set_target_fps: JetRaylibSetTargetFps,
+    load_texture: Option<JetRaylibLoadTexture>,
+    draw_texture_pro: Option<JetRaylibDrawTexturePro>,
 }
 
 static JET_RAYLIB_WINDOW_OPEN: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
+static JET_RAYLIB_FRAME_INDEX: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
 
 fn jet_raylib_display_enabled() -> bool {
     std::env::var("JET_RAYLIB_DISPLAY").as_deref() == Ok("1")
@@ -125,6 +196,74 @@ fn jet_raylib_c_color(color: &RaylibColor) -> JetRaylibCColor {
         g: jet_raylib_clamp_u8(color.g),
         b: jet_raylib_clamp_u8(color.b),
         a: jet_raylib_clamp_u8(color.a),
+    }
+}
+fn jet_raylib_native_color(color: &RaylibColor) -> JetDevtoolsNativeColor {
+    JetDevtoolsNativeColor::new(
+        jet_raylib_clamp_u8(color.r),
+        jet_raylib_clamp_u8(color.g),
+        jet_raylib_clamp_u8(color.b),
+        jet_raylib_clamp_u8(color.a),
+    )
+}
+
+fn jet_raylib_draw_native_command(command: &JetDevtoolsNativeDrawCommand) {
+    if !JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    let Some(api) = jet_raylib_api() else {
+        return;
+    };
+    match command {
+        JetDevtoolsNativeDrawCommand::Rectangle {
+            x,
+            y,
+            width,
+            height,
+            color,
+        } => {
+            // SAFETY: the raylib drawing context is active and the command
+            // contains plain integer/color ABI values.
+            unsafe {
+                (api.draw_rectangle)(
+                    *x,
+                    *y,
+                    *width,
+                    *height,
+                    JetRaylibCColor {
+                        r: color.red,
+                        g: color.green,
+                        b: color.blue,
+                        a: color.alpha,
+                    },
+                )
+            };
+        }
+        JetDevtoolsNativeDrawCommand::Text {
+            text,
+            x,
+            y,
+            size,
+            color,
+        } => {
+            let text_c = jet_raylib_cstring(text);
+            // SAFETY: the text pointer is valid for the call and the command
+            // color matches raylib's C ABI.
+            unsafe {
+                (api.draw_text)(
+                    text_c.as_ptr(),
+                    *x,
+                    *y,
+                    (*size).max(1),
+                    JetRaylibCColor {
+                        r: color.red,
+                        g: color.green,
+                        b: color.blue,
+                        a: color.alpha,
+                    },
+                )
+            };
+        }
     }
 }
 
@@ -185,7 +324,11 @@ mod jet_raylib_dyn {
             end_drawing: symbol(handle, b"EndDrawing\0")?,
             close_window: symbol(handle, b"CloseWindow\0")?,
             is_key_down: symbol(handle, b"IsKeyDown\0")?,
+            is_gamepad_button_down: symbol(handle, b"IsGamepadButtonDown\0"),
+            get_gamepad_axis_movement: symbol(handle, b"GetGamepadAxisMovement\0"),
             set_target_fps: symbol(handle, b"SetTargetFPS\0")?,
+            load_texture: symbol(handle, b"LoadTexture\0"),
+            draw_texture_pro: symbol(handle, b"DrawTexturePro\0"),
         })
     }
 
@@ -213,6 +356,88 @@ fn jet_raylib_api() -> Option<&'static JetRaylibApi> {
     None
 }
 
+
+fn jet_raylib_native_texture(path: &String) -> Option<JetRaylibCTexture2D> {
+    if !JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
+        return None;
+    }
+    let api = jet_raylib_api()?;
+    let load_texture = api.load_texture?;
+    let path_c = jet_raylib_cstring(path);
+    // SAFETY: the path pointer is valid for the call and the function pointer
+    // was loaded from the active raylib shared library.
+    let texture = unsafe { load_texture(path_c.as_ptr()) };
+    (texture.id > 0).then_some(texture)
+}
+
+fn jet_raylib_load_texture_atlas(path: &String) -> RaylibTextureAtlas {
+    let spec = jet_raylib_load_texture_atlas_spec(path);
+    let native_texture = spec
+        .texture_path
+        .as_ref()
+        .and_then(jet_raylib_native_texture);
+    RaylibTextureAtlas {
+        path: spec.path,
+        name: spec.name,
+        texture_path: spec.texture_path,
+        regions: spec.regions,
+        native_texture,
+    }
+}
+
+fn jet_raylib_draw_sprite(
+    atlas: &RaylibTextureAtlas,
+    region: &String,
+    x: i64,
+    y: i64,
+) {
+    let Some(draw_call) =
+        jet_raylib_sprite_draw_call(&atlas.name, &atlas.regions, region, x, y)
+    else {
+        return;
+    };
+    let source_x = draw_call.source_x;
+    let source_y = draw_call.source_y;
+    let width = draw_call.width;
+    let height = draw_call.height;
+    jet_raylib_record_draw_call(draw_call);
+    let Some(texture) = atlas.native_texture else {
+        return;
+    };
+    let Some(draw_texture_pro) = jet_raylib_api().and_then(|api| api.draw_texture_pro) else {
+        return;
+    };
+    let source = JetRaylibCRectangle {
+        x: source_x as f32,
+        y: source_y as f32,
+        width: width as f32,
+        height: height as f32,
+    };
+    let destination = JetRaylibCRectangle {
+        x: x as f32,
+        y: y as f32,
+        width: width as f32,
+        height: height as f32,
+    };
+    // SAFETY: texture and geometry are ABI mirrors, and raylib owns the
+    // active drawing context established by begin_drawing.
+    unsafe {
+        draw_texture_pro(
+            texture,
+            source,
+            destination,
+            JetRaylibCVector2 { x: 0.0, y: 0.0 },
+            0.0,
+            JetRaylibCColor {
+                r: 255,
+                g: 255,
+                b: 255,
+                a: 255,
+            },
+        );
+    }
+}
+
 fn jet_raylib_window_open(width: i64, height: i64, title: &String) -> RaylibWindow {
     let mut native = false;
     if jet_raylib_display_enabled() {
@@ -224,6 +449,11 @@ fn jet_raylib_window_open(width: i64, height: i64, title: &String) -> RaylibWind
             JET_RAYLIB_WINDOW_OPEN.store(true, std::sync::atomic::Ordering::SeqCst);
             native = true;
         }
+    }
+    if native {
+        let native_width = width.clamp(1, i64::from(i32::MAX)) as u32;
+        let native_height = height.clamp(1, i64::from(i32::MAX)) as u32;
+        jet_devtools_native_window_open(native_width, native_height);
     }
     RaylibWindow {
         width,
@@ -252,6 +482,13 @@ fn jet_raylib_begin_drawing(window: &RaylibWindow) {
         if let Some(api) = jet_raylib_api() {
             // SAFETY: the raylib window was opened by this bridge.
             unsafe { (api.begin_drawing)() };
+            let frame_index =
+                JET_RAYLIB_FRAME_INDEX.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            let width = window.width.clamp(1, i64::from(i32::MAX)) as u32;
+            let height = window.height.clamp(1, i64::from(i32::MAX)) as u32;
+            for command in jet_devtools_native_frame_begin(frame_index, width, height) {
+                jet_raylib_draw_native_command(&command);
+            }
         }
     }
 }
@@ -268,6 +505,13 @@ fn jet_raylib_clear_background(color: &RaylibColor) {
 fn jet_raylib_draw_text(text: &String, x: i64, y: i64, size: i64, color: &RaylibColor) {
     if JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
         if let Some(api) = jet_raylib_api() {
+            jet_devtools_native_draw(JetDevtoolsNativeDrawCommand::Text {
+                text: text.clone(),
+                x: x as i32,
+                y: y as i32,
+                size: size as i32,
+                color: jet_raylib_native_color(color),
+            });
             let text_c = jet_raylib_cstring(text);
             // SAFETY: the text pointer is valid for the call, color matches C ABI,
             // and raylib owns the active drawing context.
@@ -287,6 +531,13 @@ fn jet_raylib_draw_text(text: &String, x: i64, y: i64, size: i64, color: &Raylib
 fn jet_raylib_draw_rectangle(x: i64, y: i64, width: i64, height: i64, color: &RaylibColor) {
     if JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
         if let Some(api) = jet_raylib_api() {
+            jet_devtools_native_draw(JetDevtoolsNativeDrawCommand::Rectangle {
+                x: x as i32,
+                y: y as i32,
+                width: width as i32,
+                height: height as i32,
+                color: jet_raylib_native_color(color),
+            });
             // SAFETY: color is a repr(C) mirror of raylib Color.
             unsafe {
                 (api.draw_rectangle)(
@@ -306,6 +557,7 @@ fn jet_raylib_end_drawing() {
         if let Some(api) = jet_raylib_api() {
             // SAFETY: the raylib window/drawing context is bridge-owned.
             unsafe { (api.end_drawing)() };
+            jet_devtools_native_frame_end();
         }
     }
 }
@@ -316,6 +568,7 @@ fn jet_raylib_close_window(window: &RaylibWindow) {
             // SAFETY: the window was opened by this bridge.
             unsafe { (api.close_window)() };
             JET_RAYLIB_WINDOW_OPEN.store(false, std::sync::atomic::Ordering::SeqCst);
+            jet_devtools_native_window_close();
         }
     }
 }
@@ -349,10 +602,71 @@ fn jet_raylib_key_down(name: &String) -> bool {
     if JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
         if let Some(api) = jet_raylib_api() {
             // SAFETY: key code is a plain raylib KeyboardKey integer.
-            return unsafe { (api.is_key_down)(key) };
+            let pressed = unsafe { (api.is_key_down)(key) };
+            if jet_devtools_native_input(JetDevtoolsNativeInput::Key {
+                code: name.clone(),
+                pressed,
+            }) {
+                return false;
+            }
+            return pressed;
         }
     }
     false
+}
+
+fn jet_raylib_gamepad_button_code(name: &String) -> i32 {
+    jet_raylib_button_code(name).unwrap_or(-1)
+}
+
+fn jet_raylib_gamepad_axis_code(name: &String) -> i32 {
+    jet_raylib_axis_code(name).unwrap_or(-1)
+}
+
+fn jet_raylib_gamepad_down(gamepad: i64, button: &String) -> bool {
+    let Ok(gamepad) = i32::try_from(gamepad) else {
+        return false;
+    };
+    let button_code = jet_raylib_gamepad_button_code(button);
+    if gamepad < 0 || button_code < 0 {
+        return false;
+    }
+    if JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
+        if let Some(api) = jet_raylib_api() {
+            if let Some(is_gamepad_button_down) = api.is_gamepad_button_down {
+                // SAFETY: both integers are validated raylib enum values.
+                let pressed = unsafe { is_gamepad_button_down(gamepad, button_code) };
+                if jet_devtools_native_input(JetDevtoolsNativeInput::Gamepad {
+                    gamepad: i64::from(gamepad),
+                    control: button.clone(),
+                    pressed,
+                }) {
+                    return false;
+                }
+                return pressed;
+            }
+        }
+    }
+    false
+}
+
+fn jet_raylib_gamepad_axis(gamepad: i64, axis: &String) -> f64 {
+    let Ok(gamepad) = i32::try_from(gamepad) else {
+        return 0.0;
+    };
+    let axis = jet_raylib_gamepad_axis_code(axis);
+    if gamepad < 0 || axis < 0 {
+        return 0.0;
+    }
+    if JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
+        if let Some(api) = jet_raylib_api() {
+            if let Some(get_gamepad_axis_movement) = api.get_gamepad_axis_movement {
+                // SAFETY: both integers are validated raylib enum values.
+                return unsafe { get_gamepad_axis_movement(gamepad as i32, axis) as f64 };
+            }
+        }
+    }
+    0.0
 }
 
 fn jet_raylib_set_target_fps(fps: i64) {

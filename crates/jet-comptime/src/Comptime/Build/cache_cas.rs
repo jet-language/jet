@@ -6,8 +6,9 @@ use super::validation::resolve_under;
 use crate::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
 
 const MAX_REMOTE_WIRE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_REMOTE_BLOB_BYTES: usize = 64 * 1024 * 1024;
@@ -255,6 +256,111 @@ impl ActionCacheProvenance {
             status: ActionCacheStatus::Miss(reason),
             remote_policy: RemoteCachePolicy::disabled_until_grant_and_sandbox_proof(),
         }
+    }
+}
+
+static COMPTIME_CACHE_OBSERVATION_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+/// Record the cache decision made by the canonical action-cache boundary.
+/// This is opt-in proof evidence only; it never supplies a cache decision and
+/// never participates in cache lookup or publication.
+pub(super) fn record_comptime_cache_event(
+    action: &str,
+    key: &ActionKey,
+    status: ActionCacheStatus,
+    phase: &str,
+    outcome: Option<ActionOutcome>,
+) {
+    let Some(path) = std::env::var_os("JET_COMPTIME_CACHE_OBSERVATION_PATH") else {
+        return;
+    };
+    let path = PathBuf::from(path);
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return;
+    };
+    let allowed_root = home.join(".cache");
+    if !path.is_absolute() || !(path == allowed_root || path.starts_with(&allowed_root)) {
+        return;
+    }
+    let quote = |text: &str| {
+        let mut out = String::with_capacity(text.len() + 2);
+        out.push('"');
+        for character in text.chars() {
+            match character {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                character if character.is_control() => {
+                    out.push_str(&format!("\\u{:04x}", character as u32));
+                }
+                character => out.push(character),
+            }
+        }
+        out.push('"');
+        out
+    };
+    let (status_name, reason) = match status {
+        ActionCacheStatus::Hit(CacheHitReason::LocalActionRecordMatched) => {
+            ("hit", "local_action_record_matched")
+        }
+        ActionCacheStatus::Hit(CacheHitReason::DeclaredOutputsRestored) => {
+            ("hit", "declared_outputs_restored")
+        }
+        ActionCacheStatus::Miss(CacheMissReason::NoLocalActionRecord) => {
+            ("miss", "no_local_action_record")
+        }
+        ActionCacheStatus::Miss(CacheMissReason::ActionKeyChanged) => {
+            ("miss", "action_key_changed")
+        }
+        ActionCacheStatus::Miss(CacheMissReason::DeclaredOutputMissing) => {
+            ("miss", "declared_output_missing")
+        }
+        ActionCacheStatus::Miss(CacheMissReason::CacheRecordInvalid) => {
+            ("miss", "cache_record_invalid")
+        }
+        ActionCacheStatus::Miss(CacheMissReason::CacheRestoreFailed) => {
+            ("miss", "cache_restore_failed")
+        }
+        ActionCacheStatus::Miss(CacheMissReason::RemoteDenied) => ("miss", "remote_denied"),
+        ActionCacheStatus::Miss(CacheMissReason::UncachedAction) => ("miss", "uncached_action"),
+        ActionCacheStatus::Miss(CacheMissReason::FrontEndIncomplete) => {
+            ("miss", "front_end_incomplete")
+        }
+    };
+    let outcome = outcome.map(|value| match value {
+        ActionOutcome::Succeeded { exit_code } => format!("succeeded:{exit_code}"),
+        ActionOutcome::Failed { exit_code } => format!("failed:{exit_code}"),
+        ActionOutcome::RestoredFromCache => "restored".to_string(),
+    });
+    let mode = std::env::var("JET_COMPTIME_MODE").unwrap_or_else(|_| "unknown".to_string());
+    let operation_id = std::env::var("JET_COMPTIME_OPERATION_ID")
+        .unwrap_or_else(|_| "unknown".to_string());
+    let payload = format!(
+        "{{\"schema\":\"jet.comptime-cache-event.v1\",\"mode\":{},\"operation_id\":{},\"action\":{},\"key\":{},\"phase\":{},\"status\":{},\"reason\":{},\"outcome\":{}}}\n",
+        quote(&mode),
+        quote(&operation_id),
+        quote(action),
+        quote(key.as_str()),
+        quote(phase),
+        quote(status_name),
+        quote(reason),
+        outcome
+            .as_deref()
+            .map(quote)
+            .unwrap_or_else(|| "null".to_string()),
+    );
+    let _guard = COMPTIME_CACHE_OBSERVATION_LOCK.lock().ok();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(mut file) = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = file.write_all(payload.as_bytes());
     }
 }
 
@@ -984,7 +1090,6 @@ impl RemoteBlobStore {
             .join(rest))
     }
 }
-
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct RemoteCacheTransport {
@@ -3272,10 +3377,6 @@ fn restore_outputs(
     }
     Ok(())
 }
-
-
-
-
 
 #[cfg(unix)]
 pub(super) fn secure_read_file(base: &Path, path: &Path) -> io::Result<Vec<u8>> {

@@ -22,12 +22,11 @@
 //!
 //! U13 (D-JPK-SECRETCRYPTO1, card c9jetpackgates) amends D-EFF4/5 with
 //! `Secret` — reading a decrypted repo secret (`core.crypto.vault.get`). Modeled as a
-//! bare root, not a leaf under an existing root: the compiler's own
-//! Core-call-to-effect inference (`core_effect`) only ever tags a call with a
-//! bare `Effect` (leaf precision is a user-declared-contract concept, never
-//! inferred from a real call — see the D-EFFTREE1 note below), so a genuinely
-//! *inferred* new effect can only ever be a new root, the same shape D-WASM1
-//! already used for `Browser`. Unlike every other root, reaching it is denied
+//! bare root, not a leaf under an existing root. Core-call inference now also
+//! records the canonical `Time.Wait` leaf for blocking calls; other leaf
+//! precision remains a user-declared-contract concept. A genuinely inferred
+//! new effect can only ever be a new root, the same shape D-WASM1 already used
+//! for `Browser`. Unlike every other root, reaching it is denied
 //! by default even with a matching declared bound absent — see
 //! `check_secret_grants`.
 //!
@@ -48,12 +47,16 @@
 //! regardless of leaf.
 
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
+use crate::AST::{Func, FuncSig};
+use jet_foundation::Authority::Holds;
 /// D-META-EFFECT1: the effect facts live in `jet-foundation` so both stages
 /// read one table. Sema keeps the solver, the diagnostics, and the checks.
 pub use jet_foundation::Effects::{
-    builtin_effect, core_effect, is_irreversible_effect, Effect, EffectSet,
+    builtin_effect, core_effect, core_effect_leaf, is_irreversible_effect, receiver_effect_leaf,
+    Effect, EffectSet, TIME_WAIT_EFFECT,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use jet_foundation::sema::{RightsProvenance, RightsRow};
 
 /// D-SHAPE8 open-row entry (`..E`). The parser stores row variables beside
 /// concrete effects so every consumer can preserve the exact source spelling.
@@ -206,7 +209,12 @@ pub fn undeclared_effect(name: &str, suggestion: Option<&str>, span: Option<Span
             new_text: candidate.to_string(),
         });
     }
-    diagnostic
+    diagnostic.with_rights_chain(
+        "vocabulary",
+        std::iter::once(name.to_string()),
+        std::iter::empty::<String>(),
+        None,
+    )
 }
 
 pub fn effect_leaf_required(root: &str, span: Option<Span>) -> Diagnostic {
@@ -217,8 +225,13 @@ pub fn effect_leaf_required(root: &str, span: Option<Span>) -> Diagnostic {
         format!("write `effect {root}.Name`"),
         span,
     )
+    .with_rights_chain(
+        "vocabulary",
+        std::iter::once(root.to_string()),
+        std::iter::empty::<String>(),
+        None,
+    )
 }
-
 /// D-EFFTREE1: does `bound` (one entry of a declared/granted/prohibited set)
 /// cover `e`? Exact match, or `bound` is a dot-path ancestor of `e` — ancestor
 /// subsumption, the same rule as D-TAG1's tag-tree subtree matching. A
@@ -326,8 +339,17 @@ pub fn effects_uncovered(inferred: &EffectSet, bound_set: &EffectSet) -> EffectS
         .iter()
         .filter(|effect| !deny_only(effect))
         .cloned()
-        .collect();
-    jet_foundation::Authority::uncovered(&grantable, bound_set)
+        .collect::<EffectSet>();
+    let row = RightsRow::invocation(
+        bound_set.iter().map(String::as_str),
+        std::iter::empty::<&str>(),
+        RightsProvenance::new("sema::effect-bound", "declared invocation ceiling"),
+    );
+    row.walk(&grantable, &[], &[])
+        .denials
+        .into_iter()
+        .map(|denial| denial.right)
+        .collect()
 }
 
 /// The subset of `inferred` covered by any entry of `set` — used for
@@ -344,7 +366,17 @@ pub fn effects_covered(inferred: &EffectSet, set: &EffectSet) -> EffectSet {
 pub fn effect_set_has_root(set: &EffectSet, root: Effect) -> bool {
     set.iter().any(|e| effect_root(e) == root.name())
 }
-
+/// Per-lambda effect facts accumulated during the same body walk as the
+/// enclosing function. Every active accumulator receives the event so nested
+/// lambdas retain distinct rows while their effects still contribute to the
+/// enclosing callable.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct LambdaEffectAccum {
+    pub direct: EffectSet,
+    pub direct_spans: HashMap<String, Span>,
+    pub edges: BTreeSet<String>,
+    pub maximal: bool,
+}
 impl<'a> super::Checker<'a> {
     /// D-BOUND-UNDO1=A: foreign calls are an explicit transaction boundary.
     /// Keep the policy here so every call-resolution route uses the same check;
@@ -361,6 +393,7 @@ impl<'a> super::Checker<'a> {
         if sig.foreign_effect_root.is_none() {
             self.record_effect(Effect::FFI.name(), span);
         }
+        self.reject_uncontrolled_deterministic_world(api, span);
         // D-CONC-SHARE1=A: the D-TXN2 wall belongs to transactions the author
         // opened. A synthesized one-statement commit is not a `#Transact` on
         // the page, so it never rejects a call the author wrote outside one.
@@ -373,11 +406,44 @@ impl<'a> super::Checker<'a> {
     /// function's set and every open `#FX(…)` region (which must account for
     /// effects reached inside it, E0712).
     pub(crate) fn record_effect(&mut self, e: &str, span: Span) {
+
+        for accumulator in &mut self.lambda_effect_stack {
+            accumulator.direct.insert(e.to_string());
+            accumulator
+                .direct_spans
+                .entry(e.to_string())
+                .or_insert(span);
+            if e == Effect::Panic.name() {
+                // Panic uses a non-effect sentinel edge in the shared graph.
+                accumulator.edges.insert("__jet_panic__".to_string());
+            }
+        }
         self.fx_direct.insert(e.to_string());
         self.fx_direct_spans.entry(e.to_string()).or_insert(span);
         for r in &mut self.region_stack {
             r.direct.insert(e.to_string());
         }
+    }
+    /// D-TEST-WORLD1=A: deterministic worlds control only the providers that
+    /// have a replayable implementation. Reject foreign effects at the same
+    /// semantic boundary instead of allowing a callback to escape the world.
+    pub(crate) fn reject_uncontrolled_deterministic_world(
+        &mut self,
+        api: &str,
+        span: Span,
+    ) {
+        if self.deterministic_world_depth == 0 {
+            return;
+        }
+        self.diags.push(Diagnostic::error(
+            "E3404",
+            format!("`{api}` has no deterministic world provider"),
+            "testing.world controls virtual time, scheduling, and seeded pseudo-randomness; external effects cannot be replayed"
+                .to_string(),
+            "move this call outside `testing.world`, or use a world-supported provider"
+                .to_string(),
+            Some(span),
+        ));
     }
 
     /// D-EFF1: record a call-graph edge to a user function `name` — into the
@@ -393,6 +459,9 @@ impl<'a> super::Checker<'a> {
     }
 
     fn record_edge_with_executions(&mut self, name: String, span: Span, executions: Option<u64>) {
+        for accumulator in &mut self.lambda_effect_stack {
+            accumulator.edges.insert(name.clone());
+        }
         for r in &mut self.region_stack {
             r.edges.insert(name.clone());
         }
@@ -415,6 +484,9 @@ impl<'a> super::Checker<'a> {
     /// D-EFF1: record that a foreign (`extern`) call was reached — forcing the
     /// maximal set on the function and every open `#FX(…)` region.
     pub(crate) fn record_maximal(&mut self, span: Span) {
+        for accumulator in &mut self.lambda_effect_stack {
+            accumulator.maximal = true;
+        }
         self.fx_maximal = true;
         self.fx_maximal_span.get_or_insert(span);
         self.record_open_memory_dispatch(span, "foreign or dynamically selected function body");
@@ -531,8 +603,7 @@ impl<'a> super::Checker<'a> {
                 }) = self.lookup(name).map(|info| info.ty.clone())
                 {
                     for (effect, _) in row {
-                        if effect_row_var(&effect).is_none()
-                            && parse_effect_name(&effect).is_some()
+                        if effect_row_var(&effect).is_none() && parse_effect_name(&effect).is_some()
                         {
                             self.record_effect(&effect, arg.span());
                         }
@@ -545,6 +616,18 @@ impl<'a> super::Checker<'a> {
 
     pub(crate) fn record_memory_event(&mut self, mut event: super::MemoryFacts::MemoryEvent) {
         event.executions = self.memory_control_multiplier;
+        let effect = match event.kind {
+            super::MemoryFacts::MemoryEventKind::Allocation
+            | super::MemoryFacts::MemoryEventKind::ArenaBytes(_) => "Mem.Alloc",
+            super::MemoryFacts::MemoryEventKind::RetainRelease => "Mem.Rc",
+        };
+        for accumulator in &mut self.lambda_effect_stack {
+            accumulator.direct.insert(effect.to_string());
+            accumulator
+                .direct_spans
+                .entry(effect.to_string())
+                .or_insert(event.span);
+        }
         for region in &mut self.memory_policy_stack {
             region.events.push(event.clone());
         }
@@ -585,12 +668,193 @@ impl<'a> super::Checker<'a> {
 pub fn show_set(set: &EffectSet) -> String {
     set.iter().cloned().collect::<Vec<_>>().join(", ")
 }
+fn rights_frame(
+    diagnostic: Diagnostic,
+    row: &RightsRow,
+    effects: &EffectSet,
+    call_chain: &[String],
+    scope_chain: &[jet_foundation::sema::ScopeFrame],
+) -> Diagnostic {
+    let fallback_scopes = scope_chain
+        .iter()
+        .map(|frame| frame.name.clone())
+        .collect::<Vec<_>>();
+    let (call_chain, scope_chain, nearest_granting_scope) =
+        if let Some(denial) = row.walk(effects, call_chain, scope_chain).denials.into_iter().next()
+        {
+            let chain = denial.chain;
+            (
+                chain.call_chain,
+                chain
+                    .scope_chain
+                    .into_iter()
+                    .map(|frame| frame.name)
+                    .collect(),
+                chain.nearest_granting_scope.map(|frame| frame.name),
+            )
+        } else {
+            (call_chain.to_vec(), fallback_scopes, None)
+        };
+    diagnostic.with_rights_chain(
+        row.kind.name(),
+        call_chain,
+        scope_chain,
+        nearest_granting_scope,
+    )
+}
+/// Resolve one syntax-level call to the canonical right it consumes.
+///
+/// Builtins and foreign bindings use the same foundation vocabulary as the
+/// effect solver. The caller owns the function-signature map because an extern
+/// call is a semantic fact, not a name-shaped guess.
+fn pure_call_right(name: &str, funcs: &HashMap<String, FuncSig>) -> Option<String> {
+    jet_foundation::Authority::builtin_effect(name)
+        .map(|effect| effect.name().to_string())
+        .or_else(|| {
+            funcs
+                .get(name)
+                .filter(|sig| sig.is_extern)
+                .map(|_| jet_foundation::Authority::Effect::FFI.name().to_string())
+        })
+}
+
+/// Walk one denied call through the canonical row and retain its typed chain.
+fn pure_call_denial_path(
+    row: &RightsRow,
+    name: &str,
+    funcs: &HashMap<String, FuncSig>,
+    path: &[String],
+) -> Option<Vec<String>> {
+    let right = pure_call_right(name, funcs)?;
+    let effects = Holds::from([right]);
+    row.walk(&effects, path, &[])
+        .denials
+        .into_iter()
+        .next()
+        .map(|denial| denial.chain.call_chain)
+}
+
+/// D-META-EFFECT1 c3: the call-graph walk itself lives in
+/// `jet-comptime/Comptime/Purity.rs` (`jet-sema` depends on `jet-comptime`,
+/// not the other way around, so that is the one home both stages share).
+/// This is the run-time `-[]>` route: check `f`'s own body for a direct
+/// impure-builtin or extern call. Empty `funcs` map passed to the shared
+/// walker means it never recurses into a callee's body — a callee that
+/// itself turns out impure is instead caught by the whole-program effect
+/// fixpoint (`Sema::Effects::check_inferred_purity`), which doesn't need to
+/// re-walk bodies because it already has every function's solved effect row.
+pub fn check_pure_fn(f: &Func, funcs: &HashMap<String, FuncSig>) -> Vec<Diagnostic> {
+    if !f.is_pure {
+        return Vec::new();
+    }
+    let row = RightsRow::pure(RightsProvenance::new(
+        f.name.clone(),
+        "declared pure callable row",
+    ));
+    let no_bodies: HashMap<String, &Func> = HashMap::new();
+    let is_leaf_impure =
+        |name: &str| pure_call_denial_path(&row, name, funcs, &[]).is_some();
+    match crate::Comptime::walk_purity_stmts(
+        &f.body,
+        &no_bodies,
+        &is_leaf_impure,
+        &|name, path, span| {
+            let path = pure_call_denial_path(&row, name, funcs, path)
+                .unwrap_or_else(|| path.to_vec());
+            super::e3401(&f.name, name, &path, span)
+        },
+        crate::Comptime::PurityStage::RunTime,
+    ) {
+        Ok(()) => Vec::new(),
+        Err(d) => vec![d],
+    }
+}
+
+pub(crate) fn check_pure_expr(
+    e: &crate::AST::Expr,
+    pure_fn: &str,
+    funcs: &HashMap<String, FuncSig>,
+) -> Option<Diagnostic> {
+    let row = RightsRow::pure(RightsProvenance::new(
+        pure_fn.to_string(),
+        "declared pure callable row",
+    ));
+    let no_bodies: HashMap<String, &Func> = HashMap::new();
+    let is_leaf_impure =
+        |name: &str| pure_call_denial_path(&row, name, funcs, &[]).is_some();
+    crate::Comptime::walk_purity_expr(
+        e,
+        &no_bodies,
+        &is_leaf_impure,
+        &|name, path, span| {
+            let path = pure_call_denial_path(&row, name, funcs, path)
+                .unwrap_or_else(|| path.to_vec());
+            super::e3401(pure_fn, name, &path, span)
+        },
+        crate::Comptime::PurityStage::RunTime,
+    )
+    .err()
+}
+
+/// From-root transitive purity check for `jet eval --pure`.
+///
+/// Walks the call graph starting at `entry_fn` (typically `"run"`), following
+/// calls into `ast_funcs` bodies. Fires E3401 on the first impure call with
+/// the full transitive chain.
+///
+/// This is the correct checker for the eval context: intermediate functions
+/// carry no `pure` annotation (so `check_pure_fn` would not flag them), but
+/// the whole program must be pure because it runs under `--pure`.
+pub fn check_pure_program_root(
+    entry_fn: &str,
+    funcs_sig: &HashMap<String, FuncSig>,
+    ast_funcs: &HashMap<String, &Func>,
+) -> Vec<Diagnostic> {
+    let Some(f) = ast_funcs.get(entry_fn) else {
+        return Vec::new();
+    };
+    let row = RightsRow::pure(RightsProvenance::new(
+        entry_fn.to_string(),
+        "pure evaluation invocation row",
+    ));
+    let is_leaf_impure = |name: &str| {
+        pure_call_denial_path(&row, name, funcs_sig, &[]).is_some()
+    };
+    // Seed path/visited with entry_fn itself so a direct violation in the
+    // root reads "`entry_fn` calls `x`" (matching the original wording),
+    // and so entry_fn re-calling itself is cycle-guarded from the start.
+    let mut visited = std::collections::HashSet::new();
+    visited.insert(entry_fn.to_string());
+    let mut path = vec![entry_fn.to_string()];
+    match crate::Comptime::walk_purity_stmts_from(
+        &f.body,
+        ast_funcs,
+        &is_leaf_impure,
+        &|name, path, span| {
+            let path = pure_call_denial_path(&row, name, funcs_sig, path)
+                .unwrap_or_else(|| path.to_vec());
+            super::e3401(entry_fn, name, &path, span)
+        },
+        &mut visited,
+        &mut path,
+        crate::Comptime::PurityStage::RunTime,
+    ) {
+        Ok(()) => Vec::new(),
+        Err(d) => vec![d],
+    }
+}
 /// E0746 (D-TXN2/D-BOUND-UNDO1): an irreversible effect (Net/FS/Exec/FFI) used directly inside a
 /// `#Transact { … }` block. Points at the offending call; the fix is to move it
 /// after the block or register it via `name.on_commit(() -> { … })`.
 pub fn e0746(api: &str, e: Effect, span: Span) -> Diagnostic {
-    if e == Effect::FFI {
-        return Diagnostic::error(
+    let row = RightsRow::transaction(RightsProvenance::new(
+        api,
+        "irreversible effect inside transaction row",
+    ));
+    let effects = jet_foundation::sema::expand_leaves([e.name()]);
+    let call_chain = [api.to_string()];
+    let diagnostic = if e == Effect::FFI {
+        Diagnostic::error(
             "E0746",
             format!(
                 "`{api}` has the `FFI` effect, which can't be rolled back inside a `#Transact` block"
@@ -600,24 +864,26 @@ pub fn e0746(api: &str, e: Effect, span: Span) -> Diagnostic {
             "move this call after the block, or declare `#Undo(inverse)` on the foreign binding so rollback can call the inverse"
                 .to_string(),
             Some(span),
-        );
-    }
-    Diagnostic::error(
-        "E0746",
-        format!(
-            "`{}` has the `{}` effect, which can't be rolled back inside a `#{}` block",
-            api, e.name(), crate::Syntax::KW_TRANSACT
-        ),
-        format!(
-            "a `#{}` block undoes its work on a `?`-failure; a network, file, or subprocess effect (`{}`) leaves committed external state a rollback can't take back",
-            crate::Syntax::KW_TRANSACT, e.name()
-        ),
-        format!(
-            "move this call after the block, or register it with `<handle>.{}(() -> {{ … }})` so it runs only on a clean commit",
-            crate::Syntax::TXN_ON_COMMIT
-        ),
-        Some(span),
-    )
+        )
+    } else {
+        Diagnostic::error(
+            "E0746",
+            format!(
+                "`{}` has the `{}` effect, which can't be rolled back inside a `#{}` block",
+                api, e.name(), crate::Syntax::KW_TRANSACT
+            ),
+            format!(
+                "a `#{}` block undoes its work on a `?`-failure; a network, file, or subprocess effect (`{}`) leaves committed external state a rollback can't take back",
+                crate::Syntax::KW_TRANSACT, e.name()
+            ),
+            format!(
+                "move this call after the block, or register it with `<handle>.{}(() -> {{ … }})` so it runs only on a clean commit",
+                crate::Syntax::TXN_ON_COMMIT
+            ),
+            Some(span),
+        )
+    };
+    rights_frame(diagnostic, &row, &effects, &call_chain, &[])
 }
 
 /// Per-function summary the checker accumulates during its walk: the effects the
@@ -678,6 +944,170 @@ pub struct EffectSummary {
     /// D-MEM-FACTS1 shares this already-complete call graph instead of growing
     /// a parallel reachability mechanism.
     pub memory: super::MemoryFacts::MemorySummary,
+}
+/// Stable semantic identity for one lambda. Module spans are local to the
+/// loaded module, so the canonical module key plus the exact source boundary
+/// keeps nested lambdas distinct without depending on a display name.
+pub(crate) fn lambda_effect_module_key(
+    ledger: &jet_foundation::Names::NameLedger,
+    module_idx: usize,
+    fallback: &str,
+) -> String {
+    ledger
+        .module_identity(module_idx)
+        .or_else(|| ledger.module_path(module_idx).map(str::to_owned))
+        .unwrap_or_else(|| fallback.to_owned())
+}
+
+pub(crate) fn lambda_effect_key(module_key: &str, span: Span) -> String {
+    format!("{module_key}::lambda:{}:{}", span.start, span.end)
+}
+
+fn walk_lambda_items(
+    item: &mut crate::AST::Item,
+    visit: &mut impl FnMut(&mut crate::AST::Expr),
+) {
+    use crate::AST::Item;
+
+    match item {
+        Item::Func(function) => walk_lambda_stmts(&mut function.body, visit),
+        Item::Struct(definition) => {
+            for method in &mut definition.methods {
+                walk_lambda_stmts(&mut method.body, visit);
+            }
+            for implementation in &mut definition.trait_impls {
+                for method in &mut implementation.methods {
+                    walk_lambda_stmts(&mut method.body, visit);
+                }
+            }
+        }
+        Item::Enum(definition) => {
+            for method in &mut definition.methods {
+                walk_lambda_stmts(&mut method.body, visit);
+            }
+            for implementation in &mut definition.trait_impls {
+                for method in &mut implementation.methods {
+                    walk_lambda_stmts(&mut method.body, visit);
+                }
+            }
+        }
+        Item::Impl(implementation) => {
+            for method in &mut implementation.methods {
+                walk_lambda_stmts(&mut method.body, visit);
+            }
+        }
+        Item::Test(test) => walk_lambda_stmts(&mut test.body, visit),
+        Item::Const(constant) => constant.value.for_each_expr_mut(|expr| visit(expr)),
+        Item::ErrorConv(conversion) => walk_lambda_stmts(&mut conversion.body, visit),
+        Item::CodeModule(module) => {
+            if let Some(body) = &mut module.body {
+                for inner in body {
+                    walk_lambda_items(inner, visit);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn walk_lambda_stmts(
+    body: &mut [crate::AST::Stmt],
+    visit: &mut impl FnMut(&mut crate::AST::Expr),
+) {
+    for statement in body {
+        statement.for_each_expr_mut(|expr| visit(expr));
+    }
+}
+
+/// Add the lambda rows produced by checked metadata to the same summary graph
+/// that solves named function reachability. This only reads facts already
+/// attached by `Checker::check_lambda`; it never revisits a lambda body.
+pub(crate) fn collect_lambda_effect_summaries(
+    modules: &mut [crate::AST::LoadedModule],
+    ledger: &jet_foundation::Names::NameLedger,
+    summaries: &mut HashMap<String, EffectSummary>,
+) {
+    for (module_idx, module) in modules.iter_mut().enumerate() {
+        let module_key = lambda_effect_module_key(ledger, module_idx, &module.display);
+        let mut collect = |expr: &mut crate::AST::Expr| {
+            let crate::AST::Expr::Lambda(lambda) = expr else {
+                return;
+            };
+            if lambda.meta.runtime_erased {
+                return;
+            }
+            let direct_spans = lambda
+                .meta
+                .effect_direct_spans
+                .iter()
+                .map(|(effect, span)| (effect.clone(), *span))
+                .collect();
+            summaries.insert(
+                lambda_effect_key(&module_key, lambda.span),
+                EffectSummary {
+                    direct: lambda.meta.effect_direct.clone(),
+                    direct_spans,
+                    edges: lambda.meta.effect_call_edges.clone(),
+                    maximal: lambda.meta.effect_maximal,
+                    maximal_span: lambda.meta.effect_maximal.then_some(lambda.span),
+                    ..EffectSummary::default()
+                },
+            );
+        };
+        for item in &mut module.items {
+            walk_lambda_items(item, &mut collect);
+        }
+        walk_lambda_stmts(&mut module.script_body, &mut collect);
+    }
+}
+
+/// Project the solved public row and qualified call edges back onto each
+/// checked lambda. Codegen consumes these typed facts directly.
+pub(crate) fn project_lambda_effect_facts(
+    modules: &mut [crate::AST::LoadedModule],
+    ledger: &jet_foundation::Names::NameLedger,
+    summaries: &HashMap<String, EffectSummary>,
+    reachability: &jet_foundation::Facts::ReachabilityResult,
+) {
+    let solved = reachability.row("effects");
+    for (module_idx, module) in modules.iter_mut().enumerate() {
+        let module_key = lambda_effect_module_key(ledger, module_idx, &module.display);
+        let alias = ledger
+            .module_alias(module_idx)
+            .unwrap_or(module.alias.as_str())
+            .to_owned();
+        let mut project = |expr: &mut crate::AST::Expr| {
+            let crate::AST::Expr::Lambda(lambda) = expr else {
+                return;
+            };
+            if lambda.meta.runtime_erased {
+                return;
+            }
+            let key = format!(
+                "{alias}::{}",
+                lambda_effect_key(&module_key, lambda.span)
+            );
+            let Some(summary) = summaries.get(&key) else {
+                return;
+            };
+            lambda.meta.effect_direct = summary.direct.clone();
+            lambda.meta.effect_call_edges = summary.edges.clone();
+            lambda.meta.effect_maximal = summary.maximal;
+            lambda.meta.effect_direct_spans = summary
+                .direct_spans
+                .iter()
+                .map(|(effect, span)| (effect.clone(), *span))
+                .collect();
+            lambda.meta.effect_solved = solved
+                .and_then(|values| values.get(&key))
+                .cloned()
+                .unwrap_or_else(|| summary.direct.clone());
+        };
+        for item in &mut module.items {
+            walk_lambda_items(item, &mut project);
+        }
+        walk_lambda_stmts(&mut module.script_body, &mut project);
+    }
 }
 
 /// D-AUTODIFF1: reject a named differentiated function when its solved effect
@@ -884,7 +1314,10 @@ pub fn program_effects(
     if let Some((module, name)) = selected {
         return lookup(
             solved,
-            bundle.modules.get(module).map(|module| module.alias.as_str()),
+            bundle
+                .modules
+                .get(module)
+                .map(|module| module.alias.as_str()),
             name,
         );
     }
@@ -1040,6 +1473,10 @@ pub fn solve_reachability(
 /// D-EFF3: a call through a trait value sees the trait method's declared
 /// dispatch bound, not any one implementation body. Seed those contract nodes
 /// into the same graph concrete methods use.
+/// D-EFF3: seed both the open trait-dispatch contract and each statically
+/// instantiated generic-dispatch contract. A trait-object call keeps the
+/// declaration's open-world meaning; a generic call uses the concrete impl
+/// rows that are present in this closed bundle.
 pub(crate) fn seed_trait_dispatch_effects(
     items: &[crate::AST::Item],
     summaries: &mut HashMap<String, EffectSummary>,
@@ -1050,6 +1487,33 @@ pub(crate) fn seed_trait_dispatch_effects(
         let Item::Trait(trait_def) = item else {
             continue;
         };
+
+        let mut implementations = BTreeSet::new();
+        for item in items {
+            match item {
+                Item::Impl(def) if def.trait_name.as_deref() == Some(trait_def.name.as_str()) => {
+                    implementations.insert(def.type_name.clone());
+                }
+                Item::Struct(def) => {
+                    implementations.extend(
+                        def.trait_impls
+                            .iter()
+                            .filter(|block| block.trait_name == trait_def.name)
+                            .map(|_| def.name.clone()),
+                    );
+                }
+                Item::Enum(def) => {
+                    implementations.extend(
+                        def.trait_impls
+                            .iter()
+                            .filter(|block| block.trait_name == trait_def.name)
+                            .map(|_| def.name.clone()),
+                    );
+                }
+                _ => {}
+            }
+        }
+
         for method in &trait_def.methods {
             let mut summary = EffectSummary::default();
             match &method.declared_effects {
@@ -1074,10 +1538,48 @@ pub(crate) fn seed_trait_dispatch_effects(
                 }
                 None => {}
             }
-            summaries.insert(
-                super::effect_key(Some(&trait_def.name), &method.name),
-                summary,
-            );
+            let trait_key = super::effect_key(Some(&trait_def.name), &method.name);
+            summaries.insert(trait_key.clone(), summary.clone());
+
+            // Generic dispatch is statically selected after type inference.
+            // Give it a separate graph node so an unrelated trait-object call
+            // cannot widen this concrete instantiation back to the maximal row.
+            let static_key = format!("{trait_key}::<static>");
+            let mut static_summary = match &method.declared_effects {
+                Some(_) => summary,
+                None if method.is_pure => summary,
+                None => EffectSummary::default(),
+            };
+            if method.declared_effects.is_none() && !method.is_pure {
+                let mut unresolved = implementations.is_empty();
+                for owner in &implementations {
+                    let impl_key = super::effect_key(Some(owner), &method.name);
+                    let Some(impl_summary) = summaries.get(&impl_key) else {
+                        unresolved = true;
+                        continue;
+                    };
+                    static_summary
+                        .direct
+                        .extend(impl_summary.direct.iter().cloned());
+                    static_summary
+                        .direct_spans
+                        .extend(impl_summary.direct_spans.clone());
+                    static_summary
+                        .edges
+                        .extend(impl_summary.edges.iter().cloned());
+                    static_summary.maximal |= impl_summary.maximal;
+                    if static_summary.maximal_span.is_none() {
+                        static_summary.maximal_span = impl_summary.maximal_span;
+                    }
+                }
+                if unresolved {
+                    static_summary.maximal = true;
+                    static_summary.maximal_span.get_or_insert(method.name_span);
+                }
+                // The concrete row is no longer an open trait-object contract.
+                static_summary.unbounded_trait_dispatch = false;
+            }
+            summaries.insert(static_key, static_summary);
         }
     }
 }
@@ -1181,7 +1683,7 @@ pub fn check_inferred_purity(
         reachability: &jet_foundation::Facts::ReachabilityResult,
         diags: &mut Vec<Diagnostic>,
     ) {
-        if !f.is_pure {
+        if !f.is_pure && !f.is_comptime {
             return;
         }
         let identity = identity
@@ -1191,17 +1693,34 @@ pub fn check_inferred_purity(
         if solved.get(&key).map_or(true, EffectSet::is_empty) {
             return;
         }
-        let Some(proof) = solved.get(&key).and_then(|effects| {
+        let row = if f.is_comptime {
+            RightsRow::comptime(RightsProvenance::new(
+                key.clone(),
+                "comptime callable rights row",
+            ))
+        } else {
+            RightsRow::pure(RightsProvenance::new(
+                key.clone(),
+                "declared pure callable rights row",
+            ))
+        };
+        let Some(denial) = solved.get(&key).and_then(|effects| {
             effects.iter().find_map(|effect| {
                 let path = reachability.path("effects", &key, effect)?;
-                (path.len() > 1).then(|| path.to_vec())
+                (path.len() > 1).then(|| {
+                    let effects = Holds::from([effect.clone()]);
+                    row.walk(&effects, path, &[])
+                        .denials
+                        .into_iter()
+                        .next()
+                })?
             })
         }) else {
             // Direct ambient operations are diagnosed while checking the body,
             // where their precise call span and API spelling are available.
             return;
         };
-        let chain = &proof[1..];
+        let chain = denial.chain.call_chain.get(1..).unwrap_or(&[]);
         let Some(first) = chain.first() else { return };
         let summary = summaries.get(&key);
         let span = summary
@@ -1234,11 +1753,20 @@ pub fn check_inferred_purity(
         } else {
             Vec::new()
         };
-        diags.push(crate::Sema::e3401(
+        let diagnostic = crate::Sema::e3401(
             &f.name,
             inferred_purity_display_name(module_alias, call_name),
             &path,
             span,
+        );
+        let display_call_chain = diagnostic.call_chain.clone();
+        let effects = Holds::from([denial.right.clone()]);
+        diags.push(rights_frame(
+            diagnostic,
+            &row,
+            &effects,
+            &display_call_chain,
+            &denial.chain.scope_chain,
         ));
     }
 
@@ -1498,12 +2026,67 @@ pub fn check_callback_bounds(
                 }
             }
             let over: EffectSet = effects_uncovered(&cb, &ob.bound);
+            let call_chain = [key.clone()];
             if !over.is_empty() {
                 failed_diagnostic_phases.insert(key.clone());
-                diags.push(e0747(&over, &ob.bound, ob.span));
+                diags.push(e0747_with_chain(&over, &ob.bound, ob.span, &call_chain));
             }
         }
     }
+}
+
+/// E0747's public constructor retains its stable source-facing API. The
+/// post-solve checker supplies the enclosing callable so the rights frame can
+/// retain that semantic chain.
+pub fn e0747(over: &EffectSet, bound: &EffectSet, span: Span) -> Diagnostic {
+    e0747_with_chain(over, bound, span, &[])
+}
+
+fn e0747_with_chain(
+    over: &EffectSet,
+    bound: &EffectSet,
+    span: Span,
+    call_chain: &[String],
+) -> Diagnostic {
+    let over_list = show_set(over);
+    let bound_desc = if bound.is_empty() {
+        "the parameter is `fn(…) -[]>`, so the callback must be pure".to_string()
+    } else {
+        format!(
+            "the parameter is `fn(…) -[{}]>`, so the callback may use only those effects",
+            show_set(bound)
+        )
+    };
+    let fix = if bound.is_empty() {
+        "pass a `fn(…) -[]>` callback (or a lambda that uses no effects), or widen the parameter's bound".to_string()
+    } else {
+        format!(
+            "pass a callback within `-[{}]>`, or add `{}` to the parameter's bound",
+            show_set(bound),
+            over_list
+        )
+    };
+    let row = RightsRow::invocation(
+        bound.iter().map(String::as_str),
+        std::iter::empty::<&str>(),
+        RightsProvenance::new("callback", "callback parameter rights row"),
+    );
+    rights_frame(
+        Diagnostic::error(
+            "E0747",
+            format!(
+                "this callback uses the effect `{}`, which the parameter doesn't allow",
+                over_list
+            ),
+            format!("{}; `{}` is outside that bound", bound_desc, over_list),
+            fix,
+            Some(span),
+        ),
+        &row,
+        over,
+        call_chain,
+        &[],
+    )
 }
 
 /// D-REPLAY1: `#Replayable` functions may not reach ambient
@@ -1517,15 +2100,6 @@ pub fn check_replayable_effects(
 ) {
     use crate::AST::Item;
 
-    fn replay_forbidden(effects: &EffectSet) -> EffectSet {
-        let roots = [Effect::Time, Effect::Rand, Effect::Net, Effect::IO];
-        effects
-            .iter()
-            .filter(|effect| roots.iter().any(|root| effect_root(effect) == root.name()))
-            .cloned()
-            .collect()
-    }
-
     fn check_one(
         f: &crate::AST::Func,
         owner: Option<&str>,
@@ -1535,11 +2109,18 @@ pub fn check_replayable_effects(
         if !f.is_replayable {
             return;
         }
-        let inferred = solved
-            .get(&super::effect_key(owner, &f.name))
-            .cloned()
-            .unwrap_or_default();
-        let forbidden = replay_forbidden(&inferred);
+        let key = super::effect_key(owner, &f.name);
+        let inferred = solved.get(&key).cloned().unwrap_or_default();
+        let row = RightsRow::replayable(RightsProvenance::new(
+            key,
+            "declared replayable callable rights row",
+        ));
+        let forbidden: EffectSet = row
+            .walk(&inferred, &[], &[])
+            .denials
+            .into_iter()
+            .map(|denial| denial.right)
+            .collect();
         if !forbidden.is_empty() {
             diags.push(e0725(
                 &f.name,
@@ -1548,6 +2129,7 @@ pub fn check_replayable_effects(
             ));
         }
     }
+
 
     for item in items {
         match item {
@@ -1580,53 +2162,31 @@ pub fn check_replayable_effects(
 /// E0725 (D-REPLAY1): a `#Replayable` function reaches ambient nondeterminism.
 pub fn e0725(fn_name: &str, effects: &EffectSet, span: Span) -> Diagnostic {
     let effect_list = show_set(effects);
-    Diagnostic::error(
-        "E0725",
-        format!(
-            "`{}` is `#Replayable` but reaches `{}`",
-            fn_name, effect_list
+    let row = RightsRow::replayable(RightsProvenance::new(
+        fn_name,
+        "ambient nondeterminism denied by replayable row",
+    ));
+    let call_chain = [fn_name.to_string()];
+    rights_frame(
+        Diagnostic::error(
+            "E0725",
+            format!(
+                "`{}` is `#Replayable` but reaches `{}`",
+                fn_name, effect_list
+            ),
+            "`#Replayable` code must replay from explicit inputs; ambient time, randomness, network, or console IO would make the same replay diverge"
+                .to_string(),
+            "inject a deterministic clock/RNG or mockable input, pass recorded data in, or move the ambient effect outside the replayable function"
+                .to_string(),
+            Some(span),
         ),
-        "`#Replayable` code must replay from explicit inputs; ambient time, randomness, network, or console IO would make the same replay diverge"
-            .to_string(),
-        "inject a deterministic clock/RNG or mockable input, pass recorded data in, or move the ambient effect outside the replayable function"
-            .to_string(),
-        Some(span),
+        &row,
+        effects,
+        &call_chain,
+        &[],
     )
 }
 
-/// E0747 (D-EFF2): a callback argument carries an effect the parameter's bound
-/// doesn't allow — a `fn(…) -[]>` parameter handed an impure callback, or a
-/// `fn(…) -[E]>` parameter handed one that reaches an effect outside `E`.
-pub fn e0747(over: &EffectSet, bound: &EffectSet, span: Span) -> Diagnostic {
-    let over_list = show_set(over);
-    let bound_desc = if bound.is_empty() {
-        "the parameter is `fn(…) -[]>`, so the callback must be pure".to_string()
-    } else {
-        format!(
-            "the parameter is `fn(…) -[{}]>`, so the callback may use only those effects",
-            show_set(bound)
-        )
-    };
-    let fix = if bound.is_empty() {
-        "pass a `fn(…) -[]>` callback (or a lambda that uses no effects), or widen the parameter's bound".to_string()
-    } else {
-        format!(
-            "pass a callback within `-[{}]>`, or add `{}` to the parameter's bound",
-            show_set(bound),
-            over_list
-        )
-    };
-    Diagnostic::error(
-        "E0747",
-        format!(
-            "this callback uses the effect `{}`, which the parameter doesn't allow",
-            over_list
-        ),
-        format!("{}; `{}` is outside that bound", bound_desc, over_list),
-        fix,
-        Some(span),
-    )
-}
 
 /// E0740: a function's inferred effects exceed its declared effect-row bound.
 pub fn e0740(fn_name: &str, over: &EffectSet, declared: &EffectSet, span: Span) -> Diagnostic {
@@ -1636,21 +2196,33 @@ pub fn e0740(fn_name: &str, over: &EffectSet, declared: &EffectSet, span: Span) 
     } else {
         format!("`-[{}]>`", show_set(declared))
     };
-    Diagnostic::error(
-        "E0740",
-        format!(
-            "`{}` uses the effect `{}`, which its signature doesn't allow",
-            fn_name, over_list
+    let row = RightsRow::invocation(
+        declared.iter().map(String::as_str),
+        std::iter::empty::<&str>(),
+        RightsProvenance::new(fn_name, "declared effect-arrow rights row"),
+    );
+    let call_chain = [fn_name.to_string()];
+    rights_frame(
+        Diagnostic::error(
+            "E0740",
+            format!(
+                "`{}` uses the effect `{}`, which its signature doesn't allow",
+                fn_name, over_list
+            ),
+            format!(
+                "the signature declares {}, so the body may only use those; `{}` is outside that set",
+                decl, over_list
+            ),
+            format!(
+                "add `{}` to the effect list, or stop using it in `{}`",
+                over_list, fn_name
+            ),
+            Some(span),
         ),
-        format!(
-            "the signature declares {}, so the body may only use those; `{}` is outside that set",
-            decl, over_list
-        ),
-        format!(
-            "add `{}` to the effect list, or stop using it in `{}`",
-            over_list, fn_name
-        ),
-        Some(span),
+        &row,
+        over,
+        &call_chain,
+        &[],
     )
 }
 
@@ -1663,21 +2235,33 @@ pub fn e0740(fn_name: &str, over: &EffectSet, declared: &EffectSet, span: Span) 
 pub fn e0749(fn_name: &str, reached: &EffectSet, prohibited: &EffectSet, span: Span) -> Diagnostic {
     let reached_list = show_set(reached);
     let decl_list = show_set(prohibited);
-    Diagnostic::error(
-        "E0749",
-        format!(
-            "`{}` reaches the `{}` effect, which it prohibits with `-[!{}]>`",
-            fn_name, reached_list, decl_list
+    let row = RightsRow::invocation(
+        std::iter::empty::<&str>(),
+        prohibited.iter().map(String::as_str),
+        RightsProvenance::new(fn_name, "prohibited effect rights row"),
+    );
+    let call_chain = [fn_name.to_string()];
+    rights_frame(
+        Diagnostic::error(
+            "E0749",
+            format!(
+                "`{}` reaches the `{}` effect, which it prohibits with `-[!{}]>`",
+                fn_name, reached_list, decl_list
+            ),
+            format!(
+                "a `-[!{}]>` row means the function and every callee it can reach must not use `{}`",
+                decl_list, reached_list
+            ),
+            format!(
+                "remove the call that introduces `{}`, or drop the `-[!{}]>` prohibition",
+                reached_list, decl_list
+            ),
+            Some(span),
         ),
-        format!(
-            "a `-[!{}]>` row means the function and every callee it can reach must not use `{}`",
-            decl_list, reached_list
-        ),
-        format!(
-            "remove the call that introduces `{}`, or drop the `-[!{}]>` prohibition",
-            reached_list, decl_list
-        ),
-        Some(span),
+        &row,
+        reached,
+        &call_chain,
+        &[],
     )
 }
 
@@ -1690,16 +2274,29 @@ pub fn e0749_panic(
     span: Span,
 ) -> Diagnostic {
     let prohibition = show_set(prohibited);
-    Diagnostic::error(
-        "E0749",
-        format!("`{fn_name}` can stop, but Panic is denied here"),
-        format!(
-            "`{panic_site}` can stop; `{fn_name}` and every reachable callee must not stop when Panic is denied"
+    let row = RightsRow::invocation(
+        std::iter::empty::<&str>(),
+        prohibited.iter().map(String::as_str),
+        RightsProvenance::new(fn_name, "Panic prohibition rights row"),
+    );
+    let effects = Holds::from([Effect::Panic.name().to_string()]);
+    let call_chain = [fn_name.to_string(), panic_site.to_string()];
+    rights_frame(
+        Diagnostic::error(
+            "E0749",
+            format!("`{fn_name}` can stop, but Panic is denied here"),
+            format!(
+                "`{panic_site}` can stop; `{fn_name}` and every reachable callee must not stop when Panic is denied"
+            ),
+            format!(
+                "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or drop the `-[!{prohibition}]>` prohibition"
+            ),
+            Some(span),
         ),
-        format!(
-            "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or drop the `-[!{prohibition}]>` prohibition"
-        ),
-        Some(span),
+        &row,
+        &effects,
+        &call_chain,
+        &[],
     )
 }
 
@@ -1803,10 +2400,7 @@ pub fn authority_delegations(
     delegations
 }
 
-fn authority_expr_rights(
-    regions: &[RegionAccum],
-    expr: &crate::AST::Expr,
-) -> Option<EffectSet> {
+fn authority_expr_rights(regions: &[RegionAccum], expr: &crate::AST::Expr) -> Option<EffectSet> {
     use crate::AST::{Expr, StrPart};
 
     match expr {
@@ -1840,9 +2434,7 @@ fn authority_expr_rights(
             });
             match (method.as_str(), requested) {
                 ("with", Some(requested))
-                    if rights
-                        .iter()
-                        .any(|bound| effect_covers(bound, &requested)) =>
+                    if rights.iter().any(|bound| effect_covers(bound, &requested)) =>
                 {
                     rights.clear();
                     rights.insert(requested);
@@ -1913,9 +2505,7 @@ fn authority_chain_rooted_in(
         Expr::Ident(name, _) => name == handle || aliases.contains(name),
         Expr::Paren(inner, _) => authority_chain_rooted_in(inner, handle, aliases),
         Expr::MethodCall {
-            receiver,
-            method,
-            ..
+            receiver, method, ..
         } if matches!(method.as_str(), "with" | "without") => {
             authority_chain_rooted_in(receiver, handle, aliases)
         }
@@ -1932,9 +2522,7 @@ fn is_authority_narrowing_chain(
     match expr {
         Expr::Paren(inner, _) => is_authority_narrowing_chain(inner, handle, aliases),
         Expr::MethodCall {
-            receiver,
-            method,
-            ..
+            receiver, method, ..
         } if matches!(method.as_str(), "with" | "without") => {
             authority_chain_rooted_in(receiver, handle, aliases)
         }
@@ -2063,8 +2651,10 @@ fn derived_stmt_escape(
         Stmt::Expr(expr) => authority_call_argument_escape(expr, handle, aliases),
         Stmt::Val(binding) => derived_binding_escape(binding, handle, aliases),
         Stmt::Assign { value, .. } => authority_value_escape(value, handle, aliases),
-        Stmt::Return(Some(value), _) | Stmt::BreakValue(value, _)
-        | Stmt::BreakLabelValue(_, _, value, _) | Stmt::Yield(value, _)
+        Stmt::Return(Some(value), _)
+        | Stmt::BreakValue(value, _)
+        | Stmt::BreakLabelValue(_, _, value, _)
+        | Stmt::Yield(value, _)
         | Stmt::DeferClose { close: value, .. } => authority_value_escape(value, handle, aliases),
         Stmt::While { cond, body, .. } => authority_call_argument_escape(cond, handle, aliases)
             .or_else(|| derived_block_escape(body, handle, aliases)),
@@ -2445,21 +3035,39 @@ pub fn e0712(over: &EffectSet, caps: &EffectSet, span: Span, marker: &str) -> Di
     } else {
         format!("`{}`", show_set(caps))
     };
-    Diagnostic::error(
-        "E0712",
-        format!(
-            "this `#{}` region uses the effect `{}`, which it has no authority for",
-            marker, over_list
+    let row = RightsRow::invocation(
+        caps.iter().map(String::as_str),
+        std::iter::empty::<&str>(),
+        RightsProvenance::new(marker, "block authority rights row"),
+    );
+    let call_chain = [format!("#{marker}")];
+    let scope_chain = [jet_foundation::sema::ScopeFrame::new(
+        jet_foundation::Authority::Scope::Block,
+        format!("#{marker}"),
+        caps.clone(),
+        RightsProvenance::new(marker, "lexical block authority scope"),
+    )];
+    rights_frame(
+        Diagnostic::error(
+            "E0712",
+            format!(
+                "this `#{}` region uses the effect `{}`, which it has no authority for",
+                marker, over_list
+            ),
+            format!(
+                "`#{}(…)` allows only {}; an effect reached inside — even through a call — must be in that list",
+                marker, caps_list
+            ),
+            format!(
+                "add `{}` to the `#{}(…)` list, or move that work outside the region",
+                over_list, marker
+            ),
+            Some(span),
         ),
-        format!(
-            "`#{}(…)` allows only {}; an effect reached inside — even through a call — must be in that list",
-            marker, caps_list
-        ),
-        format!(
-            "add `{}` to the `#{}(…)` list, or move that work outside the region",
-            over_list, marker
-        ),
-        Some(span),
+        &row,
+        over,
+        &call_chain,
+        &scope_chain,
     )
 }
 
@@ -2501,6 +3109,17 @@ pub fn e0742(
     bound: &EffectSet,
     span: Span,
 ) -> Diagnostic {
+    e0742_with_chain(trait_name, method, over, bound, span, &[])
+}
+
+fn e0742_with_chain(
+    trait_name: &str,
+    method: &str,
+    over: &EffectSet,
+    bound: &EffectSet,
+    span: Span,
+    call_chain: &[String],
+) -> Diagnostic {
     let over_list = show_set(over);
     let bound_desc = if bound.is_empty() {
         format!(
@@ -2515,18 +3134,32 @@ pub fn e0742(
             show_set(bound)
         )
     };
-    Diagnostic::error(
-        "E0742",
-        format!(
-            "this `{}` impl uses the effect `{}`, which the trait doesn't allow",
-            method, over_list
+    let row = RightsRow::invocation(
+        bound.iter().map(String::as_str),
+        std::iter::empty::<&str>(),
+        RightsProvenance::new(
+            format!("{trait_name}::{method}"),
+            "trait method rights row",
         ),
-        format!("{}; `{}` is outside that bound", bound_desc, over_list),
-        format!(
-            "remove the `{}` work from this impl, or widen the bound on the trait method",
-            over_list
+    );
+    rights_frame(
+        Diagnostic::error(
+            "E0742",
+            format!(
+                "this `{}` impl uses the effect `{}`, which the trait doesn't allow",
+                method, over_list
+            ),
+            format!("{}; `{}` is outside that bound", bound_desc, over_list),
+            format!(
+                "remove the `{}` work from this impl, or widen the bound on the trait method",
+                over_list
+            ),
+            Some(span),
         ),
-        Some(span),
+        &row,
+        over,
+        call_chain,
+        &[],
     )
 }
 
@@ -2549,7 +3182,15 @@ pub fn check_trait_obligations(
         let inferred = solved.get(&key).cloned().unwrap_or_default();
         let over: EffectSet = effects_uncovered(&inferred, bound);
         if !over.is_empty() {
-            diags.push(e0742(trait_name, method, &over, bound, *span));
+            let call_chain = [key.clone()];
+            diags.push(e0742_with_chain(
+                trait_name,
+                method,
+                &over,
+                bound,
+                *span,
+                &call_chain,
+            ));
         }
     }
 }
@@ -2644,7 +3285,7 @@ pub(crate) fn check_secret_grants(
 /// E1264 (U13, D-JPK-SECRETCRYPTO1): a function reaches `core.crypto.vault.get`
 /// (transitively) without `Secret` in its own declared effect row.
 pub fn e1264(fn_name: &str, span: Span) -> Diagnostic {
-    Diagnostic::error(
+    let diagnostic = Diagnostic::error(
         "E1264",
         format!(
             "`{}` reads a secret but doesn't declare the `Secret` effect",
@@ -2659,5 +3300,13 @@ pub fn e1264(fn_name: &str, span: Span) -> Diagnostic {
             fn_name
         ),
         Some(span),
-    )
+    );
+    let row = RightsRow::invocation(
+        std::iter::empty::<&str>(),
+        std::iter::empty::<&str>(),
+        RightsProvenance::new(fn_name, "implicit Secret grant rights row"),
+    );
+    let effects = Holds::from([Effect::Secret.name().to_string()]);
+    let call_chain = [fn_name.to_string()];
+    rights_frame(diagnostic, &row, &effects, &call_chain, &[])
 }

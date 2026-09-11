@@ -1,0 +1,43 @@
+struct Token {
+    kind: String
+    text: String
+    width: Int
+}
+
+struct Node {
+    kind: String
+    children: Int
+}
+
+fn parse(tokens: &[Token]) [Node] -> {
+    nodes := [Node]{}
+    loop token in tokens {
+        child_count := 0
+        if token.kind == "keyword" -> child_count = 1
+        if token.kind == "operator" -> child_count = 2
+        nodes.push(Node{kind: ~token.kind, children: child_count})
+    }
+    return nodes
+}
+
+fn run() {
+    tokens :: [Token]{
+        Token{kind: "keyword", text: "fn", width: 2},
+        Token{kind: "identifier", text: "add", width: 3},
+        Token{kind: "identifier", text: "left", width: 4},
+        Token{kind: "identifier", text: "right", width: 5},
+        Token{kind: "arrow", text: "->", width: 2},
+        Token{kind: "identifier", text: "left", width: 4},
+        Token{kind: "operator", text: "+", width: 1},
+        Token{kind: "identifier", text: "right", width: 5}
+    }
+    nodes :: parse(&tokens)
+    lexeme_bytes := 0
+    identifiers := 0
+    loop token in tokens {
+        lexeme_bytes += token.width
+        if token.kind == "identifier" -> identifiers += 1
+    }
+    print("tokens={tokens.len()} lexeme_bytes={lexeme_bytes} identifiers={identifiers} ast_nodes={nodes.len()}")
+    print("parse=ok root={nodes[0].kind} ownership=owned")
+}

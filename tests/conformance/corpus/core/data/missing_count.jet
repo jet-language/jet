@@ -1,9 +1,9 @@
-// core-conformance: core.data.missing_count
+// core-conformance: core.data.list.optional
 use core.data as data
-
 fn no_value() ?Float -> None
 
 fn run() {
-    series :: data.series([Val(Float{1.0}), no_value(), Val(Float{3.0})])
-    print(data.missing_count(series))
+    values :: [?Float]{Val(1.0), no_value(), Val(3.0)}
+    missing :: data.query(values).filter(value -> value == None).collect() ?? panic("missing")
+    print(missing.len())
 }

@@ -1,0 +1,17 @@
+// D-DBROWS1: typed row helpers preserve the SQL column's value kind.
+use core.db as db
+
+fn run() {
+    conn :: db.open_memory()
+    policy :: db.policy("metrics", "true") ?? return
+    scoped :: conn.with_policy(policy, "owner")
+    db.migrate(scoped, "metrics-v1", [SQL{"CREATE TABLE metrics (i INTEGER, f REAL, b BOOLEAN, t TEXT)"}]) ?? return
+    scoped.execute(SQL{"INSERT INTO metrics (i, f, b, t) VALUES (7, 1.5, true, 'jet')"}) ?? return
+    row :: scoped.query_one(SQL{"SELECT i, f, b, t FROM metrics"}) ?? return
+    integer :: db.row_int(row, "i") ?? return
+    floating :: db.row_float(row, "f") ?? return
+    boolean :: db.row_bool(row, "b") ?? return
+    value :: db.row_value(row, "t") ?? return
+    print("typed:{integer}:{floating}:{boolean}")
+    print("value:{value}")
+}

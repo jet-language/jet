@@ -23,5 +23,5 @@ or revocation check stops the operation. Operators retain the failed receipt;
 they do not repair a release by editing an artifact in place.
 
 The package trust and offline behavior that this policy relies on are described
-in the [Jetpack package plan](../../docs/plans/epoch-4/world-class-package-manager.md)
-and [trust-root procedure](../../docs/infra/trust-root.md).
+in the [Jetpack package plan](../../docs/proposals/jetpack/world-class-package-manager.md)
+and [trust-root procedure](../../docs/spec/packaging/trust-root.md).

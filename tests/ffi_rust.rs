@@ -29,10 +29,10 @@ fn rust_extern_std_round_trip_uses_the_canonical_descriptor() {
     let path = root.join("main.jet");
     let source = r#"
 extern rust "std" {
-    fn rust_max(a: Int, b: Int) Int = "std::cmp::max";
+    fn rust_max(a: Int, b: Int) Int = "std::cmp::max"
 }
 fn run() {
-    print(rust_max(2, 40));
+    print(rust_max(2, 40))
 }
 "#;
     fs::write(&path, source).unwrap();
@@ -99,7 +99,7 @@ fn rust_extern_signature_mismatch_is_typed_before_a_foreign_call() {
     let path = root.join("main.jet");
     let source = r#"
 extern rust "std" {
-    fn wrong_result(value: Int) String = "std::convert::identity";
+    fn wrong_result(value: Int) String = "std::convert::identity"
 }
 fn run() {}
 "#;

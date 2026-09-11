@@ -29,7 +29,7 @@ fn callbacks_entry_effects_are_only_io() {
         jet::EffectBudget::summary_line_for_program(
             &bundle.expect("callbacks bundle"),
             &facts.summaries,
-            jet::Codegen::ENTRY_FN,
+            "run",
         ),
         "effects: IO"
     );
@@ -67,7 +67,7 @@ fn selected_output_effects_follow_the_selected_callable() {
         jet::EffectBudget::summary_line_for_program(
             &bundle,
             &facts.summaries,
-            jet::Codegen::ENTRY_FN,
+            "run",
         ),
         "effects: IO",
         "selected={selected:#?}\nsummaries={:#?}",
@@ -1072,7 +1072,7 @@ fn run() {
 fn transact_ffi_without_undo_is_e0746() {
     let src = r#"
 extern rust "std" {
-    fn mutate(left: Int, right: Int) Int = "std::cmp::max";
+    fn mutate(left: Int, right: Int) Int = "std::cmp::max"
 }
 fn run() {
     #Transact(tx) {
@@ -1093,7 +1093,7 @@ fn run() {
 fn transact_ffi_with_undo_registers_rollback_hook() {
     let src = r#"
 extern rust "std" {
-    #Undo(undo_mutate) fn mutate(left: Int, right: Int) Int = "std::cmp::max";
+    #Undo(undo_mutate) fn mutate(left: Int, right: Int) Int = "std::cmp::max"
 }
 fn undo_mutate(left: Int, right: Int) { print(left + right) }
 fn run() {
@@ -1119,7 +1119,7 @@ fn run() {
 fn transact_ffi_undo_rejects_parameter_type_mismatch() {
     let src = r#"
 extern rust "std" {
-    #Undo(undo_mutate) fn mutate(left: Int, right: Int) Int = "std::cmp::max";
+    #Undo(undo_mutate) fn mutate(left: Int, right: Int) Int = "std::cmp::max"
 }
 fn undo_mutate(left: String, right: Int) {}
 fn run() {}
@@ -1131,7 +1131,7 @@ fn run() {}
 fn transact_ffi_undo_rejects_non_unit_return() {
     let src = r#"
 extern rust "std" {
-    #Undo(undo_mutate) fn mutate(left: Int, right: Int) Int = "std::cmp::max";
+    #Undo(undo_mutate) fn mutate(left: Int, right: Int) Int = "std::cmp::max"
 }
 fn undo_mutate(left: Int, right: Int) Int { return 0 }
 fn run() {}
@@ -1330,16 +1330,16 @@ fn run() {}
     let _ = fs::remove_dir_all(&root);
 }
 
-/// Tier 0 does not execute native foreign code. Its boundary must reject the
-/// program instead of silently running a foreign call without its undo hook.
+/// The canonical evaluator does not execute native foreign code. It reports
+/// the unsupported operation instead of silently running a foreign call without its undo hook.
 #[test]
-fn transact_ffi_interpreter_rejects_native_boundary() {
+fn transact_ffi_interpreter_reports_unsupported_diagnostic() {
     let dir = common::unique_tmp("jet_effects_ffi_interpreter");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.jet");
     let src = r#"
 extern rust "std" {
-    #Undo(undo_mutate) fn mutate(left: Int, right: Int) Int = "std::cmp::max";
+    #Undo(undo_mutate) fn mutate(left: Int, right: Int) Int = "std::cmp::max"
 }
 fn undo_mutate(left: Int, right: Int) { print(left + right) }
 fn run() {
@@ -1355,8 +1355,8 @@ fn run() {
         jet::Interpreter::RunOutcome::Problems(diagnostics) => assert!(
             diagnostics
                 .iter()
-                .any(|diagnostic| diagnostic.code == "E2201"),
-            "native FFI must be an explicit interpreter boundary: {diagnostics:?}"
+                .any(|diagnostic| diagnostic.code == "E0956"),
+            "native FFI must use the canonical unsupported diagnostic: {diagnostics:?}"
         ),
         other => panic!("interpreter ran native FFI: {other:?}"),
     }
@@ -1762,5 +1762,28 @@ fn run() { print("{transform([1], inc)}"); invoke(5, show); }
     assert_eq!(
         a, b,
         "D-EFF2 levers must leave no trace in generated Rust (I3)"
+    );
+}
+
+#[test]
+fn rights_denials_keep_the_semantic_frame() {
+    let src = r#"
+use core.files as fs
+
+fn load(path: String) String -[]> {
+    return fs.read(path) ?? ""
+}
+
+fn run() {}
+"#;
+    let diagnostics = jet::compile(src).expect_err("pure filesystem access is rejected");
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E3401")
+        .expect("pure access should produce E3401");
+    assert_eq!(diagnostic.denial_kind.as_deref(), Some("pure"));
+    assert_eq!(
+        diagnostic.call_chain,
+        vec!["load".to_string(), "fs.read".to_string()]
     );
 }

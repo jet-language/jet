@@ -24,7 +24,11 @@ Vocabulary: [Jet vocabulary](vocabulary.md).
   `\\` only; anything else after `\` is E0001. Interpolation (S8): `{expr}`
   embeds any printable expression; format selectors use the closed `:` rail
   (`{value:Debug}`, `{value:Pretty}`, `{value:Fixed(2)}`, `{value:Grouped(2)}`, `{value:Unit(name|bare)}`); `{{` and
-  `}}` write literal braces; a lone `{` or `}` is E0001.
+  `}}` write literal braces; a lone `{` or `}` is E0001. A run of N backticks
+  opens a raw ordinary `String`; the next maximal run of exactly N backticks
+  closes it, while other runs remain content. Raw text has no escapes or
+  interpolation, preserves line-ending bytes, and strips one edge space from
+  both ends only when it contains a non-space character.
 - Multi-line strings (S70): `"""…"""` span multiple lines with the same escapes
   and interpolation. The newline right after the opening `"""` and the one right
   before the closing `"""` are dropped, and the closing `"""`'s indentation is
@@ -209,8 +213,8 @@ artifacts are types; the construct itself never is. Jet already uses lambdas
 for deferred control, so `Loop` and `If` types would duplicate the lambda
 mechanism and violate I8. Value-producing cases are already expressions. Typed
 artifacts hold reusable values, while constructs stay zero-cost keywords and
-keep code readable from top to bottom. See
-[type-unification audit F11](../audits/type-unification-audit-2026-07-28.md#f11--spec-law-constructs-are-never-types-their-artifacts-always-are).
+keep code readable from top to bottom. Historical source: type-unification audit
+F11 (the report is not retained here). Current law: [syntax decisions](syntax-decisions.md).
 
 - `if` is Jet's one branching form. Its preferred multi-branch surface is an
   ordered arm table: `if subject == { head -> body }` when naming a subject
@@ -1173,8 +1177,10 @@ the default `fmt` output remains unchanged by this mode.
 Style (zero configuration): 4-space indent, `{` on the same line as its
 header, one statement per line, at most one blank line between top-level
 items, spaces around binary operators, no space before `;`/`,`/call `(`,
-trailing `;` on statements (S6). General line width is not enforced in v1;
-long multi-clause loop headers wrap only after their canonical semicolons.
+trailing commas on multiline comma lists and no trailing commas on one-line
+lists (D-TRAILCOMMA1). Explicit `;` is retired and diagnosed as E0373; its
+behavior-preserving fix is a line break when code follows or removal at line
+end (D-SEMI1).
 
 `//` and `/* … */` comments are preserved and re-attached by source span. Real
 parse errors still block fmt. The typed `package.jet`/Config formatter is a
@@ -1844,7 +1850,8 @@ are not implemented by this binder and remain unclaimed Jetpack provider work.
 its top-level body and binds direct named functions with one required argument.
 `open()` starts one supervised R worker, loads the script once, and retains its
 state. A normal `<name>` adapter round-trips `DataTree`; `<name>_table<T>` maps
-`Table<T>` to `data.frame` and back through the same framed JSON channel.
+ordinary `[T]` rows to `data.frame` and back through the same framed JSON
+channel. This bridge wording does not reintroduce a public Jet table carrier.
 
 `<name>_plot` runs the function on an isolated SVG graphics device and returns
 the plot as `String`. The worker parses resulting XML structurally, permits only
@@ -1978,6 +1985,42 @@ needs outside the retained `core.ui` paint surface:
 `addEventListener`, `querySelector`, `localStorage`, and `sessionStorage` calls;
 native codegen lowers the same checked calls to inert stubs so rustc never
 becomes the browser API checker.
+
+## Web queries (D-WEBQUERY1, implemented)
+
+`use core.web.query as query` exposes one reactive query contract. A query
+always has an explicit cache key. The key is the sole identity of its live
+record; the declared footprint is dependency metadata, not a second identity.
+
+- `query.live(key, footprint, initial, fetch)` creates a live query. `fetch`
+  returns the next encoded value or an error. The query state moves through
+  `Pending`, `Fresh`, `Stale`, `Fetching`, `Error`, and `Offline`.
+- `query.subscribe(source)` creates an external subscription whose cache key is
+  `source` and whose footprint is `ext:<source>`.
+- `q.get()`, `q.state()`, and `q.mutation_state()` read the value and the
+  lifecycle carriers. `q.show()` and `q.facts()` report identity, generation,
+  freshness, observer count, invalidation cause, and mutation status without
+  including payloads.
+
+Registering the same key with a different footprint is rejected with the named
+runtime diagnostic `E2473`; callers must use one dependency declaration for a
+key. A mutation targets the query's declared footprint by default, so only
+dependent queries become stale. Explicit invalidation targets may name a
+`key:<key>` or a footprint.
+
+`offlineFirst` mutation mode applies the optimistic value, persists the
+payload and invalidation targets in FIFO order, and restores the exact prior
+state on a failed online action. The queue is stored at
+`$JET_WEB_QUERY_QUEUE_PATH`, or
+`$XDG_STATE_HOME/jet/web-query-queue.v1`, or
+`$HOME/.local/state/jet/web-query-queue.v1`. Writes use a temporary file and
+atomic rename. If no state directory exists, or if the queue cannot be read or
+written, enqueue and replay fail with a durability error rather than silently
+losing a mutation.
+
+The app graph serializes query facts (`key`, `footprint`, `source`, and `kind`)
+for tooling. Development HTML may expose a `Queries` panel with lifecycle
+metadata; release HTML never includes that panel or query payloads.
 
 ## First-party events and hooks (D-EVENT1, implemented)
 
@@ -2388,7 +2431,7 @@ Integration: `tests/closures.rs`.
 
 ## M10 — Core library (done)
 
-Full user-facing reference: **docs/reference/core-library.md**.
+Full user-facing reference: **docs/spec/reference/core-library.md**.
 
 Compiler-known `core.<name>` namespaces backed by Rust std helpers in the
 generated prelude (D-CORENS1/D-CORENS-CANON1): file/terminal/env/process I/O,
@@ -2499,13 +2542,20 @@ connecting, and never falls back to unsigned mail. Environment configuration
 requires the domain, selector, and base64 32-byte seed together. Separate
 identities use separate Mailers.
 
-D-DATAFRAME1/D-DATA-SURFACE1 define one typed `core.data` path. `Table<T>` and
-`Series<T>` own rows and values. `LazyFrame<T>` owns a source plus deferred
-filter/sort operations; `plan` inspects them without running selectors, while
-`collect` and reducers materialize them in order. `inner_join` returns stable
-`DataJoin<L, R>` row pairs with full duplicate-key multiplicity. `left_join`
-returns `DataJoin<L, ?R>`, preserving every left row and representing an
-unmatched right row as `None`.
+D-QUERY-RETAIN1=A defines one typed `Query<T>` over ordinary list results,
+checked readers, and checked SQL. `data.query(rows)` and the SQL form return the
+same query carrier; `collect` is the checked boundary that materializes an
+ordinary `[T]`. `filter`, stable `sort_by`, `map`, `min`, and `max` retain typed
+callbacks and plan order. `inner_join` returns stable `DataJoin<L, R>` pairs
+with full duplicate-key multiplicity, while `left_join` returns
+`DataJoin<L, ?R>` and preserves every left row. `group_by` produces
+`Group<K, V>` reductions. `DataStream<T>` remains one-shot and fallible;
+`DataLoader<T>` remains typed and stateful. There is no public `Table<T>`,
+`Series<T>`, `LazyFrame<T>`, or `DataGroup` carrier.
+This supersedes the earlier `D-DATAFRAME1`/`D-DATA-SURFACE1` carrier wording;
+historical alternatives and review evidence remain historical records.
+Eager list `inner_join`/`left_join` adapters remain list operations and share
+the checked join semantics; they do not reintroduce a table carrier.
 
 ## E2-M1 — Concurrency (tasks and channels, verified 2026-08-06)
 
@@ -4267,9 +4317,9 @@ same-directory temporary files, fsyncs contents and parents, and advances a
 fsynced recovery journal around each rename. Replacement reopens each parent
 without following links, verifies the destination through that handle, and
 renames relative to the same handle (`openat`/`renameat` on Unix; directory and
-file handles plus `SetFileInformationByHandle` on Windows). The process lock is
-an OS-owned advisory lock on Unix and a delete-on-close exclusive file on
-Windows, so crash recovery does not depend on `/proc`. A later codemod recovers a crash
+file handles plus `SetFileInformationByHandle` on Windows). The process lock is an
+OS-owned advisory lock on Unix and a delete-on-close exclusive file on Windows, so
+crash recovery does not depend on `/proc`. A later codemod recovers a crash
 before planning; unexpected concurrent bytes preserve the journal and stop.
 Schema-2 logs contain byte-exact before/after images. Undo verifies every
 after-hash before making any write and uses the same journal protocol to restore
@@ -4345,9 +4395,9 @@ and lets the proof rail mark that exact revision current. Build output commands
 require explicit confirmation.
 
 The public v1 graph/edit field contract is pinned in
-[`docs/reference/canvas-protocol.md`](../reference/canvas-protocol.md), and the
+[`docs/spec/reference/canvas-protocol.md`](reference/canvas-protocol.md), and the
 AST-derived Canvas coverage ratchet is pinned in
-[`docs/reference/canvas-parity.md`](../reference/canvas-parity.md).
+[`docs/spec/reference/canvas-parity.md`](reference/canvas-parity.md).
 Unknown request fields are ignored by v1; unknown operations fail as Canvas edit
 errors, and unknown future graph fields may never carry hidden semantics.
 
@@ -4758,7 +4808,7 @@ oracle output, and pins the generated bytes. It also proves a second import is
 byte-identical and that a three-way conflict writes no conflicted file.
 
 The enterprise language boundary is published in the
-[migration tier map](../reference/migration-tier-map.md). D-ADOPT-TIER1=A
+[migration tier map](reference/migration-tier-map.md). D-ADOPT-TIER1=A
 promises source import for Python, Java, C#, TypeScript/JavaScript, and Go;
 C and C++ have the explicit binder-plus-overlay verdict. The importer wave
 uses one scalar-function subset and keeps the foreign source authoritative

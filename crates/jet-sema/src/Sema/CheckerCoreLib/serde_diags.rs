@@ -213,26 +213,6 @@ pub(crate) fn unknown_core_module(module: &str, span: Span) -> Diagnostic {
 pub(crate) fn e2411(ty: &Type, encode: bool, span: Span) -> Diagnostic {
     let shown = ty.show();
     let ty = shown.as_str();
-    if matches!(ty_name_of(&shown), name if name == crate::Syntax::TYPE_U64) {
-        let (verb, fix) = if encode {
-            (
-                "serialized",
-                "convert the U64 to Int after checking it fits, or encode it as Text explicitly",
-            )
-        } else {
-            (
-                "decoded",
-                "decode an Int or Text and convert it to U64 explicitly",
-            )
-        };
-        return Diagnostic::error(
-            "E2411",
-            format!("U64 can't be {verb}"),
-            "Codable uses the shared DataTree model, whose Int values are signed 64-bit; U64 cannot round-trip every value".to_string(),
-            fix.to_string(),
-            Some(span),
-        );
-    }
     let (verb, marker) = if encode {
         ("serialized", "`#[Codable]` or `#[Encode]`")
     } else {
@@ -245,12 +225,6 @@ pub(crate) fn e2411(ty: &Type, encode: bool, span: Span) -> Diagnostic {
         format!("add {marker} to `{ty}`, or remove it from the encoded value"),
         Some(span),
     )
-}
-
-/// The bare type name inside a shown type, i.e. `U64` in
-/// `U64 (a 64-bit whole number, 0 to 18446744073709551615)`.
-fn ty_name_of(shown: &str) -> &str {
-    shown.split_once(" (").map_or(shown, |(name, _)| name)
 }
 
 fn e2411_unknown_union_shape(union_ty: &str, member: &str, span: Span) -> Diagnostic {
@@ -302,13 +276,7 @@ fn validate_union_decode_shapes(
                 if let Some((_, previous)) = seen.iter().find(|(known, _)| *known == shape) {
                     let pair = (label(previous), label(member));
                     if reported_pairs.insert(pair.clone()) {
-                        out.push(e2415(
-                            &ty.show(),
-                            &pair.0,
-                            &pair.1,
-                            shape.name(),
-                            span,
-                        ));
+                        out.push(e2415(&ty.show(), &pair.0, &pair.1, shape.name(), span));
                     }
                 } else {
                     seen.push((shape, member));
@@ -424,8 +392,7 @@ pub(crate) fn is_encodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
         | Type::String
         | Type::Char
         | Type::Float32
-        | Type::InlineRange { .. } => true,
-        Type::IntN { .. } => crate::Traits::sized_int_has_datatree_form(ty),
+        | Type::IntN { .. } => true,
         Type::List(e) | Type::Option(e) | Type::Shared(e) => is_encodable_ty(e, reg),
         Type::FixedList { elem, .. } => is_encodable_ty(elem, reg),
         Type::Map { key, value, .. } => {
@@ -460,8 +427,7 @@ pub(crate) fn is_decodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
         | Type::String
         | Type::Char
         | Type::Float32
-        | Type::InlineRange { .. } => true,
-        Type::IntN { .. } => crate::Traits::sized_int_has_datatree_form(ty),
+        | Type::IntN { .. } => true,
         Type::List(e) | Type::Option(e) | Type::Shared(e) => is_decodable_ty(e, reg),
         Type::FixedList { elem, .. } => is_decodable_ty(elem, reg),
         Type::Map { key, value, .. } => {
@@ -521,9 +487,7 @@ fn invalid_union_decode_shapes(items: &[crate::AST::Item], ty: &Type) -> bool {
         | Type::Result {
             ok: key,
             err: value,
-        } => {
-            invalid_union_decode_shapes(items, key) || invalid_union_decode_shapes(items, value)
-        }
+        } => invalid_union_decode_shapes(items, key) || invalid_union_decode_shapes(items, value),
         Type::Apply { args, .. } | Type::Union(args) => args
             .iter()
             .any(|arg| invalid_union_decode_shapes(items, arg)),
@@ -599,8 +563,7 @@ pub(crate) fn invalid_serde_derive_impls(
                 }
                 if s.derives.iter().any(|(t, _)| t == crate::Generics::DECODE)
                     && (fields.iter().any(|f| {
-                        !is_decodable_ty(&f.ty, reg)
-                            || invalid_union_decode_shapes(items, &f.ty)
+                        !is_decodable_ty(&f.ty, reg) || invalid_union_decode_shapes(items, &f.ty)
                     }) || s
                         .fields
                         .iter()
@@ -627,10 +590,10 @@ pub(crate) fn invalid_serde_derive_impls(
                     invalid.insert((e.name.clone(), crate::Generics::ENCODE.to_string()));
                 }
                 if e.derives.iter().any(|(t, _)| t == crate::Generics::DECODE)
-                    && (payloads.iter().any(|t| {
-                        !is_decodable_ty(t, reg)
-                            || invalid_union_decode_shapes(items, t)
-                    }) || invalid_generated_union_decode_shapes(items, e))
+                    && (payloads
+                        .iter()
+                        .any(|t| !is_decodable_ty(t, reg) || invalid_union_decode_shapes(items, t))
+                        || invalid_generated_union_decode_shapes(items, e))
                 {
                     invalid.insert((e.name.clone(), crate::Generics::DECODE.to_string()));
                 }
@@ -674,7 +637,7 @@ pub(crate) fn validate_serde_items(
         // Container `#[RenameAll(style)]` casing menu (E2409).
         for m in container {
             if m.name == Syntax::MARKER_RENAME_ALL {
-                match m.args.first() {
+                match m.expr_arg(0) {
                     Some(Expr::Ident(style, sp)) => {
                         if !matches!(
                             style.as_str(),
@@ -881,7 +844,9 @@ pub(crate) fn int_range_error(signed: bool, bits: u8, span: Span) -> Diagnostic 
     let why = if !signed && bits == 8 {
         "binary APIs use one byte per value".to_string()
     } else {
-        format!("{article} `{spelling}` is a fixed-width number — values outside its range can't fit")
+        format!(
+            "{article} `{spelling}` is a fixed-width number — values outside its range can't fit"
+        )
     };
     Diagnostic::error(
         "E1003",

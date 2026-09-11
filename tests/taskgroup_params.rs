@@ -85,7 +85,7 @@ fn assert_jit_compiles(name: &str, source: &str) {
                 })
                 .collect::<Vec<_>>();
             assert!(errors.is_empty(), "{errors:?}");
-            jet_jit::try_compile_bundle(&bundle)
+            common::compile_cranelift_bundle(&bundle, &common::development_policy())
                 .expect("Group source must compile for resident JIT");
             let _ = fs::remove_dir_all(dir);
         })
@@ -438,9 +438,9 @@ fn assert_group_close_success(name: &str, source: &str, expected_stdout: &str) {
                 errors.is_empty(),
                 "resident probe rejected {probe_name}: {errors:?}"
             );
-            let detail = jet_jit::resident_jit_safe_bundle_detail(&bundle);
+            let detail = common::cranelift_resident_safe_detail(&bundle);
             assert!(
-                jet_jit::resident_jit_safe_bundle(&bundle),
+                common::cranelift_resident_safe(&bundle),
                 "{probe_name} must stay resident-JIT safe: {detail}"
             );
             let _ = fs::remove_dir_all(dir);

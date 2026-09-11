@@ -2355,7 +2355,8 @@ fn run() {
             .all(|diag| !matches!(diag.severity, jet::Diagnostics::Severity::Error)),
         "CBOR fixture must type-check: {diagnostics:?}"
     );
-    jet_jit::try_compile_bundle(&bundle).expect("CBOR fixture must compile for resident JIT");
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
+        .expect("CBOR fixture must compile for resident JIT");
     jet_jit::reset_jit_trace_for_test();
     match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran {

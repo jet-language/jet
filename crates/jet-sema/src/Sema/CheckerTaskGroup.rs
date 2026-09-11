@@ -5,6 +5,7 @@ use crate::AST::{CallArg, Expr, Stmt};
 use std::collections::HashSet;
 
 /// A child task spawned inside the active `task.group` scope.
+#[derive(Clone)]
 pub(crate) struct PendingTaskSpawn {
     pub binding: Option<String>,
     pub span: Span,
@@ -12,12 +13,14 @@ pub(crate) struct PendingTaskSpawn {
 
 /// D-TASKBORROW1=A: one borrowed place a child of this group holds. Loans open
 /// before the child launches and close when the group joins.
+#[derive(Clone)]
 pub(crate) struct ScopedBorrow {
     pub name: String,
     pub place: ViewPlace,
     pub access: ViewAccess,
 }
 
+#[derive(Clone)]
 pub(crate) struct TaskGroupCtx {
     pub name: String,
     pub origin: TaskGroupOrigin,
@@ -116,12 +119,22 @@ impl<'a> Checker<'a> {
         resolved_ret_out: &mut Option<Type>,
     ) -> Option<Type> {
         if method == Syntax::INTERNAL_TASK_TIMEOUT_METHOD {
+            self.record_effect(crate::Sema::Effects::TIME_WAIT_EFFECT, span);
             let ret = self.infer_task_timeout(args, span);
             *recv_type_out = Some(Syntax::INTERNAL_TASK_SURFACE_TYPE.to_string());
             *resolved_ret_out = ret.clone();
             return ret;
         }
         let active_group = self.active_taskgroup().map(|group| group.name.clone());
+        if matches!(
+            method,
+            Syntax::INTERNAL_TASK_ALL_METHOD
+                | Syntax::INTERNAL_TASK_RACE_METHOD
+                | Syntax::INTERNAL_TASK_ANY_METHOD
+        ) {
+            self.record_effect(crate::Sema::Effects::TIME_WAIT_EFFECT, span);
+        }
+
         if let Some(group) = active_group {
             *receiver = Box::new(Expr::Ident(group, receiver.span()));
             let group_name = match receiver.as_ref() {
@@ -473,22 +486,17 @@ impl<'a> Checker<'a> {
     /// obligation check before the enclosing group can mark its pending
     /// spawn.
     pub(crate) fn mark_taskgroup_spawn_owned(&mut self, name: &str) {
-        let pending = self
-            .taskgroup_stack
-            .iter()
-            .rev()
-            .find_map(|ctx| {
-                ctx.pending.iter().find_map(|spawn| {
-                    (spawn.binding.as_deref() == Some(name)).then_some(spawn.span)
-                })
-            });
+        let pending = self.taskgroup_stack.iter().rev().find_map(|ctx| {
+            ctx.pending
+                .iter()
+                .find_map(|spawn| (spawn.binding.as_deref() == Some(name)).then_some(spawn.span))
+        });
         if let Some(span) = pending {
             if !self.flow.moved.contains(name) {
                 self.mark_moved_by(name.to_string(), span, "task group");
             }
         }
     }
-
 
     pub(crate) fn taskgroup_spawn_from_expr(expr: &Expr) -> Option<(&Expr, Span)> {
         match expr {
@@ -745,9 +753,7 @@ impl<'a> Checker<'a> {
                 let mut result_fields = Vec::with_capacity(fields.len());
                 for (field, task_ty) in fields {
                     let elem = match *task_ty {
-                        Type::Apply { name, args, .. }
-                            if name == "Task" && args.len() == 1 =>
-                        {
+                        Type::Apply { name, args, .. } if name == "Task" && args.len() == 1 => {
                             taskgroup_success_type(&args[0])
                         }
                         other => {
@@ -882,9 +888,9 @@ impl<'a> Checker<'a> {
     fn normalize_taskgroup_carrier(&self, expr: &mut Expr, ty: Type) -> Type {
         let lambdas = taskgroup_spawn_lambdas(expr);
         let propagated = lambdas.iter().any(|lam| lam.meta.fallible_propagation);
-        let lambda_error = lambdas.iter().find_map(|lam| {
-            taskgroup_result_error(lam.meta.fallible_carrier.as_ref()?)
-        });
+        let lambda_error = lambdas
+            .iter()
+            .find_map(|lam| taskgroup_result_error(lam.meta.fallible_carrier.as_ref()?));
         let type_error = taskgroup_result_error(&ty);
         if !propagated && lambda_error.is_none() && type_error.is_none() {
             return ty;

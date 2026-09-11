@@ -1,8 +1,8 @@
-Error [E0003]: Expected `{` to open the `#FFI` foreign-source body, found `->`
-  --> tests/ui/ffi_asm_float_signature.jet:3:81
+Error [E3222]: `#FFI(asm)` has a signature its register binder can't represent
+  --> tests/ui/ffi_asm_float_signature.jet:3:51
     |
   3 | #[Unsafe("register-only increment"), FFI(asm)] fn increment(value: Float) Float -> {
-    |                                                                                 ^^
- Why: The structure here isn't what the compiler expected
- Fix: Use `{` to open the `#FFI` foreign-source body
-More: jet-lang.dev/e/E0003
+    |                                                   ^^^^^^^^^
+ Why: The audited assembly bridge uses general-purpose integer registers; floats and Bool need explicit conversion in Jet before the boundary
+ Fix: Use Int or I8/I16/I32/I64/U8/U16/U32/U64 parameters and return values
+More: jet-lang.dev/e/E3222

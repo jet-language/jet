@@ -127,11 +127,12 @@ fn resident_jit_and_forced_interpreter_agree_without_fallback() {
         "fact fixture rejected before tier proof: {errors:?}"
     );
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "fact fixture is not resident-JIT safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle).expect("fact fixture must compile in resident JIT");
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
+        .expect("fact fixture must compile in resident JIT");
 
     jet_jit::reset_jit_trace_for_test();
     match jet::Interpreter::dev_iteration(entry.to_str().unwrap(), false, false) {

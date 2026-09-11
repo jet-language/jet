@@ -34,9 +34,18 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema/build rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for E3222</p>
+<p class="diag-copy fix" data-registry-field="fix">Make the inline body and signature use a supported scalar ABI.</p>
 <h2>Worked example</h2>
-<p>No UI snapshot currently mentions this code.</p>
+<p>First UI snapshot mentioning <code>E3222</code>: <code>tests/ui/ffi_asm_float_signature.stderr</code>.</p>
+<pre class="diag">Error [E3222]: `#FFI(asm)` has a signature its register binder can&#39;t represent
+  --&gt; tests/ui/ffi_asm_float_signature.jet:3:51
+    |
+  3 | #[Unsafe(&quot;register-only increment&quot;), FFI(asm)] fn increment(value: Float) Float -&gt; {
+    |                                                   ^^^^^^^^^
+ Why: The audited assembly bridge uses general-purpose integer registers; floats and Bool need explicit conversion in Jet before the boundary
+ Fix: Use Int or I8/I16/I32/I64/U8/U16/U32/U64 parameters and return values
+More: jet-lang.dev/e/E3222
+</pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
 </main>

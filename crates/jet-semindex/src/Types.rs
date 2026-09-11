@@ -1,13 +1,14 @@
 //! D-SEMINDEX1: stable public query types (versioned independently of LSP internals).
 
 use jet_foundation::Diagnostics::Span;
+use jet_foundation::Facts::DerivationRecord;
 use jet_pkg_model::Overlay::OverlayPolicy;
 use jet_pkg_model::EffectBudget::EffectProjection;
 use jet_pkg_model::Package::PackageFacts;
 
 /// Schema version for JSON snapshots and API consumers. Bump when the exported
 /// fact shape changes incompatibly.
-pub const SCHEMA_VERSION: u32 = 17;
+pub const SCHEMA_VERSION: u32 = 18;
 
 /// Canonical JSON values for additive tooling projections. Keeping this small
 /// value model in the semantic-index crate prevents CLI consumers from
@@ -566,6 +567,9 @@ pub struct SemIndex {
     package_facts: Option<PackageFacts>,
     workspace_overlay_policy: Option<OverlayPolicy>,
     effect_projection: EffectProjection,
+    /// Shared checked reason records. Consumers retain only ids in their
+    /// evidence rows and resolve the payload from this table.
+    derivations: Vec<DerivationRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -602,6 +606,7 @@ impl SemIndex {
             package_facts: None,
             workspace_overlay_policy: None,
             effect_projection: EffectProjection::default(),
+            derivations: Vec::new(),
         }
     }
 
@@ -627,6 +632,42 @@ impl SemIndex {
 
     pub fn state_graphs(&self) -> &[StateGraphFact] {
         &self.state_graphs
+    }
+    pub(crate) fn set_derivations(&mut self, derivations: Vec<DerivationRecord>) {
+        self.derivations = derivations;
+        self.derivations.sort_by(|left, right| left.id.cmp(&right.id));
+    }
+
+    pub fn derivations(&self) -> &[DerivationRecord] {
+        &self.derivations
+    }
+
+    pub fn derivation(&self, id: &str) -> Option<&DerivationRecord> {
+        self.derivations.iter().find(|derivation| derivation.id == id)
+    }
+    pub fn derivation_ref(
+        &self,
+        subject: &str,
+    ) -> Option<jet_foundation::Facts::DerivationRef> {
+        self.derivations
+            .iter()
+            .find(|derivation| derivation.subject == subject)
+            .map(|derivation| derivation.reference())
+    }
+
+
+
+    pub fn invalidate_derivations(
+        &mut self,
+        current: &jet_foundation::Facts::DerivationIdentity,
+    ) -> usize {
+        let mut count = 0;
+        for derivation in &mut self.derivations {
+            if derivation.invalidate_if_identity_changed(current) {
+                count += 1;
+            }
+        }
+        count
     }
 
     pub(crate) fn set_state_graphs(&mut self, graphs: Vec<StateGraphFact>) {

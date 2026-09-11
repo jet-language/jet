@@ -75,6 +75,13 @@ impl<S: JetRow> JetColumnList<S> {
         }
     }
 
+    /// Borrow one stored column for a contiguous field scan.  The caller must
+    /// already have a canonical field index; `JetColumns` remains the one
+    /// bounds/ownership boundary for the storage.
+    pub fn column(&self, field: usize) -> &[S::Cell] {
+        self.columns.column(field)
+    }
+
     /// Build the columns from records in order — what a columnar list literal
     /// lowers to.
     pub fn from_aos(values: Vec<S>) -> Self {

@@ -1,5 +1,5 @@
 use super::*;
-use jet_foundation::JSON::JSONValue;
+use jet_foundation::DataTree::DataTree;
 
 /// `jet fix --edition=2027` rewrites `json.canonical(x)` per D-JSONCANON1:
 /// `json.canonical(x)` when the enclosing function is fallible, otherwise
@@ -492,14 +492,13 @@ fn top_level_help_lists_job_vocabulary_only() {
         stdout.contains("jet jobs"),
         "help must list `jet jobs`: {stdout}"
     );
-    assert!(stdout.contains("#Job"), "help must list `#Job`: {stdout}");
     assert!(
-        stdout.contains("<file.jet> --"),
-        "help must show job subcommands: {stdout}"
+        stdout.contains("jobs [<name>] [-- <args>]"),
+        "help must show named-job arguments: {stdout}"
     );
     assert!(
-        stdout.contains("<file.jet> -- <job>"),
-        "help must show named-job argv, not a dedicated flag: {stdout}"
+        stdout.contains("List or run named project jobs"),
+        "help must describe the jobs command: {stdout}"
     );
     assert!(
         !stdout.contains("tasks"),
@@ -518,12 +517,8 @@ fn top_level_help_lists_job_vocabulary_only() {
         let snapshot = fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(golden))
             .unwrap_or_else(|error| panic!("read {golden}: {error}"));
         assert!(
-            snapshot.contains("jobs") && snapshot.contains("#Job"),
-            "{golden} must list job discovery"
-        );
-        assert!(
-            snapshot.contains("<file.jet> -- <job>"),
-            "{golden} must document named-job argv"
+            snapshot.contains("jobs") && snapshot.contains("List or run named project jobs"),
+            "{golden} must use the canonical jobs vocabulary"
         );
         assert!(
             !snapshot.contains("tasks") && !snapshot.contains(&retired_flag),
@@ -1218,15 +1213,19 @@ fn measured_test_targets_filter_and_json_match_test_runner_contract() {
         "JSON must contain one record per selected claim: {json_stdout}"
     );
     for record in records {
-        let JSONValue::Object(record) = record else {
+        let DataTree::Object(_) = &record else {
             panic!("measurement JSON record is not an object")
         };
         assert!(
-            matches!(record.get("name"), Some(JSONValue::String(name)) if name == "measured-needle"),
+            matches!(
+                record.get("name").ok(),
+                Some(DataTree::Text(name) | DataTree::TypedText(name))
+                    if name == "measured-needle"
+            ),
             "JSON claim name is wrong: {record:?}"
         );
         assert!(
-            record.contains_key("mean_ns"),
+            record.get("mean_ns").is_ok(),
             "JSON measurement has no mean: {record:?}"
         );
     }

@@ -94,110 +94,31 @@
         }
     }
 
-    // JSON (dynamic, BTreeMap-keyed) → DataTree. Numbers that are integral collapse
-    // to `Int`, so a round-trip through JSON keeps `5` an Int.
-    pub fn datatree_from_json(j: &JSON) -> DataTree {
-        match j {
-            JSON::Null => DataTree::Null,
-            JSON::Boolean(b) => DataTree::Bool(*b),
-            JSON::Integer(n) => DataTree::Int(*n),
-            JSON::ExactInteger(text) => DataTree::Int(
-                jet_int_from_str(text).unwrap_or_else(|_| {
-                    unreachable!("JSON exact integer carrier must contain a valid integer")
-                }),
-            ),
-            JSON::Number(n) => {
-                if n.fract() == 0.0
-                    && n.is_finite()
-                    && *n >= i64::MIN as f64
-                    && *n < i64::MAX as f64
-                {
-                    DataTree::Int(*n as i64)
-                } else {
-                    DataTree::Float(*n)
-                }
-            }
-            JSON::Text(s) => DataTree::Text(s.clone()),
-            JSON::Array(items) => DataTree::Array(items.iter().map(datatree_from_json).collect()),
-            JSON::Object(entries) => DataTree::Object(
-                entries
-                    .iter()
-                    .map(|(key, value)| (key.clone(), datatree_from_json(value)))
-                    .collect(),
-            ),
-        }
-    }
 
     /// Parse typed wire data directly into the ordered tree. The parser and
     /// malformed-input vocabulary are shared with dynamic JSON and comptime.
-    pub fn parse_json_datatree(text: &str) -> Result<DataTree, JSONError> {
-        crate::jet_encoding_json::parse_json(text, false)
-            .map(datatree_from_shared)
-            .map_err(json_error_from_shared)
+    pub fn parse_json_datatree(text: &str) -> Result<DataTree, EncodingError> {
+        crate::jet_encoding_json::parse_json(text, false).map_err(json_error_from_datatree)
     }
 
     /// Parse typed JSON through the same tokenizer while preserving each
     /// number token until a destination decoder chooses Int, a sized integer,
     /// Decimal, or Float.
-    pub fn parse_json_typed_datatree(text: &str) -> Result<DataTree, JSONError> {
-        crate::jet_encoding_json::parse_json_exact_numbers(text, false)
-            .map(typed_datatree_from_shared)
-            .map_err(json_error_from_shared)
+    pub fn parse_json_typed_datatree(text: &str) -> Result<DataTree, EncodingError> {
+        crate::jet_encoding_json::parse_json_typed(text, false)
+            .map_err(json_error_from_datatree)
     }
 
-    fn typed_datatree_from_shared(value: crate::jet_encoding_json::Value) -> DataTree {
-        match value {
-            crate::jet_encoding_json::Value::Null => DataTree::Null,
-            crate::jet_encoding_json::Value::Bool(value) => DataTree::Bool(value),
-            crate::jet_encoding_json::Value::Number(value) => DataTree::Number(value),
-            crate::jet_encoding_json::Value::Text(value) => DataTree::TypedText(value),
-            crate::jet_encoding_json::Value::Array(values) => DataTree::Array(
-                values
-                    .into_iter()
-                    .map(typed_datatree_from_shared)
-                    .collect(),
-            ),
-            crate::jet_encoding_json::Value::Object(entries) => DataTree::Object(
-                entries
-                    .into_iter()
-                    .map(|(key, value)| (key, typed_datatree_from_shared(value)))
-                    .collect(),
-            ),
-            crate::jet_encoding_json::Value::Int(_)
-            | crate::jet_encoding_json::Value::Float(_) => {
-                unreachable!("lossless JSON parsing projected a number early")
-            }
-        }
-    }
-
-    fn datatree_from_shared(value: crate::jet_encoding_json::Value) -> DataTree {
-        match value {
-            crate::jet_encoding_json::Value::Null => DataTree::Null,
-            crate::jet_encoding_json::Value::Bool(value) => DataTree::Bool(value),
-            crate::jet_encoding_json::Value::Int(value) => DataTree::Int(value),
-            crate::jet_encoding_json::Value::Float(value) => DataTree::Float(value),
-            crate::jet_encoding_json::Value::Number(text) => DataTree::Int(
-                jet_int_from_str(&text).unwrap_or_else(|_| {
-                    unreachable!("JSON integer token must fit the exact Int carrier")
-                }),
-            ),
-            crate::jet_encoding_json::Value::Text(value) => DataTree::Text(value),
-            crate::jet_encoding_json::Value::Array(values) => {
-                DataTree::Array(values.into_iter().map(datatree_from_shared).collect())
-            }
-            crate::jet_encoding_json::Value::Object(mut entries) => {
-                // Dynamic JSON has the same sorted-key projection as the
-                // comptime BTreeMap value. Typed JSON uses the separate
-                // `typed_datatree_from_shared` path above to retain wire order.
-                entries.sort_by(|left, right| left.0.cmp(&right.0));
-                DataTree::Object(
-                    entries
-                        .into_iter()
-                        .map(|(key, value)| (key, datatree_from_shared(value)))
-                        .collect(),
-                )
-            }
-        }
+    fn json_error_from_datatree(error: crate::jet_encoding_json::Error) -> EncodingError {
+        EncodingError::new(
+            EncodingFormat::JSON,
+            EncodingErrorKind::Syntax,
+            0,
+            Ok(error.line),
+            Err(JetAbsent),
+            "",
+            error.message,
+        )
     }
 
     // Look up a key in an ordered Object.
@@ -232,67 +153,67 @@
     // Any JSON string that looks like a boolean or a number becomes that type,
     // and one audit line is emitted per coercion naming the field and from→to.
     pub fn jet_std_json_coerce_walk(
-        value: &JSON,
+        value: &DataTree,
         path: &str,
         emit: &mut dyn FnMut(String),
-    ) -> JSON {
+    ) -> DataTree {
         match value {
-            JSON::Text(s) => {
-                // Bool first (exact match only).
+            DataTree::Text(s) | DataTree::TypedText(s) => {
                 if s == "true" {
                     emit(jet_std_json_coerce_line(path, "string", "boolean"));
-                    return JSON::Boolean(true);
+                    return DataTree::Bool(true);
                 }
                 if s == "false" {
                     emit(jet_std_json_coerce_line(path, "string", "boolean"));
-                    return JSON::Boolean(false);
+                    return DataTree::Bool(false);
                 }
-                // Then number (must parse as a finite f64).
                 if let Ok(n) = s.parse::<f64>() {
                     if n.is_finite() {
                         emit(jet_std_json_coerce_line(path, "string", "number"));
-                        return JSON::Number(n);
+                        return DataTree::Float(n);
                     }
                 }
                 value.clone()
             }
-            JSON::Object(entries) => {
-                let mut out = std::collections::BTreeMap::new();
-                for (k, v) in entries {
-                    let child_path = if path.is_empty() {
-                        format!("{}", k)
-                    } else {
-                        format!("{}.{}", path, k)
-                    };
-                    out.insert(k.clone(), jet_std_json_coerce_walk(v, &child_path, emit));
-                }
-                JSON::Object(out)
-            }
-            JSON::Array(items) => {
-                let mut coerced: Vec<JSON> = Vec::with_capacity(items.len());
-                for (i, v) in items.iter().enumerate() {
-                    let child_path = if path.is_empty() {
-                        format!("[{}]", i)
-                    } else {
-                        format!("{}[{}]", path, i)
-                    };
-                    coerced.push(jet_std_json_coerce_walk(v, &child_path, emit));
-                }
-                JSON::Array(coerced)
-            }
-            // Null, Boolean, Integer, Number — already the right type.
+            DataTree::Object(entries) => DataTree::Object(
+                entries
+                    .iter()
+                    .map(|(key, value)| {
+                        let child_path = if path.is_empty() {
+                            key.clone()
+                        } else {
+                            format!("{}.{}", path, key)
+                        };
+                        (
+                            key.clone(),
+                            jet_std_json_coerce_walk(value, &child_path, emit),
+                        )
+                    })
+                    .collect(),
+            ),
+            DataTree::Array(items) => DataTree::Array(
+                items
+                    .iter()
+                    .enumerate()
+                    .map(|(index, value)| {
+                        let child_path = if path.is_empty() {
+                            format!("[{}]", index)
+                        } else {
+                            format!("{}[{}]", path, index)
+                        };
+                        jet_std_json_coerce_walk(value, &child_path, emit)
+                    })
+                    .collect(),
+            ),
             other => other.clone(),
         }
     }
 
-    // The lenient decode value collapses onto `Data`
-    // (D-ENC-DYN1=A+).
+    // The lenient decode value stays on the canonical ordered DataTree.
     pub fn jet_std_json_decode_lenient(
         text: &str,
         emit: &mut dyn FnMut(String),
-    ) -> Result<DataTree, JSONError> {
-        let parsed = parse_json(text)?;
-        Ok(datatree_from_json(&jet_std_json_coerce_walk(
-            &parsed, "", emit,
-        )))
+    ) -> Result<DataTree, EncodingError> {
+        let parsed = parse_json_datatree(text)?;
+        Ok(jet_std_json_coerce_walk(&parsed, "", emit))
     }

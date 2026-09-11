@@ -139,34 +139,17 @@ fn root() -> PathBuf {
 /// Mirrors the check in cli.rs `every_registered_code_has_an_explain_entry`.
 #[test]
 fn ga_every_diagnostic_has_explain() {
-    let md = fs::read_to_string(root().join("docs/spec/diagnostics.md")).expect("diagnostics.md");
     let index = jet::Explain::index();
-
-    let mut missing = Vec::new();
-    for line in md.lines() {
-        let line = line.trim();
-        if !line.starts_with("| E") && !line.starts_with("| L") {
-            continue;
-        }
-        let first = line
-            .trim_matches('|')
-            .split('|')
-            .next()
-            .unwrap_or("")
-            .trim();
-        if is_code(first) && !index.contains_key(first) {
-            missing.push(first.to_string());
-        }
-    }
+    let missing: Vec<String> = jet_foundation::Registry::diagnostic_rows()
+        .iter()
+        .filter(|row| !index.contains_key(row.code))
+        .map(|row| row.code.to_string())
+        .collect();
     assert!(
         missing.is_empty(),
         "M17 GA gate: these diagnostic codes lack a `jet explain` entry:\n  {}",
         missing.join(", ")
     );
-}
-
-fn is_code(s: &str) -> bool {
-    jet::Explain::is_code(s)
 }
 
 // ── 2. Milestone feature examples are front-end clean ─────────────────────
@@ -381,46 +364,6 @@ fn cbor_deprecation_release_fixture() {
     }
     let _ = fs::remove_dir_all(&root);
     check_fixture("deprecation.txt", &rendered);
-}
-
-#[test]
-fn later_breaking_milestones_name_their_gate() {
-    // m2 exit criterion: every later breaking epoch-2 milestone names the
-    // edition/epoch gate it needs. We scan the epoch-2 plan folder: any plan
-    // that calls itself "breaking"/"public-breaking" must also mention an
-    // edition or epoch gate. m2 itself defines the gate, so it is exempt.
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs/plans/epoch-2");
-    // Epoch 2 is wrapped (2026-06-19): the per-milestone plan folder was removed,
-    // its decisions recorded in syntax-decisions.md and highlights in roadmap.md.
-    // The m2 gate criterion was met at GA; with no plans left to scan this check
-    // is a no-op. If the folder ever returns, the scan resumes.
-    if !dir.exists() {
-        return;
-    }
-    let mut checked = 0;
-    for entry in fs::read_dir(&dir).unwrap().flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|x| x.to_str()) != Some("md") {
-            continue;
-        }
-        let name = path.file_name().unwrap().to_string_lossy().into_owned();
-        if name.starts_with("m2-") {
-            continue; // m2 defines the gate.
-        }
-        let text = fs::read_to_string(&path).unwrap().to_lowercase();
-        let claims_breaking = text.contains("breaking");
-        if claims_breaking {
-            assert!(
-                text.contains("edition") || text.contains("epoch"),
-                "{name} describes breaking changes but names no edition/epoch gate (m2 exit criterion)",
-            );
-        }
-        checked += 1;
-    }
-    assert!(
-        checked >= 1,
-        "expected at least one non-m2 epoch-2 plan to scan"
-    );
 }
 
 // ============================================================================

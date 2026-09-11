@@ -2,6 +2,88 @@
 
 use std::collections::BTreeMap;
 
+pub const RECORD_FIELD_ADDRESS_I64: i64 = 0;
+pub const RECORD_FIELD_ADDRESS_F64: i64 = 1;
+pub const RECORD_FIELD_ADDRESS_BOOL: i64 = 2;
+pub const RECORD_FIELD_ADDRESS_CHAR: i64 = 3;
+
+/// Runtime-owned model/provider surface. The compiler projects package
+/// metadata into this neutral seam; generated applications link only `jet_rt`.
+pub mod model;
+pub use jet_foundation::{DataTree, Diagnostics, JSON, SHA256};
+
+/// Canonical exact-number carrier shared by all resident arenas and the AOT,
+/// JIT, interpreter, and web adapters. Small values remain inline; spilled
+/// values own a reusable immutable Foundation node through Clone/Drop.
+mod exact_int_bridge {
+    use jet_foundation::Numeric::{CtBigInt, JetInt};
+
+    pub const SMALL_MIN: i64 = JetInt::inline_min();
+    pub const SMALL_MAX: i64 = JetInt::inline_max();
+
+    #[inline]
+    pub fn is_tagged(value: i64) -> bool {
+        // SAFETY: callers pass a borrowed scalar carrier; clone/release keeps
+        // a spilled node alive while the classification reads it.
+        unsafe { !JetInt::clone_from_raw(value).is_inline() }
+    }
+
+    pub fn big_value(value: i64) -> Option<CtBigInt> {
+        let value = unsafe { JetInt::clone_from_raw(value) };
+        (!value.is_inline()).then(|| value.to_big())
+    }
+
+    pub fn value(value: i64) -> CtBigInt {
+        big_value(value).unwrap_or_else(|| CtBigInt::from_int(value))
+    }
+
+    pub fn pack(value: CtBigInt) -> i64 {
+        JetInt::from_big(value).into_raw()
+    }
+
+    pub fn add(left: i64, right: i64) -> i64 {
+        let left = unsafe { JetInt::clone_from_raw(left) };
+        let right = unsafe { JetInt::clone_from_raw(right) };
+        left.add(&right)
+            .unwrap_or_else(|_| std::process::abort())
+            .into_raw()
+    }
+
+    pub fn try_new(value: i64) -> Result<i64, jet_foundation::Outcome::AllocError> {
+        JetInt::try_from_i64(value).map(|value| value.into_raw())
+    }
+
+    pub fn try_add(
+        left: i64,
+        right: i64,
+    ) -> Result<i64, jet_foundation::Outcome::AllocError> {
+        let left = unsafe { JetInt::clone_from_raw(left) };
+        let right = unsafe { JetInt::clone_from_raw(right) };
+        left.try_add(&right).map(|value| value.into_raw())
+    }
+
+    pub fn compare(left: i64, right: i64) -> i64 {
+        let left = unsafe { JetInt::clone_from_raw(left) };
+        let right = unsafe { JetInt::clone_from_raw(right) };
+        match left.compare(&right) {
+            std::cmp::Ordering::Less => -1,
+            std::cmp::Ordering::Equal => 0,
+            std::cmp::Ordering::Greater => 1,
+        }
+    }
+
+    pub fn to_string(value: i64) -> String {
+        unsafe { JetInt::clone_from_raw(value) }.to_string_rep()
+    }
+}
+
+pub use exact_int_bridge::{
+    add as exact_int_add, big_value as exact_int_big_value, compare as exact_int_compare,
+    is_tagged as exact_int_is_tagged, pack as exact_int_pack, to_string as exact_int_to_string,
+    try_add as exact_int_try_add, try_new as exact_int_try_new, value as exact_int_value,
+    SMALL_MAX as EXACT_INT_SMALL_MAX, SMALL_MIN as EXACT_INT_SMALL_MIN,
+};
+
 /// The arena only marshals resident values into the shared Prelude carrier.
 mod map_key_semantics {
     include!("../../jet-codegen/src/Prelude/Core/MapKey.rs");
@@ -106,12 +188,102 @@ pub enum JetVal {
     ExactInt(jet_foundation::Numeric::CtBigInt),
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct JetArena {
     values: Vec<JetVal>,
+    /// Roots for spilled exact words stored in erased i64 carriers. The
+    /// arena owns these until reset; atomic cells clone before publication.
+    exact_roots: Vec<jet_foundation::Numeric::JetInt>,
 }
 
+impl Default for JetArena {
+    fn default() -> Self {
+        Self {
+            values: Vec::new(),
+            exact_roots: Vec::new(),
+        }
+    }
+}
+
+
 impl JetArena {
+    fn retain_exact_raw(roots: &mut Vec<jet_foundation::Numeric::JetInt>, raw: i64) {
+        // SAFETY: only a tagged Foundation exact word has a pointer payload;
+        // ordinary arena handles stay inline and therefore retain nothing.
+        let owner = unsafe { jet_foundation::Numeric::JetInt::clone_from_raw(raw) };
+        if !owner.is_inline() {
+            roots.push(owner);
+        }
+    }
+
+    fn retain_map_key(
+        roots: &mut Vec<jet_foundation::Numeric::JetInt>,
+        key: &JetMapKey,
+    ) {
+        match key {
+            JetMapKey::Int(raw) => Self::retain_exact_raw(roots, *raw),
+            JetMapKey::Record(fields) => {
+                for field in fields {
+                    Self::retain_map_key(roots, field);
+                }
+            }
+            JetMapKey::UInt(_)
+            | JetMapKey::String(_)
+            | JetMapKey::Bool(_)
+            | JetMapKey::Char(_) => {}
+        }
+    }
+
+    fn retain_value_roots(
+        roots: &mut Vec<jet_foundation::Numeric::JetInt>,
+        value: &JetVal,
+    ) {
+        match value {
+            JetVal::Int(raw) => Self::retain_exact_raw(roots, *raw),
+            JetVal::IntList(values) => {
+                for raw in values {
+                    Self::retain_exact_raw(roots, *raw);
+                }
+            }
+            JetVal::List(values)
+            | JetVal::Record(values)
+            | JetVal::UninitList { values, .. } => {
+                for value in values {
+                    Self::retain_value_roots(roots, value);
+                }
+            }
+            JetVal::Range {
+                start,
+                end,
+                exclusive: _,
+            } => {
+                Self::retain_exact_raw(roots, *start);
+                Self::retain_exact_raw(roots, *end);
+            }
+            JetVal::Map(entries) => {
+                for (key, (key_id, value)) in entries {
+                    Self::retain_map_key(roots, key);
+                    Self::retain_exact_raw(roots, *key_id);
+                    Self::retain_exact_raw(roots, *value);
+                }
+            }
+            JetVal::Float(_)
+            | JetVal::Bool(_)
+            | JetVal::Char(_)
+            | JetVal::String(_)
+            | JetVal::StringView { .. }
+            | JetVal::RecordRef(_)
+            | JetVal::ExactInt(_) => {}
+        }
+    }
+
+    fn own_exact(&mut self, value: jet_foundation::Numeric::JetInt) -> i64 {
+        let raw = value.to_raw();
+        if !value.is_inline() {
+            self.exact_roots.push(value);
+        }
+        raw
+    }
     pub fn alloc_empty_string(&mut self) -> i64 {
         self.alloc_string(String::new())
     }
@@ -120,6 +292,19 @@ impl JetArena {
         let id = self.values.len() as i64;
         self.values.push(JetVal::String(text.into()));
         id
+    }
+    /// Allocate one erased carrier supplied by a checked marshalling adapter.
+    /// The adapter owns recursive type validation; this method only appends the
+    /// representation to the arena and returns its handle.
+    pub fn alloc_value(&mut self, value: JetVal) -> i64 {
+        Self::retain_value_roots(&mut self.exact_roots, &value);
+        let id = self.values.len() as i64;
+        self.values.push(value);
+        id
+    }
+    /// Copy one arena slot for a descriptor-guided marshalling pass.
+    pub fn clone_value(&self, id: i64) -> Option<JetVal> {
+        self.values.get(id as usize).cloned()
     }
 
     pub fn get_string(&self, id: i64) -> Option<&str> {
@@ -133,6 +318,10 @@ impl JetArena {
             }
             _ => None,
         }
+    }
+
+    pub fn clone_string(&self, id: i64) -> Option<String> {
+        self.get_string(id).map(str::to_owned)
     }
 
     pub fn alloc_string_view(&mut self, owner: i64, start: usize, end: usize) -> Option<i64> {
@@ -162,12 +351,9 @@ impl JetArena {
         }
     }
 
-    pub fn clone_string(&self, id: i64) -> Option<String> {
-        self.get_string(id).map(str::to_string)
-    }
-
     pub fn clear(&mut self) {
         self.values.clear();
+        self.exact_roots.clear();
     }
 
     /// Indices of `String` values allocated during JIT lowering (baked into code as handles).
@@ -195,8 +381,46 @@ impl JetArena {
             self.values[*i] = JetVal::String(text.clone());
         }
     }
+    /// Borrow an initialized list carrier without copying its source rows.
+    pub fn list_value(&self, list: i64) -> Option<&JetVal> {
+        let value = self.values.get(list as usize)?;
+        match value {
+            JetVal::IntList(_) | JetVal::List(_) => Some(value),
+            JetVal::UninitList { initialized, .. } => {
+                uninit_semantics::jet_uninit_all(initialized).ok()?;
+                Some(value)
+            }
+            _ => None,
+        }
+    }
+
+    /// Copy the logical list slots, expanding dense integer storage without
+    /// retaining any arena-owned handle.
+    pub fn clone_list_values(&self, list: i64) -> Option<Vec<JetVal>> {
+        match self.values.get(list as usize)? {
+            JetVal::IntList(values) => Some(values.iter().copied().map(JetVal::Int).collect()),
+            JetVal::List(values) => Some(values.clone()),
+            JetVal::UninitList {
+                values,
+                initialized,
+            } => {
+                uninit_semantics::jet_uninit_all(initialized).ok()?;
+                Some(values.clone())
+            }
+            _ => None,
+        }
+    }
+
+    /// Allocate a heterogeneous list carrier after its elements were
+    /// recursively materialized by a checked adapter.
+    pub fn alloc_list_values(&mut self, values: Vec<JetVal>) -> i64 {
+        self.alloc_value(JetVal::List(values))
+    }
 
     pub fn alloc_int_list(&mut self, values: Vec<i64>) -> i64 {
+        for raw in &values {
+            Self::retain_exact_raw(&mut self.exact_roots, *raw);
+        }
         let id = self.values.len() as i64;
         self.values.push(JetVal::IntList(values));
         id
@@ -227,7 +451,19 @@ impl JetArena {
         let key = self.clone_string(key_id)?;
         match self.values.get_mut(map as usize) {
             Some(JetVal::Map(entries)) => {
+                Self::retain_exact_raw(&mut self.exact_roots, value);
                 entries.insert(JetMapKey::String(key), (key_id, value));
+                Some(())
+            }
+            _ => None,
+        }
+    }
+
+    pub fn map_insert_bool(&mut self, map: i64, key: bool, value: i64) -> Option<()> {
+        match self.values.get_mut(map as usize) {
+            Some(JetVal::Map(entries)) => {
+                Self::retain_exact_raw(&mut self.exact_roots, value);
+                entries.insert(JetMapKey::Bool(key), (i64::from(key), value));
                 Some(())
             }
             _ => None,
@@ -257,6 +493,8 @@ impl JetArena {
     pub fn map_insert_int(&mut self, map: i64, key: i64, value: i64) -> Option<()> {
         match self.values.get_mut(map as usize) {
             Some(JetVal::Map(entries)) => {
+                Self::retain_exact_raw(&mut self.exact_roots, key);
+                Self::retain_exact_raw(&mut self.exact_roots, value);
                 entries.insert(JetMapKey::Int(key), (key, value));
                 Some(())
             }
@@ -321,6 +559,8 @@ impl JetArena {
         let key = self.composite_key(key_id)?;
         match self.values.get_mut(map as usize) {
             Some(JetVal::Map(entries)) => {
+                Self::retain_map_key(&mut self.exact_roots, &key);
+                Self::retain_exact_raw(&mut self.exact_roots, value);
                 entries.insert(key, (key_id, value));
                 Some(())
             }
@@ -347,6 +587,14 @@ impl JetArena {
     pub fn map_len(&self, map: i64) -> Option<i64> {
         match self.values.get(map as usize) {
             Some(JetVal::Map(entries)) => Some(entries.len() as i64),
+            _ => None,
+        }
+    }
+
+    /// Snapshot raw map pairs without cloning structural keys or payloads.
+    pub fn clone_map_pairs(&self, map: i64) -> Option<Vec<(i64, i64)>> {
+        match self.values.get(map as usize)? {
+            JetVal::Map(entries) => Some(entries.values().copied().collect()),
             _ => None,
         }
     }
@@ -378,6 +626,7 @@ impl JetArena {
     pub fn list_push_int(&mut self, list: i64, value: i64) -> Option<()> {
         match self.values.get_mut(list as usize) {
             Some(JetVal::IntList(values)) => {
+                Self::retain_exact_raw(&mut self.exact_roots, value);
                 values.push(value);
                 Some(())
             }
@@ -389,6 +638,7 @@ impl JetArena {
                     JetVal::List(values) => values.is_empty(),
                     _ => return None,
                 };
+                Self::retain_exact_raw(&mut self.exact_roots, value);
                 if empty {
                     *slot = JetVal::IntList(vec![value]);
                 } else if let JetVal::List(values) = slot {
@@ -411,6 +661,15 @@ impl JetArena {
     }
 
     pub fn replace_int_list(&mut self, list: i64, values: Vec<i64>) -> Option<()> {
+        if !matches!(
+            self.values.get(list as usize),
+            Some(JetVal::List(_)) | Some(JetVal::IntList(_))
+        ) {
+            return None;
+        }
+        for raw in &values {
+            Self::retain_exact_raw(&mut self.exact_roots, *raw);
+        }
         match self.values.get_mut(list as usize) {
             Some(slot @ JetVal::List(_)) => {
                 *slot = JetVal::IntList(values);
@@ -441,6 +700,11 @@ impl JetArena {
         end: i64,
         exclusive: bool,
     ) -> Option<()> {
+        if !matches!(self.values.get(list as usize), Some(JetVal::List(_))) {
+            return None;
+        }
+        Self::retain_exact_raw(&mut self.exact_roots, start);
+        Self::retain_exact_raw(&mut self.exact_roots, end);
         match self.values.get_mut(list as usize) {
             Some(JetVal::List(values)) => {
                 values.push(JetVal::Range {
@@ -612,11 +876,14 @@ impl JetArena {
         }
         match self.values.get_mut(list as usize) {
             Some(JetVal::IntList(values)) => {
-                *values.get_mut(index as usize)? = value;
+                let slot = values.get_mut(index as usize)?;
+                Self::retain_exact_raw(&mut self.exact_roots, value);
+                *slot = value;
                 Some(())
             }
             Some(JetVal::List(values)) => match values.get_mut(index as usize) {
                 Some(slot @ JetVal::Int(_)) => {
+                    Self::retain_exact_raw(&mut self.exact_roots, value);
                     *slot = JetVal::Int(value);
                     Some(())
                 }
@@ -628,6 +895,7 @@ impl JetArena {
             }) => {
                 let (index, _) =
                     uninit_semantics::jet_uninit_write(initialized, index as usize).ok()?;
+                Self::retain_exact_raw(&mut self.exact_roots, value);
                 values[index] = JetVal::Int(value);
                 Some(())
             }
@@ -695,6 +963,7 @@ impl JetArena {
             }
             _ => return None,
         };
+        Self::retain_value_roots(&mut self.exact_roots, &slice);
         let id = self.values.len() as i64;
         self.values.push(slice);
         Some(id)
@@ -754,6 +1023,7 @@ impl JetArena {
             },
             _ => return None,
         };
+        Self::retain_value_roots(&mut self.exact_roots, &value);
         let id = self.values.len() as i64;
         self.values.push(value);
         Some(id)
@@ -765,22 +1035,39 @@ impl JetArena {
             .push(JetVal::Record(vec![JetVal::Int(0); fields]));
         id
     }
+    /// Copy record slots for a descriptor-guided marshalling pass.
+    pub fn clone_record_values(&self, record: i64) -> Option<Vec<JetVal>> {
+        match self.values.get(record as usize)? {
+            JetVal::Record(fields) => Some(fields.clone()),
+            _ => None,
+        }
+    }
+
+    /// Allocate a record carrier after all field values were recursively
+    /// materialized by a checked adapter.
+    pub fn alloc_record_values(&mut self, fields: Vec<JetVal>) -> i64 {
+        self.alloc_value(JetVal::Record(fields))
+    }
 
     fn record_set(&mut self, record: i64, index: i64, value: JetVal) -> Option<()> {
         if index < 0 {
             return None;
         }
-        match self.values.get_mut(record as usize) {
-            Some(JetVal::Record(fields)) => {
-                let slot = fields.get_mut(index as usize)?;
-                *slot = value;
-                Some(())
-            }
-            _ => None,
+        let Some(JetVal::Record(fields)) = self.values.get(record as usize) else {
+            return None;
+        };
+        if index as usize >= fields.len() {
+            return None;
         }
+        Self::retain_value_roots(&mut self.exact_roots, &value);
+        let Some(JetVal::Record(fields)) = self.values.get_mut(record as usize) else {
+            return None;
+        };
+        fields[index as usize] = value;
+        Some(())
     }
 
-    fn record_get(&self, record: i64, index: i64) -> Option<&JetVal> {
+    pub fn record_get(&self, record: i64, index: i64) -> Option<&JetVal> {
         if index < 0 {
             return None;
         }
@@ -788,6 +1075,49 @@ impl JetArena {
             Some(JetVal::Record(fields)) => fields.get(index as usize),
             _ => None,
         }
+    }
+
+    /// Return a typed native address for one record slot.
+    ///
+    /// The address points into the record's inner field allocation, not the
+    /// outer arena `values` element. Growing that arena may relocate the
+    /// record header, but it cannot relocate this inner `Vec<JetVal>` buffer.
+    /// The checked native borrow must not retain the address or replace this
+    /// record slot until its synchronous call returns.
+    pub fn record_field_address(
+        &mut self,
+        record: i64,
+        index: i64,
+        kind: i64,
+    ) -> Option<i64> {
+        let record = usize::try_from(record).ok()?;
+        let index = usize::try_from(index).ok()?;
+        let JetVal::Record(fields) = self.values.get_mut(record)? else {
+            return None;
+        };
+        let field = fields.get_mut(index)?;
+        let address = match kind {
+            RECORD_FIELD_ADDRESS_I64 => match field {
+                JetVal::Int(value) | JetVal::RecordRef(value) => {
+                    value as *mut i64 as *mut u8
+                }
+                _ => return None,
+            },
+            RECORD_FIELD_ADDRESS_F64 => match field {
+                JetVal::Float(value) => value as *mut f64 as *mut u8,
+                _ => return None,
+            },
+            RECORD_FIELD_ADDRESS_BOOL => match field {
+                JetVal::Bool(value) => value as *mut bool as *mut u8,
+                _ => return None,
+            },
+            RECORD_FIELD_ADDRESS_CHAR => match field {
+                JetVal::Char(value) => value as *mut char as *mut u8,
+                _ => return None,
+            },
+            _ => return None,
+        };
+        i64::try_from(address as usize).ok()
     }
 
     pub fn record_set_int(&mut self, record: i64, index: i64, value: i64) -> Option<()> {
@@ -810,34 +1140,6 @@ impl JetArena {
         let value = self.clone_string(value_handle)?;
         self.record_set(record, index, JetVal::String(value))
     }
-
-    pub fn record_set_record(&mut self, record: i64, index: i64, value: i64) -> Option<()> {
-        if !matches!(self.values.get(value as usize), Some(JetVal::Record(_))) {
-            return None;
-        }
-        self.record_set(record, index, JetVal::RecordRef(value))
-    }
-
-    /// Whole-record write-through for `(*self) = …` / D-MUTSELF1 (keeps the
-    /// caller's handle identity; replaces field slots from `src`).
-    pub fn record_assign_from(&mut self, dst: i64, src: i64) -> Option<()> {
-        let src_fields = match self.values.get(src as usize)? {
-            JetVal::Record(fields) => fields.clone(),
-            _ => return None,
-        };
-        match self.values.get_mut(dst as usize)? {
-            JetVal::Record(dst_fields) => {
-                *dst_fields = src_fields;
-                Some(())
-            }
-            _ => None,
-        }
-    }
-
-    /// D-SOA-TIER1=A: the logical rows of a list whose elements are records,
-    /// as cell vectors in stored-field order.
-    ///
-    /// The Cranelift tier holds a `#Layout(columnar)` list as its rows, exactly
     /// as the interpreter ambient does, and marshals them into THE shared
     /// Prelude column store for the two reads the layout defines. This is the
     /// read side of that marshalling: it hands the rows over as cells so the
@@ -894,6 +1196,24 @@ impl JetArena {
         }
     }
 
+    pub fn record_set_record(&mut self, record: i64, index: i64, value_handle: i64) -> Option<()> {
+        self.record_set(record, index, JetVal::RecordRef(value_handle))
+    }
+
+    pub fn record_assign_from(&mut self, dst: i64, src: i64) -> Option<()> {
+        let src_fields = match self.values.get(src as usize)? {
+            JetVal::Record(fields) => fields.clone(),
+            _ => return None,
+        };
+        match self.values.get_mut(dst as usize)? {
+            JetVal::Record(fields) => {
+                *fields = src_fields;
+                Some(())
+            }
+            _ => None,
+        }
+    }
+
     pub fn record_get_float(&self, record: i64, index: i64) -> Option<f64> {
         match self.record_get(record, index) {
             Some(JetVal::Float(value)) => Some(*value),
@@ -931,54 +1251,39 @@ impl JetArena {
     }
 
     // ── D-INTBIG1: packed default `Int` ───────────────────────────────────
-    // A resident signed 63-bit payload is its own value. Larger values use
-    // the same arena and CtBigInt limbs as the spill carrier; the public
-    // language type is still only `Int`.
-    pub const INT_SMALL_MIN: i64 = -(1i64 << 62);
-    pub const INT_SMALL_MAX: i64 = (1i64 << 62) - 1;
-    const INT_BIG_TAG: i64 = i64::MIN + 1;
+    // Resident values stay inline. Larger values use the Foundation's
+    // immutable exact nodes, which carry ownership and reclaim spilled data
+    // after the final reader releases it.
+    pub const INT_SMALL_MIN: i64 = EXACT_INT_SMALL_MIN;
+    pub const INT_SMALL_MAX: i64 = EXACT_INT_SMALL_MAX;
 
+    #[inline(always)]
     fn int_is_tagged(value: i64) -> bool {
-        (Self::INT_BIG_TAG..Self::INT_SMALL_MIN).contains(&value)
+        exact_int_is_tagged(value)
+    }
+
+    #[inline(always)]
+    fn int_is_small(value: i64) -> bool {
+        !Self::int_is_tagged(value) && (Self::INT_SMALL_MIN..=Self::INT_SMALL_MAX).contains(&value)
     }
 
     fn int_big_value(&self, value: i64) -> Option<jet_foundation::Numeric::CtBigInt> {
-        if !Self::int_is_tagged(value) {
-            return None;
-        }
-        let id = value.wrapping_sub(Self::INT_BIG_TAG) as usize;
-        match self.values.get(id) {
-            Some(JetVal::ExactInt(value)) => Some(value.clone()),
-            _ => None,
-        }
+        exact_int_big_value(value)
     }
 
     fn int_value(&self, value: i64) -> jet_foundation::Numeric::CtBigInt {
-        self.int_big_value(value)
-            .unwrap_or_else(|| jet_foundation::Numeric::CtBigInt::from_int(value))
+        exact_int_value(value)
     }
 
     fn int_pack(&mut self, value: jet_foundation::Numeric::CtBigInt) -> i64 {
-        if let Some(small) = value.try_i64() {
-            if (Self::INT_SMALL_MIN..=Self::INT_SMALL_MAX).contains(&small) {
-                return small;
-            }
-        }
-        if let Some(id) = self.values.iter().position(|existing| {
-            matches!(existing, JetVal::ExactInt(existing) if existing == &value)
-        }) {
-            return Self::INT_BIG_TAG.wrapping_add(id as i64);
-        }
-        let id = self.values.len() as i64;
-        self.values.push(JetVal::ExactInt(value));
-        Self::INT_BIG_TAG.wrapping_add(id)
+        self.own_exact(jet_foundation::Numeric::JetInt::from_big(value))
     }
 
     pub fn int_from_i64(&mut self, value: i64) -> i64 {
         if (Self::INT_SMALL_MIN..=Self::INT_SMALL_MAX).contains(&value) {
             value
         } else {
-            self.int_pack(jet_foundation::Numeric::CtBigInt::from_int(value))
+            self.own_exact(jet_foundation::Numeric::JetInt::from_i64(value))
         }
     }
 
@@ -986,7 +1291,9 @@ impl JetArena {
         if value <= Self::INT_SMALL_MAX as u64 {
             value as i64
         } else {
-            self.int_pack(jet_foundation::Numeric::CtBigInt::from_u64(value))
+            self.own_exact(jet_foundation::Numeric::JetInt::from_big(
+                jet_foundation::Numeric::CtBigInt::from_u64(value),
+            ))
         }
     }
 
@@ -1046,7 +1353,7 @@ impl JetArena {
     }
 
     pub fn int_compare(&self, left: i64, right: i64) -> i64 {
-        if !Self::int_is_tagged(left) && !Self::int_is_tagged(right) {
+        if Self::int_is_small(left) && Self::int_is_small(right) {
             return match left.cmp(&right) {
                 std::cmp::Ordering::Less => -1,
                 std::cmp::Ordering::Equal => 0,
@@ -1061,7 +1368,7 @@ impl JetArena {
     }
 
     pub fn int_add(&mut self, left: i64, right: i64) -> i64 {
-        if !Self::int_is_tagged(left) && !Self::int_is_tagged(right) {
+        if Self::int_is_small(left) && Self::int_is_small(right) {
             if let Some(value) = left.checked_add(right) {
                 if (Self::INT_SMALL_MIN..=Self::INT_SMALL_MAX).contains(&value) {
                     return value;
@@ -1072,7 +1379,7 @@ impl JetArena {
     }
 
     pub fn int_sub(&mut self, left: i64, right: i64) -> i64 {
-        if !Self::int_is_tagged(left) && !Self::int_is_tagged(right) {
+        if Self::int_is_small(left) && Self::int_is_small(right) {
             if let Some(value) = left.checked_sub(right) {
                 if (Self::INT_SMALL_MIN..=Self::INT_SMALL_MAX).contains(&value) {
                     return value;
@@ -1083,7 +1390,7 @@ impl JetArena {
     }
 
     pub fn int_mul(&mut self, left: i64, right: i64) -> i64 {
-        if !Self::int_is_tagged(left) && !Self::int_is_tagged(right) {
+        if Self::int_is_small(left) && Self::int_is_small(right) {
             if let Some(value) = left.checked_mul(right) {
                 if (Self::INT_SMALL_MIN..=Self::INT_SMALL_MAX).contains(&value) {
                     return value;
@@ -1112,7 +1419,7 @@ impl JetArena {
     }
 
     pub fn int_neg(&mut self, value: i64) -> i64 {
-        if !Self::int_is_tagged(value) {
+        if Self::int_is_small(value) {
             if let Some(value) = value.checked_neg() {
                 if (Self::INT_SMALL_MIN..=Self::INT_SMALL_MAX).contains(&value) {
                     return value;
@@ -1131,19 +1438,8 @@ impl JetArena {
     }
 
     pub fn int_try_from(&self, value: i64, kind: i64) -> Option<i128> {
-        let value = self.int_to_i128(value)?;
-        let (lo, hi) = match kind {
-            0 => (i8::MIN as i128, i8::MAX as i128),
-            1 => (i16::MIN as i128, i16::MAX as i128),
-            2 => (i32::MIN as i128, i32::MAX as i128),
-            3 => (i64::MIN as i128, i64::MAX as i128),
-            4 => (u8::MIN as i128, u8::MAX as i128),
-            5 => (u16::MIN as i128, u16::MAX as i128),
-            6 => (u32::MIN as i128, u32::MAX as i128),
-            7 => (u64::MIN as i128, u64::MAX as i128),
-            _ => return None,
-        };
-        (lo..=hi).contains(&value).then_some(value)
+        self.int_to_i128(value)
+            .and_then(|value| jet_foundation::NumericConversion::jet_numeric_fixed_from_i128(value, kind))
     }
 
     pub fn int_not(&mut self, value: i64) -> i64 {
@@ -1168,7 +1464,7 @@ impl JetArena {
         if self.int_is_zero(divisor) {
             return None;
         }
-        if !Self::int_is_tagged(value) && !Self::int_is_tagged(divisor) {
+        if Self::int_is_small(value) && Self::int_is_small(divisor) {
             if let (Some(quotient), Some(remainder)) =
                 (value.checked_div(divisor), value.checked_rem(divisor))
             {
@@ -1368,23 +1664,26 @@ mod tests {
     #[test]
     fn exact_int_small_path_and_spill_boundary() {
         let mut arena = JetArena::default();
-        let before = arena.values.len();
 
         let inline = arena.int_add(JetArena::INT_SMALL_MAX - 1, 1);
         assert_eq!(inline, JetArena::INT_SMALL_MAX);
-        assert_eq!(
-            arena.values.len(),
-            before,
-            "small exact Int arithmetic must not allocate a spill value"
-        );
 
         let positive_spill = arena.int_add(JetArena::INT_SMALL_MAX, 1);
-        assert_eq!(arena.values.len(), before + 1);
-        assert_eq!(arena.int_to_string(positive_spill), "4611686018427387904");
+        assert_eq!(
+            exact_int_big_value(positive_spill)
+                .expect("large exact value must be in the shared store")
+                .to_string_rep(),
+            "4611686018427387904"
+        );
 
         let negative_spill = arena.int_sub(JetArena::INT_SMALL_MIN, 1);
-        assert_eq!(arena.values.len(), before + 2);
-        assert_eq!(arena.int_to_string(negative_spill), "-4611686018427387905");
+        assert_eq!(
+            exact_int_big_value(negative_spill)
+                .expect("large exact value must be in the shared store")
+                .to_string_rep(),
+            "-4611686018427387905"
+        );
+        assert_eq!(arena.int_compare(positive_spill, positive_spill), 0);
     }
 
     #[test]
@@ -1393,8 +1692,9 @@ mod tests {
         assert_eq!(string_trim("  jet\n"), "jet");
         assert_eq!(string_to_upper("Jet"), "JET");
         assert_eq!(string_to_lower("Jet"), "jet");
-        assert_eq!(string_to_lower("\u{A7CE}"), "\u{A7CE}");
-        assert_eq!(string_to_upper("\u{A7CF}"), "\u{A7CF}");
+        // Unicode 17 introduced this pair; casing follows the pinned UCD, not host data.
+        assert_eq!(string_to_lower("\u{A7CE}"), "\u{A7CF}");
+        assert_eq!(string_to_upper("\u{A7CF}"), "\u{A7CE}");
         assert_eq!(string_trim("\u{2003}jet\u{2003}"), "jet");
         assert_eq!(string_replace("one two one", "one", "1"), "1 two 1");
         assert_eq!(string_after("nate@jet-lang.dev", "@"), "jet-lang.dev");
@@ -1482,6 +1782,51 @@ mod tests {
         assert_eq!(arena.record_get_float(record, 1), Some(2.5));
         assert_eq!(arena.record_get_bool(record, 2), Some(true));
         assert_eq!(arena.record_get_char(record, 3), Some('J'));
+    }
+
+    #[test]
+    fn record_field_borrows_survive_arena_growth() {
+        let mut arena = JetArena::default();
+        let record = arena.alloc_record(4);
+        arena.record_set_int(record, 0, 10).unwrap();
+        arena.record_set_float(record, 1, 2.5).unwrap();
+        arena.record_set_bool(record, 2, false).unwrap();
+        arena.record_set_char(record, 3, 'a').unwrap();
+        let kinds = [
+            RECORD_FIELD_ADDRESS_I64,
+            RECORD_FIELD_ADDRESS_F64,
+            RECORD_FIELD_ADDRESS_BOOL,
+            RECORD_FIELD_ADDRESS_CHAR,
+        ];
+        let addresses: [i64; 4] = std::array::from_fn(|index| {
+            arena.record_field_address(record, index as i64, kinds[index]).unwrap()
+        });
+
+        // Allocate the new arena while the old allocation is still live, so
+        // moving the record headers cannot accidentally reuse their addresses.
+        let replacement = Vec::with_capacity(arena.values.capacity() + 1);
+        let original = std::mem::replace(&mut arena.values, replacement);
+        arena.values.extend(original);
+        for (index, address) in addresses.iter().enumerate() {
+            assert_eq!(
+                arena.record_field_address(record, index as i64, kinds[index]),
+                Some(*address),
+            );
+        }
+        // SAFETY: the typed borrows above still own their unchanged field
+        // slots, as checked after moving the outer arena. No slot is replaced.
+        unsafe {
+            *(addresses[0] as usize as *mut i64) = 41;
+            *(addresses[1] as usize as *mut f64) = 3.5;
+            *(addresses[2] as usize as *mut bool) = true;
+            *(addresses[3] as usize as *mut char) = 'z';
+        }
+        assert_eq!(arena.record_get_int(record, 0), Some(41));
+        assert_eq!(arena.record_get_float(record, 1), Some(3.5));
+        assert_eq!(arena.record_get_bool(record, 2), Some(true));
+        assert_eq!(arena.record_get_char(record, 3), Some('z'));
+        assert_eq!(arena.record_field_address(record, 0, RECORD_FIELD_ADDRESS_F64), None);
+        assert_eq!(arena.record_field_address(record, 4, RECORD_FIELD_ADDRESS_I64), None);
     }
 
     #[test]

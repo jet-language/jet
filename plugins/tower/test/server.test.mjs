@@ -1,20 +1,20 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { request as httpRequest } from 'node:http';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { openStore, empty } from '../app/store.mjs';
-import { configFile, readJSON, secretsFile, writeJSON } from '../app/paths.mjs';
+import { configFile, readJSON, writeJSON } from '../app/paths.mjs';
 import { serve } from '../app/server.mjs';
 
 const root = mkdtempSync(join(tmpdir(), 'tower-srv-'));
 const dir = join(root, '.tower');
-mkdirSync(join(root, 'docs', 'agents'), { recursive: true });
-writeFileSync(join(root, 'docs', 'agents', 'owner-guidance.md'), '# Owner guidance\n\nold\n');
+writeFileSync(join(root, 'AGENTS.md'), '# AGENTS.md\n\nold\n');
 mkdirSync(dir, { recursive: true });
 writeJSON(join(dir, 'tower.json'), empty('Srv'));
 writeJSON(configFile(dir), { project: 'Srv' });
+writeJSON(join(dir, 'secrets.json'), { auth: { token: 'ignored-by-keyless-server' } });
 const store = openStore(dir);
 const PORT = 7955;
 const server = serve(store, PORT, false);
@@ -27,14 +27,6 @@ const post = async (route, body, headers = {}) => {
   });
   return { status: r.status, json: await r.json() };
 };
-const ownerSession = async () => {
-  const page = await fetch(url('/'), { headers: { accept: 'text/html' } });
-  assert.equal(page.status, 200);
-  const cookie = page.headers.get('set-cookie')?.split(';', 1)[0];
-  assert.ok(cookie, 'owner navigation must establish an in-memory session');
-  return cookie;
-};
-const ownerPost = async (route, body) => post(route, body, { cookie: await ownerSession() });
 const rawGet = (path, host, headers = {}) => new Promise((resolve, reject) => {
   const req = httpRequest({ hostname: '127.0.0.1', port: PORT, path, headers: { host, ...headers } }, (res) => {
     let data = '';
@@ -45,6 +37,19 @@ const rawGet = (path, host, headers = {}) => new Promise((resolve, reject) => {
   req.on('error', reject);
   req.end();
 });
+const rawPost = (path, host, payload, headers = {}) => new Promise((resolve, reject) => {
+  const req = httpRequest({
+    hostname: '127.0.0.1', port: PORT, path, method: 'POST',
+    headers: { host, 'content-type': 'application/json', ...headers },
+  }, (res) => {
+    let data = '';
+    res.setEncoding('utf8');
+    res.on('data', chunk => { data += chunk; });
+    res.on('end', () => resolve({ status: res.statusCode, data, json: JSON.parse(data) }));
+  });
+  req.on('error', reject);
+  req.end(JSON.stringify(payload));
+});
 
 test('server round-trip: add, state, validation, conflict, next', async () => {
   const add = await post('card/add', { title: 'Via HTTP', by: 'agent-x' });
@@ -54,8 +59,6 @@ test('server round-trip: add, state, validation, conflict, next', async () => {
   assert.equal(Object.hasOwn(add.json.state.config, 'auth'), false);
   assert.equal(Object.hasOwn(add.json.state.config, 'push'), false);
   assert.equal(Object.hasOwn(readJSON(configFile(dir), {}), 'push'), false);
-  const secretShape = readJSON(secretsFile(dir), {});
-  assert.equal(Object.hasOwn(secretShape, 'push'), false);
 
   const state = await (await fetch(url('/api/state'))).json();
   assert.equal(state.meta.project, 'Srv');
@@ -79,17 +82,53 @@ test('server round-trip: add, state, validation, conflict, next', async () => {
   assert.equal(unknown.status, 404);
 });
 
-test('default server rejects DNS rebinding, cross-site mutation, and forged owner payloads', async () => {
-  assert.equal(server.address().address, '127.0.0.1', 'no-token server is loopback-only');
+test('keyless LAN access keeps Host and CSRF boundaries', async () => {
+  assert.ok(['::', '0.0.0.0'].includes(server.address().address), 'server listens on the LAN');
+
+  const page = await fetch(url('/'), { headers: { accept: 'text/html' } });
+  assert.equal(page.status, 200, 'a fresh device loads the Tower page without a key');
+  assert.match(page.headers.get('set-cookie') || '', /tower-owner-session=/);
+  assert.doesNotMatch(page.headers.get('set-cookie') || '', /(?:^|;\s*)tower=/);
+  const legacyKey = await rawGet('/api/state?key=wrong', `localhost:${PORT}`, {
+    authorization: 'Bearer wrong',
+    cookie: 'tower=wrong',
+  });
+  assert.equal(legacyKey.status, 200, 'retired keys and access cookies do not gate LAN requests');
+
+  for (const host of [
+    `192.168.1.42:${PORT}`, `[fd00::42]:${PORT}`, `[FD00::42]:${PORT}`,
+    `[fe80::42]:${PORT}`, `[::1]:${PORT}`,
+    `[::ffff:192.168.1.42]:${PORT}`, `[0:0:0:0:0:ffff:c0a8:12a]:${PORT}`,
+    `tower.lan:${PORT}`, `tower:${PORT}`,
+  ]) {
+    const response = await rawGet('/api/state', host);
+    assert.equal(response.status, 200, `private LAN Host ${host} is readable`);
+  }
+
+  for (const host of [
+    `[2001:4860:4860::8888]:${PORT}`,
+    `[::ffff:8.8.8.8]:${PORT}`,
+    `[0:0:0:0:0:ffff:cb00:7108]:${PORT}`,
+  ]) {
+    const response = await rawGet('/api/state', host);
+    assert.equal(response.status, 403, `public Host ${host} is rejected`);
+    assert.equal(JSON.parse(response.data).error, 'E_HOST');
+  }
+
+  for (const host of [`[2001:db8::1`, `2001:db8::1`, `[]:${PORT}`]) {
+    const response = await rawGet('/api/state', host);
+    assert.equal(response.status, 403, `malformed Host ${host} is rejected`);
+    assert.equal(JSON.parse(response.data).error, 'E_HOST');
+  }
 
   const rebound = await rawGet('/api/state', `rebind.invalid:${PORT}`);
-  assert.equal(rebound.status, 401);
-  assert.equal(JSON.parse(rebound.data).error, 'E_AUTH');
+  assert.equal(rebound.status, 403);
+  assert.equal(JSON.parse(rebound.data).error, 'E_HOST');
   const proxied = await rawGet('/api/state', `localhost:${PORT}`, { 'x-forwarded-for': '203.0.113.8' });
-  assert.equal(proxied.status, 401);
-  assert.equal(JSON.parse(proxied.data).error, 'E_AUTH');
+  assert.equal(proxied.status, 403);
+  assert.equal(JSON.parse(proxied.data).error, 'E_HOST');
 
-  const before = (await (await fetch(url('/api/state'))).json()).meta.rev;
+  const beforeCards = (await (await fetch(url('/api/state'))).json()).cards.length;
   const headerless = await fetch(url('/api/card/add'), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -98,6 +137,15 @@ test('default server rejects DNS rebinding, cross-site mutation, and forged owne
   assert.equal(headerless.status, 403);
   assert.equal((await headerless.json()).error, 'E_CSRF');
 
+  const originMutation = await rawPost('/api/card/update', `192.168.1.42:${PORT}`,
+    { id: '#1', title: 'Via HTTP', by: 'lan-browser' },
+    { origin: `http://192.168.1.42:${PORT}` });
+  assert.equal(originMutation.status, 200, 'plain HTTP LAN Origin works without Fetch Metadata');
+  const refererMutation = await rawPost('/api/card/update', `tower.lan:${PORT}`,
+    { id: '#1', title: 'Via HTTP', by: 'lan-browser' },
+    { referer: `http://tower.lan:${PORT}/` });
+  assert.equal(refererMutation.status, 200, 'plain HTTP LAN Referer works without Fetch Metadata');
+
   const csrf = await fetch(url('/api/card/add'), {
     method: 'POST',
     headers: { origin: 'https://evil.example', 'content-type': 'application/json' },
@@ -105,10 +153,18 @@ test('default server rejects DNS rebinding, cross-site mutation, and forged owne
   });
   assert.equal(csrf.status, 403);
   assert.equal((await csrf.json()).error, 'E_CSRF');
+  const nullOrigin = await fetch(url('/api/card/add'), {
+    method: 'POST',
+    headers: { origin: 'null', 'content-type': 'application/json' },
+    body: JSON.stringify({ title: 'null-origin mutation' }),
+  });
+  assert.equal(nullOrigin.status, 403);
+  assert.equal((await nullOrigin.json()).error, 'E_CSRF');
   const afterCsrf = await (await fetch(url('/api/state'))).json();
-  assert.equal(afterCsrf.meta.rev, before);
+  assert.equal(afterCsrf.cards.length, beforeCards);
   assert.equal(afterCsrf.cards.some(c => c.title === 'headerless mutation'), false);
   assert.equal(afterCsrf.cards.some(c => c.title === 'cross-site mutation'), false);
+  assert.equal(afterCsrf.cards.some(c => c.title === 'null-origin mutation'), false);
 
   const briefCsrf = await fetch(url('/api/brief?agent=evil-agent&claim=1'), {
     headers: { origin: 'https://evil.example' },
@@ -122,40 +178,69 @@ test('default server rejects DNS rebinding, cross-site mutation, and forged owne
   assert.equal((await briefHeaderless.json()).error, 'E_CSRF');
 
   const docsCsrf = await fetch(url('/api/docs'), { headers: { origin: 'https://evil.example' } });
-  assert.equal(docsCsrf.status, 403);
-  assert.equal((await docsCsrf.json()).error, 'E_CSRF');
+  assert.equal(docsCsrf.status, 200, 'read-only Docs does not need Origin or credentials');
+  assert.ok((await docsCsrf.json()).sections);
   const docsHeaderless = await fetch(url('/api/docs'));
-  assert.equal(docsHeaderless.status, 403);
-  assert.equal((await docsHeaderless.json()).error, 'E_CSRF');
+  assert.equal(docsHeaderless.status, 200, 'read-only Docs works without Fetch Metadata');
+  assert.ok((await docsHeaderless.json()).sections);
+  const retiredArchive = await post('docs/archive', { path: 'docs/research/old.md' });
+  assert.equal(retiredArchive.status, 404, 'Docs archive route is retired');
 
   const frozen = await post('card/add', { title: 'frozen owner lane', phase: 'frozen' });
   assert.equal(frozen.status, 200);
-  const forged = await post('card/update', { id: frozen.json.result.id, title: 'forged owner write', by: 'owner' });
-  assert.equal(forged.status, 403);
-  assert.equal(forged.json.error, 'E_OWNER_ONLY');
+  const ownerWrite = await rawPost('/api/card/update', `localhost:${PORT}`,
+    { id: frozen.json.result.id, title: 'owner write without session', by: 'owner' },
+    { origin: `http://localhost:${PORT}` });
+  assert.equal(ownerWrite.status, 200, 'owner-attributed UI actions need no session');
+  const agentWrite = await post('card/update', { id: frozen.json.result.id, title: 'agent write', by: 'agent' });
+  assert.equal(agentWrite.status, 403);
+  assert.equal(agentWrite.json.error, 'E_OWNER_LANE');
   const missingQuestionBy = await post('question/add', { cardId: '#1', text: 'forged owner question' });
   assert.equal(missingQuestionBy.status, 400);
   assert.equal(missingQuestionBy.json.error, 'E_INVALID');
   const state = await (await fetch(url('/api/state'))).json();
-  assert.equal(state.cards.find(c => c.id === frozen.json.result.id).title, 'frozen owner lane');
+  assert.equal(state.cards.find(c => c.id === frozen.json.result.id).title, 'owner write without session');
   assert.equal(state.questions.some(q => q.text === 'forged owner question'), false);
 });
 
-test('guidance reads publicly but only an authenticated owner UI session can update it', async () => {
+test('AGENTS HTTP editor requires a current revision and same-origin mutation', async () => {
   const initial = await fetch(url('/api/guidance'));
   assert.equal(initial.status, 200);
-  assert.match((await initial.json()).body, /old/);
+  const loaded = await initial.json();
+  assert.equal(loaded.path, 'AGENTS.md');
+  assert.equal(loaded.body, '# AGENTS.md\n\nold\n');
 
-  const forged = await post('guidance/update', { body: '# Owner guidance\n\nforged\n' });
-  assert.equal(forged.status, 403);
-  assert.equal(forged.json.error, 'E_OWNER_ONLY');
-
-  const saved = await ownerPost('guidance/update', { body: '# Owner guidance\n\nnew\n' });
+  const saved = await rawPost('/api/guidance/update', `localhost:${PORT}`,
+    { body: '# AGENTS.md\n\nnew\n', expectRev: loaded.revision },
+    { origin: `http://localhost:${PORT}` });
   assert.equal(saved.status, 200);
-  assert.match(saved.json.result.body, /new/);
+  assert.equal(saved.json.result.body, '# AGENTS.md\n\nnew\n');
+  assert.equal(readFileSync(join(root, 'AGENTS.md'), 'utf8'), saved.json.result.body);
 
+  for (const payload of [
+    { body: 'blind overwrite' },
+    { body: 'stale overwrite', expectRev: loaded.revision },
+  ]) {
+    const rejected = await rawPost('/api/guidance/update', `localhost:${PORT}`,
+      payload, { origin: `http://localhost:${PORT}` });
+    assert.equal(rejected.status, 409);
+    assert.equal(rejected.json.error, 'E_CONFLICT');
+  }
+  const crossSite = await rawPost('/api/guidance/update', `localhost:${PORT}`,
+    { body: 'cross-site overwrite', expectRev: saved.json.result.revision },
+    { origin: 'https://evil.example' });
+  assert.equal(crossSite.status, 403);
+  assert.equal(crossSite.json.error, 'E_CSRF');
+  const headerless = await rawPost('/api/guidance/update', `localhost:${PORT}`,
+    { body: 'headerless overwrite', expectRev: saved.json.result.revision });
+  assert.equal(headerless.status, 403);
+  assert.equal(headerless.json.error, 'E_CSRF');
+
+  const generalDocs = await post('docs/update', { path: 'AGENTS.md', body: 'generic overwrite' });
+  assert.equal(generalDocs.status, 400);
+  assert.equal(generalDocs.json.error, 'E_INVALID');
   const reread = await (await fetch(url('/api/guidance'))).json();
-  assert.match(reread.body, /new/);
+  assert.equal(reread.body, '# AGENTS.md\n\nnew\n');
 });
 
 test('message API adds, lists, and closes independently of done-card clearing', async () => {
@@ -174,7 +259,7 @@ test('message API adds, lists, and closes independently of done-card clearing', 
   assert.equal(rejectedClear.status, 403);
   assert.equal(rejectedClear.json.error, 'E_OWNER_ONLY');
 
-  const cleared = await ownerPost('done/clear', { by: 'owner' });
+  const cleared = await post('done/clear', { by: 'owner' });
   assert.equal(cleared.status, 200);
   assert.equal(cleared.json.state.events[0].action, 'done.clear');
   assert.equal(cleared.json.state.events[0].by, 'owner');
@@ -185,7 +270,7 @@ test('message API adds, lists, and closes independently of done-card clearing', 
   assert.equal(rejected.status, 403);
   assert.equal(rejected.json.error, 'E_OWNER_ONLY');
 
-  const done = await ownerPost('message/done', { id: add.json.result.id, by: 'owner' });
+  const done = await post('message/done', { id: add.json.result.id, by: 'owner' });
   assert.equal(done.status, 200);
   assert.equal(done.json.result.status, 'done');
   assert.deepEqual(await (await fetch(url('/api/messages'))).json(), []);
@@ -216,17 +301,38 @@ test('served index.html stamps a live tower-version meta tag', async () => {
 
 test('server ratify flow advances the card', async () => {
   await post('decision/add', { cardId: '#1', id: 'D-S1', title: 'pick',
-    ballotMode: 'full', reviewPasses: { base: 'The base pass completed the ballot.', boilOcean: 'The breadth review checked for missing choices.', hybrid: 'The hybrid pass combined compatible strengths.', cooperative: 'The cooperative pass strengthened every option.', beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.', adversarial: 'Author model family: family-a. Adversarial model family: family-b. The adversarial pass attacked the recommendation.' },
+    ballotMode: 'full', reviewPasses: {
+      beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.',
+      adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
+    },
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'A',
-    recommendation: { why: 'A wins here.', whyNot: [{ key: 'B', reason: 'B loses the needed behavior.' }], tradeoff: 'A adds one visible step.' },
+    recommendation: {
+      why: 'A wins here.', gains: ['Behavior stays visible'],
+      losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }],
+      whyNot: [{ key: 'B', reason: 'B loses the needed behavior.' }], tradeoff: 'A adds one visible step.',
+    },
     hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Keep it.' }, { key: 'B', aspect: 'B is brief.', use: 'Borrow its short names.' }] },
     options: [{ key: 'A', name: 'a', detail: 'A is explicit.', code: 'a()' }, { key: 'B', name: 'b', detail: 'B is brief.', code: 'b()' }],
-    surface: { gist: 'Which option should Jet ship?', lesson: 'Jet has no way to decide today. This ballot picks the approach.', trio: { current: { note: 'Jet today: nothing.', code: 'jet run x.jet\nError [E1001]' }, wild: { lang: 'Python', note: 'The common tool does X in one call.', code: 'x()' } }, options: [{ key: 'A', name: 'Option A', gist: 'Explicit call.', gains: ['Behavior stays visible'], losses: ['One more step'], proposed: { code: 'a()' } }, { key: 'B', name: 'Option B', gist: 'Short call.', gains: ['Shortest first script'], losses: ['Loses the needed guarantee'], proposed: { code: 'b()' } }], recommendation: { rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'], losses: ['One more step'], whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step.' } } });
+    surface: {
+      gist: 'Which option should Jet ship?', lesson: 'Jet has no way to decide today. This ballot picks the approach.',
+      trio: { current: { note: 'Jet today: nothing.', code: 'jet run x.jet\nError [E1001]' }, wild: { lang: 'Python', note: 'The common tool does X in one call.', code: 'x()' } },
+      options: [
+        { key: 'A', name: 'Option A', gist: 'Explicit call.', gains: ['Behavior stays visible'], losses: ['One more step'], proposed: { code: 'a()' } },
+        { key: 'B', name: 'Option B', gist: 'Short call.', gains: ['Shortest first script'], losses: ['Loses the needed guarantee'], proposed: { code: 'b()' } },
+      ],
+      recommendation: {
+        rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'],
+        losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }],
+        whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step.',
+      },
+    },
+  });
   let state = await (await fetch(url('/api/state'))).json();
   assert.equal(state.cards[0].lane.lane, 'decide');
   assert.equal(state.decisions[0].ballotMode, 'full');
-  assert.equal(state.decisions[0].reviewPasses.cooperative, 'The cooperative pass strengthened every option.');
-  const r = await ownerPost('clearance', { decisionId: 'D-S1', outcome: 'A', by: 'owner' });
+  assert.equal(state.decisions[0].ballotProcessVersion, 4);
+  assert.equal(state.decisions[0].reviewPasses.beginner, 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.');
+  const r = await post('clearance', { decisionId: 'D-S1', outcome: 'A', by: 'owner' });
   assert.equal(r.status, 200);
   state = await (await fetch(url('/api/state'))).json();
   assert.equal(state.cards[0].lane.lane, 'plan');
@@ -235,7 +341,7 @@ test('server ratify flow advances the card', async () => {
 test('clearance/reopen rejects missing actor without owner attribution', async () => {
   const added = await post('decision/add', {
     cardId: '#1', id: 'D-OPEN-NO-ACTOR', title: 'open decision', by: 'agent-test', draft: true,
-    reviewPasses: { beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.', adversarial: 'Author model family: family-a. Adversarial model family: family-b.' },
+    reviewPasses: { beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.', adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2.' },
   });
   assert.equal(added.status, 200);
   const rejected = await post('clearance/reopen', { decisionId: 'D-OPEN-NO-ACTOR' });

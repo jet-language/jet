@@ -502,7 +502,8 @@ fn default_dev_runs_deferred_close_with_native_parity() {
     assert!(errors.is_empty(), "{errors:?}");
 
     if jet_jit::cranelift_host_supported() {
-        let result = jet_jit::try_compile_bundle(&bundle);
+        let policy = common::development_policy();
+        let result = common::compile_cranelift_bundle(&bundle, &policy);
         assert!(
             result.is_ok(),
             "JIT must compile typed deferred cleanup: {result:?}"
@@ -513,9 +514,10 @@ fn default_dev_runs_deferred_close_with_native_parity() {
     assert!(native.status.success());
     assert_eq!(native.stdout, b"body\nclose dev\n");
 
+    let policy = common::development_policy();
     let mut dev = jet_jit::CraneliftBackend::new();
     jet_jit::reset_jit_trace_for_test();
-    match dev.run(&bundle, false) {
+    match common::run_cranelift_bundle(&mut dev, &bundle, false, &policy) {
         RunOutcome::Ran { stdout, .. } => {
             assert!(
                 !jet_jit::deopt_invoked_for_test(),

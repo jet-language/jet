@@ -3,8 +3,7 @@
 //! Status consumes authenticated receipts. It never runs a producer command;
 //! stale stored evidence stays visible, and absent evidence creates no claim.
 
-use jet_foundation::PerformanceBudget::CanonicalJson;
-use jet_foundation::Report::render_status_json;
+use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -30,6 +29,7 @@ struct ClaimRow {
     action: String,
     state: State,
     receipt: Option<String>,
+    sections: StatusValue,
     reason: &'static str,
 }
 
@@ -38,7 +38,7 @@ pub(crate) fn run_status(args: &[String], json: bool) -> i32 {
     let target = match target_arg(args, &cwd) {
         Ok(target) => target,
         Err(message) => {
-            crate::emit_cli_report(
+            emit_report(
                 "E2102",
                 message,
                 "jet status accepts one project target and registered output flags".to_string(),
@@ -211,33 +211,22 @@ fn run_cache_prune(target_bytes: u64, json: bool) -> i32 {
         Err(error) => return cache_store_error("prune the machine-wide store", error, json),
     };
     if json {
-        let payload = CanonicalJson::object([
-            ("after_bytes".into(), json_integer(report.after_bytes)),
-            ("before_bytes".into(), json_integer(report.before_bytes)),
-            ("blocked".into(), CanonicalJson::Bool(report.blocked)),
-            (
-                "freed_bytes".into(),
-                json_integer(report.before_bytes.saturating_sub(report.after_bytes)),
-            ),
-            (
-                "pinned_bytes".into(),
-                json_integer(report.pinned_bytes),
-            ),
-            (
-                "removed_entries".into(),
-                json_integer(report.removed.len() as u64),
-            ),
-            ("target_bytes".into(), json_integer(report.target_bytes)),
-        ])
-        .expect("cache prune keys are unique");
+        let cache = StatusFields::new()
+            .with("after_bytes", report.after_bytes)
+            .with("before_bytes", report.before_bytes)
+            .with("blocked", report.blocked)
+            .with(
+                "freed_bytes",
+                report.before_bytes.saturating_sub(report.after_bytes),
+            )
+            .with("pinned_bytes", report.pinned_bytes)
+            .with("removed_entries", report.removed.len())
+            .with("target_bytes", report.target_bytes);
         println!(
             "{}",
-            render_status_json(
-                "ok",
-                true,
-                "cache.prune",
-                &format!(",\"cache\":{}", canonical_json_text(payload)),
-            )
+            StatusEnvelope::new("cache.prune", true)
+                .with_field("cache", StatusValue::object(cache))
+                .json()
         );
     } else {
         let freed = report.before_bytes.saturating_sub(report.after_bytes);
@@ -269,22 +258,14 @@ fn run_cache_limit(limit_bytes: u64, json: bool) -> i32 {
         return cache_store_error("set the host store limit", error, json);
     }
     if json {
-        let payload = CanonicalJson::object([
-            ("host_limit_bytes".into(), json_integer(limit_bytes)),
-            (
-                "root".into(),
-                CanonicalJson::String(store.root().display().to_string()),
-            ),
-        ])
-        .expect("cache limit keys are unique");
+        let cache = StatusFields::new()
+            .with("host_limit_bytes", limit_bytes)
+            .with("root", store.root().display().to_string());
         println!(
             "{}",
-            render_status_json(
-                "ok",
-                true,
-                "cache.limit",
-                &format!(",\"cache\":{}", canonical_json_text(payload)),
-            )
+            StatusEnvelope::new("cache.limit", true)
+                .with_field("cache", StatusValue::object(cache))
+                .json()
         );
     } else {
         println!("host limit {} (persisted)", format_size(limit_bytes));
@@ -298,42 +279,39 @@ fn render_cache_status(store: &jet_store::Store, status: &jet_store::StoreStatus
     let records = entry_count(status, jet_store::EntryKind::Action);
     let lto = entry_count(status, jet_store::EntryKind::Lto);
     if json {
-        let available = status
-            .available_bytes
-            .map(json_integer)
-            .unwrap_or(CanonicalJson::Null);
-        let payload = CanonicalJson::object([
-            ("available_bytes".into(), available),
-            ("blobs".into(), json_integer(blobs as u64)),
-            ("entries".into(), json_integer(status.entries.len() as u64)),
-            ("footprint_bytes".into(), json_integer(status.footprint_bytes)),
-            (
-                "host_limit_bytes".into(),
+        let cache = StatusFields::new()
+            .with(
+                "available_bytes",
+                status
+                    .available_bytes
+                    .map(StatusValue::from)
+                    .unwrap_or(StatusValue::Null),
+            )
+            .with("blobs", blobs)
+            .with("entries", status.entries.len())
+            .with("footprint_bytes", status.footprint_bytes)
+            .with(
+                "host_limit_bytes",
                 status
                     .host_limit_bytes
-                    .map(json_integer)
-                    .unwrap_or(CanonicalJson::Null),
-            ),
-            ("limit_bytes".into(), json_integer(status.limit_bytes)),
-            ("live_leases".into(), json_integer(status.live_leases as u64)),
-            ("records".into(), json_integer(records as u64)),
-            ("reserve_bytes".into(), json_integer(status.reserve_bytes)),
-            (
-                "root".into(),
-                CanonicalJson::String(status.root.display().to_string()),
-            ),
-            ("tiers".into(), CanonicalJson::Array(status.tiers.iter().cloned().map(CanonicalJson::String).collect())),
-            ("thinlto_caches".into(), json_integer(lto as u64)),
-        ])
-        .expect("cache status keys are unique");
+                    .map(StatusValue::from)
+                    .unwrap_or(StatusValue::Null),
+            )
+            .with("limit_bytes", status.limit_bytes)
+            .with("live_leases", status.live_leases)
+            .with("records", records)
+            .with("reserve_bytes", status.reserve_bytes)
+            .with("root", status.root.display().to_string())
+            .with(
+                "tiers",
+                StatusValue::array(status.tiers.iter().cloned().map(StatusValue::String)),
+            )
+            .with("thinlto_caches", lto);
         println!(
             "{}",
-            render_status_json(
-                "ok",
-                true,
-                "cache.status",
-                &format!(",\"cache\":{}", canonical_json_text(payload)),
-            )
+            StatusEnvelope::new("cache.status", true)
+                .with_field("cache", StatusValue::object(cache))
+                .json()
         );
         return;
     }
@@ -369,16 +347,6 @@ fn entry_count(status: &jet_store::StoreStatus, kind: jet_store::EntryKind) -> u
     status.entries.iter().filter(|entry| entry.kind == kind).count()
 }
 
-fn json_integer(value: u64) -> CanonicalJson {
-    CanonicalJson::Integer(value.to_string())
-}
-
-fn canonical_json_text(value: CanonicalJson) -> String {
-    String::from_utf8(value.bytes())
-        .expect("canonical JSON is UTF-8")
-        .trim_end_matches('\n')
-        .to_string()
-}
 
 fn format_size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
@@ -399,7 +367,7 @@ fn format_size(bytes: u64) -> String {
 }
 
 fn cache_usage_error(message: String, json: bool) -> i32 {
-    crate::emit_cli_report(
+    emit_report(
         "E2102",
         message,
         "`jet cache` has one read-only status command and two explicit mutations".to_string(),
@@ -411,7 +379,7 @@ fn cache_usage_error(message: String, json: bool) -> i32 {
 }
 
 fn cache_store_error(operation: &str, error: jet_store::StoreError, json: bool) -> i32 {
-    crate::emit_cli_report(
+    emit_report(
         "E2105",
         format!("could not {operation}: {error}"),
         "cache commands use one machine-wide store with atomic, verified entries".to_string(),
@@ -419,6 +387,26 @@ fn cache_store_error(operation: &str, error: jet_store::StoreError, json: bool) 
         json,
     );
     jet::ExitCodes::USER_ERROR
+}
+fn emit_report(code: &str, what: String, why: String, fix: String, json: bool) {
+    let diagnostic = jet::Diagnostics::Diagnostic::error(code, what, why, fix, None);
+    if json {
+        let report = diagnostic.to_report(
+            &jet::Diagnostics::ReportPath::from_process(""),
+            "",
+        );
+        print!(
+            "{}",
+            StatusEnvelope::new("status", false)
+                .with_report(report)
+                .json()
+        );
+    } else {
+        eprint!(
+            "{}",
+            jet::render_all_colored("", "", std::slice::from_ref(&diagnostic), false)
+        );
+    }
 }
 
 
@@ -497,34 +485,55 @@ fn summarize(
     let mut stale = None;
     for receipt in receipts {
         match store.is_current(receipt) {
-            Ok(true) if receipt.status == 0 => current_success = Some(short_id(&receipt.claim.key)),
-            Ok(true) => current_failure = Some(short_id(&receipt.claim.key)),
-            Ok(false) => stale = Some(short_id(&receipt.claim.key)),
-            Err(_) => current_failure = Some(short_id(&receipt.claim.key)),
+            Ok(true) if receipt.status == 0 => current_success = Some(*receipt),
+            Ok(true) => current_failure = Some(*receipt),
+            Ok(false) => stale = Some(*receipt),
+            Err(_) => current_failure = Some(*receipt),
         }
     }
-    let (state, receipt, reason) = if let Some(id) = current_failure {
-        (State::Unproven, Some(id), "current receipt records failure")
-    } else if let Some(id) = current_success {
-        (State::Proven, Some(id), "current receipt records success")
-    } else if let Some(id) = stale {
-        (State::Stale, Some(id), "receipt input closure changed")
+    let (state, selected, reason) = if let Some(receipt) = current_failure {
+        (
+            State::Unproven,
+            Some(receipt),
+            "current receipt records failure",
+        )
+    } else if let Some(receipt) = current_success {
+        (
+            State::Proven,
+            Some(receipt),
+            "current receipt records success",
+        )
+    } else if let Some(receipt) = stale {
+        (State::Stale, Some(receipt), "receipt input closure changed")
     } else {
         (State::Unproven, None, "no receipt proves this claim")
     };
+    let sections = selected
+        .and_then(|receipt| store.query_sections(receipt, None).ok())
+        .map(|value| {
+            let bytes = value.bytes();
+            let text = std::str::from_utf8(&bytes).expect("receipt sections are UTF-8");
+            StatusValue::parse(text.trim_end_matches('\n'))
+                .expect("receipt sections contain valid canonical JSON")
+        })
+        .unwrap_or_else(empty_sections);
     ClaimRow {
         name,
         action: format!("{action} {display_target}"),
         state,
-        receipt,
+        receipt: selected.map(|receipt| short_id(&receipt.claim.key)),
+        sections,
         reason,
     }
+}
+
+fn empty_sections() -> StatusValue {
+    StatusValue::object(StatusFields::new())
 }
 
 fn canonical_or_absolute(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
-
 fn receipt_matches(inputs: &[jet::ReceiptInput], target: &Path) -> bool {
     let target_is_dir = target.is_dir();
     inputs.iter().any(|input| {
@@ -539,53 +548,37 @@ fn short_id(id: &str) -> String {
 
 fn render(target: &str, rows: &[ClaimRow], error: String, json: bool) -> i32 {
     if json {
-        let claims = rows
-            .iter()
-            .map(|row| {
-                CanonicalJson::object([
-                    ("action".into(), CanonicalJson::String(row.action.clone())),
-                    ("claim".into(), CanonicalJson::String(row.name.clone())),
-                    ("reason".into(), CanonicalJson::String(row.reason.into())),
-                    (
-                        "receipt".into(),
+        let claims = StatusValue::array(rows.iter().map(|row| {
+            StatusValue::object(
+                StatusFields::new()
+                    .with("action", row.action.clone())
+                    .with("claim", row.name.clone())
+                    .with("reason", row.reason)
+                    .with(
+                        "receipt",
                         row.receipt
                             .clone()
-                            .map(CanonicalJson::String)
-                            .unwrap_or(CanonicalJson::Null),
-                    ),
-                    (
-                        "state".into(),
-                        CanonicalJson::String(row.state.as_str().into()),
-                    ),
-                ])
-                .expect("status claim keys are unique")
-            })
-            .collect();
-        let document = CanonicalJson::object([
-            ("claims".into(), CanonicalJson::Array(claims)),
-            (
-                "error".into(),
-                if error.is_empty() {
-                    CanonicalJson::Null
-                } else {
-                    CanonicalJson::String(error)
-                },
-            ),
-            ("target".into(), CanonicalJson::String(target.into())),
-        ])
-        .expect("status keys are unique");
-        let payload = String::from_utf8(document.bytes())
-            .expect("canonical JSON is UTF-8")
-            .trim_end_matches('\n')
-            .to_string();
+                            .map(StatusValue::String)
+                            .unwrap_or(StatusValue::Null),
+                    )
+                    .with("sections", row.sections.clone())
+                    .with("state", row.state.as_str()),
+            )
+        }));
         println!(
             "{}",
-            render_status_json(
-                "ok",
-                true,
-                "status",
-                &format!(",\"status_report\":{payload}")
-            )
+            StatusEnvelope::new("status", true)
+                .with_field("claims", claims)
+                .with_field(
+                    "error",
+                    if error.is_empty() {
+                        StatusValue::Null
+                    } else {
+                        StatusValue::String(error)
+                    },
+                )
+                .with_field("target", target)
+                .json()
         );
     } else {
         println!("target  {target}");

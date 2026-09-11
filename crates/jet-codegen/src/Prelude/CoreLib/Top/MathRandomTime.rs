@@ -32,6 +32,7 @@ fn jet_deadline_exceeded(wait_kind: &str) -> ! {
 }
 
 fn jet_std_time_start() -> jet_std::Stopwatch {
+    jet_scheduler_world_reject_uncontrolled("clock");
     jet_std::Stopwatch {
         start: std::time::Instant::now(),
     }
@@ -62,7 +63,7 @@ fn jet_clock_advance(c: &mut jet_std::Clock, to_ms: i64) -> i64 {
     c.now()
 }
 fn jet_clock_wait(c: &mut jet_std::Clock, d: &jet_std::Duration) -> i64 {
-    let now = c.now().saturating_add(d.as_millis());
+    let now = c.now().saturating_add(jet_std_time_duration_to_millis(d.ns));
     c.set(now);
     c.now()
 }
@@ -136,9 +137,12 @@ fn jet_rng_shuffle<T>(r: &mut jet_std::Rng, xs: &mut Vec<T>) {
 // D-TIMERES1=A / D-SHAPE-DURATIONCONVERT1=A: one checked nanosecond unit
 // model for every runtime constructor and whole-unit read.
 fn jet_duration_from_int(
-    n: i64,
+    n: jet_foundation::Numeric::JetInt,
     unit: jet_std::DurationUnit,
 ) -> Result<jet_std::Duration, jet_std::RangeError> {
+    let n = jet_std::jet_int_owned_to_i64(&n).map_err(|_| jet_std::RangeError {
+        reason: jet_duration_kernel_int_error_reason().to_string(),
+    })?;
     jet_duration_kernel_from_int(n, unit.nanoseconds())
         .map(|ns| jet_std::Duration { ns })
         .ok_or_else(|| jet_std::RangeError {
@@ -166,6 +170,11 @@ fn jet_duration_ms_value(d: &jet_std::Duration) -> i64 {
 }
 fn jet_duration_ns_value(d: &jet_std::Duration) -> i64 {
     d.ns
+}
+/// AOT's checked Core route carries Duration by reference; keep conversion at
+/// this boundary while the shared sleep policy remains nanosecond-based.
+fn jet_std_time_sleep_duration(duration: &jet_std::Duration) {
+    jet_std_time_sleep_duration_ns(duration.ns);
 }
 fn jet_duration_is_zero(d: &jet_std::Duration) -> bool {
     jet_duration_kernel_is_zero(d.ns)
@@ -308,11 +317,51 @@ fn jet_instant_elapsed(i: &JetInstant) -> jet_std::Duration {
         ns: i.elapsed_nanos(),
     }
 }
-fn jet_time_now_utc() -> JetDateTime {
-    JetDateTime::now()
+// D-TIME-INT-ADAPTER1: the native temporal kernel uses i64 while AOT's
+// default-Int ABI carries an exact packed word. Decode once at the surface
+// boundary; constructors below keep all temporal policy in Core/Time.rs.
+fn jet_time_unix_input(value: i64) -> i64 {
+    jet_std::jet_int_to_i64(value).unwrap_or_else(|| {
+        jet_runtime_stop("E1003", file!(), line!(), jet_c_int_range_message())
+    })
 }
-fn jet_time_today() -> JetDate {
-    JetDate::today_utc()
+fn jet_time_owned_input(value: &jet_foundation::Numeric::JetInt) -> i64 {
+    jet_std::jet_int_owned_to_i64(value).unwrap_or_else(|_| {
+        jet_runtime_stop("E1003", file!(), line!(), jet_c_int_range_message())
+    })
+}
+fn jet_local_date_owned(
+    year: &jet_foundation::Numeric::JetInt,
+    month: &jet_foundation::Numeric::JetInt,
+    day: &jet_foundation::Numeric::JetInt,
+) -> JetDate {
+    JetDate::new(
+        jet_time_owned_input(year),
+        jet_time_owned_input(month),
+        jet_time_owned_input(day),
+    )
+}
+fn jet_local_time_owned(
+    hour: &jet_foundation::Numeric::JetInt,
+    minute: &jet_foundation::Numeric::JetInt,
+    second: &jet_foundation::Numeric::JetInt,
+) -> JetLocalTime {
+    JetLocalTime::new(
+        jet_time_owned_input(hour),
+        jet_time_owned_input(minute),
+        jet_time_owned_input(second),
+    )
+}
+fn jet_period_owned(
+    years: &jet_foundation::Numeric::JetInt,
+    months: &jet_foundation::Numeric::JetInt,
+    days: &jet_foundation::Numeric::JetInt,
+) -> JetPeriod {
+    JetPeriod::new(
+        jet_time_owned_input(years),
+        jet_time_owned_input(months),
+        jet_time_owned_input(days),
+    )
 }
 fn jet_time_datetime(
     year: i64,
@@ -322,28 +371,63 @@ fn jet_time_datetime(
     minute: i64,
     second: i64,
 ) -> JetDateTime {
-    JetDateTime::from_parts(year, month, day, hour, minute, second, 0)
+    JetDateTime::from_parts(
+        jet_time_unix_input(year),
+        jet_time_unix_input(month),
+        jet_time_unix_input(day),
+        jet_time_unix_input(hour),
+        jet_time_unix_input(minute),
+        jet_time_unix_input(second),
+        0,
+    )
 }
 fn jet_time_time(hour: i64, minute: i64, second: i64) -> JetLocalTime {
-    JetLocalTime::new(hour, minute, second)
+    JetLocalTime::new(
+        jet_time_unix_input(hour),
+        jet_time_unix_input(minute),
+        jet_time_unix_input(second),
+    )
 }
 fn jet_time_days_in_month(year: i64, month: i64) -> i64 {
-    JetDate::days_in_month_of(year, month.clamp(1, 12))
+    JetDate::days_in_month_of(jet_time_unix_input(year), jet_time_unix_input(month))
 }
 fn jet_time_is_leap_year(year: i64) -> bool {
-    JetDate::is_leap(year)
+    JetDate::is_leap(jet_time_unix_input(year))
 }
 fn jet_time_period(years: i64, months: i64, days: i64) -> JetPeriod {
-    JetPeriod::new(years, months, days)
+    JetPeriod::new(
+        jet_time_unix_input(years),
+        jet_time_unix_input(months),
+        jet_time_unix_input(days),
+    )
 }
 fn jet_time_period_days(days: i64) -> JetPeriod {
-    JetPeriod::days(days)
+    JetPeriod::days(jet_time_unix_input(days))
 }
 fn jet_time_period_months(months: i64) -> JetPeriod {
-    JetPeriod::months(months)
+    JetPeriod::months(jet_time_unix_input(months))
 }
 fn jet_time_period_years(years: i64) -> JetPeriod {
-    JetPeriod::years(years)
+    JetPeriod::years(jet_time_unix_input(years))
+}
+fn jet_time_from_unix_ms(value: i64) -> JetDateTime {
+    JetDateTime::from_unix_ms(jet_time_unix_input(value))
+}
+fn jet_time_from_unix_seconds(value: i64) -> JetDateTime {
+    JetDateTime::from_unix_seconds(jet_time_unix_input(value))
+}
+fn jet_time_from_unix_microseconds(value: i64) -> JetDateTime {
+    JetDateTime::from_unix_microseconds(jet_time_unix_input(value))
+}
+fn jet_time_from_unix_nanoseconds(value: i64) -> JetDateTime {
+    JetDateTime::from_unix_nanoseconds(jet_time_unix_input(value))
+}
+
+fn jet_time_now_utc() -> JetDateTime {
+    JetDateTime::now()
+}
+fn jet_time_today() -> JetDate {
+    JetDate::today_utc()
 }
 fn jet_time_zone_named(name: &String) -> Result<JetZone, String> {
     JetZone::named(name)
@@ -373,6 +457,382 @@ fn jet_datetime_difference(a: &JetDateTime, b: &JetDateTime) -> crate::jet_std::
 fn jet_zoned_add_duration(z: &JetZonedDateTime, d: &crate::jet_std::Duration) -> JetZonedDateTime {
     z.add_duration_ns(d.ns)
 }
+fn jet_time_text_error(message: String) -> jet_std::TextError {
+    jet_std::TextError { message }
+}
+
+fn jet_time_range_error(reason: String) -> jet_std::RangeError {
+    jet_std::RangeError { reason }
+}
+
+impl JetDate {
+    fn diff_days_value(&self, other: JetDate) -> i64 {
+        self.diff_days(&other)
+    }
+
+    fn add_period_value(&self, period: JetPeriod) -> JetDate {
+        self.add_period(&period)
+    }
+
+    fn subtract_period_value(&self, period: JetPeriod) -> JetDate {
+        self.subtract_period(&period)
+    }
+
+    fn until_duration(
+        &self,
+        other: JetDate,
+        largest_unit: &String,
+        smallest_unit: &String,
+        rounding_mode: &String,
+        increment: i64,
+    ) -> jet_std::Duration {
+        jet_std::Duration {
+            ns: self.until_ns(
+                &other,
+                largest_unit,
+                smallest_unit,
+                rounding_mode,
+                increment,
+            ),
+        }
+    }
+
+    fn since_duration(
+        &self,
+        other: JetDate,
+        largest_unit: &String,
+        smallest_unit: &String,
+        rounding_mode: &String,
+        increment: i64,
+    ) -> jet_std::Duration {
+        jet_std::Duration {
+            ns: self.since_ns(
+                &other,
+                largest_unit,
+                smallest_unit,
+                rounding_mode,
+                increment,
+            ),
+        }
+    }
+
+    fn format_checked_text(&self, pattern: &String) -> Result<String, jet_std::TextError> {
+        self.format_checked(pattern).map_err(jet_time_text_error)
+    }
+
+    fn equal_value(&self, other: JetDate) -> bool {
+        self == &other
+    }
+
+    fn compare_value(&self, other: JetDate) -> __jet_Ordering {
+        jet_time_ordering(self.cmp(&other))
+    }
+}
+
+impl JetLocalTime {
+    fn add_duration_value(&self, duration: jet_std::Duration) -> JetLocalTime {
+        self.add_duration_ns(duration.ns)
+    }
+
+    fn subtract_duration_value(&self, duration: jet_std::Duration) -> JetLocalTime {
+        self.subtract_duration_ns(duration.ns)
+    }
+
+    fn until_duration(
+        &self,
+        other: JetLocalTime,
+        largest_unit: &String,
+        smallest_unit: &String,
+        rounding_mode: &String,
+        increment: i64,
+    ) -> jet_std::Duration {
+        jet_std::Duration {
+            ns: self.until_ns(
+                &other,
+                largest_unit,
+                smallest_unit,
+                rounding_mode,
+                increment,
+            ),
+        }
+    }
+
+    fn since_duration(
+        &self,
+        other: JetLocalTime,
+        largest_unit: &String,
+        smallest_unit: &String,
+        rounding_mode: &String,
+        increment: i64,
+    ) -> jet_std::Duration {
+        jet_std::Duration {
+            ns: self.since_ns(
+                &other,
+                largest_unit,
+                smallest_unit,
+                rounding_mode,
+                increment,
+            ),
+        }
+    }
+
+    fn format_checked_text(&self, pattern: &String) -> Result<String, jet_std::TextError> {
+        self.format_checked(pattern).map_err(jet_time_text_error)
+    }
+
+    fn equal_value(&self, other: JetLocalTime) -> bool {
+        self == &other
+    }
+
+    fn compare_value(&self, other: JetLocalTime) -> __jet_Ordering {
+        jet_time_ordering(self.cmp(&other))
+    }
+}
+
+impl JetDateTime {
+    fn to_unix_ms_value(&self) -> jet_foundation::Numeric::JetInt {
+        jet_std::jet_int_owned_from_i64(self.to_unix_ms())
+    }
+
+    fn to_unix_seconds_value(&self) -> jet_foundation::Numeric::JetInt {
+        jet_std::jet_int_owned_from_i64(self.to_unix_seconds())
+    }
+
+    fn to_unix_microseconds_value(
+        &self,
+    ) -> Result<jet_foundation::Numeric::JetInt, jet_std::RangeError> {
+        self.to_unix_microseconds()
+            .map(jet_std::jet_int_owned_from_i64)
+            .map_err(jet_time_range_error)
+    }
+
+    fn to_unix_nanoseconds_value(
+        &self,
+    ) -> Result<jet_foundation::Numeric::JetInt, jet_std::RangeError> {
+        self.to_unix_nanoseconds()
+            .map(jet_std::jet_int_owned_from_i64)
+            .map_err(jet_time_range_error)
+    }
+
+    fn plus_duration_value(&self, duration: jet_std::Duration) -> JetDateTime {
+        self.plus_duration_ns(duration.ns)
+    }
+
+    fn subtract_duration_value(&self, duration: jet_std::Duration) -> JetDateTime {
+        self.subtract_duration_ns(duration.ns)
+    }
+
+    fn difference_duration(&self, other: JetDateTime) -> jet_std::Duration {
+        jet_std::Duration {
+            ns: self.difference_ns(&other),
+        }
+    }
+
+    fn add_period_value(&self, period: JetPeriod) -> JetDateTime {
+        self.add_period(&period)
+    }
+
+    fn subtract_period_value(&self, period: JetPeriod) -> JetDateTime {
+        self.subtract_period(&period)
+    }
+
+    fn until_duration(
+        &self,
+        other: JetDateTime,
+        largest_unit: &String,
+        smallest_unit: &String,
+        rounding_mode: &String,
+        increment: i64,
+    ) -> jet_std::Duration {
+        jet_std::Duration {
+            ns: self.until_ns(
+                &other,
+                largest_unit,
+                smallest_unit,
+                rounding_mode,
+                increment,
+            ),
+        }
+    }
+
+    fn since_duration(
+        &self,
+        other: JetDateTime,
+        largest_unit: &String,
+        smallest_unit: &String,
+        rounding_mode: &String,
+        increment: i64,
+    ) -> jet_std::Duration {
+        jet_std::Duration {
+            ns: self.since_ns(
+                &other,
+                largest_unit,
+                smallest_unit,
+                rounding_mode,
+                increment,
+            ),
+        }
+    }
+
+    fn in_zone_value(&self, zone: JetZone) -> JetZonedDateTime {
+        self.in_zone(&zone)
+    }
+
+    fn format_checked_text(&self, pattern: &String) -> Result<String, jet_std::TextError> {
+        self.format_checked(pattern).map_err(jet_time_text_error)
+    }
+
+    fn equal_value(&self, other: JetDateTime) -> bool {
+        self == &other
+    }
+
+    fn compare_value(&self, other: JetDateTime) -> __jet_Ordering {
+        jet_time_ordering(self.cmp(&other))
+    }
+}
+
+impl JetInstant {
+    fn elapsed_duration(&self) -> jet_std::Duration {
+        jet_std::Duration {
+            ns: self.elapsed_nanos(),
+        }
+    }
+
+    fn equal_value(&self, other: JetInstant) -> bool {
+        self == &other
+    }
+
+    fn compare_value(&self, other: JetInstant) -> __jet_Ordering {
+        jet_time_ordering(self.cmp(&other))
+    }
+}
+
+impl JetPeriod {
+    fn add_value(&self, other: JetPeriod) -> JetPeriod {
+        self.add(&other)
+    }
+
+    fn sub_value(&self, other: JetPeriod) -> JetPeriod {
+        self.sub(&other)
+    }
+}
+
+pub(crate) trait JetPeriodAnchor {
+    fn period_total_in(&self, period: &JetPeriod, unit: &String) -> f64;
+}
+
+impl JetPeriodAnchor for JetDate {
+    fn period_total_in(&self, period: &JetPeriod, unit: &String) -> f64 {
+        period.total_in_date(unit, self)
+    }
+}
+
+impl JetPeriodAnchor for JetDateTime {
+    fn period_total_in(&self, period: &JetPeriod, unit: &String) -> f64 {
+        period.total_in_datetime(unit, self)
+    }
+}
+
+impl JetPeriod {
+    fn total_in_value<A: JetPeriodAnchor>(&self, unit: &String, anchor: &A) -> f64 {
+        anchor.period_total_in(self, unit)
+    }
+}
+
+impl JetZone {
+    fn next_transition_value(&self, utc_seconds: i64) -> JetOutcome<i64, JetAbsent> {
+        jet_outcome_of(self.next_transition(utc_seconds))
+    }
+
+    fn previous_transition_value(&self, utc_seconds: i64) -> JetOutcome<i64, JetAbsent> {
+        jet_outcome_of(self.previous_transition(utc_seconds))
+    }
+
+    fn start_of_day_value(&self, date: JetDate) -> JetZonedDateTime {
+        self.start_of_day_zoned(&date)
+    }
+
+    fn hours_in_day_value(&self, date: JetDate) -> i64 {
+        self.hours_in_day(&date)
+    }
+}
+
+impl JetZonedDateTime {
+    fn add_duration_value(&self, duration: jet_std::Duration) -> JetZonedDateTime {
+        self.add_duration_ns(duration.ns)
+    }
+
+    fn subtract_duration_value(&self, duration: jet_std::Duration) -> JetZonedDateTime {
+        self.subtract_duration_ns(duration.ns)
+    }
+
+    fn add_period_value(&self, period: JetPeriod) -> JetZonedDateTime {
+        self.add_period(&period)
+    }
+
+    fn subtract_period_value(&self, period: JetPeriod) -> JetZonedDateTime {
+        self.subtract_period(&period)
+    }
+
+    fn until_duration(
+        &self,
+        other: JetZonedDateTime,
+        largest_unit: &String,
+        smallest_unit: &String,
+        rounding_mode: &String,
+        increment: i64,
+    ) -> jet_std::Duration {
+        jet_std::Duration {
+            ns: self.until_ns(
+                &other,
+                largest_unit,
+                smallest_unit,
+                rounding_mode,
+                increment,
+            ),
+        }
+    }
+
+    fn since_duration(
+        &self,
+        other: JetZonedDateTime,
+        largest_unit: &String,
+        smallest_unit: &String,
+        rounding_mode: &String,
+        increment: i64,
+    ) -> jet_std::Duration {
+        jet_std::Duration {
+            ns: self.since_ns(
+                &other,
+                largest_unit,
+                smallest_unit,
+                rounding_mode,
+                increment,
+            ),
+        }
+    }
+
+    fn next_transition_value(&self) -> JetOutcome<i64, JetAbsent> {
+        jet_outcome_of(self.next_transition())
+    }
+
+    fn previous_transition_value(&self) -> JetOutcome<i64, JetAbsent> {
+        jet_outcome_of(self.previous_transition())
+    }
+
+    fn format_checked_text(&self, pattern: &String) -> Result<String, jet_std::TextError> {
+        self.format_checked(pattern).map_err(jet_time_text_error)
+    }
+
+    fn equal_value(&self, other: JetZonedDateTime) -> bool {
+        self == &other
+    }
+
+    fn compare_value(&self, other: JetZonedDateTime) -> __jet_Ordering {
+        jet_time_ordering(self.cmp(&other))
+    }
+}
+
 
 fn jet_url_parse(s: &String) -> Result<crate::jet_std::JetURL, String> {
     crate::jet_std::JetURL::parse(s)
@@ -382,7 +842,7 @@ fn jet_url_parse(s: &String) -> Result<crate::jet_std::JetURL, String> {
 /// already rejected holes that could make the literal invalid.
 fn jet_typed_datetime_literal(literals: &[&str], holes: Vec<String>) -> JetDateTime {
     let text = jet_typed_datetime_interpolate(literals, &holes);
-    match JetDateTime::parse_rfc3339(&text) {
+    match jet_time_parse_rfc3339(&text) {
         Ok(value) => value,
         Err(error) => unreachable!("sema accepted an invalid DateTime typed head: {error}"),
     }
@@ -454,6 +914,12 @@ fn jet_fraction_new(numerator: i64, denominator: i64) -> Option<jet_std::JetFrac
 fn jet_fraction_from_parts(numerator: i64, denominator: i64) -> jet_std::JetFraction {
     jet_std::JetFraction::new(numerator, denominator)
         .unwrap_or_else(|| jet_panic("", 0, "invalid exact quotient"))
+}
+fn jet_fraction_from_owned_parts(
+    numerator: &jet_foundation::Numeric::JetInt,
+    denominator: &jet_foundation::Numeric::JetInt,
+) -> jet_std::JetFraction {
+    jet_fraction_from_parts(numerator.to_raw(), denominator.to_raw())
 }
 fn jet_fraction_add(a: &jet_std::JetFraction, b: &jet_std::JetFraction) -> jet_std::JetFraction {
     a.add(b).expect("this sum of ratios overflows the value type")
@@ -547,15 +1013,13 @@ fn jet_decimal_to_string(a: &jet_std::JetDecimal) -> String {
 // exactly as it admits a Fraction, so every tier needs this conversion, not
 // only the evaluator.
 fn jet_decimal_to_float(a: &jet_std::JetDecimal) -> f64 {
-    a.to_string_rep().parse::<f64>().unwrap_or(f64::NAN)
+    a.to_float()
 }
 
 // D-ENC-DYN1=A+: the dynamic `parse` returns the one rich `Data` value (the
-// user-facing face of `DataTree`). JSON text parses through the internal `JSON`
-// enum, then collapses onto `DataTree` (integral numbers become `Int`, fractional
-// `Float`). Object keys arrive in sorted order (the internal `JSON` enum is
-// `BTreeMap`-keyed), matching the pre-`Data` dynamic JSON behavior.
-fn jet_std_json_parse(text: &String) -> Result<jet_std::DataTree, jet_std::JSONError> {
+// user-facing face of `DataTree`). JSON text parses directly to the canonical
+// ordered `DataTree` carrier.
+fn jet_std_json_parse(text: &String) -> Result<jet_std::DataTree, jet_std::EncodingError> {
     jet_std::parse_json_datatree(text)
 }
 fn jet_std_json_render(d: &jet_std::DataTree) -> String {
@@ -635,7 +1099,7 @@ fn jet_std_json_events(d: &jet_std::DataTree) -> String {
     walk(String::new(), d, &mut out);
     out.join("\n")
 }
-fn jet_std_jsonl_parse(text: &String) -> Result<Vec<jet_std::DataTree>, jet_std::JSONError> {
+fn jet_std_jsonl_parse(text: &String) -> Result<Vec<jet_std::DataTree>, jet_std::EncodingError> {
     let mut out = Vec::new();
     for (idx, line) in text.lines().enumerate() {
         let trimmed = line.trim();
@@ -644,11 +1108,10 @@ fn jet_std_jsonl_parse(text: &String) -> Result<Vec<jet_std::DataTree>, jet_std:
         }
         match jet_std_json_parse(&trimmed.to_string()) {
             Ok(v) => out.push(v),
-            Err(e) => {
-                return Err(jet_std::JSONError {
-                    line: idx as i64 + e.line,
-                    message: e.message,
-                })
+            Err(mut error) => {
+                error.format = jet_std::EncodingFormat::JSONL;
+                error.line = error.line.map(|line| idx as i64 + line);
+                return Err(error);
             }
         }
     }
@@ -671,7 +1134,7 @@ fn jet_std_jsonl_render(rows: &Vec<jet_std::DataTree>) -> String {
 // `CoreLib/JetStd/JSONDataTree.rs`, shared with the resident JIT host that
 // used to carry a byte-equivalent copy (I8/I9). AOT supplies only the sink it
 // owns: the process's own stderr.
-fn jet_std_json_decode_lenient(text: &String) -> Result<jet_std::DataTree, jet_std::JSONError> {
+fn jet_std_json_decode_lenient(text: &String) -> Result<jet_std::DataTree, jet_std::EncodingError> {
     jet_std::jet_std_json_decode_lenient(text, &mut |line| eprintln!("{}", line))
 }
 

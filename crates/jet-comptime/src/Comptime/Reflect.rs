@@ -15,6 +15,7 @@ use crate::AST::{
 
 use crate::AST::CtValue;
 use jet_foundation::Layout::{FieldLayoutFacts, LayoutFacts, TargetLayout, TargetLayoutEngine};
+use jet_foundation::Shape::ShapeProjectionKind;
 use jet_foundation::Reflection::ReflectionField;
 
 #[derive(Debug, Clone, Default)]
@@ -100,6 +101,7 @@ fn layout_info(
     target: &TargetLayout,
     fields: Vec<(String, String)>,
     facts: &LayoutFacts,
+    alignment: Option<&jet_foundation::Layout::LayoutAlignmentFact>,
 ) -> CtValue {
     ct_struct(
         crate::Syntax::TYPE_LAYOUT_INFO,
@@ -116,6 +118,14 @@ fn layout_info(
             (
                 "stride",
                 optional_layout_byte(facts.bytes.map(|bytes| bytes.stride)),
+            ),
+            (
+                "requested_alignment",
+                optional_layout_byte(alignment.map(|fact| fact.requested_alignment)),
+            ),
+            (
+                "effective_alignment",
+                optional_layout_byte(alignment.map(|fact| fact.effective_alignment)),
             ),
             ("target", ct_str(target.triple.clone())),
             ("guarantee", ct_str(guarantee)),
@@ -152,20 +162,41 @@ fn optional_layout_byte(value: Option<u64>) -> CtValue {
 
 fn layout_info_for_struct(s: &StructDef, engine: &TargetLayoutEngine<'_>) -> CtValue {
     let (kind, guarantee) = match s.layout.as_ref() {
-        Some(StructLayout::C) => ("c", "repr(C) declaration"),
-        Some(StructLayout::Columnar) => ("columnar", "columnar storage declaration"),
-        None => ("default", "physical layout unspecified"),
+        Some(StructLayout::C) => ("c", "repr(C) declaration".to_string()),
+        Some(StructLayout::CAligned {
+            alignment,
+            target,
+        }) => (
+            "c",
+            if *target {
+                format!("repr(C, align(target, {alignment})) declaration")
+            } else {
+                format!("repr(C, align({alignment})) declaration")
+            },
+        ),
+        Some(StructLayout::Columnar) => ("columnar", "columnar storage declaration".to_string()),
+        None => ("default", "physical layout unspecified".to_string()),
     };
-    let facts = engine.struct_facts(s);
+    let (facts, alignment) = match engine.checked_struct_facts(s) {
+        Ok(checked) => (checked.physical, checked.alignment),
+        Err(_) => (engine.struct_facts(s), None),
+    };
     layout_info(
         kind,
-        guarantee,
+        &guarantee,
         "struct declaration",
         engine.target(),
         s.reflection_fields()
-            .map(|field| (field.name.clone(), field.ty.name()))
+            .map(|field| {
+                let name = jet_foundation::CLISchema::shape_field_names(s, field)
+                    .name_for(ShapeProjectionKind::Layout)
+                    .expect("checked layout field is missing its Layout shape name")
+                    .to_owned();
+                (name, field.ty.name())
+            })
             .collect(),
         &facts,
+        alignment.as_ref(),
     )
 }
 
@@ -214,6 +245,7 @@ fn layout_info_for_enum(def: &EnumDef, engine: &TargetLayoutEngine<'_>) -> CtVal
         engine.target(),
         fields,
         &facts,
+        None,
     )
 }
 
@@ -1111,7 +1143,12 @@ fn marker_info(
                 &[
                     ("name", ct_str(argument_name)),
                     ("ty", ct_str(source_type.clone())),
-                    ("value", marker_arg_value(argument, &source_type)),
+                    ("value", match argument {
+                        crate::AST::MarkerCallArg::Expr(expression) =>
+                            marker_arg_value(expression, &source_type),
+                        crate::AST::MarkerCallArg::EffectRow { effects, .. } =>
+                            CtValue::List(effects.iter().map(|(name, _)| CtValue::Str(name.clone())).collect()),
+                    }),
                 ],
             )
         })
@@ -1741,6 +1778,30 @@ pub fn reflect_type_value_with_target_and_graph_and_facts(
     None
 }
 
+/// Project one direct nominal compiler fact through the same target-aware
+/// `TypeInfo` value used by `Type.reflect()`. The three legacy fact spellings
+/// are projections of that value, not a second layout/name/field algorithm.
+pub fn reflect_type_fact_value_with_target_and_graph_and_facts(
+    items: &[Item],
+    type_name: &str,
+    module: &str,
+    target: &TargetLayout,
+    graph: Option<&jet_foundation::Facts::StateGraph>,
+    facts: Option<&jet_foundation::Facts::FactRegistry>,
+    read: jet_foundation::Registry::FactRead,
+) -> Option<CtValue> {
+    let field = match read {
+        jet_foundation::Registry::FactRead::Layout => "layout",
+        jet_foundation::Registry::FactRead::Name => "name",
+        jet_foundation::Registry::FactRead::Fields => "fields",
+        _ => return None,
+    };
+    let info = reflect_type_value_with_target_and_graph_and_facts(
+        items, type_name, module, target, graph, facts,
+    )?;
+    reflected_struct_field(&info, field).cloned()
+}
+
 /// D-FACT-READ1=A: resolve a direct fact read while top-level comptime
 /// bindings are evaluated. This pass runs before sema has built a module
 /// `TypeRegistry`, but receives the same erased fact registry that sema will
@@ -1769,7 +1830,7 @@ pub(crate) fn fact_read_value_with_registry(
     {
         if method == "reflect" && args.is_empty() {
             if let Expr::Ident(type_name, _) = receiver.as_ref() {
-                let target = TargetLayout::from_triple(&build_facts.target_triple);
+                let target = TargetLayout::from_build_facts(build_facts);
                 return reflect_type_value_with_target_and_graph_and_facts(
                     items,
                     type_name,
@@ -1800,7 +1861,23 @@ pub(crate) fn fact_read_value_with_registry(
         }
         jet_foundation::Registry::fact_read(crate::Syntax::COMPILER_BUILD_FACT_PROFILE)?
     } else {
-        jet_foundation::Registry::fact_read(member)?
+        match jet_foundation::Registry::fact_read(member) {
+            Some(read) => read,
+            None => {
+                let CtValue::Struct { fields, .. } = fact_read_value_with_registry(
+                    subject,
+                    items,
+                    build_facts,
+                    fact_registry,
+                )? else {
+                    return None;
+                };
+                return fields
+                    .into_iter()
+                    .find(|(field, _)| field == member)
+                    .map(|(_, value)| value);
+            }
+        }
     };
     let subject_name = match subject.as_ref() {
         Expr::Ident(name, _) => name.as_str(),
@@ -1881,7 +1958,15 @@ pub(crate) fn fact_read_value_with_registry(
             .or_else(|| registered_fact_value(read, subject_name, items)),
         jet_foundation::Registry::FactRead::Layout
         | jet_foundation::Registry::FactRead::Name
-        | jet_foundation::Registry::FactRead::Fields => None,
+        | jet_foundation::Registry::FactRead::Fields => reflect_type_fact_value_with_target_and_graph_and_facts(
+            items,
+            subject_name,
+            "main",
+            &TargetLayout::from_build_facts(build_facts),
+            None,
+            Some(fact_registry),
+            read,
+        ),
     }
 }
 
@@ -2164,6 +2249,7 @@ pub fn build_distinct_type_info_with_path(d: &DistinctDef, module: &str, path: &
             bytes: None,
             fields: Vec::new(),
         },
+        None,
     );
     let dimensions = d
         .quantity
@@ -2398,6 +2484,73 @@ fn qualified_method_info(method: &Func, module: &str, identity: &str) -> CtValue
     info
 }
 
+fn enum_payload_field_info(
+    name: impl Into<String>,
+    ty: &Type,
+    span: crate::Diagnostics::Span,
+    path: String,
+    is_pub: bool,
+) -> CtValue {
+    ct_struct(
+        "FieldInfo",
+        &[
+            ("name", ct_str(name)),
+            ("ty", ct_str(ty.name())),
+            ("markers", ct_list(Vec::new())),
+            ("dimensions", ct_list(type_dimensions(ty))),
+            ("facts", ct_list(type_fact_rows(&path, ty))),
+            ("is_pub", ct_bool(is_pub)),
+            (
+                "span",
+                ct_struct(
+                    crate::Syntax::TYPE_SOURCE_SPAN,
+                    &[
+                        ("start", CtValue::Int(span.start as i64)),
+                        ("end", CtValue::Int(span.end as i64)),
+                    ],
+                ),
+            ),
+        ],
+    )
+}
+
+fn enum_payload_fields(
+    definition: &EnumDef,
+    variant: &crate::AST::Variant,
+) -> Vec<CtValue> {
+    match &variant.payload {
+        VariantPayload::Unit => Vec::new(),
+        VariantPayload::Single(ty, span) => vec![enum_payload_field_info(
+            "value",
+            ty,
+            *span,
+            format!("{}.{}", definition.name, variant.name),
+            definition.is_pub,
+        )],
+        VariantPayload::Named(fields) => fields
+            .iter()
+            .map(|field| {
+                enum_payload_field_info(
+                    field.name.clone(),
+                    &field.ty,
+                    field.name_span,
+                    format!("{}.{}.{}", definition.name, variant.name, field.name),
+                    definition.is_pub,
+                )
+            })
+            .collect(),
+    }
+}
+
+/// Build the same typed reflection handle for an enum target that struct and
+/// distinct derives already receive. Variant rows use `FieldInfo` as their
+/// canonical shape; payload fields are nested rows so declaration templates
+/// can bind every heterogeneous payload without a second enum table.
+pub fn build_enum_type_info(e: &EnumDef) -> CtValue {
+    let engine = TargetLayoutEngine::new(std::iter::empty::<&Item>(), TargetLayout::host());
+    build_enum_type_info_with_engine(e, "", &e.name, &e.name, &engine)
+}
+
 fn build_enum_type_info_with_engine(
     def: &EnumDef,
     module: &str,
@@ -2432,7 +2585,8 @@ fn build_enum_type_info_with_engine(
     let variants = def
         .variants
         .iter()
-        .map(|variant| {
+        .enumerate()
+        .map(|(index, variant)| {
             let ty = match &variant.payload {
                 VariantPayload::Unit => "Unit".to_string(),
                 VariantPayload::Single(ty, _) => ty.name(),
@@ -2473,6 +2627,11 @@ fn build_enum_type_info_with_engine(
                 &[
                     ("name", ct_str(variant.name.clone())),
                     ("ty", ct_str(ty)),
+                    ("index", CtValue::Int(index as i64)),
+                    (
+                        "fields",
+                        ct_list(enum_payload_fields(def, variant)),
+                    ),
                     (
                         "markers",
                         ct_list(marker_infos(&variant.serde_markers, None)),
@@ -2603,7 +2762,7 @@ pub fn build_program_info_with_index(
 ) -> CtValue {
     let layout_engine = TargetLayoutEngine::new(
         bundle.modules.iter().flat_map(|module| module.items.iter()),
-        TargetLayout::from_triple(&bundle.build_facts.target_triple),
+        TargetLayout::from_build_facts(&bundle.build_facts),
     );
     let mut external_impls = std::collections::HashMap::<
         (String, String),
@@ -3034,6 +3193,7 @@ mod tests {
         Func {
             span: span(),
             is_pub,
+            is_comptime: false,
             is_package_pub: false,
             external_type: None,
             meta: None,

@@ -736,7 +736,7 @@ pub fn mangle(name: &str) -> String {
     crate::Syntax::generated_name(&name)
 }
 
-/// Rust identifier for a dotted Jet path.
+/// Rust identifier for a canonical Jet path or module identity.
 pub fn mangle_path(path: &str) -> String {
     crate::Syntax::generated_path(path)
 }
@@ -759,6 +759,8 @@ pub fn member_name(module: &str, name: &str) -> String {
     let module = module
         .strip_prefix(crate::Syntax::GENERATED_NAME_PREFIX)
         .unwrap_or(module);
+    let decoded = crate::Syntax::decode_generated_path_suffix(module);
+    let module = decoded.as_deref().unwrap_or(module);
     mangle_path(&format!("{module}.{name}"))
 }
 
@@ -925,11 +927,11 @@ mod tests {
     fn rust_names_use_one_projection() {
         assert_eq!(mangle("run"), "__jet_run");
         assert_eq!(mangle("@value"), "__jet_ct_value");
-        assert_eq!(mangle_path("Fire.Burn"), "__jet_Fire__Burn");
-        assert_eq!(member_name("math", "double"), "__jet_math__double");
+        assert_eq!(mangle_path("Fire.Burn"), "__jet_Fire_dBurn");
+        assert_eq!(member_name("math", "double"), "__jet_math_ddouble");
         assert_eq!(
             member_name(&member_name("outer", "inner"), "helper"),
-            "__jet_outer__inner__helper"
+            "__jet_outer_dinner_dhelper"
         );
     }
 

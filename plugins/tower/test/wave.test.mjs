@@ -4,66 +4,77 @@ import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { openStore, empty } from '../app/store.mjs';
-import { saveSecrets } from '../app/config.mjs';
-import { configFile, readJSON, secretsFile, writeJSON } from '../app/paths.mjs';
+import { configFile, readJSON, writeJSON } from '../app/paths.mjs';
 import { serve } from '../app/server.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'tower-wave-'));
 writeJSON(join(dir, 'tower.json'), empty('Wave'));
-// opt-in auth token
 writeJSON(configFile(dir), { project: 'Wave' });
-saveSecrets(dir, { auth: { token: 'test-token-123456' } });
 const store = openStore(dir);
 const PORT = 7957;
 const server = serve(store, PORT, false);
 after(() => server.close());
 
 const url = (p) => `http://localhost:${PORT}${p}`;
-const AUTH_TOKEN = store.config.auth.token;
-const authHeaders = { authorization: `Bearer ${AUTH_TOKEN}` };
 const get = (p, options = {}) => fetch(url(p), {
   ...options,
-  headers: { ...authHeaders, ...options.headers },
+  headers: { ...options.headers },
 });
 const post = async (p, b, raw = false, headers = {}) => {
   const r = await fetch(url(p), {
-    method: 'POST', headers: { ...authHeaders, 'content-type': 'application/json', 'x-tower-client': 'cli', ...headers }, body: raw ? b : JSON.stringify(b),
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-tower-client': 'cli', ...headers }, body: raw ? b : JSON.stringify(b),
   });
   return { status: r.status, json: await r.json().catch(() => null) };
 };
-const ownerSession = async () => {
-  const unlock = await fetch(url(`/?key=${AUTH_TOKEN}`), { redirect: 'manual' });
-  const accessCookie = unlock.headers.get('set-cookie')?.split(';', 1)[0];
-  assert.ok(accessCookie, 'owner navigation must establish an access cookie');
-  const page = await fetch(url('/'), { headers: { accept: 'text/html', cookie: accessCookie } });
-  const ownerCookie = page.headers.get('set-cookie')?.split(';', 1)[0];
-  assert.ok(ownerCookie, 'owner navigation must establish an in-memory session');
-  return `${accessCookie}; ${ownerCookie}`;
-};
-const ownerPost = async (p, b) => post(p, b, false, { cookie: await ownerSession() });
+const ownerPost = post;
 
-test('configured token is required on loopback', async () => {
+test('keyless requests are accepted on loopback', async () => {
   const read = await fetch(url('/api/state'));
-  assert.equal(read.status, 401);
-  const write = await fetch(url('/api/card/add'), {
+  assert.equal(read.status, 200);
+  const invalidWrite = await fetch(url('/api/card/add'), {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-tower-client': 'cli' },
-    body: JSON.stringify({ title: 'unauthorized' }),
+    body: JSON.stringify({}),
   });
-  assert.equal(write.status, 401);
-  assert.equal((await get('/api/state')).status, 200);
+  assert.equal(invalidWrite.status, 400);
 });
 
-test('provisioning: no vapid; auth stays opt-in (no auto token)', () => {
-  assert.equal(store.config.push, null);
-  assert.equal(store.config.auth.token, 'test-token-123456', 'configured token respected, none invented');
+test('keyless config has no runtime auth or push fields', () => {
+  assert.equal(Object.hasOwn(store.config, 'auth'), false);
+  assert.equal(Object.hasOwn(store.config, 'push'), false);
   assert.deepEqual(Object.keys(readJSON(configFile(dir), {})), ['project']);
-  const secrets = readJSON(secretsFile(dir), {});
-  assert.equal(Object.hasOwn(secrets, 'push'), false);
-  assert.equal(typeof secrets.auth?.token, 'string');
   const projected = store.project();
   assert.equal(Object.hasOwn(projected.config, 'auth'), false);
   assert.equal(Object.hasOwn(projected.config, 'push'), false);
+});
+
+// Non-localhost enforcement: reach the same server via the machine's real IP.
+test('LAN browser: keyless page and same-origin mutation establish an interaction session', async (t) => {
+  const { networkInterfaces } = await import('node:os');
+  const ip = Object.values(networkInterfaces()).flat().find(i => i && !i.internal && i.family === 'IPv4')?.address;
+  if (!ip) return t.skip('no external interface');
+  const base = `http://${ip}:${PORT}`;
+  const read = await fetch(`${base}/api/state`);
+  assert.equal(read.status, 200);
+  const page = await fetch(`${base}/`, { headers: { accept: 'text/html' } });
+  assert.equal(page.status, 200);
+  const ownerCookie = page.headers.get('set-cookie')?.split(';', 1)[0];
+  assert.ok(ownerCookie, 'LAN page must establish an in-memory interaction session');
+  assert.match(ownerCookie, /^tower-owner-session=/);
+  const write = await fetch(`${base}/api/card/add`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: base, cookie: ownerCookie },
+    body: JSON.stringify({ title: 'LAN browser card' }),
+  });
+  assert.equal(write.status, 200);
+  const changed = await (await fetch(`${base}/api/state`, { headers: { cookie: ownerCookie } })).json();
+  const undo = await fetch(`${base}/api/undo`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: base, cookie: ownerCookie },
+    body: JSON.stringify({ expectRev: changed.meta.rev }),
+  });
+  assert.equal(undo.status, 200);
+  assert.equal((await fetch(`${base}/api/state`, { headers: { cookie: ownerCookie } })).status, 200);
 });
 
 test('push routes are gone', async () => {
@@ -107,12 +118,32 @@ test('clearance batch ratifies without agent notifications', async () => {
   const { json: cardR } = await post('/api/card/add', { title: 'ballot host' });
   const cid = cardR.result.id;
   for (const n of [1, 2, 3]) await post('/api/decision/add', { cardId: cid, id: 'D-W' + n, title: 'w' + n,
-    ballotMode: 'full', reviewPasses: { base: 'The base pass completed the ballot.', boilOcean: 'The breadth review checked the broad solution space.', hybrid: 'The hybrid pass combined compatible strengths.', cooperative: 'The cooperative pass strengthened every option.', beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.', adversarial: 'Author model family: family-a. Adversarial model family: family-b. The adversarial pass attacked the recommendation.' },
+    ballotMode: 'full', reviewPasses: {
+      beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.',
+      adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
+    },
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'A',
-    recommendation: { why: 'A wins here.', whyNot: [{ key: 'B', reason: 'B loses the needed behavior.' }], tradeoff: 'A adds one visible step.' },
-    hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Keep it.' }, { key: 'B', aspect: 'B is brief.', use: 'Borrow its short names.' }] },
+    recommendation: {
+      why: 'A wins here.', gains: ['Behavior stays visible'],
+      losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }],
+      whyNot: [{ key: 'B', reason: 'B loses the needed behavior.' }], tradeoff: 'A adds one visible step.',
+    },
+    hybrid: { result: 'A', synthesis: 'A combines the useful parts.', harvest: [{ key: 'A', aspect: 'A is explicit.', use: 'Borrow its clear names.' }, { key: 'B', aspect: 'B is brief.', use: 'Keep it.' }] },
     options: [{ key: 'A', name: 'a', detail: 'A is explicit.', code: 'a()' }, { key: 'B', name: 'b', detail: 'B is brief.', code: 'b()' }],
-    surface: { gist: 'Which option should Jet ship?', lesson: 'Jet has no way to decide today. This ballot picks the approach.', trio: { current: { note: 'Jet today: nothing.', code: 'jet run x.jet\nError [E1001]' }, wild: { lang: 'Python', note: 'The common tool does X in one call.', code: 'x()' } }, options: [{ key: 'A', name: 'Option A', gist: 'Explicit call.', gains: ['Behavior stays visible'], losses: ['One more step'], proposed: { code: 'a()' } }, { key: 'B', name: 'Option B', gist: 'Short call.', gains: ['Shortest first script'], losses: ['Loses the needed guarantee'], proposed: { code: 'b()' } }], recommendation: { rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'], losses: ['One more step'], whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step.' } } });
+    surface: {
+      gist: 'Which option should Jet ship?', lesson: 'Jet has no way to decide today. This ballot picks the approach.',
+      trio: { current: { note: 'Jet today: nothing.', code: 'jet run x.jet\nError [E1001]' }, wild: { lang: 'Python', note: 'The common tool does X in one call.', code: 'x()' } },
+      options: [
+        { key: 'A', name: 'Option A', gist: 'Explicit call.', gains: ['Behavior stays visible'], losses: ['One more step'], proposed: { code: 'a()' } },
+        { key: 'B', name: 'Option B', gist: 'Short call.', gains: ['Shortest first script'], losses: ['Loses the needed guarantee'], proposed: { code: 'b()' } },
+      ],
+      recommendation: {
+        rec: 'A', why: 'A best serves this decision.', gains: ['Behavior stays visible'],
+        losses: [{ loss: 'One more step', whyUnavoidable: 'The explicit step keeps behavior visible.' }],
+        whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step.',
+      },
+    },
+  });
   await ownerPost('/api/clearance', { decisionId: 'D-W1', outcome: 'A', by: 'owner' });
   await ownerPost('/api/clearance/batch', { by: 'owner', decisions: [{ decisionId: 'D-W2', outcome: 'A' }, { decisionId: 'D-W3', outcome: 'A' }] });
   const s = store.load();
@@ -142,24 +173,3 @@ test('SSE stream delivers state on mutation', async () => {
   assert.ok(buf.includes('sse check'), 'mutation broadcast arrived over SSE');
 });
 
-// Non-localhost enforcement: reach the same server via the machine's real IP.
-test('auth: remote requests 401 without key, unlock page for browsers, boot in state', async (t) => {
-  const { networkInterfaces } = await import('node:os');
-  const ip = Object.values(networkInterfaces()).flat().find(i => i && !i.internal && i.family === 'IPv4')?.address;
-  if (!ip) return t.skip('no external interface');
-  const base = `http://${ip}:${PORT}`;
-  const r1 = await fetch(`${base}/api/state`);
-  assert.equal(r1.status, 401);
-  const r2 = await fetch(`${base}/`, { headers: { accept: 'text/html' } });
-  assert.equal(r2.status, 401);
-  assert.match(await r2.text(), /Unlock/);
-  const r3 = await fetch(`${base}/api/state`, { headers: { authorization: `Bearer ${store.config.auth.token}` } });
-  assert.equal(r3.status, 200);
-  const s = await r3.json();
-  assert.ok(s.boot?.length > 4, 'boot id present');
-  assert.equal(Object.hasOwn(s.config, 'auth'), false);
-  assert.equal(Object.hasOwn(s.config, 'push'), false);
-  const r4 = await fetch(`${base}/?key=${store.config.auth.token}`, { redirect: 'manual' });
-  assert.equal(r4.status, 302);
-  assert.match(r4.headers.get('set-cookie') || '', /tower=/);
-});

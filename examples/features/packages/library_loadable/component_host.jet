@@ -4,7 +4,8 @@
 use core.plugin as plugin
 
 fn run() {
-    library :: plugin.load("build/library.wasm")
+    policy :: Authority.from_rights(["FS.Read:repo"])
+    library :: plugin.load("build/library.wasm", policy)
     tick :: library.call_int("on-tick", [41]) ?? -1
     enabled :: library.call_bool("is-enabled", [true]) ?? false
     greeting :: library.call_text("greet", ["Ada"]) ?? "component call failed"

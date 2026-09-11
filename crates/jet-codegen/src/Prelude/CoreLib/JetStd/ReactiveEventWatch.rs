@@ -6,10 +6,10 @@
     // crossing cannot data-race and cannot lean on rustc Send (I2/I3).
     // Every Signal/Derived/Computed uses the synchronized form; `#Local` rejects
     // crossings (E1102) and `#Shared`/boundary crossings emit upgrade-report lines.
-    use std::cell::RefCell;
+    use std::any::Any;
+    use std::cell::{RefCell, UnsafeCell};
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::{Arc, Mutex, RwLock, Weak};
-
     type Observer = Arc<ReactiveObserver>;
     type WeakObserver = Weak<ReactiveObserver>;
     type DependencyCleanup = Box<dyn Fn() + Send + Sync>;
@@ -137,6 +137,72 @@
         static JET_REACTIVE_ROOT_EFFECTS: RefCell<Vec<JetReactiveEffect>> = const { RefCell::new(Vec::new()) };
     }
 
+    /// A transaction keeps its staged value on the same signal read path.
+    /// The cell is thread-local and lives only for the synchronous update
+    /// callback, so a read cannot observe an uncommitted value from another
+    /// thread. `UnsafeCell` permits the callback's mutable borrow and a
+    /// re-entrant signal read to share this one staged value.
+    struct ReactiveTransactionValue<T> {
+        value: UnsafeCell<T>,
+    }
+
+    struct ReactiveTransactionContext {
+        signal: usize,
+        value: Box<dyn Any>,
+    }
+
+    thread_local! {
+        static JET_REACTIVE_TRANSACTION_CONTEXT: RefCell<Vec<ReactiveTransactionContext>> =
+            const { RefCell::new(Vec::new()) };
+    }
+
+    fn jet_reactive_transaction_value<T: Clone + 'static>(signal: usize) -> Option<T> {
+        JET_REACTIVE_TRANSACTION_CONTEXT.with(|contexts| {
+            let contexts = contexts.borrow();
+            let context = contexts.iter().rev().find(|context| context.signal == signal)?;
+            let staged = context.value.downcast_ref::<ReactiveTransactionValue<T>>()?;
+            // SAFETY: transaction values are accessed only on the owning
+            // thread, while the synchronous callback is active.
+            Some(unsafe { (&*staged.value.get()).clone() })
+        })
+    }
+
+    fn jet_reactive_transaction_propagate<T: Clone + 'static>(signal: usize, value: &T) {
+        JET_REACTIVE_TRANSACTION_CONTEXT.with(|contexts| {
+            let contexts = contexts.borrow();
+            let Some(context) = contexts.iter().rev().find(|context| context.signal == signal)
+            else {
+                return;
+            };
+            let Some(staged) = context.value.downcast_ref::<ReactiveTransactionValue<T>>()
+            else {
+                return;
+            };
+            // SAFETY: nested transactions run synchronously on this thread;
+            // their committed value becomes the enclosing transaction's
+            // staged value before its callback resumes.
+            unsafe { *staged.value.get() = value.clone() };
+        });
+    }
+
+    struct ReactiveTransactionContextGuard {
+        signal: usize,
+    }
+
+    impl Drop for ReactiveTransactionContextGuard {
+        fn drop(&mut self) {
+            JET_REACTIVE_TRANSACTION_CONTEXT.with(|contexts| {
+                let mut contexts = contexts.borrow_mut();
+                let context = contexts.pop();
+                debug_assert_eq!(
+                    context.as_ref().map(|context| context.signal),
+                    Some(self.signal)
+                );
+            });
+        }
+    }
+
+
     fn jet_reactive_active_observer() -> Option<Observer> {
         JET_REACTIVE_OBSERVERS.with(|s| s.borrow().last().cloned())
     }
@@ -169,6 +235,10 @@
                 })),
             }
         }
+        fn signal_key(&self) -> usize {
+            Arc::as_ptr(&self.cell) as usize
+        }
+
         pub fn get(&self) -> T {
             if let Some(obs) = jet_reactive_active_observer() {
                 let added = {
@@ -194,13 +264,19 @@
                     }));
                 }
             }
-            self.cell
-                .read()
-                .unwrap_or_else(|e| e.into_inner())
-                .value
-                .clone()
+            jet_reactive_transaction_value(self.signal_key()).unwrap_or_else(|| {
+                self.cell
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .value
+                    .clone()
+            })
         }
         pub fn set(&self, value: T) {
+            // A nested transaction commits into its enclosing transaction's
+            // staged value before observers run. This keeps one read rule for
+            // both ordinary and transaction-local signal reads.
+            jet_reactive_transaction_propagate(self.signal_key(), &value);
             let subs = {
                 let mut c = self.cell.write().unwrap_or_else(|e| e.into_inner());
                 c.value = value;
@@ -214,6 +290,40 @@
                 s.run();
             }
         }
+    }
+
+    /// Run one synchronous signal transaction. Reads of this signal during
+    /// `update` resolve to its staged value; the signal is published exactly
+    /// once after the callback returns.
+    pub fn jet_reactive_transaction<T, F, R>(
+        signal: &JetSignal<T>,
+        update: F,
+    ) -> (T, R)
+    where
+        T: Clone + Send + Sync + 'static,
+        F: FnOnce(&mut T) -> R,
+    {
+        let context = Box::new(ReactiveTransactionValue {
+            value: UnsafeCell::new(signal.get()),
+        });
+        let context_ptr: *const ReactiveTransactionValue<T> = &*context;
+        let signal_key = signal.signal_key();
+        JET_REACTIVE_TRANSACTION_CONTEXT.with(|contexts| {
+            contexts.borrow_mut().push(ReactiveTransactionContext {
+                signal: signal_key,
+                value: context,
+            });
+        });
+        let context_guard = ReactiveTransactionContextGuard {
+            signal: signal_key,
+        };
+        // SAFETY: the boxed context remains in the thread-local stack until
+        // after this synchronous callback and its staged clone are complete.
+        let result = unsafe { update(&mut *(*context_ptr).value.get()) };
+        let after = unsafe { (&*(*context_ptr).value.get()).clone() };
+        drop(context_guard);
+        signal.set(after.clone());
+        (after, result)
     }
 
     // A derived value is itself observable: it holds a current value plus its own
@@ -236,6 +346,20 @@
 
     impl<T: Clone + Send + Sync + 'static> JetDerived<T> {
         pub fn new<F: Fn() -> T + Send + Sync + 'static>(compute: F) -> JetDerived<T> {
+            Self::new_with_comparison(compute, |_, _| false)
+        }
+
+        pub fn new_distinct<F: Fn() -> T + Send + Sync + 'static>(compute: F) -> JetDerived<T>
+        where
+            T: PartialEq,
+        {
+            Self::new_with_comparison(compute, |previous, next| previous == next)
+        }
+
+        fn new_with_comparison<F: Fn() -> T + Send + Sync + 'static>(
+            compute: F,
+            equal: fn(&T, &T) -> bool,
+        ) -> JetDerived<T> {
             let compute = Arc::new(compute);
             let cell: Arc<RwLock<SignalCell<T>>> = Arc::new(RwLock::new(SignalCell {
                 value: (compute)(),
@@ -248,6 +372,9 @@
                 let v = (compute_for_obs)();
                 let subs = {
                     let mut c = cell_for_obs.write().unwrap_or_else(|e| e.into_inner());
+                    if equal(&c.value, &v) {
+                        return;
+                    }
                     c.value = v;
                     c.subs.retain(|(_, weak)| weak.strong_count() > 0);
                     c.subs
@@ -713,6 +840,13 @@
         pub fn new(capacity: i64, overflow: JetEventOverflow) -> Self {
             JetAsyncPolicy { capacity, overflow }
         }
+
+        pub(crate) fn validate(self) -> Result<Self, JetEventConfigError> {
+            if self.capacity <= 0 {
+                return Err(JetEventConfigError::InvalidCapacity);
+            }
+            Ok(self)
+        }
     }
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -874,7 +1008,7 @@
 
     impl<T: Clone + Send + 'static, E: Clone + Send + 'static> JetAsyncEvent<T, E> {
         pub fn new(policy: JetAsyncPolicy, failure_policy: JetFailurePolicy) -> Result<Self, JetEventConfigError> {
-            if policy.capacity <= 0 { return Err(JetEventConfigError::InvalidCapacity); }
+            let policy = policy.validate()?;
             Ok(JetAsyncEvent {
                 policy,
                 failure_policy,
@@ -1140,7 +1274,7 @@
             let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.run_entry_inner(&entry)));
             match run {
                 Ok(report) => report,
-                Err(payload) if payload.is::<super::JetCancelUnwind>() => {
+                Err(payload) if super::jet_scheduler_is_cancel_unwind(payload.as_ref()) => {
                     let phase = entry.phase.load(std::sync::atomic::Ordering::Acquire);
                     let accepted = entry.accepted.load(std::sync::atomic::Ordering::Acquire);
                     Self::complete_entry(&entry, phase, accepted, JetDispatchState::Cancelled);
@@ -1153,7 +1287,7 @@
                         )
                     })
                 }
-                Err(payload) if payload.is::<super::JetDeadlineUnwind>() => {
+                Err(payload) if super::jet_scheduler_is_deadline_unwind(payload.as_ref()) => {
                     let phase = entry.phase.load(std::sync::atomic::Ordering::Acquire);
                     let accepted = entry.accepted.load(std::sync::atomic::Ordering::Acquire);
                     Self::complete_entry(&entry, phase, accepted, JetDispatchState::DeadlineExceeded);
@@ -1342,8 +1476,8 @@
                                 }
                             }
                             Err(payload) => {
-                                if payload.is::<super::JetCancelUnwind>()
-                                    || payload.is::<super::JetDeadlineUnwind>()
+                                if super::jet_scheduler_is_cancel_unwind(payload.as_ref())
+                                    || super::jet_scheduler_is_deadline_unwind(payload.as_ref())
                                 {
                                     std::panic::resume_unwind(payload);
                                 }
@@ -1740,6 +1874,57 @@
         seen_ready: bool,
         active: bool,
     }
+    fn jet_watch_topology_now() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .and_then(|duration| u64::try_from(duration.as_millis()).ok())
+            .unwrap_or(0)
+    }
+
+    fn jet_watch_json_string(value: &str) -> String {
+        let mut escaped = String::with_capacity(value.len() + 2);
+        escaped.push('"');
+        for character in value.chars() {
+            match character {
+                '"' => escaped.push_str("\\\""),
+                '\\' => escaped.push_str("\\\\"),
+                '\n' => escaped.push_str("\\n"),
+                '\r' => escaped.push_str("\\r"),
+                '\t' => escaped.push_str("\\t"),
+                character if character.is_control() => {
+                    escaped.push_str(&format!("\\u{:04x}", character as u32));
+                }
+                character => escaped.push(character),
+            }
+        }
+        escaped.push('"');
+        escaped
+    }
+
+    fn jet_watch_publish_readiness(
+        id: &str,
+        state: &str,
+        reason: &str,
+    ) {
+        let timestamp = jet_watch_topology_now();
+        let fields = format!(
+            "{{\"id\":{},\"source\":\"watch-runtime\",\"parent_id\":null,\"state\":{},\"reason\":{},\"freshness\":{{\"state\":\"fresh\",\"observed_at_ms\":{timestamp}}}}}",
+            jet_watch_json_string(id),
+            jet_watch_json_string(state),
+            jet_watch_json_string(reason),
+        );
+        if let Ok(event) = super::JetDevtoolsEvent::from_parts(
+            timestamp,
+            "watch-runtime",
+            "Readiness",
+            id,
+            fields,
+        ) {
+            super::jet_devtools_publish_event(event);
+        }
+    }
+
 
     #[derive(Clone)]
     pub struct WatchHandle {
@@ -1767,19 +1952,33 @@
         }
 
         pub fn process_pid(pid: i64) -> Self {
-            WatchHandle {
+            let ready = pid > 0 && jet_process_alive(pid);
+            let handle = WatchHandle {
                 state: Rc::new(RefCell::new(JetWatchState {
                     target: JetWatchTarget::Process { pid },
                     snapshot: JetWatchSnapshot::new(),
-                    seen_ready: jet_process_alive(pid),
+                    seen_ready: ready,
                     active: true,
                 })),
                 event: JetEvent::new(),
-            }
+            };
+            let (state, reason) = if pid <= 0 {
+                ("unknown", "not_checked")
+            } else if ready {
+                ("ready", "probe_passed")
+            } else {
+                ("not_ready", "waiting_for_process")
+            };
+            jet_watch_publish_readiness(&format!("watch:process:{pid}"), state, reason);
+            handle
         }
 
         pub fn port(host: String, port: i64) -> Self {
-            WatchHandle {
+            let id = format!("watch:port:{host}:{port}");
+            let valid = (0..=u16::MAX as i64).contains(&port)
+                && !host.is_empty()
+                && !host.chars().any(char::is_control);
+            let handle = WatchHandle {
                 state: Rc::new(RefCell::new(JetWatchState {
                     target: JetWatchTarget::Port { host, port },
                     snapshot: JetWatchSnapshot::new(),
@@ -1787,7 +1986,13 @@
                     active: true,
                 })),
                 event: JetEvent::new(),
+            };
+            if valid {
+                jet_watch_publish_readiness(&id, "checking", "waiting_for_endpoint");
+            } else {
+                jet_watch_publish_readiness(&id, "failed", "probe_failed");
             }
+            handle
         }
 
         pub fn poll(&self) -> Vec<WatchEvent> {
@@ -1813,14 +2018,27 @@
                     }],
                 },
                 JetWatchTarget::Process { pid } => {
-                    let alive = jet_process_alive(pid);
+                    let alive = pid > 0 && jet_process_alive(pid);
+                    let id = format!("watch:process:{pid}");
                     if state.seen_ready && !alive {
                         state.seen_ready = false;
+                        jet_watch_publish_readiness(&id, "not_ready", "waiting_for_process");
                         vec![WatchEvent {
                             domain: WatchDomain::Process,
                             kind: WatchKind::Exited,
                             path: String::new(),
                             detail: "process exited".to_string(),
+                            pid,
+                            port: 0,
+                        }]
+                    } else if !state.seen_ready && alive {
+                        state.seen_ready = true;
+                        jet_watch_publish_readiness(&id, "ready", "probe_passed");
+                        vec![WatchEvent {
+                            domain: WatchDomain::Process,
+                            kind: WatchKind::Ready,
+                            path: String::new(),
+                            detail: "process is running".to_string(),
                             pid,
                             port: 0,
                         }]
@@ -1838,9 +2056,12 @@
                     }
                 }
                 JetWatchTarget::Port { host, port } => {
-                    let ready = std::net::TcpStream::connect((host.as_str(), port as u16)).is_ok();
+                    let ready = (0..=u16::MAX as i64).contains(&port)
+                        && std::net::TcpStream::connect((host.as_str(), port as u16)).is_ok();
+                    let id = format!("watch:port:{host}:{port}");
                     if ready && !state.seen_ready {
                         state.seen_ready = true;
+                        jet_watch_publish_readiness(&id, "ready", "probe_passed");
                         vec![WatchEvent {
                             domain: WatchDomain::Port,
                             kind: WatchKind::Ready,
@@ -1849,6 +2070,10 @@
                             pid: 0,
                             port,
                         }]
+                    } else if !ready && state.seen_ready {
+                        state.seen_ready = false;
+                        jet_watch_publish_readiness(&id, "not_ready", "probe_failed");
+                        Vec::new()
                     } else {
                         Vec::new()
                     }
@@ -1882,7 +2107,24 @@
         }
 
         pub fn cancel(&self) {
-            self.state.borrow_mut().active = false;
+            let target = {
+                let mut state = self.state.borrow_mut();
+                state.active = false;
+                state.target.clone()
+            };
+            match target {
+                JetWatchTarget::Files { .. } => {}
+                JetWatchTarget::Process { pid } => jet_watch_publish_readiness(
+                    &format!("watch:process:{pid}"),
+                    "not_ready",
+                    "stopped",
+                ),
+                JetWatchTarget::Port { host, port } => jet_watch_publish_readiness(
+                    &format!("watch:port:{host}:{port}"),
+                    "not_ready",
+                    "stopped",
+                ),
+            }
         }
 
         pub fn active(&self) -> bool {

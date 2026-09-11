@@ -8,12 +8,70 @@ const JET_TIME_NS_HOUR = 3600000000000n;
 const JET_TIME_NS_DAY = 86400000000000n;
 const JET_TIME_NS_WEEK = 604800000000000n;
 const JET_TIME_DAY_EPOCH = 719162n;
+const JET_TIME_LEAP_SECONDS = new Set([
+  78796800n,
+  94694400n,
+  126230400n,
+  157766400n,
+  189302400n,
+  220924800n,
+  252460800n,
+  283996800n,
+  315532800n,
+  362793600n,
+  394329600n,
+  425865600n,
+  489024000n,
+  567993600n,
+  631152000n,
+  662688000n,
+  709948800n,
+  741484800n,
+  773020800n,
+  820454400n,
+  867715200n,
+  915148800n,
+  1136073600n,
+  1230768000n,
+  1341100800n,
+  1435708800n,
+  1483228800n,
+]);
+function jet_time_ordering_value(left, right) {
+  return {
+    tag: left < right ? "Less" : left > right ? "Greater" : "Equal",
+    values: [],
+  };
+}
+
+function jet_time_date_compare(left, right) {
+  for (const field of ["year", "month", "day"]) {
+    const ordering = jet_time_ordering_value(BigInt(left[field]), BigInt(right[field]));
+    if (ordering.tag !== "Equal") return ordering;
+  }
+  return jet_time_ordering_value(0n, 0n);
+}
+
+function jet_time_date_time_compare(left, right) {
+  let ordering = jet_time_ordering_value(BigInt(left.secs), BigInt(right.secs));
+  if (ordering.tag !== "Equal") return ordering;
+  ordering = jet_time_ordering_value(left.leap_second ? 1n : 0n, right.leap_second ? 1n : 0n);
+  if (ordering.tag !== "Equal") return ordering;
+  return jet_time_ordering_value(BigInt(left.nanos), BigInt(right.nanos));
+}
 const JET_TIME_ZONE_DATA = Object.create(null);
 const JET_TIME_ZONE_CACHE = Object.create(null);
 
 function jet_time_monotonic_now_ns() {
+  const world = globalThis.__jet_deterministic_world;
+  if (world) return world.monotonic_ns;
   const now = typeof performance === "undefined" ? 0 : performance.now();
   return BigInt(Math.max(0, Math.trunc((now - JET_TIME_EPOCH_MS) * 1000000)));
+}
+
+function jet_time_wall_now_ms() {
+  const world = globalThis.__jet_deterministic_world;
+  return world ? world.now() : BigInt(Date.now());
 }
 
 function jet_time_floor_div(left, right) {
@@ -209,16 +267,27 @@ function jet_time_time(hour, minute, second, nanosecond) {
   };
 }
 
-function jet_time_parse_time(value) {
+function jet_time_parse_time_parts(value, allowLeap) {
   const text = String(value);
   const match = /^([0-9]+):([0-9]+):([0-9]+)(?:\.([0-9]{1,9}))?$/.exec(text);
   if (!match) throw new Error("invalid time: " + text);
+  const hour = BigInt(match[1]);
+  const minute = BigInt(match[2]);
+  const second = BigInt(match[3]);
   const fraction = match[4] === undefined ? 0n : BigInt(match[4].padEnd(9, "0"));
-  const time = jet_time_time(BigInt(match[1]), BigInt(match[2]), BigInt(match[3]), fraction);
-  if (BigInt(match[1]) > 23n || BigInt(match[2]) > 59n || BigInt(match[3]) > 59n) {
+  const leap_second = second === 60n;
+  if (hour > 23n || minute > 59n || second > (allowLeap ? 60n : 59n)
+    || (leap_second && (hour !== 23n || minute !== 59n))) {
     throw new Error("time out of range: " + text);
   }
-  return time;
+  return {
+    time: jet_time_time(hour, minute, leap_second ? 59n : second, fraction),
+    leap_second: leap_second,
+  };
+}
+
+function jet_time_parse_time(value) {
+  return jet_time_parse_time_parts(value, false).time;
 }
 
 function jet_time_time_seconds(time) {
@@ -242,9 +311,23 @@ function jet_time_time_from_nanoseconds(value) {
 
 function jet_time_date_time_from_ns(value) {
   const total = BigInt(value);
+  const seconds = jet_time_floor_div(total, JET_TIME_NS_SECOND);
+  const nanos = jet_time_mod(total, JET_TIME_NS_SECOND);
+  const leap_second = JET_TIME_LEAP_SECONDS.has(seconds);
   return {
-    secs: jet_time_clamp_i64(jet_time_floor_div(total, JET_TIME_NS_SECOND)),
-    nanos: jet_time_mod(total, JET_TIME_NS_SECOND),
+    secs: jet_time_clamp_i64(leap_second ? seconds - 1n : seconds),
+    nanos: nanos,
+    leap_second: leap_second,
+  };
+}
+function jet_time_date_time_from_parts(year, month, day, hour, minute, second, nanosecond) {
+  const leap_second = BigInt(hour) === 23n && BigInt(minute) === 59n && BigInt(second) === 60n;
+  const date = jet_time_date(year, month, day);
+  const time = jet_time_time(hour, minute, leap_second ? 59n : second, nanosecond);
+  return {
+    secs: jet_time_clamp_i64(jet_time_local_epoch_seconds(date, time)),
+    nanos: BigInt(time.nanosecond),
+    leap_second: leap_second,
   };
 }
 
@@ -253,7 +336,7 @@ function jet_time_date_time_from_ms(value) {
 }
 
 function jet_time_date_time_from_seconds(value) {
-  return { secs: jet_time_clamp_i64(value), nanos: 0n };
+  return jet_time_date_time_from_ns(BigInt(value) * JET_TIME_NS_SECOND);
 }
 
 function jet_time_date_time_from_microseconds(value) {
@@ -265,7 +348,8 @@ function jet_time_date_time_from_nanoseconds(value) {
 }
 
 function jet_time_date_time_total_ns(value) {
-  return BigInt(value.secs) * JET_TIME_NS_SECOND + BigInt(value.nanos);
+  return BigInt(value.secs) * JET_TIME_NS_SECOND + BigInt(value.nanos)
+    + (value.leap_second ? JET_TIME_NS_SECOND : 0n);
 }
 
 function jet_time_date_time_date(value) {
@@ -274,13 +358,17 @@ function jet_time_date_time_date(value) {
 
 function jet_time_date_time_time(value) {
   const seconds = jet_time_mod(BigInt(value.secs), 86400n);
-  return jet_time_time(seconds / 3600n, (seconds / 60n) % 60n, seconds % 60n, value.nanos);
+  const time = jet_time_time(seconds / 3600n, (seconds / 60n) % 60n, seconds % 60n, value.nanos);
+  if (value.leap_second) time.second = 60n;
+  return time;
 }
 
 function jet_time_date_time_add_duration(value, duration) {
-  const result = jet_time_date_time_from_ns(jet_time_date_time_total_ns(value) + BigInt(duration));
-  result.secs = jet_time_clamp_i64(result.secs);
-  return result;
+  const amount = BigInt(duration);
+  if (amount === 0n) {
+    return { secs: value.secs, nanos: value.nanos, leap_second: value.leap_second };
+  }
+  return jet_time_date_time_from_ns(jet_time_date_time_total_ns(value) + amount);
 }
 
 function jet_time_local_epoch_seconds(date, time) {
@@ -324,10 +412,15 @@ function jet_time_parse_rfc3339(value) {
   } else {
     throw new Error("RFC3339 datetime needs Z or an offset: " + text);
   }
-  const time = jet_time_parse_time(timeText);
+  const parsed = jet_time_parse_time_parts(timeText, true);
+  const offset = jet_time_parse_offset(offsetText);
+  if (parsed.leap_second && offset !== 0n) {
+    throw new Error("time out of range: " + timeText);
+  }
   return {
-    secs: jet_time_clamp_i64(jet_time_local_epoch_seconds(date, time) - jet_time_parse_offset(offsetText)),
-    nanos: BigInt(time.nanosecond),
+    secs: jet_time_clamp_i64(jet_time_local_epoch_seconds(date, parsed.time) - offset),
+    nanos: BigInt(parsed.time.nanosecond),
+    leap_second: parsed.leap_second,
   };
 }
 
@@ -398,11 +491,15 @@ function jet_time_period_add_to_date(period, anchor) {
 function jet_time_period_add_to_datetime(period, anchor) {
   const date = jet_time_period_add_to_date(period, jet_time_date_time_date(anchor));
   const time = jet_time_date_time_time(anchor);
-  const result = jet_time_date_time_from_ns(
-    jet_time_local_epoch_seconds(date, time) * JET_TIME_NS_SECOND + BigInt(time.nanosecond),
+  return jet_time_date_time_from_parts(
+    date.year,
+    date.month,
+    date.day,
+    time.hour,
+    time.minute,
+    anchor.leap_second ? 60n : time.second,
+    time.nanosecond,
   );
-  result.secs = jet_time_clamp_i64(result.secs);
-  return result;
 }
 
 function jet_time_period_total_in(period, unit, anchor) {
@@ -422,10 +519,15 @@ function jet_time_period_total_in(period, unit, anchor) {
   );
   const calendarNs = dateAnchor
     ? jet_time_day_number(calendarDate) * JET_TIME_NS_DAY
-    : jet_time_date_time_total_ns(jet_time_period_add_to_datetime({ years: 0n, months: 0n, days: 0n }, {
-      secs: jet_time_local_epoch_seconds(calendarDate, jet_time_date_time_time(anchor)),
-      nanos: anchor.nanos,
-    }));
+    : jet_time_date_time_total_ns(jet_time_date_time_from_parts(
+      calendarDate.year,
+      calendarDate.month,
+      calendarDate.day,
+      jet_time_date_time_time(anchor).hour,
+      jet_time_date_time_time(anchor).minute,
+      anchor.leap_second ? 60n : jet_time_date_time_time(anchor).second,
+      anchor.nanos,
+    ));
   const residualNs = endNs - calendarNs;
   switch (String(unit)) {
     case "nanosecond":
@@ -611,11 +713,11 @@ function jet_time_range_result(fn) {
 }
 
 function jet_time_some(value) {
-  return { tag: "Some", values: [value] };
+  return jet_option_some(value);
 }
 
 function jet_time_none() {
-  return { tag: "None", values: [] };
+  return jet_option_none();
 }
 
 function jet_time_tzif_u32(bytes, offset) {
@@ -715,6 +817,21 @@ function jet_time_zone_local_parts(zone, seconds) {
   const local = jet_time_date_time_from_seconds(BigInt(seconds) + offset);
   return { date: jet_time_date_time_date(local), time: jet_time_date_time_time(local), offset: offset };
 }
+function jet_time_date_time_timestamp(value) {
+  return jet_time_clamp_i64(BigInt(value.secs) + (value.leap_second ? 1n : 0n));
+}
+
+function jet_time_zoned_display_parts(value) {
+  if (value.instant.leap_second && value.zone.name === "UTC") {
+    return {
+      date: jet_time_date_time_date(value.instant),
+      time: jet_time_date_time_time(value.instant),
+      offset: 0n,
+    };
+  }
+  return jet_time_zone_local_parts(value.zone, jet_time_date_time_timestamp(value.instant));
+}
+
 
 function jet_time_zone_local_to_utc(zone, date, time, disambiguation) {
   const policy = disambiguation === undefined ? "compatible" : String(disambiguation);
@@ -792,18 +909,23 @@ function jet_time_zone_transition(zone, seconds, direction) {
 function jet_time_zoned_from_local(date, time, zone, disambiguation) {
   const seconds = jet_time_zone_local_to_utc(zone, date, time, disambiguation);
   return {
-    instant: { secs: jet_time_clamp_i64(seconds), nanos: BigInt(time.nanosecond) },
+    instant: { secs: jet_time_clamp_i64(seconds), nanos: BigInt(time.nanosecond), leap_second: false },
     zone: zone,
   };
 }
 
 function jet_time_zoned_date(value) {
-  return jet_time_zone_local_parts(value.zone, value.instant.secs).date;
+  return jet_time_zoned_display_parts(value).date;
 }
 
 function jet_time_zoned_time(value) {
-  const time = jet_time_zone_local_parts(value.zone, value.instant.secs).time;
-  return jet_time_time(time.hour, time.minute, time.second, value.instant.nanos);
+  const time = jet_time_zoned_display_parts(value).time;
+  return {
+    hour: time.hour,
+    minute: time.minute,
+    second: time.second,
+    nanosecond: BigInt(value.instant.nanos),
+  };
 }
 
 function jet_time_replace(out, token, value) {
@@ -921,6 +1043,8 @@ function jet_time_method(recv, kind, method, args) {
       case "month":
       case "day": return recv[method];
       case "to_string": return jet_time_date_string(recv);
+      case "equal": return recv.year === a(0).year && recv.month === a(0).month && recv.day === a(0).day;
+      case "compare": return jet_time_date_compare(recv, a(0));
       case "weekday": return jet_time_weekday(recv);
       case "iso_weekday": return jet_time_iso_weekday(recv);
       case "day_of_year": return jet_time_day_number(recv) - jet_time_day_number(jet_time_date(recv.year, 1n, 1n)) + 1n;
@@ -961,6 +1085,8 @@ function jet_time_method(recv, kind, method, args) {
       case "millisecond": return BigInt(recv.nanosecond) / 1000000n;
       case "microsecond": return BigInt(recv.nanosecond) / 1000n;
       case "to_string": return jet_time_time_string(recv);
+      case "equal": return recv.hour === a(0).hour && recv.minute === a(0).minute && recv.second === a(0).second && recv.nanosecond === a(0).nanosecond;
+      case "compare": return jet_time_ordering_value(jet_time_time_nanoseconds(recv), jet_time_time_nanoseconds(a(0)));
       case "add_duration": return jet_time_time_from_nanoseconds(jet_time_time_nanoseconds(recv) + BigInt(a(0)));
       case "subtract_duration": return jet_time_time_from_nanoseconds(jet_time_time_nanoseconds(recv) + jet_time_duration_negated(a(0)));
       case "round":
@@ -983,12 +1109,14 @@ function jet_time_method(recv, kind, method, args) {
   }
   if (kind === "DateTime") {
     switch (method) {
-      case "to_timestamp": return recv.secs;
+      case "to_timestamp": return jet_time_date_time_timestamp(recv);
       case "to_unix_ms": return jet_time_clamp_i64(jet_time_floor_div(jet_time_date_time_total_ns(recv), 1000000n));
       case "to_unix_s": return jet_time_clamp_i64(jet_time_floor_div(jet_time_date_time_total_ns(recv), JET_TIME_NS_SECOND));
       case "to_unix_us": return jet_time_range_result(function() { return jet_time_checked_i64(jet_time_floor_div(jet_time_date_time_total_ns(recv), 1000n), "microseconds"); });
       case "to_unix_ns": return jet_time_range_result(function() { return jet_time_checked_i64(jet_time_date_time_total_ns(recv), "nanoseconds"); });
       case "to_string": return jet_time_date_string(jet_time_date_time_date(recv)) + " " + jet_time_time_string(jet_time_date_time_time(recv)) + " UTC";
+      case "equal": return recv.secs === a(0).secs && recv.nanos === a(0).nanos && recv.leap_second === a(0).leap_second;
+      case "compare": return jet_time_date_time_compare(recv, a(0));
       case "date": return jet_time_date_time_date(recv);
       case "time": return jet_time_date_time_time(recv);
       case "hour":
@@ -1001,6 +1129,7 @@ function jet_time_method(recv, kind, method, args) {
       case "format": return jet_time_format(a(0), jet_time_date_time_date(recv), jet_time_date_time_time(recv), null);
       case "format_checked": return jet_time_text_result(function() { return jet_time_format_checked(a(0), jet_time_date_time_date(recv), jet_time_date_time_time(recv), null); });
       case "plus_duration": return jet_time_date_time_add_duration(recv, a(0));
+      case "add_nanoseconds": return jet_time_date_time_add_duration(recv, a(0));
       case "subtract_duration": return jet_time_date_time_add_duration(recv, jet_time_duration_negated(a(0)));
       case "add_period": return jet_time_period_add_to_datetime(a(0), recv);
       case "subtract_period": return jet_time_period_add_to_datetime(jet_time_period_negated(a(0)), recv);
@@ -1017,15 +1146,22 @@ function jet_time_method(recv, kind, method, args) {
         const delta = method === "until" ? jet_time_date_time_total_ns(a(0)) - jet_time_date_time_total_ns(recv) : jet_time_date_time_total_ns(recv) - jet_time_date_time_total_ns(a(0));
         return jet_time_clamp_i64(jet_time_round_ns(delta, a(2), a(3), a(4)));
       }
-      case "replace": return jet_time_date_time_from_ns(jet_time_local_epoch_seconds(jet_time_date(a(0), a(1), a(2)), jet_time_time(a(3), a(4), a(5), recv.nanos)) * JET_TIME_NS_SECOND + BigInt(recv.nanos));
-      case "in_zone": return { instant: { secs: recv.secs, nanos: recv.nanos }, zone: a(0) };
+      case "replace": return jet_time_date_time_from_parts(a(0), a(1), a(2), a(3), a(4), a(5), recv.nanos);
+      case "in_zone": return { instant: { secs: recv.secs, nanos: recv.nanos, leap_second: recv.leap_second }, zone: a(0) };
       case "with": {
         const overflow = String(a(6));
         if (!["constrain", "clamp", "reject"].includes(overflow)) throw new Error("invalid overflow policy: " + overflow);
-        if (overflow === "reject" && (BigInt(a(3)) < 0n || BigInt(a(3)) > 23n || BigInt(a(4)) < 0n || BigInt(a(4)) > 59n || BigInt(a(5)) < 0n || BigInt(a(5)) > 59n)) throw new Error("time fields are outside the valid range");
+        const hour = BigInt(a(3));
+        const minute = BigInt(a(4));
+        const second = BigInt(a(5));
+        const leap_second = hour === 23n && minute === 59n && second === 60n;
+        if (overflow === "reject" && (hour < 0n || hour > 23n || minute < 0n || minute > 59n
+          || (!leap_second && (second < 0n || second > 59n)))) {
+          throw new Error("time fields are outside the valid range");
+        }
         const date = jet_time_date(a(0), a(1), a(2));
         if (overflow === "reject" && (BigInt(a(1)) < 1n || BigInt(a(1)) > 12n || BigInt(a(2)) < 1n || BigInt(a(2)) > jet_time_days_in_month(a(0), a(1)))) throw new Error("date fields are outside the valid range");
-        return jet_time_ok(jet_time_date_time_from_ns(jet_time_local_epoch_seconds(date, jet_time_time(a(3), a(4), a(5), recv.nanos)) * JET_TIME_NS_SECOND + BigInt(recv.nanos)));
+        return jet_time_ok(jet_time_date_time_from_parts(date.year, date.month, date.day, hour, minute, second, recv.nanos));
       }
       default: throw new Error("unsupported DateTime method: " + method);
     }
@@ -1047,23 +1183,37 @@ function jet_time_method(recv, kind, method, args) {
     switch (method) {
       case "date": return jet_time_zoned_date(recv);
       case "time": return jet_time_zoned_time(recv);
-      case "offset_seconds": return jet_time_zone_local_parts(recv.zone, recv.instant.secs).offset;
-      case "is_dst": return jet_time_zone_info_at_utc(recv.zone, recv.instant.secs).isDst;
-      case "to_datetime": return { secs: recv.instant.secs, nanos: recv.instant.nanos };
+      case "offset_seconds": return jet_time_zoned_display_parts(recv).offset;
+      case "is_dst": return jet_time_zone_info_at_utc(recv.zone, jet_time_date_time_timestamp(recv.instant)).isDst;
+      case "to_datetime": return { secs: recv.instant.secs, nanos: recv.instant.nanos, leap_second: recv.instant.leap_second };
       case "zone": return recv.zone;
-      case "to_string": return jet_time_date_string(jet_time_zoned_date(recv)) + " " + jet_time_time_string(jet_time_zoned_time(recv)) + " " + recv.zone.name + " (" + jet_time_offset_string(jet_time_zone_local_parts(recv.zone, recv.instant.secs).offset) + ")";
-      case "format": return jet_time_format(a(0), jet_time_zoned_date(recv), jet_time_zoned_time(recv), { zone: recv.zone, offset: jet_time_zone_local_parts(recv.zone, recv.instant.secs).offset });
-      case "format_checked": return jet_time_text_result(function() { return jet_time_format_checked(a(0), jet_time_zoned_date(recv), jet_time_zoned_time(recv), { zone: recv.zone, offset: jet_time_zone_local_parts(recv.zone, recv.instant.secs).offset }); });
+      case "equal": return recv.instant.secs === a(0).instant.secs
+        && recv.instant.nanos === a(0).instant.nanos
+        && recv.instant.leap_second === a(0).instant.leap_second
+        && recv.zone.name === a(0).zone.name;
+      case "compare": return jet_time_date_time_compare(recv.instant, a(0).instant);
+      case "to_string": {
+        const parts = jet_time_zoned_display_parts(recv);
+        return jet_time_date_string(parts.date) + " " + jet_time_time_string(jet_time_zoned_time(recv)) + " " + recv.zone.name + " (" + jet_time_offset_string(parts.offset) + ")";
+      }
+      case "format": {
+        const parts = jet_time_zoned_display_parts(recv);
+        return jet_time_format(a(0), parts.date, jet_time_zoned_time(recv), { zone: recv.zone, offset: parts.offset });
+      }
+      case "format_checked": {
+        const parts = jet_time_zoned_display_parts(recv);
+        return jet_time_text_result(function() { return jet_time_format_checked(a(0), parts.date, jet_time_zoned_time(recv), { zone: recv.zone, offset: parts.offset }); });
+      }
       case "format_rfc9557": {
-        const offset = jet_time_zone_local_parts(recv.zone, recv.instant.secs).offset;
-        return jet_time_date_string(jet_time_zoned_date(recv)) + "T" + jet_time_time_string(jet_time_zoned_time(recv)) + (offset === 0n ? "Z" : jet_time_offset_string(offset)) + "[" + recv.zone.name + "]";
+        const parts = jet_time_zoned_display_parts(recv);
+        return jet_time_date_string(parts.date) + "T" + jet_time_time_string(jet_time_zoned_time(recv)) + (parts.offset === 0n ? "Z" : jet_time_offset_string(parts.offset)) + "[" + recv.zone.name + "]";
       }
       case "add_duration": return { instant: jet_time_date_time_add_duration(recv.instant, a(0)), zone: recv.zone };
       case "subtract_duration": return { instant: jet_time_date_time_add_duration(recv.instant, jet_time_duration_negated(a(0))), zone: recv.zone };
       case "add_period": return jet_time_zoned_from_local(jet_time_period_add_to_date(a(0), jet_time_zoned_date(recv)), jet_time_zoned_time(recv), recv.zone);
       case "subtract_period": return jet_time_zoned_from_local(jet_time_period_add_to_date(jet_time_period_negated(a(0)), jet_time_zoned_date(recv)), jet_time_zoned_time(recv), recv.zone);
       case "with_time": return jet_time_result(function() { return jet_time_zoned_from_local(jet_time_zoned_date(recv), a(0), recv.zone, a(1)); });
-      case "with_zone": return { instant: { secs: recv.instant.secs, nanos: recv.instant.nanos }, zone: a(0) };
+      case "with_zone": return { instant: { secs: recv.instant.secs, nanos: recv.instant.nanos, leap_second: recv.instant.leap_second }, zone: a(0) };
       case "until":
       case "since": {
         const delta = method === "until" ? jet_time_date_time_total_ns(a(0).instant) - jet_time_date_time_total_ns(recv.instant) : jet_time_date_time_total_ns(recv.instant) - jet_time_date_time_total_ns(a(0).instant);
@@ -1100,9 +1250,9 @@ function jet_time_method(recv, kind, method, args) {
 
 function jet_time_core(method, args) {
   switch (method) {
-    case "now": return BigInt(Date.now());
-    case "now_utc": return jet_time_date_time_from_ms(Date.now());
-    case "today": return jet_time_date_time_date(jet_time_date_time_from_ms(Date.now()));
+    case "now": return jet_time_wall_now_ms();
+    case "now_utc": return jet_time_date_time_from_ms(jet_time_wall_now_ms());
+    case "today": return jet_time_date_time_date(jet_time_date_time_from_ms(jet_time_wall_now_ms()));
     case "instant": return jet_time_monotonic_now_ns();
     case "utc": return jet_time_zone("UTC");
     case "new": return jet_time_date(args[0], args[1], args[2]);
@@ -1127,14 +1277,23 @@ function jet_time_core(method, args) {
       if (split < 0) throw new Error("invalid RFC9557 datetime: " + text);
       const rest = datetime.slice(split + 1);
       const offsetText = rest.endsWith("Z") ? "Z" : rest.slice(-6);
-      const time = jet_time_parse_time(rest.endsWith("Z") ? rest.slice(0, -1) : rest.slice(0, -6));
+      const timeText = rest.endsWith("Z") ? rest.slice(0, -1) : rest.slice(0, -6);
+      const parsedTime = jet_time_parse_time_parts(timeText, true);
       const date = jet_time_date_parse(datetime.slice(0, split));
       const offset = jet_time_parse_offset(offsetText);
-      const seconds = jet_time_zone_local_to_utc_offset(zone, date, time, offset);
+      if (parsedTime.leap_second && offset !== 0n) throw new Error("time out of range: " + timeText);
+      const seconds = jet_time_zone_local_to_utc_offset(zone, date, parsedTime.time, offset);
       if (seconds === null) throw new Error("RFC9557 offset does not match zone " + zone.name);
-      return { instant: { secs: jet_time_clamp_i64(seconds), nanos: BigInt(time.nanosecond) }, zone: zone };
+      return {
+        instant: {
+          secs: jet_time_clamp_i64(seconds),
+          nanos: BigInt(parsedTime.time.nanosecond),
+          leap_second: parsedTime.leap_second,
+        },
+        zone: zone,
+      };
     });
-    case "datetime": return jet_time_date_time_from_ns(jet_time_local_epoch_seconds(jet_time_date(args[0], args[1], args[2]), jet_time_time(args[3], args[4], args[5])) * JET_TIME_NS_SECOND);
+    case "datetime": return jet_time_date_time_from_parts(args[0], args[1], args[2], args[3], args[4], args[5], 0n);
     case "time":
     case "local_time": return jet_time_time(args[0], args[1], args[2]);
     case "days_in_month": return jet_time_days_in_month(args[0], args[1]);
@@ -1144,7 +1303,7 @@ function jet_time_core(method, args) {
     case "period_months": return jet_time_period(0n, args[0], 0n);
     case "period_years": return jet_time_period(args[0], 0n, 0n);
     case "zone": return jet_time_result(function() { return jet_time_zone(args[0]); });
-    case "zoned": return { instant: { secs: args[0].secs, nanos: args[0].nanos }, zone: args[1] };
+    case "zoned": return { instant: { secs: args[0].secs, nanos: args[0].nanos, leap_second: args[0].leap_second }, zone: args[1] };
     case "zoned_local": return jet_time_result(function() { return jet_time_zoned_from_local(args[0], args[1], args[2], args[3] === undefined ? "compatible" : args[3]); });
     default: throw new Error("unsupported core.time call: " + method);
   }

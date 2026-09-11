@@ -23,8 +23,9 @@ pub use Docs::{build_doc_graph, DocExpectation, DocGraph, DocImpl, DocItem, DocM
     DocTest, DOC_SCHEMA_VERSION};
 pub use SemanticOps::{
     review_semantic_ops, review_semantic_ops_with_receipts, semantic_blame,
-    semantic_blame_for_file, semantic_ops_for_file, semantic_rename_ops, ReviewOpKind,
-    ReviewSemanticOp, SemanticBlameEntry, SemanticOp, SemanticOpFile, SemanticOpTarget,
+    semantic_blame_for_file, semantic_ops_for_file, semantic_rename_ops, ReviewAlignment,
+    ReviewOpKind, ReviewSemanticOp, SemanticBlameEntry, SemanticOp, SemanticOpFile,
+    SemanticOpTarget,
 };
 pub use Symbols::{
     build_semantic_symbol_index, SemanticProvenance, SemanticSymbol, SemanticSymbolIndex,
@@ -39,6 +40,10 @@ pub use Types::{
     ViewProjectionFact,
     ViewProvenanceFact, ViewSourceFact, ViewSourcePathFact, StateGraphFact, StateNodeFact,
     StateTransitionFact, SCHEMA_VERSION,
+};
+pub use jet_foundation::Facts::{
+    DerivationDisposition, DerivationIdentity, DerivationMethod, DerivationObservation,
+    DerivationPayload, DerivationRecord, DerivationRef,
 };
 pub use JSON::{package_facts_json, workspace_overlay_policy_json};
 
@@ -320,7 +325,7 @@ mod tests {
 
     #[test]
     fn schema_version_constant() {
-        assert_eq!(SCHEMA_VERSION, 16);
+        assert_eq!(SCHEMA_VERSION, 18);
     }
 
     #[test]

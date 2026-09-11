@@ -15,8 +15,7 @@ Model and review policy follow `AGENTS.md` and the owner's current instruction.
 
 ## Environment sanity (before trusting ANY failure)
 
-- `df -h /tmp` — if near full, `rm -rf /tmp/nix-shell.*` and re-run; a full
-  tmpfs causes phantom ENOSPC failures unrelated to your change.
+- `/tmp` is RAM-backed. Use `scripts/agent/tmp-guard.sh`; if it blocks, remove only the stale paths it names. Never put Cargo targets, broad logs, or test scratch there.
 - Use `scripts/agent/jet-env`; it uses nix-direnv's cached environment when
   available. `full` selects browser/FFI/VM tooling.
 
@@ -34,18 +33,19 @@ workspace proof, use `scripts/agent/jet-env cargo fmt --all -- --check`.
 
 ## Test strategy
 
-- **Card closure:** use the evidence named by the card's robust observable exit
-  criteria. The orchestrator checks the evidence after integration and closes the
-  card when no known blocker contradicts it. No per-card reviewer or duplicate proof
-  is required.
-- **Milestone closeout:** after the milestone patches are integrated and cards are
-  closed, the orchestrator runs one composed targeted test sweep over the milestone's
-  gates and one fresh-context review of the integrated milestone diff. Include every
-  applicable I9 execution tier. Add broader targets only when the criteria or a known
-  interaction requires them.
-- **Closeout findings:** every finding reopens its owning card and affected criteria.
-  Apply and integrate the fix, review the delta, and verify the affected criteria
-  before the card and milestone close again.
+- **Card closure:** run only the evidence named by the card's observable criteria
+  against the integrated tree. Close immediately when it passes and no blocker
+  contradicts it. No per-card reviewer, duplicate proof, suite batch, unfiltered
+  census, or `verify-full.sh`.
+- **Milestone closeout:** after every linked card is `done`, commit the frozen source
+  and run `scripts/agent/closeout-gate.mjs open MILESTONE --by AGENT`. The token binds
+  broad proof and review to that commit. Then run one composed targeted sweep and one
+  fresh-context review, covering every applicable I9 tier.
+- **Closeout findings:** reopen only the owning card and affected criteria. Fix,
+  integrate, run the affected focused proof, and close it again. Freeze a new commit
+  and open a new token before resuming broad proof.
+- **Hard guards:** `proof-parallel.sh`, unfiltered Core conformance census,
+  `verify-full.sh`, and `tower milestone verify` refuse without the token.
 - Do not use global `-- --test-threads=1` for completion proof. Use it only for
   a targeted race reproduction after a parallel failure.
 
@@ -73,7 +73,7 @@ look-and-feel with human eyes: UI/UX/DX taste, visual presentation, copy polish,
 or a real environment the harness cannot replace. Give the owner a brief
 observable checklist only — omit machine evidence.
 
-## Blessing snapshots and generated docs
+## Blessing snapshots
 
 Blessing accepts a reviewed behavior change; it is never a way to make red
 tests disappear.
@@ -81,8 +81,8 @@ tests disappear.
 1. Run the focused test without an update variable and read the complete diff.
 2. Build a fresh binary: `scripts/agent/jet-env cargo build`.
 3. Preview with `scripts/agent/jet-env jet self devtools bless <target> --dry-run`,
-   then bless only the named target. For generated error pages:
-   `scripts/agent/jet-env env UPDATE_DOCS=1 cargo test --test gen_errors gen_error_pages -- --nocapture`.
+   then bless only the named target. Diagnostic text comes from its executable
+   registry; do not create a Markdown error-page or status-catalog mirror.
 4. Inspect `git diff` immediately. Revert unrelated churn.
 5. Re-run the focused test with no update variable.
 
@@ -116,8 +116,10 @@ snapshots, and examples when the change touches them.
 
 ## Traps
 
-- Stale `target/debug/jet` while sources changed — rebuild first.
+- Stale `target/debug/jet` while sources changed — rebuild before a compiler smoke.
+- Broad proof without a review-ready milestone and frozen source commit — close cards
+  first, then open the closeout token.
 - Blessing without reading the full diff.
-- `/tmp` full → phantom ENOSPC.
-- Moving/renaming examples breaks path-embedding fixtures.
-- Claiming done from an audit/research note without this skill's proof gate.
+- Heavy scratch or logs in `/tmp` — use the disk-backed agent scratch path.
+- Moving or renaming examples breaks path-embedding fixtures.
+- Claiming done from an audit or research note without observable criterion evidence.

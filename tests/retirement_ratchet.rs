@@ -265,8 +265,7 @@ fn failure_surface_files() -> Vec<PathBuf> {
         out.extend(entries.flatten().filter_map(|entry| {
             let path = entry.path();
             (path.is_file()
-                && (path.extension().is_some_and(|extension| extension == "jet")
-                    || file_name(&path) == "llms.text"))
+                && path.extension().is_some_and(|extension| extension == "jet"))
             .then_some(path)
         }));
     }
@@ -445,8 +444,7 @@ fn failure_source_fragments(path: &Path, text: &str) -> Vec<FailureSourceFragmen
         }];
     }
 
-    let markdown = path.extension().is_some_and(|extension| extension == "md")
-        || file_name(path) == "llms.text";
+    let markdown = path.extension().is_some_and(|extension| extension == "md");
     if !markdown {
         return failure_embedded_fragments(text);
     }
@@ -757,13 +755,12 @@ fn relative_path(path: &Path) -> String {
 
 fn is_authority_history(path: &str) -> bool {
     path == "docs/spec/syntax-decisions.md"
-        || path == "docs/agents/agent-memory.md"
-        || path == "docs/reference/prior-art.md"
-        || path.starts_with("docs/archive/")
+        || path == "docs/spec/contributing/agent-engineering.md"
+        || path == "docs/spec/reference/prior-art.md"
         || path.starts_with("docs/audits/")
-        || path.starts_with("docs/plans/")
         || path.starts_with("docs/proposals/")
         || path.starts_with("docs/research/")
+        || path.starts_with("tools/agent-eval/domain-foundations/")
 }
 
 fn is_authority_diagnostic_fixture(path: &str) -> bool {
@@ -771,16 +768,6 @@ fn is_authority_diagnostic_fixture(path: &str) -> bool {
         || path.starts_with("tests/fuzz/")
         || path == "tests/syntax_reconciliation.rs"
         || path == "scripts/notebook-test/acceptance.mjs"
-        || path == "docs/spec/diagnostics.md"
-        || path == "docs/spec/diagnostic-rows.md"
-}
-
-fn is_authority_generated_diagnostic_row(path: &str, line: &str) -> bool {
-    if path != "llms.text" {
-        return false;
-    }
-    let mut fields = line.split('\t');
-    fields.next() == Some("retired") || fields.next() == Some("retired")
 }
 
 fn is_authority_diagnostic_producer(path: &str, line: &str) -> bool {
@@ -817,9 +804,7 @@ fn is_unrelated_authority_word(path: &str, line: &str) -> bool {
     ) {
         return true;
     }
-    if path.starts_with("docs/reference/surfaces/")
-        || path == "docs/reference/core-surface-ledger.json"
-    {
+    if path.starts_with("docs/spec/reference/surfaces/") {
         return true;
     }
     matches!(
@@ -1592,7 +1577,6 @@ fn retired_authority_vocabulary_stays_in_fixtures_history_or_unrelated_english()
             if hits.is_empty()
                 || is_authority_history(&relative)
                 || is_authority_diagnostic_fixture(&relative)
-                || is_authority_generated_diagnostic_row(&relative, line)
                 || is_authority_diagnostic_producer(&relative, line)
                 || is_unrelated_authority_word(&relative, line)
             {

@@ -34,14 +34,52 @@
 // Re-export the parent `Codegen` glob so the split-out submodules
 // (`subset`/`lower`/`emit`) reach `Cx`, `mangle`, `rust_*`, etc. via `use super::*`.
 pub(crate) use super::*;
-
-mod emit;
-mod eval;
-pub use eval::{
-    install_comptime_bridge, lower_interp_program, new_memo_state, run_named_func,
-    run_named_func_with_memos, run_program, run_program_with_structs, set_native_call_hook,
-    stable_memo_field_slot, stable_place_address, tir_place_address_key, MemoState, NativeCallHook,
+use jet_foundation::CanonicalPass;
+use jet_foundation::SchemaMigration::{
+    SchemaMigrationOp, SchemaMigrationPlan, SchemaMigrationStep,
 };
+use jet_foundation::MIR::{MirArtifactBuildMode, MirArtifactRequest};
+
+mod artifact_plan;
+mod data_plan;
+mod mir;
+mod opt;
+mod routes;
+mod tir_to_mir_core;
+mod tir_to_mir_expr;
+mod tir_to_mir_stmt;
+pub(crate) mod tir_to_mir_types;
+use artifact_plan::{lower_tir_artifact_facts_for_request, TirArtifactFacts};
+pub(crate) use data_plan::data_plan_for_core_call;
+pub use data_plan::{
+    project_data_plan, DataPlanError, TDataPlan, TDataPlanNode, TDataPlanPhysicalNode,
+    TDATA_PLAN_SCHEMA_VERSION,
+};
+pub use mir::{lower_checked_mir_program_for, lower_tir_to_mir, LowerError};
+use tir_to_mir_types::{
+    lower_declarations_from_items_with_boxed_edges, lower_tir_declarations, TirDeclarations,
+};
+
+fn set_lowered_method_name(lowered: &mut TFunc, name: impl FnOnce() -> String) {
+    if !matches!(&lowered.kind, TFuncKind::TraitMethod { .. }) {
+        lowered.name = name();
+    }
+}
+
+fn qualification_binders(
+    owner: &[crate::AST::TypeParam],
+    method: Option<&crate::AST::Func>,
+) -> Vec<String> {
+    owner
+        .iter()
+        .map(|param| param.name.clone())
+        .chain(
+            method
+                .into_iter()
+                .flat_map(|method| method.type_params.iter().map(|param| param.name.clone())),
+        )
+        .collect()
+}
 
 /// Resolve a reflected row through its enclosing generic owner. AOT, Web, and
 /// the interpreter call this one substitution seam before building carriers.
@@ -66,25 +104,49 @@ pub(crate) fn substitute_reflect_field_type(
 mod lower;
 mod subset;
 
-// Re-export every submodule item so existing `TIR::<name>` call sites and the
-// `#[cfg(test)] mod tests` block (which uses `super::*`) keep resolving unchanged.
-pub(crate) use emit::*;
 pub(crate) use lower::*;
+use routes::*;
 pub use subset::is_civil_time_method_name;
 pub(crate) use subset::*;
 
-#[cfg(test)]
-pub(crate) fn unmatched_enum_match_guard(
-    fallthrough: bool,
-    span: crate::Diagnostics::Span,
-) -> Result<(), crate::Diagnostics::Diagnostic> {
-    eval::unmatched_enum_match_guard(fallthrough, span)
+pub(super) fn mir_unary_op(op: crate::AST::UnOp) -> jet_foundation::MIR::MirUnaryOp {
+    match op {
+        crate::AST::UnOp::Neg => jet_foundation::MIR::MirUnaryOp::Neg,
+        crate::AST::UnOp::Not => jet_foundation::MIR::MirUnaryOp::Not,
+    }
+}
+
+pub(super) fn mir_binary_op(op: crate::AST::BinOp) -> jet_foundation::MIR::MirBinaryOp {
+    match op {
+        crate::AST::BinOp::Add => jet_foundation::MIR::MirBinaryOp::Add,
+        crate::AST::BinOp::Sub => jet_foundation::MIR::MirBinaryOp::Sub,
+        crate::AST::BinOp::Mul => jet_foundation::MIR::MirBinaryOp::Mul,
+        crate::AST::BinOp::Div => jet_foundation::MIR::MirBinaryOp::Div,
+        crate::AST::BinOp::FloorDiv => jet_foundation::MIR::MirBinaryOp::FloorDiv,
+        crate::AST::BinOp::Mod => jet_foundation::MIR::MirBinaryOp::Mod,
+        crate::AST::BinOp::Rem => jet_foundation::MIR::MirBinaryOp::Rem,
+        crate::AST::BinOp::Pow => jet_foundation::MIR::MirBinaryOp::Pow,
+        crate::AST::BinOp::BitAnd => jet_foundation::MIR::MirBinaryOp::BitAnd,
+        crate::AST::BinOp::BitOr => jet_foundation::MIR::MirBinaryOp::BitOr,
+        crate::AST::BinOp::BitXor => jet_foundation::MIR::MirBinaryOp::BitXor,
+        crate::AST::BinOp::Shl => jet_foundation::MIR::MirBinaryOp::Shl,
+        crate::AST::BinOp::Shr => jet_foundation::MIR::MirBinaryOp::Shr,
+        crate::AST::BinOp::Eq => jet_foundation::MIR::MirBinaryOp::Eq,
+        crate::AST::BinOp::Ne => jet_foundation::MIR::MirBinaryOp::Ne,
+        crate::AST::BinOp::Lt => jet_foundation::MIR::MirBinaryOp::Lt,
+        crate::AST::BinOp::Gt => jet_foundation::MIR::MirBinaryOp::Gt,
+        crate::AST::BinOp::Le => jet_foundation::MIR::MirBinaryOp::Le,
+        crate::AST::BinOp::Ge => jet_foundation::MIR::MirBinaryOp::Ge,
+        crate::AST::BinOp::Compare => jet_foundation::MIR::MirBinaryOp::Compare,
+        crate::AST::BinOp::And => jet_foundation::MIR::MirBinaryOp::And,
+        crate::AST::BinOp::Or => jet_foundation::MIR::MirBinaryOp::Or,
+    }
 }
 
 use crate::Codegen::{mangle, mangle_path};
 use crate::AST::{
-    AccessConvention, BinOp, CtValue, Expr, Item, Pattern, ProgramBundle, Type, UnOp,
-    VariantPayload,
+    AccessConvention, BinOp, CtValue, Expr, Func, Item, Pattern, ProgramBundle, TestDef, Type,
+    UnOp, VariantPayload,
 };
 
 /// Stable suffix for the raw C ABI trampoline around a fallible Jet callable.
@@ -104,9 +166,6 @@ fn compiler_owned_unit_enum(
     type_name: &str,
 ) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
 {
-    if is_eval_fragment() {
-        return None;
-    }
     crate::Sema::core_fact_kind_variants(type_name)
 }
 
@@ -194,11 +253,6 @@ pub(crate) fn fold_typed_fact_enum_pattern(subject: &Expr, pattern: &Pattern) ->
         return None;
     }
     Some(value_variant == variant)
-}
-
-thread_local! {
-    static LAST_JIT_LOWER_FAILURE: std::cell::RefCell<Option<String>> =
-        const { std::cell::RefCell::new(None) };
 }
 
 /// c139 M4: lowered spawn-lambda body for Cranelift JIT (captures as explicit params).
@@ -293,12 +347,204 @@ pub enum TJitSpawnBody {
     },
 }
 
-/// c139 M3: every lowered function the JIT may compile from the entry module.
-pub struct JitProgram {
-    /// Display path of the entry module (for overflow trap messages).
+/// Package-level checked facts carried with the canonical TIR program.
+#[derive(Clone, Debug, Default)]
+pub struct TirPackageFacts {
+    pub project_root: String,
+    pub used_core: std::collections::BTreeSet<String>,
+    pub ffi_callback_functions: std::collections::BTreeSet<String>,
+    pub active_os: String,
+    pub inferred_layer: String,
+    pub allocator: String,
+    pub web_app: Option<jet_foundation::App::AppGraph>,
+    /// D-PLUGIN-AUTHORITY1: package-declared guest capability needs.
+    pub authority_needs: Vec<String>,
+    /// D-MODEL-SIGNATURE1: one loader-projected model payload reaches every
+    /// execution tier; no tier reparses package manifests.
+    pub model_outputs: Vec<jet_foundation::AST::ModelOutputFact>,
+    /// D-FOUND-BOARD1: sema-owned hardware operations and immutable profile.
+    pub hardware_use: jet_foundation::TargetMachine::TargetHardwareUse,
+    pub hardware_profile: Option<jet_foundation::TargetMachine::TargetHardwareFacts>,
+    pub hardware_profile_id: String,
+    pub hardware_capabilities: Vec<String>,
+    pub hardware_setups: Vec<THardwareSetup>,
+}
+fn target_hardware_setups(
+    bundle: &crate::AST::ProgramBundle,
+    hardware: &jet_foundation::TargetMachine::TargetHardwareUse,
+    profile: Option<&jet_foundation::TargetMachine::TargetHardwareFacts>,
+    profile_id: &str,
+) -> Vec<THardwareSetup> {
+    let Some(profile) = profile else {
+        return Vec::new();
+    };
+    if profile_id.is_empty() {
+        return Vec::new();
+    }
+    let mut setups = Vec::new();
+    let mut channels = std::collections::BTreeSet::new();
+    for operation in &hardware.dma_operations {
+        if !matches!(
+            operation.operation,
+            jet_foundation::TargetMachine::TargetDmaOperation::Start
+        ) || !channels.insert(operation.channel.clone())
+        {
+            continue;
+        }
+        let Some(channel) = profile.dma_channel(&operation.channel) else {
+            continue;
+        };
+        setups.push(THardwareSetup::DmaConfigure {
+            profile_id: profile_id.to_string(),
+            channel: channel.name.clone(),
+            transfer_width: channel.transfer_width,
+            ownership: channel.ownership,
+        });
+    }
+    for handler in &hardware.interrupt_handlers {
+        let Some(interrupt) = profile.interrupt(&handler.interrupt) else {
+            continue;
+        };
+        let handler_symbol = bundle
+            .modules
+            .iter()
+            .find(|module| {
+                module.items.iter().any(|item| match item {
+                    crate::AST::Item::Func(function) => function.name == handler.handler,
+                    crate::AST::Item::Struct(definition) => {
+                        definition
+                            .methods
+                            .iter()
+                            .any(|method| method.name == handler.handler)
+                            || definition
+                                .trait_impls
+                                .iter()
+                                .flat_map(|implementation| implementation.methods.iter())
+                                .any(|method| method.name == handler.handler)
+                    }
+                    crate::AST::Item::Enum(definition) => {
+                        definition
+                            .methods
+                            .iter()
+                            .any(|method| method.name == handler.handler)
+                            || definition
+                                .trait_impls
+                                .iter()
+                                .flat_map(|implementation| implementation.methods.iter())
+                                .any(|method| method.name == handler.handler)
+                    }
+                    crate::AST::Item::Impl(implementation) => implementation
+                        .methods
+                        .iter()
+                        .any(|method| method.name == handler.handler),
+                    _ => false,
+                })
+            })
+            .map(|module| format!("{}::{}", module.alias, handler.handler))
+            .unwrap_or_else(|| handler.handler.clone());
+        setups.push(THardwareSetup::InterruptBind {
+            profile_id: profile_id.to_string(),
+            interrupt: interrupt.name.clone(),
+            vector: interrupt.vector,
+            handler_symbol,
+            forbidden_effects: interrupt
+                .forbidden_effects
+                .iter()
+                .chain(handler.forbidden_effects.iter())
+                .cloned()
+                .collect(),
+        });
+    }
+    setups
+}
+
+/// Why a checked construct is absent from executable TIR.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TirErasureReason {
+    CompileTimeOnly,
+    Disabled,
+    ExpandedBeforeLowering,
+    SemanticIndexOnly,
+}
+
+/// Explicit, typed erasure row.  Compile-time constructs never disappear
+/// silently from the total checked program.
+#[derive(Clone, Debug)]
+pub struct TirErasure {
+    pub construct: String,
+    pub span: crate::Diagnostics::Span,
+    pub reason: TirErasureReason,
+}
+
+fn collect_item_erasures(
+    items: &[Item],
+    module: &str,
+    include_tests: bool,
+    rows: &mut Vec<TirErasure>,
+) {
+    use TirErasureReason::{CompileTimeOnly, Disabled, ExpandedBeforeLowering, SemanticIndexOnly};
+    for item in items {
+        let (construct, span, reason) = match item {
+            Item::Tag(row) => ("Tag", row.span, CompileTimeOnly),
+            Item::EffectDecl(row) => ("EffectDecl", row.span, CompileTimeOnly),
+            Item::MarkerDecl(row) => ("MarkerDecl", row.span, CompileTimeOnly),
+            Item::FactDecl(row) => ("FactDecl", row.span, CompileTimeOnly),
+            Item::GenericModule(row) => ("GenericModule", row.span, CompileTimeOnly),
+            Item::UserDerive(row) => ("UserDerive", row.span, CompileTimeOnly),
+            Item::TemplateLoop(row) => ("TemplateLoop", row.span, ExpandedBeforeLowering),
+            Item::ModuleAlias(row) => ("ModuleAlias", row.span, ExpandedBeforeLowering),
+            Item::ProtocolDecl(row) => ("ProtocolDecl", row.span, ExpandedBeforeLowering),
+            Item::UnitFamily(row) => ("UnitFamily", row.span, ExpandedBeforeLowering),
+            Item::Migration(row) => ("Migration", row.span, SemanticIndexOnly),
+            Item::Module(row) => ("Module", row.span, SemanticIndexOnly),
+            Item::Test(row) if !include_tests => ("Test", row.span, Disabled),
+            Item::CodeModule(row) => {
+                if let Some(body) = &row.body {
+                    collect_item_erasures(
+                        body,
+                        &format!("{module}::{}", row.name),
+                        include_tests,
+                        rows,
+                    );
+                }
+                continue;
+            }
+            Item::Func(_)
+            | Item::Struct(_)
+            | Item::Enum(_)
+            | Item::Distinct(_)
+            | Item::TypeAlias(_)
+            | Item::Trait(_)
+            | Item::Impl(_)
+            | Item::Const(_)
+            | Item::Test(_)
+            | Item::ExternRust(_)
+            | Item::CModule(_)
+            | Item::ErrorConv(_) => continue,
+        };
+        rows.push(tir_to_mir_types::lower_erasure(
+            format!("{module}::{construct}"),
+            span,
+            reason,
+        ));
+    }
+}
+
+/// The one total checked analytical program. Every checked executable body is
+/// represented by one `TFunc` row with its module/source identity attached.
+///
+/// Resident engines may temporarily read the same model while their old
+/// adapters are removed.
+pub struct TirProgram {
+    /// Stable package identity supplied by the checked bundle.
+    pub package_identity: String,
+    pub facts: TirPackageFacts,
+    /// Display path of the entry module retained for temporary diagnostics.
     pub source_file: String,
-    /// Source text for the one runtime stop renderer's context box.
+    /// Source text of the entry module retained for temporary diagnostics.
     pub source_text: String,
+    /// Canonical source text keyed by every checked module display path.
+    pub source_files: std::collections::BTreeMap<String, String>,
     /// D-MEM-GUARANTEE1: package hardening is a checked bundle fact carried
     /// into named deopt; the evaluator never reparses package.jet.
     pub package_hardened: bool,
@@ -308,21 +554,20 @@ pub struct JitProgram {
     pub application_authority: jet_foundation::Authority::ApplicationAuthority,
     /// D-REL3: the package edition is a checked bundle fact carried the same
     /// way, because every tier that runs this program answers edition-gated
-    /// questions (`core.data`'s checked surface, `fixed_sigs.rs`) from the
-    /// `PACKAGE_EDITION` thread-local. The evaluator runs the body on its own
-    /// sized worker and named deopt runs on the JIT's thread, so a caller's
-    /// ambient scope never reaches either; the fact travels with the program
-    /// and is established under the boundary instead.
+    /// questions from the checked bundle.
     pub edition: String,
-    /// Sema-selected callable name. The JIT compiles this exact function and
-    /// never assumes the source spelling `run`.
-    pub entry: String,
-    /// #91: canonical generic-instance fingerprints consumed by JIT caches,
-    /// diagnostics, and parity tooling.
-    pub instance_provenance: Vec<InstanceProvenance>,
-    /// All top-level `tir_covers` functions in the entry module, including `run`.
+    /// Every checked executable body, including imported modules and methods.
     pub funcs: Vec<TFunc>,
-    /// c139 M4: spawn lambda bodies in program traversal order (parallel to spawn sites in TIR).
+    /// All checked declaration rows.  MIR receives this projection rather than
+    /// re-walking source items or reading generated names.
+    declarations: TirDeclarations,
+    /// Checked module/link/entry/harness/artifact facts for the selected request.
+    artifact_facts: TirArtifactFacts,
+    /// Exact checked Core registry identities, including receiver rows.
+    pub core_calls: Vec<&'static crate::Syntax::CoreCallRecord>,
+    /// Explicitly erased or unreachable checked constructs.
+    pub unreachable: Vec<TirErasure>,
+    /// c139 M4: spawn lambda bodies in program traversal order.
     pub spawn_lambdas: Vec<TJitSpawnLambda>,
     /// M5: mangled field names per struct type (field order).
     pub struct_fields: std::collections::HashMap<String, Vec<String>>,
@@ -365,39 +610,236 @@ pub struct JitProgram {
     /// Published-schema migration plans compiled from sema facts. The
     /// evaluator applies these wire-key operations before re-entering the
     /// ordinary lowered `Decode` body.
-    pub codec_migrations: std::collections::HashMap<String, TCodecMigrationPlan>,
-    /// Sema-resolved `(trait, method) -> concrete owner` dispatch facts.
-    pub trait_method_owners: std::collections::HashMap<(String, String), Vec<String>>,
-    /// Sema-resolved `(collection, iterator) -> Iterable.Item` facts.
+    pub codec_migrations: std::collections::HashMap<String, SchemaMigrationPlan>,
+    /// S62/M9: exact checked `(owner, method) -> trait` identity for static
+    /// associated calls. This is projected once; lowerers never scan owners.
+    pub trait_method_traits: std::collections::HashMap<(String, String), String>,
     pub iterable_item_types: std::collections::HashMap<(String, String), Type>,
 }
 
-fn published_schema_unknown_field(s: &crate::AST::StructDef) -> bool {
+/// Stable structured snapshot used by the opt-in pass journal. This is a
+/// projection of the actual checked TIR rows, not a source reparse or digest.
+pub fn canonical_payload(program: &TirProgram) -> String {
+    let funcs = program
+        .funcs
+        .iter()
+        .enumerate()
+        .map(|(index, function)| {
+            let params = function
+                .params
+                .iter()
+                .map(|(name, ty, convention)| {
+                    format!(
+                        "{{\"name\":\"{}\",\"type\":\"{}\",\"convention\":\"{:?}\"}}",
+                        jet_foundation::JSON::json_escape(name),
+                        jet_foundation::JSON::json_escape(&ty.name()),
+                        convention
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            let ret = function
+                .ret
+                .as_ref()
+                .map(|ty| format!("\"{}\"", jet_foundation::JSON::json_escape(&ty.name())))
+                .unwrap_or_else(|| "null".to_string());
+            format!(
+                "{{\"index\":{index},\"name\":\"{}\",\"module\":\"{}\",\"key\":\"{}\",\"source_file\":\"{}\",\"source_span\":{{\"start\":{},\"end\":{}}},\"params\":[{}],\"ret\":{},\"body_nodes\":{},\"is_main\":{},\"synthetic\":{}}}",
+                jet_foundation::JSON::json_escape(&function.name),
+                jet_foundation::JSON::json_escape(&function.module),
+                jet_foundation::JSON::json_escape(&function.key),
+                jet_foundation::JSON::json_escape(&function.source_file),
+                function.source_span.start,
+                function.source_span.end,
+                params,
+                ret,
+                function.body.len(),
+                function.is_main,
+                function.synthetic,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"representation\":\"tir\",\"package\":\"{}\",\"source_file\":\"{}\",\"edition\":\"{}\",\"functions\":[{}]}}",
+        jet_foundation::JSON::json_escape(&program.package_identity),
+        jet_foundation::JSON::json_escape(&program.source_file),
+        jet_foundation::JSON::json_escape(&program.edition),
+        funcs
+    )
+}
+
+pub fn canonical_function_payload(function: &TFunc) -> String {
+    let params = function
+        .params
+        .iter()
+        .map(|(name, ty, convention)| {
+            format!(
+                "{{\"name\":\"{}\",\"type\":\"{}\",\"convention\":\"{:?}\"}}",
+                jet_foundation::JSON::json_escape(name),
+                jet_foundation::JSON::json_escape(&ty.name()),
+                convention
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"representation\":\"tir\",\"name\":\"{}\",\"module\":\"{}\",\"key\":\"{}\",\"source_file\":\"{}\",\"span\":{{\"start\":{},\"end\":{}}},\"params\":[{}],\"body_nodes\":{},\"synthetic\":{}}}",
+        jet_foundation::JSON::json_escape(&function.name),
+        jet_foundation::JSON::json_escape(&function.module),
+        jet_foundation::JSON::json_escape(&function.key),
+        jet_foundation::JSON::json_escape(&function.source_file),
+        function.source_span.start,
+        function.source_span.end,
+        params,
+        function.body.len(),
+        function.synthetic,
+    )
+}
+
+pub fn canonical_function_identity(function: &TFunc) -> String {
+    format!(
+        "{{\"representation\":\"tir\",\"key\":\"{}\",\"source_file\":\"{}\",\"span\":{{\"start\":{},\"end\":{}}}}}",
+        jet_foundation::JSON::json_escape(&function.key),
+        jet_foundation::JSON::json_escape(&function.source_file),
+        function.source_span.start,
+        function.source_span.end
+    )
+}
+
+pub fn canonical_expression_payload(expression: &TExpr) -> String {
+    let kind = format!("{:?}", std::mem::discriminant(&expression.kind));
+    format!(
+        "{{\"representation\":\"tir\",\"type\":\"{}\",\"kind\":\"{}\"}}",
+        jet_foundation::JSON::json_escape(&expression.ty.name()),
+        jet_foundation::JSON::json_escape(&kind),
+    )
+}
+
+pub fn canonical_expression_identity(expression: &TExpr) -> String {
+    let kind = format!("{:?}", std::mem::discriminant(&expression.kind));
+    format!(
+        "{{\"representation\":\"tir\",\"type\":\"{}\",\"kind\":\"{}\"}}",
+        jet_foundation::JSON::json_escape(&expression.ty.name()),
+        jet_foundation::JSON::json_escape(&kind),
+    )
+}
+
+pub fn canonical_statements_payload(statements: &[TStmt]) -> String {
+    let kinds = statements
+        .iter()
+        .map(|statement| format!("{:?}", std::mem::discriminant(statement)))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"representation\":\"tir\",\"statement_count\":{},\"kinds\":\"{}\"}}",
+        statements.len(),
+        jet_foundation::JSON::json_escape(&kinds),
+    )
+}
+
+pub fn canonical_statements_identity(statements: &[TStmt]) -> String {
+    format!(
+        "{{\"representation\":\"tir\",\"statement_count\":{}}}",
+        statements.len(),
+    )
+}
+
+pub fn canonical_lambda_payload(lambda: &TLambda) -> String {
+    let params = lambda
+        .param_types
+        .iter()
+        .map(|ty| format!("\"{}\"", jet_foundation::JSON::json_escape(&ty.name())))
+        .collect::<Vec<_>>()
+        .join(",");
+    let captures = lambda
+        .captures
+        .iter()
+        .map(|(name, place, ty)| {
+            format!(
+                "{{\"name\":\"{}\",\"place\":\"{}\",\"type\":\"{}\"}}",
+                jet_foundation::JSON::json_escape(name),
+                jet_foundation::JSON::json_escape(place),
+                jet_foundation::JSON::json_escape(&ty.name()),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let body_kind = format!("{:?}", std::mem::discriminant(&lambda.executable));
+    format!(
+        "{{\"representation\":\"tir\",\"source_span\":{{\"start\":{},\"end\":{}}},\"params\":[{}],\"captures\":[{}],\"ret\":{},\"body_kind\":\"{}\",\"is_move\":{},\"boxed\":{},\"rc\":{},\"arc\":{}}}",
+        lambda.source_span.start,
+        lambda.source_span.end,
+        params,
+        captures,
+        lambda
+            .ret
+            .as_ref()
+            .map(|ty| format!("\"{}\"", jet_foundation::JSON::json_escape(&ty.name())))
+            .unwrap_or_else(|| "null".to_string()),
+        jet_foundation::JSON::json_escape(&body_kind),
+        lambda.is_move,
+        lambda.boxed,
+        lambda.rc,
+        lambda.arc,
+    )
+}
+
+pub fn canonical_lambda_identity(lambda: &TLambda) -> String {
+    format!(
+        "{{\"representation\":\"tir\",\"source_span\":{{\"start\":{},\"end\":{}}},\"param_count\":{},\"capture_count\":{}}}",
+        lambda.source_span.start,
+        lambda.source_span.end,
+        lambda.param_types.len(),
+        lambda.captures.len(),
+    )
+}
+
+pub fn canonical_identity(program: &TirProgram) -> String {
+    let functions = program
+        .funcs
+        .iter()
+        .map(|function| {
+            format!(
+                "{{\"key\":\"{}\",\"source_file\":\"{}\",\"span\":{{\"start\":{},\"end\":{}}}}}",
+                jet_foundation::JSON::json_escape(&function.key),
+                jet_foundation::JSON::json_escape(&function.source_file),
+                function.source_span.start,
+                function.source_span.end
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"representation\":\"tir\",\"package\":\"{}\",\"functions\":[{}]}}",
+        jet_foundation::JSON::json_escape(&program.package_identity),
+        functions
+    )
+}
+
+fn published_schema(s: &crate::AST::StructDef) -> bool {
     s.is_published_schema
+        || s.derives
+            .iter()
+            .any(|(marker, _)| marker == crate::Syntax::MARKER_PUBLISHED_SCHEMA)
 }
 
 fn add_published_schema_field(s: &crate::AST::StructDef, fields: &mut Vec<String>) {
-    if published_schema_unknown_field(s) {
+    if published_schema(s) {
         fields.push(crate::Syntax::PUBLISHED_UNKNOWN_FIELDS.to_string());
     }
 }
 
 fn add_published_schema_field_type(s: &crate::AST::StructDef, types: &mut Vec<Type>) {
-    if published_schema_unknown_field(s) {
+    if published_schema(s) {
         types.push(Type::Named(crate::Syntax::TYPE_DATA.to_string()));
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct TCodecMigrationPlan {
-    pub historical_shapes: Vec<Vec<String>>,
-    pub steps: Vec<Vec<TCodecMigrationOp>>,
-}
-
 /// D-MIGRATE4 version vocabulary. Shapes count from one, and a step names the
-/// shapes it moves between. Codegen bakes these names into the generated
-/// chain-walker and the evaluator keeps them internal to the decode adapter,
-/// so both read them from here. `index` is zero-based.
+/// shapes it moves between. The canonical schema plan owns the operation
+/// records; these helpers keep the sema/codegen naming contract in one place.
+/// `index` is zero-based.
 pub fn migration_shape_name(index: usize) -> String {
     format!("v{}", index + 1)
 }
@@ -408,28 +850,6 @@ pub fn migration_step_name(index: usize) -> String {
         migration_shape_name(index),
         migration_shape_name(index + 1)
     )
-}
-
-#[derive(Debug, Clone)]
-pub enum TCodecMigrationOp {
-    Rename {
-        from_key: String,
-        to_key: String,
-    },
-    Remove {
-        key: String,
-    },
-    Add {
-        key: String,
-        ty: Type,
-        default_fn: String,
-    },
-    Change {
-        key: String,
-        from_ty: Type,
-        to_ty: Type,
-        converter_fn: String,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -494,6 +914,7 @@ fn register_imported_enum_variants(
     bundle: &ProgramBundle,
     module_idx: usize,
     owner: &str,
+    binders: &[String],
     enum_name: &str,
     variants: &[crate::AST::Variant],
     enum_variants: &mut std::collections::HashMap<String, Vec<String>>,
@@ -511,7 +932,9 @@ fn register_imported_enum_variants(
         let pattern = format!("{}::{}", mangle_path(&identity), mangle_path(&variant.name));
         let payload = payload_types_for_variant(&variant.payload)
             .into_iter()
-            .map(|ty| crate::Codegen::TIR::qualify_imported_type(bundle, module_idx, owner, &ty))
+            .map(|ty| {
+                crate::Codegen::TIR::qualify_imported_type(bundle, module_idx, owner, binders, &ty)
+            })
             .collect();
         enum_variant_payload_types.insert(pattern, payload);
     }
@@ -519,36 +942,38 @@ fn register_imported_enum_variants(
 
 fn compile_codec_migrations(
     cx: &Cx,
+    module: &str,
     items: &[Item],
-) -> Option<std::collections::HashMap<String, TCodecMigrationPlan>> {
+) -> Option<std::collections::HashMap<String, SchemaMigrationPlan>> {
     let mut plans = std::collections::HashMap::new();
     for item in items {
         let Item::Struct(def) = item else { continue };
         let Some(blocks) = super::Items::migration_blocks(cx, def) else {
             continue;
         };
-        let style = super::Items::container_rename_all(&def.serde_markers);
-        let historical_shapes = super::Items::migration_shapes(style.as_deref(), def, blocks);
+        let canonical = crate::Sema::Schema::canonical_migration_shape(module, def, blocks)
+            .expect("sema-checked struct must have canonical migration shape facts");
+        let historical_shapes = canonical.historical.clone();
         let mut steps = Vec::with_capacity(blocks.len());
-        for block in blocks {
-            let mut lowered = Vec::with_capacity(block.ops.len());
+        for (block_index, block) in blocks.iter().enumerate() {
+            let mut ops = Vec::with_capacity(block.ops.len());
             for op in &block.ops {
-                lowered.push(match op {
-                    crate::AST::MigrationOp::Rename { from, to, .. } => TCodecMigrationOp::Rename {
-                        from_key: super::Items::migration_wire_key(style.as_deref(), def, from),
-                        to_key: super::Items::migration_wire_key(style.as_deref(), def, to),
+                ops.push(match op {
+                    crate::AST::MigrationOp::Rename { from, to, .. } => SchemaMigrationOp::Rename {
+                        from_key: canonical.json_key(from),
+                        to_key: canonical.json_key(to),
                     },
-                    crate::AST::MigrationOp::Remove { field, .. } => TCodecMigrationOp::Remove {
-                        key: super::Items::migration_wire_key(style.as_deref(), def, field),
+                    crate::AST::MigrationOp::Remove { field, .. } => SchemaMigrationOp::Remove {
+                        key: canonical.json_key(field),
                     },
                     crate::AST::MigrationOp::Add {
                         field,
                         ty,
                         default_fn,
                         ..
-                    } => TCodecMigrationOp::Add {
-                        key: super::Items::migration_wire_key(style.as_deref(), def, field),
-                        ty: ty.clone(),
+                    } => SchemaMigrationOp::Add {
+                        key: canonical.json_key(field),
+                        type_name: ty.name(),
                         default_fn: default_fn.clone()?,
                     },
                     crate::AST::MigrationOp::Change {
@@ -557,22 +982,23 @@ fn compile_codec_migrations(
                         to_ty,
                         conv_fn,
                         ..
-                    } => TCodecMigrationOp::Change {
-                        key: super::Items::migration_wire_key(style.as_deref(), def, field),
-                        from_ty: from_ty.clone(),
-                        to_ty: to_ty.clone(),
+                    } => SchemaMigrationOp::Change {
+                        key: canonical.json_key(field),
+                        from_type: from_ty.name(),
+                        to_type: to_ty.name(),
                         converter_fn: conv_fn.clone()?,
                     },
                 });
             }
-            steps.push(lowered);
+            steps.push(SchemaMigrationStep::new(
+                migration_shape_name(block_index),
+                migration_shape_name(block_index + 1),
+                ops,
+            ));
         }
         plans.insert(
             def.name.clone(),
-            TCodecMigrationPlan {
-                historical_shapes,
-                steps,
-            },
+            SchemaMigrationPlan::new(def.name.clone(), historical_shapes, steps),
         );
     }
     Some(plans)
@@ -634,22 +1060,6 @@ fn register_union_type(
     }
 }
 
-/// c139 M3: the single lowered function selected without argv dispatch.
-///
-/// Program-struct CLIs return `None`: their entry is one of several commands
-/// selected later from the checked schema, not a synthetic top-level `run`.
-pub fn lower_entry_main_for_jit(bundle: &ProgramBundle) -> Option<TFunc> {
-    lower_jit_program(bundle).and_then(|p| {
-        let entry = p.entry;
-        let entry = if entry == super::mangle_generated("cli_main") {
-            "run".to_string()
-        } else {
-            entry
-        };
-        p.funcs.into_iter().find(|f| f.name == entry)
-    })
-}
-
 /// Rust local place for JIT variable lookup (`__jet_x`).
 pub fn local_place(name: &str) -> String {
     super::mangle(name)
@@ -692,6 +1102,11 @@ pub struct TLocal {
     /// initialization; ordinary TIR reads still have the declared Jet type.
     pub uninit_scalar: bool,
     pub uninit_fixed: bool,
+    /// The slot holds a non-escaping closure that borrows this frame (S47):
+    /// every use is a direct call, and the body's capture writes land in the
+    /// enclosing locals. Escaping closures never carry this; they own the
+    /// first-class carrier and their captures are private copies.
+    pub direct_closure: bool,
 }
 
 impl TLocal {
@@ -709,6 +1124,7 @@ impl TLocal {
             integer_bounds: None,
             uninit_scalar: false,
             uninit_fixed: false,
+            direct_closure: false,
         }
     }
 
@@ -732,6 +1148,7 @@ impl TLocal {
             integer_bounds: None,
             uninit_scalar: false,
             uninit_fixed: false,
+            direct_closure: false,
         }
     }
 
@@ -755,6 +1172,7 @@ impl TLocal {
             integer_bounds: None,
             uninit_scalar: false,
             uninit_fixed: false,
+            direct_closure: false,
         }
     }
 
@@ -784,6 +1202,12 @@ impl TLocal {
 
     pub fn as_uninit_fixed(mut self) -> TLocal {
         self.uninit_fixed = true;
+        self
+    }
+
+    /// A local bound to a non-escaping closure that borrows this frame.
+    pub fn as_direct_closure(mut self) -> TLocal {
+        self.direct_closure = true;
         self
     }
 
@@ -895,6 +1319,9 @@ pub struct TMethodRef {
     /// Sema-resolved trait that owns a dynamic call. `None` for inherent and
     /// prelude calls; JIT dispatch never reconstructs this fact from names.
     pub trait_owner: Option<String>,
+    /// Complete sema-resolved operator identity. Ordinary method calls leave
+    /// this unset; operator calls include lhs, trait, method, and RHS type.
+    pub operator_identity: Option<String>,
 }
 
 impl TMethodRef {
@@ -904,6 +1331,7 @@ impl TMethodRef {
             name: name.into(),
             mangled: true,
             trait_owner: None,
+            operator_identity: None,
         }
     }
 
@@ -913,6 +1341,7 @@ impl TMethodRef {
             name: name.into(),
             mangled: false,
             trait_owner: None,
+            operator_identity: None,
         }
     }
 
@@ -921,6 +1350,30 @@ impl TMethodRef {
             name: name.into(),
             mangled: false,
             trait_owner: Some(trait_owner.into()),
+            operator_identity: None,
+        }
+    }
+
+    /// A checked operator method whose complete function key includes RHS type.
+    pub fn operator(
+        left: impl Into<String>,
+        trait_name: impl Into<String>,
+        name: impl Into<String>,
+        rhs: &Type,
+    ) -> TMethodRef {
+        let left = left.into();
+        let trait_name = trait_name.into();
+        let name = name.into();
+        TMethodRef {
+            name: name.clone(),
+            mangled: false,
+            trait_owner: Some(trait_name.clone()),
+            operator_identity: Some(crate::Traits::operator_method_identity(
+                &left,
+                &trait_name,
+                &name,
+                rhs,
+            )),
         }
     }
 
@@ -944,6 +1397,7 @@ pub enum TPreludeArg {
 }
 
 /// The owner of a static (associated) call.
+#[derive(Clone)]
 pub enum TStaticOwner {
     /// A user type the front end compiles. Both the Rust spelling and the JIT's
     /// compiled-function key derive from this Jet type name.
@@ -961,6 +1415,7 @@ pub enum TStaticOwner {
 /// An assignable place. Every engine reads the structure directly: a local slot
 /// by name, or the already-structured place expression a field/index/pool write
 /// targets. Rust spelling happens only in the emit layer.
+#[derive(Clone)]
 pub enum TPlace {
     Local(TLocal),
     /// A structured place expression — a field-read chain, a swizzle lane, a
@@ -991,14 +1446,8 @@ fn demand_serde_codec(
     }
 }
 
-/// Stable symbol key for one concrete method instance. Empty method arguments
-/// retain the historical `Owner<Args>::method` key used by serde demands.
-pub fn generic_method_instance_key(owner: &Type, method: &str, type_args: &[Type]) -> String {
-    let base = format!("{}::{method}", owner.name());
-    if type_args.is_empty() {
-        return base;
-    }
-    let suffix = type_args
+fn generic_type_arg_suffix(type_args: &[Type]) -> String {
+    type_args
         .iter()
         .map(Type::name)
         .map(|name| {
@@ -1007,8 +1456,41 @@ pub fn generic_method_instance_key(owner: &Type, method: &str, type_args: &[Type
                 .collect::<String>()
         })
         .collect::<Vec<_>>()
-        .join("__");
-    format!("{base}__generic__{suffix}")
+        .join("__")
+}
+
+/// Stable symbol key for one concrete method instance. Empty method arguments
+/// retain the historical `Owner<Args>::method` key used by serde demands.
+pub fn generic_method_instance_key(owner: &Type, method: &str, type_args: &[Type]) -> String {
+    let base = format!("{}::{method}", owner.name());
+    if type_args.is_empty() {
+        return base;
+    }
+    format!("{base}__generic__{}", generic_type_arg_suffix(type_args))
+}
+
+/// Concrete free calls and their checked definitions share this instance key.
+pub(crate) fn generic_free_function_instance_key(base: &str, type_args: &[Type]) -> String {
+    if type_args.is_empty() {
+        return base.to_string();
+    }
+    format!("{base}__generic__{}", generic_type_arg_suffix(type_args))
+}
+
+fn function_semantic_key(module: &str, name: &str) -> String {
+    if module.is_empty() {
+        name.to_string()
+    } else {
+        format!("{module}::{name}")
+    }
+}
+
+pub(crate) fn canonical_enum_owner(cx: &Cx, name: &str) -> String {
+    cx.core_qualified_rust_type_name(name)
+        .map(str::to_owned)
+        .or_else(|| cx.local_type_identities.get(name).cloned())
+        .or_else(|| cx.imported_type_metadata_name(name))
+        .unwrap_or_else(|| name.to_string())
 }
 
 /// Seed monomorphize demand for generic Codable from encoding core calls and
@@ -1073,17 +1555,12 @@ fn collect_serde_codec_demands(
                     | TOrFallback::ContinueLabel(_) => {}
                 }
             }
-            TExprKind::CoreCall {
-                module,
-                method,
-                args,
-                ..
-            } => {
+            TExprKind::CoreCall { record, args, .. } => {
                 for a in args {
                     walk_expr(a, demands);
                 }
                 let encoding = matches!(
-                    module.as_str(),
+                    record.module,
                     "core.encoding.json"
                         | "core.encoding.toml"
                         | "core.encoding.yaml"
@@ -1092,7 +1569,7 @@ fn collect_serde_codec_demands(
                 );
                 if encoding
                     && matches!(
-                        method.as_str(),
+                        record.member,
                         "to_string" | "to_string_pretty" | "to_bytes" | "to_bytes_canonical"
                     )
                 {
@@ -1100,7 +1577,7 @@ fn collect_serde_codec_demands(
                         demand_serde_codec(demands, &arg.ty, "encode");
                     }
                 }
-                if encoding && method == "decode" {
+                if encoding && record.member == "decode" {
                     if let Type::Result { ok, .. } = &expr.ty {
                         demand_serde_codec(demands, ok, "decode");
                     }
@@ -1132,7 +1609,11 @@ fn collect_serde_codec_demands(
     }
 }
 
-fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc>) -> Option<()> {
+fn lower_demanded_generic_methods(
+    items: &[Item],
+    cx: &Cx,
+    funcs: &mut Vec<TFunc>,
+) -> Result<(), LowerError> {
     let mut pending = std::mem::take(&mut *cx.jit_method_calls.borrow_mut());
     collect_serde_codec_demands(funcs, &mut pending);
     let mut processed = std::collections::BTreeSet::new();
@@ -1141,12 +1622,12 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
             continue;
         }
         if let Some(chain) = crate::Generics::generic_depth_exceeded(&owner_ty) {
-            LAST_JIT_LOWER_FAILURE.with(|failure| {
-                *failure.borrow_mut() = Some(format!(
+            return Err(LowerError::new(
+                crate::Diagnostics::Span::new(0, 0),
+                format!(
                     "E0909: generic instantiation goes too deep; simplify the types involved: {chain}"
-                ));
-            });
-            return None;
+                ),
+            ));
         }
         let (name, owner_args): (&str, &[Type]) = match &owner_ty {
             Type::Apply { name, args } => (name.as_str(), args.as_slice()),
@@ -1289,13 +1770,15 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
                         cx,
                         trait_name,
                         generated_serde && specialized.compiler_generated,
+                        None,
                     )
                 }
             } else {
                 lower_method_for_owner(&specialized, name, owner_ty.clone(), cx, false)
             };
             cx.current_type_params.replace(previous_type_params);
-            lowered.name = key.clone();
+            lowered.key = function_semantic_key(&lowered.module, &key);
+            set_lowered_method_name(&mut lowered, || key.clone());
             // Nested SerdeEncode/DataTreeDecode inside this body may demand more.
             collect_serde_codec_demands(std::slice::from_ref(&lowered), &mut pending);
             funcs.push(lowered);
@@ -1306,7 +1789,7 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
             }
         }
     }
-    Some(())
+    Ok(())
 }
 
 pub(crate) fn bind_generic_type(
@@ -1378,97 +1861,197 @@ pub(crate) fn bind_generic_type(
     }
 }
 
-fn specialize_generic_free_functions(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc>) {
-    let calls = std::mem::take(&mut *cx.jit_generic_calls.borrow_mut());
-    for (called_name, shapes) in calls {
-        if funcs.iter().any(|func| func.name == called_name) {
-            continue;
-        }
-        let mut unique = shapes;
-        unique.sort_by_key(|shape| format!("{shape:?}"));
-        unique.dedup();
-        // One native symbol has one ABI. Multiple concrete shapes keep the
-        // program outside resident JIT until call-site symbol mangling lands.
-        let [actuals] = unique.as_slice() else {
-            continue;
-        };
-        let (template, emitted_name) = if let Some((base, arity)) = called_name
-            .rsplit_once("__va")
-            .and_then(|(base, arity)| arity.parse::<usize>().ok().map(|arity| (base, arity)))
-        {
-            let Some((_, bounds)) = cx.variadic_bound_fns.get(base) else {
-                continue;
-            };
-            let Some(source) = items.iter().find_map(|item| match item {
-                Item::Func(func) if func.name == base => Some(func),
-                _ => None,
-            }) else {
-                continue;
-            };
-            (
-                crate::Codegen::VariadicBound::build_variadic_bound_func(source, bounds, arity),
-                called_name.clone(),
-            )
+fn generic_call_shape(args: &[TCallArg], type_args: &[Type]) -> Vec<Type> {
+    let mut shape = args
+        .iter()
+        .map(|arg| {
+            if arg.widen_to_vec {
+                if let Type::FixedList { elem, .. } = &arg.value.ty {
+                    return Type::List(elem.clone());
+                }
+            }
+            arg.value.ty.clone()
+        })
+        .collect::<Vec<_>>();
+    shape.extend(type_args.iter().cloned());
+    shape
+}
+
+/// Recorded shapes contain value types followed by any explicit type arguments.
+fn generic_call_substitution(
+    param_types: &[Type],
+    type_param_names: &[String],
+    actuals: &[Type],
+) -> Option<std::collections::HashMap<String, Type>> {
+    if type_param_names.is_empty() {
+        return None;
+    }
+    let (param_actuals, explicit_actuals) =
+        if actuals.len() == param_types.len() + type_param_names.len() {
+            actuals.split_at(param_types.len())
+        } else if actuals.len() == param_types.len() {
+            (actuals, &[][..])
         } else {
-            let Some(source) = items.iter().find_map(|item| match item {
-                Item::Func(func) if func.name == called_name => Some(func.clone()),
-                _ => None,
-            }) else {
-                continue;
-            };
-            (source, called_name.clone())
+            return None;
         };
-        if template.type_params.is_empty() {
-            continue;
+    let names = type_param_names.iter().cloned().collect();
+    let mut subst = std::collections::HashMap::new();
+    for (param, actual) in type_param_names.iter().zip(explicit_actuals) {
+        subst.insert(param.clone(), actual.clone());
+    }
+    if !param_types
+        .iter()
+        .zip(param_actuals)
+        .all(|(template, actual)| bind_generic_type(template, actual, &names, &mut subst))
+        || subst.len() != names.len()
+    {
+        return None;
+    }
+    Some(subst)
+}
+
+pub(crate) fn demand_generic_free_function(
+    cx: &Cx,
+    name: &str,
+    args: &[TCallArg],
+    explicit_type_args: &[Type],
+) -> Option<String> {
+    let type_param_names = cx.fn_type_param_order.get(name)?;
+    if type_param_names.is_empty() {
+        return None;
+    }
+    let sig = cx.sigs.get(name)?;
+    let param_types = sig.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
+    let shape = generic_call_shape(args, explicit_type_args);
+    let subst = generic_call_substitution(&param_types, type_param_names, &shape)?;
+    let type_args = type_param_names
+        .iter()
+        .map(|param| subst.get(param).cloned())
+        .collect::<Option<Vec<_>>>()?;
+    cx.jit_generic_calls
+        .borrow_mut()
+        .entry(name.to_string())
+        .or_default()
+        .push(shape);
+    Some(generic_free_function_instance_key(name, &type_args))
+}
+
+fn generic_free_function_template(items: &[Item], called_name: &str) -> Option<Func> {
+    for item in items {
+        match item {
+            Item::Func(function) if function.name == called_name => return Some(function.clone()),
+            Item::CodeModule(module) => {
+                let Some(body) = &module.body else {
+                    continue;
+                };
+                for inner in body {
+                    let Item::Func(function) = inner else {
+                        continue;
+                    };
+                    let member = jet_foundation::Names::member_name(&module.name, &function.name);
+                    if member == called_name {
+                        let mut function = function.clone();
+                        function.name = member;
+                        return Some(function);
+                    }
+                }
+            }
+            _ => {}
         }
-        let explicit_count = template.type_params.len();
-        let (param_actuals, explicit_actuals) =
-            if actuals.len() == template.params.len() + explicit_count {
-                let split = template.params.len();
-                (&actuals[..split], &actuals[split..])
-            } else if actuals.len() == template.params.len() {
-                (&actuals[..], &[][..])
-            } else {
+    }
+    None
+}
+
+fn specialize_generic_free_functions(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc>) {
+    loop {
+        let calls = std::mem::take(&mut *cx.jit_generic_calls.borrow_mut());
+        if calls.is_empty() {
+            break;
+        }
+        for (called_name, shapes) in calls {
+            if funcs.iter().any(|func| func.name == called_name) {
                 continue;
+            }
+            let mut unique = shapes;
+            unique.sort_by_key(|shape| format!("{shape:?}"));
+            unique.dedup();
+            let (template, variadic) = if let Some((base, arity)) = called_name
+                .rsplit_once("__va")
+                .and_then(|(base, arity)| arity.parse::<usize>().ok().map(|arity| (base, arity)))
+            {
+                let Some((_, bounds)) = cx.variadic_bound_fns.get(base) else {
+                    continue;
+                };
+                let Some(source) = generic_free_function_template(items, base) else {
+                    continue;
+                };
+                (
+                    crate::Codegen::VariadicBound::build_variadic_bound_func(
+                        &source, bounds, arity,
+                    ),
+                    true,
+                )
+            } else {
+                let Some(source) = generic_free_function_template(items, &called_name) else {
+                    continue;
+                };
+                (source, false)
             };
-        let names: std::collections::HashSet<String> = template
-            .type_params
-            .iter()
-            .map(|param| param.name.clone())
-            .collect();
-        let mut subst = std::collections::HashMap::new();
-        for (param, actual) in template.type_params.iter().zip(explicit_actuals) {
-            subst.insert(param.name.clone(), actual.clone());
+            if template.type_params.is_empty() || (variadic && unique.len() != 1) {
+                continue;
+            }
+            let param_types = template
+                .params
+                .iter()
+                .map(|param| param.ty.clone())
+                .collect::<Vec<_>>();
+            let type_param_names = template
+                .type_params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect::<Vec<_>>();
+            for actuals in unique {
+                let Some(subst) =
+                    generic_call_substitution(&param_types, &type_param_names, &actuals)
+                else {
+                    continue;
+                };
+                let type_args = type_param_names
+                    .iter()
+                    .map(|param| subst.get(param).cloned())
+                    .collect::<Option<Vec<_>>>();
+                let Some(type_args) = type_args else {
+                    continue;
+                };
+                let emitted_name = if variadic {
+                    called_name.clone()
+                } else {
+                    generic_free_function_instance_key(&called_name, &type_args)
+                };
+                if funcs.iter().any(|func| func.name == emitted_name) {
+                    continue;
+                }
+                let mut specialized =
+                    crate::Sema::specialize_function_types(template.clone(), &subst);
+                let residual_type_params: std::collections::HashSet<String> = specialized
+                    .type_params
+                    .iter()
+                    .map(|param| param.name.clone())
+                    .collect();
+                specialized.type_params.clear();
+                // Bounded operators retain their resolved source owner (`T::compare`).
+                let previous_type_params = cx.current_type_params.replace(residual_type_params);
+                if !tir_covers(&specialized, cx) {
+                    cx.current_type_params.replace(previous_type_params);
+                    continue;
+                }
+                let mut lowered = lower_func(&specialized, cx);
+                cx.current_type_params.replace(previous_type_params);
+                lowered.key = function_semantic_key(&lowered.module, &emitted_name);
+                lowered.name = emitted_name;
+                funcs.push(lowered);
+            }
         }
-        if !template
-            .params
-            .iter()
-            .zip(param_actuals)
-            .all(|(param, actual)| bind_generic_type(&param.ty, actual, &names, &mut subst))
-            || subst.len() != names.len()
-        {
-            continue;
-        }
-        let mut specialized = crate::Sema::specialize_function_types(template, &subst);
-        let residual_type_params: std::collections::HashSet<String> = specialized
-            .type_params
-            .iter()
-            .map(|param| param.name.clone())
-            .collect();
-        specialized.type_params.clear();
-        // Sema has replaced the value types, but bounded operator calls retain
-        // their resolved source type-parameter owner (`T::compare`). Preserve
-        // that exact identity while coverage and lowering consume the body.
-        let previous_type_params = cx.current_type_params.replace(residual_type_params);
-        let covered = tir_covers(&specialized, cx);
-        if !covered {
-            cx.current_type_params.replace(previous_type_params);
-            continue;
-        }
-        let mut lowered = lower_func(&specialized, cx);
-        cx.current_type_params.replace(previous_type_params);
-        lowered.name = emitted_name;
-        funcs.push(lowered);
     }
 }
 
@@ -1538,11 +2121,23 @@ fn lower_imported_generated_codecs(
         // codec that silently drops the merge AOT performs.
         if imported.items.iter().any(|candidate| {
             matches!(candidate, Item::Struct(definition)
-                if definition.name == implementation.type_name
-                    && definition.is_published_schema)
+                if definition.name == implementation.type_name && published_schema(definition))
         }) {
             continue;
         }
+        let owner_params: &[crate::AST::TypeParam] = imported
+            .items
+            .iter()
+            .find_map(|item| match item {
+                Item::Struct(definition) if definition.name == implementation.type_name => {
+                    Some(definition.type_params.as_slice())
+                }
+                Item::Enum(definition) if definition.name == implementation.type_name => {
+                    Some(definition.type_params.as_slice())
+                }
+                _ => None,
+            })
+            .unwrap_or(&[]);
         for owner in imported_type_owners(bundle, module_idx) {
             let qualified = imported_type_name(&owner, &implementation.type_name);
             if !cx.struct_fields.contains_key(&qualified)
@@ -1555,54 +2150,1133 @@ fn lower_imported_generated_codecs(
                     continue;
                 }
                 let name = format!("{qualified}::{}", method.name);
-                if funcs.iter().any(|function| function.name == name) {
-                    continue;
-                }
                 let mut lowered = lower_trait_method(
                     method,
                     &qualified,
                     cx,
                     trait_name,
                     implementation.is_generated_serde && method.compiler_generated,
+                    implementation.operator_rhs.as_ref(),
                 );
                 // `decode` declares `Result<Badge, [FieldError]>` with the
                 // declaring module's leaf; carry it to the same canonical
                 // identity the owner and the body already use.
+                let binders = qualification_binders(owner_params, Some(method));
                 lowered.ret = lowered
                     .ret
                     .as_ref()
-                    .map(|ty| qualify_imported_type(bundle, module_idx, &owner, ty));
-                lowered.name = name;
+                    .map(|ty| qualify_imported_type(bundle, module_idx, &owner, &binders, ty));
+                if funcs.iter().any(|function| {
+                    function.key == lowered.key && function.source_span == lowered.source_span
+                }) {
+                    continue;
+                }
+                set_lowered_method_name(&mut lowered, || name);
                 funcs.push(lowered);
             }
         }
     }
 }
 
-/// Lowering is an unbounded-depth recursive descent over user syntax, so the
-/// frame requirement is per source-nesting level. This is the narrowest point
-/// every caller shares -- the driver's seams, the JIT's public entries, a test
-/// helper, and any embedder -- so the sized stack is installed here rather than
-/// chased caller by caller. The boundary is re-entrant, so an outer one already
-/// on the worker makes this run inline.
-///
-/// `LAST_JIT_LOWER_FAILURE` is thread-local and callers read it back through
-/// `lower_jit_program_fail_reason`, so the reason recorded inside the worker is
-/// carried out and restored on the caller's thread.
-pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
-    if jet_foundation::CompilerStack::on_compiler_worker() {
-        return lower_jit_program_on_stack(bundle);
-    }
-    let (program, failure) = jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        let program = lower_jit_program_on_stack(bundle);
-        let failure = LAST_JIT_LOWER_FAILURE.with(|failure| failure.borrow_mut().take());
-        (program, failure)
-    });
-    LAST_JIT_LOWER_FAILURE.with(|slot| *slot.borrow_mut() = failure);
-    program
+/// Pre-sema context retained by comptime fragment callers. The fragment is
+/// lowered here once and then consumed only as canonical MIR by MIREval.
+pub struct MirFragmentContext<'a> {
+    pub funcs: &'a std::collections::HashMap<String, &'a crate::AST::Func>,
+    pub binding_types: &'a std::collections::HashMap<String, crate::AST::Type>,
+    pub method_traits: &'a std::collections::HashMap<(String, String), String>,
+    pub error_conversions: &'a [crate::AST::ErrorConvDef],
+    pub methods: &'a std::collections::HashMap<(String, String), &'a crate::AST::Func>,
+    pub extern_names: &'a std::collections::HashSet<String>,
+    pub globals: &'a std::collections::HashMap<String, crate::AST::CtValue>,
+    pub core_imports: &'a std::collections::HashMap<String, String>,
+    pub structs: &'a std::collections::HashMap<String, &'a crate::AST::StructDef>,
+    pub computed_fields: &'a std::collections::HashMap<(String, String), &'a crate::AST::Expr>,
+    pub checked_nominals: Option<&'a crate::Comptime::MirBridge::MirFragmentNominalFacts>,
+    pub distinct_ranges: &'a std::collections::HashMap<String, Option<(i64, i64)>>,
+    pub distinct_bases: &'a std::collections::HashMap<String, crate::AST::Type>,
+    pub unit_families: &'a [crate::AST::UnitFamilyDef],
+}
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum FragmentCallable {
+    Function(String),
+    Method { owner: String, name: String },
 }
 
-/// #2252: build [`JitProgram::nominal_identities`].
+fn fragment_function_key(name: &str, context: &MirFragmentContext<'_>) -> Option<String> {
+    // The AST spelling is accepted only after it resolves to a checked
+    // function declaration. The dotted form is the one source-level module
+    // spelling that needs canonicalization for the fragment registry.
+    if context.funcs.contains_key(name) {
+        return Some(name.to_string());
+    }
+    name.split_once('.')
+        .map(|(module, symbol)| format!("{module}::{symbol}"))
+        .filter(|qualified| context.funcs.contains_key(qualified))
+}
+
+fn fragment_method_key(
+    owner: &str,
+    method: &str,
+    context: &MirFragmentContext<'_>,
+) -> Option<(String, String)> {
+    let mut owners = vec![owner.to_string()];
+    if let Some((module, leaf)) = owner.split_once('.') {
+        owners.push(format!("{module}::{leaf}"));
+    }
+    if let Some((_, leaf)) = owner.rsplit_once("::") {
+        owners.push(leaf.to_string());
+    }
+    if let Some((_, leaf)) = owner.rsplit_once('.') {
+        owners.push(leaf.to_string());
+    }
+    owners.dedup();
+    owners.into_iter().find_map(|candidate| {
+        let key = (candidate, method.to_string());
+        context.methods.contains_key(&key).then_some(key)
+    })
+}
+
+fn fragment_type_owner(ty: &crate::AST::Type) -> Option<String> {
+    match ty {
+        crate::AST::Type::Named(name) | crate::AST::Type::Apply { name, .. } => Some(name.clone()),
+        crate::AST::Type::Tagged { inner, .. } => fragment_type_owner(inner),
+        _ => None,
+    }
+}
+
+fn fragment_static_method_key(
+    receiver: &crate::AST::Expr,
+    method: &str,
+    locals: Option<&std::collections::HashMap<String, crate::AST::Type>>,
+    context: &MirFragmentContext<'_>,
+) -> Option<(String, String)> {
+    match receiver {
+        crate::AST::Expr::Ident(name, _)
+            if locals.is_some_and(|locals| locals.contains_key(name)) =>
+        {
+            return None;
+        }
+        crate::AST::Expr::Field(base, _, _)
+            if matches!(
+                base.as_ref(),
+                crate::AST::Expr::Ident(name, _)
+                    if locals.is_some_and(|locals| locals.contains_key(name))
+            ) =>
+        {
+            return None;
+        }
+        _ => {}
+    }
+    let owner = static_call_type_name_unchecked(receiver)?;
+    fragment_method_key(&owner, method, context)
+}
+
+fn collect_fragment_callable(
+    expr: &crate::AST::Expr,
+    context: &MirFragmentContext<'_>,
+    current_owner: Option<&str>,
+    locals: Option<&std::collections::HashMap<String, crate::AST::Type>>,
+    out: &mut std::collections::BTreeSet<FragmentCallable>,
+) {
+    match expr {
+        crate::AST::Expr::Call(call) => {
+            if let Some(name) = fragment_function_key(&call.name, context) {
+                out.insert(FragmentCallable::Function(name));
+            }
+        }
+        crate::AST::Expr::Ident(name, _)
+            if !locals.is_some_and(|locals| locals.contains_key(name)) =>
+        {
+            if let Some(name) = fragment_function_key(name, context) {
+                out.insert(FragmentCallable::Function(name));
+            }
+        }
+        crate::AST::Expr::Field(receiver, member, _) => {
+            let owner = match receiver.as_ref() {
+                crate::AST::Expr::Ident(name, _) if name == crate::Syntax::KW_SELF => {
+                    current_owner.map(str::to_string)
+                }
+                crate::AST::Expr::Ident(name, _) => locals
+                    .and_then(|locals| locals.get(name))
+                    .and_then(fragment_type_owner),
+                _ => None,
+            };
+            if let Some(owner) = owner {
+                if context
+                    .computed_fields
+                    .contains_key(&(owner.clone(), member.clone()))
+                {
+                    if let Some((owner, name)) = fragment_method_key(&owner, member, context) {
+                        out.insert(FragmentCallable::Method { owner, name });
+                    }
+                }
+            }
+        }
+        crate::AST::Expr::MethodCall {
+            receiver,
+            method,
+            recv_type,
+            ..
+        } => {
+            let key = recv_type
+                .as_deref()
+                .and_then(|owner| fragment_method_key(owner, method, context))
+                .or_else(|| fragment_static_method_key(receiver, method, locals, context));
+            if let Some((owner, name)) = key {
+                out.insert(FragmentCallable::Method { owner, name });
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_fragment_function_dependencies(
+    function: &crate::AST::Func,
+    current_owner: Option<&str>,
+    context: &MirFragmentContext<'_>,
+    out: &mut std::collections::BTreeSet<FragmentCallable>,
+) {
+    let locals = function
+        .params
+        .iter()
+        .map(|param| (param.name.clone(), param.ty.clone()))
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut collect = |candidate: &crate::AST::Expr| {
+        collect_fragment_callable(candidate, context, current_owner, Some(&locals), out);
+    };
+    for statement in &function.body {
+        statement.for_each_expr(&mut collect);
+    }
+    for clause in function.pre.iter().chain(&function.post) {
+        clause.cond.for_each_expr(&mut collect);
+        clause.message_expr.for_each_expr(&mut collect);
+    }
+    for param in &function.params {
+        if let Some(default) = &param.default {
+            default.for_each_expr(&mut collect);
+        }
+    }
+}
+
+fn fragment_callable_closure(
+    expr: &crate::AST::Expr,
+    stmts: &[crate::AST::Stmt],
+    context: &MirFragmentContext<'_>,
+) -> std::collections::BTreeSet<FragmentCallable> {
+    let mut reachable = std::collections::BTreeSet::new();
+    let mut collect = |candidate: &crate::AST::Expr| {
+        collect_fragment_callable(
+            candidate,
+            context,
+            None,
+            Some(context.binding_types),
+            &mut reachable,
+        );
+    };
+    expr.for_each_expr(&mut collect);
+    for statement in stmts {
+        statement.for_each_expr(&mut collect);
+    }
+
+    let mut pending = reachable.iter().cloned().collect::<Vec<_>>();
+    while let Some(callable) = pending.pop() {
+        let mut owner = None;
+        let (function, current_owner) = match &callable {
+            FragmentCallable::Function(name) => {
+                let Some(function) = context.funcs.get(name).copied() else {
+                    continue;
+                };
+                (function, owner)
+            }
+            FragmentCallable::Method {
+                owner: method_owner,
+                name,
+            } => {
+                let Some(function) = context
+                    .methods
+                    .get(&(method_owner.clone(), name.clone()))
+                    .copied()
+                else {
+                    continue;
+                };
+                owner = Some(method_owner.as_str());
+                (function, owner)
+            }
+        };
+        let mut dependencies = std::collections::BTreeSet::new();
+        collect_fragment_function_dependencies(function, current_owner, context, &mut dependencies);
+        for dependency in dependencies {
+            if reachable.insert(dependency.clone()) {
+                pending.push(dependency);
+            }
+        }
+    }
+    reachable
+}
+
+fn fragment_declaration_items(
+    items: &[crate::AST::Item],
+    reachable: &std::collections::BTreeSet<FragmentCallable>,
+) -> Vec<crate::AST::Item> {
+    items
+        .iter()
+        .map(|item| match item {
+            crate::AST::Item::Impl(definition) => {
+                let mut definition = definition.clone();
+                let owner = definition.type_name.clone();
+                definition.methods.retain(|method| {
+                    reachable.contains(&FragmentCallable::Method {
+                        owner: owner.clone(),
+                        name: method.name.clone(),
+                    })
+                });
+                crate::AST::Item::Impl(definition)
+            }
+            crate::AST::Item::Struct(definition) => {
+                let mut definition = definition.clone();
+                let owner = definition.name.clone();
+                for implementation in &mut definition.trait_impls {
+                    implementation.methods.retain(|method| {
+                        reachable.contains(&FragmentCallable::Method {
+                            owner: owner.clone(),
+                            name: method.name.clone(),
+                        })
+                    });
+                }
+                crate::AST::Item::Struct(definition)
+            }
+            crate::AST::Item::Enum(definition) => {
+                let mut definition = definition.clone();
+                let owner = definition.name.clone();
+                for implementation in &mut definition.trait_impls {
+                    implementation.methods.retain(|method| {
+                        reachable.contains(&FragmentCallable::Method {
+                            owner: owner.clone(),
+                            name: method.name.clone(),
+                        })
+                    });
+                }
+                crate::AST::Item::Enum(definition)
+            }
+            _ => item.clone(),
+        })
+        .collect()
+}
+
+/// Lower one comptime expression through the analytical TIR/MIR path.
+pub fn lower_mir_fragment_expr(
+    expr: &crate::AST::Expr,
+    context: &MirFragmentContext<'_>,
+) -> Result<
+    (
+        jet_foundation::MIR::MirProgram,
+        jet_foundation::MIR::MirFunctionId,
+    ),
+    LowerError,
+> {
+    lower_mir_fragment(expr, &[], context)
+}
+
+/// Lower one comptime statement block through the analytical TIR/MIR path.
+pub fn lower_mir_fragment_block(
+    stmts: &[crate::AST::Stmt],
+    context: &MirFragmentContext<'_>,
+) -> Result<
+    (
+        jet_foundation::MIR::MirProgram,
+        jet_foundation::MIR::MirFunctionId,
+    ),
+    LowerError,
+> {
+    lower_mir_fragment(
+        &crate::AST::Expr::Unit(crate::Diagnostics::Span::new(0, 0)),
+        stmts,
+        context,
+    )
+}
+
+fn lower_mir_fragment(
+    expr: &crate::AST::Expr,
+    stmts: &[crate::AST::Stmt],
+    context: &MirFragmentContext<'_>,
+) -> Result<
+    (
+        jet_foundation::MIR::MirProgram,
+        jet_foundation::MIR::MirFunctionId,
+    ),
+    LowerError,
+> {
+    let module = "__comptime".to_string();
+    let name = "__fragment".to_string();
+    let file = module.clone();
+    let span = if stmts.is_empty() {
+        expr.span()
+    } else {
+        stmts
+            .first()
+            .map(crate::AST::Stmt::span)
+            .unwrap_or(crate::Diagnostics::Span::new(0, 0))
+    };
+    // An implicit fold may reference a runtime capture. Its value and type
+    // are absent from this fragment environment; reject the fold before
+    // lowering a checked closure that requires that capture slot.
+    let mut free_reads = None;
+    let mut missing_capture = None;
+    let mut check_captures = |candidate: &crate::AST::Expr| {
+        if missing_capture.is_some() {
+            return;
+        }
+        if let crate::AST::Expr::Lambda(lambda) = candidate {
+            // The checked capture lists are authoritative.  Include every
+            // capture class that the lambda lowerer can pack; otherwise a
+            // runtime-only moved/mutable capture reaches the strict TIR
+            // capture-type invariant below before this fragment can reject
+            // the non-closed fold.
+            for capture in lambda
+                .meta
+                .cloned_captures
+                .iter()
+                .chain(lambda.meta.moved_captures.iter())
+                .chain(lambda.meta.mut_captures.iter())
+                .chain(lambda.take_names.iter().map(|(name, _)| name))
+            {
+                let free_reads = free_reads.get_or_insert_with(|| {
+                    let (mut reads, calls) = if stmts.is_empty() {
+                        crate::Sema::expr_free_reads_and_calls(expr)
+                    } else {
+                        crate::Sema::block_free_reads_and_calls(stmts)
+                    };
+                    reads.extend(calls);
+                    reads
+                });
+                if free_reads.contains(capture) && !context.binding_types.contains_key(capture) {
+                    missing_capture = Some(LowerError::new(
+                        candidate.span(),
+                        format!("capture `{capture}` has no value in the compile-time environment"),
+                    ));
+                    break;
+                }
+            }
+        }
+    };
+    expr.for_each_expr(&mut check_captures);
+    for stmt in stmts {
+        stmt.for_each_expr(&mut check_captures);
+    }
+    if let Some(error) = missing_capture {
+        return Err(error);
+    }
+    let reachable = fragment_callable_closure(expr, stmts, context);
+    let mut items = Vec::new();
+    for (name, function) in context.funcs {
+        if !reachable.contains(&FragmentCallable::Function(name.clone())) {
+            continue;
+        }
+        items.push(crate::AST::Item::Func((*function).clone()));
+    }
+    for structure in context.structs.values() {
+        let mut structure = (*structure).clone();
+        // Fragment declarations carry field/type shape, not the enclosing
+        // module's derived-trait references. Those traits are not part of the
+        // fragment item set and would otherwise leave dangling MIR IDs.
+        structure.derives.clear();
+        items.push(crate::AST::Item::Struct(structure));
+    }
+    if let Some(facts) = context.checked_nominals {
+        for (identity, structure) in &facts.structs {
+            if context.structs.contains_key(identity) {
+                continue;
+            }
+            let mut structure = structure.clone();
+            structure.derives.clear();
+            items.push(crate::AST::Item::Struct(structure));
+        }
+        items.extend(facts.enums.values().cloned().map(crate::AST::Item::Enum));
+    }
+    // Fragment Cx omits enum/struct items that exist only as config-surface
+    // literals (`Prompt{…}`, `.Short`, `Light.Green`). Seed those types from
+    // the Field / EnumLit / StructLit spellings actually present.
+    {
+        let mut enum_variants: std::collections::BTreeMap<
+            String,
+            std::collections::BTreeSet<String>,
+        > = std::collections::BTreeMap::new();
+        let mut struct_fields: std::collections::BTreeMap<
+            String,
+            std::collections::BTreeSet<String>,
+        > = std::collections::BTreeMap::new();
+        let skip_named = |name: &str| {
+            context.structs.contains_key(name)
+                || context
+                    .checked_nominals
+                    .is_some_and(|facts| {
+                        facts.structs.contains_key(name)
+                            || facts.enums.contains_key(name)
+                            || facts.nominal_identities.get(name).is_some_and(|identity| {
+                                facts.structs.contains_key(identity) || facts.enums.contains_key(identity)
+                            })
+                    })
+                || crate::AST::numeric_type_from_name(name).is_some()
+                || crate::Codegen::is_json_type_name(name)
+        };
+        let mut collect = |candidate: &crate::AST::Expr| match candidate {
+            crate::AST::Expr::Field(receiver, member, _) => {
+                let crate::AST::Expr::Ident(name, _) = receiver.as_ref() else {
+                    return;
+                };
+                if skip_named(name) {
+                    return;
+                }
+                if name.chars().next().is_some_and(char::is_uppercase)
+                    && member.chars().next().is_some_and(char::is_uppercase)
+                {
+                    enum_variants
+                        .entry(name.clone())
+                        .or_default()
+                        .insert(member.clone());
+                }
+            }
+            crate::AST::Expr::EnumLit {
+                type_name, variant, ..
+            } if !type_name.is_empty() && !skip_named(type_name) => {
+                enum_variants
+                    .entry(type_name.clone())
+                    .or_default()
+                    .insert(variant.clone());
+            }
+            crate::AST::Expr::StructLit {
+                type_name, fields, ..
+            } if !type_name.is_empty() && !skip_named(type_name) => {
+                let entry = struct_fields.entry(type_name.clone()).or_default();
+                for (name, _, _) in fields {
+                    entry.insert(name.clone());
+                }
+            }
+            _ => {}
+        };
+        expr.for_each_expr(&mut collect);
+        for stmt in stmts {
+            stmt.for_each_expr(&mut collect);
+        }
+        let empty_span = crate::Diagnostics::Span::new(0, 0);
+        for (name, variants) in enum_variants {
+            struct_fields.remove(&name);
+            items.push(crate::AST::Item::Enum(crate::AST::EnumDef {
+                span: empty_span,
+                is_pub: false,
+                is_package_pub: false,
+                name,
+                name_span: empty_span,
+                type_params: Vec::new(),
+                variants: variants
+                    .into_iter()
+                    .map(|variant| crate::AST::Variant {
+                        name: variant,
+                        name_span: empty_span,
+                        payload: crate::AST::VariantPayload::Unit,
+                        discriminant: None,
+                        discriminant_expr: None,
+                        serde_markers: Vec::new(),
+                    })
+                    .collect(),
+                methods: Vec::new(),
+                trait_impls: Vec::new(),
+                derives: Vec::new(),
+                auto_derive_default: false,
+                is_single_use: false,
+                single_use_span: None,
+                is_must_use: false,
+                must_use_span: None,
+                serde_markers: Vec::new(),
+                type_markers: Vec::new(),
+                groups: Vec::new(),
+            }));
+        }
+        for (name, fields) in struct_fields {
+            items.push(crate::AST::Item::Struct(crate::AST::StructDef {
+                span: empty_span,
+                is_pub: false,
+                is_package_pub: false,
+                name,
+                name_span: empty_span,
+                type_params: Vec::new(),
+                fields: fields
+                    .into_iter()
+                    .map(|field_name| crate::AST::Field {
+                        is_pub: false,
+                        is_package_pub: false,
+                        name: field_name,
+                        name_span: empty_span,
+                        ty: crate::AST::Type::String,
+                        ty_span: empty_span,
+                        serde_markers: Vec::new(),
+                        redact: false,
+                        computed: None,
+                        default: None,
+                        default_ct: None,
+                    })
+                    .collect(),
+                state: None,
+                methods: Vec::new(),
+                cli_bindings: Vec::new(),
+                trait_impls: Vec::new(),
+                derives: Vec::new(),
+                auto_derive_default: false,
+                is_published_schema: false,
+                published_schema_span: None,
+                is_single_use: false,
+                single_use_span: None,
+                is_must_use: false,
+                must_use_span: None,
+                layout: None,
+                layout_span: None,
+                serde_markers: Vec::new(),
+                type_markers: Vec::new(),
+                validate_block: Vec::new(),
+                validate_span: None,
+            }));
+        }
+    }
+    for (name, base) in context.distinct_bases {
+        if context.structs.contains_key(name) {
+            continue;
+        }
+        let range = context.distinct_ranges.get(name).and_then(|bounds| {
+            bounds
+                .as_ref()
+                .map(|(lo, hi)| (*lo, *hi, crate::Diagnostics::Span::new(0, 0)))
+        });
+        items.push(crate::AST::Item::Distinct(crate::AST::DistinctDef {
+            is_pub: false,
+            is_package_pub: false,
+            type_markers: Vec::new(),
+            derives: Vec::new(),
+            quantity: None,
+            name: name.clone(),
+            name_span: crate::Diagnostics::Span::new(0, 0),
+            base: base.clone(),
+            base_span: crate::Diagnostics::Span::new(0, 0),
+            range,
+            span: crate::Diagnostics::Span::new(0, 0),
+        }));
+    }
+    for conversion in context.error_conversions {
+        items.push(crate::AST::Item::ErrorConv(conversion.clone()));
+    }
+    for family in context.unit_families {
+        items.push(crate::AST::Item::UnitFamily(family.clone()));
+    }
+    for ((owner, method_name), method) in context.methods {
+        if !reachable.contains(&FragmentCallable::Method {
+            owner: owner.clone(),
+            name: method_name.clone(),
+        }) {
+            continue;
+        }
+        if matches!(method_name.as_str(), "encode" | "decode") {
+            continue;
+        }
+        let declared = context.structs.get(owner).is_some_and(|structure| {
+            structure
+                .methods
+                .iter()
+                .any(|candidate| candidate.name == *method_name)
+                || structure.trait_impls.iter().any(|implementation| {
+                    implementation
+                        .methods
+                        .iter()
+                        .any(|candidate| candidate.name == *method_name)
+                })
+        });
+        if declared {
+            continue;
+        }
+        let trait_name = context
+            .method_traits
+            .get(&(owner.clone(), method_name.clone()))
+            .cloned();
+        let operator_rhs = trait_name
+            .as_deref()
+            .filter(|trait_name| {
+                matches!(
+                    *trait_name,
+                    crate::Syntax::TRAIT_ADD
+                        | crate::Syntax::TRAIT_SUB
+                        | crate::Syntax::TRAIT_MUL
+                        | crate::Syntax::TRAIT_DIV
+                        | crate::Syntax::TRAIT_EQUATABLE
+                        | crate::Syntax::TRAIT_COMPARABLE
+                )
+            })
+            .and_then(|_| {
+                method
+                    .params
+                    .iter()
+                    .find(|param| param.name != crate::Syntax::KW_SELF)
+                    .map(|param| param.ty.clone())
+            });
+        items.push(crate::AST::Item::Impl(crate::AST::ImplDef {
+            span: method.span,
+            type_name: owner.clone(),
+            type_span: method.span,
+            trait_name,
+            trait_span: None,
+            operator_rhs,
+            operator_marker: None,
+            methods: vec![(*method).clone()],
+            delegation_field: None,
+            assoc_type_impls: Vec::new(),
+            is_generated_serde: false,
+            os_target: None,
+        }));
+    }
+    let mut cx = build_cx_items(
+        &items,
+        "",
+        &file,
+        None,
+        &std::collections::HashMap::new(),
+        "2026",
+    );
+    if let Some(facts) = context.checked_nominals {
+        cx.import_mods = facts
+            .import_modules
+            .iter()
+            .map(|(alias, module)| (alias.clone(), crate::Codegen::mangle(module)))
+            .collect();
+        cx.foreign_types = facts
+            .foreign_modules
+            .iter()
+            .map(|(identity, module)| (identity.clone(), crate::Codegen::mangle(module)))
+            .collect();
+        cx.local_type_identities
+            .extend(facts.nominal_identities.clone());
+        cx.type_names.extend(facts.structs.keys().cloned());
+        cx.type_names.extend(facts.enums.keys().cloned());
+    }
+    cx.module_identity = module.clone();
+    cx.core_imports = context.core_imports.clone();
+    cx.const_values = context.globals.clone();
+    cx.consts = cx
+        .const_values
+        .keys()
+        .map(|name| (name.clone(), name.clone()))
+        .collect();
+    cx.computed_fields.clear();
+    for ((owner, field), _) in context.computed_fields {
+        cx.computed_fields
+            .entry(owner.clone())
+            .or_default()
+            .insert(field.clone());
+    }
+    cx.distinct_ranges = context
+        .distinct_ranges
+        .iter()
+        .filter_map(|(name, bounds)| bounds.map(|bounds| (name.clone(), bounds)))
+        .collect();
+    for (name, base) in context.distinct_bases {
+        cx.distinct_types
+            .insert(name.clone(), (base.clone(), false));
+    }
+    let declaration_items = fragment_declaration_items(&items, &reachable);
+    let declarations = lower_declarations_from_items_with_boxed_edges(
+        &declaration_items,
+        &module,
+        &cx.boxed_edges,
+        &cx.auto_printable,
+        &cx.auto_debug,
+    );
+    let mut extra_funcs = Vec::new();
+    for (function_name, function) in context.funcs {
+        if !reachable.contains(&FragmentCallable::Function(function_name.clone())) {
+            continue;
+        }
+        if !function.type_params.is_empty() || matches!(function.name.as_str(), "encode" | "decode")
+        {
+            continue;
+        }
+        extra_funcs.push(lower::lower_func(function, &cx));
+    }
+    let mut trait_method_traits = std::collections::HashMap::new();
+    for ((owner, method_name), method) in context.methods {
+        if !reachable.contains(&FragmentCallable::Method {
+            owner: owner.clone(),
+            name: method_name.clone(),
+        }) {
+            continue;
+        }
+        if matches!(method_name.as_str(), "encode" | "decode") {
+            continue;
+        }
+        let mut lowered = if let Some(trait_name) = context
+            .method_traits
+            .get(&(owner.clone(), method_name.clone()))
+        {
+            trait_method_traits.insert((owner.clone(), method_name.clone()), trait_name.clone());
+            let operator_rhs = matches!(
+                trait_name.as_str(),
+                crate::Syntax::TRAIT_ADD
+                    | crate::Syntax::TRAIT_SUB
+                    | crate::Syntax::TRAIT_MUL
+                    | crate::Syntax::TRAIT_DIV
+                    | crate::Syntax::TRAIT_EQUATABLE
+                    | crate::Syntax::TRAIT_COMPARABLE
+            )
+            .then(|| {
+                method
+                    .params
+                    .iter()
+                    .find(|param| param.name != crate::Syntax::KW_SELF)
+                    .map(|param| param.ty.clone())
+            })
+            .flatten();
+            lower::lower_trait_method(method, owner, &cx, trait_name, false, operator_rhs.as_ref())
+        } else {
+            lower::lower_method(method, owner, &cx)
+        };
+        lowered.name = method_name.clone();
+        extra_funcs.push(lowered);
+    }
+    *cx.current_fn.borrow_mut() = name.clone();
+    let mut env = lower::LowerEnv::new(name.clone());
+    let mut names = context.binding_types.keys().cloned().collect::<Vec<_>>();
+    names.sort();
+    let params = names
+        .iter()
+        .map(|binding| {
+            let ty = context
+                .binding_types
+                .get(binding)
+                .cloned()
+                .expect("comptime fragment binding type must be present");
+            env.bind(binding, TLocal::user(binding), Some(ty.clone()));
+            (binding.clone(), ty, crate::AST::AccessConvention::Move)
+        })
+        .collect::<Vec<_>>();
+    let value = if stmts.is_empty() {
+        lower::lower_expr(expr, &cx, &mut env)
+    } else {
+        let body = lower::lower_stmts(stmts, &cx, &mut env);
+        let tuple_shape = params
+            .iter()
+            .map(|(binding, ty, _)| (binding.clone(), ty.clone()))
+            .collect::<Vec<_>>();
+        let tuple_ty = crate::AST::Type::Tuple(
+            tuple_shape
+                .iter()
+                .map(|(binding, ty)| (binding.clone(), Box::new(ty.clone())))
+                .collect(),
+        );
+        let fields = params
+            .iter()
+            .map(|(binding, ty, _)| {
+                (
+                    binding.clone(),
+                    TExpr {
+                        ty: ty.clone(),
+                        kind: TExprKind::Local(TLocal::user(binding)),
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut body = body;
+        body.push(TStmt::Return(Some(TExpr {
+            ty: tuple_ty.clone(),
+            kind: TExprKind::TupleLit {
+                struct_name: tuple_struct_name(&tuple_shape),
+                fields,
+            },
+        })));
+        specialize_generic_free_functions(&items, &cx, &mut extra_funcs);
+        return lower_mir_fragment_program(
+            module,
+            name,
+            file,
+            span,
+            params,
+            tuple_ty,
+            body,
+            &extra_funcs,
+            &declarations,
+            &trait_method_traits,
+            context,
+        );
+    };
+    let tuple_shape = std::iter::once(("value".to_string(), value.ty.clone()))
+        .chain(
+            params
+                .iter()
+                .map(|(binding, ty, _)| (binding.clone(), ty.clone())),
+        )
+        .collect::<Vec<_>>();
+    let tuple_ty = crate::AST::Type::Tuple(
+        tuple_shape
+            .iter()
+            .map(|(binding, ty)| (binding.clone(), Box::new(ty.clone())))
+            .collect(),
+    );
+    let mut body = Vec::new();
+    let mut fields = vec![("value".to_string(), value.clone())];
+    fields.extend(params.iter().map(|(binding, ty, _)| {
+        (
+            binding.clone(),
+            TExpr {
+                ty: ty.clone(),
+                kind: TExprKind::Local(TLocal::user(binding)),
+            },
+        )
+    }));
+    body.push(TStmt::Return(Some(TExpr {
+        ty: tuple_ty.clone(),
+        kind: TExprKind::TupleLit {
+            struct_name: tuple_struct_name(&tuple_shape),
+            fields,
+        },
+    })));
+    specialize_generic_free_functions(&items, &cx, &mut extra_funcs);
+    lower_mir_fragment_program(
+        module,
+        name,
+        file,
+        span,
+        params,
+        tuple_ty,
+        body,
+        &extra_funcs,
+        &declarations,
+        &trait_method_traits,
+        context,
+    )
+}
+
+fn lower_mir_fragment_program(
+    module: String,
+    name: String,
+    file: String,
+    span: crate::Diagnostics::Span,
+    params: Vec<(String, crate::AST::Type, crate::AST::AccessConvention)>,
+    ret: crate::AST::Type,
+    body: Vec<TStmt>,
+    extra_funcs: &[TFunc],
+    declarations: &TirDeclarations,
+    trait_method_traits: &std::collections::HashMap<(String, String), String>,
+    context: &MirFragmentContext<'_>,
+) -> Result<
+    (
+        jet_foundation::MIR::MirProgram,
+        jet_foundation::MIR::MirFunctionId,
+    ),
+    LowerError,
+> {
+    let key = format!("{module}::{name}");
+    let function_ref = artifact_plan::TirFunctionRef {
+        key: key.clone(),
+        module: module.clone(),
+        name: name.clone(),
+        span,
+        visibility: crate::Names::NameVisibility::Private,
+    };
+    let param_facts = params
+        .iter()
+        .enumerate()
+        .map(|(index, (name, ty, access))| artifact_plan::TirParamFact {
+            index,
+            name: name.clone(),
+            span,
+            ty: ty.clone(),
+            access: match access {
+                crate::AST::AccessConvention::Read => artifact_plan::TirAccess::Read,
+                crate::AST::AccessConvention::Write => artifact_plan::TirAccess::Write,
+                crate::AST::AccessConvention::Move => artifact_plan::TirAccess::Move,
+            },
+            label: name.clone(),
+            zone: crate::AST::ParamZone::Either,
+            variadic: false,
+            default_present: false,
+        })
+        .collect::<Vec<_>>();
+    let entry = artifact_plan::TirEntrySpec {
+        kind: artifact_plan::TirArtifactEntryKind::Command,
+        function: Some(function_ref.clone()),
+        cli: None,
+        output: artifact_plan::TirEntryOutput::ReturnValue,
+        output_kind: crate::AST::OutputKind::Executable,
+        initialize_environment: false,
+        initialize_gc: false,
+        serves_until_stopped: false,
+        package_version: "0.0.0".to_string(),
+    };
+    let artifact_key = "__comptime_fragment".to_string();
+    let artifact_facts = artifact_plan::TirArtifactFacts {
+        package_identity: "comptime-fragment".to_string(),
+        package_version: "0.0.0".to_string(),
+        target: artifact_plan::TirArtifactTarget::Interpreter,
+        build_mode: MirArtifactBuildMode::Dev,
+        build: crate::Facts::BuildFactSnapshot::default(),
+        names: artifact_plan::TirNameFacts::default(),
+        functions: vec![artifact_plan::TirFunctionFact {
+            reference: function_ref.clone(),
+            params: param_facts,
+            return_type: Some(ret.clone()),
+            is_pure: false,
+        }],
+        modules: vec![artifact_plan::TirModuleFact {
+            key: module.clone(),
+            name: module.clone(),
+            path: file.clone(),
+            source_path: file.clone(),
+            imports: Vec::new(),
+            item_order: vec![artifact_plan::TirItemRef::Function(key.clone())],
+        }],
+        imports: Vec::new(),
+        foreign: Vec::new(),
+        links: Vec::new(),
+        callbacks: Vec::new(),
+        handles: Vec::new(),
+        entry: Some(entry.clone()),
+        cli: None,
+        jobs: Vec::new(),
+        tests: Vec::new(),
+        output_checks: Vec::new(),
+        coverage_points: Vec::new(),
+        harnesses: Vec::new(),
+        artifacts: vec![artifact_plan::TirArtifactPlan {
+            key: artifact_key,
+            kind: artifact_plan::TirArtifactKind::NativeExecutable,
+            name: "comptime fragment".to_string(),
+            target: artifact_plan::TirArtifactTarget::Interpreter,
+            modules: vec![module.clone()],
+            links: Vec::new(),
+            jobs: Vec::new(),
+            runtime_parts: std::collections::BTreeSet::new(),
+            exports: Vec::new(),
+            provider_identity: "comptime".to_string(),
+            closure_identity: "comptime".to_string(),
+            artifact_identity: "comptime".to_string(),
+            entry: Some(entry),
+            harness: None,
+        }],
+        cffi: artifact_plan::TirCffiFacts::default(),
+    };
+    let function = TFunc {
+        name,
+        module: module.clone(),
+        key,
+        source_file: file.clone(),
+        source_span: span,
+        failure_carrier: TFailureCarrier::from_checked_type(&ret),
+        effects: TEffectFacts::default(),
+        target_applicability: TTargetApplicability {
+            rust_aot: false,
+            cranelift: false,
+            interpreter: true,
+            web: false,
+        },
+        web_bucket: None,
+        web_marker: None,
+        visibility: TVisibility::Private,
+        foreign: None,
+        params,
+        web_param_reconstructions: Vec::new(),
+        ret: Some(ret),
+        gc_return: false,
+        gc_scope: false,
+        return_view_provenance: None,
+        generic_params: Vec::new(),
+        clone_types: Vec::new(),
+        is_main: true,
+        line: 0,
+        synthetic: true,
+        is_unsafe: false,
+        unsafe_gate: None,
+        is_pure: false,
+        memo_bound: None,
+        is_reactive: false,
+        reactive_upgrades: Vec::new(),
+        is_inline: false,
+        is_inline_always: false,
+        is_scalar: false,
+        kernel_proof: None,
+        memo_field: None,
+        uses_stack_sentry: false,
+        body,
+        kind: TFuncKind::TopLevel,
+    };
+    let mut tir = TirProgram {
+        package_identity: "comptime-fragment".to_string(),
+        facts: TirPackageFacts::default(),
+        source_file: file.clone(),
+        source_text: String::new(),
+        source_files: std::iter::once((file.clone(), String::new())).collect(),
+        package_hardened: false,
+        application_authority: jet_foundation::Authority::ApplicationAuthority::default(),
+        edition: "2026".to_string(),
+        funcs: std::iter::once(function)
+            .chain(extra_funcs.iter().cloned())
+            .collect(),
+        declarations: declarations.clone(),
+        artifact_facts,
+        core_calls: crate::Syntax::CORE_CALLS.iter().collect(),
+        unreachable: Vec::new(),
+        spawn_lambdas: Vec::new(),
+        struct_fields: std::collections::HashMap::new(),
+        struct_field_types: std::collections::HashMap::new(),
+        memo_dependencies: std::collections::HashMap::new(),
+        reflection_fields: std::collections::HashMap::new(),
+        reflect_paths: std::collections::HashMap::new(),
+        nominal_identities: context
+            .checked_nominals
+            .map(|facts| facts.nominal_identities.clone())
+            .unwrap_or_default(),
+        struct_type_params: std::collections::HashMap::new(),
+        enum_variants: std::collections::HashMap::new(),
+        enum_variant_payload_types: std::collections::HashMap::new(),
+        canonical_deopt: std::collections::HashSet::new(),
+        canonical_calls: std::collections::HashSet::new(),
+        int_constants: std::collections::HashMap::new(),
+        constants: context.globals.clone(),
+        distinct_bases: context.distinct_bases.clone(),
+        distinct_ranges: context
+            .distinct_ranges
+            .iter()
+            .filter_map(|(name, bounds)| bounds.map(|bounds| (name.clone(), bounds)))
+            .collect(),
+        codec_migrations: std::collections::HashMap::new(),
+        trait_method_traits: trait_method_traits.clone(),
+        iterable_item_types: std::collections::HashMap::new(),
+    };
+    opt::optimize_program(&mut tir);
+    let mir = lower_tir_to_mir(&tir)?;
+    let function_id = mir
+        .functions
+        .iter()
+        .find(|function| function.key == tir.funcs[0].key)
+        .map(|function| function.id)
+        .ok_or_else(|| LowerError::new(span, "MIR fragment function row was not emitted"))?;
+    let mir = jet_foundation::MIR::optimize_mir_program(
+        &mir,
+        &jet_foundation::MIR::MirOptimizationPolicy::conservative(),
+    )
+    .map_err(|error| {
+        LowerError::new(span, format!("canonical MIR optimization failed: {error}"))
+    })?;
+    Ok((mir, function_id))
+}
+
+/// Lower one explicitly requested checked artifact into analytical TIR.
+pub fn lower_checked_tir_program_for(
+    bundle: &ProgramBundle,
+    request: MirArtifactRequest,
+) -> Result<TirProgram, LowerError> {
+    if jet_foundation::CompilerStack::on_compiler_worker() {
+        return lower_checked_tir_program_on_stack(bundle, request);
+    }
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        lower_checked_tir_program_on_stack(bundle, request)
+    })
+}
+
+/// #2252: build [`TirProgram::nominal_identities`].
 ///
 /// The name ledger already owns both halves of this fact: `nominal_identity`
 /// gives a declaration its canonical module-qualified name, and the recorded
@@ -1702,6 +3376,26 @@ fn selected_imported_zero_arg_tir_entry(bundle: &ProgramBundle) -> Option<String
         Some(output.lowered_name.clone())
     })
 }
+fn selected_test_override_tir_entry(
+    bundle: &ProgramBundle,
+    request: &MirArtifactRequest,
+) -> Option<String> {
+    if !matches!(
+        (request.kind, request.mode),
+        (
+            jet_foundation::MIR::MirArtifactKind::TestOverride,
+            MirArtifactBuildMode::Test
+        )
+    ) {
+        return None;
+    }
+    let module = bundle.modules.get(bundle.entry)?;
+    module
+        .items
+        .iter()
+        .any(|item| matches!(item, Item::Func(function) if function.name == "test"))
+        .then(|| "test".to_string())
+}
 fn selected_zero_arg_tir_entry(bundle: &ProgramBundle) -> Option<String> {
     let module = bundle.modules.get(bundle.entry)?;
     selected_imported_zero_arg_tir_entry(bundle)
@@ -1723,11 +3417,361 @@ fn selected_zero_arg_tir_entry(bundle: &ProgramBundle) -> Option<String> {
             })
         })
 }
+fn lower_test_item(test: &TestDef, module: &str, cx: &Cx) -> TFunc {
+    let test_name = test.name.as_deref().unwrap_or("anonymous");
+    let mut synthetic = Func::implicit_run(test.body.clone(), test.span);
+    synthetic.name = format!("__test_{test_name}");
+    synthetic.name_span = test.name_span;
+    synthetic.params = test.params.clone();
+    synthetic.compiler_generated = true;
 
-fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
+    let mut lowered = lower_func(&synthetic, cx);
+    let key = artifact_plan::test_key(module, test);
+    lowered.module = module.to_string();
+    lowered.key = key.clone();
+    lowered.name = key;
+    lowered.source_span = test.span;
+    lowered.synthetic = true;
+    lowered
+}
+
+fn lower_contract_test_item(function: &Func, module: &str, cx: &Cx, target_name: &str) -> TFunc {
+    let key = artifact_plan::contract_key(module, function);
+    let call_args = function
+        .params
+        .iter()
+        .map(|param| crate::AST::CallArg {
+            convention: param.convention,
+            expr: Expr::Ident(param.name.clone(), param.name_span),
+            span: param.name_span,
+            flags: crate::AST::CallArgFlags::default(),
+            label: param
+                .public_label
+                .as_ref()
+                .map(|(label, span)| (label.clone(), *span)),
+            spread: param.variadic,
+        })
+        .collect();
+    let call = Expr::Call(crate::AST::Call {
+        name: target_name.to_string(),
+        name_span: function.name_span,
+        type_args: Vec::new(),
+        args: call_args,
+        resolved_ret: None,
+        range_checked: false,
+        widen_approx: false,
+    });
+    let mut synthetic = function.clone();
+    synthetic.name = format!("__contract_{}", function.name);
+    synthetic.name_span = function.name_span;
+    synthetic.pre.clear();
+    synthetic.post.clear();
+    synthetic.body = vec![crate::AST::Stmt::Return(Some(call), function.span)];
+    synthetic.compiler_generated = true;
+
+    let mut lowered = lower_func(&synthetic, cx);
+    lowered.module = module.to_string();
+    lowered.key = key.clone();
+    lowered.name = key;
+    lowered.source_span = function.span;
+    lowered.synthetic = true;
+    lowered
+}
+
+/// Synthesize the pre-call eligibility predicate for one sampled contract
+/// candidate (#2502): a Read-convention callable over the candidate's own
+/// parameters whose body is the conjunction of its checked `#Pre` conditions.
+/// The generated harness evaluates this predicate BEFORE invoking the
+/// contract wrapper, so a rejected input never executes the callable, and a
+/// failure inside the callable (its own clauses or a nested callee's `#Pre`)
+/// is never reclassified as input rejection.
+fn lower_contract_eligibility_item(function: &Func, module: &str, cx: &Cx) -> TFunc {
+    let key = artifact_plan::contract_eligibility_key(module, function);
+    let condition = function
+        .pre
+        .iter()
+        .map(|clause| clause.cond.clone())
+        .reduce(|lhs, rhs| {
+            Expr::Binary(
+                crate::AST::BinOp::And,
+                Box::new(lhs),
+                Box::new(rhs),
+                function.span,
+            )
+        })
+        .expect("a sampled contract candidate has at least one #Pre clause");
+    let mut synthetic = function.clone();
+    synthetic.name = format!("__contract_pre_{}", function.name);
+    synthetic.name_span = function.name_span;
+    synthetic.pre.clear();
+    synthetic.post.clear();
+    for param in &mut synthetic.params {
+        // A sampled candidate's conditions only read their arguments (a
+        // condition that calls a function is classified unavailable), so the
+        // predicate borrows every parameter.
+        param.convention = crate::AST::AccessConvention::Read;
+    }
+    synthetic.return_type = Some(Type::Named(crate::Syntax::TYPE_BOOL.to_string()));
+    synthetic.return_type_span = None;
+    synthetic.return_view_provenance = None;
+    synthetic.declared_return_view_provenance = None;
+    synthetic.gc_return = false;
+    synthetic.diverges = false;
+    synthetic.body = vec![crate::AST::Stmt::Return(Some(condition), function.span)];
+    synthetic.compiler_generated = true;
+
+    let mut lowered = lower_func(&synthetic, cx);
+    lowered.module = module.to_string();
+    lowered.key = key.clone();
+    lowered.name = key;
+    lowered.source_span = function.span;
+    lowered.synthetic = true;
+    lowered
+}
+
+/// Materialize the trivial callable behind an explicit unavailable contract
+/// row (#2502). The harness reports the row's stable reason without invoking
+/// anything, but the row still resolves to a real lowered function, so no
+/// contract key is ever left unresolved.
+fn lower_contract_unavailable_item(function: &Func, module: &str, cx: &Cx) -> TFunc {
+    let key = artifact_plan::contract_key(module, function);
+    let mut synthetic = Func::implicit_run(Vec::new(), function.span);
+    synthetic.name = format!("__contract_unavailable_{}", function.name);
+    synthetic.name_span = function.name_span;
+    synthetic.compiler_generated = true;
+
+    let mut lowered = lower_func(&synthetic, cx);
+    lowered.module = module.to_string();
+    lowered.key = key.clone();
+    lowered.name = key;
+    lowered.source_span = function.span;
+    lowered.synthetic = true;
+    lowered
+}
+
+/// Record one contract candidate under the canonical sampling fact
+/// (`artifact_plan::contract_sampling_reason`) and materialize exactly the
+/// synthetic callables the recorded plan promises: predicate + wrapper for a
+/// sampled candidate, the trivial unavailable callable otherwise. Artifact
+/// discovery consumes the same recorded plan, so a contract row can never
+/// name a callable this walk did not lower.
+#[allow(clippy::too_many_arguments)]
+fn materialize_contract_sampling(
+    function: &Func,
+    module: &str,
+    covered: bool,
+    target_name: &str,
+    cx: &Cx,
+    funcs: &mut Vec<TFunc>,
+    contract_rows: &mut artifact_plan::ContractSamplingPlan,
+) {
+    let Some(reason) = artifact_plan::contract_sampling_reason(function, covered) else {
+        return;
+    };
+    match &reason {
+        None => {
+            funcs.push(lower_contract_eligibility_item(function, module, cx));
+            funcs.push(lower_contract_test_item(function, module, cx, target_name));
+        }
+        Some(_) => funcs.push(lower_contract_unavailable_item(function, module, cx)),
+    }
+    contract_rows.insert(artifact_plan::contract_key(module, function), reason);
+}
+
+/// Mirror sema's canonical callable partition identity and retain the source
+/// span that survives lowering. TIR function names are deliberately rewritten
+/// for imported and inline modules, so the source row is the stable bridge back
+/// to `ProgramBundle::web_partitions`.
+fn record_web_partition_key(
+    function: &Func,
+    callable_name: &str,
+    source_file: &str,
+    file_alias: &str,
+    is_entry: bool,
+    module_prefix: Option<&str>,
+    out: &mut std::collections::HashMap<(String, usize, usize), String>,
+) {
+    let file_prefix = (!is_entry && module_prefix.is_none()).then_some(file_alias);
+    let key =
+        jet_foundation::WebPartition::partition_key(file_prefix, module_prefix, callable_name);
+    out.insert(
+        (
+            source_file.to_string(),
+            function.span.start,
+            function.span.end,
+        ),
+        key,
+    );
+}
+
+fn collect_web_partition_keys(
+    items: &[Item],
+    source_file: &str,
+    file_alias: &str,
+    is_entry: bool,
+    module_prefix: Option<&str>,
+    out: &mut std::collections::HashMap<(String, usize, usize), String>,
+) {
+    for item in items {
+        match item {
+            Item::Func(function) => record_web_partition_key(
+                function,
+                &function.name,
+                source_file,
+                file_alias,
+                is_entry,
+                module_prefix,
+                out,
+            ),
+            Item::Struct(structure) => {
+                for method in &structure.methods {
+                    let callable_name = format!("{}::{}", structure.name, method.name);
+                    record_web_partition_key(
+                        method,
+                        &callable_name,
+                        source_file,
+                        file_alias,
+                        is_entry,
+                        module_prefix,
+                        out,
+                    );
+                }
+                for implementation in &structure.trait_impls {
+                    for method in &implementation.methods {
+                        let callable_name = format!("{}::{}", structure.name, method.name);
+                        record_web_partition_key(
+                            method,
+                            &callable_name,
+                            source_file,
+                            file_alias,
+                            is_entry,
+                            module_prefix,
+                            out,
+                        );
+                    }
+                }
+            }
+            Item::Enum(enumeration) => {
+                for method in &enumeration.methods {
+                    let callable_name = format!("{}::{}", enumeration.name, method.name);
+                    record_web_partition_key(
+                        method,
+                        &callable_name,
+                        source_file,
+                        file_alias,
+                        is_entry,
+                        module_prefix,
+                        out,
+                    );
+                }
+                for implementation in &enumeration.trait_impls {
+                    for method in &implementation.methods {
+                        let callable_name = format!("{}::{}", enumeration.name, method.name);
+                        record_web_partition_key(
+                            method,
+                            &callable_name,
+                            source_file,
+                            file_alias,
+                            is_entry,
+                            module_prefix,
+                            out,
+                        );
+                    }
+                }
+            }
+            Item::Impl(implementation) => {
+                for method in &implementation.methods {
+                    let callable_name = format!("{}::{}", implementation.type_name, method.name);
+                    record_web_partition_key(
+                        method,
+                        &callable_name,
+                        source_file,
+                        file_alias,
+                        is_entry,
+                        module_prefix,
+                        out,
+                    );
+                }
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    collect_web_partition_keys(
+                        body,
+                        source_file,
+                        file_alias,
+                        is_entry,
+                        Some(&module.name),
+                        out,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn apply_checked_web_partitions(bundle: &ProgramBundle, funcs: &mut [TFunc]) {
+    let mut source_rows = std::collections::HashMap::new();
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        collect_web_partition_keys(
+            &module.items,
+            &module.display,
+            &module.alias,
+            module_idx == bundle.entry,
+            None,
+            &mut source_rows,
+        );
+    }
+
+    for function in funcs {
+        if function.web_bucket.is_some() {
+            continue;
+        }
+        let source_key = (
+            function.source_file.clone(),
+            function.source_span.start,
+            function.source_span.end,
+        );
+        let bucket = source_rows
+            .get(&source_key)
+            .and_then(|key| bundle.web_partitions.get(key))
+            .copied()
+            // Inline members already use the canonical partition key as their
+            // lowered name. These candidates also cover source-less fragments.
+            .or_else(|| bundle.web_partitions.get(&function.name).copied())
+            .or_else(|| bundle.web_partitions.get(&function.key).copied())
+            // Source rows carry sema's inherited file/module ceiling. Any
+            // remaining generated row still uses the same sema policy.
+            .or_else(|| {
+                Some(crate::Sema::checked_web_bucket(
+                    function.web_marker,
+                    None,
+                    &function.effects.solved,
+                    function.ret.as_ref(),
+                ))
+            });
+        if bucket.is_some() {
+            function.web_bucket = bucket;
+        }
+    }
+}
+
+fn child_module_identity(module: &str, child: &str) -> String {
+    if module.is_empty() {
+        child.to_string()
+    } else {
+        format!("{module}::{child}")
+    }
+}
+
+fn lower_checked_tir_program_on_stack(
+    bundle: &ProgramBundle,
+    request: MirArtifactRequest,
+) -> Result<TirProgram, LowerError> {
     jet_foundation::PackageEdition::with_package_edition(&bundle.edition, || {
-        LAST_JIT_LOWER_FAILURE.with(|failure| *failure.borrow_mut() = None);
-        let module = bundle.modules.get(bundle.entry)?;
+        let module = bundle.modules.get(bundle.entry).ok_or_else(|| {
+            LowerError::new(crate::Diagnostics::Span::new(0, 0), "missing entry module")
+        })?;
         let extern_funcs = bundle_extern_funcs(bundle);
         let mut cx = build_cx_items(
             &module.items,
@@ -1738,27 +3782,56 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
             &bundle.edition,
         );
         populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
+        register_own_struct_shapes(&mut cx, bundle, bundle.entry);
         let type_shapes = collect_type_shapes(&module.items);
         let mut funcs = Vec::new();
-        let zero_arg_entry = selected_zero_arg_tir_entry(bundle);
-        let cli_schema = zero_arg_entry
-            .is_none()
-            .then(|| jet_foundation::CLISchema::entry_schema_for_bundle(bundle))
-            .flatten();
-        let cli_run = cli_schema.as_ref().and_then(|_| {
-            module.items.iter().find_map(|item| match item {
-                Item::Func(function) if function.name == "run" => Some(function.name.clone()),
-                Item::Const(value) => value.resolved_output.as_ref().and_then(|output| {
-                    (output.selected && output.module == bundle.entry && output.params.len() == 1)
-                        .then(|| output.semantic_name.clone())
-                }),
-                _ => None,
-            })
-        });
-        let entry_name = match (zero_arg_entry, cli_run, cli_schema.is_some()) {
-            (Some(name), _, _) => name,
-            (None, Some(_), _) | (None, None, true) => super::mangle_generated("cli_main"),
-            (None, None, false) => return None,
+        let include_tests = matches!(
+            request.kind,
+            jet_foundation::MIR::MirArtifactKind::TestExecutable
+                | jet_foundation::MIR::MirArtifactKind::FuzzExecutable
+                | jet_foundation::MIR::MirArtifactKind::TestOverride
+        );
+        let entry_module_identity = artifact_plan::module_identity(bundle, bundle.entry);
+        let mut boxed_edges_by_module = std::collections::BTreeMap::new();
+        boxed_edges_by_module.insert(entry_module_identity.clone(), cx.boxed_edges.clone());
+        let mut auto_printable_by_module = std::collections::BTreeMap::new();
+        auto_printable_by_module.insert(entry_module_identity.clone(), cx.auto_printable.clone());
+        let mut auto_debug_by_module = std::collections::BTreeMap::new();
+        auto_debug_by_module.insert(entry_module_identity.clone(), cx.auto_debug.clone());
+        let (entry_name, cli_schema) = if matches!(
+            request.kind,
+            jet_foundation::MIR::MirArtifactKind::TestExecutable
+                | jet_foundation::MIR::MirArtifactKind::FuzzExecutable
+        ) {
+            (None, None)
+        } else {
+            let zero_arg_entry = selected_test_override_tir_entry(bundle, &request)
+                .or_else(|| selected_zero_arg_tir_entry(bundle));
+            let cli_schema = zero_arg_entry
+                .is_none()
+                .then(|| jet_foundation::CLISchema::entry_schema_for_bundle(bundle))
+                .flatten();
+            let cli_run = cli_schema.as_ref().and_then(|_| {
+                module.items.iter().find_map(|item| match item {
+                    Item::Func(function) if function.name == "run" => Some(function.name.clone()),
+                    Item::Const(value) => value.resolved_output.as_ref().and_then(|output| {
+                        (output.selected && output.module == bundle.entry && output.params.len() == 1)
+                            .then(|| output.semantic_name.clone())
+                    }),
+                    _ => None,
+                })
+            });
+            let entry_name = match (zero_arg_entry, cli_run, cli_schema.is_some()) {
+                (Some(name), _, _) => name,
+                (None, Some(_), _) | (None, None, true) => super::mangle_generated("cli_main"),
+                (None, None, false) => {
+                    return Err(LowerError::new(
+                        crate::Diagnostics::Span::new(0, 0),
+                        NO_RUNNABLE_ENTRY,
+                    ));
+                }
+            };
+            (Some(entry_name), cli_schema)
         };
         cx.jit_spawn_lambdas.borrow_mut().clear();
         cx.jit_spawn_sites.borrow_mut().clear();
@@ -1766,19 +3839,35 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
         cx.jit_generic_calls.borrow_mut().clear();
         cx.jit_canonical_deopt.borrow_mut().clear();
         cx.jit_canonical_calls.borrow_mut().clear();
+        // #2502: the canonical contract sampling plan this walk records and
+        // artifact discovery replays.
+        let mut contract_rows = artifact_plan::ContractSamplingPlan::new();
         for item in &module.items {
             match item {
                 Item::Func(f) => {
                     // D-FFI-INLINE1: body lives in the hidden bridge; calls are ExternCall.
-                    if f.inline_foreign.is_some() {
-                        continue;
-                    }
-                    let covered = tir_covers(f, &cx);
-                    if !f.type_params.is_empty() || !covered {
+                    let covered = f.inline_foreign.is_none() && tir_covers(f, &cx);
+                    materialize_contract_sampling(
+                        f,
+                        &entry_module_identity,
+                        covered,
+                        &f.name,
+                        &cx,
+                        &mut funcs,
+                        &mut contract_rows,
+                    );
+                    if f.inline_foreign.is_some() || !f.type_params.is_empty() || !covered {
                         continue;
                     }
                     let lowered = lower_func(f, &cx);
                     funcs.push(lowered);
+                }
+                Item::Test(test)
+                    if include_tests
+                        && test.name.is_some()
+                        && tir_covers_test_body(&test.body, &cx) =>
+                {
+                    funcs.push(lower_test_item(test, &entry_module_identity, &cx));
                 }
                 Item::ErrorConv(ec) => {
                     if !tir_covers_error_conv_body(&ec.body, &cx) {
@@ -1820,8 +3909,9 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                     &cx,
                                     &implementation.trait_name,
                                     implementation.compiler_generated && method.compiler_generated,
+                                    implementation.operator_rhs.as_ref(),
                                 );
-                                lowered.name = format!("{}::{}", s.name, method.name);
+                                set_lowered_method_name(&mut lowered, || format!("{}::{}", s.name, method.name));
                                 funcs.push(lowered);
                             }
                         }
@@ -1861,8 +3951,9 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                     &cx,
                                     &implementation.trait_name,
                                     implementation.compiler_generated && method.compiler_generated,
+                                    implementation.operator_rhs.as_ref(),
                                 );
-                                lowered.name = format!("{}::{}", e.name, method.name);
+                                set_lowered_method_name(&mut lowered, || format!("{}::{}", e.name, method.name));
                                 funcs.push(lowered);
                             }
                         }
@@ -1927,6 +4018,7 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                     &cx,
                                     trait_name,
                                     imp.is_generated_serde && specialized.compiler_generated,
+                                    imp.operator_rhs.as_ref(),
                                 )
                             } else {
                                 if !tir_covers_method(&specialized, &imp.type_name, &cx) {
@@ -1940,7 +4032,7 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                     false,
                                 )
                             };
-                            lowered.name = format!("{}::{}", owner_ty.name(), method.name);
+                            set_lowered_method_name(&mut lowered, || format!("{}::{}", owner_ty.name(), method.name));
                             funcs.push(lowered);
                         }
                     }
@@ -1951,7 +4043,21 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                     for inner in body {
                         match inner {
                             Item::Func(f) => {
-                                if !f.type_params.is_empty() || !tir_covers(f, &cx) {
+                                let covered = tir_covers(f, &cx);
+                                let child = child_module_identity(&entry_module_identity, &cm.name);
+                                let previous_prefix = cx.jit_local_call_prefix.clone();
+                                cx.jit_local_call_prefix = Some(format!("{}::", mangle(&cm.name)));
+                                materialize_contract_sampling(
+                                    f,
+                                    &child,
+                                    covered,
+                                    &f.name,
+                                    &cx,
+                                    &mut funcs,
+                                    &mut contract_rows,
+                                );
+                                cx.jit_local_call_prefix = previous_prefix;
+                                if !f.type_params.is_empty() || !covered {
                                     continue;
                                 }
                                 // Match the AOT inline-module path: lower against the
@@ -1965,6 +4071,14 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                 lowered.name = member;
                                 funcs.push(lowered);
                             }
+                            Item::Test(test)
+                                if include_tests
+                                    && test.name.is_some()
+                                    && tir_covers_test_body(&test.body, &cx) =>
+                            {
+                                let child = child_module_identity(&entry_module_identity, &cm.name);
+                                funcs.push(lower_test_item(test, &child, &cx));
+                            }
                             Item::Struct(s) => {
                                 let type_name = if s.name.starts_with(&member_prefix) {
                                     s.name.clone()
@@ -1976,7 +4090,7 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                         continue;
                                     }
                                     let mut lowered = lower_method(method, &type_name, &cx);
-                                    lowered.name = format!("{}::{}", type_name, method.name);
+                                    set_lowered_method_name(&mut lowered, || format!("{}::{}", type_name, method.name));
                                     funcs.push(lowered);
                                 }
                             }
@@ -2003,6 +4117,7 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                             &cx,
                                             trait_name,
                                             imp.is_generated_serde && method.compiler_generated,
+                                            imp.operator_rhs.as_ref(),
                                         )
                                     } else {
                                         if !tir_covers_method(method, &type_name, &cx) {
@@ -2010,7 +4125,7 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                         }
                                         lower_method(method, &type_name, &cx)
                                     };
-                                    lowered.name = format!("{}::{}", type_name, method.name);
+                                    set_lowered_method_name(&mut lowered, || format!("{}::{}", type_name, method.name));
                                     funcs.push(lowered);
                                 }
                             }
@@ -2046,6 +4161,10 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                 &bundle.edition,
             );
             populate_cx_from_bundle(&mut imported_cx, bundle, module_idx);
+            boxed_edges_by_module.insert(imported_owner.clone(), imported_cx.boxed_edges.clone());
+            auto_printable_by_module
+                .insert(imported_owner.clone(), imported_cx.auto_printable.clone());
+            auto_debug_by_module.insert(imported_owner.clone(), imported_cx.auto_debug.clone());
             // #2252: this pass lowers the module's OWN items under their
             // canonical owner (`{owner}::{Leaf}::{method}` below), so the
             // context needs the same canonical shape rows a consumer context
@@ -2071,32 +4190,72 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
             imported_cx.jit_spawn_site_base = spawn_lambdas.len();
             for item in &imported.items {
                 match item {
-                    Item::Func(function)
-                        if function.type_params.is_empty()
-                            && tir_covers(function, &imported_cx) =>
+                    Item::Func(function) => {
+                        let covered =
+                            function.type_params.is_empty() && tir_covers(function, &imported_cx);
+                        imported_cx.jit_local_call_prefix =
+                            Some(format!("{}::", mangle(&imported.alias)));
+                        if covered {
+                            let mut lowered = lower_func(function, &imported_cx);
+                            lowered.name =
+                                format!("{}::{}", mangle(&imported.alias), mangle(&function.name));
+                            funcs.push(lowered);
+                        }
+                        materialize_contract_sampling(
+                            function,
+                            &imported_owner,
+                            covered,
+                            &function.name,
+                            &imported_cx,
+                            &mut funcs,
+                            &mut contract_rows,
+                        );
+                    }
+                    Item::Test(test)
+                        if include_tests
+                            && test.name.is_some()
+                            && tir_covers_test_body(&test.body, &imported_cx) =>
                     {
                         imported_cx.jit_local_call_prefix =
                             Some(format!("{}::", mangle(&imported.alias)));
-                        let mut lowered = lower_func(function, &imported_cx);
-                        lowered.name =
-                            format!("{}::{}", mangle(&imported.alias), mangle(&function.name));
-                        funcs.push(lowered);
+                        funcs.push(lower_test_item(test, &imported_owner, &imported_cx));
                     }
                     Item::CodeModule(code_module) => {
                         let Some(body) = &code_module.body else {
                             continue;
                         };
                         for inner in body {
+                            if let Item::Test(test) = inner {
+                                if include_tests
+                                    && test.name.is_some()
+                                    && tir_covers_test_body(&test.body, &imported_cx)
+                                {
+                                    let child =
+                                        child_module_identity(&imported_owner, &code_module.name);
+                                    funcs.push(lower_test_item(test, &child, &imported_cx));
+                                }
+                                continue;
+                            }
                             let Item::Func(function) = inner else {
                                 continue;
                             };
-                            if !function.type_params.is_empty()
-                                || !tir_covers(function, &imported_cx)
-                            {
-                                continue;
-                            }
+                            let covered = function.type_params.is_empty()
+                                && tir_covers(function, &imported_cx);
+                            let child = child_module_identity(&imported_owner, &code_module.name);
                             imported_cx.jit_local_call_prefix =
                                 Some(format!("{}::", mangle(&code_module.name)));
+                            materialize_contract_sampling(
+                                function,
+                                &child,
+                                covered,
+                                &function.name,
+                                &imported_cx,
+                                &mut funcs,
+                                &mut contract_rows,
+                            );
+                            if !covered {
+                                continue;
+                            }
                             // Keep inline body-local import lookup aligned with the
                             // emitted `code_module__function` name. The final TIR
                             // symbol remains the imported module's Rust-qualified ABI.
@@ -2148,10 +4307,11 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                     &imported_cx,
                                     false,
                                 );
+                                let binders = qualification_binders(type_params, Some(method));
                                 lowered.ret = lowered.ret.as_ref().map(|ty| {
-                                    qualify_imported_type(bundle, module_idx, &owner, ty)
+                                    qualify_imported_type(bundle, module_idx, &owner, &binders, ty)
                                 });
-                                lowered.name = format!("{}::{}", qualified, method.name);
+                                set_lowered_method_name(&mut lowered, || format!("{}::{}", qualified, method.name));
                                 funcs.push(lowered);
                             }
                             for implementation in trait_impls {
@@ -2179,11 +4339,13 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                         &implementation.trait_name,
                                         implementation.compiler_generated
                                             && method.compiler_generated,
+                                        implementation.operator_rhs.as_ref(),
                                     );
+                                    let binders = qualification_binders(type_params, Some(method));
                                     lowered.ret = lowered.ret.as_ref().map(|ty| {
-                                        qualify_imported_type(bundle, module_idx, &owner, ty)
+                                        qualify_imported_type(bundle, module_idx, &owner, &binders, ty)
                                     });
-                                    lowered.name = format!("{}::{}", qualified, method.name);
+                                    set_lowered_method_name(&mut lowered, || format!("{}::{}", qualified, method.name));
                                     funcs.push(lowered);
                                 }
                             }
@@ -2229,8 +4391,9 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                     &imported_cx,
                                     false,
                                 );
+                                let binders = qualification_binders(&[], Some(method));
                                 lowered.ret = lowered.ret.as_ref().map(|ty| {
-                                    qualify_imported_type(bundle, module_idx, &owner, ty)
+                                    qualify_imported_type(bundle, module_idx, &owner, &binders, ty)
                                 });
                                 lowered.name = name;
                                 funcs.push(lowered);
@@ -2259,11 +4422,12 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                 &imported_cx,
                                 crate::Syntax::TRAIT_DISPLAY,
                                 false,
+                                implementation.operator_rhs.as_ref(),
                             );
-                            lowered.name = format!(
+                            set_lowered_method_name(&mut lowered, || format!(
                                 "{}::{}::{}",
                                 imported_owner, implementation.type_name, method.name
-                            );
+                            ));
                             funcs.push(lowered);
                         }
                     }
@@ -2325,6 +4489,7 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                             &imported_cx,
                                             trait_name,
                                             false,
+                                            implementation.operator_rhs.as_ref(),
                                         )
                                     } else {
                                         if !tir_covers_method(method, &qualified, &imported_cx) {
@@ -2337,11 +4502,12 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                             &imported_cx,
                                             false,
                                         )
-                                    };
+                                };
+                                let binders = qualification_binders(owner_params, Some(method));
                                 lowered.ret = lowered.ret.as_ref().map(|ty| {
-                                    qualify_imported_type(bundle, module_idx, &owner, ty)
+                                    qualify_imported_type(bundle, module_idx, &owner, &binders, ty)
                                 });
-                                lowered.name = format!("{}::{}", qualified, method.name);
+                                set_lowered_method_name(&mut lowered, || format!("{}::{}", qualified, method.name));
                                 funcs.push(lowered);
                             }
                         }
@@ -2353,18 +4519,27 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                 &mut *imported_cx.jit_spawn_lambdas.borrow_mut(),
             ));
         }
-        let entry_ok = if entry_name == super::mangle_generated("cli_main") {
-            // A program-struct CLI has no literal `run`: argv selects one of its
-            // lowered methods or bound functions at execution time. `cli::prepare`
-            // resolves that target from the checked schema, and the evaluator
-            // reports a missing selected TIR entry instead of rejecting the whole
-            // program before dispatch.
-            cli_schema.is_some() || funcs.iter().any(|function| function.name == "run")
-        } else {
-            funcs.iter().any(|function| function.name == entry_name)
-        };
-        if !entry_ok {
-            return None;
+        apply_checked_web_partitions(bundle, &mut funcs);
+        if let Some(entry_name) = entry_name {
+            let entry_ok = if entry_name == super::mangle_generated("cli_main") {
+                // A checked CLI schema selects its callable at execution time.
+                cli_schema.is_some()
+                    || funcs.iter().any(|function| {
+                        function.name == "run" && matches!(&function.kind, TFuncKind::TopLevel)
+                    })
+            } else {
+                funcs.iter().any(|function| {
+                    function.name == entry_name && matches!(&function.kind, TFuncKind::TopLevel)
+                })
+            };
+            if !entry_ok {
+                let reason = if entry_name == super::mangle_generated("cli_main") {
+                    CLI_ENTRY_MISSING_RUN
+                } else {
+                    "selected entry is not a top-level function"
+                };
+                return Err(LowerError::new(crate::Diagnostics::Span::new(0, 0), reason));
+            }
         }
         let mut struct_fields = std::collections::HashMap::new();
         let mut struct_field_types = std::collections::HashMap::new();
@@ -2374,9 +4549,10 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
         let mut enum_variant_payload_types = std::collections::HashMap::new();
         enum_variants.insert(
             crate::Syntax::TYPE_ORDERING.to_string(),
-            ["Less", "Equal", "Greater"]
-                .into_iter()
-                .map(mangle)
+            tir_to_mir_types::compiler_owned_enum_variants(crate::Syntax::TYPE_ORDERING)
+                .expect("Ordering is a compiler-owned enum")
+                .iter()
+                .map(|variant| mangle(variant))
                 .collect(),
         );
         // D-CONC-FAIL1=A: `TaskFailure` is a Prelude enum, so register its
@@ -2592,6 +4768,7 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
             for item in &imported.items {
                 match item {
                     Item::Struct(s) => {
+                        let binders = qualification_binders(&s.type_params, None);
                         for owner in crate::Codegen::TIR::imported_type_owners(bundle, module_idx) {
                             let name = crate::Codegen::TIR::imported_type_name(&owner, &s.name);
                             struct_type_params.insert(
@@ -2614,7 +4791,7 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                     .reflection_fields()
                                     .map(|field| {
                                         crate::Codegen::TIR::qualify_imported_type(
-                                            bundle, module_idx, &owner, &field.ty,
+                                            bundle, module_idx, &owner, &binders, &field.ty,
                                         )
                                     })
                                     .collect::<Vec<_>>();
@@ -2627,7 +4804,7 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                                     .into_iter()
                                     .map(|mut field| {
                                         field.ty = crate::Codegen::TIR::qualify_imported_type(
-                                            bundle, module_idx, &owner, &field.ty,
+                                            bundle, module_idx, &owner, &binders, &field.ty,
                                         );
                                         field
                                     })
@@ -2643,11 +4820,13 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                         }
                     }
                     Item::Enum(e) if e.type_params.is_empty() => {
+                        let binders = qualification_binders(&e.type_params, None);
                         for owner in crate::Codegen::TIR::imported_type_owners(bundle, module_idx) {
                             register_imported_enum_variants(
                                 bundle,
                                 module_idx,
                                 &owner,
+                                &binders,
                                 &e.name,
                                 &e.variants,
                                 &mut enum_variants,
@@ -2723,48 +4902,6 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
             .iter()
             .map(|(name, (base, _))| (name.clone(), base.clone()))
             .collect();
-        let mut trait_method_owners =
-            std::collections::HashMap::<(String, String), Vec<String>>::new();
-        for item in &module.items {
-            let mut record = |trait_name: &str, owner: &str, methods: &[crate::AST::Func]| {
-                for method in methods {
-                    trait_method_owners
-                        .entry((trait_name.to_string(), method.name.clone()))
-                        .or_default()
-                        .push(owner.to_string());
-                }
-            };
-            match item {
-                Item::Struct(def) => {
-                    for implementation in &def.trait_impls {
-                        record(
-                            &implementation.trait_name,
-                            &def.name,
-                            &implementation.methods,
-                        );
-                    }
-                }
-                Item::Enum(def) => {
-                    for implementation in &def.trait_impls {
-                        record(
-                            &implementation.trait_name,
-                            &def.name,
-                            &implementation.methods,
-                        );
-                    }
-                }
-                Item::Impl(implementation) => {
-                    if let Some(trait_name) = &implementation.trait_name {
-                        record(
-                            trait_name,
-                            &implementation.type_name,
-                            &implementation.methods,
-                        );
-                    }
-                }
-                _ => {}
-            }
-        }
         let iterable_item_types = cx
             .iterable_hooks
             .iter()
@@ -2775,18 +4912,84 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
                 )
             })
             .collect();
-        let codec_migrations = compile_codec_migrations(&cx, &module.items)?;
+        let codec_migrations = compile_codec_migrations(&cx, &entry_module_identity, &module.items)
+            .ok_or_else(|| {
+                LowerError::new(
+                    crate::Diagnostics::Span::new(0, 0),
+                    "checked schema migration is missing its default or conversion function",
+                )
+            })?;
         let canonical_deopt = cx.jit_canonical_deopt.borrow().clone();
         let canonical_calls = cx.jit_canonical_calls.borrow().clone();
-        Some(JitProgram {
-            instance_provenance: instance_provenance(bundle),
+        let declarations =
+            lower_tir_declarations(
+                bundle,
+                &boxed_edges_by_module,
+                &auto_printable_by_module,
+                &auto_debug_by_module,
+            );
+        let hardware_use = crate::Sema::target_hardware_use(bundle);
+        let hardware_profile = crate::Sema::target_hardware_profile(bundle);
+        let hardware_profile_id =
+            crate::Sema::target_hardware_profile_id(bundle).unwrap_or_default();
+        let hardware_capabilities = crate::Sema::target_hardware_capabilities(bundle);
+        let hardware_setups = target_hardware_setups(
+            bundle,
+            &hardware_use,
+            hardware_profile.as_ref(),
+            &hardware_profile_id,
+        );
+        let mut used_core = bundle
+            .used_core
+            .iter()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        if hardware_profile.is_some() {
+            used_core.insert("core.hardware".to_string());
+        }
+        let artifact_facts = lower_tir_artifact_facts_for_request(bundle, request, &contract_rows);
+        let mut unreachable = Vec::new();
+        for (index, source) in bundle.modules.iter().enumerate() {
+            collect_item_erasures(
+                &source.items,
+                &artifact_plan::module_identity(bundle, index),
+                include_tests,
+                &mut unreachable,
+            );
+        }
+        let mut program = TirProgram {
+            package_identity: bundle.build_facts.package_name.clone(),
+            facts: TirPackageFacts {
+                project_root: bundle.project_root.display().to_string(),
+                used_core,
+                ffi_callback_functions: bundle.ffi_callback_fns.iter().cloned().collect(),
+                active_os: format!("{:?}", bundle.active_os),
+                inferred_layer: format!("{:?}", bundle.inferred_layer),
+                allocator: format!("{:?}", bundle.program_allocator),
+                web_app: crate::Sema::extract_app_graph(bundle).0,
+                authority_needs: bundle.package_guarantees.authority_needs.clone(),
+                model_outputs: bundle.model_outputs().to_vec(),
+                hardware_use,
+                hardware_profile,
+                hardware_profile_id,
+                hardware_capabilities,
+                hardware_setups,
+            },
             source_file: module.display.clone(),
             source_text: module.source.clone(),
+            source_files: bundle
+                .modules
+                .iter()
+                .map(|module| (module.display.clone(), module.source.clone()))
+                .collect(),
             package_hardened: bundle.package_guarantees.harden,
             application_authority: bundle.package_guarantees.application_authority.clone(),
             edition: bundle.edition.clone(),
-            entry: entry_name,
             funcs,
+            declarations,
+            artifact_facts,
+            core_calls: crate::Syntax::CORE_CALLS.iter().collect(),
+            unreachable,
             spawn_lambdas,
             struct_fields,
             struct_field_types,
@@ -2804,96 +5007,43 @@ fn lower_jit_program_on_stack(bundle: &ProgramBundle) -> Option<JitProgram> {
             distinct_bases,
             distinct_ranges: cx.distinct_ranges.clone(),
             codec_migrations,
-            trait_method_owners,
+            trait_method_traits: cx.trait_method_traits.clone(),
             iterable_item_types,
-        })
+        };
+        CanonicalPass::record(
+            "lowering",
+            "tir.lower-checked-program",
+            "crates/jet-codegen/src/Codegen/TIR/mod.rs",
+            "ast",
+            CanonicalPass::ast_payload(bundle),
+            CanonicalPass::ast_identity(bundle),
+            "tir",
+            canonical_payload(&program),
+            canonical_identity(&program),
+            "preserve",
+        );
+        let tir_before_optimization = canonical_payload(&program);
+        let tir_before_identity = canonical_identity(&program);
+        opt::optimize_program(&mut program);
+        CanonicalPass::record(
+            "lowering",
+            "tir.optimize-program",
+            "crates/jet-codegen/src/Codegen/TIR/opt.rs",
+            "tir",
+            tir_before_optimization,
+            tir_before_identity,
+            "tir",
+            canonical_payload(&program),
+            canonical_identity(&program),
+            "preserve",
+        );
+        Ok(program)
     })
 }
 
-/// The two `lower_jit_program_fail_reason` answers that describe a real
-/// user-side missing entry point rather than a compiler defect: the program
-/// simply has nothing to run. Every OTHER reason means lowering itself failed
-/// on a program that does have an entry, which is an I2 internal compiler
-/// error, not a user diagnostic (card #2001). The dev interpreter boundary in
-/// `eval::run_bundle_at_stage` keys E2201 off exactly these two, so they are
-/// named here beside the strings they must stay equal to.
+/// Explicit lowering messages for a checked bundle with no runnable entry.
 pub const NO_RUNNABLE_ENTRY: &str = "no runnable entry";
 pub const CLI_ENTRY_MISSING_RUN: &str = "cli entry missing `run`";
-
-/// Why `lower_jit_program` returned `None`.
-pub fn lower_jit_program_fail_reason(bundle: &ProgramBundle) -> String {
-    if let Some(reason) = LAST_JIT_LOWER_FAILURE.with(|failure| failure.borrow_mut().take()) {
-        return reason;
-    }
-    let Some(module) = bundle.modules.get(bundle.entry) else {
-        return "missing entry module".to_string();
-    };
-    let extern_funcs = bundle_extern_funcs(bundle);
-    let mut cx = build_cx_items(
-        &module.items,
-        &module.source,
-        &module.display,
-        None,
-        &extern_funcs,
-        &bundle.edition,
-    );
-    populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
-    let selected = selected_zero_arg_tir_entry(bundle).or_else(|| {
-        jet_foundation::CLISchema::entry_schema_for_bundle(bundle)
-            .map(|_| super::mangle_generated("cli_main"))
-    });
-    let Some(selected) = selected else {
-        return NO_RUNNABLE_ENTRY.to_string();
-    };
-    let entry_check = if selected == super::mangle_generated("cli_main") {
-        "run".to_string()
-    } else {
-        selected.clone()
-    };
-    let mut saw_entry = false;
-    let mut entry_tir = false;
-    for item in &module.items {
-        let Item::Func(f) = item else {
-            continue;
-        };
-        if f.name == entry_check {
-            saw_entry = true;
-            entry_tir = tir_covers(f, &cx);
-        }
-    }
-    if !saw_entry {
-        return if selected == super::mangle_generated("cli_main") {
-            CLI_ENTRY_MISSING_RUN.to_string()
-        } else {
-            "selected entry is not a top-level function".to_string()
-        };
-    }
-    if !entry_tir {
-        let mut locals: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for item in &module.items {
-            let Item::Func(f) = item else {
-                continue;
-            };
-            if f.name != entry_check {
-                continue;
-            }
-            for (i, stmt) in f.body.iter().enumerate() {
-                let mut probe = locals.clone();
-                if !subset::stmt_in_subset(stmt, &cx, &mut probe) {
-                    if let crate::AST::Stmt::Val(b) = stmt {
-                        if !subset::expr_in_subset(&b.init, &cx, &locals) {
-                            return format!("entry stmt {i} init outside tir_covers");
-                        }
-                    }
-                    return format!("entry stmt {i} outside tir_covers");
-                }
-                let _ = subset::stmt_in_subset(stmt, &cx, &mut locals);
-            }
-        }
-        return "entry outside tir_covers".to_string();
-    }
-    "unknown".to_string()
-}
 
 // ---------------------------------------------------------------------------
 // TIR types. Every node carries the facts codegen needs, pre-resolved (totality).
@@ -2912,36 +5062,52 @@ pub struct TUnsafeGate {
     pub fenced: bool,
 }
 
-/// A lowered top-level function. `params` are already mangled to their Rust
-/// names and carry their resolved Jet `Type`; `ret` is the resolved return type.
-pub struct TFunc {
-    /// Jet function name (unmangled) — the emitter mangles via `cx.mangle_name`.
+/// One source-level generic parameter and its checked bounds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TGenericParam {
     pub name: String,
+    pub bounds: Vec<String>,
+}
+
+/// A lowered top-level function. Parameter and generic names remain Jet
+/// identities; each adapter owns target-specific spelling.
+#[derive(Clone)]
+pub struct TFunc {
+    /// Jet function name (unmangled).
+    pub name: String,
+    /// Canonical module identity for this checked body.
+    pub module: String,
+    /// Deterministic semantic key for this function, independent of allocation order.
+    pub key: String,
+    /// Source file identity owned by this function row.
+    pub source_file: String,
     /// Source range for function-level evaluator diagnostics.
-    ///
-    /// Expression-precise spans remain owned by Tower #1329.
     pub source_span: crate::Diagnostics::Span,
-    /// `(mangled rust name, resolved jet type, convention)` per parameter. The
-    /// convention is kept so the emitter reproduces the `&`/by-value Rust form
-    /// without re-deciding (it mirrors `rust_param_type`).
+    /// Sema-selected failure carrier; adapters must not infer it from `ret`.
+    pub failure_carrier: TFailureCarrier,
+    /// Direct/solved/call-edge effect facts and their source spans.
+    pub effects: TEffectFacts,
+    /// Target applicability fixed by the checked bundle.
+    pub target_applicability: TTargetApplicability,
+    /// Checked web partition facts.
+    pub web_bucket: Option<crate::WebPartition::WebBucket>,
+    pub web_marker: Option<crate::WebPartition::WebPartitionMarker>,
+    /// Checked visibility and foreign ownership provenance.
+    pub visibility: TVisibility,
+    pub foreign: Option<TForeignProvenance>,
+    /// `(Jet parameter name, resolved Jet type, convention)` per parameter.
     pub params: Vec<(String, Type, AccessConvention)>,
-    /// Web-export boundary facts. A Codable struct parameter stays a typed value
-    /// in the executable TIR body, while the external Wasm wrapper receives its
-    /// scalar fields. Lowering resolves every Rust name/type here; Web emission
-    /// only formats the wrapper and never re-discovers struct semantics.
+    /// Web-export boundary facts.
     pub web_param_reconstructions: Vec<TWebParamReconstruction>,
     /// Resolved return type, or `None` for a unit-returning function.
     pub ret: Option<Type>,
     /// Sema-proven hidden automatic-root return representation.
     pub gc_return: bool,
-    /// Sema-proved owner source for a returned `View`/`ViewMut`. Codegen reads
-    /// this fact mechanically when spelling hidden Rust lifetimes.
+    /// Sema-selected tracing scope, including scopes with no promotions.
+    pub gc_scope: bool,
     pub return_view_provenance: Option<crate::AST::ViewProvenanceMap>,
-    /// c109 Phase 17: the rendered Rust generic clause (`<T: Clone>` / `<T, U>` / empty),
-    /// resolved at lowering via `Generics::rust_type_param_list(&f.type_params, …)` exactly
-    /// as `emit_func` does, including only bounds required by lowered operations.
-    /// Emitted verbatim after the function name; empty for a non-generic function.
-    pub generics: String,
+    /// Checked generic parameters; no rendered target-language clause.
+    pub generic_params: Vec<TGenericParam>,
     /// Types of operands materialized with `.clone()` while lowering this body.
     /// Generic inherent impl emission unions these facts to derive minimal bounds.
     pub clone_types: Vec<Type>,
@@ -3046,6 +5212,7 @@ pub enum TContractDisposition {
     Stripped,
 }
 
+#[derive(Clone)]
 pub struct TContract {
     pub kind: TContractKind,
     pub condition: TExpr,
@@ -3057,6 +5224,7 @@ pub struct TContract {
 }
 
 /// One typed parameter reconstructed by a flattened WebAssembly export wrapper.
+#[derive(Clone)]
 pub struct TWebParamReconstruction {
     /// Param slot the reconstructed value binds into (matches `TFunc.params`).
     pub local: TLocal,
@@ -3076,6 +5244,7 @@ pub enum SerdeCodec {
 }
 
 /// c109 Phase 7: the emission shape of a lowered function.
+#[derive(Clone)]
 pub enum TFuncKind {
     /// A module-level free function — `pub fn name(params) { … }`.
     TopLevel,
@@ -3099,6 +5268,12 @@ pub enum TFuncKind {
     TraitMethod {
         is_unsafe: bool,
         self_conv: Option<AccessConvention>,
+        /// Neutral checked owner identity; MIR lowering must not recover it
+        /// from the legacy emitted signature.
+        owner_type: Type,
+        /// Neutral checked trait identity; MIR lowering must not recover it
+        /// from the legacy emitted signature.
+        trait_name: String,
         /// D-SERDE2 (card #131 S1-bridge): a hand-written `impl T.Encode` /
         /// `impl T.Decode` method. The user writes the verbs `encode`/`decode`
         /// with Jet-facing signatures, but the Rust `__jet_Encode`/`__jet_Decode`
@@ -3108,20 +5283,29 @@ pub enum TFuncKind {
         /// produce Rust rustc accepts). `None` for every ordinary trait method.
         serde: Option<SerdeCodec>,
     },
-    /// c109 Phase 15: a DELEGATION trait method (`using field`) — `emit_delegation_method`
-    /// (Source/Codegen/Items.rs). The whole method is structural: a forwarding call
-    /// `(self).<field>.<method>(<args>)` to the delegated field, with the BARE trait
-    /// method name (no `__jet_` mangle). There is NO body to lower — the forward string is
-    /// resolved at lowering. The signature reproduces `emit_delegation_method`'s exact
-    /// shape (a quirky two-space `  {` before the brace, `&self` receiver, no `pub`).
-    /// `has_return` decides whether the forward line ends in `;` (unit) or not (returns).
-    /// `sig` is the fully-rendered signature line (`    fn name(params)  {\n` with its
-    /// quirky double space) and `fwd` the forwarding call — both resolved at lowering.
-    Delegation {
-        sig: String,
-        fwd: String,
-        has_return: bool,
-    },
+}
+
+impl TFuncKind {
+    /// The receiver slot of an instance method: its checked owner type and
+    /// access convention. `None` for free functions and static methods.
+    ///
+    /// `TFunc.params` never lists the receiver; this is the one fact every
+    /// MIR consumer binds it from, so the receiver is MIR parameter 0 and the
+    /// declared parameters follow it in order.
+    pub fn receiver(&self) -> Option<(&Type, AccessConvention)> {
+        match self {
+            TFuncKind::TopLevel => None,
+            TFuncKind::Method {
+                self_conv,
+                owner_type,
+            }
+            | TFuncKind::TraitMethod {
+                self_conv,
+                owner_type,
+                ..
+            } => self_conv.map(|access| (owner_type, access)),
+        }
+    }
 }
 
 /// c109 Phase 22: a special source iteration form on a `loop x in <coll>`,
@@ -3130,6 +5314,7 @@ pub enum TFuncKind {
 /// `file`/the panic line are program/source facts. The plain `.iter().cloned()` form
 /// (incl. a non-special method-call collection like `.split(…)`, which `emit_for_in`
 /// routes to its `else` default) is represented by `ForIn.method_kind == None`.
+#[derive(Clone)]
 pub enum TForInMethod {
     /// `loop c in s.chars()` — char iteration: `for __jet_c in ({recv}).chars()`,
     /// binding `let <var> = __jet_c;`.
@@ -3153,9 +5338,13 @@ pub enum TForInMethod {
     /// D-ENCSTREAM-SURFACE1=A: bounded synchronous codec-reader pull source.
     EncodingReader { reader_type: String },
     /// D-ITER-HOOK: `loop x in mytype` when `mytype` implements `Iterable`.
+    /// The symbol fields are canonical checked TFunc identities; MIR and
+    /// adapters must not reconstruct them from the collection type.
     Iterable {
         coll_type: String,
         iter_type: String,
+        iter_symbol: String,
+        next_symbol: String,
     },
 }
 
@@ -3175,6 +5364,7 @@ pub enum TForInMethod {
 ///    branch. This is used when a structural pattern reads one subject in both
 ///    places; the subject is evaluated once, outside the condition's expression
 ///    scope.
+#[derive(Clone)]
 pub enum TIfCond {
     Plain(TExpr),
     /// A right-associated, short-circuiting conjunction. `left` is atomic;
@@ -3201,6 +5391,7 @@ pub enum TIfCond {
 }
 
 /// D-DOTSCOPE1: which `#Test` scope member a `TStmt::ScopeMember` is.
+#[derive(Clone)]
 pub enum ScopeMemberKind {
     /// `.setup { … }` — the body's statements are spliced inline (bindings leak
     /// to the rest of the test), running first.
@@ -3225,6 +5416,7 @@ pub enum ScopeMemberKind {
 /// This remains structured through lowering so every backend mutates the
 /// collection element itself instead of reconstructing the field-read
 /// expression, whose list-index path returns a clone.
+#[derive(Clone)]
 pub struct TIndexFieldAssign {
     pub base: TExpr,
     pub index: TExpr,
@@ -3246,11 +5438,25 @@ pub enum TStructExtra {
     HTTPRequestParams,
 }
 
+/// A checked helper with a stable Prelude identity. The legacy `helper` spelling
+/// remains only for the old emitter until #2918.
+#[derive(Clone, Copy)]
+pub enum THelperKind {
+    ClockNew,
+    ClockSystem,
+}
+
 /// Host/prelude call assembled only in emit — structured pieces, no Rust source text.
+#[derive(Clone)]
 pub enum THostCall {
-    /// `{root}{helper}({args…})` with per-arg wrap style.
-    Helper { helper: String, args: Vec<THostArg> },
-    /// `(recv).{method}({args})`
+    /// A checked helper route. `helper` is retained for the old emitter only.
+    Helper {
+        helper: String,
+        kind: THelperKind,
+        args: Vec<THostArg>,
+    },
+    /// `(recv).{method}({args})`; `method` is a checked Jet identity and the
+    /// MIR lowerer selects its explicit Prelude row from the receiver shape.
     Method {
         recv: Box<TExpr>,
         method: String,
@@ -3291,15 +5497,18 @@ pub enum THostCall {
     FnName(String),
     /// GC edit expression — structured slots; emit formats jet_gc edit wrappers.
     GcEdit {
-        root: String,
+        /// The checked source local owning the GC root. Backend place spellings
+        /// are derived by each adapter, never stored in analytical TIR.
+        root: TLocal,
         method_span_start: usize,
-        edges: Vec<String>,
+        /// Checked source locals whose GC object identities become edge inputs.
+        edges: Vec<TLocal>,
         edit: Box<TExpr>,
         index_temp: Option<(String, TExpr)>,
         kind: TGcEditKind,
     },
-    /// GC local read: `jet_gc::runtime_or_exit(root.read(|__jet_value| __jet_value.clone()))`.
-    GcRead { root: String },
+    /// GC local read. Backend adapters derive the place from this checked slot.
+    GcRead { root: TLocal },
     /// Option/pattern projection helpers: `(inner).is_some()` / `.unwrap()` / field project.
     OptionProbe {
         inner: Box<TExpr>,
@@ -3365,6 +5574,11 @@ pub enum THostCall {
         symbol: String,
         lambda: TLambda,
         ret: Option<Type>,
+        /// D-FFI-CALLBACK2=A: managed callback transport carries the exact
+        /// generated plan identity through TIR into each target adapter.
+        managed: bool,
+        plan_digest: Option<String>,
+        callback_identity: Option<String>,
     },
 }
 
@@ -3388,6 +5602,7 @@ pub enum TMatchProbe {
     Unwrap,
 }
 
+#[derive(Clone)]
 pub enum THostArg {
     Expr(TExpr),
     /// Wrap as `&(expr)`
@@ -3427,7 +5642,6 @@ pub enum TLetTy {
     /// Explicit Jet type, optionally wrapped for resources / GC roots.
     Annotated {
         ty: Type,
-        mut_fn: bool,
         wrapper: TLetWrapper,
     },
     /// Pattern-binding tuple annotation spelled `(T0, T1, …)`.
@@ -3452,25 +5666,20 @@ impl TLetTy {
     pub fn plain(ty: Type) -> Self {
         Self::Annotated {
             ty,
-            mut_fn: false,
             wrapper: TLetWrapper::None,
         }
     }
 
-    pub fn of(ty: Type, mut_fn: bool, wrapper: TLetWrapper) -> Self {
-        Self::Annotated {
-            ty,
-            mut_fn,
-            wrapper,
-        }
+    pub fn of(ty: Type, wrapper: TLetWrapper) -> Self {
+        Self::Annotated { ty, wrapper }
     }
 
     pub fn resource(ty: Type) -> Self {
-        Self::of(ty, false, TLetWrapper::Resource)
+        Self::of(ty, TLetWrapper::Resource)
     }
 
     pub fn automatic_root(ty: Type) -> Self {
-        Self::of(ty, false, TLetWrapper::AutomaticRoot)
+        Self::of(ty, TLetWrapper::AutomaticRoot)
     }
 }
 
@@ -3488,6 +5697,7 @@ pub struct TPanicLoc {
     pub locals: Vec<(String, TLocal)>,
 }
 
+#[derive(Clone)]
 pub enum TRequireKind {
     /// `assert(cond[, msg])`
     Require {
@@ -3529,6 +5739,7 @@ pub struct TContractResult {
 }
 
 /// A lowered statement. Only the constructs the Phase-1 subset allows.
+#[derive(Clone)]
 pub enum TStmt {
     /// D-FAIL-TIER1: one executable contract check.  A precondition node is
     /// placed immediately before the call that supplies its arguments;
@@ -3602,12 +5813,10 @@ pub enum TStmt {
         line: usize,
     },
     /// c109 Phase 23: a TUPLE-destructuring binding `(a, b) :: <init>` (S74,
-    /// `BindPattern::Tuple`). Reproduces `emit_stmt`'s destructure form byte-for-byte:
-    /// a `let {tmp} = &({init});` temp (borrowed — never moves out of a shared ref, I2),
-    /// then one `let[ mut] {elem_rust} = ({tmp}).{field_rust}.clone();` per element,
-    /// pairing the pattern's elements to the tuple type's CANONICAL fields by position
-    /// (resolved at lowering off the init's total `Type::Tuple`). `tmp` is the
-    /// `__jet_d{span}` name the AST uses (resolved at lowering); `kw` is `"let"`/`"let mut"`.
+    /// `BindPattern::Tuple`). The checked init type supplies the canonical source
+    /// field labels and field types; MIR resolves each projection by position and
+    /// the backend chooses the Rust spelling from the checked field row. `tmp` is
+    /// retained for the legacy TIR shape; `kw` is `"let"`/`"let mut"`.
     TupleDestructure {
         tmp: String,
         init: TExpr,
@@ -3615,18 +5824,12 @@ pub enum TStmt {
         /// Non-copyable guard fields must move out of the owned tuple instead
         /// of borrowing it and accidentally cloning the guarded value.
         move_fields: bool,
-        /// `(elem_rust_name, field_rust_name)` per bound element, canonical order.
+        /// `(source_binding, checked_field_label)` in canonical source order.
         binds: Vec<(String, String)>,
     },
     /// c109: a STRUCT-destructuring binding `Type.{ x, y } :: <init>` (S74,
-    /// `BindPattern::Struct`). Reproduces `emit_stmt`'s `BindPattern::Struct` arm
-    /// byte-for-byte: a `let {tmp} = &({init});` borrow temp, then one
-    /// `let[ mut] {local_rust} = ({tmp}).{field_rust}.clone();` per bound field.
-    /// D-DESTRUCT1: `local_rust`/`field_rust` diverge for a renamed field
-    /// (`severity: sev` binds local `sev` from field `severity`); they're equal
-    /// when unrenamed (pre-D-DESTRUCT1 shape). The field's resolved type comes
-    /// from `cx.struct_fields` (the init's `Type::Named`/`Apply` name), resolved
-    /// at lowering for the slot.
+    /// `BindPattern::Struct`). The checked field label is carried unchanged;
+    /// MIR resolves its type and stable field ID before backend spelling.
     StructDestructure {
         tmp: String,
         init: TExpr,
@@ -3634,7 +5837,7 @@ pub enum TStmt {
         /// Structs containing a SharedGuard are consumed so the owned guard
         /// moves into the binding instead of cloning its dereferenced payload.
         move_fields: bool,
-        /// `(local_rust_name, field_rust_name)` per bound field, source order.
+        /// `(source_binding, checked_field_label)` in source order.
         binds: Vec<(String, String)>,
     },
     /// c109 Phase 26: a LIST-destructuring binding `[a, b, c] :: <init>` (S74,
@@ -3717,13 +5920,16 @@ pub enum TStmt {
         cond: TExpr,
         body: Vec<TStmt>,
     },
-    /// D-LOOP-SEMICOLON1=A: `loop init; cond; step { body }` — the three-part counted loop.
+    /// D-LOOP-SEMICOLON1=A: `loop init; cond; step { … }` — the three-part counted loop.
     /// Emitted as `{ let mut init_name = init_val; loop { if !(cond) { break; } body; step; } }`.
     CountedLoop {
         label: Option<String>,
         init: Box<TStmt>,
         cond: TExpr,
         step: Option<Box<TStmt>>,
+        /// D-SIMD3=B: preserve sema's complete loop proof when a numeric range
+        /// is canonicalized into this counted shape.
+        auto_vectorization: Option<crate::AST::AutoVectorizationFacts>,
         body: Vec<TStmt>,
     },
     /// `loop i in start..end [, stride]` — a numeric range loop (`ForKind::Range`).
@@ -3906,9 +6112,8 @@ pub enum TStmt {
     /// impurity depth only while evaluating this body.
     Impure(Vec<TStmt>),
     /// D-REACTCORE1: `#Reactive { … }` — register a reactive effect at this point.
-    /// `closure` is the AOT Rust string; `executable` is the JIT-compilable body.
+    /// The executable body is lowered once into the shared MIR.
     Reactive {
-        closure: String,
         executable: Box<TLambda>,
     },
     /// c109 Phase 19: an explicit `region r { … }` (D-REGION1 opt B). Lowers to a plain
@@ -3997,6 +6202,19 @@ pub enum TStmt {
         stm: Option<TLocal>,
         body: Vec<TStmt>,
     },
+    /// A checked compile-time-only construct retained as an explicit erasure
+    /// row so no source form disappears from the total program silently.
+    Erased {
+        construct: String,
+        span: crate::Diagnostics::Span,
+        reason: TirErasureReason,
+    },
+    /// A structurally impossible post-sema shape.  Old adapters surface this
+    /// as an ICE; canonical MIR returns a typed lowering error.
+    InvariantViolation {
+        construct: String,
+        span: crate::Diagnostics::Span,
+    },
     /// D-DBG3 step 2 (dap-debugger): a source line marker, one per lowered `Stmt`,
     /// inserted ONLY when `cx.debug_linemap` is set (native `jet debug` builds —
     /// never a normal build or the JIT tier, so this is invisible to the JIT
@@ -4014,6 +6232,10 @@ impl TStmt {
     pub fn fact_channel(&self) -> TFactChannel<'_> {
         match self {
             TStmt::Range {
+                auto_vectorization: Some(facts),
+                ..
+            }
+            | TStmt::CountedLoop {
                 auto_vectorization: Some(facts),
                 ..
             } => TFactChannel::from_auto_vectorization(facts),
@@ -4038,90 +6260,507 @@ pub enum BranchClass {
 /// `__jet_Conn::__jet_Active(user_id) | __jet_Conn::__jet_Reconnecting(user_id)`,
 /// `__jet_Http::__jet_Good(__jet_range_0)`); `guard` is the optional `if …` range
 /// guard. Both are computed once at lowering — emit only formats them.
+#[derive(Clone)]
 pub struct TMatchArm {
     pub pattern: TPattern,
     pub body: Vec<TStmt>,
 }
 
-/// A pattern carried as structure instead of a rendered Rust pattern: the source
-/// pattern sema checked, the resolved owning enum, and the syntactic position it
-/// tests in. Every engine reads the pattern itself; only emit spells Rust.
-#[derive(Debug, Clone)]
+/// A fully analytical checked pattern.  TIR stores no AST pattern: every
+/// variant, binding, field, interpolation hole, and binary read is copied into
+/// this target-neutral shape before the bundle reaches an adapter.
+#[derive(Clone)]
 pub struct TPattern {
-    pub pattern: crate::AST::Pattern,
-    /// The owning enum, when the subject is a user/foreign/core enum.
+    pub shape: TPatternShape,
+    /// Canonical owning enum/type key, when the subject has a nominal owner.
     pub enum_type: Option<String>,
     pub position: TPatternPosition,
-    /// Whether payload bindings need mutable Rust pattern slots.
-    ///
-    /// This is the same lowering fact carried by the corresponding `TLocal`.
-    /// Engines must not infer it from a type name or source spelling.
+    /// Whether payload bindings need mutable slots.
     pub mutable: bool,
+    /// Sema-proved boxed payload representation for enum variants.
+    pub boxed: bool,
 }
 
-/// Where a `TPattern` is tested. The position decides how much a match binds,
-/// which is a semantic fact each engine needs, not a spelling detail.
+#[derive(Clone)]
+pub enum TPatternShape {
+    Variant {
+        variant: String,
+        bindings: Vec<TPatternBinding>,
+        leading_dot: bool,
+        span: crate::Diagnostics::Span,
+    },
+    Present {
+        binding: String,
+        binding_span: crate::Diagnostics::Span,
+        span: crate::Diagnostics::Span,
+    },
+    Absent(crate::Diagnostics::Span),
+    Ok {
+        binding: String,
+        binding_span: crate::Diagnostics::Span,
+        span: crate::Diagnostics::Span,
+    },
+    Err {
+        binding: String,
+        binding_span: crate::Diagnostics::Span,
+        span: crate::Diagnostics::Span,
+    },
+    Range {
+        lo: i64,
+        hi: i64,
+        span: crate::Diagnostics::Span,
+    },
+    Or(Vec<TPatternShape>, crate::Diagnostics::Span),
+    Struct {
+        fields: Vec<TPatternField>,
+        rest: Option<crate::Diagnostics::Span>,
+        span: crate::Diagnostics::Span,
+    },
+    Text(Vec<TTextPatternPart>, crate::Diagnostics::Span),
+    Binary(Vec<TBinaryPatternPart>, crate::Diagnostics::Span),
+}
+
+#[derive(Debug, Clone)]
+pub enum TPatternBinding {
+    Wildcard,
+    Bind {
+        name: String,
+        span: crate::Diagnostics::Span,
+    },
+    Range {
+        lo: i64,
+        hi: i64,
+    },
+}
+
+#[derive(Clone)]
+pub enum TPatternField {
+    Bind {
+        field: String,
+        local: String,
+        span: crate::Diagnostics::Span,
+    },
+    Value {
+        field: String,
+        value: Box<TExpr>,
+        span: crate::Diagnostics::Span,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum TTextPatternPart {
+    Literal(String),
+    Hole {
+        name: String,
+        /// Checked capture type. Untyped holes are sema-resolved to String.
+        ty: Type,
+        span: crate::Diagnostics::Span,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum TBinaryPatternPart {
+    Literal(Vec<u8>),
+    Bits {
+        name: String,
+        width: u8,
+        big_endian: bool,
+        /// Checked unsigned integer type for this bit capture.
+        ty: Type,
+        span: crate::Diagnostics::Span,
+    },
+    Rest {
+        name: String,
+        /// Checked byte-list type for the trailing rest capture.
+        ty: Type,
+        span: crate::Diagnostics::Span,
+    },
+}
+
+/// Where a `TPattern` is tested.
 #[derive(Debug, Clone)]
 pub enum TPatternPosition {
-    /// A binding test that destructures payload slots into locals (`if x == Ok(v)`).
     Binding,
-    /// An Option binding test (`if x == Some(v)`).
     OptionBinding,
-    /// A match-arm head, which also binds payload slots.
     Arm,
-    /// A payload-free variant path, compared by value.
     VariantPath,
-    /// D-ENC-DYN1: a `Data` object test that captures the raw entry pairs into
-    /// `temp`; a body prefix collects them into the map the body sees.
     DataEntries { temp: String },
 }
 
 impl TPattern {
-    /// A match-arm head over `enum_type`.
-    pub fn arm(pattern: crate::AST::Pattern, enum_type: Option<String>) -> TPattern {
+    pub(crate) fn from_ast(
+        pattern: crate::AST::Pattern,
+        enum_type: Option<String>,
+        position: TPatternPosition,
+        mutable: bool,
+        boxed: bool,
+    ) -> TPattern {
+        assert!(
+            !Self::contains_struct_value(&pattern),
+            "struct-pattern value requires from_ast_with_values"
+        );
         TPattern {
-            pattern,
+            shape: Self::shape_from_ast(&pattern),
+            enum_type,
+            position,
+            mutable,
+            boxed,
+        }
+    }
+
+    fn invariant_pattern_value(span: crate::Diagnostics::Span) -> Box<TExpr> {
+        Box::new(TExpr {
+            ty: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
+            kind: TExprKind::InvariantViolation {
+                construct: "unlowered struct-pattern value".to_string(),
+                span,
+            },
+        })
+    }
+
+    fn contains_struct_value(pattern: &crate::AST::Pattern) -> bool {
+        match pattern {
+            crate::AST::Pattern::Struct { fields, .. } => fields
+                .iter()
+                .any(|field| matches!(field, crate::AST::StructPatField::Value { .. })),
+            crate::AST::Pattern::Or(alternatives, ..) => {
+                alternatives.iter().any(Self::contains_struct_value)
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn from_ast_with_values<F>(
+        pattern: crate::AST::Pattern,
+        enum_type: Option<String>,
+        position: TPatternPosition,
+        mutable: bool,
+        boxed: bool,
+        mut lower_value: F,
+    ) -> TPattern
+    where
+        F: FnMut(&crate::AST::Expr) -> TExpr,
+    {
+        fn fill_values<F>(
+            shape: &mut TPatternShape,
+            pattern: &crate::AST::Pattern,
+            lower_value: &mut F,
+        ) where
+            F: FnMut(&crate::AST::Expr) -> TExpr,
+        {
+            match (shape, pattern) {
+                (
+                    TPatternShape::Struct { fields, .. },
+                    crate::AST::Pattern::Struct {
+                        fields: source_fields,
+                        ..
+                    },
+                ) => {
+                    for (field, source) in fields.iter_mut().zip(source_fields) {
+                        if let (
+                            TPatternField::Value { value, .. },
+                            crate::AST::StructPatField::Value { value: source, .. },
+                        ) = (field, source)
+                        {
+                            *value = Box::new(lower_value(source));
+                        }
+                    }
+                }
+                (
+                    TPatternShape::Or(alternatives, ..),
+                    crate::AST::Pattern::Or(source_alternatives, ..),
+                ) => {
+                    for (shape, source) in alternatives.iter_mut().zip(source_alternatives) {
+                        fill_values(shape, source, lower_value);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let mut shape = Self::shape_from_ast(&pattern);
+        fill_values(&mut shape, &pattern, &mut lower_value);
+        TPattern {
+            shape,
+            enum_type,
+            position,
+            mutable,
+            boxed,
+        }
+    }
+
+    fn shape_from_ast(pattern: &crate::AST::Pattern) -> TPatternShape {
+        match pattern {
+            crate::AST::Pattern::Variant {
+                variant,
+                bindings,
+                leading_dot,
+                span,
+            } => TPatternShape::Variant {
+                variant: variant.clone(),
+                bindings: bindings
+                    .iter()
+                    .map(|binding| match binding {
+                        crate::AST::PatSlot::Wildcard => TPatternBinding::Wildcard,
+                        crate::AST::PatSlot::Bind { name, span } => TPatternBinding::Bind {
+                            name: name.clone(),
+                            span: *span,
+                        },
+                        crate::AST::PatSlot::Range { lo, hi } => {
+                            TPatternBinding::Range { lo: *lo, hi: *hi }
+                        }
+                    })
+                    .collect(),
+                leading_dot: *leading_dot,
+                span: *span,
+            },
+            crate::AST::Pattern::Present {
+                binding,
+                binding_span,
+                span,
+            } => TPatternShape::Present {
+                binding: binding.clone(),
+                binding_span: *binding_span,
+                span: *span,
+            },
+            crate::AST::Pattern::Absent(span) => TPatternShape::Absent(*span),
+            crate::AST::Pattern::Ok {
+                binding,
+                binding_span,
+                span,
+            } => TPatternShape::Ok {
+                binding: binding.clone(),
+                binding_span: *binding_span,
+                span: *span,
+            },
+            crate::AST::Pattern::Err {
+                binding,
+                binding_span,
+                span,
+            } => TPatternShape::Err {
+                binding: binding.clone(),
+                binding_span: *binding_span,
+                span: *span,
+            },
+            crate::AST::Pattern::Range { lo, hi, span } => TPatternShape::Range {
+                lo: *lo,
+                hi: *hi,
+                span: *span,
+            },
+            crate::AST::Pattern::Or(alternatives, span) => TPatternShape::Or(
+                alternatives.iter().map(Self::shape_from_ast).collect(),
+                *span,
+            ),
+            crate::AST::Pattern::Struct { fields, rest, span } => TPatternShape::Struct {
+                fields: fields
+                    .iter()
+                    .map(|field| match field {
+                        crate::AST::StructPatField::Bind {
+                            field,
+                            local,
+                            local_span,
+                            ..
+                        } => TPatternField::Bind {
+                            field: field.clone(),
+                            local: local.clone(),
+                            span: *local_span,
+                        },
+                        crate::AST::StructPatField::Value {
+                            field, field_span, ..
+                        } => TPatternField::Value {
+                            field: field.clone(),
+                            value: Self::invariant_pattern_value(*field_span),
+                            span: *field_span,
+                        },
+                    })
+                    .collect(),
+                rest: *rest,
+                span: *span,
+            },
+            crate::AST::Pattern::StrMatch { parts, span } => TPatternShape::Text(
+                parts
+                    .iter()
+                    .map(|part| match part {
+                        crate::AST::StrMatchPart::Lit(text) => {
+                            TTextPatternPart::Literal(text.clone())
+                        }
+                        crate::AST::StrMatchPart::Hole { name, ty, span } => {
+                            TTextPatternPart::Hole {
+                                name: name.clone(),
+                                ty: ty.clone().unwrap_or(Type::String),
+                                span: *span,
+                            }
+                        }
+                    })
+                    .collect(),
+                *span,
+            ),
+            crate::AST::Pattern::BinMatch { parts, span } => TPatternShape::Binary(
+                parts
+                    .iter()
+                    .map(|part| match part {
+                        crate::AST::BinMatchPart::Lit(bytes) => {
+                            TBinaryPatternPart::Literal(bytes.clone())
+                        }
+                        crate::AST::BinMatchPart::Hole { name, spec, span } => match spec {
+                            crate::AST::BinSpec::Bits { width, endian } => {
+                                TBinaryPatternPart::Bits {
+                                    name: name.clone(),
+                                    width: *width,
+                                    big_endian: matches!(endian, crate::AST::BinEndian::Big),
+                                    ty: Self::binary_bits_type(*width),
+                                    span: *span,
+                                }
+                            }
+                            crate::AST::BinSpec::Rest => TBinaryPatternPart::Rest {
+                                name: name.clone(),
+                                ty: Self::binary_rest_type(),
+                                span: *span,
+                            },
+                        },
+                    })
+                    .collect(),
+                *span,
+            ),
+        }
+    }
+
+    fn binary_bits_type(width: u8) -> Type {
+        let bits = if width <= 8 {
+            8
+        } else if width <= 16 {
+            16
+        } else if width <= 32 {
+            32
+        } else {
+            64
+        };
+        Type::IntN {
+            signed: false,
+            bits,
+        }
+    }
+
+    fn binary_rest_type() -> Type {
+        Type::List(Box::new(Type::IntN {
+            signed: false,
+            bits: 8,
+        }))
+    }
+
+    pub fn arm(pattern: crate::AST::Pattern, enum_type: Option<String>) -> TPattern {
+        assert!(
+            !Self::contains_struct_value(&pattern),
+            "struct-pattern value requires from_ast_with_values"
+        );
+        TPattern {
+            shape: Self::shape_from_ast(&pattern),
             enum_type,
             position: TPatternPosition::Arm,
             mutable: false,
+            boxed: false,
         }
     }
 
-    /// A payload-binding test (`if let` position).
     pub fn binding(pattern: crate::AST::Pattern) -> TPattern {
+        assert!(
+            !Self::contains_struct_value(&pattern),
+            "struct-pattern value requires from_ast_with_values"
+        );
         TPattern {
-            pattern,
+            shape: Self::shape_from_ast(&pattern),
             enum_type: None,
             position: TPatternPosition::Binding,
             mutable: false,
+            boxed: false,
         }
     }
 
-    /// An Option payload-binding test (`if x == Some(v)`).
     pub fn option_binding(pattern: crate::AST::Pattern) -> TPattern {
+        assert!(
+            !Self::contains_struct_value(&pattern),
+            "struct-pattern value requires from_ast_with_values"
+        );
         TPattern {
-            pattern,
+            shape: Self::shape_from_ast(&pattern),
             enum_type: None,
             position: TPatternPosition::OptionBinding,
             mutable: false,
+            boxed: false,
         }
     }
-
-    /// Carry the local mutability fact into the Rust pattern slot.
-    pub fn with_mutability(mut self, mutable: bool) -> TPattern {
-        self.mutable = mutable;
-        self
-    }
-
-    /// The variant this pattern tests, when it tests one.
     pub fn variant(&self) -> Option<&str> {
-        match &self.pattern {
-            crate::AST::Pattern::Variant { variant, .. } => Some(variant),
-            crate::AST::Pattern::Or(alts, _) => match alts.first() {
-                Some(crate::AST::Pattern::Variant { variant, .. }) => Some(variant),
+        match &self.shape {
+            TPatternShape::Variant { variant, .. } => Some(variant),
+            TPatternShape::Or(alts, _) => match alts.first() {
+                Some(TPatternShape::Variant { variant, .. }) => Some(variant),
                 _ => None,
             },
             _ => None,
+        }
+    }
+
+    pub(crate) fn arm_with_values<F>(
+        pattern: crate::AST::Pattern,
+        enum_type: Option<String>,
+        lower_value: F,
+    ) -> TPattern
+    where
+        F: FnMut(&crate::AST::Expr) -> TExpr,
+    {
+        Self::from_ast_with_values(
+            pattern,
+            enum_type,
+            TPatternPosition::Arm,
+            false,
+            false,
+            lower_value,
+        )
+    }
+
+    pub(crate) fn binding_with_values<F>(pattern: crate::AST::Pattern, lower_value: F) -> TPattern
+    where
+        F: FnMut(&crate::AST::Expr) -> TExpr,
+    {
+        Self::from_ast_with_values(
+            pattern,
+            None,
+            TPatternPosition::Binding,
+            false,
+            false,
+            lower_value,
+        )
+    }
+
+    pub(crate) fn option_binding_with_values<F>(
+        pattern: crate::AST::Pattern,
+        lower_value: F,
+    ) -> TPattern
+    where
+        F: FnMut(&crate::AST::Expr) -> TExpr,
+    {
+        Self::from_ast_with_values(
+            pattern,
+            None,
+            TPatternPosition::OptionBinding,
+            false,
+            false,
+            lower_value,
+        )
+    }
+
+    pub fn span(&self) -> crate::Diagnostics::Span {
+        match &self.shape {
+            TPatternShape::Variant { span, .. }
+            | TPatternShape::Present { span, .. }
+            | TPatternShape::Ok { span, .. }
+            | TPatternShape::Err { span, .. }
+            | TPatternShape::Range { span, .. }
+            | TPatternShape::Struct { span, .. }
+            | TPatternShape::Text(_, span)
+            | TPatternShape::Binary(_, span)
+            | TPatternShape::Or(_, span) => *span,
+            TPatternShape::Absent(span) => *span,
         }
     }
 }
@@ -4144,6 +6783,7 @@ impl TIntegerBounds {
 
 /// A fully typed expression. The resolved type is carried on every node,
 /// so codegen never recomputes it.
+#[derive(Clone)]
 pub struct TExpr {
     pub ty: Type,
     pub kind: TExprKind,
@@ -4345,7 +6985,11 @@ impl<'a> TFactChannel<'a> {
             } else {
                 TExclusivity::Unknown
             },
-            purity: if facts.effect_free_body {
+            purity: if facts.no_aliasing
+                && facts.no_early_exit
+                && facts.effect_free_body
+                && facts.no_cross_iteration_deps
+            {
                 TPurity::Pure
             } else {
                 TPurity::Unknown
@@ -4358,8 +7002,7 @@ impl<'a> TFactChannel<'a> {
 }
 
 fn integer_bounds_for_type(ty: &Type) -> Option<TIntegerBounds> {
-    ty.integer_range()
-        .map(|(lo, hi)| TIntegerBounds { lo, hi })
+    ty.integer_range().map(|(lo, hi)| TIntegerBounds { lo, hi })
 }
 
 /// Project the interval already carried by a TIR expression. This deliberately
@@ -4402,7 +7045,7 @@ pub(crate) fn integer_bounds_for_expr(expr: &TExpr) -> Option<TIntegerBounds> {
                 }
                 _ => success,
             }
-        },
+        }
         TExprKind::NumericMethod {
             recv,
             op: TNumericOp::CastAs { dst_rust },
@@ -4528,30 +7171,6 @@ pub(crate) fn integer_bounds_for_op(
     }
 }
 
-pub(crate) fn integer_native_floor_mod_proven(
-    op: BinOp,
-    lhs: TIntegerBounds,
-    rhs: TIntegerBounds,
-    result: TIntegerBounds,
-) -> bool {
-    if !bounds_fit_inline(lhs)
-        || !bounds_fit_inline(rhs)
-        || !bounds_fit_inline(result)
-        || (rhs.lo <= 0 && rhs.hi >= 0)
-    {
-        return false;
-    }
-    let lhs_zero = lhs.lo == 0 && lhs.hi == 0;
-    let rhs_unit = (rhs.lo == -1 && rhs.hi == -1) || (rhs.lo == 1 && rhs.hi == 1);
-    let same_sign = (lhs.lo >= 0 && rhs.lo > 0) || (lhs.hi < 0 && rhs.hi < 0);
-    let exact = lhs.lo == lhs.hi
-        && rhs.lo == rhs.hi
-        && rhs.lo != 0
-        && lhs.lo.checked_rem(rhs.lo) == Some(0);
-    matches!(op, BinOp::FloorDiv | BinOp::Mod)
-        && (lhs_zero || rhs_unit || same_sign || exact)
-}
-
 /// D-INTBIG1: the inline rail is a signed 63-bit payload, represented by the
 /// same half-i64 bounds as `Prelude/Core/JetInt`. Keep this projection in TIR
 /// so cost consumers share one proof rather than reading backend constants.
@@ -4651,7 +7270,6 @@ fn is_outcome_constructor(kind: &TExprKind) -> bool {
             | TExprKind::Err(_)
             | TExprKind::Call { .. }
             | TExprKind::MethodCall { .. }
-            | TExprKind::FnFieldCall { .. }
             | TExprKind::StaticCall { .. }
             | TExprKind::BuiltinMethod { .. }
             | TExprKind::ClosureMethod { .. }
@@ -4670,29 +7288,6 @@ fn is_outcome_constructor(kind: &TExprKind) -> bool {
             | TExprKind::TaskGroupRace { .. }
             | TExprKind::TaskGroupAny { .. }
     )
-}
-
-fn outcome_fast_path_available(expr: &TExpr) -> bool {
-    if !is_outcome_type(&expr.ty) {
-        return false;
-    }
-    match &expr.kind {
-        TExprKind::BuiltinMethod { op, args, .. } if args.is_empty() => {
-            op.outcome_fast_path().is_some()
-        }
-        TExprKind::HandleMethod { op, args, .. } if args.is_empty() => {
-            op.outcome_fast_path().is_some()
-        }
-        _ => false,
-    }
-}
-
-fn outcome_cost_state(expr: &TExpr) -> Option<TCostState> {
-    // The collector below only records a site when the expression carries an
-    // outcome-construction fact. The operation capability is the complete
-    // removal proof, so do not duplicate that fact match here: it can turn a
-    // successfully lowered immediate handler back into a semantic warning.
-    outcome_fast_path_available(expr).then_some(TCostState::OptimizerRemoved)
 }
 
 fn cost_fact_for_expr(expr: &TExpr) -> Option<TCostFact> {
@@ -4729,6 +7324,7 @@ fn cost_fact_for_expr(expr: &TExpr) -> Option<TCostFact> {
 }
 
 /// One piece of a D-VARIADIC1 list spread literal — either a single element or `...list`.
+#[derive(Clone)]
 pub enum ListSpreadPart {
     Elem(TExpr),
     Spread(TExpr),
@@ -4858,6 +7454,15 @@ fn collect_cost_core_closure(
             }
             collect_cost_lambda(executable, function, span, loop_depth, sites);
         }
+        TCoreClosureKind::Realtime {
+            rate,
+            frames,
+            executable,
+        } => {
+            collect_cost_expr(rate, function, span, loop_depth, sites);
+            collect_cost_expr(frames, function, span, loop_depth, sites);
+            collect_cost_lambda(executable, function, span, loop_depth, sites);
+        }
         TCoreClosureKind::Serve { addr, .. } => {
             collect_cost_expr(addr, function, span, loop_depth, sites);
         }
@@ -4872,10 +7477,38 @@ fn collect_cost_core_closure(
         | TCoreClosureKind::UiReactiveRender { executable, .. } => {
             collect_cost_lambda(executable, function, span, loop_depth, sites);
         }
+        TCoreClosureKind::UiPreview {
+            name,
+            viewport,
+            executable,
+            ..
+        } => {
+            collect_cost_expr(name, function, span, loop_depth, sites);
+            if let Some(viewport) = viewport {
+                collect_cost_expr(viewport, function, span, loop_depth, sites);
+            }
+            collect_cost_lambda(executable, function, span, loop_depth, sites);
+        }
         TCoreClosureKind::UiButtonOnClick {
-            label, executable, ..
+            label,
+            shortcut,
+            accessible_label,
+            executable,
+            ..
         } => {
             collect_cost_expr(label, function, span, loop_depth, sites);
+            collect_cost_expr(shortcut, function, span, loop_depth, sites);
+            collect_cost_expr(accessible_label, function, span, loop_depth, sites);
+            collect_cost_lambda(executable, function, span, loop_depth, sites);
+        }
+        TCoreClosureKind::UiTextInputOnDrop {
+            state,
+            ime,
+            executable,
+            ..
+        } => {
+            collect_cost_expr(state, function, span, loop_depth, sites);
+            collect_cost_expr(ime, function, span, loop_depth, sites);
             collect_cost_lambda(executable, function, span, loop_depth, sites);
         }
     }
@@ -4906,7 +7539,7 @@ fn collect_cost_fn_value(
             collect_cost_expr(callee, function, span, loop_depth, sites);
             collect_cost_call_args(args, function, span, loop_depth, sites);
         }
-        TFnValueKind::Interrupt { value } => {
+        TFnValueKind::Send { value } => {
             collect_cost_expr(value, function, span, loop_depth, sites);
         }
     }
@@ -4960,17 +7593,8 @@ fn collect_cost_expr_consumed(
     loop_depth: usize,
     sites: &mut Vec<TCostSite>,
 ) {
-    collect_cost_expr_with_state_and_context(
-        expr,
-        function,
-        span,
-        loop_depth,
-        sites,
-        outcome_cost_state(expr),
-        true,
-    );
+    collect_cost_expr_with_state_and_context(expr, function, span, loop_depth, sites, None, true);
 }
-
 
 fn collect_cost_expr_with_state_and_context(
     expr: &TExpr,
@@ -5238,7 +7862,7 @@ fn collect_cost_expr_with_state_and_context(
                 collect_cost_expr(range, function, expr_span, loop_depth, sites);
             }
         }
-        TExprKind::MethodCall { recv, args, .. } | TExprKind::FnFieldCall { recv, args, .. } => {
+        TExprKind::MethodCall { recv, args, .. } => {
             collect_cost_expr(recv, function, expr_span, loop_depth, sites);
             collect_cost_call_args(args, function, expr_span, loop_depth, sites);
         }
@@ -5279,7 +7903,15 @@ fn collect_cost_expr_with_state_and_context(
             }
         }
         TExprKind::OrFallback { value, fallback } => {
-            collect_cost_expr_consumed(value, function, expr_span, loop_depth, sites);
+            collect_cost_expr_with_state_and_context(
+                value,
+                function,
+                expr_span,
+                loop_depth,
+                sites,
+                Some(TCostState::OptimizerRemoved),
+                true,
+            );
             match fallback {
                 TOrFallback::Value(value) | TOrFallback::Return(Some(value)) => {
                     collect_cost_expr(value, function, expr_span, loop_depth, sites);
@@ -5366,9 +7998,7 @@ fn collect_cost_cond(
         TIfCond::Plain(expr) => {
             collect_cost_expr(expr, function, span, loop_depth, sites);
         }
-        TIfCond::IfLet { subj, .. }
-        | TIfCond::IsNone { subj }
-        | TIfCond::Matches { subj, .. } => {
+        TIfCond::IfLet { subj, .. } | TIfCond::IsNone { subj } | TIfCond::Matches { subj, .. } => {
             collect_cost_expr_consumed(subj, function, span, loop_depth, sites);
         }
         TIfCond::And { left, right } => {
@@ -5648,7 +8278,14 @@ fn collect_cost_stmt(
         TStmt::Transact { body, .. } => {
             collect_cost_stmts(body, function, span, loop_depth, sites);
         }
-        TStmt::SourceSpan(_) | TStmt::LineMarker(_) | TStmt::Break(_) | TStmt::Continue(_) => {}
+        TStmt::SourceSpan(_)
+        | TStmt::LineMarker(_)
+        | TStmt::Break(_)
+        | TStmt::Continue(_)
+        | TStmt::Erased { .. } => {}
+        TStmt::InvariantViolation { construct, span } => {
+            panic!("checked TIR contains invariant violation `{construct}` at {span:?}");
+        }
     }
 }
 
@@ -5926,7 +8563,9 @@ fn lowered_cost_method_matches(lowered: &str, expected: &str) -> bool {
 }
 
 fn lowered_cost_function_matches(lowered: &str, expected: &str) -> bool {
-    lowered == expected || lowered.starts_with(&format!("{expected}__va"))
+    lowered == expected
+        || lowered.starts_with(&format!("{expected}__va"))
+        || lowered.starts_with(&format!("{expected}__generic__"))
 }
 
 fn cost_callable_lowered_name(bundle: &ProgramBundle, callable: &TCostCallable) -> Option<String> {
@@ -5961,7 +8600,7 @@ fn cost_callable_lowered_name(bundle: &ProgramBundle, callable: &TCostCallable) 
 fn cost_callable_is_covered(
     bundle: &ProgramBundle,
     callable: &TCostCallable,
-    program: &JitProgram,
+    program: &TirProgram,
 ) -> bool {
     let Some(source_span) = callable.source_span else {
         return false;
@@ -5987,13 +8626,7 @@ fn collect_cost_typed_conversions(
 ) {
     for statement in body {
         statement.for_each_expr(|expression| {
-            if let Expr::Try(
-                _,
-                _,
-                crate::AST::TryConvert::Typed { fn_name, .. },
-                _,
-            ) = expression
-            {
+            if let Expr::Try(_, _, crate::AST::TryConvert::Typed { fn_name, .. }, _) = expression {
                 names.insert(fn_name.clone());
             }
         });
@@ -6027,7 +8660,7 @@ fn find_cost_error_conversion<'a>(
 
 fn cost_error_conversion_gaps(
     bundle: &ProgramBundle,
-    program: &JitProgram,
+    program: &TirProgram,
     callables: &[TCostCallable],
     reachable: &[bool],
 ) -> Vec<String> {
@@ -6100,8 +8733,7 @@ fn cost_error_conversion_gaps(
         })
         .collect()
 }
-
-fn cost_coverage_gaps(bundle: &ProgramBundle, program: &JitProgram) -> Vec<String> {
+fn cost_coverage_gaps(bundle: &ProgramBundle, program: &TirProgram) -> Vec<String> {
     let app_graph = crate::Sema::extract_app_graph(bundle).0;
     let callables = cost_callables(bundle, app_graph.as_ref());
     let reachable = reachable_cost_callables(bundle, &callables);
@@ -6109,9 +8741,7 @@ fn cost_coverage_gaps(bundle: &ProgramBundle, program: &JitProgram) -> Vec<Strin
         .iter()
         .zip(reachable.iter().copied())
         .filter_map(|(callable, reachable)| {
-            (reachable
-                && !callable.foreign
-                && !cost_callable_is_covered(bundle, callable, program))
+            (reachable && !callable.foreign && !cost_callable_is_covered(bundle, callable, program))
                 .then(|| {
                     let reason = if callable.type_parameterized {
                         "type-parameterized callable has no complete TIR specialization"
@@ -6134,12 +8764,26 @@ fn cost_coverage_gaps(bundle: &ProgramBundle, program: &JitProgram) -> Vec<Strin
 /// producer of the fact channel; CLI tooling and linting consume this one
 /// report instead of reconstructing cost from emitted Rust.
 pub fn cost_report(bundle: &ProgramBundle) -> Result<TCostReport, TCostReportError> {
-    let Some(program) = lower_jit_program(bundle) else {
-        let reason = lower_jit_program_fail_reason(bundle);
-        if matches!(reason.as_str(), NO_RUNNABLE_ENTRY | CLI_ENTRY_MISSING_RUN) {
+    let request = MirArtifactRequest::new(
+        jet_foundation::MIR::MirArtifactTarget::RustAot,
+        jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+        MirArtifactBuildMode::Dev,
+    );
+    let program = match lower_checked_tir_program_for(bundle, request) {
+        Ok(program) => program,
+        Err(error)
+            if matches!(
+                error.message.as_str(),
+                NO_RUNNABLE_ENTRY | CLI_ENTRY_MISSING_RUN
+            ) =>
+        {
             return Ok(TCostReport::default());
         }
-        return Err(TCostReportError::Lowering { reason });
+        Err(error) => {
+            return Err(TCostReportError::Lowering {
+                reason: error.message,
+            })
+        }
     };
     let gaps = cost_coverage_gaps(bundle, &program);
     if !gaps.is_empty() {
@@ -6223,6 +8867,7 @@ pub fn validate_tir_support(bundle: &ProgramBundle) -> Vec<TirCoverageIssue> {
                 &bundle.edition,
             );
             populate_cx_from_bundle(&mut cx, bundle, callable.module);
+            register_own_struct_shapes(&mut cx, bundle, callable.module);
             register_foreign_enum_variants(&mut cx, bundle, callable.module);
             update_cloneability_with_foreign_types(&mut cx, &module.items);
             cx
@@ -6467,6 +9112,14 @@ pub fn view_copy_owned_type(source: &Type) -> Option<Type> {
     }
 }
 
+/// Typed allocator constructor fact carried by TIR into the shared MIR
+/// allocation operation. No backend constructor spelling crosses this seam.
+#[derive(Clone)]
+pub enum TAllocCtor {
+    Fixed,
+    General,
+}
+#[derive(Clone)]
 pub enum TExprKind {
     /// Integer literal with its D-SG9 width (`None` = default `Int`/i64). The
     /// width is the elaborated `(signed, bits)` sema attached to the AST node.
@@ -6723,7 +9376,7 @@ pub enum TExprKind {
     /// Fixed.new carries its comptime byte count to statement emission so the
     /// backing array can be declared immediately before the handle.
     AllocNew {
-        ctor: String,
+        ctor: TAllocCtor,
     },
     /// c109 Phase 4: an enum literal `Enum.Variant`, `Variant(args)`, or a
     /// named-payload `Variant { f: v, … }`. The Rust head (`__jet_Enum::__jet_Variant`)
@@ -6792,25 +9445,24 @@ pub enum TExprKind {
     /// list — one cell straight out of that field's column, with no whole-`S`
     /// gather. This is the cache-friendly fast path.
     ///
-    /// `column` is the field's position in declaration order among STORED
-    /// fields, which is exactly the column order the store was built with
-    /// (a computed field is never a column, D-FIELDPOL1). `accessor` unwraps
-    /// that column's cell back to the field's own type; every tier resolves the
-    /// same column index, and only the accessor is engine-specific.
+    /// `owner` and `field` are checked semantic identities. `column` is the
+    /// field's position in declaration order among stored fields, exactly the
+    /// column order used by the shared store.
     ColumnarColumnRead {
         base: Box<TExpr>,
         index: Box<TExpr>,
+        owner: String,
+        field: String,
         column: usize,
-        accessor: String,
         line: usize,
     },
     /// c109 Phase 23: a named-tuple literal `(x: 1, y: 2)` (S73/D-SG7). The generated
     /// struct name (`JetTup_<hash>`) and the CANONICAL field order are resolved at
     /// lowering from the literal's sema-attached `Type::Tuple`; each field's value is
     /// reordered to that canonical order (a `(y: 3, x: 4)` literal becomes
-    /// `JetTup_…{ __jet_x: 4, __jet_y: 3 }`). Reproduces `emit_expr`'s `TupleLit` arm
-    /// byte-for-byte — `struct_name { __jet_<f>: <v>, … }`. `fields` are the already
-    /// mangled-name + lowered-value pairs in canonical order.
+    /// `(x: 4, y: 3)`). `fields` pair each CHECKED field name with its lowered value:
+    /// MIR resolves a tuple field by `<instance>::<name>` against the `Type::Tuple`
+    /// shape, and every backend mangles from its own field row.
     TupleLit {
         struct_name: String,
         fields: Vec<(String, TExpr)>,
@@ -6923,17 +9575,6 @@ pub enum TExprKind {
         /// the Jet operator line through the synthetic trait's default helper.
         operator_line: Option<u32>,
     },
-    /// c109 Phase 27: a CALL THROUGH a fn-typed struct field — `w.step(4)` where `step`
-    /// is a `fn(...)` FIELD (not a user method). Emits `(({recv}).{field_rust})({args})`,
-    /// byte-for-byte the AST `emit_method_call` fn-field branch (Expression.rs ~L1573).
-    /// `field_rust` is the mangled `__jet_<field>`; args emit PLAINLY (the AST passes
-    /// `None` to `emit_call_args` — no param convention, only each arg's own clone flags).
-    FnFieldCall {
-        recv: Box<TExpr>,
-        /// Jet field name; emit mangles.
-        field: String,
-        args: Vec<TCallArg>,
-    },
     /// c109 Phase 7: a STATIC (associated) method call `Type.make(args)`. Resolved
     /// at lowering to `__jet_<Type>::__jet_<method>(args)` — `type_prefix` is the
     /// already-resolved Rust type head (`__jet_<Type>`), `method_rust` the mangled
@@ -6966,23 +9607,25 @@ pub enum TExprKind {
         op: TBuiltinOp,
         args: Vec<TExpr>,
     },
-    /// c109 Phase 10: a core/stdlib module call `alias.method(args)` where `alias`
-    /// is a core import (`cx.core_imports`). The `(module, method)` dispatch
-    /// is a pure syntactic match on two already-resolved strings — NO type inference
-    /// (I3) — so the TIR carries
-    /// `module`/`method` as resolved strings and the emitter reproduces the match
-    /// byte-for-byte. The args are lowered as plain expressions; the sole generic
-    /// conversion fact is D-FIXARR1 widening. Per-arm `&(…)`/`&mut (…)`/move wrappers
-    /// stay baked into each emit arm. `cx.root_prefix`/`cx.ffi_crate` are program-level
-    /// (read at emit, like Phase 9's `cx.file`), never a per-node decision.
+    /// A checked Core registry row plus its typed argument facts.  The record
+    /// owns module/member identity and all ABI/effect/interpreter metadata;
+    /// TIR never reconstructs those facts from strings.  `type_args` retains
+    /// the explicit generic arguments for Core calls whose runtime behavior
+    /// depends on a checked operation schema (notably `testing.histories<T>`).
     CoreCall {
-        module: String,
-        method: String,
+        record: &'static crate::Syntax::CoreCallRecord,
         args: Vec<TExpr>,
         source_span: crate::Diagnostics::Span,
-        /// D-FIXARR1: per-argument `[T#N]` to `[T]` widening, resolved from the
-        /// authoritative Core signature during lowering.
+        type_args: Vec<Type>,
+        /// D-FIXARR1: per-argument `[T#N]` to `[T]` widening, resolved from
+        /// the authoritative Core signature during lowering.
         widen_to_vec: Vec<bool>,
+        /// Checked table-plan fact, present only for recognized `core.data`
+        /// calls.  Backends must consume this fact rather than reclassifying
+        /// the call from the registry row.
+        data_plan: Option<TDataPlan>,
+        /// Checked result failure transport, shared by every CoreCall route.
+        fallibility: TFailureCarrier,
     },
     /// `if`-expression form (S68 / D-SG2). Both arms are value blocks.
     IfExpr {
@@ -6993,11 +9636,16 @@ pub enum TExprKind {
         else_value: Box<TExpr>,
     },
     /// D-FAIL-BREACH1=A: a `#Todo` typed goal (`Expr::Todo`, D-TOOL2, E2-M11)
-    /// emits the registered E3011 Prelude stop. The `expected_type` is the total
-    /// sema fact; `line` is the source line resolved at lowering.
+    /// emits the registered E3011 Prelude stop. The enclosing `TExpr.ty` is
+    /// the checked expected type; `line` is the source line resolved at lowering.
     Todo {
         line: usize,
-        expected_type: String,
+    },
+    /// A structurally impossible post-sema shape. Old adapters surface this
+    /// as an ICE; canonical MIR returns a typed lowering error.
+    InvariantViolation {
+        construct: String,
+        span: crate::Diagnostics::Span,
     },
     /// Card #1440: the synthesized dead end of an else-less exhaustive value
     /// dispatch (`Expr::NoElse`). Sema proved the pattern arms cover the
@@ -7224,18 +9872,11 @@ pub enum TExprKind {
         type_args: Vec<Type>,
         args: Vec<TCallArg>,
     },
-    /// c109 Phase 14: an FFI extern call (`extern rust`/`extern C`). `emit_call`'s
-    /// `extern_funcs` arm emits `{ffi_crate}::{wrapper}(args)` with args lowered via
-    /// `emit_extern_call_args` (a DISTINCT arg form — a non-scalar `Read` param is
-    /// `(…).clone()`, NOT `&(…)`). `wrapper` is the resolved FFI symbol; `args` carry
-    /// the resolved per-arg clone decision. `c_abi` marks the hidden C bridge,
-    /// whose scalar boundary needs the Prelude's Jet/C conversion at the call
-    /// site. `cx.ffi_crate` is program-level (read at emit, like Phase 10's regex
-    /// form). I1: an extern call introduces no Rust
-    /// `unsafe` by itself — this reproduces the AST emit byte-for-byte, which emits no
-    /// `unsafe`.
+    /// A resolved foreign symbol and its checked ABI/arguments. The symbol is
+    /// consumed by the canonical MIR foreign-call row; no backend wrapper text
+    /// is stored.
     ExternCall {
-        wrapper: String,
+        symbol: String,
         c_abi: bool,
         args: Vec<TExternArg>,
     },
@@ -7244,6 +9885,7 @@ pub enum TExprKind {
 /// c109 Phase 14: a resolved cross-module call form. Each variant pre-resolves the
 /// path pieces of one `emit_call`/`emit_method_call` module-call arm; emit prepends
 /// `cx.root_prefix` exactly where the AST path does (or omits it where the AST does).
+#[derive(Clone)]
 pub enum TModuleCallForm {
     /// `import_mods` qualified call (`mod.fn()`) and `reexport_calls` (`pub use`) —
     /// both emit `{root}{rust_mod}::{rust_fn}(args)`. `rust_mod` is the resolved Rust
@@ -7258,6 +9900,7 @@ pub enum TModuleCallForm {
 /// `emit_extern_call_args` wraps the value in `(…).clone()` when the arg has an
 /// `implicit_clone` flag OR its param is a non-scalar `Read` (resolved here into one
 /// total `clone` bool; the `shared_auto_clone`/Arc form is excluded from the subset).
+#[derive(Clone)]
 pub struct TExternArg {
     pub value: TExpr,
     pub clone: bool,
@@ -7267,73 +9910,93 @@ pub struct TExternArg {
 }
 
 /// c109 Phase 13: the closure-taking core-call shapes (see
-/// `TExprKind::CoreClosureCall`). Each holds the already-rendered closure string
-/// (`spawn_closure` is the distinct `emit_spawn_lambda` form; `serve`/`guard` use the
-/// plain `emit_lambda` form) plus, for `serve`, the lowered address arg.
+/// `TExprKind::CoreClosureCall`). Each carries a typed executable body and
+/// source-level route facts.
+#[derive(Clone)]
 pub enum TCoreClosureKind {
     /// `task <body>` uses no group. A `task.group` child carries the same
     /// internal group collector through every named helper call.
     Spawn {
         group: Option<Box<TExpr>>,
         site: usize,
-        /// Optional direct named-call/function-reference identity. `None` keeps
-        /// the runtime's bounded `task@<site>` fallback for arbitrary bodies.
+        /// Optional direct named-call/function-reference identity.
         label: Option<String>,
-        spawn_closure: String,
         executable: Box<TLambda>,
     },
-    /// `http.serve(addr, <lambda>)` → `{root}jet_http_serve(&(<addr>), <closure>)`.
-    Serve { addr: Box<TExpr>, closure: String },
+    /// D-FOUND-REALTIME1=A: fixed-rate callback over one reusable sample buffer.
+    Realtime {
+        rate: Box<TExpr>,
+        frames: Box<TExpr>,
+        executable: Box<TLambda>,
+    },
+    /// `http.serve(addr, <lambda>)`.
+    Serve {
+        addr: Box<TExpr>,
+        executable: Box<TLambda>,
+    },
     /// `core.sys.on_interrupt(<callback>)` crosses the shared Send-safe runtime
     /// boundary. Engines only marshal this lowered callback to their adapter.
     OnInterrupt { callback: Box<TExpr> },
-    /// `scope.guard(<lambda>)` → `{root}jet_scope_guard(<closure>)`.
-    Guard {
-        closure: String,
-        executable: Box<TLambda>,
-    },
-    /// D-TXN3: `<handle>.on_commit(<lambda>)` → `<handle>.on_commit(Box::new(<closure>))`.
+    /// `scope.guard(<lambda>)`.
+    Guard { executable: Box<TLambda> },
+    /// D-TXN3: `<handle>.on_commit(<lambda>)`.
     OnCommit {
-        handle: String,
-        closure: String,
+        /// Checked source binding identity for MIR lowering.
+        handle_name: String,
         executable: Box<TLambda>,
     },
-    /// D-TXN-ROLLBACK (layer 3): `<handle>.on_rollback(<lambda>)` →
-    /// `<handle>.on_rollback(Box::new(<closure>))`. Mirror of `OnCommit`.
+    /// D-TXN3: `<handle>.on_rollback(<lambda>)`.
     OnRollback {
-        handle: String,
-        closure: String,
+        handle_name: String,
         executable: Box<TLambda>,
     },
-    /// D-REACT1=B: `reactive.derived(<lambda>)` → `{root}jet_std::JetDerived::new(<closure>)`.
-    /// `executable` is AOT-ignored; Cranelift JIT compiles it (captures via spawn-lambda table).
-    ///
-    /// `site` is this callback's index in the JIT spawn-lambda table, exactly the
-    /// fact `Spawn` above carries. Lowering owns it: a lambda body is lowered
-    /// once per pass (the AOT closure text, `executable`, and the JIT spawn
-    /// body), so the index cannot be re-derived from traversal order without
-    /// drifting. Every engine reads this number; none recomputes it.
+    /// D-UI-CLOSURE1=A: the fixed callback route carries display text,
+    /// optional shortcut metadata, and optional accessible label metadata.
+    UiButtonOnClick {
+        label: Box<TExpr>,
+        shortcut: Box<TExpr>,
+        accessible_label: Box<TExpr>,
+        executable: Box<TLambda>,
+        site: usize,
+    },
+    /// D-UI-DROP1=A: the text-input drop callback reuses the existing node
+    /// constructor and carries state/IME values beside its typed closure.
+    UiTextInputOnDrop {
+        state: Box<TExpr>,
+        ime: Box<TExpr>,
+        executable: Box<TLambda>,
+        site: usize,
+    },
+    /// D-DX-PREVIEW1=A: named preview callback retains canonical UiNode
+    /// semantics and compiler-owned source/build provenance.  The public
+    /// Core call remains name/viewport/callback; these facts never become
+    /// source parameters.
+    UiPreview {
+        name: Box<TExpr>,
+        viewport: Option<Box<TExpr>>,
+        executable: Box<TLambda>,
+        site: usize,
+        playground: bool,
+        source_file: String,
+        source_span: crate::Diagnostics::Span,
+        source_start_line: u32,
+        source_start_column: u32,
+        source_end_line: u32,
+        source_end_column: u32,
+        build_id: String,
+        revision: String,
+    },
     ReactiveDerived {
-        closure: String,
         executable: Box<TLambda>,
         site: usize,
     },
     /// D-EFFECT-LIFECYCLE1=A: `reactive.effect(<lambda>)` returns a lifecycle handle.
     ReactiveEffect {
-        closure: String,
         executable: Box<TLambda>,
         site: usize,
     },
     /// D-RENDERTGT2=A (c133 M2): reactive UI render loop through the backend seam.
     UiReactiveRender {
-        closure: String,
-        executable: Box<TLambda>,
-        site: usize,
-    },
-    /// D-WEB-CLICK-PORT1=D: `ui.button(label, on_click: <lambda>)`.
-    UiButtonOnClick {
-        label: Box<TExpr>,
-        closure: String,
         executable: Box<TLambda>,
         site: usize,
     },
@@ -7341,23 +10004,17 @@ pub enum TCoreClosureKind {
 
 /// c109 Phase 13: fn-typed values plus the canonical interrupt callback form
 /// (see `TExprKind::FnValue`).
+#[derive(Clone)]
 pub enum TFnValueKind {
-    /// A bare function name used as a value. `wrapper` is the already-rendered
-    /// `Box::new(move |…| __jet_<name>(…)) as <fn-type>` string (`emit_named_fn_value`),
-    /// produced at lowering so emit only echoes it.
+    /// A checked named function identity.
     NamedFn {
-        wrapper: String,
-        /// Jet function key for native backends. `None` is a rendered closure
-        /// coercion. `lambda` carries that closure's target-neutral executable
-        /// body so Web and the TIR evaluator do not depend on the Rust wrapper.
+        /// Jet function key for MIR registry resolution.
         name: Option<String>,
         lambda: Option<Box<TLambda>>,
     },
     /// D-STRUCT-POLICY1=A: a checked package policy closes over its typed
-    /// setting values and the supplied callable, then forwards the target's
-    /// full argument contract to the generated checked wrapper function.
+    /// setting values and the supplied callable.
     Policy {
-        wrapper: String,
         fn_type: Type,
         policy_args: Vec<TCallArg>,
         policy_conventions: Vec<crate::AST::AccessConvention>,
@@ -7370,11 +10027,9 @@ pub enum TFnValueKind {
         args: Vec<TCallArg>,
     },
     /// D-OSINTERRUPT1: one Send-safe callback representation. `value` is the
-    /// already-lowered inline, named, or indirect callable. AOT emits its
-    /// `Arc<dyn Fn() + Send + Sync + 'static>` value; resident JIT marshals it
-    /// to one `(function, environment)` record; the interpreter keeps its
-    /// callable index. The engines do not infer callback policy here.
-    Interrupt { value: Box<TExpr> },
+    /// already-lowered inline, named, or indirect callable. Engines consume
+    /// the shared callable row rather than backend wrapper text.
+    Send { value: Box<TExpr> },
 }
 
 /// c109 Phase 12: a resolved numeric method form, one per numeric arm. The width
@@ -7382,12 +10037,13 @@ pub enum TFnValueKind {
 /// widening-vs-narrowing branch (which `numeric_conversion` decides from the source
 /// width name) are decided ONCE at lowering — the variant encodes the chosen form so
 /// emit only formats.
+#[derive(Clone)]
 pub enum TNumericOp {
     /// `is_nan`/`is_infinite`/`is_finite` → `({recv}).{method}()` (bool).
     Predicate(String),
     /// `count_ones`/`count_zeros`/`leading_zeros`/`trailing_zeros` →
     /// `(({recv}).{method}() as i64)` (Rust returns u32 → widen to Int).
-    /// `width` is the receiver's bit width (baked at lowering — TirBridge may
+    /// `width` is the receiver's bit width (baked at lowering — MirBridge may
     /// evaluate before locals carry `IntN` types).
     BitCount {
         method: String,
@@ -7398,7 +10054,7 @@ pub enum TNumericOp {
         dst_rust: String,
     },
     /// D-NUMWIDEN-CROSS1=E: an implicit integer-to-float crossing whose source
-    /// type is not wholly exact. Every engine calls Prelude/NumericWiden.rs.
+    /// type is not wholly exact. Every engine calls Foundation's NumericConversion kernel.
     CheckedIntToFloat {
         source_signed: bool,
         target_f32: bool,
@@ -7463,7 +10119,7 @@ pub enum TNumericOp {
 /// the variant encodes the chosen form so emit only formats.
 // Debug names the variant in engine rejection text: a JIT refusal is a silent
 // interpreter deopt, so the message must say WHICH closure method was refused.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum TClosureOp {
     /// Prove two indexes before lending their mutable views to one callback.
     EditDisjoint,
@@ -7534,9 +10190,19 @@ pub enum TClosureOp {
     MinBy,
     /// `max_by(f)` — `jet_list_max_by((recv).clone(), f)`.
     MaxBy,
+    /// `fold(init, (acc: F32|F64, item: F32|F64) => acc + item)` with a fixed
+    /// scalar addition kernel selected by checked lowering. `f32` records the
+    /// checked lane type for target-specific marshaling.
+    FloatAddFold {
+        f32: bool,
+    },
+    /// `para_fold(seed, (acc: F32|F64, item: F32|F64) => acc + item)` with a
+    /// fixed scalar addition kernel selected by checked lowering.
+    FloatAddParaFold {
+        f32: bool,
+    },
     /// `fold(init, f)` — `jet_list_fold((recv).clone(), init, f)`.
     Fold,
-    /// `group_by(f)` — `jet_list_group_by((recv).clone(), f)`.
     GroupBy,
     /// `count_by(f)` — `jet_list_count_by((recv).clone(), f)`.
     CountBy,
@@ -7577,19 +10243,257 @@ pub enum TClosureOp {
     ViewMap,
 }
 
-/// c109 Phase 11: a fully-resolved lambda/closure, every fact carried total from
-/// `Lambda.meta`. `prep` is the rendered clone/materialization capture prelude
-/// (`let __jet_cap_<n> = (place).clone();\n    ` per capture); `params` the rendered `name[: ty]`
-/// param list; `body` the rendered closure body string (an expression body, or a
-/// `{ … }` block) — rendered at lowering from the lowered body so emit stays a pure
-/// wrapper; `is_move`/`boxed` reproduce the AST wrappers.
+/// One checked semantic Prelude route.  TIR owns the complete ABI and effect
+/// metadata so MIR lowering only interns this row; adapters never rediscover a
+/// helper from an operation name.
+#[derive(Clone, Debug)]
+pub struct TPreludeRoute {
+    pub family: jet_foundation::MIR::MirPreludeFamily,
+    pub module: String,
+    pub member: String,
+    pub symbol: jet_foundation::MIR::MirSymbol,
+    pub signature: jet_foundation::MIR::MirCallSignature,
+    pub effect: Option<jet_foundation::Effects::Effect>,
+    pub fallibility: TFailureCarrier,
+    pub abi: jet_foundation::MIR::MirPreludeAbi,
+    /// The checked capability decision carried by this route.  Every backend
+    /// receives the same row; no adapter infers authority from a symbol.
+    pub authority: Option<jet_foundation::MIR::MirAuthorityDecision>,
+    /// Checked database sink facts, if this route is a DB query operation.
+    pub db_metadata: Option<TDbQueryMetadata>,
+}
+/// A checked operation plan.  Primitive plans are fully expanded into
+/// ordinary MIR by the lowering projection; Prelude plans become one canonical
+/// route row.
+#[derive(Clone, Debug)]
+pub enum TRoutePlan {
+    Primitive,
+    Prelude(TPreludeRoute),
+}
+
+/// Checked effect facts shared by callable rows and closure rows.  The sets are
+/// sema projections; neither TIR readers nor a backend recomputes them from a
+/// body or a rendered symbol.
+#[derive(Clone, Debug, Default)]
+pub struct TEffectFacts {
+    pub direct: std::collections::BTreeSet<String>,
+    pub solved: std::collections::BTreeSet<String>,
+    pub call_edges: std::collections::BTreeSet<String>,
+    pub maximal: bool,
+    pub direct_spans: std::collections::BTreeMap<String, crate::Diagnostics::Span>,
+}
+
+/// Failure carrier selected by sema for a checked callable.
+#[derive(Clone, Debug)]
+pub enum TFailureCarrier {
+    Infallible,
+    Result { success: Type, error: Type },
+    Optional { value: Type },
+    Diverges { value: Type },
+}
+
+impl Default for TFailureCarrier {
+    fn default() -> Self {
+        Self::Infallible
+    }
+}
+
+impl TFailureCarrier {
+    pub fn from_contract(contract: &crate::AST::FailureContract) -> Self {
+        match contract {
+            crate::AST::FailureContract::Default { success, error }
+            | crate::AST::FailureContract::Explicit { success, error }
+            | crate::AST::FailureContract::Converted {
+                success,
+                target: error,
+                ..
+            } => Self::Result {
+                success: success.clone(),
+                error: error.clone(),
+            },
+            crate::AST::FailureContract::Optional { success } => Self::Optional {
+                value: success.clone(),
+            },
+            crate::AST::FailureContract::DeclaredNever => Self::Diverges {
+                value: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
+            },
+            crate::AST::FailureContract::ProvenUnreachable { success } => Self::Result {
+                success: success.clone(),
+                error: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
+            },
+        }
+    }
+
+    /// Derive the callable failure carrier from the checked result type once.
+    /// Downstream MIR and adapters consume this fact; they never infer it from
+    /// a rendered signature or operation spelling.
+    pub fn from_checked_type(ty: &Type) -> Self {
+        match ty {
+            Type::Result { ok, err } => Self::Result {
+                success: ok.as_ref().clone(),
+                error: err.as_ref().clone(),
+            },
+            Type::Option(value) => Self::Optional {
+                value: value.as_ref().clone(),
+            },
+            _ if ty.is_never() => Self::Diverges { value: ty.clone() },
+            _ => Self::Infallible,
+        }
+    }
+}
+
+/// Target applicability is a checked fact, not an adapter capability query.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TTargetApplicability {
+    pub rust_aot: bool,
+    pub cranelift: bool,
+    pub interpreter: bool,
+    pub web: bool,
+}
+
+/// Visibility fact on a checked function row.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TVisibility {
+    #[default]
+    Private,
+    Package,
+    Public,
+}
+
+/// Foreign ownership/ABI provenance on an inline foreign function row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TForeignProvenance {
+    pub language: String,
+    pub abi: String,
+    pub symbol: String,
+    pub span: crate::Diagnostics::Span,
+}
+
+/// Total capture facts copied from `AST::Lambda.meta`.
+#[derive(Clone, Debug, Default)]
+pub struct TCaptureFacts {
+    pub escapes: bool,
+    pub needs_fn_mut: bool,
+    pub mutable: std::collections::BTreeSet<String>,
+    pub cloned: std::collections::BTreeSet<String>,
+    pub frozen: std::collections::BTreeSet<String>,
+    pub materialized: std::collections::BTreeSet<String>,
+    pub moved: std::collections::BTreeSet<String>,
+}
+
+pub(crate) fn function_effect_facts(f: &crate::AST::Func) -> TEffectFacts {
+    let mut facts = TEffectFacts::default();
+    if let Some(effects) = &f.declared_effects {
+        for (name, span) in effects {
+            facts.direct.insert(name.clone());
+            facts.direct_spans.insert(name.clone(), *span);
+        }
+        facts.maximal = true;
+    }
+    facts
+}
+
+pub(crate) fn lambda_effect_facts(lam: &crate::AST::Lambda) -> TEffectFacts {
+    let mut facts = TEffectFacts::default();
+    if let Some(effects) = &lam.effects {
+        for (name, span) in effects {
+            facts.direct.insert(name.clone());
+            facts.direct_spans.insert(name.clone(), *span);
+        }
+        facts.maximal = true;
+    }
+    facts
+}
+pub(crate) fn lambda_failure_carrier(lam: &crate::AST::Lambda) -> TFailureCarrier {
+    let contract = match (
+        &lam.result_type,
+        &lam.error_type,
+        &lam.meta.fallible_carrier,
+    ) {
+        (_, Some(error), _) => crate::AST::FailureContract::Explicit {
+            success: lam
+                .result_type
+                .clone()
+                .unwrap_or_else(|| Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string())),
+            error: error.clone(),
+        },
+        (Some(result), None, _) => crate::AST::FailureContract::from_return_type(Some(result)),
+        (None, None, Some(carrier)) => crate::AST::FailureContract::from_return_type(Some(carrier)),
+        (None, None, None) => crate::AST::FailureContract::from_return_type(None),
+    };
+    TFailureCarrier::from_contract(&contract)
+}
+
+pub(crate) fn function_failure_carrier(f: &crate::AST::Func) -> TFailureCarrier {
+    TFailureCarrier::from_contract(&f.failure_contract())
+}
+
+pub(crate) fn function_target_applicability(f: &crate::AST::Func) -> TTargetApplicability {
+    let Some(foreign) = f.inline_foreign.as_ref() else {
+        return TTargetApplicability {
+            rust_aot: true,
+            cranelift: true,
+            interpreter: true,
+            web: true,
+        };
+    };
+    let web = foreign.lang.eq_ignore_ascii_case("js") || foreign.lang.eq_ignore_ascii_case("web");
+    TTargetApplicability {
+        rust_aot: true,
+        cranelift: false,
+        interpreter: false,
+        web,
+    }
+}
+
+pub(crate) fn function_visibility(f: &crate::AST::Func) -> TVisibility {
+    if f.is_pub {
+        TVisibility::Public
+    } else if f.is_package_pub {
+        TVisibility::Package
+    } else {
+        TVisibility::Private
+    }
+}
+
+pub(crate) fn function_foreign_provenance(f: &crate::AST::Func) -> Option<TForeignProvenance> {
+    f.inline_foreign.as_ref().map(|foreign| TForeignProvenance {
+        language: foreign.lang.clone(),
+        abi: "inline".to_string(),
+        symbol: f.name.clone(),
+        span: foreign.marker_span,
+    })
+}
+
+pub(crate) fn lambda_capture_facts(lam: &crate::AST::Lambda) -> TCaptureFacts {
+    TCaptureFacts {
+        escapes: lam.meta.escapes,
+        needs_fn_mut: lam.meta.needs_fn_mut,
+        mutable: lam.meta.mut_captures.iter().cloned().collect(),
+        cloned: lam.meta.cloned_captures.iter().cloned().collect(),
+        frozen: lam.meta.frozen_captures.iter().cloned().collect(),
+        materialized: lam.meta.materialized_captures.iter().cloned().collect(),
+        moved: lam.meta.moved_captures.iter().cloned().collect(),
+    }
+}
+
+/// c109 Phase 11: a fully-resolved lambda/closure. All semantic facts are
+/// copied from checked AST metadata before any backend rendering occurs.
+#[derive(Clone)]
 pub struct TLambda {
-    pub prep: String,
-    pub params: Vec<String>,
-    pub body: String,
-    /// Target-neutral executable body. Backends must consume this, never the
-    /// Rust-rendered `body` compatibility field.
     pub executable: TLambdaBody,
+    /// Source identity of the checked closure body.
+    pub source_span: crate::Diagnostics::Span,
+    /// D-RESOURCE-SCHEDULE1=A: the complete sema-derived frame schedule.
+    /// This is carried as metadata; no lowering pass derives another plan.
+    pub frame_schedule: Option<jet_foundation::ResourceSchedule::JetFrameSchedule>,
+    /// ID of the canonical #2945 derivation relation for this payload.
+    pub frame_schedule_derivation: Option<jet_foundation::Facts::DerivationRef>,
+    /// Complete capture proof copied from `Lambda.meta`.
+    pub capture_facts: TCaptureFacts,
+    /// Sema-selected failure and effect carriers for this closure.
+    pub failure_carrier: TFailureCarrier,
+    pub effects: TEffectFacts,
     /// Unmangled source parameter names for non-Rust targets.
     pub source_params: Vec<String>,
     /// Stable native symbol and resolved signature for noncapturing JIT calls.
@@ -7614,6 +10518,7 @@ pub struct TLambda {
     pub uses_stack_sentry: bool,
 }
 
+#[derive(Clone)]
 pub enum TLambdaBody {
     Expr(Box<TExpr>),
     Block(Vec<TStmt>),
@@ -7623,6 +10528,7 @@ pub enum TLambdaBody {
 
 /// c109 Phase 8: the resolved error-conversion of a `?`, mirroring `AST::TryConvert`
 /// (the total sema fact). Carried onto the TIR so the emitter never re-derives it.
+#[derive(Clone)]
 pub enum TTryConvert {
     /// Error types match — bare `jet_trace_err(x, …)?`.
     None,
@@ -7648,11 +10554,11 @@ pub enum TTryConvert {
 
 /// Whether a `?` produces the default `Err` carrier after its sema-selected
 /// conversion. Only that carrier can own structured context frames.
-pub fn try_target_is_default_error(inner: &TExpr, convert: &TTryConvert) -> bool {
+pub fn try_target_is_default_error(input: &Type, convert: &TTryConvert) -> bool {
     match convert {
         TTryConvert::DefaultErr => true,
         TTryConvert::None => matches!(
-            inner.ty.unwrap_result().map(|(_, error)| error),
+            input.unwrap_result().map(|(_, error)| error),
             Some(Type::Named(name)) if name == crate::Syntax::TYPE_ERR
         ),
         TTryConvert::Typed { target, .. } => matches!(
@@ -7667,6 +10573,7 @@ pub fn try_target_is_default_error(inner: &TExpr, convert: &TTryConvert) -> bool
 /// `Value` is an expression; `Return` is an early `return [expr]` from the enclosing
 /// function. c109 Phase 15 / #776: `Panic` carries structured message + `TPanicLoc`;
 /// emit alone formats `jet_panic_rich` (I3: no pre-rendered Rust blob on the node).
+#[derive(Clone)]
 pub enum TOrFallback {
     Value(Box<TExpr>),
     Return(Option<Box<TExpr>>),
@@ -7685,12 +10592,14 @@ pub enum TOrFallback {
     ContinueLabel(String),
 }
 
+#[derive(Clone)]
 pub enum TStrPart {
     Lit(String),
     Interp(TExpr, crate::AST::StrFormat),
 }
 
 /// c109 Phase 4/16: the resolved payload shape of an enum literal.
+#[derive(Clone)]
 pub enum TEnumPayload {
     /// `Enum.Variant` — no payload, emits just the prefix.
     Unit,
@@ -7707,6 +10616,7 @@ pub enum TEnumPayload {
 /// borrowed-in-env ident gets `(…).clone()`; a recursive (`boxed_edge`) payload
 /// gets `Box::new(…)`. For a scalar payload from a non-borrowed value both are
 /// false (the Phase-4 no-op case), so emit is byte-identical.
+#[derive(Clone)]
 pub struct TEnumArg {
     pub value: TExpr,
     /// Wrap the value in `(…).clone()` (non-scalar payload, borrowed-in-env arg).
@@ -7747,124 +10657,16 @@ pub enum TZipFillMode {
     Columns,
 }
 
-/// A resolved fast payload access for an outcome consumed immediately by `??`.
-/// The carrier is still authoritative on the ordinary path; this descriptor only
-/// lets emit elide its construction on the success edge and reconstruct failure
-/// at the cold edge. Operation tables publish capabilities, while the use site
-/// decides whether the immediate-outcome shape permits the optimization.
-#[derive(Clone, Copy)]
-pub(crate) enum TOutcomeFastPath {
-    FixedRead {
-        buffer: TOutcomeFastBuffer,
-        helper: &'static str,
-        error_method: Option<&'static str>,
-        width: usize,
-    },
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum TOutcomeFastBuffer {
-    Reader,
-    Bytes,
-}
-
-/// The fixed-width Reader facts consumed by both immediate-outcome lowering
-/// and the AOT region rewrite. Keeping the payload type and byte order here
-/// prevents an emitter from recognizing a helper name and guessing how to
-/// decode its bytes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TReaderFixedWidth {
-    U8,
-    I8,
-    U16Le,
-    U16Be,
-    I16Le,
-    I16Be,
-    U32Le,
-    U32Be,
-    I32Le,
-    I32Be,
-    U64Le,
-    U64Be,
-    I64Le,
-    I64Be,
-    F32Le,
-    F32Be,
-    F64Le,
-    F64Be,
-}
-
-impl TReaderFixedWidth {
-    fn fast_path_facts(self) -> (&'static str, &'static str, usize) {
-        match self {
-            Self::U8 => ("jet_reader_read_u8_fast", "read_u8", 1),
-            Self::I8 => ("jet_reader_read_i8_fast", "read_i8", 1),
-            Self::U16Le => ("jet_reader_read_u16_le_fast", "read_u16_le", 2),
-            Self::U16Be => ("jet_reader_read_u16_be_fast", "read_u16_be", 2),
-            Self::I16Le => ("jet_reader_read_i16_le_fast", "read_i16_le", 2),
-            Self::I16Be => ("jet_reader_read_i16_be_fast", "read_i16_be", 2),
-            Self::U32Le => ("jet_reader_read_u32_le_fast", "read_u32_le", 4),
-            Self::U32Be => ("jet_reader_read_u32_be_fast", "read_u32_be", 4),
-            Self::I32Le => ("jet_reader_read_i32_le_fast", "read_i32_le", 4),
-            Self::I32Be => ("jet_reader_read_i32_be_fast", "read_i32_be", 4),
-            Self::U64Le => ("jet_reader_read_u64_le_fast", "read_u64_le", 8),
-            Self::U64Be => ("jet_reader_read_u64_be_fast", "read_u64_be", 8),
-            Self::I64Le => ("jet_reader_read_i64_le_fast", "read_i64_le", 8),
-            Self::I64Be => ("jet_reader_read_i64_be_fast", "read_i64_be", 8),
-            Self::F32Le => ("jet_reader_read_f32_le_fast", "read_f32_le", 4),
-            Self::F32Be => ("jet_reader_read_f32_be_fast", "read_f32_be", 4),
-            Self::F64Le => ("jet_reader_read_f64_le_fast", "read_f64_le", 8),
-            Self::F64Be => ("jet_reader_read_f64_be_fast", "read_f64_be", 8),
-        }
-    }
-
-    pub(crate) const fn width(self) -> usize {
-        match self {
-            Self::U8 | Self::I8 => 1,
-            Self::U16Le | Self::U16Be | Self::I16Le | Self::I16Be => 2,
-            Self::U32Le | Self::U32Be | Self::I32Le | Self::I32Be => 4,
-            Self::U64Le | Self::U64Be | Self::I64Le | Self::I64Be => 8,
-            Self::F32Le | Self::F32Be => 4,
-            Self::F64Le | Self::F64Be => 8,
-        }
-    }
-
-    /// Render one fixed-width payload load from already-proven byte access.
-    /// Both immediate `??` lowering and the bounded Reader region use this
-    /// operation table fact; neither emitter guesses byte order from a helper
-    /// name or duplicates the typed decode table.
-    pub(crate) fn emit_load(self, byte_at: impl Fn(usize) -> String) -> String {
-        let byte = |offset| byte_at(offset);
-        let (ty, endian) = match self {
-            Self::U8 => return byte(0),
-            Self::I8 => return format!("{} as i8", byte(0)),
-            Self::U16Le => ("u16", "from_le_bytes"),
-            Self::U16Be => ("u16", "from_be_bytes"),
-            Self::I16Le => ("i16", "from_le_bytes"),
-            Self::I16Be => ("i16", "from_be_bytes"),
-            Self::U32Le => ("u32", "from_le_bytes"),
-            Self::U32Be => ("u32", "from_be_bytes"),
-            Self::I32Le => ("i32", "from_le_bytes"),
-            Self::I32Be => ("i32", "from_be_bytes"),
-            Self::U64Le => ("u64", "from_le_bytes"),
-            Self::U64Be => ("u64", "from_be_bytes"),
-            Self::I64Le => ("i64", "from_le_bytes"),
-            Self::I64Be => ("i64", "from_be_bytes"),
-            Self::F32Le => ("f32", "from_le_bytes"),
-            Self::F32Be => ("f32", "from_be_bytes"),
-            Self::F64Le => ("f64", "from_le_bytes"),
-            Self::F64Be => ("f64", "from_be_bytes"),
-        };
-        let bytes = (0..self.width()).map(byte).collect::<Vec<_>>().join(", ");
-        format!("{ty}::{endian}([{bytes}])")
-    }
-}
-
 // Debug names the variant in engine rejection text: a JIT refusal is a silent
 // interpreter deopt, so the message must say WHICH builtin method was refused.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum TBuiltinOp {
     /// `len` on a `String` → `jet_char_len(&(recv))` (char count, not byte len).
+    /// D-PLACE1: lock-free scalar access uses the single checked Prelude
+    /// adapter family rather than exposing memory-order choices.
+    AtomicMethod {
+        method: String,
+    },
     LenString,
     /// `len` on a list/map → `(recv).len() as i64`.
     LenList,
@@ -7934,6 +10736,7 @@ pub enum TBuiltinOp {
     JoinSep,
     Sum {
         float: bool,
+        f32: bool,
     },
     Product {
         float: bool,
@@ -8367,25 +11170,27 @@ impl TBuiltinOp {
             _ => false,
         }
     }
+}
 
-    /// Publish only byte-wise outcome operations whose success payload can be
-    /// read without building the `JetOutcome` carrier first. This is a
-    /// capability table, not the decision to optimize a particular expression.
-    pub(crate) fn outcome_fast_path(&self) -> Option<TOutcomeFastPath> {
-        match self {
-            Self::ByteBufferMethod { method }
-                if matches!(method.as_str(), "next" | "read_byte") =>
-            {
-                Some(TOutcomeFastPath::FixedRead {
-                    buffer: TOutcomeFastBuffer::Bytes,
-                    helper: "read_byte_fast",
-                    error_method: None,
-                    width: 1,
-                })
-            }
-            _ => None,
-        }
-    }
+/// One checked table fact attached to a database sink.  The table identity is
+/// derived from checked SQL literal segments; runtime result shape is never
+/// used to infer a relation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TDbTableFact {
+    pub table_id: String,
+    pub read: bool,
+    pub write: bool,
+}
+
+/// Checked database query metadata shared by every execution adapter.
+/// `source_span` identifies the checked sink call and `table_facts` contains
+/// only relations proven from static SQL segments.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TDbQueryMetadata {
+    pub source_file: String,
+    pub source_span: crate::Diagnostics::Span,
+    pub statement_identity: String,
+    pub table_facts: Vec<TDbTableFact>,
 }
 
 /// c109 Phase 13: a resolved handle-method op, one per handle arm of
@@ -8393,7 +11198,87 @@ impl TBuiltinOp {
 /// (keyed on `rty == Some(Named(<handle>))`) is decided ONCE at lowering from the
 /// total `recv_type` — emit only formats. Args are emitted plainly (raw `arg(i)`).
 /// `{root}` denotes `cx.root_prefix` (program-level, read at emit).
+/// Checked embedded-hardware operation metadata. The operation identity is
+/// resolved from the selected target profile before lowering; adapters marshal
+/// these facts and never rediscover board paths or widths.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum THardwareCall {
+    RegisterRead {
+        profile_id: String,
+        block: String,
+        register: String,
+        width: jet_foundation::TargetMachine::RegisterWidth,
+    },
+    RegisterWrite {
+        profile_id: String,
+        block: String,
+        register: String,
+        width: jet_foundation::TargetMachine::RegisterWidth,
+    },
+    DmaStart {
+        profile_id: String,
+        channel: String,
+        buffer_ty: Type,
+    },
+    DmaWait {
+        profile_id: String,
+        channel: String,
+        buffer_ty: Type,
+    },
+}
+/// Checked target setup installed before execution. Setups are not source
+/// expressions: they are declaration/profile facts consumed by every adapter.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum THardwareSetup {
+    DmaConfigure {
+        profile_id: String,
+        channel: String,
+        transfer_width: jet_foundation::TargetMachine::RegisterWidth,
+        ownership: jet_foundation::TargetMachine::TargetDmaOwnership,
+    },
+    InterruptBind {
+        profile_id: String,
+        interrupt: String,
+        vector: u16,
+        handler_symbol: String,
+        forbidden_effects: Vec<String>,
+    },
+}
+
+impl THardwareCall {
+    pub fn profile_id(&self) -> &str {
+        match self {
+            Self::RegisterRead { profile_id, .. }
+            | Self::RegisterWrite { profile_id, .. }
+            | Self::DmaStart { profile_id, .. }
+            | Self::DmaWait { profile_id, .. } => profile_id,
+        }
+    }
+}
+
+impl THardwareSetup {
+    pub fn profile_id(&self) -> &str {
+        match self {
+            Self::DmaConfigure { profile_id, .. } | Self::InterruptBind { profile_id, .. } => {
+                profile_id
+            }
+        }
+    }
+}
+
+/// Four closed runtime hardware operations are represented inside the existing
+/// handle method family so all tiers consume one checked operation node.
+#[derive(Clone)]
 pub enum THandleOp {
+    /// D-FOUND-BOARD1: sema-owned embedded hardware call metadata.
+    Hardware(THardwareCall),
+    /// Checked DevServer lifecycle operations use the shared Core adapter.
+    DevServerMethod {
+        method: String,
+    },
+    /// D-FOUND-RECEIPT1: typed section attachment; MIR lowers this to the
+    /// canonical existing CoreCall row with compiler-supplied metadata args.
+    ReceiptAttach,
     /// D-SHAPE-DURATION1=A: checked type-owned runtime constructor.
     DurationNew {
         unit: &'static str,
@@ -8401,6 +11286,16 @@ pub enum THandleOp {
     },
     /// FileReader: `read_line()` → `{root}jet_std_file_reader_read_line(&mut (recv))`.
     FileReaderReadLine,
+    /// D-FOUND-VIEW1=A: mapped-file byte window (`Result<View<[U8]>, IOError>`).
+    MappedFileWindow,
+    /// D-FOUND-VIEW1=A: mapped-file offset/length window.
+    MappedFileWindowLen,
+    /// D-FOUND-VIEW1=A: mapped-file line windows retaining the mapping owner.
+    MappedFileLines,
+    /// D-FOUND-VIEW1=A: mapped-file byte length.
+    MappedFileLen,
+    /// D-FOUND-VIEW1=A: mapped-file emptiness check.
+    MappedFileIsEmpty,
     /// FileWriter: `write_line(s)` → `{root}jet_std_file_writer_write_line(&mut (recv), &(a0))`.
     FileWriterWriteLine,
     /// FileWriter: `flush()` → `{root}jet_std_file_writer_flush(&mut (recv))`.
@@ -8417,6 +11312,12 @@ pub enum THandleOp {
     CSVReaderNext,
     /// D-DATAFLOW1=A: typed pull `DataStream<T>.next()` → `?T !DataError`.
     DataStreamNext,
+    /// D-FOUND-COREAPI1 / #2853: shared event-time stream operators.
+    StreamWithEventTime,
+    /// DateTime callbacks cross the scalar JIT ABI as Unix nanoseconds.
+    StreamWithEventTimeNs,
+    StreamKeyBy,
+    StreamWindow,
     XMLReaderNext,
     XMLWriterWrite,
     XMLWriterFlush,
@@ -8453,6 +11354,22 @@ pub enum THandleOp {
     ClockAdvance,
     /// D-DET-CAPAPI Clock: `wait(d)` → `{root}jet_clock_wait(&mut (recv), &(a0))` (advance by a Duration + read).
     ClockWait,
+    /// D-TEST-WORLD1=A: controlled world clock read in milliseconds.
+    WorldNow,
+    /// D-TEST-WORLD1=A: controlled world monotonic advance by Duration.
+    WorldAdvance,
+    /// D-TEST-WORLD1=A: drain the world scheduler to a fixed point.
+    WorldWaitIdle,
+    /// D-TEST-WORLD1=A: return the recorded deterministic execution history.
+    WorldHistory,
+    /// D-FOUND-REALTIME1=A: next absolute callback deadline.
+    RealtimeNextDeadline,
+    /// D-FOUND-REALTIME1=A: bounded callback receipt snapshot.
+    RealtimeReceipt,
+    /// D-FOUND-REALTIME1=A: cancel and join the callback worker.
+    RealtimeCancel,
+    /// D-FOUND-REALTIME1=A: cancellation state.
+    RealtimeIsCancelled,
     /// D-DET1 Rng: `int(lo, hi)` → `{root}jet_rng_int(&mut (recv), a0, a1)` (draw in [lo,hi]).
     RngInt,
     /// D-DET1 Rng: `float()` → `{root}jet_rng_float(&mut (recv))` (draw in [0,1)).
@@ -8479,6 +11396,10 @@ pub enum THandleOp {
     RngSample,
     /// D-DET-CAPAPI Rng: `shuffle(&list)` → `{root}jet_rng_shuffle(&mut (recv), &mut (a0))` (in-place).
     RngShuffle,
+    /// D-TEST-STRATEGY1=A HistoryRng: `next_u64()` consumes the callback RNG.
+    HistoryRngNextU64,
+    /// D-TEST-STRATEGY1=A HistoryRng: `below(bound)` consumes the callback RNG.
+    HistoryRngBelow,
     /// D-TESTDATA1 Fake: locale and deterministic fake-data domain draws.
     FakeLocale,
     FakeName,
@@ -8500,7 +11421,10 @@ pub enum THandleOp {
     GameBackendShouldContinue,
     /// D-GAME-LOOP1=A: `backend.present()` → Unit.
     GameBackendPresent,
-    GameSceneOnFrame,
+    GameSceneOnFrame {
+        schedule: Option<jet_foundation::ResourceSchedule::JetFrameSchedule>,
+        derivation: Option<jet_foundation::Facts::DerivationRef>,
+    },
     GameSceneComponent,
     GameSceneQuery,
     GameAssetsImage,
@@ -8646,6 +11570,9 @@ pub enum THandleOp {
     /// D-PROCESS1=A: `child.stdin.write(text)` →
     /// `{root}jet_process_stdin_write(&(recv), &(a0))` → `Result<(), IOError>`.
     ProcessStdinWrite,
+    /// D-FOUND-LIFECYCLE1=A: `child.stdin.close()` drops the writer and sends
+    /// EOF to the child through the shared Process Prelude.
+    ProcessStdinClose,
     /// D-ANY-JAI1 (c7jaiany §6): `reflect.of(x)`'s `Value` handle — plain
     /// inherent-method passthrough, same shape as `ArgsSpecHelp`.
     ReflectValueTypeName,
@@ -8675,15 +11602,19 @@ pub enum THandleOp {
     /// c109 Phase 21: Sender `send(v)` → `(recv).send(a0)`. Returns unit.
     SenderSend,
     /// c109 Phase 25: HTTPRouter `get`/`post`/`put`/`delete` route registration
-    /// (D-ROUTE1=A). Emits `{root}jet_http_router_register(&mut (recv), "<VERB>".to_string(),
-    /// <path>, <handler>)` where `<path>` is the lowered first arg (args[0]) and `<handler>`
-    /// is a pre-rendered boxed-closure string (`emit_router_handler` reproduction, resolved
-    /// at lowering). `verb` is the uppercase HTTP method literal.
+    /// (D-ROUTE1=A). The path and handler remain typed TIR children; `verb`
+    /// is the checked HTTP method literal.
     HTTPRouterRegister {
-        verb: &'static str,
-        handler: String,
+        verb: jet_foundation::MIR::MirHttpMethod,
+        handler: Box<TExpr>,
         file: String,
         line: usize,
+        /// Source parameter names paired with the checked handler signature.
+        /// The route adapter uses these names to bind path/query values.
+        handler_param_names: Vec<String>,
+        /// Checked route/OpenAPI facts serialized by shared TIR lowering.
+        /// Backends marshal this as the final prelude argument.
+        contract_json: String,
     },
     /// D-SIMD2 / D-LINALG1: an INSTANCE method on a built-in math value type. Emits
     /// the prelude free function `{root}jet_math_<type>_<method>(&(recv), <args>)`
@@ -8706,8 +11637,10 @@ pub enum THandleOp {
     EventMethod {
         method: String,
     },
-    /// D-WATCH-SCOPE1: WatchHandle/WatchSet polling and callback methods.
-    /// `callback_index` is an index into `JitProgram.spawn_lambdas` for `on`/`once`.
+    /// D-FFI-CALLBACK2=A: callback event self-stop uses the active callback
+    /// TLS slot; the source receiver is not passed to the native helper.
+    FfiCallbackEventStop,
+    /// `callback_index` is an index into `TirProgram.spawn_lambdas` for `on`/`once`.
     WatchMethod {
         method: String,
         callback_index: Option<usize>,
@@ -8828,17 +11761,27 @@ pub enum THandleOp {
     UiBackendMethod {
         method: String,
     },
-    /// c-devserver (owner-directed 2026-07-01): `DevServer` builder methods
-    /// (`.html`/`.port`/`.serve`).
-    DevServerMethod {
-        method: String,
-    },
     /// D-WEBAPP1=D: `App` builder methods (`.route`/`.action`/`.mount`/…).
     AppMethod {
         method: String,
+        /// The checked source arity, retained because App has overloads whose
+        /// runtime adapters have distinct ABI shapes.  Route and loader
+        /// calls carry one extra lowered argument: the checked input binding.
+        args_len: usize,
     },
+    /// D-WEBVIRTUAL1: project a virtual window through its canonical facts API.
+    WebVirtualWindowFacts,
     /// D-DBPOLICY-BIND1: bind a validated RowPolicy + user to a DBConnection.
     DBWithPolicy,
+    /// D-DBPOOL1: bounded acquisition, readiness, draining, and receipt share
+    /// one Prelude pool state machine on every execution tier.
+    DBPoolAcquire,
+    DBPoolAcquireDeadline,
+    DBPoolReady,
+    DBPoolDrain,
+    DBPoolReceipt,
+    /// D-DBPOOL1: consume one lease through the canonical resource-close path.
+    DBLeaseClose,
     /// D-SERVICE-AUTHORITY1: durable authority methods share the Prelude log.
     ServiceRuntimeSend,
     ServiceRuntimeRetry,
@@ -8848,13 +11791,19 @@ pub enum THandleOp {
     /// D-TYPEDSQL-SINK1=A: `conn.query(sql)` consumes one checked `SQL` value
     /// carrying template text and ordered `DBValue` bindings. The emitter
     /// borrows that pair only at the final driver boundary.
-    DBQuery,
+    DBQuery {
+        metadata: Option<TDbQueryMetadata>,
+    },
     /// D-TYPEDSQL-SINK1=A: `conn.query_one(sql)` consumes one checked `SQL`
     /// value and returns only the first row (if any).
-    DBQueryOne,
+    DBQueryOne {
+        metadata: Option<TDbQueryMetadata>,
+    },
     /// D-TYPEDSQL-SINK1=A: `conn.execute(sql)` consumes one checked `SQL` value
     /// and returns affected rows.
-    DBExecute,
+    DBExecute {
+        metadata: Option<TDbQueryMetadata>,
+    },
     /// D-DBPOLICY-BIND1: scoped query registered with the same live registry as
     /// `app.live`, after policy transformation.
     DBLive,
@@ -8875,22 +11824,19 @@ pub enum THandleOp {
     DBValueBool,
     DBValueBlob,
     DBValueIsNull,
-    /// D-DEP-WASM1=A / D-PLUGIN1=B (c81): `plugin.call(name, args)` →
-    /// `Result<Float, String>`, a homogeneous `[Float]` call across the
-    /// sandboxed Component Model boundary (wire-encoded, see `Prelude/Plugin.rs`).
-    PluginCall,
-    /// D-DEP-WASM1=A / D-PLUGIN1=B (c81): `plugin.call_int(name, args)` →
-    /// `Result<Int, String>`, the `[Int]` sibling of `PluginCall`.
-    PluginCallInt,
-    /// `Result<Bool, String>`, the `[Bool]` sibling of `PluginCall`.
-    PluginCallBool,
-    /// `Result<String, String>`, the `[String]` sibling of `PluginCall`.
-    PluginCallText,
+    /// One statically checked Component export invocation.  The descriptor is
+    /// selected by sema/TIR and is consumed unchanged by every MIR adapter.
+    PluginInvoke {
+        export_name: String,
+        signature: jet_foundation::MIR::ComponentSignatureDescriptor,
+    },
     /// D-LIB-CALLGRANT1=A: `mod.on_tick(dt)` → the checked native entry point.
     ModOnTick,
     /// D-SHIFT1 (c7shift): `Reader.over(bytes)` constructor. `owned` is a
     /// sema-proven last-use fact; false retains the borrowing clone helper.
-    ReaderOver { owned: bool },
+    ReaderOver {
+        owned: bool,
+    },
     /// D-SHIFT1: `reader.read_u8()` → `{root}jet_reader_read_u8(&mut (recv))`
     /// → `Result<U8, String>`. Bounds miss is an ordinary `Err`, never a panic.
     ReaderReadU8,
@@ -8952,117 +11898,30 @@ pub enum THandleOp {
     },
 }
 
-impl THandleOp {
-    /// Publish the fixed-width Reader payload fact once for every consumer.
-    /// The AOT region path uses the typed variant; the ordinary immediate
-    /// outcome path below derives its helper and error facts from the same
-    /// table.
-    pub(crate) fn reader_fixed_width(&self) -> Option<TReaderFixedWidth> {
-        Some(match self {
-            Self::ReaderReadU8 => TReaderFixedWidth::U8,
-            Self::ReaderReadI8 => TReaderFixedWidth::I8,
-            Self::ReaderReadU16Le => TReaderFixedWidth::U16Le,
-            Self::ReaderReadU16Be => TReaderFixedWidth::U16Be,
-            Self::ReaderReadI16Le => TReaderFixedWidth::I16Le,
-            Self::ReaderReadI16Be => TReaderFixedWidth::I16Be,
-            Self::ReaderReadU32Le => TReaderFixedWidth::U32Le,
-            Self::ReaderReadU32Be => TReaderFixedWidth::U32Be,
-            Self::ReaderReadI32Le => TReaderFixedWidth::I32Le,
-            Self::ReaderReadI32Be => TReaderFixedWidth::I32Be,
-            Self::ReaderReadU64Le => TReaderFixedWidth::U64Le,
-            Self::ReaderReadU64Be => TReaderFixedWidth::U64Be,
-            Self::ReaderReadI64Le => TReaderFixedWidth::I64Le,
-            Self::ReaderReadI64Be => TReaderFixedWidth::I64Be,
-            Self::ReaderReadF32Le => TReaderFixedWidth::F32Le,
-            Self::ReaderReadF32Be => TReaderFixedWidth::F32Be,
-            Self::ReaderReadF64Le => TReaderFixedWidth::F64Le,
-            Self::ReaderReadF64Be => TReaderFixedWidth::F64Be,
-            _ => return None,
-        })
-    }
-
-    /// Publish fixed-width Reader payload access for the same generic
-    /// immediate-outcome optimization used by byte buffers.
-    pub(crate) fn outcome_fast_path(&self) -> Option<TOutcomeFastPath> {
-        let reader = self.reader_fixed_width()?;
-        let (helper, method, width) = reader.fast_path_facts();
-        Some(TOutcomeFastPath::FixedRead {
-            buffer: TOutcomeFastBuffer::Reader,
-            helper,
-            error_method: Some(method),
-            width,
-        })
-    }
-    /// True only for handle operations whose rendered host call still returns
-    /// Rust's `Option`.  Jet's `Type::Option` is the `JetOutcome`/`Result`
-    /// carrier, so the HandleMethod emitter adapts these operations exactly
-    /// once, before any fallback expression can inspect the value.
-    ///
-    /// This is an operation fact, not a surface-type heuristic.  Operations
-    /// that already call a canonical `JetOutcome` helper stay out of this
-    /// table, even when their Jet result type is optional.
-    pub(crate) fn raw_option_boundary(&self) -> bool {
-        match self {
-            Self::HTTPReqHeader
-            | Self::HTTPReqParam
-            | Self::HTTPRespHeader
-            | Self::DataTreeToText
-            | Self::JSONToText => true,
-            Self::HTTPClientMethod { kind, method } => {
-                matches!(
-                    (kind.as_str(), method.as_str()),
-                    ("HTTPHeaders", "first") | ("HTTPResponse", "raw_content_encoding")
-                )
-            }
-            Self::CivilTimeMethod { kind, method } => matches!(
-                (kind.as_str(), method.as_str()),
-                ("Zone", "next_transition" | "previous_transition")
-                    | ("ZonedDateTime", "next_transition" | "previous_transition")
-            ),
-            _ => false,
-        }
-    }
-}
-
-/// One lowered call argument, with the borrow/clone decisions already made (so
-/// the emitter reproduces `emit_call_args` without consulting `cx.sigs`).
-///
-/// Emission order mirrors `emit_call_args` exactly: the clone wrapper (`.clone()`
-/// or `Arc::clone(&…)`) is applied to the raw value first, then the borrow wrapper
-/// (`&(…)` for a `Read` non-scalar, `&mut (…)` for a `Mutate`).
+/// One lowered call argument, with borrow/clone/coercion decisions already made.
+/// All fields are target-neutral facts consumed by canonical MIR.
+#[derive(Clone)]
 pub struct TCallArg {
     pub value: TExpr,
     /// D-META-BODY1=A: `b.generate(name) { … }` carries its typed item
     /// template beside the lowered placeholder value.
-    pub template_items: Option<Vec<crate::AST::DeriveBodyItem>>,
-    /// Emit `&(...)` around the value (a non-scalar passed by `Read` convention).
+    pub template_items: Option<crate::Comptime::TemplateBody<TExpr>>,
+    /// The checked call passes this value by shared reference.
     pub borrow: bool,
-    /// Emit `&mut (...)` around the value (a `Mutate`-convention argument). c109
-    /// Phase 6: method args may be `Mutate`; the plain-call path never sets this.
+    /// The checked call passes this value by exclusive reference.
     pub mut_borrow: bool,
-    /// Emit `(...).clone()` (an implicit clone — a value passed by `Move`).
+    /// The checked call requires an implicit value clone.
     pub clone: bool,
-    /// Emit `(...).clone()` (a `Shared` value auto-cloned at the call site — its
-    /// own cheap-handle `Clone` impl; D-MEM1 S6 changed this from a hardcoded
-    /// `Arc::clone(&...)` once `Shared<T>` stopped being a bare `Arc<T>`).
-    /// c109 Phase 6: method/Arc args may set this; the plain-call path does not.
+    /// The checked call requires a shared-handle clone.
     pub arc_clone: bool,
-    /// c109 Phase 13: Fn-typed-parameter coercion. When set, emit wraps with
-    /// `Rc`/`Arc`/`Box::new` to match `cx.rust_type(&ty)` (unless `already_boxed`),
-    /// then ` as <fn-type>`. Named-fn / escaping-lambda values already wrap.
+    /// Checked fn-typed parameter coercion facts.
     pub fn_coerce: Option<TFnCoerce>,
-    /// D-FIXARR1: a `[T#N]` argument passed to a `[T]` (Vec) slot is widened by
-    /// copying into a growable list. When true, emit wraps with `.to_vec()`.
+    /// Checked fixed-array to list widening.
     pub widen_to_vec: bool,
-    /// D-UNIONTYPE1=A: a member value passed where a union is expected. When
-    /// `Some(union)`, emit wraps as `__jet_<UnionEnum>::<MemberTag>(value)`.
+    /// Checked member-to-union widening target.
     pub widen_to_union: Option<Type>,
-    /// S48: the parameter is a single-trait value slot (`fn show(s: Shape)`) and
-    /// this argument is a concrete implementor, so it boxes invisibly. When
-    /// `Some(trait)`, emit wraps with `Box::new(value) as Box<dyn <trait>>` —
-    /// the same slot-driven boxing a `[Shape]` list element already gets in
-    /// `emit_tir_expr`'s `ListLit` arm, decided here so emit stays dumb.
-    pub box_as_trait: Option<String>,
+    /// Checked concrete-to-single-trait boxing target.
+    pub box_as_trait: Option<Type>,
 }
 
 impl TCallArg {
@@ -9085,6 +11944,7 @@ impl TCallArg {
 }
 
 /// c109 Phase 13: the resolved Fn-typed-argument coercion (`emit_call_args`).
+#[derive(Clone)]
 pub struct TFnCoerce {
     /// Target fn type; emit spells via `cx.rust_type`.
     pub ty: Type,

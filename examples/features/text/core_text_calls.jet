@@ -1,0 +1,29 @@
+// D-TEXT-CORE-CALLS1: direct witnesses for text views, normalization, and formatting.
+use core.text as text
+use core.text.fmt as fmt
+
+fn run() {
+    loop byte in text.byte_views("Jet") -> print(byte)
+    print(text.casefold("Straße"))
+    print(text.ends_any("jetpack", ["pack", "go"]))
+    print(fmt.bin(10))
+    print(fmt.decimal(Float{12.34}, 2))
+    print(fmt.grouped(Float{1234.5678}, 2))
+    print(fmt.hex(255, 4))
+    print(fmt.oct(10))
+    print(fmt.pad("x", 3, "."))
+    print(fmt.sci(Float{123.4}, 2))
+    loop grapheme in text.grapheme_views("áb") -> print(grapheme)
+    print(text.graphemes("áb").len())
+    print(text.is_whitespace(" "))
+    loop line in text.line_views("one\ntwo") -> print(line)
+    print(text.nfd("é"))
+    print(text.nfkd("ﬃ"))
+    print(text.pad_end("7", 3, "0"))
+    print(text.rsplitn("a,b,c", ",", 2).len())
+    print(text.splitn("a,b,c", ",", 2).len())
+    print(text.trim("  jet  "))
+    print(text.trim_end("jet  "))
+    print(text.trim_start("  jet"))
+    loop word in text.word_views("jet lang") -> print(word)
+}

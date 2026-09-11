@@ -1,0 +1,20 @@
+// D-LOG1: structured levels and sinks can be configured without ambient output.
+use core.files as files
+use core.log as log
+use core.testing as testing
+
+fn run() {
+    log.disable()
+    log.debug_fields("debug", [])
+    log.error("error")
+    log.error_fields("error-fields", [])
+    log.warn_fields("warn-fields", [])
+    ratio :: log.float("ratio", 1.25)
+    redacted :: log.redact("secret")
+    log.sample_every(2)
+    root := testing.temp_dir("log-projection")
+    path := Path.from(root).join("events.jsonl").to_string()
+    log.otlp_file(path)
+    print("fields:{ratio.kind}:{redacted.redacted}")
+    files.remove_all(root) ?? return
+}

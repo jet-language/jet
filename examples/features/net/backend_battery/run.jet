@@ -1,0 +1,148 @@
+use backend
+use core.auth as auth
+use core.files as files
+use core.http.client as http_client
+use core.http as http
+use core.http.server as http_server
+use core.log as log
+use core.testing as testing
+use core.process as process
+use core.time as time
+use core.tasks as tasks
+
+struct Metrics {
+    requests: Int
+    errors: Int
+}
+
+fn health(req: HTTPRequest, metrics: Shared<Metrics>) HTTPResponse !HTTPError -> {
+    metrics.guard_edit().value.requests += 1
+    return backend.health_response(req)
+}
+
+fn create_order(req: HTTPRequest, session_id: String, queue_path: String, metrics: Shared<Metrics>) HTTPResponse !HTTPError -> {
+    metrics.guard_edit().value.requests += 1
+    request_id :: backend.request_id(req.header("x-request-id") ?? "")
+    if !backend.role_allowed(req, session_id, "writer", time.now()) {
+        metrics.guard_edit().value.errors += 1
+        return backend.error_response(req, 401, "unauthorized", "writer role required")
+    }
+    body :: backend.decode_order(req) ?? {
+        metrics.guard_edit().value.errors += 1
+        return backend.error_response(req, 400, "malformed-json", "request body is not OrderRequest")
+    }
+    if body.item == "" || body.quantity <= 0 {
+        metrics.guard_edit().value.errors += 1
+        return backend.error_response(req, 422, "invalid-order", "item and positive quantity are required")
+    }
+    order_id :: metrics.guard_read().value.requests
+    queue_report :: backend.durable_queue(queue_path, "order:{order_id}:{body.item}:{body.quantity}", "order-{order_id}")
+    if !queue_report.delivered {
+        metrics.guard_edit().value.errors += 1
+        return backend.error_response(req, 503, "queue-unavailable", "durable worker did not receive the order")
+    }
+    return backend.order_response(202, backend.OrderResponse{
+        order_id: order_id,
+        item: body.item,
+        quantity: body.quantity,
+        request_id: request_id.value,
+        role: "writer",
+        queued: queue_report.delivered,
+    })
+}
+
+fn run() {
+    temp := testing.temp_dir("backend-battery")
+    process.on_signal(.Term)
+    db_report :: backend.sqlite_fixture()
+    pool_path :: Path.from(temp).join("pool.sqlite").to_string()
+    pool_report :: backend.pool_fixture(pool_path)
+    trace_path :: Path.from(temp).join("backend.jsonl").to_string()
+    trace_report :: backend.configure_trace(trace_path, "jsonl", "backend-battery")
+    queue_path :: Path.from(temp).join("queue.log").to_string()
+    queue_report :: backend.durable_queue(queue_path, "order:bootstrap", "order-1")
+
+    auth.register_user("ada", "argon2id:demo") ?? panic("auth register")
+    session_id :: backend.issue_session("ada", "argon2id:demo", time.now(), 600000)
+    policy :: backend.session_policy()
+    print("session-policy:{policy.session_header}/{policy.role_header}/{policy.cookie_name}")
+    if session_id == "" -> panic("auth login")
+
+    router := http.router()
+    router.get("/health", (req: HTTPRequest) -> Ok(http_server.json(200, backend.HealthResponse{
+        status: "ok",
+        request_id: req.header("x-request-id") ?? "unassigned",
+    })))
+    router.post("/orders", (req: HTTPRequest) -> {
+        body :: req.json<backend.OrderRequest>() ?? panic("openapi request")
+        return Ok(http_server.json(202, backend.OrderResponse{
+            order_id: 1,
+            item: body.item,
+            quantity: body.quantity,
+            request_id: req.header("x-request-id") ?? "openapi",
+            role: "writer",
+            queued: true,
+        }))
+    })
+    openapi :: backend.openapi_document(router)
+    if !openapi.contains("/health") || !openapi.contains("/orders") || !openapi.contains("\"get\"") || !openapi.contains("\"post\"") || !openapi.contains("\"200\"") || !openapi.contains("\"202\"") || !openapi.contains("application/json") || !openapi.contains("\"quantity\"") -> panic("openapi validation")
+    in_process_request :: http.parse("GET /health HTTP/1.1\nHost: localhost\nx-request-id: in-process\n\n")
+    in_process_response :: http.dispatch(router, in_process_request) ?? panic("in-process dispatch")
+    in_process_body :: in_process_response.json<backend.HealthResponse>() ?? panic("in-process json")
+    print("in-process:{in_process_response.status()}:{in_process_body.request_id}")
+    print("openapi:valid=true")
+    print("db:{db_report.first_item}:rollback={db_report.rolled_back}:checksum={db_report.checksum}")
+    print("pool:ready={pool_report.ready}:acquired={pool_report.acquired}:drained={pool_report.drained}")
+    print("pool-before:{pool_report.before}")
+    print("pool-after:{pool_report.after}")
+    print("queue:{queue_report.status}:delivered={queue_report.delivered}:retried={queue_report.retried}")
+    loop gate in backend.core_gates() -> print("gate:{gate.ticket}:available={gate.available}")
+
+    metrics :: shared Metrics{requests: 0, errors: 0}
+    mux :: http_server.mux()
+    http_server.request_id(mux)
+    mux.get("/health", (req: HTTPRequest) -> health(req, metrics))
+    mux.post("/orders", (req: HTTPRequest) -> create_order(req, session_id, queue_path, metrics))
+    bound :: http_server.bind("127.0.0.1:0", mux, deadline: 2s) ?? panic("server bind")
+    address :: bound.local_addr() ?? panic("server address")
+    serving :: task { bound.serve() }
+    time.sleep(20ms)
+
+    health_request :: http_client.request("GET", "http://{address}/health").header("x-request-id", "health-1")
+    health_response :: health_request.send() ?? panic("health request")
+    health_body :: health_response.json<backend.HealthResponse>() ?? panic("health json")
+    print("health:{health_response.status()}:{health_body.request_id}")
+
+    denied_request :: http_client.request("POST", "http://{address}/orders")
+        .header("x-session", session_id)
+        .header("x-role", "reader")
+        .header("x-request-id", "denied-1")
+        .json(backend.OrderRequest{item: "book", quantity: 1})
+    denied_response :: denied_request.send() ?? panic("denied request")
+    denied_body :: denied_response.json<backend.ErrorResponse>() ?? panic("denied json")
+    print("denied:{denied_response.status()}:{denied_body.code}:{denied_body.request_id}")
+
+    order_request :: http_client.request("POST", "http://{address}/orders")
+        .header("cookie", "session={session_id}")
+        .header("x-role", "writer")
+        .header("x-request-id", "order-1")
+        .json(backend.OrderRequest{item: "book", quantity: 2})
+    order_response :: order_request.send() ?? panic("order request")
+    order_body :: order_response.json<backend.OrderResponse>() ?? panic("order json")
+    print("order:{order_response.status()}:{order_body.queued}:{order_body.request_id}")
+
+    load_report :: backend.load_test(address)
+    print("load:users={load_report.users}:completed={load_report.completed}:ok={load_report.ok}:errors={load_report.errors}:transport={load_report.transport_errors}:p50={load_report.p50}:p95={load_report.p95}:p99={load_report.p99}:samples={load_report.samples.len()}")
+    print("load-receipt:{backend.load_receipt(load_report)}")
+
+    request_count :: metrics.guard_read().value.requests
+    error_count :: metrics.guard_read().value.errors
+    _summary_trace :: backend.emit_trace(trace_report.trace_id, "/orders", 202, request_count, error_count, trace_report.sink)
+    log.flush()
+    log_text :: files.read(trace_path) ?? panic("trace read")
+    print("trace:redacted={log_text.contains("[redacted]")}:bytes={log_text.len()}")
+
+    shutdown_report :: bound.shutdown(100ms) ?? panic("server shutdown")
+    print("shutdown-cancelled:{shutdown_report.cancelled}")
+    serving.join() ?? panic("server join")
+}

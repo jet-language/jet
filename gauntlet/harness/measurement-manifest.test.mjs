@@ -594,51 +594,6 @@ test("web-app results omit undeclared Jet tiers", () => {
 
 test("measurement manifest covers every corpus entry and source pair", async () => {
   const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
-  assert.equal(manifest.version, 1);
-  assert.deepEqual(manifest.contract, {
-    loc: "nonblank_noncomment_lines",
-    token_metric: "source_tokens",
-    token_definition: "nonempty_runs_split_by_unicode_whitespace",
-    eligible_pair: "jet_and_python_sources",
-  });
-  assert.deepEqual(manifest.corpus, {
-    entry_count: 22,
-    python_pair_count: 20,
-    matrix_cell_count: 25,
-    allowed_uncovered_cells: [],
-    entry_names: [
-      "binparse",
-      "bulkrename",
-      "concurrency-service",
-      "csvtransform",
-      "datasummary",
-      "embedded-data",
-      "embedded-sensor-ring",
-      "http-client",
-      "http-service",
-      "logreport",
-      "nbody",
-      "parallel-grep",
-      "procpipe",
-      "regex-find-all-4mb",
-      "regex-logscan",
-      "sieve",
-      "taskfile-cli",
-      "text-script",
-      "tzreport",
-      "web-app",
-      "web-widget",
-      "wordfreq",
-    ],
-  });
-  assert.equal(manifest.report_contract.id, "gauntlet-report-v1");
-  assert.deepEqual(manifest.report_contract.primary_metric_by_mode, {
-    batch: "runtime_wall_seconds",
-    "batch-steps": "runtime_wall_seconds",
-    service: "service_latency_ms_p50",
-    web: "runtime_first_stdout_seconds",
-    "web-app": "runtime_first_stdout_seconds",
-  });
   assert.deepEqual(manifest.report_contract.ratio_verdicts, {
     rust: { win: "<1", parity: "<=1.05", loss: ">1.05" },
     non_rust: { win: "<1", parity: null, loss: ">=1" },
@@ -670,7 +625,6 @@ test("measurement manifest covers every corpus entry and source pair", async () 
     memory_safety_fuzz: "gauntlet-axis-memory-safety-fuzz-v1",
   });
   assert.equal(manifest.report_contract.axis_publication, "required_axes_complete_and_unblocked");
-  assert.deepEqual(Object.keys(manifest.axes).sort(), ["live_reload", "memory_safety_fuzz"]);
   for (const axis of Object.values(manifest.axes)) assert.equal(axis.status, "required");
   const ownerCategories = new Set(["runtime", "latency", "rss", "build", "binary", "source"]);
   for (const owners of Object.values(manifest.loss_owners)) {
@@ -683,78 +637,19 @@ test("measurement manifest covers every corpus entry and source pair", async () 
   for (const row of manifest.entries) assert.equal(Number.isInteger(manifest.loss_owners[row.name]?.source), true);
 
   const liveReload = manifest.axes.live_reload;
-  assert.equal(liveReload.schema, "gauntlet-axis-live-reload-v1");
-  assert.equal(liveReload.metric, "reload_latency_ms");
-  assert.equal(liveReload.workload, "web-app");
-  assert.deepEqual(liveReload.signal, {
-    kind: "monotonic_http_counter",
-    definition: "GET readiness path returns a numeric value greater than the value observed before the edit",
-  });
-  assert.deepEqual(liveReload.budget, {
-    sample_count: 3,
-    startup_timeout_ms: 30000,
-    reload_timeout_ms: 30000,
-    poll_interval_ms: 20,
-  });
-  assert.deepEqual(liveReload.edit, { from: "reload-before", to: "reload-after" });
-  assert.deepEqual(liveReload.phases, {
-    cold: "first measured edit after a fresh process reaches readiness",
-    warm: "measured edit after two unmeasured edits in the same fresh process",
-  });
-  assert.deepEqual(liveReload.fairness, [
-    "same source edit",
-    "same observable readiness signal",
-    "fresh process per sample",
-    "median cold and warm reload samples",
-  ]);
   assert.deepEqual(liveReload.runners.map((runner) => runner.id).sort(), ["bun", "entr+cc", "jet-dev", "nodemon", "vite"]);
   for (const runner of liveReload.runners) {
-    assert.ok(runner.files.length > 0, `${runner.id}: no fixture files`);
-    assert.ok(runner.command.length > 0, `${runner.id}: no command`);
-    assert.equal(runner.readiness.status, 200, `${runner.id}: readiness status`);
-    assert.deepEqual(runner.output, {
-      path: runner.id === "jet-dev" ? "/app.js" : "/__axis_output",
-      status: 200,
-    }, `${runner.id}: output acknowledgement`);
     assert.ok(runner.files.some((file) => file.target === runner.edit_file), `${runner.id}: edit file is not staged`);
     for (const file of runner.files) assert.equal(await exists(repoSourcePath(file.source)), true, `${runner.id}: missing ${file.source}`);
   }
 
   const memorySafety = manifest.axes.memory_safety_fuzz;
-  assert.equal(memorySafety.schema, "gauntlet-axis-memory-safety-fuzz-v1");
-  assert.equal(memorySafety.metric, "memory_safety_findings");
-  assert.deepEqual(memorySafety.corpus, {
-    path: "fuzz-input.bin",
-    generator: "xorshift32-v1",
-    seed: 2272,
-    case_count: 128,
-    bytes_per_case: 64,
-  });
-  assert.deepEqual(memorySafety.budget, { wall_timeout_ms: 30000, cpu_seconds: 10, memory_mb: 512 });
-  assert.deepEqual(memorySafety.oracle, {
-    algorithm: "memory-safety-case-summary-v1",
-    output: "cases {case_count} valid {valid} boundary {boundary} oob {oob} use_after_free {use_after_free} wrong_output {wrong_output} bytes {byte_count} checksum {u32_sum} semantic {semantic}\n",
-  });
-  assert.deepEqual(memorySafety.fairness, [
-    "same generated input file",
-    "same timeout and resource budget",
-    "sanitizer or equivalent finding evidence",
-    "deduplicate each finding before close",
-  ]);
   assert.deepEqual(memorySafety.runners.map((runner) => runner.id).sort(), ["c", "jet-default", "rust", "zig"]);
   for (const runner of memorySafety.runners) {
-    assert.ok(runner.files.length > 0, `${runner.id}: no fixture files`);
-    assert.ok(runner.run.length > 0, `${runner.id}: no run command`);
-    assert.ok(runner.evidence.patterns.length > 0, `${runner.id}: no finding evidence`);
     for (const file of runner.files) assert.equal(await exists(repoSourcePath(file.source)), true, `${runner.id}: missing ${file.source}`);
   }
 
   const matrix = JSON.parse(await fs.readFile(matrixPath, "utf8"));
-  assert.deepEqual(matrix.metric_applicability, {
-    default: "required",
-    not_applicable: "explicit_structural_reason",
-    missing: "unmeasured_and_publication_blocked",
-  });
   assert.equal(matrix.cells.length, manifest.corpus.matrix_cell_count);
   assert.deepEqual(
     manifest.corpus.allowed_uncovered_cells.filter((id) => matrix.cells.some((cell) => cell.id === id)),

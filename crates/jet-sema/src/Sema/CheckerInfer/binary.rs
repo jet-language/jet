@@ -86,11 +86,7 @@ impl<'a> Checker<'a> {
         else {
             return None;
         };
-        if method != "starts_with"
-            || args.len() != 1
-            || args[0].label.is_some()
-            || args[0].spread
-        {
+        if method != "starts_with" || args.len() != 1 || args[0].label.is_some() || args[0].spread {
             return None;
         }
         let candidate = Self::path_ident(receiver)?;
@@ -145,7 +141,9 @@ impl<'a> Checker<'a> {
         if !self
             .lookup(candidate)
             .is_some_and(|info| info.ty == Type::String)
-            || !self.lookup(base).is_some_and(|info| info.ty == Type::String)
+            || !self
+                .lookup(base)
+                .is_some_and(|info| info.ty == Type::String)
         {
             return None;
         }
@@ -482,6 +480,7 @@ impl<'a> Checker<'a> {
             }],
             recv_type: None,
             resolved_ret: Some(target.clone()),
+            operator_rhs: None,
             checked_widen: widening && checked,
         };
     }
@@ -514,6 +513,7 @@ impl<'a> Checker<'a> {
             args: Vec::new(),
             recv_type: Some(type_name.to_string()),
             resolved_ret: Some(base),
+            operator_rhs: None,
             checked_widen: false,
         }
     }
@@ -547,6 +547,7 @@ impl<'a> Checker<'a> {
             }],
             recv_type: None,
             resolved_ret: Some(Type::Named(destination_name.to_string())),
+            operator_rhs: None,
             checked_widen: false,
         }
     }
@@ -605,6 +606,7 @@ impl<'a> Checker<'a> {
             }],
             recv_type: None,
             resolved_ret: Some(Type::Named(destination_name.to_string())),
+            operator_rhs: None,
             checked_widen: false,
         }
     }
@@ -643,6 +645,7 @@ impl<'a> Checker<'a> {
             }],
             recv_type: None,
             resolved_ret: Some(Type::Named(unit_name.to_string())),
+            operator_rhs: None,
             checked_widen: false,
         }
     }
@@ -708,8 +711,7 @@ impl<'a> Checker<'a> {
                             && (self.type_implements_trait_for_name(
                                 name,
                                 crate::Syntax::TRAIT_COMPARABLE,
-                            )
-                            || self.type_param_has_bound(ty, crate::Syntax::TRAIT_COMPARABLE))
+                            ) || self.type_param_has_bound(ty, crate::Syntax::TRAIT_COMPARABLE))
                             && (self.type_implements_trait_for_name(
                                 name,
                                 crate::Syntax::TRAIT_EQUATABLE,
@@ -804,9 +806,11 @@ impl<'a> Checker<'a> {
             Expr::Ident(name, _) if !name.is_empty() && self.lookup(name).is_none() => {
                 Some(name.clone())
             }
-            Expr::Field(base, member, _) => {
-                Some(format!("{}.{}", self.direct_static_type_name(base)?, member))
-            }
+            Expr::Field(base, member, _) => Some(format!(
+                "{}.{}",
+                self.direct_static_type_name(base)?,
+                member
+            )),
             Expr::Paren(inner, _) => self.direct_static_type_name(inner),
             _ => None,
         }
@@ -883,8 +887,7 @@ impl<'a> Checker<'a> {
                     && crate::Syntax::numeric_conversion_source(method).is_some_and(|source| {
                         matches!(
                             source,
-                            "I8"
-                                | "I64"
+                            "I8" | "I64"
                                 | "I16"
                                 | "I32"
                                 | "Int"
@@ -938,14 +941,12 @@ impl<'a> Checker<'a> {
         let Expr::Binary(op, left, right, _) = (match &args[0].expr {
             Expr::Paren(inner, _) => inner.as_ref(),
             expr => expr,
-        })
-        else {
+        }) else {
             return false;
         };
         match op {
             BinOp::Mul => {
-                (Self::direct_unit_raw(self, left, &outer_fact)
-                    && self.direct_unit_scalar(right))
+                (Self::direct_unit_raw(self, left, &outer_fact) && self.direct_unit_scalar(right))
                     || (Self::direct_unit_raw(self, right, &outer_fact)
                         && self.direct_unit_scalar(left))
             }
@@ -1011,7 +1012,120 @@ impl<'a> Checker<'a> {
         }));
     }
 
-    /// Binary operators and type checking.
+    /// D-OPMIX1: match a concrete operator RHS bound on a generic receiver.
+    fn operator_bound_matches(&self, ty: &Type, trait_name: &str, rhs: &Type) -> bool {
+        let Type::Named(name) = ty else {
+            return false;
+        };
+        let Some(param) = self
+            .type_param_scope
+            .iter()
+            .find(|param| param.name == *name)
+        else {
+            return false;
+        };
+        let typed = format!("{trait_name}<{}>", rhs.name());
+        param
+            .bounds
+            .iter()
+            .any(|bound| bound == &typed || (bound == trait_name && rhs == ty))
+    }
+
+    /// D-FOUND-OPMIX1=A: a mixed operator resolves its direct `(left, right)`
+    /// hook first; only a checked `#Commutative` hook derives the reverse
+    /// lookup. Subtraction and division therefore never mirror implicitly.
+    fn infer_mixed_operator(
+        &mut self,
+        op: BinOp,
+        lhs: &mut Box<Expr>,
+        rhs: &mut Box<Expr>,
+        lt: &Type,
+        rt: &Type,
+        span: Span,
+        replacement: &mut Option<Expr>,
+    ) -> Option<Type> {
+        let (trait_name, method) = match op {
+            BinOp::Add => (crate::Syntax::TRAIT_ADD, "add"),
+            BinOp::Sub => (crate::Syntax::TRAIT_SUB, "sub"),
+            BinOp::Mul => (crate::Syntax::TRAIT_MUL, "mul"),
+            BinOp::Div => (crate::Syntax::TRAIT_DIV, "div"),
+            _ => return None,
+        };
+        if lt == rt {
+            return None;
+        }
+
+        let mut receiver_is_left = true;
+        let mut row = self
+            .trait_reg
+            .operator_impl_for(lt, trait_name, rt)
+            .cloned();
+        if row.is_none() {
+            if let Some(candidate) = self.trait_reg.operator_impl_for(rt, trait_name, lt) {
+                if candidate.operator_marker == Some(crate::AST::OperatorMarker::Commutative) {
+                    row = Some(candidate.clone());
+                    receiver_is_left = false;
+                }
+            }
+        }
+
+        let (receiver_ty, argument_ty, result_ty, recv_type, operator_rhs) = if let Some(row) = row
+        {
+            let receiver_ty = if receiver_is_left { lt } else { rt };
+            let argument_ty = if receiver_is_left { rt } else { lt };
+            (
+                receiver_ty.clone(),
+                argument_ty.clone(),
+                row.result,
+                row.left,
+                Some(row.rhs),
+            )
+        } else {
+            let receiver_ty = if receiver_is_left { lt } else { rt };
+            let argument_ty = if receiver_is_left { rt } else { lt };
+            if !self.operator_bound_matches(receiver_ty, trait_name, argument_ty) {
+                return None;
+            }
+            (
+                receiver_ty.clone(),
+                argument_ty.clone(),
+                receiver_ty.clone(),
+                trait_name.to_string(),
+                None,
+            )
+        };
+
+        let left = std::mem::replace(lhs, Box::new(Expr::Absent(span)));
+        let right = std::mem::replace(rhs, Box::new(Expr::Absent(span)));
+        let (receiver, argument) = if receiver_is_left {
+            (left, right)
+        } else {
+            (right, left)
+        };
+        let call = Expr::MethodCall {
+            receiver,
+            method: method.to_string(),
+            method_span: span,
+            owner_type_args: Vec::new(),
+            type_args: Vec::new(),
+            args: vec![crate::AST::CallArg {
+                convention: crate::AST::AccessConvention::Read,
+                expr: *argument,
+                span,
+                flags: crate::AST::CallArgFlags::default(),
+                label: None,
+                spread: false,
+            }],
+            recv_type: Some(recv_type),
+            resolved_ret: Some(result_ty.clone()),
+            operator_rhs,
+            checked_widen: false,
+        };
+        *replacement = Some(call);
+        let _ = (receiver_ty, argument_ty);
+        Some(result_ty)
+    }
+
     pub(crate) fn infer_binary(
         &mut self,
         op: BinOp,
@@ -1062,8 +1176,7 @@ impl<'a> Checker<'a> {
                 && rt.as_ref() == Some(&Type::Bool)
             {
                 if let Some(edit) = self.path_containment_string_prefix_edit(lhs, rhs, span) {
-                    let diagnostic =
-                        Diagnostic::from_row("L0517", &[], Some(span)).with_edit(edit);
+                    let diagnostic = Diagnostic::from_row("L0517", &[], Some(span)).with_edit(edit);
                     self.diags.push(diagnostic);
                 }
             }
@@ -1076,8 +1189,7 @@ impl<'a> Checker<'a> {
         let saved_expected = self.expected_type.clone();
         if Self::is_exact_numeric_literal(lhs)
             && (self.known_measurement_expr(rhs)
-                || (matches!(op, BinOp::Mul | BinOp::Div)
-                    && self.known_unit_expr(rhs)))
+                || (matches!(op, BinOp::Mul | BinOp::Div) && self.known_unit_expr(rhs)))
         {
             self.expected_type = Some(Type::Float);
         }
@@ -1122,9 +1234,7 @@ impl<'a> Checker<'a> {
                 Some(Type::Float)
             } else if matches!(op, BinOp::Mul | BinOp::Div)
                 && Self::is_exact_numeric_literal(rhs)
-                && lt
-                    .as_ref()
-                    .is_some_and(|ty| self.is_scalable_unit_type(ty))
+                && lt.as_ref().is_some_and(|ty| self.is_scalable_unit_type(ty))
             {
                 Some(Type::Float)
             } else {
@@ -1339,6 +1449,10 @@ impl<'a> Checker<'a> {
             }
         }
 
+        if let Some(mixed) = self.infer_mixed_operator(op, lhs, rhs, &lt, &rt, span, replacement) {
+            return Some(mixed);
+        }
+
         // D-OPDEF1=A: user operators are ordinary trait-method calls after sema
         // proves one exact impl and the fixed same-type law.
         // A dimensional unit is still represented by a nominal `#Numeric`
@@ -1356,8 +1470,7 @@ impl<'a> Checker<'a> {
                     && (self.type_implements_trait_for_name(
                         type_name,
                         crate::Syntax::TRAIT_COMPARABLE,
-                    )
-                    || self.type_param_has_bound(&lt, crate::Syntax::TRAIT_COMPARABLE))
+                    ) || self.type_param_has_bound(&lt, crate::Syntax::TRAIT_COMPARABLE))
                     && (self
                         .type_implements_trait_for_name(type_name, crate::Syntax::TRAIT_EQUATABLE)
                         || self.type_param_has_bound(&lt, crate::Syntax::TRAIT_EQUATABLE));
@@ -1381,7 +1494,18 @@ impl<'a> Checker<'a> {
                     )),
                     _ => None,
                 };
-                if let Some((trait_name, method, ret)) = hook {
+                if let Some((trait_name, method, mut ret)) = hook {
+                    let operator_rhs = self
+                        .trait_reg
+                        .operator_impl_for(&lt, trait_name, &rt)
+                        .map(|implementation| {
+                            ret = implementation.result.clone();
+                            implementation.rhs.clone()
+                        })
+                        .or_else(|| {
+                            self.type_param_has_bound(&lt, trait_name)
+                                .then(|| rt.clone())
+                        });
                     if self.type_implements_trait_for_name(type_name, trait_name)
                         || self.type_param_has_bound(&lt, trait_name)
                     {
@@ -1438,7 +1562,8 @@ impl<'a> Checker<'a> {
                                     Self::split_type_name(type_name).1.to_string()
                                 },
                             ),
-                            resolved_ret: Some(ret),
+                            resolved_ret: Some(ret.clone()),
+                            operator_rhs,
                             checked_widen: false,
                         };
                         *replacement = Some(match op {
@@ -1490,7 +1615,7 @@ impl<'a> Checker<'a> {
                         } else if op.is_comparison() {
                             Type::Bool
                         } else {
-                            lt
+                            ret
                         });
                     }
                 }
@@ -1542,17 +1667,10 @@ impl<'a> Checker<'a> {
                         return None;
                     }
                     let unit = *std::mem::replace(lhs, Box::new(Expr::Absent(span)));
-                    let mut scalar =
-                        *std::mem::replace(rhs, Box::new(Expr::Absent(span)));
+                    let mut scalar = *std::mem::replace(rhs, Box::new(Expr::Absent(span)));
                     self.widen_numeric_expr(&mut scalar, &rt, &Type::Float);
-                    *replacement = Some(self.unit_scalar_wrapped_binary(
-                        op,
-                        unit,
-                        lname,
-                        scalar,
-                        true,
-                        span,
-                    ));
+                    *replacement =
+                        Some(self.unit_scalar_wrapped_binary(op, unit, lname, scalar, true, span));
                     return Some(Type::Named(lname.clone()));
                 }
             }
@@ -1562,18 +1680,11 @@ impl<'a> Checker<'a> {
                         self.op_mismatch(op, &lt, &rt, span);
                         return None;
                     }
-                    let mut scalar =
-                        *std::mem::replace(lhs, Box::new(Expr::Absent(span)));
+                    let mut scalar = *std::mem::replace(lhs, Box::new(Expr::Absent(span)));
                     let unit = *std::mem::replace(rhs, Box::new(Expr::Absent(span)));
                     self.widen_numeric_expr(&mut scalar, &lt, &Type::Float);
-                    *replacement = Some(self.unit_scalar_wrapped_binary(
-                        op,
-                        unit,
-                        rname,
-                        scalar,
-                        false,
-                        span,
-                    ));
+                    *replacement =
+                        Some(self.unit_scalar_wrapped_binary(op, unit, rname, scalar, false, span));
                     return Some(Type::Named(rname.clone()));
                 }
             }
@@ -2053,6 +2164,31 @@ impl<'a> Checker<'a> {
             // Implicit coercion check (non-arithmetic, non-eq): handled at assignment.
         }
 
+        // D-SPACE-GEOMETRY1=A: points/deltas are only combinable inside one
+        // nominal coordinate space.  Do this before the generic operator
+        // machinery so a cross-space expression is source-linked as geometry,
+        // not reported as an opaque missing operator.
+        match crate::Sema::CheckerCoreLib::geometry_binop_result(op, &lt, &rt) {
+            Some(Ok(result)) => return Some(result),
+            Some(Err(())) => {
+                if let Some((operation, expected, actual)) =
+                    crate::Sema::CheckerCoreLib::geometry_binop_diagnostic(op, &lt, &rt)
+                {
+                    self.diags.push(Diagnostic::from_row(
+                        "E2520",
+                        &[
+                            ("operation", operation.as_str()),
+                            ("expected", expected.as_str()),
+                            ("actual", actual.as_str()),
+                        ],
+                        Some(span),
+                    ));
+                }
+                return None;
+            }
+            None => {}
+        }
+
         // D-LAYOUT1 / D-LAYOUT-GATES1: operator overloading on the closed
         // built-in layout family (`HVar`/`VVar`/`LengthVar`/`Constraint`).
         // GATE 1 is exactly this: `>=`/`<=`/`==` return `Constraint` instead
@@ -2120,13 +2256,14 @@ impl<'a> Checker<'a> {
                 if let Some(result) = math_binop_result(op, &lname, &rname) {
                     return Some(result);
                 }
-                // A math operand with an unsupported operator/operand pairing — a
-                // teaching diagnostic (the closed family has fixed operators).
+                // A math operand with an unsupported operator/operand pairing.
+                // The built-in family keeps fixed shapes (D-SIMD2/D-LINALG1);
+                // other pairs go through the D-OPDEF1/D-OPMIX1 hook traits.
                 self.diags.push(Diagnostic::error(
                     "E2511",
                     format!("{} isn't defined between `{}` and `{}`", operator_label(op), lt.name(), rt.name()),
-                    "the built-in math types support element-wise `+`/`-` (and `/` for lanes), `*` (element-wise, or matrix×vector), and `==`".to_string(),
-                    "check the operands are the same lane/vector type, or use a method like `.dot()`/`.matmul()`".to_string(),
+                    "built-in lane and linalg operators keep fixed shapes: one lane/vector type on both sides, or a matrix and its matching vector; any other pair needs an operator hook".to_string(),
+                    "match the operand types (`T.splat(x)` lifts a scalar into every lane), call a named method like `.dot()`/`.matmul()`, or implement the operator's hook trait on your own type for this pair".to_string(),
                     Some(span),
                 ));
                 return None;
@@ -2559,9 +2696,13 @@ impl<'a> Checker<'a> {
                 ),
             )
         } else {
+            // D-OPDEF1 / D-OPMIX1: a mixed pair is served by the owning
+            // type's hook trait; the built-in pairs have no user route.
             (
-                "the two sides of an operator must be the same type".to_string(),
-                "make both sides the same type".to_string(),
+                "the operator has no built-in rule and no user-defined `impl Type.Trait` hook for this operand pair"
+                    .to_string(),
+                "use a supported operand pair, call a named method, or implement the operator's hook trait on your own type for this pair"
+                    .to_string(),
             )
         };
         self.diags.push(Diagnostic::error(

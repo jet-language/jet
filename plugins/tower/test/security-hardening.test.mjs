@@ -43,7 +43,6 @@ test('docs reject hardlinked documents and every available special file', (t) =>
       () => docs.addDoc(dataDir, { path: 'docs/research/hardlink.md', body: 'overwrite' }),
       () => docs.updateDoc(dataDir, 'docs/research/hardlink.md', { body: 'overwrite' }),
       () => docs.deleteDoc(dataDir, 'docs/research/hardlink.md'),
-      () => docs.archiveDoc(dataDir, 'docs/research/hardlink.md'),
     ]) invalid(operation);
     assert.equal(readFileSync(original, 'utf8'), 'inside secret\n');
 
@@ -61,7 +60,6 @@ test('docs reject hardlinked documents and every available special file', (t) =>
         () => docs.addDoc(dataDir, { path: rel, body: 'overwrite' }),
         () => docs.updateDoc(dataDir, rel, { body: 'overwrite' }),
         () => docs.deleteDoc(dataDir, rel),
-        () => docs.archiveDoc(dataDir, rel),
       ]) invalid(operation);
     }
     const listed = docs.listDocs(dataDir);

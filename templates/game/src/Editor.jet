@@ -1,0 +1,100 @@
+// Editor actions name their scene scope and fail closed during recovery.  These
+// records are ordinary source data, so there is one auditable authority instead
+// of a hidden editor database.
+pub enum SceneRunTarget {
+    CurrentScene
+    ProjectMainScene
+}
+
+pub enum EditorMode {
+    Import
+    Recovery
+}
+
+pub struct RunConfiguration {
+    target: SceneRunTarget
+    label: String
+    entry: String
+    backend: String
+    profile: String
+    headless: Bool
+    deterministic: Bool
+    source_backed: Bool
+}
+
+pub struct ImportFacts {
+    mode: EditorMode
+    source_backed: Bool
+    generated_state: Bool
+    hidden_editor_state: Bool
+    assets_root: String
+    clean_import_required: Bool
+}
+
+pub struct RecoveryBoundary {
+    mode: EditorMode
+    disabled_risky_tooling: [String]
+    risky_disabled: Bool
+    explanation: String
+    source_only: Bool
+    hidden_editor_state: Bool
+}
+
+pub struct EditorProfile {
+    current_scene_run: RunConfiguration
+    project_main_scene_run: RunConfiguration
+    import_mode: EditorMode
+    recovery_mode: EditorMode
+    import_facts: ImportFacts
+    recovery_boundary: RecoveryBoundary
+}
+
+pub fn default() EditorProfile -> {
+    return EditorProfile{
+        current_scene_run: RunConfiguration{
+            target: SceneRunTarget.CurrentScene,
+            label: "F6 current scene",
+            entry: "src/Scene.jet",
+            backend: "headless",
+            profile: "dev",
+            headless: true,
+            deterministic: true,
+            source_backed: true,
+        },
+        project_main_scene_run: RunConfiguration{
+            target: SceneRunTarget.ProjectMainScene,
+            label: "F5 project main scene",
+            entry: "src/Scene.jet",
+            backend: "headless",
+            profile: "dev",
+            headless: true,
+            deterministic: true,
+            source_backed: true,
+        },
+        import_mode: EditorMode.Import,
+        recovery_mode: EditorMode.Recovery,
+        import_facts: ImportFacts{
+            mode: EditorMode.Import,
+            source_backed: true,
+            generated_state: false,
+            hidden_editor_state: false,
+            assets_root: "assets/",
+            clean_import_required: true,
+        },
+        recovery_boundary: RecoveryBoundary{
+            mode: EditorMode.Recovery,
+            disabled_risky_tooling: [String]{
+                "tool scripts",
+                "editor plugins",
+                "GDExtension addons",
+                "native renderer and remote writes",
+                "scene restore",
+                "running",
+            },
+            risky_disabled: true,
+            explanation: "Recovery opens source only; skipped risky tooling stays disabled until a clean import.",
+            source_only: true,
+            hidden_editor_state: false,
+        },
+    }
+}

@@ -6,8 +6,7 @@ use std::path::Path;
 
 use jet::Diagnostics::Span;
 use jet::AST::{Expr, Func, Item, ProgramBundle};
-use jet_foundation::Report::render_status_json;
-use jet_foundation::JSON::json_escape;
+use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
 
 use crate::{CmdInspect::CheckProjection, OutputMode};
 
@@ -52,7 +51,15 @@ pub(crate) fn run_fill(target: &str, mode: OutputMode) {
         Some(report) => println!("{report}"),
         None if mode.json => println!(
             "{}",
-            render_status_json("ok", true, "fill", ",\"fill\":{\"goals\":[]}")
+            StatusEnvelope::new("fill", true)
+                .with_field(
+                    "fill",
+                    StatusValue::object(
+                        StatusFields::new()
+                            .with("goals", StatusValue::array(Vec::<StatusValue>::new())),
+                    ),
+                )
+                .json()
         ),
         None => println!("no goals found in '{file}'"),
     }
@@ -80,35 +87,35 @@ pub(crate) fn render_goal_report(
 
     let mut out = String::new();
     if json {
-        out.push_str("{\"goals\":[");
-        for (index, goal) in goals.iter().enumerate() {
-            if index > 0 {
-                out.push(',');
-            }
-            let candidates = checked_candidates(goal, include_candidates);
-            write!(
-                out,
-                "{{\"file\":\"{}\",\"line\":{},\"function\":\"{}\",\"expected_type\":\"{}\",\"required_effects\":\"{}\",\"candidates\":[{}]}}",
-                json_escape(&goal.file),
-                goal.line,
-                json_escape(&goal.function),
-                json_escape(&goal.expected_type),
-                json_escape(&goal.required_effects),
-                candidates
-                    .iter()
-                    .map(|candidate| format!("\"{}\"", json_escape(candidate)))
-                    .collect::<Vec<_>>()
-                    .join(","),
-            )
-            .expect("writing to a String cannot fail");
-        }
-        out.push_str("]}");
-        return Some(render_status_json(
-            "ok",
-            true,
-            "fill",
-            &format!(",\"fill\":{out}"),
-        ));
+        let fill = StatusValue::object(
+            StatusFields::new().with(
+                "goals",
+                StatusValue::array(goals.iter().map(|goal| {
+                    let candidates = checked_candidates(goal, include_candidates);
+                    StatusValue::object(
+                        StatusFields::new()
+                            .with("file", goal.file.as_str())
+                            .with("line", goal.line)
+                            .with("function", goal.function.as_str())
+                            .with("expected_type", goal.expected_type.as_str())
+                            .with("required_effects", goal.required_effects.as_str())
+                            .with(
+                                "candidates",
+                                StatusValue::array(
+                                    candidates
+                                        .iter()
+                                        .map(|candidate| StatusValue::from(candidate.as_str())),
+                                ),
+                            ),
+                    )
+                })),
+            ),
+        );
+        return Some(
+            StatusEnvelope::new("fill", true)
+                .with_field("fill", fill)
+                .json(),
+        );
     }
 
     for goal in &goals {

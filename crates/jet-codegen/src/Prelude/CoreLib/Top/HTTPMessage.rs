@@ -686,6 +686,12 @@ fn jet_http_json_decode_error() -> JetHTTPError {
     JetHTTPError::InvalidFraming
 }
 
+fn jet_http_project_json_decode_error<T>(
+    result: Result<T, Vec<jet_std::FieldError>>,
+) -> Result<T, JetHTTPError> {
+    result.map_err(|_| jet_http_json_decode_error())
+}
+
 fn jet_http_body_json<T: __jet_Decode>(body: &JetHTTPBody, limit: i64) -> Result<T, JetHTTPError> {
     let text = jet_http_body_json_text(body, limit)?;
     jet_enc_json_decode(&text).map_err(|_| jet_http_json_decode_error())
@@ -752,16 +758,16 @@ impl PartialEq<String> for JetHTTPBody {
 }
 
 #[derive(Clone)]
-struct JetHTTPRequest {
+pub(crate) struct JetHTTPRequest {
     method: String,
     url: String,
-    path: String,
+    pub(crate) path: String,
     version: String,
     headers: JetHTTPHeaders,
     trailers: std::sync::Arc<std::sync::Mutex<JetHTTPHeaders>>,
     body: JetHTTPBody,
     body_set: bool,
-    params: std::collections::BTreeMap<String, String>,
+    pub(crate) params: std::collections::BTreeMap<String, String>,
     route_template: Option<String>,
     header_error: Option<JetHTTPError>,
     timeout_ms: Option<i64>,

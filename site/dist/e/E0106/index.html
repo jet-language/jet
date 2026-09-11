@@ -34,79 +34,52 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for E0106</p>
+<p class="diag-copy fix" data-registry-field="fix">Rename the declaration so it does not shadow a built-in.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0106</code>: <code>tests/ui/incomparable_eq.stderr</code>.</p>
-<pre class="diag">Error [E0106]: the name `Tally` is built in and can&#39;t be redefined
-  --&gt; tests/ui/incomparable_eq.jet:1:8
+<p>First UI snapshot mentioning <code>E0106</code>: <code>tests/ui/local_cell_crossing.stderr</code>.</p>
+<pre class="diag">Error [E0106]: The name `Cache` is built in and can&#39;t be redefined
+  --&gt; tests/ui/local_cell_crossing.jet:12:8
     |
-  1 | struct Tally {
+ 12 | struct Cache {
     |        ^^^^^
- Why: `Tally` is provided by the language itself
- Fix: choose a different name for this struct
+ Why: `Cache` is provided by the language itself
+ Fix: Choose a different name for this struct
 More: jet-lang.dev/e/E0106
 
-Error [E0119]: there&#39;s no type called `Tally`
-  --&gt; tests/ui/incomparable_eq.jet:5:12
+Error [E1102]: `cell` can&#39;t cross into a task because `Cell&lt;Int&gt;` isn&#39;t sendable
+  --&gt; tests/ui/local_cell_crossing.jet:2:20
     |
-  5 | fn same(a: Tally, b: Tally) Bool -&gt; (a == b)
-    |            ^^^^^
- Why: the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
- Fix: check the spelling, or define the struct or enum first
-More: jet-lang.dev/e/E0119
+  2 |     worker :: task {
+    |                    ^
+ Why: `Cell` owns thread-local state and must stay on the thread that created it; tasks and channels move owned values between threads
+ Fix: Create the `Cell&lt;T&gt;` inside the task, or use `Shared&lt;T&gt;` for synchronized state
+More: jet-lang.dev/e/E1102
 
-Error [E0119]: there&#39;s no type called `Tally`
-  --&gt; tests/ui/incomparable_eq.jet:5:22
+Error [E0120]: `cell` was not moved here, so it cannot be taken with the move marker `^`
+  --&gt; tests/ui/local_cell_crossing.jet:3:14
     |
-  5 | fn same(a: Tally, b: Tally) Bool -&gt; (a == b)
-    |                      ^^^^^
- Why: the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
- Fix: check the spelling, or define the struct or enum first
-More: jet-lang.dev/e/E0119
+  3 |         _ :: cell
+    |              ^^^^
+ Why: This function has read access only and does not own the value
+ Fix: Copy it instead: `_ :: ~cell`
+More: jet-lang.dev/e/E0120
 
-Error [E0312]: `Tally` doesn&#39;t support `==`
-  --&gt; tests/ui/incomparable_eq.jet:5:38
+Error [E1102]: `Cell`&lt;Int&gt; cannot be stored in `Shared&lt;T&gt;`
+  --&gt; tests/ui/local_cell_crossing.jet:9:17
     |
-  5 | fn same(a: Tally, b: Tally) Bool -&gt; (a == b)
-    |                                      ^^^^^^
- Why: value equality requires the Equatable trait
- Fix: add `#Equatable` before the type, implement `Equatable` by hand, or compare individual fields
-More: jet-lang.dev/e/E0312
+  9 |     _ :: shared cell
+    |                 ^^^^
+ Why: A Cell and its guards own one-thread borrow state; wrapping that state does not make it synchronized
+ Fix: Store the value itself in `Shared&lt;T&gt;`, then read and write its fields directly
+More: jet-lang.dev/e/E1102
 
-Error [E0302]: `.data` only works on struct and tuple values
-  --&gt; tests/ui/incomparable_eq.jet:1:8
+Error [E0119]: There&#39;s no type called `Cache`
+  --&gt; tests/ui/local_cell_crossing.jet:16:31
     |
-  1 | struct Tally {
-    |        ^^^^^
- Why: enums and other values use methods or pattern tests instead
- Fix: use a struct or tuple value before `.data`
-More: jet-lang.dev/e/E0302
-
-Error [E0302]: `.data` only works on struct and tuple values
-  --&gt; tests/ui/incomparable_eq.jet:1:8
-    |
-  1 | struct Tally {
-    |        ^^^^^
- Why: enums and other values use methods or pattern tests instead
- Fix: use a struct or tuple value before `.data`
-More: jet-lang.dev/e/E0302
-
-Error [E0119]: there&#39;s no type called `Tally`
-  --&gt; tests/ui/incomparable_eq.jet:1:8
-    |
-  1 | struct Tally {
-    |        ^^^^^
- Why: the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
- Fix: check the spelling, or define the struct or enum first
-More: jet-lang.dev/e/E0119
-
-Error [E0119]: there&#39;s no type called `Tally`
-  --&gt; tests/ui/incomparable_eq.jet:1:8
-    |
-  1 | struct Tally {
-    |        ^^^^^
- Why: struct literals need a struct type name
- Fix: define the struct first, or check the spelling
+ 16 | fn cross_shared_nested(cache: Cache) {
+    |                               ^^^^^
+ Why: The types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
+ Fix: Check the spelling, or define the struct or enum first
 More: jet-lang.dev/e/E0119
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

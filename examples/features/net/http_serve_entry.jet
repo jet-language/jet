@@ -1,0 +1,9 @@
+// D-HTTP-SERVE1: explicit blocking HTTP entry. Run only with a bounded listener harness.
+use core.http as http
+use core.http.server as server
+
+fn run() {
+    #Unsafe("core.http.serve blocks until the listener exits") {
+        http.serve("127.0.0.1:0", (req: HTTPRequest) -> server.response(200, "served"))
+    }
+}

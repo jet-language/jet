@@ -1,0 +1,152 @@
+// One portable source witness for the core UI, TUI, font, and host-service
+// vocabulary.  The null backend keeps the tree executable without inventing a
+// platform adapter; host calls retain their typed cancellation/error results.
+use core.font as font
+use core.tui as tui
+use core.ui as ui
+use core.ui.host as host
+use core.ui.host.accessibility as accessibility
+use core.ui.host.clipboard as clipboard
+use core.ui.host.drag_drop as drag_drop
+use core.ui.host.ime as ime
+use core.ui.host.shortcuts as shortcuts
+
+fn preview_body() UiNode -> ui.box([
+    ui.node_role("Preview label", 160.0, 24.0, ui.aria_role_label()),
+    ui.text("The same node tree is rendered by every backend"),
+])
+
+fn playground_body() UiNode -> ui.text_input("Try the playground", .Native)
+
+fn save_command() UiShortcut -> .cmd("s")
+
+fn run() {
+    point :: ui.point(8.0, 12.0)
+    size :: ui.size(640.0, 360.0)
+    area :: ui.rect(point.x, point.y, size.width, size.height)
+    bounds :: ui.constraint(0.0, 0.0, size.width, size.height)
+
+    label_role :: ui.aria_role_label()
+    container_role :: ui.aria_role_container()
+    button_role :: ui.aria_role_button()
+    input_role :: ui.aria_role_text_input()
+    label :: ui.node_role("Surface", 120.0, 24.0, label_role)
+    container :: ui.node_role("Panel", 240.0, 120.0, container_role)
+    button :: ui.node_shortcut(ui.node_role("Save", 96.0, 28.0, button_role), save_command())
+    input :: ui.text_input("Draft", .Native)
+    colored :: ui.node_color("Accent", 120.0, 28.0, "#3366ff")
+    plain :: ui.node("Plain node", 80.0, 20.0)
+    text :: ui.text("Unicode: café — العربية")
+    tree :: ui.box([label, container, button, input, colored, plain, text])
+
+    preview :: ui.preview("surface-preview", ui.phone(), preview_body)
+    playground :: ui.playground("surface-playground", ui.tablet(), playground_body)
+    _preview_registry :: ui.previews([preview])
+    _playground_registry :: ui.playgrounds([playground])
+    _phone :: ui.phone()
+    _tablet :: ui.tablet()
+    _desktop :: ui.desktop()
+
+    null_backend :: ui.null_backend()
+    ui.mount(null_backend, tree, bounds)
+    tui_backend :: ui.tui_backend()
+    ui.mount(tui_backend, ui.box([tree]), bounds)
+
+    key :: ui.key_event("Enter")
+    resize :: ui.resize_event(size.width, size.height)
+    _events :: [InputEvent]{key, resize}
+    _input_role :: input_role
+
+    face :: font.system(.Body)
+    shaped :: font.shape("Arabic العربية and emoji 👨‍👩‍👦", face)
+    print("font glyphs={shaped.glyphs.len()}")
+
+    capabilities :: tui.capabilities()
+    _ascii :: tui.ascii("box ─ café")
+    _width :: tui.display_width("表面")
+    ansi16 :: tui.color_ansi16(4)
+    ansi256 :: tui.color_ansi256(42)
+    rgb :: tui.color_rgb(51, 102, 255)
+    style0 :: tui.style()
+    style1 :: tui.style_foreground(style0, ansi16)
+    style2 :: tui.style_background(style1, ansi256)
+    style3 :: tui.style_bold(style2, true)
+    style4 :: tui.style_dim(style3, false)
+    style5 :: tui.style_underline(style4, true)
+    _styled :: tui.style_text("styled text", style5, capabilities)
+
+    horizontal :: tui.horizontal()
+    vertical :: tui.vertical()
+    constraints :: [TuiConstraint]{
+        tui.length(24.0),
+        tui.min(8.0),
+        tui.max(400.0),
+        tui.percent(50.0),
+        tui.fill(1.0),
+    }
+    _columns :: tui.layout(area, horizontal, constraints)
+    _rows :: tui.layout(area, vertical, [TuiConstraint]{tui.fill(1.0), tui.length(2.0)})
+    _list :: tui.list(["one", "two", "three"])
+    _table :: tui.table(["Name", "State"], [["Ada", "ready"], ["Grace", "paused"]])
+    state0 :: tui.list_state()
+    state1 :: tui.list_state_select(state0, 1)
+    state2 :: tui.list_state_offset(state1, 2)
+    _selected :: tui.list_state_selected(state2)
+
+    _key :: tui.key_event("Enter")
+    _modified_key :: tui.key_event_modifiers("S", 2)
+    _resize :: tui.resize_event(80.0, 24.0)
+    _timer :: tui.timer_event("refresh", 16)
+    _io :: tui.io_event("stdin", [])
+    _focus :: tui.focus_event(true)
+    _interrupt :: tui.interrupt_event()
+    _close :: tui.close_event()
+
+    filter :: host.file_filter("Source", ["jet", "html"], ["text/plain", "text/html"])
+    _text_filter :: host.file_filter_text()
+    read_rights :: host.fs_rights_read()
+    write_rights :: host.fs_rights_write()
+    read_write_rights :: host.fs_rights_read_write()
+    grant_result :: host.fs_grant(".", read_write_rights)
+    _capabilities :: host.capabilities()
+    _metadata_result :: host.accessibility("Surface", "Portable UI surface")
+    _clipboard_read :: clipboard.read_text()
+    _clipboard_write :: clipboard.write_text("surface clipboard")
+    _ime_event :: ime.poll()
+    _drop_event :: drag_drop.poll()
+
+    command :: save_command()
+    _host_shortcut :: host.shortcut("s", command.modifiers)
+    binding_result :: shortcuts.binding(command, "save")
+    if binding_result == {
+        .Ok(binding) -> {
+            _registered :: shortcuts.register(binding)
+            _dispatched :: shortcuts.dispatch(command)
+        }
+        .Err(_) -> {}
+    }
+
+    if grant_result == {
+        .Ok(grant) -> {
+            open_request :: host.open_request(~grant)
+            save_request :: host.save_request(~grant)
+            _open_result :: host.open_file(open_request)
+            _save_result :: host.save_file(save_request)
+        }
+        .Err(_) -> {}
+    }
+
+    if _metadata_result == {
+        .Ok(metadata) -> {
+            accessible :: ui.node_accessibility(tree, ~metadata)
+            _attached :: accessibility.attach(accessible, metadata)
+            if _ime_event == {
+                .Ok(event) -> {
+                    _projected :: accessibility.project(accessible, event.target)
+                }
+                .Err(_) -> {}
+            }
+        }
+        .Err(_) -> {}
+    }
+}

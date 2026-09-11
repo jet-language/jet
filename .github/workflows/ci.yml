@@ -9,6 +9,11 @@ on:
   schedule:
     - cron: "0 3 * * *"
   workflow_dispatch:
+    inputs:
+      candidate_evidence:
+        description: "Canonical candidate-build evidence JSON for qualification publication"
+        required: false
+        type: string
 
 jobs:
   cffi-native-matrix:
@@ -425,12 +430,76 @@ jobs:
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
+      - name: Documentation boundaries
+        run: |
+          scripts/agent/jet-env node --test scripts/agent/check-agent-doc-flags.test.mjs
+          scripts/agent/jet-env node scripts/agent/check-agent-doc-flags.mjs --policy-only
+      - name: Diagnostic actionability census (#2906)
+        run: nix develop .#full -c node scripts/agent/diagnostic-actionability-census.mjs --check
+      - name: Materialize candidate qualification evidence (#2943)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_evidence != '' }}
+        env:
+          CANDIDATE_EVIDENCE_JSON: ${{ inputs.candidate_evidence }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { writeFileSync } from "node:fs";
+
+          const raw = process.env.CANDIDATE_EVIDENCE_JSON;
+          if (!raw) throw new Error("candidate evidence input is empty");
+          const evidence = JSON.parse(raw);
+          if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
+            throw new Error("candidate evidence input must be a JSON object");
+          }
+          const commit = evidence.commit ?? evidence.candidate_identity?.commit;
+          if (commit !== process.env.GITHUB_SHA) {
+            throw new Error(`candidate evidence commit ${String(commit)} differs from ${process.env.GITHUB_SHA}`);
+          }
+          writeFileSync(".jet/candidate-evidence.json", `${JSON.stringify(evidence)}\n`, { mode: 0o600 });
+          NODE
+      - name: Assemble candidate record from qualification evidence (#2943)
+        id: candidate_build
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_evidence != '' }}
+        run: |
+          set -euo pipefail
+          nix develop .#full -c node scripts/agent/hardening-manifest.mjs \
+            --candidate-build .jet/candidate-evidence.json \
+            --output .jet/candidate.json \
+            --require-qualified \
+            --require-release-claim \
+            --release-channel stable
+      - name: Candidate identity gate (#2943)
+        id: candidate_check
+        if: ${{ hashFiles('.jet/candidate.json') != '' }}
+        run: nix develop .#full -c node scripts/agent/hardening-manifest.mjs --candidate-check .jet/candidate.json --require-qualified
+      - name: Publish candidate qualification record (#2943)
+        if: ${{ always() && steps.candidate_build.outcome == 'success' && steps.candidate_check.outcome == 'success' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && hashFiles('.jet/candidate.json') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-${{ github.sha }}
+          path: .jet/candidate.json
+          retention-days: 30
+          if-no-files-found: error
+      - name: Candidate identity negative controls (#2943)
+        run: nix develop .#full -c node scripts/agent/hardening-manifest.mjs --candidate-negative-controls
+      - name: Tier coverage census gate (#2898)
+        run: nix develop .#full -c node scripts/agent/tier-census.mjs --check
+      - name: Tier coverage matrix negative gate (#2898)
+        run: nix develop .#full -c node scripts/agent/tier-census.mjs --policy-check
+      - name: Executable example coverage diff gate (#2903)
+        run: nix develop .#full -c node scripts/agent/example-core-census.mjs --check
+      - name: Executable example coverage negative gate (#2903)
+        run: nix develop .#full -c node scripts/agent/example-core-census.mjs --policy-check
+      - name: Executable example uncovered-row gate (#2903)
+        run: nix develop .#full -c node scripts/agent/example-core-census.mjs --fail-on-uncovered
 
       - name: Check flake
         run: nix flake check
 
       - name: Cargo check
         run: nix develop .#full -c cargo check --workspace --all-targets --locked
+      - name: MIR Rust metadata witness (#2917)
+        run: nix develop .#full -c node scripts/agent/mir-rust-metadata-witness.mjs
 
   # D-CI1=A: grammar drift and the Rust documentation build are explicit
   # change-gate inputs. The direct grammar target must fail if tests/grammar.rs

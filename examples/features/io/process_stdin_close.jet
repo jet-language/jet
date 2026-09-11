@@ -1,0 +1,9 @@
+// D-PROCESS-STDIN1: a spawned child owns an explicit closeable stdin pipe.
+use core.process as process
+
+fn run() {
+    child :: process.cmd(["cat"]).stdin(.Stream).stdout(.Capture).spawn() ?? return
+    child.stdin.close() ?? return
+    result :: child.wait() ?? return
+    print("stdin-closed:{result.success}")
+}

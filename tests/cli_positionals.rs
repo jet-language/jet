@@ -177,22 +177,3 @@ fn help_lists_arguments_before_options() {
     assert!(stdout.contains("text"), "{stdout}");
 }
 
-#[test]
-fn dossier_exposes_positional_order() {
-    let dir = scratch("dossier");
-    write_todo(&dir);
-    let out = Command::new(jet())
-        .args(["inspect", "dossier", "todo.jet", "run", "--json"])
-        .current_dir(&dir)
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "stderr={}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let body = String::from_utf8_lossy(&out.stdout);
-    assert!(body.contains("\"positional\":0"), "{body}");
-    assert!(body.contains("\"shape\":\"positional\""), "{body}");
-    assert!(body.contains("\"flag\":\"--token\""), "{body}");
-}

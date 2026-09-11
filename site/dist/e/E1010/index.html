@@ -34,35 +34,17 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for E1010</p>
+<p class="diag-copy fix" data-registry-field="fix">Match the binary pattern against a `[U8]` subject.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E1010</code>: <code>tests/ui/binpat_subject_not_bytes.stderr</code>.</p>
-<pre class="diag">Error [E1010]: this pattern matches raw bytes, but the subject is String (text)
+<pre class="diag">Error [E1010]: This pattern matches raw bytes, but the subject is String (text)
   --&gt; tests/ui/binpat_subject_not_bytes.jet:4:9
     |
   4 |         [U8]{&quot;{x:U8}&quot;} -&gt; { print(&quot;x&quot;) }
     |         ^^^^^^^^^^^^^^
- Why: an `[U8].{&quot;…&quot;}` binary pattern only matches a `[U8]` byte buffer
- Fix: match a `[U8]` subject, or use a pattern for this type instead
+ Why: An `[U8].{&quot;…&quot;}` binary pattern only matches a `[U8]` byte buffer
+ Fix: Match a `[U8]` subject, or use a pattern for this type instead
 More: jet-lang.dev/e/E1010
-
-Error [E0116]: `print` doesn&#39;t hand back a value
-  --&gt; tests/ui/binpat_subject_not_bytes.jet:4:29
-    |
-  4 |         [U8]{&quot;{x:U8}&quot;} -&gt; { print(&quot;x&quot;) }
-    |                             ^^^^^
- Why: a call is a value only when its function declares a result after the parameter list
- Fix: inside an arm, wrap the call in `{ … }`; otherwise put `print` on its own line, or declare it as `fn print(…) Type -&gt; …`
-More: jet-lang.dev/e/E0116
-
-Error [E0116]: `print` doesn&#39;t hand back a value
-  --&gt; tests/ui/binpat_subject_not_bytes.jet:6:13
-    |
-  6 |             print(&quot;no&quot;)
-    |             ^^^^^
- Why: a call is a value only when its function declares a result after the parameter list
- Fix: inside an arm, wrap the call in `{ … }`; otherwise put `print` on its own line, or declare it as `fn print(…) Type -&gt; …`
-More: jet-lang.dev/e/E0116
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

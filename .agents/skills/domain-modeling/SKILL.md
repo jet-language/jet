@@ -7,6 +7,15 @@ description: Build and sharpen a project's domain model. Use when the user wants
 
 Actively build and sharpen the project's domain model as you design. This is the *active* discipline — challenging terms, inventing edge-case scenarios, and writing the glossary and decisions down the moment they crystallise. (Merely *reading* `CONTEXT.md` for vocabulary is not this skill — that's a one-line habit any skill can do. This skill is for when you're changing the model, not just consuming it.)
 
+## Contract
+
+- **Requested outcome:** A sharpened domain term or an agreed ADR/glossary record, captured when the user resolves it.
+- **Supplied inputs:** The current conversation, existing glossary/context map, relevant code, and ADRs.
+- **Allowed child result:** None. Reads from code and existing records are evidence; this workflow does not silently start grilling, research, implementation, or another record.
+- **Completion owner:** `domain-modeling` owns the record update; the user owns the domain decision.
+- **Return point:** After each resolved term, return to the active modeling conversation before recording the next one.
+- **Stopping condition:** Stop after the requested terms and records are captured, or when no term is resolved. Do not create an automatic implementation or planning follow-on.
+
 ## File structure
 
 Most repos have a single context:

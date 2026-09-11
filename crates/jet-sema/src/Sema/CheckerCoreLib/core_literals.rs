@@ -144,12 +144,12 @@ impl<'a> Checker<'a> {
                 // enum slot. Copy a live owned local once, matching map-literal
                 // payload semantics without cloning a last-use value.
                 let copy_owned_value = matches!(&arg.expr, crate::AST::Expr::Ident(name, _) if self
-                    .lookup(name)
-                    .is_some_and(|info| {
-                        info.param_conv.is_none()
-                            && !crate::Sema::Diagnostics::type_is_copy(&info.ty)
-                            && self.is_name_live_after(name)
-                    }));
+                .lookup(name)
+                .is_some_and(|info| {
+                    info.param_conv.is_none()
+                        && !crate::Sema::Diagnostics::type_is_copy(&info.ty)
+                        && self.is_name_live_after(name)
+                }));
                 if copy_owned_value && self.is_cloneable_type(want) {
                     self.insert_implicit_copy(&mut arg.expr, want, want);
                 }

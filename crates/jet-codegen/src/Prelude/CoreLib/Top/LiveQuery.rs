@@ -6,18 +6,38 @@ use std::collections::{
     BTreeSet as JetLiveBTreeSet,
     VecDeque as JetLiveVecDeque,
 };
+use std::time::{SystemTime as JetLiveSystemTime, UNIX_EPOCH as JetLiveUNIX_EPOCH};
 use std::sync::{Arc as JetLiveArc, Mutex as JetLiveMutex, OnceLock as JetLiveOnceLock};
 
 const JET_LIVE_MAX_QUERIES: usize = 1024;
 const JET_LIVE_MAX_WS_SINKS: usize = 1024;
+const JET_LIVE_MAX_OBSERVERS: usize = 1024;
 const JET_LIVE_MAX_PAYLOAD: usize = 4 * 1024 * 1024;
 const JET_LIVE_MAX_TRANSPORT_EVENTS: usize = 2048;
 const JET_LIVE_MAX_TRANSPORT_EVENT: usize = 1024 * 1024;
+const JET_LIVE_MAX_REFRESHES_PER_INVALIDATION: usize = 8;
 const JET_LIVE_ERR_INVALID_INPUT: i64 = -1;
 const JET_LIVE_ERR_UNAVAILABLE: i64 = -2;
 
-type JetLiveRerun = JetLiveArc<dyn Fn() -> Result<String, String> + Send + Sync + 'static>;
+pub(crate) type JetLiveRerun = JetLiveArc<dyn Fn() -> Result<String, String> + Send + Sync + 'static>;
 pub(crate) type JetLiveSink = JetLiveArc<dyn Fn(String) + Send + Sync + 'static>;
+
+fn jet_live_now_ms() -> u64 {
+    JetLiveSystemTime::now()
+        .duration_since(JetLiveUNIX_EPOCH)
+        .ok()
+        .and_then(|duration| u64::try_from(duration.as_millis()).ok())
+        .unwrap_or(0)
+}
+
+fn jet_live_age_ms(fresh_at_ms: u64) -> u64 {
+    jet_live_now_ms().saturating_sub(fresh_at_ms)
+}
+
+
+fn jet_live_is_external(footprint: &JetLiveFootprint) -> bool {
+    footprint.paths.iter().any(|path| path.starts_with("ext:"))
+}
 
 /// A normalized read/write footprint. The public Core API still accepts the
 /// source spelling as a String, but the runtime never compares raw labels:
@@ -69,42 +89,44 @@ impl JetLiveFootprint {
 }
 
 #[derive(Clone)]
-struct JetLiveQuery {
+pub(crate) struct JetLiveQuery {
     id: u64,
+    key: String,
     footprint: JetLiveFootprint,
     value: String,
-    generation: u64,
-    active: bool,
-    dirty: bool,
-    error: String,
+    pub(crate) lifecycle: JetLiveLifecycle,
     rerun: Option<JetLiveRerun>,
     sink: Option<JetLiveSink>,
 }
+
 
 impl std::fmt::Debug for JetLiveQuery {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JetLiveQuery")
             .field("id", &self.id)
+            .field("key", &self.key)
             .field("footprint", &self.footprint)
             .field("value", &self.value)
-            .field("generation", &self.generation)
-            .field("active", &self.active)
-            .field("dirty", &self.dirty)
-            .field("error", &self.error)
+            .field("generation", &self.lifecycle.generation)
+            .field("active", &self.lifecycle.active)
+            .field("dirty", &self.lifecycle.dirty)
+            .field("fresh_at_ms", &self.lifecycle.fresh_at_ms)
+            .field("invalidation_cause", &self.lifecycle.invalidation_cause)
+            .field("refreshing", &self.lifecycle.refreshing)
+            .field("cancelled", &self.lifecycle.cancelled)
             .finish()
     }
 }
 
 #[derive(Clone)]
 struct JetLiveRecord {
+    key: String,
     footprint: JetLiveFootprint,
     value: String,
-    generation: u64,
-    active: bool,
-    dirty: bool,
-    error: String,
+    lifecycle: JetLiveLifecycle,
     rerun: Option<JetLiveRerun>,
     sink: Option<JetLiveSink>,
+    sinks: Vec<JetLiveSink>,
 }
 
 #[derive(Default)]
@@ -133,12 +155,35 @@ fn jet_live_error_query(
 ) -> JetLiveQuery {
     JetLiveQuery {
         id,
+        key: String::new(),
         footprint,
         value: String::new(),
-        generation: 0,
-        active: false,
-        dirty: false,
-        error: error.to_string(),
+        lifecycle: JetLiveLifecycle::error(error),
+        rerun: None,
+        sink: None,
+    }
+}
+
+fn jet_live_conflict_query(
+    id: u64,
+    key: String,
+    requested: JetLiveFootprint,
+    registered: &JetLiveFootprint,
+) -> JetLiveQuery {
+    // E2473 is the runtime counterpart of the sema key-identity rule:
+    // one explicit key names one cache entry. A footprint is dependency
+    // metadata, so a second declaration must agree rather than silently
+    // creating a second cache entry.
+    JetLiveQuery {
+        id,
+        key,
+        footprint: requested.clone(),
+        value: String::new(),
+        lifecycle: JetLiveLifecycle::error(&format!(
+            "E2473: query key is already registered with footprint `{}`; requested `{}`",
+            registered.display(),
+            requested.display(),
+        )),
         rerun: None,
         sink: None,
     }
@@ -147,12 +192,10 @@ fn jet_live_error_query(
 fn jet_live_query(id: u64, record: &JetLiveRecord) -> JetLiveQuery {
     JetLiveQuery {
         id,
+        key: record.key.clone(),
         footprint: record.footprint.clone(),
         value: record.value.clone(),
-        generation: record.generation,
-        active: record.active,
-        dirty: record.dirty,
-        error: record.error.clone(),
+        lifecycle: record.lifecycle.clone(),
         rerun: record.rerun.clone(),
         sink: record.sink.clone(),
     }
@@ -169,7 +212,16 @@ fn jet_live_payload(value: String) -> Result<String, String> {
     }
 }
 
-fn jet_app_live_with(
+fn jet_live_error_payload(error: String) -> String {
+    if error.len() <= JET_LIVE_MAX_PAYLOAD {
+        error
+    } else {
+        "live query callback error exceeds the payload limit".to_string()
+    }
+}
+
+pub(crate) fn jet_app_live_keyed(
+    key: String,
     footprint: String,
     initial: String,
     rerun: Option<JetLiveRerun>,
@@ -178,37 +230,80 @@ fn jet_app_live_with(
     let Some(footprint) = JetLiveFootprint::parse(&footprint) else {
         return jet_live_error_query(0, JetLiveFootprint { paths: Vec::new() }, "invalid live footprint");
     };
+    let key = if key.trim().is_empty() {
+        footprint.display()
+    } else {
+        key
+    };
+    if key.len() > 512 || key.chars().any(|character| character.is_control()) {
+        return jet_live_error_query(0, footprint, "live query key is invalid");
+    }
     let Ok(initial) = jet_live_payload(initial) else {
         return jet_live_error_query(0, footprint, "live query payload is too large");
     };
     let Ok(mut state) = jet_live_registry().lock() else {
         return jet_live_error_query(0, footprint, "live registry unavailable");
     };
+    // Explicit keys are cache identity. Footprints are dependency metadata:
+    // reusing a key with a different footprint is a checked conflict, never a
+    // second cache entry that can drift from the first.
+    if let Some(id) = state
+        .queries
+        .iter()
+        .find(|(_, record)| record.lifecycle.active && record.key == key)
+        .map(|(id, _)| *id)
+    {
+        let Some(record) = state.queries.get_mut(&id) else {
+            return jet_live_error_query(0, footprint, "live registry entry disappeared");
+        };
+        if record.footprint != footprint {
+            return jet_live_conflict_query(id, key, footprint, &record.footprint);
+        }
+        if record.rerun.is_none() {
+            record.rerun = rerun;
+        }
+        if let Some(sink) = sink {
+            if record.sinks.len() < JET_LIVE_MAX_OBSERVERS {
+                record.sinks.push(sink.clone());
+            }
+            if record.sink.is_none() {
+                record.sink = Some(sink);
+            }
+        }
+        return jet_live_query(id, record);
+    }
     let Some(id) = state.next_id.checked_add(1) else {
         return jet_live_error_query(0, footprint, "live query id space exhausted");
     };
     if state.queries.len() >= JET_LIVE_MAX_QUERIES {
-        // Bounded registry: remove oldest state. Existing handles become closed
-        // and report an error instead of reading a stale local copy.
         if let Some(oldest) = state.queries.keys().next().copied() {
             state.queries.remove(&oldest);
             state.evictions = state.evictions.saturating_add(1);
         }
     }
-    state.next_id = id;
+    let now = jet_live_now_ms();
+    let sinks = sink.clone().into_iter().collect();
     let record = JetLiveRecord {
+        key,
         footprint,
         value: initial,
-        generation: 1,
-        active: true,
-        dirty: false,
-        error: String::new(),
+        lifecycle: JetLiveLifecycle::active(now),
         rerun,
         sink,
+        sinks,
     };
     let query = jet_live_query(id, &record);
     state.queries.insert(id, record);
     query
+}
+
+fn jet_app_live_with(
+    footprint: String,
+    initial: String,
+    rerun: Option<JetLiveRerun>,
+    sink: Option<JetLiveSink>,
+) -> JetLiveQuery {
+    jet_app_live_keyed(footprint.clone(), footprint, initial, rerun, sink)
 }
 
 fn jet_app_live(footprint: String, initial: String) -> JetLiveQuery {
@@ -222,12 +317,32 @@ fn jet_app_live_query<F>(footprint: String, initial: String, rerun: F) -> JetLiv
 where
     F: Fn() -> Result<String, String> + Send + Sync + 'static,
 {
-    let query = jet_app_live_with(footprint, initial, Some(JetLiveArc::new(rerun)), None);
-    if query.id != 0 && query.error.is_empty() {
-        // Seed the bounded transport with the current value. A connection
-        // opened after the query is created must receive the same snapshot as
-        // a connection that was already present.
-        jet_live_publish_ws(query.id, query.generation, &query.footprint, query.value.clone());
+    jet_app_live_keyed_query(footprint.clone(), footprint, initial, rerun)
+}
+
+fn jet_app_live_keyed_query<F>(
+    key: String,
+    footprint: String,
+    initial: String,
+    rerun: F,
+) -> JetLiveQuery
+where
+    F: Fn() -> Result<String, String> + Send + Sync + 'static,
+{
+    let query = jet_app_live_keyed(
+        key,
+        footprint,
+        initial,
+        Some(JetLiveArc::new(rerun)),
+        None,
+    );
+    if query.id != 0 && query.lifecycle.error.is_empty() {
+        jet_live_publish_ws(
+            query.id,
+            query.lifecycle.generation,
+            &query.footprint,
+            query.value.clone(),
+        );
     }
     query
 }
@@ -253,11 +368,114 @@ fn jet_app_live_bind_sink(query: &JetLiveQuery, sink: JetLiveSink) -> JetLiveQue
     let Some(record) = state.queries.get_mut(&query.id) else {
         return jet_live_error_query(query.id, query.footprint.clone(), "live query is closed");
     };
-    if !record.active || !record.error.is_empty() {
+    if !record.lifecycle.active {
         return jet_live_error_query(query.id, record.footprint.clone(), "live query is closed");
+    }
+    if record.sinks.len() < JET_LIVE_MAX_OBSERVERS {
+        record.sinks.push(sink.clone());
     }
     record.sink = Some(sink);
     jet_live_query(query.id, record)
+}
+fn jet_app_live_snapshot(query: &JetLiveQuery) -> JetLiveQuery {
+    let Ok(state) = jet_live_registry().lock() else {
+        return jet_live_error_query(
+            query.id,
+            query.footprint.clone(),
+            "live registry unavailable",
+        );
+    };
+    state
+        .queries
+        .get(&query.id)
+        .map(|record| jet_live_query(query.id, record))
+        .unwrap_or_else(|| jet_live_error_query(query.id, query.footprint.clone(), "live query is closed"))
+}
+fn jet_app_live_refresh(query: &JetLiveQuery) -> i64 {
+    let Ok(mut state) = jet_live_registry().lock() else {
+        return JET_LIVE_ERR_UNAVAILABLE;
+    };
+    let mut reruns = Vec::new();
+    let hit = jet_live_mark_id(
+        &mut state,
+        query.id,
+        "manual-refresh",
+        &mut reruns,
+    );
+    state.invalidations = state.invalidations.saturating_add(hit);
+    drop(state);
+    jet_live_run_refreshes(reruns);
+    hit.min(i64::MAX as u64) as i64
+}
+
+fn jet_app_live_cancel(query: &JetLiveQuery) -> JetLiveQuery {
+    if let Ok(mut state) = jet_live_registry().lock() {
+        if let Some(record) = state.queries.get_mut(&query.id) {
+            if record.lifecycle.cancel() {
+                return jet_live_query(query.id, record);
+            }
+        }
+    }
+    jet_live_error_query(query.id, query.footprint.clone(), "live query is closed")
+}
+
+fn jet_app_live_close(query: &JetLiveQuery) -> i64 {
+    let Ok(mut state) = jet_live_registry().lock() else {
+        return JET_LIVE_ERR_UNAVAILABLE;
+    };
+    let Some(record) = state.queries.get_mut(&query.id) else {
+        return 0;
+    };
+    record.lifecycle.close();
+    1
+}
+
+fn jet_app_live_gc() -> i64 {
+    let Ok(mut state) = jet_live_registry().lock() else {
+        return JET_LIVE_ERR_UNAVAILABLE;
+    };
+    let before = state.queries.len();
+    state.queries.retain(|_, query| query.lifecycle.active);
+    let removed = before.saturating_sub(state.queries.len());
+    state.evictions = state.evictions.saturating_add(removed as u64);
+    removed.min(i64::MAX as usize) as i64
+}
+
+fn jet_app_live_observers(query: &JetLiveQuery) -> i64 {
+    let Ok(state) = jet_live_registry().lock() else {
+        return 0;
+    };
+    state
+        .queries
+        .get(&query.id)
+        .map(|record| record.sinks.len().min(i64::MAX as usize) as i64)
+        .unwrap_or(0)
+}
+
+fn jet_app_live_freshness_ms(query: &JetLiveQuery) -> u64 {
+    let Ok(state) = jet_live_registry().lock() else {
+        return 0;
+    };
+    state
+        .queries
+        .get(&query.id)
+        .map(|record| jet_live_age_ms(record.lifecycle.fresh_at_ms))
+        .unwrap_or(0)
+}
+
+fn jet_app_live_invalidation_cause(query: &JetLiveQuery) -> String {
+    let Ok(state) = jet_live_registry().lock() else {
+        return "live registry unavailable".to_string();
+    };
+    state
+        .queries
+        .get(&query.id)
+        .map(|record| record.lifecycle.invalidation_cause.clone())
+        .unwrap_or_else(|| "live query is closed".to_string())
+}
+
+fn jet_app_live_is_external_query(query: &JetLiveQuery) -> bool {
+    jet_live_is_external(&query.footprint)
 }
 
 /// Register one core.net.ws connection as a live transport. WebSocket writes are
@@ -349,13 +567,217 @@ fn jet_live_publish_ws(
 }
 
 fn jet_app_subscribe(source: String) -> JetLiveQuery {
-    if source.trim().is_empty() {
-        return jet_live_error_query(0, JetLiveFootprint { paths: Vec::new() }, "subscription source is empty");
+    if source.trim().is_empty()
+        || source.len() > 512
+        || source.chars().any(|character| character.is_control())
+    {
+        return jet_live_error_query(
+            0,
+            JetLiveFootprint { paths: Vec::new() },
+            "subscription source is invalid",
+        );
     }
     jet_app_live(format!("ext:{source}"), String::new())
 }
 
-fn jet_app_invalidate(footprint: String) -> i64 {
+fn jet_live_schedule_latest(
+    state: &mut JetLiveRegistry,
+    id: u64,
+    reruns: &mut Vec<(u64, u64, JetLiveRerun)>,
+) {
+    let Some(query) = state.queries.get_mut(&id) else {
+        return;
+    };
+    if !query.lifecycle.active
+        || query.lifecycle.cancelled
+        || !query.lifecycle.dirty
+        || query.lifecycle.refreshing
+    {
+        return;
+    }
+    let Some(rerun) = query.rerun.clone() else {
+        return;
+    };
+    let generation = query.lifecycle.generation;
+    if !query.lifecycle.begin_refresh(generation) {
+        return;
+    }
+    reruns.push((id, generation, rerun));
+}
+
+fn jet_live_mark_footprint(
+    state: &mut JetLiveRegistry,
+    footprint: &JetLiveFootprint,
+    cause: &str,
+    reruns: &mut Vec<(u64, u64, JetLiveRerun)>,
+) -> u64 {
+    let mut hit = 0u64;
+    let ids = state
+        .queries
+        .iter()
+        .filter(|(_, query)| query.lifecycle.active && query.footprint.intersects(footprint))
+        .map(|(id, _)| *id)
+        .collect::<Vec<_>>();
+    for id in ids {
+        let schedule = if let Some(query) = state.queries.get_mut(&id) {
+            let was_refreshing = query.lifecycle.refreshing;
+            if query.lifecycle.invalidate(cause) {
+                hit = hit.saturating_add(1);
+                !was_refreshing
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        if schedule {
+            jet_live_schedule_latest(state, id, reruns);
+        }
+    }
+    hit
+}
+
+fn jet_live_mark_key(
+    state: &mut JetLiveRegistry,
+    key: &str,
+    cause: &str,
+    reruns: &mut Vec<(u64, u64, JetLiveRerun)>,
+) -> u64 {
+    let mut hit = 0u64;
+    let ids = state
+        .queries
+        .iter()
+        .filter(|(_, query)| query.lifecycle.active && query.key == key)
+        .map(|(id, _)| *id)
+        .collect::<Vec<_>>();
+    for id in ids {
+        let schedule = if let Some(query) = state.queries.get_mut(&id) {
+            let was_refreshing = query.lifecycle.refreshing;
+            if query.lifecycle.invalidate(cause) {
+                hit = hit.saturating_add(1);
+                !was_refreshing
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        if schedule {
+            jet_live_schedule_latest(state, id, reruns);
+        }
+    }
+    hit
+}
+
+fn jet_live_mark_id(
+    state: &mut JetLiveRegistry,
+    id: u64,
+    cause: &str,
+    reruns: &mut Vec<(u64, u64, JetLiveRerun)>,
+) -> u64 {
+    let schedule = if let Some(query) = state.queries.get_mut(&id) {
+        if !query.lifecycle.active {
+            return 0;
+        }
+        let was_refreshing = query.lifecycle.refreshing;
+        query.lifecycle.invalidate(cause);
+        !was_refreshing
+    } else {
+        return 0;
+    };
+    if schedule {
+        jet_live_schedule_latest(state, id, reruns);
+    }
+    1
+}
+
+fn jet_live_run_refreshes(mut reruns: Vec<(u64, u64, JetLiveRerun)>) {
+    let mut runs = 0usize;
+    while let Some((id, generation, rerun)) = reruns.pop() {
+        if runs >= JET_LIVE_MAX_REFRESHES_PER_INVALIDATION {
+            if let Ok(mut state) = jet_live_registry().lock() {
+                if let Some(query) = state.queries.get_mut(&id) {
+                    query.lifecycle.refreshing = false;
+                }
+                for (pending_id, _, _) in reruns.drain(..) {
+                    if let Some(query) = state.queries.get_mut(&pending_id) {
+                        query.lifecycle.refreshing = false;
+                    }
+                }
+            }
+            break;
+        }
+        runs += 1;
+        let result = rerun();
+        let mut delivery: Option<(JetLiveQuery, Vec<JetLiveSink>, String)> = None;
+        let mut next = None;
+        if let Ok(mut state) = jet_live_registry().lock() {
+            let schedule_latest = if let Some(query) = state.queries.get_mut(&id) {
+                let mut schedule = false;
+                match result {
+                    Ok(value) => match jet_live_payload(value) {
+                        Ok(value) => {
+                            if query.lifecycle.is_current(generation) {
+                                query.value = value.clone();
+                                let _ = query.lifecycle.publish(generation, jet_live_now_ms());
+                                delivery = Some((
+                                    jet_live_query(id, query),
+                                    query.sinks.clone(),
+                                    value,
+                                ));
+                            } else {
+                                let _ = query.lifecycle.publish(generation, jet_live_now_ms());
+                                schedule = true;
+                            }
+                        }
+                        Err(_) if query.lifecycle.is_current(generation) => {
+                            let _ = query.lifecycle.fail(
+                                generation,
+                                "live query callback result exceeds the payload limit".to_string(),
+                            );
+                        }
+                        Err(_) => {
+                            let _ = query.lifecycle.publish(generation, jet_live_now_ms());
+                            schedule = true;
+                        }
+                    },
+                    Err(error) => {
+                        if !query
+                            .lifecycle
+                            .fail(generation, jet_live_error_payload(error))
+                        {
+                            schedule = true;
+                        }
+                    }
+                }
+                schedule
+            } else {
+                false
+            };
+            if schedule_latest {
+                let mut pending = Vec::new();
+                jet_live_schedule_latest(&mut state, id, &mut pending);
+                next = pending.pop();
+            }
+        }
+        if let Some((updated, sinks, value)) = delivery {
+            for sink in sinks {
+                sink(value.clone());
+            }
+            jet_live_publish_ws(
+                updated.id,
+                updated.lifecycle.generation,
+                &updated.footprint,
+                value,
+            );
+        }
+        if let Some(next) = next {
+            reruns.push(next);
+        }
+    }
+}
+
+fn jet_app_invalidate_with_cause(footprint: String, cause: String) -> i64 {
     let Some(footprint) = JetLiveFootprint::parse(&footprint) else {
         return JET_LIVE_ERR_INVALID_INPUT;
     };
@@ -363,88 +785,46 @@ fn jet_app_invalidate(footprint: String) -> i64 {
         return JET_LIVE_ERR_UNAVAILABLE;
     };
     let mut reruns = Vec::new();
-    let mut hit = 0u64;
-    for (id, query) in state.queries.iter_mut() {
-        if query.active && query.error.is_empty() && query.footprint.intersects(&footprint) {
-            query.generation = query.generation.saturating_add(1);
-            query.dirty = true;
-            hit = hit.saturating_add(1);
-            if let Some(rerun) = query.rerun.clone() {
-                reruns.push((*id, query.generation, rerun));
-            }
-        }
-    }
+    let hit = jet_live_mark_footprint(&mut state, &footprint, &cause, &mut reruns);
     state.invalidations = state.invalidations.saturating_add(hit);
     drop(state);
-
-    // A query body may itself touch the live registry. Never execute user
-    // callbacks while holding the registry mutex.
-    for (id, generation, rerun) in reruns {
-        match rerun() {
-            Ok(value) => match jet_live_payload(value) {
-                Ok(value) => {
-                    let mut publish = None;
-                    if let Ok(mut state) = jet_live_registry().lock() {
-                        let updated = match state.queries.get_mut(&id) {
-                            Some(query)
-                                if query.active
-                                    && query.error.is_empty()
-                                    && query.generation == generation =>
-                            {
-                                query.value = value.clone();
-                                query.dirty = false;
-                                Some(jet_live_query(id, query))
-                            }
-                            _ => None,
-                        };
-                        publish = updated;
-                    }
-                    if let Some(updated) = publish {
-                        // Select the sink at commit time. A query may be
-                        // rebound while its rerunner is outside the lock;
-                        // delivery must follow the canonical current sink,
-                        // not the invalidation-time snapshot.
-                        if let Some(sink) = updated.sink.clone() {
-                            sink(value.clone());
-                        }
-                        jet_live_publish_ws(
-                            updated.id,
-                            updated.generation,
-                            &updated.footprint,
-                            value,
-                        );
-                    }
-                }
-                Err(error) => {
-                    if let Ok(mut state) = jet_live_registry().lock() {
-                        if let Some(query) = state.queries.get_mut(&id) {
-                            if query.active && query.generation == generation {
-                                query.error = error;
-                                query.dirty = true;
-                            }
-                        }
-                    }
-                }
-            },
-            Err(error) => {
-                if let Ok(mut state) = jet_live_registry().lock() {
-                    if let Some(query) = state.queries.get_mut(&id) {
-                        if query.active && query.generation == generation {
-                            query.error = error;
-                            query.dirty = true;
-                        }
-                    }
-                }
-            }
-        }
-    }
+    jet_live_run_refreshes(reruns);
     hit.min(i64::MAX as u64) as i64
 }
+
+fn jet_app_invalidate(footprint: String) -> i64 {
+    let cause = format!("footprint:{footprint}");
+    jet_app_invalidate_with_cause(footprint, cause)
+}
+
+pub(crate) fn jet_app_invalidate_key(key: String) -> i64 {
+    if key.trim().is_empty()
+        || key.len() > 512
+        || key.chars().any(|character| character.is_control())
+    {
+        return JET_LIVE_ERR_INVALID_INPUT;
+    }
+    let Ok(mut state) = jet_live_registry().lock() else {
+        return JET_LIVE_ERR_UNAVAILABLE;
+    };
+    let mut reruns = Vec::new();
+    let hit = jet_live_mark_key(
+        &mut state,
+        &key,
+        &format!("key:{key}"),
+        &mut reruns,
+    );
+    state.invalidations = state.invalidations.saturating_add(hit);
+    drop(state);
+    jet_live_run_refreshes(reruns);
+    hit.min(i64::MAX as u64) as i64
+}
+
 
 /// D-LIVEQUERY1: `#Transact` write-set → invalidate matching live footprints.
 /// Invalidation never fabricates a result. Registered typed rerunners execute
 /// outside the registry lock; successful results update the canonical query,
-/// signal sink, and existing core.net.ws transport.
+/// signal sinks, and existing core.net.ws transport.
 fn jet_app_transact_invalidate(write_set: String) -> i64 {
     if write_set.trim().is_empty() {
         return JET_LIVE_ERR_INVALID_INPUT;
@@ -453,7 +833,10 @@ fn jet_app_transact_invalidate(write_set: String) -> i64 {
     for part in write_set.split(|c| c == ',' || c == ';' || c == ' ') {
         let footprint = part.trim();
         if !footprint.is_empty() {
-            let hit = jet_app_invalidate(footprint.to_string());
+            let hit = jet_app_invalidate_with_cause(
+                footprint.to_string(),
+                format!("transaction:{footprint}"),
+            );
             if hit < 0 {
                 return hit;
             }
@@ -464,9 +847,6 @@ fn jet_app_transact_invalidate(write_set: String) -> i64 {
 }
 
 fn jet_app_signal_push(query: &JetLiveQuery, payload: String) -> JetLiveQuery {
-    if !query.error.is_empty() {
-        return query.clone();
-    }
     let Ok(payload) = jet_live_payload(payload) else {
         return jet_live_error_query(query.id, query.footprint.clone(), "live query payload is too large");
     };
@@ -476,56 +856,72 @@ fn jet_app_signal_push(query: &JetLiveQuery, payload: String) -> JetLiveQuery {
     let Some(updated) = state.queries.get_mut(&query.id) else {
         return jet_live_error_query(query.id, query.footprint.clone(), "live query is closed");
     };
-    if !updated.active || !updated.error.is_empty() {
+    if !updated.lifecycle.active {
         return jet_live_error_query(query.id, updated.footprint.clone(), "live query is closed");
     }
-    updated.generation = updated.generation.saturating_add(1);
+    let _ = updated.lifecycle.invalidate("signal-push");
     updated.value = payload.clone();
-    updated.dirty = false;
+    let generation = updated.lifecycle.generation;
+    let _ = updated.lifecycle.publish(generation, jet_live_now_ms());
+    updated.lifecycle.invalidation_cause = "signal-push".to_string();
+    let sinks = updated.sinks.clone();
     let result = jet_live_query(query.id, updated);
-    let sink = result.sink.clone();
     drop(state);
-    if let Some(sink) = sink {
+    for sink in sinks {
         sink(payload.clone());
     }
-    jet_live_publish_ws(result.id, result.generation, &result.footprint, payload);
+    jet_live_publish_ws(
+        result.id,
+        result.lifecycle.generation,
+        &result.footprint,
+        payload,
+    );
     result
 }
 
 fn jet_app_live_get(query: &JetLiveQuery) -> String {
-    if !query.error.is_empty() {
-        return format!("LiveError({})", query.error);
-    }
     let Ok(state) = jet_live_registry().lock() else {
         return "LiveError(live registry unavailable)".to_string();
     };
     let Some(stored) = state.queries.get(&query.id) else {
         return "LiveError(live query is closed)".to_string();
     };
-    if !stored.active || !stored.error.is_empty() {
-        return format!("LiveError({})", if stored.error.is_empty() { "live query is closed" } else { &stored.error });
+    if !stored.lifecycle.active {
+        return "LiveError(live query is closed)".to_string();
+    }
+    if !stored.lifecycle.error.is_empty() {
+        return "LiveError(live query callback failed)".to_string();
     }
     stored.value.clone()
 }
 
 fn jet_app_live_show(query: &JetLiveQuery) -> String {
-    if !query.error.is_empty() {
-        return format!("LiveQueryError(id={}, reason={})", query.id, query.error);
-    }
     let Ok(state) = jet_live_registry().lock() else {
         return format!("LiveQueryError(id={}, reason=live registry unavailable)", query.id);
     };
     let Some(stored) = state.queries.get(&query.id) else {
         return format!("LiveQueryError(id={}, reason=live query is closed)", query.id);
     };
+    let source = if jet_live_is_external(&stored.footprint) {
+        "external"
+    } else {
+        "database"
+    };
     format!(
-        "LiveQuery(id={}, footprint={}, generation={}, active={}, dirty={}, error={})",
+        "LiveQuery(id={},key={},source={},footprint={},generation={},active={},dirty={},refreshing={},observers={},freshness_ms={},cause={},value_bytes={},error_bytes={})",
         query.id,
+        stored.key,
+        source,
         stored.footprint.display(),
-        stored.generation,
-        stored.active,
-        stored.dirty,
-        stored.error
+        stored.lifecycle.generation,
+        stored.lifecycle.active,
+        stored.lifecycle.dirty,
+        stored.lifecycle.refreshing,
+        stored.sinks.len(),
+        jet_live_age_ms(stored.lifecycle.fresh_at_ms),
+        stored.lifecycle.invalidation_cause,
+        stored.value.len(),
+        stored.lifecycle.error.len()
     )
 }
 
@@ -533,9 +929,21 @@ fn jet_app_live_stats() -> String {
     let Ok(state) = jet_live_registry().lock() else {
         return "LiveStats(error=live registry unavailable)".to_string();
     };
+    let active = state
+        .queries
+        .values()
+        .filter(|query| query.lifecycle.active)
+        .count();
+    let refreshing = state
+        .queries
+        .values()
+        .filter(|query| query.lifecycle.active && query.lifecycle.refreshing)
+        .count();
     format!(
-        "LiveStats(queries={}, limit={}, evictions={}, invalidations={}, ws_pushes={})",
+        "LiveStats(queries={},active={},refreshing={},limit={},evictions={},invalidations={},ws_pushes={})",
         state.queries.len(),
+        active,
+        refreshing,
         JET_LIVE_MAX_QUERIES,
         state.evictions,
         state.invalidations,

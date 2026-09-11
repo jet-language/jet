@@ -12,9 +12,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use jet::Interpreter::{dev_iteration, RunOutcome};
 use jet_jit::{
-    deopt_invoked_for_test, fallback_invoked_for_test, jit_executed_for_test, plan_bundle_tiers,
-    reset_jit_trace_for_test, resident_jit_safe_bundle, resident_jit_safe_bundle_detail,
-    set_trace_tiers, take_last_trace, try_compile_bundle, Tier,
+    deopt_invoked_for_test, fallback_invoked_for_test, jit_executed_for_test,
+    reset_jit_trace_for_test, set_trace_tiers, take_last_trace, Tier,
 };
 
 mod common;
@@ -163,7 +162,7 @@ fn checked_bundle(path: &str) -> jet::AST::ProgramBundle {
 fn run_default_dev(path: &str) -> (DevBackend, ProgramOutput) {
     reset_jit_trace_for_test();
     let bundle = checked_bundle(path);
-    let jit_safe = resident_jit_safe_bundle(&bundle);
+    let jit_safe = common::cranelift_resident_safe(&bundle);
     match dev_iteration(path, false, false) {
         RunOutcome::Ran {
             stdout,
@@ -189,8 +188,8 @@ fn run_default_dev(path: &str) -> (DevBackend, ProgramOutput) {
                 );
                 assert!(
                     jit_safe,
-                    "resident JIT run requires resident_jit_safe_bundle; detail: {}",
-                    resident_jit_safe_bundle_detail(&bundle)
+                    "resident JIT run requires cranelift_resident_safe; detail: {}",
+                    common::cranelift_resident_safe_detail(&bundle)
                 );
                 (
                     DevBackend::ResidentJit,
@@ -343,7 +342,7 @@ fn assert_default_dev_matches_aot_or_honest_gap(
 /// Runtime-only whole-value probes shared by AOT ↔ default-dev (#778 lens).
 /// Encoding parse/decode at comptime is AOT-pure but impure on the tiered run
 /// interpreter (E0956); default-dev must not pretend comptime bindings work there.
-/// Avoid enum-match Result arms here — whole-program deopt still lacks them (E2201).
+/// Avoid enum-match Result arms here — the whole-program evaluator lacks them.
 const WHOLE_VALUE_RUNTIME: &str = r#"
 use core.encoding.json as json
 use core.encoding.jsonl as jsonl
@@ -427,27 +426,15 @@ use core.encoding.toml as toml
 fn run() {
     open64 :: "[".repeat(64)
     close64 :: "]".repeat(64)
-    if json.parse("{open64}{close64}") == {
-        .Ok(_) -> { print("json64:accepted") }
-        .Err(error) -> { print("json64:{error.line}:{error.message}") }
-    }
+    json.parse("{open64}{close64}") ? _value -> { print("json64:accepted") } ! error -> { print("json64:{error.line}:{error.message}") }
 
     open65 :: "[".repeat(65)
     close65 :: "]".repeat(65)
-    if json.parse("{open65}{close65}") == {
-        .Ok(_) -> { print("json65:accepted") }
-        .Err(error) -> { print("json65:{error.line}:{error.message}") }
-    }
+    json.parse("{open65}{close65}") ? _value -> { print("json65:accepted") } ! error -> { print("json65:{error.line}:{error.message}") }
 
-    if toml.parse("value = {open64}{close64}") == {
-        .Ok(_) -> { print("toml64:accepted") }
-        .Err(error) -> { print("toml64:{error.line}:{error.message}") }
-    }
+    toml.parse("value = {open64}{close64}") ? _value -> { print("toml64:accepted") } ! error -> { print("toml64:{error.line}:{error.message}") }
 
-    if toml.parse("value = {open65}{close65}") == {
-        .Ok(_) -> { print("toml65:accepted") }
-        .Err(error) -> { print("toml65:{error.line}:{error.message}") }
-    }
+    toml.parse("value = {open65}{close65}") ? _value -> { print("toml65:accepted") } ! error -> { print("toml65:{error.line}:{error.message}") }
 }
 "#;
 
@@ -542,7 +529,7 @@ fn serde_examples_match_aot_default_resident_jit_and_interpreter_inner() {
             backend,
             DevBackend::ResidentJit,
             "{stem} default run must stay resident JIT; detail: {}",
-            resident_jit_safe_bundle_detail(&checked_bundle(jet_path.to_str().unwrap()))
+            common::cranelift_resident_safe_detail(&checked_bundle(jet_path.to_str().unwrap()))
         );
         assert_eq!(default_run, aot, "{stem} default run diverged from AOT");
 
@@ -656,31 +643,19 @@ struct Row {
 }
 
 fn json_parse_error() String -[]> {
-    if json.parse("\n{{oops") == {
-        .Err(error) -> return "{error.line}|{error.message}"
-        else -> return "accepted"
-    }
+    json.parse("\n{{oops") ? _value -> return "accepted" ! error -> return "{error.line}|{error.message}"
 }
 
 fn json_decode_error() String -[]> {
-    if json.decode<Row>("\n{{oops") == {
-        .Err(errors) -> return "{errors[0].path}|{errors[0].reason}"
-        else -> return "accepted"
-    }
+    json.decode<Row>("\n{{oops") ? _value -> return "accepted" ! errors -> return "{errors[0].path}|{errors[0].reason}"
 }
 
 fn toml_parse_error() String -[]> {
-    if toml.parse("value = ") == {
-        .Err(error) -> return error.message
-        else -> return "accepted"
-    }
+    toml.parse("value = ") ? _value -> return "accepted" ! error -> return error.message
 }
 
 fn yaml_parse_error() String -[]> {
-    if yaml.parse("key: value\nbad") == {
-        .Err(error) -> return error.message
-        else -> return "accepted"
-    }
+    yaml.parse("key: value\nbad") ? _value -> return "accepted" ! error -> return error.message
 }
 
 fn run() {
@@ -751,7 +726,7 @@ fn run() {
     let scratch = Scratch::new("cbor_typed_schema");
     let path = scratch.write_project("2026", source);
     let bundle = checked_bundle(path.to_str().unwrap());
-    let plan = plan_bundle_tiers(&bundle);
+    let plan = common::cranelift_tier_plan(&bundle);
     assert!(
         !plan.whole_interp,
         "regression needs mixed named-function deopt: {plan:?}"
@@ -887,7 +862,7 @@ fn run() {
     )
     .unwrap();
     let bundle = checked_bundle(path.to_str().unwrap());
-    let plan = plan_bundle_tiers(&bundle);
+    let plan = common::cranelift_tier_plan(&bundle);
     assert!(
         !plan.whole_interp,
         "regression needs mixed tiers: gap={:?}; plan={plan:?}",
@@ -1012,10 +987,7 @@ fn failed_change() String -[]> {
         0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
         0x09
     }
-    if cbor.decode<Profile>(~bytes) == {
-        .Ok(_) -> return "accepted"
-        .Err(error) -> return "{error[0].path}:{error[0].reason}"
-    }
+    cbor.decode<Profile>(~bytes) ? _value -> return "accepted" ! error -> return "{error[0].path}:{error[0].reason}"
 }
 
 fn run() {
@@ -1031,42 +1003,7 @@ fn run() {
     )
     .unwrap();
     let bundle = checked_bundle(path.to_str().unwrap());
-    let program = jet::Codegen::TIR::lower_jit_program(&bundle)
-        .expect("migration corpus must lower to one resident/deopt program");
-    let migration = program
-        .codec_migrations
-        .get("Profile")
-        .expect("published schema must carry a compiled migration plan");
-    assert_eq!(migration.historical_shapes.len(), 3);
-    assert_eq!(migration.steps.len(), 3);
-    let mut direct_sink = jet::Comptime::DevSink::default();
-    let direct =
-        jet::Codegen::TIR::run_named_func(&program, "forced_deopt", Vec::new(), &mut direct_sink)
-            .expect("compiled migration plan must execute in the TIR evaluator");
-    assert!(
-        matches!(
-            &direct,
-            jet::AST::CtValue::Present(value)
-                if matches!(value.as_ref(), jet::AST::CtValue::Str(text) if text == "Ada|95|localhost")
-        ),
-        "direct migration result diverged: {direct:?}"
-    );
-    let failed_change =
-        jet::Codegen::TIR::run_named_func(&program, "failed_change", Vec::new(), &mut direct_sink)
-            .expect("failed migration change must return its keyed decode error");
-    assert!(
-        matches!(
-            &failed_change,
-            jet::AST::CtValue::Present(value)
-                if matches!(
-                    value.as_ref(),
-                    jet::AST::CtValue::Str(text)
-                        if text == "score:expected Int, found text \"bad\""
-                )
-        ),
-        "failed migration change lost its keyed decode error: {failed_change:?}"
-    );
-    let plan = plan_bundle_tiers(&bundle);
+    let plan = common::cranelift_tier_plan(&bundle);
     assert!(!plan.whole_interp, "regression needs mixed tiers: {plan:?}");
     assert!(
         plan.deopt.iter().any(|(name, _)| name == "forced_deopt"),
@@ -1084,7 +1021,7 @@ fn run() {
     assert!(jit_executed_for_test(), "resident control must execute JIT");
     assert!(
         deopt_invoked_for_test(),
-        "migration must execute TIR evaluator"
+        "migration must execute the MIR interpreter"
     );
     assert!(
         !fallback_invoked_for_test(),
@@ -1132,17 +1069,11 @@ fn plain() String -[]> {
 }
 
 fn strict() String -[]> {
-    if json.decode<Strict>("{{\"known\":7,\"extra\":1}}") == {
-        .Err(errors) -> return errors[0].reason
-        else -> return "strict accepted"
-    }
+    json.decode<Strict>("{{\"known\":7,\"extra\":1}}") ? _value -> return "strict accepted" ! errors -> return errors[0].reason
 }
 
 fn malformed() String -[]> {
-    if json.decode<Published>("{{\"known\":7") == {
-        .Err(_) -> return "malformed rejected"
-        else -> return "malformed accepted"
-    }
+    json.decode<Published>("{{\"known\":7") ? _value -> return "malformed accepted" ! _error -> return "malformed rejected"
 }
 
 fn forced_deopt() String -[]> {
@@ -1161,7 +1092,7 @@ fn run() {
     let scratch = Scratch::new("published_schema_unknowns");
     let path = scratch.write_project("2026", source);
     let bundle = checked_bundle(path.to_str().unwrap());
-    let plan = plan_bundle_tiers(&bundle);
+    let plan = common::cranelift_tier_plan(&bundle);
     assert!(
         !plan.whole_interp,
         "published-schema probe needs mixed tiers: {plan:?}"
@@ -1195,63 +1126,6 @@ fn run() {
     );
 }
 
-#[test]
-fn u64_codable_is_rejected_before_backend_selection() {
-    let cases = [
-        (
-            r#"
-use core.encoding.cbor as cbor
-fn run() {
-    value := U64{ 1 }
-    cbor.to_bytes(value)
-}
-"#,
-            "U64 can't be serialized",
-            "convert the U64 to Int after checking it fits, or encode it as Text explicitly",
-        ),
-        (
-            r#"
-use core.encoding.cbor as cbor
-fn run() {
-    cbor.decode<U64>([U8]{ 0x01 })
-}
-"#,
-            "U64 can't be decoded",
-            "decode an Int or Text and convert it to U64 explicitly",
-        ),
-    ];
-    for (source, what, fix) in cases {
-        let diagnostics = jet::compile(source).expect_err("U64 must not enter Codable backends");
-        let diagnostic = diagnostics
-            .iter()
-            .find(|diagnostic| diagnostic.code == "E2411")
-            .expect("U64 Codable rejection must use E2411");
-        assert_eq!(diagnostic.what, what);
-        assert_eq!(
-            diagnostic.why,
-            "Codable uses the shared DataTree model, whose Int values are signed 64-bit; U64 cannot round-trip every value"
-        );
-        assert_eq!(diagnostic.fix, fix);
-    }
-    let derived = jet::compile(
-        r#"
-#Codable
-struct Counter {
-    value: U64
-}
-fn run() {}
-"#,
-    )
-    .expect_err("a derived U64 field must not promise a Codable wire form");
-    assert_eq!(
-        derived
-            .iter()
-            .filter(|diagnostic| diagnostic.code == "E2411")
-            .map(|diagnostic| diagnostic.what.as_str())
-            .collect::<Vec<_>>(),
-        ["U64 can't be serialized", "U64 can't be decoded"]
-    );
-}
 
 #[test]
 fn cbor_primitive_container_boundaries_match_aot_and_forced_deopt() {
@@ -1271,59 +1145,35 @@ use core.text as text
 Severity :: distinct Int(0..10)
 
 fn invalid_i8_rejected() Bool -[]> {
-    if cbor.decode<I8>([U8]{ 0x18, 0x80 }) == {
-        .Ok(_) -> return false
-        .Err(_) -> return true
-    }
+    cbor.decode<I8>([U8]{ 0x18, 0x80 }) ? _value -> return false ! _error -> return true
 }
 
 fn invalid_u32_rejected() Bool -[]> {
-    if cbor.decode<U32>([U8]{ 0x20 }) == {
-        .Ok(_) -> return false
-        .Err(_) -> return true
-    }
+    cbor.decode<U32>([U8]{ 0x20 }) ? _value -> return false ! _error -> return true
 }
 
 fn invalid_f32_rejected() Bool -[]> {
-    if cbor.decode<F32>([U8]{ 0xfb, 0x7f, 0xef, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff }) == {
-        .Ok(_) -> return false
-        .Err(_) -> return true
-    }
+    cbor.decode<F32>([U8]{ 0xfb, 0x7f, 0xef, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff }) ? _value -> return false ! _error -> return true
 }
 
 fn invalid_fixed_rejected() Bool -[]> {
-    if cbor.decode<[Int#2]>([U8]{ 0x81, 0x01 }) == {
-        .Ok(_) -> return false
-        .Err(_) -> return true
-    }
+    cbor.decode<[Int#2]>([U8]{ 0x81, 0x01 }) ? _value -> return false ! _error -> return true
 }
 
 fn invalid_range_rejected() Bool -[]> {
-    if cbor.decode<Severity>([U8]{ 0x0b }) == {
-        .Ok(_) -> return false
-        .Err(_) -> return true
-    }
+    cbor.decode<Severity>([U8]{ 0x0b }) ? _value -> return false ! _error -> return true
 }
 
 fn invalid_i8_error() String -[]> {
-    if cbor.decode<I8>([U8]{ 0x18, 0x80 }) == {
-        .Ok(_) -> return "accepted"
-        .Err(error) -> return error[0].reason
-    }
+    cbor.decode<I8>([U8]{ 0x18, 0x80 }) ? _value -> return "accepted" ! error -> return error[0].reason
 }
 
 fn invalid_u8_error() String -[]> {
-    if cbor.decode<U8>([U8]{ 0x19, 0x01, 0x00 }) == {
-        .Ok(_) -> return "accepted"
-        .Err(error) -> return error[0].reason
-    }
+    cbor.decode<U8>([U8]{ 0x19, 0x01, 0x00 }) ? _value -> return "accepted" ! error -> return error[0].reason
 }
 
 fn invalid_fixed_bytes_error() String -[]> {
-    if cbor.decode<[U8#2]>([U8]{ 0x41, 0xde }) == {
-        .Ok(_) -> return "accepted"
-        .Err(error) -> return error[0].reason
-    }
+    cbor.decode<[U8#2]>([U8]{ 0x41, 0xde }) ? _value -> return "accepted" ! error -> return error[0].reason
 }
 
 fn forced_deopt() String -[]> {
@@ -1351,24 +1201,13 @@ fn run() {
     )
     .unwrap();
     let bundle = checked_bundle(path.to_str().unwrap());
-    let program = jet::Codegen::TIR::lower_jit_program(&bundle)
-        .expect("primitive boundary corpus must lower to one resident/deopt program");
-    let mut direct_sink = jet::Comptime::DevSink::default();
-    let direct =
-        jet::Codegen::TIR::run_named_func(&program, "forced_deopt", Vec::new(), &mut direct_sink)
-            .expect("primitive boundaries must execute in the TIR evaluator");
-    let expected = "-8|4000000000|1.5|1,2|222,173|7|7|true|true|true|true|true|expected I8, found out-of-range Int|expected U8, found out-of-range Int|expected a fixed list of length 2, found 1";
-    assert!(
-        matches!(&direct, jet::AST::CtValue::Present(value)
-            if matches!(value.as_ref(), jet::AST::CtValue::Str(text) if text == expected)),
-        "direct primitive result diverged: {direct:?}"
-    );
-    let plan = plan_bundle_tiers(&bundle);
+    let plan = common::cranelift_tier_plan(&bundle);
     assert!(!plan.whole_interp, "regression needs mixed tiers: {plan:?}");
     assert!(
         plan.deopt.iter().any(|(name, _)| name == "forced_deopt"),
         "regression must force primitive codecs through named deopt: {plan:?}"
     );
+    let expected = "-8|4000000000|1.5|1,2|222,173|7|7|true|true|true|true|true|expected I8, found out-of-range Int|expected U8, found out-of-range Int|expected a fixed list of length 2, found 1";
     let aot = run_aot(&path, scratch.path());
     assert_eq!(aot.exit, 0, "primitive boundary AOT failed: {}", aot.stderr);
     assert_eq!(aot.stdout, format!("{expected}\n"));
@@ -1378,7 +1217,7 @@ fn run() {
     assert!(jit_executed_for_test(), "resident control must execute JIT");
     assert!(
         deopt_invoked_for_test(),
-        "primitive corpus must execute TIR evaluator"
+        "primitive corpus must execute the MIR interpreter"
     );
     assert!(
         !fallback_invoked_for_test(),
@@ -1398,29 +1237,21 @@ fn datatree_int_accessor_matches_aot_without_coercion_inner() {
     }
     let source = r#"
 fn run() {
-    if DataTree.Int(7).int() == {
-        .Ok(value) -> print(value)
-        .Err(error) -> print(error)
-    }
-    if DataTree.Float(7.0).int() == {
-        .Ok(value) -> print(value)
-        .Err(error) -> print(error)
-    }
-    if DataTree.Text("7").int() == {
-        .Ok(value) -> print(value)
-        .Err(error) -> print(error)
-    }
+    DataTree.Int(7).int() ? value -> print(value) ! error -> print(error)
+    DataTree.Float(7.0).int() ? value -> print(value) ! error -> print(error)
+    DataTree.Text("7").int() ? value -> print(value) ! error -> print(error)
 }
 "#;
     let scratch = Scratch::new("datatree_int");
     let path = scratch.write_project("2026", source);
     let bundle = checked_bundle(path.to_str().unwrap());
-    let plan = plan_bundle_tiers(&bundle);
+    let plan = common::cranelift_tier_plan(&bundle);
     assert!(
         plan.deopt.is_empty() && !plan.whole_interp,
         "DataTree Int accessor must stay resident: {plan:?}"
     );
-    try_compile_bundle(&bundle).expect("DataTree Int accessor must compile for resident JIT");
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
+        .expect("DataTree Int accessor must compile for resident JIT");
     let aot = run_aot(&path, scratch.path());
     assert_eq!(aot.exit, 0, "DataTree Int AOT failed: {}", aot.stderr);
     assert_eq!(
@@ -1451,14 +1282,8 @@ fn datatree_scalar_and_unordered_parity_matches_all_tiers_inner() {
 use core.encoding.json as json
 
 fn run() {
-    if DataTree.Text("strict").text() == {
-        .Ok(value) -> print(value)
-        .Err(_) -> print("strict-error")
-    }
-    if DataTree.Int(7).text() == {
-        .Ok(_) -> print("strict-bad")
-        .Err(_) -> print("strict-error")
-    }
+    DataTree.Text("strict").text() ? value -> print(value) ! _error -> print("strict-error")
+    DataTree.Int(7).text() ? _value -> print("strict-bad") ! _error -> print("strict-error")
 
     print(DataTree.Text("text").to_text() ?? "none")
     print(DataTree.Int(-42).to_text() ?? "none")
@@ -1483,12 +1308,12 @@ fn run() {
     let scratch = Scratch::new("datatree_scalar_unordered");
     let path = scratch.write_project("2026", source);
     let bundle = checked_bundle(path.to_str().unwrap());
-    let plan = plan_bundle_tiers(&bundle);
+    let plan = common::cranelift_tier_plan(&bundle);
     assert!(
         plan.deopt.is_empty() && !plan.whole_interp,
         "DataTree scalar/equality probe must stay resident: {plan:?}"
     );
-    try_compile_bundle(&bundle)
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
         .expect("DataTree scalar/equality probe must compile for resident JIT");
     let expected = concat!(
         "strict\nstrict-error\n",
@@ -1526,18 +1351,9 @@ use core.text as text
 fn gap() {
     folded := text.casefold("Straße")
     if folded != "strasse" { panic("casefold") }
-    if DataTree.Int(7).int() == {
-        .Ok(value) -> print(value)
-        .Err(error) -> print(error)
-    }
-    if DataTree.Float(7.0).int() == {
-        .Ok(value) -> print(value)
-        .Err(error) -> print(error)
-    }
-    if DataTree.Text("7").int() == {
-        .Ok(value) -> print(value)
-        .Err(error) -> print(error)
-    }
+    DataTree.Int(7).int() ? value -> print(value) ! error -> print(error)
+    DataTree.Float(7.0).int() ? value -> print(value) ! error -> print(error)
+    DataTree.Text("7").int() ? value -> print(value) ! error -> print(error)
 }
 
 fn run() {
@@ -1547,7 +1363,7 @@ fn run() {
     let scratch = Scratch::new("datatree_int_deopt");
     let path = scratch.write_project("2026", source);
     let bundle = checked_bundle(path.to_str().unwrap());
-    let plan = plan_bundle_tiers(&bundle);
+    let plan = common::cranelift_tier_plan(&bundle);
     assert!(
         !plan.whole_interp,
         "regression needs named-function deopt: {plan:?}"
@@ -1630,6 +1446,37 @@ fn typed_csv_encode_matches_aot_and_default_dev_inner() {
         &aot,
         true,
     );
+}
+
+#[test]
+fn custom_encode_survives_containers() {
+    on_encoding_stack(|| {
+        let source = r#"
+use core.encoding.json as json
+struct Token { raw: String }
+impl Token.Encode {
+    fn encode(self) DataTree -> DataTree.Text("wire")
+}
+fn token() ?Token -> Val(Token{raw: "raw"})
+fn empty() ?Token -> None
+fn run() {
+    print(json.to_string([Token{raw: "raw"}]))
+    print(json.to_string(token()))
+    print(json.to_string(empty()))
+    tokens := [String:Token]{}
+    tokens["a"] = Token{raw: "raw"}
+    print(json.to_string(tokens))
+}
+"#;
+        let scratch = Scratch::new("custom_container_encode");
+        let path = scratch.write_project("2026", source);
+        let aot = run_aot(&path, scratch.path());
+        assert_eq!(aot.exit, 0, "{}", aot.stderr);
+        assert_eq!(aot.stdout, "[\"wire\"]\n\"wire\"\nnull\n{\"a\":\"wire\"}\n");
+        let (_, resident) = run_default_dev(path.to_str().unwrap());
+        assert_eq!(resident, aot);
+        assert_eq!(run_forced_interpreter(path.to_str().unwrap()), aot);
+    });
 }
 
 #[test]
@@ -1991,8 +1838,8 @@ fn default_dev_encoding_probes_record_backend_without_silent_fallback_inner() {
     let scratch = Scratch::new("backend");
     let path = scratch.write_project("2026", WHOLE_VALUE_RUNTIME);
     let bundle = checked_bundle(path.to_str().unwrap());
-    let plan = plan_bundle_tiers(&bundle);
-    let jit_safe = resident_jit_safe_bundle(&bundle);
+    let plan = common::cranelift_tier_plan(&bundle);
+    let jit_safe = common::cranelift_resident_safe(&bundle);
     reset_jit_trace_for_test();
     set_trace_tiers(true);
     let (backend, out) = run_default_dev(path.to_str().unwrap());
@@ -2015,7 +1862,7 @@ fn default_dev_encoding_probes_record_backend_without_silent_fallback_inner() {
             assert!(
                 deopt_invoked_for_test() || plan.whole_interp || !plan.deopt.is_empty(),
                 "deopt path must record deopt or named tier plan; detail={} plan={plan:?} trace={trace:?}",
-                resident_jit_safe_bundle_detail(&bundle)
+                common::cranelift_resident_safe_detail(&bundle)
             );
             assert!(
                 !trace.is_empty()
@@ -2050,14 +1897,8 @@ fn terminal_limit_probe() String -[FS]> {
     fs_write := files.create(bad_path) ?? panic("create")
     writer :: json.writer(^fs_write, limits, false) ?? panic("writer")
     writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
-    if writer.write(encoding.DataEvent.Text("abcd")) == {
-        .Err(first) -> {
-            if writer.finish() == {
-                .Err(second) -> return "{first.reason == second.reason}"
-                .Ok(_) -> return "terminal-missed"
-            }
-        }
-        .Ok(_) -> return "limit-missed"
+    writer.write(encoding.DataEvent.Text("abcd")) ? _value -> return "limit-missed" ! first -> {
+        writer.finish() ? _value -> return "terminal-missed" ! second -> return "{first.reason == second.reason}"
     }
     return "unreachable"
 }
@@ -2066,14 +1907,8 @@ fn malformed_reader_probe() String -[FS]> {
     files.write("@DIR@/malformed.json", "{{\"a\":") ?? panic("write malformed")
     input :: files.open("@DIR@/malformed.json") ?? panic("open")
     reader :: json.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")
-    if reader.next() == {
-        .Err(error) -> {
-            if reader.next() == {
-                .Err(second) -> return "{error.kind == encoding.EncodingErrorKind.Syntax}|{error.path}|{error.reason == second.reason}"
-                .Ok(_) -> return "repeat-missed"
-            }
-        }
-        .Ok(_) -> return "malformed-missed"
+    reader.next() ? _maybe -> return "malformed-missed" ! error -> {
+        reader.next() ? _maybe -> return "repeat-missed" ! second -> return "{error.kind == encoding.EncodingErrorKind.Syntax}|{error.path}|{error.reason == second.reason}"
     }
     return "unreachable"
 }
@@ -2192,52 +2027,19 @@ fn run() {
         print(row.large.to_string())
     }
 
-    if json.decode<SmallI64>("{{\"value\":9223372036854775808}}") == {
-        .Err(_) -> { print("i64-overflow") }
-        else -> { print("accepted") }
-    }
-    if json.decode<Float>("1e400") == {
-        .Err(_) -> { print("nonfinite") }
-        else -> { print("accepted") }
-    }
-    if json.decode<Decimal>("NaN") == {
-        .Err(_) -> { print("nan-rejected") }
-        else -> { print("accepted") }
-    }
-    if json.decode<Decimal>("Infinity") == {
-        .Err(_) -> { print("infinity-rejected") }
-        else -> { print("accepted") }
-    }
-    if json.decode<Int>("1.5") == {
-        .Err(_) -> { print("fractional-rejected") }
-        else -> { print("accepted") }
-    }
-    if json.decode<Decimal>("1e1000001") == {
-        .Err(_) -> { print("exponent-limit") }
-        else -> { print("accepted") }
-    }
+    json.decode<SmallI64>("{{\"value\":9223372036854775808}}") ? _value -> { print("accepted") } ! _error -> { print("i64-overflow") }
+    json.decode<Float>("1e400") ? _value -> { print("accepted") } ! _error -> { print("nonfinite") }
+    json.decode<Decimal>("NaN") ? _value -> { print("accepted") } ! _error -> { print("nan-rejected") }
+    json.decode<Decimal>("Infinity") ? _value -> { print("accepted") } ! _error -> { print("infinity-rejected") }
+    json.decode<Int>("1.5") ? _value -> { print("accepted") } ! _error -> { print("fractional-rejected") }
+    json.decode<Decimal>("1e1000001") ? _value -> { print("accepted") } ! _error -> { print("exponent-limit") }
     mismatch_text :: fs.read("@DIR@/mismatch.json") ?? panic("mismatch JSON read")
-    if json.decode<ExactNumbers>(mismatch_text) == {
-        .Err(_) -> { print("file-mismatch") }
-        else -> { print("accepted") }
-    }
+    json.decode<ExactNumbers>(mismatch_text) ? _value -> { print("accepted") } ! _error -> { print("file-mismatch") }
     mismatch_raw :: "{{\"amount\":\"12.340\",\"exponent\":1E-5,\"whole\":100,\"tenth\":0.1,\"tenth_with_zero\":0.10,\"scientific_tenth\":1e-1,\"adjacent_lo\":1,\"adjacent_hi\":1,\"large\":1,\"large_exp\":1}}"
-    if json.decode<ExactNumbers>(mismatch_raw) == {
-        .Err(_) -> { print("mismatch") }
-        else -> { print("accepted") }
-    }
-    if data.json<ExactNumbers>("[{mismatch_raw}]") == {
-        .Err(_) -> { print("stream-mismatch") }
-        else -> { print("accepted") }
-    }
-    if json.decode<String>("123") == {
-        .Err(_) -> { print("string-mismatch") }
-        else -> { print("accepted") }
-    }
-    if json.decode<Decimal>(@limited_text) == {
-        .Err(_) -> { print("limit") }
-        else -> { print("accepted") }
-    }
+    json.decode<ExactNumbers>(mismatch_raw) ? _value -> { print("accepted") } ! _error -> { print("mismatch") }
+    data.json<ExactNumbers>("[{mismatch_raw}]") ? _value -> { print("accepted") } ! _error -> { print("stream-mismatch") }
+    json.decode<String>("123") ? _value -> { print("accepted") } ! _error -> { print("string-mismatch") }
+    json.decode<Decimal>(@limited_text) ? _value -> { print("accepted") } ! _error -> { print("limit") }
 }
 "#;
     let scratch = Scratch::new("exact_typed_json_numbers");

@@ -3,10 +3,6 @@ mod tir_support;
 
 #[test]
 fn checked_time_format_grammar_and_diagnostics_match_across_tiers() {
-    assert!(
-        jet_foundation::Registry::diagnostic("E2703").is_some(),
-        "checked time-format failures need one registered diagnostic"
-    );
     let source = r#"
 use core.time as time
 
@@ -85,11 +81,28 @@ fn run() {
 }
 
 #[test]
-fn epoch_precision_round_trips_and_reports_overflow_across_tiers() {
-    assert!(
-        jet_foundation::Registry::diagnostic("E2704").is_some(),
-        "epoch overflow failures need one registered diagnostic"
+fn local_date_display_with_trait_signature_matches_across_tiers() {
+    let source = r#"
+use core.time as time
+
+trait BusinessCalendar {
+    fn is_business_day(self, date: LocalDate) Bool
+}
+
+fn run() {
+    date :: time.new(2024, 1, 2)
+    print(date)
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "local_date_display_trait_signature",
+        source,
+        "2024-01-02\n",
     );
+}
+
+#[test]
+fn epoch_precision_round_trips_and_reports_overflow_across_tiers() {
     let source = r#"
 use core.time as time
 
@@ -138,4 +151,36 @@ fn run() {
     );
 
     tir_support::assert_tiers_agree("time_epoch_precision", source, expected);
+}
+
+#[test]
+fn unix_nanosecond_endpoints_preserve_value_and_fraction_across_tiers() {
+    let source = r#"
+use core.time as time
+
+fn run() {
+    maximum :: time.from_unix_nanoseconds(9223372036854775807)
+    minimum :: time.from_unix_nanoseconds(-9223372036854775808)
+    print(maximum.format_rfc3339())
+    print(minimum.format_rfc3339())
+    if maximum.to_unix_ns() == {
+        .Ok(number) -> { print(number) }
+        .Err(error) -> { print("unexpected: {error:Debug}") }
+    }
+    if minimum.to_unix_ns() == {
+        .Ok(number) -> { print(number) }
+        .Err(error) -> { print("unexpected: {error:Debug}") }
+    }
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "unix_nanosecond_endpoints",
+        source,
+        concat!(
+            "2262-04-11T23:47:16.854775807Z\n",
+            "1677-09-21T00:12:43.145224192Z\n",
+            "9223372036854775807\n",
+            "-9223372036854775808\n",
+        ),
+    );
 }

@@ -29,5 +29,14 @@
     "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Stdlib json."},
     "go": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Stdlib encoding/json."},
     "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in Node JSON store rail preserving the declared multi-step add/done/list sequence."}
+  },
+  "rewrite_provenance": {
+    "worker": "CorpusTaskfileCli",
+    "variant": "jet",
+    "changed": "Rewrote the source to use process.args() positions explicitly (command at index 0, payload/id at index 1), defined the add payload before storing it, propagated filesystem and typed-JSON failures through load/save, matched done results with explicit Val/None arms, and used an ordered loop for list output. The add, done, list sequence, tasks.json persistence, next-id rule, and output formatting remain unchanged.",
+    "matched": "Same six command invocations, persistent tasks.json store, append-order task IDs, first matching done transition, missing-id report, id-order listing, open/done totals, and output lines as Rust, Python, Go, and Node; no task operation or input was removed.",
+    "expected_output_sha256": "a6a5b3e69a01373057bf738a6f5dc2d93e7baa39c9814ec71aba0e30cb4cf608",
+    "measurement": "unrun: source-only rewrite; runtime and performance proof intentionally not executed",
+    "compiler_observations": "No compiler or harness command was run. Historical diagnostics remain unchanged in authoring.jet.diagnosticsHit; fresh compiler observations are unavailable by design."
   }
 }

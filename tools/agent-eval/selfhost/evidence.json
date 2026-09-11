@@ -1,0 +1,81 @@
+{
+  "schema": "jet.selfhost.evidence.v1",
+  "study": "#2955",
+  "status": "unrun",
+  "kind": "go-no-go-evidence-package",
+  "purpose": "Deliver the eight workload contracts and their future evidence protocol to the existing bootstrap owners without starting a compiler port.",
+  "provenance": {
+    "authorProfile": "implementation-worker",
+    "pairedSources": "Jet fixtures and Rust counterparts authored together as same-job contracts",
+    "execution": "unrun",
+    "measurements": "unavailable"
+  },
+  "owners": {
+    "bootstrap": {
+      "id": "#217",
+      "title": "Bootstrap readiness gate: dogfood portfolio + memory-model soundness campaign",
+      "role": "existing prerequisite and owner sign-off",
+      "state": "owner-frozen"
+    },
+    "port": {
+      "id": "#218",
+      "title": "Full port: self-host the Jet compiler in Jet",
+      "role": "existing full-port owner; retained-host and seam boundary",
+      "state": "planning-blocked-by-217"
+    }
+  },
+  "sourceBoundary": {
+    "productionCompiler": "Source/",
+    "comparison": "read-only input only",
+    "portStarted": false,
+    "newReleaseGate": false,
+    "versionMigration": false
+  },
+  "protocols": {
+    "manifest": "manifest.json",
+    "driver": "run.mjs",
+    "receiptSchema": "receipt.schema.json",
+    "reasoningSchema": "reasoning.schema.json"
+  },
+  "sequence": {
+    "position": "before #2919 repair/greening",
+    "implementationOnly": true,
+    "validationDeferred": true
+  },
+  "workloadManifest": "manifest.json",
+  "driver": "run.mjs",
+  "workloads": [
+    { "id": "scan-parse", "jet": "workloads/scan-parse/run.jet", "rust": "workloads/scan-parse/oracle.rs", "status": "unrun" },
+    { "id": "symbol-type", "jet": "workloads/symbol-type/run.jet", "rust": "workloads/symbol-type/oracle.rs", "status": "unrun" },
+    { "id": "diagnostics-maps", "jet": "workloads/diagnostics-maps/run.jet", "rust": "workloads/diagnostics-maps/oracle.rs", "status": "unrun" },
+    { "id": "dependency-invalidation", "jet": "workloads/dependency-invalidation/run.jet", "rust": "workloads/dependency-invalidation/oracle.rs", "status": "unrun" },
+    { "id": "generic-comptime", "jet": "workloads/generic-comptime/run.jet", "rust": "workloads/generic-comptime/oracle.rs", "status": "unrun" },
+    { "id": "concurrent-scheduling", "jet": "workloads/concurrent-scheduling/run.jet", "rust": "workloads/concurrent-scheduling/oracle.rs", "status": "unrun" },
+    { "id": "foreign-interaction", "jet": "workloads/foreign-interaction/run.jet", "rust": "workloads/foreign-interaction/oracle.rs", "status": "unrun" },
+    { "id": "multi-package-build", "jet": "workloads/multi-package-build/run.jet", "rust": "workloads/multi-package-build/oracle.rs", "status": "unrun" }
+  ],
+  "evidenceClasses": {
+    "machine": { "status": "unavailable", "owner": "run.mjs", "includes": ["exact identities", "exit", "stdout", "stderr", "latency", "peak RSS", "diagnostics", "invalidation", "source shape"] },
+    "model": { "status": "unrun", "owner": "manifest.json", "includes": ["expected values", "expected failures", "ownership", "effects", "invalidation", "memory", "target"] },
+    "human": { "status": "unavailable", "owner": "later consented reader/repair study", "includes": ["cold read", "repair friction", "explain", "predict", "modify", "derive"], "simulatedIsNotHuman": true }
+  },
+  "retainedTrust": {
+    "rust": { "status": "unrun", "meaning": "independent same-job oracle; agreement cannot prove Jet semantics" },
+    "foreign": { "status": "unrun", "meaning": "C header, binding, source, toolchain, target, artifact, ABI, and retention behavior remain explicit assumptions until checked" },
+    "bootstrap": { "status": "unrun", "meaning": "equal stage binaries establish identity only; they do not establish semantic correctness" }
+  },
+  "requiredFuturePhases": [
+    "fresh build with exact compiler/toolchain/target/artifact identity",
+    "run every supported mode on the same case",
+    "peak RSS and latency capture",
+    "diagnostic and source-map comparison",
+    "controlled repair and source-complexity capture",
+    "explain/predict/modify/derive capture with provenance"
+  ],
+  "decision": {
+    "portfolio": "unresolved",
+    "portApproval": "not-addressed",
+    "readiness": false,
+    "reason": "No workload has been executed in this source-only delivery; unrun results remain unavailable. The package informs #217/#218 and does not create a release or port gate."
+  }
+}

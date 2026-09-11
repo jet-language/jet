@@ -1665,19 +1665,8 @@ fn run() {
     }
 }
 ";
-    let generated = compile("tir_ranges_codegen", src);
-    assert!(
-        generated.contains("for __jet_n in (1i64)..=(5i64) {"),
-        "literal range loop must remain a direct Rust range jump:\n{generated}"
-    );
-    assert!(
-        !generated.contains("let __jet_range = JetRange"),
-        "literal range loop must not allocate or construct a Range value:\n{generated}"
-    );
-    let (code, stdout) = build_and_run("tir_ranges", src);
-    assert_eq!(code, 0);
     // 1+2+3+4+5 = 15, then 0,2,4,6,8,10 (inclusive end).
-    assert_eq!(stdout, "15\n0\n2\n4\n6\n8\n10\n");
+    assert_tiers_agree("tir_ranges", src, "15\n0\n2\n4\n6\n8\n10\n");
 }
 
 /// `[U8]` values returned by byte-buffer APIs use the evaluator's compact byte
@@ -1728,10 +1717,8 @@ fn run() {
     print(empty)
 }
 ";
-    let (code, stdout) = build_and_run("tir_ranges_excl", src);
-    assert_eq!(code, 0);
     // 0+1+2+3+4 = 10; empty exclusive range runs 0 times.
-    assert_eq!(stdout, "10\n0\n");
+    assert_tiers_agree("tir_ranges_excl", src, "10\n0\n");
 }
 
 /// D-RANGE-VALUE1=A: both range spellings construct one storable `Range`.
@@ -2206,24 +2193,22 @@ fn run() {
     assert_eq!(default_stdout, "object:1\nint\nother\n", "{stderr}");
 }
 
-/// Scalar-payload variants, an enum literal with a payload (`Conn.Active(42)`), a
-/// payload binding read in the arm body, an or-pattern sharing a binding
-/// (`Active(id) | Reconnecting(id)`), and a wildcard slot (`Idle(_)`).
+/// Alternatives share one payload binding; sibling arms may reuse that name
+/// for another payload type without sharing its storage.
 #[test]
 fn enum_payload_or_pattern_and_binding() {
-    if !have_rustc() {
-        return;
-    }
     let src = "\
 enum Conn {
     Active(Int)
     Reconnecting(Int)
+    Blocked(String)
     Idle(Int)
     Closed
 }
 fn describe(c: Conn) String -> {
     if c == {
         .Active(id) | .Reconnecting(id) -> { return \"live:{id}\" }
+        .Blocked(id) -> { return \"blocked:{id}\" }
         .Idle(_) -> { return \"idle\" }
         .Closed -> { return \"closed\" }
     }
@@ -2232,13 +2217,16 @@ fn describe(c: Conn) String -> {
 fn run() {
     print(describe(Conn.Active(42)))
     print(describe(Conn.Reconnecting(7)))
+    print(describe(Conn.Blocked(\"waiting\")))
     print(describe(Conn.Idle(99)))
     print(describe(Conn.Closed))
 }
 ";
-    let (code, stdout) = build_and_run("tir_enum_payload", src);
-    assert_eq!(code, 0);
-    assert_eq!(stdout, "live:42\nlive:7\nidle\nclosed\n");
+    assert_tiers_agree(
+        "tir_enum_payload",
+        src,
+        "live:42\nlive:7\nblocked:waiting\nidle\nclosed\n",
+    );
 }
 
 /// S83 / D-CHOOSE-HEADS1=A: multi-head declarations lower to the same TIR

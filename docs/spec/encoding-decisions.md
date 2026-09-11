@@ -1,6 +1,9 @@
 # Encoding decision law
 
-This file is the durable current law ratified for card #296. Later, narrower decisions override earlier umbrella or provisional wording: D-ENCSTREAM-SURFACE1, D-ENCXML1, D-JSONCANON1, D-ENC-CBOR-SURFACE1, and D-ENCBASE-STRICT1 control their respective public surfaces. Implementation status remains separate: ratification does not claim these surfaces are built.
+This file records the durable law ratified for card #296. Later, narrower
+decisions override earlier umbrella wording: D-ENCSTREAM-SURFACE1,
+D-ENCXML1, D-JSONCANON1, D-ENC-CBOR-SURFACE1, and D-ENCBASE-STRICT1 control
+their respective public surfaces.
 
 Vocabulary: [Jet vocabulary](vocabulary.md).
 
@@ -49,7 +52,7 @@ tier failure, not an accepted parity result.
 
 ## D-ENCSTREAM-SURFACE1=A — Public streaming encoding surface
 
-Ratified D-ENCSTREAM1=A fixes the architecture, not this public spelling: every codec stays in core.encoding.<format>; whole-value and reader/writer modes share DataTree and Codable; reader/writer access is one mode of the same adapter. This ballot adds no language syntax and does not create a second codec family. Existing parse/to_string/encode/decode and the shipped json.events(DataTree) String path transcript remain unchanged under release policy. Pull events exist only through json.reader and use DataEvent. Any future json.events rename or return-type change requires an edition-migration decision with source rewrite, deprecation window, and old-edition behavior; no return-type-only overload exists (I8).
+Ratified D-ENCSTREAM1=A fixes the architecture, not this public spelling: every codec stays in core.encoding.<format>; whole-value and reader/writer modes share DataTree and Codable; reader/writer access is one mode of the same adapter. This ballot adds no language syntax and does not create a second codec family. Existing parse/to_string/encode/decode and the json.events(DataTree) String path transcript remain unchanged under release policy. Pull events exist only through json.reader and use DataEvent. Any json.events rename or return-type change requires an edition-migration decision with source rewrite, deprecation window, and old-edition behavior; no return-type-only overload exists (I8).
 
 Canonical namespaces: shared EncodingLimits, EncodingError, EncodingCause, EncodingFormat, EncodingErrorKind, DataEvent, and DataTree live only in core.encoding and are referenced through `use core.encoding as encoding`. Format handles and format-only options/events live only in core.encoding.json, .jsonl, .csv, .xml, and .cbor and are referenced through those aliases. FileReader/FileWriter remain core.files types; no duplicate re-exports exist.
 
@@ -106,11 +109,25 @@ Reader coordination: reader events are document_start, declaration, document_whi
 
 Beginner pass: xml.parse, xml.to_string, xml.decode<T>, safe limits, preserved entities, and ordinary local names need no namespace or DTD ceremony. Expert pass: expanded names, exact byte encoding, lexical evidence, explicit entity resolution, limits, events, C14N mode, comments, and inclusive prefixes are controllable and auditable. Hybrid pass: helpers and Codable are views over the same tagged DataTree/events, not another tree.
 
-Compatibility: current {name, attrs, children, text} output is unratified and lossy. Existing parse/to_string call spelling stays; manual field access migrates to the chosen tags/helpers. The encoding_breadth call site stays, while expected shape and hostile XML corpus are re-pinned. No compatibility alias retains the lossy shape. No compiler dependency/external crate is added.
+The earlier `{name, attrs, children, text}` shape is unratified and lossy.
+`parse`/`to_string` remain the entry spellings; the tagged tree and focused
+helpers are the canonical representation. No compatibility alias retains the
+lossy shape, and no compiler dependency or external crate is added.
 
-Downstream gates: exact helper list/signatures beyond those shown; XML Reader/Writer ownership and backpressure; diagnostic codes/copy/snapshots; XML conformance corpus/version; canonicalization test-vector provenance; migration tooling for manually inspected old trees. These do not alter the node algebra selected here.
+The XML node algebra, helper signatures, ownership and backpressure, diagnostic
+projection, conformance corpus, canonicalization vectors, and manual-tree
+migration are all governed by the laws above.
 
-Current reader error projection is exact. XML reader/writer IO bypasses XMLReason and produces EncodingErrorKind.IO with a populated handle-free EncodingCause; every XMLReason projection has cause=None. InvalidEncoding maps to Syntax. Malformed maps to Truncated only when caused by clean underlying EOF before required XML closure, otherwise Syntax. MismatchedTag, InvalidName, Namespace, DuplicateAttribute, Entity, and Shape map to Syntax. EntityCycle and Limit map to Limit. Canonicalization and Unsupported map to Unsupported. format is XML; path and reason copy unchanged. A present XMLError byte_offset copies unchanged; absent byte_offset maps to the queued EncodingError-required 0 while line/column remain None. Present line/column copy unchanged. This target-only zero is not an XML source-location sentinel: absence is retained by both optional line/column fields and the source-less operation context. No other field is synthesized, and terminal clone/equality follows D-ENCSTREAM-SURFACE1.
+The reader error projection is exact. XML reader/writer IO bypasses XMLReason
+and produces EncodingErrorKind.IO with a populated handle-free EncodingCause;
+every XMLReason projection has cause=None. InvalidEncoding maps to Syntax.
+Malformed maps to Truncated only when caused by clean underlying EOF before
+required XML closure, otherwise Syntax. MismatchedTag, InvalidName, Namespace,
+DuplicateAttribute, Entity, and Shape map to Syntax. EntityCycle and Limit map
+to Limit. Canonicalization and Unsupported map to Unsupported. format is XML;
+path and reason copy unchanged. A present XMLError byte_offset copies unchanged;
+an absent byte_offset maps to the shared EncodingError zero while line/column
+remain None. Present line/column copy unchanged.
 
 `xml.XMLReader.next(&self) ?encoding.DataTree !encoding.EncodingError ->` returns those events in source order. `xml.XMLWriter.write(&self, item: encoding.DataTree) !encoding.EncodingError` validates one exact event before accepting it, enforces document/declaration/doctype/element state, and emits no bytes for a rejected item; flush/finish follow D-ENCSTREAM-SURFACE1. Folding starts at document_start, converts declaration/doctype and leaf events to their `$xml` node forms, nests element_start through matching element_end (or closes an empty event immediately), and finishes only at document_end, yielding exactly the whole-value document DataTree.Object. Unfolding performs the inverse key-for-key projection. For every valid whole tree, fold(unfold(tree)) is deep-equal including order and lexical evidence; for every valid complete event sequence, unfold(fold(events)) is event-for-event deep-equal. Invalid order, duplicate document events, post-end input, mismatched end names, or incomplete finish returns State for writer state misuse and Syntax/Truncated for reader wire failures under the queued projection law.
 
@@ -144,7 +161,9 @@ Exact XMLLimits counter membership and scope. `max_nodes` counts every accepted 
 
 `max_entity_declarations` counts general plus parameter declarations encountered in the internal subset, even when unsupported policy later rejects use. `max_entity_depth` counts the root replacement as depth 1 and each recursively referenced replacement as parent+1; preserved/unresolved references consume depth 0. `max_entity_replacement_bytes` is both per replacement and cumulative: each decoded replacement UTF-8 length and the arbitrary-precision sum of all replacement bytes materialized during one parse must be <= it. Repeated expansion is charged every time materialized; rejected/preserved inert text is not charged. Every counter uses prospective arbitrary-precision addition and returns Limit before allocation/retention on crossing.
 
-D-ENCSTREAM-SURFACE1=A makes the public encoding.DataTree event ABI, XMLReader/XMLWriter methods, shared EncodingLimits precedence, EncodingError projection, and constructor signatures above operative current law.
+D-ENCSTREAM-SURFACE1=A makes the public encoding.DataTree event ABI,
+XMLReader/XMLWriter methods, shared EncodingLimits precedence, EncodingError
+projection, and constructor signatures above operative law.
 
 ### Selected option: Nested tagged XML nodes in ordinary DataTree
 
@@ -238,7 +257,10 @@ this decision adds no second writer.
 
 ## D-JSONCANON1=A — Canonical JSON semantics
 
-Live `json.canonical(DataTree) String` is a shipped prototype: it sorts Rust strings, formats Float with Rust debug syntax, renders Bytes as a JSON number array, and cannot fail. Those bytes are deterministic only accidentally and are not RFC 8785. Ratified D-ENCSTREAM1=A requires whole-value and reader/writer modes to share one codec; D-ENCSTREAM-SURFACE1=A requires canonical and ordinary JSON writers to share rejection/lifecycle law. This ballot chooses the one canonical JSON meaning used by both. `json.to_string` and `json.to_string_pretty` remain ordinary JSON renderers and are not hashing contracts.
+Canonical JSON is the one hashing and signing contract. It must not depend on
+incidental renderer behavior: `json.canonical` uses the RFC 8785 law below,
+while `json.to_string` and `json.to_string_pretty` remain ordinary JSON
+renderers and are not hashing contracts.
 
 Common law for every replacement option: canonicalization is recursive, emits UTF-8 without BOM or trailing LF, emits no insignificant whitespace, preserves array order, rejects duplicate object keys, never normalizes Unicode, never coerces Bytes/numbers/Text, and never emits NaN or infinity. A failure is `encoding.EncodingError` with format JSON, cause None, byte_offset 0, line/column None, the exact DataTree path, and the option's kind/reason. `json.canonical` therefore becomes `canonical(data: encoding.DataTree, limits: encoding.EncodingLimits = encoding.EncodingLimits.safe()) String !EncodingError`. Whole-value canonicalization validates EncodingLimits in queued field order before traversal. buffer_bytes and expansion fields are retained for one shared type but unused; max_depth bounds DataTree container nesting with root container depth 1; max_total_bytes, when Val(n), bounds final UTF-8 output bytes; max_item_bytes bounds aggregate live canonical-object workspace. It renders arrays directly into one final output allocation and buffers object members for sorting. Excluding caller-owned DataTree and the returned String after transfer, codec-owned live heap is at most current_output_bytes + max_item_bytes + (256 * max_depth) + 65536 bytes; a prospective output/workspace crossing returns Limit before retaining the crossing bytes. Under D-ENCSTREAM-SURFACE1=A, `json.writer(..., canonical:true)` uses the identical primitive serializer, key comparator, domain checks, errors, and output bytes. For both entrypoints, aggregate live canonical-object workspace is the sum of encoded keys, UTF-16 comparison keys, separators, and not-yet-emitted canonical child bytes across every simultaneously open nested object; that aggregate, not each object independently, must remain <= max_item_bytes. The reader/writer path buffers through ObjectEnd, rejects a duplicate key or invalid value before accepting/emitting that buffered object, and otherwise obeys queued finish/terminal/allocator law. Whole-value and reader/writer output for the same event tree are byte-identical.
 
@@ -246,11 +268,20 @@ Option A exact RFC 8785/JCS law: input must be I-JSON. Bool/Null spell normally.
 
 JCS numbers use the RFC 8785 frozen ECMAScript `Number::toString`/ECMA-262 7.1.12.1 Note-2 shortest-round-tripping binary64 algorithm, verified against RFC 8785 Appendix B. Float -0.0 emits `0`; finite Float uses that algorithm; NaN and either infinity reject Unsupported with reason `JCS cannot encode a non-finite Float`. DataTree Int is admitted exactly when IEEE-754 roundTiesToEven conversion to binary64 represents the same mathematical integer; 9007199254740992 is admitted, while 9007199254740993 is not. An admitted Int is serialized by the same ECMAScript algorithm. A non-representable Int rejects Unsupported with reason `JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text`. Bytes rejects Unsupported with the already-queued reason `JSON cannot encode Bytes; encode bytes as Text explicitly`. Duplicate keys reject Syntax with reason `JCS requires unique object keys`. No locale, host formatter, Unicode normalization, decimal pre-rounding, or external crate participates.
 
-Compatibility and migration: choosing A/B/C is a breaking correction to the return type and, for some existing values, bytes. Per ratified release policy, it first ships in Jet 2.0.0 behind new edition `"2027"`; Jet 1.x and edition `"2026"` retain the exact old infallible signature and prototype bytes. Before changing `edition: "2026"` to `edition: "2027"`, the owner runs existing `jet fix`; its D-JSONCANON1 migration rewrites each `json.canonical(x)` to `json.canonical(x)` when the enclosing function is fallible, otherwise to `json.canonical(x) ?? panic("value is not canonical JSON")`, inserts an explicit limits argument only when prior code already carried a project encoding limit, and reports every hashing/signing fixture for review. Then the owner explicitly bumps package.jet to `edition: "2027"`. Single-file programs use the toolchain's newest stable edition, so Jet 2.0.0 applies the new fallible law immediately; such code can be placed temporarily in a package and fixed before upgrade. Within edition 2027 there is one engine: no legacy alias, overload, flag, or hidden branch. Edition 2026 compatibility is the release-policy boundary, not a second 2027 mechanism; its implementation is frozen and receives no new canonical features. L2001/E2002 behavior follows the already-ratified lifecycle marker and existing copy/snapshots; no new diagnostic code is invented here. Canonical byte fixtures must be re-pinned explicitly. D-ENCSTREAM-SURFACE1 must be ratified/reconciled before the public reader/writer half ships.
+Compatibility follows the ratified release policy: the breaking return and byte
+correction uses edition `2027`, while edition `2026` retains its compatibility
+signature and prototype bytes. `jet fix` is the migration authority; it rewrites
+the canonical call and fallible handling, reports affected hashing/signing
+fixtures, and leaves an explicit limits argument only where the source already
+carried one.
 
 Beginner pass: ordinary JSON DataTree within the familiar interoperable number range needs one `json.canonical(data)` call. Expert pass: exact input domain, UTF-16 ordering, number algorithm, errors, buffering bound, byte output, and edition transition are auditable. Hybrid pass: beginner whole-value and expert reader/writer entrypoints invoke the same semantic writer; there is no separate signing serializer.
 
-Acceptance: vendor RFC 8785 sample/key-order/Appendix-B vectors with source+license+hash manifest; test every Float Appendix-B bit pattern, -0, exponent cutovers, exactly representable and adjacent non-representable Int values, controls, slash, BMP/astral key ordering, duplicate keys, Bytes/nonfinite, nested objects, every reader/writer chunk boundary, aggregate nested-object max_item_bytes boundary, whole max_total/output/workspace boundary, whole/reader-writer/AOT/comptime byte parity, terminal error stability, and migration rewrites. Compiler/runtime code remains std-only; no external dependency is approved here. Exact new compiler diagnostic codes/copy, if any, remain I4-gated; runtime EncodingError text above is decided here.
+Independent evidence must cover RFC 8785 vectors, number and key-order
+boundaries, invalid values, limits, chunk boundaries, cross-tier byte parity,
+terminal errors, and edition migration. Compiler and runtime code remain
+std-only; new compiler diagnostics remain I4-gated, while runtime
+EncodingError text follows the law above.
 
 ### Selected option: Strict RFC 8785 JCS
 
@@ -281,19 +312,37 @@ CBOROptions is exactly {max_depth:Int,max_items:Int,max_bytes:Int,require_canoni
 
 Counter law: a root scalar has depth 0; a root array/map/indefinite string has depth 1; entering each nested array/map/indefinite string adds one. max_items counts each encoded data item exactly once: each scalar, array/map container, map key under the same scalar/container rule, map value under that rule, and each definite chunk inside an indefinite text/byte string; a map key has no additional key surcharge and break bytes add zero. A tag counts before rejection. max_bytes first bounds input length, then independently bounds peak live requested allocation. Requested allocation is counted by actual requested capacities before allocator calls: byte/text payload capacity in bytes, array capacity times size_of(DataTree), map capacity times size_of((String,DataTree)) plus key capacities, decode stack capacity times frame size, and error/path String capacities. Reallocation prospectively replaces old capacity charge with new; freeing subtracts it. Input slice storage and allocator metadata are excluded. Every counter and capacity product uses arbitrary-precision arithmetic; crossing returns Limit before allocation/retention, so overflow cannot wrap. Tests pin both logical accounting and a counting-allocator ceiling of max_bytes plus allocator metadata for the exact allocation sequence.
 
-CBORError is exactly {kind:cbor.CBORErrorKind,byte_offset:Int,path:String,reason:String}. CBORErrorKind is the closed enum Syntax, Truncated, Unsupported, Limit, TypeMismatch, TrailingData, NonCanonical. byte_offset is the zero-based input byte that begins the failing item, or input length for missing required bytes; encoder/type errors use 0. path grammar is unambiguous: root is `$`; an array index appends `[<unsigned-decimal>]` with no leading zero except 0; a text map key appends `[<JSON-string>]`, where JSON-string includes quotes and uses JSON escapes with lowercase `\u00xx`; examples are `$[0]`, `$["payload"]`, `$["a.b"]`, and `$["x\"y"]`. No bare `.key` form exists. Before a key decodes, the map path is its container prefix; otherwise path is the deepest known prefix. reason names the rejected major/additional value, target Codable expectation, limit, or canonical rule. parse/decode reject trailing bytes with TrailingData. No partial DataTree/T escapes; runtime failures are Core values, not compiler diagnostics. Wrong static argument/target types reuse existing Core type diagnostics; any new compiler diagnostic still requires diagnostics.md and tests/ui under I4.
+CBORError is exactly {kind:cbor.CBORErrorKind,byte_offset:Int,path:String,reason:String}. CBORErrorKind is the closed enum Syntax, Truncated, Unsupported, Limit, TypeMismatch, TrailingData, NonCanonical. byte_offset is the zero-based input byte that begins the failing item, or input length for missing required bytes; encoder/type errors use 0. path grammar is unambiguous: root is `$`; an array index appends `[<unsigned-decimal>]` with no leading zero except 0; a text map key appends `[<JSON-string>]`, where JSON-string includes quotes and uses JSON escapes with lowercase `\u00xx`; examples are `$[0]`, `$["payload"]`, `$["a.b"]`, and `$["x\"y"]`. No bare `.key` form exists. Before a key decodes, the map path is its container prefix; otherwise path is the deepest known prefix. reason names the rejected major/additional value, target Codable expectation, limit, or canonical rule. parse/decode reject trailing bytes with TrailingData. No partial DataTree/T escapes; runtime failures are Core values, not compiler diagnostics. Wrong static argument/target types reuse existing Core type diagnostics; any new compiler diagnostic still requires Diagnostics.jet/Registry registration and tests/ui under I4.
 
-Default to_bytes is deterministic for one Jet value within one toolchain but promises only valid preferred CBOR interoperability, not cross-version hash identity: structs follow Codable field order and `DataTree` objects preserve their semantic order. It emits definite lengths, shortest integer/length arguments, UTF-8 text, direct byte strings, and preferred Float representation, and never emits tags or indefinite containers. to_bytes_canonical is the one hash/signature mechanism. It uses definite lengths, shortest integer/length arguments, preferred shortest Float width preserving the Jet Float value, canonical NaN 0xf97e00, preserved signed zero, and duplicate encoded-key rejection. RFC 8949 Section 4.2.1 Core ordering sorts map keys by pure unsigned bytewise lexicographic order of each complete deterministic encoded key; no length pre-pass exists. Section 4.2.3 length-first bytes remain valid ordinary input but are never emitted or advertised as Jet canonical bytes. Same semantic Codable value and canonical version yields byte-identical output in AOT, JIT, comptime, and every target. Changing Core bytes is breaking and requires a major+edition migration decision.
+Default `to_bytes` is deterministic for one Jet value within one toolchain but
+promises only valid preferred CBOR interoperability, not cross-version hash
+identity: structs follow Codable field order and `DataTree` objects preserve
+their semantic order. It emits definite lengths, shortest integer/length
+arguments, UTF-8 text, direct byte strings, and preferred Float representation,
+and never emits tags or indefinite containers. `to_bytes_canonical` is the one
+hash/signature mechanism. It uses definite lengths, shortest integer/length
+arguments, preferred shortest Float width preserving the Jet Float value,
+canonical NaN 0xf97e00, preserved signed zero, and duplicate encoded-key
+rejection. RFC 8949 Section 4.2.1 Core ordering sorts map keys by pure unsigned
+bytewise order.
 
 Decoder canonical law. require_canonical checks original bytes, not a re-encoded approximation: true validates pure encoded-byte lexicographic Core ordering and rejects length-first-only ordering, indefinite lengths, non-shortest arguments, non-preferred floats/NaNs, duplicate keys, and every other Core-profile violation with NonCanonical at the first offending item. Normal parse/decode accept noncanonical but valid supported encodings and return the same semantic value. Neither mode accepts a semantic value outside the DataTree/Codable laws above.
 
-Compatibility and migration. Live drift currently exports `encode(DataTree) [U8]` and `decode([U8]) DataTree !String`; tests/examples use those names, but ratified D-ENCBIN1 specifies `to_bytes`/typed `decode`/`to_bytes_canonical`. The breaking correction first ships in Jet 2.0.0 behind edition `"2027"`. Edition `"2026"` retains the exact live `encode`/`DataTree`-returning `decode` signatures, bytes, and String errors unchanged on every supporting Jet 2.x/3.x toolchain. Edition 2027 is the one exact migration window: throughout Jet 2.x it exposes deprecated `encode` and `DataTree`-returning `decode` forwarding entrypoints, with L2001 naming `to_bytes` and `parse`. Jet 3.0.0 introduces edition `"2028"`; in edition 2028 those two forwarding entries are removed and E2002 names the replacement. Supporting edition 2026 remains unaffected by their 2028 removal. No later edition restores them.
-
-`jet fix` plus explicit edition upgrade are the sole migration authority. Before upgrading 2026 to 2027, `jet fix` rewrites `cbor.encode(x)` to `cbor.to_bytes(x)` and DataTree-result `cbor.decode(bytes)` to `cbor.parse(bytes)`; an explicitly typed `decode<T>` remains decode. It also migrates String-error handling to CBORError handling and lists every changed golden/wire fixture. L2001/E2002 use their ratified diagnostics.md copy and snapshots; any CBOR-specific new diagnostic still requires I4 docs/tests before emission. There is no permanent alias, return-type-only overload, or second canonical encoder in editions 2027/2028.
+Compatibility follows the ratified release policy. Edition `2026` retains the
+legacy `encode` and DataTree-returning `decode` contract; the edition `2027`
+migration exposes the canonical `to_bytes` and `parse` names and the shared
+typed errors, and edition `2028` removes the deprecated entries. `jet fix` plus
+an explicit edition upgrade are the migration authority. There is no permanent
+alias, return-type-only overload, or second canonical encoder.
 
 CBORReader/Writer use D-ENCSTREAM-SURFACE1=A codec-native pull handles, the same DataEvent/Codable engine, field-by-field CBORError projection into shared EncodingError, and the same deterministic writer mode. CBOR reader/writer mode cannot bypass the DataTree, limits, error, or canonical laws. Only `json.writer` has the `canonical:` constructor argument; CBOR canonical bytes use `to_bytes_canonical`.
 
-Beginner pass: `to_bytes(value)` and typed `decode(bytes)` are the complete ordinary story; no mode object or CBOR vocabulary is required. Expert pass: parse to DataTree, exact typed errors/offsets/paths, bounded decoding, canonical validation, native bytes, and RFC deterministic output are explicit. Hybrid pass: parse, decode, default bytes, canonical bytes, comptime, and future streams share one codec engine and one Codable mapping. No facade or proof-only path exists.
+Beginner pass: `to_bytes(value)` and typed `decode(bytes)` are the complete
+ordinary story; no mode object or CBOR vocabulary is required. Expert pass:
+parse to DataTree, exact typed errors/offsets/paths, bounded decoding,
+canonical validation, native bytes, and RFC deterministic output are explicit.
+Hybrid pass: parse, decode, default bytes, canonical bytes, and streams share
+one codec engine and one Codable mapping. No facade or proof-only path exists.
 
 Exact reader/writer error projection under D-ENCSTREAM-SURFACE1=A: CBORError Syntax maps to EncodingErrorKind.Syntax; Truncated to Truncated; Unsupported to Unsupported; Limit to Limit; TypeMismatch, TrailingData, and NonCanonical to Syntax. format is CBOR, byte_offset/path/reason copy exactly, line and column are None, and cause is None. Underlying FileReader/FileWriter IO bypasses CBORError and maps directly to EncodingErrorKind.IO with its handle-free EncodingCause. No CBORErrorKind maps to State; State is reserved for writer lifecycle/order misuse. Terminal clone/equality follows the shared reader/writer law.
 
@@ -325,7 +374,10 @@ fn run() {
 
 ## D-ENCBASE-STRICT1=A — Canonical RFC 4648 decoder policy
 
-Current implementation has no settled decoder law. AOT standard base64 removes every ASCII whitespace byte and requires filtered length divisible by four; comptime removes any trailing '=' and accepts unpadded lengths except remainder one. base64url trims outer whitespace, accepts padded or unpadded text, then delegates to those different decoders. Base32 in both paths ignores ASCII whitespace and every '=' byte anywhere, accepts lowercase, and never checks legal length, padding position/count, or unused bits. Encoders are already deterministic: standard base64 emits RFC 4648 padding, base64url emits no padding, and base32 emits uppercase RFC 4648 padding. This ballot settles public behavior; it adds no language syntax.
+The strict decoder law below replaces backend-dependent decoding behavior. The
+encoders remain deterministic: standard base64 emits RFC 4648 padding,
+base64url emits no padding, and base32 emits uppercase RFC 4648 padding. The
+ballot adds no language syntax.
 
 Common strict law for A, B, and C's `decode_canonical` / `decode_url_canonical` functions. `base64.encode` remains padded standard alphabet; strict `base64.decode` accepts exactly that canonical spelling. `base64.encode_url` remains unpadded URL alphabet; strict `base64.decode_url` accepts exactly that canonical spelling, including empty input, and rejects every '='. `base32.encode` remains uppercase and padded to eight characters; strict `base32.decode` accepts exactly that canonical spelling. All strict decoders reject ASCII whitespace, non-ASCII, the other alphabet, lowercase base32, missing/excess/interior padding, impossible encoded lengths, and non-zero unused bits. Thus `decode(encode(bytes))` succeeds and `encode(decode(text)) == text` for every accepted strict input. Encoders never wrap lines and never gain policy flags.
 
@@ -335,13 +387,24 @@ Exact strict error contract for A, B, and C's canonical functions; exact allowan
 
 Allowance automaton for A. `allow_whitespace` recognizes only ASCII bytes 0x09, 0x0A, 0x0B, 0x0C, 0x0D, and 0x20, at any position including before, between, or after padding; it removes them while retaining an origin-offset map. Other Unicode whitespace remains a forbidden UTF-8 byte. `allow_lowercase` maps base32 a..z to A..Z after whitespace removal and accepts mixed case; it never maps 0/1 aliases. `allow_missing_padding` for standard base64 accepts either exact RFC padding or no '=' with cleaned data length modulo four 0, 2, or 3; modulo one fails at original EOF, partial/interior/excess padding still fails, and unused bits remain zero. Base32 `allow_missing_padding` analogously accepts exact RFC padding or no '=' with cleaned data length modulo eight 0, 2, 4, 5, or 7; remainders 1, 3, or 6 fail at EOF. Base64url is canonically unpadded; `allow_padding` additionally accepts exactly the RFC-required zero, one, or two trailing '=' for its data length, never partial/interior/excess padding. Combined options execute in this fixed order: scan original bytes left-to-right classifying selected-alphabet bytes, recognized '=' padding tokens, and allowed whitespace; return the first disallowed whitespace or byte that is neither in the selected alphabet nor '='; remove allowed whitespace while preserving origins; fold allowed base32 lowercase; validate every recognized '=' in the alphabet-specific padding phase and report the first offending original '=' offset; validate cleaned length/padding count at original EOF; validate unused bits at the original final data-symbol offset; decode. '=' is never reported as a non-alphabet byte: padding phase exclusively owns padding-not-allowed, interior, partial, and excess-padding errors. Thus options relax only named forms and never change error precedence or offsets. A shared std-only parser and table-driven RFC 4648 vectors must produce identical bytes/errors in AOT, `comptime`, `jet eval`, REPL, and `jet dev`; parity tests compare every option combination and malformed corpus case byte-for-byte.
 
-Compatibility law. Any stricter omitted-argument default is a breaking behavior change: it ships only with a major release plus edition 2027. Edition 2026 first receives one shared compatibility parser across AOT, `comptime`, `jet eval`, REPL, and `jet dev`; it accepts the union of every input successfully decoded by either historical AOT or historical comptime implementation and returns the same bytes everywhere, never preserving backend drift. For standard base64 that union includes AOT's ASCII-whitespace-filtered padded path and comptime's no-whitespace trailing-padding-stripped/unpadded path, including their accepted non-zero unused bits and legacy padding placements. Base64url applies the historical outer trim/alphabet substitution/autopadding before that union. Base32 preserves its historical ASCII-whitespace removal, removal of every '=' position, and case-insensitive alphabet. Exhaustive short-input and corpus tests prove union membership and byte parity; any input for which historical successful paths produced different bytes becomes an implementation-blocking compatibility case, not an arbitrary winner. For rejected edition-2026 input, every execution mode in one toolchain returns Err with byte-identical String bytes; wording is explicitly not a release-stable API and may change in a patch, so programs must branch on Err and must not parse it. Golden parity tests pin each toolchain build, while edition-2027 strict errors remain the exact stable offset/reason contract above. Edition 2027 projects and manifest-free single files use the selected new default. `jet fix --edition 2027` is the only automatic source migration. Under A it rewrites calls to explicit allowances for whitespace, omitted standard/base32 padding, padded base64url, and lowercase base32. It emits an irreconcilable-data audit for each call whose runtime input may rely on interior/excess padding, stripped arbitrary base32 '=', non-zero unused bits, or another 2026-union quirk because no A allowance admits those ambiguous forms and source rewriting cannot prove data cleanliness. User must clean data or remain on edition 2026. No API item is removed or renamed, so L2001/E2002 deprecation does not apply and the deprecation registry stays unchanged. Old-edition accepted input never silently stops decoding.
+Compatibility follows the ratified release policy. A stricter omitted-argument
+default is a breaking change and uses a major release plus edition `2027`.
+Edition `2026` uses one compatibility parser across AOT, comptime, `jet eval`,
+REPL, and `jet dev`; it accepts the historical union and returns the same bytes
+everywhere, never preserving backend drift. The strict law and named allowances
+apply in edition `2027`.
 
 Beginner pass: encoder output always decodes; default rejects ambiguous/corrupt text at the exact byte. Expert pass: A offers named, narrow interoperability controls without accepting unrelated damage; whole-program and comptime paths share identical policy. Hybrid pass: A keeps one decoder per alphabet, with strict defaults and explicit allowances on the same mechanical path rather than a second permissive codec family.
 
 ### Selected option: Strict default with narrow named allowances
 
-Recommended. Edition 2027 uses common strict law. Same decoder accepts only specifically requested transport deviations through full signatures defined above: whitespace, omitted standard/base32 padding, padded base64url, and lowercase base32. Every argument defaults false. Options combine under the fixed allowance automaton; none permits wrong alphabets, partial/interior/excess padding, impossible lengths, 0/1 base32 aliases, or non-zero unused bits. `jet fix` enables relevant allowances, then reports irreconcilable 2026-union data cases. One parser and error contract serve beginner and expert use.
+Edition `2027` uses the common strict law. The same decoder accepts only the
+named transport deviations selected by its allowance arguments: whitespace,
+omitted standard/base32 padding, padded base64url, and lowercase base32. Every
+argument defaults false; wrong alphabets, malformed padding, impossible
+lengths, aliases, and non-zero unused bits remain errors. `jet fix` preserves
+named allowances when migrating edition `2026` input and reports data that no
+allowance can preserve.
 
 ```jet
 use core.encoding.base64 as base64
@@ -376,21 +439,20 @@ it does not trim or silently repair input. These runtime parse/decode failures
 remain typed Core values, not compiler diagnostics. Executable examples and
 their goldens snapshot the observable rejection text.
 
-## Shipped status (edition 2026 vs 2027)
+## Evidence anchors
 
-Ratified law above is the target contract. Shipped behavior in this repository is pinned by examples, corpora, and tests as follows.
+Encoding claims use the external corpora under `tests/fixtures/encoding/` and
+their `MANIFEST.tsv` rows (URL, license, SHA-256); `tests/encoding_corpus.rs`
+verifies each manifest before use. Local hostile oracles are labeled `local`
+and are not independent RFC corpora.
 
-| Surface | Edition 2026 (compatibility) | Edition 2027+ (strict / migrated) |
-|---|---|---|
-| `json.canonical` | Infallible prototype bytes (legacy) | Failure-aware RFC 8785 JCS (automatic propagation) |
-| `cbor.encode` / DataTree `cbor.decode` | Live names and `String` errors | Deprecated `cbor.encode` emits **L2001**; use `cbor.to_bytes` / `cbor.parse` |
-| `cbor.encode` | Still callable in 2027 with lint | Removed in edition 2028 (**E2002**) |
-| `base64` / `base32` decode | 2026 compatibility union (whitespace, padding, case) | Strict RFC 4648 default; named `allow_*` flags only |
-| Reader/writer handles | Shared `EncodingLimits`, `EncodingError`, codec-native handles | Same law; runtime failures are typed `EncodingError` values |
-| XML | Tagged `DataTree` whole + reader events; dual limits | Same; C14N via `xml.canonical` only |
+Examples cover whole-value breadth, expert base allowances, reader/writer
+lifecycle, and shared types. Their checked goldens live under
+`examples/features/expected/serde/`.
 
-Corpora under `tests/fixtures/encoding/` carry `MANIFEST.tsv` rows (URL, license, SHA-256). `tests/encoding_corpus.rs` verifies every manifest before use. Local hostile oracles (for example the 40-case CBOR whole-value corpus in `tests/corelib.rs`) are labeled `local` and are not independent RFC corpora.
-
-Examples: whole-value breadth in `encoding_breadth.jet` and `encoding_base.jet`; expert base allowances in `encoding_base_expert/` (edition 2027); reader/writer lifecycle in `encoding_{json,jsonl,csv,xml,cbor}_stream.jet` and shared types in `encoding_stream_types.jet`. Every example has a checked golden under `examples/features/expected/serde/`.
-
-Static migration diagnostics: **L2001** / **E2002** for `cbor.encode` are registered in `docs/spec/diagnostics.md`, snapshotted in `tests/ui/cbor_encode_deprecated/` and `tests/ui/cbor_encode_removed/`, and exercised in `tests/encoding_edition.rs`. Runtime parse/decode failures remain typed Core values, not compiler diagnostics.
+Static migration diagnostics **L2001** / **E2002** for `cbor.encode` are
+registered in `crates/jet-codegen/src/Prelude/Diagnostics.jet` and the
+diagnostic registry, snapshotted in `tests/ui/cbor_encode_deprecated/` and
+`tests/ui/cbor_encode_removed/`, and exercised in
+`tests/encoding_edition.rs`. Runtime parse/decode failures remain typed Core
+values, not compiler diagnostics.

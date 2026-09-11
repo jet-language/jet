@@ -6,6 +6,7 @@ fn identity_bundle(project_root: PathBuf) -> ProgramBundle {
         entry: 0,
         project_root,
         modules: Vec::new(),
+        devtools_registry: crate::AST::DevtoolsRegistry::default(),
         parse_teaching: Vec::new(),
         used_core: HashSet::new(),
         ffi_callback_fns: HashSet::new(),
@@ -198,15 +199,15 @@ fn generated_nominal_names_encode_module_alias_boundaries() {
 fn generic_template_snapshot_never_filters_parser_admitted_items() {
     let source = r#"
 module everything<T> {
-    @answer :: 42;
+    @answer :: 42
     tag Marked { deny: [Net] }
-    trait Show { fn show(self) => T }
+    trait Show { fn show(self) T }
     struct Boxed { value: T }
     enum Maybe { Empty Value(T) }
-    impl Boxed.Show { fn show(self) => T { return self.value } }
-    fn id(value: T) => T { return ~value }
+    impl Boxed.Show { fn show(self) T -> { return self.value } }
+    fn id(value: T) T -> { return ~value }
     module nested { fn nested() {} }
-    module inner<U> { fn inner(value: U) => U { return ~value } }
+    module inner<U> { fn inner(value: U) U -> { return ~value } }
     module int_inner :: inner<Int>
     #Test("smoke") { expect(@answer == 42) }
     #Test("work") { .measure { assert(@answer == 42) } }

@@ -41,6 +41,7 @@ mod tests {
             ("Pool", crate::Syntax::CoreMemGate::Import),
             ("Fixed", crate::Syntax::CoreMemGate::Import),
             ("AllocError", crate::Syntax::CoreMemGate::Import),
+            ("Atomic", crate::Syntax::CoreMemGate::Import),
         ];
 
         assert_eq!(
@@ -77,16 +78,25 @@ mod tests {
 
     #[test]
     fn plain_core_rows_keep_typed_signature_arity() {
-        for row in crate::Syntax::CORE_CALLS {
-            if let Some((params, _)) = core_fixed_sig(row.module, row.member) {
-                assert_eq!(
-                    params.len(),
-                    row.arity(),
-                    "typed sema signature drifted for {}.{}",
-                    row.module,
-                    row.member
-                );
-            }
-        }
+        let drifted: Vec<String> = crate::Syntax::CORE_CALLS
+            .iter()
+            .filter_map(|row| {
+                let (params, _) = core_fixed_sig(row.module, row.member)?;
+                (params.len() != row.arity()).then(|| {
+                    format!(
+                        "{}.{} typed={} registry={}",
+                        row.module,
+                        row.member,
+                        params.len(),
+                        row.arity()
+                    )
+                })
+            })
+            .collect();
+        assert!(
+            drifted.is_empty(),
+            "typed sema signature drifted for: {}",
+            drifted.join(", ")
+        );
     }
 }

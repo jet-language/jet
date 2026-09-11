@@ -34,34 +34,25 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for E0201</p>
+<p class="diag-copy fix" data-registry-field="fix">Add the move marker `^` at the consuming call site.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0201</code>: <code>tests/ui/expiring_secret_loan_escape.stderr</code>.</p>
-<pre class="diag">Error [E0201]: an ExpiringSecret loan cannot escape its callback
+<pre class="diag">Error [E0201]: An ExpiringSecret loan cannot escape its callback
   --&gt; tests/ui/expiring_secret_loan_escape.jet:11:17
     |
  11 |     _ := secret.with((borrowed) -&gt; borrowed)
     |                 ^^^^
- Why: the callback receives a temporary read-only loan; returning a secret would create another owned credential outside the expiry boundary
- Fix: return a non-secret result such as a signature, public key, status, or response
+ Why: The callback receives a temporary read-only loan; returning a secret would create another owned credential outside the expiry boundary
+ Fix: Return a non-secret result such as a signature, public key, status, or response
 More: jet-lang.dev/e/E0201
 
-Error [E0201]: an ExpiringSecret loan cannot escape its callback
+Error [E2402]: This implicit fallible call can&#39;t convert `Expired` into `Err` — no declared conversion exists
   --&gt; tests/ui/expiring_secret_loan_escape.jet:11:17
     |
  11 |     _ := secret.with((borrowed) -&gt; borrowed)
     |                 ^^^^
- Why: the callback receives a temporary read-only loan; returning a secret would create another owned credential outside the expiry boundary
- Fix: return a non-secret result such as a signature, public key, status, or response
-More: jet-lang.dev/e/E0201
-
-Error [E2402]: `?` can&#39;t convert `Expired` into `Err` — no declared conversion exists
-  --&gt; tests/ui/expiring_secret_loan_escape.jet:11:17
-    |
- 11 |     _ := secret.with((borrowed) -&gt; borrowed)
-    |                 ^^^^
- Why: `?` uses the declared conversion rail; `Expired` can reach `Err` only through `impl Expired -&gt; Err`
- Fix: add `impl Expired -&gt; Err { … }` before this function, or change the return type
+ Why: Ordinary fallible calls propagate automatically; `Expired` can reach `Err` only through `impl Expired -&gt; Err`
+ Fix: Handle this call locally with `??`, add `impl Expired -&gt; Err { … }`, or change the return type
 More: jet-lang.dev/e/E2402
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

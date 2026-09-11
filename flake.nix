@@ -4,6 +4,10 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    # D-COMPILER-PROOF-TOOLS1=A: proof artifacts use the exact Lean 4.29.1
+    # derivation recorded by the compiler-proof manifest, independently from
+    # the rolling nixpkgs input used by ordinary Jet development.
+    proofNixpkgs.url = "github:NixOS/nixpkgs/0c88e1f2bdb93d5999019e99cb0e61e1fe2af4c5";
   };
 
   outputs =
@@ -11,11 +15,13 @@
       self,
       nixpkgs,
       flake-utils,
+      proofNixpkgs,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        proofPkgs = proofNixpkgs.legacyPackages.${system};
         jetR = pkgs.rWrapper.override { packages = [ pkgs.rPackages.jsonlite ]; };
 
         # jet build/run shells out to rustc; keep this path in one place.
@@ -33,6 +39,13 @@
           jetR
         ];
         jetTzdb = "${pkgs.tzdata}/share/zoneinfo";
+        # D-FOUND-PLATFORM1: the existing vetted font bridge loads HarfBuzz.
+        jetRuntimeLibraryPath = pkgs.lib.makeLibraryPath [ pkgs.harfbuzz ];
+        jetRuntimeLibraryVariable =
+          if pkgs.stdenv.hostPlatform.isDarwin then "DYLD_LIBRARY_PATH" else "LD_LIBRARY_PATH";
+        jetRuntimeLibraryHook = ''
+          export ${jetRuntimeLibraryVariable}="${jetRuntimeLibraryPath}:''${${jetRuntimeLibraryVariable}:-}"
+        '';
         # pkgs.vitejs calls fetchPnpmDeps without pinning `pnpm`, defaulting
         # to pnpm_11 (fetcherVersion 3), which nixpkgs rejects; pin pnpm_10.
         jetVite = pkgs.vitejs.override {
@@ -54,6 +67,7 @@
             mv $out/bin/jet-cxx $out/bin/jet-c++
             wrapProgram $out/bin/jet \
               --prefix PATH : "${jetRuntimePath}" \
+              --prefix ${jetRuntimeLibraryVariable} : "${jetRuntimeLibraryPath}" \
               --set-default TZDIR "${jetTzdb}"
           '';
 
@@ -64,7 +78,6 @@
             platforms = platforms.unix;
           };
         };
-
         # `jet` in the dev shell: run the cargo-built debug binary from anywhere
         # in the repo, with rustc + cc on PATH for `jet build`/`jet run`.
         mkJetDevBin =
@@ -85,6 +98,7 @@
             root="''${root:-$PWD}"
             bin="$root/target/debug/${name}"
             export PATH="${jetRuntimePath}:$PATH"
+            ${jetRuntimeLibraryHook}
             if [ ! -x "$bin" ]; then
               echo "jet: no debug binary at $bin" >&2
               echo "fix: cargo build" >&2
@@ -94,12 +108,36 @@
           '';
         jetDev = mkJetDevBin "jet";
         jetpackDev = mkJetDevBin "jetpack";
+        # D-COMPILER-PROOF-TOOLS1=A: keep Lean development-only. The exact
+        # output path is recorded in proof/compiler/toolchain/manifest.json;
+        # ordinary compiler/runtime shells must not inherit this closure.
+        # Keep this literal while the proof artifacts are assembled in the
+        # worktree: Nix flakes expose tracked inputs only. The manifest remains
+        # the runtime authority and rejects any different executable.
+        proofToolchainPin = "/nix/store/sz7vdknpsl9ipkjj003vbfa7sd284535-lean4-4.29.1";
+        proofToolchain = proofPkgs.lean4;
+        proofShell = pkgs.mkShellNoCC {
+          packages = [ proofToolchain ];
+          shellHook = ''
+            export JET_PROOF_TOOLCHAIN_STORE="${proofToolchain}"
+            export JET_PROOF_TOOLCHAIN_PIN="${proofToolchainPin}"
+            if [ "$JET_PROOF_TOOLCHAIN_STORE" != "$JET_PROOF_TOOLCHAIN_PIN" ]; then
+              echo "compiler-proof: pinned Lean derivation mismatch" >&2
+              echo "  manifest: $JET_PROOF_TOOLCHAIN_PIN" >&2
+              echo "  nixpkgs:  $JET_PROOF_TOOLCHAIN_STORE" >&2
+              exit 78
+            fi
+            export JET_NIX_TMP_CLEANED=1
+            export JET_ENV_DISABLE=1
+          '';
+        };
       in
       {
         packages = {
           default = jet;
           inherit jet;
           jetpack = jet;
+          proof-toolchain = proofToolchain;
         };
 
         apps.default = {
@@ -161,6 +199,7 @@
               export JET_ROOT="$PWD"
             fi
             export TZDIR="${jetTzdb}"
+            ${jetRuntimeLibraryHook}
             ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
               export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.vulkan-loader ]}:''${LD_LIBRARY_PATH:-}"
             ''}
@@ -174,6 +213,9 @@
           '';
         };
 
+        # Development-only proof shell. It is deliberately not part of the
+        # default shell used by ordinary Jet compilation or installation.
+        devShells.proof = proofShell;
         # Integration shell: full FFI matrix, Canvas, graphics, emulator, and
         # OS-image work. Use `nix develop .#full` / `jet-env full …` explicitly.
         devShells.full = pkgs.mkShell {
@@ -275,6 +317,7 @@
               export JET_ROOT="$PWD"
             fi
             export TZDIR="${jetTzdb}"
+            ${jetRuntimeLibraryHook}
             export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.raylib ]}:''${LD_LIBRARY_PATH:-}"
             ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
               export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.vulkan-loader ]}:''${LD_LIBRARY_PATH:-}"

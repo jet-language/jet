@@ -1,391 +1,135 @@
-# AGENTS.md — Jet agent operating manual
+# AGENTS.md — Jet shared agent contract
 
-Canonical policy for every coding agent. `CLAUDE.md` is a symlink here; do not fork per-tool copies.
-Put procedures in skills, design in specs, work state in Tower, and deterministic enforcement in tests or hooks.
+This is Jet's sole cross-tool policy. `CLAUDE.md` is its symlink. Strategic guidance lives in `docs/spec/philosophy.md`; plans and work state live only in Tower. Procedures belong in skills. Code, executable registries, and exercised tests/examples establish current behavior.
 
-## Mission and authority
+## Authority and mission
 
-Jet is a dual-facet, memory-safe compiled language: magic for beginners, full expert control behind explicit opt-in.
-The front end owns semantics and user-facing errors; rustc is hidden. The human owner decides user-facing syntax.
+Read `docs/spec/philosophy.md` for purpose and ranked design priorities. Do not copy that guidance into other documents.
 
-Resolve guidance in this order:
+Code is the source of truth for what Jet does. Specs explain durable contracts and reasons; they do not prove that a feature works, is absent, or is complete. A conflict with an approved requirement is a defect to investigate and home in Tower, not permission to bless the implementation or repeat stale prose.
 
-1. the owner's current explicit instruction;
-2. ratified Tower verdicts and their acceptance terms;
-3. the relevant domain spec;
-4. invariants I1–I9 and owner gates in this file;
-5. `docs/agents/owner-guidance.md` for owner-maintained agent conduct;
-6. remaining rules in this file and the nearest nested `AGENTS.md`;
-7. task-specific skills.
+For decisions about intended behavior and agent conduct, resolve conflicts in this order:
 
-Code shows implementation state, not design authority. A newer ratified ruling beats stale code or prose. On conflict,
-follow the higher authority, record it, and stop only the affected slice. Never average contradictory rules.
+1. The owner's latest explicit instruction.
+2. A ratified Tower decision and its acceptance terms.
+3. The relevant domain specification or ADR.
+4. This contract.
+5. The task-specific skill.
 
-## Greenfield evolution
+A newer higher-authority ruling wins. Do not average conflicting rules. Stop only the affected slice when a conflict or owner gate blocks it; continue independent work.
 
-Jet is greenfield until the owner explicitly declares an external compatibility baseline. Repository history creates
-no compatibility obligation.
+## Decision Level Definitions
 
-- Design and ship one canonical current form.
-- When syntax, semantics, APIs, ABIs, or formats change, migrate every in-repo consumer in one coherent change and
-  delete the replaced form.
-- Do not keep deprecated spellings, aliases, shims, fallback parsers, legacy readers, version branches,
-  compatibility flags, or parallel implementations.
-- Update source, generated artifacts, packages, schemas, snapshots, examples, tests, tools, and docs before the
-  change closes.
-- Preserve decision history in specs, ADRs, and Tower. Do not preserve retired behavior in the compiler, runtime,
-  stdlib, or tools.
-- Judge a proposal by the best final design. Internal migration work and development churn are not product
-  tradeoffs.
-- Any compatibility exception requires an owner-ratified Tower decision that names its exact scope and removal
-  condition.
+### Strategic
 
-## Load context by trigger
+Defines purpose and direction: what we want to achieve, why it matters, and what
+principles and trade-offs should guide us. Strategic discussion establishes
+desired outcomes, priorities, boundaries, and what success means. It can question
+whether an undertaking is worth pursuing at all.
 
-Read this file, then relevant code, tests, and the current diff. Load only task-triggered references:
+Central question: What are we trying to accomplish, and why?
 
-Before using any skill or dispatching any agent, read
-`docs/agents/owner-guidance.md`. It is the single owner-maintained source for
-agent behavior. Agents may read it but must never edit it. The owner edits it
-through Tower's **Guidance** tab.
+### Operational
 
-- language semantics or syntax: relevant sections of `docs/spec/philosophy.md`,
-  `docs/spec/syntax-decisions.md`, and `docs/spec/architecture.md`; adding syntax
-  uses `.agents/skills/verify/SKILL.md`;
-- diagnostics: `docs/spec/diagnostics.md` (including "Adding a diagnostic") and
-  the matching UI snapshots;
-- FFI bridges: `docs/spec/architecture.md` ("Adding an FFI bridge");
-- Tower board mechanics or owner decisions: `plugins/tower/skills/tower/SKILL.md`, plus
-  `plugins/tower/skills/tower-ballot/SKILL.md` when a choice is owner-gated;
-- Tower backlog ranking: `plugins/tower/skills/tower-rank/SKILL.md`;
-- Tower board prep (plans/ballots): `plugins/tower/skills/tower-prep/SKILL.md`;
-- Tower backlog burndown (orchestrated closeout): `plugins/tower/skills/tower-burndown/SKILL.md`;
-- orchestrating other agents (burndown, sweep, multi-card wave): `docs/agents/orchestration.md`;
-- owner preferences, project state, technical traps: `docs/agents/agent-memory.md`;
-- Jet audits / research / cleanup routing: `.agents/skills/JetSkillsRouter.md`;
-- completion claims: `.agents/skills/verify/SKILL.md` (code closeout only);
-- a specialized task: the matching skill named in the request or skill catalog.
+Translates strategic direction into a coherent approach and organized work.
+Operational discussion determines what needs to exist or change, how the major
+pieces fit together, and how to sequence and coordinate them. It covers
+substantial design choices, scope, dependencies, milestones, and acceptance
+criteria without resolving every implementation detail.
 
-Do not front-load every spec, plan, skill, or board record. Search first; read the smallest authoritative slice.
+Central question: What approach and body of work will achieve the intended
+outcome?
 
-## Command environment
+### Tactical
 
-Run project commands through `scripts/agent/jet-env`:
+Concerns the concrete actions and decisions that carry out the operational
+approach. Tactical discussion resolves implementation details, performs specific
+changes, handles immediate problems, and verifies results. Findings at this level
+can reveal that an operational approach or strategic assumption needs
+reconsideration.
 
-```sh
-scripts/agent/jet-env cargo build
-scripts/agent/jet-env cargo test --test NAME
-scripts/agent/jet-env jet run examples/features/basics/hello.jet
-scripts/agent/jet-env rg "pattern" docs Source crates tests
-```
+Central question: What specifically do we do, and how do we establish that it
+worked?
 
-Use `scripts/agent/jet-env full <command>` only for FFI, browser/graphics, VM/image, or full verification. Do not rely
-on host tools unless testing host-shell independence. Group dependent checks when practical.
+## Documentation boundaries
 
-Rebuild before compiler smoke tests: the `jet` wrapper runs `target/debug/jet`. Check `/tmp` before trusting ENOSPC.
-The verification skill owns snapshot, golden, formatter, grammar, and full-suite traps.
+- **One strategic document:** `docs/spec/philosophy.md` holds durable vision and design priorities. No schedules, feature inventories, progress notes, or release-by-release scope. Do not create a separate roadmap without owner direction.
+- **One planning system:** Tower holds specific goals, plans, milestones, dependencies, decisions, acceptance criteria, status, blockers, and handoffs. Move still-live work there before removing its document copy; discard superseded plans rather than preserving a second queue.
+- **Executable truth:** Keep spellings, APIs, diagnostics, defaults, and constraints in their code or registry home. Use tests, snapshots, and executable examples to prove behavior. Generate reference output on demand; do not check generated status or duplicate catalogs into docs.
+- **Small explanations:** Specs and guides may explain durable contracts, non-obvious reasons, and how to use or change the system. Link to executable sources instead of maintaining feature lists, limitations, coverage tables, or implementation maps. Fix stale prose by cutting it or correcting the explanation, never by redefining reality.
+- **Evidence, not work state:** Audits and research retain dated findings; proposals retain alternatives and reasons linked to a Tower decision. They cannot own plans, goals, or a live status record. Historical evidence does not establish current behavior.
 
-`/tmp` is RAM-backed tmpfs on this machine. Never place cargo target dirs, alternate `CARGO_TARGET_DIR`s, or
-multi-GB logs there — tmpfs pages fill swap and end in kernel OOM kills. Use a gitignored disk path such as
-`<repo>/target-<name>`, and delete large session outputs when the task closes. `jet-env` rejects a `/tmp`
-target dir; `scripts/agent/tmp-guard.sh` auto-cleans stale junk and blocks commands under critical memory
-pressure — if it blocks you, free the space it names before continuing.
+Docs have four categories: `spec`, `audits`, `research`, and `proposals`; `docs/README.md` is navigation only. Only the owner may delete audits or final reports; agents may move them intact. Do not create cleanup reports, preservation maps, archive buckets, or recurring documentation janitors. Preserve unique decision rationale in its existing home; use Tower and source history for work and recovery.
 
-`target/` is build cache with no automatic pruning; it once reached 619G unnoticed. Tests and scripts never
-write scratch, fixtures, or logs inside it — use temp-dir scratch cleaned on exit (the shared test `Scratch`).
-`verify-full.sh` prints the footprint each run and warns past 150G; on that warning, run `cargo clean` and
-rebuild.
+## Greenfield cutover
 
-Only the owner starts the Tower board server (`node plugins/tower/tower.mjs
-serve --open`). Agents never run `tower serve` — not on another port, not in a
-worktree, not to "restart" a stale one; a second server holds divergent
-in-memory state and has silently lost board data. If a server looks stale or
-wrong, report it and stop. Board data lives in `plugins/tower/.tower/` (main
-checkout only). Agents read and write board state through the non-serve CLI
-commands, which operate on the store directly.
-
-When this repository's own agent tooling snags you mid-task — a dead-end
-`scripts/agent/*` command, a Tower CLI flag that its own help documents but
-rejects, a stale devshell — log it in one line and keep going:
-`node plugins/tower/tower.mjs papercut add --by <agent> --text "..."`. Do not
-silently push through, and do not derail the task to fix it.
-
-A papercut is a bug report against in-repo agent tooling, and every one of the
-four gates below must hold. The bar is high on purpose: 70 accumulated at once,
-and roughly a third were the same external tool failing repeatedly.
-
-1. **In scope.** The broken thing lives in this repository: `scripts/agent/**`,
-   `tools/**`, the Tower CLI, the devshell, or an in-repo doc that told you to
-   run something that does not work. The agent platform is out of scope — model
-   ids, harness agent types, subagent dispatch, account limits, sandbox policy,
-   and daemon-socket denials are not Jet's tooling and never become papercuts.
-2. **Deterministic and reproducible.** You can name the exact command and the
-   exact observed output, and anyone running that command hits it. One flaky
-   failure, a slow command, a concurrent-session collision, or self-inflicted
-   state (dirty tree, stale binary, wrong cwd, wrong worktree) is not a
-   papercut.
-3. **Not already logged.** Check `papercut list` for the same cause first. A
-   second row for a known cause adds noise, not signal; if you have new
-   evidence, put it on the existing row's card instead.
-4. **Not a card.** A bug in Jet itself — compiler, stdlib, examples, tests,
-   diagnostics — is a card. A test that is already red on master is a card. A
-   missing feature is a card. Papercuts are only for tooling that wastes the
-   next agent's time.
-
-Papercuts are triaged in batches: a cause that will keep hitting agents becomes
-a sidequest card that fixes it for good, and everything else is discarded. A
-papercut is a signal, not a to-do list, so it is closed when its cause is
-carded or dismissed — never left open as a reminder.
+Jet has no compatibility obligation to repository history until the owner declares one. Ship one canonical current form. When syntax, semantics, APIs, ABIs, formats, names, or commands change, migrate every in-repository caller, example, test, generated artifact, schema, and affected explanation in one cutover. Remove old spellings, aliases, shims, fallback parsers, legacy readers, version branches, and parallel implementations. Keep ratification history in Tower and only necessary design rationale in specs, not retired behavior in compiler or tools. A compatibility exception needs an owner-ratified decision with exact scope and removal condition.
 
 ## Invariants
 
-Violating an invariant means stop and fix it.
+A violation stops the affected work and requires a root fix.
 
-- **I1 — Safety.** Jet is memory-safe and type-safe by default. Expert escape
-  uses user-written audited `#Unsafe("reason") { … }` or
-  `#Unsafe("reason") fn` regions. Generated Rust `unsafe` may appear only
-  there or in vetted std/mem internals.
-- **I2 — rustc is hidden.** rustc rejection of generated code is an internal
-  compiler error (exit 101), never a user diagnostic.
-- **I3 — Sema checks.** All checking lives in sema. Codegen is dumb; never use
-  “try rustc and see” as validation.
-- **I4 — Diagnostics are products.** Every diagnostic has a registered code,
-  what/why/fix text, and a UI snapshot. No snapshot means no diagnostic.
-- **I5 — Examples are executable specs.** Every feature ships with an example
-  and golden-tested output. That example must prove the same meaning on every
-  applicable execution tier (see I9), not only AOT.
-- **I6 — Compiler seams are dependency-free.** The root compiler and compiler
-  seam crates accept only path dependencies. Existing ratified stdlib bootstrap
-  dependencies remain temporary; any new stdlib external dependency requires
-  owner approval.
-- **I7 — Syntax is ratified.** Every user-typeable keyword or sigil lives in
-  `crates/jet-foundation/src/Syntax.rs` with a decision ID.
-- **I8 — One mechanism.** One canonical semantic mechanism may have flexible
-  spelling and organization. Keep the beginner surface small and safe; expose
-  expert control through explicit opt-in. New mechanisms require a roadmap slot
-  or owner approval.
-- **I9 — Execution-tier parity (one Prelude, dumb engines).** AOT, Cranelift
-  JIT (`jet run` / `jet dev`), the interpreter (TIR-eval deopt / ambient), and
-  web targets preserve one executable meaning for every language feature and
-  Core library API. **Semantics live only in the embedded Prelude parts**
-  (`crates/jet-foundation` prelude modules and `crates/jet-codegen/src/Prelude/**`;
-  a part sits in `jet-foundation` when a comptime-reachable seam crate must call
-  it, per I6) (and ratified CoreLib). AOT emit, Cranelift hosts, and interpreter ambient are
-  **marshalling adapters only**: they convert arguments/results and call those
-  Prelude functions. Re-encoding validation, policy, defaults, or error meaning
-  in an engine is an invariant violation — not a “host helper.” Parking work in
-  `tests/jit_gaps.txt`, marking an example AOT-only, or closing a card with
-  “JIT/interpreter owed later” is also a violation. A change is incomplete until
-  parser → sema → TIR → AOT emit → JIT/dev → interpreter (and web when the
-  feature touches web) all honor the same Prelude semantics. Prove AOT and
-  default `jet run`; if deopt reaches the surface, interpreter ambient must call
-  the same Prelude symbol. The only allowed
-  exception is an owner-ratified carve-out that names a tier that cannot apply
-  to that surface (for example native `#Unsafe` on a pure web target).
+- **I1 — Safety.** Jet is memory-safe and type-safe by default. Expert escape uses user-written audited `#Unsafe("reason") { … }` or `#Unsafe("reason") fn` regions. Generated Rust `unsafe` is allowed only there or in vetted standard-library and memory internals.
+- **I2 — Hidden backend.** A rustc rejection of generated code is an internal compiler error with exit 101, never a user diagnostic.
+- **I3 — Sema owns checks.** All language checking lives in sema. Codegen lowers known facts; it never probes rustc to discover user errors.
+- **I4 — Diagnostic product.** Every diagnostic has a registered code, what/why/fix text, and a UI snapshot. Without the snapshot, the diagnostic is incomplete.
+- **I5 — Executable example.** Every feature has an example and golden-tested output. The example proves the same meaning on every applicable execution tier.
+- **I6 — Dependency seams.** The compiler and compiler seam crates use path dependencies only. Existing ratified stdlib bootstrap dependencies are temporary. A new stdlib external dependency requires an owner decision and an approved bridge pattern.
+- **I7 — Ratified syntax.** Every user-typeable keyword or sigil is registered in `crates/jet-foundation/src/Syntax.rs` and tied to a decision ID.
+- **I8 — One mechanism.** Keep one canonical semantic mechanism, with flexible spelling or organization only where it improves use. Keep the beginner surface small and safe. Expose expert control by explicit opt-in. A new mechanism needs approved Tower scope or owner approval.
+- **I9 — One meaning across tiers.** AOT, Cranelift JIT (`jet run` and `jet dev`), interpreter/deopt, and web when applicable preserve one executable meaning for every language feature and Core API. Semantics live in the embedded Prelude and ratified CoreLib. AOT emit, JIT hosts, and interpreter ambient marshal values and call the same Prelude symbols; they must not re-encode validation, defaults, policy, or error meaning. Do not mark a feature AOT-only, add a new `tests/jit_gaps.txt` parking entry, or say “JIT later.” Prove AOT and default `jet run`; prove interpreter and web when the surface reaches them. An owner-ratified exception must name the inapplicable tier.
 
-### Competitive performance gate
+## Strict performance gate
 
-Jet targets a strict win against every matched peer on every required
-performance cell and metric. Rust alone permits parity at a same-run
-Jet/Rust ratio of `1.05` or lower; that band is measurement noise, not a
-target or win. Every non-Rust peer requires Jet/peer below `1.00`.
+Jet targets a strict win for every matched peer on every required cell and metric. Rust permits same-run parity only at a Jet/Rust ratio of `1.05` or lower; that band is measurement noise, not a target or a win. Every non-Rust peer requires Jet/peer below `1.00`.
 
-Required cells are the language foundations (numerics, text, files,
-concurrency, networking, build and run times) plus one real workload for
-each of the eight critical areas: web, games, CLI and scripts, data
-analysis, backend services, AI/ML applications, GUI apps, and embedded. A
-niche outside those areas gets a required cell only when Jet ships a
-first-party battery for it; anything else may be measured and reported but
-never gates a card, milestone, or release (owner, 2026-09-02). Jet does not
-claim wins in niches it does not ship.
+Required cells cover foundations (numerics, text, files, concurrency, networking, build time, and run time) plus one real workload in each critical area: web, games, CLI and scripts, data analysis, backend services, AI/ML applications, GUI applications, and embedded. A niche becomes required only when Jet ships a first-party battery for it. Do not claim a niche win without that battery.
 
-Apply the rule per cell and metric. Never average away a loss, substitute an
-easier workload or tier, omit a required peer, or pass wrong, unavailable,
-uncovered, mismatched, or inconclusive evidence. A performance card,
-milestone, dashboard, or release gate remains open while any required cell
-fails. General optimization continues toward the largest safe Jet win; it
-never trades away semantics, diagnostics, determinism, safety, or I9 parity.
+Apply the comparator per cell and metric. Never average away a loss, substitute an easier workload or tier, omit a peer, or pass wrong, unavailable, uncovered, mismatched, or inconclusive evidence. A performance card, milestone, dashboard, or release gate stays open while any required cell fails. Never trade semantics, diagnostics, determinism, safety, or I9 parity for a score. Manifests and gates must encode this policy; prose alone is not evidence. Historical receipts remain immutable evidence under their recorded policy and never weaken the current gate.
+- A performance-motivated surface must arrive with a paired two-program cell against the plain spelling it replaces; ratification waits for a strict surface/plain win. Record the pair in the canonical manifest and keep any loss carded; this references the comparator above.
 
-The gauntlet manifest and every performance gate encode this comparator
-policy. A prose-only threshold is incomplete. Historical receipts remain
-immutable evidence under their recorded policy; they never grandfather a
-weaker current exit criterion.
+## Owner gates and work state
 
-## Workflow ownership
+Before coding, identify genuine owner-only choices: new syntax, public API, command, dependency, invariant or I9 exception, epoch or scope move, product behavior, or visual direction. Make each a Tower ballot with same-program alternatives, exact syntax and behavior, trade-offs, edge cases, and beginner and expert paths. Do not ballot implementation choices already covered by an approved contract. A question is not approval. A ratified outcome remains law until the owner changes it.
 
-Keep bounded work inline. For larger work, use the active harness plus Tower.
-Do not invent a durable competing planner, phase model, or orchestration product
-in this repo.
+Tower is the only work ledger. Every incomplete stream has one homed card with current phase, plan, dependencies, criteria, and handoff state. Workers never write Tower, close cards, or maintain a competing task ledger. The orchestrator integrates a valid result, runs the exact focused proof named by the criteria, records evidence, closes the card, and confirms `done` before claiming or briefing more work. A milestone then gets one commit-bound composed sweep and one fresh-context review; a card does not wait for that later gate.
 
-Before writing, inspect relevant Git/Tower ownership and the authoritative decision. Search
-before broad reading; choose targeted proof before implementation.
+One implementer owns each coherent patch. Concurrent writers use disjoint paths and one named close owner. Default to one delivery stream; add streams only when paths, integration, tests, and resources are clean. Use only in-repository worktrees under `.claude/worktrees/<name>` or `.agent-worktrees/<name>`, share the bounded main `target/`, integrate promptly, and remove finished worktrees and temporary branches. Never overwrite another task's paths. Never use `git add -A`, broad `git commit -a`, `git restore .`, or an equivalent broad operation. Never hand-edit `plugins/tower/.tower/`.
 
-Use `ponytail:ponytail` for coding, refactoring, fixes, review, and technical design. Choose the smallest complete
-solution: standard library and existing mechanisms before dependencies or abstractions. Never cut ratified scope,
-safety, necessary tests, or end-to-end behavior. No stubs, facades, speculative extension points, or parallel mechanisms.
+The owner alone starts `tower serve`. Agents use non-serve Tower CLI commands against the main board and report a stale or duplicate server. Never touch owner personal notes or scratch files.
 
-Write a failing behavioral test or executable example first when feasible, then the smallest complete vertical slice.
-Language features preserve full I9 parity — parser → sema → TIR → AOT → JIT/dev →
-interpreter → web when applicable — and update touched docs. Difficulty and
-duration do not lower the outcome. Never close with a new `jit_gaps` entry.
+## Routing and model contract
 
-Before plans, ballots, or public frontend acceptance, run both passes:
+OMP `task` and `hub` are the first path for every dispatch. Use the most specific available agent. Main keeps its session model. Active profiles:
 
-- **Beginner:** safe useful defaults, no unnecessary ceremony or policy jargon.
-- **Expert:** explicit control over targets, effects, generated code, toolchains,
-  scheduling, caching, and audit output.
+- `@implementation`: GPT-5.6 Luna, maximum reasoning, for normal code-writing workers.
+- `@full_review`: GPT-5.6 Sol, high reasoning, for full review axes, security review, and milestone review.
+- `@cavecrew`: Sonnet for investigator, builder, and reviewer roles.
+- Existing audit, research, report, HTML, and gauntlet skills keep their own declared routes.
 
-A frontend requires the real terminal/browser state matrix: archetypes, viewports, states, keyboard/focus paths, and
-ANSI/`NO_COLOR` where relevant—not prose or a selected screenshot.
+Managed duplicate skills are disabled inside Jet.
 
-## Owner gates
+A missing, stale, unknown, or conflicting adapter fails closed. Direct Codex or rescue CLI is a fallback only after OMP cannot run the required role; record the exact harness failure in `JET_OMP_FALLBACK_REASON`. Workers do not spawn workers. Every code worker returns the exact `CHECK OK` receipt from `scripts/agent/lane-check.sh`; prose or static-data-only work returns `DOCS ONLY`. The orchestration skill defines briefs, liveness, integration, proof cadence, recovery, and closure mechanics.
 
-Before coding, enumerate new syntax, a new stdlib external dependency, an
-invariant carve-out (including any I9 tier-parity exception), and any other
-owner-only call. For Jet project work, make each choice ballot-ready in Tower,
-then pause only the gated slice. Work on independent ungated slices meanwhile.
-Never hand-edit `plugins/tower/.tower/` data.
+## Environment and proof
 
-Kill a design slice before ballot or code when it breaks an invariant
-(including shipping AOT-only or parking a feature in `jit_gaps`),
-duplicates a mechanism, burdens the beginner default without necessity, or
-hides expert control or auditability. Otherwise, unresolved owner choices go
-through the Tower ballot workflow; a ratified verdict and its acceptance terms
-remain law until a later owner verdict amends them.
+Run repository commands through `scripts/agent/jet-env`. Keep scratch and logs on disk at `~/.cache/jet-test-scratch` and `~/.cache/jet-luna`, never in `/tmp`; `/tmp` is RAM-backed. Share one bounded Cargo target, set `CARGO_INCREMENTAL=0`, and respect the default `JET_TARGET_CAP_GB=120`. Rebuild before compiler smoke tests. Use the exact narrow criterion proof after integration. Broad suites, unfiltered censuses, and `verify-full.sh` are milestone or release operations only, with the required token. A worker type-check is not runtime, tier, golden, snapshot, or generated-artifact proof.
 
-After ratification, implement the complete ruling and acceptance terms; the verification skill owns syntax chores.
+## Triggered references
 
-When the owner explicitly says a task is outside the Jet decision system, raise
-choices directly in chat rather than creating Tower ballots.
+Read this file first, then load only what the task needs:
 
-## Ownership and worktrees
+| Trigger | Canonical reference |
+|---|---|
+| Dispatch, waves, worktrees, receipts, recovery, card closure | `.agents/skills/orchestration/SKILL.md` |
+| Compiler or language semantics | Relevant code, executable examples and tests; `docs/spec/syntax-decisions.md` for decision rationale |
+| Diagnostics or snapshots | `crates/jet-codegen/src/Prelude/Diagnostics.jet`, matching UI snapshots, and `docs/spec/diagnostics.md` |
+| Examples or golden paths | `docs/spec/contributing/examples.md` and `examples/README.md` |
+| Tower cards, questions, tags, or board operations | `docs/spec/contributing/issue-tracker.md`, `docs/spec/contributing/triage-labels.md`, `plugins/tower/skills/tower/SKILL.md` |
+| Domain vocabulary or decisions | `docs/spec/vocabulary.md`, `docs/spec/syntax-decisions.md`, `docs/spec/contributing/domain.md` |
+| Security closure | `docs/spec/contributing/security-closure.md` |
+| Technical traps | `docs/spec/contributing/agent-engineering.md` |
+| Audit, research, cleanup, or skill routing | `.agents/skills/JetSkillsRouter.md` |
+| Code completion claims or milestone closeout | `.agents/skills/verify/SKILL.md` |
 
-One implementer owns each coherent patch. Concurrent writers need disjoint paths. The active specialized
-skill decides delegation mechanics when needed. Start agent chatter with `caveman:caveman` where available; product copy, specs,
-diagnostics, ballots, and commits use normal prose.
-
-Default to one active delivery stream. Expand concurrency only when each stream
-has disjoint write paths and tests, a clean integration target, and one named
-close owner. Contract when streams share compiler seams, contend for build
-resources, or produce an integration backlog. Integrate ready worker patches
-promptly. This is an adaptive rule, not a fixed worker cap.
-
-Shared-tree safety is absolute:
-
-- never run `git add -A`, broad `git commit -a`, `git restore .`, or equivalent;
-- never stage, commit, overwrite, clean, or revert another task's paths;
-- stage and commit only explicitly owned paths after inspecting the diff;
-- if ownership or collision is unclear, stop and resolve it before writing.
-
-Worktrees are allowed for isolated or concurrent writes. Record ownership before use. Integrate successful work into
-the intended branch promptly, verify it there, then remove the worktree and temporary branch immediately. Never park
-finished work unmerged. Paused work keeps a named coherent handoff branch and resume note, not an orphaned worktree.
-
-Build-heavy agent tasks share the main checkout’s one `target/`. A second build tree is not free: the
-retired builder worktree reached 517G (438G of stale `deps` generations that nothing prunes, 40G incremental,
-39G scratch) and the machine ended a session in an OOM kill. Workers type-check with
-`scripts/agent/lane-check.sh`; the orchestrator tests with `scripts/agent/proof-parallel.sh`, which refuses to
-run past `JET_TARGET_CAP_GB` (120G default). `scripts/agent/disk-report.sh` prints the current footprint and
-the command to reclaim each piece.
-
-`/tmp` is RAM-backed here, so never point scratch, a target dir, or a log at it: agent scripts export
-`TMPDIR=~/.cache/jet-test-scratch` before `jet-env` (the nix shell inherits it) and set `CARGO_INCREMENTAL=0`.
-Briefs and worker logs live in `~/.cache/jet-luna`. The runtime rlib cache (`~/.cache/jet/runtime`) is bounded
-to 512 MiB and prunes its oldest published entries on writes; `jet self doctor` reports its byte footprint.
-
-Worktree location is absolute (no exceptions for cloud agents, Cursor, Claude, or temp names):
-
-- The only top-level Jet checkout is the main clone (e.g. `…/Github/jet`). Never create sibling
-  directories beside it (`jet-bd-*`, `jet-*`, random agent ids, or “helpful” parallel clones).
-- Every git worktree path MUST live under the main clone:
-  - preferred: `<repo>/.claude/worktrees/<short-name>`
-  - allowed: `<repo>/.agent-worktrees/<short-name>`
-- Create with an in-repo path only, e.g.
-  `git worktree add .claude/worktrees/<short-name> -b <branch>`.
-- If a tool drops a worktree outside the clone, stop and relocate immediately:
-  `git worktree move <bad-path> .claude/worktrees/<short-name>`, then continue only from the
-  in-repo path. Do not leave the sibling in place “for now.”
-- Canonical Tower board is only the main checkout’s `plugins/tower/.tower/`. Never treat a
-  worktree copy of `.tower` as source of truth, and never copy it over the main board.
-- Before finish: merge or hand off, `git worktree remove` the in-repo path, delete the temp
-  branch. Run `scripts/agent/check-worktree-layout.sh` if layout is unclear.
-
-## Review and verification constraints
-
-Card closure and milestone closeout are separate gates:
-
-- A card closes immediately when all robust observable exit criteria have concrete
-  implementation evidence, the patch is integrated, and no known blocker contradicts
-  that evidence.
-- No per-card reviewer, duplicate proof, or repeated fresh-context audit is required
-  before closure.
-- Workers implement assigned cards and return concrete evidence and blockers. The
-  orchestrator integrates patches, records criteria evidence, closes cards, and owns
-  milestone closeout and any reopen/fix control. Workers do not set `--phase done`.
-- At milestone end, the orchestrator runs one composed targeted test sweep and one
-  fresh-context review of the integrated milestone diff. The sweep covers every
-  applicable execution tier required by I9.
-- Every closeout finding reopens its owning card and affected criteria. Apply the fix,
-  integrate it, review the delta, and verify the affected criteria before the card and
-  milestone close again.
-- A known blocker that contradicts the evidence prevents or reopens closure. Owner
-  visual acceptance remains required when a criterion names it.
-
-The fresh-context review checks missing paths, semantic and safety bugs, false-green
-evidence, stale decisions, accidental scope, duplicate mechanisms, orphaned work,
-and **I9 drift**: new Core behavior implemented only in AOT emit, re-encoded
-policy/defaults/error behavior inside Cranelift hosts or interpreter ambient (instead
-of calling the same Prelude `jet_*` symbol), new or retained `tests/jit_gaps.txt`
-parking for the change, or closing with “JIT/interpreter later.” A green sweep never
-waives an open finding.
-
-Technical verification is agent-owned. Workers return evidence; the orchestrator
-validates and records it after integration. No technical card waits in `verify` for
-the owner, and no owner verification covers tests, builds, diffs, or other
-machine-verifiable claims.
-
-Owner verification (`needsAcceptance` / Now “visual check”) is **only** for
-look-and-feel with human eyes: UI/UX/DX taste, visual presentation, copy polish,
-or a real environment the harness cannot replace. Tell the owner only what to
-look at and what “good” looks like; omit machine-verification details.
-
-Use the evidence named by each exit criterion. Do not repeat proof only for
-reassurance. The milestone sweep is the composed machine proof; include broader
-targets only when the milestone criteria or a known interaction requires them.
-
-Done means: each card has robust criteria evidence, its patch is integrated, no
-contradictory blocker remains, and its Tower state is accurate. A milestone also
-needs its composed targeted sweep and fresh-context review, with every finding fixed,
-reviewed, and re-verified. No owned worktree or temporary branch remains, and the
-final report names tests, commits, open gates, and any retained handoff branch.
-
-## Style
-
-Be terse and precise. Say each rule once. Plain std-only Rust; small modules; no
-cleverness in codegen. Treat error text as snapshot-tested product copy. When in
-doubt, `docs/spec/philosophy.md` decides: effort is expendable; safety and the
-beginner experience are not.
-
-## Agent skills
-
-### Issue tracker
-
-Work lives on the Tower board (`node plugins/tower/tower.mjs`). See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Triage roles map to Tower card tags and `kind` (not phases). See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Single-context: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
-
-### Orchestration
-
-Dispatching other agents (burndowns, sweeps, multi-card waves): `docs/agents/orchestration.md`.
-Results-not-activity, role boundaries, worker briefs, milestone stream, board hygiene, recovery.
-
-### Agent memory
-
-Owner preferences, ratified-slate state, and technical traps: `docs/agents/agent-memory.md`.
-Owner-auditable and owner-editable; treat it as law after this file. Prune stale dated entries.
+Use `ponytail` for coding and technical design: understand the whole path, then choose the smallest complete change. Use clear, plain prose for durable artifacts. Do not stop at a report when the task asks for implementation, and do not claim work that the board or an exercised command does not prove.

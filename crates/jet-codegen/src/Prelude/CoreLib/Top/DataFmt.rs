@@ -1,92 +1,27 @@
-fn jet_data_inner_join<T, U, FL, FR>(
-    left: &Vec<T>,
-    right: &Vec<U>,
-    left_key: FL,
-    right_key: FR,
-) -> Vec<jet_std::DataJoin<T, U>>
-where
-    T: Clone,
-    U: Clone,
-    FL: Fn(T) -> String,
-    FR: Fn(U) -> String,
-{
-    let mut right_rows = std::collections::BTreeMap::<String, Vec<U>>::new();
-    for row in right.iter().cloned() {
-        right_rows.entry(right_key(row.clone())).or_default().push(row);
-    }
-    let mut joined = Vec::new();
-    for left_row in left.iter().cloned() {
-        if let Some(matches) = right_rows.get(&left_key(left_row.clone())) {
-            for right_row in matches {
-                joined.push(jet_std::DataJoin {
-                    left: left_row.clone(),
-                    right: right_row.clone(),
-                });
-            }
-        }
-    }
-    joined
-}
-
-fn jet_data_left_join<T, U, FL, FR>(
-    left: &Vec<T>,
-    right: &Vec<U>,
-    left_key: FL,
-    right_key: FR,
-) -> Vec<jet_std::DataJoin<T, JetOutcome<U, JetAbsent>>>
-where
-    T: Clone,
-    U: Clone,
-    FL: Fn(T) -> String,
-    FR: Fn(U) -> String,
-{
-    let mut right_rows = std::collections::BTreeMap::<String, Vec<U>>::new();
-    for row in right.iter().cloned() {
-        right_rows.entry(right_key(row.clone())).or_default().push(row);
-    }
-    let mut joined = Vec::new();
-    for left_row in left.iter().cloned() {
-        match right_rows.get(&left_key(left_row.clone())) {
-            Some(matches) => {
-                for right_row in matches {
-                    joined.push(jet_std::DataJoin {
-                        left: left_row.clone(),
-                        right: Ok(right_row.clone()),
-                    });
-                }
-            }
-            None => joined.push(jet_std::DataJoin {
-                left: left_row,
-                right: Err(JetAbsent),
-            }),
-        }
-    }
-    joined
-}
-
 fn jet_data_pivot_sum<T, FR, FC, FV>(
     rows: &Vec<T>,
     row_key: FR,
     col_key: FC,
     value: FV,
-) -> Vec<jet_std::DataGroup>
+) -> Vec<jet_std::DataPivotCell>
 where
     T: Clone,
     FR: Fn(T) -> String,
     FC: Fn(T) -> String,
     FV: Fn(T) -> f64,
 {
-    let mut groups = std::collections::BTreeMap::<String, (i64, f64)>::new();
+    let mut groups = std::collections::BTreeMap::<(String, String), (i64, f64)>::new();
     for row in rows.iter().cloned() {
-        let key = format!("{}|{}", row_key(row.clone()), col_key(row.clone()));
+        let key = (row_key(row.clone()), col_key(row.clone()));
         let entry = groups.entry(key).or_insert((0, 0.0));
         entry.0 += 1;
         entry.1 += value(row);
     }
     groups
         .into_iter()
-        .map(|(key, (count, sum))| jet_std::DataGroup {
-            key,
+        .map(|((row_key, column_key), (count, sum))| jet_std::DataPivotCell {
+            row_key,
+            column_key,
             count,
             sum,
             mean: if count == 0 { 0.0 } else { sum / count as f64 },
@@ -94,55 +29,138 @@ where
         .collect()
 }
 
+
 // CSV typed encode: `[T]` → header row (field names from the first row's Object)
-// + one record per element. Requires every element to encode to a flat Object.
+// + one record per element. Flat object records and explicit row arrays share the
+// same renderer: rows already carry their header as the first row.
 fn jet_enc_csv_to_string<T: __jet_Encode>(values: &Vec<T>) -> String {
     let trees: Vec<jet_std::DataTree> = values.iter().map(|v| v.jet_encode()).collect();
-    let mut header: Vec<String> = Vec::new();
-    if let Some(jet_std::DataTree::Object(entries)) = trees.first() {
-        header = entries.iter().map(|(k, _)| k.clone()).collect();
-    } else if !trees.is_empty() {
-        jet_panic(
-            "<core.encoding.csv>",
-            0,
-            "csv.to_string needs rows or records",
-        );
-    }
     let mut rows: Vec<Vec<String>> = Vec::new();
-    rows.push(header.clone());
-    for tree in &trees {
-        if !matches!(tree, jet_std::DataTree::Object(_)) {
-            jet_panic(
-                "<core.encoding.csv>",
-                0,
-                "csv.to_string needs rows or records",
+    if let Some(jet_std::DataTree::Object(entries)) = trees.first() {
+        let header: Vec<String> = entries.iter().map(|(k, _)| k.clone()).collect();
+        rows.push(header.clone());
+        for tree in &trees {
+            if !matches!(tree, jet_std::DataTree::Object(_)) {
+                jet_panic(
+                    "<core.encoding.csv>",
+                    0,
+                    "csv.to_string needs rows or records",
+                );
+            }
+            let mut record = Vec::with_capacity(header.len());
+            for key in &header {
+                let cell = match jet_std::datatree_get(tree, key) {
+                    Some(jet_std::DataTree::Text(s)) => s.clone(),
+                    Some(jet_std::DataTree::Int(n)) => jet_std::jet_int_to_string(*n),
+                    Some(jet_std::DataTree::Float(f)) => format!("{:?}", f),
+                    Some(jet_std::DataTree::Bool(b)) => b.to_string(),
+                    Some(jet_std::DataTree::Null) | None => String::new(),
+                    Some(other) => jet_std::render_datatree_json(other, false, 0),
+                };
+                record.push(cell);
+            }
+            rows.push(record);
+        }
+    } else {
+        for tree in trees {
+            let jet_std::DataTree::Array(cells) = tree else {
+                jet_panic(
+                    "<core.encoding.csv>",
+                    0,
+                    "csv.to_string needs rows or records",
+                );
+            };
+            rows.push(
+                cells
+                    .iter()
+                    .map(|cell| match cell {
+                        jet_std::DataTree::Text(s) => s.clone(),
+                        jet_std::DataTree::Int(n) => jet_std::jet_int_to_string(*n),
+                        jet_std::DataTree::Float(f) => format!("{:?}", f),
+                        jet_std::DataTree::Bool(b) => b.to_string(),
+                        jet_std::DataTree::Null => String::new(),
+                        other => jet_std::render_datatree_json(other, false, 0),
+                    })
+                    .collect(),
             );
         }
-        let mut record = Vec::with_capacity(header.len());
-        for key in &header {
-            let cell = match jet_std::datatree_get(tree, key) {
-                Some(jet_std::DataTree::Text(s)) => s.clone(),
-                Some(jet_std::DataTree::Int(n)) => n.to_string(),
-                Some(jet_std::DataTree::Float(f)) => format!("{:?}", f),
-                Some(jet_std::DataTree::Bool(b)) => b.to_string(),
-                Some(jet_std::DataTree::Null) | None => String::new(),
-                Some(other) => jet_std::render_datatree_json(other, false, 0),
-            };
-            record.push(cell);
-        }
-        rows.push(record);
     }
     jet_ring_csv_render(&rows)
+}
+
+/// D-SHAPE-ONE1=A: CSV is only an adapter over the canonical shape projection.
+/// The projection supplies field identities and order; this function only
+/// renders the selected values.
+fn jet_enc_csv_to_string_shape<T: __jet_Encode>(
+    values: &Vec<T>,
+    projection: &ShapeProjection,
+) -> Result<String, Vec<jet_std::FieldError>> {
+    if projection.kind != ShapeProjectionKind::Csv {
+        return Err(jet_std::FieldError::one("CSV needs a CSV shape projection"));
+    }
+    let encoded = jet_std::DataTree::Array(
+        values
+            .iter()
+            .map(|value| value.jet_encode())
+            .collect::<Vec<_>>(),
+    );
+    let projected = jet_std::jet_datatree_project(&encoded, projection)?;
+    let jet_std::DataTree::Array(rows) = projected else {
+        return Err(jet_std::FieldError::one(
+            "CSV shape projection needs object rows",
+        ));
+    };
+    let header = match rows.first() {
+        Some(jet_std::DataTree::Object(entries)) => entries
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>(),
+        Some(_) => {
+            return Err(jet_std::FieldError::one(
+                "CSV shape projection needs object rows",
+            ))
+        }
+        None => Vec::new(),
+    };
+    let mut output = vec![header.clone()];
+    for row in &rows {
+        let jet_std::DataTree::Object(_) = row else {
+            return Err(jet_std::FieldError::one(
+                "CSV shape projection needs object rows",
+            ));
+        };
+        output.push(
+            header
+                .iter()
+                .map(|name| match jet_std::datatree_get(row, name) {
+                    Some(jet_std::DataTree::Text(value)) => value.clone(),
+                    Some(jet_std::DataTree::Int(value)) => jet_std::jet_int_to_string(*value),
+                    Some(jet_std::DataTree::Float(value)) => format!("{value:?}"),
+                    Some(jet_std::DataTree::Bool(value)) => value.to_string(),
+                    Some(jet_std::DataTree::Null) | None => String::new(),
+                    Some(other) => jet_std::render_datatree_json(other, false, 0),
+                })
+                .collect::<Vec<_>>(),
+        );
+    }
+    Ok(jet_ring_csv_render(&output))
 }
 
 // D-ENC-DYN1=A+ (c152): TOML is a full serde-equivalent adapter over the one rich
 // `DataTree` — nested `[table]`s, arrays-of-tables, dotted keys, and typed scalars.
 // The dynamic `parse` returns the `Data` value; `decode<T>` walks the rich tree;
 // `to_string` renders a `DataTree` back to a nested document.
-fn jet_std_toml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::JSONError> {
-    jet_std::toml::parse_to_tree(text).map_err(|e| jet_std::JSONError {
-        line: e.line as i64,
-        message: e.message,
+fn jet_std_toml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::EncodingError> {
+    jet_std::toml::parse_to_tree(text).map_err(|e| {
+        jet_std::EncodingError::new(
+            jet_std::EncodingFormat::TOML,
+            jet_std::EncodingErrorKind::Syntax,
+            0,
+            Ok(e.line as i64),
+            Err(JetAbsent),
+            "",
+            e.message,
+        )
     })
 }
 fn jet_std_toml_render(d: &jet_std::DataTree) -> String {
@@ -161,10 +179,17 @@ fn jet_enc_toml_decode<T: __jet_Decode>(text: &String) -> Result<T, Vec<jet_std:
 // D-ENC-DYN1=A+ / D-ENC-YAML1 (c152): YAML is a full serde adapter over the one
 // rich `DataTree` — block + flow maps/sequences, typed core scalars, block scalars,
 // comments, documents, anchors/aliases. parse → `Data`; decode<T> → typed tree.
-fn jet_std_yaml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::JSONError> {
-    jet_std::yaml::parse_to_tree(text).map_err(|e| jet_std::JSONError {
-        line: e.line as i64,
-        message: e.message,
+fn jet_std_yaml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::EncodingError> {
+    jet_std::yaml::parse_to_tree(text).map_err(|e| {
+        jet_std::EncodingError::new(
+            jet_std::EncodingFormat::YAML,
+            jet_std::EncodingErrorKind::Syntax,
+            0,
+            Ok(e.line as i64),
+            Err(JetAbsent),
+            "",
+            e.message,
+        )
     })
 }
 fn jet_std_yaml_render(d: &jet_std::DataTree) -> String {
@@ -185,6 +210,28 @@ fn jet_enc_yaml_to_string<T: __jet_Encode>(v: &T) -> String {
     jet_std::yaml::render(&v.jet_encode())
 }
 
+fn jet_enc_toml_to_string_shape<T: __jet_Encode>(
+    value: &T,
+    projection: &ShapeProjection,
+) -> Result<String, Vec<jet_std::FieldError>> {
+    if projection.kind != ShapeProjectionKind::Toml {
+        return Err(jet_std::FieldError::one("TOML needs a TOML shape projection"));
+    }
+    let projected = jet_std::jet_datatree_project(&value.jet_encode(), projection)?;
+    Ok(jet_std::toml::render(&projected))
+}
+
+fn jet_enc_yaml_to_string_shape<T: __jet_Encode>(
+    value: &T,
+    projection: &ShapeProjection,
+) -> Result<String, Vec<jet_std::FieldError>> {
+    if projection.kind != ShapeProjectionKind::Yaml {
+        return Err(jet_std::FieldError::one("YAML needs a YAML shape projection"));
+    }
+    let projected = jet_std::jet_datatree_project(&value.jet_encode(), projection)?;
+    Ok(jet_std::yaml::render(&projected))
+}
+
 // D-SQL-SURFACE1=C: the query plan and field comparison live in the shared
 // non-generic Prelude entry. This typed wrapper only encodes rows and maps
 // selected positions back to `T`, preserving one query implementation across
@@ -195,12 +242,3 @@ fn jet_data_query_rows<T: __jet_Encode + Clone>(rows: &Vec<T>, sql: &String) -> 
     Ok(selected.into_iter().map(|index| rows[index].clone()).collect())
 }
 
-
-fn jet_enc_csv_query<T: __jet_Decode + __jet_Encode + Clone>(
-    path: &String,
-    sql: &String,
-) -> Result<Vec<T>, Vec<jet_std::FieldError>> {
-    let text = jet_data_query_read(path)?;
-    let rows = jet_enc_csv_decode::<T>(&text)?;
-    jet_data_query_rows(&rows, sql)
-}

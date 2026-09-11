@@ -22,7 +22,7 @@ impl<'a> Parser<'a> {
             && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_HTML)
     }
 
-    /// D-HTMLPAIR1 (ratified 2026-07-01, c134): parse `#HTML("path.html")` — the file's
+    /// D-HTMLPAIR1 (ratified 2026-07-01, c134): parse `#HTML(Path{"path.html"})` — the file's
     /// explicit companion host page for `--target=web` builds.
     pub(super) fn parse_html_marker(
         &mut self,
@@ -41,6 +41,17 @@ impl<'a> Parser<'a> {
             return Ok(None);
         };
         match path {
+            crate::AST::Expr::TypedLit {
+                head: Some(crate::AST::Type::Named(name)),
+                body: crate::AST::TypedLitBody::Value(inner),
+                ..
+            } if name == Syntax::TYPE_PATH => match inner.as_ref() {
+                crate::AST::Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
+                    crate::AST::StrPart::Lit(s) => Ok(Some(s.clone())),
+                    crate::AST::StrPart::Interp(..) => Ok(None),
+                },
+                _ => Ok(None),
+            },
             crate::AST::Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
                 crate::AST::StrPart::Lit(s) => Ok(Some(s.clone())),
                 crate::AST::StrPart::Interp(..) => Ok(None),

@@ -41,10 +41,10 @@ fn with_store<T, F: FnOnce() -> T>(dir: &Path, f: F) -> T {
 fn pure_fn_compiles() {
     let src = r#"
 fn add(a: Int, b: Int) Int -[]> {
-    return a + b;
+    return a + b
 }
 fn run() {
-    print("{add(1, 2)}");
+    print("{add(1, 2)}")
 }
 "#;
     let res = jet::compile(src);
@@ -56,11 +56,11 @@ fn run() {
 fn pure_fn_impure_call_is_e3401() {
     let src = r#"
 fn bad() Int -[]> {
-    print("side effect");
-    return 42;
+    print("side effect")
+    return 42
 }
 fn run() {
-    print("{bad()}");
+    print("{bad()}")
 }
 "#;
     let res = jet::compile(src);
@@ -84,10 +84,10 @@ fn bad() Int -[]> {
     #Impure("side effect") {
         print("ambient")
     }
-    return 42;
+    return 42
 }
 fn run() {
-    print("{bad()}");
+    print("{bad()}")
 }
 "#;
     let res = jet::compile(src);
@@ -117,10 +117,10 @@ fn good() Int -[]> {
     @ {
         print("build-time only")
     }
-    return 42;
+    return 42
 }
 fn run() {
-    print("{good()}");
+    print("{good()}")
 }
 "#;
     let res = jet::compile(src);
@@ -174,13 +174,13 @@ fn run() {
 fn pure_fn_calling_pure_fn_is_ok() {
     let src = r#"
 fn square(n: Int) Int -[]> {
-    return n * n;
+    return n * n
 }
 fn cube(n: Int) Int -[]> {
-    return n * square(n);
+    return n * square(n)
 }
 fn run() {
-    print("{cube(3)}");
+    print("{cube(3)}")
 }
 "#;
     let res = jet::compile(src);
@@ -196,10 +196,10 @@ fn run() {
 fn pub_pure_fn_compiles() {
     let src = r#"
 pub fn double(n: Int) Int -[]> {
-    return n * 2;
+    return n * 2
 }
 fn run() {
-    print("{double(5)}");
+    print("{double(5)}")
 }
 "#;
     let res = jet::compile(src);
@@ -215,14 +215,14 @@ fn run() {
 fn pure_fn_calling_impure_user_fn_is_e3401() {
     let src = r#"
 fn read_value() Int {
-    print("side effect");
-    return 1;
+    print("side effect")
+    return 1
 }
 fn compute() Int -[]> {
-    return read_value();
+    return read_value()
 }
 fn run() {
-    print("{compute()}");
+    print("{compute()}")
 }
 "#;
     let res = jet::compile(src);

@@ -1,0 +1,80 @@
+use core.encoding.json as json
+use core.files as fs
+
+fn run() {
+    @ct :: Reader.over([U8]{7, 9, 11})
+    @ct_a :: @ct.read_u8() ?? panic("ct a")
+    @ct_b :: @ct.read_u8() ?? panic("ct b")
+    @comptime_value :: "{@ct_a}|{@ct_b}|{@ct.remaining()}"
+
+    rt :: Reader.over([U8]{7, 9, 11})
+    rt_a :: rt.read_u8() ?? panic("rt a")
+    rt_b :: rt.read_u8() ?? panic("rt b")
+    runtime_value :: "{rt_a}|{rt_b}|{rt.remaining()}"
+
+    print("{@comptime_value}")
+    print("{runtime_value}")
+    mode :: env.get("JET_COMPTIME_MODE") ?? "unknown"
+    operation_id :: env.get("JET_COMPTIME_OPERATION_ID") ?? "mixed-reader-mutation-fallible"
+    journal_path :: env.get("JET_COMPTIME_OBSERVATION_PATH") ?? ""
+    if journal_path != "" {
+        observations :: DataTree.Object([
+            "result": DataTree.Object([
+                "comptime": DataTree.Text("{@comptime_value}"),
+                "runtime": DataTree.Text("{runtime_value}")
+            ]),
+            "typed_failure": DataTree.Array([]),
+            "mutation": DataTree.Array([
+                DataTree.Object([
+                    "stage": DataTree.Text("comptime"),
+                    "binding": DataTree.Text("ct"),
+                    "operation": DataTree.Text("Reader.read_u8"),
+                    "consumed": DataTree.Int(2),
+                    "remaining": DataTree.Int(1)
+                ]),
+                DataTree.Object([
+                    "stage": DataTree.Text("runtime"),
+                    "binding": DataTree.Text("rt"),
+                    "operation": DataTree.Text("Reader.read_u8"),
+                    "consumed": DataTree.Int(2),
+                    "remaining": DataTree.Int(1)
+                ])
+            ]),
+            "input_consumption": DataTree.Array([
+                DataTree.Object([
+                    "stage": DataTree.Text("comptime"),
+                    "input": DataTree.Array([DataTree.Int(7), DataTree.Int(9), DataTree.Int(11)]),
+                    "consumed": DataTree.Array([DataTree.Int(7), DataTree.Int(9)]),
+                    "remaining": DataTree.Array([DataTree.Int(11)])
+                ]),
+                DataTree.Object([
+                    "stage": DataTree.Text("runtime"),
+                    "input": DataTree.Array([DataTree.Int(7), DataTree.Int(9), DataTree.Int(11)]),
+                    "consumed": DataTree.Array([DataTree.Int(7), DataTree.Int(9)]),
+                    "remaining": DataTree.Array([DataTree.Int(11)])
+                ])
+            ]),
+            "ordered_effects": DataTree.Array([
+                DataTree.Text("stdout:{@comptime_value}"),
+                DataTree.Text("stdout:{runtime_value}")
+            ]),
+            "cleanup": DataTree.Array([
+                DataTree.Text("ct-reader"),
+                DataTree.Text("rt-reader")
+            ]),
+            "resource_premises": DataTree.Object([
+                "fuel": DataTree.Text("finite"),
+                "input": DataTree.Text("fixed-bytes"),
+                "allocation": DataTree.Text("successful")
+            ]),
+            "schedule": DataTree.Text("source-order"),
+            "allowed_schedules": DataTree.Array([DataTree.Text("source-order")])
+        ])
+        record :: DataTree.Object([
+            "operation_id": DataTree.Text(operation_id),
+            "mode": DataTree.Text(mode),
+            "observations": observations
+        ])
+        fs.write(journal_path, json.to_string(record) + "\n") ?? panic("comptime observation journal")
+    }
+}

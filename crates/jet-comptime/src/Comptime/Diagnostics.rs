@@ -8,7 +8,7 @@
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::Expr;
 
-pub(super) fn comptime_panic(msg: &str, span: Span) -> Diagnostic {
+pub fn comptime_panic(msg: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0953",
         "your comptime code stopped the build".to_string(),

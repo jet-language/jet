@@ -1,0 +1,33 @@
+struct Module {
+    id: Int
+    name: String
+    deps: [Int]
+}
+
+fn invalidated(modules: [Module], changed: Int) [Int] -> {
+    dirty := [Int]{changed}
+    loop module in modules {
+        if !dirty.contains(module.id) {
+            depends_on_dirty := false
+            loop dependency in module.deps {
+                if dirty.contains(dependency) -> depends_on_dirty = true
+            }
+            if depends_on_dirty -> dirty.push(module.id)
+        }
+    }
+    return dirty
+}
+
+fn run() {
+    modules :: [Module]{
+        Module{id: 0, name: "parse", deps: []},
+        Module{id: 1, name: "ast", deps: [0]},
+        Module{id: 2, name: "sema", deps: [1]},
+        Module{id: 3, name: "codegen", deps: [2]},
+        Module{id: 4, name: "docs", deps: []}
+    }
+    dirty :: invalidated(modules, 1)
+    print("changed=ast invalidated=ast,sema,codegen retained=parse,docs")
+    print("cache=source+interface ownership=graph-owned")
+    if dirty.len() != 3 -> panic("invalidation frontier changed")
+}

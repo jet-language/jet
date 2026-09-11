@@ -1,0 +1,29 @@
+{
+  "schema": "jet.frontier-study-job.v1",
+  "study_id": "H3-conditional-optimization",
+  "job_id": "frontier2954-conditional-optimization-job-001",
+  "contract_id": "frontier2954-conditional-optimization-v1",
+  "records": [1, 2, 4, 8, 16],
+  "factor": 3,
+  "failure_value": 8,
+  "observation_contract": [
+    "result",
+    "typed_failure",
+    "mutation",
+    "input_consumption",
+    "event_order"
+  ],
+  "expected": {
+    "status": "failed",
+    "failure": { "code": "CallbackFailure", "value": 8, "index": 3 },
+    "total_before_failure": 9,
+    "consumed_records": 4,
+    "event_kinds": ["map", "reduce", "map", "reduce", "map", "reduce", "map", "failure"]
+  },
+  "invalid_control": {
+    "name": "binary64-reassociation",
+    "operands": [10000000000000000, -10000000000000000, 1],
+    "allowed_premises": ["finite-binary64", "strict-observation-preservation"],
+    "reason": "reassociation changes the defined binary64 result"
+  }
+}

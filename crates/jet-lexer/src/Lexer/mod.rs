@@ -51,7 +51,6 @@ fn keyword(name: &str) -> Option<TokKind> {
         s if s == Syntax::KW_IF => Some(TokKind::KwIf),
         s if s == Syntax::KW_ELSE => Some(TokKind::KwElse),
         s if s == Syntax::KW_IN => Some(TokKind::KwIn),
-        s if s == Syntax::KW_SWITCH => Some(TokKind::KwSwitch),
         s if s == Syntax::KW_BREAK => Some(TokKind::KwBreak),
         s if s == Syntax::LIT_TRUE => Some(TokKind::KwTrue),
         s if s == Syntax::LIT_FALSE => Some(TokKind::KwFalse),

@@ -6,8 +6,8 @@
 #![allow(dead_code)]
 
 use super::Concurrency;
-use std::sync::atomic::{compiler_fence, AtomicI64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{compiler_fence, AtomicI64, AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock, Mutex};
 
 pub(crate) mod shared_protocol {
     include!("../../jet-codegen/src/Prelude/SharedProtocol.rs");
@@ -24,6 +24,17 @@ thread_local! {
 struct SharedTransaction {
     transaction: shared_protocol::JetSharedTransaction,
 }
+
+struct SharedSnapshot {
+    owner: Arc<SharedState>,
+    revision: u64,
+    value: i64,
+    valid: Arc<std::sync::atomic::AtomicBool>,
+    consumed: std::sync::atomic::AtomicBool,
+}
+
+static SHARED_SNAPSHOTS: LazyLock<Mutex<Vec<Arc<SharedSnapshot>>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
 
 type SharedTransactionCallback = unsafe extern "C" fn(i64, i64) -> i64;
 
@@ -63,20 +74,25 @@ impl Default for AllocatorState {
     }
 }
 
-#[derive(Clone, Copy)]
-struct PoolSlot {
-    generation: u32,
-    value: Option<i64>,
+type CanonicalPool = jet_codegen::Comptime::PoolRuntime::jet_std::JetPool<i64>;
+type CanonicalPoolId = jet_codegen::Comptime::PoolRuntime::jet_std::JetId<i64>;
+
+pub(crate) struct PoolState {
+    pool: CanonicalPool,
 }
 
-#[derive(Default)]
-pub(crate) struct PoolState {
-    slots: Vec<PoolSlot>,
+impl Default for PoolState {
+    fn default() -> Self {
+        Self {
+            pool: CanonicalPool::new(),
+        }
+    }
 }
 
 pub(crate) struct SharedState {
     pub(crate) protocol: Arc<shared_protocol::JetSharedProtocol>,
     value: AtomicI64,
+    revision: AtomicU64,
 }
 
 pub(crate) struct ConditionState {
@@ -175,8 +191,134 @@ impl SharedState {
         Self {
             protocol: shared_protocol::JetSharedProtocol::new(),
             value: AtomicI64::new(value),
+            revision: AtomicU64::new(0),
         }
     }
+}
+fn shared_next_revision(shared: &SharedState) -> Result<u64, ()> {
+    shared
+        .revision
+        .load(Ordering::Acquire)
+        .checked_add(1)
+        .ok_or(())
+}
+
+fn shared_capture_parts(shared: &Arc<SharedState>) -> Option<(u64, i64)> {
+    let permit = shared_protocol::jet_shared_acquire(&shared.protocol, false, || false)?;
+    let revision = shared.revision.load(Ordering::Acquire);
+    let value = shared.value.load(Ordering::Acquire);
+    drop(permit);
+    Some((revision, value))
+}
+
+fn shared_snapshot_store(owner: Arc<SharedState>, revision: u64, value: i64) -> i64 {
+    let snapshot = Arc::new(SharedSnapshot {
+        owner,
+        revision,
+        value,
+        valid: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        consumed: std::sync::atomic::AtomicBool::new(false),
+    });
+    let mut snapshots = SHARED_SNAPSHOTS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let Some(index) = snapshots.len().checked_add(1) else {
+        return 0;
+    };
+    let Ok(index) = i64::try_from(index) else {
+        return 0;
+    };
+    snapshots.push(snapshot);
+    -index
+}
+
+fn shared_snapshot_load(handle: i64) -> Option<Arc<SharedSnapshot>> {
+    let index = handle.checked_neg()?.checked_sub(1)?;
+    let index = usize::try_from(index).ok()?;
+    SHARED_SNAPSHOTS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(index)
+        .cloned()
+}
+
+fn shared_revision_error_result(rt: &mut crate::JitRuntime, discriminant: i64) -> i64 {
+    let error = rt.heap.alloc_record(1);
+    let _ = rt.heap.record_set_int(error, 0, discriminant);
+    crate::runtime_host::alloc_jit_result(rt, false, error as u64)
+}
+
+fn shared_transaction_touch(shared: &Arc<SharedState>) -> bool {
+    SHARED_TRANSACTIONS.with(|transactions| {
+        let mut transactions = transactions.borrow_mut();
+        let Some(transaction) = transactions.last_mut() else {
+            return false;
+        };
+        transaction
+            .transaction
+            .touch(Arc::clone(&shared.protocol));
+        true
+    })
+}
+fn shared_transaction_staged(shared: &Arc<SharedState>) -> Option<std::rc::Rc<std::cell::RefCell<i64>>> {
+    SHARED_TRANSACTIONS.with(|transactions| {
+        transactions
+            .borrow()
+            .last()
+            .and_then(|transaction| {
+                transaction
+                    .transaction
+                    .staged_value::<i64>(&shared.protocol)
+            })
+    })
+}
+
+fn shared_transaction_snapshot_revision(shared: &Arc<SharedState>) -> Option<u64> {
+    SHARED_TRANSACTIONS.with(|transactions| {
+        transactions
+            .borrow()
+            .last()
+            .and_then(|transaction| {
+                transaction
+                    .transaction
+                    .snapshot_revision(
+                        &shared.protocol,
+                        shared.revision.load(Ordering::Acquire),
+                    )
+            })
+    })
+}
+
+fn shared_transaction_stage_for_write(
+    shared: &Arc<SharedState>,
+) -> Option<std::rc::Rc<std::cell::RefCell<i64>>> {
+    let protocol = Arc::clone(&shared.protocol);
+    SHARED_TRANSACTIONS.with(|transactions| {
+        let mut transactions = transactions.borrow_mut();
+        let transaction = transactions.last_mut()?;
+        let staged = transaction
+            .transaction
+            .stage_value(protocol.clone(), || shared.value.load(Ordering::Acquire));
+        transaction.transaction.mark_write(protocol.clone());
+        let commit_shared = Arc::clone(shared);
+        let commit_staged = staged.clone();
+        transaction.transaction.record_edit_with_commit(
+            protocol,
+            Box::new(|| {}),
+            Box::new(move || {
+                let value = *commit_staged.borrow();
+                let Some(next) = shared_next_revision(&commit_shared).ok() else {
+                    Concurrency::with_runtime_mut(|rt| {
+                        rt.set_trap("SharedRevisionError.GenerationExhausted");
+                    });
+                    return;
+                };
+                commit_shared.value.store(value, Ordering::Release);
+                commit_shared.revision.store(next, Ordering::Release);
+            }),
+        );
+        Some(staged)
+    })
 }
 
 fn pool(rt: &crate::JitRuntime, handle: i64) -> Option<Arc<Mutex<PoolState>>> {
@@ -185,6 +327,14 @@ fn pool(rt: &crate::JitRuntime, handle: i64) -> Option<Arc<Mutex<PoolState>>> {
 
 fn shared(rt: &crate::JitRuntime, handle: i64) -> Option<Arc<SharedState>> {
     rt.shareds.get((handle as usize).wrapping_sub(1)).cloned()
+}
+
+/// Read the current value behind a checked `Shared<T>` handle for a host
+/// marshaller. The protocol permit is intentionally not acquired here:
+/// receipt attachment snapshots the ambient value and does not expose a
+/// mutable borrow to user code.
+pub(crate) fn shared_value(rt: &crate::JitRuntime, handle: i64) -> Option<i64> {
+    shared(rt, handle).map(|state| state.value.load(Ordering::Acquire))
 }
 
 fn condition(rt: &crate::JitRuntime, handle: i64) -> Option<Arc<ConditionState>> {
@@ -248,7 +398,7 @@ fn pack_id(index: usize, generation: u32) -> i64 {
 
 fn unpack_id(id: i64) -> Option<(usize, u32)> {
     let low = (id as u64 & 0xffff_ffff) as u32;
-    (low != 0).then_some(((low - 1) as usize, (id as u64 >> 32) as u32))
+    low.checked_sub(1).map(|index| (index as usize, (id as u64 >> 32) as u32))
 }
 
 const ALLOCATOR_VIEW_TAG: i64 = i64::MIN;
@@ -619,7 +769,146 @@ fn jet_jit_gc_edit(handle: i64, value: i64) {
         }
     });
 }
+fn gc_callback_value(slot: crate::runtime_host::JitCallableSlot, value: i64) -> i64 {
+    unsafe {
+        if slot.has_env {
+            let callback: unsafe extern "C" fn(i64, i64) -> i64 =
+                std::mem::transmute(slot.fn_ptr as usize);
+            callback(slot.env, value)
+        } else {
+            let callback: unsafe extern "C" fn(i64) -> i64 =
+                std::mem::transmute(slot.fn_ptr as usize);
+            callback(value)
+        }
+    }
+}
 
+enum GcEditAction {
+    Clear,
+    Pop,
+    RemoveIndex,
+    InsertIndex,
+    Prepend,
+    Additive,
+    Plain,
+    EdgeSlot,
+}
+
+fn gc_edit(
+    root_handle: i64,
+    edge_list: i64,
+    callback_handle: i64,
+    index: i64,
+    site: i64,
+    action: GcEditAction,
+) -> i64 {
+    let snapshot = Concurrency::with_runtime_string(|rt| {
+        let root_index = usize::try_from(root_handle)
+            .ok()
+            .and_then(|handle| handle.checked_sub(1))
+            .ok_or_else(|| "automatic GC root handle is invalid".to_string())?;
+        let root = rt
+            .gc_roots
+            .get(root_index)
+            .ok_or_else(|| "automatic GC root handle is invalid".to_string())?
+            .try_clone_root()
+            .map_err(|fault| fault.to_string())?;
+        let callback = crate::runtime_host::jit_callable_parts(rt, callback_handle)
+            .ok_or_else(|| "automatic GC edit callback handle is invalid".to_string())?;
+        let mut edges = Vec::new();
+        if edge_list != 0 {
+            let len = rt
+                .heap
+                .list_len(edge_list)
+                .ok_or_else(|| "automatic GC edge list handle is invalid".to_string())?;
+            for position in 0..len {
+                let handle = rt
+                    .heap
+                    .list_get_int(edge_list, position)
+                    .ok_or_else(|| "automatic GC edge list contains an invalid handle".to_string())?;
+                let edge_index = usize::try_from(handle)
+                    .ok()
+                    .and_then(|value| value.checked_sub(1))
+                    .ok_or_else(|| "automatic GC edge handle is invalid".to_string())?;
+                let edge = rt
+                    .gc_roots
+                    .get(edge_index)
+                    .ok_or_else(|| "automatic GC edge handle is invalid".to_string())?
+                    .id();
+                edges.push(edge);
+            }
+        }
+        Ok::<_, String>((root, edges, callback))
+    });
+    let (root, edges, callback) = match snapshot {
+        Ok(snapshot) => snapshot,
+        Err(message) => {
+            Concurrency::with_runtime_mut(|rt| rt.set_host_fault(&message));
+            return 0;
+        }
+    };
+    let mut edit = |slot: &mut i64| {
+        let updated = gc_callback_value(callback, *slot);
+        *slot = updated;
+        updated
+    };
+    let result = match action {
+        GcEditAction::Clear => root.edit_clearing_edges(&mut edit),
+        GcEditAction::Pop => root.edit_edge_slot_pop("collection", &mut edit),
+        GcEditAction::RemoveIndex => usize::try_from(index)
+            .map_err(|_| jet_rt::__gc::Fault::UnknownObject(root.id()))
+            .and_then(|index| root.edit_edge_slot_remove("collection", index, &mut edit)),
+        GcEditAction::InsertIndex => usize::try_from(index)
+            .map_err(|_| jet_rt::__gc::Fault::UnknownObject(root.id()))
+            .and_then(|index| root.edit_edge_slot_insert("collection", index, &edges, &mut edit)),
+        GcEditAction::Prepend => root.edit_edge_slot_prepend("collection", &edges, &mut edit),
+        GcEditAction::Additive => root.edit_edge_slot_additive("collection", &edges, &mut edit),
+        GcEditAction::Plain => root.edit(&mut edit),
+        GcEditAction::EdgeSlot => {
+            let slot = format!("method:{site}");
+            root.edit_edge_slot(&slot, &edges, &mut edit)
+        }
+    };
+    match result {
+        Ok(value) => value,
+        Err(fault) => {
+            Concurrency::with_runtime_mut(|rt| rt.set_trap(&fault.to_string()));
+            0
+        }
+    }
+}
+
+fn jet_jit_gc_edit_clear(root: i64, callback: i64) -> i64 {
+    gc_edit(root, 0, callback, 0, 0, GcEditAction::Clear)
+}
+
+fn jet_jit_gc_edit_pop(root: i64, callback: i64) -> i64 {
+    gc_edit(root, 0, callback, 0, 0, GcEditAction::Pop)
+}
+
+fn jet_jit_gc_edit_remove_index(root: i64, index: i64, callback: i64) -> i64 {
+    gc_edit(root, 0, callback, index, 0, GcEditAction::RemoveIndex)
+}
+
+fn jet_jit_gc_edit_insert_index(root: i64, index: i64, edges: i64, callback: i64) -> i64 {
+    gc_edit(root, edges, callback, index, 0, GcEditAction::InsertIndex)
+}
+
+fn jet_jit_gc_edit_prepend(root: i64, edges: i64, callback: i64) -> i64 {
+    gc_edit(root, edges, callback, 0, 0, GcEditAction::Prepend)
+}
+
+fn jet_jit_gc_edit_additive(root: i64, edges: i64, callback: i64) -> i64 {
+    gc_edit(root, edges, callback, 0, 0, GcEditAction::Additive)
+}
+
+fn jet_jit_gc_edit_plain(root: i64, callback: i64) -> i64 {
+    gc_edit(root, 0, callback, 0, 0, GcEditAction::Plain)
+}
+
+fn jet_jit_gc_edit_edge_slot(root: i64, edges: i64, callback: i64, site: i64) -> i64 {
+    gc_edit(root, edges, callback, 0, site, GcEditAction::EdgeSlot)
+}
 fn jet_jit_gc_clear_edges(handle: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let index = (handle as usize).wrapping_sub(1);
@@ -687,31 +976,14 @@ fn jet_jit_pool_add(handle: i64, value: i64) -> i64 {
         return 0;
     };
     let mut pool = pool.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    if let Some((index, slot)) = pool
-        .slots
-        .iter_mut()
-        .enumerate()
-        .find(|(_, slot)| slot.value.is_none())
-    {
-        slot.value = Some(value);
-        return pack_id(index, slot.generation);
-    }
-    let index = pool.slots.len();
-    pool.slots.push(PoolSlot {
-        generation: 0,
-        value: Some(value),
-    });
-    pack_id(index, 0)
+    pool.pool.add(value).to_word()
 }
 
 fn pool_value(handle: i64, id: i64) -> Option<i64> {
     let pool = Concurrency::with_runtime_mut(|rt| pool(rt, handle))?;
     let pool = pool.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let (index, generation) = unpack_id(id)?;
-    let slot = pool.slots.get(index)?;
-    (slot.generation == generation)
-        .then_some(slot.value)
-        .flatten()
+    let id = CanonicalPoolId::from_word(id)?;
+    pool.pool.checked_get(id).copied()
 }
 
 /// `src_line` is the source line captured in the shared PoolSlot TIR node; it
@@ -734,28 +1006,82 @@ fn jet_jit_pool_get(handle: i64, id: i64, line: i64, src_line: i64) -> i64 {
         }
     }
 }
+/// Checked MIR Pool-index reads carry file/function handles for diagnostics;
+/// this adapter keeps the existing source-line-aware JIT kernel and its
+/// six-word ABI.
+fn jet_jit_pool_get_checked(
+    handle: i64,
+    id: i64,
+    _file: i64,
+    line: i64,
+    _function: i64,
+    source_line: i64,
+) -> i64 {
+    jet_jit_pool_get(handle, id, line, source_line)
+}
+
+
+fn jet_jit_pool_set(handle: i64, id: i64, value: i64, line: i64, src_line: i64) {
+    let updated = Concurrency::with_runtime_mut(|rt| {
+        let Some(pool) = pool(rt, handle) else {
+            return false;
+        };
+        let mut pool = pool.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(id) = CanonicalPoolId::from_word(id) else {
+            return false;
+        };
+        let Some(slot) = pool.pool.checked_get_mut(id) else {
+            return false;
+        };
+        *slot = value;
+        true
+    });
+    if !updated {
+        Concurrency::with_runtime_mut(|rt| {
+            let source_line = rt.heap.clone_string(src_line).unwrap_or_default();
+            rt.set_runtime_stop_with_source_line(
+                "E3001",
+                line.max(0) as u32,
+                Some(source_line.as_str()),
+                jet_foundation::Outcome::jet_pool_stale_message(),
+            )
+        });
+    }
+}
+
+/// Exact checked MIR pool-index setter route.  The route carries the source
+/// file and function as diagnostic metadata; the pool kernel consumes the
+/// source line and source text just like its getter counterpart.
+fn jet_jit_index_pool_set(
+    handle: i64,
+    id: i64,
+    value: i64,
+    _file: i64,
+    line: i64,
+    _function: i64,
+    source_line: i64,
+) {
+    jet_jit_pool_set(handle, id, value, line, source_line);
+}
+
+/// `JetPool::remove` uses the packed optional ABI: zero is absent and a
+/// present payload is offset by one so that zero remains unambiguous.
+fn jet_jit_pool_absent() -> i64 {
+    0
+}
 
 fn jet_jit_pool_remove(handle: i64, id: i64) -> i64 {
     let Some(pool) = Concurrency::with_runtime_mut(|rt| pool(rt, handle)) else {
-        return 0;
+        return jet_jit_pool_absent();
     };
     let mut pool = pool.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let Some((index, generation)) = unpack_id(id) else {
-        return 0;
+    let Some(id) = CanonicalPoolId::from_word(id) else {
+        return jet_jit_pool_absent();
     };
-    let Some(slot) = pool.slots.get_mut(index) else {
-        return 0;
-    };
-    if slot.generation != generation {
-        return 0;
+    match pool.pool.remove(id) {
+        Ok(value) => value.wrapping_add(1),
+        Err(_) => jet_jit_pool_absent(),
     }
-    let Some(value) = slot.value.take() else {
-        return 0;
-    };
-    slot.generation = slot.generation.wrapping_add(1);
-    Concurrency::with_runtime_mut(|rt| {
-        crate::runtime_host::alloc_jit_result(rt, true, value as u64)
-    })
 }
 
 fn jet_jit_pool_ids(handle: i64) -> i64 {
@@ -764,14 +1090,10 @@ fn jet_jit_pool_ids(handle: i64) -> i64 {
     };
     let ids = {
         let pool = pool.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        pool.slots
-            .iter()
-            .enumerate()
-            .filter_map(|(index, slot)| {
-                slot.value
-                    .is_some()
-                    .then_some(pack_id(index, slot.generation))
-            })
+        pool.pool
+            .ids()
+            .into_iter()
+            .map(|id| id.to_word())
             .collect::<Vec<_>>()
     };
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_int_list(ids))
@@ -784,6 +1106,289 @@ fn jet_jit_shared_new(value: i64) -> i64 {
     })
 }
 
+/// Allocate a fresh Shared carrier for descriptor-guided persistent restore.
+/// The caller has already converted the element into a new run-heap word.
+pub(crate) fn shared_alloc_for_persist(rt: &mut crate::JitRuntime, value: i64) -> i64 {
+    rt.shareds.push(Arc::new(SharedState::new(value)));
+    rt.shareds.len() as i64
+}
+
+/// Scalar Shared compatibility operations stay on the canonical atomic rail.
+/// They must not enter the blocking guard protocol: callback-safe scalar reads
+/// and writes are direct Acquire/Release operations, while guard/aggregate
+/// paths below retain the protocol permits.
+fn jet_jit_shared_get(handle: i64) -> i64 {
+    let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
+        return 0;
+    };
+    shared_transaction_staged(&shared)
+        .map_or_else(|| shared.value.load(Ordering::Acquire), |staged| *staged.borrow())
+}
+
+fn jet_jit_shared_set(handle: i64, value: i64) {
+    let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
+        return;
+    };
+    if let Some(staged) = shared_transaction_stage_for_write(&shared) {
+        *staged.borrow_mut() = value;
+        return;
+    }
+    let Some(permit) =
+        shared_protocol::jet_shared_acquire(&shared.protocol, true, || false)
+    else {
+        return;
+    };
+    let Ok(next) = shared_next_revision(&shared) else {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_trap("SharedRevisionError.GenerationExhausted");
+        });
+        drop(permit);
+        return;
+    };
+    shared.value.store(value, Ordering::Release);
+    shared.revision.store(next, Ordering::Release);
+    drop(permit);
+}
+
+fn jet_jit_shared_replace(handle: i64, value: i64) -> i64 {
+    let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
+        return 0;
+    };
+    if let Some(staged) = shared_transaction_stage_for_write(&shared) {
+        let previous = *staged.borrow();
+        *staged.borrow_mut() = value;
+        return previous;
+    }
+    let Some(permit) =
+        shared_protocol::jet_shared_acquire(&shared.protocol, true, || false)
+    else {
+        return 0;
+    };
+    let Ok(next) = shared_next_revision(&shared) else {
+        Concurrency::with_runtime_mut(|rt| {
+            rt.set_trap("SharedRevisionError.GenerationExhausted");
+        });
+        drop(permit);
+        return 0;
+    };
+    let previous = shared.value.swap(value, Ordering::AcqRel);
+    shared.revision.store(next, Ordering::Release);
+    drop(permit);
+    previous
+}
+
+fn jet_jit_shared_capture(handle: i64) -> i64 {
+    let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
+        return 0;
+    };
+    let Some((revision, value)) = shared_capture_parts(&shared) else {
+        return Concurrency::with_runtime_mut(|rt| {
+            rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
+            0
+        });
+    };
+    shared_snapshot_store(shared, revision, value)
+}
+
+fn shared_projected_capture(shared: &Arc<SharedState>, callback: i64) -> Option<(u64, i64)> {
+    let permit = shared_protocol::jet_shared_acquire(&shared.protocol, false, || false)?;
+    let revision = shared.revision.load(Ordering::Acquire);
+    let value = shared.value.load(Ordering::Acquire);
+    let slot = Concurrency::with_runtime_mut(|rt| {
+        crate::runtime_host::jit_callable_parts(rt, callback)
+    })?;
+    let projected = crate::runtime_host::invoke_universal_unary(slot, value)?;
+    drop(permit);
+    Some((revision, projected))
+}
+fn shared_projected_capture_staged(
+    shared: &Arc<SharedState>,
+    callback: i64,
+    staged: &std::rc::Rc<std::cell::RefCell<i64>>,
+) -> Option<(u64, i64)> {
+    let revision = shared_transaction_snapshot_revision(shared)?;
+    let slot = Concurrency::with_runtime_mut(|rt| {
+        crate::runtime_host::jit_callable_parts(rt, callback)
+    })?;
+    let projected =
+        crate::runtime_host::invoke_universal_unary(slot, *staged.borrow())?;
+    Some((revision, projected))
+}
+
+fn jet_jit_shared_capture_with(handle: i64, callback: i64) -> i64 {
+    let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
+        return 0;
+    };
+    let Some((revision, value)) = shared_projected_capture(&shared, callback) else {
+        return Concurrency::with_runtime_mut(|rt| {
+            rt.set_trap("Shared.capture projection callback is invalid");
+            0
+        });
+    };
+    shared_snapshot_store(shared, revision, value)
+}
+
+fn shared_transaction_register_snapshot(
+    snapshot: Arc<SharedSnapshot>,
+    protocol: Arc<shared_protocol::JetSharedProtocol>,
+) -> bool {
+    SHARED_TRANSACTIONS.with(|transactions| {
+        let mut transactions = transactions.borrow_mut();
+        let Some(transaction) = transactions.last_mut() else {
+            return false;
+        };
+        transaction
+            .transaction
+            .record_snapshot(protocol, snapshot.valid.clone());
+        true
+    })
+}
+
+fn jet_jit_shared_capture_txn_plain(handle: i64, _stm: i64) -> i64 {
+    let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
+        return 0;
+    };
+    if !shared_transaction_touch(&shared) {
+        return Concurrency::with_runtime_mut(|rt| {
+            rt.set_trap("Shared.capture_txn requires an active transaction");
+            0
+        });
+    }
+    let captured = if let Some(staged) = shared_transaction_staged(&shared) {
+        let Some(revision) = shared_transaction_snapshot_revision(&shared) else {
+            return 0;
+        };
+        Some((revision, *staged.borrow()))
+    } else {
+        shared_capture_parts(&shared)
+    };
+    let Some((revision, value)) = captured else {
+        return 0;
+    };
+    let protocol = Arc::clone(&shared.protocol);
+    let token = shared_snapshot_store(shared, revision, value);
+    let Some(snapshot) = shared_snapshot_load(token) else {
+        return 0;
+    };
+    if !shared_transaction_register_snapshot(snapshot, protocol) {
+        return Concurrency::with_runtime_mut(|rt| {
+            rt.set_trap("Shared.capture_txn requires an active transaction");
+            0
+        });
+    }
+    token
+}
+
+fn jet_jit_shared_capture_txn(handle: i64, _stm: i64, callback: i64) -> i64 {
+    let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
+        return 0;
+    };
+    if !shared_transaction_touch(&shared) {
+        return Concurrency::with_runtime_mut(|rt| {
+            rt.set_trap("Shared.capture_txn requires an active transaction");
+            0
+        });
+    }
+    let captured = if let Some(staged) = shared_transaction_staged(&shared) {
+        shared_projected_capture_staged(&shared, callback, &staged)
+    } else {
+        shared_projected_capture(&shared, callback)
+    };
+    let Some((revision, value)) = captured else {
+        return Concurrency::with_runtime_mut(|rt| {
+            rt.set_trap("Shared.capture projection callback is invalid");
+            0
+        });
+    };
+    let protocol = Arc::clone(&shared.protocol);
+    let token = shared_snapshot_store(shared, revision, value);
+    let Some(snapshot) = shared_snapshot_load(token) else {
+        return 0;
+    };
+    if !shared_transaction_register_snapshot(snapshot, protocol) {
+        return Concurrency::with_runtime_mut(|rt| {
+            rt.set_trap("Shared.capture_txn requires an active transaction");
+            0
+        });
+    }
+    token
+}
+
+fn jet_jit_shared_try_replace(handle: i64, snapshot_handle: i64, value: i64) -> i64 {
+    let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
+        return 0;
+    };
+    let Some(permit) =
+        shared_protocol::jet_shared_acquire(&shared.protocol, true, || false)
+    else {
+        return 0;
+    };
+    let Some(snapshot) = shared_snapshot_load(snapshot_handle) else {
+        let result = Concurrency::with_runtime_mut(|rt| shared_revision_error_result(rt, 0));
+        drop(permit);
+        return result;
+    };
+    if !Arc::ptr_eq(&shared, &snapshot.owner) {
+        let result = Concurrency::with_runtime_mut(|rt| shared_revision_error_result(rt, 0));
+        drop(permit);
+        return result;
+    }
+    if !snapshot
+        .valid
+        .load(std::sync::atomic::Ordering::Acquire)
+        || snapshot
+            .consumed
+            .load(std::sync::atomic::Ordering::Acquire)
+    {
+        let result = Concurrency::with_runtime_mut(|rt| {
+            crate::runtime_host::alloc_jit_result(rt, true, 0)
+        });
+        drop(permit);
+        return result;
+    }
+    if shared.revision.load(Ordering::Acquire) != snapshot.revision {
+        let result = Concurrency::with_runtime_mut(|rt| {
+            crate::runtime_host::alloc_jit_result(rt, true, 0)
+        });
+        drop(permit);
+        return result;
+    }
+    let Ok(next) = shared_next_revision(&shared) else {
+        let result = Concurrency::with_runtime_mut(|rt| shared_revision_error_result(rt, 1));
+        drop(permit);
+        return result;
+    };
+    if snapshot
+        .consumed
+        .swap(true, std::sync::atomic::Ordering::AcqRel)
+    {
+        let result = Concurrency::with_runtime_mut(|rt| {
+            crate::runtime_host::alloc_jit_result(rt, true, 0)
+        });
+        drop(permit);
+        return result;
+    }
+    snapshot
+        .valid
+        .store(false, std::sync::atomic::Ordering::Release);
+    shared.value.store(value, Ordering::Release);
+    shared.revision.store(next, Ordering::Release);
+    let result = Concurrency::with_runtime_mut(|rt| {
+        crate::runtime_host::alloc_jit_result(rt, true, 1)
+    });
+    drop(permit);
+    result
+}
+
+fn jet_jit_shared_snapshot_value(snapshot_handle: i64) -> i64 {
+    let Some(snapshot) = shared_snapshot_load(snapshot_handle) else {
+        return Concurrency::with_runtime_mut(|rt| {
+            rt.set_trap("SharedSnapshot.value received an invalid snapshot");
+            0
+        });
+    };
+    snapshot.value
+}
 fn jet_jit_shared_begin(handle: i64, editable: i64) -> i64 {
     let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
         return 0;
@@ -803,10 +1408,18 @@ fn jet_jit_shared_end_read(handle: i64) {
 }
 
 fn jet_jit_shared_end_write(handle: i64, value: i64) {
+    let permit = take_active_shared_permit(handle);
     if let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) {
-        shared.value.store(value, Ordering::Release);
+        if let Ok(next) = shared_next_revision(&shared) {
+            shared.value.store(value, Ordering::Release);
+            shared.revision.store(next, Ordering::Release);
+        } else {
+            Concurrency::with_runtime_mut(|rt| {
+                rt.set_trap("SharedRevisionError.GenerationExhausted");
+            });
+        }
     }
-    drop(take_active_shared_permit(handle));
+    drop(permit);
 }
 
 /// D-SHARED-CYCLE1=C: weak handle is the same slot index; upgrade packs
@@ -896,6 +1509,41 @@ fn jet_jit_shared_guard_map(guard: i64, field: i64, editable: i64) -> i64 {
                 rt.shared_guard_states.remove(&guard);
                 let _ = rt.heap.record_set_int(guard, GUARD_SHARED, 0);
                 pack_shared_guard(rt, shared_handle, value, mapped)
+            }
+            Err(message) => {
+                rt.set_trap(message);
+                0
+            }
+        }
+    })
+}
+
+fn jet_jit_shared_guard_split(guard: i64, first: i64, second: i64, editable: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        if guard_shared_handle(rt, guard).is_none() {
+            rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
+            return 0;
+        }
+        let Some(state) = guard_state(rt, guard) else {
+            rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
+            return 0;
+        };
+        match shared_protocol::jet_shared_guard_split(&state, first, second, editable != 0) {
+            Ok((first_state, second_state)) => {
+                let shared_handle = guard_shared_handle(rt, guard)
+                    .expect("validated SharedGuard carrier lost its shared handle");
+                let Some(value) = rt.heap.record_get_int(guard, GUARD_VALUE) else {
+                    rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
+                    return 0;
+                };
+                rt.shared_guard_states.remove(&guard);
+                let _ = rt.heap.record_set_int(guard, GUARD_SHARED, 0);
+                let first = pack_shared_guard(rt, shared_handle, value, first_state);
+                let second = pack_shared_guard(rt, shared_handle, value, second_state);
+                let pair = rt.heap.alloc_record(2);
+                let _ = rt.heap.record_set_int(pair, 0, first);
+                let _ = rt.heap.record_set_int(pair, 1, second);
+                pair
             }
             Err(message) => {
                 rt.set_trap(message);
@@ -1078,17 +1726,11 @@ fn store_root_guard_value(
 
 fn jet_jit_shared_guard_set_value(guard: i64, value: i64) {
     Concurrency::with_runtime_mut(|rt| {
-        let Some((record, field, root)) = editable_guard_slot_or_trap(rt, guard) else {
+        let Some((record, field, _root)) = editable_guard_slot_or_trap(rt, guard) else {
             return;
         };
         if rt.heap.record_set_int(record, field, value).is_none() {
             rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
-            return;
-        }
-        if root {
-            if store_root_guard_value(rt, guard, value).is_err() {
-                rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
-            }
         }
     });
 }
@@ -1099,13 +1741,12 @@ fn jet_jit_shared_guard_set_value_f64(guard: i64, value: f64) {
             return;
         };
         if root {
-            let bits = value.to_bits() as i64;
-            if rt.heap.record_set_int(record, field, bits).is_none() {
+            if rt
+                .heap
+                .record_set_int(record, field, value.to_bits() as i64)
+                .is_none()
+            {
                 rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
-                return;
-            }
-            if store_root_guard_value(rt, guard, bits).is_err() {
-                rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
             }
         } else if rt.heap.record_set_float(record, field, value).is_none() {
             rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
@@ -1120,13 +1761,12 @@ fn jet_jit_shared_guard_set_value_bool(guard: i64, value: i8) {
         };
         let value = value != 0;
         if root {
-            let value = i64::from(value);
-            if rt.heap.record_set_int(record, field, value).is_none() {
+            if rt
+                .heap
+                .record_set_int(record, field, i64::from(value))
+                .is_none()
+            {
                 rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
-                return;
-            }
-            if store_root_guard_value(rt, guard, value).is_err() {
-                rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
             }
         } else if rt.heap.record_set_bool(record, field, value).is_none() {
             rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
@@ -1147,13 +1787,12 @@ fn jet_jit_shared_guard_set_value_char(guard: i64, value: i32) {
             }
         };
         if root {
-            let value = i64::from(value as u32);
-            if rt.heap.record_set_int(record, field, value).is_none() {
+            if rt
+                .heap
+                .record_set_int(record, field, i64::from(value as u32))
+                .is_none()
+            {
                 rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
-                return;
-            }
-            if store_root_guard_value(rt, guard, value).is_err() {
-                rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
             }
         } else if rt.heap.record_set_char(record, field, value).is_none() {
             rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
@@ -1169,10 +1808,6 @@ fn jet_jit_shared_guard_set_value_string(guard: i64, value: i64) {
         if root {
             if rt.heap.record_set_int(record, field, value).is_none() {
                 rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
-                return;
-            }
-            if store_root_guard_value(rt, guard, value).is_err() {
-                rt.set_trap(shared_protocol::JET_SHARED_GUARD_INVALID);
             }
         } else if rt.heap.record_set_string(record, field, value).is_none() {
             rt.set_trap(shared_protocol::JET_SHARED_GUARD_VALUE_STORAGE_FAILED);
@@ -1204,7 +1839,14 @@ fn jet_jit_shared_guard_end(guard: i64) {
     };
     if let Some(shared) = shared {
         if editable && root {
-            shared.value.store(value, Ordering::Release);
+            if let Ok(next) = shared_next_revision(&shared) {
+                shared.value.store(value, Ordering::Release);
+                shared.revision.store(next, Ordering::Release);
+            } else {
+                Concurrency::with_runtime_mut(|rt| {
+                    rt.set_trap("SharedRevisionError.GenerationExhausted");
+                });
+            }
         }
     }
     drop(state);
@@ -1315,11 +1957,7 @@ fn jet_jit_shared_txn_touch(handle: i64) {
     let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
         return;
     };
-    SHARED_TRANSACTIONS.with(|transactions| {
-        if let Some(transaction) = transactions.borrow_mut().last_mut() {
-            transaction.transaction.touch(Arc::clone(&shared.protocol));
-        }
-    });
+    let _ = shared_transaction_touch(&shared);
 }
 
 fn jet_jit_shared_txn_record(handle: i64, callback_ptr: i64, environment: i64, record: i64) -> i64 {
@@ -1330,31 +1968,32 @@ fn jet_jit_shared_txn_record(handle: i64, callback_ptr: i64, environment: i64, r
         return 0;
     }
     // The callback address is produced by Cranelift `func_addr` for the fixed
-    // `(environment, current) -> updated` ABI above.
+    // `(environment, current) -> updated` ABI above. Run it once against the
+    // transaction-local value; commit only publishes that value.
     let callback: SharedTransactionCallback = unsafe { std::mem::transmute(callback_ptr as usize) };
-    let protocol = Arc::clone(&shared.protocol);
-    let delta = Box::new(move || {
-        let current = shared.value.load(Ordering::Acquire);
-        let updated = unsafe { callback(environment, current) };
-        Concurrency::with_runtime_mut(|rt| {
-            if record != 0 {
+    let Some(staged) = shared_transaction_stage_for_write(&shared) else {
+        return 0;
+    };
+    let current = *staged.borrow();
+    let updated = unsafe { callback(environment, current) };
+    if record != 0 {
+        let delta = Box::new(move || {
+            Concurrency::with_runtime_mut(|rt| {
                 if rt.heap.record_assign_from(current, updated).is_none() {
                     rt.set_trap(shared_protocol::JET_SHARED_TRANSACTION_VALUE_STORAGE_FAILED);
                 }
-            } else {
-                shared.value.store(updated, Ordering::Release);
+            });
+        });
+        let protocol = Arc::clone(&shared.protocol);
+        SHARED_TRANSACTIONS.with(|transactions| {
+            let mut transactions = transactions.borrow_mut();
+            if let Some(transaction) = transactions.last_mut() {
+                transaction.transaction.record_edit(protocol, delta);
             }
         });
-    });
-    let recorded = SHARED_TRANSACTIONS.with(|transactions| {
-        let mut transactions = transactions.borrow_mut();
-        let Some(transaction) = transactions.last_mut() else {
-            return false;
-        };
-        transaction.transaction.record_edit(protocol, delta);
-        true
-    });
-    i64::from(recorded)
+    }
+    *staged.borrow_mut() = updated;
+    1
 }
 
 fn jet_jit_shared_txn_commit() {
@@ -1389,11 +2028,7 @@ fn jet_jit_expiring_new(value: i64, duration: i64, clock: i64, secret: i64) -> i
         None
     };
     Concurrency::with_runtime_mut(|rt| {
-        let now = rt
-            .clocks
-            .get((clock as usize).wrapping_sub(1))
-            .copied()
-            .unwrap_or(0);
+        let now = rt.clock_now(clock);
         rt.expirings.push(ExpiringState {
             value,
             expires_at: now.saturating_add(duration.max(0)),
@@ -1412,11 +2047,7 @@ fn jet_jit_expiring_get(handle: i64, clock: i64) -> i64 {
             .map(|value| value.clock)
             .unwrap_or(0);
         let clock = if clock == 0 { stored_clock } else { clock };
-        let now = rt
-            .clocks
-            .get((clock as usize).wrapping_sub(1))
-            .copied()
-            .unwrap_or(0);
+        let now = rt.clock_now(clock);
         let Some(value) = rt.expirings.get_mut((handle as usize).wrapping_sub(1)) else {
             return (0_i64, None);
         };
@@ -1436,6 +2067,16 @@ fn jet_jit_expiring_get(handle: i64, clock: i64) -> i64 {
 
 fn jet_jit_expiring_is_valid(handle: i64, clock: i64) -> i8 {
     i8::from(jet_jit_expiring_get(handle, clock) != 0)
+}
+
+fn jet_jit_volatile_read(address: i64) -> i64 {
+    // SAFETY: the source `#Unsafe` gate owns validity of the typed pointer.
+    unsafe { std::ptr::read_volatile(address as *const i64) }
+}
+
+fn jet_jit_volatile_write(address: i64, value: i64) {
+    // SAFETY: the source `#Unsafe` gate owns validity of the typed pointer.
+    unsafe { std::ptr::write_volatile(address as *mut i64, value) };
 }
 
 host_fns! {
@@ -1470,11 +2111,22 @@ host_fns! {
         let mut ternary_void = binary_void.clone();
         ternary_void.params.push(AbiParam::new(types::I64));
         let mut binary_f64_void = Signature::new(cc);
+        let mut sig_index_pool_get = Signature::new(cc);
+        sig_index_pool_get
+            .params
+            .extend([AbiParam::new(types::I64); 6]);
+        sig_index_pool_get
+            .returns
+            .push(AbiParam::new(types::I64));
+        let mut sig_index_pool_set = Signature::new(cc);
+        sig_index_pool_set
+            .params
+            .extend([AbiParam::new(types::I64); 7]);
+
         binary_f64_void.params.push(AbiParam::new(types::I64));
         binary_f64_void.params.push(AbiParam::new(types::F64));
         let mut binary_i8_void = Signature::new(cc);
         binary_i8_void.params.push(AbiParam::new(types::I64));
-        binary_i8_void.params.push(AbiParam::new(types::I8));
         let mut binary_i32_void = Signature::new(cc);
         binary_i32_void.params.push(AbiParam::new(types::I64));
         binary_i32_void.params.push(AbiParam::new(types::I32));
@@ -1483,6 +2135,10 @@ host_fns! {
             quaternary.params.push(AbiParam::new(types::I64));
         }
         quaternary.returns.push(AbiParam::new(types::I64));
+        let mut quinary_void = Signature::new(cc);
+        for _ in 0..5 {
+            quinary_void.params.push(AbiParam::new(types::I64));
+        }
         let mut binary_i8 = Signature::new(cc);
         binary_i8.params.push(AbiParam::new(types::I64));
         binary_i8.params.push(AbiParam::new(types::I64));
@@ -1495,20 +2151,45 @@ host_fns! {
     allocator_new_capacity: "jet_jit_allocator_new_capacity" => jet_jit_allocator_new_capacity: binary;
     allocator_alloc: "jet_jit_allocator_alloc" => jet_jit_allocator_alloc: ternary;
     allocator_view_read: "jet_jit_allocator_view_read" => jet_jit_allocator_view_read: unary;
+    index_pool_get: "jet_std::jet_pool_get" => jet_jit_pool_get_checked: sig_index_pool_get;
+    index_pool_get_mut: "jet_std::jet_pool_get_mut" => jet_jit_pool_get_checked: sig_index_pool_get;
+    index_pool_set: "jet_std::jet_pool_set" => jet_jit_index_pool_set: sig_index_pool_set;
+
     allocator_view_write: "jet_jit_allocator_view_write" => jet_jit_allocator_view_write: binary_void;
     allocator_try_alloc: "jet_jit_allocator_try_alloc" => jet_jit_allocator_try_alloc: ternary;
     allocator_reset: "jet_jit_allocator_reset" => jet_jit_allocator_reset: unary_void;
     allocator_close: "jet_jit_allocator_close" => jet_jit_allocator_close: unary_void;
-    gc_promote: "jet_jit_gc_promote" => jet_jit_gc_promote: unary;
     gc_read: "jet_jit_gc_read" => jet_jit_gc_read: unary;
     gc_edit: "jet_jit_gc_edit" => jet_jit_gc_edit: binary_void;
     gc_clear_edges: "jet_jit_gc_clear_edges" => jet_jit_gc_clear_edges: unary_void;
     gc_add_edge: "jet_jit_gc_add_edge" => jet_jit_gc_add_edge: ternary_void;
-    pool_new: "jet_jit_pool_new" => jet_jit_pool_new: noarg_i64;
-    pool_add: "jet_jit_pool_add" => jet_jit_pool_add: binary;
+    gc_read_canonical: "jet_gc_read" => jet_jit_gc_read: unary;
+    gc_edit_clear: "jet_gc_edit_clear" => jet_jit_gc_edit_clear: binary;
+    gc_edit_pop: "jet_gc_edit_pop" => jet_jit_gc_edit_pop: binary;
+    gc_edit_remove_index: "jet_gc_edit_remove_index" => jet_jit_gc_edit_remove_index: ternary;
+    gc_edit_insert_index: "jet_gc_edit_insert_index" => jet_jit_gc_edit_insert_index: quaternary;
+    gc_edit_prepend: "jet_gc_edit_prepend" => jet_jit_gc_edit_prepend: ternary;
+    gc_edit_additive: "jet_gc_edit_additive" => jet_jit_gc_edit_additive: ternary;
+    gc_edit_plain: "jet_gc_edit_plain" => jet_jit_gc_edit_plain: binary;
+    gc_edit_edge_slot: "jet_gc_edit_edge_slot" => jet_jit_gc_edit_edge_slot: quaternary;
+    pool_new: "jet_std::JetPool::new" => jet_jit_pool_new: noarg_i64;
+    pool_add: "jet_std::JetPool::add" => jet_jit_pool_add: binary;
     pool_get: "jet_jit_pool_get" => jet_jit_pool_get: quaternary;
-    pool_remove: "jet_jit_pool_remove" => jet_jit_pool_remove: binary;
-    pool_ids: "jet_jit_pool_ids" => jet_jit_pool_ids: unary;
+
+    shared_new_static: "jet_std::JetShared::new" => jet_jit_shared_new: unary;
+    shared_new_rooted: "::jet_std::JetShared::new" => jet_jit_shared_new: unary;
+    shared_get: "jet_shared_get" => jet_jit_shared_get: unary;
+    shared_set: "jet_shared_set" => jet_jit_shared_set: binary_void;
+    shared_replace: "jet_shared_replace" => jet_jit_shared_replace: binary;
+    shared_capture: "jet_shared_capture" => jet_jit_shared_capture: unary;
+    shared_capture_with: "jet_shared_capture_with" => jet_jit_shared_capture_with: binary;
+    shared_capture_txn_plain: "jet_shared_capture_txn_plain" => jet_jit_shared_capture_txn_plain: binary;
+    shared_capture_txn: "jet_shared_capture_txn" => jet_jit_shared_capture_txn: ternary;
+    shared_try_replace: "jet_shared_try_replace" => jet_jit_shared_try_replace: ternary;
+    shared_snapshot_value: "jet_shared_snapshot_value" => jet_jit_shared_snapshot_value: unary;
+    pool_set: "jet_jit_pool_set" => jet_jit_pool_set: quinary_void;
+    pool_remove: "jet_std::JetPool::remove" => jet_jit_pool_remove: binary;
+    pool_ids: "jet_std::JetPool::ids" => jet_jit_pool_ids: unary;
     shared_new: "jet_jit_shared_new" => jet_jit_shared_new: unary;
     shared_begin: "jet_jit_shared_begin" => jet_jit_shared_begin: binary;
     shared_end_read: "jet_jit_shared_end_read" => jet_jit_shared_end_read: unary_void;
@@ -1520,7 +2201,8 @@ host_fns! {
     condition_notify_one: "jet_jit_condition_notify_one" => jet_jit_condition_notify_one: unary_void;
     condition_notify_all: "jet_jit_condition_notify_all" => jet_jit_condition_notify_all: unary_void;
     shared_guard_begin: "jet_jit_shared_guard_begin" => jet_jit_shared_guard_begin: binary;
-    shared_guard_map: "jet_jit_shared_guard_map" => jet_jit_shared_guard_map: ternary;
+    shared_guard_map: "jet_shared_guard_map" => jet_jit_shared_guard_map: ternary;
+    shared_guard_split: "jet_shared_guard_split" => jet_jit_shared_guard_split: quaternary;
     shared_guard_clone: "jet_jit_shared_guard_clone" => jet_jit_shared_guard_clone: binary;
     shared_guard_value: "jet_jit_shared_guard_value" => jet_jit_shared_guard_value: unary;
     shared_guard_value_f64: "jet_jit_shared_guard_value_f64" => jet_jit_shared_guard_value_f64: unary_f64;
@@ -1542,4 +2224,6 @@ host_fns! {
     expiring_new: "jet_jit_expiring_new" => jet_jit_expiring_new: quaternary;
     expiring_get: "jet_jit_expiring_get" => jet_jit_expiring_get: binary;
     expiring_is_valid: "jet_jit_expiring_is_valid" => jet_jit_expiring_is_valid: binary_i8;
+    volatile_read: "std::ptr::read_volatile" => jet_jit_volatile_read: unary;
+    volatile_write: "std::ptr::write_volatile" => jet_jit_volatile_write: binary_void;
 }

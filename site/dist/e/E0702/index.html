@@ -34,25 +34,16 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">{reason}</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">{fix}</p>
+<p class="diag-copy fix" data-registry-field="fix">Use an FFI-safe scalar or capability type, or put the boundary in an audited `#Unsafe` region.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0702</code>: <code>tests/ui/ffi_bad_type.stderr</code>.</p>
-<pre class="diag">Error [E0702]: an FFI boundary rejects call `bad` uses capability `&amp;` outside `#Unsafe`
+<pre class="diag">Error [E0702]: An FFI boundary rejects call `bad` uses capability `&amp;` outside `#Unsafe`
   --&gt; tests/ui/ffi_bad_type.jet:8:11
     |
   8 |     print(bad(&amp;value))
     |           ^^^
- Why: a foreign capability can write to or transfer ownership of Jet storage, so a raw call needs an audited boundary
- Fix: call `bad` inside `#Unsafe(&quot;…&quot;) { … }`, or expose it through a generated typed binding
-More: jet-lang.dev/e/E0702
-
-Error [E0702]: an FFI boundary rejects call `bad` uses capability `&amp;` outside `#Unsafe`
-  --&gt; tests/ui/ffi_bad_type.jet:8:11
-    |
-  8 |     print(bad(&amp;value))
-    |           ^^^
- Why: a foreign capability can write to or transfer ownership of Jet storage, so a raw call needs an audited boundary
- Fix: call `bad` inside `#Unsafe(&quot;…&quot;) { … }`, or expose it through a generated typed binding
+ Why: A foreign capability can write to or transfer ownership of Jet storage, so a raw call needs an audited boundary
+ Fix: Call `bad` inside `#Unsafe(&quot;…&quot;) { … }`, or expose it through a generated typed binding
 More: jet-lang.dev/e/E0702
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

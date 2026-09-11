@@ -1,0 +1,199 @@
+{
+  "schema": "jet.adapters-witnesses.v1",
+  "schema_version": 1,
+  "stage": "adapters",
+  "relation": "adapter_observation_correspondence",
+  "observation_fields": [
+    "result",
+    "typed_failure",
+    "mutation",
+    "input_consumption",
+    "ordered_effects",
+    "cleanup",
+    "resource_premises",
+    "schedule",
+    "allowed_schedules"
+  ],
+  "obligation_dimensions": [
+    "dispatch",
+    "control_transfer",
+    "calling_convention",
+    "representation",
+    "width",
+    "layout",
+    "handles",
+    "callbacks",
+    "results",
+    "errors",
+    "cleanup",
+    "task_completion",
+    "source_identity",
+    "target_identity",
+    "tool_configuration"
+  ],
+  "identity_fields": [
+    "program_sha256",
+    "source_sha256",
+    "shared_operation_sha256",
+    "adapter_artifact_sha256",
+    "target_sha256",
+    "tool_configuration_sha256",
+    "checker_sha256",
+    "obligations_sha256"
+  ],
+  "identity": {
+    "authority_key": "compiler-proof.adapters",
+    "model": {"meaning": "#2941 adapter operation/target/boundary denominator and observation alphabet"},
+    "source": {"meaning": "Core dispatcher, route implementation, artifact, target, foreign-boundary, fixture, and configuration bytes with exact SHA-256"},
+    "compiler": {"meaning": "current Jet compiler source/artifact path, proof driver, and pinned compiler-proof identity"},
+    "checker": {"meaning": "this adapters checker and its shared source-bound checker utilities"},
+    "configuration": {"meaning": "adapter contract, D-COMPILER-PROOF1 policy, capability relation, and no-execution mode"},
+    "target": {"meaning": "RustAot, Cranelift, Interpreter, Web, and comptime target applicability and bridge identity"},
+    "obligations": {"meaning": "generated proof/compiler/obligations.json rows owned by #2941"}
+  },
+  "runner": {
+    "launcher": "scripts/agent/jet-env",
+    "invocation": "proof/compiler/adapters/observe.mjs invokes scripts/agent/jet-env full for each selected applicable mode, passes JET_ADAPTER_OBSERVATION_PATH to the selected production, consumes proof/compiler/observations/comparison-journal.mjs records, and replays each typed comparison observation through the canonical jet test-compare path; check.mjs consumes the resulting identity-bound carrier without running Jet",
+    "supported_operations": ["check", "run"],
+    "tiers": ["aot", "jet_run", "interpreter", "web", "comptime"],
+    "timeout_ms": 120000,
+    "scratch": "$HOME/.cache/jet-test-scratch",
+    "fixtures": ["proof/compiler/adapters/fixtures/public-capture.jet"],
+    "unknown_policy": "unknown, unavailable, stale, or unobserved adapter facts remain unverified and cannot become proof"
+  },
+  "observation_certificates": {
+    "path": "proof/compiler/adapters/observations.json",
+    "schema": "jet.adapters-observations.v1",
+    "producer": "proof/compiler/adapters/observe.mjs",
+    "status": "unverified",
+    "universal_proof": false
+  },
+  "formal_discharge": {
+    "path": "proof/compiler/adapters/discharge.json",
+    "schema": "jet.adapters-formal-discharge.v1",
+    "methods": ["direct_verification", "translation_certificate"],
+    "required_fields": ["operation_id", "mode", "method", "replay_ref", "identity_fields", "identity", "universal_proof"],
+    "universal_proof": false
+  },
+  "coverage": {
+    "relation": "proof/compiler/obligations.json",
+    "owner": "#2941",
+    "mapping_statuses": ["mapped_unproved", "unsupported", "unmapped", "proved"],
+    "qualification_rule": "every current #2941 row gets one source-bound adapter disposition; failed, stale, unavailable, planned, and unsupported capability rows remain required unless owner-ratified-not-applicable; positive observations may be marked matched but only an approved canonical formal discharge may promote a row to proved"
+  },
+  "capability_relation": {
+    "manifest_path": ".jet/hardening-manifest.json",
+    "field": "capability_relation",
+    "schema": "jet.capability.relation.v1",
+    "key_format": "<capability_id>@<mode>",
+    "source_snapshot_field": "source_snapshot_hash",
+    "required_fields": ["capability_id", "family", "mode", "contract", "route", "observable", "oracle", "evidence", "identity", "owner", "disposition", "source_identity", "candidate_identity", "owner_link", "status", "counted"],
+    "unknown_policy": "a missing or unavailable capability row is not an applicable denominator reduction and is reported as unavailable"
+  },
+  "route_binding": {
+    "dispatcher": "crates/jet-codegen/src/Prelude/Core.jet",
+    "parser": "proof/compiler/runtime/common.mjs:parseDispatcher",
+    "implementation_roots": [
+      "crates/jet-codegen/src/Prelude",
+      "crates/jet-foundation/src",
+      "crates/jet-jit/src",
+      "crates/jet-comptime/src",
+      "crates/jet-rt/src",
+      "Source"
+    ],
+    "definition_kinds": ["rust_fn", "javascript_function", "javascript_binding"],
+    "rule": "route names are indexes only; a route is bound only when the actual definition and target-specific bridge source are present"
+  },
+  "target_bindings": [
+    {
+      "id": "aot",
+      "artifact_target": "RustAot",
+      "target_label": "rust-aot",
+      "kind": "native",
+      "source_markers": {
+        "crates/jet-foundation/src/MIR.rs": ["MirArtifactTarget::RustAot"],
+        "crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs": ["TirArtifactTarget::RustAot", "target_applicability_for"],
+        "crates/jet-codegen/src/Codegen/MIRRust.rs": ["MirRustTarget::Native", "emit_mir_program", "target_applicability.rust_aot"],
+        "Source/CmdCompile.rs": ["MirArtifactTarget::RustAot", "lower_checked_mir_program_for"]
+      },
+      "tool_configuration": [
+        {"kind": "rustc/LLVM", "paths": ["Cargo.toml", "flake.nix"], "assumption": "rustc and LLVM lower the selected RustAot artifact under the recorded target and profile"},
+        {"kind": "assembler/linker", "paths": ["Cargo.toml", "flake.nix"], "assumption": "the assembler and linker consume exactly the emitted RustAot closure"}
+      ]
+    },
+    {
+      "id": "jet_run",
+      "artifact_target": "Cranelift",
+      "target_label": "cranelift",
+      "kind": "native-jit",
+      "source_markers": {
+        "crates/jet-foundation/src/MIR.rs": ["MirArtifactTarget::Cranelift"],
+        "crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs": ["TirArtifactTarget::Cranelift", "target_applicability_for"],
+        "crates/jet-jit/src/CLI.rs": ["prepare_cli_from_mir", "MirArtifactTarget::Cranelift"],
+        "crates/jet-jit/src/jit/functions_compile.rs": ["MirArtifactTarget::Cranelift", "target_applicability.cranelift"],
+        "crates/jet-jit/src/Ffi.rs": ["MirArtifactTarget::Cranelift", "MirForeignTarget::Cranelift"],
+        "Source/CmdCompile.rs": ["run_native_lens", "run_jit_once_with_source_closure"]
+      },
+      "tool_configuration": [
+        {"kind": "Cranelift", "paths": ["Cargo.toml", "flake.nix"], "assumption": "Cranelift compiles only the selected Cranelift artifact and preserves the declared host ABI"}
+      ]
+    },
+    {
+      "id": "interpreter",
+      "artifact_target": "Interpreter",
+      "target_label": "interpreter",
+      "kind": "canonical-vm",
+      "source_markers": {
+        "crates/jet-foundation/src/MIR.rs": ["MirArtifactTarget::Interpreter"],
+        "crates/jet-codegen/src/Codegen/MIREval.rs": ["evaluate_mir_program_with_config", "MirArtifactTarget::Interpreter", "target_applicability.interpreter"],
+        "Source/Interpreter.rs": ["run_interpreter_once_with_source_closure"],
+        "Source/CmdCompile.rs": ["run_native_lens", "run_interpreter_once_with_source_closure"]
+      },
+      "tool_configuration": [
+        {"kind": "interpreter/VM", "paths": ["Cargo.toml", "flake.nix"], "assumption": "the canonical MIR interpreter executes the selected Interpreter artifact under its explicit target layout"}
+      ]
+    },
+    {
+      "id": "web",
+      "artifact_target": "Web",
+      "target_label": "web",
+      "kind": "wasm-browser",
+      "source_markers": {
+        "crates/jet-foundation/src/MIR.rs": ["MirArtifactTarget::Web"],
+        "crates/jet-codegen/src/Codegen/MIRWeb.rs": ["emit_web", "MirWebTarget", "MirArtifactTarget::Web"],
+        "crates/jet-codegen/src/Codegen/MIRRust.rs": ["MirRustTarget::WebWasm", "MirArtifactTarget::Web"],
+        "Source/CmdInspect.rs": ["emit_web"]
+      },
+      "tool_configuration": [
+        {"kind": "rustc/LLVM-wasm", "paths": ["Cargo.toml", "flake.nix"], "assumption": "rustc and LLVM emit the selected Web Wasm fragment under the recorded wasm target"},
+        {"kind": "browser/VM", "paths": ["crates/jet-codegen/src/Prelude/Core/RuntimeStop.js", "crates/jet-codegen/src/Prelude/Core/HttpRouter.js"], "assumption": "the named browser or Wasm VM honors the generated ABI and callback contract"}
+      ]
+    },
+    {
+      "id": "comptime",
+      "artifact_target": "Interpreter",
+      "target_label": "comptime",
+      "kind": "canonical-evaluator",
+      "source_markers": {
+        "crates/jet-comptime/src/Comptime/CorePureParity.rs": ["mirror the AOT prelude", "CoreCallPureRoute", "pub(super) fn evaluate"],
+        "crates/jet-comptime/src/Comptime/Methods/core_calls.rs": ["pure_route", "validate_interpreter_route"],
+        "crates/jet-codegen/src/Codegen/MIREval.rs": ["MirArtifactTarget::Interpreter", "lower_checked_mir_program_for"]
+      },
+      "tool_configuration": [
+        {"kind": "interpreter/VM", "paths": ["Cargo.toml", "flake.nix"], "assumption": "comptime uses the canonical evaluator and does not introduce a second semantic policy"}
+      ]
+    }
+  ],
+  "fixtures": [
+    "proof/compiler/adapters/fixtures/same-observation.json",
+    "proof/compiler/adapters/fixtures/negative-controls.json"
+  ],
+  "foreign_assumptions": [
+    {"id": "foreign.rustc-llvm", "kind": "rustc-llvm", "edge": "RustAot/Web Wasm emitted source to rustc and LLVM", "contract": "rustc and LLVM preserve the selected Rust/MIR ABI, widths, layout, failure carrier, and target identity under the recorded configuration", "status": "assumed", "universal_proof": false},
+    {"id": "foreign.cranelift", "kind": "cranelift", "edge": "canonical MIR artifact to Cranelift IR and resident module", "contract": "Cranelift preserves declared call conventions, host-word representations, handles, callbacks, trap/failure transport, and completion order", "status": "assumed", "universal_proof": false},
+    {"id": "foreign.assembler-linker", "kind": "assembler-linker", "edge": "emitted Rust/native object closure to executable or library", "contract": "the assembler/linker consumes the exact artifact closure and does not change the recorded symbol, layout, or target identity", "status": "assumed", "universal_proof": false},
+    {"id": "foreign.browser-vm", "kind": "browser-vm", "edge": "generated Web Wasm/JavaScript publication to browser or Wasm VM", "contract": "the named browser/VM honors the generated ABI, linear-memory widths, callback schedule, and resource lifetime", "status": "assumed", "universal_proof": false},
+    {"id": "foreign.library", "kind": "foreign-library", "edge": "adapter wrapper to crypto, HTTP, font, service, data, and other foreign libraries", "contract": "the foreign library satisfies its named ABI, encoding, bounds, error, callback, and lifetime contract; its status never proves the Jet wrapper", "status": "assumed", "universal_proof": false},
+    {"id": "foreign.physical-environment", "kind": "physical-environment", "edge": "OS, device, allocator, clock, scheduler, and physical resource providers", "contract": "the environment satisfies the named target, width, synchronization, capacity, scheduling, and release premises", "status": "assumed", "universal_proof": false}
+  ]
+}

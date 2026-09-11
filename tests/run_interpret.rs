@@ -2,7 +2,8 @@ mod common;
 
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 fn jet() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
@@ -93,10 +94,7 @@ fn run_interpret_rejects_release_profile() {
 /// --interpret survive the CLI split unchanged.
 #[test]
 fn argv_agrees_on_every_native_tier() {
-    let dir = std::env::temp_dir().join(format!(
-        "jet_run_interpret_argv_{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("jet_run_interpret_argv_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     fs::write(
@@ -249,7 +247,7 @@ fn run_interpret_keeps_unused_c_member_lists_runnable() {
     .unwrap();
     fs::write(
         dir.join("main.jet"),
-        "use core.math.[abs, min]\nuse core.encoding.[json, csv]\nuse c.[c as libc, m]\nfn run() { print(abs(-8)); print(min(9, 4)) }\n",
+        "use core.math.[abs, min]\nuse core.encoding.[json, csv]\nuse c.[c as libc, m]\nfn run() {\n    print(abs(-8))\n    print(min(9, 4))\n}\n",
     )
     .unwrap();
 
@@ -343,6 +341,108 @@ fn c_extern_calls_match_aot_and_interpreter() {
     }
 
     let _ = fs::remove_dir_all(&cache);
+}
+
+fn median_nanos(samples: &mut [u128]) -> u128 {
+    samples.sort_unstable();
+    samples[samples.len() / 2]
+}
+
+/// Card #2864: the real sieve fixture must keep its byte-exact results while
+/// indexed stores scale linearly in the forced interpreter. One 10,000-item
+/// warmup removes cold-cache effects; three measured runs and a median keep
+/// the ratio independent of one noisy process launch.
+#[test]
+fn sieve_scales_linearly() {
+    const MEASURED_SAMPLES: usize = 3;
+    const RUN_TIMEOUT: Duration = Duration::from_secs(30);
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let fixture = root.join("gauntlet/entries/sieve/jet");
+    let scratch = common::Scratch::new("sieve-scales-linearly");
+    for file in ["package.jet", "run.jet"] {
+        fs::copy(fixture.join(file), scratch.path.join(file))
+            .unwrap_or_else(|error| panic!("copy sieve fixture `{file}`: {error}"));
+    }
+
+    let cases: &[(u32, &[u8])] = &[
+        (10_000, b"count 1229\nlargest 9973\n"),
+        (100_000, b"count 9592\nlargest 99991\n"),
+    ];
+    let run = |n: u32| -> (u128, Vec<u8>) {
+        let n_arg = n.to_string();
+        let started = Instant::now();
+        let mut child = Command::new(jet())
+            .args(["run", "--interpret", "run.jet", "--", &n_arg])
+            .current_dir(&scratch.path)
+            .env("JET_RUN_CACHE_DIR", scratch.path.join("run-cache"))
+            .env("JET_STORE_DIR", scratch.path.join("store"))
+            .env("NO_COLOR", "1")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap_or_else(|error| panic!("start sieve n={n}: {error}"));
+        loop {
+            if child
+                .try_wait()
+                .unwrap_or_else(|error| panic!("poll sieve n={n}: {error}"))
+                .is_some()
+            {
+                break;
+            }
+            if started.elapsed() >= RUN_TIMEOUT {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("sieve n={n} exceeded {RUN_TIMEOUT:?}");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let output = child
+            .wait_with_output()
+            .unwrap_or_else(|error| panic!("collect sieve n={n}: {error}"));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "sieve n={n} failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            output.stderr.is_empty(),
+            "sieve n={n} wrote stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        (started.elapsed().as_nanos(), output.stdout)
+    };
+
+    let (_, stdout) = run(10_000);
+    assert_eq!(stdout, b"count 1229\nlargest 9973\n", "sieve n=10000 output changed");
+
+    let mut timings = Vec::with_capacity(cases.len());
+    for &(n, expected) in cases {
+        let mut samples = Vec::with_capacity(MEASURED_SAMPLES);
+        for _ in 0..MEASURED_SAMPLES {
+            let (elapsed, stdout) = run(n);
+            assert_eq!(stdout, expected, "sieve n={n} output changed");
+            samples.push(elapsed);
+        }
+        timings.push((n, median_nanos(&mut samples)));
+    }
+
+    let small = timings[0].1;
+    let large = timings[1].1;
+    assert!(small > 0 && large > 0, "sieve timings must be positive");
+    eprintln!(
+        "interpreter sieve scaling: n={} median_ns={} n={} median_ns={} samples={MEASURED_SAMPLES}",
+        timings[0].0, small, timings[1].0, large
+    );
+    assert!(
+        large < small.saturating_mul(10),
+        "interpreter sieve exceeded linear scaling: n={} median_ns={} n={} median_ns={} ratio={:.2}x",
+        timings[0].0,
+        small,
+        timings[1].0,
+        large,
+        large as f64 / small as f64
+    );
 }
 
 /// Cards #2014/#2015 (I9): an example AOT completes must complete identically
@@ -451,4 +551,91 @@ fn data_json_agrees_on_every_tier() {
         "examples/features/tooling/data_json.jet",
         "examples/features/expected/tooling/data_json.out",
     );
+}
+
+/// Card #2816 (I9): a spawned task blocked in a Core UDP receive must make
+/// progress while its parent waits in a Core DNS call. The forced interpreter
+/// used to hold the shared program-output sink lock across the parent's DNS
+/// wait, so the responder could not even enter `udp_receive` until the
+/// parent's deadline expired — and the parent then panicked on the timeout.
+/// The DNS deadline inside the program is the pass criterion; the process
+/// bound only turns a wedged interpreter into a failure instead of a hang.
+#[test]
+fn udp_responder_progresses_under_parent_wait() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_run_interpret_udp_responder_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"run_interpret_udp_responder\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Exec, IO, Mem.Alloc, Net, Panic] } }\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("main.jet"),
+        r#"use core.net as net
+
+fn run() {
+    server :: net.udp_bind("127.0.0.1:0") ?? panic("DNS server")
+    address :: net.socket_to_string(net.udp_local_addr(server) ?? panic("server address"))
+    responder :: task {
+        request :: net.udp_receive(server, 512) ?? panic("DNS query")
+        query :: net.udp_packet_bytes(request)
+        response :: [U8]{
+            query[0], query[1], 0x81, 0x80, 0, 1, 0, 1, 0, 0, 0, 0,
+            7, 101, 120, 97, 109, 112, 108, 101, 4, 116, 101, 115, 116, 0,
+            0, 16, 0, 1,
+            0xc0, 0x0c, 0, 16, 0, 1, 0, 0, 0, 60, 0, 4,
+            3, 106, 101, 116
+        }
+        net.udp_send_bytes_to(server, response, net.udp_packet_addr(request)) ?? panic("DNS response")
+        print("responder answered")
+    }
+    result :: net.dns_txt_at(address, "example.test", 1000) ?? panic("DNS TXT")
+    responder.join() ?? panic("DNS responder")
+    print(result.len() == 1 && result[0] == "jet")
+}
+"#,
+    )
+    .unwrap();
+
+    let mut child = Command::new(jet())
+        .args(["run", "--trace-tiers", "--interpret", "main.jet"])
+        .current_dir(&dir)
+        .env("JET_RUN_CACHE_DIR", dir.join("run-cache"))
+        .env("JET_STORE_DIR", dir.join("store"))
+        .env("NO_COLOR", "1")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let bound = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while child.try_wait().unwrap().is_none() {
+        if std::time::Instant::now() >= bound {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("forced interpreter wedged: the UDP responder task never progressed");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let output = child.wait_with_output().unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert_eq!(stdout, "responder answered\ntrue\n", "stderr:\n{stderr}");
+    assert!(
+        stderr
+            .lines()
+            .any(|line| line.starts_with("run") && line.contains("tier0 interp")),
+        "forced `--interpret` did not run `run` on tier 0:\n{stderr}"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
 }

@@ -5,8 +5,10 @@ use std::path::PathBuf;
 use std::process::Command;
 
 mod common;
+mod tir_support;
 
 fn build_and_run(dir: &PathBuf, name: &str, src: &str) -> (i32, String, String) {
+    tir_support::write_test_package(dir, tir_support::TIR_TEST_PACKAGE);
     let path = dir.join(name);
     fs::write(&path, src).unwrap();
     let shown = path.to_string_lossy();
@@ -65,23 +67,44 @@ fn null_backend_measure_layout_paint_roundtrip() {
 
 #[test]
 fn tui_backend_reactive_render_loop() {
-    let have_rustc = common::have_rustc();
-    if !have_rustc {
-        eprintln!("note: skipping ui backend test (need rustc)");
-        return;
-    }
-    let dir = std::env::temp_dir().join(format!("jet_ui_tui_{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
-    let (code, stdout, stderr) = build_and_run(
-        &dir,
-        "ui_tui_reactive",
-        include_str!("../examples/features/ui/ui_tui_reactive.jet"),
+    tir_support::assert_example_cli_tiers_agree_with_package(
+        "ui/ui_tui_reactive",
+        Some(tir_support::TIR_TEST_PACKAGE),
+        |actual| assert_eq!(actual, include_str!("../examples/features/expected/ui/ui_tui_reactive.out")),
     );
-    assert_eq!(code, 0, "ui tui reactive render failed: {stderr}");
-    let expected = include_str!("../examples/features/expected/ui/ui_tui_reactive.out");
-    assert_eq!(stdout, expected);
-    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn tui_backend_reactive_conditional_capture() {
+    tir_support::assert_tiers_agree_with_application_policy(
+        "ui_reactive_conditional_capture",
+        r#"
+use core.ui as ui
+use core.reactive as reactive
+
+fn view(title: String) UiNode -> ui.box([
+    ui.text(title),
+    ui.node_role("notes", 30.0, 3.0, ui.aria_role_text_input())
+])
+
+fn run() {
+    selected := reactive.signal(0)
+    backend := ui.tui_backend()
+    render_backend :: ~backend
+    ui.reactive_render(() -> {
+        marker :: if selected.get() == 0 -> "* " else -> "  "
+        ui.mount(render_backend, view("{marker}Meeting"))
+    })
+    print("initial: {backend.render_count()}")
+    selected.set(1)
+    print("updated: {backend.render_count()}")
+    selected.set(0)
+    print("reset: {backend.render_count()}")
+}
+"#,
+        "initial: 1\nupdated: 2\nreset: 3\n",
+        tir_support::TIR_TEST_PACKAGE,
+    );
 }
 
 /// D-UI-MOUNT1=A: mount twice yields the same paint transcript as one mount.

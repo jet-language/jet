@@ -32,6 +32,21 @@ trait JetDebug {
         false
     }
 }
+/// Shared generic display adapter used by every checked formatting caller.
+///
+/// The caller's monomorphized `T: JetDisplay` implementation supplies the
+/// semantic formatting. This function only preserves the borrowed argument.
+fn jet_fmt_display<T: JetDisplay + ?Sized>(value: &T) -> String {
+    value.jet_display()
+}
+
+/// Shared generic debug adapter used by every checked formatting caller.
+///
+/// The caller's monomorphized `T: JetDebug` implementation supplies the
+/// semantic formatting. This function only preserves the borrowed argument.
+fn jet_fmt_debug<T: JetDebug + ?Sized>(value: &T) -> String {
+    value.jet_debug()
+}
 
 /// D-QUANTITY-TYPE1=A: internal compile-time bridge for physical-unit generic
 /// bounds. Concrete unit identity stays in the
@@ -205,25 +220,24 @@ macro_rules! jet_scalar_show {
         impl JetDebug for $t { fn jet_debug(&self) -> String { self.to_string() } }
     )+};
 }
-// Int is an exact, tagged carrier in the Prelude. Never render its storage tag
-// as a Rust i64; all three user-facing representations use the canonical
-// decimal conversion supplied by the surrounding execution tier.
-impl JetShow for i64 {
+// Exact Int owns its Foundation node. Fixed-width integers stay ordinary Rust
+// scalars; the two carriers must never share a formatter or ABI assumption.
+impl JetShow for jet_foundation::Numeric::JetInt {
     fn jet_show(&self) -> String {
-        jet_int_to_string(*self)
+        self.to_string_rep()
     }
 }
-impl JetDisplay for i64 {
+impl JetDisplay for jet_foundation::Numeric::JetInt {
     fn jet_display(&self) -> String {
-        jet_int_to_string(*self)
+        self.to_string_rep()
     }
 }
-impl JetDebug for i64 {
+impl JetDebug for jet_foundation::Numeric::JetInt {
     fn jet_debug(&self) -> String {
-        jet_int_to_string(*self)
+        self.to_string_rep()
     }
 }
-jet_scalar_show!(i8, i16, i32, u8, u16, u32, u64, bool, char);
+jet_scalar_show!(i8, i16, i32, i64, u8, u16, u32, u64, bool, char);
 impl JetShow for f32 {
     fn jet_show(&self) -> String {
         format!("{:?}", self)

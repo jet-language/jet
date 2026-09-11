@@ -34,7 +34,7 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">Reading a secret (`core.crypto.vault.get`) always requires an explicit grant (D-JPK-SECRETCRYPTO1) — unlike every other effect, there is no silently inferred default. A bare `fn` with no `-[…]&gt;` list, or one that omits `Secret`, is rejected even though the same function may infer other effects.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">add `-[Secret]&gt;` to `{fn}`&#39;s signature, or add `Secret` to its existing effect ceiling.</p>
+<p class="diag-copy fix" data-registry-field="fix">Add `-[Secret]&gt;` to `{fn}`&#39;s signature, or add `Secret` to its existing effect ceiling.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E1264</code>: <code>tests/ui/secret_in_build.stderr</code>.</p>
 <pre class="diag">Error [E1265]: `core.crypto.vault.get()` can&#39;t be reached from a build-time context
@@ -52,7 +52,7 @@ Error [E1264]: `run` reads a secret but doesn&#39;t declare the `Secret` effect
   3 | fn run() {
     |    ^^^
  Why: reading a secret (`core.crypto.vault.get`) always requires an explicit grant — unlike other effects, there is no silently-inferred default here, so a function must opt in even with no other explicit effect row at all.
- Fix: add `=[Secret]=&gt;` to `run`&#39;s signature (or widen an existing effect row to cover it)
+ Fix: add `-[Secret]&gt;` to `run`&#39;s signature (or widen an existing effect row to cover it)
 More: jet-lang.dev/e/E1264
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

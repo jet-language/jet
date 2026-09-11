@@ -1,8 +1,8 @@
-use super::alloc_ptrs::{e3101, io_error_ty, ptr_elem, result_ty};
-use super::core_types::{decode_error_ty, json_error_ty, json_ty, u8_ty, unit_ty};
+use super::alloc_ptrs::{db_row_ty, e3101, io_error_ty, ptr_elem, result_ty};
+use super::core_types::{decode_error_ty, encoding_error_ty, json_ty, u8_ty, unit_ty};
 use super::fixed_sigs::{core_fixed_sig, core_fixed_sig_for_row};
 use super::serde_diags::{
-    no_os_hint, is_no_os_forbidden, module_short_name, reactive_derived_unit,
+    is_no_os_forbidden, literal_string_value, module_short_name, no_os_hint, reactive_derived_unit,
     reactive_lambda_arity, reactive_not_lambda, unknown_core_item, wrong_core_arity,
 };
 use crate::Diagnostics::{CryptoMisuseReason, Diagnostic, Span};
@@ -10,13 +10,16 @@ use crate::Sema::Checker;
 use crate::Sema::Diagnostics::{
     is_debuggable, is_displayable, is_printable, suggest_field, type_fix_hint, types_comparable,
 };
-use crate::Sema::Effects::{core_effect, e0746, is_irreversible_effect};
-use crate::Sema::Purity::{e3401, is_impure_core};
+use crate::Sema::Effects::{
+    core_effect, core_effect_leaf, e0746, is_irreversible_effect, Effect,
+};
+use crate::Sema::Purity::e3401;
 use crate::Sema::SendCrossing;
 use crate::Sema::FFI::e3301;
 use crate::Syntax;
-use crate::AST::{AccessConvention, Expr, ParamZone, Type};
+use crate::AST::{AccessConvention, CallArg, CallArgFlags, Expr, OrFallback, ParamZone, StrPart, Type};
 use jet_foundation::Effects::is_nondeterministic_core;
+use jet_foundation::Game::JetGameFrameBudget;
 
 /// The Core row owns the lookup key for plain calls. Keep the fallback for
 /// polymorphic/closure forms until their projection rows land, but do not let
@@ -28,15 +31,23 @@ fn core_effect_for_call(module: &str, name: &str) -> Option<crate::Sema::Effects
     }
 }
 
+fn core_effect_leaf_for_call(module: &str, name: &str) -> Option<&'static str> {
+    match Syntax::core_call(module, name) {
+        Some(row) => row.effect_leaf(),
+        None => core_effect_leaf(module, name),
+    }
+}
+
 fn core_call_is_known(module: &str, name: &str) -> bool {
     matches!(
         (module, name),
-        (
-            "core.compiler",
-            "lex" | "parse" | "check" | "source_map" | "manifest" | "package"
-                | "lock" | "profiles",
-        )
-            | ("core.service", "tree")
+            ("core.service", "tree")
+            | (
+                "core.data.loader",
+                "authority" | "bind" | "bind_text" | "cancel" | "invalidate" | "needs_refresh"
+                    | "offline" | "ready" | "source_identity" | "status" | "stream",
+            )
+            | ("core.build", "graph" | "receipt_diff")
             | ("core.auth", "verify_jwt" | "verify_paseto")
             | ("core.net.tls", "client")
             | ("core.net", "unix_connect")
@@ -49,6 +60,65 @@ fn core_call_is_known(module: &str, name: &str) -> bool {
         || super::core_param_contract(module, name).is_some()
         || Syntax::core_marker_application(module, name).is_some()
 }
+fn unit_callback_type() -> Type {
+    Type::Fn {
+        params: Vec::new(),
+        ret: Some(Box::new(unit_ty())),
+        effect_bound: None,
+        return_view_provenance: None,
+        param_contract: None,
+        call_metadata: None,
+    }
+}
+fn deterministic_world_callback_type() -> Type {
+    Type::Fn {
+        params: vec![Type::Named(
+            crate::Syntax::DETERMINISTIC_WORLD_TYPE.to_string(),
+        )],
+        ret: Some(Box::new(unit_ty())),
+        effect_bound: None,
+        return_view_provenance: None,
+        param_contract: None,
+        call_metadata: None,
+    }
+}
+
+fn data_carrier_type(name: &str, row: Type) -> Type {
+    Type::Apply {
+        name: name.to_string(),
+        args: vec![row],
+    }
+}
+
+
+fn data_callback_type(row: Type, ret: Type) -> Type {
+    Type::Fn {
+        params: vec![row],
+        ret: Some(Box::new(ret)),
+        effect_bound: None,
+        return_view_provenance: None,
+        param_contract: None,
+        call_metadata: None,
+    }
+}
+fn history_strategy_type(command: Type) -> Type {
+    Type::Apply {
+        name: "HistoryStrategy".to_string(),
+        args: vec![command],
+    }
+}
+
+fn ui_drop_callback_type() -> Type {
+    Type::Fn {
+        params: vec![Type::List(Box::new(Type::Named("UiDropItem".to_string())))],
+        ret: Some(Box::new(unit_ty())),
+        effect_bound: None,
+        param_contract: None,
+        call_metadata: None,
+        return_view_provenance: None,
+    }
+}
+
 
 fn analytics_sql_literal(expr: &Expr) -> Option<String> {
     let Expr::TypedLit {
@@ -198,6 +268,120 @@ impl<'a> Checker<'a> {
             ));
         }
     }
+
+    /// D-QUERY-RETAIN1=A: infer a one-row query callback (`map`, `min`,
+    /// `max`, `group_by`, or a grouped reducer) whose result type is open.
+    /// The row type seeds the lambda parameter; the callback's own result type
+    /// is returned so projections, keys, and values keep their nominal/exact
+    /// types instead of a String/Float projection.
+    pub(crate) fn infer_query_callback(
+        &mut self,
+        call_name: &str,
+        row: &Type,
+        arg: &mut crate::AST::CallArg,
+    ) -> Option<Type> {
+        let expected = Type::Fn {
+            params: vec![row.clone()],
+            ret: None,
+            effect_bound: Some(Vec::new()),
+            return_view_provenance: None,
+            param_contract: None,
+            call_metadata: None,
+        };
+        let saved_expected = self.expected_type.clone();
+        self.expected_type = Some(expected.clone());
+        let got = self.infer(&mut arg.expr);
+        self.expected_type = saved_expected;
+        match &got {
+            Some(callback_ty @ Type::Fn { params, ret, .. }) => {
+                self.check_query_callback_effect(
+                    call_name,
+                    &expected,
+                    callback_ty,
+                    arg.expr.span(),
+                );
+                if params.len() != 1 || params[0] != *row {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!(
+                            "`{call_name}` wants a callback over {} for argument 1",
+                            row.show()
+                        ),
+                        "a query callback receives exactly one row".to_string(),
+                        format!("write `{} -> …`", "row"),
+                        Some(arg.expr.span()),
+                    ));
+                }
+                ret.as_ref().map(|ret| (**ret).clone())
+            }
+            Some(other) => {
+                self.diags.push(Diagnostic::error(
+                    "E0112",
+                    format!(
+                        "`{call_name}` wants a callback for argument 1, but this is {}",
+                        other.show()
+                    ),
+                    "query reducers take one callback over the row".to_string(),
+                    "pass a lambda such as `row -> row.field`".to_string(),
+                    Some(arg.expr.span()),
+                ));
+                None
+            }
+            None => None,
+        }
+    }
+    /// D-QUERY-LIVE1: maintained callbacks must prove an explicit empty
+    /// effect bound. An absent bound is open, not evidence of replay safety.
+    pub(crate) fn check_query_callback_effect(
+        &mut self,
+        call_name: &str,
+        expected: &Type,
+        offered: &Type,
+        span: Span,
+    ) -> bool {
+        let requires_pure = matches!(
+            call_name,
+            "filter"
+                | "sort_by"
+                | "map"
+                | "min"
+                | "max"
+                | "inner_join"
+                | "left_join"
+                | "group_by"
+                | "sum"
+                | "mean"
+        ) && matches!(
+            expected,
+            Type::Fn {
+                effect_bound: Some(bound),
+                ..
+            } if bound.is_empty()
+        );
+        if !requires_pure {
+            return false;
+        }
+        let safe = matches!(
+            offered,
+            Type::Fn {
+                effect_bound: Some(bound),
+                ..
+            } if bound.is_empty()
+        );
+        if safe {
+            return false;
+        }
+        self.diags.push(Diagnostic::error(
+            "E2476",
+            format!("live query callback `{call_name}` is not replay-safe"),
+            "a maintained query replays callbacks after each source delta, so the callback must have an explicit empty effect bound"
+                .to_string(),
+            "remove the effectful operation, or declare/use a pure callback over the tracked row"
+                .to_string(),
+            Some(span),
+        ));
+        true
+    }
 }
 
 fn vault_key_arg(ty: &Type) -> Option<Type> {
@@ -229,6 +413,12 @@ fn literal_list_len(expr: &crate::AST::Expr) -> Option<usize> {
         {
             Some(items.len())
         }
+        // An empty typed list keeps its head after inference (`[U8]{}`).
+        crate::AST::Expr::TypedLit {
+            head: Some(Type::List(_) | Type::FixedList { .. }),
+            body: crate::AST::TypedLitBody::Empty,
+            ..
+        } => Some(0),
         crate::AST::Expr::Paren(inner, _) => literal_list_len(inner),
         _ => None,
     }
@@ -265,6 +455,14 @@ fn exactly_one_type_arg(
         return None;
     }
     Some(type_args[0].clone())
+}
+
+fn model_type_leaf(ty: &Type) -> Option<&str> {
+    match ty {
+        Type::Named(name) => Some(name.rsplit_once('.').map_or(name.as_str(), |(_, leaf)| leaf)),
+        Type::TraitObject(names) if names.len() == 1 => names.first().map(String::as_str),
+        _ => None,
+    }
 }
 
 fn literal_int(expr: &crate::AST::Expr) -> Option<i64> {
@@ -350,6 +548,38 @@ fn compute_wrt_names(expr: &Expr) -> Option<Vec<String>> {
     }
 }
 
+fn compute_function_value_names(ty: &Type) -> Option<Vec<String>> {
+    let Type::Fn {
+        params,
+        param_contract,
+        call_metadata,
+        ..
+    } = ty
+    else {
+        return None;
+    };
+    // `param_contract` intentionally omits implicit labels.  A derivative
+    // transform still has to carry the declaration-local names so a later
+    // `compute.gradient` can build its named higher-order result.  Metadata
+    // is the source-of-truth for those names; the contract remains the
+    // fallback for synthetic callable types that have no declaration metadata.
+    if let Some(names) = call_metadata
+        .as_ref()
+        .map(|metadata| &metadata.names)
+        .filter(|names| names.len() == params.len())
+    {
+        return Some(names.clone());
+    }
+    param_contract.as_ref().and_then(|contract| {
+        (contract.len() == params.len()).then(|| {
+            contract
+                .iter()
+                .map(|(name, _)| name.clone())
+                .collect()
+        })
+    })
+}
+
 fn compute_function_names(checker: &Checker<'_>, expr: &Expr) -> Option<Vec<String>> {
     match expr {
         Expr::Paren(inner, _) => compute_function_names(checker, inner),
@@ -364,14 +594,7 @@ fn compute_function_names(checker: &Checker<'_>, expr: &Expr) -> Option<Vec<Stri
             })
             .or_else(|| {
                 let info = checker.lookup(name)?;
-                let Type::Fn {
-                    param_contract: Some(contract),
-                    ..
-                } = &info.ty
-                else {
-                    return None;
-                };
-                Some(contract.iter().map(|(name, _)| name.clone()).collect())
+                compute_function_value_names(&info.ty)
             }),
         Expr::Lambda(lambda) => Some(
             lambda
@@ -688,6 +911,9 @@ fn crypto_misuse_diagnostic(
 fn resolved_core_fixed_sig(
     module: &str,
     name: &str,
+    type_args: &[Type],
+    span: Span,
+    diags: &mut Vec<Diagnostic>,
 ) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
     let (params, ret) = match Syntax::core_call(module, name) {
         Some(row) => {
@@ -698,11 +924,18 @@ fn resolved_core_fixed_sig(
                 row.arity(),
             )
             .ok()?;
-            core_fixed_sig_for_row(row)?
+            // `time.now` is a registered runtime Core row whose return type is
+            // not represented in the ordinary fixed-signature table. Keep its
+            // sema type attached so pure diagnostics do not lose the call's
+            // return type or fall through to E1004.
+            core_fixed_sig_for_row(row).or_else(|| {
+                (module == "core.time" && name == "now")
+                    .then(|| (Vec::new(), Some(Type::Int)))
+            })?
         }
         None => core_fixed_sig(module, name)?,
     };
-    if matches!(module, "core.crypto" | "core.crypto.expert") {
+    let resolved = if matches!(module, "core.crypto" | "core.crypto.expert") {
         Some((
             params
                 .into_iter()
@@ -712,7 +945,18 @@ fn resolved_core_fixed_sig(
         ))
     } else {
         Some((params, ret))
+    };
+    if !type_args.is_empty() && resolved.is_some() {
+        diags.push(Diagnostic::error(
+            "E0119",
+            format!("`{name}` is not generic"),
+            "only functions declared with type parameters accept call-site type arguments"
+                .to_string(),
+            format!("call {name} without type arguments"),
+            Some(span),
+        ));
     }
+    resolved
 }
 
 fn core_compiler_return(name: &str) -> Type {
@@ -736,6 +980,13 @@ fn core_compiler_return(name: &str) -> Type {
         ok: Box::new(Type::Named(value.to_string())),
         err: Box::new(Type::Named(error.to_string())),
     }
+}
+fn core_build_return(name: &str) -> Type {
+    Type::Named(match name {
+        "graph" => Syntax::TYPE_BUILD_GRAPH,
+        "receipt_diff" => Syntax::TYPE_BUILD_GRAPH_DIFF,
+        _ => Syntax::TYPE_BUILD_GRAPH_DIFF,
+    }.to_string())
 }
 
 impl<'a> Checker<'a> {
@@ -1047,6 +1298,1357 @@ impl<'a> Checker<'a> {
         })
     }
 
+}
+
+fn web_apply(name: &str, arg: Type) -> Type {
+    Type::Apply {
+        name: name.to_string(),
+        args: vec![arg],
+    }
+}
+
+fn web_callback(param: Type, ret: Type) -> Type {
+    Type::Fn {
+        params: vec![param],
+        ret: Some(Box::new(ret)),
+        effect_bound: None,
+        return_view_provenance: None,
+        param_contract: None,
+        call_metadata: None,
+    }
+}
+fn web_result(ok: Type) -> Type {
+    Type::Result {
+        ok: Box::new(ok),
+        err: Box::new(Type::String),
+    }
+}
+fn web_callback_result(ok: Type) -> Type {
+    Type::Result {
+        ok: Box::new(ok),
+        err: Box::new(Type::Named(Syntax::TYPE_ERR.to_string())),
+    }
+}
+
+impl<'a> Checker<'a> {
+    /// D-WEBFORM1=A: elaborate `web.form(Model, action: handler)` once,
+    /// from the declared model fields, into the existing typed-form input
+    /// constructor. The runtime only sees the canonical `WebFormInput` and
+    /// action-name values, so no second form or server-function mechanism can
+    /// drift from `core.web.forms.typed` / #2477.
+    fn infer_web_form_core_call(
+        &mut self,
+        span: Span,
+        args: &mut Vec<CallArg>,
+    ) -> Option<Type> {
+        let typed = Type::Named("WebFormTyped".to_string());
+        if args.len() != 2 {
+            self.diags
+                .push(wrong_core_arity("form", 2, args.len(), span));
+            for arg in args.iter_mut() {
+                self.infer(&mut arg.expr);
+            }
+            return Some(typed);
+        }
+
+        let action_index = args
+            .iter()
+            .position(|arg| arg.label.as_ref().is_some_and(|(label, _)| label == "action"))
+            .unwrap_or(1);
+        let model_index = if action_index == 0 { 1 } else { 0 };
+        let model_arg = args[model_index].clone();
+        let action_arg = args[action_index].clone();
+        let model_name = match &model_arg.expr {
+            Expr::Ident(name, _) => name.clone(),
+            _ => {
+                self.diags.push(Diagnostic::error(
+                    "E2474",
+                    "web.form needs a named model type".to_string(),
+                    "the form field set is derived from one declared struct, so a runtime value cannot provide its schema"
+                        .to_string(),
+                    "pass the struct name as the first argument: `web.form(Checkout, action: submit)`"
+                        .to_string(),
+                    Some(model_arg.expr.span()),
+                ));
+                for arg in args.iter_mut() {
+                    self.infer(&mut arg.expr);
+                }
+                return Some(typed);
+            }
+        };
+        let Some(fields) = self
+            .struct_fields_for_type_name(&model_name)
+            .map(|fields| fields.to_vec())
+        else {
+            self.diags.push(Diagnostic::error(
+                "E2474",
+                format!("web.form model `{model_name}` is not a declared struct"),
+                "the form field set must come from the model's declared fields".to_string(),
+                format!("declare `struct {model_name} {{ ... }}` before constructing the form"),
+                Some(model_arg.expr.span()),
+            ));
+            return Some(typed);
+        };
+
+        let action_name = match &action_arg.expr {
+            Expr::Ident(name, _) => name.clone(),
+            _ => {
+                self.diags.push(Diagnostic::error(
+                    "E2474",
+                    "web.form action must be a named function".to_string(),
+                    "the action is registered through the existing typed server-function boundary"
+                        .to_string(),
+                    "pass a named action function: `web.form(Model, action: submit)`".to_string(),
+                    Some(action_arg.expr.span()),
+                ));
+                return Some(typed);
+            }
+        };
+        let action_params = self
+            .funcs
+            .get(&action_name)
+            .map(|sig| sig.params.clone());
+        let action_accepts_model = action_params
+            .as_ref()
+            .and_then(|params| params.first())
+            .is_some_and(|(_, ty)| self.resolve_type(ty.clone()) == Type::Named(model_name.clone()))
+            && action_params.as_ref().is_some_and(|params| params.len() == 1);
+        if !action_accepts_model {
+            self.diags.push(Diagnostic::error(
+                "E2474",
+                format!("form action `{action_name}` does not accept `{model_name}`"),
+                "the form derives its fields from the model and the one server-function action must receive that exact input type"
+                    .to_string(),
+                format!("change `{action_name}` to accept `{model_name}` as its only parameter"),
+                Some(action_arg.expr.span()),
+            ));
+        }
+
+        let call_arg = |expr| CallArg {
+            convention: AccessConvention::Read,
+            expr,
+            span,
+            flags: CallArgFlags::default(),
+            label: None,
+            spread: false,
+        };
+        let enum_lit = |type_name: &str, variant: &str, field_span: Span| Expr::EnumLit {
+            type_name: type_name.to_string(),
+            variant: variant.to_string(),
+            variant_span: Some(field_span),
+            args: Vec::new(),
+            leading_dot: false,
+            span: field_span,
+        };
+        let mut descriptors = Vec::with_capacity(fields.len());
+        for (field, field_span, field_ty) in fields {
+            let (value_variant, control_variant) = match field_ty {
+                Type::String => ("String", "Text"),
+                Type::Int => ("Int", "Number"),
+                Type::Bool => ("Bool", "Checkbox"),
+                Type::Float => ("Float", "Number"),
+                other => {
+                    self.diags.push(Diagnostic::error(
+                        "E2474",
+                        format!(
+                            "form field `{field}` on `{model_name}` has unsupported type `{}`",
+                            other.show()
+                        ),
+                        "web forms decode scalar controls into the declared model fields without a second coercion policy"
+                            .to_string(),
+                        format!("change `{field}` to `String`, `Int`, `Bool`, or `Float`"),
+                        Some(field_span),
+                    ));
+                    continue;
+                }
+            };
+            let text = |value: String| Expr::Str(vec![StrPart::Lit(value)], field_span);
+            descriptors.push(Expr::StructLit {
+                type_name: "WebFormFieldSpec".to_string(),
+                type_args: Vec::new(),
+                import_ns: None,
+                as_trait: None,
+                fields: vec![
+                    ("name".to_string(), field_span, text(field.clone())),
+                    (
+                        "value_type".to_string(),
+                        field_span,
+                        enum_lit("WebFormValueType", value_variant, field_span),
+                    ),
+                    ("required".to_string(), field_span, Expr::Bool(true, field_span)),
+                    ("default".to_string(), field_span, Expr::Absent(field_span)),
+                    ("label".to_string(), field_span, text(field.clone())),
+                    (
+                        "control".to_string(),
+                        field_span,
+                        enum_lit("WebFormControl", control_variant, field_span),
+                    ),
+                    ("group".to_string(), field_span, Expr::Absent(field_span)),
+                    ("wire_name".to_string(), field_span, text(field)),
+                ],
+                inferred: false,
+                span: field_span,
+            });
+        }
+
+        let input_call = Expr::MethodCall {
+            receiver: Box::new(Expr::Field(
+                Box::new(Expr::Ident("web".to_string(), span)),
+                "forms".to_string(),
+                span,
+            )),
+            method: "input".to_string(),
+            method_span: span,
+            owner_type_args: Vec::new(),
+            type_args: Vec::new(),
+            args: vec![
+                call_arg(Expr::Str(
+                    vec![StrPart::Lit(model_name.clone())],
+                    span,
+                )),
+                call_arg(Expr::ListLit(descriptors, span)),
+            ],
+            recv_type: None,
+            resolved_ret: None,
+            operator_rhs: None,
+            checked_widen: false,
+        };
+        let input = Expr::OrFallback {
+            value: Box::new(input_call),
+            fallback: OrFallback::Panic {
+                name_span: span,
+                args: vec![call_arg(Expr::Str(
+                    vec![StrPart::Lit("web.form could not construct its derived input".to_string())],
+                    span,
+                ))],
+            },
+            is_option: false,
+            span,
+        };
+        *args = vec![
+            call_arg(input),
+            call_arg(Expr::Str(vec![StrPart::Lit(action_name)], span)),
+        ];
+        let _ = self.infer(&mut args[0].expr);
+        let _ = self.infer(&mut args[1].expr);
+        Some(typed)
+    }
+
+    /// D-FLAGSHIP-WEBAPI1=A: resolve the element type for the generic web
+    /// suite calls in one sema path. The foundation rows own lookup and
+    /// arity; this path owns the resolved Jet return shape.
+    fn infer_web_generic_core_call(
+        &mut self,
+        module: &str,
+        name: &str,
+        type_args: &[Type],
+        span: Span,
+        args: &mut [crate::AST::CallArg],
+    ) -> Option<Type> {
+        if !matches!(
+            (module, name),
+            ("core.web.table",
+                "new" | "new_keyed" | "column" | "with_column" | "with_server_page"
+                    | "state" | "facts" | "keys" | "page_state" | "sort" | "filter" | "page"
+                    | "sort_by" | "filter_by" | "paginate" | "set_rows" | "set_selected"
+                    | "toggle_selection" | "clear_selection" | "focus" | "clear_focus" | "focused_key"
+                    | "selected_keys" | "selected_rows"
+                    | "insert_row" | "replace_row" | "update_row" | "remove_row"
+                    | "first_page" | "next_page" | "last_page" | "visible_rows")
+                | ("core.web.virtual",
+                    "window" | "window_measured" | "slice" | "indices"
+                        | "plan" | "plan_measured" | "plan_from_sizes" | "plan_indices"
+                        | "plan_slice" | "plan_viewport" | "plan_measure"
+                        | "plan_viewport_state" | "plan_scroll_to" | "plan_resize"
+                        | "plan_viewport_measure" | "plan_facts")
+                | ("core.web.store",
+                    "new" | "with_history" | "value" | "signal" | "state_signal"
+                        | "transaction" | "update" | "batch"
+                        | "set" | "set_state" | "optimistic" | "patch" | "patch_generation"
+                        | "patch_transaction" | "patch_active" | "patch_commit" | "patch_rollback"
+                        | "back" | "forward" | "jump" | "scrub" | "restore" | "history"
+                        | "history_at" | "events" | "events_since" | "clear_history"
+                        | "history_enabled" | "history_limit" | "set_history_limit" | "cursor"
+                        | "current_generation" | "subscribe" | "subscribe_selector"
+                        | "subscription_unsubscribe" | "subscription_active" | "derived" | "selector"
+                        | "inspect" | "facts_json" | "event_json")
+        ) {
+            return None;
+        }
+        let expected = match (module, name) {
+            ("core.web.table", "new") => 2,
+            ("core.web.table", "new_keyed" | "column" | "sort_by" | "filter_by" | "paginate"
+                | "replace_row" | "update_row") => 3,
+            ("core.web.table", "with_column" | "with_server_page" | "set_rows"
+                | "insert_row" | "visible_rows") => 2,
+            ("core.web.table", "state" | "facts" | "keys" | "page_state" | "filter"
+                | "clear_selection" | "selected_keys" | "selected_rows" | "clear_focus" | "focused_key"
+                | "first_page" | "next_page" | "last_page") => 1,
+            ("core.web.table", "focus") => 2,
+            ("core.web.table", "set_selected") => 3,
+            ("core.web.table", "toggle_selection" | "remove_row") => 2,
+            ("core.web.table", "sort" | "page") => 3,
+            ("core.web.virtual", "window") => 5,
+            ("core.web.virtual", "window_measured") => 6,
+            ("core.web.virtual", "slice" | "plan_slice" | "plan_scroll_to") => 2,
+            ("core.web.virtual", "plan_resize" | "plan_viewport_measure") => 3,
+            ("core.web.virtual", "indices" | "plan_indices" | "plan_viewport" | "plan_facts"
+                | "plan_viewport_state") => 1,
+            ("core.web.virtual", "plan") => 6,
+            ("core.web.virtual", "plan_measure") => 3,
+            ("core.web.virtual", "plan_measured" | "plan_from_sizes") => 7,
+            ("core.web.store", "new") => 2,
+            ("core.web.store", "with_history") => 3,
+            ("core.web.store", "value" | "signal" | "state_signal" | "back" | "forward" | "history" | "events"
+                | "clear_history" | "history_enabled" | "history_limit" | "cursor"
+                | "current_generation" | "inspect" | "facts_json" | "event_json"
+                | "patch_generation" | "patch_transaction" | "patch_active" | "patch_commit"
+                | "patch_rollback" | "subscription_unsubscribe" | "subscription_active") => 1,
+            ("core.web.store", "transaction" | "update" | "batch" | "optimistic" | "patch") => 4,
+            ("core.web.store", "set" | "set_state" | "jump" | "scrub" | "restore"
+                | "history_at" | "events_since" | "set_history_limit") => 2,
+            ("core.web.store", "subscribe" | "derived" | "selector") => 2,
+            ("core.web.store", "subscribe_selector") => 3,
+            _ => unreachable!("web generic call was checked above"),
+        };
+        if args.len() != expected {
+            self.diags
+                .push(wrong_core_arity(name, expected, args.len(), span));
+            for arg in args.iter_mut() {
+                self.infer(&mut arg.expr);
+            }
+        }
+        let hinted = type_args.first().cloned();
+        macro_rules! web_list_element {
+            ($ty:expr) => {{
+                match $ty {
+                    Type::List(inner) => *inner,
+                    other => {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`{module}.{name}` needs a typed list, not {}", other.show()),
+                            "the web collection helpers preserve one element type".to_string(),
+                            "pass a `[T]` value".to_string(),
+                            Some(span),
+                        ));
+                        other
+                    }
+                }
+            }};
+        }
+        macro_rules! web_expect {
+            ($index:expr, $ty:expr) => {{
+                let ty = $ty;
+                if let Some(arg) = args.get_mut($index) {
+                    self.expect_core_arg(name, $index, &ty, arg);
+                }
+            }};
+        }
+        macro_rules! web_handle_element {
+            ($index:expr, $handle:literal) => {{
+                args.get_mut($index)
+                    .and_then(|arg| self.infer(&mut arg.expr))
+                    .and_then(|ty| match ty {
+                        Type::Apply { name, args } if name == $handle && args.len() == 1 => {
+                            Some(args[0].clone())
+                        }
+                        _ => None,
+                    })
+                    .or_else(|| hinted.clone())
+                    .unwrap_or(Type::Int)
+            }};
+        }
+        match (module, name) {
+            ("core.web.table", "new") => {
+                web_expect!(0, Type::String);
+                let row = hinted.unwrap_or_else(|| {
+                    args.get_mut(1)
+                        .and_then(|arg| self.infer(&mut arg.expr))
+                        .and_then(|ty| match ty {
+                            Type::List(inner) => Some(*inner),
+                            _ => None,
+                        })
+                        .unwrap_or(Type::Int)
+                });
+                web_expect!(1, Type::List(Box::new(row.clone())));
+                Some(web_apply("WebTable", row))
+            }
+            ("core.web.table", "column") => {
+                web_expect!(0, Type::String);
+                web_expect!(1, Type::String);
+                let row = hinted
+                    .or_else(|| {
+                        args.get_mut(2)
+                            .and_then(|arg| self.infer(&mut arg.expr))
+                            .and_then(|ty| match ty {
+                                Type::Fn { params, .. } => params.first().cloned(),
+                                _ => None,
+                            })
+                    })
+                    .unwrap_or(Type::Int);
+                if let Some(column_name) = args.get(0).and_then(|arg| literal_string_value(&arg.expr)) {
+                    let mut schema = &row;
+                    while let Type::Tagged { inner, .. } = schema {
+                        schema = inner.as_ref();
+                    }
+                    let span = args.get(0).map(|arg| arg.span).unwrap_or(span);
+                    let Some(type_name) = (match schema {
+                        Type::Named(name) | Type::Apply { name, .. } => Some(name.as_str()),
+                        _ => None,
+                    }) else {
+                        self.diags.push(Diagnostic::error(
+                            "E2475",
+                            format!(
+                                "table column `{column_name}` needs a declared row schema, got `{}`",
+                                schema.show()
+                            ),
+                            "table columns are checked against row fields before a renderer can consume them"
+                                .to_string(),
+                            "declare a row struct, then use one of its fields as the column name"
+                                .to_string(),
+                            Some(span),
+                        ));
+                        return Some(web_apply("WebTableColumn", row));
+                    };
+                    let Some(fields) = self
+                        .struct_fields_for_type_name(type_name)
+                        .map(|fields| fields.to_vec())
+                    else {
+                        self.diags.push(Diagnostic::error(
+                            "E2475",
+                            format!(
+                                "table column `{column_name}` needs fields from row type `{type_name}`"
+                            ),
+                            "a typed table column must resolve against a declared row schema"
+                                .to_string(),
+                            "declare the row fields before constructing the table column".to_string(),
+                            Some(span),
+                        ));
+                        return Some(web_apply("WebTableColumn", row));
+                    };
+                    if !fields.iter().any(|(field, _, _)| field == &column_name) {
+                        let known = fields
+                            .iter()
+                            .map(|(field, _, _)| field.clone())
+                            .collect::<Vec<_>>();
+                        let suggestion = suggest_field(&column_name, &known);
+                        let what = suggestion
+                            .as_ref()
+                            .map(|field| {
+                                format!(
+                                    "table column `{column_name}` is not a field on `{type_name}`; did you mean `{field}`?"
+                                )
+                            })
+                            .unwrap_or_else(|| {
+                                format!(
+                                    "table column `{column_name}` is not a field on `{type_name}`"
+                                )
+                            });
+                        let fix = suggestion
+                            .as_ref()
+                            .map(|field| format!("rename the column to the existing field `{field}`"))
+                            .unwrap_or_else(|| {
+                                format!(
+                                    "rename the column to one of the existing fields: {}",
+                                    known.join(", ")
+                                )
+                            });
+                        self.diags.push(Diagnostic::error(
+                            "E2475",
+                            what,
+                            "the table keeps one row schema for sorting, filtering, and every renderer"
+                                .to_string(),
+                            fix,
+                            Some(span),
+                        ));
+                    }
+                }
+                web_expect!(2, web_callback(row.clone(), Type::String));
+                Some(web_apply("WebTableColumn", row))
+            }
+            ("core.web.table", "sort") => {
+                let Some(row) = hinted.or_else(|| {
+                    args.get_mut(0)
+                        .and_then(|arg| self.infer(&mut arg.expr))
+                        .map(|ty| web_list_element!(ty))
+                }) else {
+                    return None;
+                };
+                web_expect!(0, Type::List(Box::new(row.clone())));
+                web_expect!(1, Type::Bool);
+                web_expect!(2, web_callback(row.clone(), Type::String));
+                Some(Type::List(Box::new(row)))
+            }
+            ("core.web.table", "filter") => {
+                let Some(row) = hinted.or_else(|| {
+                    args.get_mut(0)
+                        .and_then(|arg| self.infer(&mut arg.expr))
+                        .map(|ty| web_list_element!(ty))
+                }) else {
+                    return None;
+                };
+                web_expect!(0, Type::List(Box::new(row.clone())));
+                web_expect!(1, web_callback(row.clone(), Type::Bool));
+                Some(Type::List(Box::new(row)))
+            }
+            ("core.web.table", "page") => {
+                let Some(row) = hinted.or_else(|| {
+                    args.get_mut(0)
+                        .and_then(|arg| self.infer(&mut arg.expr))
+                        .map(|ty| web_list_element!(ty))
+                }) else {
+                    return None;
+                };
+                web_expect!(0, Type::List(Box::new(row.clone())));
+                web_expect!(1, Type::Int);
+                web_expect!(2, Type::Int);
+                Some(web_apply("WebTablePage", row))
+            }
+            ("core.web.table", "new_keyed") => {
+                web_expect!(0, Type::String);
+                let row = hinted.clone().or_else(|| {
+                    args.get_mut(1)
+                        .and_then(|arg| self.infer(&mut arg.expr))
+                        .and_then(|ty| match ty {
+                            Type::List(inner) => Some(*inner),
+                            _ => None,
+                        })
+                }).unwrap_or(Type::Int);
+                web_expect!(1, Type::List(Box::new(row.clone())));
+                web_expect!(2, web_callback(row.clone(), Type::String));
+                Some(web_apply("WebTable", row))
+            }
+            ("core.web.table", "with_column") => {
+                let row = web_handle_element!(0, "WebTable");
+                web_expect!(0, web_apply("WebTable", row.clone()));
+                web_expect!(1, web_apply("WebTableColumn", row.clone()));
+                Some(web_apply("WebTable", row))
+            }
+            ("core.web.table", "with_server_page") => {
+                let row = web_handle_element!(0, "WebTable");
+                web_expect!(0, web_apply("WebTable", row.clone()));
+                web_expect!(1, web_callback(
+                    Type::Named("WebTableState".to_string()),
+                    web_callback_result(web_apply("WebTablePage", row.clone())),
+                ));
+                Some(web_apply("WebTable", row))
+            }
+            ("core.web.table", "state" | "facts" | "keys" | "page_state") => {
+                let row = web_handle_element!(0, "WebTable");
+                web_expect!(0, web_apply("WebTable", row.clone()));
+                Some(match name {
+                    "state" => Type::Named("WebTableState".to_string()),
+                    "facts" => Type::String,
+                    "keys" => web_result(Type::List(Box::new(Type::String))),
+                    "page_state" => web_result(web_apply("WebTablePage", row)),
+                    _ => unreachable!(),
+                })
+            }
+            ("core.web.table", "sort_by" | "filter_by") => {
+                let row = web_handle_element!(0, "WebTable");
+                web_expect!(0, web_apply("WebTable", row.clone()));
+                web_expect!(1, Type::String);
+                match name {
+                    "sort_by" => web_expect!(2, Type::Named("WebTableSortDirection".to_string())),
+                    "filter_by" => web_expect!(2, Type::String),
+                    _ => unreachable!(),
+                }
+                Some(web_apply("WebTable", row))
+            }
+            ("core.web.table", "paginate") => {
+                let row = web_handle_element!(0, "WebTable");
+                web_expect!(0, web_apply("WebTable", row.clone()));
+                web_expect!(1, Type::Int);
+                web_expect!(2, Type::Int);
+                Some(web_apply("WebTable", row))
+            }
+            ("core.web.table", "set_rows") => {
+                let row = web_handle_element!(0, "WebTable");
+                web_expect!(0, web_apply("WebTable", row.clone()));
+                web_expect!(1, Type::List(Box::new(row)));
+                Some(web_result(unit_ty()))
+            }
+            ("core.web.table", "set_selected" | "toggle_selection" | "remove_row") => {
+                let row = web_handle_element!(0, "WebTable");
+                web_expect!(0, web_apply("WebTable", row.clone()));
+                web_expect!(1, Type::String);
+                if name == "set_selected" {
+                    web_expect!(2, Type::Bool);
+                }
+                Some(match name {
+                    "set_selected" | "toggle_selection" => web_result(web_apply("WebTable", row)),
+                    "remove_row" => web_result(row),
+                    _ => unreachable!(),
+                })
+            }
+            ("core.web.table", "focus" | "clear_focus" | "focused_key") => {
+                let row = web_handle_element!(0, "WebTable");
+                web_expect!(0, web_apply("WebTable", row.clone()));
+                if name == "focus" {
+                    web_expect!(1, Type::String);
+                }
+                Some(match name {
+                    "focus" | "clear_focus" => web_apply("WebTable", row),
+                    "focused_key" => Type::Option(Box::new(Type::String)),
+                    _ => unreachable!(),
+                })
+            }
+            ("core.web.table", "clear_selection" | "selected_keys" | "selected_rows"
+                | "first_page" | "next_page" | "last_page") => {
+                let row = web_handle_element!(0, "WebTable");
+                web_expect!(0, web_apply("WebTable", row.clone()));
+                Some(match name {
+                    "clear_selection" | "first_page" | "next_page" => {
+                        if name == "clear_selection" {
+                            web_apply("WebTable", row)
+                        } else {
+                            web_apply("WebTable", row)
+                        }
+                    }
+                    "last_page" => web_result(web_apply("WebTable", row)),
+                    "selected_keys" => Type::List(Box::new(Type::String)),
+                    "selected_rows" => web_result(Type::List(Box::new(web_apply(
+                        "WebTableRow",
+                        row,
+                    )))),
+                    _ => unreachable!(),
+                })
+            }
+            ("core.web.table", "insert_row") => {
+                let row = web_handle_element!(0, "WebTable");
+                web_expect!(0, web_apply("WebTable", row.clone()));
+                web_expect!(1, row);
+                Some(web_result(Type::String))
+            }
+            ("core.web.table", "replace_row" | "update_row") => {
+                let row = web_handle_element!(0, "WebTable");
+                web_expect!(0, web_apply("WebTable", row.clone()));
+                web_expect!(1, Type::String);
+                if name == "replace_row" {
+                    web_expect!(2, row);
+                } else {
+                    web_expect!(2, web_callback(row.clone(), row));
+                }
+                Some(web_result(unit_ty()))
+            }
+            ("core.web.table", "visible_rows") => {
+                let row = web_handle_element!(0, "WebTable");
+                web_expect!(0, web_apply("WebTable", row.clone()));
+                web_expect!(1, Type::Named("WebVirtualPlan".to_string()));
+                Some(web_result(Type::List(Box::new(web_apply("WebTableRow", row)))))
+            }
+            ("core.web.virtual", "slice") => {
+                let Some(row) = hinted.or_else(|| {
+                    args.get_mut(0)
+                        .and_then(|arg| self.infer(&mut arg.expr))
+                        .map(|ty| web_list_element!(ty))
+                }) else {
+                    return None;
+                };
+                web_expect!(0, Type::List(Box::new(row.clone())));
+                web_expect!(1, Type::Named("WebVirtualWindow".to_string()));
+                Some(Type::List(Box::new(row)))
+            }
+            ("core.web.virtual", "window") => {
+                for index in 0..5 {
+                    web_expect!(index, Type::Int);
+                }
+                Some(Type::Named("WebVirtualWindow".to_string()))
+            }
+            ("core.web.virtual", "window_measured") => {
+                for index in 0..5 {
+                    web_expect!(index, Type::Int);
+                }
+                web_expect!(5, Type::List(Box::new(Type::Int)));
+                Some(Type::Named("WebVirtualWindow".to_string()))
+            }
+            ("core.web.virtual", "indices") => {
+                web_expect!(0, Type::Named("WebVirtualWindow".to_string()));
+                Some(Type::List(Box::new(Type::Int)))
+            }
+            ("core.web.virtual", "plan") => {
+                for index in 0..6 {
+                    web_expect!(index, Type::Int);
+                }
+                Some(Type::Named("WebVirtualPlan".to_string()))
+            }
+            ("core.web.virtual", "plan_measured") => {
+                for index in 0..6 {
+                    web_expect!(index, Type::Int);
+                }
+                web_expect!(
+                    6,
+                    Type::List(Box::new(Type::Tuple(vec![
+                        ("index".to_string(), Box::new(Type::Int)),
+                        ("size".to_string(), Box::new(Type::Int)),
+                    ])))
+                );
+                Some(Type::Named("WebVirtualPlan".to_string()))
+            }
+            ("core.web.virtual", "plan_from_sizes") => {
+                for index in 0..6 {
+                    web_expect!(index, Type::Int);
+                }
+                web_expect!(6, Type::List(Box::new(Type::Int)));
+                Some(Type::Named("WebVirtualPlan".to_string()))
+            }
+            ("core.web.virtual", "plan_measure") => {
+                web_expect!(0, Type::Named("WebVirtualPlan".to_string()));
+                web_expect!(1, Type::Int);
+                web_expect!(2, Type::Int);
+                Some(Type::Named("WebVirtualPlan".to_string()))
+            }
+            ("core.web.virtual", "plan_slice") => {
+                let Some(row) = hinted.clone().or_else(|| {
+                    args.get_mut(0)
+                        .and_then(|arg| self.infer(&mut arg.expr))
+                        .map(|ty| web_list_element!(ty))
+                }) else {
+                    return None;
+                };
+                web_expect!(0, Type::List(Box::new(row.clone())));
+                web_expect!(1, Type::Named("WebVirtualPlan".to_string()));
+                Some(Type::List(Box::new(row)))
+            }
+            ("core.web.virtual", "plan_indices") => {
+                web_expect!(0, Type::Named("WebVirtualPlan".to_string()));
+                Some(Type::List(Box::new(Type::Int)))
+            }
+            ("core.web.virtual", "plan_viewport") => {
+                web_expect!(0, Type::Named("WebVirtualPlan".to_string()));
+                Some(Type::Named("WebVirtualPlanViewport".to_string()))
+            }
+            ("core.web.virtual", "plan_viewport_state") => {
+                web_expect!(0, Type::Named("WebVirtualPlanViewport".to_string()));
+                Some(Type::Named("WebVirtualPlan".to_string()))
+            }
+            ("core.web.virtual", "plan_scroll_to") => {
+                web_expect!(0, Type::Named("WebVirtualPlanViewport".to_string()));
+                web_expect!(1, Type::Int);
+                Some(unit_ty())
+            }
+            ("core.web.virtual", "plan_resize") => {
+                web_expect!(0, Type::Named("WebVirtualPlanViewport".to_string()));
+                web_expect!(1, Type::Int);
+                web_expect!(2, Type::Int);
+                Some(unit_ty())
+            }
+            ("core.web.virtual", "plan_viewport_measure") => {
+                web_expect!(0, Type::Named("WebVirtualPlanViewport".to_string()));
+                web_expect!(1, Type::Int);
+                web_expect!(2, Type::Int);
+                Some(unit_ty())
+            }
+            ("core.web.virtual", "plan_facts") => {
+                web_expect!(0, Type::Named("WebVirtualPlan".to_string()));
+                Some(Type::String)
+            }
+            ("core.web.store", "new") => {
+                web_expect!(0, Type::String);
+                let value = hinted.unwrap_or_else(|| {
+                    args.get_mut(1)
+                        .and_then(|arg| self.infer(&mut arg.expr))
+                        .unwrap_or(Type::Int)
+                });
+                web_expect!(1, value.clone());
+                Some(web_apply("WebStore", value))
+            }
+            ("core.web.store", "with_history") => {
+                web_expect!(0, Type::String);
+                let value = hinted.unwrap_or_else(|| {
+                    args.get_mut(1)
+                        .and_then(|arg| self.infer(&mut arg.expr))
+                        .unwrap_or(Type::Int)
+                });
+                web_expect!(1, value.clone());
+                web_expect!(2, Type::Int);
+                Some(web_apply("WebStore", value))
+            }
+            ("core.web.store", "transaction") => {
+                let value = hinted.unwrap_or_else(|| {
+                    args.get_mut(0)
+                        .and_then(|arg| self.infer(&mut arg.expr))
+                        .and_then(|ty| match ty {
+                            Type::Apply { name, args }
+                                if name == "WebStore" && args.len() == 1 =>
+                            {
+                                Some(args[0].clone())
+                            }
+                            _ => None,
+                        })
+                        .unwrap_or(Type::Int)
+                });
+                web_expect!(0, web_apply("WebStore", value.clone()));
+                web_expect!(1, Type::String);
+                web_expect!(2, Type::List(Box::new(Type::String)));
+                web_expect!(3, web_callback(value.clone(), unit_ty()));
+                Some(web_apply("WebStoreTransaction", value))
+            }
+            ("core.web.store", "update" | "batch") => {
+                let value = web_handle_element!(0, "WebStore");
+                web_expect!(0, web_apply("WebStore", value.clone()));
+                web_expect!(1, Type::String);
+                web_expect!(2, Type::List(Box::new(Type::String)));
+                web_expect!(3, web_callback(value.clone(), unit_ty()));
+                Some(web_apply("WebStoreTransaction", value))
+            }
+            ("core.web.store", "set" | "set_state") => {
+                let value = web_handle_element!(0, "WebStore");
+                web_expect!(0, web_apply("WebStore", value.clone()));
+                web_expect!(1, value.clone());
+                Some(web_apply("WebStoreTransaction", value))
+            }
+            ("core.web.store", "optimistic" | "patch") => {
+                let value = web_handle_element!(0, "WebStore");
+                web_expect!(0, web_apply("WebStore", value.clone()));
+                web_expect!(1, Type::String);
+                web_expect!(2, Type::List(Box::new(Type::String)));
+                web_expect!(3, web_callback(value.clone(), unit_ty()));
+                Some(web_apply("WebStorePatch", value))
+            }
+            ("core.web.store", "patch_generation" | "patch_transaction" | "patch_active"
+                | "patch_commit" | "patch_rollback") => {
+                let value = web_handle_element!(0, "WebStorePatch");
+                web_expect!(0, web_apply("WebStorePatch", value.clone()));
+                Some(match name {
+                    "patch_generation" => Type::Int,
+                    "patch_transaction" | "patch_commit" => {
+                        web_apply("WebStoreTransaction", value)
+                    }
+                    "patch_active" => Type::Bool,
+                    "patch_rollback" => Type::Option(Box::new(value)),
+                    _ => unreachable!(),
+                })
+            }
+            ("core.web.store", "value" | "signal" | "state_signal" | "back" | "forward" | "history" | "events"
+                | "clear_history" | "history_enabled" | "history_limit" | "cursor"
+                | "current_generation" | "inspect" | "facts_json" | "event_json") => {
+                let value = web_handle_element!(0, "WebStore");
+                web_expect!(0, web_apply("WebStore", value.clone()));
+                Some(match name {
+                    "value" => value,
+                    "signal" | "state_signal" => web_apply("Signal", value),
+                    "back" | "forward" => Type::Option(Box::new(value)),
+                    "history" => Type::List(Box::new(web_apply("WebStoreTransaction", value))),
+                    "events" => Type::List(Box::new(Type::Named("WebStoreEvent".to_string()))),
+                    "clear_history" => unit_ty(),
+                    "history_enabled" => Type::Bool,
+                    "history_limit" | "cursor" | "current_generation" => Type::Int,
+                    "inspect" => web_apply("WebStoreInspection", value),
+                    "facts_json" | "event_json" => Type::String,
+                    _ => unreachable!(),
+                })
+            }
+            ("core.web.store", "jump" | "scrub" | "restore" | "history_at" | "events_since"
+                | "set_history_limit") => {
+                let value = web_handle_element!(0, "WebStore");
+                web_expect!(0, web_apply("WebStore", value.clone()));
+                web_expect!(1, Type::Int);
+                Some(match name {
+                    "jump" | "scrub" | "restore" => Type::Option(Box::new(value)),
+                    "history_at" => Type::Option(Box::new(web_apply(
+                        "WebStoreTransaction",
+                        value,
+                    ))),
+                    "events_since" => Type::List(Box::new(Type::Named("WebStoreEvent".to_string()))),
+                    "set_history_limit" => unit_ty(),
+                    _ => unreachable!(),
+                })
+            }
+            ("core.web.store", "subscribe") => {
+                let value = web_handle_element!(0, "WebStore");
+                web_expect!(0, web_apply("WebStore", value.clone()));
+                web_expect!(1, web_callback(value, unit_ty()));
+                Some(Type::Named("WebStoreSubscription".to_string()))
+            }
+            ("core.web.store", "subscribe_selector") => {
+                let value = web_handle_element!(0, "WebStore");
+                let selected = args
+                    .get_mut(1)
+                    .and_then(|arg| self.infer(&mut arg.expr))
+                    .and_then(|ty| match ty {
+                        Type::Fn {
+                            params,
+                            ret: Some(ret),
+                            ..
+                        } if params.len() == 1 => Some(*ret),
+                        _ => None,
+                    })
+                    .unwrap_or(Type::Int);
+                web_expect!(0, web_apply("WebStore", value.clone()));
+                web_expect!(1, web_callback(value, selected.clone()));
+                web_expect!(2, web_callback(selected, unit_ty()));
+                Some(Type::Named("WebStoreSubscription".to_string()))
+            }
+            ("core.web.store", "subscription_unsubscribe" | "subscription_active") => {
+                web_expect!(0, Type::Named("WebStoreSubscription".to_string()));
+                Some(if name == "subscription_unsubscribe" {
+                    unit_ty()
+                } else {
+                    Type::Bool
+                })
+            }
+            ("core.web.store", "derived" | "selector") => {
+                let value = web_handle_element!(0, "WebStore");
+                let selected = args
+                    .get_mut(1)
+                    .and_then(|arg| self.infer(&mut arg.expr))
+                    .and_then(|ty| match ty {
+                        Type::Fn {
+                            params,
+                            ret: Some(ret),
+                            ..
+                        } if params.len() == 1 => Some(*ret),
+                        _ => None,
+                    })
+                    .unwrap_or(Type::Int);
+                web_expect!(0, web_apply("WebStore", value.clone()));
+                web_expect!(1, web_callback(value, selected.clone()));
+                Some(web_apply("Derived", selected))
+            }
+            _ => unreachable!("web generic call was checked above"),
+        }
+    }
+}
+
+impl<'a> Checker<'a> {
+    /// D-MODEL-PACKAGE1=A: resolve one source-declared model trait without
+    /// inventing a universal `Embedder` type. Qualified source names select a
+    /// single imported module; bare names must have one unambiguous trait owner.
+    fn model_trait_owner(&self, raw: &Type) -> Result<(usize, String), &'static str> {
+        let (qualified, leaf) = match raw {
+            Type::Named(name) => {
+                let (qualified, leaf) = name.rsplit_once('.').map_or((None, name.as_str()), |(q, l)| {
+                    (Some(q), l)
+                });
+                (qualified, leaf)
+            }
+            Type::TraitObject(names) if names.len() == 1 => (None, names[0].as_str()),
+            _ => return Err("model.open expects one trait type argument"),
+        };
+        let mut candidates = Vec::new();
+        if let Some(alias) = qualified {
+            let Some(&owner) = self.imports.get(alias) else {
+                return Err("model trait module is not imported");
+            };
+            if self
+                .modules
+                .is_some_and(|modules| modules[owner].trait_reg.traits.contains_key(leaf))
+            {
+                candidates.push((owner, leaf.to_string()));
+            }
+        } else {
+            if self.trait_reg.traits.contains_key(leaf) {
+                candidates.push((self.module_idx, leaf.to_string()));
+            }
+            if let Some(modules) = self.modules {
+                for (owner, module) in modules.iter().enumerate() {
+                    if owner != self.module_idx
+                        && module.trait_reg.traits.contains_key(leaf)
+                    {
+                        candidates.push((owner, leaf.to_string()));
+                    }
+                }
+            }
+        }
+        candidates.sort_unstable();
+        candidates.dedup();
+        match candidates.as_slice() {
+            [(owner, name)] => Ok((*owner, name.clone())),
+            [] => Err("model trait is not an exported source declaration"),
+            _ => Err("model trait name is ambiguous"),
+        }
+    }
+
+    fn infer_model_open(
+        &mut self,
+        span: Span,
+        type_args: &[Type],
+        args: &mut [crate::AST::CallArg],
+    ) -> Option<Type> {
+        let invalid = |checker: &mut Self, message: String, detail: String, fix: String| {
+            checker
+                .diags
+                .push(Diagnostic::error("E-MODEL-SIGNATURE", message, detail, fix, Some(span)));
+            None
+        };
+        if args.len() != 1 {
+            self.diags
+                .push(wrong_core_arity("open", 1, args.len(), span));
+            for arg in args {
+                self.infer(&mut arg.expr);
+            }
+            return None;
+        }
+        let Some(raw_trait) = exactly_one_type_arg(self, "models.open", type_args, span) else {
+            self.infer(&mut args[0].expr);
+            return None;
+        };
+        self.expect_core_arg("open", 0, &Type::String, &mut args[0]);
+        let Some(output) = literal_string_value(&args[0].expr) else {
+            return invalid(
+                self,
+                "`models.open` needs a literal output name".to_string(),
+                "model output selection is checked before provider execution".to_string(),
+                "write `models.open<Trait>(\"output\")` with a package output name".to_string(),
+            );
+        };
+        let (owner, trait_name) = match self.model_trait_owner(&raw_trait) {
+            Ok(owner) => owner,
+            Err(reason) => {
+                return invalid(
+                    self,
+                    format!("cannot bind model trait `{}`", raw_trait.name()),
+                    reason.to_string(),
+                    "export one public trait with the declared model signature and import its module".to_string(),
+                )
+            }
+        };
+        let Some(modules) = self.modules else {
+            return invalid(
+                self,
+                "model source binding is unavailable".to_string(),
+                "the checker has no loaded module graph".to_string(),
+                "load the package source before opening its model output".to_string(),
+            );
+        };
+        let items = modules[owner].items.clone();
+        let Some(trait_def) = items.iter().find_map(|item| match item {
+            crate::AST::Item::Trait(definition) if definition.name == trait_name => {
+                Some(definition.clone())
+            }
+            _ => None,
+        }) else {
+            return invalid(
+                self,
+                format!("model trait `{trait_name}` has no source declaration"),
+                "model signatures bind only to ordinary exported Jet traits".to_string(),
+                "declare `pub trait TraitName { fn embed(self, documents: [String]) Batch !Err }`".to_string(),
+            );
+        };
+        if !trait_def.is_pub {
+            return invalid(
+                self,
+                format!("model trait `{trait_name}` is not public"),
+                "a model provider boundary cannot expose a private trait".to_string(),
+                "mark the source trait `pub`".to_string(),
+            );
+        }
+        let Some(method) = trait_def
+            .methods
+            .iter()
+            .find(|method| method.name == "embed")
+            .cloned()
+        else {
+            return invalid(
+                self,
+                format!("model trait `{trait_name}` has no `embed` method"),
+                "the checked model signature is document-to-batch".to_string(),
+                "declare `fn embed(self, documents: [String]) Batch !Err`".to_string(),
+            );
+        };
+        if method.params.len() != 2
+            || method.params[0].name != "self"
+            || method.params[1].name != "documents"
+            || method.params[1].variadic
+            || self.resolve_type(method.params[1].ty.clone())
+                != Type::List(Box::new(Type::String))
+        {
+            return invalid(
+                self,
+                format!("model trait `{trait_name}` has an incompatible `embed` input"),
+                "the model boundary requires `embed(self, documents: [String])`".to_string(),
+                "use exactly one `[String]` documents parameter after `self`".to_string(),
+            );
+        }
+        let Some(Type::Result { ok, err }) = method.return_type.as_ref() else {
+            return invalid(
+                self,
+                format!("model trait `{trait_name}` has an incompatible `embed` result"),
+                "provider failure must remain the explicit `!Err` result domain".to_string(),
+                "declare `EmbeddingBatch !Err` as the method result".to_string(),
+            );
+        };
+        let Some(batch_name) = model_type_leaf(ok) else {
+            return invalid(
+                self,
+                format!("model trait `{trait_name}` has no named batch carrier"),
+                "the provider must return one exported batch struct".to_string(),
+                "return the exported batch carrier from `embed`".to_string(),
+            );
+        };
+        if !matches!(err.as_ref(), Type::Named(name) if name == crate::Syntax::TYPE_ERR) {
+            return invalid(
+                self,
+                format!("model trait `{trait_name}` has a non-`Err` failure domain"),
+                "model provider failures use the ordinary `Err` domain".to_string(),
+                "declare the method as `... Batch !Err`".to_string(),
+            );
+        }
+        let matching_batches = items.iter().filter_map(|item| match item {
+            crate::AST::Item::Struct(definition)
+                if definition.name == batch_name && definition.is_pub =>
+            {
+                Some(definition)
+            }
+            _ => None,
+        }).collect::<Vec<_>>();
+        if matching_batches.len() != 1 {
+            return invalid(
+                self,
+                format!("model batch carrier `{batch_name}` is not uniquely exported"),
+                "exactly one public source struct must carry provider vectors".to_string(),
+                "export exactly one `pub struct Batch` for this model trait".to_string(),
+            );
+        }
+        let batch = matching_batches[0];
+        let Some(values_ty) = batch.fields.iter().find(|field| field.name == "values") else {
+            return invalid(
+                self,
+                format!("model batch carrier `{batch_name}` has no `values` field"),
+                "the provider returns one dense floating-point vector per document".to_string(),
+                "add a public `values: [[Float]]` field to the batch carrier".to_string(),
+            );
+        };
+        if self.resolve_type(values_ty.ty.clone())
+            != Type::List(Box::new(Type::List(Box::new(Type::Float))))
+        {
+            return invalid(
+                self,
+                format!("model batch carrier `{batch_name}` has an incompatible `values` field"),
+                "model providers expose checked dense vectors as `[[Float]]`".to_string(),
+                "declare `pub values: [[Float]]` on the batch carrier".to_string(),
+            );
+        }
+        let Some(space_ty) = batch.fields.iter().find(|field| field.name == "space") else {
+            return invalid(
+                self,
+                format!("model batch carrier `{batch_name}` has no `space` witness"),
+                "embedding vectors must carry their checked model-space identity".to_string(),
+                "add a private `space: Space` field to the batch carrier".to_string(),
+            );
+        };
+        if space_ty.is_pub || space_ty.is_package_pub {
+            return invalid(
+                self,
+                format!("model batch carrier `{batch_name}` exposes its space witness"),
+                "safe consumers must not retag a provider-created embedding space".to_string(),
+                "keep the `space` field private and expose only checked accessors".to_string(),
+            );
+        }
+        let Some(space_name) = model_type_leaf(&space_ty.ty) else {
+            return invalid(
+                self,
+                format!("model batch carrier `{batch_name}` has an unnamed space type"),
+                "the space witness must be one exported source struct".to_string(),
+                "type the private `space` field as the exported space carrier".to_string(),
+            );
+        };
+        let matching_spaces = items.iter().filter_map(|item| match item {
+            crate::AST::Item::Struct(definition)
+                if definition.name == space_name && definition.is_pub =>
+            {
+                Some(definition)
+            }
+            _ => None,
+        }).collect::<Vec<_>>();
+        if matching_spaces.len() != 1 {
+            return invalid(
+                self,
+                format!("model space carrier `{space_name}` is not uniquely exported"),
+                "exactly one public source struct must carry model identity".to_string(),
+                "export exactly one `pub struct Space` for this model trait".to_string(),
+            );
+        }
+        let space = matching_spaces[0];
+        for (required, expected) in [
+            ("model_digest", Type::String),
+            ("dimension", Type::Int),
+            ("metric", Type::String),
+            ("normalization", Type::String),
+        ] {
+            let Some(field) = space.fields.iter().find(|field| field.name == required) else {
+                return invalid(
+                    self,
+                    format!("model space carrier `{space_name}` is missing `{required}`"),
+                    "the embedding-space identity is part of the checked carrier".to_string(),
+                    "add the four private model identity fields".to_string(),
+                );
+            };
+            if field.is_pub || field.is_package_pub {
+                return invalid(
+                    self,
+                    format!("model space field `{required}` is public"),
+                    "safe consumers cannot relabel model identity metadata".to_string(),
+                    "keep model-space identity fields private".to_string(),
+                );
+            }
+            if self.resolve_type(field.ty.clone()) != expected {
+                return invalid(
+                    self,
+                    format!("model space field `{required}` has an incompatible type"),
+                    "model identity fields have fixed String/Int carrier types".to_string(),
+                    format!("declare `{required}` with the checked model-space type"),
+                );
+            }
+        }
+        let matching_outputs = self
+            .model_outputs
+            .iter()
+            .filter(|fact| {
+                fact.output == output
+                    && fact.signature_name.as_deref() == Some(trait_name.as_str())
+            })
+            .collect::<Vec<_>>();
+        if matching_outputs.is_empty() {
+            return invalid(
+                self,
+                format!("model output `{output}` does not bind trait `{trait_name}`"),
+                "the package output's `name` must select exactly one source trait".to_string(),
+                format!("declare `.Model {{ name: \"{trait_name}\", ... }}` for this output"),
+            );
+        }
+        if matching_outputs.len() != 1 {
+            return invalid(
+                self,
+                format!("model output `{output}` binds trait `{trait_name}` more than once"),
+                "missing, ambiguous, and conflicting model exports fail before execution".to_string(),
+                "keep one package output and one source trait binding".to_string(),
+            );
+        }
+        self.record_effect("IO", span);
+        Some(result_ty(
+            Type::TraitObject(vec![trait_name]),
+            Type::Named(crate::Syntax::TYPE_ERR.to_string()),
+        ))
+    }
+
+    fn infer_browser_test_core_call(
+        &mut self,
+        module: &str,
+        name: &str,
+        span: Span,
+        args: &mut [crate::AST::CallArg],
+    ) -> Option<Type> {
+        if module != "core.web.browser" {
+            return None;
+        }
+        let browser_error = Type::Named("BrowserError".to_string());
+        let config = Type::Named("BrowserTestConfig".to_string());
+        let fixture = Type::Named("BrowserTestFixture".to_string());
+        let report = Type::Named("BrowserTestReport".to_string());
+        let case = Type::Named("BrowserTestCase".to_string());
+        let server = Type::Named("BrowserTestServer".to_string());
+        let string = Type::String;
+        let int = Type::Int;
+        let expected = match name {
+            "config" | "config_from_env" => vec![],
+            "begin_named" => vec![
+                config.clone(),
+                string.clone(),
+                string.clone(),
+                int.clone(),
+                string.clone(),
+                int.clone(),
+                int.clone(),
+            ],
+            "generate_source" => vec![string.clone(), string.clone(), string.clone()],
+            "selected" => vec![config.clone(), string.clone()],
+            "report_new" => vec![config.clone()],
+            "report_add_case" => vec![report.clone(), case],
+            "report_json" | "report_text" | "report_html" => vec![report.clone()],
+            "write_report" => vec![report.clone(), string.clone()],
+            "report_exit_code" => vec![report.clone()],
+            "server_start" => vec![config],
+            "watch_changed" => vec![string, int],
+            _ => return None,
+        };
+        let result = match name {
+            "config" | "config_from_env" => Type::Result {
+                ok: Box::new(Type::Named("BrowserTestConfig".to_string())),
+                err: Box::new(browser_error.clone()),
+            },
+            "begin_named" => Type::Result {
+                ok: Box::new(fixture),
+                err: Box::new(browser_error.clone()),
+            },
+            "generate_source" => Type::Result {
+                ok: Box::new(Type::String),
+                err: Box::new(browser_error.clone()),
+            },
+            "selected" => Type::Bool,
+            "report_new" => report.clone(),
+            "report_add_case" => report.clone(),
+            "report_json" | "report_text" | "report_html" => Type::String,
+            "write_report" => Type::Result {
+                ok: Box::new(unit_ty()),
+                err: Box::new(browser_error.clone()),
+            },
+            "report_exit_code" => Type::Int,
+            "server_start" => Type::Result {
+                ok: Box::new(server),
+                err: Box::new(browser_error.clone()),
+            },
+            "watch_changed" => Type::Result {
+                ok: Box::new(Type::Bool),
+                err: Box::new(browser_error),
+            },
+            _ => unreachable!(),
+        };
+        if args.len() != expected.len() {
+            self.diags
+                .push(wrong_core_arity(name, expected.len(), args.len(), span));
+            for arg in args {
+                self.infer(&mut arg.expr);
+            }
+            return Some(result);
+        }
+        for (index, expected) in expected.iter().enumerate() {
+            self.expect_core_arg(name, index, expected, &mut args[index]);
+        }
+        Some(result)
+    }
+
+}
+
+fn core_call_argument_convention(
+    module: &str,
+    name: &str,
+    index: usize,
+) -> AccessConvention {
+    Syntax::core_call(module, name)
+        .and_then(|row| row.signature.borrow_mask.get(index).copied())
+        .map_or(AccessConvention::Read, |borrowed| {
+            if borrowed {
+                AccessConvention::Read
+            } else {
+                AccessConvention::Move
+            }
+        })
+}
+
+impl<'a> Checker<'a> {
+    /// Infer a callback retained by a reactive/UI host. Retention owns the
+    /// lambda's captures, and the host ABI uses the checked SendFn carrier;
+    /// ordinary escaping inference would otherwise leave borrowed/Rc facts
+    /// behind for MIR to erase.
+    fn infer_retained_callback(
+        &mut self,
+        expr: &mut Expr,
+        expected: Option<&Type>,
+    ) -> Option<Type> {
+        let saved_escapes = self.lambda_escapes;
+        self.lambda_escapes = true;
+        let ty = expected
+            .map(|expected| self.infer_with_expected(expr, expected))
+            .unwrap_or_else(|| self.infer(expr));
+        self.lambda_escapes = saved_escapes;
+        if let Some(ty) = ty.as_ref() {
+            self.check_stream_callback_expr(expr, ty);
+        }
+        ty
+    }
+
     pub(crate) fn infer_core_call(
         &mut self,
         module: &str,
@@ -1060,15 +2662,29 @@ impl<'a> Checker<'a> {
         if let Some(alias) = alias.filter(|_| core_call_is_known(module, name)) {
             self.record_import_alias_reference(alias, alias_span);
         }
+        let fixed_sig =
+            resolved_core_fixed_sig(module, name, type_args, span, &mut self.diags);
+        if module == "core.web" && name == "form" {
+            return self.infer_web_form_core_call(span, args);
+        }
+        if module == "core.models" && name == "open" {
+            return self.infer_model_open(span, type_args, args);
+        }
         // D-FRONTENDAPI1=A: the compiler surface is a read-only
-        // compile-time value API. It is intentionally handled before the
-        // ordinary Core effect/fixed-signature tables so it cannot become
+        // compile-time value API. It is intentionally handled before
+        // the ordinary Core effect/fixed-signature tables so it cannot become
         // a runtime or ambient fallback by accident.
         if module == "core.compiler" {
             if !matches!(
                 name,
-                "lex" | "parse" | "check" | "source_map" | "manifest" | "package"
-                    | "lock" | "profiles"
+                "lex"
+                    | "parse"
+                    | "check"
+                    | "source_map"
+                    | "manifest"
+                    | "package"
+                    | "lock"
+                    | "profiles"
             ) {
                 self.diags.push(unknown_core_item(module, name, span));
                 for arg in args.iter_mut() {
@@ -1107,6 +2723,45 @@ impl<'a> Checker<'a> {
                 self.expect_core_arg(name, 0, &input_type, arg);
             }
             return Some(core_compiler_return(name));
+        }
+        // D-BUILDQUERY1=A: checked build graph queries are read-only values
+        // available only while the selected build/comptime program runs.
+        if module == "core.build" {
+            if !matches!(name, "graph" | "receipt_diff") {
+                self.diags.push(unknown_core_item(module, name, span));
+                for arg in args.iter_mut() {
+                    self.infer(&mut arg.expr);
+                }
+                return Some(core_build_return("unknown"));
+            }
+            if !self.in_comptime && !self.compiler_api_allowed {
+                self.diags.push(Diagnostic::error(
+                    "E0956",
+                    format!("`core.build.{name}` is compile-time only"),
+                    "build graph values are checked facts, not a runtime service".to_string(),
+                    "move this call into `fn build` or a `comptime` binding".to_string(),
+                    Some(span),
+                ));
+            }
+            let expected = if name == "graph" {
+                vec![Type::Named(Syntax::TYPE_BUILD_PLAN.to_string())]
+            } else {
+                vec![
+                    Type::Named(Syntax::TYPE_BUILD_GRAPH.to_string()),
+                    Type::Named(Syntax::TYPE_BUILD_GRAPH.to_string()),
+                ]
+            };
+            if args.len() != expected.len() {
+                self.diags.push(wrong_core_arity(name, expected.len(), args.len(), span));
+            }
+            for (index, arg) in args.iter_mut().enumerate() {
+                if let Some(expected) = expected.get(index) {
+                    self.expect_core_arg(name, index, expected, arg);
+                } else {
+                    self.infer(&mut arg.expr);
+                }
+            }
+            return Some(core_build_return(name));
         }
         // D-BENCH-KEEP1=A: `keep` is the one generic identity sink. Sema
         // infers its argument and returns that exact type; no engine gets
@@ -1190,11 +2845,14 @@ impl<'a> Checker<'a> {
             self.check_decodable(&row, span);
             self.check_encodable(&row, span);
             return Some(result_ty(
-                Type::List(Box::new(row)),
+                Type::Apply {
+                    name: "Query".to_string(),
+                    args: vec![row],
+                },
                 Type::List(Box::new(Type::Named("FieldError".to_string()))),
             ));
         }
-        if module == "core.data" && name == "query" {
+        if module == "core.data" && name == "track" {
             if args.len() != 2 {
                 self.diags.push(wrong_core_arity(name, 2, args.len(), span));
             }
@@ -1203,24 +2861,110 @@ impl<'a> Checker<'a> {
                 Some(other) => {
                     self.diags.push(Diagnostic::error(
                         "E0112",
-                        format!("`data.query` needs a typed row list, not {}", other.show()),
-                        "the in-memory SQL door preserves one typed row shape".to_string(),
-                        "pass a `[Row]` value".to_string(),
+                        format!("`data.track` needs a typed row list, not {}", other.show()),
+                        "a tracked source owns one typed row shape and one nominal key".to_string(),
+                        "pass a `[Row]` value and a key callback".to_string(),
                         Some(span),
                     ));
                     Type::Int
                 }
                 None => Type::Int,
             };
-            if let Some(query) = args.get_mut(1) {
-                self.check_analytics_sql_schema(&row, &query.expr);
-                self.expect_core_arg(name, 1, &Type::Named("SQL".to_string()), query);
-            }
-            self.check_encodable(&row, span);
+            let key = args
+                .get_mut(1)
+                .and_then(|callback| self.infer_query_callback(name, &row, callback))
+                .unwrap_or(Type::Int);
             return Some(result_ty(
-                Type::List(Box::new(row)),
-                Type::List(Box::new(Type::Named("FieldError".to_string()))),
+                Type::Apply {
+                    name: "DataTracked".to_string(),
+                    args: vec![row, key],
+                },
+                Type::Named("DataError".to_string()),
             ));
+        }
+        if module == "core.data" && name == "query" {
+            if args.len() != 1 {
+                self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+            }
+            let row = match args.get_mut(0).and_then(|arg| self.infer(&mut arg.expr)) {
+                Some(Type::List(inner)) => *inner,
+                Some(Type::Apply {
+                    name: tracked_name,
+                    args: tracked_args,
+                }) if tracked_name == "DataTracked" && tracked_args.len() == 2 => {
+                    tracked_args[0].clone()
+                }
+                Some(Type::Apply { name, args }) if name == "DataStream" && args.len() == 1 => {
+                    args[0].clone()
+                }
+                Some(other) => {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!("`data.query` needs a typed row list or stream, not {}", other.show()),
+                        "a query defers calculations over one typed row shape".to_string(),
+                        "pass a `[Row]` value or `DataStream<Row>`".to_string(),
+                        Some(span),
+                    ));
+                    Type::Int
+                }
+                None => Type::Int,
+            };
+            return Some(Type::Apply {
+                name: "Query".to_string(),
+                args: vec![row],
+            });
+        }
+        // D-DATAFLOW1=A: typed stream consumers preserve the DataStream<T>
+        // row shape while keeping collection fallible and one-shot.
+        if module == "core.data.stream" {
+            if !type_args.is_empty() {
+                self.diags.push(Diagnostic::error(
+                    "E0119",
+                    format!("`{name}` does not take an explicit type argument"),
+                    "stream operations read their row type from the DataStream<T> value"
+                        .to_string(),
+                    "remove the type argument and pass a concrete DataStream<T>".to_string(),
+                    Some(span),
+                ));
+            }
+            let expected = 1;
+            if args.len() != expected {
+                self.diags.push(wrong_core_arity(name, expected, args.len(), span));
+            }
+            let row = match args.get_mut(0).and_then(|arg| self.infer(&mut arg.expr)) {
+                Some(Type::Apply { name, args }) if name == "DataStream" && args.len() == 1 => {
+                    args.into_iter().next().unwrap_or(Type::Named("Unknown".to_string()))
+                }
+                Some(other) => {
+                    self.diags.push(Diagnostic::error(
+                        "E0112",
+                        format!("`{name}` expects a `DataStream<T>` handle, got {}", other.show()),
+                        "stream operations preserve the row type carried by the stream".to_string(),
+                        "pass a `DataStream<T>` value as the first argument".to_string(),
+                        Some(span),
+                    ));
+                    Type::Named("Unknown".to_string())
+                }
+                None => Type::Named("Unknown".to_string()),
+            };
+            for arg in args.iter_mut().skip(1) {
+                self.infer(&mut arg.expr);
+            }
+            return Some(match name {
+                "next" => result_ty(
+                    Type::Option(Box::new(row)),
+                    Type::Named("DataError".to_string()),
+                ),
+                "collect" => result_ty(
+                    Type::List(Box::new(row)),
+                    Type::Named("DataError".to_string()),
+                ),
+                "cancel" => unit_ty(),
+                _ => {
+                    self.diags.push(unknown_core_item(module, name, span));
+                    unit_ty()
+                }
+            });
         }
         // D-EFF1: record the effect this Core call contributes to the enclosing
         // function's inferred set (erased in codegen; purely a sema fact).
@@ -1234,7 +2978,7 @@ impl<'a> Checker<'a> {
         // Plain calls carry their erased arity in the foundation record.
         // Keep the richer Jet type construction below in sema, but make
         // every consumer reject a row-shaped call from the same fact.
-        if let Some(row) = Syntax::core_call(module, name) {
+        if Syntax::core_call(module, name).is_some() {
             // A Core parameter contract may omit trailing defaulted slots at
             // the source boundary. Its binder below fills those slots before
             // the fixed ABI reaches any engine, so validate the raw
@@ -1256,19 +3000,18 @@ impl<'a> Checker<'a> {
                     return None;
                 }
             }
-            debug_assert_eq!(row.arity(), row.signature.borrow_mask.len());
         }
         if let Some(e) = core_effect_for_call(module, name) {
-            // D-EFFTREE1: Core calls (this module-call path) stay tagged with
-            // a bare root — real stdlib call sites are unchanged (no migration
-            // break: existing diagnostics naming `FS`/`DB`/… keep their exact
-            // wording). Leaf precision (`FS.Read`, …) is otherwise a
-            // user-declared-contract concept (a function's own `#(…)` bound,
-            // D-PROP1-seeded into its `direct` set) — see Registration.rs /
-            // Bundle.rs. The one exception is D-EFFDBREAD1=A: `core.db`'s own
-            // closed connection-method table infers `DB.Read`/`DB.Write` leaves
-            // (in `check_db_connection_method`, the method-call path — those
-            // methods never reach this module-call `core_effect`).
+            if self.deterministic_world_depth > 0
+                && (!matches!(e, Effect::Time | Effect::Rand)
+                    || module == "core.crypto.random")
+            {
+                let api = format!("{}.{}", module_short_name(module), name);
+                self.reject_uncontrolled_deterministic_world(&api, span);
+            }
+            // D-EFFTREE1: keep the broad root for existing transaction and
+            // diagnostic behavior. `Time.Wait` is consumed by ordinary callback
+            // effect solving; it is not a callback-specific allowlist.
             self.record_effect(e.name(), span);
             // D-TXN2: an irreversible effect (Net/FS/Exec — a network/file/
             // subprocess effect) can't be rolled back, so it is rejected when it
@@ -1281,6 +3024,9 @@ impl<'a> Checker<'a> {
                 let api = format!("{}.{}", module_short_name(module), name);
                 self.diags.push(e0746(&api, e, span));
             }
+        }
+        if let Some(leaf) = core_effect_leaf_for_call(module, name) {
+            self.record_effect(leaf, span);
         }
         // E2-M15 / E3301: reject OS-dependent APIs on no-OS targets.
         if self.no_os && is_no_os_forbidden(module) {
@@ -1334,17 +3080,20 @@ impl<'a> Checker<'a> {
                 self.infer(&mut a.expr);
             }
             // Return the declared type so the call site doesn't cascade.
-            return resolved_core_fixed_sig(module, name).and_then(|(_, ret)| ret);
+            return fixed_sig.as_ref().and_then(|(_, ret)| ret.clone());
         }
         // D-STDIN1=A / E3401: `pure fn` cannot read from stdin.
-        if self.in_pure && self.det_suppress == 0 && is_impure_core(module, name) {
+        if self.in_pure
+            && self.det_suppress == 0
+            && jet_foundation::Authority::is_impure_core(module, name)
+        {
             let api = format!("{}.{}", module_short_name(module), name);
             self.diags
                 .push(e3401(&self.fn_name.clone(), &api, &[], span));
             for a in args.iter_mut() {
                 self.infer(&mut a.expr);
             }
-            return resolved_core_fixed_sig(module, name).and_then(|(_, ret)| ret);
+            return fixed_sig.as_ref().and_then(|(_, ret)| ret.clone());
         }
         // D-STRUCT-LIFE1=A: Core aliases use marker metadata attached to
         // their ordinary declaration row. This is the same lifecycle
@@ -1372,7 +3121,7 @@ impl<'a> Checker<'a> {
             for a in args.iter_mut() {
                 self.infer(&mut a.expr);
             }
-            return resolved_core_fixed_sig(module, name).and_then(|(_, ret)| ret);
+            return fixed_sig.as_ref().and_then(|(_, ret)| ret.clone());
         }
         // D-A11YGATE1=B (c134 Phase 6): E2930 (empty accessible label on an
         // interactive-role node) is checked here, on the raw call-site args,
@@ -1439,12 +3188,9 @@ impl<'a> Checker<'a> {
                 &mut self.diags,
             );
         }
-        if matches!(module, "core.service" | "core.services")
-            && name == "runtime"
-            && args.len() == 2
-        {
+        if module == "core.service" && name == "runtime" && args.len() == 2 {
             super::net_text_time::require_exact_labels(
-                "services.runtime",
+                "service.runtime",
                 args,
                 &[(1, "retention")],
                 span,
@@ -1542,14 +3288,34 @@ impl<'a> Checker<'a> {
                 )),
             ))
         } else {
-            resolved_core_fixed_sig(module, name)
+            fixed_sig
         };
-        // D-APILABEL1=A: a Core function that publishes a call contract
-        // binds through the same binder as user code, so a caller can name
-        // the one policy it changes and skip the rest. Filling the skipped
-        // defaults here is also what stops each engine spelling its own
-        // fallback: every tier now receives the same argument.
-        if let Some(contract) = super::core_param_contract(module, name) {
+        // D-UI-CLOSURE1=A: parser-owned trailing blocks are unlabeled until
+        // the Core contract identifies their callback slot. Normalize that
+        // one source marker before the shared binder sees label ordering.
+        if module == "core.ui" {
+            let callback_label = match name {
+                "button" => Some("on_click"),
+                "text_input" => Some("on_drop"),
+                _ => None,
+            };
+            if let Some(callback_label) = callback_label {
+                for arg in args.iter_mut().filter(|arg| arg.flags.is_trailing_block) {
+                    if arg.label.is_none() {
+                        arg.label = Some((callback_label.to_string(), arg.span));
+                    }
+                }
+            }
+        }
+        let ui_plain_constructor = module == "core.ui"
+            && ((name == "button"
+                && args.len() == 1
+                && args.iter().all(|arg| arg.label.is_none()))
+                || (name == "text_input"
+                    && args.len() == 2
+                    && args.iter().all(|arg| arg.label.is_none())));
+        if !ui_plain_constructor {
+            if let Some(contract) = super::core_param_contract(module, name) {
             let params: Vec<crate::Sema::CallBinder::BindParam<'_>> = contract
                 .iter()
                 .enumerate()
@@ -1580,6 +3346,37 @@ impl<'a> Checker<'a> {
                 return sig.and_then(|(_, ret)| ret);
             }
             self.register_binder_refs(args);
+        }
+        }
+        // D-DX-PLUGIN1=D: the publication gate binds exactly two explicit
+        // labels, infers only the value slot, and records the typed fact in
+        // the existing module TypeRegistry. The selector is metadata, not a
+        // runtime value to infer.
+        if module == Syntax::CORE_DEVTOOLS_MODULE && name == Syntax::CORE_DEVTOOLS_PUBLISH {
+            let value_type = args
+                .get_mut(1)
+                .and_then(|arg| self.infer(&mut arg.expr));
+            crate::Sema::check_devtools_publish(
+                self.package_scope,
+                self.module_path,
+                args,
+                value_type,
+                span,
+                self.devtools_registry,
+                self.registry,
+                &mut self.diags,
+            );
+            return Some(unit_ty());
+        }
+        if let Some(web_return) =
+            self.infer_web_generic_core_call(module, name, type_args, span, args)
+        {
+            return Some(web_return);
+        }
+        if let Some(browser_test_return) =
+            self.infer_browser_test_core_call(module, name, span, args)
+        {
+            return Some(browser_test_return);
         }
         match (module, name) {
             (
@@ -1782,10 +3579,8 @@ impl<'a> Checker<'a> {
                 }
                 for (i, ((convention, ty), arg)) in params.iter().zip(args.iter_mut()).enumerate() {
                     if *convention == AccessConvention::Move {
-                        if arg.convention != AccessConvention::Move {
-                            self.diags.push(Diagnostic::error("E0201", format!("argument {} to `{name}` transfers ownership through the move marker `^`", i + 1), "this vault operation consumes its single-use authority value".to_string(), format!("write the move marker `^`: `{}value` for this argument", Syntax::SIGIL_MOVE), Some(arg.span)));
-                        }
                         self.expect_core_arg_moving(name, i, ty, arg);
+                        self.finish_core_call_ownership(name, i, arg, *convention, ty);
                     } else {
                         self.expect_core_arg(name, i, ty, arg);
                     }
@@ -2087,16 +3882,8 @@ impl<'a> Checker<'a> {
                 }
                 for (i, ((conv, param_ty), arg)) in params.iter().zip(args.iter_mut()).enumerate() {
                     if *conv == AccessConvention::Move {
-                        if arg.convention != AccessConvention::Move {
-                            self.diags.push(Diagnostic::error(
-                                    "E0201",
-                                    format!("argument {} to `{}` transfers ownership through the move marker `^`", i + 1, name),
-                                    "this standard library constructor retains the consumed handle".to_string(),
-                                    format!("write the move marker `^`: `{}value` for this argument", Syntax::SIGIL_MOVE),
-                                    Some(arg.span),
-                                ));
-                        }
                         self.expect_core_arg_moving(name, i, param_ty, arg);
+                        self.finish_core_call_ownership(name, i, arg, *conv, param_ty);
                     } else {
                         self.expect_core_arg(name, i, param_ty, arg);
                     }
@@ -2107,13 +3894,14 @@ impl<'a> Checker<'a> {
                 return ret.clone();
             }
             ("core.game", "run") => {
-                if args.len() != 3 {
+                if !(1..=4).contains(&args.len()) {
                     self.diags.push(Diagnostic::error(
                             "E0104",
-                            format!("`game.run` expects 1 to 3 arguments, got {}", args.len()),
-                            "`game.run` accepts a scene plus optional replay and backend handles"
+                            format!("`game.run` expects 1 to 4 arguments, got {}", args.len()),
+                            "`game.run` accepts a scene plus optional replay, backend, and frame-count handles"
                                 .to_string(),
-                            "write `game.run(scene)`, `game.run(scene, replay: replay)`, or `game.run(scene, replay: replay, backend: backend)`".to_string(),
+                            "write `game.run(scene)`, `game.run(scene, replay: replay)`, `game.run(scene, replay: replay, backend: backend)`, or `game.run(scene, frames: 60)`"
+                                .to_string(),
                             Some(span),
                         ));
                 }
@@ -2135,7 +3923,50 @@ impl<'a> Checker<'a> {
                         self.expect_core_arg("run", index, param_ty, arg);
                     }
                 }
+                if let Some(frames) = args.get(3) {
+                    if literal_int(&frames.expr)
+                        .is_some_and(|value| JetGameFrameBudget::validate(value).is_err())
+                    {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            "`game.run` frame budget must be positive".to_string(),
+                            "a non-positive frame budget cannot execute a deterministic frame transcript"
+                                .to_string(),
+                            "pass a positive frame budget, such as `frames: 600`".to_string(),
+                            Some(frames.expr.span()),
+                        ));
+                    }
+                }
                 return Some(Type::String);
+            }
+            // D-FOUND-COREAPI1=A: the ignore-file default is one binder-owned
+            // absence. Every tier receives the same two-slot checked shape.
+            ("core.files", "walk" | "walk_parallel" | "walk_files") => {
+                if !(1..=2).contains(&args.len()) {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                }
+                let Some((params, ret)) = sig.as_ref() else {
+                    return None;
+                };
+                for (index, ((_, param_ty), arg)) in params
+                    .iter()
+                    .zip(args.iter_mut())
+                    .enumerate()
+                {
+                    let optional_slot = matches!(param_ty, Type::Option(_));
+                    if !optional_slot || !matches!(arg.expr, Expr::Absent(_)) {
+                        // Optional ABI slots are represented as `Option<T>` in the
+                        // checked signature, while source callers pass `T` or
+                        // `Absent`. Check present source values against the
+                        // payload type, as other optional Core slots do.
+                        let source_ty = param_ty.unwrap_option().unwrap_or(param_ty);
+                        self.expect_core_arg(name, index, source_ty, arg);
+                    }
+                }
+                for arg in args.iter_mut().skip(params.len()) {
+                    self.infer(&mut arg.expr);
+                }
+                return ret.clone();
             }
             // D-ENC1 / D-GENERIC-CALL1 / D-SERDE6: typed encode/decode over
             // the Encode/Decode model.
@@ -2262,10 +4093,26 @@ impl<'a> Checker<'a> {
                 }
                 return Some(Type::String);
             }
+            // D-SHAPE-PROJECT1=A: `args.decode<T>()` decodes a `#CLI` struct from
+            // the process arguments anywhere, through the same builder rows the
+            // entry `fn run(args: T)` derives from T.
+            ("core.args", "decode") => {
+                if !args.is_empty() {
+                    self.diags.push(wrong_core_arity(name, 0, args.len(), span));
+                }
+                for arg in args.iter_mut() {
+                    self.infer(&mut arg.expr);
+                }
+                let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
+                    return None;
+                };
+                self.check_cli_shape(&t, span);
+                return Some(result_ty(t, decode_error_ty()));
+            }
             // D-JSON3: the UNTYPED `json.decode(text)` form is the lenient
-            // dynamic decode — same `Data !JSONError` shape as `parse`, with
+            // dynamic decode — same `DataTree !EncodingError` shape as `parse`, with
             // string→number/bool coercions surfaced as log lines
-            // (docs/reference/core-library.md, `jet_std_json_decode_lenient`
+            // (docs/spec/reference/core-library.md, `jet_std_json_decode_lenient`
             // in the Prelude, `enc_ok_is_json` in emit). `decode` is registered
             // in `is_polymorphic_core_special`, so its `core_fixed_sig` row is
             // never consulted; without this arm the call fell through to
@@ -2281,7 +4128,7 @@ impl<'a> Checker<'a> {
                 for arg in args.iter_mut().skip(1) {
                     self.infer(&mut arg.expr);
                 }
-                return Some(result_ty(json_ty(), json_error_ty()));
+                return Some(result_ty(json_ty(), encoding_error_ty()));
             }
             ("core.sys", "decode") if !type_args.is_empty() => {
                 if args.len() > 3 {
@@ -2307,6 +4154,25 @@ impl<'a> Checker<'a> {
                 self.check_decodable(&t, span);
                 return Some(result_ty(t, decode_error_ty()));
             }
+            // D-SHAPE-ONE1=A: decode one existing DB row through the same
+            // typed DataTree decoder used by the wire formats. The explicit
+            // row remains the authoritative table/transaction carrier.
+            ("core.db", "decode") if !type_args.is_empty() => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                }
+                if let Some(arg) = args.get_mut(0) {
+                    self.expect_core_arg(name, 0, &db_row_ty(), arg);
+                }
+                for arg in args.iter_mut().skip(1) {
+                    self.infer(&mut arg.expr);
+                }
+                let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
+                    return None;
+                };
+                self.check_decodable(&t, span);
+                return Some(result_ty(t, decode_error_ty()));
+            }
             (
                 "core.encoding.json" | "core.encoding.csv" | "core.encoding.toml"
                 | "core.encoding.yaml",
@@ -2315,8 +4181,11 @@ impl<'a> Checker<'a> {
                 if args.len() != 1 {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }
-                for a in args.iter_mut() {
-                    self.infer(&mut a.expr);
+                if let Some(arg) = args.get_mut(0) {
+                    self.expect_core_arg(name, 0, &Type::String, arg);
+                }
+                for arg in args.iter_mut().skip(1) {
+                    self.infer(&mut arg.expr);
                 }
                 let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
                     return None;
@@ -2328,6 +4197,273 @@ impl<'a> Checker<'a> {
                     t
                 };
                 return Some(result_ty(inner, decode_error_ty()));
+            }
+            // D-COLUMNAR-BOUNDARY1=A: Arrow owners carry their checked row
+            // type in the unique `DataArrowBatch<T>` carrier. Import and query
+            // consume that owner; the row's registered `borrow_mask` supplies
+            // the same Move convention used by every other Core call. This
+            // arm only projects the carrier's row type and cannot invent a
+            // second ownership policy.
+            ("core.data.arrow", "import" | "query") => {
+                if !type_args.is_empty() {
+                    self.diags.push(Diagnostic::error(
+                        "E0119",
+                        format!("`{name}` does not take an explicit type argument"),
+                        "Arrow operations infer their row type from the `DataArrowBatch<T>` value"
+                            .to_string(),
+                        "remove the explicit type argument and pass a `DataArrowBatch<T>` value"
+                            .to_string(),
+                        Some(span),
+                    ));
+                }
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                }
+                let row = args.get_mut(0).and_then(|arg| {
+                    let actual = self.infer(&mut arg.expr)?;
+                    let convention = core_call_argument_convention(module, name, 0);
+                    self.finish_core_call_ownership(name, 0, arg, convention, &actual);
+                    match actual {
+                        Type::Apply { name: carrier, args } if carrier == "DataArrowBatch" && args.len() == 1 => {
+                            args.into_iter().next()
+                        }
+                        other => {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!("`{name}` expects a `DataArrowBatch<T>` value, got {}", other.show()),
+                                "Arrow operations preserve the row type carried by the checked owner"
+                                    .to_string(),
+                                "pass a `DataArrowBatch<T>` value as the argument".to_string(),
+                                Some(span),
+                            ));
+                            None
+                        }
+                    }
+                });
+                for arg in args.iter_mut().skip(1) {
+                    self.infer(&mut arg.expr);
+                }
+                let Some(row) = row else {
+                    return None;
+                };
+                if name == "import" {
+                    return Some(data_carrier_type("DataArrowBatch", row));
+                }
+                return Some(result_ty(
+                    data_carrier_type("Query", row),
+                    Type::Named("DataError".to_string()),
+                ));
+            }
+            // D-DX-LOADERS1=A: loader lifecycle operations infer their row
+            // type from the concrete `DataLoader<T>` argument. The child
+            // operations are not a second generic-call family: only the
+            // top-level data constructors carry explicit `<T>` syntax.
+            (
+                "core.data.loader",
+                "authority" | "bind" | "bind_text" | "cancel" | "invalidate"
+                    | "needs_refresh" | "offline" | "ready" | "source_identity"
+                    | "status" | "stream",
+            ) => {
+                if !type_args.is_empty() {
+                    self.diags.push(Diagnostic::error(
+                        "E0119",
+                        format!("`{name}` does not take an explicit type argument"),
+                        "the loader operation reads its row type from the `DataLoader<T>` value"
+                            .to_string(),
+                        "remove the `<T>` and pass a concrete `DataLoader<T>` handle".to_string(),
+                        Some(span),
+                    ));
+                }
+                let expected = match name {
+                    "bind" | "bind_text" | "offline" | "invalidate" => 2,
+                    _ => 1,
+                };
+                if args.len() != expected {
+                    self.diags.push(wrong_core_arity(name, expected, args.len(), span));
+                }
+                let mutating = matches!(
+                    name,
+                    "bind" | "bind_text" | "cancel" | "invalidate" | "offline" | "stream"
+                );
+                let loader_ty = args.get_mut(0).and_then(|arg| {
+                    if mutating && arg.convention != AccessConvention::Write {
+                        self.diags.push(Diagnostic::error(
+                            "E0202",
+                            format!("argument 1 to `{name}` requires the write-access marker `&`"),
+                            "this data-loader operation changes the loader state in place"
+                                .to_string(),
+                            format!(
+                                "write the write-access marker `&`: `{}loader`",
+                                Syntax::SIGIL_WRITE
+                            ),
+                            Some(arg.span),
+                        ));
+                    }
+                    self.infer(&mut arg.expr)
+                });
+                let _row = match loader_ty {
+                    Some(Type::Apply { name, args }) if name == "DataLoader" && args.len() == 1 => {
+                        args.into_iter().next()
+                    }
+                    Some(other) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!(
+                                "`{name}` expects a `DataLoader<T>` handle, got {}",
+                                other.show()
+                            ),
+                            "loader lifecycle operations preserve the row type carried by the loader"
+                                .to_string(),
+                            "pass a `DataLoader<T>` value as the first argument".to_string(),
+                            Some(span),
+                        ));
+                        None
+                    }
+                    None => None,
+                };
+                for (index, arg) in args.iter_mut().enumerate().skip(1) {
+                    let expected_ty = match (name, index) {
+                        ("bind", 1) => Some(Type::List(Box::new(u8_ty()))),
+                        ("bind_text", 1) => Some(Type::String),
+                        ("offline", 1) => Some(Type::Bool),
+                        ("invalidate", 1) => {
+                            Some(Type::Named("DataInvalidationCause".to_string()))
+                        }
+                        _ => None,
+                    };
+                    if let Some(expected_ty) = expected_ty {
+                        self.expect_core_arg(name, index, &expected_ty, arg);
+                    } else {
+                        self.infer(&mut arg.expr);
+                    }
+                }
+                let result = match name {
+                    "bind" | "bind_text" => {
+                        result_ty(unit_ty(), Type::Named("DataError".to_string()))
+                    }
+                    "cancel" | "offline" | "invalidate" => unit_ty(),
+                    "needs_refresh" | "ready" => Type::Bool,
+                    "status" => Type::Named("DataLoaderStatus".to_string()),
+                    "source_identity" => Type::Named("DataSourceIdentity".to_string()),
+                    "authority" => Type::Named("DataAuthority".to_string()),
+                    "stream" => result_ty(
+                        Type::Named("DataStream".to_string()),
+                        Type::Named("DataError".to_string()),
+                    ),
+                    _ => unreachable!(),
+                };
+                return Some(result);
+            }
+            // D-DX-LOADERS1=A: declarations preserve the row type while
+            // snapshot decoding remains an explicit fallible operation.
+            ("core.data", "load" | "load_default" | "file" | "file_member" | "url" | "database" | "value" | "snapshot")
+                if !type_args.is_empty() =>
+            {
+                let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
+                    return None;
+                };
+                let expected = match name {
+                    "load" => 2..=2,
+                    "load_default" => 1..=1,
+                    "file" => 3..=3,
+                    "file_member" => 4..=4,
+                    "url" => 4..=4,
+                    "database" => 4..=4,
+                    "value" => 2..=2,
+                    "snapshot" => 1..=1,
+                    _ => unreachable!(),
+                };
+                if !expected.contains(&args.len()) {
+                    self.diags.push(wrong_core_arity(name, *expected.end(), args.len(), span));
+                }
+                for (index, arg) in args.iter_mut().enumerate() {
+                    let ty = match name {
+                        "load" | "load_default" => {
+                            if index == 0 { Some(Type::String) } else { Some(Type::Named("DataLimits".to_string())) }
+                        }
+                        "file" => Some(if index < 2 { Type::String } else { Type::Named("DataLimits".to_string()) }),
+                        "file_member" => Some(if index < 3 { Type::String } else { Type::Named("DataLimits".to_string()) }),
+                        "url" => Some(if index < 3 { Type::String } else { Type::Named("DataLimits".to_string()) }),
+                        "database" => Some(match index {
+                            0 => Type::String,
+                            1 => Type::List(Box::new(Type::String)),
+                            2 => Type::String,
+                            _ => Type::Named("DataLimits".to_string()),
+                        }),
+                        "value" => Some(t.clone()),
+                        "snapshot" => Some(Type::Apply { name: "DataLoader".to_string(), args: vec![t.clone()] }),
+                        _ => None,
+                    };
+                    if let Some(ty) = ty {
+                        self.expect_core_arg(name, index, &ty, arg);
+                    } else {
+                        self.infer(&mut arg.expr);
+                    }
+                }
+                if name == "value" {
+                    self.check_encodable(&t, span);
+                }
+                if name == "snapshot" {
+                    self.check_decodable(&t, span);
+                    self.check_encodable(&t, span);
+                    return Some(result_ty(
+                        Type::Apply { name: "DataSnapshot".to_string(), args: vec![t] },
+                        Type::Named("DataError".to_string()),
+                    ));
+                }
+                return Some(result_ty(
+                    Type::Apply { name: "DataLoader".to_string(), args: vec![t] },
+                    Type::Named("DataError".to_string()),
+                ));
+            }
+            // D-DX-PLOT1=A: plotting consumes an ordinary typed list. The
+            // compiler derives schema facts from the row type.
+            ("core.data", "plot") | ("core.data.plot", "plot") if !type_args.is_empty() => {
+                if args.len() != 1 {
+                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                }
+                let Some(row) = exactly_one_type_arg(self, name, type_args, span) else {
+                    return None;
+                };
+                if let Some(arg) = args.get_mut(0) {
+                    self.expect_core_arg(name, 0, &Type::List(Box::new(row.clone())), arg);
+                }
+                self.check_encodable(&row, span);
+                return Some(result_ty(
+                    Type::Apply { name: "JetDataPlot".to_string(), args: vec![row] },
+                    Type::Named("DataError".to_string()),
+                ));
+            }
+            ("core.data", "inspect" | "inspect_json" | "text" | "svg" | "show" | "render")
+            | ("core.data.plot", "inspect" | "inspect_json" | "text" | "svg" | "show" | "render")
+                if !type_args.is_empty() =>
+            {
+                let Some(row) = exactly_one_type_arg(self, name, type_args, span) else {
+                    return None;
+                };
+                let expected = if name == "render" { 2 } else { 1 };
+                if args.len() != expected {
+                    self.diags.push(wrong_core_arity(name, expected, args.len(), span));
+                }
+                if let Some(arg) = args.get_mut(0) {
+                    self.expect_core_arg(
+                        name,
+                        0,
+                        &Type::Apply { name: "JetDataPlot".to_string(), args: vec![row] },
+                        arg,
+                    );
+                }
+                if name == "render" {
+                    if let Some(arg) = args.get_mut(1) {
+                        self.expect_core_arg(name, 1, &Type::Named("JetDataPlotBackend".to_string()), arg);
+                    }
+                }
+                let ok = match name {
+                    "inspect" => Type::Named("JetDataPlotInspection".to_string()),
+                    "inspect_json" | "text" | "svg" => Type::String,
+                    _ => Type::Named("JetDataPlotRender".to_string()),
+                };
+                return Some(result_ty(ok, Type::Named("DataError".to_string())));
             }
             // D-DATA-SURFACE1=A: the beginner facade reuses typed CSV/JSON decoding,
             // then keeps table/stat selectors as ordinary typed Jet lambdas.
@@ -2374,87 +4510,16 @@ impl<'a> Checker<'a> {
                     return Some(Type::Int);
                 };
                 let ty = self.infer(&mut arg.expr)?;
-                let countable = match &ty {
-                    Type::List(_) => true,
-                    Type::Apply { name, .. } => {
-                        matches!(name.as_str(), "Table" | "Series" | "LazyFrame")
-                    }
-                    _ => false,
-                };
-                if !countable {
+                if !matches!(ty, Type::List(_)) {
                     self.diags.push(Diagnostic::error(
                         "E0112",
-                        format!(
-                            "`data.count` needs a typed table or series, not {}",
-                            ty.show()
-                        ),
-                        "core.data counts rows from a list-backed table or series".to_string(),
-                        "pass a `[T]` value, such as `data.csv<Row>(text)?`".to_string(),
+                        format!("`data.count` needs a typed row list, not {}", ty.show()),
+                        "core.data counts ordinary list elements".to_string(),
+                        "pass a `[T]` value".to_string(),
                         Some(arg.expr.span()),
                     ));
                 }
                 return Some(Type::Int);
-            }
-            ("core.data", "table" | "series") => {
-                if args.len() != 1 {
-                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-                }
-                let Some(rows_arg) = args.get_mut(0) else {
-                    return Some(Type::Apply {
-                        name: if name == "table" { "Table" } else { "Series" }.to_string(),
-                        args: vec![Type::Int],
-                    });
-                };
-                let ty = self.infer(&mut rows_arg.expr);
-                let elem = match ty {
-                    Some(Type::List(inner)) => *inner,
-                    Some(other) => {
-                        self.diags.push(Diagnostic::error(
-                            "E0112",
-                            format!(
-                                "`data.{}` needs a list-backed value, not {}",
-                                name,
-                                other.show()
-                            ),
-                            "core.data tables and series are built from typed lists".to_string(),
-                            "pass `[Row]` to `data.table` or `[T]` to `data.series`".to_string(),
-                            Some(rows_arg.expr.span()),
-                        ));
-                        Type::Int
-                    }
-                    None => Type::Int,
-                };
-                return Some(Type::Apply {
-                    name: if name == "table" { "Table" } else { "Series" }.to_string(),
-                    args: vec![elem],
-                });
-            }
-            ("core.data", "rows" | "values") => {
-                if args.len() != 1 {
-                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-                }
-                let Some(arg) = args.get_mut(0) else {
-                    return Some(Type::List(Box::new(Type::Int)));
-                };
-                let want = if name == "rows" { "Table" } else { "Series" };
-                let ty = self.infer(&mut arg.expr);
-                let elem = match ty {
-                    Some(Type::Apply { name: head, args }) if head == want && args.len() == 1 => {
-                        args[0].clone()
-                    }
-                    Some(other) => {
-                        self.diags.push(Diagnostic::error(
-                                "E0112",
-                                format!("`data.{}` needs a `{}` value, not {}", name, want, other.show()),
-                                "core.data unwraps typed table/series containers through explicit helpers".to_string(),
-                                format!("pass a `{want}<T>` value"),
-                                Some(arg.expr.span()),
-                            ));
-                        Type::Int
-                    }
-                    None => Type::Int,
-                };
-                return Some(Type::List(Box::new(elem)));
             }
             ("core.data", "schema") => {
                 if args.len() != 1 {
@@ -2464,302 +4529,17 @@ impl<'a> Checker<'a> {
                     return Some(Type::List(Box::new(Type::Named("DataColumn".to_string()))));
                 };
                 let ty = self.infer(&mut arg.expr)?;
-                let ok = match &ty {
-                    Type::List(_) => true,
-                    Type::Apply { name, args } => {
-                        matches!(name.as_str(), "Table" | "Series" | "LazyFrame") && args.len() == 1
-                    }
-                    _ => false,
-                };
-                if !ok {
+                if !matches!(ty, Type::List(_)) {
                     self.diags.push(Diagnostic::error(
                         "E0112",
-                        format!(
-                            "`data.schema` needs a typed table or series, not {}",
-                            ty.show()
-                        ),
-                        "core.data schema reads column names and types from the row model"
+                        format!("`data.schema` needs a typed row list, not {}", ty.show()),
+                        "core.data schema reads column names and types from ordinary rows"
                             .to_string(),
-                        "pass a `Table<T>`, `Series<T>`, `LazyFrame<T>`, or `[T]` value"
-                            .to_string(),
+                        "pass a `[T]` value".to_string(),
                         Some(arg.expr.span()),
                     ));
                 }
                 return Some(Type::List(Box::new(Type::Named("DataColumn".to_string()))));
-            }
-            ("core.data", "missing_count") => {
-                if args.len() != 1 {
-                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-                }
-                let Some(arg) = args.get_mut(0) else {
-                    return Some(Type::Int);
-                };
-                let ty = self.infer(&mut arg.expr);
-                if !matches!(&ty, Some(Type::Apply { name: head, args }) if head == "Series" && args.len() == 1)
-                {
-                    let shown = ty
-                        .map(|t| t.show())
-                        .unwrap_or_else(|| "<unknown>".to_string());
-                    self.diags.push(Diagnostic::error(
-                        "E0112",
-                        format!("`data.missing_count` needs a `Series<T?>`, not {}", shown),
-                        "missing values are represented by Jet optionals in a typed series"
-                            .to_string(),
-                        "build a series from `[T?]` values with `data.series(values)`".to_string(),
-                        Some(arg.expr.span()),
-                    ));
-                }
-                return Some(Type::Int);
-            }
-            ("core.data", "lazy") => {
-                if args.len() != 1 {
-                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-                }
-                let Some(arg) = args.get_mut(0) else {
-                    return Some(Type::Apply {
-                        name: "LazyFrame".to_string(),
-                        args: vec![Type::Int],
-                    });
-                };
-                let ty = self.infer(&mut arg.expr);
-                let elem = match ty {
-                    Some(Type::Apply { name: head, args })
-                        if head == "Table" && args.len() == 1 =>
-                    {
-                        args[0].clone()
-                    }
-                    Some(other) => {
-                        self.diags.push(Diagnostic::error(
-                            "E0112",
-                            format!("`data.lazy` needs a `Table<T>`, not {}", other.show()),
-                            "lazy plans start from the same typed table model as eager helpers"
-                                .to_string(),
-                            "wrap rows with `data.table(rows)` first".to_string(),
-                            Some(arg.expr.span()),
-                        ));
-                        Type::Int
-                    }
-                    None => Type::Int,
-                };
-                return Some(Type::Apply {
-                    name: "LazyFrame".to_string(),
-                    args: vec![elem],
-                });
-            }
-            ("core.data", "collect" | "plan") => {
-                if args.len() != 1 {
-                    self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-                }
-                let Some(arg) = args.get_mut(0) else {
-                    return Some(if name == "collect" {
-                        Type::Apply {
-                            name: "Table".to_string(),
-                            args: vec![Type::Int],
-                        }
-                    } else {
-                        Type::List(Box::new(Type::String))
-                    });
-                };
-                let ty = self.infer(&mut arg.expr);
-                let elem = match ty {
-                    Some(Type::Apply { name: head, args })
-                        if head == "LazyFrame" && args.len() == 1 =>
-                    {
-                        args[0].clone()
-                    }
-                    Some(other) => {
-                        self.diags.push(Diagnostic::error(
-                            "E0112",
-                            format!(
-                                "`data.{}` needs a `LazyFrame<T>`, not {}",
-                                name,
-                                other.show()
-                            ),
-                            "lazy plan inspection and collection operate on core.data lazy frames"
-                                .to_string(),
-                            "call `data.lazy(table)` first".to_string(),
-                            Some(arg.expr.span()),
-                        ));
-                        Type::Int
-                    }
-                    None => Type::Int,
-                };
-                return Some(if name == "collect" {
-                    let table = Type::Apply {
-                        name: "Table".to_string(),
-                        args: vec![elem],
-                    };
-                    if super::super::Edition::edition_at_least("2027") {
-                        result_ty(table, Type::Named("DataError".to_string()))
-                    } else {
-                        table
-                    }
-                } else {
-                    Type::List(Box::new(Type::String))
-                });
-            }
-            ("core.data", "lazy_filter" | "lazy_sort_by") => {
-                if args.len() != 2 {
-                    self.diags.push(wrong_core_arity(name, 2, args.len(), span));
-                }
-                let Some(frame_arg) = args.get_mut(0) else {
-                    return Some(Type::Apply {
-                        name: "LazyFrame".to_string(),
-                        args: vec![Type::Int],
-                    });
-                };
-                let frame_ty = self.infer(&mut frame_arg.expr);
-                let row_ty = match frame_ty {
-                    Some(Type::Apply { name: head, args })
-                        if head == "LazyFrame" && args.len() == 1 =>
-                    {
-                        args[0].clone()
-                    }
-                    Some(other) => {
-                        self.diags.push(Diagnostic::error(
-                            "E0112",
-                            format!(
-                                "`data.{}` needs a `LazyFrame<T>`, not {}",
-                                name,
-                                other.show()
-                            ),
-                            "lazy table operations keep a typed row model through the plan"
-                                .to_string(),
-                            "call `data.lazy(table)` first".to_string(),
-                            Some(frame_arg.expr.span()),
-                        ));
-                        Type::Int
-                    }
-                    None => Type::Int,
-                };
-                if let Some(fn_arg) = args.get_mut(1) {
-                    let ret = if name == "lazy_filter" {
-                        Type::Bool
-                    } else {
-                        Type::String
-                    };
-                    let fn_ty = Type::Fn {
-                        params: vec![row_ty.clone()],
-                        ret: Some(Box::new(ret)),
-                        effect_bound: None,
-                        return_view_provenance: None,
-                        param_contract: None,
-                        call_metadata: None,
-                    };
-                    self.expect_core_arg(name, 1, &fn_ty, fn_arg);
-                }
-                return Some(Type::Apply {
-                    name: "LazyFrame".to_string(),
-                    args: vec![row_ty],
-                });
-            }
-            ("core.data", "filter" | "sort_by") => {
-                if args.len() != 2 {
-                    self.diags.push(wrong_core_arity(name, 2, args.len(), span));
-                }
-                let Some(rows_arg) = args.get_mut(0) else {
-                    return Some(Type::List(Box::new(Type::Int)));
-                };
-                let rows_ty = self.infer(&mut rows_arg.expr);
-                let row_ty = match rows_ty {
-                    Some(Type::List(inner)) => *inner,
-                    Some(other) => {
-                        self.diags.push(Diagnostic::error(
-                            "E0112",
-                            format!("`data.{}` needs a typed table, not {}", name, other.show()),
-                            "core.data pipelines rows from a list-backed typed table".to_string(),
-                            "pass a `[Row]` value, such as `data.csv<Row>(text)?`".to_string(),
-                            Some(rows_arg.expr.span()),
-                        ));
-                        Type::Int
-                    }
-                    None => Type::Int,
-                };
-                if let Some(fn_arg) = args.get_mut(1) {
-                    let ret = if name == "filter" {
-                        Type::Bool
-                    } else {
-                        Type::String
-                    };
-                    let fn_ty = Type::Fn {
-                        params: vec![row_ty.clone()],
-                        ret: Some(Box::new(ret)),
-                        effect_bound: None,
-                        return_view_provenance: None,
-                        param_contract: None,
-                        call_metadata: None,
-                    };
-                    self.expect_core_arg(name, 1, &fn_ty, fn_arg);
-                }
-                return Some(
-                    if name == "sort_by" && super::super::Edition::edition_at_least("2027") {
-                        result_ty(
-                            Type::List(Box::new(row_ty)),
-                            Type::Named("DataError".to_string()),
-                        )
-                    } else {
-                        Type::List(Box::new(row_ty))
-                    },
-                );
-            }
-            ("core.data", "group_count" | "group_sum" | "group_mean") => {
-                let want = if name == "group_count" { 2 } else { 3 };
-                if args.len() != want {
-                    self.diags
-                        .push(wrong_core_arity(name, want, args.len(), span));
-                }
-                let Some(rows_arg) = args.get_mut(0) else {
-                    return Some(Type::List(Box::new(Type::Named("DataGroup".to_string()))));
-                };
-                let rows_ty = self.infer(&mut rows_arg.expr);
-                let row_ty = match rows_ty {
-                    Some(Type::List(inner)) => *inner,
-                    Some(Type::Apply {
-                        name: ref an,
-                        args: ref ta,
-                    }) if an == "DataStream" && ta.len() == 1 => ta[0].clone(),
-                    Some(other) => {
-                        self.diags.push(Diagnostic::error(
-                            "E0112",
-                            format!("`data.{}` needs a typed table, not {}", name, other.show()),
-                            "core.data groups rows from a list-backed typed table".to_string(),
-                            "pass a `[Row]` value, such as `data.csv<Row>(text)?`".to_string(),
-                            Some(rows_arg.expr.span()),
-                        ));
-                        Type::Int
-                    }
-                    None => Type::Int,
-                };
-                if let Some(key_arg) = args.get_mut(1) {
-                    let key_fn = Type::Fn {
-                        params: vec![row_ty.clone()],
-                        ret: Some(Box::new(Type::String)),
-                        effect_bound: None,
-                        return_view_provenance: None,
-                        param_contract: None,
-                        call_metadata: None,
-                    };
-                    self.expect_core_arg(name, 1, &key_fn, key_arg);
-                }
-                if name != "group_count" {
-                    if let Some(value_arg) = args.get_mut(2) {
-                        let value_fn = Type::Fn {
-                            params: vec![row_ty],
-                            ret: Some(Box::new(Type::Float)),
-                            effect_bound: None,
-                            return_view_provenance: None,
-                            param_contract: None,
-                            call_metadata: None,
-                        };
-                        self.expect_core_arg(name, 2, &value_fn, value_arg);
-                    }
-                }
-                let groups = Type::List(Box::new(Type::Named("DataGroup".to_string())));
-                return Some(if super::super::Edition::edition_at_least("2027") {
-                    result_ty(groups, Type::Named("DataError".to_string()))
-                } else {
-                    groups
-                });
             }
             ("core.data", "inner_join" | "left_join") => {
                 if args.len() != 4 {
@@ -2774,11 +4554,11 @@ impl<'a> Checker<'a> {
                             self.diags.push(Diagnostic::error(
                                 "E0112",
                                 format!(
-                                    "`data.{}` needs a typed left table, not {}",
+                                    "`data.{}` needs a typed left list, not {}",
                                     name,
                                     other.show()
                                 ),
-                                "core.data joins rows from list-backed typed tables".to_string(),
+                                "core.data joins rows from typed lists".to_string(),
                                 "pass `[LeftRow]` and `[RightRow]` values".to_string(),
                                 Some(arg.expr.span()),
                             ));
@@ -2794,11 +4574,11 @@ impl<'a> Checker<'a> {
                             self.diags.push(Diagnostic::error(
                                 "E0112",
                                 format!(
-                                    "`data.{}` needs a typed right table, not {}",
+                                    "`data.{}` needs a typed right list, not {}",
                                     name,
                                     other.show()
                                 ),
-                                "core.data joins rows from list-backed typed tables".to_string(),
+                                "core.data joins rows from typed lists".to_string(),
                                 "pass `[LeftRow]` and `[RightRow]` values".to_string(),
                                 Some(arg.expr.span()),
                             ));
@@ -2838,18 +4618,14 @@ impl<'a> Checker<'a> {
                     name: "DataJoin".to_string(),
                     args: vec![left_row, joined_right],
                 }));
-                return Some(if super::super::Edition::edition_at_least("2027") {
-                    result_ty(joined, Type::Named("DataError".to_string()))
-                } else {
-                    joined
-                });
+                return Some(result_ty(joined, Type::Named("DataError".to_string())));
             }
             ("core.data", "pivot_sum") => {
                 if args.len() != 4 {
                     self.diags.push(wrong_core_arity(name, 4, args.len(), span));
                 }
                 let Some(rows_arg) = args.get_mut(0) else {
-                    return Some(Type::List(Box::new(Type::Named("DataGroup".to_string()))));
+                    return Some(Type::List(Box::new(Type::Named("DataPivotCell".to_string()))));
                 };
                 let rows_ty = self.infer(&mut rows_arg.expr);
                 let row_ty = match rows_ty {
@@ -2857,8 +4633,8 @@ impl<'a> Checker<'a> {
                     Some(other) => {
                         self.diags.push(Diagnostic::error(
                             "E0112",
-                            format!("`data.{}` needs a typed table, not {}", name, other.show()),
-                            "core.data pivots rows from a list-backed typed table".to_string(),
+                            format!("`data.{}` needs a typed list, not {}", name, other.show()),
+                            "core.data pivots rows from ordinary typed lists".to_string(),
                             "pass a `[Row]` value, such as `data.csv<Row>(text)?`".to_string(),
                             Some(rows_arg.expr.span()),
                         ));
@@ -2890,18 +4666,11 @@ impl<'a> Checker<'a> {
                     };
                     self.expect_core_arg(name, 3, &value_fn, value_arg);
                 }
-                let cell = if super::super::Edition::edition_at_least("2027") {
-                    Type::Named("DataPivotCell".to_string())
-                } else {
-                    Type::Named("DataGroup".to_string())
-                };
+                let cell = Type::Named("DataPivotCell".to_string());
                 let cells = Type::List(Box::new(cell));
-                return Some(if super::super::Edition::edition_at_least("2027") {
-                    result_ty(cells, Type::Named("DataError".to_string()))
-                } else {
-                    cells
-                });
+                return Some(result_ty(cells, Type::Named("DataError".to_string())));
             }
+
             ("core.mem", "volatile_read") => {
                 if Syntax::core_mem_requires_audit(Syntax::MEM_VOLATILE_READ) && !self.in_unsafe {
                     self.diags.push(e3101(Syntax::MEM_VOLATILE_READ, span));
@@ -3676,8 +5445,7 @@ impl<'a> Checker<'a> {
             }
             (
                 "core.math",
-                "saturating_add" | "saturating_sub" | "saturating_mul" | "gcd" | "lcm"
-                | "int_pow",
+                "saturating_add" | "saturating_sub" | "saturating_mul" | "gcd" | "lcm" | "int_pow",
             ) => {
                 if args.len() != 2 {
                     self.diags.push(wrong_core_arity(name, 2, args.len(), span));
@@ -4092,9 +5860,43 @@ impl<'a> Checker<'a> {
                     err: Box::new(Type::Named("HTTPError".to_string())),
                 });
             }
-            // E2-M10: jet.http.serve(addr, handler) — blocking accept loop.
-            // handler: fn(HTTPRequest) => HTTPResponse (lambda) or HTTPRouter.
+            // D-FOUND-LIFECYCLE1=A: the beginner surface binds a loopback
+            // server with one shared per-request Context deadline. The legacy
+            // address/handler form remains below for expert compatibility.
             ("core.http", "serve") => {
+                let first_ty = args
+                    .get_mut(0)
+                    .map(|arg| self.infer(&mut arg.expr));
+                if matches!(
+                    first_ty.as_ref(),
+                    Some(Some(Type::Named(name))) if name == "HTTPMux"
+                ) {
+                    if args.len() != 2 {
+                        self.diags
+                            .push(wrong_core_arity("serve", 2, args.len(), span));
+                        for arg in args.iter_mut().skip(1) {
+                            self.infer(&mut arg.expr);
+                        }
+                        return None;
+                    }
+                    super::net_text_time::require_exact_labels(
+                        "http.serve",
+                        args,
+                        &[(1, "deadline")],
+                        span,
+                        &mut self.diags,
+                    );
+                    self.expect_core_arg(
+                        "serve",
+                        1,
+                        &Type::Named("Duration".to_string()),
+                        &mut args[1],
+                    );
+                    return Some(Type::Named("HTTPServer".to_string()));
+                }
+
+                // E2-M10: jet.http.serve(addr, handler) — blocking accept
+                // loop. handler is a function or HTTPRouter.
                 if args.len() != 2 {
                     self.diags
                         .push(wrong_core_arity("serve", 2, args.len(), span));
@@ -4104,23 +5906,145 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 self.expect_core_arg("serve", 0, &Type::String, &mut args[0]);
-                // Accept an HTTPRouter or a callable (lambda/fn pointer).
+                let saved_http_depth = self.http_handler_depth;
+                let saved_escapes = self.lambda_escapes;
+                self.http_handler_depth += 1;
+                self.lambda_escapes = true;
                 let handler_ty = self.infer(&mut args[1].expr);
+                self.http_handler_depth = saved_http_depth;
+                self.lambda_escapes = saved_escapes;
                 match &handler_ty {
                     Some(Type::Fn { .. }) => {}
                     Some(Type::Named(n)) if n == "HTTPRouter" => {}
                     Some(other) => {
                         self.diags.push(Diagnostic::error(
-                                "E0112",
-                                format!("`http.serve` handler must be a function or HTTPRouter, not {}", other.show()),
-                                "the handler is called with each incoming `HTTPRequest`".to_string(),
-                                "pass a router (`http.router()`) or a lambda: `(req) -> HTTPResponse { … }`".to_string(),
-                                Some(args[1].expr.span()),
-                            ));
+                            "E0112",
+                            format!(
+                                "`http.serve` handler must be a function or HTTPRouter, not {}",
+                                other.show()
+                            ),
+                            "the handler is called with each incoming `HTTPRequest`"
+                                .to_string(),
+                            "pass a router (`http.router()`) or a lambda: `(req) -> HTTPResponse { … }`"
+                                .to_string(),
+                            Some(args[1].expr.span()),
+                        ));
                     }
                     None => {}
                 }
-                return None; // serve runs forever; no meaningful return type
+                return None;
+            }
+            // D-TEST-WORLD1=A: execute a callback inside one scoped deterministic
+            // world. The callback receives the world handle and cannot escape
+            // the call's checked lifetime.
+            ("core.testing", "world") => {
+                if args.len() != 1 {
+                    self.diags
+                        .push(wrong_core_arity("world", 1, args.len(), span));
+                    for arg in args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                    return None;
+                }
+                let saved_world_depth = self.deterministic_world_depth;
+                self.deterministic_world_depth += 1;
+                let callback_ty = self.infer_with_expected(
+                    &mut args[0].expr,
+                    &deterministic_world_callback_type(),
+                );
+                self.deterministic_world_depth = saved_world_depth;
+                match &callback_ty {
+                    Some(Type::Fn { params, .. }) if params.len() == 1 => {
+                        if params[0]
+                            != Type::Named(crate::Syntax::DETERMINISTIC_WORLD_TYPE.to_string())
+                        {
+                            self.diags.push(Diagnostic::error(
+                                "E0104",
+                                format!(
+                                    "`testing.world` callback needs a DeterministicWorld parameter, got {}",
+                                    params[0].show()
+                                ),
+                                "the callback receives the active controlled execution world"
+                                    .to_string(),
+                                "write `testing.world(world -> { … })`".to_string(),
+                                Some(args[0].expr.span()),
+                            ));
+                        }
+                    }
+                    Some(Type::Fn { params, .. }) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0104",
+                            format!(
+                                "`testing.world` callback needs one parameter, got {}",
+                                params.len()
+                            ),
+                            "the callback receives exactly one scoped execution world"
+                                .to_string(),
+                            "write `testing.world(world -> { … })`".to_string(),
+                            Some(args[0].expr.span()),
+                        ));
+                    }
+                    Some(other) => {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!(
+                                "`testing.world` needs a lambda, not {}",
+                                other.show()
+                            ),
+                            "the world callback runs with controlled time and scheduling"
+                                .to_string(),
+                            "write `testing.world(world -> { … })`".to_string(),
+                            Some(args[0].expr.span()),
+                        ));
+                    }
+                    None => {}
+                }
+                return Some(unit_ty());
+            }
+            // D-TEST-STRATEGY1=A: one optional explicit strategy replaces the
+            // compiler-derived strategy when present. The runner remains the
+            // shared Foundation implementation and keeps typed callbacks.
+            ("core.testing", "histories") => {
+                if type_args.len() == 1 {
+                    self.check_declared_type(&type_args[0], span);
+                } else {
+                    let _ = exactly_one_type_arg(self, name, type_args, span);
+                }
+                let command = type_args
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| Type::Named("DataTree".to_string()));
+                let data_tree = Type::Named("DataTree".to_string());
+                let command_callback = data_callback_type(
+                    Type::List(Box::new(command.clone())),
+                    data_tree.clone(),
+                );
+                let observe_callback = data_callback_type(data_tree.clone(), data_tree);
+                let strategy_callback = Type::Option(Box::new(history_strategy_type(command)));
+                let expected = vec![
+                    Type::Int,
+                    Type::Int,
+                    strategy_callback,
+                    command_callback.clone(),
+                    command_callback,
+                    observe_callback,
+                ];
+                if args.len() != expected.len() {
+                    self.diags
+                        .push(wrong_core_arity(name, expected.len(), args.len(), span));
+                }
+                for (index, expected) in expected.iter().enumerate() {
+                    if let Some(arg) = args.get_mut(index) {
+                        self.expect_core_arg(name, index, expected, arg);
+                    }
+                }
+                for arg in args.iter_mut().skip(expected.len()) {
+                    self.infer(&mut arg.expr);
+                }
+                return Some(Type::Result {
+                    ok: Box::new(Type::Named("TestComparison".to_string())),
+                    err: Box::new(Type::String),
+                });
             }
             // D-DEFER1 option B: scope.guard(() -> { … }) → ScopeGuard
             // The argument must be a zero-parameter lambda. LIFO drop order is
@@ -4134,7 +6058,8 @@ impl<'a> Checker<'a> {
                     }
                     return None;
                 }
-                let lam_ty = self.infer(&mut args[0].expr);
+                let lam_ty =
+                    self.infer_with_expected(&mut args[0].expr, &unit_callback_type());
                 match &lam_ty {
                     Some(Type::Fn { params, .. }) => {
                         if !params.is_empty() {
@@ -4207,7 +6132,7 @@ impl<'a> Checker<'a> {
                     }
                     return None;
                 }
-                let lam_ty = self.infer(&mut args[0].expr);
+                let lam_ty = self.infer_retained_callback(&mut args[0].expr, None);
                 let elem = match &lam_ty {
                     Some(Type::Fn { params, ret, .. }) => {
                         if !params.is_empty() {
@@ -4260,7 +6185,7 @@ impl<'a> Checker<'a> {
                     }
                     return None;
                 }
-                let lam_ty = self.infer(&mut args[0].expr);
+                let lam_ty = self.infer_retained_callback(&mut args[0].expr, None);
                 let elem = match &lam_ty {
                     Some(Type::Fn { params, ret, .. }) => {
                         if !params.is_empty() {
@@ -4317,7 +6242,8 @@ impl<'a> Checker<'a> {
                     }
                     return None;
                 }
-                let lam_ty = self.infer(&mut args[0].expr);
+                let lam_ty =
+                    self.infer_retained_callback(&mut args[0].expr, Some(&unit_callback_type()));
                 match &lam_ty {
                     Some(Type::Fn { params, .. }) => {
                         if !params.is_empty() {
@@ -4341,64 +6267,96 @@ impl<'a> Checker<'a> {
                 }
                 return None;
             }
-            // D-WEB-CLICK-PORT1=D: `ui.button(label)` or
-            // `ui.button(label, on_click: () -> …)`.
+            // D-UI-CLOSURE1=A: the optional shortcut and accessible label
+            // are metadata on one canonical button node. A callback uses the
+            // trailing block spelling and is lowered to one fixed four-word
+            // runtime route.
             ("core.ui", "button") => {
-                if args.len() != 1 && args.len() != 2 {
+                if args.len() == 1 {
+                    self.expect_core_arg("button", 0, &Type::String, &mut args[0]);
+                    return Some(Type::Named("UiNode".to_string()));
+                }
+                if args.len() != 4 {
                     self.diags
-                        .push(wrong_core_arity("button", 1, args.len(), span));
-                    for a in args.iter_mut() {
-                        self.infer(&mut a.expr);
+                        .push(wrong_core_arity("button", 4, args.len(), span));
+                    for arg in args.iter_mut() {
+                        self.infer(&mut arg.expr);
                     }
                     return None;
                 }
-                if args.len() == 2 {
-                    super::net_text_time::require_exact_labels(
-                        "ui.button",
-                        args,
-                        &[(1, "on_click")],
-                        span,
-                        &mut self.diags,
+                self.expect_core_arg("button", 0, &Type::String, &mut args[0]);
+                if !matches!(args[1].expr, Expr::Absent(_)) {
+                    self.expect_core_arg(
+                        "button",
+                        1,
+                        &Type::Named("UiShortcut".to_string()),
+                        &mut args[1],
                     );
                 }
-                let label_ty = self.infer(&mut args[0].expr);
-                if let Some(got) = label_ty {
-                    if got != Type::String {
-                        self.diags.push(Diagnostic::error(
-                            "E0112",
-                            format!(
-                                "`button` wants String for argument 1, but this is {}",
-                                got.show()
-                            ),
-                            "every argument must match its parameter's type".to_string(),
-                            "pass a string label".to_string(),
-                            Some(args[0].expr.span()),
+                if !matches!(args[2].expr, Expr::Absent(_)) {
+                    self.expect_core_arg("button", 2, &Type::String, &mut args[2]);
+                }
+                if !args[3].flags.is_trailing_block
+                    || matches!(args[3].expr, Expr::Absent(_))
+                {
+                    self.diags.push(Diagnostic::error(
+                        "E0335",
+                        "button callbacks use a trailing block".to_string(),
+                        "the callback is the button's trailing closure, after its labeled metadata"
+                            .to_string(),
+                        "write `button(\"Save\") { save() }`".to_string(),
+                        Some(args[3].span),
+                    ));
+                    self.infer(&mut args[3].expr);
+                    return Some(Type::Named("UiNode".to_string()));
+                }
+                let callback_ty =
+                    self.infer_retained_callback(&mut args[3].expr, Some(&unit_callback_type()));
+                if let Some(Type::Fn { params, .. }) = callback_ty {
+                    if !params.is_empty() {
+                        self.diags.push(reactive_lambda_arity(
+                            "button on_click",
+                            params.len(),
+                            args[3].expr.span(),
                         ));
                     }
                 }
+                return Some(Type::Named("UiNode".to_string()));
+            }
+            // D-UI-DROP1=A: text input keeps its existing two-value node
+            // constructor and adds one typed `on_drop` closure slot.
+            ("core.ui", "text_input") => {
                 if args.len() == 2 {
-                    let saved_esc = self.lambda_escapes;
-                    self.lambda_escapes = true;
-                    let lam_ty = self.infer(&mut args[1].expr);
-                    self.lambda_escapes = saved_esc;
-                    match &lam_ty {
-                        Some(Type::Fn { params, .. }) => {
-                            if !params.is_empty() {
-                                self.diags.push(reactive_lambda_arity(
-                                    "button on_click",
-                                    params.len(),
-                                    args[1].expr.span(),
-                                ));
-                            }
-                        }
-                        Some(other) => {
-                            self.diags.push(reactive_not_lambda(
-                                "button on_click",
-                                other,
-                                args[1].expr.span(),
+                    self.expect_core_arg("text_input", 0, &Type::String, &mut args[0]);
+                    self.expect_core_arg(
+                        "text_input",
+                        1,
+                        &Type::Named("UiImeMode".to_string()),
+                        &mut args[1],
+                    );
+                    return Some(Type::Named("UiNode".to_string()));
+                }
+                if args.len() != 3 {
+                    self.diags
+                        .push(wrong_core_arity("text_input", 3, args.len(), span));
+                    for arg in args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                    return None;
+                }
+                if !matches!(args[2].expr, Expr::Absent(_)) {
+                    let callback_ty = self.infer_retained_callback(
+                        &mut args[2].expr,
+                        Some(&ui_drop_callback_type()),
+                    );
+                    if let Some(Type::Fn { params, .. }) = callback_ty {
+                        if params.len() != 1 {
+                            self.diags.push(reactive_lambda_arity(
+                                "text_input on_drop",
+                                params.len(),
+                                args[2].expr.span(),
                             ));
                         }
-                        None => {}
                     }
                 }
                 return Some(Type::Named("UiNode".to_string()));
@@ -4478,7 +6436,8 @@ impl<'a> Checker<'a> {
                     }
                     return None;
                 }
-                let lam_ty = self.infer(&mut args[0].expr);
+                let lam_ty =
+                    self.infer_retained_callback(&mut args[0].expr, Some(&unit_callback_type()));
                 match &lam_ty {
                     Some(Type::Fn { params, .. }) => {
                         if !params.is_empty() {
@@ -5028,12 +6987,16 @@ impl<'a> Checker<'a> {
                 return Some(Type::Named("HTTPMux".to_string()));
             }
             ("core.http.server", "bind") => {
-                if args.len() != 2 && args.len() != 3 {
+                // The shared Core parameter binder materializes both optional
+                // labeled slots before this checked branch reaches the
+                // backend. Keeping one four-value shape makes the AOT, JIT,
+                // and evaluator routes agree on the server ABI.
+                if args.len() != 4 {
                     self.diags.push(Diagnostic::error(
                             "E0104",
-                            format!("`bind` expects 2 arguments, or 3 with `tls:`, got {}", args.len()),
-                            "HTTPS binding uses the named `tls:` option so plaintext and TLS share one entry point".to_string(),
-                            "write `Server.bind(addr, mux)` or `Server.bind(addr, mux, tls: Server.tls(cert, key))`".to_string(),
+                            format!("`bind` expects address, mux, optional `tls:`, and optional `deadline:`, got {}", args.len()),
+                            "HTTPS binding and request deadlines use named options while plaintext keeps the same entry point".to_string(),
+                            "write `Server.bind(addr, mux)`, add `tls: Server.tls(cert, key)`, or add `deadline: duration`".to_string(),
                             Some(span),
                         ));
                     for arg in args.iter_mut() {
@@ -5043,12 +7006,20 @@ impl<'a> Checker<'a> {
                 }
                 self.expect_core_arg("bind", 0, &Type::String, &mut args[0]);
                 self.expect_core_arg("bind", 1, &Type::Named("HTTPMux".to_string()), &mut args[1]);
-                if args.len() == 3 && !matches!(&args[2].expr, Expr::Absent(_)) {
+                if !matches!(&args[2].expr, Expr::Absent(_)) {
                     self.expect_core_arg(
                         "bind",
                         2,
                         &Type::Named("HTTPServerTls".to_string()),
                         &mut args[2],
+                    );
+                }
+                if !matches!(&args[3].expr, Expr::Absent(_)) {
+                    self.expect_core_arg(
+                        "bind",
+                        3,
+                        &Type::Named("Duration".to_string()),
+                        &mut args[3],
                     );
                 }
                 return Some(Type::Result {
@@ -5057,28 +7028,36 @@ impl<'a> Checker<'a> {
                 });
             }
             ("core.http.server", "serve") => {
-                if args.len() != 2 && args.len() != 3 {
+                if args.len() != 4 {
                     self.diags.push(Diagnostic::error(
                             "E0104",
-                            format!("`serve` expects 2 arguments, or 3 with `tls:`, got {}", args.len()),
-                            "HTTPS serving uses the named `tls:` option so plaintext and TLS share one entry point".to_string(),
-                            "write `Server.serve(addr, mux)` or `Server.serve(addr, mux, tls: Server.tls(cert, key))`".to_string(),
+                            format!("`serve` expects address, mux, optional `tls:`, and optional `deadline:`, got {}", args.len()),
+                            "HTTPS serving and request deadlines use named options while plaintext keeps the same entry point".to_string(),
+                            "write `Server.serve(addr, mux)`, add `tls: Server.tls(cert, key)`, or add `deadline: duration`".to_string(),
                             Some(span),
                         ));
-                    for a in args.iter_mut() {
-                        self.infer(&mut a.expr);
+                    for arg in args.iter_mut() {
+                        self.infer(&mut arg.expr);
                     }
                     return None;
                 }
                 self.expect_core_arg("serve", 0, &Type::String, &mut args[0]);
                 // second arg is a Mux — just infer it
                 self.infer(&mut args[1].expr);
-                if args.len() == 3 && !matches!(&args[2].expr, Expr::Absent(_)) {
+                if !matches!(&args[2].expr, Expr::Absent(_)) {
                     self.expect_core_arg(
                         "serve",
                         2,
                         &Type::Named("HTTPServerTls".to_string()),
                         &mut args[2],
+                    );
+                }
+                if !matches!(&args[3].expr, Expr::Absent(_)) {
+                    self.expect_core_arg(
+                        "serve",
+                        3,
+                        &Type::Named("Duration".to_string()),
+                        &mut args[3],
                     );
                 }
                 return Some(Type::Result {
@@ -5663,31 +7642,57 @@ impl<'a> Checker<'a> {
             return ret;
         }
 
-        // D-AUTHORITY-WORD2=E: plugin construction accepts the same
-        // Authority boundary value as process execution. The one-argument
-        // loader remains the existing sandboxed convenience form; the
-        // two-argument form carries the explicit authority value.
+        // D-PLUGIN-AUTHORITY1: plugin loading has one exact ABI. The path and
+        // tightened Authority are both required; omitted authority is never
+        // replaced with ambient host policy. A static artifact also selects a
+        // frozen Component interface before body checking can see methods.
         if module == "core.plugin" && name == "load" {
-            if !matches!(args.len(), 1 | 2) {
-                self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+            if args.len() != 2 {
+                self.diags.push(wrong_core_arity(name, 2, args.len(), span));
             }
             if let Some(arg) = args.get_mut(0) {
                 self.expect_core_arg(name, 0, &Type::String, arg);
             }
-            if args.len() == 2 {
+            if let Some(arg) = args.get_mut(1) {
                 self.expect_core_arg(
                     name,
                     1,
                     &Type::Named(crate::Syntax::AUTHORITY_HANDLE_TYPE.to_string()),
-                    &mut args[1],
+                    arg,
                 );
-                crate::Sema::Effects::check_authority_boundary_scope(self, &args[1].expr);
-                args[1].flags.authority_boundary = true;
+                crate::Sema::Effects::check_authority_boundary_scope(self, &arg.expr);
+                arg.flags.authority_boundary = true;
             }
             for arg in args.iter_mut().skip(2) {
                 self.infer(&mut arg.expr);
             }
-            return Some(Type::Named("Plugin".to_string()));
+
+            let artifact = args.first().and_then(|arg| match &arg.expr {
+                Expr::Str(parts, _) => match parts.as_slice() {
+                    [crate::AST::StrPart::Lit(path)] => Some(path.as_str()),
+                    _ => None,
+                },
+                _ => None,
+            });
+            let interface = artifact.and_then(|path| self.plugin_interfaces.interface_for_artifact(path));
+            let Some(interface) = interface else {
+                self.diags.push(Diagnostic::error(
+                    "E1257",
+                    "plugin.load needs a registered Component interface".to_string(),
+                    "plugin members are available only when the artifact is a literal with a frozen interface snapshot"
+                        .to_string(),
+                    "pass a literal registered artifact path, or publish its plugin interface snapshot"
+                        .to_string(),
+                    args.first()
+                        .map(|arg| arg.expr.span())
+                        .or(Some(span)),
+                ));
+                return Some(Type::Named("Plugin".to_string()));
+            };
+            return Some(Type::Apply {
+                name: "Plugin".to_string(),
+                args: vec![Type::Named(interface.identity.clone())],
+            });
         }
 
         let compute_alias_ret = if module == "core.compute" {
@@ -5768,24 +7773,23 @@ impl<'a> Checker<'a> {
                 .push(wrong_core_arity(name, params.len(), args.len(), span));
         }
         for (i, ((conv, param_ty), arg)) in params.iter().zip(args.iter_mut()).enumerate() {
+            let retained_ui_callback = matches!(
+                (module, name),
+                ("core.ui", "preview" | "playground")
+            ) && matches!(param_ty, Type::Fn { .. });
+            let saved_callback_escapes = self.lambda_escapes;
+            if retained_ui_callback {
+                self.lambda_escapes = true;
+            }
             if *conv == AccessConvention::Move {
-                if arg.convention != AccessConvention::Move {
-                    self.diags.push(Diagnostic::error(
-                        "E0201",
-                        format!(
-                            "argument {} to `{}` transfers ownership through the move marker `^`",
-                            i + 1,
-                            name
-                        ),
-                        "this standard library constructor retains the consumed handle".to_string(),
-                        format!(
-                            "write the move marker `^`: `{}value` for this argument",
-                            Syntax::SIGIL_MOVE
-                        ),
-                        Some(arg.span),
-                    ));
-                }
                 self.expect_core_arg_moving(name, i, param_ty, arg);
+                if retained_ui_callback {
+                    self.lambda_escapes = saved_callback_escapes;
+                    if !matches!(arg.expr, Expr::Absent(_)) {
+                        self.check_stream_callback_expr(&arg.expr, param_ty);
+                    }
+                }
+                self.finish_core_call_ownership(name, i, arg, *conv, param_ty);
                 continue;
             }
             if *conv == AccessConvention::Write && arg.convention != AccessConvention::Write {
@@ -5803,8 +7807,47 @@ impl<'a> Checker<'a> {
                     ),
                     Some(arg.span),
                 ));
+            } else if *conv == AccessConvention::Write {
+                if let Expr::Ident(ident, ident_span) = &arg.expr {
+                    if let Some(info) = self.lookup(ident) {
+                        if !info.mutable {
+                            let mut diagnostic = Diagnostic::error(
+                                "E0111",
+                                format!(
+                                    "`{}` was made with `{}`, so it can't be changed",
+                                    ident,
+                                    Syntax::SIGIL_BIND_IMMUT
+                                ),
+                                format!(
+                                    "`{}` will change this value, so it must be mutable (`{}`)",
+                                    name,
+                                    Syntax::SIGIL_BIND_MUT
+                                ),
+                                format!(
+                                    "declare it with `{} {} ...`",
+                                    ident,
+                                    Syntax::SIGIL_BIND_MUT
+                                ),
+                                Some(*ident_span),
+                            );
+                            if let Some(sigil_span) = info.binding_sigil_span {
+                                diagnostic = diagnostic.with_edit(crate::Diagnostics::TextEdit {
+                                    span: sigil_span,
+                                    new_text: Syntax::SIGIL_BIND_MUT.to_string(),
+                                });
+                            }
+                            self.diags.push(diagnostic);
+                        }
+                    }
+                }
             }
             self.expect_core_arg(name, i, param_ty, arg);
+            if retained_ui_callback {
+                self.lambda_escapes = saved_callback_escapes;
+                if !matches!(arg.expr, Expr::Absent(_)) {
+                    self.check_stream_callback_expr(&arg.expr, param_ty);
+                }
+            }
         }
         for arg in args.iter_mut().skip(params.len()) {
             self.infer(&mut arg.expr);

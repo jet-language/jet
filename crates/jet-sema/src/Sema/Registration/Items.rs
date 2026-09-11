@@ -53,7 +53,122 @@ fn cell_guard_storage_diagnostic(place: &str, span: Span) -> Diagnostic {
         Some(span),
     )
 }
+/// D-PLACE1=A / D-LAYOUT-ALIGN1=A: sema is the sole owner of the declaration
+/// gate. It reads one target/profile intersection fact and carries the checked
+/// request forward; no backend or rustc probe invents a second policy.
+fn layout_alignment_literal(expr: &Expr) -> Option<(i128, Span)> {
+    match expr {
+        Expr::Int(value, span, _, _) => Some((i128::from(*value), *span)),
+        Expr::Unary(crate::AST::UnOp::Neg, inner, span)
+            if matches!(&**inner, Expr::Int(..)) =>
+        {
+            let Expr::Int(value, _, _, _) = &**inner else {
+                return None;
+            };
+            Some((-i128::from(*value), *span))
+        }
+        _ => None,
+    }
+}
 
+fn nearest_layout_alignment(value: i128) -> String {
+    if value <= 0 {
+        return "1".to_string();
+    }
+    let value = u64::try_from(value).unwrap_or(u64::MAX);
+    let upper = value.checked_next_power_of_two().unwrap_or(u64::MAX);
+    if value > jet_foundation::Layout::PORTABLE_ALIGNMENT_BASELINE_MAX {
+        return format!("{}, {}", Syntax::LAYOUT_ALIGN_TARGET, upper);
+    }
+    let lower = upper / 2;
+    let nearest = if value - lower <= upper.saturating_sub(value) {
+        lower
+    } else {
+        upper
+    };
+    nearest.to_string()
+}
+
+fn validate_layout_alignment(
+    s: &StructDef,
+    target: &jet_foundation::Layout::TargetLayout,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let Some(marker) = s
+        .type_markers
+        .iter()
+        .find(|marker| marker.name == Syntax::MARKER_LAYOUT && !marker.negated)
+    else {
+        return;
+    };
+    let Some(Expr::Call(call)) = marker.expr_arg(1) else {
+        return;
+    };
+    if call.name != Syntax::LAYOUT_ALIGN {
+        return;
+    }
+    let target_mode = call.args.len() == 2
+        && matches!(
+            &call.args[0].expr,
+            Expr::Ident(name, _) if name == Syntax::LAYOUT_ALIGN_TARGET
+        );
+    let argument = match call.args.len() {
+        1 => &call.args[0].expr,
+        2 if target_mode => &call.args[1].expr,
+        _ => return,
+    };
+    let Some((value, span)) = layout_alignment_literal(argument) else {
+        return;
+    };
+    let value_text = value.to_string();
+    let Some(requested) = u64::try_from(value).ok() else {
+        diags.push(Diagnostic::from_row(
+            "E1119",
+            &[
+                ("value", value_text.as_str()),
+                ("reason", "negative values cannot describe byte alignment"),
+                ("suggestion", "1"),
+            ],
+            Some(span),
+        ));
+        return;
+    };
+    match target
+        .layout_facts
+        .check_alignment(requested, 1, target_mode)
+    {
+        Ok(_) => {}
+        Err(error) => {
+            let reason = error.reason();
+            let suggestion = nearest_layout_alignment(value);
+            diags.push(Diagnostic::from_row(
+                "E1119",
+                &[
+                    ("value", value_text.as_str()),
+                    ("reason", reason.as_str()),
+                    ("suggestion", suggestion.as_str()),
+                ],
+                Some(span),
+            ));
+        }
+    }
+}
+
+
+
+
+fn receipt_schema_digest(type_name: &str, fields: &[(String, Span, Type)]) -> String {
+    let mut schema = String::new();
+    schema.push_str(type_name);
+    schema.push('\0');
+    for (name, _, ty) in fields {
+        schema.push_str(name);
+        schema.push(':');
+        schema.push_str(&ty.name());
+        schema.push(';');
+    }
+    jet_foundation::SHA256::sha256_hex(schema.as_bytes())
+}
 /// D-DIST1/D-DIST3: register a distinct type declaration.
 pub(crate) fn register_distinct(
     d: &DistinctDef,
@@ -132,8 +247,7 @@ pub(crate) fn register_distinct(
                 }),
         },
     );
-    if d
-        .type_markers
+    if d.type_markers
         .iter()
         .any(|marker| marker.name == Syntax::MARKER_ERROR)
     {
@@ -198,7 +312,12 @@ pub(crate) fn eval_comptime_items(
     // D-CORE-USELIST1=A: local grouped-item name → original Core member.
     core_item_imports: &HashMap<String, String>,
     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
-    fact_registry: &jet_foundation::Facts::FactRegistry,
+    states: &mut [ModuleState],
+    plugin_interfaces: &PluginInterfaceRegistry,
+    devtools_registry: &jet_foundation::AST::DevtoolsRegistry,
+    no_os: bool,
+    gates: crate::Policy::GateSet,
+    no_prelude: bool,
     mut embed_inputs_out: Option<&mut Vec<crate::AST::ComptimeInput>>,
 ) {
     if !items
@@ -279,14 +398,12 @@ pub(crate) fn eval_comptime_items(
                         continue;
                     }
                     for method in &implementation.methods {
-                        let method_key =
-                            (implementation.type_name.clone(), method.name.clone());
+                        let method_key = (implementation.type_name.clone(), method.name.clone());
                         if matches!(
                             implementation.trait_name.as_deref(),
                             Some(crate::Generics::ENCODE | crate::Generics::DECODE)
                         ) {
-                            let key =
-                                format!("{}::{}", implementation.type_name, method.name);
+                            let key = format!("{}::{}", implementation.type_name, method.name);
                             if implementation.is_generated_serde || method.compiler_generated {
                                 funcs.entry(key).or_insert(method);
                                 methods.entry(method_key).or_insert(method);
@@ -380,6 +497,8 @@ pub(crate) fn eval_comptime_items(
         // expansion can hand registration a declaration whose predecessor
         // was already folded, and delayed write-back loses that binding.
         let mut globals: HashMap<String, crate::Comptime::CtValue> = HashMap::new();
+        let (ct_funcs, ct_externs, _) = comptime_context_from_items(&eval_items);
+        let ct_checked_funcs = HashMap::new();
         for index in 0..items.len() {
             let (name, value, known, known_ty) = match &items[index] {
                 Item::Const(c) if c.is_comptime => {
@@ -390,6 +509,7 @@ pub(crate) fn eval_comptime_items(
             if let Some(value) = known {
                 let ty = known_ty.unwrap_or_else(|| value.jet_type());
                 consts.insert(name.clone(), ty.clone());
+                states[module_idx].consts.insert(name.clone(), ty.clone());
                 globals.insert(name, value.clone());
 
                 if let Item::Const(c) = &mut items[index] {
@@ -406,6 +526,40 @@ pub(crate) fn eval_comptime_items(
             // D-META-EFFECT1: evaluate_with_imports resolves Core calls
             // through the shared effect facts.
             let mut eval_value = value.clone();
+            let checker_diags = {
+                let effect_facts = &states[module_idx].fact_registry;
+                let mut checker = crate::Sema::checker_for_module(
+                    module_idx,
+                    &*states,
+                    plugin_interfaces,
+                    devtools_registry,
+                    effect_facts,
+                    &ct_funcs,
+                    &ct_checked_funcs,
+                    &eval_items,
+                    &ct_externs,
+                    base_dir,
+                    &globals,
+                    no_os,
+                    gates,
+                    no_prelude,
+                    name_ledger,
+                    None,
+                    false,
+                    false,
+                );
+                checker.in_comptime = true;
+                checker.in_pure = true;
+                checker.infer(&mut eval_value);
+                checker.diags
+            };
+            let invalid = checker_diags
+                .iter()
+                .any(|diagnostic| diagnostic.severity == crate::Diagnostics::Severity::Error);
+            diags.extend(checker_diags);
+            if invalid {
+                continue;
+            }
             eval_value.for_each_expr_mut(|expr| {
                 let Expr::Call(call) = expr else {
                     return;
@@ -462,7 +616,7 @@ pub(crate) fn eval_comptime_items(
                 None,
                 &eval_items,
                 build_facts,
-                fact_registry,
+                &states[module_idx].fact_registry,
             ) {
                 Ok((v, inputs)) => {
                     crate::Sema::record_comptime_import_alias_uses(
@@ -479,6 +633,7 @@ pub(crate) fn eval_comptime_items(
                     let ty = comptime_builtin_fixed_return_type(&value, core_imports, &v)
                         .unwrap_or_else(|| v.jet_type());
                     consts.insert(name.clone(), ty.clone());
+                    states[module_idx].consts.insert(name.clone(), ty.clone());
                     globals.insert(name.clone(), v.clone());
                     if let Item::Const(c) = &mut items[index] {
                         c.ty = Some(ty);
@@ -1213,6 +1368,7 @@ pub(crate) fn register_struct(
     diags: &mut Vec<Diagnostic>,
     funcs: &HashMap<String, FuncSig>,
     consts: &HashMap<String, Type>,
+    target: &jet_foundation::Layout::TargetLayout,
 ) {
     if is_reserved_type(&s.name) {
         diags.push(Diagnostic::error(
@@ -1232,6 +1388,7 @@ pub(crate) fn register_struct(
         ));
         return;
     }
+    validate_layout_alignment(s, target, diags);
     let mut field_names = HashSet::new();
     let mut fields = Vec::new();
     // D-FIELDPOL1: struct name → computed field name → (span, type). A
@@ -1242,6 +1399,12 @@ pub(crate) fn register_struct(
     // D-DEFAULT-SHAPE1=B: stored fields with `{}` defaults for omitted construction.
     let mut field_defaults: HashMap<String, crate::AST::Expr> = HashMap::new();
     for f in &s.fields {
+        crate::Sema::CheckerCore::reject_never_value_positions(
+            &f.ty,
+            f.ty_span,
+            false,
+            diags,
+        );
         if !field_names.insert(f.name.clone()) {
             diags.push(Diagnostic::error(
                 "E0105",
@@ -1292,6 +1455,60 @@ pub(crate) fn register_struct(
             ));
         }
     }
+    // D-FOUND-RECEIPT1: the marker is a declaration fact, not a runtime
+    // string. Preserve the section name and schema digest for TIR lowering.
+    if let Some(marker) = s
+        .type_markers
+        .iter()
+        .find(|marker| marker.name == Syntax::MARKER_RECEIPT && !marker.negated)
+    {
+        let codable = s
+            .type_markers
+            .iter()
+            .any(|candidate| candidate.name == Syntax::MARKER_CODABLE && !candidate.negated);
+        if !codable {
+            diags.push(Diagnostic::error(
+                "E2411",
+                format!("receipt section type `{}` must be `#Codable`", s.name),
+                "typed receipt sections use the shared Codable wire contract".to_string(),
+                "add `#Codable` beside `#Receipt`".to_string(),
+                Some(marker.span),
+            ));
+        } else if let Some(crate::AST::CtValue::Str(section_name)) = marker.ct.as_ref() {
+            if section_name.is_empty()
+                || section_name.len() > 128
+                || !section_name
+                    .chars()
+                    .all(|ch| !ch.is_control() && ch != '/' && ch != '\\')
+            {
+                diags.push(Diagnostic::error(
+                    "E0103",
+                    "`#Receipt` section name is invalid".to_string(),
+                    "section names are bounded and cannot contain path separators".to_string(),
+                    "use a non-empty name of at most 128 bytes".to_string(),
+                    Some(marker.span),
+                ));
+            } else {
+                registry.receipt_sections.insert(
+                    s.name.clone(),
+                    ReceiptSectionMeta {
+                        name: section_name.clone(),
+                        type_name: s.name.clone(),
+                        schema_digest: receipt_schema_digest(&s.name, &fields),
+                        span: marker.span,
+                    },
+                );
+            }
+        } else {
+            diags.push(Diagnostic::error(
+                "E0103",
+                "`#Receipt` requires one compile-time string name".to_string(),
+                "receipt section identity is fixed at declaration time".to_string(),
+                "write `#Receipt(\"name\")`".to_string(),
+                Some(marker.span),
+            ));
+        }
+    }
     registry.types.insert(
         s.name.clone(),
         TypeDef::Struct {
@@ -1300,9 +1517,14 @@ pub(crate) fn register_struct(
             deprecation: super::super::deprecation_from_markers(&s.type_markers),
             single_use: s.is_single_use,
             must_use: s.is_must_use,
-            columnar: s.layout == Some(crate::AST::StructLayout::Columnar),
-            is_c_layout: s.layout == Some(crate::AST::StructLayout::C),
-            // `#PublishedSchema struct` sets the flag; the grouped
+            columnar: s
+                .layout
+                .as_ref()
+                .is_some_and(|layout| matches!(layout, crate::AST::StructLayout::Columnar)),
+            is_c_layout: s
+                .layout
+                .as_ref()
+                .is_some_and(crate::AST::StructLayout::is_c),
             // `#[PublishedSchema, Codable]` spelling leaves the marker in
             // `derives` — accept both (mirrors `Sema::desugar_migrations`).
             published: s.is_published_schema
@@ -1311,8 +1533,7 @@ pub(crate) fn register_struct(
                     .any(|(t, _)| t == crate::Syntax::MARKER_PUBLISHED_SCHEMA),
         },
     );
-    if s
-        .type_markers
+    if s.type_markers
         .iter()
         .any(|marker| marker.name == Syntax::MARKER_ERROR)
     {
@@ -1328,23 +1549,33 @@ pub(crate) fn register_struct(
             .field_defaults
             .insert(s.name.clone(), field_defaults);
     }
-    // D-REPRC1: `#layout(c)` structs may not contain growable fields.
-    if s.layout == Some(crate::AST::StructLayout::C) {
+    if s
+        .layout
+        .as_ref()
+        .is_some_and(crate::AST::StructLayout::is_c)
+    {
         for f in &s.fields {
             let growable = matches!(&f.ty, Type::List(_) | Type::Map { .. } | Type::String);
             if growable {
                 let layout_span = s.layout_span.unwrap_or(s.name_span);
+                let layout_name = match s.layout.as_ref() {
+                    Some(crate::AST::StructLayout::CAligned { target: true, .. }) => {
+                        "#Layout(c, align(target, N))"
+                    }
+                    Some(crate::AST::StructLayout::CAligned { .. }) => "#Layout(c, align(N))",
+                    _ => "#Layout(c)",
+                };
                 diags.push(Diagnostic::error(
                     "E1104",
                     format!(
-                        "`#Layout(c)` struct `{}` has a growable field `{}` ({})",
+                        "{layout_name} struct `{}` has a growable field `{}` ({})",
                         s.name,
                         f.name,
                         f.ty.name()
                     ),
                     "growable types (`[T]`, `Map`, `String`) don't have a stable C layout"
                         .to_string(),
-                    "use a fixed-size array `[T#N]` instead, or remove `#Layout(c)`".to_string(),
+                    format!("use a fixed-size array `[T#N]` instead, or remove {layout_name}"),
                     Some(layout_span),
                 ));
             }
@@ -1755,7 +1986,9 @@ pub(crate) fn register_enum(
                 }
             }
         }
-        variants.insert(v.name.clone(), (v.name_span, v.payload.clone()));
+        let mut payload = v.payload.clone();
+        super::Derives::normalize_variant_payload(&mut payload, &e.name);
+        variants.insert(v.name.clone(), (v.name_span, payload));
     }
     // D-TAG1: record each group's subtree (ordered leaf paths). A group path
     // that also names a leaf is a duplicate definition (one name, two meanings).
@@ -1792,8 +2025,7 @@ pub(crate) fn register_enum(
             c_layout_tag: e.c_layout_tag(),
         },
     );
-    if e
-        .type_markers
+    if e.type_markers
         .iter()
         .any(|marker| marker.name == Syntax::MARKER_ERROR)
     {
@@ -1806,10 +2038,41 @@ pub(crate) fn register_type_methods(
     registry: &mut TypeRegistry,
     diags: &mut Vec<Diagnostic>,
 ) {
+    register_type_methods_inner(items, registry, diags, true);
+}
+
+pub(crate) fn register_missing_type_methods(
+    items: &[Item],
+    registry: &mut TypeRegistry,
+    diags: &mut Vec<Diagnostic>,
+) {
+    register_type_methods_inner(items, registry, diags, false);
+}
+
+fn register_type_methods_inner(
+    items: &[Item],
+    registry: &mut TypeRegistry,
+    diags: &mut Vec<Diagnostic>,
+    error_on_duplicate: bool,
+) {
     for item in items {
         let (type_name, methods, field_names) = match item {
-            Item::Struct(s) => (s.name.as_str(), &s.methods, registry.field_names(&s.name)),
-            Item::Enum(e) => (e.name.as_str(), &e.methods, Vec::new()),
+            Item::Struct(s) => (
+                s.name.as_str(),
+                s.methods
+                    .iter()
+                    .chain(s.trait_impls.iter().flat_map(|block| block.methods.iter()))
+                    .collect::<Vec<_>>(),
+                registry.field_names(&s.name),
+            ),
+            Item::Enum(e) => (
+                e.name.as_str(),
+                e.methods
+                    .iter()
+                    .chain(e.trait_impls.iter().flat_map(|block| block.methods.iter()))
+                    .collect::<Vec<_>>(),
+                Vec::new(),
+            ),
             _ => continue,
         };
         let Some(type_def) = registry.types.get_mut(type_name) else {
@@ -1824,6 +2087,9 @@ pub(crate) fn register_type_methods(
                 diags.push(method_field_clash(&m.name, type_name, m.name_span));
             }
             if methods_map.contains_key(&m.name) {
+                if !error_on_duplicate {
+                    continue;
+                }
                 let is_ctor = m.self_param().is_none();
                 diags.push(method_defined_twice(
                     &m.name,

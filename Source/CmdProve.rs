@@ -3,18 +3,30 @@
 //! This owns target discovery, front-end evidence, runtime producers, and the
 //! canonical ProofReport/artifact boundary.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::process::Command;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use jet::Codegen::test_report::{JetTestFailure as TestFailure, JetTestReport as TestReport};
 use jet::Diagnostics::{span_line_col, Diagnostic, Severity};
 use jet::ExitCodes;
+use jet::RecordIndex::{
+    RecordCapture, RecordIdentity, RecordIndex, RecordIndexEntry, RecordKind, RecordLink,
+};
 use jet::AST::{Expr, Func, Item, Stmt};
+use jet_foundation::DataTree::DataTree;
+use jet_foundation::Evidence::{
+    decode_report_bytes, EvidenceKind, EvidenceOutcome, EvidenceReport,
+};
+use jet_foundation::Facts::{
+    DerivationDisposition, DerivationIdentity, DerivationMethod, DerivationRecord,
+};
+use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
+use jet_foundation::JSON::parse_json;
 
 #[derive(Clone)]
 struct Member {
@@ -26,6 +38,8 @@ struct Member {
 struct Target {
     kind: &'static str,
     root: String,
+    authority_root: PathBuf,
+    mir: jet_foundation::MIR::MirProgramIdentity,
     members: Vec<Member>,
     identity_members: Vec<(String, String)>,
     input_sha256: String,
@@ -33,7 +47,609 @@ struct Target {
     build_digest: String,
     core_abi: String,
     lock_digest: String,
-    tir_hash: String,
+}
+
+struct ProofArtifact {
+    artifact_id: String,
+    path: PathBuf,
+    size: u64,
+}
+
+fn index_artifact(
+    identity: RecordIdentity,
+    kind: RecordKind,
+    artifact_id: String,
+    path: PathBuf,
+    size: u64,
+    capture: RecordCapture,
+    consumed: Vec<RecordLink>,
+    produced: Vec<RecordLink>,
+) -> Result<RecordLink, String> {
+    let mut index = RecordIndex::load_for_project(".")
+        .map_err(|error| format!("could not load record index: {error}"))?;
+    let (recorded_sequence, saved) = if let Some(entry) = index.find(kind, &artifact_id, true) {
+        (entry.recorded_sequence, entry.saved)
+    } else {
+        (
+            index
+                .next_recorded_sequence()
+                .map_err(|error| format!("could not allocate record sequence: {error}"))?,
+            false,
+        )
+    };
+    let entry = RecordIndexEntry::new(identity, kind, artifact_id.clone(), path)
+        .map_err(|error| format!("could not construct {kind} record: {error}"))?
+        .with_links(consumed, produced)
+        .map_err(|error| format!("could not link {kind} record `{artifact_id}`: {error}"))?
+        .with_capture(capture)
+        .with_size(size)
+        .with_recorded_sequence(recorded_sequence)
+        .with_saved(saved);
+    index
+        .update_and_store(entry)
+        .map_err(|error| format!("could not store {kind} record `{artifact_id}`: {error}"))?;
+    RecordLink::new(kind, artifact_id)
+        .map_err(|error| format!("could not link {kind} record: {error}"))
+}
+
+fn produced_receipt_links(target: &Target) -> Vec<RecordLink> {
+    let Ok(claim_key) = std::env::var(jet::ReceiptStore::JET_RECEIPT_RECORD_CLAIM_ENV) else {
+        return Vec::new();
+    };
+    if claim_key.len() != 64
+        || !claim_key
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Vec::new();
+    }
+    let Ok(expected_identity) = RecordIdentity::new(
+        target.input_sha256.clone(),
+        env!("CARGO_PKG_VERSION"),
+        "jet-receipt-v2",
+    ) else {
+        return Vec::new();
+    };
+    let Ok(index) = RecordIndex::load_for_project(".") else {
+        return Vec::new();
+    };
+    let Some(indexed) = index.find(RecordKind::Receipt, &claim_key, true) else {
+        return Vec::new();
+    };
+    if indexed.identity != expected_identity {
+        return Vec::new();
+    }
+    RecordLink::new(RecordKind::Receipt, claim_key)
+        .ok()
+        .into_iter()
+        .collect()
+}
+
+fn write_authoritative_bytes(path: &Path, bytes: &[u8], label: &str) -> Result<u64, String> {
+    ensure_artifact_parent(path)?;
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(format!(
+                "final {label} path is not a regular file: {}",
+                path.display()
+            ));
+        }
+        let existing = fs::read(path).map_err(|error| error.to_string())?;
+        if existing == bytes {
+            return u64::try_from(existing.len()).map_err(|_| format!("{label} is too large"));
+        }
+        return Err(format!(
+            "refusing to overwrite differing {label} at {}",
+            path.display()
+        ));
+    }
+    let tmp = path.with_extension(format!(
+        "{}.tmp.{}.{}",
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or("artifact"),
+        std::process::id(),
+        jet::SHA256::sha256_hex(bytes)
+            .get(..8)
+            .unwrap_or("00000000")
+    ));
+    let write_result = (|| -> Result<(), String> {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
+            .map_err(|error| error.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(fs::Permissions::from_mode(0o600))
+                .map_err(|error| error.to_string())?;
+        }
+        file.write_all(bytes).map_err(|error| error.to_string())?;
+        file.sync_all().map_err(|error| error.to_string())?;
+        fs::hard_link(&tmp, path).map_err(|error| error.to_string())?;
+        fs::remove_file(&tmp).map_err(|error| error.to_string())?;
+        #[cfg(unix)]
+        if let Some(parent) = path.parent() {
+            fs::File::open(parent)
+                .map_err(|error| error.to_string())?
+                .sync_all()
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    })();
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(&tmp);
+        return Err(error);
+    }
+    u64::try_from(bytes.len()).map_err(|_| format!("{label} is too large"))
+}
+
+fn persist_evidence_report(target: &Target, report: &EvidenceReport) -> Result<RecordLink, String> {
+    let report_id = report.identity.report_id.as_str();
+    if report_id.is_empty()
+        || report_id.contains('/')
+        || report_id.contains('\\')
+        || report_id == "."
+        || report_id == ".."
+    {
+        return Err(format!(
+            "evidence report has an unsafe report id `{report_id}`"
+        ));
+    }
+    let identity = RecordIdentity::new(
+        target.input_sha256.clone(),
+        report.build.toolchain.clone(),
+        report.producer.as_str(),
+    )?;
+    let path = PathBuf::from(format!(".jet/evidence/{report_id}.json"));
+    let bytes = report.encode()?;
+    let size = write_authoritative_bytes(&path, &bytes, "evidence report")?;
+    index_artifact(
+        identity,
+        RecordKind::Evidence,
+        report_id.to_string(),
+        path,
+        size,
+        RecordCapture::Safe,
+        Vec::new(),
+        Vec::new(),
+    )
+}
+fn replay_artifact_id(bytes: &[u8]) -> Result<String, String> {
+    if bytes.len() < 16 {
+        return Err("replay artifact is truncated before its header".into());
+    }
+    let header_len = u32::from_le_bytes(
+        bytes[12..16]
+            .try_into()
+            .map_err(|_| "replay header length is invalid".to_string())?,
+    ) as usize;
+    let header_end = 16usize
+        .checked_add(header_len)
+        .ok_or_else(|| "replay header length overflows".to_string())?;
+    if header_end > bytes.len() {
+        return Err("replay artifact header is truncated".into());
+    }
+    let header = std::str::from_utf8(&bytes[16..header_end])
+        .map_err(|_| "replay artifact header is not UTF-8".to_string())?;
+    let DataTree::Object(fields) =
+        parse_json(header).map_err(|_| "replay artifact header is not valid JSON".to_string())?
+    else {
+        return Err("replay artifact header is not a JSON object".into());
+    };
+    let Some(artifact_id) = fields.iter().find_map(|(key, value)| {
+        (key == "artifact_id")
+            .then(|| value.as_str().ok())
+            .flatten()
+    }) else {
+        return Err("replay artifact header has no artifact_id".into());
+    };
+    Ok(artifact_id.to_string())
+}
+
+pub(crate) fn index_replay_artifact(
+    path: &Path,
+    identity: &crate::ProveReplay::ReplayIdentity,
+    capture: RecordCapture,
+) -> Result<RecordLink, String> {
+    let bytes = fs::read(path).map_err(|error| {
+        format!(
+            "could not read replay artifact `{}` for indexing: {error}",
+            path.display()
+        )
+    })?;
+    let artifact_id = replay_artifact_id(&bytes)?;
+    let record_identity = identity.record_identity()?;
+    let size =
+        u64::try_from(bytes.len()).map_err(|_| "replay artifact is too large".to_string())?;
+    index_artifact(
+        record_identity,
+        RecordKind::Replay,
+        artifact_id,
+        path.to_path_buf(),
+        size,
+        capture,
+        Vec::new(),
+        Vec::new(),
+    )
+}
+
+fn generated_capture_path(
+    identity: &crate::ProveReplay::ReplayIdentity,
+    authority: &crate::ProveReplay::CaptureAuthority,
+    exit_code: i32,
+) -> Result<PathBuf, String> {
+    let directory = Path::new(".jet/replays");
+    let entries = fs::read_dir(directory)
+        .map_err(|error| format!("could not inspect replay directory: {error}"))?;
+    let outcome = if exit_code == ExitCodes::RUNTIME_PANIC {
+        "panic"
+    } else {
+        "exit"
+    };
+    let mut matches = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        if !entry
+            .file_type()
+            .map_err(|error| error.to_string())?
+            .is_file()
+            || path.extension().and_then(|extension| extension.to_str()) != Some("jetproof-replay")
+        {
+            continue;
+        }
+        let path_text = path.to_string_lossy().into_owned();
+        let Ok(candidate) = crate::ProveReplay::prepare_replay(identity, &path_text) else {
+            continue;
+        };
+        if candidate.time_ms == authority.time_ms()
+            && candidate.expected_status == exit_code
+            && candidate.expected_outcome == outcome
+        {
+            matches.push(path);
+        }
+    }
+    matches.sort();
+    matches
+        .into_iter()
+        .next()
+        .ok_or_else(|| "capture finalized but its replay artifact could not be located".into())
+}
+fn validate_artifact_id(id: &str) -> Result<(), String> {
+    if id.len() != 24 || !id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("replay artifact id must be 24 lowercase hexadecimal bytes".into());
+    }
+    if id.bytes().any(|byte| byte.is_ascii_uppercase()) {
+        return Err("replay artifact id must use lowercase hexadecimal bytes".into());
+    }
+    Ok(())
+}
+
+fn saved_replay_path(id: &str) -> PathBuf {
+    PathBuf::from(format!(".jet/records/saved/{id}"))
+}
+
+fn validate_replay_input_path(raw: &str) -> Result<PathBuf, String> {
+    if raw.is_empty() {
+        return Err("replay artifact path is empty".into());
+    }
+    if raw.contains('\0') || raw.contains('\\') || raw.starts_with('/') {
+        return Err("replay artifact path must stay project-relative".into());
+    }
+    if raw.split('/').any(|component| component.is_empty()) {
+        return Err("replay artifact path must use non-empty components".into());
+    }
+    let path = PathBuf::from(raw);
+    if path.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::CurDir
+                | std::path::Component::ParentDir
+                | std::path::Component::RootDir
+                | std::path::Component::Prefix(_)
+        )
+    }) {
+        return Err("replay artifact path contains an unsafe component".into());
+    }
+    if path.extension().and_then(|extension| extension.to_str()) != Some("jetproof-replay")
+        && path != saved_replay_path(raw)
+    {
+        return Err(
+            "replay input must be a canonical index id or `.jetproof-replay` artifact path".into(),
+        );
+    }
+    Ok(path)
+}
+
+fn resolve_indexed_replay(
+    index: &RecordIndex,
+    raw: &str,
+) -> Result<Option<RecordIndexEntry>, String> {
+    if let Some(entry) = index.find(RecordKind::Replay, raw, true) {
+        return Ok(Some(entry));
+    }
+    let path = validate_replay_input_path(raw)?;
+    Ok(index
+        .entries_authenticated()
+        .into_iter()
+        .find(|entry| entry.kind == RecordKind::Replay && entry.path == path))
+}
+
+fn load_record_index() -> Result<RecordIndex, String> {
+    RecordIndex::load_for_project(".")
+        .map_err(|error| format!("could not load record index: {error}"))
+}
+
+fn mutation_diag(error: (&'static str, String), action: &str, json: bool) -> ! {
+    let (code, why) = error;
+    crate::ProveReplay::emit_prove_diag(
+        code,
+        &format!("replay {action} could not be completed"),
+        &why,
+        &format!("use `--unsave <id>` or capture a fresh replay before retrying {action}"),
+        json,
+    );
+    exit(ExitCodes::USER_ERROR);
+}
+fn prove_status_result(field: &str, value: &str) -> String {
+    let value = StatusValue::parse(value).expect("prove mutation result must be valid JSON");
+    StatusEnvelope::new("prove", true)
+        .with_field(field, value)
+        .json_line()
+}
+fn emit_prove_cli_error(code: &str, what: impl Into<String>, json: bool) {
+    crate::emit_cli_report_for_action(
+        "prove",
+        code,
+        what.into(),
+        "the requested `jet prove` operation could not be completed".to_string(),
+        "check `jet prove --help` and retry".to_string(),
+        json,
+    );
+}
+
+fn emit_prove_cli_error_with_fix(
+    code: &str,
+    what: impl Into<String>,
+    fix: impl Into<String>,
+    json: bool,
+) {
+    crate::emit_cli_report_for_action(
+        "prove",
+        code,
+        what.into(),
+        "the requested `jet prove` operation could not be completed".to_string(),
+        fix.into(),
+        json,
+    );
+}
+
+fn save_replay_command(
+    identity: &crate::ProveReplay::ReplayIdentity,
+    raw: &str,
+) -> Result<(String, PathBuf, u64), (&'static str, String)> {
+    let mut index = load_record_index().map_err(|error| ("E3622", error))?;
+    let Some(entry) = resolve_indexed_replay(&index, raw).map_err(|error| ("E3621", error))? else {
+        return Err((
+            "E3621",
+            format!("replay `{raw}` is not an indexed replay artifact"),
+        ));
+    };
+    let record_identity = identity
+        .record_identity()
+        .map_err(|error| ("E3621", error))?;
+    if entry.identity != record_identity {
+        return Err((
+            "E3621",
+            format!(
+                "replay `{}` belongs to a different target identity",
+                entry.artifact_id
+            ),
+        ));
+    }
+    validate_artifact_id(&entry.artifact_id).map_err(|error| ("E3621", error))?;
+    let source_path = entry.path.clone();
+    let source_text = source_path.to_string_lossy().into_owned();
+    let prepared = if entry.saved {
+        crate::ProveReplay::prepare_saved_replay(identity, &source_path)
+    } else {
+        crate::ProveReplay::prepare_replay(identity, &source_text)
+    };
+    prepared.map_err(|(code, why)| (code, why))?;
+    let source_bytes = fs::read(&source_path).map_err(|error| {
+        (
+            "E3622",
+            format!(
+                "could not read indexed replay `{}` for saving: {error}",
+                source_path.display()
+            ),
+        )
+    })?;
+    let actual_id = replay_artifact_id(&source_bytes).map_err(|error| ("E3622", error))?;
+    if actual_id != entry.artifact_id {
+        return Err((
+            "E3621",
+            format!(
+                "indexed replay id `{}` does not match its authoritative bytes",
+                entry.artifact_id
+            ),
+        ));
+    }
+    let source_size = u64::try_from(source_bytes.len())
+        .map_err(|_| ("E3622", "replay artifact is too large".into()))?;
+    if source_size != entry.size {
+        return Err((
+            "E3621",
+            format!(
+                "indexed replay `{}` records {} bytes but contains {}",
+                entry.artifact_id, entry.size, source_size
+            ),
+        ));
+    }
+    let destination = saved_replay_path(&entry.artifact_id);
+    let source_hash = jet::SHA256::sha256_hex(&source_bytes);
+    write_authoritative_bytes(&destination, &source_bytes, "saved replay").map_err(|error| {
+        (
+            "E3623",
+            format!(
+                "could not publish saved replay `{}`: {error}",
+                entry.artifact_id
+            ),
+        )
+    })?;
+    let saved_bytes = fs::read(&destination).map_err(|error| {
+        (
+            "E3623",
+            format!(
+                "could not verify saved replay `{}`: {error}",
+                entry.artifact_id
+            ),
+        )
+    })?;
+    let saved_size = u64::try_from(saved_bytes.len())
+        .map_err(|_| ("E3623", "saved replay is too large".into()))?;
+    if saved_size != source_size || jet::SHA256::sha256_hex(&saved_bytes) != source_hash {
+        return Err((
+            "E3623",
+            format!(
+                "saved replay `{}` failed byte and size verification",
+                entry.artifact_id
+            ),
+        ));
+    }
+    let saved = index
+        .save_replay(
+            &entry.artifact_id,
+            &record_identity,
+            destination.clone(),
+            saved_size,
+        )
+        .map_err(|error| ("E3621", error))?;
+    index.store().map_err(|error| ("E3623", error))?;
+    Ok((saved.artifact_id, saved.path, saved.size))
+}
+
+fn ordinary_replay_for_id(id: &str) -> Result<Option<(PathBuf, u64)>, String> {
+    let directory = Path::new(".jet/replays");
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("could not inspect replay directory: {error}")),
+    };
+    let mut candidates = Vec::new();
+    for item in entries {
+        let item = item.map_err(|error| error.to_string())?;
+        let path = item.path();
+        let metadata = item
+            .metadata()
+            .map_err(|error| format!("could not inspect replay candidate: {error}"))?;
+        if item
+            .file_type()
+            .map_err(|error| error.to_string())?
+            .is_symlink()
+            || !metadata.is_file()
+            || path.extension().and_then(|extension| extension.to_str()) != Some("jetproof-replay")
+        {
+            continue;
+        }
+        let bytes = fs::read(&path).map_err(|error| error.to_string())?;
+        if replay_artifact_id(&bytes).ok().as_deref() == Some(id) {
+            candidates.push((
+                path,
+                u64::try_from(bytes.len())
+                    .map_err(|_| "replay artifact is too large".to_string())?,
+            ));
+        }
+    }
+    candidates.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(candidates.into_iter().next())
+}
+
+fn unsave_replay_command(
+    id: &str,
+    identity: &crate::ProveReplay::ReplayIdentity,
+) -> Result<(), (&'static str, String)> {
+    validate_artifact_id(id).map_err(|error| ("E3621", error))?;
+    let record_identity = identity
+        .record_identity()
+        .map_err(|error| ("E3621", error))?;
+    let mut index = load_record_index().map_err(|error| ("E3622", error))?;
+    let Some(entry) = index.find(RecordKind::Replay, id, true) else {
+        return Err(("E3623", format!("saved replay `{id}` is not indexed")));
+    };
+    if entry.identity != record_identity {
+        return Err((
+            "E3621",
+            format!("replay `{id}` belongs to a different target identity"),
+        ));
+    }
+    let expected_path = saved_replay_path(id);
+    if !entry.saved || entry.path != expected_path {
+        return Err((
+            "E3623",
+            format!("replay `{id}` is not an exact saved replay claim"),
+        ));
+    }
+    let mut tombstone = None;
+    match fs::symlink_metadata(&expected_path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err((
+                    "E3623",
+                    format!("saved replay `{id}` is not a regular file"),
+                ));
+            }
+            let temporary =
+                expected_path.with_extension(format!("unsave.tmp.{}", std::process::id()));
+            fs::rename(&expected_path, &temporary).map_err(|error| {
+                (
+                    "E3623",
+                    format!("could not stage saved replay `{id}` for removal: {error}"),
+                )
+            })?;
+            tombstone = Some(temporary);
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err((
+                "E3623",
+                format!("could not inspect saved replay `{id}`: {error}"),
+            ))
+        }
+    }
+    let restored = ordinary_replay_for_id(id).map_err(|error| ("E3622", error))?;
+    let mutation = if let Some((path, size)) = restored {
+        let mut ordinary = entry.clone();
+        ordinary.path = path;
+        ordinary.size = size;
+        ordinary.saved = false;
+        index.replace(ordinary)
+    } else {
+        index.remove_replay(id).map(|_| ())
+    };
+    if let Err(error) = mutation {
+        if let Some(tombstone) = tombstone {
+            let _ = fs::rename(tombstone, &expected_path);
+        }
+        return Err(("E3623", error));
+    }
+    if let Err(error) = index.store() {
+        if let Some(tombstone) = tombstone {
+            let _ = fs::rename(tombstone, &expected_path);
+        }
+        return Err(("E3623", error));
+    }
+    if let Some(tombstone) = tombstone {
+        fs::remove_file(tombstone).map_err(|error| {
+            (
+                "E3623",
+                format!("saved replay `{id}` was unpublished but cleanup failed: {error}"),
+            )
+        })?;
+    }
+    Ok(())
 }
 
 struct FrontEndItem {
@@ -70,21 +686,304 @@ struct TestItem {
     line: u32,
     name: String,
     seed: String,
+    case_index: u64,
+    generated: bool,
+    generated_count: u64,
+    reason: String,
 }
 
-struct ProducerRecord {
-    kind: u8,
-    state: u8,
-    name: String,
-    message: String,
-    file: String,
-    line: u32,
+struct GeneratedFailure {
+    seed: u64,
+    case_index: u64,
+    input: String,
 }
 
 enum ChildOutcome {
     Exited(Option<i32>),
     TimedOut,
     LaunchFailed,
+}
+const DEFAULT_PROPERTY_SEED: u64 = 0x5EED_1234_ABCD_0001;
+
+fn generated_failure_root(target: &Target) -> &Path {
+    &target.authority_root
+}
+
+fn generated_failure_path(target: &Target, member: &Member) -> PathBuf {
+    generated_failure_root(target)
+        .join(".jet/records/generated")
+        .join(format!("{}-{}.json", target.input_sha256, member.sha256))
+}
+const HISTORY_ARTIFACT_PREFIX: &str = "history-artifact ";
+
+fn history_artifact_path(target: &Target, member: &Member) -> PathBuf {
+    generated_failure_root(target)
+        .join(".jet/records/generated")
+        .join(format!(
+            "{}-{}.history.json",
+            target.input_sha256, member.sha256
+        ))
+}
+
+fn parse_history_artifact_detail(detail: &str) -> Option<String> {
+    detail.lines().find_map(|line| {
+        let artifact = line.trim().strip_prefix(HISTORY_ARTIFACT_PREFIX)?;
+        let DataTree::Object(fields) = parse_json(artifact).ok()? else {
+            return None;
+        };
+        let schema = fields
+            .iter()
+            .find_map(|(key, value)| (key == "schema").then(|| value.as_str().ok()).flatten());
+        let version = fields
+            .iter()
+            .find_map(|(key, value)| (key == "version").then_some(value));
+        if schema != Some("jet.testing.history") || !matches!(version, Some(DataTree::Int(1))) {
+            return None;
+        }
+        Some(artifact.to_string())
+    })
+}
+
+fn clear_history_artifact(target: &Target, member: &Member) -> Result<(), String> {
+    let path = history_artifact_path(target, member);
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            return Err(format!(
+                "history artifact path is not a regular file: {}",
+                path.display()
+            ));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("could not inspect history artifact: {error}")),
+    }
+    fs::remove_file(path).map_err(|error| format!("could not clear history artifact: {error}"))
+}
+
+fn persist_history_artifact(
+    target: &Target,
+    member: &Member,
+    report: &EvidenceReport,
+) -> Result<(), String> {
+    let mut has_property = false;
+    let mut artifact = None;
+    for record in &report.records {
+        if !matches!(record.kind, EvidenceKind::Property) {
+            continue;
+        }
+        has_property = true;
+        if matches!(
+            record.outcome,
+            EvidenceOutcome::Failed | EvidenceOutcome::Error
+        ) {
+            if let Some(value) = parse_history_artifact_detail(&record.detail) {
+                artifact = Some(value);
+                break;
+            }
+        }
+    }
+    match artifact {
+        Some(value) => {
+            let path = history_artifact_path(target, member);
+            let bytes = format!("{value}\n").into_bytes();
+            write_authoritative_bytes(&path, &bytes, "history artifact")?;
+            Ok(())
+        }
+        None if has_property => clear_history_artifact(target, member),
+        None => Ok(()),
+    }
+}
+
+fn parse_generated_failure_detail(detail: &str) -> Option<GeneratedFailure> {
+    detail.lines().find_map(|line| {
+        let rest = line.trim().strip_prefix("seed ")?;
+        let (seed, rest) = rest.split_once(" case ")?;
+        let (case_index, rest) = rest.split_once(':')?;
+        let input_marker = " (input ";
+        let input_start = rest.rfind(input_marker)?;
+        let input = rest[input_start + input_marker.len()..]
+            .strip_suffix(')')?
+            .to_owned();
+        Some(GeneratedFailure {
+            seed: seed.parse().ok()?,
+            case_index: case_index.parse().ok()?,
+            input,
+        })
+    })
+}
+
+fn read_generated_failure(target: &Target, member: &Member) -> Option<GeneratedFailure> {
+    let text = fs::read_to_string(generated_failure_path(target, member)).ok()?;
+    let DataTree::Object(fields) = parse_json(&text).ok()? else {
+        return None;
+    };
+    let field = |name: &str| {
+        fields
+            .iter()
+            .find_map(|(key, value)| (key == name).then_some(value))
+    };
+    if !matches!(field("version"), Some(DataTree::Int(1)))
+        || !matches!(
+            field("target").and_then(|value| value.as_str().ok()),
+            Some(value) if value == target.input_sha256
+        )
+        || !matches!(
+            field("member").and_then(|value| value.as_str().ok()),
+            Some(value) if value == member.sha256
+        )
+    {
+        return None;
+    }
+    let parse_u64 = |value: Option<&DataTree>| match value {
+        Some(DataTree::Int(value)) if *value >= 0 => u64::try_from(*value).ok(),
+        Some(DataTree::Text(value)) | Some(DataTree::TypedText(value)) => value.parse().ok(),
+        _ => None,
+    };
+    let seed = parse_u64(field("seed"))?;
+    let case_index = parse_u64(field("caseIndex"))?;
+    let input = field("input")
+        .and_then(|value| value.as_str().ok())?
+        .to_string();
+    Some(GeneratedFailure {
+        seed,
+        case_index,
+        input,
+    })
+}
+
+fn write_generated_failure(
+    target: &Target,
+    member: &Member,
+    failure: &GeneratedFailure,
+) -> Result<(), String> {
+    let path = generated_failure_path(target, member);
+    ensure_artifact_parent(&path)?;
+    if let Ok(metadata) = fs::symlink_metadata(&path) {
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(format!(
+                "generated failure path is not a regular file: {}",
+                path.display()
+            ));
+        }
+    }
+    let seed = if failure.seed <= i64::MAX as u64 {
+        failure.seed.to_string()
+    } else {
+        json(&failure.seed.to_string())
+    };
+    let case_index = if failure.case_index <= i64::MAX as u64 {
+        failure.case_index.to_string()
+    } else {
+        json(&failure.case_index.to_string())
+    };
+    let contents = format!(
+        "{{\"caseIndex\":{},\"input\":{},\"member\":{},\"seed\":{},\"target\":{},\"version\":1}}\n",
+        case_index,
+        json(&failure.input),
+        json(&member.sha256),
+        seed,
+        json(&target.input_sha256),
+    );
+    let temporary = path.with_extension(format!(
+        "json.tmp.{}.{}",
+        std::process::id(),
+        &jet::SHA256::sha256_hex(contents.as_bytes())[..8]
+    ));
+    use std::io::Write;
+    let write_result = (|| -> Result<(), String> {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|error| error.to_string())?;
+        file.write_all(contents.as_bytes())
+            .map_err(|error| error.to_string())?;
+        file.sync_all().map_err(|error| error.to_string())?;
+        Ok(())
+    })();
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(&temporary);
+        return Err(format!(
+            "could not write generated failure `{}`: {error}",
+            temporary.display()
+        ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600)).map_err(|error| {
+            format!(
+                "could not protect generated failure `{}`: {error}",
+                temporary.display()
+            )
+        })?;
+    }
+    fs::rename(&temporary, &path).map_err(|error| {
+        let _ = fs::remove_file(&temporary);
+        format!(
+            "could not publish generated failure `{}`: {error}",
+            path.display()
+        )
+    })?;
+    if let Some(parent) = path.parent() {
+        fs::File::open(parent)
+            .map_err(|error| error.to_string())?
+            .sync_all()
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn clear_generated_failure(target: &Target, member: &Member) -> Result<(), String> {
+    let path = generated_failure_path(target, member);
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            return Err(format!(
+                "generated failure path is not a regular file: {}",
+                path.display()
+            ));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("could not inspect generated failure: {error}")),
+    }
+    fs::remove_file(path).map_err(|error| format!("could not clear generated failure: {error}"))
+}
+
+fn persist_generated_failure(
+    target: &Target,
+    member: &Member,
+    report: &EvidenceReport,
+) -> Result<(), String> {
+    persist_history_artifact(target, member, report)?;
+    let mut has_property = false;
+    let mut failure = None;
+    for record in &report.records {
+        if !matches!(record.kind, EvidenceKind::Property) {
+            continue;
+        }
+        has_property = true;
+        if matches!(
+            record.outcome,
+            EvidenceOutcome::Failed | EvidenceOutcome::Error
+        ) {
+            if let Some(parsed) = parse_generated_failure_detail(&record.detail) {
+                failure = Some(parsed);
+                break;
+            }
+        }
+    }
+    match failure {
+        Some(failure) => write_generated_failure(target, member, &failure),
+        None if has_property => clear_generated_failure(target, member),
+        None => Ok(()),
+    }
+}
+
+fn property_generation_unavailable(message: &str) -> bool {
+    message.starts_with("E0613:")
+        || message.contains("generated inputs are unavailable")
+        || message.contains("has no built-in generator")
 }
 
 pub(crate) fn run_prove(args: &[String], json: bool) {
@@ -95,6 +994,8 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
     let mut lenses = Vec::new();
     let mut capture: Option<crate::ProveReplay::CaptureOpts> = None;
     let mut replay: Option<String> = None;
+    let mut save: Option<String> = None;
+    let mut unsave: Option<String> = None;
     let mut i = 0usize;
     while i < args.len() {
         let arg = args[i].as_str();
@@ -104,9 +1005,10 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         }
         if let Some(opts) = crate::ProveReplay::parse_capture_flag(arg) {
             if capture.is_some() || replay.is_some() {
-                crate::cli_error!(
+                emit_prove_cli_error(
                     "E2104",
-                    "`jet prove` accepts at most one of `--capture` / `--replay`"
+                    "`jet prove` accepts at most one of `--capture` / `--replay`",
+                    json,
                 );
                 exit(ExitCodes::USAGE);
             }
@@ -118,9 +1020,10 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             crate::ProveReplay::parse_replay_flag(arg, args.get(i + 1).map(String::as_str))
         {
             if capture.is_some() || replay.is_some() {
-                crate::cli_error!(
+                emit_prove_cli_error(
                     "E2104",
-                    "`jet prove` accepts at most one of `--capture` / `--replay`"
+                    "`jet prove` accepts at most one of `--capture` / `--replay`",
+                    json,
                 );
                 exit(ExitCodes::USAGE);
             }
@@ -130,10 +1033,86 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
                     i += if arg == "--replay" { 2 } else { 1 };
                 }
                 Err(message) => {
-                    crate::cli_error!("E2104", "{message}");
+                    emit_prove_cli_error("E2104", message, json);
                     exit(ExitCodes::USAGE);
                 }
             }
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--save=") {
+            if value.is_empty() {
+                emit_prove_cli_error("E2104", "`--save` needs a replay artifact id or path", json);
+                exit(ExitCodes::USAGE);
+            }
+            if save.is_some() || unsave.is_some() {
+                emit_prove_cli_error(
+                    "E2104",
+                    "`jet prove` accepts at most one of `--save` / `--unsave`",
+                    json,
+                );
+                exit(ExitCodes::USAGE);
+            }
+            save = Some(value.to_string());
+            i += 1;
+            continue;
+        }
+        if arg == "--save" {
+            let Some(value) = args
+                .get(i + 1)
+                .map(String::as_str)
+                .filter(|value| !value.starts_with('-'))
+            else {
+                emit_prove_cli_error("E2104", "`--save` needs a replay artifact id or path", json);
+                exit(ExitCodes::USAGE);
+            };
+            if save.is_some() || unsave.is_some() {
+                emit_prove_cli_error(
+                    "E2104",
+                    "`jet prove` accepts at most one of `--save` / `--unsave`",
+                    json,
+                );
+                exit(ExitCodes::USAGE);
+            }
+            save = Some(value.to_string());
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--unsave=") {
+            if value.is_empty() {
+                emit_prove_cli_error("E2104", "`--unsave` needs a replay artifact id", json);
+                exit(ExitCodes::USAGE);
+            }
+            if save.is_some() || unsave.is_some() {
+                emit_prove_cli_error(
+                    "E2104",
+                    "`jet prove` accepts at most one of `--save` / `--unsave`",
+                    json,
+                );
+                exit(ExitCodes::USAGE);
+            }
+            unsave = Some(value.to_string());
+            i += 1;
+            continue;
+        }
+        if arg == "--unsave" {
+            let Some(value) = args
+                .get(i + 1)
+                .map(String::as_str)
+                .filter(|value| !value.starts_with('-'))
+            else {
+                emit_prove_cli_error("E2104", "`--unsave` needs a replay artifact id", json);
+                exit(ExitCodes::USAGE);
+            };
+            if save.is_some() || unsave.is_some() {
+                emit_prove_cli_error(
+                    "E2104",
+                    "`jet prove` accepts at most one of `--save` / `--unsave`",
+                    json,
+                );
+                exit(ExitCodes::USAGE);
+            }
+            unsave = Some(value.to_string());
+            i += 2;
             continue;
         }
         if let Some(value) = arg.strip_prefix("--lens=") {
@@ -150,20 +1129,25 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             continue;
         }
         if arg.starts_with('-') {
-            crate::cli_error!("E2102", "unknown `jet prove` flag `{arg}`");
+            emit_prove_cli_error("E2102", format!("unknown `jet prove` flag `{arg}`"), json);
             exit(ExitCodes::USAGE);
         }
         positional.push(arg);
         i += 1;
     }
     if positional.len() != 1 {
-        crate::cli_error!(@fix "E2104", "`jet prove` needs exactly one file, package, or workspace target", "jet prove path/to/program.jet");
+        emit_prove_cli_error_with_fix(
+            "E2104",
+            "`jet prove` needs exactly one file, package, or workspace target",
+            "jet prove path/to/program.jet",
+            json,
+        );
         exit(ExitCodes::USAGE);
     }
     let target = match resolve_target(positional[0]) {
         Ok(target) => target,
         Err(message) => {
-            crate::cli_error!("E2105", "{message}");
+            emit_prove_cli_error("E2105", message, json);
             exit(ExitCodes::USER_ERROR);
         }
     };
@@ -175,17 +1159,62 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             target.root.clone()
         },
         source_digest: target.source_digest.clone(),
-        execution_adapter: "dev-tir-v1".to_string(),
+        execution_adapter: "mir-v1".to_string(),
         target_triple: host_target_triple(),
         abi: "gnu".to_string(),
         build_digest: target.build_digest.clone(),
         core_abi: target.core_abi.clone(),
         lock_digest: target.lock_digest.clone(),
         profile: "dev".to_string(),
-        tir_hash: target.tir_hash.clone(),
-        tir_schema: "1".to_string(),
+        semantic_mir_hash: target.mir.semantic_hash.clone(),
+        optimized_mir_hash: target.mir.optimized_hash.clone(),
+        mir_schema: jet_foundation::MIR::MIR_IDENTITY_SCHEMA.to_string(),
+        mir_identity: target.mir.canonical_json(),
         time_site_id: time_site_id_for_target(&target),
     };
+    if (save.is_some() || unsave.is_some()) && (capture.is_some() || replay.is_some()) {
+        emit_prove_cli_error(
+            "E2104",
+            "`jet prove` cannot combine `--save` or `--unsave` with capture or replay",
+            json,
+        );
+        exit(ExitCodes::USAGE);
+    }
+    if let Some(id) = unsave.as_deref() {
+        if let Err(error) = unsave_replay_command(id, &identity) {
+            mutation_diag(error, "unsave", json);
+        }
+        if json {
+            let result = format!(
+                "{{\"artifactId\":{},\"status\":\"removed\"}}",
+                json_string(id)
+            );
+            print!("{}", prove_status_result("unsave", &result));
+        } else {
+            println!("UNSAVED  replay {id}");
+        }
+        exit(ExitCodes::OK);
+    }
+    if let Some(raw) = save.as_deref() {
+        let (artifact_id, path, size) = match save_replay_command(&identity, raw) {
+            Ok(saved) => saved,
+            Err(error) => mutation_diag(error, "save", json),
+        };
+        if json {
+            let result = format!(
+                "{{\"artifactId\":{},\"path\":{},\"size\":{size},\"status\":\"saved\"}}",
+                json_string(&artifact_id),
+                json_string(&path.to_string_lossy())
+            );
+            print!("{}", prove_status_result("save", &result));
+        } else {
+            println!(
+                "SAVED    replay {artifact_id} -> {} ({size} bytes)",
+                path.display()
+            );
+        }
+        exit(ExitCodes::OK);
+    }
     if (capture.is_some() || replay.is_some()) && target.members.len() != 1 {
         let paths = target
             .members
@@ -193,7 +1222,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             .map(|member| member.path.as_str())
             .collect::<Vec<_>>()
             .join(", ");
-        crate::ProveReplay::emit_diag(
+        crate::ProveReplay::emit_prove_diag(
             "E3624",
             "replay target cardinality is not one",
             &format!(
@@ -212,8 +1241,8 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         exit(ExitCodes::USER_ERROR);
     }
     let capture_opts = capture.clone();
-    let capture_authority = if let Some(opts) = capture {
-        match crate::ProveReplay::prepare_safe_capture(&opts, json) {
+    let capture_authority = if let Some(opts) = capture.as_ref() {
+        match crate::ProveReplay::prepare_safe_capture(opts, json) {
             Ok(authority) => Some(authority),
             Err(status) => exit(status),
         }
@@ -232,6 +1261,61 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             exit(status);
         }
     }
+    if let Some(raw) = replay.take() {
+        let index = match load_record_index() {
+            Ok(index) => index,
+            Err(error) => {
+                emit_prove_cli_error(
+                    "E2105",
+                    format!("failed to load replay index: {error}"),
+                    json,
+                );
+                exit(ExitCodes::ICE);
+            }
+        };
+        replay = match resolve_indexed_replay(&index, &raw) {
+            Ok(Some(entry)) => Some(entry.path.to_string_lossy().into_owned()),
+            Ok(None) => Some(raw),
+            Err(error) => {
+                crate::ProveReplay::emit_prove_diag(
+                    "E3621",
+                    "replay semantic identity could not be resolved",
+                    &error,
+                    "use an indexed replay id or a canonical `.jetproof-replay` path",
+                    json,
+                );
+                exit(ExitCodes::USER_ERROR);
+            }
+        };
+    }
+    if replay.is_none() && capture.is_none() {
+        let record_identity = match identity.record_identity() {
+            Ok(identity) => identity,
+            Err(error) => {
+                emit_prove_cli_error(
+                    "E2105",
+                    format!("failed to identify saved replay claims: {error}"),
+                    json,
+                );
+                exit(ExitCodes::ICE);
+            }
+        };
+        let index = match load_record_index() {
+            Ok(index) => index,
+            Err(error) => {
+                emit_prove_cli_error(
+                    "E2105",
+                    format!("failed to load replay index: {error}"),
+                    json,
+                );
+                exit(ExitCodes::ICE);
+            }
+        };
+        if let Some(entry) = index.saved_replays(&record_identity).into_iter().next() {
+            replay = Some(entry.path.to_string_lossy().into_owned());
+        }
+    }
+    let replay_path = replay.clone();
     let mut replay_authority = if let Some(path) = replay {
         // Existing artifacts get schema/identity validation first. Missing
         // artifacts keep authority preflight first, so unrecorded IO/time
@@ -256,7 +1340,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             .filter(|site| supported_time_capture_site(site))
             .count();
         if time_sites == 0 {
-            crate::ProveReplay::emit_diag(
+            crate::ProveReplay::emit_prove_diag(
                 "E3623",
                 "replay diverged from captured authority",
                 "the target has no statically identified `core.time.now` call site for the captured Time record",
@@ -293,11 +1377,15 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         let (errors, member_warnings): (Vec<_>, Vec<_>) = jet::check_with_path(&member.path)
             .into_iter()
             .partition(|diagnostic| matches!(diagnostic.severity, Severity::Error));
-        warnings.extend(member_warnings.into_iter().map(|diagnostic| FrontEndWarning {
-            path: member.path.clone(),
-            source: source.clone(),
-            diagnostic,
-        }));
+        warnings.extend(
+            member_warnings
+                .into_iter()
+                .map(|diagnostic| FrontEndWarning {
+                    path: member.path.clone(),
+                    source: source.clone(),
+                    diagnostic,
+                }),
+        );
         if errors.is_empty() {
             items.extend(semantic_items.into_iter().map(|mut item| {
                 item.source = source.clone();
@@ -329,15 +1417,22 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         .filter(|item| item.diagnostic.is_some())
         .count();
     let proved = items.len() - failed;
-    let (tests, producer_exit) = if failed == 0 {
-        run_test_producers(&target)
+    let (tests, producer_exit, evidence_links) = if failed == 0 {
+        match run_test_producers(&target) {
+            Ok(result) => result,
+            Err(message) => {
+                emit_prove_cli_error(
+                    "E2105",
+                    format!("evidence producer failed: {message}"),
+                    json,
+                );
+                exit(ExitCodes::ICE);
+            }
+        }
     } else {
-        (Vec::new(), ExitCodes::OK)
+        (Vec::new(), ExitCodes::OK, Vec::new())
     };
-    let test_failed = tests
-        .iter()
-        .filter(|item| (item.kind == 0 || item.kind == 3 || item.kind == 4) && item.state == 1)
-        .count();
+    let test_failed = tests.iter().filter(|item| item.state == 1).count();
     let budgets = budget_projection(&target);
     let budget_failed = budgets.facts.iter().any(|fact| fact.outcome == "fail");
     let enable_solver = lenses.iter().any(|lens| lens == "solver");
@@ -362,7 +1457,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         ) {
             Ok(items) => items,
             Err(message) => {
-                crate::cli_error!("E2105", "solver producer failed: {message}");
+                emit_prove_cli_error("E2105", format!("solver producer failed: {message}"), json);
                 exit(ExitCodes::ICE);
             }
         }
@@ -375,7 +1470,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             crate::ProveSolver::SolverOutcome::Disproved { .. }
         )
     });
-    let exit_code = if producer_exit == ExitCodes::ICE {
+    let mut exit_code = if producer_exit == ExitCodes::ICE {
         ExitCodes::ICE
     } else if producer_exit == ExitCodes::RUNTIME_PANIC {
         ExitCodes::RUNTIME_PANIC
@@ -392,7 +1487,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         // target with no such site is rejected during preflight; an artifact
         // with an extra/reordered record is rejected by the cursor checks.
         if let Err(why) = authority.consume_time() {
-            crate::ProveReplay::emit_diag(
+            crate::ProveReplay::emit_prove_diag(
                 "E3623",
                 "replay diverged from captured authority",
                 &why,
@@ -402,7 +1497,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             exit(ExitCodes::USER_ERROR);
         }
         if let Err(why) = authority.finish() {
-            crate::ProveReplay::emit_diag(
+            crate::ProveReplay::emit_prove_diag(
                 "E3623",
                 "replay diverged from captured authority",
                 &why,
@@ -417,7 +1512,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             "exit"
         };
         if authority.expected_status != exit_code || authority.expected_outcome != outcome {
-            crate::ProveReplay::emit_diag(
+            crate::ProveReplay::emit_prove_diag(
                 "E3623",
                 "replay diverged from captured authority",
                 &format!(
@@ -429,6 +1524,13 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             );
             exit(ExitCodes::USER_ERROR);
         }
+    }
+    let claims_grade = claim_grade(proved, failed, &tests, &solver);
+    let claims_floor = claims_floor_for_target(&target);
+    let claims_floor_violation =
+        claims_floor.filter(|floor| !grade_meets_floor(&claims_grade, *floor));
+    if claims_floor_violation.is_some() && exit_code == ExitCodes::OK {
+        exit_code = ExitCodes::USER_ERROR;
     }
     let report = render_report(
         &target,
@@ -442,33 +1544,130 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         replay_time_ms,
         proved,
         failed,
+        &claims_grade,
+        claims_floor_violation,
         exit_code,
     );
     // D-JPROOF1=A (#1127): persist the exact ProofReport under the canonical
     // `.jetproof` envelope. Usage errors and internal compiler errors do not
-    // produce evidence artifacts; `--json` still prints only the ProofReport
-    // object for every producer outcome that has a valid report.
+    // produce evidence artifacts; `--json` wraps each valid ProofReport in
+    // the command-owned `jet.status/v1` envelope.
     if exit_code != ExitCodes::ICE {
-        if let Err(message) = write_jetproof(&target, &report) {
-            crate::cli_error!("E2105", "failed to write .jetproof: {message}");
+        let mut consumed = evidence_links;
+        if let Some(path) = replay_path.as_ref() {
+            let replay_link =
+                match index_replay_artifact(Path::new(path), &identity, RecordCapture::Safe) {
+                    Ok(link) => link,
+                    Err(message) => {
+                        emit_prove_cli_error(
+                            "E2105",
+                            format!("failed to index replay artifact: {message}"),
+                            json,
+                        );
+                        exit(ExitCodes::ICE);
+                    }
+                };
+            consumed.push(replay_link);
+        }
+        let produced = produced_receipt_links(&target);
+        let proof_artifact = match write_jetproof(&target, &report, &consumed, &produced) {
+            Ok(artifact) => artifact,
+            Err(message) => {
+                emit_prove_cli_error(
+                    "E2105",
+                    format!("failed to write .jetproof: {message}"),
+                    json,
+                );
+                exit(ExitCodes::ICE);
+            }
+        };
+        let proof_identity = match RecordIdentity::new(
+            target.input_sha256.clone(),
+            env!("CARGO_PKG_VERSION"),
+            "jet-prove-v1",
+        ) {
+            Ok(identity) => identity,
+            Err(message) => {
+                emit_prove_cli_error(
+                    "E2105",
+                    format!("failed to identify proof artifact: {message}"),
+                    json,
+                );
+                exit(ExitCodes::ICE);
+            }
+        };
+        if let Err(message) = index_artifact(
+            proof_identity,
+            RecordKind::Proof,
+            proof_artifact.artifact_id.clone(),
+            proof_artifact.path.clone(),
+            proof_artifact.size,
+            RecordCapture::Safe,
+            consumed,
+            produced,
+        ) {
+            emit_prove_cli_error(
+                "E2105",
+                format!("failed to index .jetproof: {message}"),
+                json,
+            );
             exit(ExitCodes::ICE);
         }
-    }
-    if failed == 0 && producer_exit != ExitCodes::ICE {
-        if let Some(authority) = capture_authority.as_ref() {
-            if let Err(status) = crate::ProveReplay::finalize_safe_capture(
-                &identity, authority, exit_code, json, None,
-            ) {
-                exit(status);
+        if failed == 0 && producer_exit != ExitCodes::ICE {
+            if let Some(authority) = capture_authority.as_ref() {
+                if let Err(status) = crate::ProveReplay::finalize_safe_capture(
+                    &identity, authority, exit_code, json, None,
+                ) {
+                    exit(status);
+                }
+                let path = capture_opts
+                    .as_ref()
+                    .and_then(|opts| opts.path.as_ref())
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| {
+                        generated_capture_path(&identity, authority, exit_code).unwrap_or_else(
+                            |message| {
+                                emit_prove_cli_error(
+                                    "E2105",
+                                    format!("failed to locate replay artifact: {message}"),
+                                    json,
+                                );
+                                exit(ExitCodes::ICE);
+                            },
+                        )
+                    });
+                let capture = if capture_opts.as_ref().is_some_and(|opts| opts.sensitive) {
+                    RecordCapture::Sensitive
+                } else {
+                    RecordCapture::Safe
+                };
+                if let Err(message) = index_replay_artifact(&path, &identity, capture) {
+                    emit_prove_cli_error(
+                        "E2105",
+                        format!("failed to index replay artifact: {message}"),
+                        json,
+                    );
+                    exit(ExitCodes::ICE);
+                }
             }
         }
     }
     if json {
-        println!("{report}");
+        let proof = StatusValue::parse(&report).expect("render_report emits valid JSON");
+        let status =
+            StatusEnvelope::new("prove", exit_code == ExitCodes::OK).with_field("proof", proof);
+        println!("{}", status.json_line());
     } else {
         let show = |facet: &str| lens_shows(&lenses, facet);
         if !lenses.is_empty() {
             println!("LENSES   {}", canonical_lens_names(&lenses).join(", "));
+        }
+        println!("CLAIMS   grade: {claims_grade}");
+        if let Some(floor) = claims_floor_violation {
+            eprintln!(
+                "Error [E2942]: claim grade `{claims_grade}` is below package floor `{}`",
+                floor.render()
+            );
         }
         if show("refinements")
             || show("all")
@@ -501,7 +1700,7 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
                     .filter(|item| (item.kind == 0 || item.kind == 2) && item.state == 1)
                 {
                     println!("{}: FAIL", item.name);
-                    eprint!("{}", test_failure(item).render_detail());
+                    eprint!("{}", test_failure_detail(item));
                 }
             }
         }
@@ -590,7 +1789,12 @@ fn prepare_replay_or_exit(
     path: &str,
     json: bool,
 ) -> crate::ProveReplay::ReplayAuthority {
-    match crate::ProveReplay::prepare_replay(identity, path) {
+    let prepared = if path.starts_with(".jet/records/saved/") {
+        crate::ProveReplay::prepare_saved_replay(identity, Path::new(path))
+    } else {
+        crate::ProveReplay::prepare_replay(identity, path)
+    };
+    match prepared {
         Ok(authority) => authority,
         Err((code, why)) => {
             let what = match code {
@@ -605,7 +1809,7 @@ fn prepare_replay_or_exit(
                 "E3628" => "recapture a bounded artifact with a recorded Time authority",
                 _ => "recapture the target and keep the complete `.jetproof-replay` artifact",
             };
-            crate::ProveReplay::emit_diag(code, what, &why, fix, json);
+            crate::ProveReplay::emit_prove_diag(code, what, &why, fix, json);
             exit(ExitCodes::USER_ERROR);
         }
     }
@@ -812,7 +2016,7 @@ fn preflight_replay_target(target: &Target, json_mode: bool) -> Result<(), i32> 
         .filter(|site| supported_time_capture_site(site))
         .count();
     if time_sites > 1 {
-        crate::ProveReplay::emit_diag(
+        crate::ProveReplay::emit_prove_diag(
             "E3623",
             "replay diverged from captured authority",
             "the target requests more than one `core.time.now` site, but the artifact has one bounded Time record",
@@ -833,7 +2037,7 @@ fn preflight_replay_target(target: &Target, json_mode: bool) -> Result<(), i32> 
             Some(effect) => format!("replay reached unrecorded {} authority at {operation}", effect.name()),
             None => format!("replay reached an opaque authority boundary at {operation}"),
         };
-        crate::ProveReplay::emit_diag(
+        crate::ProveReplay::emit_prove_diag(
             "E3623",
             "replay diverged from captured authority",
             &why,
@@ -858,7 +2062,7 @@ fn capture_sites_for_target(target: &Target) -> Vec<CaptureSite> {
         if !lex_diagnostics.is_empty() {
             continue;
         }
-        let Ok(program) = jet::Parser::parse(&tokens) else {
+        let Ok(program) = jet::Parser::parse_with_source(&tokens, &source) else {
             continue;
         };
         collect_capture_function_names(&program.items, &mut local_functions);
@@ -871,7 +2075,7 @@ fn capture_sites_for_target(target: &Target) -> Vec<CaptureSite> {
         if !lex_diagnostics.is_empty() {
             continue;
         }
-        let Ok(program) = jet::Parser::parse(&tokens) else {
+        let Ok(program) = jet::Parser::parse_with_source(&tokens, &source) else {
             continue;
         };
         let aliases = program
@@ -945,7 +2149,7 @@ fn capture_preflight_error(
     } else {
         format!("replay capture cannot model {operation}")
     };
-    crate::ProveReplay::emit_diag(code, &what, why, fix, json_mode);
+    crate::ProveReplay::emit_prove_diag(code, &what, why, fix, json_mode);
     Err(jet::ExitCodes::USER_ERROR)
 }
 
@@ -1484,7 +2688,7 @@ fn semantic_front_end_items(
 ) -> (Vec<FrontEndItem>, Vec<ContractDeclaration>) {
     let (tokens, lex_diagnostics) = jet::Lexer::lex(source);
     let program = if lex_diagnostics.is_empty() {
-        jet::Parser::parse(&tokens).ok()
+        jet::Parser::parse_with_source(&tokens, source).ok()
     } else {
         None
     };
@@ -1723,15 +2927,17 @@ fn validate_lens(value: &str, target: &str, json_mode: bool) {
     let what = format!("unknown proof lens `{value}`");
     let why = "`jet prove` accepts all, refinements, effects, taint, contracts, tests, budgets, replay, solver";
     let fix = format!("try `jet prove {target} --lens tests`");
-    crate::emit_cli_report("E2941", what, why.to_string(), fix, json_mode);
+    crate::emit_cli_report_for_action("prove", "E2941", what, why.to_string(), fix, json_mode);
     exit(ExitCodes::USAGE);
 }
 
-fn run_test_producers(target: &Target) -> (Vec<TestItem>, i32) {
+fn run_test_producers(target: &Target) -> Result<(Vec<TestItem>, i32, Vec<RecordLink>), String> {
     let mut items = Vec::new();
     let mut highest_exit = ExitCodes::OK;
+    let mut evidence_links = Vec::new();
     for member in &target.members {
         if !jet::has_test_blocks(&member.path)
+            && !jet::has_test_contracts(&member.path)
             && jet::Doctest::discover(&String::from_utf8_lossy(&member.bytes)).is_empty()
         {
             continue;
@@ -1746,8 +2952,51 @@ fn run_test_producers(target: &Target) -> (Vec<TestItem>, i32) {
             Command::new(std::env::current_exe().unwrap_or_else(|_| PathBuf::from("jet")));
         command
             .args(["test", &member.path, "--serial", "--show-default"])
-            .env("JET_TEST_PROOF_REPORT", &report_path)
-            .env("JET_PROVE_FRESH_TEST", "1");
+            .env(jet_foundation::Evidence::EVIDENCE_REPORT_ENV, &report_path)
+            .env(
+                jet_foundation::Evidence::EVIDENCE_REPORT_ID_ENV,
+                format!("prove:{}", &member.sha256[..16]),
+            )
+            .env(
+                jet_foundation::Evidence::EVIDENCE_TOOLCHAIN_ENV,
+                env!("CARGO_PKG_VERSION"),
+            )
+            .env(
+                jet_foundation::Evidence::EVIDENCE_TARGET_ENV,
+                host_target_triple(),
+            )
+            .env(jet_foundation::Evidence::EVIDENCE_PROFILE_ENV, "dev")
+            .env(
+                jet_foundation::Evidence::EVIDENCE_SOURCE_REVISION_ENV,
+                &target.source_digest,
+            )
+            .env(
+                jet_foundation::Evidence::EVIDENCE_BUILD_REVISION_ENV,
+                &target.build_digest,
+            )
+            .env(
+                jet_foundation::Evidence::EVIDENCE_REVISION_ENV,
+                &target.mir.optimized_hash,
+            )
+            .env("JET_PROVE_FRESH_TEST", "1")
+            .env_remove("JET_PROP_REPLAY_SEED")
+            .env_remove("JET_PROP_REPLAY_CASE");
+        let replay_failure = read_generated_failure(target, member);
+        if let Some(failure) = replay_failure.as_ref() {
+            command
+                .env("JET_PROP_SEED", failure.seed.to_string())
+                .env("JET_PROP_REPLAY_SEED", failure.seed.to_string())
+                .env("JET_PROP_REPLAY_CASE", failure.case_index.to_string());
+        }
+        let property_seed = replay_failure
+            .as_ref()
+            .map(|failure| failure.seed)
+            .or_else(|| {
+                std::env::var("JET_PROP_SEED")
+                    .ok()
+                    .and_then(|seed| seed.parse::<u64>().ok())
+            })
+            .unwrap_or(DEFAULT_PROPERTY_SEED);
         match supervise_child(&mut command, Duration::from_secs(120)) {
             ChildOutcome::Exited(Some(code)) => {
                 if code == ExitCodes::ICE {
@@ -1758,53 +3007,118 @@ fn run_test_producers(target: &Target) -> (Vec<TestItem>, i32) {
                     highest_exit = ExitCodes::USER_ERROR;
                 }
                 match read_test_report(&report_path) {
-                    Ok(records) => {
-                        let invalid_records = records.is_empty()
-                            || records.iter().any(|record| {
-                                record.kind != 3
-                                    && !record.file.is_empty()
-                                    && !producer_path_is_member(target, &record.file)
+                    Ok(report) => {
+                        persist_generated_failure(target, member, &report)?;
+                        let report_link = match persist_evidence_report(target, &report) {
+                            Ok(link) => link,
+                            Err(error) => {
+                                let _ = fs::remove_file(&report_path);
+                                return Err(error);
+                            }
+                        };
+                        evidence_links.push(report_link);
+                        let invalid_records = report.records.is_empty()
+                            || report.records.iter().any(|record| {
+                                !matches!(record.kind, EvidenceKind::Property)
+                                    && !record.source.path.is_empty()
+                                    && !producer_path_is_member(target, &record.source.path)
                             });
                         if invalid_records {
                             highest_exit = ExitCodes::ICE;
                         } else {
-                            if records.iter().any(|record| {
-                                record.kind == 2 || (record.kind == 1 && record.state == 1)
+                            if report.records.iter().any(|record| {
+                                matches!(record.kind, EvidenceKind::Runtime)
+                                    || (matches!(record.kind, EvidenceKind::Contract)
+                                        && record.outcome == EvidenceOutcome::Failed)
                             }) && highest_exit != ExitCodes::ICE
                             {
                                 highest_exit = ExitCodes::RUNTIME_PANIC;
                             }
-                            for record in records {
-                                if record.kind == 2
-                                    && (record.name == "E3005"
-                                        || record.message.starts_with("Stop ["))
-                                    || record.kind == 0
-                                        && record.message.starts_with("Stop [")
+                            for record in report.records {
+                                let kind = record.kind;
+                                let kind_code = kind.code();
+                                let outcome = record.outcome;
+                                let name = record.identity.claim_id;
+                                let message = record.detail;
+                                let property_failure = if matches!(kind, EvidenceKind::Property) {
+                                    parse_generated_failure_detail(&message)
+                                } else {
+                                    None
+                                };
+                                let generation_unavailable = matches!(kind, EvidenceKind::Property)
+                                    && property_generation_unavailable(&message);
+                                let generated = matches!(kind, EvidenceKind::Property)
+                                    && !outcome.is_incomplete()
+                                    && !generation_unavailable;
+                                let generated_count = if generated { record.count } else { 0 };
+                                let source_path = record.source.path;
+                                if matches!(kind, EvidenceKind::Runtime)
+                                    && (name == "E3005" || message.starts_with("Stop ["))
+                                    || matches!(kind, EvidenceKind::Unit)
+                                        && message.starts_with("Stop [")
                                 {
                                     continue;
                                 }
-                                let claim =
-                                    format!("{}:{}:{}", record.kind, record.name, record.message);
+                                let claim = format!("{kind_code}:{name}:{message}");
+                                let line = if matches!(kind, EvidenceKind::Property) {
+                                    record.count as u32
+                                } else {
+                                    record.source.line
+                                };
+                                let state = if generation_unavailable {
+                                    3
+                                } else {
+                                    outcome.test_state().unwrap_or_else(|| {
+                                        if outcome == EvidenceOutcome::Failed {
+                                            1
+                                        } else if outcome.is_incomplete() {
+                                            3
+                                        } else {
+                                            0
+                                        }
+                                    })
+                                };
+                                let seed = property_failure
+                                    .as_ref()
+                                    .map(|failure| failure.seed)
+                                    .unwrap_or(property_seed);
+                                let case_index = property_failure
+                                    .as_ref()
+                                    .map_or(0, |failure| failure.case_index);
                                 items.push(TestItem {
                                     id: evidence_id(
                                         target,
-                                        if record.kind == 1 { "contract" } else { "unit" },
+                                        if matches!(kind, EvidenceKind::Contract) {
+                                            "contract"
+                                        } else {
+                                            "unit"
+                                        },
                                         &member.path,
                                         "0:0-0:0",
                                         &claim,
                                     ),
-                                    path: if record.kind == 3 || record.file.is_empty() {
+                                    path: if matches!(kind, EvidenceKind::Property)
+                                        || source_path.is_empty()
+                                    {
                                         member.path.clone()
                                     } else {
-                                        record.file.clone()
+                                        source_path.clone()
                                     },
-                                    state: record.state,
-                                    kind: record.kind,
-                                    message: record.message,
-                                    line: record.line,
-                                    name: record.name,
-                                    seed: if record.kind == 3 {
-                                        record.file
+                                    state,
+                                    kind: kind_code,
+                                    message,
+                                    line,
+                                    name,
+                                    seed: if matches!(kind, EvidenceKind::Property) {
+                                        seed.to_string()
+                                    } else {
+                                        String::new()
+                                    },
+                                    case_index,
+                                    generated,
+                                    generated_count,
+                                    reason: if generation_unavailable {
+                                        "generation_unavailable".to_string()
                                     } else {
                                         String::new()
                                     },
@@ -1837,14 +3151,18 @@ fn run_test_producers(target: &Target) -> (Vec<TestItem>, i32) {
                     kind: 0,
                     message: String::new(),
                     line: 0,
+                    generated: false,
+                    generated_count: 0,
                     name: String::new(),
                     seed: String::new(),
+                    case_index: 0,
+                    reason: "producer_start_failed".to_string(),
                 });
             }
         }
         let _ = fs::remove_file(report_path);
     }
-    (items, highest_exit)
+    Ok((items, highest_exit, evidence_links))
 }
 
 fn producer_path_is_member(target: &Target, path: &str) -> bool {
@@ -1957,77 +3275,18 @@ fn capture_child_stream(stream: &mut impl std::io::Read) -> Vec<u8> {
     captured
 }
 
-fn read_test_report(path: &Path) -> Result<Vec<ProducerRecord>, String> {
-    let bytes = fs::read(path).map_err(|e| e.to_string())?;
-    if bytes.len() > 16 * 1024 * 1024 {
-        return Err("oversized test producer report".into());
-    }
-    read_test_report_bytes(&bytes)
+fn read_test_report(path: &Path) -> Result<EvidenceReport, String> {
+    EvidenceReport::read(path)
 }
 
-fn read_test_report_bytes(bytes: &[u8]) -> Result<Vec<ProducerRecord>, String> {
-    if bytes.get(..8) != Some(b"JETTEST2") {
-        return Err("invalid test producer report".into());
-    }
-    let mut at = 8usize;
-    let mut records = Vec::new();
-    while at < bytes.len() {
-        if records.len() == 10_000 {
-            return Err("too many test producer records".into());
-        }
-        let kind = *bytes.get(at).ok_or("truncated test producer report")?;
-        let state = *bytes.get(at + 1).ok_or("truncated test producer report")?;
-        if kind > 4 {
-            return Err("unknown test producer record kind".into());
-        }
-        if state > 3 {
-            return Err("unknown test producer record state".into());
-        }
-        at += 2;
-        let line = u32::try_from(read_u64(&bytes, &mut at)?)
-            .map_err(|_| "test producer source line is too large")?;
-        let name = read_string(&bytes, &mut at)?;
-        let message = read_string(&bytes, &mut at)?;
-        let file = read_string(&bytes, &mut at)?;
-        records.push(ProducerRecord {
-            kind,
-            state,
-            name,
-            message,
-            file,
-            line,
-        });
-    }
-    Ok(records)
-}
-
-fn read_u64(bytes: &[u8], at: &mut usize) -> Result<u64, String> {
-    let end = (*at)
-        .checked_add(8)
-        .ok_or("test producer report offset overflow")?;
-    let raw: [u8; 8] = bytes
-        .get(*at..end)
-        .ok_or("truncated test producer report")?
-        .try_into()
-        .map_err(|_| "invalid test producer integer")?;
-    *at = end;
-    Ok(u64::from_be_bytes(raw))
-}
-
-fn read_string(bytes: &[u8], at: &mut usize) -> Result<String, String> {
-    let len = usize::try_from(read_u64(bytes, at)?)
-        .map_err(|_| "test producer field length is too large")?;
-    if len > 1024 * 1024 {
-        return Err("oversized test producer field".into());
-    }
-    let end = (*at)
-        .checked_add(len)
-        .ok_or("test producer report offset overflow")?;
-    let raw = bytes
-        .get(*at..end)
-        .ok_or("truncated test producer report")?;
-    *at = end;
-    String::from_utf8(raw.to_vec()).map_err(|_| "non-UTF-8 test producer report".into())
+fn read_test_report_bytes(bytes: &[u8]) -> Result<EvidenceReport, String> {
+    let (records, derivations) = decode_report_bytes(bytes)?;
+    let report_id = records
+        .first()
+        .map(|record| record.identity.report_id.clone())
+        .unwrap_or_else(|| "test-run".into());
+    EvidenceReport::try_from_records_with_derivations(report_id, records, derivations)
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -2036,31 +3295,28 @@ mod protocol_tests {
 
     #[test]
     fn hostile_protocol_shapes_fail_closed() {
+        use jet_foundation::Evidence::{EVIDENCE_REPORT_MAGIC, EVIDENCE_REPORT_VERSION};
+
         assert!(read_test_report_bytes(b"BADMAGIC").is_err());
-        assert!(read_test_report_bytes(b"JETTEST2\0").is_err());
 
-        let mut oversized = b"JETTEST2".to_vec();
-        oversized.extend_from_slice(&[0, 0]);
-        oversized.extend_from_slice(&0u64.to_be_bytes());
-        oversized.extend_from_slice(&(1024u64 * 1024 + 1).to_be_bytes());
-        assert!(read_test_report_bytes(&oversized).is_err());
+        let mut header = EVIDENCE_REPORT_MAGIC.to_vec();
+        header.extend_from_slice(&EVIDENCE_REPORT_VERSION.to_be_bytes());
+        assert!(read_test_report_bytes(&header).is_ok());
 
-        let mut trailing = b"JETTEST2".to_vec();
+        let mut trailing = header.clone();
         trailing.push(0);
         assert!(read_test_report_bytes(&trailing).is_err());
 
-        let mut unknown_kind = b"JETTEST2".to_vec();
-        unknown_kind.extend_from_slice(&[9, 0]);
+        let mut unknown_kind = header.clone();
+        unknown_kind.extend_from_slice(&[9, 0, 0, 0]);
         assert!(read_test_report_bytes(&unknown_kind).is_err());
 
-        let mut unknown_state = b"JETTEST2".to_vec();
-        unknown_state.extend_from_slice(&[0, 9]);
-        assert!(read_test_report_bytes(&unknown_state).is_err());
+        let mut unknown_outcome = header.clone();
+        unknown_outcome.extend_from_slice(&[0, 0, 9, 0]);
+        assert!(read_test_report_bytes(&unknown_outcome).is_err());
 
-        let mut oversized_line = b"JETTEST2".to_vec();
-        oversized_line.extend_from_slice(&[0, 0]);
-        oversized_line.extend_from_slice(&(u64::from(u32::MAX) + 1).to_be_bytes());
-        assert!(read_test_report_bytes(&oversized_line).is_err());
+        let oversized = vec![0; 16 * 1024 * 1024 + 1];
+        assert!(read_test_report_bytes(&oversized).is_err());
     }
 }
 
@@ -2137,6 +3393,9 @@ mod supervision_tests {
     }
 }
 
+pub(crate) fn target_input_sha256_for_file(file: &str) -> Result<String, String> {
+    resolve_target(file).map(|target| target.input_sha256)
+}
 fn resolve_target(raw: &str) -> Result<Target, String> {
     let path = Path::new(raw);
     let metadata = fs::symlink_metadata(path).map_err(|error| {
@@ -2266,13 +3525,10 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
             }
         }
     }
-    identity_members.sort_by(|left, right| left.0.as_bytes().cmp(right.0.as_bytes()));
-    let mut identity = Vec::new();
-    for (path, sha256) in &identity_members {
-        identity.extend_from_slice(
-            format!("{{\"path\":{},\"sha256\":{}}}\n", json(path), json(sha256)).as_bytes(),
-        );
-    }
+    let canonical = jet::ReceiptStore::canonical_target_identity(path, &identity_members)?;
+    let identity_members = canonical.members;
+    let input_sha256 = canonical.input_sha256;
+    let authority_root = canonical.authority_root;
     let source_records = identity_members
         .iter()
         .filter(|(member_path, _)| member_path.ends_with(".jet"))
@@ -2293,12 +3549,15 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
     let build_inputs = proof_digest_or_none("jet-proof-build-inputs-v2", &build_records);
     let build_digest = proof_build_digest(&build_inputs, &lock_digest)?;
     let semantic_bundle = if members.len() == 1 {
-        load_checked_proof_bundle(&members[0].path)
+        load_checked_proof_bundle(&members[0].path, "dev", &BTreeMap::new())
     } else {
         None
     };
-    let core_abi = proof_core_abi(semantic_bundle.as_ref(), &source_digest);
-    let tir_hash = proof_tir_hash(
+    let core_abi = proof_core_abi(
+        semantic_bundle.as_ref().map(|(bundle, _)| bundle),
+        &source_digest,
+    );
+    let mir = proof_mir_identity(
         semantic_bundle.as_ref(),
         &source_digest,
         &core_abi,
@@ -2307,13 +3566,14 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
     Ok(Target {
         kind,
         root: normalized(path),
+        authority_root,
         identity_members,
-        input_sha256: jet::SHA256::sha256_hex(&identity),
+        input_sha256,
         source_digest,
         build_digest,
         core_abi,
         lock_digest,
-        tir_hash,
+        mir,
         members,
     })
 }
@@ -2453,16 +3713,20 @@ fn proof_build_digest(build_inputs: &str, lock_digest: &str) -> Result<String, S
     Ok(proof_digest("jet-proof-build-v2", &fields))
 }
 
-fn load_checked_proof_bundle(entry: &str) -> Option<jet::AST::ProgramBundle> {
-    let mut bundle = jet::Loader::load_entry_with_overlay(entry, None, false).ok()?;
-    let diagnostics = jet::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+fn load_checked_proof_bundle(
+    entry: &str,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Option<(jet::AST::ProgramBundle, jet::Sema::SemIndexEffectFacts)> {
+    let (diagnostics, bundle, facts) =
+        jet::Driver::check_file_with_effect_facts_for_run(entry, profile, setting_overrides);
     if diagnostics
         .iter()
         .any(|diagnostic| matches!(diagnostic.severity, Severity::Error))
     {
         None
     } else {
-        Some(bundle)
+        bundle.map(|bundle| (bundle, facts))
     }
 }
 
@@ -2479,12 +3743,11 @@ fn proof_core_abi(bundle: Option<&jet::AST::ProgramBundle>, source_digest: &str)
     )
 }
 
-fn proof_tir_hash(
-    bundle: Option<&jet::AST::ProgramBundle>,
+fn unavailable_mir_identity(
     source_digest: &str,
     core_abi: &str,
     members: &[Member],
-) -> String {
+) -> jet_foundation::MIR::MirProgramIdentity {
     let mut fields = vec![
         ("source".to_string(), source_digest.as_bytes().to_vec()),
         ("core_abi".to_string(), core_abi.as_bytes().to_vec()),
@@ -2492,43 +3755,67 @@ fn proof_tir_hash(
     for member in members {
         fields.push((member.path.clone(), member.sha256.as_bytes().to_vec()));
     }
-    if let Some(bundle) = bundle {
-        fields.push((
-            "canonical_ast".to_string(),
-            jet::CanonicalAST::canonical_bytes(bundle),
-        ));
-        if let Some(program) = jet::Codegen::TIR::lower_jit_program(bundle) {
-            fields.push(("lowered".to_string(), b"true".to_vec()));
-            fields.push(("entry".to_string(), program.entry.into_bytes()));
-            fields.push((
-                "function_count".to_string(),
-                program.funcs.len().to_string().into_bytes(),
-            ));
-            for function in program.funcs {
-                fields.push((
-                    format!("function:{}", function.name),
-                    format!(
-                        "params={};ret={:?};body={};main={};unsafe={}",
-                        function.params.len(),
-                        function.ret,
-                        function.body.len(),
-                        function.is_main,
-                        function.is_unsafe
-                    )
-                    .into_bytes(),
-                ));
-            }
-        } else {
-            fields.push(("lowered".to_string(), b"false".to_vec()));
-            fields.push((
-                "lowering_reason".to_string(),
-                jet::Codegen::TIR::lower_jit_program_fail_reason(bundle).into_bytes(),
-            ));
-        }
-    } else {
-        fields.push(("bundle".to_string(), b"unavailable".to_vec()));
+    fields.push(("mir".to_string(), b"unavailable".to_vec()));
+    let unavailable = proof_digest("jet-proof-mir-unavailable-v1", &fields);
+    let mut source_map = members
+        .iter()
+        .enumerate()
+        .map(
+            |(index, member)| jet_foundation::MIR::MirSourceMapIdentity {
+                id: index as u64 + 1,
+                path: member.path.clone(),
+                digest: member.sha256.clone(),
+            },
+        )
+        .collect::<Vec<_>>();
+    source_map.sort_by(|left, right| left.id.cmp(&right.id));
+    jet_foundation::MIR::MirProgramIdentity::unavailable(unavailable, source_map)
+}
+
+fn proof_mir_identity(
+    checked: Option<&(jet::AST::ProgramBundle, jet::Sema::SemIndexEffectFacts)>,
+    source_digest: &str,
+    core_abi: &str,
+    members: &[Member],
+) -> jet_foundation::MIR::MirProgramIdentity {
+    if let Some((bundle, _facts)) = checked {
+        let (mir, artifact) = jet::lower_checked_semantic_mir_program_for(
+            bundle,
+            jet_foundation::MIR::MirArtifactRequest::new(
+                jet_foundation::MIR::MirArtifactTarget::RustAot,
+                jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+                jet_foundation::MIR::MirArtifactBuildMode::Dev,
+            ),
+        );
+        let identity = mir.artifact_identity(artifact).unwrap_or_else(|error| {
+            jet_foundation::ice!(None, "canonical MIR identity failed: {error}")
+        });
+        return identity.program_identity;
     }
-    proof_digest("jet-proof-tir-v2", &fields)
+    unavailable_mir_identity(source_digest, core_abi, members)
+}
+
+pub(crate) fn proof_mir_identity_for_file(
+    file: &str,
+    profile: &str,
+    setting_overrides: &BTreeMap<String, String>,
+) -> Result<jet_foundation::MIR::MirProgramIdentity, String> {
+    let bytes = fs::read(file).map_err(|error| format!("could not read `{file}`: {error}"))?;
+    let member = Member {
+        path: normalized(Path::new(file)),
+        sha256: jet::SHA256::sha256_hex(&bytes),
+        bytes,
+    };
+    let checked = load_checked_proof_bundle(file, profile, setting_overrides)
+        .ok_or_else(|| format!("could not check `{file}` for MIR artifact identity"))?;
+    let source_digest = jet::SHA256::sha256_hex(member.bytes.as_slice());
+    let core_abi = proof_core_abi(Some(&checked.0), &source_digest);
+    Ok(proof_mir_identity(
+        Some(&checked),
+        &source_digest,
+        &core_abi,
+        &[member],
+    ))
 }
 
 fn has_proof_manifest(dir: &Path, name: &str) -> Result<bool, String> {
@@ -2640,10 +3927,18 @@ fn collect_identity_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Stri
             .and_then(|parent| parent.file_name())
             .and_then(|name| name.to_str())
             == Some(".jet");
+        let under_generated = path
+            .components()
+            .collect::<Vec<_>>()
+            .windows(2)
+            .any(|components| {
+                components[0].as_os_str() == ".jet" && components[1].as_os_str() == "generated"
+            });
         if matches!(
             name,
             "package.jet" | "jet.lock" | "jet.lock.json" | "build.jet"
         ) || (parent_is_jet && name == "lock")
+            || under_generated
         {
             out.push(path);
         }
@@ -2706,11 +4001,69 @@ fn diagnostic_span(source: &str, diagnostic: &Diagnostic) -> String {
 fn evidence_id(target: &Target, kind: &str, origin: &str, span: &str, claim: &str) -> String {
     let claim_sha = jet::SHA256::sha256_hex(claim.as_bytes());
     let mut preimage = Vec::new();
-    for field in [&target.input_sha256, kind, origin, span, &claim_sha] {
+    for field in [target.input_sha256.as_str(), kind, origin, span, &claim_sha] {
         preimage.extend_from_slice(&(field.len() as u64).to_be_bytes());
         preimage.extend_from_slice(field.as_bytes());
     }
     jet::SHA256::sha256_hex(&preimage)
+}
+
+fn claim_grade(
+    proved: usize,
+    failed: usize,
+    tests: &[TestItem],
+    solver: &[crate::ProveSolver::SolverEvidence],
+) -> String {
+    // A failed producer records the attempted rung and count, but it does
+    // not establish a claim. Keep the failure visible in the evidence rows
+    // while lowering the achieved grade so a package floor cannot pass on a
+    // counterexample.
+    if failed > 0 || tests.iter().any(|item| item.state == 1) {
+        return "unchecked".to_string();
+    }
+    if solver.iter().any(|item| {
+        matches!(
+            item.outcome,
+            crate::ProveSolver::SolverOutcome::Proved { .. }
+        )
+    }) {
+        return "proved".to_string();
+    }
+    let generated: u64 = tests
+        .iter()
+        .filter(|item| item.generated && item.state == 0)
+        .map(|item| item.generated_count)
+        .sum();
+    if generated > 0 {
+        return format!("generated({generated})");
+    }
+    let examples = tests
+        .iter()
+        .filter(|item| matches!(item.kind, 0 | 2 | 4) && item.state == 0)
+        .count();
+    if examples > 0 {
+        return format!("examples({examples})");
+    }
+    if failed == 0 && proved > 0 {
+        "checked".to_string()
+    } else {
+        "unchecked".to_string()
+    }
+}
+fn claims_floor_for_target(target: &Target) -> Option<jet::Package::ClaimsGrade> {
+    let root = Path::new(&target.root);
+    let entry = if root.is_dir() {
+        PathBuf::from(target.members.first()?.path.as_str())
+    } else {
+        root.to_path_buf()
+    };
+    jet::Loader::package_facts_for_entry(&entry)
+        .ok()
+        .flatten()
+        .and_then(|facts| facts.policy.claims_min)
+}
+fn grade_meets_floor(actual: &str, floor: jet::Package::ClaimsGrade) -> bool {
+    jet::Package::ClaimsGrade::parse(actual).is_some_and(|grade| grade.meets(floor))
 }
 
 fn render_report(
@@ -2725,6 +4078,8 @@ fn render_report(
     replay_time_ms: Option<i64>,
     proved: usize,
     failed: usize,
+    claims_grade: &str,
+    claims_floor: Option<jet::Package::ClaimsGrade>,
     exit_code: i32,
 ) -> String {
     let members = target
@@ -2746,11 +4101,30 @@ fn render_report(
         let (outcome, indexes) = if item.diagnostic.is_some() { let i = diagnostic_index; diagnostic_index += 1; ("failed", format!("[{i}]")) } else { ("proved", "[]".into()) };
         format!("{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":{indexes},\"facet\":\"{}\",\"id\":{},\"kind\":\"front_end\",\"outcome\":\"{outcome}\",\"producer\":\"jet-sema\",\"property\":null,\"reason\":null,\"solver\":null,\"source\":{{\"column\":{},\"line\":{},\"path\":{}}},\"state\":\"checked\"}}", item.facet, json(&item.id), item.column, item.line, json(&item.path))
     }).collect::<Vec<_>>();
+    if let Some(floor) = claims_floor {
+        let floor_name = floor.render();
+        let diagnostic = Diagnostic::error(
+            "E2942",
+            format!("claim grade `{claims_grade}` is below package floor `{floor_name}`"),
+            format!("package policy requires at least `{floor_name}` evidence"),
+            "raise the claim with `jet prove --lens solver` or the required generated/property evidence"
+                .to_string(),
+            None,
+        );
+        let diagnostic_index = diagnostics.len();
+        diagnostics.push(diagnostic_json(&target.root, "", &diagnostic));
+        let claim = format!("claim grade `{claims_grade}` below floor `{floor_name}`");
+        let id = evidence_id(target, "claims_policy", &target.root, "1:1-1:1", &claim);
+        evidence_rows.push(format!(
+            "{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":[{diagnostic_index}],\"facet\":\"claims\",\"id\":{},\"kind\":\"policy\",\"outcome\":\"failed\",\"producer\":\"jet-policy\",\"property\":null,\"reason\":\"claims_floor\",\"solver\":null,\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"state\":\"unchecked\"}}",
+            json(&id),
+            json(&target.root)
+        ));
+    }
 
     let mut used_contract_records = BTreeSet::new();
     for declaration in declarations {
-        let matching =
-            matching_contract_record(declaration, tests, &used_contract_records);
+        let matching = matching_contract_record(declaration, tests, &used_contract_records);
         let (id, attachment, state, outcome, reason, observation, diagnostic_indexes) =
             if let Some((index, item)) = matching {
                 used_contract_records.insert(index);
@@ -2834,11 +4208,22 @@ fn render_report(
             4 => ("doctest", "tests", "jet-doctest"),
             _ => ("unit", "tests", "jet-test"),
         };
-        let (state, outcome, reason) = match item.state {
-            0 => ("executed", "passed", "null"),
-            1 => ("executed", "failed", "null"),
-            2 => ("skipped", "not_run", "\"fail_fast_policy\""),
-            _ => ("unavailable", "unavailable", "\"producer_start_failed\""),
+        let (state, outcome) = match item.state {
+            0 => ("executed", "passed"),
+            1 => ("executed", "failed"),
+            2 => ("skipped", "not_run"),
+            _ => ("unavailable", "unavailable"),
+        };
+        let reason = match item.state {
+            2 => "\"fail_fast_policy\"".to_string(),
+            _ if item.reason.is_empty() => {
+                if item.state > 2 {
+                    "\"producer_start_failed\"".to_string()
+                } else {
+                    "null".to_string()
+                }
+            }
+            _ => json(&item.reason),
         };
         let diagnostic_indexes = if item.state == 1 {
             let index = diagnostics.len();
@@ -2848,11 +4233,16 @@ fn render_report(
             "[]".into()
         };
         let property = if item.kind == 3 {
-            format!("{{\"caseIndex\":{},\"effectiveSeed\":{},\"generatedCases\":{},\"shrinkTrace\":{},\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"toolchain\":{{\"jet\":{},\"targetTriple\":{}}}}}", item.line.saturating_sub(1), item.seed.parse::<u64>().unwrap_or(0), item.line, if item.message.is_empty() { "[]".into() } else { format!("[{{\"name\":\"minimized_inputs\",\"value\":{}}}]", json(&item.message)) }, json(&item.path), json(env!("CARGO_PKG_VERSION")), json(&host_target_triple()))
+            format!("{{\"caseIndex\":{},\"effectiveSeed\":{},\"generatedCases\":{},\"shrinkTrace\":{},\"source\":{{\"column\":1,\"line\":1,\"path\":{}}},\"toolchain\":{{\"jet\":{},\"targetTriple\":{}}}}}", item.case_index, item.seed.parse::<u64>().unwrap_or(0), item.generated_count, if item.message.is_empty() { "[]".into() } else { format!("[{{\"name\":\"minimized_inputs\",\"value\":{}}}]", json(&item.message)) }, json(&item.path), json(env!("CARGO_PKG_VERSION")), json(&host_target_triple()))
         } else {
             "null".into()
         };
-        evidence_rows.push(format!("{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":{diagnostic_indexes},\"facet\":\"{facet}\",\"id\":{},\"kind\":\"{kind}\",\"outcome\":\"{outcome}\",\"producer\":\"{producer}\",\"property\":{property},\"reason\":{reason},\"solver\":null,\"source\":{{\"column\":1,\"line\":{},\"path\":{}}},\"state\":\"{state}\"}}", json(&item.id), item.line.max(1), json(&item.path)));
+        let count = if item.kind == 3 {
+            item.generated_count
+        } else {
+            1
+        };
+        evidence_rows.push(format!("{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":{count},\"diagnosticIndexes\":{diagnostic_indexes},\"facet\":\"{facet}\",\"id\":{},\"kind\":\"{kind}\",\"outcome\":\"{outcome}\",\"producer\":\"{producer}\",\"property\":{property},\"reason\":{reason},\"solver\":null,\"source\":{{\"column\":1,\"line\":{},\"path\":{}}},\"state\":\"{state}\"}}", json(&item.id), item.line.max(1), json(&item.path)));
     }
     for fact in &budgets.facts {
         let kind = if fact.statistical {
@@ -2934,11 +4324,11 @@ fn render_report(
             &warning.diagnostic,
         ));
     }
-    let evidence = evidence_rows.join(",");
+    let (evidence, derivations) = canonicalize_evidence_rows(target, &evidence_rows);
     let (solver_selected, solver_proved, solver_disproved, solver_unknown, solver_unavailable) =
         crate::ProveSolver::summarize(solver);
     let unit_report = unit_test_report(tests);
-    let unit_summary = unit_report.json_summary();
+    let unit_summary = unit_report.status_envelope().json();
     let unit_unavailable = tests
         .iter()
         .filter(|item| (item.kind == 0 || item.kind == 2) && item.state == 3)
@@ -3032,7 +4422,86 @@ fn render_report(
     } else {
         "pass"
     };
-    format!("{{\"diagnostics\":[{}],\"evidence\":[{evidence}],\"evidencePolicy\":\"allow_incomplete\",\"exitCode\":{exit_code},\"result\":\"{result}\",\"schemaVersion\":1,\"summaries\":{{\"contract\":{{\"declared\":{contract_selected},\"failed\":{contract_failed},\"notObserved\":{contract_not_observed},\"observed\":{contract_observed},\"passed\":{contract_passed},\"selected\":{contract_selected},\"skipped\":{contract_skipped}}},\"deterministicBudget\":{{\"failed\":{deterministic_failed},\"met\":{deterministic_met},\"selected\":{deterministic_selected},\"skipped\":0,\"unavailable\":{deterministic_unavailable}}},\"doctest\":{{\"failed\":{doctest_failed},\"passed\":{doctest_passed},\"selected\":{doctest_selected},\"skipped\":{doctest_skipped}}},\"frontEnd\":{{\"failed\":{failed},\"proved\":{proved},\"selected\":{front_end_selected},\"skipped\":0}},\"property\":{{\"failed\":{property_failed},\"generatedCases\":{property_cases},\"passed\":{property_passed},\"selected\":{property_selected},\"shrunkFailures\":{property_shrunk_failures},\"skipped\":{property_skipped}}},\"solver\":{{\"disproved\":{solver_disproved},\"proved\":{solver_proved},\"selected\":{solver_selected},\"unavailable\":{solver_unavailable},\"unknown\":{solver_unknown}}},\"statisticalBudget\":{{\"failed\":{statistical_failed},\"met\":{statistical_met},\"selected\":{statistical_selected},\"skipped\":0,\"unavailable\":{statistical_unavailable}}},\"unit\":{unit_summary}}},\"target\":{{\"inputSha256\":{},\"kind\":\"{}\",\"members\":[{members}],\"root\":{}}},\"tool\":{{\"jet\":{},\"proofProducer\":\"jet-prove\",\"targetTriple\":{}}}}}", diagnostics.join(","), json(&target.input_sha256), target.kind, json(&target.root), json(env!("CARGO_PKG_VERSION")), json(&host_target_triple()))
+    let mir = target.mir.canonical_json();
+    let candidate_identity = candidate_identity_json(target);
+    let claims_grade = json(claims_grade);
+    format!("{{\"derivations\":[{derivations}],\"diagnostics\":[{}],\"evidence\":[{evidence}],\"evidencePolicy\":\"allow_incomplete\",\"grade\":{claims_grade},\"exitCode\":{exit_code},\"result\":\"{result}\",\"schemaVersion\":1,\"summaries\":{{\"claims\":{{\"grade\":{claims_grade}}},\"contract\":{{\"declared\":{contract_selected},\"failed\":{contract_failed},\"notObserved\":{contract_not_observed},\"observed\":{contract_observed},\"passed\":{contract_passed},\"selected\":{contract_selected},\"skipped\":{contract_skipped}}},\"deterministicBudget\":{{\"failed\":{deterministic_failed},\"met\":{deterministic_met},\"selected\":{deterministic_selected},\"skipped\":0,\"unavailable\":{deterministic_unavailable}}},\"doctest\":{{\"failed\":{doctest_failed},\"passed\":{doctest_passed},\"selected\":{doctest_selected},\"skipped\":{doctest_skipped}}},\"frontEnd\":{{\"failed\":{failed},\"proved\":{proved},\"selected\":{front_end_selected},\"skipped\":0}},\"property\":{{\"failed\":{property_failed},\"generatedCases\":{property_cases},\"passed\":{property_passed},\"selected\":{property_selected},\"shrunkFailures\":{property_shrunk_failures},\"skipped\":{property_skipped}}},\"solver\":{{\"disproved\":{solver_disproved},\"proved\":{solver_proved},\"selected\":{solver_selected},\"unavailable\":{solver_unavailable},\"unknown\":{solver_unknown}}},\"statisticalBudget\":{{\"failed\":{statistical_failed},\"met\":{statistical_met},\"selected\":{statistical_selected},\"skipped\":0,\"unavailable\":{statistical_unavailable}}},\"unit\":{unit_summary}}},\"target\":{{\"inputSha256\":{},\"kind\":\"{}\",\"members\":[{members}],\"mir\":{mir},\"root\":{}}},\"tool\":{{\"jet\":{},\"proofProducer\":\"jet-prove\",\"targetTriple\":{}}}}}", diagnostics.join(","), json(&target.input_sha256), target.kind, json(&target.root), json(env!("CARGO_PKG_VERSION")), json(&host_target_triple()))
+    .replace(
+        "\"schemaVersion\":1,",
+        &format!("\"schemaVersion\":1,\"candidateIdentity\":{},", candidate_identity),
+    )
+}
+
+fn canonicalize_evidence_rows(target: &Target, rows: &[String]) -> (String, String) {
+    let identity = DerivationIdentity::new(
+        target.source_digest.clone(),
+        target.build_digest.clone(),
+        target.mir.optimized_hash.clone(),
+        target.input_sha256.clone(),
+    );
+    let mut rendered = Vec::with_capacity(rows.len());
+    let mut derivations = Vec::with_capacity(rows.len());
+    for (index, row) in rows.iter().enumerate() {
+        let id = row_string_field(row, "id").unwrap_or_else(|| format!("proof-row-{index}"));
+        let kind = row_string_field(row, "kind").unwrap_or_else(|| "unknown".to_string());
+        let producer = row_string_field(row, "producer").unwrap_or_else(|| "jet-prove".to_string());
+        let method = match producer.as_str() {
+            "native-presburger" | "jet-solver" => DerivationMethod::FormalProof,
+            "jet-property" => DerivationMethod::SampledAgreement,
+            "jet-runtime" | "jet-test" | "jet-doctest" | "jet-replay" => {
+                DerivationMethod::RecordedExecution
+            }
+            "jet-sema" | "jet-budget" | "jet-policy" => DerivationMethod::StaticDerivation,
+            _ => DerivationMethod::ExternalAssumption,
+        };
+        let outcome = row_string_field(row, "outcome").unwrap_or_default();
+        let state = row_string_field(row, "state").unwrap_or_default();
+        let disposition = if matches!(
+            (outcome.as_str(), state.as_str()),
+            ("unavailable", _)
+                | ("not_observed", _)
+                | ("unknown", _)
+                | (_, "unavailable")
+                | (_, "not_run")
+                | (_, "unchecked")
+        ) {
+            DerivationDisposition::Unavailable
+        } else {
+            DerivationDisposition::Current
+        };
+        let derivation = DerivationRecord::new(
+            id.clone(),
+            format!("{kind}:{id}"),
+            producer,
+            method,
+            "checked-proof-row",
+            [id.clone()],
+            identity.clone(),
+        )
+        .with_disposition(disposition);
+        let row = row
+            .strip_suffix('}')
+            .map(|prefix| {
+                format!(
+                    "{prefix},\"derivation\":{{\"id\":{}}}}}",
+                    json(&derivation.id)
+                )
+            })
+            .unwrap_or_else(|| row.clone());
+        rendered.push(row);
+        derivations.push(derivation.to_json());
+    }
+    (rendered.join(","), derivations.join(","))
+}
+
+fn row_string_field(row: &str, field: &str) -> Option<String> {
+    let DataTree::Object(fields) = parse_json(row).ok()? else {
+        return None;
+    };
+    fields
+        .iter()
+        .find_map(|(key, value)| (key == field).then(|| value.as_str().ok()).flatten())
+        .map(str::to_string)
 }
 
 fn contract_summary(
@@ -3045,8 +4514,7 @@ fn contract_summary(
     let mut not_observed = 0;
     let mut skipped = 0;
     for declaration in declarations {
-        let matching =
-            matching_contract_record(declaration, tests, &used);
+        let matching = matching_contract_record(declaration, tests, &used);
         let Some((index, item)) = matching else {
             not_observed += 1;
             continue;
@@ -3142,41 +4610,111 @@ fn source_line_for(path: &str, line: u32) -> Option<String> {
         .map(str::to_string)
 }
 
-fn unit_test_report(tests: &[TestItem]) -> TestReport {
+struct UnitTestReport {
+    passed: usize,
+    failed: usize,
+    skipped: usize,
+}
+
+impl UnitTestReport {
+    fn summary(&self) -> String {
+        format!(
+            "{} passed, {} failed, {} skipped",
+            self.passed, self.failed, self.skipped
+        )
+    }
+
+    fn status_envelope(&self) -> StatusEnvelope {
+        StatusEnvelope::new("test", self.failed == 0).with_field(
+            "test",
+            StatusValue::object(
+                StatusFields::new()
+                    .with("failed", self.failed)
+                    .with("passed", self.passed)
+                    .with("skipped", self.skipped)
+                    .with("selected", self.passed + self.failed + self.skipped),
+            ),
+        )
+    }
+}
+
+fn unit_test_report(tests: &[TestItem]) -> UnitTestReport {
     let is_unit = |item: &&TestItem| item.kind == 0 || item.kind == 2;
-    TestReport::new(
-        tests
+    UnitTestReport {
+        passed: tests
             .iter()
             .filter(|item| is_unit(item) && item.state == 0)
             .count(),
-        tests
+        failed: tests
             .iter()
             .filter(|item| is_unit(item) && item.state == 1)
             .count(),
-        tests
+        skipped: tests
             .iter()
             .filter(|item| is_unit(item) && item.state >= 2)
             .count(),
+    }
+}
+
+fn test_failure_detail(item: &TestItem) -> String {
+    let source_line = source_line_for(&item.path, item.line).unwrap_or_default();
+    let caret = source_line.chars().count().max(1);
+    format!(
+        "  Stop [E3001]: {}\n    --> {}:{}\n      {}^\n  More: jet-lang.dev/e/E3001\n",
+        item.message,
+        item.path,
+        item.line,
+        " ".repeat(caret.saturating_sub(1)),
     )
 }
 
-fn test_failure(item: &TestItem) -> TestFailure {
-    let source_line = source_line_for(&item.path, item.line).unwrap_or_default();
-    let caret = source_line.chars().count().max(1) as u32;
-    TestFailure::new(
-        "E3001",
-        &item.message,
-        &item.path,
+fn test_failure_json(item: &TestItem) -> String {
+    let source_line = source_line_for(&item.path, item.line);
+    let source_line_json = source_line
+        .as_deref()
+        .map(json)
+        .unwrap_or_else(|| "null".to_string());
+    let width = source_line
+        .as_deref()
+        .map_or(1, |line| line.chars().count().max(1));
+    format!(
+        "{{\"caret\":{{\"startColumn\":1,\"width\":{width}}},\"code\":\"E3001\",\"context\":[],\"frames\":[],\"message\":{},\"notes\":[],\"origin\":{{\"producer\":\"jet-runtime\",\"stage\":\"runtime\"}},\"safeLocals\":[],\"severity\":\"error\",\"span\":{{\"endColumn\":{},\"endLine\":{},\"path\":{},\"sourceLine\":{source_line_json},\"startColumn\":1,\"startLine\":{}}},\"type\":\"runtime\"}}",
+        json(&item.message),
+        width + 1,
         item.line,
-        &item.name,
-        &source_line,
-        1,
-        caret,
+        json(&item.path),
+        item.line
     )
 }
 
 fn runtime_item_diagnostic(item: &TestItem) -> String {
-    test_failure(item).json()
+    test_failure_json(item)
+}
+
+fn candidate_digest_json(value: &str) -> String {
+    let digest = if value.starts_with("sha256-") {
+        value.to_string()
+    } else {
+        format!("sha256-{value}")
+    };
+    json(&digest)
+}
+
+fn candidate_identity_json(target: &Target) -> String {
+    format!(
+        "{{\"source\":{{\"sha256\":{},\"contentSha256\":{},\"inputSha256\":{}}},\"compiler\":{{\"sha256\":{},\"version\":{}}},\"configuration\":{{\"coreAbi\":{},\"lockSha256\":{},\"profile\":\"dev\"}},\"generatedArtifact\":{{\"semanticMirSha256\":{},\"optimizedMirSha256\":{},\"mir\":{}}},\"targetTool\":{{\"triple\":{},\"adapter\":\"mir-v1\"}},\"proofModel\":{{\"id\":\"jet-prove-v1\"}},\"proofChecker\":{{\"id\":\"jet-prove-v1\"}}}}",
+        candidate_digest_json(&target.source_digest),
+        candidate_digest_json(&target.source_digest),
+        candidate_digest_json(&target.input_sha256),
+        candidate_digest_json(&target.build_digest),
+        json(env!("CARGO_PKG_VERSION")),
+        json(&target.core_abi),
+        candidate_digest_json(&target.lock_digest),
+        candidate_digest_json(&target.mir.semantic_hash),
+        candidate_digest_json(&target.mir.optimized_hash),
+        target.mir.canonical_json(),
+        json(&host_target_triple()),
+    )
 }
 
 fn json(value: &str) -> String {
@@ -3195,10 +4733,34 @@ fn json(value: &str) -> String {
     out.push('"');
     out
 }
+fn json_string(value: &str) -> String {
+    json(value)
+}
+
+fn record_links_json(links: &[RecordLink]) -> String {
+    let mut links = links.to_vec();
+    links.sort();
+    let values = links
+        .iter()
+        .map(|link| {
+            format!(
+                "{{\"artifact_id\":{},\"kind\":{}}}",
+                json(&link.artifact_id),
+                json(link.kind.as_str())
+            )
+        })
+        .collect::<Vec<_>>();
+    format!("[{}]", values.join(","))
+}
 
 /// D-JPROOF1=A: write `.jet/proofs/<kind>/<name>/<first-16-report_id>.jetproof`.
 /// Identical existing bytes are left unchanged; differing bytes refuse.
-fn write_jetproof(target: &Target, proof_report: &str) -> Result<(), String> {
+fn write_jetproof(
+    target: &Target,
+    proof_report: &str,
+    consumed: &[RecordLink],
+    produced: &[RecordLink],
+) -> Result<ProofArtifact, String> {
     let report_bytes = format!("{proof_report}\n");
     let report_id = jet::SHA256::sha256_hex(report_bytes.as_bytes());
     let kind = target.kind;
@@ -3220,19 +4782,28 @@ fn write_jetproof(target: &Target, proof_report: &str) -> Result<(), String> {
         &report_id[..16.min(report_id.len())]
     );
     let path = PathBuf::from(&rel);
+    let consumed_json = record_links_json(consumed);
+    let produced_json = record_links_json(produced);
     let envelope = format!(
-        "{{\"artifact\":{{\"path\":{}}},\"privacy\":{{\"absolute_paths\":\"omitted\",\"argv\":\"omitted\",\"environment\":\"omitted\",\"full_source\":\"omitted\",\"producer_transcripts\":\"omitted\",\"safe_locals\":\"redacted_by_D-OBS2\"}},\"proofReport\":{proof_report},\"report_id\":{},\"schema\":\"jet.jproof\",\"version\":1}}\n",
+        "{{\"artifact\":{{\"path\":{}}},\"consumed\":{},\"links_version\":1,\"privacy\":{{\"absolute_paths\":\"omitted\",\"argv\":\"omitted\",\"environment\":\"omitted\",\"full_source\":\"omitted\",\"producer_transcripts\":\"omitted\",\"safe_locals\":\"redacted_by_D-OBS2\"}},\"produced\":{},\"proofReport\":{proof_report},\"report_id\":{},\"schema\":\"jet.jproof\",\"version\":2}}\n",
         json(&rel),
+        consumed_json,
+        produced_json,
         json(&report_id)
     );
-    ensure_jetproof_parent(&path)?;
+    ensure_artifact_parent(&path)?;
     if let Ok(metadata) = fs::symlink_metadata(&path) {
         if !metadata.file_type().is_file() {
             return Err(format!("final .jetproof path is not a regular file: {rel}"));
         }
         let existing = fs::read(&path).map_err(|e| e.to_string())?;
         if existing == envelope.as_bytes() {
-            return Ok(());
+            return Ok(ProofArtifact {
+                artifact_id: report_id,
+                path,
+                size: u64::try_from(envelope.len())
+                    .map_err(|_| "proof artifact is too large".to_string())?,
+            });
         }
         return Err(format!(
             "refusing to overwrite differing .jetproof at {rel}"
@@ -3274,10 +4845,15 @@ fn write_jetproof(target: &Target, proof_report: &str) -> Result<(), String> {
         let _ = fs::remove_file(&tmp);
         return Err(error);
     }
-    Ok(())
+    Ok(ProofArtifact {
+        artifact_id: report_id,
+        path,
+        size: u64::try_from(envelope.len())
+            .map_err(|_| "proof artifact is too large".to_string())?,
+    })
 }
 
-fn ensure_jetproof_parent(path: &Path) -> Result<(), String> {
+fn ensure_artifact_parent(path: &Path) -> Result<(), String> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let mut current = PathBuf::from(".");
     for component in parent.components() {
@@ -3288,13 +4864,13 @@ fn ensure_jetproof_parent(path: &Path) -> Result<(), String> {
         match fs::symlink_metadata(&current) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 return Err(format!(
-                    ".jetproof parent is a symlink: {}",
+                    "artifact parent is a symlink: {}",
                     current.display()
                 ));
             }
             Ok(metadata) if !metadata.is_dir() => {
                 return Err(format!(
-                    ".jetproof parent is not a directory: {}",
+                    "artifact parent is not a directory: {}",
                     current.display()
                 ));
             }

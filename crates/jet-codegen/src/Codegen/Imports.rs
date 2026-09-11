@@ -1,5 +1,4 @@
 use super::*;
-use crate::Traits;
 use crate::AST::{
     AccessConvention, ImportDecl, ImportKind, Item, ProgramBundle, Type, VariantPayload,
 };
@@ -223,7 +222,7 @@ pub(crate) fn qualify_imported_call_type(
         .name_ledger
         .module_identity(target)
         .expect("name ledger must contain every loaded module");
-    crate::Codegen::TIR::qualify_imported_type(bundle, target, &owner, &unit_qualified)
+    crate::Codegen::TIR::qualify_imported_type(bundle, target, &owner, &[], &unit_qualified)
 }
 /// After `cx.foreign_types` is populated, add the foreign type names to
 /// `cx.type_names` and re-run the cloneability/hashability checks for any local
@@ -413,6 +412,11 @@ pub(crate) fn register_foreign_enum_variants(
                         else {
                             continue;
                         };
+                        let binders = e
+                            .type_params
+                            .iter()
+                            .map(|param| param.name.clone())
+                            .collect::<Vec<_>>();
                         cx.enum_variants.entry(identity.clone()).or_insert_with(|| {
                             e.variants
                                 .iter()
@@ -420,7 +424,7 @@ pub(crate) fn register_foreign_enum_variants(
                                     (
                                         v.name.clone(),
                                         qualify_imported_variant_payload(
-                                            bundle, target, &identity, &v.payload,
+                                            bundle, target, &identity, &binders, &v.payload,
                                         ),
                                     )
                                 })
@@ -452,6 +456,11 @@ pub(crate) fn register_foreign_enum_variants(
                     else {
                         continue;
                     };
+                    let binders = e
+                        .type_params
+                        .iter()
+                        .map(|param| param.name.clone())
+                        .collect::<Vec<_>>();
                     cx.enum_variants.entry(identity.clone()).or_insert_with(|| {
                         e.variants
                             .iter()
@@ -459,7 +468,7 @@ pub(crate) fn register_foreign_enum_variants(
                                 (
                                     v.name.clone(),
                                     qualify_imported_variant_payload(
-                                        bundle, target, &identity, &v.payload,
+                                        bundle, target, &identity, &binders, &v.payload,
                                     ),
                                 )
                             })
@@ -486,6 +495,11 @@ pub(crate) fn register_foreign_enum_variants(
         let Some(identity) = bundle.name_ledger.nominal_identity(target, &leaf) else {
             continue;
         };
+        let binders = e
+            .type_params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect::<Vec<_>>();
         cx.enum_variants.entry(identity.clone()).or_insert_with(|| {
             e.variants
                 .iter()
@@ -493,10 +507,7 @@ pub(crate) fn register_foreign_enum_variants(
                     (
                         variant.name.clone(),
                         qualify_imported_variant_payload(
-                            bundle,
-                            target,
-                            &identity,
-                            &variant.payload,
+                            bundle, target, &identity, &binders, &variant.payload,
                         ),
                     )
                 })
@@ -514,12 +525,13 @@ fn qualify_imported_variant_payload(
     bundle: &ProgramBundle,
     target: usize,
     owner: &str,
+    binders: &[String],
     payload: &VariantPayload,
 ) -> VariantPayload {
     match payload {
         VariantPayload::Unit => VariantPayload::Unit,
         VariantPayload::Single(ty, span) => VariantPayload::Single(
-            crate::Codegen::TIR::qualify_imported_type(bundle, target, owner, ty),
+            crate::Codegen::TIR::qualify_imported_type(bundle, target, owner, binders, ty),
             *span,
         ),
         VariantPayload::Named(fields) => VariantPayload::Named(
@@ -528,7 +540,7 @@ fn qualify_imported_variant_payload(
                 .map(|field| {
                     let mut qualified = field.clone();
                     qualified.ty = crate::Codegen::TIR::qualify_imported_type(
-                        bundle, target, owner, &field.ty,
+                        bundle, target, owner, binders, &field.ty,
                     );
                     qualified
                 })
@@ -572,16 +584,9 @@ pub(crate) fn import_mod_map(bundle: &ProgramBundle, module_idx: usize) -> HashM
 /// Resolve every ordinary file-module alias path reachable from module_idx.
 /// Synthetic calls can retain the whole source path even though the emitted
 /// Rust function lives in the final module's namespace.
-fn imported_module_paths(
-    bundle: &ProgramBundle,
-    module_idx: usize,
-) -> Vec<(String, usize)> {
+fn imported_module_paths(bundle: &ProgramBundle, module_idx: usize) -> Vec<(String, usize)> {
     let mut paths = Vec::new();
-    let mut pending = vec![(
-        String::new(),
-        module_idx,
-        HashSet::from([module_idx]),
-    )];
+    let mut pending = vec![(String::new(), module_idx, HashSet::from([module_idx]))];
     while let Some((prefix, owner, seen)) = pending.pop() {
         for imp in &bundle.modules[owner].imports {
             if is_foreign_member_list(imp)
@@ -1752,189 +1757,4 @@ pub(crate) fn import_ret_map(
         }
     }
     map
-}
-
-pub(crate) fn emit_program_items(
-    cx: &Cx,
-    items: &[Item],
-    out: &mut String,
-    include_main: bool,
-    include_runtime_owned_traits: bool,
-) {
-    // Imported trait impl methods use Rust method syntax. Bring each canonical
-    // owning trait into scope anonymously so same-named traits from multiple
-    // modules remain collision-free while method lookup sees the real impl.
-    let mut imported_traits = cx.imported_traits.iter().collect::<Vec<_>>();
-    imported_traits.sort();
-    for (module, trait_name) in imported_traits {
-        let path = if trait_name == crate::Generics::CHECKED_TEXT {
-            "crate::CheckedText".to_string()
-        } else {
-            format!(
-                "crate::{module}::{}",
-                crate::Codegen::rust_trait_name(trait_name)
-            )
-        };
-        out.push_str(&format!(
-            "use {path} as _;\n"
-        ));
-    }
-    if !cx.imported_traits.is_empty() {
-        out.push('\n');
-    }
-    let has_serde_protocol_impl = items.iter().any(|item| match item {
-        Item::Func(f) => f.type_params.iter().any(|param| {
-            param.bounds.iter().any(|bound| {
-                matches!(
-                    bound.as_str(),
-                    crate::Generics::ENCODE | crate::Generics::DECODE
-                )
-            })
-        }),
-        Item::Struct(s) => s.trait_impls.iter().any(|block| {
-            matches!(
-                block.trait_name.as_str(),
-                crate::Generics::ENCODE | crate::Generics::DECODE
-            )
-        }),
-        Item::Enum(e) => e.trait_impls.iter().any(|block| {
-            matches!(
-                block.trait_name.as_str(),
-                crate::Generics::ENCODE | crate::Generics::DECODE
-            )
-        }),
-        Item::Impl(i) => i
-            .trait_name
-            .as_deref()
-            .is_some_and(|name| matches!(name, crate::Generics::ENCODE | crate::Generics::DECODE)),
-        _ => false,
-    });
-    if !cx.root_prefix.is_empty() && has_serde_protocol_impl {
-        out.push_str("use super::{__jet_Encode, __jet_Decode, jet_std};\n\n");
-    }
-    let tuple_shapes = collect_tuple_shapes(items);
-    emit_tuple_structs(cx, &tuple_shapes, out);
-    emit_anonymous_unions(cx, items, out);
-    emit_synthetic_display_trait(out, include_runtime_owned_traits);
-    emit_synthetic_operator_traits(out, include_runtime_owned_traits);
-    emit_synthetic_close_trait(out);
-    emit_synthetic_foreign_close_impls(cx, items, out);
-    emit_synthetic_close_builtin_impls(cx, items, out);
-    let (hi, hj, hk, hm) = program_iter_index_usage(items);
-    emit_synthetic_iter_index_traits(out, hi, hj, hk, hm);
-    // D-TXN-ROLLBACK layer 2: emit the synthetic Rollback trait iff this module has one.
-    if program_has_rollback_impl(items) {
-        emit_synthetic_rollback_trait(out);
-    }
-    for item in items {
-        match item {
-            Item::Trait(t) => Traits::emit_trait_def(t, out, |ty, assoc| {
-                cx.rust_type_with_view_lifetime_assoc(ty, assoc)
-            }),
-            Item::Struct(s) => emit_struct(cx, s, out),
-            Item::Enum(e) if e.name.starts_with("__JetUnion_") => {}
-            Item::Enum(e) => emit_enum(cx, e, out),
-            Item::Const(c) => emit_const(c, out),
-            Item::CModule(cm) => emit_c_module(cx, cm, out),
-            Item::Distinct(d) => emit_distinct(cx, d, out),
-            // D-QUAL3: emit one distinct newtype per unit-family member.
-            Item::UnitFamily(uf) => {
-                for d in uf.distinct_defs() {
-                    emit_distinct(cx, &d, out);
-                }
-            }
-            Item::EffectDecl(_)
-            | Item::MarkerDecl(_)
-            | Item::FactDecl(_)
-            | Item::Func(_) | Item::Impl(_) | Item::Test(_) | Item::ExternRust(_)
-            | Item::Module(_) | Item::CodeModule(_) | Item::ErrorConv(_)
-            | Item::Tag(_) // D-QUAL2: tags erase
-            | Item::TypeAlias(_) // D-TYPEALIAS1: erases
-            | Item::Migration(_) // D-MIGRATE1
-            | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases
-            | Item::UserDerive(_) // D-METADERIVE1=A: erase (expanded in sema)
-            | Item::TemplateLoop(_) // D-STRUCT-ONCE1=A: expanded before imports
-            | Item::GenericModule(_) // D-CONF-GENSPELL1=A: template — erases
-            | Item::ModuleAlias(_) => {} // D-CONF-GENSPELL1=A: alias — erases after expansion
-        }
-    }
-    for item in items {
-        match item {
-            Item::Struct(s) => {
-                emit_type_impl(cx, &s.name, &s.type_params, &s.methods, out);
-                for block in &s.trait_impls {
-                    emit_trait_impl(cx, &s.name, &s.type_params, block, Some(s), out);
-                }
-            }
-            Item::Enum(e) => {
-                emit_type_impl(cx, &e.name, &e.type_params, &e.methods, out);
-                for block in &e.trait_impls {
-                    emit_trait_impl(cx, &e.name, &e.type_params, block, None, out);
-                }
-            }
-            Item::Impl(i) => {
-                // D-OSTARGET1=A: an `impl` gated to a different native OS than
-                // this build's active target is skipped entirely — mirrors how
-                // `Codegen/Web.rs` filters function membership by `WebBucket`.
-                if i.os_target.is_some_and(|os| os != cx.active_os) {
-                    continue;
-                }
-                if i.trait_name.is_some() {
-                    let struct_def = items.iter().find_map(|item| match item {
-                        Item::Struct(s) if s.name == i.type_name => Some(s),
-                        _ => None,
-                    });
-                    emit_external_trait_impl(cx, i, struct_def, out);
-                } else {
-                    emit_type_impl(
-                        cx,
-                        &i.type_name,
-                        type_params_for_name(items, &i.type_name),
-                        &i.methods,
-                        out,
-                    );
-                }
-            }
-            // D-ERR-CONV: emit the conversion function.
-            Item::ErrorConv(ec) => {
-                emit_error_conv(cx, ec, out);
-            }
-            _ => {}
-        }
-    }
-    for item in items {
-        if let Item::Func(f) = item {
-            if f.name == "run" && !include_main {
-                continue;
-            }
-            // D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): a trait-bounded variadic
-            // (`...Trait` / `...[A, B]`) has no single Rust signature — it's
-            // emitted per call-site arity below instead (`VariadicBound.rs`).
-            if cx.variadic_bound_fns.contains_key(&f.name) {
-                continue;
-            }
-            emit_func(cx, f, out);
-        }
-    }
-    // D-MOD2: emit inline code module functions with mangled names.
-    for item in items {
-        if let Item::CodeModule(cm) = item {
-            if let Some(body) = &cm.body {
-                for inner in body {
-                    if let Item::Func(f) = inner {
-                        if cx.variadic_bound_fns.contains_key(&f.name) {
-                            continue;
-                        }
-                        let mut mangled_f = f.clone();
-                        mangled_f.name = jet_foundation::Names::member_name(&cm.name, &f.name);
-                        emit_func(cx, &mangled_f, out);
-                    }
-                }
-            }
-        }
-    }
-    // D-ANY-JAI1: emit exactly the per-arity specializations call sites above
-    // actually needed (`Cx::needed_variadic_arities`, populated while lowering
-    // those call sites — see `TIR/lower.rs::lower_variadic_bound_call`).
-    crate::Codegen::VariadicBound::emit_variadic_bound_specializations(cx, items, out);
 }

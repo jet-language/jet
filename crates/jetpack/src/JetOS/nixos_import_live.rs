@@ -9,10 +9,11 @@
 /// path is `or`-guarded so hosts without a subsystem still evaluate.
 use super::nixos_import::{
     import_is_ident, import_json_array, import_json_string, import_json_string_array,
-    import_package_list, import_render_string, scan_first_nixos_host, NixosImportArgs,
-    NixosImportPlan, NixosImportUser,
+    import_json_value, import_package_list, import_render_string, scan_first_nixos_host,
+    NixosImportArgs, NixosImportPlan, NixosImportUser,
 };
 use crate::JSON;
+use jet_foundation::DataTree::DataTree;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
@@ -96,7 +97,7 @@ pub(super) fn live_import_plan(args: &NixosImportArgs) -> Result<Option<NixosImp
     Ok(Some(plan_from_live_facts(args, &host, root)?))
 }
 
-fn run_live_extractor(source: &Path, host: &str) -> Result<JSON::JSONValue, String> {
+fn run_live_extractor(source: &Path, host: &str) -> Result<DataTree, String> {
     let attr = format!("{}#nixosConfigurations.{}.config", source.display(), host);
     let output = Command::new("nix")
         .args(["eval", "--json", &attr, "--apply", NIXOS_LIVE_EXTRACTOR])
@@ -119,34 +120,33 @@ fn run_live_extractor(source: &Path, host: &str) -> Result<JSON::JSONValue, Stri
     JSON::parse(&text).map_err(|e| format!("parsing `nix eval` output failed: {e}"))
 }
 
-fn live_str(root: &std::collections::BTreeMap<String, JSON::JSONValue>, key: &str) -> String {
+fn live_str(root: &[(String, DataTree)], key: &str) -> String {
     import_json_string(root, key).unwrap_or_default()
 }
 
-fn live_bool(root: &std::collections::BTreeMap<String, JSON::JSONValue>, key: &str) -> bool {
-    matches!(root.get(key), Some(JSON::JSONValue::Bool(true)))
+fn live_bool(root: &[(String, DataTree)], key: &str) -> bool {
+    matches!(import_json_value(root, key), Some(DataTree::Bool(true)))
 }
 
-fn live_num(root: &std::collections::BTreeMap<String, JSON::JSONValue>, key: &str) -> Option<f64> {
-    match root.get(key) {
-        Some(JSON::JSONValue::Number(n)) => Some(*n as f64),
-        Some(JSON::JSONValue::Flt(n)) => Some(*n),
+fn live_num(root: &[(String, DataTree)], key: &str) -> Option<f64> {
+    match import_json_value(root, key) {
+        Some(DataTree::Int(n)) => Some(*n as f64),
+        Some(DataTree::Float(n)) => Some(*n),
+        Some(DataTree::Number(n)) => n.parse::<f64>().ok(),
         _ => None,
     }
 }
 
-fn live_num_list(
-    root: &std::collections::BTreeMap<String, JSON::JSONValue>,
-    key: &str,
-) -> Vec<i64> {
-    root.get(key)
-        .and_then(|v| v.as_array().ok())
+fn live_num_list(root: &[(String, DataTree)], key: &str) -> Vec<i64> {
+    import_json_value(root, key)
+        .and_then(|value| value.as_array().ok())
         .map(|values| {
             values
                 .iter()
-                .filter_map(|v| match v {
-                    JSON::JSONValue::Number(n) => Some(*n),
-                    JSON::JSONValue::Flt(n) => Some(*n as i64),
+                .filter_map(|value| match value {
+                    DataTree::Int(n) => Some(*n),
+                    DataTree::Float(n) => Some(*n as i64),
+                    DataTree::Number(n) => n.parse::<i64>().ok(),
                     _ => None,
                 })
                 .collect()
@@ -309,7 +309,7 @@ fn live_external_github_inputs(source: &Path) -> Vec<(String, String)> {
         let Ok(obj) = value.as_object() else {
             continue;
         };
-        let Some(locked) = obj.get("locked").and_then(|v| v.as_object().ok()) else {
+        let Some(locked) = import_json_value(obj, "locked").and_then(|v| v.as_object().ok()) else {
             continue;
         };
         let Some(owner) = import_json_string(locked, "owner") else {
@@ -412,7 +412,7 @@ fn merge_sourced_packages(
 fn plan_from_live_facts(
     args: &NixosImportArgs,
     host: &str,
-    root: &std::collections::BTreeMap<String, JSON::JSONValue>,
+    root: &[(String, DataTree)],
 ) -> Result<NixosImportPlan, String> {
     let mut options: Vec<(String, String)> = Vec::new();
     let mut services: Vec<String> = Vec::new();
@@ -490,20 +490,24 @@ fn plan_from_live_facts(
                 .to_string(),
         );
     }
-    if let Some(JSON::JSONValue::Object(sysctl)) = root.get("sysctl") {
+    if let Some(DataTree::Object(sysctl)) = import_json_value(root, "sysctl") {
         for (key, value) in sysctl {
             // Values embedding store paths are NixOS machinery echoes (e.g.
             // `kernel.poweroff_cmd` from shutdown.nix), not configuration
             // intent — the target system regenerates them itself, and
             // re-declaring them collides with the module that owns them.
-            if matches!(value, JSON::JSONValue::String(s) if s.contains("/nix/store/")) {
+            if matches!(
+                value,
+                DataTree::Text(s) | DataTree::TypedText(s) if s.contains("/nix/store/")
+            ) {
                 continue;
             }
             let rendered = match value {
-                JSON::JSONValue::Number(n) => render_live_number(*n as f64),
-                JSON::JSONValue::Flt(n) => render_live_number(*n),
-                JSON::JSONValue::Bool(b) => b.to_string(),
-                JSON::JSONValue::String(s) => import_render_string(s),
+                DataTree::Int(n) => render_live_number(*n as f64),
+                DataTree::Float(n) => render_live_number(*n),
+                DataTree::Number(n) => n.clone(),
+                DataTree::Bool(b) => b.to_string(),
+                DataTree::Text(s) | DataTree::TypedText(s) => import_render_string(s),
                 other => {
                     omissions.push(format!(
                         "boot.kernel.sysctl.{key} has a shape jetos cannot encode yet: {other:?}"
@@ -606,7 +610,7 @@ fn plan_from_live_facts(
         String,
         (Vec<String>, Vec<String>, Vec<String>),
     > = std::collections::BTreeMap::new();
-    if let Some(hm_json) = root.get("hm") {
+    if let Some(hm_json) = import_json_value(root, "hm") {
         for entry in hm_json.as_array().map_err(|e| format!("hm: {e}"))? {
             let entry = entry.as_object().map_err(|e| format!("hm entry: {e}"))?;
             let Some(name) = import_json_string(entry, "name") else {
@@ -619,7 +623,7 @@ fn plan_from_live_facts(
     }
 
     let mut users = Vec::new();
-    if let Some(users_json) = root.get("users") {
+    if let Some(users_json) = import_json_value(root, "users") {
         for user_json in users_json.as_array().map_err(|e| format!("users: {e}"))? {
             let user = user_json
                 .as_object()

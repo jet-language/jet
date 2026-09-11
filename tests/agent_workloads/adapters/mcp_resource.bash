@@ -22,7 +22,6 @@ payload+="$(frame "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"par
 payload+="$(frame '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}')"
 payload+="$(frame '{"jsonrpc":"2.0","id":2,"method":"resources/list","params":{}}')"
 payload+="$(frame '{"jsonrpc":"2.0","id":3,"method":"resources/read","params":{"uri":"jet://environment"}}')"
-payload+="$(frame '{"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"jet://missing"}}')"
 payload+="$(frame '{"jsonrpc":"2.0","id":5,"method":"shutdown","params":{}}')"
 payload+="$(frame '{"jsonrpc":"2.0","method":"exit","params":{}}')"
 
@@ -34,7 +33,7 @@ if [[ $task == mcp-environment-denied ]]; then
 else
   [[ $response == *'active_environment'* ]] || { printf '%s\n' 'MCP resource omitted environment' >&2; exit 1; }
   [[ $response == *'codex-agent'* && $response == *'mcp.read'* ]] || { printf '%s\n' 'MCP grant projection missing' >&2; exit 1; }
-  [[ $response == *'generated.txt'* && $response == *'lint'* ]] || { printf '%s\n' 'MCP resource omitted declared facts' >&2; exit 1; }
+  [[ $response == *'generated.txt'* && $response == *'fixture'* ]] || { printf '%s\n' 'MCP resource omitted declared facts' >&2; exit 1; }
   [[ $response != *'/agent-secret'* ]] || { printf '%s\n' 'MCP resource leaked HOME' >&2; exit 1; }
   printf '%s\n' 'mcp=readonly' 'resource=jet://environment' 'grant=mcp.read' 'side-effects=none'
 fi

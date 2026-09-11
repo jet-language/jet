@@ -9,8 +9,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use tir_support::{
-    assert_tiers_agree, assert_tiers_agree_with_application_policy, build_and_run, build_and_run_full,
-    have_rustc, write_test_package, TIR_TEST_PACKAGE,
+    assert_tiers_agree, assert_tiers_agree_with_application_policy, build_and_run,
+    build_and_run_full, have_rustc, write_test_package, TIR_TEST_PACKAGE,
 };
 const FROM_ADDR_SOURCE: &str = r###"
 use core.mem as _mem
@@ -24,7 +24,6 @@ fn run() {
     }
 }
 "###;
-
 
 /// c109 Phase 18 / D-UNSAFE2: the expert low-level tier (S58, E2-M13/D-LL1). A
 /// `#Unsafe("reason") fn` lowers to a Rust `unsafe fn`; a `#Unsafe("reason") { … }`
@@ -177,9 +176,8 @@ cell :: 1337
         out.rust
     );
     assert!(
-        out.rust.contains(
-            "return Ok(jet_mem::jet_sentry_volatile_read((__jet_p), \"valid_ptr\"));"
-        ),
+        out.rust
+            .contains("return Ok(jet_mem::jet_sentry_volatile_read((__jet_p), \"valid_ptr\"));"),
         "volatile_read sentry wrapper missing (D-FAIL-CARRIER1=A):\n{}",
         out.rust
     );
@@ -269,7 +267,8 @@ fn run() {
         out.rust
     );
     assert!(
-        out.rust.contains("the foreign call may write through the borrowed value"),
+        out.rust
+            .contains("the foreign call may write through the borrowed value"),
         "foreign gate reason was not carried into generated Rust:\n{}",
         out.rust
     );
@@ -359,56 +358,76 @@ fn sentry_kernel_is_shared_by_aot_and_runtime_adapters() {
     );
 }
 
-/// D-MEM-SENTRY1: source policy-off keeps the same safe raw operation for
-/// default JIT and AOT; forced interpretation reports E2201 at the honest
-/// low-level boundary.
+/// D-MEM-SENTRY1: source policy-off keeps the same safe raw operation on every
+/// execution tier; the sentry policy changes only the runtime witness.
 #[test]
 fn sentry_source_policy_off_is_tier_parity() {
     let source = include_str!("../examples/features/memory/unsafe_sentries_source_off.jet")
         .replace("use core.mem", "use core.mem as _mem");
-    let (jit_code, jit_out, jit_err) =
-        tir_support::jit_run("unsafe_sentries_source_off", &source);
+    let (jit_code, jit_out, jit_err) = tir_support::jit_run("unsafe_sentries_source_off", &source);
     assert_eq!(jit_code, 0, "default JIT failed:\n{jit_err}");
     assert_eq!(jit_out, "41\n", "default JIT output drifted:\n{jit_err}");
     let (interpreter_code, interpreter_out, interpreter_err) =
         tir_support::interpreter_run("unsafe_sentries_source_off", &source);
-    assert_eq!(interpreter_code, 1, "forced interpreter must report E2201");
-    assert!(interpreter_out.is_empty(), "forced interpreter leaked stdout");
-    assert!(
-        interpreter_err.contains("Error [E2201]"),
-        "forced interpreter lost the canonical low-level boundary:\n{interpreter_err}"
+    assert_eq!(
+        interpreter_code, jit_code,
+        "forced interpreter/default JIT exit codes disagree:\n{interpreter_err}"
+    );
+    assert_eq!(
+        interpreter_out, jit_out,
+        "forced interpreter/default JIT stdout disagrees:\n{interpreter_err}"
+    );
+    assert_eq!(
+        interpreter_err, jit_err,
+        "forced interpreter/default JIT stderr disagrees"
     );
     if have_rustc() {
         let (aot_code, aot_out, aot_err) =
             build_and_run_full("jet_tir_sentry", "unsafe_sentries_source_off", &source);
-        assert_eq!(aot_code, jit_code, "AOT/default JIT exit codes disagree:\n{aot_err}");
-        assert_eq!(aot_out, jit_out, "AOT/default JIT stdout disagrees:\n{aot_err}");
+        assert_eq!(
+            aot_code, jit_code,
+            "AOT/default JIT exit codes disagree:\n{aot_err}"
+        );
+        assert_eq!(
+            aot_out, jit_out,
+            "AOT/default JIT stdout disagrees:\n{aot_err}"
+        );
         assert_eq!(aot_err, jit_err, "AOT/default JIT stderr disagrees");
     }
 }
 
 /// D-MEM-SENTRY1: `from_addr` uses the canonical evaluator's stack sentry.
-/// Default JIT and AOT execute it; forced interpretation reports E2201 at the
-/// honest low-level boundary, matching the existing sentry-tier contract.
+/// All execution tiers must preserve the same successful result.
 #[test]
 fn from_addr_sentry_is_tier_parity() {
-    let (jit_code, jit_out, jit_err) =
-        tir_support::jit_run("core_mem_from_addr", FROM_ADDR_SOURCE);
+    let (jit_code, jit_out, jit_err) = tir_support::jit_run("core_mem_from_addr", FROM_ADDR_SOURCE);
     assert_eq!(jit_code, 0, "default JIT failed:\n{jit_err}");
     assert_eq!(jit_out, "7\n", "default JIT output drifted:\n{jit_err}");
     let (interpreter_code, interpreter_out, interpreter_err) =
         tir_support::interpreter_run("core_mem_from_addr", FROM_ADDR_SOURCE);
-    assert_eq!(interpreter_code, 1, "forced interpreter must report E2201");
-    assert!(interpreter_out.is_empty(), "forced interpreter leaked stdout");
-    assert!(
-        interpreter_err.contains("Error [E2201]"),
-        "forced interpreter lost the canonical low-level boundary:\n{interpreter_err}"
+    assert_eq!(
+        interpreter_code, jit_code,
+        "forced interpreter/default JIT exit codes disagree:\n{interpreter_err}"
+    );
+    assert_eq!(
+        interpreter_out, jit_out,
+        "forced interpreter/default JIT stdout disagrees:\n{interpreter_err}"
+    );
+    assert_eq!(
+        interpreter_err, jit_err,
+        "forced interpreter/default JIT stderr disagrees"
     );
     if have_rustc() {
         let (aot_code, aot_out, aot_err) =
             build_and_run_full("jet_tir_from_addr", "core_mem_from_addr", FROM_ADDR_SOURCE);
-        assert_eq!(aot_code, jit_code, "AOT/default JIT exit codes disagree:\n{aot_err}");
-        assert_eq!(aot_out, jit_out, "AOT/default JIT stdout disagrees:\n{aot_err}");
+        assert_eq!(
+            aot_code, jit_code,
+            "AOT/default JIT exit codes disagree:\n{aot_err}"
+        );
+        assert_eq!(
+            aot_out, jit_out,
+            "AOT/default JIT stdout disagrees:\n{aot_err}"
+        );
         assert_eq!(aot_err, jit_err, "AOT/default JIT stderr disagrees");
     }
 }
@@ -850,11 +869,12 @@ fn assert_task_tier_parity(name: &str, src: &str, expected_stdout: &str) {
         "task program must type-check: {errors:?}"
     );
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "task program must stay resident-JIT safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle).expect("task program must compile in resident JIT");
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
+        .expect("task program must compile in resident JIT");
 
     for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
         jet_jit::reset_jit_trace_for_test();
@@ -913,16 +933,16 @@ fn assert_named_task_tier_parity(name: &str, src: &str, expected_stdout: &str) {
         "named task program must type-check: {errors:?}"
     );
     assert!(
-        jet_jit::tir_lowers_bundle(&bundle),
+        common::cranelift_lowers(&bundle),
         "named task.all must lower before taking its explicit deopt route"
     );
-    let plan = jet_jit::plan_bundle_tiers(&bundle);
+    let plan = common::cranelift_tier_plan(&bundle);
     assert!(
         plan.whole_interp && plan.deopt.iter().any(|(function, _)| function == "run"),
         "named task.all must report an interpreter deopt for run: {plan:?}"
     );
     assert!(
-        !jet_jit::resident_jit_safe_bundle(&bundle),
+        !common::cranelift_resident_safe(&bundle),
         "named task.all tuple/record carrier must remain an explicit deopt"
     );
 
@@ -1191,11 +1211,12 @@ fn run() {
         "deadline program must type-check: {errors:?}"
     );
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "deadline program must stay resident-JIT safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle).expect("deadline program must compile in resident JIT");
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
+        .expect("deadline program must compile in resident JIT");
 
     for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
         jet_jit::reset_jit_trace_for_test();
@@ -1314,11 +1335,12 @@ fn run() {
         "combinator program must type-check: {errors:?}"
     );
     assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
+        common::cranelift_resident_safe(&bundle),
         "combinator program must stay resident-JIT safe: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        common::cranelift_resident_safe_detail(&bundle)
     );
-    jet_jit::try_compile_bundle(&bundle).expect("combinator program must compile in resident JIT");
+    common::compile_cranelift_bundle(&bundle, &common::development_policy())
+        .expect("combinator program must compile in resident JIT");
 
     for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
         jet_jit::reset_jit_trace_for_test();
@@ -1663,6 +1685,27 @@ fn run() {
 }
 "#;
     assert_tiers_agree("tir_card_2840_owned_task_join_helper", src, "91\n");
+}
+
+/// Hardening finding lane-4/process-output-limit-error-display (card #2831).
+#[test]
+fn card_2831_process_limit_error_display_tier_parity() {
+    let src = r#"
+use core.process as process
+
+fn run() {
+    result :: process.cmd(["printf", "abcdef"]).stdout(.Capture).output_limit(3).run() ?? {
+        print(err)
+        return
+    }
+    print(result.output)
+}
+"#;
+    assert_tiers_agree(
+        "tir_card_2831_process_limit_error_display",
+        src,
+        "process resource limit exceeded: output\n",
+    );
 }
 
 #[test]

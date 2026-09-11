@@ -742,6 +742,19 @@ done
 command_json=$(json_string_array "${jet_args[@]}")
 inputs_json=$(json_fragment_array "${input_json[@]}")
 artifacts_json=$(json_fragment_array "${artifact_json[@]}")
+foreign_source_identity=$(printf '%s' "$inputs_json" | sha256_stream)
+foreign_implementation_identity=$(printf '%s' "$artifacts_json" | sha256_stream)
+foreign_contract_identity=$(
+    printf '%s\n' \
+        "$foreign_source_identity" \
+        "overlay=none" \
+        "generator=$jet_identity" \
+        "implementation=$foreign_implementation_identity" \
+        "toolchain=$toolchain_identity" \
+        "linker=$linker_identity" \
+        "target=$target_triple" |
+        sha256_stream
+)
 {
     printf '{"schema":2,"jet":{"path":'
     json_string "$jet"
@@ -781,7 +794,25 @@ artifacts_json=$(json_fragment_array "${artifact_json[@]}")
     json_string "$linker_identity"
     printf ',"version":'
     json_string "$linker_version"
-    printf '},"lock":{"path":".jet/lock","digest":'
+    printf '},"foreign_boundary":{"schema":"jet-ffi-boundary-v1","identity":'
+    json_string "$foreign_contract_identity"
+    printf ',"source_identity":'
+    json_string "$foreign_source_identity"
+    printf ',"overlay_identity":"none","generator_identity":'
+    json_string "$jet_identity"
+    printf ',"implementation_identity":'
+    json_string "$foreign_implementation_identity"
+    printf ',"toolchain_identity":'
+    json_string "$toolchain_identity"
+    printf ',"linker_identity":'
+    json_string "$linker_identity"
+    printf ',"target_identity":'
+    json_string "$target_triple"
+    printf ',"loaded_artifact_identity":'
+    json_string "$foreign_implementation_identity"
+    printf ',"transitive_dependency_identities":%s' "$inputs_json"
+    printf ',"reachable_callback_identities":[],"compiler_flags":%s' "$command_json"
+    printf ',"source_authority":"foreign-until-accepted","disposition":"supported"},"lock":{"path":".jet/lock","digest":'
     json_string "$lock_digest"
     printf '},"inputs":%s,"build":{"entry":' "$inputs_json"
     json_string "$entry_rel"
@@ -793,7 +824,7 @@ artifacts_json=$(json_fragment_array "${artifact_json[@]}")
     json_string "$kind"
     printf ',"profile":'
     json_string "$profile"
-    printf ',"loadable":%s,"command":%s},"artifacts":%s}\n' \
+    printf ',"loadable":%s,"command":%s},"artifacts":%s,"workflow":{"schema":"jet-ffi-workflow-receipt-v1","status":"executed","clean":"completed","incremental":"unexecuted","offline":"unexecuted","input_drift":"unexecuted","partial_output":"unexecuted","cancel":"unexecuted","tier":"host-library"}}\n' \
         "$([[ "$loadable" == 1 ]] && printf true || printf false)" \
         "$command_json" "$artifacts_json"
 } > "$stage/jet-host.receipt"

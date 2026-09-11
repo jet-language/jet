@@ -1,8 +1,8 @@
-// core-conformance: core.data.lazy_filter
+// core-conformance: core.data.query.filter.plan
 use core.data as data
 
 fn run() {
-    source :: data.lazy(data.table([Int]{1, 2}))
-    filtered :: data.lazy_filter(source, value -> value > 1)
-    print(data.plan(filtered)[1])
+    source :: data.query([Int]{1, 2})
+    filtered :: source.filter(value -> value > 1)
+    print(filtered.plan()[1])
 }

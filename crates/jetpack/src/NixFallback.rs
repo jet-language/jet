@@ -6,8 +6,9 @@
 //! record, so later Jetpack phases do not need the Nix process or its output
 //! formatting.
 
-use crate::JSON::{self, JSONValue};
+use crate::JSON;
 use crate::SHA256;
+use jet_foundation::DataTree::DataTree;
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -40,11 +41,10 @@ impl ImportedNixState {
 
 /// Import a rich fallback record. `None` means the input is the old pinned
 /// `nix build --json` shape and has no fallback projections to retain.
-pub(crate) fn import_record(record: &JSONValue) -> Result<Option<ImportedNixState>, String> {
+pub(crate) fn import_record(record: &DataTree) -> Result<Option<ImportedNixState>, String> {
     let object = record.as_object()?;
-    let import = object
-        .get("jetpackImport")
-        .or_else(|| object.get("jetpack"))
+    let import = object_value(object, "jetpackImport")
+        .or_else(|| object_value(object, "jetpack"))
         .unwrap_or(record);
     let import = import.as_object()?;
     if !looks_like_fallback(object, import) {
@@ -86,20 +86,26 @@ pub(crate) fn import_record(record: &JSONValue) -> Result<Option<ImportedNixStat
         facts.insert(key.to_string(), canonical(value)?);
     }
     for (fact_name, source_name) in [("recipe", "recipe"), ("lock", "lock")] {
-        if let Some(value) = import.get(source_name) {
+        if let Some(value) = object_value(import, source_name) {
             facts.insert(format!("nix.fallback.{fact_name}"), canonical(value)?);
         }
     }
     Ok(Some(ImportedNixState { facts }))
 }
 
-fn looks_like_fallback(
-    root: &BTreeMap<String, JSONValue>,
-    import: &BTreeMap<String, JSONValue>,
-) -> bool {
-    root.contains_key("jetpackImport")
-        || root.contains_key("jetpack")
-        || root.contains_key("fallback")
+fn object_value<'a>(
+    object: &'a [(String, DataTree)],
+    name: &str,
+) -> Option<&'a DataTree> {
+    object
+        .iter()
+        .find_map(|(key, value)| (key == name).then_some(value))
+}
+
+fn looks_like_fallback(root: &[(String, DataTree)], import: &[(String, DataTree)]) -> bool {
+    object_value(root, "jetpackImport").is_some()
+        || object_value(root, "jetpack").is_some()
+        || object_value(root, "fallback").is_some()
         || GRAPH_FIELDS
             .iter()
             .chain(DEPENDENCY_FIELDS)
@@ -107,17 +113,17 @@ fn looks_like_fallback(
             .chain(HASH_FIELDS)
             .chain(LOSS_FIELDS)
             .chain(PROOF_FIELDS)
-            .any(|key| import.contains_key(*key))
+            .any(|key| object_value(import, key).is_some())
 }
 
 fn required<'a>(
-    object: &'a BTreeMap<String, JSONValue>,
+    object: &'a [(String, DataTree)],
     names: &[&str],
     label: &str,
-) -> Result<&'a JSONValue, String> {
+) -> Result<&'a DataTree, String> {
     let mut found = None;
     for name in names {
-        let Some(value) = object.get(*name) else {
+        let Some(value) = object_value(object, name) else {
             continue;
         };
         if found.is_some() {
@@ -128,21 +134,32 @@ fn required<'a>(
     found.ok_or_else(|| format!("fallback document has no {label} field"))
 }
 
-fn canonical(value: &JSONValue) -> Result<String, String> {
+fn canonical(value: &DataTree) -> Result<String, String> {
     let mut output = String::new();
     write_canonical(value, &mut output)?;
     Ok(output)
 }
 
-fn write_canonical(value: &JSONValue, output: &mut String) -> Result<(), String> {
+fn write_canonical(value: &DataTree, output: &mut String) -> Result<(), String> {
     match value {
-        JSONValue::Null => output.push_str("null"),
-        JSONValue::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
-        JSONValue::Number(value) => output.push_str(&value.to_string()),
-        JSONValue::Flt(value) if value.is_finite() => output.push_str(&value.to_string()),
-        JSONValue::Flt(_) => return Err("fallback document contains a non-finite number".into()),
-        JSONValue::String(value) => output.push_str(&JSON::quote(value)),
-        JSONValue::Array(values) => {
+        DataTree::Null => output.push_str("null"),
+        DataTree::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
+        DataTree::Int(value) => output.push_str(&value.to_string()),
+        DataTree::Float(value) if value.is_finite() => output.push_str(&value.to_string()),
+        DataTree::Float(_) => return Err("fallback document contains a non-finite number".into()),
+        DataTree::Number(value) => output.push_str(value),
+        DataTree::TypedText(value) | DataTree::Text(value) => output.push_str(&JSON::quote(value)),
+        DataTree::Bytes(values) => {
+            output.push('[');
+            for (index, value) in values.iter().enumerate() {
+                if index != 0 {
+                    output.push(',');
+                }
+                output.push_str(&value.to_string());
+            }
+            output.push(']');
+        }
+        DataTree::Array(values) => {
             output.push('[');
             for (index, value) in values.iter().enumerate() {
                 if index != 0 {
@@ -152,7 +169,7 @@ fn write_canonical(value: &JSONValue, output: &mut String) -> Result<(), String>
             }
             output.push(']');
         }
-        JSONValue::Object(values) => {
+        DataTree::Object(values) => {
             output.push('{');
             for (index, (key, value)) in values.iter().enumerate() {
                 if index != 0 {
@@ -167,6 +184,7 @@ fn write_canonical(value: &JSONValue, output: &mut String) -> Result<(), String>
     }
     Ok(())
 }
+
 
 pub(crate) use policy::FallbackRun;
 

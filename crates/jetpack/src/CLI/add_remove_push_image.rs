@@ -4,7 +4,7 @@ use super::realize::{
     channel_sources, load_project_plan, offline_refusal, realize_ref_outcome,
     report_nix_bridge_required, resolve_source_channel, RefOutcome, RowStyle,
 };
-use super::workspace_sources::cwd_table;
+use super::workspace_sources::{cwd_table, ensure_builtin_sources};
 use crate::Output::{self, Theme};
 use crate::RefSpec;
 use crate::Store;
@@ -89,9 +89,10 @@ pub(super) fn cmd_add(theme: &Theme, parsed: &Parsed) -> i32 {
     let dir = std::env::current_dir().unwrap_or_default();
     // Classify against the env's declared sources so `add fd@unstable` works
     // when `unstable` is already declared.
-    let table = EnvFile::load(&dir)
+    let mut table = EnvFile::load(&dir)
         .map(|ef| ef.source_table())
         .unwrap_or_else(RefSpec::SourceTable::empty);
+    ensure_builtin_sources(&mut table);
     let spec = match RefSpec::classify_in(raw, &table) {
         Ok(s) => s,
         Err(e) => {
@@ -132,14 +133,22 @@ pub(super) fn cmd_add(theme: &Theme, parsed: &Parsed) -> i32 {
             if let Ok(plan) = load_project_plan(theme) {
                 for source in channel_sources(&plan.table) {
                     if let Ok(exact) = resolve_source_channel(&source, &parsed.flags) {
-                        Lock::record_source_channel(
+                        if let Err(error) = Lock::record_source_channel(
                             &dir,
                             Lock::LockedSourceChannel {
                                 name: source.name.clone(),
                                 channel: source.lock_channel().to_string(),
                                 exact,
                             },
-                        );
+                        ) {
+                            theme.error_coded(
+                                "E1206",
+                                &format!("couldn't write source channel `{}` to the lock", source.name),
+                                &error,
+                                "fix the project lock permissions and rerun the add command",
+                            );
+                            return 1;
+                        }
                     }
                 }
             }
@@ -309,9 +318,10 @@ pub(super) fn cmd_remove(theme: &Theme, parsed: &Parsed) -> i32 {
         return 2;
     };
     let dir = std::env::current_dir().unwrap_or_default();
-    let table = EnvFile::load(&dir)
+    let mut table = EnvFile::load(&dir)
         .map(|ef| ef.source_table())
         .unwrap_or_else(RefSpec::SourceTable::empty);
+    ensure_builtin_sources(&mut table);
     let spec = match RefSpec::classify_in(raw, &table) {
         Ok(s) => s,
         Err(e) => {

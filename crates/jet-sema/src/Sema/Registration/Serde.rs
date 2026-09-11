@@ -1,4 +1,6 @@
 use super::*;
+mod Ast;
+use Ast::*;
 use crate::AST::{
     AccessConvention, BinOp, CallArg, CallArgFlags, CtReport, CtValue, EnumDef, EnumLitArg, Expr,
     ForKind, Func, ImplDef, IndexKind, Item, LValue, Param, PatSlot, Pattern, Stmt, SwitchArm,
@@ -554,7 +556,10 @@ fn struct_codec_items(s: &crate::AST::StructDef) -> Vec<Item> {
             &s.type_params,
             s.fields
                 .iter()
-                .filter(|field| !has_marker(&field.serde_markers, crate::Syntax::MARKER_SKIP))
+                .filter(|field| {
+                    field.computed.is_none()
+                        && !has_marker(&field.serde_markers, crate::Syntax::MARKER_SKIP)
+                })
                 .map(|field| field.ty.clone()),
             true,
             false,
@@ -814,6 +819,8 @@ fn serde_impl(type_name: &str, trait_name: &str, method: Func, span: Span) -> Im
         type_name: type_name.to_string(),
         type_span: span,
         trait_name: Some(trait_name.to_string()),
+        operator_rhs: None,
+        operator_marker: None,
         trait_span: Some(span),
         methods: vec![method],
         delegation_field: None,
@@ -846,13 +853,16 @@ fn struct_encode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
     let fields = s
         .fields
         .iter()
-        .filter(|field| !has_marker(&field.serde_markers, crate::Syntax::MARKER_SKIP))
+        .filter(|field| {
+            field.computed.is_none()
+                && !has_marker(&field.serde_markers, crate::Syntax::MARKER_SKIP)
+        })
         .collect::<Vec<_>>();
     let has_flatten = fields
         .iter()
         .any(|field| has_marker(&field.serde_markers, crate::Syntax::MARKER_FLATTEN));
     if !has_flatten {
-        return ordered_encode_fields(&s.serde_markers, &fields, 0, Vec::new(), span);
+        return ordered_encode_fields(s, &fields, 0, Vec::new(), span);
     }
 
     let mut body = vec![binding(
@@ -863,18 +873,13 @@ fn struct_encode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
         span,
     )];
     for field in fields {
-        let key = serde_field_key(&s.serde_markers, field);
+        let key = serde_field_key(s, field);
         if has_marker(&field.serde_markers, crate::Syntax::MARKER_FLATTEN) {
             let nested = format!("jet_serde_nested_{}", field.name);
             body.push(binding(
                 &nested,
                 None,
-                method(
-                    field_value(field, span),
-                    "encode",
-                    Vec::new(),
-                    span,
-                ),
+                method(field_value(field, span), "encode", Vec::new(), span),
                 false,
                 span,
             ));
@@ -908,12 +913,7 @@ fn struct_encode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
             body.push(assign_index(
                 "out",
                 string_expr(&key, span),
-                method(
-                    field_value(field, span),
-                    "encode",
-                    Vec::new(),
-                    span,
-                ),
+                method(field_value(field, span), "encode", Vec::new(), span),
                 span,
             ));
         }
@@ -923,7 +923,7 @@ fn struct_encode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
 }
 
 fn ordered_encode_fields(
-    container_markers: &[crate::AST::Marker],
+    structure: &crate::AST::StructDef,
     fields: &[&crate::AST::Field],
     index: usize,
     pairs: Vec<(Expr, Expr)>,
@@ -932,17 +932,14 @@ fn ordered_encode_fields(
     let Some(field) = fields.get(index) else {
         return vec![ret(data_tree_object(pairs, span), span)];
     };
-    let key = serde_field_key(container_markers, field);
+    let key = serde_field_key(structure, field);
     let next_pairs = |value: Expr| {
         let mut next = pairs.clone();
         next.push((string_expr(&key, span), value));
-        ordered_encode_fields(container_markers, fields, index + 1, next, span)
+        ordered_encode_fields(structure, fields, index + 1, next, span)
     };
     if matches!(field.ty, Type::Option(_)) {
-        let binding_name = format!(
-            "jet_serde_option_value_{}",
-            field.name.replace('.', "_")
-        );
+        let binding_name = format!("jet_serde_option_value_{}", field.name.replace('.', "_"));
         let present = next_pairs(method(
             ident(&binding_name, span),
             "encode",
@@ -953,16 +950,11 @@ fn ordered_encode_fields(
             copy(field_value(field, span), span),
             &binding_name,
             present,
-            ordered_encode_fields(container_markers, fields, index + 1, pairs, span),
+            ordered_encode_fields(structure, fields, index + 1, pairs, span),
             span,
         )]
     } else {
-        next_pairs(method(
-            field_value(field, span),
-            "encode",
-            Vec::new(),
-            span,
-        ))
+        next_pairs(method(field_value(field, span), "encode", Vec::new(), span))
     }
 }
 
@@ -1066,7 +1058,7 @@ fn struct_decode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
         let keys = s
             .reflection_fields()
             .filter(|field| !has_marker(&field.serde_markers, crate::Syntax::MARKER_SKIP))
-            .map(|field| string_expr(&serde_field_key(&s.serde_markers, field), span))
+            .map(|field| string_expr(&serde_field_key(s, field), span))
             .collect::<Vec<_>>();
         let allowed = list_literal(keys, span);
         body.push(pattern_switch(
@@ -1148,7 +1140,7 @@ fn struct_decode_body(s: &crate::AST::StructDef, span: Span) -> Vec<Stmt> {
             decoded.push((slot, value.clone(), None, None));
             ident(&value, span)
         } else {
-            let key = serde_field_key(&s.serde_markers, field);
+            let key = serde_field_key(s, field);
             let is_required =
                 !matches!(field.ty, Type::Option(_)) && serde_default_expr(field).is_none();
             let missing = if is_required {
@@ -1346,12 +1338,13 @@ fn enum_encode_body(e: &crate::AST::EnumDef, span: Span) -> Vec<Stmt> {
         .find(|marker| marker.name == crate::Syntax::MARKER_TAG)
         .and_then(marker_static_string);
     let untagged = has_marker(&e.serde_markers, crate::Syntax::MARKER_UNTAGGED);
+    let style = serde_rename_all_style(&e.serde_markers);
     let arms = e
         .variants
         .iter()
         .map(|variant| {
             let bindings = payload_bindings(&variant.payload, "v");
-            let value = enum_wire_value(variant, tag.as_deref(), untagged, span);
+            let value = enum_wire_value(variant, tag.as_deref(), untagged, style, span);
             SwitchArm {
                 cond: pattern_test("self", variant, bindings, span),
                 body: vec![ret(value, span)],
@@ -1371,9 +1364,10 @@ fn enum_wire_value(
     variant: &crate::AST::Variant,
     tag: Option<&str>,
     untagged: bool,
+    style: Option<&str>,
     span: Span,
 ) -> Expr {
-    let wire = serde_enum_variant_key(variant);
+    let wire = serde_enum_variant_key(variant, style);
     if !untagged && tag.is_some() {
         if let VariantPayload::Named(fields) = &variant.payload {
             let mut entries = vec![(
@@ -1450,6 +1444,7 @@ fn enum_decode_body(e: &crate::AST::EnumDef, span: Span) -> Vec<Stmt> {
         .find(|marker| marker.name == crate::Syntax::MARKER_TAG)
         .and_then(marker_static_string);
     let untagged = has_marker(&e.serde_markers, crate::Syntax::MARKER_UNTAGGED);
+    let style = serde_rename_all_style(&e.serde_markers);
     if untagged {
         let mut body = Vec::new();
         for variant in &e.variants {
@@ -1495,7 +1490,7 @@ fn enum_decode_body(e: &crate::AST::EnumDef, span: Span) -> Vec<Stmt> {
         let tag_try = try_expr(tag_decode, span);
         let mut body = vec![binding("tag_value", None, tag_try, false, span)];
         for variant in &e.variants {
-            let wire = serde_enum_variant_key(variant);
+            let wire = serde_enum_variant_key(variant, style);
             let payload_source = if matches!(variant.payload, VariantPayload::Single(..)) {
                 try_expr(
                     method(
@@ -1527,7 +1522,7 @@ fn enum_decode_body(e: &crate::AST::EnumDef, span: Span) -> Vec<Stmt> {
 
     let mut body = Vec::new();
     for variant in &e.variants {
-        let wire = serde_enum_variant_key(variant);
+        let wire = serde_enum_variant_key(variant, style);
         if matches!(variant.payload, VariantPayload::Unit) {
             let binding_name = format!(
                 "jet_serde_enum_variant_name_{}",
@@ -1807,723 +1802,5 @@ fn enum_constructor_named(
             .collect(),
         leading_dot: false,
         span,
-    }
-}
-
-fn no_matching_enum(span: Span) -> Stmt {
-    ret(
-        err(
-            list_literal(
-                vec![field_error("", "no matching enum variant", span)],
-                span,
-            ),
-            span,
-        ),
-        span,
-    )
-}
-
-fn no_matching_union(span: Span) -> Stmt {
-    ret(
-        err(
-            list_literal(
-                vec![field_error("", "no matching union member", span)],
-                span,
-            ),
-            span,
-        ),
-        span,
-    )
-}
-
-fn enum_payload_type(variant: &crate::AST::Variant) -> Type {
-    match &variant.payload {
-        VariantPayload::Unit | VariantPayload::Named(_) => data_tree_type(),
-        VariantPayload::Single(ty, _) => ty.clone(),
-    }
-}
-
-fn payload_bindings(payload: &VariantPayload, prefix: &str) -> Vec<String> {
-    let count = match payload {
-        VariantPayload::Unit => 0,
-        VariantPayload::Single(..) => 1,
-        VariantPayload::Named(fields) => fields.len(),
-    };
-    (0..count).map(|index| format!("{prefix}{index}")).collect()
-}
-
-fn pattern_test(
-    subject: &str,
-    variant: &crate::AST::Variant,
-    bindings: Vec<String>,
-    span: Span,
-) -> Expr {
-    Expr::PatternTest {
-        subject: Box::new(ident(subject, span)),
-        pattern: Pattern::Variant {
-            variant: variant.name.clone(),
-            bindings: bindings
-                .into_iter()
-                .map(|name| PatSlot::Bind { name, span })
-                .collect(),
-            leading_dot: true,
-            span,
-        },
-        span,
-    }
-}
-
-fn pattern_switch(
-    subject: Expr,
-    variant: &str,
-    bindings: Vec<String>,
-    body: Vec<Stmt>,
-    else_body: Option<Vec<Stmt>>,
-    span: Span,
-) -> Stmt {
-    let pattern_subject = subject.clone();
-    Stmt::Switch {
-        subject,
-        arms: vec![SwitchArm {
-            cond: Expr::PatternTest {
-                subject: Box::new(pattern_subject),
-                pattern: Pattern::Variant {
-                    variant: variant.to_string(),
-                    bindings: bindings
-                        .into_iter()
-                        .map(|name| PatSlot::Bind { name, span })
-                        .collect(),
-                    leading_dot: true,
-                    span,
-                },
-                span,
-            },
-            body,
-            span,
-        }],
-        else_body,
-        span,
-    }
-}
-
-fn result_switch(
-    subject: Expr,
-    ok_binding: &str,
-    ok_body: Vec<Stmt>,
-    err_binding: &str,
-    err_body: Vec<Stmt>,
-    span: Span,
-) -> Stmt {
-    let ok_subject = subject.clone();
-    let err_subject = subject.clone();
-    Stmt::Switch {
-        subject,
-        arms: vec![
-            SwitchArm {
-                cond: Expr::PatternTest {
-                    subject: Box::new(ok_subject),
-                    pattern: Pattern::Variant {
-                        variant: "Ok".to_string(),
-                        bindings: vec![PatSlot::Bind {
-                            name: ok_binding.to_string(),
-                            span,
-                        }],
-                        leading_dot: true,
-                        span,
-                    },
-                    span,
-                },
-                body: ok_body,
-                span,
-            },
-            SwitchArm {
-                cond: Expr::PatternTest {
-                    subject: Box::new(err_subject),
-                    pattern: Pattern::Variant {
-                        variant: "Err".to_string(),
-                        bindings: vec![PatSlot::Bind {
-                            name: err_binding.to_string(),
-                            span,
-                        }],
-                        leading_dot: true,
-                        span,
-                    },
-                    span,
-                },
-                body: err_body,
-                span,
-            },
-        ],
-        else_body: Some(Vec::new()),
-        span,
-    }
-}
-
-fn option_switch(
-    subject: Expr,
-    binding_name: &str,
-    body: Vec<Stmt>,
-    else_body: Vec<Stmt>,
-    span: Span,
-) -> Stmt {
-    pattern_switch(
-        subject,
-        "Val",
-        vec![binding_name.to_string()],
-        body,
-        Some(else_body),
-        span,
-    )
-}
-
-fn option_encode(subject: Expr, key: &str, field_names: Vec<String>, span: Span) -> Stmt {
-    let binding_name = format!(
-        "jet_serde_option_value_{}",
-        field_names
-            .first()
-            .expect("one field for option encode")
-            .replace('.', "_")
-    );
-    option_switch(
-        subject,
-        &binding_name,
-        vec![assign_index(
-            "out",
-            string_expr(key, span),
-            method(
-                ident(&binding_name, span),
-                "encode",
-                Vec::new(),
-                span,
-            ),
-            span,
-        )],
-        Vec::new(),
-        span,
-    )
-}
-
-fn for_each_map(var: &str, var2: &str, collection: Expr, body: Vec<Stmt>, span: Span) -> Stmt {
-    Stmt::For {
-        var: var.to_string(),
-        var_span: span,
-        var2: Some((var2.to_string(), span)),
-        kind: ForKind::In {
-            collection,
-            step: None,
-        },
-        body,
-        span,
-        arrow_body: false,
-        label: None,
-        auto_vectorization: None,
-    }
-}
-
-fn for_each(var: &str, collection: Expr, body: Vec<Stmt>, span: Span) -> Stmt {
-    Stmt::For {
-        var: var.to_string(),
-        var_span: span,
-        var2: None,
-        kind: ForKind::In {
-            collection,
-            step: None,
-        },
-        body,
-        span,
-        arrow_body: false,
-        label: None,
-        auto_vectorization: None,
-    }
-}
-
-fn binding(name: &str, ty: Option<Type>, init: Expr, mutable: bool, span: Span) -> Stmt {
-    Stmt::Val(crate::AST::Binding {
-        mutable,
-        markers: Vec::new(),
-        reactive_upgrade: false,
-        meta: None,
-        name: name.to_string(),
-        name_span: span,
-        sigil_span: None,
-        pattern: None,
-        ty,
-        ty_span: Some(span),
-        init,
-        is_comptime: false,
-        ct: None,
-        uninit: false,
-        arena_view: false,
-        string_view: false,
-        gc_promotion: None,
-        gc_transferred: false,
-    })
-}
-
-fn assign_local(name: &str, value: Expr, span: Span) -> Stmt {
-    Stmt::Assign {
-        target: LValue::Local {
-            name: name.to_string(),
-            name_span: span,
-        },
-        op: None,
-        op_span: span,
-        value,
-    }
-}
-
-fn assign_index(base: &str, index: Expr, value: Expr, span: Span) -> Stmt {
-    Stmt::Assign {
-        target: LValue::Index {
-            base: Box::new(ident(base, span)),
-            index: Box::new(index),
-            span,
-            kind: IndexKind::Unknown,
-        },
-        op: None,
-        op_span: span,
-        value,
-    }
-}
-
-fn expr_stmt(expr: Expr) -> Stmt {
-    Stmt::Expr(expr)
-}
-fn ret(expr: Expr, span: Span) -> Stmt {
-    Stmt::Return(Some(expr), span)
-}
-fn ok(expr: Expr, span: Span) -> Expr {
-    Expr::Ok(Box::new(expr), span)
-}
-fn err(expr: Expr, span: Span) -> Expr {
-    Expr::Err(Box::new(expr), span)
-}
-fn copy(expr: Expr, span: Span) -> Expr {
-    Expr::Copy(Box::new(expr), span)
-}
-fn unary_not(expr: Expr, span: Span) -> Expr {
-    Expr::Unary(crate::AST::UnOp::Not, Box::new(expr), span)
-}
-
-fn ident(name: &str, span: Span) -> Expr {
-    Expr::Ident(name.to_string(), span)
-}
-
-fn binary(op: BinOp, left: Expr, right: Expr, span: Span) -> Expr {
-    Expr::Binary(op, Box::new(left), Box::new(right), span)
-}
-
-fn if_stmt(cond: Expr, body: Vec<Stmt>, span: Span) -> Stmt {
-    Stmt::Switch {
-        subject: Expr::Bool(true, span),
-        arms: vec![SwitchArm { cond, body, span }],
-        else_body: Some(Vec::new()),
-        span,
-    }
-}
-
-fn string_expr(value: &str, span: Span) -> Expr {
-    Expr::Str(vec![crate::AST::StrPart::Lit(value.to_string())], span)
-}
-
-fn data_tree_type() -> Type {
-    Type::Named("DataTree".to_string())
-}
-fn field_error_type() -> Type {
-    Type::Named("FieldError".to_string())
-}
-fn field_error_list_type(_span: Span) -> Type {
-    Type::List(Box::new(field_error_type()))
-}
-fn result_type(ok: Type, _span: Span) -> Type {
-    Type::Result {
-        ok: Box::new(ok),
-        err: Box::new(field_error_list_type(_span)),
-    }
-}
-
-fn map_type(value: Type, _span: Span) -> Type {
-    Type::Map {
-        key: Box::new(Type::String),
-        key_span: None,
-        value: Box::new(value),
-    }
-}
-
-fn target_type(name: &str, params: &[TypeParam]) -> Type {
-    if params.is_empty() {
-        Type::Named(name.to_string())
-    } else {
-        Type::Apply {
-            name: name.to_string(),
-            args: params
-                .iter()
-                .map(|param| Type::Named(param.name.clone()))
-                .collect(),
-        }
-    }
-}
-
-fn target_type_name(name: &str) -> String {
-    name.to_string()
-}
-
-fn type_args_from_params(params: &[TypeParam], _span: Span) -> Vec<Type> {
-    params
-        .iter()
-        .map(|param| Type::Named(param.name.clone()))
-        .collect()
-}
-
-fn list_literal(values: Vec<Expr>, span: Span) -> Expr {
-    Expr::ListLit(values, span)
-}
-fn map_literal(values: Vec<(Expr, Expr)>, span: Span) -> Expr {
-    Expr::MapLit(values, span)
-}
-
-fn data_tree_object(entries: Vec<(Expr, Expr)>, span: Span) -> Expr {
-    data_tree_variant("Object", vec![map_literal(entries, span)], span)
-}
-
-fn data_tree_object_expr(map: Expr, span: Span) -> Expr {
-    data_tree_variant("Object", vec![map], span)
-}
-
-fn data_tree_null(span: Span) -> Expr {
-    data_tree_variant("Null", Vec::new(), span)
-}
-fn data_tree_text(value: &str, span: Span) -> Expr {
-    data_tree_variant("Text", vec![string_expr(value, span)], span)
-}
-
-fn data_tree_variant(variant: &str, args: Vec<Expr>, span: Span) -> Expr {
-    if args.is_empty() {
-        Expr::Field(Box::new(ident("DataTree", span)), variant.to_string(), span)
-    } else {
-        Expr::MethodCall {
-            receiver: Box::new(ident("DataTree", span)),
-            method: variant.to_string(),
-            method_span: span,
-            owner_type_args: Vec::new(),
-            type_args: Vec::new(),
-            args: args.into_iter().map(|expr| call_arg(expr, span)).collect(),
-            recv_type: None,
-            resolved_ret: None,
-            checked_widen: false,
-        }
-    }
-}
-
-fn struct_literal(
-    name: String,
-    type_args: Vec<Type>,
-    fields: Vec<(String, Expr)>,
-    span: Span,
-) -> Expr {
-    Expr::StructLit {
-        type_name: name,
-        type_args,
-        import_ns: None,
-        as_trait: None,
-        fields: fields
-            .into_iter()
-            .map(|(name, expr)| (name, span, expr))
-            .collect(),
-        inferred: false,
-        span,
-    }
-}
-
-fn field_error(path: &str, reason: &str, span: Span) -> Expr {
-    field_error_expr_value(string_expr(path, span), string_expr(reason, span), span)
-}
-
-fn field_error_expr_value(path: Expr, reason: Expr, span: Span) -> Expr {
-    struct_literal(
-        "FieldError".to_string(),
-        Vec::new(),
-        vec![("path".to_string(), path), ("reason".to_string(), reason)],
-        span,
-    )
-}
-
-fn interpolated_string(prefix: &str, value: Expr, suffix: &str, span: Span) -> Expr {
-    Expr::Str(
-        vec![
-            crate::AST::StrPart::Lit(prefix.to_string()),
-            crate::AST::StrPart::Interp(Box::new(value), crate::AST::StrFormat::default()),
-            crate::AST::StrPart::Lit(suffix.to_string()),
-        ],
-        span,
-    )
-}
-
-fn method(receiver: Expr, name: &str, args: Vec<Expr>, span: Span) -> Expr {
-    method_with_owner_args(receiver, name, Vec::new(), args, span)
-}
-
-fn method_with_owner_args(
-    receiver: Expr,
-    name: &str,
-    owner_type_args: Vec<Type>,
-    args: Vec<Expr>,
-    span: Span,
-) -> Expr {
-    Expr::MethodCall {
-        receiver: Box::new(receiver),
-        method: name.to_string(),
-        method_span: span,
-        owner_type_args,
-        type_args: Vec::new(),
-        args: args.into_iter().map(|expr| call_arg(expr, span)).collect(),
-        recv_type: (name == "encode").then(|| "__SerdeEncode__".to_string()),
-        resolved_ret: None,
-        checked_widen: false,
-    }
-}
-
-fn method_with_type_args(receiver: Expr, name: &str, type_args: Vec<Type>, span: Span) -> Expr {
-    Expr::MethodCall {
-        receiver: Box::new(receiver),
-        method: name.to_string(),
-        method_span: span,
-        owner_type_args: Vec::new(),
-        type_args,
-        args: Vec::new(),
-        recv_type: (name == Syntax::METHOD_DATATREE_DECODE).then(|| Syntax::TYPE_DATA.to_string()),
-        resolved_ret: None,
-        checked_widen: false,
-    }
-}
-
-fn field_read(base: &str, field: &str, span: Span) -> Expr {
-    Expr::Field(Box::new(ident(base, span)), field.to_string(), span)
-}
-
-fn field_value(field: &crate::AST::Field, span: Span) -> Expr {
-    field
-        .computed
-        .as_ref()
-        .map(|computed| computed.as_ref().clone())
-        .unwrap_or_else(|| field_read("self", &field.name, span))
-}
-
-fn call_arg(expr: Expr, span: Span) -> CallArg {
-    CallArg {
-        convention: AccessConvention::Read,
-        expr,
-        span,
-        flags: CallArgFlags::default(),
-        label: None,
-        spread: false,
-    }
-}
-
-fn self_param(span: Span) -> Param {
-    named_param("self", Type::Named(String::new()), span)
-}
-
-fn named_param(name: &str, ty: Type, span: Span) -> Param {
-    Param {
-        convention: AccessConvention::Read,
-        root: false,
-        name: name.to_string(),
-        name_span: span,
-        public_label: None,
-        zone: crate::AST::ParamZone::Either,
-        ty,
-        ty_span: span,
-        default: None,
-        variadic: false,
-        variadic_bound_list: None,
-        declared_view_from_names: None,
-    }
-}
-
-fn try_expr(expr: Expr, span: Span) -> Expr {
-    Expr::Try(Box::new(expr), span, TryConvert::None, None)
-}
-
-fn or_fallback(value: Expr, fallback: Expr, span: Span) -> Expr {
-    Expr::OrFallback {
-        value: Box::new(value),
-        fallback: crate::AST::OrFallback::Value(Box::new(fallback)),
-        is_option: false,
-        span,
-    }
-}
-
-fn field_error_under(path: &str, value: Expr, span: Span) -> Expr {
-    method(
-        ident("FieldError", span),
-        "under",
-        vec![string_expr(path, span), value],
-        span,
-    )
-}
-
-fn serde_zero_expr(ty: &Type, span: Span) -> Expr {
-    match ty {
-        Type::Int | Type::IntN { .. } => Expr::Int(0, span, None, None),
-        Type::InlineRange { lo, .. } => Expr::Int(*lo, span, None, None),
-        Type::Float | Type::Float32 => Expr::Float(0.0, span, matches!(ty, Type::Float32), None),
-        Type::Bool => Expr::Bool(false, span),
-        Type::String => string_expr("", span),
-        Type::Option(_) => Expr::Absent(span),
-        Type::List(_) | Type::Map { .. } => list_literal(Vec::new(), span),
-        Type::Apply { name, args } => struct_literal(name.clone(), args.clone(), Vec::new(), span),
-        Type::Named(name) => struct_literal(name.clone(), Vec::new(), Vec::new(), span),
-        _ => struct_literal(ty.name(), Vec::new(), Vec::new(), span),
-    }
-}
-
-fn serde_default_expr(field: &crate::AST::Field) -> Option<Expr> {
-    if let Some(expr) = &field.default {
-        return Some(expr.as_ref().clone());
-    }
-    let marker = field
-        .serde_markers
-        .iter()
-        .find(|marker| marker.name == crate::Syntax::MARKER_DEFAULT)?;
-    if let Some(expr) = marker.args.first() {
-        if let Some(value) = marker.ct.as_ref() {
-            return serde_ct_expr(value, expr.span());
-        }
-        return Some(expr.clone());
-    }
-    marker
-        .ct
-        .as_ref()
-        .and_then(|value| serde_ct_expr(value, marker.span))
-}
-
-fn serde_ct_expr(value: &CtValue, span: Span) -> Option<Expr> {
-    Some(match value {
-        CtValue::Int(value) => Expr::Int(*value, span, None, None),
-        CtValue::Float(value) => Expr::Float(value.as_f64(), span, false, None),
-        CtValue::Bool(value) => Expr::Bool(*value, span),
-        CtValue::Char(value) => Expr::Char(*value, span),
-        CtValue::Str(value) => string_expr(value, span),
-        // Exact default `Int` values keep their decimal source spelling so the
-        // ordinary literal pipeline owns parsing and lowering on every tier.
-        CtValue::BigInt(value) => Expr::Int(0, span, None, Some(value.to_string_rep())),
-        CtValue::Bytes(values) => list_literal(
-            values
-                .iter()
-                .map(|value| Expr::Int(i64::from(*value), span, None, None))
-                .collect(),
-            span,
-        ),
-        CtValue::List(values) => list_literal(
-            values
-                .iter()
-                .map(|value| serde_ct_expr(value, span))
-                .collect::<Option<Vec<_>>>()?,
-            span,
-        ),
-        CtValue::Map(values) => map_literal(
-            values
-                .iter()
-                .map(|(key, value)| {
-                    Some((
-                        serde_ct_expr(&key.to_value(), span)?,
-                        serde_ct_expr(value, span)?,
-                    ))
-                })
-                .collect::<Option<Vec<_>>>()?,
-            span,
-        ),
-        CtValue::Struct { type_name, fields } => struct_literal(
-            type_name.clone(),
-            Vec::new(),
-            fields
-                .iter()
-                .map(|(name, value)| Some((name.clone(), serde_ct_expr(value, span)?)))
-                .collect::<Option<Vec<_>>>()?,
-            span,
-        ),
-        CtValue::Enum {
-            type_name,
-            variant,
-            args,
-        } => Expr::EnumLit {
-            type_name: type_name.clone(),
-            variant: variant.clone(),
-            variant_span: None,
-            args: args
-                .iter()
-                .map(|(label, value)| {
-                    Some(match label {
-                        Some(label) => EnumLitArg::Named {
-                            label: label.clone(),
-                            expr: serde_ct_expr(value, span)?,
-                        },
-                        None => EnumLitArg::Positional(serde_ct_expr(value, span)?),
-                    })
-                })
-                .collect::<Option<Vec<_>>>()?,
-            leading_dot: false,
-            span,
-        },
-        CtValue::Present(value) => Expr::Present(Box::new(serde_ct_expr(value, span)?), span),
-        CtValue::Failed(CtReport::Clean(_)) => Expr::Absent(span),
-        CtValue::Failed(CtReport::Told(value)) => {
-            Expr::Err(Box::new(serde_ct_expr(value, span)?), span)
-        }
-        CtValue::Unit | CtValue::Closure(_) => return None,
-    })
-}
-
-fn has_marker(markers: &[crate::AST::Marker], name: &str) -> bool {
-    markers.iter().any(|marker| marker.name == name)
-}
-
-fn serde_enum_variant_key(v: &crate::AST::Variant) -> String {
-    v.serde_markers
-        .iter()
-        .find(|marker| marker.name == crate::Syntax::MARKER_RENAME)
-        .and_then(marker_static_string)
-        .unwrap_or_else(|| v.name.clone())
-}
-
-fn marker_static_string(marker: &crate::AST::Marker) -> Option<String> {
-    if let Some(CtValue::Str(value)) = &marker.ct {
-        return Some(value.clone());
-    }
-    marker.args.first().and_then(|expression| match expression {
-        Expr::Str(parts, _) => parts.first().and_then(|part| match part {
-            crate::AST::StrPart::Lit(value) => Some(value.clone()),
-            crate::AST::StrPart::Interp(..) => None,
-        }),
-        _ => None,
-    })
-}
-
-fn serde_field_key(container: &[crate::AST::Marker], field: &crate::AST::Field) -> String {
-    if let Some(marker) = field
-        .serde_markers
-        .iter()
-        .find(|marker| marker.name == crate::Syntax::MARKER_RENAME)
-    {
-        if let Some(value) = marker_static_string(marker) {
-            return value;
-        }
-    }
-    let style = container
-        .iter()
-        .find(|marker| marker.name == crate::Syntax::MARKER_RENAME_ALL)
-        .and_then(|marker| marker.args.first())
-        .and_then(|expression| match expression {
-            Expr::Ident(name, _) => Some(name.as_str()),
-            _ => None,
-        });
-    match style {
-        Some("camel") => crate::Syntax::to_camel_acronym(&field.name),
-        Some("kebab") => crate::Syntax::to_snake_acronym(&field.name).replace('_', "-"),
-        Some("screaming") => crate::Syntax::to_shouty_acronym(&field.name),
-        Some("pascal") => crate::Syntax::to_pascal_acronym(&field.name),
-        Some("snake") => crate::Syntax::to_snake_acronym(&field.name),
-        _ => field.name.clone(),
     }
 }

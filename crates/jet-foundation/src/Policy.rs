@@ -1291,6 +1291,7 @@ fn canonical_rule_arg_variants(name: &str) -> Option<&'static [&'static str]> {
             "On",
             "Off",
         ],
+        "Path" => &[],
         "State" => &[],
         "TaintKind" => crate::Syntax::BUILTIN_TAGS,
         "Target" => &["Native", "Web", "Wasm", "JS", "Freestanding", "OS"],
@@ -1567,7 +1568,10 @@ impl RuleSignature {
                     return Some(name.as_str());
                 }
                 if marker.name == crate::Syntax::MARKER_META
-                    && matches!(argument, crate::AST::Expr::Ident(name, _) if name == crate::Syntax::META_FIELD_TUNABLE)
+                    && matches!(
+                        argument.as_expr(),
+                        Some(crate::AST::Expr::Ident(name, _)) if name == crate::Syntax::META_FIELD_TUNABLE
+                    )
                 {
                     return Some(crate::Syntax::META_FIELD_TUNABLE);
                 }
@@ -2035,7 +2039,8 @@ mod tests {
     #[test]
     fn authority_rows_are_site_bound_and_policy_is_lexical() {
         let rows = super::applied_rule_registry();
-        for name in ["Unsafe", "Grant", "Scrub", "wire"] {
+        // D-AUTHORITY-SCOPE1/D-ABILITY-NAME2: `#FX` is canonical; `#Grant` is retired.
+        for name in ["Unsafe", "FX", "Scrub", "wire"] {
             let row = rows.iter().find(|row| row.name == name).unwrap();
             assert_eq!(row.resolution, super::RuleResolution::SiteBound);
             assert!(row.policy_scopes.is_empty());
@@ -2061,7 +2066,7 @@ mod tests {
     fn every_typed_marker_argument_has_one_core_lang_declaration() {
         // One declaration per typed marker-argument menu, plus the `Track`
         // reflection enum retained by D-RULEARG-TYPES1.
-        assert_eq!(super::RULE_ARG_DECLARATIONS.len(), 18);
+        assert_eq!(super::RULE_ARG_DECLARATIONS.len(), 19);
         let mut expected = std::collections::BTreeSet::from(["Site", "Track"]);
         for row in super::APPLIED_RULES.iter() {
             expected.extend(
@@ -2244,6 +2249,31 @@ mod tests {
         let transition = super::applied_rule("Transition").unwrap().signature;
         assert!(transition.argument_bindings(&[Some("to")]).is_none());
     }
+    #[test]
+    fn marker_argument_bindings_accept_positional_strings() {
+        let span = crate::Diagnostics::Span::new(0, 1);
+        let marker = crate::AST::Marker {
+            name: "Doc".to_string(),
+            negated: false,
+            name_span: span,
+            args: vec![crate::AST::MarkerCallArg::Expr(crate::AST::Expr::Str(
+                vec![crate::AST::StrPart::Lit("text".to_string())],
+                span,
+            ))],
+            arg_labels: vec![None],
+            span,
+            ct: None,
+        };
+        let bindings = super::applied_rule("Doc")
+            .unwrap()
+            .signature
+            .marker_argument_bindings(&marker)
+            .expect("Doc's ordinary positional argument must bind to text");
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(bindings[0].parameter_index, Some(0));
+        assert_eq!(bindings[0].ty, super::RuleArgType::String);
+    }
+
 
     #[test]
     fn memory_floor_words_are_not_policy_keys() {

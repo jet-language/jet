@@ -10,7 +10,8 @@
 use core.plugin as plugin
 
 fn run() {
-    mathkit :: plugin.load("examples/features/packages/sandbox_mathkit/mathkit.wasm")
+    policy :: Authority.from_rights(["FS.Read:repo"])
+    mathkit :: plugin.load("examples/features/packages/sandbox_mathkit/mathkit.wasm", policy)
     area :: mathkit.call("scale", [6.0, 7.0]) ?? panic("scale failed")
     print("scale(6, 7) = {area}")
     diag :: mathkit.call("hypot", [3.0, 4.0]) ?? panic("hypot failed")

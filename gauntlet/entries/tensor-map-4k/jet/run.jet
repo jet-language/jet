@@ -1,0 +1,23 @@
+use core.compute as compute
+
+fn run() {
+    shape :: [4096, 4096]
+    left :: compute.full(shape, 1.0) ?? panic("left")
+    right :: compute.full(shape, 2.0) ?? panic("right")
+    mapped :: compute.add(left, right) ?? panic("map")
+
+    actual_shape :: compute.shape(mapped)
+    actual_numel :: compute.numel(mapped)
+    corner :: compute.get(mapped, [4095, 4095]) ?? panic("corner")
+    if actual_shape != shape -> panic("shape")
+    if actual_numel != 4096 * 4096 -> panic("numel")
+    if corner != 3.0 -> panic("corner value")
+
+    row_totals :: compute.sum_axis(mapped, 0) ?? panic("checksum rows")
+    total :: compute.sum_axis(row_totals, 0) ?? panic("checksum")
+    checksum_value :: compute.get(total, [0]) ?? panic("checksum value")
+    checksum :: Int.from_float(checksum_value) ?? panic("checksum integer")
+    if checksum != 50331648 -> panic("checksum result")
+
+    print("shape:{actual_shape} numel:{actual_numel} corner:{corner} checksum:{checksum}")
+}

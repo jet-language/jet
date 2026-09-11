@@ -2,7 +2,7 @@
 
 Owner-editable. This is the source list for the domain matrix (Tower epoch e15). Each row names the incumbent languages, the best stack a practitioner actually uses today, the developer-experience exemplar Jet must beat stock, the performance exemplar Jet must beat on the gauntlet, and the workload that becomes the gauntlet cell. Add a row to request a domain; strike a row to remove one; the orchestrator runs a follow-up census wave for every change. The nine domains mined on 2026-09-01 (web tooling, web frameworks, live debugging, games, backend, systems, mobile, data and notebooks, CLI and TUI) live in epoch e14 and are not repeated here.
 
-Rows: 108 domains in 11 families. Census evidence per domain lands under `~/.cache/jet-luna/dx2/<id>/` and is registered in `docs/reference/prior-art.md` by card.
+Rows: 108 domains in 11 families. Census evidence per domain lands under `~/.cache/jet-luna/dx2/<id>/` and is registered in `docs/spec/reference/prior-art.md` by card.
 
 ## Science and numerics (e15-m01-science-numerics)
 
